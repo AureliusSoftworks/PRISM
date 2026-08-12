@@ -12,7 +12,8 @@ wins.
 
 ## Release Channel Semantics
 
-- GitHub **draft** releases are staging slots for upload and verification.
+- GitHub **draft** releases are temporary staging slots for upload and
+  verification while the Steam release is prepared.
 - Drafts are published manually after smoke checks.
 - No App Store/TestFlight review step exists in this model.
 
@@ -79,8 +80,10 @@ Publish is an explicit human decision after these checks.
 
 ## Steam Release Lane
 
-Steam is an additional desktop lane, not a replacement for the free GitHub
-release baseline. Start from an already-built `desktop/v<version>` release.
+Steam is the paid desktop release lane, targeting a $9.99 launch price. Start
+from an already-built `desktop/v<version>` release. GitHub is a temporary
+development/CI fallback and must be restricted or privatized before public
+Steam launch; the app itself does not implement runtime entitlement checks.
 
 Prerequisites:
 - Steamworks partner/app setup is complete, with a Prism Desktop App ID and
@@ -89,9 +92,16 @@ Prerequisites:
 - Steam Content Survey answers are ready, especially the live-generated AI
   disclosure and guardrails, including offline generated speech and bundled
   procedural or pre-generated vocal reactions.
-- `npm run voice:assets:verify:release` passes on the release tree; an
-  unqualified Voice+ candidate blocks desktop packaging rather than silently
-  substituting an unaudited model.
+- Use [`steam-ai-content-disclosure.md`](steam-ai-content-disclosure.md) as the
+  draft. The final survey answer still requires human confirmation of the
+  shipped asset provenance and the live-generated text guardrail stance.
+- Use [`steam-store-copy.md`](steam-store-copy.md) for the store description,
+  metadata, and screenshot handoff; review it against the exact submitted
+  build before publishing the store page.
+- `npm run voice:assets:verify` passes on the release tree. Steam uses the
+  qualified Instant/Kokoro path by default; an unqualified Voice+ candidate
+  remains unavailable and cannot be enabled without an explicit
+  `--require-voice-plus` qualification run.
 - Store presence copy and screenshots describe only shipped functionality.
 
 Operator flow:

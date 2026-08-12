@@ -183,6 +183,15 @@ function readNestedString(
 
 export function ensureImageAssetLibrarySchema(db: DatabaseSync): void {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS image_asset_generation_preferences (
+      user_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      provider TEXT NOT NULL CHECK (provider IN ('local', 'openai')),
+      model TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(user_id, kind),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS image_asset_sets (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,

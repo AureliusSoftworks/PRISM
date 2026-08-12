@@ -15,7 +15,7 @@ test("commercial voice assets and the Voice+ candidate stay pinned", async () =>
   assert.equal(candidate.requiredFiles.length, 13);
 });
 
-test("Steam stays blocked until every Voice+ target is qualified", async () => {
+test("explicit Voice+ qualification stays blocked until every target is qualified", async () => {
   await assert.rejects(
     verifyVoiceAssets({ requireVoicePlus: true }),
     /Voice\+ release gate is blocked/u,

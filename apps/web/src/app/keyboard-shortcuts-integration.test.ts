@@ -37,7 +37,7 @@ test("exposes account-scoped device shortcuts in Settings", () => {
   assert.match(settingsSource, /Cmd\/Ctrl\s*- shrinks it/u);
 });
 
-test("uses the configurable Prism and navbar Control-root shortcuts globally", () => {
+test("uses the configurable Prism and navbar shortcuts globally", () => {
   assert.match(
     companionSource,
     /keyboardShortcutMatchesEvent\(keyboardShortcut, event\)/u,
@@ -210,15 +210,17 @@ test("mounts a Control-hold shortcut toast", () => {
 });
 
 test("updates contextual guidance without adding first-run setup", () => {
-  assert.match(tutorialSource, /Control\+Left opens Model/u);
+  assert.match(tutorialSource, /\.replaceAll\("Control\+Left", "Option\+Left"\)/u);
   assert.match(tutorialSource, /arrow keys do not roam their lists/u);
   assert.match(tutorialSource, /Shift\+Tab flips LOCAL\/ONLINE directly/u);
-  assert.match(tutorialSource, /Control\+Right opens Speech Type/u);
+  assert.match(tutorialSource, /\.replaceAll\("Control\+Right", "Option\+Right"\)/u);
   assert.match(
     tutorialSource,
     /Tab then closes the picker and places the cursor in the nearest visible composer/u,
   );
-  assert.match(tutorialSource, /Control\+Up toggles Turbo/u);
+  assert.match(tutorialSource, /\.replaceAll\("Control\+Up", "Option\+Up"\)/u);
+  assert.match(tutorialSource, /Option-arrow commands stay out of editable text/u);
+  assert.match(tutorialSource, /Option\+Command summons Prism/u);
   assert.match(
     tutorialSource,
     /Hold Control for a moment to reveal a small shortcut toast[\s\S]*Wield Prism stays legend-free/u,

@@ -25,6 +25,12 @@ const pageCss = readFileSync(
   new URL("./page.module.css", import.meta.url),
   "utf8",
 );
+const debateCss = readFileSync(
+  new URL("./DebateExperience.module.css", import.meta.url),
+  "utf8",
+);
+const EXTERNAL_FACING_COUNTER_SCALE =
+  "var(--bot-avatar-external-facing-scale-x, 1)";
 
 describe("Avatar Details face registration", () => {
   it("applies Avatar Studio's canonical registration at the shared mannequin boundary", () => {
@@ -80,6 +86,7 @@ describe("botAvatarFaceFacingStyle", () => {
       "--coffee-plate-emoji-face-scale-y":
         BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
       "--zen-live-bot-screen-facing-scale-x": "1",
+      "--zen-live-bot-glyph-facing-scale-x": EXTERNAL_FACING_COUNTER_SCALE,
       "--avatar-details-facing-scale-x": "1",
     });
   });
@@ -91,6 +98,7 @@ describe("botAvatarFaceFacingStyle", () => {
         "--coffee-plate-emoji-face-scale-y":
           BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
         "--zen-live-bot-screen-facing-scale-x": "1",
+        "--zen-live-bot-glyph-facing-scale-x": EXTERNAL_FACING_COUNTER_SCALE,
         "--avatar-details-facing-scale-x": "1",
       },
     );
@@ -100,6 +108,7 @@ describe("botAvatarFaceFacingStyle", () => {
     assert.deepEqual(botAvatarFaceFacingStyle("left"), {
       "--coffee-plate-emoji-face-scale-y": botAvatarFaceScaleYForFacing("left"),
       "--zen-live-bot-screen-facing-scale-x": "-1",
+      "--zen-live-bot-glyph-facing-scale-x": EXTERNAL_FACING_COUNTER_SCALE,
       "--avatar-details-facing-scale-x": "-1",
     });
   });
@@ -115,7 +124,26 @@ describe("botAvatarFaceFacingStyle", () => {
         style["--zen-live-bot-screen-facing-scale-x"],
         botAvatarScreenFacingScaleX(facing),
       );
+      assert.equal(
+        style["--zen-live-bot-glyph-facing-scale-x"],
+        EXTERNAL_FACING_COUNTER_SCALE,
+      );
     }
+  });
+
+  it("counter-mirrors lower glyphs when a room turns the complete chassis", () => {
+    assert.match(
+      debateCss,
+      /\.debateAudienceBotPortrait\s*\{[^}]*--bot-avatar-external-facing-scale-x:\s*var\(\s*--debate-audience-facing-scale\s*\)/,
+    );
+    assert.match(
+      debateCss,
+      /\.debateAudienceBotPortrait > \[data-debate-bot-avatar="true"\]\s*\{[^}]*transform:\s*translateX\(-50%\) scaleX\(var\(--debate-audience-facing-scale\)\)/,
+    );
+    assert.match(
+      debateCss,
+      /\.debateAudienceBotPortrait > \[data-chat-mini-bot-avatar="true"\]\s*\{[^}]*transform:\s*translateX\(-50%\) scaleX\(var\(--debate-audience-facing-scale\)\)/,
+    );
   });
 
   it("resolves facing directly on both complete face-and-ink screen rigs", () => {
@@ -133,8 +161,8 @@ describe("botAvatarFaceFacingStyle", () => {
     );
     assert.match(
       pageCss,
-      /\.zenLiveBotPresenceBotGlyph\s*\{[\s\S]*?transform:\s*translate\(-50%, -50%\)\s*scaleX\(var\(--zen-live-bot-screen-facing-scale-x, 1\)\)/,
-      "the full buckle must mirror with its face and authored Ink",
+      /\.zenLiveBotPresenceBotGlyph\s*\{[\s\S]*?transform:\s*translate\(-50%, -50%\)\s*scaleX\(var\(--zen-live-bot-glyph-facing-scale-x, 1\)\)/,
+      "the lower buckle stays upright while face and authored Ink may mirror",
     );
   });
 
@@ -157,6 +185,19 @@ describe("botAvatarFaceFacingStyle", () => {
       screenContentRigRule,
       /--avatar-details-facing-offset-y\s*:/,
       "the Ink layer may mirror but must never move after authoring",
+    );
+  });
+
+  it("keeps Avatar Studio's mini glyph aligned with the full private preview", () => {
+    assert.match(
+      pageCss,
+      /\.appLayout\[data-private-active="true"\][\s\S]*?\.botAvatarStudioMiniPreview[\s\S]*?\.emptyStateHeroMiniGlyph,[\s\S]*?\.appLayout\[data-zen-private-tone="true"\][\s\S]*?\.botAvatarStudioMiniPreview[\s\S]*?\.emptyStateHeroMiniGlyph\s*\{\s*transform:\s*rotate\(180deg\);\s*\}/,
+      "the Studio mini should share the private runtime glyph rotation",
+    );
+    assert.match(
+      pageCss,
+      /\.appLayout\[data-private-active="true"\][\s\S]*?\.zenLiveBotPresencePlate[\s\S]*?\.zenLiveBotPresenceBotGlyph,[\s\S]*?\.appLayout\[data-zen-private-tone="true"\][\s\S]*?\.zenLiveBotPresencePlate[\s\S]*?\.zenLiveBotPresenceBotGlyph\s*\{[\s\S]*?rotate\(180deg\)[\s\S]*?scaleX\(var\(--zen-live-bot-glyph-facing-scale-x, 1\)\);\s*\}/,
+      "the full Studio plate should retain the runtime private treatment",
     );
   });
 });

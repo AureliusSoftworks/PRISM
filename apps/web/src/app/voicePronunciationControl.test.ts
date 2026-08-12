@@ -54,15 +54,13 @@ describe("cross-accent local voice pronunciation controls", () => {
       avatarAtlasSource,
       /void playPronunciationAtlasPreview\(nextProfile\)/,
     );
-    assert.ok(
-      avatarAtlasSource.includes(
-        `onPreviewSource={() => {\n                const sourceProfile = profileWithOriginalPronunciation(\n                  audioVoiceProfile,\n                );\n                void playPronunciationAtlasPreview(sourceProfile);`,
-      ),
+    assert.match(
+      avatarAtlasSource,
+      /onPreviewSource=\{\(\) => \{[\s\S]*?sourceProfile[\s\S]*?pronunciationBase:\s*"follow-voice"[\s\S]*?influence:\s*"none"[\s\S]*?void playPronunciationAtlasPreview\(sourceProfile\);[\s\S]*?\}\}/u,
     );
-    assert.ok(
-      avatarAtlasSource.includes(
-        `onPreviewCurrent={() =>\n            void playPronunciationAtlasPreview(audioVoiceProfile)`,
-      ),
+    assert.match(
+      avatarAtlasSource,
+      /onPreviewCurrent=\{\(\) =>\s*void playPronunciationAtlasPreview\(audioVoiceProfile\)/u,
     );
   });
 

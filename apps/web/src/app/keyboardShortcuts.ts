@@ -95,14 +95,15 @@ function isApplePlatform(platform: string): boolean {
 export function defaultPrismKeyboardShortcuts(
   platform: string,
 ): PrismKeyboardShortcutPreferencesV1 {
+  const applePlatform = isApplePlatform(platform);
   return {
-    prism: "Control+Alt",
+    prism: applePlatform ? "Meta+Alt" : "Control+Alt",
     providerMode: "Shift+Tab",
-    modelPicker: "Control+ArrowLeft",
-    effortPicker: "Control+ArrowDown",
-    turbo: "Control+ArrowUp",
-    speechType: "Control+ArrowRight",
-    effortHud: isApplePlatform(platform)
+    modelPicker: applePlatform ? "Alt+ArrowLeft" : "Control+ArrowLeft",
+    effortPicker: applePlatform ? "Alt+ArrowDown" : "Control+ArrowDown",
+    turbo: applePlatform ? "Alt+ArrowUp" : "Control+ArrowUp",
+    speechType: applePlatform ? "Alt+ArrowRight" : "Control+ArrowRight",
+    effortHud: applePlatform
       ? "Meta+Shift+KeyE"
       : "Control+Shift+KeyE",
   };
@@ -118,6 +119,7 @@ interface ShortcutEventLike {
   ctrlKey: boolean;
   metaKey: boolean;
   shiftKey: boolean;
+  target?: EventTarget | null;
 }
 
 function normalizedShortcut(value: unknown): string | null | undefined {
@@ -222,6 +224,30 @@ export function readPrismKeyboardShortcuts(
       preferences.modelPicker = defaults.modelPicker;
       preferences.effortPicker = defaults.effortPicker;
       preferences.speechType = defaults.speechType;
+      if (
+        isApplePlatform(platform) &&
+        preferences.prism === "Control+Alt" &&
+        preferences.turbo === "Control+ArrowUp"
+      ) {
+        preferences.prism = defaults.prism;
+        preferences.turbo = defaults.turbo;
+      }
+    }
+    if (
+      isApplePlatform(platform) &&
+      preferences.prism === "Control+Alt" &&
+      preferences.providerMode === "Shift+Tab" &&
+      preferences.modelPicker === "Control+ArrowLeft" &&
+      preferences.effortPicker === "Control+ArrowDown" &&
+      preferences.turbo === "Control+ArrowUp" &&
+      preferences.speechType === "Control+ArrowRight"
+    ) {
+      const defaults = defaultPrismKeyboardShortcuts(platform);
+      preferences.prism = defaults.prism;
+      preferences.modelPicker = defaults.modelPicker;
+      preferences.effortPicker = defaults.effortPicker;
+      preferences.turbo = defaults.turbo;
+      preferences.speechType = defaults.speechType;
     }
     return preferences;
   } catch {
@@ -244,15 +270,13 @@ export function keyboardShortcutFromEvent(
   event: ShortcutEventLike,
 ): string | null {
   if (MODIFIER_CODES.has(event.code)) {
-    if (
-      event.ctrlKey &&
-      event.altKey &&
-      !event.metaKey &&
-      !event.shiftKey
-    ) {
-      return "Control+Alt";
-    }
-    return null;
+    const modifiers = [
+      event.metaKey ? "Meta" : null,
+      event.ctrlKey ? "Control" : null,
+      event.altKey ? "Alt" : null,
+      event.shiftKey ? "Shift" : null,
+    ].filter((modifier): modifier is string => modifier !== null);
+    return modifiers.length >= 2 ? modifiers.join("+") : null;
   }
   if (!VALID_KEY_CODE.test(event.code)) {
     return null;
@@ -276,19 +300,27 @@ export function keyboardShortcutMatchesEvent(
   event: ShortcutEventLike,
 ): boolean {
   if (!shortcut) return false;
-  if (shortcut === "Control+Alt") {
-    return (
-      event.ctrlKey &&
-      event.altKey &&
-      !event.metaKey &&
-      !event.shiftKey &&
-      (event.code === "ControlLeft" ||
-        event.code === "ControlRight" ||
-        event.code === "AltLeft" ||
-        event.code === "AltRight")
-    );
+  if (
+    /^Alt\+Arrow(?:Up|Down|Left|Right)$/u.test(shortcut) &&
+    keyboardShortcutTargetIsTextEditable(event.target)
+  ) {
+    return false;
   }
   return keyboardShortcutFromEvent(event) === shortcut;
+}
+
+export function keyboardShortcutTargetIsTextEditable(
+  target: EventTarget | null | undefined,
+): boolean {
+  if (!target || typeof target !== "object") return false;
+  const closest = (target as { closest?: unknown }).closest;
+  if (typeof closest !== "function") return false;
+  return Boolean(
+    closest.call(
+      target,
+      "input, textarea, [contenteditable='true'], [role='textbox'], [data-markdown-cm-host='true']",
+    ),
+  );
 }
 
 function displayCode(code: string): string {

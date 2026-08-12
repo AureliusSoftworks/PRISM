@@ -31,6 +31,10 @@ function shapeshiftState() {
     targetFace: { faceEyeCharacter: "◉", faceMouthCharacter: "_" },
     targetAvatarDetails: null,
     targetVoice: { v: 2, enabled: true, baseVoiceId: "voice-4", pitch: 0.2 },
+    targetColor: "#ff00aa",
+    targetGlyph: "lucideOrbit",
+    targetVoicePreset: "playful",
+    targetFrameMaterialSeed: "bot-frame-material:id:mara",
     sourceMessageId: "message-1",
     occurredAt,
   });
@@ -81,7 +85,13 @@ test("identity shapeshift effect normalizes to the sticky library/marketplace co
 
 test("identity shapeshift snapshot stays public-form only and sticky until target changes", () => {
   const state = shapeshiftState();
-  assert.equal(normalizeBotIdentityShapeshiftStateV1(state)?.targetBotName, "Mara Vale");
+  const normalized = normalizeBotIdentityShapeshiftStateV1(state);
+  assert.equal(normalized?.targetBotName, "Mara Vale");
+  assert.equal(normalized?.targetColor, "#ff00aa");
+  assert.equal(normalized?.targetGlyph, "lucideOrbit");
+  assert.equal(normalized?.targetVoicePreset, "playful");
+  assert.equal(normalized?.targetFrameMaterialSeed, "bot-frame-material:id:mara");
+  assert.equal(normalized?.targetVoice.elevenLabsEffect, "chorus");
   assert.equal(botIdentityShapeshiftTargetChangesV1(state, "mara"), false);
   assert.equal(botIdentityShapeshiftTargetChangesV1(state, "sol"), true);
   assert.match(

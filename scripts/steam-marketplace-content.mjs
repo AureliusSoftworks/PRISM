@@ -41,9 +41,20 @@ function parsePolicy(raw) {
   if (new Set(approvedBotIds).size !== approvedBotIds.length) {
     throw new Error("Steam Marketplace allowlist contains duplicate bot IDs.");
   }
+  const steamExcludedBotIds = (Array.isArray(raw.steamExcludedBotIds) ? raw.steamExcludedBotIds : []).map(normalizeId);
+  if (steamExcludedBotIds.some((id) => !id)) {
+    throw new Error("Steam Marketplace exclusion list contains an invalid bot ID.");
+  }
+  if (new Set(steamExcludedBotIds).size !== steamExcludedBotIds.length) {
+    throw new Error("Steam Marketplace exclusion list contains duplicate bot IDs.");
+  }
+  if (steamExcludedBotIds.some((id) => approvedBotIds.includes(id))) {
+    throw new Error("Steam Marketplace bots cannot be both approved and excluded.");
+  }
   return {
     ...raw,
     approvedBotIds,
+    steamExcludedBotIds,
   };
 }
 
@@ -107,11 +118,16 @@ export function resolveSteamMarketplaceContent(manifestRaw, policyRaw) {
   const manifest = parseManifest(manifestRaw);
   const policy = parsePolicy(policyRaw);
   const approvedIds = new Set(policy.approvedBotIds);
+  const steamExcludedIds = new Set(policy.steamExcludedBotIds);
   const sourceBotsById = new Map(manifest.bots.map((bot) => [normalizeId(bot.id), bot]));
 
   const missingApprovedIds = policy.approvedBotIds.filter((id) => !sourceBotsById.has(id));
   if (missingApprovedIds.length > 0) {
     throw new Error(`Steam Marketplace allowlist references missing bots: ${missingApprovedIds.join(", ")}.`);
+  }
+  const missingExcludedIds = policy.steamExcludedBotIds.filter((id) => !sourceBotsById.has(id));
+  if (missingExcludedIds.length > 0) {
+    throw new Error(`Steam Marketplace exclusion list references missing bots: ${missingExcludedIds.join(", ")}.`);
   }
 
   const approvedDevLockedIds = policy.approvedBotIds.filter(
@@ -122,7 +138,7 @@ export function resolveSteamMarketplaceContent(manifestRaw, policyRaw) {
   }
 
   const unapprovedPublicIds = manifest.bots
-    .filter((bot) => !bot.branchLock && !approvedIds.has(normalizeId(bot.id)))
+    .filter((bot) => !bot.branchLock && !approvedIds.has(normalizeId(bot.id)) && !steamExcludedIds.has(normalizeId(bot.id)))
     .map((bot) => normalizeId(bot.id));
   if (unapprovedPublicIds.length > 0) {
     throw new Error(
@@ -194,6 +210,9 @@ export function resolveSteamMarketplaceContent(manifestRaw, policyRaw) {
         bundlePath: bot.bundlePath,
       })),
       excludedDevBotCount: devLockedBots.length,
+      excludedSteamBots: manifest.bots
+        .filter((bot) => steamExcludedIds.has(normalizeId(bot.id)))
+        .map((bot) => ({ id: normalizeId(bot.id), name: bot.name })),
     },
   };
 }
@@ -296,10 +315,15 @@ export function renderSteamContentReport(report) {
     `- Marketplace manifest version: ${report.manifestVersion}`,
     `- Approved Marketplace bots: ${report.approvedBots.length}`,
     `- Excluded development-only bots: ${report.excludedDevBotCount}`,
+    `- Excluded pending rights/provenance review: ${report.excludedSteamBots.length}`,
     "",
     "## Approved Marketplace Bots",
     "",
     ...report.approvedBots.map((bot) => `- ${bot.name} (\`${bot.id}\`)`),
+    "",
+    "## Excluded Pending Rights/Provenance Review",
+    "",
+    ...report.excludedSteamBots.map((bot) => `- ${bot.name} (\`${bot.id}\`)`),
     "",
   ];
   return `${lines.join("\n")}\n`;

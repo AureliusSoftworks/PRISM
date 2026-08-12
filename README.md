@@ -176,13 +176,13 @@ runtime included.
 - **macOS:** DMG
 - **Windows:** installer
 - **Linux:** AppImage
-- **Steam:** desktop release target
-- **GitHub Releases:** current direct-download path while Steam is prepared
+- **Steam:** paid desktop release target at $9.99
+- **GitHub Releases:** temporary development and CI path while Steam is prepared
 
-Official builds are free to download and use. Start with
-[GitHub Releases](https://github.com/AureliusSoftworks/LocalAI/releases) or read
-the current [`distribution model`](docs/distribution-model.md) and
-[`release process`](docs/release-process.md).
+Steam is the intended public desktop channel. GitHub artifacts are temporary
+development and CI downloads and will be restricted or privatized before the
+public Steam launch. Read the current [`distribution model`](docs/distribution-model.md)
+and [`release process`](docs/release-process.md) for the release workflow.
 
 ## Architecture
 

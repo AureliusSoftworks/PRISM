@@ -1108,6 +1108,19 @@
   display: inline-grid;
 }
 
+/* Private mode rotates identity marks as part of its visual language. The
+   full Studio avatar already shares the live plate treatment; mirror that
+   treatment on its independently rendered mini without tying either glyph to
+   left/right avatar facing. */
+.appLayout[data-private-active="true"]
+  .botAvatarStudioMiniPreview
+  .emptyStateHeroMiniGlyph,
+.appLayout[data-zen-private-tone="true"]
+  .botAvatarStudioMiniPreview
+  .emptyStateHeroMiniGlyph {
+  transform: rotate(180deg);
+}
+
 .botAvatarStudioMiniPreviewViewport {
   display: grid;
   place-items: center;
@@ -2422,9 +2435,25 @@
   .botAvatarCustomizer[data-foundry="true"]
     .botAvatarControlGroup[data-avatar-control-tab="eyes"]
     .botAvatarOverrideControl
-    > .botAvatarCustomGeometry {
+    > .botAvatarCustomGeometry[data-eye-geometry="size"] {
     grid-column: 3;
     grid-row: 1 / span 2;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarControlGroup[data-avatar-control-tab="eyes"]
+    .botAvatarOverrideControl
+    > .botAvatarCustomGeometry[data-eye-geometry="spacing"] {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarControlGroup[data-avatar-control-tab="eyes"]
+    .botAvatarOverrideControl
+    > .botAvatarCustomGeometry[data-eye-geometry="spacing"]
+    ~ .botAvatarCustomGeometry[data-eye-geometry="size"] {
+    grid-row: 2;
   }
 
   .botAvatarCustomizer[data-foundry="true"]
@@ -3814,41 +3843,45 @@
   right: 18%;
 }
 
-/* Identity Mirror keeps the holder's metal/color/glyph anchored while only the CRT face scrambles. */
-.coffeeSeat[data-identity-mirror-transition="true"]
-  .zenLiveBotPresenceFaceEmissionMask,
-.signalBotPresencePlate[data-identity-mirror-transition="true"]
+/* Borrowed identities share Zen's handled-screen fiction: the persisted new
+   form is installed while the CRT is dark, then the screen reveals it. */
+[data-identity-presentation-blackout="true"]
   .zenLiveBotPresenceFaceEmissionMask {
-  --crt-static-opacity: 0.82;
-  --crt-static-speed: 72ms;
-  animation: identityMirrorFaceScramble 760ms steps(8, end) both;
+  --crt-strength: 0 !important;
+  --crt-core-opacity: 0 !important;
+  --crt-bloom-narrow-strength: 0 !important;
+  --crt-bloom-wide-strength: 0 !important;
+  --crt-phosphor-opacity: 0 !important;
+  --crt-phosphor-midtone-strength: 0 !important;
+  --crt-phosphor-bright-strength: 0 !important;
+  --crt-unlit-phosphor-opacity: 0 !important;
+  --crt-static-opacity: 0 !important;
+  --crt-scanline-opacity: 0 !important;
+  --crt-convergence-opacity: 0 !important;
+  --crt-breath-strength: 0 !important;
 }
 
-@keyframes identityMirrorFaceScramble {
-  0% {
-    filter: none;
-    opacity: 1;
-  }
-  18% {
-    filter: contrast(1.9) brightness(1.5) saturate(0);
-    opacity: 0.42;
-  }
-  38% {
-    filter: contrast(2.4) brightness(1.8) hue-rotate(90deg);
-    opacity: 0.12;
-  }
-  58% {
-    filter: contrast(2.1) brightness(1.55) hue-rotate(-70deg);
-    opacity: 0.2;
-  }
-  78% {
-    filter: contrast(1.65) brightness(1.28) saturate(0.35);
-    opacity: 0.62;
-  }
-  100% {
-    filter: none;
-    opacity: 1;
-  }
+[data-identity-presentation-blackout="true"]
+  :is(
+    .zenLiveBotPresenceScreenContentRig,
+    .zenLiveBotPresenceThinkingGlyphAnchor,
+    [data-chat-mini-upper-screen]
+  ) {
+  opacity: 0;
+  transform: scaleY(0.018);
+  animation: zenLiveBotFaceScreenPowerDown 130ms cubic-bezier(0.42, 0, 0.74, 0.28)
+    both;
+}
+
+[data-identity-presentation-blackout="true"]
+  .zenLiveBotPresenceScreenContentRig {
+  transform: scaleX(var(--zen-live-bot-screen-facing-scale-x, 1)) scaleY(0.018);
+}
+
+[data-identity-presentation-blackout="true"]
+  :is(.botFaceCrtNoiseLayer, .botFaceCrtBreathingLayer) {
+  opacity: 0 !important;
+  animation: none !important;
 }
 
 /* A ghost Power is a hard live-avatar rule: the holder appears only to speak. */
@@ -3886,11 +3919,13 @@
     transition: none;
   }
 
-  .coffeeSeat[data-identity-mirror-transition="true"]
-    .zenLiveBotPresenceFaceEmissionMask,
-  .signalBotPresencePlate[data-identity-mirror-transition="true"]
-    .zenLiveBotPresenceFaceEmissionMask {
-    animation-duration: 120ms;
+  [data-identity-presentation-blackout="true"]
+    :is(
+      .zenLiveBotPresenceScreenContentRig,
+      .zenLiveBotPresenceThinkingGlyphAnchor,
+      [data-chat-mini-upper-screen]
+    ) {
+    animation: none;
   }
 }
 
@@ -9557,6 +9592,10 @@
   box-shadow:
     0 0 0 2px color-mix(in srgb, var(--bg) 76%, transparent),
     0 0 18px color-mix(in srgb, var(--coffee-bot-color) 48%, transparent);
+}
+
+.liveBotMemoryReceiptAnnouncement {
+  display: contents;
 }
 
 .zenLiveBotPresencePlate > .liveBotMemoryReceiptChip {
@@ -15680,6 +15719,62 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   animation: none;
 }
 
+/* The retained Zen card remains the only docking destination while the bot
+   roams. Home-only selection controls soften out without becoming a second
+   interaction layer under the live bot. */
+.zenHomeRoaming .canvasBotBrowserRail,
+.zenHomeRoaming .chatCanvasPickerControls,
+.zenHomeRoaming .chatBotPickerFrame,
+.zenHomeRoaming .botGroupWaitingRoom,
+.zenHomeRoaming .botGroupImageBubbleLayer {
+  filter: blur(10px);
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.985);
+  transition:
+    filter 220ms ease,
+    opacity 220ms ease,
+    transform 220ms ease;
+}
+
+.compose[data-zen-home-roaming="true"] .hueLensRow {
+  filter: blur(10px);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(8px);
+  transition:
+    filter 220ms ease,
+    opacity 220ms ease,
+    transform 220ms ease;
+}
+
+.zenHomeRoaming .emptyStateIconButton {
+  filter: blur(3px);
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.96);
+  transition:
+    filter 180ms ease,
+    opacity 180ms ease,
+    transform 220ms ease;
+}
+
+.zenHomeRoaming [data-zen-home-drop-target="true"] {
+  pointer-events: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zenHomeRoaming .canvasBotBrowserRail,
+  .zenHomeRoaming .chatCanvasPickerControls,
+  .zenHomeRoaming .chatBotPickerFrame,
+  .zenHomeRoaming .botGroupWaitingRoom,
+  .zenHomeRoaming .botGroupImageBubbleLayer,
+  .zenHomeRoaming .emptyStateIconButton,
+  .compose[data-zen-home-roaming="true"] .hueLensRow {
+    transition-duration: 1ms;
+  }
+}
+
 .emptyStateSearching {
   /* Keep a state hook for search-specific empty-canvas tuning. The Spotlight
      itself participates in the flex stack so it cannot cover bot tiles. */
@@ -19717,7 +19812,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .zenLiveBotPresencePlate
   .zenLiveBotPresenceBotGlyph {
   transform: translate(-50%, -50%) rotate(180deg)
-    scaleX(var(--zen-live-bot-screen-facing-scale-x, 1));
+    scaleX(var(--zen-live-bot-glyph-facing-scale-x, 1));
 }
 
 .appLayout[data-private-active="true"]
@@ -28297,23 +28392,34 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     --bot-color,
     var(--coffee-bot-color, var(--accent))
   );
-  --bot-face-frame-color: var(--zen-live-bot-handling-accent) !important;
   --bot-face-frame-led-color: var(--zen-live-bot-handling-accent) !important;
   --foundry-module-color: var(--zen-live-bot-handling-accent) !important;
-  --bot-face-frame-finish-color: var(--zen-live-bot-handling-accent) !important;
-  --bot-face-metal-alloy-color: var(--zen-live-bot-handling-accent) !important;
   --bot-voice-light-level: 0;
   --bot-voice-light-glow-lift: 0;
   --bot-voice-light-emitter-lift: 0;
   --bot-voice-light-core-lift: 0;
 }
 
-.zenLiveBotPresencePlate[data-user-screen-power="off"] .botFaceFrameAlloy {
+.zenLiveBotPresencePlate[data-user-screen-power="off"]:not(
+    [data-prism-persona="true"]
+  ) {
+  --bot-face-frame-color: var(--zen-live-bot-handling-accent) !important;
+  --bot-face-frame-finish-color: var(--zen-live-bot-handling-accent) !important;
+  --bot-face-metal-alloy-color: var(--zen-live-bot-handling-accent) !important;
+}
+
+.zenLiveBotPresencePlate[data-user-screen-power="off"]:not(
+    [data-prism-persona="true"]
+  )
+  .botFaceFrameAlloy {
   --bot-face-metal-alloy-color: var(--zen-live-bot-handling-accent) !important;
   --bot-face-metal-alloy-mix: 74% !important;
 }
 
-.zenLiveBotPresencePlate[data-user-screen-power="off"] .botFaceFrameTint {
+.zenLiveBotPresencePlate[data-user-screen-power="off"]:not(
+    [data-prism-persona="true"]
+  )
+  .botFaceFrameTint {
   --bot-face-frame-color: var(--zen-live-bot-handling-accent) !important;
   --bot-face-frame-tint-talking-opacity-high: 1 !important;
   --bot-face-frame-tint-talking-opacity-mid: 0.82 !important;
@@ -28406,7 +28512,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   animation: none !important;
 }
 
-.zenLiveBotPresencePlate[data-user-screen-power="off"]
+.zenLiveBotPresencePlate[data-user-screen-power="off"]:not(
+    [data-prism-persona="true"]
+  )
   .zenLiveBotPresenceMiniAvatar {
   --chat-mini-bot-color: var(--zen-live-bot-handling-accent) !important;
   --chat-mini-bot-alloy-color: var(--zen-live-bot-handling-accent) !important;
@@ -29217,7 +29325,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   position: absolute;
   left: 50%;
   top: 50%;
-  z-index: 5;
+  /* The lens belongs in front of the emitted face/Ink, while the chassis and
+     buckle continue to sit above it in the body stack. */
+  z-index: 7;
   width: var(--zen-live-bot-body-frame-size);
   height: var(--zen-live-bot-body-frame-size);
   transform: translate(-50%, -50%);
@@ -29232,19 +29342,80 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --bot-face-screen-bottom: 0;
   --bot-face-screen-radius: 0;
   --bot-face-screen-mask-image: url("/bot-frame/bot-frame-screen-mask-glass.png?v=1000");
-  --bot-face-screen-glass-background: transparent;
+  /* Full-size lens only. Broad, non-repeating gradients keep the material
+     readable without introducing texture noise into the phosphor artwork. */
+  --bot-face-screen-glass-background:
+    linear-gradient(
+      138deg,
+      transparent 0 26%,
+      rgb(255 255 255 / 0.18) 34%,
+      rgb(255 255 255 / 0.055) 40%,
+      transparent 47% 100%
+    ),
+    radial-gradient(
+      ellipse at 50% 48%,
+      transparent 0 56%,
+      rgb(255 255 255 / 0.16) 72%,
+      rgb(255 255 255 / 0.045) 83%,
+      transparent 96%
+    ),
+    radial-gradient(
+      circle at 66% 72%,
+      rgb(255 255 255 / 0.055),
+      transparent 36%
+    );
   --bot-face-screen-glass-z: 0;
   --bot-face-screen-glass-opacity: var(
     --zen-live-bot-screen-glass-overlay-opacity,
-    0.2
+    0.34
   );
   --bot-face-screen-glare-opacity: var(
     --zen-live-bot-screen-glare-overlay-opacity,
     0.24
   );
-  --bot-face-screen-specular-opacity: 0.52;
-  --bot-face-screen-glass-shadow: none;
-  box-shadow: none;
+  --bot-face-screen-specular-opacity: 0.68;
+  --bot-face-screen-glass-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.18),
+    inset 0 10px 18px rgb(255 255 255 / 0.045),
+    inset 0 -14px 24px rgb(0 0 0 / 0.2);
+}
+
+/* Authored handling maps are square and screen-local. Register the square to
+   the main 665x638 lens aperture, then let the chassis glass mask perform the
+   final curved crop. They intentionally never reach the lower buckle. */
+.zenLiveBotPresenceScreenGlass .botFaceScreenGlassDistortion,
+.zenLiveBotPresenceScreenGlass .botFaceScreenGlassResidue {
+  position: absolute;
+  left: 16.75%;
+  top: 11.85%;
+  z-index: 1;
+  display: block;
+  width: 66.5%;
+  aspect-ratio: 1;
+  transform: rotate(var(--bot-screen-glass-profile-rotation, 0deg));
+  transform-origin: 50% 50%;
+  pointer-events: none;
+}
+
+.zenLiveBotPresenceScreenGlass .botFaceScreenGlassDistortion {
+  background: rgb(255 255 255 / 0.018);
+  -webkit-mask: var(--bot-screen-glass-distortion-image) center / 100% 100%
+    no-repeat;
+  mask: var(--bot-screen-glass-distortion-image) center / 100% 100% no-repeat;
+  opacity: var(--bot-screen-glass-distortion-opacity, 0.82);
+  -webkit-backdrop-filter: blur(
+    var(--bot-screen-glass-distortion-blur, 0.42px)
+  );
+  backdrop-filter: blur(var(--bot-screen-glass-distortion-blur, 0.42px));
+}
+
+.zenLiveBotPresenceScreenGlass .botFaceScreenGlassResidue {
+  z-index: 2;
+  background: var(--bot-screen-glass-residue-image) center / 100% 100%
+    no-repeat;
+  opacity: var(--bot-screen-glass-residue-opacity, 0.8);
+  mix-blend-mode: screen;
+  filter: contrast(1.06) brightness(0.9);
 }
 
 .zenLiveBotPresenceHitTarget {
@@ -31106,10 +31277,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   width: var(--zen-live-bot-body-glyph-render-size);
   height: var(--zen-live-bot-body-glyph-render-size);
   aspect-ratio: 1;
-  /* The buckle is an asymmetric screen glyph too. Turn it with the shared
-     face-and-Ink contract rather than leaving it behind on a side-facing bot. */
+  /* The buckle is an asymmetric screen glyph too. Keep its placement tied
+     to the avatar body while decoupling left/right glyph direction from body
+     facing so it never reads mirrored.
+     */
   transform: translate(-50%, -50%)
-    scaleX(var(--zen-live-bot-screen-facing-scale-x, 1));
+    scaleX(var(--zen-live-bot-glyph-facing-scale-x, 1));
   display: block;
   padding: 0;
   border: 0;
@@ -31256,6 +31429,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .botAvatarFoundryBuckleGlass {
+  --foundry-buckle-glass-scale: 1.26;
   --foundry-buckle-screen-size: var(
     --zen-live-bot-body-glyph-size,
     clamp(
@@ -31274,7 +31448,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   width: var(--foundry-buckle-screen-size);
   height: var(--foundry-buckle-screen-size);
   border-radius: 50%;
-  transform: translate(-50%, -50%);
+  transform: translate(-50%, -50%) scale(var(--foundry-buckle-glass-scale));
   background:
     radial-gradient(circle at 34% 24%, rgba(255,255,255,.18), transparent 24%),
     linear-gradient(145deg, rgba(255,255,255,.08), transparent 44% 68%, rgba(255,255,255,.06));
@@ -75592,6 +75766,16 @@ a.settingsCreditItem:focus-visible {
   display: grid;
   gap: 4px;
   min-width: 0;
+}
+
+.coffeeExperienceModeField {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.coffeeGroupOverview .coffeeExperienceModeField {
+  grid-column: 2;
 }
 
 .coffeeGroupStartControlLabel {

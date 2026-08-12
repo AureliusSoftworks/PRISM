@@ -24,6 +24,24 @@ export async function verifySteamRuntimeContent(options = {}) {
     "public",
   );
   const packagedPolicyPath = path.join(runtimeDir, "steam-marketplace-allowlist.json");
+  const runtimeLayoutPath = path.join(runtimeDir, "runtime-layout.json");
+  let runtimeLayout;
+  try {
+    runtimeLayout = JSON.parse(await fs.readFile(runtimeLayoutPath, "utf8"));
+  } catch (error) {
+    throw new Error(
+      `Steam runtime manifest is missing or invalid: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  if (runtimeLayout.distribution !== "steam") {
+    throw new Error(
+      `Steam content verification requires a Steam runtime (found ${String(
+        runtimeLayout.distribution ?? "unknown",
+      )}).`,
+    );
+  }
   const [expectedPolicy, packagedPolicy] = await Promise.all([
     fs.readFile(policyPath),
     fs.readFile(packagedPolicyPath),

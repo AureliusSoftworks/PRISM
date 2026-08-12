@@ -11,6 +11,8 @@ import {
 } from "./botAvatarDetails.ts";
 import {
   DEFAULT_BOT_FACE_BLINK_BAR,
+  DEFAULT_BOT_FACE_EYE_OFFSET_X,
+  DEFAULT_BOT_FACE_EYE_OFFSET_Y,
   DEFAULT_BOT_FACE_MOUTH_OFFSET_X,
   DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
   DEFAULT_BOT_FACE_MOUTH_SCALE,
@@ -49,8 +51,6 @@ const BOT_GENERATED_INK_MAX_LINE_LENGTH = 32;
 const BOT_GENERATED_INK_MAX_CIRCLE_RADIUS = 16;
 const BOT_GENERATED_INK_MAX_PATH_POINTS = 18;
 const BOT_GENERATED_INK_MAX_PATH_SEGMENT_LENGTH = 96;
-const BOT_GENERATED_PORTRAIT_EYE_OFFSET_X = 0;
-const BOT_GENERATED_PORTRAIT_EYE_OFFSET_Y = 0.18;
 const BOT_GENERATED_PORTRAIT_EYE_WINDOW = {
   minX: 42,
   maxX: 86,
@@ -749,10 +749,10 @@ export function normalizeBotGeneratedDraftV1(
     eyeScale: faceIntent.eyeGeometryException ? resolvedFace.eyeScale : 1,
     eyeOffsetX: faceIntent.eyeGeometryException
       ? resolvedFace.eyeOffsetX
-      : BOT_GENERATED_PORTRAIT_EYE_OFFSET_X,
+      : DEFAULT_BOT_FACE_EYE_OFFSET_X,
     eyeOffsetY: faceIntent.eyeGeometryException
       ? resolvedFace.eyeOffsetY
-      : BOT_GENERATED_PORTRAIT_EYE_OFFSET_Y,
+      : DEFAULT_BOT_FACE_EYE_OFFSET_Y,
     eyeRotationDeg: faceIntent.eyeGeometryException
       ? resolvedFace.eyeRotationDeg
       : 0,
@@ -771,10 +771,10 @@ export function normalizeBotGeneratedDraftV1(
     blinkScale: faceIntent.blinkGeometryException ? resolvedFace.blinkScale : 1,
     blinkOffsetX: faceIntent.blinkGeometryException
       ? resolvedFace.blinkOffsetX
-      : BOT_GENERATED_PORTRAIT_EYE_OFFSET_X,
+      : DEFAULT_BOT_FACE_EYE_OFFSET_X,
     blinkOffsetY: faceIntent.blinkGeometryException
       ? resolvedFace.blinkOffsetY
-      : BOT_GENERATED_PORTRAIT_EYE_OFFSET_Y,
+      : DEFAULT_BOT_FACE_EYE_OFFSET_Y,
     blinkRotationDeg: faceIntent.blinkGeometryException
       ? resolvedFace.blinkRotationDeg
       : 0,

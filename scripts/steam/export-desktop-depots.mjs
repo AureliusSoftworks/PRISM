@@ -63,6 +63,24 @@ function parseArgs(argv) {
   return args;
 }
 
+function validateSteamUploadBranch(branch) {
+  const normalized = String(branch ?? "").trim();
+  if (!normalized) {
+    throw new Error("Steam upload branch must be explicit and non-empty.");
+  }
+  if (normalized.toLowerCase() === "default") {
+    throw new Error(
+      "Refusing to export a Steam build for the public default branch. Use a private or prerelease branch first."
+    );
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(normalized)) {
+    throw new Error(
+      "Steam upload branch must contain only letters, numbers, periods, underscores, or hyphens."
+    );
+  }
+  return normalized;
+}
+
 async function ensureDir(target) {
   await fs.mkdir(target, { recursive: true });
 }
@@ -142,6 +160,7 @@ async function main() {
       "Usage: export-desktop-depots.mjs --version <x.y.z> --app-id <id> --windows-depot-id <id> --mac-depot-id <id> --linux-depot-id <id> [--branch prerelease] [--artifacts-dir dist-desktop] [--output-dir steam-build]"
     );
   }
+  args.branch = validateSteamUploadBranch(args.branch);
 
   const projectRoot = process.cwd();
   const artifactsDir = path.resolve(projectRoot, args.artifactsDir);

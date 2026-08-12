@@ -1380,8 +1380,14 @@ describe("Story API helpers", () => {
     assert.equal(freddieScenes.length, 2);
     assert.ok(freddieScenes.every(
       (scene) =>
-        scene.narration ===
-        "As I said earlier, the key is in the archive. Do you remember?",
+        scene.narration.includes(
+          "As I said earlier, the key is in the archive. Do you remember?",
+        ),
+    ));
+    assert.ok(freddieScenes.every((scene) =>
+      /(?:Hello—I'm Forgetful Freddie\.|I'm Forgetful Freddie; it's good to meet you\.|Pleased to meet you—I'm Forgetful Freddie\.)/u.test(
+        scene.narration,
+      ),
     ));
     assert.ok(freddieScenes.every((scene) => scene.spritePose === "speaking"));
     assert.match(prompt, /Story adaptation for Forgetful Freddie/iu);

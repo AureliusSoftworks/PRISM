@@ -2,7 +2,7 @@
   "name": "localai-chatgov",
   "private": true,
   "type": "module",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -34,7 +34,12 @@
     "desktop:package:windows": "pwsh scripts/package-desktop-windows.ps1",
     "steam:export-desktop-depots": "node scripts/steam/export-desktop-depots.mjs",
     "steam:content:verify": "node scripts/verify-steam-content.mjs --runtime-dir runtime",
-    "steam:content:test": "node --test scripts/steam-marketplace-content.test.mjs",
+    "steam:content:test": "node --test scripts/steam-marketplace-content.test.mjs scripts/steam/export-desktop-depots.test.mjs",
+    "steam:assets:ledger": "node scripts/steam-asset-rights-ledger.mjs --write",
+    "steam:assets:verify": "node scripts/steam-asset-rights-ledger.mjs --runtime-dir runtime",
+    "steam:third-party:regenerate": "node scripts/generate-third-party-notices.mjs --runtime-dir runtime",
+    "steam:third-party:verify": "node scripts/verify-third-party-notices.mjs --runtime-dir runtime",
+    "steam:trailer:build": "node scripts/build-steam-trailer.mjs",
     "kb": "node --env-file-if-exists=.env scripts/kb.mjs sync",
     "kb:incremental": "node --env-file-if-exists=.env scripts/kb.mjs incremental",
     "kb:augment": "node --env-file-if-exists=.env scripts/kb.mjs augment",

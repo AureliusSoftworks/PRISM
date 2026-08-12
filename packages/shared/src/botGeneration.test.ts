@@ -186,11 +186,11 @@ describe("normalizeBotGeneratedDraftV1", () => {
     assert.equal(draft.face.blinkRotationDeg, 0);
     assert.equal(draft.face.blinkBar, " ");
     assert.equal(draft.face.eyeOffsetX, 0);
-    assert.equal(draft.face.eyeOffsetY, 0.18);
+    assert.equal(draft.face.eyeOffsetY, 0);
     assert.equal(draft.face.blinkOffsetX, 0);
-    assert.equal(draft.face.blinkOffsetY, 0.18);
-    assert.equal(draft.face.mouthOffsetX, 0.04);
-    assert.equal(draft.face.mouthOffsetY, 0.22);
+    assert.equal(draft.face.blinkOffsetY, 0);
+    assert.equal(draft.face.mouthOffsetX, 0);
+    assert.equal(draft.face.mouthOffsetY, 0);
     assert.deepEqual(draft.avatarDetails?.screen.stamps, []);
     assert.ok(draft.avatarDetails?.screen.paintColorMapBase64);
     assert.equal(draft.avatarDetails?.screen.speechInkAnimation, "wobble");
@@ -538,11 +538,11 @@ describe("normalizeBotGeneratedDraftV1", () => {
       },
       {
         eyeX: 0,
-        eyeY: 0.18,
+        eyeY: 0,
         blinkX: 0,
-        blinkY: 0.18,
-        mouthX: 0.04,
-        mouthY: 0.22,
+        blinkY: 0,
+        mouthX: 0,
+        mouthY: 0,
       },
     );
     const bytes = decodeBotAvatarDetailsPaintColorMap(

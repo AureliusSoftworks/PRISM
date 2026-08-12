@@ -9,7 +9,10 @@ import { test } from "node:test";
 
 import {
   STEAM_PUBLIC_EXCLUDED_TOP_LEVEL,
+  STEAM_PUBLIC_EXCLUDED_FILES,
+  nodeRuntimeResourceExecutable,
   nodeRuntimeSourceCandidates,
+  voicePlusRequiredForDistribution,
 } from "./stage-desktop-runtime.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -52,11 +55,71 @@ test("desktop staging preserves host Node behavior on Linux and Windows", () => 
   );
 });
 
+test("Steam staging never falls back to the developer's host Node", () => {
+  const steamLinuxNode = nodeRuntimeResourceExecutable({
+    platform: "linux",
+    repositoryRoot,
+  });
+  const steamWindowsNode = nodeRuntimeResourceExecutable({
+    platform: "win32",
+    repositoryRoot,
+  });
+
+  assert.deepEqual(
+    nodeRuntimeSourceCandidates({
+      platform: "linux",
+      distribution: "steam",
+      executablePath: "/usr/bin/node",
+      repositoryRoot,
+      configuredPath: "/tmp/unverified-node",
+    }),
+    [steamLinuxNode],
+  );
+  assert.deepEqual(
+    nodeRuntimeSourceCandidates({
+      platform: "win32",
+      distribution: "steam",
+      executablePath: "C:\\nodejs\\node.exe",
+      repositoryRoot,
+      configuredPath: "C:\\unverified\\node.exe",
+    }),
+    [steamWindowsNode],
+  );
+});
+
 test("Steam staging excludes development-only public tools", () => {
   assert.deepEqual(STEAM_PUBLIC_EXCLUDED_TOP_LEVEL, [
     "bot-marketplace",
     "tools",
   ]);
+  assert.deepEqual(STEAM_PUBLIC_EXCLUDED_FILES, [
+    "file.svg",
+    "globe.svg",
+    "next.svg",
+    "vercel.svg",
+    "window.svg",
+  ]);
+});
+
+test("Steam staging uses Instant by default and keeps Voice+ opt-in", () => {
+  assert.equal(
+    voicePlusRequiredForDistribution({ distribution: "steam" }),
+    false,
+  );
+  assert.equal(
+    voicePlusRequiredForDistribution({
+      distribution: "steam",
+      explicitlyEnabled: true,
+    }),
+    true,
+  );
+  assert.equal(
+    voicePlusRequiredForDistribution({
+      distribution: "development",
+      explicitlyEnabled: true,
+    }),
+    false,
+  );
 });
 
 test(

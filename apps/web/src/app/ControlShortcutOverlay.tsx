@@ -129,7 +129,7 @@ export function ControlShortcutGuide({
       aria-live="polite"
       aria-hidden={visible ? undefined : "true"}
     >
-      <span className={styles.title}>Control shortcuts</span>
+      <span className={styles.title}>PRISM shortcuts</span>
       <span className={styles.shortcuts}>
         {controlRootEntries.map((entry) => (
           <GuideChip key={entry.action} entry={entry} />

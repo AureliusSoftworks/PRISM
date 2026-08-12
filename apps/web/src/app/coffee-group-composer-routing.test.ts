@@ -82,4 +82,17 @@ describe("Coffee group dashboard composer routing", () => {
     assert.match(pageCss, /\.coffeeGroupRecentSessionRow \{/);
     assert.match(pageCss, /\.coffeeGroupRecentSessionReuse \{/);
   });
+
+  it("exposes the Join or Serve choice and sends it with a group start", () => {
+    assert.match(pageSource, /coffeeExperienceModePicker/);
+    assert.match(pageSource, /Join for Coffee/);
+    assert.match(pageSource, /Serve Coffee/);
+    assert.match(
+      pageSource,
+      /experienceMode:\s*coffeeSelectedExperienceMode/,
+    );
+    assert.match(pageSource, /coffeeSelectedExperienceMode === "serve"/);
+    assert.match(pageSource, /coffeeSelectedExperienceMode === "join"/);
+    assert.match(pageCss, /\.coffeeExperienceModeField \{/);
+  });
 });

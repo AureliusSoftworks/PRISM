@@ -368,6 +368,24 @@ describe("bot avatar face style", () => {
     assert.equal(DEFAULT_BOT_FACE_EYE_ROTATION_DEG, 0);
   });
 
+  it("keeps canonical eyes and mouth at the editor pad origin", () => {
+    assert.equal(DEFAULT_BOT_FACE_EYE_OFFSET_X, 0);
+    assert.equal(DEFAULT_BOT_FACE_EYE_OFFSET_Y, 0);
+    assert.equal(DEFAULT_BOT_FACE_MOUTH_OFFSET_X, 0);
+    assert.equal(DEFAULT_BOT_FACE_MOUTH_OFFSET_Y, 0);
+
+    const defaults = resolveBotFaceStyle({});
+    assert.deepEqual(
+      {
+        eyeOffsetX: defaults.eyeOffsetX,
+        eyeOffsetY: defaults.eyeOffsetY,
+        mouthOffsetX: defaults.mouthOffsetX,
+        mouthOffsetY: defaults.mouthOffsetY,
+      },
+      { eyeOffsetX: 0, eyeOffsetY: 0, mouthOffsetX: 0, mouthOffsetY: 0 },
+    );
+  });
+
   it("clamps and steps eye scale, mouth scale, face placement, and mouth rotation", () => {
     assert.equal(normalizeBotFaceEyeScale(1.17), 1.15);
     assert.equal(normalizeBotFaceEyeScale(0.2), 0.7);

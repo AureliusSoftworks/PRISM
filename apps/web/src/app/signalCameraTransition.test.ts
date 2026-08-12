@@ -65,6 +65,28 @@ describe("Signal automatic camera direction", () => {
     );
   });
 
+  it("holds Wide through voice preparation, then hands directly to the ready speaker", () => {
+    const shots = [
+      signalLiveAutoCameraShot({
+        baseShot: "right",
+        botThinking: true,
+        producerGuestThinking: false,
+      }),
+      signalLiveAutoCameraShot({
+        baseShot: "right",
+        botThinking: true,
+        producerGuestThinking: false,
+      }),
+      signalLiveAutoCameraShot({
+        baseShot: "right",
+        speakingShot: "right",
+        botThinking: false,
+        producerGuestThinking: false,
+      }),
+    ];
+    assert.deepEqual(shots, ["wide", "wide", "right"]);
+  });
+
   it("preserves base shots and higher-priority listener reactions", () => {
     assert.equal(
       signalLiveAutoCameraShot({
@@ -91,7 +113,7 @@ describe("Signal automatic camera direction", () => {
       signalListenerReactionCameraShot({
         cameraCutEligible: false,
         ephemeralSpeakingShot: "right",
-        timedReactionShot: "right",
+        ephemeralSpeechDurationMs: 3_000,
       }),
       null,
     );
@@ -99,16 +121,29 @@ describe("Signal automatic camera direction", () => {
       signalListenerReactionCameraShot({
         cameraCutEligible: true,
         ephemeralSpeakingShot: "right",
+        ephemeralSpeechDurationMs: 2_500,
       }),
       "right",
     );
   });
 
-  it("cuts an eligible interruption with its audible overlap", () => {
+  it("keeps brief interruption audio off camera to prevent a quick bounce", () => {
     assert.equal(
       signalListenerReactionCameraShot({
         cameraCutEligible: true,
         ephemeralSpeakingShot: "left",
+        ephemeralSpeechDurationMs: 2_499,
+      }),
+      null,
+    );
+  });
+
+  it("cuts an eligible sustained interruption with its audible overlap", () => {
+    assert.equal(
+      signalListenerReactionCameraShot({
+        cameraCutEligible: true,
+        ephemeralSpeakingShot: "left",
+        ephemeralSpeechDurationMs: 3_100,
       }),
       "left",
     );

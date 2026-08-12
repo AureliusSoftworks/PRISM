@@ -29,6 +29,9 @@ describe("live bake Auto re-resolve", () => {
       source,
       /const generation = \{\s*\.\.\.\(await args\.resolveGeneration\(\)\)/u,
     );
+    assert.match(source, /await runWithUsageSession\(/u);
+    assert.match(source, /mode: "signal"/u);
+    assert.match(source, /surface: "signal"/u);
   });
 
   it("wires bake jobs and HTTP starters to per-step resolvers", () => {

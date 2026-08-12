@@ -447,6 +447,35 @@ describe("bot marketplace static catalog", () => {
           /Always interrupts the Signal bot host[\s\S]*every opening and interview turn/iu,
         );
       }
+      if (botId === "identity-crisis-ian") {
+        assert.deepEqual(entry.tags, [
+          "power",
+          "showcase",
+          "identity",
+          "impostor",
+          "face",
+          "voice",
+          "ink",
+          "glyph",
+        ]);
+        assert.match(entry.description ?? "", /inside his own vivid shell/iu);
+        assert.match(
+          bundle.botJson.profile?.purpose.statement ?? "",
+          /borrows.*public persona.*face.*Ink.*voice identity.*lower glyph.*active public Power consequences/iu,
+        );
+        assert.match(
+          bundle.botJson.profile?.appearance.description ?? "",
+          /vivid cyan shell.*communication chassis.*frame stay unmistakably his/iu,
+        );
+        assert.match(
+          powers[0]?.intent ?? "",
+          /Retain Ian's own saturated color.*client-side voice effect.*communication-style chassis.*frame finish/iu,
+        );
+        assert.doesNotMatch(
+          powers[0]?.intent ?? "",
+          /complete public audiovisual identity/iu,
+        );
+      }
       if (botId === "joyful-nora") {
         assert.equal(bundle.botJson.bot.color, fullySaturateBotColor("#ff24bf"));
         assert.equal(bundle.botJson.bot.glyph, "lucideRadio");

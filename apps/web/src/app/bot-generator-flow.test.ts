@@ -283,9 +283,21 @@ test("prompt generation becomes an accessible PRISM assembly ritual", () => {
     "generateBotDraftFromPrompt",
     "openFreshBotCustomizer",
   );
+  const shellLanded = functionSource(
+    "handleBotFoundryShellLanded",
+    "closeBotGenerator",
+  );
 
   assert.match(pageSource, /<BotCreationRitual/u);
   assert.match(pageSource, /phase=\{botFoundryPhase\}/u);
+  assert.match(
+    pageSource,
+    /onShellLanded=\{handleBotFoundryShellLanded\}/u,
+  );
+  assert.match(
+    shellLanded,
+    /setBotFoundryPhase\(\(current\)\s*=>\s*current === "arrival" \? "brief" : current/u,
+  );
   assert.match(pageSource, /completedDraft=\{botGeneratorCompletedDraft\}/u);
   assert.match(pageSource, /theme=\{resolvedTheme\}/u);
   assert.match(generateDraft, /setBotGeneratorCompletedDraft\(generatedDraft\)/u);
@@ -378,7 +390,7 @@ test("Foundry synthesis stays beneath authored glass and separates both liquid s
   assert.match(cssSource, /\.botAvatarFoundryBuckleFill::after\s*\{[\s\S]*?inset:\s*var\(--foundry-buckle-unfilled/u);
   assert.match(
     pageSource,
-    /className=\{styles\.botAvatarFoundryBuckleGlass\}[\s\S]*?data-avatar-foundry-buckle-glass="true"/u,
+    /<\/PhosphorPixelSvgGlyph>\s*<span\s+className=\{styles\.botAvatarFoundryBuckleGlass\}\s+data-avatar-foundry-buckle-glass="true"/u,
   );
   const buckleFillIndex = pageSource.indexOf(
     "className={styles.botAvatarFoundryBuckleFill}",
@@ -397,6 +409,10 @@ test("Foundry synthesis stays beneath authored glass and separates both liquid s
   assert.match(
     cssSource,
     /\.botAvatarFoundryBuckleFill\s*\{[\s\S]*?--foundry-buckle-screen-size:[\s\S]*?border-radius:\s*50%/u,
+  );
+  assert.match(
+    cssSource,
+    /\.botAvatarFoundryBuckleGlass\s*\{[\s\S]*?--foundry-buckle-glass-scale:\s*1\.26;[\s\S]*?scale\(var\(--foundry-buckle-glass-scale\)\)/u,
   );
   assert.match(cssSource, /data-screen-crest="true"[\s\S]*?z-index:\s*9;/u);
   assert.match(ritualCssSource, /data-synthesis-complete="true"[\s\S]*?background:\s*#fff;/u);

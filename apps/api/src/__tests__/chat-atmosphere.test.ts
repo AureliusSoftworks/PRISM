@@ -15,6 +15,8 @@ function createDb(): DatabaseSync {
       user_id TEXT NOT NULL,
       name TEXT NOT NULL,
       system_prompt TEXT NOT NULL DEFAULT '',
+      color TEXT,
+      accent_color TEXT,
       chat_atmosphere_image_id TEXT,
       chat_atmosphere_generated_on TEXT,
       updated_at TEXT NOT NULL

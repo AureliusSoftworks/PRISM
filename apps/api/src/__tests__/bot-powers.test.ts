@@ -466,11 +466,15 @@ test("Identity Crisis Ian deterministically compiles bounded bot-only identity m
   ]);
   assert.match(
     result.powers[0]?.compiled?.selfCue ?? "",
-    /public persona.*face.*voice.*active public Powers/iu,
+    /public diegetic name.*persona.*face.*authored ink.*spoken voice identity.*lower glyph.*active public Powers/iu,
   );
   assert.match(
     result.powers[0]?.compiled?.selfCue ?? "",
-    /diegetic name.*never your bot ID.*role.*seat/iu,
+    /Keep your own saturated color.*client-side voice effect.*communication-style chassis.*frame finish/iu,
+  );
+  assert.match(
+    result.powers[0]?.compiled?.selfCue ?? "",
+    /diegetic name.*never (?:change )?your bot ID.*role.*seat/iu,
   );
   assert.match(result.powers[0]?.compiled?.selfCue ?? "", /player.*never/iu);
   assert.match(result.powers[0]?.compiled?.observerCue ?? "", /irritated/iu);

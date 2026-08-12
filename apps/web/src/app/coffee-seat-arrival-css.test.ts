@@ -1549,17 +1549,12 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(pageSource, /function botScreenMaterialSeedForBot/);
     assert.match(
       pageSource,
-      /return "bot-screen-material:shared-curved-glass";/,
+      /bot-screen-material:export:[\s\S]*bot-screen-material:id:/,
     );
     assert.match(pageSource, /function botScreenMaterialStyle/);
-    assert.match(pageSource, /"--bot-face-crt-grime-opacity"/);
     assert.match(
       pageSource,
-      /\["--bot-face-crt-grime-opacity" as string\]: "0\.24"/,
-    );
-    assert.doesNotMatch(
-      pageSource,
-      /stableUnitValue\(`\$\{normalizedSeed\}:grime:/,
+      /\["--bot-screen-glass-residue-image" as string\]/,
     );
     assert.match(pageSource, /function botFrameMaterialSeedForBot/);
     assert.match(pageSource, /normalizeImportedBotHash\(bot\?\.export_hash\)/);

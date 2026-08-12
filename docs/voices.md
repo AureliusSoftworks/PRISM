@@ -25,11 +25,11 @@ Voice settings list the engines available in each privacy lane:
   bundled with installed builds and generated entirely on the device. The
   Kokoro 82M q8 model is loaded only from the packaged model directory; a
   missing model never triggers a network download.
-- **Voice+** is the pinned Chatterbox Turbo ONNX Q4 candidate. Production
-  packaging is fail-closed until the exact redistributed asset, provenance
+- **Voice+** is the pinned Chatterbox Turbo ONNX Q4 candidate. It remains a
+  development-only opt-in until the exact redistributed asset, provenance
   watermark, original PRISM reference deck, and macOS arm64/x64, Windows x64,
-  and Linux x64 qualification records pass. A forced Voice+ hard failure is
-  visible and recovers through Instant before playback begins.
+  and Linux x64 qualification records pass. Steam ships Instant by default; a
+  forced Voice+ request visibly recovers through Instant before playback begins.
 - **Operating-system voices** are an optional account setting. When enabled,
   installed English voices from macOS or Windows join bot voice menus. Turning
   the catalog setting off hides new operating-system choices without deleting

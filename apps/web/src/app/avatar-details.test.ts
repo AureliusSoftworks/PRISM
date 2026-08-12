@@ -955,8 +955,8 @@ describe("avatar details deterministic raster", () => {
       eyeOffsetX: 0,
       eyeOffsetY: 0,
       mouthScale: 0.7,
-      mouthOffsetX: 0.04,
-      mouthOffsetY: 0.22,
+      mouthOffsetX: 0,
+      mouthOffsetY: 0,
       mouthRotationDeg: 0,
     });
     assert.deepEqual(resolveAvatarDetailStampAnchor(glasses), {

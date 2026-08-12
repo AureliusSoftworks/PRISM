@@ -47,6 +47,7 @@ describe("Coffee face glyph optical offsets", () => {
         glyph: "¦",
         voicePreset: "warm",
         rotateDeg: 0,
+        blinkGlyph: "¦",
       })?.id,
       "warm-broken-bar",
     );
@@ -58,6 +59,37 @@ describe("Coffee face glyph optical offsets", () => {
         rotateDeg: 0,
       }),
       null,
+    );
+  });
+
+  it("nudges single-eye closed blink glyphs toward screen-right", () => {
+    assert.deepEqual(
+      coffeeSeatGlyphOpticalOffset({
+        part: "eyes",
+        glyph: "¦",
+        voicePreset: "neutral",
+        rotateDeg: 0,
+        blinkGlyph: "¦",
+      }),
+      {
+        id: "single-eye-blink",
+        x: 0.035,
+        y: 0,
+      },
+    );
+    assert.deepEqual(
+      coffeeSeatGlyphOpticalOffset({
+        part: "eyes",
+        glyph: "|",
+        voicePreset: "concise",
+        rotateDeg: 45,
+        blinkGlyph: "|",
+      }),
+      {
+        id: "single-eye-blink",
+        x: 0.025,
+        y: -0.025,
+      },
     );
   });
 
@@ -91,6 +123,7 @@ describe("Coffee face glyph optical offsets", () => {
           voicePreset,
           rotateDeg: 90,
           pairedEye: true,
+          blinkGlyph: "¦",
         }),
         { id: "paired-eye", x: 0, y: 0.13 },
       );

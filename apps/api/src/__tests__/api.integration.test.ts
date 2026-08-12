@@ -2184,6 +2184,127 @@ describe("API request integration", () => {
     );
   });
 
+  it("records direct Signal advances in usage and developer telemetry", async () => {
+    const client = createClient();
+    const registration = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "signal-usage-route@example.com",
+        password: "signal-usage-route-password",
+      }),
+    );
+    assert.equal(registration.status, 201);
+    const userId = String((await json(registration)).user.id);
+    const createdAt = "2026-08-12T00:00:00.000Z";
+    const insertBot = db.prepare(
+      `INSERT INTO bots
+         (id, user_id, name, system_prompt, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    insertBot.run(
+      "signal-usage-route-host",
+      userId,
+      "Signal Usage Host",
+      "A concise host for a telemetry test.",
+      createdAt,
+      createdAt,
+    );
+    insertBot.run(
+      "signal-usage-route-guest",
+      userId,
+      "Signal Usage Guest",
+      "A concise guest for a telemetry test.",
+      createdAt,
+      createdAt,
+    );
+    const showResponse = await client.request(
+      "/api/botcast/shows",
+      jsonInit({ hostBotId: "signal-usage-route-host" }),
+    );
+    const showPayload = await json(showResponse);
+    assert.equal(showResponse.status, 201, JSON.stringify(showPayload));
+    const showId = String(showPayload.show.id);
+    const episodeResponse = await client.request(
+      `/api/botcast/shows/${encodeURIComponent(showId)}/episodes`,
+      jsonInit({
+        guestBotId: "signal-usage-route-guest",
+        topic: "Telemetry should survive a direct Signal advance.",
+        preferredProvider: "local",
+        responseMode: "local",
+      }),
+    );
+    const episodePayload = await json(episodeResponse);
+    assert.equal(episodeResponse.status, 201, JSON.stringify(episodePayload));
+    const episodeId = String(episodePayload.episode.id);
+
+    const originalGenerateResponse = deterministicProvider.generateResponse;
+    deterministicProvider.generateResponse = async (messages, options) => {
+      const reply = await originalGenerateResponse.call(
+        deterministicProvider,
+        messages,
+        options,
+      );
+      recordTextUsage({
+        provider: "local",
+        model: options?.model ?? "deterministic-test-model",
+        purpose: "botcast_turn",
+        inputTokens: null,
+        outputTokens: null,
+        totalTokens: null,
+        tokenCountSource: "unavailable",
+        developer: {
+          request: { messages },
+          parsedOutput: reply,
+          streaming: false,
+        },
+      });
+      return reply;
+    };
+
+    try {
+      const advanceResponse = await client.request(
+        `/api/botcast/episodes/${encodeURIComponent(episodeId)}/advance`,
+        jsonInit({}),
+      );
+      const advancePayload = await json(advanceResponse);
+      assert.equal(advanceResponse.status, 200, JSON.stringify(advancePayload));
+
+      const usageRows = db
+        .prepare(
+          `SELECT conversation_id, bot_id, purpose, surface
+             FROM usage_events
+            WHERE user_id = ? AND purpose = 'botcast_turn'`,
+        )
+        .all(userId) as Array<{
+        conversation_id: string | null;
+        bot_id: string | null;
+        purpose: string;
+        surface: string;
+      }>;
+      assert.ok(usageRows.length > 0);
+      assert.ok(usageRows.every((row) => row.surface === "signal"));
+      assert.ok(usageRows.every((row) => row.conversation_id === null));
+      assert.ok(usageRows.every((row) => row.bot_id === null));
+
+      const developerRows = db
+        .prepare(
+          `SELECT conversation_id, bot_id, purpose
+             FROM developer_transcript_events
+            WHERE user_id = ? AND purpose = 'botcast_turn'`,
+        )
+        .all(userId) as Array<{
+        conversation_id: string | null;
+        bot_id: string | null;
+        purpose: string;
+      }>;
+      assert.ok(developerRows.length > 0);
+      assert.ok(developerRows.every((row) => row.conversation_id === null));
+      assert.ok(developerRows.every((row) => row.bot_id === null));
+    } finally {
+      deterministicProvider.generateResponse = originalGenerateResponse;
+    }
+  });
+
   it("locks Signal episodes to the selected online provider without weakening LOCAL mode", async () => {
     const client = createClient();
     const registration = await client.request(

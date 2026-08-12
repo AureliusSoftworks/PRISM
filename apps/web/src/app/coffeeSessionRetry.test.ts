@@ -13,6 +13,7 @@ describe("Coffee session retry setup", () => {
         coffeeSettings: {
           responseLength: "brief",
           crossTalk: "chatty",
+          experienceMode: "serve",
         },
         coffeeSessionDurationMinutes: 12,
         coffeeTopic: "  What makes a ritual last?  ",
@@ -23,6 +24,7 @@ describe("Coffee session retry setup", () => {
     assert.equal(draft.durationMinutes, 12);
     assert.equal(draft.settings.responseLength, "brief");
     assert.equal(draft.settings.crossTalk, "chatty");
+    assert.equal(draft.settings.experienceMode, "serve");
     assert.equal(draft.topic, "What makes a ritual last?");
     assert.deepEqual(draft.missingBotIds, []);
   });

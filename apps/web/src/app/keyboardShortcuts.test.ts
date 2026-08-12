@@ -19,6 +19,7 @@ const event = (
     ctrlKey: boolean;
     metaKey: boolean;
     shiftKey: boolean;
+    target: EventTarget | null;
   }> = {},
 ) => ({
   code,
@@ -29,20 +30,25 @@ const event = (
   ...modifiers,
 });
 
-test("provides the Control-root navbar shortcut defaults", () => {
+test("provides the one-handed Option command defaults on Apple platforms", () => {
   assert.deepEqual(defaultPrismKeyboardShortcuts("MacIntel"), {
+    prism: "Meta+Alt",
+    providerMode: "Shift+Tab",
+    modelPicker: "Alt+ArrowLeft",
+    effortPicker: "Alt+ArrowDown",
+    turbo: "Alt+ArrowUp",
+    speechType: "Alt+ArrowRight",
+    effortHud: "Meta+Shift+KeyE",
+  });
+  assert.deepEqual(defaultPrismKeyboardShortcuts("Win32"), {
     prism: "Control+Alt",
     providerMode: "Shift+Tab",
     modelPicker: "Control+ArrowLeft",
     effortPicker: "Control+ArrowDown",
     turbo: "Control+ArrowUp",
     speechType: "Control+ArrowRight",
-    effortHud: "Meta+Shift+KeyE",
+    effortHud: "Control+Shift+KeyE",
   });
-  assert.equal(
-    defaultPrismKeyboardShortcuts("Win32").effortHud,
-    "Control+Shift+KeyE",
-  );
 });
 
 test("captures canonical physical-key shortcuts with an exact modifier set", () => {
@@ -63,6 +69,16 @@ test("captures canonical physical-key shortcuts with an exact modifier set", () 
       shiftKey: false,
     }),
     "Control+Alt",
+  );
+  assert.equal(
+    keyboardShortcutFromEvent({
+      code: "MetaLeft",
+      altKey: true,
+      ctrlKey: false,
+      metaKey: true,
+      shiftKey: false,
+    }),
+    "Meta+Alt",
   );
   assert.equal(
     keyboardShortcutFromEvent(event("ArrowUp", { ctrlKey: true })),
@@ -106,6 +122,14 @@ test("formats shortcuts for Apple and non-Apple keyboards", () => {
   assert.equal(
     keyboardShortcutDisplay("Control+ArrowDown", "MacIntel"),
     "⌃ Down",
+  );
+  assert.equal(
+    keyboardShortcutDisplay("Alt+ArrowDown", "MacIntel"),
+    "⌥ Down",
+  );
+  assert.equal(
+    keyboardShortcutDisplay("Meta+Alt", "MacIntel"),
+    "⌘ ⌥",
   );
   assert.equal(
     keyboardShortcutDisplay("Control+Alt", "MacIntel"),
@@ -202,5 +226,54 @@ test("detects conflicts and stores account-scoped preferences", () => {
   assert.deepEqual(
     readPrismKeyboardShortcuts(storage, "legacy-routing", "Win32"),
     preferences,
+  );
+
+  const retiredAppleDefaults = {
+    prism: "Control+Alt",
+    providerMode: "Shift+Tab",
+    modelPicker: "Control+ArrowLeft",
+    effortPicker: "Control+ArrowDown",
+    turbo: "Control+ArrowUp",
+    speechType: "Control+ArrowRight",
+    effortHud: "Meta+Shift+KeyE",
+  };
+  values.set(
+    prismKeyboardShortcutsStorageKey("retired-apple-defaults"),
+    JSON.stringify(retiredAppleDefaults),
+  );
+  assert.deepEqual(
+    readPrismKeyboardShortcuts(storage, "retired-apple-defaults", "MacIntel"),
+    defaultPrismKeyboardShortcuts("MacIntel"),
+  );
+});
+
+test("leaves Option-arrow text editing intact", () => {
+  const editableTarget = {
+    closest: () => ({ tagName: "TEXTAREA" }),
+  } as unknown as EventTarget;
+  assert.equal(
+    keyboardShortcutMatchesEvent(
+      "Alt+ArrowLeft",
+      event("ArrowLeft", { altKey: true, target: editableTarget }),
+    ),
+    false,
+  );
+  assert.equal(
+    keyboardShortcutMatchesEvent(
+      "Alt+ArrowLeft",
+      event("ArrowLeft", { altKey: true, target: null }),
+    ),
+    true,
+  );
+  assert.equal(
+    keyboardShortcutMatchesEvent(
+      "Meta+Alt",
+      event("MetaLeft", {
+        altKey: true,
+        metaKey: true,
+        target: editableTarget,
+      }),
+    ),
+    true,
   );
 });

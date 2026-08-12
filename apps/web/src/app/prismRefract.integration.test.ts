@@ -322,6 +322,10 @@ describe("Prism Refract integration", () => {
       companionSource,
       /wieldSuppressedClickRef\.current = shiftedRegistration\.element[\s\S]*event\.preventDefault\(\)[\s\S]*event\.stopPropagation\(\)/u,
     );
+    assert.match(
+      companionSource,
+      /requestPrismRefract\(targetId, "wield-click"\)[\s\S]*resetPrismWield\(true, false, \{ skipCursorDock: true \}\)[\s\S]*event\.preventDefault\(\)/u,
+    );
   });
 
   it("keeps active input focused while queued inputs stay inert", () => {

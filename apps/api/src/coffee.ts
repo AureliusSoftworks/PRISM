@@ -192,6 +192,7 @@ import {
   botPowerResponseIsSilentV1,
   botNaturalAddressAliasesV1,
   botIdentityMirrorFaceV1,
+  botIdentityPresentationGlyphV1,
   botIdentityMirrorHolderPromptV1,
   botIdentityMirrorObserverPromptV1,
   botIdentityMirrorTargetChangesV1,
@@ -442,6 +443,7 @@ export interface CoffeeBotProfile {
   id: string;
   name: string;
   systemPrompt: string;
+  exportHash?: string | null;
   cloneFamilyId?: string | null;
   color: string | null;
   glyph: string | null;
@@ -4579,6 +4581,14 @@ function sanitizeLoadedCoffeeAssistantContent(
   const storedToolPayload = parseStoredAssistantToolPayload(row.tool_payload);
   const exactResponse = storedToolPayload.botPowerExactResponse;
   if (exactResponse === "speech_copy") {
+    // Speech-copy is an authored Power contract: preserve the source bytes in
+    // replay just as they were persisted, including intentional spacing.
+    if (/^\s*(?:assistant|bot|system)(?=$|\s|[:：\-–—[{])/iu.test(row.content)) {
+      return normalizeCoffeeVisibleActionFormatting(
+        stripCoffeeChatRoleFraming(row.content),
+        row.bot_name ?? "Bot",
+      ) || "...";
+    }
     return row.content || "...";
   }
   if (exactResponse !== undefined) {
@@ -6557,6 +6567,7 @@ type CoffeeBotProfileRow = {
   id: string;
   name: string | null;
   system_prompt: string | null;
+  export_hash: string | null;
   clone_family_id: string | null;
   color: string | null;
   glyph: string | null;
@@ -6610,6 +6621,7 @@ function mapCoffeeBotProfileRow(row: CoffeeBotProfileRow): CoffeeBotProfile {
     id: row.id,
     name: typeof row.name === "string" && row.name.trim().length > 0 ? row.name.trim() : "Unnamed bot",
     systemPrompt: typeof row.system_prompt === "string" ? row.system_prompt : "",
+    exportHash: row.export_hash ?? null,
     cloneFamilyId: row.clone_family_id ?? null,
     color: row.color ?? null,
     glyph: row.glyph ?? null,
@@ -6691,7 +6703,7 @@ function loadCoffeeGroupProfileRows(
     botColumns.has(columnName) ? columnName : `NULL AS ${columnName}`;
   const rows = db
     .prepare(
-      `SELECT id, name, system_prompt,
+      `SELECT id, name, system_prompt, ${selectOptionalBotColumn("export_hash")},
               ${selectOptionalBotColumn("clone_family_id")}, color, glyph,
               ${selectOptionalBotColumn("face_eyes_font")},
               ${selectOptionalBotColumn("face_eye_character")},
@@ -12932,7 +12944,22 @@ export function buildSpeakerPrompt(args: {
   const moodDrainTurnActive = /\bCoffee Power drag:/u.test(
     coffeePowersPrompt ?? "",
   );
-  const promptHistory = coffeeBotPromptHistory(history);
+  const promptHistory = coffeeBotPromptHistory(history).map((message) => {
+    if (
+      message.role !== "assistant" ||
+      message.botId === speaker.id ||
+      message.coffeeAudienceBotIds === null ||
+      message.coffeeAudienceBotIds === undefined ||
+      message.coffeeAudienceBotIds.length > 0
+    ) {
+      return message;
+    }
+    // Keep the privacy boundary intact even if an upstream projection misses a row.
+    return {
+      ...message,
+      content: "*[Their voice is too faint to make out.]*",
+    };
+  });
   const { tableReplyMaxChars } = coffeeReplyLengthCaps(settings);
   const peerNameFor = (bot: Pick<CoffeeBotProfile, "id" | "name">): string =>
     peerAddressByBotId?.get(bot.id)?.trim() || bot.name;
@@ -12970,6 +12997,13 @@ export function buildSpeakerPrompt(args: {
         420
       )
     : "";
+  const autonomousUserMessage =
+    turnKind === "autonomous" &&
+      latestPeerMessage &&
+      latestPeerMessage.coffeeAudienceBotIds?.length === 0 &&
+      latestPeerSpeech
+      ? latestPeerSpeech
+      : userMessage;
   const latestPeerHandoffLines = latestPeerMessage
     ? [
         "",
@@ -13349,7 +13383,7 @@ export function buildSpeakerPrompt(args: {
           role: "user",
           content: latestPeerMessage
             ? [
-                `Latest table moment: ${userMessage}`,
+                `Latest table moment: ${autonomousUserMessage}`,
                 `${latestPeerName} just spoke at the table: ${latestPeerSpeech}`,
                 "Continue that exchange by answering one concrete part of the line.",
                 ...(moodDrainTurnActive
@@ -13358,7 +13392,7 @@ export function buildSpeakerPrompt(args: {
                 `${speaker.name}, say your next short table line now.`,
               ].join("\n")
             : [
-                `Latest table moment: ${userMessage}`,
+                `Latest table moment: ${autonomousUserMessage}`,
                 ...(moodDrainTurnActive
                   ? ["Required current-state beat: open by showing your own reduced momentum in first person or one visible *stage action*, not another character's mood."]
                   : []),
@@ -13790,24 +13824,37 @@ export function coffeeMessagesVisibleInExport<
     role: string;
     content: string;
     socialSilence?: SocialSilenceMarkerV1;
+    coffeeInterruption?: unknown;
   },
 >(
   messages: readonly T[]
 ): T[] {
-  return messages.filter(
-    (message) =>
-      !(message.role === "system" && message.content.trim().length === 0) &&
-      !(
-        message.role === "assistant" &&
-        coffeeReplyIsPunctuationOnly(message.content) &&
-        !botPowerResponseIsSilentV1(message.content) &&
-        !socialSilenceMessageIsMarkedV1({
-          content: message.content,
-          marker: message.socialSilence,
-          mode: "coffee",
-        })
-      )
-  );
+  return messages.filter((message) => {
+    if (message.role === "system" && message.content.trim().length === 0) {
+      return false;
+    }
+    if (message.role !== "assistant") return true;
+    if (message.coffeeInterruption !== undefined) return false;
+    if (
+      message.content.trim() === "..." &&
+      !socialSilenceMessageIsMarkedV1({
+        content: message.content,
+        marker: message.socialSilence,
+        mode: "coffee",
+      })
+    ) {
+      return false;
+    }
+    return !(
+      coffeeReplyIsPunctuationOnly(message.content) &&
+      !botPowerResponseIsSilentV1(message.content) &&
+      !socialSilenceMessageIsMarkedV1({
+        content: message.content,
+        marker: message.socialSilence,
+        mode: "coffee",
+      })
+    );
+  });
 }
 
 /**
@@ -16294,12 +16341,16 @@ function pickSpeakerModel(
   _speaker: CoffeeBotProfile,
   _effectiveProvider: ProviderName,
   sessionOverride?: string | null,
-  _legacyAccountPreference?: string | null
+  accountPreference?: string | null
 ): string | undefined {
-  const trimmed =
+  const sessionModel =
     typeof sessionOverride === "string" ? sessionOverride.trim() : "";
-  if (trimmed.length > 0 && trimmed.toLowerCase() !== "auto") {
-    return trimmed;
+  if (sessionModel.length > 0 && sessionModel.toLowerCase() !== "auto") {
+    return sessionModel;
+  }
+  const accountModel = typeof accountPreference === "string" ? accountPreference.trim() : "";
+  if (accountModel.length > 0 && accountModel.toLowerCase() !== "auto") {
+    return accountModel;
   }
   return undefined;
 }
@@ -17813,15 +17864,29 @@ async function generateCoffeeBotReply(args: {
       ) &&
       latestTableMessageBeforePerception.content !== "...",
   );
+  // Autonomous callers describe the latest assistant line before we know who
+  // will speak. Replace that raw handoff when the selected speaker could not
+  // hear it; otherwise a Quiet/hidden line can bypass the filtered history.
+  const autonomousFocusIncludesUnperceivedLatestAssistant = Boolean(
+    turnKind === "autonomous" &&
+      latestAssistantBeforeTurn &&
+      tableFocus.includes(latestAssistantBeforeTurn.content) &&
+      perceivedLatestAssistantBeforeTurn?.content !== latestAssistantBeforeTurn.content,
+  );
+  const safeAutonomousTableFocus = autonomousFocusIncludesUnperceivedLatestAssistant
+    ? perceivedLatestAssistantBeforeTurn
+      ? `The latest visible table moment was: ${perceivedLatestAssistantBeforeTurn.content}`
+      : "Respond only to what you can actually perceive from the latest table moment."
+    : tableFocus;
   const speakerTableFocus = speakerEternallyIntroduces && sessionKickoff
     ? "You have just sat down at a Coffee table. No one has spoken to you yet, and you do not know what the gathering is about. Offer one brief first-contact opening without naming or inventing a topic."
     : speakerMissedLatestTableMoment
       ? `You have just settled at the table. Offer a fresh, in-character opening line from what you can see now; do not refer to earlier dialogue you did not hear.`
       : speakerSawLatestTableMomentWithoutHearingIt &&
           turnKind === "autonomous" &&
-          !tableFocus.startsWith("The user directly addressed")
+          !safeAutonomousTableFocus.startsWith("The user directly addressed")
         ? "The latest participant visibly spoke, but you heard no words. Continue from visible action only; do not infer or answer their hidden speech."
-      : tableFocus;
+      : safeAutonomousTableFocus;
   const addressedInsultTargetName =
     turnKind === "user"
       ? settings.userDisplayName?.trim() || "you"
@@ -19031,6 +19096,7 @@ async function generateCoffeeBotReply(args: {
             speaker.authoredAudioVoiceProfile,
             speaker.audioVoiceProfileOverride,
           ),
+          targetGlyph: botIdentityPresentationGlyphV1(speaker.glyph),
           sourceMessageId: assistantMessageId,
           occurredAt: assistantNow,
         })

@@ -25,16 +25,15 @@ function collapseWhitespace(value: string): string {
 }
 
 describe("relationship-depth page integration", () => {
-  it("routes the Home picker without invoking the message-generating guest handoff", () => {
-    const directHomePicker = sourceSlice(
+  it("uses an immediate empty-Home selection and a guest handoff once the Home is established", () => {
+    const headerBotPicker = sourceSlice(
       "function handleZenPersonaSelectionChange",
       "function handleZenMentionPersonaSelection",
     );
-    assert.match(directHomePicker, /visitZenHome\(nextBotId\)/);
-    assert.doesNotMatch(
-      directHomePicker,
-      /commitZenPersonaTransition|sendMessage|personaTransition/,
-    );
+    assert.match(headerBotPicker, /zenSessionHasNotStarted\(\)/);
+    assert.match(headerBotPicker, /armFreshZenPersona\(nextBotId\)/);
+    assert.match(headerBotPicker, /commitZenPersonaTransition\(nextBotId\)/);
+    assert.doesNotMatch(headerBotPicker, /visitZenHome\(nextBotId\)/);
 
     const guestInvitation = sourceSlice(
       "function handleZenMentionPersonaSelection",
@@ -43,20 +42,20 @@ describe("relationship-depth page integration", () => {
     assert.match(guestInvitation, /commitZenPersonaTransition\(botId\)/);
   });
 
-  it("labels the direct picker as Home navigation and keeps guest controls out of it", () => {
+  it("labels the header picker as an invitation and restores its guest handoff footer", () => {
     const picker = sourceSlice(
       "const renderHeaderModelPicker = (",
       "const renderImagesPanelModelPicker",
     );
-    assert.match(picker, /"Visit a Zen Home"/);
-    assert.match(picker, /ariaLabel="Zen Home"/);
-    assert.doesNotMatch(
+    assert.match(picker, /"Invite a Facet into this Home"/);
+    assert.match(picker, /ariaLabel="Invite a Facet into this Home"/);
+    assert.match(
       picker,
       /menuFooter=\{renderZenPersonaTransitionChoiceControl\(\)\}/,
     );
   });
 
-  it("presents Random, New, Intro, and Off only as a Zen guest-invitation setting", () => {
+  it("presents Random, New, Intro, and Off in both the picker and Zen guest-invitation settings", () => {
     const control = sourceSlice(
       "function ZenPersonaTransitionChoiceControl",
       "function normalizeZenPersonaTransitionChoice",

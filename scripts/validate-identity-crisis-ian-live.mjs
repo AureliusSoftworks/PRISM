@@ -10,6 +10,7 @@ import {
   createBotFalseNameStateV1,
   createBotIdentityMirrorStateV1,
   parseStoredBotPowersV1,
+  resolveBotIdentityMirrorVoiceV1,
   rewriteBotFalseNameResponseV1,
 } from "@localai/shared";
 import { parsePrismBotArchive } from "../apps/web/src/app/botArchive.ts";
@@ -58,7 +59,15 @@ const state = createBotIdentityMirrorStateV1({
       paintMaskBase64: null,
     },
   },
-  targetVoice: { v: 2, enabled: true, baseVoiceId: "voice-4", pitch: 0.18 },
+  targetVoice: {
+    v: 2,
+    enabled: true,
+    baseVoiceId: "voice-4",
+    pitch: 0.18,
+    elevenLabsEffect: "robot",
+    voiceEffectExplicit: true,
+  },
+  targetGlyph: "lucideCompass",
   sourceMessageId: "mara-addresses-ian",
   occurredAt,
 });
@@ -190,6 +199,11 @@ const coffeePrompt = buildSpeakerPrompt({
 });
 
 const signalState = { ...state, surface: "signal" };
+const mirrorPlaybackVoice = resolveBotIdentityMirrorVoiceV1(
+  state,
+  ianExport.authoredAudioVoiceProfile,
+  null,
+);
 const signalEpisode = {
   id: "identity-live-signal",
   topic: "Navigation under pressure",
@@ -285,7 +299,7 @@ const PASS_CRITERIA = Object.freeze([
   "The response demonstrates Mara's public cartographer persona.",
   "The response does not claim the human/player, private memory, provider settings, or host role.",
   "The production-composed prompt retains Ian's Coffee participant or Signal host mechanical boundary.",
-  "The persisted public snapshot carries Mara's normalized Avatar Details ink; runtime rendering, not the model, enforces that visual handoff.",
+  "The persisted public snapshot carries Mara's resolved voice identity, authored Avatar Details ink, and lower glyph; runtime playback retains Ian's voice effect, and material presentation retains Ian's saturated color, communication chassis, and frame finish.",
   "Signal's persisted closing reset restores Ian's authored host persona before the sign-off prompt and suppresses the copied Mara identity.",
 ]);
 console.error(JSON.stringify({ phase: "predeclared_pass_criteria", criteria: PASS_CRITERIA }));
@@ -418,6 +432,15 @@ const result = {
       state.targetAvatarDetails?.screen.stamps.some(
         (stamp) => stamp.id === "diagonal-scar",
       ) === true,
+    targetVoiceIdentitySnapshotted: state.targetVoice.baseVoiceId === "voice-4",
+    holderVoiceEffectRetained:
+      mirrorPlaybackVoice.elevenLabsEffect ===
+      ianExport.authoredAudioVoiceProfile?.elevenLabsEffect,
+    targetGlyphSnapshotted: state.targetGlyph === "lucideCompass",
+    holderMaterialFieldsNotSnapshotted:
+      !("targetColor" in state) &&
+      !("targetVoicePreset" in state) &&
+      !("targetFrameMaterialSeed" in state),
     signalHostMirrorClearedForClosing:
       !botcastIdentityMirrorStatesV1(signalClosingEpisode.events).has("ian"),
   },
@@ -443,6 +466,10 @@ const result = {
 };
 result.pass =
   result.runtimeInvariant.targetInkSnapshotted &&
+  result.runtimeInvariant.targetVoiceIdentitySnapshotted &&
+  result.runtimeInvariant.holderVoiceEffectRetained &&
+  result.runtimeInvariant.targetGlyphSnapshotted &&
+  result.runtimeInvariant.holderMaterialFieldsNotSnapshotted &&
   result.runtimeInvariant.signalHostMirrorClearedForClosing &&
   result.coffee.judgment.pass &&
   result.signal.judgment.pass &&

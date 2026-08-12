@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   BOT_IDENTITY_MIRROR_TRANSITION_MS,
+  applyBotIdentityMirrorHolderVoiceEffectV1,
   applyBotIdentityMirrorResponseV1,
   botDirectAddressIndexV1,
   botDirectlyAddressesBotV1,
@@ -44,11 +45,45 @@ function identityState() {
     targetPersonaPrompt: "A terse lunar cartographer who speaks in bearings.",
     targetFace: { faceEyeCharacter: "◉", faceMouthCharacter: "_" },
     targetAvatarDetails,
-    targetVoice: { v: 2, enabled: true, baseVoiceId: "voice-4", pitch: 0.2 },
+    targetVoice: {
+      v: 2,
+      enabled: true,
+      baseVoiceId: "voice-4",
+      pitch: 0.2,
+      elevenLabsEffect: "robot",
+      voiceEffectExplicit: true,
+    },
+    targetGlyph: "lucideMoonStar",
     sourceMessageId: "message-1",
     occurredAt,
   });
 }
+
+test("identity mirror snapshots borrowed identity but ignores legacy target materials", () => {
+  const state = normalizeBotIdentityMirrorStateV1(identityState());
+  assert.ok(state);
+  assert.equal(state.targetVoice.baseVoiceId, "voice-4");
+  assert.equal(state.targetVoice.elevenLabsEffect, "robot");
+  assert.equal(state.targetGlyph, "lucideMoonStar");
+  assert.deepEqual(state.targetAvatarDetails, targetAvatarDetails);
+
+  const normalizedLegacy = normalizeBotIdentityMirrorStateV1({
+    ...state,
+    targetColor: "#00ffcc",
+    targetVoicePreset: "reflective",
+    targetFrameMaterialSeed:
+      "bot-frame-material:export:0123456789abcdef0123456789abcdef",
+  });
+  assert.ok(normalizedLegacy);
+  assert.equal("targetColor" in normalizedLegacy, false);
+  assert.equal("targetVoicePreset" in normalizedLegacy, false);
+  assert.equal("targetFrameMaterialSeed" in normalizedLegacy, false);
+  assert.equal(
+    normalizedLegacy.targetGlyph,
+    "lucideMoonStar",
+    "legacy mirror events still borrow the target's lower glyph",
+  );
+});
 
 test("identity mirror accepts only explicit direct bot address syntax", () => {
   assert.deepEqual(botNaturalAddressAliasesV1("Identity Crisis Ian"), [
@@ -240,13 +275,37 @@ test("identity mirror snapshot stays public while its prompt permits borrowed Po
   assert.equal(botIdentityMirrorTargetChangesV1(state, "mara"), false);
   assert.equal(botIdentityMirrorTargetChangesV1(state, "jo"), true);
   assert.equal(botIdentityMirrorTargetChangesV1(null, "mara"), true);
+  const mirroredVoice = resolveBotIdentityMirrorVoiceV1(
+    state,
+    {
+      v: 2,
+      enabled: true,
+      baseVoiceId: "voice-2",
+      pitch: -0.2,
+      elevenLabsEffect: "echo",
+      voiceEffectExplicit: true,
+    },
+    null,
+  );
+  assert.equal(mirroredVoice.baseVoiceId, "voice-4");
+  assert.equal(mirroredVoice.pitch, 0.2);
   assert.equal(
-    resolveBotIdentityMirrorVoiceV1(
-      state,
-      { v: 2, enabled: true, baseVoiceId: "voice-2", pitch: -0.2 },
-      null,
-    ).baseVoiceId,
-    "voice-4",
+    mirroredVoice.elevenLabsEffect,
+    "echo",
+    "target voice identity must play through the holder's retained effect",
+  );
+  assert.equal(
+    applyBotIdentityMirrorHolderVoiceEffectV1(
+      state.targetVoice,
+      {
+        v: 2,
+        enabled: true,
+        baseVoiceId: "voice-2",
+        elevenLabsEffect: "deep-space",
+        voiceEffectExplicit: true,
+      },
+    ).elevenLabsEffect,
+    "deep-space",
   );
   assert.equal(
     resolveBotIdentityMirrorVoiceV1(

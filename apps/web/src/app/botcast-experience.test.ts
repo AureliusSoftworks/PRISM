@@ -37,6 +37,27 @@ const pageCss = readFileSync(
 );
 
 describe("Signal experience shell", () => {
+  it("resolves transient session receipts once when a Signal episode ends", () => {
+    assert.match(source, /onSessionEnded\?: \(sessionId: string\) => void/u);
+    assert.match(
+      source,
+      /if \(liveSessionActive\) \{[\s\S]{0,120}presentedSessionReceiptIdRef\.current = episode\.id/u,
+    );
+    assert.match(
+      source,
+      /resolvedSessionReceiptIdsRef\.current\.has\(endedSessionId\)/u,
+    );
+    assert.match(source, /onSessionEndedRef\.current\?\.\(endedSessionId\)/u);
+    assert.match(
+      source,
+      /return \(\) => \{[\s\S]{0,120}presentedSessionReceiptIdRef\.current/u,
+    );
+    assert.doesNotMatch(
+      source,
+      /avatarEmbodiment\} aria-hidden="true"/u,
+    );
+  });
+
   it("defaults generated bot lighting to Hard Light in both themes", () => {
     assert.match(
       source,
@@ -178,7 +199,7 @@ describe("Signal experience shell", () => {
     assert.doesNotMatch(source, /window\.addEventListener\("keyup", onKeyUp\)/u);
   });
 
-  it("cuts on ready speech and only animates a visible thinking push", () => {
+  it("holds voice preparation Wide and hands directly to ready speech", () => {
     assert.match(
       source,
       /const liveBotThinking = Boolean\([\s\S]{0,220}busy[\s\S]{0,100}speakingMessageId === null/u,
@@ -209,11 +230,11 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /SIGNAL_LIVE_CAMERA_VOICE_WAIT_THRESHOLD_MS = 240/u,
+      /const liveBotVoicePreparationPending = Boolean\([\s\S]{0,220}signalVoicePreparationPending[\s\S]{0,220}liveActiveMessage/u,
     );
-    assert.match(
+    assert.doesNotMatch(
       source,
-      /signalCameraVoiceWaitTimeoutRef\.current = window\.setTimeout\([\s\S]{0,220}setSignalCameraVoiceWaitMessageId\(pendingBotMessage\)[\s\S]{0,100}SIGNAL_LIVE_CAMERA_VOICE_WAIT_THRESHOLD_MS/u,
+      /SIGNAL_LIVE_CAMERA_VOICE_WAIT_THRESHOLD_MS|signalCameraVoiceWaitTimeoutRef|signalCameraVoiceWaitMessageId/u,
     );
     assert.doesNotMatch(
       source.slice(
@@ -252,14 +273,10 @@ describe("Signal experience shell", () => {
     assert.match(source, /signalEphemeralSpeakingBotIds\.has\(roleBotId\)/u);
     assert.doesNotMatch(source, /beginSignalInterruptCompactHold/u);
     assert.match(source, /signalListenerReactionCameraShot\(\{/u);
-    assert.match(
-      source,
-      /cameraCutEligible[\s\S]{0,120}liveCameraMode === "auto"/u,
-    );
-    assert.match(
-      source,
-      /listenerReactionAtMs \+[\s\S]{0,120}interjectionAttempt \? 1_600 : 1_200/u,
-    );
+    assert.match(source, /liveCameraMode === "auto"/u);
+    assert.match(source, /ephemeralSpeechDurationMs:/u);
+    assert.match(source, /ephemeralSpeechDurationMs:/u);
+    assert.doesNotMatch(source, /timedReactionShot:/u);
     assert.match(source, /data-listener-reaction=/u);
     assert.match(css, /\.listenerReactionText/u);
     assert.match(css, /prefers-reduced-motion[\s\S]*?data-listener-reaction/u);
@@ -1328,7 +1345,10 @@ describe("Signal experience shell", () => {
     assert.match(source, /Signal transmission complete/u);
     assert.match(source, /"Skip outro"/u);
     assert.match(source, /"Return to show"/u);
-    assert.match(source, /copyEpisodeForReview\(episode\)/u);
+    assert.match(
+      source,
+      /onClick=\{\(\) => void copyEpisodeForReview\(episodeOutro\.episode\)\}/u,
+    );
     assert.match(source, /Copy for Signal Review/u);
     assert.match(source, /presentedEpisodeOutroIdsRef/u);
     assert.match(source, /suppressCompletedOutroFallbackRef/u);
@@ -1342,7 +1362,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /bakedEpisode\.status === "completed"[\s\S]{0,180}playEpisodeOutro\(\{[\s\S]{0,120}episode: bakedEpisode/u,
+      /presentationEpisode\.status === "completed"[\s\S]{0,320}playEpisodeOutro\(\{[\s\S]{0,120}episode: presentationEpisode/u,
     );
     assert.match(
       source,
@@ -1355,14 +1375,18 @@ describe("Signal experience shell", () => {
     assert.match(outroSource, /phase: "curtain"/u);
     assert.match(outroSource, /phase: "holding"/u);
     assert.match(outroSource, /phase: "complete"/u);
+    assert.match(outroSource, /episode: args\.episode/u);
     assert.match(source, /SIGNAL_EPISODE_OUTRO_DEAD_AIR_MS = 2_000/u);
     assert.match(
       outroSource,
       /setTimeout\(resolve, SIGNAL_EPISODE_OUTRO_DEAD_AIR_MS\)[\s\S]{0,100}outroRunIdRef\.current !== runId[\s\S]{0,100}setEpisodeOutro\(/u,
     );
     assert.doesNotMatch(outroSource, /setEpisodeOutro\(null\)/u);
-    assert.match(css, /\.episodeOutro\[data-phase="complete"\] > button/u);
-    assert.match(css, /\.episodeOutro > \.episodeReviewCopyButton/u);
+    assert.match(
+      css,
+      /\.episodeOutro\[data-phase="complete"\] \.episodeOutroActions > button/u,
+    );
+    assert.match(css, /\.episodeOutroActions\s*\{[^}]*display:\s*flex/u);
     assert.match(
       source,
       /data-episode-outro=\{episodeOutro \? "true" : undefined\}/u,
@@ -1777,7 +1801,7 @@ describe("Signal experience shell", () => {
   it("keeps explicit crosstalk interruption presentation replay-safe", () => {
     assert.match(
       source,
-      /listenerReactionPlan\.interjectionAttempt \? 1_600 : 1_200/u,
+      /Brief interjections stay audible without creating a 1→2→1 camera/u,
     );
     assert.match(source, /data-interjection-attempt=\{/u);
     assert.match(
@@ -1796,10 +1820,10 @@ describe("Signal experience shell", () => {
       source,
       /if \(interruptionCrosstalkPlayback\) \{[\s\S]{0,80}await interruptionCrosstalkPlayback/u,
     );
-    assert.match(source, /const liveEphemeralSpeakingShot = episode/u);
+    assert.match(source, /const liveEphemeralCameraBotId = episode/u);
     assert.match(
       source,
-      /signalListenerReactionCameraShot\(\{[\s\S]{0,220}cameraCutEligible:[\s\S]{0,120}liveListenerReactionPlan\.cameraCutEligible[\s\S]{0,220}ephemeralSpeakingShot: liveEphemeralSpeakingShot/u,
+      /signalListenerReactionCameraShot\(\{[\s\S]{0,220}cameraCutEligible:[\s\S]{0,120}liveListenerReactionPlan\.cameraCutEligible[\s\S]{0,220}ephemeralSpeakingShot: liveEphemeralSpeakingShot[\s\S]{0,220}ephemeralSpeechDurationMs:/u,
     );
     assert.doesNotMatch(source, /wordCount \* 310/u);
     assert.match(
@@ -1841,7 +1865,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       pageSource,
-      /resolveBotIdentityMirrorVoiceV1\(\s*lifecycles\?\.interruptedBot\?\.identityMirrorState/u,
+      /resolveBotcastBorrowedIdentityVoiceProfile\(\{\s*botSummary: lifecycles\?\.interruptedBot \?\? \{\}/u,
     );
     assert.match(
       pageSource,

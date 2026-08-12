@@ -103,6 +103,10 @@ describe("Settings memory controls", () => {
     assert.match(pageSource, /fetch|api/u);
     assert.match(pageSource, /"\/api\/memory-receipts\?kind=bot_relation"/u);
     assert.match(pageSource, /memory-receipts\/\$\{encodeURIComponent\(receipt\.id\)\}\/read/u);
+    assert.match(
+      pageSource,
+      /memory-receipts\/sessions\/\$\{encodeURIComponent\(normalizedSessionId\)\}\/read/u,
+    );
     assert.match(pageSource, /receipt\.kind !== "bot_relation"/u);
     assert.match(pageSource, /unreadMemoryReceiptBotIds/u);
     assert.match(pageSource, /renderLiveBotMemoryReceiptChip/u);
@@ -118,8 +122,59 @@ describe("Settings memory controls", () => {
       pageStylesSource,
       /\.zenLiveBotPresencePlate > \.liveBotMemoryReceiptChip\s*\{\s*pointer-events: auto/u,
     );
+    assert.match(pageSource, /DEBATE_MEMORY_RECEIPT_BADGE_DURATION_MS = 5_000/u);
+    assert.match(pageSource, /data-transient=\{props\.transient \? "true" : undefined\}/u);
+    assert.match(
+      pageSource,
+      /renderLiveBotMemoryReceiptChip\(\s*liveBot\.id,\s*liveBot\.name,\s*\{ transient: true \},/u,
+    );
+    assert.match(pageSource, /aria-live="polite"/u);
     assert.match(pageSource, /View in Memories/u);
     assert.doesNotMatch(pageSource, /was just addressed/u);
+  });
+
+  it("clears only finished Signal session receipts while preserving Coffee and Debate behavior", () => {
+    assert.match(
+      pageSource,
+      /onSessionEnded=\{\(sessionId\) => \{[\s\S]{0,140}resolveSignalSessionMemoryReceipts\(sessionId\)/u,
+    );
+    assert.match(
+      pageSource,
+      /receipt\.kind === "bot_relation"[\s\S]{0,100}receipt\.conversationId === normalizedSessionId/u,
+    );
+    assert.match(
+      pageSource,
+      /resolvedSignalSessionReceiptIdsRef\.current\.add\(normalizedSessionId\)/u,
+    );
+    assert.match(
+      pageSource,
+      /resolvedSignalSessionReceiptIdsRef\.current\.has\([\s\S]{0,120}receipt\.conversationId/u,
+    );
+    const signalAvatarStart = pageSource.indexOf("data-signal-bot-presence=\"true\"");
+    const signalAvatarEnd = pageSource.indexOf("renderMug={(botSummary", signalAvatarStart);
+    const signalAvatar = pageSource.slice(signalAvatarStart, signalAvatarEnd);
+    assert.match(
+      pageSource,
+      /const signalDashboardAvatar = avatarState\.surface === "dashboard"/u,
+    );
+    assert.doesNotMatch(signalAvatar, /screenMode=/u);
+    assert.match(
+      signalAvatar,
+      /signalDashboardAvatar \? null : \([\s\S]*?<BotPowerBadge[\s\S]*?signalLiveSessionId[\s\S]*?renderLiveBotMemoryReceiptChip\(bot\.id, bot\.name, \{[\s\S]*?sessionId: signalLiveSessionId/u,
+    );
+    assert.doesNotMatch(
+      signalAvatar,
+      /<BotPowerBadge powers=\{bot\.powers\} passive \/>[\s\S]*?signalDashboardAvatar \? null/u,
+    );
+    assert.match(
+      pageSource,
+      /candidate\.conversationId === options\.sessionId/u,
+    );
+    assert.doesNotMatch(pageSource, /activeSignalMemoryReceiptSessionIdRef/u);
+    assert.match(
+      pageSource,
+      /debateBotPresencePlate[\s\S]{0,9000}renderLiveBotMemoryReceiptChip/u,
+    );
   });
 
   it("updates Coffee guidance without changing the talking indicator", () => {

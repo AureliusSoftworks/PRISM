@@ -12,9 +12,15 @@ import {
   parseBotAvatarDetailsV1,
   type BotAvatarDetailsV1,
 } from "./botAvatarDetails.ts";
+import {
+  BOT_IDENTITY_PRESENTATION_TRANSITION_MS,
+  botIdentityPresentationGlyphV1,
+  botIdentityPresentationTransitionActiveV1,
+} from "./botIdentityPresentation.ts";
 
 export const BOT_IDENTITY_MIRROR_VERSION = 1 as const;
-export const BOT_IDENTITY_MIRROR_TRANSITION_MS = 760;
+export const BOT_IDENTITY_MIRROR_TRANSITION_MS =
+  BOT_IDENTITY_PRESENTATION_TRANSITION_MS;
 
 export type BotIdentityMirrorSurfaceV1 = "coffee" | "signal" | "story";
 
@@ -33,6 +39,8 @@ export interface BotIdentityMirrorStateV1 {
   /** Missing only on legacy replay events created before public ink was copied. */
   targetAvatarDetails?: BotAvatarDetailsV1 | null;
   targetVoice: NormalizedBotAudioVoiceProfileV1;
+  /** Missing authored glyph is itself a borrowed public identity choice. */
+  targetGlyph?: string | null;
   sourceMessageId: string;
   occurredAt: string;
 }
@@ -121,16 +129,34 @@ export function resolveBotIdentityMirrorAvatarDetailsV1(
   return state.targetAvatarDetails ?? null;
 }
 
-/** Persisted mirror voice wins; otherwise preserve the holder's resolved voice. */
+/** Borrow the target voice identity while retaining the holder's client effect. */
+export function applyBotIdentityMirrorHolderVoiceEffectV1(
+  targetVoice: unknown,
+  holderVoice: unknown,
+): NormalizedBotAudioVoiceProfileV1 {
+  const target = botIdentityMirrorVoiceV1(targetVoice);
+  const holder = normalizeBotAudioVoiceProfileV1(holderVoice);
+  return normalizeBotAudioVoiceProfileV1({
+    ...target,
+    elevenLabsEffect: holder.elevenLabsEffect,
+    voiceEffectExplicit:
+      holder.voiceEffectExplicit === true ? true : undefined,
+  });
+}
+
+/** Persisted target voice wins, played through the holder's retained effect. */
 export function resolveBotIdentityMirrorVoiceV1(
   state: BotIdentityMirrorStateV1 | null | undefined,
   holderAuthoredVoice: unknown,
   holderVoiceOverride: unknown,
 ): NormalizedBotAudioVoiceProfileV1 {
-  return (
-    state?.targetVoice ??
-    resolveBotAudioVoiceProfileV1(holderAuthoredVoice, holderVoiceOverride)
+  const holderVoice = resolveBotAudioVoiceProfileV1(
+    holderAuthoredVoice,
+    holderVoiceOverride,
   );
+  return state
+    ? applyBotIdentityMirrorHolderVoiceEffectV1(state.targetVoice, holderVoice)
+    : holderVoice;
 }
 
 export function normalizeBotIdentityMirrorStateV1(
@@ -153,6 +179,13 @@ export function normalizeBotIdentityMirrorStateV1(
   );
   const targetAvatarDetails = hasTargetAvatarDetails
     ? botIdentityMirrorAvatarDetailsV1(row.targetAvatarDetails)
+    : undefined;
+  const hasTargetGlyph = Object.prototype.hasOwnProperty.call(
+    row,
+    "targetGlyph",
+  );
+  const targetGlyph = hasTargetGlyph
+    ? botIdentityPresentationGlyphV1(row.targetGlyph)
     : undefined;
   const sourceMessageId = boundedText(row.sourceMessageId, 160);
   const occurredAt = normalizedIso(row.occurredAt);
@@ -191,6 +224,7 @@ export function normalizeBotIdentityMirrorStateV1(
     targetFace: botIdentityMirrorFaceV1(row.targetFace as BotFaceStyle),
     ...(hasTargetAvatarDetails ? { targetAvatarDetails } : {}),
     targetVoice: botIdentityMirrorVoiceV1(row.targetVoice),
+    ...(hasTargetGlyph ? { targetGlyph } : {}),
     sourceMessageId,
     occurredAt,
   };
@@ -206,6 +240,7 @@ export function createBotIdentityMirrorStateV1(args: {
   targetFace: BotFaceStyleInput | BotFaceStyle;
   targetAvatarDetails?: unknown;
   targetVoice: unknown;
+  targetGlyph?: string | null;
   sourceMessageId: string;
   occurredAt: string;
 }): BotIdentityMirrorStateV1 {
@@ -228,6 +263,9 @@ export function createBotIdentityMirrorStateV1(args: {
         }
       : {}),
     targetVoice: botIdentityMirrorVoiceV1(args.targetVoice),
+    ...(Object.prototype.hasOwnProperty.call(args, "targetGlyph")
+      ? { targetGlyph: args.targetGlyph }
+      : {}),
     sourceMessageId: args.sourceMessageId,
     occurredAt: args.occurredAt,
   });
@@ -449,7 +487,5 @@ export function botIdentityMirrorTransitionActiveV1(
   state: BotIdentityMirrorStateV1 | null | undefined,
   nowMs: number,
 ): boolean {
-  if (!state || !Number.isFinite(nowMs)) return false;
-  const atMs = Date.parse(state.occurredAt);
-  return Number.isFinite(atMs) && nowMs >= atMs && nowMs < atMs + BOT_IDENTITY_MIRROR_TRANSITION_MS;
+  return botIdentityPresentationTransitionActiveV1(state, nowMs);
 }

@@ -17,9 +17,17 @@ import {
   botIdentityMirrorFaceV1,
   botIdentityMirrorVoiceV1,
 } from "./botIdentityMirror.ts";
+import {
+  BOT_IDENTITY_PRESENTATION_TRANSITION_MS,
+  botIdentityPresentationTransitionActiveV1,
+  normalizeBotIdentityPresentationSnapshotV1,
+  type BotIdentityPresentationSnapshotV1,
+} from "./botIdentityPresentation.ts";
+import type { BotVoicePreset } from "./botProfile.ts";
 
 export const BOT_IDENTITY_SHAPESHIFT_VERSION = 1 as const;
-export const BOT_IDENTITY_SHAPESHIFT_TRANSITION_MS = 760;
+export const BOT_IDENTITY_SHAPESHIFT_TRANSITION_MS =
+  BOT_IDENTITY_PRESENTATION_TRANSITION_MS;
 
 export type BotIdentityShapeshiftSurfaceV1 =
   | "chat"
@@ -31,7 +39,8 @@ export type BotIdentityShapeshiftSurfaceV1 =
 export type BotIdentityShapeshiftTargetSourceV1 = "library" | "marketplace";
 
 /** Public, replay-safe shapeshift snapshot. Powers and private memories are never copied. */
-export interface BotIdentityShapeshiftStateV1 {
+export interface BotIdentityShapeshiftStateV1
+  extends BotIdentityPresentationSnapshotV1 {
   v: 1;
   effect: "identity_shapeshift";
   surface: BotIdentityShapeshiftSurfaceV1;
@@ -88,6 +97,7 @@ export function normalizeBotIdentityShapeshiftStateV1(
   const targetAvatarDetails = hasTargetAvatarDetails
     ? botIdentityMirrorAvatarDetailsV1(row.targetAvatarDetails)
     : undefined;
+  const presentation = normalizeBotIdentityPresentationSnapshotV1(row);
   const sourceMessageId = boundedText(row.sourceMessageId, 160);
   const occurredAt = normalizedIso(row.occurredAt);
   if (
@@ -127,6 +137,7 @@ export function normalizeBotIdentityShapeshiftStateV1(
     targetFace: botIdentityMirrorFaceV1(row.targetFace as BotFaceStyle),
     ...(hasTargetAvatarDetails ? { targetAvatarDetails } : {}),
     targetVoice: botIdentityMirrorVoiceV1(row.targetVoice),
+    ...presentation,
     sourceMessageId,
     occurredAt,
   };
@@ -143,6 +154,10 @@ export function createBotIdentityShapeshiftStateV1(args: {
   targetFace: BotFaceStyleInput | BotFaceStyle;
   targetAvatarDetails?: unknown;
   targetVoice: unknown;
+  targetColor?: string;
+  targetGlyph?: string | null;
+  targetVoicePreset?: BotVoicePreset;
+  targetFrameMaterialSeed?: string;
   sourceMessageId: string;
   occurredAt: string;
 }): BotIdentityShapeshiftStateV1 {
@@ -166,6 +181,16 @@ export function createBotIdentityShapeshiftStateV1(args: {
         }
       : {}),
     targetVoice: botIdentityMirrorVoiceV1(args.targetVoice),
+    ...(args.targetColor ? { targetColor: args.targetColor } : {}),
+    ...(Object.prototype.hasOwnProperty.call(args, "targetGlyph")
+      ? { targetGlyph: args.targetGlyph }
+      : {}),
+    ...(args.targetVoicePreset
+      ? { targetVoicePreset: args.targetVoicePreset }
+      : {}),
+    ...(args.targetFrameMaterialSeed
+      ? { targetFrameMaterialSeed: args.targetFrameMaterialSeed }
+      : {}),
     sourceMessageId: args.sourceMessageId,
     occurredAt: args.occurredAt,
   });
@@ -321,13 +346,7 @@ export function botIdentityShapeshiftTransitionActiveV1(
   state: BotIdentityShapeshiftStateV1 | null | undefined,
   nowMs: number,
 ): boolean {
-  if (!state || !Number.isFinite(nowMs)) return false;
-  const atMs = Date.parse(state.occurredAt);
-  return (
-    Number.isFinite(atMs) &&
-    nowMs >= atMs &&
-    nowMs < atMs + BOT_IDENTITY_SHAPESHIFT_TRANSITION_MS
-  );
+  return botIdentityPresentationTransitionActiveV1(state, nowMs);
 }
 
 /** Stable 32-bit mix for deterministic Library / Marketplace picks. */

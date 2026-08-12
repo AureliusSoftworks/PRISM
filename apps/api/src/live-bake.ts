@@ -27,6 +27,7 @@ import {
   getBotcastEpisode,
   type BotcastGenerationOptions,
 } from "./botcast.ts";
+import { runWithUsageSession } from "./usage.ts";
 import { HttpError } from "./utils.http.ts";
 
 function bakeIdempotencyKey(prefix: string, step: number): string {
@@ -461,7 +462,16 @@ export async function bakeBotcastWatchEpisode(args: {
         ...(await args.resolveGeneration()),
         signal: args.signal,
       };
-      await advanceBotcastEpisode(db, userId, episodeId, {}, generation);
+      await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "signal",
+          surface: "signal",
+        },
+        () => advanceBotcastEpisode(db, userId, episodeId, {}, generation),
+      );
       episode = getBotcastEpisode(db, userId, episodeId);
       artifact = buildSignalLiveBakeArtifactFromEpisode(episode, {
         status: "baking",

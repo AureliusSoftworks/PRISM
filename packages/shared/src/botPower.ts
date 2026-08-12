@@ -1169,8 +1169,7 @@ function upgradeLegacyAvatarPresentationV1(
   if (
     normalizedName === "invisible" &&
     visibilityEffect?.type === "avatar_visibility" &&
-    visibilityEffect.mode !== "translucent" &&
-    visibilityEffect.mode !== "speaking_only"
+    visibilityEffect.mode !== "translucent"
   ) {
     return {
       ...upgraded,
@@ -1945,6 +1944,10 @@ export function botPowerSubjectEffectsForObserverV1(
   subjectPowers: unknown,
   observerPowers: unknown,
 ): BotPowerEffectV1[] {
+  // The observer's own Power is not a peer effect. Callers normally skip this
+  // pair, but keeping the projection total prevents self-effects from leaking
+  // through generic perception helpers and replay projections.
+  if (subjectPowers === observerPowers) return [];
   return botPowerSubjectEffectsForObserverFromEffectsV1(
     activeBotPowerEffectsV1(subjectPowers),
     activeBotPowerEffectsV1(observerPowers),

@@ -5,6 +5,8 @@ import type {
   ResponseMode,
 } from "./autoFallback.js";
 import type { BotAvatarDetailsV1 } from "./botAvatarDetails.js";
+import type { BotFaceStyle } from "./botAvatar.js";
+import type { BotVoicePreset } from "./botProfile.js";
 import type {
   BotPowerEffectV1,
   BotPowerResolvedThemeV1,
@@ -60,7 +62,10 @@ export const DEBATE_PARTICIPANT_FLOOR_BREAK_DEADLINE_MS = 30_000;
 export const DEBATE_PARTICIPANT_RECESS_MAX_USES = 3 as const;
 export const DEBATE_CASE_CARDS_PER_SIDE = 4;
 export const DEBATE_TURNABOUT_STATEMENTS_PER_SIDE = 2;
-export const DEBATE_JURY_SIZE = 5;
+/** Canonical live Jury: four jurors, then the Moderator's final ballot. */
+export const DEBATE_JURY_SIZE = 4;
+/** Read-only compatibility ceiling for proceedings created before the new rule. */
+export const DEBATE_LEGACY_JURY_SIZE = 5;
 export const DEBATE_JURY_DISCUSSION_TURNS = 5;
 export const DEBATE_JURY_EARLY_DISCUSSION_TURNS = 3;
 export const DEBATE_FORUM_MIN_REBUTTAL_ROUNDS = 1;
@@ -139,7 +144,8 @@ export type DebateSetupPresetId =
   | "jury-trial"
   | "public-forum"
   | "take-the-floor";
-export type DebateJuryCadence = "natural-five";
+/** `natural-five` is retained solely for saved five-juror proceedings. */
+export type DebateJuryCadence = "four-plus-moderator" | "natural-five";
 export type DebateJuryPhase =
   | "disabled"
   | "waiting"
@@ -348,12 +354,12 @@ export const DEBATE_SETUP_PRESETS: readonly DebateSetupPresetDescriptorV1[] = [
     id: "daytime-showdown",
     name: "Daytime Showdown",
     summary:
-      "A televised verbal free-for-all with personal jabs, cut-ins, moderator warnings, and a five-seat Jury verdict.",
+      "A televised verbal free-for-all with personal jabs, cut-ins, moderator warnings, four jurors, and the moderator's final ballot.",
     format: "forum",
     formality: "free_for_all",
     playerRole: "spectator",
     juryEnabled: true,
-    juryCadence: "natural-five",
+    juryCadence: "four-plus-moderator",
   },
   {
     id: "take-the-floor",
@@ -364,18 +370,18 @@ export const DEBATE_SETUP_PRESETS: readonly DebateSetupPresetDescriptorV1[] = [
     formality: "heated",
     playerRole: "participant",
     juryEnabled: false,
-    juryCadence: "natural-five",
+    juryCadence: "four-plus-moderator",
   },
   {
     id: "public-forum",
     name: "Town Hall",
     summary:
-      "Watch a plainspoken Forum and let the five-seat Jury carry the verdict.",
+      "Watch a plainspoken Forum as four jurors deliberate before the moderator's final ballot.",
     format: "forum",
     formality: "plainspoken",
     playerRole: "spectator",
     juryEnabled: true,
-    juryCadence: "natural-five",
+    juryCadence: "four-plus-moderator",
   },
   {
     id: "jury-trial",
@@ -385,7 +391,7 @@ export const DEBATE_SETUP_PRESETS: readonly DebateSetupPresetDescriptorV1[] = [
     formality: "structured",
     playerRole: "judge",
     juryEnabled: false,
-    juryCadence: "natural-five",
+    juryCadence: "four-plus-moderator",
   },
   {
     id: "classic-duel",
@@ -396,7 +402,7 @@ export const DEBATE_SETUP_PRESETS: readonly DebateSetupPresetDescriptorV1[] = [
     formality: "parliamentary",
     playerRole: "judge",
     juryEnabled: false,
-    juryCadence: "natural-five",
+    juryCadence: "four-plus-moderator",
   },
 ] as const;
 
@@ -648,6 +654,15 @@ export interface DebateBotSnapshotV1 {
   glyph: string | null;
   avatarDetails: BotAvatarDetailsV1 | null;
   voiceProfile: BotAudioVoiceProfileV1 | null;
+  /** Frozen public chassis/face materials for replay-safe identity Powers. */
+  replayVisualSnapshot?: {
+    v: 1;
+    faceStyle: BotFaceStyle;
+    avatarDetails: BotAvatarDetailsV1 | null;
+    voicePreset: BotVoicePreset;
+    screenMaterialSeed: string;
+    frameMaterialSeed: string;
+  } | null;
   powers: BotPowerV1[];
   provider: LlmProviderName;
   model: string;
@@ -1239,6 +1254,8 @@ export interface DebateJuryStateV1 {
   /** Legacy bake-ahead ballots retained for resumable pre-discussion sessions. */
   preparedFinalBallots: DebateJuryBallotV1[];
   finalBallots: DebateJuryBallotV1[];
+  /** The bot Moderator's distinct, always-last ballot. Never generated for a human Judge. */
+  moderatorBallot: DebateBallotV1 | null;
   discussionTurnTarget: number;
   discussionTurnCount: number;
   speakerCounts: Record<string, number>;
@@ -2981,13 +2998,14 @@ export function defaultDebateJuryStateV1(): DebateJuryStateV1 {
   return {
     version: DEBATE_SCHEMA_VERSION,
     enabled: false,
-    cadence: "natural-five",
+    cadence: "four-plus-moderator",
     phase: "disabled",
     jurors: [],
     forepersonBotId: null,
     initialBallots: [],
     preparedFinalBallots: [],
     finalBallots: [],
+    moderatorBallot: null,
     discussionTurnTarget: DEBATE_JURY_DISCUSSION_TURNS,
     discussionTurnCount: 0,
     speakerCounts: {},
@@ -2997,6 +3015,21 @@ export function defaultDebateJuryStateV1(): DebateJuryStateV1 {
     calledVoteAt: null,
     completedAt: null,
   };
+}
+
+/** Saved natural-five proceedings keep their original roster and replay shape. */
+export function debateJurySeatCount(
+  jury: Pick<DebateJuryStateV1, "cadence">,
+): number {
+  return jury.cadence === "natural-five"
+    ? DEBATE_LEGACY_JURY_SIZE
+    : DEBATE_JURY_SIZE;
+}
+
+export function debateJuryUsesModeratorBallot(
+  jury: Pick<DebateJuryStateV1, "cadence">,
+): boolean {
+  return jury.cadence === "four-plus-moderator";
 }
 
 export function normalizeDebateJuryStateV1(value: unknown): DebateJuryStateV1 {
@@ -3022,7 +3055,19 @@ export function normalizeDebateJuryStateV1(value: unknown): DebateJuryStateV1 {
         );
       })
     : [];
-  const selectedJurors = jurors.slice(0, DEBATE_JURY_SIZE);
+  // The original persisted shape predates the cadence tag. Preserve a
+  // complete five-seat record when it is reopened for archive or replay;
+  // new sessions always write the explicit four-plus-moderator cadence.
+  const legacyFiveJurorRecord =
+    source.cadence === "natural-five" ||
+    (source.cadence === undefined &&
+      (jurors.length >= DEBATE_LEGACY_JURY_SIZE ||
+        (Array.isArray(source.finalBallots) &&
+          source.finalBallots.length >= DEBATE_LEGACY_JURY_SIZE)));
+  const jurorLimit = legacyFiveJurorRecord
+    ? DEBATE_LEGACY_JURY_SIZE
+    : DEBATE_JURY_SIZE;
+  const selectedJurors = jurors.slice(0, jurorLimit);
   const selectedJurorIds = new Set(selectedJurors.map((juror) => juror.id));
   const initialBallots = Array.isArray(source.initialBallots)
     ? source.initialBallots
@@ -3035,7 +3080,7 @@ export function normalizeDebateJuryStateV1(value: unknown): DebateJuryStateV1 {
             isDebateSideId((ballot as DebateJuryBallotV1).sideId),
           ),
         )
-        .slice(0, DEBATE_JURY_SIZE)
+        .slice(0, jurorLimit)
     : [];
   const finalBallots = Array.isArray(source.finalBallots)
     ? source.finalBallots
@@ -3048,7 +3093,7 @@ export function normalizeDebateJuryStateV1(value: unknown): DebateJuryStateV1 {
             isDebateSideId((ballot as DebateJuryBallotV1).sideId),
           ),
         )
-        .slice(0, DEBATE_JURY_SIZE)
+        .slice(0, jurorLimit)
     : [];
   const revealedJurorIds = new Set(
     finalBallots.map((ballot) => ballot.jurorBotId),
@@ -3067,7 +3112,7 @@ export function normalizeDebateJuryStateV1(value: unknown): DebateJuryStateV1 {
             isDebateSideId((ballot as DebateJuryBallotV1).sideId),
           ),
         )
-        .slice(0, DEBATE_JURY_SIZE)
+        .slice(0, jurorLimit)
     : [];
   const phase: DebateJuryPhase =
     source.phase === "waiting" ||
@@ -3092,16 +3137,32 @@ export function normalizeDebateJuryStateV1(value: unknown): DebateJuryStateV1 {
             .map(([id, count]) => [id, Math.floor(count as number)]),
         )
       : {};
-  const forVotes = finalBallots.filter(
+  const moderatorBallot =
+    !legacyFiveJurorRecord &&
+    source.moderatorBallot &&
+    typeof source.moderatorBallot === "object" &&
+    typeof (source.moderatorBallot as DebateBallotV1).voterBotId ===
+      "string" &&
+    isDebateSideId((source.moderatorBallot as DebateBallotV1).sideId)
+      ? (source.moderatorBallot as DebateBallotV1)
+      : null;
+  const jurorForVotes = finalBallots.filter(
     (ballot) => ballot.sideId === "for",
   ).length;
-  const againstVotes = finalBallots.filter(
+  const jurorAgainstVotes = finalBallots.filter(
     (ballot) => ballot.sideId === "against",
   ).length;
+  const forVotes =
+    jurorForVotes + (moderatorBallot?.sideId === "for" ? 1 : 0);
+  const againstVotes =
+    jurorAgainstVotes + (moderatorBallot?.sideId === "against" ? 1 : 0);
+  const outcomeComplete = legacyFiveJurorRecord
+    ? finalBallots.length === jurorLimit
+    : finalBallots.length === jurorLimit && moderatorBallot !== null;
   return {
     version: DEBATE_SCHEMA_VERSION,
     enabled: true,
-    cadence: "natural-five",
+    cadence: legacyFiveJurorRecord ? "natural-five" : "four-plus-moderator",
     phase,
     jurors: selectedJurors,
     forepersonBotId:
@@ -3112,6 +3173,7 @@ export function normalizeDebateJuryStateV1(value: unknown): DebateJuryStateV1 {
     initialBallots,
     preparedFinalBallots,
     finalBallots,
+    moderatorBallot,
     discussionTurnTarget:
       typeof source.discussionTurnTarget === "number"
         ? Math.max(
@@ -3129,10 +3191,8 @@ export function normalizeDebateJuryStateV1(value: unknown): DebateJuryStateV1 {
     speakerCounts,
     majoritySideId: isDebateSideId(source.majoritySideId)
       ? source.majoritySideId
-      : finalBallots.length === DEBATE_JURY_SIZE
-        ? forVotes > againstVotes
-          ? "for"
-          : "against"
+      : outcomeComplete && forVotes !== againstVotes
+        ? forVotes > againstVotes ? "for" : "against"
         : null,
     forVotes,
     againstVotes,

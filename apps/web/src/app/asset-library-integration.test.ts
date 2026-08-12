@@ -62,10 +62,44 @@ describe("typed local asset library", () => {
     assert.match(assetSource, /PrismRefractTarget target=\{synthesizeTarget\}/u);
     assert.match(assetSource, /onClick=\{activateAdd\}/u);
     assert.match(assetSource, /onUpload\(\)/u);
-    assert.match(assetSource, /await onSynthesize\(direction\)/u);
+    assert.match(
+      assetSource,
+      /await onSynthesize\(direction, generation\?\.selection \?\? undefined\)/u,
+    );
     assert.match(assetSource, /data-tutorial-target=\{`asset-add-\$\{kind\}`\}/u);
     assert.match(assetSource, /Synthesize with Prism/u);
     assert.match(assetSource, /requestPrismRefract\(targetId, "focused-shortcut"\)/u);
+  });
+
+  it("keeps a compact remembered model selector on typed rails only", () => {
+    assert.match(assetSource, /generation\?: AssetRailGenerationControl/u);
+    assert.match(assetSource, /generationSelector/u);
+    assert.match(assetSource, /generation\.onChange/u);
+    assert.match(assetSource, /await onSynthesize\(direction, generation\?\.selection/u);
+    assert.match(pageSource, /kind="general_image"[\s\S]{0,700}onSynthesize=\{synthesizeGeneralImage\}/u);
+    assert.doesNotMatch(
+      pageSource.match(/kind="general_image"[\s\S]{0,700}/u)?.[0] ?? "",
+      /generation=\{/u,
+    );
+    assert.match(debateSource, /assetRailGeneration\?\.\("debate_exhibit"\)/u);
+    assert.match(signalSource, /assetRailGeneration\?\.\("signal_studio"\)/u);
+    assert.match(signalSource, /assetRailGeneration\?\.\("signal_logo"\)/u);
+    assert.match(slateSource, /assetRailGeneration\?\.\("slate_cover"\)/u);
+    assert.match(studiesSource, /assetRailGeneration\?\.\("slate_visual_study"\)/u);
+  });
+
+  it("persists typed model choices and carries them into each asset generator", () => {
+    assert.match(serverSource, /image_asset_generation_preferences/u);
+    assert.match(serverSource, /\/api\/assets\/generation-preferences/u);
+    assert.match(serverSource, /requestedImageModel/u);
+    assert.match(debateSource, /preferredProvider: selection\?\.provider/u);
+    assert.match(signalSource, /\{ model: selection\.model \}/u);
+    assert.match(slateSource, /\{ preferredProvider: selection\.provider, model: selection\.model \}/u);
+    assert.match(studiesSource, /\{ preferredProvider: selection\.provider, model: selection\.model \}/u);
+    assert.match(
+      pageSource,
+      /zenWallpaperImageGenerationAvailable\(\s*options\.selection\?\.provider \?\? effectiveImageProvider/u,
+    );
   });
 
   it("locks the fullscreen browser to one kind with local filters and Light/Dark previews", () => {

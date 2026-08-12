@@ -91,7 +91,7 @@ import { PrismCompanionPresenceBoundary } from "./prismCompanionPresence";
 import { SlateDirectionQuestion } from "./SlateDirectionQuestion";
 import { SlateDirectorBar } from "./SlateDirectorBar";
 import { SlateCreativeStudiosDesk } from "./SlateCreativeStudiosDesk";
-import { AssetRail } from "./AssetLibrary";
+import { AssetRail, type AssetGenerationSelection, type AssetRailGenerationControl } from "./AssetLibrary";
 import { SlateFullBookReader } from "./SlateFullBookReader";
 import { SlateMirrorDesk } from "./SlateMirrorDesk";
 import {
@@ -163,6 +163,9 @@ interface SlateWorkspaceProps {
   foregroundModelProvider?: SlateAiProvider;
   foregroundModelOverride?: string | null;
   foregroundReasoningEffort?: ProviderReasoningEffort;
+  assetRailGeneration?: (
+    kind: "slate_cover" | "slate_visual_study",
+  ) => AssetRailGenerationControl;
 }
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -538,6 +541,7 @@ export default function SlateWorkspace({
   foregroundModelProvider,
   foregroundModelOverride,
   foregroundReasoningEffort,
+  assetRailGeneration,
 }: SlateWorkspaceProps): React.JSX.Element {
   slateForegroundModelProvider = foregroundModelProvider;
   slateForegroundModelOverride = foregroundModelOverride;
@@ -991,7 +995,12 @@ export default function SlateWorkspace({
   }, []);
 
   const synthesizeProjectCover = useCallback(
-    async (projectId: string, quiet = false, direction = ""): Promise<void> => {
+    async (
+      projectId: string,
+      quiet = false,
+      direction = "",
+      selection?: AssetGenerationSelection,
+    ): Promise<void> => {
       setCoverGeneratingProjectIds((current) => {
         const next = new Set(current);
         next.add(projectId);
@@ -1001,7 +1010,15 @@ export default function SlateWorkspace({
       try {
         const response = await slateApi<SlateProjectResponse>(
           `/api/slate/projects/${encodeURIComponent(projectId)}/cover`,
-          { method: "POST", body: JSON.stringify({ direction }) },
+          {
+            method: "POST",
+            body: JSON.stringify({
+              direction,
+              ...(selection
+                ? { preferredProvider: selection.provider, model: selection.model }
+                : {}),
+            }),
+          },
         );
         setProjects((current) =>
           current.map((item) =>
@@ -4233,14 +4250,15 @@ export default function SlateWorkspace({
                 />
                 <AssetRail
                   kind="slate_cover"
+                  generation={assetRailGeneration?.("slate_cover")}
                   label="Book covers"
                   context={project.id}
                   currentImageIds={[project.cover.imageId]}
                   refreshKey={project.cover.imageId}
                   disabled={coverGeneratingProjectIds.has(project.id)}
                   onUpload={() => coverUploadRef.current?.click()}
-                  onSynthesize={(direction) =>
-                    synthesizeProjectCover(project.id, false, direction)
+                  onSynthesize={(direction, selection) =>
+                    synthesizeProjectCover(project.id, false, direction, selection)
                   }
                   onSelect={(asset) => reuseProjectCover(project.id, asset.id)}
                 />
@@ -5729,13 +5747,14 @@ export default function SlateWorkspace({
         />
       ) : null}
       {project && creativeStudiosOpen ? (
-        <SlateCreativeStudiosDesk
+          <SlateCreativeStudiosDesk
           projectId={project.id}
           currentSectionId={activeSection?.id ?? null}
-          sections={sections.map((section) => ({
+            sections={sections.map((section) => ({
             id: section.id,
             title: section.title,
-          }))}
+            }))}
+            assetRailGeneration={assetRailGeneration}
           onClose={() => setCreativeStudiosOpen(false)}
         />
       ) : null}

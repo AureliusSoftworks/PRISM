@@ -718,6 +718,76 @@ describe("replay manifests", () => {
           sourceMessageId: null,
           payload: { active: true },
         },
+        {
+          sequence: 8,
+          atMs: 800,
+          endMs: 801,
+          kind: "thinking",
+          sourceMessageId: "message-1",
+          payload: {
+            participantId: "host-1",
+            followingMessageId: "message-1",
+            timelineCompacted: true,
+            endReason: "completed",
+            presentationDurationMs: 9_000,
+          },
+        },
+        {
+          sequence: 9,
+          atMs: 800,
+          endMs: 801,
+          kind: "thinking",
+          sourceMessageId: "message-1",
+          payload: {
+            participantId: "host-1",
+            followingMessageId: "message-1",
+            timelineCompacted: true,
+            endReason: "completed",
+            presentationDurationMs: 4_000,
+          },
+        },
+        {
+          sequence: 10,
+          atMs: 800,
+          endMs: 801,
+          kind: "thinking",
+          sourceMessageId: "message-1",
+          payload: {
+            participantId: "host-1",
+            followingMessageId: "message-1",
+            timelineCompacted: true,
+            endReason: "interrupted",
+            presentationDurationMs: 250,
+          },
+        },
+        {
+          sequence: 11,
+          atMs: 800,
+          endMs: 1_200,
+          kind: "thinking",
+          sourceMessageId: "message-1",
+          payload: {
+            participantId: "host-1",
+            followingMessageId: "message-1",
+            timelineCompacted: false,
+            endReason: "completed",
+            presentationDurationMs: 400,
+          },
+        },
+        {
+          sequence: 12,
+          atMs: 900,
+          endMs: 901,
+          kind: "thinking",
+          sourceMessageId: "message-1",
+          payload: {
+            participantId: "host-1",
+            followingMessageId: "message-1",
+            timelineCompacted: true,
+            endReason: "completed",
+            presentationDurationMs: 300,
+          },
+        },
       ],
     });
 
@@ -747,6 +817,22 @@ describe("replay manifests", () => {
         .filter((event) => event.kind === "outro")
         .map((event) => event.atMs),
       [4_500],
+    );
+    assert.deepEqual(
+      manifest.direction
+        .filter((event) => event.kind === "thinking")
+        .map((event) => [
+          event.atMs,
+          event.payload.timelineCompacted,
+          event.payload.endReason,
+          event.payload.presentationDurationMs,
+        ]),
+      [
+        [800, true, "completed", 9_000],
+        [800, true, "interrupted", 250],
+        [800, false, "completed", 400],
+        [900, true, "completed", 300],
+      ],
     );
     assert.deepEqual(
       manifest.direction

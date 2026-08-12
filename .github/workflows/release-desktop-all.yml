@@ -173,6 +173,11 @@ jobs:
           chmod +x apps/server-mac/scripts/vendor-qdrant.sh
           apps/server-mac/scripts/vendor-qdrant.sh "apps/server-mac/Resources/qdrant"
 
+      - name: Vendor pinned Node runtime for desktop runtime
+        run: |
+          chmod +x apps/server-mac/scripts/vendor-node.sh
+          apps/server-mac/scripts/vendor-node.sh "apps/server-mac/Resources/node"
+
       - name: Build and package macOS artifact
         run: |
           chmod +x scripts/package-desktop-macos.sh
@@ -180,6 +185,12 @@ jobs:
 
       - name: Verify Steam content firewall
         run: npm run steam:content:verify
+
+      - name: Verify Steam asset rights ledger
+        run: npm run steam:assets:verify
+
+      - name: Verify Steam third-party provenance
+        run: npm run steam:third-party:verify
 
       - name: Upload macOS asset to desktop release
         run: |
@@ -239,6 +250,11 @@ jobs:
       - name: Stamp version
         run: node scripts/set-version.mjs --version "${RELEASE_VERSION}"
 
+      - name: Vendor pinned Node runtime for desktop runtime
+        run: |
+          chmod +x apps/server-linux/scripts/vendor-node.sh
+          apps/server-linux/scripts/vendor-node.sh "apps/server-linux/Resources/node"
+
       - name: Build and package Linux artifact
         env:
           # Force AppImage tools to run without kernel FUSE mounts in CI.
@@ -253,6 +269,15 @@ jobs:
 
       - name: Verify Steam content firewall
         run: npm run steam:content:verify
+
+      - name: Verify Steam asset rights ledger
+        run: npm run steam:assets:verify
+
+      - name: Regenerate third-party inventory after Linux pruning
+        run: npm run steam:third-party:regenerate
+
+      - name: Verify Steam third-party provenance
+        run: npm run steam:third-party:verify
 
       - name: Upload Linux asset to desktop release
         run: |
@@ -286,6 +311,11 @@ jobs:
       - name: Stamp version
         run: node scripts/set-version.mjs --version $env:RELEASE_VERSION
 
+      - name: Vendor pinned Node runtime for desktop runtime
+        shell: pwsh
+        run: |
+          pwsh apps/server-windows/scripts/vendor-node.ps1 -OutputDir "apps/server-windows/src/Resources/node"
+
       - name: Vendor Qdrant binary for desktop runtime
         shell: pwsh
         run: |
@@ -299,6 +329,14 @@ jobs:
       - name: Verify Steam content firewall
         shell: pwsh
         run: npm run steam:content:verify
+
+      - name: Verify Steam asset rights ledger
+        shell: pwsh
+        run: npm run steam:assets:verify
+
+      - name: Verify Steam third-party provenance
+        shell: pwsh
+        run: npm run steam:third-party:verify
 
       - name: Upload Windows assets to desktop release
         shell: pwsh

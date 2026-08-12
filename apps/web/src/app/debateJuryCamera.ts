@@ -7,6 +7,21 @@ export interface DebateJuryCameraPresentationV1 {
 }
 
 export function debateEventUsesJuryCamera(event: DebateEventV1): boolean {
+  // Sidebar remarks are Jury-authored, but remain inter-round commentary on
+  // the public floor. The chamber is reserved for the formal record only.
+  if (event.kind === "jury_deliberation") {
+    return !event.stepKey.startsWith("jury_sidebar_");
+  }
+  if (event.kind === "ballot") {
+    return (
+      event.speakerKind === "juror" &&
+      event.stepKey.startsWith("jury_final_")
+    );
+  }
+  return event.kind === "jury_verdict";
+}
+
+function debateEventNeedsJuryAccess(event: DebateEventV1): boolean {
   return (
     event.speakerKind === "juror" ||
     event.kind === "jury_deliberation" ||
@@ -23,21 +38,16 @@ export function debateJuryEventCanPresent(
   session: Pick<DebateSessionV1, "jury" | "playerRole">,
   event: DebateEventV1,
 ): boolean {
-  if (!debateEventUsesJuryCamera(event)) return true;
+  if (!debateEventNeedsJuryAccess(event)) return true;
   return session.jury.enabled && session.playerRole !== "participant";
 }
 
-/** Current or preparing Jury speech owns the chamber even after bake-ahead. */
+/** Only a visible formal Jury beat owns the chamber, even after bake-ahead. */
 export function debateJuryPresentationUsesChamber(
-  session: Pick<DebateSessionV1, "jury">,
+  _session: Pick<DebateSessionV1, "jury">,
   presentation: DebateJuryCameraPresentationV1 | undefined,
 ): boolean {
   if (!presentation?.presenting) return false;
-  if (presentation.preparingSpeakerBotId) {
-    return session.jury.jurors.some(
-      (juror) => juror.id === presentation.preparingSpeakerBotId,
-    );
-  }
   return presentation.event
     ? debateEventUsesJuryCamera(presentation.event)
     : false;
@@ -49,15 +59,11 @@ export function debateJuryPresentationUsesChamber(
  * Keep that queued public-floor material on the Forum camera until it lands.
  */
 export function debateJuryPresentationKeepsForumCamera(
-  session: Pick<DebateSessionV1, "jury">,
+  _session: Pick<DebateSessionV1, "jury">,
   presentation: DebateJuryCameraPresentationV1 | undefined,
 ): boolean {
   if (!presentation?.presenting) return false;
-  if (presentation.preparingSpeakerBotId) {
-    return !session.jury.jurors.some(
-      (juror) => juror.id === presentation.preparingSpeakerBotId,
-    );
-  }
+  if (presentation.preparingSpeakerBotId) return true;
   if (presentation.event) {
     return !debateEventUsesJuryCamera(presentation.event);
   }

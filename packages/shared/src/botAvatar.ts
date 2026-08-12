@@ -88,11 +88,12 @@ export const BOT_FACE_MOUTH_SCALE_MIN = 0.2;
 export const BOT_FACE_MOUTH_SCALE_MAX = 1.5;
 /** Preserve the existing physical 5% steps so saved mouth sizes never drift. */
 export const BOT_FACE_MOUTH_SCALE_STEP = 0.05;
-export const DEFAULT_BOT_FACE_MOUTH_OFFSET_X = 0.04;
+/** Canonical mouth spacing is built into the face layout; the pad rests at origin. */
+export const DEFAULT_BOT_FACE_MOUTH_OFFSET_X = 0;
 export const BOT_FACE_MOUTH_OFFSET_X_MIN = -1.2;
 export const BOT_FACE_MOUTH_OFFSET_X_MAX = 1.2;
 export const BOT_FACE_MOUTH_OFFSET_X_STEP = 0.02;
-export const DEFAULT_BOT_FACE_MOUTH_OFFSET_Y = 0.22;
+export const DEFAULT_BOT_FACE_MOUTH_OFFSET_Y = 0;
 export const BOT_FACE_MOUTH_OFFSET_Y_MIN = -1.2;
 export const BOT_FACE_MOUTH_OFFSET_Y_MAX = 1.2;
 export const BOT_FACE_MOUTH_OFFSET_Y_STEP = 0.02;

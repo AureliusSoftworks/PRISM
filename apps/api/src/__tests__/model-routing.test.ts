@@ -34,6 +34,20 @@ function catalog(overrides: Partial<ModelCatalog> = {}): ModelCatalog {
   };
 }
 
+function assertAutoRoute(
+  resolved: ReturnType<typeof resolveAutoModel>,
+  provider: "local" | "openai" | "anthropic",
+  model: string,
+  lane: "local" | "online",
+): void {
+  assert.equal(resolved.provider, provider);
+  assert.equal(resolved.model, model);
+  assert.equal(resolved.usedRequiredLocalFallback, false);
+  assert.equal(resolved.autoRoute?.provider, provider);
+  assert.equal(resolved.autoRoute?.model, model);
+  assert.equal(resolved.autoRoute?.lane, lane);
+}
+
 describe("resolveAutoModel", () => {
   it("uses an explicit picker override before a saved preference", () => {
     const resolved = resolveAutoModel({
@@ -51,7 +65,7 @@ describe("resolveAutoModel", () => {
     });
   });
 
-  it("uses a visible saved preference before catalog fallbacks", () => {
+  it("routes a light request to the cheapest suitable visible model", () => {
     const resolved = resolveAutoModel({
       provider: "openai",
       preferredModel: "gpt-4.1-mini",
@@ -59,14 +73,10 @@ describe("resolveAutoModel", () => {
       catalog: catalog(),
     });
 
-    assert.deepEqual(resolved, {
-      provider: "openai",
-      model: "gpt-4.1-mini",
-      usedRequiredLocalFallback: false,
-    });
+    assertAutoRoute(resolved, "openai", "gpt-4o-mini", "online");
   });
 
-  it("skips hidden saved preferences and defaults before choosing the next visible model", () => {
+  it("skips hidden saved preferences before contextual Auto chooses the next visible model", () => {
     const resolved = resolveAutoModel({
       provider: "openai",
       preferredModel: "gpt-4o-mini",
@@ -74,14 +84,10 @@ describe("resolveAutoModel", () => {
       catalog: catalog(),
     });
 
-    assert.deepEqual(resolved, {
-      provider: "openai",
-      model: "gpt-4o",
-      usedRequiredLocalFallback: false,
-    });
+    assertAutoRoute(resolved, "openai", "gpt-4.1-mini", "online");
   });
 
-  it("routes an Anthropic saved online default through Anthropic while in online auto", () => {
+  it("does not let an Anthropic saved default override balanced online Auto", () => {
     const resolved = resolveAutoModel({
       provider: "openai",
       preferredModel: "claude-sonnet-4-6",
@@ -89,11 +95,7 @@ describe("resolveAutoModel", () => {
       catalog: catalog(),
     });
 
-    assert.deepEqual(resolved, {
-      provider: "anthropic",
-      model: "claude-sonnet-4-6",
-      usedRequiredLocalFallback: false,
-    });
+    assertAutoRoute(resolved, "openai", "gpt-4o-mini", "online");
   });
 
   it("routes a stale Claude override through Anthropic even when the catalog is unavailable", () => {
@@ -120,11 +122,7 @@ describe("resolveAutoModel", () => {
       catalog: catalog(),
     });
 
-    assert.deepEqual(resolved, {
-      provider: "local",
-      model: REQUIRED_PRIMARY_LOCAL_MODEL_ID,
-      usedRequiredLocalFallback: false,
-    });
+    assertAutoRoute(resolved, "local", REQUIRED_PRIMARY_LOCAL_MODEL_ID, "local");
   });
 
   it("ignores a hidden explicit override from a stale client", () => {
@@ -135,10 +133,11 @@ describe("resolveAutoModel", () => {
       catalog: catalog(),
     });
 
-    assert.equal(resolved.model, "gpt-4o");
+    assert.equal(resolved.model, "gpt-4.1-mini");
+    assert.equal(resolved.autoRoute?.model, "gpt-4.1-mini");
   });
 
-  it("ignores OpenAI model preferences while resolving Anthropic chat", () => {
+  it("keeps balanced online Auto independent of a stale provider preference", () => {
     const resolved = resolveAutoModel({
       provider: "anthropic",
       explicitModelOverride: "gpt-5.3-chat-latest",
@@ -147,14 +146,10 @@ describe("resolveAutoModel", () => {
       catalog: catalog(),
     });
 
-    assert.deepEqual(resolved, {
-      provider: "anthropic",
-      model: "claude-sonnet-4-6",
-      usedRequiredLocalFallback: false,
-    });
+    assertAutoRoute(resolved, "openai", "gpt-4o-mini", "online");
   });
 
-  it("uses an Anthropic bot preference after ignoring a stale OpenAI override", () => {
+  it("keeps balanced online Auto independent of a stale Anthropic preference", () => {
     const resolved = resolveAutoModel({
       provider: "anthropic",
       explicitModelOverride: "gpt-4o-mini",
@@ -163,25 +158,17 @@ describe("resolveAutoModel", () => {
       catalog: catalog(),
     });
 
-    assert.deepEqual(resolved, {
-      provider: "anthropic",
-      model: "claude-opus-4-8",
-      usedRequiredLocalFallback: false,
-    });
+    assertAutoRoute(resolved, "openai", "gpt-4o-mini", "online");
   });
 
-  it("falls back to the required primary local model when every provider model is hidden", () => {
+  it("uses the only visible online candidate when OpenAI models are hidden", () => {
     const resolved = resolveAutoModel({
       provider: "openai",
       hiddenModelIds: ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini"],
       catalog: catalog(),
     });
 
-    assert.deepEqual(resolved, {
-      provider: "local",
-      model: REQUIRED_PRIMARY_LOCAL_MODEL_ID,
-      usedRequiredLocalFallback: true,
-    });
+    assertAutoRoute(resolved, "anthropic", "claude-sonnet-4-6", "online");
   });
 });
 

@@ -91,6 +91,7 @@ export const FACTORY_RESET_USER_DATA_TABLES = [
   "slate_projects",
   "slate_series",
   "story_sessions",
+  "image_asset_generation_preferences",
   "images",
   "messages",
   "conversations",

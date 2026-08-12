@@ -53,6 +53,7 @@ import {
   debateSpectatorAwaitingFirstWatch,
   debateSessionAwaitingFirstPresentation,
   debateSessionAwaitingDeferredStart,
+  debateJurySeatCount,
   debateRecessResumeFiller,
   debateRecessResumePresentationContent,
   type DebateEventV1,
@@ -382,7 +383,7 @@ test("normalizes a frozen moderator title with a safe legacy default", () => {
   );
 });
 
-test("migrates seven-seat Jury records to the first five jurors and their ballots", () => {
+test("keeps legacy five-juror records readable while capping malformed extra seats", () => {
   const jurors = Array.from({ length: 7 }, (_, index) => ({
     role: "juror",
     sideId: null,
@@ -397,7 +398,7 @@ test("migrates seven-seat Jury records to the first five jurors and their ballot
   }));
   const normalized = normalizeDebateJuryStateV1({
     enabled: true,
-    cadence: "natural-seven",
+    cadence: "natural-five",
     phase: "complete",
     jurors,
     forepersonBotId: "juror-1",
@@ -419,6 +420,66 @@ test("migrates seven-seat Jury records to the first five jurors and their ballot
     "juror-4",
     "juror-5",
   ]);
+});
+
+test("keeps the expected Jury seat count stable when observer projections hide identities", () => {
+  assert.equal(debateJurySeatCount({ cadence: "four-plus-moderator" }), 4);
+  assert.equal(debateJurySeatCount({ cadence: "natural-five" }), 5);
+});
+
+test("recognizes an untagged saved five-juror record as legacy replay data", () => {
+  const jurors = Array.from({ length: 5 }, (_, index) => ({
+    role: "juror",
+    sideId: null,
+    id: `legacy-juror-${index + 1}`,
+    name: `Legacy Juror ${index + 1}`,
+    source: "generic",
+  }));
+  const normalized = normalizeDebateJuryStateV1({
+    enabled: true,
+    phase: "complete",
+    jurors,
+    finalBallots: jurors.map((juror) => ({
+      jurorBotId: juror.id,
+      stage: "final",
+      sideId: "for",
+    })),
+  });
+
+  assert.equal(normalized.cadence, "natural-five");
+  assert.equal(normalized.jurors.length, 5);
+  assert.equal(normalized.finalBallots.length, 5);
+  assert.equal(normalized.moderatorBallot, null);
+  assert.equal(normalized.majoritySideId, "for");
+});
+
+test("normalizes the canonical four jurors plus moderator final ballot", () => {
+  const jurors = Array.from({ length: 5 }, (_, index) => ({
+    role: "juror",
+    sideId: null,
+    id: `juror-${index + 1}`,
+    name: `Juror ${index + 1}`,
+    source: "generic",
+  }));
+  const normalized = normalizeDebateJuryStateV1({
+    enabled: true,
+    cadence: "four-plus-moderator",
+    phase: "complete",
+    jurors,
+    finalBallots: jurors.slice(0, 4).map((juror, index) => ({
+      jurorBotId: juror.id,
+      stage: "final",
+      sideId: index < 2 ? "for" : "against",
+    })),
+    moderatorBallot: { voterBotId: "moderator", sideId: "against" },
+  });
+  assert.equal(normalized.cadence, "four-plus-moderator");
+  assert.equal(normalized.jurors.length, 4);
+  assert.equal(normalized.finalBallots.length, 4);
+  assert.equal(normalized.moderatorBallot?.voterBotId, "moderator");
+  assert.equal(normalized.forVotes, 2);
+  assert.equal(normalized.againstVotes, 3);
+  assert.equal(normalized.majoritySideId, "against");
 });
 
 test("separates executable Debate formats from visible future productions", () => {

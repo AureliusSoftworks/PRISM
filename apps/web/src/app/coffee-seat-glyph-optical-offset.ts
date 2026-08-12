@@ -1,7 +1,11 @@
 import type { BotVoicePreset } from "@localai/shared";
 
 export type CoffeeSeatGlyphOpticalOffset = {
-  id: "idle-mood-mouth-slot" | "warm-broken-bar" | "paired-eye";
+  id:
+    | "idle-mood-mouth-slot"
+    | "warm-broken-bar"
+    | "single-eye-blink"
+    | "paired-eye";
   x: number;
   y: number;
 };
@@ -19,6 +23,7 @@ export function coffeeSeatGlyphOpticalOffset(args: {
   glyph: string;
   voicePreset: BotVoicePreset;
   rotateDeg: number;
+  blinkGlyph?: string | null;
   pairedEye?: boolean;
   customGlyph?: boolean;
 }): CoffeeSeatGlyphOpticalOffset | null {
@@ -51,6 +56,16 @@ export function coffeeSeatGlyphOpticalOffset(args: {
     args.glyph === "¦"
   ) {
     correction = { id: "warm-broken-bar", screenX: 0.035 };
+  } else if (
+    correction === null &&
+    args.part === "eyes" &&
+    args.blinkGlyph !== undefined &&
+    args.blinkGlyph !== null &&
+    args.glyph === args.blinkGlyph
+  ) {
+    // Keep single-eye blink glyphs nudged slightly screen-right to align with
+    // neutral eyes without affecting paired-eye corrections or custom logic.
+    correction = { id: "single-eye-blink", screenX: 0.035 };
   }
   if (!correction) return null;
 

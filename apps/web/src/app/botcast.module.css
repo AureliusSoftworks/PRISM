@@ -234,15 +234,17 @@
 .preRollMeters i:nth-child(2n) { animation-delay: -180ms; }.preRollMeters i:nth-child(3n) { animation-delay: -390ms; }.preRollMeters i:nth-child(5n) { animation-delay: -610ms; }
 .episodeOutro .preRollSignalField { opacity: .32; }
 .episodeOutro { position: fixed; inset: var(--app-navbar-height, 66px) 0 0 0; width: auto; height: auto; min-height: 0; contain: layout paint; background: var(--botcast-curtain); opacity: 0; animation: signalOutroCurtainIn 760ms cubic-bezier(.4,0,.2,1) both; }
-.episodeOutro .preRollLockup, .episodeOutro .preRollSignalField, .episodeOutro > button { transition: opacity 520ms ease, transform 520ms cubic-bezier(.2,.72,.18,1); }
-.episodeOutro[data-phase="curtain"] .preRollLockup, .episodeOutro[data-phase="curtain"] .preRollSignalField, .episodeOutro[data-phase="curtain"] > button { opacity: 0; pointer-events: none; }
+.episodeOutro .preRollLockup, .episodeOutro .preRollSignalField, .episodeOutroActions { transition: opacity 520ms ease, transform 520ms cubic-bezier(.2,.72,.18,1); }
+.episodeOutro[data-phase="curtain"] .preRollLockup, .episodeOutro[data-phase="curtain"] .preRollSignalField, .episodeOutro[data-phase="curtain"] .episodeOutroActions { opacity: 0; pointer-events: none; }
 .episodeOutro[data-phase="curtain"] .preRollLockup { transform: translateY(8px) scale(.985); }
 .episodeOutro .preRollLogo { width: 118px; height: 118px; }
 .episodeOutro .preRollLogo .showLogo { width: 94px; border-radius: 24px; }
 .episodeOutro .preRollLockup h1 { margin-top: 14px; font-size: clamp(1.8rem, 4vw, 3.6rem); }
 .episodeOutro .preRollLockup small { margin-top: 18px; letter-spacing: .24em; text-transform: uppercase; }
-.episodeOutro > .episodeReviewCopyButton { right: 166px; }
-.episodeOutro[data-phase="complete"] > button { border-color: color-mix(in srgb, var(--botcast-accent) 62%, rgba(255,255,255,.28)); color: #fff; background: color-mix(in srgb, var(--botcast-accent) 18%, rgba(255,255,255,.07)); }
+.episodeOutroActions { position: absolute; top: 24px; right: 28px; display: flex; max-width: calc(100% - 56px); align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.episodeOutroActions > button { border: 1px solid rgba(255,255,255,.19); border-radius: 999px; padding: 8px 12px; color: rgba(255,255,255,.72); background: rgba(255,255,255,.055); font: 700 .68rem/1 system-ui; cursor: pointer; backdrop-filter: blur(12px); }
+.episodeOutroActions > button:hover { color: #fff; border-color: rgba(255,255,255,.38); background: rgba(255,255,255,.1); }
+.episodeOutro[data-phase="complete"] .episodeOutroActions > button { border-color: color-mix(in srgb, var(--botcast-accent) 62%, rgba(255,255,255,.28)); color: #fff; background: color-mix(in srgb, var(--botcast-accent) 18%, rgba(255,255,255,.07)); }
 @keyframes signalPreRollRing { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.18); } 22% { opacity: .8; } 100% { opacity: 0; transform: translate(-50%, -50%) scale(1); } }
 @keyframes signalIntroCurtainOut { from { opacity: 1; } to { opacity: 0; } }
 @keyframes signalOutroCurtainIn { from { opacity: 0; } to { opacity: 1; } }
@@ -262,6 +264,8 @@
 .shell[data-theme="light"] .episodePreRoll::before { opacity: .42; background: repeating-linear-gradient(0deg, rgba(31,35,55,.026) 0 1px, transparent 1px 4px); }
 .shell[data-theme="light"] .episodePreRoll > button { border-color: rgba(30,34,56,.15); color: rgba(23,23,36,.66); background: rgba(255,255,255,.6); box-shadow: 0 9px 26px rgba(65,69,103,.1), inset 0 1px rgba(255,255,255,.92); }
 .shell[data-theme="light"] .episodePreRoll > button:hover { color: #171724; border-color: color-mix(in srgb, var(--botcast-accent) 36%, rgba(30,34,56,.15)); background: rgba(255,255,255,.88); }
+.shell[data-theme="light"] .episodeOutroActions > button { border-color: rgba(30,34,56,.15); color: rgba(23,23,36,.66); background: rgba(255,255,255,.6); box-shadow: 0 9px 26px rgba(65,69,103,.1), inset 0 1px rgba(255,255,255,.92); }
+.shell[data-theme="light"] .episodeOutroActions > button:hover { color: #171724; border-color: color-mix(in srgb, var(--botcast-accent) 36%, rgba(30,34,56,.15)); background: rgba(255,255,255,.88); }
 .shell[data-theme="light"] .preRollSignalField { opacity: .62; }
 .shell[data-theme="light"] .preRollSignalField i { border-color: color-mix(in srgb, var(--botcast-accent) 30%, rgba(53,61,94,.13)); }
 .shell[data-theme="light"] .preRollEyebrow { color: rgba(23,23,36,.54); }
@@ -1349,6 +1353,7 @@
   .episodePreRoll { grid-column: 1; grid-row: 3; min-height: calc(100dvh - var(--app-navbar-height, 66px)); }
   .shell[data-live-episode="true"] .episodePreRoll { grid-row: 2; }
   .episodeOutro { inset: var(--app-navbar-height, 66px) 0 0; min-height: 0; }
+  .episodeOutroActions { top: 14px; right: 14px; max-width: calc(100% - 28px); }
   .library { grid-column: 1; grid-row: 2; position: relative; width: 100%; height: auto; max-height: 330px; }
   .main { grid-column: 1; grid-row: 3; height: auto; min-height: 0; overflow: visible; }
   .createShowCard { margin-top: 10px; }

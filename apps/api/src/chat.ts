@@ -11306,7 +11306,7 @@ export async function processChatMessage(
           validation.candidates,
           userKey,
           {
-            source: "direct",
+            source: "inferred",
             category: "general",
             tier: "short_term",
             sourceMessageIds: assistantProseMessageId ? [assistantProseMessageId] : [],

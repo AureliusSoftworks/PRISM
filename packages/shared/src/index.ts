@@ -492,8 +492,21 @@ export {
 } from "./botProfile.js";
 
 export {
+  BOT_IDENTITY_PRESENTATION_TRANSITION_MS,
+  botIdentityPresentationColorV1,
+  botIdentityPresentationFrameMaterialSeedV1,
+  botIdentityPresentationGlyphV1,
+  botIdentityPresentationScreenMaterialSeedV1,
+  botIdentityPresentationTransitionActiveV1,
+  botIdentityPresentationVoicePresetV1,
+  normalizeBotIdentityPresentationSnapshotV1,
+  type BotIdentityPresentationSnapshotV1,
+} from "./botIdentityPresentation.js";
+
+export {
   BOT_IDENTITY_MIRROR_TRANSITION_MS,
   BOT_IDENTITY_MIRROR_VERSION,
+  applyBotIdentityMirrorHolderVoiceEffectV1,
   applyBotIdentityMirrorResponseV1,
   botDirectAddressIndexV1,
   botDirectlyAddressesBotV1,

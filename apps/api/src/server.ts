@@ -238,6 +238,7 @@ import {
   resolveDebateParticipantObjection,
   retryDebateParticipantChoices,
   recoverParticipantDebateFromFinalRecess,
+  restartDebateFromArchive,
   restartParticipantDebateAsDraft,
   resumeDebateSession,
   resumeDebateSessionWithPersona,
@@ -335,6 +336,8 @@ import {
   resolveBotcastProducerGuestName,
   setBotcastEpisodeCameraMode,
   setBotcastModelWarmupHold,
+  signalAutoFallbackHttpStatus,
+  signalAutoFallbackPublicMessage,
   signalOnlineTurnHttpStatus,
   storeBotcastShowAtmosphereAudio,
   storeBotcastShowIntroAudio,
@@ -858,6 +861,7 @@ import {
   DEFAULT_BOT_FACE_THINKING_OFFSET_Y,
   DEFAULT_BOT_FACE_THINKING_SCALE,
   DEFAULT_OPENAI_IMAGE_MODEL_ID,
+  isAllowedOpenAiImageModelId,
   PRISM_ACTION_UNDO_RETENTION_MS,
   PRISM_ORCHESTRATION_VERSION,
   HUB_ATMOSPHERE_IMAGE_PURPOSE,
@@ -1208,6 +1212,7 @@ import {
   MemoryEcologySettingsInputError,
   listUnreadMemoryAcquisitionReceipts,
   markMemoryAcquisitionReceiptRead,
+  markSessionBotRelationMemoryReceiptsRead,
   materializeShortTermMemoryDecay,
   memoryEvidenceIds,
   readMemoryEcologySettings,
@@ -7808,6 +7813,7 @@ async function generateAndPersistSignalArtworkAsset(args: {
   persistencePrompt?: string;
   size: "1536x1024" | "1024x1024";
   preferredProvider: ImageProviderName;
+  requestedImageModel?: string;
   sourceNightImageId: string | null;
   signal: AbortSignal;
 }): Promise<SignalArtworkGeneratedAsset> {
@@ -7892,12 +7898,18 @@ async function generateAndPersistSignalArtworkAsset(args: {
     user.preferred_openai_image_model?.trim() ?? "";
   const localImageDisabled = isDisabledModelChoice(preferredLocalImageModel);
   const openAiImageDisabled = isDisabledModelChoice(preferredOpenAiImageModel);
+  const requestedImageModel = args.requestedImageModel?.trim() ?? "";
   const resolvedLocalImageModel = localImageDisabled
     ? ""
-    : preferredLocalImageModel;
+    : effectiveProvider === args.preferredProvider && requestedImageModel
+      ? requestedImageModel
+      : preferredLocalImageModel;
   const resolvedOpenAiImageModel = openAiImageDisabled
     ? ""
-    : DEFAULT_OPENAI_IMAGE_MODEL_ID;
+    : effectiveProvider === args.preferredProvider &&
+        isAllowedOpenAiImageModelId(requestedImageModel)
+      ? requestedImageModel
+      : DEFAULT_OPENAI_IMAGE_MODEL_ID;
   const shouldRunLocal =
     effectiveProvider === "local" ||
     (openAiImageDisabled && Boolean(resolvedLocalImageModel));
@@ -8214,6 +8226,7 @@ async function generateAndPersistStandaloneImageAsset(args: {
   /** Canonical catalog prompt when ephemeral Refract direction shaped generation. */
   persistencePrompt?: string;
   preferredProvider: ImageProviderName;
+  requestedImageModel?: string;
   offlineOnly?: boolean;
   signal: AbortSignal;
   size: "1536x1024" | "1024x1536" | "1024x1024";
@@ -8235,12 +8248,18 @@ async function generateAndPersistStandaloneImageAsset(args: {
     user.preferred_openai_image_model?.trim() ?? "";
   const localImageDisabled = isDisabledModelChoice(preferredLocalImageModel);
   const openAiImageDisabled = isDisabledModelChoice(preferredOpenAiImageModel);
+  const requestedImageModel = args.requestedImageModel?.trim() ?? "";
   const resolvedLocalImageModel = localImageDisabled
     ? ""
-    : preferredLocalImageModel;
+    : effectiveProvider === args.preferredProvider && requestedImageModel
+      ? requestedImageModel
+      : preferredLocalImageModel;
   const resolvedOpenAiImageModel = openAiImageDisabled
     ? ""
-    : DEFAULT_OPENAI_IMAGE_MODEL_ID;
+    : effectiveProvider === args.preferredProvider &&
+        isAllowedOpenAiImageModelId(requestedImageModel)
+      ? requestedImageModel
+      : DEFAULT_OPENAI_IMAGE_MODEL_ID;
   const shouldRunLocal =
     effectiveProvider === "local" ||
     (openAiImageDisabled && Boolean(resolvedLocalImageModel));
@@ -8485,6 +8504,7 @@ async function generateAndPersistSlateCoverAsset(args: {
   prompt: string;
   persistencePrompt?: string;
   preferredProvider: ImageProviderName;
+  requestedImageModel?: string;
   offlineOnly: boolean;
   signal: AbortSignal;
 }): Promise<SignalArtworkGeneratedAsset> {
@@ -9549,6 +9569,8 @@ function buildRoutes(): RouteDefinition[] {
           prompt,
           ...(direction ? { persistencePrompt: canonicalPrompt } : {}),
           preferredProvider,
+          requestedImageModel:
+            typeof body.model === "string" ? body.model.trim() : undefined,
           offlineOnly,
           signal: acquired.job.abortController.signal,
           size: "1536x1024",
@@ -9997,6 +10019,8 @@ function buildRoutes(): RouteDefinition[] {
           prompt,
           ...(direction ? { persistencePrompt: canonicalPrompt } : {}),
           preferredProvider,
+          requestedImageModel:
+            typeof body.model === "string" ? body.model.trim() : undefined,
           offlineOnly,
           signal: acquired.job.abortController.signal,
         });
@@ -12308,12 +12332,20 @@ function buildRoutes(): RouteDefinition[] {
         isDisabledModelChoice(preferredOpenAiImageModel);
       const resolvedLocalImageModel = localWallpaperDisabled
         ? ""
-        : (bodyModel && effectiveProvider === "local" ? bodyModel : "") ||
+        : (bodyModel &&
+            effectiveProvider === "local" &&
+            (!requestedProvider || requestedProvider === effectiveProvider)
+              ? bodyModel
+              : "") ||
           preferredZenWallpaperLocalImageModel ||
           preferredLocalImageModel;
       const resolvedOpenAiImageModel = onlineWallpaperDisabled
         ? ""
-        : (bodyModel && effectiveProvider !== "local" ? bodyModel : "") ||
+        : (bodyModel &&
+            effectiveProvider !== "local" &&
+            (!requestedProvider || requestedProvider === effectiveProvider)
+              ? bodyModel
+              : "") ||
           preferredZenWallpaperOpenAiImageModel ||
           preferredOpenAiImageModel;
       const shouldRunLocalWallpaper =
@@ -15945,6 +15977,8 @@ function buildRoutes(): RouteDefinition[] {
           prompt,
           ...(direction ? { persistencePrompt: canonicalPrompt } : {}),
           preferredProvider: requestedImageProvider,
+          requestedImageModel:
+            typeof body.model === "string" ? body.model.trim() : undefined,
           offlineOnly,
           signal: acquired.abortController.signal,
           size: "1024x1024",
@@ -17361,6 +17395,25 @@ function buildRoutes(): RouteDefinition[] {
         draftSession: debateSessionForPlayer(result.draftSession),
       });
     }),
+    route("POST", "/api/debates/:id/restart", async (ctx) => {
+      const userId = requireAuth(ctx);
+      invalidateTurnPreparation(
+        userId,
+        "debate",
+        ctx.params.id,
+        "The archived Debate restarted from its sealed opening setup.",
+      );
+      const session = restartDebateFromArchive(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.body as Parameters<typeof restartDebateFromArchive>[3],
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+      });
+    }),
     route("POST", "/api/debates/:id/forfeit", async (ctx) => {
       const userId = requireAuth(ctx);
       invalidateTurnPreparation(
@@ -17782,6 +17835,8 @@ function buildRoutes(): RouteDefinition[] {
                 ...(direction ? { persistencePrompt: canonicalPrompt } : {}),
                 size: kind === "logo" ? "1024x1024" : "1536x1024",
                 preferredProvider,
+                requestedImageModel:
+                  typeof body.model === "string" ? body.model.trim() : undefined,
                 sourceNightImageId,
                 signal,
               });
@@ -19540,25 +19595,35 @@ function buildRoutes(): RouteDefinition[] {
         user,
         episode: currentEpisode,
       });
-      const result = await endBotcastEpisodeOnProducerCut(
-        db,
-        userId,
-        currentEpisode.id,
+      const result = await runWithUsageSession(
         {
-          preferredProvider: runtime.provider,
-          responseMode: runtime.responseMode,
-          openAiApiKey: runtime.openAiApiKey,
-          anthropicApiKey: runtime.anthropicApiKey,
-          secondaryOllamaHost: user.secondary_ollama_host,
-          contextualModel: runtime.model,
-          contextualReasoningEffort: runtime.reasoningEffort,
-          autoRouteDecision: runtime.autoRoute,
-          autoFallbackChain: runtime.autoFallbackChain,
-          providerFactory: providerFactoryOverride,
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "signal",
+          surface: "signal",
         },
-        {
-          ...(body.deterministicClose === true ? { deterministic: true } : {}),
-        },
+        () =>
+          endBotcastEpisodeOnProducerCut(
+            db,
+            userId,
+            currentEpisode.id,
+            {
+              preferredProvider: runtime.provider,
+              responseMode: runtime.responseMode,
+              openAiApiKey: runtime.openAiApiKey,
+              anthropicApiKey: runtime.anthropicApiKey,
+              secondaryOllamaHost: user.secondary_ollama_host,
+              contextualModel: runtime.model,
+              contextualReasoningEffort: runtime.reasoningEffort,
+              autoRouteDecision: runtime.autoRoute,
+              autoFallbackChain: runtime.autoFallbackChain,
+              providerFactory: providerFactoryOverride,
+            },
+            {
+              ...(body.deterministicClose === true ? { deterministic: true } : {}),
+            },
+          ),
       );
       const cancelledEpisode = discardProducerCutEpisode();
       json(ctx.res, 200, {
@@ -20022,45 +20087,61 @@ function buildRoutes(): RouteDefinition[] {
       ctx.res.once("close", onSignalAdvanceClientClose);
       let result: Awaited<ReturnType<typeof advanceBotcastEpisode>>;
       try {
-        result = await advanceBotcastEpisode(
-          db,
-          userId,
-          ctx.params.id,
-          typeof body.guestMessage === "string"
-            ? {
-                guestMessage: body.guestMessage,
-                ...(typeof body.guestThinkingMs === "number"
-                  ? { guestThinkingMs: body.guestThinkingMs }
-                  : {}),
-              }
-            : cue
-              ? {
-                  cue,
-                  ...(cueDelivery ? { cueDelivery } : {}),
-                  ...(hostRedirect ? { hostRedirect } : {}),
-                  ...(guestInterruption ? { guestInterruption } : {}),
-                }
-              : {},
+        result = await runWithUsageSession(
           {
-            preferredProvider: runtime.provider,
-            responseMode: runtime.responseMode,
-            openAiApiKey: runtime.openAiApiKey,
-            anthropicApiKey: runtime.anthropicApiKey,
-            userKey: signalUserKey,
-            secondaryOllamaHost: user.secondary_ollama_host,
-            contextualModel: runtime.model,
-            contextualReasoningEffort: runtime.reasoningEffort,
-            autoRouteDecision: runtime.autoRoute,
-            autoFallbackChain: runtime.autoFallbackChain,
-            experimentalAllModelEffortEnabled:
-              user.experimental_all_model_effort_enabled === 1,
-            signal: signalAdvanceAbort.signal,
-            ...(powerTheme ? { theme: powerTheme } : {}),
-            providerFactory: providerFactoryOverride,
+            db,
+            userId,
+            privacyScope: "normal",
+            mode: "signal",
+            surface: "signal",
           },
+          () =>
+            advanceBotcastEpisode(
+              db,
+              userId,
+              ctx.params.id,
+              typeof body.guestMessage === "string"
+                ? {
+                    guestMessage: body.guestMessage,
+                    ...(typeof body.guestThinkingMs === "number"
+                      ? { guestThinkingMs: body.guestThinkingMs }
+                      : {}),
+                  }
+                : cue
+                  ? {
+                      cue,
+                      ...(cueDelivery ? { cueDelivery } : {}),
+                      ...(hostRedirect ? { hostRedirect } : {}),
+                      ...(guestInterruption ? { guestInterruption } : {}),
+                    }
+                  : {},
+              {
+                preferredProvider: runtime.provider,
+                responseMode: runtime.responseMode,
+                openAiApiKey: runtime.openAiApiKey,
+                anthropicApiKey: runtime.anthropicApiKey,
+                userKey: signalUserKey,
+                secondaryOllamaHost: user.secondary_ollama_host,
+                contextualModel: runtime.model,
+                contextualReasoningEffort: runtime.reasoningEffort,
+                autoRouteDecision: runtime.autoRoute,
+                autoFallbackChain: runtime.autoFallbackChain,
+                experimentalAllModelEffortEnabled:
+                  user.experimental_all_model_effort_enabled === 1,
+                signal: signalAdvanceAbort.signal,
+                ...(powerTheme ? { theme: powerTheme } : {}),
+                providerFactory: providerFactoryOverride,
+              },
+            ),
         );
       } catch (error) {
         if (signalAdvanceAbort.signal.aborted) return;
+        if (error instanceof AutoFallbackExhaustedError) {
+          throw new HttpError(
+            signalAutoFallbackHttpStatus(error),
+            signalAutoFallbackPublicMessage(error),
+          );
+        }
         if (error instanceof SignalOnlineTurnError) {
           throw new HttpError(signalOnlineTurnHttpStatus(error), error.message);
         }
@@ -22017,6 +22098,28 @@ function buildRoutes(): RouteDefinition[] {
         throw new HttpError(404, "Memory receipt not found.");
       }
       json(ctx.res, 200, { ok: true });
+    }),
+    route("POST", "/api/memory-receipts/sessions/:id/read", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const conversationId = decodeURIComponent(ctx.params.id ?? "").trim();
+      if (!conversationId) {
+        throw new HttpError(400, "Missing memory receipt session id.");
+      }
+      let episode;
+      try {
+        episode = getBotcastEpisode(db, userId, conversationId);
+      } catch {
+        throw new HttpError(404, "Signal episode not found.");
+      }
+      if (episode.status !== "completed" && episode.status !== "cancelled") {
+        throw new HttpError(409, "Signal episode has not ended.");
+      }
+      const resolved = markSessionBotRelationMemoryReceiptsRead(
+        db,
+        userId,
+        conversationId,
+      );
+      json(ctx.res, 200, { ok: true, resolved });
     }),
     route("GET", "/api/zen/session-memory", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -26893,7 +26996,9 @@ function buildRoutes(): RouteDefinition[] {
           isDisabledModelChoice(preferredOpenAiImageModel);
         const resolvedLocalImageModel = localImageDisabled
           ? ""
-          : (bodyModel && effectiveProvider === "local"
+          : (bodyModel &&
+                effectiveProvider === "local" &&
+                (!requestedProvider || requestedProvider === effectiveProvider)
               ? bodyModel.trim()
               : "") || preferredLocalImageModel;
 
@@ -26901,7 +27006,9 @@ function buildRoutes(): RouteDefinition[] {
           ? ""
           : imageOrigin === "botcast" && effectiveProvider !== "local"
             ? DEFAULT_OPENAI_IMAGE_MODEL_ID
-            : (bodyModel && effectiveProvider !== "local"
+            : (bodyModel &&
+                  effectiveProvider !== "local" &&
+                  (!requestedProvider || requestedProvider === effectiveProvider)
                 ? bodyModel.trim()
                 : "") || preferredOpenAiImageModel;
         const shouldRunLocal =
@@ -27670,6 +27777,63 @@ function buildRoutes(): RouteDefinition[] {
         }
         throw error;
       }
+    }),
+    route("GET", "/api/assets/generation-preferences", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const rows = db
+        .prepare(
+          `SELECT kind, provider, model
+             FROM image_asset_generation_preferences
+            WHERE user_id = ?`,
+        )
+        .all(userId) as Array<{ kind: string; provider: string; model: string }>;
+      const preferences: Record<
+        string,
+        { provider: ImageProviderName; model: string }
+      > = {};
+      for (const row of rows) {
+        if (
+          isImageAssetKind(row.kind) &&
+          row.kind !== "general_image" &&
+          (row.provider === "local" || row.provider === "openai") &&
+          row.model.trim()
+        ) {
+          preferences[row.kind] = {
+            provider: row.provider,
+            model: row.model.trim(),
+          };
+        }
+      }
+      json(ctx.res, 200, { ok: true, preferences });
+    }),
+    route("PATCH", "/api/assets/generation-preferences/:kind", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const kind = ctx.params.kind;
+      if (!isImageAssetKind(kind) || kind === "general_image") {
+        throw new HttpError(404, "This asset library does not own a generation model.");
+      }
+      const body = ctx.body as Record<string, unknown>;
+      const provider: ImageProviderName =
+        body.provider === "openai" ? "openai" : body.provider === "local" ? "local" : (() => {
+          throw new HttpError(400, "Choose a local or online image provider.");
+        })();
+      const model = typeof body.model === "string" ? body.model.trim() : "";
+      if (!model || model.length > 240 || isDisabledModelChoice(model)) {
+        throw new HttpError(400, "Choose an available image model.");
+      }
+      if (provider === "openai" && !isAllowedOpenAiImageModelId(model)) {
+        throw new HttpError(400, "Choose a supported online image model.");
+      }
+      db.prepare(
+        `INSERT INTO image_asset_generation_preferences
+             (user_id, kind, provider, model, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(user_id, kind) DO UPDATE SET
+           provider = excluded.provider,
+           model = excluded.model,
+           updated_at = excluded.updated_at`,
+      ).run(userId, kind, provider, model, new Date().toISOString());
+      json(ctx.res, 200, { ok: true, preference: { provider, model } });
     }),
     route("GET", "/api/assets/storage", async (ctx) => {
       const userId = requireAuth(ctx);

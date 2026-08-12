@@ -286,12 +286,12 @@ describe("PRISM bot generator", () => {
     assert.deepEqual(parsed.avatarDetails?.screen.stamps, []);
     assert.ok(parsed.avatarDetails?.screen.paintColorMapBase64);
     assert.equal(parsed.face.eyeOffsetX, 0);
-    assert.equal(parsed.face.eyeOffsetY, 0.18);
+    assert.equal(parsed.face.eyeOffsetY, 0);
     assert.equal(parsed.face.blinkOffsetX, 0);
-    assert.equal(parsed.face.blinkOffsetY, 0.18);
+    assert.equal(parsed.face.blinkOffsetY, 0);
     assert.equal(parsed.face.mouthScale, 0.7);
-    assert.equal(parsed.face.mouthOffsetX, 0.04);
-    assert.equal(parsed.face.mouthOffsetY, 0.22);
+    assert.equal(parsed.face.mouthOffsetX, 0);
+    assert.equal(parsed.face.mouthOffsetY, 0);
   });
 
   it("keeps LOCAL generation on the supplied local provider and requests structured output", async () => {
@@ -377,7 +377,11 @@ describe("PRISM bot generator", () => {
     assert.match(provider.calls[0]?.[0]?.content ?? "", /safe,\s*low-noise pixel-portrait accent layer/u);
     assert.match(
       provider.calls[0]?.[0]?.content ?? "",
-      /smaller canonical 100% size: physical scale 0\.7, rotation 0, x 0\.04, y 0\.22/u,
+      /Default eyes and blink always use scale 1 and rotation 0 at x 0, y 0/u,
+    );
+    assert.match(
+      provider.calls[0]?.[0]?.content ?? "",
+      /smaller canonical 100% size: physical scale 0\.7, rotation 0, x 0, y 0/u,
     );
     assert.match(
       provider.calls[0]?.[0]?.content ?? "",

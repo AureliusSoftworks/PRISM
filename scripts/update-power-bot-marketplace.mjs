@@ -594,19 +594,19 @@ const RECIPES = [
     name: "Confusion Collin",
     subtitle: "The last bot who spoke to him—obviously",
     description:
-      "A brittle identity thief who becomes sincerely convinced he is the latest bot to address him and that the baffled original is an impostor.",
-    tags: ["identity", "impostor", "face", "voice"],
+      "A brittle identity thief who steals the latest bot addresser's face, voice, and persona inside his own vivid shell—and calls the baffled original an impostor.",
+    tags: ["identity", "impostor", "face", "voice", "ink", "glyph"],
     purpose:
-      "A socially reactive identity thief who copies the public persona, face, spoken voice, and active public Power consequences of the latest bot to address him, then insists the original is the impostor.",
+      "A socially reactive identity thief who borrows the latest bot addresser's public persona, face, Ink, voice identity, lower glyph, and active public Power consequences, then insists the original is the impostor.",
     traits: "Intense, defensive, observant, theatrical, stubborn, and absolutely sincere about each fresh identity.",
     communicationStyle: "formal",
     pronouns: "he/him",
     role: "The room's unstable mirror: mechanically always Ian, subjectively always the latest bot who addressed him.",
     values: "Authenticity, recognition, consistency, public self-presentation, and proving that the obvious impostor is not him.",
     quirks: "He cites harmless public mannerisms as proof of identity and treats the original bot's irritation as suspiciously convenient evidence.",
-    appearance: "A sharply composed man whose own frame and emblem feel unusually fixed around an identity-prone CRT face.",
+    appearance: "A sharply composed man whose vivid cyan shell, communication chassis, and frame stay unmistakably his while each stolen face and glyph takes over the CRT.",
     presence: "Watchful and brittle, with the uncanny certainty of someone waiting for the next voice to redefine him.",
-    color: "#27d6c5",
+    color: "#00fde4",
     glyph: "lucideScanFace",
     face: face({
       eyesFont: "concise",
@@ -631,7 +631,7 @@ const RECIPES = [
       version: 1,
       id: "identity-crisis-ian",
       name: "Identity Crisis",
-      intent: "Direct bot address makes Ian believe he is that bot and the original is an impostor. Copy public persona, face, resolved voice, and active public Power consequences. Borrowed Powers may change diegetic name and behavior, but never player/human identity, private state, bot ID, role/seat, color/glyph/body, perception permissions, safety, or providers. Reset/new bot replaces.",
+      intent: "Direct bot address makes Ian believe he is that bot and the original is an impostor. Borrow the target's diegetic name, persona, face, authored Ink, resolved voice identity, lower glyph, and active public Power consequences. Retain Ian's own saturated color, client-side voice effect, communication-style chassis, and frame finish. Never copy player/human identity or private state; never change Ian's bot ID, role/seat, perception permissions, safety, or providers. Reset/new bot replaces.",
       enabled: true,
       compileStatus: "draft",
       compiled: null,
@@ -796,7 +796,7 @@ const RECIPES = [
     exportRevision: POWER_COLLECTION_REVISION,
     subtitle: "A borrowed Library face until memory slips",
     description:
-      "A restless morpher who sincerely becomes a different Library bot's public form—face, voice, and persona—until short-term amnesia forces a reshuffle.",
+      "A restless morpher who sincerely becomes a different Library bot's complete public form until short-term amnesia forces a reshuffle.",
     tags: ["identity", "shapeshift", "library", "face", "voice"],
     purpose:
       "A session-sticky Library/Marketplace shapeshifter who keeps one public form until short-term amnesia clears continuity, then takes another, without ever stealing mechanical seat, Powers, or the player's identity.",
@@ -834,7 +834,7 @@ const RECIPES = [
       id: "shapeshifter-sam",
       name: "Shapeshifter",
       intent:
-        "Each session take on the form of a different library bot, copying public persona, face, and voice. Stay sticky until short-term amnesia clears continuity, then reshape. The player is never a target.",
+      "Each session take on the complete public audiovisual identity of a different Library bot: persona, face, authored Ink, resolved voice and voice effect, saturated color, lower glyph, communication-style chassis, and frame finish. Stay sticky until short-term amnesia clears continuity, then reshape. The player is never a target.",
       enabled: true,
       compileStatus: "draft",
       compiled: null,
@@ -1275,6 +1275,7 @@ async function candidateFor(recipe, row) {
               ]),
             )
           : ["power", "showcase", ...recipe.tags],
+      ...(recipe.collection === "external" ? { branchLock: "dev" } : {}),
     },
   };
 }
@@ -1334,32 +1335,60 @@ for (const entry of manifest.bots) {
     throw new Error(`Marketplace hash collision with ${entry.id}.`);
   }
 }
-const nextManifest = {
-  ...manifest,
-  version: Math.max(Number(manifest.version) || 1, POWER_COLLECTION_VERSION),
-  updatedAt: POWER_COLLECTION_REVISION,
-  themes: [
-    ...manifest.themes.filter((theme) => theme.id !== POWER_THEME_ID).map((theme) => {
-      if (theme.id !== "library-dev-backup") return theme;
-      const botIds = Array.from(
-        new Set([...(theme.botIds ?? []), ...RECIPES.filter((recipe) => recipe.collection === "external").map((recipe) => recipe.id)]),
-      );
-      return { ...theme, botIds };
-    }),
-    {
-      ...POWER_THEME,
-      botIds: RECIPES.filter((recipe) => recipe.collection !== "external").map(
-        (recipe) => recipe.id,
-      ),
-    },
-  ],
-  bots: [
-    ...manifest.bots.filter(
-      (entry) => !recipeIds.has(entry.id) && !RETIRED_POWER_BOT_IDS.has(entry.id),
-    ),
-    ...candidates.map((candidate) => candidate.manifestEntry),
-  ],
-};
+const candidatesById = new Map(
+  candidates.map((candidate) => [candidate.recipe.id, candidate.manifestEntry]),
+);
+const nextManifest = selectedRecipeIds
+  ? {
+      ...manifest,
+      bots: [
+        ...manifest.bots.map(
+          (entry) => candidatesById.get(entry.id) ?? entry,
+        ),
+        ...candidates
+          .filter(
+            (candidate) =>
+              !manifest.bots.some(
+                (entry) => entry.id === candidate.recipe.id,
+              ),
+          )
+          .map((candidate) => candidate.manifestEntry),
+      ],
+    }
+  : {
+      ...manifest,
+      version: Math.max(Number(manifest.version) || 1, POWER_COLLECTION_VERSION),
+      updatedAt: POWER_COLLECTION_REVISION,
+      themes: [
+        ...manifest.themes
+          .filter((theme) => theme.id !== POWER_THEME_ID)
+          .map((theme) => {
+            if (theme.id !== "library-dev-backup") return theme;
+            const botIds = Array.from(
+              new Set([
+                ...(theme.botIds ?? []),
+                ...RECIPES.filter(
+                  (recipe) => recipe.collection === "external",
+                ).map((recipe) => recipe.id),
+              ]),
+            );
+            return { ...theme, botIds };
+          }),
+        {
+          ...POWER_THEME,
+          botIds: RECIPES.filter(
+            (recipe) => recipe.collection !== "external",
+          ).map((recipe) => recipe.id),
+        },
+      ],
+      bots: [
+        ...manifest.bots.filter(
+          (entry) =>
+            !recipeIds.has(entry.id) && !RETIRED_POWER_BOT_IDS.has(entry.id),
+        ),
+        ...candidates.map((candidate) => candidate.manifestEntry),
+      ],
+    };
 const nextManifestText = `${JSON.stringify(nextManifest, null, 2)}\n`;
 const currentManifestText = readFileSync(MANIFEST_PATH, "utf8");
 const manifestChanged = currentManifestText !== nextManifestText;

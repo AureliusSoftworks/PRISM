@@ -51,7 +51,8 @@ function fixture(): DatabaseSync {
       id TEXT NOT NULL,
       user_id TEXT NOT NULL,
       name TEXT NOT NULL,
-      profile_picture_image_id TEXT
+      profile_picture_image_id TEXT,
+      chat_atmosphere_image_id TEXT
     );
     CREATE TABLE conversations (
       id TEXT NOT NULL,
@@ -183,7 +184,9 @@ describe("image asset cleanup preview", () => {
       seedImage(db, "remote-only", { local: false });
       seedImage(db, "other-user-unused", { userId: "user-2" });
 
-      db.prepare("INSERT INTO bots VALUES (?, ?, ?, ?)").run(
+      db.prepare(
+        "INSERT INTO bots (id, user_id, name, profile_picture_image_id) VALUES (?, ?, ?, ?)",
+      ).run(
         "bot-profile",
         "user-1",
         "Profile bot",
@@ -702,7 +705,9 @@ describe("image asset cleanup preview", () => {
     try {
       seedImage(db, "candidate-a");
       seedImage(db, "profile-image");
-      db.prepare("INSERT INTO bots VALUES (?, ?, ?, ?)").run(
+      db.prepare(
+        "INSERT INTO bots (id, user_id, name, profile_picture_image_id) VALUES (?, ?, ?, ?)",
+      ).run(
         "bot-profile",
         "user-1",
         "Profile bot",

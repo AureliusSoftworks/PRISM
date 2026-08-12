@@ -67,6 +67,29 @@ jobs:
             exit 1
           fi
 
+      - name: Validate Steam release inputs
+        run: |
+          set -euo pipefail
+          if ! [[ "${RELEASE_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "version must follow SemVer core format, for example 0.14.0."
+            exit 1
+          fi
+          for value in "${STEAM_APP_ID}" "${WINDOWS_DEPOT_ID}" "${MACOS_DEPOT_ID}" "${LINUX_DEPOT_ID}"; do
+            if ! [[ "${value}" =~ ^[0-9]+$ ]]; then
+              echo "Steam App and depot IDs must contain digits only."
+              exit 1
+            fi
+          done
+          branch="${STEAM_BRANCH:-prerelease}"
+          if [[ "${branch,,}" == "default" ]]; then
+            echo "Refusing to upload directly to Steam's public default branch."
+            exit 1
+          fi
+          if ! [[ "${branch}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]; then
+            echo "steam_branch contains unsupported characters."
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v6
 
@@ -75,6 +98,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
+
+      - name: Run Steam export and content tests
+        run: npm run steam:content:test
 
       - name: Download desktop release assets
         run: |

@@ -149,7 +149,7 @@ function seedPortableProject(db: DatabaseSync, userId: string) {
     premise: "Mara must decide whether an old promise still binds her city.",
     voice: "Lyrical but precise.",
     phase: "refine",
-    proseMode: "auto",
+    proseMode: "online",
     proseProvider: "openai",
     proseModel: "gpt-5-mini",
     deliberationConfig: {
@@ -586,7 +586,7 @@ describe("Slate .slate archive import service", () => {
     assert.equal(project.title, imported.title);
     assert.equal(project.title_origin, "spark");
     assert.equal(project.premise, "Mara must decide whether an old promise still binds her city.");
-    assert.equal(project.prose_mode, "auto");
+    assert.equal(project.prose_mode, "online");
     assert.equal(project.prose_provider, "openai");
     assert.equal(project.prose_model, "gpt-5-mini");
     assert.deepEqual(JSON.parse(String(project.deliberation_config_json)), {

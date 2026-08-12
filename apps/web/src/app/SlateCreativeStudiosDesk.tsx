@@ -10,7 +10,7 @@ import type {
   SlateVisualReferenceKind,
 } from "../../../../packages/shared/src/slateCreativeStudios";
 import styles from "./slateCreativeStudiosDesk.module.css";
-import { AssetRail } from "./AssetLibrary";
+import { AssetRail, type AssetGenerationSelection, type AssetRailGenerationControl } from "./AssetLibrary";
 
 type StudioDesk = "sources" | "visuals" | "review";
 
@@ -29,6 +29,7 @@ interface SlateCreativeStudiosDeskProps {
   currentSectionId: string | null;
   sections: SlateStudioSection[];
   onClose: () => void;
+  assetRailGeneration?: (kind: "slate_visual_study") => AssetRailGenerationControl;
 }
 
 interface StudioResponse {
@@ -113,6 +114,7 @@ export function SlateCreativeStudiosDesk({
   currentSectionId,
   sections,
   onClose,
+  assetRailGeneration,
 }: SlateCreativeStudiosDeskProps): React.JSX.Element {
   const base = `/api/slate/projects/${encodeURIComponent(projectId)}`;
   const [desk, setDesk] = useState<StudioDesk>("sources");
@@ -186,7 +188,10 @@ export function SlateCreativeStudiosDesk({
     [visuals],
   );
 
-  const createVisualStudy = (direction = ""): void => {
+  const createVisualStudy = (
+    direction = "",
+    selection?: AssetGenerationSelection,
+  ): void => {
     if (!visualPrompt.trim()) return;
     void act(async () => {
       const body = await studioRequest(`${base}/visual-references`, {
@@ -196,6 +201,9 @@ export function SlateCreativeStudiosDesk({
           kind: visualKind,
           prompt: visualPrompt,
           direction,
+          ...(selection
+            ? { preferredProvider: selection.provider, model: selection.model }
+            : {}),
         }),
       });
       if (body.visual) setVisuals((items) => [body.visual!, ...items]);
@@ -531,6 +539,7 @@ export function SlateCreativeStudiosDesk({
             />
             <AssetRail
               kind="slate_visual_study"
+              generation={assetRailGeneration?.("slate_visual_study")}
               label="Visual studies"
               context={projectId}
               currentImageIds={pinnedVisuals.map((visual) => visual.assetId)}

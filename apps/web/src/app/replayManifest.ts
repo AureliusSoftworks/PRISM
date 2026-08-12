@@ -694,7 +694,7 @@ function buildReplayDirectionV2(
         : [],
     ),
   );
-  const deduped = [
+  const sorted = [
     ...capturedSpeechDirection(manifest).filter(
       (event) =>
         !event.sourceMessageId ||
@@ -702,8 +702,33 @@ function buildReplayDirectionV2(
     ),
     ...semanticEvents,
     ...capturedDirection,
-  ]
-    .sort((left, right) => left.atMs - right.atMs || left.sequence - right.sequence)
+  ].sort(
+    (left, right) => left.atMs - right.atMs || left.sequence - right.sequence,
+  );
+  const compactThinkingKeys = new Set<string>();
+  const compactThinkingDeduped = sorted.filter((event) => {
+    if (
+      event.kind !== "thinking" ||
+      event.payload.timelineCompacted !== true ||
+      event.payload.endReason !== "completed"
+    ) {
+      return true;
+    }
+    const participantId =
+      typeof event.payload.participantId === "string"
+        ? event.payload.participantId.trim()
+        : "";
+    const followingMessageId =
+      typeof event.payload.followingMessageId === "string"
+        ? event.payload.followingMessageId.trim()
+        : (event.sourceMessageId?.trim() ?? "");
+    if (!participantId || !followingMessageId) return true;
+    const key = `${event.atMs}:${participantId}:${followingMessageId}`;
+    if (compactThinkingKeys.has(key)) return false;
+    compactThinkingKeys.add(key);
+    return true;
+  });
+  const deduped = compactThinkingDeduped
     .filter((event, index, events) => {
       const previous = events[index - 1];
       return !(

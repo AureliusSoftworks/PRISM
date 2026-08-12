@@ -346,7 +346,7 @@ describe("Prism Marketplace capability", () => {
       });
       assert.equal(proposal.confirmation, "preview");
       assert.equal(proposal.preview.targets.length, 1);
-      assert.match(proposal.preview.summary, /Silent Jack/u);
+      assert.match(proposal.preview.summary, /Silent Simon/u);
 
       const run = await registry.executeProposal({
         context: marketplaceContext,
@@ -358,7 +358,7 @@ describe("Prism Marketplace capability", () => {
       assert.equal(run.affectedEntities.length, 1);
       const installed = db
         .prepare(
-          "SELECT id, export_hash FROM bots WHERE user_id = 'u1' AND name = 'Silent Jack'",
+          "SELECT id, export_hash FROM bots WHERE user_id = 'u1' AND name = 'Silent Simon'",
         )
         .get() as { id: string; export_hash: string };
       assert.match(installed.export_hash, /^[a-f0-9]{32}$/u);

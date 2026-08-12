@@ -1,0 +1,1962 @@
+{
+  "schema": "prism-steam-asset-rights-v1",
+  "version": 1,
+  "scope": {
+    "sourceRoot": "apps/web/public",
+    "steamRuntimeRoot": "apps/web/.next/standalone/apps/web/public",
+    "mediaExtensions": [
+      ".gif",
+      ".eot",
+      ".jpeg",
+      ".jpg",
+      ".mp3",
+      ".otf",
+      ".ogg",
+      ".png",
+      ".svg",
+      ".ttf",
+      ".wav",
+      ".webm",
+      ".webp",
+      ".woff",
+      ".woff2"
+    ],
+    "excludedTopLevel": [
+      "bot-marketplace",
+      "tools"
+    ],
+    "excludedFiles": [
+      "file.svg",
+      "globe.svg",
+      "next.svg",
+      "vercel.svg",
+      "window.svg"
+    ]
+  },
+  "rightsProfiles": {
+    "aurelius-production": {
+      "rightsHolder": "Aurelius Games LLC",
+      "rightsStatus": "owner-attested",
+      "commercialUse": "allowed-by-rights-holder-attestation",
+      "attribution": "(c) Aurelius Games LLC",
+      "source": [
+        "apps/web/src/app/aboutCredits.ts#assets.prism-originals",
+        "apps/web/src/app/aboutCredits.ts#assets.generated-assets"
+      ],
+      "provenance": {
+        "origin": "Original PRISM production and selected generated production assets reviewed and integrated in-house.",
+        "providers": [
+          "OpenAI",
+          "ElevenLabs"
+        ],
+        "modelOrVersion": "Mixed; asset-specific generation metadata is retained by the generating workflow when available.",
+        "generationDate": "Mixed; asset-specific dates are retained by the generating workflow when available.",
+        "accountOrPlan": "Owner-attested commercial-use permission for the account or plan used to create each asset.",
+        "promptOrSourceRights": "Aurelius Games LLC attests to the right to use the source material and prompts for commercial distribution."
+      }
+    }
+  },
+  "aiDisclosure": {
+    "preGeneratedAiContent": true,
+    "basis": "aurelius-production",
+    "reviewerText": "The Steam build includes selected pre-generated imagery, voices, music, and foley created through connected OpenAI and ElevenLabs tools, then reviewed and integrated in-house."
+  },
+  "linkedProvenance": [
+    "apps/web/src/app/aboutCredits.ts",
+    "voice-assets.manifest.json",
+    "THIRD_PARTY_NOTICES.md",
+    "apps/web/public/worklets/formant-correction-worklet.LICENSE"
+  ],
+  "assets": [
+    {
+      "path": "apple-touch-icon.png",
+      "kind": "image",
+      "sha256": "02c7557215bc42ecfcb06db707424b9c41e56f2299490e6bb29c86c7915e7360",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/artificial/burp-01.mp3",
+      "kind": "audio",
+      "sha256": "81ae15596e2e214ff4c279db21902ee78cb68cb923f8a24836a27818c8bb62a4",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/artificial/burp-02.mp3",
+      "kind": "audio",
+      "sha256": "bb46165bc6aee75b3ab8dca0f8808b1fd0f7cc8d6f3f29e56c79148d1b5a918b",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/artificial/burp-03.mp3",
+      "kind": "audio",
+      "sha256": "2ef36678c882015e41fa7ec47adee3931d4e01ccf06e0e4d29543a235ca0e10e",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/artificial/cough-01.mp3",
+      "kind": "audio",
+      "sha256": "3f8a0c355245a8a58345f84ed35a682b110e5c66652bb2fd9feb9b4d6977ca6c",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/artificial/cough-02.mp3",
+      "kind": "audio",
+      "sha256": "bd6cb0333b0e49e6d1b34952ede4749d0920072d7e57f8015263263f8a04f8e4",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/artificial/cough-03.mp3",
+      "kind": "audio",
+      "sha256": "e69eb60fb96b05d026f2c74b97cccdb06f554d3d462b66fb94d129648fadff90",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/artificial/fart-01.mp3",
+      "kind": "audio",
+      "sha256": "2e31328632dd1961409a801ab160e833b88f0dbe78067f1c24be7debaaa3b7ab",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/artificial/fart-02.mp3",
+      "kind": "audio",
+      "sha256": "cf9d0d23e9a42ef4e355037c76ff96b6f069daad6a5560ac56455a0cfe7515e2",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/artificial/fart-03.mp3",
+      "kind": "audio",
+      "sha256": "35b9d47f511e789abeb204ee2bf3d4975e061f13739dec746b165e0cc42c69a6",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/ethereal/burp-01.mp3",
+      "kind": "audio",
+      "sha256": "ba3582ef4e8e8dd69b4502d0697bca526bc8c3801a4c938e876af8827b8463dd",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/ethereal/burp-02.mp3",
+      "kind": "audio",
+      "sha256": "506ffc5fb9d66f18321bca7503f836649422776580b39dab401927ad29db199b",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/ethereal/burp-03.mp3",
+      "kind": "audio",
+      "sha256": "d75f07480673c8923696454b10d299b91aee9d2260799ba44ed8bae9f4178df9",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/ethereal/cough-01.mp3",
+      "kind": "audio",
+      "sha256": "550571c55062dac6032822cbe7377da917e233ed973fc3416ea4516233422c79",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/ethereal/cough-02.mp3",
+      "kind": "audio",
+      "sha256": "be50eefc41fd7279138a21c22b7cd00176d1fdac99d6b186b528fede44a16cfd",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/ethereal/cough-03.mp3",
+      "kind": "audio",
+      "sha256": "3945ea29526e3242c552699471d45d8221ec7d380329ed44e1f806c3098cc97f",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/ethereal/fart-01.mp3",
+      "kind": "audio",
+      "sha256": "f199c6d89203a3874d2e54ec1f848453688c2584158c87c43888a13cbd306a35",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/ethereal/fart-02.mp3",
+      "kind": "audio",
+      "sha256": "b5b72c27a88715952533169e4f8267f903f6f0135560c83030881ddb36884406",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/ethereal/fart-03.mp3",
+      "kind": "audio",
+      "sha256": "cd625ae519c230c4793e9c4bd466a7a37f63f09bef24cd415c447402ae32df7a",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/organic/burp-01.mp3",
+      "kind": "audio",
+      "sha256": "a4cf51c906700281149e3d53675d44249309cd587b8881bade183e9d3a212fa5",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/organic/burp-02.mp3",
+      "kind": "audio",
+      "sha256": "65be7484f5a8636cda2953e05c6272f924ece8740ce8f45f952aec8e6151155e",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/organic/burp-03.mp3",
+      "kind": "audio",
+      "sha256": "bd29d5d942b84a6be6c6825acfd596704fafe97d6cac70343e4888a835b55c4a",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/organic/cough-01.mp3",
+      "kind": "audio",
+      "sha256": "b89e661a19159cced8ce383fdb20ab04d9d77f77369a37b80fdc323bad2e9696",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/organic/cough-02.mp3",
+      "kind": "audio",
+      "sha256": "9c484d336d8a548db06cd1f737fde95b4d1b8d544dd0f1bb841e1721e125cf67",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/organic/cough-03.mp3",
+      "kind": "audio",
+      "sha256": "3b02db0d20dfa0e25ddb955f98951990d6c2fc94879a6bddc8e58ca8b03309aa",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/organic/fart-01.mp3",
+      "kind": "audio",
+      "sha256": "81ba76a63e737f290ac34654cb531edef20b5f965df6833cfe0a38955641b9e1",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/organic/fart-02.mp3",
+      "kind": "audio",
+      "sha256": "46be37358ea0e999f38e39675dbd5651c74463c009e891012358e6eee590b984",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/action-reactions/corporality/organic/fart-03.mp3",
+      "kind": "audio",
+      "sha256": "971dfca2220210fa2bba63b9ffd62b1d5bc705c03203beda76cda6e11edc91bb",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/avatar/prism-calculating-01.mp3",
+      "kind": "audio",
+      "sha256": "cc19a83e2c0d818ae1743a05569eefc9c3737303d82ef212d4a3bf5277b40d7f",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/avatar/prism-calculating-02.mp3",
+      "kind": "audio",
+      "sha256": "c9e590e8254d64091dbffc81e213be81920cb71fc178504feb7e7f6b42c9f8b2",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/avatar/prism-calculating-03.mp3",
+      "kind": "audio",
+      "sha256": "f36c52c8b99cb5b3121bced74b1fa4e0790aba49866c3a63bd7a611d145d91e6",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/avatar/prism-calculating-04.mp3",
+      "kind": "audio",
+      "sha256": "01f400ea13c21e02dd6311d8c8c219cee4493121c77a63ce7114a9e093a7430c",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/coffee/action-reactions/burp-01.mp3",
+      "kind": "audio",
+      "sha256": "d4ad925e5be54ae3a2093d0267b0058049856d20f2a61b1a9d179a2d675ba383",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/coffee/action-reactions/burp-02.mp3",
+      "kind": "audio",
+      "sha256": "278521618972558fe3e285cfa56c7d46269aef77b7aae14e5e47c13b50f1d6ea",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/coffee/action-reactions/burp-03.mp3",
+      "kind": "audio",
+      "sha256": "35a06e61dc31397cb390498c1b908d7e6c3912e850ff32b4cb208eac2260d9af",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/coffee/action-reactions/burp-04.mp3",
+      "kind": "audio",
+      "sha256": "8ccc875c36090580bf50fbbf75a4f0350c751de3ec93390d6770b7734433242e",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/coffee/action-reactions/cough-01.mp3",
+      "kind": "audio",
+      "sha256": "c07712d8c6edf4ca798d8dbd22923c1d6ab02d7eb71010b7c2c12f3ec8edbe48",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/coffee/action-reactions/cough-02.mp3",
+      "kind": "audio",
+      "sha256": "a799d87490b8022fd775f6d5b572368c69d93067fe073b3d1808e2e2c1db7a5c",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/coffee/action-reactions/cough-03.mp3",
+      "kind": "audio",
+      "sha256": "dde25545b2aac452dd8cee488d1d783bab94ab49dead66ca64945a3d2dacd157",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/coffee/action-reactions/cough-04.mp3",
+      "kind": "audio",
+      "sha256": "76b02a79bc927933b2c6c998eaad958cb662badca6483a25bb25b681859fcc64",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/coffee/action-reactions/fart-01.mp3",
+      "kind": "audio",
+      "sha256": "9779bcb63a2a91e045c8e5c9411e4e4a2c7ff099d400b27aa40618b0ee019830",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/coffee/action-reactions/fart-02.mp3",
+      "kind": "audio",
+      "sha256": "9e02d6d6b415bbe1458e45d14a901ec72c9f39afe326f5f14cbfd35cf8230643",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/coffee/action-reactions/fart-03.mp3",
+      "kind": "audio",
+      "sha256": "48e76caf76109ed9c6ff9358e9c511373545db12878ade1fbab773552d6302dc",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/coffee/action-reactions/fart-04.mp3",
+      "kind": "audio",
+      "sha256": "030e553dceb520b61cdfc2976f70bd9fdc2167e9b211118f1d40e7aea0d064f0",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/coffee/jazz/dreamy-steam.mp3",
+      "kind": "audio",
+      "sha256": "a33ff81f4c3e7d49350d8804063a5266d7c4f10c7910680bedf4893fb6122d7d",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/coffee/jazz/late-night-lounge.mp3",
+      "kind": "audio",
+      "sha256": "b013115dc77b0b5c9cdd2a2325a36fc08e9760c1ff7b82957b875fb1878ede5e",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/coffee/jazz/rainy-morning.mp3",
+      "kind": "audio",
+      "sha256": "fee2dceeddb6888bc26c846bbd710ec8e42f096b63b22eaa7f80a89a62ffa5f4",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/coffee/jazz/rhodes-nook.mp3",
+      "kind": "audio",
+      "sha256": "86e68a3a6dcd83b3c9b0c84440354b799129e66bac93b9c7b5a4900319948732",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/coffee/jazz/sunny-brunch.mp3",
+      "kind": "audio",
+      "sha256": "8aac13142eb4b8957897dbeb169c81f250988ae02c8dc72e2ce81203c9bda357",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/courtroom-audience-agitation-swell.mp3",
+      "kind": "audio",
+      "sha256": "14a6a40cf7c19ee47e0eecc0eb3c215ae2b910ccf2b9b518234adab7c655550f",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/courtroom-audience-crosstalk-loop.mp3",
+      "kind": "audio",
+      "sha256": "decf206b2865a946812600f64566ab33ed35d9d7de0141b64d93f4f47d52a6df",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/courtroom-audience-murmur-loop.mp3",
+      "kind": "audio",
+      "sha256": "fd75fc777cfc2ff5a59b7bdb5c98c94a0a3b59b9cd5b71e642d715df543c8002",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/courtroom-audience-order-hush.mp3",
+      "kind": "audio",
+      "sha256": "8580caf82981c209807f3feca438ab149a05caad69d919c704613d14318fc048",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/courtroom-audience-session-settle.mp3",
+      "kind": "audio",
+      "sha256": "68c0522dbd1865bedc7c492baf341ce20adb685903e053df0edc875cab4997a4",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/courtroom-chair-shift.mp3",
+      "kind": "audio",
+      "sha256": "5d2f3e4a57da56568c85c5ab2f6e7345fc571759eebaf41f715d6d1a0338ab64",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/courtroom-cough-01.mp3",
+      "kind": "audio",
+      "sha256": "4f5ac7e47f14553fb2cfd1c82b5908447940f4dc4d11c28e37f5558b335b8dc6",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/courtroom-cough-02.mp3",
+      "kind": "audio",
+      "sha256": "a1e4993dfc0dcfdbf52263a6887fe94257a0b08b1517d5b4e958b374505e0847",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/courtroom-paper-shuffle.mp3",
+      "kind": "audio",
+      "sha256": "60f8bbe26e130ac0a7c3eb0ea0bbfa26b334985c84bd773bfaaeeaa05c65e800",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/exhibits/impact-cardboard.mp3",
+      "kind": "audio",
+      "sha256": "91e7279365987a59ed4c046f5554363b35852d58e56d82a3165db899c1b39915",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/exhibits/impact-ceramic.mp3",
+      "kind": "audio",
+      "sha256": "f47f37620db7226d71b01f3c0912c9ec16524bec6a181015671ab0ec2f095ff3",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/exhibits/impact-fabric.mp3",
+      "kind": "audio",
+      "sha256": "c546143c0a568cf134e7bc7cab9d435e3f05938c810a612423b84b26fce33447",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/exhibits/impact-glass.mp3",
+      "kind": "audio",
+      "sha256": "74d42546c7be1bf9616a7c7151af06e1dd8c665feeca77f0b5529cec79148853",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/exhibits/impact-ice.mp3",
+      "kind": "audio",
+      "sha256": "68e0d33e5acd172d39361371f62f41edefb627494ba0de2ee1de679ae978b720",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/exhibits/impact-metal.mp3",
+      "kind": "audio",
+      "sha256": "ac536228579cdae78cc00cfbe7a9968105b3f98f323e1294e7f8557e00e484ad",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/exhibits/impact-plastic.mp3",
+      "kind": "audio",
+      "sha256": "cdf24d02f14ca1f8befa16bc4a33554ba5647b621391072fc2d0131dc1b1727a",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/exhibits/impact-rubber.mp3",
+      "kind": "audio",
+      "sha256": "bd7b013e90d9050677ddef402047de56de3d26f1768551d9b7d1a35f4775be48",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/exhibits/impact-stone.mp3",
+      "kind": "audio",
+      "sha256": "99d6955f999b7592910f95e15e8a04d8293d350448cc128868227cc258dcd4ed",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/exhibits/impact-wood.mp3",
+      "kind": "audio",
+      "sha256": "542318f9bbdbebe1a3892428d1d0cd6fc450b9343d4d762522739e155cf8ea01",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/gavel-attention-v2.wav",
+      "kind": "audio",
+      "sha256": "9545215ed0230ad24eef992f6655f44cb87239ee0423c6e06087873a76ac0781",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/gavel-attention-v3.wav",
+      "kind": "audio",
+      "sha256": "2e0c3e46d2b1ad4afdfdb5d59971e7267ddb90ab87d84e6400aad676d34d7983",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/gavel-attention.mp3",
+      "kind": "audio",
+      "sha256": "2b93603478a64760312c045bc089d48b2bbf8adc884ab6103a707a581180d814",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/gavel-order-v2.wav",
+      "kind": "audio",
+      "sha256": "178e6946d1b2d3806c36f4b4107466db3a2eb76966ed2c4e133852d57015fdc7",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/gavel-order-v3.wav",
+      "kind": "audio",
+      "sha256": "2942ed02053ec71f428c60cf69b42bc0131d663ac3cba87ebed7d787d48167a0",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/gavel-order.mp3",
+      "kind": "audio",
+      "sha256": "b9c28a395b28840adb68b85c6bf77ed75951b098903b70f362fbbedad02ce9b7",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/living-chamber-intro.mp3",
+      "kind": "audio",
+      "sha256": "6c3bc7c559ee87401bf29303aeb580ef5544f4909551322c5a775127d86fbb04",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/debate/living-chamber-outro.mp3",
+      "kind": "audio",
+      "sha256": "e3a9fb04242ee7143853cf8803396fc13aa708c46ca54c2335a28e9487d38e27",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/prism-companion/glass-tap-01.mp3",
+      "kind": "audio",
+      "sha256": "cc9562c505a916561e4cf9e3fe3bd09bf2f77ca59010e9dfb0cbb2af3a6d727f",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/prism-companion/glass-tap-02.mp3",
+      "kind": "audio",
+      "sha256": "cc95e17078d5779e708432e7d0ef548efaa7672d12b86e0c07f2d6f4901e76da",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/prism-companion/glass-tap-03.mp3",
+      "kind": "audio",
+      "sha256": "23d4b73d6d3bdc4b7238dd75245b85a30a9d5f93d7c70971dc8cc02071a30455",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/prism-companion/glass-tap-04.mp3",
+      "kind": "audio",
+      "sha256": "660774ef98e03dd3f2e94187d0175f50d0e0f478635a58e5870e4bb5c8d12b1b",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/prism-intro/01-border-coast.mp3",
+      "kind": "audio",
+      "sha256": "912a783b9dc18068333edf7c9ef11a666f2dfd347f09bc08499ae896a90685b3",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/prism-intro/02-threshold-door.mp3",
+      "kind": "audio",
+      "sha256": "2347c52a264f3d248922b027bcc3f47bd9db75ef3cc736d2db08ff4b917cdf43",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/prism-intro/03-sanctum-archive.mp3",
+      "kind": "audio",
+      "sha256": "d142d0eaa237dbfb2ecbd4f0bd1c355629458a71ca88352d179801baf5f98afc",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/prism-intro/04-source-light.mp3",
+      "kind": "audio",
+      "sha256": "9b53402a7cb43f0a5aeaf8e33ae0da869b5f4cc4d49737f724a896ea88e40bd4",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/prism-intro/05-refraction-bloom.mp3",
+      "kind": "audio",
+      "sha256": "ee15de1c2f5c927f2d8ffe8a65f32d12f10e2f13357854a8febf470983af8a99",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/prism-intro/06-inhabitants-wake.mp3",
+      "kind": "audio",
+      "sha256": "850545c91afb383ce57ef2f69bcb6b96c4b261435c6f744a15fcbae8b6c82f47",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/prism-intro/07-interplay-weave.mp3",
+      "kind": "audio",
+      "sha256": "7102f1c7ef1b200a61f138a13b561fc17387e9c33965da2999d55b3907c2a6fd",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/prism-intro/08-prism-online.mp3",
+      "kind": "audio",
+      "sha256": "dbbbe27290623feb906d6280863225ca1f4356323a389830f288adb46a30dac6",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/prism-intro/prism-threshold-ethereal-loop-v1.mp3",
+      "kind": "audio",
+      "sha256": "2edb956f91a6856d8602939d665dcc76664d45bfdd4f2d7102a4cd8677382b2a",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/session-atmosphere/clothing-shuffle.mp3",
+      "kind": "audio",
+      "sha256": "b7b12de63a769a34b03010770cba9f6e51a3cbdf42aeb54c608687f3843e4078",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/session-atmosphere/coffee-cup-place.mp3",
+      "kind": "audio",
+      "sha256": "d55e4cb60789a291d4c9f31e2d35cdb55f6a2fbedc018fd25dcf5f211cc2fbd0",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/session-atmosphere/coffee-sip.mp3",
+      "kind": "audio",
+      "sha256": "b483dd1c0ddc963ba6b30eb3e3481e9227ba3d0fe3e5b3d20716660bacb9b571",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/session-atmosphere/default-studio-room-loop.mp3",
+      "kind": "audio",
+      "sha256": "0c3b9d4629ae169ffc06b6ebcabf56a8b07548b114af6b87f6b02e17bfde89d1",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/session-atmosphere/faint-swallow.mp3",
+      "kind": "audio",
+      "sha256": "278bdc0e1fb2f282a9ca49fb2ad501a19bf0c67ab715c2bc4ed87a05b42fd381",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/session-atmosphere/lip-smack-01.mp3",
+      "kind": "audio",
+      "sha256": "c108a834721fe0173e997d07556c6aa6c5b47f7448c65e186e0253565233c843",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/session-atmosphere/soft-foot-tap.mp3",
+      "kind": "audio",
+      "sha256": "287ed32ff1e2820bca2113c92518133b05de4a6f7f7ac9cbaccfb1b561bed9a3",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/session-atmosphere/soft-sigh-01.mp3",
+      "kind": "audio",
+      "sha256": "7dfd69b3d8e2a34641d9ba021838b065499e5d48cb4761570fe0a68017403c7a",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/session-atmosphere/studio-mix-grain-loop.mp3",
+      "kind": "audio",
+      "sha256": "dc091b61c9f069a9847e90effbec402a9f3b9cbcd5f8a8a181c8354eb58e8e8b",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/session-atmosphere/throat-clear.mp3",
+      "kind": "audio",
+      "sha256": "e5f2d77f5a785eb528bc4efd2e714f3fee1e98bf405175ec0bcef6d0352629d8",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/signal/soundboard/applause.mp3",
+      "kind": "audio",
+      "sha256": "cd9fca5f2618345abe1e3d5f3a8097690b88028a6868a49aef7d2fb42d21a53e",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/signal/soundboard/gasp.mp3",
+      "kind": "audio",
+      "sha256": "d40891b62f34977976760d1fc5f577508391a544a22c298a6ce5fe1256cf7b42",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/signal/soundboard/laughter.mp3",
+      "kind": "audio",
+      "sha256": "31b7434017692a675aed0ebfbe9011b52fb951414eb18328da77373de8c7ab54",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/signal/soundboard/rimshot.mp3",
+      "kind": "audio",
+      "sha256": "b7c9df1b88890c275c0325367491645341af3b15b6b0aa554d8c1f175f526115",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/ui-asmr/bot-hover-01.mp3",
+      "kind": "audio",
+      "sha256": "647587962fb974f3a61db707085c0a2bc1ed3bcb33d2d73b79dbbda72196fba5",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/ui-asmr/bot-hover-02.mp3",
+      "kind": "audio",
+      "sha256": "43d907fb84de72c52d50b044474877af637fdf3cca6fdc1ff3707aea25ca32ae",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/ui-asmr/bot-hover-03.mp3",
+      "kind": "audio",
+      "sha256": "bc0cd52e9b1686673a0a2a75754b78a261006d01b898a70d2465ba7c91454fac",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/ui-asmr/bot-hover-04.mp3",
+      "kind": "audio",
+      "sha256": "af7494d80d04368959c9a5ae5990fda126597b23baa834789cedcfcaeda00cee",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/ui-asmr/bot-hover-05.mp3",
+      "kind": "audio",
+      "sha256": "cc6b8791c4a5f8e46f4e93d0506f3f754f9ccb06def1ee5b5a092d0605ea924e",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/ui-asmr/bot-hover-07.mp3",
+      "kind": "audio",
+      "sha256": "e94219a6e8893c664191fc4688c13f2828b903dba4a782df1545a654e399189c",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/ui-asmr/bot-hover-08.mp3",
+      "kind": "audio",
+      "sha256": "6bdfdd4136b0bd061f01985fe6fa36649e6d95861c895a870da9267e6ff7683f",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/ui-asmr/bot-select-01.mp3",
+      "kind": "audio",
+      "sha256": "6ec4b0e65ac7e71f9fae245094c5aab73bfa79e08784339a505efe68b67ab6e3",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/ui-asmr/bot-select-02.mp3",
+      "kind": "audio",
+      "sha256": "b225dfe50a793b71233b8963a1031e7d7ec5540f9b2f29f3682dcaebcf971f12",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/ui-asmr/bot-select-03.mp3",
+      "kind": "audio",
+      "sha256": "5e9cfabf52521b99111b666d4effb77cc1459744304d60b41dc48db815c566d0",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/ui-asmr/bot-select-04.mp3",
+      "kind": "audio",
+      "sha256": "c0b1765e0cbdbee3761934b030337c78690a065b5dd4e986ef71ff1a93cd6393",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/ui-asmr/panel-close-01.mp3",
+      "kind": "audio",
+      "sha256": "882b180bd7db3c65b6f0e9d9be3b217ce1090120fefff4581fb838203f57e736",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/ui-asmr/panel-close-02.mp3",
+      "kind": "audio",
+      "sha256": "46d254dddd91c794b2c69707a7535cf620cc35eecccd56aeb16abf08c05bb4a2",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/ui-asmr/panel-close-03.mp3",
+      "kind": "audio",
+      "sha256": "194e56f6b6ce55ce0a4660a398c24a415b7ccb8b58a09cea5490b0dfad7c8f88",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/ui-asmr/panel-open-01.mp3",
+      "kind": "audio",
+      "sha256": "7f1d327a7c5646cc427e7997935a4e81bba25002ff5e3799d01534675e2a0af4",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/ui-asmr/panel-open-02.mp3",
+      "kind": "audio",
+      "sha256": "5f882faa354228e9208ae69594fd8e95fa25d51174406b7e8aeac84626b139cc",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/ui-asmr/panel-open-03.mp3",
+      "kind": "audio",
+      "sha256": "fd68b47f550e686836d37c076b07b2b97daa3a6d90890dd3c2a0a406cfd1c181",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/ui-asmr/toggle-01.mp3",
+      "kind": "audio",
+      "sha256": "6f1742a4fc15c02083aede36008d1fdabb3d8efbbb5cbbd8f88440b13785a2ab",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/ui-asmr/toggle-02.mp3",
+      "kind": "audio",
+      "sha256": "d0b77045f70e8f03363a3f7378d2fe8b6dcbc3b4851d8a376e0ce8fcd7187fa7",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/ui-asmr/toggle-03.mp3",
+      "kind": "audio",
+      "sha256": "d8c9a906ff10298e9fd5d6fae60a1a5274555aad55c94e1576c845566fcc52fe",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/ui-asmr/turbo-flame-ignition-01.mp3",
+      "kind": "audio",
+      "sha256": "665bfbd69849ac9788c7a4abeaaa3ad65a075eeed7808e2b0a144b76a3e7c086",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/ui-asmr/turbo-steam-extinguish-01.mp3",
+      "kind": "audio",
+      "sha256": "da37b1df666d028bf2784ba8c1fd02679f55ace03a789d31c861d83113b0f2f1",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/voice-presence/breath-deliberate-01-v2.mp3",
+      "kind": "audio",
+      "sha256": "950bfbc14486d831473b93ac12b1ee6ff635d79bf0265a5afbc1b96558c5f2e1",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/voice-presence/breath-deliberate-02-v2.mp3",
+      "kind": "audio",
+      "sha256": "03be0844169360a60f4b714581e421908df18e2613e83c9946fb9bde9ab2857d",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/voice-presence/breath-micro-01-v2.mp3",
+      "kind": "audio",
+      "sha256": "5e61a1df945085c58d774a634e025c15e1ec04b3da7a8d7390dc958ac2e8e6ff",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/voice-presence/breath-micro-02-v2.mp3",
+      "kind": "audio",
+      "sha256": "4717c0b0206da2b087b54bc95a8cf22cf8c94134890ae09e0a5a6dc3faa9b21a",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/voice-presence/breath-natural-01-v2.mp3",
+      "kind": "audio",
+      "sha256": "37b129363efbf3b52bea741737fa7b35aaf65cd811e42464a8b34bb82ebff2ae",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/voice-presence/breath-natural-02-v2.mp3",
+      "kind": "audio",
+      "sha256": "82d275197bf2a6b8c7b0c1b23ddf8f96d85e041aa27e6197550e22f6e5538064",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/voice-presence/breath-natural-03-v2.mp3",
+      "kind": "audio",
+      "sha256": "61ad9a978d6e8610fbbe15e6dbd5c80356457f3aad434364210fbd910302e14c",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/bot-frame-base.png",
+      "kind": "image",
+      "sha256": "520ad03d10c91a55f61d6833b8d40bcb57813eef9b3433e65897b710bfdf4070",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/bot-frame-broken-band-mask.png",
+      "kind": "image",
+      "sha256": "714df0863ef5db48aebe7193baa46a1a961236cbec55b78ba0f0d963cec7f188",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/bot-frame-chipped-paint-mask.png",
+      "kind": "image",
+      "sha256": "ea6580228ae405c94868cbc66b2591a33f1fda24af9d45c05f20edbf5d707542",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/bot-frame-diagonal-sweep-mask.png",
+      "kind": "image",
+      "sha256": "99e1c6cc0a11baad1f9bd3510da14b380c61bcbe1389292af8cfaa6260dba2a5",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/bot-frame-led.png",
+      "kind": "image",
+      "sha256": "b37c87cc913507514d9ae7ff3d3847e9b131f56b1bafc5a79e684a7de3768bf7",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/bot-frame-light-base.png",
+      "kind": "image",
+      "sha256": "b8ee0eff4557b04f8cedcddd3d8e0a1684fcf87b733b7ca57f60282025725b5b",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/bot-frame-lower-jaw-mask.png",
+      "kind": "image",
+      "sha256": "f1c58496b2bdaeb1205197b9f7d6e60f4a432aaa45d67cb3fdf501cedf2ea16e",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/bot-frame-metal-mask.png",
+      "kind": "image",
+      "sha256": "42f7373b273015b0efe4b8415b685abae610ee33234991c94f3a5564df0712b7",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/bot-frame-metal.png",
+      "kind": "image",
+      "sha256": "492a72b3d5ea18e85ad0b097f2cf70d5c4245ac6b2ea6ca978961d7013b942a3",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/bot-frame-mini-dark.png",
+      "kind": "image",
+      "sha256": "58fa14b459fa4792e27981874e53ca777a3d8e7d4a745ac67c4c4bd5d2da9b2a",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/bot-frame-mini-light.png",
+      "kind": "image",
+      "sha256": "4357395ae04b0049c046c8aa76782d45281c096a41d3cd747e4472e49feb85a0",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/bot-frame-mini-metal-mask.png",
+      "kind": "image",
+      "sha256": "58f1872e332229d171639589f481676761b3b61c7887c5d63b19e4c0f65b79ac",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/bot-frame-offset-stripe-mask.png",
+      "kind": "image",
+      "sha256": "db7e80a9f421634e81acb7db98491eb7ae442d9162ea253782266f5285436e8e",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/bot-frame-quartered-panels-mask.png",
+      "kind": "image",
+      "sha256": "2b367712a37f7b0671f235a4527f1945b3c95ed9845502a62e7d9df2facb368c",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/bot-frame-screen-grime-mask.png",
+      "kind": "image",
+      "sha256": "30c05a8c60b95cbad3596c6f13529ca6321f9034509bb2eec3d38093d8468303",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/bot-frame-screen-mask-glass.png",
+      "kind": "image",
+      "sha256": "41b5bf391398591f9369becb99a3de7a48d9ac558483449f6527db772634ba4a",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/bot-frame-screen-mask.png",
+      "kind": "image",
+      "sha256": "645fe1c0f6f2b93056533b7010bbbdf8269d6573b17f231f3a54c212f0a11d01",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/bot-frame-side-pods-mask.png",
+      "kind": "image",
+      "sha256": "eee0556c33120624dbe59c52413fe2e805fd2d20a32359c59cc5228117a4d4dd",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/bot-frame-staggered-dashes-mask.png",
+      "kind": "image",
+      "sha256": "5799aa09918dd658937a384514f24ea4d144aa918f2628dee8ef650813994029",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/bot-frame-tint-mask.png",
+      "kind": "image",
+      "sha256": "295ae6a230b6a140d1853812aed20a8878cb47e6db1b9ea531060deb00675f57",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/bot-frame-top-crown-mask.png",
+      "kind": "image",
+      "sha256": "9f33b3afe2e8a26941efd1f570949d367d6e16371c35ecba615ba9de032eb7e8",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/bot-frame-weathered-asymmetric-mask.png",
+      "kind": "image",
+      "sha256": "d2cef0289f48adec54fdc088e1748675e39b45bc57fd3c8b8845f9ebe9a52236",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/bot-frame-weathered-gap-mask.png",
+      "kind": "image",
+      "sha256": "d6cbf7fe011d0223a30785d8230b1c9966004d8b737ab6fd24c33616fae577e4",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/bot-frame-weathered-ring-mask.png",
+      "kind": "image",
+      "sha256": "f37be767039cc0571a4411c21643bc19327005149ba1fced9664c5d1fa8509ff",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/bot-frame-weathered-segments-mask.png",
+      "kind": "image",
+      "sha256": "2d0b809bf87ee6178a163e4dca1fb8dc6b5cb35909509574877095564b14a256",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/glass-v1/glass-profile-01-distortion.png",
+      "kind": "image",
+      "sha256": "1809ab1e800b28b23c312718b58a2f2fff0040ee8cccb19bca65230bc865a048",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/glass-v1/glass-profile-01-residue.png",
+      "kind": "image",
+      "sha256": "7f7ec586c333e9b8249cb3efe7406ed2e09baf9330ad0cc4b3c596dce61bf780",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/glass-v1/glass-profile-02-distortion.png",
+      "kind": "image",
+      "sha256": "d1de71e6d922225e791a700957f83a51f40fe8e5d3764b248845e276dd875586",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/glass-v1/glass-profile-02-residue.png",
+      "kind": "image",
+      "sha256": "b8cda3292b7fd9eeceebceb8e6f77bbec946c0c2920fbe91498e74361e6ed048",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/glass-v1/glass-profile-03-distortion.png",
+      "kind": "image",
+      "sha256": "609319c80aaaa326b3222788008983ba2818603e8bedfe7c8b1a8bc12e1f82b3",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/glass-v1/glass-profile-03-residue.png",
+      "kind": "image",
+      "sha256": "0395cf6a064e389e6bd938263019e3ad2c4bb0f073e709c2a061b6a2a8c14072",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/glass-v1/glass-profile-04-distortion.png",
+      "kind": "image",
+      "sha256": "59e18ba99f5f07d267f0fc068b87ec90f4f51515b189ce59398f82d6e7ec28f1",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/glass-v1/glass-profile-04-residue.png",
+      "kind": "image",
+      "sha256": "80134616251435d002689d8dd4dc498d1b0206c7bc6b5f6efc46234f1e61a205",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/glass-v1/glass-profile-05-distortion.png",
+      "kind": "image",
+      "sha256": "2c30bbd9c46c4f01fe61a8417db4206a36fe91500d41608802e8993b4cf19024",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/glass-v1/glass-profile-05-residue.png",
+      "kind": "image",
+      "sha256": "c91024cb257e671832f27d468c469971b2d031d197ffa0053f72151726e04219",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/glass-v1/glass-profile-06-distortion.png",
+      "kind": "image",
+      "sha256": "5f0aa815e573740a5a02a05a868af3e72a2341d98c9d96e660e0b6b649a1db68",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/glass-v1/glass-profile-06-residue.png",
+      "kind": "image",
+      "sha256": "56453d400b1e06daa0550cf21ed704c7ff8f1f39d19b380427fe07091d208459",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/glass-v1/glass-profile-07-distortion.png",
+      "kind": "image",
+      "sha256": "d30d3cf093272513ade25724f2cd16c2e6b65206c1c3d8a2b68c58e2b9285acb",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/glass-v1/glass-profile-07-residue.png",
+      "kind": "image",
+      "sha256": "237ba9d8de8a1f15489aa2976ff948644962a592e0f2d2ab18f0f864f9855519",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/glass-v1/glass-profile-08-distortion.png",
+      "kind": "image",
+      "sha256": "e06f82f45c52bfcb4ef4def1786a7191f9d7da95306eedbf979b0a9a611bac2a",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/glass-v1/glass-profile-08-residue.png",
+      "kind": "image",
+      "sha256": "afe0061181e1650c12c310097c5bbd8dd5de1ce5dc1ce4d4ecf3cb9d6e765be4",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/glass-v1/glass-profile-09-distortion.png",
+      "kind": "image",
+      "sha256": "2603df810342cebd7ac7b88bce9b5a7f4df27b385e6c5b48eed106ae0068248e",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/glass-v1/glass-profile-09-residue.png",
+      "kind": "image",
+      "sha256": "9228185130f75f93748e975c31fa5ebdfec72f9a3abf8d7dba45317705fe71ef",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/glass-v1/glass-profile-10-distortion.png",
+      "kind": "image",
+      "sha256": "96636f98f6135c51491b4141120e628aad4872dbe962ad0688e970ee60033c74",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/glass-v1/glass-profile-10-residue.png",
+      "kind": "image",
+      "sha256": "9b5361f43e9327b01490a53bc592e13d5054bab4a8b992ea806fc267654bff90",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/glass-v1/glass-profile-11-distortion.png",
+      "kind": "image",
+      "sha256": "43ce677a4e912564528c401b9bf27398124dfd5f841051d43af1c66ce90afe8c",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/glass-v1/glass-profile-11-residue.png",
+      "kind": "image",
+      "sha256": "b9eefff4dcdf51e47aa2d2a29e47faf167d4d5cb777211b09e487218e25d652c",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/glass-v1/glass-profile-12-distortion.png",
+      "kind": "image",
+      "sha256": "1bfd32f1ea00fe7aef3aefff799f836ee18eecd445e372a7f9138f9821514ca0",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "bot-frame/glass-v1/glass-profile-12-residue.png",
+      "kind": "image",
+      "sha256": "d97515c336cfc29ba9a9b8bda6944a2fc94e5330a8175d41cd568c5b255d43ca",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-bar/coffee-bar-dark.webp",
+      "kind": "image",
+      "sha256": "63ecca208a7f35198e9c7c382449f3dd6840566dfd8591eb8dd3c0b0e1360049",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-bar/coffee-bar-light.webp",
+      "kind": "image",
+      "sha256": "f9cf1e1494a0ef70d47a5f636f01ec7fab43ee8ca47d46304a89a740cbc0fd2d",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-cups/coffee_blue_sip.webp",
+      "kind": "image",
+      "sha256": "70ebe70ac4b3c90238a8f2e096b1ebbc1f2517c0d9fe92d1dc0dc1a6d36eda80",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-cups/coffee_blue.webp",
+      "kind": "image",
+      "sha256": "31e4ab5e14ff7ab459ca03173751b61764168d1244c54b8f4dcf00b353b102c1",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-cups/coffee_green_sip.webp",
+      "kind": "image",
+      "sha256": "8d180bb5617e14f6a89fac7a591bf026b6efd6524ca2d55a9371af8341e55ac3",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-cups/coffee_green.webp",
+      "kind": "image",
+      "sha256": "f4d716be5a3b4546e7b46697ad8e57f3210b5d437de175051a0b49f99fc16a30",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-cups/coffee_light_blue_sip.webp",
+      "kind": "image",
+      "sha256": "681f197749c973fcbc6730d9da04fc87b740fb2cbb242a64834be4d75fc17564",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-cups/coffee_light_blue.webp",
+      "kind": "image",
+      "sha256": "2714ff437f93ad49f4d534c4ea28dc060c24d86f9c5502b3ac7e9b27758a7e0e",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-cups/coffee_light_green_sip.webp",
+      "kind": "image",
+      "sha256": "7f10bc2cf22cbcb0c53f7e060e8c8261033ac71725cf33673666d7fa2ccbe54a",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-cups/coffee_light_green.webp",
+      "kind": "image",
+      "sha256": "a858b202579699874fdf10c032e478702b37b1eddf08003f94601f02290614b4",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-cups/coffee_light_orange_sip.webp",
+      "kind": "image",
+      "sha256": "1cc0bc1d7f5a6bef9fc54e3a23af83331e02c761d49418606d0cba2b8e0d1eba",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-cups/coffee_light_orange.webp",
+      "kind": "image",
+      "sha256": "8711f1496b2d861ec249208bb8d3e6dab4ba8675c59d8d084e13adfd67b13844",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-cups/coffee_light_prism_sip.webp",
+      "kind": "image",
+      "sha256": "68266621cdce9047575a2a090318208ccd025682d505c4dfe42c2766fdd3eb06",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-cups/coffee_light_prism.webp",
+      "kind": "image",
+      "sha256": "07ad55aa15cbb96066cd34b966eba31495d63a8d41279429a76b86a8e3d13c65",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-cups/coffee_light_purple_sip.webp",
+      "kind": "image",
+      "sha256": "765e754c3b631e27ed7f777c4b63eea9d80710dd83fc4e1a6df137b46bce841e",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-cups/coffee_light_purple.webp",
+      "kind": "image",
+      "sha256": "636923258f0b1c3f2efc0f034d15966506f22ab1e4525a7ce776a33fa3c92463",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-cups/coffee_light_red_sip.webp",
+      "kind": "image",
+      "sha256": "536607ff5e8fcd33b4079a79868884ac0ce2e77e124de5451b01bc364b851d07",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-cups/coffee_light_red.webp",
+      "kind": "image",
+      "sha256": "a09b48c21155044b071c7ca40c087b0b7befe7800f5c7695ae42822d91a11d89",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-cups/coffee_orange_sip.webp",
+      "kind": "image",
+      "sha256": "bf40e4d43faff2d05aff4e21d273f9a090e7e0c36e0daa74836e8ffb6199bc14",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-cups/coffee_orange.webp",
+      "kind": "image",
+      "sha256": "dfd8fcc5387dd4e3abea8a722bf852716172466b34ab0a86dae94afa79a764d3",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-cups/coffee_prism_sip.webp",
+      "kind": "image",
+      "sha256": "43c922411691820bb965e660de11602087011727975166b60c5ca5038e4910a0",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-cups/coffee_prism.webp",
+      "kind": "image",
+      "sha256": "ce69d387a542697f7ec1e7ffca4daa07dc15ade6ee5d89019016cb4fc580b245",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-cups/coffee_purple_sip.webp",
+      "kind": "image",
+      "sha256": "4fc35af6154a2c44b0f10cb535b1fe611d72684f51402dc5908747947a322407",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-cups/coffee_purple.webp",
+      "kind": "image",
+      "sha256": "feae565644890bcbfa56301a62b991b9e9828e07c4073c44f270a465089a7683",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-cups/coffee_red_sip.webp",
+      "kind": "image",
+      "sha256": "1328d9ab5eec05a7e0831f691ef86c3fb7b6271edf7a70bf3665b6d933859325",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-cups/coffee_red.webp",
+      "kind": "image",
+      "sha256": "a5ecf2989ecc92a7788f346d6e121a89b7fc32b50c10cd2548d12232165b61d2",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-pot/coffee_0.webp",
+      "kind": "image",
+      "sha256": "d49121ba4608b72ea1b885c18afffe43602f46fac957a07de5d8f387d20e1674",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-pot/coffee_1.webp",
+      "kind": "image",
+      "sha256": "0f52c0b707a00d30a9748e926e24d484c63e0591a42714220387ee9178892f75",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-pot/coffee_2.webp",
+      "kind": "image",
+      "sha256": "5f92763c6b13593caf7972c2d0ea304a428eb06680699bf55ad491e4b93c456b",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-pot/coffee_3.webp",
+      "kind": "image",
+      "sha256": "c1ee22702f37f733b8569d8377a380571821cc682bd0874095838fedaff88cb1",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-pot/coffee_4.webp",
+      "kind": "image",
+      "sha256": "8e950caf1c3c0d7d1ec246be4323c468f6883dc410e382168d6e6ef6945e788d",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-pot/coffee_light_0.webp",
+      "kind": "image",
+      "sha256": "b1f3e31ace4f34c9dfa917673403d217880a01a9c18169151175d4b33db93fab",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-pot/coffee_light_1.webp",
+      "kind": "image",
+      "sha256": "d02b5e0df1c9fc116516d42cceb1e22ed7d69aa855cbafa65217e8bdd4780fb2",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-pot/coffee_light_2.webp",
+      "kind": "image",
+      "sha256": "df22d59d90163c2b1e4d8e7089e43f4a1908d16dbc68767fa1ac980507b2e4f2",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-pot/coffee_light_3.webp",
+      "kind": "image",
+      "sha256": "0e1ab1431653f32ea6455fc255b57c1ea8c9c0a8bec2e294dd173af21a5ab0ae",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-pot/coffee_light_4.webp",
+      "kind": "image",
+      "sha256": "8ff34b626b2ac22cd6f5f75691e101f9883807fc05ac8d5092cec5a648f1b303",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-pot/coffee_light_pot_light_pour.webp",
+      "kind": "image",
+      "sha256": "82e594ec1fd55609500a1058085c185f9434876b96989692cffcee04d898cc25",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-pot/coffee_light_pot.webp",
+      "kind": "image",
+      "sha256": "20e3f79e7eed4feff9e076f1abff06e9a303b341ee421fdbdd718335fe55b998",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-pot/coffee_pot_pour.webp",
+      "kind": "image",
+      "sha256": "3f69ef778a785dc11a09037eecf1844d1b1034b0c0c178385c3db855311d7aba",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-pot/coffee_pot.webp",
+      "kind": "image",
+      "sha256": "8b6e281dbcbb02263e138b1787463700713b1b03a07b381ebb7552f53b129a93",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-table/table_dark.png",
+      "kind": "image",
+      "sha256": "c9eb6f37a9992117be82fc6a9b97474630e0b1d893a44c698565bbcce3c2e1ee",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "coffee-table/table_light.png",
+      "kind": "image",
+      "sha256": "d9e1b87a4665befd267082dba3dafdbb6521e5e54e450871eae730d110fb5ff4",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "cursors/cursor_grab_click_native_light_v2.png",
+      "kind": "image",
+      "sha256": "7f4d5bb7c4a2d03474ca312d287bdff14574ba4afa499bb4cc561fa1e9875cef",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "cursors/cursor_grab_click_native_light.png",
+      "kind": "image",
+      "sha256": "4a5157f28b8547ec19a3ab586054988f93400289ce8e2d4b03d95478b6ae9f7f",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "cursors/cursor_grab_click_native_v2.png",
+      "kind": "image",
+      "sha256": "545668dbf68daf4c5481710ca966694ef6cd0c4afc0ac522e55f1e61019a1a66",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "cursors/cursor_grab_click_native.png",
+      "kind": "image",
+      "sha256": "2d59035586cdc4365250b21f34964ff82ce4214059a7ee04009824b0d641b227",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "cursors/cursor_grab_click.png",
+      "kind": "image",
+      "sha256": "f49cce406fd48daf8837813af149377d12e66bfd0964ee475856579e3efed1c8",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "cursors/cursor_grab_native_light_v2.png",
+      "kind": "image",
+      "sha256": "712087540314a6c9521fe9f0b48a11d7955d996d7bec8d96bf09625493411f1b",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "cursors/cursor_grab_native_light.png",
+      "kind": "image",
+      "sha256": "e5c50eac01ef304b3695ef1b8e202c5ab9c4242dfc7c253e3b71496e7b5b90e9",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "cursors/cursor_grab_native_v2.png",
+      "kind": "image",
+      "sha256": "d672aeceadede69308e7b12c6f3e670af24e2cadb0917a7c8ae5feac63fcc140",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "cursors/cursor_grab_native.png",
+      "kind": "image",
+      "sha256": "4d0e1e81a9b4264f51939f0d0105fc2b3a927f65d13b530a573b516ec8100022",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "cursors/cursor_grab.png",
+      "kind": "image",
+      "sha256": "013abf9ce81763afdd2a0c2f32614d5f6cbc3dcb1853e10849c3faf502fe0cb5",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "cursors/cursor_link_native_light_v2.png",
+      "kind": "image",
+      "sha256": "58cfed291ccd7c4fbc1572ad5c3500aa5fd41ae08af903841aef95fad8a4e249",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "cursors/cursor_link_native_light.png",
+      "kind": "image",
+      "sha256": "2a76ecf94ea5a784ccd318ec459e33afe2b1c6eeed902dca6dccccf68e11809b",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "cursors/cursor_link_native_v2.png",
+      "kind": "image",
+      "sha256": "9a6a991d72aac3c71fbcc94a6437de3ab12f8b00b729826ce4913343de9bc232",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "cursors/cursor_link_native.png",
+      "kind": "image",
+      "sha256": "38ae587e9174a072f0b2364bd6706e834a8b2b1cad1d3f48265ca47b1d6bee0b",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "cursors/cursor_link.png",
+      "kind": "image",
+      "sha256": "b96244e074c370228d8d7472d05fbec712fa52e2195fec1330a500e979959223",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "cursors/cursor_normal_native_light_v2.png",
+      "kind": "image",
+      "sha256": "67509a247af569e03cb232205fd1be93f2a36d9a4dfeaab1f6ca17fc98e4f00e",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "cursors/cursor_normal_native_light.png",
+      "kind": "image",
+      "sha256": "dfa4d83317ebce1dfce3fd88d7f8f756b688d406982e9be484601c68c591be3e",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "cursors/cursor_normal_native_v2.png",
+      "kind": "image",
+      "sha256": "f4489fa31220fcfe62d965124355920601fdd462678be9cfd80c50aba1b7995b",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "cursors/cursor_normal_native.png",
+      "kind": "image",
+      "sha256": "b699e56e8e8a8cad2d4b1dec654b158bac354bf059f3f0f62e558966c299a8b0",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "cursors/cursor_normal.png",
+      "kind": "image",
+      "sha256": "de02f3eef69364191b1d1fa6733253b81e716cfc280bf068407a18aa3692d5c9",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "cursors/cursor_type_native_light_v2.png",
+      "kind": "image",
+      "sha256": "fcb337fb601bd63a519f25e0a3a0d59e492b2ab3e19e59b2f1abcc7a364faa75",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "cursors/cursor_type_native_light.png",
+      "kind": "image",
+      "sha256": "3e187095252035a75a1f995f5d8f2fc2308e9ffae92773e4586e4ab65a0056f1",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "cursors/cursor_type_native_v2.png",
+      "kind": "image",
+      "sha256": "bc45cd8090840ea9642a4693c4de7145032eb25051004f419d6550b009da6b99",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "cursors/cursor_type_native.png",
+      "kind": "image",
+      "sha256": "78b70b85a7d3727d34a96e120ac84043a32cac2bd202165f74b5daf753229161",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "cursors/cursor_type.png",
+      "kind": "image",
+      "sha256": "2fca1a47118827232c4ca053128bb56c08c5494e17f6184068f88d2f667871cd",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/forum-dark-foreground.png",
+      "kind": "image",
+      "sha256": "d8f8d98b71cfbe73f40b764631030bb4c134c8675da444849fa28751191d80a0",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/forum-dark.webp",
+      "kind": "image",
+      "sha256": "bafdf6bf5e82956efafc5539d5e2e5c9b461667caddd99057e5be0711bcbff01",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/forum-light-foreground.png",
+      "kind": "image",
+      "sha256": "73bbcdef105e23e8f4773411afdf174332f7746a588c95c1a38e06159e55a022",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/forum-light-mask-foreground.png",
+      "kind": "image",
+      "sha256": "e625be4411be9e69edb5b6fb86c1ffc4cfc97e1a830a4b3e2a26417329191b2a",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/forum-light-mask.png",
+      "kind": "image",
+      "sha256": "49994ffcbff434aa8769837d9e5306dc85ab5b54fa241ebf4de94220acc7f9a3",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/forum-light.webp",
+      "kind": "image",
+      "sha256": "6591f09de9f47114cbde84843ba103a0ec565469ca9c9d16614070ec61214e1e",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/gallery-chamber-dark.webp",
+      "kind": "image",
+      "sha256": "6cb76ffea3955b87d587988cca6fe2f2ae7ba936c3ab01ebf5ae9daa5f42bc62",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/gallery-chamber-light.webp",
+      "kind": "image",
+      "sha256": "856416731fec5e7a1e092135652025b4470884f37a98be82b3f8f086c2795bc6",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/moderator-dark-foreground.png",
+      "kind": "image",
+      "sha256": "7aea09bfde689b127ab8ec6f38a6ad669ff0b41c4e53b99a9cc28de968402e08",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/moderator-dark.webp",
+      "kind": "image",
+      "sha256": "cec873500215c61be392f5cd77653d9d362a7fc67f9e5b4337c03e74dea5e2c0",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/moderator-gavel-dark-down.png",
+      "kind": "image",
+      "sha256": "ce5af0d9d3847d9f206b1afb8c680f35ddc6e0be5841a991c4eb129376de275f",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/moderator-gavel-dark-tint-mask.png",
+      "kind": "image",
+      "sha256": "1ae6bedb942fcc775bb7ee3a5c2a4f669f8b1345a9294db4b4d0eacd2e0b8669",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/moderator-gavel-dark-up.png",
+      "kind": "image",
+      "sha256": "d90a03eef031edde7a21077218032bc9fe1773e9f815f2575952277b29bdaf84",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/moderator-gavel-dark.png",
+      "kind": "image",
+      "sha256": "3ca3c23486698fd1cd2999bc8151fd6ff4c0a1901b2c697df5b8e43b69d4d8bf",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/moderator-gavel-light-down.png",
+      "kind": "image",
+      "sha256": "b3398d3eff3c1a26a1c6f78d2508cfafd8027b8d62a9f49accd9a3200e93ce83",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/moderator-gavel-light-tint-mask.png",
+      "kind": "image",
+      "sha256": "dc78c70e2bc9646f55d84a0be3bcc47a1367d9c1f802a02733637348d1372c94",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/moderator-gavel-light-up.png",
+      "kind": "image",
+      "sha256": "57128ce148ee60b4203bccf4841133fdbb9138e24fc3d198cc58648b3b814624",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/moderator-gavel-light.png",
+      "kind": "image",
+      "sha256": "761963a66b471f5b493a71a109f91b42cc1cf6af9c5ac5e3abbb95cf9013507f",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/moderator-light-foreground.png",
+      "kind": "image",
+      "sha256": "8030a88f56009b7b46a45a37061b18975d3a50c9f8b8e899fbbe285fadb9b535",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/moderator-light-mask-foreground.png",
+      "kind": "image",
+      "sha256": "a6d04d654705de1525544fe8131977904d1f144e89201f6c72225fb7826d7355",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/moderator-light-mask.png",
+      "kind": "image",
+      "sha256": "8d8d04612efeff3524f86bc35b4d981a45bd94117a68fe3cc70b0165fddc838a",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/moderator-light.webp",
+      "kind": "image",
+      "sha256": "02e31f3ba2b1ee35c4bca6567c2a4d353e7d0a09859a520bc68f33f5d9b530de",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "icon-192.png",
+      "kind": "image",
+      "sha256": "af3a3fcf098633e33b03a595acb054d25ac23ba1f274a1b3c3f599b832c38ffd",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "icon-512.png",
+      "kind": "image",
+      "sha256": "0c60f9cc5cf757893cd0d7e3ffde7f93658a9ed0c5b53d6be591d6807c2f396b",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "icon-triangle.svg",
+      "kind": "vector-art",
+      "sha256": "53414c8ac04934039f98c414cd46481446694261b22df7a3b1cac050fb14a50d",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "icon.jpg",
+      "kind": "image",
+      "sha256": "3f3ae8bc29aed7318c7cfee2906eb67d48f92da58796a4c583cbc67784ad238c",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "prism-intro/01-border.webp",
+      "kind": "image",
+      "sha256": "3f26b9985b1ceda986fdbfa1f61cedbd565a6eeb8c0db1a7df082732a34b0ac8",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "prism-intro/02-threshold.webp",
+      "kind": "image",
+      "sha256": "09de5d55b48c0975eed1d47f02986ca1ee53535237b57bf1229e6f25c8572315",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "prism-intro/03-instruments.webp",
+      "kind": "image",
+      "sha256": "3039d7087ea6428cde7a0e19487dd904142d40787c16825741c4593e6f0815fe",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "prism-intro/04-waiting-light.webp",
+      "kind": "image",
+      "sha256": "522f3c9a72e1438bdb18620ac8c7831f301142a74096ad66b72ae797b08a622d",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "prism-intro/05-refraction.webp",
+      "kind": "image",
+      "sha256": "1aa983cc430d53744d87335f63b37bfb6862e869a080ad7eba5cb5158ee440c6",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "prism-intro/06-inhabitants.webp",
+      "kind": "image",
+      "sha256": "df38781f14827795ccf17cc3949cbf808926d729d85cc65070e1fef6d9e48481",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "prism-intro/07-interplay.webp",
+      "kind": "image",
+      "sha256": "a84c90a4bee0cb85601bd0f502d440864d85d301104309fb93f3236498b8814f",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "prism-intro/08-enter.webp",
+      "kind": "image",
+      "sha256": "c042852a65238664af545b7bce27fbe0c532ad4caa1b5f3e100c4f3c8e108001",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "reasoning-effort/default.svg",
+      "kind": "vector-art",
+      "sha256": "c77fb311d26eaeb380767ee9d82e0dc2964cc9402d4a51372214a462ad43d0c0",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "reasoning-effort/high.svg",
+      "kind": "vector-art",
+      "sha256": "c1efe0405566b9cb94bb0496dd66ba50aa83b3c2193c625ee3805a3eb86d4190",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "reasoning-effort/low.svg",
+      "kind": "vector-art",
+      "sha256": "4e9dfc9a3dc83fb0f9edd595a81c894c991f43b20bf0a18c81979d03f882a62c",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "reasoning-effort/max.svg",
+      "kind": "vector-art",
+      "sha256": "a18c4650ef5a12248a4cea9b58c9253e4899ad1e3fa379157cc9e71a3c108113",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "reasoning-effort/medium.svg",
+      "kind": "vector-art",
+      "sha256": "46c5c6ef6ad8b8bec5349f17d4f136cb2cf25a12ae16572b385198a2b5ef7260",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "reasoning-effort/minimal.svg",
+      "kind": "vector-art",
+      "sha256": "10205edd8e166e58bfc8fa00a599b4ec5f9afdd15d85a82f0676f32ccbead01e",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "reasoning-effort/none.svg",
+      "kind": "vector-art",
+      "sha256": "9382f7aa7655ad308bb28e9ffee8820a487f188f1ce4c00da0efeafe136b1bc6",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "reasoning-effort/xhigh.svg",
+      "kind": "vector-art",
+      "sha256": "c1b064066b39858b0288da9702f247b1ad41456cd859a1a0dea510ee0dec6315",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "refraction-emblem.svg",
+      "kind": "vector-art",
+      "sha256": "d46e9c4ae0ad24819cbd5cc6ab6d524d8c990e5a831a2c19ab6ac0cc66be913d",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "signal-film-grain.svg",
+      "kind": "vector-art",
+      "sha256": "4255caa052e80e8d72af8d9c484f5d25960fe33cdd5d482dc76aff81566952d8",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "signal-studio/accent-masks/broadcast-circuit.png",
+      "kind": "image",
+      "sha256": "e95c63fa99cf26de2dbb5449943a4be2b0a55eb6f9239faa5239cfd81dc15273",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "signal-studio/accent-masks/quiet-frame.png",
+      "kind": "image",
+      "sha256": "c5dd510b55db2c230b6444fcc60899217488b9eae921b73019e17ab522dd6cce",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "signal-studio/accent-masks/shelf-rhythm.png",
+      "kind": "image",
+      "sha256": "01253152a7c59569b726742537f93b7fdb35574b6854d42e5398f8b0aa05a34b",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "signal-studio/studio_dark.webp",
+      "kind": "image",
+      "sha256": "ccbb21cd7e932ec095e85bb4197ffc525d821e577bb56ffd05fa5916a4a72e86",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "signal-studio/studio_light.webp",
+      "kind": "image",
+      "sha256": "701c91e661b3ab739e6eaecdb88138fa308e749b39468496a4311f8082579d4c",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "story-themes/prism_default/background_reference_exterior.webp",
+      "kind": "image",
+      "sha256": "be5a859e7b1273ddb63e616d514974739322d19f579b16da5db6f1e7de12c500",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "story-themes/prism_default/background_reference_interior.webp",
+      "kind": "image",
+      "sha256": "c254cdae996b44410c38eb71e429f1cabb6d0f4782d6f1b315440df57027c78b",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "story-themes/prism_default/background_reference_liminal.webp",
+      "kind": "image",
+      "sha256": "f2be70054150179e836d3d51c04c6495f68be36a032c7da01e54865fee29f9b3",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "story-themes/prism_default/cutscene_reference.webp",
+      "kind": "image",
+      "sha256": "a65c044dadaffd2441d49659b0754594949945adebc9b95e5b6f74117d8d0330",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "story-themes/prism_default/map_style_reference.webp",
+      "kind": "image",
+      "sha256": "2221eb9952569983be3f10b376a8b743b0545f72ca18eeddc446d4e45ce62cea",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "story-themes/prism_default/projection_fallback.webp",
+      "kind": "image",
+      "sha256": "3201fedec76f498e1c4555dddac142cc62394044e0263df00955ae3f4afa04c1",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "story-themes/prism_default/sprite_fallback_silhouette.webp",
+      "kind": "image",
+      "sha256": "f623d1fd6efe8d49ac49777808f8cfe5b1ac5c7fd8abd592dfb7381bd04391ec",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "story-themes/prism_default/sprite_reference_sheet.webp",
+      "kind": "image",
+      "sha256": "333e061db3fd73652189a536cb9a2ff19784b4d820012226740fdc780d9f1313",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "ui/turbo-fire-loop.gif",
+      "kind": "image",
+      "sha256": "c9f824d1d1b880003ffb1e60a3a8d89a6b3149d8d9c74cb6fdf00a2d95111378",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "ui/turbo-fire-loop.webp",
+      "kind": "image",
+      "sha256": "673ef03d8330a5d7eaf5a8b1db638af702979beff498f178640c6358ea078524",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "ui/turbo-fire-still.png",
+      "kind": "image",
+      "sha256": "c7e42c1f3b327cc61db3ebf0d673ab498f77a32c09cb031c83daf2474492060a",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "voice/pronunciation-atlas-earth-equirectangular-v2.svg",
+      "kind": "vector-art",
+      "sha256": "ac8d3bad159427b040360aea0fa6daad4966484c5ec03839c95ac1c84a64cfd6",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "wordmark.svg",
+      "kind": "vector-art",
+      "sha256": "f659fb9bc3d01f3a67e5956a53c2d32375f822a6d2302abe50dda1ffc61257d6",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "zen-fallback-wallpapers/mineral-aurora.webp",
+      "kind": "image",
+      "sha256": "30c6f63ccbd0caa8063e443cae9c65ab8fbf19044a6e11e4edf2b586ae1dbdc0",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "zen-fallback-wallpapers/ocean-haze.webp",
+      "kind": "image",
+      "sha256": "3fcd158f7a25bfbeed58cbfc816b0c2fec095bcce1f3c09f7200109a853608ed",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "zen-fallback-wallpapers/paper-grain-wash.webp",
+      "kind": "image",
+      "sha256": "9595b5744c4080a01797940bd7aa46306c9455770d8df0e65cc7d07b1b274311",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "zen-fallback-wallpapers/prismatic-mist.webp",
+      "kind": "image",
+      "sha256": "6a7427ca55c2363e88f6d570a95001b04cdc6220f638af2a827f90a85088c16a",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "zen-fallback-wallpapers/soft-glass-light.webp",
+      "kind": "image",
+      "sha256": "6e200c3f7d6c0bc8d479a54c962bd57a1d50c11f0083b61186d118061b812592",
+      "provenanceProfile": "aurelius-production"
+    }
+  ]
+}

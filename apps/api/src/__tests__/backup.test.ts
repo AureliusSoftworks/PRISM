@@ -577,7 +577,11 @@ describe("backup Auto model settings", () => {
         "SELECT auto_switch_model, auto_fallback_chain FROM users WHERE id = ?"
       ).get("user-1") as { auto_switch_model: number; auto_fallback_chain: string | null };
       assert.equal(restored.auto_switch_model, 1);
-      assert.deepEqual(JSON.parse(restored.auto_fallback_chain ?? "null"), chain);
+      assert.deepEqual(JSON.parse(restored.auto_fallback_chain ?? "null"), {
+        v: 2,
+        local: [chain.fallbacks[0]],
+        online: [chain.fallbacks[1]],
+      });
     });
   });
 
@@ -1108,9 +1112,16 @@ describe("backup bot avatar face style", () => {
           face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count,
           face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg,
           face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg,
-          face_thinking_frames,
+          face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?
+        )`
       ).run(
         "bot-1",
         "user-1",
@@ -1143,6 +1154,9 @@ describe("backup bot avatar face style", () => {
         0.06,
         -40,
         '["·","*","✦","*"]',
+        1.3,
+        -0.08,
+        0.04,
         "2026-01-01T00:00:00.000Z",
         "2026-01-01T00:00:00.000Z"
       );
@@ -1218,7 +1232,23 @@ describe("backup bot avatar face style", () => {
             enabled: true,
             baseVoiceId: "voice-1",
             elevenLabsEffect: "chorus",
+            accentLocale: "en-US",
+            accentMode: "prefer-genuine",
+            brightness: 0,
+            corporality: 0.5,
+            localEnginePreference: "inherit",
+            localVoiceSource: "portable",
+            openness: 0,
+            premiumLilt: 0,
+            premiumPace: 0,
+            premiumPitch: 0,
             pitch: 0,
+            pronunciationBase: "follow-voice",
+            resonance: 0,
+            speechprintInfluence: "none",
+            speechprintStrength: "balanced",
+            speechprintVariationSeed: "natural-v1",
+            weight: 0,
           warmth: 0,
           pace: 0,
           lilt: 0,
@@ -1629,9 +1659,9 @@ describe("backup audio voice settings", () => {
       assert.equal(restoredUser.voice_effects_enabled, 0);
       assert.equal(restoredUser.voice_volume, 0.65);
       assert.equal(restoredUser.operating_system_voices_enabled, 1);
-      assert.equal(JSON.parse(restoredUser.prism_default_bot_audio_voice_profile ?? "{}").baseVoiceId, "voice-5");
-      assert.equal(JSON.parse(restoredUser.prism_default_bot_audio_voice_profile ?? "{}").elevenLabsEffect, "radio");
-      assert.equal(JSON.parse(restoredUser.prism_default_bot_audio_voice_profile ?? "{}").elevenLabsVoiceInitialized, true);
+      assert.equal(JSON.parse(restoredUser.prism_default_bot_audio_voice_profile ?? "{}").local.archetypeId, "voice-5");
+      assert.equal(JSON.parse(restoredUser.prism_default_bot_audio_voice_profile ?? "{}").delivery.effect, "radio");
+      assert.equal(JSON.parse(restoredUser.prism_default_bot_audio_voice_profile ?? "{}").premium.initialized, true);
       assert.equal(restoredUser.english_voice_engine, "elevenlabs");
       assert.equal(restoredUser.default_system_voice_name, "Alex");
       assert.equal(restoredUser.default_elevenlabs_voice_id, "eleven-global");
@@ -1639,17 +1669,17 @@ describe("backup audio voice settings", () => {
       assert.equal(restoredUser.elevenlabs_voice_collection_id, "collection-main");
       assert.equal(JSON.parse(restoredUser.elevenlabs_voice_bank ?? "{}")["voice-1"], "eleven-a");
       assert.equal(restoredUser.zen_player_voice_enabled, 1);
-      assert.equal(JSON.parse(restoredUser.player_audio_voice_profile ?? "{}").baseVoiceId, "voice-3");
+      assert.equal(JSON.parse(restoredUser.player_audio_voice_profile ?? "{}").local.archetypeId, "voice-3");
       assert.equal(restoredUser.player_name_pronunciation, "Keep me");
 
       const restoredBot = db.prepare(
         "SELECT authored_audio_voice_profile, audio_voice_profile_override FROM bots WHERE id = ?"
       ).get("voice-bot") as Record<string, string>;
-      assert.equal(JSON.parse(restoredBot.authored_audio_voice_profile).baseVoiceId, "voice-4");
-      assert.equal(JSON.parse(restoredBot.authored_audio_voice_profile).elevenLabsEffect, "echo");
-      assert.equal(JSON.parse(restoredBot.audio_voice_profile_override).baseVoiceId, "voice-2");
-      assert.equal(JSON.parse(restoredBot.audio_voice_profile_override).elevenLabsEffect, "robot");
-      assert.equal(JSON.parse(restoredBot.audio_voice_profile_override).elevenLabsVoiceInitialized, true);
+      assert.equal(JSON.parse(restoredBot.authored_audio_voice_profile).local.archetypeId, "voice-4");
+      assert.equal(JSON.parse(restoredBot.authored_audio_voice_profile).delivery.effect, "echo");
+      assert.equal(JSON.parse(restoredBot.audio_voice_profile_override).local.archetypeId, "voice-2");
+      assert.equal(JSON.parse(restoredBot.audio_voice_profile_override).delivery.effect, "robot");
+      assert.equal(JSON.parse(restoredBot.audio_voice_profile_override).premium.initialized, true);
     });
   });
 });
@@ -2373,7 +2403,7 @@ describe("backup spectral Power compatibility", () => {
       assert.equal(exportedPower?.compiled?.sourceHash, sourceHash);
       assert.deepEqual(exportedPower?.compiled?.effects, [
         legacyPowers[0]!.compiled.effects[0],
-        { type: "avatar_visibility", mode: "translucent" },
+        { type: "avatar_visibility", mode: "hidden" },
       ]);
 
       db.prepare("UPDATE bots SET powers_json = '[]' WHERE id = ?").run(

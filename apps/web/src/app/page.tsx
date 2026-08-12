@@ -36,6 +36,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { LUCIDE_BOT_GLYPHS, LUCIDE_BOT_GLYPH_ORDER } from "./glyphCatalog";
 import GlyphTooltipLayer from "./GlyphTooltipLayer";
 import { BackendUnavailableNotice } from "./BackendUnavailableNotice";
+import IdentityPresentationBlackout from "./IdentityPresentationBlackout";
 import {
   BOT_FRAME_FINISH_RECIPES,
   PRISM_FACTORY_CLEAN_FRAME_SEED,
@@ -253,6 +254,7 @@ import {
 import { CoffeeSeatPlateEmoji } from "./CoffeeSeatPlateEmoji";
 import { PhosphorPixelSvgGlyph } from "./PhosphorPixelGlyph";
 import { PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX } from "./phosphorPixelRaster";
+import { botScreenGlassProfileForSeed } from "./botScreenGlass";
 import { BotCreationRitual } from "./BotCreationRitual";
 import { AdjustmentPad } from "./AdjustmentPad";
 import { PronunciationAtlas } from "./PronunciationAtlas";
@@ -883,12 +885,17 @@ import {
 } from "./SettingsPanel";
 import { StorageSettings } from "./StorageSettings";
 import { MemorySettings } from "./MemorySettings";
-import { AssetRail } from "./AssetLibrary";
+import {
+  AssetRail,
+  type AssetGenerationOption,
+  type AssetGenerationSelection,
+  type AssetRailGenerationControl,
+} from "./AssetLibrary";
 import {
   prismActionLabel,
   prismActionStatusLabel,
 } from "./prismActionPresentation";
-import type { ImageAssetSet } from "@localai/shared";
+import type { ImageAssetKind, ImageAssetSet } from "@localai/shared";
 import {
   BOT_FACT_KEY_LABELS,
   BOT_GENERATION_PROMPT_MAX_LENGTH,
@@ -1051,7 +1058,6 @@ import {
   botPowerMetaSigilFromEffectsV1,
   botPowerMetaSigilV1,
   botPowerAuthoringParadoxHintV1,
-  BOT_IDENTITY_MIRROR_TRANSITION_MS,
   BOT_IDENTITY_SHAPESHIFT_TRANSITION_MS,
   botIdentityMirrorTransitionActiveV1,
   botIdentityShapeshiftTransitionActiveV1,
@@ -1139,6 +1145,7 @@ import {
   type CoffeeReplayTopOffEventPayload,
   type CoffeeUserActionPayload,
   type CoffeeSessionDurationMinutes,
+  type CoffeeExperienceMode,
   type CoffeeSessionSettings,
   type CoffeeGroupAtmosphere,
   type CoffeeGroupSetupSuggestionV1,
@@ -1668,6 +1675,11 @@ import {
   type ZenLiveBotDragVelocitySample,
   type ZenLiveBotFreeRoamMotionState,
 } from "./zenLiveBotFreeRoam";
+import {
+  zenHomeDirectSelectionVisible,
+  zenHomeDockState,
+  zenHomeDropTargetContainsPoint,
+} from "./zenHomeDock";
 import {
   applyPrismBotLinkBackspace,
   applyPrismBotLinkBoundaryDelete,
@@ -2794,9 +2806,9 @@ const ZEN_LIVE_BOT_AVATAR_MIN_SIZE_PX = 94;
 const ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX = 184;
 const ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX = 240;
 const ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX = 480;
-// Zen's authored 480px default is comfortably dominant without crowding the
-// reading room. Keep one deliberate 40px step above it, never the old 640px.
-const ZEN_LIVE_BOT_AVATAR_MAX_SIZE_PX = 520;
+// The authored default is also the ceiling: it already reads as a dominant
+// presence without allowing the chassis to crowd the room any further.
+const ZEN_LIVE_BOT_AVATAR_MAX_SIZE_PX = 480;
 const ZEN_LIVE_BOT_AVATAR_SIZE_STEP_PX = 24;
 const ZEN_LIVE_BOT_AVATAR_LEGACY_MIN_SIZE_PX = 118;
 const ZEN_LIVE_BOT_AVATAR_LEGACY_MAX_SIZE_PX = 300;
@@ -3010,6 +3022,7 @@ const ZEN_LIVE_BOT_AVATAR_SURFACE_SELECTOR = "[data-zen-surface='true']";
 const ZEN_LIVE_BOT_AVATAR_DRAG_BLOCKED_SELECTOR = [
   "[data-zen-live-bot-composer-boundary='true']",
   "[data-zen-live-bot-drag-exclusion='top-bar']",
+  "[data-zen-home-drop-target='true']",
 ].join(", ");
 const ZEN_LIVE_BOT_AVATAR_DRAG_INTERACTIVE_SELECTOR = [
   PRISM_APP_CURSOR_TEXT_SELECTOR,
@@ -3141,6 +3154,34 @@ function normalizeZenLiveBotAvatarSizePx(value: unknown): number {
       : ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX;
   }
   return bounded;
+}
+
+function resizeZenLiveBotAvatarSizePx(
+  value: unknown,
+  direction: "grow" | "shrink",
+): number {
+  const current = normalizeZenLiveBotAvatarSizePx(value);
+  // The full and mini chassis have intentionally separate authored ranges.
+  // Cross that gap explicitly so repeated size steps cannot get stuck at the
+  // smallest full avatar or largest mini avatar.
+  if (
+    direction === "shrink" &&
+    current === ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX
+  ) {
+    return ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX;
+  }
+  if (
+    direction === "grow" &&
+    current === ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX
+  ) {
+    return ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX;
+  }
+  return normalizeZenLiveBotAvatarSizePx(
+    current +
+      (direction === "grow"
+        ? ZEN_LIVE_BOT_AVATAR_SIZE_STEP_PX
+        : -ZEN_LIVE_BOT_AVATAR_SIZE_STEP_PX),
+  );
 }
 
 function migrateLegacyZenLiveBotAvatarSizePx(value: unknown): number {
@@ -8200,16 +8241,30 @@ function resolveBotAvatarDetails(
 }
 
 function botScreenMaterialSeedForBot(
-  _bot: Pick<Bot, "id" | "export_hash"> | null | undefined,
-  _fallbackSeed: string,
+  bot:
+    | {
+        id?: string;
+        export_hash?: string | null;
+        replayVisualSnapshot?: ReplayBotVisualSnapshotV1 | null;
+      }
+    | null
+    | undefined,
+  fallbackSeed: string,
 ): string {
-  return "bot-screen-material:shared-curved-glass";
+  const replaySeed = bot?.replayVisualSnapshot?.screenMaterialSeed;
+  if (replaySeed) return replaySeed;
+  const exportHash = normalizeImportedBotHash(bot?.export_hash);
+  if (exportHash) return `bot-screen-material:export:${exportHash}`;
+  const botId = bot?.id?.trim();
+  if (botId) return `bot-screen-material:id:${botId}`;
+  return `bot-screen-material:fallback:${fallbackSeed.trim() || "preview"}`;
 }
 
 function botScreenMaterialStyle(
   seed: string | null | undefined,
 ): CSSProperties {
   const normalizedSeed = seed?.trim() || "bot-screen-material:shared-curved-glass";
+  const glassProfile = botScreenGlassProfileForSeed(normalizedSeed);
   const rotation = (
     (stableUnitValue(`${normalizedSeed}:grime:rotation`) - 0.5) *
     9
@@ -8232,12 +8287,28 @@ function botScreenMaterialStyle(
     ["--bot-face-crt-grime-scale" as string]: scale,
     ["--bot-face-crt-grime-opacity" as string]: "0.24",
     ["--bot-face-crt-grime-blur" as string]: "0.16px",
+    ["--bot-screen-glass-residue-image" as string]: `url("${glassProfile.residueUrl}")`,
+    ["--bot-screen-glass-distortion-image" as string]: `url("${glassProfile.distortionUrl}")`,
+    ["--bot-screen-glass-profile-rotation" as string]: `${glassProfile.rotationDeg}deg`,
+    ["--bot-screen-glass-residue-opacity" as string]: String(
+      glassProfile.residueOpacity,
+    ),
+    ["--bot-screen-glass-distortion-opacity" as string]: String(
+      glassProfile.distortionOpacity,
+    ),
+    ["--bot-screen-glass-distortion-blur" as string]: `${glassProfile.distortionBlurPx}px`,
   } as CSSProperties;
 }
 
 function botFrameMaterialSeedForBot(
   bot:
-    Pick<Bot, "id" | "export_hash" | "replayVisualSnapshot"> | null | undefined,
+    | {
+        id?: string;
+        export_hash?: string | null;
+        replayVisualSnapshot?: ReplayBotVisualSnapshotV1 | null;
+      }
+    | null
+    | undefined,
   fallbackSeed: string,
 ): string {
   const replaySeed = bot?.replayVisualSnapshot?.frameMaterialSeed;
@@ -9892,7 +9963,7 @@ type ZenPrivateReturnCheckpoint = {
   botOpinion: BotOpinion | null;
 };
 
-/** POST /api/chat success envelope — `conversationStarters` only appears after “Talk to me!”. */
+/** POST /api/chat success envelope — `conversationStarters` accompanies a server starter turn. */
 interface ChatPostEnvelope {
   conversation: ConversationDetail;
   conversationStarters?: string[];
@@ -10603,6 +10674,58 @@ interface MemoryAcquisitionReceiptView {
   createdAt: string;
   readAt: string | null;
   memory?: UserMemory;
+}
+
+const DEBATE_MEMORY_RECEIPT_BADGE_DURATION_MS = 5_000;
+
+function LiveBotMemoryReceiptChip(props: {
+  receipt: MemoryAcquisitionReceiptView;
+  botName: string;
+  transient?: boolean;
+  onOpen: (receipt: MemoryAcquisitionReceiptView) => void;
+}): React.JSX.Element | null {
+  const [visibleReceiptId, setVisibleReceiptId] = useState<string | null>(
+    props.receipt.id,
+  );
+  const [focused, setFocused] = useState(false);
+  const visible = visibleReceiptId === props.receipt.id;
+
+  useEffect(() => {
+    setVisibleReceiptId(props.receipt.id);
+  }, [props.receipt.id]);
+
+  useEffect(() => {
+    if (!props.transient || !visible || focused) return;
+    const timeout = window.setTimeout(
+      () => setVisibleReceiptId(null),
+      DEBATE_MEMORY_RECEIPT_BADGE_DURATION_MS,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [focused, props.transient, visible]);
+
+  if (!visible) return null;
+  const label = `${props.botName} learned something new about another bot`;
+  return (
+    <span className={styles.liveBotMemoryReceiptAnnouncement} aria-live="polite" aria-atomic="true">
+      <button
+        type="button"
+        className={styles.liveBotMemoryReceiptChip}
+        data-memory-acquisition-receipt="true"
+        data-transient={props.transient ? "true" : undefined}
+        aria-label={label}
+        title={label}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          props.onOpen(props.receipt);
+        }}
+      >
+        !
+      </button>
+    </span>
+  );
 }
 
 type MemoryCategory = "general" | "user" | "bot_relation";
@@ -17720,6 +17843,28 @@ function resolveAssistantMessageAudioVoiceProfile(args: {
   );
 }
 
+function resolveBotcastBorrowedIdentityVoiceProfile(args: {
+  botSummary: Pick<
+    BotcastBotSummary,
+    "identityMirrorState" | "identityShapeshiftState"
+  >;
+  holderAuthoredVoice: unknown;
+  holderVoiceOverride: unknown;
+}): ReturnType<typeof resolveBotAudioVoiceProfileV1> {
+  if (args.botSummary.identityMirrorState) {
+    return resolveBotIdentityMirrorVoiceV1(
+      args.botSummary.identityMirrorState,
+      args.holderAuthoredVoice,
+      args.holderVoiceOverride,
+    );
+  }
+  return resolveBotIdentityShapeshiftVoiceV1(
+    args.botSummary.identityShapeshiftState,
+    args.holderAuthoredVoice,
+    args.holderVoiceOverride,
+  );
+}
+
 function botWithIdentityShapeshiftPresentation(
   bot: Bot,
   state: BotIdentityShapeshiftStateV1 | null | undefined,
@@ -17727,6 +17872,10 @@ function botWithIdentityShapeshiftPresentation(
   if (!state || state.holderBotId !== bot.id) return bot;
   return {
     ...bot,
+    color: state.targetColor ?? bot.color,
+    glyph: Object.prototype.hasOwnProperty.call(state, "targetGlyph")
+      ? (state.targetGlyph ?? null)
+      : bot.glyph,
     authored_audio_voice_profile: state.targetVoice,
     audio_voice_profile_override: null,
     replayVisualSnapshot: {
@@ -17737,11 +17886,35 @@ function botWithIdentityShapeshiftPresentation(
         resolveBotAvatarDetails(bot),
         true,
       ),
-      voicePreset: coffeeSeatVoicePreset(bot),
+      voicePreset: state.targetVoicePreset ?? coffeeSeatVoicePreset(bot),
       screenMaterialSeed: botScreenMaterialSeedForBot(bot, bot.id),
-      frameMaterialSeed: botFrameMaterialSeedForBot(bot, bot.id),
+      frameMaterialSeed:
+        state.targetFrameMaterialSeed ?? botFrameMaterialSeedForBot(bot, bot.id),
     },
   };
+}
+
+function useIdentityPresentationBlackout(
+  state: BotIdentityShapeshiftStateV1 | null | undefined,
+): boolean {
+  const [transitionActive, setTransitionActive] = useState(false);
+  useLayoutEffect(() => {
+    if (!state || typeof window === "undefined") {
+      setTransitionActive(false);
+      return;
+    }
+    const endAt =
+      Date.parse(state.occurredAt) + BOT_IDENTITY_SHAPESHIFT_TRANSITION_MS;
+    const remainingMs = endAt - Date.now();
+    setTransitionActive(remainingMs > 0);
+    if (!(remainingMs > 0)) return;
+    const timeout = window.setTimeout(
+      () => setTransitionActive(false),
+      remainingMs + 1,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [state?.occurredAt, state?.sourceMessageId]);
+  return transitionActive;
 }
 
 function TypingDots({
@@ -18075,7 +18248,8 @@ function BotFaceScreenFill(): React.JSX.Element {
 
 function BotFaceScreenGlass({
   className,
-}: { className?: string } = {}): React.JSX.Element {
+  authoredWear = false,
+}: { className?: string; authoredWear?: boolean } = {}): React.JSX.Element {
   return (
     <span
       className={
@@ -18084,8 +18258,22 @@ function BotFaceScreenGlass({
           : styles.botFaceScreenGlass
       }
       data-screen-material-layer="glass"
+      data-screen-glass-authored-wear={authoredWear ? "true" : undefined}
       aria-hidden="true"
-    />
+    >
+      {authoredWear ? (
+        <>
+          <span
+            className={styles.botFaceScreenGlassDistortion}
+            data-screen-glass-layer="distortion"
+          />
+          <span
+            className={styles.botFaceScreenGlassResidue}
+            data-screen-glass-layer="residue"
+          />
+        </>
+      ) : null}
+    </span>
   );
 }
 
@@ -18127,6 +18315,7 @@ function MessageMoodFace(props: {
     <CoffeeSeatPlateEmoji
       enabled={faceEnabled}
       isTalking={props.isTalking === true}
+      blinkWhileTalking
       mouthShape={seatMouthShape}
       scheduleKey={scheduleKey}
       showQuestionMark={showMicroFace ? false : questionMarkActive}
@@ -31708,7 +31897,10 @@ function ZenLiveBotMannequin({
         className={styles.zenLiveBotPresenceScreenGlassOverlay}
         aria-hidden="true"
       >
-        <BotFaceScreenGlass className={styles.zenLiveBotPresenceScreenGlass} />
+        <BotFaceScreenGlass
+          className={styles.zenLiveBotPresenceScreenGlass}
+          authoredWear
+        />
       </span>
       {typeof buckleFill === "number" ? (
         <span
@@ -31729,13 +31921,11 @@ function ZenLiveBotMannequin({
       <PhosphorPixelSvgGlyph className={styles.zenLiveBotPresenceBotGlyph}>
         <BotGlyph name={glyph} size={18} strokeWidth={1.95} />
       </PhosphorPixelSvgGlyph>
-      {typeof buckleFill === "number" ? (
-        <span
-          className={styles.botAvatarFoundryBuckleGlass}
-          data-avatar-foundry-buckle-glass="true"
-          aria-hidden="true"
-        />
-      ) : null}
+      <span
+        className={styles.botAvatarFoundryBuckleGlass}
+        data-avatar-foundry-buckle-glass="true"
+        aria-hidden="true"
+      />
     </span>
   );
 }
@@ -31762,7 +31952,11 @@ function ZenLiveBotPresencePlate({
   avatarSizePx,
   voiceLightTarget,
   voiceBusGain,
+  identityPresentationBlackout = false,
+  identityPresentationOccurredAt,
   onContextMenuRequest,
+  initialRoamOrigin,
+  onHomeDockRequest,
 }: {
   bot: Bot | null;
   actionState: ZenLiveBotActionState | null;
@@ -31786,7 +31980,11 @@ function ZenLiveBotPresencePlate({
   avatarSizePx: number;
   voiceLightTarget?: string;
   voiceBusGain: number;
+  identityPresentationBlackout?: boolean;
+  identityPresentationOccurredAt?: string | null;
   onContextMenuRequest?: (x: number, y: number) => void;
+  initialRoamOrigin?: { key: number; x: number; y: number } | null;
+  onHomeDockRequest?: (x: number, y: number) => boolean;
 }): React.JSX.Element | null {
   const botName = bot?.name?.trim() || "Prism";
   const defaultPrismPresence = bot === null;
@@ -31809,12 +32007,18 @@ function ZenLiveBotPresencePlate({
   const avatarMetalRotationRef = useRef(0);
   const [avatarPosition, setAvatarPosition] =
     useState<ZenLiveBotAvatarPosition | null>(() =>
-      readZenLiveBotAvatarPosition(),
+      initialRoamOrigin
+        ? { x: initialRoamOrigin.x, y: initialRoamOrigin.y }
+        : readZenLiveBotAvatarPosition(),
     );
   const avatarPositionRef = useRef<ZenLiveBotAvatarPosition | null>(
     avatarPosition,
   );
-  const avatarPositionUserRelocatedRef = useRef(avatarPosition !== null);
+  // A card-origin handoff is visual-only. Persist only positions the player
+  // actually drags so the next Zen does not reopen at the old Home card.
+  const avatarPositionUserRelocatedRef = useRef(
+    avatarPosition !== null && !initialRoamOrigin,
+  );
   const avatarFloating = avatarPosition !== null;
   const [avatarDragging, setAvatarDragging] = useState(false);
   // This is deliberately presentation-only. The live screen may go dark while
@@ -32338,6 +32542,14 @@ function ZenLiveBotPresencePlate({
         }
       }
       if (dragState.moved && !cancelled) {
+        if (onHomeDockRequest?.(clientX, clientY)) {
+          freeRoamMotionRef.current = null;
+          avatarPositionUserRelocatedRef.current = false;
+          avatarPositionRef.current = null;
+          setAvatarPosition(null);
+          restoreAvatarScreen();
+          return true;
+        }
         sampleZenLiveBotDragVelocity(
           dragState.velocitySample,
           clientX,
@@ -32374,6 +32586,7 @@ function ZenLiveBotPresencePlate({
       restoreAvatarScreen,
       setAvatarPositionClamped,
       startAvatarMomentum,
+      onHomeDockRequest,
     ],
   );
 
@@ -32929,6 +33142,9 @@ function ZenLiveBotPresencePlate({
       data-user-screen-power={
         avatarScreenPower === "on" ? undefined : avatarScreenPower
       }
+      data-identity-presentation-blackout={
+        identityPresentationBlackout ? "true" : undefined
+      }
       data-body-sized="true"
       data-user-avatar-scale="true"
       data-avatar-render-mode={avatarRenderMode}
@@ -33077,6 +33293,11 @@ function ZenLiveBotPresencePlate({
   if (avatarFloating && typeof document !== "undefined") {
     return (
       <>
+        <IdentityPresentationBlackout
+          key={identityPresentationOccurredAt ?? "no-identity-change"}
+          active={identityPresentationBlackout}
+          occurredAt={identityPresentationOccurredAt}
+        />
         {createPortal(plateNode, document.body)}
         {actionCopyNode}
       </>
@@ -33084,6 +33305,11 @@ function ZenLiveBotPresencePlate({
   }
   return (
     <>
+      <IdentityPresentationBlackout
+        key={identityPresentationOccurredAt ?? "no-identity-change"}
+        active={identityPresentationBlackout}
+        occurredAt={identityPresentationOccurredAt}
+      />
       {plateNode}
       {actionCopyNode}
     </>
@@ -39635,6 +39861,7 @@ function BotAvatarPreviewPanel({
                       enabled
                       pixelated
                       isTalking={previewTalking}
+                      blinkWhileTalking
                       mouthShape={miniAvatarBinaryMouthShape({
                         talking: previewTalking,
                         mouthShape: displayedPreviewMouthShape,
@@ -42510,7 +42737,10 @@ function BotAvatarFaceControls({
                 </BotAvatarRefractRandomizer>
               ) : null}
               {customEyeActive && faceEyeCount === 2 ? (
-                <div className={styles.botAvatarCustomGeometry}>
+                <div
+                  className={styles.botAvatarCustomGeometry}
+                  data-eye-geometry="spacing"
+                >
                   <BotAvatarRangeControl
                     label="Eye spacing"
                     valueLabel={`${Math.round(faceEyeSpacing * 100)}% distance`}
@@ -42524,7 +42754,10 @@ function BotAvatarFaceControls({
                   />
                 </div>
               ) : null}
-              <div className={styles.botAvatarCustomGeometry}>
+              <div
+                className={styles.botAvatarCustomGeometry}
+                data-eye-geometry="size"
+              >
                 <BotAvatarRangeControl
                   label="Eye size"
                   valueLabel={botAvatarEyeScaleLabel(faceEyeScale)}
@@ -44306,7 +44539,6 @@ function BotAvatarCustomizerModal({
               selection,
             );
             onAudioVoiceProfileChange(nextProfile, { saveImmediately: true });
-            void playPronunciationAtlasPreview(nextProfile);
           }}
           onPreviewSource={() => {
             const sourceProfile = profileWithPronunciationAtlasSelection(
@@ -49011,6 +49243,7 @@ function HomeContent(): React.JSX.Element {
   >([]);
   const [selectedMemoryReceipt, setSelectedMemoryReceipt] =
     useState<MemoryAcquisitionReceiptView | null>(null);
+  const resolvedSignalSessionReceiptIdsRef = useRef(new Set<string>());
   const refreshMemoryAcquisitionReceipts = useCallback(async (): Promise<void> => {
     if (!user?.id) {
       setMemoryAcquisitionReceipts([]);
@@ -49021,7 +49254,12 @@ function HomeContent(): React.JSX.Element {
         "/api/memory-receipts?kind=bot_relation",
       );
       setMemoryAcquisitionReceipts(
-        Array.isArray(payload.receipts) ? payload.receipts : [],
+        (Array.isArray(payload.receipts) ? payload.receipts : []).filter(
+          (receipt) =>
+            !resolvedSignalSessionReceiptIdsRef.current.has(
+              receipt.conversationId ?? "",
+            ),
+        ),
       );
     } catch {
       // Receipts are an ambient live indicator; normal conversation should
@@ -49045,6 +49283,34 @@ function HomeContent(): React.JSX.Element {
         await api(`/api/memory-receipts/${encodeURIComponent(receipt.id)}/read`, {
           method: "POST",
         });
+      } catch {
+        await refreshMemoryAcquisitionReceipts();
+      }
+    },
+    [refreshMemoryAcquisitionReceipts],
+  );
+  const resolveSignalSessionMemoryReceipts = useCallback(
+    async (sessionId: string): Promise<void> => {
+      const normalizedSessionId = sessionId.trim();
+      if (!normalizedSessionId) return;
+      resolvedSignalSessionReceiptIdsRef.current.add(normalizedSessionId);
+      setSelectedMemoryReceipt((current) =>
+        current?.conversationId === normalizedSessionId ? null : current,
+      );
+      setMemoryAcquisitionReceipts((current) =>
+        current.filter(
+          (receipt) =>
+            !(
+              receipt.kind === "bot_relation" &&
+              receipt.conversationId === normalizedSessionId
+            ),
+        ),
+      );
+      try {
+        await api(
+          `/api/memory-receipts/sessions/${encodeURIComponent(normalizedSessionId)}/read`,
+          { method: "POST" },
+        );
       } catch {
         await refreshMemoryAcquisitionReceipts();
       }
@@ -51241,6 +51507,11 @@ function HomeContent(): React.JSX.Element {
       openai: AUTO_MODEL_CHOICE,
       anthropic: AUTO_MODEL_CHOICE,
     });
+  const [assetGenerationPreferences, setAssetGenerationPreferences] = useState<
+    Partial<Record<ImageAssetKind, AssetGenerationSelection>>
+  >({});
+  const [assetGenerationPreferencesLoaded, setAssetGenerationPreferencesLoaded] =
+    useState(false);
   // Do not sync this from `settings.preferred*ImageModel`: image Auto follows
   // its own image-only settings and catalog. Copying a saved image preference
   // into state would replace the Auto label with a concrete id.
@@ -51296,8 +51567,26 @@ function HomeContent(): React.JSX.Element {
     string | null | undefined
   >(undefined);
   const [zenPersonaBotId, setZenPersonaBotId] = useState<string | null>(null);
+  // A selected Home can become a live, empty conversation before its first
+  // message. This is presentation-only: the normal first send still creates
+  // the conversation, so selecting the hero never initiates an LLM turn.
+  const [zenPreMessageConversationActive, setZenPreMessageConversationActive] =
+    useState(false);
+  const [zenHomeRoamOrigin, setZenHomeRoamOrigin] = useState<{
+    key: number;
+    x: number;
+    y: number;
+  } | null>(null);
   const zenPersonaBotIdRef = useRef<string | null>(null);
   zenPersonaBotIdRef.current = zenPersonaBotId;
+  useEffect(() => {
+    // Back, Escape, and header navigation clear the focused Home persona.
+    // Never carry its pre-message canvas state into the next Home.
+    if (view !== "chat" || zenPersonaBotId === null) {
+      setZenPreMessageConversationActive(false);
+      setZenHomeRoamOrigin(null);
+    }
+  }, [view, zenPersonaBotId]);
   const [zenPersonaPresence, setZenPersonaPresence] =
     useState<ZenPersonaPresenceUiState>(() =>
       createStableZenPersonaPresenceState(null),
@@ -53830,7 +54119,11 @@ function HomeContent(): React.JSX.Element {
   const requestHubAtmosphereGeneration = useCallback(
     async (
       requestedStyle: HubAtmosphereStyle,
-      options: { force?: boolean; direction?: string } = {},
+      options: {
+        force?: boolean;
+        direction?: string;
+        selection?: AssetGenerationSelection;
+      } = {},
     ): Promise<void> => {
       if (
         !user ||
@@ -53851,6 +54144,8 @@ function HomeContent(): React.JSX.Element {
         settings.preferredImageProvider,
         settings.preferredLocalImageModel,
         settings.preferredOpenAiImageModel,
+        options.selection?.provider,
+        options.selection?.model,
         settings.openAiApiKeySource,
       ].join(":");
       if (
@@ -53870,6 +54165,12 @@ function HomeContent(): React.JSX.Element {
             body: JSON.stringify({
               purpose: HUB_ATMOSPHERE_IMAGE_PURPOSE,
               atmosphereStyle,
+              ...(options.selection
+                ? {
+                    preferredProvider: options.selection.provider,
+                    model: options.selection.model,
+                  }
+                : {}),
               ...(options.direction?.trim()
                 ? { direction: options.direction.trim() }
                 : {}),
@@ -54395,7 +54696,7 @@ function HomeContent(): React.JSX.Element {
       if (
         target instanceof Element &&
         target.closest(
-          "[data-starter-compose-surface='true'], [data-starter-bot-affordance='true'], [data-bot-talk-hero='true']",
+          "[data-starter-compose-surface='true'], [data-starter-bot-affordance='true'], [data-zen-pre-message-hero='true'], [data-bot-talk-hero='true']",
         )
       ) {
         return;
@@ -54995,6 +55296,15 @@ function HomeContent(): React.JSX.Element {
   const navbarCustomizerBot = useMemo<Bot | null>(() => {
     return view === "chat" ? (zenPersonaBot ?? activeBot) : activeBot;
   }, [activeBot, view, zenPersonaBot]);
+  const zenLivePresenceIdentityShapeshiftState = useMemo(() => {
+    const bot = zenPersonaPresence.visibleBotId
+      ? (bots.find((entry) => entry.id === zenPersonaPresence.visibleBotId) ??
+        null)
+      : null;
+    return bot
+      ? latestIdentityShapeshiftStateForBot(detail?.messages, bot.id)
+      : null;
+  }, [bots, detail?.messages, zenPersonaPresence.visibleBotId]);
   const zenLivePresenceBot = useMemo<Bot | null>(() => {
     const bot = zenPersonaPresence.visibleBotId
       ? (bots.find((entry) => entry.id === zenPersonaPresence.visibleBotId) ??
@@ -55003,9 +55313,12 @@ function HomeContent(): React.JSX.Element {
     if (!bot) return null;
     return botWithIdentityShapeshiftPresentation(
       bot,
-      latestIdentityShapeshiftStateForBot(detail?.messages, bot.id),
+      zenLivePresenceIdentityShapeshiftState,
     );
-  }, [bots, detail?.messages, zenPersonaPresence.visibleBotId]);
+  }, [bots, zenLivePresenceIdentityShapeshiftState, zenPersonaPresence.visibleBotId]);
+  const zenLivePresenceIdentityBlackout = useIdentityPresentationBlackout(
+    zenLivePresenceIdentityShapeshiftState,
+  );
   const botPanelShowcaseBotId = useMemo<string | null>(() => {
     if (panel === "bots") {
       if (botPanelView === "library") return selectedBotPanelBotId;
@@ -56093,6 +56406,111 @@ function HomeContent(): React.JSX.Element {
       visibleOnlineImageModelIdOrEmpty(modelId) || defaultOnlineImageModelChoice
     );
   };
+  const assetRailGenerationOptions = useMemo<AssetGenerationOption[]>(
+    () => [
+      ...(modelChoiceIsDisabled(settings?.preferredLocalImageModel)
+        ? []
+        : localImageModelCatalogEntries
+            .filter((entry) => !entry.disabledReason)
+            .map((entry) => ({
+              provider: "local" as const,
+              model: entry.id,
+              label: entry.label,
+            }))),
+      ...(modelChoiceIsDisabled(settings?.preferredOpenAiImageModel)
+        ? []
+        : availableOpenAiImageModelCatalogEntries
+            .filter((entry) => !entry.disabledReason)
+            .map((entry) => ({
+              provider: "openai" as const,
+              model: entry.id,
+              label: entry.label,
+            }))),
+    ],
+    [
+      availableOpenAiImageModelCatalogEntries,
+      localImageModelCatalogEntries,
+      settings?.preferredLocalImageModel,
+      settings?.preferredOpenAiImageModel,
+    ],
+  );
+  const assetRailGenerationControl = useCallback(
+    (kind: Exclude<ImageAssetKind, "general_image">): AssetRailGenerationControl => {
+      const saved = assetGenerationPreferences[kind];
+      const selection =
+        saved &&
+        assetRailGenerationOptions.some(
+          (option) =>
+            option.provider === saved.provider && option.model === saved.model,
+        )
+          ? saved
+          : assetRailGenerationOptions.find(
+                (option) => option.provider === settings?.preferredImageProvider,
+              ) ?? assetRailGenerationOptions[0] ?? null;
+      return {
+        selection,
+        options: assetRailGenerationOptions,
+        loading: modelCatalogLoading || !assetGenerationPreferencesLoaded,
+        onChange: async (next) => {
+          const previous = assetGenerationPreferences[kind];
+          setAssetGenerationPreferences((current) => ({
+            ...current,
+            [kind]: next,
+          }));
+          try {
+            await api(`/api/assets/generation-preferences/${kind}`, {
+              method: "PATCH",
+              body: JSON.stringify(next),
+            });
+          } catch (error) {
+            setAssetGenerationPreferences((current) => {
+              const restored = { ...current };
+              if (previous) restored[kind] = previous;
+              else delete restored[kind];
+              return restored;
+            });
+            setPanelError(
+              error instanceof Error
+                ? error.message
+                : "Could not save this library's image model.",
+            );
+          }
+        },
+      };
+    },
+    [
+      api,
+      assetGenerationPreferences,
+      assetGenerationPreferencesLoaded,
+      assetRailGenerationOptions,
+      modelCatalogLoading,
+      settings?.preferredImageProvider,
+    ],
+  );
+  useEffect(() => {
+    if (!user) {
+      setAssetGenerationPreferences({});
+      setAssetGenerationPreferencesLoaded(false);
+      return;
+    }
+    let cancelled = false;
+    setAssetGenerationPreferencesLoaded(false);
+    void api<{
+      preferences?: Partial<Record<ImageAssetKind, AssetGenerationSelection>>;
+    }>("/api/assets/generation-preferences")
+      .then((result) => {
+        if (!cancelled) setAssetGenerationPreferences(result.preferences ?? {});
+      })
+      .catch(() => {
+        if (!cancelled) setAssetGenerationPreferences({});
+      })
+      .finally(() => {
+        if (!cancelled) setAssetGenerationPreferencesLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, user]);
   const settingsLocalLlmModelChoice = (
     modelId: string | null | undefined,
     fallbackModelId: string,
@@ -57512,11 +57930,14 @@ function HomeContent(): React.JSX.Element {
       view === "chat" &&
       (pendingReplyVisible || chatAssistantRevealInProgress || activeSideChat);
     const showModelControls = options.showModelControls ?? true;
-    // The empty canvas already exposes direct bot cards and, when useful, a
-    // full hue lens. Do not duplicate that browsing surface in the navbar.
-    const directBotSelectionVisible =
-      emptyStateLensVisible ||
-      (activeConversationIsEmpty && canvasBotDirectoryInteractive);
+    // The home hero or hue-lens controls already expose direct bot selection.
+    // Keep navbar Facet picker visible only when we are in the pre-message
+    // roaming state after hero selection.
+    const directBotSelectionVisible = zenHomeDirectSelectionVisible({
+      dockState: zenHomeDockState(zenPreMessageConversationActive),
+      botCardsVisible: zenEmptyHeroVisible && pickerSourceBots.length > 0,
+      hueLensVisible: emptyStateLensVisible,
+    });
     const showBotPicker =
       (options.showBotPicker ?? true) &&
       view === "chat" &&
@@ -57594,9 +58015,9 @@ function HomeContent(): React.JSX.Element {
                 ? disabledReason
                 : pendingReplyVisible || chatAssistantRevealInProgress
                 ? "Wait for the current reply before changing Facet."
-                : "Visit a Zen Home"
+                : "Invite a Facet into this Home"
             }
-            ariaLabel="Zen Home"
+            ariaLabel="Invite a Facet into this Home"
             showName
             enableFilters
             hueFilterCenter={hueFilterCenter}
@@ -57605,6 +58026,7 @@ function HomeContent(): React.JSX.Element {
             hueLensTrackGradient={hueLensTrackGradient}
             hueLensTrackSegments={hueLensTrackSegments}
             dismissPopoversSignal={composerPopoverDismissSignal}
+            menuFooter={renderZenPersonaTransitionChoiceControl()}
             menuClassName={options.botMenuClassName}
             privateTone={appWidePrivateMode}
             navbarPicker
@@ -61821,6 +62243,8 @@ function HomeContent(): React.JSX.Element {
   const [coffeePresetsLoading, setCoffeePresetsLoading] = useState(false);
   const [coffeeSelectedDurationMinutes, setCoffeeSelectedDurationMinutes] =
     useState<CoffeeSessionDurationMinutes | null>(null);
+  const [coffeeSelectedExperienceMode, setCoffeeSelectedExperienceMode] =
+    useState<CoffeeExperienceMode>("join");
   const [coffeeSelectedPresetId, setCoffeeSelectedPresetId] = useState("");
   const [coffeeOpeningPollModalOpen, setCoffeeOpeningPollModalOpen] =
     useState(false);
@@ -67627,11 +68051,11 @@ function HomeContent(): React.JSX.Element {
         listenerBot &&
         !botPowerIsMutedV1(listenerBot.powers)
       ) {
-        const profile = resolveBotIdentityMirrorVoiceV1(
-          botSummary.identityMirrorState,
-          listenerBot.authored_audio_voice_profile,
-          listenerBot.audio_voice_profile_override,
-        );
+        const profile = resolveBotcastBorrowedIdentityVoiceProfile({
+          botSummary,
+          holderAuthoredVoice: listenerBot.authored_audio_voice_profile,
+          holderVoiceOverride: listenerBot.audio_voice_profile_override,
+        });
         const engine: EnglishVoiceEngine =
           listenerBot.online_enabled !== 0
             ? voiceSelection.englishVoiceEngine
@@ -67674,11 +68098,11 @@ function HomeContent(): React.JSX.Element {
         interruptedBot &&
         !botPowerIsMutedV1(interruptedBot.powers)
       ) {
-        const profile = resolveBotIdentityMirrorVoiceV1(
-          interruptedBotSummary?.identityMirrorState,
-          interruptedBot.authored_audio_voice_profile,
-          interruptedBot.audio_voice_profile_override,
-        );
+        const profile = resolveBotcastBorrowedIdentityVoiceProfile({
+          botSummary: interruptedBotSummary ?? {},
+          holderAuthoredVoice: interruptedBot.authored_audio_voice_profile,
+          holderVoiceOverride: interruptedBot.audio_voice_profile_override,
+        });
         if (profile.enabled) {
           prefetchInterruptedSpeakerReactionClip({
             plan,
@@ -67736,18 +68160,18 @@ function HomeContent(): React.JSX.Element {
         (candidate) => candidate.id === sanitizedPlan.speakerBotId,
       );
       const listenerProfile = listenerBot
-        ? resolveBotIdentityMirrorVoiceV1(
-            botSummary.identityMirrorState,
-            listenerBot.authored_audio_voice_profile,
-            listenerBot.audio_voice_profile_override,
-          )
+        ? resolveBotcastBorrowedIdentityVoiceProfile({
+            botSummary,
+            holderAuthoredVoice: listenerBot.authored_audio_voice_profile,
+            holderVoiceOverride: listenerBot.audio_voice_profile_override,
+          })
         : null;
       const interruptedProfile = interruptedBot
-        ? resolveBotIdentityMirrorVoiceV1(
-            lifecycles?.interruptedBot?.identityMirrorState,
-            interruptedBot.authored_audio_voice_profile,
-            interruptedBot.audio_voice_profile_override,
-          )
+        ? resolveBotcastBorrowedIdentityVoiceProfile({
+            botSummary: lifecycles?.interruptedBot ?? {},
+            holderAuthoredVoice: interruptedBot.authored_audio_voice_profile,
+            holderVoiceOverride: interruptedBot.audio_voice_profile_override,
+          })
         : null;
       const interruptedDelivery = lifecycles?.directionalIrritationDelivery;
       const interruptedMood =
@@ -68087,11 +68511,11 @@ function HomeContent(): React.JSX.Element {
               settings.prismDefaultBotAudioVoiceProfile,
             )
           : bot
-            ? resolveBotIdentityMirrorVoiceV1(
-                botSummary.identityMirrorState,
-                bot.authored_audio_voice_profile,
-                bot.audio_voice_profile_override,
-              )
+            ? resolveBotcastBorrowedIdentityVoiceProfile({
+                botSummary,
+                holderAuthoredVoice: bot.authored_audio_voice_profile,
+                holderVoiceOverride: bot.audio_voice_profile_override,
+              })
             : null);
       const normalizedProfile = profile
         ? normalizeBotAudioVoiceProfileV1(profile)
@@ -68683,11 +69107,11 @@ function HomeContent(): React.JSX.Element {
           ? coffeePlayerPlaybackProfile(
               settings.prismDefaultBotAudioVoiceProfile,
             )
-          : resolveBotIdentityMirrorVoiceV1(
-              botSummary.identityMirrorState,
-              bot!.authored_audio_voice_profile,
-              bot!.audio_voice_profile_override,
-            ));
+          : resolveBotcastBorrowedIdentityVoiceProfile({
+              botSummary,
+              holderAuthoredVoice: bot!.authored_audio_voice_profile,
+              holderVoiceOverride: bot!.audio_voice_profile_override,
+            }));
       const playbackProfile = applyDirectionalIrritationGainToProfile(
         normalizeBotAudioVoiceProfileV1(profile),
         message.directionalIrritationDelivery?.gainDbBoost,
@@ -72171,6 +72595,13 @@ function HomeContent(): React.JSX.Element {
     (!detail || detail.messages.length === 0) &&
     !pendingReplyVisible &&
     !zenEphemeralUserActionMessage &&
+    !zenPreMessageConversationActive &&
+    !emptyStateSearchActive;
+  const zenHomeHeroVisible =
+    chatLikeSurface &&
+    (!detail || detail.messages.length === 0) &&
+    !pendingReplyVisible &&
+    !zenEphemeralUserActionMessage &&
     !emptyStateSearchActive;
   const prismHomeEmptyHeroVisible =
     view === "chat" &&
@@ -72377,7 +72808,7 @@ function HomeContent(): React.JSX.Element {
     conversationSurfaceLoading && (view === "chat" || view === "sandbox");
   const zenNewSessionPresenceDeferred =
     chatLikeSurface &&
-    (activeConversationIsEmpty ||
+    ((activeConversationIsEmpty && !zenPreMessageConversationActive) ||
       showConversationSurfaceLoading ||
       zenInitialThinkingActive);
   // Bot-profile switching keeps running in the background, but we no longer
@@ -78212,6 +78643,7 @@ function HomeContent(): React.JSX.Element {
 
   async function generateAtmosphereFromSlashCommand(
     direction = "",
+    selection?: AssetGenerationSelection,
   ): Promise<void> {
     if (view !== "chat") {
       setError("$atmosphere is only available in Zen.");
@@ -78249,6 +78681,7 @@ function HomeContent(): React.JSX.Element {
       enabled: true,
       force: true,
       direction,
+      selection,
     });
   }
 
@@ -83192,6 +83625,12 @@ function HomeContent(): React.JSX.Element {
         zenLiveAskQuestionMarkerVisible,
       ) ||
       zenPersonaPresence.phase !== "stable");
+  // Keep the Home-card handoff visually continuous. The established live
+  // presence takes over the same compact bot first; ordinary reply presence
+  // still returns to the player's chosen full-size setting.
+  const zenLivePresenceAvatarSizePx = zenPreMessageConversationActive
+    ? Math.min(zenLiveBotAvatarSizePx, ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX)
+    : zenLiveBotAvatarSizePx;
   useEffect(() => {
     setZenEphemeralUserActionMessage(null);
     setZenLiveBotAction(null);
@@ -85114,13 +85553,21 @@ function HomeContent(): React.JSX.Element {
                           )
                         : 0
                     }
-                    avatarSizePx={zenLiveBotAvatarSizePx}
+                    identityPresentationBlackout={
+                      zenLivePresenceIdentityBlackout
+                    }
+                    identityPresentationOccurredAt={
+                      zenLivePresenceIdentityShapeshiftState?.occurredAt
+                    }
+                    avatarSizePx={zenLivePresenceAvatarSizePx}
                     voiceLightTarget={botVoiceLightTarget(
                       "chat",
                       detail?.id ?? selectedId ?? "pending",
                       zenLivePresenceBot?.id ?? "prism",
                     )}
                     onContextMenuRequest={openZenLiveBotContextMenu}
+                    initialRoamOrigin={zenHomeRoamOrigin}
+                    onHomeDockRequest={handleZenHomeDockRequest}
                   />
                 </div>
               ) : null}
@@ -85385,6 +85832,8 @@ function HomeContent(): React.JSX.Element {
     privateMode: boolean,
     options: { zenHomeBotId?: string | null } = {},
   ) {
+    setZenPreMessageConversationActive(false);
+    setZenHomeRoamOrigin(null);
     const hasExplicitZenHome = Object.prototype.hasOwnProperty.call(
       options,
       "zenHomeBotId",
@@ -85519,26 +85968,61 @@ function HomeContent(): React.JSX.Element {
     }, 360);
   }
 
-  /** Click-to-start: dispatches a starter prompt request as if the user typed
-   *  nothing and submitted. The bot (or default Prism) opens the conversation
-   *  with its own first message. */
-  function startHeroConversation(): void {
-    if (replayCachedZenInitialStarterReply()) return;
-    if (armCanceledZenInitialStarterReplay()) return;
-    if (pendingReply) return;
-    if (!isStarterPromptAvailable(draft)) return;
+  /**
+   * Hero mini-bot selection is deliberately pre-message. The selected bot
+   * leaves Home and joins the existing live canvas, but PRISM does not send a
+   * starter turn. Proactive openings remain disabled until their setting owns
+   * that behavior.
+   */
+  function handleZenHeroMiniBotSelection(
+    event: React.MouseEvent<HTMLButtonElement>,
+  ): void {
+    event.stopPropagation();
+    if (pendingReply || !isStarterPromptAvailable(draft)) return;
+    const origin = event.currentTarget.getBoundingClientRect();
+    setZenHomeRoamOrigin({
+      key: Date.now(),
+      x: origin.left,
+      y: origin.top,
+    });
+    setChatAutoRestoreSuppressed(true);
+    setForceNewConversationOnNextSend(true);
+    setZenPreMessageConversationActive(true);
+    closeEmptyStateBotSearch();
+    focusDraftInput();
+  }
+
+  function handleZenHomeDockRequest(clientX: number, clientY: number): boolean {
+    if (!zenPreMessageConversationActive) return false;
+    const target = document.querySelector<HTMLElement>(
+      '[data-zen-home-drop-target="true"]',
+    );
+    if (
+      !target ||
+      !zenHomeDropTargetContainsPoint(target.getBoundingClientRect(), {
+        x: clientX,
+        y: clientY,
+      })
+    ) {
+      return false;
+    }
+    setZenPreMessageConversationActive(false);
+    setZenHomeRoamOrigin(null);
+    return true;
+  }
+
+  // Sandbox retains its explicit starter action. Zen's mini-bot hero is the
+  // only surface that now enters an empty live canvas instead.
+  function handleSandboxHeroStarter(
+    event: React.MouseEvent<HTMLButtonElement>,
+  ): void {
+    event.stopPropagation();
+    if (pendingReply || !isStarterPromptAvailable(draft)) return;
     setChatAutoRestoreSuppressed(false);
     void sendMessage(
       { preventDefault: () => {} } as React.FormEvent<HTMLFormElement>,
       { starterPrompt: true, starterPromptWarrantsIntro: true },
     );
-  }
-
-  function handleHeroStartConversation(
-    event: React.MouseEvent<HTMLButtonElement>,
-  ): void {
-    event.stopPropagation();
-    startHeroConversation();
   }
 
   function resetChatHeaderToSpotlight() {
@@ -87647,12 +88131,7 @@ function HomeContent(): React.JSX.Element {
   const resizeZenLiveBotAvatar = useCallback(
     (direction: "grow" | "shrink"): void => {
       setZenLiveBotAvatarSizePx((current) => {
-        const next = normalizeZenLiveBotAvatarSizePx(
-          current +
-            (direction === "grow"
-              ? ZEN_LIVE_BOT_AVATAR_SIZE_STEP_PX
-              : -ZEN_LIVE_BOT_AVATAR_SIZE_STEP_PX),
-        );
+        const next = resizeZenLiveBotAvatarSizePx(current, direction);
         if (next !== current) persistZenLiveBotAvatarSizePx(next);
         return next;
       });
@@ -91217,6 +91696,7 @@ function HomeContent(): React.JSX.Element {
     setSelectedBotId(null);
     setSandboxGridSelectedBotId(null);
     if (view === "chat") {
+      setZenPreMessageConversationActive(false);
       setZenPersonaBotId(null);
     }
     cancelCanvasBotMarqueeGesture();
@@ -92425,6 +92905,8 @@ function HomeContent(): React.JSX.Element {
   }
 
   function armFreshZenPersona(nextBotId: string | null): void {
+    setZenPreMessageConversationActive(false);
+    setZenHomeRoamOrigin(null);
     if (zenSessionHasNotStarted() && zenPersonaBotIdRef.current !== nextBotId) {
       rotateZenFallbackWallpaperSeed();
     }
@@ -92490,7 +92972,11 @@ function HomeContent(): React.JSX.Element {
 
   function handleZenPersonaSelectionChange(next: string): void {
     const nextBotId = next || null;
-    void visitZenHome(nextBotId);
+    if (zenSessionHasNotStarted()) {
+      armFreshZenPersona(nextBotId);
+      return;
+    }
+    commitZenPersonaTransition(nextBotId);
   }
 
   function handleZenMentionPersonaSelection(botId: string): void {
@@ -95230,6 +95716,12 @@ function HomeContent(): React.JSX.Element {
     setBotGeneratorOpen(true);
   }
 
+  function handleBotFoundryShellLanded(): void {
+    setBotFoundryPhase((current) =>
+      current === "arrival" ? "brief" : current,
+    );
+  }
+
   function closeBotGenerator(): void {
     if (botGeneratorBusy) return;
     botFoundryRunRef.current += 1;
@@ -96959,6 +97451,7 @@ function HomeContent(): React.JSX.Element {
   async function generateBotGroupRoomAtmosphere(
     groupId: string,
     direction = "",
+    selection?: AssetGenerationSelection,
   ): Promise<void> {
     const target = botLibraryGroups.find((group) => group.id === groupId);
     const memberBotIds = target?.botIds.filter((botId) =>
@@ -96995,7 +97488,7 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     const groupImageProvider = resolveImageProviderName({
-      savedProvider: settings?.preferredImageProvider,
+      savedProvider: selection?.provider ?? settings?.preferredImageProvider,
       offlineOnly: memberBotIds.some(
         (botId) =>
           bots.find((candidate) => candidate.id === botId)?.online_enabled ===
@@ -97052,7 +97545,10 @@ function HomeContent(): React.JSX.Element {
         size: "1536x1024",
       };
       if (direction.trim()) body.direction = direction.trim();
-      if (groupImageProvider !== "local") {
+      if (selection) {
+        body.preferredProvider = selection.provider;
+        body.model = selection.model;
+      } else if (groupImageProvider !== "local") {
         if (zenWallpaperImageLaneDisabled("openai")) {
           if (zenWallpaperImageLaneDisabled("local") || !localModelId) {
             throw new Error(
@@ -97798,29 +98294,24 @@ function HomeContent(): React.JSX.Element {
   function renderLiveBotMemoryReceiptChip(
     botId: string,
     botName: string,
+    options?: { transient?: boolean; sessionId?: string },
   ): React.JSX.Element | null {
     const receipt = memoryAcquisitionReceipts.find(
       (candidate) =>
         candidate.kind === "bot_relation" &&
         candidate.readAt === null &&
-        candidate.learnerBotId === botId,
+        candidate.learnerBotId === botId &&
+        (options?.sessionId === undefined ||
+          candidate.conversationId === options.sessionId),
     );
     if (!receipt) return null;
     return (
-      <button
-        type="button"
-        className={styles.liveBotMemoryReceiptChip}
-        data-memory-acquisition-receipt="true"
-        aria-label={`${botName} learned something new about another bot`}
-        title={`${botName} learned something new about another bot`}
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={(event) => {
-          event.stopPropagation();
-          void openMemoryAcquisitionReceipt(receipt);
-        }}
-      >
-        !
-      </button>
+      <LiveBotMemoryReceiptChip
+        receipt={receipt}
+        botName={botName}
+        transient={options?.transient}
+        onOpen={(nextReceipt) => void openMemoryAcquisitionReceipt(nextReceipt)}
+      />
     );
   }
 
@@ -100363,13 +100854,16 @@ function HomeContent(): React.JSX.Element {
       generate?: boolean;
       promptOverride?: string;
       direction?: string;
+      selection?: AssetGenerationSelection;
     },
   ): Promise<void> {
     const generationRequested = options.generate !== false;
     if (
       options.enabled &&
       generationRequested &&
-      !zenWallpaperImageGenerationAvailable()
+      !zenWallpaperImageGenerationAvailable(
+        options.selection?.provider ?? effectiveImageProvider,
+      )
     ) {
       setZenWallpaperError(
         "Configure an image generation model before enabling Atmosphere.",
@@ -100396,7 +100890,10 @@ function HomeContent(): React.JSX.Element {
         body.direction = options.direction.trim();
       }
       if (options.enabled && generationRequested) {
-        if (effectiveImageProvider === "local") {
+        if (options.selection) {
+          body.preferredProvider = options.selection.provider;
+          body.model = options.selection.model;
+        } else if (effectiveImageProvider === "local") {
           body.preferredProvider = "local";
           if (localModelId) body.model = localModelId;
         } else {
@@ -103598,6 +104095,7 @@ function HomeContent(): React.JSX.Element {
             </div>
             <AssetRail
               kind="group_room_atmosphere"
+              generation={assetRailGenerationControl("group_room_atmosphere")}
               label="Group-room Atmospheres"
               context={`${group.name} ${group.description}`}
               currentImageIds={[selectedAtmosphere?.imageId]}
@@ -103611,8 +104109,8 @@ function HomeContent(): React.JSX.Element {
               onUpload={() =>
                 botGroupRoomAtmosphereUploadRef.current?.click()
               }
-              onSynthesize={(direction) =>
-                generateBotGroupRoomAtmosphere(group.id, direction)
+              onSynthesize={(direction, selection) =>
+                generateBotGroupRoomAtmosphere(group.id, direction, selection)
               }
               onSelect={(asset) =>
                 applyBotGroupRoomAtmosphereAsset(group.id, asset)
@@ -113594,6 +114092,7 @@ function HomeContent(): React.JSX.Element {
                             />
                             <AssetRail
                               kind="zen_atmosphere"
+                              generation={assetRailGenerationControl("zen_atmosphere")}
                               label="Zen Atmospheres"
                               context={detail?.title ?? activeBot?.name ?? "Zen"}
                               currentImageIds={[detail?.zenWallpaper?.imageId]}
@@ -113610,8 +114109,8 @@ function HomeContent(): React.JSX.Element {
                               onUpload={() =>
                                 zenAtmosphereUploadRef.current?.click()
                               }
-                              onSynthesize={(direction) =>
-                                generateAtmosphereFromSlashCommand(direction)
+                              onSynthesize={(direction, selection) =>
+                                generateAtmosphereFromSlashCommand(direction, selection)
                               }
                               onSelect={applyZenAtmosphereAsset}
                             />
@@ -114285,6 +114784,7 @@ function HomeContent(): React.JSX.Element {
                               />
                               <AssetRail
                                 kind="home_atmosphere"
+                                generation={assetRailGenerationControl("home_atmosphere")}
                                 label="Home atmospheres"
                                 context={settings.atmosphereStyle}
                                 currentImageIds={[settings.hubAtmosphereImageId]}
@@ -114296,10 +114796,10 @@ function HomeContent(): React.JSX.Element {
                                 onUpload={() =>
                                   homeAtmosphereUploadRef.current?.click()
                                 }
-                                onSynthesize={(direction) =>
+                                onSynthesize={(direction, selection) =>
                                   requestHubAtmosphereGeneration(
                                     settings.atmosphereStyle,
-                                    { force: true, direction },
+                                    { force: true, direction, selection },
                                   )
                                 }
                                 onSelect={applyHomeAtmosphereAsset}
@@ -120079,6 +120579,7 @@ function HomeContent(): React.JSX.Element {
                     >
                       <BotCreationRitual
                         phase={botFoundryPhase}
+                        onShellLanded={handleBotFoundryShellLanded}
                         prompt={botGeneratorPrompt}
                         responseMode={responseModeForProvider(
                                 settings?.preferredProvider ?? "local",
@@ -123664,6 +124165,8 @@ function HomeContent(): React.JSX.Element {
     setCoffeeSelectedGroupId(null);
     setCoffeeExcludedBotIds(new Set());
     setCoffeeSelectedSeatBotIds(emptyCoffeeSeatBotIds());
+    setCoffeeSelectedExperienceMode("join");
+    setCoffeeSelectedDurationMinutes(null);
     setCoffeeDraft("");
     setCoffeeBusy(false);
     setCoffeeAutoBusy(false);
@@ -123695,12 +124198,20 @@ function HomeContent(): React.JSX.Element {
     setCoffeeSelectedGroupId(group.id);
     setCoffeeExcludedBotIds(new Set());
     setCoffeeSelectedSeatBotIds(group.coffeeSeatBotIds);
-    setCoffeeSessionSettings(
-      normalizeCoffeeSessionSettings(group.coffeeSettings),
+    const groupSettings = normalizeCoffeeSessionSettings(group.coffeeSettings);
+    const groupExperienceMode = isCoffeeExperienceMode(
+      groupSettings.experienceMode,
+    )
+      ? groupSettings.experienceMode
+      : "join";
+    setCoffeeSelectedExperienceMode(groupExperienceMode);
+    setCoffeeSelectedDurationMinutes(
+      groupExperienceMode === "serve"
+        ? DEFAULT_COFFEE_SESSION_DURATION_MINUTES
+        : null,
     );
-    setCoffeeSettingsDraft(
-      normalizeCoffeeSessionSettings(group.coffeeSettings),
-    );
+    setCoffeeSessionSettings(groupSettings);
+    setCoffeeSettingsDraft(groupSettings);
     setCoffeeGroupNameDraft(group.name);
     setCoffeeGroupEthosDraft(group.ethos ?? "");
     coffeeGroupNameEditingRef.current = false;
@@ -123708,7 +124219,6 @@ function HomeContent(): React.JSX.Element {
     setCoffeeSelectedPresetId(
       group.presetMode === "auto" ? COFFEE_AUTO_PRESET_ID : "",
     );
-    setCoffeeSelectedDurationMinutes(DEFAULT_COFFEE_SESSION_DURATION_MINUTES);
     setCoffeeDraft("");
     setCoffeeBusy(false);
     setCoffeeAutoBusy(false);
@@ -124134,12 +124644,31 @@ function HomeContent(): React.JSX.Element {
     revealArrivals();
     return true;
   };
+  const prepareCoffeeServeHandoff = async (
+    conversation: CoffeeConversationState,
+    retryAction: () => void,
+  ): Promise<boolean> => {
+    if (conversation.coffeeSettings?.experienceMode !== "serve") return true;
+    coffeeModelWarmupRetryActionRef.current = retryAction;
+    if (!(await ensureCoffeeModelReady(true))) return false;
+    await releaseCoffeeModelWarmup();
+    return true;
+  };
   const beginCoffeeLiveWithIntro = async (
     conversation: CoffeeConversationState,
     scenario: CoffeeArrivalScenario,
   ): Promise<boolean> => {
+    if (
+      !(await prepareCoffeeServeHandoff(conversation, () => {
+        void beginCoffeeLiveWithIntro(conversation, scenario);
+      }))
+    ) {
+      return false;
+    }
     await playCoffeeIntroCurtain();
-    return startCoffeeArrivalSequence(conversation, scenario);
+    const started = await startCoffeeArrivalSequence(conversation, scenario);
+    if (started) coffeeModelWarmupRetryActionRef.current = null;
+    return started;
   };
   const refreshCoffeeStarterTopics = async (
     conversation: CoffeeConversationState,
@@ -124484,6 +125013,11 @@ function HomeContent(): React.JSX.Element {
         body: JSON.stringify({
           groupBotIds: requestedSeatBotIds,
           coffeeSettings: coffeeSessionSettings,
+          experienceMode: isCoffeeExperienceMode(
+            coffeeSessionSettings.experienceMode,
+          )
+            ? coffeeSessionSettings.experienceMode
+            : coffeeSelectedExperienceMode,
           ...(options.initialTopic !== undefined
             ? { initialTopic: options.initialTopic }
             : {}),
@@ -124501,6 +125035,11 @@ function HomeContent(): React.JSX.Element {
         normalizeCoffeeSessionSettings(
           response.conversation.coffeeSettings ?? undefined,
         ),
+      );
+      setCoffeeSelectedExperienceMode(
+        isCoffeeExperienceMode(response.conversation.coffeeSettings?.experienceMode)
+          ? response.conversation.coffeeSettings.experienceMode
+          : "join",
       );
       setCoffeeSelectedSessionId(response.conversation.id);
       const roomReturnStorageKey = botGroupCoffeeReturnCheckpointStorageKey(
@@ -124541,8 +125080,7 @@ function HomeContent(): React.JSX.Element {
       if (!topicReady) {
         assignCoffeeSessionPhase("topic");
       } else if (shouldStartArrival) {
-        await playCoffeeIntroCurtain();
-        await startCoffeeArrivalSequence(
+        await beginCoffeeLiveWithIntro(
           response.conversation,
           response.arrivalScenario,
         );
@@ -124890,6 +125428,7 @@ function HomeContent(): React.JSX.Element {
         method: "POST",
         body: JSON.stringify({
           durationMinutes: coffeeSelectedDurationMinutes,
+          experienceMode: coffeeSelectedExperienceMode,
           ...(options.coffeeSettings
             ? {
                 coffeeSettings: options.coffeeSettings,
@@ -124921,6 +125460,11 @@ function HomeContent(): React.JSX.Element {
         normalizeCoffeeSessionSettings(
           response.conversation.coffeeSettings ?? group.coffeeSettings,
         ),
+      );
+      setCoffeeSelectedExperienceMode(
+        isCoffeeExperienceMode(response.conversation.coffeeSettings?.experienceMode)
+          ? response.conversation.coffeeSettings.experienceMode
+          : "join",
       );
       setCoffeeSelectedSessionId(response.conversation.id);
       setCoffeeSelectedSeatBotIds(
@@ -125224,6 +125768,11 @@ function HomeContent(): React.JSX.Element {
           normalizeCoffeeSessionSettings(
             response.conversation.coffeeSettings ?? group?.coffeeSettings,
           ),
+        );
+        setCoffeeSelectedExperienceMode(
+          isCoffeeExperienceMode(response.conversation.coffeeSettings?.experienceMode)
+            ? response.conversation.coffeeSettings.experienceMode
+            : "join",
         );
         setCoffeeSelectedSessionId(response.conversation.id);
         setCoffeeSelectedSeatBotIds(seatLayout);
@@ -125530,9 +126079,20 @@ function HomeContent(): React.JSX.Element {
     const group = coffeeSelectedGroup;
     setCoffeeRestoredSessionSetup(null);
     setCoffeeExcludedBotIds(new Set());
-    setCoffeeSelectedDurationMinutes(DEFAULT_COFFEE_SESSION_DURATION_MINUTES);
+    setCoffeeSelectedExperienceMode("join");
+    setCoffeeSelectedDurationMinutes(null);
     if (!group) return;
     const groupSettings = normalizeCoffeeSessionSettings(group.coffeeSettings);
+    setCoffeeSelectedExperienceMode(
+      isCoffeeExperienceMode(groupSettings.experienceMode)
+        ? groupSettings.experienceMode
+        : "join",
+    );
+    setCoffeeSelectedDurationMinutes(
+      groupSettings.experienceMode === "serve"
+        ? DEFAULT_COFFEE_SESSION_DURATION_MINUTES
+        : null,
+    );
     setCoffeeSelectedSeatBotIds(group.coffeeSeatBotIds);
     setCoffeeSessionSettings(groupSettings);
     setCoffeeSettingsDraft(groupSettings);
@@ -125572,10 +126132,20 @@ function HomeContent(): React.JSX.Element {
       const attendingCount = currentGroupBotIds.filter(
         (botId) => !retry.excludedBotIds.includes(botId),
       ).length;
+      const retryExperienceMode = isCoffeeExperienceMode(
+        retry.settings.experienceMode,
+      )
+        ? retry.settings.experienceMode
+        : "join";
 
       setCoffeeSelectedSeatBotIds(group.coffeeSeatBotIds);
       setCoffeeExcludedBotIds(new Set(retry.excludedBotIds));
-      setCoffeeSelectedDurationMinutes(retry.durationMinutes);
+      setCoffeeSelectedDurationMinutes(
+        retryExperienceMode === "serve"
+          ? retry.durationMinutes ?? DEFAULT_COFFEE_SESSION_DURATION_MINUTES
+          : null,
+      );
+      setCoffeeSelectedExperienceMode(retryExperienceMode);
       setCoffeeSessionSettings(retry.settings);
       setCoffeeSettingsDraft(retry.settings);
       setCoffeeSelectedPresetId("");
@@ -125632,6 +126202,11 @@ function HomeContent(): React.JSX.Element {
         normalizeCoffeeSessionSettings(
           response.conversation.coffeeSettings ?? undefined,
         ),
+      );
+      setCoffeeSelectedExperienceMode(
+        isCoffeeExperienceMode(response.conversation.coffeeSettings?.experienceMode)
+          ? response.conversation.coffeeSettings.experienceMode
+          : "join",
       );
       setCoffeeSelectedSessionId(response.conversation.id);
       const roomReturnStorageKey = botGroupCoffeeReturnCheckpointStorageKey(
@@ -125718,10 +126293,21 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     markCoffeeSessionResumed(coffeeConversation.id);
-    void startCoffeeArrivalSequence(
-      coffeeConversation,
-      coffeePendingArrivalScenario,
-    );
+    const startPreviewArrival = async (): Promise<void> => {
+      if (
+        !(await prepareCoffeeServeHandoff(coffeeConversation, () => {
+          void startPreviewArrival();
+        }))
+      ) {
+        return;
+      }
+      const started = await startCoffeeArrivalSequence(
+        coffeeConversation,
+        coffeePendingArrivalScenario,
+      );
+      if (started) coffeeModelWarmupRetryActionRef.current = null;
+    };
+    await startPreviewArrival();
     closeCoffeeTranscript();
     setCoffeeAutoplayPausedValue(false);
   };
@@ -131207,6 +131793,7 @@ function HomeContent(): React.JSX.Element {
                       faceScaleY={replayPlayerFaceScaleY}
                       voicePreset="warm"
                       isTalking={replayPlayerTalking}
+                      blinkWhileTalking
                       voiceLightLevel={
                         coffeeReplayAudioMasterRef.current?.manifest
                           ? (replayVoiceLightLevelAtV2(
@@ -131540,11 +132127,20 @@ function HomeContent(): React.JSX.Element {
                         : "closed",
                   isTalking: seatMouthActive,
                 });
-              const seatVoicePreset = coffeeSeatVoicePreset(bot);
               const identityMirrorState =
                 identityMirrorByHolderBotId[bot.id] ?? null;
               const identityShapeshiftState =
                 identityShapeshiftByHolderBotId[bot.id] ?? null;
+              const identityPresentationState =
+                identityMirrorState ?? identityShapeshiftState;
+              const identityFullFormPresentationState = identityMirrorState
+                ? null
+                : identityShapeshiftState;
+              const seatIdentityColor =
+                identityFullFormPresentationState?.targetColor ?? bot.color;
+              const seatVoicePreset =
+                identityFullFormPresentationState?.targetVoicePreset ??
+                coffeeSeatVoicePreset(bot);
               const falseNameState = falseNameByHolderBotId[bot.id] ?? null;
               const seatPublicName =
                 falseNameState?.believedName?.trim() ||
@@ -131568,38 +132164,31 @@ function HomeContent(): React.JSX.Element {
               const identityBorrowTransitionActive =
                 identityMirrorTransitionActive ||
                 identityShapeshiftTransitionActive;
-              const identityBorrowTransitionMs = identityMirrorState
-                ? BOT_IDENTITY_MIRROR_TRANSITION_MS
-                : BOT_IDENTITY_SHAPESHIFT_TRANSITION_MS;
-              const identityBorrowOccurredAt =
-                identityMirrorState?.occurredAt ??
-                identityShapeshiftState?.occurredAt ??
-                null;
-              const identityBorrowTargetFaceVisible = Boolean(
-                (identityMirrorState || identityShapeshiftState) &&
-                (!identityBorrowTransitionActive ||
-                  (identityBorrowOccurredAt != null &&
-                    identityMirrorNowMs >=
-                      Date.parse(identityBorrowOccurredAt) +
-                        identityBorrowTransitionMs / 2)),
+              const identityBorrowTargetActive = Boolean(
+                identityPresentationState,
               );
-              const seatFaceStyle = identityBorrowTargetFaceVisible
-                ? (identityMirrorState?.targetFace ??
-                  identityShapeshiftState!.targetFace)
+              const seatFaceStyle = identityBorrowTargetActive
+                ? identityPresentationState!.targetFace
                 : resolveBotFaceStyleForBot(bot);
               const seatAvatarDetails = identityMirrorState
                 ? resolveBotIdentityMirrorAvatarDetailsV1(
                     identityMirrorState,
                     resolveBotAvatarDetails(bot),
-                    identityBorrowTargetFaceVisible,
+                    identityBorrowTargetActive,
                   )
                 : resolveBotIdentityShapeshiftAvatarDetailsV1(
                     identityShapeshiftState,
                     resolveBotAvatarDetails(bot),
-                    identityBorrowTargetFaceVisible,
+                    identityBorrowTargetActive,
                   );
               const seatGlyphName: BotGlyphName = resolveCustomBotGlyph(
-                bot.glyph,
+                identityPresentationState &&
+                  Object.prototype.hasOwnProperty.call(
+                    identityPresentationState,
+                    "targetGlyph",
+                  )
+                  ? identityPresentationState.targetGlyph
+                  : bot.glyph,
               );
               const seatEmojiTier = coffeeSeatEmojiMoodFromPrism(prismSeatMood);
               const seatTypingActionState =
@@ -131825,7 +132414,7 @@ function HomeContent(): React.JSX.Element {
                   });
               const coffeeCupVisual = buildCoffeeCupVisualState({
                 seed: coffeeCupSeed,
-                botColor: bot.color,
+                botColor: seatIdentityColor,
                 theme: resolvedTheme,
                 nowMs: coffeeCupClockMs,
                 ...coffeeCupConsumptionTiming,
@@ -132011,7 +132600,11 @@ function HomeContent(): React.JSX.Element {
                 coffeeReplayActionPanelBotId === bot.id;
               const replayActionPopoverId = `coffee-replay-actions-${bot.id}`;
               const seatStyle = {
-                ...coffeeSeatVisualStyle(bot, prismSeatMood, socialSnapshot),
+                ...coffeeSeatVisualStyle(
+                  { ...bot, color: seatIdentityColor },
+                  prismSeatMood,
+                  socialSnapshot,
+                ),
                 ...(rosterPreviewSeat
                   ? {}
                   : coffeeArrivalMotionStyle(
@@ -132154,7 +132747,7 @@ function HomeContent(): React.JSX.Element {
                       ? "true"
                       : undefined
                   }
-                  data-identity-mirror-transition={
+                  data-identity-presentation-blackout={
                     identityBorrowTransitionActive ? "true" : undefined
                   }
                   data-identity-mirror-target-id={
@@ -132225,6 +132818,12 @@ function HomeContent(): React.JSX.Element {
                   aria-label={seatAriaLabel}
                   title={seatTitle}
                 >
+                  <IdentityPresentationBlackout
+                    key={identityPresentationState?.sourceMessageId ?? "no-identity-change"}
+                    active={identityBorrowTransitionActive}
+                    occurredAt={identityPresentationState?.occurredAt}
+                    nowMs={identityMirrorNowMs}
+                  />
                   <div className={styles.coffeeSeatCluster}>
                     {rosterPreviewSeat ? (
                       <div
@@ -132349,13 +132948,14 @@ function HomeContent(): React.JSX.Element {
                               bot,
                               bot.id,
                             )}
-                            frameMaterialSeed={botFrameMaterialSeedForBot(
-                              bot,
-                              bot.id,
-                            )}
+                            frameMaterialSeed={
+                              identityFullFormPresentationState
+                                ?.targetFrameMaterialSeed ??
+                              botFrameMaterialSeedForBot(bot, bot.id)
+                            }
                             avatarDetails={seatAvatarDetails}
                             avatarDetailsColor={botOrPrismAccentForTheme(
-                              bot.color,
+                              seatIdentityColor,
                               resolvedTheme,
                             )}
                           />
@@ -133428,6 +134028,7 @@ function HomeContent(): React.JSX.Element {
                   data-active={
                     coffeeSelectedDurationMinutes === null ? "true" : undefined
                   }
+                  disabled={coffeeSelectedExperienceMode === "serve"}
                   onClick={() => setCoffeeSelectedDurationMinutes(null)}
                 >
                   Auto
@@ -133437,6 +134038,7 @@ function HomeContent(): React.JSX.Element {
                   data-active={
                     coffeeSelectedDurationMinutes !== null ? "true" : undefined
                   }
+                  disabled={coffeeSelectedExperienceMode === "join"}
                   onClick={() =>
                     setCoffeeSelectedDurationMinutes(
                       (current) =>
@@ -133477,6 +134079,62 @@ function HomeContent(): React.JSX.Element {
                   </div>
                 </>
               )}
+            </div>
+            <div className={styles.coffeeExperienceModeField}>
+              <div className={styles.coffeeDurationSliderHeader}>
+                <span className={styles.coffeeGroupStartControlLabel}>
+                  Experience
+                </span>
+                <strong>
+                  {coffeeSelectedExperienceMode === "serve"
+                    ? "Serve"
+                    : "Join"}
+                </strong>
+              </div>
+              <div
+                className={styles.coffeeExperienceModePicker}
+                role="group"
+                aria-label="Coffee experience"
+              >
+                <button
+                  type="button"
+                  aria-pressed={coffeeSelectedExperienceMode === "join"}
+                  data-active={
+                    coffeeSelectedExperienceMode === "join"
+                      ? "true"
+                      : undefined
+                  }
+                  onClick={() => {
+                    setCoffeeSelectedExperienceMode("join");
+                    setCoffeeSelectedDurationMinutes(null);
+                  }}
+                >
+                  Join for Coffee
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={coffeeSelectedExperienceMode === "serve"}
+                  data-active={
+                    coffeeSelectedExperienceMode === "serve"
+                      ? "true"
+                      : undefined
+                  }
+                  onClick={() => {
+                    setCoffeeSelectedExperienceMode("serve");
+                    setCoffeeSelectedDurationMinutes(
+                      (current) =>
+                        current ?? DEFAULT_COFFEE_SESSION_DURATION_MINUTES,
+                    );
+                  }}
+                >
+                  Serve Coffee
+                </button>
+              </div>
+              <small className={styles.coffeeExperienceModeNote}>
+                {coffeeSelectedExperienceMode === "serve"
+                  ? "Stay off camera and carry the pot during a timed visit."
+                  : "Chat and sip at the table during an open-ended visit."}
+              </small>
             </div>
             {coffeeStartPresetControlVisible ? (
               <div className={styles.coffeeGroupPresetField}>
@@ -136027,13 +136685,11 @@ function HomeContent(): React.JSX.Element {
       const speakerBot = utterance.speaker
         ? bots.find((candidate) => candidate.id === utterance.speaker?.id)
         : null;
-      const voiceBot = utterance.voiceSourceBotId
-        ? bots.find((candidate) => candidate.id === utterance.voiceSourceBotId)
-        : speakerBot;
       const speakerPowers =
         utterance.speaker?.powers ?? speakerBot?.powers ?? [];
       const speakerId =
-        voiceBot?.id ??
+        speakerBot?.id ??
+        utterance.speaker?.id ??
         (usePlayerVoice ? "__debate_player__" : "__debate_prism_juror__");
       const usePrismDefaultVoice =
         usePlayerVoice || (!speakerBot && utterance.speaker !== null);
@@ -136070,7 +136726,7 @@ function HomeContent(): React.JSX.Element {
           color:
             speakerBot?.color ?? utterance.speaker?.color ?? PRISM_COLORS.i,
           glyph: speakerBot?.glyph ?? utterance.speaker?.glyph ?? "◇",
-          online_enabled: voiceBot?.online_enabled ?? 1,
+          online_enabled: speakerBot?.online_enabled ?? 1,
           muted: botPowerIsMutedV1(speakerPowers),
           voiceGainMultiplier:
             botPowerVoiceGainMultiplierV1(speakerPowers) *
@@ -136165,13 +136821,11 @@ function HomeContent(): React.JSX.Element {
       const speakerBot = utterance.speaker
         ? bots.find((candidate) => candidate.id === utterance.speaker?.id)
         : null;
-      const voiceBot = utterance.voiceSourceBotId
-        ? bots.find((candidate) => candidate.id === utterance.voiceSourceBotId)
-        : speakerBot;
       const speakerPowers =
         utterance.speaker?.powers ?? speakerBot?.powers ?? [];
       const speakerId =
-        voiceBot?.id ??
+        speakerBot?.id ??
+        utterance.speaker?.id ??
         (usePlayerVoice ? "__debate_player__" : "__debate_prism_juror__");
       const usePrismDefaultVoice =
         usePlayerVoice || (!speakerBot && utterance.speaker !== null);
@@ -136198,7 +136852,7 @@ function HomeContent(): React.JSX.Element {
           color:
             speakerBot?.color ?? utterance.speaker?.color ?? PRISM_COLORS.i,
           glyph: speakerBot?.glyph ?? utterance.speaker?.glyph ?? "◇",
-          online_enabled: voiceBot?.online_enabled ?? 1,
+          online_enabled: speakerBot?.online_enabled ?? 1,
           muted: botPowerIsMutedV1(speakerPowers),
           voiceGainMultiplier:
             botPowerVoiceGainMultiplierV1(speakerPowers) *
@@ -136348,6 +137002,7 @@ function HomeContent(): React.JSX.Element {
               preferredImageProvider={
                 settings?.preferredImageProvider ?? "local"
               }
+              assetRailGeneration={assetRailGenerationControl}
               responseMode={debateResponseMode}
               reasoningEffort={debateReasoningEffort}
               turbo={debateTurbo}
@@ -136431,22 +137086,20 @@ function HomeContent(): React.JSX.Element {
                     : bots.find(
                         (candidate) => candidate.id === botSnapshot.id,
                       )) ?? null;
+                const debateIdentityBot =
+                  botSnapshot.replayVisualSnapshot != null
+                    ? botSnapshot
+                    : (liveBot ?? botSnapshot);
                 const glyph: BotGlyphName = playerJudgePrism
                   ? zenDefaultPrismGlyph
-                  : resolveCustomBotGlyph(
-                      liveBot?.glyph ?? botSnapshot.glyph,
-                    );
+                  : resolveCustomBotGlyph(botSnapshot.glyph);
                 const faceStyle = playerJudgePrism
                   ? zenDefaultPrismFaceStyle
                   : generatedAudienceBot
                     ? randomBotFaceStyle(
                         debateAudienceRandom(`face:${botSnapshot.id}`),
                       )
-                    : resolveBotFaceStyleForBot(
-                        liveBot ?? {
-                          systemPrompt: botSnapshot.systemPrompt,
-                        },
-                      );
+                    : resolveBotFaceStyleForBot(debateIdentityBot);
                 const moderatorLookAtRole =
                   avatarState.role === "moderator"
                     ? avatarState.lookAtRole
@@ -136620,9 +137273,7 @@ function HomeContent(): React.JSX.Element {
                       thinking={false}
                       color={debateAvatarAccentColor}
                       alloyColor={botFrameMetalAlloyColor(
-                        coffeeSeatVoicePreset(
-                          liveBot ?? { systemPrompt: botSnapshot.systemPrompt },
-                        ),
+                        coffeeSeatVoicePreset(debateIdentityBot),
                       )}
                       theme={resolvedTheme}
                       className={
@@ -136650,11 +137301,7 @@ function HomeContent(): React.JSX.Element {
                               }-mini-${botSnapshot.id}`}
                               baseText={galleryFace.text}
                               rotateDeg={galleryFace.rotateDeg}
-                              voicePreset={coffeeSeatVoicePreset(
-                                liveBot ?? {
-                                  systemPrompt: botSnapshot.systemPrompt,
-                                },
-                              )}
+                              voicePreset={coffeeSeatVoicePreset(debateIdentityBot)}
                               faceEyesFont={faceStyle.eyesFont}
                               faceEyeCharacter={faceStyle.eyeCharacter}
                               faceEyeMovement="still"
@@ -136723,11 +137370,7 @@ function HomeContent(): React.JSX.Element {
                       ...botFrameMetalAlloyStyle(
                         playerJudgePrism
                           ? "warm"
-                          : coffeeSeatVoicePreset(
-                              liveBot ?? {
-                                systemPrompt: botSnapshot.systemPrompt,
-                              },
-                            ),
+                          : coffeeSeatVoicePreset(debateIdentityBot),
                         { enabled: !playerJudgePrism },
                       ),
                       ["--coffee-plate-emoji-face-scale-y" as string]:
@@ -136762,11 +137405,7 @@ function HomeContent(): React.JSX.Element {
                         voicePreset={
                           playerJudgePrism
                             ? "warm"
-                            : coffeeSeatVoicePreset(
-                                liveBot ?? {
-                                  systemPrompt: botSnapshot.systemPrompt,
-                                },
-                              )
+                            : coffeeSeatVoicePreset(debateIdentityBot)
                         }
                         isTalking={debateMouthActive}
                         voiceLightTarget={botVoiceLightTarget(
@@ -136833,7 +137472,7 @@ function HomeContent(): React.JSX.Element {
                           playerJudgePrism
                             ? "prism-default"
                             : botScreenMaterialSeedForBot(
-                                liveBot,
+                                debateIdentityBot,
                                 botSnapshot.id,
                               )
                         }
@@ -136841,7 +137480,7 @@ function HomeContent(): React.JSX.Element {
                           playerJudgePrism
                             ? PRISM_FACTORY_CLEAN_FRAME_SEED
                             : botFrameMaterialSeedForBot(
-                                liveBot,
+                                debateIdentityBot,
                                 botSnapshot.id,
                               )
                         }
@@ -136861,6 +137500,7 @@ function HomeContent(): React.JSX.Element {
                       ? renderLiveBotMemoryReceiptChip(
                           liveBot.id,
                           liveBot.name,
+                          { transient: true },
                         )
                       : null}
                   </span>
@@ -137146,6 +137786,7 @@ function HomeContent(): React.JSX.Element {
           preferredProvider={signalProvider}
           hostChatProvider={signalHostChatProvider}
           preferredImageProvider={settings?.preferredImageProvider ?? "local"}
+          assetRailGeneration={assetRailGenerationControl}
           modelOptions={signalModelOptions}
           modelChoice={
             signalGlobalModelChoice === AUTO_MODEL_CHOICE
@@ -137176,6 +137817,9 @@ function HomeContent(): React.JSX.Element {
           onLiveSessionActiveChange={(active, sessionId) => {
             setSignalLiveSessionActive(active);
             setSignalLiveSessionId(active ? sessionId : null);
+          }}
+          onSessionEnded={(sessionId) => {
+            void resolveSignalSessionMemoryReceipts(sessionId);
           }}
           resolveLockedRoutingChip={({ modelChoice, modelProvider }) =>
             buildLiveSessionRoutingChip({
@@ -137346,6 +137990,7 @@ function HomeContent(): React.JSX.Element {
           introAudioVolume={settings?.voiceVolume ?? 1}
           renderAvatar={(botSummary, avatarState) => {
             const renderTheme = avatarState.theme ?? resolvedTheme;
+            const signalDashboardAvatar = avatarState.surface === "dashboard";
             const faceScaleY = coffeePlateFaceScaleYFromSeatHorizontalSide(
               avatarState.facing === "left"
                 ? 1
@@ -137489,12 +138134,33 @@ function HomeContent(): React.JSX.Element {
               (candidate) => candidate.id === botSummary.id,
             );
             if (!bot) return null;
-            const glyph: BotGlyphName = resolveCustomBotGlyph(bot.glyph);
-            const color = botOrPrismAccentForTheme(bot.color, renderTheme);
+            const identityMirrorState = botSummary.identityMirrorState ?? null;
+            const identityShapeshiftState =
+              botSummary.identityShapeshiftState ?? null;
+            const presentationIdentity =
+              identityMirrorState ?? identityShapeshiftState;
+            const fullFormPresentationIdentity = identityMirrorState
+              ? null
+              : identityShapeshiftState;
+            const glyph: BotGlyphName = resolveCustomBotGlyph(
+              presentationIdentity &&
+                Object.prototype.hasOwnProperty.call(
+                  presentationIdentity,
+                  "targetGlyph",
+                )
+                ? presentationIdentity.targetGlyph
+                : bot.glyph,
+            );
+            const identityColor =
+              fullFormPresentationIdentity?.targetColor ?? bot.color;
+            const color = botOrPrismAccentForTheme(
+              identityColor,
+              renderTheme,
+            );
             const faceStyle =
-              botSummary.identityMirrorState &&
+              presentationIdentity &&
               botSummary.identityMirrorTargetFaceActive
-                ? botSummary.identityMirrorState.targetFace
+                ? presentationIdentity.targetFace
                 : resolveBotFaceStyleForBot(bot);
             const sipMouthTreatmentActive = coffeeSeatSipMouthTreatmentActive({
               sipActive: sipPresentation.active,
@@ -137521,13 +138187,13 @@ function HomeContent(): React.JSX.Element {
                 data-mood="neutral"
                 data-talking={avatarState.talking ? "true" : undefined}
                 data-identity-mirror={
-                  botSummary.identityMirrorState ? "true" : undefined
+                  identityMirrorState ? "true" : undefined
                 }
-                data-identity-mirror-transition={
+                data-identity-presentation-blackout={
                   botSummary.identityMirrorTransitionActive ? "true" : undefined
                 }
                 data-identity-mirror-target={
-                  botSummary.identityMirrorState?.targetBotId
+                  presentationIdentity?.targetBotId
                 }
                 data-thinking={avatarState.thinking ? "true" : undefined}
                 data-power-avatar-color-cycle={
@@ -137540,7 +138206,7 @@ function HomeContent(): React.JSX.Element {
                   openAppWideBotContextMenu(event);
                 }}
                 style={{
-                  ...botAccentStyle(bot.color, renderTheme),
+                  ...botAccentStyle(identityColor, renderTheme),
                   ["--coffee-plate-emoji-face-scale-y" as string]: faceScaleY,
                   ["--avatar-details-facing-scale-x" as string]:
                     botAvatarDetailsFacingScaleX(faceScaleY),
@@ -137550,6 +138216,12 @@ function HomeContent(): React.JSX.Element {
                     sipPresentation.mouthOffsetY,
                 }}
               >
+                <IdentityPresentationBlackout
+                  key={presentationIdentity?.sourceMessageId ?? "no-identity-change"}
+                  active={Boolean(botSummary.identityMirrorTransitionActive)}
+                  occurredAt={presentationIdentity?.occurredAt}
+                  nowMs={botSummary.identityPresentationNowMs}
+                />
                 <BotAmbientPresenceRig
                   theme={renderTheme}
                   isTalking={avatarState.talking}
@@ -137567,7 +138239,10 @@ function HomeContent(): React.JSX.Element {
                     glyph={glyph}
                     faceStyle={renderedFaceStyle}
                     faceScaleY={faceScaleY}
-                    voicePreset={coffeeSeatVoicePreset(bot)}
+                    voicePreset={
+                      fullFormPresentationIdentity?.targetVoicePreset ??
+                      coffeeSeatVoicePreset(bot)
+                    }
                     isTalking={avatarState.talking}
                     voiceLightTarget={avatarState.voiceLightTarget}
                     voiceLightLevel={avatarState.voiceLightLevel}
@@ -137611,17 +138286,40 @@ function HomeContent(): React.JSX.Element {
                       bot,
                       bot.id,
                     )}
-                    frameMaterialSeed={botFrameMaterialSeedForBot(bot, bot.id)}
-                    avatarDetails={resolveBotIdentityMirrorAvatarDetailsV1(
-                      botSummary.identityMirrorState,
-                      resolveBotAvatarDetails(bot),
-                      Boolean(botSummary.identityMirrorTargetFaceActive),
-                    )}
+                    frameMaterialSeed={
+                      fullFormPresentationIdentity?.targetFrameMaterialSeed ??
+                      botFrameMaterialSeedForBot(bot, bot.id)
+                    }
+                    avatarDetails={
+                      identityMirrorState
+                        ? resolveBotIdentityMirrorAvatarDetailsV1(
+                            identityMirrorState,
+                            resolveBotAvatarDetails(bot),
+                            Boolean(
+                              botSummary.identityMirrorTargetFaceActive,
+                            ),
+                          )
+                        : resolveBotIdentityShapeshiftAvatarDetailsV1(
+                            identityShapeshiftState,
+                            resolveBotAvatarDetails(bot),
+                            Boolean(
+                              botSummary.identityMirrorTargetFaceActive,
+                            ),
+                          )
+                    }
                     avatarDetailsColor={color}
                   />
                 </BotAmbientPresenceRig>
-                <BotPowerBadge powers={bot.powers} passive />
-                {renderLiveBotMemoryReceiptChip(bot.id, bot.name)}
+                {signalDashboardAvatar ? null : (
+                  <>
+                    <BotPowerBadge powers={bot.powers} passive />
+                    {signalLiveSessionId
+                      ? renderLiveBotMemoryReceiptChip(bot.id, bot.name, {
+                          sessionId: signalLiveSessionId,
+                        })
+                      : null}
+                  </>
+                )}
               </span>
             );
           }}
@@ -137764,6 +138462,7 @@ function HomeContent(): React.JSX.Element {
           foregroundModelProvider={slateForegroundModel?.provider}
           foregroundModelOverride={slateForegroundModel?.model}
           foregroundReasoningEffort={sharedAccountForegroundReasoningEffort()}
+          assetRailGeneration={assetRailGenerationControl}
         />
         {renderSharedPanels()}
         {renderViewSwitchOverlay()}
@@ -137876,7 +138575,7 @@ function HomeContent(): React.JSX.Element {
   // directly from Chat.
   if (view === "chat") {
     const zenRememberedWallpaperVisible =
-      zenEmptyHeroVisible &&
+      zenHomeHeroVisible &&
       !appWidePrivateMode &&
       zenPersonaBotId !== null &&
       zenRememberedWallpaperPreview?.botId === zenPersonaBotId;
@@ -137993,7 +138692,7 @@ function HomeContent(): React.JSX.Element {
     // never stacks over it and recreates the former monochromatic wash.
     const zenPersonaFallbackAtmosphereVisible =
       sharedChatConversationPresentation &&
-      zenEmptyHeroVisible &&
+      zenHomeHeroVisible &&
       Boolean(zenPersonaBot) &&
       !appWidePrivateMode &&
       !selectedBotGradientActive &&
@@ -138120,10 +138819,7 @@ function HomeContent(): React.JSX.Element {
     const hubAtmosphereBotHomeTint = atmosphereSurface === "homeBot";
     // Empty Home hero (with or without sidebar) already paints the startup
     // summary in the main band — never also mount the floating chip above it.
-    const emptyHomeHeroMounted =
-      (!detail || detail.messages.length === 0) &&
-      !pendingReplyVisible &&
-      !zenEphemeralUserActionMessage;
+    const emptyHomeHeroMounted = zenHomeHeroVisible;
     const zenHeroSurfaceVisible = chatLikeSurface && emptyHomeHeroMounted;
     const zenCanvasPrivateControlActive =
       chatLikeSurface && zenHeroSurfaceVisible && !emptyStateSearchActive;
@@ -138561,7 +139257,7 @@ function HomeContent(): React.JSX.Element {
               data-zen-bot-resize-surface={
                 chatLikeSurface ? "true" : undefined
               }
-              data-zen-empty-hero={zenEmptyHeroVisible ? "true" : undefined}
+              data-zen-empty-hero={zenHomeHeroVisible ? "true" : undefined}
               data-mobile-msg-focus={
                 mobileFocusedMessageId ? "true" : undefined
               }
@@ -138633,17 +139329,14 @@ function HomeContent(): React.JSX.Element {
                   </div>
                 </div>
               ) : null}
-              {(!detail || detail.messages.length === 0) &&
-                !pendingReplyVisible &&
-                !zenEphemeralUserActionMessage &&
+              {zenHomeHeroVisible &&
                 (() => {
                   // Chat-mode empty state keeps the immersive PRISM hero while
                   // restoring the bot browser grid as the Hub picker beneath it.
                   //   • ARMED — hero becomes the bot's full-color glyph; tapping
-                  //     the hero primes the starter hello + focuses compose.
+                  //     it moves the bot into the live, pre-message canvas.
                   // Fresh Zen can arm a persona without starting the conversation.
-                  // The first actual turn is still controlled by the user unless
-                  // they tap the Talk to Me hero.
+                  // The first actual turn remains controlled by the user.
                   const suppressHeroCopy = false;
                   const immersiveEmptyState = chatLikeSurface;
                   const isPreviewing = false;
@@ -138682,6 +139375,9 @@ function HomeContent(): React.JSX.Element {
                       ? styles.emptyStateHubPicker
                       : null,
                     emptyStateSearchActive ? styles.emptyStateSearching : null,
+                    zenPreMessageConversationActive
+                      ? styles.zenHomeRoaming
+                      : null,
                     suppressHeroCopy ? styles.emptyStateDensePicker : null,
                   ]
                     .filter(Boolean)
@@ -138738,9 +139434,8 @@ function HomeContent(): React.JSX.Element {
                       previewBot={isPreviewing ? heroBot : null}
                       previewAsBotGlyph={isPreviewing}
                       privateHero={appWidePrivateMode}
-                      /* Fresh Zen keeps the focused persona visible without
-                   starting the session; the user decides whether to type
-                   first or tap the Talk to Me hero. */
+                      /* The Home preview becomes the live canvas companion on
+                   selection; it does not initiate the first turn. */
                       forceTrianglePreview={false}
                       resolvedTheme={resolvedTheme}
                     />
@@ -138750,14 +139445,14 @@ function HomeContent(): React.JSX.Element {
                     !isStarterPromptAvailable(draft) ||
                     heroLensPlaceholder;
                   const heroStartTitle = heroBotName
-                    ? `Start with ${heroBotName}`
-                    : "Start with PRISM";
+                    ? `Enter an empty chat with ${heroBotName}`
+                    : "Enter an empty chat with PRISM";
                   const heroStartAriaLabel = heroBotName
-                    ? `Start chat with ${heroBotName}`
-                    : "Start chat with PRISM";
+                    ? `Enter empty chat with ${heroBotName}`
+                    : "Enter empty chat with PRISM";
                   const heroStartCue =
                     heroBotName && !heroStartDisabled
-                      ? "SEND A MESSAGE TO CHAT · SELECT AGAIN TO CUSTOMIZE"
+                      ? "ENTER EMPTY CHAT · SEND WHEN YOU ARE READY"
                       : null;
                   const shouldShowHeroNudge =
                     !heroStartDisabled &&
@@ -138796,12 +139491,12 @@ function HomeContent(): React.JSX.Element {
                               ]
                                 .filter(Boolean)
                                 .join(" ")}
-                              data-bot-talk-hero="true"
+                              data-zen-pre-message-hero="true"
                               data-relationship-depth-anchor="home"
                               data-relationship-depth-identity={relationshipDepthIdentity(
                                 heroBot?.id ?? null,
                               )}
-                              onClick={handleHeroStartConversation}
+                              onClick={handleZenHeroMiniBotSelection}
                               disabled={heroStartDisabled}
                               title={heroStartTitle}
                               aria-label={heroStartAriaLabel}
@@ -138863,6 +139558,9 @@ function HomeContent(): React.JSX.Element {
                     <div
                       className={emptyStateClassName}
                       style={emptyStateStyle}
+                      data-zen-home-roaming={
+                        zenPreMessageConversationActive ? "true" : undefined
+                      }
                       onClick={handleEmptyStateBackgroundClick}
                     >
                       {activeBotLibraryGroupFilter
@@ -138871,10 +139569,9 @@ function HomeContent(): React.JSX.Element {
                           )
                         : null}
                       {groupHero}
-                      {/* Tap any hero (armed bot or default Prism) to dispatch a
-                    starter prompt — the bot opens the conversation with its
-                    own first message. Disabled mid-draft so accidental clicks
-                    don't drop the user's typed text. */}
+                      {/* Selecting the armed bot hands its mini avatar to the
+                    live room without dispatching a starter turn. The retained
+                    card becomes the explicit drag-back dock. */}
                       {!suppressHeroCopy && emptyStateSearchActive ? (
                         <button
                           type="button"
@@ -138886,12 +139583,12 @@ function HomeContent(): React.JSX.Element {
                           ]
                             .filter(Boolean)
                             .join(" ")}
-                          data-bot-talk-hero="true"
+                          data-zen-pre-message-hero="true"
                           data-relationship-depth-anchor="home"
                           data-relationship-depth-identity={relationshipDepthIdentity(
                             heroBot?.id ?? null,
                           )}
-                          onClick={handleHeroStartConversation}
+                          onClick={handleZenHeroMiniBotSelection}
                           disabled={heroStartDisabled}
                           title={heroStartTitle}
                           aria-label={heroStartAriaLabel}
@@ -138905,6 +139602,10 @@ function HomeContent(): React.JSX.Element {
                           className={styles.emptyStateInfoBand}
                           data-empty-state-band-emphasis="bot"
                           data-selected-bot-hero="true"
+                          data-zen-home-drop-target={
+                            zenPreMessageConversationActive ? "true" : undefined
+                          }
+                          data-zen-live-bot-chrome-avoid="true"
                         >
                           <div className={styles.emptyStateInfoBandRow}>
                             <div
@@ -138920,12 +139621,12 @@ function HomeContent(): React.JSX.Element {
                                 ]
                                   .filter(Boolean)
                                   .join(" ")}
-                                data-bot-talk-hero="true"
+                                data-zen-pre-message-hero="true"
                                 data-relationship-depth-anchor="home"
                                 data-relationship-depth-identity={relationshipDepthIdentity(
                                   heroBot?.id ?? null,
                                 )}
-                                onClick={handleHeroStartConversation}
+                                onClick={handleZenHeroMiniBotSelection}
                                 disabled={heroStartDisabled}
                                 title={heroStartTitle}
                                 aria-label={heroStartAriaLabel}
@@ -138967,12 +139668,12 @@ function HomeContent(): React.JSX.Element {
                                   ]
                                     .filter(Boolean)
                                     .join(" ")}
-                                  data-bot-talk-hero="true"
+                                  data-zen-pre-message-hero="true"
                                   data-relationship-depth-anchor="home"
                                   data-relationship-depth-identity={relationshipDepthIdentity(
                                     null,
                                   )}
-                                  onClick={handleHeroStartConversation}
+                                  onClick={handleZenHeroMiniBotSelection}
                                   disabled={heroStartDisabled}
                                   title={heroStartTitle}
                                   aria-label={heroStartAriaLabel}
@@ -139785,6 +140486,9 @@ function HomeContent(): React.JSX.Element {
             data-tutorial-target="composer"
             data-viewport-safe-area="bottom"
             data-starter-compose-surface="true"
+            data-zen-home-roaming={
+              zenPreMessageConversationActive ? "true" : undefined
+            }
             data-compose-bot-selected={
               selectedComposeBotAccent ? "true" : undefined
             }
@@ -139909,13 +140613,21 @@ function HomeContent(): React.JSX.Element {
                               )
                             : 0
                         }
-                        avatarSizePx={zenLiveBotAvatarSizePx}
+                        identityPresentationBlackout={
+                          zenLivePresenceIdentityBlackout
+                        }
+                        identityPresentationOccurredAt={
+                          zenLivePresenceIdentityShapeshiftState?.occurredAt
+                        }
+                        avatarSizePx={zenLivePresenceAvatarSizePx}
                         voiceLightTarget={botVoiceLightTarget(
                           "chat",
                           detail?.id ?? selectedId ?? "pending",
                           zenLivePresenceBot?.id ?? "prism",
                         )}
                         onContextMenuRequest={openZenLiveBotContextMenu}
+                        initialRoamOrigin={zenHomeRoamOrigin}
+                        onHomeDockRequest={handleZenHomeDockRequest}
                       />
                     </div>
                   ) : null}
@@ -140717,7 +141429,7 @@ function HomeContent(): React.JSX.Element {
                           .filter(Boolean)
                           .join(" ")}
                         data-bot-talk-hero="true"
-                        onClick={handleHeroStartConversation}
+                        onClick={handleSandboxHeroStarter}
                         disabled={heroStartDisabled}
                         title={heroStartTitle}
                         aria-label={heroStartAriaLabel}
@@ -140753,7 +141465,7 @@ function HomeContent(): React.JSX.Element {
                                 .filter(Boolean)
                                 .join(" ")}
                               data-bot-talk-hero="true"
-                              onClick={handleHeroStartConversation}
+                              onClick={handleSandboxHeroStarter}
                               disabled={heroStartDisabled}
                               title={heroStartTitle}
                               aria-label={heroStartAriaLabel}

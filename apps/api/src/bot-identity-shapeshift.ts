@@ -5,12 +5,17 @@ import { fileURLToPath } from "node:url";
 import { strFromU8, unzipSync } from "fflate";
 import {
   createBotIdentityShapeshiftStateV1,
+  botIdentityPresentationColorV1,
+  botIdentityPresentationFrameMaterialSeedV1,
+  botIdentityPresentationGlyphV1,
+  botIdentityPresentationVoicePresetV1,
   pickBotIdentityShapeshiftCandidateIndexV1,
   type BotAvatarDetailsV1,
   type BotFaceStyle,
   type BotIdentityShapeshiftStateV1,
   type BotIdentityShapeshiftSurfaceV1,
   type BotIdentityShapeshiftTargetSourceV1,
+  type BotVoicePreset,
   botIdentityMirrorFaceV1,
   parseBotAvatarDetailsV1,
   resolveBotAudioVoiceProfileV1,
@@ -30,6 +35,11 @@ export interface BotIdentityShapeshiftCandidateV1 {
   face: BotFaceStyle;
   avatarDetails: BotAvatarDetailsV1 | null;
   voice: unknown;
+  /** Missing only while upgrading a legacy pending state. */
+  color?: string;
+  glyph?: string | null;
+  voicePreset?: BotVoicePreset;
+  frameMaterialSeed?: string;
 }
 
 function boundedText(value: unknown, max: number): string {
@@ -99,17 +109,43 @@ export function listLibraryIdentityShapeshiftCandidatesV1(
   userId: string,
   holderBotId: string,
 ): BotIdentityShapeshiftCandidateV1[] {
+  const botColumns = new Set(
+    (
+      db.prepare("PRAGMA table_info(bots)").all() as Array<{ name: string }>
+    ).map((column) => column.name),
+  );
+  const optionalBotColumn = (name: string): string =>
+    botColumns.has(name) ? name : `NULL AS ${name}`;
   const rows = db
     .prepare(
-      `SELECT id, name, system_prompt,
-              face_eyes_font, face_eye_character, face_eye_count, face_eye_spacing, face_eye_animation,
-              face_mouth_font, face_mouth_character, face_mouth_animation,
-              face_mouth_coffee_pucker, face_font_weight,
-              face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg,
-              face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg,
-              face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y,
-              face_blink_rotation_deg, face_thinking_frames, avatar_details_json,
-              authored_audio_voice_profile, audio_voice_profile_override
+      `SELECT id, name, system_prompt, ${optionalBotColumn("export_hash")}, color, glyph,
+              ${optionalBotColumn("face_eyes_font")},
+              ${optionalBotColumn("face_eye_character")},
+              ${optionalBotColumn("face_eye_count")},
+              ${optionalBotColumn("face_eye_spacing")},
+              ${optionalBotColumn("face_eye_animation")},
+              ${optionalBotColumn("face_mouth_font")},
+              ${optionalBotColumn("face_mouth_character")},
+              ${optionalBotColumn("face_mouth_animation")},
+              ${optionalBotColumn("face_mouth_coffee_pucker")},
+              ${optionalBotColumn("face_font_weight")},
+              ${optionalBotColumn("face_eye_scale")},
+              ${optionalBotColumn("face_eye_offset_x")},
+              ${optionalBotColumn("face_eye_offset_y")},
+              ${optionalBotColumn("face_eye_rotation_deg")},
+              ${optionalBotColumn("face_mouth_scale")},
+              ${optionalBotColumn("face_mouth_offset_x")},
+              ${optionalBotColumn("face_mouth_offset_y")},
+              ${optionalBotColumn("face_mouth_rotation_deg")},
+              ${optionalBotColumn("face_blink_bar")},
+              ${optionalBotColumn("face_blink_scale")},
+              ${optionalBotColumn("face_blink_offset_x")},
+              ${optionalBotColumn("face_blink_offset_y")},
+              ${optionalBotColumn("face_blink_rotation_deg")},
+              ${optionalBotColumn("face_thinking_frames")},
+              ${optionalBotColumn("avatar_details_json")},
+              ${optionalBotColumn("authored_audio_voice_profile")},
+              ${optionalBotColumn("audio_voice_profile_override")}
          FROM bots
         WHERE user_id = ?
           AND id != ?
@@ -136,6 +172,13 @@ export function listLibraryIdentityShapeshiftCandidatesV1(
           parseJsonColumn(row.authored_audio_voice_profile),
           parseJsonColumn(row.audio_voice_profile_override),
         ),
+        color: botIdentityPresentationColorV1(row.color),
+        glyph: botIdentityPresentationGlyphV1(row.glyph),
+        voicePreset: botIdentityPresentationVoicePresetV1(row.system_prompt),
+        frameMaterialSeed: botIdentityPresentationFrameMaterialSeedV1({
+          targetBotId: id,
+          exportHash: row.export_hash,
+        }),
       };
     })
     .filter((row): row is BotIdentityShapeshiftCandidateV1 => row !== null);
@@ -157,6 +200,7 @@ function parseMarketplaceBotArchive(
     const botJsonBytes = entries["bot.json"];
     if (!botJsonBytes) return null;
     const parsed = JSON.parse(strFromU8(botJsonBytes)) as {
+      botHash?: unknown;
       bot?: Record<string, unknown>;
     };
     const bot = parsed.bot;
@@ -205,6 +249,13 @@ function parseMarketplaceBotArchive(
         bot.authoredAudioVoiceProfile,
         bot.audioVoiceProfileOverride,
       ),
+      color: botIdentityPresentationColorV1(bot.color),
+      glyph: botIdentityPresentationGlyphV1(bot.glyph),
+      voicePreset: botIdentityPresentationVoicePresetV1(bot.systemPrompt),
+      frameMaterialSeed: botIdentityPresentationFrameMaterialSeedV1({
+        targetBotId: `marketplace:${marketplaceId}`,
+        exportHash: parsed.botHash,
+      }),
     };
   } catch {
     return null;
@@ -298,6 +349,10 @@ export function createIdentityShapeshiftStateFromCandidateV1(args: {
     targetFace: args.candidate.face,
     targetAvatarDetails: args.candidate.avatarDetails,
     targetVoice: args.candidate.voice,
+    targetColor: args.candidate.color,
+    targetGlyph: args.candidate.glyph,
+    targetVoicePreset: args.candidate.voicePreset,
+    targetFrameMaterialSeed: args.candidate.frameMaterialSeed,
     sourceMessageId: args.sourceMessageId,
     occurredAt: args.occurredAt,
   });

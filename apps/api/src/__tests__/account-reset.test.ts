@@ -372,6 +372,17 @@ function seedResetFixture(db: DatabaseSync): void {
     "2026-01-01T00:00:00.000Z"
   );
   db.prepare(
+    `INSERT INTO image_asset_generation_preferences
+       (user_id, kind, provider, model, updated_at)
+     VALUES (?, ?, ?, ?, ?)`
+  ).run(
+    "user-1",
+    "slate_cover",
+    "openai",
+    "gpt-image-1.5",
+    "2026-01-01T00:00:00.000Z"
+  );
+  db.prepare(
     "INSERT INTO pairing_codes (id, user_id, code_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?)"
   ).run(
     "pair-1",

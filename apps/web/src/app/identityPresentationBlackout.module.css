@@ -1,0 +1,29 @@
+.blackout {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  pointer-events: none;
+  background: #000;
+  animation: identity-presentation-blackout 760ms linear both;
+}
+
+@keyframes identity-presentation-blackout {
+  0% {
+    opacity: 0;
+  }
+
+  12%,
+  72% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .blackout {
+    animation-timing-function: steps(1, end);
+  }
+}

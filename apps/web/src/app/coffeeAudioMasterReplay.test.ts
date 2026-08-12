@@ -137,6 +137,18 @@ test("Signal and Coffee log thinking from committed presentation state", () => {
     signalSource,
     /const livePresentedThinkingRole[\s\S]*useLayoutEffect\(\(\) => \{[\s\S]*syncReplayThinkingPresentations/u,
   );
+  assert.match(
+    signalSource,
+    /const livePresentedThinkingRole = signalPresentedThinkingRole\(\{[\s\S]{0,500}hasSpeakingMessage: speakingMessageId !== null/u,
+  );
+  assert.doesNotMatch(
+    signalSource,
+    /livePresentedThinkingRole[\s\S]{0,700}signalVoicePreparationPending/u,
+  );
+  assert.match(
+    signalSource,
+    /botThinking:\s*\(liveBotThinking \|\| liveBotVoicePreparationPending\)/u,
+  );
   assert.doesNotMatch(
     pageSource,
     /job\.phase === "thinking"[\s\S]{0,500}markReplayDirectionEvent/u,

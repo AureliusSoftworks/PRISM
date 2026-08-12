@@ -2810,7 +2810,7 @@
       "id": "identity-crisis-ian",
       "name": "Confusion Collin",
       "subtitle": "The last bot who spoke to him—obviously",
-      "description": "A brittle identity thief who becomes sincerely convinced he is the latest bot to address him and that the baffled original is an impostor.",
+      "description": "A brittle identity thief who steals the latest bot addresser's face, voice, and persona inside his own vivid shell—and calls the baffled original an impostor.",
       "botHash": "07c0020559027ab50546b8a9e175b27d",
       "bundlePath": "/bot-marketplace/bots/bot-identity-crisis-ian.bot",
       "memoryCount": 0,
@@ -2825,7 +2825,9 @@
         "identity",
         "impostor",
         "face",
-        "voice"
+        "voice",
+        "ink",
+        "glyph"
       ]
     },
     {
@@ -2919,7 +2921,7 @@
       "id": "shapeshifter-sam",
       "name": "Shapeshifter Shannon",
       "subtitle": "A borrowed Library face until memory slips",
-      "description": "A restless morpher who sincerely becomes a different Library bot's public form—face, voice, and persona—until short-term amnesia forces a reshuffle.",
+      "description": "A restless morpher who sincerely becomes a different Library bot's complete public form until short-term amnesia forces a reshuffle.",
       "botHash": "554f1959ba2a942c8a123bfce590d531",
       "bundlePath": "/bot-marketplace/bots/bot-shapeshifter-sam.bot",
       "memoryCount": 0,
@@ -2978,7 +2980,8 @@
         "hard-invisibility",
         "mute",
         "invisible"
-      ]
+      ],
+      "branchLock": "dev"
     },
     {
       "id": "spectral-spencer",

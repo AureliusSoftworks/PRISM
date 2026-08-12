@@ -57,6 +57,21 @@ describe("chatMiniBotAvatar", () => {
       "the outer mini rig must be the only horizontal mirror for custom Ink",
     );
     assert.match(
+      componentSource,
+      /\["--chat-mini-bot-upper-screen-facing-scale-x" as string\]:\s*directionIndependentFace \? "1" : screenFacingScaleX/,
+      "upper screen mirroring remains driven by explicit upper facing",
+    );
+    assert.match(
+      componentSource,
+      /\["--chat-mini-bot-lower-screen-facing-scale-x" as string\]:\s*"var\(--bot-avatar-external-facing-scale-x, 1\)"/,
+      "lower identity glyph stays upright and can counter an external chassis mirror",
+    );
+    assert.doesNotMatch(
+      componentSource,
+      /\["--chat-mini-bot-lower-screen-facing-scale-x" as string\]:\s*screenFacingScaleX/,
+      "lower glyph must not mirror with body facing",
+    );
+    assert.match(
       pageSource,
       /\["--coffee-plate-emoji-face-scale-y" as string\]:\s*BOT_AVATAR_CANONICAL_FACE_SCALE_Y/,
       "the inner punctuation face must remain canonical to avoid a double flip",

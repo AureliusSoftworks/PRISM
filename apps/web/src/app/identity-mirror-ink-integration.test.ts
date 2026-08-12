@@ -22,31 +22,35 @@ describe("Identity Crisis avatar ink integration", () => {
     assert.ok(coffeeResolverIndex >= 0 && coffeeRenderIndex > coffeeResolverIndex);
     assert.match(
       pageSource.slice(coffeeResolverIndex, coffeeResolverIndex + 700),
-      /resolveBotIdentityMirrorAvatarDetailsV1\(\s*identityMirrorState,\s*resolveBotAvatarDetails\(bot\),\s*identityBorrowTargetFaceVisible,/u,
+      /resolveBotIdentityMirrorAvatarDetailsV1\(\s*identityMirrorState,\s*resolveBotAvatarDetails\(bot\),\s*identityBorrowTargetActive,/u,
     );
     assert.match(
       pageSource,
-      /resolveBotIdentityMirrorAvatarDetailsV1\(\s*botSummary\.identityMirrorState,\s*resolveBotAvatarDetails\(bot\),\s*Boolean\(botSummary\.identityMirrorTargetFaceActive\),/u,
+      /resolveBotIdentityMirrorAvatarDetailsV1\(\s*identityMirrorState,\s*resolveBotAvatarDetails\(bot\),\s*Boolean\(\s*botSummary\.identityMirrorTargetFaceActive,?\s*\),/u,
     );
     assert.match(
       pageSource,
-      /botSummary\.identityMirrorState &&\s*botSummary\.identityMirrorTargetFaceActive\s*\?\s*botSummary\.identityMirrorState\.targetFace/u,
+      /presentationIdentity &&\s*botSummary\.identityMirrorTargetFaceActive\s*\? presentationIdentity\.targetFace/u,
     );
   });
 
   it("describes the saved ink handoff in current mode guidance", () => {
     assert.match(
       tutorialSource,
-      /copies the public persona, CRT face, authored Avatar Details ink, and resolved voice/u,
-    );
-    assert.match(tutorialSource, /saved face-ink-and-voice handoff replays exactly/u);
-    assert.match(
-      tutorialSource,
-      /authored default persona, face, ink, and voice return before the closing sign-off/u,
+      /borrows the latest direct bot addresser's public diegetic identity/u,
     );
     assert.match(
       tutorialSource,
-      /Shapeshifter sincerely becomes a different Library bot's public form/u,
+      /keeps its own saturated color, client-side voice effect, communication-style chassis, and frame finish/u,
+    );
+    assert.match(tutorialSource, /saved handoff and its timing replay exactly/u);
+    assert.match(
+      tutorialSource,
+      /authored default identity returns before the closing sign-off/u,
+    );
+    assert.match(
+      tutorialSource,
+      /Shapeshifter sincerely becomes a different Library bot's complete public form/u,
     );
     assert.match(
       tutorialSource,

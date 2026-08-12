@@ -103,6 +103,8 @@ import {
   setBotcastEpisodeCameraMode,
   setBotcastModelWarmupHold,
   recordBotcastSessionClockHold,
+  signalAutoFallbackHttpStatus,
+  signalAutoFallbackPublicMessage,
   signalOnlineTurnHttpStatus,
   selectBotcastReviewPersona,
   signalVisualOnlyListenerReaction,
@@ -111,6 +113,7 @@ import {
   type SignalOnlineTurnAttemptV1,
   updateBotcastShow,
 } from "../botcast.ts";
+import { AutoFallbackExhaustedError } from "../auto-fallback.ts";
 import { exportUserSnapshot, importUserSnapshot } from "../backup.ts";
 import { initializeDatabase, readBotRelationship } from "../db.ts";
 import {
@@ -1330,7 +1333,9 @@ describe("Botcast persistence and isolation", () => {
     const serverSource = readFileSync(
       new URL("../server.ts", import.meta.url),
       "utf8",
-    );
+    )
+      .replace(/\s+/gu, " ")
+      .replace(/route\(\s+/gu, "route(");
     const bookingFailureIndex = serverSource.indexOf(
       "Signal could not reach an available interview model.",
     );
@@ -5790,6 +5795,7 @@ describe("Botcast persistence and isolation", () => {
       `UPDATE bots
           SET face_eye_character = '◉',
               face_mouth_character = '_',
+              glyph = 'lucideCompass',
               authored_audio_voice_profile = ?,
               avatar_details_json = ?
         WHERE id = 'host-1'`,
@@ -5850,6 +5856,7 @@ describe("Botcast persistence and isolation", () => {
         (state.targetVoice as Record<string, unknown>).baseVoiceId,
         "voice-4",
       );
+      assert.equal(state.targetGlyph, "lucideCompass");
       assert.deepEqual(state.targetAvatarDetails, {
         version: 1,
         screen: {
@@ -5862,6 +5869,9 @@ describe("Botcast persistence and isolation", () => {
       assert.equal("powers" in state, false);
       assert.equal("color" in state, false);
       assert.equal("glyph" in state, false);
+      assert.equal("targetColor" in state, false);
+      assert.equal("targetVoicePreset" in state, false);
+      assert.equal("targetFrameMaterialSeed" in state, false);
       assert.deepEqual(firstEvents[0]?.payload.irritation, {
         targetBotId: "host-1",
         strength: "small",
@@ -6004,6 +6014,9 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(state.holderBotId, "host-1");
       assert.equal(state.targetBotId, "guest-1");
       assert.equal(state.sourceMessageId, guestTurn.message?.id);
+      assert.equal("targetColor" in state, false);
+      assert.equal("targetVoicePreset" in state, false);
+      assert.equal("targetFrameMaterialSeed" in state, false);
 
       const holderTurn = await advanceBotcastEpisode(
         db,
@@ -9136,7 +9149,9 @@ describe("Botcast persistence and isolation", () => {
     const serverSource = readFileSync(
       new URL("../server.ts", import.meta.url),
       "utf8",
-    );
+    )
+      .replace(/\s+/gu, " ")
+      .replace(/route\(\s+/gu, "route(");
     assert.match(
       serverSource,
       /route\("DELETE", "\/api\/botcast\/shows\/:id"/u,
@@ -9171,7 +9186,7 @@ describe("Botcast persistence and isolation", () => {
     );
     assert.match(
       serverSource,
-      /const result = await endBotcastEpisodeOnProducerCut\(/u,
+      /const result = await runWithUsageSession\([\s\S]{0,800}endBotcastEpisodeOnProducerCut\(/u,
     );
     assert.match(
       serverSource,
@@ -9244,14 +9259,18 @@ describe("Botcast persistence and isolation", () => {
       serverSource,
       /route\("POST", "\/api\/botcast\/shows\/:id\/booking-suggestion"/u,
     );
-    assert.match(
-      serverSource,
-      /booking-suggestion[\s\S]{0,3800}requestedResponseMode[\s\S]{0,1400}autoEnabled[\s\S]{0,2200}responseMode: autoEnabled[\s\S]{0,1800}autoFallbackChain/iu,
+    const bookingRouteSource = serverSource.slice(
+      serverSource.indexOf(
+        'route("POST", "/api/botcast/shows/:id/booking-suggestion"',
+      ),
+      serverSource.indexOf(
+        '"/api/botcast/shows/:id/asset-sets/:setId/reuse"',
+      ),
     );
-    assert.match(
-      serverSource,
-      /booking-suggestion[\s\S]{0,1800}localModeLocked = user\.preferred_provider === "local"[\s\S]{0,900}autoEnabled =\s*!localModeLocked/iu,
-    );
+    assert.match(bookingRouteSource, /contextualTextRuntimeForUser\(/u);
+    assert.match(bookingRouteSource, /requestedResponseMode: body\.responseMode/u);
+    assert.match(bookingRouteSource, /responseMode: runtime\.responseMode/u);
+    assert.match(bookingRouteSource, /autoFallbackChain: runtime\.autoFallbackChain/u);
     assert.match(
       serverSource,
       /route\("POST", "\/api\/botcast\/shows\/:id\/host-chat"/u,
@@ -9263,31 +9282,31 @@ describe("Botcast persistence and isolation", () => {
     assert.match(serverSource, /body\.atmosphereMix !== undefined/u);
     assert.match(
       serverSource,
-      /route\("POST", "\/api\/botcast\/shows\/:id\/intro-audio\/generate"/u,
+      /route\(\s*"POST",\s*"\/api\/botcast\/shows\/:id\/intro-audio\/generate"/u,
     );
     assert.match(
       serverSource,
-      /route\("POST", "\/api\/botcast\/shows\/:id\/atmosphere-audio\/generate"/u,
+      /route\(\s*"POST",\s*"\/api\/botcast\/shows\/:id\/atmosphere-audio\/generate"/u,
     );
     assert.match(
       serverSource,
-      /route\("POST", "\/api\/botcast\/shows\/:id\/atmosphere-audio\/generate"[\s\S]{0,320}userBlocksOnlineCapabilities\(user\)[\s\S]{0,180}Switch to AUTO or ONLINE before creating an ElevenLabs Signal atmosphere/u,
+      /route\(\s*"POST",\s*"\/api\/botcast\/shows\/:id\/atmosphere-audio\/generate"[\s\S]{0,320}userBlocksOnlineCapabilities\(user\)[\s\S]{0,180}Switch to AUTO or ONLINE before creating an ElevenLabs Signal atmosphere/u,
     );
     assert.match(
       serverSource,
-      /route\("GET", "\/api\/botcast\/shows\/:id\/intro-audio"/u,
+      /route\(\s*"GET",\s*"\/api\/botcast\/shows\/:id\/intro-audio"/u,
     );
     assert.match(
       serverSource,
-      /route\("GET", "\/api\/botcast\/shows\/:id\/outdent-audio"/u,
+      /route\(\s*"GET",\s*"\/api\/botcast\/shows\/:id\/outdent-audio"/u,
     );
     assert.match(
       serverSource,
-      /route\("GET", "\/api\/botcast\/shows\/:id\/atmosphere-audio"/u,
+      /route\(\s*"GET",\s*"\/api\/botcast\/shows\/:id\/atmosphere-audio"/u,
     );
     assert.match(
       serverSource,
-      /route\("DELETE", "\/api\/botcast\/shows\/:id\/intro-audio"/u,
+      /route\(\s*"DELETE",\s*"\/api\/botcast\/shows\/:id\/intro-audio"/u,
     );
     assert.match(
       serverSource,
@@ -9341,10 +9360,10 @@ describe("Botcast persistence and isolation", () => {
     );
     const studioLightingRoute = serverSource.slice(
       serverSource.indexOf(
-        'route("POST", "/api/botcast/shows/:id/studio-lighting/refresh"',
+        '"/api/botcast/shows/:id/studio-lighting/refresh"',
       ),
       serverSource.indexOf(
-        'route("POST", "/api/botcast/shows/:id/intro-audio/generate"',
+        '"/api/botcast/shows/:id/intro-audio/generate"',
       ),
     );
     assert.match(studioLightingRoute, /studioLightingOnly: true/u);
@@ -9436,7 +9455,7 @@ describe("Botcast persistence and isolation", () => {
     );
     assert.match(
       serverSource,
-      /prompt: withSignalGenerationKeywords\([\s\S]{0,120}promptByKind\[kind\],[\s\S]{0,60}keywords/u,
+      /const canonicalPrompt = withSignalGenerationKeywords\([\s\S]{0,120}promptByKind\[kind\],[\s\S]{0,60}keywords[\s\S]{0,300}prompt: direction \?[\s\S]{0,100}canonicalPrompt/u,
     );
     assert.match(
       serverSource,
@@ -14251,6 +14270,21 @@ describe("Botcast persistence and isolation", () => {
       assert.match(advanceRouteSource, /const signalAdvanceAbort = new AbortController\(\)/u);
       assert.match(advanceRouteSource, /ctx\.res\.once\("close", onSignalAdvanceClientClose\)/u);
       assert.match(advanceRouteSource, /signal: signalAdvanceAbort\.signal/u);
+      assert.match(advanceRouteSource, /result = await runWithUsageSession\(/u);
+      assert.match(advanceRouteSource, /mode: "signal"/u);
+      assert.match(advanceRouteSource, /surface: "signal"/u);
+
+      const endRouteStart = serverSource.indexOf(
+        'route("POST", "/api/botcast/episodes/:id/end"',
+      );
+      const endRouteEnd = serverSource.indexOf(
+        'route(\n      "POST",\n      "/api/botcast/episodes/:id/model-warmup-hold"',
+        endRouteStart,
+      );
+      const endRouteSource = serverSource.slice(endRouteStart, endRouteEnd);
+      assert.match(endRouteSource, /const result = await runWithUsageSession\(/u);
+      assert.match(endRouteSource, /mode: "signal"/u);
+      assert.match(endRouteSource, /surface: "signal"/u);
     } finally {
       db.close();
     }
@@ -14568,6 +14602,260 @@ describe("Botcast persistence and isolation", () => {
     } finally {
       db.close();
     }
+  });
+
+  it("completes an Eternal Introduction host closing after every Auto candidate fails validation", async () => {
+    const db = fixture();
+    let providerCalls = 0;
+    let closingPhase = false;
+    const attempts: Array<{ provider: string; model: string | undefined }> = [];
+    const providerFactory: typeof selectProvider = (providerName) => ({
+      name: providerName,
+      async generateResponse(_messages, options) {
+        providerCalls += 1;
+        attempts.push({ provider: providerName, model: options.model });
+        if (!closingPhase) {
+          return "Welcome to The Unfinished Signal. I'm Forgetful Forrest, and Jared joins me to examine the art of leaving things unfinished. Jared, where does unfinished become intentional?";
+        }
+        return "Should we keep going, Jared?";
+      },
+      async embedText() {
+        return [];
+      },
+    });
+    const powerName = "Eternal Introduction";
+    const powerIntent =
+      "Every message is a sincere first introduction. Forgetful Forrest remembers only the current other-speaker message.";
+    try {
+      db.prepare(
+        "UPDATE bots SET name = 'Forgetful Forrest', system_prompt = ?, powers_json = ? WHERE id = 'host-1'",
+      ).run(
+        "A warm, absent-minded interviewer who treats unfinished work as an invitation rather than a defect.",
+        JSON.stringify([
+          {
+            version: 1,
+            id: "eternal-introduction",
+            name: powerName,
+            intent: powerIntent,
+            enabled: true,
+            compileStatus: "ready",
+            compiled: {
+              version: 1,
+              sourceHash: botPowerSourceHashV1(powerName, powerIntent),
+              selfCue: "Every request is first contact.",
+              observerCue: "Remember every repeated introduction.",
+              effects: [
+                {
+                  type: "eternal_introduction",
+                  memory: "current_other_speaker_message",
+                },
+              ],
+              ruleLabels: ["Current other-speaker message only"],
+            },
+          },
+        ]),
+      );
+      const show = createBotcastShow(db, "user-1", {
+        hostBotId: "host-1",
+        name: "The Unfinished Signal",
+      });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestKind: "producer",
+        guestName: "Jared",
+        topic: "The Art of Leaving Things Unfinished",
+        preferredProvider: "openai",
+        modelOverride: "gpt-5.6-terra",
+        responseMode: "auto",
+        durationMinutes: 3,
+      });
+      const generationOptions = {
+        preferredProvider: "openai" as const,
+        responseMode: "auto" as const,
+        contextualModel: "gpt-5.6-terra",
+        providerFactory,
+        autoFallbackChain: {
+          v: 1 as const,
+          fallbacks: [
+            { provider: "openai" as const, model: "gpt-5.6-sol" },
+            { provider: "anthropic" as const, model: "claude-fable-5" },
+            { provider: "openai" as const, model: "gpt-4o-mini" },
+            { provider: "openai" as const, model: "gpt-5.6-luna" },
+          ],
+        },
+      };
+
+      const opening = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        {
+          preferredProvider: "openai",
+          contextualModel: "gpt-5.6-terra",
+          providerFactory,
+        },
+      );
+      assert.equal(opening.message?.speakerRole, "host");
+      const followUp = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {
+          guestMessage:
+            "I usually notice it when another pass would make the work safer but less alive.",
+        },
+        {
+          preferredProvider: "openai",
+          contextualModel: "gpt-5.6-terra",
+          providerFactory,
+        },
+      );
+      assert.equal(followUp.message?.speakerRole, "host");
+      closingPhase = true;
+      attempts.length = 0;
+      const humanClosingMessageId = "producer-closing-boundary";
+      db.prepare(
+        `INSERT INTO botcast_messages
+          (id, user_id, episode_id, speaker_role, bot_id, content, created_at)
+         VALUES (?, 'user-1', ?, 'guest', ?, ?, ?)`,
+      ).run(
+        humanClosingMessageId,
+        episode.id,
+        BOTCAST_PRODUCER_GUEST_ID,
+        "I leave a piece unfinished when preserving its open question matters more than polishing away the invitation.",
+        new Date().toISOString(),
+      );
+      insertBotcastTestEvent(db, episode.id, "utterance", {
+        messageId: humanClosingMessageId,
+        speakerRole: "guest",
+        botId: BOTCAST_PRODUCER_GUEST_ID,
+        segment: "interview",
+        provider: "human",
+        model: "producer",
+      });
+      db.prepare(
+        "UPDATE botcast_episodes SET segment = 'closing' WHERE id = ? AND user_id = 'user-1'",
+      ).run(episode.id);
+      insertBotcastTestEvent(db, episode.id, "segment", {
+        segment: "closing",
+        ordinal: 2,
+      });
+
+      const closing = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+
+      assert.equal(closing.episode.status, "completed");
+      assert.equal(closing.episode.segment, "closing");
+      assert.equal(closing.message?.speakerRole, "host");
+      assert.match(closing.message?.content ?? "", /Forgetful Forrest/u);
+      assert.match(closing.message?.content ?? "", /Jared, thank you for joining me/iu);
+      assert.match(closing.message?.content ?? "", /thank you for watching/iu);
+      assert.doesNotMatch(closing.message?.content ?? "", /\?/u);
+      assert.equal(closing.episode.messages.length, 5);
+      assert.deepEqual(attempts.slice(0, 5), [
+        { provider: "openai", model: "gpt-5.6-terra" },
+        { provider: "openai", model: "gpt-5.6-sol" },
+        { provider: "anthropic", model: "claude-fable-5" },
+        { provider: "openai", model: "gpt-4o-mini" },
+        { provider: "openai", model: "gpt-5.6-luna" },
+      ]);
+      const failedGeneration = closing.episode.events.findLast(
+        (event) => event.kind === "provider_generation",
+      );
+      assert.equal(failedGeneration?.payload.outcome, "rejected");
+      assert.equal(failedGeneration?.payload.exhaustionKind, "content_validation");
+      assert.equal(
+        failedGeneration?.payload.recovery?.strategy,
+        "deterministic_host_closing",
+      );
+      assert.deepEqual(
+        (failedGeneration?.payload.attempts as Array<Record<string, unknown>>)
+          .map((attempt) => ({
+            model: attempt.model,
+            reason: attempt.reason,
+          })),
+        [
+          { model: "gpt-5.6-terra", reason: "invalid_output" },
+          { model: "gpt-5.6-sol", reason: "invalid_output" },
+          { model: "claude-fable-5", reason: "invalid_output" },
+          { model: "gpt-4o-mini", reason: "invalid_output" },
+          { model: "gpt-5.6-luna", reason: "invalid_output" },
+        ],
+      );
+      const closingUtterance = closing.episode.events.findLast(
+        (event) => event.kind === "utterance",
+      );
+      assert.equal(closingUtterance?.payload.provider, "deterministic");
+      assert.equal(
+        closingUtterance?.payload.model,
+        "signal-host-closing-fallback",
+      );
+      assert.equal(
+        closingUtterance?.payload.utteranceRepair?.fallbackKind,
+        "host_closing",
+      );
+
+      const messageCount = closing.episode.messages.length;
+      const repeated = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+      assert.equal(repeated.message, null);
+      assert.equal(repeated.episode.messages.length, messageCount);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("maps Signal Auto validation exhaustion separately from provider exhaustion", () => {
+    const validationError = new AutoFallbackExhaustedError([
+      {
+        provider: "openai",
+        model: "gpt-signal-primary",
+        durationMs: 12,
+        outcome: "failed",
+        reason: "invalid_output",
+      },
+      {
+        provider: "anthropic",
+        model: "claude-signal-fallback",
+        durationMs: 8,
+        outcome: "failed",
+        reason: "refusal",
+      },
+    ]);
+    assert.equal(signalAutoFallbackHttpStatus(validationError), 422);
+    assert.match(
+      signalAutoFallbackPublicMessage(validationError),
+      /responded.*valid Signal turn/iu,
+    );
+    assert.doesNotMatch(
+      signalAutoFallbackPublicMessage(validationError),
+      /available|availability/iu,
+    );
+
+    const providerError = new AutoFallbackExhaustedError([
+      {
+        provider: "openai",
+        model: "gpt-signal-primary",
+        durationMs: 12,
+        outcome: "failed",
+        reason: "provider_error",
+      },
+    ]);
+    assert.equal(signalAutoFallbackHttpStatus(providerError), 503);
+    assert.match(
+      signalAutoFallbackPublicMessage(providerError),
+      /providers are available/iu,
+    );
   });
 
   it("records live camera overrides and locks direction when the episode ends", () => {
@@ -16844,7 +17132,13 @@ describe("Botcast persistence and isolation", () => {
             canReclaim: true,
           }),
         );
-        if (plan && floorOutcomes.every((outcome) => outcome === "yield")) break;
+        if (
+          plan &&
+          plan.targetProgress < 0.85 &&
+          floorOutcomes.every((outcome) => outcome === "yield")
+        ) {
+          break;
+        }
         created = createBotcastEpisode(db, "user-1", show.id, {
           guestBotId: "guest-1",
           topic: `The cost of copied invention ${attempt + 1}`,
@@ -17267,13 +17561,13 @@ describe("Botcast persistence and isolation", () => {
           canReclaim: false,
           canHold: true,
         });
-        if (plan && floorOutcome === "yield") break;
+        if (plan && plan.targetProgress < 0.85 && floorOutcome === "yield") break;
         created = createBotcastEpisode(db, "user-1", show.id, {
           guestBotId: "guest-1",
           topic: `The cost of copied invention ${attempt + 1}`,
         });
       }
-      assert.ok(botcastPowerInterruptionPlanV1({
+      const selectedPlan = botcastPowerInterruptionPlanV1({
         episodeId: created.id,
         targetTurnOrdinal: 1,
         powerId: "power-interrupting",
@@ -17281,7 +17575,9 @@ describe("Botcast persistence and isolation", () => {
         frequency: "frequent",
         strength: "large",
         targetTurnsSinceLastInterruption: null,
-      }));
+      });
+      assert.ok(selectedPlan);
+      assert.ok(selectedPlan.targetProgress < 0.85);
       assert.equal(
         botcastCrosstalkFloorOutcomeV1({
           seed: [
@@ -19404,7 +19700,7 @@ describe("Botcast persistence and isolation", () => {
         "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore What survives an edit. [sighs]",
       );
       assert.equal(restored.messages[1]?.content, "...");
-      assert.equal(restored.messages[1]?.stageActionText, null);
+      assert.equal(restored.messages[1]?.stageActionText, "leans back, slight smile");
       assert.ok(
         restored.events.some((event) => event.kind === "camera_suggestion"),
       );

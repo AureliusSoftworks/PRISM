@@ -1,6 +1,9 @@
 export type SignalCameraTransitionMode = "animated" | "instant";
 export type SignalDirectedCameraShot = "left" | "right" | "wide";
 
+/** A reaction shot must read as an editorial choice, not a camera twitch. */
+export const SIGNAL_REACTION_CAMERA_MIN_HOLD_MS = 2_500;
+
 /**
  * Ordinary backchannels cut only when the persisted director plan explicitly
  * allows it. Audible reactions are editorial cuts, never slow sweeps.
@@ -8,10 +11,17 @@ export type SignalDirectedCameraShot = "left" | "right" | "wide";
 export function signalListenerReactionCameraShot(args: {
   cameraCutEligible: boolean;
   ephemeralSpeakingShot?: SignalDirectedCameraShot | null;
-  timedReactionShot?: SignalDirectedCameraShot | null;
+  ephemeralSpeechDurationMs?: number | null;
 }): SignalDirectedCameraShot | null {
   if (!args.cameraCutEligible) return null;
-  return args.ephemeralSpeakingShot ?? args.timedReactionShot ?? null;
+  if (
+    !args.ephemeralSpeakingShot ||
+    !Number.isFinite(args.ephemeralSpeechDurationMs) ||
+    Number(args.ephemeralSpeechDurationMs) < SIGNAL_REACTION_CAMERA_MIN_HOLD_MS
+  ) {
+    return null;
+  }
+  return args.ephemeralSpeakingShot;
 }
 
 /** Auto keeps the room visible while a bot prepares, then follows the speaker. */

@@ -33,7 +33,7 @@ export function ChatMiniBotAvatar(props: {
   size?: "badge" | "room" | "hero";
   /** `breathing` softly illuminates the authored chassis lamp apertures. */
   lightMode?: "off" | "breathing";
-  /** Visible direction for the whole mini screen, including Ink and buckle. */
+  /** Visible direction for the mini face and Ink; the glyph stays readable. */
   facing?: BotAvatarFacing;
   /** Keep another full-screen face effect, such as Question, upright. */
   directionIndependentFace?: boolean;
@@ -60,8 +60,10 @@ export function ChatMiniBotAvatar(props: {
     // double-flipping custom Ink.
     ["--chat-mini-bot-upper-screen-facing-scale-x" as string]:
       directionIndependentFace ? "1" : screenFacingScaleX,
+    // Cancel an ancestor that mirrors the complete chassis; ordinary
+    // component-owned face turns resolve to 1.
     ["--chat-mini-bot-lower-screen-facing-scale-x" as string]:
-      screenFacingScaleX,
+      "var(--bot-avatar-external-facing-scale-x, 1)",
     ["--avatar-details-facing-scale-x" as string]: "1",
   } as CSSProperties;
 

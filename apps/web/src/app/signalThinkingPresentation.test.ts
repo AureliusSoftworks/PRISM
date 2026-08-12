@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   signalGenerationThinkingRole,
+  signalPresentedThinkingRole,
   signalThinkingPresentationEndReason,
 } from "./signalThinkingPresentation.ts";
 
@@ -44,6 +45,59 @@ describe("Signal thinking presentation", () => {
         hasProducerCue: false,
       }),
       "host",
+    );
+  });
+
+  it("records generation thinking once but not the compact voice-preparation wait", () => {
+    const base = {
+      episodeLive: true,
+      producerGuestThinking: false,
+      producerGuestSipActive: false,
+      nextSpeakerRole: "guest" as const,
+      generationThinkingRole: "guest" as const,
+      generationThinkingRunMatches: true,
+    };
+    assert.equal(
+      signalPresentedThinkingRole({
+        ...base,
+        generationBusy: true,
+        hasSpeakingMessage: false,
+      }),
+      "guest",
+    );
+    assert.equal(
+      signalPresentedThinkingRole({
+        ...base,
+        generationBusy: false,
+        hasSpeakingMessage: true,
+      }),
+      null,
+    );
+  });
+
+  it("preserves producer-guest waits and suppresses the thinking face while sipping", () => {
+    const base = {
+      episodeLive: true,
+      producerGuestThinking: true,
+      generationBusy: false,
+      hasSpeakingMessage: false,
+      nextSpeakerRole: "guest" as const,
+      generationThinkingRole: null,
+      generationThinkingRunMatches: false,
+    };
+    assert.equal(
+      signalPresentedThinkingRole({
+        ...base,
+        producerGuestSipActive: false,
+      }),
+      "guest",
+    );
+    assert.equal(
+      signalPresentedThinkingRole({
+        ...base,
+        producerGuestSipActive: true,
+      }),
+      null,
     );
   });
 

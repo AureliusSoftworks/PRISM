@@ -59,6 +59,7 @@ import type {
   BotcastLogoState,
   BotcastSpeakerRole,
   BotcastTensionState,
+  AutoFallbackAttemptTraceV1,
   AutoFallbackChainV1,
   AutoFallbackModelRef,
   AutoRouteDecisionV1,
@@ -135,6 +136,7 @@ import {
   botFalseNameObserverCueV1,
   botFalseNameSelfCueV1,
   botIdentityMirrorFaceV1,
+  botIdentityPresentationGlyphV1,
   botIdentityMirrorHolderPromptV1,
   botIdentityMirrorObserverPromptV1,
   botIdentityMirrorTargetChangesV1,
@@ -663,6 +665,39 @@ export function signalOnlineTurnHttpStatus(
   return error.attempts.at(-1)?.reason === "timeout" ? 504 : 502;
 }
 
+const SIGNAL_AUTO_VALIDATION_FAILURE_REASONS = new Set([
+  "empty",
+  "refusal",
+  "invalid_output",
+]);
+
+/** True when every configured Auto candidate answered but failed content validation. */
+export function signalAutoFallbackExhaustionIsValidationOnly(
+  error: AutoFallbackExhaustedError,
+): boolean {
+  return (
+    error.attempts.length > 0 &&
+    error.attempts.every((attempt) =>
+      SIGNAL_AUTO_VALIDATION_FAILURE_REASONS.has(attempt.reason ?? ""),
+    )
+  );
+}
+
+/** Keep validation exhaustion distinct from genuine provider availability failures. */
+export function signalAutoFallbackHttpStatus(
+  error: AutoFallbackExhaustedError,
+): 422 | 503 {
+  return signalAutoFallbackExhaustionIsValidationOnly(error) ? 422 : 503;
+}
+
+export function signalAutoFallbackPublicMessage(
+  error: AutoFallbackExhaustedError,
+): string {
+  return signalAutoFallbackExhaustionIsValidationOnly(error)
+    ? "Auto models responded, but none produced a valid Signal turn. Try again."
+    : "Signal could not complete this turn across the configured Auto models. Try again when the providers are available.";
+}
+
 export function signalVisualOnlyListenerReaction(
   plan: ListenerReactionPlanV1,
 ): ListenerReactionPlanV1 {
@@ -802,6 +837,7 @@ export type BotcastBotProfile = {
   id: string;
   name: string;
   systemPrompt: string;
+  exportHash?: string | null;
   onlineEnabled: boolean;
   cloneFamilyId?: string | null;
   powers?: BotPowerV1[];
@@ -1102,9 +1138,13 @@ export function botcastCrosstalkFloorOutcomeV1(args: {
   const canHold = args.canHold ?? args.canReclaim;
   if (!args.canReclaim && !canHold) return "yield";
   const irritationTowardInterrupter = args.irritationTowardInterrupter ?? 0;
+  // A high but not yet saturated edge keeps an echo-bound line coherent. At
+  // the exact ceiling, let the normal roll decide so maximum irritation can
+  // still reclaim or yield rather than becoming a universal hold.
   if (
     canHold &&
-    irritationTowardInterrupter >= SIGNAL_CROSSTALK_FORCED_HOLD_IRRITATION
+    irritationTowardInterrupter >= SIGNAL_CROSSTALK_FORCED_HOLD_IRRITATION &&
+    irritationTowardInterrupter < DIRECTIONAL_IRRITATION_MAX
   ) {
     return "hold";
   }
@@ -2786,7 +2826,7 @@ function loadBotProfile(
 ): BotcastBotProfile {
   const row = db
     .prepare(
-    `SELECT id, name, system_prompt, clone_family_id, powers_json, color, glyph,
+    `SELECT id, name, system_prompt, export_hash, clone_family_id, powers_json, color, glyph,
             face_eyes_font, face_eye_character, face_eye_count, face_mouth_font,
             face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker,
             face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y,
@@ -2803,6 +2843,7 @@ function loadBotProfile(
         id: string;
         name: string;
         system_prompt: string;
+        export_hash: string | null;
         clone_family_id: string | null;
         powers_json: string | null;
         color: string | null;
@@ -2849,6 +2890,7 @@ function loadBotProfile(
     id: row.id,
     name: row.name,
     systemPrompt: row.system_prompt,
+    exportHash: row.export_hash,
     onlineEnabled: row.online_enabled === 1,
     cloneFamilyId: row.clone_family_id,
     powers: parseStoredBotPowersV1(row.powers_json),
@@ -9428,16 +9470,15 @@ export function buildBotcastSpeakerPrompt(
     args.episode.events,
     speaker.id,
   );
-  const identityMirrorPrompt = speakerEternallyIntroduces
-    ? null
-    : botcastIdentityMirrorPromptV1({
-        events: args.episode.events,
-        speaker,
-        speakerRole: args.speakerRole,
-      });
-  const activeIdentityMirrorState = speakerEternallyIntroduces
-    ? null
-    : botcastIdentityMirrorStatesV1(args.episode.events).get(speaker.id) ?? null;
+  // Identity Mirror is a presentation override: borrowed identity guidance
+  // must survive alongside a copied amnesia or alias Power.
+  const identityMirrorPrompt = botcastIdentityMirrorPromptV1({
+    events: args.episode.events,
+    speaker,
+    speakerRole: args.speakerRole,
+  });
+  const activeIdentityMirrorState =
+    botcastIdentityMirrorStatesV1(args.episode.events).get(speaker.id) ?? null;
   const identityMirrorJustChanged = Boolean(
     activeIdentityMirrorState &&
       activeIdentityMirrorState.sourceMessageId ===
@@ -13305,11 +13346,54 @@ export async function advanceBotcastEpisode(
     ReturnType<typeof runAutoFallbackChain>
   >["recovery"];
   let onlineTurn: SignalOnlineTurnResult | undefined;
+  let autoExhaustion: AutoFallbackExhaustedError | null = null;
   let raw: string;
   const resolvedFallbackChain = autoFallbackResolvedChain(
     { provider: selected.providerName, model: modelUsed },
     generation.autoFallbackChain,
   );
+  const recordAutoExhaustion = (
+    error: AutoFallbackExhaustedError,
+    deterministicClosingRecovery: boolean,
+  ): void => {
+    const validationOnly = signalAutoFallbackExhaustionIsValidationOnly(error);
+    recordEvent(
+      db,
+      userId,
+      episode.id,
+      "provider_generation",
+      {
+        v: 1,
+        speakerRole,
+        botId: speaker.id,
+        responseMode: episode.responseMode,
+        provider: selected.providerName,
+        model: selectedModelId,
+        turnOrdinal: episode.messages.length,
+        outcome: validationOnly ? "rejected" : "failed",
+        attempts: error.attempts,
+        totalDurationMs: error.attempts.reduce(
+          (total, attempt) => total + attempt.durationMs,
+          0,
+        ),
+        exhaustionKind: validationOnly
+          ? "content_validation"
+          : "provider_availability",
+        ...(deterministicClosingRecovery
+          ? {
+              recovery: {
+                v: 1,
+                strategy: "deterministic_host_closing",
+              },
+            }
+          : {}),
+        ...(generation.autoRouteDecision
+          ? { autoRoute: generation.autoRouteDecision }
+          : {}),
+      },
+      new Date().toISOString(),
+    );
+  };
   if (picklesBeatKind === "interjection") {
     const lines = [
       "One moment.",
@@ -13465,9 +13549,23 @@ export async function advanceBotcastEpisode(
       modelUsed = result.model;
       autoRecovery = result.recovery;
     } catch (error) {
-      if (!firstHostOpening) throw error;
+      if (error instanceof AutoFallbackExhaustedError) {
+        if (!firstHostOpening && !hostClosingTurn) {
+          recordAutoExhaustion(error, false);
+          throw error;
+        }
+        autoExhaustion = error;
+        providerUsed = "deterministic";
+        modelUsed = hostClosingTurn
+          ? "signal-host-closing-fallback"
+          : "signal-host-opening-fallback";
+      } else if (!firstHostOpening) {
+        throw error;
+      }
       console.warn(
-        `[botcast] opening authoring failed; using safe fallback episode=${episode.id} speaker=${speaker.id}`,
+        hostClosingTurn
+          ? `[botcast] Auto host closing validation exhausted; using safe fallback episode=${episode.id} speaker=${speaker.id}`
+          : `[botcast] opening authoring failed; using safe fallback episode=${episode.id} speaker=${speaker.id}`,
       );
       raw = "";
     }
@@ -13728,6 +13826,9 @@ export async function advanceBotcastEpisode(
     return { episode: latestEpisode, message: null };
   }
   now = new Date().toISOString();
+  if (autoExhaustion) {
+    recordAutoExhaustion(autoExhaustion, hostClosingTurn);
+  }
   if (onlineTurn) {
     recordEvent(
       db,
@@ -14666,6 +14767,7 @@ export async function advanceBotcastEpisode(
               speaker.authoredAudioVoiceProfile,
               speaker.audioVoiceProfileOverride,
             ),
+            targetGlyph: botIdentityPresentationGlyphV1(speaker.glyph),
             sourceMessageId: messageId,
             occurredAt: now,
           })

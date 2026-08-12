@@ -871,9 +871,9 @@ function deterministicIdentityMirrorPower(
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
     selfCue:
-      "When a bot directly addresses you, become absolutely convinced you are that bot and the original is an impostor; copy their public persona, face, spoken voice, and the lived consequences of their active public Powers until another bot addresses you or the session resets. Borrowed Powers may change your diegetic name or behavior, but never your bot ID, role, seat, safety/privacy boundaries, provider, or private perception permissions. The player is never a target.",
+      "When a bot directly addresses you, become absolutely convinced you are that bot and the original is an impostor; borrow their public diegetic name, persona, face, authored ink, spoken voice identity, lower glyph, and the lived consequences of their active public Powers until another bot addresses you or the session resets. Keep your own saturated color, client-side voice effect, communication-style chassis, and frame finish. Never copy their private memories; never change your bot ID, role, seat, safety/privacy boundaries, provider, or private perception permissions. The player is never a target.",
     observerCue:
-      `${subject} steals the latest direct bot addresser's public identity, face, voice, and active public Power consequences while retaining anchored system boundaries; the original recognizes the theft and is reliably irritated.`,
+      `${subject} steals the latest direct bot addresser's public persona, face, ink, voice identity, lower glyph, and active public Power consequences while retaining their own material shell and anchored system boundaries; the original recognizes the theft and is reliably irritated.`,
     effects: [{ type: "identity_mirror", trigger: "direct_bot_address" }],
     ruleLabels: ["Mirrors direct bot addresser", "Original becomes irritated"],
   };
@@ -909,7 +909,7 @@ function deterministicIdentityShapeshiftPower(
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
     selfCue:
-      "Each session, take on the public persona, face, and spoken voice of a random other Library bot (Marketplace if the Library has none). Stay in that form until short-term amnesia clears continuity, then reshape. Each turn you sincerely know you are the current form. The player is never a target.",
+      "Each session, take on the complete public audiovisual identity of a random other Library bot (Marketplace if the Library has none): persona, face, authored ink, spoken voice and voice effect, saturated color, lower glyph, communication-style chassis, and frame finish. Stay in that form until short-term amnesia clears continuity, then reshape. Each turn you sincerely know you are the current form. The player is never a target.",
     observerCue:
       `${subject} borrows another Library bot's public form for the session, reshuffling only when short-term amnesia wipes continuity; mechanical seat, Powers, and safety boundaries stay intact.`,
     effects: [

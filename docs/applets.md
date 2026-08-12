@@ -29,11 +29,11 @@ ship as `0.5.2` while Coffee is `v0.7`.
 
 | Applet  | Version | Status             | Notes                                                                                                                                                                                                                                                                                                       |
 | ------- | ------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Chat    | v1.37   | Active             | Full playground with independent saved conversations, six-tier size presentation, and player-safe Quiet/Loud behavior inside each PRISM or persona Home.                                                                                                                                                    |
-| Zen     | v1.35   | Active             | Calm one-to-one continuity with draggable six-tier embodiment, direct human access, and holder-scoped bot-naming and social-reaction cues.                                                                                                                                                                  |
-| Coffee  | v2.43   | Active             | Two-to-five-bot tables with six-tier bodies, listener-specific Quiet hearing, one-peer Loud annoyance, composable identity Powers, local-only café Jazz beds, and faithful replay that seats Default Prism for the player.                                                                                                          |
-| Signal  | v1.54   | Active             | Interview studio with frozen six-tier bodies, replayed peer-hearing and one-peer annoyance outcomes, and Power-permissive bot or Producer-guest encounters.                                                                                                                                                 |
-| Debate  | v0.6    | Preview            | Power-permissive Forum and Turnabout proceedings with frozen public sources and object exhibits, explicit advocacy consent, organic cast reactions, and durable verdicts. After completion: sibling Jury commentary with header copy, Coffee-style session synopsis, and ephemeral pick-a-bot inquiry into frozen reasoning. Object exhibits use an approved `{ADJECTIVE} {OBJECT}` record plus emoji, uploaded art, or a consistent synthesized stage sprite. Territory / Your idea accepts Prompt Center prompts and wildcard decks. |
+| Chat    | v1.39   | Active             | Full playground with independent saved conversations, six-tier size presentation, and complete session-sticky Shapeshifter embodiment inside each PRISM or persona Home.                                                                                                                                   |
+| Zen     | v1.38   | Active             | Calm one-to-one continuity with draggable six-tier embodiment, direct human access, and complete session-sticky Shapeshifter embodiment.                                                                                                                                                                    |
+| Coffee  | v2.51   | Active             | Two-to-five-bot tables with complete borrowed audiovisual identities, replay-safe form changes, local-only café Jazz beds, and faithful replay that seats Default Prism for the player.                                                                                                                     |
+| Signal  | v1.61   | Active             | Interview studio with complete borrowed audiovisual identities, replay-safe form changes, and Power-permissive bot or Producer-guest encounters.                                                                                                                                                           |
+| Debate  | v0.31   | Preview            | Power-permissive Forum and Turnabout proceedings with frozen public sources, replay-safe complete borrowed audiovisual identities, screen-off form changes, explicit advocacy consent, organic cast reactions, and durable verdicts. After completion: sibling Jury commentary with header copy, Coffee-style session synopsis, and ephemeral pick-a-bot inquiry into frozen reasoning. Object exhibits use an approved `{ADJECTIVE} {OBJECT}` record plus emoji, uploaded art, or a consistent synthesized stage sprite. Territory / Your idea accepts Prompt Center prompts and wildcard decks. |
 | Polling | v0.0    | Planned            | AI-powered polling across bot groups.                                                                                                                                                                                                                                                                       |
 | Feed    | v0.0    | Planned            | BotBook-style social feed.                                                                                                                                                                                                                                                                                  |
 | Games   | v0.0    | Planned            | Boardgame-like bot matches.                                                                                                                                                                                                                                                                                 |
@@ -122,6 +122,18 @@ stages do not block the standalone preview.
   deferred.
 
 ## Changelog
+
+### 2026-08-12
+
+- Advanced `Chat` to `v1.39`, `Zen` to `v1.38`, `Coffee` to `v2.51`,
+  `Debate` to `v0.31`, and `Signal` to `v1.61`. Identity Crisis now borrows the
+  target's public persona, face, authored Ink, resolved voice identity, lower
+  glyph, and active public Power consequences while retaining the holder's
+  saturated color, client-side voice effect, communication-style chassis, and
+  frame finish. Shapeshifter still borrows the complete public audiovisual
+  form. A persisted true identity change powers the CRT down, installs the new
+  identity while dark, then reveals it without restarting on ordinary
+  rerender, reload, or replay seek.
 
 ### 2026-08-09
 

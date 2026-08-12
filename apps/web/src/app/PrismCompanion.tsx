@@ -3599,6 +3599,11 @@ export default function PrismCompanion({
         resetPrismWield();
         return;
       }
+      // The captured field now owns Prism's visual. Retire the free cursor-orb
+      // transform immediately—even while Option remains held—so the triangle
+      // can travel to the field center and later Option-clicks can join the
+      // active Refract queue.
+      resetPrismWield(true, false, { skipCursorDock: true });
       event.preventDefault();
       event.stopPropagation();
       if (wieldSuppressedClickTimerRef.current !== null) {

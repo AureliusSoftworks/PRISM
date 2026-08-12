@@ -211,9 +211,9 @@
   clip-path: ellipse(34.2% 33.4% at 50% 46.1%);
 }
 
-/* The mini's face, custom Ink, and lower screen glyph all inhabit one
-   player-facing coordinate plane. Keep this outside the authored Ink mask so
-   each asymmetric mark mirrors once, around the same aperture center. */
+/* The mini's face and custom Ink share one player-facing coordinate plane.
+   The lower glyph has a separate transform so it can counter a whole-avatar
+   mirror and remain readable. */
 .upperScreenContent,
 .lowerScreenContent {
   position: absolute;

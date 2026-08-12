@@ -32,7 +32,7 @@ describe("retired Coffee service", () => {
     const createSource = pageSource.slice(createStart, createEnd);
     assert.doesNotMatch(createSource, /assignCoffeeSessionPhase\("barista"\)/u);
     assert.match(createSource, /assignCoffeeSessionPhase\("topic"\)/u);
-    assert.match(createSource, /startCoffeeArrivalSequence\(/u);
+    assert.match(createSource, /beginCoffeeLiveWithIntro\(/u);
 
     const resumeStart = pageSource.indexOf(
       "const joinPreviewedCoffeeSession =",
@@ -44,6 +44,25 @@ describe("retired Coffee service", () => {
     const resumeSource = pageSource.slice(resumeStart, resumeEnd);
     assert.doesNotMatch(resumeSource, /setCoffeeSessionPhase\("barista"\)/u);
     assert.match(resumeSource, /startCoffeeArrivalSequence\(/u);
+  });
+
+  it("preloads the model before Serve arrivals and keeps retry actionable", () => {
+    const handoffStart = pageSource.indexOf(
+      "const prepareCoffeeServeHandoff = async",
+    );
+    const handoffEnd = pageSource.indexOf(
+      "const beginCoffeeLiveWithIntro = async",
+      handoffStart,
+    );
+    const handoffSource = pageSource.slice(handoffStart, handoffEnd);
+    assert.match(handoffSource, /coffeeSettings\?\.experienceMode !== "serve"/u);
+    assert.match(handoffSource, /coffeeModelWarmupRetryActionRef\.current/u);
+    assert.match(handoffSource, /ensureCoffeeModelReady\(true\)/u);
+    assert.match(handoffSource, /releaseCoffeeModelWarmup\(\)/u);
+    assert.match(
+      pageSource,
+      /beginCoffeeLiveWithIntro[\s\S]*prepareCoffeeServeHandoff\(/u,
+    );
   });
 
   it("gives every live off-camera player the pot without legacy ritual state", () => {

@@ -23,9 +23,9 @@ flowchart LR
 ```
 
 - Desktop distribution is direct: no App Store, no Mac App Store, no TestFlight.
-- Steam is the desktop release target.
-- GitHub Releases is the direct-download path while Steam is being prepared.
-- Official desktop builds are free to download and use.
+- Steam is the paid desktop release target, with a planned launch price of $9.99.
+- GitHub Releases is a temporary development and CI path while Steam is being prepared;
+  it is not the permanent public distribution channel.
 - iPhone remains a separate PWA path served by Prism.
 
 ## What Users Get
@@ -53,15 +53,17 @@ experience.
 
 ## Channel Model
 
-Prism's active public channels are Steam and GitHub Releases.
+Prism's intended public desktop channel is Steam. GitHub Releases is currently
+an interim development channel.
 
-- Steam is the launch target for desktop discovery and installs.
-- GitHub Releases remains the direct-download path for now and a practical
-  fallback channel.
-- No paid feature locks, activation checks, purchase screens, or runtime
-  entitlement checks are part of this phase.
-- Store-specific copy should describe Prism as the same free local-first
-  desktop app, with channel differences limited to installer/update mechanics.
+- Steam is the launch target for desktop discovery, purchase, and installs.
+- GitHub Releases remains available only as a temporary development and CI
+  fallback until it is restricted or privatized.
+- Steam's package controls access to the desktop build; no paid feature locks,
+  activation checks, purchase screens, or runtime entitlement checks are part
+  of the app itself.
+- Store-specific copy should describe Prism as the same local-first desktop app
+  across supported platforms, with Steam handling purchase and installation.
 
 ## Launch Readiness
 
@@ -81,8 +83,8 @@ The detailed launch checklist lives in
 
 This repository currently should not make final source-license claims until a
 real `LICENSE`, trademark notice, contributor policy, and brand-use policy are
-present. Public copy can say that official builds are free to download and use,
-and that source availability/licensing details are pending.
+present. Public copy should not promise a permanent free GitHub distribution;
+the Steam price and any temporary development access should be kept distinct.
 
 ## Historical Note
 

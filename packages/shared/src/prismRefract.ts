@@ -185,7 +185,12 @@ export function isPrismRefractInputTextTarget(
 
 function boundedText(value: unknown, limit: number): string {
   if (typeof value !== "string") return "";
-  return value.replace(/\s+/gu, " ").trim().slice(0, limit).trim();
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  const clipped = normalized.slice(0, limit);
+  if (clipped.length === limit && /\s$/u.test(clipped) && normalized.length > limit) {
+    return normalized.slice(0, limit + 1).trim().slice(0, limit);
+  }
+  return clipped.trim();
 }
 
 function normalizeTarget(value: unknown): PrismRefractTextTarget {

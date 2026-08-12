@@ -6,6 +6,15 @@ content and (optionally) uploads with `steamcmd`.
 For the wishlist / store feature-trailer beat sheet and capture checklist, see
 [`steam-trailer-wireframe.md`](steam-trailer-wireframe.md).
 
+For the Steam Content Survey AI wording and human release checkpoint, see
+[`steam-ai-content-disclosure.md`](steam-ai-content-disclosure.md).
+
+For the store description, metadata, and screenshot handoff, see
+[`steam-store-copy.md`](steam-store-copy.md).
+
+For the platform-by-platform manual launch record, see
+[`steam-smoke-matrix.md`](steam-smoke-matrix.md).
+
 ## Required precondition
 
 Before any Steam upload:
@@ -18,22 +27,30 @@ Before any Steam upload:
 3. Manually smoke-test each artifact.
 4. Confirm the exact version to publish.
 5. Confirm each platform packaging job passed `npm run steam:content:verify`.
-6. Confirm `npm run voice:assets:verify:release` passes. Voice+ is fail-closed
-   until the pinned Q4 model, runtime, checksums, provenance watermark, and
-   latency qualification are recorded for macOS arm64/x64, Windows x64, and
-   Linux x64.
+6. Confirm each platform packaging job passed `npm run steam:assets:verify`.
+7. Confirm `npm run voice:assets:verify` passes. Steam ships the qualified
+   Instant/Kokoro path by default; Voice+ remains unavailable in the Steam
+   build until the pinned Q4 model, runtime, checksums, provenance watermark,
+   and latency qualification are recorded for macOS arm64/x64, Windows x64,
+   and Linux x64. Use `--require-voice-plus` only for an explicit development
+   qualification run.
 
 ## Marketplace content firewall
 
 Release packaging uses `steam-marketplace-allowlist.json` as a fail-closed
 Marketplace roster. `branchLock: "dev"` entries remain available to local dev
-builds but are never copied into Steam-safe runtime staging. Adding a new
-non-dev Marketplace bot without updating the allowlist fails packaging.
+builds but are never copied into Steam-safe runtime staging. The policy's
+`steamExcludedBotIds` list provides the same staging boundary for public persona
+bots whose rights or provenance review is still pending: they remain available
+to development, but are omitted from Steam packaging. Adding a new non-dev
+Marketplace bot without updating either policy list fails packaging.
 
 Every staged Steam runtime includes `STEAM_CONTENT_REPORT.md`. Before release,
-review that report alongside the asset-rights ledger; the allowlist enforces the
-approved roster but does not itself establish copyright, trademark, publicity,
-or generated-asset rights.
+review that report alongside `steam-asset-rights-ledger.json`. The ledger
+hashes every staged image, audio, vector, and font asset, and fails closed when
+a media file is added without a rights profile. The allowlist and exclusion
+list enforce Marketplace packaging scope but do not themselves establish
+copyright, trademark, publicity, or generated-asset rights.
 
 ## Steam Content Survey — voice disclosure
 
@@ -65,6 +82,10 @@ node scripts/steam/export-desktop-depots.mjs \
   --artifacts-dir dist-desktop \
   --output-dir steam-build
 ```
+
+The exporter refuses the public `default` branch. Export and upload to a
+private or prerelease branch first; promote the default branch manually in
+Steamworks only after the build review and platform smoke checks pass.
 
 Generated output:
 

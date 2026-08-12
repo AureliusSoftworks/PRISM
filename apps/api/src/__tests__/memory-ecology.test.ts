@@ -14,6 +14,7 @@ import {
   linkDerivedMemoryEvidence,
   listUnreadMemoryAcquisitionReceipts,
   markMemoryAcquisitionReceiptRead,
+  markSessionBotRelationMemoryReceiptsRead,
   materializeShortTermMemoryDecay,
   memoryCandidatePassesAcquisition,
   readMemoryEcologySettings,
@@ -611,6 +612,57 @@ describe("memory acquisition receipts", () => {
           (row) => row.memory_id,
         ),
         ["player-memory"],
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("resolves only unread bot-relation receipts from the completed session", () => {
+    const db = createDb();
+    try {
+      for (const id of ["signal-bot", "signal-player", "coffee-bot"]) {
+        insertMemory(db, { id, confidence: 0.82, botId: "bot-a" });
+      }
+      createMemoryAcquisitionReceipt({
+        db,
+        userId: USER_ID,
+        memoryId: "signal-bot",
+        learnerBotId: "bot-a",
+        targetBotId: "bot-b",
+        conversationId: "signal-episode-1",
+        kind: "bot_relation",
+      });
+      createMemoryAcquisitionReceipt({
+        db,
+        userId: USER_ID,
+        memoryId: "signal-player",
+        learnerBotId: "bot-a",
+        conversationId: "signal-episode-1",
+        kind: "player_memory",
+      });
+      createMemoryAcquisitionReceipt({
+        db,
+        userId: USER_ID,
+        memoryId: "coffee-bot",
+        learnerBotId: "bot-a",
+        targetBotId: "bot-b",
+        conversationId: "coffee-session-1",
+        kind: "bot_relation",
+      });
+
+      assert.equal(
+        markSessionBotRelationMemoryReceiptsRead(
+          db,
+          USER_ID,
+          "signal-episode-1",
+          "2026-08-12T00:00:00.000Z",
+        ),
+        1,
+      );
+      assert.deepEqual(
+        listUnreadMemoryAcquisitionReceipts(db, USER_ID).map((row) => row.memory_id),
+        ["coffee-bot", "signal-player"],
       );
     } finally {
       db.close();

@@ -59,6 +59,7 @@ function fixture(): {
     title: "The Bell's Dry Mouth",
     spark: "A drowned bell rings when the reservoir empties.",
   });
+  updateSlateProject(db, userId, project.id, { proseMode: "online" });
   const section = listSlateProjectSections(db, userId, project.id)[0]!;
   saveSlateProjectSection(db, userId, project.id, section.id, {
     expectedRevision: section.revision,

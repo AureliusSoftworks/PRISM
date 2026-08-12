@@ -48,6 +48,7 @@ function policyFixture(approvedBotIds = ["original"]) {
     schema: "prism-steam-marketplace-allowlist-v1",
     version: 1,
     approvedBotIds,
+    steamExcludedBotIds: [],
   };
 }
 
@@ -70,6 +71,40 @@ test("fails closed when a public bot is not explicitly approved", () => {
   assert.throws(
     () => resolveSteamMarketplaceContent(manifest, policyFixture()),
     /missing from the Steam allowlist/u,
+  );
+});
+
+test("keeps an explicitly Steam-excluded public bot available to development but out of staging", () => {
+  const manifest = manifestFixture();
+  manifest.bots.push({
+    id: "rights-pending",
+    name: "Rights Pending",
+    bundlePath: "/bot-marketplace/bots/bot-rights-pending.bot",
+    botHash: "cccccccccccccccccccccccccccccccc",
+    themeIds: ["public"],
+  });
+  const policy = policyFixture();
+  policy.steamExcludedBotIds = ["rights-pending"];
+  const result = resolveSteamMarketplaceContent(manifest, policy);
+  assert.deepEqual(result.manifest.bots.map((bot) => bot.id), ["original"]);
+  assert.deepEqual(result.report.excludedSteamBots.map((bot) => bot.id), ["rights-pending"]);
+});
+
+test("rejects a bot listed as both approved and Steam-excluded", () => {
+  const policy = policyFixture();
+  policy.steamExcludedBotIds = ["original"];
+  assert.throws(
+    () => resolveSteamMarketplaceContent(manifestFixture(), policy),
+    /both approved and excluded/u,
+  );
+});
+
+test("rejects a Steam exclusion entry that is absent from the Marketplace", () => {
+  const policy = policyFixture();
+  policy.steamExcludedBotIds = ["missing-bot"];
+  assert.throws(
+    () => resolveSteamMarketplaceContent(manifestFixture(), policy),
+    /exclusion list references missing bots/u,
   );
 });
 
@@ -159,14 +194,37 @@ test("the repository Marketplace satisfies the current Steam allowlist", async (
     });
     await fs.copyFile(policyPath, path.join(runtimeDir, "steam-marketplace-allowlist.json"));
     await fs.writeFile(
+      path.join(runtimeDir, "runtime-layout.json"),
+      JSON.stringify({ distribution: "steam" }),
+    );
+    await fs.writeFile(
       path.join(runtimeDir, "STEAM_CONTENT_REPORT.md"),
       renderSteamContentReport(report),
     );
-    assert.equal(report.approvedBots.length, 64);
+    assert.equal(report.approvedBots.length, 25);
     assert.equal(report.excludedDevBotCount, 42);
+    assert.equal(report.excludedSteamBots.length, 42);
     assert.deepEqual(
       await verifySteamRuntimeContent({ runtimeDir, policyPath }),
-      { botCount: 64, bundleCount: 64 },
+      { botCount: 25, bundleCount: 25 },
+    );
+  } finally {
+    await fs.rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test("rejects a development runtime before checking Steam content", async () => {
+  const fixtureRoot = await fs.mkdtemp(path.join(tmpdir(), "prism-steam-runtime-kind-"));
+  try {
+    const runtimeDir = path.join(fixtureRoot, "runtime");
+    await fs.mkdir(runtimeDir, { recursive: true });
+    await fs.writeFile(
+      path.join(runtimeDir, "runtime-layout.json"),
+      JSON.stringify({ distribution: "development" }),
+    );
+    await assert.rejects(
+      verifySteamRuntimeContent({ runtimeDir }),
+      /requires a Steam runtime \(found development\)/u,
     );
   } finally {
     await fs.rm(fixtureRoot, { recursive: true, force: true });

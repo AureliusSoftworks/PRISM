@@ -12,6 +12,42 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area - nothing queued for release yet._
 
+## [0.15.0] - 2026-08-12
+
+### Added
+
+- **Identity Powers now have a full presentation language.** Identity Crisis
+  borrows the target's public persona, face, authored Ink, voice identity,
+  lower glyph, and active public Power consequences while preserving the
+  holder's color, voice effects, communication style, and frame finish.
+- **Shapeshifter now borrows the complete public audiovisual form.** Chat, Zen,
+  Coffee, Signal, and Debate share the same identity presentation with
+  replay-safe transitions and a brief screen-off handoff.
+- **Home Base, Zen ceremony, and Avatar Foundry now form a connected shell.**
+  New dock, viewport, avatar, and presentation controls make the major PRISM
+  spaces feel like one instrument.
+
+### Changed
+
+- **Live spaces now share canonical avatar presentation.** Face, authored Ink,
+  speaking, thinking, blinking, glyph, and facing behavior stay consistent
+  across Avatar Studio, Zen, Coffee, Signal, and Debate.
+- **Coffee and Debate receive another presentation pass.** Seating, speech,
+  replay, Jury camera, identity transitions, and live visual feedback now keep
+  their state through retries and resumed sessions.
+- **Applet provenance moved forward with the experience.** Chat, Zen, Coffee,
+  Signal, and Debate versions are recorded alongside the visible changes.
+
+### Desktop
+
+- **Desktop packaging now carries release-grade runtime provenance.** Steam
+  staging uses a pinned, self-contained Node runtime, a rights ledger, a
+  third-party dependency inventory, and a fail-closed Marketplace allowlist
+  across the desktop matrix.
+- **Desktop release and Steam export guards are stricter.** The release matrix
+  validates SemVer inputs, launchable depot payloads, provenance reports, and
+  prerelease-only Steam upload targets before artifacts can leave CI.
+
 ## [0.14.0] - 2026-07-21
 
 ### Added

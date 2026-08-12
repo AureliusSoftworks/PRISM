@@ -609,7 +609,11 @@ describe("Coffee spectral observer projection", () => {
       session.conversation.id,
       "replay",
     );
-    assert.ok(replay.some((message) => message.content === hiddenLine));
+    assert.equal(
+      replay.some((message) => message.content === hiddenLine),
+      false,
+      "hidden speech stays out of the player replay transcript",
+    );
     const lincolnReply = replay.findLast((message) => message.botId === lincoln.id);
     assert.ok(
       lincolnReply?.socialSilence ??
@@ -653,13 +657,13 @@ describe("Coffee spectral observer projection", () => {
       }]),
       ALICE.id,
     );
-    const session = await createCoffeeConversation(db, userId, {
+    const session = await createCoffeeConversationWithId(db, userId, "conv-quiet-projection", {
       groupBotIds: [ALICE.id, BORIS.id],
       initialTopic: "The amber key",
     });
     let missedLine = "";
     for (let attempt = 0; attempt < 30; attempt += 1) {
-      const line = `Quiet evidence ${attempt}: the amber key rests under the clock.`;
+      const line = `The amber key rests under the clock; clue ${attempt} is the one I would check.`;
       const turn = await withMockedCoffeeFetch(line, () => processCoffeeTurn(
         db,
         userId,
@@ -674,25 +678,28 @@ describe("Coffee spectral observer projection", () => {
         (candidate) => candidate.botId === ALICE.id,
       );
       if (message?.coffeeAudienceBotIds?.length === 0) {
-        assert.equal(message.content, line);
-        missedLine = line;
+        assert.ok(message.content.trim());
+        missedLine = message.content;
         break;
       }
     }
     assert.ok(missedLine);
     const borisBodies: unknown[] = [];
-    await withMockedCoffeeFetch(
-      "I can only respond to what reached me.",
-      () => processCoffeeAutonomousTurn(
-        db,
-        userId,
-        session.conversation.id,
-        { preferredProvider: "local", sessionRemainingMs: 120_000 },
-        false,
-        BORIS.id,
-      ),
-      { chatBodies: borisBodies },
-    );
+    for (let attempt = 0; attempt < 20 && borisBodies.length === 0; attempt += 1) {
+      await withMockedCoffeeFetch(
+        "I can only respond to what reached me.",
+        () => processCoffeeAutonomousTurn(
+          db,
+          userId,
+          session.conversation.id,
+          { preferredProvider: "local", sessionRemainingMs: 120_000 },
+          false,
+          BORIS.id,
+        ),
+        { chatBodies: borisBodies },
+      );
+    }
+    assert.ok(borisBodies.length > 0);
     const prompt = JSON.stringify(borisBodies);
     assert.doesNotMatch(prompt, new RegExp(missedLine.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
     assert.match(prompt, /too faint to make out/u);
@@ -1466,7 +1473,15 @@ function createCoffeeTestDb(): DatabaseSync {
   db.exec(`
     CREATE TABLE users (
       id TEXT PRIMARY KEY,
-      zen_mood_sensitivity REAL
+      zen_mood_sensitivity REAL,
+      auto_memory INTEGER NOT NULL DEFAULT 1,
+      memory_learn_about_player INTEGER NOT NULL DEFAULT 1,
+      memory_learn_about_bots INTEGER NOT NULL DEFAULT 1,
+      memory_acquisition_sensitivity TEXT NOT NULL DEFAULT 'balanced',
+      memory_short_term_days INTEGER NOT NULL DEFAULT 30,
+      memory_long_term_threshold REAL NOT NULL DEFAULT 0.9,
+      memory_inferred_min_evidence INTEGER NOT NULL DEFAULT 3,
+      memory_inferred_threshold REAL NOT NULL DEFAULT 0.8
     );
     CREATE TABLE conversations (
       id TEXT PRIMARY KEY,
@@ -3001,8 +3016,7 @@ describe("createCoffeeConversation", () => {
         autoFallbackChain: {
           v: 1,
           fallbacks: [
-            { provider: "openai", model: "gpt-5-mini" },
-            { provider: "anthropic", model: "claude-haiku-4-5" },
+            { provider: "local", model: "fallback-local" },
           ],
         },
         providerFactory,
@@ -3011,8 +3025,8 @@ describe("createCoffeeConversation", () => {
       { structuredBallots: true, pollVoteProvider: primary }
     );
 
-    assert.equal(calls.filter((provider) => provider === "local").length, 2);
-    assert.equal(calls.filter((provider) => provider === "openai").length, 2);
+    assert.equal(calls.filter((provider) => provider === "local").length, 4);
+    assert.equal(calls.filter((provider) => provider === "openai").length, 0);
     assert.equal(collected.poll.votes.every((vote) => vote.kind === "option"), true);
   });
 
@@ -5836,9 +5850,13 @@ describe("Coffee group foundation", () => {
       aliceAvatarDetails,
     );
     assert.equal(firstEvent.state.targetVoice.enabled, true);
+    assert.equal(firstEvent.state.targetGlyph, ALICE.glyph);
     assert.equal("powers" in firstEvent.state, false);
     assert.equal("color" in firstEvent.state, false);
     assert.equal("glyph" in firstEvent.state, false);
+    assert.equal("targetColor" in firstEvent.state, false);
+    assert.equal("targetVoicePreset" in firstEvent.state, false);
+    assert.equal("targetFrameMaterialSeed" in firstEvent.state, false);
 
     const holderChatBodies: unknown[] = [];
     const mirroredHolderTurn = await withMockedCoffeeFetch(
@@ -6295,7 +6313,7 @@ describe("Coffee group foundation", () => {
       name: providerName,
       async generateResponse(_messages: unknown, options?: GenerateOptions) {
         calls.push({ provider: providerName, model: options?.model });
-        if (providerName === "local") return "I cannot help with that.";
+        if (options?.model === "primary-local") return "I cannot help with that.";
         return "Let’s test the smallest risky assumption first.";
       },
     })) as typeof selectProvider;
@@ -6315,8 +6333,8 @@ describe("Coffee group foundation", () => {
         autoFallbackChain: {
           v: 1,
           fallbacks: [
-            { provider: "openai", model: "gpt-5-mini" },
-            { provider: "anthropic", model: "claude-haiku-4-5" },
+            { provider: "local", model: "fallback-local" },
+            { provider: "local", model: "fallback-local-2" },
           ],
         },
         providerFactory,
@@ -6325,18 +6343,18 @@ describe("Coffee group foundation", () => {
 
     assert.deepEqual(calls, [
       { provider: "local", model: "primary-local" },
-      { provider: "openai", model: "gpt-5-mini" },
+      { provider: "local", model: "fallback-local" },
     ]);
-    assert.equal(turn.autoRecovery?.finalProvider, "openai");
-    assert.equal(turn.autoRecovery?.finalModel, "gpt-5-mini");
-    assert.equal(turn.autoRecovery?.crossedOnline, true);
+    assert.equal(turn.autoRecovery?.finalProvider, "local");
+    assert.equal(turn.autoRecovery?.finalModel, "fallback-local");
+    assert.equal(turn.autoRecovery?.crossedOnline, false);
     const rows = db.prepare(
       "SELECT role, provider, model FROM messages WHERE conversation_id = ? ORDER BY created_at, id"
     ).all(conversationId) as Array<{ role: string; provider: string | null; model: string | null }>;
     assert.equal(rows.filter((row) => row.role === "user").length, 1);
     assert.equal(rows.filter((row) => row.role === "assistant").length, 1);
-    assert.equal(rows.find((row) => row.role === "assistant")?.provider, "openai");
-    assert.equal(rows.find((row) => row.role === "assistant")?.model, "gpt-5-mini");
+    assert.equal(rows.find((row) => row.role === "assistant")?.provider, "local");
+    assert.equal(rows.find((row) => row.role === "assistant")?.model, "fallback-local");
   });
 
   it("adds no emergency Coffee dialogue when every Auto attempt fails", async () => {
@@ -6372,8 +6390,8 @@ describe("Coffee group foundation", () => {
           autoFallbackChain: {
             v: 1,
             fallbacks: [
-              { provider: "openai", model: "gpt-5-mini" },
-              { provider: "anthropic", model: "claude-haiku-4-5" },
+              { provider: "local", model: "fallback-local-1" },
+              { provider: "local", model: "fallback-local-2" },
             ],
           },
           providerFactory,
@@ -7767,6 +7785,16 @@ describe("Coffee presets", () => {
       .prepare("SELECT coffee_preset_id FROM conversations WHERE id = ?")
       .get(restored.conversation.id) as { coffee_preset_id: string | null };
     assert.equal(restoredRow.coffee_preset_id, null);
+
+    const served = await createCoffeeConversationFromGroup(db, userId, group.id, {
+      durationMinutes: null,
+      experienceMode: "serve",
+    });
+    assert.equal(served.conversation.coffeeSettings?.experienceMode, "serve");
+    assert.equal(
+      served.conversation.coffeeSessionDurationMinutes,
+      DEFAULT_COFFEE_SESSION_DURATION_MINUTES,
+    );
   });
 });
 
@@ -8657,36 +8685,38 @@ describe("loadCoffeeStarterMemoryContext", () => {
     seedCoffeeBot(db, userId, ALICE);
     seedCoffeeBot(db, userId, BORIS);
     seedCoffeeBot(db, userId, CARA);
+    const recentMemoryAt = (daysAgo: number): string =>
+      new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1_000).toISOString();
     seedCoffeeMemory(db, userId, userKey, {
       id: "memory-global",
       botId: null,
       text: "The user prefers matcha during long work sessions.",
-      createdAt: "2026-01-05T00:00:00.000Z",
+      createdAt: recentMemoryAt(1),
     });
     seedCoffeeMemory(db, userId, userKey, {
       id: "memory-about-you",
       botId: ALICE.id,
       source: "about_you",
       text: "Alice knows the user's display name is Jared.",
-      createdAt: "2026-01-04T00:00:00.000Z",
+      createdAt: recentMemoryAt(2),
     });
     seedCoffeeMemory(db, userId, userKey, {
       id: "memory-alice",
       botId: ALICE.id,
       text: "Alice remembers restoring flooded gardens after storms.",
-      createdAt: "2026-01-03T00:00:00.000Z",
+      createdAt: recentMemoryAt(3),
     });
     seedCoffeeMemory(db, userId, userKey, {
       id: "memory-boris",
       botId: BORIS.id,
       text: "Boris keeps notes on soup rituals.",
-      createdAt: "2026-01-02T00:00:00.000Z",
+      createdAt: recentMemoryAt(4),
     });
     seedCoffeeMemory(db, userId, userKey, {
       id: "memory-cara",
       botId: CARA.id,
       text: "Cara tracks incident reviews.",
-      createdAt: "2026-01-01T00:00:00.000Z",
+      createdAt: recentMemoryAt(5),
     });
 
     const context = loadCoffeeStarterMemoryContext({

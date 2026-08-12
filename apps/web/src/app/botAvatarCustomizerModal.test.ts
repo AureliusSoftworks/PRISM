@@ -2255,6 +2255,18 @@ test("desktop Avatar Foundry uses a wide two-dimensional control workbench", () 
     cssSource,
     /\.botAvatarControlGroup\[data-avatar-control-tab="eyes"\][\s\S]*?:is\(\.botAvatarOverrideGrid, \.botAvatarOverrideControl\)\s*\{[\s\S]*?display:\s*contents;/,
   );
+  assert.match(
+    pageSource,
+    /data-eye-geometry="spacing"[\s\S]*?label="Eye spacing"/,
+  );
+  assert.match(
+    pageSource,
+    /data-eye-geometry="size"[\s\S]*?label="Eye size"/,
+  );
+  assert.match(
+    cssSource,
+    /\.botAvatarCustomGeometry\[data-eye-geometry="spacing"\][\s\S]*?~ \.botAvatarCustomGeometry\[data-eye-geometry="size"\]\s*\{[\s\S]*?grid-row:\s*2;/,
+  );
 });
 
 test("avatar customizer preview has explicit expression states", () => {

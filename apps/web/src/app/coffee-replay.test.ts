@@ -10,6 +10,7 @@ import {
   coffeeActionPassesSipCadence,
   coffeeActionSipMessageGapForDuration,
   coffeeConversationHasMeaningfulTableDialogue,
+  coffeeBorrowedIdentityVoiceBeforeMessage,
   coffeeIdentityMirrorStateBeforeMessage,
   coffeeListenerReactionForMessage,
   coffeeReplayMessageHasStateEvent,
@@ -651,7 +652,14 @@ describe("coffee replay helpers", () => {
       targetBotName: "Mara Vale",
       targetPersonaPrompt: "A terse lunar cartographer.",
       targetFace: { faceEyeCharacter: "◉" },
-      targetVoice: { v: 2, enabled: true, baseVoiceId: "voice-4", pitch: 0.18 },
+      targetVoice: {
+        v: 2,
+        enabled: true,
+        baseVoiceId: "voice-4",
+        pitch: 0.18,
+        elevenLabsEffect: "robot",
+        voiceEffectExplicit: true,
+      },
       sourceMessageId: "mara-trigger",
       occurredAt: "2026-07-20T20:00:00.000Z",
     });
@@ -663,7 +671,14 @@ describe("coffee replay helpers", () => {
       targetBotName: "Jo Reed",
       targetPersonaPrompt: "A dry public-radio host.",
       targetFace: { faceEyeCharacter: "•" },
-      targetVoice: { v: 2, enabled: true, baseVoiceId: "voice-2", pitch: -0.18 },
+      targetVoice: {
+        v: 2,
+        enabled: true,
+        baseVoiceId: "voice-2",
+        pitch: -0.18,
+        elevenLabsEffect: "radio",
+        voiceEffectExplicit: true,
+      },
       sourceMessageId: "jo-trigger",
       occurredAt: "2026-07-20T20:01:00.000Z",
     });
@@ -718,6 +733,26 @@ describe("coffee replay helpers", () => {
     assert.equal(
       coffeeReplayStateAt(messages, 2).identityMirrorByHolderBotId.ian?.targetBotId,
       "jo",
+    );
+    const replayVoice = coffeeBorrowedIdentityVoiceBeforeMessage(
+      messages,
+      1,
+      "ian",
+      {
+        v: 2,
+        enabled: true,
+        baseVoiceId: "voice-9",
+        elevenLabsEffect: "deep-space",
+        voiceEffectExplicit: true,
+      },
+      null,
+    );
+    assert.equal(replayVoice.baseVoiceId, "voice-4");
+    assert.equal(replayVoice.pitch, 0.18);
+    assert.equal(
+      replayVoice.elevenLabsEffect,
+      "deep-space",
+      "replay borrows the target voice through the holder's retained effect",
     );
   });
 

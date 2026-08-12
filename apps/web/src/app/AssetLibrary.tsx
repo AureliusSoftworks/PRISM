@@ -14,6 +14,7 @@ import {
   IMAGE_ASSET_KIND_LABELS,
   type ImageAssetCatalogPage,
   type ImageAssetKind,
+  type ImageProviderName,
   type ImageAssetSet,
 } from "@localai/shared";
 import {
@@ -67,8 +68,30 @@ export interface AssetRailProps {
   synthesizeDisabled?: boolean;
   onOpenStorageSettings?: () => void;
   onUpload?: () => void;
-  onSynthesize: (direction: string) => void | Promise<void>;
+  /** General Images owns its existing header picker; typed rails own this compact choice. */
+  generation?: AssetRailGenerationControl;
+  onSynthesize: (
+    direction: string,
+    selection?: AssetGenerationSelection,
+  ) => void | Promise<void>;
   onSelect: (asset: ImageAssetSet) => void | Promise<void>;
+}
+
+export interface AssetGenerationSelection {
+  provider: ImageProviderName;
+  model: string;
+}
+
+export interface AssetGenerationOption extends AssetGenerationSelection {
+  label: string;
+}
+
+export interface AssetRailGenerationControl {
+  selection: AssetGenerationSelection | null;
+  options: readonly AssetGenerationOption[];
+  loading?: boolean;
+  disabled?: boolean;
+  onChange: (selection: AssetGenerationSelection) => void | Promise<void>;
 }
 
 function primaryMember(asset: ImageAssetSet) {
@@ -214,6 +237,7 @@ export function AssetRail({
   synthesizeDisabled = false,
   onOpenStorageSettings,
   onUpload,
+  generation,
   onSynthesize,
   onSelect,
 }: AssetRailProps) {
@@ -227,6 +251,9 @@ export function AssetRail({
   const addButtonRef = useRef<HTMLButtonElement | null>(null);
   const touchSheetRef = useRef<HTMLDivElement | null>(null);
   const coarsePointer = useCoarsePointer();
+  const generationUnavailable = Boolean(
+    generation && (generation.loading || generation.selection === null),
+  );
   const currentIds = useMemo(
     () => new Set(currentImageIds.filter((value): value is string => Boolean(value))),
     [currentImageIds],
@@ -297,14 +324,23 @@ export function AssetRail({
       id: targetId,
       kind: "magic",
       label: `Synthesize ${IMAGE_ASSET_KIND_LABELS[kind].replace(/s$/u, "")}`,
-      disabled: () => disabled || synthesizeDisabled,
+      disabled: () => disabled || synthesizeDisabled || generationUnavailable,
       run: async (direction) => {
         setTouchActionsOpen(false);
-        await onSynthesize(direction);
+        await onSynthesize(direction, generation?.selection ?? undefined);
         await loadRecent();
       },
     }),
-    [disabled, kind, loadRecent, onSynthesize, synthesizeDisabled, targetId],
+    [
+      disabled,
+      generation?.selection,
+      generationUnavailable,
+      kind,
+      loadRecent,
+      onSynthesize,
+      synthesizeDisabled,
+      targetId,
+    ],
   );
 
   const activateAdd = (): void => {
@@ -336,6 +372,53 @@ export function AssetRail({
           </small>
         </div>
         <div className={styles.railHeaderActions}>
+          {generation ? (
+            <label className={styles.generationSelector}>
+              <span>Model</span>
+              <select
+                aria-label={`${IMAGE_ASSET_KIND_LABELS[kind]} generation model`}
+                value={
+                  generation.selection
+                    ? `${generation.selection.provider}:${generation.selection.model}`
+                    : ""
+                }
+                disabled={
+                  disabled ||
+                  synthesizeDisabled ||
+                  generation.disabled ||
+                  generation.loading ||
+                  generation.options.length === 0
+                }
+                onChange={(event) => {
+                  const selected = generation.options.find(
+                    (option) =>
+                      `${option.provider}:${option.model}` === event.target.value,
+                  );
+                  if (selected) {
+                    void generation.onChange({
+                      provider: selected.provider,
+                      model: selected.model,
+                    });
+                  }
+                }}
+              >
+                {generation.selection === null ? (
+                  <option value="">
+                    {generation.loading ? "Loading models…" : "No image model"}
+                  </option>
+                ) : null}
+                {generation.options.map((option) => (
+                  <option
+                    key={`${option.provider}:${option.model}`}
+                    value={`${option.provider}:${option.model}`}
+                  >
+                    {option.provider === "local" ? "LOCAL · " : "ONLINE · "}
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           {onOpenStorageSettings ? (
             <button
               type="button"
@@ -437,7 +520,7 @@ export function AssetRail({
             </button>
             <button
               type="button"
-              disabled={synthesizeDisabled}
+              disabled={synthesizeDisabled || generationUnavailable}
               onClick={() => {
                 setTouchActionsOpen(false);
                 requestPrismRefract(targetId, "focused-shortcut");

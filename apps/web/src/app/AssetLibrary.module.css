@@ -29,6 +29,26 @@
   gap: 0.45rem;
 }
 
+.generationSelector {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  min-width: 0;
+  color: var(--fg-muted, rgba(255, 255, 255, 0.64));
+  font-size: 0.72rem;
+}
+
+.generationSelector select {
+  max-width: min(13.5rem, 42vw);
+  min-height: 1.9rem;
+  padding: 0.24rem 1.7rem 0.24rem 0.48rem;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.16));
+  border-radius: 0.46rem;
+  color: var(--fg, inherit);
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.08));
+  font: inherit;
+}
+
 @media (max-width: 560px) {
   .railShell > header {
     align-items: flex-start;

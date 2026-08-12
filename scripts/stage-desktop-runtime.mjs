@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from "node:fs/promises";
+import crypto from "node:crypto";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -10,6 +11,10 @@ import {
   renderSteamContentReport,
   stageSteamMarketplace,
 } from "./steam-marketplace-content.mjs";
+import {
+  STEAM_ASSET_EXCLUDED_FILES,
+  verifySteamAssetRights,
+} from "./steam-asset-rights-ledger.mjs";
 import { verifyVoiceAssets } from "./verify-voice-assets.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -27,6 +32,7 @@ export const STEAM_PUBLIC_EXCLUDED_TOP_LEVEL = Object.freeze([
   "bot-marketplace",
   "tools",
 ]);
+export const STEAM_PUBLIC_EXCLUDED_FILES = STEAM_ASSET_EXCLUDED_FILES;
 // Transformers.js selects onnxruntime-node through its Node export. Its browser
 // backend is not used by the bundled API and would add roughly 90 MB.
 const omittedDesktopRuntimePackages = new Set(["onnxruntime-web"]);
@@ -61,6 +67,53 @@ const includedPrismVoiceFiles = new Set([
   "bm_lewis.bin"
 ]);
 
+const nodeRuntimeManifestPath = path.join(
+  repoRoot,
+  "scripts",
+  "node-runtime-manifest.json"
+);
+
+export function nodeRuntimeResourceRoot({
+  platform = process.platform,
+  repositoryRoot = repoRoot
+} = {}) {
+  if (platform === "darwin") {
+    return path.join(repositoryRoot, "apps", "server-mac", "Resources", "node");
+  }
+  if (platform === "win32") {
+    return path.join(
+      repositoryRoot,
+      "apps",
+      "server-windows",
+      "src",
+      "Resources",
+      "node"
+    );
+  }
+  if (platform === "linux") {
+    return path.join(repositoryRoot, "apps", "server-linux", "Resources", "node");
+  }
+  return "";
+}
+
+export function nodeRuntimeResourceExecutable({
+  platform = process.platform,
+  repositoryRoot = repoRoot
+} = {}) {
+  const resourceRoot = nodeRuntimeResourceRoot({ platform, repositoryRoot });
+  if (!resourceRoot) return "";
+  return platform === "win32"
+    ? path.join(resourceRoot, "node.exe")
+    : path.join(resourceRoot, "bin", "node");
+}
+
+function nodeRuntimeProvenanceTarget(platform) {
+  if (platform === "darwin") return "darwin-universal";
+  if (platform === "win32") return "win-x64";
+  if (platform === "linux") return "linux-x64";
+  return "";
+}
+
 /**
  * Prefer PRISM's pinned, relocatable macOS Node build over the developer's
  * host executable. Homebrew Node 26 may be only a small launcher whose
@@ -70,22 +123,35 @@ export function nodeRuntimeSourceCandidates({
   platform = process.platform,
   executablePath = process.execPath,
   repositoryRoot = repoRoot,
-  configuredPath = process.env.PRISM_NODE_RUNTIME_PATH ?? ""
+  configuredPath = process.env.PRISM_NODE_RUNTIME_PATH ?? "",
+  distribution = "development"
 } = {}) {
-  return [...new Set([
-    configuredPath.trim(),
-    platform === "darwin"
-      ? path.join(repositoryRoot, "apps", "server-mac", "Resources", "node", "bin", "node")
-      : "",
-    executablePath
-  ].filter(Boolean))];
+  const candidates = [];
+  if (distribution === "steam") {
+    candidates.push(nodeRuntimeResourceExecutable({ platform, repositoryRoot }));
+  } else {
+    candidates.push(configuredPath.trim());
+    if (platform === "darwin") {
+      candidates.push(nodeRuntimeResourceExecutable({ platform, repositoryRoot }));
+    }
+    candidates.push(executablePath);
+  }
+  return [...new Set(candidates.filter(Boolean))];
+}
+
+export function voicePlusRequiredForDistribution({
+  distribution = "development",
+  explicitlyEnabled = false,
+} = {}) {
+  return distribution === "steam" && explicitlyEnabled === true;
 }
 
 function parseArgs(argv) {
   const args = {
     outputDir: "",
     skipBuild: false,
-    distribution: "steam"
+    distribution: "steam",
+    requireVoicePlus: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
@@ -102,6 +168,9 @@ function parseArgs(argv) {
       args.distribution = argv[index + 1] ?? "";
       index += 1;
       continue;
+    }
+    if (token === "--require-voice-plus") {
+      args.requireVoicePlus = true;
     }
   }
   return args;
@@ -134,7 +203,12 @@ async function copyDir(source, destination) {
   await fs.cp(source, destination, { recursive: true, force: true });
 }
 
-async function copyDirExcludingTopLevel(source, destination, excludedNames) {
+async function copyDirExcludingTopLevel(
+  source,
+  destination,
+  excludedNames,
+  excludedFiles = new Set(),
+) {
   await fs.cp(source, destination, {
     recursive: true,
     force: true,
@@ -142,6 +216,7 @@ async function copyDirExcludingTopLevel(source, destination, excludedNames) {
       if (path.basename(sourcePath) === ".DS_Store") return false;
       const relative = path.relative(source, sourcePath);
       if (!relative) return true;
+      if (excludedFiles.has(relative)) return false;
       return !excludedNames.has(relative.split(path.sep)[0]);
     }
   });
@@ -307,12 +382,121 @@ async function pruneUnusedKokoroVoices(destinationRoot) {
   }
 }
 
+function normalizeLicenseValue(value) {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => normalizeLicenseValue(entry))
+      .filter(Boolean)
+      .join(", ");
+  }
+  if (value && typeof value === "object") {
+    return String(value.type ?? value.name ?? "");
+  }
+  return "";
+}
+
+function normalizeRepositoryUrl(repository) {
+  const raw = typeof repository === "string" ? repository : repository?.url;
+  if (!raw) return "";
+  return raw
+    .replace(/^git\+/u, "")
+    .replace(/^git:\/\//u, "https://")
+    .replace(/\.git$/u, "");
+}
+
+async function collectRuntimePackageMetadata(runtimeNodeModules) {
+  const entries = [];
+  async function walk(directory) {
+    let children;
+    try {
+      children = await fs.readdir(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const child of children) {
+      if (!child.isDirectory() || child.name === ".bin") continue;
+      const childPath = path.join(directory, child.name);
+      const packageJsonPath = path.join(childPath, "package.json");
+      if (await fileExists(packageJsonPath)) {
+        const packageJson = await readJsonFile(packageJsonPath);
+        if (packageJson.name) {
+          entries.push({
+            name: packageJson.name,
+            version: packageJson.version ?? "unknown",
+            license:
+              normalizeLicenseValue(packageJson.license ?? packageJson.licenses) ||
+              "UNDECLARED",
+            source:
+              normalizeRepositoryUrl(packageJson.repository) ||
+              packageJson.homepage ||
+              "UNSPECIFIED",
+            path: path.relative(runtimeNodeModules, childPath),
+          });
+        }
+      }
+      await walk(childPath);
+    }
+  }
+  await walk(runtimeNodeModules);
+  return entries.sort((left, right) =>
+    `${left.name}@${left.version}:${left.path}`.localeCompare(
+      `${right.name}@${right.version}:${right.path}`,
+    ),
+  );
+}
+
+function escapeNoticeTableValue(value) {
+  return String(value).replaceAll("|", "\\|");
+}
+
+export async function writeRuntimeThirdPartyNotices({
+  runtimeRoot,
+  packageLockRaw,
+  sourceNotice,
+}) {
+  const packages = await collectRuntimePackageMetadata(
+    path.join(runtimeRoot, "node_modules"),
+  );
+  const lockfileSha256 = crypto
+    .createHash("sha256")
+    .update(packageLockRaw)
+    .digest("hex");
+  const rows = packages.map(
+    (packageInfo) =>
+      `| ${escapeNoticeTableValue(packageInfo.name)} | ${escapeNoticeTableValue(packageInfo.version)} | ${escapeNoticeTableValue(packageInfo.license)} | ${escapeNoticeTableValue(packageInfo.source)} | ${escapeNoticeTableValue(packageInfo.path)} |`,
+  );
+  const generatedSection = [
+    "",
+    "## Reproducible Runtime Dependency Inventory",
+    "",
+    "This section is generated during Steam staging from the exact runtime dependency closure and copied package metadata. The package-lock hash binds this inventory to the build inputs.",
+    "",
+    `- package-lock.json SHA-256: \`${lockfileSha256}\``,
+    `- Runtime package directories inventoried: ${packages.length}`,
+    "- Package license and notice files remain in their staged package directories; this table records the package-declared license and source metadata for audit and renewal.",
+    "",
+    "| Package | Version | Declared license | Source | Staged path |",
+    "| --- | --- | --- | --- | --- |",
+    ...rows,
+    "",
+  ].join("\n");
+  await fs.writeFile(
+    path.join(runtimeRoot, "THIRD_PARTY_NOTICES.md"),
+    `${sourceNotice.trimEnd()}\n${generatedSection}`,
+    "utf8",
+  );
+  return { packageCount: packages.length, lockfileSha256 };
+}
+
 async function main() {
-  const { outputDir, skipBuild, distribution } = parseArgs(process.argv.slice(2));
+  const { outputDir, skipBuild, distribution, requireVoicePlus } = parseArgs(
+    process.argv.slice(2),
+  );
   if (!outputDir) {
     throw new Error(
       "Usage: stage-desktop-runtime.mjs --output-dir <absolute-or-relative-path> " +
-      "[--skip-build] [--distribution steam|development]"
+      "[--skip-build] [--distribution steam|development] [--require-voice-plus]"
     );
   }
   if (distribution !== "steam" && distribution !== "development") {
@@ -326,7 +510,10 @@ async function main() {
   const builtinTtsModel = await ensureBuiltinTtsModel(modelCacheRoot);
   await verifyVoiceAssets({
     modelRoot: modelCacheRoot,
-    requireVoicePlus: distribution === "steam",
+    requireVoicePlus: voicePlusRequiredForDistribution({
+      distribution,
+      explicitlyEnabled: requireVoicePlus,
+    }),
   });
 
   if (!skipBuild) {
@@ -360,14 +547,22 @@ async function main() {
     path.join(resolvedOutputDir, "apps", "api", "package.json")
   );
   await copyFile(path.join(repoRoot, "package.json"), path.join(resolvedOutputDir, "package.json"));
-  await copyFile(path.join(repoRoot, "package-lock.json"), path.join(resolvedOutputDir, "package-lock.json"));
+  const packageLockRaw = await fs.readFile(
+    path.join(repoRoot, "package-lock.json"),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(resolvedOutputDir, "package-lock.json"),
+    packageLockRaw,
+    "utf8",
+  );
+  const sourceThirdPartyNotices = await fs.readFile(
+    path.join(repoRoot, "THIRD_PARTY_NOTICES.md"),
+    "utf8",
+  );
   await copyFile(
     path.join(repoRoot, "voice-assets.manifest.json"),
     path.join(resolvedOutputDir, "voice-assets.manifest.json")
-  );
-  await copyFile(
-    path.join(repoRoot, "THIRD_PARTY_NOTICES.md"),
-    path.join(resolvedOutputDir, "THIRD_PARTY_NOTICES.md")
   );
 
   console.log("Staging runtime dependencies...");
@@ -398,6 +593,23 @@ async function main() {
     repoRoot,
     { PLAYWRIGHT_BROWSERS_PATH: playwrightBrowsersRoot }
   );
+  if (distribution === "steam") {
+    const noticeInventory = await writeRuntimeThirdPartyNotices({
+      runtimeRoot: resolvedOutputDir,
+      packageLockRaw,
+      sourceNotice: sourceThirdPartyNotices,
+    });
+    console.log(
+      `Generated reproducible third-party inventory: ${noticeInventory.packageCount} runtime packages; ` +
+      `package-lock SHA-256 ${noticeInventory.lockfileSha256}`,
+    );
+  } else {
+    await fs.writeFile(
+      path.join(resolvedOutputDir, "THIRD_PARTY_NOTICES.md"),
+      sourceThirdPartyNotices,
+      "utf8",
+    );
+  }
 
   console.log("Staging built-in voice model...");
   await copyDir(
@@ -406,7 +618,7 @@ async function main() {
   );
 
   console.log("Staging Node runtime...");
-  const nodeSourceCandidates = nodeRuntimeSourceCandidates();
+  const nodeSourceCandidates = nodeRuntimeSourceCandidates({ distribution });
   let nodeSource = "";
   for (const candidate of nodeSourceCandidates) {
     if (await fileExists(candidate)) {
@@ -416,8 +628,32 @@ async function main() {
   }
   if (!nodeSource) {
     throw new Error(
-      `Missing Node runtime. Checked: ${nodeSourceCandidates.join(", ")}`
+      distribution === "steam"
+        ? `Missing pinned Node runtime for Steam staging. Run the platform vendor script first. Checked: ${nodeSourceCandidates.join(", ")}`
+        : `Missing Node runtime. Checked: ${nodeSourceCandidates.join(", ")}`
     );
+  }
+  const nodeResourceRoot = nodeRuntimeResourceRoot({ platform: process.platform });
+  const nodeProvenanceTarget = nodeRuntimeProvenanceTarget(process.platform);
+  let nodeRuntimeManifest = null;
+  if (distribution === "steam") {
+    if (!nodeResourceRoot || !nodeProvenanceTarget) {
+      throw new Error(`Unsupported Steam Node runtime platform: ${process.platform}`);
+    }
+    const nodeLicensePath = path.join(nodeResourceRoot, "LICENSE");
+    if (!(await fileExists(nodeLicensePath))) {
+      throw new Error(
+        `Missing Node.js license provenance at ${nodeLicensePath}. Run the platform vendor script first.`
+      );
+    }
+    nodeRuntimeManifest = await readJsonFile(nodeRuntimeManifestPath);
+    if (
+      nodeRuntimeManifest.schemaVersion !== 1 ||
+      nodeRuntimeManifest.product !== "Node.js" ||
+      nodeRuntimeManifest.version !== "22.22.2"
+    ) {
+      throw new Error("Invalid pinned Node runtime manifest.");
+    }
   }
   let stagedNode;
   if (process.platform === "win32") {
@@ -432,9 +668,45 @@ async function main() {
     await runCommand(stagedNode, ["--version"], repoRoot);
   } catch {
     throw new Error(
-      "The staged Node runtime is not relocatable. On macOS, run " +
-      "apps/server-mac/scripts/vendor-node.sh or set PRISM_NODE_RUNTIME_PATH " +
-      "to a self-contained Node executable."
+      distribution === "steam"
+        ? "The staged pinned Node runtime is not executable after relocation. Re-run the platform vendor script and verify the release artifact on a clean target."
+        : "The staged Node runtime is not relocatable. On macOS, run " +
+          "apps/server-mac/scripts/vendor-node.sh or set PRISM_NODE_RUNTIME_PATH " +
+          "to a self-contained Node executable."
+    );
+  }
+  if (distribution === "steam") {
+    const selectedArtifacts = nodeProvenanceTarget === "darwin-universal"
+      ? [
+          nodeRuntimeManifest.artifacts["darwin-arm64"],
+          nodeRuntimeManifest.artifacts["darwin-x64"]
+        ]
+      : [nodeRuntimeManifest.artifacts[nodeProvenanceTarget]];
+    if (selectedArtifacts.some((artifact) => !artifact?.archive || !artifact?.sha256)) {
+      throw new Error(`Pinned Node runtime manifest is missing ${nodeProvenanceTarget} provenance.`);
+    }
+    await copyFile(
+      path.join(nodeResourceRoot, "LICENSE"),
+      path.join(resolvedOutputDir, "node", "LICENSE")
+    );
+    await fs.writeFile(
+      path.join(resolvedOutputDir, "node", "node-runtime-provenance.json"),
+      `${JSON.stringify(
+        {
+          schemaVersion: nodeRuntimeManifest.schemaVersion,
+          product: nodeRuntimeManifest.product,
+          version: nodeRuntimeManifest.version,
+          license: nodeRuntimeManifest.license,
+          licenseUrl: nodeRuntimeManifest.licenseUrl,
+          releaseUrl: nodeRuntimeManifest.releaseUrl,
+          checksumsUrl: nodeRuntimeManifest.checksumsUrl,
+          target: nodeProvenanceTarget,
+          artifacts: selectedArtifacts
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
     );
   }
 
@@ -517,7 +789,8 @@ async function main() {
       await copyDirExcludingTopLevel(
         publicDir,
         stagedPublicDir,
-        new Set(STEAM_PUBLIC_EXCLUDED_TOP_LEVEL)
+        new Set(STEAM_PUBLIC_EXCLUDED_TOP_LEVEL),
+        new Set(STEAM_PUBLIC_EXCLUDED_FILES),
       );
       const steamContentReport = await stageSteamMarketplace({
         sourcePublicRoot: publicDir,
@@ -532,6 +805,10 @@ async function main() {
         path.join(resolvedOutputDir, "STEAM_CONTENT_REPORT.md"),
         renderSteamContentReport(steamContentReport),
         "utf8"
+      );
+      await copyFile(
+        path.join(repoRoot, "steam-asset-rights-ledger.json"),
+        path.join(resolvedOutputDir, "steam-asset-rights-ledger.json")
       );
       console.log(
         `Steam Marketplace verified: ${steamContentReport.approvedBots.length} approved bots; ` +
@@ -570,6 +847,14 @@ async function main() {
     `${JSON.stringify(runtimeLayout, null, 2)}\n`,
     "utf8"
   );
+
+  if (distribution === "steam") {
+    const assetRights = await verifySteamAssetRights({ runtimeDir: resolvedOutputDir });
+    console.log(
+      `Steam asset rights verified: ${assetRights.assetCount} media assets; ` +
+      "report written to STEAM_ASSET_RIGHTS_REPORT.md.",
+    );
+  }
 
   console.log(`Runtime staged at ${resolvedOutputDir}`);
 }

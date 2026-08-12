@@ -2683,6 +2683,11 @@
 .debateAudienceBotPortrait {
   --debate-audience-depth: 1;
   --debate-audience-facing-scale: 1;
+  /* The complete chassis turns below. Shared full and mini renderers consume
+     this same scale once more on their lower glyph to cancel that mirror. */
+  --bot-avatar-external-facing-scale-x: var(
+    --debate-audience-facing-scale
+  );
   --debate-audience-shade-opacity: 0.3;
   position: relative;
   width: clamp(56px, 6.9vw, 104px);
@@ -8459,7 +8464,7 @@
 
 .jurySeatRow {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
   margin-top: 10px;
 }
@@ -8561,9 +8566,13 @@
 
 .juryRosterSeats {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 4px;
   padding: 13px 10px 7px;
+}
+
+.juryRoster[data-jury-cadence="natural-five"] .juryRosterSeats {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .juryRosterSeats > span {
@@ -9000,29 +9009,57 @@
 }
 
 .juryChamberSeat[data-seat="0"] {
-  left: 50%;
-  top: 46%;
-  width: clamp(138px, 12.8vw, 200px);
-  height: clamp(184px, 17.1vw, 267px);
-}
-.juryChamberSeat[data-seat="1"] {
   left: 27%;
   top: 53%;
   width: clamp(146px, 13.5vw, 210px);
   height: clamp(194px, 18vw, 280px);
 }
-.juryChamberSeat[data-seat="2"] {
+.juryChamberSeat[data-seat="1"] {
   left: 73%;
   top: 53%;
   width: clamp(146px, 13.5vw, 210px);
   height: clamp(194px, 18vw, 280px);
 }
+.juryChamberSeat[data-seat="2"] {
+  left: 38%;
+  top: 69%;
+  width: clamp(146px, 13.5vw, 210px);
+  height: clamp(194px, 18vw, 280px);
+}
 .juryChamberSeat[data-seat="3"] {
-  left: 13%;
-  top: 65%;
+  left: 62%;
+  top: 69%;
+  width: clamp(146px, 13.5vw, 210px);
+  height: clamp(194px, 18vw, 280px);
 }
 .juryChamberSeat[data-seat="4"] {
   left: 87%;
+  top: 65%;
+}
+
+.juryChamber[data-jury-cadence="natural-five"]
+  .juryChamberSeat[data-seat="0"] {
+  left: 50%;
+  top: 46%;
+  width: clamp(138px, 12.8vw, 200px);
+  height: clamp(184px, 17.1vw, 267px);
+}
+
+.juryChamber[data-jury-cadence="natural-five"]
+  .juryChamberSeat[data-seat="1"] {
+  left: 27%;
+  top: 53%;
+}
+
+.juryChamber[data-jury-cadence="natural-five"]
+  .juryChamberSeat[data-seat="2"] {
+  left: 73%;
+  top: 53%;
+}
+
+.juryChamber[data-jury-cadence="natural-five"]
+  .juryChamberSeat[data-seat="3"] {
+  left: 13%;
   top: 65%;
 }
 
@@ -15584,7 +15621,7 @@
 }
 
 .audienceGallery.juryRoster .juryRosterSeats {
-  /* Keep the five seats in the visible band — do not center them into a
+  /* Keep the jury seats in the visible band — do not center them into a
      clipped void below the stageSupport overflow edge. */
   flex: 1 1 auto;
   align-content: start;

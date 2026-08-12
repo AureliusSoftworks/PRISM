@@ -12,7 +12,11 @@ describe("Shapeshifter Chat/Zen presentation", () => {
     assert.match(pageSource, /function latestIdentityShapeshiftStateForBot\(/u);
     assert.match(
       pageSource,
-      /botWithIdentityShapeshiftPresentation\(\s*bot,\s*latestIdentityShapeshiftStateForBot\(detail\?\.messages, bot\.id\)/u,
+      /latestIdentityShapeshiftStateForBot\(detail\?\.messages, bot\.id\)[\s\S]*botWithIdentityShapeshiftPresentation\(\s*bot,\s*zenLivePresenceIdentityShapeshiftState/u,
+    );
+    assert.match(
+      pageSource,
+      /color:\s*state\.targetColor[\s\S]*glyph:[\s\S]*state\.targetGlyph[\s\S]*authored_audio_voice_profile:\s*state\.targetVoice[\s\S]*voicePreset:\s*state\.targetVoicePreset[\s\S]*frameMaterialSeed:[\s\S]*state\.targetFrameMaterialSeed/u,
     );
     assert.match(
       pageSource,

@@ -132,7 +132,7 @@ export interface DebateSessionRetryDraft {
   missingBotNames: string[];
 }
 
-/** Empty five-seat Jury preference roster (all Surprise). */
+/** Empty four-seat Jury preference roster (all Surprise). */
 export function emptyPreferredJurorBotIds(): Array<string | null> {
   return Array.from({ length: DEBATE_JURY_SIZE }, () => null);
 }

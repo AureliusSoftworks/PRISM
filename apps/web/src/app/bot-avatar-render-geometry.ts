@@ -123,6 +123,8 @@ export function botAvatarFaceFacingStyle(facing: BotAvatarFacing) {
   return {
     "--coffee-plate-emoji-face-scale-y": botAvatarFaceScaleYForFacing(facing),
     "--zen-live-bot-screen-facing-scale-x": screenFacingScaleX,
+    "--zen-live-bot-glyph-facing-scale-x":
+      "var(--bot-avatar-external-facing-scale-x, 1)",
     "--avatar-details-facing-scale-x": screenFacingScaleX,
   } as const;
 }

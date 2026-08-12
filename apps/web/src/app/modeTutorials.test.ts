@@ -52,6 +52,15 @@ describe("mode tutorials", () => {
     );
   });
 
+  it("explains that typed asset rails remember their own generation model", () => {
+    const storageStep = MODE_TUTORIALS.chat.steps.find(
+      (step) => step.body.includes("Space Lens"),
+    );
+    assert.ok(storageStep);
+    assert.match(storageStep.body, /Each typed asset rail keeps its own remembered LOCAL or ONLINE generation model/u);
+    assert.match(storageStep.body, /General Images keeps its existing Images-panel model picker/u);
+  });
+
   it("explains bot hub editor shortcuts and exact voice testing", () => {
     const step = MODE_TUTORIALS.zen.steps[0];
     assert.match(step?.body ?? "", /jump straight to any Avatar Studio section/u);
@@ -59,6 +68,15 @@ describe("mode tutorials", () => {
     assert.match(step?.body ?? "", /English, Premium, Babble, and Bottish/u);
     assert.match(step?.body ?? "", /Speak uses the current top-bar Voice mode/u);
     assert.match(step?.body ?? "", /starts a chat or LLM turn/u);
+  });
+
+  it("teaches that the Zen header bot picker invites a guest into the current Home", () => {
+    const continueHomeStep = MODE_TUTORIALS.zen.steps.find(
+      (step) => step.heading === "Continue this Home",
+    );
+    assert.ok(continueHomeStep);
+    assert.match(continueHomeStep.body, /header bot picker invites them into this same conversation/u);
+    assert.match(continueHomeStep.body, /Random, New, Intro, or Off handoff/u);
   });
 
   it("teaches explicit Zen avatar resizing without changing the authored face", () => {
@@ -157,6 +175,22 @@ describe("mode tutorials", () => {
         assert.match(step.targetSelector, /^\[data-tutorial-target=/);
       }
     }
+  });
+
+  it("explains Signal memory alerts and the persona-only dashboard avatar", () => {
+    const liveStep = MODE_TUTORIALS.botcast.steps.find(
+      (step) => step.heading === "Produce from the control room",
+    );
+    const dashboardStep = MODE_TUTORIALS.botcast.steps.find(
+      (step) => step.heading === "Talk with the host off-air",
+    );
+    assert.ok(liveStep);
+    assert.ok(dashboardStep);
+    assert.match(liveStep.body, /live ! chip/u);
+    assert.match(liveStep.body, /read the exact memory and dismiss the alert/u);
+    assert.match(liveStep.body, /clears any unseen Signal alert/u);
+    assert.match(dashboardStep.body, /ordinary authored face and persona glyph/u);
+    assert.match(dashboardStep.body, /no Power or status badge attached/u);
   });
 
   it("guides Avatar Foundry modules and live controls with stable targets", () => {
@@ -393,14 +427,12 @@ describe("mode tutorials", () => {
     assert.match(copy, /switch to Signal or any other applet/u);
     assert.match(copy, /attaches directly to its saved Debate exhibit/u);
     assert.match(copy, /uploaded, reused, or already synthesized assets are never replaced/u);
-    assert.match(copy, /Spectator starts synthesis alongside the full bake/u);
-    assert.match(copy, /wait for the first sprite to load/u);
+    assert.match(copy, /Start and Resume open while those missing sprites queue in the background/u);
     assert.match(copy, /Continue without evidence confirms that choice/u);
     assert.match(copy, /Save Debate parks a ready setup in Archive Open/u);
     assert.match(copy, /Save immediately hands only emoji-only exhibits with no attached asset to the server-owned soft queue/u);
     assert.match(copy, /custom, reused, and synthesized assets stay untouched/u);
     assert.match(copy, /Remove soft-cancels the proceeding and releases those sprites/u);
-    assert.match(copy, /Start Debate launches now/u);
     assert.doesNotMatch(copy, /Basic|Advanced/u);
     assert.match(
       copy,
@@ -491,10 +523,10 @@ describe("mode tutorials", () => {
       copy,
       /Judge \/ Moderator seat, the public floor stays on Auto/u,
     );
-    assert.match(copy, /Participant never receives Jury as a manual camera/u);
+    assert.match(copy, /Participants never mount this chamber/u);
     assert.match(
       copy,
-      /Spectators and Judges also get a manual Jury camera once that chamber window opens/u,
+      /Spectators and human Judges can open the four-seat Jury camera manually/u,
     );
     assert.match(
       copy,
@@ -635,13 +667,14 @@ describe("mode tutorials", () => {
     assert.match(copy, /End Debate skips the remaining rounds/u);
     assert.match(copy, /not to penalize unheard rounds/u);
     assert.match(copy, /automatically enters a dim chamber/u);
-    assert.match(copy, /five short, routed, audible juror turns/u);
+    assert.match(copy, /Four private leanings lead into short, routed, audible juror turns/u);
     assert.match(copy, /three after End Debate/u);
     assert.match(copy, /same saved voice and caption path/u);
     assert.doesNotMatch(copy, /choose Participate/u);
     assert.match(copy, /Deliberation and voting are automatic and unskippable/u);
     assert.match(copy, /cast final ballots one at a time/u);
-    assert.match(copy, /open the five-seat Jury camera manually once leanings, deliberation, or ballots begin/u);
+    assert.match(copy, /open the four-seat Jury camera manually once leanings, deliberation, or ballots begin/u);
+    assert.match(copy, /Moderator records a fifth, final ballot last/u);
     assert.match(copy, /trade short reactions between public-floor turns/u);
     assert.match(
       copy,
@@ -708,6 +741,8 @@ describe("mode tutorials", () => {
     );
     assert.match(copy, /excluding generation waits, explicit recesses/u);
     assert.match(copy, /Use setup copies its motion, title, room settings/u);
+    assert.match(copy, /Open proceedings also offer Restart/u);
+    assert.match(copy, /Completed records never offer Restart/u);
     assert.match(copy, /currently selected model and routing remain in place/u);
     assert.match(copy, /whole chain fails/u);
     assert.match(copy, /LOCAL remains a hard offline guarantee/u);
@@ -888,8 +923,9 @@ describe("mode tutorials", () => {
     const copy = MODE_TUTORIALS.debate.steps
       .map((step) => step.body)
       .join(" ");
-    assert.match(copy, /every role enters and leaves it automatically/u);
-    assert.match(copy, /Participants see five sealed anonymous seats/u);
+    assert.match(copy, /Participants never mount this chamber/u);
+    assert.match(copy, /Four private leanings lead into routed discussion and four final juror ballots/u);
+    assert.match(copy, /Moderator then records a distinct fifth and final ballot/u);
     assert.match(copy, /individual ballots remain private/u);
   });
 
@@ -1086,8 +1122,9 @@ describe("mode tutorials", () => {
         (step) =>
           step.targetSelector === '[data-tutorial-target="debate-seat"]',
       )?.body ?? "";
-    assert.match(seatCopy, /five seats default to Surprise/u);
+    assert.match(seatCopy, /four juror seats default to Surprise/u);
     assert.match(seatCopy, /pin any seat from the Library/u);
+    assert.match(seatCopy, /Moderator records the fifth and final ballot/u);
     const juryChamberCopy =
       MODE_TUTORIALS.debate.steps.find(
         (step) =>
@@ -1318,12 +1355,24 @@ describe("mode tutorials", () => {
         targetSelector: '[data-tutorial-target="chat-bot-picker"]',
       },
     );
-    assert.deepEqual(continueHome, {
-      heading: "Continue this Home",
-      body: "Opening a persona Home from All Bots, the header picker, or its grouped conversation heading continues that Home's latest saved chat. Expand the group to choose an exact older chat; use its + or New chat only when you deliberately want a separate conversation. Only the selected conversation's transcript enters its active context. Put physical stage direction in the separate Action field using letters and spaces only; typing exactly ** in the speech field jumps there. Action drafts stay private until Send. If you send an Action without speech, it and the bot's action response appear on the canvas as an ephemeral exchange and never enter history or memory. For a surprise opening or next line, Wield Prism onto the message box—hold Option on macOS or Control on Windows and Linux, then click the glowing composer—or focus it and press your Summon / Wield Prism shortcut. Space rerolls after a draft settles; clicking away, Enter, or Tab keeps it; Escape restores what you had. Opening the Conversations panel enters transcript Chat and temporarily forces Voice to Mute without changing your saved choice. Close the panel to return to immersive Zen, where English, Premium, Babble, or Bottish resumes automatically; an explicitly saved Mute remains muted. In Zen, Mute also lets the live avatar step out and reveals each completed reply in a near-instant sweep. When Shh appears, it stops the current reply without replacing the draft you are writing.",
-      clickLabel: "the message box at the bottom",
-      targetSelector: '[data-tutorial-target="composer"]',
-    });
+    assert.equal(continueHome?.heading, "Continue this Home");
+    assert.equal(continueHome?.clickLabel, "the message box at the bottom");
+    assert.equal(
+      continueHome?.targetSelector,
+      '[data-tutorial-target="composer"]',
+    );
+    assert.match(
+      continueHome?.body ?? "",
+      /Opening a persona Home from All Bots or its grouped conversation heading continues that Home's latest saved chat/u,
+    );
+    assert.match(
+      continueHome?.body ?? "",
+      /header bot picker invites them into this same conversation/u,
+    );
+    assert.match(
+      continueHome?.body ?? "",
+      /Random, New, Intro, or Off handoff/u,
+    );
     assert.match(
       continueHome?.body ?? "",
       /Wield Prism onto the message box/u,
@@ -1610,7 +1659,10 @@ describe("mode tutorials", () => {
   it("teaches persona comments, intentional reaction cuts, and the formal Signal close", () => {
     const camera = MODE_TUTORIALS.botcast.steps[6]?.body ?? "";
     const controlRoom = MODE_TUTORIALS.botcast.steps[7]?.body ?? "";
-    assert.match(camera, /Most brief listener comments stay off-camera/u);
+    assert.match(
+      camera,
+      /interruption clips under 2\.5 seconds stay off-camera/u,
+    );
     assert.match(
       camera,
       /social-silence beat belongs to the silent bot on camera/u,
@@ -2271,7 +2323,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
-      /keeps a human Producer guest framed while they compose and deliver each answer/u,
+      /uses editorial hard cuts exactly as audible host and guest speech begins/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
@@ -2287,7 +2339,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
-      /Audible interruptions cut directly to the interrupter/u,
+      /Sustained audible interruptions cut directly to the interrupter/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
@@ -2307,7 +2359,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
-      /brief listener comments stay off-camera[\s\S]*listener cut/u,
+      /interruption clips under 2\.5 seconds stay off-camera[\s\S]*listener cut/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
@@ -2339,7 +2391,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
-      /Most brief listener comments stay off-camera/u,
+      /interruption clips under 2\.5 seconds stay off-camera/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
@@ -2448,6 +2500,10 @@ describe("mode tutorials", () => {
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
       /[Rr]outing, model, Effort, Voice[\s\S]*stay locked through the closing card/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      /completed, cancelled, or discarded closing card keeps Copy for Signal Review available/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
@@ -2900,6 +2956,8 @@ describe("mode tutorials", () => {
       assert.match(body, /Closing the panel restores Prism/u);
       assert.match(body, /ordinary surfaces.*shortcut opens this menu at the orb's current location/u);
       assert.match(body, /eligible text field.*contextual editable draft/u);
+      assert.match(body, /Keep Option held.*queue each once in click order/u);
+      assert.match(body, /fills them consecutively/u);
       assert.match(body, /passwords, credentials.*live production.*replay remain untouched/u);
       assert.match(body, /menu is open.*Wield modifier leaves the assistant anchored/u);
     }

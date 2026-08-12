@@ -836,6 +836,34 @@ export function markMemoryAcquisitionReceiptRead(
   );
 }
 
+/**
+ * Resolves the transient bot-to-bot notifications owned by one completed
+ * applet session. The underlying memories remain intact; only their unread
+ * presentation receipts are consumed.
+ */
+export function markSessionBotRelationMemoryReceiptsRead(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  readAt = new Date().toISOString(),
+): number {
+  ensureMemoryEcologyMemorySchema(db);
+  const sessionId = conversationId.trim();
+  if (!sessionId) return 0;
+  return Number(
+    db
+      .prepare(
+        `UPDATE memory_acquisition_receipts
+            SET read_at = COALESCE(read_at, ?)
+          WHERE user_id = ?
+            AND conversation_id = ?
+            AND kind = 'bot_relation'
+            AND read_at IS NULL`,
+      )
+      .run(readAt, userId, sessionId).changes ?? 0,
+  );
+}
+
 export function latestPlayerMemoryReceipt(args: {
   db: DatabaseSync;
   userId: string;

@@ -2514,7 +2514,7 @@ dependencies = [
 
 [[package]]
 name = "prism_desktop"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "objc2",
  "objc2-app-kit",

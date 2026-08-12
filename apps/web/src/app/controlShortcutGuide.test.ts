@@ -49,7 +49,7 @@ test("shows the guide only while Control is held", () => {
   );
 });
 
-test("builds Control-root shortcut entries from preferences", () => {
+test("builds PRISM shortcut entries from preferences", () => {
   const entries = controlShortcutGuideEntries(
     defaultPrismKeyboardShortcuts("MacIntel"),
     "MacIntel",
@@ -57,12 +57,12 @@ test("builds Control-root shortcut entries from preferences", () => {
   assert.deepEqual(
     entries.map((entry) => [entry.action, entry.slot, entry.display]),
     [
-      ["turbo", "up", "⌃ Up"],
+      ["turbo", "up", "⌥ Up"],
       ["providerMode", "footer", "⇧ Tab"],
-      ["effortPicker", "down", "⌃ Down"],
-      ["modelPicker", "left", "⌃ Left"],
-      ["prism", "footer", "⌃ ⌥"],
-      ["speechType", "right", "⌃ Right"],
+      ["effortPicker", "down", "⌥ Down"],
+      ["modelPicker", "left", "⌥ Left"],
+      ["prism", "footer", "⌘ ⌥"],
+      ["speechType", "right", "⌥ Right"],
     ],
   );
 });

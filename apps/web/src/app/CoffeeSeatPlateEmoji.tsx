@@ -214,11 +214,11 @@ export type CoffeeSeatPlateEmojiProps = {
   enabled: boolean;
   /** Quantizes the rendered font silhouette to the full-avatar phosphor grid. */
   pixelated?: boolean;
-  /** While this seat is doing table typewriter speech, no blink timers run. */
+  /** Active speaking state for speech-driven mouth sync and blink eligibility. */
   isTalking: boolean;
   /** Full streamed-text viseme used to animate authored custom mouth glyphs. */
   mouthShape?: ZenLiveBotMouthShape | null;
-  /** Allows editor/previews to keep eye blinks independent of mouth motion. */
+  /** Keeps eye blinks independent of speech mouth motion by default. */
   blinkWhileTalking?: boolean;
   /** Used only to de-sync blink timers between seats. */
   scheduleKey: string;
@@ -310,7 +310,7 @@ export function CoffeeSeatPlateEmoji({
   pixelated = false,
   isTalking,
   mouthShape,
-  blinkWhileTalking = false,
+  blinkWhileTalking = true,
   scheduleKey,
   showThinkingSpinner = false,
   showQuestionMark = false,
@@ -954,6 +954,10 @@ export function CoffeeSeatPlateEmoji({
               voicePreset,
               rotateDeg,
               pairedEye: renderCustomEyePair || renderCustomBlinkPair,
+              blinkGlyph:
+                displayBlinkPhase === "closed" && part === "eyes"
+                  ? normalizedFaceBlinkBar
+                  : null,
               customGlyph:
                 part === "mouth" && renderedFaceMouthCharacter !== null,
             });

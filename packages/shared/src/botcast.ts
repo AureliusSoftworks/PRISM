@@ -25,6 +25,7 @@ import {
 } from "./directionalIrritation.ts";
 import {
   normalizeCrosstalkReclaimPlanV1,
+  normalizeBotCrosstalkInterruptedSpeakerCue,
   normalizeListenerReactionPlanV1,
   socialSilenceMessageIsMarkedV1,
   type BotCrosstalkInterruptedSpeakerCue,
@@ -1635,20 +1636,36 @@ function normalizeSavedBotcastListenerReactionPlan(
   if (!plan || !value || typeof value !== "object" || Array.isArray(value)) {
     return plan;
   }
-  if (plan.interruptedSpeakerCue) return plan;
   const row = value as Record<string, unknown>;
+  const savedCue = normalizeBotCrosstalkInterruptedSpeakerCue(
+    row.interruptedSpeakerCue,
+  );
+  const savedPlayback =
+    row.interruptedSpeakerCuePlayback === "primary" ||
+    row.interruptedSpeakerCuePlayback === "crosstalk"
+      ? row.interruptedSpeakerCuePlayback
+      : undefined;
+  if (plan.interruptedSpeakerCue) {
+    return savedPlayback && plan.interruptedSpeakerCuePlayback !== savedPlayback
+      ? { ...plan, interruptedSpeakerCuePlayback: savedPlayback }
+      : plan;
+  }
   const snarkCue =
-    typeof row.interruptedSpeakerCue === "string"
+    !savedCue && typeof row.interruptedSpeakerCue === "string"
       ? row.interruptedSpeakerCue.replace(/\s+/gu, " ").trim().slice(0, 120)
       : "";
-  if (!snarkCue || !BOTCAST_DIRECTIONAL_IRRITATION_SNARK_CUE_SET.has(snarkCue)) {
+  const cue = savedCue ??
+    (BOTCAST_DIRECTIONAL_IRRITATION_SNARK_CUE_SET.has(snarkCue)
+      ? snarkCue as BotCrosstalkInterruptedSpeakerCue
+      : null);
+  if (!cue) {
     return plan;
   }
   return {
     ...plan,
-    interruptedSpeakerCue: snarkCue as BotCrosstalkInterruptedSpeakerCue,
+    interruptedSpeakerCue: cue,
     interruptedSpeakerCuePlayback:
-      plan.interruptedSpeakerCuePlayback ?? "crosstalk",
+      savedPlayback ?? plan.interruptedSpeakerCuePlayback ?? "crosstalk",
   };
 }
 

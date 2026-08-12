@@ -3,7 +3,7 @@ import type { PrismCompanionCardV1 } from "./prismOrchestration.js";
 import {
   normalizeStoredUserNotesPayload,
   type UserNotesPayload,
-} from "./prismTool.js";
+} from "./prismTool.ts";
 import type {
   DebateFormalityId,
   DebateFormatId,
