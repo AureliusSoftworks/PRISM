@@ -14,6 +14,36 @@
   --baseline-fg: #e8ecf5;
   /* Shared applet navbar band; collapses to 0 during locked live sessions. */
   --app-navbar-height: 66px;
+
+  /* Title role was authored on .appLayout, so it resolved only inside the
+     shell subtree and silently fell back everywhere else. Same value, lifted
+     to :root; the .appLayout declaration still wins where it applies. */
+  --font-title:
+    var(--font-title-sans), var(--font-ui-sans), system-ui, sans-serif;
+
+  /* Radius scale. See docs/design-system.md — 7/9/11/13/15px in the tree are
+     drift to snap onto these steps, not additional rungs. */
+  --prism-radius-xs: 4px;
+  --prism-radius-sm: 6px;
+  --prism-radius-md: 8px;
+  --prism-radius-lg: 10px;
+  --prism-radius-xl: 12px;
+  --prism-radius-2xl: 16px;
+  --prism-radius-3xl: 20px;
+  --prism-radius-pill: 999px;
+  --prism-radius-circle: 50%;
+
+  /* Spacing scale, on the same terms: even steps are the system, odd values
+     already in the tree are drift. */
+  --prism-space-3xs: 2px;
+  --prism-space-2xs: 4px;
+  --prism-space-xs: 6px;
+  --prism-space-sm: 8px;
+  --prism-space-md: 10px;
+  --prism-space-lg: 12px;
+  --prism-space-xl: 16px;
+  --prism-space-2xl: 20px;
+  --prism-space-3xl: 24px;
 }
 
 html {
