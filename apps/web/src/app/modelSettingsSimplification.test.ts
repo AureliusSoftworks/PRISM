@@ -20,9 +20,9 @@ const signalExperience = readFileSync(
   "utf8",
 );
 
-test("keeps Models focused on Prism, recovery, and advanced visibility", () => {
-  assert.match(page, /Prism &amp; Recovery/u);
-  assert.match(page, /<span>Prism model<\/span>/u);
+test("keeps Models focused on background work, recovery, and advanced visibility", () => {
+  assert.match(page, /Background &amp; Recovery/u);
+  assert.match(page, /<span>Background model<\/span>/u);
   assert.match(page, /<span>Auto recovery<\/span>/u);
   assert.match(page, /<span>Manage model list<\/span>/u);
   assert.doesNotMatch(page, /Image-request LLM/u);

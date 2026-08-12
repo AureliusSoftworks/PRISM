@@ -7,7 +7,7 @@
   --companion-m: #7b5cff;
   --prism-companion-anchor-z-index: 170;
   --prism-companion-open-z-index: 855;
-  --prism-companion-wielding-z-index: 857;
+  --prism-companion-wielding-z-index: 2147483200;
   position: fixed;
   /* Docked/floating companion sits below shared top chrome when closed. */
   z-index: var(--prism-companion-anchor-z-index);
@@ -18,7 +18,7 @@
   will-change: left, top;
 }
 
-.anchor[data-refracting="traveling"] {
+.anchor[data-refracting="generating"] {
   transition:
     left 420ms cubic-bezier(.2, .82, .2, 1),
     top 420ms cubic-bezier(.2, .82, .2, 1);
@@ -35,6 +35,18 @@
 
 .anchor[data-open="true"] {
   z-index: var(--prism-companion-open-z-index);
+}
+
+/* Main panels submerge passive assistant chrome without disabling the global
+   Wield gesture or contextual Refract targets inside those panels. */
+.anchor[data-submerged="true"]:not([data-wielding="true"]):not([data-refracting]) {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.anchor[data-refracting] {
+  z-index: var(--prism-companion-wielding-z-index);
 }
 
 .anchor[data-home-base-radial-phase] {
@@ -331,6 +343,11 @@
   -webkit-backdrop-filter: none;
 }
 
+.backdrop[data-submerged="true"] {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .focusOrb {
   --focus-orb-x: 34px;
   --focus-orb-y: 34px;
@@ -576,9 +593,7 @@
 
 .refractGlyph {
   position: absolute;
-  left: calc(
-    50% + var(--prism-refract-target-half-width, 0px) - 20px
-  );
+  left: 50%;
   top: 50%;
   z-index: 3;
   width: 18px;
@@ -607,7 +622,6 @@
 }
 
 .anchor[data-refracting="generating"] .refractGlyph,
-.anchor[data-refracting="ready"] .refractGlyph,
 .anchor[data-refracting="prompting"] .refractGlyph,
 .anchor[data-refracting="error"] .refractGlyph {
   opacity: .94;

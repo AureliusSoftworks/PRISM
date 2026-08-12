@@ -3,11 +3,10 @@ import assert from "node:assert/strict";
 import {
   isZenLiveBotPresenceActionVerbose,
   resolveZenLiveBotPresenceActionText,
-  resizeZenLiveBotAvatarFromWheel,
   sanitizeZenLiveBotActionText,
   zenLiveBotCanvasSideFromCenterX,
+  zenLiveBotFacingForCanvasSide,
   zenLiveBotFaceScaleYForCanvasSide,
-  zenLiveBotResizeLaneAtClientX,
   zenLiveActionPlateFace,
 } from "./zenLiveActions.ts";
 
@@ -210,109 +209,10 @@ describe("zenLiveBotCanvasSideFromCenterX", () => {
   });
 });
 
-describe("zenLiveBotResizeLaneAtClientX", () => {
-  it("reserves only the empty columns beside centered Zen prose", () => {
-    const geometry = {
-      surfaceLeft: 100,
-      surfaceWidth: 1200,
-      proseWidth: 800,
-    };
-    assert.equal(
-      zenLiveBotResizeLaneAtClientX({ ...geometry, clientX: 180 }),
-      "left",
-    );
-    assert.equal(
-      zenLiveBotResizeLaneAtClientX({ ...geometry, clientX: 1220 }),
-      "right",
-    );
-    assert.equal(
-      zenLiveBotResizeLaneAtClientX({ ...geometry, clientX: 700 }),
-      null,
-    );
-  });
-
-  it("keeps the full surface as prose when no side column exists", () => {
-    assert.equal(
-      zenLiveBotResizeLaneAtClientX({
-        clientX: 10,
-        surfaceLeft: 0,
-        surfaceWidth: 1000,
-        proseWidth: 1200,
-      }),
-      null,
-    );
-  });
-});
-
-describe("resizeZenLiveBotAvatarFromWheel", () => {
-  it("grows upward scrolls and shrinks downward scrolls smoothly", () => {
-    assert.ok(
-      resizeZenLiveBotAvatarFromWheel({
-        currentSizePx: 360,
-        wheelDeltaY: -80,
-        minSizePx: 94,
-        maxSizePx: 840,
-      }) > 360,
-    );
-    assert.ok(
-      resizeZenLiveBotAvatarFromWheel({
-        currentSizePx: 360,
-        wheelDeltaY: 80,
-        minSizePx: 94,
-        maxSizePx: 840,
-      }) < 360,
-    );
-  });
-
-  it("clamps inertial wheel motion to the authored size range", () => {
-    assert.equal(
-      resizeZenLiveBotAvatarFromWheel({
-        currentSizePx: 839,
-        wheelDeltaY: -10_000,
-        minSizePx: 94,
-        maxSizePx: 840,
-      }),
-      840,
-    );
-    assert.equal(
-      resizeZenLiveBotAvatarFromWheel({
-        currentSizePx: 95,
-        wheelDeltaY: 10_000,
-        minSizePx: 94,
-        maxSizePx: 840,
-      }),
-      94,
-    );
-  });
-
-  it("jumps across the protected gap between compact and full renderers", () => {
-    const geometry = {
-      minSizePx: 94,
-      maxSizePx: 840,
-      compactMaxSizePx: 184,
-      fullMinSizePx: 240,
-    };
-    assert.equal(
-      resizeZenLiveBotAvatarFromWheel({
-        ...geometry,
-        currentSizePx: 184,
-        wheelDeltaY: -80,
-      }),
-      240,
-    );
-    assert.equal(
-      resizeZenLiveBotAvatarFromWheel({
-        ...geometry,
-        currentSizePx: 240,
-        wheelDeltaY: 80,
-      }),
-      184,
-    );
-  });
-});
-
 describe("zenLiveBotFaceScaleYForCanvasSide", () => {
   it("flips left-side Zen bots to face right and leaves right-side bots facing left", () => {
+    assert.equal(zenLiveBotFacingForCanvasSide("left"), "right");
+    assert.equal(zenLiveBotFacingForCanvasSide("right"), "left");
     assert.equal(zenLiveBotFaceScaleYForCanvasSide("left"), "-1");
     assert.equal(zenLiveBotFaceScaleYForCanvasSide("right"), "1");
   });

@@ -4,7 +4,7 @@ import {
   anthropicReasoningEffortForRequest,
   modelSupportsTurboMode,
   openAiReasoningEffortForRequest,
-  type ReasoningEffort,
+  type ProviderReasoningEffort,
   type UsagePurpose,
 } from "@localai/shared";
 import {
@@ -34,7 +34,7 @@ export interface GenerateOptions {
   topP?: number;
   topK?: number;
   repetitionPenalty?: number;
-  reasoningEffort?: ReasoningEffort;
+  reasoningEffort?: ProviderReasoningEffort;
   /** Requests the provider's supported premium low-latency service tier. */
   turbo?: boolean;
   usagePurpose?: UsagePurpose;
@@ -1986,10 +1986,11 @@ export class AnthropicProvider implements LlmProvider {
 }
 
 /**
- * Resolved local model for Prism-owned lanes (Prism Home, companion,
- * Wield/Refract, orchestration, titles, summarization, memory inference,
- * Coffee routing, and helper suggestions). Per-user Settings override wins;
- * otherwise `OLLAMA_AUXILIARY_MODEL` (default llama3.2).
+ * Resolved local model for quiet background/helper work (orchestration,
+ * titles, summarization, memory inference, cleanup, Coffee routing, and helper
+ * suggestions). Foreground generation such as Refract follows the global
+ * privacy lane, Model/Auto, and Effort controls instead. Per-user Settings
+ * override wins; otherwise `OLLAMA_AUXILIARY_MODEL` (default llama3.2).
  */
 export function resolveAuxiliaryOllamaModel(prismDefaultLlmModel?: string | null): string {
   const trimmed = typeof prismDefaultLlmModel === "string" ? prismDefaultLlmModel.trim() : "";

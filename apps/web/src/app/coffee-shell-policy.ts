@@ -39,8 +39,12 @@ export function liveSessionChromePolicy(
       : sessionName === "Debate"
         ? "Return to the Debate lobby"
       : "Cut or finish the Signal session";
+  const lockMessage =
+    sessionName === "Debate"
+      ? "This Debate is sealed to its saved LOCAL/ONLINE lane, model, Effort or Max, and Turbo setting. Return to the Debate lobby to configure a new Duel."
+      : `${exitInstruction} before changing LOCAL/ONLINE, model, Effort, or other session chrome. Auto still picks model and Effort for each generation when selected.`;
   return {
-    lockMessage: `${exitInstruction} before changing LOCAL/ONLINE, model, Effort, or other session chrome. Auto still picks model and Effort for each generation when selected.`,
+    lockMessage,
     disabledNavbarActions: {
       promptCenter: true,
       refresh: true,

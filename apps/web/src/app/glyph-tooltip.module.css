@@ -6,7 +6,7 @@
   padding: 8px 10px;
   border-radius: 9px;
   border: 1px solid var(--line);
-  background: var(--bg-surface);
+  background: color-mix(in srgb, var(--bg-surface) 90%, var(--bg) 10%);
   box-shadow: var(--shadow-lg);
   color: var(--fg);
   font-size: 11.5px;

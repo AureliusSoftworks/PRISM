@@ -4,7 +4,7 @@ import {
   normalizePromptWildcardRunMetadata,
   transformSlateLockedRangesForTextEdit,
   type PromptWildcardRunMetadata,
-  type ModelReasoningEffortPreference,
+  type ProviderReasoningEffort,
   type SlateAiProvider,
   type SlateCharacter,
   type SlateDeliberationConfig,
@@ -198,7 +198,7 @@ export interface SlateAiOperationInput {
   provider: LlmProvider;
   providerName: ProviderName;
   model: string;
-  reasoningEffort?: ModelReasoningEffortPreference;
+  reasoningEffort?: Exclude<ProviderReasoningEffort, "auto">;
   turbo?: boolean;
 }
 

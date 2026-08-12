@@ -3,6 +3,7 @@
 import {
   LOCAL_VOICE_SPEECHPRINT_CAPABILITIES,
   LOCAL_VOICE_SPEECHPRINT_STRENGTHS,
+  voiceAccentDefinitionForId,
   type LocalVoicePronunciationBase,
   type LocalVoiceSpeechprintInfluence,
   type LocalVoiceSpeechprintStrength,
@@ -74,6 +75,25 @@ function foundationSelectValue(
   return selection.pronunciationBase;
 }
 
+function accentDefinitionIdForSelection(
+  pronunciationBase: LocalVoicePronunciationBase,
+  influence: LocalVoiceSpeechprintInfluence,
+  currentAccentDefinitionId?: string | null,
+): string | null {
+  const current = voiceAccentDefinitionForId(currentAccentDefinitionId);
+  if (
+    current?.localSpeechprintFallback === influence &&
+    (!current.localPronunciationBaseFallback ||
+      current.localPronunciationBaseFallback === pronunciationBase)
+  ) {
+    return current.id;
+  }
+  if (influence !== "none") return influence;
+  if (pronunciationBase === "en-US") return "american-english";
+  if (pronunciationBase === "en-GB") return "british-english";
+  return null;
+}
+
 export function PronunciationAtlas({
   selection,
   onPreview,
@@ -125,7 +145,6 @@ export function PronunciationAtlas({
   const commitSelection = (next: PronunciationAtlasSelection): void => {
     const normalized = normalizePronunciationAtlasSelection(next);
     setDraftValue(null);
-    onPreview(normalized);
     onCommit(normalized);
   };
 
@@ -162,7 +181,6 @@ export function PronunciationAtlas({
         onCommit={(next) => {
           const committed = padValueForSelection(next.selection);
           setDraftValue(null);
-          onPreview(committed.selection);
           onCommit(committed.selection);
         }}
         onCancel={(restored) => {
@@ -177,10 +195,14 @@ export function PronunciationAtlas({
         <div role="group" aria-label="Nearby accent choices">
           {nearbyCandidates.map((candidate) => {
             const active =
-              candidate.selection.influence === padValue.selection.influence &&
-              (candidate.selection.influence !== "none" ||
-                candidate.selection.pronunciationBase ===
-                  padValue.selection.pronunciationBase);
+              candidate.selection.accentDefinitionId
+                ? candidate.selection.accentDefinitionId ===
+                  padValue.selection.accentDefinitionId
+                : candidate.selection.influence ===
+                    padValue.selection.influence &&
+                  (candidate.selection.influence !== "none" ||
+                    candidate.selection.pronunciationBase ===
+                      padValue.selection.pronunciationBase);
             return (
               <button
                 key={candidate.id}
@@ -197,7 +219,8 @@ export function PronunciationAtlas({
         </div>
       </div>
       <div className={styles.controls}>
-        {padValue.selection.influence !== "none" ? (
+        {padValue.selection.accentDefinitionId ||
+        padValue.selection.influence !== "none" ? (
           <div
             className={styles.strength}
             role="group"
@@ -237,13 +260,19 @@ export function PronunciationAtlas({
               <select
                 value={foundationSelectValue(padValue.selection)}
                 disabled={disabled}
-                onChange={(event) =>
+                onChange={(event) => {
+                  const pronunciationBase = event.currentTarget
+                    .value as LocalVoicePronunciationBase;
                   commitSelection({
                     ...padValue.selection,
-                    pronunciationBase: event.currentTarget
-                      .value as LocalVoicePronunciationBase,
-                  })
-                }
+                    pronunciationBase,
+                    accentDefinitionId: accentDefinitionIdForSelection(
+                      pronunciationBase,
+                      padValue.selection.influence,
+                      padValue.selection.accentDefinitionId,
+                    ),
+                  });
+                }}
               >
                 <option value="follow-voice">
                   Automatic foundation
@@ -257,13 +286,18 @@ export function PronunciationAtlas({
               <select
                 value={padValue.selection.influence}
                 disabled={disabled}
-                onChange={(event) =>
+                onChange={(event) => {
+                  const influence = event.currentTarget
+                    .value as LocalVoiceSpeechprintInfluence;
                   commitSelection({
                     ...padValue.selection,
-                    influence: event.currentTarget
-                      .value as LocalVoiceSpeechprintInfluence,
-                  })
-                }
+                    influence,
+                    accentDefinitionId: accentDefinitionIdForSelection(
+                      padValue.selection.pronunciationBase,
+                      influence,
+                    ),
+                  });
+                }}
               >
                 <option value="none">Natural voice</option>
                 {LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.map((capability) => (

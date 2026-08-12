@@ -29,6 +29,7 @@ import {
   type PrismCompanionMessage,
   type PrismCompanionResponse,
   type PrismRefractResponse,
+  type ProviderReasoningEffort,
   type PrismCompanionSurfaceReference,
   type UserNotesPayload,
 } from "@localai/shared";
@@ -140,11 +141,13 @@ import {
   PRISM_REFRACT_TARGET_ATTRIBUTE,
   nextPrismRefractChoice,
   prismRefractModifierClickDecision,
+  prismRefractResultOwnershipIsCurrent,
   prismRefractTargetIdAtPoint,
   registeredPrismRefractTarget,
   requestPrismRefract,
   subscribePrismRefractRequests,
   type PrismRefractInvocation,
+  type PrismRefractRequest,
   type RegisteredPrismRefractTarget,
 } from "./prismRefract";
 import {
@@ -163,6 +166,10 @@ import {
   installPrismUniversalInputTargets,
   type PrismUniversalInputCandidateRequest,
 } from "./prismUniversalInputRefract";
+import {
+  buildBotGeneratorBriefRefractContext,
+  buildBotGeneratorRefractRequestTarget,
+} from "./botPowerRefract";
 import type { SpeechCharacterAlignment } from "./speechRevealTimeline";
 import {
   prismActionLabel,
@@ -174,6 +181,8 @@ const PRISM_COMPANION_SYSTEM_PAUSE_REASON = "prism-companion";
 const PRISM_SYSTEM_PAUSE_EXEMPT_SELECTOR =
   '[data-prism-system-pause-exempt="true"]';
 const PRISM_REFRACT_CURSOR_ATTRIBUTE = "data-prism-refract-cursor-hidden";
+const PRISM_REFRACT_PREVIEW_PAINT_FRAMES = 2;
+const PRISM_REFRACT_FIELD_PREVIEW_PAINT_ATTEMPTS = 12;
 const PRISM_WIELD_CURSOR_ATTRIBUTE = "data-prism-wielding";
 /** After settle, dim the idle orb so it stays out of the way. */
 export const PRISM_COMPANION_IDLE_DIM_MS = 3_000;
@@ -191,10 +200,18 @@ interface PrismRefractSession {
   invocation: PrismRefractInvocation;
   phase: PrismRefractPhase;
   targetWidth: number;
+  targetCenter: PrismCompanionPosition;
   originalValue: string;
   candidateValue: string | null;
   rejectedValues: string[];
   originalAriaBusy: string | null;
+  originalAriaReadonly: string | null;
+}
+
+interface QueuedPrismRefractRequest extends PrismRefractRequest {
+  element: HTMLElement;
+  originalState: string | undefined;
+  originalSheen: string | undefined;
   originalAriaReadonly: string | null;
 }
 
@@ -246,8 +263,18 @@ export interface PrismCompanionProps {
   accountKey: string;
   /** Resolved app theme. Portal-rendered companion chrome cannot inherit the page shell class. */
   theme?: "light" | "dark";
+  /** Hide passive chrome behind a main panel while keeping Wield and Refract available. */
+  submerged?: boolean;
   keyboardShortcut: string | null;
   surface: PrismCompanionSurfaceReference;
+  /** Live global navbar routing snapshot for foreground field Refract. */
+  refractRouting?: {
+    preferredProvider: EphemeralChatResolvedProvider;
+    responseMode: "local" | "online";
+    modelOverride: string | null;
+    reasoningEffort?: Exclude<ProviderReasoningEffort, "auto">;
+    turbo?: boolean;
+  };
   /** Chat and Zen share one route; this is the authoritative view boundary. */
   presentation?: PrismCompanionPresentation;
   /** The account's existing "Same session after idle" duration. */
@@ -296,6 +323,62 @@ export interface PrismCompanionHomeAppletTarget {
   id: string;
   label: string;
   glyph: ReactNode;
+}
+
+function nextPrismRefractPaint(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    let remaining = PRISM_REFRACT_PREVIEW_PAINT_FRAMES;
+    const nextFrame = (): void => {
+      if (signal.aborted || remaining-- <= 0) {
+        resolve();
+        return;
+      }
+      window.requestAnimationFrame(nextFrame);
+    };
+    window.requestAnimationFrame(nextFrame);
+  });
+}
+
+function prismRefractFieldPreviewIsVisible(
+  element: HTMLElement,
+  value: string,
+): boolean {
+  const controls = [
+    ...(element.matches("input, textarea, select, [contenteditable=\"true\"]")
+      ? [element]
+      : []),
+    ...element.querySelectorAll<HTMLElement>(
+      "input, textarea, select, [contenteditable=\"true\"]",
+    ),
+  ];
+  return controls.some((control) => {
+    if (
+      control instanceof HTMLInputElement ||
+      control instanceof HTMLTextAreaElement ||
+      control instanceof HTMLSelectElement
+    ) {
+      return control.value.trim() === value;
+    }
+    return control.textContent?.trim() === value;
+  });
+}
+
+async function waitForPrismRefractPreviewPaint(input: {
+  element: HTMLElement;
+  kind: "field" | "choice";
+  value: string;
+  signal: AbortSignal;
+}): Promise<boolean> {
+  await nextPrismRefractPaint(input.signal);
+  if (input.signal.aborted || input.kind === "choice") return !input.signal.aborted;
+  for (let attempt = 0; attempt < PRISM_REFRACT_FIELD_PREVIEW_PAINT_ATTEMPTS; attempt += 1) {
+    if (prismRefractFieldPreviewIsVisible(input.element, input.value)) {
+      return true;
+    }
+    await nextPrismRefractPaint(input.signal);
+    if (input.signal.aborted) return false;
+  }
+  return false;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -520,8 +603,10 @@ function companionUserNotesHeadline(userNotes: UserNotesPayload): string {
 export default function PrismCompanion({
   accountKey,
   theme = "dark",
+  submerged = false,
   keyboardShortcut,
   surface,
+  refractRouting,
   presentation = null,
   zenSessionIdleGapMs = DEFAULT_PRISM_COMPANION_SESSION_IDLE_GAP_MS,
   chatHomeHeroDocked = false,
@@ -691,6 +776,8 @@ export default function PrismCompanion({
   const homeBaseRadialSuppressClickRef = useRef(false);
   const homeBaseRadialTargetRefs = useRef(new Map<string, HTMLButtonElement>());
   const refractSessionRef = useRef<PrismRefractSession | null>(null);
+  const refractQueueRef = useRef<QueuedPrismRefractRequest[]>([]);
+  const refractQueueAdvanceRunRef = useRef(0);
   const refractMagicHandoffFrameRef = useRef<number | null>(null);
   const refractAbortRef = useRef<AbortController | null>(null);
   const copyFeedbackTimerRef = useRef<number | null>(null);
@@ -769,8 +856,13 @@ export default function PrismCompanion({
   const dismissOnExternalInteraction =
     prismCompanionDismissesOnExternalInteraction(surface);
   const surfaceGlare = resolvePrismCompanionSurfaceGlare(position);
-  const visiblePosition =
-    chatHomeOrbDocked && chatHomeDockPosition
+  const refractTargetPosition =
+    refractSession?.registration.target.kind === "field"
+      ? refractSession.targetCenter
+      : null;
+  const visiblePosition = refractTargetPosition
+    ? refractTargetPosition
+    : chatHomeOrbDocked && chatHomeDockPosition
       ? chatHomeDockPosition
       : position;
   const visibleSurfaceGlare = chatHomeOrbDocked && chatHomeDockPosition
@@ -2207,20 +2299,27 @@ export default function PrismCompanion({
       field,
       currentValue,
       rejectedValues,
+      element,
       signal,
     }: PrismUniversalInputCandidateRequest): Promise<string> => {
+      const target =
+        element.id === "bot-generator-prompt"
+          ? buildBotGeneratorRefractRequestTarget({
+              context: buildBotGeneratorBriefRefractContext({
+                brief: currentValue,
+              }),
+              maxLength: field.maxLength ?? 2_000,
+            })
+          : { kind: "prism.input.text", surface: surfaceRef.current, ...field };
       const response = await fetch("/api/prism/refract", {
         method: "POST",
         credentials: "same-origin",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          target: {
-            kind: "prism.input.text",
-            surface: surfaceRef.current,
-            ...field,
-          },
+          target,
           currentValue,
           rejectedValues,
+          ...(refractRouting ?? {}),
         }),
         signal,
       });
@@ -2241,7 +2340,7 @@ export default function PrismCompanion({
       }
       return payload.value;
     },
-    [],
+    [refractRouting],
   );
 
   useEffect(() => {
@@ -2255,10 +2354,129 @@ export default function PrismCompanion({
     sessionNoteContext,
   ]);
 
+  const restoreQueuedPrismRefractTarget = useCallback(
+    (entry: QueuedPrismRefractRequest): void => {
+      const { element } = entry;
+      if (entry.originalState === undefined) {
+        delete element.dataset.prismRefractState;
+      } else {
+        element.dataset.prismRefractState = entry.originalState;
+      }
+      if (entry.originalSheen === undefined) {
+        delete element.dataset.prismRefractSheen;
+      } else {
+        element.dataset.prismRefractSheen = entry.originalSheen;
+      }
+      if (entry.originalAriaReadonly === null) {
+        element.removeAttribute("aria-readonly");
+      } else {
+        element.setAttribute("aria-readonly", entry.originalAriaReadonly);
+      }
+    },
+    [],
+  );
+
+  const clearPrismRefractQueue = useCallback((): void => {
+    refractQueueAdvanceRunRef.current += 1;
+    for (const entry of refractQueueRef.current) {
+      restoreQueuedPrismRefractTarget(entry);
+    }
+    refractQueueRef.current = [];
+  }, [restoreQueuedPrismRefractTarget]);
+
+  const takeNextPrismRefractRequest = useCallback(
+    (): PrismRefractRequest | null => {
+      while (refractQueueRef.current.length > 0) {
+        const entry = refractQueueRef.current.shift();
+        if (!entry) return null;
+        restoreQueuedPrismRefractTarget(entry);
+        const registration = registeredPrismRefractTarget(entry.targetId);
+        if (
+          registration &&
+          registration.target.kind !== "magic" &&
+          !registration.target.disabled?.()
+        ) {
+          return { targetId: entry.targetId, invocation: entry.invocation };
+        }
+      }
+      return null;
+    },
+    [restoreQueuedPrismRefractTarget],
+  );
+
+  const queuePrismRefractRequest = useCallback(
+    (request: PrismRefractRequest): boolean => {
+      const active = refractSessionRef.current;
+      if (
+        !active ||
+        active.registration.target.kind === "magic" ||
+        active.registration.target.id === request.targetId ||
+        refractQueueRef.current.some(
+          (entry) => entry.targetId === request.targetId,
+        )
+      ) {
+        return false;
+      }
+      const registration = registeredPrismRefractTarget(request.targetId);
+      if (
+        !registration ||
+        registration.target.kind === "magic" ||
+        registration.target.disabled?.()
+      ) {
+        return false;
+      }
+      const { element } = registration;
+      refractQueueRef.current.push({
+        ...request,
+        element,
+        originalState: element.dataset.prismRefractState,
+        originalSheen: element.dataset.prismRefractSheen,
+        originalAriaReadonly: element.getAttribute("aria-readonly"),
+      });
+      element.dataset.prismRefractState = "queued";
+      delete element.dataset.prismRefractSheen;
+      element.setAttribute("aria-readonly", "true");
+      const activeLabel = active.registration.target.label;
+      const queuedLabel = registration.target.label;
+      setRefractStatus(
+        `${queuedLabel} is queued after ${activeLabel}.`,
+      );
+      return true;
+    },
+    [],
+  );
+
+  const refreshQueuedPrismRefractTargets = useCallback((): void => {
+    for (const entry of refractQueueRef.current) {
+      const registration = registeredPrismRefractTarget(entry.targetId);
+      if (
+        !registration ||
+        registration.target.kind === "magic" ||
+        registration.element === entry.element
+      ) {
+        continue;
+      }
+      restoreQueuedPrismRefractTarget(entry);
+      const nextElement = registration.element;
+      entry.element = nextElement;
+      entry.originalState = nextElement.dataset.prismRefractState;
+      entry.originalSheen = nextElement.dataset.prismRefractSheen;
+      entry.originalAriaReadonly = nextElement.getAttribute("aria-readonly");
+      nextElement.dataset.prismRefractState = "queued";
+      delete nextElement.dataset.prismRefractSheen;
+      nextElement.setAttribute("aria-readonly", "true");
+    }
+  }, [restoreQueuedPrismRefractTarget]);
+
   const markRefractTarget = useCallback(
     (session: PrismRefractSession, phase: PrismRefractPhase): void => {
       const { element } = session.registration;
       element.dataset.prismRefractState = phase;
+      if (phase === "generating" && session.registration.target.kind !== "magic") {
+        element.dataset.prismRefractSheen = "true";
+      } else {
+        delete element.dataset.prismRefractSheen;
+      }
       element.setAttribute(
         "aria-busy",
         phase === "generating" ? "true" : "false",
@@ -2271,7 +2489,10 @@ export default function PrismCompanion({
   );
 
   const releasePrismRefract = useCallback(
-    (restoreOriginal: boolean): void => {
+    (
+      restoreOriginal: boolean,
+      options: { preserveQueue?: boolean } = {},
+    ): void => {
       const session = refractSessionRef.current;
       refractRunRef.current += 1;
       refractAbortRef.current?.abort();
@@ -2282,6 +2503,7 @@ export default function PrismCompanion({
           target.preview(session.originalValue);
         }
         delete element.dataset.prismRefractState;
+        delete element.dataset.prismRefractSheen;
         if (session.originalAriaBusy === null) {
           element.removeAttribute("aria-busy");
         } else {
@@ -2295,6 +2517,7 @@ export default function PrismCompanion({
       }
       document.documentElement.removeAttribute(PRISM_REFRACT_CURSOR_ATTRIBUTE);
       anchorRef.current?.removeAttribute("data-refracting");
+      if (!options.preserveQueue) clearPrismRefractQueue();
       updateRefractSession(null);
       setRefractPrompt("");
       setRefractStatus("");
@@ -2312,7 +2535,7 @@ export default function PrismCompanion({
         onRefractTutorialCompleteRef.current?.();
       }
     },
-    [scheduleIdleDim, updateRefractSession],
+    [clearPrismRefractQueue, scheduleIdleDim, updateRefractSession],
   );
 
   useLayoutEffect(() => {
@@ -2436,78 +2659,109 @@ export default function PrismCompanion({
       const generatingSession = { ...session, phase: "generating" as const };
       markRefractTarget(generatingSession, "generating");
       updateRefractSession(generatingSession);
-      setRefractStatus(`Prism is refracting ${target.label}.`);
-
-      if (target.kind === "choice") {
-        const choice = nextPrismRefractChoice(
-          target.choices(),
-          target.read(),
-          rejectedValues,
-        );
-        if (!choice) {
-          const errorSession = {
-            ...generatingSession,
-            phase: "error" as const,
-          };
-          target.preview(session.originalValue);
-          markRefractTarget(errorSession, "error");
-          updateRefractSession(errorSession);
-          setRefractStatus(`There is no other valid ${target.label} choice.`);
-          return;
-        }
-        target.preview(choice.value);
-        const readySession = {
-          ...generatingSession,
-          phase: "ready" as const,
-          candidateValue: choice.value,
-        };
-        markRefractTarget(readySession, "ready");
-        updateRefractSession(readySession);
-        setRefractStatus(
-          `${choice.label} is ready. Click away, Enter, or Tab keeps it. Space rerolls. Escape restores.`,
-        );
-        return;
-      }
+      const queuedCount = refractQueueRef.current.length;
+      setRefractStatus(
+        queuedCount > 0
+          ? `Prism is refracting ${target.label}. ${queuedCount} more queued.`
+          : `Prism is refracting ${target.label}.`,
+      );
 
       refractAbortRef.current?.abort();
       const controller = new AbortController();
       refractAbortRef.current = controller;
       const runId = ++refractRunRef.current;
-      void (async () => {
-        try {
-          if (refractionGate) {
-            const preparation = await refractionGate.prepareLocalModel({
-              provider: "local",
-              experience: preparationExperience,
-              context: "refract",
-              signal: controller.signal,
-            });
-            if (
-              controller.signal.aborted ||
-              runId !== refractRunRef.current ||
-              refractSessionRef.current?.registration.element !== element
-            ) {
+      const requestOwnershipIsCurrent = (): boolean => {
+        const current = registeredPrismRefractTarget(target.id);
+        return prismRefractResultOwnershipIsCurrent({
+          aborted: controller.signal.aborted,
+          requestRunId: runId,
+          currentRunId: refractRunRef.current,
+          expectedTargetId: target.id,
+          currentTargetId: current?.target.id ?? null,
+          expectedElement: element,
+          currentElement: current?.element ?? null,
+        });
+      };
+
+      if (target.kind === "choice") {
+        void (async () => {
+          try {
+            await nextPrismRefractPaint(controller.signal);
+            if (!requestOwnershipIsCurrent()) return;
+            const choice = nextPrismRefractChoice(
+              target.choices(),
+              target.read(),
+              rejectedValues,
+            );
+            if (!choice) {
+              const errorSession = {
+                ...generatingSession,
+                phase: "error" as const,
+              };
+              target.preview(session.originalValue);
+              markRefractTarget(errorSession, "error");
+              updateRefractSession(errorSession);
+              setRefractStatus(`There is no other valid ${target.label} choice.`);
               return;
             }
-            if (preparation.state === "unavailable") {
-              throw new Error(
-                `The local model could not get ready for ${target.label}.`,
-              );
+            target.preview(choice.value);
+            const previewPainted = await waitForPrismRefractPreviewPaint({
+              element,
+              kind: "choice",
+              value: choice.value,
+              signal: controller.signal,
+            });
+            if (!previewPainted || !requestOwnershipIsCurrent()) {
+              return;
             }
+            const readySession = {
+              ...generatingSession,
+              phase: "ready" as const,
+              candidateValue: choice.value,
+            };
+            markRefractTarget(readySession, "ready");
+            updateRefractSession(readySession);
+            setRefractStatus(
+              `${choice.label} is ready. Click away, Enter, or Tab keeps it. Space rerolls. Escape restores.`,
+            );
+          } catch (error) {
+            if (!requestOwnershipIsCurrent()) return;
+            target.preview(session.originalValue);
+            const errorSession = {
+              ...generatingSession,
+              phase: "error" as const,
+              candidateValue: null,
+            };
+            markRefractTarget(errorSession, "error");
+            updateRefractSession(errorSession);
+            const message =
+              error instanceof Error
+                ? error.message
+                : `Prism could not refract ${target.label}.`;
+            setRefractStatus(
+              `${message} Space retries and Escape restores the field.`,
+            );
+            onError?.(message);
           }
-          // Prose field Refract uses the in-field rainbow only — never the
-          // fullscreen synthesis / blocking loader (that shell is for images
-          // and invent-scale magic waits).
+        })();
+        return;
+      }
+
+      void (async () => {
+        try {
+          await nextPrismRefractPaint(controller.signal);
+          if (!requestOwnershipIsCurrent()) {
+            return;
+          }
+          // Foreground field Refract follows the globally selected provider
+          // and model. Its in-field sheen is the complete loading treatment;
+          // local cold starts must never summon the fullscreen model warmer.
           const rawValue = await target.generate({
             currentValue: target.read(),
             rejectedValues,
             signal: controller.signal,
           });
-          if (
-            controller.signal.aborted ||
-            runId !== refractRunRef.current ||
-            refractSessionRef.current?.registration.element !== element
-          ) {
+          if (!requestOwnershipIsCurrent()) {
             return;
           }
           const value = rawValue.trim();
@@ -2522,6 +2776,18 @@ export default function PrismCompanion({
             throw new Error("Prism returned the same idea.");
           }
           target.preview(value);
+          const previewPainted = await waitForPrismRefractPreviewPaint({
+            element,
+            kind: "field",
+            value,
+            signal: controller.signal,
+          });
+          if (!previewPainted) {
+            throw new Error(`Prism could not display the refracted ${target.label}.`);
+          }
+          if (!requestOwnershipIsCurrent()) {
+            return;
+          }
           const readySession = {
             ...generatingSession,
             phase: "ready" as const,
@@ -2533,10 +2799,7 @@ export default function PrismCompanion({
             `${target.label} is ready. Click away, Enter, or Tab keeps it. Space rerolls. Escape restores.`,
           );
         } catch (error) {
-          if (
-            controller.signal.aborted ||
-            runId !== refractRunRef.current
-          ) {
+          if (!requestOwnershipIsCurrent()) {
             return;
           }
           target.preview(session.originalValue);
@@ -2561,8 +2824,6 @@ export default function PrismCompanion({
     [
       markRefractTarget,
       onError,
-      preparationExperience,
-      refractionGate,
       updateRefractSession,
     ],
   );
@@ -2571,6 +2832,7 @@ export default function PrismCompanion({
     (
       targetId: string,
       invocation: PrismRefractInvocation,
+      options: { preserveQueue?: boolean } = {},
     ): void => {
       const registration = registeredPrismRefractTarget(targetId);
       if (!registration || registration.target.disabled?.()) return;
@@ -2581,7 +2843,7 @@ export default function PrismCompanion({
         refractTutorialRunRef.current = true;
         updateRefractTutorialStage("reroll");
       }
-      releasePrismRefract(true);
+      releasePrismRefract(true, options);
       // Refract is an active interaction, even while its direction prompt is
       // waiting on the player. Cancel any idle presence timer that the release
       // above scheduled so the prompt cannot disappear mid-entry.
@@ -2597,6 +2859,16 @@ export default function PrismCompanion({
         invocation,
         phase: target.kind === "magic" ? "prompting" : "generating",
         targetWidth: rect.width,
+        targetCenter: {
+          x: Math.min(
+            1,
+            Math.max(0, (rect.left + rect.width / 2) / window.innerWidth),
+          ),
+          y: Math.min(
+            1,
+            Math.max(0, (rect.top + rect.height / 2) / window.innerHeight),
+          ),
+        },
         originalValue,
         candidateValue: null,
         rejectedValues: originalValue ? [originalValue] : [],
@@ -2604,7 +2876,9 @@ export default function PrismCompanion({
         originalAriaReadonly:
           registration.element.getAttribute("aria-readonly"),
       };
-      registration.element.focus({ preventScroll: true });
+      if (target.kind === "magic") {
+        registration.element.focus({ preventScroll: true });
+      }
       markRefractTarget(session, session.phase);
       updateRefractSession(session);
       setRefractPrompt("");
@@ -2649,6 +2923,9 @@ export default function PrismCompanion({
     ) {
       return;
     }
+    // The queue transition owns committing this candidate. A click or keypress
+    // in the single paint frame before it advances must not discard the rest.
+    if (refractQueueRef.current.length > 0) return;
     const { target } = session.registration;
     const candidate = session.candidateValue;
     releasePrismRefract(false);
@@ -2781,10 +3058,44 @@ export default function PrismCompanion({
     () => {
       if (companionSuppressed || sessionNoteContext) return;
       return subscribePrismRefractRequests(({ targetId, invocation }) => {
-        beginPrismRefract(targetId, invocation);
+        const active = refractSessionRef.current;
+        if (!active) {
+          beginPrismRefract(targetId, invocation);
+          return;
+        }
+        if (
+          active.registration.target.id !== targetId &&
+          refractQueueRef.current.length > 0
+        ) {
+          queuePrismRefractRequest({ targetId, invocation });
+          return;
+        }
+        const decision = prismRefractModifierClickDecision({
+          activeTargetId: active.registration.target.id,
+          activeTargetKind: active.registration.target.kind,
+          clickedTargetId: targetId,
+          canAccept:
+            active.phase === "ready" && active.candidateValue !== null,
+        });
+        if (decision === "queue") {
+          queuePrismRefractRequest({ targetId, invocation });
+          return;
+        }
+        if (decision === "accept" || decision === "accept-and-begin") {
+          acceptPrismRefract();
+        }
+        if (decision === "begin" || decision === "accept-and-begin") {
+          beginPrismRefract(targetId, invocation);
+        }
       });
     },
-    [beginPrismRefract, companionSuppressed, sessionNoteContext],
+    [
+      acceptPrismRefract,
+      beginPrismRefract,
+      companionSuppressed,
+      queuePrismRefractRequest,
+      sessionNoteContext,
+    ],
   );
 
   useEffect(() => {
@@ -2827,23 +3138,7 @@ export default function PrismCompanion({
         shiftedRegistration?.element === shiftedRefractTarget &&
         !shiftedRegistration.target.disabled?.()
       ) {
-        const decision = prismRefractModifierClickDecision({
-          activeTargetId: session.registration.target.id,
-          activeTargetKind: session.registration.target.kind,
-          clickedTargetId: shiftedRegistration.target.id,
-          canAccept:
-            session.phase === "ready" && session.candidateValue !== null,
-        });
-        if (decision === "wait") {
-          setRefractStatus("Prism is still refracting.");
-        } else {
-          if (decision === "accept" || decision === "accept-and-begin") {
-            acceptPrismRefract();
-          }
-          if (decision === "begin" || decision === "accept-and-begin") {
-            requestPrismRefract(shiftedRegistration.target.id, "modifier-click");
-          }
-        }
+        requestPrismRefract(shiftedRegistration.target.id, "modifier-click");
         wieldSuppressedClickRef.current = shiftedRegistration.element;
         if (wieldSuppressedClickTimerRef.current !== null) {
           window.clearTimeout(wieldSuppressedClickTimerRef.current);
@@ -2856,12 +3151,24 @@ export default function PrismCompanion({
         event.stopPropagation();
         return;
       }
+      const queuedTarget =
+        eventTarget instanceof Element
+          ? eventTarget.closest<HTMLElement>(
+              '[data-prism-refract-state="queued"]',
+            )
+          : null;
+      if (queuedTarget) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       if (
         eventTarget instanceof Node &&
         session.registration.element.contains(eventTarget)
       ) {
         if (session.registration.target.kind !== "magic") {
           event.preventDefault();
+          event.stopPropagation();
           if (event.button === 0 && session.phase === "ready") {
             acceptPrismRefract();
           }
@@ -2908,21 +3215,49 @@ export default function PrismCompanion({
       }
       releasePrismRefract(true);
     };
+    const preventCapturedFieldClick = (event: MouseEvent): void => {
+      const eventTarget = event.target;
+      if (!(eventTarget instanceof Element)) return;
+      const blockedTarget = eventTarget.closest<HTMLElement>(
+        '[data-prism-refract-state="generating"], [data-prism-refract-state="queued"]',
+      );
+      if (!blockedTarget) return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
     const preventCapturedFieldInput = (event: InputEvent): void => {
       const session = refractSessionRef.current;
       const eventTarget = event.target;
+      const queuedTarget =
+        eventTarget instanceof Element
+          ? eventTarget.closest<HTMLElement>(
+              '[data-prism-refract-state="queued"]',
+            )
+          : null;
       if (
-        !session ||
-        session.registration.target.kind === "magic" ||
-        !(eventTarget instanceof Node) ||
-        !session.registration.element.contains(eventTarget)
+        !queuedTarget &&
+        (!session ||
+          session.registration.target.kind === "magic" ||
+          !(eventTarget instanceof Node) ||
+          !session.registration.element.contains(eventTarget))
       ) {
         return;
       }
       event.preventDefault();
       event.stopPropagation();
     };
+    const preventCapturedFieldFocus = (event: FocusEvent): void => {
+      const eventTarget = event.target;
+      if (!(eventTarget instanceof HTMLElement)) return;
+      const blockedTarget = eventTarget.closest<HTMLElement>(
+        '[data-prism-refract-state="queued"]',
+      );
+      if (!blockedTarget) return;
+      eventTarget.blur();
+      event.stopPropagation();
+    };
     const restoreIfTargetUnmounts = new MutationObserver(() => {
+      refreshQueuedPrismRefractTargets();
       const currentSession = refractSessionRef.current;
       if (currentSession && !currentSession.registration.element.isConnected) {
         releasePrismRefract(true);
@@ -2937,21 +3272,80 @@ export default function PrismCompanion({
       once: true,
     });
     window.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("click", preventCapturedFieldClick, true);
     window.addEventListener("beforeinput", preventCapturedFieldInput, true);
+    window.addEventListener("focusin", preventCapturedFieldFocus, true);
     return () => {
       restoreIfTargetUnmounts.disconnect();
       window.removeEventListener("pointermove", revealCursor, true);
       window.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("click", preventCapturedFieldClick, true);
       window.removeEventListener(
         "beforeinput",
         preventCapturedFieldInput,
         true,
       );
+      window.removeEventListener("focusin", preventCapturedFieldFocus, true);
     };
   }, [
     acceptPrismRefract,
+    refreshQueuedPrismRefractTargets,
     refractSession,
     releasePrismRefract,
+  ]);
+
+  useEffect(() => {
+    if (
+      !refractSession ||
+      refractSession.phase !== "ready" ||
+      refractSession.candidateValue === null ||
+      refractQueueRef.current.length === 0
+    ) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      const current = refractSessionRef.current;
+      if (
+        !current ||
+        current.phase !== "ready" ||
+        current.candidateValue === null ||
+        current.registration.target.kind === "magic"
+      ) {
+        return;
+      }
+      const next = takeNextPrismRefractRequest();
+      if (!next) return;
+      const advanceRun = ++refractQueueAdvanceRunRef.current;
+      const { target } = current.registration;
+      const candidate = current.candidateValue;
+      releasePrismRefract(false, { preserveQueue: true });
+      void Promise.resolve(target.accept(candidate))
+        .then(() => {
+          if (advanceRun !== refractQueueAdvanceRunRef.current) return;
+          refreshQueuedPrismRefractTargets();
+          beginPrismRefract(next.targetId, next.invocation, {
+            preserveQueue: true,
+          });
+        })
+        .catch((error) => {
+          if (advanceRun !== refractQueueAdvanceRunRef.current) return;
+          clearPrismRefractQueue();
+          onError?.(
+            error instanceof Error
+              ? error.message
+              : `Prism could not keep ${target.label}.`,
+          );
+        });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    beginPrismRefract,
+    clearPrismRefractQueue,
+    onError,
+    refreshQueuedPrismRefractTargets,
+    refractSession,
+    releasePrismRefract,
+    takeNextPrismRefractRequest,
   ]);
 
   useEffect(() => {
@@ -2966,6 +3360,7 @@ export default function PrismCompanion({
         const { element, target } = session.registration;
         if (target.kind !== "magic") target.preview(session.originalValue);
         delete element.dataset.prismRefractState;
+        delete element.dataset.prismRefractSheen;
         if (session.originalAriaBusy === null) {
           element.removeAttribute("aria-busy");
         } else {
@@ -2981,8 +3376,9 @@ export default function PrismCompanion({
         }
       }
       document.documentElement.removeAttribute(PRISM_REFRACT_CURSOR_ATTRIBUTE);
+      clearPrismRefractQueue();
     };
-  }, []);
+  }, [clearPrismRefractQueue]);
 
   const setSpeechPreference = useCallback(
     (enabled: boolean): void => {
@@ -4654,6 +5050,7 @@ export default function PrismCompanion({
         ref={backdropRef}
         className={styles.backdrop}
         data-open={open ? "true" : undefined}
+        data-submerged={submerged ? "true" : undefined}
         data-prism-system-pause-exempt="true"
         data-presentation={presentation ?? undefined}
         aria-hidden="true"
@@ -4665,6 +5062,7 @@ export default function PrismCompanion({
         ref={anchorRef}
         className={styles.anchor}
         data-theme={theme}
+        data-submerged={submerged ? "true" : undefined}
         data-prism-companion-anchor="true"
         data-prism-system-pause-exempt="true"
         data-open={open ? "true" : undefined}

@@ -1,4 +1,5 @@
 import { BOT_PROFILE_PURPOSE_STATEMENT_MAX_LENGTH } from "./botProfile.ts";
+import { BOT_POWER_NAME_MAX_LENGTH } from "./botPower.ts";
 
 export const BOT_GENERATION_FIELD_REGISTRY_VERSION = 1 as const;
 
@@ -18,6 +19,9 @@ export interface BotGenerationFieldDefinitionV1 {
 
 const prose = (maxLength: number): BotGenerationFieldDefinitionV1 => ({
   policy: "semantic", kind: "string", maxLength,
+});
+const proseList = (maxLength: number): BotGenerationFieldDefinitionV1 => ({
+  policy: "semantic", kind: "string-array", maxLength,
 });
 const semanticChoice = (
   choices: readonly (string | number | boolean)[],
@@ -59,6 +63,11 @@ export const BOT_GENERATION_FIELD_REGISTRY_V1 = {
     "reflective",
     "direct",
   ]),
+  "profile.core.responseCues.enabled": semanticChoice([true, false]),
+  "profile.core.responseCues.interruption": proseList(48),
+  "profile.core.responseCues.redirect": proseList(48),
+  "profile.core.responseCues.waiting": proseList(48),
+  "profile.core.responseCues.blockedDefaults": proseList(48),
   "profile.core.openness": semanticChoice([-2, -1, 0, 1, 2]),
   "profile.core.conscientiousness": semanticChoice([-2, -1, 0, 1, 2]),
   "profile.core.extraversion": semanticChoice([-2, -1, 0, 1, 2]),
@@ -97,6 +106,7 @@ export const BOT_GENERATION_FIELD_REGISTRY_V1 = {
   "face.eyes.glyph": bounded("string"),
   "face.eyes.animation": bounded("string"),
   "face.eyes.count": bounded("number", { integer: true }),
+  "face.eyes.spacing": bounded("number"),
   "face.eyes.scale": bounded("number"),
   "face.eyes.offsetX": bounded("number"),
   "face.eyes.offsetY": bounded("number"),
@@ -114,6 +124,7 @@ export const BOT_GENERATION_FIELD_REGISTRY_V1 = {
   "face.blink.scale": bounded("number"),
   "face.blink.offsetX": bounded("number"),
   "face.blink.offsetY": bounded("number"),
+  "face.blink.rotation": bounded("number"),
   "face.thinking.frame0": bounded("string"),
   "face.thinking.frame1": bounded("string"),
   "face.thinking.frame2": bounded("string"),
@@ -134,9 +145,17 @@ export const BOT_GENERATION_FIELD_REGISTRY_V1 = {
   "voice.stability": bounded("number", { minimum: 0, maximum: 1 }),
   "voice.pitch": bounded("number", { minimum: -1, maximum: 1 }),
   "voice.warmth": bounded("number", { minimum: -1, maximum: 1 }),
+  "voice.openness": bounded("number", { minimum: -1, maximum: 1 }),
+  "voice.weight": bounded("number", { minimum: -1, maximum: 1 }),
+  "voice.brightness": bounded("number", { minimum: -1, maximum: 1 }),
+  "voice.resonance": bounded("number", { minimum: -1, maximum: 1 }),
   "voice.pace": bounded("number", { minimum: -1, maximum: 1 }),
   "voice.lilt": bounded("number", { minimum: -1, maximum: 1 }),
+  "voice.premiumPitch": bounded("number", { minimum: -1, maximum: 1 }),
+  "voice.premiumPace": bounded("number", { minimum: -1, maximum: 1 }),
+  "voice.premiumLilt": bounded("number", { minimum: -1, maximum: 1 }),
   "voice.bottishTone": bounded("number", { minimum: -1, maximum: 1 }),
+  "voice.corporality": bounded("number", { minimum: 0, maximum: 1 }),
   "voice.eqTilt": bounded("number", { minimum: -1, maximum: 1 }),
   "voice.gainDb": bounded("number", { minimum: -12, maximum: 6 }),
   "voice.volume": bounded("number", { minimum: 0, maximum: 1.25 }),
@@ -155,6 +174,7 @@ export const BOT_GENERATION_FIELD_REGISTRY_V1 = {
   "settings.topK": bounded("number", { minimum: 0, maximum: 200, integer: true }),
   "settings.repetitionPenalty": bounded("number", { minimum: 0.5, maximum: 2 }),
 
+  "power.name": prose(BOT_POWER_NAME_MAX_LENGTH),
   "power.prompt": prose(640),
   "power.sigil": bounded("string"),
 

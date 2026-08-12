@@ -42,6 +42,7 @@ import {
   listDebateSessions,
   listDebateSessionExhibitAssets,
   attachDebateExhibitSprite,
+  bufferDebateArchiveReturn,
   updateDebateExhibitEmoji,
   orderDebateAudience,
   pauseDebateSession,
@@ -144,6 +145,46 @@ class DebateProviderStub implements LlmProvider {
 
   public async embedText(): Promise<number[]> {
     return [0.1, 0.2];
+  }
+}
+
+class ToggleFailureDebateProvider extends DebateProviderStub {
+  public fail = false;
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    if (this.fail) throw new Error("buffer provider unavailable");
+    return super.generateResponse(messages, options);
+  }
+}
+
+class BlockingDebateProvider extends DebateProviderStub {
+  public blockNext = false;
+  private startedResolve!: () => void;
+  private releaseResolve!: () => void;
+  public readonly started = new Promise<void>((resolve) => {
+    this.startedResolve = resolve;
+  });
+  private readonly releaseGate = new Promise<void>((resolve) => {
+    this.releaseResolve = resolve;
+  });
+
+  public release(): void {
+    this.releaseResolve();
+  }
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    if (this.blockNext) {
+      this.startedResolve();
+      await this.releaseGate;
+      this.blockNext = false;
+    }
+    return super.generateResponse(messages, options);
   }
 }
 
@@ -1525,6 +1566,7 @@ async function createDebateForRole(
     forSystemPrompt?: string;
     evidence?: DebateEvidencePacketV1;
     participantDifficulty?: "coach" | "standard" | "immersive";
+    deferStart?: boolean;
   } = {},
 ) {
   const debateRuntime = options.debateRuntime ?? runtime();
@@ -1578,6 +1620,7 @@ async function createDebateForRole(
       advocacyConsent: checks,
       preferredProvider: "local",
       theme: "light",
+      ...(options.deferStart ? { deferStart: true } : {}),
       idempotencyKey: `create:${role}:0001`,
     },
     debateRuntime,
@@ -1934,7 +1977,7 @@ describe("Debate engine", () => {
     }
   });
 
-  it("applies the current explicit model only when a saved Debate starts", async () => {
+  it("keeps the saved model, effort, and Turbo when an archived Debate starts", async () => {
     const db = createTestDb();
     try {
       const savedRuntime = runtime();
@@ -1951,48 +1994,30 @@ describe("Debate engine", () => {
         deferStart: true,
         idempotencyKey: "create:judge:deferred-model",
       });
-      const currentRuntime = runtime();
-      currentRuntime.local = {
-        ...currentRuntime.local,
-        model: "current-explicit-model",
-        reasoningEffort: "high",
-        turbo: true,
-      };
-      currentRuntime.lanes = [currentRuntime.local];
-      currentRuntime.responseMode = "local";
-      currentRuntime.modelSelectionKind = "fixed";
-
       const started = resumeDebateSession(
         db,
         "user-1",
         saved.id,
         {
           expectedRevision: saved.revision,
-          idempotencyKey: "start:current-explicit-model",
+          idempotencyKey: "start:saved-runtime",
           quietSave: true,
           exitRecovery: true,
-          startPreferredProvider: "local",
-          startModelOverride: "current-explicit-model",
-          startResponseMode: "local",
         },
-        undefined,
-        currentRuntime,
       );
 
       assert.equal(started.status, "live");
       assert.equal(started.provider, "local");
-      assert.equal(started.model, "current-explicit-model");
-      assert.equal(started.modelSelectionKind, "fixed");
+      assert.equal(started.model, saved.model);
+      assert.equal(started.modelSelectionKind, saved.modelSelectionKind);
       assert.equal(started.responseMode, "local");
-      assert.deepEqual(started.generationChain, [
-        { provider: "local", model: "current-explicit-model" },
-      ]);
-      assert.equal(started.latestAutoRoute, undefined);
-      assert.equal(started.lastReasoningEffort, "high");
-      assert.equal(started.lastTurbo, true);
-      assert.equal(started.moderator.model, "current-explicit-model");
-      assert.equal(started.forAdvocate.model, "current-explicit-model");
-      assert.equal(started.againstAdvocate.model, "current-explicit-model");
+      assert.deepEqual(started.generationChain, saved.generationChain);
+      assert.deepEqual(started.latestAutoRoute, saved.latestAutoRoute);
+      assert.equal(started.lastReasoningEffort, saved.lastReasoningEffort);
+      assert.equal(started.lastTurbo, saved.lastTurbo);
+      assert.equal(started.moderator.model, saved.moderator.model);
+      assert.equal(started.forAdvocate.model, saved.forAdvocate.model);
+      assert.equal(started.againstAdvocate.model, saved.againstAdvocate.model);
 
       const frozenOverrideSource = serverSource.slice(
         serverSource.indexOf("function frozenDebateModelOverride"),
@@ -2002,6 +2027,274 @@ describe("Debate engine", () => {
       assert.doesNotMatch(
         frozenOverrideSource,
         /modelSelectionKind === "auto"/u,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("persists a hidden resume ceremony, then incrementally deepens the safe Archive runway", async () => {
+    const db = createTestDb();
+    try {
+      const debateRuntime = runtime();
+      let session = await createDebateForRole(db, "participant", {
+        debateRuntime,
+      });
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "archive-buffer:opening",
+        },
+        debateRuntime,
+      );
+      const heldEvent = session.events.find(
+        (event) => event.speakerKind !== "system" && event.kind !== "error",
+      );
+      assert.ok(heldEvent);
+      session = pauseDebateSession(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "archive-buffer:pause",
+        quietSave: true,
+        presentationEventId: heldEvent.id,
+      });
+      const pausedEventIds = new Set(session.events.map((event) => event.id));
+
+      const buffered = await bufferDebateArchiveReturn(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "archive-buffer:return",
+        },
+        debateRuntime,
+      );
+
+      assert.equal(buffered.session.status, "paused");
+      assert.notEqual(buffered.phase, "preparing");
+      assert.equal(buffered.session.pausedPresentationEventId, heldEvent.id);
+      assert.ok(buffered.session.preparedResumeEventId);
+      assert.equal(buffered.bufferedAdvanceCount, 1);
+      assert.equal(buffered.advanceCap, 3);
+      const preparedResumeEvent = buffered.session.events.find(
+        (event) => event.id === buffered.session.preparedResumeEventId,
+      );
+      assert.equal(preparedResumeEvent?.stepKey, "resume");
+      assert.equal(preparedResumeEvent?.speakerKind, "moderator");
+      assert.equal(preparedResumeEvent?.kind, "judge_gavel");
+      assert.equal(
+        buffered.session.events
+          .filter((event) => !pausedEventIds.has(event.id))
+          .some((event) => event.speakerKind === "player"),
+        false,
+      );
+
+      const reopened = await bufferDebateArchiveReturn(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: buffered.session.revision,
+          idempotencyKey: "archive-buffer:return-again",
+        },
+        debateRuntime,
+      );
+      assert.ok(
+        reopened.bufferedAdvanceCount > buffered.bufferedAdvanceCount ||
+          buffered.phase === "fully_buffered",
+      );
+      assert.equal(
+        reopened.session.events.filter((event) => event.stepKey === "resume")
+          .length,
+        1,
+      );
+
+      let fullyBuffered = reopened;
+      while (fullyBuffered.phase !== "fully_buffered") {
+        fullyBuffered = await bufferDebateArchiveReturn(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: fullyBuffered.session.revision,
+            idempotencyKey: `archive-buffer:deeper:${fullyBuffered.bufferedAdvanceCount}`,
+          },
+          debateRuntime,
+        );
+      }
+      assert.ok(fullyBuffered.bufferedAdvanceCount <= 3);
+      assert.equal(
+        fullyBuffered.session.events
+          .filter((event) => !pausedEventIds.has(event.id))
+          .some((event) => event.speakerKind === "player"),
+        false,
+      );
+
+      const resumed = resumeDebateSession(db, "user-1", session.id, {
+        expectedRevision: fullyBuffered.session.revision,
+        idempotencyKey: "archive-buffer:resume",
+        quietSave: true,
+      });
+      assert.equal(resumed.preparedResumeEventId, null);
+      assert.equal(resumed.archiveReturnBuffer, null);
+      assert.equal(
+        resumed.events.filter((event) => event.stepKey === "resume").length,
+        1,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("makes a deferred opening playable at the minimum threshold, then buffers farther without crossing the player floor", async () => {
+    const db = createTestDb();
+    try {
+      const debateRuntime = runtime();
+      const session = await createDebateForRole(db, "participant", {
+        debateRuntime,
+        deferStart: true,
+      });
+      const first = await bufferDebateArchiveReturn(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "archive-buffer:minimum-threshold",
+        },
+        debateRuntime,
+      );
+      assert.equal(first.phase, "ready_buffering");
+      assert.equal(first.bufferedAdvanceCount, 1);
+      assert.equal(first.session.status, "paused");
+
+      const deeper = await bufferDebateArchiveReturn(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: first.session.revision,
+          idempotencyKey: "archive-buffer:waited-longer",
+        },
+        debateRuntime,
+      );
+      assert.ok(deeper.bufferedAdvanceCount > first.bufferedAdvanceCount);
+      assert.equal(deeper.phase, "fully_buffered");
+      assert.equal(deeper.boundary, "player");
+      assert.equal(
+        deeper.session.events.some((event) => event.speakerKind === "player"),
+        false,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps minimum readiness after a deeper Archive buffer attempt fails", async () => {
+    const db = createTestDb();
+    try {
+      const provider = new ToggleFailureDebateProvider();
+      const debateRuntime = runtimeWith(provider);
+      const session = await createDebateForRole(db, "participant", {
+        debateRuntime,
+        deferStart: true,
+      });
+      const first = await bufferDebateArchiveReturn(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "archive-buffer:ready-before-failure",
+        },
+        debateRuntime,
+      );
+      assert.equal(first.phase, "ready_buffering");
+      provider.fail = true;
+
+      const failedDeeper = await bufferDebateArchiveReturn(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: first.session.revision,
+          idempotencyKey: "archive-buffer:deeper-failure",
+        },
+        debateRuntime,
+      );
+      assert.equal(failedDeeper.phase, "ready_buffering");
+      assert.equal(failedDeeper.bufferingFailed, true);
+      assert.equal(
+        failedDeeper.bufferedAdvanceCount,
+        first.bufferedAdvanceCount,
+      );
+      assert.equal(failedDeeper.session.revision, first.session.revision);
+      assert.equal(failedDeeper.session.status, "paused");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("lets Resume win a deeper-buffer race without duplicating or reordering events", async () => {
+    const db = createTestDb();
+    try {
+      const provider = new BlockingDebateProvider();
+      const debateRuntime = runtimeWith(provider);
+      const session = await createDebateForRole(db, "participant", {
+        debateRuntime,
+        deferStart: true,
+      });
+      const ready = await bufferDebateArchiveReturn(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "archive-buffer:race-ready",
+        },
+        debateRuntime,
+      );
+      provider.blockNext = true;
+      const deeper = bufferDebateArchiveReturn(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: ready.session.revision,
+          idempotencyKey: "archive-buffer:race-deeper",
+        },
+        debateRuntime,
+      );
+      await provider.started;
+
+      const resumed = resumeDebateSession(db, "user-1", session.id, {
+        expectedRevision: ready.session.revision,
+        idempotencyKey: "archive-buffer:race-resume",
+        quietSave: true,
+      });
+      provider.release();
+      await assert.rejects(
+        deeper,
+        (error: unknown) =>
+          error instanceof HttpError && error.statusCode === 409,
+      );
+
+      const persisted = getDebateSession(db, "user-1", session.id);
+      assert.equal(persisted.revision, resumed.revision);
+      assert.equal(persisted.status, resumed.status);
+      assert.equal(persisted.archiveReturnBuffer, null);
+      assert.deepEqual(
+        persisted.events.map((event) => event.id),
+        resumed.events.map((event) => event.id),
+      );
+      assert.deepEqual(
+        persisted.events.map((event) => event.sequence),
+        [...persisted.events.map((event) => event.sequence)].sort(
+          (left, right) => left - right,
+        ),
       );
     } finally {
       db.close();
@@ -2102,7 +2395,7 @@ describe("Debate engine", () => {
     }
   });
 
-  it("freezes Auto candidates but records the fresh route on generated events", async () => {
+  it("freezes the chosen Auto route as well as its candidate set", async () => {
     const db = createTestDb();
     try {
       const debateRuntime = runtime();
@@ -2173,11 +2466,12 @@ describe("Debate engine", () => {
       const generatedEvent = session.events.find(
         (event) => event.provider && event.model,
       );
-      assert.deepEqual(generatedEvent?.autoRoute, debateRuntime.autoRoute);
+      assert.deepEqual(generatedEvent?.autoRoute, session.latestAutoRoute);
+      assert.equal(generatedEvent?.model, "debate-test");
       assert.equal(generatedEvent?.turbo, true);
       const resolvedList = listDebateSessions(db, "user-1");
-      assert.equal(resolvedList[0]?.model, "debate-routed-next");
-      assert.equal(resolvedList[0]?.reasoningEffort, "high");
+      assert.equal(resolvedList[0]?.model, "debate-test");
+      assert.equal(resolvedList[0]?.reasoningEffort, "low");
       assert.equal(resolvedList[0]?.turbo, true);
     } finally {
       db.close();

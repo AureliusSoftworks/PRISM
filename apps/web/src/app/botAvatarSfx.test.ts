@@ -3,6 +3,7 @@ import { statSync } from "node:fs";
 import test from "node:test";
 import {
   BOT_AVATAR_SFX_DEFAULT_VOLUME,
+  BOT_AVATAR_SFX_MAX_VOLUME,
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
   type BotAvatarSfxV1,
 } from "@localai/shared";
@@ -18,12 +19,14 @@ import {
   botAvatarSfxAttackGainAt,
   botAvatarSfxLoopBounds,
   botAvatarSfxLoopRestartTime,
+  botAvatarSfxOutputGain,
   botAvatarSfxReleaseGainAt,
   botAvatarSfxShouldPlay,
   botAvatarSfxStereoPanForRect,
   connectBotAvatarSfxSpatialAudio,
   createSeamlessBotAvatarSfxLoopBuffer,
   effectiveBotAvatarSfxPlayback,
+  normalizeGeneratedBotThinkingSfxPrompt,
   normalizeBotAvatarSfxLoopBlob,
   playBotAvatarSfxSampleAudio,
   prismBotThinkingSfxFallback,
@@ -42,7 +45,7 @@ const sfx: BotAvatarSfxV1 = {
   playWhileTalking: true,
   playWhileIdle: false,
   playWhileThinking: true,
-  volume: 0.5,
+  volume: BOT_AVATAR_SFX_MAX_VOLUME,
 };
 
 test("bot thinking SFX is downmixed to mono before spatial placement", () => {
@@ -305,6 +308,24 @@ test("automatic bot thinking SFX uses the exact prompt and thinking-only playbac
   assert.equal(profile.avatarSfx?.playWhileThinking, true);
 });
 
+test("generated bots can carry a persona-specific thinking-loop brief", () => {
+  const prompt = "Soft cassette transport ticks and a muted relay hum";
+  const generated = botAudioVoiceProfileWithThinkingSfx(
+    DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+    "data:audio/mpeg;base64,AQID",
+    prompt,
+  );
+
+  assert.equal(generated.avatarSfx?.prompt, prompt);
+  assert.equal(generated.avatarSfx?.playWhileTalking, false);
+  assert.equal(generated.avatarSfx?.playWhileIdle, false);
+  assert.equal(generated.avatarSfx?.playWhileThinking, true);
+  assert.equal(
+    normalizeGeneratedBotThinkingSfxPrompt("  \n  "),
+    GENERATED_BOT_THINKING_SFX_PROMPT,
+  );
+});
+
 test("bots without selected audio use one of four stable PRISM thinking fallbacks", () => {
   assert.equal(PRISM_BOT_THINKING_SFX_FALLBACK_URLS.length, 4);
   assert.equal(new Set(PRISM_BOT_THINKING_SFX_FALLBACK_URLS).size, 4);
@@ -367,6 +388,25 @@ test("automatic thinking loops and fallbacks share the twenty-percent library vo
   );
 });
 
+test("Avatar SFX full scale stays quiet and inherits the complete voice gain", () => {
+  assert.equal(BOT_AVATAR_SFX_MAX_VOLUME, 0.2);
+  assert.equal(
+    botAvatarSfxOutputGain({ volume: BOT_AVATAR_SFX_MAX_VOLUME }),
+    0.2,
+  );
+  assert.equal(
+    botAvatarSfxOutputGain({
+      volume: BOT_AVATAR_SFX_MAX_VOLUME,
+      voiceBusGain: 0.5,
+    }),
+    0.1,
+  );
+  assert.equal(
+    botAvatarSfxShouldPlay({ ...sfx, voiceBusGain: 0 }, "thinking"),
+    false,
+  );
+});
+
 test("automatic and manual avatar loops share the guarded ElevenLabs request", async () => {
   let requestedUrl = "";
   let requestedBody = "";
@@ -388,6 +428,24 @@ test("automatic and manual avatar loops share the guarded ElevenLabs request", a
     prompt: "Computer calculating",
   });
   assert.equal(blob.type, "audio/mpeg");
+});
+
+test("the guarded ElevenLabs request accepts a persona-specific loop brief", async () => {
+  const prompt = "Soft cassette transport ticks and a muted relay hum";
+  let requestedBody = "";
+  await requestElevenLabsAvatarSfxLoop(
+    prompt,
+    "https://prism.local",
+    async (_input, init) => {
+      requestedBody = String(init?.body ?? "");
+      return new Response(new Uint8Array([1, 2, 3]), {
+        status: 200,
+        headers: { "content-type": "audio/mpeg" },
+      });
+    },
+  );
+
+  assert.deepEqual(JSON.parse(requestedBody), { prompt });
 });
 
 class FakeAvatarSfxAudio implements BotAvatarSfxAudioTarget {
@@ -524,7 +582,7 @@ test("avatar SFX keeps one loop running across enabled live states", () => {
   assert.equal(loadedSource, sfx.audioDataUrl);
   assert.equal(audio.src, sfx.audioDataUrl);
   assert.equal(audio.loop, false);
-  assert.equal(audio.volume, 0.5);
+  assert.equal(audio.volume, BOT_AVATAR_SFX_MAX_VOLUME);
   assert.equal(audio.loadCalls, 1);
   assert.equal(audio.playCalls, 1);
 

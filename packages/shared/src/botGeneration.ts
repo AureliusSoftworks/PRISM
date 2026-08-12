@@ -2,12 +2,18 @@ import {
   BOT_AVATAR_DETAILS_CANVAS_SIZE,
   BOT_AVATAR_DETAILS_MAX_PAINTED_PIXELS,
   BOT_AVATAR_DETAILS_PAINT_COLOR_MAP_BYTE_LENGTH,
+  BOT_AVATAR_DETAILS_SPEECH_INK_ANIMATIONS,
   BOT_AVATAR_DETAILS_VERSION,
   encodeBotAvatarDetailsPaintColorMap,
   isBotAvatarDetailsWritablePixel,
+  type BotAvatarDetailsSpeechInkAnimation,
   type BotAvatarDetailsV1,
 } from "./botAvatarDetails.ts";
 import {
+  DEFAULT_BOT_FACE_BLINK_BAR,
+  DEFAULT_BOT_FACE_MOUTH_OFFSET_X,
+  DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
+  DEFAULT_BOT_FACE_MOUTH_SCALE,
   resolveBotFaceStyle,
   type BotFaceStyle,
 } from "./botAvatar.ts";
@@ -16,7 +22,11 @@ import {
   type BotAudioVoiceProfileV2,
 } from "./audioVoice.ts";
 import { inferCorporalityFromPersona } from "./corporalityFoley.ts";
-import { normalizeBotIdentityColor } from "./color.ts";
+import {
+  hexToHsl,
+  hslToHex,
+  normalizeBotIdentityColor,
+} from "./color.ts";
 import {
   BOT_PROFILE_PURPOSE_STATEMENT_MAX_LENGTH,
   parseStoredBotPrompt,
@@ -41,8 +51,6 @@ const BOT_GENERATED_INK_MAX_PATH_POINTS = 18;
 const BOT_GENERATED_INK_MAX_PATH_SEGMENT_LENGTH = 96;
 const BOT_GENERATED_PORTRAIT_EYE_OFFSET_X = 0;
 const BOT_GENERATED_PORTRAIT_EYE_OFFSET_Y = 0.18;
-const BOT_GENERATED_PORTRAIT_MOUTH_OFFSET_X = 0;
-const BOT_GENERATED_PORTRAIT_MOUTH_OFFSET_Y = 0.08;
 const BOT_GENERATED_PORTRAIT_EYE_WINDOW = {
   minX: 42,
   maxX: 86,
@@ -50,13 +58,17 @@ const BOT_GENERATED_PORTRAIT_EYE_WINDOW = {
   maxY: 70,
 } as const;
 const BOT_GENERATED_PORTRAIT_MOUTH_WINDOW = {
-  minX: 46,
-  maxX: 82,
-  minY: 72,
-  maxY: 89,
+  minX: 49,
+  maxX: 85,
+  minY: 81,
+  maxY: 98,
 } as const;
 
-/** A compact, stable subset of the bot icon library that models can choose reliably. */
+/**
+ * A shared semantic subset of the bot icon library. Keep these concrete nouns
+ * broad enough for persona signatures while avoiding hundreds of near-synonyms
+ * that make structured generation less reliable.
+ */
 export const BOT_GENERATION_GLYPH_IDS = [
   "bot",
   "sparkles",
@@ -70,7 +82,14 @@ export const BOT_GENERATION_GLYPH_IDS = [
   "puzzle",
   "infinity",
   "spiral",
+  "target",
+  "radar",
+  "atom",
+  "dna",
+  "yinYang",
+  "pulse",
   "eye",
+  "peace",
   "terminal",
   "book",
   "feather",
@@ -78,37 +97,112 @@ export const BOT_GENERATION_GLYPH_IDS = [
   "shield",
   "music",
   "lightbulb",
+  "lens",
   "key",
+  "lock",
   "clock",
+  "scissors",
+  "magnet",
+  "umbrella",
+  "gift",
+  "pencil",
+  "scroll",
+  "hammer",
   "beaker",
   "telescope",
   "cpu",
   "database",
   "globe",
+  "wifi",
   "satellite",
+  "antenna",
   "camera",
+  "headphones",
+  "battery",
+  "bolt",
+  "signal",
+  "broadcast",
   "leaf",
   "tree",
   "mountain",
   "sun",
   "moon",
+  "cloud",
   "snowflake",
+  "droplet",
   "wave",
   "flower",
+  "seedling",
+  "cactus",
+  "rainbow",
+  "tornado",
   "cat",
   "dog",
+  "fish",
   "bird",
+  "butterfly",
+  "rabbit",
   "owl",
+  "turtle",
+  "spider",
+  "paw",
+  "snake",
+  "whale",
+  "octopus",
+  "bee",
+  "frog",
   "fox",
+  "bear",
+  "penguin",
   "dragon",
+  "unicorn",
   "planet",
+  "comet",
+  "constellation",
+  "galaxy",
   "smile",
+  "skull",
+  "hand",
+  "cherry",
+  "mushroom",
+  "apple",
   "coffee",
+  "cake",
+  "strawberry",
+  "pizza",
+  "car",
+  "airplane",
+  "balloon",
+  "anchor",
+  "dice",
+  "flag",
   "crown",
+  "medal",
+  "trophy",
   "gamepad",
+  "bike",
+  "boat",
+  "train",
+  "kite",
+  "hexagon",
   "diamond",
   "origami",
+  "circle",
+  "square",
+  "pentagon",
+  "checkmark",
+  "guitar",
+  "piano",
+  "drum",
+  "candle",
+  "ring",
+  "bell",
+  "pi",
+  "sigma",
+  "hashtag",
+  "at",
   "hourglass",
+  "calendar",
 ] as const;
 
 export type BotGenerationGlyphId = (typeof BOT_GENERATION_GLYPH_IDS)[number];
@@ -149,6 +243,7 @@ export type BotGeneratedInkPrimitiveV1 =
 
 export interface BotGeneratedAvatarDetailsInputV1 {
   ink: BotGeneratedInkPrimitiveV1[];
+  speechInkAnimation?: BotAvatarDetailsSpeechInkAnimation;
 }
 
 export interface BotGeneratedSettingsV1 {
@@ -171,6 +266,8 @@ export interface BotGeneratedDraftV1 {
   glyph: BotGenerationGlyphId;
   face: BotFaceStyle;
   avatarDetails: BotAvatarDetailsV1 | null;
+  /** Portable sound-design direction; audio is created only by the guarded online workflow. */
+  avatarSfxPrompt: string;
   audioVoiceProfile: BotAudioVoiceProfileV2;
   voicePreviewLine: string;
   /** Zero or one compiler-ready prompt-authored Power from the master brief. */
@@ -207,13 +304,17 @@ function clampedInteger(value: unknown, fallback: number, min: number, max: numb
   return Math.round(clampedNumber(value, fallback, min, max));
 }
 
-function normalizeGeneratedHexColor(value: unknown): string {
+function normalizeGeneratedBotHueColor(value: unknown): string {
   const normalized = compactText(value, 24).toLowerCase();
-  if (/^#[0-9a-f]{6}$/u.test(normalized)) return normalized;
-  if (/^#[0-9a-f]{3}$/u.test(normalized)) {
-    return `#${normalized.slice(1).split("").map((part) => `${part}${part}`).join("")}`;
-  }
-  return "#5ad6ff";
+  const expanded = /^#[0-9a-f]{6}$/u.test(normalized)
+    ? normalized
+    : /^#[0-9a-f]{3}$/u.test(normalized)
+      ? `#${normalized.slice(1).split("").map((part) => `${part}${part}`).join("")}`
+      : "#5ad6ff";
+  const { h } = hexToHsl(expanded);
+  // Generated colors obey the same one-axis contract as Avatar Studio's
+  // hue-only picker: hue varies, saturation and lightness do not.
+  return hslToHex(h, 100, 50).toLowerCase();
 }
 
 function normalizeGeneratedGlyph(value: unknown): BotGenerationGlyphId {
@@ -252,19 +353,41 @@ function fitGeneratedPurpose(value: string): string {
 function generatedFaceIntent(value: unknown): {
   customEyes: boolean;
   customMouth: boolean;
-  geometryException: boolean;
+  customBlink: boolean;
+  eyeGeometryException: boolean;
+  mouthGeometryException: boolean;
+  blinkGeometryException: boolean;
 } {
   const face = isRecord(value) ? value : {};
+  const customEyes = face.intentionalCustomEyes === true;
+  const customMouth = face.intentionalCustomMouth === true;
+  const customBlink = face.intentionalCustomBlink === true;
+  const legacyGeometryException = face.intentionalGeometryException === true;
   return {
-    customEyes: face.intentionalCustomEyes === true,
-    customMouth: face.intentionalCustomMouth === true,
-    geometryException: face.intentionalGeometryException === true,
+    customEyes,
+    customMouth,
+    customBlink,
+    eyeGeometryException:
+      customEyes &&
+      (face.intentionalEyeGeometryException === true || legacyGeometryException),
+    mouthGeometryException:
+      customMouth &&
+      (face.intentionalMouthGeometryException === true || legacyGeometryException),
+    blinkGeometryException:
+      customBlink &&
+      (face.intentionalBlinkGeometryException === true || legacyGeometryException),
   };
+}
+
+function normalizeGeneratedInkRole(value: unknown): BotGeneratedInkRole | null {
+  return value === "blink" || value === "talking" || value === "effect"
+    ? value
+    : null;
 }
 
 function normalizeInkStroke(value: unknown): BotGeneratedInkStrokeV1 | null {
   if (!isRecord(value)) return null;
-  const role = value.role === "effect" ? value.role : null;
+  const role = normalizeGeneratedInkRole(value.role);
   const shape = value.shape === "line" || value.shape === "circle"
     ? value.shape
     : null;
@@ -301,7 +424,7 @@ function normalizeInkPoint(value: unknown): BotGeneratedInkPointV1 | null {
 
 function normalizeInkPath(value: unknown): BotGeneratedInkPathV1 | null {
   if (!isRecord(value) || !Array.isArray(value.points)) return null;
-  const role = value.role === "effect" ? value.role : null;
+  const role = normalizeGeneratedInkRole(value.role);
   if (!role) return null;
   const points = value.points
     .map(normalizeInkPoint)
@@ -329,14 +452,24 @@ function normalizeInkPath(value: unknown): BotGeneratedInkPathV1 | null {
   };
 }
 
-function generatedPortraitPixelIsReserved(x: number, y: number): boolean {
-  return [
-    BOT_GENERATED_PORTRAIT_EYE_WINDOW,
-    BOT_GENERATED_PORTRAIT_MOUTH_WINDOW,
-  ].some((window) =>
+function generatedPortraitPixelIsReserved(
+  x: number,
+  y: number,
+  code: 1 | 2 | 3,
+): boolean {
+  const inside = (window: {
+    minX: number;
+    maxX: number;
+    minY: number;
+    maxY: number;
+  }): boolean =>
     x >= window.minX && x <= window.maxX &&
-    y >= window.minY && y <= window.maxY
-  );
+    y >= window.minY && y <= window.maxY;
+  const insideEyes = inside(BOT_GENERATED_PORTRAIT_EYE_WINDOW);
+  const insideMouth = inside(BOT_GENERATED_PORTRAIT_MOUTH_WINDOW);
+  if (code === 1) return insideMouth;
+  if (code === 2) return insideEyes;
+  return insideEyes || insideMouth;
 }
 
 function setInkPixel(
@@ -351,7 +484,7 @@ function setInkPixel(
       BOT_AVATAR_DETAILS_MAX_PAINTED_PIXELS,
       BOT_GENERATED_AVATAR_INK_MAX_PAINTED_PIXELS,
     ) ||
-    generatedPortraitPixelIsReserved(x, y) ||
+    generatedPortraitPixelIsReserved(x, y, code) ||
     !isBotAvatarDetailsWritablePixel(x, y)
   ) return;
   const pixelIndex = y * BOT_AVATAR_DETAILS_CANVAS_SIZE + x;
@@ -510,6 +643,15 @@ function normalizeGeneratedAvatarDetails(value: unknown): BotAvatarDetailsV1 | n
     }
   }
   if (paintState.painted === 0) return null;
+  const hasSpeechInk = primitives.some((primitive) => primitive.role === "talking");
+  const speechInkAnimation =
+    hasSpeechInk &&
+    typeof record.speechInkAnimation === "string" &&
+    BOT_AVATAR_DETAILS_SPEECH_INK_ANIMATIONS.includes(
+      record.speechInkAnimation as BotAvatarDetailsSpeechInkAnimation,
+    )
+      ? record.speechInkAnimation as BotAvatarDetailsSpeechInkAnimation
+      : null;
   return {
     version: BOT_AVATAR_DETAILS_VERSION,
     screen: {
@@ -518,6 +660,9 @@ function normalizeGeneratedAvatarDetails(value: unknown): BotAvatarDetailsV1 | n
       ...(paintState.painted > 0
         ? { paintColorMapBase64: encodeBotAvatarDetailsPaintColorMap(colorMap) }
         : {}),
+      ...(speechInkAnimation && speechInkAnimation !== "none"
+        ? { speechInkAnimation }
+        : {}),
     },
   };
 }
@@ -525,6 +670,7 @@ function normalizeGeneratedAvatarDetails(value: unknown): BotAvatarDetailsV1 | n
 function normalizeGeneratedVoice(
   value: unknown,
   personaText = "",
+  avatarSfxPrompt = "",
 ): BotAudioVoiceProfileV2 {
   const record = isRecord(value) ? value : {};
   const corporality =
@@ -544,6 +690,7 @@ function normalizeGeneratedVoice(
     voiceEffectExplicit: true,
     corporality,
     avatarSfx: null,
+    avatarSfxPrompt,
   });
   const {
     systemVoiceName: _systemVoiceName,
@@ -596,25 +743,47 @@ export function normalizeBotGeneratedDraftV1(
     eyeCharacter: faceIntent.customEyes ? resolvedFace.eyeCharacter : null,
     eyeCount: faceIntent.customEyes ? resolvedFace.eyeCount : 1,
     mouthCharacter: faceIntent.customMouth ? resolvedFace.mouthCharacter : null,
-    ...(faceIntent.geometryException
-      ? {}
-      : {
-          eyeScale: 1,
-          eyeOffsetX: BOT_GENERATED_PORTRAIT_EYE_OFFSET_X,
-          eyeOffsetY: BOT_GENERATED_PORTRAIT_EYE_OFFSET_Y,
-          eyeRotationDeg: 0,
-          mouthScale: 1,
-          mouthOffsetX: BOT_GENERATED_PORTRAIT_MOUTH_OFFSET_X,
-          mouthOffsetY: BOT_GENERATED_PORTRAIT_MOUTH_OFFSET_Y,
-          mouthRotationDeg: 0,
-          blinkOffsetX: BOT_GENERATED_PORTRAIT_EYE_OFFSET_X,
-          blinkOffsetY: BOT_GENERATED_PORTRAIT_EYE_OFFSET_Y,
-        }),
+    blinkBar: faceIntent.customBlink
+      ? resolvedFace.blinkBar
+      : DEFAULT_BOT_FACE_BLINK_BAR,
+    eyeScale: faceIntent.eyeGeometryException ? resolvedFace.eyeScale : 1,
+    eyeOffsetX: faceIntent.eyeGeometryException
+      ? resolvedFace.eyeOffsetX
+      : BOT_GENERATED_PORTRAIT_EYE_OFFSET_X,
+    eyeOffsetY: faceIntent.eyeGeometryException
+      ? resolvedFace.eyeOffsetY
+      : BOT_GENERATED_PORTRAIT_EYE_OFFSET_Y,
+    eyeRotationDeg: faceIntent.eyeGeometryException
+      ? resolvedFace.eyeRotationDeg
+      : 0,
+    mouthScale: faceIntent.mouthGeometryException
+      ? resolvedFace.mouthScale
+      : DEFAULT_BOT_FACE_MOUTH_SCALE,
+    mouthOffsetX: faceIntent.mouthGeometryException
+      ? resolvedFace.mouthOffsetX
+      : DEFAULT_BOT_FACE_MOUTH_OFFSET_X,
+    mouthOffsetY: faceIntent.mouthGeometryException
+      ? resolvedFace.mouthOffsetY
+      : DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
+    mouthRotationDeg: faceIntent.mouthGeometryException
+      ? resolvedFace.mouthRotationDeg
+      : 0,
+    blinkScale: faceIntent.blinkGeometryException ? resolvedFace.blinkScale : 1,
+    blinkOffsetX: faceIntent.blinkGeometryException
+      ? resolvedFace.blinkOffsetX
+      : BOT_GENERATED_PORTRAIT_EYE_OFFSET_X,
+    blinkOffsetY: faceIntent.blinkGeometryException
+      ? resolvedFace.blinkOffsetY
+      : BOT_GENERATED_PORTRAIT_EYE_OFFSET_Y,
+    blinkRotationDeg: faceIntent.blinkGeometryException
+      ? resolvedFace.blinkRotationDeg
+      : 0,
   };
   const voicePreviewLine = compactText(
     value.voicePreviewLine,
     BOT_GENERATION_VOICE_PREVIEW_MAX_LENGTH,
   ) || `Hello. I'm ${name}.`;
+  const avatarSfxPrompt = compactText(value.avatarSfxPrompt, 400);
   const powerPrompt = compactText(value.powerPrompt, BOT_POWER_INTENT_MAX_LENGTH);
   const generatedPower: BotPowerV1 | null = powerPrompt
     ? {
@@ -653,14 +822,16 @@ export function normalizeBotGeneratedDraftV1(
     namePronunciation: "",
     selfReferral: "",
     profile,
-    color: normalizeGeneratedHexColor(value.color),
+    color: normalizeGeneratedBotHueColor(value.color),
     accentColor: normalizeBotIdentityColor(value.accentColor),
     glyph: normalizeGeneratedGlyph(value.glyph),
     face,
     avatarDetails,
+    avatarSfxPrompt,
     audioVoiceProfile: normalizeGeneratedVoice(
       value.voice,
       personaSeedText,
+      avatarSfxPrompt,
     ),
     voicePreviewLine,
     powers: generatedPower ? [generatedPower] : [],

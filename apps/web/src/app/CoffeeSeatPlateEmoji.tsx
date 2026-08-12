@@ -12,6 +12,7 @@ import {
 import {
   BOT_FACE_BLINK_BAR_VALUES,
   DEFAULT_BOT_FACE_BLINK_BAR,
+  DEFAULT_BOT_FACE_EYE_SPACING,
   DEFAULT_BOT_FACE_PAIRED_EYE_ROTATION_DEG,
   DEFAULT_BOT_FACE_THINKING_FRAMES,
   botFaceThinkingSpinnerDisabled,
@@ -23,6 +24,7 @@ import {
   normalizeBotFaceBlinkScale,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeCount,
+  normalizeBotFaceEyeSpacing,
   normalizeBotFaceEyeMovement,
   botFaceEyeMovementIsActive,
   normalizeBotFaceEyeOffsetX,
@@ -244,6 +246,7 @@ export type CoffeeSeatPlateEmojiProps = {
   faceEyeOffsetY?: number | null;
   faceEyeRotationDeg?: number | null;
   faceEyeCount?: BotFaceEyeCount | number | null;
+  faceEyeSpacing?: number | null;
   faceMouthScale?: number | null;
   faceMouthOffsetX?: number | null;
   faceMouthOffsetY?: number | null;
@@ -329,6 +332,7 @@ export function CoffeeSeatPlateEmoji({
   faceEyeOffsetY,
   faceEyeRotationDeg,
   faceEyeCount,
+  faceEyeSpacing,
   faceMouthScale,
   faceMouthOffsetX,
   faceMouthOffsetY,
@@ -365,6 +369,8 @@ export function CoffeeSeatPlateEmoji({
   const normalizedFaceEyeCount = normalizedFaceEyeCharacter
     ? (normalizeBotFaceEyeCount(faceEyeCount) ?? 1)
     : 1;
+  const normalizedFaceEyeSpacing =
+    normalizeBotFaceEyeSpacing(faceEyeSpacing) ?? DEFAULT_BOT_FACE_EYE_SPACING;
   const normalizedFaceMouthCharacter =
     normalizeBotFaceMouthCharacter(faceMouthCharacter);
   const transientSipPucker =
@@ -376,8 +382,9 @@ export function CoffeeSeatPlateEmoji({
   const normalizedFaceMouthAnimation =
     normalizeBotFaceGlyphAnimation(faceMouthAnimation) ?? "none";
   // Default mouths clear the authored glyph while talking so the plate
-  // viseme (or mini binary `:0`) can drive the mouth. Special/custom mouths
-  // keep their authored glyph and never join speech morphs.
+  // viseme (or mini binary `:0`) can drive the mouth.
+  // "static" keeps the authored custom glyph visible and unanimated while
+  // talking for a stable presentation.
   const hasCustomMouth = normalizedFaceMouthCharacter !== null;
   const renderedFaceMouthCharacter =
     hasCustomMouth && isTalking && normalizedFaceMouthAnimation === "none"
@@ -825,6 +832,11 @@ export function CoffeeSeatPlateEmoji({
       data-face-eye-count={
         normalizedFaceEyeCharacter ? normalizedFaceEyeCount : undefined
       }
+      data-face-eye-spacing={
+        normalizedFaceEyeCharacter && normalizedFaceEyeCount === 2
+          ? normalizedFaceEyeSpacing
+          : undefined
+      }
       data-face-mouth-character={renderedFaceMouthCharacter ?? undefined}
       data-face-transient-pucker={transientSipPucker ? "true" : undefined}
       data-face-mouth-animation={
@@ -837,6 +849,7 @@ export function CoffeeSeatPlateEmoji({
       style={
         {
           ["--bot-face-eye-scale" as string]: normalizedFaceEyeScale,
+          ["--bot-face-eye-spacing" as string]: `${normalizedFaceEyeSpacing}em`,
           ["--bot-face-gaze-x" as string]: `${displayGaze.xPx}px`,
           ["--bot-face-gaze-y" as string]: `${displayGaze.yPx}px`,
           ["--bot-face-gaze-transition-ms" as string]:
@@ -929,13 +942,18 @@ export function CoffeeSeatPlateEmoji({
               normalizedFaceEyeCharacter !== null &&
               normalizedFaceEyeCount === 2 &&
               displayBlinkPhase !== "closed";
+            const renderCustomBlinkPair =
+              part === "eyes" &&
+              normalizedFaceEyeCharacter !== null &&
+              normalizedFaceEyeCount === 2 &&
+              displayBlinkPhase === "closed";
             const partFaceFont = part === "eyes" ? faceEyesFont : faceMouthFont;
             const opticalOffset = coffeeSeatGlyphOpticalOffset({
               part,
               glyph: renderedGlyph,
               voicePreset,
               rotateDeg,
-              pairedEye: renderCustomEyePair,
+              pairedEye: renderCustomEyePair || renderCustomBlinkPair,
               customGlyph:
                 part === "mouth" && renderedFaceMouthCharacter !== null,
             });
@@ -960,7 +978,7 @@ export function CoffeeSeatPlateEmoji({
                     : undefined
                 }
               >
-                {renderCustomEyePair ? (
+                {renderCustomEyePair || renderCustomBlinkPair ? (
                   <span data-custom-eye-pair="true">
                     <CrtPixelTextGlyph
                       data-custom-eye-pair-side="left"

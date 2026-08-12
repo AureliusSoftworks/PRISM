@@ -104,7 +104,7 @@ import {
   normalizeDebateSetupPresetId,
   normalizeAutoRouteDecisionV1,
   normalizeAutoFallbackModelRef,
-  normalizeModelReasoningEffortPreference,
+  normalizeProviderReasoningEffort,
   resolveDebateForumRoundPlan,
   normalizeBotAudioVoiceProfileV1,
   parseStoredBotPrompt,
@@ -121,6 +121,9 @@ import {
   type BotAudioVoiceProfileV1,
   type BotPowerTargetV1,
   type DebateAdvocacyConsent,
+  type DebateArchiveReturnBufferBoundaryV1,
+  type DebateArchiveReturnBufferPhaseV1,
+  type DebateArchiveReturnBufferStateV1,
   type DebateAdvanceRequest,
   type DebateAudienceReactionV1,
   type DebateBallotV1,
@@ -195,13 +198,13 @@ import {
   type DebateTurnaboutStatementV1,
   type DebateTurnTimingV1,
   type DebateVoicePerformanceCue,
-  type ModelReasoningEffortPreference,
   type DebateVerdictRequest,
   type DebateDebriefChatMessageV1,
   type DebateDebriefEligibleBotV1,
   type PrismRefractDebateTextTarget,
   type PreparedTurnCursorV1,
   type ReasoningEffort,
+  type ProviderReasoningEffort,
   type ResponseMode,
   reasoningGenerationBudgetMs,
   REASONING_GENERATION_AUTO_TOTAL_BUDGET_MS,
@@ -240,6 +243,7 @@ import {
 } from "./prompt-wildcards.ts";
 import { getImageAssetSetForImage } from "./image-asset-library.ts";
 import { HttpError } from "./utils.http.ts";
+import { deleteMemoriesAcquiredDuringAppletSessions } from "./memory.ts";
 import type {
   DebateEvidenceExcerptGenerationRequest,
   DebateEvidenceExcerptModelSelection,
@@ -293,7 +297,7 @@ export interface DebateGenerationLane {
   provider: LlmProvider;
   providerName: ProviderName;
   model: string;
-  reasoningEffort?: ReasoningEffort;
+  reasoningEffort?: ProviderReasoningEffort;
   turbo?: boolean;
   available?: boolean;
   /** Experimental deep simulated-effort ladder for this lane. */
@@ -981,15 +985,18 @@ function selectedLane(runtime: DebateAiRuntime): DebateGenerationLane {
 
 function debateRuntimeReasoningEffort(
   runtime: DebateAiRuntime,
-): ModelReasoningEffortPreference | null {
-  return (
-    normalizeModelReasoningEffortPreference(
-      runtime.autoRoute?.reasoningEffort,
-    ) ??
-    normalizeModelReasoningEffortPreference(
-      selectedLane(runtime).reasoningEffort,
-    )
+): Exclude<ProviderReasoningEffort, "auto"> | null {
+  const effort = normalizeProviderReasoningEffort(
+    runtime.autoRoute?.reasoningEffort ?? selectedLane(runtime).reasoningEffort,
   );
+  return effort === "auto" ? null : effort;
+}
+
+function normalizePersistedDebateReasoningEffort(
+  value: unknown,
+): Exclude<ProviderReasoningEffort, "auto"> | null {
+  const effort = normalizeProviderReasoningEffort(value);
+  return effort === "auto" ? null : effort;
 }
 
 function debateRuntimeTurbo(runtime: DebateAiRuntime): boolean {
@@ -1020,41 +1027,6 @@ function debateGenerationChainForRuntime(
       provider: candidate.providerName,
       model: candidate.model,
     }));
-}
-
-function debateSessionWithDeferredStartRuntime(
-  session: DebateSessionV1,
-  runtime: DebateAiRuntime,
-): DebateSessionV1 {
-  if (!debateSessionAwaitingDeferredStart(session)) return session;
-  const lane = selectedLane(runtime);
-  const retargetBot = <T extends DebateBotSnapshotV1>(bot: T): T => ({
-    ...bot,
-    provider: lane.providerName,
-    model: lane.model,
-  });
-  return {
-    ...session,
-    provider: lane.providerName,
-    model: lane.model,
-    responseMode:
-      runtime.responseMode ??
-      (lane.providerName === "local" ? "local" : "online"),
-    modelSelectionKind: runtime.modelSelectionKind ?? "fixed",
-    autoCandidateAllowlist: runtime.autoCandidateAllowlist,
-    routingPolicyVersion: runtime.autoRoute?.v,
-    latestAutoRoute: runtime.autoRoute,
-    lastReasoningEffort: debateRuntimeReasoningEffort(runtime),
-    lastTurbo: debateRuntimeTurbo(runtime),
-    generationChain: debateGenerationChainForRuntime(runtime),
-    moderator: retargetBot(session.moderator),
-    forAdvocate: retargetBot(session.forAdvocate),
-    againstAdvocate: retargetBot(session.againstAdvocate),
-    jury: {
-      ...session.jury,
-      jurors: session.jury.jurors.map((juror) => retargetBot(juror)),
-    },
-  };
 }
 
 function debateSessionListCastColors(parsed: {
@@ -1116,11 +1088,17 @@ async function generateJsonOnLane(
     topP?: number;
     topK?: number;
     repetitionPenalty?: number;
-    reasoningEffort?: ReasoningEffort;
+    reasoningEffort?: ProviderReasoningEffort;
     validate?: (value: Record<string, unknown>) => boolean;
   } = {},
   signal?: AbortSignal,
 ): Promise<Record<string, unknown>> {
+  const requestedReasoningEffort =
+    options.reasoningEffort ?? lane.reasoningEffort;
+  const simulatedReasoningEffort: ReasoningEffort | undefined =
+    requestedReasoningEffort === "max"
+      ? undefined
+      : requestedReasoningEffort;
   if (
     shouldPrepareMessagesWithSimulatedEffort({
       provider: lane.providerName,
@@ -1140,7 +1118,7 @@ async function generateJsonOnLane(
         turbo: lane.turbo,
         signal,
       },
-      effort: options.reasoningEffort ?? lane.reasoningEffort,
+      effort: simulatedReasoningEffort,
       surface: "debate",
       ladderProfile: lane.deepSimulatedEffort === true ? "deep" : "standard",
       outputContract:
@@ -1206,7 +1184,7 @@ async function generateJson(
     topP?: number;
     topK?: number;
     repetitionPenalty?: number;
-    reasoningEffort?: ReasoningEffort;
+    reasoningEffort?: ProviderReasoningEffort;
     validate?: (value: Record<string, unknown>) => boolean;
   } = {},
 ): Promise<DebateJsonGeneration> {
@@ -2995,9 +2973,9 @@ function parseSessionRow(
           )!,
         }
       : {}),
-    ...(normalizeModelReasoningEffortPreference(parsed.lastReasoningEffort)
+    ...(normalizePersistedDebateReasoningEffort(parsed.lastReasoningEffort)
       ? {
-          lastReasoningEffort: normalizeModelReasoningEffortPreference(
+          lastReasoningEffort: normalizePersistedDebateReasoningEffort(
             parsed.lastReasoningEffort,
           ),
         }
@@ -3066,6 +3044,13 @@ function parseSessionRow(
       typeof parsed.pausedPresentationEventId === "string"
         ? parsed.pausedPresentationEventId
         : null,
+    preparedResumeEventId:
+      typeof parsed.preparedResumeEventId === "string"
+        ? parsed.preparedResumeEventId
+        : null,
+    archiveReturnBuffer: normalizeDebateArchiveReturnBufferState(
+      parsed.archiveReturnBuffer,
+    ),
     pausedAt: typeof parsed.pausedAt === "string" ? parsed.pausedAt : null,
     pausedDurationMs:
       typeof parsed.pausedDurationMs === "number" &&
@@ -3433,7 +3418,7 @@ export function listDebateSessions(
     let provider: DebateSessionListItemV1["provider"];
     let model: string | undefined;
     let modelSelectionKind: DebateSessionListItemV1["modelSelectionKind"];
-    let reasoningEffort: ModelReasoningEffortPreference | null = null;
+    let reasoningEffort: Exclude<ProviderReasoningEffort, "auto"> | null = null;
     let turbo = false;
     let castColors: string[] = [];
     let advocateVisuals: DebateSessionAdvocateVisualV1[] = [];
@@ -3535,12 +3520,9 @@ export function listDebateSessions(
       }
       const autoRoute = normalizeAutoRouteDecisionV1(parsed.latestAutoRoute);
       reasoningEffort =
-        normalizeModelReasoningEffortPreference(autoRoute?.reasoningEffort) ??
-        normalizeModelReasoningEffortPreference(parsed.lastReasoningEffort);
-      if (
-        autoRoute?.model &&
-        (modelSelectionKind === "auto" || !model)
-      ) {
+        normalizePersistedDebateReasoningEffort(parsed.lastReasoningEffort) ??
+        normalizePersistedDebateReasoningEffort(autoRoute?.reasoningEffort);
+      if (autoRoute?.model && !model) {
         model = autoRoute.model;
       }
       if (
@@ -3548,7 +3530,7 @@ export function listDebateSessions(
         (autoRoute.provider === "local" ||
           autoRoute.provider === "openai" ||
           autoRoute.provider === "anthropic") &&
-        (modelSelectionKind === "auto" || !provider)
+        !provider
       ) {
         provider = autoRoute.provider;
       }
@@ -3930,6 +3912,8 @@ export function createDebateSession(
     participantFloorBreak: null,
     participantFloorBreakPreparation: null,
     voterPredispositions: [],
+    preparedResumeEventId: null,
+    archiveReturnBuffer: null,
     events: [],
     error: null,
     createdAt: now,
@@ -4094,6 +4078,13 @@ function mutationReplay(
       typeof parsed.pausedPresentationEventId === "string"
         ? parsed.pausedPresentationEventId
         : null,
+    preparedResumeEventId:
+      typeof parsed.preparedResumeEventId === "string"
+        ? parsed.preparedResumeEventId
+        : null,
+    archiveReturnBuffer: normalizeDebateArchiveReturnBufferState(
+      parsed.archiveReturnBuffer,
+    ),
     pausedAt: typeof parsed.pausedAt === "string" ? parsed.pausedAt : null,
     pausedDurationMs:
       typeof parsed.pausedDurationMs === "number" &&
@@ -11331,6 +11322,106 @@ export function debateSessionCanPrepareAdvance(
   );
 }
 
+/**
+ * Archive Open gets a small, canonical runway without ever exposing a live
+ * mutation window. The cap is deliberately server-owned so a client cannot
+ * turn return buffering into an unbounded bake for an interactive Debate.
+ */
+export const DEBATE_ARCHIVE_RETURN_LOOKAHEAD_ADVANCE_CAP = 3;
+const DEBATE_ARCHIVE_RETURN_ADVANCES_PER_REQUEST = 1;
+
+export type DebateArchiveReturnBufferBoundary =
+  | DebateArchiveReturnBufferBoundaryV1
+  | "cap"
+  | "player"
+  | "procedure"
+  | "completion"
+  | "generation_failed"
+  | "not_applicable";
+
+export interface DebateArchiveReturnBufferResult {
+  session: DebateSessionV1;
+  phase: DebateArchiveReturnBufferPhaseV1;
+  bufferedAdvanceCount: number;
+  advanceCap: number;
+  boundary: DebateArchiveReturnBufferBoundary;
+  bufferingFailed: boolean;
+  originalPresentationEventId: string | null;
+}
+
+function normalizeDebateArchiveReturnBufferState(
+  value: unknown,
+): DebateArchiveReturnBufferStateV1 | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Partial<DebateArchiveReturnBufferStateV1>;
+  const boundary: DebateArchiveReturnBufferBoundaryV1 =
+    candidate.boundary === "cap" ||
+    candidate.boundary === "player" ||
+    candidate.boundary === "procedure" ||
+    candidate.boundary === "completion" ||
+    candidate.boundary === "not_applicable"
+      ? candidate.boundary
+      : "buffering_ahead";
+  return {
+    version: 1,
+    originalPresentationEventId:
+      typeof candidate.originalPresentationEventId === "string"
+        ? candidate.originalPresentationEventId
+        : null,
+    bufferedAdvanceCount:
+      typeof candidate.bufferedAdvanceCount === "number" &&
+      Number.isFinite(candidate.bufferedAdvanceCount)
+        ? Math.max(
+            0,
+            Math.min(
+              DEBATE_ARCHIVE_RETURN_LOOKAHEAD_ADVANCE_CAP,
+              Math.floor(candidate.bufferedAdvanceCount),
+            ),
+          )
+        : 0,
+    advanceCap: DEBATE_ARCHIVE_RETURN_LOOKAHEAD_ADVANCE_CAP,
+    boundary,
+  };
+}
+
+function debateArchiveReturnBufferPhase(
+  session: DebateSessionV1,
+  boundary: DebateArchiveReturnBufferBoundary,
+): DebateArchiveReturnBufferPhaseV1 {
+  const state = session.archiveReturnBuffer;
+  const minimumReady = Boolean(
+    session.preparedResumeEventId ||
+      (state && state.bufferedAdvanceCount > 0),
+  );
+  if (!minimumReady) return "preparing";
+  return boundary === "cap" ||
+    boundary === "player" ||
+    boundary === "procedure" ||
+    boundary === "completion" ||
+    boundary === "not_applicable"
+    ? "fully_buffered"
+    : "ready_buffering";
+}
+
+function debateArchiveReturnBufferBoundary(
+  session: DebateSessionV1,
+): Exclude<DebateArchiveReturnBufferBoundary, "cap" | "generation_failed"> | null {
+  if (session.stepKey === "completed" || session.status === "completed") {
+    return "completion";
+  }
+  if (session.status === "waiting_for_player") return "player";
+  if (
+    session.judgeGavel?.status === "awaiting_message" ||
+    session.objectionRuling?.status === "awaiting_ruling" ||
+    session.participantObjection?.status === "awaiting_reason" ||
+    Boolean(session.participantFloorBreak) ||
+    Boolean(session.participantFloorBreakPreparation)
+  ) {
+    return "procedure";
+  }
+  return session.status === "live" ? null : "not_applicable";
+}
+
 function guidedParticipantChoiceIsUnsafe(content: string): boolean {
   const normalized = content.toLocaleLowerCase();
   return (
@@ -11560,11 +11651,6 @@ export async function prepareDebateAdvance(
     ...session,
     status: "live" as const,
     error: null,
-    ...(runtime.autoRoute ? { latestAutoRoute: runtime.autoRoute } : {}),
-    ...(debateRuntimeReasoningEffort(runtime)
-      ? { lastReasoningEffort: debateRuntimeReasoningEffort(runtime) }
-      : {}),
-    lastTurbo: debateRuntimeTurbo(runtime),
   };
   const stepSpan = startDebatePerfSpan("advance.step");
   const transitioned = isJudgeAftermathStep(session.stepKey)
@@ -11633,6 +11719,247 @@ export async function prepareDebateAdvance(
   };
 }
 
+/**
+ * Persist one incremental slice of a bounded automatic runway for an archived
+ * Judge/Participant Debate. The first slice establishes minimum playability;
+ * later revision-checked calls deepen it while the title card remains.
+ *
+ * All provider work happens against an in-memory live projection. Only the
+ * completed safe prefix is committed, in one revision, and the stored session
+ * remains paused on the exact presentation bookmark it had when Archive Open
+ * began. A cancelled client therefore cannot strand the floor live midway
+ * through preparation.
+ */
+export async function bufferDebateArchiveReturn(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  request: { expectedRevision: number; idempotencyKey: string },
+  runtime: DebateAiRuntime,
+): Promise<DebateArchiveReturnBufferResult> {
+  const checked = assertMutation(db, userId, sessionId, request);
+  if (checked.replay) {
+    const boundary =
+      checked.replay.archiveReturnBuffer?.boundary ?? "not_applicable";
+    return {
+      session: checked.replay,
+      phase: debateArchiveReturnBufferPhase(checked.replay, boundary),
+      bufferedAdvanceCount:
+        checked.replay.archiveReturnBuffer?.bufferedAdvanceCount ?? 0,
+      advanceCap: DEBATE_ARCHIVE_RETURN_LOOKAHEAD_ADVANCE_CAP,
+      boundary,
+      bufferingFailed: false,
+      originalPresentationEventId:
+        checked.replay.pausedPresentationEventId ?? null,
+    };
+  }
+  const original = checked.session;
+  const originalPresentationEventId =
+    original.pausedPresentationEventId ?? null;
+  if (
+    original.playerRole === "spectator" ||
+    original.status === "completed" ||
+    original.status === "cancelled" ||
+    original.status === "failed"
+  ) {
+    return {
+      session: original,
+      phase: "preparing",
+      bufferedAdvanceCount:
+        original.archiveReturnBuffer?.bufferedAdvanceCount ?? 0,
+      advanceCap: DEBATE_ARCHIVE_RETURN_LOOKAHEAD_ADVANCE_CAP,
+      boundary: "not_applicable",
+      bufferingFailed: false,
+      originalPresentationEventId,
+    };
+  }
+  if (original.status !== "paused") {
+    throw new HttpError(
+      409,
+      "Archive return buffering requires a paused Debate bookmark.",
+    );
+  }
+  if (original.error) {
+    return {
+      session: original,
+      phase: debateArchiveReturnBufferPhase(original, "generation_failed"),
+      bufferedAdvanceCount:
+        original.archiveReturnBuffer?.bufferedAdvanceCount ?? 0,
+      advanceCap: DEBATE_ARCHIVE_RETURN_LOOKAHEAD_ADVANCE_CAP,
+      boundary: "generation_failed",
+      bufferingFailed: true,
+      originalPresentationEventId,
+    };
+  }
+
+  const existingBufferState =
+    original.archiveReturnBuffer?.originalPresentationEventId ===
+    originalPresentationEventId
+      ? original.archiveReturnBuffer
+      : null;
+  if (
+    existingBufferState &&
+    existingBufferState.boundary !== "buffering_ahead"
+  ) {
+    return {
+      session: original,
+      phase: "fully_buffered",
+      bufferedAdvanceCount: existingBufferState.bufferedAdvanceCount,
+      advanceCap: DEBATE_ARCHIVE_RETURN_LOOKAHEAD_ADVANCE_CAP,
+      boundary: existingBufferState.boundary,
+      bufferingFailed: false,
+      originalPresentationEventId,
+    };
+  }
+
+  const existingPreparedResumeEvent = original.preparedResumeEventId
+    ? (original.events.find(
+        (event) => event.id === original.preparedResumeEventId,
+      ) ?? null)
+    : null;
+  const preparesResumeCeremony =
+    !existingPreparedResumeEvent &&
+    !debateSessionAwaitingDeferredStart(original) &&
+    !debateSessionAwaitingFirstPresentation(original);
+  let preparedResumeEvent: DebateEventV1 | null = null;
+  if (preparesResumeCeremony) {
+    const resumeSpeech = await generateDebateLifecycleSpeech(
+      original,
+      "resume",
+      runtime,
+    );
+    preparedResumeEvent = debateResumeGavelEvent(original, resumeSpeech);
+  }
+
+  let working: DebateSessionV1 = {
+    ...original,
+    status: statusForStep(original.stepKey),
+    error: null,
+    events: preparedResumeEvent
+      ? [...original.events, preparedResumeEvent]
+      : original.events,
+  };
+  const bufferedEvents: DebateEventV1[] = preparedResumeEvent
+    ? [preparedResumeEvent]
+    : [];
+  const caseBoardEvents: DebateEventV1[] = [];
+  const previouslyBufferedAdvanceCount =
+    existingBufferState?.bufferedAdvanceCount ?? 0;
+  let newlyBufferedAdvanceCount = 0;
+  let boundary: DebateArchiveReturnBufferBoundary = "buffering_ahead";
+  let bufferingFailed = false;
+
+  while (
+    previouslyBufferedAdvanceCount + newlyBufferedAdvanceCount <
+      DEBATE_ARCHIVE_RETURN_LOOKAHEAD_ADVANCE_CAP &&
+    newlyBufferedAdvanceCount < DEBATE_ARCHIVE_RETURN_ADVANCES_PER_REQUEST
+  ) {
+    const currentBoundary = debateArchiveReturnBufferBoundary(working);
+    if (currentBoundary) {
+      boundary = currentBoundary;
+      break;
+    }
+    let prepared: DebateAdvancePreparation;
+    try {
+      prepared = await prepareDebateAdvance(working, runtime);
+    } catch {
+      boundary = "generation_failed";
+      bufferingFailed = true;
+      break;
+    }
+    // Automatic preparation must never author or persist a future human line.
+    // The status/step guard above should make this unreachable; keep the
+    // commit boundary defensive if a future format adds a new player step.
+    if (prepared.events.some((event) => event.speakerKind === "player")) {
+      boundary = "player";
+      break;
+    }
+    bufferedEvents.push(...prepared.events);
+    caseBoardEvents.push(...prepared.caseBoardEvents);
+    working = {
+      ...prepared.nextSession,
+      events: [...working.events, ...prepared.events],
+    };
+    newlyBufferedAdvanceCount += 1;
+    const nextBoundary = debateArchiveReturnBufferBoundary(working);
+    if (nextBoundary) {
+      boundary = nextBoundary;
+      break;
+    }
+  }
+
+  const bufferedAdvanceCount =
+    previouslyBufferedAdvanceCount + newlyBufferedAdvanceCount;
+  if (
+    boundary === "buffering_ahead" &&
+    bufferedAdvanceCount >= DEBATE_ARCHIVE_RETURN_LOOKAHEAD_ADVANCE_CAP
+  ) {
+    boundary = "cap";
+  }
+
+  const durableBoundary: DebateArchiveReturnBufferBoundaryV1 =
+    boundary === "generation_failed" ? "buffering_ahead" : boundary;
+  const archiveReturnBuffer: DebateArchiveReturnBufferStateV1 = {
+    version: 1,
+    originalPresentationEventId,
+    bufferedAdvanceCount,
+    advanceCap: DEBATE_ARCHIVE_RETURN_LOOKAHEAD_ADVANCE_CAP,
+    boundary: durableBoundary,
+  };
+
+  if (
+    newlyBufferedAdvanceCount === 0 &&
+    !preparedResumeEvent
+  ) {
+    return {
+      session: original,
+      phase: debateArchiveReturnBufferPhase(original, boundary),
+      bufferedAdvanceCount,
+      advanceCap: DEBATE_ARCHIVE_RETURN_LOOKAHEAD_ADVANCE_CAP,
+      boundary,
+      bufferingFailed,
+      originalPresentationEventId,
+    };
+  }
+
+  const committed = commitMutation(
+    db,
+    userId,
+    original,
+    {
+      ...working,
+      status: "paused",
+      pausedPresentationEventId: originalPresentationEventId,
+      preparedResumeEventId:
+        preparedResumeEvent?.id ?? existingPreparedResumeEvent?.id ?? null,
+      archiveReturnBuffer,
+      pausedAt: original.pausedAt ?? null,
+      pausedDurationMs: Math.max(0, original.pausedDurationMs ?? 0),
+      error: null,
+    },
+    checked.idempotencyKey,
+    bufferedEvents,
+  );
+  if (original.format === "forum") {
+    queueCaseBoardRefinement(
+      db,
+      userId,
+      committed,
+      caseBoardEvents,
+      runtime.auxiliary,
+    );
+  }
+  return {
+    session: committed,
+    phase: debateArchiveReturnBufferPhase(committed, boundary),
+    bufferedAdvanceCount,
+    advanceCap: DEBATE_ARCHIVE_RETURN_LOOKAHEAD_ADVANCE_CAP,
+    boundary,
+    bufferingFailed,
+    originalPresentationEventId,
+  };
+}
+
 export function commitDebateAdvancePreparation(
   db: DatabaseSync,
   userId: string,
@@ -11675,14 +12002,7 @@ export async function advanceDebateSession(
 ): Promise<DebateSessionV1> {
   const checked = assertMutation(db, userId, sessionId, request);
   if (checked.replay) return checked.replay;
-  let session = {
-    ...checked.session,
-    ...(runtime.autoRoute ? { latestAutoRoute: runtime.autoRoute } : {}),
-    ...(debateRuntimeReasoningEffort(runtime)
-      ? { lastReasoningEffort: debateRuntimeReasoningEffort(runtime) }
-      : {}),
-    lastTurbo: debateRuntimeTurbo(runtime),
-  };
+  let session = checked.session;
   if (session.status === "completed" || session.status === "cancelled") {
     throw new HttpError(409, "This Debate is already finished.");
   }
@@ -16215,10 +16535,6 @@ type DebateLifecycleRequest = {
   juryVisible?: boolean;
   /** Exact saved public line to replay from its beginning after resume. */
   presentationEventId?: string | null;
-  /** Explicit navbar routing applied only when a saved setup starts. */
-  startPreferredProvider?: ProviderName;
-  startModelOverride?: string;
-  startResponseMode?: ResponseMode;
 };
 
 const DEBATE_PAUSE_FALLBACKS = {
@@ -16933,6 +17249,8 @@ export function pauseDebateSession(
       ...session,
       status: "paused",
       pausedPresentationEventId: replayEventId,
+      preparedResumeEventId: null,
+      archiveReturnBuffer: null,
       pausedAt: new Date().toISOString(),
       pausedDurationMs: Math.max(0, session.pausedDurationMs ?? 0),
       participation,
@@ -17413,7 +17731,6 @@ export function resumeDebateSession(
   sessionId: string,
   request: DebateLifecycleRequest,
   speech?: DebateLifecycleSpeech,
-  startRuntime?: DebateAiRuntime,
 ): DebateSessionV1 {
   const checked = assertMutation(db, userId, sessionId, request);
   if (checked.replay) return checked.replay;
@@ -17422,24 +17739,31 @@ export function resumeDebateSession(
     throw new HttpError(409, "This Debate is not paused.");
   }
   const resumedStatus =
-    session.judgeGavel?.status === "awaiting_message" ||
-    session.objectionRuling?.status === "awaiting_ruling" ||
-    session.participantObjection?.status === "awaiting_reason"
-      ? "waiting_for_player"
-      : statusForStep(session.stepKey);
-  const lifecycleEvents = debateLifecycleIsQuiet(session, request)
+    session.stepKey === "completed" && session.completedAt
+      ? "completed"
+      : session.judgeGavel?.status === "awaiting_message" ||
+          session.objectionRuling?.status === "awaiting_ruling" ||
+          session.participantObjection?.status === "awaiting_reason"
+        ? "waiting_for_player"
+        : statusForStep(session.stepKey);
+  const preparedResumeEvent = session.preparedResumeEventId
+    ? (session.events.find(
+        (event) => event.id === session.preparedResumeEventId,
+      ) ?? null)
+    : null;
+  const lifecycleEvents =
+    preparedResumeEvent || debateLifecycleIsQuiet(session, request)
     ? []
     : [debateResumeGavelEvent(session, speech)];
-  const startedSession = startRuntime
-    ? debateSessionWithDeferredStartRuntime(session, startRuntime)
-    : session;
   return commitMutation(
     db,
     userId,
     session,
     {
-      ...startedSession,
+      ...session,
       status: resumedStatus,
+      preparedResumeEventId: null,
+      archiveReturnBuffer: null,
       error: null,
       ...resumedDebatePauseTiming(session),
     },
@@ -17454,7 +17778,6 @@ export async function resumeDebateSessionWithPersona(
   sessionId: string,
   request: DebateLifecycleRequest,
   runtime: DebateAiRuntime,
-  startRuntime?: DebateAiRuntime,
 ): Promise<DebateSessionV1> {
   const session = getDebateSession(db, userId, sessionId);
   if (session.status !== "paused") {
@@ -17467,7 +17790,6 @@ export async function resumeDebateSessionWithPersona(
       sessionId,
       request,
       undefined,
-      startRuntime,
     );
   }
   const quietKey = `${request.idempotencyKey}:quiet`;
@@ -17487,7 +17809,6 @@ export async function resumeDebateSessionWithPersona(
         idempotencyKey: quietKey,
       },
       undefined,
-      startRuntime,
     );
   return announceDebateResumeCeremony(
     db,
@@ -17546,6 +17867,7 @@ export function deleteDebateSession(
 ): void {
   const checked = assertMutation(db, userId, sessionId, request);
   if (checked.replay) return;
+  deleteMemoriesAcquiredDuringAppletSessions(db, userId, [sessionId]);
   commitMutation(
     db,
     userId,

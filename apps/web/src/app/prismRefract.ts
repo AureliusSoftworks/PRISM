@@ -62,6 +62,7 @@ export type PrismRefractModifierClickDecision =
   | "begin"
   | "accept"
   | "accept-and-begin"
+  | "queue"
   | "wait";
 
 export function prismRefractModifierClickDecision(input: {
@@ -73,16 +74,34 @@ export function prismRefractModifierClickDecision(input: {
   if (!input.activeTargetId || input.activeTargetKind === "magic") {
     return "begin";
   }
-  // Same-target modifier clicks never reroll — Spacebar is the only reroll path.
+  // Same-target modifier clicks never reroll or enqueue duplicates — Spacebar
+  // remains the explicit reroll path once the current result has settled.
   if (input.activeTargetId === input.clickedTargetId) {
-    return input.canAccept ? "accept" : "wait";
+    return "wait";
   }
-  return input.canAccept ? "accept-and-begin" : "wait";
+  return input.canAccept ? "accept-and-begin" : "queue";
 }
 
 export interface RegisteredPrismRefractTarget {
   target: PrismRefractTarget;
   element: HTMLElement;
+}
+
+export function prismRefractResultOwnershipIsCurrent(input: {
+  aborted: boolean;
+  requestRunId: number;
+  currentRunId: number;
+  expectedTargetId: string;
+  currentTargetId: string | null;
+  expectedElement: HTMLElement;
+  currentElement: HTMLElement | null;
+}): boolean {
+  return (
+    !input.aborted &&
+    input.requestRunId === input.currentRunId &&
+    input.expectedTargetId === input.currentTargetId &&
+    input.expectedElement === input.currentElement
+  );
 }
 
 export interface PrismRefractRequest {

@@ -107,6 +107,11 @@ describe("first-run onboarding", () => {
       pageSource,
       /assigns stable Premium defaults from the collection you choose in Voice Settings/u,
     );
+    assert.match(
+      pageSource,
+      /one Accent Map pin shapes both Local and Premium voice/u,
+    );
+    assert.match(pageSource, /keeping the spoken language English/u);
   });
 
   it("clamps restored progress and reaches a full final bar", () => {

@@ -14,12 +14,16 @@ const universalInputSource = readFileSync(
   new URL("./prismUniversalInputRefract.ts", import.meta.url),
   "utf8",
 );
+const botPowerRefractSource = readFileSync(
+  new URL("./botPowerRefract.ts", import.meta.url),
+  "utf8",
+);
 const companionStyles = readFileSync(
   new URL("./prismCompanion.module.css", import.meta.url),
   "utf8",
 );
-const signalStyles = readFileSync(
-  new URL("./botcast.module.css", import.meta.url),
+const globalStyles = readFileSync(
+  new URL("./globals.css", import.meta.url),
   "utf8",
 );
 const signalSource = readFileSync(
@@ -77,6 +81,50 @@ describe("Prism Refract integration", () => {
       pageSource,
       /if \(view === "botcast"\)[\s\S]*<BotcastExperience[\s\S]*\{renderGlobalPrismCompanion\(\)\}/u,
     );
+  });
+
+  it("keeps Avatar Studio Power prose reachable by Wield above panel chrome", () => {
+    assert.match(
+      pageSource,
+      /<span>What makes this bot special\?<\/span>[\s\S]*<PrismRefractTarget[\s\S]*<textarea/u,
+    );
+    assert.match(pageSource, /buildBotPowerRefractRequestTarget\(\{/u);
+    assert.match(pageSource, /botId=\{editingBotId\}/u);
+    assert.match(pageSource, /profileContext=\{/u);
+    assert.match(
+      botPowerRefractSource,
+      /Focused Avatar Studio bot draft identity:[\s\S]*Focused bot draft owner:[\s\S]*Current Power context:[\s\S]*Current draft personality and profile:/u,
+    );
+    assert.match(
+      companionSource,
+      /prismRefractResultOwnershipIsCurrent\([\s\S]*expectedTargetId: target\.id[\s\S]*currentTargetId: current\?\.target\.id/u,
+    );
+    assert.match(
+      companionSource,
+      /element\.id === "bot-generator-prompt"/u,
+    );
+    assert.match(
+      companionSource,
+      /buildBotGeneratorRefractRequestTarget\(\{/u,
+    );
+    assert.match(
+      companionSource,
+      /buildBotGeneratorBriefRefractContext\(\{/u,
+    );
+    assert.match(companionSource, /brief: currentValue/u);
+    assert.match(
+      pageSource,
+      /submerged=\{companionSubmergedByMainPanel\}/u,
+    );
+    assert.match(
+      companionStyles,
+      /--prism-companion-wielding-z-index:\s*2147483200/u,
+    );
+    assert.match(
+      companionStyles,
+      /\.anchor\[data-refracting\][\s\S]*z-index:\s*var\(--prism-companion-wielding-z-index\)/u,
+    );
+    assert.match(universalInputSource, /"textarea"/u);
   });
 
   it("keeps Prism available for Debate setup and contextually refracts registered drafts", () => {
@@ -197,7 +245,11 @@ describe("Prism Refract integration", () => {
   it("rejects stale work and restores cursor/orb state on every release path", () => {
     assert.match(
       companionSource,
-      /runId !== refractRunRef\.current/u,
+      /const requestOwnershipIsCurrent[\s\S]*prismRefractResultOwnershipIsCurrent/u,
+    );
+    assert.match(
+      refractSource,
+      /requestRunId === input\.currentRunId[\s\S]*expectedTargetId === input\.currentTargetId[\s\S]*expectedElement === input\.currentElement/u,
     );
     assert.match(companionSource, /refractAbortRef\.current\?\.abort\(\)/u);
     assert.match(
@@ -241,7 +293,7 @@ describe("Prism Refract integration", () => {
     assert.doesNotMatch(refractSource, /shift-click|shiftKey|onClickCapture/u);
   });
 
-  it("rerolls only with Space; modifier-clicks accept before chaining to another target", () => {
+  it("ignores duplicate refracts and queues each distinct unsettled input once", () => {
     assert.match(
       refractSource,
       /Same-target modifier clicks never reroll/u,
@@ -256,11 +308,46 @@ describe("Prism Refract integration", () => {
     );
     assert.match(
       companionSource,
-      /decision === "begin" \|\| decision === "accept-and-begin"[\s\S]*"modifier-click"/u,
+      /decision === "queue"[\s\S]*queuePrismRefractRequest\(\{ targetId, invocation \}\)/u,
+    );
+    assert.match(
+      companionSource,
+      /active\.registration\.target\.id === request\.targetId[\s\S]*refractQueueRef\.current\.some/u,
+    );
+    assert.match(
+      companionSource,
+      /phase !== "ready"[\s\S]*refractQueueRef\.current\.length === 0[\s\S]*takeNextPrismRefractRequest\(\)[\s\S]*target\.accept\(candidate\)[\s\S]*preserveQueue: true/u,
     );
     assert.match(
       companionSource,
       /wieldSuppressedClickRef\.current = shiftedRegistration\.element[\s\S]*event\.preventDefault\(\)[\s\S]*event\.stopPropagation\(\)/u,
+    );
+  });
+
+  it("keeps active input focused while queued inputs stay inert", () => {
+    assert.match(
+      companionSource,
+      /const preventCapturedFieldClick[\s\S]*data-prism-refract-state="generating"\], \[data-prism-refract-state="queued"\]/u,
+    );
+    assert.match(
+      companionSource,
+      /window\.addEventListener\("beforeinput", preventCapturedFieldInput, true\)[\s\S]*window\.addEventListener\("focusin", preventCapturedFieldFocus, true\)/u,
+    );
+    assert.match(
+      companionSource,
+      /event\.key === "Escape"[\s\S]*releasePrismRefract\(true\)/u,
+    );
+    assert.match(
+      companionSource,
+      /const preventCapturedFieldFocus[\s\S]*data-prism-refract-state="queued"/u,
+    );
+    assert.doesNotMatch(
+      companionSource,
+      /activeElement\.blur/u,
+    );
+    assert.match(
+      globalStyles,
+      /data-prism-refract-state="queued"[\s\S]*cursor: progress !important[\s\S]*data-prism-refract-sheen="true"[\s\S]*cursor: progress !important/u,
     );
   });
 
@@ -339,22 +426,78 @@ describe("Prism Refract integration", () => {
     );
   });
 
-  it("uses the Zen-inspired rainbow flow while prose is generating", () => {
+  it("keeps every field or choice visibly refracting through a committed preview paint", () => {
     assert.match(
-      signalStyles,
-      /data-prism-refract-state="generating"[\s\S]*--signal-refract-rainbow-period[\s\S]*linear-gradient\([\s\S]*var\(--prism-p\)[\s\S]*animation: signalRefractRainbowFlow 1\.7s linear infinite/u,
+      companionSource,
+      /phase === "generating"[\s\S]*element\.dataset\.prismRefractSheen = "true"/u,
     );
     assert.match(
-      signalStyles,
-      /@media \(prefers-reduced-motion: reduce\)[\s\S]*data-prism-refract-state[\s\S]*animation: none/u,
+      companionSource,
+      /await nextPrismRefractPaint\(controller\.signal\)[\s\S]*const rawValue = await target\.generate/u,
+    );
+    assert.doesNotMatch(
+      companionSource.match(
+        /await nextPrismRefractPaint\(controller\.signal\)[\s\S]*?const rawValue = await target\.generate/u,
+      )?.[0] ?? "",
+      /prepareLocalModel|activeElement\.blur/u,
+    );
+    assert.match(
+      companionSource,
+      /target\.preview\(value\);[\s\S]*waitForPrismRefractPreviewPaint\([\s\S]*kind: "field"[\s\S]*phase: "ready"/u,
+    );
+    assert.match(
+      companionSource,
+      /refractSession\?\.registration\.target\.kind === "field"[\s\S]*refractSession\.targetCenter/u,
+    );
+    assert.match(
+      companionSource,
+      /targetCenter: \{[\s\S]*rect\.left \+ rect\.width \/ 2[\s\S]*rect\.top \+ rect\.height \/ 2/u,
+    );
+    assert.match(
+      companionSource,
+      /target\.preview\(choice\.value\);[\s\S]*waitForPrismRefractPreviewPaint\([\s\S]*kind: "choice"[\s\S]*phase: "ready"/u,
+    );
+    assert.match(
+      companionSource,
+      /prismRefractFieldPreviewIsVisible[\s\S]*control\.value\.trim\(\) === value/u,
+    );
+  });
+
+  it("uses one light- and dark-legible rainbow sheen with a static reduced-motion treatment", () => {
+    assert.match(
+      globalStyles,
+      /data-prism-refract-sheen="true"\]\[data-prism-refract-state="generating"[\s\S]*var\(--bg-surface, var\(--baseline-bg\)\)[\s\S]*outline: 2px solid[\s\S]*linear-gradient\([\s\S]*animation: prismRefractSheenFlow 1\.7s linear infinite/u,
+    );
+    assert.match(
+      globalStyles,
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*data-prism-refract-sheen[\s\S]*animation: none !important/u,
     );
     assert.match(
       debateStyles,
-      /data-prism-refract-state="generating"[\s\S]*--debate-refract-rainbow-period[\s\S]*linear-gradient\([\s\S]*var\(--prism-p\)[\s\S]*animation: debateRefractRainbowFlow 1\.7s linear infinite/u,
+      /data-prism-refract-sheen="true"\]\[data-prism-refract-state="generating"[\s\S]*--prism-refract-sheen-surface: var\(--debate-refract-field\)/u,
     );
     assert.match(
-      debateStyles,
-      /@media \(prefers-reduced-motion: reduce\)[\s\S]*data-prism-refract-state[\s\S]*animation: none/u,
+      readFileSync(new URL("./botcast.module.css", import.meta.url), "utf8"),
+      /data-prism-refract-sheen="true"\]\[data-prism-refract-state="generating"[\s\S]*--prism-refract-sheen-surface: var\(--botcast-field\)/u,
+    );
+  });
+
+  it("centers the triangle while prose generates and removes it after preview paint", () => {
+    assert.match(
+      companionStyles,
+      /\.anchor\[data-refracting="generating"\] \{[\s\S]*left 420ms[\s\S]*top 420ms/u,
+    );
+    assert.match(
+      companionStyles,
+      /\.refractGlyph \{[\s\S]*left: 50%;[\s\S]*top: 50%/u,
+    );
+    assert.match(
+      companionStyles,
+      /data-refracting="generating"\] \.refractGlyph,[\s\S]*data-refracting="error"\] \.refractGlyph/u,
+    );
+    assert.doesNotMatch(
+      companionStyles,
+      /data-refracting="ready"\] \.refractGlyph/u,
     );
   });
 
@@ -389,7 +532,7 @@ describe("Prism Refract integration", () => {
     assert.match(tutorialSource, /skippable Wield Prism teaching beat/u);
     assert.match(
       tutorialSource,
-      /Space rerolls[\s\S]*Clicking away, Enter, Tab, or clicking another input keeps the current draft[\s\S]*Option-clicking a different registered control[\s\S]*Control-clicking a different registered control[\s\S]*Escape restores the original/u,
+      /active field locks[\s\S]*different registered input to queue it once[\s\S]*unique inputs in click order[\s\S]*repeat clicks[\s\S]*Escape restores the active field and clears the remaining queue/u,
     );
     assert.match(pageSource, /tutorialProgress\.prismWield/u);
     assert.match(pageSource, /tutorialProgress\.signalRefract/u);

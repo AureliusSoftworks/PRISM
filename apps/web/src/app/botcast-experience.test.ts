@@ -162,13 +162,9 @@ describe("Signal experience shell", () => {
     assert.match(css, /\.liveCameraControls button\[data-selected="true"\]/u);
   });
 
-  it("lets arrow keys and lone Shift drive the live Signal camera strip", () => {
-    assert.match(
-      source,
-      /const toggleCameraTransitionMode = \(\): void => \{/u,
-    );
-    assert.match(source, /onClick=\{toggleCameraTransitionMode\}/u);
-    assert.match(source, /liveCameraShiftAloneRef/u);
+  it("lets arrow keys direct the live Signal camera strip", () => {
+    assert.doesNotMatch(source, /toggleCameraTransitionMode/u);
+    assert.doesNotMatch(source, /liveCameraShiftAloneRef/u);
     assert.match(
       source,
       /ArrowLeft:\s*"left"[\s\S]{0,80}ArrowRight:\s*"right"[\s\S]{0,80}ArrowDown:\s*"wide"[\s\S]{0,80}ArrowUp:\s*"auto"/u,
@@ -178,17 +174,11 @@ describe("Signal experience shell", () => {
       source,
       /studioLayoutEditorOpen \|\| isEditableTarget\(event\.target\)/u,
     );
-    assert.match(
-      source,
-      /event\.key !== "Shift"[\s\S]{0,280}toggleCameraTransitionMode\(\)/u,
-    );
-    assert.match(
-      source,
-      /window\.addEventListener\("keydown", onKeyDown\)[\s\S]{0,80}window\.addEventListener\("keyup", onKeyUp\)/u,
-    );
+    assert.match(source, /window\.addEventListener\("keydown", onKeyDown\)/u);
+    assert.doesNotMatch(source, /window\.addEventListener\("keyup", onKeyUp\)/u);
   });
 
-  it("cuts on live speech, lingers after it, then uses Wide only while a bot actually thinks", () => {
+  it("cuts on ready speech and only animates a visible thinking push", () => {
     assert.match(
       source,
       /const liveBotThinking = Boolean\([\s\S]{0,220}busy[\s\S]{0,100}speakingMessageId === null/u,
@@ -215,8 +205,24 @@ describe("Signal experience shell", () => {
     assert.match(source, /holdLiveCameraAfterSpeech\(message\.speakerRole\)/u);
     assert.match(
       source,
-      /botThinking: liveBotThinking && !liveActiveMessageIsSocialSilence/u,
+      /botThinking:[\s\S]{0,100}\(liveBotThinking \|\| liveBotVoicePreparationPending\)[\s\S]{0,100}!liveActiveMessageIsSocialSilence/u,
     );
+    assert.match(
+      source,
+      /SIGNAL_LIVE_CAMERA_VOICE_WAIT_THRESHOLD_MS = 240/u,
+    );
+    assert.match(
+      source,
+      /signalCameraVoiceWaitTimeoutRef\.current = window\.setTimeout\([\s\S]{0,220}setSignalCameraVoiceWaitMessageId\(pendingBotMessage\)[\s\S]{0,100}SIGNAL_LIVE_CAMERA_VOICE_WAIT_THRESHOLD_MS/u,
+    );
+    assert.doesNotMatch(
+      source.slice(
+        source.indexOf("const prepareEpisodeMessage = useCallback"),
+        source.indexOf("const playPreparedEpisodeMessage = useCallback"),
+      ),
+      /signalCameraWaitingForPresenceRef\.current = false/u,
+    );
+    assert.match(source, /signalPreSpeechPresenceMessageId === liveActiveMessage\.id/u);
     assert.match(
       source,
       /producerGuestThinking:[\s\S]{0,120}liveProducerGuestThinking[\s\S]{0,120}liveCameraMode === "auto"/u,
@@ -1063,6 +1069,35 @@ describe("Signal experience shell", () => {
     );
   });
 
+  it("keeps the startup card through a useful opening buffer for bot and Producer guests", () => {
+    const startEpisodeSource = source.slice(
+      source.indexOf("const startEpisode = async"),
+      source.indexOf("startEpisodeRef.current = startEpisode"),
+    );
+    const preparationHoldSource = startEpisodeSource.slice(
+      startEpisodeSource.indexOf("void visualMinimum.then"),
+      startEpisodeSource.indexOf("// Watch bakes behind"),
+    );
+
+    assert.match(
+      startEpisodeSource,
+      /const producerGuest = guestDraftId === BOTCAST_PRODUCER_GUEST_ID/u,
+    );
+    assert.match(
+      startEpisodeSource,
+      /let openingMessageReceived = false;/u,
+    );
+    assert.match(
+      startEpisodeSource,
+      /openingMessageReceived = true;[\s\S]{0,700}prepareEpisodeMessage\(opening\.message, opening\.episode\)/u,
+    );
+    assert.match(
+      startEpisodeSource,
+      /await Promise\.all\(\[introPlayback\.finished, visualMinimum\]\);[\s\S]{0,900}setEpisodePreRoll\(null\);[\s\S]{0,200}playPreparedEpisodeMessage\(/u,
+    );
+    assert.doesNotMatch(preparationHoldSource, /setEpisodePreRoll\(null\)/u);
+  });
+
   it("keeps Auto labeled Auto on the locked Signal model control", () => {
     assert.match(
       source,
@@ -1228,12 +1263,17 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /previous\.shot === liveShot &&[\s\S]{0,80}previous\.transitionMode === transitionMode/u,
+      /previous\.shot === liveShot/u,
     );
+    assert.match(source, /signalCameraWaitingForPresenceRef\.current = liveAutoWaitingForPresence/u);
+    assert.match(source, /setSignalCameraPushMessageId\(message\.id\)/u);
+    assert.match(source, /signalCameraPushTimeoutRef\.current = window\.setTimeout/u);
+    assert.match(source, /\}, 900\);/u);
     assert.match(
-      source,
-      /signalCameraTransitionsShouldAnimate\([\s\S]{0,120}prefers-reduced-motion: reduce/u,
+      css,
+      /\.stageScene\s*\{[^}]*transition:\s*transform 900ms/u,
     );
+    assert.match(source, /const liveCameraTransitionMode: SignalCameraTransitionMode =[\s\S]{0,100}\? "animated"[\s\S]{0,60}: "instant"/u);
     assert.match(
       source,
       /preferDirectedCamera: replayHasCapturedCameraDirection/u,

@@ -42,6 +42,7 @@ export interface BotCustomizerSavePristine {
   faceEyeOffsetY: number;
   faceEyeRotationDeg: number;
   faceEyeCount: 1 | 2;
+  faceEyeSpacing: number;
   faceMouthScale: number;
   faceMouthOffsetX: number;
   faceMouthOffsetY: number;
@@ -99,6 +100,7 @@ export interface BotCustomizerSaveCurrent {
   faceEyeOffsetY: number;
   faceEyeRotationDeg: number;
   faceEyeCount: 1 | 2;
+  faceEyeSpacing: number;
   faceMouthScale: number;
   faceMouthOffsetX: number;
   faceMouthOffsetY: number;
@@ -147,6 +149,7 @@ export interface BotCustomizerSavePatch {
   faceEyeOffsetY?: number;
   faceEyeRotationDeg?: number;
   faceEyeCount?: 1 | 2;
+  faceEyeSpacing?: number;
   faceMouthScale?: number;
   faceMouthOffsetX?: number;
   faceMouthOffsetY?: number;
@@ -213,6 +216,7 @@ export function buildBotCustomizerSavePatch(
       faceEyeOffsetY: current.faceEyeOffsetY,
       faceEyeRotationDeg: current.faceEyeRotationDeg,
       faceEyeCount: current.faceEyeCount,
+      faceEyeSpacing: current.faceEyeSpacing,
       faceMouthScale: current.faceMouthScale,
       faceMouthOffsetX: current.faceMouthOffsetX,
       faceMouthOffsetY: current.faceMouthOffsetY,
@@ -323,6 +327,9 @@ export function buildBotCustomizerSavePatch(
   }
   if (current.faceEyeCount !== pristine.faceEyeCount) {
     patch.faceEyeCount = current.faceEyeCount;
+  }
+  if (current.faceEyeSpacing !== pristine.faceEyeSpacing) {
+    patch.faceEyeSpacing = current.faceEyeSpacing;
   }
   if (current.faceMouthScale !== pristine.faceMouthScale) {
     patch.faceMouthScale = current.faceMouthScale;

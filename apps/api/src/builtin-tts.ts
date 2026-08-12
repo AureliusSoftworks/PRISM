@@ -535,6 +535,7 @@ export async function generateBuiltinEnglishWave(args: {
       // the explicit system-voice contract by keeping phoneme controls
       // suspended rather than changing pronunciation invisibly.
       profile.pronunciationBase = "follow-voice";
+      profile.accentDefinitionId = null;
       profile.speechprintInfluence = "none";
       profile.speechprintVariationSeed = "natural-v1";
     }

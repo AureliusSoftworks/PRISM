@@ -1,7 +1,5 @@
 .ritual {
   --creation-bot-color: #91a8bd;
-  --prism-origin-dx: 42vw;
-  --prism-origin-dy: 45dvh;
   position: absolute;
   inset: 0;
   overflow: hidden;
@@ -223,18 +221,27 @@
 
 .scene {
   position: absolute;
-  inset: clamp(84px, 10dvh, 116px) 0 clamp(76px, 9dvh, 94px);
+  inset: clamp(104px, 12dvh, 132px) 0 clamp(92px, 11dvh, 116px);
   display: grid;
   place-items: center;
 }
 
 .botDropRig {
+  --foundry-shell-transform: translate3d(0, 0, 0) rotate(0rad);
   position: relative;
   z-index: 5;
-  width: min(72vw, 920px);
-  height: min(75dvh, 720px);
+  width: min(64vw, 780px);
+  height: 100%;
+  max-height: 660px;
   display: grid;
   place-items: center;
+  transform: var(--foundry-shell-transform);
+  transform-origin: 50% 68%;
+  will-change: transform;
+}
+
+.botDropRig[data-aligning="true"] {
+  transition: transform 520ms cubic-bezier(.2, .84, .2, 1);
 }
 
 .botPreview {
@@ -244,11 +251,41 @@
   height: 100%;
   display: grid;
   place-items: center;
-  transform-origin: 50% 72%;
 }
 
-.ritual[data-foundry-phase="arrival"] .botPreview {
-  animation: shellDrop 760ms cubic-bezier(0.19, 0.84, 0.28, 1.08) both;
+.shellHitTarget {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 8;
+  width: clamp(176px, 25vw, 326px);
+  height: clamp(236px, 47dvh, 424px);
+  padding: 0;
+  border: 0;
+  border-radius: 44% 44% 28% 28%;
+  color: transparent;
+  background: transparent;
+  transform: translate(-50%, -45%);
+  touch-action: none;
+  cursor: default;
+}
+
+.shellHitTarget[data-shell-interactive="true"] {
+  cursor: grab;
+}
+
+.ritual[data-shell-dragging="true"] .shellHitTarget {
+  cursor: grabbing;
+}
+
+.shellHitTarget:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--creation-bot-color) 72%, white);
+  outline-offset: 8px;
+  box-shadow: 0 0 28px color-mix(in srgb, var(--creation-bot-color) 42%, transparent);
+}
+
+.shellHitTarget:disabled {
+  pointer-events: none;
 }
 
 .cradle {
@@ -256,8 +293,8 @@
   left: 50%;
   bottom: 3.5%;
   z-index: 3;
-  width: min(44vw, 540px);
-  height: 74px;
+  width: min(54vw, 680px);
+  height: 84px;
   transform: translateX(-50%);
   border: 1px solid rgba(255, 255, 255, 0.11);
   border-radius: 50%;
@@ -289,6 +326,21 @@
   opacity: 0.45;
 }
 
+.collisionPulse {
+  position: absolute;
+  left: 50%;
+  bottom: 3%;
+  z-index: 4;
+  width: min(54vw, 660px);
+  height: 54px;
+  border: 2px solid color-mix(in srgb, var(--creation-bot-color) 58%, white);
+  border-radius: 50%;
+  opacity: 0;
+  transform: translateX(-50%) scale(.55);
+  pointer-events: none;
+  animation: collisionPulse 360ms ease-out both;
+}
+
 .refractionStation {
   position: absolute;
   left: 50%;
@@ -299,33 +351,53 @@
   pointer-events: none;
 }
 
-.prismTransit {
-  --prism-orb-size: clamp(48px, 5vw, 72px);
+.prismRadialLight {
   position: absolute;
-  left: 0;
-  top: 0;
-  width: var(--prism-orb-size);
-  height: var(--prism-orb-size);
+  inset: 0;
+  z-index: 9;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  overflow: visible;
+  pointer-events: none;
+  filter: drop-shadow(0 0 8px rgba(125, 220, 248, .57));
+}
+
+.ritual[data-foundry-phase="handoff"] .prismRadialLight {
+  opacity: 1;
+  animation: radialHandoff 620ms cubic-bezier(.18, .8, .2, 1) both;
+}
+
+.ritual[data-foundry-phase="generation"] .prismRadialLight {
+  opacity: .54;
+  animation: radialSynthesisPulse 1.8s ease-in-out infinite;
+}
+
+.prismAnchor {
+  position: absolute;
+  left: var(--prism-origin-x);
+  top: var(--prism-origin-y);
+  z-index: 11;
+  width: clamp(48px, 5vw, 72px);
+  height: clamp(48px, 5vw, 72px);
   opacity: 0;
   transform: translate(-50%, -50%);
+  transition: filter 180ms ease, opacity 180ms ease;
+  pointer-events: none;
 }
 
-.prismOrb { width: 100%; height: 100%; }
-
-.ritual[data-foundry-phase="handoff"] .prismTransit {
-  opacity: 1;
-  animation: prismHandoff 620ms cubic-bezier(0.18, 0.78, 0.2, 1) both;
+.ritual[data-foundry-phase="handoff"] .prismAnchor {
+  opacity: .92;
+  filter: brightness(1.36) drop-shadow(0 0 13px rgba(125, 220, 248, .78));
 }
 
-.ritual[data-foundry-phase="generation"] .prismTransit,
-.ritual[data-foundry-phase="awakening"] .prismTransit {
-  opacity: 1;
-  animation: prismLivingPulse 2.1s ease-in-out infinite;
+.ritual[data-foundry-phase="generation"] .prismAnchor {
+  opacity: .92;
+  filter: brightness(1.15) drop-shadow(0 0 9px rgba(125, 220, 248, .56));
 }
 
-.ritual[data-foundry-phase="error"] .prismTransit {
-  opacity: 0.34;
-  transform: translate(calc(-50% + var(--prism-origin-dx)), calc(-50% + var(--prism-origin-dy))) scale(.84);
+.ritual[data-foundry-phase="awakening"] .prismAnchor {
+  opacity: .92;
 }
 
 .refractionRing {
@@ -354,15 +426,205 @@
   animation: refractionWake 720ms ease-out both;
 }
 
-.statusLine {
+.synthesisScreen {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--creation-bot-color) 52%, white);
+  background: #010407;
+  isolation: isolate;
+}
+
+.synthesisFill {
+  position: absolute;
+  inset: var(--foundry-screen-unfilled, 88%) 0 0;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.78), transparent 3px),
+    linear-gradient(180deg, color-mix(in srgb, var(--creation-bot-color) 42%, transparent), color-mix(in srgb, var(--creation-bot-color) 18%, #02070b));
+  box-shadow: 0 -4px 18px color-mix(in srgb, var(--creation-bot-color) 72%, transparent);
+  transition: inset 220ms linear;
+}
+
+.synthesisFill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: .22;
+  background-image: linear-gradient(rgba(255,255,255,.15) 1px, transparent 1px);
+  background-size: 100% 5px;
+}
+
+.synthesisGlyph {
+  position: relative;
+  z-index: 2;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: clamp(2.25rem, 5.4vw, 4.8rem);
+  line-height: 1;
+  text-shadow:
+    0 0 2px #fff,
+    0 0 10px var(--creation-bot-color),
+    0 0 26px color-mix(in srgb, var(--creation-bot-color) 72%, transparent);
+  transition: opacity 120ms ease, filter 120ms ease;
+  animation: synthesisGlyphShift 430ms steps(2, end) infinite;
+}
+
+.synthesisScanline {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  opacity: .18;
+  background: linear-gradient(180deg, transparent, rgba(255,255,255,.42), transparent);
+  transform: translateY(-100%);
+  animation: synthesisScan 1.4s linear infinite;
+}
+
+.synthesisScreen[data-synthesis-complete="true"] .synthesisGlyph,
+.synthesisScreen:not([data-synthesis-active="true"]):not([data-synthesis-complete="true"]) {
+  opacity: 0;
+}
+
+.synthesisScreen[data-synthesis-complete="true"] .synthesisFill {
+  background: #fff;
+  box-shadow:
+    0 0 16px #fff,
+    0 0 40px color-mix(in srgb, var(--creation-bot-color) 65%, white);
+}
+
+.synthesisScreen[data-draft-resolved="true"] .synthesisFill {
+  animation: foundryResolvedPhosphorFill 1.28s cubic-bezier(.2, .72, .22, 1) both;
+}
+
+.synthesisScreen[data-synthesis-complete="true"] .synthesisScanline {
+  display: none;
+}
+
+.moduleReadouts {
   position: absolute;
   left: 50%;
-  bottom: clamp(34px, 5dvh, 58px);
+  top: 50%;
+  z-index: 7;
+  width: min(86vw, 980px);
+  height: min(62dvh, 520px);
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  transition: opacity 180ms ease;
+  pointer-events: none;
+}
+
+.ritual:is([data-foundry-phase="generation"], [data-foundry-phase="awakening"])
+  .moduleReadouts {
+  opacity: 1;
+}
+
+.moduleReadout {
+  position: absolute;
+  min-width: 112px;
+  display: grid;
+  grid-template-columns: 6px auto;
+  column-gap: 7px;
+  align-items: center;
+  color: rgba(224, 231, 241, .48);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  text-transform: uppercase;
+  letter-spacing: .075em;
+  transition: color 180ms ease, opacity 180ms ease;
+}
+
+.moduleReadout > i {
+  grid-row: 1 / 3;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 transparent;
+}
+
+.moduleReadout strong {
+  font-size: .62rem;
+  font-weight: 760;
+}
+
+.moduleReadout small {
+  font-size: .48rem;
+  opacity: .66;
+}
+
+.moduleReadout[data-state="populating"] {
+  color: color-mix(in srgb, var(--creation-bot-color) 60%, white);
+}
+
+.moduleReadout[data-state="populating"] > i,
+.moduleReadout[data-state="populated"] > i {
+  box-shadow: 0 0 9px currentColor;
+}
+
+.moduleReadout[data-state="populated"] {
+  color: color-mix(in srgb, var(--creation-bot-color) 72%, white);
+}
+
+.moduleReadout[data-module="eyes"] { left: 2%; top: 25%; }
+.moduleReadout[data-module="mouth"] { left: 1%; top: 61%; }
+.moduleReadout[data-module="screen"] { right: 1%; top: 24%; }
+.moduleReadout[data-module="glyph"] { right: 0; top: 61%; }
+.moduleReadout[data-module="chassis"] { left: 50%; bottom: 0; transform: translateX(-50%); }
+
+.awakeningDischarge {
+  position: absolute;
+  left: 50%;
+  top: 52%;
+  z-index: 12;
+  width: min(34vw, 360px);
+  height: min(44dvh, 380px);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.awakeningDischarge [data-effect="spark"] {
+  position: absolute;
+  right: 12%;
+  top: 20%;
+  width: 2px;
+  height: 38px;
+  background: #fff;
+  box-shadow: 0 0 8px #fff, 0 0 18px var(--creation-bot-color);
+  clip-path: polygon(48% 0, 100% 0, 62% 42%, 88% 42%, 20% 100%, 38% 55%, 0 55%);
+  transform: rotate(18deg);
+  opacity: 0;
+  animation: foundryFinalSpark 520ms steps(3, end) both;
+}
+
+.awakeningDischarge [data-effect="smoke"] {
+  position: absolute;
+  right: 7%;
+  top: 17%;
+  width: 34px;
+  height: 46px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(226, 235, 241, .34), transparent 68%);
+  filter: blur(6px);
+  opacity: 0;
+  animation: foundryFinalSmoke 720ms ease-out both;
+}
+
+.footer {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(18px, 2.8dvh, 30px);
   z-index: 16;
+  width: min(560px, calc(100% - 48px));
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  transform: translateX(-50%);
+  text-align: center;
+}
+
+.statusLine {
   display: inline-flex;
   align-items: center;
   gap: 9px;
-  transform: translateX(-50%);
   color: rgba(239, 242, 250, 0.72);
   font-size: 0.78rem;
   letter-spacing: 0.01em;
@@ -378,13 +640,10 @@
 }
 
 .privacyNote {
-  position: absolute;
-  right: var(--bot-foundry-chrome-inset-inline, clamp(24px, 3.5vw, 54px));
-  bottom: clamp(20px, 2.8dvh, 32px);
-  z-index: 16;
   margin: 0;
   color: rgba(225, 229, 241, 0.36);
   font-size: 0.66rem;
+  line-height: 1.25;
 }
 
 .ritual[data-theme="light"] .statusLine {
@@ -395,22 +654,36 @@
   color: rgba(32, 47, 66, 0.48);
 }
 
-@keyframes shellDrop {
-  0% { opacity: 0; transform: translateY(-58dvh) scale(.94); }
-  72% { opacity: 1; transform: translateY(10px) scale(1.01); }
-  88% { transform: translateY(-4px) scale(.997); }
-  100% { opacity: 1; transform: translateY(0) scale(1); }
+@keyframes collisionPulse {
+  0% { opacity: .72; transform: translateX(-50%) scale(.52); }
+  100% { opacity: 0; transform: translateX(-50%) scale(1.18); }
 }
 
-@keyframes prismHandoff {
-  0% { transform: translate(calc(-50% + var(--prism-origin-dx)), calc(-50% + var(--prism-origin-dy))) scale(.78); filter: brightness(.8); }
-  72% { transform: translate(-50%, -50%) scale(1.08); filter: brightness(1.18); }
-  100% { transform: translate(-50%, -50%) scale(1); filter: brightness(1); }
+@keyframes radialHandoff {
+  0% { opacity: 0; filter: brightness(.72) drop-shadow(0 0 3px transparent); }
+  28% { opacity: 1; }
+  68% { opacity: 1; filter: brightness(1.5) drop-shadow(0 0 12px rgba(125, 220, 248, .86)); }
+  100% { opacity: 0; filter: brightness(1); }
 }
 
-@keyframes prismLivingPulse {
-  0%, 100% { transform: translate(-50%, -50%) scale(.96); filter: brightness(.92); }
-  50% { transform: translate(-50%, -50%) scale(1.06); filter: brightness(1.18); }
+@keyframes radialSynthesisPulse {
+  0%, 100% { opacity: .36; filter: brightness(.92) drop-shadow(0 0 5px rgba(125, 220, 248, .48)); }
+  50% { opacity: .68; filter: brightness(1.3) drop-shadow(0 0 13px rgba(125, 220, 248, .82)); }
+}
+
+@keyframes synthesisGlyphShift {
+  0%, 100% { filter: brightness(.82); }
+  50% { filter: brightness(1.32); }
+}
+
+@keyframes synthesisScan {
+  to { transform: translateY(100%); }
+}
+
+@keyframes foundryResolvedPhosphorFill {
+  0% { inset: 100% 0 0; filter: brightness(.86); }
+  72% { filter: brightness(1.08); }
+  100% { inset: 0; filter: brightness(1.18); }
 }
 
 @keyframes refractionWake {
@@ -419,28 +692,65 @@
   100% { transform: scale(1.16); opacity: 0; }
 }
 
+@keyframes foundryFinalSpark {
+  0%, 100% { opacity: 0; }
+  18%, 58% { opacity: 1; }
+  36%, 76% { opacity: .18; }
+}
+
+@keyframes foundryFinalSmoke {
+  0% { opacity: 0; transform: translate3d(0, 8px, 0) scale(.72); }
+  24% { opacity: .5; }
+  100% { opacity: 0; transform: translate3d(9px, -30px, 0) scale(1.38); }
+}
+
 @keyframes ambientTurn { to { transform: rotate(360deg); } }
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 
 @media (max-width: 760px) {
   .header h3 { font-size: 1.15rem; }
   .botDropRig { width: 100vw; }
   .privacyNote { display: none; }
-  .statusLine { bottom: 26px; }
+  .footer { bottom: 22px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .ambient,
-  .botPreview,
-  .prismTransit,
+  .botDropRig,
+  .prismRadialLight,
   .refractionRing,
-  .refractionBeam {
+  .refractionBeam,
+  .synthesisGlyph,
+  .synthesisScanline,
+  .collisionPulse,
+  .awakeningDischarge [data-effect] {
     animation: none !important;
   }
-  .ritual[data-foundry-phase="arrival"] .botPreview { opacity: 1; transform: none; }
-  .ritual[data-foundry-phase="handoff"] .prismTransit,
-  .ritual[data-foundry-phase="generation"] .prismTransit,
-  .ritual[data-foundry-phase="awakening"] .prismTransit {
-    opacity: 1;
-    transform: translate(-50%, -50%);
+  .botDropRig[data-aligning="true"],
+  .synthesisFill {
+    transition-duration: 1ms;
+  }
+  .synthesisScreen[data-draft-resolved="true"] .synthesisFill {
+    animation: none !important;
+    inset: 0;
+  }
+  .ritual[data-foundry-phase="handoff"] .prismRadialLight,
+  .ritual[data-foundry-phase="generation"] .prismRadialLight,
+  .ritual[data-foundry-phase="generation"] .prismAnchor {
+    opacity: .76;
+  }
+  .prismAnchor {
+    transition-duration: 180ms;
   }
 }

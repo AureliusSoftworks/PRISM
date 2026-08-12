@@ -1,5 +1,6 @@
 import type {
   ModelReasoningEffortCapabilityV1,
+  ProviderReasoningEffort,
   ReasoningEffort,
 } from "@localai/shared";
 
@@ -15,6 +16,21 @@ export const MODEL_EFFORT_ICON_PATHS: Record<ReasoningEffort, string> = {
   high: "/reasoning-effort/high.svg",
   xhigh: "/reasoning-effort/xhigh.svg",
 };
+
+export const MODEL_EFFORT_MAX_ICON_PATH = "/reasoning-effort/max.svg";
+
+export function modelEffortRequestValue(
+  capability: ModelReasoningEffortCapabilityV1,
+  ordinaryEffort: ReasoningEffort,
+  maxEnabled: boolean,
+): ProviderReasoningEffort {
+  return maxEnabled &&
+    ordinaryEffort === "xhigh" &&
+    capability.mode === "native" &&
+    capability.supportsMax
+    ? "max"
+    : ordinaryEffort;
+}
 
 export function modelEffortBaseline(
   capability: ModelReasoningEffortCapabilityV1,

@@ -7,6 +7,7 @@ import {
   simulatedSurfacePreparationMaxTokens,
   simulatedSurfacePreparationNoteMaxChars,
   type NativeReasoningEffortProvider,
+  type ProviderReasoningEffort,
   type ReasoningEffort,
   type SimulatedEffortLadderProfile,
   type SimulatedEffortPassName,
@@ -22,6 +23,7 @@ export type SimulatedEffortSurface =
   | "coffee"
   | "signal"
   | "debate"
+  | "prism-refract"
   | "story";
 
 export class ReasoningGenerationTimeoutError extends Error {
@@ -39,7 +41,7 @@ export class ReasoningGenerationTimeoutError extends Error {
 /** Bounds one complete direct-mode response, not each simulated preparation
  * pass. The caller supplies the whole prepare-and-generate pipeline. */
 export async function runWithReasoningGenerationBudget<T>(args: {
-  effort: ReasoningEffort | null | undefined;
+  effort: ProviderReasoningEffort | null | undefined;
   provider?: NativeReasoningEffortProvider;
   modelId?: string;
   signal?: AbortSignal;
@@ -165,11 +167,12 @@ function cleanPrivatePreparation(raw: string, effort: ReasoningEffort): string {
 export function shouldPrepareMessagesWithSimulatedEffort(args: {
   provider: NativeReasoningEffortProvider;
   model: string;
-  effort: ReasoningEffort | null | undefined;
+  effort: ProviderReasoningEffort | null | undefined;
 }): boolean {
   if (!args.effort || args.effort === "auto" || args.effort === "none") {
     return false;
   }
+  if (args.effort === "max") return false;
   if (args.provider !== "local") return false;
   return !modelSupportsNativeReasoningEffort(args.provider, args.model);
 }

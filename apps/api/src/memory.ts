@@ -610,6 +610,162 @@ export function deleteMemoriesLinkedToMessages(
   return Number(result.changes ?? 0);
 }
 
+export interface AppletSessionMemoryCleanupResult {
+  deletedMemories: number;
+  deletedReceipts: number;
+  deletedEvidenceLinks: number;
+  removedDerivedMemories: number;
+}
+
+/**
+ * Revokes every memory acquired inside an applet session.
+ *
+ * New rows are owned by `conversation_id`; source-message and receipt matching
+ * keep older Signal/Coffee rows cleanable after those provenance fields were
+ * introduced. Unlike an ordinary message undo, session deletion intentionally
+ * removes long-term and About You rows too: they would not exist without the
+ * deleted experience.
+ */
+export function deleteMemoriesAcquiredDuringAppletSessions(
+  db: DatabaseSync,
+  userId: string,
+  sessionIds: readonly string[],
+  sourceMessageIds: readonly string[] = [],
+): AppletSessionMemoryCleanupResult {
+  const memoryColumns = new Set(
+    (db.prepare("PRAGMA table_info(memories)").all() as Array<{ name: string }>).map(
+      (column) => column.name,
+    ),
+  );
+  if (memoryColumns.size === 0) {
+    return {
+      deletedMemories: 0,
+      deletedReceipts: 0,
+      deletedEvidenceLinks: 0,
+      removedDerivedMemories: 0,
+    };
+  }
+
+  ensureMemoryEcologyMemorySchema(db);
+  const targetSessionIds = new Set(normalizeSourceMessageIds([...sessionIds]));
+  const targetSourceIds = new Set(normalizeSourceMessageIds([...sourceMessageIds]));
+  if (targetSessionIds.size === 0 && targetSourceIds.size === 0) {
+    return {
+      deletedMemories: 0,
+      deletedReceipts: 0,
+      deletedEvidenceLinks: 0,
+      removedDerivedMemories: 0,
+    };
+  }
+
+  const conversationSelect = memoryColumns.has("conversation_id")
+    ? "conversation_id"
+    : "NULL AS conversation_id";
+  const sourceSelect = memoryColumns.has("source_message_ids")
+    ? "source_message_ids"
+    : "'[]' AS source_message_ids";
+  const rows = db
+    .prepare(
+      `SELECT id, ${conversationSelect}, ${sourceSelect}
+         FROM memories
+        WHERE user_id = ?`,
+    )
+    .all(userId) as Array<{
+    id: string;
+    conversation_id: string | null;
+    source_message_ids: string;
+  }>;
+  const memoryIds = new Set(
+    rows
+      .filter(
+        (row) =>
+          (row.conversation_id != null && targetSessionIds.has(row.conversation_id)) ||
+          sourceIdsOverlap(row.source_message_ids, targetSourceIds),
+      )
+      .map((row) => row.id),
+  );
+
+  const receiptRows = db
+    .prepare(
+      `SELECT id, memory_id, conversation_id
+         FROM memory_acquisition_receipts
+        WHERE user_id = ?`,
+    )
+    .all(userId) as Array<{
+    id: string;
+    memory_id: string;
+    conversation_id: string | null;
+  }>;
+  for (const receipt of receiptRows) {
+    if (receipt.conversation_id && targetSessionIds.has(receipt.conversation_id)) {
+      memoryIds.add(receipt.memory_id);
+    }
+  }
+
+  const deleteReceipt = db.prepare(
+    "DELETE FROM memory_acquisition_receipts WHERE user_id = ? AND memory_id = ?",
+  );
+  const deleteEvidence = db.prepare(
+    `DELETE FROM memory_evidence_links
+      WHERE user_id = ? AND (inferred_memory_id = ? OR evidence_memory_id = ?)`,
+  );
+  const deleteMemory = db.prepare(
+    "DELETE FROM memories WHERE user_id = ? AND id = ?",
+  );
+  let deletedReceipts = 0;
+  let deletedEvidenceLinks = 0;
+  let deletedMemories = 0;
+  for (const memoryId of memoryIds) {
+    deletedReceipts += Number(deleteReceipt.run(userId, memoryId).changes ?? 0);
+    deletedEvidenceLinks += Number(
+      deleteEvidence.run(userId, memoryId, memoryId).changes ?? 0,
+    );
+    deletedMemories += Number(deleteMemory.run(userId, memoryId).changes ?? 0);
+  }
+
+  const decay = materializeShortTermMemoryDecay(db, userId);
+  deletedReceipts += Number(
+    db
+      .prepare(
+        `DELETE FROM memory_acquisition_receipts
+          WHERE user_id = ?
+            AND NOT EXISTS (
+              SELECT 1 FROM memories
+               WHERE memories.user_id = memory_acquisition_receipts.user_id
+                 AND memories.id = memory_acquisition_receipts.memory_id
+            )`,
+      )
+      .run(userId).changes ?? 0,
+  );
+  deletedEvidenceLinks += Number(
+    db
+      .prepare(
+        `DELETE FROM memory_evidence_links
+          WHERE user_id = ?
+            AND (
+              NOT EXISTS (
+                SELECT 1 FROM memories
+                 WHERE memories.user_id = memory_evidence_links.user_id
+                   AND memories.id = memory_evidence_links.inferred_memory_id
+              )
+              OR NOT EXISTS (
+                SELECT 1 FROM memories
+                 WHERE memories.user_id = memory_evidence_links.user_id
+                   AND memories.id = memory_evidence_links.evidence_memory_id
+              )
+            )`,
+      )
+      .run(userId).changes ?? 0,
+  );
+
+  return {
+    deletedMemories,
+    deletedReceipts,
+    deletedEvidenceLinks,
+    removedDerivedMemories: decay.removedDerived,
+  };
+}
+
 interface DeleteMemoryOptions {
   allowLongTerm?: boolean;
   /** User explicitly removed an “about you” line from the Memories panel. */
@@ -894,6 +1050,7 @@ function decryptMemoryRow(
 export function persistBotPairNarrativeMemory(args: {
   db: DatabaseSync;
   userId: string;
+  conversationId?: string | null;
   sourceBotId: string;
   targetBotId: string;
   text: string;
@@ -911,6 +1068,7 @@ export function persistBotPairNarrativeMemory(args: {
   }
   const id = randomId(12);
   const createdAt = args.createdAt ?? new Date().toISOString();
+  const conversationId = args.conversationId?.trim() || null;
   const sourceMessageIds = normalizeSourceMessageIds([
     ...(args.sourceMessageIds ?? []),
   ]);
@@ -932,11 +1090,12 @@ export function persistBotPairNarrativeMemory(args: {
       (id, user_id, conversation_id, bot_id, target_bot_id, ciphertext, iv, tag,
        confidence, base_confidence, category, tier, lifecycle, durability,
        source, certainty, source_message_ids, last_reinforced_at, created_at)
-     VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'bot_relation', ?, ?,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'bot_relation', ?, ?,
              0.95, 'direct', ?, ?, ?, ?)`,
   ).run(
     id,
     args.userId,
+    conversationId,
     sourceBotId,
     targetBotId,
     encrypted.ciphertext,
@@ -957,12 +1116,14 @@ export function persistBotPairNarrativeMemory(args: {
     memoryId: id,
     learnerBotId: sourceBotId,
     targetBotId,
+    conversationId,
     kind: "bot_relation",
     createdAt,
   });
   return {
     id,
     userId: args.userId,
+    conversationId: conversationId ?? undefined,
     botId: sourceBotId,
     targetBotId,
     confidence,

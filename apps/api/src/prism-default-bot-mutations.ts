@@ -7,6 +7,7 @@ import {
   DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
   DEFAULT_BOT_FACE_BLINK_SCALE,
   DEFAULT_BOT_FACE_EYE_COUNT,
+  DEFAULT_BOT_FACE_EYE_SPACING,
   DEFAULT_BOT_FACE_EYE_MOVEMENT,
   DEFAULT_BOT_FACE_EYE_OFFSET_X,
   DEFAULT_BOT_FACE_EYE_OFFSET_Y,
@@ -31,6 +32,7 @@ import {
   normalizeBotFaceBlinkScale,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeCount,
+  normalizeBotFaceEyeSpacing,
   normalizeBotFaceEyeMovement,
   normalizeBotFaceEyeOffsetX,
   normalizeBotFaceEyeOffsetY,
@@ -71,6 +73,7 @@ const DEFAULT_BOT_COLUMNS = [
   "prism_default_bot_face_eye_offset_y",
   "prism_default_bot_face_eye_rotation_deg",
   "prism_default_bot_face_eye_count",
+  "prism_default_bot_face_eye_spacing",
   "prism_default_bot_face_mouth_scale",
   "prism_default_bot_face_mouth_offset_x",
   "prism_default_bot_face_mouth_offset_y",
@@ -151,6 +154,12 @@ function nextValues(patch: PrismJsonObject): DefaultBotValues {
       ? DEFAULT_BOT_FACE_EYE_COUNT
       : normalizeBotFaceEyeCount(patch.faceEyeCount);
   if (faceEyeCount === null) throw new Error("Invalid custom eye count.");
+  const faceEyeSpacing = requiredNormalized(
+    patch.faceEyeSpacing,
+    DEFAULT_BOT_FACE_EYE_SPACING,
+    "eye spacing",
+    normalizeBotFaceEyeSpacing,
+  );
   let faceThinkingFrames: string | null = null;
   if (patch.faceThinkingFrames !== null) {
     faceThinkingFrames = serializeBotFaceThinkingFrames(
@@ -236,6 +245,7 @@ function nextValues(patch: PrismJsonObject): DefaultBotValues {
       normalizeBotFaceEyeRotationDeg,
     ),
     prism_default_bot_face_eye_count: faceEyeCount,
+    prism_default_bot_face_eye_spacing: faceEyeSpacing,
     prism_default_bot_face_mouth_scale: requiredNormalized(
       patch.faceMouthScale,
       DEFAULT_BOT_FACE_MOUTH_SCALE,

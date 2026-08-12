@@ -212,6 +212,15 @@ describe("Prism Signal domain capabilities", () => {
   it("quarantines episodes and replay state, then restores both", async () => {
     const db = fixture();
     try {
+      db.prepare(
+        `INSERT INTO memories
+          (id, user_id, conversation_id, bot_id, target_bot_id, ciphertext, iv,
+           tag, confidence, category, tier, durability, source, certainty,
+           source_message_ids, created_at)
+         VALUES ('signal-memory', 'u1', NULL, 'host', 'guest', 'cipher', 'iv',
+                 'tag', 0.98, 'bot_relation', 'long_term', 0.95, 'direct',
+                 0.98, '["message"]', '2026-07-26T01:00:00.000Z')`,
+      ).run();
       const registry = createPrismDomainCapabilityRegistry();
       const proposal = registry.createProposal({
         context: context(db),
@@ -237,6 +246,14 @@ describe("Prism Signal domain capabilities", () => {
       assert.equal(
         (
           db.prepare("SELECT COUNT(*) AS count FROM replay_recordings").get() as {
+            count: number;
+          }
+        ).count,
+        0,
+      );
+      assert.equal(
+        (
+          db.prepare("SELECT COUNT(*) AS count FROM memories").get() as {
             count: number;
           }
         ).count,
@@ -491,12 +508,14 @@ describe("Prism Bot and Avatar Studio field capability", () => {
       const previous = db
         .prepare(
           `SELECT prism_default_bot_face_eye_count,
+                  prism_default_bot_face_eye_spacing,
                   prism_default_bot_face_eye_offset_x
              FROM users
             WHERE id = 'u1'`,
         )
         .get() as {
         prism_default_bot_face_eye_count: number | null;
+        prism_default_bot_face_eye_spacing: number | null;
         prism_default_bot_face_eye_offset_x: number | null;
       };
       const proposal = registry.createProposal({
@@ -505,6 +524,7 @@ describe("Prism Bot and Avatar Studio field capability", () => {
         input: {
           patch: {
             faceEyeCount: 2,
+            faceEyeSpacing: 0.52,
             faceEyeOffsetX: 0.12,
           },
         },
@@ -519,15 +539,18 @@ describe("Prism Bot and Avatar Studio field capability", () => {
       const saved = db
         .prepare(
           `SELECT prism_default_bot_face_eye_count,
+                  prism_default_bot_face_eye_spacing,
                   prism_default_bot_face_eye_offset_x
              FROM users
             WHERE id = 'u1'`,
         )
         .get() as {
         prism_default_bot_face_eye_count: number;
+        prism_default_bot_face_eye_spacing: number;
         prism_default_bot_face_eye_offset_x: number;
       };
       assert.equal(saved.prism_default_bot_face_eye_count, 2);
+      assert.equal(saved.prism_default_bot_face_eye_spacing, 0.52);
       assert.equal(saved.prism_default_bot_face_eye_offset_x, 0.12);
 
       const undone = registry.undo({
@@ -541,12 +564,14 @@ describe("Prism Bot and Avatar Studio field capability", () => {
       const restored = db
         .prepare(
           `SELECT prism_default_bot_face_eye_count,
+                  prism_default_bot_face_eye_spacing,
                   prism_default_bot_face_eye_offset_x
              FROM users
             WHERE id = 'u1'`,
         )
         .get() as {
         prism_default_bot_face_eye_count: number | null;
+        prism_default_bot_face_eye_spacing: number | null;
         prism_default_bot_face_eye_offset_x: number | null;
       };
       assert.deepEqual(restored, previous);
@@ -828,6 +853,14 @@ describe("Prism Story capability", () => {
          VALUES ('story', 'u1', 'The Glass Archive', 'complete', 'local',
                  '["host","guest"]', '[]', ?, ?)`,
       ).run(createdAt, createdAt);
+      db.prepare(
+        `INSERT INTO memories
+          (id, user_id, conversation_id, bot_id, ciphertext, iv, tag,
+           confidence, category, tier, durability, source, certainty,
+           source_message_ids, created_at)
+         VALUES ('story-memory', 'u1', 'story', 'host', 'cipher', 'iv', 'tag',
+                 0.85, 'user', 'short_term', 0.7, 'direct', 0.85, '[]', ?)`,
+      ).run(createdAt);
       const registry = createPrismDomainCapabilityRegistry();
       const capabilityContext = {
         db,
@@ -861,6 +894,14 @@ describe("Prism Story capability", () => {
             .prepare(
               "SELECT COUNT(*) AS count FROM story_sessions WHERE id = 'story'",
             )
+            .get() as { count: number }
+        ).count,
+        0,
+      );
+      assert.equal(
+        (
+          db
+            .prepare("SELECT COUNT(*) AS count FROM memories WHERE id = 'story-memory'")
             .get() as { count: number }
         ).count,
         0,
@@ -1249,7 +1290,11 @@ describe("Prism bot creation capability", () => {
         },
         color: "#557744",
         glyph: "leaf",
-        face: {},
+        face: {
+          eyeCharacter: "•",
+          eyeCount: 2,
+          faceEyeSpacing: 0.52,
+        },
         voice: {},
         settings: {},
         powerPrompt:
@@ -1275,12 +1320,18 @@ describe("Prism bot creation capability", () => {
       assert.equal(run.status, "committed", run.error ?? undefined);
       const bot = db
         .prepare(
-          "SELECT name, system_prompt, powers_json FROM bots WHERE id <> 'host' AND id <> 'guest'",
+          "SELECT name, system_prompt, powers_json, face_eye_spacing FROM bots WHERE id <> 'host' AND id <> 'guest'",
         )
-        .get() as { name: string; system_prompt: string; powers_json: string };
+        .get() as {
+        name: string;
+        system_prompt: string;
+        powers_json: string;
+        face_eye_spacing: number;
+      };
       assert.equal(bot.name, "Conifer");
       assert.match(bot.system_prompt, /Pinecone archivist/u);
       assert.match(bot.powers_json, /leaf/u);
+      assert.equal(bot.face_eye_spacing, 0.52);
       assert.equal(
         registry.undo({ context: context(db), runId: run.id }).status,
         "undone",
@@ -1417,6 +1468,74 @@ describe("Prism conversation capability", () => {
             .get() as { archived_at: string | null }
         ).archived_at,
         null,
+      );
+    } finally {
+      closeTestDatabase(db);
+    }
+  });
+
+  it("revokes Coffee memories when the session is quarantined", async () => {
+    const db = fixture();
+    try {
+      const now = "2026-07-26T01:25:00.000Z";
+      db.prepare(
+        `INSERT INTO conversations (
+          id, user_id, title, conversation_mode, bot_id, incognito,
+          created_at, updated_at
+        ) VALUES
+          ('coffee', 'u1', 'Coffee Session', 'coffee', 'host', 0, ?, ?),
+          ('sandbox', 'u1', 'Sandbox Session', 'sandbox', 'host', 0, ?, ?)`,
+      ).run(now, now, now, now);
+      db.prepare(
+        `INSERT INTO messages
+          (id, conversation_id, user_id, role, content, created_at)
+         VALUES ('coffee-message', 'coffee', 'u1', 'assistant', 'A learned detail', ?)`,
+      ).run(now);
+      const insertMemory = db.prepare(
+        `INSERT INTO memories
+          (id, user_id, conversation_id, bot_id, ciphertext, iv, tag,
+           confidence, category, tier, durability, source, certainty,
+           source_message_ids, created_at)
+         VALUES (?, 'u1', ?, 'host', 'cipher', 'iv', 'tag', 0.98, 'user',
+                 'long_term', 0.95, 'about_you', 0.98, ?, ?)`,
+      );
+      insertMemory.run(
+        "coffee-memory",
+        "coffee",
+        '["coffee-message"]',
+        now,
+      );
+      insertMemory.run("sandbox-memory", "sandbox", "[]", now);
+
+      const registry = createPrismDomainCapabilityRegistry();
+      const proposal = await registry.createPreparedProposal({
+        context: context(db),
+        capabilityId: "conversations.quarantine",
+        input: { conversationIds: ["coffee"] },
+      });
+      const run = await registry.executeProposal({
+        context: context(db),
+        proposalId: proposal.id,
+        confirmation: true,
+        idempotencyKey: "delete-coffee-session",
+      });
+
+      assert.equal(run.status, "committed", run.error ?? undefined);
+      assert.deepEqual(run.nonReversibleConsequences, [
+        "Learned Coffee memories cannot be restored by Undo.",
+      ]);
+      assert.deepEqual(
+        (
+          db.prepare("SELECT id FROM memories WHERE user_id = 'u1' ORDER BY id").all() as Array<{ id: string }>
+        ).map((row) => row.id),
+        ["sandbox-memory"],
+      );
+      assert.ok(
+        (
+          db.prepare("SELECT archived_at FROM conversations WHERE id = 'coffee'").get() as {
+            archived_at: string | null;
+          }
+        ).archived_at,
       );
     } finally {
       closeTestDatabase(db);

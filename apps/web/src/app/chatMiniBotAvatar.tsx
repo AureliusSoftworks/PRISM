@@ -1,6 +1,11 @@
 "use client";
 
 import { type CSSProperties, type ReactNode } from "react";
+import {
+  BOT_AVATAR_CANONICAL_FACING,
+  botAvatarScreenFacingScaleX,
+  type BotAvatarFacing,
+} from "./bot-avatar-render-geometry";
 import styles from "./chatMiniBotAvatar.module.css";
 
 export const CHAT_MINI_BOT_AVATAR_CANONICAL_SCREEN_SIZE = 128;
@@ -15,6 +20,12 @@ export function ChatMiniBotAvatar(props: {
   color?: string | null;
   alloyColor?: string | null;
   theme?: "light" | "dark";
+  /** When true, suppress behind/above art layers while the avatar is thinking. */
+  thinking: boolean;
+  /** Authorable face art that sits behind the plate glyph. */
+  behindFace?: ReactNode;
+  /** Authorable face art that sits above the plate glyph. */
+  aboveFace?: ReactNode;
   face: ReactNode;
   glyph: ReactNode;
   className?: string;
@@ -22,11 +33,19 @@ export function ChatMiniBotAvatar(props: {
   size?: "badge" | "room" | "hero";
   /** `breathing` softly illuminates the authored chassis lamp apertures. */
   lightMode?: "off" | "breathing";
+  /** Visible direction for the whole mini screen, including Ink and buckle. */
+  facing?: BotAvatarFacing;
+  /** Keep another full-screen face effect, such as Question, upright. */
+  directionIndependentFace?: boolean;
 }): React.JSX.Element {
   const color = props.color?.trim() || null;
   const size = props.size ?? "badge";
   const theme = props.theme ?? "dark";
   const lightMode = props.lightMode ?? "off";
+  const facing = props.facing ?? BOT_AVATAR_CANONICAL_FACING;
+  const screenFacingScaleX = botAvatarScreenFacingScaleX(facing);
+  const directionIndependentFace =
+    props.thinking || props.directionIndependentFace === true;
   const frameBaseSrc =
     theme === "light"
       ? CHAT_MINI_BOT_AVATAR_LIGHT_BASE_SRC
@@ -36,6 +55,14 @@ export function ChatMiniBotAvatar(props: {
     ["--chat-mini-bot-color" as string]: color ?? "var(--accent)",
     ["--chat-mini-bot-alloy-color" as string]:
       props.alloyColor?.trim() || "#aeb8c1",
+    // AvatarDetailsMask has its own mirror transform. The mini turns the
+    // complete screen plane instead, so reset that inner transform and avoid
+    // double-flipping custom Ink.
+    ["--chat-mini-bot-upper-screen-facing-scale-x" as string]:
+      directionIndependentFace ? "1" : screenFacingScaleX,
+    ["--chat-mini-bot-lower-screen-facing-scale-x" as string]:
+      screenFacingScaleX,
+    ["--avatar-details-facing-scale-x" as string]: "1",
   } as CSSProperties;
 
   const rootClassName = [
@@ -57,6 +84,7 @@ export function ChatMiniBotAvatar(props: {
       data-size={size}
       data-theme={theme}
       data-light-mode={lightMode}
+      data-avatar-facing={facing}
       style={rootStyle}
       aria-hidden="true"
     >
@@ -72,21 +100,40 @@ export function ChatMiniBotAvatar(props: {
       <span className={styles.frameAlloy} aria-hidden="true" />
       {lightMode === "breathing" ? (
         <>
-          <span className={styles.frameLightAura} aria-hidden="true" />
-          <span className={styles.frameLightEmitter} aria-hidden="true" />
-          <span className={styles.frameLightCore} aria-hidden="true" />
+          <span
+            className={styles.frameLightAura}
+            data-chat-mini-frame-light="aura"
+            aria-hidden="true"
+          />
+          <span
+            className={styles.frameLightEmitter}
+            data-chat-mini-frame-light="emitter"
+            aria-hidden="true"
+          />
+          <span
+            className={styles.frameLightCore}
+            data-chat-mini-frame-light="core"
+            aria-hidden="true"
+          />
         </>
       ) : null}
       <span
         className={styles.upperScreen}
+        data-chat-mini-upper-screen="true"
         data-avatar-canonical-screen-size={
           CHAT_MINI_BOT_AVATAR_CANONICAL_SCREEN_SIZE
         }
         data-avatar-face-coordinate-source="studio"
       >
-        {props.face}
+        <span className={styles.upperScreenContent}>
+          {props.thinking ? null : props.behindFace}
+          {props.face}
+          {props.thinking ? null : props.aboveFace}
+        </span>
       </span>
-      <span className={styles.lowerScreen}>{props.glyph}</span>
+      <span className={styles.lowerScreen}>
+        <span className={styles.lowerScreenContent}>{props.glyph}</span>
+      </span>
     </span>
   );
 }

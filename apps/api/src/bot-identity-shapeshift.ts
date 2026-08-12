@@ -55,6 +55,7 @@ function faceFromRow(row: Record<string, unknown>): BotFaceStyle {
     faceEyesFont: row.face_eyes_font,
     faceEyeCharacter: row.face_eye_character,
     faceEyeCount: row.face_eye_count,
+    faceEyeSpacing: row.face_eye_spacing,
     faceEyeAnimation: row.face_eye_animation,
     faceMouthFont: row.face_mouth_font,
     faceMouthCharacter: row.face_mouth_character,
@@ -101,7 +102,7 @@ export function listLibraryIdentityShapeshiftCandidatesV1(
   const rows = db
     .prepare(
       `SELECT id, name, system_prompt,
-              face_eyes_font, face_eye_character, face_eye_count, face_eye_animation,
+              face_eyes_font, face_eye_character, face_eye_count, face_eye_spacing, face_eye_animation,
               face_mouth_font, face_mouth_character, face_mouth_animation,
               face_mouth_coffee_pucker, face_font_weight,
               face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg,
@@ -174,6 +175,7 @@ function parseMarketplaceBotArchive(
         faceEyesFont: bot.faceEyesFont,
         faceEyeCharacter: bot.faceEyeCharacter,
         faceEyeCount: bot.faceEyeCount,
+        faceEyeSpacing: bot.faceEyeSpacing,
         faceEyeAnimation: bot.faceEyeAnimation,
         faceMouthFont: bot.faceMouthFont,
         faceMouthCharacter: bot.faceMouthCharacter,

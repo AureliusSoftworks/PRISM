@@ -54,12 +54,14 @@ export function playerPremiumVoiceId(
 export function selectPlayerPremiumVoice(
   profile: BotAudioVoiceProfileV1 | null | undefined,
   voiceId: string | null,
+  nativeAccentHint: string | null = null,
 ): BotAudioVoiceProfileV2 {
   return cleanPlayerVoiceProfile({
     ...cleanPlayerVoiceProfile(profile),
     elevenLabsVoiceId: voiceId?.trim() || null,
     elevenLabsVoiceIdOverride: null,
     elevenLabsVoiceInitialized: true,
+    elevenLabsNativeAccentHint: voiceId?.trim() ? nativeAccentHint : null,
   });
 }
 
@@ -70,6 +72,7 @@ export function playerLocalVoiceProfile(
     ...cleanPlayerVoiceProfile(profile),
     elevenLabsVoiceId: null,
     elevenLabsVoiceIdOverride: null,
+    elevenLabsNativeAccentHint: null,
   });
 }
 

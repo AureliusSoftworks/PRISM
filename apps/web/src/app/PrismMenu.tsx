@@ -25,6 +25,8 @@ import styles from "./PrismMenu.module.css";
 
 /** Broadcast before opening a top-navbar picker so every picker shares one owner. */
 export const PRISM_NAVBAR_PICKER_OPEN_EVENT = "prism:navbar-picker-open";
+const PRISM_NAVBAR_PICKER_SURFACE_SELECTOR =
+  '[data-navbar-picker-surface="true"]';
 
 export function announcePrismNavbarPickerOpen(source: string): void {
   window.dispatchEvent(
@@ -273,6 +275,60 @@ export function PrismMenuProvider({ children }: { children: ReactNode }): React.
         closeForNavbarPicker,
       );
   }, [closeStandaloneMenus]);
+
+  useEffect(() => {
+    const navbarPickerIsOpen = (): boolean =>
+      Boolean(document.querySelector(PRISM_NAVBAR_PICKER_SURFACE_SELECTOR));
+    const eventStartedInsideNavbarPicker = (event: Event): boolean => {
+      const target = event.target;
+      return (
+        target instanceof Element &&
+        Boolean(target.closest(PRISM_NAVBAR_PICKER_SURFACE_SELECTOR))
+      );
+    };
+    const blockBackgroundScroll = (event: WheelEvent | TouchEvent): void => {
+      if (!navbarPickerIsOpen() || eventStartedInsideNavbarPicker(event)) return;
+      event.preventDefault();
+    };
+    const blockBackgroundKeyboardScroll = (event: KeyboardEvent): void => {
+      if (
+        !navbarPickerIsOpen() ||
+        eventStartedInsideNavbarPicker(event) ||
+        ![
+          "ArrowDown",
+          "ArrowLeft",
+          "ArrowRight",
+          "ArrowUp",
+          "End",
+          "Home",
+          "PageDown",
+          "PageUp",
+          " ",
+        ].includes(event.key)
+      ) {
+        return;
+      }
+      event.preventDefault();
+    };
+
+    // PRISM's pages scroll inside applet-owned containers rather than the body.
+    // Guard at the window capture boundary so every navbar picker freezes all
+    // background scrollers while preserving native overflow inside the picker.
+    window.addEventListener("wheel", blockBackgroundScroll, {
+      capture: true,
+      passive: false,
+    });
+    window.addEventListener("touchmove", blockBackgroundScroll, {
+      capture: true,
+      passive: false,
+    });
+    window.addEventListener("keydown", blockBackgroundKeyboardScroll, true);
+    return () => {
+      window.removeEventListener("wheel", blockBackgroundScroll, true);
+      window.removeEventListener("touchmove", blockBackgroundScroll, true);
+      window.removeEventListener("keydown", blockBackgroundKeyboardScroll, true);
+    };
+  }, []);
 
   const value = useMemo(
     () => ({ activeMenu, openMenu, closeMenu, claimSurface }),

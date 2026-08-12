@@ -42,6 +42,7 @@ const pristine: BotCustomizerSavePristine = {
   faceEyeOffsetY: 0,
   faceEyeRotationDeg: 0,
   faceEyeCount: 1,
+  faceEyeSpacing: 0.36,
   faceMouthScale: 1,
   faceMouthOffsetX: 0,
   faceMouthOffsetY: 0,
@@ -101,6 +102,7 @@ const currentFromPristine = (
   faceEyeOffsetY: pristine.faceEyeOffsetY,
   faceEyeRotationDeg: pristine.faceEyeRotationDeg,
   faceEyeCount: pristine.faceEyeCount,
+  faceEyeSpacing: pristine.faceEyeSpacing,
   faceMouthScale: pristine.faceMouthScale,
   faceMouthOffsetX: pristine.faceMouthOffsetX,
   faceMouthOffsetY: pristine.faceMouthOffsetY,
@@ -290,6 +292,16 @@ describe("bot customizer save patch", () => {
     );
   });
 
+  it("patches None as a distinct static mouth animation", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ faceMouthAnimation: "static" }),
+        pristine,
+      ),
+      { faceMouthAnimation: "static" },
+    );
+  });
+
   it("patches the custom eye count independently", () => {
     assert.deepEqual(
       buildBotCustomizerSavePatch(
@@ -297,6 +309,16 @@ describe("bot customizer save patch", () => {
         pristine,
       ),
       { faceEyeCount: 2 },
+    );
+  });
+
+  it("patches the custom eye spacing independently", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ faceEyeSpacing: 0.48 }),
+        pristine,
+      ),
+      { faceEyeSpacing: 0.48 },
     );
   });
 

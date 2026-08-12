@@ -55,4 +55,27 @@ describe("Avatar Studio voice preview routing", () => {
       /englishVoiceEngine: englishChoice \? previewEngine : undefined/,
     );
   });
+
+  it("keeps the dock form-free with local Enter playback behavior", () => {
+    assert.match(
+      pageSource,
+      /<div[\s\S]*?className=\{styles\.botAvatarVoiceTestDock\}[\s\S]*?data-avatar-foundry-region="voice-preview"[\s\S]*?role="group"[\s\S]*?aria-label="Test this bot's voice"/u,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /<form[\s\S]*?className=\{styles\.botAvatarVoiceTestDock\}[\s\S]*?data-avatar-foundry-region="voice-preview"/u,
+    );
+    assert.match(
+      pageSource,
+      /type="button"[\s\S]*?onClick=\{\(\) => void playChoice\("current"\)\}[\s\S]*?\{activeChoice === "current" \? "Speaking…" : "Speak"\}/u,
+    );
+    assert.match(
+      pageSource,
+      /choices\.map\([\s\S]*?onClick=\{\(\) => void playChoice\(choice\)\}[\s\S]*?botAvatarVoiceTestChoiceLabel\(choice\)/u,
+    );
+    assert.match(
+      pageSource,
+      /aria-label="Voice preview line"[\s\S]*?onKeyDown=\{\(event\) => \{[\s\S]*?if \(event\.key !== "Enter"\)[\s\S]*?return;[\s\S]*?if \(event\.nativeEvent\.isComposing\)[\s\S]*?return;[\s\S]*?event\.preventDefault\(\);[\s\S]*?event\.stopPropagation\(\);[\s\S]*?void playChoice\("current"\);[\s\S]*?\}\}/u,
+    );
+  });
 });

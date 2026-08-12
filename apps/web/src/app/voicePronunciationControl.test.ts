@@ -39,6 +39,33 @@ describe("cross-accent local voice pronunciation controls", () => {
     assert.match(pageSource, /playerAudioVoiceProfile: nextProfile/u);
   });
 
+  it("keeps Avatar Studio map interactions save-only while keeping explicit preview controls", () => {
+    const avatarAtlasSource = pageSource.slice(
+      pageSource.indexOf("selection={avatarPronunciationSelection}"),
+      pageSource.indexOf(
+        'if (activeControlTab === "voice" && !avatarVoiceAccentReady)',
+      ),
+    );
+    assert.match(
+      avatarAtlasSource,
+      /onCommit=\{\(selection\) => \{\s*const nextProfile = profileWithPronunciationAtlasSelection\([\s\S]*?onAudioVoiceProfileChange\(nextProfile, \{ saveImmediately: true \}\);\s*\}\}/u,
+    );
+    assert.doesNotMatch(
+      avatarAtlasSource,
+      /void playPronunciationAtlasPreview\(nextProfile\)/,
+    );
+    assert.ok(
+      avatarAtlasSource.includes(
+        `onPreviewSource={() => {\n                const sourceProfile = profileWithOriginalPronunciation(\n                  audioVoiceProfile,\n                );\n                void playPronunciationAtlasPreview(sourceProfile);`,
+      ),
+    );
+    assert.ok(
+      avatarAtlasSource.includes(
+        `onPreviewCurrent={() =>\n            void playPronunciationAtlasPreview(audioVoiceProfile)`,
+      ),
+    );
+  });
+
   it("compares the authored source against the current phoneme stack", () => {
     assert.match(pageSource, /pronunciationBase: "follow-voice"/u);
     assert.match(atlasSource, />\s*Original\s*</u);

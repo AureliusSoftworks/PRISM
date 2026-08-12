@@ -2,7 +2,7 @@ import type {
   AutoRecoveryTraceV1,
   AutoRouteDecisionV1,
   PsychicThoughtPayload,
-  ReasoningEffort,
+  ProviderReasoningEffort,
 } from "@localai/shared";
 
 export interface PsychicPresentationMessageLike {
@@ -11,12 +11,13 @@ export interface PsychicPresentationMessageLike {
   psychicThought?: PsychicThoughtPayload;
   autoRecovery?: AutoRecoveryTraceV1;
   autoRoute?: AutoRouteDecisionV1;
+  reasoningEffort?: ProviderReasoningEffort;
   turbo?: boolean;
 }
 
 export interface AssistantGenerationMetadata {
   model: string;
-  effort: ReasoningEffort;
+  effort: ProviderReasoningEffort;
   automatic: boolean;
   turbo: boolean;
 }
@@ -55,6 +56,7 @@ export function assistantGenerationMetadata(
     effort: assistant.autoRecovery
       ? "none"
       : (assistant.autoRoute?.reasoningEffort ??
+        assistant.reasoningEffort ??
         psychicSource?.psychicThought?.effort ??
         "auto"),
     automatic,

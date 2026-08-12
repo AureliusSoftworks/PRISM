@@ -131,7 +131,7 @@ describe("Debate experience", () => {
     );
   });
 
-  it("makes every resumed recess one gavel-led Moderator camera run", () => {
+  it("makes every archived Resume an immediate gavel, prepared Moderator line, then held floor", () => {
     const immediateStrike = source.indexOf("const resumeGavelEventId =");
     const quietResumeRequest = source.indexOf(
       "quiet = await requestQuietLifecycle(previous)",
@@ -142,17 +142,25 @@ describe("Debate experience", () => {
     assert.match(source, /const lifecycleCutscene = resume \|\| !juryCameraActive/u);
     assert.match(
       source,
-      /const lifecycleGavelAlreadyStruck =[\s\S]{0,180}resumeCeremonyStarted/u,
+      /const lifecycleGavelAlreadyStruck =[\s\S]{0,220}resumeCeremonyStarted \|\| bufferedReturnGavel/u,
     );
     assert.match(
       source,
-      /const judgeGavelCameraForced =[\s\S]{0,120}resumeCeremonyCameraForced/u,
+      /const preparedResumeEventId = resumeBufferedArchive[\s\S]{0,120}previous\.preparedResumeEventId/u,
+    );
+    assert.match(
+      source,
+      /const ceremonyPrevious = preparedResumeEventId[\s\S]{0,260}event\.id !== preparedResumeEventId/u,
     );
     assert.match(
       source,
       /releaseResumeCeremonyCameraOnEventId:[\s\S]{0,80}pausedPresentationEvent\.id/u,
     );
     assert.match(source, /debateRecessGalleryPhase\(/u);
+    assert.match(
+      source,
+      /const cameraSpeechEvent = debateEventCanOwnAutomaticCamera\([\s\S]{0,80}presenting/u,
+    );
   });
 
   it("restores an interrupted Debate line from its durable captured voice take", () => {
@@ -1696,8 +1704,8 @@ describe("Debate experience", () => {
     assert.match(source, /debateSessionRetryDraft\(/u);
     assert.match(source, /your current model and routing stay selected/u);
     const restoreBody = source.slice(
+      source.indexOf("const restoreDebateSetupFromSession"),
       source.indexOf("const reuseSessionSetup"),
-      source.indexOf("const startDebate"),
     );
     assert.match(restoreBody, /setRoleChecks\(\[\]\)/u);
     assert.match(restoreBody, /setEvidenceDecisionMade\(false\)/u);
@@ -1774,14 +1782,15 @@ describe("Debate experience", () => {
     );
   });
 
-  it("uses the current explicit model only at a saved Debate's Start boundary", () => {
-    assert.match(
-      source,
-      /startDeferredSetup && props\.modelOverride[\s\S]{0,260}startPreferredProvider: props\.modelOverride\.provider[\s\S]{0,160}startModelOverride: props\.modelOverride\.model[\s\S]{0,120}startResponseMode: props\.responseMode/u,
+  it("never sends current navbar routing into an archived Start or Resume", () => {
+    const lifecycleBody = source.slice(
+      source.indexOf("const pauseOrResume = async"),
+      source.indexOf("pauseOrResumeRef.current = pauseOrResume"),
     );
-    assert.match(
-      source,
-      /startDeferredSetup && props\.modelOverride[\s\S]{0,420}: \{\}\),/u,
+    assert.match(lifecycleBody, /expectedRevision: session\.revision/u);
+    assert.doesNotMatch(
+      lifecycleBody,
+      /startPreferredProvider|startModelOverride|startResponseMode|props\.reasoningEffort|props\.turbo/u,
     );
   });
 
@@ -1876,10 +1885,10 @@ describe("Debate experience", () => {
     for (const kind of ["player", "verdict", "failed"]) {
       assert.match(source, new RegExp(`data-kind="${kind}"`, "u"));
     }
-    // Ready-to-begin holds use the full-screen intro title so Proceedings
-    // cannot spoil a prepared gallery before Start. Mid-proceeding pause/resume
-    // uses the dim stage overlay for every role.
-    assert.match(source, /readyToBeginOverlay \?/u);
+    // Ready-to-begin and Archive-return holds use the full-screen intro title
+    // so Proceedings cannot spoil the prepared gallery before Start/Resume.
+    assert.match(source, /const titleCardHolding =/u);
+    assert.match(source, /archiveReadinessForSession !== null/u);
     assert.doesNotMatch(
       source,
       /readyToBeginOverlay \|\| session\.playerRole === "spectator"/u,
@@ -1890,7 +1899,7 @@ describe("Debate experience", () => {
     assert.match(source, /Start Debate/u);
     assert.match(
       source,
-      /session\.status === "paused" &&\s*!presenting &&\s*!readyToBeginOverlay \?/u,
+      /session\.status === "paused" &&\s*!presenting &&\s*!titleCardHolding \?/u,
     );
     assert.match(source, /data-kind="paused"/u);
     assert.match(source, /Debate paused/u);
@@ -1901,7 +1910,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /The proceeding stays covered until you start/u,
+      /The first audible sequence is being readied/u,
     );
     assert.match(css, /\.identOverlay\[data-hold="true"\]/u);
     assert.match(css, /\.identHoldAction/u);
@@ -2642,7 +2651,7 @@ describe("Debate experience", () => {
     );
   });
 
-  it("performs a missed Judge gavel cue as a silent camera beat", () => {
+  it("keeps a missed Judge gavel cue silent without inventing a Moderator shot", () => {
     assert.match(
       source,
       /gavelCue &&[\s\S]{0,120}next\.playerRole === "judge"[\s\S]{0,260}requestJudgeGavelCeremonyRef\.current\?\.\(gavelCue\)[\s\S]{0,100}gavelCue = null/u,
@@ -2651,19 +2660,9 @@ describe("Debate experience", () => {
     assert.match(source, /The room is waiting on you\./u);
     assert.doesNotMatch(source, /An awkward beat hangs\./u);
     assert.doesNotMatch(source, /No gavel falls\. The bots carry on anyway\./u);
-    assert.match(source, /setJudgeGavelMissedCameraView\(/u);
-    assert.match(
-      source,
-      /missed-gavel-camera[\s\S]{0,180}\? "left"\s*: "right"/u,
-    );
-    assert.match(
-      source,
-      /setJudgeGavelMissedCameraView\("moderator"\)[\s\S]{0,180}Math\.floor\(DEBATE_JUDGE_GAVEL_MISSED_BEAT_MS \/ 2\)/u,
-    );
-    assert.match(
-      source,
-      /judgeGavelCeremony\?\.status === "missed"[\s\S]{0,120}judgeGavelMissedCameraView/u,
-    );
+    assert.doesNotMatch(source, /setJudgeGavelMissedCameraView/u);
+    assert.doesNotMatch(source, /judgeGavelMissedCameraView/u);
+    assert.match(source, /const recessSettledWide = session\.status === "paused" && !presenting/u);
     assert.match(
       source,
       /\{judgeGavelCeremony && !judgeJuryGavelLocked \? \(\s*judgeGavelCeremony\.status === "ready" \? \(/u,
@@ -3692,10 +3691,9 @@ describe("Debate experience", () => {
     assert.match(source, /hardMuted:/u);
     assert.match(source, /data-vocal-foley/u);
     assert.match(page, /avatarState\.foleyMouthShape \?\? "closed"/u);
-    assert.match(page, /const DEBATE_THINKING_SFX_MIX_GAIN = 0\.2/u);
     assert.match(
       page,
-      /botAvatarSfxForDebateState\([\s\S]{0,260}avatarState\.thinking/u,
+      /botAvatarSfxForVoiceBus\([\s\S]{0,220}botSnapshot\.voiceProfile[\s\S]{0,500}settings\.voiceVolume/u,
     );
     assert.match(page, /DEBATE_FORUM_VOICE_ROOM_SEND/u);
     assert.match(page, /playbackSurface === "debate"/u);
@@ -4013,69 +4011,100 @@ describe("Debate experience", () => {
     );
   });
 
-  it("hot-preloads an archived opening before exposing its title-card Start", () => {
-    assert.match(source, /debateSessionAwaitingFirstPresentation/u);
+  it("replays gallery arrival and exposes Start only after the minimum Archive runway is ready", () => {
+    assert.match(source, /setOpeningPreloadSessionId\(session\.id\)/u);
+    assert.match(source, /setView\("baking"\)/u);
+    assert.match(source, /archive-return-buffer/u);
     assert.match(
       source,
-      /deferredStartAtOpen[\s\S]{0,1300}setOpeningPreloadSessionId\(session\.id\)[\s\S]{0,2600}archive-preload-start[\s\S]{0,1800}archive-preload-opening[\s\S]{0,1800}archive-preload-hold/u,
+      /setArchiveReturnReadiness\(\{[\s\S]{0,180}phase: "preparing"/u,
+    );
+    const arrivalStart = source.indexOf(
+      "openingGalleryArrivalPromise = (async",
+    );
+    const returnBufferStart = source.indexOf(
+      "archive-return-buffer",
+      arrivalStart,
+    );
+    assert.ok(arrivalStart >= 0);
+    assert.ok(returnBufferStart > arrivalStart);
+    assert.match(
+      source,
+      /while \(openingIsCurrent\(\)\)[\s\S]{0,650}debateGalleryArrivalRevealedCount\([\s\S]{0,300}arrival\.arrivalComplete/u,
     );
     assert.match(
       source,
-      /openingPreloadRequested[\s\S]{0,900}setSpectatorGalleryBakeUnlocked\(false\)[\s\S]{0,500}setView\("baking"\)/u,
+      /setView\("live"\)[\s\S]{0,420}const identPlaybackPromise = identReadyPromise\.then\(\(\) =>[\s\S]{0,80}playDebateIdent\("intro"\)[\s\S]{0,500}minimumArchiveBufferPromise[\s\S]{0,900}const voiceRunway = preloadReturnedDebateVoices\(session\)[\s\S]{0,180}voiceRunway\.criticalReady/u,
+    );
+    assert.match(source, /setOpeningPreloadSessionId\(null\)/u);
+    assert.match(source, /setArchiveReturnReadySessionId\(/u);
+    assert.match(
+      source,
+      /titleCardHolding =[\s\S]{0,100}archiveReadinessForSession !== null/u,
+    );
+    assert.match(source, /"Ready now · buffering ahead"/u);
+    assert.match(source, /"Fully buffered"/u);
+    assert.match(
+      source,
+      /disabled:[\s\S]{0,120}archiveReadinessForSession\?\.phase === "preparing"[\s\S]{0,160}busy/u,
+    );
+    const openSessionSource = source.slice(
+      source.indexOf("const openSession = async"),
+      source.indexOf("useEffect(() =>", source.indexOf("const openSession = async")),
+    );
+    assert.doesNotMatch(openSessionSource, /pauseOrResume\(/u);
+  });
+
+  it("keeps buffering and voice-warming after readiness while the title card remains", () => {
+    assert.match(source, /const preloadDebateVoiceRunway = useCallback/u);
+    assert.match(source, /debateUtteranceForEvent\(session, event\)/u);
+    assert.match(source, /Promise\.allSettled\(\[worker\(\), worker\(\)\]\)/u);
+    assert.match(source, /if \(requireFirstReady\)[\s\S]{0,100}await onPrepareUtterance\(first\)/u);
+    assert.match(source, /const preloadReturnedDebateVoices = useCallback/u);
+    assert.match(source, /const criticalReady = preloadDebateVoiceRunway\(/u);
+    assert.match(source, /const runwayReady = criticalReady\.then/u);
+    assert.match(
+      source,
+      /preparedResumeEvent \? \[preparedResumeEvent\] : \[\][\s\S]{0,180}event\.id !== preparedResumeEvent\?\.id/u,
+    );
+    assert.match(source, /archiveReturnTitleSessionIdRef\.current === lookaheadSessionId/u);
+    assert.match(source, /archive-return-buffer-ahead-/u);
+    assert.match(source, /buffered\.bufferedAdvanceCount <= previousBufferedCount/u);
+    assert.ok(
+      source.indexOf("void voiceRunway.runwayReady") <
+        source.indexOf("await voiceRunway.runwayReady"),
     );
     assert.match(
       source,
-      /await Promise\.all\(\[[\s\S]{0,180}preloadReturnedDebateVoices\(session\)[\s\S]{0,180}preloadDebateIdentAudio\("intro"\)[\s\S]{0,1400}arrival\.arrivalComplete[\s\S]{0,500}setView\("live"\)[\s\S]{0,180}setOpeningPreloadSessionId\(null\)[\s\S]{0,140}playPreparedOpeningTitleMusic\(session\.id\)/u,
+      /current\?\.sessionId === lookaheadSessionId &&[\s\S]{0,100}current\.phase !== "preparing"[\s\S]{0,120}bufferingFailed: true/u,
     );
     assert.match(
       source,
-      /session\.status === "paused" &&[\s\S]{0,160}readyToBeginOverlay &&[\s\S]{0,100}!openingPreloading &&[\s\S]{0,100}!openingLaunching/u,
-    );
-    assert.match(
-      source,
-      /holdTitle="Gallery ready"[\s\S]{0,500}label: "Start Debate"/u,
+      /archiveReadinessForSession\?\.phase === "preparing" \|\|[\s\S]{0,120}debateFloorMutationInFlightRef\.current/u,
     );
   });
 
-  it("preloads the exact returned floor and keeps an audible runway ahead", () => {
-    assert.match(
-      source,
-      /const preloadDebateVoiceRunway = useCallback\([\s\S]{0,500}debateUtteranceForEvent\(session, event\)[\s\S]{0,1200}Promise\.allSettled\(\[worker\(\), worker\(\)\]\)/u,
+  it("detaches lookahead race-safely on an early Start and keeps catch-up synthesis in-world", () => {
+    assert.match(source, /if \(launchFromTitleCard\) \{/u);
+    assert.match(source, /archiveReturnTitleSessionIdRef\.current = null/u);
+    assert.match(source, /server revision check decides whether that[\s\S]{0,80}slice or Resume wins/u);
+    const gavelIndex = source.indexOf(
+      'triggerJudgeGavelSmash("order", openingGavelEventId)',
     );
-    assert.match(
-      source,
-      /const preloadReturnedDebateVoices = useCallback\([\s\S]{0,600}session\.pausedPresentationEventId[\s\S]{0,400}debateResumeFloorReplayEvents\([\s\S]{0,800}debatePresentationEvents\([\s\S]{0,300}preloadDebateVoiceRunway\(session, presentationEvents, true\)/u,
+    const lifecycleRequestIndex = source.indexOf(
+      "const lifecyclePath",
+      gavelIndex,
     );
-    assert.match(
-      source,
-      /activeSessionRef\.current = session;[\s\S]{0,120}setActiveSession\(session\)[\s\S]{0,5000}setView\("live"\)[\s\S]{0,900}requestAnimationFrame[\s\S]{0,260}await preloadReturnedDebateVoices\(session\)/u,
-    );
-    assert.match(
-      source,
-      /session\.liveBake\?\.status === "baking" \|\|[\s\S]{0,100}liveBakeShouldResumeOnOpen\(session\.liveBake\)/u,
-    );
-    assert.match(
-      source,
-      /const freshRunway = debatePresentationEvents\([\s\S]{0,500}await preloadDebateVoiceRunway\([\s\S]{0,220}await adoptSession\(previous, polled\.session\)/u,
-    );
-    assert.match(
-      source,
-      /let pollInFlight = false[\s\S]{0,120}if \(pollInFlight\) return[\s\S]{0,120}pollInFlight = true[\s\S]{0,5000}finally \{[\s\S]{0,80}pollInFlight = false/u,
-    );
-    assert.match(
-      source,
-      /Never absorb a new event revision while its predecessor is still[\s\S]{0,500}polled\.session\.liveBake\?\.status === "baking"[\s\S]{0,300}\.\.\.previous,[\s\S]{0,120}liveBake: polled\.session\.liveBake/u,
-    );
-    assert.match(
-      source,
-      /polled\.session\.liveBake\?\.status === "failed"[\s\S]{0,160}acceptedPolledRevision[\s\S]{0,100}setSpectatorBakeLiveFallback\(true\)/u,
-    );
+    assert.ok(gavelIndex >= 0 && lifecycleRequestIndex > gavelIndex);
+    assert.match(source, /busy && !presenting && session\.status === "live"/u);
+    assert.match(source, /\? debateExpectedBotId\(session\)/u);
+    assert.doesNotMatch(source, /<PrismBlockingLoader\s+open=\{busy\}/u);
   });
 
   it("cuts the prepared title straight to the opening gavel", () => {
     assert.match(
       source,
-      /if \(startFromTitleCard\)[\s\S]{0,240}setOpeningLaunchSessionId\(previous\.id\)[\s\S]{0,320}stopDebateIdentAudio\(DEBATE_OPENING_TITLE_CUT_FADE_MS\)[\s\S]{0,240}triggerJudgeGavelSmash\("order", openingGavelEventId\)/u,
+      /if \(bufferedReturnGavel\)[\s\S]{0,240}if \(launchFromTitleCard\) setOpeningLaunchSessionId\(previous\.id\)[\s\S]{0,320}stopDebateIdentAudio\(DEBATE_OPENING_TITLE_CUT_FADE_MS\)[\s\S]{0,240}triggerJudgeGavelSmash\("order", openingGavelEventId\)/u,
     );
     assert.match(
       source,
@@ -4087,7 +4116,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /catch \(caught\) \{[\s\S]{0,180}if \(startFromTitleCard && mountedRef\.current\)[\s\S]{0,240}setOpeningLaunchSessionId\(null\)[\s\S]{0,220}setDebateOpeningGalleryHushed\(false\)[\s\S]{0,220}if \(!titleStartCommitted\)[\s\S]{0,140}playPreparedOpeningTitleMusic\(previous\.id\)/u,
+      /catch \(caught\) \{[\s\S]{0,180}if \(launchFromTitleCard && mountedRef\.current\)[\s\S]{0,240}setOpeningLaunchSessionId\(null\)[\s\S]{0,220}setDebateOpeningGalleryHushed\(false\)[\s\S]{0,260}if \(!titleStartCommitted\)[\s\S]{0,140}playPreparedOpeningTitleMusic\(previous\.id\)/u,
     );
     assert.match(
       source,
@@ -4212,7 +4241,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /disabled=\{judgeGavelCameraForced \|\| juryCameraClosed\}/u,
+      /disabled=\{juryCameraClosed\}/u,
     );
     assert.match(
       source,
@@ -4266,9 +4295,12 @@ describe("Debate experience", () => {
     assert.doesNotMatch(source, /forumPreparingNextTurn/u);
     assert.match(
       source,
-      /recessSettledWide[\s\S]{0,900}recessLifecycleModerator[\s\S]{0,1400}juryCameraActive[\s\S]{0,120}\? "jury"[\s\S]{0,200}speakerHandoffKeepsWide[\s\S]{0,400}introCameraView/u,
+      /const cameraSpeechEvent = debateEventCanOwnAutomaticCamera\([\s\S]{0,120}presenting/u,
     );
-    assert.match(source, /lifecycleModeratorShot[\s\S]{0,100}debateAutoCameraView\(activeRole\)/u);
+    assert.match(source, /const cameraView = galleryArriving/u);
+    assert.match(source, /recessSettledWide\s*\? "wide"/u);
+    assert.match(source, /juryCameraActive\s*\? "jury"/u);
+    assert.match(source, /debateAutoCameraView\(cameraActiveRole\)/u);
     assert.match(
       source,
       /Metadata-only revision drift is safe to absorb without clearing[\s\S]{0,260}setActiveSession\(recovered\)[\s\S]{0,120}requestAdvance\(recovered\)/u,
@@ -4341,20 +4373,11 @@ describe("Debate experience", () => {
       source,
       /data-impact-material=\{\s*exhibit \? resolveDebateExhibitImpactMaterial\(exhibit\) : "paper"\s*\}/u,
     );
-    assert.match(
-      source,
-      /const judgeGavelCameraForced =\s*judgeGavelSmashCue !== null \|\|\s*gavelCameraSettling \|\|\s*resumeCeremonyCameraForced/u,
-    );
-    assert.match(
-      source,
-      /const cameraView = galleryArriving\s*\?\s*"wide"\s*:\s*judgeGavelCameraForced\s*\?\s*"moderator"/u,
-    );
+    assert.doesNotMatch(source, /judgeGavelCameraForced/u);
+    assert.match(source, /const cameraView = galleryArriving\s*\?\s*"wide"/u);
     assert.match(source, /const juryChamberVisible = cameraView === "jury"/u);
-    assert.match(
-      source,
-      /data-locked=\{judgeGavelCameraForced \? "true" : undefined\}/u,
-    );
-    assert.match(source, /disabled=\{judgeGavelCameraForced\}/u);
+    assert.doesNotMatch(source, /data-locked=\{judgeGavelCameraForced/u);
+    assert.doesNotMatch(source, /disabled=\{judgeGavelCameraForced/u);
     assert.doesNotMatch(
       source,
       /const triggerJudgeGavelSmash[\s\S]{0,420}setCameraMode\("moderator"\)/u,
@@ -4555,13 +4578,10 @@ describe("Debate experience", () => {
     assert.match(source, /debateModeratorGavelSpeechLeadMs\(gavelCue\.kind\)/u);
     assert.match(
       source,
-      /setGavelCameraSettling\(true\)[\s\S]{0,700}setLiveGavelCue\(resumedLifecycleGavelAlreadyStruck \? null : gavelCue\)/u,
+      /const gavelCameraSettleMs =[\s\S]{0,180}debateModeratorGavelCameraSettleMs\(gavelCue\.kind\)[\s\S]{0,300}window\.setTimeout\(resolve, gavelCameraSettleMs\)[\s\S]{0,220}setLiveGavelCue\(resumedLifecycleGavelAlreadyStruck \? null : gavelCue\)/u,
     );
     assert.match(source, /debateModeratorGavelCameraSettleMs/u);
-    assert.match(
-      source,
-      /judgeGavelSmashCue !== null \|\|\s*gavelCameraSettling \|\|\s*resumeCeremonyCameraForced/u,
-    );
+    assert.doesNotMatch(source, /gavelCameraSettling|resumeCeremonyCameraForced/u);
     assert.match(
       source,
       /setLiveGavelCue\([^)]+gavelCue\)[\s\S]{0,900}DEBATE_GAVEL_ORDER_CAMERA_CUT_MS[\s\S]{0,1800}let presentationArmedForHandoff = false[\s\S]{0,800}setPresentationEventId\(event\.id\)/u,
@@ -4582,12 +4602,10 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /recessLifecycleModerator[\s\S]{0,120}session\.status === "paused" && presenting;/u,
+      /const cameraSpeechEvent = debateEventCanOwnAutomaticCamera\([\s\S]{0,120}presenting/u,
     );
-    assert.match(
-      source,
-      /recessSettledWide\s*\?\s*"wide"\s*:\s*recessLifecycleModerator\s*\?\s*"moderator"/u,
-    );
+    assert.doesNotMatch(source, /recessLifecycleModerator/u);
+    assert.match(source, /recessSettledWide\s*\?\s*"wide"/u);
     assert.match(
       source,
       /resume && !silentLifecycle[\s\S]{0,180}status: "paused"/u,
@@ -4649,9 +4667,10 @@ describe("Debate experience", () => {
       source,
       /ambientBotVocalizations=\{\s*ambientAudioActive && !suppressSparseAmbient\s*\}/u,
     );
+    assert.match(source, /cue=\{activeGavelCue\}/u);
     assert.match(
       source,
-      /judgeGavelSmashCue !== null \|\|\s*gavelCameraSettling \|\|\s*activeGavelCue == null \|\|\s*activeGavelCue\.kind === "order" \|\|\s*activeGavelCue\.kind === "attention"/u,
+      /session\.status !== "paused" \|\|\s*activeGavelCue !== null/u,
     );
     assert.match(
       source,

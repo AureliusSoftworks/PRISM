@@ -8,6 +8,7 @@ import {
   normalizeLocalVoicePronunciationBase,
   normalizeLocalVoiceSpeechprintInfluence,
   normalizeLocalVoiceSpeechprintStrength,
+  resolveLocalAccentFallback,
   resolveLocalVoicePronunciationLocale,
   type BotAudioVoiceProfileV1,
   type LocalVoiceCalibrationStateV1,
@@ -215,8 +216,13 @@ export function resolveLocalVoicePronunciation(args: {
   usingSystemVoice: boolean;
 }): ResolvedLocalVoicePronunciationV1 {
   const profile = normalizeBotAudioVoiceProfileV1(args.profile);
+  const localAccent = resolveLocalAccentFallback({
+    accentDefinitionId: profile.accentDefinitionId,
+    pronunciationBase: profile.pronunciationBase,
+    speechprintInfluence: profile.speechprintInfluence,
+  });
   const requestedBase = normalizeLocalVoicePronunciationBase(
-    profile.pronunciationBase,
+    localAccent.pronunciationBase,
   );
   const sourceLocale = profile.accentLocale ?? "en-US";
   const sourceBaseLocale = resolveLocalVoicePronunciationLocale(
@@ -254,15 +260,20 @@ export function resolveLocalVoiceSpeechprint(args: {
   pronunciation?: ResolvedLocalVoicePronunciationV1;
 }): ResolvedLocalVoiceSpeechprintV1 {
   const profile = normalizeBotAudioVoiceProfileV1(args.profile);
+  const localAccent = resolveLocalAccentFallback({
+    accentDefinitionId: profile.accentDefinitionId,
+    pronunciationBase: profile.pronunciationBase,
+    speechprintInfluence: profile.speechprintInfluence,
+  });
   const requestedInfluence = normalizeLocalVoiceSpeechprintInfluence(
-    profile.speechprintInfluence,
+    localAccent.speechprintInfluence,
   );
   const strength = normalizeLocalVoiceSpeechprintStrength(
     profile.speechprintStrength,
   );
   const baseLocale = args.pronunciation?.resolvedBaseLocale ??
     resolveLocalVoicePronunciationLocale(
-      profile.pronunciationBase,
+      localAccent.pronunciationBase,
       profile.accentLocale,
     );
   if (requestedInfluence === "none") {

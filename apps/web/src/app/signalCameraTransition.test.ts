@@ -2,42 +2,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  readSignalCameraTransitionMode,
-  SIGNAL_CAMERA_TRANSITION_STORAGE_KEY,
-  signalCameraTransitionsShouldAnimate,
   signalListenerReactionCameraShot,
   signalLiveAutoCameraShot,
-  writeSignalCameraTransitionMode,
 } from "./signalCameraTransition.ts";
 
-describe("Signal camera transition preference", () => {
-  it("persists Instant and restores it in a later panel session", () => {
-    const values = new Map<string, string>();
-    const storage = {
-      getItem: (key: string) => values.get(key) ?? null,
-      setItem: (key: string, value: string) => values.set(key, value),
-    };
-    writeSignalCameraTransitionMode(storage, "instant");
-    assert.equal(
-      values.get(SIGNAL_CAMERA_TRANSITION_STORAGE_KEY),
-      "instant",
-    );
-    assert.equal(readSignalCameraTransitionMode(storage), "instant");
-  });
-
-  it("defaults corrupt or unavailable storage to Animated", () => {
-    assert.equal(readSignalCameraTransitionMode(null), "animated");
-    assert.equal(
-      readSignalCameraTransitionMode({ getItem: () => "surprise" }),
-      "animated",
-    );
-  });
-
-  it("gives reduced-motion precedence over the saved Animated preference", () => {
-    assert.equal(signalCameraTransitionsShouldAnimate("animated", false), true);
-    assert.equal(signalCameraTransitionsShouldAnimate("animated", true), false);
-    assert.equal(signalCameraTransitionsShouldAnimate("instant", false), false);
-  });
+describe("Signal automatic camera direction", () => {
 
   it("holds the Producer guest, then uses Wide whenever a bot is thinking", () => {
     assert.equal(
@@ -66,7 +35,7 @@ describe("Signal camera transition preference", () => {
     );
   });
 
-  it("cuts directly to live speech and holds that shot before returning Wide", () => {
+  it("cuts directly to live speech, but releases a prior hold for real thinking", () => {
     assert.equal(
       signalLiveAutoCameraShot({
         baseShot: "left",
@@ -84,7 +53,7 @@ describe("Signal camera transition preference", () => {
         botThinking: true,
         producerGuestThinking: false,
       }),
-      "left",
+      "wide",
     );
     assert.equal(
       signalLiveAutoCameraShot({
@@ -121,8 +90,6 @@ describe("Signal camera transition preference", () => {
     assert.equal(
       signalListenerReactionCameraShot({
         cameraCutEligible: false,
-        interjectionAttempt: false,
-        transitionMode: "instant",
         ephemeralSpeakingShot: "right",
         timedReactionShot: "right",
       }),
@@ -131,29 +98,16 @@ describe("Signal camera transition preference", () => {
     assert.equal(
       signalListenerReactionCameraShot({
         cameraCutEligible: true,
-        interjectionAttempt: false,
-        transitionMode: "animated",
         ephemeralSpeakingShot: "right",
       }),
       "right",
     );
   });
 
-  it("cuts interruption audio only when Instant can land the move", () => {
+  it("cuts an eligible interruption with its audible overlap", () => {
     assert.equal(
       signalListenerReactionCameraShot({
         cameraCutEligible: true,
-        interjectionAttempt: true,
-        transitionMode: "animated",
-        ephemeralSpeakingShot: "left",
-      }),
-      null,
-    );
-    assert.equal(
-      signalListenerReactionCameraShot({
-        cameraCutEligible: true,
-        interjectionAttempt: true,
-        transitionMode: "instant",
         ephemeralSpeakingShot: "left",
       }),
       "left",

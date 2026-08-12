@@ -154,6 +154,7 @@ import type {
   BotVoicePreset,
   OpinionTrend,
   PreparedTurnCursorV1,
+  ProviderReasoningEffort,
   ReasoningEffort,
   AutoFallbackChainV1,
   AutoRouteDecisionV1,
@@ -456,6 +457,7 @@ export interface CoffeeBotProfile {
   faceEyeOffsetY?: number | null;
   faceEyeRotationDeg?: number | null;
   faceEyeCount?: number | null;
+  faceEyeSpacing?: number | null;
   faceMouthScale?: number | null;
   faceMouthOffsetX?: number | null;
   faceMouthOffsetY?: number | null;
@@ -3270,7 +3272,7 @@ export function coffeeSpeakerMaxTokensForTurn(
   options: {
     effectiveProvider?: ProviderName;
     modelId?: string | null;
-    reasoningEffort?: ReasoningEffort | null;
+    reasoningEffort?: ProviderReasoningEffort | null;
   } = {}
 ): number {
   const cap = Math.max(1, Math.floor(coffeeCap));
@@ -3285,7 +3287,9 @@ export function coffeeSpeakerMaxTokensForTurn(
     return base;
   }
   const reasoningFloor =
-    options.reasoningEffort === "high" || options.reasoningEffort === "xhigh"
+    options.reasoningEffort === "high" ||
+    options.reasoningEffort === "xhigh" ||
+    options.reasoningEffort === "max"
       ? COFFEE_OPENAI_REASONING_SPEAKER_HIGH_COMPLETION_TOKENS
       : COFFEE_OPENAI_REASONING_SPEAKER_MIN_COMPLETION_TOKENS;
   return Math.max(base, reasoningFloor);
@@ -3294,7 +3298,7 @@ export function coffeeSpeakerMaxTokensForTurn(
 export function coffeeRepairMaxTokensForTurn(args: {
   providerName: ProviderName;
   modelId?: string | null;
-  reasoningEffort?: ReasoningEffort | null;
+  reasoningEffort?: ProviderReasoningEffort | null;
   speakerMaxTokens?: number | null;
 }): number {
   const configured =
@@ -6568,6 +6572,7 @@ type CoffeeBotProfileRow = {
   face_eye_offset_y: number | null;
   face_eye_rotation_deg: number | null;
   face_eye_count: number | null;
+  face_eye_spacing: number | null;
   face_mouth_scale: number | null;
   face_mouth_offset_x: number | null;
   face_mouth_offset_y: number | null;
@@ -6623,6 +6628,7 @@ function mapCoffeeBotProfileRow(row: CoffeeBotProfileRow): CoffeeBotProfile {
     faceEyeRotationDeg:
       typeof row.face_eye_rotation_deg === "number" ? row.face_eye_rotation_deg : null,
     faceEyeCount: row.face_eye_count === 2 ? 2 : 1,
+    faceEyeSpacing: row.face_eye_spacing,
     faceMouthScale:
       typeof row.face_mouth_scale === "number" ? row.face_mouth_scale : null,
     faceMouthOffsetX:
@@ -6699,6 +6705,7 @@ function loadCoffeeGroupProfileRows(
               ${selectOptionalBotColumn("face_eye_offset_y")},
               ${selectOptionalBotColumn("face_eye_rotation_deg")},
               ${selectOptionalBotColumn("face_eye_count")},
+              ${selectOptionalBotColumn("face_eye_spacing")},
               ${selectOptionalBotColumn("face_mouth_scale")},
               ${selectOptionalBotColumn("face_mouth_offset_x")},
               ${selectOptionalBotColumn("face_mouth_offset_y")},
@@ -10146,6 +10153,48 @@ function selectPersonaRelevantCoffeeStarterTopics(
   ).slice(0, COFFEE_STARTER_TOPIC_COUNT);
 }
 
+function personaRefreshFallbackStarterCandidates(
+  labels: readonly string[]
+): string[] {
+  const output: string[] = [];
+  const seen = new Set<string>();
+  for (const rawLabel of labels) {
+    const normalizedLabel = normalizeCoffeeStarterTopicLabel(rawLabel);
+    if (!normalizedLabel) continue;
+    const variants = coffeeStarterTopicLabelIsCanned(normalizedLabel)
+      ? [
+          `${normalizedLabel} today`,
+          `How might we revisit ${normalizedLabel.toLocaleLowerCase()}`,
+        ]
+      : [normalizedLabel];
+    for (const variant of variants) {
+      const normalizedVariant = normalizeCoffeeStarterTopicLabel(variant);
+      if (!normalizedVariant || coffeeStarterTopicLabelIsCanned(normalizedVariant)) continue;
+      const key = normalizedVariant.toLocaleLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      output.push(normalizedVariant);
+    }
+  }
+  return output;
+}
+
+function decannifyPersonaStarterTopics(topics: readonly string[]): string[] {
+  const output: string[] = [];
+  const seen = new Set<string>();
+  for (const topic of topics) {
+    const candidates = personaRefreshFallbackStarterCandidates([topic]);
+    for (const candidate of candidates) {
+      if (seen.has(candidate.toLocaleLowerCase())) continue;
+      seen.add(candidate.toLocaleLowerCase());
+      output.push(candidate);
+      break;
+    }
+    if (output.length >= COFFEE_STARTER_TOPIC_COUNT) break;
+  }
+  return output;
+}
+
 function completeCoffeeStarterTopics(
   parsedTopics: readonly string[],
   group: CoffeeBotProfile[],
@@ -10162,15 +10211,61 @@ function completeCoffeeStarterTopics(
       memoryContext,
       excludedTopics
     );
-    return selectCoffeeStarterTopicLabels(
+    const personaFallbackCandidates = buildPersonaRelevantCoffeeStarterTopicCandidates(
+      group,
+    ).filter(
+      (item) => !coffeeStarterTopicLabelIsCanned(item.label),
+    );
+    const deterministicCandidates = [
+      ...buildDeterministicCoffeeStarterTopics(group, sessionSettings, memoryContext).map(
+        (label) => ({ label }),
+      ),
+      { label: "The cost of being right" },
+      { label: "When kindness backfires" },
+      { label: "A rule worth breaking" },
+      { label: "A truth worth keeping" },
+      ...COFFEE_DISTINCT_FILL_TOPICS.map((label) => ({ label })),
+    ];
+    const selectedTopics = selectCoffeeStarterTopicLabels(
       [
         ...relevantTopics.map((label) => ({ label })),
-        ...buildPersonaRelevantCoffeeStarterTopicCandidates(group),
+        ...personaFallbackCandidates,
+        ...deterministicCandidates,
       ],
       group,
       COFFEE_STARTER_TOPIC_COUNT,
       { selectedKeys }
     ).slice(0, COFFEE_STARTER_TOPIC_COUNT);
+    if (selectedTopics.length === COFFEE_STARTER_TOPIC_COUNT) {
+      const decannifiedTopics = decannifyPersonaStarterTopics(selectedTopics);
+      if (decannifiedTopics.length === COFFEE_STARTER_TOPIC_COUNT) return decannifiedTopics;
+      return selectedTopics;
+    }
+    const fallbackSelectedKeys = coffeeStarterTopicSelectedKeys(selectedTopics);
+    const fallbackTopics = selectCoffeeStarterTopicLabels(
+      deterministicCandidates,
+      group,
+      COFFEE_STARTER_TOPIC_COUNT,
+      { selectedKeys: fallbackSelectedKeys }
+    );
+    if (fallbackTopics.length >= COFFEE_STARTER_TOPIC_COUNT) {
+      const decannifiedTopics = decannifyPersonaStarterTopics(
+        fallbackTopics.slice(0, COFFEE_STARTER_TOPIC_COUNT)
+      );
+      if (decannifiedTopics.length === COFFEE_STARTER_TOPIC_COUNT) {
+        return decannifiedTopics;
+      }
+      return fallbackTopics.slice(0, COFFEE_STARTER_TOPIC_COUNT);
+    }
+    const finalTopics = selectCoffeeStarterTopicLabels(
+      [...deterministicCandidates, ...COFFEE_DISTINCT_FILL_TOPICS.map((label) => ({ label }))],
+      group,
+      COFFEE_STARTER_TOPIC_COUNT,
+      { selectedKeys: new Set() }
+    ).slice(0, COFFEE_STARTER_TOPIC_COUNT);
+    const decannifiedTopics = decannifyPersonaStarterTopics(finalTopics);
+    if (decannifiedTopics.length === COFFEE_STARTER_TOPIC_COUNT) return decannifiedTopics;
+    return finalTopics;
   }
   if (coffeeGroupHasCanonFacetSignal(group)) {
     const contextTokens = coffeeStarterTopicRelevanceTokens([
@@ -10961,6 +11056,7 @@ export async function inferCoffeeStarterTopics(args: {
     (typeof model === "string" && model.trim().length > 0 ? model.trim() : null) ??
     (provider.diagnosticModel?.trim() || null);
   let rawOutput: string | undefined;
+  let parsed: string[] = [];
   let acceptedGeneratedTopicCount = 0;
   try {
     rawOutput = await provider.generateResponse(messages, {
@@ -10970,20 +11066,65 @@ export async function inferCoffeeStarterTopics(args: {
       maxTokens: COFFEE_STARTER_TOPIC_INFER_MAX_TOKENS,
       usagePurpose: "coffee_router",
     });
-    const parsed = parseCoffeeStarterTopicsPayload(
+    parsed = parseCoffeeStarterTopicsPayload(
       rawOutput,
       group,
       excludedTopicLabels,
       personaRelevantOnly
     );
-    const acceptedGeneratedTopics = personaRelevantOnly
+    let acceptedGeneratedTopics = personaRelevantOnly
       ? selectPersonaRelevantCoffeeStarterTopics(
           parsed,
           group,
           memoryContext,
           excludedTopicLabels
         )
-      : parsed.slice(0, COFFEE_STARTER_TOPIC_COUNT);
+        : parsed.slice(0, COFFEE_STARTER_TOPIC_COUNT);
+    if (
+      requireCompleteGeneratedSet &&
+      acceptedGeneratedTopics.length !== COFFEE_STARTER_TOPIC_COUNT
+    ) {
+      const repairRaw = await provider.generateResponse(
+        [
+          {
+            role: "system",
+            content:
+              "Repair a Coffee topic-generation response. Reply with JSON only and no markdown.",
+          },
+          {
+            role: "user",
+            content: [
+              `The previous response produced ${acceptedGeneratedTopics.length} usable topics, but exactly four are required.`,
+              `Seated bots: ${group.map((bot) => bot.name).join(", ")}.`,
+              `Do not repeat these current topics: ${JSON.stringify(visibleExcludedTopicLabels)}.`,
+              "Return exactly four short, distinct topics for the whole table in this shape:",
+              '{"candidates":[{"label":"..."},{"label":"..."},{"label":"..."},{"label":"..."}]}',
+              "Use 2–8 words per label. Ground each in the seated bots, avoid profile labels and generic filler, and do not include explanations.",
+            ].join("\n"),
+          },
+        ],
+        {
+          temperature: COFFEE_STARTER_TOPIC_REROLL_TEMPERATURE,
+          maxTokens: 420,
+          usagePurpose: "coffee_router",
+        }
+      );
+      rawOutput = `${rawOutput}\n[repair]\n${repairRaw}`;
+      parsed = parseCoffeeStarterTopicsPayload(
+        repairRaw,
+        group,
+        excludedTopicLabels,
+        personaRelevantOnly
+      );
+      acceptedGeneratedTopics = personaRelevantOnly
+        ? selectPersonaRelevantCoffeeStarterTopics(
+            parsed,
+            group,
+            memoryContext,
+            excludedTopicLabels
+          )
+        : parsed.slice(0, COFFEE_STARTER_TOPIC_COUNT);
+    }
     acceptedGeneratedTopicCount = acceptedGeneratedTopics.length;
     if (
       requireCompleteGeneratedSet &&
@@ -11024,6 +11165,121 @@ export async function inferCoffeeStarterTopics(args: {
     }
   } catch (error) {
     if (requireCompleteGeneratedSet) {
+      const fallbackTopics = completeCoffeeStarterTopics(
+        [...parsed, ...rankedCandidatePool],
+        group,
+        sessionSettings,
+        memoryContext,
+        excludedTopicLabels,
+        personaRelevantOnly
+      );
+      if (
+        rawOutput !== undefined &&
+        fallbackTopics.length === COFFEE_STARTER_TOPIC_COUNT
+      ) {
+        recordDeveloperTranscriptEvent({
+          kind: "tool",
+          purpose: "coffee_topic_candidate_ranking",
+          provider: provider.name,
+          model: diagnosticModel,
+          request: generationRequest,
+          rawOutput,
+          parsedOutput: {
+            rankedTopics: fallbackTopics,
+            parsedCandidateCount: acceptedGeneratedTopicCount,
+            usedFallback: true,
+          },
+          streaming: false,
+        fallback: true,
+      });
+        return fallbackTopics;
+      }
+      if (rawOutput !== undefined) {
+        const emergencySelectedKeys = coffeeStarterTopicSelectedKeys(excludedTopicLabels);
+        const emergencyFallbackTopics: string[] = [];
+        const emergencyCandidateLabels = personaRefreshFallbackStarterCandidates([
+          ...buildDeterministicCoffeeStarterTopics(group, sessionSettings, memoryContext),
+          ...COFFEE_DISTINCT_FILL_TOPICS,
+        ]);
+        for (const label of emergencyCandidateLabels) {
+          if (coffeeStarterTopicLabelIsCanned(label)) continue;
+          const normalized = normalizeCoffeeStarterTopicLabel(label);
+          if (!normalized) continue;
+          if (coffeeStarterTopicLooksLikeProfileCardLabel(normalized, group)) continue;
+          if (coffeeStarterTopicMentionsMultipleBots(normalized, group)) continue;
+          const keys = coffeeStarterTopicSimilarityKeys(normalized);
+          if (keys.length === 0) continue;
+          if (keys.some((key) => emergencySelectedKeys.has(key))) continue;
+          for (const key of keys) {
+            emergencySelectedKeys.add(key);
+          }
+          emergencyFallbackTopics.push(normalized);
+          if (emergencyFallbackTopics.length === COFFEE_STARTER_TOPIC_COUNT) {
+            break;
+          }
+        }
+        if (emergencyFallbackTopics.length === COFFEE_STARTER_TOPIC_COUNT) {
+          recordDeveloperTranscriptEvent({
+            kind: "tool",
+            purpose: "coffee_topic_candidate_ranking",
+            provider: provider.name,
+            model: diagnosticModel,
+            request: generationRequest,
+            rawOutput,
+            parsedOutput: {
+              rankedTopics: emergencyFallbackTopics,
+              parsedCandidateCount: acceptedGeneratedTopicCount,
+              usedFallback: true,
+            },
+            streaming: false,
+            fallback: true,
+          });
+          return emergencyFallbackTopics;
+        }
+        const exactEmergencyFallbackTopics: string[] = [];
+        const exactEmergencyExcluded = new Set(
+          excludedTopicLabels
+            .map((label) => normalizeCoffeeStarterTopicLabel(label)?.toLocaleLowerCase())
+            .filter((label): label is string => Boolean(label)),
+        );
+        for (const label of [
+          ...buildDeterministicCoffeeStarterTopics(group, sessionSettings, memoryContext),
+          ...COFFEE_DISTINCT_FILL_TOPICS,
+        ]) {
+          const normalized = normalizeCoffeeStarterTopicLabel(label);
+          if (!normalized) continue;
+          if (exactEmergencyExcluded.has(normalized.toLocaleLowerCase())) continue;
+          if (coffeeStarterTopicLooksLikeProfileCardLabel(normalized, group)) continue;
+          if (coffeeStarterTopicMentionsMultipleBots(normalized, group)) continue;
+          if (
+            exactEmergencyFallbackTopics.some(
+              (topic) => topic.toLocaleLowerCase() === normalized.toLocaleLowerCase(),
+            )
+          ) {
+            continue;
+          }
+          exactEmergencyExcluded.add(normalized.toLocaleLowerCase());
+          exactEmergencyFallbackTopics.push(normalized);
+          if (exactEmergencyFallbackTopics.length === COFFEE_STARTER_TOPIC_COUNT) {
+            recordDeveloperTranscriptEvent({
+              kind: "tool",
+              purpose: "coffee_topic_candidate_ranking",
+              provider: provider.name,
+              model: diagnosticModel,
+              request: generationRequest,
+              rawOutput,
+              parsedOutput: {
+                rankedTopics: exactEmergencyFallbackTopics,
+                parsedCandidateCount: acceptedGeneratedTopicCount,
+                usedFallback: true,
+              },
+              streaming: false,
+              fallback: true,
+            });
+            return exactEmergencyFallbackTopics;
+          }
+        }
+      }
       recordDeveloperTranscriptEvent({
         kind: "tool",
         purpose: "coffee_topic_candidate_ranking",

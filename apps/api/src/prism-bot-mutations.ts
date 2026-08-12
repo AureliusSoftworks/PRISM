@@ -8,6 +8,7 @@ import {
   normalizeBotFaceBlinkScale,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeCount,
+  normalizeBotFaceEyeSpacing,
   normalizeBotFaceEyeMovement,
   normalizeBotFaceEyeOffsetX,
   normalizeBotFaceEyeOffsetY,
@@ -70,6 +71,7 @@ export const PRISM_JOURNALED_BOT_PATCH_KEYS = new Set([
   "faceEyeOffsetY",
   "faceEyeRotationDeg",
   "faceEyeCount",
+  "faceEyeSpacing",
   "faceMouthScale",
   "faceMouthOffsetX",
   "faceMouthOffsetY",
@@ -120,6 +122,7 @@ const BOT_MUTATION_COLUMNS = [
   "face_eye_offset_y",
   "face_eye_rotation_deg",
   "face_eye_count",
+  "face_eye_spacing",
   "face_mouth_scale",
   "face_mouth_offset_x",
   "face_mouth_offset_y",
@@ -417,6 +420,11 @@ function normalizedColumns(
     const count = normalizeBotFaceEyeCount(patch.faceEyeCount);
     if (count === null) throw new Error("Invalid custom eye count.");
     next.face_eye_count = count;
+  }
+  if (own(patch, "faceEyeSpacing")) {
+    const spacing = normalizeBotFaceEyeSpacing(patch.faceEyeSpacing);
+    if (spacing === null) throw new Error("Invalid custom eye spacing.");
+    next.face_eye_spacing = spacing;
   }
   if (own(patch, "faceBlinkBar")) {
     const raw = patch.faceBlinkBar;

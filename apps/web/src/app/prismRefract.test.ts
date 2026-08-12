@@ -38,7 +38,7 @@ describe("Prism Refract helpers", () => {
     );
   });
 
-  it("uses modifier-click to accept in place or accept and continue", () => {
+  it("ignores repeated same-target modifier clicks and accepts before continuing elsewhere", () => {
     const active = {
       activeTargetId: "topic",
       activeTargetKind: "field" as const,
@@ -49,7 +49,7 @@ describe("Prism Refract helpers", () => {
         ...active,
         clickedTargetId: "topic",
       }),
-      "accept",
+      "wait",
     );
     assert.equal(
       prismRefractModifierClickDecision({
@@ -72,7 +72,7 @@ describe("Prism Refract helpers", () => {
     );
   });
 
-  it("waits for an unsettled draft before modifier-click chaining", () => {
+  it("queues a distinct target while the active draft is unsettled", () => {
     assert.equal(
       prismRefractModifierClickDecision({
         activeTargetId: "topic",
@@ -80,7 +80,7 @@ describe("Prism Refract helpers", () => {
         clickedTargetId: "private-comments",
         canAccept: false,
       }),
-      "wait",
+      "queue",
     );
     assert.equal(
       prismRefractModifierClickDecision({

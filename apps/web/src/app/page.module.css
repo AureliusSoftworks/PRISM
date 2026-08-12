@@ -152,6 +152,17 @@
   background: #020406;
 }
 
+.zenLiveBotPresenceBody[data-screen-mode="synthesis"]
+  .botAvatarFoundryScreenOverlay {
+  z-index: 4;
+  pointer-events: none;
+}
+
+.zenLiveBotPresenceBody[data-screen-crest="true"]
+  .botAvatarFoundryScreenOverlay {
+  z-index: 9;
+}
+
 .zenLiveBotPresencePlate
   .botAvatarFoundryScreenOverlay:not([data-screen-overlay-visible="true"]) {
   visibility: hidden;
@@ -181,10 +192,28 @@
   --crt-beam-softness: 0px;
 }
 
-.botAvatarMannequinPanel[data-foundry-ritual="true"] {
+.botGeneratorDialog[data-foundry-phase]
+  .botAvatarMannequinPanel[data-foundry-ritual="true"] {
+  position: relative;
   width: 100%;
   height: 100%;
   min-width: 0;
+  min-height: 0;
+  display: block;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.botGeneratorDialog[data-foundry-phase]
+  .botAvatarMannequinPanel[data-foundry-ritual="true"]
+  .botAvatarMannequinStage {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   min-height: 0;
   display: grid;
   place-items: center;
@@ -193,21 +222,11 @@
   border-radius: 0;
   background: transparent;
   box-shadow: none;
-}
-
-.botAvatarMannequinPanel[data-foundry-ritual="true"] .botAvatarMannequinStage {
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
   overflow: visible;
 }
 
-.botAvatarMannequinPanel[data-foundry-ritual="true"]
+.botGeneratorDialog[data-foundry-phase]
+  .botAvatarMannequinPanel[data-foundry-ritual="true"]
   .zenLiveBotPresencePlate[data-avatar-customizer-preview="true"] {
   transform: translateY(2.5dvh) scale(clamp(1.04, 1.1 + 0.15vw, 1.28));
 }
@@ -233,18 +252,16 @@
 }
 
 .botGeneratorDialog[data-foundry-phase] {
-  --bot-foundry-workspace-height: calc(
-    100dvh - var(--app-shell-top-nav-height, 60px)
-  );
+  --bot-foundry-workspace-height: 100%;
   --bot-foundry-chrome-inset-inline: clamp(24px, 3.5vw, 54px);
   --bot-foundry-brief-top: clamp(112px, 16dvh, 154px);
   --bot-foundry-brief-width: min(
     430px,
     calc(100vw - (2 * var(--bot-foundry-chrome-inset-inline)))
   );
-  position: fixed;
-  inset: var(--app-shell-top-nav-height, 60px) 0 0;
-  width: 100vw;
+  position: absolute;
+  inset: 0;
+  width: 100%;
   height: var(--bot-foundry-workspace-height);
   max-width: none;
   max-height: none;
@@ -258,7 +275,7 @@
 }
 
 .botGeneratorDialog[data-foundry-phase][data-creating="true"] {
-  width: 100vw;
+  width: 100%;
   height: var(--bot-foundry-workspace-height);
   max-width: none;
 }
@@ -1047,8 +1064,10 @@
   z-index: 22;
   display: grid;
   justify-items: center;
-  gap: 2px;
-  padding: 7px 8px 5px;
+  gap: 5px;
+  width: fit-content;
+  max-width: calc(100vw - 44px);
+  padding: 9px 11px 8px;
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 12px;
   background: rgba(5, 8, 13, 0.7);
@@ -1056,6 +1075,24 @@
   pointer-events: none;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+}
+
+.botAvatarStudioMiniPreviewCluster {
+  display: grid;
+  grid-template-columns: 122px 76px;
+  align-items: center;
+  gap: 12px;
+}
+
+.botAvatarStudioMiniClusterItem,
+.botAvatarStudioMicroClusterItem {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+}
+
+.botAvatarStudioMicroClusterItem {
+  align-self: center;
 }
 
 .botAvatarStudioMiniPreviewLabel {
@@ -1069,6 +1106,52 @@
 
 .botAvatarStudioMiniAvatar {
   display: inline-grid;
+}
+
+.botAvatarStudioMiniPreviewViewport {
+  display: grid;
+  place-items: center;
+  width: 122px;
+  height: 122px;
+  overflow: visible;
+}
+
+.botAvatarStudioMiniPreviewViewport .botAvatarStudioMiniAvatar {
+  width: 122px;
+  height: 122px;
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer[data-foundry="true"]
+  .botAvatarStudioMiniPreview {
+  border-color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 22%,
+    var(--line)
+  );
+  background: color-mix(in srgb, var(--bg-elevated) 90%, transparent);
+  box-shadow:
+    0 15px 34px rgba(45, 62, 79, 0.14),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 82%, transparent);
+}
+
+.themeLight.botAvatarStudioThemeScope .botAvatarStudioMiniPreviewLabel {
+  color: color-mix(in srgb, var(--fg) 72%, var(--fg-muted));
+}
+
+.botAvatarStudioMicroPreview {
+  display: grid;
+  place-items: center;
+}
+
+.botAvatarStudioMicroPreview
+  .messageMoodBadge[data-face="coffee"][data-variant="micro"] {
+  width: 36px;
+  height: 36px;
+}
+
+.botAvatarStudioMicroPreview .messageMoodMicroFace {
+  font-size: 10px;
 }
 
 .botAvatarFoundryCameraHud > span {
@@ -2479,8 +2562,33 @@
   .botAvatarCustomizer[data-foundry="true"] .botAvatarStudioMiniPreview {
     left: 12px;
     top: 12px;
-    transform: scale(0.9);
-    transform-origin: top left;
+    max-width: calc(100vw - 24px);
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarStudioMiniPreviewCluster {
+    grid-template-columns: 108px 64px;
+    gap: 8px;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarStudioMiniPreviewViewport,
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarStudioMiniPreviewViewport .botAvatarStudioMiniAvatar {
+    width: 108px;
+    height: 108px;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarStudioMicroPreview
+    .messageMoodBadge[data-face="coffee"][data-variant="micro"] {
+    width: 30px;
+    height: 30px;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarStudioMicroPreview .messageMoodMicroFace {
+    font-size: 9px;
   }
 
   .botAvatarFoundryCameraHud {
@@ -7485,7 +7593,7 @@
   padding: 8px 10px;
   border: 1px solid color-mix(in srgb, var(--line-strong) 54%, var(--line));
   border-radius: 8px;
-  background: var(--bg-surface);
+  background: color-mix(in srgb, var(--bg-surface) 90%, var(--bg) 10%);
   color: var(--fg);
   box-shadow: var(--shadow-lg);
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
@@ -9394,6 +9502,12 @@
   gap: 10px;
   min-width: 0;
   flex: 0 1 auto;
+}
+
+.botFoundrySidebarLockGroup[aria-hidden="true"] {
+  pointer-events: none;
+  opacity: 0.5;
+  user-select: none;
 }
 
 .botMemoryReceiptChip {
@@ -18147,6 +18261,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   display: grid;
   gap: 8px;
   min-width: 0;
+  /* The selected name sizes itself against this copy column, not the whole
+     hero card. That keeps a long name from borrowing the introduction lane. */
+  container-type: inline-size;
 }
 
 .emptyStateInfoBandRow .emptyStateTitle {
@@ -18197,6 +18314,28 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     grid-template-columns: 1fr;
     justify-items: center;
     text-align: center;
+  }
+
+  .emptyStateInfoBand[data-selected-bot-hero="true"] .emptyStateInfoBandRow {
+    grid-template-areas:
+      "identity"
+      "introduction"
+      "action";
+  }
+
+  .emptyStateInfoBand[data-selected-bot-hero="true"]
+    .emptyStateSelectedHeroIdentity {
+    grid-area: identity;
+  }
+
+  .emptyStateInfoBand[data-selected-bot-hero="true"] .emptyStateHint {
+    grid-area: introduction;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .emptyStateInfoBand[data-selected-bot-hero="true"] .zenSplashControls {
+    grid-area: action;
   }
 
   .emptyStateInfoBand[data-selected-bot-hero="true"] .emptyStateTitleBlock {
@@ -18428,7 +18567,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 
   .emptyStateInfoBand[data-selected-bot-hero="true"] .emptyStateInfoBandRow {
-    grid-template-columns: minmax(300px, 0.92fr) minmax(320px, 1.08fr);
+    /* Keep the identity and introduction as named grid regions. The old
+       implicit placement left the name's visible overflow free to paint over
+       the introduction and its divider. */
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+    grid-template-areas:
+      "identity introduction"
+      "action action";
     align-items: center;
     column-gap: clamp(28px, 4vw, 64px);
     row-gap: 14px;
@@ -18436,7 +18581,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
   .emptyStateInfoBand[data-selected-bot-hero="true"]
     .emptyStateSelectedHeroIdentity {
+    grid-area: identity;
     gap: clamp(20px, 2.4vw, 30px);
+    min-width: 0;
   }
 
   .emptyStateInfoBand[data-selected-bot-hero="true"] .emptyStateTitleBlock {
@@ -18453,12 +18600,19 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 
   .emptyStateInfoBand[data-selected-bot-hero="true"] .emptyStateHint {
+    grid-area: introduction;
     align-self: center;
     max-width: 50ch;
+    min-width: 0;
     padding-left: clamp(18px, 2.2vw, 32px);
     border-left: 1px solid color-mix(in srgb, var(--line) 52%, transparent);
     font-size: clamp(1rem, 1.24vw, 1.18rem);
     line-height: 1.56;
+    overflow-wrap: anywhere;
+  }
+
+  .emptyStateInfoBand[data-selected-bot-hero="true"] .zenSplashControls {
+    grid-area: action;
   }
 
   .emptyStateInfoBandRow .emptyStateHeader {
@@ -19562,7 +19716,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .appLayout[data-zen-private-tone="true"]
   .zenLiveBotPresencePlate
   .zenLiveBotPresenceBotGlyph {
-  transform: translate(-50%, -50%) rotate(180deg);
+  transform: translate(-50%, -50%) rotate(180deg)
+    scaleX(var(--zen-live-bot-screen-facing-scale-x, 1));
 }
 
 .appLayout[data-private-active="true"]
@@ -22123,7 +22278,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     color-mix(in srgb, var(--coffee-bot-color) 26%, transparent);
 }
 
-.messageMoodBadge[data-face="coffee"][data-variant="mini"] {
+.messageMoodBadge[data-face="coffee"][data-variant="micro"] {
   width: 22px;
   height: 22px;
   background:
@@ -22141,7 +22296,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   overflow: visible;
 }
 
-.messageMoodMiniFace {
+.messageMoodMicroFace {
   --crt-core-opacity: 0.92;
   --crt-beam-softness: 0.2px;
   --crt-bloom-narrow-radius: 0.45px;
@@ -22151,7 +22306,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --crt-scanline-opacity: 0.01;
   display: block;
   font-family: var(--prism-face-font);
-  font-size: 7.5px;
+  font-size: 8.5px;
   line-height: 1;
   font-weight: var(--prism-face-weight);
   letter-spacing: var(--prism-face-letter-spacing);
@@ -22257,7 +22412,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   z-index: 6;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--line));
-  background: var(--bg-surface);
+  background: color-mix(in srgb, var(--bg-surface) 90%, var(--bg) 10%);
   color: color-mix(in srgb, var(--fg) 92%, transparent);
   font-size: 10px;
   letter-spacing: 0.06em;
@@ -26639,11 +26794,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .emptyStateInfoBand[data-selected-bot-hero="true"]
   .emptyStateTitle[data-zen-title-with-hero="true"]
   .emptyStateTitleSubject {
-  max-width: min(100%, 13em);
-  font-size: clamp(2.05rem, 3.1vw, var(--zen-title-subject-font-cap, 3.2rem));
+  inline-size: 100%;
+  max-inline-size: 100%;
+  font-size: min(
+    var(--zen-title-subject-font-cap, 3.2rem),
+    clamp(1.9rem, 13cqw, 3.2rem)
+  );
   letter-spacing: 0.03em;
   line-height: 1.02;
-  overflow-wrap: normal;
+  overflow: clip;
+  overflow-wrap: anywhere;
   word-break: normal;
   hyphens: manual;
 }
@@ -27256,10 +27416,18 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
-  translate: var(--zen-live-bot-lane-drift-x, 0px)
-    var(--zen-live-bot-lane-drift-y, 0px);
-  rotate: var(--zen-live-bot-motion-tilt);
-  transition: rotate 360ms cubic-bezier(0.22, 0.72, 0.24, 1);
+  /* Autonomous travel is composited once at the plate root. Keeping every
+     chassis and phosphor child in this layer prevents nested CRT/Ink planes
+     from sampling different sub-pixels while the bot moves. */
+  transform: translate3d(
+      var(--zen-live-bot-lane-drift-x, 0px),
+      var(--zen-live-bot-lane-drift-y, 0px),
+      0
+    )
+    rotate(var(--zen-live-bot-motion-tilt));
+  transform-origin: 50% 50%;
+  will-change: transform;
+  transition: transform 360ms cubic-bezier(0.22, 0.72, 0.24, 1);
   animation: zenActionCueIn 0.24s cubic-bezier(0.2, 0.72, 0.18, 1) both;
 }
 
@@ -27305,7 +27473,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 @media (prefers-reduced-motion: reduce) {
   .zenLiveBotPresencePlate {
-    rotate: 0deg;
+    transform: none;
     transition: none;
   }
 }
@@ -27316,7 +27484,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   top: var(--zen-live-bot-avatar-y, 20px);
   z-index: 4;
   margin: 0;
-  will-change: left, top, width;
+  will-change: transform, left, top;
 }
 
 .zenLiveBotPresencePlate * {
@@ -28104,6 +28272,286 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --crt-phosphor-red-rgb: var(--crt-accent-rgb);
   --crt-phosphor-green-rgb: var(--crt-accent-rgb);
   --crt-phosphor-blue-rgb: var(--crt-accent-rgb);
+}
+
+/* Zen-only player handling feedback. Keep the face/ink dark while preserving
+   a stable accent chassis and frame lights for the handling window. */
+.zenLiveBotPresencePlate[data-user-screen-power="off"]
+  .zenLiveBotPresenceFaceEmissionMask {
+  --crt-strength: 0 !important;
+  --crt-core-opacity: 0 !important;
+  --crt-bloom-narrow-strength: 0 !important;
+  --crt-bloom-wide-strength: 0 !important;
+  --crt-phosphor-opacity: 0 !important;
+  --crt-phosphor-midtone-strength: 0 !important;
+  --crt-phosphor-bright-strength: 0 !important;
+  --crt-unlit-phosphor-opacity: 0 !important;
+  --crt-static-opacity: 0 !important;
+  --crt-scanline-opacity: 0 !important;
+  --crt-convergence-opacity: 0 !important;
+  --crt-breath-strength: 0 !important;
+}
+
+.zenLiveBotPresencePlate[data-user-screen-power="off"] {
+  --zen-live-bot-handling-accent: var(
+    --bot-color,
+    var(--coffee-bot-color, var(--accent))
+  );
+  --bot-face-frame-color: var(--zen-live-bot-handling-accent) !important;
+  --bot-face-frame-led-color: var(--zen-live-bot-handling-accent) !important;
+  --foundry-module-color: var(--zen-live-bot-handling-accent) !important;
+  --bot-face-frame-finish-color: var(--zen-live-bot-handling-accent) !important;
+  --bot-face-metal-alloy-color: var(--zen-live-bot-handling-accent) !important;
+  --bot-voice-light-level: 0;
+  --bot-voice-light-glow-lift: 0;
+  --bot-voice-light-emitter-lift: 0;
+  --bot-voice-light-core-lift: 0;
+}
+
+.zenLiveBotPresencePlate[data-user-screen-power="off"] .botFaceFrameAlloy {
+  --bot-face-metal-alloy-color: var(--zen-live-bot-handling-accent) !important;
+  --bot-face-metal-alloy-mix: 74% !important;
+}
+
+.zenLiveBotPresencePlate[data-user-screen-power="off"] .botFaceFrameTint {
+  --bot-face-frame-color: var(--zen-live-bot-handling-accent) !important;
+  --bot-face-frame-tint-talking-opacity-high: 1 !important;
+  --bot-face-frame-tint-talking-opacity-mid: 0.82 !important;
+  --bot-face-frame-tint-talking-opacity-low: 0.58 !important;
+  --bot-face-frame-tint-opacity: 1 !important;
+  --bot-face-frame-tint-filter: drop-shadow(
+      0 0 6px
+      color-mix(
+        in srgb,
+        var(--bot-face-frame-resolved-color, var(--zen-live-bot-frame-tint-color, #ffffff))
+          35%,
+        transparent
+      )
+    )
+    saturate(1.16);
+  animation: none !important;
+  opacity: 1 !important;
+}
+
+.zenLiveBotPresencePlate[data-user-screen-power="off"] .botFaceFrameLed {
+  --bot-face-frame-led-color: var(--zen-live-bot-handling-accent) !important;
+  --bot-face-frame-led-resolved-color: var(--zen-live-bot-handling-accent) !important;
+  --bot-face-frame-led-opacity: 0.9;
+  --bot-face-frame-led-glow-opacity: 0;
+  --bot-face-frame-led-filter: none;
+  --zen-live-bot-talking-light-opacity-high: 1;
+  --zen-live-bot-talking-light-opacity-mid: 0.82;
+  --zen-live-bot-talking-light-opacity-low: 0.58;
+  --bot-face-frame-led-talking-opacity-high: 1;
+  --bot-face-frame-led-talking-opacity-mid: 0.82;
+  --bot-face-frame-led-talking-opacity-low: 0.58;
+  animation: none !important;
+  opacity: 0.9 !important;
+  background-color: var(--zen-live-bot-handling-accent) !important;
+  mix-blend-mode: normal !important;
+}
+
+.zenLiveBotPresencePlate[data-user-screen-power="off"]
+  .botFaceFrameLedAura,
+.zenLiveBotPresencePlate[data-user-screen-power="off"]
+  .botFaceFrameLedCore,
+.zenLiveBotPresencePlate[data-user-screen-power="off"]
+  .botFaceFrameLedGlow,
+.zenLiveBotPresencePlate[data-user-screen-power="off"]
+  .botAvatarFoundryFrameModuleLamp[data-populated="true"] {
+  animation: none !important;
+  transition: opacity 220ms ease;
+  filter: none !important;
+}
+
+.zenLiveBotPresencePlate[data-user-screen-power="off"]
+  .botFaceFrameLedAura,
+.zenLiveBotPresencePlate[data-user-screen-power="off"]
+  .botFaceFrameLedCore,
+.zenLiveBotPresencePlate[data-user-screen-power="off"]
+  .botFaceFrameLedGlow {
+  --bot-face-frame-led-color: var(--zen-live-bot-handling-accent) !important;
+  --bot-face-frame-led-resolved-color: var(--zen-live-bot-handling-accent) !important;
+  --bot-face-frame-led-glow-opacity: 0.9;
+  background: var(--zen-live-bot-handling-accent) !important;
+  color: var(--zen-live-bot-handling-accent) !important;
+  opacity: 0.84 !important;
+  mix-blend-mode: normal !important;
+  filter: drop-shadow(
+    0 0 6px
+    color-mix(
+      in srgb,
+      var(
+        --bot-face-frame-led-resolved-color,
+        var(
+          --bot-face-frame-led-color,
+          var(--zen-live-bot-frame-tint-color, var(--coffee-bot-color, var(--accent)))
+        )
+      ) 72%,
+      transparent
+    )
+  ) !important;
+}
+
+.zenLiveBotPresencePlate[data-user-screen-power="off"] .botFaceFrameLedAura {
+  background: var(--zen-live-bot-handling-accent) !important;
+  opacity: 0.72 !important;
+}
+
+.zenLiveBotPresencePlate[data-user-screen-power="off"]
+  .botFaceCrtNoiseLayer,
+.zenLiveBotPresencePlate[data-user-screen-power="off"]
+  .botFaceCrtBreathingLayer {
+  opacity: 0 !important;
+  animation: none !important;
+}
+
+.zenLiveBotPresencePlate[data-user-screen-power="off"]
+  .zenLiveBotPresenceMiniAvatar {
+  --chat-mini-bot-color: var(--zen-live-bot-handling-accent) !important;
+  --chat-mini-bot-alloy-color: var(--zen-live-bot-handling-accent) !important;
+}
+
+.zenLiveBotPresencePlate[data-user-screen-power="off"]
+  .zenLiveBotPresenceMiniAvatar
+  [data-chat-mini-frame-light] {
+  background: var(--zen-live-bot-handling-accent) !important;
+  opacity: 0.88 !important;
+  animation: none !important;
+}
+
+.zenLiveBotPresencePlate
+  .zenLiveBotPresenceMiniAvatar
+  [data-chat-mini-upper-screen] {
+  transform-origin: 50% 50%;
+  transition:
+    opacity 150ms ease-out,
+    transform 180ms cubic-bezier(0.18, 0.72, 0.2, 1);
+}
+
+.zenLiveBotPresencePlate[data-user-screen-power="off"]
+  .zenLiveBotPresenceMiniAvatar
+  [data-chat-mini-upper-screen] {
+  opacity: 0;
+  transform: scaleY(0.018);
+  animation: zenLiveBotFaceScreenPowerDown 130ms cubic-bezier(0.42, 0, 0.74, 0.28)
+    both;
+}
+
+.zenLiveBotPresencePlate[data-user-screen-power="warming"]
+  .zenLiveBotPresenceMiniAvatar
+  [data-chat-mini-upper-screen] {
+  animation: zenLiveBotFaceScreenPowerUp 280ms cubic-bezier(0.16, 0.88, 0.24, 1)
+    both;
+}
+
+.zenLiveBotPresencePlate[data-user-screen-power="off"]
+  .botAvatarFoundryFrameModuleLamp[data-populated="true"] {
+  background: radial-gradient(
+    circle at 42% 38%,
+    #ffffff 0 21%,
+    color-mix(in srgb, var(--foundry-module-color) 62%, #ffffff) 34%,
+    var(--foundry-module-color) 72%,
+    color-mix(in srgb, var(--foundry-module-color) 72%, transparent) 100%
+  );
+  opacity: 0.9 !important;
+  filter: brightness(0.88);
+  box-shadow:
+    0 0 2px color-mix(in srgb, var(--foundry-module-color) 44%, transparent),
+    0 0 7px color-mix(in srgb, var(--foundry-module-color) 24%, transparent);
+  animation: none !important;
+  mix-blend-mode: normal !important;
+}
+
+.zenLiveBotPresenceScreenContentRig,
+.zenLiveBotPresenceThinkingGlyphAnchor {
+  transform-origin: 50% 50%;
+  transition:
+    opacity 150ms ease-out,
+    transform 180ms cubic-bezier(0.18, 0.72, 0.2, 1);
+}
+
+.zenLiveBotPresencePlate[data-user-screen-power="off"]
+  .zenLiveBotPresenceScreenContentRig,
+.zenLiveBotPresencePlate[data-user-screen-power="off"]
+  .zenLiveBotPresenceThinkingGlyphAnchor {
+  opacity: 0;
+  animation: zenLiveBotFaceScreenPowerDown 130ms cubic-bezier(0.42, 0, 0.74, 0.28)
+    both;
+}
+
+.zenLiveBotPresencePlate[data-user-screen-power="off"]
+  .zenLiveBotPresenceScreenContentRig {
+  transform: scaleX(var(--zen-live-bot-screen-facing-scale-x, 1)) scaleY(0.018);
+}
+
+.zenLiveBotPresencePlate[data-user-screen-power="off"]
+  .zenLiveBotPresenceThinkingGlyphAnchor {
+  transform: scaleY(0.018);
+}
+
+.zenLiveBotPresencePlate[data-user-screen-power="warming"]
+  .zenLiveBotPresenceScreenContentRig,
+.zenLiveBotPresencePlate[data-user-screen-power="warming"]
+  .zenLiveBotPresenceThinkingGlyphAnchor {
+  animation: zenLiveBotFaceScreenPowerUp 280ms cubic-bezier(0.16, 0.88, 0.24, 1)
+    both;
+}
+
+@keyframes zenLiveBotFaceScreenPowerDown {
+  0% {
+    opacity: 1;
+    filter: brightness(1.18);
+  }
+
+  58% {
+    opacity: 0.66;
+    filter: brightness(0.56);
+  }
+
+  100% {
+    opacity: 0;
+    filter: brightness(0);
+  }
+}
+
+@keyframes zenLiveBotFaceScreenPowerUp {
+  0% {
+    opacity: 0;
+    filter: brightness(0);
+  }
+
+  42% {
+    opacity: 0.78;
+    filter: brightness(1.34);
+  }
+
+  68% {
+    opacity: 0.54;
+    filter: brightness(0.7);
+  }
+
+  100% {
+    opacity: 1;
+    filter: brightness(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zenLiveBotPresencePlate[data-user-screen-power]
+    .zenLiveBotPresenceScreenContentRig,
+  .zenLiveBotPresencePlate[data-user-screen-power]
+    .zenLiveBotPresenceThinkingGlyphAnchor {
+    animation: none;
+    transition: opacity 100ms linear;
+  }
+
+  .zenLiveBotPresencePlate[data-user-screen-power]
+    .zenLiveBotPresenceMiniAvatar
+    [data-chat-mini-upper-screen] {
+    animation: none;
+    transition: opacity 100ms linear;
+  }
 }
 
 .zenLiveBotPresenceFaceEmissionMask [data-avatar-details-emission] {
@@ -30658,7 +31106,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   width: var(--zen-live-bot-body-glyph-render-size);
   height: var(--zen-live-bot-body-glyph-render-size);
   aspect-ratio: 1;
-  transform: translate(-50%, -50%);
+  /* The buckle is an asymmetric screen glyph too. Turn it with the shared
+     face-and-Ink contract rather than leaving it behind on a side-facing bot. */
+  transform: translate(-50%, -50%)
+    scaleX(var(--zen-live-bot-screen-facing-scale-x, 1));
   display: block;
   padding: 0;
   border: 0;
@@ -30711,6 +31162,143 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     );
   line-height: 0;
   pointer-events: none;
+}
+
+.botAvatarFoundryBuckleFill {
+  --foundry-buckle-screen-size: var(
+    --zen-live-bot-body-glyph-size,
+    clamp(
+      var(--zen-live-bot-body-glyph-min-size),
+      calc(
+        var(--zen-live-bot-body-frame-size) *
+          var(--zen-live-bot-body-glyph-ratio)
+      ),
+      var(--zen-live-bot-body-glyph-max-size)
+    )
+  );
+  position: absolute;
+  left: calc(50% + var(--zen-live-bot-glyph-x-anchor, 0px) + 1px);
+  top: calc(50% + var(--zen-live-bot-glyph-y-anchor, 70px) + 1px);
+  z-index: 11;
+  width: var(--foundry-buckle-screen-size);
+  height: var(--foundry-buckle-screen-size);
+  overflow: hidden;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: #020507;
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,.1),
+    inset 0 0 8px rgba(0,0,0,.8);
+  pointer-events: none;
+}
+
+.botAvatarFoundryBuckleFill::after {
+  content: "";
+  position: absolute;
+  inset: var(--foundry-buckle-unfilled, 100%) 0 0;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0
+        calc(
+          var(--zen-live-bot-buckle-crt-cell-pitch) -
+            var(--zen-live-bot-buckle-crt-line-width)
+        ),
+      rgb(0 0 0 / 0.34)
+        calc(
+          var(--zen-live-bot-buckle-crt-cell-pitch) -
+            var(--zen-live-bot-buckle-crt-line-width)
+        )
+        var(--zen-live-bot-buckle-crt-cell-pitch)
+    ),
+    repeating-linear-gradient(
+      0deg,
+      transparent 0
+        calc(
+          var(--zen-live-bot-buckle-crt-cell-pitch) -
+            var(--zen-live-bot-buckle-crt-line-width)
+        ),
+      rgb(0 0 0 / 0.28)
+        calc(
+          var(--zen-live-bot-buckle-crt-cell-pitch) -
+            var(--zen-live-bot-buckle-crt-line-width)
+        )
+        var(--zen-live-bot-buckle-crt-cell-pitch)
+    ),
+    linear-gradient(180deg, rgba(255,255,255,.82), transparent 2px),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--coffee-bot-color) 72%, white),
+      color-mix(in srgb, var(--coffee-bot-color) 48%, #02070b)
+    );
+  box-shadow: 0 -2px 7px color-mix(in srgb, var(--coffee-bot-color) 70%, transparent);
+  transition: inset 220ms linear;
+}
+
+.botAvatarFoundryBuckleFill[data-screen-crest="true"]::after {
+  background:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0
+        calc(
+          var(--zen-live-bot-buckle-crt-cell-pitch) -
+            var(--zen-live-bot-buckle-crt-line-width)
+        ),
+      rgb(0 0 0 / 0.14)
+        calc(
+          var(--zen-live-bot-buckle-crt-cell-pitch) -
+            var(--zen-live-bot-buckle-crt-line-width)
+        )
+        var(--zen-live-bot-buckle-crt-cell-pitch)
+    ),
+    #fff;
+  box-shadow: 0 0 12px #fff, 0 0 24px var(--coffee-bot-color);
+}
+
+.botAvatarFoundryBuckleGlass {
+  --foundry-buckle-screen-size: var(
+    --zen-live-bot-body-glyph-size,
+    clamp(
+      var(--zen-live-bot-body-glyph-min-size),
+      calc(
+        var(--zen-live-bot-body-frame-size) *
+          var(--zen-live-bot-body-glyph-ratio)
+      ),
+      var(--zen-live-bot-body-glyph-max-size)
+    )
+  );
+  position: absolute;
+  left: calc(50% + var(--zen-live-bot-glyph-x-anchor, 0px) + 1px);
+  top: calc(50% + var(--zen-live-bot-glyph-y-anchor, 70px) + 1px);
+  z-index: 13;
+  width: var(--foundry-buckle-screen-size);
+  height: var(--foundry-buckle-screen-size);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background:
+    radial-gradient(circle at 34% 24%, rgba(255,255,255,.18), transparent 24%),
+    linear-gradient(145deg, rgba(255,255,255,.08), transparent 44% 68%, rgba(255,255,255,.06));
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,.13),
+    inset 0 0 8px rgba(0,0,0,.34);
+  pointer-events: none;
+}
+
+.botAvatarFoundryBuckleFill[data-draft-resolved="true"]::after {
+  animation: foundryBuckleResolvedFill 1.28s cubic-bezier(.2, .72, .22, 1) both;
+}
+
+@keyframes foundryBuckleResolvedFill {
+  0% { inset: 100% 0 0; filter: brightness(.86); }
+  72% { filter: brightness(1.08); }
+  100% { inset: 0; filter: brightness(1.18); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .botAvatarFoundryBuckleFill[data-draft-resolved="true"]::after {
+    animation: none !important;
+    inset: 0;
+  }
 }
 
 .zenLiveBotPresenceCopyText {
@@ -34386,6 +34974,20 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     drop-shadow(0 0 7px color-mix(in srgb, #e46fc5 48%, transparent));
 }
 
+.modelEffortIcon[data-effort-level="max"] {
+  background: linear-gradient(
+    145deg,
+    #60e6b5 0%,
+    #63c7ff 20%,
+    #8b7dff 40%,
+    #e46fc5 60%,
+    #ff9a62 80%,
+    #ffe47a 100%
+  );
+  filter: drop-shadow(0 0 4px color-mix(in srgb, #63c7ff 62%, transparent))
+    drop-shadow(0 0 8px color-mix(in srgb, #ffe47a 54%, transparent));
+}
+
 /* Filled glyphs are provider-native. Hollow glyphs mark Prism's private
    simulated passes while preserving the same effort shape and spectrum. */
 .modelEffortIcon[data-reasoning-mode="simulated"] {
@@ -34452,6 +35054,21 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   );
   filter: drop-shadow(0 0 3px color-mix(in srgb, #168461 30%, transparent))
     drop-shadow(0 0 4px color-mix(in srgb, #ad3c84 26%, transparent));
+}
+
+:global(body[data-prism-theme="light"])
+  .modelEffortIcon[data-effort-level="max"] {
+  background: linear-gradient(
+    145deg,
+    #11694d 0%,
+    #245f95 20%,
+    #5943ad 40%,
+    #91336f 60%,
+    #a84429 80%,
+    #8f6810 100%
+  );
+  filter: drop-shadow(0 0 2px color-mix(in srgb, #245f95 30%, transparent))
+    drop-shadow(0 0 4px color-mix(in srgb, #8f6810 28%, transparent));
 }
 
 .composeModelEffortTrigger > .modelEffortIcon {
@@ -35143,6 +35760,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   color: var(--fg);
 }
 
+.composeModelMaxToggle,
 .composeModelTurboToggle {
   appearance: none;
   display: grid;
@@ -35158,6 +35776,70 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   color: var(--fg);
   text-align: left;
   cursor: pointer;
+}
+
+.composeModelMaxToggle {
+  border-color: color-mix(in srgb, #9c8cff 42%, var(--line));
+  background: color-mix(in srgb, #7567ff 8%, var(--bg-deep));
+}
+
+.composeModelMaxToggle:hover:not(:disabled),
+.composeModelMaxToggle:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, #b7abff 76%, var(--line-strong));
+  background: color-mix(in srgb, #7567ff 15%, var(--bg-hover));
+}
+
+.composeModelMaxToggle[data-active="true"] {
+  border-color: color-mix(in srgb, #d8d0ff 86%, var(--line-strong));
+  background: linear-gradient(
+    105deg,
+    color-mix(in srgb, #604cff 20%, var(--bg-deep)),
+    color-mix(in srgb, #ef7bd8 13%, var(--bg-elevated))
+  );
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, #ffffff 22%, transparent),
+    0 0 14px color-mix(in srgb, #8b7dff 30%, transparent);
+}
+
+.composeModelMaxToggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.composeModelMaxToggle > .modelEffortIcon {
+  width: 18px;
+  height: 18px;
+}
+
+.composeModelMaxToggle[data-active="true"] .composeModelTurboSwitch {
+  background: linear-gradient(90deg, #6650c7, #e46fc5);
+  box-shadow: 0 0 8px color-mix(in srgb, #8b7dff 64%, transparent);
+}
+
+.composeModelMaxToggle[data-active="true"]
+  .composeModelTurboSwitch
+  > span {
+  transform: translateX(13px);
+  background: #fbf9ff;
+}
+
+:global(body[data-prism-theme="light"]) .composeModelMaxToggle {
+  border-color: color-mix(in srgb, #5943ad 48%, var(--line));
+  background: color-mix(in srgb, #6650c7 7%, var(--bg-elevated));
+}
+
+:global(body[data-prism-theme="light"])
+  .composeModelMaxToggle[data-active="true"] {
+  border-color: #5943ad;
+  background: linear-gradient(
+    105deg,
+    color-mix(in srgb, #6650c7 16%, #ffffff),
+    color-mix(in srgb, #ad3c84 10%, #ffffff)
+  );
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, #ffffff 58%, transparent),
+    0 0 10px color-mix(in srgb, #5943ad 20%, transparent);
 }
 
 .composeModelTurboToggle:hover,
@@ -39878,7 +40560,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   padding: 7px 10px;
   border: 1px solid var(--line);
   border-radius: 9px;
-  background: var(--bg-surface);
+  background: color-mix(in srgb, var(--bg-surface) 90%, var(--bg) 10%);
   box-shadow: var(--shadow-lg);
   color: var(--fg);
   display: flex;
@@ -48964,7 +49646,7 @@ a.settingsCreditItem:focus-visible {
   height: 100%;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 10px;
   align-items: stretch;
 }
@@ -54960,7 +55642,7 @@ a.settingsCreditItem:focus-visible {
   width: 240px;
   padding: 12px 14px;
   border-radius: 12px;
-  background: var(--bg-surface);
+  background: color-mix(in srgb, var(--bg-surface) 90%, var(--bg) 10%);
   border: 1px solid var(--line);
   box-shadow: var(--shadow-lg);
   font-size: 12px;
@@ -55421,6 +56103,80 @@ a.settingsCreditItem:focus-visible {
   color: var(--fg-muted);
   font-size: 11px;
   text-align: right;
+}
+
+.botLibraryGroupMemberSearchField {
+  display: grid;
+  gap: 6px;
+}
+
+.botLibraryGroupMemberSearchField > label,
+.botLibraryGroupMemberSearchStatus {
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.botLibraryGroupMemberSearchStatus {
+  margin: 0;
+  line-height: 1.35;
+}
+
+.botLibraryGroupMemberSearch {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--fg-muted) 20%, var(--line));
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 8px;
+}
+
+.botLibraryGroupMemberSearch:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.botLibraryGroupMemberSearch > svg {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+}
+
+.botLibraryGroupMemberSearch input {
+  border: 0;
+  outline: 0;
+  width: 100%;
+  min-width: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  padding: 0;
+}
+
+.botLibraryGroupMemberSearch input::placeholder {
+  color: var(--fg-muted);
+}
+
+.botLibraryGroupMemberSearch button {
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  padding: 0;
+}
+
+.botLibraryGroupMemberSearch button:hover,
+.botLibraryGroupMemberSearch button:focus-visible {
+  color: var(--fg);
 }
 
 .botLibraryGroupMemberGrid {
@@ -61037,10 +61793,9 @@ a.settingsCreditItem:focus-visible {
   }
 }
 
-/* Color hue strip: one axis only. X = hue 0→360° left to right.
-   Lightness is pinned in JS to the theme accent midpoint; saturation
-   stays at 100%. Private-mode desaturation is a separate presentation
-   path and must not be reintroduced here as a second picker axis. */
+/* Color hue strip: X = hue 0→360° left to right. Lightness is authored by
+   the adjacent brightness rail; saturation stays at the canonical 100%.
+   Private-mode desaturation remains a separate presentation path. */
 .colorSquare {
   position: relative;
   width: 100%;
@@ -61065,6 +61820,50 @@ a.settingsCreditItem:focus-visible {
     hsl(360, 100%, 50%)
   );
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+
+.colorLightnessControl {
+  width: 100%;
+  display: grid;
+  gap: 5px;
+  color: var(--fg-muted);
+  font-size: 9px;
+  font-weight: 760;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.colorLightnessControl > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.colorLightnessControl output {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
+.colorLightnessControl input[type="range"] {
+  width: 100%;
+  height: 18px;
+  margin: 0;
+  cursor: ew-resize;
+  accent-color: hsl(var(--picker-hue, 0), 100%, 50%);
+  background: linear-gradient(
+    to right,
+    hsl(var(--picker-hue, 0), 100%, 30%),
+    hsl(var(--picker-hue, 0), 100%, 50%),
+    hsl(var(--picker-hue, 0), 100%, 70%)
+  );
+  border-radius: 999px;
+}
+
+.colorLightnessControl input[type="range"]:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
 }
 
 /* Tiny ring marking the currently picked hue. Vertically centered on
@@ -64589,7 +65388,7 @@ a.settingsCreditItem:focus-visible {
       max(12px, calc(env(safe-area-inset-right) + 12px))
       calc(env(safe-area-inset-bottom) + 12px)
       max(12px, calc(env(safe-area-inset-left) + 12px));
-    grid-template-rows: clamp(150px, 26dvh, 230px) auto minmax(0, 1fr) auto;
+    grid-template-rows: clamp(150px, 26dvh, 230px) auto auto minmax(0, 1fr) auto;
     align-content: stretch;
     justify-items: stretch;
     border: 0;
@@ -71727,12 +72526,12 @@ a.settingsCreditItem:focus-visible {
 
 :is(.coffeeSeatPlateEmoji, .messageMoodCoffeeFace, .zenLiveBotPresenceFaceGlyph)
   [data-custom-eye-pair-side="left"] {
-  transform: translateX(-0.18em) scale(var(--bot-face-custom-eye-pair-scale));
+  transform: translateX(calc(var(--bot-face-eye-spacing, 0.36em) / -2)) scale(var(--bot-face-custom-eye-pair-scale));
 }
 
 :is(.coffeeSeatPlateEmoji, .messageMoodCoffeeFace, .zenLiveBotPresenceFaceGlyph)
   [data-custom-eye-pair-side="right"] {
-  transform: translateX(0.18em) scale(var(--bot-face-custom-eye-pair-scale));
+  transform: translateX(calc(var(--bot-face-eye-spacing, 0.36em) / 2)) scale(var(--bot-face-custom-eye-pair-scale));
 }
 
 :is(
@@ -71886,6 +72685,17 @@ a.settingsCreditItem:focus-visible {
   --bot-face-mouth-pulse-scale-y: 1.02;
   --bot-face-mouth-speech-opacity: 0.96;
   --bot-face-mouth-speech-wobble: 0deg;
+}
+
+:is(
+    .coffeeSeatPlateEmoji,
+    .messageMoodCoffeeFace,
+    .zenLiveBotPresenceFaceGlyph
+  )[data-talking="true"][data-face-mouth-animation="static"]
+  [data-coffee-plate-emoji-part="mouth"]
+  > [data-crt-glyph-layer="true"] {
+  animation: none;
+  transform: rotate(var(--bot-face-custom-glyph-base-rotation));
 }
 
 :is(
@@ -83701,6 +84511,18 @@ a.settingsCreditItem:focus-visible {
     botVoiceLightBulbIgnite 600ms ease-out,
     botVoiceLightBulbBreath 6.4s ease-in-out 600ms infinite !important;
   transition: opacity 90ms ease-out;
+}
+
+.zenLiveBotPresenceBody[data-screen-crest="true"] :is(
+  .botFaceFrameTint,
+  .botFaceFrameLed,
+  .botFaceFrameLedGlow,
+  .botFaceFrameLedCore,
+  .botAvatarFoundryFrameModuleLamp[data-populated="true"]
+) {
+  opacity: 1 !important;
+  filter: brightness(1.34) saturate(.82) !important;
+  animation: none !important;
 }
 
 .zenLiveBotPresencePlate[data-prism-persona="true"]:not(

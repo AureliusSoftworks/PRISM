@@ -8,8 +8,10 @@ import {
   modelSupportsNativeReasoningEffort,
   modelSupportsTurboMode,
   normalizeModelReasoningEffortPreference,
+  normalizeProviderReasoningEffort,
   normalizeReasoningEffort,
   openAiModelSupportsReasoningEffort,
+  openAiModelSupportsMaxReasoningEffort,
   openAiReasoningEffortForRequest,
   openAiReasoningEffortLevels,
   reasoningGenerationBudgetMs,
@@ -64,6 +66,8 @@ describe("reasoning effort helpers", () => {
     assert.equal(reasoningEffortForRequest("auto"), null);
     assert.equal(reasoningEffortForRequest("none"), "none");
     assert.equal(reasoningEffortForRequest("minimal"), "minimal");
+    assert.equal(normalizeProviderReasoningEffort(" MAX "), "max");
+    assert.equal(normalizeModelReasoningEffortPreference("max"), null);
   });
 
   it("keeps simulated-effort token budgets thrifty at low tiers and richer at high", () => {
@@ -173,6 +177,7 @@ describe("reasoning effort helpers", () => {
     assert.equal(reasoningGenerationBudgetMs("medium"), 240_000);
     assert.equal(reasoningGenerationBudgetMs("high"), 360_000);
     assert.equal(reasoningGenerationBudgetMs("xhigh"), 480_000);
+    assert.equal(reasoningGenerationBudgetMs("max"), 600_000);
     assert.equal(reasoningGenerationBudgetMs("auto"), 180_000);
     assert.equal(reasoningGenerationBudgetMs(undefined), 180_000);
     assert.equal(
@@ -303,6 +308,8 @@ describe("reasoning effort helpers", () => {
       ]);
       assert.equal(openAiReasoningEffortForRequest(modelId, "minimal"), null);
       assert.equal(openAiReasoningEffortForRequest(modelId, "low"), "low");
+      assert.equal(openAiModelSupportsMaxReasoningEffort(modelId), true);
+      assert.equal(openAiReasoningEffortForRequest(modelId, "max"), "max");
       assert.equal(
         effectiveModelReasoningEffort({
           provider: "openai",
@@ -313,6 +320,8 @@ describe("reasoning effort helpers", () => {
       );
     }
     assert.deepEqual(openAiReasoningEffortLevels("gpt-5.5-pro"), []);
+    assert.equal(openAiModelSupportsMaxReasoningEffort("gpt-5.5"), false);
+    assert.equal(openAiReasoningEffortForRequest("gpt-5.5", "max"), null);
     assert.equal(openAiReasoningEffortForRequest("gpt-5", "none"), null);
     assert.equal(openAiReasoningEffortForRequest("gpt-5.6-sol", "none"), "none");
   });
@@ -324,6 +333,7 @@ describe("reasoning effort helpers", () => {
     });
     assert.equal(localSimulated.mode, "simulated");
     assert.equal(localSimulated.supportsNone, true);
+    assert.equal(localSimulated.supportsMax, false);
     assert.deepEqual(localSimulated.levels, [
       "none",
       "minimal",
@@ -381,6 +391,13 @@ describe("reasoning effort helpers", () => {
         simulatedEffortEnabled: true,
       }).mode,
       "native",
+    );
+    assert.equal(
+      resolveModelReasoningEffortCapability({
+        provider: "openai",
+        modelId: "gpt-5.6-sol",
+      }).supportsMax,
+      true,
     );
     const fixed = resolveModelReasoningEffortCapability({
       provider: "openai",

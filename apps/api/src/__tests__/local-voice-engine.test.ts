@@ -88,6 +88,34 @@ describe("adaptive local voice selection", () => {
     assert.match(resolved.rulesetSha256 ?? "", /^[a-f0-9]{64}$/u);
   });
 
+  it("uses the shared Accent Map identity as Local's fallback authority", () => {
+    const engine = resolveLocalVoiceEngine({
+      preference: "instant",
+      calibration: calibration(),
+      runtimeHealthy: true,
+      speechprintActive: true,
+    });
+    const profile = {
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      accentDefinitionId: "german-influenced-english",
+      pronunciationBase: "en-US" as const,
+      speechprintInfluence: "italian-influenced-english" as const,
+    };
+    const pronunciation = resolveLocalVoicePronunciation({
+      profile,
+      localEngine: engine,
+      usingSystemVoice: false,
+    });
+    const speechprint = resolveLocalVoiceSpeechprint({
+      profile,
+      localEngine: engine,
+      usingSystemVoice: false,
+      pronunciation,
+    });
+    assert.equal(speechprint.requestedInfluence, "german-influenced-english");
+    assert.equal(speechprint.appliedInfluence, "german-influenced-english");
+  });
+
   it("routes a cross-accent pronunciation through Instant before Speechprints", () => {
     const engine = resolveLocalVoiceEngine({
       preference: "auto",

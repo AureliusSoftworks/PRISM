@@ -1407,6 +1407,32 @@ describe("OpenAiProvider request shape", () => {
     assert.equal(body.reasoning_effort, "high");
   });
 
+  it("sends native max only to compatible GPT-5.6 models", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const provider = new OpenAiProvider({ apiKey: "sk-test" });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "gpt-5.6-sol",
+      reasoningEffort: "max",
+      turbo: true,
+    });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "gpt-5.5",
+      reasoningEffort: "max",
+    });
+
+    assert.equal(bodies[0]?.reasoning_effort, "max");
+    assert.equal(bodies[0]?.service_tier, "priority");
+    assert.equal("reasoning_effort" in (bodies[1] ?? {}), false);
+  });
+
   it("sends Priority processing only when Turbo is enabled on a supported model", async () => {
     const bodies: Array<Record<string, unknown>> = [];
     globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {

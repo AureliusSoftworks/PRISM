@@ -55,9 +55,9 @@ test("desaturates the whole screen during local model warmup", () => {
   assert.match(warmupCss, /-webkit-backdrop-filter:\s*grayscale\(1\)/u);
 });
 
-test("Companion field Refract warms locally but never opens the hard synthesis loader", () => {
+test("Companion field Refract bypasses warmup while magic can still use the gate", () => {
   assert.match(companion, /usePrismRefractionGate/u);
-  assert.match(companion, /prepareLocalModel/u);
+  assert.doesNotMatch(companion, /prepareLocalModel/u);
   assert.match(companion, /runLocalRefraction/u);
   assert.match(companion, /!target\.ownsPresentation/u);
   assert.match(refract, /ownsPresentation\?:/u);
@@ -82,7 +82,7 @@ test("Companion field Refract warms locally but never opens the hard synthesis l
   );
 });
 
-test("Companion suppress keeps in-flight field Refract alive under warmup", () => {
+test("Companion suppress keeps in-flight field Refract alive", () => {
   assert.match(companion, /keepFieldRefract/u);
   assert.match(
     companion,

@@ -233,7 +233,7 @@ export function hslToHex(h: number, s: number, l: number): string {
 
 /**
  * Canonicalize a stored bot color to the fully saturated hue used by the
- * hue-only Shell picker. Hue and HSL lightness are preserved; only saturation
+ * hue-and-lightness Shell picker. Hue and HSL lightness are preserved; only saturation
  * is raised to 100%. Non-hex legacy CSS values are returned trimmed so this
  * storage migration never turns an unreadable custom value into a new color.
  */
@@ -394,8 +394,7 @@ export function accentLightnessBand(
  * single "shadeless" 50% lightness (which erases subtle shade left in
  * older saved accents and random seeds), we keep whatever shade they
  * already have — as long as it's inside the safe band for the active
- * theme. The Shell hue strip itself always commits new picks at the
- * band midpoint.
+ * theme. The Shell picker authors hue and lightness independently.
  *
  * Colors already inside the band pass through unchanged, so the function
  * is idempotent per theme. Note that a round-trip through the dark-mode

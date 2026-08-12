@@ -95,6 +95,10 @@ test("known build-failure identifiers stay aligned with current contracts", () =
   assert.doesNotMatch(pageSource, /ceremonyFaceStyle\.eyeMovement/u);
   assert.match(
     pageSource,
+    /eyeCount:[\s\S]{0,600}eyeSpacing:\s*\n?\s*(?:normalizeBotFaceEyeSpacing\([\s\S]{0,180}?\)\s*\n?\s*\?\?|)\s*DEFAULT_BOT_FACE_STYLE\.eyeSpacing/u,
+  );
+  assert.match(
+    pageSource,
     /modelSelectionKind:[\s\S]{0,180}\("auto" as const\)[\s\S]{0,120}\("fixed" as const\)/u,
   );
 });

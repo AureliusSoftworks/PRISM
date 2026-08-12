@@ -9,6 +9,7 @@ import {
 import {
   decodeBotAvatarDetailsPaintColorMap,
 } from "./botAvatarDetails.ts";
+import { hexToHsl } from "./color.ts";
 
 function paintedPixelCount(bytes: Uint8Array): number {
   return Array.from(bytes).reduce((count, byte) =>
@@ -27,6 +28,14 @@ function completeDraft(): Record<string, unknown> {
       core: {
         traits: "patient, sly, observant",
         communicationStyle: "warm",
+        responseCues: {
+          v: 1,
+          enabled: true,
+          interruption: ["A new route, then.", "Course corrected."],
+          redirect: ["I see another path.", "Let's chart that."],
+          waiting: ["Reading the stars…", "Finding our bearings…"],
+          blockedDefaults: [],
+        },
         openness: 2,
         conscientiousness: 1,
         extraversion: -1,
@@ -74,7 +83,10 @@ function completeDraft(): Record<string, unknown> {
     face: {
       intentionalCustomEyes: true,
       intentionalCustomMouth: true,
-      intentionalGeometryException: false,
+      intentionalCustomBlink: false,
+      intentionalEyeGeometryException: false,
+      intentionalMouthGeometryException: false,
+      intentionalBlinkGeometryException: false,
       faceEyesFont: "warm",
       faceEyeCharacter: "*",
       faceEyeCount: 2,
@@ -108,6 +120,7 @@ function completeDraft(): Record<string, unknown> {
         { role: "effect", shape: "line", x1: 30, y1: 30, x2: 50, y2: 30, size: 1 },
         { role: "talking", shape: "line", x1: 56, y1: 76, x2: 72, y2: 76, size: 2 },
       ],
+      speechInkAnimation: "wobble",
     },
     voice: {
       v: 2,
@@ -118,6 +131,10 @@ function completeDraft(): Record<string, unknown> {
       elevenLabsStability: 0.63,
       pitch: 0.2,
       warmth: 0.35,
+      openness: -0.25,
+      weight: 0.4,
+      brightness: -0.2,
+      resonance: 0.55,
       pace: -0.15,
       lilt: 0.3,
       bottishTone: 0.2,
@@ -125,6 +142,7 @@ function completeDraft(): Record<string, unknown> {
       gainDb: -1.5,
       volume: 0.9,
     },
+    avatarSfxPrompt: "Soft celestial relay ticks and a low glass shimmer",
     voicePreviewLine: "Every unanswered question leaves a trail in the dark.",
     settings: {
       flirtEnabled: false,
@@ -145,24 +163,37 @@ describe("normalizeBotGeneratedDraftV1", () => {
     assert.equal(draft.namePronunciation, "");
     assert.equal(draft.selfReferral, "");
     assert.equal(draft.profile.core.communicationStyle, "warm");
+    assert.deepEqual(draft.profile.core.responseCues?.waiting, [
+      "Reading the stars…",
+      "Finding our bearings…",
+    ]);
     assert.equal(draft.profile.facts.customFacts.length, 1);
-    assert.equal(draft.color, "#7a5cff");
+    const generatedColor = hexToHsl(draft.color);
+    const requestedColor = hexToHsl("#7A5CFF");
+    assert.ok(Math.abs(generatedColor.h - requestedColor.h) < 0.6);
+    assert.ok(Math.abs(generatedColor.s - 100) < 0.6);
+    assert.ok(Math.abs(generatedColor.l - 50) < 0.6);
     assert.equal(draft.accentColor, "#22b5ff");
     assert.equal(draft.glyph, "moon");
     assert.equal(draft.face.eyeCharacter, "*");
     assert.equal(draft.face.eyeCount, 2);
     assert.equal(draft.face.mouthCharacter, "_");
     assert.equal(draft.face.eyeScale, 1);
-    assert.equal(draft.face.mouthScale, 1);
+    assert.equal(draft.face.mouthScale, 0.7);
+    assert.equal(draft.face.blinkScale, 1);
     assert.equal(draft.face.eyeRotationDeg, 0);
+    assert.equal(draft.face.mouthRotationDeg, 0);
+    assert.equal(draft.face.blinkRotationDeg, 0);
+    assert.equal(draft.face.blinkBar, " ");
     assert.equal(draft.face.eyeOffsetX, 0);
     assert.equal(draft.face.eyeOffsetY, 0.18);
     assert.equal(draft.face.blinkOffsetX, 0);
     assert.equal(draft.face.blinkOffsetY, 0.18);
-    assert.equal(draft.face.mouthOffsetX, 0);
-    assert.equal(draft.face.mouthOffsetY, 0.08);
+    assert.equal(draft.face.mouthOffsetX, 0.04);
+    assert.equal(draft.face.mouthOffsetY, 0.22);
     assert.deepEqual(draft.avatarDetails?.screen.stamps, []);
     assert.ok(draft.avatarDetails?.screen.paintColorMapBase64);
+    assert.equal(draft.avatarDetails?.screen.speechInkAnimation, "wobble");
     assert.equal(draft.audioVoiceProfile.baseVoiceId, "voice-8");
     assert.deepEqual(draft.powers, []);
     assert.equal(draft.audioVoiceProfile.elevenLabsVoiceId, undefined);
@@ -171,6 +202,14 @@ describe("normalizeBotGeneratedDraftV1", () => {
     assert.equal(draft.audioVoiceProfile.accentLocale, "en-US");
     assert.equal(draft.audioVoiceProfile.systemVoiceName, undefined);
     assert.equal(draft.audioVoiceProfile.elevenLabsDirection, "hushed, wry, deliberate");
+    assert.equal(draft.audioVoiceProfile.openness, -0.25);
+    assert.equal(draft.audioVoiceProfile.weight, 0.4);
+    assert.equal(draft.audioVoiceProfile.brightness, -0.2);
+    assert.equal(draft.audioVoiceProfile.resonance, 0.55);
+    assert.equal(
+      draft.avatarSfxPrompt,
+      "Soft celestial relay ticks and a low glass shimmer",
+    );
     assert.equal(draft.settings.maxTokens, 1800);
   });
 
@@ -180,8 +219,10 @@ describe("normalizeBotGeneratedDraftV1", () => {
       ...(ordinary.face as Record<string, unknown>),
       intentionalCustomEyes: false,
       intentionalCustomMouth: false,
+      intentionalCustomBlink: false,
       faceEyeCharacter: "*",
       faceMouthCharacter: "_",
+      faceBlinkBar: "¦",
       faceEyeCount: 2,
     };
     const ordinaryDraft = normalizeBotGeneratedDraftV1(ordinary);
@@ -189,6 +230,13 @@ describe("normalizeBotGeneratedDraftV1", () => {
     assert.equal(ordinaryDraft.face.eyeCharacter, null);
     assert.equal(ordinaryDraft.face.eyeCount, 1);
     assert.equal(ordinaryDraft.face.mouthCharacter, null);
+    assert.equal(ordinaryDraft.face.blinkBar, " ");
+    assert.equal(ordinaryDraft.face.eyeScale, 1);
+    assert.equal(ordinaryDraft.face.mouthScale, 0.7);
+    assert.equal(ordinaryDraft.face.blinkScale, 1);
+    assert.equal(ordinaryDraft.face.eyeRotationDeg, 0);
+    assert.equal(ordinaryDraft.face.mouthRotationDeg, 0);
+    assert.equal(ordinaryDraft.face.blinkRotationDeg, 0);
 
     const canon = completeDraft();
     const canonDraft = normalizeBotGeneratedDraftV1(canon);
@@ -197,11 +245,14 @@ describe("normalizeBotGeneratedDraftV1", () => {
     assert.equal(canonDraft.face.mouthCharacter, "_");
   });
 
-  it("uses canonical generated face geometry unless a deliberate exception is flagged", () => {
+  it("preserves directional geometry only for the explicitly custom feature", () => {
     const exception = completeDraft();
     exception.face = {
       ...(exception.face as Record<string, unknown>),
-      intentionalGeometryException: true,
+      intentionalCustomBlink: true,
+      intentionalEyeGeometryException: true,
+      intentionalMouthGeometryException: true,
+      intentionalBlinkGeometryException: true,
       faceEyeScale: 1.2,
       faceEyeOffsetX: -0.3,
       faceEyeOffsetY: -0.04,
@@ -210,6 +261,11 @@ describe("normalizeBotGeneratedDraftV1", () => {
       faceMouthOffsetX: 0.2,
       faceMouthOffsetY: 0.04,
       faceMouthRotationDeg: -15,
+      faceBlinkBar: "╱",
+      faceBlinkScale: 1.1,
+      faceBlinkOffsetX: -0.2,
+      faceBlinkOffsetY: 0.12,
+      faceBlinkRotationDeg: 20,
     };
     const draft = normalizeBotGeneratedDraftV1(exception);
     assert.ok(draft);
@@ -223,6 +279,11 @@ describe("normalizeBotGeneratedDraftV1", () => {
         mouthX: draft.face.mouthOffsetX,
         mouthY: draft.face.mouthOffsetY,
         mouthRotation: draft.face.mouthRotationDeg,
+        blinkBar: draft.face.blinkBar,
+        blinkScale: draft.face.blinkScale,
+        blinkX: draft.face.blinkOffsetX,
+        blinkY: draft.face.blinkOffsetY,
+        blinkRotation: draft.face.blinkRotationDeg,
       },
       {
         eyeScale: 1.2,
@@ -233,8 +294,27 @@ describe("normalizeBotGeneratedDraftV1", () => {
         mouthX: 0.2,
         mouthY: 0.04,
         mouthRotation: -15,
+        blinkBar: "╱",
+        blinkScale: 1.1,
+        blinkX: -0.2,
+        blinkY: 0.12,
+        blinkRotation: 20,
       },
     );
+
+    const defaultMouth = completeDraft();
+    defaultMouth.face = {
+      ...(defaultMouth.face as Record<string, unknown>),
+      intentionalCustomMouth: false,
+      intentionalMouthGeometryException: true,
+      faceMouthScale: 1.4,
+      faceMouthRotationDeg: 40,
+    };
+    const defaultMouthDraft = normalizeBotGeneratedDraftV1(defaultMouth);
+    assert.ok(defaultMouthDraft);
+    assert.equal(defaultMouthDraft.face.mouthCharacter, null);
+    assert.equal(defaultMouthDraft.face.mouthScale, 0.7);
+    assert.equal(defaultMouthDraft.face.mouthRotationDeg, 0);
   });
 
   it("keeps generated Atmosphere accents optional and portable", () => {
@@ -247,6 +327,19 @@ describe("normalizeBotGeneratedDraftV1", () => {
     assert.equal(normalizeBotGeneratedDraftV1(invalid).accentColor, null);
   });
 
+  it("turns pale generated primary colors into the vivid hue-only picker midpoint", () => {
+    const paleOrange = completeDraft();
+    paleOrange.color = "#eadcc7";
+
+    const draft = normalizeBotGeneratedDraftV1(paleOrange);
+    assert.ok(draft);
+    const generatedColor = hexToHsl(draft.color);
+    const requestedColor = hexToHsl("#eadcc7");
+    assert.ok(Math.abs(generatedColor.h - requestedColor.h) < 0.6);
+    assert.ok(Math.abs(generatedColor.s - 100) < 0.6);
+    assert.ok(Math.abs(generatedColor.l - 50) < 0.6);
+  });
+
   it("creates at most one compiler-ready prompt Power from a master draft", () => {
     const value = completeDraft();
     value.powerPrompt = "She can hear lies as broken glass, but only from detectives.";
@@ -256,6 +349,16 @@ describe("normalizeBotGeneratedDraftV1", () => {
     assert.equal(draft.powers[0]?.authoringMode, "prompt");
     assert.equal(draft.powers[0]?.intent, value.powerPrompt);
     assert.equal(draft.powers[0]?.compileStatus, "draft");
+  });
+
+  it("keeps legacy null and malformed generated Power prompts removable by normalizing them to no draft Power", () => {
+    const legacyNull = completeDraft();
+    legacyNull.powerPrompt = null;
+    const malformed = completeDraft();
+    malformed.powerPrompt = { intent: "not a sentence" };
+
+    assert.deepEqual(normalizeBotGeneratedDraftV1(legacyNull)?.powers, []);
+    assert.deepEqual(normalizeBotGeneratedDraftV1(malformed)?.powers, []);
   });
 
   it("never links a premium voice during generation while preserving local casting", () => {
@@ -324,20 +427,68 @@ describe("normalizeBotGeneratedDraftV1", () => {
     assert.ok(paintedPixelCount(bytes) > 500);
   });
 
-  it("reserves calibrated live eye and mouth windows in generated portraits", () => {
+  it("preserves semantic eyebrow, eyelash, and lip ink with speech motion", () => {
     const input = completeDraft();
     input.avatarDetails = {
       ink: [
         {
-          role: "effect",
+          role: "talking",
           points: [
-            { x: 20, y: 20 },
-            { x: 108, y: 20 },
-            { x: 108, y: 100 },
-            { x: 20, y: 100 },
+            { x: 54, y: 80 },
+            { x: 74, y: 80 },
           ],
-          closed: true,
-          fill: true,
+          closed: false,
+          fill: false,
+          size: 2,
+        },
+        {
+          role: "blink",
+          shape: "line",
+          x1: 48,
+          y1: 54,
+          x2: 56,
+          y2: 52,
+          size: 2,
+        },
+        {
+          role: "effect",
+          shape: "line",
+          x1: 46,
+          y1: 46,
+          x2: 58,
+          y2: 44,
+          size: 2,
+        },
+      ],
+      speechInkAnimation: "pulsate",
+    };
+    const draft = normalizeBotGeneratedDraftV1(input);
+    assert.ok(draft?.avatarDetails?.screen.paintColorMapBase64);
+    assert.equal(draft.avatarDetails.screen.speechInkAnimation, "pulsate");
+    const bytes = decodeBotAvatarDetailsPaintColorMap(
+      draft.avatarDetails.screen.paintColorMapBase64,
+    );
+    const roles = new Set<number>();
+    for (const byte of bytes) {
+      for (const shift of [6, 4, 2, 0]) roles.add((byte >>> shift) & 0x03);
+    }
+    assert.equal(roles.has(1), true);
+    assert.equal(roles.has(2), true);
+    assert.equal(roles.has(3), true);
+  });
+
+  it("reserves live windows by semantic role while allowing lashes and lips", () => {
+    const input = completeDraft();
+    input.avatarDetails = {
+      ink: [
+        {
+          role: "blink",
+          points: [
+            { x: 56, y: 60 },
+            { x: 72, y: 60 },
+          ],
+          closed: false,
+          fill: false,
           size: 2,
         },
         {
@@ -349,6 +500,18 @@ describe("normalizeBotGeneratedDraftV1", () => {
           closed: false,
           fill: false,
           size: 3,
+        },
+        {
+          role: "effect",
+          points: [
+            { x: 20, y: 20 },
+            { x: 108, y: 20 },
+            { x: 108, y: 100 },
+            { x: 20, y: 100 },
+          ],
+          closed: true,
+          fill: true,
+          size: 2,
         },
       ],
     };
@@ -373,7 +536,14 @@ describe("normalizeBotGeneratedDraftV1", () => {
         mouthX: draft.face.mouthOffsetX,
         mouthY: draft.face.mouthOffsetY,
       },
-      { eyeX: 0, eyeY: 0.18, blinkX: 0, blinkY: 0.18, mouthX: 0, mouthY: 0.08 },
+      {
+        eyeX: 0,
+        eyeY: 0.18,
+        blinkX: 0,
+        blinkY: 0.18,
+        mouthX: 0.04,
+        mouthY: 0.22,
+      },
     );
     const bytes = decodeBotAvatarDetailsPaintColorMap(
       draft.avatarDetails.screen.paintColorMapBase64,
@@ -382,11 +552,11 @@ describe("normalizeBotGeneratedDraftV1", () => {
       const pixelIndex = y * 128 + x;
       return ((bytes[pixelIndex >>> 2] ?? 0) >>> (6 - (pixelIndex & 3) * 2)) & 0x03;
     };
-    assert.equal(roleAt(64, 60), 0);
-    assert.equal(roleAt(64, 81), 0);
+    assert.equal(roleAt(64, 60), 1);
+    assert.equal(roleAt(64, 81), 2);
     assert.equal(Array.from(bytes).some((byte) =>
       [6, 4, 2, 0].some((shift) => ((byte >>> shift) & 0x03) === 2)
-    ), false);
+    ), true);
   });
 
   it("caps generated portrait ink at the restrained accent density", () => {
@@ -431,7 +601,7 @@ describe("normalizeBotGeneratedDraftV1", () => {
     };
     const draft = normalizeBotGeneratedDraftV1(input);
     assert.ok(draft);
-    assert.equal(draft.color, "#5ad6ff");
+    assert.equal(draft.color, "#00c0ff");
     assert.equal(draft.glyph, "sparkles");
     assert.deepEqual(draft.settings, {
       flirtEnabled: true,

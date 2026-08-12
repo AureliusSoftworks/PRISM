@@ -28,6 +28,7 @@ import {
   type PrismCapabilityDefinition,
 } from "./prism-capabilities.ts";
 import { decryptJson, encryptJson, randomId } from "./security.ts";
+import { deleteMemoriesAcquiredDuringAppletSessions } from "./memory.ts";
 import type { ElevenLabsCreditBalance } from "./elevenlabs-subscription.ts";
 import {
   checkElevenLabsCreditMonitor,
@@ -506,6 +507,7 @@ function memoriesDeleteCapability(): PrismCapabilityDefinition {
 interface PrismConversationRow {
   id: string;
   title: string;
+  conversation_mode: string;
   updated_at: string;
   archived_at: string | null;
   archive_batch_id: string | null;
@@ -519,7 +521,7 @@ function conversationRows(
   const placeholders = conversationIds.map(() => "?").join(", ");
   return context.db
     .prepare(
-      `SELECT id, title, updated_at, archived_at, archive_batch_id
+      `SELECT id, title, conversation_mode, updated_at, archived_at, archive_batch_id
          FROM conversations
         WHERE user_id = ? AND id IN (${placeholders})
         ORDER BY updated_at, id`,
@@ -579,7 +581,7 @@ function conversationsQuarantineCapability(): PrismCapabilityDefinition {
       const placeholders = rootIds.map(() => "?").join(", ");
       const children = context.db
         .prepare(
-          `SELECT id, title, updated_at, archived_at, archive_batch_id
+          `SELECT id, title, conversation_mode, updated_at, archived_at, archive_batch_id
              FROM conversations
             WHERE user_id = ?
               AND parent_id IN (${placeholders})
@@ -595,7 +597,7 @@ function conversationsQuarantineCapability(): PrismCapabilityDefinition {
     }
     return context.db
       .prepare(
-        `SELECT id, title, updated_at, archived_at, archive_batch_id
+        `SELECT id, title, conversation_mode, updated_at, archived_at, archive_batch_id
            FROM conversations
           WHERE user_id = ?
             AND COALESCE(incognito, 0) = 0
@@ -630,6 +632,7 @@ function conversationsQuarantineCapability(): PrismCapabilityDefinition {
       ),
       consequences: [
         "The conversations leave active history immediately and remain recoverable for 30 days.",
+        "Memories learned inside deleted Coffee sessions are permanently removed, even if a session is restored.",
         "Downloaded exports and already-consumed provider credits are not recalled.",
       ],
     };
@@ -676,6 +679,27 @@ function conversationsQuarantineCapability(): PrismCapabilityDefinition {
       const archiveBatchId = `prism:${context.runId ?? randomId()}`;
       const placeholders = conversationIds.map(() => "?").join(", ");
       const archivedAt = context.now.toISOString();
+      const coffeeIds = rows
+        .filter((row) => row.conversation_mode === "coffee")
+        .map((row) => row.id);
+      if (coffeeIds.length > 0) {
+        const coffeePlaceholders = coffeeIds.map(() => "?").join(", ");
+        const sourceMessageIds = (
+          context.db
+            .prepare(
+              `SELECT id FROM messages
+                WHERE user_id = ?
+                  AND conversation_id IN (${coffeePlaceholders})`,
+            )
+            .all(context.userId, ...coffeeIds) as Array<{ id: string }>
+        ).map((row) => row.id);
+        deleteMemoriesAcquiredDuringAppletSessions(
+          context.db,
+          context.userId,
+          coffeeIds,
+          sourceMessageIds,
+        );
+      }
       context.db
         .prepare(
           `UPDATE conversations
@@ -712,6 +736,10 @@ function conversationsQuarantineCapability(): PrismCapabilityDefinition {
             archiveBatchId: row.archive_batch_id,
           })),
         },
+        nonReversibleConsequences:
+          coffeeIds.length > 0
+            ? ["Learned Coffee memories cannot be restored by Undo."]
+            : [],
       };
     },
     undo: (context, inverse) => {
@@ -1343,6 +1371,7 @@ function storySessionDeleteCapability(): PrismCapabilityDefinition {
         ),
         consequences: [
           "The session disappears immediately but can be restored for 30 days.",
+          "Any memories learned inside this Story session are permanently removed, even if the session is restored.",
         ],
       };
     },
@@ -1371,6 +1400,9 @@ function storySessionDeleteCapability(): PrismCapabilityDefinition {
           before: mutation.before,
           expectedRevision: null,
         },
+        nonReversibleConsequences: [
+          "Learned Story memories cannot be restored by Undo.",
+        ],
       };
     },
     undo: (context, inverse) => {
@@ -1453,6 +1485,7 @@ function debateSessionDeleteCapability(): PrismCapabilityDefinition {
         ),
         consequences: [
           "The Debate disappears immediately but can be restored for 30 days.",
+          "Any memories learned inside this Debate are permanently removed, even if the session is restored.",
         ],
       };
     },
@@ -1489,6 +1522,9 @@ function debateSessionDeleteCapability(): PrismCapabilityDefinition {
         inverse: {
           before: JSON.parse(JSON.stringify(before)) as PrismJsonObject,
         },
+        nonReversibleConsequences: [
+          "Learned Debate memories cannot be restored by Undo.",
+        ],
       };
     },
     undo: (context, inverse) => {
@@ -3329,6 +3365,7 @@ function signalEpisodesDeleteCapability(): PrismCapabilityDefinition {
         ),
         consequences: [
           `${replayCount} replay package${replayCount === 1 ? "" : "s"} will be quarantined with the episodes.`,
+          "Memories learned inside the selected episodes are permanently removed, even if an episode is restored.",
           "Independent Slate projects remain unchanged.",
           "Undo is available for 30 days.",
         ],
@@ -3418,6 +3455,14 @@ function signalEpisodesDeleteCapability(): PrismCapabilityDefinition {
           context.now.toISOString(),
           expiresAt,
         );
+      deleteMemoriesAcquiredDuringAppletSessions(
+        context.db,
+        context.userId,
+        episodeIds,
+        snapshot.botcast_messages.flatMap((row) =>
+          typeof row.id === "string" ? [row.id] : [],
+        ),
+      );
       const remove = context.db.prepare(
         "DELETE FROM botcast_episodes WHERE id = ? AND user_id = ?",
       );
@@ -3440,6 +3485,9 @@ function signalEpisodesDeleteCapability(): PrismCapabilityDefinition {
           revision: null,
         })),
         inverse: { quarantineId },
+        nonReversibleConsequences: [
+          "Learned Signal memories cannot be restored by Undo.",
+        ],
       };
     },
     undo: (context, inverse) => {
@@ -4600,6 +4648,11 @@ function botCreateCapability(
           now,
           now,
         );
+      context.db
+        .prepare(
+          "UPDATE bots SET face_eye_spacing = ? WHERE id = ? AND user_id = ?",
+        )
+        .run(draft.face.eyeSpacing, botId, context.userId);
       return {
         result: {
           bot: {

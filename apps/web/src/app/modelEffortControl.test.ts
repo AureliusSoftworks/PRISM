@@ -15,6 +15,7 @@ const modernCapability: ModelReasoningEffortCapabilityV1 = {
   mode: "native",
   levels: ["none", "minimal", "low", "medium", "high", "xhigh"],
   supportsNone: true,
+  supportsMax: false,
 };
 
 describe("model effort slider", () => {
@@ -51,6 +52,7 @@ describe("model effort slider", () => {
       mode: "simulated",
       levels: ["none", "minimal", "low", "medium", "high", "xhigh"],
       supportsNone: true,
+      supportsMax: false,
     };
     const levels = modelEffortSliderLevels(simulatedCapability);
     assert.equal(modelEffortBaseline(simulatedCapability), "none");
@@ -78,6 +80,7 @@ describe("model effort slider", () => {
       mode: "native",
       levels: ["low", "medium", "high"],
       supportsNone: false,
+      supportsMax: false,
     });
     assert.equal(modelEffortStep(levels, "auto", -1), "auto");
     assert.equal(modelEffortStep(levels, "auto", 1), "low");

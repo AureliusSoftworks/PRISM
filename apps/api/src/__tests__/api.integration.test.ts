@@ -2893,6 +2893,7 @@ describe("API request integration", () => {
         faceEyeAnimation: "natural",
         faceEyeRotationDeg: -25,
         faceEyeCount: 2,
+        faceEyeSpacing: 0.52,
         faceMouthCharacter: "△",
         faceMouthAnimation: "wobble",
         faceBlinkScale: 1.2,
@@ -2910,6 +2911,7 @@ describe("API request integration", () => {
     assert.equal(createdPayload.bot.face_eye_animation, "natural");
     assert.equal(createdPayload.bot.face_eye_rotation_deg, -25);
     assert.equal(createdPayload.bot.face_eye_count, 2);
+    assert.equal(createdPayload.bot.face_eye_spacing, 0.52);
     assert.equal(createdPayload.bot.face_mouth_animation, "wobble");
     assert.equal(createdPayload.bot.face_mouth_coffee_pucker, 1);
     assert.equal(createdPayload.bot.face_blink_scale, 1.2);
@@ -2928,7 +2930,8 @@ describe("API request integration", () => {
         faceEyeAnimation: "still",
         faceEyeRotationDeg: 35,
         faceEyeCount: 1,
-        faceMouthAnimation: "pulsate",
+        faceEyeSpacing: 0.28,
+        faceMouthAnimation: "static",
         faceMouthCoffeePucker: false,
         faceBlinkScale: 0.85,
         faceBlinkOffsetX: 0.1,
@@ -2945,7 +2948,8 @@ describe("API request integration", () => {
     assert.equal(updatedPayload.bot.face_eye_animation, "still");
     assert.equal(updatedPayload.bot.face_eye_rotation_deg, 35);
     assert.equal(updatedPayload.bot.face_eye_count, 1);
-    assert.equal(updatedPayload.bot.face_mouth_animation, "pulsate");
+    assert.equal(updatedPayload.bot.face_eye_spacing, 0.28);
+    assert.equal(updatedPayload.bot.face_mouth_animation, "static");
     assert.equal(updatedPayload.bot.face_mouth_coffee_pucker, 0);
     assert.equal(updatedPayload.bot.face_blink_scale, 0.85);
     assert.equal(updatedPayload.bot.face_blink_offset_x, 0.1);
@@ -2966,6 +2970,17 @@ describe("API request integration", () => {
     assert.equal(invalidEyeCount.status, 400);
     assert.match((await json(invalidEyeCount)).error, /eye count/i);
 
+    const invalidEyeSpacing = await client.request(
+      `/api/bots/${encodeURIComponent(botId)}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ faceEyeSpacing: "wide" }),
+      },
+    );
+    assert.equal(invalidEyeSpacing.status, 400);
+    assert.match((await json(invalidEyeSpacing)).error, /eye spacing/i);
+
     const updatedDefault = await client.request("/api/default-bot", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -2974,6 +2989,7 @@ describe("API request integration", () => {
         faceEyeAnimation: "natural",
         faceEyeRotationDeg: -45,
         faceEyeCount: 2,
+        faceEyeSpacing: 0.48,
         faceMouthCharacter: "△",
         faceMouthAnimation: "wobble",
         faceBlinkScale: 1.25,
@@ -2993,6 +3009,7 @@ describe("API request integration", () => {
     );
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceEyeRotationDeg, -45);
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceEyeCount, 2);
+    assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceEyeSpacing, 0.48);
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceMouthAnimation, "wobble");
     assert.equal(
       defaultPayload.defaultBot.prismDefaultBotFaceMouthCoffeePucker,

@@ -148,7 +148,7 @@ describe("bot group canvas filtering", () => {
     );
     assert.match(
       pageSource,
-      /className=\{styles\.botLibraryGroupMemberGrid\}[\s\S]*?sortedPanelBots\.map\([\s\S]*?toggleBotLibraryGroupDialogMember/,
+      /const visibleMembers = \[[\s\S]*?\.\.\.selectedMembers,[\s\S]*?\.\.\.filteredCandidates,[\s\S]*?\];[\s\S]*?className=\{styles\.botLibraryGroupMemberGrid\}[\s\S]*?toggleBotLibraryGroupDialogMember/,
     );
     assert.match(
       cssSource,

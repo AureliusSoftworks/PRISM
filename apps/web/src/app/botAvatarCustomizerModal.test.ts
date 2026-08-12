@@ -109,6 +109,12 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
     miniSource,
     /forceBlinkPhase=\{previewBlink \? "closed" : "open"\}/,
   );
+  assert.match(miniSource, /<MessageMoodFace/);
+  assert.match(miniSource, /variant="micro"/);
+  assert.match(
+    miniSource,
+    /forceBlinkPhase=\{previewBlink \? "closed" : undefined\}/,
+  );
   assert.match(miniSource, /faceEyeMovement="still"/);
   assert.match(
     miniSource,
@@ -116,7 +122,12 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
   );
   assert.match(
     miniSource,
-    /faceBlinkRotationDeg=\{previewFaceStyle\.blinkRotationDeg\}/,
+    /faceBlinkRotationDeg=\{\s*previewFaceStyle\.blinkRotationDeg\s*\}/,
+  );
+  assert.match(miniSource, /className=\{styles\.botAvatarStudioMicroPreview\}/);
+  assert.match(
+    miniSource,
+    /className=\{styles\.botAvatarStudioMiniPreviewViewport\}/,
   );
   assert.match(pageSource, /details=\{miniAvatarDetails\}/);
   assert.match(miniSource, /name=\{glyph\}/);
@@ -130,6 +141,20 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
   assert.match(previewRule, /top: 20px;/);
   assert.match(previewRule, /z-index: 22;/);
   assert.match(previewRule, /pointer-events: none;/);
+  assert.match(previewRule, /width:\s*fit-content;/);
+  assert.match(previewRule, /max-width:\s*calc\(100vw - 44px\);/);
+
+  const miniViewportRule = cssRuleBody(
+    ".botAvatarStudioMiniPreviewViewport",
+  );
+  assert.match(miniViewportRule, /width:\s*122px;/);
+  assert.match(miniViewportRule, /height:\s*122px;/);
+
+  const microClassRule = cssRuleBody(
+    '.botAvatarStudioMicroPreview .messageMoodBadge[data-face="coffee"][data-variant="micro"]',
+  );
+  assert.match(microClassRule, /width:\s*36px;/);
+  assert.match(microClassRule, /height:\s*36px;/);
 });
 
 test("Avatar Studio requires an Accent pin before named voice casting", () => {
@@ -387,6 +412,15 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(pageSource, /: randomBotAvatarCustomBlinkGlyph\(\)/);
   assert.match(pageSource, /: randomBotAvatarCustomThinkingFrames\(\)/);
   assert.match(pageSource, /label="Eye size"/);
+  assert.match(pageSource, /label="Eye spacing"/);
+  assert.match(
+    pageSource,
+    /faceEyeSpacing !== DEFAULT_BOT_FACE_STYLE\.eyeSpacing/,
+  );
+  assert.match(
+    pageSource,
+    /newBotFaceEyeSpacing !== editPristine\.faceEyeSpacing/,
+  );
   assert.match(pageSource, /label="Eye position"/);
   assert.match(pageSource, /label="Blink size"/);
   assert.match(pageSource, /label="Blink position"/);
@@ -394,6 +428,10 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(pageSource, /onBlinkOffsetXChange/);
   assert.match(pageSource, /onBlinkOffsetYChange/);
   assert.match(pageSource, /label="Mouth size"/);
+  assert.match(
+    pageSource,
+    /faceMouthScale\s*\/\s*DEFAULT_BOT_FACE_MOUTH_SCALE/u,
+  );
   assert.match(pageSource, /label="Mouth position"/);
   assert.match(pageSource, /function BotAvatarCoordinateControl\(/);
   assert.match(pageSource, /const visualX = -x;/);
@@ -476,9 +514,14 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(faceTabSource, /identitySection \?/);
   assert.doesNotMatch(faceTabSource, /<ColorGlyphPicker/);
   assert.match(pageSource, /ariaLabel="Shell color and identity badge"/);
+  assert.match(pageSource, /return hslToHex\(hue, 100, currentLightness\)/);
   assert.match(
     pageSource,
-    /return hslToHex\(hue, 100, accentLightnessMidpoint\(resolvedTheme\)\)/,
+    /aria-label="Bot accent brightness\. Drag left and right to make the accent darker or brighter\."/,
+  );
+  assert.match(
+    pageSource,
+    /commitColorPick\(hslToHex\(currentHue, 100, nextLightness\)\)/,
   );
   assert.doesNotMatch(pageSource, /computePickedColor[\s\S]{0,700}clientY[^;]*\/ rect\.height/);
   assert.match(faceTabSource, /label="Thinking animation"/);
@@ -593,6 +636,8 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(mouthTabSource, /label="Mouth animation"/);
   assert.match(mouthTabSource, /value=\{faceMouthAnimation\}/);
   assert.match(mouthTabSource, /onChange=\{onMouthAnimationChange\}/);
+  assert.match(pageSource, /none: "Default"/);
+  assert.match(pageSource, /static: "None"/);
   assert.ok(
     mouthTabSource.indexOf("<BotAvatarCustomGlyphCapture") <
       mouthTabSource.indexOf("<BotAvatarMouthRotationWheel"),
@@ -661,13 +706,15 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.doesNotMatch(pageSource, />\s*Eye height\s*</);
 });
 
-test("two custom eyes duplicate only the open-eye glyph and leave blink behavior unchanged", () => {
+test("two custom eyes share adjustable centered spacing across open and blink states", () => {
   assert.match(coffeeFaceSource, /normalizedFaceEyeCount === 2/);
   assert.match(coffeeFaceSource, /displayBlinkPhase !== "closed"/);
+  assert.match(coffeeFaceSource, /displayBlinkPhase === "closed"/);
+  assert.match(coffeeFaceSource, /renderCustomEyePair \|\| renderCustomBlinkPair/);
   assert.match(coffeeFaceSource, /data-custom-eye-pair="true"/);
   assert.match(coffeeFaceSource, /data-custom-eye-pair-side="left"/);
   assert.match(coffeeFaceSource, /data-custom-eye-pair-side="right"/);
-  assert.match(coffeeFaceSource, /pairedEye: renderCustomEyePair/);
+  assert.match(coffeeFaceSource, /--bot-face-eye-spacing/);
   assert.match(
     coffeeFaceSource,
     /const blinkKey = `\$\{enabled[\s\S]*?:\$\{faceText\}:\$\{scheduleKey\}`/,
@@ -682,12 +729,17 @@ test("two custom eyes duplicate only the open-eye glyph and leave blink behavior
   assert.match(cssSource, /--bot-face-custom-eye-pair-scale:\s*0\.42\s*;/);
   assert.match(
     cssSource,
-    /translateX\(-0\.18em\) scale\(var\(--bot-face-custom-eye-pair-scale\)\)/,
+    /translateX\(calc\(var\(--bot-face-eye-spacing, 0\.36em\) \/ -2\)\) scale\(var\(--bot-face-custom-eye-pair-scale\)\)/,
   );
   assert.match(
     cssSource,
-    /translateX\(0\.18em\) scale\(var\(--bot-face-custom-eye-pair-scale\)\)/,
+    /translateX\(calc\(var\(--bot-face-eye-spacing, 0\.36em\) \/ 2\)\) scale\(var\(--bot-face-custom-eye-pair-scale\)\)/,
   );
+  assert.match(
+    pageSource,
+    /customEyeActive && faceEyeCount === 2[\s\S]*?label="Eye spacing"/,
+  );
+  assert.match(pageSource, /onEyeSpacingChange/);
 });
 
 test("avatar edits stay local until Save and support multi-step undo", () => {
@@ -1424,6 +1476,15 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(pageSource, /compiledById\.get\(power\.id\) \?\? power/u);
   assert.match(pageSource, /Reroll Power/u);
   assert.match(pageSource, /Reroll rune/u);
+  assert.match(pageSource, /Reroll the generated Power name and rune/u);
+  assert.match(
+    pageSource,
+    /randomizeSemanticBotField\(\s*"power\.name",\s*power\.name/u,
+  );
+  assert.match(
+    pageSource,
+    /power:\s*\{\s*name:\s*power\.name,\s*prompt:\s*power\.intent/u,
+  );
   assert.doesNotMatch(pageSource, /BOT_POWER_SIGIL_GLYPHS/u);
   assert.match(pageSource, /Pop Power\?/u);
   assert.match(pageSource, /\/api\/bot-powers\/compile/);
@@ -1567,7 +1628,7 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   );
   assert.match(
     cssRuleBody(".colorGlyphInline"),
-    /grid-template-rows:\s*auto minmax\(0,\s*1fr\);/,
+    /grid-template-rows:\s*auto auto minmax\(0,\s*1fr\);/,
   );
   assert.match(
     cssRuleBody(".colorGlyphInline .colorSquare"),
@@ -1582,11 +1643,8 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
     pageSource,
     /aria-label="Bot color hue\. Drag left and right to choose a hue\."/,
   );
-  assert.match(pageSource, /accentLightnessMidpoint\(/);
-  assert.doesNotMatch(
-    pageSource,
-    /vertical axis: lightness/,
-  );
+  assert.doesNotMatch(pageSource, /accentLightnessMidpoint\(/);
+  assert.match(cssSource, /\.colorLightnessControl/);
   assert.doesNotMatch(
     cssSource,
     /--color-square-band-alpha/,

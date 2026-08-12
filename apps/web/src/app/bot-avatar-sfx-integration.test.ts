@@ -3,6 +3,14 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const avatarSfxSource = readFileSync(
+  new URL("./botAvatarSfx.ts", import.meta.url),
+  "utf8",
+);
+const voiceEffectsSource = readFileSync(
+  new URL("./voiceEffects.ts", import.meta.url),
+  "utf8",
+);
 
 function sourceBefore(marker: string, length = 2_200): string {
   const markerIndex = pageSource.indexOf(marker);
@@ -14,6 +22,17 @@ test("the shared full-avatar renderer owns the looping SFX lifecycle", () => {
   assert.match(pageSource, /syncBotAvatarSfxAudio\(/);
   assert.match(pageSource, /stopBotAvatarSfxAudio\(/);
   assert.match(pageSource, /data-bot-avatar-sfx-runtime="true"/);
+});
+
+test("Avatar SFX and bot speech share the exact post-effect output node", () => {
+  assert.match(
+    avatarSfxSource,
+    /engine\.output\.connect\(prismAudioOutputNode\(engine\.context\)\)/u,
+  );
+  assert.match(
+    voiceEffectsSource,
+    /destination:\s*prismAudioOutputNode\(context\)/u,
+  );
 });
 
 test("Avatar Studio samples use the shared trimmed attack and release behavior", () => {
@@ -52,6 +71,19 @@ test("Avatar Studio presents the built-in fallback without pretending it was upl
   assert.match(pageSource, /Use PRISM default avatar sound/u);
 });
 
+test("Avatar Studio presents the quiet physical ceiling as player-facing 100%", () => {
+  const volumeSource = sourceBefore('aria-label="Avatar sound volume"', 2_000);
+  assert.match(volumeSource, /max=\{100\}/u);
+  assert.match(
+    volumeSource,
+    /currentSfx\.volume\s*\/\s*BOT_AVATAR_SFX_MAX_VOLUME/u,
+  );
+  assert.match(
+    volumeSource,
+    /Number\(event\.currentTarget\.value\)\s*\/\s*100\)[\s\S]{0,80}BOT_AVATAR_SFX_MAX_VOLUME/u,
+  );
+});
+
 test("Avatar Studio drives SFX from its idle, blink, talking, and thinking preview", () => {
   const previewSource = sourceBefore(
     "scheduleKey={`${scheduleKey}-${previewMode}-${previewMood}`}",
@@ -68,13 +100,19 @@ test("Zen, Coffee, and live Signal resolve each visible bot's SFX and live state
   const zenSource = sourceBefore(
     'scheduleKey={`zen-live-${bot?.id ?? "prism"}-${moodHint}`}',
   );
-  assert.match(zenSource, /avatarSfx=\{botAvatarSfxForBot\(bot\)\}/);
+  assert.match(
+    zenSource,
+    /avatarSfx=\{[\s\S]{0,160}botAvatarSfxForVoiceBus\([\s\S]{0,100}botAvatarSfxForBot\(bot\)[\s\S]{0,60}voiceBusGain/u,
+  );
   assert.match(zenSource, /showThinkingSpinner \|\| transitioning/);
 
-  const coffeeSource = sourceBefore("scheduleKey={`coffee-live-${bot.id}`}");
+  const coffeeSource = sourceBefore(
+    "scheduleKey={`coffee-live-${bot.id}`}",
+    4_000,
+  );
   assert.match(
     coffeeSource,
-    /avatarSfx=\{\s*coffeeReplayUsesAudioMaster\s*\?\s*null\s*:\s*botAvatarSfxForBot\(bot\)\s*\}/u,
+    /avatarSfx=\{[\s\S]{0,240}coffeeReplayUsesAudioMaster[\s\S]{0,180}botAvatarSfxForVoiceBus\([\s\S]{0,120}botAvatarSfxForBot\(bot\)/u,
   );
   assert.match(coffeeSource, /seatThinkingVisualActive/);
 
@@ -84,20 +122,20 @@ test("Zen, Coffee, and live Signal resolve each visible bot's SFX and live state
   );
   assert.match(
     signalSource,
-    /avatarSfx=\{[\s\S]{0,80}avatarState\.sfxEnabled[\s\S]{0,180}botAvatarSfxForSignalMix\([\s\S]{0,120}botAvatarSfxForBot\(bot\)/u,
+    /avatarSfx=\{[\s\S]{0,80}avatarState\.sfxEnabled[\s\S]{0,180}botAvatarSfxForVoiceBus\([\s\S]{0,120}botAvatarSfxForBot\(bot\)/u,
   );
   assert.match(signalSource, /avatarState\.talking/);
   assert.match(signalSource, /avatarState\.thinking/);
 });
 
-test("Debate routes the thinking bot's frozen SFX profile into its live avatar", () => {
+test("Debate routes the bot's frozen SFX profile through its voice bus", () => {
   const debateSource = sourceBefore(
     "scheduleKey={`debate-${avatarState.role}-${botSnapshot.id}`}",
     3_000,
   );
   assert.match(
     debateSource,
-    /avatarSfx=\{botAvatarSfxForDebateState\(\s*botAvatarSfxForProfile\(\s*botSnapshot\.voiceProfile,\s*botSnapshot\.id,\s*\),\s*avatarState\.thinking,\s*\)\}/u,
+    /avatarSfx=\{[\s\S]{0,220}botAvatarSfxForVoiceBus\(\s*botAvatarSfxForProfile\(\s*botSnapshot\.voiceProfile,\s*botSnapshot\.id,\s*\),[\s\S]{0,420}settings\.voiceVolume/u,
   );
   assert.match(
     debateSource,
@@ -135,15 +173,14 @@ test("Signal keeps dashboard avatars quiet and respects Persona SFX triggers on 
   );
   assert.match(
     botcastSource,
-    /surface: "alignment",[\s\S]{0,140}sfxEnabled: sfxMixGain > 0,[\s\S]{0,80}sfxMixGain/u,
+    /surface: "alignment",[\s\S]{0,140}sfxEnabled: sfxVoiceBusGain > 0,[\s\S]{0,100}sfxVoiceBusGain/u,
   );
-  assert.match(botcastSource, /sessionAtmosphereBusVolume\(\{/u);
   assert.match(
     pageSource,
-    /botAvatarSfxForSignalMix\([\s\S]{0,180}avatarState\.sfxMixGain/u,
+    /botAvatarSfxForVoiceBus\([\s\S]{0,180}avatarState\.sfxVoiceBusGain/u,
   );
   const signalMixSource = pageSource.slice(
-    pageSource.indexOf("function botAvatarSfxForSignalMix"),
+    pageSource.indexOf("function botAvatarSfxForVoiceBus"),
     pageSource.indexOf("function marketplacePreviewBotFromArchive"),
   );
   assert.doesNotMatch(signalMixSource, /forcePreview/u);
@@ -157,6 +194,6 @@ test("Signal keeps dashboard avatars quiet and respects Persona SFX triggers on 
   );
   assert.match(
     producerSource,
-    /avatarSfx=\{[\s\S]{0,80}avatarState\.sfxEnabled[\s\S]{0,180}botAvatarSfxForProfile\([\s\S]{0,360}: null/u,
+    /avatarSfx=\{[\s\S]{0,100}avatarState\.sfxEnabled[\s\S]{0,220}botAvatarSfxForVoiceBus\([\s\S]{0,100}botAvatarSfxForProfile\([\s\S]{0,180}avatarState\.sfxVoiceBusGain/u,
   );
 });

@@ -100,11 +100,11 @@ test("master playback suppresses reconstructed voices, action SFX, and atmospher
   );
   assert.match(
     pageSource,
-    /avatarSfx=\{\s*coffeeReplayUsesAudioMaster\s*\? null\s*:\s*botAvatarSfxForBot/u,
+    /avatarSfx=\{[\s\S]{0,180}coffeeReplayUsesAudioMaster[\s\S]{0,180}botAvatarSfxForVoiceBus\([\s\S]{0,100}botAvatarSfxForBot/u,
   );
   assert.match(
     pageSource,
-    /avatarState\.sfxEnabled[\s\S]{0,120}botAvatarSfxForSignalMix/u,
+    /avatarState\.sfxEnabled[\s\S]{0,160}botAvatarSfxForVoiceBus/u,
   );
   assert.match(
     signalSource,

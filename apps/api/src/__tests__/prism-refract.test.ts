@@ -12,31 +12,34 @@ const botcastSource = readFileSync(
 );
 
 describe("Prism Refract API contract", () => {
-  it("requires auth, normalizes the bounded target union, and always uses the dedicated local Prism model", () => {
+  it("requires auth and routes every foreground Refract through the global text runtime", () => {
     const route = serverSource.match(
       /route\("POST", "\/api\/prism\/refract"[\s\S]*?route\("GET", "\/api\/botcast\/shows"/u,
     )?.[0] ?? "";
     assert.match(route, /const userId = requireAuth\(ctx\)/u);
     assert.match(route, /normalizePrismRefractRequest\(ctx\.body\)/u);
-    assert.match(
-      route,
-      /const preferredProvider = "local" as const/u,
-    );
-    assert.match(
-      route,
-      /const modelOverride = resolveAuxiliaryOllamaModel\([\s\S]*user\.prism_default_llm_model/u,
-    );
-    assert.match(route, /const effectiveResponseMode = "local" as const/u);
-    assert.doesNotMatch(route, /request\.preferredProvider/u);
-    assert.doesNotMatch(route, /request\.modelOverride/u);
-    assert.doesNotMatch(route, /getOpenAiApiKeyForUser/u);
-    assert.doesNotMatch(route, /getAnthropicApiKeyForUser/u);
+    assert.match(route, /request\.preferredProvider \?\? user\.preferred_provider/u);
+    assert.match(route, /user\.preferred_local_model/u);
+    assert.match(route, /user\.preferred_online_model/u);
+    assert.match(route, /contextualTextRuntimeForUser\(/u);
+    assert.match(route, /requestedReasoningEffort: request\.reasoningEffort/u);
+    assert.match(route, /requestedTurbo: request\.turbo/u);
+    assert.doesNotMatch(route, /resolveAuxiliaryOllamaModel\(/u);
     assert.match(route, /isPrismRefractDebateTextTarget\(request\.target\)/u);
     assert.match(route, /isPrismRefractInputTextTarget\(request\.target\)/u);
     assert.match(route, /generatePrismInputRefractDraft/u);
     assert.match(route, /buildPrismCompanionAuthoritativeContext/u);
     assert.match(route, /surface: "prism-refract"/u);
-    assert.match(route, /auxiliaryProviderFactoryOverride/u);
+    assert.match(route, /providerFactoryOverride/u);
+    assert.match(route, /refractRuntime\.reasoningEffort/u);
+    assert.match(route, /refractRuntime\.turbo/u);
+    const globalRuntime = serverSource.match(
+      /async function contextualTextRuntimeForUser[\s\S]*?async function contextualSignalRuntimeForEpisode/u,
+    )?.[0] ?? "";
+    assert.match(
+      globalRuntime,
+      /Max reasoning requires an explicitly selected compatible native model/u,
+    );
     assert.match(route, /generateDebateRefractDraft/u);
     assert.match(route, /generateBotcastRefractDraft/u);
   });

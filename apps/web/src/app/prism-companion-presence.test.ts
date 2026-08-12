@@ -28,17 +28,30 @@ test("uses one reference-counted focus boundary for overlapping surfaces", () =>
   assert.match(companion, /if \(!companionSuppressed\) return/u);
 });
 
-test("shares one non-interactive orb visual between the companion and focus screens", () => {
+test("suppresses the global companion while Creation renders its own live Prism", () => {
   assert.match(orb, /data-prism-orb="true"/u);
   assert.match(orb, /aria-hidden="true"/u);
   assert.match(companion, /<PrismOrb aura=\{false\}/u);
-  assert.match(ritual, /<PrismOrb aura=\{false\} className=\{styles\.prismOrb\}/u);
+  assert.match(ritual, /<PrismOrb aura size="100%"/u);
+  assert.match(ritual, /className=\{styles\.prismRadialLight\}/u);
   assert.match(companion, /publishPrismCompanionVisualSnapshot/u);
-  assert.match(ritual, /data-companion-origin=/u);
+  assert.match(ritual, /data-prism-anchor="authored"/u);
+  assert.doesNotMatch(ritual, /pointermove/u);
 });
 
-test("suppresses the floating assistant throughout bot creation and full-screen loading", () => {
-  assert.match(page, /reason="bot-creation"/u);
+test("keeps Foundry brief fields Wieldable, then suppresses the assistant during generation", () => {
+  assert.match(
+    page,
+    /\{botGeneratorBusy \? \(\s*<PrismCompanionPresenceBoundary reason="bot-creation" \/>\s*\) : null\}/u,
+  );
+  assert.match(page, /id="bot-generator-prompt"/u);
+  assert.doesNotMatch(
+    page,
+    /<textarea[\s\S]{0,500}data-prism-refract-ignore/u,
+  );
+});
+
+test("suppresses the floating assistant throughout full-screen loading", () => {
   assert.match(page, /reason="view-switch-loading"/u);
   assert.match(page, /reason="story-loading"/u);
   assert.match(warmup, /reason=\{`\$\{props\.experience\}-model-warmup`\}/u);
@@ -46,16 +59,17 @@ test("suppresses the floating assistant throughout bot creation and full-screen 
   assert.match(slate, /reason="slate-loading"/u);
 });
 
-test("removes the assistant while any top-bar main panel is open", () => {
+test("submerges passive Prism chrome while keeping panel fields Wieldable", () => {
   assert.match(
     presence,
     /function prismCompanionDisabledByMainPanel\([\s\S]*return panel !== null \|\| avatarStudioOpen;/u,
   );
   assert.match(
     page,
-    /if \(prismCompanionDisabledByMainPanel\(panel, botAvatarCustomizerOpen\)\) \{\s*return <PrismCompanionPresenceBoundary reason="main-menu-panel" \/>;\s*\}/u,
+    /const companionSubmergedByMainPanel =\s*prismCompanionDisabledByMainPanel\(panel, botAvatarCustomizerOpen\)/u,
   );
-  assert.match(companion, /if \(companionSuppressed\) return;/u);
+  assert.match(page, /submerged=\{companionSubmergedByMainPanel\}/u);
+  assert.match(companion, /data-submerged=\{submerged \? "true" : undefined\}/u);
   assert.match(
     companion,
     /if \(companionSuppressed \|\| sessionNoteContext\) return;\s*return installPrismUniversalInputTargets/u,

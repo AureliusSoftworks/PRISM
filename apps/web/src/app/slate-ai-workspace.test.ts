@@ -28,6 +28,14 @@ describe("Slate AI workspace controls", () => {
     assert.match(workspace, /Every generated prose artifact keeps its provider and\s+model receipt/u);
   });
 
+  it("carries transient Max from the visible global navbar into foreground Slate AI requests", () => {
+    assert.match(workspace, /foregroundReasoningEffort\?: ProviderReasoningEffort/u);
+    assert.match(workspace, /x-prism-reasoning-effort/u);
+    assert.match(workspace, /x-prism-model-provider/u);
+    assert.match(workspace, /x-prism-model-override/u);
+    assert.match(page, /foregroundReasoningEffort=\{sharedAccountForegroundReasoningEffort\(\)\}/u);
+  });
+
   it("surfaces the living summary and advisory title decision on the canvas", () => {
     assert.match(workspace, /data-tutorial-target="slate-summary"/u);
     assert.match(workspace, /livingSummary\.tail/u);

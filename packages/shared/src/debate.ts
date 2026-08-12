@@ -15,7 +15,8 @@ import type { AutoRouteDecisionV1 } from "./modelRouting.js";
 import type { LiveBakeArtifactV1 } from "./liveBake.js";
 import {
   normalizeReasoningEffort,
-  type ModelReasoningEffortPreference,
+  normalizeProviderReasoningEffort,
+  type ProviderReasoningEffort,
   type ReasoningEffort,
 } from "./reasoningEffort.ts";
 
@@ -583,7 +584,7 @@ export interface DebateAdvocacyConsent {
   routingResponseMode?: ResponseMode;
   modelSelectionKind?: "auto" | "fixed";
   /** Deliberation depth selected when consent was requested. Turbo is excluded. */
-  reasoningEffort?: ReasoningEffort;
+  reasoningEffort?: ProviderReasoningEffort;
   autoRoute?: AutoRouteDecisionV1;
   autoRecovery?: AutoRecoveryTraceV1;
 }
@@ -591,7 +592,7 @@ export interface DebateAdvocacyConsent {
 export interface DebateConsentRoutingV1 {
   provider: LlmProviderName;
   model: string;
-  reasoningEffort: ReasoningEffort;
+  reasoningEffort: ProviderReasoningEffort;
   responseMode: ResponseMode;
   modelSelectionKind: "auto" | "fixed";
 }
@@ -611,8 +612,8 @@ export function debateAdvocacyConsentMatchesRouting(
     consent.routingModel === routing.model &&
     consent.routingResponseMode === routing.responseMode &&
     consent.modelSelectionKind === routing.modelSelectionKind &&
-    normalizeReasoningEffort(consent.reasoningEffort) ===
-      normalizeReasoningEffort(routing.reasoningEffort)
+    normalizeProviderReasoningEffort(consent.reasoningEffort) ===
+      normalizeProviderReasoningEffort(routing.reasoningEffort)
   );
 }
 
@@ -1248,6 +1249,28 @@ export interface DebateJuryStateV1 {
   completedAt: string | null;
 }
 
+export type DebateArchiveReturnBufferPhaseV1 =
+  | "preparing"
+  | "ready_buffering"
+  | "fully_buffered";
+
+export type DebateArchiveReturnBufferBoundaryV1 =
+  | "buffering_ahead"
+  | "cap"
+  | "player"
+  | "procedure"
+  | "completion"
+  | "not_applicable";
+
+/** Durable, revision-owned runway prepared while an Archive title card holds. */
+export interface DebateArchiveReturnBufferStateV1 {
+  version: 1;
+  originalPresentationEventId: string | null;
+  bufferedAdvanceCount: number;
+  advanceCap: number;
+  boundary: DebateArchiveReturnBufferBoundaryV1;
+}
+
 export interface DebateSessionV1 {
   version: typeof DEBATE_SCHEMA_VERSION;
   id: string;
@@ -1272,7 +1295,7 @@ export interface DebateSessionV1 {
    * `latestAutoRoute`; fixed lanes freeze the preference used at create /
    * generation time.
    */
-  lastReasoningEffort?: ModelReasoningEffortPreference | null;
+  lastReasoningEffort?: Exclude<ProviderReasoningEffort, "auto"> | null;
   /** Whether the most recently resolved generation lane used Turbo. */
   lastTurbo?: boolean;
   /** Ordered primary + fallback lanes. One entry for LOCAL/ONLINE. */
@@ -1321,6 +1344,14 @@ export interface DebateSessionV1 {
    * events, but never enter Proceedings or copied transcripts.
    */
   pausedPresentationEventId?: string | null;
+  /**
+   * Persisted, pre-generated return-to-order line. Archive preload may prepare
+   * and voice this event while the room is still recessed; Resume reveals it
+   * only after the user's gavel cut, then clears this pointer.
+   */
+  preparedResumeEventId?: string | null;
+  /** Safe canonical lookahead accumulated for the current Archive return. */
+  archiveReturnBuffer?: DebateArchiveReturnBufferStateV1 | null;
   /** Silent lifecycle bookkeeping for the visible overall Debate timer. */
   pausedAt?: string | null;
   /** Accumulated paused wall time; never represented as transcript events. */
@@ -1399,6 +1430,8 @@ export interface DebateRoleChecksRequest {
   preferredProvider?: LlmProviderName;
   modelOverride?: string | null;
   responseMode?: ResponseMode;
+  reasoningEffort?: ProviderReasoningEffort;
+  turbo?: boolean;
 }
 
 export interface DebateRoleChecksResponse {
@@ -1522,6 +1555,10 @@ export interface DebateSessionCreateRequest {
   preferredProvider?: LlmProviderName;
   modelOverride?: string | null;
   responseMode?: ResponseMode;
+  /** Frozen with the session when Start succeeds, including Max overdrive. */
+  reasoningEffort?: ProviderReasoningEffort;
+  /** Frozen speed/service-tier choice for every later generation. */
+  turbo?: boolean;
   theme?: BotPowerResolvedThemeV1;
   /**
    * Save for later: create a paused Archive Open proceeding without opening
@@ -1727,7 +1764,7 @@ export interface DebateSessionListItemV1 {
   model?: string;
   modelSelectionKind?: "auto" | "fixed";
   /** Last applied effort (Auto route or frozen fixed preference). */
-  reasoningEffort?: ModelReasoningEffortPreference | null;
+  reasoningEffort?: Exclude<ProviderReasoningEffort, "auto"> | null;
   /** Resolved Turbo state for the model shown on this archive row. */
   turbo?: boolean;
   /** Moderator + advocate cast colors for Coffee-style archive chips. */

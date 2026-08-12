@@ -15,6 +15,10 @@ import type {
 import type { BotPowerObserverProjectionV1 } from "./botPower.js";
 import type { BotIdentityShapeshiftStateV1 } from "./botIdentityShapeshift.js";
 import type { BotFalseNameStateV1 } from "./botFalseName.js";
+import type {
+  MaxReasoningEffort,
+  ProviderReasoningEffort,
+} from "./reasoningEffort.js";
 
 export {
   PRISM_ACTION_UNDO_RETENTION_MS,
@@ -566,6 +570,7 @@ export {
   ELEVENLABS_VOICE_EFFECT_LABELS,
   ELEVENLABS_VOICE_STABILITY_DEFAULT,
   BOT_AVATAR_SFX_DEFAULT_VOLUME,
+  BOT_AVATAR_SFX_MAX_VOLUME,
   BOT_VOICE_EQ_TILT_DB_MAX,
   BOT_VOICE_LOW_SHELF_HZ,
   BOT_VOICE_HIGH_SHELF_HZ,
@@ -603,6 +608,7 @@ export {
   normalizeLocalVoiceAccentLocale,
   normalizeLocalVoiceAccentMode,
   normalizeLocalVoicePronunciationBase,
+  normalizeVoiceAccentDefinitionId,
   normalizeLocalVoiceEnginePreference,
   normalizeLocalVoiceSource,
   normalizeLocalVoiceSpeechprintInfluence,
@@ -652,6 +658,7 @@ export {
   type BotVoiceFeelLane,
   type LocalVoiceAccentMode,
   type LocalVoicePronunciationBase,
+  type VoiceAccentDefinitionId,
   type LocalVoiceEnginePreference,
   type LocalVoiceSource,
   type LocalVoicePresentation,
@@ -759,6 +766,10 @@ export {
   DEFAULT_BOT_FACE_THINKING_OFFSET_X,
   DEFAULT_BOT_FACE_THINKING_OFFSET_Y,
   DEFAULT_BOT_FACE_THINKING_SCALE,
+  DEFAULT_BOT_FACE_EYE_SPACING,
+  BOT_FACE_EYE_SPACING_MIN,
+  BOT_FACE_EYE_SPACING_MAX,
+  BOT_FACE_EYE_SPACING_STEP,
   DISABLED_BOT_FACE_THINKING_FRAMES,
   botFaceThinkingSpinnerDisabled,
   botFaceThinkingFramesEqual,
@@ -771,6 +782,7 @@ export {
   normalizeBotFaceBlinkScale,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeCount,
+  normalizeBotFaceEyeSpacing,
   normalizeBotFaceEyeOffsetX,
   normalizeBotFaceEyeOffsetY,
   normalizeBotFaceEyeScale,
@@ -1069,7 +1081,9 @@ export {
   modelSupportsNativeReasoningEffort,
   modelSupportsTurboMode,
   normalizeModelReasoningEffortPreference,
+  normalizeProviderReasoningEffort,
   normalizeReasoningEffort,
+  openAiModelSupportsMaxReasoningEffort,
   openAiModelSupportsReasoningEffort,
   openAiReasoningEffortForRequest,
   openAiReasoningEffortLevels,
@@ -1097,7 +1111,9 @@ export {
   type ModelReasoningEffortPreference,
   type ModelReasoningEffortPreferenceV1,
   type ModelTurboPreferenceV1,
+  type MaxReasoningEffort,
   type NativeReasoningEffortProvider,
+  type ProviderReasoningEffort,
   type ReasoningEffort,
   type RequestReasoningEffort,
   type SimulatedEffortBudgetProfile,
@@ -1491,6 +1507,8 @@ export interface ChatMessage {
   model?: string;
   /** Contextual Auto route used for this assistant message. */
   autoRoute?: AutoRouteDecisionV1;
+  /** Concrete provider effort used by a fixed-model assistant reply. */
+  reasoningEffort?: ProviderReasoningEffort;
   /** True when the concrete model used Turbo for this assistant reply. */
   turbo?: boolean;
   /** Bot/persona id attributed to this message. Null/undefined = default PRISM. */
@@ -2942,6 +2960,8 @@ export interface ChatRequestPayload {
   /** Back-compat top-level routing knobs. Chat honors explicit modelOverride only. */
   preferredProvider?: LlmProviderName;
   modelOverride?: string;
+  /** Request-only native Max overdrive for an explicitly selected compatible model. */
+  reasoningEffort?: MaxReasoningEffort;
   /**
    * Chat/Sandbox bot selector. In Zen this is a backwards-compatible fallback
    * for `facetBotId`.

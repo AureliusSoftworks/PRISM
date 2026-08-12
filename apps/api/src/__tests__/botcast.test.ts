@@ -11752,11 +11752,11 @@ describe("Botcast persistence and isolation", () => {
         { kind: "signal.show.name", showId: show.id },
         show.name,
         [],
-        null,
+        "gemma3:latest",
         {
           preferredProvider: "local",
           responseMode: "auto",
-          prismDefaultLlmModel: "gemma3:latest",
+          preferredLocalModel: "gemma3:latest",
           autoFallbackChain: {
             v: 1,
             fallbacks: [
@@ -12474,11 +12474,12 @@ describe("Botcast persistence and isolation", () => {
         cursorBeforeHistory.promptStateHash,
       );
       const rows = db.prepare(
-        `SELECT bot_id, target_bot_id, ciphertext
+        `SELECT conversation_id, bot_id, target_bot_id, ciphertext
            FROM memories
           WHERE user_id = 'user-1'
           ORDER BY bot_id`,
       ).all() as Array<{
+        conversation_id: string | null;
         bot_id: string;
         target_bot_id: string;
         ciphertext: string;
@@ -12493,6 +12494,7 @@ describe("Botcast persistence and isolation", () => {
       assert.ok(
         rows.every((row) => !row.ciphertext.includes("repeated interruptions")),
       );
+      assert.ok(rows.every((row) => row.conversation_id === first.id));
       const guestMemories = retrieveBotPairNarrativeMemories({
         db,
         userId: "user-1",
@@ -12601,6 +12603,49 @@ describe("Botcast persistence and isolation", () => {
         .join("\n");
       assert.match(unrelatedPrompt, /meeting for the first time/iu);
       assert.doesNotMatch(unrelatedPrompt, /repeated interruptions/iu);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("revokes completed Signal pair history when its episode is deleted", () => {
+    const db = fixture();
+    const userKey = Buffer.alloc(32, 43);
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "A Temporary Exchange",
+      });
+      completeBotcastTestEpisodeWithWalkout(db, episode.id);
+      assert.equal(
+        persistCompletedBotcastPairHistory({
+          db,
+          userId: "user-1",
+          episodeId: episode.id,
+          userKey,
+        }),
+        true,
+      );
+      assert.equal(
+        (db.prepare("SELECT COUNT(*) AS count FROM memories").get() as { count: number }).count,
+        2,
+      );
+
+      assert.equal(deleteBotcastEpisode(db, "user-1", episode.id), true);
+
+      assert.equal(
+        (db.prepare("SELECT COUNT(*) AS count FROM memories").get() as { count: number }).count,
+        0,
+      );
+      assert.equal(
+        (db.prepare("SELECT COUNT(*) AS count FROM bot_relationships").get() as { count: number }).count,
+        0,
+      );
+      assert.equal(
+        (db.prepare("SELECT COUNT(*) AS count FROM memory_relationship_projections").get() as { count: number }).count,
+        0,
+      );
     } finally {
       db.close();
     }
@@ -15553,8 +15598,27 @@ describe("Botcast persistence and isolation", () => {
         guestBotId: "guest-1",
         topic: "Second archived episode",
       });
-      forceEndBotcastEpisode(db, "user-1", firstEpisode.id);
-      forceEndBotcastEpisode(db, "user-1", secondEpisode.id);
+      completeBotcastTestEpisodeWithWalkout(db, firstEpisode.id);
+      completeBotcastTestEpisodeWithWalkout(db, secondEpisode.id);
+      const userKey = Buffer.alloc(32, 44);
+      assert.equal(
+        persistCompletedBotcastPairHistory({
+          db,
+          userId: "user-1",
+          episodeId: firstEpisode.id,
+          userKey,
+        }),
+        true,
+      );
+      assert.equal(
+        persistCompletedBotcastPairHistory({
+          db,
+          userId: "user-1",
+          episodeId: secondEpisode.id,
+          userKey,
+        }),
+        true,
+      );
       storeBotcastShowIntroAudio(db, "user-1", show.id, {
         model: "music_v2",
         prompt: "Show-owned ident",
@@ -15579,6 +15643,10 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(deleteBotcastShow(db, "another-user", show.id), false);
       assert.equal(getBotcastShow(db, "user-1", show.id).episodeCount, 2);
       assert.equal(deleteBotcastShow(db, "user-1", show.id), true);
+      assert.equal(
+        (db.prepare("SELECT COUNT(*) AS count FROM memories").get() as { count: number }).count,
+        0,
+      );
       assert.throws(
         () => getBotcastShow(db, "user-1", show.id),
         /Signal show not found/u,

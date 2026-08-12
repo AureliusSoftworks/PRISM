@@ -72,6 +72,7 @@ import {
 } from "@localai/shared";
 import { randomId } from "./security.ts";
 import { buildCloneFamilyIdentityPrompt } from "./bots.ts";
+import { deleteMemoriesAcquiredDuringAppletSessions } from "./memory.ts";
 import type {
   GenerateOptions,
   LlmProvider,
@@ -2511,6 +2512,11 @@ export function deleteStorySession(
   userId: string,
   sessionId: string
 ): boolean {
+  const existing = db
+    .prepare("SELECT id FROM story_sessions WHERE id = ? AND user_id = ?")
+    .get(sessionId, userId) as { id: string } | undefined;
+  if (!existing) return false;
+  deleteMemoriesAcquiredDuringAppletSessions(db, userId, [sessionId]);
   const result = db
     .prepare("DELETE FROM story_sessions WHERE id = ? AND user_id = ?")
     .run(sessionId, userId);

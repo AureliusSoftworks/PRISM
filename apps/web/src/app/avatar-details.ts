@@ -13,6 +13,11 @@ import {
   BOT_AVATAR_DETAIL_SCALE_MIN,
   BOT_AVATAR_DETAIL_STAMP_CATALOG,
   BOT_AVATAR_DETAIL_STAMP_IDS,
+  BOT_FACE_MOUTH_SCALE_MAX,
+  BOT_FACE_MOUTH_SCALE_MIN,
+  DEFAULT_BOT_FACE_MOUTH_OFFSET_X,
+  DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
+  DEFAULT_BOT_FACE_MOUTH_SCALE,
   botAvatarDetailsPaintColorCode,
   countBotAvatarDetailsColoredPixels,
   countBotAvatarDetailsPaintedPixels,
@@ -1482,14 +1487,26 @@ export function normalizeAvatarDetailsFaceGeometry(
       0.18,
       Math.max(-0.18, finiteOr(geometry?.eyeOffsetY, 0)),
     ),
-    mouthScale: Math.min(1.5, Math.max(0.7, finiteOr(geometry?.mouthScale, 1))),
+    mouthScale: Math.min(
+      BOT_FACE_MOUTH_SCALE_MAX,
+      Math.max(
+        BOT_FACE_MOUTH_SCALE_MIN,
+        finiteOr(geometry?.mouthScale, DEFAULT_BOT_FACE_MOUTH_SCALE),
+      ),
+    ),
     mouthOffsetX: Math.min(
       0.18,
-      Math.max(-0.18, finiteOr(geometry?.mouthOffsetX, 0)),
+      Math.max(
+        -0.18,
+        finiteOr(geometry?.mouthOffsetX, DEFAULT_BOT_FACE_MOUTH_OFFSET_X),
+      ),
     ),
     mouthOffsetY: Math.min(
-      0.18,
-      Math.max(-0.18, finiteOr(geometry?.mouthOffsetY, 0)),
+      Math.max(0.18, DEFAULT_BOT_FACE_MOUTH_OFFSET_Y),
+      Math.max(
+        -0.18,
+        finiteOr(geometry?.mouthOffsetY, DEFAULT_BOT_FACE_MOUTH_OFFSET_Y),
+      ),
     ),
     mouthRotationDeg: Math.min(
       180,

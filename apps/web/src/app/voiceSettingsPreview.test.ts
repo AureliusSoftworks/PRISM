@@ -729,4 +729,23 @@ describe("voice settings preview", () => {
     assert.match(pageStyles, /\.botVoicePresentationChips/);
     assert.match(pageStyles, /\.botVoiceNameGrid/);
   });
+
+  it("keeps Accent previews on one engine and clears stale provider hints", () => {
+    assert.match(
+      pageSource,
+      /function profileWithOriginalPronunciation\([\s\S]*?accentDefinitionId: null/,
+    );
+    assert.match(
+      pageSource,
+      /const originalProfile =\s*profileWithOriginalPronunciation\([\s\S]*?const premium = Boolean\([\s\S]*?englishVoiceEngine: premium/,
+    );
+    assert.match(
+      pageSource,
+      /elevenLabsVoiceIdOverride: value,[\s\S]*?elevenLabsNativeAccentHint: null/,
+    );
+    assert.match(
+      pageSource,
+      /const nextVoiceId = nextProfile\.elevenLabsVoiceId;[\s\S]*?elevenLabsNativeAccentHint: nextVoiceId/,
+    );
+  });
 });

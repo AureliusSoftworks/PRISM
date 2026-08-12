@@ -60,6 +60,7 @@ export function randomizeBotAudioVoiceProfile(
           elevenLabsVoiceId: identity,
           elevenLabsVoiceIdOverride: null,
           elevenLabsVoiceInitialized: true,
+          elevenLabsNativeAccentHint: null,
           premiumPitch: randomControl(random),
           premiumPace: randomControl(random),
           premiumLilt: randomControl(random),
@@ -86,6 +87,7 @@ export function fillMissingBotAudioVoiceIdentities(
       ? {
           elevenLabsVoiceId: choose(elevenLabsVoiceIds, random),
           elevenLabsVoiceInitialized: true,
+          elevenLabsNativeAccentHint: null,
         }
       : {}),
   });

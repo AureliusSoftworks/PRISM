@@ -53,6 +53,37 @@ test("navbar dropdown pickers share one global open owner", () => {
   assert.match(pageSource, /voiceModeSelectorPickerId = useId\(\)/u);
 });
 
+test("open navbar pickers freeze background scrolling but keep their own overflow native", () => {
+  assert.match(
+    prismMenuSource,
+    /PRISM_NAVBAR_PICKER_SURFACE_SELECTOR\s*=\s*\n?\s*'\[data-navbar-picker-surface="true"\]'/u,
+  );
+  assert.match(
+    prismMenuSource,
+    /window\.addEventListener\("wheel", blockBackgroundScroll, \{\s*capture: true,\s*passive: false/u,
+  );
+  assert.match(
+    prismMenuSource,
+    /window\.addEventListener\("touchmove", blockBackgroundScroll, \{\s*capture: true,\s*passive: false/u,
+  );
+  assert.match(
+    prismMenuSource,
+    /eventStartedInsideNavbarPicker\(event\)[\s\S]{0,80}return;[\s\S]{0,80}event\.preventDefault\(\)/u,
+  );
+  assert.match(
+    prismMenuSource,
+    /window\.addEventListener\("keydown", blockBackgroundKeyboardScroll, true\)/u,
+  );
+  assert.match(
+    prismMenuSource,
+    /window\.removeEventListener\("wheel", blockBackgroundScroll, true\)[\s\S]{0,220}window\.removeEventListener\("keydown", blockBackgroundKeyboardScroll, true\)/u,
+  );
+  assert.match(
+    prismMenuCss,
+    /\.menu\s*\{[\s\S]*overflow-y:\s*auto;[\s\S]*overscroll-behavior:\s*contain;/u,
+  );
+});
+
 test("Speech Type stays compact and its hotkey closes an already-open menu", () => {
   const voiceSelector = sourceBetween(
     "const renderVoiceModeSelector",

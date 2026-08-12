@@ -1,9 +1,17 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import { MODE_TUTORIALS, modeTutorialStep } from "./modeTutorials.ts";
 
 describe("mode tutorials", () => {
+  it("explains transient native Max without changing the ordinary ladder", () => {
+    const copy = readFileSync(new URL("./modeTutorials.ts", import.meta.url), "utf8");
+    assert.match(copy, /Extra High unlocks a separate Max overdrive toggle/u);
+    assert.match(copy, /Auto and simulated Effort never use it/u);
+    assert.match(copy, /Turbo remains an independent toggle.*combined with Max/u);
+  });
+
   it("teaches vertical keyboard navigation for the model and effort pickers", () => {
     const copy = MODE_TUTORIALS.zen.steps
       .map((step) => step.body)
@@ -34,6 +42,16 @@ describe("mode tutorials", () => {
     assert.match(step?.body ?? "", /Escape cancels/u);
   });
 
+  it("explains primary accent brightness without conflating Atmosphere", () => {
+    const step = MODE_TUTORIALS.avatar.steps[2];
+    assert.match(step?.body ?? "", /accent brightness/u);
+    assert.match(step?.body ?? "", /only that color darker or brighter/u);
+    assert.match(
+      step?.body ?? "",
+      /without changing the alloy or Atmosphere accent/u,
+    );
+  });
+
   it("explains bot hub editor shortcuts and exact voice testing", () => {
     const step = MODE_TUTORIALS.zen.steps[0];
     assert.match(step?.body ?? "", /jump straight to any Avatar Studio section/u);
@@ -43,20 +61,34 @@ describe("mode tutorials", () => {
     assert.match(step?.body ?? "", /starts a chat or LLM turn/u);
   });
 
-  it("teaches Zen side-column resizing without changing the authored face", () => {
+  it("teaches explicit Zen avatar resizing without changing the authored face", () => {
     const step = MODE_TUTORIALS.zen.steps.find(
       (candidate) => candidate.heading === "Let context breathe",
     );
     assert.ok(step);
-    assert.match(step.body, /scroll in either empty column beside the prose/u);
+    assert.match(step.body, /Cmd\/Ctrl \+ enlarges it/u);
+    assert.match(step.body, /Cmd\/Ctrl - shrinks it/u);
+    assert.match(step.body, /Grow and Shrink from its context menu/u);
     assert.match(step.body, /compact sizes it becomes the crisp mini chassis/u);
     assert.match(step.body, /full textured avatar/u);
-    assert.match(step.body, /dominant presence/u);
+    assert.match(step.body, /firm maximum keeps the reading room clear/u);
     assert.match(step.body, /without changing the face/u);
+  });
+
+  it("teaches that crossing the Zen midpoint turns the complete avatar screen", () => {
+    const step = MODE_TUTORIALS.zen.steps.find(
+      (candidate) => candidate.heading === "Let the companion move",
+    );
+    assert.ok(step);
+    assert.match(step.body, /may rest over prose or chrome/u);
+    assert.match(step.body, /turns its face and authored Ink toward the room/u);
   });
 
   it("explains immersive waiting captions and the Psychic privacy boundary", () => {
     const step = MODE_TUTORIALS.chat.steps[0];
+    assert.match(step?.body ?? "", /Shift-click bot cards/u);
+    assert.match(step?.body ?? "", /right-click anywhere on the PRISM surface/u);
+    assert.match(step?.body ?? "", /Escape closes that menu first/u);
     assert.match(step?.body ?? "", /short in-character activity caption/u);
     assert.match(
       step?.body ?? "",
@@ -138,9 +170,25 @@ describe("mode tutorials", () => {
     );
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /stay fully dark only/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /slow, dim breath/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /Creation chamber/u);
+    assert.match(
+      MODE_TUTORIALS.avatar.steps[0]!.body,
+      /Wield Prism onto it to populate an editable direction/u,
+    );
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /fling it across the platform/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /Reduced Motion settles it calmly/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /Prism stays at an authored chamber anchor/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /module being populated/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /no fake percentages/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /only the buckle cycles real bot glyphs/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /both screens fill upward/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /crests both screens white/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /generated drafts/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /shared navbar stays available/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /model, and Effort settings/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /During active assembly/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /Only the PRISM wordmark remains available/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /prior draft restored/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /Auto chooses both model and effort automatically/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /perimeter dock/u);
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /lights stay dim and breathing/u);
@@ -162,6 +210,10 @@ describe("mode tutorials", () => {
       MODE_TUTORIALS.avatar.steps[1]!.body,
       /Coffee \* makes the custom mouth pucker and Speech ink switch together/u,
     );
+    assert.match(
+      MODE_TUTORIALS.avatar.steps[1]!.body,
+      /Default follows ordinary speech shapes while talking; None keeps the authored mouth completely still/u,
+    );
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /Preview live/u);
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /Five floating orbs/u);
     assert.match(
@@ -175,19 +227,19 @@ describe("mode tutorials", () => {
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /nearby-choice buttons/u);
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /audition dock/u);
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /remains beneath the bot/u);
-    assert.doesNotMatch(MODE_TUTORIALS.avatar.steps[1]!.body, /Wield Prism/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /Wield/u);
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /randomizer buttons/u);
     assert.match(
       MODE_TUTORIALS.avatar.steps[1]!.body,
-      /Prism is intentionally unavailable.*top-bar main panel/u,
+      /Prism stays visually submerged.*top-bar panels/u,
     );
     assert.doesNotMatch(
       MODE_TUTORIALS.avatar.steps.map((step) => step.body).join(" "),
-      /Wield Prism|refracts Wield/u,
+      /refracts Wield/u,
     );
     assert.match(
       MODE_TUTORIALS.avatar.steps[2]!.body,
-      /Prism stays unavailable inside this main panel/u,
+      /Wield Prism onto What makes this bot special\?/u,
     );
     assert.match(MODE_TUTORIALS.avatar.steps[2]!.body, /visible shared navbar/u);
     assert.match(MODE_TUTORIALS.avatar.steps[2]!.body, /Save or Create bot/u);
@@ -212,6 +264,12 @@ describe("mode tutorials", () => {
     assert.match(step.body, /All accents/u);
     assert.match(step.body, /Nearby choices/u);
     assert.match(step.body, /Original and With accent/u);
+    assert.match(step.body, /same selected voice/u);
+    assert.match(step.body, /One pin controls both engines/u);
+    assert.match(step.body, /Premium may use a more specific named accent/u);
+    assert.match(step.body, /Local uses the nearest qualified Speechprint approximation/u);
+    assert.match(step.body, /same selected voice and engine/u);
+    assert.match(step.body, /never changes the spoken language/u);
   });
 
   it("points Images players to the Asset Library", () => {
@@ -487,7 +545,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /Wield Prism into a glowing setup field/u);
     assert.match(
       copy,
-      /Space rerolls; clicking away, Enter, Tab, or clicking another input accepts; Escape restores/u,
+      /shimmering field is locked[\s\S]*different registered input to queue it once[\s\S]*unique inputs in click order[\s\S]*repeat clicks[\s\S]*Escape restores the active field and clears the remaining queue/u,
     );
     assert.match(copy, /adjective, object, or observable-fact fields/u);
     assert.match(
@@ -540,11 +598,20 @@ describe("mode tutorials", () => {
       /Leaving mid-ceremony or returning to the Debate menu still hard-stops every voice/u,
     );
     assert.match(copy, /Leaving an unfinished Debate by any route/u);
-    assert.match(copy, /Opening that archived recess mounts the chamber immediately/u);
-    assert.match(copy, /prepares the held voice/u);
-    assert.match(copy, /Judge, Participant, and Spectator alike/u);
-    assert.match(copy, /unfinished Spectator bake also continues building its append-only runway/u);
-    assert.match(copy, /Continuing always begins with the Moderator calling/u);
+    assert.match(copy, /Opening any archived Debate replays the full title card/u);
+    assert.match(copy, /gallery fills gradually/u);
+    assert.match(copy, /saved provider, model, Effort, Turbo or Max state/u);
+    assert.match(copy, /title first reads Preparing/u);
+    assert.match(copy, /Start or Resume disabled until the first audible sequence/u);
+    assert.match(copy, /Ready now · buffering ahead/u);
+    assert.match(copy, /Fully buffered/u);
+    assert.match(copy, /Nothing auto-starts or dismisses the title card/u);
+    assert.match(copy, /Waiting longer can reduce later latency/u);
+    assert.match(copy, /human message, ruling, objection, verdict/u);
+    assert.match(copy, /expected bot’s own in-world thinking animation/u);
+    assert.match(copy, /never a modal or fullscreen loader/u);
+    assert.match(copy, /failed deeper attempt never disables/u);
+    assert.match(copy, /Auto stays Wide whenever nobody is speaking/u);
     assert.match(copy, /Choosing Resume strikes the visible gavel immediately for every role/u);
     assert.match(copy, /audible hit calls the camera to the Moderator/u);
     assert.match(copy, /visible Jury chamber follows the same handoff/u);
@@ -1433,6 +1500,14 @@ describe("mode tutorials", () => {
     assert.match(automaticThinkingSfx?.body ?? "", /while thinking/);
     assert.match(
       automaticThinkingSfx?.body ?? "",
+      /follows that bot’s voice mute and volume/u,
+    );
+    assert.match(
+      automaticThinkingSfx?.body ?? "",
+      /quiet 100% is the former physical 20% level/u,
+    );
+    assert.match(
+      automaticThinkingSfx?.body ?? "",
       /ElevenLabs is connected and ONLINE/,
     );
     assert.match(
@@ -2019,7 +2094,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /hold Option.*Control.*Wield Prism.*Space rerolls.*Clicking away.*Escape restores.*Control \+ Option.*opens the assistant menu at the orb/u,
+      /hold Option.*Control.*Wield Prism.*active field locks.*queue it once.*unique inputs in click order.*repeat clicks.*Escape restores the active field.*Control \+ Option.*opens the assistant menu at the orb/u,
     );
     assert.doesNotMatch(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
@@ -2200,19 +2275,19 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
-      /switches to Wide whenever any bot is thinking or preparing its voice/u,
+      /genuinely thinking, loading a voice, or visibly waiting/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
-      /moves to that bot only when speech begins/u,
+      /push begins only with the audible pre-speech presence/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
-      /Animated or Instant/u,
+      /ready handoff never flashes Wide or glides late/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
-      /interruption cuts directly to the interrupter only when Instant is selected[\s\S]*Animated holds the current shot/u,
+      /Audible interruptions cut directly to the interrupter/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
@@ -2220,11 +2295,11 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
-      /press Shift alone/u,
+      /Prepared text alone never changes the camera/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
-      /reduced-motion always uses instant cuts/u,
+      /whether the visible cut was instant or the brief thinking push was animated/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
@@ -2244,7 +2319,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
-      /effective Animated or Instant transition/u,
+      /whether the visible cut was instant or the brief thinking push was animated/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
@@ -2376,7 +2451,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /Animated or Instant camera control remains available/u,
+      /camera grammar is fixed: ready dialogue and live interruptions cut/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
@@ -2820,8 +2895,8 @@ describe("mode tutorials", () => {
       assert.match(body, /create, reopen, edit, and delete/u);
       assert.match(body, /personal Notes stay unavailable.*Private/u);
       assert.match(body, /default bot overview.*Home mark/u);
-      assert.match(body, /Opening Settings, Avatar Studio.*removes Prism entirely/u);
-      assert.match(body, /orb, assistant shortcut, Wield.*unavailable until the panel closes/u);
+      assert.match(body, /Opening Settings, Avatar Studio.*visually submerges the passive orb/u);
+      assert.match(body, /Wield and contextual field population available above the panel/u);
       assert.match(body, /Closing the panel restores Prism/u);
       assert.match(body, /ordinary surfaces.*shortcut opens this menu at the orb's current location/u);
       assert.match(body, /eligible text field.*contextual editable draft/u);

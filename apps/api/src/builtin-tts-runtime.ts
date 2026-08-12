@@ -6,6 +6,7 @@ import {
   normalizeBotAudioVoiceProfileV1,
   normalizeLocalVoiceSpeechprintV1,
   prismBuiltinEnglishVoice,
+  resolveLocalAccentFallback,
   resolveLocalVoicePronunciationLocale,
   type BotAudioVoiceProfileV1,
 } from "@localai/shared";
@@ -70,8 +71,13 @@ export async function generatePrismVoicePackWaveInProcess(args: {
   const profile = normalizeBotAudioVoiceProfileV1(args.profile);
   const voice = prismBuiltinEnglishVoice(profile.baseVoiceId);
   const tts = await getKokoroTts();
+  const localAccent = resolveLocalAccentFallback({
+    accentDefinitionId: profile.accentDefinitionId,
+    pronunciationBase: profile.pronunciationBase,
+    speechprintInfluence: profile.speechprintInfluence,
+  });
   const speechprint = normalizeLocalVoiceSpeechprintV1({
-    influence: profile.speechprintInfluence,
+    influence: localAccent.speechprintInfluence,
     strength: profile.speechprintStrength,
     variationSeed: profile.speechprintVariationSeed,
   });
@@ -81,13 +87,13 @@ export async function generatePrismVoicePackWaveInProcess(args: {
     speed: 1,
   } as const;
   const pronunciationLocale = resolveLocalVoicePronunciationLocale(
-    profile.pronunciationBase,
+    localAccent.pronunciationBase,
     voice.locale,
   );
   const phonemeControlActive =
     localVoiceSpeechprintIsActive(speechprint) ||
     localVoicePronunciationOverrideIsActive(
-      profile.pronunciationBase,
+      localAccent.pronunciationBase,
       voice.locale,
     );
   const audio = phonemeControlActive

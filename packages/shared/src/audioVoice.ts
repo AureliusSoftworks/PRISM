@@ -401,6 +401,8 @@ export interface BotAudioVoiceProfileV2 {
   elevenLabsVoiceIdOverride?: string | null;
   /** True once Premium identity has been assigned or explicitly declined. */
   elevenLabsVoiceInitialized?: boolean;
+  /** Provider-derived catalog metadata; separate from the character Accent Map. */
+  elevenLabsNativeAccentHint?: string | null;
   /** Portable playback effect. The key name is retained for export compatibility. */
   elevenLabsEffect: VoiceEffect;
   /** Distinguishes an explicit Clean choice from the former local-only default. */
@@ -426,6 +428,9 @@ export interface BotAudioVoiceProfileV2 {
   accentLocale?: string | null;
   accentMode?: LocalVoiceAccentMode;
   pronunciationBase?: LocalVoicePronunciationBase;
+  /** Provider-neutral Accent Map identity. Legacy profiles resolve from the
+   * Speechprint influence and pronunciation foundation instead. */
+  accentDefinitionId?: VoiceAccentDefinitionId | null;
   /** Exact normalized Accent Map position. The chosen influence remains approximate. */
   pronunciationMapPoint?: LocalVoicePronunciationMapPoint;
   speechprintInfluence?: LocalVoiceSpeechprintInfluence;
@@ -455,6 +460,8 @@ export interface BotAudioVoiceProfileV2 {
   texture: BotVoiceTextureV1;
   /** Optional looping avatar sound that follows the bot's visible state. */
   avatarSfx?: BotAvatarSfxV1;
+  /** Portable generation/editing brief retained even before audio exists. */
+  avatarSfxPrompt?: string;
   /** Deliberately suppresses both a custom loop and PRISM's built-in fallback. */
   avatarSfxMuted?: boolean;
 }
@@ -489,6 +496,9 @@ export interface LocalVoicePronunciationMapPoint {
   x: number;
   y: number;
 }
+
+/** Stable, provider-neutral key into the shared voice accent registry. */
+export type VoiceAccentDefinitionId = string;
 
 export const LOCAL_VOICE_SPEECHPRINT_INFLUENCES = [
   "none",
@@ -579,6 +589,7 @@ export interface BotLocalVoiceProfileV1 {
   };
   pronunciation?: {
     base: LocalVoicePronunciationBase;
+    accentDefinitionId?: VoiceAccentDefinitionId | null;
     mapPoint?: LocalVoicePronunciationMapPoint;
   };
   speechprint: LocalVoiceSpeechprintV1;
@@ -591,6 +602,8 @@ export interface BotPremiumVoiceProfileV1 {
   initialized?: boolean;
   direction?: string | null;
   stability?: number;
+  /** Provider-derived catalog metadata; never reinterprets the Accent Map. */
+  nativeAccentHint?: string | null;
   /** Premium-only pitch transform applied after ElevenLabs synthesis. */
   pitch: number;
   /** Premium-only tempo. Pace is the only Feel control that changes duration. */
@@ -634,13 +647,16 @@ export interface BotAudioVoiceProfileV3 {
    */
   corporality?: number;
   avatarSfx?: BotAvatarSfxV1;
+  avatarSfxPrompt?: string;
   avatarSfxMuted?: boolean;
 }
 
 export const BOT_AVATAR_SFX_MAX_BYTES = 4 * 1024 * 1024;
 export const BOT_AVATAR_SFX_PROMPT_MAX_LENGTH = 400;
 export const BOT_AVATAR_SFX_FILE_NAME_MAX_LENGTH = 160;
-export const BOT_AVATAR_SFX_DEFAULT_VOLUME = 0.2;
+/** Player-facing 100% for Avatar SFX. Intentionally quiet beside speech. */
+export const BOT_AVATAR_SFX_MAX_VOLUME = 0.2;
+export const BOT_AVATAR_SFX_DEFAULT_VOLUME = BOT_AVATAR_SFX_MAX_VOLUME;
 
 export interface BotAvatarSfxV1 {
   v: 1;
@@ -1163,6 +1179,19 @@ export function normalizeLocalVoicePronunciationBase(
     : fallback;
 }
 
+export function normalizeVoiceAccentDefinitionId(
+  value: unknown,
+  fallback: VoiceAccentDefinitionId | null = null,
+): VoiceAccentDefinitionId | null {
+  if (value === undefined) return fallback;
+  if (value === null) return null;
+  if (typeof value !== "string") return fallback;
+  const normalized = value.trim().toLocaleLowerCase().slice(0, 96);
+  return /^[a-z0-9][a-z0-9-]{0,95}$/u.test(normalized)
+    ? normalized
+    : fallback;
+}
+
 export function resolveLocalVoicePronunciationLocale(
   pronunciationBase: unknown,
   genuineLocale: unknown,
@@ -1470,6 +1499,7 @@ function flattenBotAudioVoiceProfileV3Record(
     elevenLabsVoiceId: premium.voiceId,
     elevenLabsVoiceIdOverride: premium.voiceIdOverride,
     elevenLabsVoiceInitialized: premium.initialized,
+    elevenLabsNativeAccentHint: premium.nativeAccentHint,
     elevenLabsDirection: premium.direction,
     elevenLabsStability: premium.stability,
     elevenLabsEffect: delivery.effect,
@@ -1486,6 +1516,8 @@ function flattenBotAudioVoiceProfileV3Record(
     accentLocale: accent.locale,
     accentMode: accent.mode,
     pronunciationBase: pronunciation.base,
+    accentDefinitionId:
+      pronunciation.accentDefinitionId ?? value.accentDefinitionId,
     pronunciationMapPoint: pronunciation.mapPoint,
     speechprintInfluence: speechprint.influence,
     speechprintStrength: speechprint.strength,
@@ -1505,6 +1537,7 @@ function flattenBotAudioVoiceProfileV3Record(
     volume: delivery.volume,
     texture: delivery.texture,
     avatarSfx: value.avatarSfx,
+    avatarSfxPrompt: value.avatarSfxPrompt,
     avatarSfxMuted: value.avatarSfxMuted,
   };
 }
@@ -1530,6 +1563,10 @@ export function normalizeBotAudioVoiceProfileV1(
     fallbackProfile.elevenLabsVoiceIdOverride ?? null,
   );
   const elevenLabsVoiceInitialized = record.elevenLabsVoiceInitialized === true;
+  const elevenLabsNativeAccentHint = normalizeElevenLabsNativeAccentHint(
+    record.elevenLabsNativeAccentHint,
+    fallbackProfile.elevenLabsNativeAccentHint ?? null,
+  );
   const voiceEffectExplicit =
     record.voiceEffectExplicit === true ||
     (record.elevenLabsEffect === "clean" &&
@@ -1553,6 +1590,10 @@ export function normalizeBotAudioVoiceProfileV1(
     record.avatarSfx,
     fallbackProfile.avatarSfx ?? null,
   );
+  const avatarSfxPrompt = normalizeBotAvatarSfxText(
+    record.avatarSfxPrompt ?? avatarSfx?.prompt,
+    BOT_AVATAR_SFX_PROMPT_MAX_LENGTH,
+  );
   const avatarSfxMuted =
     record.avatarSfxMuted === undefined
       ? fallbackProfile.avatarSfxMuted === true
@@ -1572,6 +1613,10 @@ export function normalizeBotAudioVoiceProfileV1(
     record.pronunciationMapPoint,
     fallbackProfile.pronunciationMapPoint ?? null,
   );
+  const accentDefinitionId = normalizeVoiceAccentDefinitionId(
+    record.accentDefinitionId,
+    fallbackProfile.accentDefinitionId ?? null,
+  );
   return {
     v: 2,
     enabled: legacy ? true : record.enabled !== false,
@@ -1580,6 +1625,7 @@ export function normalizeBotAudioVoiceProfileV1(
     ...(elevenLabsVoiceId ? { elevenLabsVoiceId } : {}),
     ...(elevenLabsVoiceIdOverride ? { elevenLabsVoiceIdOverride } : {}),
     ...(elevenLabsVoiceInitialized ? { elevenLabsVoiceInitialized: true } : {}),
+    ...(elevenLabsNativeAccentHint ? { elevenLabsNativeAccentHint } : {}),
     elevenLabsEffect: voiceEffect,
     ...(voiceEffectExplicit ? { voiceEffectExplicit: true } : {}),
     ...(elevenLabsDirection ? { elevenLabsDirection } : {}),
@@ -1637,6 +1683,7 @@ export function normalizeBotAudioVoiceProfileV1(
       record.pronunciationBase,
       fallbackProfile.pronunciationBase ?? "follow-voice",
     ),
+    ...(accentDefinitionId ? { accentDefinitionId } : {}),
     ...(pronunciationMapPoint ? { pronunciationMapPoint } : {}),
     speechprintInfluence,
     speechprintStrength: normalizeLocalVoiceSpeechprintStrength(
@@ -1684,6 +1731,7 @@ export function normalizeBotAudioVoiceProfileV1(
     // compatibility, but always resolve old and new profiles to clean audio.
     texture: botVoiceTextureForPreset("clean"),
     ...(avatarSfx ? { avatarSfx } : {}),
+    ...(avatarSfxPrompt ? { avatarSfxPrompt } : {}),
     ...(avatarSfxMuted ? { avatarSfxMuted: true } : {}),
   };
 }
@@ -1703,6 +1751,7 @@ function normalizeBotAudioVoiceProfileFallback(
   if (value.v === 2) {
     const {
       avatarSfx: rawAvatarSfx,
+      avatarSfxPrompt: rawAvatarSfxPrompt,
       avatarSfxMuted: rawAvatarSfxMuted,
       ...voiceProfile
     } = value;
@@ -1714,6 +1763,10 @@ function normalizeBotAudioVoiceProfileFallback(
         ? undefined
         : normalizeElevenLabsVoiceStability(value.elevenLabsStability);
     const avatarSfx = normalizeBotAvatarSfxV1(rawAvatarSfx);
+    const avatarSfxPrompt = normalizeBotAvatarSfxText(
+      rawAvatarSfxPrompt ?? avatarSfx?.prompt,
+      BOT_AVATAR_SFX_PROMPT_MAX_LENGTH,
+    );
     const pronunciationMapPoint = normalizeLocalVoicePronunciationMapPoint(
       value.pronunciationMapPoint,
     );
@@ -1755,6 +1808,13 @@ function normalizeBotAudioVoiceProfileFallback(
       pronunciationBase: normalizeLocalVoicePronunciationBase(
         value.pronunciationBase,
       ),
+      ...(normalizeVoiceAccentDefinitionId(value.accentDefinitionId)
+        ? {
+            accentDefinitionId: normalizeVoiceAccentDefinitionId(
+              value.accentDefinitionId,
+            ),
+          }
+        : { accentDefinitionId: undefined }),
       ...(pronunciationMapPoint
         ? { pronunciationMapPoint }
         : { pronunciationMapPoint: undefined }),
@@ -1773,6 +1833,7 @@ function normalizeBotAudioVoiceProfileFallback(
       gainDb: normalizeBotVoiceGainDb(value.gainDb),
       texture: botVoiceTextureForPreset("clean"),
       ...(avatarSfx ? { avatarSfx } : {}),
+      ...(avatarSfxPrompt ? { avatarSfxPrompt } : {}),
       ...(rawAvatarSfxMuted === true ? { avatarSfxMuted: true } : {}),
     };
   }
@@ -1820,6 +1881,10 @@ export function normalizeBotAudioVoiceProfileV3(
     profile.elevenLabsDirection,
   );
   const avatarSfx = normalizeBotAvatarSfxV1(profile.avatarSfx);
+  const avatarSfxPrompt = normalizeBotAvatarSfxText(
+    profile.avatarSfxPrompt ?? avatarSfx?.prompt,
+    BOT_AVATAR_SFX_PROMPT_MAX_LENGTH,
+  );
   return {
     v: 3,
     enabled: profile.enabled,
@@ -1840,6 +1905,9 @@ export function normalizeBotAudioVoiceProfileV3(
       },
       pronunciation: {
         base: normalizeLocalVoicePronunciationBase(profile.pronunciationBase),
+        ...(profile.accentDefinitionId
+          ? { accentDefinitionId: profile.accentDefinitionId }
+          : {}),
         ...(profile.pronunciationMapPoint
           ? { mapPoint: { ...profile.pronunciationMapPoint } }
           : {}),
@@ -1868,6 +1936,9 @@ export function normalizeBotAudioVoiceProfileV3(
       ...(voiceId ? { voiceId } : {}),
       ...(voiceIdOverride ? { voiceIdOverride } : {}),
       ...(profile.elevenLabsVoiceInitialized ? { initialized: true } : {}),
+      ...(profile.elevenLabsNativeAccentHint
+        ? { nativeAccentHint: profile.elevenLabsNativeAccentHint }
+        : {}),
       ...(direction ? { direction } : {}),
       ...(profile.elevenLabsStability === undefined
         ? {}
@@ -1889,6 +1960,7 @@ export function normalizeBotAudioVoiceProfileV3(
     bottishTone: normalizeBotAudioVoiceControl(profile.bottishTone, 0.45),
     corporality: normalizeCorporality(profile.corporality, 0.5),
     ...(avatarSfx ? { avatarSfx } : {}),
+    ...(avatarSfxPrompt ? { avatarSfxPrompt } : {}),
     ...(profile.avatarSfxMuted ? { avatarSfxMuted: true } : {}),
   };
 }
@@ -1946,7 +2018,9 @@ export function normalizeBotAvatarSfxVolume(
         ? Number(value)
         : NaN;
   const safe = Number.isFinite(parsed) ? parsed : fallback;
-  return Number(Math.min(1, Math.max(0, safe)).toFixed(3));
+  return Number(
+    Math.min(BOT_AVATAR_SFX_MAX_VOLUME, Math.max(0, safe)).toFixed(3),
+  );
 }
 
 export function normalizeBotAvatarSfxV1(
@@ -1991,6 +2065,22 @@ function normalizeOptionalVoiceSelection(
   if (typeof value !== "string") return fallback;
   const normalized = value.trim();
   return normalized.length > 0 ? normalized.slice(0, 240) : null;
+}
+
+/** Provider metadata is intentionally small and disposable. It is not a
+ * user-authored direction or character pronunciation field. */
+export function normalizeElevenLabsNativeAccentHint(
+  value: unknown,
+  fallback: string | null = null,
+): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string") return fallback;
+  const normalized = value
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .toLocaleLowerCase()
+    .slice(0, 96);
+  return normalized || null;
 }
 
 /** Null is a deliberate absence for per-user overrides; malformed values are ignored. */

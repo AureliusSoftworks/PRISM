@@ -451,6 +451,35 @@ describe("voice Phase 1 boundary", () => {
     );
   });
 
+  it("combines the private Accent Map cue with authored directions in Eleven v3", async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    const text = "The door is already open.";
+    const request = {
+      apiKey: "secret-key", voiceId: "voice-id", model: "eleven_flash_v2_5",
+      text, deliveryMood: "warm" as const,
+      profile: {
+        v: 2 as const, enabled: true, baseVoiceId: "voice-1" as const, elevenLabsEffect: "clean" as const,
+        elevenLabsDirection: "hushed, measured", elevenLabsNativeAccentHint: "American",
+        accentDefinitionId: "german-influenced-english",
+        pronunciationBase: "en-US", speechprintInfluence: "italian-influenced-english",
+        speechprintStrength: "balanced", pitch: 0, warmth: 0, pace: 0, lilt: 0,
+        bottishTone: 0.45, volume: 1, texture: { preset: "clean", amount: 0, bandwidth: 1, noise: 0, instability: 0, distortion: 0, damage: 0 },
+      },
+      fetchImpl: (async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    };
+    await requestElevenLabsSpeech(request);
+    assert.equal(requestBody?.model_id, "eleven_v3");
+    assert.equal(
+      requestBody?.text,
+      "[German accent] [hushed] [measured] The door is already open.",
+    );
+    assert.equal(request.text, text);
+    assert.doesNotMatch(requestBody?.text as string, /warmly/u);
+  });
+
   it("turns non-neutral delivery moods into sparse Eleven v3 directions", async () => {
     const cases = [
       ["joyful", "delighted"],
@@ -913,6 +942,7 @@ describe("voice Phase 1 boundary", () => {
     assert.deepEqual(voice, {
       voiceId: "portable/voice",
       name: "Portable Muse",
+      labels: {},
     });
   });
 

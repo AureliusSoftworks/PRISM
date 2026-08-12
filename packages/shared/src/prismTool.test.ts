@@ -1069,6 +1069,16 @@ describe("hydrateAssistantMessageParts", () => {
     );
   });
 
+  it("round-trips fixed-model Max effort provenance", () => {
+    const stored = serializeAssistantToolPayload({ reasoningEffort: "max" });
+    assert.equal(parseStoredAssistantToolPayload(stored).reasoningEffort, "max");
+    assert.equal(
+      hydrateAssistantMessageParts({ content: "Done.", toolPayload: stored })
+        .reasoningEffort,
+      "max",
+    );
+  });
+
   it("round-trips provenance-marked social silence independently of Power silence", () => {
     const socialSilence = {
       v: 1 as const,

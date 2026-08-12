@@ -268,6 +268,7 @@ describe("audio voice normalization", () => {
       localEnginePreference: "voice-plus",
       accentLocale: "en-GB",
       pronunciationBase: "en-US",
+      accentDefinitionId: "japanese-influenced-english",
       pronunciationMapPoint: { x: 0.28731, y: 0.29842 },
       openness: 0.35,
       weight: -0.4,
@@ -283,6 +284,7 @@ describe("audio voice normalization", () => {
     assert.equal(v3.local.enginePreference, "voice-plus");
     assert.deepEqual(v3.local.pronunciation, {
       base: "en-US",
+      accentDefinitionId: "japanese-influenced-english",
       mapPoint: { x: 0.28731, y: 0.29842 },
     });
     assert.equal(v3.local.tone.openness, 0.35);
@@ -303,12 +305,43 @@ describe("audio voice normalization", () => {
     assert.equal(compatible?.baseVoiceId, "voice-28");
     assert.equal(compatible?.localEnginePreference, "voice-plus");
     assert.equal(compatible?.pronunciationBase, "en-US");
+    assert.equal(
+      compatible?.accentDefinitionId,
+      "japanese-influenced-english",
+    );
     assert.deepEqual(compatible?.pronunciationMapPoint, {
       x: 0.28731,
       y: 0.29842,
     });
     assert.equal(compatible?.pace, 0.2);
     assert.equal(compatible?.premiumPace, 0.2);
+  });
+
+  it("normalizes accent IDs compatibly and lets Original clear them", () => {
+    const profile = normalizeBotAudioVoiceProfileV1({
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      accentDefinitionId: " German-Influenced-English ",
+    });
+    assert.equal(
+      profile.accentDefinitionId,
+      "german-influenced-english",
+    );
+    assert.equal(
+      normalizeBotAudioVoiceProfileV1(
+        { ...profile, accentDefinitionId: null },
+        profile,
+      ).accentDefinitionId,
+      undefined,
+    );
+    const serialized = serializeBotAudioVoiceProfileV1(profile);
+    assert.equal(
+      JSON.parse(serialized).local.pronunciation.accentDefinitionId,
+      "german-influenced-english",
+    );
+    assert.equal(
+      parseStoredBotAudioVoiceProfileV1(serialized)?.accentDefinitionId,
+      "german-influenced-english",
+    );
   });
 
   it("keeps independent Local and Premium Feel after V3 round-trip", () => {
@@ -467,7 +500,7 @@ describe("audio voice normalization", () => {
       playWhileTalking: true,
       playWhileIdle: false,
       playWhileThinking: true,
-      volume: 1,
+      volume: 0.2,
     });
     const profile = normalizeBotAudioVoiceProfileV1({
       ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
@@ -480,7 +513,7 @@ describe("audio voice normalization", () => {
     assert.equal(BOT_AVATAR_SFX_MAX_BYTES, 4 * 1024 * 1024);
   });
 
-  it("defaults library avatar SFX to twenty percent", () => {
+  it("treats the quiet twenty-percent Avatar SFX ceiling as full scale", () => {
     const audioDataUrl = `data:audio/mpeg;base64,${Buffer.from("loop").toString("base64")}`;
     assert.equal(BOT_AVATAR_SFX_DEFAULT_VOLUME, 0.2);
     assert.equal(
@@ -508,6 +541,23 @@ describe("audio voice normalization", () => {
       normalizeBotAudioVoiceProfileV1({ ...muted, avatarSfxMuted: false })
         .avatarSfxMuted,
       undefined,
+    );
+  });
+
+  it("round-trips an avatar SFX design brief before audio exists", () => {
+    const profile = normalizeBotAudioVoiceProfileV1({
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      avatarSfxPrompt: "  soft   cassette ticks and relay hum  ",
+    });
+    assert.equal(
+      profile.avatarSfxPrompt,
+      "soft cassette ticks and relay hum",
+    );
+    assert.equal(profile.avatarSfx, undefined);
+    assert.equal(
+      parseStoredBotAudioVoiceProfileV1(serializeBotAudioVoiceProfileV1(profile))
+        ?.avatarSfxPrompt,
+      "soft cassette ticks and relay hum",
     );
   });
 

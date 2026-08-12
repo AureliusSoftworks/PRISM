@@ -478,6 +478,15 @@ describe("Debate API", () => {
     );
     assert.equal(fetchRecorder.calls.length, callsBeforeResearch);
 
+    db.prepare(
+      `INSERT INTO memories
+        (id, user_id, conversation_id, bot_id, ciphertext, iv, tag,
+         confidence, category, tier, durability, source, certainty,
+         source_message_ids, created_at)
+       VALUES ('debate-memory', ?, ?, 'moderator', 'cipher', 'iv', 'tag',
+               0.85, 'user', 'short_term', 0.7, 'direct', 0.85, '[]', ?)`,
+    ).run(userId, session.id, new Date().toISOString());
+
     const deleted = await owner.request(
       `/api/debates/${session.id}`,
       jsonInit(
@@ -492,6 +501,10 @@ describe("Debate API", () => {
     const deleteRun = (await payload(deleted)).actionRun;
     assert.equal(deleteRun.capabilityId, "debate.session.delete");
     assert.equal(deleteRun.undoAvailable, true);
+    assert.equal(
+      db.prepare("SELECT id FROM memories WHERE id = 'debate-memory'").get(),
+      undefined,
+    );
     assert.deepEqual(
       (await payload(await owner.request("/api/debates"))).sessions,
       [],

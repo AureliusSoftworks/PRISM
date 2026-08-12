@@ -3,10 +3,13 @@ import {
   normalizeLocalVoicePronunciationBase,
   normalizeLocalVoiceSpeechprintInfluence,
   normalizeLocalVoiceSpeechprintStrength,
+  normalizeVoiceAccentDefinitionId,
   resolveLocalVoicePronunciationLocale,
+  voiceAccentDefinitionForId,
   type LocalVoicePronunciationBase,
   type LocalVoiceSpeechprintInfluence,
   type LocalVoiceSpeechprintStrength,
+  type VoiceAccentDefinitionId,
 } from "@localai/shared";
 
 import type {
@@ -19,6 +22,7 @@ export interface PronunciationAtlasSelection {
   sourceLocale: string;
   influence: LocalVoiceSpeechprintInfluence;
   strength: LocalVoiceSpeechprintStrength;
+  accentDefinitionId?: VoiceAccentDefinitionId | null;
   /** The pin's exact normalized position; absent only for legacy profiles. */
   point?: AdjustmentPadPoint;
 }
@@ -28,6 +32,7 @@ export interface PronunciationAtlasAnchor {
   point: AdjustmentPadPoint;
   base?: "en-US" | "en-GB";
   influence?: Exclude<LocalVoiceSpeechprintInfluence, "none">;
+  accentDefinitionId: VoiceAccentDefinitionId;
 }
 
 export interface PronunciationAtlasCandidate {
@@ -189,11 +194,13 @@ const BASE_ANCHORS = [
     id: "base-en-US",
     point: pronunciationAtlasPointForCoordinates(-98.5, 39.8),
     base: "en-US",
+    accentDefinitionId: "american-english",
   },
   {
     id: "base-en-GB",
     point: pronunciationAtlasPointForCoordinates(-0.13, 51.51),
     base: "en-GB",
+    accentDefinitionId: "british-english",
   },
 ] as const satisfies readonly PronunciationAtlasAnchor[];
 
@@ -206,6 +213,7 @@ export const PRONUNCIATION_ATLAS_ANCHORS: readonly PronunciationAtlasAnchor[] =
         id: `influence-${capability.id}`,
         point: authored.point,
         influence: capability.id,
+        accentDefinitionId: capability.id,
       } satisfies PronunciationAtlasAnchor;
     }),
   ];
@@ -238,6 +246,13 @@ export function normalizePronunciationAtlasSelection(
     sourceLocale: selection.sourceLocale,
     influence: normalizeLocalVoiceSpeechprintInfluence(selection.influence),
     strength: normalizeLocalVoiceSpeechprintStrength(selection.strength),
+    ...(normalizeVoiceAccentDefinitionId(selection.accentDefinitionId)
+      ? {
+          accentDefinitionId: normalizeVoiceAccentDefinitionId(
+            selection.accentDefinitionId,
+          ),
+        }
+      : {}),
     ...(selection.point
       ? { point: clampPronunciationAtlasPoint(selection.point) }
       : {}),
@@ -252,6 +267,7 @@ export function pronunciationAtlasSelectionKey(
     normalized.pronunciationBase,
     normalized.sourceLocale,
     normalized.influence,
+    normalized.accentDefinitionId ?? "legacy",
     normalized.strength,
     normalized.point ? `${normalized.point.x},${normalized.point.y}` : "anchor",
   ].join(":");
@@ -270,6 +286,13 @@ export function pronunciationAtlasAnchorForSelection(
   selection: PronunciationAtlasSelection,
 ): PronunciationAtlasAnchor {
   const normalized = normalizePronunciationAtlasSelection(selection);
+  if (normalized.accentDefinitionId) {
+    const definitionAnchor = PRONUNCIATION_ATLAS_ANCHORS.find(
+      (anchor) =>
+        anchor.accentDefinitionId === normalized.accentDefinitionId,
+    );
+    if (definitionAnchor) return definitionAnchor;
+  }
   if (normalized.influence !== "none") {
     const influenceAnchor = PRONUNCIATION_ATLAS_ANCHORS.find(
       (anchor) => anchor.influence === normalized.influence,
@@ -297,12 +320,41 @@ function pronunciationAtlasAnchorLabel(
 ): string {
   if (anchor.base === "en-GB") return "British";
   if (anchor.base === "en-US") return "American";
+  const definition = voiceAccentDefinitionForId(anchor.accentDefinitionId);
+  if (definition) {
+    return definition.premiumAccentedEnglishLabel.replace(
+      /-accented English$/u,
+      "",
+    );
+  }
   const capability = LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.find(
     (candidate) => candidate.id === anchor.influence,
   );
   return (capability?.label ?? anchor.influence ?? anchor.id)
     .replace(/-influenced English$/u, "")
     .replace(/ English$/u, "");
+}
+
+function selectionForPronunciationAtlasAnchor(
+  anchor: PronunciationAtlasAnchor,
+  current: PronunciationAtlasSelection,
+  point: AdjustmentPadPoint,
+): PronunciationAtlasSelection {
+  const definition = voiceAccentDefinitionForId(anchor.accentDefinitionId);
+  const pronunciationBase =
+    anchor.base ??
+    definition?.localPronunciationBaseFallback ??
+    (current.pronunciationBase === "follow-voice"
+      ? pronunciationAtlasResolvedBase(current)
+      : current.pronunciationBase);
+  return {
+    ...current,
+    pronunciationBase,
+    influence:
+      anchor.influence ?? definition?.localSpeechprintFallback ?? "none",
+    accentDefinitionId: anchor.accentDefinitionId,
+    point,
+  };
 }
 
 /**
@@ -325,22 +377,11 @@ export function pronunciationAtlasNearbyCandidates(
     .map((anchor) => ({
       id: anchor.id,
       label: pronunciationAtlasAnchorLabel(anchor),
-      selection: anchor.base
-        ? {
-            ...normalized,
-            pronunciationBase: anchor.base,
-            influence: "none",
-            point: anchor.point,
-          }
-        : {
-            ...normalized,
-            pronunciationBase:
-              normalized.pronunciationBase === "follow-voice"
-                ? pronunciationAtlasResolvedBase(normalized)
-                : normalized.pronunciationBase,
-            influence: anchor.influence ?? "none",
-            point: anchor.point,
-          },
+      selection: selectionForPronunciationAtlasAnchor(
+        anchor,
+        normalized,
+        anchor.point,
+      ),
     }));
 }
 
@@ -356,23 +397,11 @@ export function pronunciationAtlasSelectionAtPoint(
       ? candidate
       : best,
   );
-  if (nearest.base) {
-    return {
-      ...normalized,
-      pronunciationBase: nearest.base,
-      influence: "none",
-      point: clampedPoint,
-    };
-  }
-  return {
-    ...normalized,
-    pronunciationBase:
-      normalized.pronunciationBase === "follow-voice"
-        ? pronunciationAtlasResolvedBase(normalized)
-        : normalized.pronunciationBase,
-    influence: nearest.influence ?? "none",
-    point: clampedPoint,
-  };
+  return selectionForPronunciationAtlasAnchor(
+    nearest,
+    normalized,
+    clampedPoint,
+  );
 }
 
 export function nudgePronunciationAtlasSelection(
@@ -398,11 +427,19 @@ export function pronunciationAtlasValueText(
 ): string {
   const normalized = normalizePronunciationAtlasSelection(selection);
   const foundation = baseLabel(pronunciationAtlasResolvedBase(normalized));
-  if (normalized.influence === "none") return `${foundation}, natural`;
+  const definition = voiceAccentDefinitionForId(
+    normalized.accentDefinitionId,
+  );
+  if (!definition && normalized.influence === "none") {
+    return `${foundation}, natural`;
+  }
   const influence = LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.find(
     (capability) => capability.id === normalized.influence,
   );
-  const influenceLabel = influence?.label ?? normalized.influence;
+  const influenceLabel =
+    definition?.premiumAccentedEnglishLabel ??
+    influence?.label ??
+    normalized.influence;
   const strength =
     normalized.strength === "light"
       ? "Light"
@@ -416,7 +453,10 @@ export function pronunciationAtlasLocationText(
   selection: PronunciationAtlasSelection,
 ): string {
   const normalized = normalizePronunciationAtlasSelection(selection);
-  if (normalized.influence === "none") {
+  const definition = voiceAccentDefinitionForId(
+    normalized.accentDefinitionId,
+  );
+  if (!definition && normalized.influence === "none") {
     return pronunciationAtlasResolvedBase(normalized) === "en-GB"
       ? "British · Natural"
       : "American · Natural";
@@ -424,7 +464,12 @@ export function pronunciationAtlasLocationText(
   const capability = LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.find(
     (candidate) => candidate.id === normalized.influence,
   );
-  const place = (capability?.label ?? normalized.influence)
+  const place = (
+    definition?.premiumAccentedEnglishLabel ??
+    capability?.label ??
+    normalized.influence
+  )
+    .replace(/-accented English$/u, "")
     .replace(/-influenced English$/u, "")
     .replace(/ English$/u, "");
   const strength =
@@ -444,5 +489,6 @@ export function pronunciationAtlasNaturalSelection(
     sourceLocale,
     influence: "none",
     strength: "balanced",
+    accentDefinitionId: null,
   };
 }

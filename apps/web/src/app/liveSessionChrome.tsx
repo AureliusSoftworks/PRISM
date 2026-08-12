@@ -1,7 +1,10 @@
 "use client";
 
 import type { CSSProperties, JSX } from "react";
-import { MODEL_EFFORT_ICON_PATHS } from "./modelEffortControl";
+import {
+  MODEL_EFFORT_ICON_PATHS,
+  MODEL_EFFORT_MAX_ICON_PATH,
+} from "./modelEffortControl";
 import styles from "./liveSessionChrome.module.css";
 
 export {
@@ -41,7 +44,11 @@ export function LiveSessionModelChip(props: {
           data-effort-level={effortKey}
           style={
             {
-              "--live-session-effort-icon": `url("${MODEL_EFFORT_ICON_PATHS[effortKey]}")`,
+              "--live-session-effort-icon": `url("${
+                effortKey === "max"
+                  ? MODEL_EFFORT_MAX_ICON_PATH
+                  : MODEL_EFFORT_ICON_PATHS[effortKey]
+              }")`,
             } as CSSProperties
           }
           aria-hidden="true"

@@ -1,6 +1,7 @@
 import {
   applyVoiceDeliveryMoodToProfile,
   elevenLabsVoiceDirectionForMood,
+  resolvePremiumAccentDirection,
   normalizeBotAudioVoiceProfileV1,
   normalizeEnglishVoiceEngine,
   normalizeElevenLabsVoiceDirection,
@@ -194,9 +195,17 @@ function elevenLabsSpeechInput(args: ElevenLabsSpeechArgs): {
   model: ElevenLabsTtsModel;
   directionPrefix: string;
 } {
+  const normalizedProfile = normalizeBotAudioVoiceProfileV1(args.profile);
   const authoredDirection = normalizeElevenLabsVoiceDirection(
-    normalizeBotAudioVoiceProfileV1(args.profile).elevenLabsDirection
+    normalizedProfile.elevenLabsDirection,
   );
+  const accentDirection = resolvePremiumAccentDirection({
+    accentDefinitionId: normalizedProfile.accentDefinitionId,
+    pronunciationBase: normalizedProfile.pronunciationBase,
+    speechprintInfluence: normalizedProfile.speechprintInfluence,
+    speechprintStrength: normalizedProfile.speechprintStrength,
+    nativeAccentHint: normalizedProfile.elevenLabsNativeAccentHint,
+  });
   const hasAudioTags = [...args.text.matchAll(ELEVENLABS_AUDIO_TAG_PATTERN)]
     .length > 0;
   // Explicit vocal reactions are more specific than the broad mood state.
@@ -206,8 +215,12 @@ function elevenLabsSpeechInput(args: ElevenLabsSpeechArgs): {
   const moodDirection = hasAudioTags
     ? null
     : elevenLabsVoiceDirectionForMood(args.deliveryMood);
+  // Accent is a saved character definition and must retain a direction slot.
+  // The shared normalizer caps the combined request at Eleven v3's three tags.
   const direction = normalizeElevenLabsVoiceDirection(
-    [authoredDirection, moodDirection].filter(Boolean).join(", ") || null,
+    [accentDirection, authoredDirection, moodDirection]
+      .filter(Boolean)
+      .join(", ") || null,
   );
   const model = direction || hasAudioTags
     ? "eleven_v3"
@@ -453,6 +466,7 @@ export interface ElevenLabsVoiceCatalogEntry {
 export interface ElevenLabsVoiceIdentity {
   voiceId: string;
   name: string;
+  labels: Record<string, string>;
 }
 
 export interface ElevenLabsVoiceCollectionCatalogEntry {
@@ -516,7 +530,18 @@ export async function requestElevenLabsVoiceIdentity(args: {
       "ElevenLabs returned incomplete voice metadata.",
     );
   }
-  return { voiceId: resolvedVoiceId, name };
+  const labels =
+    payload.labels &&
+    typeof payload.labels === "object" &&
+    !Array.isArray(payload.labels)
+      ? Object.fromEntries(
+          Object.entries(payload.labels as Record<string, unknown>).filter(
+            (entry): entry is [string, string] =>
+              typeof entry[1] === "string",
+          ),
+        )
+      : {};
+  return { voiceId: resolvedVoiceId, name, labels };
 }
 
 export async function requestElevenLabsVoiceCatalog(args: {

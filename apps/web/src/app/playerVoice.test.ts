@@ -88,6 +88,7 @@ test("player Premium and local fallback identities remain independent", () => {
     baseVoiceId: "voice-7",
     systemVoiceName: "Samantha",
     elevenLabsVoiceId: "premium-player",
+    elevenLabsNativeAccentHint: "german germany",
   });
 
   assert.equal(playerPremiumVoiceId(profile), "premium-player");
@@ -108,6 +109,7 @@ test("player Premium and local fallback identities remain independent", () => {
   assert.equal(playerPremiumVoiceId(changedPremium), "premium-two");
   assert.equal(changedPremium.baseVoiceId, "voice-7");
   assert.equal(changedPremium.systemVoiceName, "Samantha");
+  assert.equal(changedPremium.elevenLabsNativeAccentHint, undefined);
 });
 
 test("top speech type selects the matching clean player identity", () => {

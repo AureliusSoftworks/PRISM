@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { fallbackEmbedding } from "../providers.ts";
 import {
   analyzeMemoryIntent,
+  deleteMemoriesAcquiredDuringAppletSessions,
   deleteMemoriesForBotScope,
   deleteMemoryById,
   deleteMemoriesLinkedToMessages,
@@ -19,6 +20,7 @@ import {
   restoreMemory,
   retrieveRelevantMemories,
 } from "../memory.ts";
+import { ensureMemoryEcologyMemorySchema } from "../memory-ecology.ts";
 
 function createMemoryTestDb(): DatabaseSync {
   const db = new DatabaseSync(":memory:");
@@ -1130,6 +1132,188 @@ describe("persistMemoryCandidates", () => {
 
     assert.equal(deleted, 1);
     assert.equal(remaining.n, 0);
+  });
+
+  it("revokes all applet-session memory layers without touching other sessions or tenants", () => {
+    const db = createMemoryTestDb();
+    ensureMemoryEcologyMemorySchema(db);
+    db.exec(`
+      CREATE TABLE bot_relationships (
+        user_id TEXT NOT NULL,
+        source_bot_id TEXT NOT NULL,
+        target_bot_id TEXT NOT NULL,
+        score REAL NOT NULL,
+        band TEXT NOT NULL,
+        mood_key TEXT NOT NULL,
+        trend TEXT NOT NULL,
+        last_reason TEXT NOT NULL,
+        recent_reasons TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (user_id, source_bot_id, target_bot_id)
+      );
+    `);
+    const now = new Date().toISOString();
+    const insertMemory = db.prepare(
+      `INSERT INTO memories (
+        id, user_id, conversation_id, bot_id, target_bot_id,
+        ciphertext, iv, tag, confidence, base_confidence, category, tier,
+        lifecycle, durability, source, certainty, source_message_ids,
+        evidence_lineage_known, last_reinforced_at, created_at
+      ) VALUES (?, ?, ?, ?, ?, 'cipher', 'iv', 'tag', 0.95, 0.95, ?, ?, ?, 0.9, ?, 0.95, ?, ?, ?, ?)`,
+    );
+    insertMemory.run(
+      "m-session",
+      "user-1",
+      "coffee-session",
+      "bot-1",
+      null,
+      "user",
+      "long_term",
+      "long_term",
+      "about_you",
+      "[]",
+      0,
+      now,
+      now,
+    );
+    insertMemory.run(
+      "m-legacy",
+      "user-1",
+      null,
+      "bot-1",
+      null,
+      "user",
+      "short_term",
+      "short_term",
+      "direct",
+      '["coffee-message"]',
+      0,
+      now,
+      now,
+    );
+    insertMemory.run(
+      "m-relation",
+      "user-1",
+      "coffee-session",
+      "bot-1",
+      "bot-2",
+      "bot_relation",
+      "long_term",
+      "long_term",
+      "direct",
+      "[]",
+      0,
+      now,
+      now,
+    );
+    insertMemory.run(
+      "m-stable",
+      "user-1",
+      "other-session",
+      "bot-1",
+      null,
+      "user",
+      "short_term",
+      "short_term",
+      "direct",
+      "[]",
+      0,
+      now,
+      now,
+    );
+    insertMemory.run(
+      "m-derived",
+      "user-1",
+      "other-session",
+      "bot-1",
+      "bot-2",
+      "bot_relation",
+      "short_term",
+      "derived",
+      "inferred",
+      "[]",
+      1,
+      now,
+      now,
+    );
+    insertMemory.run(
+      "m-other-user",
+      "user-2",
+      "coffee-session",
+      "bot-1",
+      null,
+      "user",
+      "short_term",
+      "short_term",
+      "direct",
+      '["coffee-message"]',
+      0,
+      now,
+      now,
+    );
+    const link = db.prepare(
+      `INSERT INTO memory_evidence_links
+        (user_id, inferred_memory_id, evidence_memory_id, created_at)
+       VALUES ('user-1', 'm-derived', ?, ?)`,
+    );
+    for (const evidenceId of ["m-session", "m-legacy", "m-stable"]) {
+      link.run(evidenceId, now);
+    }
+    db.prepare(
+      `INSERT INTO memory_acquisition_receipts
+        (id, user_id, memory_id, learner_bot_id, conversation_id, kind, created_at)
+       VALUES ('receipt-session', 'user-1', 'm-session', 'bot-1', 'coffee-session', 'player', ?)`,
+    ).run(now);
+    db.prepare(
+      `INSERT INTO memory_acquisition_receipts
+        (id, user_id, memory_id, learner_bot_id, conversation_id, kind, created_at)
+       VALUES ('receipt-legacy', 'user-1', 'm-legacy', 'bot-1', NULL, 'player', ?)`,
+    ).run(now);
+    db.prepare(
+      `INSERT INTO memory_relationship_projections
+        (user_id, source_bot_id, target_bot_id, base_score, updated_at)
+       VALUES ('user-1', 'bot-1', 'bot-2', 32, ?)`,
+    ).run(now);
+    db.prepare(
+      `INSERT INTO bot_relationships
+        (user_id, source_bot_id, target_bot_id, score, band, mood_key, trend,
+         last_reason, recent_reasons, updated_at)
+       VALUES ('user-1', 'bot-1', 'bot-2', 32, 'tense', 'guarded', 'down',
+               'Coffee evidence', '["Coffee evidence"]', ?)`,
+    ).run(now);
+
+    const result = deleteMemoriesAcquiredDuringAppletSessions(
+      db,
+      "user-1",
+      ["coffee-session"],
+      ["coffee-message"],
+    );
+
+    assert.equal(result.deletedMemories, 3);
+    assert.equal(result.removedDerivedMemories, 1);
+    assert.deepEqual(
+      db
+        .prepare("SELECT id FROM memories ORDER BY id")
+        .all()
+        .map((row) => (row as { id: string }).id),
+      ["m-other-user", "m-stable"],
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM memory_acquisition_receipts").get() as { n: number }).n,
+      0,
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM memory_evidence_links").get() as { n: number }).n,
+      0,
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM memory_relationship_projections").get() as { n: number }).n,
+      0,
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM bot_relationships").get() as { n: number }).n,
+      0,
+    );
   });
 
   it("keeps long-term specifics out of automatic culmination deletion", async () => {

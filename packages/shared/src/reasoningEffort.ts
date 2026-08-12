@@ -10,6 +10,9 @@ export const REASONING_EFFORT_VALUES = [
 
 export type ReasoningEffort = (typeof REASONING_EFFORT_VALUES)[number];
 export type RequestReasoningEffort = Exclude<ReasoningEffort, "auto">;
+/** Provider-only overdrive. Never persisted or exposed as an ordinary ladder stop. */
+export type MaxReasoningEffort = "max";
+export type ProviderReasoningEffort = ReasoningEffort | MaxReasoningEffort;
 export type NativeReasoningEffortProvider = "local" | "openai" | "anthropic";
 export type AnthropicRequestReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -392,6 +395,7 @@ export function reasoningGenerationBudgetMs(
     modelId: string;
   },
 ): number {
+  if (normalizeProviderReasoningEffort(value) === "max") return 600_000;
   const effort = normalizeReasoningEffort(value);
   // Heavy-from-Minimal ladder: more private passes need longer wall clocks.
   if (effort === "xhigh") return 480_000;
@@ -482,6 +486,8 @@ export interface ModelReasoningEffortCapabilityV1 {
   mode: "native" | "simulated" | "unavailable";
   levels: readonly ModelReasoningEffortPreference[];
   supportsNone: boolean;
+  /** Request-only native Max overdrive; deliberately absent from `levels`. */
+  supportsMax: boolean;
   disabledReason?: string;
 }
 
@@ -545,6 +551,15 @@ export function reasoningEffortForRequest(
   return normalized === "auto" ? null : normalized;
 }
 
+export function normalizeProviderReasoningEffort(
+  value: unknown,
+): ProviderReasoningEffort {
+  if (typeof value === "string" && value.trim().toLowerCase() === "max") {
+    return "max";
+  }
+  return normalizeReasoningEffort(value);
+}
+
 export function normalizeModelReasoningEffortPreference(
   value: unknown,
 ): ModelReasoningEffortPreference | null {
@@ -585,6 +600,16 @@ function openAiModelIsFixedHigh(modelId: string): boolean {
   return /^gpt-5(?:\.\d+)?-pro(?:-|$)/.test(modelId.trim().toLowerCase());
 }
 
+export function openAiModelSupportsMaxReasoningEffort(
+  modelId: string,
+): boolean {
+  return (
+    openAiModelSupportsReasoningEffort(modelId) &&
+    !openAiModelIsFixedHigh(modelId) &&
+    openAiGpt5MinorVersion(modelId) === 6
+  );
+}
+
 export function openAiReasoningEffortLevels(
   modelId: string,
 ): readonly ModelReasoningEffortPreference[] {
@@ -600,7 +625,10 @@ export function openAiReasoningEffortLevels(
 export function openAiReasoningEffortForRequest(
   modelId: string,
   value: unknown,
-): RequestReasoningEffort | null {
+): RequestReasoningEffort | MaxReasoningEffort | null {
+  if (normalizeProviderReasoningEffort(value) === "max") {
+    return openAiModelSupportsMaxReasoningEffort(modelId) ? "max" : null;
+  }
   const requested = reasoningEffortForRequest(value);
   if (!requested) return null;
   return openAiReasoningEffortLevels(modelId).includes(requested) ? requested : null;
@@ -687,12 +715,14 @@ export function resolveModelReasoningEffortCapability(args: {
         mode: "simulated",
         levels: LOCAL_SIMULATED_REASONING_LEVELS,
         supportsNone: true,
+        supportsMax: false,
       };
     }
     return {
       mode: "unavailable",
       levels: [],
       supportsNone: false,
+      supportsMax: false,
       disabledReason: "Simulated Effort is disabled for this model.",
     };
   }
@@ -703,12 +733,14 @@ export function resolveModelReasoningEffortCapability(args: {
           mode: "native",
           levels,
           supportsNone: levels.includes("none"),
+          supportsMax: openAiModelSupportsMaxReasoningEffort(args.modelId),
         }
       : openAiModelIsFixedHigh(args.modelId)
         ? {
             mode: "unavailable",
             levels: [],
             supportsNone: false,
+            supportsMax: false,
             disabledReason: "This model uses a fixed reasoning effort.",
           }
         : simulatedEnabled
@@ -716,11 +748,13 @@ export function resolveModelReasoningEffortCapability(args: {
               mode: "simulated",
               levels: LOCAL_SIMULATED_REASONING_LEVELS,
               supportsNone: true,
+              supportsMax: false,
             }
           : {
               mode: "unavailable",
               levels: [],
               supportsNone: false,
+              supportsMax: false,
               disabledReason:
                 "This model has no native thinking dial and simulated Effort is disabled.",
             };
@@ -733,6 +767,7 @@ export function resolveModelReasoningEffortCapability(args: {
       mode: "native",
       levels,
       supportsNone: false,
+      supportsMax: false,
     };
   }
   return simulatedEnabled
@@ -740,11 +775,13 @@ export function resolveModelReasoningEffortCapability(args: {
         mode: "simulated",
         levels: LOCAL_SIMULATED_REASONING_LEVELS,
         supportsNone: true,
+        supportsMax: false,
       }
     : {
         mode: "unavailable",
         levels: [],
         supportsNone: false,
+        supportsMax: false,
         disabledReason:
           "This model has no native thinking dial and simulated Effort is disabled.",
       };

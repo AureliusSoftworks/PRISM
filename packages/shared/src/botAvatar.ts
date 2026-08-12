@@ -21,6 +21,7 @@ export const BOT_FACE_FONT_LABELS: Record<BotFaceFontId, string> = {
 export const DEFAULT_BOT_FACE_FONT_ID: BotFaceFontId = "neutral";
 export const BOT_FACE_GLYPH_ANIMATIONS = [
   "none",
+  "static",
   "pulsate",
   "spin",
   "flicker",
@@ -49,6 +50,11 @@ export const BOT_FACE_EYE_COUNTS = [1, 2] as const;
 export type BotFaceEyeCount = (typeof BOT_FACE_EYE_COUNTS)[number];
 /** A custom glyph is one authored eye unit unless the user opts into a pair. */
 export const DEFAULT_BOT_FACE_EYE_COUNT: BotFaceEyeCount = 1;
+/** Center-to-center distance for a cloned custom-eye pair. Keeps legacy ±0.18em. */
+export const DEFAULT_BOT_FACE_EYE_SPACING = 0.36;
+export const BOT_FACE_EYE_SPACING_MIN = 0.16;
+export const BOT_FACE_EYE_SPACING_MAX = 0.72;
+export const BOT_FACE_EYE_SPACING_STEP = 0.02;
 export const DEFAULT_BOT_FACE_MOUTH_CHARACTER: string | null = null;
 /** Custom mouths use the Coffee sip pucker unless the player explicitly opts out. */
 export const DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER = true;
@@ -75,15 +81,18 @@ export const DEFAULT_BOT_FACE_PAIRED_EYE_ROTATION_DEG = -90;
 export const BOT_FACE_EYE_ROTATION_DEG_MIN = -180;
 export const BOT_FACE_EYE_ROTATION_DEG_MAX = 180;
 export const BOT_FACE_EYE_ROTATION_DEG_STEP = 5;
-export const DEFAULT_BOT_FACE_MOUTH_SCALE = 1;
-export const BOT_FACE_MOUTH_SCALE_MIN = 0.7;
+/** The former 70% mouth is the new canonical 100% visual baseline. */
+export const DEFAULT_BOT_FACE_MOUTH_SCALE = 0.7;
+/** Smallest physical mouth size; displayed as 29% of the canonical baseline. */
+export const BOT_FACE_MOUTH_SCALE_MIN = 0.2;
 export const BOT_FACE_MOUTH_SCALE_MAX = 1.5;
+/** Preserve the existing physical 5% steps so saved mouth sizes never drift. */
 export const BOT_FACE_MOUTH_SCALE_STEP = 0.05;
-export const DEFAULT_BOT_FACE_MOUTH_OFFSET_X = 0;
+export const DEFAULT_BOT_FACE_MOUTH_OFFSET_X = 0.04;
 export const BOT_FACE_MOUTH_OFFSET_X_MIN = -1.2;
 export const BOT_FACE_MOUTH_OFFSET_X_MAX = 1.2;
 export const BOT_FACE_MOUTH_OFFSET_X_STEP = 0.02;
-export const DEFAULT_BOT_FACE_MOUTH_OFFSET_Y = 0.18;
+export const DEFAULT_BOT_FACE_MOUTH_OFFSET_Y = 0.22;
 export const BOT_FACE_MOUTH_OFFSET_Y_MIN = -1.2;
 export const BOT_FACE_MOUTH_OFFSET_Y_MAX = 1.2;
 export const BOT_FACE_MOUTH_OFFSET_Y_STEP = 0.02;
@@ -150,6 +159,7 @@ export interface BotFaceStyle {
   eyesFont: BotFaceFontId;
   eyeCharacter: string | null;
   eyeCount: BotFaceEyeCount;
+  eyeSpacing: number;
   /** Presentation-only eye attention. Stored under the legacy API field name. */
   eyeAnimation: BotFaceEyeMovement;
   mouthFont: BotFaceFontId;
@@ -180,6 +190,7 @@ export interface BotFaceStyleInput {
   faceEyesFont?: unknown;
   faceEyeCharacter?: unknown;
   faceEyeCount?: unknown;
+  faceEyeSpacing?: unknown;
   faceEyeAnimation?: unknown;
   faceMouthFont?: unknown;
   faceMouthCharacter?: unknown;
@@ -266,6 +277,15 @@ export function normalizeBotFaceEyeCount(
   value: unknown
 ): BotFaceEyeCount | null {
   return value === 1 || value === 2 ? value : null;
+}
+
+export function normalizeBotFaceEyeSpacing(value: unknown): number | null {
+  return normalizeSteppedBotFaceFloat(
+    value,
+    BOT_FACE_EYE_SPACING_MIN,
+    BOT_FACE_EYE_SPACING_MAX,
+    BOT_FACE_EYE_SPACING_STEP,
+  );
 }
 
 export function normalizeBotFaceMouthCharacter(value: unknown): string | null {
@@ -637,6 +657,9 @@ export function resolveBotFaceStyle(
         ? normalizeBotFaceEyeCount(input.faceEyeCount) ??
           DEFAULT_BOT_FACE_EYE_COUNT
         : DEFAULT_BOT_FACE_EYE_COUNT,
+    eyeSpacing:
+      normalizeBotFaceEyeSpacing(input.faceEyeSpacing) ??
+      DEFAULT_BOT_FACE_EYE_SPACING,
     eyeAnimation:
       normalizeBotFaceEyeMovement(input.faceEyeAnimation) ??
       DEFAULT_BOT_FACE_EYE_MOVEMENT,
@@ -733,6 +756,7 @@ export function randomBotFaceStyle(random = Math.random): BotFaceStyle {
     eyesFont,
     eyeCharacter: DEFAULT_BOT_FACE_EYE_CHARACTER,
     eyeCount: DEFAULT_BOT_FACE_EYE_COUNT,
+    eyeSpacing: DEFAULT_BOT_FACE_EYE_SPACING,
     eyeAnimation: DEFAULT_BOT_FACE_EYE_MOVEMENT,
     mouthFont,
     mouthCharacter: DEFAULT_BOT_FACE_MOUTH_CHARACTER,

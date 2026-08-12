@@ -4,6 +4,10 @@ import type {
   ZenLiveActionReactionResponse,
 } from "@localai/shared";
 import { sentenceCaseActionText } from "./zenActions.ts";
+import {
+  botAvatarFaceScaleYForFacing,
+  type BotAvatarFacing,
+} from "./bot-avatar-render-geometry.ts";
 import type { ZenLiveBotMouthShape } from "./zenLiveMouth";
 
 export type ZenLiveBotActionState = {
@@ -81,85 +85,11 @@ export type ZenLiveActionMouthShape = ZenLiveBotMouthShape;
 
 export type ZenLiveBotCanvasSide = "left" | "right";
 
-export type ZenLiveBotResizeLane = ZenLiveBotCanvasSide;
-
-export function zenLiveBotResizeLaneAtClientX({
-  clientX,
-  surfaceLeft,
-  surfaceWidth,
-  proseWidth,
-}: {
-  clientX: number;
-  surfaceLeft: number;
-  surfaceWidth: number;
-  proseWidth: number;
-}): ZenLiveBotResizeLane | null {
-  if (
-    !Number.isFinite(clientX) ||
-    !Number.isFinite(surfaceLeft) ||
-    !Number.isFinite(surfaceWidth) ||
-    !Number.isFinite(proseWidth) ||
-    surfaceWidth <= 0
-  ) {
-    return null;
-  }
-  const boundedProseWidth = Math.max(0, Math.min(surfaceWidth, proseWidth));
-  const proseLeft = surfaceLeft + (surfaceWidth - boundedProseWidth) / 2;
-  const proseRight = proseLeft + boundedProseWidth;
-  if (clientX < proseLeft) return "left";
-  if (clientX > proseRight) return "right";
-  return null;
-}
-
-export function resizeZenLiveBotAvatarFromWheel({
-  currentSizePx,
-  wheelDeltaY,
-  minSizePx,
-  maxSizePx,
-  compactMaxSizePx,
-  fullMinSizePx,
-}: {
-  currentSizePx: number;
-  wheelDeltaY: number;
-  minSizePx: number;
-  maxSizePx: number;
-  compactMaxSizePx?: number;
-  fullMinSizePx?: number;
-}): number {
-  const boundedMin = Number.isFinite(minSizePx) ? minSizePx : 0;
-  const boundedMax = Number.isFinite(maxSizePx)
-    ? Math.max(boundedMin, maxSizePx)
-    : boundedMin;
-  const current = Number.isFinite(currentSizePx)
-    ? Math.max(boundedMin, Math.min(boundedMax, currentSizePx))
-    : boundedMin;
-  if (!Number.isFinite(wheelDeltaY) || wheelDeltaY === 0) return current;
-  const boundedDelta = Math.max(-240, Math.min(240, wheelDeltaY));
-  const scaleFactor = Math.exp(-boundedDelta * 0.0015);
-  const next = Math.max(
-    boundedMin,
-    Math.min(boundedMax, current * scaleFactor),
-  );
-  const compactMax =
-    typeof compactMaxSizePx === "number" && Number.isFinite(compactMaxSizePx)
-      ? Math.max(boundedMin, Math.min(boundedMax, compactMaxSizePx))
-    : null;
-  const fullMin =
-    typeof fullMinSizePx === "number" && Number.isFinite(fullMinSizePx)
-      ? Math.max(boundedMin, Math.min(boundedMax, fullMinSizePx))
-    : null;
-  if (compactMax !== null && fullMin !== null && fullMin > compactMax) {
-    if (wheelDeltaY < 0 && current <= compactMax && next > compactMax) {
-      return fullMin;
-    }
-    if (wheelDeltaY > 0 && current >= fullMin && next < fullMin) {
-      return compactMax;
-    }
-    if (current > compactMax && current < fullMin) {
-      return wheelDeltaY < 0 ? fullMin : compactMax;
-    }
-  }
-  return Math.round(next * 10) / 10;
+/** The bot looks inward when it crosses the Zen canvas midpoint. */
+export function zenLiveBotFacingForCanvasSide(
+  side: ZenLiveBotCanvasSide,
+): BotAvatarFacing {
+  return side === "left" ? "right" : "left";
 }
 
 export function zenLiveBotCanvasSideFromCenterX(
@@ -172,10 +102,31 @@ export function zenLiveBotCanvasSideFromCenterX(
   return centerX < viewportWidth / 2 ? "left" : "right";
 }
 
+/** Keep a floating avatar from flickering direction at the Zen center line. */
+export function zenLiveBotCanvasSideWithHysteresis(
+  centerX: number,
+  viewportWidth: number,
+  previousSide: ZenLiveBotCanvasSide,
+  deadZonePx = 32,
+): ZenLiveBotCanvasSide {
+  if (
+    !Number.isFinite(centerX) ||
+    !Number.isFinite(viewportWidth) ||
+    viewportWidth <= 0
+  ) {
+    return previousSide;
+  }
+  const midpoint = viewportWidth / 2;
+  const deadZone = Math.max(0, Math.min(viewportWidth / 4, deadZonePx));
+  if (previousSide === "left" && centerX <= midpoint + deadZone) return "left";
+  if (previousSide === "right" && centerX >= midpoint - deadZone) return "right";
+  return centerX < midpoint ? "left" : "right";
+}
+
 export function zenLiveBotFaceScaleYForCanvasSide(
   side: ZenLiveBotCanvasSide
 ): string {
-  return side === "left" ? "-1" : "1";
+  return botAvatarFaceScaleYForFacing(zenLiveBotFacingForCanvasSide(side));
 }
 
 function normalizeZenLiveActionMouthShape(

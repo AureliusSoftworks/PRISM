@@ -6,6 +6,7 @@ export const LIVE_SESSION_EFFORT_LABELS = {
   medium: "Medium",
   high: "High",
   xhigh: "XHigh",
+  max: "Max",
 } as const;
 
 export type LiveSessionEffortKey = keyof typeof LIVE_SESSION_EFFORT_LABELS;

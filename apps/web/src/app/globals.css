@@ -359,3 +359,80 @@ html[data-relationship-depth-motion="pullback-swap"]::view-transition-new(relati
     drop-shadow(0 0 5px color-mix(in srgb, var(--prism-i, #b7e63a) 58%, transparent))
     drop-shadow(0 0 13px color-mix(in srgb, var(--prism-s, #2fd3e3) 30%, transparent));
 }
+
+[data-prism-refract-state="queued"] {
+  outline: 1px solid color-mix(in srgb, var(--prism-s, #2fd3e3) 56%, white);
+  outline-offset: 3px;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--prism-p, #ff4d6d) 24%, transparent),
+    0 0 18px -10px color-mix(in srgb, var(--prism-s, #2fd3e3) 58%, transparent),
+    0 0 26px -16px color-mix(in srgb, var(--prism-m, #7b5cff) 54%, transparent) !important;
+  caret-color: transparent !important;
+  cursor: progress !important;
+  user-select: none;
+}
+
+/* Every registered prose field and choice gets this same visible generation
+   contract. Surface styles may tune the resting field color through the custom
+   property, but must not layer a second competing rainbow over this sheen. */
+[data-prism-refract-sheen="true"][data-prism-refract-state="generating"] {
+  --prism-refract-sheen-surface: color-mix(
+    in srgb,
+    var(--bg-surface, var(--baseline-bg)) 88%,
+    #11131c
+  );
+  --prism-refract-sheen-period: 52rem;
+  border-color: transparent !important;
+  outline: 2px solid color-mix(in srgb, var(--prism-s, #2fd3e3) 74%, white);
+  outline-offset: 3px;
+  background:
+    linear-gradient(
+        115deg,
+        color-mix(in srgb, var(--prism-p, #ff4d6d) 18%, var(--prism-refract-sheen-surface)) 0%,
+        color-mix(in srgb, var(--prism-r, #ff9f1c) 15%, var(--prism-refract-sheen-surface)) 15%,
+        color-mix(in srgb, #f4f86a 12%, var(--prism-refract-sheen-surface)) 30%,
+        color-mix(in srgb, #36f0b2 14%, var(--prism-refract-sheen-surface)) 45%,
+        color-mix(in srgb, var(--prism-i, #b7e63a) 17%, var(--prism-refract-sheen-surface)) 60%,
+        color-mix(in srgb, var(--prism-s, #2fd3e3) 17%, var(--prism-refract-sheen-surface)) 78%,
+        color-mix(in srgb, var(--prism-m, #7b5cff) 18%, var(--prism-refract-sheen-surface)) 100%
+      ) padding-box,
+    linear-gradient(
+        90deg,
+        var(--prism-p, #ff4d6d),
+        var(--prism-r, #ff9f1c),
+        #f4f86a,
+        #36f0b2,
+        var(--prism-i, #b7e63a),
+        var(--prism-s, #2fd3e3),
+        var(--prism-m, #7b5cff),
+        var(--prism-p, #ff4d6d)
+      ) border-box !important;
+  background-repeat: repeat-x !important;
+  background-size:
+    var(--prism-refract-sheen-period) 100%,
+    var(--prism-refract-sheen-period) 100% !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 0 22px -13px color-mix(in srgb, var(--prism-i, #b7e63a) 76%, transparent),
+    0 0 34px -20px color-mix(in srgb, var(--prism-m, #7b5cff) 72%, transparent) !important;
+  filter: saturate(1.12) brightness(1.04);
+  animation: prismRefractSheenFlow 1.7s linear infinite !important;
+  caret-color: transparent !important;
+  cursor: progress !important;
+  user-select: none;
+}
+
+@keyframes prismRefractSheenFlow {
+  from { background-position: 0 0, 0 0; }
+  to {
+    background-position:
+      var(--prism-refract-sheen-period) 0,
+      var(--prism-refract-sheen-period) 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-prism-refract-sheen="true"][data-prism-refract-state="generating"] {
+    animation: none !important;
+  }
+}

@@ -1,6 +1,12 @@
 import type { ResponseMode } from "./autoFallback.js";
 import type { EphemeralChatResolvedProvider } from "./ephemeralChat.js";
 import {
+  normalizeModelReasoningEffortPreference,
+  normalizeProviderReasoningEffort,
+  type ModelReasoningEffortPreference,
+  type ProviderReasoningEffort,
+} from "./reasoningEffort.ts";
+import {
   normalizePrismCompanionSurfaceReference,
   normalizePrismCompanionDebateDraft,
   type PrismCompanionSurfaceReference,
@@ -95,6 +101,8 @@ export interface PrismRefractRequest {
   preferredProvider?: EphemeralChatResolvedProvider;
   responseMode?: ResponseMode;
   modelOverride?: string | null;
+  reasoningEffort?: ProviderReasoningEffort;
+  turbo?: boolean;
 }
 
 export interface PrismRefractResponse {
@@ -300,16 +308,29 @@ export function normalizePrismRefractRequest(
     value.responseMode === "auto"
       ? value.responseMode
       : undefined;
+  const hasModelOverride = Object.prototype.hasOwnProperty.call(
+    value,
+    "modelOverride",
+  );
   const modelOverride =
     typeof value.modelOverride === "string"
       ? value.modelOverride.trim().slice(0, 200) || null
       : null;
+  const normalizedProviderReasoningEffort =
+    normalizeProviderReasoningEffort(value.reasoningEffort);
+  const reasoningEffort =
+    normalizedProviderReasoningEffort === "max"
+      ? normalizedProviderReasoningEffort
+      : normalizeModelReasoningEffortPreference(value.reasoningEffort);
+  const turbo = typeof value.turbo === "boolean" ? value.turbo : undefined;
   return {
     target,
     currentValue,
     rejectedValues,
     ...(preferredProvider ? { preferredProvider } : {}),
     ...(responseMode ? { responseMode } : {}),
-    ...(modelOverride ? { modelOverride } : {}),
+    ...(hasModelOverride ? { modelOverride } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
+    ...(turbo !== undefined ? { turbo } : {}),
   };
 }

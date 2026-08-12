@@ -56,6 +56,7 @@ export function botIdentityMirrorFaceV1(
     faceEyesFont: row.eyesFont ?? row.faceEyesFont,
     faceEyeCharacter: row.eyeCharacter ?? row.faceEyeCharacter,
     faceEyeCount: row.eyeCount ?? row.faceEyeCount,
+    faceEyeSpacing: row.eyeSpacing ?? row.faceEyeSpacing,
     faceEyeAnimation: row.eyeAnimation ?? row.faceEyeAnimation,
     faceMouthFont: row.mouthFont ?? row.faceMouthFont,
     faceMouthCharacter: row.mouthCharacter ?? row.faceMouthCharacter,

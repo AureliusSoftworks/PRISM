@@ -63,6 +63,7 @@ import type {
   AutoFallbackModelRef,
   AutoRouteDecisionV1,
   ModelReasoningEffortPreference,
+  ProviderReasoningEffort,
   BotPowerFrequency,
   BotPowerStrength,
   BotPowerResolvedThemeV1,
@@ -288,6 +289,7 @@ import {
 } from "./bot-identity-shapeshift.ts";
 import { resolveBotFalseNameStateV1 } from "./bot-false-name.ts";
 import {
+  deleteMemoriesAcquiredDuringAppletSessions,
   persistBotPairNarrativeMemory,
   retrieveBotPairNarrativeMemories,
   retrieveRecentBotMemoriesForStarter,
@@ -808,6 +810,7 @@ export type BotcastBotProfile = {
   faceEyesFont?: string | null;
   faceEyeCharacter?: string | null;
   faceEyeCount?: number | null;
+  faceEyeSpacing?: number | null;
   faceMouthFont?: string | null;
   faceMouthCharacter?: string | null;
   faceMouthAnimation?: string | null;
@@ -857,7 +860,9 @@ export interface BotcastGenerationOptions {
   /** Concrete contextual selection for this individual generation. */
   contextualModel?: string | null;
   /** Concrete contextual effort for this individual generation. */
-  contextualReasoningEffort?: ModelReasoningEffortPreference;
+  contextualReasoningEffort?: Exclude<ProviderReasoningEffort, "auto">;
+  /** Concrete contextual Turbo state for this individual generation. */
+  contextualTurbo?: boolean;
   /** Persisted with the generated Signal event when Auto selected the route. */
   autoRouteDecision?: AutoRouteDecisionV1;
   /** Account consent gate for private multi-pass effort on local models. */
@@ -2785,7 +2790,7 @@ function loadBotProfile(
             face_eyes_font, face_eye_character, face_eye_count, face_mouth_font,
             face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker,
             face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y,
-            face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x,
+            face_eye_rotation_deg, face_eye_spacing, face_mouth_scale, face_mouth_offset_x,
             face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar,
             face_blink_scale, face_blink_offset_x, face_blink_offset_y,
             face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, avatar_details_json, authored_audio_voice_profile,
@@ -2805,6 +2810,7 @@ function loadBotProfile(
         face_eyes_font: string | null;
         face_eye_character: string | null;
         face_eye_count: number | null;
+        face_eye_spacing: number | null;
         face_mouth_font: string | null;
         face_mouth_character: string | null;
         face_mouth_animation: string | null;
@@ -2851,6 +2857,7 @@ function loadBotProfile(
     faceEyesFont: row.face_eyes_font,
     faceEyeCharacter: row.face_eye_character,
     faceEyeCount: row.face_eye_count,
+    faceEyeSpacing: row.face_eye_spacing,
     faceMouthFont: row.face_mouth_font,
     faceMouthCharacter: row.face_mouth_character,
     faceMouthAnimation: row.face_mouth_animation,
@@ -3798,6 +3805,32 @@ export function deleteBotcastShow(
   userId: string,
   showId: string,
 ): boolean {
+  const existing = db
+    .prepare("SELECT id FROM botcast_shows WHERE id = ? AND user_id = ?")
+    .get(showId, userId) as { id: string } | undefined;
+  if (!existing) return false;
+  const episodeIds = (
+    db
+      .prepare("SELECT id FROM botcast_episodes WHERE user_id = ? AND show_id = ?")
+      .all(userId, showId) as Array<{ id: string }>
+  ).map((row) => row.id);
+  if (episodeIds.length > 0) {
+    const placeholders = episodeIds.map(() => "?").join(", ");
+    const sourceMessageIds = (
+      db
+        .prepare(
+          `SELECT id FROM botcast_messages
+            WHERE user_id = ? AND episode_id IN (${placeholders})`,
+        )
+        .all(userId, ...episodeIds) as Array<{ id: string }>
+    ).map((row) => row.id);
+    deleteMemoriesAcquiredDuringAppletSessions(
+      db,
+      userId,
+      episodeIds,
+      sourceMessageIds,
+    );
+  }
   const result = db
     .prepare("DELETE FROM botcast_shows WHERE id = ? AND user_id = ?")
     .run(showId, userId);
@@ -6382,23 +6415,17 @@ export async function generateBotcastRefractDraft(
   modelOverride: string | null | undefined,
   generation: BotcastGenerationOptions,
 ): Promise<BotcastRefractDraftResult> {
-  const auxiliaryTarget =
-    target.kind === "signal.create.premise" ||
-    target.kind === "signal.show.name" ||
-    target.kind === "signal.show.premise" ||
-    target.kind === "signal.booking.producerGuestDirection";
-  const selected = auxiliaryTarget
-    ? auxiliaryGenerationProvider(generation)
-    : generationProvider(
-        generation,
-        generation.preferredProvider,
-        modelOverride,
-      );
+  const selected = generationProvider(
+    generation,
+    generation.preferredProvider,
+    modelOverride,
+  );
   let resolvedProvider = selected.providerName;
   let resolvedModel =
     selected.model ?? defaultModelIdForProvider(selected.providerName);
   const draftGeneration: BotcastGenerationOptions = {
     ...generation,
+    contextualModel: resolvedModel,
     onGenerationResolved: (provider, model) => {
       resolvedProvider = provider;
       resolvedModel = model;
@@ -6754,6 +6781,22 @@ export function deleteBotcastEpisode(
   userId: string,
   episodeId: string,
 ): boolean {
+  const existing = db
+    .prepare("SELECT id FROM botcast_episodes WHERE id = ? AND user_id = ?")
+    .get(episodeId, userId) as { id: string } | undefined;
+  if (!existing) return false;
+  const sourceMessageIds = db
+    .prepare(
+      "SELECT id FROM botcast_messages WHERE user_id = ? AND episode_id = ?",
+    )
+    .all(userId, episodeId)
+    .map((row) => (row as { id: string }).id);
+  deleteMemoriesAcquiredDuringAppletSessions(
+    db,
+    userId,
+    [episodeId],
+    sourceMessageIds,
+  );
   const result = db
     .prepare(
       "DELETE FROM botcast_episodes WHERE id = ? AND user_id = ?",
@@ -8395,6 +8438,7 @@ export function persistCompletedBotcastPairHistory(args: {
       persistBotPairNarrativeMemory({
         db: args.db,
         userId: args.userId,
+        conversationId: episode.id,
         userKey: args.userKey,
         ...pair,
         text: botcastPairNarrative({ episode, ...pair }),
@@ -10891,9 +10935,18 @@ async function generateAuxiliaryBotcastJson<T>(args: {
     | { ok: true; value: T }
     | { ok: false; reason: "empty" | "refusal" | "invalid_output" };
 }): Promise<T | null> {
-  const selected = auxiliaryGenerationProvider(args.generation);
+  const selected =
+    args.generation.contextualModel !== undefined
+      ? generationProvider(
+          args.generation,
+          args.generation.preferredProvider,
+          args.generation.contextualModel,
+        )
+      : auxiliaryGenerationProvider(args.generation);
+  const selectedModel =
+    selected.model ?? defaultModelIdForProvider(selected.providerName);
   const chain = autoFallbackResolvedChain(
-    { provider: selected.providerName, model: selected.model },
+    { provider: selected.providerName, model: selectedModel },
     args.generation.autoFallbackChain,
   );
   if (chain) {
@@ -10929,8 +10982,15 @@ async function generateAuxiliaryBotcastJson<T>(args: {
               ...options,
               reasoningEffort: autoFallbackReasoningEffort(
                 index,
-                options.reasoningEffort,
+                index === 0
+                  ? args.generation.contextualReasoningEffort ??
+                    options.reasoningEffort
+                  : options.reasoningEffort,
               ),
+              turbo:
+                index === 0
+                  ? args.generation.contextualTurbo ?? options.turbo
+                  : false,
             });
           },
         })),
@@ -10946,20 +11006,23 @@ async function generateAuxiliaryBotcastJson<T>(args: {
     }
   }
   try {
-    const raw = await selected.provider.generateResponse(
-      args.messages,
-      args.options(
-        selected.providerName,
-        selected.model,
-        args.generation.signal,
-        false,
-      ),
+    const options = args.options(
+      selected.providerName,
+      selectedModel,
+      args.generation.signal,
+      false,
     );
+    const raw = await selected.provider.generateResponse(args.messages, {
+      ...options,
+      reasoningEffort:
+        args.generation.contextualReasoningEffort ?? options.reasoningEffort,
+      turbo: args.generation.contextualTurbo ?? options.turbo,
+    });
     const validated = args.validate(raw);
     if (validated.ok) {
       args.generation.onGenerationResolved?.(
         selected.providerName,
-        selected.model,
+        selectedModel,
       );
     }
     return validated.ok ? validated.value : null;
@@ -13342,7 +13405,10 @@ export async function advanceBotcastEpisode(
                     provider,
                     messages: prompt,
                     options: attemptOptions,
-                    effort: attemptReasoningEffort,
+                    effort:
+                      attemptReasoningEffort === "max"
+                        ? undefined
+                        : attemptReasoningEffort,
                     surface: "signal",
                     ladderProfile:
                       generation.experimentalAllModelEffortEnabled === true
@@ -13438,7 +13504,10 @@ export async function advanceBotcastEpisode(
                   provider: selected.provider,
                   messages: prompt,
                   options: onlineTurnOptions,
-                  effort: primaryReasoningEffort,
+                  effort:
+                    primaryReasoningEffort === "max"
+                      ? undefined
+                      : primaryReasoningEffort,
                   surface: "signal",
                   ladderProfile:
                     generation.experimentalAllModelEffortEnabled === true
@@ -13564,7 +13633,10 @@ export async function advanceBotcastEpisode(
                   provider: selected.provider,
                   messages: prompt,
                   options: localTurnOptions,
-                  effort: primaryReasoningEffort,
+                  effort:
+                    primaryReasoningEffort === "max"
+                      ? undefined
+                      : primaryReasoningEffort,
                   surface: "signal",
                   ladderProfile:
                     generation.experimentalAllModelEffortEnabled === true

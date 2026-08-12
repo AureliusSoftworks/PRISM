@@ -9,6 +9,7 @@ import {
   stepPrismCompanionInertia,
 } from "./prismCompanionPhysics.ts";
 import {
+  advanceZenLiveBotFreeRoamMotion,
   advanceZenLiveBotPhysics,
   createZenLiveBotDragVelocitySample,
   planZenLiveBotFreeRoamDestination,
@@ -22,6 +23,7 @@ import {
   zenLiveBotBoundsToPrismCompanionLiveBounds,
   zenLiveBotFreeRoamShouldRun,
   zenLiveBotPointToPrismCompanionPosition,
+  type ZenLiveBotFreeRoamMotionState,
 } from "./zenLiveBotFreeRoam.ts";
 
 const bounds = { left: 0, top: 0, right: 900, bottom: 600 };
@@ -56,9 +58,6 @@ describe("zenLiveBotFreeRoam", () => {
     const destination = planZenLiveBotFreeRoamDestination({
       current: { x: 400, y: 240 },
       bounds,
-      avatarWidth: 100,
-      avatarHeight: 100,
-      avoidRects: [],
       random: () => values[index++ % values.length]!,
     });
 
@@ -67,26 +66,15 @@ describe("zenLiveBotFreeRoam", () => {
     assertClose(destination.y, 552);
   });
 
-  it("moves away from the newest prose or chrome avoidance geometry", () => {
+  it("does not model prose or chrome collision geometry", () => {
     const destination = planZenLiveBotFreeRoamDestination({
       current: { x: 390, y: 200 },
       bounds,
-      avatarWidth: 120,
-      avatarHeight: 120,
-      avoidRects: [
-        { left: 300, top: 100, right: 700, bottom: 500 },
-      ],
       random: () => 0.15,
     });
     assert.ok(destination.x >= bounds.left && destination.x <= bounds.right);
     assert.ok(destination.y >= bounds.top && destination.y <= bounds.bottom);
-    assert.ok(
-      destination.x + 120 <= 300 ||
-        destination.x >= 700 ||
-        destination.y + 120 <= 100 ||
-        destination.y >= 500,
-    );
-    assert.match(helperSource, /avoidRects|overlaps\(|rectAt\(/);
+    assert.doesNotMatch(helperSource, /avoidRects|overlaps\(|rectAt\(/);
   });
 
   it("converts Zen top-left pixels to normalized Prism companion coordinates", () => {
@@ -249,6 +237,60 @@ describe("zenLiveBotFreeRoam", () => {
     assert.ok(next.x > 100);
     assert.equal(next.y, 100);
     assert.ok(next.velocityX > 0);
+  });
+
+  it("finishes user throw inertia before autonomous travel resumes", () => {
+    const releasedAt = { x: 390, y: 200 };
+    let motion: ZenLiveBotFreeRoamMotionState = {
+      physics: { ...releasedAt, velocityX: 140, velocityY: 0 },
+      target: null,
+      nextRoamAtMs: 2_400,
+      throwing: true,
+    };
+    let nowMs = 16;
+    const firstFrame = advanceZenLiveBotFreeRoamMotion({
+      motion,
+      nowMs,
+      elapsedMs: 16,
+      bounds,
+      viewportWidth,
+      viewportHeight,
+      random: () => 0,
+    });
+    const canonicalFirstFrame = advanceZenLiveBotPhysics(
+      motion.physics,
+      16,
+      bounds,
+      viewportWidth,
+      viewportHeight,
+    );
+    assertClose(firstFrame.physics.x, canonicalFirstFrame.x);
+    assertClose(firstFrame.physics.y, canonicalFirstFrame.y);
+    assert.equal(firstFrame.target, null);
+    assert.ok(
+      Math.hypot(
+        firstFrame.physics.x - releasedAt.x,
+        firstFrame.physics.y - releasedAt.y,
+      ) < 3,
+    );
+
+    motion = firstFrame;
+    for (let frame = 0; frame < 700 && motion.throwing; frame += 1) {
+      nowMs += 16;
+      motion = advanceZenLiveBotFreeRoamMotion({
+        motion,
+        nowMs,
+        elapsedMs: 16,
+        bounds,
+        viewportWidth,
+        viewportHeight,
+        random: () => 0,
+      });
+    }
+
+    assert.equal(motion.throwing, false);
+    assert.equal(motion.target, null);
+    assert.ok(motion.nextRoamAtMs > nowMs);
   });
 
   it("samples a bounded idle bob and tilt/glow from pixel velocity", () => {

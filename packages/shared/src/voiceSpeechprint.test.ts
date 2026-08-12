@@ -3,8 +3,12 @@ import { describe, it } from "node:test";
 import {
   LOCAL_VOICE_SPEECHPRINT_CAPABILITIES,
   LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256,
+  VOICE_ACCENT_DEFINITIONS,
   applyLocalVoiceSpeechprintMelodyToIpa,
   applyLocalVoiceSpeechprintToIpa,
+  premiumVoiceNativeAccentHintFromLabels,
+  resolveLocalAccentFallback,
+  resolvePremiumAccentDirection,
 } from "@localai/shared";
 
 const SAMPLE_IPA = "θɪs ɹɪvɚ wɪl ðɹaɪv vɛɹi faɹ";
@@ -18,7 +22,149 @@ describe("local voice Speechprints", () => {
       assert.deepEqual(capability.strengths, ["light", "balanced", "strong"]);
       assert.deepEqual(capability.supportedEngines, ["instant"]);
       assert.equal(capability.approximate, true);
+      const definition = VOICE_ACCENT_DEFINITIONS.find(
+        (candidate) => candidate.id === capability.id,
+      );
+      assert.ok(definition?.premiumAccentedEnglishLabel);
+      assert.ok(definition.premiumNativeAccentAliases.length > 0);
+      assert.equal(definition.localSpeechprintFallback, capability.id);
     }
+    assert.ok(
+      VOICE_ACCENT_DEFINITIONS.some(
+        (definition) =>
+          definition.id === "american-english" &&
+          definition.localSpeechprintFallback === "none",
+      ),
+    );
+    assert.ok(
+      VOICE_ACCENT_DEFINITIONS.some(
+        (definition) =>
+          definition.id === "british-english" &&
+          definition.localSpeechprintFallback === "none",
+      ),
+    );
+  });
+
+  it("resolves shared Premium accent cues without changing language", () => {
+    assert.equal(
+      resolvePremiumAccentDirection({
+        pronunciationBase: "en-US",
+        speechprintInfluence: "german-influenced-english",
+        speechprintStrength: "balanced",
+        nativeAccentHint: "German",
+      }),
+      null,
+    );
+    assert.equal(
+      resolvePremiumAccentDirection({
+        pronunciationBase: "en-US",
+        speechprintInfluence: "german-influenced-english",
+        speechprintStrength: "light",
+        nativeAccentHint: "German",
+      }),
+      "subtle German accent",
+    );
+    assert.equal(
+      resolvePremiumAccentDirection({
+        pronunciationBase: "en-US",
+        speechprintInfluence: "german-influenced-english",
+        speechprintStrength: "strong",
+        nativeAccentHint: "German",
+      }),
+      "strong German accent",
+    );
+    assert.equal(
+      resolvePremiumAccentDirection({
+        pronunciationBase: "en-US",
+        speechprintInfluence: "italian-influenced-english",
+        speechprintStrength: "balanced",
+        nativeAccentHint: "American",
+      }),
+      "Italian accent",
+    );
+    assert.equal(
+      resolvePremiumAccentDirection({
+        pronunciationBase: "en-US",
+        speechprintInfluence: "none",
+        speechprintStrength: "balanced",
+        nativeAccentHint: "American",
+      }),
+      null,
+    );
+    assert.equal(
+      resolvePremiumAccentDirection({
+        pronunciationBase: "en-GB",
+        speechprintInfluence: "none",
+        speechprintStrength: "balanced",
+        nativeAccentHint: null,
+      }),
+      "British accent",
+    );
+  });
+
+  it("prefers the provider-neutral definition and recognizes provider variants", () => {
+    assert.equal(
+      premiumVoiceNativeAccentHintFromLabels({
+        language: "American English",
+        accent: "German (Germany)",
+      }),
+      "german germany",
+    );
+    assert.equal(
+      resolvePremiumAccentDirection({
+        accentDefinitionId: "german-influenced-english",
+        pronunciationBase: "en-US",
+        speechprintInfluence: "italian-influenced-english",
+        speechprintStrength: "balanced",
+        nativeAccentHint: "German (Germany)",
+      }),
+      null,
+    );
+    assert.equal(
+      resolvePremiumAccentDirection({
+        accentDefinitionId: "american-english",
+        pronunciationBase: "en-GB",
+        speechprintInfluence: "italian-influenced-english",
+        speechprintStrength: "balanced",
+        nativeAccentHint: "American English",
+      }),
+      null,
+    );
+    assert.equal(
+      resolvePremiumAccentDirection({
+        accentDefinitionId: "german-influenced-english",
+        pronunciationBase: "en-US",
+        speechprintInfluence: "italian-influenced-english",
+        speechprintStrength: "strong",
+        nativeAccentHint: "American English",
+      }),
+      "strong German accent",
+    );
+  });
+
+  it("derives Local fallback from the shared accent identity", () => {
+    assert.deepEqual(
+      resolveLocalAccentFallback({
+        accentDefinitionId: "german-influenced-english",
+        pronunciationBase: "en-US",
+        speechprintInfluence: "italian-influenced-english",
+      }),
+      {
+        pronunciationBase: "en-US",
+        speechprintInfluence: "german-influenced-english",
+      },
+    );
+    assert.deepEqual(
+      resolveLocalAccentFallback({
+        accentDefinitionId: "british-english",
+        pronunciationBase: "en-US",
+        speechprintInfluence: "italian-influenced-english",
+      }),
+      {
+        pronunciationBase: "en-GB",
+        speechprintInfluence: "none",
+      },
+    );
   });
 
   it("covers additional regions without collapsing them into distant profiles", () => {

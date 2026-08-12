@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { botAvatarScreenFacingScaleX } from "./bot-avatar-render-geometry.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const publicDir = join(here, "../../public");
@@ -34,6 +35,58 @@ function pngHeader(fileName: string): {
 }
 
 describe("chatMiniBotAvatar", () => {
+  it("uses the shared left/right screen contract for every mini screen layer", () => {
+    assert.match(componentSource, /facing\?: BotAvatarFacing/);
+    assert.match(componentSource, /data-avatar-facing=\{facing\}/);
+    assert.match(componentSource, /botAvatarScreenFacingScaleX\(facing\)/);
+    assert.match(componentSource, /styles\.upperScreenContent/);
+    assert.match(componentSource, /styles\.lowerScreenContent/);
+    assert.equal(botAvatarScreenFacingScaleX("right"), "1");
+    assert.equal(botAvatarScreenFacingScaleX("left"), "-1");
+    assert.match(
+      cssSource,
+      /\.upperScreenContent\s*\{[\s\S]*?transform:\s*scaleX\(var\(--chat-mini-bot-upper-screen-facing-scale-x, 1\)\)/,
+    );
+    assert.match(
+      cssSource,
+      /\.lowerScreenContent\s*\{[\s\S]*?transform:\s*scaleX\(var\(--chat-mini-bot-lower-screen-facing-scale-x, 1\)\)/,
+    );
+    assert.match(
+      componentSource,
+      /\["--avatar-details-facing-scale-x" as string\]: "1"/,
+      "the outer mini rig must be the only horizontal mirror for custom Ink",
+    );
+    assert.match(
+      pageSource,
+      /\["--coffee-plate-emoji-face-scale-y" as string\]:\s*BOT_AVATAR_CANONICAL_FACE_SCALE_Y/,
+      "the inner punctuation face must remain canonical to avoid a double flip",
+    );
+    assert.match(
+      pageSource,
+      /directionIndependentFace=\{\s*miniThinkingSpinnerActive \|\| showQuestionMark\s*\}/,
+    );
+    assert.match(
+      componentSource,
+      /const directionIndependentFace =\s*props\.thinking \|\| props\.directionIndependentFace === true/,
+    );
+    assert.match(
+      componentSource,
+      /directionIndependentFace \? "1" : screenFacingScaleX/,
+    );
+    assert.match(
+      pageSource,
+      /const avatarFacing = zenLiveBotFacingForCanvasSide\(avatarCanvasSide\)/,
+    );
+    assert.match(pageSource, /<EmptyStateHeroMiniBot[\s\S]{0,900}?facing=\{avatarFacing\}/);
+    assert.match(pageSource, /<ZenLiveBotMannequin[\s\S]{0,240}?facing=\{avatarFacing\}/);
+    assert.match(
+      pageSource,
+      /facing=\{ambientFacing \?\? BOT_AVATAR_CANONICAL_FACING\}/,
+    );
+    assert.doesNotMatch(componentSource, /key=\{?facing/);
+    assert.doesNotMatch(pageSource, /key=\{[^}]*avatarFacing/);
+  });
+
   it("keeps every mini buckle glyph two pixels inside its nominal size", () => {
     assert.match(
       pageCssSource,
@@ -196,7 +249,7 @@ describe("chatMiniBotAvatar", () => {
     assert.match(pageSource, /<ChatMiniBotAvatar\s+size=\{size\}/);
     assert.match(
       pageSource,
-      /lightMode=\{size === "hero" \? "breathing" : "off"\}/,
+      /lightMode=\{lightMode \?\? \(size === "hero" \? "breathing" : "off"\)\}/,
     );
     assert.match(pageSource, /SELECT THE BOT TO START THE CHAT/);
     assert.match(pageCssSource, /\.emptyStateHeroMiniBot\b/);
@@ -243,7 +296,6 @@ describe("chatMiniBotAvatar", () => {
     assert.match(pageSource, /miniAvatarBinaryMouthShape/);
     assert.match(pageSource, /style=\{miniFaceRegistrationStyle\}/);
     assert.match(pageSource, /BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE/);
-    assert.match(pageSource, /BOT_AVATAR_FACE_GLYPH_FRAME_RATIO/);
     assert.match(
       pageCssSource,
       /\.coffeeSeatPlateEmoji\.emptyStateHeroMiniFace\s*\{[^}]*display:\s*inline-grid/,
@@ -266,7 +318,7 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.match(
       pageCssSource,
-      /\.emptyStateHeroMiniGlyph\s*\{[^}]*width:\s*var\(--chat-mini-bot-glyph-size[^}]*height:\s*var\(--chat-mini-bot-glyph-size/,
+      /\.emptyStateHeroMiniGlyph\s*\{[^}]*width:\s*calc\([^}]*--chat-mini-bot-glyph-size[^}]*- 2px[^}]*height:\s*calc\([^}]*--chat-mini-bot-glyph-size[^}]*- 2px/,
     );
     assert.match(
       pageCssSource,
@@ -282,7 +334,7 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.match(
       pageSource,
-      /renderAvatarDetailsInk\("behind-face"\)[\s\S]*?<CoffeeSeatPlateEmoji[\s\S]*?renderAvatarDetailsInk\("above-face"\)/,
+      /behindFace=\{renderAvatarDetailsInk\("behind-face"\)\}[\s\S]*?aboveFace=\{renderAvatarDetailsInk\("above-face"\)\}[\s\S]*?<CoffeeSeatPlateEmoji/,
     );
     assert.match(pageSource, /coreColor="ink"/);
     assert.match(pageSource, /color=\{normalizedBotColor\}/);
@@ -305,20 +357,88 @@ describe("chatMiniBotAvatar", () => {
     );
   });
 
-  it("keeps classic Chat message mood badges as coffee faces, not mini chassis", () => {
-    assert.match(pageSource, /variant="mini"/);
+  it("supports suppressing behind/above art slots while thinking", () => {
+    assert.match(componentSource, /thinking: boolean/);
+    assert.match(componentSource, /behindFace\?: ReactNode/);
+    assert.match(componentSource, /aboveFace\?: ReactNode/);
+    assert.match(
+      componentSource,
+      /props\.thinking \? null : props\.behindFace/,
+    );
+    assert.match(componentSource, /props\.thinking \? null : props\.aboveFace/);
+    assert.match(pageSource, /thinking=\{miniThinkingSpinnerActive\}/);
+    assert.match(pageSource, /thinking=\{previewThinkingSpinnerActive\}/);
+    assert.match(pageSource, /thinking=\{false\}/);
+    assert.match(
+      pageSource,
+      /behindFace=\{renderAvatarDetailsInk\("behind-face"\)\}/,
+    );
+    assert.match(
+      pageSource,
+      /aboveFace=\{renderAvatarDetailsInk\("above-face"\)\}/,
+    );
+    assert.match(
+      pageSource,
+      /behindFace=\{renderMiniAvatarDetailsInk\("behind-face"\)\}/,
+    );
+    assert.match(
+      pageSource,
+      /aboveFace=\{renderMiniAvatarDetailsInk\("above-face"\)\}/,
+    );
+    assert.match(
+      pageSource,
+      /behindFace=\{renderGalleryAvatarDetails\("behind-face"\)\}/,
+    );
+    assert.match(
+      pageSource,
+      /aboveFace=\{renderGalleryAvatarDetails\("above-face"\)\}/,
+    );
+  });
+
+  it("keeps micro message avatars to an upright orb, eyes, and mouth", () => {
+    assert.match(pageSource, /variant="micro"/);
     assert.match(pageSource, /function MessageMoodFace\(/);
-    // Mood badge still exists, but ChatMiniBotAvatar is no longer nested inside it.
-    const moodFaceFn = pageSource.slice(
+    const microFaceFn = pageSource.slice(
       pageSource.indexOf("function MessageMoodFace("),
       pageSource.indexOf("function neutralRowColor("),
     );
-    assert.doesNotMatch(moodFaceFn, /ChatMiniBotAvatar/);
-    assert.match(moodFaceFn, /messageMoodMiniFace|messageMoodCoffeeFace/);
-    assert.match(pageCssSource, /\[data-variant="mini"\]/);
+    assert.doesNotMatch(microFaceFn, /ChatMiniBotAvatar|AvatarDetailsMask/);
+    assert.doesNotMatch(microFaceFn, /glyph\?:|avatarDetails\?:/);
+    assert.match(
+      microFaceFn,
+      /`\$\{styles\.messageMoodCoffeeFace\} \$\{styles\.messageMoodMicroFace\}`/,
+    );
+    assert.match(
+      microFaceFn,
+      /faceEyeMovement=\{showMicroFace \? "still" : undefined\}/,
+    );
+    assert.match(
+      microFaceFn,
+      /faceThinkingFrames=\{showMicroFace \? undefined : props\.faceStyle\?\.thinkingFrames\}/,
+    );
+    assert.match(
+      microFaceFn,
+      /faceThinkingScale=\{showMicroFace \? undefined : props\.faceStyle\?\.thinkingScale\}/,
+    );
+    assert.match(
+      microFaceFn,
+      /faceThinkingOffsetX=\{showMicroFace \? undefined : props\.faceStyle\?\.thinkingOffsetX\}/,
+    );
+    assert.match(
+      microFaceFn,
+      /faceThinkingOffsetY=\{showMicroFace \? undefined : props\.faceStyle\?\.thinkingOffsetY\}/,
+    );
+    assert.match(
+      microFaceFn,
+      /forceBlinkPhase=\{showMicroFace \? props\.forceBlinkPhase : undefined\}/,
+    );
+    assert.match(microFaceFn, /showQuestionMark=\{showMicroFace \? false : questionMarkActive\}/);
+    assert.match(microFaceFn, /data-avatar-render-tier=\{showMicroFace \? "micro" : undefined\}/);
+    assert.match(pageCssSource, /\[data-variant="micro"\]/);
     assert.match(
       pageCssSource,
-      /\.messageMoodBadge\[data-face="coffee"\]\[data-variant="mini"\]\s*\{[^}]*border:\s*1px solid/,
+      /\.messageMoodBadge\[data-face="coffee"\]\[data-variant="micro"\]\s*\{[^}]*border:\s*1px solid/,
     );
+    assert.match(pageCssSource, /\.messageMoodMicroFace\s*\{[^}]*font-size:\s*8\.5px/);
   });
 });

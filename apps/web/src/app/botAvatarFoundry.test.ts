@@ -3,18 +3,21 @@ import { describe, it } from "node:test";
 
 import {
   BOT_AVATAR_FOUNDRY_PIXEL_GRID_ZOOM_THRESHOLD,
+  BOT_AVATAR_FOUNDRY_FACE_CANDIDATES,
+  BOT_AVATAR_FOUNDRY_INTERIM_GLYPHS,
   BOT_AVATAR_FOUNDRY_UPGRADE_NODES,
   botAvatarFoundryAtmosphere,
   botAvatarFoundryCameraForControl,
   botAvatarFoundryGenerationHoldMs,
   botAvatarFoundryIdentitySurfaceForNode,
   botAvatarFoundryModulePopulation,
+  botAvatarFoundryPopulationFrame,
+  botAvatarFoundryRadialRayGeometry,
   botAvatarFoundryPixelGridVisible,
   botAvatarFoundryScreenMode,
   botAvatarFoundryStatus,
   botAvatarFoundryTiming,
   botAvatarFoundryUpgradeNodeForControl,
-  normalizeBotAvatarFoundryOrigin,
   normalizeBotAvatarFoundryViewport,
   transitionBotAvatarFoundry,
   zoomBotAvatarFoundryViewport,
@@ -51,11 +54,11 @@ describe("Avatar Foundry presentation contracts", () => {
       "arrival",
       "brief",
       "handoff",
-      "generation",
       "error",
     ] as const) {
       assert.equal(botAvatarFoundryScreenMode(phase), "off");
     }
+    assert.equal(botAvatarFoundryScreenMode("generation"), "synthesis");
     assert.equal(botAvatarFoundryScreenMode("awakening"), "live");
     assert.equal(botAvatarFoundryScreenMode("editing"), "editing");
   });
@@ -204,24 +207,56 @@ describe("Avatar Foundry presentation contracts", () => {
     assert.equal(botAvatarFoundryPixelGridVisible(Number.NaN), false);
   });
 
-  it("normalizes a live companion origin without trusting invalid values", () => {
-    assert.deepEqual(
-      normalizeBotAvatarFoundryOrigin({ x: 1.4, y: -0.2, available: true }),
-      { x: 1, y: 0, available: true },
-    );
-    assert.deepEqual(normalizeBotAvatarFoundryOrigin(null), {
-      x: 0.92,
-      y: 0.84,
-      available: false,
-    });
-  });
-
   it("uses one quiet, concrete status line", () => {
     assert.equal(
       botAvatarFoundryStatus("awakening", "Mira"),
       "Mira is coming online.",
     );
     assert.match(botAvatarFoundryStatus("error"), /safe/u);
+  });
+
+  it("populates the CRT without inventing completion percentages", () => {
+    const first = botAvatarFoundryPopulationFrame(0);
+    const later = botAvatarFoundryPopulationFrame(6_400);
+    const held = botAvatarFoundryPopulationFrame(60_000);
+    assert.equal(first.fill, 0.12);
+    assert.ok(later.fill > first.fill);
+    assert.equal(held.fill, 0.92);
+    assert.ok(BOT_AVATAR_FOUNDRY_INTERIM_GLYPHS.includes(first.glyph));
+    assert.ok(BOT_AVATAR_FOUNDRY_INTERIM_GLYPHS.includes(later.glyph));
+    assert.ok(BOT_AVATAR_FOUNDRY_FACE_CANDIDATES.includes(first.face));
+    assert.equal(first.activeModule, "chassis");
+    assert.equal(first.population.chassis, false);
+    assert.equal(later.activeModule, "glyph");
+    assert.deepEqual(later.population, {
+      chassis: true,
+      screen: true,
+      eyes: true,
+      mouth: true,
+      glyph: false,
+    });
+    assert.equal(
+      later.modules.find((module) => module.id === "glyph")?.active,
+      true,
+    );
+    assert.notEqual(first.notice, later.notice);
+    assert.doesNotMatch(later.notice, /%|percent/u);
+    const reduced = botAvatarFoundryPopulationFrame(120, true);
+    assert.equal(reduced.face, BOT_AVATAR_FOUNDRY_FACE_CANDIDATES[0]);
+    assert.equal(reduced.glyph, BOT_AVATAR_FOUNDRY_INTERIM_GLYPHS[0]);
+  });
+
+  it("aims a tapered radial light from Prism toward the shell", () => {
+    const ray = botAvatarFoundryRadialRayGeometry(
+      { x: 0.9, y: 0.8 },
+      { x: 0.5, y: 0.52 },
+    );
+    const points = ray.points.split(" ");
+    assert.equal(points.length, 4);
+    assert.ok(points.every((point) => /^\d+\.\d{2},\d+\.\d{2}$/u.test(point)));
+    assert.ok(ray.targetWidth < ray.sourceWidth);
+    assert.notEqual(points[0], points[3]);
+    assert.notEqual(points[1], points[2]);
   });
 
   it("runs AI creation through every explicit phase", () => {
@@ -276,6 +311,7 @@ describe("Avatar Foundry presentation contracts", () => {
     assert.ok(reduced.arrivalMs < full.arrivalMs);
     assert.ok(reduced.handoffMs < full.handoffMs);
     assert.ok(reduced.minimumGenerationMs < full.minimumGenerationMs);
+    assert.ok(reduced.finalizationMs < full.finalizationMs);
     assert.ok(reduced.awakeningMs < full.awakeningMs);
     assert.equal(botAvatarFoundryGenerationHoldMs(40, true), 140);
   });

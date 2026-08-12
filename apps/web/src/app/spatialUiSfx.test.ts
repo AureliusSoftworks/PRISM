@@ -13,8 +13,8 @@ import {
 
 test("ships a varied tactile UI library with real local assets", () => {
   const sources = Object.values(SPATIAL_UI_SFX_SOURCES).flat();
-  assert.equal(sources.length, 27);
-  assert.equal(new Set(sources).size, 27);
+  assert.equal(sources.length, 28);
+  assert.equal(new Set(sources).size, 28);
   assert.equal(SPATIAL_UI_SFX_SOURCES["bot-hover"].length, 4);
   assert.equal(SPATIAL_UI_SFX_SOURCES["bot-select"].length, 3);
   assert.deepEqual(SPATIAL_UI_SFX_SOURCES["turbo-on"], [
@@ -31,6 +31,10 @@ test("ships a varied tactile UI library with real local assets", () => {
     "/audio/ui-asmr/bot-select-03.mp3",
   ]);
   assert.equal(SPATIAL_UI_SFX_CONFIG["effort-tick"].cooldownMs, 0);
+  assert.deepEqual(SPATIAL_UI_SFX_SOURCES["foundry-clank"], [
+    "/audio/debate/exhibits/impact-metal.mp3",
+  ]);
+  assert.equal(SPATIAL_UI_SFX_CONFIG["foundry-clank"].volume, 0.16);
   assert.ok(
     SPATIAL_UI_SFX_CONFIG["turbo-off"].volume <
       SPATIAL_UI_SFX_CONFIG["turbo-on"].volume,

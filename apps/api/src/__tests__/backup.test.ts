@@ -1199,6 +1199,7 @@ describe("backup bot avatar face style", () => {
         faceEyeOffsetY: -0.08,
         faceEyeRotationDeg: -25,
         faceEyeCount: 2,
+        faceEyeSpacing: 0.36,
         faceMouthScale: 1.25,
         faceMouthOffsetX: -0.04,
         faceMouthOffsetY: 0.06,
@@ -1342,6 +1343,58 @@ describe("backup bot avatar face style", () => {
           ).get("bot-1") as { value: number }
         ).value,
         1,
+      );
+    });
+  });
+
+  it("round-trips cloned-eye spacing and defaults legacy backups", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare(
+        `INSERT INTO bots (
+          id, user_id, name, system_prompt, face_eye_character, face_eye_count,
+          face_eye_spacing, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        "eye-spacing-bot",
+        "user-1",
+        "Eye Spacing Bot",
+        "",
+        "•",
+        2,
+        0.52,
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z",
+      );
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      const exportedBot = snapshot.bots?.find(
+        (bot) => bot.id === "eye-spacing-bot",
+      );
+      assert.ok(exportedBot);
+      assert.equal(exportedBot.faceEyeSpacing, 0.52);
+
+      db.prepare(
+        "UPDATE bots SET face_eye_spacing = 0.24 WHERE id = ? AND user_id = ?",
+      ).run("eye-spacing-bot", "user-1");
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      assert.equal(
+        (
+          db.prepare(
+            "SELECT face_eye_spacing AS value FROM bots WHERE id = ? AND user_id = ?",
+          ).get("eye-spacing-bot", "user-1") as { value: number }
+        ).value,
+        0.52,
+      );
+
+      delete exportedBot.faceEyeSpacing;
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      assert.equal(
+        (
+          db.prepare(
+            "SELECT face_eye_spacing AS value FROM bots WHERE id = ? AND user_id = ?",
+          ).get("eye-spacing-bot", "user-1") as { value: number }
+        ).value,
+        0.36,
       );
     });
   });

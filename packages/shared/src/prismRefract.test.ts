@@ -85,6 +85,9 @@ test("normalizes a bounded registered Signal text target", () => {
     ),
     preferredProvider: "local",
     responseMode: "local",
+    modelOverride: null,
+    reasoningEffort: "high",
+    turbo: true,
   });
   assert.equal(request.currentValue, "A current title");
   assert.equal(
@@ -93,6 +96,29 @@ test("normalizes a bounded registered Signal text target", () => {
   );
   assert.equal(request.rejectedValues[0], "Idea 2");
   assert.equal(request.preferredProvider, "local");
+  assert.equal(request.modelOverride, null);
+  assert.equal(request.reasoningEffort, "high");
+  assert.equal(request.turbo, true);
+});
+
+test("preserves native Max as transient Refract routing without adding it to saved effort", () => {
+  const request = normalizePrismRefractRequest({
+    target: {
+      kind: "prism.input.text",
+      surface: { surfaceId: "avatar-studio", botIds: ["bot-1"] },
+      label: "Power",
+      context: "Current bot power draft",
+      multiline: true,
+      maxLength: 500,
+    },
+    currentValue: "Bends probability around bad jokes.",
+    rejectedValues: [],
+    preferredProvider: "openai",
+    responseMode: "online",
+    modelOverride: "gpt-5.6-sol",
+    reasoningEffort: "max",
+  });
+  assert.equal(request.reasoningEffort, "max");
 });
 
 test("normalizes a contextual Debate setup target without trusting extra fields", () => {

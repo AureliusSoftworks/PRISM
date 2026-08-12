@@ -202,6 +202,7 @@ import {
 import {
   activateDebateParticipantFloorBreak,
   advanceDebateSession,
+  bufferDebateArchiveReturn,
   checkDebateAdvocacyRoles,
   clarifyDebateParticipantFloorBreak,
   commitDebateAdvancePreparation,
@@ -428,6 +429,7 @@ import type {
   ReplayVoiceTakeV1,
   ResolvedLocalVoicePronunciationV1,
   ResolvedLocalVoiceSpeechprintV1,
+  ProviderReasoningEffort,
   ReasoningEffort,
   SlateClarificationAnswerRequest,
   SlateDirectionIntentPatch,
@@ -836,6 +838,7 @@ import {
   DEFAULT_BOT_FACE_BLINK_SCALE,
   DEFAULT_BOT_FACE_EYE_CHARACTER,
   DEFAULT_BOT_FACE_EYE_COUNT,
+  DEFAULT_BOT_FACE_EYE_SPACING,
   DEFAULT_BOT_FACE_EYE_OFFSET_X,
   DEFAULT_BOT_FACE_EYE_OFFSET_Y,
   DEFAULT_BOT_FACE_EYE_ROTATION_DEG,
@@ -880,6 +883,7 @@ import {
   normalizeBotFaceBlinkScale,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeCount,
+  normalizeBotFaceEyeSpacing,
   normalizeBotFaceEyeOffsetX,
   normalizeBotFaceEyeOffsetY,
   normalizeBotFaceEyeRotationDeg,
@@ -905,6 +909,7 @@ import {
   localVoicePronunciationOverrideIsActive,
   normalizeLocalVoiceSpeechprintV1,
   localVoiceSpeechprintIsActive,
+  resolveLocalAccentFallback,
   LOCAL_VOICE_PRONUNCIATION_BASES,
   LOCAL_VOICE_SPEECHPRINT_CAPABILITIES,
   normalizeBotGenerationPrompt,
@@ -961,6 +966,7 @@ import {
   normalizePromptShortcutMetadata,
   normalizePromptWildcardRunMetadata,
   normalizeModelReasoningEffortPreference,
+  normalizeProviderReasoningEffort,
   modelSupportsTurboMode,
   resolveModelReasoningEffortCapability,
   parseBuiltInPromptWildcardReference,
@@ -2146,33 +2152,43 @@ function resolveLocalVoiceDelivery(
   speechprint: ResolvedLocalVoiceSpeechprintV1;
 } {
   const profile = normalizeBotAudioVoiceProfileV1(profileValue);
+  const localAccent = resolveLocalAccentFallback({
+    accentDefinitionId: profile.accentDefinitionId,
+    pronunciationBase: profile.pronunciationBase,
+    speechprintInfluence: profile.speechprintInfluence,
+  });
+  const localProfile = {
+    ...profile,
+    pronunciationBase: localAccent.pronunciationBase,
+    speechprintInfluence: localAccent.speechprintInfluence,
+  };
   const speechprintProfile = normalizeLocalVoiceSpeechprintV1({
-    influence: profile.speechprintInfluence,
-    strength: profile.speechprintStrength,
-    variationSeed: profile.speechprintVariationSeed,
+    influence: localProfile.speechprintInfluence,
+    strength: localProfile.speechprintStrength,
+    variationSeed: localProfile.speechprintVariationSeed,
   });
   const localEngine = resolveLocalVoiceEngine({
-    preference: profile.localEnginePreference,
+    preference: localProfile.localEnginePreference,
     speechprintActive: localVoiceSpeechprintIsActive(speechprintProfile),
     pronunciationOverrideActive: localVoicePronunciationOverrideIsActive(
-      profile.pronunciationBase,
-      profile.accentLocale,
+      localProfile.pronunciationBase,
+      localProfile.accentLocale,
     ),
   });
   const pronunciation = resolveLocalVoicePronunciation({
-    profile,
+    profile: localProfile,
     localEngine,
     usingSystemVoice:
-      allowOperatingSystemVoices && Boolean(profile.systemVoiceName),
+      allowOperatingSystemVoices && Boolean(localProfile.systemVoiceName),
   });
   return {
     localEngine,
     pronunciation,
     speechprint: resolveLocalVoiceSpeechprint({
-      profile,
+      profile: localProfile,
       localEngine,
       usingSystemVoice:
-        allowOperatingSystemVoices && Boolean(profile.systemVoiceName),
+        allowOperatingSystemVoices && Boolean(localProfile.systemVoiceName),
       pronunciation,
     }),
   };
@@ -2715,6 +2731,7 @@ interface UserDbRow {
   prism_default_bot_face_eye_offset_y: number | null;
   prism_default_bot_face_eye_rotation_deg: number | null;
   prism_default_bot_face_eye_count: number | null;
+  prism_default_bot_face_eye_spacing: number | null;
   prism_default_bot_face_mouth_scale: number | null;
   prism_default_bot_face_mouth_offset_x: number | null;
   prism_default_bot_face_mouth_offset_y: number | null;
@@ -3115,12 +3132,13 @@ function getUserRow(userId: string): UserDbRow {
   );
   const faceRotation = db
     .prepare(
-      "SELECT prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count FROM users WHERE id = ?",
+      "SELECT prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_eye_spacing FROM users WHERE id = ?",
     )
     .get(userId) as
     | {
         prism_default_bot_face_eye_rotation_deg: number | null;
         prism_default_bot_face_eye_count: number | null;
+        prism_default_bot_face_eye_spacing: number | null;
       }
     | undefined;
   row.prism_default_bot_face_eye_rotation_deg =
@@ -3128,6 +3146,9 @@ function getUserRow(userId: string): UserDbRow {
   row.prism_default_bot_face_eye_count =
     faceRotation?.prism_default_bot_face_eye_count ??
     DEFAULT_BOT_FACE_EYE_COUNT;
+  row.prism_default_bot_face_eye_spacing =
+    faceRotation?.prism_default_bot_face_eye_spacing ??
+    DEFAULT_BOT_FACE_EYE_SPACING;
   return row;
 }
 
@@ -3788,6 +3809,9 @@ async function slateAiForUser(
   projectId?: string,
   deliberationSpeaker?: SlateDeliberationSpeaker,
   routingInputText = "",
+  requestedReasoningEffort?: unknown,
+  requestedProviderOverride?: unknown,
+  requestedModelOverride?: unknown,
 ) {
   const user = getUserRow(userId);
   const projectSettings = projectId
@@ -3818,9 +3842,16 @@ async function slateAiForUser(
     projectSettings?.prose_mode === "online"
       ? projectSettings.prose_mode
       : "auto";
-  let selectedModel = projectSettings?.prose_model?.trim() || null;
+  const foregroundModelOverride = readCoffeeSessionSpeakerModel(
+    requestedModelOverride,
+  );
+  const foregroundProviderOverride = readProvider(requestedProviderOverride);
+  let selectedModel =
+    foregroundModelOverride ?? projectSettings?.prose_model?.trim() ?? null;
   let selectedProvider: ProviderName | null =
-    projectSettings?.prose_provider === "local" ||
+    foregroundModelOverride && foregroundProviderOverride
+      ? foregroundProviderOverride
+      : projectSettings?.prose_provider === "local" ||
     projectSettings?.prose_provider === "openai" ||
     projectSettings?.prose_provider === "anthropic"
       ? projectSettings.prose_provider
@@ -3831,14 +3862,18 @@ async function slateAiForUser(
       deliberationSpeaker,
       storedMode,
     );
-    if (override) {
+    if (override && !foregroundModelOverride) {
       selectedProvider = override.provider;
       selectedModel = override.model;
     }
   }
   const legacyProvider = readProvider(projectSettings?.last_provider);
   const responseMode =
-    storedMode === "offline"
+    foregroundModelOverride && foregroundProviderOverride
+      ? foregroundProviderOverride === "local"
+        ? "local"
+        : "online"
+      : storedMode === "offline"
       ? "local"
       : storedMode === "online"
         ? "online"
@@ -3873,6 +3908,8 @@ async function slateAiForUser(
     requestedProvider,
     requestedResponseMode: responseMode,
     modelOverride: selectedModel,
+    requestedReasoningEffort:
+      requestedReasoningEffort === "max" ? "max" : undefined,
     routingContext: {
       surface: "slate",
       inputText: [
@@ -3897,6 +3934,51 @@ async function slateAiForUser(
     reasoningEffort: runtime.reasoningEffort,
     turbo: runtime.turbo,
   };
+}
+
+function slateForegroundRoutingFromContext(ctx: RequestContext): {
+  reasoningEffort?: "max";
+  provider?: ProviderName;
+  model?: string;
+} {
+  const body =
+    ctx.body && typeof ctx.body === "object" && !Array.isArray(ctx.body)
+      ? (ctx.body as Record<string, unknown>)
+      : {};
+  const reasoningEffort =
+    body.__prismForegroundReasoningEffort === "max" ? "max" : undefined;
+  const provider = readProvider(body.__prismForegroundModelProvider);
+  const model = readCoffeeSessionSpeakerModel(
+    body.__prismForegroundModelOverride,
+  );
+  return {
+    ...(reasoningEffort ? { reasoningEffort } : {}),
+    ...(provider ? { provider } : {}),
+    ...(model ? { model } : {}),
+  };
+}
+
+type SlateForegroundRouting = ReturnType<
+  typeof slateForegroundRoutingFromContext
+>;
+
+function slateAiForRequest(
+  ctx: RequestContext,
+  userId: string,
+  projectId?: string,
+  deliberationSpeaker?: SlateDeliberationSpeaker,
+  routingInputText = "",
+) {
+  const foreground = slateForegroundRoutingFromContext(ctx);
+  return slateAiForUser(
+    userId,
+    projectId,
+    deliberationSpeaker,
+    routingInputText,
+    foreground.reasoningEffort,
+    foreground.provider,
+    foreground.model,
+  );
 }
 
 const slateWritingAbortControllers = new Map<string, AbortController>();
@@ -3966,8 +4048,17 @@ async function compileSlateCustomVibe(
   projectId: string,
   operation: SlateWritingOperationView["operation"],
   vibe: string,
+  foreground: SlateForegroundRouting = {},
 ): Promise<SlateDirectionIntentPatch> {
-  const ai = await slateAiForUser(userId, projectId);
+  const ai = await slateAiForUser(
+    userId,
+    projectId,
+    undefined,
+    vibe,
+    foreground.reasoningEffort,
+    foreground.provider,
+    foreground.model,
+  );
   const raw = await runWithUsageSession(
     {
       db,
@@ -4191,6 +4282,7 @@ async function preflightSlateWritingDirection(
   projectId: string,
   view: SlateWritingOperationView,
   signal?: AbortSignal,
+  foreground: SlateForegroundRouting = {},
 ): Promise<SlateWritingOperationView> {
   const operation = view.operation;
   if (operation.status !== "generating") return view;
@@ -4211,7 +4303,15 @@ async function preflightSlateWritingDirection(
     focusedReplacementRange: operation.intent.target.selection,
   });
   if (evidence.length === 0) return view;
-  const ai = await slateAiForUser(userId, projectId);
+  const ai = await slateAiForUser(
+    userId,
+    projectId,
+    undefined,
+    candidateText,
+    foreground.reasoningEffort,
+    foreground.provider,
+    foreground.model,
+  );
   let audit: SlateProposalContinuityAudit;
   try {
     audit = await runWithUsageSession(
@@ -4877,6 +4977,7 @@ async function generateSlateWritingOperation(
   projectId: string,
   view: SlateWritingOperationView,
   activeController?: AbortController,
+  foreground: SlateForegroundRouting = {},
 ): Promise<SlateWritingOperationView> {
   const operation = view.operation;
   if (operation.status !== "generating") return view;
@@ -4885,7 +4986,15 @@ async function generateSlateWritingOperation(
   if (!activeController) {
     slateWritingAbortControllers.set(abortKey, controller);
   }
-  const ai = await slateAiForUser(userId, projectId);
+  const ai = await slateAiForUser(
+    userId,
+    projectId,
+    undefined,
+    operation.intent.direction,
+    foreground.reasoningEffort,
+    foreground.provider,
+    foreground.model,
+  );
   const mirror = slateComposerMirrorBrief(
     userId,
     projectId,
@@ -5186,6 +5295,7 @@ function runSlateWritingOperationLifecycle(
   userId: string,
   projectId: string,
   operationId: string,
+  foreground: SlateForegroundRouting = {},
 ): Promise<SlateWritingOperationView> {
   const abortKey = slateWritingAbortKey(userId, projectId, operationId);
   const existing = slateWritingLifecycleRuns.get(abortKey);
@@ -5201,6 +5311,7 @@ function runSlateWritingOperationLifecycle(
         projectId,
         view,
         controller.signal,
+        foreground,
       );
     }
     if (
@@ -5216,6 +5327,7 @@ function runSlateWritingOperationLifecycle(
         projectId,
         view,
         controller,
+        foreground,
       );
     }
     return view;
@@ -5342,6 +5454,7 @@ async function synthesizeSlateMirrorVoiceCard(
   userId: string,
   projectId: string | undefined,
   samples: readonly SlateMirrorSampleInput[],
+  foreground: SlateForegroundRouting = {},
 ): Promise<ReturnType<typeof normalizeSlateMirrorVoiceCard>> {
   const eligible = slateMirrorEligibleSamplesForSynthesis(db, userId, samples);
   let remainingCharacters = 42_000;
@@ -5353,7 +5466,15 @@ async function synthesizeSlateMirrorVoiceCard(
     })
     .filter((sample) => sample.length > 0)
     .join("\n\n---\n\n");
-  const ai = await slateAiForUser(userId, projectId);
+  const ai = await slateAiForUser(
+    userId,
+    projectId,
+    undefined,
+    sampleText,
+    foreground.reasoningEffort,
+    foreground.provider,
+    foreground.model,
+  );
   const raw = await runWithUsageSession(
     {
       db,
@@ -5622,9 +5743,18 @@ function frozenDebateModelOverride(session: {
 function debateAutoRoutingContext(
   session: Pick<
     ReturnType<typeof getDebateSession>,
-    "motion" | "evidence" | "stepKey" | "events"
+    | "motion"
+    | "evidence"
+    | "stepKey"
+    | "events"
+    | "lastReasoningEffort"
+    | "lastTurbo"
+    | "latestAutoRoute"
   >,
-): AutoRoutingContextV1 {
+): AutoRoutingContextV1 & {
+  frozenReasoningEffort?: ProviderReasoningEffort;
+  frozenTurbo?: boolean;
+} {
   const evidenceSources = session.evidence.sources.flatMap((source) => [
     source.title,
     source.snippet,
@@ -5658,6 +5788,14 @@ function debateAutoRoutingContext(
     outputTokens: shortTurn ? 900 : 2_400,
     structuredOutput: true,
     highStakes: true,
+    ...(session.lastReasoningEffort
+      ? { frozenReasoningEffort: session.lastReasoningEffort }
+      : session.latestAutoRoute?.reasoningEffort
+        ? { frozenReasoningEffort: session.latestAutoRoute.reasoningEffort }
+        : {}),
+    ...(typeof session.lastTurbo === "boolean"
+      ? { frozenTurbo: session.lastTurbo }
+      : {}),
   };
 }
 
@@ -5668,7 +5806,10 @@ async function debateAiRuntimeForUser(
   requestedResponseMode?: unknown,
   requestedFrozenChain?: unknown,
   requestedFrozenCandidates?: unknown,
-  requestedRoutingContext?: AutoRoutingContextV1,
+  requestedRoutingContext?: AutoRoutingContextV1 & {
+    frozenReasoningEffort?: ProviderReasoningEffort;
+    frozenTurbo?: boolean;
+  },
 ): Promise<DebateAiRuntime> {
   const user = getUserRow(userId);
   const requestedProviderName = readProvider(requestedProvider);
@@ -5728,6 +5869,10 @@ async function debateAiRuntimeForUser(
           ),
         };
   const hiddenModelIds = parseHiddenBotModelIds(user.hidden_bot_model_ids);
+  const frozenReasoningEffort = normalizeProviderReasoningEffort(
+    requestedRoutingContext?.frozenReasoningEffort,
+  );
+  const frozenTurbo = requestedRoutingContext?.frozenTurbo;
   const resolvedPrimary = resolveAutoModel({
     provider: preferredProvider,
     lane: responseLane,
@@ -5746,12 +5891,14 @@ async function debateAiRuntimeForUser(
     },
   });
   const primaryEffort =
-    resolvedPrimary.autoRoute?.reasoningEffort ??
-    resolveUserModelReasoningEffort(db, {
-      userId,
-      provider: resolvedPrimary.provider,
-      modelId: resolvedPrimary.model,
-    });
+    frozenReasoningEffort !== "auto"
+      ? frozenReasoningEffort
+      : resolvedPrimary.autoRoute?.reasoningEffort ??
+        resolveUserModelReasoningEffort(db, {
+          userId,
+          provider: resolvedPrimary.provider,
+          modelId: resolvedPrimary.model,
+        });
   const localModel =
     resolvedPrimary.provider === "local"
       ? resolvedPrimary.model
@@ -5768,7 +5915,7 @@ async function debateAiRuntimeForUser(
     ),
     providerName: "local",
     model: localModel,
-    turbo: false,
+    turbo: frozenTurbo === true,
     deepSimulatedEffort,
     reasoningEffort:
       resolvedPrimary.provider === "local"
@@ -5786,7 +5933,7 @@ async function debateAiRuntimeForUser(
   const onlineLane = (
     providerName: "openai" | "anthropic",
     model: string,
-    reasoningEffort?: ReasoningEffort,
+    reasoningEffort?: ProviderReasoningEffort,
   ): NonNullable<DebateAiRuntime["online"]> => {
     const apiKey =
       providerName === "anthropic" ? anthropicApiKey : openAiApiKey;
@@ -5799,11 +5946,14 @@ async function debateAiRuntimeForUser(
       ),
       providerName,
       model,
-      turbo: resolveUserModelTurboMode(db, {
-        userId,
-        provider: providerName,
-        modelId: model,
-      }),
+      turbo:
+        typeof frozenTurbo === "boolean"
+          ? frozenTurbo
+          : resolveUserModelTurboMode(db, {
+              userId,
+              provider: providerName,
+              modelId: model,
+            }),
       deepSimulatedEffort,
       reasoningEffort:
         reasoningEffort ??
@@ -6063,12 +6213,26 @@ function readCoffeeSessionSpeakerModel(value: unknown): string | null {
  * inputs are accepted only as reads and collapse to the lane implied by the
  * frozen/requested provider; new callers receive a concrete binary lane.
  */
-async function contextualTextRuntimeForUser(args: {
+type ContextualRequestedReasoningEffort =
+  | import("@localai/shared").ProviderReasoningEffort
+  | undefined;
+
+type ContextualResolvedReasoningEffort<
+  TRequested extends ContextualRequestedReasoningEffort,
+> = Extract<TRequested, "max"> extends never
+  ? import("@localai/shared").ModelReasoningEffortPreference | undefined
+  : Exclude<import("@localai/shared").ProviderReasoningEffort, "auto"> | undefined;
+
+async function contextualTextRuntimeForUser<
+  TRequested extends ContextualRequestedReasoningEffort = undefined,
+>(args: {
   userId: string;
   user: UserDbRow;
   requestedProvider?: unknown;
   requestedResponseMode?: unknown;
   modelOverride?: unknown;
+  requestedReasoningEffort?: TRequested;
+  requestedTurbo?: unknown;
   frozenCandidateAllowlist?: unknown;
   frozenFallbackChain?: unknown;
   routingContext: AutoRoutingContextV1;
@@ -6132,10 +6296,13 @@ async function contextualTextRuntimeForUser(args: {
         };
   const hiddenModelIds = parseHiddenBotModelIds(args.user.hidden_bot_model_ids);
   const hiddenModels = new Set(hiddenModelIds);
+  const explicitModelOverride = readCoffeeSessionSpeakerModel(
+    args.modelOverride,
+  );
   const resolved = resolveAutoModel({
     provider: primaryProvider,
     lane: responseMode,
-    explicitModelOverride: readCoffeeSessionSpeakerModel(args.modelOverride),
+    explicitModelOverride,
     hiddenModelIds,
     catalog: routingCatalog,
     onlineAutoProviderBias: clampOnlineAutoProviderBias(
@@ -6146,14 +6313,45 @@ async function contextualTextRuntimeForUser(args: {
       simulatedEffortEnabled: true,
     },
   });
-  const reasoningEffort =
-    resolved.autoRoute?.reasoningEffort ??
-    resolveUserModelReasoningEffort(db, {
+  const storedReasoningEffort = resolveUserModelReasoningEffort(db, {
       userId: args.userId,
       provider: resolved.provider,
       modelId: resolved.model,
       simulatedEffortEnabled: true,
     });
+  const requestedProviderReasoningEffort = normalizeProviderReasoningEffort(
+    args.requestedReasoningEffort,
+  );
+  const maxReasoningEffortRequested =
+    requestedProviderReasoningEffort === "max";
+  if (maxReasoningEffortRequested) {
+    const capability = resolveModelReasoningEffortCapability({
+      provider: resolved.provider,
+      modelId: resolved.model,
+      simulatedEffortEnabled: false,
+    });
+    if (
+      !explicitModelOverride ||
+      resolved.autoRoute ||
+      storedReasoningEffort !== "xhigh" ||
+      capability.mode !== "native" ||
+      !capability.supportsMax
+    ) {
+      throw new HttpError(
+        400,
+        "Max reasoning requires an explicitly selected compatible native model with saved Effort set to XHigh.",
+      );
+    }
+  }
+  const reasoningEffort = (
+    maxReasoningEffortRequested
+      ? "max"
+      : resolved.autoRoute?.reasoningEffort ??
+        normalizeModelReasoningEffortPreference(
+          args.requestedReasoningEffort,
+        ) ??
+        storedReasoningEffort
+  ) as ContextualResolvedReasoningEffort<TRequested>;
   const candidateAllowlist = (
     responseMode === "local" ? routingCatalog.local : routingCatalog.online
   )
@@ -6185,11 +6383,14 @@ async function contextualTextRuntimeForUser(args: {
     provider: resolved.provider,
     model: resolved.model,
     reasoningEffort,
-    turbo: resolveUserModelTurboMode(db, {
-      userId: args.userId,
-      provider: resolved.provider,
-      modelId: resolved.model,
-    }),
+    turbo:
+      typeof args.requestedTurbo === "boolean"
+        ? args.requestedTurbo
+        : resolveUserModelTurboMode(db, {
+            userId: args.userId,
+            provider: resolved.provider,
+            modelId: resolved.model,
+          }),
     autoRoute: resolved.autoRoute,
     candidateAllowlist,
     openAiApiKey,
@@ -7029,6 +7230,10 @@ function readBotFaceEyeCountForStorage(value: unknown): number | null {
   return normalizeBotFaceEyeCount(value);
 }
 
+function readBotFaceEyeSpacingForStorage(value: unknown): number | null {
+  return normalizeBotFaceEyeSpacing(value);
+}
+
 function readBotFaceMouthScaleForStorage(value: unknown): number | null {
   return normalizeBotFaceMouthScale(value);
 }
@@ -7142,6 +7347,9 @@ function botRowForResponse(row: Record<string, unknown>): Record<
   } = row;
   return {
     ...normalizeBotAudioVoiceProfilesForResponse(bot),
+    face_eye_spacing:
+      normalizeBotFaceEyeSpacing(row.face_eye_spacing) ??
+      DEFAULT_BOT_FACE_EYE_SPACING,
     accentColor:
       typeof storedAccentColor === "string"
         ? normalizeBotIdentityColor(storedAccentColor)
@@ -7204,6 +7412,9 @@ function normalizeDefaultBotSettingsForResponse(user: UserDbRow) {
     prismDefaultBotFaceEyeCount:
       normalizeBotFaceEyeCount(user.prism_default_bot_face_eye_count) ??
       DEFAULT_BOT_FACE_EYE_COUNT,
+    prismDefaultBotFaceEyeSpacing:
+      normalizeBotFaceEyeSpacing(user.prism_default_bot_face_eye_spacing) ??
+      DEFAULT_BOT_FACE_EYE_SPACING,
     prismDefaultBotFaceMouthScale:
       normalizeBotFaceMouthScale(user.prism_default_bot_face_mouth_scale) ??
       DEFAULT_BOT_FACE_MOUTH_SCALE,
@@ -9154,6 +9365,7 @@ function buildRoutes(): RouteDefinition[] {
             userId,
             projectId ?? undefined,
             samples,
+            slateForegroundRoutingFromContext(ctx),
           );
           json(ctx.res, 201, {
             ok: true,
@@ -9536,7 +9748,7 @@ function buildRoutes(): RouteDefinition[] {
         !Array.isArray(body.guest)
           ? (body.guest as { name: string; readerBrief: string })
           : null;
-      const ai = await slateAiForUser(userId, ctx.params.id);
+      const ai = await slateAiForRequest(ctx, userId, ctx.params.id);
       const room = await runWithUsageSession(
         {
           db,
@@ -9575,7 +9787,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/slate/wildcards/resolve", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
-      const ai = await slateAiForUser(userId);
+      const ai = await slateAiForRequest(ctx, userId);
       const botCandidates = promptBotWildcardCandidates(db, userId);
       const resolution = await runWithUsageSession(
         { db, userId, privacyScope: "normal", mode: "slate", surface: "slate" },
@@ -9587,7 +9799,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/slate/title-suggestions", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
-      const ai = await slateAiForUser(userId);
+      const ai = await slateAiForRequest(ctx, userId);
       const suggestion = await runWithUsageSession(
         { db, userId, privacyScope: "normal", mode: "slate", surface: "slate" },
         () =>
@@ -9612,6 +9824,14 @@ function buildRoutes(): RouteDefinition[] {
         undefined,
         undefined,
         routingInputText,
+        ...(() => {
+          const foreground = slateForegroundRoutingFromContext(ctx);
+          return [
+            foreground.reasoningEffort,
+            foreground.provider,
+            foreground.model,
+          ] as const;
+        })(),
       );
       const project = await runWithUsageSession(
         { db, userId, privacyScope: "normal", mode: "slate", surface: "slate" },
@@ -9903,7 +10123,12 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/slate/projects/:id/deliberation/turn", async (ctx) => {
       const userId = requireAuth(ctx);
       const speaker = slateDeliberationSpeakerForRequest(ctx.body);
-      const ai = await slateAiForUser(userId, ctx.params.id, speaker);
+      const ai = await slateAiForRequest(
+        ctx,
+        userId,
+        ctx.params.id,
+        speaker,
+      );
       const deliberationAbort = new AbortController();
       const onDeliberationClientClose = () => {
         if (!ctx.res.writableEnded) deliberationAbort.abort();
@@ -9940,7 +10165,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/slate/projects/:id/title-suggestions", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
-      const ai = await slateAiForUser(userId, ctx.params.id);
+      const ai = await slateAiForRequest(ctx, userId, ctx.params.id);
       const project = await runWithUsageSession(
         {
           db,
@@ -10243,6 +10468,7 @@ function buildRoutes(): RouteDefinition[] {
                   userId,
                   ctx.params.id,
                   ctx.params.operationId,
+                  slateForegroundRoutingFromContext(ctx),
                 )
               : current;
           json(ctx.res, 200, { ok: true, ...view });
@@ -10315,6 +10541,7 @@ function buildRoutes(): RouteDefinition[] {
               ctx.params.id,
               current.operation,
               vibe,
+              slateForegroundRoutingFromContext(ctx),
             );
           }
           const view = answerSlateClarification(
@@ -10912,7 +11139,7 @@ function buildRoutes(): RouteDefinition[] {
               ctx.params.concernId,
               body.direction,
             );
-            const ai = await slateAiForUser(userId, ctx.params.id);
+            const ai = await slateAiForRequest(ctx, userId, ctx.params.id);
             const project = await runWithUsageSession(
               {
                 db,
@@ -11085,7 +11312,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/slate/projects/:id/shape", async (ctx) => {
       const userId = requireAuth(ctx);
       protectSlateBeforeRisk(userId, ctx.params.id);
-      const ai = await slateAiForUser(userId, ctx.params.id);
+      const ai = await slateAiForRequest(ctx, userId, ctx.params.id);
       try {
         const project = await runWithUsageSession(
           {
@@ -11125,7 +11352,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/slate/projects/:id/draft", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
-      const ai = await slateAiForUser(userId, ctx.params.id);
+      const ai = await slateAiForRequest(ctx, userId, ctx.params.id);
       try {
         const project = await runWithUsageSession(
           {
@@ -11173,7 +11400,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/slate/projects/:id/revisions", async (ctx) => {
       const userId = requireAuth(ctx);
-      const ai = await slateAiForUser(userId, ctx.params.id);
+      const ai = await slateAiForRequest(ctx, userId, ctx.params.id);
       const project = await runWithUsageSession(
         { db, userId, privacyScope: "normal", mode: "slate", surface: "slate" },
         () => proposeSlateRevision(db, userId, ctx.params.id, ctx.body, ai),
@@ -13829,6 +14056,16 @@ function buildRoutes(): RouteDefinition[] {
       // takes effect immediately. Zen remains PRISM-only, but users can still
       // choose how PRISM replies.
       const explicitModelOverride = readModelOverride(body.modelOverride);
+      const maxReasoningEffortRequested = body.reasoningEffort === "max";
+      if (
+        body.reasoningEffort !== undefined &&
+        !maxReasoningEffortRequested
+      ) {
+        throw new HttpError(
+          400,
+          "Only the request-scoped Max reasoning overdrive may override saved Effort.",
+        );
+      }
       const providerOverride = readProvider(body.preferredProvider);
       const requestedProvider = providerOverride ?? undefined;
       const user = getUserRow(userId);
@@ -14381,8 +14618,28 @@ function buildRoutes(): RouteDefinition[] {
         provider: resolvedAuto.provider,
         modelId: resolvedAuto.model,
       });
-      const effectiveReasoningEffort =
-        resolvedAuto.autoRoute?.reasoningEffort ?? storedReasoningEffort;
+      if (maxReasoningEffortRequested) {
+        const maxCapability = resolveModelReasoningEffortCapability({
+          provider: resolvedAuto.provider,
+          modelId: resolvedAuto.model,
+          simulatedEffortEnabled: false,
+        });
+        if (
+          !explicitModelOverride ||
+          resolvedAuto.autoRoute ||
+          storedReasoningEffort !== "xhigh" ||
+          maxCapability.mode !== "native" ||
+          !maxCapability.supportsMax
+        ) {
+          throw new HttpError(
+            400,
+            "Max reasoning requires an explicitly selected compatible native model with saved Effort set to XHigh.",
+          );
+        }
+      }
+      const effectiveReasoningEffort = maxReasoningEffortRequested
+        ? "max"
+        : resolvedAuto.autoRoute?.reasoningEffort ?? storedReasoningEffort;
       if (effectiveReasoningEffort) {
         generationOverrides.reasoningEffort = effectiveReasoningEffort;
       }
@@ -14915,22 +15172,58 @@ function buildRoutes(): RouteDefinition[] {
             : "A valid Prism Refract request is required.",
         );
       }
-      // Wield/Refract belongs to Prism, not to the active applet picker.
-      // Keep the entire draft pass on the dedicated local Prism model.
-      const preferredProvider = "local" as const;
-      const modelOverride = resolveAuxiliaryOllamaModel(
-        user.prism_default_llm_model,
+      // Refract is foreground generation. It follows the same global privacy
+      // lane, Model/Auto selection, saved Effort, Turbo, and recovery chain as
+      // the navbar. The Settings background model is deliberately not used.
+      const requestedProvider =
+        request.preferredProvider ?? user.preferred_provider;
+      const requestedResponseMode =
+        request.responseMode ??
+        (requestedProvider === "local" ? "local" : "online");
+      const requestedLane = normalizeResponseMode(
+        requestedResponseMode,
+        requestedProvider === "local" ? "local" : "online",
       );
-      const effectiveResponseMode = "local" as const;
+      const effectiveResponseMode =
+        requestedLane === "auto"
+          ? requestedProvider === "local"
+            ? "local"
+            : "online"
+          : requestedLane;
+      const modelOverride = Object.prototype.hasOwnProperty.call(
+        request,
+        "modelOverride",
+      )
+        ? request.modelOverride
+        : effectiveResponseMode === "local"
+          ? user.preferred_local_model
+          : user.preferred_online_model;
+      const refractRuntime = await contextualTextRuntimeForUser({
+        userId,
+        user,
+        requestedProvider,
+        requestedResponseMode: effectiveResponseMode,
+        modelOverride,
+        requestedReasoningEffort: request.reasoningEffort,
+        requestedTurbo: request.turbo,
+        routingContext: {
+          surface: "prism-refract",
+          inputText: request.currentValue,
+          structuredOutput: true,
+          outputTokens: 1_200,
+        },
+      });
       const inputTarget = isPrismRefractInputTextTarget(request.target)
         ? request.target
         : null;
-      const debateTarget = !inputTarget && isPrismRefractDebateTextTarget(request.target)
-        ? request.target
-        : null;
-      const signalTarget = inputTarget || debateTarget
-        ? null
-        : (request.target as PrismRefractSignalTextTarget);
+      const debateTarget =
+        !inputTarget && isPrismRefractDebateTextTarget(request.target)
+          ? request.target
+          : null;
+      const signalTarget =
+        inputTarget || debateTarget
+          ? null
+          : (request.target as PrismRefractSignalTextTarget);
       const result = inputTarget
         ? await runWithUsageSession(
             {
@@ -14951,11 +15244,18 @@ function buildRoutes(): RouteDefinition[] {
                   user.display_name,
                   inputTarget.surface,
                 ),
-                provider: auxiliaryProviderFactoryOverride(
-                  user.prism_default_llm_model ?? undefined,
-                  dualOllamaWorkloadOptions(user),
+                provider: providerFactoryOverride(
+                  refractRuntime.provider,
+                  refractRuntime.openAiApiKey,
+                  user.secondary_ollama_host,
+                  refractRuntime.anthropicApiKey,
                 ),
-                model: modelOverride,
+                providerName: refractRuntime.provider,
+                model: refractRuntime.model,
+                reasoningEffort: refractRuntime.reasoningEffort,
+                turbo: refractRuntime.turbo,
+                deepSimulatedEffort:
+                  user.experimental_all_model_effort_enabled === 1,
               }),
           )
         : debateTarget
@@ -14967,36 +15267,52 @@ function buildRoutes(): RouteDefinition[] {
               mode: "debate",
               surface: "debate",
             },
-            async () =>
-              generateDebateRefractDraft(
+            async () => {
+              const debateRuntime = await debateAiRuntimeForUser(
+                userId,
+                refractRuntime.provider,
+                refractRuntime.model,
+                refractRuntime.responseMode,
+              );
+              if (debateRuntime.lanes?.[0]) {
+                debateRuntime.lanes[0] = {
+                  ...debateRuntime.lanes[0],
+                  reasoningEffort: refractRuntime.reasoningEffort,
+                  turbo: refractRuntime.turbo,
+                };
+              }
+              return generateDebateRefractDraft(
                 db,
                 userId,
                 debateTarget,
                 request.currentValue,
                 request.rejectedValues,
-                await debateAiRuntimeForUser(
-                  userId,
-                  preferredProvider,
-                  modelOverride,
-                  effectiveResponseMode,
-                ),
-              ),
+                debateRuntime,
+              );
+            },
           )
         : await generateBotcastRefractDraft(
             db,
             userId,
-              signalTarget!,
+            signalTarget!,
             request.currentValue,
             request.rejectedValues,
-            modelOverride,
+            refractRuntime.model,
             {
-              preferredProvider,
-              responseMode: effectiveResponseMode,
+              preferredProvider: refractRuntime.provider,
+              responseMode: refractRuntime.responseMode,
+              openAiApiKey: refractRuntime.openAiApiKey,
+              anthropicApiKey: refractRuntime.anthropicApiKey,
               secondaryOllamaHost: user.secondary_ollama_host,
               prismDefaultLlmModel: user.prism_default_llm_model,
               preferredLocalModel: user.preferred_local_model,
               preferredOnlineModel: user.preferred_online_model,
-              autoFallbackChain: null,
+              autoFallbackChain: refractRuntime.autoFallbackChain,
+              contextualModel: refractRuntime.model,
+              contextualReasoningEffort: refractRuntime.reasoningEffort,
+              contextualTurbo: refractRuntime.turbo,
+              experimentalAllModelEffortEnabled:
+                user.experimental_all_model_effort_enabled === 1,
               providerFactory: providerFactoryOverride,
             },
           );
@@ -15023,6 +15339,17 @@ function buildRoutes(): RouteDefinition[] {
         body.preferredProvider,
         body.modelOverride,
         body.responseMode,
+        undefined,
+        undefined,
+        {
+          surface: "debate",
+          frozenReasoningEffort: normalizeProviderReasoningEffort(
+            body.reasoningEffort,
+          ),
+          ...(typeof body.turbo === "boolean"
+            ? { frozenTurbo: body.turbo }
+            : {}),
+        },
       );
       const botCandidates = promptBotWildcardCandidates(db, userId);
       const slates = await runWithUsageSession(
@@ -15053,6 +15380,17 @@ function buildRoutes(): RouteDefinition[] {
         body.preferredProvider,
         body.modelOverride,
         body.responseMode,
+        undefined,
+        undefined,
+        {
+          surface: "debate",
+          frozenReasoningEffort: normalizeProviderReasoningEffort(
+            body.reasoningEffort,
+          ),
+          ...(typeof body.turbo === "boolean"
+            ? { frozenTurbo: body.turbo }
+            : {}),
+        },
       );
       const requestedMode = normalizeResponseMode(
         body.responseMode,
@@ -15660,6 +15998,17 @@ function buildRoutes(): RouteDefinition[] {
         body.preferredProvider,
         body.modelOverride,
         body.responseMode,
+        undefined,
+        undefined,
+        {
+          surface: "debate",
+          frozenReasoningEffort: normalizeProviderReasoningEffort(
+            body.reasoningEffort,
+          ),
+          ...(typeof body.turbo === "boolean"
+            ? { frozenTurbo: body.turbo }
+            : {}),
+        },
       );
       const checks = await runWithUsageSession(
         {
@@ -15695,6 +16044,17 @@ function buildRoutes(): RouteDefinition[] {
         body.preferredProvider,
         body.modelOverride,
         body.responseMode,
+        undefined,
+        undefined,
+        {
+          surface: "debate",
+          frozenReasoningEffort: normalizeProviderReasoningEffort(
+            body.reasoningEffort,
+          ),
+          ...(typeof body.turbo === "boolean"
+            ? { frozenTurbo: body.turbo }
+            : {}),
+        },
       );
       const session = await createDebateSessionWithParticipantPredispositions(
         db,
@@ -15766,6 +16126,56 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         session: debateSessionForPlayer(session, "live"),
         exhibits: listDebateSessionExhibitAssets(db, userId, ctx.params.id),
+      });
+    }),
+    route("POST", "/api/debates/:id/archive-return-buffer", async (ctx) => {
+      const userId = requireAuth(ctx);
+      invalidateTurnPreparation(
+        userId,
+        "debate",
+        ctx.params.id,
+        "Archive return buffering replaced the prepared turn.",
+      );
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      const frozen = getDebateSession(db, userId, ctx.params.id);
+      const runtime = await debateAiRuntimeForUser(
+        userId,
+        frozen.provider,
+        frozenDebateModelOverride(frozen),
+        frozen.responseMode,
+        frozen.generationChain,
+        frozen.autoCandidateAllowlist,
+        debateAutoRoutingContext(frozen),
+      );
+      const buffered = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "debate",
+          surface: "debate",
+        },
+        () =>
+          bufferDebateArchiveReturn(
+            db,
+            userId,
+            ctx.params.id,
+            body as unknown as Parameters<
+              typeof bufferDebateArchiveReturn
+            >[3],
+            runtime,
+          ),
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(buffered.session),
+        phase: buffered.phase,
+        bufferedAdvanceCount: buffered.bufferedAdvanceCount,
+        advanceCap: buffered.advanceCap,
+        boundary: buffered.boundary,
+        bufferingFailed: buffered.bufferingFailed,
+        originalPresentationEventId:
+          buffered.originalPresentationEventId,
       });
     }),
     route("POST", "/api/debates/:id/turn-preparations", async (ctx) => {
@@ -16213,8 +16623,8 @@ function buildRoutes(): RouteDefinition[] {
             db,
             userId,
             sessionId: ctx.params.id,
-            // Re-resolve each bake step so Auto can switch from latest context;
-            // fixed model/effort stays pinned via frozenDebateModelOverride.
+            // Rebuild provider clients as needed, but keep the archived model,
+            // effort, Turbo/service tier, candidates, and fallback chain sealed.
             resolveRuntime: async () => {
               const current = getDebateSession(db, userId, ctx.params.id);
               return debateAiRuntimeForUser(
@@ -16786,7 +17196,16 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/debates/:id/player-turn", async (ctx) => {
       const userId = requireAuth(ctx);
       invalidateTurnPreparation(userId, "debate", ctx.params.id, "A player turn changed the Debate.");
-      const runtime = await debateAiRuntimeForUser(userId, "local");
+      const frozen = getDebateSession(db, userId, ctx.params.id);
+      const runtime = await debateAiRuntimeForUser(
+        userId,
+        frozen.provider,
+        frozenDebateModelOverride(frozen),
+        frozen.responseMode,
+        frozen.generationChain,
+        frozen.autoCandidateAllowlist,
+        debateAutoRoutingContext(frozen),
+      );
       const session = await runWithUsageSession(
         {
           db,
@@ -16985,16 +17404,6 @@ function buildRoutes(): RouteDefinition[] {
       invalidateTurnPreparation(userId, "debate", ctx.params.id, "The Debate resumed from a new floor state.");
       const body = ctx.body as Parameters<typeof resumeDebateSession>[3];
       const frozen = getDebateSession(db, userId, ctx.params.id);
-      const startModelOverride = readModelOverride(body?.startModelOverride);
-      const startRuntime =
-        startModelOverride && debateSessionAwaitingDeferredStart(frozen)
-          ? await debateAiRuntimeForUser(
-              userId,
-              body.startPreferredProvider,
-              startModelOverride,
-              body.startResponseMode,
-            )
-          : undefined;
       if (body?.quietSave === true || body?.exitRecovery === true) {
         const session = resumeDebateSession(
           db,
@@ -17002,7 +17411,6 @@ function buildRoutes(): RouteDefinition[] {
           ctx.params.id,
           body,
           undefined,
-          startRuntime,
         );
         json(ctx.res, 200, {
           ok: true,
@@ -17010,9 +17418,7 @@ function buildRoutes(): RouteDefinition[] {
         });
         return;
       }
-      const runtime =
-        startRuntime ??
-        (await debateAiRuntimeForUser(
+      const runtime = await debateAiRuntimeForUser(
           userId,
           frozen.provider,
           frozenDebateModelOverride(frozen),
@@ -17020,14 +17426,13 @@ function buildRoutes(): RouteDefinition[] {
           frozen.generationChain,
           frozen.autoCandidateAllowlist,
           debateAutoRoutingContext(frozen),
-        ));
+        );
       const session = await resumeDebateSessionWithPersona(
         db,
         userId,
         ctx.params.id,
         body,
         runtime,
-        startRuntime,
       );
       json(ctx.res, 200, {
         ok: true,
@@ -17067,15 +17472,12 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/debates/:id/synopsis", async (ctx) => {
       const userId = requireAuth(ctx);
       invalidateTurnPreparation(userId, "debate", ctx.params.id, "Session metadata changed.");
-      const body = ctx.body as Record<string, unknown>;
       const frozen = getDebateSession(db, userId, ctx.params.id);
       const runtime = await debateAiRuntimeForUser(
         userId,
-        body.preferredProvider ?? frozen.provider,
-        body.modelOverride !== undefined
-          ? body.modelOverride
-          : frozenDebateModelOverride(frozen),
-        body.responseMode ?? frozen.responseMode,
+        frozen.provider,
+        frozenDebateModelOverride(frozen),
+        frozen.responseMode,
         frozen.generationChain,
         frozen.autoCandidateAllowlist,
         debateAutoRoutingContext(frozen),
@@ -27955,7 +28357,7 @@ function buildRoutes(): RouteDefinition[] {
 
       const updatedBot = db
         .prepare(
-          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, accent_color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?",
+          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, accent_color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_eye_spacing, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?",
         )
         .get(botId, userId) as Record<string, unknown>;
       json(ctx.res, 200, {
@@ -28209,8 +28611,12 @@ function buildRoutes(): RouteDefinition[] {
           : requestedResponseMode;
       const requestedProvider = readProvider(body.preferredProvider);
       const requestedModelOverride = readModelOverride(body.modelOverride);
+      const requestedProviderReasoningEffort =
+        normalizeProviderReasoningEffort(body.reasoningEffort);
       const requestedReasoningEffort =
-        normalizeModelReasoningEffortPreference(body.reasoningEffort);
+        requestedProviderReasoningEffort === "max"
+          ? null
+          : normalizeModelReasoningEffortPreference(body.reasoningEffort);
       const explicitModelOverride =
         requestedModelOverride?.toLowerCase() === "auto"
           ? null
@@ -28262,11 +28668,35 @@ function buildRoutes(): RouteDefinition[] {
         modelId: resolved.model,
         simulatedEffortEnabled: true,
       });
+      const maxReasoningEffortRequested =
+        requestedProviderReasoningEffort === "max";
+      if (maxReasoningEffortRequested) {
+        const storedReasoningEffort = resolveUserModelReasoningEffort(db, {
+          userId,
+          provider: resolved.provider,
+          modelId: resolved.model,
+          simulatedEffortEnabled: true,
+        });
+        if (
+          !explicitModelOverride ||
+          resolved.autoRoute ||
+          storedReasoningEffort !== "xhigh" ||
+          resolvedEffortCapability.mode !== "native" ||
+          !resolvedEffortCapability.supportsMax
+        ) {
+          throw new HttpError(
+            400,
+            "Max reasoning requires an explicitly selected compatible native model with saved Effort set to XHigh.",
+          );
+        }
+      }
       const reasoningEffort = explicitModelOverride
-        ? requestedReasoningEffort &&
-          resolvedEffortCapability.levels.includes(requestedReasoningEffort)
-          ? requestedReasoningEffort
-          : undefined
+        ? maxReasoningEffortRequested
+          ? "max"
+          : requestedReasoningEffort &&
+              resolvedEffortCapability.levels.includes(requestedReasoningEffort)
+            ? requestedReasoningEffort
+            : undefined
         : resolved.autoRoute?.reasoningEffort;
       const provider = providerFactoryOverride(
         resolved.provider,
@@ -28435,6 +28865,11 @@ function buildRoutes(): RouteDefinition[] {
           ? DEFAULT_BOT_FACE_EYE_COUNT
           : readBotFaceEyeCountForStorage(body.faceEyeCount);
       if (faceEyeCount === null) throw new Error("Invalid custom eye count.");
+      const faceEyeSpacing =
+        body.faceEyeSpacing === undefined
+          ? DEFAULT_BOT_FACE_EYE_SPACING
+          : readBotFaceEyeSpacingForStorage(body.faceEyeSpacing);
+      if (faceEyeSpacing === null) throw new Error("Invalid custom eye spacing.");
       const faceMouthScale = readBotFaceMouthScaleForStorage(
         body.faceMouthScale,
       );
@@ -28597,6 +29032,9 @@ function buildRoutes(): RouteDefinition[] {
         "UPDATE bots SET face_mouth_coffee_pucker = ? WHERE id = ? AND user_id = ?",
       ).run(faceMouthCoffeePucker, botId, userId);
       db.prepare(
+        "UPDATE bots SET face_eye_spacing = ? WHERE id = ? AND user_id = ?",
+      ).run(faceEyeSpacing, botId, userId);
+      db.prepare(
         "UPDATE bots SET face_blink_rotation_deg = ? WHERE id = ? AND user_id = ?",
       ).run(faceBlinkRotationDeg, botId, userId);
       db.prepare(
@@ -28671,6 +29109,7 @@ function buildRoutes(): RouteDefinition[] {
           face_eye_offset_y: faceEyeOffsetY,
           face_eye_rotation_deg: faceEyeRotationDeg,
           face_eye_count: faceEyeCount,
+          face_eye_spacing: faceEyeSpacing,
           face_mouth_scale: faceMouthScale,
           face_mouth_offset_x: faceMouthOffsetX,
           face_mouth_offset_y: faceMouthOffsetY,
@@ -28697,7 +29136,7 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const rows = db
         .prepare(
-          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, accent_color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC",
+          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, accent_color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_eye_spacing, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC",
         )
         .all(userId) as Record<string, unknown>[];
       json(ctx.res, 200, { ok: true, bots: botRowsForResponse(rows) });
@@ -28706,7 +29145,7 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const row = db
         .prepare(
-          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, accent_color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
+          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, accent_color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_eye_spacing, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
         )
         .get(ctx.params.id, userId) as Record<string, unknown> | undefined;
       if (!row) throw new HttpError(404, "Bot not found.");
@@ -28855,7 +29294,7 @@ function buildRoutes(): RouteDefinition[] {
         result.ids.length > 0
           ? (db
               .prepare(
-                `SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, accent_color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? AND id IN (${result.ids.map(() => "?").join(", ")})`,
+                `SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, accent_color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_eye_spacing, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? AND id IN (${result.ids.map(() => "?").join(", ")})`,
               )
               .all(userId, ...result.ids) as Record<string, unknown>[])
           : [];
@@ -28913,7 +29352,7 @@ function buildRoutes(): RouteDefinition[] {
         }
         const updatedBot = db
           .prepare(
-            "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, accent_color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?",
+            "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, accent_color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_eye_spacing, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?",
           )
           .get(botId, userId) as Record<string, unknown>;
         json(ctx.res, 200, {
@@ -29133,6 +29572,16 @@ function buildRoutes(): RouteDefinition[] {
         }
         fields.push("face_eye_count = ?");
         values.push(normalizedFaceEyeCount);
+      }
+      if (body.faceEyeSpacing !== undefined) {
+        const normalizedFaceEyeSpacing = readBotFaceEyeSpacingForStorage(
+          body.faceEyeSpacing,
+        );
+        if (normalizedFaceEyeSpacing === null) {
+          throw new Error("Invalid custom eye spacing.");
+        }
+        fields.push("face_eye_spacing = ?");
+        values.push(normalizedFaceEyeSpacing);
       }
       if (body.faceMouthScale !== undefined) {
         if (body.faceMouthScale === null) {
@@ -29465,7 +29914,7 @@ function buildRoutes(): RouteDefinition[] {
       }
       const updatedBot = db
         .prepare(
-          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, accent_color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?",
+          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, accent_color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_eye_spacing, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?",
         )
         .get(botId, userId) as Record<string, unknown>;
       json(ctx.res, 200, { ok: true, bot: botRowForResponse(updatedBot) });
@@ -30273,6 +30722,45 @@ async function dispatchRequest(
             )
           : await readJsonBody(req)
         : {};
+    const foregroundReasoningEffort =
+      req.headers["x-prism-reasoning-effort"] === "max" ? "max" : undefined;
+    const foregroundModelProvider = readProvider(
+      req.headers["x-prism-model-provider"],
+    );
+    const foregroundModelOverride = readCoffeeSessionSpeakerModel(
+      req.headers["x-prism-model-override"],
+    );
+    if (
+      foregroundReasoningEffort &&
+      body &&
+      typeof body === "object" &&
+      !Array.isArray(body) &&
+      !Buffer.isBuffer(body)
+    ) {
+      Object.defineProperty(body, "__prismForegroundReasoningEffort", {
+        value: foregroundReasoningEffort,
+        enumerable: false,
+      });
+    }
+    if (
+      foregroundModelProvider &&
+      foregroundModelOverride &&
+      body &&
+      typeof body === "object" &&
+      !Array.isArray(body) &&
+      !Buffer.isBuffer(body)
+    ) {
+      Object.defineProperties(body, {
+        __prismForegroundModelProvider: {
+          value: foregroundModelProvider,
+          enumerable: false,
+        },
+        __prismForegroundModelOverride: {
+          value: foregroundModelOverride,
+          enumerable: false,
+        },
+      });
+    }
     const matchingRoute = routeTable.find(
       (candidate) =>
         candidate.method === method && candidate.pattern.test(pathname),

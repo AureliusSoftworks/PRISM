@@ -211,6 +211,26 @@
   clip-path: ellipse(34.2% 33.4% at 50% 46.1%);
 }
 
+/* The mini's face, custom Ink, and lower screen glyph all inhabit one
+   player-facing coordinate plane. Keep this outside the authored Ink mask so
+   each asymmetric mark mirrors once, around the same aperture center. */
+.upperScreenContent,
+.lowerScreenContent {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  transform-origin: 50% 50%;
+}
+
+.upperScreenContent {
+  transform: scaleX(var(--chat-mini-bot-upper-screen-facing-scale-x, 1));
+}
+
+.lowerScreenContent {
+  transform: scaleX(var(--chat-mini-bot-lower-screen-facing-scale-x, 1));
+}
+
 /* Lower glyph screen: (52,86)-(74,111) on 128px → ~41%/67%/18%/20% */
 .lowerScreen {
   left: 40.6%;

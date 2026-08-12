@@ -50,6 +50,7 @@ export interface PrismUniversalInputCandidateRequest {
   currentValue: string;
   rejectedValues: readonly string[];
   signal: AbortSignal;
+  element: PrismUniversalInputElement;
 }
 
 function compactText(value: string | null | undefined, limit: number): string {
@@ -296,6 +297,7 @@ export function installPrismUniversalInputTargets(options: {
           currentValue,
           rejectedValues,
           signal,
+          element,
         }),
     };
     const unregister = registerPrismRefractTarget(id, {

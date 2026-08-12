@@ -11,7 +11,7 @@ import {
 } from "./prismCompanionPhysics.ts";
 
 export type ZenLiveBotPoint = { x: number; y: number };
-export type ZenLiveBotRect = {
+export type ZenLiveBotMotionBounds = {
   left: number;
   top: number;
   right: number;
@@ -19,7 +19,6 @@ export type ZenLiveBotRect = {
 };
 
 /** Inclusive legal top-left coordinates for the avatar. */
-export type ZenLiveBotMotionBounds = ZenLiveBotRect;
 export type ZenLiveBotDragVelocitySample = PrismCompanionDragVelocitySample;
 
 export type ZenLiveBotPhysicsState = ZenLiveBotPoint & {
@@ -33,35 +32,23 @@ export type ZenLiveBotPhysicsStep = ZenLiveBotPhysicsState & {
   bounced: boolean;
 };
 
+export type ZenLiveBotFreeRoamMotionState = {
+  physics: ZenLiveBotPhysicsState;
+  target: ZenLiveBotPoint | null;
+  nextRoamAtMs: number;
+  throwing: boolean;
+};
+
 export const ZEN_LIVE_BOT_IDLE_BOB_AMPLITUDE_PX = 1.5;
 export const ZEN_LIVE_BOT_IDLE_BOB_PERIOD_MS = 9_000;
 
 const ZEN_LIVE_BOT_AUTONOMOUS_SPEED_PX_PER_SECOND = 52;
+const ZEN_LIVE_BOT_POST_THROW_ROAM_DELAY_MS = 2_400;
+const ZEN_LIVE_BOT_ROAM_DELAY_MIN_MS = 3_800;
+const ZEN_LIVE_BOT_ROAM_DELAY_VARIANCE_MS = 4_200;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
-}
-
-function overlaps(first: ZenLiveBotRect, second: ZenLiveBotRect): boolean {
-  return (
-    first.left < second.right &&
-    first.right > second.left &&
-    first.top < second.bottom &&
-    first.bottom > second.top
-  );
-}
-
-function rectAt(
-  position: ZenLiveBotPoint,
-  width: number,
-  height: number,
-): ZenLiveBotRect {
-  return {
-    left: position.x,
-    top: position.y,
-    right: position.x + width,
-    bottom: position.y + height,
-  };
 }
 
 export function zenLiveBotFreeRoamShouldRun(input: {
@@ -253,16 +240,12 @@ export function stepZenLiveBotAutonomousTravel(input: {
 }
 
 /**
- * Plans calm destinations across the whole safe field. `bounds` already
- * contains legal top-left limits, so avatar dimensions are used only for
- * overlap testing. Side lanes are chosen about 72% of the time.
+ * Plans calm destinations across the whole field. `bounds` contains legal
+ * top-left limits; side lanes are chosen about 72% of the time.
  */
 export function planZenLiveBotFreeRoamDestination(input: {
   current: ZenLiveBotPoint;
   bounds: ZenLiveBotMotionBounds;
-  avatarWidth: number;
-  avatarHeight: number;
-  avoidRects: ZenLiveBotRect[];
   random?: () => number;
 }): ZenLiveBotPoint {
   const random = input.random ?? Math.random;
@@ -270,12 +253,9 @@ export function planZenLiveBotFreeRoamDestination(input: {
   const maxX = Math.max(minX, input.bounds.right);
   const minY = input.bounds.top;
   const maxY = Math.max(minY, input.bounds.bottom);
-  const currentOverlaps = input.avoidRects.some((rect) =>
-    overlaps(rectAt(input.current, input.avatarWidth, input.avatarHeight), rect),
-  );
   const candidates: ZenLiveBotPoint[] = [];
   for (let index = 0; index < 16; index += 1) {
-    const useSideLane = currentOverlaps || random() < 0.72;
+    const useSideLane = random() < 0.72;
     const chooseLeft = random() < 0.5;
     const laneFraction = 0.06 + random() * 0.22;
     const x = useSideLane
@@ -288,17 +268,72 @@ export function planZenLiveBotFreeRoamDestination(input: {
       y: minY + (maxY - minY) * (0.08 + random() * 0.84),
     });
   }
-  return (
-    candidates.find((candidate) =>
-      input.avoidRects.every(
-        (rect) =>
-          !overlaps(
-            rectAt(candidate, input.avatarWidth, input.avatarHeight),
-            rect,
-          ),
-      ),
-    ) ??
-    candidates[0] ??
-    input.current
-  );
+  return candidates[0] ?? input.current;
+}
+
+/**
+ * Advances one free-roam frame. User throw inertia completes before ordinary
+ * autonomous travel resumes.
+ */
+export function advanceZenLiveBotFreeRoamMotion(input: {
+  motion: ZenLiveBotFreeRoamMotionState;
+  nowMs: number;
+  elapsedMs: number;
+  bounds: ZenLiveBotMotionBounds;
+  viewportWidth: number;
+  viewportHeight: number;
+  random?: () => number;
+}): ZenLiveBotFreeRoamMotionState {
+  const random = input.random ?? Math.random;
+  const motion: ZenLiveBotFreeRoamMotionState = {
+    ...input.motion,
+    physics: { ...input.motion.physics },
+    target: input.motion.target ? { ...input.motion.target } : null,
+  };
+
+  if (motion.throwing) {
+    const next = advanceZenLiveBotPhysics(
+      motion.physics,
+      input.elapsedMs,
+      input.bounds,
+      input.viewportWidth,
+      input.viewportHeight,
+    );
+    motion.physics = next;
+    motion.throwing = next.moving;
+    if (!next.moving) {
+      motion.nextRoamAtMs =
+        input.nowMs + ZEN_LIVE_BOT_POST_THROW_ROAM_DELAY_MS;
+    }
+    return motion;
+  }
+
+  const ordinaryRoamDue = input.nowMs >= motion.nextRoamAtMs;
+
+  if (!motion.target && ordinaryRoamDue) {
+    const plannedTarget = planZenLiveBotFreeRoamDestination({
+      current: motion.physics,
+      bounds: input.bounds,
+      random,
+    });
+    motion.target = plannedTarget;
+  }
+
+  if (!motion.target) return motion;
+
+  const next = stepZenLiveBotAutonomousTravel({
+    current: motion.physics,
+    target: motion.target,
+    elapsedMs: input.elapsedMs,
+  });
+  const arrived = next.x === motion.target.x && next.y === motion.target.y;
+  motion.physics = next;
+  if (arrived) {
+    motion.target = null;
+    motion.nextRoamAtMs =
+      input.nowMs +
+      ZEN_LIVE_BOT_ROAM_DELAY_MIN_MS +
+      random() * ZEN_LIVE_BOT_ROAM_DELAY_VARIANCE_MS;
+  }
+  return motion;
 }

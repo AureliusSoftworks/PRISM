@@ -1036,6 +1036,16 @@ describe("deleteConversation", () => {
     db.prepare(
       "UPDATE conversations SET conversation_mode = 'coffee' WHERE id = ? AND user_id = ?"
     ).run("coffee-1", "user-1");
+    insertLinkedMemory(
+      db,
+      "user-1",
+      "coffee-1",
+      "memory-coffee-1",
+      ["msg-coffee-1"],
+    );
+    db.prepare(
+      "UPDATE memories SET tier = 'long_term', source = 'about_you' WHERE id = ?",
+    ).run("memory-coffee-1");
     db.prepare(
       "INSERT INTO coffee_polls (id, user_id, conversation_id, question, options_json, status, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
     ).run(
@@ -1062,6 +1072,10 @@ describe("deleteConversation", () => {
     assert.equal(
       (db.prepare("SELECT COUNT(*) AS n FROM coffee_poll_votes").get() as { n: number }).n,
       0
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM memories").get() as { n: number }).n,
+      0,
     );
   });
 

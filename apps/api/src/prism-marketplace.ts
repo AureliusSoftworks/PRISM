@@ -10,6 +10,7 @@ import {
   DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
   DEFAULT_BOT_FACE_BLINK_SCALE,
   DEFAULT_BOT_FACE_EYE_COUNT,
+  DEFAULT_BOT_FACE_EYE_SPACING,
   DEFAULT_BOT_FACE_GLYPH_ANIMATION,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotFaceBlinkBar,
@@ -19,6 +20,7 @@ import {
   normalizeBotFaceBlinkScale,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeCount,
+  normalizeBotFaceEyeSpacing,
   normalizeBotFaceEyeOffsetX,
   normalizeBotFaceEyeOffsetY,
   normalizeBotFaceEyeRotationDeg,
@@ -106,6 +108,7 @@ interface MarketplaceArchiveBot {
   faceEyeOffsetY?: unknown;
   faceEyeRotationDeg?: unknown;
   faceEyeCount?: unknown;
+  faceEyeSpacing?: unknown;
   faceMouthScale?: unknown;
   faceMouthOffsetX?: unknown;
   faceMouthOffsetY?: unknown;
@@ -508,6 +511,14 @@ function insertMarketplaceBot(args: {
       bot.flirtEnabled === true ? 1 : 0,
       args.now,
       args.now,
+    );
+  args.db
+    .prepare("UPDATE bots SET face_eye_spacing = ? WHERE id = ? AND user_id = ?")
+    .run(
+      normalizeBotFaceEyeSpacing(bot.faceEyeSpacing) ??
+        DEFAULT_BOT_FACE_EYE_SPACING,
+      botId,
+      args.userId,
     );
   return botId;
 }

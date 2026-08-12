@@ -748,7 +748,7 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       pageSource,
-      /const screenFacingScaleX = showQuestionMark\s*\? "1"\s*:\s*botAvatarDetailsFacingScaleX\(faceScaleY\)/,
+      /const resolvedFacing = facing \?\? botAvatarFacingFromFaceScaleY\(faceScaleY\);[\s\S]*const screenFacingScaleX = showQuestionMark\s*\? "1"\s*:\s*botAvatarScreenFacingScaleX\(resolvedFacing\)/,
     );
     assert.equal(
       [
@@ -766,7 +766,7 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.match(pageSource, /faceScaleY\?:\s*string \| number/);
     assert.match(
       pageSource,
-      /faceScaleY = BOT_AVATAR_CANONICAL_FACE_SCALE_Y[\s\S]*const presenceBodyStyle = \{[\s\S]{0,180}\.\.\.botAvatarFaceFacingStyle\(faceScaleY\)/,
+      /faceScaleY = BOT_AVATAR_CANONICAL_FACE_SCALE_Y,[\s\S]*const resolvedFacing = facing \?\? botAvatarFacingFromFaceScaleY\(faceScaleY\);[\s\S]{0,260}\.\.\.botAvatarFaceFacingStyle\(resolvedFacing\)/,
     );
     const mannequinCalls = [
       ...pageSource.matchAll(/<ZenLiveBotMannequin\b[\s\S]*?\/>/gu),
@@ -775,8 +775,8 @@ describe("Avatar Details shared mannequin rendering", () => {
     for (const [mannequinCall] of mannequinCalls) {
       assert.match(
         mannequinCall,
-        /\bfaceScaleY=\{/,
-        "every full-avatar surface must pass its orientation into the shared face-and-ink rig",
+        /\b(?:facing|faceScaleY)=\{/,
+        "every full-avatar surface must pass explicit facing or legacy orientation into the shared face-and-ink rig",
       );
     }
     assert.equal(

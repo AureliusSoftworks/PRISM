@@ -1580,43 +1580,9 @@
   animation: signalRefractGlass 1.4s ease-in-out infinite alternate;
 }
 
-.shell :global([data-prism-refract-state="generating"]) {
-  --signal-refract-rainbow-period: 52rem;
-  border-color: transparent !important;
-  background:
-    linear-gradient(
-        115deg,
-        color-mix(in srgb, var(--prism-p) 18%, var(--botcast-field)) 0%,
-        color-mix(in srgb, var(--prism-r) 15%, var(--botcast-field)) 15%,
-        color-mix(in srgb, #f4f86a 11%, var(--botcast-field)) 30%,
-        color-mix(in srgb, #36f0b2 14%, var(--botcast-field)) 45%,
-        color-mix(in srgb, var(--prism-i) 17%, var(--botcast-field)) 60%,
-        color-mix(in srgb, var(--prism-s) 17%, var(--botcast-field)) 78%,
-        color-mix(in srgb, var(--prism-m) 18%, var(--botcast-field)) 100%
-      )
-      padding-box,
-    linear-gradient(
-        90deg,
-        var(--prism-p),
-        var(--prism-r),
-        #f4f86a,
-        #36f0b2,
-        var(--prism-i),
-        var(--prism-s),
-        var(--prism-m),
-        var(--prism-p)
-      )
-      border-box !important;
-  background-repeat: repeat-x !important;
-  background-size:
-    var(--signal-refract-rainbow-period) 100%,
-    var(--signal-refract-rainbow-period) 100% !important;
-  filter: saturate(1.12) brightness(1.04);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, .16),
-    0 0 25px -14px color-mix(in srgb, var(--prism-i) 72%, transparent),
-    0 0 34px -20px color-mix(in srgb, var(--prism-m) 70%, transparent) !important;
-  animation: signalRefractRainbowFlow 1.7s linear infinite;
+.shell
+  :global([data-prism-refract-sheen="true"][data-prism-refract-state="generating"]) {
+  --prism-refract-sheen-surface: var(--botcast-field);
 }
 
 .shell :global([data-prism-refract-state="ready"]) {
@@ -1637,19 +1603,6 @@
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, .24),
       0 0 32px color-mix(in srgb, var(--prism-m) 25%, transparent);
-  }
-}
-
-@keyframes signalRefractRainbowFlow {
-  from {
-    background-position:
-      0 0,
-      0 0;
-  }
-  to {
-    background-position:
-      var(--signal-refract-rainbow-period) 0,
-      var(--signal-refract-rainbow-period) 0;
   }
 }
 

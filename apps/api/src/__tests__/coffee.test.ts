@@ -9038,7 +9038,7 @@ describe("inferCoffeeStarterTopics", () => {
     );
   });
 
-  it("keeps failed topic rerolls atomic instead of substituting fallback labels", async () => {
+  it("keeps transport-failed rerolls atomic instead of substituting fallback labels", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-atomic-reroll";
     const interjector: CoffeeBotProfile = {
@@ -9095,20 +9095,183 @@ describe("inferCoffeeStarterTopics", () => {
       () =>
         inferCoffeeStarterTopics({
           ...args,
+          personaRelevantOnly: false,
           provider: {
             async generateResponse(): Promise<string> {
-              return JSON.stringify({
-                topics: [
-                  "When interruption outruns accuracy",
-                  "Can precision survive bad timing?",
-                  "Who pays for public correction?",
-                ],
-              });
+              throw new Error("offline");
             },
           } as never,
         }),
       /current topics are unchanged/i,
     );
+  });
+
+  it("falls back to locally generated topics when reroll repair still returns an incomplete model set", async () => {
+    let calls = 0;
+    const partialTopics = [
+      "When interruption outruns accuracy",
+      "Can precision survive bad timing?",
+      "Who pays for public correction?",
+    ];
+    const topics = await inferCoffeeStarterTopics({
+      group: [ALICE, BORIS],
+      sessionSettings: normalizeCoffeeSessionSettings(undefined),
+      personaRelevantOnly: false,
+      requireCompleteGeneratedSet: true,
+      provider: {
+        async generateResponse(): Promise<string> {
+          calls += 1;
+          return JSON.stringify({
+            topics: partialTopics,
+          });
+        },
+      } as never,
+    });
+
+    assert.equal(topics.length, 4);
+    assert.ok(calls >= 2);
+    for (const topic of partialTopics) {
+      assert.ok(topics.includes(topic));
+    }
+    assert.ok(topics.every((topic) => topic !== ""));
+  });
+
+  it("falls back to deterministic reroll topics when repair returns unusable payloads", async () => {
+    let calls = 0;
+    const topics = await inferCoffeeStarterTopics({
+      group: [ALICE, BORIS],
+      sessionSettings: normalizeCoffeeSessionSettings(undefined),
+      personaRelevantOnly: true,
+      requireCompleteGeneratedSet: true,
+      excludedTopics: [
+        "The first practical test",
+        "A necessary compromise",
+        "The favorite exception",
+        "A promise under pressure",
+      ],
+      provider: {
+        async generateResponse(): Promise<string> {
+          calls += 1;
+          if (calls === 1) {
+            return JSON.stringify({
+              topics: [
+                "Can precision survive bad timing?",
+                "Who pays for public correction?",
+              ],
+            });
+          }
+          if (calls === 2) {
+            return JSON.stringify({
+              candidates: [
+                "What are we really saying about this?",
+              ],
+            });
+          }
+          return JSON.stringify({ candidates: ["one", "two", "three"] });
+        },
+      } as never,
+    });
+
+    assert.equal(topics.length, 4);
+    assert.ok(calls >= 2);
+    assert.ok(topics.every((topic) => !topic.includes("A necessary compromise")));
+  });
+
+  it("repairs a partial reroll before leaving the current topics unchanged", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-topic-reroll-repair";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const currentTopics = [
+      "The first practical test",
+      "A necessary compromise",
+      "The favorite exception",
+      "A promise under pressure",
+    ];
+    const created = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      starterTopics: currentTopics,
+    });
+    let calls = 0;
+    const provider = {
+      async generateResponse(): Promise<string> {
+        calls += 1;
+        return calls === 1
+          ? JSON.stringify({ candidates: ["A partial idea"] })
+          : JSON.stringify({
+              candidates: [
+                "When should evidence outrank tradition?",
+                "What makes a question worth keeping?",
+                "Which recipe survives a hard deadline?",
+                "Can soup settle a philosophical feud?",
+              ],
+            });
+      },
+    };
+
+    const topics = await refreshCoffeeConversationStarterTopics(
+      db,
+      userId,
+      created.conversation.id,
+      currentTopics,
+      { auxiliaryProviderFactory: () => provider as never },
+    );
+
+    assert.equal(calls, 2);
+    assert.deepEqual(topics, [
+      "When should evidence outrank tradition?",
+      "What makes a question worth keeping?",
+      "Which recipe survives a hard deadline?",
+      "Can soup settle a philosophical feud?",
+    ]);
+  });
+
+  it("recovers a malformed reroll into a deterministic persona-safe quartet", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-topic-reroll-malformed";
+    const silentBotA: CoffeeBotProfile = {
+      ...ALICE,
+      id: "bot-empty-a",
+      name: "Quiet A",
+      systemPrompt: "",
+    };
+    const silentBotB: CoffeeBotProfile = {
+      ...BORIS,
+      id: "bot-empty-b",
+      name: "Quiet B",
+      systemPrompt: "",
+    };
+    const currentTopics = [
+      "The first practical test",
+      "A necessary compromise",
+      "The favorite exception",
+      "A promise under pressure",
+    ];
+    seedCoffeeBot(db, userId, silentBotA);
+    seedCoffeeBot(db, userId, silentBotB);
+    const created = await createCoffeeConversation(db, userId, {
+      groupBotIds: [silentBotA.id, silentBotB.id],
+      starterTopics: currentTopics,
+    });
+
+    const topics = await refreshCoffeeConversationStarterTopics(
+      db,
+      userId,
+      created.conversation.id,
+      currentTopics,
+      {
+        auxiliaryProviderFactory: () =>
+          ({
+            async generateResponse(): Promise<string> {
+              return "Not valid JSON at all.";
+            },
+          }) as never,
+      },
+    );
+
+    assert.equal(topics.length, 4);
+    assert.deepEqual(topics, [...new Set(topics)]);
+    assert.ok(topics.every((topic) => !coffeeStarterTopicLabelIsCanned(topic)));
   });
 
   it("feeds attending bot memories into the starter-topic inference prompt", async () => {

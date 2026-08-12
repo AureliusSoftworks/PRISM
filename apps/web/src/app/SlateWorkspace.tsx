@@ -37,6 +37,7 @@ import type {
   SlateProjectSummary,
   SlateProjectTitleOrigin,
   SlateProseMode,
+  ProviderReasoningEffort,
   SlateRevisionAction,
   SlateResolveSparkWildcardsResponse,
   SlateReturnSession,
@@ -159,6 +160,9 @@ interface SlateWorkspaceProps {
     onKeyDown?: (event: ReactKeyboardEvent<HTMLElement>) => void;
   }) => ReactNode;
   expandComposerDraft?: (rawDraft: string) => string | Promise<string>;
+  foregroundModelProvider?: SlateAiProvider;
+  foregroundModelOverride?: string | null;
+  foregroundReasoningEffort?: ProviderReasoningEffort;
 }
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -399,10 +403,25 @@ function slateContinuityArchiveRowCount(counts: SlateArchiveImportCounts): numbe
     counts.continuityGenerations;
 }
 
+let slateForegroundReasoningEffort: ProviderReasoningEffort | undefined;
+let slateForegroundModelProvider: SlateAiProvider | undefined;
+let slateForegroundModelOverride: string | null | undefined;
+
 async function slateApi<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body && !headers.has("content-type")) {
     headers.set("content-type", "application/json");
+  }
+  if (slateForegroundReasoningEffort === "max") {
+    headers.set("x-prism-reasoning-effort", "max");
+  }
+  if (
+    slateForegroundReasoningEffort === "max" &&
+    slateForegroundModelProvider &&
+    slateForegroundModelOverride
+  ) {
+    headers.set("x-prism-model-provider", slateForegroundModelProvider);
+    headers.set("x-prism-model-override", slateForegroundModelOverride);
   }
   const response = await fetch(path, {
     ...init,
@@ -516,7 +535,13 @@ export default function SlateWorkspace({
   onDiscussSelection,
   renderPickAwareComposer,
   expandComposerDraft,
+  foregroundModelProvider,
+  foregroundModelOverride,
+  foregroundReasoningEffort,
 }: SlateWorkspaceProps): React.JSX.Element {
+  slateForegroundModelProvider = foregroundModelProvider;
+  slateForegroundModelOverride = foregroundModelOverride;
+  slateForegroundReasoningEffort = foregroundReasoningEffort;
   const { activeMenu, openMenu, closeMenu } = usePrismMenu();
   const [projects, setProjects] = useState<SlateProjectSummary[]>([]);
   const [project, setProject] = useState<SlateProjectDetail | null>(null);

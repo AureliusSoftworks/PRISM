@@ -66,6 +66,16 @@ export const BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE = {
 export const BOT_AVATAR_CANONICAL_FACE_SCALE_Y = "-1";
 
 /**
+ * The direction an avatar's complete screen presentation is looking. This is
+ * deliberately about what the player sees, rather than the legacy glyph
+ * scaleY implementation detail used to make punctuation read upright.
+ */
+export type BotAvatarFacing = "left" | "right";
+
+/** Avatar Studio and stationary portraits use the right-facing master art. */
+export const BOT_AVATAR_CANONICAL_FACING: BotAvatarFacing = "right";
+
+/**
  * Authored screen ink is stored in the editor's front-facing coordinates.
  * The face glyph always carries a canonical post-rotation `scaleY(-1)` just to
  * make punctuation readable, so only the opposite runtime scale represents an
@@ -82,15 +92,36 @@ export function botAvatarDetailsFacingScaleX(
   return faceIsNegative === canonicalIsNegative ? "1" : "-1";
 }
 
+/** Convert the legacy punctuation correction into the visible direction. */
+export function botAvatarFacingFromFaceScaleY(
+  faceScaleY: string | number,
+): BotAvatarFacing {
+  return botAvatarDetailsFacingScaleX(faceScaleY) === "-1" ? "left" : "right";
+}
+
+/** Keep the face glyph's punctuation correction coupled to visible facing. */
+export function botAvatarFaceScaleYForFacing(
+  facing: BotAvatarFacing,
+): "-1" | "1" {
+  return facing === "right" ? "-1" : "1";
+}
+
+/** One mirror direction for every complete face, ink, and screen-glyph rig. */
+export function botAvatarScreenFacingScaleX(
+  facing: BotAvatarFacing,
+): "1" | "-1" {
+  return facing === "right" ? "1" : "-1";
+}
+
 /**
  * Keep the live face and authored screen ink on one facing contract.
  * Applying this at the shared mannequin boundary prevents individual
  * presentation surfaces from mirroring one layer without the other.
  */
-export function botAvatarFaceFacingStyle(faceScaleY: string | number) {
-  const screenFacingScaleX = botAvatarDetailsFacingScaleX(faceScaleY);
+export function botAvatarFaceFacingStyle(facing: BotAvatarFacing) {
+  const screenFacingScaleX = botAvatarScreenFacingScaleX(facing);
   return {
-    "--coffee-plate-emoji-face-scale-y": String(faceScaleY),
+    "--coffee-plate-emoji-face-scale-y": botAvatarFaceScaleYForFacing(facing),
     "--zen-live-bot-screen-facing-scale-x": screenFacingScaleX,
     "--avatar-details-facing-scale-x": screenFacingScaleX,
   } as const;
@@ -102,4 +133,4 @@ export function botAvatarFaceFacingStyle(faceScaleY: string | number) {
  * the complete face-and-authored-ink coordinate space.
  */
 export const BOT_AVATAR_CANONICAL_FACE_FACING_STYLE =
-  botAvatarFaceFacingStyle(BOT_AVATAR_CANONICAL_FACE_SCALE_Y);
+  botAvatarFaceFacingStyle(BOT_AVATAR_CANONICAL_FACING);

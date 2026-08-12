@@ -3,6 +3,7 @@ import type {
   AutoFallbackFailureReason,
   AutoFallbackModelRef,
   AutoRecoveryTraceV1,
+  ProviderReasoningEffort,
   ReasoningEffort,
 } from "@localai/shared";
 import {
@@ -28,10 +29,18 @@ export interface AutoFallbackRunResult<T> {
 }
 
 /** The primary keeps its configured effort; recovery attempts prioritize speed. */
-export function autoFallbackReasoningEffort(
+export function autoFallbackReasoningEffort<
+  T extends ProviderReasoningEffort | undefined,
+>(
   attemptIndex: number,
-  primaryEffort: ReasoningEffort | undefined,
-): ReasoningEffort | undefined {
+  primaryEffort: T,
+): T | "none";
+export function autoFallbackReasoningEffort<
+  T extends ProviderReasoningEffort | undefined,
+>(
+  attemptIndex: number,
+  primaryEffort: T,
+): T | "none" {
   return attemptIndex === 0 ? primaryEffort : "none";
 }
 

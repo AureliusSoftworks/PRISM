@@ -25,6 +25,16 @@ describe("bot marketplace previews", () => {
     assert.match(pageSource, /avatarDetails: body\.avatarDetails/);
     assert.match(
       pageSource,
+      /face_eye_spacing: body\.faceEyeSpacing as number \| null/,
+      "Marketplace previews must preserve authored eye spacing",
+    );
+    assert.match(
+      pageSource,
+      /interface Bot \{[\s\S]*?face_eye_spacing\?: number \| null;/,
+      "The preview row shape must declare every mapped face field",
+    );
+    assert.match(
+      pageSource,
       /authored_audio_voice_profile:[\s\S]*?body\.authoredAudioVoiceProfile/,
     );
     assert.match(

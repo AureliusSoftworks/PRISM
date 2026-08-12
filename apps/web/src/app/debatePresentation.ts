@@ -10,6 +10,7 @@ import {
   debateEstimatedSpeechDurationMs,
   debateEventIsCanonicalSilence,
   debateEventIsTranscriptHousekeeping,
+  debateSpokenText,
   debateEvidenceItemById,
   debateEvidenceTitleCasedForProse,
   debateSilenceHoldDurationMs,
@@ -164,6 +165,20 @@ export function debateEventCanOwnIdleCamera(
   return (
     DEBATE_IDLE_CAMERA_EVENT_KINDS.has(event.kind) ||
     (event.kind === "verdict" && event.speakerKind === "player")
+  );
+}
+
+/** Auto camera ownership exists only during an actually presented spoken line. */
+export function debateEventCanOwnAutomaticCamera(
+  event: Pick<DebateEventV1, "content" | "kind" | "speakerKind"> | null,
+  presenting: boolean,
+): boolean {
+  return Boolean(
+    presenting &&
+      event &&
+      event.speakerKind !== "system" &&
+      !debateEventIsCanonicalSilence(event) &&
+      debateSpokenText(event.content).trim(),
   );
 }
 

@@ -10,6 +10,7 @@ import {
   buildConversationHistoryEntry,
   loadConversationParticipantBotIdsMap,
 } from "./conversation-history.ts";
+import { deleteMemoriesAcquiredDuringAppletSessions } from "./memory.ts";
 import {
   applyPrismMoodIgnoredQuestion,
   applyPrismMoodIgnoreCooldown,
@@ -835,6 +836,7 @@ function deleteConversationsByIds(
   const scopedInClause = `user_id = ? AND id IN (${placeholders})`;
   const messageScopedInClause = `user_id = ? AND conversation_id IN (${placeholders})`;
 
+  deleteMemoriesForAppletConversations(db, userId, conversationIds);
   deleteCoffeePollsForConversations(db, userId, conversationIds);
 
   db.prepare(
@@ -859,6 +861,41 @@ function deleteConversationsByIds(
     `DELETE FROM conversations WHERE ${scopedInClause}`
   ).run(userId, ...conversationIds);
   return Number(deleted.changes ?? 0);
+}
+
+function deleteMemoriesForAppletConversations(
+  db: DatabaseSync,
+  userId: string,
+  conversationIds: readonly string[],
+): void {
+  if (conversationIds.length === 0) return;
+  const placeholders = inClausePlaceholders(conversationIds.length);
+  const coffeeIds = (
+    db
+      .prepare(
+        `SELECT id FROM conversations
+          WHERE user_id = ?
+            AND conversation_mode = 'coffee'
+            AND id IN (${placeholders})`,
+      )
+      .all(userId, ...conversationIds) as Array<{ id: string }>
+  ).map((row) => row.id);
+  if (coffeeIds.length === 0) return;
+  const coffeePlaceholders = inClausePlaceholders(coffeeIds.length);
+  const messageIds = (
+    db
+      .prepare(
+        `SELECT id FROM messages
+          WHERE user_id = ? AND conversation_id IN (${coffeePlaceholders})`,
+      )
+      .all(userId, ...coffeeIds) as Array<{ id: string }>
+  ).map((row) => row.id);
+  deleteMemoriesAcquiredDuringAppletSessions(
+    db,
+    userId,
+    coffeeIds,
+    messageIds,
+  );
 }
 
 function composeSweepSummaryText(
@@ -1322,6 +1359,7 @@ export function undoLatestConversationSweep(
  *     summaries) by untying them (`conversation_id = NULL`) instead of
  *     destroying them. Images and summaries outlive the chat they came from
  *     because the gallery / memories UI still show them meaningfully.
+ *   - Revokes learned memory rows when the target is a Coffee applet session.
  */
 export function deleteConversation(
   db: DatabaseSync,
@@ -1493,8 +1531,8 @@ export function setZenStarterConversationSuppression(
  * `botId === null` targets Default Prism chats (`conversations.bot_id IS NULL`).
  * Private/incognito rows are excluded to match the sidebar's visible saved-chat
  * surface. Linked user artifacts follow the same preservation contract as
- * {@link deleteConversation}: images and memories survive with their
- * conversation pointer nulled, while messages and exports are deleted.
+ * {@link deleteConversation}; memories acquired in Coffee are revoked with
+ * their applet session.
  */
 export function deleteConversationsByBot(
   db: DatabaseSync,
@@ -1513,6 +1551,14 @@ export function deleteConversationsByBot(
       )
       .get(...groupParams) as { n: number };
     const conversationCount = Number(countRow.n ?? 0);
+    const conversationIds = (
+      db
+        .prepare(
+          `SELECT id FROM conversations WHERE user_id = ? AND COALESCE(incognito, 0) = 0 AND archived_at IS NULL AND conversation_mode != 'zen' AND ${botPredicate}`,
+        )
+        .all(...groupParams) as Array<{ id: string }>
+    ).map((row) => row.id);
+    deleteMemoriesForAppletConversations(db, userId, conversationIds);
 
     db.prepare(
       `UPDATE images SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (${groupSubquery})`
@@ -1859,7 +1905,8 @@ export function deleteConversationMessage(
  *     gone or the database is untouched.
  *   - Follows the same preservation contract as {@link deleteConversation}:
  *     images and memory summaries survive with `conversation_id = NULL`;
- *     messages and markdown exports are hard-deleted alongside their chats.
+ *     messages and markdown exports are hard-deleted alongside their chats,
+ *     and learned Coffee memories are revoked with their sessions.
  *   - Strictly scoped to `userId` via `WHERE user_id = ?` on every statement
  *     so other users' data is never touched.
  */
@@ -1880,6 +1927,19 @@ export function deleteAllConversations(
             )`
       )
       .get(userId) as { n: number };
+    const conversationIds = (
+      db
+        .prepare(
+          `SELECT id FROM conversations
+            WHERE user_id = ?
+              AND NOT (
+                conversation_mode = 'zen'
+                OR (conversation_mode = 'chat' AND bot_id IS NULL)
+              )`,
+        )
+        .all(userId) as Array<{ id: string }>
+    ).map((row) => row.id);
+    deleteMemoriesForAppletConversations(db, userId, conversationIds);
 
     db.prepare(
       "UPDATE images SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE user_id = ? AND NOT (conversation_mode = 'zen' OR (conversation_mode = 'chat' AND bot_id IS NULL)))"

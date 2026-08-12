@@ -33,6 +33,7 @@ export const SPATIAL_UI_SFX_SOURCES = {
     "/audio/prism-companion/glass-tap-03.mp3",
     "/audio/prism-companion/glass-tap-04.mp3",
   ],
+  "foundry-clank": ["/audio/debate/exhibits/impact-metal.mp3"],
   "turbo-on": ["/audio/ui-asmr/turbo-flame-ignition-01.mp3"],
   "turbo-off": ["/audio/ui-asmr/turbo-steam-extinguish-01.mp3"],
   // Reuse Coffee bodily Foley when Turbo is unavailable for the active model.
@@ -57,6 +58,7 @@ export const SPATIAL_UI_SFX_CONFIG: Record<
   toggle: { cooldownMs: 55, volume: 0.16 },
   "effort-tick": { cooldownMs: 0, volume: 0.09 },
   confirm: { cooldownMs: 80, volume: 0.2 },
+  "foundry-clank": { cooldownMs: 90, volume: 0.16 },
   // These generated cues carry more energy than the short tactile UI library.
   // Keep the sustained extinguish hiss especially restrained.
   "turbo-on": { cooldownMs: 140, volume: 0.08 },

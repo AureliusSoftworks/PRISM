@@ -35,10 +35,9 @@ describe("tooltip surfaces", () => {
 
     for (const rule of tooltipRules) {
       assert.notEqual(rule, "");
-      assert.match(
-        rule,
-        /background:\s*(?:var\(--bg-surface\)|#[0-9a-f]{6})\s*;/u,
-      );
+      const backgroundRule = rule.match(/background:\s*([^;]+)\s*;/u)?.[1];
+      assert.ok(backgroundRule);
+      assert.match(backgroundRule, /(?:var\(--bg-surface\)|color-mix\(|#[0-9a-f]{6})/iu);
       assert.doesNotMatch(rule, /background:[^;]*(?:transparent|rgba\()/u);
     }
 

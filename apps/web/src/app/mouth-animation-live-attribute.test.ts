@@ -10,6 +10,17 @@ const coffeeSeatPlateEmojiSource = readFileSync(
 );
 
 describe("live mouth animation attributes", () => {
+  it("keeps none as Default and supports a distinct static option", () => {
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /const renderedFaceMouthCharacter =\s*hasCustomMouth\s*&&\s*isTalking\s*&&\s*normalizedFaceMouthAnimation\s*===\s*"none"\s*\?\s*null\s*:\s*normalizedFaceMouthCharacter/,
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /data-face-mouth-character=\{renderedFaceMouthCharacter \?\? undefined\}/,
+    );
+  });
+
   it("keeps non-default custom mouth animation active while the bot talks", () => {
     assert.match(
       coffeeSeatPlateEmojiSource,
@@ -47,6 +58,17 @@ describe("live mouth animation attributes", () => {
     assert.match(
       coffeeSeatPlateEmojiSource,
       /hasCustomMouth\s*&&\s*isTalking\s*&&\s*normalizedFaceMouthAnimation\s*===\s*"none"\s*\?\s*null\s*:\s*normalizedFaceMouthCharacter/, // non-default path
+    );
+  });
+
+  it("keeps static custom mouths visible and unanimated while talking", () => {
+    assert.doesNotMatch(
+      coffeeSeatPlateEmojiSource,
+      /hasCustomMouth\s*&&\s*isTalking\s*&&\s*normalizedFaceMouthAnimation\s*===\s*"static"/,
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /data-face-mouth-animation=\{\s*renderedFaceMouthCharacter \? normalizedFaceMouthAnimation : undefined\s*\}/,
     );
   });
 });

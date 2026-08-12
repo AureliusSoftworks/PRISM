@@ -83,6 +83,21 @@ describe("bot voice randomizer", () => {
     assert.equal(operatingSystem.systemVoiceName, "Samantha");
   });
 
+  it("clears stale provider accent metadata when Premium identity changes", () => {
+    const randomized = randomizeBotAudioVoiceProfile(
+      {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        elevenLabsVoiceId: "old-voice",
+        elevenLabsNativeAccentHint: "german germany",
+      },
+      "elevenlabs",
+      ["new-voice"],
+      () => 0.5,
+    );
+    assert.equal(randomized.elevenLabsVoiceId, "new-voice");
+    assert.equal(randomized.elevenLabsNativeAccentHint, undefined);
+  });
+
   it("keeps fresh bot drafts deterministic after whole-bot randomization is removed", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8").replace(
       /\s+/gu,

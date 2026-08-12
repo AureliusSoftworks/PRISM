@@ -20,6 +20,7 @@ import {
   DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
   DEFAULT_BOT_FACE_BLINK_SCALE,
   DEFAULT_BOT_FACE_EYE_COUNT,
+  DEFAULT_BOT_FACE_EYE_SPACING,
   DEFAULT_BOT_FACE_GLYPH_ANIMATION,
   DEFAULT_BOT_FACE_EYE_MOVEMENT,
   DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER,
@@ -32,6 +33,7 @@ import {
   normalizeBotFaceBlinkScale,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeCount,
+  normalizeBotFaceEyeSpacing,
   normalizeBotFaceEyeOffsetX,
   normalizeBotFaceEyeOffsetY,
   normalizeBotFaceEyeRotationDeg,
@@ -273,6 +275,7 @@ export interface BackupBotSnapshot {
   faceEyeOffsetY?: number | null;
   faceEyeRotationDeg?: number | null;
   faceEyeCount?: BotFaceEyeCount | number | null;
+  faceEyeSpacing?: number | null;
   faceMouthScale?: number | null;
   faceMouthOffsetX?: number | null;
   faceMouthOffsetY?: number | null;
@@ -2071,6 +2074,7 @@ export function exportUserSnapshot(
          face_eye_offset_y,
          face_eye_rotation_deg,
          face_eye_count,
+         face_eye_spacing,
          face_mouth_scale,
          face_mouth_offset_x,
          face_mouth_offset_y,
@@ -2134,6 +2138,7 @@ export function exportUserSnapshot(
     face_eye_offset_y: number | null;
     face_eye_rotation_deg: number | null;
     face_eye_count: number | null;
+    face_eye_spacing: number | null;
     face_mouth_scale: number | null;
     face_mouth_offset_x: number | null;
     face_mouth_offset_y: number | null;
@@ -2653,6 +2658,9 @@ export function exportUserSnapshot(
       faceEyeCount:
         normalizeBotFaceEyeCount(bot.face_eye_count) ??
         DEFAULT_BOT_FACE_EYE_COUNT,
+      faceEyeSpacing:
+        normalizeBotFaceEyeSpacing(bot.face_eye_spacing) ??
+        DEFAULT_BOT_FACE_EYE_SPACING,
         faceMouthScale: normalizeBotFaceMouthScale(bot.face_mouth_scale),
         faceMouthOffsetX: normalizeBotFaceMouthOffsetX(bot.face_mouth_offset_x),
         faceMouthOffsetY: normalizeBotFaceMouthOffsetY(bot.face_mouth_offset_y),
@@ -3882,6 +3890,14 @@ function importUserSnapshotWithinTransaction(
           : DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER
             ? 1
             : 0,
+        bot.id.trim(),
+        userId,
+      );
+      db.prepare(
+        "UPDATE bots SET face_eye_spacing = ? WHERE id = ? AND user_id = ?",
+      ).run(
+        normalizeBotFaceEyeSpacing(bot.faceEyeSpacing) ??
+          DEFAULT_BOT_FACE_EYE_SPACING,
         bot.id.trim(),
         userId,
       );

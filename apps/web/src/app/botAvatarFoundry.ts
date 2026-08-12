@@ -1,3 +1,8 @@
+import {
+  homeBaseRadialRayGeometry,
+  type HomeBaseRadialRayGeometry,
+} from "./homeBaseRadialLauncher.ts";
+
 export const BOT_AVATAR_FOUNDRY_PHASES = [
   "arrival",
   "brief",
@@ -11,7 +16,11 @@ export const BOT_AVATAR_FOUNDRY_PHASES = [
 export type BotAvatarFoundryPhase = (typeof BOT_AVATAR_FOUNDRY_PHASES)[number];
 
 export type BotAvatarFoundryCameraMode = "overview" | "face" | "ink";
-export type BotAvatarFoundryScreenMode = "off" | "live" | "editing";
+export type BotAvatarFoundryScreenMode =
+  | "off"
+  | "synthesis"
+  | "live"
+  | "editing";
 export type BotAvatarFoundryTheme = "light" | "dark";
 export type BotAvatarFoundryAtmosphereSource = "neutral" | "bot";
 
@@ -266,20 +275,131 @@ export type BotAvatarFoundryEvent =
   | { type: "retry" }
   | { type: "cancel" };
 
-export interface BotAvatarFoundryOrigin {
-  x: number;
-  y: number;
-  available: boolean;
+/** Fixed Creation chamber station; Foundry Prism never tracks pointer movement. */
+export const BOT_AVATAR_FOUNDRY_PRISM_ANCHOR = {
+  x: 0.13,
+  y: 0.45,
+} as const;
+
+export const BOT_AVATAR_FOUNDRY_INTERIM_GLYPHS = [
+  "bot",
+  "sparkles",
+  "heart",
+  "star",
+  "moon",
+  "brain",
+] as const;
+
+export const BOT_AVATAR_FOUNDRY_FACE_CANDIDATES = [
+  { eyes: "•", mouth: "_" },
+  { eyes: "◉", mouth: "⌣" },
+  { eyes: "^", mouth: "ᴗ" },
+  { eyes: "◆", mouth: "—" },
+] as const;
+
+export type BotAvatarFoundryFaceCandidate =
+  (typeof BOT_AVATAR_FOUNDRY_FACE_CANDIDATES)[number];
+
+export interface BotAvatarFoundryPopulationModule {
+  id: BotAvatarFoundryUpgradeNodeId;
+  label: string;
+  populated: boolean;
+  active: boolean;
+}
+
+export interface BotAvatarFoundryPopulationFrame {
+  fill: number;
+  glyph: (typeof BOT_AVATAR_FOUNDRY_INTERIM_GLYPHS)[number];
+  face: BotAvatarFoundryFaceCandidate;
+  modules: readonly BotAvatarFoundryPopulationModule[];
+  population: BotAvatarFoundryModulePopulation;
+  activeModule: BotAvatarFoundryUpgradeNodeId;
+  notice: string;
+}
+
+const BOT_AVATAR_FOUNDRY_POPULATION_SEQUENCE = [
+  "chassis",
+  "screen",
+  "eyes",
+  "mouth",
+  "glyph",
+] as const satisfies readonly BotAvatarFoundryUpgradeNodeId[];
+
+const BOT_AVATAR_FOUNDRY_POPULATION_NOTICES = {
+  chassis: "Seating the shell.",
+  screen: "Charging the ink display.",
+  eyes: "Tuning optics.",
+  mouth: "Casting the vocalizer.",
+  glyph: "Resolving the identity core.",
+} as const satisfies Record<BotAvatarFoundryUpgradeNodeId, string>;
+
+export function botAvatarFoundryPopulationFrame(
+  elapsedMs: number,
+  reducedMotion = false,
+): BotAvatarFoundryPopulationFrame {
+  const elapsed = Math.max(0, Number.isFinite(elapsedMs) ? elapsedMs : 0);
+  const moduleDurationMs = reducedMotion ? 36 : 1_050;
+  const activeIndex = Math.min(
+    BOT_AVATAR_FOUNDRY_POPULATION_SEQUENCE.length - 1,
+    Math.floor(elapsed / moduleDurationMs),
+  );
+  const activeModule = BOT_AVATAR_FOUNDRY_POPULATION_SEQUENCE[activeIndex]!;
+  const population = Object.fromEntries(
+    BOT_AVATAR_FOUNDRY_POPULATION_SEQUENCE.map((id, index) => [
+      id,
+      index < activeIndex,
+    ]),
+  ) as unknown as BotAvatarFoundryModulePopulation;
+  const glyphIndex =
+    (reducedMotion ? 0 : Math.floor(elapsed / 430)) %
+    BOT_AVATAR_FOUNDRY_INTERIM_GLYPHS.length;
+  const faceIndex =
+    (reducedMotion ? 0 : Math.floor(elapsed / 360)) %
+    BOT_AVATAR_FOUNDRY_FACE_CANDIDATES.length;
+  return {
+    // Provider work has no honest numeric completion. This is a bounded CRT
+    // population ritual: it visibly advances, then patiently holds below full
+    // until the real generation request resolves.
+    fill: Math.min(0.92, (reducedMotion ? 0.36 : 0.12) + elapsed / 5_800),
+    glyph: BOT_AVATAR_FOUNDRY_INTERIM_GLYPHS[glyphIndex]!,
+    face: BOT_AVATAR_FOUNDRY_FACE_CANDIDATES[faceIndex]!,
+    modules: BOT_AVATAR_FOUNDRY_UPGRADE_NODES.map(({ id, label }) => ({
+      id,
+      label,
+      populated: population[id],
+      active: id === activeModule,
+    })),
+    population,
+    activeModule,
+    notice: BOT_AVATAR_FOUNDRY_POPULATION_NOTICES[activeModule],
+  };
+}
+
+export function botAvatarFoundryRadialRayGeometry(
+  origin: Readonly<{ x: number; y: number }>,
+  target: Readonly<{ x: number; y: number }> = { x: 0.5, y: 0.52 },
+): HomeBaseRadialRayGeometry {
+  const canvasSize = 1_000;
+  const sourceX = Math.max(0, Math.min(1, Number(origin.x) || 0));
+  const sourceY = Math.max(0, Math.min(1, Number(origin.y) || 0));
+  const targetX = Math.max(0, Math.min(1, Number(target.x) || 0));
+  const targetY = Math.max(0, Math.min(1, Number(target.y) || 0));
+  return homeBaseRadialRayGeometry(
+    { x: sourceX * canvasSize, y: sourceY * canvasSize },
+    { x: targetX * canvasSize, y: targetY * canvasSize },
+  );
 }
 
 export const BOT_AVATAR_FOUNDRY_TIMING = {
   arrivalMs: 760,
   handoffMs: 620,
   minimumGenerationMs: 980,
+  finalizationMs: 1_280,
   awakeningMs: 720,
   reducedArrivalMs: 80,
   reducedHandoffMs: 120,
   reducedMinimumGenerationMs: 180,
+  reducedFinalizationMs: 120,
   reducedAwakeningMs: 180,
 } as const;
 
@@ -287,6 +407,7 @@ export function botAvatarFoundryTiming(reducedMotion: boolean): {
   arrivalMs: number;
   handoffMs: number;
   minimumGenerationMs: number;
+  finalizationMs: number;
   awakeningMs: number;
 } {
   return reducedMotion
@@ -295,12 +416,14 @@ export function botAvatarFoundryTiming(reducedMotion: boolean): {
         handoffMs: BOT_AVATAR_FOUNDRY_TIMING.reducedHandoffMs,
         minimumGenerationMs:
           BOT_AVATAR_FOUNDRY_TIMING.reducedMinimumGenerationMs,
+        finalizationMs: BOT_AVATAR_FOUNDRY_TIMING.reducedFinalizationMs,
         awakeningMs: BOT_AVATAR_FOUNDRY_TIMING.reducedAwakeningMs,
       }
     : {
         arrivalMs: BOT_AVATAR_FOUNDRY_TIMING.arrivalMs,
         handoffMs: BOT_AVATAR_FOUNDRY_TIMING.handoffMs,
         minimumGenerationMs: BOT_AVATAR_FOUNDRY_TIMING.minimumGenerationMs,
+        finalizationMs: BOT_AVATAR_FOUNDRY_TIMING.finalizationMs,
         awakeningMs: BOT_AVATAR_FOUNDRY_TIMING.awakeningMs,
       };
 }
@@ -366,11 +489,11 @@ export function botAvatarFoundryStatus(
   const name = botName?.trim() || "Your bot";
   switch (phase) {
     case "arrival":
-      return "A new shell is arriving.";
+      return "Fresh shell inbound—mind your toes.";
     case "brief":
-      return "Give this shell a spark.";
+      return "Grab it, fling it, then give it a spark.";
     case "handoff":
-      return "Prism is entering the chamber.";
+      return "Hands clear. Aligning the chassis.";
     case "generation":
       return "Prism is shaping the draft.";
     case "awakening":
@@ -389,6 +512,8 @@ export function botAvatarFoundryScreenMode(
     ? "editing"
     : phase === "awakening"
       ? "live"
+      : phase === "generation"
+        ? "synthesis"
       : "off";
 }
 
@@ -397,16 +522,4 @@ export function botAvatarFoundryCameraForControl(
 ): BotAvatarFoundryCameraMode {
   if (control === "details") return "ink";
   return "overview";
-}
-
-export function normalizeBotAvatarFoundryOrigin(
-  origin: Partial<BotAvatarFoundryOrigin> | null | undefined,
-): BotAvatarFoundryOrigin {
-  const x = Number.isFinite(origin?.x)
-    ? Math.max(0, Math.min(1, Number(origin?.x)))
-    : 0.92;
-  const y = Number.isFinite(origin?.y)
-    ? Math.max(0, Math.min(1, Number(origin?.y)))
-    : 0.84;
-  return { x, y, available: origin?.available === true };
 }

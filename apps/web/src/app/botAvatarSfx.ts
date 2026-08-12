@@ -1,6 +1,7 @@
 import {
   BOT_AVATAR_SFX_DEFAULT_VOLUME,
   BOT_AVATAR_SFX_MAX_BYTES,
+  BOT_AVATAR_SFX_MAX_VOLUME,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotAvatarSfxV1,
   type BotAudioVoiceProfileV1,
@@ -17,6 +18,18 @@ import {
 } from "./prismFullscreenBlockingAudio.ts";
 
 export const GENERATED_BOT_THINKING_SFX_PROMPT = "Computer calculating";
+
+export function normalizeGeneratedBotThinkingSfxPrompt(
+  prompt: unknown,
+): string {
+  if (typeof prompt !== "string") return GENERATED_BOT_THINKING_SFX_PROMPT;
+  const normalized = prompt
+    .replace(/[\u0000-\u001f\u007f]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, 400);
+  return normalized || GENERATED_BOT_THINKING_SFX_PROMPT;
+}
 export const PRISM_BOT_THINKING_SFX_FALLBACK_URLS = [
   "/audio/avatar/prism-calculating-01.mp3",
   "/audio/avatar/prism-calculating-02.mp3",
@@ -42,7 +55,10 @@ export type BotAvatarSfxPlayback = Pick<
   | "playWhileIdle"
   | "playWhileThinking"
   | "volume"
->;
+> & {
+  /** Runtime-only voice-bus gain. Never persisted with the authored loop. */
+  voiceBusGain?: number;
+};
 
 export interface BotAvatarSfxAudioTarget {
   src: string;
@@ -129,6 +145,26 @@ function untrackBotAvatarSfxMedia(audio: HTMLMediaElement): void {
 
 function clampBotAvatarSfxGain(value: number): number {
   return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+}
+
+export function botAvatarSfxOutputGain(
+  sfx: Pick<BotAvatarSfxPlayback, "volume" | "voiceBusGain">,
+): number {
+  const authoredGain = Math.max(
+    0,
+    Math.min(
+      BOT_AVATAR_SFX_MAX_VOLUME,
+      Number.isFinite(sfx.volume) ? sfx.volume : 0,
+    ),
+  );
+  const voiceBusGain =
+    sfx.voiceBusGain === undefined
+      ? 1
+      : Math.max(
+          0,
+          Math.min(1.25, Number.isFinite(sfx.voiceBusGain) ? sfx.voiceBusGain : 0),
+        );
+  return clampBotAvatarSfxGain(authoredGain * voiceBusGain);
 }
 
 function clampBotAvatarSfxProgress(value: number): number {
@@ -783,7 +819,7 @@ function syncBrowserBotAvatarSfxAudio(
   const previousDesiredGain = engine.desiredGain;
   engine.desiredPlaying = true;
   engine.desiredSource = sfx.audioDataUrl;
-  engine.desiredGain = clampBotAvatarSfxGain(sfx.volume);
+  engine.desiredGain = botAvatarSfxOutputGain(sfx);
 
   if (engine.loadedSource !== engine.desiredSource) {
     if (!audio.paused && engine.loadedSource !== null) {
@@ -857,7 +893,7 @@ export function botAvatarSfxShouldPlay(
   state: BotAvatarSfxState,
 ): boolean {
   if (isPrismFullscreenBlockingAudioMuted()) return false;
-  if (!sfx?.audioDataUrl || sfx.volume <= 0) return false;
+  if (!sfx?.audioDataUrl || botAvatarSfxOutputGain(sfx) <= 0) return false;
   if (state === "talking") return sfx.playWhileTalking;
   if (state === "thinking") return sfx.playWhileThinking;
   return sfx.playWhileIdle;
@@ -886,7 +922,7 @@ export function syncBotAvatarSfxAudio(
   // Non-browser test/runtime targets use the same explicit trimmed-loop
   // contract as real media elements.
   audio.loop = false;
-  audio.volume = sfx.volume;
+  audio.volume = botAvatarSfxOutputGain(sfx);
   updateBotAvatarSfxLoopTime(audio);
   if (audio.paused) void audio.play().catch(() => undefined);
   return loadedSource;
@@ -1026,7 +1062,7 @@ export async function playBotAvatarSfxSampleAudio(
   const lifecycleGeneration = ++runtime.lifecycleGeneration;
   runtime.desiredPlaying = true;
   runtime.desiredSource = sfx.audioDataUrl;
-  runtime.targetVolume = clampBotAvatarSfxGain(sfx.volume);
+  runtime.targetVolume = botAvatarSfxOutputGain(sfx);
   if (
     runtime.loadedSource !== runtime.desiredSource &&
     !audio.paused &&
@@ -1188,13 +1224,16 @@ export async function requestElevenLabsAvatarSfxLoop(
 export function botAudioVoiceProfileWithThinkingSfx(
   profile: BotAudioVoiceProfileV1,
   audioDataUrl: string,
+  prompt = normalizeBotAudioVoiceProfileV1(profile).avatarSfxPrompt ??
+    GENERATED_BOT_THINKING_SFX_PROMPT,
 ): NormalizedBotAudioVoiceProfileV1 {
+  const normalizedPrompt = normalizeGeneratedBotThinkingSfxPrompt(prompt);
   const thinkingSfx = normalizeBotAvatarSfxV1({
     v: 1,
     source: "elevenlabs",
     audioDataUrl,
     fileName: "ElevenLabs thinking loop.mp3",
-    prompt: GENERATED_BOT_THINKING_SFX_PROMPT,
+    prompt: normalizedPrompt,
     playWhileTalking: false,
     playWhileIdle: false,
     playWhileThinking: true,
@@ -1205,6 +1244,7 @@ export function botAudioVoiceProfileWithThinkingSfx(
   }
   return normalizeBotAudioVoiceProfileV1({
     ...normalizeBotAudioVoiceProfileV1(profile),
+    avatarSfxPrompt: normalizedPrompt,
     avatarSfx: thinkingSfx,
     avatarSfxMuted: false,
   });
@@ -1214,14 +1254,18 @@ export async function generateBotThinkingSfxProfile(
   profile: BotAudioVoiceProfileV1,
   origin: string,
   fetchImpl: typeof fetch = fetch,
-): Promise<NormalizedBotAudioVoiceProfileV1> {
-  const blob = await requestElevenLabsAvatarSfxLoop(
+  prompt = normalizeBotAudioVoiceProfileV1(profile).avatarSfxPrompt ??
     GENERATED_BOT_THINKING_SFX_PROMPT,
+): Promise<NormalizedBotAudioVoiceProfileV1> {
+  const normalizedPrompt = normalizeGeneratedBotThinkingSfxPrompt(prompt);
+  const blob = await requestElevenLabsAvatarSfxLoop(
+    normalizedPrompt,
     origin,
     fetchImpl,
   );
   return botAudioVoiceProfileWithThinkingSfx(
     profile,
     await audioBlobAsDataUrl(await normalizeBotAvatarSfxLoopBlob(blob)),
+    normalizedPrompt,
   );
 }

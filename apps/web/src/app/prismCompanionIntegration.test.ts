@@ -34,7 +34,7 @@ const api = readFileSync(
   "utf8",
 );
 
-test("mounts the global companion on product shells but not top-bar main panels", () => {
+test("mounts the global companion on product shells and submerges it behind top-bar panels", () => {
   assert.ok((page.match(/renderGlobalPrismCompanion\(\)/gu)?.length ?? 0) >= 7);
   assert.match(page, /surfaceId: "home"/u);
   assert.match(page, /surfaceId: "group-home"/u);
@@ -49,8 +49,11 @@ test("mounts the global companion on product shells but not top-bar main panels"
   assert.doesNotMatch(page, /surfaceId: "settings"/u);
   assert.match(
     page,
-    /prismCompanionDisabledByMainPanel\(panel, botAvatarCustomizerOpen\)[\s\S]*reason="main-menu-panel"/u,
+    /companionSubmergedByMainPanel =\s*prismCompanionDisabledByMainPanel\(panel, botAvatarCustomizerOpen\)[\s\S]*submerged=\{companionSubmergedByMainPanel\}/u,
   );
+  assert.match(page, /const globalRefractRouting = useMemo\(\(\) =>/u);
+  assert.match(page, /refractRouting=\{globalRefractRouting\}/u);
+  assert.match(component, /\.\.\.\(refractRouting \?\? \{\}\)/u);
 });
 
 test("docks only in the live default Chat Home empty hero", () => {
@@ -282,20 +285,15 @@ test("gives full-size Prism Home the same orchestration, activity, and undo APIs
   assert.doesNotMatch(api, /title: "One thing first"/u);
 });
 
-test("shows Prism's dedicated local model without inheriting the applet picker", () => {
-  assert.match(page, /<span>Prism model<\/span>/u);
+test("separates the quiet background model from foreground global routing", () => {
+  assert.match(page, /<span>Background model<\/span>/u);
   assert.match(
     page,
-    /Prism Home, the floating[\s\S]*Applet model pickers do not[\s\S]*change it/u,
-  );
-  assert.match(page, /const prismHomeUsesDedicatedLocalModel/u);
-  assert.match(
-    page,
-    /Prism uses this dedicated local model\. Change it in Settings → Models\./u,
+    /quiet background work[\s\S]*Foreground Refract follows the global/u,
   );
   assert.match(
     tutorials,
-    /Prism Home, the floating companion, Wield, and Refract always use the local Prism model/u,
+    /Foreground Refract follows these global controls/u,
   );
 });
 
@@ -481,6 +479,11 @@ test("keeps the app shell crisp behind a local focus orb while pausing motion", 
   assert.equal(companionOpenLayer > navbarPickerLayer, true);
   assert.equal(companionWieldLayer > navHeaderLayer, true);
   assert.equal(companionWieldLayer > navbarPickerLayer, true);
+  assert.equal(companionWieldLayer > 2_147_483_000, true);
+  assert.match(
+    companionCss,
+    /\.anchor\[data-refracting\] \{\s*z-index: var\(--prism-companion-wielding-z-index\);/u,
+  );
 });
 
 test("keeps companion-orb momentum independent from the Zen avatar", () => {

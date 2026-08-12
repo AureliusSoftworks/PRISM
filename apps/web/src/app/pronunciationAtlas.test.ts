@@ -50,6 +50,11 @@ describe("Pronunciation Atlas", () => {
       mapped,
       new Set(LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.map(({ id }) => id)),
     );
+    assert.ok(
+      PRONUNCIATION_ATLAS_ANCHORS.every(
+        (anchor) => anchor.accentDefinitionId.length > 0,
+      ),
+    );
   });
 
   it("places representative anchors on their real projected regions", () => {
@@ -100,6 +105,10 @@ describe("Pronunciation Atlas", () => {
     );
     assert.equal(selected.pronunciationBase, "en-GB");
     assert.equal(selected.influence, "japanese-influenced-english");
+    assert.equal(
+      selected.accentDefinitionId,
+      "japanese-influenced-english",
+    );
     assert.deepEqual(selected.point, {
       x: japanese.point.x - 0.01,
       y: japanese.point.y + 0.01,
@@ -175,6 +184,11 @@ describe("Pronunciation Atlas", () => {
     );
     assert.equal(selected.pronunciationBase, "en-US");
     assert.equal(selected.influence, "none");
+    assert.equal(selected.accentDefinitionId, "american-english");
+    assert.equal(
+      pronunciationAtlasLocationText(selected),
+      "American · Balanced",
+    );
   });
 
   it("freezes a legacy automatic foundation when any map point is chosen", () => {
@@ -190,6 +204,10 @@ describe("Pronunciation Atlas", () => {
     });
     assert.equal(selected.pronunciationBase, "en-GB");
     assert.equal(selected.influence, "french-influenced-english");
+    assert.equal(
+      selected.accentDefinitionId,
+      "french-influenced-english",
+    );
   });
 
   it("supports deterministic continuous keyboard travel", () => {
@@ -236,11 +254,22 @@ describe("Pronunciation Atlas", () => {
     const german = candidates.find(({ label }) => label === "German");
     assert.ok(german);
     assert.equal(german.selection.influence, "german-influenced-english");
+    assert.equal(
+      german.selection.accentDefinitionId,
+      "german-influenced-english",
+    );
     assert.deepEqual(
       german.selection.point,
       PRONUNCIATION_ATLAS_ANCHORS.find(
         (anchor) => anchor.influence === "german-influenced-english",
       )?.point,
+    );
+  });
+
+  it("clears the provider-neutral definition for Original", () => {
+    assert.equal(
+      pronunciationAtlasNaturalSelection("en-US").accentDefinitionId,
+      null,
     );
   });
 });

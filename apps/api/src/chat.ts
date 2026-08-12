@@ -82,6 +82,7 @@ import type {
   PrismMoodSnapshot,
   PromptShortcutMetadata,
   PromptWildcardRunMetadata,
+  ProviderReasoningEffort,
   ReasoningEffort,
   SessionOpinion,
   SentGeneratedImagePayload,
@@ -149,6 +150,7 @@ import {
   isDisabledModelChoice,
   isPrismMoodIgnoring,
   modelSupportsNativeReasoningEffort,
+  normalizeProviderReasoningEffort,
   normalizeReasoningEffort,
   reasoningGenerationBudgetMs,
   REASONING_GENERATION_AUTO_TOTAL_BUDGET_MS,
@@ -2976,29 +2978,40 @@ async function generateChatResponse(args: {
     model: string,
     botOverrides: GenerateOptions | undefined,
     signal: AbortSignal | undefined,
-    forcedReasoningEffort?: ReasoningEffort,
+    forcedReasoningEffort?: ProviderReasoningEffort,
   ): Promise<{
     messages: ProviderMessage[];
     overrides: GenerateOptions | undefined;
   }> => {
+    const requestedOverride = normalizeProviderReasoningEffort(
+      botOverrides?.reasoningEffort,
+    );
     const savedEffort =
       forcedReasoningEffort ??
-      args.resolveReasoningEffort?.(provider.name, model);
-    const effort = normalizeReasoningEffort(
+      (requestedOverride === "max"
+        ? "max"
+        : args.resolveReasoningEffort?.(provider.name, model));
+    const providerEffort = normalizeProviderReasoningEffort(
       savedEffort ?? botOverrides?.reasoningEffort,
     );
+    const effort: ReasoningEffort =
+      providerEffort === "max" ? "xhigh" : providerEffort;
     const turbo = args.resolveTurboMode?.(provider.name, model) === true;
     const overrides: GenerateOptions | undefined = botOverrides
       ? {
           ...botOverrides,
           model,
           turbo,
-          ...(effort === "auto" ? { reasoningEffort: undefined } : { reasoningEffort: effort }),
+          ...(providerEffort === "auto"
+            ? { reasoningEffort: undefined }
+            : { reasoningEffort: providerEffort }),
         }
       : {
           model,
           turbo,
-          ...(effort === "auto" ? {} : { reasoningEffort: effort }),
+          ...(providerEffort === "auto"
+            ? {}
+            : { reasoningEffort: providerEffort }),
         };
     const simulatedEffort = shouldSimulateReasoningEffort({
       provider,
@@ -3072,10 +3085,13 @@ async function generateChatResponse(args: {
                 args.secondaryOllamaHost,
                 args.anthropicApiKey
               );
-          const fallbackEffort = autoFallbackReasoningEffort(
-            index,
+          const requestedFallbackEffort = normalizeProviderReasoningEffort(
             args.resolveReasoningEffort?.(attempt.provider, attempt.model) ??
               args.botOverrides?.reasoningEffort,
+          );
+          const fallbackEffort = autoFallbackReasoningEffort(
+            index,
+            requestedFallbackEffort,
           );
           const prepared = await prepareAttempt(
             provider,
@@ -3104,8 +3120,15 @@ async function generateChatResponse(args: {
         reasoningGenerationBudgetMs(
           autoFallbackReasoningEffort(
             index,
-            args.resolveReasoningEffort?.(attempt.provider, attempt.model) ??
-              args.botOverrides?.reasoningEffort,
+            (() => {
+              const requested = normalizeProviderReasoningEffort(
+                args.resolveReasoningEffort?.(
+                  attempt.provider,
+                  attempt.model,
+                ) ?? args.botOverrides?.reasoningEffort,
+              );
+              return requested;
+            })(),
           ),
           { provider: attempt.provider, modelId: attempt.model },
         ),
@@ -3133,10 +3156,12 @@ async function generateChatResponse(args: {
     });
   }
 
-  const primaryEffort = normalizeReasoningEffort(
+  const primaryProviderEffort = normalizeProviderReasoningEffort(
     args.resolveReasoningEffort?.(args.provider.name, primaryModel) ??
       args.botOverrides?.reasoningEffort,
   );
+  const primaryEffort: ReasoningEffort =
+    primaryProviderEffort === "max" ? "xhigh" : primaryProviderEffort;
   const assistantReplyRaw = await runWithReasoningGenerationBudget({
     effort: primaryEffort,
     provider: args.provider.name,
@@ -9131,6 +9156,13 @@ export async function processChatMessage(
       ...(settings.autoRouteDecision
         ? { autoRoute: settings.autoRouteDecision }
         : {}),
+      ...(!settings.autoRouteDecision
+        ? {
+            reasoningEffort: normalizeProviderReasoningEffort(
+              settings.botOverrides?.reasoningEffort,
+            ),
+          }
+        : {}),
       ...(settings.resolveTurboMode?.(providerNameUsed, modelUsed) === true
         ? { turbo: true }
         : {}),
@@ -10858,6 +10890,11 @@ export async function processChatMessage(
 	      userNotes: userNotesForTurn,
 	      autoRecovery,
 	      autoRoute: settings.autoRouteDecision,
+	      reasoningEffort: settings.autoRouteDecision
+	        ? undefined
+	        : normalizeProviderReasoningEffort(
+	            settings.botOverrides?.reasoningEffort,
+	          ),
 	      turbo:
 	        settings.resolveTurboMode?.(providerNameUsed, modelUsed) === true,
 	      botPowerExactResponse: botPowerQuietIgnoredTurn

@@ -33,6 +33,8 @@ test("exposes account-scoped device shortcuts in Settings", () => {
   assert.match(settingsSource, /data-keyboard-shortcut-recorder="true"/u);
   assert.match(settingsSource, /Already used by/u);
   assert.match(settingsSource, /Restore defaults/u);
+  assert.match(settingsSource, /Cmd\/Ctrl \+ enlarges the live avatar/u);
+  assert.match(settingsSource, /Cmd\/Ctrl\s*- shrinks it/u);
 });
 
 test("uses the configurable Prism and navbar Control-root shortcuts globally", () => {
@@ -234,4 +236,6 @@ test("updates contextual guidance without adding first-run setup", () => {
   assert.match(tutorialSource, /Model and Effort never remain open together/u);
   assert.match(tutorialSource, /Settings → Shortcuts/u);
   assert.doesNotMatch(firstRunSource, /keyboard shortcuts|Shift\+Tab/u);
+  assert.match(tutorialSource, /Cmd\/Ctrl \+ enlarges it/u);
+  assert.match(tutorialSource, /Grow and Shrink from its context menu/u);
 });

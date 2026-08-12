@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   BOT_AVATAR_CANONICAL_FACE_FACING_STYLE,
+  BOT_AVATAR_CANONICAL_FACING,
   BOT_AVATAR_CANONICAL_FACE_PLACEMENT,
   BOT_AVATAR_CANONICAL_FACE_REGISTRATION_STYLE,
   BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
@@ -13,7 +14,10 @@ import {
   BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE,
   BOT_AVATAR_DETAILS_INK_APERTURE_SCALE,
   botAvatarFaceFacingStyle,
+  botAvatarFaceScaleYForFacing,
+  botAvatarFacingFromFaceScaleY,
   botAvatarDetailsFacingScaleX,
+  botAvatarScreenFacingScaleX,
 } from "./bot-avatar-render-geometry.ts";
 
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
@@ -82,7 +86,7 @@ describe("botAvatarFaceFacingStyle", () => {
 
   it("keeps canonical face and authored ink on one registration contract", () => {
     assert.deepEqual(
-      botAvatarFaceFacingStyle(BOT_AVATAR_CANONICAL_FACE_SCALE_Y),
+      botAvatarFaceFacingStyle(BOT_AVATAR_CANONICAL_FACING),
       {
         "--coffee-plate-emoji-face-scale-y":
           BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
@@ -93,23 +97,23 @@ describe("botAvatarFaceFacingStyle", () => {
   });
 
   it("mirrors face and ink as one operation without translating either", () => {
-    assert.deepEqual(botAvatarFaceFacingStyle(1), {
-      "--coffee-plate-emoji-face-scale-y": "1",
+    assert.deepEqual(botAvatarFaceFacingStyle("left"), {
+      "--coffee-plate-emoji-face-scale-y": botAvatarFaceScaleYForFacing("left"),
       "--zen-live-bot-screen-facing-scale-x": "-1",
       "--avatar-details-facing-scale-x": "-1",
     });
   });
 
   it("keeps the authored face and ink orientation coupled in both directions", () => {
-    for (const faceScaleY of [-1, 1] as const) {
-      const style = botAvatarFaceFacingStyle(faceScaleY);
+    for (const facing of ["right", "left"] as const) {
+      const style = botAvatarFaceFacingStyle(facing);
       assert.equal(
         style["--avatar-details-facing-scale-x"],
-        botAvatarDetailsFacingScaleX(faceScaleY),
+        botAvatarScreenFacingScaleX(facing),
       );
       assert.equal(
         style["--zen-live-bot-screen-facing-scale-x"],
-        botAvatarDetailsFacingScaleX(faceScaleY),
+        botAvatarScreenFacingScaleX(facing),
       );
     }
   });
@@ -117,7 +121,7 @@ describe("botAvatarFaceFacingStyle", () => {
   it("resolves facing directly on both complete face-and-ink screen rigs", () => {
     assert.match(
       pageSource,
-      /const screenFacingScaleX = showQuestionMark\s*\? "1"\s*:\s*botAvatarDetailsFacingScaleX\(faceScaleY\)/,
+      /const resolvedFacing = facing \?\? botAvatarFacingFromFaceScaleY\(faceScaleY\);[\s\S]*const screenFacingScaleX = showQuestionMark\s*\? "1"\s*:\s*botAvatarScreenFacingScaleX\(resolvedFacing\)/,
     );
     assert.equal(
       [
@@ -127,12 +131,22 @@ describe("botAvatarFaceFacingStyle", () => {
       ].length,
       2,
     );
+    assert.match(
+      pageCss,
+      /\.zenLiveBotPresenceBotGlyph\s*\{[\s\S]*?transform:\s*translate\(-50%, -50%\)\s*scaleX\(var\(--zen-live-bot-screen-facing-scale-x, 1\)\)/,
+      "the full buckle must mirror with its face and authored Ink",
+    );
+  });
+
+  it("normalizes legacy full-avatar scale values into explicit directions", () => {
+    assert.equal(botAvatarFacingFromFaceScaleY(-1), "right");
+    assert.equal(botAvatarFacingFromFaceScaleY(1), "left");
   });
 
   it("forbids any post-flip Ink translation inside the shared screen rig", () => {
-    const screenContentRigRule = pageCss.match(
-      /\.zenLiveBotPresenceScreenContentRig\s*\{[^}]*\}/,
-    )?.[0];
+    const screenContentRigRule = [
+      ...pageCss.matchAll(/\.zenLiveBotPresenceScreenContentRig\s*\{[^}]*\}/g),
+    ].find((rule) => rule[0].includes("--avatar-details-facing-scale-x"))?.[0];
     assert.ok(screenContentRigRule);
     assert.match(
       screenContentRigRule,

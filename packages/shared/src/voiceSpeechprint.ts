@@ -1,11 +1,15 @@
 import {
   LOCAL_VOICE_SPEECHPRINT_STRENGTHS,
+  normalizeVoiceAccentDefinitionId,
+  normalizeLocalVoicePronunciationBase,
   normalizeLocalVoiceSpeechprintInfluence,
   normalizeLocalVoiceSpeechprintStrength,
   normalizeLocalVoiceSpeechprintVariationSeed,
   type LocalVoiceSpeechprintInfluence,
+  type LocalVoicePronunciationBase,
   type LocalVoiceSpeechprintStrength,
   type LocalVoiceSpeechprintV1,
+  type VoiceAccentDefinitionId,
 } from "./audioVoice.js";
 
 export const LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION = "2026.08.9";
@@ -23,6 +27,16 @@ export interface LocalVoiceSpeechprintCapabilityV1 {
   supportedEngines: readonly ["instant"];
   rulesetVersion: string;
   rulesetSha256: string;
+}
+
+/** One Accent Map identity can drive a precise Premium cue while Local uses
+ * the closest qualified Speechprint. */
+export interface VoiceAccentDefinitionV1 {
+  id: VoiceAccentDefinitionId;
+  premiumAccentedEnglishLabel: string;
+  premiumNativeAccentAliases: readonly string[];
+  localSpeechprintFallback: LocalVoiceSpeechprintInfluence;
+  localPronunciationBaseFallback?: "en-US" | "en-GB";
 }
 
 const SUPPORTED_BASE_LOCALES = ["en-US", "en-GB"] as const;
@@ -262,6 +276,213 @@ export const LOCAL_VOICE_SPEECHPRINT_CAPABILITIES =
     rulesetVersion: LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION,
     rulesetSha256: LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256,
   })) satisfies readonly LocalVoiceSpeechprintCapabilityV1[];
+
+function premiumAccentLabel(label: string): string {
+  return label
+    .replace(/-influenced English$/u, "")
+    .replace(/ English$/u, "")
+    .trim();
+}
+
+function premiumNativeAccentAliases(
+  id: LocalVoiceSpeechprintInfluence,
+  label: string,
+): readonly string[] {
+  const accentLabel = premiumAccentLabel(label);
+  const aliases = [accentLabel, label];
+  if (id === "german-influenced-english") {
+    aliases.push("Germany", "German (Germany)", "German English", "de-DE");
+  }
+  return aliases;
+}
+
+export const VOICE_ACCENT_DEFINITIONS: readonly VoiceAccentDefinitionV1[] = [
+  {
+    id: "american-english",
+    premiumAccentedEnglishLabel: "American-accented English",
+    premiumNativeAccentAliases: [
+      "American",
+      "American English",
+      "US English",
+      "English (United States)",
+      "en-US",
+    ],
+    localSpeechprintFallback: "none",
+    localPronunciationBaseFallback: "en-US",
+  },
+  {
+    id: "british-english",
+    premiumAccentedEnglishLabel: "British-accented English",
+    premiumNativeAccentAliases: [
+      "British",
+      "British English",
+      "UK English",
+      "English (United Kingdom)",
+      "en-GB",
+    ],
+    localSpeechprintFallback: "none",
+    localPronunciationBaseFallback: "en-GB",
+  },
+  ...LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.map((capability) => ({
+    id: capability.id,
+    premiumAccentedEnglishLabel: `${premiumAccentLabel(
+      capability.label,
+    )}-accented English`,
+    premiumNativeAccentAliases: premiumNativeAccentAliases(
+      capability.id,
+      capability.label,
+    ),
+    localSpeechprintFallback: capability.id,
+  })),
+];
+
+export function voiceAccentDefinitionForId(
+  value: unknown,
+): VoiceAccentDefinitionV1 | null {
+  const id = normalizeVoiceAccentDefinitionId(value);
+  return id
+    ? VOICE_ACCENT_DEFINITIONS.find((definition) => definition.id === id) ?? null
+    : null;
+}
+
+export function voiceAccentDefinitionForLegacyProfile(args: {
+  pronunciationBase: unknown;
+  speechprintInfluence: unknown;
+}): VoiceAccentDefinitionV1 | null {
+  const influence = normalizeLocalVoiceSpeechprintInfluence(
+    args.speechprintInfluence,
+  );
+  if (influence !== "none") return voiceAccentDefinitionForId(influence);
+  if (args.pronunciationBase === "en-US") {
+    return voiceAccentDefinitionForId("american-english");
+  }
+  if (args.pronunciationBase === "en-GB") {
+    return voiceAccentDefinitionForId("british-english");
+  }
+  return null;
+}
+
+/** Resolves a precise Accent Map identity into the closest qualified Local
+ * pronunciation behavior. This is deliberately independent from Premium so
+ * future regional definitions can outnumber Local Speechprints. */
+export function resolveLocalAccentFallback(args: {
+  accentDefinitionId?: unknown;
+  pronunciationBase: unknown;
+  speechprintInfluence: unknown;
+}): {
+  pronunciationBase: LocalVoicePronunciationBase;
+  speechprintInfluence: LocalVoiceSpeechprintInfluence;
+} {
+  const definition = voiceAccentDefinitionForId(args.accentDefinitionId);
+  return {
+    pronunciationBase:
+      definition?.localPronunciationBaseFallback ??
+      normalizeLocalVoicePronunciationBase(args.pronunciationBase),
+    speechprintInfluence:
+      definition?.localSpeechprintFallback ??
+      normalizeLocalVoiceSpeechprintInfluence(args.speechprintInfluence),
+  };
+}
+
+/** Provider labels are retained only as small, portable identity hints. */
+export function normalizePremiumVoiceNativeAccentHint(
+  value: unknown,
+): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .toLocaleLowerCase()
+    .slice(0, 96);
+  return normalized || null;
+}
+
+export function premiumVoiceNativeAccentHintFromLabels(
+  labels: Record<string, string> | null | undefined,
+): string | null {
+  if (!labels) return null;
+  const ranked = Object.entries(labels)
+    .filter(([key]) => /accent|language|locale|nationality/iu.test(key))
+    .sort(([left], [right]) => {
+      const rank = (key: string): number =>
+        /accent/iu.test(key)
+          ? 0
+          : /nationality/iu.test(key)
+            ? 1
+            : /locale/iu.test(key)
+              ? 2
+              : 3;
+      return rank(left) - rank(right);
+    });
+  for (const [, value] of ranked) {
+    const hint = normalizePremiumVoiceNativeAccentHint(value);
+    if (hint) return hint;
+  }
+  return null;
+}
+
+function premiumAccentTarget(args: {
+  accentDefinitionId?: unknown;
+  pronunciationBase: unknown;
+  speechprintInfluence: unknown;
+}): VoiceAccentDefinitionV1 | null {
+  return (
+    voiceAccentDefinitionForId(args.accentDefinitionId) ??
+    voiceAccentDefinitionForLegacyProfile(args)
+  );
+}
+
+function premiumNativeAccentMatches(
+  nativeHint: string,
+  aliases: readonly string[],
+): boolean {
+  const paddedHint = ` ${nativeHint} `;
+  return aliases.some((alias) => {
+    const normalizedAlias = normalizePremiumVoiceNativeAccentHint(alias);
+    if (!normalizedAlias) return false;
+    const paddedAlias = ` ${normalizedAlias} `;
+    return (
+      nativeHint === normalizedAlias ||
+      paddedHint.includes(paddedAlias)
+    );
+  });
+}
+
+/** Private ElevenLabs v3 cue for the saved Accent Map definition. */
+export function resolvePremiumAccentDirection(args: {
+  accentDefinitionId?: unknown;
+  pronunciationBase: unknown;
+  speechprintInfluence: unknown;
+  speechprintStrength: unknown;
+  nativeAccentHint?: unknown;
+}): string | null {
+  const target = premiumAccentTarget(args);
+  if (!target) return null;
+  const strength = normalizeLocalVoiceSpeechprintStrength(
+    args.speechprintStrength,
+  );
+  const nativeHint = normalizePremiumVoiceNativeAccentHint(
+    args.nativeAccentHint,
+  );
+  const matchesNative = nativeHint
+    ? premiumNativeAccentMatches(
+        nativeHint,
+        target.premiumNativeAccentAliases,
+      )
+    : false;
+  if (matchesNative && strength === "balanced") return null;
+  const intensity =
+    strength === "light"
+      ? "subtle "
+      : strength === "strong"
+        ? "strong "
+        : "";
+  const providerAccentLabel = target.premiumAccentedEnglishLabel.replace(
+    /-accented English$/u,
+    " accent",
+  );
+  return `${intensity}${providerAccentLabel}`;
+}
 
 type SpeechprintRuleTier = "light" | "balanced" | "strong";
 
