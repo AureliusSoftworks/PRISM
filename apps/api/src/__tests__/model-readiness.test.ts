@@ -120,11 +120,9 @@ describe("local model readiness", () => {
       return Response.json({ done: true });
     }) as typeof fetch;
 
-    const [first, second] = await Promise.all([
-      keepAuxiliaryLocalModelWarm({ model: "auxiliary-override" }),
-      keepAuxiliaryLocalModelWarm({ model: "auxiliary-override" }),
-    ]);
-
+    const first = keepAuxiliaryLocalModelWarm({ model: "auxiliary-override" });
+    const second = keepAuxiliaryLocalModelWarm({ model: "auxiliary-override" });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     assert.equal(chatCalls, 1);
     releaseChat();
     const [firstReady, secondReady] = await Promise.all([first, second]);
