@@ -16655,8 +16655,10 @@ export function DebateExperience(
           searchAriaLabel="Search bots for Debate"
           searchPlaceholder="Search the Library…"
           groups={debatePickerGroups}
+          groupItems={bots}
           groupValue={effectiveCastPickerGroupId}
           onGroupChange={setCastPickerGroupId}
+          groupTheme={props.theme}
           resultLabel={`${visibleCastBots.length} bot${visibleCastBots.length === 1 ? "" : "s"}`}
         />
         <div

@@ -620,6 +620,18 @@
 .signalBotDropdownOptionSelected { flex: 0 0 auto; color: color-mix(in srgb, var(--signal-picker-accent) 80%, var(--botcast-ink)); font-size: .7rem; }
 @keyframes signalBotDropdownIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 .signalBotPickerGrid { width: 100% !important; max-height: 238px; box-sizing: border-box; grid-template-columns: repeat(auto-fill, minmax(74px, 1fr)) !important; align-items: stretch; justify-content: stretch; overflow-x: hidden; overflow-y: auto; gap: 8px; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 16%, var(--botcast-line)); border-radius: 14px; padding: 9px; background: color-mix(in srgb, var(--botcast-host-accent) 4%, var(--botcast-soft-panel)); scrollbar-width: thin; }
+.signalBotPickerGridWithHueLens { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) 26px; gap: 9px; align-items: stretch; }
+.signalBotPickerHueLens { --signal-grid-hue-track: linear-gradient(to bottom, var(--prism-p) 0%, var(--prism-p) 20%, var(--prism-r) 20%, var(--prism-r) 40%, var(--prism-i) 40%, var(--prism-i) 60%, var(--prism-s) 60%, var(--prism-s) 80%, var(--prism-m) 80%, var(--prism-m) 100%); display: flex; min-height: 0; flex-direction: column; align-items: center; gap: 7px; padding: 7px 2px; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 20%, var(--botcast-line)); border-radius: 999px; color: var(--botcast-muted); background: color-mix(in srgb, var(--botcast-host-accent) 5%, var(--botcast-soft-panel)); }
+.signalBotPickerHueLens > span { font-size: .54rem; font-weight: 760; letter-spacing: .08em; text-transform: uppercase; writing-mode: vertical-rl; }
+.signalBotPickerHueLens input { appearance: none; width: 16px; min-height: 92px; height: 100%; margin: 0; border: 0; padding: 0; background: transparent; cursor: ns-resize; writing-mode: vertical-lr; direction: rtl; }
+.signalBotPickerHueLens input::-webkit-slider-runnable-track { width: 5px; border-radius: 999px; background: var(--signal-grid-hue-track); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--botcast-line) 76%, transparent); }
+.signalBotPickerHueLens input::-moz-range-track { width: 5px; border-radius: 999px; background: var(--signal-grid-hue-track); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--botcast-line) 76%, transparent); }
+.signalBotPickerHueLens input::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; border: 2px solid var(--botcast-ink); border-radius: 999px; background: var(--botcast-field); box-shadow: 0 0 0 1px rgba(0,0,0,.35); }
+.signalBotPickerHueLens input::-moz-range-thumb { width: 11px; height: 11px; border: 2px solid var(--botcast-ink); border-radius: 999px; background: var(--botcast-field); box-shadow: 0 0 0 1px rgba(0,0,0,.35); }
+.signalBotPickerHueLens input:focus-visible { outline: 2px solid color-mix(in srgb, var(--prism-m) 62%, transparent); outline-offset: 3px; border-radius: 999px; }
+.signalBotPickerHueLens button { appearance: none; width: 20px; height: 20px; display: grid; place-items: center; border: 1px solid var(--botcast-line); border-radius: 999px; padding: 0; color: var(--botcast-muted); background: var(--botcast-field); font: 720 .76rem/1 system-ui; cursor: pointer; }
+.signalBotPickerHueLens button:hover, .signalBotPickerHueLens button:focus-visible { outline: none; border-color: color-mix(in srgb, var(--prism-m) 58%, var(--botcast-line)); color: var(--botcast-ink); }
+.signalBotPickerHueLens button:disabled { opacity: .35; cursor: not-allowed; }
 .signalBotPicker[data-compact="true"] .signalBotPickerGrid { max-height: 214px; grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
 .signalBotPickerTile { width: 100% !important; min-width: 0; height: 78px !important; min-height: 78px; }
 .signalBotPickerTile:disabled { opacity: .36; cursor: not-allowed; transform: none; }
@@ -753,8 +765,8 @@ button.episodeParticipantChip { cursor: pointer; transition: border-color 160ms 
 button.episodeParticipantChip:hover { border-color: color-mix(in srgb, var(--botcast-host-accent) 48%, var(--botcast-line)); background: color-mix(in srgb, var(--botcast-host-accent) 8%, var(--botcast-panel)); transform: translateY(-1px); }
 button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in srgb, var(--botcast-host-accent) 72%, transparent); outline-offset: 2px; }
 .episodeParticipantChip[data-interactive="false"] { opacity: .82; }
-.episodeParticipantAvatar { position: relative; flex: 0 0 42px; width: 42px; height: 46px; display: grid; place-items: center; overflow: hidden; border-radius: 8px; }
-.episodeParticipantAvatar [data-avatar-render-tier="micro"] { width: 36px; height: 36px; animation: none; }
+.episodeParticipantAvatar { position: relative; flex: 0 0 58px; width: 58px; height: 60px; display: grid; place-items: center; overflow: visible; border-radius: 8px; }
+.episodeParticipantAvatar [data-chat-mini-bot-avatar="true"] { width: 58px; height: 58px; animation: none; }
 .episodeParticipantAvatar .avatarFallback { width: 38px; height: 38px; }
 .episodeDeleteButton { position: absolute; top: 11px; right: 11px; z-index: 2; border: 1px solid color-mix(in srgb, var(--prism-p) 22%, var(--botcast-line)); border-radius: 999px; padding: 6px 8px; color: color-mix(in srgb, var(--prism-p) 70%, var(--botcast-ink)); background: color-mix(in srgb, var(--botcast-panel) 88%, transparent); font: 700 .62rem/1 system-ui; cursor: pointer; opacity: .72; transition: opacity 160ms ease, border-color 160ms ease, background 160ms ease; }
 .episodeCard:hover .episodeDeleteButton, .episodeDeleteButton:focus-visible { opacity: 1; border-color: color-mix(in srgb, var(--prism-p) 46%, var(--botcast-line)); background: color-mix(in srgb, var(--prism-p) 10%, var(--botcast-panel)); }

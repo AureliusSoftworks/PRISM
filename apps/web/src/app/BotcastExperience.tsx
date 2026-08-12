@@ -355,6 +355,10 @@ import {
   type BotPickerGroup,
   type BotPickerGlyphRenderer,
 } from "./BotPicker";
+import {
+  debateCastHueFromLensSliderInput,
+  debateCastLensSliderInputValue,
+} from "./debateCastHueLens";
 import styles from "./botcast.module.css";
 
 export interface BotcastBotSummary {
@@ -2028,6 +2032,9 @@ export function BotcastExperience({
   const [guestDraftId, setGuestDraftId] = useState(initialCast[1] ?? "");
   const [guestPickerSearch, setGuestPickerSearch] = useState("");
   const [guestPickerGroupId, setGuestPickerGroupId] = useState("all");
+  const [signalGridHueLensCenter, setSignalGridHueLensCenter] = useState<
+    number | null
+  >(null);
   const [topicDraft, setTopicDraft] = useState("");
   const [producerBriefDraft, setProducerBriefDraft] = useState("");
   const [producerGuestContextDraft, setProducerGuestContextDraft] =
@@ -10056,11 +10063,39 @@ export function BotcastExperience({
     const effectiveGroupId = groups.some((group) => group.id === groupId)
       ? groupId
       : "all";
-    const visibleBots = filterBotPickerItems(
+    const hueLensAvailable =
+      pickerBots.filter((bot) => signalBotDropdownHue(bot) !== null).length >= 2;
+    const visibleBots = sortBotPickerItems(
+      filterBotPickerItems(
       pickerBots,
       searchValue,
       effectiveGroupId,
       groups,
+      ),
+      signalGridHueLensCenter !== null,
+      (left, right) => {
+        const leftHue = signalBotDropdownHue(left);
+        const rightHue = signalBotDropdownHue(right);
+        if (leftHue === null && rightHue !== null) return 1;
+        if (leftHue !== null && rightHue === null) return -1;
+        if (
+          leftHue !== null &&
+          rightHue !== null &&
+          signalGridHueLensCenter !== null
+        ) {
+          const leftDistance = signalCircularHueDistance(
+            leftHue,
+            signalGridHueLensCenter,
+          );
+          const rightDistance = signalCircularHueDistance(
+            rightHue,
+            signalGridHueLensCenter,
+          );
+          if (leftDistance !== rightDistance) return leftDistance - rightDistance;
+          if (leftHue !== rightHue) return leftHue - rightHue;
+        }
+        return left.name.localeCompare(right.name);
+      },
     );
     const resultLabel =
       visibleBots.length === 0
@@ -10077,24 +10112,30 @@ export function BotcastExperience({
           searchAriaLabel={`Search ${ariaLabel.toLocaleLowerCase()}`}
           searchPlaceholder="Search bots…"
           groups={groups}
+          groupItems={bots}
           groupValue={effectiveGroupId}
           onGroupChange={onGroupChange}
+          groupTheme={theme}
           resultLabel={resultLabel}
           compact={compact}
         />
         {visibleBots.length > 0 ? (
-          <BotPickerGrid
-            className={styles.signalBotPickerGrid}
-            role="radiogroup"
-            ariaLabel={ariaLabel}
-            style={
-              {
-                "--tile-size": `${SIGNAL_BOT_PICKER_TILE.tileSize}px`,
-                "--tile-gap": "8px",
-                "--tile-hover-scale": "1.055",
-              } as CSSProperties
-            }
+          <div
+            className={styles.signalBotPickerGridWithHueLens}
+            data-signal-grid-hue-lens="true"
           >
+            <BotPickerGrid
+              className={styles.signalBotPickerGrid}
+              role="radiogroup"
+              ariaLabel={ariaLabel}
+              style={
+                {
+                  "--tile-size": `${SIGNAL_BOT_PICKER_TILE.tileSize}px`,
+                  "--tile-gap": "8px",
+                  "--tile-hover-scale": "1.055",
+                } as CSSProperties
+              }
+            >
             {visibleBots.map((bot) => {
               const selected = bot.id === selectedId;
               const accent = normalizeAccentForTheme(
@@ -10120,6 +10161,10 @@ export function BotcastExperience({
                     role: "radio",
                     "aria-checked": selected,
                     "aria-label": `${bot.name}${selected ? ", selected" : ""}`,
+                    "data-bot-hue":
+                      signalBotDropdownHue(bot) === null
+                        ? undefined
+                        : String(signalBotDropdownHue(bot)),
                     disabled,
                     onPointerDown: (event) =>
                       onBotContextLongPressStart?.(event, bot.id),
@@ -10136,7 +10181,44 @@ export function BotcastExperience({
                 />
               );
             })}
-          </BotPickerGrid>
+            </BotPickerGrid>
+            {hueLensAvailable ? (
+              <div
+                className={styles.signalBotPickerHueLens}
+                data-active={
+                  signalGridHueLensCenter !== null ? "true" : undefined
+                }
+                data-tutorial-target="signal-guest-hue-lens"
+              >
+                <span aria-hidden="true">Hue</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={359}
+                  step={1}
+                  value={debateCastLensSliderInputValue(
+                    signalGridHueLensCenter,
+                  )}
+                  onChange={(event) =>
+                    setSignalGridHueLensCenter(
+                      debateCastHueFromLensSliderInput(
+                        Number(event.currentTarget.value),
+                      ),
+                    )
+                  }
+                  aria-label="Browse Signal guests by hue"
+                />
+                <button
+                  type="button"
+                  onClick={() => setSignalGridHueLensCenter(null)}
+                  disabled={signalGridHueLensCenter === null}
+                  aria-label="Clear Signal guest hue lens"
+                >
+                  ×
+                </button>
+              </div>
+            ) : null}
+          </div>
         ) : (
           <p className={styles.signalBotPickerEmpty}>No bots found.</p>
         )}

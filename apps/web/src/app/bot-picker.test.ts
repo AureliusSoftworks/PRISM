@@ -171,6 +171,32 @@ describe("shared bot picker", () => {
     assert.match(source, /button\[data-bot-id\]:not\(:disabled\)/u);
   });
 
+  it("uses the Library group-picker treatment instead of a native select", () => {
+    assert.doesNotMatch(source, /<select[\s\S]{0,240}Filter by bot group/u);
+    assert.match(source, /buildBotLibraryGroupVisualVariables/u);
+    assert.match(source, /botLibraryGroupTrigger/u);
+    assert.match(source, /botLibraryGroupOption/u);
+    assert.match(source, /aria-haspopup="listbox"/u);
+    assert.match(source, /ArrowDown[\s\S]{0,220}ArrowUp/u);
+    assert.match(source, /createPortal\([\s\S]*botLibraryGroupMenu/u);
+    assert.match(source, /group\.count === 1[\s\S]*"1 bot"/u);
+    assert.match(signalSource, /groupItems=\{bots\}/u);
+    assert.match(signalSource, /groupTheme=\{theme\}/u);
+    assert.match(debateSource, /groupItems=\{bots\}/u);
+    assert.match(debateSource, /groupTheme=\{props\.theme\}/u);
+  });
+
+  it("reuses the navbar group picker in Library workflow controls", () => {
+    assert.match(
+      pageSource,
+      /<BotLibraryGroupPicker\s+value=\{botLibraryGroupPickerValue\}\s+options=\{botLibraryGroupFilterOptions\}\s+onChange=\{applyBotLibraryHeaderFilter\}/u,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /className=\{styles\.botLibraryFilterSelect\}[\s\S]{0,80}aria-label="Bot library filter"/u,
+    );
+  });
+
   it("opens the focused Zen overview bot's management hub on reactivation", () => {
     assert.match(
       pageSource,

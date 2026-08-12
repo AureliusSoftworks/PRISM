@@ -2998,7 +2998,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /surface: "archive"/u);
     assert.match(
       css,
-      /\.episodeParticipantAvatar \[data-avatar-render-tier="micro"\]/u,
+      /\.episodeParticipantAvatar \[data-chat-mini-bot-avatar="true"\]/u,
     );
     assert.doesNotMatch(
       css,
