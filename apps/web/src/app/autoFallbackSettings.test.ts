@@ -7,6 +7,7 @@ import {
   autoFallbackModeSelectable,
   autoFallbackChainWithAddedEntry,
   autoFallbackChainWithEntry,
+  autoFallbackChainWithMovedEntry,
   autoFallbackChainWithoutEntry,
   autoFallbackPrimaryForSelection,
   autoFallbackResponseModeForSend,
@@ -43,6 +44,10 @@ describe("Auto fallback settings", () => {
     assert.match(pageSource, /AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT/);
     assert.match(pageSource, /autoFallbackChainWithAddedEntry/);
     assert.match(pageSource, /autoFallbackChainWithoutEntry/);
+    assert.match(pageSource, /autoFallbackChainWithMovedEntry/);
+    assert.match(pageSource, /Drag to reorder/u);
+    assert.match(pageSource, /event\.key === "ArrowUp"/u);
+    assert.match(pageSource, /aria-live="polite"/u);
     assert.match(pageSource, /\+ Add \$\{laneLabel\} fallback/);
   });
 
@@ -98,6 +103,48 @@ describe("Auto fallback settings", () => {
     assert.deepEqual(
       autoFallbackChainWithoutEntry({ chain: second, index: 0 }),
       { v: 1, fallbacks: [openai] },
+    );
+  });
+
+  it("reorders priority within a lane without moving the other lane", () => {
+    const localSecond = { provider: "local" as const, model: "llama3.2" };
+    const chain = {
+      v: 1 as const,
+      fallbacks: [local, openai, localSecond, anthropic],
+    };
+    assert.deepEqual(
+      autoFallbackChainWithMovedEntry({
+        chain,
+        fromIndex: 2,
+        toIndex: 0,
+      }),
+      {
+        v: 1,
+        fallbacks: [localSecond, openai, local, anthropic],
+      },
+    );
+    assert.deepEqual(
+      autoFallbackChainWithMovedEntry({
+        chain,
+        fromIndex: 3,
+        toIndex: 1,
+      }),
+      {
+        v: 1,
+        fallbacks: [local, anthropic, localSecond, openai],
+      },
+    );
+  });
+
+  it("ignores cross-lane and invalid reorder attempts", () => {
+    const chain = { v: 1 as const, fallbacks: [local, openai] };
+    assert.deepEqual(
+      autoFallbackChainWithMovedEntry({ chain, fromIndex: 0, toIndex: 1 }),
+      chain,
+    );
+    assert.deepEqual(
+      autoFallbackChainWithMovedEntry({ chain, fromIndex: -1, toIndex: 0 }),
+      chain,
     );
   });
 

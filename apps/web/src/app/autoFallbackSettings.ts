@@ -142,6 +142,56 @@ export function autoFallbackChainWithoutEntry(args: {
     : null;
 }
 
+export function autoFallbackChainWithMovedEntry(args: {
+  chain: AutoFallbackChainV1 | null | undefined;
+  fromIndex: number;
+  toIndex: number;
+}): AutoFallbackChainV1 | null {
+  const normalized = normalizeAutoFallbackChain(args.chain);
+  const existing = normalized?.fallbacks ?? [];
+  if (
+    !Number.isInteger(args.fromIndex) ||
+    !Number.isInteger(args.toIndex) ||
+    args.fromIndex < 0 ||
+    args.toIndex < 0 ||
+    args.fromIndex >= existing.length ||
+    args.toIndex >= existing.length
+  ) {
+    return normalized;
+  }
+  if (args.fromIndex === args.toIndex) return normalized;
+
+  const from = existing[args.fromIndex]!;
+  const to = existing[args.toIndex]!;
+  const fromLane = from.provider === "local" ? "local" : "online";
+  const toLane = to.provider === "local" ? "local" : "online";
+  if (fromLane !== toLane) return normalized;
+
+  const laneEntries = existing.filter((entry) =>
+    fromLane === "local"
+      ? entry.provider === "local"
+      : entry.provider !== "local",
+  );
+  const fromLaneIndex = laneEntries.findIndex(
+    (entry) => autoFallbackModelKey(entry) === autoFallbackModelKey(from),
+  );
+  const toLaneIndex = laneEntries.findIndex(
+    (entry) => autoFallbackModelKey(entry) === autoFallbackModelKey(to),
+  );
+  const [moved] = laneEntries.splice(fromLaneIndex, 1);
+  if (!moved) return normalized;
+  laneEntries.splice(toLaneIndex, 0, moved);
+
+  let nextLaneIndex = 0;
+  return {
+    v: AUTO_FALLBACK_CHAIN_VERSION,
+    fallbacks: existing.map((entry) => {
+      const entryLane = entry.provider === "local" ? "local" : "online";
+      return entryLane === fromLane ? laneEntries[nextLaneIndex++]! : entry;
+    }),
+  };
+}
+
 export function autoFallbackAvailableForPrimary(args: {
   primary: AutoFallbackModelRef | null | undefined;
   chain: AutoFallbackChainV1 | null | undefined;
