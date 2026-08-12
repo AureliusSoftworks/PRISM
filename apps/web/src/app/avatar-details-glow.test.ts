@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { avatarDetailsExteriorGlowRaster } from "./avatar-details-glow.ts";
+import {
+  avatarDetailsCropRgbaRaster,
+  avatarDetailsExteriorGlowRaster,
+} from "./avatar-details-glow.ts";
 
 function solidRgba(width: number, height: number): Uint8ClampedArray {
   const pixels = new Uint8ClampedArray(width * height * 4);
@@ -24,6 +27,26 @@ function alphaAt(
 }
 
 describe("Avatar Details exterior glow raster", () => {
+  it("crops a solid core to occupied bounds without changing its pixels", () => {
+    const pixels = new Uint8ClampedArray(8 * 7 * 4);
+    for (const [x, y, alpha] of [
+      [2, 3, 255],
+      [3, 3, 128],
+      [4, 4, 64],
+    ]) {
+      const index = (y * 8 + x) * 4;
+      pixels[index] = x * 20;
+      pixels[index + 1] = y * 20;
+      pixels[index + 3] = alpha;
+    }
+    const result = avatarDetailsCropRgbaRaster(pixels, 8, 7);
+    assert.ok(result);
+    assert.deepEqual(result.bounds, { x: 2, y: 3, width: 3, height: 2 });
+    assert.equal(alphaAt(result.pixels, 3, 0, 0), 255);
+    assert.equal(alphaAt(result.pixels, 3, 1, 0), 128);
+    assert.equal(alphaAt(result.pixels, 3, 2, 1), 64);
+  });
+
   it("removes surrounded ink while preserving a two-pixel exterior rim", () => {
     const result = avatarDetailsExteriorGlowRaster(solidRgba(7, 7), 7, 7, 2);
     assert.ok(result);

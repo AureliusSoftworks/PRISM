@@ -608,7 +608,8 @@
 }
 
 .canvasFrame {
-  --avatar-details-cell-size: 0.78125%;
+  /* One visible cell is one authored 128px Ink pixel (brush size 1). */
+  --avatar-details-cell-size: calc(100% / 128);
   /* Five display pixels per authored pixel on a typical MacBook viewport. */
   --avatar-details-editor-canvas-size: 640px;
   container-type: inline-size;
@@ -668,7 +669,7 @@
 .faceGuide {
   opacity: 0;
   filter: none;
-  transition: opacity 120ms ease;
+  transition: none;
 }
 
 .faceGuide[data-visible="true"] {
@@ -750,11 +751,8 @@
   pointer-events: none;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
-  filter: drop-shadow(
-    0 0 3px
-      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 76%, transparent)
-  );
-  transition: opacity 100ms ease;
+  filter: none;
+  transition: none;
 }
 
 .stampPreview[data-visible="true"] {
@@ -776,13 +774,17 @@
       color-mix(in srgb, var(--editor-bot-color, var(--accent)) 28%, transparent) 1px,
       transparent 1px
     );
+  /* Align the line origin with the same top-left used by pointerGridPoint. */
   background-position: 0 0;
   background-size:
     var(--avatar-details-cell-size) var(--avatar-details-cell-size),
     var(--avatar-details-cell-size) var(--avatar-details-cell-size);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 140ms ease;
+  transition: none;
+  /* Ink exists only on the large face screen (authored rows 17 through 98).
+     The lower buckle is a separate small screen and must stay grid-free. */
+  clip-path: inset(13.28125% 0 22.65625% 0);
 }
 
 [data-avatar-details-grid-visible="true"] .pixelGrid {

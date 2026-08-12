@@ -66,27 +66,22 @@ describe("full-size CRT phosphor brush", () => {
       /const resampleMode = pixelPerfectInk \? "nearest" : "coverage"/,
     );
 
-    const inkBloomRule = ruleFor(inkCss, ".bloom");
+    const inkGlowRule = ruleFor(inkCss, ".glow");
     assert.match(
-      inkBloomRule,
+      inkGlowRule,
       /blur\(\s*var\(--bot-phosphor-beam-softness,\s*0\.45px\)\s*\)/,
     );
     for (const token of [
       "halo-contact-radius",
-      "halo-tight-radius",
       "halo-near-radius",
       "halo-mid-radius",
-      "halo-far-radius",
       "halo-ambient-radius",
     ]) {
-      assert.match(inkBloomRule, new RegExp(`--bot-phosphor-${token}`));
+      assert.match(inkGlowRule, new RegExp(`--bot-phosphor-${token}`));
     }
 
     const inkCoreRule = ruleFor(inkCss, ".core");
-    assert.match(
-      inkCoreRule,
-      /--zen-live-bot-crt-flicker-base-filter:\s*none/,
-    );
+    assert.match(inkCoreRule, /filter:\s*none/);
     assert.doesNotMatch(inkCoreRule, /blur\(/);
 
     assert.match(

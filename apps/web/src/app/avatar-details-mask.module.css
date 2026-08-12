@@ -42,9 +42,8 @@
   height: 100%;
   pointer-events: none;
   transform:
-    /* Each emission owns its full-screen transform wrapper. The filtered
-       child may therefore crop tightly without changing mirror or Speech
-       animation origins. */
+    /* One full-screen wrapper moves the retained glow and core together. The
+       children may crop tightly without changing mirror or Speech origins. */
     scaleX(var(--avatar-details-facing-scale-x, 1))
     translateX(calc(var(--avatar-details-speech-origin-x, 50%) - 50%))
     translateY(calc(var(--avatar-details-speech-origin-y, 50%) - 50%))
@@ -69,13 +68,16 @@
   image-rendering: crisp-edges;
 }
 
-.fullRaster {
+.emissionPlane {
+  position: absolute;
   inset: 0;
+  display: block;
   width: 100%;
   height: 100%;
+  pointer-events: none;
 }
 
-.croppedGlowRaster {
+.croppedRaster {
   right: auto;
   bottom: auto;
 }
@@ -94,8 +96,7 @@
 .speechMotion {
   transition:
     transform 70ms ease-out,
-    opacity 70ms linear,
-    --zen-live-bot-crt-flicker-opacity-scale 70ms linear;
+    opacity 70ms linear;
   will-change: transform, opacity;
 }
 
@@ -105,10 +106,7 @@
 }
 
 .speechMotion[data-avatar-details-ink-motion="flicker"] {
-  --zen-live-bot-crt-flicker-opacity-scale: var(
-    --bot-face-mouth-speech-opacity,
-    1
-  );
+  opacity: var(--bot-face-mouth-speech-opacity, 1);
 }
 
 .speechMotion[data-avatar-details-ink-motion="wobble"] {
@@ -123,78 +121,22 @@
   z-index: 7;
 }
 
-.haloPlane {
-  /* Keep a hint of light in the glass without letting broad bloom become the
-     shape. The core and near bloom carry the authored stroke. */
-  --avatar-details-emission-opacity: 0.14;
+.glowPlane {
+  /* The exterior contour is retained as one static filtered surface. Runtime
+     CRT flicker changes only opacity, so WebKit can reuse the filtered result
+     instead of recomputing brightness/contrast and two separate glow planes. */
+  --avatar-details-glow-opacity: 1;
   opacity: calc(
-    var(--avatar-details-speech-opacity, 1) *
-      var(--avatar-details-emission-opacity) *
-      var(--zen-live-bot-crt-flicker-opacity-scale, 1) *
+    var(--avatar-details-glow-opacity) *
       var(--zen-live-bot-crt-shared-flicker-opacity, 1)
   );
   mix-blend-mode: screen;
 }
 
-.halo {
-  --zen-live-bot-crt-flicker-base-filter: blur(
-      calc(0.8px * var(--bot-phosphor-focus-radius-scale, 1))
-    )
-    saturate(1.08)
-    drop-shadow(
-      0 0 var(--bot-phosphor-halo-near-radius, 3px)
-        color-mix(
-          in srgb,
-          var(--avatar-details-phosphor-glow-color) 22%,
-          transparent
-        )
-    )
-    drop-shadow(
-      0 0 var(--bot-phosphor-halo-mid-radius, 6px)
-        color-mix(
-          in srgb,
-          var(--avatar-details-phosphor-glow-color) 9%,
-          transparent
-        )
-    )
-    drop-shadow(
-      0 0 var(--bot-phosphor-halo-far-radius, 12px)
-        color-mix(
-          in srgb,
-          var(--avatar-details-phosphor-glow-color) 3%,
-          transparent
-        )
-    );
-  filter: brightness(
-      calc(
-        var(--zen-live-bot-crt-flicker-base-brightness, 1) *
-          var(--zen-live-bot-crt-shared-flicker-brightness-scale, 1)
-      )
-    )
-    contrast(
-      calc(
-        var(--zen-live-bot-crt-flicker-base-contrast, 1) *
-          var(--zen-live-bot-crt-shared-flicker-contrast-scale, 1)
-      )
-    )
-    var(--zen-live-bot-crt-flicker-base-filter);
-}
-
-.bloomPlane {
-  /* Match the full-avatar eye glyphs: the authored color forms the saturated
-     edge and six-stage halo beneath the same white phosphor core. */
-  --avatar-details-emission-opacity: 1;
-  opacity: calc(
-    var(--avatar-details-speech-opacity, 1) *
-      var(--avatar-details-emission-opacity) *
-      var(--zen-live-bot-crt-flicker-opacity-scale, 1) *
-      var(--zen-live-bot-crt-shared-flicker-opacity, 1)
-  );
-  mix-blend-mode: screen;
-}
-
-.bloom {
-  --zen-live-bot-crt-flicker-base-filter: blur(
+.glow {
+  /* Four fixed radii preserve the contact edge, near bloom, and glass wash.
+     The former halo+bloom stack used nine drop-shadows across two canvases. */
+  filter: brightness(1.07) contrast(1.02) blur(
       var(--bot-phosphor-beam-softness, 0.45px)
     )
     saturate(1.08)
@@ -203,14 +145,10 @@
         var(--avatar-details-phosphor-glow-color)
     )
     drop-shadow(
-      0 0 var(--bot-phosphor-halo-tight-radius, 1.5px)
-        var(--avatar-details-phosphor-glow-color)
-    )
-    drop-shadow(
       0 0 var(--bot-phosphor-halo-near-radius, 3px)
         color-mix(
           in srgb,
-          var(--avatar-details-phosphor-glow-color) 82%,
+          var(--avatar-details-phosphor-glow-color) 76%,
           transparent
         )
     )
@@ -218,44 +156,26 @@
       0 0 var(--bot-phosphor-halo-mid-radius, 6px)
         color-mix(
           in srgb,
-          var(--avatar-details-phosphor-glow-color) 58%,
+          var(--avatar-details-phosphor-glow-color) 42%,
           transparent
         )
     )
     drop-shadow(
-      0 0 var(--bot-phosphor-halo-far-radius, 12px)
+      0 0 var(--bot-phosphor-halo-ambient-radius, 16px)
         color-mix(
           in srgb,
-          var(--avatar-details-phosphor-glow-color) 36%,
-          transparent
-        )
-    )
-    drop-shadow(
-      0 0 var(--bot-phosphor-halo-ambient-radius, 21px)
-        color-mix(
-          in srgb,
-          var(--avatar-details-phosphor-glow-color) 22%,
+          var(--avatar-details-phosphor-glow-color) 14%,
           transparent
         )
     );
-  filter: brightness(
-      calc(
-        var(--zen-live-bot-crt-flicker-base-brightness, 1) *
-          var(--zen-live-bot-crt-shared-flicker-brightness-scale, 1)
-      )
-    )
-    contrast(
-      calc(
-        var(--zen-live-bot-crt-flicker-base-contrast, 1) *
-          var(--zen-live-bot-crt-shared-flicker-contrast-scale, 1)
-      )
-    )
-    var(--zen-live-bot-crt-flicker-base-filter);
 }
 
-.bloomPlane[data-avatar-details-render-detail="reduced"] {
-  --avatar-details-emission-opacity: 0.28;
-  --zen-live-bot-crt-flicker-base-filter: blur(0.16px)
+.glowPlane[data-avatar-details-render-detail="reduced"] {
+  --avatar-details-glow-opacity: 0.28;
+}
+
+.glowPlane[data-avatar-details-render-detail="reduced"] .glow {
+  filter: blur(0.16px)
     drop-shadow(
       0 0 0.45px
         color-mix(
@@ -275,44 +195,25 @@
 }
 
 .corePlane {
-  --avatar-details-emission-opacity: 1;
-  opacity: calc(
-    var(--avatar-details-speech-opacity, 1) *
-      var(--avatar-details-emission-opacity) *
-      var(--zen-live-bot-crt-flicker-opacity-scale, 1) *
-      var(--zen-live-bot-crt-shared-flicker-opacity, 1)
-  );
+  opacity: var(--zen-live-bot-crt-shared-flicker-opacity, 1);
   /* The solid phosphor core is coverage, not additive light. Normal blending
-     makes coincident face and Ink pixels read as one stroke; halo and bloom
-     remain screen-blended around that shared silhouette. */
+     makes coincident face and Ink pixels read as one stroke; the retained
+     glow remains screen-blended around that shared silhouette. */
   mix-blend-mode: normal;
 }
 
 .core {
   /* Ink and text/SVG features already share the same coverage-aware 256-cell
      silhouette. Keep the solid core neutral and crisp, then let the shared
-     bloom planes supply the physical beam. Blurring this core a second time
+     glow plane supply the physical beam. Blurring this core a second time
      was the final source of resource-to-resource edge drift. */
-  --zen-live-bot-crt-flicker-base-filter: none;
-  filter: brightness(
-      calc(
-        var(--zen-live-bot-crt-flicker-base-brightness, 1.02) *
-          var(--zen-live-bot-crt-shared-flicker-brightness-scale, 1)
-      )
-    )
-    contrast(
-      calc(
-        var(--zen-live-bot-crt-flicker-base-contrast, 1.02) *
-          var(--zen-live-bot-crt-shared-flicker-contrast-scale, 1)
-      )
-    )
-    var(--zen-live-bot-crt-flicker-base-filter);
+  filter: none;
 }
 
 .layer[data-avatar-details-pixel-perfect="true"],
 .motionPlane[data-avatar-details-pixel-perfect="true"],
-.motionPlane[data-avatar-details-pixel-perfect="true"] > .raster {
-  --zen-live-bot-crt-flicker-base-filter: none;
+.motionPlane[data-avatar-details-pixel-perfect="true"] .emissionPlane,
+.motionPlane[data-avatar-details-pixel-perfect="true"] .raster {
   filter: none;
   mix-blend-mode: normal;
 }

@@ -12,6 +12,12 @@
   pointer-events: none;
 }
 
+/* Avatar Studio Ink is an authoring surface, not a live phosphor preview. */
+:global([data-screen-mode="editing"]) .svgRaster {
+  opacity: 1;
+  filter: none;
+}
+
 .svgSource > svg {
   display: block;
   width: 100%;

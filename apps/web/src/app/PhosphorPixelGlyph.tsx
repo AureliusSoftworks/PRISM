@@ -148,6 +148,7 @@ function rasterizeTextMask(
   node: HTMLSpanElement,
   content: string,
   cacheVariant = "",
+  binaryAlpha = false,
 ): { dataUrl: string; overscanPx: number } | null {
   const computed = window.getComputedStyle(node);
   const presentationScale = canonicalPhosphorPresentationScaleForNode(node);
@@ -220,6 +221,7 @@ function rasterizeTextMask(
     scaledLetterSpacing,
     canonicalStrokeWidth,
     cacheVariant,
+    binaryAlpha ? "binary-alpha" : "coverage-alpha",
     PHOSPHOR_FACE_PIXEL_COVERAGE_GAMMA,
   ].join(":");
   const cached = phosphorPixelMaskCache.get(cacheKey);
@@ -268,7 +270,9 @@ function rasterizeTextMask(
   const outputContext = outputCanvas.getContext("2d", { alpha: true });
   if (!outputContext) return null;
   const outputImage = outputContext.createImageData(canvasWidth, canvasHeight);
-  outputImage.data.set(sampledAlpha);
+  outputImage.data.set(
+    binaryAlpha ? thresholdPhosphorPixelAlpha(sampledAlpha) : sampledAlpha,
+  );
   outputContext.putImageData(outputImage, 0, 0);
   const dataUrl = outputCanvas.toDataURL("image/png");
   if (dataUrl) cachePhosphorPixelMask(cacheKey, dataUrl);
@@ -288,6 +292,8 @@ export const CrtPixelTextGlyph = forwardRef<
   {
     content: string;
     enabled?: boolean;
+    /** Converts quantized cell coverage to binary alpha. */
+    binaryAlpha?: boolean;
     /**
      * Authored font identity (or another style revision) that changes the
      * glyph silhouette without necessarily resizing its DOM box.
@@ -299,6 +305,7 @@ export const CrtPixelTextGlyph = forwardRef<
   {
     content,
     enabled = false,
+    binaryAlpha = false,
     rasterKey,
     "data-custom-eye-pair-side": customEyePairSide,
   },
@@ -339,6 +346,7 @@ export const CrtPixelTextGlyph = forwardRef<
         node,
         content,
         `${rasterKey ?? ""}:${fontRevision}`,
+        binaryAlpha,
       );
       // #region agent log
       {
@@ -445,7 +453,7 @@ export const CrtPixelTextGlyph = forwardRef<
       document.fonts?.removeEventListener("loadingdone", handleFontsLoaded);
       if (frameId !== null) cancelAnimationFrame(frameId);
     };
-  }, [content, enabled, rasterKey]);
+  }, [binaryAlpha, content, enabled, rasterKey]);
 
   const maskUrl =
     renderedMask?.content === content ? renderedMask.url : null;

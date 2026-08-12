@@ -16,6 +16,63 @@ function rgbaAlphaAt(pixels: Uint8ClampedArray, index: number): number {
   return pixels[index * RGBA_CHANNELS_PER_PIXEL + 3] ?? 0;
 }
 
+/** Crops an RGBA raster to its occupied alpha bounds without changing pixels. */
+export function avatarDetailsCropRgbaRaster(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+): AvatarDetailsExteriorGlowRaster | null {
+  const normalizedWidth = Math.max(0, Math.floor(width));
+  const normalizedHeight = Math.max(0, Math.floor(height));
+  const pixelCount = normalizedWidth * normalizedHeight;
+  if (
+    normalizedWidth === 0 ||
+    normalizedHeight === 0 ||
+    pixels.length !== pixelCount * RGBA_CHANNELS_PER_PIXEL
+  ) {
+    return null;
+  }
+
+  let minX = normalizedWidth;
+  let minY = normalizedHeight;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < normalizedHeight; y += 1) {
+    for (let x = 0; x < normalizedWidth; x += 1) {
+      if (rgbaAlphaAt(pixels, y * normalizedWidth + x) === 0) continue;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+  if (maxX < minX || maxY < minY) return null;
+
+  const croppedWidth = maxX - minX + 1;
+  const croppedHeight = maxY - minY + 1;
+  const cropped = new Uint8ClampedArray(
+    croppedWidth * croppedHeight * RGBA_CHANNELS_PER_PIXEL,
+  );
+  for (let y = minY; y <= maxY; y += 1) {
+    const sourceStart =
+      (y * normalizedWidth + minX) * RGBA_CHANNELS_PER_PIXEL;
+    const sourceEnd = sourceStart + croppedWidth * RGBA_CHANNELS_PER_PIXEL;
+    const destinationStart =
+      (y - minY) * croppedWidth * RGBA_CHANNELS_PER_PIXEL;
+    cropped.set(pixels.subarray(sourceStart, sourceEnd), destinationStart);
+  }
+
+  return {
+    bounds: {
+      x: minX,
+      y: minY,
+      width: croppedWidth,
+      height: croppedHeight,
+    },
+    pixels: cropped,
+  };
+}
+
 /**
  * Keeps only the exterior-connected edge of an RGBA silhouette, then crops it
  * to the smallest useful raster. Transparent holes enclosed by ink do not

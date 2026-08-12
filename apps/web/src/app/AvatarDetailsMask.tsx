@@ -29,7 +29,10 @@ import {
   avatarDetailsSpeechMotionOrigin,
   type AvatarDetailsSpeechMotionOrigin,
 } from "./avatar-details-speech-motion";
-import { avatarDetailsExteriorGlowRaster } from "./avatar-details-glow";
+import {
+  avatarDetailsCropRgbaRaster,
+  avatarDetailsExteriorGlowRaster,
+} from "./avatar-details-glow";
 import { resamplePhosphorRgbaForPresentation } from "./phosphorPixelRaster";
 import styles from "./avatar-details-mask.module.css";
 
@@ -84,14 +87,9 @@ function AvatarDetailsEmissionPlanes({
   rasterSize,
   pixelPerfectInk = false,
 }: AvatarDetailsEmissionPlanesProps): React.JSX.Element | null {
-  const haloCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const bloomCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const glowCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const coreCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [staticRasterUrl, setStaticRasterUrl] = useState<string | null>(null);
-  const hasPixels = useMemo(
-    () => pixels.some((channel, index) => index % 4 === 3 && channel > 0),
-    [pixels],
-  );
   const resampleMode = pixelPerfectInk ? "nearest" : "coverage";
   const rasterizedGlowPixels = useMemo(
     () =>
@@ -136,6 +134,16 @@ function AvatarDetailsEmissionPlanes({
           resampleMode,
         );
   }, [coreColor, pixels, rasterSize, resampleMode]);
+  const coreRaster = useMemo(
+    () =>
+      avatarDetailsCropRgbaRaster(
+        rasterizedCorePixels,
+        rasterSize,
+        rasterSize,
+      ),
+    [rasterSize, rasterizedCorePixels],
+  );
+  const hasPixels = coreRaster !== null;
   useLayoutEffect(() => {
     if (staticRaster && detailLevel === "audience") {
       if (!hasPixels) {
@@ -158,48 +166,40 @@ function AvatarDetailsEmissionPlanes({
       queueMicrotask(() => setStaticRasterUrl(nextRasterUrl));
       return;
     }
-    const haloCanvas = haloCanvasRef.current;
-    const bloomCanvas = bloomCanvasRef.current;
+    const glowCanvas = glowCanvasRef.current;
     const coreCanvas = coreCanvasRef.current;
-    const needsGlowPlanes = detailLevel === "full" && exteriorGlow !== null;
-    const needsBloomPlane =
-      detailLevel === "reduced" && exteriorGlow !== null;
+    const needsGlowPlane = detailLevel !== "audience" && exteriorGlow !== null;
     if (
       !hasPixels ||
+      !coreRaster ||
       !coreCanvas ||
-      (needsGlowPlanes && (!haloCanvas || !bloomCanvas)) ||
-      (needsBloomPlane && !bloomCanvas)
+      (needsGlowPlane && !glowCanvas)
     ) {
       return;
     }
-    const haloContext = haloCanvas?.getContext("2d", { alpha: true }) ?? null;
-    const bloomContext =
-      bloomCanvas?.getContext("2d", { alpha: true }) ?? null;
+    const glowContext =
+      glowCanvas?.getContext("2d", { alpha: true }) ?? null;
     const coreContext = coreCanvas.getContext("2d", { alpha: true });
-    if (
-      !coreContext ||
-      ((needsGlowPlanes || needsBloomPlane) && !bloomContext)
-    ) {
+    if (!coreContext || (needsGlowPlane && !glowContext)) {
       return;
     }
     const glowImageData = exteriorGlow
-      ? coreContext.createImageData(
+      ? glowContext?.createImageData(
           exteriorGlow.bounds.width,
           exteriorGlow.bounds.height,
-        )
+        ) ?? null
       : null;
     if (glowImageData && exteriorGlow) {
       glowImageData.data.set(exteriorGlow.pixels);
     }
     const coreImageData = coreContext.createImageData(
-      rasterSize,
-      rasterSize,
+      coreRaster.bounds.width,
+      coreRaster.bounds.height,
     );
-    coreImageData.data.set(rasterizedCorePixels);
-    for (const context of [haloContext, bloomContext]) {
-      if (!context || !glowImageData) continue;
-      context.imageSmoothingEnabled = false;
-      context.putImageData(glowImageData, 0, 0);
+    coreImageData.data.set(coreRaster.pixels);
+    if (glowContext && glowImageData) {
+      glowContext.imageSmoothingEnabled = false;
+      glowContext.putImageData(glowImageData, 0, 0);
     }
     coreContext.imageSmoothingEnabled = false;
     coreContext.putImageData(coreImageData, 0, 0);
@@ -208,6 +208,7 @@ function AvatarDetailsEmissionPlanes({
     exteriorGlow,
     hasPixels,
     pixelPerfectInk,
+    coreRaster,
     rasterizedCorePixels,
     rasterSize,
     staticRaster,
@@ -227,14 +228,14 @@ function AvatarDetailsEmissionPlanes({
       ? `${motionOrigin.yPct}%`
       : undefined,
   } as CSSProperties;
-  const glowRasterStyle = exteriorGlow
-    ? ({
-        left: `${(exteriorGlow.bounds.x / rasterSize) * 100}%`,
-        top: `${(exteriorGlow.bounds.y / rasterSize) * 100}%`,
-        width: `${(exteriorGlow.bounds.width / rasterSize) * 100}%`,
-        height: `${(exteriorGlow.bounds.height / rasterSize) * 100}%`,
-      } as CSSProperties)
-    : undefined;
+  const rasterBoundsStyle = (
+    bounds: { x: number; y: number; width: number; height: number },
+  ): CSSProperties => ({
+    left: `${(bounds.x / rasterSize) * 100}%`,
+    top: `${(bounds.y / rasterSize) * 100}%`,
+    width: `${(bounds.width / rasterSize) * 100}%`,
+    height: `${(bounds.height / rasterSize) * 100}%`,
+  });
   const depthClassName =
     depth === "behind-face" ? styles.behindFace : styles.aboveFace;
   const motionClassName = motion ? ` ${styles.speechMotion}` : "";
@@ -272,52 +273,42 @@ function AvatarDetailsEmissionPlanes({
     ) : null;
   }
 
-  return (
-    <>
-      {detailLevel === "full" && exteriorGlow ? (
-        <span
-          className={`${styles.motionPlane} ${depthClassName} ${styles.haloPlane}${motionClassName}`}
-          data-avatar-details-emission="halo"
-          {...sharedPlaneProps}
-        >
-          <canvas
-            ref={haloCanvasRef}
-            width={exteriorGlow.bounds.width}
-            height={exteriorGlow.bounds.height}
-            className={`${styles.raster} ${styles.croppedGlowRaster} ${styles.halo}`}
-            style={glowRasterStyle}
-            data-avatar-details-raster="glow"
-            aria-hidden
-          />
-        </span>
-      ) : null}
+  return coreRaster ? (
+    <span
+      className={`${styles.motionPlane} ${depthClassName}${motionClassName}`}
+      data-avatar-details-motion-group="true"
+      {...sharedPlaneProps}
+    >
       {detailLevel !== "audience" && exteriorGlow ? (
         <span
-          className={`${styles.motionPlane} ${depthClassName} ${styles.bloomPlane}${motionClassName}`}
-          data-avatar-details-emission="bloom"
-          {...sharedPlaneProps}
+          className={`${styles.emissionPlane} ${styles.glowPlane}`}
+          data-avatar-details-emission="glow"
+          data-avatar-details-render-detail={detailLevel}
+          aria-hidden
         >
           <canvas
-            ref={bloomCanvasRef}
+            ref={glowCanvasRef}
             width={exteriorGlow.bounds.width}
             height={exteriorGlow.bounds.height}
-            className={`${styles.raster} ${styles.croppedGlowRaster} ${styles.bloom}`}
-            style={glowRasterStyle}
+            className={`${styles.raster} ${styles.croppedRaster} ${styles.glow}`}
+            style={rasterBoundsStyle(exteriorGlow.bounds)}
             data-avatar-details-raster="glow"
             aria-hidden
           />
         </span>
       ) : null}
       <span
-        className={`${styles.motionPlane} ${depthClassName} ${styles.corePlane}${motionClassName}`}
+        className={`${styles.emissionPlane} ${styles.corePlane}`}
         data-avatar-details-emission="core"
-        {...sharedPlaneProps}
+        data-avatar-details-render-detail={detailLevel}
+        aria-hidden
       >
         <canvas
           ref={coreCanvasRef}
-          width={rasterSize}
-          height={rasterSize}
-          className={`${styles.raster} ${styles.fullRaster} ${styles.core}`}
+          width={coreRaster.bounds.width}
+          height={coreRaster.bounds.height}
+          className={`${styles.raster} ${styles.croppedRaster} ${styles.core}`}
+          style={rasterBoundsStyle(coreRaster.bounds)}
           data-avatar-details-mask="true"
           data-avatar-details-raster="core"
           data-avatar-details-rendering={
@@ -329,8 +320,8 @@ function AvatarDetailsEmissionPlanes({
           aria-hidden
         />
       </span>
-    </>
-  );
+    </span>
+  ) : null;
 }
 
 /**

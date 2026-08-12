@@ -188,7 +188,7 @@ export interface AvatarDetailsEditorProps {
   layout?: "panel" | "foundry";
   canvasPortalTarget?: HTMLElement | null;
   autoCommit?: boolean;
-  /** When true (Studio pixel grid visible), ink draws as hard nearest-neighbor cells. */
+  /** When true, ink draws as hard nearest-neighbor cells. */
   pixelPerfectInk?: boolean;
 }
 
@@ -1437,6 +1437,7 @@ const AvatarDetailsEditorSession = forwardRef<
           <CoffeeSeatPlateEmoji
             enabled={false}
             pixelated
+            hardPixels
             isTalking={false}
             scheduleKey="avatar-details-neutral-guide"
             baseText={AVATAR_DETAILS_NEUTRAL_FACE.text}
@@ -1453,6 +1454,7 @@ const AvatarDetailsEditorSession = forwardRef<
             faceEyeOffsetY={faceStyle.eyeOffsetY}
             faceEyeRotationDeg={faceStyle.eyeRotationDeg}
             faceEyeCount={faceStyle.eyeCount}
+            faceBlinkCount={faceStyle.blinkCount}
             faceEyeSpacing={faceStyle.eyeSpacing}
             faceMouthScale={faceStyle.mouthScale}
             faceMouthOffsetX={faceStyle.mouthOffsetX}
