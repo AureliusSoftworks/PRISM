@@ -113,15 +113,23 @@ describe("living-shell applet navigation", () => {
     );
   });
 
-  it("keeps the app switcher compact on narrow viewports", () => {
+  it("uses a round glyph-only app switcher trigger at every viewport", () => {
     assert.doesNotMatch(cssSource, /\.locationStrip(?:Home|Copy|Status)?\b/u);
-    assert.match(
-      cssSource,
-      /@media \(max-width: 720px\)[\s\S]*\.appSwitcherButton\s*\{[\s\S]*min-width: 0/u,
+    const switcherSource = pageSource.slice(
+      pageSource.indexOf("const renderAppSwitcher ="),
+      pageSource.indexOf("const renderUniversalNavbarButtons ="),
     );
     assert.match(
       cssSource,
-      /@media \(max-width: 720px\)[\s\S]*\.appSwitcherName\s*\{[\s\S]*display: none/u,
+      /\.appSwitcherButton\s*\{[\s\S]*width:\s*32px;[\s\S]*min-width:\s*32px;[\s\S]*height:\s*32px;[\s\S]*place-items:\s*center;[\s\S]*border-radius:\s*50%/u,
     );
+    assert.match(switcherSource, /className=\{styles\.appSwitcherGlyph\}/u);
+    assert.doesNotMatch(switcherSource, /styles\.appSwitcherName/u);
+    assert.doesNotMatch(switcherSource, /styles\.appSwitcherChevron/u);
+    assert.match(
+      switcherSource,
+      /aria-label=\{`Switch Prism app\. Current app: \$\{PRISM_APPLETS\[currentAppletId\]\.name\}`\}/u,
+    );
+    assert.match(switcherSource, /<PrismMenuSurface/u);
   });
 });

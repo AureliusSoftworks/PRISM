@@ -158,6 +158,102 @@
   pointer-events: none;
 }
 
+/* Ink authoring is a flat inspection mode. Preview live temporarily changes
+   screenMode back to live, restoring the full phosphor and chassis treatment. */
+.botAvatarMannequinStage[data-avatar-ink-authoring="true"]
+  .botAvatarFoundryCameraRig
+  .botAmbientUnderglow {
+  display: none;
+  opacity: 0;
+  filter: none;
+  animation: none;
+}
+
+.zenLiveBotPresenceBody[data-screen-mode="editing"] {
+  --bot-face-frame-glow-filter: none;
+  --bot-face-frame-tint-filter: none;
+  --bot-face-metal-light-opacity: 0;
+  --bot-face-frame-paint-plastic-light-opacity: 0;
+}
+
+.zenLiveBotPresenceBody[data-screen-mode="editing"]::after {
+  content: none;
+  display: none;
+}
+
+.zenLiveBotPresenceBody[data-screen-mode="editing"] :is(
+  .botFaceFrameTint,
+  .botFaceFrameLed,
+  .botFaceFrameLedAura,
+  .botFaceFrameLedGlow,
+  .botFaceFrameLedCore,
+  .botFaceFrameMetalLight,
+  .botAvatarFoundryFrameModuleLamp
+) {
+  opacity: 0 !important;
+  filter: none !important;
+  box-shadow: none !important;
+  animation: none !important;
+  transition: none !important;
+}
+
+.zenLiveBotPresenceBody[data-screen-mode="editing"]
+  .zenLiveBotPresenceBotGlyph {
+  filter: none;
+}
+
+.zenLiveBotPresenceBody[data-screen-mode="editing"]
+  .botAvatarFoundryBuckleGlass {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.13);
+}
+
+/* The editor's adjacent scale previews communicate silhouette only. Their
+   compact lower displays do not need a CRT lattice at this size. */
+.botAvatarMannequinStage[data-avatar-ink-authoring="true"]
+  .botAvatarStudioMiniPreview
+  [data-chat-mini-bot-avatar="true"]
+  [class*="lowerScreen"]::before {
+  content: none;
+  display: none;
+}
+
+.botAvatarMannequinStage[data-avatar-ink-authoring="true"]
+  .botAvatarStudioMiniPreview
+  [data-chat-mini-bot-avatar="true"]::before,
+.botAvatarMannequinStage[data-avatar-ink-authoring="true"]
+  .botAvatarStudioMiniPreview
+  [data-chat-mini-bot-avatar="true"]::after {
+  content: none;
+  display: none;
+}
+
+.botAvatarMannequinStage[data-avatar-ink-authoring="true"]
+  .botAvatarStudioMicroPreview
+  .messageMoodBadge[data-face="coffee"][data-variant="micro"] {
+  box-shadow: none;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-screen-mode="editing"] {
+  --crt-beam-softness: 0px;
+  --crt-bloom-narrow-radius: 0px;
+  --crt-bloom-narrow-strength: 0;
+  --crt-bloom-wide-radius: 0px;
+  --crt-bloom-wide-strength: 0;
+  --crt-convergence-offset: 0px;
+  --crt-convergence-opacity: 0;
+  filter: none;
+  animation: none !important;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-screen-mode="editing"]::before,
+.zenLiveBotPresenceFaceEmissionMask[data-screen-mode="editing"]::after,
+.zenLiveBotPresenceBody[data-screen-mode="editing"]
+  .zenLiveBotPresenceScreenGlassOverlay {
+  content: none;
+  display: none;
+}
+
 .zenLiveBotPresenceBody[data-screen-crest="true"]
   .botAvatarFoundryScreenOverlay {
   z-index: 9;
@@ -1167,7 +1263,7 @@
 }
 
 .botAvatarStudioMicroPreview .messageMoodMicroFace {
-  font-size: 10px;
+  font-size: 15px;
 }
 
 .botAvatarFoundryCameraHud > span {
@@ -2620,7 +2716,7 @@
 
   .botAvatarCustomizer[data-foundry="true"]
     .botAvatarStudioMicroPreview .messageMoodMicroFace {
-    font-size: 9px;
+    font-size: 13px;
   }
 
   .botAvatarFoundryCameraHud {
@@ -6661,12 +6757,17 @@
 
 .settingsFallbackEntry {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 34px;
+  grid-template-columns: 34px minmax(0, 1fr) 34px;
   gap: 6px;
   align-items: end;
   min-width: 0;
+  border-radius: 10px;
+  transition:
+    opacity 120ms ease,
+    box-shadow 120ms ease;
 }
 
+.settingsFallbackDragHandle,
 .settingsFallbackRemoveButton,
 .settingsFallbackAddButton {
   border: 1px solid color-mix(in srgb, var(--line-strong) 52%, var(--line));
@@ -6675,11 +6776,29 @@
   color: var(--fg-muted);
 }
 
+.settingsFallbackDragHandle,
 .settingsFallbackRemoveButton {
   display: inline-grid;
   width: 34px;
   height: 44px;
   place-items: center;
+}
+
+.settingsFallbackDragHandle {
+  cursor: grab;
+  touch-action: none;
+}
+
+.settingsFallbackDragHandle:active:not(:disabled) {
+  cursor: grabbing;
+}
+
+.settingsFallbackEntry[data-dragging="true"] {
+  opacity: 0.5;
+}
+
+.settingsFallbackEntry[data-drag-over="true"] {
+  box-shadow: 0 -2px 0 color-mix(in srgb, var(--accent) 78%, transparent);
 }
 
 .settingsFallbackAddButton {
@@ -6690,6 +6809,8 @@
   font-weight: 700;
 }
 
+.settingsFallbackDragHandle:hover:not(:disabled),
+.settingsFallbackDragHandle:focus-visible,
 .settingsFallbackRemoveButton:hover:not(:disabled),
 .settingsFallbackRemoveButton:focus-visible,
 .settingsFallbackAddButton:hover:not(:disabled),
@@ -6697,6 +6818,17 @@
   border-color: color-mix(in srgb, var(--accent) 42%, var(--line-strong));
   background: color-mix(in srgb, var(--accent) 8%, var(--bg-surface));
   color: var(--fg);
+}
+
+.settingsFallbackDragHandle:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settingsFallbackEntry {
+    transition: none;
+  }
 }
 
 .settingsFallbackAddButton:disabled {
@@ -9724,19 +9856,6 @@
   opacity: 0.5;
 }
 
-@media (max-width: 720px) {
-  .appSwitcherButton {
-    min-width: 0;
-    grid-template-columns: 22px 14px;
-    gap: 4px;
-    padding: 0 7px;
-  }
-
-  .appSwitcherName {
-    display: none;
-  }
-}
-
 .appSwitcher {
   position: relative;
   display: inline-flex;
@@ -9749,14 +9868,13 @@
   appearance: none;
   -webkit-appearance: none;
   box-sizing: border-box;
-  min-width: 104px;
+  width: 32px;
+  min-width: 32px;
   height: 32px;
   display: inline-grid;
-  grid-template-columns: 22px minmax(0, 1fr) 14px;
-  align-items: center;
-  gap: 7px;
-  padding: 0 10px 0 8px;
-  border-radius: 999px;
+  place-items: center;
+  padding: 0;
+  border-radius: 50%;
   border: 1px solid var(--line);
   background: color-mix(in srgb, var(--bg-elevated) 78%, transparent);
   color: var(--fg);
@@ -9806,23 +9924,6 @@
 .appSwitcherMenuGlyph svg {
   width: 22px;
   height: 22px;
-}
-
-.appSwitcherName {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: left;
-}
-
-.appSwitcherChevron {
-  opacity: 0.72;
-  transition: transform 140ms ease;
-}
-
-.appSwitcher[data-open="true"] .appSwitcherChevron {
-  transform: rotate(180deg);
 }
 
 .appSwitcherMenu {
@@ -22365,18 +22466,77 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   height: 22px;
   background:
     radial-gradient(
-      circle at 50% 38%,
-      color-mix(in srgb, #ffffff 18%, transparent) 0 34%,
-      transparent 66%
+      circle at 38% 28%,
+      color-mix(in srgb, #ffffff 12%, transparent) 0 8%,
+      transparent 32%
     ),
-    color-mix(in srgb, var(--coffee-bot-color) 24%, rgba(255, 255, 255, 0.04));
+    color-mix(in srgb, #05080b 91%, var(--coffee-bot-color) 9%);
   border: 1px solid
-    color-mix(in srgb, var(--coffee-bot-color) 54%, rgba(255, 255, 255, 0.18));
+    color-mix(in srgb, var(--coffee-bot-color) 72%, rgba(255, 255, 255, 0.16));
   box-shadow:
-    inset 0 0 8px color-mix(in srgb, var(--coffee-bot-color) 20%, transparent),
-    0 0 8px color-mix(in srgb, var(--coffee-bot-color) 24%, transparent);
+    inset 0 0 0 1px color-mix(in srgb, #ffffff 7%, transparent),
+    inset 0 0 8px color-mix(in srgb, var(--coffee-bot-color) 12%, transparent),
+    0 0 8px color-mix(in srgb, var(--coffee-bot-color) 28%, transparent);
   overflow: visible;
   position: relative;
+}
+
+.themeLight
+  .messageMoodBadge[data-face="coffee"][data-variant="micro"] {
+  background:
+    radial-gradient(
+      circle at 38% 28%,
+      rgba(255, 255, 255, 0.92) 0 8%,
+      transparent 32%
+    ),
+    color-mix(in srgb, #f7fafc 94%, var(--coffee-bot-color) 6%);
+  border-color: color-mix(
+    in srgb,
+    var(--coffee-bot-color) 58%,
+    rgba(5, 8, 11, 0.24)
+  );
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.68),
+    inset 0 0 7px color-mix(in srgb, var(--coffee-bot-color) 9%, transparent),
+    0 0 7px color-mix(in srgb, var(--coffee-bot-color) 20%, transparent);
+}
+
+.botAvatarMicroTalkingGlow {
+  position: absolute;
+  inset: -12%;
+  z-index: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--coffee-bot-color) 44%, transparent) 0 30%,
+    color-mix(in srgb, var(--coffee-bot-color) 20%, transparent) 52%,
+    transparent 78%
+  );
+  filter: blur(5px) saturate(1.1);
+  opacity: 0;
+  transform: scale(0.9);
+  transition:
+    opacity 200ms ease-out,
+    transform 280ms cubic-bezier(0.22, 0.72, 0.24, 1);
+}
+
+.messageMoodBadge[data-face="coffee"][data-variant="micro"][data-talking="true"]
+  .botAvatarMicroTalkingGlow {
+  opacity: 0.7;
+  transform: scale(1.08);
+}
+
+.themeLight
+  .messageMoodBadge[data-face="coffee"][data-variant="micro"][data-talking="true"]
+  .botAvatarMicroTalkingGlow {
+  opacity: 0.46;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .botAvatarMicroTalkingGlow {
+    transition: none;
+  }
 }
 
 .botAvatarMicroInk {
@@ -22405,7 +22565,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .messageMoodMicroFace {
   position: relative;
   z-index: 2;
-  --crt-core-opacity: 0.92;
+  --crt-core-opacity: 1;
   --crt-beam-softness: 0.2px;
   --crt-bloom-narrow-radius: 0.45px;
   --crt-bloom-narrow-strength: 0.14;
@@ -22414,28 +22574,33 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --crt-scanline-opacity: 0.01;
   display: block;
   font-family: var(--prism-face-font);
-  font-size: 8.5px;
+  font-size: 12px;
   line-height: 1;
   font-weight: var(--prism-face-weight);
   letter-spacing: var(--prism-face-letter-spacing);
   font-variant-ligatures: none;
-  color: color-mix(in srgb, var(--coffee-bot-color) 90%, #ffffff);
-  text-shadow: 0 0 2px color-mix(in srgb, currentColor 70%, transparent);
+  color: #ffffff;
+  text-shadow: 0 0 1px color-mix(in srgb, currentColor 62%, transparent);
   transform-origin: center center;
 }
 
-.signalArchiveMicroAvatar {
-  width: 36px;
-  height: 36px;
+.themeLight .messageMoodMicroFace {
+  color: #05080b;
+  text-shadow: 0 0 1px rgba(255, 255, 255, 0.46);
+}
+
+.signalArchiveMiniAvatar[data-size="room"] {
+  width: 58px;
+  height: 58px;
+  transform: none;
 }
 
 :is(
-    .signalArchiveMicroAvatar,
     .debateModeratorMicroAvatar,
     .zenLiveBotPresenceMicroAvatar
   )
   .messageMoodMicroFace {
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .zenLiveBotPresenceBody[data-render-detail="micro"]::after {
@@ -29990,7 +30155,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-live-bot-screen-glare-overlay-opacity: 0.2;
 }
 
-.zenLiveBotPresencePlate[data-talking="true"] .zenLiveBotPresenceFace {
+.zenLiveBotPresencePlate[data-talking="true"] .zenLiveBotPresenceFace,
+.zenLiveBotPresenceBody[data-talking="true"] .zenLiveBotPresenceFace {
   --bot-face-ambient-glow-opacity: 0.52;
 }
 
@@ -30069,6 +30235,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenLiveBotPresencePlate[data-theme="light"][data-talking="true"]
+  .zenLiveBotPresenceFace,
+.zenLiveBotPresencePlate[data-theme="light"]
+  .zenLiveBotPresenceBody[data-talking="true"]
   .zenLiveBotPresenceFace {
   --bot-face-ambient-glow-opacity: 0.46;
 }
@@ -30139,6 +30308,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
+  .zenLiveBotPresenceFace,
+.zenLiveBotPresencePlate[data-prism-persona="true"]
+  .zenLiveBotPresenceBody[data-talking="true"]
   .zenLiveBotPresenceFace {
   --bot-face-ambient-glow-opacity: 0.88;
   --bot-face-ambient-glow-size: 92%;
@@ -30386,7 +30558,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenLiveBotPresenceFaceEmissionMask
-  [data-avatar-details-emission][data-avatar-details-ink-motion="spin"] {
+  [data-avatar-details-motion-group][data-avatar-details-ink-motion="spin"] {
   animation: avatarDetailsSpeechInkSpin
     var(--avatar-details-speech-spin-turn-duration, 480ms) linear infinite;
 }
@@ -31768,7 +31940,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     [data-crt-glyph-layer="true"]::before,
   .zenLiveBotPresenceFaceEmissionMask [data-avatar-details-emission],
   .zenLiveBotPresenceFaceEmissionMask
-    [data-avatar-details-emission][data-avatar-details-ink-motion="spin"] {
+    [data-avatar-details-motion-group][data-avatar-details-ink-motion="spin"] {
     animation: none;
   }
 

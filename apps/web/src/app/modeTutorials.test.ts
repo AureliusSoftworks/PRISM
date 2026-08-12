@@ -242,7 +242,19 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.avatar.steps[1]!.body,
-      /At 150% zoom, a pixel grid fades onto the CRT and ink draws as hard blocky cells/u,
+      /At 150% zoom, a 128-cell grid appears only on the large face screen/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.avatar.steps[1]!.body,
+      /each cell is exactly one size-1 brush pixel/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.avatar.steps[1]!.body,
+      /buckle and Mini\/Micro screens stay grid-free/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.avatar.steps[1]!.body,
+      /keeps the face and chassis lighting flat and hard-edged/u,
     );
     assert.match(
       MODE_TUTORIALS.avatar.steps[1]!.body,

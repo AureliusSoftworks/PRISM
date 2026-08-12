@@ -616,6 +616,7 @@ import {
 import {
   autoFallbackChainWithAddedEntry,
   autoFallbackChainWithEntry,
+  autoFallbackChainWithMovedEntry,
   autoFallbackChainWithoutEntry,
   autoFallbackPrimaryForSelection,
   decodeAutoFallbackPickerValue,
@@ -792,6 +793,7 @@ import {
   Eye,
   GitFork,
   Globe,
+  GripVertical,
   HardDrive,
   Home as HomeIcon,
   Image as ImageGlyph,
@@ -960,7 +962,6 @@ import {
   DEFAULT_BOT_FACE_EYE_OFFSET_X,
   DEFAULT_BOT_FACE_EYE_OFFSET_Y,
   DEFAULT_BOT_FACE_EYE_SCALE,
-  DEFAULT_BOT_FACE_PAIRED_EYE_ROTATION_DEG,
   DEFAULT_BOT_FACE_FONT_ID,
   BOT_FACE_GLYPH_ANIMATIONS,
   BOT_FACE_EYE_MOVEMENTS,
@@ -8136,6 +8137,8 @@ type BotFaceStyleSource = {
   faceMouthRotationDeg?: unknown;
   face_blink_bar?: unknown;
   faceBlinkBar?: unknown;
+  face_blink_count?: unknown;
+  faceBlinkCount?: unknown;
   face_blink_scale?: unknown;
   faceBlinkScale?: unknown;
   face_blink_offset_x?: unknown;
@@ -8200,6 +8203,7 @@ function resolveBotFaceStyleForBot(
       faceMouthRotationDeg:
         bot?.face_mouth_rotation_deg ?? bot?.faceMouthRotationDeg,
       faceBlinkBar: bot?.face_blink_bar ?? bot?.faceBlinkBar,
+      faceBlinkCount: bot?.face_blink_count ?? bot?.faceBlinkCount,
       faceBlinkScale: bot?.face_blink_scale ?? bot?.faceBlinkScale,
       faceBlinkOffsetX: bot?.face_blink_offset_x ?? bot?.faceBlinkOffsetX,
       faceBlinkOffsetY: bot?.face_blink_offset_y ?? bot?.faceBlinkOffsetY,
@@ -10185,6 +10189,7 @@ interface UserSettings {
   prismDefaultBotFaceMouthOffsetY: number;
   prismDefaultBotFaceMouthRotationDeg: number;
   prismDefaultBotFaceBlinkBar: BotFaceBlinkBar;
+  prismDefaultBotFaceBlinkCount: BotFaceEyeCount;
   prismDefaultBotFaceBlinkScale: number;
   prismDefaultBotFaceBlinkOffsetX: number;
   prismDefaultBotFaceBlinkOffsetY: number;
@@ -10944,6 +10949,7 @@ interface Bot {
   face_mouth_offset_y?: number | null;
   face_mouth_rotation_deg?: number | null;
   face_blink_bar?: string | null;
+  face_blink_count?: number | null;
   face_blink_scale?: number | null;
   face_blink_offset_x?: number | null;
   face_blink_offset_y?: number | null;
@@ -11095,6 +11101,7 @@ function marketplacePreviewBotFromArchive(
     face_mouth_offset_y: body.faceMouthOffsetY as number | null,
     face_mouth_rotation_deg: body.faceMouthRotationDeg as number | null,
     face_blink_bar: body.faceBlinkBar as string | null,
+    face_blink_count: body.faceBlinkCount as number | null,
     face_blink_scale: body.faceBlinkScale as number | null,
     face_blink_offset_x: body.faceBlinkOffsetX as number | null,
     face_blink_offset_y: body.faceBlinkOffsetY as number | null,
@@ -12362,6 +12369,7 @@ type BotEditOriginalSnapshot = {
   faceMouthOffsetY: number;
   faceMouthRotationDeg: number;
   faceBlinkBar: BotFaceBlinkBar;
+  faceBlinkCount: BotFaceEyeCount;
   faceBlinkScale: number;
   faceBlinkOffsetX: number;
   faceBlinkOffsetY: number;
@@ -12403,6 +12411,7 @@ type BotAvatarDraftSnapshot = Pick<
   | "faceMouthOffsetY"
   | "faceMouthRotationDeg"
   | "faceBlinkBar"
+  | "faceBlinkCount"
   | "faceBlinkScale"
   | "faceBlinkOffsetX"
   | "faceBlinkOffsetY"
@@ -12829,6 +12838,10 @@ function prepareBotArchivePayload(
       faceBlinkBar:
         normalizeBotFaceBlinkBar(parsedBot.faceBlinkBar) ??
         DEFAULT_BOT_FACE_BLINK_BAR,
+      faceBlinkCount:
+        normalizeBotFaceEyeCount(parsedBot.faceBlinkCount) ??
+        normalizeBotFaceEyeCount(parsedBot.faceEyeCount) ??
+        DEFAULT_BOT_FACE_STYLE.blinkCount,
       faceBlinkScale:
         normalizeBotFaceBlinkScale(parsedBot.faceBlinkScale) ??
         DEFAULT_BOT_FACE_BLINK_SCALE,
@@ -18387,6 +18400,7 @@ function BotAvatarMicroRenderer(props: {
       data-face="coffee"
       data-variant="micro"
       data-avatar-render-tier="micro"
+      data-talking={props.isTalking === true ? "true" : undefined}
       data-avatar-details-visuals={hasAvatarDetails ? "true" : undefined}
       style={
         color
@@ -18395,9 +18409,15 @@ function BotAvatarMicroRenderer(props: {
       }
       aria-hidden="true"
     >
+      <span
+        className={styles.botAvatarMicroTalkingGlow}
+        data-bot-avatar-talking-glow="true"
+        aria-hidden="true"
+      />
       {renderInk("behind-face")}
       <CoffeeSeatPlateEmoji
         enabled
+        pixelated
         isTalking={props.isTalking === true}
         blinkWhileTalking
         mouthShape={mouthShape}
@@ -18417,6 +18437,7 @@ function BotAvatarMicroRenderer(props: {
         faceEyeOffsetY={props.faceStyle?.eyeOffsetY}
         faceEyeRotationDeg={props.faceStyle?.eyeRotationDeg}
         faceEyeCount={props.faceStyle?.eyeCount}
+        faceBlinkCount={props.faceStyle?.blinkCount}
         faceEyeSpacing={props.faceStyle?.eyeSpacing}
         faceMouthScale={props.faceStyle?.mouthScale}
         faceMouthOffsetX={props.faceStyle?.mouthOffsetX}
@@ -18494,6 +18515,7 @@ function MessageMoodFace(props: {
       faceEyeOffsetY={props.faceStyle?.eyeOffsetY}
       faceEyeRotationDeg={props.faceStyle?.eyeRotationDeg}
       faceEyeCount={props.faceStyle?.eyeCount}
+      faceBlinkCount={props.faceStyle?.blinkCount}
       faceEyeSpacing={props.faceStyle?.eyeSpacing}
       faceMouthScale={props.faceStyle?.mouthScale}
       faceMouthOffsetX={props.faceStyle?.mouthOffsetX}
@@ -21800,6 +21822,7 @@ function EmptyStateHeroMiniBot({
     <ChatMiniBotAvatar
       size={size}
       thinking={miniThinkingSpinnerActive}
+      talking={isTalking}
       lightMode={lightMode ?? (size === "hero" ? "breathing" : "off")}
       color={color}
       alloyColor={alloyColor}
@@ -21846,6 +21869,7 @@ function EmptyStateHeroMiniBot({
               faceEyeOffsetY={faceStyle.eyeOffsetY}
               faceEyeRotationDeg={faceStyle.eyeRotationDeg}
               faceEyeCount={faceStyle.eyeCount}
+              faceBlinkCount={faceStyle.blinkCount}
               faceMouthScale={faceStyle.mouthScale}
               faceMouthOffsetX={faceStyle.mouthOffsetX}
               faceMouthOffsetY={faceStyle.mouthOffsetY}
@@ -31383,7 +31407,9 @@ function ZenLiveBotMannequin({
   frameModulePopulation = null,
   pixelPerfectInk = false,
 }: ZenLiveBotMannequinProps): React.JSX.Element {
-  const resolvedFrameLightsActive = avatarLightMode === "alive";
+  const inkAuthoringActive = screenMode === "editing";
+  const resolvedFrameLightsActive =
+    avatarLightMode === "alive" && !inkAuthoringActive;
   const presenceBodyRef = useRef<HTMLSpanElement | null>(null);
   const [microFallbackActive, setMicroFallbackActive] = useState(false);
   useLayoutEffect(() => {
@@ -31710,6 +31736,7 @@ function ZenLiveBotMannequin({
         className={styles.zenLiveBotPresenceBody}
         data-zen-live-bot-body-layer="true"
         data-render-detail="micro"
+        data-talking={isTalking ? "true" : undefined}
         data-avatar-facing={resolvedFacing}
         style={presenceBodyStyle}
       >
@@ -31741,6 +31768,7 @@ function ZenLiveBotMannequin({
         }
         data-avatar-face-coordinate-source="studio"
         data-avatar-facing={resolvedFacing}
+        data-talking={isTalking ? "true" : undefined}
         data-debate-optimized-avatar="true"
         data-avatar-light-mode={avatarLightMode}
         style={presenceBodyStyle}
@@ -31881,6 +31909,7 @@ function ZenLiveBotMannequin({
                 faceEyeOffsetY={faceStyle.eyeOffsetY}
                 faceEyeRotationDeg={faceStyle.eyeRotationDeg}
                 faceEyeCount={faceStyle.eyeCount}
+                faceBlinkCount={faceStyle.blinkCount}
                 faceEyeSpacing={faceStyle.eyeSpacing}
                 faceMouthScale={faceStyle.mouthScale}
                 faceMouthOffsetX={faceStyle.mouthOffsetX}
@@ -31937,7 +31966,8 @@ function ZenLiveBotMannequin({
       data-avatar-details-visuals={hasAvatarDetailsVisuals ? "true" : undefined}
       data-avatar-face-coordinate-source="studio"
       data-avatar-facing={resolvedFacing}
-      data-avatar-light-mode={avatarLightMode}
+      data-talking={isTalking ? "true" : undefined}
+      data-avatar-light-mode={inkAuthoringActive ? "off" : avatarLightMode}
       style={presenceBodyStyle}
     >
       {runtimeEffectsEnabled ? (
@@ -32075,6 +32105,7 @@ function ZenLiveBotMannequin({
                   faceEyeOffsetY={faceStyle.eyeOffsetY}
                   faceEyeRotationDeg={faceStyle.eyeRotationDeg}
                   faceEyeCount={faceStyle.eyeCount}
+                  faceBlinkCount={faceStyle.blinkCount}
                   faceEyeSpacing={faceStyle.eyeSpacing}
                   faceMouthScale={faceStyle.mouthScale}
                   faceMouthOffsetX={faceStyle.mouthOffsetX}
@@ -38413,6 +38444,7 @@ interface BotAvatarCustomizerModalProps {
   faceMouthOffsetY: number;
   faceMouthRotationDeg: number;
   faceBlinkBar: BotFaceBlinkBar;
+  faceBlinkCount: BotFaceEyeCount;
   faceBlinkScale: number;
   faceBlinkOffsetX: number;
   faceBlinkOffsetY: number;
@@ -38474,6 +38506,7 @@ interface BotAvatarCustomizerModalProps {
   onMouthOffsetYChange: (offsetY: number) => void;
   onMouthRotationDegChange: (rotationDeg: number) => void;
   onBlinkBarChange: (blinkBar: BotFaceBlinkBar) => void;
+  onBlinkCountChange: (count: BotFaceEyeCount) => void;
   onBlinkScaleChange: (scale: number) => void;
   onBlinkOffsetXChange: (offsetX: number) => void;
   onBlinkOffsetYChange: (offsetY: number) => void;
@@ -39297,6 +39330,7 @@ function botAvatarFaceIsDefault(args: {
   faceMouthOffsetY: number;
   faceMouthRotationDeg: number;
   faceBlinkBar: BotFaceBlinkBar;
+  faceBlinkCount: BotFaceEyeCount;
   faceBlinkScale: number;
   faceBlinkOffsetX: number;
   faceBlinkOffsetY: number;
@@ -39325,6 +39359,7 @@ function botAvatarFaceIsDefault(args: {
     args.faceMouthOffsetY === DEFAULT_BOT_FACE_STYLE.mouthOffsetY &&
     args.faceMouthRotationDeg === DEFAULT_BOT_FACE_STYLE.mouthRotationDeg &&
     args.faceBlinkBar === DEFAULT_BOT_FACE_STYLE.blinkBar &&
+    args.faceBlinkCount === DEFAULT_BOT_FACE_STYLE.blinkCount &&
     args.faceBlinkScale === DEFAULT_BOT_FACE_STYLE.blinkScale &&
     args.faceBlinkOffsetX === DEFAULT_BOT_FACE_STYLE.blinkOffsetX &&
     args.faceBlinkOffsetY === DEFAULT_BOT_FACE_STYLE.blinkOffsetY &&
@@ -39372,6 +39407,7 @@ function botAvatarPresetSelected(
     faceMouthOffsetY: number;
     faceMouthRotationDeg: number;
     faceBlinkBar: BotFaceBlinkBar;
+    faceBlinkCount: BotFaceEyeCount;
     faceBlinkScale: number;
     faceBlinkOffsetX: number;
     faceBlinkOffsetY: number;
@@ -39400,6 +39436,7 @@ function botAvatarPresetSelected(
     preset.mouthOffsetY === args.faceMouthOffsetY &&
     preset.mouthRotationDeg === args.faceMouthRotationDeg &&
     preset.blinkBar === args.faceBlinkBar &&
+    args.faceBlinkCount === DEFAULT_BOT_FACE_STYLE.blinkCount &&
     args.faceBlinkScale === botFaceBlinkScaleForEyeScale(preset.eyeScale) &&
     args.faceBlinkOffsetX === preset.eyeOffsetX &&
     args.faceBlinkOffsetY === preset.eyeOffsetY &&
@@ -39915,6 +39952,9 @@ function BotAvatarPreviewPanel({
             ? "true"
             : undefined
         }
+        data-avatar-ink-authoring={
+          screenMode === "editing" ? "true" : undefined
+        }
         style={foundryViewportStyle}
         tabIndex={
           foundryCameraEditable ? 0 : undefined
@@ -40070,9 +40110,7 @@ function BotAvatarPreviewPanel({
                   frameModulePopulation={
                     spatialControls ? modulePopulation : null
                   }
-                  pixelPerfectInk={botAvatarFoundryPixelGridVisible(
-                    foundryViewport.zoom,
-                  )}
+                  pixelPerfectInk={screenMode === "editing"}
                 />
               </BotAmbientPresenceRig>
             </div>
@@ -40097,6 +40135,7 @@ function BotAvatarPreviewPanel({
                   <ChatMiniBotAvatar
                     size="room"
                     thinking={previewThinking}
+                    talking={previewTalking}
                     color={miniAccentColor}
                     alloyColor={
                       isDefaultPrismBot
@@ -40155,6 +40194,7 @@ function BotAvatarPreviewPanel({
                               previewFaceStyle.eyeRotationDeg
                             }
                             faceEyeCount={previewFaceStyle.eyeCount}
+                            faceBlinkCount={previewFaceStyle.blinkCount}
                             faceMouthScale={previewFaceStyle.mouthScale}
                             faceMouthOffsetX={previewFaceStyle.mouthOffsetX}
                             faceMouthOffsetY={previewFaceStyle.mouthOffsetY}
@@ -42344,6 +42384,7 @@ function BotAvatarFaceControls({
   faceMouthOffsetY,
   faceMouthRotationDeg,
   faceBlinkBar,
+  faceBlinkCount,
   faceBlinkScale,
   faceBlinkOffsetX,
   faceBlinkOffsetY,
@@ -42371,6 +42412,7 @@ function BotAvatarFaceControls({
   onMouthOffsetYChange,
   onMouthRotationDegChange,
   onBlinkBarChange,
+  onBlinkCountChange,
   onBlinkScaleChange,
   onBlinkOffsetXChange,
   onBlinkOffsetYChange,
@@ -42406,6 +42448,7 @@ function BotAvatarFaceControls({
   faceMouthOffsetY: number;
   faceMouthRotationDeg: number;
   faceBlinkBar: BotFaceBlinkBar;
+  faceBlinkCount: BotFaceEyeCount;
   faceBlinkScale: number;
   faceBlinkOffsetX: number;
   faceBlinkOffsetY: number;
@@ -42433,6 +42476,7 @@ function BotAvatarFaceControls({
   onMouthOffsetYChange: (offsetY: number) => void;
   onMouthRotationDegChange: (rotationDeg: number) => void;
   onBlinkBarChange: (blinkBar: BotFaceBlinkBar) => void;
+  onBlinkCountChange: (count: BotFaceEyeCount) => void;
   onBlinkScaleChange: (scale: number) => void;
   onBlinkOffsetXChange: (offsetX: number) => void;
   onBlinkOffsetYChange: (offsetY: number) => void;
@@ -42743,6 +42787,7 @@ function BotAvatarFaceControls({
                     faceMouthOffsetY,
                     faceMouthRotationDeg,
                     faceBlinkBar,
+                    faceBlinkCount,
                     faceBlinkScale,
                     faceBlinkOffsetX,
                     faceBlinkOffsetY,
@@ -43147,6 +43192,40 @@ function BotAvatarFaceControls({
                         />
                       </label>
                     ) : null}
+                    <BotAvatarRefractRandomizer
+                      label="Blink count"
+                      onRandomize={() =>
+                        onBlinkCountChange(faceBlinkCount === 1 ? 2 : 1)
+                      }
+                    >
+                      {(binding) => (
+                        <div
+                          {...binding}
+                          className={styles.botAvatarEyeCountControl}
+                        >
+                          <span>Blink count</span>
+                          <div
+                            className={styles.botAvatarGlyphModeControl}
+                            role="group"
+                            aria-label="Blink eye count"
+                          >
+                            {([1, 2] as const).map((count) => (
+                              <button
+                                key={`blink-eye-count-${count}`}
+                                type="button"
+                                data-active={
+                                  faceBlinkCount === count ? "true" : undefined
+                                }
+                                aria-pressed={faceBlinkCount === count}
+                                onClick={() => onBlinkCountChange(count)}
+                              >
+                                {count === 1 ? "One eye" : "Two eyes"}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </BotAvatarRefractRandomizer>
                     <BotAvatarMouthRotationWheel
                       part="blink"
                       value={faceBlinkRotationDeg}
@@ -43805,6 +43884,7 @@ function BotAvatarCustomizerModal({
   faceMouthOffsetY,
   faceMouthRotationDeg,
   faceBlinkBar,
+  faceBlinkCount,
   faceBlinkScale,
   faceBlinkOffsetX,
   faceBlinkOffsetY,
@@ -43866,6 +43946,7 @@ function BotAvatarCustomizerModal({
   onMouthOffsetYChange,
   onMouthRotationDegChange,
   onBlinkBarChange,
+  onBlinkCountChange,
   onBlinkScaleChange,
   onBlinkOffsetXChange,
   onBlinkOffsetYChange,
@@ -43982,6 +44063,7 @@ function BotAvatarCustomizerModal({
       faceMouthOffsetY,
       faceMouthRotationDeg,
       faceBlinkBar,
+      faceBlinkCount,
       faceBlinkScale,
       faceBlinkOffsetX,
       faceBlinkOffsetY,
@@ -44442,6 +44524,7 @@ function BotAvatarCustomizerModal({
     faceMouthOffsetY,
     faceMouthRotationDeg,
     faceBlinkBar,
+    faceBlinkCount,
     faceBlinkScale,
     faceBlinkOffsetX,
     faceBlinkOffsetY,
@@ -44915,6 +44998,7 @@ function BotAvatarCustomizerModal({
     onMouthOffsetYChange(preset.mouthOffsetY);
     onMouthRotationDegChange(preset.mouthRotationDeg);
     onBlinkBarChange(preset.blinkBar);
+    onBlinkCountChange(DEFAULT_BOT_FACE_STYLE.blinkCount);
     onBlinkScaleChange(botFaceBlinkScaleForEyeScale(preset.eyeScale));
     onBlinkOffsetXChange(preset.eyeOffsetX);
     onBlinkOffsetYChange(preset.eyeOffsetY);
@@ -44941,6 +45025,7 @@ function BotAvatarCustomizerModal({
     onMouthOffsetYChange(DEFAULT_BOT_FACE_STYLE.mouthOffsetY);
     onMouthRotationDegChange(DEFAULT_BOT_FACE_STYLE.mouthRotationDeg);
     onBlinkBarChange(DEFAULT_BOT_FACE_STYLE.blinkBar);
+    onBlinkCountChange(DEFAULT_BOT_FACE_STYLE.blinkCount);
     onBlinkScaleChange(DEFAULT_BOT_FACE_STYLE.blinkScale);
     onBlinkOffsetXChange(DEFAULT_BOT_FACE_STYLE.blinkOffsetX);
     onBlinkOffsetYChange(DEFAULT_BOT_FACE_STYLE.blinkOffsetY);
@@ -45558,6 +45643,7 @@ function BotAvatarCustomizerModal({
                   layout="foundry"
                   canvasPortalTarget={inkCanvasTarget}
                   autoCommit
+                  pixelPerfectInk
                   onApply={async (nextDetails) => {
                     const normalized = normalizeAvatarDetails(nextDetails);
                     await onAvatarDetailsApply(
@@ -45683,6 +45769,7 @@ function BotAvatarCustomizerModal({
                   faceMouthOffsetY={faceMouthOffsetY}
                   faceMouthRotationDeg={faceMouthRotationDeg}
                   faceBlinkBar={faceBlinkBar}
+                  faceBlinkCount={faceBlinkCount}
                   faceBlinkScale={faceBlinkScale}
                   faceBlinkOffsetX={faceBlinkOffsetX}
                   faceBlinkOffsetY={faceBlinkOffsetY}
@@ -45714,6 +45801,7 @@ function BotAvatarCustomizerModal({
                   onMouthOffsetYChange={onMouthOffsetYChange}
                   onMouthRotationDegChange={onMouthRotationDegChange}
                   onBlinkBarChange={onBlinkBarChange}
+                  onBlinkCountChange={onBlinkCountChange}
                   onBlinkScaleChange={changeBlinkScale}
                   onBlinkOffsetXChange={(next) =>
                     changeBlinkOffset({ x: next, y: faceBlinkOffsetY })
@@ -48084,6 +48172,13 @@ function HomeContent(): React.JSX.Element {
     new Map(),
   );
   const [settings, setSettings] = useState<UserSettings | null>(null);
+  const [autoFallbackDrag, setAutoFallbackDrag] = useState<{
+    lane: "local" | "online";
+    fromIndex: number;
+    overIndex: number;
+  } | null>(null);
+  const [autoFallbackReorderAnnouncement, setAutoFallbackReorderAnnouncement] =
+    useState("");
   const globalModelChoiceByProviderRef = useRef(globalModelChoiceByProvider);
   globalModelChoiceByProviderRef.current = globalModelChoiceByProvider;
   useEffect(() => {
@@ -52363,6 +52458,8 @@ function HomeContent(): React.JSX.Element {
   const [newBotFaceBlinkBar, setNewBotFaceBlinkBar] = useState<BotFaceBlinkBar>(
     DEFAULT_BOT_FACE_STYLE.blinkBar,
   );
+  const [newBotFaceBlinkCount, setNewBotFaceBlinkCount] =
+    useState<BotFaceEyeCount>(DEFAULT_BOT_FACE_STYLE.blinkCount);
   const [newBotFaceBlinkScale, setNewBotFaceBlinkScale] = useState<number>(
     DEFAULT_BOT_FACE_STYLE.blinkScale,
   );
@@ -52545,6 +52642,7 @@ function HomeContent(): React.JSX.Element {
     faceMouthOffsetY: DEFAULT_BOT_FACE_STYLE.mouthOffsetY,
     faceMouthRotationDeg: DEFAULT_BOT_FACE_STYLE.mouthRotationDeg,
     faceBlinkBar: DEFAULT_BOT_FACE_STYLE.blinkBar,
+    faceBlinkCount: DEFAULT_BOT_FACE_STYLE.blinkCount,
     faceBlinkScale: DEFAULT_BOT_FACE_STYLE.blinkScale,
     faceBlinkOffsetX: DEFAULT_BOT_FACE_STYLE.blinkOffsetX,
     faceBlinkOffsetY: DEFAULT_BOT_FACE_STYLE.blinkOffsetY,
@@ -52590,6 +52688,7 @@ function HomeContent(): React.JSX.Element {
     faceMouthOffsetY: newBotFaceMouthOffsetY,
     faceMouthRotationDeg: newBotFaceMouthRotationDeg,
     faceBlinkBar: newBotFaceBlinkBar,
+    faceBlinkCount: newBotFaceBlinkCount,
     faceBlinkScale: newBotFaceBlinkScale,
     faceBlinkOffsetX: newBotFaceBlinkOffsetX,
     faceBlinkOffsetY: newBotFaceBlinkOffsetY,
@@ -52747,6 +52846,16 @@ function HomeContent(): React.JSX.Element {
       createBotAppearanceTouchedRef.current = true;
       setNewBotFaceBlinkBar(
         normalizeBotFaceBlinkBar(next) ?? DEFAULT_BOT_FACE_STYLE.blinkBar,
+      );
+    },
+    [],
+  );
+
+  const handleNewBotFaceBlinkCountChange = useCallback(
+    (next: BotFaceEyeCount) => {
+      createBotAppearanceTouchedRef.current = true;
+      setNewBotFaceBlinkCount(
+        normalizeBotFaceEyeCount(next) ?? DEFAULT_BOT_FACE_STYLE.blinkCount,
       );
     },
     [],
@@ -52953,6 +53062,7 @@ function HomeContent(): React.JSX.Element {
       faceMouthOffsetY: newBotFaceMouthOffsetY,
       faceMouthRotationDeg: newBotFaceMouthRotationDeg,
       faceBlinkBar: newBotFaceBlinkBar,
+      faceBlinkCount: newBotFaceBlinkCount,
       faceBlinkScale: newBotFaceBlinkScale,
       faceBlinkOffsetX: newBotFaceBlinkOffsetX,
       faceBlinkOffsetY: newBotFaceBlinkOffsetY,
@@ -52978,6 +53088,7 @@ function HomeContent(): React.JSX.Element {
       newBotColor,
       newBotAccentColor,
       newBotFaceBlinkBar,
+      newBotFaceBlinkCount,
       newBotFaceBlinkScale,
       newBotFaceBlinkOffsetX,
       newBotFaceBlinkOffsetY,
@@ -53050,6 +53161,7 @@ function HomeContent(): React.JSX.Element {
       setNewBotFaceMouthOffsetY(snapshot.faceMouthOffsetY);
       setNewBotFaceMouthRotationDeg(snapshot.faceMouthRotationDeg);
       setNewBotFaceBlinkBar(snapshot.faceBlinkBar);
+      setNewBotFaceBlinkCount(snapshot.faceBlinkCount);
       setNewBotFaceBlinkScale(snapshot.faceBlinkScale);
       setNewBotFaceBlinkOffsetX(snapshot.faceBlinkOffsetX);
       setNewBotFaceBlinkOffsetY(snapshot.faceBlinkOffsetY);
@@ -53174,6 +53286,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthRotationDeg(pristine.faceMouthRotationDeg);
     setNewBotAudioVoiceProfile(pristine.audioVoiceProfile);
     setNewBotFaceBlinkBar(pristine.faceBlinkBar);
+    setNewBotFaceBlinkCount(pristine.faceBlinkCount);
     setNewBotFaceBlinkScale(pristine.faceBlinkScale);
     setNewBotFaceBlinkOffsetX(pristine.faceBlinkOffsetX);
     setNewBotFaceBlinkOffsetY(pristine.faceBlinkOffsetY);
@@ -55513,6 +55626,10 @@ function HomeContent(): React.JSX.Element {
       blinkBar:
         settings?.prismDefaultBotFaceBlinkBar ??
         DEFAULT_BOT_FACE_STYLE.blinkBar,
+      blinkCount:
+        normalizeBotFaceEyeCount(settings?.prismDefaultBotFaceBlinkCount) ??
+        normalizeBotFaceEyeCount(settings?.prismDefaultBotFaceEyeCount) ??
+        DEFAULT_BOT_FACE_STYLE.blinkCount,
       blinkScale:
         settings?.prismDefaultBotFaceBlinkScale ??
         DEFAULT_BOT_FACE_STYLE.blinkScale,
@@ -55540,6 +55657,7 @@ function HomeContent(): React.JSX.Element {
     }),
     [
       settings?.prismDefaultBotFaceBlinkBar,
+      settings?.prismDefaultBotFaceBlinkCount,
       settings?.prismDefaultBotFaceBlinkScale,
       settings?.prismDefaultBotFaceBlinkOffsetX,
       settings?.prismDefaultBotFaceBlinkOffsetY,
@@ -56938,6 +57056,7 @@ function HomeContent(): React.JSX.Element {
           <p className={styles.settingsFallbackDescription}>
               Prism tries these in order only after the selected model fails,
               skips duplicates, and uses no thinking for fallback attempts.
+              Drag the grips to set highest priority first.
           </p>
             {(["local", "online"] as const).map((lane) => {
               const laneLabel = lane === "local" ? "LOCAL" : "ONLINE";
@@ -56951,6 +57070,30 @@ function HomeContent(): React.JSX.Element {
                       encodeAutoFallbackPickerValue(candidate),
                     ),
                 );
+              const moveFallback = (
+                fromIndex: number,
+                toIndex: number,
+                fromLaneIndex: number,
+                toLaneIndex: number,
+              ): void => {
+                setSettings((previous) =>
+                  previous
+                    ? {
+                        ...previous,
+                        legacyAutoFallbackModelSuggestion: "",
+                        autoFallbackChain: autoFallbackChainWithMovedEntry({
+                          chain:
+                            previous.autoFallbackChain ?? suggestedChain,
+                          fromIndex,
+                          toIndex,
+                        }),
+                      }
+                    : previous,
+                );
+                setAutoFallbackReorderAnnouncement(
+                  `${laneLabel} fallback ${fromLaneIndex + 1} moved to priority ${toLaneIndex + 1}`,
+                );
+              };
               return (
                 <div key={lane} className={styles.settingsFallbackLane}>
           <div className={styles.settingsAutoPrimary}>
@@ -56961,7 +57104,7 @@ function HomeContent(): React.JSX.Element {
                         : "Only runnable OpenAI and Anthropic models can run here."}
                     </small>
           </div>
-          <div className={styles.settingsFallbackGrid}>
+          <div className={styles.settingsFallbackGrid} role="list">
                     {rows.map(({ fallback, index }, laneIndex) => {
                       const selectedValue =
                         encodeAutoFallbackPickerValue(fallback);
@@ -56983,9 +57126,102 @@ function HomeContent(): React.JSX.Element {
               );
               return (
                 <div
-                          key={`${lane}:${index}`}
+                          key={encodeAutoFallbackPickerValue(fallback)}
                   className={styles.settingsFallbackEntry}
+                          data-dragging={
+                            autoFallbackDrag?.lane === lane &&
+                            autoFallbackDrag.fromIndex === index
+                              ? "true"
+                              : undefined
+                          }
+                          data-drag-over={
+                            autoFallbackDrag?.lane === lane &&
+                            autoFallbackDrag.overIndex === index &&
+                            autoFallbackDrag.fromIndex !== index
+                              ? "true"
+                              : undefined
+                          }
+                          onDragOver={(event) => {
+                            if (autoFallbackDrag?.lane !== lane) return;
+                            event.preventDefault();
+                            event.dataTransfer.dropEffect = "move";
+                            if (autoFallbackDrag.overIndex !== index) {
+                              setAutoFallbackDrag({
+                                ...autoFallbackDrag,
+                                overIndex: index,
+                              });
+                            }
+                          }}
+                          onDrop={(event) => {
+                            event.preventDefault();
+                            if (
+                              autoFallbackDrag?.lane === lane &&
+                              autoFallbackDrag.fromIndex !== index
+                            ) {
+                              const fromLaneIndex = rows.findIndex(
+                                (row) =>
+                                  row.index === autoFallbackDrag.fromIndex,
+                              );
+                              if (fromLaneIndex >= 0) {
+                                moveFallback(
+                                  autoFallbackDrag.fromIndex,
+                                  index,
+                                  fromLaneIndex,
+                                  laneIndex,
+                                );
+                              }
+                            }
+                            setAutoFallbackDrag(null);
+                          }}
+                          role="listitem"
                 >
+                          <button
+                            type="button"
+                            className={styles.settingsFallbackDragHandle}
+                            draggable={rows.length > 1}
+                            disabled={rows.length <= 1}
+                            aria-label={`Reorder ${laneLabel} fallback ${laneIndex + 1}. Use Up and Down arrow keys.`}
+                            title="Drag to reorder"
+                            onDragStart={(event) => {
+                              event.dataTransfer.effectAllowed = "move";
+                              event.dataTransfer.setData(
+                                "text/plain",
+                                encodeAutoFallbackPickerValue(fallback),
+                              );
+                              setAutoFallbackDrag({
+                                lane,
+                                fromIndex: index,
+                                overIndex: index,
+                              });
+                            }}
+                            onDragEnd={() => setAutoFallbackDrag(null)}
+                            onKeyDown={(event) => {
+                              if (
+                                event.key !== "ArrowUp" &&
+                                event.key !== "ArrowDown"
+                              ) {
+                                return;
+                              }
+                              const targetLaneIndex =
+                                laneIndex +
+                                (event.key === "ArrowUp" ? -1 : 1);
+                              const target = rows[targetLaneIndex];
+                              if (!target) return;
+                              event.preventDefault();
+                              moveFallback(
+                                index,
+                                target.index,
+                                laneIndex,
+                                targetLaneIndex,
+                              );
+                            }}
+                          >
+                            <GripVertical
+                              size={15}
+                              strokeWidth={2.2}
+                              aria-hidden="true"
+                            />
+                          </button>
                   <div className={styles.settingsModelField}>
                     <span className={styles.controlLabelWithInfo}>
                               <span>Fallback {laneIndex + 1}</span>
@@ -57092,6 +57328,13 @@ function HomeContent(): React.JSX.Element {
         </div>
               );
             })}
+            <span
+              className={styles.srOnly}
+              role="status"
+              aria-live="polite"
+            >
+              {autoFallbackReorderAnnouncement}
+            </span>
           </div>
         </details>
         </div>
@@ -61940,6 +62183,7 @@ function HomeContent(): React.JSX.Element {
         faceEyeOffsetY={ceremonyFaceStyle.eyeOffsetY}
         faceEyeRotationDeg={ceremonyFaceStyle.eyeRotationDeg}
         faceEyeCount={ceremonyFaceStyle.eyeCount}
+        faceBlinkCount={ceremonyFaceStyle.blinkCount}
         faceEyeSpacing={ceremonyFaceStyle.eyeSpacing}
         faceMouthScale={ceremonyFaceStyle.mouthScale}
         faceMouthOffsetX={ceremonyFaceStyle.mouthOffsetX}
@@ -62411,6 +62655,9 @@ function HomeContent(): React.JSX.Element {
   const [coffeeAutoTopicToggleBusy, setCoffeeAutoTopicToggleBusy] =
     useState(false);
   const [coffeeSearch, setCoffeeSearch] = useState("");
+  const [coffeeHueLensCenter, setCoffeeHueLensCenter] = useState<
+    number | null
+  >(null);
   const [coffeeBotLibraryGroupFilterId, setCoffeeBotLibraryGroupFilterId] =
     useState<string>(BOT_LIBRARY_GROUP_FILTER_ALL);
   const [coffeeDraft, setCoffeeDraft] = useState<string>("");
@@ -70346,7 +70593,7 @@ function HomeContent(): React.JSX.Element {
     [coffeeBotLibraryGroupFilterId, coffeeBotLibraryGroupFilterOptions],
   );
   const coffeeSearchTerm = coffeeSearch.trim().toLowerCase();
-  const coffeeFilteredBots = useMemo(
+  const coffeeSearchFilteredBots = useMemo(
     () =>
       coffeeGroupFilteredBots.filter((bot) => {
         if (!coffeeSearchTerm) return true;
@@ -70357,6 +70604,38 @@ function HomeContent(): React.JSX.Element {
       }),
     [coffeeGroupFilteredBots, coffeeSearchTerm],
   );
+  const coffeeHueLensTrackSegments = useMemo(
+    () => computeHueLensTrackSegments(coffeeGroupFilteredBots),
+    [coffeeGroupFilteredBots],
+  );
+  const coffeeHueLensAvailable =
+    coffeeHueLensTrackSegments.length > 1 || coffeeHueLensCenter !== null;
+  useEffect(() => {
+    if (!coffeeHueLensAvailable && coffeeHueLensCenter !== null) {
+      setCoffeeHueLensCenter(null);
+    }
+  }, [coffeeHueLensAvailable, coffeeHueLensCenter]);
+  const coffeeFilteredBots = useMemo(() => {
+    const preferredRows = coffeeCanvasPickerPreferredRows(
+      coffeeSearchFilteredBots.length,
+      viewportWidth,
+      viewportHeight,
+    );
+    return hueRibbonWindowBots(
+      coffeeSearchFilteredBots,
+      coffeeHueLensCenter,
+      coffeeHueLensTrackSegments,
+      viewportWidth,
+      viewportHeight,
+      preferredRows,
+    );
+  }, [
+    coffeeHueLensCenter,
+    coffeeHueLensTrackSegments,
+    coffeeSearchFilteredBots,
+    viewportHeight,
+    viewportWidth,
+  ]);
   const coffeeCanvasBotPickerGeometry = useMemo<PickerGeometry | null>(() => {
     if (coffeeFilteredBots.length === 0) return null;
     const preferredRows = coffeeCanvasPickerPreferredRows(
@@ -75256,7 +75535,7 @@ function HomeContent(): React.JSX.Element {
   }, [backendUnavailable, requestApiWithLoopbackFallback]);
 
   useEffect(() => {
-    if (!user?.id || !settings || backendUnavailable) return;
+    if (!user?.id || backendUnavailable) return;
 
     let cancelled = false;
     let requestRunning = false;
@@ -75627,6 +75906,14 @@ function HomeContent(): React.JSX.Element {
     const savedTypographyScale = normalizePrismTypographyScale(
       d.settings.typographyScale,
     );
+    // Do not expose an interactive authenticated surface until the account's
+    // auxiliary model has been given its persistent Ollama residency lease.
+    // Runtime/model failures stay non-blocking so PRISM can still open and
+    // explain the underlying local-service problem.
+    await requestApiWithLoopbackFallback(
+      "/api/models/auxiliary/keep-warm",
+      { method: "POST" },
+    ).catch(() => undefined);
     setZenPersonaTransitionChoice(zenPersonaTransitionChoice);
     setCommittedGraphicsQuality(savedGraphicsQuality);
     setSettings({
@@ -75839,6 +76126,10 @@ function HomeContent(): React.JSX.Element {
       prismDefaultBotFaceBlinkBar:
         normalizeBotFaceBlinkBar(d.settings.prismDefaultBotFaceBlinkBar) ??
         DEFAULT_BOT_FACE_STYLE.blinkBar,
+      prismDefaultBotFaceBlinkCount:
+        normalizeBotFaceEyeCount(d.settings.prismDefaultBotFaceBlinkCount) ??
+        normalizeBotFaceEyeCount(d.settings.prismDefaultBotFaceEyeCount) ??
+        DEFAULT_BOT_FACE_STYLE.blinkCount,
       prismDefaultBotFaceBlinkScale:
         normalizeBotFaceBlinkScale(d.settings.prismDefaultBotFaceBlinkScale) ??
         DEFAULT_BOT_FACE_STYLE.blinkScale,
@@ -88890,6 +89181,7 @@ function HomeContent(): React.JSX.Element {
         faceMouthOffsetY: faceStyle.mouthOffsetY,
         faceMouthRotationDeg: faceStyle.mouthRotationDeg,
         faceBlinkBar: faceStyle.blinkBar,
+        faceBlinkCount: faceStyle.blinkCount,
         faceBlinkScale: faceStyle.blinkScale,
         faceBlinkOffsetX: faceStyle.blinkOffsetX,
         faceBlinkOffsetY: faceStyle.blinkOffsetY,
@@ -95675,6 +95967,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthOffsetY(DEFAULT_BOT_FACE_STYLE.mouthOffsetY);
     setNewBotFaceMouthRotationDeg(DEFAULT_BOT_FACE_STYLE.mouthRotationDeg);
     setNewBotFaceBlinkBar(DEFAULT_BOT_FACE_STYLE.blinkBar);
+    setNewBotFaceBlinkCount(DEFAULT_BOT_FACE_STYLE.blinkCount);
     setNewBotFaceBlinkScale(DEFAULT_BOT_FACE_STYLE.blinkScale);
     setNewBotFaceBlinkOffsetX(DEFAULT_BOT_FACE_STYLE.blinkOffsetX);
     setNewBotFaceBlinkOffsetY(DEFAULT_BOT_FACE_STYLE.blinkOffsetY);
@@ -95958,6 +96251,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthOffsetY(draft.face.mouthOffsetY);
     setNewBotFaceMouthRotationDeg(draft.face.mouthRotationDeg);
     setNewBotFaceBlinkBar(draft.face.blinkBar);
+    setNewBotFaceBlinkCount(draft.face.blinkCount);
     setNewBotFaceBlinkScale(draft.face.blinkScale);
     setNewBotFaceBlinkOffsetX(draft.face.blinkOffsetX);
     setNewBotFaceBlinkOffsetY(draft.face.blinkOffsetY);
@@ -96270,6 +96564,9 @@ function HomeContent(): React.JSX.Element {
     const seededFaceBlinkBar =
       normalizeBotFaceBlinkBar(settings.prismDefaultBotFaceBlinkBar) ??
       DEFAULT_BOT_FACE_STYLE.blinkBar;
+    const seededFaceBlinkCount =
+      normalizeBotFaceEyeCount(settings.prismDefaultBotFaceBlinkCount) ??
+      seededFaceEyeCount;
     const seededFaceBlinkScale =
       normalizeBotFaceBlinkScale(settings.prismDefaultBotFaceBlinkScale) ??
       DEFAULT_BOT_FACE_STYLE.blinkScale;
@@ -96351,6 +96648,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthOffsetY(seededFaceMouthOffsetY);
     setNewBotFaceMouthRotationDeg(seededFaceMouthRotationDeg);
     setNewBotFaceBlinkBar(seededFaceBlinkBar);
+    setNewBotFaceBlinkCount(seededFaceBlinkCount);
     setNewBotFaceBlinkScale(seededFaceBlinkScale);
     setNewBotFaceBlinkOffsetX(seededFaceBlinkOffsetX);
     setNewBotFaceBlinkOffsetY(seededFaceBlinkOffsetY);
@@ -96405,6 +96703,7 @@ function HomeContent(): React.JSX.Element {
       faceMouthOffsetY: seededFaceMouthOffsetY,
       faceMouthRotationDeg: seededFaceMouthRotationDeg,
       faceBlinkBar: seededFaceBlinkBar,
+      faceBlinkCount: seededFaceBlinkCount,
       faceBlinkScale: seededFaceBlinkScale,
       faceBlinkOffsetX: seededFaceBlinkOffsetX,
       faceBlinkOffsetY: seededFaceBlinkOffsetY,
@@ -96550,6 +96849,7 @@ function HomeContent(): React.JSX.Element {
           faceMouthOffsetY: newBotFaceMouthOffsetY,
           faceMouthRotationDeg: newBotFaceMouthRotationDeg,
           faceBlinkBar: newBotFaceBlinkBar,
+          faceBlinkCount: newBotFaceBlinkCount,
           faceBlinkScale: newBotFaceBlinkScale,
           faceBlinkOffsetX: newBotFaceBlinkOffsetX,
           faceBlinkOffsetY: newBotFaceBlinkOffsetY,
@@ -96691,6 +96991,7 @@ function HomeContent(): React.JSX.Element {
           faceMouthOffsetY: faceStyle.mouthOffsetY,
           faceMouthRotationDeg: faceStyle.mouthRotationDeg,
           faceBlinkBar: faceStyle.blinkBar,
+          faceBlinkCount: faceStyle.blinkCount,
           faceBlinkScale: faceStyle.blinkScale,
           faceBlinkOffsetX: faceStyle.blinkOffsetX,
           faceBlinkOffsetY: faceStyle.blinkOffsetY,
@@ -96791,6 +97092,7 @@ function HomeContent(): React.JSX.Element {
           faceMouthOffsetY: newBotFaceMouthOffsetY,
           faceMouthRotationDeg: newBotFaceMouthRotationDeg,
           faceBlinkBar: newBotFaceBlinkBar,
+          faceBlinkCount: newBotFaceBlinkCount,
           faceBlinkScale: newBotFaceBlinkScale,
           faceBlinkOffsetX: newBotFaceBlinkOffsetX,
           faceBlinkOffsetY: newBotFaceBlinkOffsetY,
@@ -96865,6 +97167,7 @@ function HomeContent(): React.JSX.Element {
         faceMouthOffsetY: newBotFaceMouthOffsetY,
         faceMouthRotationDeg: newBotFaceMouthRotationDeg,
         faceBlinkBar: newBotFaceBlinkBar,
+        faceBlinkCount: newBotFaceBlinkCount,
         faceBlinkScale: newBotFaceBlinkScale,
         faceBlinkOffsetX: newBotFaceBlinkOffsetX,
         faceBlinkOffsetY: newBotFaceBlinkOffsetY,
@@ -98004,6 +98307,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthOffsetY(seededFaceStyle.mouthOffsetY);
     setNewBotFaceMouthRotationDeg(seededFaceStyle.mouthRotationDeg);
     setNewBotFaceBlinkBar(seededFaceStyle.blinkBar);
+    setNewBotFaceBlinkCount(seededFaceStyle.blinkCount);
     setNewBotFaceBlinkScale(seededFaceStyle.blinkScale);
     setNewBotFaceBlinkOffsetX(seededFaceStyle.blinkOffsetX);
     setNewBotFaceBlinkOffsetY(seededFaceStyle.blinkOffsetY);
@@ -98059,6 +98363,7 @@ function HomeContent(): React.JSX.Element {
       faceMouthOffsetY: seededFaceStyle.mouthOffsetY,
       faceMouthRotationDeg: seededFaceStyle.mouthRotationDeg,
       faceBlinkBar: seededFaceStyle.blinkBar,
+      faceBlinkCount: seededFaceStyle.blinkCount,
       faceBlinkScale: seededFaceStyle.blinkScale,
       faceBlinkOffsetX: seededFaceStyle.blinkOffsetX,
       faceBlinkOffsetY: seededFaceStyle.blinkOffsetY,
@@ -100190,6 +100495,7 @@ function HomeContent(): React.JSX.Element {
         newBotFaceMouthOffsetY !== editPristine.faceMouthOffsetY ||
         newBotFaceMouthRotationDeg !== editPristine.faceMouthRotationDeg ||
         newBotFaceBlinkBar !== editPristine.faceBlinkBar ||
+        newBotFaceBlinkCount !== editPristine.faceBlinkCount ||
         newBotFaceBlinkScale !== editPristine.faceBlinkScale ||
         newBotFaceBlinkOffsetX !== editPristine.faceBlinkOffsetX ||
         newBotFaceBlinkOffsetY !== editPristine.faceBlinkOffsetY ||
@@ -100237,6 +100543,7 @@ function HomeContent(): React.JSX.Element {
             faceMouthOffsetY: newBotFaceMouthOffsetY,
             faceMouthRotationDeg: newBotFaceMouthRotationDeg,
             faceBlinkBar: newBotFaceBlinkBar,
+            faceBlinkCount: newBotFaceBlinkCount,
             faceBlinkScale: newBotFaceBlinkScale,
             faceBlinkOffsetX: newBotFaceBlinkOffsetX,
             faceBlinkOffsetY: newBotFaceBlinkOffsetY,
@@ -100301,6 +100608,7 @@ function HomeContent(): React.JSX.Element {
         faceMouthOffsetY: newBotFaceMouthOffsetY,
         faceMouthRotationDeg: newBotFaceMouthRotationDeg,
         faceBlinkBar: newBotFaceBlinkBar,
+        faceBlinkCount: newBotFaceBlinkCount,
         faceBlinkScale: newBotFaceBlinkScale,
         faceBlinkOffsetX: newBotFaceBlinkOffsetX,
         faceBlinkOffsetY: newBotFaceBlinkOffsetY,
@@ -100341,6 +100649,7 @@ function HomeContent(): React.JSX.Element {
               prismDefaultBotFaceMouthOffsetY: newBotFaceMouthOffsetY,
               prismDefaultBotFaceMouthRotationDeg: newBotFaceMouthRotationDeg,
               prismDefaultBotFaceBlinkBar: newBotFaceBlinkBar,
+              prismDefaultBotFaceBlinkCount: newBotFaceBlinkCount,
               prismDefaultBotFaceBlinkScale: newBotFaceBlinkScale,
               prismDefaultBotFaceBlinkOffsetX: newBotFaceBlinkOffsetX,
               prismDefaultBotFaceBlinkOffsetY: newBotFaceBlinkOffsetY,
@@ -100472,6 +100781,7 @@ function HomeContent(): React.JSX.Element {
         faceMouthOffsetY: newBotFaceMouthOffsetY,
         faceMouthRotationDeg: newBotFaceMouthRotationDeg,
         faceBlinkBar: newBotFaceBlinkBar,
+        faceBlinkCount: newBotFaceBlinkCount,
         faceBlinkScale: newBotFaceBlinkScale,
         faceBlinkOffsetX: newBotFaceBlinkOffsetX,
         faceBlinkOffsetY: newBotFaceBlinkOffsetY,
@@ -100562,6 +100872,7 @@ function HomeContent(): React.JSX.Element {
         faceMouthOffsetY: newBotFaceMouthOffsetY,
         faceMouthRotationDeg: newBotFaceMouthRotationDeg,
         faceBlinkBar: newBotFaceBlinkBar,
+        faceBlinkCount: newBotFaceBlinkCount,
         faceBlinkScale: newBotFaceBlinkScale,
         faceBlinkOffsetX: newBotFaceBlinkOffsetX,
         faceBlinkOffsetY: newBotFaceBlinkOffsetY,
@@ -105872,15 +106183,18 @@ function HomeContent(): React.JSX.Element {
             panel === null &&
             !botAvatarCustomizerOpen
           }
-          homeBaseAppletTargets={prismTopLevelSwitcherApplets()
-            .filter((applet) => applet.id !== "chat" && applet.id !== "zen")
-            .map((applet) => ({
-              id: applet.id,
-              label: applet.name,
-              glyph: (
-                <PrismAppletGlyph appletId={applet.id} size={56} />
-              ),
-            }))}
+          zenCanvasOrb={chatPresentation === "zen"}
+          homeBaseAppletTargets={[
+            ...prismTopLevelSwitcherApplets()
+              .filter((applet) => applet.id !== "chat" && applet.id !== "zen")
+              .map((applet) => ({
+                id: applet.id,
+                label: applet.name,
+                glyph: (
+                  <PrismAppletGlyph appletId={applet.id} size={56} />
+                ),
+              })),
+          ]}
           onHomeBaseAppletSelect={(appletId) =>
             switchToSelectableApplet(appletId as PrismAppletId)
           }
@@ -106114,15 +106428,6 @@ function HomeContent(): React.JSX.Element {
           <span className={styles.appSwitcherGlyph} aria-hidden="true">
             {appletGlyph(currentAppletId)}
           </span>
-          <span className={styles.appSwitcherName}>
-            {PRISM_APPLETS[currentAppletId].name}
-          </span>
-          <ChevronDown
-            size={14}
-            strokeWidth={2.2}
-            className={styles.appSwitcherChevron}
-            aria-hidden="true"
-          />
         </button>
         {!disabled &&
         appSwitcherOpen &&
@@ -119348,6 +119653,7 @@ function HomeContent(): React.JSX.Element {
                         faceMouthOffsetY={newBotFaceMouthOffsetY}
                         faceMouthRotationDeg={newBotFaceMouthRotationDeg}
                         faceBlinkBar={newBotFaceBlinkBar}
+                        faceBlinkCount={newBotFaceBlinkCount}
                         faceBlinkScale={newBotFaceBlinkScale}
                         faceBlinkOffsetX={newBotFaceBlinkOffsetX}
                         faceBlinkOffsetY={newBotFaceBlinkOffsetY}
@@ -119558,11 +119864,6 @@ function HomeContent(): React.JSX.Element {
                         }}
                         onEyeCountChange={(next) => {
                           pushBotAvatarUndoSnapshot();
-                          if (next === 2) {
-                            handleNewBotFaceEyeRotationDegChange(
-                              DEFAULT_BOT_FACE_PAIRED_EYE_ROTATION_DEG,
-                            );
-                          }
                           handleNewBotFaceEyeCountChange(next);
                         }}
                         onEyeSpacingChange={(next) => {
@@ -119608,6 +119909,10 @@ function HomeContent(): React.JSX.Element {
                             DEFAULT_BOT_FACE_STYLE.blinkBar;
                           pushBotAvatarUndoSnapshot();
                           handleNewBotFaceBlinkBarChange(normalizedBlinkBar);
+                        }}
+                        onBlinkCountChange={(next) => {
+                          pushBotAvatarUndoSnapshot();
+                          handleNewBotFaceBlinkCountChange(next);
                         }}
                         onBlinkScaleChange={(next) => {
                           const normalizedScale =
@@ -120345,51 +120650,15 @@ function HomeContent(): React.JSX.Element {
                                     </button>
                                   ) : null}
                                 </label>
-                                <select
-                                  className={styles.botLibraryFilterSelect}
-                                  aria-label="Bot library filter"
-                                  value={botLibraryGroupFilterId}
-                                  onChange={(event) => {
-                                    applyBotLibraryGroupFilter(
-                                      event.currentTarget.value,
-                                    );
-                                  }}
-                                >
-                                  <option value={BOT_LIBRARY_GROUP_FILTER_ALL}>
-                                    No group selected
-                                  </option>
-                                  {ungroupedPanelBots.length > 0 ? (
-                                    <option
-                                      value={BOT_LIBRARY_GROUP_FILTER_UNGROUPED}
-                                    >
-                                      Ungrouped (
-                                      {botLibraryBotCountLabel(
-                                        ungroupedPanelBots.length,
-                                      )}
-                                      )
-                                    </option>
-                                  ) : null}
-                                  <option
-                                    value={BOT_LIBRARY_FAVORITES_GROUP_ID}
-                                  >
-                                    Favorites ({favoriteBotIdSet.size})
-                                  </option>
-                                  {customBotLibraryGroups.map((group) => {
-                                    const count = group.botIds.filter((botId) =>
-                                      existingBotIds.has(botId),
-                                    ).length;
-                                    return (
-                                      <option key={group.id} value={group.id}>
-                                        {group.name} (
-                                        {botLibraryGroupCapacityLabel(
-                                          count,
-                                          BOT_LIBRARY_GROUP_BOT_CAP,
-                                        )}
-                                        )
-                                      </option>
-                                    );
-                                  })}
-                                </select>
+                                <BotLibraryGroupPicker
+                                  value={botLibraryGroupPickerValue}
+                                  options={botLibraryGroupFilterOptions}
+                                  onChange={applyBotLibraryHeaderFilter}
+                                  onCreateGroup={() =>
+                                    openCreateBotLibraryGroupDialog([])
+                                  }
+                                  resolvedTheme={resolvedTheme}
+                                />
                                 {activeBotLibraryGroupFilter &&
                                 !activeBotLibraryGroupFilter.builtIn ? (
                                   <button
@@ -120410,21 +120679,6 @@ function HomeContent(): React.JSX.Element {
                                     />
                                   </button>
                                 ) : null}
-                                <button
-                                  type="button"
-                                  className={styles.botLibraryFilterRename}
-                                  onClick={() =>
-                                    openCreateBotLibraryGroupDialog([])
-                                  }
-                                  aria-label="Create a new bot group"
-                                  data-glyph-tooltip="New group"
-                                >
-                                  <Plus
-                                    size={14}
-                                    strokeWidth={2.2}
-                                    aria-hidden="true"
-                                  />
-                                </button>
                               </div>
                             </div>
                           </div>
@@ -120648,6 +120902,7 @@ function HomeContent(): React.JSX.Element {
                                 faceMouthRotationDeg:
                                   newBotFaceMouthRotationDeg,
                                 faceBlinkBar: newBotFaceBlinkBar,
+                                faceBlinkCount: newBotFaceBlinkCount,
                                 faceBlinkScale: newBotFaceBlinkScale,
                                 faceBlinkOffsetX: newBotFaceBlinkOffsetX,
                                 faceBlinkOffsetY: newBotFaceBlinkOffsetY,
@@ -133437,6 +133692,21 @@ function HomeContent(): React.JSX.Element {
                 />
               ),
             })}
+            <div data-tutorial-target="coffee-hue-lens">
+              <HueLensControl
+                bots={coffeeSearchFilteredBots}
+                filteredBots={coffeeFilteredBots}
+                hueFilterCenter={coffeeHueLensCenter}
+                onHueChange={setCoffeeHueLensCenter}
+                hueLensAvailable={coffeeHueLensAvailable}
+                trackGradient={hueLensGradient(
+                  coffeeHueLensTrackSegments,
+                  resolvedTheme,
+                )}
+                trackSegments={coffeeHueLensTrackSegments}
+                resolvedTheme={resolvedTheme}
+              />
+            </div>
             {coffeeBotsLibrary.length === 0 ? (
               <div className={styles.coffeePickerEmptyState}>
                 <p className={styles.coffeePickerEmpty}>
@@ -137303,6 +137573,7 @@ function HomeContent(): React.JSX.Element {
                     <ChatMiniBotAvatar
                       size="room"
                       thinking={false}
+                      talking={galleryMouthAnimated}
                       color={debateAvatarAccentColor}
                       alloyColor={botFrameMetalAlloyColor(
                         coffeeSeatVoicePreset(debateIdentityBot),
@@ -137346,6 +137617,7 @@ function HomeContent(): React.JSX.Element {
                               faceEyeOffsetY={faceStyle.eyeOffsetY}
                               faceEyeRotationDeg={faceStyle.eyeRotationDeg}
                               faceEyeCount={faceStyle.eyeCount}
+                              faceBlinkCount={faceStyle.blinkCount}
                               faceMouthScale={faceStyle.mouthScale}
                               faceMouthOffsetX={faceStyle.mouthOffsetX}
                               faceMouthOffsetY={faceStyle.mouthOffsetY}
@@ -138050,29 +138322,19 @@ function HomeContent(): React.JSX.Element {
                 ? null
                 : (bots.find((candidate) => candidate.id === botSummary.id) ??
                   null);
-              const archiveFaceStyle = archiveBot
-                ? resolveBotFaceStyleForBot(archiveBot)
-                : zenDefaultPrismFaceStyle;
               return (
-                <BotAvatarMicroRenderer
-                  moodKey="neutral"
-                  color={
-                    archiveBot
-                      ? botOrPrismAccentForTheme(
-                          archiveBot.color,
-                          renderTheme,
-                        )
-                      : prismDefaultAccentForTheme(renderTheme)
-                  }
-                  voicePreset={coffeeSeatVoicePreset(archiveBot)}
-                  faceStyle={archiveFaceStyle}
+                <EmptyStateHeroMiniBot
+                  bot={archiveBot}
+                  resolvedTheme={renderTheme}
                   isTalking={avatarState.talking}
                   mouthShape={avatarState.mouthShape}
-                  scheduleKey={`signal-archive-micro-${botSummary.id}`}
-                  avatarDetails={
-                    archiveBot ? resolveBotAvatarDetails(archiveBot) : null
-                  }
-                  className={styles.signalArchiveMicroAvatar}
+                  size="room"
+                  lightMode="off"
+                  facing={avatarState.facing}
+                  defaultPrismGlyph={zenDefaultPrismGlyph}
+                  defaultPrismFaceStyle={zenDefaultPrismFaceStyle}
+                  scheduleKey={`signal-archive-mini-${botSummary.id}`}
+                  className={styles.signalArchiveMiniAvatar}
                 />
               );
             }
