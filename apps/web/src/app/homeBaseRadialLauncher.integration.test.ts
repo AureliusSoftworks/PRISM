@@ -15,9 +15,13 @@ const firstRunSource = readFileSync(
   new URL("./firstRunOnboarding.ts", import.meta.url),
   "utf8",
 );
+const modeTutorialSource = readFileSync(
+  new URL("./modeTutorials.ts", import.meta.url),
+  "utf8",
+);
 
 describe("Home Base radial launcher integration", () => {
-  it("is scoped to the docked Home orb and preserves ordinary orb behavior", () => {
+  it("gives the Zen canvas orb a radial-only tap while preserving Chat behavior", () => {
     assert.match(
       componentSource,
       /chatHomeOrbDocked \? beginHomeBaseRadialPointer : beginDrag/u,
@@ -29,6 +33,14 @@ describe("Home Base radial launcher integration", () => {
     assert.match(
       componentSource,
       /released\.effect === "activate-source"[\s\S]*playPrismCompanionGlassTap\(\)[\s\S]*activatePrismConversation\(\)/u,
+    );
+    assert.match(
+      componentSource,
+      /released\.effect === "activate-source" && zenCanvasOrb[\s\S]*type: "open-keyboard"[\s\S]*setHomeBaseRadialLayout\(measurement\.layout\)/u,
+    );
+    assert.match(
+      componentSource,
+      /if \(zenCanvasOrb\) \{[\s\S]*openHomeBaseRadialFromKeyboard\(\);[\s\S]*return;/u,
     );
     assert.match(
       componentSource,
@@ -45,17 +57,30 @@ describe("Home Base radial launcher integration", () => {
   });
 
   it("derives targets, glyphs, and navigation from existing applet sources", () => {
+    const homeBaseTargetsSource = pageSource.slice(
+      pageSource.indexOf("homeBaseAppletTargets={["),
+      pageSource.indexOf("onHomeBaseAppletSelect=", pageSource.indexOf("homeBaseAppletTargets={[")),
+    );
     assert.match(
       pageSource,
-      /homeBaseAppletTargets=\{prismTopLevelSwitcherApplets\(\)/u,
+      /homeBaseAppletTargets=\{\[[\s\S]*prismTopLevelSwitcherApplets\(\)/u,
     );
     assert.match(pageSource, /function PrismAppletGlyph/u);
     assert.match(
       pageSource,
       /onHomeBaseAppletSelect=\{\(appletId\) =>[\s\S]*switchToSelectableApplet/u,
     );
-    assert.doesNotMatch(pageSource, /id: "assistant"/u);
-    assert.doesNotMatch(pageSource, /label: "Assistant"/u);
+    assert.doesNotMatch(homeBaseTargetsSource, /id: "assistant"/u);
+    assert.doesNotMatch(homeBaseTargetsSource, /label: "Assistant"/u);
+    assert.doesNotMatch(homeBaseTargetsSource, /kind: "assistant"/u);
+    assert.match(
+      componentSource,
+      /selectedTarget\?\.kind === "assistant"[\s\S]*openAndFocusNearPoint/u,
+    );
+    assert.match(
+      componentSource,
+      /openAndFocusNearPoint[\s\S]*point\.x \/ Math\.max\(1, window\.innerWidth\)[\s\S]*setPosition\(next\)[\s\S]*presentAssistantConversation\(\)/u,
+    );
     assert.match(
       pageSource,
       /onSelect: \(\) => switchToSelectableApplet\(applet\.id\)/u,
@@ -130,5 +155,6 @@ describe("Home Base radial launcher integration", () => {
       /data-tutorial-target="prism-companion"/u,
     );
     assert.doesNotMatch(firstRunSource, /radial|hold for applets/iu);
+    assert.doesNotMatch(modeTutorialSource, /choose Assistant from that radial/iu);
   });
 });

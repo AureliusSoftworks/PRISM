@@ -282,6 +282,8 @@ export interface PrismCompanionProps {
   chatHomeHeroDocked?: boolean;
   /** Home Base-only applet registry entries rendered around the held orb. */
   homeBaseAppletTargets?: readonly PrismCompanionHomeAppletTarget[];
+  /** The Zen all-bots canvas orb opens its radial on tap instead of opening chat. */
+  zenCanvasOrb?: boolean;
   onHomeBaseAppletSelect?: (appletId: string) => void;
   onContinueFocusedChat?: (
     handoff: PrismCompanionFocusedChatHandoff,
@@ -321,6 +323,7 @@ export interface PrismCompanionHomeAppletTarget {
   id: string;
   label: string;
   glyph: ReactNode;
+  kind?: "applet" | "assistant";
 }
 
 function nextPrismRefractPaint(signal: AbortSignal): Promise<void> {
@@ -609,6 +612,7 @@ export default function PrismCompanion({
   zenSessionIdleGapMs = DEFAULT_PRISM_COMPANION_SESSION_IDLE_GAP_MS,
   chatHomeHeroDocked = false,
   homeBaseAppletTargets = [],
+  zenCanvasOrb = false,
   onHomeBaseAppletSelect,
   onContinueFocusedChat,
   onPersistentConversationChange,
@@ -1952,8 +1956,7 @@ export default function PrismCompanion({
     setPosition(dockPosition);
   }, []);
 
-  const openAndFocus = useCallback((): void => {
-    inheritChatHomeDockPosition();
+  const presentAssistantConversation = useCallback((): void => {
     clearIdleDim();
     setPanelView("chat");
     setPrismSoftSynthesisExpanded(false);
@@ -1972,10 +1975,32 @@ export default function PrismCompanion({
   }, [
     clearIdleDim,
     ensurePersistentConversation,
-    inheritChatHomeDockPosition,
     onError,
     privateMode,
   ]);
+
+  const openAndFocus = useCallback((): void => {
+    inheritChatHomeDockPosition();
+    presentAssistantConversation();
+  }, [inheritChatHomeDockPosition, presentAssistantConversation]);
+
+  const openAndFocusNearPoint = useCallback(
+    (point: HomeBaseRadialPoint): void => {
+      stopInertia();
+      const next = clampPrismCompanionPosition(
+        {
+          x: point.x / Math.max(1, window.innerWidth),
+          y: point.y / Math.max(1, window.innerHeight),
+        },
+        liveBoundsRef.current,
+      );
+      positionRef.current = next;
+      setPosition(next);
+      persistPosition(next);
+      presentAssistantConversation();
+    },
+    [persistPosition, presentAssistantConversation, stopInertia],
+  );
 
   const toggleSoftSynthesisFromOrb = useCallback((): void => {
     if (!softSynthesisUi.expanded) inheritChatHomeDockPosition();
@@ -4352,7 +4377,12 @@ export default function PrismCompanion({
         () => {
           homeBaseRadialHandoffTimerRef.current = null;
           if (homeBaseRadialRunRef.current !== run) return;
-          onHomeBaseAppletSelect?.(targetId);
+          const selectedTarget = homeBaseAppletTargets.find(
+            (target) => target.id === targetId,
+          );
+          const selectedPosition = homeBaseRadialLayout.find(
+            (target) => target.id === targetId,
+          );
           const finished = transitionHomeBaseRadialGesture(
             homeBaseRadialGestureRef.current,
             { type: "finish" },
@@ -4361,11 +4391,29 @@ export default function PrismCompanion({
           setHomeBaseRadialPointer(null);
           setHomeBaseRadialLayout([]);
           setHomeBaseRadialTargetRadius(HOME_BASE_RADIAL_TARGET_RADIUS_PX);
+          if (selectedTarget?.kind === "assistant") {
+            openAndFocusNearPoint(
+              selectedPosition ??
+                homeBaseRadialSource ?? {
+                  x: window.innerWidth / 2,
+                  y: window.innerHeight / 2,
+                },
+            );
+          } else {
+            onHomeBaseAppletSelect?.(targetId);
+          }
         },
         reducedMotion ? 40 : HOME_BASE_RADIAL_HANDOFF_MS,
       );
     },
-    [onHomeBaseAppletSelect, publishHomeBaseRadialState],
+    [
+      homeBaseAppletTargets,
+      homeBaseRadialLayout,
+      homeBaseRadialSource,
+      onHomeBaseAppletSelect,
+      openAndFocusNearPoint,
+      publishHomeBaseRadialState,
+    ],
   );
 
   const selectHomeBaseRadialTarget = useCallback(
@@ -4508,7 +4556,20 @@ export default function PrismCompanion({
       publishHomeBaseRadialState(released.state);
       setHomeBaseRadialPointer(null);
       setHomeBaseRadialLayout([]);
-      if (released.effect === "activate-source") {
+      if (released.effect === "activate-source" && zenCanvasOrb) {
+        const measurement = measureHomeBaseRadial();
+        if (measurement) {
+          const opened = transitionHomeBaseRadialGesture(released.state, {
+            type: "open-keyboard",
+            initialId: null,
+          });
+          setHomeBaseRadialSource(measurement.source);
+          setHomeBaseRadialPointer(null);
+          setHomeBaseRadialLayout(measurement.layout);
+          setHomeBaseRadialTargetRadius(measurement.targetRadius);
+          publishHomeBaseRadialState(opened.state);
+        }
+      } else if (released.effect === "activate-source") {
         playPrismCompanionGlassTap();
         activatePrismConversation();
       }
@@ -5937,7 +5998,9 @@ export default function PrismCompanion({
           data-prism-companion-avatar="true"
           aria-label={
             chatHomeOrbDocked
-              ? "Open Prism assistant. Hold for applets."
+              ? zenCanvasOrb
+                ? "Choose a PRISM applet"
+                : "Open Prism assistant. Hold for applets."
               : softSynthesisActive
               ? softSynthesisUi.expanded
                 ? "Minimize soft synthesis"
@@ -6007,6 +6070,10 @@ export default function PrismCompanion({
               if (homeBaseRadialSuppressClickRef.current) {
                 homeBaseRadialSuppressClickRef.current = false;
                 event.preventDefault();
+                return;
+              }
+              if (zenCanvasOrb) {
+                openHomeBaseRadialFromKeyboard();
                 return;
               }
               playPrismCompanionGlassTap();

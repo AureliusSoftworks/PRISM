@@ -162,7 +162,7 @@ test("keeps the companion explicit, keyboard accessible, and capability-driven",
   assert.match(handoffCanvas, /Only this selection will cross surfaces/u);
 });
 
-test("opens the assistant menu from every live orb, including the Home hero", () => {
+test("keeps the Zen canvas orb distinct while ordinary live orbs open the assistant", () => {
   assert.match(component, /presentation\?: PrismCompanionPresentation/u);
   assert.doesNotMatch(component, /onZenSummon/u);
   assert.match(
@@ -177,6 +177,11 @@ test("opens the assistant menu from every live orb, including the Home hero", ()
       4,
   );
   assert.match(page, /presentation=\{view === "chat" \? chatPresentation : null\}/u);
+  assert.match(page, /zenCanvasOrb=\{chatPresentation === "zen"\}/u);
+  assert.match(
+    component,
+    /zenCanvasOrb[\s\S]*"Choose a PRISM applet"/u,
+  );
   assert.doesNotMatch(page, /onZenSummon=/u);
   assert.doesNotMatch(page, /summonRunId/u);
   assert.doesNotMatch(page, /summonPrismIntoFreshChat/u);
