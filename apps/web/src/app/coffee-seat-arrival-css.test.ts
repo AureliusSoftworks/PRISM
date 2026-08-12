@@ -1628,8 +1628,6 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(grimeRule, /inset:\s*0\s*;/);
     assert.match(grimeRule, /z-index:\s*8\s*;/);
-    assert.match(grimeRule, /var\(--bot-face-screen-glare-x,\s*38%\)/);
-    assert.match(grimeRule, /var\(--bot-face-screen-glare-y,\s*44%\)/);
     assert.doesNotMatch(grimeRule, /repeating-linear-gradient/);
     assert.match(grimeRule, /opacity:\s*1\s*;/);
     assert.match(grimeRule, /mix-blend-mode:\s*normal\s*;/);

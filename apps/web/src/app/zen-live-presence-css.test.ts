@@ -1202,11 +1202,8 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(grimeRule, /inset:\s*0\s*;/);
     assert.match(grimeRule, /z-index:\s*8\s*;/);
-    assert.match(grimeRule, /var\(--bot-face-screen-glare-x,\s*38%\)/);
-    assert.match(grimeRule, /var\(--bot-face-screen-glare-y,\s*44%\)/);
     assert.match(grimeRule, /var\(--crt-vignette-strength\)/);
     assert.match(grimeRule, /var\(--crt-fresnel-strength\)/);
-    assert.match(grimeRule, /var\(--crt-glare-strength\)/);
     assert.doesNotMatch(grimeRule, /repeating-radial-gradient/);
     assert.doesNotMatch(grimeRule, /repeating-linear-gradient/);
     assert.match(grimeRule, /mix-blend-mode:\s*normal\s*;/);

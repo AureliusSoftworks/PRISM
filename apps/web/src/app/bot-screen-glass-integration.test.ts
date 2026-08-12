@@ -27,6 +27,29 @@ test("full avatars mount authored residue and distortion above phosphor", () => 
     cssSource,
     /\.zenLiveBotPresenceScreenGlass \.botFaceScreenGlassDistortion[\s\S]*backdrop-filter:\s*blur/,
   );
+  const fullSizeGlassRule = cssSource.match(
+    /\.zenLiveBotPresenceScreenGlass\s*\{[\s\S]*?\n\}/u,
+  )?.[0];
+  assert.ok(fullSizeGlassRule);
+  assert.match(
+    fullSizeGlassRule,
+    /--bot-face-screen-glass-background:\s*none\s*;/u,
+  );
+  assert.match(
+    fullSizeGlassRule,
+    /--bot-face-screen-glass-opacity:\s*1\s*;/u,
+  );
+  assert.match(
+    fullSizeGlassRule,
+    /--bot-face-screen-specular-opacity:\s*0\.055\s*;/u,
+  );
+  assert.doesNotMatch(fullSizeGlassRule, /linear-gradient\(/u);
+  const curvatureRule = cssSource.match(
+    /\.botFaceCrtGrimeLayer\s*\{[\s\S]*?\n\}/u,
+  )?.[0];
+  assert.ok(curvatureRule);
+  assert.doesNotMatch(curvatureRule, /linear-gradient\(/u);
+  assert.doesNotMatch(curvatureRule, /--bot-face-screen-glare-[xy]/u);
   assert.doesNotMatch(
     readFileSync(join(appDir, "chatMiniBotAvatar.tsx"), "utf8"),
     /BotFaceScreenGlass|data-screen-glass-layer/,

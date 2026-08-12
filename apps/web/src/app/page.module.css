@@ -29110,7 +29110,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   mix-blend-mode: multiply;
 }
 
-/* Curvature and Fresnel: broad fields make the tube feel convex, not patterned. */
+/* Screen-local curvature only. Authored wear belongs to the high-resolution
+   residue/distortion maps in BotFaceScreenGlass; do not synthesize a generic
+   diagonal smear over every identity. */
 .botFaceCrtGrimeLayer {
   position: absolute;
   inset: 0;
@@ -29129,32 +29131,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       transparent 68%,
       rgba(255, 255, 255, calc(var(--crt-fresnel-strength) * 0.34)) 84%,
       transparent 96%
-    ),
-    radial-gradient(
-      ellipse 74% 32% at var(--bot-face-screen-glare-x, 38%)
-        var(--bot-face-screen-glare-y, 44%),
-      rgba(255, 255, 255, calc(var(--crt-glare-strength) * 0.2)),
-      transparent 68%
-    ),
-    linear-gradient(
-      118deg,
-      transparent 18%,
-      rgba(255, 255, 255, calc(var(--crt-glare-strength) * 0.12)) 43%,
-      transparent 62%
-    ),
-    radial-gradient(
-      ellipse 52% 80% at 16% 50%,
-      rgba(255, 255, 255, calc(var(--crt-fresnel-strength) * 0.14)),
-      transparent 64%
     );
-  background-size:
-    100% 100%,
-    100% 100%,
-    100% 100%,
-    100% 100%,
-    100% 100%;
-  background-position: center, center, center, center, center;
-  background-repeat: no-repeat, no-repeat, no-repeat, no-repeat, no-repeat;
+  background-size: 100% 100%, 100% 100%;
+  background-position: center, center;
+  background-repeat: no-repeat, no-repeat;
   opacity: 1;
   mix-blend-mode: normal;
   -webkit-backdrop-filter: blur(var(--bot-face-crt-grime-blur)) saturate(1.02)
@@ -29342,42 +29322,22 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --bot-face-screen-bottom: 0;
   --bot-face-screen-radius: 0;
   --bot-face-screen-mask-image: url("/bot-frame/bot-frame-screen-mask-glass.png?v=1000");
-  /* Full-size lens only. Broad, non-repeating gradients keep the material
-     readable without introducing texture noise into the phosphor artwork. */
-  --bot-face-screen-glass-background:
-    linear-gradient(
-      138deg,
-      transparent 0 26%,
-      rgb(255 255 255 / 0.18) 34%,
-      rgb(255 255 255 / 0.055) 40%,
-      transparent 47% 100%
-    ),
-    radial-gradient(
-      ellipse at 50% 48%,
-      transparent 0 56%,
-      rgb(255 255 255 / 0.16) 72%,
-      rgb(255 255 255 / 0.045) 83%,
-      transparent 96%
-    ),
-    radial-gradient(
-      circle at 66% 72%,
-      rgb(255 255 255 / 0.055),
-      transparent 36%
-    );
+  /* Keep the full-size lens optically clear. The authored 1024px residue and
+     distortion maps below provide each bot's grime, scuffs, and gunk. */
+  --bot-face-screen-glass-background: none;
   --bot-face-screen-glass-z: 0;
-  --bot-face-screen-glass-opacity: var(
-    --zen-live-bot-screen-glass-overlay-opacity,
-    0.34
-  );
+  /* The parent must remain fully present or its opacity also suppresses the
+     authored child maps. Their own per-profile opacity controls wear strength. */
+  --bot-face-screen-glass-opacity: 1;
   --bot-face-screen-glare-opacity: var(
     --zen-live-bot-screen-glare-overlay-opacity,
     0.24
   );
-  --bot-face-screen-specular-opacity: 0.68;
+  --bot-face-screen-specular-opacity: 0.055;
   --bot-face-screen-glass-shadow:
-    inset 0 0 0 1px rgb(255 255 255 / 0.18),
-    inset 0 10px 18px rgb(255 255 255 / 0.045),
-    inset 0 -14px 24px rgb(0 0 0 / 0.2);
+    inset 0 0 0 1px rgb(255 255 255 / 0.025),
+    inset 0 10px 18px rgb(255 255 255 / 0.005),
+    inset 0 -14px 24px rgb(0 0 0 / 0.04);
 }
 
 /* Authored handling maps are square and screen-local. Register the square to
