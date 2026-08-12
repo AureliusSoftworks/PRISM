@@ -1165,7 +1165,6 @@ import {
   type BotPresenceBeatV1,
   type BotResponseCueTriggerV1,
   type BotPowerV1,
-  type BotPowerTargetV1,
   type BotPowerObserverProjectionV1,
   type BotProfileScaleValue,
   type BotVoicePreset,
@@ -22869,7 +22868,6 @@ function ComposerBotPicker({
                 {selectedBot.name}
               </span>
             )}
-            <BotPowerNameplateIndicator powers={selectedBot.powers} />
           </>
         ) : (
           <>
@@ -42976,215 +42974,6 @@ function BotAvatarFaceControls({
         </div>
       ) : null}
     </section>
-  );
-}
-
-function BotPowerBadge({
-  powers,
-  resolved,
-  passive = false,
-}: {
-  powers: BotPowerV1[] | null | undefined;
-  resolved?: CoffeePowerPlanV1["bots"][string] | null;
-  passive?: boolean;
-}): React.JSX.Element | null {
-  const [open, setOpen] = useState(false);
-  const active = activeBotPowersV1(powers);
-  if (active.length === 0) return null;
-  const labels = resolved?.ruleLabels?.length
-    ? resolved.ruleLabels
-    : active.map((power) => power.name).filter(Boolean);
-  const warningText = resolved?.warnings?.length
-    ? ` Warnings: ${resolved.warnings.join(" ")}`
-    : "";
-  const effects =
-    resolved?.effects ??
-    active.flatMap((power) => power.compiled?.effects ?? []);
-  const targetNames = (targets: BotPowerTargetV1[]): string => {
-    const names = targets.map((target) => {
-      switch (target.kind) {
-        case "all":
-          return "everyone";
-        case "bot":
-          return target.name;
-        case "player":
-          return "the player";
-        case "trait":
-          return target.trait;
-        default: {
-          const _exhaustive: never = target;
-          return _exhaustive;
-        }
-      }
-    });
-    return names.length > 0 ? names.join(", ") : "no matching bots";
-  };
-  const effectLines = effects.map((effect) => {
-    if (effect.type === "power_immunity")
-      return "Experiences every other bot as their ordinary unpowered self";
-    if (effect.type === "awareness")
-      return `Visible to: ${targetNames(effect.allowed)}`;
-    if (effect.type === "speech_audience")
-      return `May address: ${targetNames(effect.allowed)}`;
-    if (effect.type === "avatar_visibility")
-      return effect.mode === "hidden"
-        ? "Fully hidden, including while speaking"
-        : effect.mode === "translucent"
-          ? "Half-translucent spectral presence"
-          : "Hidden while idle; appears while speaking";
-    if (effect.type === "avatar_scale")
-      return `${effect.mode.slice(0, 1).toUpperCase()}${effect.mode.slice(1)} physical size`;
-    if (effect.type === "avatar_color_cycle")
-      return "Avatar continuously cycles through the color spectrum";
-    if (effect.type === "voice_presence")
-      return effect.mode === "loud"
-        ? "Amplified voice and larger spoken text"
-        : "Attenuated voice and smaller spoken text";
-    if (effect.type === "speech_obfuscation")
-      return "Normal-volume gibberish; intended words remain private";
-    if (effect.type === "intermittent_mute")
-      return `Half of turns go unheard with a ${effect.moodPenalty} mood cost`;
-    if (effect.type === "intermittent_audibility")
-      return "Each bot listener independently hears half of completed lines";
-    if (effect.type === "annoyance")
-      return "Half of audible lines mildly annoy one eligible audible peer";
-    if (effect.type === "social_influence") {
-      return `${effect.trigger === "session_start" ? "Session start" : "After speaking"}: ${effect.polarity} ${effect.strength} effect on ${targetNames(effect.targets)}`;
-    }
-    if (effect.type === "candor")
-      return `${effect.strength} one-response candor pressure on ${targetNames(effect.targets)}`;
-    if (effect.type === "credulity")
-      return `${effect.strength} gullible belief of every claim`;
-    if (effect.type === "anti_truth")
-      return `${effect.strength} anti-truth (soft lies; hard invert on questions)`;
-    if (effect.type === "mood_resistance")
-      return `${effect.strength} ${effect.polarity} mood resistance`;
-    if (effect.type === "cup_rate")
-      return effect.rate === "none"
-        ? "Refuses coffee"
-        : `${effect.rate.replace("_", " ")} cup pace`;
-    if (effect.type === "turn_gravity")
-      return `${effect.strength} ${effect.direction === "more" ? "speaker pull" : "speaker reserve"}`;
-    if (effect.type === "response_bond")
-      return `${effect.strength} response pull ${effect.direction} ${targetNames(effect.targets)}`;
-    if (effect.type === "topic_gravity")
-      return `${effect.strength} topic pull ${effect.direction} ${effect.topics.join(", ")}`;
-    if (effect.type === "selective_memory")
-      return `${effect.strength} ${effect.mode} memory for ${targetNames(effect.targets)}`;
-    if (effect.type === "insight")
-      return `${effect.strength} private insight into ${targetNames(effect.targets)}`;
-    if (effect.type === "response_budget")
-      return `${effect.enforcement === "hard" ? "Hard" : "Soft"} ${effect.mode} response budget`;
-    if (effect.type === "mute") return "Never speaks";
-    if (effect.type === "breathless") return "Does not breathe";
-    if (effect.type === "speech_copy")
-      return "Repeats addressed speech exactly";
-    if (effect.type === "hearing_repeat")
-      return `${effect.frequency}: requests exact repeats with a ${effect.moodPenalty} mood cost`;
-    if (effect.type === "interruption")
-      return `${effect.frequency} ${effect.strength} interruption pressure on ${targetNames(effect.targets)}`;
-    if (effect.type === "identity_mirror")
-      return "Copies the latest bot to address them";
-    if (effect.type === "identity_shapeshift")
-      return "Borrows a Library or Marketplace form until amnesia reshuffles";
-    if (effect.type === "false_name")
-      return "Believes a random persona name until amnesia reshuffles";
-    if (effect.type === "addressed_fandom")
-      return `${effect.strength} fandom for the current addressee`;
-    if (effect.type === "addressed_insult")
-      return "Fresh tailored insult for every current addressee";
-    if (effect.type === "mood_boost")
-      return `${effect.strength} mood boost for addressed listeners after speech`;
-    if (effect.type === "mood_drain")
-      return `${effect.strength} mood drain for bots that directly address the holder`;
-    if (effect.type === "eternal_introduction")
-      return "Only the current other-speaker message each turn";
-    if (effect.type === "designation")
-      return `${effect.placement === "prefix" ? "Prefixes" : "Suffixes"} other bot names with ${effect.text}`;
-    if (effect.type === "action_bias")
-      return `${effect.frequency}: ${effect.cue}`;
-    return "Active Power effect";
-  });
-  const title = `${active.map((power) => power.name).join(", ")}${labels.length ? ` — ${labels.join(", ")}` : ""}.${warningText}`;
-  const badge = (
-    <span className={styles.botPowerSurfaceBadge} aria-hidden="true">
-      <Zap size={10} strokeWidth={2.5} />
-      {active.length}
-    </span>
-  );
-  if (passive) {
-    return (
-      <span
-        className={styles.botPowerSurfaceBadgeWrap}
-        data-passive="true"
-        title={title}
-        aria-label={`${active.length} active Power${active.length === 1 ? "" : "s"}`}
-      >
-        {badge}
-      </span>
-    );
-  }
-  return (
-    <span
-      className={styles.botPowerSurfaceBadgeWrap}
-      data-open={open ? "true" : undefined}
-      title={title}
-      aria-label={`${active.length} active Power${active.length === 1 ? "" : "s"}`}
-      role="button"
-      tabIndex={0}
-      onClick={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        setOpen((current) => !current);
-      }}
-      onKeyDown={(event) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        event.preventDefault();
-        event.stopPropagation();
-        setOpen((current) => !current);
-      }}
-    >
-      {badge}
-      {open ? (
-        <span className={styles.botPowerSurfacePopover} role="status">
-          <strong>{active.map((power) => power.name).join(" · ")}</strong>
-          {effectLines.map((line) => (
-            <span key={line}>{line}</span>
-          ))}
-          {resolved?.warnings?.map((warning) => (
-            <em key={warning}>{warning}</em>
-          ))}
-        </span>
-      ) : null}
-    </span>
-  );
-}
-
-function BotPowerNameplateIndicator({
-  powers,
-  resolved,
-}: {
-  powers: BotPowerV1[] | null | undefined;
-  resolved?: CoffeePowerPlanV1["bots"][string] | null;
-}): React.JSX.Element | null {
-  const active = activeBotPowersV1(powers);
-  if (active.length === 0) return null;
-  const labels = resolved?.ruleLabels?.length
-    ? resolved.ruleLabels
-    : active.map((power) => power.name).filter(Boolean);
-  const warningText = resolved?.warnings?.length
-    ? ` Warnings: ${resolved.warnings.join(" ")}`
-    : "";
-  const title = `${active.map((power) => power.name).join(", ")}${labels.length ? ` — ${labels.join(", ")}` : ""}.${warningText}`;
-  return (
-    <span
-      className={styles.botPowerNameplateIndicator}
-      title={title}
-      aria-label={`${active.length} active Power${active.length === 1 ? "" : "s"}`}
-    >
-      <Zap size={9} strokeWidth={2.4} aria-hidden="true" />
-      <span aria-hidden="true">{active.length}</span>
-    </span>
   );
 }
 
@@ -133055,12 +132844,6 @@ function HomeContent(): React.JSX.Element {
                     ) : null}
                     <div className={styles.coffeeSeatGlowPill}>
                       {rosterPreviewSeat ? null : (
-                        <BotPowerNameplateIndicator
-                          powers={bot.powers}
-                          resolved={coffeePowerPlan?.bots[bot.id] ?? null}
-                        />
-                      )}
-                      {rosterPreviewSeat ? null : (
                         <span
                           className={styles.coffeeSeatGlowGlyph}
                           aria-hidden="true"
@@ -138310,16 +138093,11 @@ function HomeContent(): React.JSX.Element {
                     avatarDetailsColor={color}
                   />
                 </BotAmbientPresenceRig>
-                {signalDashboardAvatar ? null : (
-                  <>
-                    <BotPowerBadge powers={bot.powers} passive />
-                    {signalLiveSessionId
-                      ? renderLiveBotMemoryReceiptChip(bot.id, bot.name, {
-                          sessionId: signalLiveSessionId,
-                        })
-                      : null}
-                  </>
-                )}
+                {!signalDashboardAvatar && signalLiveSessionId
+                  ? renderLiveBotMemoryReceiptChip(bot.id, bot.name, {
+                      sessionId: signalLiveSessionId,
+                    })
+                  : null}
               </span>
             );
           }}

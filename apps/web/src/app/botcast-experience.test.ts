@@ -496,10 +496,7 @@ describe("Signal experience shell", () => {
       source,
       /guest && guestHasCoffeeCup[\s\S]{0,120}layoutHandle\("guestCup"/u,
     );
-    assert.match(
-      pageSource,
-      /<BotPowerBadge powers=\{bot\.powers\} passive \/>/u,
-    );
+    assert.doesNotMatch(pageSource, /BotPowerBadge/u);
     assert.match(source, /data-sip-requested=\{hostSipping/u);
     assert.match(source, /data-sip-requested=\{guestSipping/u);
     assert.match(source, /hostSipping && hostCupTravel\.sipFaceActive/u);

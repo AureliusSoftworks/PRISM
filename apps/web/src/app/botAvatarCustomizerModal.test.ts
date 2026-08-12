@@ -502,7 +502,7 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   const eyesTabSource = pageSource.slice(eyesBranchStart, mouthBranchStart);
   const mouthTabSource = pageSource.slice(
     mouthBranchStart,
-    pageSource.indexOf("function BotPowerNameplateIndicator", mouthBranchStart),
+    pageSource.indexOf("function BotPowersEditor", mouthBranchStart),
   );
   assert.doesNotMatch(faceTabSource, /label="Eye size"/);
   assert.doesNotMatch(faceTabSource, /label="Eye position"/);
@@ -1796,7 +1796,10 @@ test("Avatar Studio face controls use Wield Prism instead of shuffle buttons", (
     coordinateStart,
   );
   const faceStart = pageSource.indexOf("function BotAvatarFaceControls(");
-  const faceEnd = pageSource.indexOf("function BotPowerBadge(", faceStart);
+  const faceEnd = pageSource.indexOf(
+    "function BotPowersEditor(",
+    faceStart,
+  );
 
   assert.notEqual(rangeStart, -1);
   assert.notEqual(rangeEnd, -1);
@@ -2492,23 +2495,7 @@ test("Powers read as an app-wide bot trait across active surfaces", () => {
     /Describe the magic or hard rule\. PRISM names it and makes it real\./u,
   );
   assert.doesNotMatch(pageSource, /apply only during Coffee sessions/u);
-  assert.match(
-    pageSource,
-    /<BotPowerNameplateIndicator powers=\{selectedBot\.powers\} \/>/u,
-  );
-  assert.match(
-    pageSource,
-    /<BotPowerNameplateIndicator[\s\S]{0,120}powers=\{bot\.powers\}[\s\S]{0,120}resolved=\{coffeePowerPlan\?\.bots\[bot\.id\] \?\? null\}/u,
-  );
-  assert.equal(
-    [...pageSource.matchAll(/<BotPowerBadge\b/gu)].length,
-    1,
-    "the released Signal render callback retains its passive legacy badge",
-  );
-  assert.match(
-    pageSource,
-    /<BotPowerBadge powers=\{bot\.powers\} passive \/>/u,
-  );
+  assert.doesNotMatch(pageSource, /BotPower(?:Badge|NameplateIndicator)/u);
   assert.match(pageSource, /botPowerCupRateMultiplierForBotV1/u);
   assert.match(
     pageSource,
@@ -2551,41 +2538,7 @@ test("Power authoring locks its source, rerolls one artifact, and explains behav
   assert.match(cssSource, /\.botPowerBehaviorCard/u);
 });
 
-test("Power indicators stay unboxed inside glyph-bearing nameplates", () => {
-  assert.equal(
-    [...pageSource.matchAll(/<BotPowerNameplateIndicator\b/gu)].length,
-    2,
-  );
-  assert.match(
-    pageSource,
-    /styles\.composeBotTriggerGlyph[\s\S]{0,240}<BotPowerNameplateIndicator powers=\{selectedBot\.powers\}/u,
-  );
-  assert.match(
-    pageSource,
-    /className=\{styles\.coffeeSeatGlowPill\}[\s\S]{0,180}<BotPowerNameplateIndicator[\s\S]{0,180}<span className=\{styles\.coffeeSeatGlowGlyph\}/u,
-  );
-  assert.doesNotMatch(
-    pageSource,
-    /styles\.botMarketplaceCardGlyph[\s\S]{0,180}<BotPowerNameplateIndicator/u,
-  );
-  assert.doesNotMatch(
-    pageSource,
-    /className=\{styles\.storyBotGlyph\}[\s\S]{0,120}<BotPowerNameplateIndicator/u,
-  );
-  assert.doesNotMatch(
-    pageSource,
-    /className=\{styles\.coffeeMessageBotLabel\}[\s\S]{0,180}<BotPowerNameplateIndicator/u,
-  );
-  assert.match(
-    cssSource,
-    /\.botPowerNameplateIndicator\s*\{[\s\S]{0,220}opacity:\s*0\.68/u,
-  );
-  assert.match(
-    cssSource,
-    /\.coffeeSeatGlowPill:has\(> \.botPowerNameplateIndicator\)[\s\S]{0,180}grid-template-columns/u,
-  );
-  assert.doesNotMatch(
-    cssSource,
-    /\.coffeeSeatGlowPill > \.botPowerNameplateIndicator\s*\{[^}]*position:\s*absolute/u,
-  );
+test("Power counters never render beside or below bot avatars", () => {
+  assert.doesNotMatch(pageSource, /BotPower(?:Badge|NameplateIndicator)/u);
+  assert.doesNotMatch(cssSource, /botPower(?:SurfaceBadge|NameplateIndicator)/u);
 });

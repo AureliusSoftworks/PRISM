@@ -160,12 +160,9 @@ describe("Settings memory controls", () => {
     assert.doesNotMatch(signalAvatar, /screenMode=/u);
     assert.match(
       signalAvatar,
-      /signalDashboardAvatar \? null : \([\s\S]*?<BotPowerBadge[\s\S]*?signalLiveSessionId[\s\S]*?renderLiveBotMemoryReceiptChip\(bot\.id, bot\.name, \{[\s\S]*?sessionId: signalLiveSessionId/u,
+      /!signalDashboardAvatar && signalLiveSessionId[\s\S]*?renderLiveBotMemoryReceiptChip\(bot\.id, bot\.name, \{[\s\S]*?sessionId: signalLiveSessionId/u,
     );
-    assert.doesNotMatch(
-      signalAvatar,
-      /<BotPowerBadge powers=\{bot\.powers\} passive \/>[\s\S]*?signalDashboardAvatar \? null/u,
-    );
+    assert.doesNotMatch(pageSource, /BotPowerBadge/u);
     assert.match(
       pageSource,
       /candidate\.conversationId === options\.sessionId/u,

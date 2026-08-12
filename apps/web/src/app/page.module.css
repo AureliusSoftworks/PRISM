@@ -36567,10 +36567,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   max-width: 11ch; /* bot names beyond ~11 chars ellipsize gracefully */
 }
 
-.composeBotTrigger .botPowerNameplateIndicator {
-  color: var(--bot-color, currentColor);
-}
-
 .composeBotTrigger:disabled .composeBotTriggerGlyph,
 .composeBotTrigger:disabled .composeBotTriggerName,
 .composeBotTrigger:disabled .composeBotTriggerChevron {
@@ -51898,25 +51894,6 @@ a.settingsCreditItem:focus-visible {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.botPowerNameplateIndicator {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  flex: 0 0 auto;
-  min-width: 0;
-  color: currentColor;
-  opacity: 0.68;
-  font-size: 9px;
-  font-weight: 850;
-  line-height: 1;
-}
-
-.botPowerNameplateIndicator svg {
-  width: 9px;
-  height: 9px;
 }
 
 .coffeePowerWarning {
@@ -71032,31 +71009,6 @@ a.settingsCreditItem:focus-visible {
     translateY(calc(var(--coffee-seat-name-plate-y) + 6px)) scale(0.96);
 }
 
-.coffeeSeatGlowPill:has(> .botPowerNameplateIndicator) {
-  grid-template-columns:
-    var(--coffee-seat-glyph-slot-width) 16px minmax(0, 1fr)
-    var(--coffee-seat-cup-slot-width);
-}
-
-.coffeeSeat[data-cup-side="left"]
-  .coffeeSeatGlowPill:has(> .botPowerNameplateIndicator) {
-  grid-template-columns:
-    var(--coffee-seat-cup-slot-width) minmax(0, 1fr) 16px
-    var(--coffee-seat-glyph-slot-width);
-}
-
-.coffeeSeatGlowPill > .botPowerNameplateIndicator {
-  grid-column: 2;
-  grid-row: 1;
-  color: var(--coffee-seat-emotion-color);
-}
-
-.coffeeSeat[data-cup-side="left"]
-  .coffeeSeatGlowPill
-  > .botPowerNameplateIndicator {
-  grid-column: 3;
-}
-
 .coffeeSeatGlowGlyph {
   grid-column: 1;
   grid-row: 1;
@@ -71075,22 +71027,6 @@ a.settingsCreditItem:focus-visible {
 
 .coffeeSeat[data-cup-side="left"] .coffeeSeatGlowGlyph {
   grid-column: 3;
-}
-
-.coffeeSeatGlowPill:has(> .botPowerNameplateIndicator) .coffeeSeatGlowText {
-  grid-column: 3;
-}
-
-.coffeeSeat[data-cup-side="left"]
-  .coffeeSeatGlowPill:has(> .botPowerNameplateIndicator)
-  .coffeeSeatGlowGlyph {
-  grid-column: 4;
-}
-
-.coffeeSeat[data-cup-side="left"]
-  .coffeeSeatGlowPill:has(> .botPowerNameplateIndicator)
-  .coffeeSeatGlowText {
-  grid-column: 2;
 }
 
 .coffeeSeat[data-cup-side="left"] .coffeeSeatGlowPill {
