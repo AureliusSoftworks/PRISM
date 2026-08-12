@@ -2985,6 +2985,21 @@ describe("Signal experience shell", () => {
     assert.match(css, /prefers-reduced-motion[\s\S]*?\.episodeDeleteButton/u);
   });
 
+  it("shows editable host and guest portraits on archived episodes", () => {
+    assert.match(source, /className=\{styles\.episodeParticipants\}/u);
+    assert.match(source, /renderArchiveParticipant\(item, "host"\)/u);
+    assert.match(source, /renderArchiveParticipant\(item, "guest"\)/u);
+    assert.match(source, /data-bot-id=\{libraryBot\.id\}/u);
+    assert.match(
+      source,
+      /onBotContextMenu\?\.\(libraryBot\.id, event\.clientX, event\.clientY\)/u,
+    );
+    assert.match(source, /onBotContextLongPressStart\?\.\(event, libraryBot\.id\)/u);
+    assert.match(source, /if \(!libraryBot\) \{/u);
+    assert.match(source, /data-interactive="false"/u);
+    assert.match(css, /\.episodeParticipantAvatar \[data-signal-bot-presence="true"\]/u);
+  });
+
   it("opens a bounded ephemeral host chat from the dashboard avatar", () => {
     assert.match(source, /data-tutorial-target="botcast-host-chat"/u);
     assert.match(source, /className=\{styles\.showCardHostTrigger\}/u);

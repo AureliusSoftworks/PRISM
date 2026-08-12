@@ -11654,6 +11654,99 @@ export function BotcastExperience({
   const archiveEpisodes = episodes.filter(
     (item) => item.status === "completed",
   );
+  const renderArchiveParticipant = (
+    item: BotcastEpisodeSummary,
+    role: "host" | "guest",
+  ): React.JSX.Element => {
+    const producerGuest = role === "guest" && item.guestKind === "producer";
+    const botId = role === "host" ? item.hostBotId : item.guestBotId;
+    const libraryBot = producerGuest ? null : botsById.get(botId);
+    const participant = producerGuest
+      ? signalProducerGuestBotSummary(item, selectedShow?.accentColor)
+      : libraryBot ?? {
+          id: botId,
+          name:
+            role === "guest"
+              ? (item.guestName?.trim() || "Former guest")
+              : "Former host",
+          color: null,
+          glyph: null,
+          personaTemperament: "neutral" as const,
+        };
+    const roleLabel = role === "host" ? "Host" : "Guest";
+    const portrait = (
+      <span className={styles.episodeParticipantAvatar} aria-hidden="true">
+        {renderAvatar?.(participant, {
+          talking: false,
+          thinking: false,
+          sipping: false,
+          role,
+          surface: "dashboard",
+          sfxEnabled: false,
+          facing: role === "host" ? "right" : "left",
+          theme,
+          mouthShape: "closed",
+        }) ?? avatarFallback(participant)}
+      </span>
+    );
+    const label = (
+      <span className={styles.episodeParticipantLabel}>
+        <small>{roleLabel}</small>
+        <strong>{participant.name}</strong>
+      </span>
+    );
+
+    if (!libraryBot) {
+      return (
+        <span
+          key={role}
+          className={styles.episodeParticipantChip}
+          data-interactive="false"
+          title={
+            producerGuest
+              ? `${participant.name} appeared as the Producer guest`
+              : `${participant.name} is no longer in your bot library`
+          }
+        >
+          {portrait}
+          {label}
+        </span>
+      );
+    }
+
+    return (
+      <button
+        key={role}
+        type="button"
+        className={styles.episodeParticipantChip}
+        data-bot-id={libraryBot.id}
+        aria-label={`Adjust ${libraryBot.name}, episode ${roleLabel.toLowerCase()}`}
+        title={`Adjust ${libraryBot.name}`}
+        onPointerDown={(event) =>
+          onBotContextLongPressStart?.(event, libraryBot.id)
+        }
+        onPointerUp={onBotContextLongPressEnd}
+        onPointerCancel={onBotContextLongPressEnd}
+        onPointerMove={onBotContextLongPressMove}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onBotContextMenu?.(libraryBot.id, event.clientX, event.clientY);
+        }}
+        onClick={(event) => {
+          const bounds = event.currentTarget.getBoundingClientRect();
+          onBotContextMenu?.(
+            libraryBot.id,
+            bounds.left + bounds.width / 2,
+            bounds.top + bounds.height / 2,
+          );
+        }}
+      >
+        {portrait}
+        {label}
+      </button>
+    );
+  };
   const renderArchive = (): React.JSX.Element => (
     <section className={styles.archive} data-tutorial-target="botcast-replay">
       <div className={styles.archiveHeading}>
@@ -11690,6 +11783,13 @@ export function BotcastExperience({
                 · {episodeOutcomeLabel(item)}
               </small>
             </button>
+            <div
+              className={styles.episodeParticipants}
+              aria-label={`Participants in ${item.title}`}
+            >
+              {renderArchiveParticipant(item, "host")}
+              {renderArchiveParticipant(item, "guest")}
+            </div>
             <button
               type="button"
               className={styles.episodeDeleteButton}

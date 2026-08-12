@@ -1646,6 +1646,8 @@ describe("mode tutorials", () => {
     );
     const copy = replayStep?.body ?? "";
 
+    assert.match(copy, /compact host and guest portraits/u);
+    assert.match(copy, /click, right-click, or long-press a Library bot/u);
     assert.match(copy, /recorded voice provenance/u);
     assert.match(copy, /already marked Premium audio and needs no extra step/u);
     assert.match(copy, /Repair voice action sends only the fallback line/u);
