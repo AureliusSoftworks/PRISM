@@ -102,23 +102,31 @@ export function validateConfirmationActions(
  *  Structural on purpose, so this module stays free of transport types. */
 export interface CapabilityReversibilityFacts {
   undo: "none" | "inverse" | "quarantine";
-  risk: string;
   provider: string;
 }
 
-/** Derive the reversibility flags from a Prism capability descriptor.
+/** Derive what a Prism capability descriptor can actually tell us.
  *
- *  The API already publishes exactly the facts this policy needs, so actions
- *  routed through the capability registry should not restate them by hand.
- *  Actions that call a plain REST route have no descriptor and must be
- *  described directly. */
+ *  Both `inverse` and `quarantine` count as `reversible`: the 30-day action
+ *  journal is a real inverse, but it is a hidden store rather than a browsable
+ *  archive, so it only reaches the person if the UI offers undo at the point
+ *  of action. Mapping quarantine to `soft` would resolve a destructive delete
+ *  to `none` and hand them no way to reach a recovery that exists.
+ *
+ *  `bulk` and `soft` are deliberately not derived:
+ *
+ *  - `bulk` is a property of the *invocation*, not the capability.
+ *    `conversations.quarantine` serves both `{conversationIds: [id]}` and
+ *    `{all: true}` from one descriptor with one risk value.
+ *  - `soft` is a property of the UI model — whether the item stays visible and
+ *    restorable — which the server descriptor does not describe.
+ *
+ *  Callers set both from the call site. */
 export function reversibilityFromCapability(
   facts: CapabilityReversibilityFacts,
-): Pick<ConfirmationAction, "leavesDevice" | "reversible" | "bulk" | "soft"> {
+): Pick<ConfirmationAction, "leavesDevice" | "reversible"> {
   return {
     leavesDevice: facts.provider === "online-required",
-    reversible: facts.undo === "inverse",
-    bulk: facts.risk === "bulk",
-    soft: facts.undo === "quarantine",
+    reversible: facts.undo !== "none",
   };
 }

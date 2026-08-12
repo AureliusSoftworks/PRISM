@@ -161,54 +161,69 @@ describe("confirmation policy validation", () => {
 });
 
 describe("capability descriptor mapping", () => {
-  it("reads quarantine undo as a soft delete", () => {
-    assert.deepEqual(
-      reversibilityFromCapability({
-        undo: "quarantine",
-        risk: "destructive",
-        provider: "none",
-      }),
-      { leavesDevice: false, reversible: false, bulk: false, soft: true },
-    );
+  // The 30-day journal is a real inverse, but it is a hidden store rather than
+  // a browsable archive. Treating it as `soft` would resolve a destructive
+  // delete to `none` and leave the person no way to reach the recovery.
+  it("treats quarantine undo as reversible, not as a soft delete", () => {
+    const facts = reversibilityFromCapability({
+      undo: "quarantine",
+      provider: "none",
+    });
+    assert.deepEqual(facts, { leavesDevice: false, reversible: true });
+    assert.equal(confirmationAffordanceFor({ ...action({}), ...facts }), "undo");
   });
 
   it("reads inverse undo as reversible", () => {
     const facts = reversibilityFromCapability({
       undo: "inverse",
-      risk: "reversible",
       provider: "none",
     });
     assert.equal(facts.reversible, true);
+    assert.equal(confirmationAffordanceFor({ ...action({}), ...facts }), "undo");
+  });
+
+  it("reads absent undo as irreversible", () => {
+    const facts = reversibilityFromCapability({
+      undo: "none",
+      provider: "none",
+    });
+    assert.equal(facts.reversible, false);
     assert.equal(
       confirmationAffordanceFor({ ...action({}), ...facts }),
-      "undo",
+      "confirm",
     );
   });
 
   it("carries an online-required provider across the device boundary", () => {
     assert.equal(
-      reversibilityFromCapability({
-        undo: "none",
-        risk: "costly",
-        provider: "online-required",
-      }).leavesDevice,
+      reversibilityFromCapability({ undo: "none", provider: "online-required" })
+        .leavesDevice,
       true,
     );
   });
 
   // bots.delete is undo:"quarantine" while DELETE /api/bots/selected is raw
-  // SQL — the descriptor is what separates them.
-  it("lands a quarantine-backed single delete on `none` and a raw bulk delete on `confirm`", () => {
+  // SQL with no journal entry at all. Same-looking modals, different guarantees.
+  it("separates a quarantine-backed single delete from a raw bulk delete", () => {
     const single = {
       ...action({ id: "bots.delete" }),
-      ...reversibilityFromCapability({
-        undo: "quarantine",
-        risk: "destructive",
-        provider: "none",
-      }),
+      ...reversibilityFromCapability({ undo: "quarantine", provider: "none" }),
     };
     const bulk = action({ id: "bots.delete-selected", bulk: true });
-    assert.equal(confirmationAffordanceFor(single), "none");
+    assert.equal(confirmationAffordanceFor(single), "undo");
     assert.equal(confirmationAffordanceFor(bulk), "confirm");
+  });
+
+  // `bulk` is a property of the invocation: conversations.quarantine serves
+  // both a single id and {all:true} from one descriptor.
+  it("lets the call site raise a reversible capability to confirm when bulk", () => {
+    const facts = reversibilityFromCapability({
+      undo: "quarantine",
+      provider: "none",
+    });
+    assert.equal(
+      confirmationAffordanceFor({ ...action({}), ...facts, bulk: true }),
+      "confirm",
+    );
   });
 });

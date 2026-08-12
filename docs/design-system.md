@@ -95,32 +95,47 @@ resting on completely different guarantees. Six surfaces are affected.
 
 ### Reading tiers off the server
 
-The API already publishes the facts this policy needs.
-`PrismCapabilityDescriptorV1` carries `undo`, `risk`, and `provider`, and
+The API already publishes part of what this policy needs.
+`PrismCapabilityDescriptorV1` carries `undo` and `provider`, and
 `reversibilityFromCapability()` maps them:
 
-| Descriptor field       | Policy input        |
-| ---------------------- | ------------------- |
-| `undo: "none"`         | irreversible        |
-| `undo: "inverse"`      | `reversible`        |
-| `undo: "quarantine"`   | `soft`              |
-| `risk: "bulk"`         | `bulk`              |
+| Descriptor field              | Policy input   |
+| ----------------------------- | -------------- |
+| `undo: "none"`                | irreversible   |
+| `undo: "inverse"`             | `reversible`   |
+| `undo: "quarantine"`          | `reversible`   |
 | `provider: "online-required"` | `leavesDevice` |
 
-Actions routed through the capability registry should read their tier from the
-descriptor rather than restating it. Actions calling a plain REST route have no
-descriptor and must describe themselves — which is itself a signal that the
-route may deserve a capability.
+Quarantine maps to `reversible`, not to `soft`. The 30-day action journal
+(`PRISM_ACTION_UNDO_RETENTION_MS`) is a real inverse, but it is a hidden store
+rather than a browsable archive, so it only reaches the person if the UI offers
+undo at the point of action. Calling it `soft` would resolve a destructive
+single-item delete to `none` and hand them no route to a recovery that exists.
+
+`bulk` and `soft` are deliberately **not** derived from the descriptor, and
+call sites must set them:
+
+- `bulk` is a property of the *invocation*, not the capability.
+  `conversations.quarantine` serves both `{conversationIds: [id]}` and
+  `{all: true}` from a single descriptor with a single risk value, and those
+  two land in different tiers.
+- `soft` is a property of the UI model — whether the item remains visible and
+  restorable, as `archived_at` conversations are — which the server descriptor
+  does not describe.
+
+Actions calling a plain REST route have no descriptor and must describe
+themselves entirely, which is itself a signal that the route may deserve a
+capability.
 
 ### Current state
 
 No call sites have been migrated. The contract test's allowlist holds every
-surface found in the first inventory: 9 native browser dialogs and 40
+surface found in the first inventory: 9 native browser dialog call sites and 39
 confirmation-shaped surfaces. Of those, **nine already have a real inverse in
-the code** and are `confirm` only by habit — the migration backlog. A second
-group are permanent entries that were never confirmations at all (consent
-gates, password-match fields), and they stay on the list rather than being
-migrated.
+the code** and are `confirm` only by habit — they resolve to `undo` once
+migrated, and they are the backlog this policy exists to create. A second group
+are permanent entries that were never confirmations at all (consent gates,
+password-match fields); they stay on the list rather than being migrated.
 
 The contract test also fails when an allowlist entry's last call site
 disappears, so the list cannot quietly become fiction.

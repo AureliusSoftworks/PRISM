@@ -143,29 +143,60 @@ function basename(file: string): string {
   return file.split("/").pop() ?? file;
 }
 
+const NATIVE_DIALOG = /\bwindow\.(?:confirm|alert|prompt)\s*\(/u;
+
+/** Native dialog call sites, keyed `file :: copy`, with a count per key.
+ *  Shared by the ratchet and its staleness check so the two cannot drift. */
+function scanNativeDialogs(): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const [file, source] of sources) {
+    const lines = source.split("\n");
+    lines.forEach((line, index) => {
+      if (!NATIVE_DIALOG.test(line)) return;
+      // The copy may sit on a following line when the call is wrapped.
+      const window4 = lines.slice(index, index + 4).join(" ");
+      const copy = /["'`]([^"'`]{8,})["'`]/u.exec(window4)?.[1] ?? "(no copy)";
+      const key = `${basename(file)} :: ${copy.slice(0, 40)}`;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    });
+  }
+  return counts;
+}
+
+/** Confirmation-shaped surfaces, keyed `file :: label-or-identifier`. */
+function scanConfirmationSurfaces(): Set<string> {
+  const surfaces = new Set<string>();
+  for (const [file, source] of sources) {
+    const lines = source.split("\n");
+
+    lines.forEach((line, index) => {
+      // A JSX attribute is `role="alertdialog"`; a CSS selector is
+      // `[role="alertdialog"]`. The bracket is the whole discriminator —
+      // without it the selector strings in page.tsx and
+      // prismUniversalInputRefract.ts read as confirmation dialogs.
+      if (!/(?<!\[)role="alertdialog"/u.test(line)) return;
+      const ahead = lines.slice(index, index + 30).join(" ");
+      const label = /aria-labelledby="([^"]+)"/u.exec(ahead)?.[1];
+      surfaces.add(`${basename(file)} :: ${label ?? "(unlabelled dialog)"}`);
+    });
+
+    // State named for confirmation is the other shape a bespoke inline
+    // confirmation takes when it is not a dialog at all.
+    for (const [, id] of source.matchAll(
+      /const \[([a-zA-Z0-9_$]*[Cc]onfirm[a-zA-Z0-9_$]*)\s*,/gu,
+    )) {
+      surfaces.add(`${basename(file)} :: ${id}`);
+    }
+  }
+  return surfaces;
+}
+
 describe("confirmation contract", () => {
   it("routes every confirmation through the app, not the browser chrome", () => {
     // A native dialog cannot be styled, cannot name the specific consequence
     // in the app's own voice, and blocks the main thread — so it can never be
     // the canonical mechanism, only a thing to migrate off.
-    const nativeDialog = /\bwindow\.(?:confirm|alert|prompt)\s*\(/gu;
-    const found = new Map<string, { file: string; copy: string }>();
-    const counts = new Map<string, number>();
-
-    for (const [file, source] of sources) {
-      const lines = source.split("\n");
-      lines.forEach((line, index) => {
-        if (!nativeDialog.test(line)) return;
-        nativeDialog.lastIndex = 0;
-        // The copy may sit on a following line when the call is wrapped.
-        const window4 = lines.slice(index, index + 4).join(" ");
-        const copy = /["'`]([^"'`]{8,})["'`]/u.exec(window4)?.[1] ?? "(no copy)";
-        const key = `${basename(file)} :: ${copy.slice(0, 40)}`;
-        found.set(key, { file: basename(file), copy: copy.slice(0, 40) });
-        counts.set(key, (counts.get(key) ?? 0) + 1);
-      });
-    }
-
+    const counts = scanNativeDialogs();
     const allowed = new Map(
       GRANDFATHERED_NATIVE_DIALOGS.map((entry) => [
         `${entry.file} :: ${entry.copy}`,
@@ -174,9 +205,8 @@ describe("confirmation contract", () => {
     );
 
     const unexpected: string[] = [];
-    for (const [key] of found) {
+    for (const [key, actual] of counts) {
       const budget = allowed.get(key);
-      const actual = counts.get(key) ?? 0;
       if (budget === undefined) {
         unexpected.push(`new native dialog — ${key}`);
       } else if (actual > budget) {
@@ -193,57 +223,31 @@ describe("confirmation contract", () => {
   });
 
   it("keeps the grandfathered native-dialog list from going stale", () => {
-    // A ratchet only ratchets if removing the last call site also removes the
-    // entry, otherwise the list slowly becomes fiction.
-    const present = new Set<string>();
-    for (const [file, source] of sources) {
-      const lines = source.split("\n");
-      lines.forEach((line, index) => {
-        if (!/\bwindow\.(?:confirm|alert|prompt)\s*\(/u.test(line)) return;
-        const window4 = lines.slice(index, index + 4).join(" ");
-        const copy = /["'`]([^"'`]{8,})["'`]/u.exec(window4)?.[1] ?? "(no copy)";
-        present.add(`${basename(file)} :: ${copy.slice(0, 40)}`);
-      });
-    }
+    // A ratchet only ratchets if migrating a call site also updates the entry,
+    // otherwise the list slowly becomes fiction. Shrinking counts matter as
+    // much as a vanished key: with only a `>` check, deleting one of a
+    // duplicated pair would pass silently.
+    const counts = scanNativeDialogs();
 
-    const stale = GRANDFATHERED_NATIVE_DIALOGS.map(
-      (entry) => `${entry.file} :: ${entry.copy}`,
-    ).filter((key) => !present.has(key));
+    const stale = GRANDFATHERED_NATIVE_DIALOGS.flatMap((entry) => {
+      const key = `${entry.file} :: ${entry.copy}`;
+      const actual = counts.get(key) ?? 0;
+      if (actual === 0) return [`${key} is gone — delete its entry`];
+      if (actual < entry.count) {
+        return [`${key} fell from ${entry.count} to ${actual} — lower its count`];
+      }
+      return [];
+    });
 
     assert.deepEqual(
-      stale,
+      stale.sort(),
       [],
-      "these native dialogs are gone — delete their allowlist entries",
+      "the grandfathered native-dialog list has drifted from the tree",
     );
   });
 
   it("registers or grandfathers every confirmation-shaped surface", () => {
-    const surfaces = new Set<string>();
-
-    for (const [file, source] of sources) {
-      const lines = source.split("\n");
-
-      lines.forEach((line, index) => {
-        // A JSX attribute is `role="alertdialog"`; a CSS selector is
-        // `[role="alertdialog"]`. The bracket is the whole discriminator —
-        // without it the two selector strings in page.tsx and
-        // prismUniversalInputRefract.ts read as confirmation dialogs.
-        if (!/(?<!\[)role="alertdialog"/u.test(line)) return;
-        const ahead = lines.slice(index, index + 30).join(" ");
-        const label = /aria-labelledby="([^"]+)"/u.exec(ahead)?.[1];
-        surfaces.add(`${basename(file)} :: ${label ?? "(unlabelled dialog)"}`);
-      });
-
-      // State named for confirmation is the other shape a bespoke inline
-      // confirmation takes when it is not a dialog at all.
-      for (const [, id] of source.matchAll(
-        /const \[([a-zA-Z0-9_$]*[Cc]onfirm[a-zA-Z0-9_$]*)\s*,/gu,
-      )) {
-        surfaces.add(`${basename(file)} :: ${id}`);
-      }
-    }
-
-    const unregistered = [...surfaces].filter(
+    const unregistered = [...scanConfirmationSurfaces()].filter(
       (surface) =>
         !REGISTERED_CONFIRMATION_SURFACES.has(surface) &&
         !GRANDFATHERED_SURFACES.has(surface),
@@ -258,21 +262,7 @@ describe("confirmation contract", () => {
   });
 
   it("keeps the grandfathered surface list from going stale", () => {
-    const present = new Set<string>();
-    for (const [file, source] of sources) {
-      const lines = source.split("\n");
-      lines.forEach((line, index) => {
-        if (!/(?<!\[)role="alertdialog"/u.test(line)) return;
-        const ahead = lines.slice(index, index + 30).join(" ");
-        const label = /aria-labelledby="([^"]+)"/u.exec(ahead)?.[1];
-        present.add(`${basename(file)} :: ${label ?? "(unlabelled dialog)"}`);
-      });
-      for (const [, id] of source.matchAll(
-        /const \[([a-zA-Z0-9_$]*[Cc]onfirm[a-zA-Z0-9_$]*)\s*,/gu,
-      )) {
-        present.add(`${basename(file)} :: ${id}`);
-      }
-    }
+    const present = scanConfirmationSurfaces();
 
     assert.deepEqual(
       [...GRANDFATHERED_SURFACES].filter((key) => !present.has(key)).sort(),
