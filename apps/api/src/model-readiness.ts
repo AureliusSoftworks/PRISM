@@ -14,6 +14,7 @@ const MODEL_PREPARATION_KEEP_ALIVE = "10m";
 const MODEL_PREPARATION_TIMEOUT_MS = 10 * 60_000;
 const MODEL_READINESS_PROBE_TIMEOUT_MS = 4_000;
 const MODEL_PREPARATION_RETRY_AFTER_MS = 1_000;
+const AUXILIARY_MODEL_KEEP_ALIVE = -1;
 
 type StoredReadiness =
   | {
@@ -44,6 +45,10 @@ interface OllamaRunningModel {
 
 const readinessByTarget = new Map<string, StoredReadiness>();
 const inspectionByTarget = new Map<
+  string,
+  Promise<ModelPreparationResponse>
+>();
+const persistentWarmupByTarget = new Map<
   string,
   Promise<ModelPreparationResponse>
 >();
@@ -257,6 +262,104 @@ export async function prepareLocalModel(args: {
   }
 }
 
+/**
+ * Preload the active auxiliary model and ask Ollama to keep it resident until
+ * explicitly unloaded or the runtime stops. Calls for the same host/model are
+ * coalesced so browser activity heartbeats cannot start parallel loads.
+ */
+export async function keepAuxiliaryLocalModelWarm(args: {
+  model: string;
+  options?: DualOllamaWorkloadOptions;
+  /** Test seam; production uses the normal preparation cap. */
+  timeoutMs?: number;
+}): Promise<ModelPreparationResponse> {
+  let target: ResolvedLocalOllamaTarget;
+  try {
+    target = await resolveLocalOllamaTarget(args.model, args.options);
+  } catch (error) {
+    const failure: ModelPreparationFailure =
+      error instanceof LocalModelRequestError && error.kind === "model_unavailable"
+        ? "model_unavailable"
+        : "runtime_unavailable";
+    return {
+      ok: true,
+      state: "unavailable",
+      model: args.model,
+      startedAt: null,
+      expiresAt: null,
+      retryAfterMs: null,
+      failure,
+    };
+  }
+
+  const key = targetKey(target);
+  const active = persistentWarmupByTarget.get(key);
+  if (active) return active;
+
+  const startedAt = new Date().toISOString();
+  const warmup = (async (): Promise<ModelPreparationResponse> => {
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => controller.abort(),
+      args.timeoutMs ?? MODEL_PREPARATION_TIMEOUT_MS,
+    );
+    let failure: ModelPreparationFailure = "request_failed";
+    try {
+      const response = await fetch(`${target.host}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: target.model,
+          messages: [],
+          stream: false,
+          think: false,
+          keep_alive: AUXILIARY_MODEL_KEEP_ALIVE,
+        }),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const detail = await response.text().catch(() => "");
+        failure = /model[^\n]{0,120}(not found|missing|does not exist)/iu.test(
+          detail,
+        )
+          ? "model_unavailable"
+          : "request_failed";
+        throw new Error("Ollama auxiliary model warmup failed.");
+      }
+      const resident = await runningModel(target);
+      if (!resident) throw new Error("Warmed auxiliary model was not resident.");
+      const ready: StoredReadiness = {
+        state: "ready",
+        target,
+        digest: resident.digest,
+        expiresAt: resident.expiresAt,
+      };
+      readinessByTarget.set(key, ready);
+      return responseFor(ready);
+    } catch {
+      if (controller.signal.aborted) failure = "timed_out";
+      const unavailable: StoredReadiness = {
+        state: "unavailable",
+        target,
+        startedAt,
+        failure,
+      };
+      readinessByTarget.set(key, unavailable);
+      return responseFor(unavailable);
+    } finally {
+      clearTimeout(timer);
+    }
+  })();
+  persistentWarmupByTarget.set(key, warmup);
+  try {
+    return await warmup;
+  } finally {
+    if (persistentWarmupByTarget.get(key) === warmup) {
+      persistentWarmupByTarget.delete(key);
+    }
+  }
+}
+
 async function refreshReadinessAfterLocalResponse(
   target: ResolvedLocalOllamaTarget,
 ): Promise<void> {
@@ -285,4 +388,5 @@ setLocalOllamaResponseObserver((target) => {
 export function resetModelReadinessForTests(): void {
   readinessByTarget.clear();
   inspectionByTarget.clear();
+  persistentWarmupByTarget.clear();
 }

@@ -37,4 +37,11 @@ describe("prism settings journal allowlist", () => {
     assert.equal(prismSettingsPatchIsJournalable(patch), true);
     assert.deepEqual(validatePrismSettingsPatch(patch), patch);
   });
+
+  it("keeps CRT focus on the persisted journal path", () => {
+    const patch = { crtFocus: 75 };
+    assert.equal(PRISM_JOURNALED_SETTING_KEYS.has("crtFocus"), true);
+    assert.equal(prismSettingsPatchIsJournalable(patch), true);
+    assert.deepEqual(validatePrismSettingsPatch(patch), patch);
+  });
 });

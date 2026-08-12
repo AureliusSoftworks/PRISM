@@ -117,6 +117,7 @@ export function restoreFactoryDefaultsInDatabase(
         SET
           theme = 'system',
           graphics_quality = 'high',
+          crt_focus = 50,
           typography_scale = 'standard',
           atmosphere_style = 'prismatic',
           hub_atmosphere_enabled = 1,

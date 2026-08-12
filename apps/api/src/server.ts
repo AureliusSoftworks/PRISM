@@ -774,7 +774,10 @@ import type {
   ProviderMessage,
   ProviderName,
 } from "./providers.ts";
-import { prepareLocalModel } from "./model-readiness.ts";
+import {
+  keepAuxiliaryLocalModelWarm,
+  prepareLocalModel,
+} from "./model-readiness.ts";
 import { cleanupResolvedPromptWithModel } from "./composer-cleanup.ts";
 import {
   inferVoicePreviewLine,
@@ -937,6 +940,7 @@ import {
   normalizePrismExecuteProposalRequestV1,
   normalizePrismUndoRequestV1,
   normalizeGraphicsQuality,
+  normalizeCrtFocus,
   normalizePrismTypographyScale,
   normalizeListenerReactionVocalFoley,
   normalizeBotCrosstalkInterruptedSpeakerCue,
@@ -2660,6 +2664,7 @@ interface UserDbRow {
   wrapped_user_key_tag: string;
   theme: "light" | "dark" | "system";
   graphics_quality: GraphicsQuality | string | null;
+  crt_focus: number | null;
   typography_scale: PrismTypographyScale | string | null;
   atmosphere_style: string | null;
   hub_atmosphere_enabled: number;
@@ -3129,6 +3134,10 @@ function getUserRow(userId: string): UserDbRow {
   row.graphics_quality = normalizeGraphicsQuality(
     graphicsQuality?.graphics_quality,
   );
+  const crtFocus = db
+    .prepare("SELECT crt_focus FROM users WHERE id = ?")
+    .get(userId) as { crt_focus: number | null } | undefined;
+  row.crt_focus = normalizeCrtFocus(crtFocus?.crt_focus);
   const typographyScale = db
     .prepare("SELECT typography_scale FROM users WHERE id = ?")
     .get(userId) as { typography_scale: string | null } | undefined;
@@ -7804,6 +7813,60 @@ async function readOpenAiGeneratedImageBytes(
   return downloadRemoteImage(result.url, { signal });
 }
 
+type TypedAssetGenerationKind =
+  | "debate_exhibit"
+  | "signal_studio"
+  | "signal_logo"
+  | "slate_cover"
+  | "slate_visual_study"
+  | "zen_atmosphere"
+  | "home_atmosphere"
+  | "group_room_atmosphere";
+
+function resolveTypedAssetGenerationSelection(
+  userId: string,
+  kind: TypedAssetGenerationKind,
+  requested: {
+    provider?: ImageProviderName;
+    model?: string;
+  } = {},
+): { provider: ImageProviderName; model?: string } {
+  const requestedProvider =
+    requested.provider === "local" || requested.provider === "openai"
+      ? requested.provider
+      : null;
+  const requestedModel =
+    requested.model?.trim() && !isDisabledModelChoice(requested.model)
+      ? requested.model.trim()
+      : "";
+  // The current control must win immediately; persistence can finish in the
+  // background without a generation request racing against the previous row.
+  if (requestedProvider && requestedModel) {
+    return { provider: requestedProvider, model: requestedModel };
+  }
+  const saved = db
+    .prepare(
+      `SELECT provider, model
+         FROM image_asset_generation_preferences
+        WHERE user_id = ? AND kind = ?`,
+    )
+    .get(userId, kind) as
+    | { provider: string; model: string }
+    | undefined;
+  if (
+    saved &&
+    (saved.provider === "local" || saved.provider === "openai") &&
+    saved.model.trim() &&
+    !isDisabledModelChoice(saved.model)
+  ) {
+    return { provider: saved.provider, model: saved.model.trim() };
+  }
+  return {
+    provider: requestedProvider ?? "local",
+    ...(requestedModel ? { model: requestedModel } : {}),
+  };
+}
+
 async function generateAndPersistSignalArtworkAsset(args: {
   userId: string;
   hostBotId: string;
@@ -8634,13 +8697,20 @@ async function runCoffeeGroupSynthesisItem(
       group: profiles,
     });
     const user = getUserRow(userId);
+    const groupRoomAssetSelection = resolveTypedAssetGenerationSelection(
+      userId,
+      "group_room_atmosphere",
+      { provider: user.preferred_image_provider },
+    );
     const asset = await generateAndPersistStandaloneImageAsset({
       userId,
       prompt,
       preferredProvider: resolveImageProviderName({
         savedProvider: user.preferred_image_provider,
+        requestedProvider: groupRoomAssetSelection.provider,
         offlineOnly: user.preferred_provider === "local",
       }),
+      requestedImageModel: groupRoomAssetSelection.model,
       signal: new AbortController().signal,
       size: "1536x1024",
       origin: "bot_group_room",
@@ -9540,10 +9610,21 @@ function buildRoutes(): RouteDefinition[] {
         ? `${canonicalPrompt}\nCreative direction for this pass: ${direction}`
         : canonicalPrompt;
       const user = getUserRow(userId);
+      const visualStudyAssetSelection = resolveTypedAssetGenerationSelection(
+        userId,
+        "slate_visual_study",
+        {
+          provider:
+            body.preferredProvider === "openai" ? "openai" :
+            body.preferredProvider === "local" ? "local" :
+            user.preferred_image_provider,
+          model: typeof body.model === "string" ? body.model : undefined,
+        },
+      );
       const offlineOnly = project.proseMode === "offline";
       const preferredProvider = resolveImageProviderName({
         savedProvider: user.preferred_image_provider,
-        requestedProvider: body.preferredProvider,
+        requestedProvider: visualStudyAssetSelection.provider,
         offlineOnly,
       });
       const acquired = await tryAcquireImageSlot({
@@ -9569,8 +9650,7 @@ function buildRoutes(): RouteDefinition[] {
           prompt,
           ...(direction ? { persistencePrompt: canonicalPrompt } : {}),
           preferredProvider,
-          requestedImageModel:
-            typeof body.model === "string" ? body.model.trim() : undefined,
+          requestedImageModel: visualStudyAssetSelection.model,
           offlineOnly,
           signal: acquired.job.abortController.signal,
           size: "1536x1024",
@@ -9976,10 +10056,21 @@ function buildRoutes(): RouteDefinition[] {
       const project = getSlateProject(db, userId, ctx.params.id);
       const user = getUserRow(userId);
       const body = ctx.body as Record<string, unknown>;
+      const coverAssetSelection = resolveTypedAssetGenerationSelection(
+        userId,
+        "slate_cover",
+        {
+          provider:
+            body.preferredProvider === "openai" ? "openai" :
+            body.preferredProvider === "local" ? "local" :
+            user.preferred_image_provider,
+          model: typeof body.model === "string" ? body.model : undefined,
+        },
+      );
       const offlineOnly = project.proseMode === "offline";
       const preferredProvider = resolveImageProviderName({
         savedProvider: user.preferred_image_provider,
-        requestedProvider: body.preferredProvider,
+        requestedProvider: coverAssetSelection.provider,
         offlineOnly,
       });
       const canonicalPrompt = composeSlateProjectCoverPrompt(project);
@@ -10019,8 +10110,7 @@ function buildRoutes(): RouteDefinition[] {
           prompt,
           ...(direction ? { persistencePrompt: canonicalPrompt } : {}),
           preferredProvider,
-          requestedImageModel:
-            typeof body.model === "string" ? body.model.trim() : undefined,
+          requestedImageModel: coverAssetSelection.model,
           offlineOnly,
           signal: acquired.job.abortController.signal,
         });
@@ -12099,7 +12189,7 @@ function buildRoutes(): RouteDefinition[] {
       const force =
         generationRequested &&
         (body.force === true || body.replaceImmediately === true);
-      const requestedProvider =
+      let requestedProvider: ImageProviderName | undefined =
         body.preferredProvider === "openai" ||
         body.preferredProvider === "local"
           ? body.preferredProvider
@@ -12108,8 +12198,8 @@ function buildRoutes(): RouteDefinition[] {
         typeof body.model === "string" && body.model.trim().length > 0
           ? body.model.trim()
           : "";
-      const bodyModelDisabled = isDisabledModelChoice(bodyModelRaw);
-      const bodyModel =
+      let bodyModelDisabled = isDisabledModelChoice(bodyModelRaw);
+      let bodyModel =
         bodyModelRaw && !bodyModelDisabled ? bodyModelRaw : undefined;
       const promptOverride =
         typeof body.promptOverride === "string"
@@ -12264,6 +12354,17 @@ function buildRoutes(): RouteDefinition[] {
       }
 
       const user = getUserRow(userId);
+      const zenAssetSelection = resolveTypedAssetGenerationSelection(
+        userId,
+        "zen_atmosphere",
+        {
+          provider: requestedProvider ?? user.preferred_image_provider,
+          model: bodyModel,
+        },
+      );
+      requestedProvider = zenAssetSelection.provider;
+      bodyModel = zenAssetSelection.model;
+      bodyModelDisabled = false;
       const existingWallpaper = mapZenWallpaperMetadata(conversation);
       const lastGeneratedAt = existingWallpaper.generationMessageCount ?? 0;
       const zenWallpaperRegenMessageInterval =
@@ -15808,14 +15909,18 @@ function buildRoutes(): RouteDefinition[] {
         ? `${canonicalPrompt}\nCreative direction for this pass: ${direction}`
         : canonicalPrompt;
       const user = getUserRow(userId);
-      const requestedImageProvider: ImageProviderName =
-        body.preferredProvider === "openai"
-          ? "openai"
-          : body.preferredProvider === "local"
-            ? "local"
-            : user.preferred_image_provider === "openai"
-              ? "openai"
-              : "local";
+      const debateAssetSelection = resolveTypedAssetGenerationSelection(
+        userId,
+        "debate_exhibit",
+        {
+          provider:
+            body.preferredProvider === "openai" ? "openai" :
+            body.preferredProvider === "local" ? "local" :
+            user.preferred_image_provider,
+          model: typeof body.model === "string" ? body.model : undefined,
+        },
+      );
+      const requestedImageProvider = debateAssetSelection.provider;
       const offlineOnly =
         normalizeResponseMode(
           body.responseMode,
@@ -15862,6 +15967,7 @@ function buildRoutes(): RouteDefinition[] {
               prompt,
               ...(direction ? { persistencePrompt: canonicalPrompt } : {}),
               preferredProvider: requestedImageProvider,
+              requestedImageModel: debateAssetSelection.model,
               offlineOnly,
               signal: generationSignal,
               size: "1024x1024",
@@ -15932,14 +16038,18 @@ function buildRoutes(): RouteDefinition[] {
       const clientRequestId =
         typeof body.requestId === "string" ? body.requestId.trim() : "";
       const user = getUserRow(userId);
-      const requestedImageProvider: ImageProviderName =
-        body.preferredProvider === "openai"
-          ? "openai"
-          : body.preferredProvider === "local"
-            ? "local"
-            : user.preferred_image_provider === "openai"
-              ? "openai"
-              : "local";
+      const debateAssetSelection = resolveTypedAssetGenerationSelection(
+        userId,
+        "debate_exhibit",
+        {
+          provider:
+            body.preferredProvider === "openai" ? "openai" :
+            body.preferredProvider === "local" ? "local" :
+            user.preferred_image_provider,
+          model: typeof body.model === "string" ? body.model : undefined,
+        },
+      );
+      const requestedImageProvider = debateAssetSelection.provider;
       const offlineOnly =
         normalizeResponseMode(
           body.responseMode,
@@ -15977,8 +16087,7 @@ function buildRoutes(): RouteDefinition[] {
           prompt,
           ...(direction ? { persistencePrompt: canonicalPrompt } : {}),
           preferredProvider: requestedImageProvider,
-          requestedImageModel:
-            typeof body.model === "string" ? body.model.trim() : undefined,
+          requestedImageModel: debateAssetSelection.model,
           offlineOnly,
           signal: acquired.abortController.signal,
           size: "1024x1024",
@@ -17821,6 +17930,14 @@ function buildRoutes(): RouteDefinition[] {
           },
           generate: (kind, sourceNightImageId, signal) =>
             {
+              const assetSelection = resolveTypedAssetGenerationSelection(
+                userId,
+                kind === "logo" ? "signal_logo" : "signal_studio",
+                {
+                  provider: preferredProvider,
+                  model: typeof body.model === "string" ? body.model : undefined,
+                },
+              );
               const canonicalPrompt = withSignalGenerationKeywords(
                 promptByKind[kind],
                 keywords,
@@ -17834,9 +17951,8 @@ function buildRoutes(): RouteDefinition[] {
                   : canonicalPrompt,
                 ...(direction ? { persistencePrompt: canonicalPrompt } : {}),
                 size: kind === "logo" ? "1024x1024" : "1536x1024",
-                preferredProvider,
-                requestedImageModel:
-                  typeof body.model === "string" ? body.model.trim() : undefined,
+                preferredProvider: assetSelection.provider,
+                requestedImageModel: assetSelection.model,
                 sourceNightImageId,
                 signal,
               });
@@ -25534,6 +25650,7 @@ function buildRoutes(): RouteDefinition[] {
           displayName: user.display_name,
           theme: user.theme,
           graphicsQuality: normalizeGraphicsQuality(user.graphics_quality),
+          crtFocus: normalizeCrtFocus(user.crt_focus),
           typographyScale: normalizePrismTypographyScale(
             user.typography_scale,
           ),
@@ -25878,6 +25995,16 @@ function buildRoutes(): RouteDefinition[] {
       });
       json(ctx.res, 200, { ...readiness });
     }),
+    route("POST", "/api/models/auxiliary/keep-warm", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const model = resolveAuxiliaryOllamaModel(user.prism_default_llm_model);
+      const readiness = await keepAuxiliaryLocalModelWarm({
+        model,
+        options: dualOllamaWorkloadOptions(user),
+      });
+      json(ctx.res, 200, { ...readiness });
+    }),
     route("GET", "/api/models", async (ctx) => {
       const userId = requireAuth(ctx);
       const userKey = decryptUserKey(userId);
@@ -26214,6 +26341,7 @@ function buildRoutes(): RouteDefinition[] {
         displayName: user.display_name,
         theme: user.theme,
         graphicsQuality: user.graphics_quality,
+        crtFocus: user.crt_focus,
         typographyScale: user.typography_scale,
         atmosphereStyle: user.atmosphere_style,
         hubAtmosphereEnabled: user.hub_atmosphere_enabled,
@@ -26357,7 +26485,7 @@ function buildRoutes(): RouteDefinition[] {
       db.prepare(
         `
         UPDATE users
-        SET display_name = ?, theme = ?, graphics_quality = ?, typography_scale = ?, atmosphere_style = ?, hub_atmosphere_enabled = ?, startup_preference = ?, preferred_provider = ?, ephemeral_chat_provider_preferences = ?, preferred_image_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
+        SET display_name = ?, theme = ?, graphics_quality = ?, crt_focus = ?, typography_scale = ?, atmosphere_style = ?, hub_atmosphere_enabled = ?, startup_preference = ?, preferred_provider = ?, ephemeral_chat_provider_preferences = ?, preferred_image_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
             experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, coffee_experimental_table_angle_enabled = ?, psychic_mode_enabled = ?, auto_switch_model = ?, auto_fallback_chain = ?, online_auto_provider_bias = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, preferred_home_atmosphere_image_model = ?, preferred_home_atmosphere_image_provider = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
             zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?, zen_persona_transition_choice = ?,
@@ -26374,6 +26502,7 @@ function buildRoutes(): RouteDefinition[] {
         next.displayName,
         next.theme,
         next.graphicsQuality,
+        next.crtFocus,
         next.typographyScale,
         next.atmosphereStyle,
         next.hubAtmosphereEnabled,
@@ -26467,6 +26596,7 @@ function buildRoutes(): RouteDefinition[] {
         settings: {
           displayName: next.displayName,
           graphicsQuality: next.graphicsQuality,
+          crtFocus: next.crtFocus,
           typographyScale: next.typographyScale,
           atmosphereStyle: next.atmosphereStyle,
           hubAtmosphereEnabled: next.hubAtmosphereEnabled !== 0,
@@ -26683,8 +26813,8 @@ function buildRoutes(): RouteDefinition[] {
           typeof body.model === "string" && body.model.trim().length > 0
             ? body.model.trim()
             : "";
-        const bodyModelDisabled = isDisabledModelChoice(bodyModelRaw);
-        const bodyModel =
+        let bodyModelDisabled = isDisabledModelChoice(bodyModelRaw);
+        let bodyModel =
           bodyModelRaw && !bodyModelDisabled ? bodyModelRaw : undefined;
         const conversationIdRaw =
           typeof body.conversationId === "string"
@@ -26751,11 +26881,30 @@ function buildRoutes(): RouteDefinition[] {
             variationSeed: chatAtmosphereUtcDate(),
           });
         }
-        const requestedProvider =
+        let requestedProvider: ImageProviderName | undefined =
           body.preferredProvider === "openai" ||
           body.preferredProvider === "local"
             ? body.preferredProvider
             : undefined;
+        const typedAssetKind: TypedAssetGenerationKind | null =
+          imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE
+            ? "home_atmosphere"
+            : imagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+              ? "group_room_atmosphere"
+              : null;
+        if (typedAssetKind) {
+          const selection = resolveTypedAssetGenerationSelection(
+            userId,
+            typedAssetKind,
+            {
+              provider: requestedProvider ?? user.preferred_image_provider,
+              model: bodyModel,
+            },
+          );
+          requestedProvider = selection.provider;
+          bodyModel = selection.model;
+          bodyModelDisabled = false;
+        }
 
         const persistence = resolveImageGeneratePersistence({
           db,
@@ -26856,6 +27005,7 @@ function buildRoutes(): RouteDefinition[] {
             : "";
         const hubHomeAtmosphereLaneActive =
           imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE &&
+          typedAssetKind === null &&
           Boolean(homeAtmosphereImageProvider) &&
           Boolean(homeAtmosphereImageModel) &&
           !isDisabledModelChoice(homeAtmosphereImageModel);

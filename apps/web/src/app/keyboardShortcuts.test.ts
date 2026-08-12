@@ -247,7 +247,7 @@ test("detects conflicts and stores account-scoped preferences", () => {
   );
 });
 
-test("leaves Option-arrow text editing intact", () => {
+test("keeps Option-arrow picker shortcuts available while editing", () => {
   const editableTarget = {
     closest: () => ({ tagName: "TEXTAREA" }),
   } as unknown as EventTarget;
@@ -256,12 +256,12 @@ test("leaves Option-arrow text editing intact", () => {
       "Alt+ArrowLeft",
       event("ArrowLeft", { altKey: true, target: editableTarget }),
     ),
-    false,
+    true,
   );
   assert.equal(
     keyboardShortcutMatchesEvent(
-      "Alt+ArrowLeft",
-      event("ArrowLeft", { altKey: true, target: null }),
+      "Alt+ArrowRight",
+      event("ArrowRight", { altKey: true, target: editableTarget }),
     ),
     true,
   );

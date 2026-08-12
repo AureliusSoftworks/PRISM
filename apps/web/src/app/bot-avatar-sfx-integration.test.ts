@@ -150,8 +150,9 @@ test("Signal keeps dashboard avatars quiet and respects Persona SFX triggers on 
   );
   assert.match(
     botcastSource,
-    /surface: "dashboard" \| "stage" \| "alignment";/u,
+    /surface: "archive" \| "dashboard" \| "stage" \| "alignment";/u,
   );
+  assert.match(botcastSource, /surface: "archive"/u);
   const liveStageAvatarSource = botcastSource.slice(
     botcastSource.indexOf("const renderedAvatar = renderAvatar?.(bot, {"),
     botcastSource.indexOf(
@@ -169,7 +170,7 @@ test("Signal keeps dashboard avatars quiet and respects Persona SFX triggers on 
   assert.equal(
     botcastSource.match(/surface: "dashboard",/gu)?.length,
     2,
-    "Every non-live Signal avatar surface should be marked as dashboard UI",
+    "Signal keeps two non-live dashboard avatar surfaces separate from the compact archive",
   );
   assert.match(
     botcastSource,

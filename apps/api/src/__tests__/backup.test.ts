@@ -767,6 +767,40 @@ describe("backup graphics quality", () => {
   });
 });
 
+describe("backup CRT focus", () => {
+  it("round-trips the shared phosphor focus and defaults legacy snapshots to Balanced", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare("UPDATE users SET crt_focus = 85 WHERE id = ?").run("user-1");
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(snapshot.settings?.crtFocus, 85);
+
+      db.prepare("UPDATE users SET crt_focus = 20 WHERE id = ?").run("user-1");
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      assert.equal(
+        (db.prepare("SELECT crt_focus FROM users WHERE id = ?").get(
+          "user-1",
+        ) as { crt_focus: number }).crt_focus,
+        85,
+      );
+
+      const legacySettings = { ...snapshot.settings! };
+      delete legacySettings.crtFocus;
+      importUserSnapshot(
+        db,
+        "user-1",
+        { ...snapshot, settings: legacySettings },
+        userKey,
+      );
+      assert.equal(
+        (db.prepare("SELECT crt_focus FROM users WHERE id = ?").get(
+          "user-1",
+        ) as { crt_focus: number }).crt_focus,
+        50,
+      );
+    });
+  });
+});
+
 describe("backup typography scale", () => {
   it("round-trips the selected preset and defaults legacy snapshots to Standard", () => {
     withBackupDatabase((db, userKey) => {

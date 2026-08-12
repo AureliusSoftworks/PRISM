@@ -3585,7 +3585,7 @@ describe("Debate experience", () => {
     );
   });
 
-  it("keeps compact moderators on the registered avatar geometry and inset turn-owned podium screens", () => {
+  it("uses the authored micro form for compact moderators and keeps turn-owned podium screens", () => {
     assert.match(source, /debateTurnOwnerBotId\(\{/u);
     assert.match(
       source,
@@ -3642,9 +3642,14 @@ describe("Debate experience", () => {
       css,
       /\.botStagePresence\[data-debate-stage-compact="true"\]\s*\{[^}]*position:\s*relative[^}]*aspect-ratio:\s*1/u,
     );
+    assert.match(page, /if \(moderatorMiniPortrait\)[\s\S]{0,1000}<BotAvatarMicroRenderer/u);
     assert.match(
       pageCss,
-      /:global\(\[data-debate-stage-compact="true"\]\)\s*>\s*\.debateBotPresencePlate\[data-debate-compact="true"\]\s*\{[^}]*position:\s*absolute[^}]*width:\s*215\.054%[^}]*translateX\(-50%\) scale\(0\.465\)[^}]*transform-origin:\s*50% 100%/u,
+      /:global\(\[data-debate-stage-compact="true"\]\)\s*>\s*\.debateModeratorMicroAvatar\s*\{[^}]*position:\s*absolute[^}]*width:\s*36px[^}]*height:\s*36px[^}]*translateX\(-50%\)[^}]*transform-origin:\s*50% 100%/u,
+    );
+    assert.doesNotMatch(
+      pageCss,
+      /:global\(\[data-debate-stage-compact="true"\]\)\s*>\s*\.debateBotPresencePlate\[data-debate-compact="true"\][\s\S]{0,300}scale\(/u,
     );
     assert.match(
       pageCss,

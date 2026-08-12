@@ -28,15 +28,15 @@ describe("Home Base radial launcher integration", () => {
     );
     assert.match(
       componentSource,
-      /released\.effect === "activate-source"[\s\S]*activateChatHomeHero\(\)/u,
+      /released\.effect === "activate-source"[\s\S]*playPrismCompanionGlassTap\(\)[\s\S]*activatePrismConversation\(\)/u,
     );
     assert.match(
       componentSource,
       /released\.effect === "activate-source"[\s\S]*homeBaseRadialSuppressClickRef\.current = true/u,
     );
     assert.match(
-      pageSource,
-      /starterPrompt: true[\s\S]*queuedConversationId: opened\.conversationId[\s\S]*conversationDetailOverride: freshConversation/u,
+      componentSource,
+      /"Open Prism assistant\. Hold for applets\."/u,
     );
     assert.match(
       pageSource,
@@ -54,6 +54,8 @@ describe("Home Base radial launcher integration", () => {
       pageSource,
       /onHomeBaseAppletSelect=\{\(appletId\) =>[\s\S]*switchToSelectableApplet/u,
     );
+    assert.doesNotMatch(pageSource, /id: "assistant"/u);
+    assert.doesNotMatch(pageSource, /label: "Assistant"/u);
     assert.match(
       pageSource,
       /onSelect: \(\) => switchToSelectableApplet\(applet\.id\)/u,

@@ -5,9 +5,7 @@
   );
   position: absolute;
   inset: 0;
-  /* Keep every ink emission canvas in the CRT root stacking context. A
-     positioned wrapper would flatten them before screen-blending with the
-     face, making connected ink look pasted on as a separate layer. */
+  /* Audience/static ink stays a single full-screen raster. */
   display: block;
   width: 100%;
   height: 100%;
@@ -32,7 +30,58 @@
   transform-origin: center;
 }
 
-.layer[data-avatar-details-render-detail="reduced"] {
+.motionPlane {
+  --avatar-details-phosphor-glow-color: var(
+    --crt-face-edge-color,
+    currentColor
+  );
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  transform:
+    /* Each emission owns its full-screen transform wrapper. The filtered
+       child may therefore crop tightly without changing mirror or Speech
+       animation origins. */
+    scaleX(var(--avatar-details-facing-scale-x, 1))
+    translateX(calc(var(--avatar-details-speech-origin-x, 50%) - 50%))
+    translateY(calc(var(--avatar-details-speech-origin-y, 50%) - 50%))
+    rotate(
+      calc(
+        var(--avatar-details-speech-rotation, 0deg) +
+          var(--avatar-details-speech-spin-angle, 0turn)
+      )
+    )
+    scaleX(var(--avatar-details-speech-scale-x, 1))
+    scaleY(var(--avatar-details-speech-scale-y, 1))
+    translateY(calc(50% - var(--avatar-details-speech-origin-y, 50%)))
+    translateX(calc(50% - var(--avatar-details-speech-origin-x, 50%)));
+  transform-origin: center;
+}
+
+.raster {
+  position: absolute;
+  display: block;
+  pointer-events: none;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.fullRaster {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.croppedGlowRaster {
+  right: auto;
+  bottom: auto;
+}
+
+.layer[data-avatar-details-render-detail="reduced"],
+.motionPlane[data-avatar-details-render-detail="reduced"] {
   animation: none !important;
 }
 
@@ -74,7 +123,7 @@
   z-index: 7;
 }
 
-.halo {
+.haloPlane {
   /* Keep a hint of light in the glass without letting broad bloom become the
      shape. The core and near bloom carry the authored stroke. */
   --avatar-details-emission-opacity: 0.14;
@@ -85,9 +134,15 @@
       var(--zen-live-bot-crt-shared-flicker-opacity, 1)
   );
   mix-blend-mode: screen;
-  --zen-live-bot-crt-flicker-base-filter: blur(0.8px) saturate(1.08)
+}
+
+.halo {
+  --zen-live-bot-crt-flicker-base-filter: blur(
+      calc(0.8px * var(--bot-phosphor-focus-radius-scale, 1))
+    )
+    saturate(1.08)
     drop-shadow(
-      0 0 4px
+      0 0 var(--bot-phosphor-halo-near-radius, 3px)
         color-mix(
           in srgb,
           var(--avatar-details-phosphor-glow-color) 22%,
@@ -95,7 +150,7 @@
         )
     )
     drop-shadow(
-      0 0 8px
+      0 0 var(--bot-phosphor-halo-mid-radius, 6px)
         color-mix(
           in srgb,
           var(--avatar-details-phosphor-glow-color) 9%,
@@ -103,7 +158,7 @@
         )
     )
     drop-shadow(
-      0 0 12px
+      0 0 var(--bot-phosphor-halo-far-radius, 12px)
         color-mix(
           in srgb,
           var(--avatar-details-phosphor-glow-color) 3%,
@@ -125,7 +180,7 @@
     var(--zen-live-bot-crt-flicker-base-filter);
 }
 
-.bloom {
+.bloomPlane {
   /* Match the full-avatar eye glyphs: the authored color forms the saturated
      edge and six-stage halo beneath the same white phosphor core. */
   --avatar-details-emission-opacity: 1;
@@ -136,15 +191,23 @@
       var(--zen-live-bot-crt-shared-flicker-opacity, 1)
   );
   mix-blend-mode: screen;
-  --zen-live-bot-crt-flicker-base-filter: blur(0.22px) saturate(1.08)
+}
+
+.bloom {
+  --zen-live-bot-crt-flicker-base-filter: blur(
+      var(--bot-phosphor-beam-softness, 0.45px)
+    )
+    saturate(1.08)
     drop-shadow(
-      0 0 0.72px var(--avatar-details-phosphor-glow-color)
+      0 0 var(--bot-phosphor-halo-contact-radius, 0.72px)
+        var(--avatar-details-phosphor-glow-color)
     )
     drop-shadow(
-      0 0 1.5px var(--avatar-details-phosphor-glow-color)
+      0 0 var(--bot-phosphor-halo-tight-radius, 1.5px)
+        var(--avatar-details-phosphor-glow-color)
     )
     drop-shadow(
-      0 0 3px
+      0 0 var(--bot-phosphor-halo-near-radius, 3px)
         color-mix(
           in srgb,
           var(--avatar-details-phosphor-glow-color) 82%,
@@ -152,7 +215,7 @@
         )
     )
     drop-shadow(
-      0 0 6px
+      0 0 var(--bot-phosphor-halo-mid-radius, 6px)
         color-mix(
           in srgb,
           var(--avatar-details-phosphor-glow-color) 58%,
@@ -160,7 +223,7 @@
         )
     )
     drop-shadow(
-      0 0 12px
+      0 0 var(--bot-phosphor-halo-far-radius, 12px)
         color-mix(
           in srgb,
           var(--avatar-details-phosphor-glow-color) 36%,
@@ -168,7 +231,7 @@
         )
     )
     drop-shadow(
-      0 0 21px
+      0 0 var(--bot-phosphor-halo-ambient-radius, 21px)
         color-mix(
           in srgb,
           var(--avatar-details-phosphor-glow-color) 22%,
@@ -190,7 +253,7 @@
     var(--zen-live-bot-crt-flicker-base-filter);
 }
 
-.bloom[data-avatar-details-render-detail="reduced"] {
+.bloomPlane[data-avatar-details-render-detail="reduced"] {
   --avatar-details-emission-opacity: 0.28;
   --zen-live-bot-crt-flicker-base-filter: blur(0.16px)
     drop-shadow(
@@ -211,7 +274,7 @@
     );
 }
 
-.core {
+.corePlane {
   --avatar-details-emission-opacity: 1;
   opacity: calc(
     var(--avatar-details-speech-opacity, 1) *
@@ -223,13 +286,14 @@
      makes coincident face and Ink pixels read as one stroke; halo and bloom
      remain screen-blended around that shared silhouette. */
   mix-blend-mode: normal;
-  /* Authored Ink begins as a binary nearest-neighbor canvas while live glyphs
-     arrive with coverage-aware edges. Give both the same final CRT beam
-     softness without sharing masks or disturbing their independent geometry. */
-  --zen-live-bot-crt-flicker-base-filter: blur(
-      var(--crt-beam-softness, 0.45px)
-    )
-    drop-shadow(0 0 0.3px rgba(255, 255, 255, 0.46));
+}
+
+.core {
+  /* Ink and text/SVG features already share the same coverage-aware 256-cell
+     silhouette. Keep the solid core neutral and crisp, then let the shared
+     bloom planes supply the physical beam. Blurring this core a second time
+     was the final source of resource-to-resource edge drift. */
+  --zen-live-bot-crt-flicker-base-filter: none;
   filter: brightness(
       calc(
         var(--zen-live-bot-crt-flicker-base-brightness, 1.02) *
@@ -246,7 +310,8 @@
 }
 
 .layer[data-avatar-details-pixel-perfect="true"],
-.core[data-avatar-details-pixel-perfect="true"] {
+.motionPlane[data-avatar-details-pixel-perfect="true"],
+.motionPlane[data-avatar-details-pixel-perfect="true"] > .raster {
   --zen-live-bot-crt-flicker-base-filter: none;
   filter: none;
   mix-blend-mode: normal;

@@ -145,18 +145,6 @@ async function readJson<T>(response: Response): Promise<T> {
   return payload;
 }
 
-function useCoarsePointer(): boolean {
-  const [coarse, setCoarse] = useState(false);
-  useEffect(() => {
-    const query = window.matchMedia("(hover: none), (pointer: coarse)");
-    const update = (): void => setCoarse(query.matches);
-    update();
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }, []);
-  return coarse;
-}
-
 function ViewportAssetThumb({
   src,
   fallbackSrc,
@@ -247,10 +235,6 @@ export function AssetRail({
   const [loading, setLoading] = useState(true);
   const [unavailable, setUnavailable] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
-  const [touchActionsOpen, setTouchActionsOpen] = useState(false);
-  const addButtonRef = useRef<HTMLButtonElement | null>(null);
-  const touchSheetRef = useRef<HTMLDivElement | null>(null);
-  const coarsePointer = useCoarsePointer();
   const generationUnavailable = Boolean(
     generation && (generation.loading || generation.selection === null),
   );
@@ -280,45 +264,6 @@ export function AssetRail({
     void loadRecent();
   }, [loadRecent, refreshKey]);
 
-  useEffect(() => {
-    if (!touchActionsOpen) return;
-    const sheet = touchSheetRef.current;
-    const addButton = addButtonRef.current;
-    if (!sheet) return;
-    const frameId = window.requestAnimationFrame(() =>
-      sheet.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus({
-        preventScroll: true,
-      }),
-    );
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setTouchActionsOpen(false);
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const buttons = Array.from(
-        sheet.querySelectorAll<HTMLButtonElement>("button:not([disabled])"),
-      );
-      const first = buttons[0];
-      const last = buttons.at(-1);
-      if (!first || !last) return;
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus({ preventScroll: true });
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus({ preventScroll: true });
-      }
-    };
-    document.addEventListener("keydown", onKeyDown, true);
-    return () => {
-      window.cancelAnimationFrame(frameId);
-      document.removeEventListener("keydown", onKeyDown, true);
-      addButton?.focus({ preventScroll: true });
-    };
-  }, [touchActionsOpen]);
-
   const synthesizeTarget = useMemo<PrismRefractMagicTarget>(
     () => ({
       id: targetId,
@@ -326,7 +271,6 @@ export function AssetRail({
       label: `Synthesize ${IMAGE_ASSET_KIND_LABELS[kind].replace(/s$/u, "")}`,
       disabled: () => disabled || synthesizeDisabled || generationUnavailable,
       run: async (direction) => {
-        setTouchActionsOpen(false);
         await onSynthesize(direction, generation?.selection ?? undefined);
         await loadRecent();
       },
@@ -343,19 +287,6 @@ export function AssetRail({
     ],
   );
 
-  const activateAdd = (): void => {
-    if (disabled) return;
-    if (!onUpload) {
-      requestPrismRefract(targetId, "focused-shortcut");
-      return;
-    }
-    if (
-      coarsePointer ||
-      window.matchMedia("(hover: none), (pointer: coarse)").matches
-    ) setTouchActionsOpen(true);
-    else onUpload();
-  };
-
   return (
     <section
       className={styles.railShell}
@@ -367,11 +298,63 @@ export function AssetRail({
           <strong>{label ?? IMAGE_ASSET_KIND_LABELS[kind]}</strong>
           <small>
             {onUpload
-              ? "Upload, reuse, or wield Prism onto + to synthesize."
-              : "Reuse a recent image or synthesize a new one."}
+              ? "Upload, synthesize, or reuse an asset."
+              : "Synthesize a new image or reuse a recent one."}
           </small>
         </div>
         <div className={styles.railHeaderActions}>
+          {onOpenStorageSettings ? (
+            <button
+              type="button"
+              className={sharedStyles.linkButton}
+              data-asset-storage-settings-shortcut={kind}
+              onClick={onOpenStorageSettings}
+            >
+              Storage Settings
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className={sharedStyles.linkButton}
+            data-asset-library-shortcut={kind}
+            onClick={() => setModalOpen(true)}
+          >
+            {viewAllLabel}
+          </button>
+        </div>
+      </header>
+      <div className={styles.rail}>
+        {onUpload ? (
+          <button
+            type="button"
+            className={`${styles.addTile} ${sharedStyles.imageThumbWrap}`}
+            onClick={onUpload}
+            disabled={disabled}
+            aria-label={`Upload ${IMAGE_ASSET_KIND_LABELS[kind]}`}
+          >
+            <span aria-hidden="true">＋</span>
+            <small>Upload</small>
+          </button>
+        ) : null}
+        <div className={styles.synthesisControl}>
+          <PrismRefractTarget target={synthesizeTarget}>
+            {(binding) => (
+              <button
+                {...binding}
+                type="button"
+                className={`${styles.addTile} ${sharedStyles.imageThumbWrap}`}
+                onClick={() =>
+                  requestPrismRefract(targetId, "focused-shortcut")
+                }
+                disabled={disabled || synthesizeDisabled || generationUnavailable}
+                data-tutorial-target={`asset-add-${kind}`}
+                aria-label={`Synthesize ${IMAGE_ASSET_KIND_LABELS[kind]}`}
+              >
+                <span aria-hidden="true">◇</span>
+                <small>Synthesize</small>
+              </button>
+            )}
+          </PrismRefractTarget>
           {generation ? (
             <label className={styles.generationSelector}>
               <span>Model</span>
@@ -419,48 +402,7 @@ export function AssetRail({
               </select>
             </label>
           ) : null}
-          {onOpenStorageSettings ? (
-            <button
-              type="button"
-              className={sharedStyles.linkButton}
-              data-asset-storage-settings-shortcut={kind}
-              onClick={onOpenStorageSettings}
-            >
-              Storage Settings
-            </button>
-          ) : null}
-          <button
-            type="button"
-            className={sharedStyles.linkButton}
-            data-asset-library-shortcut={kind}
-            onClick={() => setModalOpen(true)}
-          >
-            {viewAllLabel}
-          </button>
         </div>
-      </header>
-      <div className={styles.rail}>
-        <PrismRefractTarget target={synthesizeTarget}>
-          {(binding) => (
-            <button
-              {...binding}
-              ref={addButtonRef}
-              type="button"
-              className={`${styles.addTile} ${sharedStyles.imageThumbWrap}`}
-              onClick={activateAdd}
-              disabled={disabled}
-              data-tutorial-target={`asset-add-${kind}`}
-              aria-label={
-                onUpload
-                  ? `Upload ${IMAGE_ASSET_KIND_LABELS[kind]}. Wield Prism here to synthesize.`
-                  : `Synthesize ${IMAGE_ASSET_KIND_LABELS[kind]}`
-              }
-            >
-              <span aria-hidden="true">＋</span>
-              <small>{onUpload ? "Upload" : "Synthesize"}</small>
-            </button>
-          )}
-        </PrismRefractTarget>
         {loading ? (
           <span className={styles.railStatus}>Loading…</span>
         ) : unavailable ? (
@@ -494,50 +436,6 @@ export function AssetRail({
           })
         )}
       </div>
-      {touchActionsOpen && onUpload ? (
-        <div
-          className={`${styles.actionSheetBackdrop} ${sharedStyles.imageLightboxBackdrop}`}
-          role="presentation"
-          onClick={() => setTouchActionsOpen(false)}
-        >
-          <div
-            ref={touchSheetRef}
-            className={`${styles.actionSheet} ${sharedStyles.settingsTutorialCard} ${sharedStyles.form} ${sharedStyles.formInModal}`}
-            role="dialog"
-            aria-modal="true"
-            aria-label={`Add ${IMAGE_ASSET_KIND_LABELS[kind]}`}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <strong>Add {IMAGE_ASSET_KIND_LABELS[kind]}</strong>
-            <button
-              type="button"
-              onClick={() => {
-                setTouchActionsOpen(false);
-                onUpload();
-              }}
-            >
-              Upload
-            </button>
-            <button
-              type="button"
-              disabled={synthesizeDisabled || generationUnavailable}
-              onClick={() => {
-                setTouchActionsOpen(false);
-                requestPrismRefract(targetId, "focused-shortcut");
-              }}
-            >
-              Synthesize with Prism
-            </button>
-            <button
-              type="button"
-              className={sharedStyles.accountLogoutButton}
-              onClick={() => setTouchActionsOpen(false)}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : null}
       {modalOpen ? (
         <AssetLibraryModal
           kind={kind}

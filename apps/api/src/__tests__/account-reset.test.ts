@@ -50,7 +50,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
         .prepare(
           `
           SELECT
-            email, display_name, theme, graphics_quality, typography_scale, hub_atmosphere_enabled, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked,
+            email, display_name, theme, graphics_quality, crt_focus, typography_scale, hub_atmosphere_enabled, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked,
             auto_memory, memory_learn_about_player, memory_learn_about_bots,
             memory_acquisition_sensitivity, memory_short_term_days,
             memory_long_term_threshold, memory_inferred_min_evidence,
@@ -114,6 +114,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.display_name, "User One");
       assert.equal(user.theme, "system");
       assert.equal(user.graphics_quality, "high");
+      assert.equal(user.crt_focus, 50);
       assert.equal(user.typography_scale, "standard");
       assert.equal(user.hub_atmosphere_enabled, 1);
       assert.equal(user.startup_preference, "home");
@@ -257,6 +258,7 @@ function seedResetFixture(db: DatabaseSync): void {
     SET
       theme = 'dark',
       graphics_quality = 'low',
+      crt_focus = 90,
       typography_scale = 'extra-large',
       hub_atmosphere_enabled = 0,
       startup_preference = 'slate',

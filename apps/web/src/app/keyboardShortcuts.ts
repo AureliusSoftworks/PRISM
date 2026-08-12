@@ -300,12 +300,6 @@ export function keyboardShortcutMatchesEvent(
   event: ShortcutEventLike,
 ): boolean {
   if (!shortcut) return false;
-  if (
-    /^Alt\+Arrow(?:Up|Down|Left|Right)$/u.test(shortcut) &&
-    keyboardShortcutTargetIsTextEditable(event.target)
-  ) {
-    return false;
-  }
   return keyboardShortcutFromEvent(event) === shortcut;
 }
 

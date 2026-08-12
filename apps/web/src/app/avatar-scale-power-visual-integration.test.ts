@@ -96,4 +96,44 @@ describe("avatar scale Power visual contract", () => {
     assert.match(pageCss, /data-power-avatar-scale="giant"[^}]*scale: 1\.5; translate: -16% 0/u);
     assert.match(pageCss, /data-power-avatar-scale="colossal"[^}]*scale: 3; translate: -58% 0/u);
   });
+
+  it("switches unreadable full avatars to the shared Ink-aware micro form", () => {
+    assert.match(
+      pageSource,
+      /BOT_AVATAR_MICRO_FALLBACK_MAX_PX = 118/u,
+    );
+    assert.match(
+      pageSource,
+      /setMicroFallbackActive\([\s\S]{0,120}width < BOT_AVATAR_MICRO_FALLBACK_MAX_PX/u,
+    );
+    assert.match(
+      pageSource,
+      /if \(microFallbackActive\)[\s\S]{0,700}<BotAvatarMicroRenderer[\s\S]{0,500}avatarDetails=\{avatarDetails\}/u,
+    );
+    assert.match(
+      pageCss,
+      /:has\(\.zenLiveBotPresenceBody\[data-render-detail="micro"\]\)\s*\{[^}]*scale:\s*1;/u,
+    );
+    assert.match(
+      signalCss,
+      /\.avatarEmbodiment:has\(\[data-render-detail="micro"\]\)\s*\{[^}]*scale:\s*1;/u,
+    );
+  });
+
+  it("uses Micro with authored Ink in Signal's compact episode archive only", () => {
+    assert.match(signalSource, /surface:\s*"archive"/u);
+    assert.match(pageSource, /avatarState\.surface === "archive"/u);
+    assert.match(
+      pageSource,
+      /if \(signalArchiveAvatar\)[\s\S]{0,1800}<BotAvatarMicroRenderer[\s\S]{0,900}resolveBotAvatarDetails\(archiveBot\)/u,
+    );
+    assert.match(
+      signalCss,
+      /\.episodeParticipantAvatar \[data-avatar-render-tier="micro"\]\s*\{[^}]*width:\s*36px;[^}]*height:\s*36px;/u,
+    );
+    assert.doesNotMatch(
+      signalCss,
+      /\.episodeParticipantAvatar \[data-signal-bot-presence="true"\]/u,
+    );
+  });
 });

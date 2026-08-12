@@ -29,6 +29,7 @@ import {
   type EphemeralChatProviderPreferences,
   isImageProviderName,
   normalizeEphemeralChatProviderPreferences,
+  normalizeCrtFocus,
   normalizeGraphicsQuality,
   normalizePrismTypographyScale,
   normalizeHubAtmosphereStyle,
@@ -173,6 +174,7 @@ export interface CurrentSettings {
   displayName: string;
   theme: Theme;
   graphicsQuality: GraphicsQuality | string | null;
+  crtFocus: number | string | null;
   typographyScale: PrismTypographyScale | string | null;
   atmosphereStyle: string | null;
   hubAtmosphereEnabled: number | null;
@@ -253,6 +255,7 @@ export interface NextSettings {
   displayName: string;
   theme: Theme;
   graphicsQuality: GraphicsQuality;
+  crtFocus: number;
   typographyScale: PrismTypographyScale;
   atmosphereStyle: HubAtmosphereStyle;
   hubAtmosphereEnabled: number;
@@ -901,6 +904,10 @@ export function resolveNextSettings(
     body.graphicsQuality,
     normalizeGraphicsQuality(current.graphicsQuality),
   );
+  const crtFocus = normalizeCrtFocus(
+    body.crtFocus,
+    normalizeCrtFocus(current.crtFocus),
+  );
   const typographyScale = normalizePrismTypographyScale(
     body.typographyScale,
     normalizePrismTypographyScale(current.typographyScale),
@@ -1333,6 +1340,7 @@ export function resolveNextSettings(
     displayName,
     theme,
     graphicsQuality,
+    crtFocus,
     typographyScale,
     atmosphereStyle,
     hubAtmosphereEnabled,

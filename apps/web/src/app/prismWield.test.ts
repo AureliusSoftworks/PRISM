@@ -6,7 +6,7 @@ import {
   transitionPrismWield,
 } from "./prismWield.ts";
 
-test("keeps Prism anchored while any assistant menu is open", () => {
+test("keeps Prism wieldable from Home while assistant menus stay protected", () => {
   assert.equal(
     prismWieldCanArm({
       companionMenuOpen: false,
@@ -37,7 +37,7 @@ test("keeps Prism anchored while any assistant menu is open", () => {
       softSynthesisMenuOpen: false,
       homeDocked: true,
     }),
-    false,
+    true,
   );
 });
 

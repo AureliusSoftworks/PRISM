@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import {
+  keepAuxiliaryLocalModelWarm,
   prepareLocalModel,
   resetModelReadinessForTests,
 } from "../model-readiness.ts";
@@ -88,6 +89,47 @@ describe("local model readiness", () => {
     assert.equal(chatCalls, 1);
     releaseChat();
     await eventuallyReady("llama3.2");
+  });
+
+  it("coalesces persistent auxiliary warms and uses indefinite residency", async () => {
+    let resident = false;
+    let chatCalls = 0;
+    let releaseChat!: () => void;
+    const chatGate = new Promise<void>((resolve) => {
+      releaseChat = resolve;
+    });
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith("/api/ps")) {
+        return Response.json({
+          models: resident
+            ? [{
+                model: "auxiliary-override",
+                digest: "sha256:auxiliary",
+                expires_at: null,
+              }]
+            : [],
+        });
+      }
+      chatCalls += 1;
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      assert.deepEqual(body.messages, []);
+      assert.equal(body.model, "auxiliary-override");
+      assert.equal(body.keep_alive, -1);
+      await chatGate;
+      resident = true;
+      return Response.json({ done: true });
+    }) as typeof fetch;
+
+    const [first, second] = await Promise.all([
+      keepAuxiliaryLocalModelWarm({ model: "auxiliary-override" }),
+      keepAuxiliaryLocalModelWarm({ model: "auxiliary-override" }),
+    ]);
+
+    assert.equal(chatCalls, 1);
+    releaseChat();
+    const [firstReady, secondReady] = await Promise.all([first, second]);
+    assert.equal(firstReady.state, "ready");
+    assert.equal(secondReady.state, "ready");
   });
 
   it("treats expired residency as cold", async () => {

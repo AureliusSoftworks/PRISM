@@ -99,7 +99,7 @@ test("moves the existing companion without overwriting its saved dock and restor
   assert.match(component, /data-chat-home-orb-returning/u);
 });
 
-test("keeps the docked orb continuously visible and preserves hero activation", () => {
+test("keeps the docked orb continuously visible and preserves normal assistant activation", () => {
   assert.match(
     component,
     /idleDimmed && !chatHomeOrbDocked \? "true" : undefined/u,
@@ -114,16 +114,11 @@ test("keeps the docked orb continuously visible and preserves hero activation", 
   );
   assert.match(
     component,
-    /if \(chatHomeOrbDocked\) \{[\s\S]*homeBaseRadialSuppressClickRef\.current[\s\S]*activateChatHomeHero\(\);\s*return;/u,
+    /if \(chatHomeOrbDocked\) \{[\s\S]*homeBaseRadialSuppressClickRef\.current[\s\S]*playPrismCompanionGlassTap\(\);[\s\S]*activatePrismConversation\(\);\s*return;/u,
   );
-  assert.match(
-    page,
-    /onChatHomeHeroActivate=\{\(\) => void summonPrismIntoFreshChat\(\)\}/u,
-  );
-  assert.match(
-    page,
-    /async function summonPrismIntoFreshChat[\s\S]*?newSession: true[\s\S]*?starterPrompt: true[\s\S]*?queuedConversationId: opened\.conversationId[\s\S]*?conversationDetailOverride: freshConversation/u,
-  );
+  assert.doesNotMatch(component, /activateChatHomeHero/u);
+  assert.doesNotMatch(page, /onChatHomeHeroActivate/u);
+  assert.doesNotMatch(page, /summonPrismIntoFreshChat/u);
 });
 
 test("welds live Home docking without lag and settles its return safely", () => {
@@ -167,7 +162,7 @@ test("keeps the companion explicit, keyboard accessible, and capability-driven",
   assert.match(handoffCanvas, /Only this selection will cross surfaces/u);
 });
 
-test("opens the assistant menu from the live orb while preserving Home hero Chat", () => {
+test("opens the assistant menu from every live orb, including the Home hero", () => {
   assert.match(component, /presentation\?: PrismCompanionPresentation/u);
   assert.doesNotMatch(component, /onZenSummon/u);
   assert.match(
@@ -183,13 +178,8 @@ test("opens the assistant menu from the live orb while preserving Home hero Chat
   );
   assert.match(page, /presentation=\{view === "chat" \? chatPresentation : null\}/u);
   assert.doesNotMatch(page, /onZenSummon=/u);
-  assert.match(
-    page,
-    /const summonRunId = zenOpenRunRef\.current \+ 1;\s*zenOpenRunRef\.current = summonRunId;/u,
-  );
-  assert.ok(
-    (page.match(/zenOpenRunRef\.current !== summonRunId/gu)?.length ?? 0) >= 3,
-  );
+  assert.doesNotMatch(page, /summonRunId/u);
+  assert.doesNotMatch(page, /summonPrismIntoFreshChat/u);
 });
 
 test("keeps ordinary assistant talk in one account-scoped saved Prism chat", () => {

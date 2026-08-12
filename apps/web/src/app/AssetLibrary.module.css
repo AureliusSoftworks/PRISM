@@ -70,6 +70,30 @@
   padding: 0.1rem 0 0.35rem;
 }
 
+.synthesisControl {
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 0.34rem;
+  min-width: 5.25rem;
+}
+
+.synthesisControl .generationSelector {
+  display: grid;
+  width: 100%;
+  max-width: 10rem;
+  align-items: stretch;
+  gap: 0.16rem;
+  font-size: 0.64rem;
+}
+
+.synthesisControl .generationSelector select {
+  width: 100%;
+  max-width: 100%;
+  min-height: 1.75rem;
+  padding-right: 1.35rem;
+  font-size: 0.66rem;
+}
+
 .addTile,
 .assetTile {
   aspect-ratio: 1;

@@ -23,6 +23,10 @@ const firstRunSource = readFileSync(
   new URL("./firstRunOnboarding.ts", import.meta.url),
   "utf8",
 );
+const browserGuardSource = readFileSync(
+  new URL("./BlockBrowserInspection.tsx", import.meta.url),
+  "utf8",
+);
 
 test("exposes account-scoped device shortcuts in Settings", () => {
   assert.match(settingsPanelSource, /\| "shortcuts"/u);
@@ -60,6 +64,14 @@ test("uses the configurable Prism and navbar shortcuts globally", () => {
   assert.match(pageSource, /keyboardShortcuts\.effortHud, event/u);
   assert.match(pageSource, /playPrismHotkeyInaccessibleSfx\(\)/u);
   assert.match(companionSource, /companionSuppressed[\s\S]{0,300}playPrismHotkeyInaccessibleSfx\(\)/u);
+  assert.match(
+    browserGuardSource,
+    /PRISM_BROWSER_GUARD_SHORTCUT_ACTIONS[\s\S]*"modelPicker"[\s\S]*"speechType"/u,
+  );
+  assert.match(
+    browserGuardSource,
+    /keyboardShortcutMatchesEvent\(activePrismKeyboardShortcut\(action\), e\)[\s\S]{0,80}return;/u,
+  );
   assert.match(
     pageSource,
     /if \(modelEffortHudTarget\) \{[\s\S]{0,160}setModelEffortHudTarget\(null\)/u,
@@ -219,7 +231,7 @@ test("updates contextual guidance without adding first-run setup", () => {
     /Tab then closes the picker and places the cursor in the nearest visible composer/u,
   );
   assert.match(tutorialSource, /\.replaceAll\("Control\+Up", "Option\+Up"\)/u);
-  assert.match(tutorialSource, /Option-arrow commands stay out of editable text/u);
+  assert.match(tutorialSource, /Option-arrow commands remain available while typing/u);
   assert.match(tutorialSource, /Option\+Command summons Prism/u);
   assert.match(
     tutorialSource,

@@ -3183,15 +3183,19 @@ describe("Zen live presence CSS", () => {
     assert.match(bodyRule, /--zen-live-bot-body-glyph-max-size:\s*48px\s*;/);
     assert.match(
       bodyRule,
-      /--bot-phosphor-beam-softness:\s*0\.45px\s*;/,
+      /--bot-phosphor-focus-radius-scale:\s*var\(--prism-crt-focus-radius-scale,\s*1\)\s*;/,
     );
     assert.match(
       bodyRule,
-      /--bot-phosphor-halo-contact-radius:\s*0\.72px\s*;/,
+      /--bot-phosphor-beam-softness:\s*calc\(\s*0\.45px \* var\(--bot-phosphor-focus-radius-scale\)\s*\)\s*;/,
     );
     assert.match(
       bodyRule,
-      /--bot-phosphor-halo-ambient-radius:\s*21px\s*;/,
+      /--bot-phosphor-halo-contact-radius:\s*calc\(\s*0\.72px \* var\(--bot-phosphor-focus-radius-scale\)\s*\)\s*;/,
+    );
+    assert.match(
+      bodyRule,
+      /--bot-phosphor-halo-ambient-radius:\s*calc\(\s*21px \* var\(--bot-phosphor-focus-radius-scale\)\s*\)\s*;/,
     );
     assert.match(
       glyphRule,
@@ -3948,7 +3952,7 @@ describe("Zen live presence CSS", () => {
   it("drags from the Zen surface while preserving body geometry and relocation persistence", () => {
     assert.match(
       pageSource,
-      /const avatarPositionUserRelocatedRef = useRef\(\s*avatarPosition !== null && !initialRoamOrigin,\s*\)/,
+      /const avatarPositionUserRelocatedRef = useRef\(avatarPosition !== null\)/,
     );
     assert.match(
       pageSource,
@@ -3961,7 +3965,6 @@ describe("Zen live presence CSS", () => {
     assert.match(pageSource, /allowSurfaceDrag:\s*true/);
     assert.match(pageSource, /data-zen-live-bot-composer-boundary="true"/);
     assert.match(pageSource, /data-zen-live-bot-drag-exclusion="top-bar"/);
-    assert.match(pageSource, /\[data-zen-home-drop-target='true'\]/);
     assert.match(pageSource, /avatarPositionUserRelocatedRef\.current = true;/);
     assert.match(
       pageSource,
@@ -4267,10 +4270,10 @@ describe("Zen live presence CSS", () => {
     assert.match(sidebarOpenRule, /display:\s*none\s*;/);
   });
 
-  it("shows live presence during the empty pre-message roaming state", () => {
+  it("shows live presence once a new Zen opener begins revealing", () => {
     assert.match(
       pageSource,
-      /const zenNewSessionPresenceDeferred =\s*chatLikeSurface &&\s*\(\(activeConversationIsEmpty && !zenPreMessageConversationActive\) \|\|\s*showConversationSurfaceLoading \|\|\s*zenInitialThinkingActive\);/,
+      /const zenNewSessionPresenceDeferred =\s*chatLikeSurface &&\s*\(activeConversationIsEmpty \|\|\s*showConversationSurfaceLoading \|\|\s*zenInitialThinkingActive\);/,
     );
     assert.doesNotMatch(
       pageSource.slice(

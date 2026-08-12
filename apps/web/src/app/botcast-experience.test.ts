@@ -2982,10 +2982,10 @@ describe("Signal experience shell", () => {
     assert.match(css, /prefers-reduced-motion[\s\S]*?\.episodeDeleteButton/u);
   });
 
-  it("shows editable host and guest portraits on archived episodes", () => {
-    assert.match(source, /className=\{styles\.episodeParticipants\}/u);
-    assert.match(source, /renderArchiveParticipant\(item, "host"\)/u);
-    assert.match(source, /renderArchiveParticipant\(item, "guest"\)/u);
+  it("shows the editable guest portrait at the right of archived episodes", () => {
+    assert.match(source, /className=\{styles\.episodeGuest\}/u);
+    assert.match(source, /renderArchiveGuest\(item\)/u);
+    assert.doesNotMatch(source, /renderArchiveParticipant\(item, "host"\)/u);
     assert.match(source, /data-bot-id=\{libraryBot\.id\}/u);
     assert.match(
       source,
@@ -2994,7 +2994,16 @@ describe("Signal experience shell", () => {
     assert.match(source, /onBotContextLongPressStart\?\.\(event, libraryBot\.id\)/u);
     assert.match(source, /if \(!libraryBot\) \{/u);
     assert.match(source, /data-interactive="false"/u);
-    assert.match(css, /\.episodeParticipantAvatar \[data-signal-bot-presence="true"\]/u);
+    assert.match(css, /\.episodeGuest \{[^}]*right: 14px/u);
+    assert.match(source, /surface: "archive"/u);
+    assert.match(
+      css,
+      /\.episodeParticipantAvatar \[data-avatar-render-tier="micro"\]/u,
+    );
+    assert.doesNotMatch(
+      css,
+      /\.episodeParticipantAvatar \[data-signal-bot-presence="true"\]/u,
+    );
   });
 
   it("opens a bounded ephemeral host chat from the dashboard avatar", () => {

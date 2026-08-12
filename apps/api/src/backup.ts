@@ -67,6 +67,7 @@ import {
   normalizeBotVoiceVolume,
   normalizeEnglishVoiceEngine,
   normalizeGraphicsQuality,
+  normalizeCrtFocus,
   normalizePrismTypographyScale,
   normalizeHubAtmosphereStyle,
   normalizeModelReasoningEffortPreference,
@@ -165,6 +166,7 @@ import {
 export interface BackupUserSettings {
   theme: "light" | "dark" | "system";
   graphicsQuality?: GraphicsQuality;
+  crtFocus?: number;
   typographyScale?: PrismTypographyScale;
   atmosphereStyle?: HubAtmosphereStyle;
   hubAtmosphereEnabled?: boolean;
@@ -1708,6 +1710,7 @@ export function exportUserSnapshot(
       `SELECT
          theme,
          graphics_quality,
+         crt_focus,
          typography_scale,
          startup_preference,
          preferred_provider,
@@ -1782,6 +1785,7 @@ export function exportUserSnapshot(
     | {
         theme: "light" | "dark" | "system";
         graphics_quality: string | null;
+        crt_focus: number | null;
         typography_scale: string | null;
         atmosphere_style: string | null;
         hub_atmosphere_enabled: number;
@@ -1863,6 +1867,7 @@ export function exportUserSnapshot(
     ? {
         theme: user.theme,
         graphicsQuality: normalizeGraphicsQuality(user.graphics_quality),
+        crtFocus: normalizeCrtFocus(user.crt_focus),
         typographyScale: normalizePrismTypographyScale(user.typography_scale),
         atmosphereStyle: normalizeHubAtmosphereStyle(user.atmosphere_style),
         hubAtmosphereEnabled: user.hub_atmosphere_enabled !== 0,
@@ -3435,6 +3440,7 @@ function importUserSnapshotWithinTransaction(
       SET
         theme = ?,
         graphics_quality = ?,
+        crt_focus = ?,
         typography_scale = ?,
         atmosphere_style = ?,
         hub_atmosphere_enabled = ?,
@@ -3519,6 +3525,7 @@ function importUserSnapshotWithinTransaction(
         ? settings.theme
         : "system",
       normalizeGraphicsQuality(settings.graphicsQuality),
+      normalizeCrtFocus(settings.crtFocus),
       normalizePrismTypographyScale(settings.typographyScale),
       normalizeHubAtmosphereStyle(settings.atmosphereStyle),
       settings.hubAtmosphereEnabled === false ? 0 : 1,

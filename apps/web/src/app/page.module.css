@@ -186,6 +186,9 @@
 .botAvatarMannequinStage[data-avatar-details-grid-visible="true"]
   [data-avatar-details-emission],
 .botAvatarMannequinStage[data-avatar-details-grid-visible="true"]
+  [data-avatar-details-emission]
+  > [data-avatar-details-raster],
+.botAvatarMannequinStage[data-avatar-details-grid-visible="true"]
   [data-avatar-details-mask="true"] {
   filter: none !important;
   --zen-live-bot-crt-flicker-base-filter: none;
@@ -3661,6 +3664,17 @@
     transform 180ms ease,
     translate 180ms ease,
     opacity 180ms ease;
+}
+
+/* When scaling would push a full chassis below the readable floor, the shared
+   renderer swaps to Micro. Keep that 36px authored form at its intended size
+   instead of applying the full-avatar Power scale a second time. */
+:is(
+    .zenLiveBotPresencePlate > .botAmbientPresenceRig,
+    .coffeeSeat .coffeeSeatPlate > .botAmbientPresenceRig
+  ):has(.zenLiveBotPresenceBody[data-render-detail="micro"]) {
+  scale: 1;
+  translate: 0 0;
 }
 
 /* Zen size gestures magnify one canonical authored raster. Keeping the inner
@@ -7867,6 +7881,26 @@
   font-size: var(--prism-type-label);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.settingsRangeHeader > span:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settingsRangeHeader small,
+.settingsRangeEnds small {
+  color: var(--fg-muted);
+  font-size: var(--prism-type-caption);
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.settingsRangeEnds {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .settingsOnlineAutoProviderBiasField {
@@ -13556,9 +13590,26 @@
 
 .chatHeaderModelPicker .botLibraryGroupControl {
   height: 30px;
-  max-width: min(13rem, 25vw);
+  width: min(300px, 30vw);
+  max-width: min(300px, 30vw);
   border-radius: 9px;
-  flex: 0 1 auto;
+  flex: 0 1 min(300px, 30vw);
+}
+
+.fpsCounter {
+  position: fixed;
+  z-index: 2147483000;
+  top: 4px;
+  left: 6px;
+  padding: 1px 4px;
+  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--bg, #080b10) 82%, transparent);
+  color: color-mix(in srgb, currentColor 78%, transparent);
+  font: 600 9px/1.1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  user-select: none;
 }
 
 .botLibraryGroupTrigger {
@@ -15717,62 +15768,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .chatBotPickerFrame[data-returning-all="true"]
   .chatBotPicker {
   animation: none;
-}
-
-/* The retained Zen card remains the only docking destination while the bot
-   roams. Home-only selection controls soften out without becoming a second
-   interaction layer under the live bot. */
-.zenHomeRoaming .canvasBotBrowserRail,
-.zenHomeRoaming .chatCanvasPickerControls,
-.zenHomeRoaming .chatBotPickerFrame,
-.zenHomeRoaming .botGroupWaitingRoom,
-.zenHomeRoaming .botGroupImageBubbleLayer {
-  filter: blur(10px);
-  opacity: 0;
-  pointer-events: none;
-  transform: scale(0.985);
-  transition:
-    filter 220ms ease,
-    opacity 220ms ease,
-    transform 220ms ease;
-}
-
-.compose[data-zen-home-roaming="true"] .hueLensRow {
-  filter: blur(10px);
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(8px);
-  transition:
-    filter 220ms ease,
-    opacity 220ms ease,
-    transform 220ms ease;
-}
-
-.zenHomeRoaming .emptyStateIconButton {
-  filter: blur(3px);
-  opacity: 0;
-  pointer-events: none;
-  transform: scale(0.96);
-  transition:
-    filter 180ms ease,
-    opacity 180ms ease,
-    transform 220ms ease;
-}
-
-.zenHomeRoaming [data-zen-home-drop-target="true"] {
-  pointer-events: auto;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .zenHomeRoaming .canvasBotBrowserRail,
-  .zenHomeRoaming .chatCanvasPickerControls,
-  .zenHomeRoaming .chatBotPickerFrame,
-  .zenHomeRoaming .botGroupWaitingRoom,
-  .zenHomeRoaming .botGroupImageBubbleLayer,
-  .zenHomeRoaming .emptyStateIconButton,
-  .compose[data-zen-home-roaming="true"] .hueLensRow {
-    transition-duration: 1ms;
-  }
 }
 
 .emptyStateSearching {
@@ -18074,17 +18069,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   min-width: 0;
 }
 
-.emptyStateSearchGroupPicker {
-  min-width: 0;
-}
-
 @media (max-width: 620px) {
   .emptyStateSearchRow {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .emptyStateSearchGroupPicker {
-    justify-self: center;
   }
 }
 
@@ -22389,9 +22376,35 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     inset 0 0 8px color-mix(in srgb, var(--coffee-bot-color) 20%, transparent),
     0 0 8px color-mix(in srgb, var(--coffee-bot-color) 24%, transparent);
   overflow: visible;
+  position: relative;
+}
+
+.botAvatarMicroInk {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.botAvatarMicroInk [data-avatar-details-mask="true"] {
+  width: 100%;
+  height: 100%;
+  filter: none;
+  mix-blend-mode: normal;
+}
+
+.botAvatarMicroInk[data-avatar-details-depth="behind-face"] {
+  z-index: 1;
+}
+
+.botAvatarMicroInk[data-avatar-details-depth="above-face"] {
+  z-index: 3;
 }
 
 .messageMoodMicroFace {
+  position: relative;
+  z-index: 2;
   --crt-core-opacity: 0.92;
   --crt-beam-softness: 0.2px;
   --crt-bloom-narrow-radius: 0.45px;
@@ -22409,6 +22422,33 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   color: color-mix(in srgb, var(--coffee-bot-color) 90%, #ffffff);
   text-shadow: 0 0 2px color-mix(in srgb, currentColor 70%, transparent);
   transform-origin: center center;
+}
+
+.signalArchiveMicroAvatar {
+  width: 36px;
+  height: 36px;
+}
+
+:is(
+    .signalArchiveMicroAvatar,
+    .debateModeratorMicroAvatar,
+    .zenLiveBotPresenceMicroAvatar
+  )
+  .messageMoodMicroFace {
+  font-size: 10px;
+}
+
+.zenLiveBotPresenceBody[data-render-detail="micro"]::after {
+  content: none;
+}
+
+.zenLiveBotPresenceMicroAvatar {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(36px, 100%);
+  height: min(36px, 100%);
+  transform: translate(-50%, -50%);
 }
 
 .messageMoodMiniArt {
@@ -27786,20 +27826,21 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 :global([data-debate-stage-compact="true"])
-  > .debateBotPresencePlate[data-debate-compact="true"] {
+  > .debateModeratorMicroAvatar {
   position: absolute;
   left: 50%;
   bottom: 0;
-  width: 215.054%;
-  transform: translateX(-50%) scale(0.465);
+  width: 36px;
+  height: 36px;
+  transform: translateX(-50%);
   transform-origin: 50% 100%;
 }
 
 @media (max-width: 900px) {
   :global([data-debate-stage-compact="true"])
-    > .debateBotPresencePlate[data-debate-compact="true"] {
-    width: 235.294%;
-    transform: translateX(-50%) scale(0.425);
+    > .debateModeratorMicroAvatar {
+    width: 30px;
+    height: 30px;
   }
 }
 
@@ -28099,15 +28140,34 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
      Individual screens may drive it at different strengths, but their beam
      width and halo falloff must describe the same display technology. */
   --bot-phosphor-core-opacity: 0.94;
-  --bot-phosphor-beam-softness: 0.45px;
-  --bot-phosphor-bloom-narrow-radius: 1.25px;
-  --bot-phosphor-bloom-wide-radius: 6px;
-  --bot-phosphor-halo-contact-radius: 0.72px;
-  --bot-phosphor-halo-tight-radius: 1.5px;
-  --bot-phosphor-halo-near-radius: 3px;
-  --bot-phosphor-halo-mid-radius: 6px;
-  --bot-phosphor-halo-far-radius: 12px;
-  --bot-phosphor-halo-ambient-radius: 21px;
+  --bot-phosphor-focus-radius-scale: var(--prism-crt-focus-radius-scale, 1);
+  --bot-phosphor-beam-softness: calc(
+    0.45px * var(--bot-phosphor-focus-radius-scale)
+  );
+  --bot-phosphor-bloom-narrow-radius: calc(
+    1.25px * var(--bot-phosphor-focus-radius-scale)
+  );
+  --bot-phosphor-bloom-wide-radius: calc(
+    6px * var(--bot-phosphor-focus-radius-scale)
+  );
+  --bot-phosphor-halo-contact-radius: calc(
+    0.72px * var(--bot-phosphor-focus-radius-scale)
+  );
+  --bot-phosphor-halo-tight-radius: calc(
+    1.5px * var(--bot-phosphor-focus-radius-scale)
+  );
+  --bot-phosphor-halo-near-radius: calc(
+    3px * var(--bot-phosphor-focus-radius-scale)
+  );
+  --bot-phosphor-halo-mid-radius: calc(
+    6px * var(--bot-phosphor-focus-radius-scale)
+  );
+  --bot-phosphor-halo-far-radius: calc(
+    12px * var(--bot-phosphor-focus-radius-scale)
+  );
+  --bot-phosphor-halo-ambient-radius: calc(
+    21px * var(--bot-phosphor-focus-radius-scale)
+  );
   /* The lower buckle shares the canonical 128px phosphor plane with the face.
      Derive its lattice pitch from that plane so resizing the complete chassis
      never changes the apparent pixel density. */
@@ -28337,9 +28397,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenLiveBotPresenceFaceEmissionMask[data-crt-profile="worn"] {
-  --crt-beam-softness: 0.62px;
-  --crt-bloom-narrow-radius: 1.55px;
-  --crt-bloom-wide-radius: 7px;
+  --crt-beam-softness: calc(
+    0.62px * var(--bot-phosphor-focus-radius-scale, 1)
+  );
+  --crt-bloom-narrow-radius: calc(
+    1.55px * var(--bot-phosphor-focus-radius-scale, 1)
+  );
+  --crt-bloom-wide-radius: calc(
+    7px * var(--bot-phosphor-focus-radius-scale, 1)
+  );
   --crt-phosphor-midtone-strength: 0.42;
   --crt-static-opacity: 0.035;
   --crt-breath-strength: 0.004;
@@ -29533,9 +29599,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --crt-chromatic-offset: 0.42px;
   --crt-chromatic-opacity: 0.042;
   --crt-bloom-narrow-strength: 0.28;
-  --crt-bloom-narrow-radius: 1.35px;
+  --crt-bloom-narrow-radius: calc(
+    1.35px * var(--bot-phosphor-focus-radius-scale, 1)
+  );
   --crt-bloom-wide-strength: 0.08;
-  --crt-bloom-wide-radius: 7px;
+  --crt-bloom-wide-radius: calc(
+    7px * var(--bot-phosphor-focus-radius-scale, 1)
+  );
   --crt-convergence-offset: 0.26px;
   --crt-convergence-opacity: 0.05;
   --zen-live-bot-talking-light-opacity-high: 1;
@@ -30190,11 +30260,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     var(--coffee-bot-color, var(--coffee-seat-emotion-color, currentColor))
   );
   --crt-bloom-opacity: 0.09;
-  --crt-bloom-radius: 1.35px;
+  --crt-bloom-radius: var(--bot-phosphor-bloom-narrow-radius, 1.25px);
   --crt-bloom-narrow-strength: 0.22;
-  --crt-bloom-narrow-radius: 1.2px;
+  --crt-bloom-narrow-radius: var(--bot-phosphor-bloom-narrow-radius, 1.25px);
   --crt-bloom-wide-strength: 0.06;
-  --crt-bloom-wide-radius: 6px;
+  --crt-bloom-wide-radius: var(--bot-phosphor-bloom-wide-radius, 6px);
   --crt-glyph-bloom-wide-inner-opacity: 8%;
   --crt-glyph-bloom-wide-outer-opacity: 3%;
   /* Match the approved buckle-glyph emission: a white-hot core with a
@@ -30423,8 +30493,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     --zen-live-bot-idle-face-glow-filter-high
   );
   --crt-face-glow-filter: var(--zen-live-bot-idle-face-glow-filter-high);
-  --crt-bloom-narrow-radius: 1.35px;
-  --crt-bloom-wide-radius: 8px;
+  --crt-bloom-narrow-radius: calc(
+    1.35px * var(--bot-phosphor-focus-radius-scale, 1)
+  );
+  --crt-bloom-wide-radius: calc(
+    8px * var(--bot-phosphor-focus-radius-scale, 1)
+  );
   --crt-chromatic-offset: 0.78px;
   --crt-chromatic-opacity: 0.105;
   --crt-core-opacity: 0.88;
@@ -30590,7 +30664,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --crt-chromatic-offset: 0.9px;
   --crt-chromatic-opacity: 0.13;
   --crt-bloom-narrow-strength: 0.35;
-  --crt-bloom-narrow-radius: 1.7px;
+  --crt-bloom-narrow-radius: calc(
+    1.7px * var(--bot-phosphor-focus-radius-scale, 1)
+  );
   --crt-bloom-wide-strength: 0.11;
   --crt-convergence-offset: 0.34px;
   --crt-convergence-opacity: 0.076;
@@ -71968,7 +72044,13 @@ a.settingsCreditItem:focus-visible {
   --crt-bloom-radius: 1.4px;
   --crt-chromatic-offset: 0.46px;
   --crt-chromatic-opacity: 0.04;
-  --crt-face-glow-radius-scale: var(--bot-face-weight-glow-radius-scale, 1);
+  /* Full-size screens get one physical beam regardless of whether the
+     silhouette came from a font, SVG, or Ink. Compact legacy faces can still
+     fall back to their weight-tuned glow when no screen brush is present. */
+  --crt-face-glow-radius-scale: var(
+    --bot-phosphor-focus-radius-scale,
+    var(--bot-face-weight-glow-radius-scale, 1)
+  );
   --crt-face-glow-strength-scale: 1;
   --coffee-face-feature-paint-pad-block: 0.18em;
   --coffee-face-feature-paint-pad-inline: 0.18em;
@@ -72136,7 +72218,10 @@ a.settingsCreditItem:focus-visible {
   color: inherit;
   justify-self: center;
   align-self: center;
-  --crt-face-glow-radius-scale: var(--bot-face-weight-glow-radius-scale, 1);
+  --crt-face-glow-radius-scale: var(
+    --bot-phosphor-focus-radius-scale,
+    var(--bot-face-weight-glow-radius-scale, 1)
+  );
   --crt-weighted-bloom-radius: calc(
     var(--crt-bloom-radius, 1.4px) * var(--crt-face-glow-radius-scale)
   );
@@ -72156,25 +72241,22 @@ a.settingsCreditItem:focus-visible {
 .zenLiveBotPresenceFaceGlyph [data-crt-glyph-layer="true"] {
   --crt-glyph-paint-bleed: var(--crt-glyph-core-paint-bleed, 0.08em);
   --crt-glyph-core-opacity: var(--crt-core-opacity, 0.82);
-  --crt-face-glow-radius-scale: var(--bot-face-weight-glow-radius-scale, 1);
-  --crt-weighted-bloom-radius: calc(
-    var(--crt-bloom-radius, 1.4px) * var(--crt-face-glow-radius-scale)
+  --crt-face-glow-radius-scale: var(
+    --bot-phosphor-focus-radius-scale,
+    var(--bot-face-weight-glow-radius-scale, 1)
   );
-  --crt-glyph-beam-softness: calc(
-    var(--crt-beam-softness, 0.45px) * var(--crt-face-glow-radius-scale)
-  );
+  --crt-weighted-bloom-radius: var(--crt-bloom-radius, 1.4px);
+  --crt-glyph-beam-softness: var(--crt-beam-softness, 0.45px);
   --crt-glyph-bloom-strength-scale: var(--bot-face-glow-strength-scale, 1);
-  --crt-glyph-bloom-narrow-radius: calc(
-    var(--crt-bloom-narrow-radius, var(--crt-bloom-radius, 1.4px)) *
-      var(--crt-face-glow-radius-scale)
+  --crt-glyph-bloom-narrow-radius: var(
+    --crt-bloom-narrow-radius,
+    var(--crt-bloom-radius, 1.4px)
   );
   --crt-glyph-bloom-narrow-strength: var(
     --crt-bloom-narrow-strength,
     var(--crt-bloom-opacity, 0.075)
   );
-  --crt-glyph-bloom-wide-radius: calc(
-    var(--crt-bloom-wide-radius, 6px) * var(--crt-face-glow-radius-scale)
-  );
+  --crt-glyph-bloom-wide-radius: var(--crt-bloom-wide-radius, 6px);
   --crt-glyph-bloom-wide-strength: var(--crt-bloom-wide-strength, 0.08);
   --crt-glyph-phosphor-opacity: var(--crt-phosphor-opacity, 0.16);
   --crt-glyph-phosphor-midtone-strength: var(

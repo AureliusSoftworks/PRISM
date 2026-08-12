@@ -3449,6 +3449,7 @@ export * from "./stageActionDirector.js";
 export * from "./continuityVersion.js";
 export * from "./modelReadiness.js";
 export * from "./graphicsQuality.js";
+export * from "./crtFocus.js";
 export * from "./typographyScale.js";
 export * from "./review.js";
 export * from "./ephemeralChat.js";

@@ -813,8 +813,12 @@
 
 .symmetryGuide {
   position: absolute;
-  top: 0;
-  bottom: 0;
+  /* The portaled editor fills the shared 128px CRT root, while Ink itself is
+     authored only inside the large face-screen component (rows 17-98). Keep
+     both grips inside that visible aperture instead of losing the upper grip
+     behind the metal shell. */
+  top: 13.28125%;
+  bottom: 22.65625%;
   left: var(--avatar-details-symmetry-axis-left, 50%);
   z-index: 5;
   width: 0;

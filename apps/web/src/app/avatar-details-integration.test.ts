@@ -19,6 +19,10 @@ const maskCss = readFileSync(
   new URL("./avatar-details-mask.module.css", import.meta.url),
   "utf8",
 );
+const glowSource = readFileSync(
+  new URL("./avatar-details-glow.ts", import.meta.url),
+  "utf8",
+);
 const editorCss = readFileSync(
   new URL("./avatar-details-editor.module.css", import.meta.url),
   "utf8",
@@ -161,13 +165,29 @@ describe("Avatar Details Studio integration", () => {
     assert.match(editorSource, /styles\.symmetryHandleBottom/);
     assert.match(
       editorCss,
-      /\.symmetryGuide\s*\{[\s\S]*left:\s*var\(--avatar-details-symmetry-axis-left, 50%\)/,
+      /\.symmetryGuide\s*\{[\s\S]*top:\s*13\.28125%;[\s\S]*bottom:\s*22\.65625%;[\s\S]*left:\s*var\(--avatar-details-symmetry-axis-left, 50%\)/,
     );
     assert.match(editorCss, /\.symmetryHandleTop\s*\{[^}]*top:\s*7px/);
     assert.match(editorCss, /\.symmetryHandleBottom\s*\{[^}]*bottom:\s*7px/);
     assert.match(
       editorCss,
       /\.symmetryGuide\[data-visible="true"\]\s*\{[^}]*opacity:\s*0\.72/,
+    );
+  });
+
+  it("captures cursor-anchored Ink camera zoom over the portaled CRT canvas", () => {
+    assert.match(
+      pageSource,
+      /stage\.addEventListener\("wheel", handleCapturedWheel, \{[\s\S]*capture:\s*true,[\s\S]*passive:\s*false/,
+    );
+    assert.match(
+      pageSource,
+      /target\?\.closest\('\[data-tool="stamp"\]'\)/,
+    );
+    assert.match(pageSource, /zoomBotAvatarFoundryViewportAtAnchor\(/);
+    assert.match(
+      pageSource,
+      /stage\.removeEventListener\("wheel", handleCapturedWheel, true\)/,
     );
   });
 
@@ -602,7 +622,11 @@ describe("Avatar Details shared mannequin rendering", () => {
       /coreContext\.putImageData\(coreImageData, 0, 0\)/,
     );
     assert.doesNotMatch(maskSource, /toBlob|createObjectURL|maskState/);
-    assert.match(maskSource, /resamplePhosphorRgbaCoverage\(/);
+    assert.match(maskSource, /resamplePhosphorRgbaForPresentation\(/);
+    assert.match(
+      maskSource,
+      /const resampleMode = pixelPerfectInk \? "nearest" : "coverage"/,
+    );
     assert.match(
       maskSource,
       /data-avatar-details-rendering=\{[\s\S]*?rasterSize === AVATAR_DETAILS_CANVAS_SIZE[\s\S]*?"nearest-neighbor"[\s\S]*?: "coverage-sampled"/,
@@ -612,7 +636,7 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.match(maskCss, /\.aboveFace\s*\{[\s\S]*z-index:\s*7/);
     assert.match(
       maskSource,
-      /detailLevel === "full" \? \([\s\S]*data-avatar-details-emission="halo"/,
+      /detailLevel === "full" && exteriorGlow \? \([\s\S]*data-avatar-details-emission="halo"/,
     );
     assert.match(
       maskSource,
@@ -620,11 +644,11 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       maskCss,
-      /\.layer\[data-avatar-details-render-detail="reduced"\]\s*\{[^}]*animation:\s*none !important/u,
+      /\.motionPlane\[data-avatar-details-render-detail="reduced"\]\s*\{[^}]*animation:\s*none !important/u,
     );
     assert.match(
       maskCss,
-      /\.bloom\[data-avatar-details-render-detail="reduced"\]\s*\{[^}]*opacity:[^}]*0\.28/u,
+      /\.bloomPlane\[data-avatar-details-render-detail="reduced"\]\s*\{[^}]*--avatar-details-emission-opacity:\s*0\.28/u,
     );
     assert.match(maskSource, /"data-avatar-details-depth": depth/);
     assert.doesNotMatch(maskSource, /className=\{styles\.group\}/);
@@ -644,23 +668,27 @@ describe("Avatar Details shared mannequin rendering", () => {
       maskSource,
       /\["--avatar-details-phosphor-glow-color" as string\]: normalizedColor/,
     );
-    assert.match(maskCss, /\.halo[\s\S]*mix-blend-mode: screen/);
+    assert.match(maskCss, /\.haloPlane[\s\S]*mix-blend-mode: screen/);
     assert.match(
       maskCss,
-      /\.halo\s*\{[^}]*--avatar-details-emission-opacity:\s*0\.14[^}]*--zen-live-bot-crt-shared-flicker-opacity/,
+      /\.haloPlane\s*\{[^}]*--avatar-details-emission-opacity:\s*0\.14[^}]*--zen-live-bot-crt-shared-flicker-opacity/,
     );
     assert.match(
       maskCss,
-      /\.halo\s*\{[^}]*0 0 4px[^}]*0 0 8px[^}]*0 0 12px/,
+      /\.halo\s*\{[^}]*--bot-phosphor-halo-near-radius[^}]*--bot-phosphor-halo-mid-radius[^}]*--bot-phosphor-halo-far-radius/,
     );
     assert.doesNotMatch(maskCss, /\.halo\s*\{[^}]*0 0 21px/);
     assert.match(
       maskCss,
-      /\.bloom\s*\{[^}]*--avatar-details-emission-opacity:\s*1[^}]*--zen-live-bot-crt-shared-flicker-opacity/,
+      /\.bloomPlane\s*\{[^}]*--avatar-details-emission-opacity:\s*1[^}]*--zen-live-bot-crt-shared-flicker-opacity/,
     );
     assert.match(
       maskCss,
-      /\.bloom\s*\{[^}]*0 0 0\.72px[^}]*0 0 1\.5px[^}]*0 0 3px[^}]*82%[^}]*0 0 6px[^}]*58%[^}]*0 0 12px[^}]*36%[^}]*0 0 21px[^}]*22%/,
+      /\.bloom\s*\{[^}]*--zen-live-bot-crt-flicker-base-filter:\s*blur\(\s*var\(--bot-phosphor-beam-softness,\s*0\.45px\)\s*\)/,
+    );
+    assert.match(
+      maskCss,
+      /\.bloom\s*\{[^}]*--bot-phosphor-halo-contact-radius[^}]*--bot-phosphor-halo-tight-radius[^}]*--bot-phosphor-halo-near-radius[^}]*82%[^}]*--bot-phosphor-halo-mid-radius[^}]*58%[^}]*--bot-phosphor-halo-far-radius[^}]*36%[^}]*--bot-phosphor-halo-ambient-radius[^}]*22%/,
     );
     assert.match(maskSource, /avatarDetailsPhosphorCoreRgba\(pixels\)/);
     assert.match(maskSource, /coreColor = "phosphor"/);
@@ -670,11 +698,7 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       maskCss,
-      /\.core[\s\S]*--avatar-details-emission-opacity:\s*1[\s\S]*--zen-live-bot-crt-shared-flicker-opacity[\s\S]*drop-shadow/,
-    );
-    assert.match(
-      maskCss,
-      /\.core\s*\{[\s\S]*--zen-live-bot-crt-flicker-base-filter:\s*blur\(\s*var\(--crt-beam-softness,\s*0\.45px\)\s*\)[\s\S]*drop-shadow/,
+      /\.corePlane\s*\{[\s\S]*--avatar-details-emission-opacity:\s*1[\s\S]*--zen-live-bot-crt-shared-flicker-opacity[\s\S]*\.core\s*\{[\s\S]*--zen-live-bot-crt-flicker-base-filter:\s*none/,
     );
     assert.match(
       maskCss,
@@ -686,8 +710,14 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       maskCss,
-      /\.core[\s\S]*mix-blend-mode:\s*normal[\s\S]*--zen-live-bot-crt-flicker-base-filter:[\s\S]*--zen-live-bot-crt-shared-flicker-brightness-scale[\s\S]*var\(--zen-live-bot-crt-flicker-base-filter\)/,
+      /\.corePlane[\s\S]*mix-blend-mode:\s*normal[\s\S]*\.core[\s\S]*--zen-live-bot-crt-flicker-base-filter:[\s\S]*--zen-live-bot-crt-shared-flicker-brightness-scale[\s\S]*var\(--zen-live-bot-crt-flicker-base-filter\)/,
     );
+    assert.match(maskSource, /avatarDetailsExteriorGlowRaster\(/);
+    assert.match(maskSource, /className=\{`\$\{styles\.raster\} \$\{styles\.croppedGlowRaster\}/);
+    assert.match(maskSource, /width=\{exteriorGlow\.bounds\.width\}/);
+    assert.match(maskSource, /className=\{`\$\{styles\.raster\} \$\{styles\.fullRaster\} \$\{styles\.core\}`\}/);
+    assert.match(glowSource, /Eight-way connectivity/);
+    assert.match(glowSource, /exterior\[nextY \* normalizedWidth \+ nextX\]/);
     assert.match(
       pageCss,
       /\.zenLiveBotPresenceBody\[data-render-detail="full"\][\s\S]*> \.zenLiveBotPresenceFaceEmissionMask[\s\S]*animation:\s*zenLiveBotCrtFaceFlicker 11\.7s linear infinite/,

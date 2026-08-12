@@ -11,6 +11,11 @@ import {
   toggleDesktopFullscreen,
 } from "./desktopShell";
 import { closestTextEditingTarget } from "./editableTextContextMenuModel";
+import {
+  activePrismKeyboardShortcut,
+  keyboardShortcutMatchesEvent,
+  type PrismKeyboardShortcutAction,
+} from "./keyboardShortcuts";
 
 const PRISM_HISTORY_GUARD_STATE_KEY = "__prismHistoryGuard";
 const BROWSER_MOUSE_NAVIGATION_EVENTS = [
@@ -20,6 +25,14 @@ const BROWSER_MOUSE_NAVIGATION_EVENTS = [
   "mouseup",
   "auxclick",
 ] as const;
+const PRISM_BROWSER_GUARD_SHORTCUT_ACTIONS = [
+  "providerMode",
+  "modelPicker",
+  "effortPicker",
+  "turbo",
+  "speechType",
+  "effortHud",
+] as const satisfies readonly PrismKeyboardShortcutAction[];
 
 function prismHistoryGuardState(state: unknown): unknown {
   if (state && typeof state === "object" && !Array.isArray(state)) {
@@ -158,6 +171,18 @@ export function BlockBrowserInspection(): null {
         e.preventDefault();
         e.stopPropagation();
         void toggleDesktopFullscreen();
+        return;
+      }
+
+      // The shell guard runs on window capture, before page-level navbar
+      // handlers. Yield active PRISM commands here so Option+Arrow reaches
+      // Model, Effort, Turbo, and Speech Type instead of being swallowed as
+      // browser history navigation.
+      if (
+        PRISM_BROWSER_GUARD_SHORTCUT_ACTIONS.some((action) =>
+          keyboardShortcutMatchesEvent(activePrismKeyboardShortcut(action), e),
+        )
+      ) {
         return;
       }
 

@@ -1,0 +1,7 @@
+file 'segments/01-hook.mp4'
+file 'segments/02-companion.mp4'
+file 'segments/03-spectrum.mp4'
+file 'segments/04-signal.mp4'
+file 'segments/05-interplay.mp4'
+file 'segments/06-local.mp4'
+file 'segments/07-close.mp4'

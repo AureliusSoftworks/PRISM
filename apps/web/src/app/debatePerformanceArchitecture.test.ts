@@ -181,7 +181,7 @@ test("talking gallery seats animate compact mouths without waking the full portr
   );
 });
 
-test("the Moderator uses the mini chassis unless its camera is active", () => {
+test("the Moderator uses the authored micro form unless its camera is active", () => {
   assert.match(
     debateSource,
     /props\.renderBotAvatar\(bot, \{[\s\S]{0,260}highDefinition:[\s\S]{0,120}stageAlignmentPreviewCamera ===[\s\S]{0,180}compact:[\s\S]{0,120}stageAlignmentPreviewCamera !==/u,
@@ -192,11 +192,11 @@ test("the Moderator uses the mini chassis unless its camera is active", () => {
   );
   assert.match(
     pageSource,
-    /staticAudiencePortrait \|\|[\s\S]{0,60}moderatorMiniPortrait[\s\S]{0,6500}<ChatMiniBotAvatar/u,
+    /if \(moderatorMiniPortrait\)[\s\S]{0,1000}<BotAvatarMicroRenderer/u,
   );
   assert.match(
     pageCss,
-    /\.debateModeratorMiniAvatar\[data-size="room"\]\s*\{[^}]*width:\s*100%[^}]*height:\s*100%/u,
+    /:global\(\[data-debate-stage-compact="true"\]\)[\s\S]{0,100}> \.debateModeratorMicroAvatar[\s\S]{0,180}width:\s*36px[\s\S]{0,80}height:\s*36px/u,
   );
   assert.doesNotMatch(pageSource, /stageAlignmentPreview/u);
 });

@@ -283,8 +283,6 @@ export interface PrismCompanionProps {
   /** Home Base-only applet registry entries rendered around the held orb. */
   homeBaseAppletTargets?: readonly PrismCompanionHomeAppletTarget[];
   onHomeBaseAppletSelect?: (appletId: string) => void;
-  /** Legacy non-Zen hero action, retained while the parent migrates. */
-  onChatHomeHeroActivate?: () => void;
   onContinueFocusedChat?: (
     handoff: PrismCompanionFocusedChatHandoff,
   ) => void | Promise<void>;
@@ -612,7 +610,6 @@ export default function PrismCompanion({
   chatHomeHeroDocked = false,
   homeBaseAppletTargets = [],
   onHomeBaseAppletSelect,
-  onChatHomeHeroActivate,
   onContinueFocusedChat,
   onPersistentConversationChange,
   onOpenImagePrompt,
@@ -1620,8 +1617,10 @@ export default function PrismCompanion({
     return () => setAppNavbarCompanionOpen(false);
   }, [open]);
 
+  const pauseBackgroundForCompanionConversation =
+    open && !sessionNoteContext;
   useEffect(() => {
-    if (!open) {
+    if (!pauseBackgroundForCompanionConversation) {
       setPrismSystemPause(PRISM_COMPANION_SYSTEM_PAUSE_REASON, false);
       return;
     }
@@ -1695,7 +1694,7 @@ export default function PrismCompanion({
       }
       pausedMedia.clear();
     };
-  }, [open]);
+  }, [pauseBackgroundForCompanionConversation]);
 
   const persistPrivateRecovery = useCallback(
     (next: readonly PrismCompanionMessage[]): PrismCompanionMessage[] => {
@@ -2048,35 +2047,17 @@ export default function PrismCompanion({
   }, [onError, sessionNoteContext, sessionNoteDraft, sessionNoteSaving]);
 
   const activatePrismConversation = useCallback(
-    (heroActivation = false): void => {
+    (): void => {
       if (sessionNoteContext) {
         if (openRef.current) setOpen(false);
         else openSessionNote();
         return;
       }
-      if (heroActivation && onChatHomeHeroActivate) {
-        onChatHomeHeroActivate();
-        return;
-      }
       if (openRef.current) setOpen(false);
       else openAndFocus();
     },
-    [
-      onChatHomeHeroActivate,
-      openAndFocus,
-      openSessionNote,
-      sessionNoteContext,
-    ],
+    [openAndFocus, openSessionNote, sessionNoteContext],
   );
-
-  const activateChatHomeHero = useCallback((): void => {
-    playPrismCompanionGlassTap();
-    if (onChatHomeHeroActivate) {
-      onChatHomeHeroActivate();
-      return;
-    }
-    activatePrismConversation(true);
-  }, [activatePrismConversation, onChatHomeHeroActivate]);
 
   const resetPersonalNoteEditor = useCallback((): void => {
     setPersonalNoteId(null);
@@ -3600,9 +3581,9 @@ export default function PrismCompanion({
         return;
       }
       // The captured field now owns Prism's visual. Retire the free cursor-orb
-      // transform immediately—even while Option remains held—so the triangle
-      // can travel to the field center and later Option-clicks can join the
-      // active Refract queue.
+      // transform immediately—even while the modifier remains held—so the
+      // triangle can travel to the field center and later modifier-clicks can
+      // join the active Refract queue.
       resetPrismWield(true, false, { skipCursorDock: true });
       event.preventDefault();
       event.stopPropagation();
@@ -4528,7 +4509,8 @@ export default function PrismCompanion({
       setHomeBaseRadialPointer(null);
       setHomeBaseRadialLayout([]);
       if (released.effect === "activate-source") {
-        activateChatHomeHero();
+        playPrismCompanionGlassTap();
+        activatePrismConversation();
       }
     }
     try {
@@ -5955,7 +5937,7 @@ export default function PrismCompanion({
           data-prism-companion-avatar="true"
           aria-label={
             chatHomeOrbDocked
-              ? "Start chat with PRISM. Hold for applets."
+              ? "Open Prism assistant. Hold for applets."
               : softSynthesisActive
               ? softSynthesisUi.expanded
                 ? "Minimize soft synthesis"
@@ -6027,7 +6009,8 @@ export default function PrismCompanion({
                 event.preventDefault();
                 return;
               }
-              activateChatHomeHero();
+              playPrismCompanionGlassTap();
+              activatePrismConversation();
               return;
             }
             if (event.detail === 0) {

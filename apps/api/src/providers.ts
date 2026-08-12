@@ -45,6 +45,8 @@ export interface GenerateOptions {
   /** Optional JSON Schema for providers that support structured JSON output. */
   jsonSchema?: Record<string, unknown>;
   jsonSchemaName?: string;
+  /** Ollama-only residency override for system-owned local lanes. */
+  ollamaKeepAlive?: string | number;
 }
 
 export type ProviderName = "local" | "openai" | "anthropic";
@@ -1381,7 +1383,7 @@ export class LocalOllamaProvider implements LlmProvider {
       model,
       stream: false,
       messages,
-      keep_alive: "10m",
+      keep_alive: options?.ollamaKeepAlive ?? "10m",
       // Thinking-capable models (Qwen3, DeepSeek-R1, etc.) otherwise default to
       // routing the visible reply into `message.thinking` and leave `content` empty,
       // which breaks Prism chat (and any follow-up like sendGeneratedImage / Comfy).
@@ -2016,6 +2018,9 @@ export function getAuxiliaryProvider(
       return inner.generateResponse(messages, {
         ...options,
         model: auxiliaryModel,
+        // Auxiliary work must never pay a cold-start penalty while PRISM is
+        // active. A negative keep_alive is Ollama's indefinite residency mode.
+        ollamaKeepAlive: -1,
       });
     },
     async embedText(text: string): Promise<number[]> {

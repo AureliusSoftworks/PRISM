@@ -40,6 +40,9 @@ describe("mode tutorials", () => {
     assert.match(step?.body ?? "", /position it with the grid pad/u);
     assert.match(step?.body ?? "", /Click the canvas or press Enter/u);
     assert.match(step?.body ?? "", /Escape cancels/u);
+    assert.match(step?.body ?? "", /Mini and Micro previews/u);
+    assert.match(step?.body ?? "", /both include authored Ink/u);
+    assert.match(step?.body ?? "", /full chassis would become unreadable/u);
   });
 
   it("explains primary accent brightness without conflating Atmosphere", () => {
@@ -58,6 +61,7 @@ describe("mode tutorials", () => {
     );
     assert.ok(storageStep);
     assert.match(storageStep.body, /Each typed asset rail keeps its own remembered LOCAL or ONLINE generation model/u);
+    assert.match(storageStep.body, /directly beneath Synthesize/u);
     assert.match(storageStep.body, /General Images keeps its existing Images-panel model picker/u);
   });
 
@@ -278,6 +282,10 @@ describe("mode tutorials", () => {
     assert.match(MODE_TUTORIALS.avatar.steps[2]!.body, /visible shared navbar/u);
     assert.match(MODE_TUTORIALS.avatar.steps[2]!.body, /Save or Create bot/u);
     assert.match(MODE_TUTORIALS.avatar.steps[2]!.body, /Core for name/u);
+    assert.match(
+      MODE_TUTORIALS.avatar.steps[2]!.body,
+      /Settings → Appearance → CRT focus can soften or tighten that brush globally without changing any authored shape or color/u,
+    );
   });
 
   it("explains the full-width Accent map in plain language", () => {
@@ -554,7 +562,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       copy,
-      /leading \+ lets you upload[\s\S]*Wielding Prism onto \+ is the directional synthesis shortcut/u,
+      /Upload lets you upload[\s\S]*Wielding Prism onto Synthesize is the directional synthesis shortcut/u,
     );
     assert.match(copy, /never reads or writes relationship memory/u);
     assert.match(
@@ -1646,8 +1654,8 @@ describe("mode tutorials", () => {
     );
     const copy = replayStep?.body ?? "";
 
-    assert.match(copy, /compact host and guest portraits/u);
-    assert.match(copy, /click, right-click, or long-press a Library bot/u);
+    assert.match(copy, /guest portrait along the card’s right edge/u);
+    assert.match(copy, /click, right-click, or long-press a Library guest/u);
     assert.match(copy, /recorded voice provenance/u);
     assert.match(copy, /already marked Premium audio and needs no extra step/u);
     assert.match(copy, /Repair voice action sends only the fallback line/u);
@@ -2148,7 +2156,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /hold Option.*Control.*Wield Prism.*active field locks.*queue it once.*unique inputs in click order.*repeat clicks.*Escape restores the active field.*Control \+ Option.*opens the assistant menu at the orb/u,
+      /hold Command.*Control.*Wield Prism.*active field locks.*queue it once.*unique inputs in click order.*repeat clicks.*Escape restores the active field.*Command \+ Option.*opens the assistant menu at the orb/u,
     );
     assert.doesNotMatch(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
@@ -2958,7 +2966,10 @@ describe("mode tutorials", () => {
       assert.match(body, /Closing the panel restores Prism/u);
       assert.match(body, /ordinary surfaces.*shortcut opens this menu at the orb's current location/u);
       assert.match(body, /eligible text field.*contextual editable draft/u);
-      assert.match(body, /Keep Option held.*queue each once in click order/u);
+      assert.match(
+        body,
+        /Keep Command held.*Control held.*queue each once in click order/u,
+      );
       assert.match(body, /fills them consecutively/u);
       assert.match(body, /passwords, credentials.*live production.*replay remain untouched/u);
       assert.match(body, /menu is open.*Wield modifier leaves the assistant anchored/u);

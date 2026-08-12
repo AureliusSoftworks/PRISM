@@ -745,20 +745,17 @@
 .archiveHeading::before { position: absolute; top: 1px; bottom: 0; left: 0; width: 3px; border-radius: 999px; content: ""; background: linear-gradient(180deg, var(--botcast-host-accent), color-mix(in srgb, var(--botcast-host-accent) 18%, transparent)); box-shadow: 0 0 14px color-mix(in srgb, var(--botcast-host-accent) 24%, transparent); }
 .episodeGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: 16px; }
 .episodeCard { position: relative; min-width: 0; }
-.episodeOpenButton { width: 100%; display: grid; gap: 8px; min-height: 218px; text-align: left; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 13%, var(--botcast-line)); border-radius: 15px; padding: 17px 72px 88px 17px; color: inherit; background: linear-gradient(145deg, color-mix(in srgb, var(--botcast-host-accent) 4%, var(--botcast-soft-panel)), var(--botcast-soft-panel)); cursor: pointer; box-shadow: 0 16px 40px transparent; transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease; }
+.episodeOpenButton { width: 100%; display: grid; gap: 8px; min-height: 150px; text-align: left; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 13%, var(--botcast-line)); border-radius: 15px; padding: 17px 82px 17px 17px; color: inherit; background: linear-gradient(145deg, color-mix(in srgb, var(--botcast-host-accent) 4%, var(--botcast-soft-panel)), var(--botcast-soft-panel)); cursor: pointer; box-shadow: 0 16px 40px transparent; transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease; }
 .episodeOpenButton:hover { border-color: color-mix(in srgb, var(--botcast-host-accent) 46%, var(--botcast-line)); transform: translateY(-2px); box-shadow: 0 18px 38px var(--botcast-shadow), 0 0 26px color-mix(in srgb, var(--botcast-host-accent) 9%, transparent); }
-.episodeParticipants { position: absolute; right: 14px; bottom: 14px; left: 14px; z-index: 2; display: flex; gap: 8px; pointer-events: none; }
-.episodeParticipantChip { min-width: 0; max-width: calc(50% - 4px); display: flex; align-items: center; gap: 7px; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 16%, var(--botcast-line)); border-radius: 11px; padding: 4px 8px 4px 4px; color: inherit; background: color-mix(in srgb, var(--botcast-panel) 91%, transparent); box-shadow: 0 7px 18px color-mix(in srgb, var(--botcast-shadow) 68%, transparent); pointer-events: auto; font: inherit; text-align: left; }
+.episodeGuest { position: absolute; top: 50%; right: 14px; z-index: 2; display: grid; transform: translateY(-50%); pointer-events: none; }
+.episodeParticipantChip { display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 16%, var(--botcast-line)); border-radius: 12px; padding: 4px; color: inherit; background: color-mix(in srgb, var(--botcast-panel) 91%, transparent); box-shadow: 0 7px 18px color-mix(in srgb, var(--botcast-shadow) 68%, transparent); pointer-events: auto; font: inherit; }
 button.episodeParticipantChip { cursor: pointer; transition: border-color 160ms ease, background 160ms ease, transform 160ms ease; }
 button.episodeParticipantChip:hover { border-color: color-mix(in srgb, var(--botcast-host-accent) 48%, var(--botcast-line)); background: color-mix(in srgb, var(--botcast-host-accent) 8%, var(--botcast-panel)); transform: translateY(-1px); }
 button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in srgb, var(--botcast-host-accent) 72%, transparent); outline-offset: 2px; }
 .episodeParticipantChip[data-interactive="false"] { opacity: .82; }
 .episodeParticipantAvatar { position: relative; flex: 0 0 42px; width: 42px; height: 46px; display: grid; place-items: center; overflow: hidden; border-radius: 8px; }
-.episodeParticipantAvatar [data-signal-bot-presence="true"] { --zen-live-bot-avatar-size: 44px; --zen-live-bot-avatar-body-size: 40px; width: 44px; height: 44px; animation: none; }
+.episodeParticipantAvatar [data-avatar-render-tier="micro"] { width: 36px; height: 36px; animation: none; }
 .episodeParticipantAvatar .avatarFallback { width: 38px; height: 38px; }
-.episodeParticipantLabel { min-width: 0; display: grid; gap: 2px; }
-.episodeParticipantLabel small { font: 750 .55rem/1 system-ui; letter-spacing: .09em; text-transform: uppercase; }
-.episodeParticipantLabel strong { overflow: hidden; color: var(--botcast-ink); font: 700 .7rem/1.12 system-ui; text-overflow: ellipsis; white-space: nowrap; }
 .episodeDeleteButton { position: absolute; top: 11px; right: 11px; z-index: 2; border: 1px solid color-mix(in srgb, var(--prism-p) 22%, var(--botcast-line)); border-radius: 999px; padding: 6px 8px; color: color-mix(in srgb, var(--prism-p) 70%, var(--botcast-ink)); background: color-mix(in srgb, var(--botcast-panel) 88%, transparent); font: 700 .62rem/1 system-ui; cursor: pointer; opacity: .72; transition: opacity 160ms ease, border-color 160ms ease, background 160ms ease; }
 .episodeCard:hover .episodeDeleteButton, .episodeDeleteButton:focus-visible { opacity: 1; border-color: color-mix(in srgb, var(--prism-p) 46%, var(--botcast-line)); background: color-mix(in srgb, var(--prism-p) 10%, var(--botcast-panel)); }
 .episodeGrid span, .episodeGrid small { color: var(--botcast-muted); }
@@ -976,6 +973,7 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .avatarRig[data-signal-presence="host"] { --signal-avatar-lean: 2.4deg; --signal-avatar-underglow-color: var(--signal-studio-host-light, var(--botcast-studio-accent)); }
 .avatarRig[data-signal-presence="guest"] { --signal-avatar-lean: -2.4deg; --signal-avatar-underglow-color: var(--signal-studio-guest-light, var(--botcast-studio-accent)); animation-delay: -2.1s; }
 .avatarEmbodiment { position: absolute; inset: 0; display: grid; place-items: center; transform-origin: 50% 82%; scale: var(--signal-power-avatar-scale, 1); translate: var(--signal-power-avatar-shift-x, 0%) 0; transition: scale 180ms ease, translate 180ms ease, opacity 180ms ease; }
+.avatarEmbodiment:has([data-render-detail="micro"]) { scale: 1; translate: 0 0; }
 .avatarEmbodiment > * { max-width: 100%; max-height: 100%; }
 .avatarRig[data-power-avatar-scale="tiny"] { --signal-power-avatar-scale: .5; }
 .avatarRig[data-power-avatar-scale="small"] { --signal-power-avatar-scale: .75; }

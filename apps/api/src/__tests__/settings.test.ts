@@ -54,6 +54,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     displayName: "Alex",
     theme: "dark",
     graphicsQuality: "high",
+    crtFocus: 50,
     typographyScale: "standard",
     atmosphereStyle: DEFAULT_HUB_ATMOSPHERE_STYLE,
     hubAtmosphereEnabled: 1,
@@ -420,6 +421,18 @@ describe("resolveNextSettings — graphics quality", () => {
       ).graphicsQuality,
       "medium",
     );
+  });
+});
+
+describe("resolveNextSettings — CRT focus", () => {
+  it("accepts a bounded global focus and preserves a valid stored value", () => {
+    assert.equal(resolveNextSettings({ crtFocus: 70 }, baseline()).crtFocus, 70);
+    assert.equal(
+      resolveNextSettings({ crtFocus: "soft" }, baseline({ crtFocus: 35 }))
+        .crtFocus,
+      35,
+    );
+    assert.equal(resolveNextSettings({ crtFocus: 140 }, baseline()).crtFocus, 100);
   });
 });
 

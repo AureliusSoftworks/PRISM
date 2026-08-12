@@ -939,15 +939,15 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(glyphLayerRule, /paint-order:\s*fill\s*;/);
     assert.match(
       glyphLayerRule,
-      /--crt-face-glow-radius-scale:\s*var\(--bot-face-weight-glow-radius-scale,\s*1\)\s*;/,
+      /--crt-face-glow-radius-scale:\s*var\(\s*--bot-phosphor-focus-radius-scale,\s*var\(--bot-face-weight-glow-radius-scale,\s*1\)\s*\)\s*;/,
     );
     assert.match(
       glyphLayerRule,
-      /--crt-weighted-bloom-radius:\s*calc\(\s*var\(--crt-bloom-radius,\s*1\.4px\) \* var\(--crt-face-glow-radius-scale\)\s*\)\s*;/,
+      /--crt-weighted-bloom-radius:\s*var\(--crt-bloom-radius,\s*1\.4px\)\s*;/,
     );
     assert.match(
       glyphLayerRule,
-      /--crt-glyph-beam-softness:\s*calc\(\s*var\(--crt-beam-softness,\s*0\.45px\) \* var\(--crt-face-glow-radius-scale\)\s*\)\s*;/,
+      /--crt-glyph-beam-softness:\s*var\(--crt-beam-softness,\s*0\.45px\)\s*;/,
     );
     assert.match(
       glyphLayerRule,
@@ -955,11 +955,11 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       glyphLayerRule,
-      /--crt-glyph-bloom-narrow-radius:\s*calc\(\s*var\(--crt-bloom-narrow-radius,\s*var\(--crt-bloom-radius,\s*1\.4px\)\) \*\s*var\(--crt-face-glow-radius-scale\)\s*\)\s*;/,
+      /--crt-glyph-bloom-narrow-radius:\s*var\(\s*--crt-bloom-narrow-radius,\s*var\(--crt-bloom-radius,\s*1\.4px\)\s*\)\s*;/,
     );
     assert.match(
       glyphLayerRule,
-      /--crt-glyph-bloom-wide-radius:\s*calc\(\s*var\(--crt-bloom-wide-radius,\s*6px\) \* var\(--crt-face-glow-radius-scale\)\s*\)\s*;/,
+      /--crt-glyph-bloom-wide-radius:\s*var\(--crt-bloom-wide-radius,\s*6px\)\s*;/,
     );
     assert.match(
       glyphLayerRule,

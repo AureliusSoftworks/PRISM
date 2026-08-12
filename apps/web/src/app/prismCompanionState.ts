@@ -137,11 +137,8 @@ export function retainPrismCompanionRecovery(
 }
 
 export interface PrismCompanionModifierPresentation {
-  modifier: "option" | "control";
-  modifierLabel: "Option" | "Control";
-  label: string;
-  spokenLabel: string;
-  ariaKeyShortcuts: string;
+  modifier: "command" | "control";
+  modifierLabel: "Command" | "Control";
 }
 
 export function prismCompanionModifierPresentation(
@@ -149,18 +146,12 @@ export function prismCompanionModifierPresentation(
 ): PrismCompanionModifierPresentation {
   return /Mac|iPhone|iPad/u.test(platform)
     ? {
-        modifier: "option",
-        modifierLabel: "Option",
-        label: "⌥ Space",
-        spokenLabel: "Option Space",
-        ariaKeyShortcuts: "Alt+Space",
+        modifier: "command",
+        modifierLabel: "Command",
       }
     : {
         modifier: "control",
         modifierLabel: "Control",
-        label: "Ctrl Space",
-        spokenLabel: "Control Space",
-        ariaKeyShortcuts: "Control+Space",
       };
 }
 
@@ -175,11 +166,7 @@ export function isPrismCompanionModifierKey(
   },
   platform: string,
 ): boolean {
-  const presentation = prismCompanionModifierPresentation(platform);
   if (!isPrismCompanionPlatformModifier(input, platform)) return false;
-  if (presentation.modifier === "option") {
-    return isPrismCompanionModifierHeld(input, platform);
-  }
   return isPrismCompanionModifierHeld(input, platform);
 }
 
@@ -188,10 +175,10 @@ export function isPrismCompanionPlatformModifier(
   platform: string,
 ): boolean {
   const presentation = prismCompanionModifierPresentation(platform);
-  return presentation.modifier === "option"
-    ? input.key === "Alt" ||
-        input.code === "AltLeft" ||
-        input.code === "AltRight"
+  return presentation.modifier === "command"
+    ? input.key === "Meta" ||
+        input.code === "MetaLeft" ||
+        input.code === "MetaRight"
     : input.key === "Control" ||
         input.code === "ControlLeft" ||
         input.code === "ControlRight";
@@ -207,9 +194,9 @@ export function isPrismCompanionModifierHeld(
   platform: string,
 ): boolean {
   const presentation = prismCompanionModifierPresentation(platform);
-  if (presentation.modifier === "option") {
+  if (presentation.modifier === "command") {
     return (
-      input.altKey && !input.ctrlKey && !input.metaKey && !input.shiftKey
+      input.metaKey && !input.altKey && !input.ctrlKey && !input.shiftKey
     );
   }
   return (
@@ -218,25 +205,4 @@ export function isPrismCompanionModifierHeld(
     !input.metaKey &&
     !input.shiftKey
   );
-}
-
-export function isPrismCompanionShortcut(input: {
-  key: string;
-  code?: string;
-  altKey: boolean;
-  ctrlKey: boolean;
-  metaKey: boolean;
-  shiftKey: boolean;
-  platform: string;
-}): boolean {
-  const spacePressed =
-    input.code === "Space" ||
-    input.key === " " ||
-    input.key === "\u00a0" ||
-    input.key === "Spacebar";
-  if (!spacePressed || input.metaKey || input.shiftKey) return false;
-  return prismCompanionModifierPresentation(input.platform).modifier ===
-    "option"
-    ? input.altKey && !input.ctrlKey
-    : input.ctrlKey && !input.altKey;
 }

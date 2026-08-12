@@ -29,6 +29,7 @@ import {
   avatarDetailsSpeechMotionOrigin,
   type AvatarDetailsSpeechMotionOrigin,
 } from "./avatar-details-speech-motion";
+import { avatarDetailsExteriorGlowRaster } from "./avatar-details-glow";
 import { resamplePhosphorRgbaForPresentation } from "./phosphorPixelRaster";
 import styles from "./avatar-details-mask.module.css";
 
@@ -91,9 +92,9 @@ function AvatarDetailsEmissionPlanes({
     () => pixels.some((channel, index) => index % 4 === 3 && channel > 0),
     [pixels],
   );
-  useLayoutEffect(() => {
-    const resampleMode = pixelPerfectInk ? "nearest" : "coverage";
-    const rasterizedGlowPixels =
+  const resampleMode = pixelPerfectInk ? "nearest" : "coverage";
+  const rasterizedGlowPixels = useMemo(
+    () =>
       rasterSize === AVATAR_DETAILS_CANVAS_SIZE
         ? pixels
         : resamplePhosphorRgbaForPresentation(
@@ -103,20 +104,39 @@ function AvatarDetailsEmissionPlanes({
             rasterSize,
             rasterSize,
             resampleMode,
-          );
+          ),
+    [pixels, rasterSize, resampleMode],
+  );
+  const exteriorGlow = useMemo(
+    () =>
+      pixelPerfectInk || detailLevel === "audience"
+        ? null
+        : avatarDetailsExteriorGlowRaster(
+            rasterizedGlowPixels,
+            rasterSize,
+            rasterSize,
+            Math.max(
+              1,
+              Math.round(rasterSize / AVATAR_DETAILS_CANVAS_SIZE),
+            ),
+          ),
+    [detailLevel, pixelPerfectInk, rasterSize, rasterizedGlowPixels],
+  );
+  const rasterizedCorePixels = useMemo(() => {
     const sourceCorePixels =
       coreColor === "ink" ? pixels : avatarDetailsPhosphorCoreRgba(pixels);
-    const rasterizedCorePixels =
-      rasterSize === AVATAR_DETAILS_CANVAS_SIZE
-        ? sourceCorePixels
-        : resamplePhosphorRgbaForPresentation(
-            sourceCorePixels,
-            AVATAR_DETAILS_CANVAS_SIZE,
-            AVATAR_DETAILS_CANVAS_SIZE,
-            rasterSize,
-            rasterSize,
-            resampleMode,
-          );
+    return rasterSize === AVATAR_DETAILS_CANVAS_SIZE
+      ? sourceCorePixels
+      : resamplePhosphorRgbaForPresentation(
+          sourceCorePixels,
+          AVATAR_DETAILS_CANVAS_SIZE,
+          AVATAR_DETAILS_CANVAS_SIZE,
+          rasterSize,
+          rasterSize,
+          resampleMode,
+        );
+  }, [coreColor, pixels, rasterSize, resampleMode]);
+  useLayoutEffect(() => {
     if (staticRaster && detailLevel === "audience") {
       if (!hasPixels) {
         queueMicrotask(() => setStaticRasterUrl(null));
@@ -141,8 +161,9 @@ function AvatarDetailsEmissionPlanes({
     const haloCanvas = haloCanvasRef.current;
     const bloomCanvas = bloomCanvasRef.current;
     const coreCanvas = coreCanvasRef.current;
-    const needsGlowPlanes = detailLevel === "full" && !pixelPerfectInk;
-    const needsBloomPlane = detailLevel === "reduced" && !pixelPerfectInk;
+    const needsGlowPlanes = detailLevel === "full" && exteriorGlow !== null;
+    const needsBloomPlane =
+      detailLevel === "reduced" && exteriorGlow !== null;
     if (
       !hasPixels ||
       !coreCanvas ||
@@ -155,39 +176,46 @@ function AvatarDetailsEmissionPlanes({
     const bloomContext =
       bloomCanvas?.getContext("2d", { alpha: true }) ?? null;
     const coreContext = coreCanvas.getContext("2d", { alpha: true });
-    if (!coreContext || (needsGlowPlanes || needsBloomPlane ? !bloomContext : false)) {
+    if (
+      !coreContext ||
+      ((needsGlowPlanes || needsBloomPlane) && !bloomContext)
+    ) {
       return;
     }
-    const glowImageData = coreContext.createImageData(
-      rasterSize,
-      rasterSize,
-    );
-    glowImageData.data.set(rasterizedGlowPixels);
+    const glowImageData = exteriorGlow
+      ? coreContext.createImageData(
+          exteriorGlow.bounds.width,
+          exteriorGlow.bounds.height,
+        )
+      : null;
+    if (glowImageData && exteriorGlow) {
+      glowImageData.data.set(exteriorGlow.pixels);
+    }
     const coreImageData = coreContext.createImageData(
       rasterSize,
       rasterSize,
     );
     coreImageData.data.set(rasterizedCorePixels);
     for (const context of [haloContext, bloomContext]) {
-      if (!context) continue;
+      if (!context || !glowImageData) continue;
       context.imageSmoothingEnabled = false;
       context.putImageData(glowImageData, 0, 0);
     }
     coreContext.imageSmoothingEnabled = false;
     coreContext.putImageData(coreImageData, 0, 0);
   }, [
-    coreColor,
     detailLevel,
+    exteriorGlow,
     hasPixels,
     pixelPerfectInk,
-    pixels,
+    rasterizedCorePixels,
     rasterSize,
     staticRaster,
   ]);
 
   if (!hasPixels) return null;
 
-  const canvasStyle = {
+  const planeStyle = {
     color: normalizedColor,
     ["--avatar-details-phosphor-glow-color" as string]: normalizedColor,
     ["--avatar-details-speech-spin-turn-duration" as string]:
@@ -199,13 +227,19 @@ function AvatarDetailsEmissionPlanes({
       ? `${motionOrigin.yPct}%`
       : undefined,
   } as CSSProperties;
+  const glowRasterStyle = exteriorGlow
+    ? ({
+        left: `${(exteriorGlow.bounds.x / rasterSize) * 100}%`,
+        top: `${(exteriorGlow.bounds.y / rasterSize) * 100}%`,
+        width: `${(exteriorGlow.bounds.width / rasterSize) * 100}%`,
+        height: `${(exteriorGlow.bounds.height / rasterSize) * 100}%`,
+      } as CSSProperties)
+    : undefined;
   const depthClassName =
     depth === "behind-face" ? styles.behindFace : styles.aboveFace;
   const motionClassName = motion ? ` ${styles.speechMotion}` : "";
-  const sharedProps = {
-    width: rasterSize,
-    height: rasterSize,
-    style: canvasStyle,
+  const sharedPlaneProps = {
+    style: planeStyle,
     "data-avatar-details-depth": depth,
     "data-avatar-details-ink-role": inkRole,
     "data-avatar-details-ink-motion": motion ?? undefined,
@@ -224,45 +258,77 @@ function AvatarDetailsEmissionPlanes({
         src={staticRasterUrl}
         alt=""
         className={`${styles.layer} ${depthClassName} ${styles.core}`}
+        width={rasterSize}
+        height={rasterSize}
+        style={planeStyle}
         data-avatar-details-mask="true"
         data-avatar-details-emission="core"
         data-avatar-details-rendering="static-raster"
-        {...sharedProps}
+        data-avatar-details-depth={depth}
+        data-avatar-details-ink-role={inkRole}
+        data-avatar-details-render-detail={detailLevel}
+        aria-hidden
       />
     ) : null;
   }
 
   return (
     <>
-      {detailLevel === "full" && !pixelPerfectInk ? (
-        <canvas
-          ref={haloCanvasRef}
-          className={`${styles.layer} ${depthClassName} ${styles.halo}${motionClassName}`}
+      {detailLevel === "full" && exteriorGlow ? (
+        <span
+          className={`${styles.motionPlane} ${depthClassName} ${styles.haloPlane}${motionClassName}`}
           data-avatar-details-emission="halo"
-          {...sharedProps}
-        />
+          {...sharedPlaneProps}
+        >
+          <canvas
+            ref={haloCanvasRef}
+            width={exteriorGlow.bounds.width}
+            height={exteriorGlow.bounds.height}
+            className={`${styles.raster} ${styles.croppedGlowRaster} ${styles.halo}`}
+            style={glowRasterStyle}
+            data-avatar-details-raster="glow"
+            aria-hidden
+          />
+        </span>
       ) : null}
-      {detailLevel !== "audience" && !pixelPerfectInk ? (
-        <canvas
-          ref={bloomCanvasRef}
-          className={`${styles.layer} ${depthClassName} ${styles.bloom}${motionClassName}`}
+      {detailLevel !== "audience" && exteriorGlow ? (
+        <span
+          className={`${styles.motionPlane} ${depthClassName} ${styles.bloomPlane}${motionClassName}`}
           data-avatar-details-emission="bloom"
-          {...sharedProps}
-        />
+          {...sharedPlaneProps}
+        >
+          <canvas
+            ref={bloomCanvasRef}
+            width={exteriorGlow.bounds.width}
+            height={exteriorGlow.bounds.height}
+            className={`${styles.raster} ${styles.croppedGlowRaster} ${styles.bloom}`}
+            style={glowRasterStyle}
+            data-avatar-details-raster="glow"
+            aria-hidden
+          />
+        </span>
       ) : null}
-      <canvas
-        ref={coreCanvasRef}
-        className={`${styles.layer} ${depthClassName} ${styles.core}${motionClassName}`}
-        data-avatar-details-mask="true"
+      <span
+        className={`${styles.motionPlane} ${depthClassName} ${styles.corePlane}${motionClassName}`}
         data-avatar-details-emission="core"
-        data-avatar-details-rendering={
-          pixelPerfectInk || rasterSize === AVATAR_DETAILS_CANVAS_SIZE
-            ? "nearest-neighbor"
-            : "coverage-sampled"
-        }
-        data-avatar-details-mask-size={rasterSize}
-        {...sharedProps}
-      />
+        {...sharedPlaneProps}
+      >
+        <canvas
+          ref={coreCanvasRef}
+          width={rasterSize}
+          height={rasterSize}
+          className={`${styles.raster} ${styles.fullRaster} ${styles.core}`}
+          data-avatar-details-mask="true"
+          data-avatar-details-raster="core"
+          data-avatar-details-rendering={
+            pixelPerfectInk || rasterSize === AVATAR_DETAILS_CANVAS_SIZE
+              ? "nearest-neighbor"
+              : "coverage-sampled"
+          }
+          data-avatar-details-mask-size={rasterSize}
+          aria-hidden
+        />
+      </span>
     </>
   );
 }

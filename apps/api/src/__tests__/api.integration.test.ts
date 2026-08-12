@@ -166,6 +166,50 @@ after(() => {
 });
 
 describe("API request integration", () => {
+  it("persists exact typed asset generation preferences and excludes General Images", async () => {
+    const client = createClient();
+    const registered = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "asset-generation-preferences@example.com",
+        password: "asset-generation-preferences-password",
+      }),
+    );
+    assert.equal(registered.status, 201);
+
+    const saved = await client.request(
+      "/api/assets/generation-preferences/slate_cover",
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ provider: "local", model: "cover-local-test" }),
+      },
+    );
+    assert.equal(saved.status, 200);
+    assert.deepEqual((await json(saved)).preference, {
+      provider: "local",
+      model: "cover-local-test",
+    });
+
+    const preferences = await client.request(
+      "/api/assets/generation-preferences",
+    );
+    assert.equal(preferences.status, 200);
+    assert.deepEqual((await json(preferences)).preferences, {
+      slate_cover: { provider: "local", model: "cover-local-test" },
+    });
+
+    const generalImages = await client.request(
+      "/api/assets/generation-preferences/general_image",
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ provider: "local", model: "general-local-test" }),
+      },
+    );
+    assert.equal(generalImages.status, 404);
+  });
+
   it("requires authentication for account memory settings endpoints", async () => {
     const anonymous = createClient();
     assert.equal((await anonymous.request("/api/settings/memories")).status, 400);
@@ -257,6 +301,41 @@ describe("API request integration", () => {
     assert.equal(payload.state, "not_applicable");
     assert.equal(payload.model, "gpt-test");
     assert.equal(JSON.stringify(payload).includes(config.ollamaHost), false);
+  });
+
+  it("authenticates and server-resolves auxiliary model residency warms", async () => {
+    const anonymous = createClient();
+    assert.equal(
+      (await anonymous.request("/api/models/auxiliary/keep-warm", jsonInit({}))).status,
+      400,
+    );
+
+    const client = createClient();
+    const email = "auxiliary-residency@example.com";
+    const registered = await client.request(
+      "/api/auth/register",
+      jsonInit({ username: email, password: "auxiliary-residency-password" }),
+    );
+    assert.equal(registered.status, 201);
+    db.prepare("UPDATE users SET prism_default_llm_model = ? WHERE email = ?").run(
+      "user-auxiliary-override",
+      email,
+    );
+
+    fetchRecorder.calls.length = 0;
+    const warmed = await client.request(
+      "/api/models/auxiliary/keep-warm",
+      jsonInit({ model: "ignored-by-server" }),
+    );
+    assert.equal(warmed.status, 200);
+    const warmCalls = fetchRecorder.calls.filter((call) =>
+      call.input.endsWith("/api/chat"),
+    );
+    assert.equal(warmCalls.length, 1);
+    const warmBody = JSON.parse(String(warmCalls[0]?.init?.body ?? "{}")) as Record<string, unknown>;
+    assert.equal(warmBody.model, "user-auxiliary-override");
+    assert.deepEqual(warmBody.messages, []);
+    assert.equal(warmBody.keep_alive, -1);
   });
 
   it("migrates GPT-5.6 tier models out of stale default-hidden settings", async () => {
@@ -1530,6 +1609,32 @@ describe("API request integration", () => {
 
     const loaded = await json(await client.request("/api/settings"));
     assert.equal(loaded.settings.typographyScale, "extra-large");
+  });
+
+  it("persists the account-level CRT focus with Balanced as the default", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "crt-focus@example.com",
+        password: "crt-focus-password",
+      }),
+    );
+    assert.equal(register.status, 201);
+
+    const initial = await json(await client.request("/api/settings"));
+    assert.equal(initial.settings.crtFocus, 50);
+
+    const saved = await client.request("/api/settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ crtFocus: 85 }),
+    });
+    assert.equal(saved.status, 200);
+    assert.equal((await json(saved)).settings.crtFocus, 85);
+
+    const loaded = await json(await client.request("/api/settings"));
+    assert.equal(loaded.settings.crtFocus, 85);
   });
 
   it("persists one global text model selection across applets", async () => {

@@ -410,50 +410,30 @@ describe("chatMiniBotAvatar", () => {
     );
   });
 
-  it("keeps micro message avatars to an upright orb, eyes, and mouth", () => {
-    assert.match(pageSource, /variant="micro"/);
-    assert.match(pageSource, /function MessageMoodFace\(/);
+  it("uses one upright authored micro renderer with still eyes and Ink", () => {
+    assert.match(pageSource, /function BotAvatarMicroRenderer\(/);
     const microFaceFn = pageSource.slice(
+      pageSource.indexOf("function BotAvatarMicroRenderer("),
       pageSource.indexOf("function MessageMoodFace("),
-      pageSource.indexOf("function neutralRowColor("),
     );
-    assert.doesNotMatch(microFaceFn, /ChatMiniBotAvatar|AvatarDetailsMask/);
-    assert.doesNotMatch(microFaceFn, /glyph\?:|avatarDetails\?:/);
+    assert.doesNotMatch(microFaceFn, /ChatMiniBotAvatar|BotGlyph/);
+    assert.match(microFaceFn, /avatarDetails\?: BotAvatarDetailsV1 \| null/);
+    assert.match(microFaceFn, /<AvatarDetailsMask/);
+    assert.match(microFaceFn, /detailLevel="audience"/);
+    assert.match(microFaceFn, /coreColor="ink"/);
     assert.match(
       microFaceFn,
       /`\$\{styles\.messageMoodCoffeeFace\} \$\{styles\.messageMoodMicroFace\}`/,
     );
-    assert.match(
-      microFaceFn,
-      /faceEyeMovement=\{showMicroFace \? "still" : undefined\}/,
-    );
-    assert.match(
-      microFaceFn,
-      /faceThinkingFrames=\{showMicroFace \? undefined : props\.faceStyle\?\.thinkingFrames\}/,
-    );
-    assert.match(
-      microFaceFn,
-      /faceThinkingScale=\{showMicroFace \? undefined : props\.faceStyle\?\.thinkingScale\}/,
-    );
-    assert.match(
-      microFaceFn,
-      /faceThinkingOffsetX=\{showMicroFace \? undefined : props\.faceStyle\?\.thinkingOffsetX\}/,
-    );
-    assert.match(
-      microFaceFn,
-      /faceThinkingOffsetY=\{showMicroFace \? undefined : props\.faceStyle\?\.thinkingOffsetY\}/,
-    );
-    assert.match(
-      microFaceFn,
-      /forceBlinkPhase=\{showMicroFace \? props\.forceBlinkPhase : undefined\}/,
-    );
-    assert.match(microFaceFn, /showQuestionMark=\{showMicroFace \? false : questionMarkActive\}/);
-    assert.match(microFaceFn, /data-avatar-render-tier=\{showMicroFace \? "micro" : undefined\}/);
+    assert.match(microFaceFn, /faceEyeMovement="still"/);
+    assert.match(microFaceFn, /showQuestionMark=\{false\}/);
+    assert.match(microFaceFn, /data-avatar-render-tier="micro"/);
     assert.match(pageCssSource, /\[data-variant="micro"\]/);
     assert.match(
       pageCssSource,
       /\.messageMoodBadge\[data-face="coffee"\]\[data-variant="micro"\]\s*\{[^}]*border:\s*1px solid/,
     );
     assert.match(pageCssSource, /\.messageMoodMicroFace\s*\{[^}]*font-size:\s*8\.5px/);
+    assert.match(pageCssSource, /\.botAvatarMicroInk\s*\{[^}]*position:\s*absolute/);
   });
 });

@@ -307,7 +307,7 @@ test("the header hides its redundant bot dropdown and places Speech Type first",
   );
   assert.match(
     headerPicker,
-    /const directBotSelectionVisible\s*=\s*zenHomeDirectSelectionVisible\(\{[\s\S]*?dockState:\s*zenHomeDockState\(zenPreMessageConversationActive\),[\s\S]*?botCardsVisible:\s*zenEmptyHeroVisible\s*&&\s*pickerSourceBots\.length > 0,[\s\S]*?hueLensVisible:\s*emptyStateLensVisible,[\s\S]*?\}\);/u,
+    /const directBotSelectionVisible\s*=\s*emptyStateLensVisible \|\|\s*\(activeConversationIsEmpty && canvasBotDirectoryInteractive\);/u,
   );
   assert.match(
     headerPicker,

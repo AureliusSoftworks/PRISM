@@ -1,0 +1,6 @@
+file 'segments/01-hook.mp4'
+file 'segments/02-companion.mp4'
+file 'segments/03-coffee.mp4'
+file 'segments/04-debate.mp4'
+file 'segments/05-local.mp4'
+file 'segments/06-end.mp4'

@@ -119,4 +119,19 @@ describe("applet session notes", () => {
     assert.match(companionStyles, /\.focusOrb\s*\{[\s\S]*filter:\s*blur\(26px\)/u);
     assert.match(companion, /className=\{styles\.focusOrb\}/u);
   });
+
+  it("keeps live applet presentation and recording running while notes are open", () => {
+    assert.match(
+      companion,
+      /const pauseBackgroundForCompanionConversation =\s*open && !sessionNoteContext;/u,
+    );
+    assert.match(
+      companion,
+      /if \(!pauseBackgroundForCompanionConversation\) \{\s*setPrismSystemPause\(PRISM_COMPANION_SYSTEM_PAUSE_REASON, false\);\s*return;/u,
+    );
+    assert.match(
+      companion,
+      /\}, \[pauseBackgroundForCompanionConversation\]\);/u,
+    );
+  });
 });

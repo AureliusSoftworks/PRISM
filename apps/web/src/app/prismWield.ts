@@ -26,13 +26,12 @@ export interface PrismWieldAvailability {
   homeDocked: boolean;
 }
 
-/** Prism stays anchored while Home or an open Prism-owned menu owns it. */
+/** Prism can be wielded from Home, Chat, and Zen unless its own menu is open. */
 export function prismWieldCanArm({
   companionMenuOpen,
   softSynthesisMenuOpen,
-  homeDocked,
 }: PrismWieldAvailability): boolean {
-  return !companionMenuOpen && !softSynthesisMenuOpen && !homeDocked;
+  return !companionMenuOpen && !softSynthesisMenuOpen;
 }
 
 export type PrismWieldEvent =

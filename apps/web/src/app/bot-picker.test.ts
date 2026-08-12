@@ -177,10 +177,7 @@ describe("shared bot picker", () => {
       /const tileActivation = resolveCanvasBotTileActivation\([\s\S]*?if \(tileActivation === "manage"\) \{[\s\S]*?openBotPanelHub\(b\);[\s\S]*?return;/u,
     );
     assert.match(pageSource, /"selected; activate to customize"/u);
-    assert.match(
-      pageSource,
-      /SEND A MESSAGE TO CHAT · SELECT AGAIN TO CUSTOMIZE/u,
-    );
+    assert.match(pageSource, /OPEN BOT PANEL/u);
   });
 
   it("is consumed by Chat, Zen, Coffee, Signal, and Debate", () => {

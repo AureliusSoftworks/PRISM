@@ -19,6 +19,10 @@ const storageSource = readFileSync(
   "utf8",
 );
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const tutorialSource = readFileSync(
+  new URL("./modeTutorials.ts", import.meta.url),
+  "utf8",
+);
 const debateSource = readFileSync(
   new URL("./DebateExperience.tsx", import.meta.url),
   "utf8",
@@ -57,23 +61,28 @@ describe("typed local asset library", () => {
     assert.match(assetSource, /\{viewAllLabel\}/u);
   });
 
-  it("uses one dual-purpose + target with an accessible touch fallback", () => {
+  it("keeps Upload separate from an explicit Synthesize target", () => {
     assert.match(assetSource, /kind: "magic"/u);
     assert.match(assetSource, /PrismRefractTarget target=\{synthesizeTarget\}/u);
-    assert.match(assetSource, /onClick=\{activateAdd\}/u);
-    assert.match(assetSource, /onUpload\(\)/u);
+    assert.match(assetSource, /onClick=\{onUpload\}/u);
+    assert.match(assetSource, /<small>Upload<\/small>/u);
+    assert.match(assetSource, /<small>Synthesize<\/small>/u);
     assert.match(
       assetSource,
       /await onSynthesize\(direction, generation\?\.selection \?\? undefined\)/u,
     );
     assert.match(assetSource, /data-tutorial-target=\{`asset-add-\$\{kind\}`\}/u);
-    assert.match(assetSource, /Synthesize with Prism/u);
     assert.match(assetSource, /requestPrismRefract\(targetId, "focused-shortcut"\)/u);
+    assert.doesNotMatch(assetSource, /touchActionsOpen|activateAdd/u);
   });
 
   it("keeps a compact remembered model selector on typed rails only", () => {
     assert.match(assetSource, /generation\?: AssetRailGenerationControl/u);
-    assert.match(assetSource, /generationSelector/u);
+    assert.match(
+      assetSource,
+      /className=\{styles\.synthesisControl\}[\s\S]*?PrismRefractTarget[\s\S]*?generationSelector/u,
+    );
+    assert.match(assetStyles, /\.synthesisControl[\s\S]*grid-template-rows/u);
     assert.match(assetSource, /generation\.onChange/u);
     assert.match(assetSource, /await onSynthesize\(direction, generation\?\.selection/u);
     assert.match(pageSource, /kind="general_image"[\s\S]{0,700}onSynthesize=\{synthesizeGeneralImage\}/u);
@@ -98,8 +107,52 @@ describe("typed local asset library", () => {
     assert.match(studiesSource, /\{ preferredProvider: selection\.provider, model: selection\.model \}/u);
     assert.match(
       pageSource,
-      /zenWallpaperImageGenerationAvailable\(\s*options\.selection\?\.provider \?\? effectiveImageProvider/u,
+      /zenWallpaperImageGenerationAvailable\([\s\S]{0,180}savedZenAtmosphereSelection\?\.provider/u,
     );
+    for (const kind of [
+      "debate_exhibit",
+      "signal_studio",
+      "signal_logo",
+      "slate_cover",
+      "slate_visual_study",
+      "zen_atmosphere",
+      "home_atmosphere",
+      "group_room_atmosphere",
+    ]) {
+      assert.match(serverSource, new RegExp(`"${kind}"`, "u"));
+    }
+    assert.match(serverSource, /resolveTypedAssetGenerationSelection/u);
+    assert.match(
+      serverSource,
+      /if \(requestedProvider && requestedModel\) \{[\s\S]*?return \{ provider: requestedProvider, model: requestedModel \}/u,
+    );
+    assert.match(
+      serverSource,
+      /route\("POST", "\/api\/images\/generate"[\s\S]*?typedAssetKind[\s\S]*?resolveTypedAssetGenerationSelection/u,
+    );
+    assert.match(
+      serverSource,
+      /route\("POST", "\/api\/botcast\/shows\/:id\/artwork-job"[\s\S]*?kind === "logo" \? "signal_logo" : "signal_studio"/u,
+    );
+    const zenGeneration = pageSource.slice(
+      pageSource.indexOf("async function requestZenWallpaperUpdate"),
+      pageSource.indexOf("function addImageKeywordTags"),
+    );
+    assert.match(
+      zenGeneration,
+      /assetGenerationPreferences\.zen_atmosphere[\s\S]*?if \(options\.selection\)[\s\S]*?body\.model = options\.selection\.model/u,
+    );
+    assert.doesNotMatch(zenGeneration, /else if \(effectiveImageProvider/u);
+    const groupRoomGeneration = pageSource.slice(
+      pageSource.indexOf("async function generateBotGroupRoomAtmosphere"),
+      pageSource.indexOf("function cancelBotGroupRoomAtmosphereSynthesis"),
+    );
+    assert.match(
+      groupRoomGeneration,
+      /assetGenerationPreferences\.group_room_atmosphere[\s\S]*?if \(selection\)[\s\S]*?body\.model = selection\.model/u,
+    );
+    assert.doesNotMatch(groupRoomGeneration, /else if \(groupImageProvider/u);
+    assert.match(tutorialSource, /generation model directly beneath Synthesize/u);
   });
 
   it("locks the fullscreen browser to one kind with local filters and Light/Dark previews", () => {
@@ -218,7 +271,8 @@ describe("typed local asset library", () => {
     assert.doesNotMatch(generalImageRail, /onUpload/u);
     assert.doesNotMatch(pageSource, /generalImageUploadRef|uploadGeneralImage/u);
     assert.match(assetSource, /onUpload\?: \(\) => void/u);
-    assert.match(assetSource, /onUpload \? "Upload" : "Synthesize"/u);
+    assert.match(assetSource, /onClick=\{onUpload\}[\s\S]*?<small>Upload<\/small>/u);
+    assert.match(assetSource, /<small>Synthesize<\/small>/u);
   });
 
   it("keeps storage and mutation interfaces local and set-aware", () => {

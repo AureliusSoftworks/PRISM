@@ -138,6 +138,7 @@ import {
   applyGraphicsQualityToDocument,
   GRAPHICS_QUALITY_LABELS,
 } from "./graphicsQuality";
+import { applyCrtFocusToDocument } from "./crtFocus";
 import {
   applyPrismTypographyScaleToDocument,
   PRISM_TYPOGRAPHY_SCALE_LABELS,
@@ -1229,7 +1230,11 @@ import {
   normalizeBotVoiceVolume,
   normalizeCorporality,
   corporalityNearestBin,
+  CRT_FOCUS_STEP,
+  MAX_CRT_FOCUS,
+  MIN_CRT_FOCUS,
   normalizeEphemeralChatProviderPreferences,
+  normalizeCrtFocus,
   normalizeGraphicsQuality,
   normalizePrismStartupPreference,
   normalizeOptionalBotAudioVoiceProfileV1,
@@ -1675,11 +1680,6 @@ import {
   type ZenLiveBotDragVelocitySample,
   type ZenLiveBotFreeRoamMotionState,
 } from "./zenLiveBotFreeRoam";
-import {
-  zenHomeDirectSelectionVisible,
-  zenHomeDockState,
-  zenHomeDropTargetContainsPoint,
-} from "./zenHomeDock";
 import {
   applyPrismBotLinkBackspace,
   applyPrismBotLinkBoundaryDelete,
@@ -2345,6 +2345,7 @@ const MEMORY_TOAST_REARM_MS = 2500;
 const MEMORY_TOAST_VISIBLE_LIMIT = 3;
 const LOCAL_COMMAND_TOAST_DISMISS_MS = 3600;
 const COMPOSER_HISTORY_LIMIT = 50;
+const AUXILIARY_MODEL_KEEP_WARM_INTERVAL_MS = 30_000;
 
 // ── Prism logo letter palette ─────────────────────────────────────────
 // One canonical hex per letter of "prism", shared with prismBrand.ts and
@@ -2805,6 +2806,7 @@ const ZEN_LIVE_BOT_AVATAR_VIEWPORT_MARGIN_PX = 14;
 const ZEN_LIVE_BOT_AVATAR_MIN_SIZE_PX = 94;
 const ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX = 184;
 const ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX = 240;
+const BOT_AVATAR_MICRO_FALLBACK_MAX_PX = 118;
 const ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX = 480;
 // The authored default is also the ceiling: it already reads as a dominant
 // presence without allowing the chassis to crowd the room any further.
@@ -3022,7 +3024,6 @@ const ZEN_LIVE_BOT_AVATAR_SURFACE_SELECTOR = "[data-zen-surface='true']";
 const ZEN_LIVE_BOT_AVATAR_DRAG_BLOCKED_SELECTOR = [
   "[data-zen-live-bot-composer-boundary='true']",
   "[data-zen-live-bot-drag-exclusion='top-bar']",
-  "[data-zen-home-drop-target='true']",
 ].join(", ");
 const ZEN_LIVE_BOT_AVATAR_DRAG_INTERACTIVE_SELECTOR = [
   PRISM_APP_CURSOR_TEXT_SELECTOR,
@@ -10103,6 +10104,7 @@ interface UserSettings {
   displayName: string;
   theme: Theme;
   graphicsQuality: GraphicsQuality;
+  crtFocus: number;
   typographyScale: PrismTypographyScale;
   atmosphereStyle: HubAtmosphereStyle;
   hubAtmosphereEnabled: boolean;
@@ -10233,6 +10235,52 @@ interface UserSettings {
    * come from the ComfyUI host (`comfyui-remote:` in the Images picker).
   */
   comfyUiWorkflows: ComfyUiWorkflowRegistration[];
+}
+
+const FPS_COUNTER_STORAGE_KEY = "prism.fps-counter.enabled";
+const FPS_COUNTER_CHANGED_EVENT = "prism:fps-counter-changed";
+
+function FpsCounter(): React.JSX.Element | null {
+  const [enabled, setEnabled] = useState(false);
+  const [fps, setFps] = useState<number | null>(null);
+
+  useEffect(() => {
+    const readEnabled = (): void => {
+      setEnabled(window.localStorage.getItem(FPS_COUNTER_STORAGE_KEY) === "true");
+    };
+    readEnabled();
+    window.addEventListener(FPS_COUNTER_CHANGED_EVENT, readEnabled);
+    return () => window.removeEventListener(FPS_COUNTER_CHANGED_EVENT, readEnabled);
+  }, []);
+
+  useEffect(() => {
+    if (!enabled) {
+      setFps(null);
+      return;
+    }
+    let frameId = 0;
+    let frameCount = 0;
+    let windowStartedAt = performance.now();
+    const tick = (now: number): void => {
+      frameCount += 1;
+      const elapsed = now - windowStartedAt;
+      if (elapsed >= 500) {
+        setFps(Math.round((frameCount * 1000) / elapsed));
+        frameCount = 0;
+        windowStartedAt = now;
+      }
+      frameId = window.requestAnimationFrame(tick);
+    };
+    frameId = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [enabled]);
+
+  if (!enabled || fps === null) return null;
+  return (
+    <output className={styles.fpsCounter} aria-label={`Frames per second: ${fps}`}>
+      {fps} FPS
+    </output>
+  );
 }
 
 function resolveVoicePreviewProfile(
@@ -18277,6 +18325,117 @@ function BotFaceScreenGlass({
   );
 }
 
+/** Shared authored fallback for surfaces below the full-chassis readability floor. */
+function BotAvatarMicroRenderer(props: {
+  moodKey: NonNullable<Message["moodKey"]>;
+  placement?: "leading" | "trailing";
+  color?: string | null;
+  voicePreset?: BotVoicePreset;
+  faceStyle?: BotFaceStyle | null;
+  isTalking?: boolean;
+  mouthOpen?: boolean;
+  mouthShape?: ZenLiveBotMouthShape | null;
+  forceBlinkPhase?: "open" | "closed" | null;
+  scheduleKey?: string;
+  avatarDetails?: BotAvatarDetailsV1 | null;
+  className?: string;
+}): React.JSX.Element {
+  const moodKey = props.moodKey;
+  const placement = props.placement ?? "trailing";
+  const scheduleKey = props.scheduleKey ?? `bot-avatar-micro-${moodKey}`;
+  const mouthShape = zenLiveBotMouthShapeForTalkingState({
+    mouthShape:
+      props.mouthShape ?? (props.mouthOpen === true ? "open-wide" : "closed"),
+    isTalking: props.isTalking === true,
+  });
+  const plateFace = coffeeSeatPlateGlyph(
+    coffeeSeatEmojiMoodFromPrism(moodKey),
+    mouthShape,
+  );
+  const color = props.color?.trim();
+  const hasAvatarDetails = avatarDetailsHasVisuals(props.avatarDetails);
+  const renderInk = (
+    depth: "behind-face" | "above-face",
+  ): React.JSX.Element | null =>
+    hasAvatarDetails ? (
+      <span
+        className={styles.botAvatarMicroInk}
+        data-avatar-details-depth={depth}
+      >
+        <AvatarDetailsMask
+          details={props.avatarDetails}
+          color={color}
+          detailLevel="audience"
+          faceGeometry={props.faceStyle}
+          blinkPhase={props.forceBlinkPhase ?? "open"}
+          talking={props.isTalking}
+          speechMotionActive={false}
+          mouthShape={mouthShape}
+          depth={depth}
+          staticRaster
+          coreColor="ink"
+          rasterSize={36}
+        />
+      </span>
+    ) : null;
+
+  return (
+    <span
+      className={`${styles.messageMoodBadge} ${props.className ?? ""}`}
+      data-mood={moodKey}
+      data-placement={placement}
+      data-face="coffee"
+      data-variant="micro"
+      data-avatar-render-tier="micro"
+      data-avatar-details-visuals={hasAvatarDetails ? "true" : undefined}
+      style={
+        color
+          ? ({ ["--coffee-bot-color" as string]: color } as CSSProperties)
+          : undefined
+      }
+      aria-hidden="true"
+    >
+      {renderInk("behind-face")}
+      <CoffeeSeatPlateEmoji
+        enabled
+        isTalking={props.isTalking === true}
+        blinkWhileTalking
+        mouthShape={mouthShape}
+        scheduleKey={scheduleKey}
+        showQuestionMark={false}
+        baseText={plateFace.text}
+        rotateDeg={plateFace.rotateDeg}
+        voicePreset={props.voicePreset ?? "neutral"}
+        faceEyesFont={props.faceStyle?.eyesFont}
+        faceEyeCharacter={props.faceStyle?.eyeCharacter}
+        faceMouthFont={props.faceStyle?.mouthFont}
+        faceMouthCharacter={props.faceStyle?.mouthCharacter}
+        faceMouthAnimation={props.faceStyle?.mouthAnimation}
+        faceFontWeight={props.faceStyle?.weight}
+        faceEyeScale={props.faceStyle?.eyeScale}
+        faceEyeOffsetX={props.faceStyle?.eyeOffsetX}
+        faceEyeOffsetY={props.faceStyle?.eyeOffsetY}
+        faceEyeRotationDeg={props.faceStyle?.eyeRotationDeg}
+        faceEyeCount={props.faceStyle?.eyeCount}
+        faceEyeSpacing={props.faceStyle?.eyeSpacing}
+        faceMouthScale={props.faceStyle?.mouthScale}
+        faceMouthOffsetX={props.faceStyle?.mouthOffsetX}
+        faceMouthOffsetY={props.faceStyle?.mouthOffsetY}
+        faceMouthRotationDeg={props.faceStyle?.mouthRotationDeg}
+        faceBlinkBar={props.faceStyle?.blinkBar}
+        faceBlinkScale={props.faceStyle?.blinkScale}
+        faceBlinkOffsetX={props.faceStyle?.blinkOffsetX}
+        faceBlinkOffsetY={props.faceStyle?.blinkOffsetY}
+        faceBlinkRotationDeg={props.faceStyle?.blinkRotationDeg}
+        faceEyeMovement="still"
+        forceBlinkPhase={props.forceBlinkPhase}
+        className={`${styles.messageMoodCoffeeFace} ${styles.messageMoodMicroFace}`}
+      />
+      {renderInk("above-face")}
+    </span>
+  );
+}
+
 function MessageMoodFace(props: {
   moodKey: NonNullable<Message["moodKey"]>;
   variant?: "classic" | "prism" | "micro";
@@ -18290,8 +18449,12 @@ function MessageMoodFace(props: {
   questionMarkActive?: boolean;
   forceBlinkPhase?: "open" | "closed" | null;
   scheduleKey?: string;
+  avatarDetails?: BotAvatarDetailsV1 | null;
 }): React.JSX.Element {
   const variant = props.variant ?? "classic";
+  if (variant === "micro") {
+    return <BotAvatarMicroRenderer {...props} />;
+  }
   const placement = props.placement ?? "trailing";
   const moodKey = props.moodKey;
   const scheduleKey =
@@ -18309,16 +18472,14 @@ function MessageMoodFace(props: {
     ? ({ ["--coffee-bot-color" as string]: color } as React.CSSProperties)
     : undefined;
   const showRasterFrame = variant === "prism";
-  const showMicroFace = variant === "micro";
-  const faceEnabled = variant === "prism" || showMicroFace;
   const faceNode = (
     <CoffeeSeatPlateEmoji
-      enabled={faceEnabled}
+      enabled={variant === "prism"}
       isTalking={props.isTalking === true}
       blinkWhileTalking
       mouthShape={seatMouthShape}
       scheduleKey={scheduleKey}
-      showQuestionMark={showMicroFace ? false : questionMarkActive}
+      showQuestionMark={questionMarkActive}
       baseText={seatPlateGlyph.text}
       rotateDeg={seatPlateGlyph.rotateDeg}
       voicePreset={props.voicePreset ?? "neutral"}
@@ -18343,17 +18504,11 @@ function MessageMoodFace(props: {
       faceBlinkOffsetX={props.faceStyle?.blinkOffsetX}
       faceBlinkOffsetY={props.faceStyle?.blinkOffsetY}
       faceBlinkRotationDeg={props.faceStyle?.blinkRotationDeg}
-      faceThinkingFrames={showMicroFace ? undefined : props.faceStyle?.thinkingFrames}
-      faceThinkingScale={showMicroFace ? undefined : props.faceStyle?.thinkingScale}
-      faceThinkingOffsetX={showMicroFace ? undefined : props.faceStyle?.thinkingOffsetX}
-      faceThinkingOffsetY={showMicroFace ? undefined : props.faceStyle?.thinkingOffsetY}
-      faceEyeMovement={showMicroFace ? "still" : undefined}
-      forceBlinkPhase={showMicroFace ? props.forceBlinkPhase : undefined}
-      className={
-        showMicroFace
-          ? `${styles.messageMoodCoffeeFace} ${styles.messageMoodMicroFace}`
-          : styles.messageMoodCoffeeFace
-      }
+      faceThinkingFrames={props.faceStyle?.thinkingFrames}
+      faceThinkingScale={props.faceStyle?.thinkingScale}
+      faceThinkingOffsetX={props.faceStyle?.thinkingOffsetX}
+      faceThinkingOffsetY={props.faceStyle?.thinkingOffsetY}
+      className={styles.messageMoodCoffeeFace}
     />
   );
 
@@ -18364,7 +18519,6 @@ function MessageMoodFace(props: {
       data-placement={placement}
       data-face="coffee"
       data-variant={variant}
-      data-avatar-render-tier={showMicroFace ? "micro" : undefined}
       style={style}
       aria-hidden="true"
     >
@@ -31231,6 +31385,56 @@ function ZenLiveBotMannequin({
 }: ZenLiveBotMannequinProps): React.JSX.Element {
   const resolvedFrameLightsActive = avatarLightMode === "alive";
   const presenceBodyRef = useRef<HTMLSpanElement | null>(null);
+  const [microFallbackActive, setMicroFallbackActive] = useState(false);
+  useLayoutEffect(() => {
+    const element = presenceBodyRef.current;
+    if (!element) return;
+    const updateRenderTier = (): void => {
+      const scaleHost = element.closest<HTMLElement>(
+        "[data-power-avatar-scale]",
+      );
+      const powerScale =
+        scaleHost?.dataset.powerAvatarScale === "tiny"
+          ? 0.5
+          : scaleHost?.dataset.powerAvatarScale === "small"
+            ? 0.75
+            : scaleHost?.dataset.powerAvatarScale === "large"
+              ? 1.25
+              : scaleHost?.dataset.powerAvatarScale === "giant"
+                ? 1.5
+                : scaleHost?.dataset.powerAvatarScale === "colossal"
+                  ? 3
+                  : 1;
+      const width = element.offsetWidth * powerScale;
+      if (width <= 0) return;
+      setMicroFallbackActive(
+        width < BOT_AVATAR_MICRO_FALLBACK_MAX_PX,
+      );
+    };
+    updateRenderTier();
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(updateRenderTier);
+    observer?.observe(element);
+    const scaleHost = element.closest("[data-power-avatar-scale]");
+    const scaleObserver =
+      scaleHost && typeof MutationObserver !== "undefined"
+        ? new MutationObserver(updateRenderTier)
+        : null;
+    if (scaleHost && scaleObserver) {
+      scaleObserver.observe(scaleHost, {
+        attributes: true,
+        attributeFilter: ["class", "data-power-avatar-scale", "style"],
+      });
+    }
+    window.addEventListener("resize", updateRenderTier);
+    return () => {
+      observer?.disconnect();
+      scaleObserver?.disconnect();
+      window.removeEventListener("resize", updateRenderTier);
+    };
+  }, [microFallbackActive]);
   useLayoutEffect(() => {
     const element = presenceBodyRef.current;
     if (!element) return;
@@ -31499,6 +31703,31 @@ function ZenLiveBotMannequin({
       />
     </span>
   ) : null;
+  if (microFallbackActive) {
+    return (
+      <span
+        ref={presenceBodyRef}
+        className={styles.zenLiveBotPresenceBody}
+        data-zen-live-bot-body-layer="true"
+        data-render-detail="micro"
+        data-avatar-facing={resolvedFacing}
+        style={presenceBodyStyle}
+      >
+        <BotAvatarMicroRenderer
+          moodKey={zenLiveActionMoodToBotMood(moodHint)}
+          color={avatarDetailsColor ?? frameIdentityColor}
+          voicePreset={voicePreset}
+          faceStyle={faceStyle}
+          isTalking={isTalking}
+          mouthShape={displayedMouthShape}
+          forceBlinkPhase={avatarDetailsBlinkPhase}
+          scheduleKey={`${scheduleKey}-micro`}
+          avatarDetails={avatarDetails}
+          className={styles.zenLiveBotPresenceMicroAvatar}
+        />
+      </span>
+    );
+  }
   if (detailLevel === "audience" || detailLevel === "debate") {
     const optimizedFaceEnabled = detailLevel === "debate" || blinkEnabled;
     return (
@@ -31970,8 +32199,6 @@ function ZenLiveBotPresencePlate({
   identityPresentationBlackout = false,
   identityPresentationOccurredAt,
   onContextMenuRequest,
-  initialRoamOrigin,
-  onHomeDockRequest,
 }: {
   bot: Bot | null;
   actionState: ZenLiveBotActionState | null;
@@ -31998,8 +32225,6 @@ function ZenLiveBotPresencePlate({
   identityPresentationBlackout?: boolean;
   identityPresentationOccurredAt?: string | null;
   onContextMenuRequest?: (x: number, y: number) => void;
-  initialRoamOrigin?: { key: number; x: number; y: number } | null;
-  onHomeDockRequest?: (x: number, y: number) => boolean;
 }): React.JSX.Element | null {
   const botName = bot?.name?.trim() || "Prism";
   const defaultPrismPresence = bot === null;
@@ -32022,18 +32247,12 @@ function ZenLiveBotPresencePlate({
   const avatarMetalRotationRef = useRef(0);
   const [avatarPosition, setAvatarPosition] =
     useState<ZenLiveBotAvatarPosition | null>(() =>
-      initialRoamOrigin
-        ? { x: initialRoamOrigin.x, y: initialRoamOrigin.y }
-        : readZenLiveBotAvatarPosition(),
+      readZenLiveBotAvatarPosition(),
     );
   const avatarPositionRef = useRef<ZenLiveBotAvatarPosition | null>(
     avatarPosition,
   );
-  // A card-origin handoff is visual-only. Persist only positions the player
-  // actually drags so the next Zen does not reopen at the old Home card.
-  const avatarPositionUserRelocatedRef = useRef(
-    avatarPosition !== null && !initialRoamOrigin,
-  );
+  const avatarPositionUserRelocatedRef = useRef(avatarPosition !== null);
   const avatarFloating = avatarPosition !== null;
   const [avatarDragging, setAvatarDragging] = useState(false);
   // This is deliberately presentation-only. The live screen may go dark while
@@ -32557,14 +32776,6 @@ function ZenLiveBotPresencePlate({
         }
       }
       if (dragState.moved && !cancelled) {
-        if (onHomeDockRequest?.(clientX, clientY)) {
-          freeRoamMotionRef.current = null;
-          avatarPositionUserRelocatedRef.current = false;
-          avatarPositionRef.current = null;
-          setAvatarPosition(null);
-          restoreAvatarScreen();
-          return true;
-        }
         sampleZenLiveBotDragVelocity(
           dragState.velocitySample,
           clientX,
@@ -32601,7 +32812,6 @@ function ZenLiveBotPresencePlate({
       restoreAvatarScreen,
       setAvatarPositionClamped,
       startAvatarMomentum,
-      onHomeDockRequest,
     ],
   );
 
@@ -39368,6 +39578,9 @@ function BotAvatarPreviewPanel({
   );
   const foundryViewportFrameRef = useRef<number | null>(null);
   const foundryWheelCommitTimerRef = useRef<number | null>(null);
+  const foundryWheelHandlerRef = useRef<
+    (event: globalThis.WheelEvent) => void
+  >(() => {});
   const foundryPanGestureRef = useRef<{
     pointerId: number;
     clientX: number;
@@ -39604,6 +39817,49 @@ function BotAvatarPreviewPanel({
     event.currentTarget.releasePointerCapture?.(event.pointerId);
     event.preventDefault();
   };
+  const handleFoundryWheel = (event: globalThis.WheelEvent): void => {
+    if (!foundryCameraEditable || event.deltaY === 0) return;
+    const target = event.target instanceof Element ? event.target : null;
+    // An equipped stamp owns the wheel for resizing. Every other part of the
+    // portaled Ink canvas remains a camera-zoom surface.
+    if (target?.closest('[data-tool="stamp"]')) return;
+    event.preventDefault();
+    setFoundryCameraActive(true);
+    queueFoundryViewport(
+      zoomBotAvatarFoundryViewportAtAnchor(
+        foundryViewportRef.current,
+        event.deltaY,
+        foundryZoomAnchor(event.clientX, event.clientY),
+      ),
+    );
+    clearFoundryWheelCommit();
+    foundryWheelCommitTimerRef.current = window.setTimeout(() => {
+      foundryWheelCommitTimerRef.current = null;
+      const viewport = flushFoundryViewportFrame();
+      setFoundryViewport(viewport);
+      setFoundryCameraActive(false);
+    }, 120);
+  };
+  useEffect(() => {
+    foundryWheelHandlerRef.current = handleFoundryWheel;
+  });
+  useEffect(() => {
+    const stage = foundryStageRef.current;
+    if (!stage || !foundryCameraEditable) return;
+    const handleCapturedWheel = (event: globalThis.WheelEvent): void => {
+      foundryWheelHandlerRef.current(event);
+    };
+    // The Ink canvas is portaled from the controls. React synthetic wheel
+    // events therefore follow that React tree rather than this stage's tree;
+    // native capture preserves camera zoom across the physical CRT surface.
+    stage.addEventListener("wheel", handleCapturedWheel, {
+      capture: true,
+      passive: false,
+    });
+    return () => {
+      stage.removeEventListener("wheel", handleCapturedWheel, true);
+    };
+  }, [foundryCameraEditable]);
 
   return (
     <section
@@ -39672,25 +39928,6 @@ function BotAvatarPreviewPanel({
         onPointerMove={moveFoundryPan}
         onPointerUp={endFoundryPan}
         onPointerCancel={cancelFoundryPan}
-        onWheel={(event) => {
-          if (!foundryCameraEditable) return;
-          event.preventDefault();
-          setFoundryCameraActive(true);
-          queueFoundryViewport(
-            zoomBotAvatarFoundryViewportAtAnchor(
-              foundryViewportRef.current,
-              event.deltaY,
-              foundryZoomAnchor(event.clientX, event.clientY),
-            ),
-          );
-          clearFoundryWheelCommit();
-          foundryWheelCommitTimerRef.current = window.setTimeout(() => {
-            foundryWheelCommitTimerRef.current = null;
-            const viewport = flushFoundryViewportFrame();
-            setFoundryViewport(viewport);
-            setFoundryCameraActive(false);
-          }, 120);
-        }}
         onKeyDown={(event) => {
           if (!foundryCameraEditable) return;
           const panStep = event.shiftKey ? 48 : 20;
@@ -39851,91 +40088,134 @@ function BotAvatarPreviewPanel({
             role="img"
             aria-label={`${titleName} mini avatar preview`}
           >
-            <span className={styles.botAvatarStudioMiniPreviewLabel}>
-              Mini preview
-            </span>
-            <ChatMiniBotAvatar
-              size="room"
-              thinking={previewThinking}
-              color={miniAccentColor}
-              alloyColor={
-                isDefaultPrismBot
-                  ? "#aeb8c1"
-                  : botFrameMetalAlloyColor(voicePreset)
-              }
-              theme={previewTheme}
-              className={styles.botAvatarStudioMiniAvatar}
-              face={
-                <>
-                  {renderMiniAvatarDetailsInk("behind-face")}
-                  <span
-                    className={styles.emptyStateHeroMiniFaceRig}
-                    data-zen-live-bot-face-rig="true"
-                    style={miniFaceRegistrationStyle}
-                  >
-                    <CoffeeSeatPlateEmoji
-                      enabled
-                      pixelated
-                      isTalking={previewTalking}
-                      blinkWhileTalking
-                      mouthShape={miniAvatarBinaryMouthShape({
-                        talking: previewTalking,
-                        mouthShape: displayedPreviewMouthShape,
-                        mouthCharacter: previewFaceStyle.mouthCharacter,
-                      })}
-                      scheduleKey={`${scheduleKey}-studio-mini-${previewMode}`}
-                      baseText={
-                        previewSipMouthTreatmentActive
-                          ? COFFEE_SEAT_SIP_PLATE_GLYPH.text
-                          : miniSeatPlateGlyph.text
-                      }
-                      rotateDeg={
-                        previewSipMouthTreatmentActive
-                          ? COFFEE_SEAT_SIP_PLATE_GLYPH.rotateDeg
-                          : miniSeatPlateGlyph.rotateDeg
-                      }
-                      voicePreset={voicePreset}
-                      forceBlinkPhase={previewBlink ? "closed" : "open"}
-                      showThinkingSpinner={previewThinkingSpinnerActive}
-                      faceEyesFont={previewFaceStyle.eyesFont}
-                      faceEyeCharacter={previewFaceStyle.eyeCharacter}
-                      faceEyeMovement="still"
-                      faceMouthFont={previewFaceStyle.mouthFont}
-                      faceMouthCharacter={previewFaceStyle.mouthCharacter}
-                      faceMouthAnimation={previewFaceStyle.mouthAnimation}
-                      faceFontWeight={previewFaceStyle.weight}
-                      faceEyeScale={previewFaceStyle.eyeScale}
-                      faceEyeOffsetX={previewFaceStyle.eyeOffsetX}
-                      faceEyeOffsetY={previewFaceStyle.eyeOffsetY}
-                      faceEyeRotationDeg={previewFaceStyle.eyeRotationDeg}
-                      faceEyeCount={previewFaceStyle.eyeCount}
-                      faceMouthScale={previewFaceStyle.mouthScale}
-                      faceMouthOffsetX={previewFaceStyle.mouthOffsetX}
-                      faceMouthOffsetY={previewFaceStyle.mouthOffsetY}
-                      faceMouthRotationDeg={previewFaceStyle.mouthRotationDeg}
-                      faceBlinkBar={previewFaceStyle.blinkBar}
-                      faceBlinkScale={previewFaceStyle.blinkScale}
-                      faceBlinkOffsetX={previewFaceStyle.blinkOffsetX}
-                      faceBlinkOffsetY={previewFaceStyle.blinkOffsetY}
-                      faceBlinkRotationDeg={previewFaceStyle.blinkRotationDeg}
-                      faceThinkingFrames={previewFaceStyle.thinkingFrames}
-                      faceThinkingScale={previewFaceStyle.thinkingScale}
-                      faceThinkingOffsetX={previewFaceStyle.thinkingOffsetX}
-                      faceThinkingOffsetY={previewFaceStyle.thinkingOffsetY}
-                      className={`${styles.coffeeSeatPlateEmoji} ${styles.emptyStateHeroMiniFace}`}
-                    />
-                  </span>
-                  {renderMiniAvatarDetailsInk("above-face")}
-                </>
-              }
-              glyph={
-                <BotGlyph
-                  name={glyph}
-                  size={12}
-                  className={styles.emptyStateHeroMiniGlyph}
-                />
-              }
-            />
+            <div className={styles.botAvatarStudioMiniPreviewCluster}>
+              <div className={styles.botAvatarStudioMiniClusterItem}>
+                <span className={styles.botAvatarStudioMiniPreviewLabel}>
+                  Mini preview
+                </span>
+                <div className={styles.botAvatarStudioMiniPreviewViewport}>
+                  <ChatMiniBotAvatar
+                    size="room"
+                    thinking={previewThinking}
+                    color={miniAccentColor}
+                    alloyColor={
+                      isDefaultPrismBot
+                        ? "#aeb8c1"
+                        : botFrameMetalAlloyColor(voicePreset)
+                    }
+                    theme={previewTheme}
+                    className={styles.botAvatarStudioMiniAvatar}
+                    face={
+                      <>
+                        {renderMiniAvatarDetailsInk("behind-face")}
+                        <span
+                          className={styles.emptyStateHeroMiniFaceRig}
+                          data-zen-live-bot-face-rig="true"
+                          style={miniFaceRegistrationStyle}
+                        >
+                          <CoffeeSeatPlateEmoji
+                            enabled
+                            pixelated
+                            isTalking={previewTalking}
+                            blinkWhileTalking
+                            mouthShape={miniAvatarBinaryMouthShape({
+                              talking: previewTalking,
+                              mouthShape: displayedPreviewMouthShape,
+                              mouthCharacter: previewFaceStyle.mouthCharacter,
+                            })}
+                            scheduleKey={`${scheduleKey}-studio-mini-${previewMode}`}
+                            baseText={
+                              previewSipMouthTreatmentActive
+                                ? COFFEE_SEAT_SIP_PLATE_GLYPH.text
+                                : miniSeatPlateGlyph.text
+                            }
+                            rotateDeg={
+                              previewSipMouthTreatmentActive
+                                ? COFFEE_SEAT_SIP_PLATE_GLYPH.rotateDeg
+                                : miniSeatPlateGlyph.rotateDeg
+                            }
+                            voicePreset={voicePreset}
+                            forceBlinkPhase={previewBlink ? "closed" : "open"}
+                            showThinkingSpinner={previewThinkingSpinnerActive}
+                            faceEyesFont={previewFaceStyle.eyesFont}
+                            faceEyeCharacter={previewFaceStyle.eyeCharacter}
+                            faceEyeMovement="still"
+                            faceMouthFont={previewFaceStyle.mouthFont}
+                            faceMouthCharacter={
+                              previewFaceStyle.mouthCharacter
+                            }
+                            faceMouthAnimation={
+                              previewFaceStyle.mouthAnimation
+                            }
+                            faceFontWeight={previewFaceStyle.weight}
+                            faceEyeScale={previewFaceStyle.eyeScale}
+                            faceEyeOffsetX={previewFaceStyle.eyeOffsetX}
+                            faceEyeOffsetY={previewFaceStyle.eyeOffsetY}
+                            faceEyeRotationDeg={
+                              previewFaceStyle.eyeRotationDeg
+                            }
+                            faceEyeCount={previewFaceStyle.eyeCount}
+                            faceMouthScale={previewFaceStyle.mouthScale}
+                            faceMouthOffsetX={previewFaceStyle.mouthOffsetX}
+                            faceMouthOffsetY={previewFaceStyle.mouthOffsetY}
+                            faceMouthRotationDeg={
+                              previewFaceStyle.mouthRotationDeg
+                            }
+                            faceBlinkBar={previewFaceStyle.blinkBar}
+                            faceBlinkScale={previewFaceStyle.blinkScale}
+                            faceBlinkOffsetX={previewFaceStyle.blinkOffsetX}
+                            faceBlinkOffsetY={previewFaceStyle.blinkOffsetY}
+                            faceBlinkRotationDeg={
+                              previewFaceStyle.blinkRotationDeg
+                            }
+                            faceThinkingFrames={
+                              previewFaceStyle.thinkingFrames
+                            }
+                            faceThinkingScale={previewFaceStyle.thinkingScale}
+                            faceThinkingOffsetX={
+                              previewFaceStyle.thinkingOffsetX
+                            }
+                            faceThinkingOffsetY={
+                              previewFaceStyle.thinkingOffsetY
+                            }
+                            className={`${styles.coffeeSeatPlateEmoji} ${styles.emptyStateHeroMiniFace}`}
+                          />
+                        </span>
+                        {renderMiniAvatarDetailsInk("above-face")}
+                      </>
+                    }
+                    glyph={
+                      <BotGlyph
+                        name={glyph}
+                        size={12}
+                        className={styles.emptyStateHeroMiniGlyph}
+                      />
+                    }
+                  />
+                </div>
+              </div>
+              <div
+                className={styles.botAvatarStudioMicroClusterItem}
+                data-avatar-studio-micro-preview="true"
+              >
+                <span className={styles.botAvatarStudioMiniPreviewLabel}>
+                  Micro preview
+                </span>
+                <div className={styles.botAvatarStudioMicroPreview}>
+                  <BotAvatarMicroRenderer
+                    moodKey={previewMood}
+                    color={miniAccentColor}
+                    voicePreset={voicePreset}
+                    faceStyle={previewFaceStyle}
+                    isTalking={previewTalking}
+                    mouthShape={displayedPreviewMouthShape}
+                    forceBlinkPhase={previewBlink ? "closed" : "open"}
+                    scheduleKey={`${scheduleKey}-studio-micro-${previewMode}`}
+                    avatarDetails={miniAvatarDetails}
+                  />
+                </div>
+              </div>
+            </div>
           </div>
         ) : null}
         {foundryCameraEditable ? (
@@ -47318,6 +47598,17 @@ function HomeContent(): React.JSX.Element {
   // product Chat.
   const viewParam = searchParams.get("view");
   const view: View = prismSurfaceViewForRouteParam(viewParam);
+  const [fpsCounterEnabled, setFpsCounterEnabled] = useState(false);
+  useEffect(() => {
+    setFpsCounterEnabled(
+      window.localStorage.getItem(FPS_COUNTER_STORAGE_KEY) === "true",
+    );
+  }, []);
+  const setFpsCounterPreference = (next: boolean): void => {
+    window.localStorage.setItem(FPS_COUNTER_STORAGE_KEY, String(next));
+    setFpsCounterEnabled(next);
+    window.dispatchEvent(new Event(FPS_COUNTER_CHANGED_EVENT));
+  };
   const debateVoiceSurfaceActiveRef = useRef(view === "debate");
   const [appSwitcherOpen, setAppSwitcherOpen] = useState(false);
   useEffect(() => {
@@ -48261,6 +48552,11 @@ function HomeContent(): React.JSX.Element {
     if (typeof document === "undefined") return;
     applyGraphicsQualityToDocument(document, graphicsQuality);
   }, [graphicsQuality]);
+  const crtFocus = normalizeCrtFocus(settings?.crtFocus);
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    applyCrtFocusToDocument(document, crtFocus);
+  }, [crtFocus]);
   const typographyScale = normalizePrismTypographyScale(
     settings?.typographyScale,
   );
@@ -49349,7 +49645,6 @@ function HomeContent(): React.JSX.Element {
   const sandboxBotStatusRefreshMarkerRef = useRef<string | null>(null);
   const zenOpenInFlightRef = useRef(false);
   const zenOpenRunRef = useRef(0);
-  const prismSummonInFlightRef = useRef(false);
   const pendingPrismFocusedChatHandoffRef =
     useRef<PrismCompanionFocusedChatHandoff | null>(null);
   const [zenZoomedOutConversationId, setZenZoomedOutConversationId] = useState<
@@ -51374,26 +51669,8 @@ function HomeContent(): React.JSX.Element {
     string | null | undefined
   >(undefined);
   const [zenPersonaBotId, setZenPersonaBotId] = useState<string | null>(null);
-  // A selected Home can become a live, empty conversation before its first
-  // message. This is presentation-only: the normal first send still creates
-  // the conversation, so selecting the hero never initiates an LLM turn.
-  const [zenPreMessageConversationActive, setZenPreMessageConversationActive] =
-    useState(false);
-  const [zenHomeRoamOrigin, setZenHomeRoamOrigin] = useState<{
-    key: number;
-    x: number;
-    y: number;
-  } | null>(null);
   const zenPersonaBotIdRef = useRef<string | null>(null);
   zenPersonaBotIdRef.current = zenPersonaBotId;
-  useEffect(() => {
-    // Back, Escape, and header navigation clear the focused Home persona.
-    // Never carry its pre-message canvas state into the next Home.
-    if (view !== "chat" || zenPersonaBotId === null) {
-      setZenPreMessageConversationActive(false);
-      setZenHomeRoamOrigin(null);
-    }
-  }, [view, zenPersonaBotId]);
   const [zenPersonaPresence, setZenPersonaPresence] =
     useState<ZenPersonaPresenceUiState>(() =>
       createStableZenPersonaPresenceState(null),
@@ -54503,7 +54780,7 @@ function HomeContent(): React.JSX.Element {
       if (
         target instanceof Element &&
         target.closest(
-          "[data-starter-compose-surface='true'], [data-starter-bot-affordance='true'], [data-zen-pre-message-hero='true'], [data-bot-talk-hero='true']",
+          "[data-starter-compose-surface='true'], [data-starter-bot-affordance='true'], [data-zen-bot-panel-hero='true'], [data-bot-talk-hero='true']",
         )
       ) {
         return;
@@ -56366,7 +56643,7 @@ function HomeContent(): React.JSX.Element {
     return (
       <div className={styles.settingsModelPairRow}>
         <div className={styles.settingsModelPairTitle}>
-          <span>Atmosphere wallpaper</span>
+          <span>Atmosphere fallbacks</span>
         </div>
         <label className={styles.settingsModelLane}>
           <span
@@ -56378,8 +56655,9 @@ function HomeContent(): React.JSX.Element {
               label="About Atmosphere offline model"
               variant="control"
             >
-              Selects the local image model used for generated Zen Atmosphere
-              wallpapers.
+              Provides the local fallback and controls whether local
+              Atmosphere generation is available. Choose the exact library
+              model beneath Synthesize above.
             </PanelSectionInfo>
           </span>
           <ComposerModelPicker
@@ -56425,8 +56703,9 @@ function HomeContent(): React.JSX.Element {
               label="About Atmosphere online model"
               variant="control"
             >
-              Selects the online image model used for Zen Atmosphere when online
-              image generation is available.
+              Provides the online fallback and controls whether online
+              Atmosphere generation is available. Choose the exact library
+              model beneath Synthesize above.
             </PanelSectionInfo>
           </span>
           <ComposerModelPicker
@@ -57737,25 +58016,31 @@ function HomeContent(): React.JSX.Element {
       view === "chat" &&
       (pendingReplyVisible || chatAssistantRevealInProgress || activeSideChat);
     const showModelControls = options.showModelControls ?? true;
-    // The home hero or hue-lens controls already expose direct bot selection.
-    // Keep navbar Facet picker visible only when we are in the pre-message
-    // roaming state after hero selection.
-    const directBotSelectionVisible = zenHomeDirectSelectionVisible({
-      dockState: zenHomeDockState(zenPreMessageConversationActive),
-      botCardsVisible: zenEmptyHeroVisible && pickerSourceBots.length > 0,
-      hueLensVisible: emptyStateLensVisible,
-    });
+    // The empty canvas already exposes direct bot cards and, when useful, a
+    // full hue lens. Do not duplicate that browsing surface in the navbar.
+    const directBotSelectionVisible =
+      emptyStateLensVisible ||
+      (activeConversationIsEmpty && canvasBotDirectoryInteractive);
     const showBotPicker =
       (options.showBotPicker ?? true) &&
       view === "chat" &&
       !activeSideChat &&
       !directBotSelectionVisible &&
       zenPersonaPickerBots.length > 0;
+    // While All Bots is the direct-selection surface, the Facet picker is
+    // intentionally hidden. Keep the library's group filter in that exact
+    // navbar slot so the canvas remains free for browsing its bot cards.
+    const showBotLibraryGroupPicker =
+      (options.showBotPicker ?? true) &&
+      view === "chat" &&
+      !activeSideChat &&
+      directBotSelectionVisible &&
+      botLibraryGroupFilterOptions.length > 0;
     const showVoiceSelector = options.showVoiceSelector ?? true;
     const disabled = options.disabled === true;
     const disabledReason = options.disabledReason ??
       "A draft is in flight. Return to the foundry brief screen to continue.";
-    if (!showModelControls && !showBotPicker) {
+    if (!showModelControls && !showBotPicker && !showBotLibraryGroupPicker) {
       return showVoiceSelector
         ? renderVoiceModeSelector({
             localPremiumFallback: blocksOnlineCapabilities(responseMode),
@@ -57837,6 +58122,17 @@ function HomeContent(): React.JSX.Element {
             menuClassName={options.botMenuClassName}
             privateTone={appWidePrivateMode}
             navbarPicker
+          />
+        ) : null}
+        {showBotLibraryGroupPicker ? (
+          <BotLibraryGroupPicker
+            value={botLibraryGroupPickerValue}
+            options={botLibraryGroupFilterOptions}
+            onChange={applyBotLibraryHeaderFilter}
+            onCreateGroup={() => openCreateBotLibraryGroupDialog([])}
+            resolvedTheme={resolvedTheme}
+            showCounts={false}
+            dismissPopoversSignal={composerPopoverDismissSignal}
           />
         ) : null}
         {view === "chat" && detail?.incognito === true ? (
@@ -72402,13 +72698,6 @@ function HomeContent(): React.JSX.Element {
     (!detail || detail.messages.length === 0) &&
     !pendingReplyVisible &&
     !zenEphemeralUserActionMessage &&
-    !zenPreMessageConversationActive &&
-    !emptyStateSearchActive;
-  const zenHomeHeroVisible =
-    chatLikeSurface &&
-    (!detail || detail.messages.length === 0) &&
-    !pendingReplyVisible &&
-    !zenEphemeralUserActionMessage &&
     !emptyStateSearchActive;
   const prismHomeEmptyHeroVisible =
     view === "chat" &&
@@ -72615,7 +72904,7 @@ function HomeContent(): React.JSX.Element {
     conversationSurfaceLoading && (view === "chat" || view === "sandbox");
   const zenNewSessionPresenceDeferred =
     chatLikeSurface &&
-    ((activeConversationIsEmpty && !zenPreMessageConversationActive) ||
+    (activeConversationIsEmpty ||
       showConversationSurfaceLoading ||
       zenInitialThinkingActive);
   // Bot-profile switching keeps running in the background, but we no longer
@@ -74967,6 +75256,57 @@ function HomeContent(): React.JSX.Element {
   }, [backendUnavailable, requestApiWithLoopbackFallback]);
 
   useEffect(() => {
+    if (!user?.id || !settings || backendUnavailable) return;
+
+    let cancelled = false;
+    let requestRunning = false;
+    let keepWarmTimer: number | null = null;
+    const scheduleKeepWarm = (delayMs: number): void => {
+      if (keepWarmTimer !== null) window.clearTimeout(keepWarmTimer);
+      keepWarmTimer = window.setTimeout(() => {
+        keepWarmTimer = null;
+        void keepAuxiliaryModelWarm();
+      }, delayMs);
+    };
+    const keepAuxiliaryModelWarm = async (): Promise<void> => {
+      if (cancelled || requestRunning) return;
+      requestRunning = true;
+      try {
+        await requestApiWithLoopbackFallback(
+          "/api/models/auxiliary/keep-warm",
+          { method: "POST" },
+        );
+      } catch {
+        // The regular backend heartbeat owns connection messaging. A missing
+        // local runtime or model must not add a second user-visible failure.
+      } finally {
+        requestRunning = false;
+        if (!cancelled) {
+          scheduleKeepWarm(AUXILIARY_MODEL_KEEP_WARM_INTERVAL_MS);
+        }
+      }
+    };
+    const refreshKeepWarm = (): void => scheduleKeepWarm(0);
+
+    scheduleKeepWarm(0);
+    document.addEventListener("visibilitychange", refreshKeepWarm);
+    window.addEventListener("online", refreshKeepWarm);
+    return () => {
+      cancelled = true;
+      if (keepWarmTimer !== null) window.clearTimeout(keepWarmTimer);
+      document.removeEventListener("visibilitychange", refreshKeepWarm);
+      window.removeEventListener("online", refreshKeepWarm);
+    };
+  }, [
+    backendUnavailable,
+    requestApiWithLoopbackFallback,
+    settings?.experimentalDualOllamaEnabled,
+    settings?.prismDefaultLlmModel,
+    settings?.secondaryOllamaHost,
+    user?.id,
+  ]);
+
+  useEffect(() => {
     if (!backendUnavailable) {
       backendReconnectAttemptCountRef.current = 0;
       return;
@@ -75283,6 +75623,7 @@ function HomeContent(): React.JSX.Element {
     const savedGraphicsQuality = normalizeGraphicsQuality(
       d.settings.graphicsQuality,
     );
+    const savedCrtFocus = normalizeCrtFocus(d.settings.crtFocus);
     const savedTypographyScale = normalizePrismTypographyScale(
       d.settings.typographyScale,
     );
@@ -75292,6 +75633,7 @@ function HomeContent(): React.JSX.Element {
       ...d.settings,
       displayName,
       graphicsQuality: savedGraphicsQuality,
+      crtFocus: savedCrtFocus,
       typographyScale: savedTypographyScale,
       startupPreference: normalizePrismStartupPreference(
         d.settings.startupPreference,
@@ -83432,12 +83774,6 @@ function HomeContent(): React.JSX.Element {
         zenLiveAskQuestionMarkerVisible,
       ) ||
       zenPersonaPresence.phase !== "stable");
-  // Keep the Home-card handoff visually continuous. The established live
-  // presence takes over the same compact bot first; ordinary reply presence
-  // still returns to the player's chosen full-size setting.
-  const zenLivePresenceAvatarSizePx = zenPreMessageConversationActive
-    ? Math.min(zenLiveBotAvatarSizePx, ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX)
-    : zenLiveBotAvatarSizePx;
   useEffect(() => {
     setZenEphemeralUserActionMessage(null);
     setZenLiveBotAction(null);
@@ -85366,15 +85702,13 @@ function HomeContent(): React.JSX.Element {
                     identityPresentationOccurredAt={
                       zenLivePresenceIdentityShapeshiftState?.occurredAt
                     }
-                    avatarSizePx={zenLivePresenceAvatarSizePx}
+                    avatarSizePx={zenLiveBotAvatarSizePx}
                     voiceLightTarget={botVoiceLightTarget(
                       "chat",
                       detail?.id ?? selectedId ?? "pending",
                       zenLivePresenceBot?.id ?? "prism",
                     )}
                     onContextMenuRequest={openZenLiveBotContextMenu}
-                    initialRoamOrigin={zenHomeRoamOrigin}
-                    onHomeDockRequest={handleZenHomeDockRequest}
                   />
                 </div>
               ) : null}
@@ -85639,8 +85973,6 @@ function HomeContent(): React.JSX.Element {
     privateMode: boolean,
     options: { zenHomeBotId?: string | null } = {},
   ) {
-    setZenPreMessageConversationActive(false);
-    setZenHomeRoamOrigin(null);
     const hasExplicitZenHome = Object.prototype.hasOwnProperty.call(
       options,
       "zenHomeBotId",
@@ -85775,47 +86107,13 @@ function HomeContent(): React.JSX.Element {
     }, 360);
   }
 
-  /**
-   * Hero mini-bot selection is deliberately pre-message. The selected bot
-   * leaves Home and joins the existing live canvas, but PRISM does not send a
-   * starter turn. Proactive openings remain disabled until their setting owns
-   * that behavior.
-   */
-  function handleZenHeroMiniBotSelection(
+  /** The hero mini bot opens the same bot hub as re-activating its card. */
+  function handleZenHeroBotPanelOpen(
     event: React.MouseEvent<HTMLButtonElement>,
   ): void {
     event.stopPropagation();
-    if (pendingReply || !isStarterPromptAvailable(draft)) return;
-    const origin = event.currentTarget.getBoundingClientRect();
-    setZenHomeRoamOrigin({
-      key: Date.now(),
-      x: origin.left,
-      y: origin.top,
-    });
-    setChatAutoRestoreSuppressed(true);
-    setForceNewConversationOnNextSend(true);
-    setZenPreMessageConversationActive(true);
-    closeEmptyStateBotSearch();
-    focusDraftInput();
-  }
-
-  function handleZenHomeDockRequest(clientX: number, clientY: number): boolean {
-    if (!zenPreMessageConversationActive) return false;
-    const target = document.querySelector<HTMLElement>(
-      '[data-zen-home-drop-target="true"]',
-    );
-    if (
-      !target ||
-      !zenHomeDropTargetContainsPoint(target.getBoundingClientRect(), {
-        x: clientX,
-        y: clientY,
-      })
-    ) {
-      return false;
-    }
-    setZenPreMessageConversationActive(false);
-    setZenHomeRoamOrigin(null);
-    return true;
+    if (!zenPersonaBot) return;
+    openBotPanelHub(zenPersonaBot);
   }
 
   // Sandbox retains its explicit starter action. Zen's mini-bot hero is the
@@ -91503,7 +91801,6 @@ function HomeContent(): React.JSX.Element {
     setSelectedBotId(null);
     setSandboxGridSelectedBotId(null);
     if (view === "chat") {
-      setZenPreMessageConversationActive(false);
       setZenPersonaBotId(null);
     }
     cancelCanvasBotMarqueeGesture();
@@ -91644,79 +91941,6 @@ function HomeContent(): React.JSX.Element {
       draftComposerRef.current?.focus({ preventScroll: true });
     }, 0);
   }, []);
-
-  async function summonPrismIntoFreshChat(): Promise<void> {
-    if (view !== "chat") return;
-    setSidebarOpen(true);
-    focusDraftInput();
-    if (prismSummonInFlightRef.current) return;
-    prismSummonInFlightRef.current = true;
-    const summonRunId = zenOpenRunRef.current + 1;
-    zenOpenRunRef.current = summonRunId;
-    chatAutoRestoreSuppressedRef.current = true;
-    setChatAutoRestoreSuppressed(true);
-    setError(null);
-    setPendingIncognito(false);
-    setZenPrivateReturnCheckpoint(null);
-    setImagePrivateMode(false);
-    selectedIdRef.current = null;
-    detailIdRef.current = null;
-    setSelectedId(null);
-    setDetail(null);
-    setSelectedBotId(null);
-    setSandboxGridSelectedBotId(null);
-    setChatBotOverride(undefined);
-    setZenPersonaBotId(null);
-    setConversationStarterPrompts(null);
-    setForceNewConversationOnNextSend(false);
-    clearComposerDraftNow();
-    try {
-      const opened = await api<{ conversationId: string }>(
-        "/api/conversations/zen/open",
-        {
-          method: "POST",
-          body: JSON.stringify({ botId: null, newSession: true }),
-        },
-      );
-      if (zenOpenRunRef.current !== summonRunId) return;
-      await refreshConversations();
-      if (zenOpenRunRef.current !== summonRunId) return;
-      selectedIdRef.current = opened.conversationId;
-      const freshConversation = await refreshConversation(
-        opened.conversationId,
-      );
-      if (
-        zenOpenRunRef.current !== summonRunId ||
-        selectedIdRef.current !== opened.conversationId ||
-        !freshConversation
-      ) {
-        return;
-      }
-      setSidebarOpen(true);
-      setZenPersonaBotId(null);
-      chatAutoRestoreSuppressedRef.current = false;
-      setChatAutoRestoreSuppressed(false);
-      focusDraftInput();
-      await sendMessage(
-        { preventDefault: () => {} } as React.FormEvent<HTMLFormElement>,
-        {
-          starterPrompt: true,
-          starterPromptWarrantsIntro: true,
-          queuedConversationId: opened.conversationId,
-          conversationDetailOverride: freshConversation,
-        },
-      );
-    } catch (err) {
-      if (zenOpenRunRef.current !== summonRunId) return;
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Could not start a fresh Prism chat.",
-      );
-    } finally {
-      prismSummonInFlightRef.current = false;
-    }
-  }
 
   async function continuePrismAssistantInFocusedChat(
     handoff: PrismCompanionFocusedChatHandoff,
@@ -92712,8 +92936,6 @@ function HomeContent(): React.JSX.Element {
   }
 
   function armFreshZenPersona(nextBotId: string | null): void {
-    setZenPreMessageConversationActive(false);
-    setZenHomeRoamOrigin(null);
     if (zenSessionHasNotStarted() && zenPersonaBotIdRef.current !== nextBotId) {
       rotateZenFallbackWallpaperSeed();
     }
@@ -93112,19 +93334,6 @@ function HomeContent(): React.JSX.Element {
               aria-label="Search bots by name"
             />
           </div>
-          {persistentEmptyCanvasSpotlight ? (
-            <div className={styles.emptyStateSearchGroupPicker}>
-              <BotLibraryGroupPicker
-                value={botLibraryGroupPickerValue}
-                options={botLibraryGroupFilterOptions}
-                onChange={applyBotLibraryHeaderFilter}
-                onCreateGroup={() => openCreateBotLibraryGroupDialog([])}
-                resolvedTheme={resolvedTheme}
-                showCounts={false}
-                dismissPopoversSignal={composerPopoverDismissSignal}
-              />
-            </div>
-          ) : null}
         </div>
         <div className={styles.emptyStateSearchMeta} aria-live="polite">
           {resultLabel}
@@ -97294,8 +97503,13 @@ function HomeContent(): React.JSX.Element {
       );
       return;
     }
+    const savedGroupRoomSelection =
+      assetGenerationPreferences.group_room_atmosphere;
     const groupImageProvider = resolveImageProviderName({
-      savedProvider: selection?.provider ?? settings?.preferredImageProvider,
+      savedProvider:
+        selection?.provider ??
+        savedGroupRoomSelection?.provider ??
+        settings?.preferredImageProvider,
       offlineOnly: memberBotIds.some(
         (botId) =>
           bots.find((candidate) => candidate.id === botId)?.online_enabled ===
@@ -97338,7 +97552,6 @@ function HomeContent(): React.JSX.Element {
     ]);
     closeBotGroupRoomAtmosphereDialog();
     try {
-      const { localModelId, openAiModelId } = resolveZenWallpaperImageModels();
       const body: Record<string, unknown> = {
         purpose: "group-room-wallpaper",
         groupName: target.name,
@@ -97355,32 +97568,6 @@ function HomeContent(): React.JSX.Element {
       if (selection) {
         body.preferredProvider = selection.provider;
         body.model = selection.model;
-      } else if (groupImageProvider !== "local") {
-        if (zenWallpaperImageLaneDisabled("openai")) {
-          if (zenWallpaperImageLaneDisabled("local") || !localModelId) {
-            throw new Error(
-              "Online image generation is disabled. Choose a local Zen wallpaper model before generating.",
-            );
-          }
-          body.preferredProvider = "local";
-          body.model = localModelId;
-        } else {
-          if (!openAiModelId) {
-            throw new Error(
-              "Add an OpenAI key in Settings to enable online image models.",
-            );
-          }
-          body.preferredProvider = "openai";
-          body.model = openAiModelId;
-        }
-      } else {
-        if (zenWallpaperImageLaneDisabled("local") || !localModelId) {
-          throw new Error(
-            "Choose a local Zen wallpaper model before generating.",
-          );
-        }
-        body.preferredProvider = "local";
-        body.model = localModelId;
       }
       const data = await api<BotGroupRoomAtmosphereGenerateApiResponse>(
         "/api/images/generate",
@@ -100587,56 +100774,6 @@ function HomeContent(): React.JSX.Element {
     );
   }
 
-  function resolveZenWallpaperImageModels(): {
-    localModelId: string;
-    openAiModelId: string;
-  } {
-    const headerLocalRaw = imageGenModelChoiceByProvider.local?.trim() ?? "";
-    const headerLocal =
-      headerLocalRaw === AUTO_MODEL_CHOICE || headerLocalRaw === ""
-        ? ""
-        : visibleLocalImageCandidateOrEmpty(headerLocalRaw);
-    const localModelId = zenWallpaperImageLaneDisabled("local")
-      ? ""
-      : headerLocal ||
-        visibleLocalImageCandidateOrEmpty(
-          settings?.preferredZenWallpaperLocalImageModel,
-        ) ||
-        visibleLocalImageCandidateOrEmpty(settings?.preferredLocalImageModel) ||
-        localImageModelCatalogEntries[0]?.id ||
-        "";
-    const headerOpenAiRaw = imageGenModelChoiceByProvider.openai?.trim() ?? "";
-    const headerOpenAi =
-      headerOpenAiRaw === AUTO_MODEL_CHOICE || headerOpenAiRaw === ""
-        ? ""
-        : visibleOpenAiImageCandidateOrEmpty(headerOpenAiRaw);
-    const fallbackOpenAiImageModel = visibleOpenAiImageCandidateOrEmpty(
-      availableOpenAiImageModelCatalogEntries[0]?.id,
-    );
-    const openAiModelCandidates: Array<
-      ReturnType<typeof normalizeOpenAiImageModelId> | ""
-    > = [
-      ...(zenWallpaperImageLaneDisabled("openai")
-        ? []
-        : [
-            headerOpenAi,
-            visibleOpenAiImageCandidateOrEmpty(
-              settings?.preferredZenWallpaperOpenAiImageModel,
-            ),
-            visibleOpenAiImageCandidateOrEmpty(
-              settings?.preferredOpenAiImageModel,
-            ),
-            fallbackOpenAiImageModel,
-          ]),
-    ];
-    const openAiModelId =
-      openAiModelCandidates.find(
-        (modelId): modelId is ReturnType<typeof normalizeOpenAiImageModelId> =>
-          modelId !== "",
-      ) ?? "";
-    return { localModelId, openAiModelId };
-  }
-
   function applyZenWallpaperMetadata(
     conversationId: string,
     zenWallpaper: ZenWallpaperMetadata,
@@ -100665,11 +100802,15 @@ function HomeContent(): React.JSX.Element {
     },
   ): Promise<void> {
     const generationRequested = options.generate !== false;
+    const savedZenAtmosphereSelection =
+      assetGenerationPreferences.zen_atmosphere;
     if (
       options.enabled &&
       generationRequested &&
       !zenWallpaperImageGenerationAvailable(
-        options.selection?.provider ?? effectiveImageProvider,
+        options.selection?.provider ??
+          savedZenAtmosphereSelection?.provider ??
+          effectiveImageProvider,
       )
     ) {
       setZenWallpaperError(
@@ -100682,7 +100823,6 @@ function HomeContent(): React.JSX.Element {
     setZenWallpaperBusyConversationId(conversationId);
     setZenWallpaperError(null);
     try {
-      const { localModelId, openAiModelId } = resolveZenWallpaperImageModels();
       const body: Record<string, unknown> = {
         enabled: options.enabled,
         force: options.force === true,
@@ -100700,27 +100840,6 @@ function HomeContent(): React.JSX.Element {
         if (options.selection) {
           body.preferredProvider = options.selection.provider;
           body.model = options.selection.model;
-        } else if (effectiveImageProvider === "local") {
-          body.preferredProvider = "local";
-          if (localModelId) body.model = localModelId;
-        } else {
-          if (zenWallpaperImageLaneDisabled("openai")) {
-            if (zenWallpaperImageLaneDisabled("local") || !localModelId) {
-              throw new Error(
-                "Online Atmosphere images are disabled. Choose a local image model before generating.",
-              );
-            }
-            body.preferredProvider = "local";
-            body.model = localModelId;
-          } else {
-            body.preferredProvider = "openai";
-            if (!openAiModelId) {
-              throw new Error(
-                "Add an OpenAI key in Settings to enable online image models.",
-              );
-            }
-            body.model = openAiModelId;
-          }
         }
       }
       const data = await api<ZenWallpaperApiResponse>(
@@ -100753,13 +100872,20 @@ function HomeContent(): React.JSX.Element {
 
   useEffect(() => {
     const zenWallpaper = detail?.zenWallpaper;
+    if (!assetGenerationPreferencesLoaded) return;
     if (view !== "chat") return;
     if (!detail || detail.mode !== "zen") return;
     if (!zenWallpaper?.enabled) return;
     if (zenWallpaper.status === "generating" || zenWallpaper.status === "error")
       return;
     if (zenWallpaperBusyConversationId === detail.id) return;
-    if (!zenWallpaperImageGenerationAvailable()) return;
+    if (
+      !zenWallpaperImageGenerationAvailable(
+        assetGenerationPreferences.zen_atmosphere?.provider ??
+          effectiveImageProvider,
+      )
+    )
+      return;
     const messageCount = detail.messages.length;
     if (messageCount === 0) return;
     const suppressedMessageCount =
@@ -100792,6 +100918,8 @@ function HomeContent(): React.JSX.Element {
       force: shouldGenerateForIdleEra || shouldPreGenerateNext,
     });
   }, [
+    assetGenerationPreferences.zen_atmosphere?.provider,
+    assetGenerationPreferencesLoaded,
     view,
     detail?.id,
     detail?.mode,
@@ -103924,9 +104052,9 @@ function HomeContent(): React.JSX.Element {
               }
             />
             <p className={styles.botGroupRoomAtmosphereHint}>
-              Generation follows your image-provider setting. LOCAL stays on
-              your network; ONLINE sends member cues. Nothing is attached to a
-              chat.
+              Generation uses the model beneath Synthesize and remembers it for
+              this library. LOCAL stays on your network; ONLINE sends member
+              cues. Nothing is attached to a chat.
             </p>
           </div>
         </section>
@@ -105756,7 +105884,6 @@ function HomeContent(): React.JSX.Element {
           onHomeBaseAppletSelect={(appletId) =>
             switchToSelectableApplet(appletId as PrismAppletId)
           }
-          onChatHomeHeroActivate={() => void summonPrismIntoFreshChat()}
           onPersistentConversationChange={async (conversationId) => {
             await refreshConversations();
             if (detailIdRef.current === conversationId) {
@@ -114614,7 +114741,7 @@ function HomeContent(): React.JSX.Element {
                               />
                               <div className={styles.settingsModelPairRow}>
                                 <div className={styles.settingsModelPairTitle}>
-                                  <span>Home wallpaper model</span>
+                                  <span>Home fallback model</span>
                                 </div>
                                 <label className={styles.settingsModelLane}>
                                   <span
@@ -114626,11 +114753,11 @@ function HomeContent(): React.JSX.Element {
                                       label="About Home wallpaper image model"
                                       variant="control"
                                     >
-                                      Local and online image models share this
-                                      list. Home wallpaper generation follows
-                                      the model you pick here, even when chat is
-                                      set to LOCAL. Choose a local model if you
-                                      want Home scenes to stay on this machine.
+                                      Used only when the Home Atmospheres
+                                      library has no saved choice. Choose the
+                                      exact model beneath Synthesize above;
+                                      choose LOCAL there when Home scenes must
+                                      stay on this machine.
                                     </PanelSectionInfo>
                                   </span>
                                   <ComposerModelPicker
@@ -114701,7 +114828,7 @@ function HomeContent(): React.JSX.Element {
                                         : undefined
                                     }
                                     loading={modelCatalogLoading}
-                                    ariaLabel="Home wallpaper image model"
+                                    ariaLabel="Home fallback image model"
                                     formName="preferredHomeAtmosphereImageModel"
                                     placement="down"
                                     minMenuWidthPx={280}
@@ -114714,8 +114841,8 @@ function HomeContent(): React.JSX.Element {
                                   />
                                 </label>
                                 <small className={styles.settingsSectionHint}>
-                                  Online models may run for Home wallpapers even
-                                  while chat is LOCAL.
+                                  A saved library choice takes precedence over
+                                  this fallback, even while chat is LOCAL.
                                 </small>
                               </div>
                             </div>
@@ -114813,6 +114940,58 @@ function HomeContent(): React.JSX.Element {
                                   );
                                 })}
                             </div>
+                            <label
+                              className={`${styles.settingsRangeField} ${styles.settingsFieldFull}`}
+                              data-crt-focus-control="true"
+                            >
+                              <span className={styles.settingsRangeHeader}>
+                                <span>
+                                  <strong>CRT focus</strong>
+                                  <small>
+                                    Adjusts the shared phosphor brush on every
+                                    full-size bot screen. It does not change
+                                    faces, Ink geometry, or color.
+                                  </small>
+                                </span>
+                                <span className={styles.settingsRangeValue}>
+                                  {crtFocus === 50
+                                    ? "Balanced"
+                                    : crtFocus < 50
+                                      ? `Softer · ${crtFocus}`
+                                      : `Crisper · ${crtFocus}`}
+                                </span>
+                              </span>
+                              <input
+                                type="range"
+                                name="crtFocus"
+                                min={MIN_CRT_FOCUS}
+                                max={MAX_CRT_FOCUS}
+                                step={CRT_FOCUS_STEP}
+                                value={crtFocus}
+                                aria-label="CRT focus"
+                                aria-valuetext={
+                                  crtFocus === 50
+                                    ? "Balanced"
+                                    : crtFocus < 50
+                                      ? `Softer, ${crtFocus} percent focus`
+                                      : `Crisper, ${crtFocus} percent focus`
+                                }
+                                onChange={(event) => {
+                                  const nextFocus = normalizeCrtFocus(
+                                    event.target.value,
+                                  );
+                                  setSettings((previous) =>
+                                    previous
+                                      ? { ...previous, crtFocus: nextFocus }
+                                      : previous,
+                                  );
+                                }}
+                              />
+                              <span className={styles.settingsRangeEnds} aria-hidden="true">
+                                <small>Softer</small>
+                                <small>Crisper</small>
+                              </span>
+                            </label>
                           </section>
                         )}
                         {activeSettingsScope === "startup" && (
@@ -116026,6 +116205,33 @@ function HomeContent(): React.JSX.Element {
                               snapshot, inspect rendering health, and safely
                               reclaim storage.
                             </p>
+                            <section
+                              className={styles.helpToolGroup}
+                              aria-labelledby="settings-help-display-title"
+                            >
+                              <header className={styles.helpToolGroupHeader}>
+                                <div>
+                                  <span>Display</span>
+                                  <h5 id="settings-help-display-title">
+                                    Performance overlay
+                                  </h5>
+                                </div>
+                              </header>
+                              <label className={`${styles.checkbox} ${styles.settingsInlineToggle}`}>
+                                <input
+                                  type="checkbox"
+                                  checked={fpsCounterEnabled}
+                                  onChange={(event) =>
+                                    setFpsCounterPreference(event.target.checked)
+                                  }
+                                  data-settings-action="toggle-fps-counter"
+                                />
+                                <span>
+                                  <strong>Show FPS counter</strong>
+                                  <small>Show a tiny live frame-rate readout in the top-left corner.</small>
+                                </span>
+                              </label>
+                            </section>
                             <div className={styles.helpToolGroups}>
                               <section
                                 className={styles.helpToolGroup}
@@ -136950,7 +137156,31 @@ function HomeContent(): React.JSX.Element {
                             avatarState.listenerReaction === "attentive"
                           ? "attentive"
                           : "neutral";
-                if (staticAudiencePortrait || moderatorMiniPortrait) {
+                // The compact podium cannot sustain the readable full chassis.
+                // Use the shared authored micro form instead of scaling the
+                // full rig down; its face and Ink remain upright and legible.
+                if (moderatorMiniPortrait) {
+                  return (
+                    <BotAvatarMicroRenderer
+                      moodKey="neutral"
+                      color={debateAvatarAccentColor}
+                      voicePreset={
+                        playerJudgePrism
+                          ? "warm"
+                          : coffeeSeatVoicePreset(debateIdentityBot)
+                      }
+                      faceStyle={faceStyle}
+                      isTalking={debateMouthActive}
+                      mouthShape={debateMouthShape}
+                      scheduleKey={`debate-moderator-micro-${botSnapshot.id}`}
+                      avatarDetails={
+                        playerJudgePrism ? null : botSnapshot.avatarDetails
+                      }
+                      className={styles.debateModeratorMicroAvatar}
+                    />
+                  );
+                }
+                if (staticAudiencePortrait) {
                   const galleryMoods = [
                     "happy",
                     "warm",
@@ -137792,6 +138022,7 @@ function HomeContent(): React.JSX.Element {
           introAudioVolume={settings?.voiceVolume ?? 1}
           renderAvatar={(botSummary, avatarState) => {
             const renderTheme = avatarState.theme ?? resolvedTheme;
+            const signalArchiveAvatar = avatarState.surface === "archive";
             const signalDashboardAvatar = avatarState.surface === "dashboard";
             const faceScaleY = coffeePlateFaceScaleYFromSeatHorizontalSide(
               avatarState.facing === "left"
@@ -137814,6 +138045,37 @@ function HomeContent(): React.JSX.Element {
               faceScaleY,
               seatHorizontalSide,
             });
+            if (signalArchiveAvatar) {
+              const archiveBot = botSummary.producerGuest
+                ? null
+                : (bots.find((candidate) => candidate.id === botSummary.id) ??
+                  null);
+              const archiveFaceStyle = archiveBot
+                ? resolveBotFaceStyleForBot(archiveBot)
+                : zenDefaultPrismFaceStyle;
+              return (
+                <BotAvatarMicroRenderer
+                  moodKey="neutral"
+                  color={
+                    archiveBot
+                      ? botOrPrismAccentForTheme(
+                          archiveBot.color,
+                          renderTheme,
+                        )
+                      : prismDefaultAccentForTheme(renderTheme)
+                  }
+                  voicePreset={coffeeSeatVoicePreset(archiveBot)}
+                  faceStyle={archiveFaceStyle}
+                  isTalking={avatarState.talking}
+                  mouthShape={avatarState.mouthShape}
+                  scheduleKey={`signal-archive-micro-${botSummary.id}`}
+                  avatarDetails={
+                    archiveBot ? resolveBotAvatarDetails(archiveBot) : null
+                  }
+                  className={styles.signalArchiveMicroAvatar}
+                />
+              );
+            }
             if (botSummary.producerGuest) {
               const prismSipMouthTreatmentActive =
                 coffeeSeatSipMouthTreatmentActive({
@@ -138372,7 +138634,7 @@ function HomeContent(): React.JSX.Element {
   // directly from Chat.
   if (view === "chat") {
     const zenRememberedWallpaperVisible =
-      zenHomeHeroVisible &&
+      zenEmptyHeroVisible &&
       !appWidePrivateMode &&
       zenPersonaBotId !== null &&
       zenRememberedWallpaperPreview?.botId === zenPersonaBotId;
@@ -138489,7 +138751,7 @@ function HomeContent(): React.JSX.Element {
     // never stacks over it and recreates the former monochromatic wash.
     const zenPersonaFallbackAtmosphereVisible =
       sharedChatConversationPresentation &&
-      zenHomeHeroVisible &&
+      zenEmptyHeroVisible &&
       Boolean(zenPersonaBot) &&
       !appWidePrivateMode &&
       !selectedBotGradientActive &&
@@ -138616,7 +138878,7 @@ function HomeContent(): React.JSX.Element {
     const hubAtmosphereBotHomeTint = atmosphereSurface === "homeBot";
     // Empty Home hero (with or without sidebar) already paints the startup
     // summary in the main band — never also mount the floating chip above it.
-    const emptyHomeHeroMounted = zenHomeHeroVisible;
+    const emptyHomeHeroMounted = zenEmptyHeroVisible;
     const zenHeroSurfaceVisible = chatLikeSurface && emptyHomeHeroMounted;
     const zenCanvasPrivateControlActive =
       chatLikeSurface && zenHeroSurfaceVisible && !emptyStateSearchActive;
@@ -139054,7 +139316,7 @@ function HomeContent(): React.JSX.Element {
               data-zen-bot-resize-surface={
                 chatLikeSurface ? "true" : undefined
               }
-              data-zen-empty-hero={zenHomeHeroVisible ? "true" : undefined}
+              data-zen-empty-hero={zenEmptyHeroVisible ? "true" : undefined}
               data-mobile-msg-focus={
                 mobileFocusedMessageId ? "true" : undefined
               }
@@ -139126,12 +139388,12 @@ function HomeContent(): React.JSX.Element {
                   </div>
                 </div>
               ) : null}
-              {zenHomeHeroVisible &&
+              {zenEmptyHeroVisible &&
                 (() => {
                   // Chat-mode empty state keeps the immersive PRISM hero while
                   // restoring the bot browser grid as the Hub picker beneath it.
                   //   • ARMED — hero becomes the bot's full-color glyph; tapping
-                  //     it moves the bot into the live, pre-message canvas.
+                  //     it opens the same bot hub as re-activating its card.
                   // Fresh Zen can arm a persona without starting the conversation.
                   // The first actual turn remains controlled by the user.
                   const suppressHeroCopy = false;
@@ -139152,9 +139414,9 @@ function HomeContent(): React.JSX.Element {
                   // filtered group." Block the click + nudge them to pick a tile.
                   const heroLensPlaceholder = false;
                   const heroStartLabel = heroBotName
-                    ? `Send a message below, or select the bot to have ${heroBotName} open.`
+                    ? `Send a message below, or select the bot to open ${heroBotName}'s panel.`
                     : immersiveEmptyState
-                      ? "A continuous PRISM-only space for the present thread. Send a message below, or select the mark for a gentle opening prompt."
+                      ? "A continuous PRISM-only space for the present thread. Send a message below, or choose a bot from the library."
                       : "Select the bot to begin, or pick a bot below.";
                   const hint = (() => {
                     if (chatStartupSummaryVisible && chatStartupSummary) {
@@ -139172,9 +139434,6 @@ function HomeContent(): React.JSX.Element {
                       ? styles.emptyStateHubPicker
                       : null,
                     emptyStateSearchActive ? styles.emptyStateSearching : null,
-                    zenPreMessageConversationActive
-                      ? styles.zenHomeRoaming
-                      : null,
                     suppressHeroCopy ? styles.emptyStateDensePicker : null,
                   ]
                     .filter(Boolean)
@@ -139231,25 +139490,22 @@ function HomeContent(): React.JSX.Element {
                       previewBot={isPreviewing ? heroBot : null}
                       previewAsBotGlyph={isPreviewing}
                       privateHero={appWidePrivateMode}
-                      /* The Home preview becomes the live canvas companion on
-                   selection; it does not initiate the first turn. */
+                      /* The Home preview opens the selected bot's hub. */
                       forceTrianglePreview={false}
                       resolvedTheme={resolvedTheme}
                     />
                   );
                   const heroStartDisabled =
-                    pendingReply ||
-                    !isStarterPromptAvailable(draft) ||
-                    heroLensPlaceholder;
+                    pendingReply || !heroBot || heroLensPlaceholder;
                   const heroStartTitle = heroBotName
-                    ? `Enter an empty chat with ${heroBotName}`
-                    : "Enter an empty chat with PRISM";
+                    ? `Open ${heroBotName}'s panel`
+                    : "Choose a bot from the library";
                   const heroStartAriaLabel = heroBotName
-                    ? `Enter empty chat with ${heroBotName}`
-                    : "Enter empty chat with PRISM";
+                    ? `Open ${heroBotName}'s panel`
+                    : "Choose a bot from the library";
                   const heroStartCue =
                     heroBotName && !heroStartDisabled
-                      ? "ENTER EMPTY CHAT · SEND WHEN YOU ARE READY"
+                      ? "OPEN BOT PANEL"
                       : null;
                   const shouldShowHeroNudge =
                     !heroStartDisabled &&
@@ -139288,12 +139544,12 @@ function HomeContent(): React.JSX.Element {
                               ]
                                 .filter(Boolean)
                                 .join(" ")}
-                              data-zen-pre-message-hero="true"
+                              data-zen-bot-panel-hero="true"
                               data-relationship-depth-anchor="home"
                               data-relationship-depth-identity={relationshipDepthIdentity(
                                 heroBot?.id ?? null,
                               )}
-                              onClick={handleZenHeroMiniBotSelection}
+                              onClick={handleZenHeroBotPanelOpen}
                               disabled={heroStartDisabled}
                               title={heroStartTitle}
                               aria-label={heroStartAriaLabel}
@@ -139355,9 +139611,6 @@ function HomeContent(): React.JSX.Element {
                     <div
                       className={emptyStateClassName}
                       style={emptyStateStyle}
-                      data-zen-home-roaming={
-                        zenPreMessageConversationActive ? "true" : undefined
-                      }
                       onClick={handleEmptyStateBackgroundClick}
                     >
                       {activeBotLibraryGroupFilter
@@ -139366,9 +139619,7 @@ function HomeContent(): React.JSX.Element {
                           )
                         : null}
                       {groupHero}
-                      {/* Selecting the armed bot hands its mini avatar to the
-                    live room without dispatching a starter turn. The retained
-                    card becomes the explicit drag-back dock. */}
+                      {/* Selecting the armed bot opens its existing bot hub. */}
                       {!suppressHeroCopy && emptyStateSearchActive ? (
                         <button
                           type="button"
@@ -139380,12 +139631,12 @@ function HomeContent(): React.JSX.Element {
                           ]
                             .filter(Boolean)
                             .join(" ")}
-                          data-zen-pre-message-hero="true"
+                          data-zen-bot-panel-hero="true"
                           data-relationship-depth-anchor="home"
                           data-relationship-depth-identity={relationshipDepthIdentity(
                             heroBot?.id ?? null,
                           )}
-                          onClick={handleZenHeroMiniBotSelection}
+                          onClick={handleZenHeroBotPanelOpen}
                           disabled={heroStartDisabled}
                           title={heroStartTitle}
                           aria-label={heroStartAriaLabel}
@@ -139399,9 +139650,6 @@ function HomeContent(): React.JSX.Element {
                           className={styles.emptyStateInfoBand}
                           data-empty-state-band-emphasis="bot"
                           data-selected-bot-hero="true"
-                          data-zen-home-drop-target={
-                            zenPreMessageConversationActive ? "true" : undefined
-                          }
                           data-zen-live-bot-chrome-avoid="true"
                         >
                           <div className={styles.emptyStateInfoBandRow}>
@@ -139418,12 +139666,12 @@ function HomeContent(): React.JSX.Element {
                                 ]
                                   .filter(Boolean)
                                   .join(" ")}
-                                data-zen-pre-message-hero="true"
+                                data-zen-bot-panel-hero="true"
                                 data-relationship-depth-anchor="home"
                                 data-relationship-depth-identity={relationshipDepthIdentity(
                                   heroBot?.id ?? null,
                                 )}
-                                onClick={handleZenHeroMiniBotSelection}
+                                onClick={handleZenHeroBotPanelOpen}
                                 disabled={heroStartDisabled}
                                 title={heroStartTitle}
                                 aria-label={heroStartAriaLabel}
@@ -139465,12 +139713,12 @@ function HomeContent(): React.JSX.Element {
                                   ]
                                     .filter(Boolean)
                                     .join(" ")}
-                                  data-zen-pre-message-hero="true"
+                                  data-zen-bot-panel-hero="true"
                                   data-relationship-depth-anchor="home"
                                   data-relationship-depth-identity={relationshipDepthIdentity(
                                     null,
                                   )}
-                                  onClick={handleZenHeroMiniBotSelection}
+                                  onClick={handleZenHeroBotPanelOpen}
                                   disabled={heroStartDisabled}
                                   title={heroStartTitle}
                                   aria-label={heroStartAriaLabel}
@@ -139996,6 +140244,13 @@ function HomeContent(): React.JSX.Element {
                                   bots,
                                   assistantFallbackBotId,
                                 )}
+                                avatarDetails={
+                                  assistantDisplayBot
+                                    ? resolveBotAvatarDetails(
+                                        assistantDisplayBot,
+                                      )
+                                    : null
+                                }
                                 isTalking={
                                   msg.id === latestAssistantMessageId &&
                                   zenLiveBotTalking
@@ -140283,9 +140538,6 @@ function HomeContent(): React.JSX.Element {
             data-tutorial-target="composer"
             data-viewport-safe-area="bottom"
             data-starter-compose-surface="true"
-            data-zen-home-roaming={
-              zenPreMessageConversationActive ? "true" : undefined
-            }
             data-compose-bot-selected={
               selectedComposeBotAccent ? "true" : undefined
             }
@@ -140416,15 +140668,13 @@ function HomeContent(): React.JSX.Element {
                         identityPresentationOccurredAt={
                           zenLivePresenceIdentityShapeshiftState?.occurredAt
                         }
-                        avatarSizePx={zenLivePresenceAvatarSizePx}
+                        avatarSizePx={zenLiveBotAvatarSizePx}
                         voiceLightTarget={botVoiceLightTarget(
                           "chat",
                           detail?.id ?? selectedId ?? "pending",
                           zenLivePresenceBot?.id ?? "prism",
                         )}
                         onContextMenuRequest={openZenLiveBotContextMenu}
-                        initialRoamOrigin={zenHomeRoamOrigin}
-                        onHomeDockRequest={handleZenHomeDockRequest}
                       />
                     </div>
                   ) : null}
@@ -142208,6 +142458,11 @@ function HomeContent(): React.JSX.Element {
                                 bots,
                                 assistantFallbackBotId,
                               )}
+                              avatarDetails={
+                                assistantDisplayBot
+                                  ? resolveBotAvatarDetails(assistantDisplayBot)
+                                  : null
+                              }
                               isTalking={
                                 msg.id === latestAssistantMessageId &&
                                 zenLiveBotTalking
@@ -142640,6 +142895,7 @@ function HomeContent(): React.JSX.Element {
 export default function Home(): React.JSX.Element {
   return (
     <>
+      <FpsCounter />
       <PrismVisualLifecycleBridge />
       <DesktopViewportNotice />
       <Suspense fallback={null}>

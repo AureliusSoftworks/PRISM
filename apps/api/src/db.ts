@@ -195,6 +195,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       wrapped_user_key_tag TEXT NOT NULL,
       theme TEXT NOT NULL DEFAULT 'system',
       graphics_quality TEXT NOT NULL DEFAULT 'high',
+      crt_focus INTEGER NOT NULL DEFAULT 50,
       typography_scale TEXT NOT NULL DEFAULT 'standard',
       atmosphere_style TEXT NOT NULL DEFAULT 'prismatic',
       hub_atmosphere_enabled INTEGER NOT NULL DEFAULT 1,
@@ -2649,6 +2650,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!hasGraphicsQuality) {
     db.exec(
       "ALTER TABLE users ADD COLUMN graphics_quality TEXT NOT NULL DEFAULT 'high';",
+    );
+  }
+  const hasCrtFocus = userColumns.some(
+    (column) => column.name === "crt_focus",
+  );
+  if (!hasCrtFocus) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN crt_focus INTEGER NOT NULL DEFAULT 50;",
     );
   }
   const hasTypographyScale = userColumns.some(

@@ -628,7 +628,7 @@ export interface BotcastExperienceProps {
       avatarColorCycle?: boolean;
       replayAudioMaster?: boolean;
       role: "host" | "guest";
-      surface: "dashboard" | "stage" | "alignment";
+      surface: "archive" | "dashboard" | "stage" | "alignment";
       sfxEnabled: boolean;
       sfxVoiceBusGain?: number;
       facing?: "left" | "right";
@@ -11654,52 +11654,39 @@ export function BotcastExperience({
   const archiveEpisodes = episodes.filter(
     (item) => item.status === "completed",
   );
-  const renderArchiveParticipant = (
+  const renderArchiveGuest = (
     item: BotcastEpisodeSummary,
-    role: "host" | "guest",
   ): React.JSX.Element => {
-    const producerGuest = role === "guest" && item.guestKind === "producer";
-    const botId = role === "host" ? item.hostBotId : item.guestBotId;
+    const producerGuest = item.guestKind === "producer";
+    const botId = item.guestBotId;
     const libraryBot = producerGuest ? null : botsById.get(botId);
     const participant = producerGuest
       ? signalProducerGuestBotSummary(item, selectedShow?.accentColor)
       : libraryBot ?? {
           id: botId,
-          name:
-            role === "guest"
-              ? (item.guestName?.trim() || "Former guest")
-              : "Former host",
+          name: item.guestName?.trim() || "Former guest",
           color: null,
           glyph: null,
           personaTemperament: "neutral" as const,
         };
-    const roleLabel = role === "host" ? "Host" : "Guest";
     const portrait = (
       <span className={styles.episodeParticipantAvatar} aria-hidden="true">
         {renderAvatar?.(participant, {
           talking: false,
           thinking: false,
           sipping: false,
-          role,
-          surface: "dashboard",
+          role: "guest",
+          surface: "archive",
           sfxEnabled: false,
-          facing: role === "host" ? "right" : "left",
+          facing: "left",
           theme,
           mouthShape: "closed",
         }) ?? avatarFallback(participant)}
       </span>
     );
-    const label = (
-      <span className={styles.episodeParticipantLabel}>
-        <small>{roleLabel}</small>
-        <strong>{participant.name}</strong>
-      </span>
-    );
-
     if (!libraryBot) {
       return (
         <span
-          key={role}
           className={styles.episodeParticipantChip}
           data-interactive="false"
           title={
@@ -11709,18 +11696,16 @@ export function BotcastExperience({
           }
         >
           {portrait}
-          {label}
         </span>
       );
     }
 
     return (
       <button
-        key={role}
         type="button"
         className={styles.episodeParticipantChip}
         data-bot-id={libraryBot.id}
-        aria-label={`Adjust ${libraryBot.name}, episode ${roleLabel.toLowerCase()}`}
+        aria-label={`Adjust ${libraryBot.name}, episode guest`}
         title={`Adjust ${libraryBot.name}`}
         onPointerDown={(event) =>
           onBotContextLongPressStart?.(event, libraryBot.id)
@@ -11743,7 +11728,6 @@ export function BotcastExperience({
         }}
       >
         {portrait}
-        {label}
       </button>
     );
   };
@@ -11784,11 +11768,10 @@ export function BotcastExperience({
               </small>
             </button>
             <div
-              className={styles.episodeParticipants}
-              aria-label={`Participants in ${item.title}`}
+              className={styles.episodeGuest}
+              aria-label={`Guest in ${item.title}`}
             >
-              {renderArchiveParticipant(item, "host")}
-              {renderArchiveParticipant(item, "guest")}
+              {renderArchiveGuest(item)}
             </div>
             <button
               type="button"

@@ -3,7 +3,6 @@ import test from "node:test";
 import {
   DEFAULT_PRISM_COMPANION_SESSION_IDLE_GAP_MS,
   isPrismCompanionModifierKey,
-  isPrismCompanionShortcut,
   parsePrismCompanionRecovery,
   parsePrismCompanionSessionRecord,
   parsePrismCompanionSpeechEnabled,
@@ -141,64 +140,43 @@ test("recovers only the latest three valid messages", () => {
   );
 });
 
-test("uses Option Space on Apple platforms and Control Space elsewhere", () => {
-  const base = {
-    key: " ",
-    altKey: false,
-    ctrlKey: false,
-    metaKey: false,
-    shiftKey: false,
-  };
-  assert.equal(
-    isPrismCompanionShortcut({ ...base, altKey: true, platform: "MacIntel" }),
-    true,
-  );
-  assert.equal(
-    isPrismCompanionShortcut({ ...base, ctrlKey: true, platform: "Win32" }),
-    true,
-  );
-  assert.equal(
-    isPrismCompanionShortcut({ ...base, ctrlKey: true, platform: "MacIntel" }),
-    false,
-  );
-});
-
-test("derives platform-aware Prism modifier labels and key bindings", () => {
+test("derives platform-aware Prism Wield modifier labels", () => {
   assert.deepEqual(prismCompanionModifierPresentation("MacIntel"), {
-    modifier: "option",
-    modifierLabel: "Option",
-    label: "⌥ Space",
-    spokenLabel: "Option Space",
-    ariaKeyShortcuts: "Alt+Space",
+    modifier: "command",
+    modifierLabel: "Command",
   });
   assert.deepEqual(prismCompanionModifierPresentation("Win32"), {
     modifier: "control",
     modifierLabel: "Control",
-    label: "Ctrl Space",
-    spokenLabel: "Control Space",
-    ariaKeyShortcuts: "Control+Space",
   });
 });
 
-test("recognizes only a modifier-only Wield Prism keydown", () => {
+test("uses Command-only Wield on Apple platforms and leaves Option available", () => {
   const base = {
-    key: "Alt",
-    altKey: true,
+    key: "Meta",
+    altKey: false,
     ctrlKey: false,
-    metaKey: false,
+    metaKey: true,
     shiftKey: false,
   };
   assert.equal(isPrismCompanionModifierKey(base, "MacIntel"), true);
   assert.equal(
     isPrismCompanionModifierKey(
-      { ...base, key: "Control", altKey: false, ctrlKey: true },
+      { ...base, key: "Alt", altKey: true, metaKey: false },
       "MacIntel",
     ),
     false,
   );
   assert.equal(
     isPrismCompanionModifierKey(
-      { ...base, key: "Control", altKey: false, ctrlKey: true },
+      { ...base, key: "Control", ctrlKey: true, metaKey: false },
+      "MacIntel",
+    ),
+    false,
+  );
+  assert.equal(
+    isPrismCompanionModifierKey(
+      { ...base, key: "Control", ctrlKey: true, metaKey: false },
       "Win32",
     ),
     true,
@@ -207,20 +185,4 @@ test("recognizes only a modifier-only Wield Prism keydown", () => {
     isPrismCompanionModifierKey({ ...base, shiftKey: true }, "MacIntel"),
     false,
   );
-});
-
-test("recognizes the physical Space key when Option changes its key value", () => {
-  const base = {
-    code: "Space",
-    altKey: true,
-    ctrlKey: false,
-    metaKey: false,
-    shiftKey: false,
-    platform: "MacIntel",
-  };
-  assert.equal(
-    isPrismCompanionShortcut({ ...base, key: "\u00a0" }),
-    true,
-  );
-  assert.equal(isPrismCompanionShortcut({ ...base, key: "Dead" }), true);
 });

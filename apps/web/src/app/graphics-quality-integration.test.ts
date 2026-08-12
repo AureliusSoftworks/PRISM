@@ -27,6 +27,10 @@ const backupSource = readFileSync(
   new URL("../../../api/src/backup.ts", import.meta.url),
   "utf8",
 );
+const crtFocusSource = readFileSync(
+  new URL("./crtFocus.ts", import.meta.url),
+  "utf8",
+);
 
 describe("graphics quality integration", () => {
   it("connects the accessible selector to persisted settings", () => {
@@ -38,6 +42,17 @@ describe("graphics quality integration", () => {
     assert.match(serverSource, /graphics_quality = \?/u);
     assert.match(backupSource, /graphicsQuality: normalizeGraphicsQuality\(user\.graphics_quality\)/u);
     assert.match(backupSource, /graphics_quality = \?/u);
+  });
+
+  it("persists one global CRT focus and applies it to the shared screen brush", () => {
+    assert.match(pageSource, /data-crt-focus-control="true"/u);
+    assert.match(pageSource, /name="crtFocus"/u);
+    assert.match(pageSource, /applyCrtFocusToDocument\(document, crtFocus\)/u);
+    assert.match(serverSource, /crtFocus: normalizeCrtFocus\(user\.crt_focus\)/u);
+    assert.match(serverSource, /crt_focus = \?/u);
+    assert.match(backupSource, /crtFocus: normalizeCrtFocus\(user\.crt_focus\)/u);
+    assert.match(backupSource, /crt_focus = \?/u);
+    assert.match(crtFocusSource, /--prism-crt-focus-radius-scale/u);
   });
 
   it("applies the persisted value to the document and Coffee scene ceiling", () => {

@@ -354,6 +354,7 @@ describe("createDatabase bot export hash migration", () => {
       );
       db.exec("ALTER TABLE users DROP COLUMN preferred_image_provider;");
       db.exec("ALTER TABLE users DROP COLUMN graphics_quality;");
+      db.exec("ALTER TABLE users DROP COLUMN crt_focus;");
       db.exec("ALTER TABLE users DROP COLUMN typography_scale;");
       db.exec("ALTER TABLE users DROP COLUMN atmosphere_style;");
       db.exec("ALTER TABLE users DROP COLUMN hub_atmosphere_enabled;");
@@ -412,6 +413,12 @@ describe("createDatabase bot export hash migration", () => {
           .prepare("SELECT graphics_quality FROM users WHERE id = ?")
           .get("user-1") as { graphics_quality: string }).graphics_quality,
         "high",
+      );
+      assert.equal(
+        (reopened.prepare("SELECT crt_focus FROM users WHERE id = ?").get(
+          "user-1",
+        ) as { crt_focus: number }).crt_focus,
+        50,
       );
       assert.equal(
         userColumns.find((column) => column.name === "typography_scale")

@@ -1060,6 +1060,7 @@ describe("system-owned local lanes", () => {
     assert.equal(response, "aux ok");
     assert.equal(provider.name, "local");
     assert.equal(requestedBody.model, "llama3.2");
+    assert.equal(requestedBody.keep_alive, -1);
     assert.equal(requestedBody.think, false);
     assert.deepEqual(requestedBody.options, { temperature: 0.2, num_predict: 40 });
   });
@@ -1082,6 +1083,24 @@ describe("system-owned local lanes", () => {
     });
     assert.equal(requestedBody.model, "mistral:latest");
     assert.equal(provider.diagnosticModel, "mistral:latest");
+    assert.equal(requestedBody.keep_alive, -1);
+  });
+
+  it("keeps ordinary foreground local generation on the ten-minute residency policy", async () => {
+    let requestedBody: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      requestedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(JSON.stringify({ message: { content: "foreground ok" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    await new LocalOllamaProvider().generateResponse([
+      { role: "user", content: "hello" },
+    ]);
+
+    assert.equal(requestedBody.keep_alive, "10m");
   });
 
   it("passes advanced sampler knobs to Ollama options", async () => {

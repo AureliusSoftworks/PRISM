@@ -99,26 +99,26 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
 
   assert.match(
     pageSource,
-    /!foundryRitual \? \( <div className=\{styles\.botAvatarStudioMiniPreview\}/,
+    /!foundryRitual \? \(\s*<div[\s\S]{0,100}className=\{styles\.botAvatarStudioMiniPreview\}/,
   );
   assert.match(miniSource, /data-avatar-studio-mini-eye-state=/);
-  assert.match(miniSource, /<ChatMiniBotAvatar size="room"/);
+  assert.match(miniSource, /<ChatMiniBotAvatar\s+size="room"/);
   assert.match(miniSource, /color=\{miniAccentColor\}/);
   assert.match(miniSource, /botFrameMetalAlloyColor\(voicePreset\)/);
   assert.match(
     miniSource,
     /forceBlinkPhase=\{previewBlink \? "closed" : "open"\}/,
   );
-  assert.match(miniSource, /<MessageMoodFace/);
-  assert.match(miniSource, /variant="micro"/);
+  assert.match(miniSource, /<BotAvatarMicroRenderer/);
+  assert.match(miniSource, /avatarDetails=\{miniAvatarDetails\}/);
   assert.match(
     miniSource,
-    /forceBlinkPhase=\{previewBlink \? "closed" : undefined\}/,
+    /forceBlinkPhase=\{previewBlink \? "closed" : "open"\}/,
   );
   assert.match(miniSource, /faceEyeMovement="still"/);
   assert.match(
     miniSource,
-    /faceEyeRotationDeg=\{previewFaceStyle\.eyeRotationDeg\}/,
+    /faceEyeRotationDeg=\{\s*previewFaceStyle\.eyeRotationDeg\s*\}/,
   );
   assert.match(
     miniSource,

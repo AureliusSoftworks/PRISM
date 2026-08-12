@@ -44,6 +44,7 @@ const faceFieldToResolvedKey = new Map([
   ["faceEyesFont", "eyesFont"],
   ["faceEyeCharacter", "eyeCharacter"],
   ["faceEyeCount", "eyeCount"],
+  ["faceEyeSpacing", "eyeSpacing"],
   ["faceEyeAnimation", "eyeAnimation"],
   ["faceMouthFont", "mouthFont"],
   ["faceMouthCharacter", "mouthCharacter"],
@@ -62,6 +63,7 @@ const faceFieldToResolvedKey = new Map([
   ["faceBlinkScale", "blinkScale"],
   ["faceBlinkOffsetX", "blinkOffsetX"],
   ["faceBlinkOffsetY", "blinkOffsetY"],
+  ["faceBlinkRotationDeg", "blinkRotationDeg"],
   ["faceThinkingFrames", "thinkingFrames"],
   ["faceThinkingScale", "thinkingScale"],
   ["faceThinkingOffsetX", "thinkingOffsetX"],
@@ -79,6 +81,7 @@ const approvedLibraryFaceColumns = [
   "face_eyes_font",
   "face_eye_character",
   "face_eye_count",
+  "face_eye_spacing",
   "face_eye_animation",
   "face_mouth_font",
   "face_mouth_character",
@@ -97,6 +100,7 @@ const approvedLibraryFaceColumns = [
   "face_blink_scale",
   "face_blink_offset_x",
   "face_blink_offset_y",
+  "face_blink_rotation_deg",
   "face_thinking_frames",
   "face_thinking_scale",
   "face_thinking_offset_x",
@@ -194,6 +198,7 @@ function libraryFaceValues(row, label) {
     faceEyesFont: row.face_eyes_font,
     faceEyeCharacter: row.face_eye_character,
     faceEyeCount: row.face_eye_count,
+    faceEyeSpacing: row.face_eye_spacing,
     faceEyeAnimation: row.face_eye_animation,
     faceMouthFont: row.face_mouth_font,
     faceMouthCharacter: row.face_mouth_character,
@@ -212,6 +217,7 @@ function libraryFaceValues(row, label) {
     faceBlinkScale: row.face_blink_scale,
     faceBlinkOffsetX: row.face_blink_offset_x,
     faceBlinkOffsetY: row.face_blink_offset_y,
+    faceBlinkRotationDeg: row.face_blink_rotation_deg,
     faceThinkingFrames: parseStoredBotFaceThinkingFrames(
       row.face_thinking_frames,
     ),
@@ -234,29 +240,34 @@ function changedFaceArchiveFields(bot, sourceValues) {
         !jsonEqual(candidateStyle[resolvedKey], sourceStyle[resolvedKey]),
     );
   };
-  let workingBot = { ...bot };
-  let remainingDiffKeys = styleDiffKeys(workingBot);
-  while (remainingDiffKeys.length > 0) {
-    let reduced = false;
-    for (const archiveField of faceFieldToResolvedKey.keys()) {
-      if (fields.includes(archiveField)) continue;
-      const candidate = {
-        ...workingBot,
-        [archiveField]: sourceValues[archiveField],
-      };
-      const candidateDiffKeys = styleDiffKeys(candidate);
-      if (candidateDiffKeys.length < remainingDiffKeys.length) {
-        fields.push(archiveField);
-        workingBot = candidate;
-        remainingDiffKeys = candidateDiffKeys;
-        reduced = true;
-        break;
-      }
-    }
-    if (!reduced) {
-      throw new Error(
-        `Could not reconcile saved face fields: ${remainingDiffKeys.join(", ")}.`,
-      );
+  // Apply the complete Library face first, then remove fields that are proven
+  // unnecessary. Face and blink geometry can be interdependent: a greedy
+  // "only accept an immediate reduction" pass gets stuck when two fields must
+  // change together (for example, independent blink offsets plus eye motion).
+  let workingBot = {
+    ...bot,
+    ...Object.fromEntries(
+      [...faceFieldToResolvedKey.keys()].map((archiveField) => [
+        archiveField,
+        sourceValues[archiveField],
+      ]),
+    ),
+  };
+  const unresolvedKeys = styleDiffKeys(workingBot);
+  if (unresolvedKeys.length > 0) {
+    throw new Error(
+      `Could not reconcile saved face fields: ${unresolvedKeys.join(", ")}.`,
+    );
+  }
+  for (const archiveField of faceFieldToResolvedKey.keys()) {
+    const candidate = {
+      ...workingBot,
+      [archiveField]: bot[archiveField],
+    };
+    if (styleDiffKeys(candidate).length === 0) {
+      workingBot = candidate;
+    } else {
+      fields.push(archiveField);
     }
   }
   return fields;
