@@ -22,6 +22,8 @@ export function ChatMiniBotAvatar(props: {
   theme?: "light" | "dark";
   /** When true, suppress behind/above art layers while the avatar is thinking. */
   thinking: boolean;
+  /** Lights the space behind the chassis while the bot is speaking. */
+  talking?: boolean;
   /** Authorable face art that sits behind the plate glyph. */
   behindFace?: ReactNode;
   /** Authorable face art that sits above the plate glyph. */
@@ -53,6 +55,8 @@ export function ChatMiniBotAvatar(props: {
 
   const rootStyle = {
     ["--chat-mini-bot-color" as string]: color ?? "var(--accent)",
+    ["--bot-avatar-talking-glow-color" as string]:
+      color ?? "var(--accent)",
     ["--chat-mini-bot-alloy-color" as string]:
       props.alloyColor?.trim() || "#aeb8c1",
     // AvatarDetailsMask has its own mirror transform. The mini turns the
@@ -86,10 +90,16 @@ export function ChatMiniBotAvatar(props: {
       data-size={size}
       data-theme={theme}
       data-light-mode={lightMode}
+      data-talking={props.talking ? "true" : undefined}
       data-avatar-facing={facing}
       style={rootStyle}
       aria-hidden="true"
     >
+      <span
+        className={styles.talkingGlow}
+        data-bot-avatar-talking-glow="true"
+        aria-hidden="true"
+      />
       {/* The pixel chassis is a mini-only derivative of the canonical body, so
           its material mask and measured screen registration stay aligned. */}
       {/* eslint-disable-next-line @next/next/no-img-element */}

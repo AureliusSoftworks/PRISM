@@ -215,7 +215,25 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.match(cssSource, /\.sizeBadge/);
     assert.doesNotMatch(cssSource, /\.frameOff|\.frameOn/);
-    assert.doesNotMatch(componentSource, /data-talking/);
+    assert.match(componentSource, /talking\?: boolean/);
+    assert.match(
+      componentSource,
+      /data-talking=\{props\.talking \? "true" : undefined\}/,
+    );
+    assert.match(componentSource, /data-bot-avatar-talking-glow="true"/);
+    assert.match(
+      componentSource,
+      /--bot-avatar-talking-glow-color/,
+    );
+    assert.match(cssSource, /\.talkingGlow\s*\{[^}]*opacity:\s*0/);
+    assert.match(
+      cssSource,
+      /\.root\[data-talking="true"\] \.talkingGlow\s*\{[^}]*opacity:\s*0\.74/,
+    );
+    assert.match(
+      cssSource,
+      /var\(--bot-avatar-talking-glow-color, var\(--chat-mini-bot-color\)\)/,
+    );
     assert.doesNotMatch(componentSource, /data-tint-ready/);
     assert.match(componentSource, /size\?: "badge" \| "room" \| "hero"/);
     assert.match(componentSource, /lightMode\?: "off" \| "breathing"/);
@@ -262,6 +280,9 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.match(pageSource, /size = "hero"/);
     assert.match(pageSource, /<ChatMiniBotAvatar\s+size=\{size\}/);
+    assert.match(pageSource, /talking=\{isTalking\}/);
+    assert.match(pageSource, /talking=\{previewTalking\}/);
+    assert.match(pageSource, /talking=\{galleryMouthAnimated\}/);
     assert.match(
       pageSource,
       /lightMode=\{lightMode \?\? \(size === "hero" \? "breathing" : "off"\)\}/,
@@ -428,12 +449,34 @@ describe("chatMiniBotAvatar", () => {
     assert.match(microFaceFn, /faceEyeMovement="still"/);
     assert.match(microFaceFn, /showQuestionMark=\{false\}/);
     assert.match(microFaceFn, /data-avatar-render-tier="micro"/);
+    assert.match(
+      microFaceFn,
+      /data-talking=\{props\.isTalking === true \? "true" : undefined\}/,
+    );
+    assert.match(microFaceFn, /styles\.botAvatarMicroTalkingGlow/);
     assert.match(pageCssSource, /\[data-variant="micro"\]/);
     assert.match(
       pageCssSource,
       /\.messageMoodBadge\[data-face="coffee"\]\[data-variant="micro"\]\s*\{[^}]*border:\s*1px solid/,
     );
-    assert.match(pageCssSource, /\.messageMoodMicroFace\s*\{[^}]*font-size:\s*8\.5px/);
+    assert.match(pageCssSource, /\.messageMoodMicroFace\s*\{[^}]*font-size:\s*12px/);
     assert.match(pageCssSource, /\.botAvatarMicroInk\s*\{[^}]*position:\s*absolute/);
+    assert.match(
+      pageCssSource,
+      /\.botAvatarMicroTalkingGlow\s*\{[^}]*opacity:\s*0/,
+    );
+    assert.match(
+      pageCssSource,
+      /\[data-variant="micro"\]\[data-talking="true"\][\s\S]{0,120}\.botAvatarMicroTalkingGlow\s*\{[^}]*opacity:\s*0\.7/,
+    );
+    assert.match(
+      pageSource,
+      /className=\{styles\.zenLiveBotPresenceBody\}[\s\S]{0,420}data-talking=\{isTalking \? "true" : undefined\}/,
+      "full avatars must own the talking marker even when an applet wrapper does not",
+    );
+    assert.match(
+      pageCssSource,
+      /\.zenLiveBotPresenceBody\[data-talking="true"\] \.zenLiveBotPresenceFace\s*\{[^}]*--bot-face-ambient-glow-opacity:\s*0\.52/,
+    );
   });
 });

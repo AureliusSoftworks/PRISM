@@ -120,16 +120,16 @@ describe("avatar scale Power visual contract", () => {
     );
   });
 
-  it("uses Micro with authored Ink in Signal's compact episode archive only", () => {
+  it("uses the authored Mini chassis in Signal's compact episode archive", () => {
     assert.match(signalSource, /surface:\s*"archive"/u);
     assert.match(pageSource, /avatarState\.surface === "archive"/u);
     assert.match(
       pageSource,
-      /if \(signalArchiveAvatar\)[\s\S]{0,1800}<BotAvatarMicroRenderer[\s\S]{0,900}resolveBotAvatarDetails\(archiveBot\)/u,
+      /if \(signalArchiveAvatar\)[\s\S]{0,1800}<EmptyStateHeroMiniBot[\s\S]{0,900}size="room"/u,
     );
     assert.match(
       signalCss,
-      /\.episodeParticipantAvatar \[data-avatar-render-tier="micro"\]\s*\{[^}]*width:\s*36px;[^}]*height:\s*36px;/u,
+      /\.episodeParticipantAvatar \[data-chat-mini-bot-avatar="true"\]\s*\{[^}]*width:\s*58px;[^}]*height:\s*58px;/u,
     );
     assert.doesNotMatch(
       signalCss,
