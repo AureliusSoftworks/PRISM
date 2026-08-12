@@ -15,6 +15,116 @@ explicit that "colors suggest plurality" and that a mode should never be
 leaning near-black/red is the spectrum working as designed. Unify structure —
 type, radius, spacing, control chrome — and leave the palettes distinct.
 
+## Confirmation and reversibility
+
+One canonical mechanism, chosen by what the code can actually undo. The
+affordance is derived from reversibility, never from how consequential the
+action *feels*. `apps/web/src/app/confirmationPolicy.ts` is the resolver and
+`confirmation-contract.test.ts` is the ratchet.
+
+### Why not "just confirm the scary ones"
+
+A confirmation fires on every invocation, including the thousands of
+intentional ones. By the time it guards a real mistake the person has already
+learned to dismiss it — it is furniture. It taxes the correct path to protect
+the rare wrong one, and it guards the wrong question: most real mistakes are
+"right action, wrong target," which can only be judged *after* seeing the
+result. Undo answers that question; a modal cannot.
+
+### The four affordances
+
+| Affordance  | Meaning                                                     |
+| ----------- | ----------------------------------------------------------- |
+| `none`      | Just do it. Reversibility lives in the data model.          |
+| `undo`      | Act immediately, surface undo at the point of action.       |
+| `hold-undo` | Hold the action briefly, offer undo during the hold.        |
+| `confirm`   | Modal naming the *specific* consequence.                    |
+
+### Precedence
+
+First match wins.
+
+1. **Leaves the device** — deferrable → `hold-undo`, otherwise `confirm`.
+2. **Irreversible** — no inverse operation or snapshot → `confirm`.
+3. **Bulk blast radius** — per-item undo isn't real recovery → `confirm`.
+4. **Reversible** — an inverse or snapshot exists → `undo`.
+5. **Soft** — archived/soft-deleted, restorable from the UI → `none`.
+
+The online boundary always confirms because a transmission is not recallable
+even when the local record of it is.
+
+Rule 2 does not fire for a soft action: soft-deletion is itself a recovery
+path, so "no inverse operation or snapshot" is read as "no recovery path at
+all." This is what keeps `none` reachable — under a bare `!reversible` gate,
+rule 4 would claim every case rule 5 could have matched, and the tier would be
+dead code.
+
+An action in the `confirm` tier must carry a written reason explaining why it
+cannot be undone. Writing the sentence is the test. If no reason can be
+written, it belongs in a lower tier — `validateConfirmationActions` enforces
+this against the *resolved* tier.
+
+### Undo has requirements
+
+Undo must restore selection, scroll, and focus — not merely the data. An undo
+that drops the person back at the top of a list with nothing selected has
+recovered the record and lost the work.
+
+Prefer a persistent undo stack to a timed toast. A five-second window is an
+accessibility trap: it fails anyone using a screen reader, anyone reading at
+their own pace, and anyone who looked away. The server already retains
+inverses for 30 days (`PRISM_ACTION_UNDO_RETENTION_MS`); the UI should not be
+the component that throws that away after five seconds.
+
+### The bulk paths are the dangerous ones
+
+This is the finding that makes rule 3 load-bearing rather than taste. In both
+bots and images, the **bulk** route is strictly *less* recoverable than the
+single-item route:
+
+| Route                          | Mechanism                        | Undo            |
+| ------------------------------ | -------------------------------- | --------------- |
+| `DELETE /api/bots/:id`         | `bots.delete` capability         | 30-day quarantine |
+| `DELETE /api/bots/selected`    | raw `DELETE FROM bots`           | none            |
+| `DELETE /api/bots`             | raw `DELETE FROM bots`           | none            |
+| `DELETE /api/images/:id`       | `images.delete` capability       | quarantine      |
+| `DELETE /api/images`           | raw SQL + file unlink            | none            |
+
+The single-item modal and the bulk modal look identical in the UI while
+resting on completely different guarantees. Six surfaces are affected.
+
+### Reading tiers off the server
+
+The API already publishes the facts this policy needs.
+`PrismCapabilityDescriptorV1` carries `undo`, `risk`, and `provider`, and
+`reversibilityFromCapability()` maps them:
+
+| Descriptor field       | Policy input        |
+| ---------------------- | ------------------- |
+| `undo: "none"`         | irreversible        |
+| `undo: "inverse"`      | `reversible`        |
+| `undo: "quarantine"`   | `soft`              |
+| `risk: "bulk"`         | `bulk`              |
+| `provider: "online-required"` | `leavesDevice` |
+
+Actions routed through the capability registry should read their tier from the
+descriptor rather than restating it. Actions calling a plain REST route have no
+descriptor and must describe themselves — which is itself a signal that the
+route may deserve a capability.
+
+### Current state
+
+No call sites have been migrated. The contract test's allowlist holds every
+surface found in the first inventory: 9 native browser dialogs and 40
+confirmation-shaped surfaces. Of those, **nine already have a real inverse in
+the code** and are `confirm` only by habit — the migration backlog. A second
+group are permanent entries that were never confirmations at all (consent
+gates, password-match fields), and they stay on the list rather than being
+migrated.
+
+The contract test also fails when an allowlist entry's last call site
+disappears, so the list cannot quietly become fiction.
+
 ## Typeface roles
 
 Faces are loaded once in `layout.tsx` via `next/font/google`.
