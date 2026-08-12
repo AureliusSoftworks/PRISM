@@ -998,6 +998,11 @@ import {
   MAX_PRISM_MOOD_SENSITIVITY,
   MIN_PRISM_MOOD_SENSITIVITY,
   normalizeOpenAiImageModelId,
+  normalizeTextModelDisplayNames,
+  resolveTextModelDisplayName,
+  TEXT_MODEL_DISPLAY_NAME_MAX_LENGTH,
+  textModelDisplayNameKey,
+  type TextModelDisplayNames,
   resolveImageProviderName,
   normalizePrismMoodSensitivity,
   OPENAI_IMAGE_MODEL_OPTIONS_FOR_UI,
@@ -10137,6 +10142,7 @@ interface UserSettings {
   legacyAutoFallbackModelSuggestion?: string;
   hiddenBotModelIds: string[];
   hiddenComfyUiWorkflowIds: string[];
+  textModelDisplayNames: TextModelDisplayNames;
   hasOpenAiApiKey: boolean;
   hasAnthropicApiKey: boolean;
   hasElevenLabsApiKey: boolean;
@@ -15783,6 +15789,22 @@ function modelOptionsForProvider(
   return [];
 }
 
+function textModelOptionsForProvider(
+  catalog: ModelCatalog | null,
+  settings: UserSettings | null,
+  provider: Provider,
+): ModelCatalogEntry[] {
+  return modelOptionsForProvider(catalog, settings, provider).map((model) => ({
+    ...model,
+    label: resolveTextModelDisplayName({
+      displayNames: settings?.textModelDisplayNames,
+      provider: model.provider,
+      modelId: model.id,
+      fallback: model.label,
+    }),
+  }));
+}
+
 function fallbackChatModelOptionsForProvider(
   settings: UserSettings | null,
   provider: Provider,
@@ -15794,13 +15816,21 @@ function fallbackChatModelOptionsForProvider(
   ) {
     return [];
   }
-  return fallbackOnlineModelIdsForProvider(provider, null).map((id, index) => ({
-    id,
-    label: modelLabelFromId(id),
-    provider,
-    hostLabel: providerDisplayLabel(provider),
-    isDefault: index === 0,
-  }));
+  return fallbackOnlineModelIdsForProvider(provider, null).map((id, index) => {
+    const fallback = modelLabelFromId(id);
+    return {
+      id,
+      label: resolveTextModelDisplayName({
+        displayNames: settings?.textModelDisplayNames,
+        provider,
+        modelId: id,
+        fallback,
+      }),
+      provider,
+      hostLabel: providerDisplayLabel(provider),
+      isDefault: index === 0,
+    };
+  });
 }
 
 function chatModelOptionsForProvider(
@@ -15809,7 +15839,7 @@ function chatModelOptionsForProvider(
   provider: Provider,
 ): ModelCatalogEntry[] {
   const visibleCatalogOptions = filterVisibleModelOptions(
-    modelOptionsForProvider(catalog, settings, provider),
+    textModelOptionsForProvider(catalog, settings, provider),
     settings?.hiddenBotModelIds ?? [],
   );
   if (visibleCatalogOptions.length > 0 || provider === "local") {
@@ -16315,7 +16345,7 @@ function settingsModelEligibilityGroups(args: {
 }): SettingsModelEligibilityGroup[] {
   const groups: SettingsModelEligibilityGroup[] = [];
   const ollama = settingsModelGroupOptions(
-    modelOptionsForProvider(args.catalog, args.settings, "local"),
+    textModelOptionsForProvider(args.catalog, args.settings, "local"),
   );
   if (ollama.length > 0) {
     groups.push({
@@ -16328,7 +16358,7 @@ function settingsModelEligibilityGroups(args: {
 
   if (apiKeySourceAvailable(args.settings.openAiApiKeySource)) {
     const openAiChat = settingsModelGroupOptions(
-      modelOptionsForProvider(args.catalog, args.settings, "openai"),
+      textModelOptionsForProvider(args.catalog, args.settings, "openai"),
     );
     const openAi = settingsModelGroupOptions([
       ...openAiChat,
@@ -16353,7 +16383,7 @@ function settingsModelEligibilityGroups(args: {
 
   if (apiKeySourceAvailable(args.settings.anthropicApiKeySource)) {
     const anthropic = settingsModelGroupOptions(
-      modelOptionsForProvider(args.catalog, args.settings, "anthropic"),
+      textModelOptionsForProvider(args.catalog, args.settings, "anthropic"),
     );
     if (anthropic.length > 0) {
       groups.push({
@@ -48172,6 +48202,11 @@ function HomeContent(): React.JSX.Element {
     new Map(),
   );
   const [settings, setSettings] = useState<UserSettings | null>(null);
+  const [modelDisplayNameEdit, setModelDisplayNameEdit] = useState<{
+    provider: Provider;
+    modelId: string;
+    value: string;
+  } | null>(null);
   const [autoFallbackDrag, setAutoFallbackDrag] = useState<{
     lane: "local" | "online";
     fromIndex: number;
@@ -56745,7 +56780,7 @@ function HomeContent(): React.JSX.Element {
   const prismInternalLlmCallOptions = useMemo(
     () =>
       includeSelectedModelOption(
-        modelOptionsForProvider(modelCatalog, settings, "local"),
+        textModelOptionsForProvider(modelCatalog, settings, "local"),
         settingsLocalLlmModelChoice(
           settings?.prismDefaultLlmModel,
           commandCenterAuxiliaryModelId(settings),
@@ -75971,6 +76006,9 @@ function HomeContent(): React.JSX.Element {
       )
         ? d.settings.hiddenComfyUiWorkflowIds
         : [],
+      textModelDisplayNames: normalizeTextModelDisplayNames(
+        d.settings.textModelDisplayNames,
+      ),
       ...keySettings,
       voiceMode: normalizeVoiceMode(d.settings.voiceMode),
       voiceEffectsEnabled: d.settings.voiceEffectsEnabled !== false,
@@ -87864,6 +87902,39 @@ function HomeContent(): React.JSX.Element {
         ),
       };
     });
+  }
+
+  async function saveTextModelDisplayName(): Promise<void> {
+    if (!settings || !modelDisplayNameEdit) return;
+    const { provider, modelId, value } = modelDisplayNameEdit;
+    const key = textModelDisplayNameKey(provider, modelId);
+    const next = { ...settings.textModelDisplayNames };
+    const name = value.trim().replace(/\s+/gu, " ");
+    if (name) next[key] = name;
+    else delete next[key];
+    const normalized = normalizeTextModelDisplayNames(next);
+    if (name && normalized[key] !== name) {
+      setPanelError(
+        `Display names must be at most ${TEXT_MODEL_DISPLAY_NAME_MAX_LENGTH} characters and cannot contain control characters.`,
+      );
+      return;
+    }
+    try {
+      await api("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ textModelDisplayNames: normalized }),
+      });
+      setSettings((previous) =>
+        previous
+          ? { ...previous, textModelDisplayNames: normalized }
+          : previous,
+      );
+      setModelDisplayNameEdit(null);
+    } catch (err) {
+      setPanelError(
+        err instanceof Error ? err.message : "Could not save this display name.",
+      );
+    }
   }
 
   function setComfyUiWorkflowVisible(modelId: string, visible: boolean) {
@@ -116068,8 +116139,28 @@ function HomeContent(): React.JSX.Element {
                                           !settings.hiddenBotModelIds.includes(
                                             model.id,
                                           );
+                                        const isTextModel =
+                                          group.id !== "elevenlabs" &&
+                                          !(group.id === "openai" &&
+                                            isAllowedOpenAiImageModelId(
+                                              model.id,
+                                            )) &&
+                                          !(group.id === "ollama" &&
+                                            catalogEntriesMatchingLocalImageHeuristic([
+                                              model,
+                                            ]).length > 0);
+                                        const editKey = textModelDisplayNameKey(
+                                          model.provider,
+                                          model.id,
+                                        );
+                                        const editing =
+                                          isTextModel &&
+                                          modelDisplayNameEdit?.provider ===
+                                            model.provider &&
+                                          modelDisplayNameEdit.modelId ===
+                                            model.id;
                                         return (
-                                          <label
+                                          <div
                                             key={model.id}
                                             className={
                                               styles.settingsModelToggle
@@ -116077,6 +116168,7 @@ function HomeContent(): React.JSX.Element {
                                           >
                                             <input
                                               type="checkbox"
+                                              aria-label={`Show ${model.label} in model pickers`}
                                               checked={visible}
                                               disabled={required}
                                               onChange={(event) =>
@@ -116087,7 +116179,39 @@ function HomeContent(): React.JSX.Element {
                                                 )
                                               }
                                             />
-                                            <span>{model.label}</span>
+                                            {editing ? (
+                                              <input
+                                                className={styles.settingsModelDisplayNameInput}
+                                                aria-label={`Display name for ${model.id}`}
+                                                autoFocus
+                                                maxLength={TEXT_MODEL_DISPLAY_NAME_MAX_LENGTH}
+                                                value={modelDisplayNameEdit.value}
+                                                onChange={(event) =>
+                                                  setModelDisplayNameEdit(
+                                                    (current) =>
+                                                      current
+                                                        ? {
+                                                            ...current,
+                                                            value:
+                                                              event.currentTarget
+                                                                .value,
+                                                          }
+                                                        : current,
+                                                  )
+                                                }
+                                                onKeyDown={(event) => {
+                                                  if (event.key === "Enter") {
+                                                    event.preventDefault();
+                                                    void saveTextModelDisplayName();
+                                                  } else if (event.key === "Escape") {
+                                                    event.preventDefault();
+                                                    setModelDisplayNameEdit(null);
+                                                  }
+                                                }}
+                                              />
+                                            ) : (
+                                              <span>{model.label}</span>
+                                            )}
                                             <small>
                                               {settingsModelToggleMeta(
                                                 group.id,
@@ -116095,7 +116219,50 @@ function HomeContent(): React.JSX.Element {
                                                 required,
                                               )}
                                             </small>
-                                          </label>
+                                            {isTextModel ? (
+                                              editing ? (
+                                                <span className={styles.settingsModelDisplayNameActions}>
+                                                  <button
+                                                    type="button"
+                                                    className={styles.settingsModelDisplayNameAction}
+                                                    onClick={() =>
+                                                      void saveTextModelDisplayName()
+                                                    }
+                                                  >
+                                                    Save
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    className={styles.settingsModelDisplayNameAction}
+                                                    onClick={() =>
+                                                      setModelDisplayNameEdit(null)
+                                                    }
+                                                  >
+                                                    Cancel
+                                                  </button>
+                                                </span>
+                                              ) : (
+                                                <button
+                                                  type="button"
+                                                  className={styles.settingsModelDisplayNameAction}
+                                                  aria-label={`Rename ${model.label}`}
+                                                  title="Rename model"
+                                                  onClick={() =>
+                                                    setModelDisplayNameEdit({
+                                                      provider: model.provider,
+                                                      modelId: model.id,
+                                                      value:
+                                                        settings.textModelDisplayNames[
+                                                          editKey
+                                                        ] ?? "",
+                                                    })
+                                                  }
+                                                >
+                                                  <PencilLine aria-hidden="true" />
+                                                </button>
+                                              )
+                                            ) : null}
+                                          </div>
                                         );
                                       })}
                                     </div>

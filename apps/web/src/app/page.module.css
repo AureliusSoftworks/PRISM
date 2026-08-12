@@ -13695,6 +13695,108 @@
   max-width: min(300px, 30vw);
   border-radius: 9px;
   flex: 0 1 min(300px, 30vw);
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--fg-muted) 34%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface) 88%, transparent),
+      color-mix(in srgb, var(--bg-deep) 92%, transparent)
+    ),
+    var(--bot-library-group-gradient);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 9%, transparent),
+    0 4px 14px rgba(0, 0, 0, 0.14);
+  backdrop-filter: blur(16px) saturate(1.12);
+}
+
+.chatHeaderModelPicker .botLibraryGroupTrigger {
+  flex: 1 1 auto;
+  border-radius: 8px 0 0 8px;
+  padding-inline: 8px 10px;
+}
+
+.chatHeaderModelPicker .botLibraryGroupTrigger::before {
+  inset: 0;
+  border-radius: 8px 0 0 8px;
+  background: linear-gradient(
+    90deg,
+    rgba(0, 0, 0, 0.34),
+    rgba(0, 0, 0, 0.18)
+  );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.chatHeaderModelPicker .botLibraryGroupTriggerSwatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+}
+
+.chatHeaderModelPicker .botLibraryGroupTriggerName {
+  max-width: none;
+}
+
+.chatHeaderModelPicker .composeBotTriggerChevron {
+  margin-left: auto;
+}
+
+.chatHeaderModelPicker .botLibraryGroupCreate {
+  width: 36px;
+  height: 100%;
+  margin: 0;
+  border-left-color: color-mix(in srgb, #fff 16%, transparent);
+  border-radius: 0 8px 8px 0;
+  background: color-mix(in srgb, #000 15%, transparent);
+}
+
+.chatHeaderModelPicker .botLibraryGroupCreate:hover,
+.chatHeaderModelPicker .botLibraryGroupCreate:focus-visible {
+  background: color-mix(in srgb, var(--fg) 13%, transparent);
+}
+
+.themeLight .chatHeaderModelPicker .botLibraryGroupControl {
+  --bot-library-group-trigger-text: color-mix(
+    in srgb,
+    var(--fg) 88%,
+    #192333 12%
+  );
+  --bot-library-group-trigger-muted: color-mix(
+    in srgb,
+    var(--fg-muted) 86%,
+    transparent
+  );
+  --bot-library-group-trigger-shadow: none;
+  border-color: color-mix(in srgb, var(--fg-muted) 40%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #fff 84%, transparent),
+      color-mix(in srgb, var(--bg-surface) 92%, transparent)
+    ),
+    var(--bot-library-group-gradient);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.88),
+    0 3px 10px rgba(38, 54, 78, 0.1);
+}
+
+.themeLight .chatHeaderModelPicker .botLibraryGroupTrigger::before {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.5),
+    rgba(255, 255, 255, 0.22)
+  );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+}
+
+.themeLight .chatHeaderModelPicker .botLibraryGroupCreate {
+  border-left-color: color-mix(in srgb, var(--fg-muted) 28%, transparent);
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+}
+
+.themeLight .chatHeaderModelPicker .botLibraryGroupCreate:hover,
+.themeLight .chatHeaderModelPicker .botLibraryGroupCreate:focus-visible {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
 }
 
 .fpsCounter {
@@ -45855,7 +45957,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .settingsModelToggle {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 8px;
   padding: 7px 8px;
@@ -45886,6 +45988,30 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+.settingsModelDisplayNameInput {
+  min-width: 0;
+  width: 100%;
+}
+
+.settingsModelDisplayNameActions {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.settingsModelDisplayNameAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 3px 6px;
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.settingsModelDisplayNameAction:hover {
+  color: var(--fg);
 }
 
 .form button.settingsInfoButton,

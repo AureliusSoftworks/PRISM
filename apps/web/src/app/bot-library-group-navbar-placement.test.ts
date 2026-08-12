@@ -48,4 +48,16 @@ test("the empty-state spotlight no longer duplicates the library group picker", 
     cssSource,
     /\.chatHeaderModelPicker \.botLibraryGroupControl\s*\{[\s\S]*width:\s*min\(300px, 30vw\);/u,
   );
+  assert.match(
+    cssSource,
+    /\.chatHeaderModelPicker \.botLibraryGroupTrigger\s*\{[\s\S]*flex:\s*1 1 auto;[\s\S]*border-radius:\s*8px 0 0 8px;/u,
+  );
+  assert.match(
+    cssSource,
+    /\.chatHeaderModelPicker \.botLibraryGroupCreate\s*\{[\s\S]*height:\s*100%;[\s\S]*border-radius:\s*0 8px 8px 0;/u,
+  );
+  assert.match(
+    cssSource,
+    /\.themeLight \.chatHeaderModelPicker \.botLibraryGroupControl\s*\{[\s\S]*--bot-library-group-trigger-shadow:\s*none;/u,
+  );
 });
