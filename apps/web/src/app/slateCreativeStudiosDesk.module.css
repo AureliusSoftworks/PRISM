@@ -52,7 +52,7 @@
 
 .topbar h1 {
   margin: 0;
-  font-family: var(--font-editorial-serif), Georgia, serif;
+  font-family: var(--font-serif, Georgia, serif);
   font-size: 1.34rem;
   font-weight: 540;
 }

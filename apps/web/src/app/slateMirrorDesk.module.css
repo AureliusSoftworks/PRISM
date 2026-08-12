@@ -59,7 +59,7 @@
 
 .topbar h1 {
   margin: 0;
-  font-family: var(--font-editorial-serif), Georgia, serif;
+  font-family: var(--font-serif, Georgia, serif);
   font-size: 1.34rem;
   font-weight: 540;
 }
@@ -254,7 +254,7 @@
 .voiceHeader h2,
 .setup h2 {
   margin: 5px 0 0;
-  font-family: var(--font-editorial-serif), Georgia, serif;
+  font-family: var(--font-serif, Georgia, serif);
   font-size: clamp(1.8rem, 3vw, 2.55rem);
   font-weight: 460;
   letter-spacing: -0.025em;
@@ -306,7 +306,7 @@
 .distance p {
   max-width: 760px;
   margin: 9px 0 0;
-  font-family: var(--font-editorial-serif), Georgia, serif;
+  font-family: var(--font-serif, Georgia, serif);
   font-size: 1.2rem;
   line-height: 1.48;
 }
@@ -474,7 +474,7 @@
   max-width: 650px;
   margin: 13px 0 0;
   color: var(--fg-muted, #a29a92);
-  font-family: var(--font-editorial-serif), Georgia, serif;
+  font-family: var(--font-serif, Georgia, serif);
   font-size: 1rem;
   line-height: 1.6;
 }
@@ -511,7 +511,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  font-family: var(--font-editorial-serif), Georgia, serif;
+  font-family: var(--font-serif, Georgia, serif);
   font-size: 1rem;
 }
 
@@ -533,7 +533,7 @@
   min-height: 130px;
   border-color: transparent;
   background: color-mix(in srgb, var(--bg, #0b0a09) 72%, var(--bg-surface));
-  font-family: var(--font-editorial-serif), Georgia, serif;
+  font-family: var(--font-serif, Georgia, serif);
   font-size: 0.9rem;
   line-height: 1.55;
 }

@@ -20,30 +20,38 @@
      to :root; the .appLayout declaration still wins where it applies. */
   --font-title:
     var(--font-title-sans), var(--font-ui-sans), system-ui, sans-serif;
+  /* Composed roles. Applets ask for an intent; only this layer names a face. */
+  --font-serif: var(--font-chat-serif), Georgia, serif;
+  --font-mono:
+    var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-ui-mono: var(--font-mono);
 
-  /* Radius scale. See docs/design-system.md — 7/9/11/13/15px in the tree are
-     drift to snap onto these steps, not additional rungs. */
-  --prism-radius-xs: 4px;
-  --prism-radius-sm: 6px;
-  --prism-radius-md: 8px;
-  --prism-radius-lg: 10px;
-  --prism-radius-xl: 12px;
+  /* Radius and spacing share one step name -> pixel mapping, so `lg` means
+     12px in both. See docs/design-system.md — the odd values in the tree
+     (5/7/9/11/13px) are drift to snap onto these steps, not extra rungs. */
+  --prism-radius-2xs: 4px;
+  --prism-radius-xs: 6px;
+  --prism-radius-sm: 8px;
+  --prism-radius-md: 10px;
+  --prism-radius-lg: 12px;
+  --prism-radius-xl: 14px;
   --prism-radius-2xl: 16px;
-  --prism-radius-3xl: 20px;
+  --prism-radius-3xl: 18px;
+  --prism-radius-4xl: 20px;
   --prism-radius-pill: 999px;
   --prism-radius-circle: 50%;
 
-  /* Spacing scale, on the same terms: even steps are the system, odd values
-     already in the tree are drift. */
   --prism-space-3xs: 2px;
   --prism-space-2xs: 4px;
   --prism-space-xs: 6px;
   --prism-space-sm: 8px;
   --prism-space-md: 10px;
   --prism-space-lg: 12px;
-  --prism-space-xl: 16px;
-  --prism-space-2xl: 20px;
-  --prism-space-3xl: 24px;
+  --prism-space-xl: 14px;
+  --prism-space-2xl: 16px;
+  --prism-space-3xl: 18px;
+  --prism-space-4xl: 20px;
+  --prism-space-5xl: 24px;
 }
 
 html {
