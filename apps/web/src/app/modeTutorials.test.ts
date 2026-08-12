@@ -743,7 +743,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       copy,
-      /In LOCAL Auto, clicking the hollow triangle gives a failed ignition/u,
+      /In LOCAL Auto, clicking the downward triangle gives a failed ignition/u,
     );
     assert.match(
       copy,

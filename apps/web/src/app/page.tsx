@@ -14320,21 +14320,9 @@ function MaxEffortIcon({ className }: { className?: string }): React.JSX.Element
   );
 }
 
-function HollowTriangleEffortIcon(): React.JSX.Element {
+function InvertedMinimalAutoEffortIcon(): React.JSX.Element {
   return (
-    <svg
-      className={styles.modelEffortAutoIcon}
-      width="18"
-      height="18"
-      viewBox="0 0 18 18"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.7"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M9 2.75 15.25 14H2.75L9 2.75Z" />
-    </svg>
+    <ModelEffortIcon level="auto" className={styles.modelEffortAutoIcon} />
   );
 }
 
@@ -24775,7 +24763,7 @@ function ComposerModelPicker({
             aria-busy={generating ? "true" : undefined}
           >
             {autoSelected ? (
-              <HollowTriangleEffortIcon />
+              <InvertedMinimalAutoEffortIcon />
             ) : maxEffortActive ? (
               <MaxEffortIcon />
             ) : (

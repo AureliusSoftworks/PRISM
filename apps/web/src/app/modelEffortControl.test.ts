@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import type { ModelReasoningEffortCapabilityV1 } from "@localai/shared";
 import {
@@ -18,6 +19,15 @@ const modernCapability: ModelReasoningEffortCapabilityV1 = {
   supportsMax: false,
 };
 
+const autoIconSource = readFileSync(
+  new URL("../../public/reasoning-effort/auto.svg", import.meta.url),
+  "utf8",
+);
+const minimalIconSource = readFileSync(
+  new URL("../../public/reasoning-effort/minimal.svg", import.meta.url),
+  "utf8",
+);
+
 describe("model effort slider", () => {
   it("maps every effort stop to Jared's supplied icon", () => {
     assert.deepEqual(Object.keys(MODEL_EFFORT_ICON_PATHS), [
@@ -29,6 +39,18 @@ describe("model effort slider", () => {
       "high",
       "xhigh",
     ]);
+    assert.equal(MODEL_EFFORT_ICON_PATHS.auto, "/reasoning-effort/auto.svg");
+    assert.notEqual(
+      MODEL_EFFORT_ICON_PATHS.auto,
+      MODEL_EFFORT_ICON_PATHS.minimal,
+    );
+  });
+
+  it("makes Auto the exact Minimal silhouette rotated downward", () => {
+    const points = minimalIconSource.match(/points="([^"]+)"/u)?.[1];
+    assert.ok(points);
+    assert.match(autoIconSource, /rotate\(180 48\.425 41\.935\)/u);
+    assert.match(autoIconSource, new RegExp(`points="${points}"`, "u"));
   });
 
   it("keeps the slider capability-aware and evenly positioned", () => {

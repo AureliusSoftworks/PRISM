@@ -156,7 +156,7 @@ describe("Chat shell header layout", () => {
 
   it("makes contextual Auto the model default inside a binary privacy lane", () => {
     assert.match(pageSource, /const autoLabelShown = "Auto";/u);
-    assert.match(pageSource, /function HollowTriangleEffortIcon/u);
+    assert.match(pageSource, /function InvertedMinimalAutoEffortIcon/u);
     assert.match(pageSource, /Effort chosen automatically/u);
     assert.doesNotMatch(pageSource, /Account default/u);
     assert.match(pageSource, /\(\["local", "online"\] as const\)\.map/u);

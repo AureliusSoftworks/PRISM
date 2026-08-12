@@ -152,8 +152,8 @@ describe("shared routing model picker integration", () => {
     assert.doesNotMatch(pageSource, /Account default/u);
   });
 
-  it("uses the hollow Auto effort glyph for Turbo toggle and preview actions", () => {
-    assert.match(pageSource, /function HollowTriangleEffortIcon/u);
+  it("uses the inverted Minimal silhouette for Auto Turbo actions", () => {
+    assert.match(pageSource, /function InvertedMinimalAutoEffortIcon/u);
     assert.match(
       pageSource,
       /const effortInteractionDisabled =[\s\S]{0,100}autoSelected/u,
@@ -175,7 +175,7 @@ describe("shared routing model picker integration", () => {
       /const effortTriggerDisabled =[\s\S]{0,100}!effortDirectActionAvailable/u,
     );
     assert.match(pageSource, /Effort chosen automatically/u);
-    assert.match(pageSource, /<HollowTriangleEffortIcon \/>/u);
+    assert.match(pageSource, /<InvertedMinimalAutoEffortIcon \/>/u);
     assert.match(
       pageSource,
       /data-auto-turbo-toggle=\{[\s\S]{0,80}autoOnlineTurboToggleAvailable/u,
@@ -204,7 +204,7 @@ describe("shared routing model picker integration", () => {
     );
     assert.match(
       tutorialSource,
-      /In ONLINE Auto, clicking the hollow Effort triangle invokes that same Turbo toggle/u,
+      /In ONLINE Auto, clicking the downward Effort triangle invokes that same Turbo toggle/u,
     );
   });
 

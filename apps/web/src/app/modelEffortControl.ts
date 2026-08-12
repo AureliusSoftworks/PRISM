@@ -8,7 +8,7 @@ export type ModelEffortCapabilityMode =
   ModelReasoningEffortCapabilityV1["mode"];
 
 export const MODEL_EFFORT_ICON_PATHS: Record<ReasoningEffort, string> = {
-  auto: "/reasoning-effort/default.svg",
+  auto: "/reasoning-effort/auto.svg",
   none: "/reasoning-effort/none.svg",
   minimal: "/reasoning-effort/minimal.svg",
   low: "/reasoning-effort/low.svg",
