@@ -667,6 +667,11 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.match(maskCss, /image-rendering: pixelated/);
     assert.match(maskCss, /\.behindFace\s*\{[\s\S]*z-index:\s*5/);
     assert.match(maskCss, /\.aboveFace\s*\{[\s\S]*z-index:\s*7/);
+    assert.match(maskCss, /\.lightPlane\s*\{[\s\S]*z-index:\s*4/);
+    assert.match(
+      maskSource,
+      /className=\{`\$\{styles\.motionPlane\} \$\{styles\.lightPlane\}/,
+    );
     assert.match(
       maskSource,
       /detailLevel !== "audience" && exteriorGlow \? \([\s\S]*data-avatar-details-emission="glow"/,
@@ -709,9 +714,9 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       maskCss,
-      /\.glow\s*\{[^}]*brightness\(1\.07\)[^}]*contrast\(1\.02\)[^}]*--bot-phosphor-halo-contact-radius[^}]*--bot-phosphor-halo-near-radius[^}]*--bot-phosphor-halo-mid-radius[^}]*--bot-phosphor-halo-ambient-radius/,
+      /\.glow\s*\{[\s\S]*--zen-live-bot-crt-shared-flicker-brightness-scale[\s\S]*--zen-live-bot-crt-shared-flicker-contrast-scale[\s\S]*--bot-phosphor-halo-contact-radius[\s\S]*--bot-phosphor-halo-tight-radius[\s\S]*--bot-phosphor-halo-near-radius[\s\S]*82%[\s\S]*--bot-phosphor-halo-mid-radius[\s\S]*58%[\s\S]*--bot-phosphor-halo-far-radius[\s\S]*36%[\s\S]*--bot-phosphor-halo-ambient-radius[\s\S]*22%/,
     );
-    assert.equal((maskCss.match(/drop-shadow\(/gu) ?? []).length, 6);
+    assert.equal((maskCss.match(/drop-shadow\(/gu) ?? []).length, 8);
     assert.match(maskSource, /avatarDetailsPhosphorCoreRgba\(pixels\)/);
     assert.match(maskSource, /coreColor = "phosphor"/);
     assert.match(
@@ -721,10 +726,6 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.match(
       maskCss,
       /\.corePlane\s*\{[^}]*--zen-live-bot-crt-shared-flicker-opacity[^}]*mix-blend-mode:\s*normal[\s\S]*\.core\s*\{[^}]*filter:\s*none/,
-    );
-    assert.doesNotMatch(
-      maskCss,
-      /--zen-live-bot-crt-shared-flicker-(?:brightness|contrast)-scale/,
     );
     assert.match(maskSource, /avatarDetailsExteriorGlowRaster\(/);
     assert.match(maskSource, /avatarDetailsCropRgbaRaster\(/);

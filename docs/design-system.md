@@ -246,7 +246,38 @@ because the tree's most-used values are that dense: 14px (330 spacing uses) and
 18px (185) are as load-bearing as 16px (151), so a 4/8/16/24 ramp would have
 nowhere to put them short of changing layout.
 
-Nothing consumes these tokens yet; adding them changed no rendering.
+### First consumer
+
+`avatar-details-editor.module.css` is the reference migration. It maps the
+shared steps onto four local roles rather than reaching for raw values:
+
+```css
+--editor-control-h: 30px; /* one inline-control height */
+--editor-radius-section: var(--prism-radius-lg); /* 12px */
+--editor-radius-panel: var(--prism-radius-md); /* 10px */
+--editor-radius-control: var(--prism-radius-sm); /* 8px  */
+--editor-radius-thumb: var(--prism-radius-xs); /* 6px  */
+```
+
+Radii nest section → panel → control → thumbnail instead of picking from
+5/7/8/9/10/12 at random, and 31 inline controls that measured 27/28/29/30/32px
+now all measure 30px. Copy this shape when migrating another applet: name the
+roles locally, point them at the shared steps.
+
+Two type steps are local because the rail is denser than
+`--prism-type-caption` (0.6875rem) bottoms out at:
+
+```css
+--editor-text-caption: max(9px, 0.5625rem);
+--editor-text-label: max(10px, 0.625rem);
+```
+
+The rem term is what lets the account reading-scale preset reach the rail at
+all — the raw px it replaced ignored the setting entirely. The px floor is
+today's rendered size, because bare rem regresses downward: at the compact
+preset (14px root) `0.5625rem` resolves to 7.875px, below both the current
+9px and the smallest shared step. Floored, the rail holds at 9/10px for
+compact through standard and grows to 10.1/11.3px at extra-large.
 
 ## Missing layers
 

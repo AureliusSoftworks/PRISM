@@ -274,53 +274,61 @@ function AvatarDetailsEmissionPlanes({
   }
 
   return coreRaster ? (
-    <span
-      className={`${styles.motionPlane} ${depthClassName}${motionClassName}`}
-      data-avatar-details-motion-group="true"
-      {...sharedPlaneProps}
-    >
+    <>
       {detailLevel !== "audience" && exteriorGlow ? (
         <span
-          className={`${styles.emissionPlane} ${styles.glowPlane}`}
-          data-avatar-details-emission="glow"
+          className={`${styles.motionPlane} ${styles.lightPlane}${motionClassName}`}
+          data-avatar-details-motion-group="true"
+          {...sharedPlaneProps}
+        >
+          <span
+            className={`${styles.emissionPlane} ${styles.glowPlane}`}
+            data-avatar-details-emission="glow"
+            data-avatar-details-render-detail={detailLevel}
+            aria-hidden
+          >
+            <canvas
+              ref={glowCanvasRef}
+              width={exteriorGlow.bounds.width}
+              height={exteriorGlow.bounds.height}
+              className={`${styles.raster} ${styles.croppedRaster} ${styles.glow}`}
+              style={rasterBoundsStyle(exteriorGlow.bounds)}
+              data-avatar-details-raster="glow"
+              aria-hidden
+            />
+          </span>
+        </span>
+      ) : null}
+      <span
+        className={`${styles.motionPlane} ${depthClassName}${motionClassName}`}
+        data-avatar-details-motion-group="true"
+        {...sharedPlaneProps}
+      >
+        <span
+          className={`${styles.emissionPlane} ${styles.corePlane}`}
+          data-avatar-details-emission="core"
           data-avatar-details-render-detail={detailLevel}
           aria-hidden
         >
           <canvas
-            ref={glowCanvasRef}
-            width={exteriorGlow.bounds.width}
-            height={exteriorGlow.bounds.height}
-            className={`${styles.raster} ${styles.croppedRaster} ${styles.glow}`}
-            style={rasterBoundsStyle(exteriorGlow.bounds)}
-            data-avatar-details-raster="glow"
+            ref={coreCanvasRef}
+            width={coreRaster.bounds.width}
+            height={coreRaster.bounds.height}
+            className={`${styles.raster} ${styles.croppedRaster} ${styles.core}`}
+            style={rasterBoundsStyle(coreRaster.bounds)}
+            data-avatar-details-mask="true"
+            data-avatar-details-raster="core"
+            data-avatar-details-rendering={
+              pixelPerfectInk || rasterSize === AVATAR_DETAILS_CANVAS_SIZE
+                ? "nearest-neighbor"
+                : "coverage-sampled"
+            }
+            data-avatar-details-mask-size={rasterSize}
             aria-hidden
           />
         </span>
-      ) : null}
-      <span
-        className={`${styles.emissionPlane} ${styles.corePlane}`}
-        data-avatar-details-emission="core"
-        data-avatar-details-render-detail={detailLevel}
-        aria-hidden
-      >
-        <canvas
-          ref={coreCanvasRef}
-          width={coreRaster.bounds.width}
-          height={coreRaster.bounds.height}
-          className={`${styles.raster} ${styles.croppedRaster} ${styles.core}`}
-          style={rasterBoundsStyle(coreRaster.bounds)}
-          data-avatar-details-mask="true"
-          data-avatar-details-raster="core"
-          data-avatar-details-rendering={
-            pixelPerfectInk || rasterSize === AVATAR_DETAILS_CANVAS_SIZE
-              ? "nearest-neighbor"
-              : "coverage-sampled"
-          }
-          data-avatar-details-mask-size={rasterSize}
-          aria-hidden
-        />
       </span>
-    </span>
+    </>
   ) : null;
 }
 

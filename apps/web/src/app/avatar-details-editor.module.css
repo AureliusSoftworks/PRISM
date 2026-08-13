@@ -1,15 +1,31 @@
 .editor {
+  /* One height for every inline control. The primary Apply/Cancel buttons
+     were already 30px; the rest of the rail had drifted to 27/28/29/32. */
+  --editor-control-h: 30px;
+  /* Nesting ramp: section > panel > control > thumbnail. */
+  --editor-radius-section: var(--prism-radius-lg);
+  --editor-radius-panel: var(--prism-radius-md);
+  --editor-radius-control: var(--prism-radius-sm);
+  --editor-radius-thumb: var(--prism-radius-xs);
+  /* The rail is denser than the shared type scale bottoms out at, so these
+     two steps are local. They are rem so the account reading-scale preset
+     reaches them at all — the raw px they replaced ignored it. The px floor
+     is today's size: the compact preset (14px root) would otherwise resolve
+     0.5625rem to 7.875px and make the rail smaller than it is now. */
+  --editor-text-caption: max(9px, 0.5625rem);
+  --editor-text-label: max(10px, 0.625rem);
+
   display: grid;
-  gap: 6px;
+  gap: var(--prism-space-xs);
   min-width: 0;
   color: var(--fg);
   container-type: inline-size;
 }
 
 .applyError {
-  margin: -8px 0 0;
+  margin: 0;
   color: var(--danger);
-  font-size: 10px;
+  font-size: var(--editor-text-label);
   line-height: 1.35;
 }
 
@@ -19,23 +35,26 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--prism-space-lg);
 }
 
-.paintHeader > div {
+/* Only the title block stacks. This used to be `.paintHeader > div`, which
+   outranked `.paintHeaderActions` and silently turned the toolbar into a
+   one-column grid — the buttons stacked into a ragged staircase. */
+.paintHeader > div:first-child {
   display: grid;
-  gap: 2px;
+  gap: var(--prism-space-3xs);
 }
 
 .paintHeader strong {
-  font-size: 13px;
+  font-size: var(--prism-type-body);
 }
 
 .paintHeader small,
 .coverage small,
 .footer > span {
   color: var(--fg-muted);
-  font-size: 10px;
+  font-size: var(--editor-text-label);
 }
 
 .historyActions button,
@@ -108,19 +127,19 @@
     "tools"
     "palette"
     "coverage";
-  gap: 9px;
+  gap: var(--prism-space-md);
   padding: 10px;
   border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
-  border-radius: 12px;
+  border-radius: var(--editor-radius-section);
   background: color-mix(in srgb, var(--bg-deep) 64%, transparent);
 }
 
 .templateSection {
   display: grid;
-  gap: 8px;
+  gap: var(--prism-space-sm);
   padding: 10px;
   border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
-  border-radius: 12px;
+  border-radius: var(--editor-radius-section);
   background: color-mix(in srgb, var(--bg-deep) 64%, transparent);
 }
 
@@ -130,43 +149,43 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--prism-space-sm);
 }
 
 .templateSection small,
 .templateTransformGrid output {
   color: var(--fg-muted);
-  font-size: 9px;
+  font-size: var(--editor-text-caption);
 }
 
 .templateSaveRow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 5px;
+  gap: var(--prism-space-xs);
 }
 
 .templateSaveRow input,
 .templateNameRow input {
   min-width: 0;
-  min-height: 29px;
+  min-height: var(--editor-control-h);
   padding: 5px 8px;
   border: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
-  border-radius: 7px;
+  border-radius: var(--editor-radius-control);
   background: color-mix(in srgb, var(--bg-surface) 86%, transparent);
   color: var(--fg);
   font: inherit;
-  font-size: 9px;
+  font-size: var(--editor-text-caption);
 }
 
 .templateSection button {
-  min-height: 27px;
+  min-height: var(--editor-control-h);
   padding: 4px 7px;
   border: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
-  border-radius: 7px;
+  border-radius: var(--editor-radius-control);
   background: color-mix(in srgb, var(--bg-surface) 86%, transparent);
   color: var(--fg-muted);
   font: inherit;
-  font-size: 9px;
+  font-size: var(--editor-text-caption);
   cursor: pointer;
 }
 
@@ -175,14 +194,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  font-weight: 800;
+  gap: var(--prism-space-xs);
+  font-weight: 700;
 }
 
 .templateLibrary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 5px;
+  gap: var(--prism-space-xs);
 }
 
 .templateLibrary > button {
@@ -190,21 +209,21 @@
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr);
   align-items: center;
-  gap: 6px;
+  gap: var(--prism-space-xs);
   text-align: left;
 }
 
 .templateLibrary > button canvas {
   width: 34px;
   height: 34px;
-  border-radius: 5px;
+  border-radius: var(--editor-radius-thumb);
   background: #050608;
   image-rendering: pixelated;
 }
 
 .templateLibrary > button > span {
   display: grid;
-  gap: 2px;
+  gap: var(--prism-space-3xs);
   min-width: 0;
 }
 
@@ -217,7 +236,7 @@
 
 .templateLibrary > button strong {
   color: var(--fg);
-  font-size: 9px;
+  font-size: var(--editor-text-caption);
 }
 
 .templateLibrary > button[data-selected="true"] {
@@ -246,21 +265,23 @@
 
 .templateControls {
   display: grid;
-  gap: 7px;
+  gap: var(--prism-space-sm);
   padding: 8px;
   border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
-  border-radius: 9px;
+  border-radius: var(--editor-radius-panel);
 }
 
 .templateNameRow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 29px 29px;
+  grid-template-columns: minmax(0, 1fr) var(--editor-control-h) var(
+      --editor-control-h
+    );
   justify-content: initial;
 }
 
 .templateNameRow button {
-  min-width: 29px;
-  min-height: 29px;
+  min-width: var(--editor-control-h);
+  min-height: var(--editor-control-h);
   padding: 0;
   display: grid;
   place-items: center;
@@ -269,14 +290,14 @@
 .templateTransformGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 7px;
+  gap: var(--prism-space-sm);
 }
 
 .templateTransformGrid label {
   display: grid;
-  gap: 4px;
+  gap: var(--prism-space-2xs);
   color: var(--fg-muted);
-  font-size: 9px;
+  font-size: var(--editor-text-caption);
 }
 
 .templateTransformGrid input {
@@ -297,11 +318,11 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 7px;
+  gap: var(--prism-space-sm);
   padding: 8px;
   border: 1px solid
     color-mix(in srgb, var(--editor-bot-color, var(--accent)) 62%, var(--line));
-  border-radius: 9px;
+  border-radius: var(--editor-radius-panel);
   background: color-mix(
     in srgb,
     var(--editor-bot-color, var(--accent)) 10%,
@@ -311,12 +332,12 @@
 
 .equippedStampControls > span {
   display: grid;
-  gap: 2px;
+  gap: var(--prism-space-3xs);
 }
 
 .equippedStampControls > span strong {
   color: var(--fg);
-  font-size: 9px;
+  font-size: var(--editor-text-caption);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -333,14 +354,16 @@
 
 .stampScaleChips {
   display: grid;
-  grid-template-columns: 27px minmax(42px, auto) 27px;
+  grid-template-columns: var(--editor-control-h) minmax(42px, auto) var(
+      --editor-control-h
+    );
   align-items: center;
-  gap: 3px;
+  gap: var(--prism-space-2xs);
 }
 
 .stampScaleChips button {
-  min-width: 27px;
-  min-height: 27px;
+  min-width: var(--editor-control-h);
+  min-height: var(--editor-control-h);
   padding: 0;
   display: grid;
   place-items: center;
@@ -348,7 +371,7 @@
 
 .stampScaleChips output {
   color: var(--fg);
-  font-size: 9px;
+  font-size: var(--editor-text-caption);
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
@@ -357,7 +380,7 @@
 .templateStatus {
   margin: 0;
   color: var(--fg-muted);
-  font-size: 9px;
+  font-size: var(--editor-text-caption);
   line-height: 1.4;
 }
 
@@ -369,12 +392,13 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: var(--prism-space-sm);
   padding: 7px 8px;
-  border: 1px solid color-mix(in srgb, var(--avatar-editor-warning, #ffb27d) 42%, var(--line));
-  border-radius: 8px;
+  border: 1px solid
+    color-mix(in srgb, var(--avatar-editor-warning, #ffb27d) 42%, var(--line));
+  border-radius: var(--editor-radius-control);
   color: var(--fg-muted);
-  font-size: 9px;
+  font-size: var(--editor-text-caption);
   line-height: 1.35;
 }
 
@@ -390,10 +414,10 @@
   grid-area: palette;
   display: grid;
   align-content: start;
-  gap: 7px;
+  gap: var(--prism-space-sm);
   padding: 8px;
   border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
-  border-radius: 10px;
+  border-radius: var(--editor-radius-panel);
   background: color-mix(in srgb, var(--bg-surface) 68%, transparent);
 }
 
@@ -413,7 +437,7 @@
 .footer > div {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--prism-space-xs);
 }
 
 .paintHeaderActions {
@@ -422,22 +446,33 @@
 
 .historyActions button,
 .brushSizes button {
-  width: 28px;
-  height: 28px;
+  width: var(--editor-control-h);
+  height: var(--editor-control-h);
   padding: 0;
-  border-radius: 7px;
+  border-radius: var(--editor-radius-control);
   display: grid;
   place-items: center;
 }
 
+/* Brush sizes sit directly under the six-up tool grid, so they share its
+   full-width rhythm instead of trailing off mid-row. */
+.brushSizes {
+  width: 100%;
+}
+
+.brushSizes button {
+  flex: 1 1 0;
+  min-width: var(--editor-control-h);
+}
+
 .guideToggleButton {
-  min-height: 28px;
+  min-height: var(--editor-control-h);
   padding: 0 8px;
-  border-radius: 7px;
+  border-radius: var(--editor-radius-control);
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font-size: 9px;
+  gap: var(--prism-space-xs);
+  font-size: var(--editor-text-caption);
   font-weight: 700;
   white-space: nowrap;
 }
@@ -454,7 +489,7 @@
 .paintTools {
   align-items: stretch;
   flex-direction: column;
-  gap: 7px;
+  gap: var(--prism-space-sm);
 }
 
 .segmentedControl {
@@ -464,25 +499,25 @@
 
 .inkPaletteHeader {
   display: grid;
-  gap: 2px;
+  gap: var(--prism-space-3xs);
 }
 
 .inkPaletteHeader > span {
   color: var(--fg);
-  font-size: 10px;
-  font-weight: 800;
+  font-size: var(--editor-text-label);
+  font-weight: 700;
 }
 
 .inkPaletteHeader small,
 .runtimeColorNote small {
   color: var(--fg-muted);
-  font-size: 9px;
+  font-size: var(--editor-text-caption);
   line-height: 1.35;
 }
 
 .inkRoleOptions {
   display: grid;
-  gap: 5px;
+  gap: var(--prism-space-xs);
 }
 
 .inkRoleOptions button {
@@ -490,27 +525,27 @@
   display: grid;
   grid-template-columns: 15px minmax(0, 1fr);
   align-items: center;
-  gap: 7px;
+  gap: var(--prism-space-sm);
   padding: 7px 8px;
-  border-radius: 8px;
+  border-radius: var(--editor-radius-control);
   text-align: left;
 }
 
 .inkRoleOptions button > span:last-child {
   display: grid;
-  gap: 2px;
+  gap: var(--prism-space-3xs);
   min-width: 0;
 }
 
 .inkRoleOptions strong {
   color: var(--fg);
-  font-size: 10px;
+  font-size: var(--editor-text-label);
   line-height: 1.25;
 }
 
 .inkRoleOptions small {
   color: var(--fg-muted);
-  font-size: 9px;
+  font-size: var(--editor-text-caption);
   line-height: 1.35;
 }
 
@@ -518,39 +553,39 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(92px, 0.72fr);
   align-items: center;
-  gap: 8px;
+  gap: var(--prism-space-sm);
   padding-top: 6px;
   border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
 }
 
 .speechInkAnimationControl > span {
   display: grid;
-  gap: 2px;
+  gap: var(--prism-space-3xs);
   min-width: 0;
 }
 
 .speechInkAnimationControl strong {
   color: var(--fg);
-  font-size: 10px;
+  font-size: var(--editor-text-label);
   line-height: 1.25;
 }
 
 .speechInkAnimationControl small {
   color: var(--fg-muted);
-  font-size: 9px;
+  font-size: var(--editor-text-caption);
   line-height: 1.35;
 }
 
 .speechInkAnimationControl select {
   min-width: 0;
-  height: 30px;
+  height: var(--editor-control-h);
   padding: 0 26px 0 8px;
   border: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
-  border-radius: 7px;
+  border-radius: var(--editor-radius-control);
   background: color-mix(in srgb, var(--bg-surface) 86%, transparent);
   color: var(--fg);
   font: inherit;
-  font-size: 10px;
+  font-size: var(--editor-text-label);
   font-weight: 700;
 }
 
@@ -558,7 +593,7 @@
   width: 15px;
   height: 15px;
   border: 2px solid color-mix(in srgb, #ffffff 72%, transparent);
-  border-radius: 999px;
+  border-radius: var(--prism-radius-pill);
   box-shadow:
     0 0 0 1px rgba(0, 0, 0, 0.35),
     0 0 12px -5px currentColor;
@@ -579,7 +614,7 @@
   display: grid;
   grid-template-columns: 15px minmax(0, 1fr);
   align-items: center;
-  gap: 7px;
+  gap: var(--prism-space-sm);
   padding-top: 6px;
   border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
 }
@@ -588,23 +623,23 @@
   width: 15px;
   height: 15px;
   border: 2px solid color-mix(in srgb, #ffffff 70%, transparent);
-  border-radius: 5px;
+  border-radius: var(--editor-radius-thumb);
   box-shadow: 0 0 12px -5px currentColor;
 }
 
 .segmentedControl button {
   min-width: 32px;
-  min-height: 32px;
+  min-height: var(--editor-control-h);
   padding: 0;
-  border-radius: 7px;
+  border-radius: var(--editor-radius-control);
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 
 .brushSizes button {
-  font-size: 10px;
-  font-weight: 800;
+  font-size: var(--editor-text-label);
+  font-weight: 700;
 }
 
 .canvasFrame {
@@ -621,7 +656,7 @@
   contain: layout paint;
   isolation: isolate;
   border: 1px solid color-mix(in srgb, var(--fg) 32%, var(--line));
-  border-radius: 9px;
+  border-radius: var(--editor-radius-panel);
   background-color: #050608;
   box-shadow: none;
 }
@@ -766,12 +801,22 @@
   background-image:
     linear-gradient(
       to right,
-      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 28%, transparent) 1px,
+      color-mix(
+          in srgb,
+          var(--editor-bot-color, var(--accent)) 28%,
+          transparent
+        )
+        1px,
       transparent 1px
     ),
     linear-gradient(
       to bottom,
-      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 28%, transparent) 1px,
+      color-mix(
+          in srgb,
+          var(--editor-bot-color, var(--accent)) 28%,
+          transparent
+        )
+        1px,
       transparent 1px
     );
   /* Align the line origin with the same top-left used by pointerGridPoint. */
@@ -794,7 +839,8 @@
 /* Pixel-grid zoom: kill CRT bloom/blur so ink snaps to hard cells for placement. */
 [data-avatar-details-grid-visible="true"] .canvas,
 [data-avatar-details-grid-visible="true"] .stampPreview,
-[data-avatar-details-grid-visible="true"] .canvas[data-avatar-details-editor-core="true"],
+[data-avatar-details-grid-visible="true"]
+  .canvas[data-avatar-details-editor-core="true"],
 .canvas[data-avatar-details-pixel-perfect="true"],
 .stampPreview[data-avatar-details-pixel-perfect="true"] {
   filter: none !important;
@@ -829,7 +875,12 @@
   opacity: 0;
   pointer-events: none;
   filter: drop-shadow(
-    0 0 3px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 46%, transparent)
+    0 0 3px
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 46%,
+        transparent
+      )
   );
   transition: opacity 120ms ease;
   outline: none;
@@ -846,18 +897,24 @@
   height: 9px;
   border: 1px solid
     color-mix(in srgb, var(--editor-bot-color, var(--accent)) 76%, #ffffff);
-  border-radius: 999px;
+  border-radius: var(--prism-radius-pill);
   background:
     linear-gradient(
       90deg,
       transparent 24%,
-      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 82%, #ffffff) 24% 76%,
+      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 82%, #ffffff)
+        24% 76%,
       transparent 76%
     ),
     #08100d;
   box-shadow:
     0 0 0 2px color-mix(in srgb, #050608 78%, transparent),
-    0 0 8px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 62%, transparent);
+    0 0 8px
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 62%,
+        transparent
+      );
   transform: translateX(-50%);
   pointer-events: auto;
   touch-action: none;
@@ -879,8 +936,18 @@
 .symmetryGuide:focus-visible .symmetryHandle {
   box-shadow:
     0 0 0 2px #ffffff,
-    0 0 0 4px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 72%, transparent),
-    0 0 10px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 72%, transparent);
+    0 0 0 4px
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 72%,
+        transparent
+      ),
+    0 0 10px
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 72%,
+        transparent
+      );
 }
 
 .inputSurface {
@@ -997,12 +1064,12 @@
 
 .coverage {
   display: grid;
-  gap: 4px;
+  gap: var(--prism-space-2xs);
 }
 
 .coverage span,
 .coverage strong {
-  font-size: 10px;
+  font-size: var(--editor-text-label);
 }
 
 .coverage strong {
@@ -1034,11 +1101,11 @@
 
 .cancelButton,
 .applyButton {
-  min-height: 30px;
+  min-height: var(--editor-control-h);
   padding: 0 12px;
-  border-radius: 8px;
-  font-size: 10px;
-  font-weight: 800;
+  border-radius: var(--editor-radius-control);
+  font-size: var(--editor-text-label);
+  font-weight: 700;
 }
 
 .applyButton {
@@ -1051,14 +1118,20 @@
   color: var(--editor-bot-ink, #071011);
 }
 
-@media (max-width: 760px) {
+/* Keyed to the editor, not the viewport. The Foundry rail is ~368px wide on
+   a 1440px desktop, so a viewport query described the wrong box entirely. */
+@container (max-width: 719px) {
   .paintHeader {
     align-items: flex-start;
+    flex-wrap: wrap;
   }
 
+  /* Drop the toolbar onto its own full-width line and let it wrap there,
+     instead of squeezing six controls beside the title. */
   .paintHeaderActions {
-    align-items: flex-end;
-    flex-direction: column;
+    flex: 1 0 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
   }
 }
 
@@ -1071,22 +1144,14 @@
       "canvas tools"
       "canvas palette"
       "canvas coverage";
-    column-gap: 10px;
-    row-gap: 7px;
+    column-gap: var(--prism-space-md);
+    row-gap: var(--prism-space-sm);
     align-items: start;
   }
 
   .segmentedControl button {
     justify-content: center;
     padding-inline: 6px;
-  }
-
-  .brushSizes {
-    width: 100%;
-  }
-
-  .brushSizes button {
-    flex: 1 1 0;
   }
 
   .canvasFrame {
@@ -1098,7 +1163,6 @@
   .segmentedControl {
     grid-template-columns: repeat(6, minmax(0, 1fr));
   }
-
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1114,7 +1178,7 @@
   height: 100%;
   grid-template-rows: auto auto;
   align-content: start;
-  gap: 10px;
+  gap: var(--prism-space-md);
 }
 
 .editor[data-editor-layout="foundry"] .paintSection {
