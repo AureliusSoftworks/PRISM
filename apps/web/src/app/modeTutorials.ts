@@ -56,7 +56,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Let the companion move",
-        body: "In a live Zen conversation, drag the bot from its body or quiet canvas space. A deliberate release can coast and bounce within the room; ordinary clicks and the context menu stay put. The bot may rest over prose or chrome, and crossing the midpoint seamlessly turns its face and authored Ink toward the room. At a very large desktop size, Zen becomes a two-column reading room, and moving the bot across the midpoint swaps the bot and prose sides. Reduced Motion keeps direct dragging but removes roaming and coasting.",
+        body: "In a live Zen conversation, drag the bot from its body or quiet canvas space. A deliberate release can coast and bounce within the room; ordinary clicks and the context menu stay put. The bot faces each horizontal move immediately, with its face and authored Ink turning together while its persona glyph stays readable. The bot may rest over prose or chrome. At a very large desktop size, Zen becomes a two-column reading room, and moving the bot across the midpoint swaps the bot and prose sides. Reduced Motion keeps direct dragging but removes roaming and coasting.",
         clickLabel: "the live bot",
         targetSelector: '[data-zen-live-bot-presence-plate="true"]',
       },
@@ -74,7 +74,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Let context breathe",
-        body: "Recent messages stay visible while older continuity for this Home is carried through summaries and memory. Drag the live bot anywhere in the room; Cmd/Ctrl + enlarges it and Cmd/Ctrl - shrinks it, or use Grow and Shrink from its context menu. A full-size bot may briefly notice and follow a nearby moving cursor, then lose interest when it rests; its Eye movement setting controls how readily and how far it looks. At compact sizes it becomes the crisp mini chassis with fixed eyes; grow it again for the full textured avatar, whose firm maximum keeps the reading room clear without changing the face.",
+        body: "Recent messages stay visible while older continuity for this Home is carried through summaries and memory. The live bot changes depth naturally with its vertical position: higher in the room uses the crisp mini chassis with fixed eyes, while moving lower brings forward the larger high-resolution avatar. Its size is not adjusted manually. A full-size bot may briefly notice and follow a nearby moving cursor, then lose interest when it rests; its Eye movement setting controls how readily and how far it looks.",
         clickLabel: "the conversation canvas",
         targetSelector: '[data-tutorial-target="conversation-canvas"]',
       },

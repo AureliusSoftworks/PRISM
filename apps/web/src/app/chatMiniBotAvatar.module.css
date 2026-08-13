@@ -280,6 +280,8 @@
 
 .upperScreenContent {
   transform: scaleX(var(--chat-mini-bot-upper-screen-facing-scale-x, 1));
+  transition: none;
+  backface-visibility: hidden;
 }
 
 .lowerScreenContent {

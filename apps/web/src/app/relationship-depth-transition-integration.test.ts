@@ -86,6 +86,14 @@ describe("relationship-depth page integration", () => {
       cssSource,
       /\.zenPersonaTransitionSegmentButton,\s*\.form \.zenPersonaTransitionSegmentButton\s*\{/,
     );
+    assert.match(
+      cssSource,
+      /\.zenPersonaTransitionControl\s*\{[\s\S]*?flex-wrap:\s*wrap;/,
+    );
+    assert.match(
+      cssSource,
+      /\.zenPersonaTransitionSegments\s*\{[\s\S]*?flex:\s*1 1 188px;[\s\S]*?min-width:\s*min\(188px,\s*100%\);/,
+    );
   });
 
   it("exposes one shared identity-anchor contract across Library, room, and Home", () => {

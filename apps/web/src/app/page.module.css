@@ -3774,10 +3774,10 @@
   translate: 0 0;
 }
 
-/* Zen size gestures magnify one canonical authored raster. Keeping the inner
-   canvas fixed prevents container queries and phosphor geometry from laying
-   the face out differently at each outer size. */
-.zenLiveBotPresencePlate[data-user-avatar-scale="true"][data-avatar-render-mode="full"]
+/* Zen depth magnifies one canonical authored raster. Keeping the inner canvas
+   fixed prevents container queries and phosphor geometry from laying the face
+   or Ink out differently as the bot travels toward the player. */
+.zenLiveBotPresencePlate[data-depth-scaled="true"][data-avatar-render-mode="full"]
   > .botAmbientPresenceRig {
   --zen-live-bot-avatar-size: var(--zen-live-bot-avatar-render-size, 190px);
   --zen-live-bot-avatar-body-size: var(
@@ -27830,8 +27830,17 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     rotate(var(--zen-live-bot-motion-tilt));
   transform-origin: 50% 50%;
   will-change: transform;
-  transition: transform 360ms cubic-bezier(0.22, 0.72, 0.24, 1);
+  /* Position and facing update as one live frame. Interpolating this root
+     makes the CRT face and authored Ink sample separate in-between pixels. */
+  transition: none;
   animation: zenActionCueIn 0.24s cubic-bezier(0.2, 0.72, 0.18, 1) both;
+}
+
+/* Facing is a direct mirror of this one shared face + Ink plane. Never ease
+   it: a flip must be a discrete turn, not a compressed/recreated avatar. */
+.zenLiveBotPresencePlate .zenLiveBotPresenceScreenContentRig {
+  transition: none;
+  backface-visibility: hidden;
 }
 
 /* Lane drift owns the idle bob + vertical hops; keep the ambient body from
@@ -27887,7 +27896,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   top: var(--zen-live-bot-avatar-y, 20px);
   z-index: 4;
   margin: 0;
-  will-change: transform, left, top;
+  contain: layout style;
+  will-change: transform, left, top, width;
 }
 
 .zenLiveBotPresencePlate * {
@@ -29632,6 +29642,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   z-index: 6;
   transform: scaleX(var(--zen-live-bot-screen-facing-scale-x, 1));
   transform-origin: 50% 50%;
+  transition: none;
+  backface-visibility: hidden;
   pointer-events: none;
 }
 
@@ -37628,6 +37640,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .zenPersonaTransitionControl {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
 }
@@ -37664,8 +37677,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .zenPersonaTransitionSegments {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  flex: 1 1 auto;
-  min-width: 0;
+  flex: 1 1 188px;
+  min-width: min(188px, 100%);
   gap: 3px;
   padding: 3px;
   border: 1px solid color-mix(in srgb, var(--line-strong) 70%, transparent);

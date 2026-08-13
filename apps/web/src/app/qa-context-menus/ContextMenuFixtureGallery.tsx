@@ -44,9 +44,7 @@ const FIXTURES = [
   "group-protected",
   "group-full",
   "group-multiselect",
-  "zen-avatar-minimum",
-  "zen-avatar-default",
-  "zen-avatar-maximum",
+  "zen-avatar",
   "canvas-chat-zen",
   "canvas-sandbox",
   "canvas-coffee-setup",
@@ -166,11 +164,7 @@ function fixtureEntries(id: FixtureId): PrismMenuEntry[] {
       ]),
     ];
   }
-  if (id.startsWith("zen-avatar")) return [
-    action("grow", "Grow", <Plus />, { disabled: id === "zen-avatar-maximum", disabledReason: id === "zen-avatar-maximum" ? "Avatar is at its maximum size." : undefined }),
-    action("shrink", "Shrink", <Trash2 />, { disabled: id === "zen-avatar-minimum", disabledReason: id === "zen-avatar-minimum" ? "Avatar is at its minimum size." : undefined }),
-    ...(id === "zen-avatar-default" ? [] : [action("reset", "Reset size", <RotateCcw />, { description: "190px default" })]),
-    { id: "avatar-separator", kind: "separator" },
+  if (id === "zen-avatar") return [
     action("edit", "Edit avatar", <PencilLine />),
   ];
   if (id.startsWith("canvas")) {

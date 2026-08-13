@@ -37,8 +37,8 @@ test("exposes account-scoped device shortcuts in Settings", () => {
   assert.match(settingsSource, /data-keyboard-shortcut-recorder="true"/u);
   assert.match(settingsSource, /Already used by/u);
   assert.match(settingsSource, /Restore defaults/u);
-  assert.match(settingsSource, /Cmd\/Ctrl \+ enlarges the live avatar/u);
-  assert.match(settingsSource, /Cmd\/Ctrl\s*- shrinks it/u);
+  assert.doesNotMatch(settingsSource, /enlarges the live avatar/u);
+  assert.doesNotMatch(settingsSource, /shrinks it/u);
 });
 
 test("uses the configurable Prism and navbar shortcuts globally", () => {
@@ -51,6 +51,11 @@ test("uses the configurable Prism and navbar shortcuts globally", () => {
   assert.match(pageSource, /keyboardShortcuts\.effortPicker, event/u);
   assert.match(pageSource, /keyboardShortcuts\.speechType, event/u);
   assert.match(pageSource, /keyboardShortcuts\.turbo, event/u);
+  assert.match(pageSource, /data-prism-provider-mode-trigger/u);
+  assert.ok(
+    (pageSource.match(/data-prism-provider-mode-trigger/gu) ?? []).length >= 5,
+    "every response-mode navbar variant should expose its enabled hotkey target",
+  );
   assert.match(pageSource, /data-prism-model-picker-trigger="true"/u);
   assert.match(pageSource, /data-prism-effort-picker-trigger="true"/u);
   assert.match(pageSource, /data-prism-speech-type-trigger="true"/u);
@@ -63,6 +68,10 @@ test("uses the configurable Prism and navbar shortcuts globally", () => {
   assert.match(pageSource, /pickerOpenState\.surface === "effort"/u);
   assert.match(pageSource, /keyboardShortcuts\.effortHud, event/u);
   assert.match(pageSource, /playPrismHotkeyInaccessibleSfx\(\)/u);
+  assert.match(
+    pageSource,
+    /keyboardShortcuts\.providerMode, event[\s\S]{0,700}findVisiblePrismShortcutTrigger\(\s*'\[data-prism-provider-mode-trigger="true"\]'[\s\S]{0,500}active\.click\(\)/u,
+  );
   assert.match(companionSource, /companionSuppressed[\s\S]{0,300}playPrismHotkeyInaccessibleSfx\(\)/u);
   assert.match(
     browserGuardSource,
@@ -250,6 +259,6 @@ test("updates contextual guidance without adding first-run setup", () => {
   assert.match(tutorialSource, /Model and Effort never remain open together/u);
   assert.match(tutorialSource, /Settings → Shortcuts/u);
   assert.doesNotMatch(firstRunSource, /keyboard shortcuts|Shift\+Tab/u);
-  assert.match(tutorialSource, /Cmd\/Ctrl \+ enlarges it/u);
-  assert.match(tutorialSource, /Grow and Shrink from its context menu/u);
+  assert.match(tutorialSource, /changes depth naturally with its vertical position/u);
+  assert.match(tutorialSource, /size is not adjusted manually/u);
 });

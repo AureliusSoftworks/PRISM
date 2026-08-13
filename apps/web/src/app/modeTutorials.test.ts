@@ -83,18 +83,15 @@ describe("mode tutorials", () => {
     assert.match(continueHomeStep.body, /Random, New, Intro, or Off handoff/u);
   });
 
-  it("teaches explicit Zen avatar resizing without changing the authored face", () => {
+  it("teaches automatic Zen avatar depth without manual resizing", () => {
     const step = MODE_TUTORIALS.zen.steps.find(
       (candidate) => candidate.heading === "Let context breathe",
     );
     assert.ok(step);
-    assert.match(step.body, /Cmd\/Ctrl \+ enlarges it/u);
-    assert.match(step.body, /Cmd\/Ctrl - shrinks it/u);
-    assert.match(step.body, /Grow and Shrink from its context menu/u);
-    assert.match(step.body, /compact sizes it becomes the crisp mini chassis/u);
-    assert.match(step.body, /full textured avatar/u);
-    assert.match(step.body, /firm maximum keeps the reading room clear/u);
-    assert.match(step.body, /without changing the face/u);
+    assert.match(step.body, /changes depth naturally with its vertical position/u);
+    assert.match(step.body, /higher in the room uses the crisp mini chassis/u);
+    assert.match(step.body, /moving lower brings forward the larger high-resolution avatar/u);
+    assert.match(step.body, /size is not adjusted manually/u);
   });
 
   it("teaches that crossing the Zen midpoint turns the complete avatar screen", () => {
@@ -103,7 +100,8 @@ describe("mode tutorials", () => {
     );
     assert.ok(step);
     assert.match(step.body, /may rest over prose or chrome/u);
-    assert.match(step.body, /turns its face and authored Ink toward the room/u);
+    assert.match(step.body, /face and authored Ink turning together/u);
+    assert.match(step.body, /persona glyph stays readable/u);
   });
 
   it("explains immersive waiting captions and the Psychic privacy boundary", () => {

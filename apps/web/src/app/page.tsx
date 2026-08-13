@@ -1687,6 +1687,13 @@ import {
   type ZenLiveBotFreeRoamMotionState,
 } from "./zenLiveBotFreeRoam";
 import {
+  resolveZenLiveAvatarDepth,
+  resolveZenLiveAvatarFacingForTravel,
+  snapZenLiveAvatarPositionForPresentation,
+  type ZenLiveAvatarDepthMode,
+  type ZenLiveAvatarFacing,
+} from "./zenLiveAvatarDepth";
+import {
   applyPrismBotLinkBackspace,
   applyPrismBotLinkBoundaryDelete,
 } from "./botMentionTipTapBackspace";
@@ -2172,10 +2179,6 @@ const MOBILE_SIDEBAR_SWIPE_VERTICAL_CANCEL_PX = 44;
 const MOBILE_SIDEBAR_SWIPE_DIRECTION_RATIO = 1.25;
 const PRISM_ZEN_LIVE_BOT_AVATAR_POSITION_STORAGE_KEY =
   "prism_zen_live_bot_avatar_position_v1";
-const PRISM_ZEN_LIVE_BOT_AVATAR_LEGACY_SIZE_STORAGE_KEY =
-  "prism_zen_live_bot_avatar_size_v1";
-const PRISM_ZEN_LIVE_BOT_AVATAR_SIZE_STORAGE_KEY =
-  "prism_zen_live_bot_avatar_size_v2";
 /** Local marker for the next/active Zen session boundary. */
 const PRISM_ZEN_SESSION_BREAK_STORAGE_KEY = "prism_zen_session_break_v1";
 /** Stores custom short-term memory bubble positions by scope and memory id. */
@@ -2809,21 +2812,8 @@ function persistMemoryBubbleLayouts(layouts: MemoryBubbleLayoutByScope): void {
 }
 
 const ZEN_LIVE_BOT_AVATAR_VIEWPORT_MARGIN_PX = 14;
-const ZEN_LIVE_BOT_AVATAR_MIN_SIZE_PX = 94;
 const ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX = 184;
-const ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX = 240;
 const BOT_AVATAR_MICRO_FALLBACK_MAX_PX = 118;
-const ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX = 480;
-// The authored default is also the ceiling: it already reads as a dominant
-// presence without allowing the chassis to crowd the room any further.
-const ZEN_LIVE_BOT_AVATAR_MAX_SIZE_PX = 480;
-const ZEN_LIVE_BOT_AVATAR_SIZE_STEP_PX = 24;
-const ZEN_LIVE_BOT_AVATAR_LEGACY_MIN_SIZE_PX = 118;
-const ZEN_LIVE_BOT_AVATAR_LEGACY_MAX_SIZE_PX = 300;
-const ZEN_LIVE_BOT_AVATAR_LEGACY_MIGRATED_MAX_SIZE_PX = 480;
-const ZEN_LIVE_BOT_PROSE_WIDTH_MIN_PX = 680;
-const ZEN_LIVE_BOT_PROSE_WIDTH_DEFAULT_PX = 860;
-const ZEN_LIVE_BOT_PROSE_WIDTH_MAX_PX = 980;
 const PRISM_APP_CUSTOM_CURSOR_ENABLED = false;
 const PRISM_APP_CURSOR_BODY_CLASS = "prismAppCursorActive";
 const PRISM_APP_CURSOR_DARK_BODY_CLASS = "prismAppCursorThemeDark";
@@ -3129,155 +3119,6 @@ function persistZenLiveBotAvatarPosition(
   } catch {
     // localStorage can throw (privacy mode, quota); non-fatal.
   }
-}
-
-function normalizeZenLiveBotAvatarSizePx(value: unknown): number {
-  if (
-    value === null ||
-    value === undefined ||
-    (typeof value === "string" && value.trim() === "")
-  ) {
-    return ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX;
-  }
-  const numeric = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(numeric)) return ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX;
-  const bounded = Math.max(
-    ZEN_LIVE_BOT_AVATAR_MIN_SIZE_PX,
-    Math.min(
-      ZEN_LIVE_BOT_AVATAR_MAX_SIZE_PX,
-      Math.round(numeric * 10) / 10,
-    ),
-  );
-  if (
-    bounded > ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX &&
-    bounded < ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX
-  ) {
-    const gapMidpoint =
-      (ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX +
-        ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX) /
-      2;
-    return bounded < gapMidpoint
-      ? ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX
-      : ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX;
-  }
-  return bounded;
-}
-
-function resizeZenLiveBotAvatarSizePx(
-  value: unknown,
-  direction: "grow" | "shrink",
-): number {
-  const current = normalizeZenLiveBotAvatarSizePx(value);
-  // The full and mini chassis have intentionally separate authored ranges.
-  // Cross that gap explicitly so repeated size steps cannot get stuck at the
-  // smallest full avatar or largest mini avatar.
-  if (
-    direction === "shrink" &&
-    current === ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX
-  ) {
-    return ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX;
-  }
-  if (
-    direction === "grow" &&
-    current === ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX
-  ) {
-    return ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX;
-  }
-  return normalizeZenLiveBotAvatarSizePx(
-    current +
-      (direction === "grow"
-        ? ZEN_LIVE_BOT_AVATAR_SIZE_STEP_PX
-        : -ZEN_LIVE_BOT_AVATAR_SIZE_STEP_PX),
-  );
-}
-
-function migrateLegacyZenLiveBotAvatarSizePx(value: unknown): number {
-  const numeric = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(numeric)) return ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX;
-  const legacySize = Math.max(
-    ZEN_LIVE_BOT_AVATAR_LEGACY_MIN_SIZE_PX,
-    Math.min(ZEN_LIVE_BOT_AVATAR_LEGACY_MAX_SIZE_PX, numeric),
-  );
-  if (legacySize <= ZEN_LIVE_BOT_AVATAR_LEGACY_MIN_SIZE_PX) {
-    return ZEN_LIVE_BOT_AVATAR_LEGACY_MIN_SIZE_PX;
-  }
-  const legacyProgress =
-    (legacySize - ZEN_LIVE_BOT_AVATAR_LEGACY_MIN_SIZE_PX) /
-    (ZEN_LIVE_BOT_AVATAR_LEGACY_MAX_SIZE_PX -
-      ZEN_LIVE_BOT_AVATAR_LEGACY_MIN_SIZE_PX);
-  return normalizeZenLiveBotAvatarSizePx(
-    ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX +
-      legacyProgress *
-        (ZEN_LIVE_BOT_AVATAR_LEGACY_MIGRATED_MAX_SIZE_PX -
-          ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX),
-  );
-}
-
-function zenLiveBotAvatarRenderMode(
-  avatarSizePx: number,
-): "mini" | "full" {
-  return normalizeZenLiveBotAvatarSizePx(avatarSizePx) <=
-    ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX
-    ? "mini"
-    : "full";
-}
-
-function readZenLiveBotAvatarSizePx(): number {
-  if (typeof window === "undefined") return ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX;
-  try {
-    const raw = window.localStorage.getItem(
-      PRISM_ZEN_LIVE_BOT_AVATAR_SIZE_STORAGE_KEY,
-    );
-    if (raw !== null) return normalizeZenLiveBotAvatarSizePx(raw);
-    const legacyRaw = window.localStorage.getItem(
-      PRISM_ZEN_LIVE_BOT_AVATAR_LEGACY_SIZE_STORAGE_KEY,
-    );
-    if (legacyRaw !== null) {
-      const migrated = migrateLegacyZenLiveBotAvatarSizePx(legacyRaw);
-      window.localStorage.setItem(
-        PRISM_ZEN_LIVE_BOT_AVATAR_SIZE_STORAGE_KEY,
-        String(migrated),
-      );
-      return migrated;
-    }
-  } catch {
-    // localStorage can throw (privacy mode, quota); non-fatal.
-  }
-  return ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX;
-}
-
-function persistZenLiveBotAvatarSizePx(sizePx: number): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(
-      PRISM_ZEN_LIVE_BOT_AVATAR_SIZE_STORAGE_KEY,
-      String(normalizeZenLiveBotAvatarSizePx(sizePx)),
-    );
-  } catch {
-    // localStorage can throw (privacy mode, quota); non-fatal.
-  }
-}
-
-function resolveZenLiveBotProseWidthPx(avatarSizePx: number): number {
-  const normalizedSize = normalizeZenLiveBotAvatarSizePx(avatarSizePx);
-  if (normalizedSize === ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX)
-    return ZEN_LIVE_BOT_PROSE_WIDTH_DEFAULT_PX;
-  if (zenLiveBotAvatarRenderMode(normalizedSize) === "mini")
-    return ZEN_LIVE_BOT_PROSE_WIDTH_MAX_PX;
-  const sizeProgress =
-    (normalizedSize - ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX) /
-    (ZEN_LIVE_BOT_AVATAR_MAX_SIZE_PX -
-      ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX);
-  const width =
-    ZEN_LIVE_BOT_PROSE_WIDTH_MAX_PX -
-    sizeProgress *
-      (ZEN_LIVE_BOT_PROSE_WIDTH_MAX_PX - ZEN_LIVE_BOT_PROSE_WIDTH_MIN_PX);
-  return Math.round(
-    Math.max(
-      ZEN_LIVE_BOT_PROSE_WIDTH_MIN_PX,
-      Math.min(ZEN_LIVE_BOT_PROSE_WIDTH_MAX_PX, width),
-    ),
-  );
 }
 
 function measureZenLiveBotAvatarBounds(
@@ -32254,7 +32095,6 @@ function ZenLiveBotPresencePlate({
   atmosphereActive,
   privateModeActive = false,
   muteLiveAvatarSfx = false,
-  avatarSizePx,
   voiceLightTarget,
   voiceBusGain,
   identityPresentationBlackout = false,
@@ -32280,7 +32120,6 @@ function ZenLiveBotPresencePlate({
   privateModeActive?: boolean;
   /** When true, stop live Avatar SFX so Studio preview audio does not stack. */
   muteLiveAvatarSfx?: boolean;
-  avatarSizePx: number;
   voiceLightTarget?: string;
   voiceBusGain: number;
   identityPresentationBlackout?: boolean;
@@ -32292,14 +32131,6 @@ function ZenLiveBotPresencePlate({
   const liveBotGlyphName: BotGlyphName = bot
     ? resolveCustomBotGlyph(bot.glyph)
     : defaultPrismGlyph;
-  const bodySize = normalizeZenLiveBotAvatarSizePx(avatarSizePx);
-  const avatarRenderMode = zenLiveBotAvatarRenderMode(bodySize);
-  const dominantFullAvatar =
-    avatarRenderMode === "full" && bodySize >= ZEN_LIVE_BOT_AVATAR_MAX_SIZE_PX;
-  const bodyScale =
-    avatarRenderMode === "full"
-      ? bodySize / ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX
-      : 1;
   const bodyPlacement = ZEN_LIVE_BOT_LOCKED_BODY_PLACEMENT;
   const avatarRef = useRef<HTMLDivElement | null>(null);
   const avatarDragRef = useRef<ZenLiveBotAvatarDragState | null>(null);
@@ -32310,6 +32141,23 @@ function ZenLiveBotPresencePlate({
     useState<ZenLiveBotAvatarPosition | null>(() =>
       readZenLiveBotAvatarPosition(),
     );
+  const [, setAvatarDepthMode] = useState<ZenLiveAvatarDepthMode>("mini");
+  const avatarDepthRef = useRef(
+    resolveZenLiveAvatarDepth({
+      y: 0,
+      viewportHeight: 1,
+      previousMode: "mini",
+    }),
+  );
+  const avatarDepth = avatarDepthRef.current;
+  const bodySize = avatarDepth.sizePx;
+  const avatarRenderMode = avatarDepth.mode;
+  const dominantFullAvatar =
+    avatarRenderMode === "full" && bodySize >= 470;
+  const bodyScale =
+    avatarRenderMode === "full"
+      ? bodySize / ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX
+      : 1;
   const avatarPositionRef = useRef<ZenLiveBotAvatarPosition | null>(
     avatarPosition,
   );
@@ -32324,15 +32172,26 @@ function ZenLiveBotPresencePlate({
   >("on");
   const avatarScreenPowerRef = useRef(avatarScreenPower);
   const avatarScreenWarmupTimeoutRef = useRef<number | null>(null);
-  const [avatarMetalRotation, setAvatarMetalRotation] = useState(0);
-  const [avatarScreenGlare, setAvatarScreenGlare] =
-    useState<ZenLiveBotScreenGlareState>(ZEN_LIVE_BOT_SCREEN_GLARE_DEFAULT);
+  const avatarScreenGlareRef = useRef<ZenLiveBotScreenGlareState>(
+    ZEN_LIVE_BOT_SCREEN_GLARE_DEFAULT,
+  );
   const [avatarCopyOffsetX, setAvatarCopyOffsetX] = useState(0);
   const [avatarCopyPlacement, setAvatarCopyPlacement] =
     useState<ZenLiveBotActionCopyPlacement>("bottom");
   const [avatarCanvasSide, setAvatarCanvasSide] =
-    useState<ZenLiveBotCanvasSide>("left");
+    useState<ZenLiveBotCanvasSide>(() =>
+      avatarPosition && typeof window !== "undefined"
+        ? zenLiveBotCanvasSideFromCenterX(
+            avatarPosition.x + ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX / 2,
+            window.innerWidth,
+          )
+        : "left",
+    );
   const avatarCanvasSideRef = useRef(avatarCanvasSide);
+  const [avatarFacing, setAvatarFacing] = useState<ZenLiveAvatarFacing>(
+    zenLiveBotFacingForCanvasSide(avatarCanvasSide),
+  );
+  const avatarFacingRef = useRef(avatarFacing);
   const [actionCopyAnchor, setActionCopyAnchor] =
     useState<ZenLiveBotActionCopyAnchor | null>(null);
   const transitioning = presencePhase !== "stable";
@@ -32384,6 +32243,92 @@ function ZenLiveBotPresencePlate({
     avatarPositionRef.current = avatarPosition;
   }, [avatarPosition]);
 
+  const updateAvatarDepthForPosition = useCallback(
+    (position: ZenLiveBotAvatarPosition): void => {
+      if (typeof window === "undefined") return;
+      const previousMode = avatarDepthRef.current.mode;
+      const nextDepth = resolveZenLiveAvatarDepth({
+        y: position.y,
+        viewportHeight: window.innerHeight,
+        previousMode,
+      });
+      avatarDepthRef.current = nextDepth;
+      const node = avatarRef.current;
+      if (node) {
+        const sizePx = nextDepth.sizePx;
+        node.style.setProperty("--zen-live-bot-avatar-size", `${sizePx}px`);
+        node.style.setProperty(
+          "--zen-live-bot-mini-size",
+          `${Math.min(sizePx, ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX)}px`,
+        );
+        node.style.setProperty(
+          "--zen-live-bot-user-scale",
+          (sizePx / ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX).toFixed(4),
+        );
+        node.style.setProperty(
+          "--zen-live-bot-copy-center-anchor",
+          `${Math.round(sizePx * 0.5)}px`,
+        );
+        node.style.setProperty(
+          "--zen-live-bot-copy-vertical-anchor",
+          `${Math.round(sizePx * 0.72)}px`,
+        );
+        node.style.setProperty(
+          "--zen-live-bot-copy-top-anchor",
+          `${Math.round(sizePx * -0.02)}px`,
+        );
+        node.style.setProperty(
+          "--zen-live-bot-copy-side-anchor",
+          `${Math.round(sizePx * 0.42)}px`,
+        );
+        if (nextDepth.mode === "full" && sizePx >= 470) {
+          node.dataset.dominantFullAvatar = "true";
+        } else {
+          delete node.dataset.dominantFullAvatar;
+        }
+      }
+      if (nextDepth.mode !== previousMode) {
+        setAvatarDepthMode(nextDepth.mode);
+      }
+    },
+    [],
+  );
+
+  const orientAvatarForHorizontalTravel = useCallback(
+    (horizontalDeltaPx: number): void => {
+      const nextFacing = resolveZenLiveAvatarFacingForTravel(
+        avatarFacingRef.current,
+        horizontalDeltaPx,
+      );
+      if (nextFacing === avatarFacingRef.current) return;
+      avatarFacingRef.current = nextFacing;
+      const node = avatarRef.current;
+      const facingScaleX = botAvatarScreenFacingScaleX(nextFacing);
+      node
+        ?.querySelectorAll<HTMLElement>(
+          "[data-zen-live-bot-screen-content-rig='true']",
+        )
+        .forEach((screen) => {
+          screen.style.setProperty(
+            "--zen-live-bot-screen-facing-scale-x",
+            facingScaleX,
+          );
+        });
+      node
+        ?.querySelectorAll<HTMLElement>("[data-chat-mini-bot-avatar='true']")
+        .forEach((mini) => {
+          mini.style.setProperty(
+            "--chat-mini-bot-upper-screen-facing-scale-x",
+            facingScaleX,
+          );
+        });
+      // The live screen turns before its plate position is written below.
+      // React then records that already-visible direction for the next render.
+      setAvatarFacing(nextFacing);
+    },
+    [],
+  );
+
   useLayoutEffect(() => {
     const node = avatarRef.current;
     if (!node || !avatarPosition) return;
@@ -32395,7 +32340,6 @@ function ZenLiveBotPresencePlate({
     (
       previousPosition: ZenLiveBotAvatarPosition | null,
       nextPosition: ZenLiveBotAvatarPosition,
-      presentationOnly = false,
     ): void => {
       const nextRotation = advanceZenLiveBotAvatarMetalRotationDegrees(
         avatarMetalRotationRef.current,
@@ -32404,16 +32348,35 @@ function ZenLiveBotPresencePlate({
       );
       if (nextRotation === avatarMetalRotationRef.current) return;
       avatarMetalRotationRef.current = nextRotation;
-      if (!presentationOnly) {
-        setAvatarMetalRotation(nextRotation);
-      }
+      avatarRef.current?.style.setProperty(
+        "--bot-face-metal-light-rotation",
+        `${nextRotation.toFixed(2)}deg`,
+      );
     },
     [],
   );
 
   const applyAvatarScreenGlare = useCallback(
-    (next: ZenLiveBotScreenGlareState, presentationOnly = false): void => {
-      if (!presentationOnly) setAvatarScreenGlare(next);
+    (next: ZenLiveBotScreenGlareState): void => {
+      avatarScreenGlareRef.current = next;
+      const node = avatarRef.current;
+      if (!node) return;
+      node.style.setProperty(
+        "--bot-face-screen-glare-x",
+        `${next.xPct.toFixed(2)}%`,
+      );
+      node.style.setProperty(
+        "--bot-face-screen-glare-y",
+        `${next.yPct.toFixed(2)}%`,
+      );
+      node.style.setProperty(
+        "--bot-face-screen-glare-angle",
+        `${next.angleDeg.toFixed(2)}deg`,
+      );
+      node.style.setProperty(
+        "--bot-face-screen-glare-opacity",
+        next.opacity.toFixed(3),
+      );
     },
     [],
   );
@@ -32458,27 +32421,28 @@ function ZenLiveBotPresencePlate({
     ): ZenLiveBotAvatarPosition => {
       const node = avatarRef.current;
       if (typeof window === "undefined" || !node) {
+        updateAvatarDepthForPosition(nextPosition);
+        const presented = snapZenLiveAvatarPositionForPresentation(nextPosition);
         const previousPosition = avatarPositionRef.current;
-        avatarPositionRef.current = nextPosition;
-        advanceAvatarMetalRotation(
-          previousPosition,
-          nextPosition,
-          presentationOnly,
+        const presentedSize = avatarDepthRef.current.sizePx;
+        orientAvatarForHorizontalTravel(
+          previousPosition ? presented.x - previousPosition.x : 0,
         );
+        avatarPositionRef.current = presented;
+        advanceAvatarMetalRotation(previousPosition, presented);
         if (typeof window !== "undefined") {
           applyAvatarScreenGlare(
             resolveZenLiveBotScreenGlareState(
-              nextPosition,
-              bodySize,
+              presented,
+              presentedSize,
               window.innerWidth,
               window.innerHeight,
             ),
-            presentationOnly,
           );
         }
-        if (!presentationOnly) setAvatarPosition(nextPosition);
+        if (!presentationOnly) setAvatarPosition(presented);
         if (typeof window !== "undefined") {
-          const avatarCenterX = nextPosition.x + bodySize / 2;
+          const avatarCenterX = presented.x + presentedSize / 2;
           const nextCanvasSide = defaultPrismPresence
             ? zenLiveBotCanvasSideWithHysteresis(
                 avatarCenterX,
@@ -32494,18 +32458,26 @@ function ZenLiveBotPresencePlate({
             setAvatarCanvasSide(nextCanvasSide);
           }
         }
-        if (persist) persistAvatarPositionIfUserRelocated(nextPosition);
-        return nextPosition;
+        if (persist) persistAvatarPositionIfUserRelocated(presented);
+        return presented;
       }
+      // Depth belongs to position, so size the complete plate before reading
+      // its bounds. The same path is used by drag, throw and autonomous roam.
+      updateAvatarDepthForPosition(nextPosition);
       const bounds = measureZenLiveBotAvatarBounds(node);
-      const rootWidth = node.getBoundingClientRect().width || bounds.width;
+      const rootWidth =
+        node.getBoundingClientRect().width ||
+        avatarDepthRef.current.sizePx ||
+        bounds.width;
       const safeAreaInsets = VIEWPORT_SAFE_AREA_DEFAULT_INSETS;
-      const clamped = clampZenLiveBotAvatarPosition(
+      const clamped = snapZenLiveAvatarPositionForPresentation(
+        clampZenLiveBotAvatarPosition(
         nextPosition,
         bounds,
         window.innerWidth,
         window.innerHeight,
         safeAreaInsets,
+        ),
       );
       const avatarCenterX = clamped.x + rootWidth / 2;
       const nextCanvasSide = defaultPrismPresence
@@ -32540,25 +32512,23 @@ function ZenLiveBotPresencePlate({
         );
       }
       const previousPosition = avatarPositionRef.current;
-      advanceAvatarMetalRotation(
-        previousPosition,
-        clamped,
-        presentationOnly,
+      orientAvatarForHorizontalTravel(
+        previousPosition ? clamped.x - previousPosition.x : 0,
       );
+      updateAvatarDepthForPosition(clamped);
+      advanceAvatarMetalRotation(previousPosition, clamped);
       applyAvatarScreenGlare(
         resolveZenLiveBotScreenGlareState(
           clamped,
-          rootWidth,
+          avatarDepthRef.current.sizePx || rootWidth,
           window.innerWidth,
           window.innerHeight,
         ),
-        presentationOnly,
       );
       avatarPositionRef.current = clamped;
-      if (presentationOnly) {
-        node.style.setProperty("--zen-live-bot-avatar-x", `${clamped.x}px`);
-        node.style.setProperty("--zen-live-bot-avatar-y", `${clamped.y}px`);
-      } else {
+      node.style.setProperty("--zen-live-bot-avatar-x", `${clamped.x}px`);
+      node.style.setProperty("--zen-live-bot-avatar-y", `${clamped.y}px`);
+      if (!presentationOnly && previousPosition === null) {
         setAvatarPosition(clamped);
       }
       if (persist) persistAvatarPositionIfUserRelocated(clamped);
@@ -32567,9 +32537,10 @@ function ZenLiveBotPresencePlate({
     [
       advanceAvatarMetalRotation,
       applyAvatarScreenGlare,
-      bodySize,
       defaultPrismPresence,
+      orientAvatarForHorizontalTravel,
       persistAvatarPositionIfUserRelocated,
+      updateAvatarDepthForPosition,
     ],
   );
 
@@ -32807,10 +32778,14 @@ function ZenLiveBotPresencePlate({
         clientY,
         _timeStamp,
       );
-      setAvatarPositionClamped({
-        x: clientX - dragState.offsetX,
-        y: clientY - dragState.offsetY,
-      });
+      setAvatarPositionClamped(
+        {
+          x: clientX - dragState.offsetX,
+          y: clientY - dragState.offsetY,
+        },
+        false,
+        true,
+      );
       return true;
     },
     [setAvatarPositionClamped],
@@ -33296,8 +33271,7 @@ function ZenLiveBotPresencePlate({
   const faceSpinnerVisible =
     !botFaceThinkingSpinnerDisabled(faceStyle.thinkingFrames) &&
     (showThinkingSpinner || transitioning);
-  const avatarFacing = zenLiveBotFacingForCanvasSide(avatarCanvasSide);
-  const faceScaleY = zenLiveBotFaceScaleYForCanvasSide(avatarCanvasSide);
+  const faceScaleY = avatarFacing === "left" ? "1" : "-1";
   const botAccent = defaultPrismPresence
     ? prismDefaultAccentStyle(resolvedTheme)
     : botAccentStyle(bot?.color, resolvedTheme, privateModeActive);
@@ -33330,15 +33304,16 @@ function ZenLiveBotPresencePlate({
     "--zen-live-bot-copy-side-anchor": `${Math.round(bodySize * 0.42)}px`,
     "--zen-live-bot-glyph-x-anchor": "0px",
     // The authored mannequin is scaled as one rigid canvas. Keep its buckle
-    // anchor in that canonical canvas so outer user scaling cannot move the
+    // anchor in that canonical canvas so outer depth scaling cannot move the
     // glyph down the chassis a second time.
     "--zen-live-bot-glyph-y-anchor":
       "calc(var(--zen-live-bot-avatar-render-size) * 0.37)",
-    "--bot-face-metal-light-rotation": `${avatarMetalRotation.toFixed(2)}deg`,
-    "--bot-face-screen-glare-x": `${avatarScreenGlare.xPct.toFixed(2)}%`,
-    "--bot-face-screen-glare-y": `${avatarScreenGlare.yPct.toFixed(2)}%`,
-    "--bot-face-screen-glare-angle": `${avatarScreenGlare.angleDeg.toFixed(2)}deg`,
-    "--bot-face-screen-glare-opacity": avatarScreenGlare.opacity.toFixed(3),
+    "--bot-face-metal-light-rotation": `${avatarMetalRotationRef.current.toFixed(2)}deg`,
+    "--bot-face-screen-glare-x": `${avatarScreenGlareRef.current.xPct.toFixed(2)}%`,
+    "--bot-face-screen-glare-y": `${avatarScreenGlareRef.current.yPct.toFixed(2)}%`,
+    "--bot-face-screen-glare-angle": `${avatarScreenGlareRef.current.angleDeg.toFixed(2)}deg`,
+    "--bot-face-screen-glare-opacity":
+      avatarScreenGlareRef.current.opacity.toFixed(3),
   } as React.CSSProperties;
   const actionCopyStyle = actionCopyAnchorForRender
     ? ({
@@ -33432,7 +33407,7 @@ function ZenLiveBotPresencePlate({
         identityPresentationBlackout ? "true" : undefined
       }
       data-body-sized="true"
-      data-user-avatar-scale="true"
+      data-depth-scaled="true"
       data-avatar-render-mode={avatarRenderMode}
       data-dominant-full-avatar={dominantFullAvatar ? "true" : undefined}
       data-zen-live-bot-presence-plate="true"
@@ -48134,9 +48109,6 @@ function HomeContent(): React.JSX.Element {
     useState<Message | null>(null);
   const [zenLiveBotAction, setZenLiveBotAction] =
     useState<ZenLiveBotActionState | null>(null);
-  const [zenLiveBotAvatarSizePx, setZenLiveBotAvatarSizePx] = useState<number>(
-    () => readZenLiveBotAvatarSizePx(),
-  );
   const zenLiveBotActionRef = useRef<ZenLiveBotActionState | null>(null);
   const zenLiveActionRequestSeqRef = useRef(0);
   const zenLiveActionAbortRef = useRef<AbortController | null>(null);
@@ -49116,19 +49088,20 @@ function HomeContent(): React.JSX.Element {
       if (
         keyboardShortcutMatchesEvent(keyboardShortcuts.providerMode, event)
       ) {
-        if (!settings) {
+        const active = findVisiblePrismShortcutTrigger(
+          '[data-prism-provider-mode-trigger="true"]',
+        );
+        if (!active) {
           event.preventDefault();
           event.stopPropagation();
           playPrismHotkeyInaccessibleSfx();
           return;
         }
-        const nextProvider =
-          settings.preferredProvider === "local" ? "openai" : "local";
-        if (nextProvider === settings.preferredProvider) return;
         event.preventDefault();
         event.stopPropagation();
         revealAppNavbarForShortcutAction();
-        void switchProvider(nextProvider);
+        active.focus();
+        active.click();
         return;
       }
 
@@ -50311,7 +50284,7 @@ function HomeContent(): React.JSX.Element {
   const chatPresentation = chatPresentationForSurface(view, sidebarOpen);
   useEffect(() => {
     revealAppNavbarForFreshSurface();
-    // Auto-hide (idle + Wield tuck) is Zen-only for now.
+    // Idle auto-hide and the Wield visibility hold are Zen-only for now.
     const zenAutoHide = chatPresentation === "zen";
     setAppNavbarAutoHideEnabled(zenAutoHide);
     if (zenAutoHide) armAppNavbarAutoHide();
@@ -57568,6 +57541,9 @@ function HomeContent(): React.JSX.Element {
             <button
               key={mode}
               type="button"
+              data-prism-provider-mode-trigger={
+                responseMode !== mode ? "true" : undefined
+              }
               className={`${styles.autoModeOption} ${
                 responseMode === mode ? styles.autoModeOptionActive : ""
               }`}
@@ -57859,6 +57835,9 @@ function HomeContent(): React.JSX.Element {
               <button
                 key={mode}
                 type="button"
+                data-prism-provider-mode-trigger={
+                  responseMode !== mode ? "true" : undefined
+                }
                 className={`${styles.autoModeOption} ${
                   responseMode === mode ? styles.autoModeOptionActive : ""
                 }`}
@@ -57912,6 +57891,7 @@ function HomeContent(): React.JSX.Element {
       >
         <button
           type="button"
+          data-prism-provider-mode-trigger="true"
           className={`${styles.modeToggleTrack} ${
             providerDisabled ? styles.modeToggleTrackLocked : ""
           }`}
@@ -73191,9 +73171,6 @@ function HomeContent(): React.JSX.Element {
           "--zen-tone-gap-extra": `${Math.round(zenToneSpace * 64)}px`,
           "--zen-tone-runway-extra": `${Math.round(zenToneSpace * 112)}px`,
           "--zen-tone-scroll-margin-extra": `${Math.round(zenToneSpace * 112)}px`,
-          "--zen-live-bot-prose-width": `${resolveZenLiveBotProseWidthPx(
-            zenLiveBotAvatarSizePx,
-          )}px`,
         }
       : {};
     const merged = { ...lensThumb, ...homeVars, ...zenToneVars };
@@ -73205,7 +73182,6 @@ function HomeContent(): React.JSX.Element {
     emptyStateLensVisible,
     homeRainbowVars,
     lensThumbXPct,
-    zenLiveBotAvatarSizePx,
     zenToneSpace,
   ]);
   const showCanvasBotSwitchLoading =
@@ -86031,7 +86007,6 @@ function HomeContent(): React.JSX.Element {
                     identityPresentationOccurredAt={
                       zenLivePresenceIdentityShapeshiftState?.occurredAt
                     }
-                    avatarSizePx={zenLiveBotAvatarSizePx}
                     voiceLightTarget={botVoiceLightTarget(
                       "chat",
                       detail?.id ?? selectedId ?? "pending",
@@ -88594,54 +88569,6 @@ function HomeContent(): React.JSX.Element {
     },
     [closeMessageContextOverlay],
   );
-
-  const resizeZenLiveBotAvatar = useCallback(
-    (direction: "grow" | "shrink"): void => {
-      setZenLiveBotAvatarSizePx((current) => {
-        const next = resizeZenLiveBotAvatarSizePx(current, direction);
-        if (next !== current) persistZenLiveBotAvatarSizePx(next);
-        return next;
-      });
-    },
-    [],
-  );
-
-  useEffect(() => {
-    const handler = (event: KeyboardEvent): void => {
-      if (
-        event.repeat ||
-        !chatLikeSurface ||
-        !zenLivePresenceRailVisible ||
-        zenCanvasBotSuppressedForPanel ||
-        eventTargetIsTextEditable(event.target) ||
-        event.altKey ||
-        (event.metaKey && event.ctrlKey) ||
-        (!event.metaKey && !event.ctrlKey)
-      ) {
-        return;
-      }
-      const grow =
-        event.key === "+" ||
-        event.key === "=" ||
-        event.code === "NumpadAdd";
-      const shrink = event.key === "-" || event.code === "NumpadSubtract";
-      if (!grow && !shrink) return;
-      event.preventDefault();
-      event.stopPropagation();
-      resizeZenLiveBotAvatar(grow ? "grow" : "shrink");
-    };
-    // The global browser-shortcut guard also owns Mod +/- at window capture.
-    // Listen at that same boundary so Zen can claim the already-reserved keys
-    // regardless of effect registration order; stopPropagation does not block
-    // sibling listeners on the same EventTarget.
-    window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
-  }, [
-    chatLikeSurface,
-    resizeZenLiveBotAvatar,
-    zenCanvasBotSuppressedForPanel,
-    zenLivePresenceRailVisible,
-  ]);
 
   const openConversationGroupContextMenu = useCallback(
     (groupKey: string, x: number, y: number) => {
@@ -107418,8 +107345,6 @@ function HomeContent(): React.JSX.Element {
     if (!zenLiveBotContextMenu) return null;
     const bot = zenLivePresenceBot;
     const botName = bot?.name?.trim() || "Prism";
-    const canGrow = zenLiveBotAvatarSizePx < ZEN_LIVE_BOT_AVATAR_MAX_SIZE_PX;
-    const canShrink = zenLiveBotAvatarSizePx > ZEN_LIVE_BOT_AVATAR_MIN_SIZE_PX;
     const canEdit = Boolean(bot) || Boolean(settings);
     const openZenAvatarCustomizer = (): void => {
       if (bot) {
@@ -107431,41 +107356,6 @@ function HomeContent(): React.JSX.Element {
     };
     const entries: PrismMenuEntry[] = [
       {
-        id: "grow",
-        icon: <Plus />,
-        label: "Grow",
-        description: "Cmd/Ctrl +",
-        disabled: !canGrow,
-        disabledReason: !canGrow ? "Avatar is at its maximum size." : undefined,
-        onSelect: () => resizeZenLiveBotAvatar("grow"),
-      },
-      {
-        id: "shrink",
-        icon: <Minus />,
-        label: "Shrink",
-        description: "Cmd/Ctrl -",
-        disabled: !canShrink,
-        disabledReason: !canShrink
-          ? "Avatar is at its minimum size."
-          : undefined,
-        onSelect: () => resizeZenLiveBotAvatar("shrink"),
-      },
-    ];
-    if (zenLiveBotAvatarSizePx !== ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX) {
-      entries.push({
-        id: "reset-size",
-        icon: <RotateCcw />,
-        label: "Reset size",
-        description: `${ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX}px default`,
-        onSelect: () => {
-          setZenLiveBotAvatarSizePx(ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX);
-          persistZenLiveBotAvatarSizePx(ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX);
-        },
-      });
-    }
-    entries.push(
-      { id: "avatar-separator", kind: "separator" },
-      {
         id: "edit-avatar",
         icon: <PencilLine />,
         label: "Edit avatar",
@@ -107475,7 +107365,7 @@ function HomeContent(): React.JSX.Element {
           : undefined,
         onSelect: openZenAvatarCustomizer,
       },
-    );
+    ];
     const boundaryBottom = contextMenuComposerBoundaryY();
     return (
       <PrismMenuSurface
@@ -136154,6 +136044,7 @@ function HomeContent(): React.JSX.Element {
       >
         <button
           type="button"
+          data-prism-provider-mode-trigger="true"
           className={`${styles.modeToggleTrack} ${
             providerDisabled ? styles.modeToggleTrackLocked : ""
           }`}
@@ -137357,6 +137248,9 @@ function HomeContent(): React.JSX.Element {
                     <button
                       key={mode}
                       type="button"
+                      data-prism-provider-mode-trigger={
+                        debateNavbarResponseMode !== mode ? "true" : undefined
+                      }
                       className={`${styles.autoModeOption} ${
                         debateNavbarResponseMode === mode
                           ? styles.autoModeOptionActive
@@ -141098,7 +140992,6 @@ function HomeContent(): React.JSX.Element {
                         identityPresentationOccurredAt={
                           zenLivePresenceIdentityShapeshiftState?.occurredAt
                         }
-                        avatarSizePx={zenLiveBotAvatarSizePx}
                         voiceLightTarget={botVoiceLightTarget(
                           "chat",
                           detail?.id ?? selectedId ?? "pending",

@@ -436,13 +436,22 @@ describe("Zen live presence CSS", () => {
       pageSource,
       /"--zen-live-bot-user-scale":\s*bodyScale\.toFixed\(4\)/,
     );
-    assert.match(pageSource, /data-user-avatar-scale="true"/);
+    assert.match(pageSource, /data-depth-scaled="true"/);
     assert.doesNotMatch(pageSource, /readZenLiveBotBodySize/);
     assert.doesNotMatch(pageSource, /readZenLiveBotFacePlacement/);
     assert.doesNotMatch(pageSource, /facePlacementScope/);
   });
 
-  it("uses bounded explicit Zen avatar scaling without wheel capture", () => {
+  it("retires manual Zen avatar resize controls", () => {
+    assert.doesNotMatch(pageSource, /resizeZenLiveBotAvatar/);
+    assert.doesNotMatch(pageSource, /zenLiveBotAvatarSizePx/);
+    assert.doesNotMatch(pageSource, /label: "Grow"/);
+    assert.doesNotMatch(pageSource, /label: "Shrink"/);
+    assert.match(pageSource, /data-depth-scaled="true"/);
+  });
+
+  /* Legacy assertions retained below as an inert migration record.
+  it("legacy manual Zen avatar resize controls", () => {
     assert.match(
       pageSource,
       /const PRISM_ZEN_LIVE_BOT_AVATAR_LEGACY_SIZE_STORAGE_KEY =\s+"prism_zen_live_bot_avatar_size_v1";/,
@@ -589,7 +598,7 @@ describe("Zen live presence CSS", () => {
 
     const rigidScaleRule = ruleForSelectorNeedlesWithBody(
       [
-        '.zenLiveBotPresencePlate[data-user-avatar-scale="true"][data-avatar-render-mode="full"]',
+        '.zenLiveBotPresencePlate[data-depth-scaled="true"][data-avatar-render-mode="full"]',
         "> .botAmbientPresenceRig",
       ],
       "--zen-live-bot-avatar-size",
@@ -624,7 +633,7 @@ describe("Zen live presence CSS", () => {
       "--zen-live-bot-mini-size",
     );
     assert.match(compactScaleRule, /transform:\s*none\s*;/);
-  });
+  }); */
 
   it("keeps body raster and face as fixed non-editable layers", () => {
     const bodyRule = ruleForExactSelector(".zenLiveBotPresenceBody");
@@ -1822,23 +1831,23 @@ describe("Zen live presence CSS", () => {
     assert.match(pageSource, /return currentDegrees \+ rotationDelta;/);
     assert.match(
       pageSource,
-      /"--bot-face-metal-light-rotation":\s*`\$\{avatarMetalRotation\.toFixed\(2\)\}deg`/,
+      /"--bot-face-metal-light-rotation":\s*`\$\{avatarMetalRotationRef\.current\.toFixed\(2\)\}deg`/,
     );
     assert.match(
       pageSource,
-      /"--bot-face-screen-glare-x":\s*`\$\{avatarScreenGlare\.xPct\.toFixed\(2\)\}%`/,
+      /"--bot-face-screen-glare-x":\s*`\$\{avatarScreenGlareRef\.current\.xPct\.toFixed\(2\)\}%`/,
     );
     assert.match(
       pageSource,
-      /"--bot-face-screen-glare-y":\s*`\$\{avatarScreenGlare\.yPct\.toFixed\(2\)\}%`/,
+      /"--bot-face-screen-glare-y":\s*`\$\{avatarScreenGlareRef\.current\.yPct\.toFixed\(2\)\}%`/,
     );
     assert.match(
       pageSource,
-      /"--bot-face-screen-glare-angle":\s*`\$\{avatarScreenGlare\.angleDeg\.toFixed\(2\)\}deg`/,
+      /"--bot-face-screen-glare-angle":\s*`\$\{avatarScreenGlareRef\.current\.angleDeg\.toFixed\(2\)\}deg`/,
     );
     assert.match(
       pageSource,
-      /"--bot-face-screen-glare-opacity":\s*avatarScreenGlare\.opacity\.toFixed\(3\)/,
+      /"--bot-face-screen-glare-opacity":\s*avatarScreenGlareRef\.current\.opacity\.toFixed\(3\)/,
     );
     assert.doesNotMatch(pageSource, /--bot-face-metal-grain-rotation/);
     assert.doesNotMatch(pageSource, /BotFaceScreenTexture/);
@@ -4494,7 +4503,10 @@ describe("Zen live presence CSS", () => {
     assert.match(plateRule, /rotate\(var\(--zen-live-bot-motion-tilt\)\)/);
     assert.match(plateRule, /will-change:\s*transform\s*;/);
     assert.match(pageSource, /setAvatarPositionClamped\([\s\S]{0,140}true,\s*\);/);
-    assert.match(pageSource, /if \(presentationOnly\) \{[\s\S]{0,220}\} else \{\s*setAvatarPosition\(clamped\);/);
+    assert.match(pageSource, /node\.style\.setProperty\("--zen-live-bot-avatar-x"/);
+    assert.match(pageSource, /if \(!presentationOnly && previousPosition === null\) \{\s*setAvatarPosition\(clamped\);/);
+    assert.match(pageSource, /"--bot-face-metal-light-rotation"/);
+    assert.match(pageSource, /"--bot-face-screen-glare-angle"/);
     assert.match(pageSource, /node\.style\.setProperty\("--zen-live-bot-avatar-x"/);
     assert.match(pageSource, /avatarCanvasSideRef\.current !== nextCanvasSide/);
     assert.match(css, /data-free-roam-motion="moving"[\s\S]*--bot-ambient-underglow-rest-opacity/);
