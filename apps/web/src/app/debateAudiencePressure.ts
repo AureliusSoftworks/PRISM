@@ -213,15 +213,47 @@ export function debateAudienceOrderCallMix(
   );
 }
 
+/**
+ * A few people keep whispering after the first call to order. This residual
+ * target keeps both room air and crosstalk alive before the final settle.
+ */
+export function debateAudienceOrderStragglerMix(
+  formality: DebateFormalityId,
+): SessionAtmosphereMix {
+  return scaleMixBed(
+    {
+      background: 0.17,
+      grain: 0.055,
+      foley: DEBATE_AUDIENCE_PRESSURE_MIX_ANCHORS.settled.foley,
+    },
+    debateAudienceFormalityLoudness(formality),
+  );
+}
+
 /** Hold the rowdy peak under the order call before easing room tone back. */
-export const DEBATE_AUDIENCE_ORDER_PEAK_HOLD_MS = 1_350;
+export const DEBATE_AUDIENCE_ORDER_PEAK_HOLD_MS = 1_650;
 
-/** Ease from order-call peak back toward settled room tone. */
-export const DEBATE_AUDIENCE_ORDER_RETURN_MS = 2_800;
+/** Ease from order-call peak into the lingering straggler bed. */
+export const DEBATE_AUDIENCE_ORDER_RETURN_MS = 4_200;
 
-/** Continuous pressure-band mix transitions (not the order-call special case). */
-export const DEBATE_AUDIENCE_PRESSURE_MIX_TRANSITION_MS = 1_400;
-export const DEBATE_AUDIENCE_LAYER_CROSSFADE_MS = 650;
+/** The order swell is theatrical, but no longer snaps up in half a second. */
+export const DEBATE_AUDIENCE_ORDER_SWELL_MS = 1_200;
+
+/** Crowd pressure has inertia; calming the room takes longer than heating it. */
+export const DEBATE_AUDIENCE_PRESSURE_RISE_MS = 2_800;
+export const DEBATE_AUDIENCE_PRESSURE_FALL_MS = 4_200;
+export const DEBATE_AUDIENCE_LAYER_CROSSFADE_MS = 2_200;
+
+export function debateAudiencePressureMixTransitionMs(args: {
+  previousScore: number;
+  nextScore: number;
+}): number {
+  const previous = clampPressure(args.previousScore);
+  const next = clampPressure(args.nextScore);
+  return next < previous
+    ? DEBATE_AUDIENCE_PRESSURE_FALL_MS
+    : DEBATE_AUDIENCE_PRESSURE_RISE_MS;
+}
 
 /**
  * Frozen Rowdiness sets the largest believable conversational cluster. Live

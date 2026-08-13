@@ -67,6 +67,41 @@ function deterministicVoiceWave(): Buffer {
   wave.writeUInt32LE(dataLength, 40);
   return wave;
 }
+
+function deterministicJoinTrimVoiceWave(): Buffer {
+  const sampleRate = 1_000;
+  const leadingFrames = 120;
+  const voicedFrames = 100;
+  const trailingFrames = 140;
+  const sampleCount = leadingFrames + voicedFrames + trailingFrames;
+  const dataLength = sampleCount * 2;
+  const wave = Buffer.alloc(44 + dataLength);
+  wave.write("RIFF", 0, "ascii");
+  wave.writeUInt32LE(36 + dataLength, 4);
+  wave.write("WAVE", 8, "ascii");
+  wave.write("fmt ", 12, "ascii");
+  wave.writeUInt32LE(16, 16);
+  wave.writeUInt16LE(1, 20);
+  wave.writeUInt16LE(1, 22);
+  wave.writeUInt32LE(sampleRate, 24);
+  wave.writeUInt32LE(sampleRate * 2, 28);
+  wave.writeUInt16LE(2, 32);
+  wave.writeUInt16LE(16, 34);
+  wave.write("data", 36, "ascii");
+  wave.writeUInt32LE(dataLength, 40);
+  for (
+    let frame = leadingFrames;
+    frame < leadingFrames + voicedFrames;
+    frame += 1
+  ) {
+    wave.writeInt16LE(0x3000, 44 + frame * 2);
+  }
+  return wave;
+}
+
+function deterministicWaveDurationMs(wave: Buffer): number {
+  return Math.round(wave.readUInt32LE(40) / wave.readUInt32LE(28) * 1_000);
+}
 const config = {
   ...getAppConfig(),
   apiPort: 0,
@@ -114,7 +149,9 @@ const server = createServer(
       if (normalizedProfile.systemVoiceName === "Unavailable Test") {
         throw new Error("System voice is still loading.");
       }
-      return deterministicVoiceWave();
+      return text.includes("TRIMFIXTURE")
+        ? deterministicJoinTrimVoiceWave()
+        : deterministicVoiceWave();
     },
   })
 );
@@ -166,6 +203,56 @@ after(() => {
 });
 
 describe("API request integration", () => {
+  it("suggests only eligible library groups through the local auxiliary lane", async () => {
+    const client = createClient();
+    const registered = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "library-group-suggestions@example.com",
+        password: "library-group-suggestions-password",
+      }),
+    );
+    assert.equal(registered.status, 201);
+    const userId = String((await json(registered)).user.id);
+    const created = await client.request(
+      "/api/bots",
+      jsonInit({ name: "Suggested Bot", systemPrompt: "A night archivist." }),
+    );
+    assert.equal(created.status, 201);
+    const botId = String((await json(created)).bot.id);
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT OR IGNORE INTO library_groups
+         (id, user_id, name, description, delete_protected_default, built_in,
+          atmosphere_json, glyph_json, created_at, updated_at)
+       VALUES
+         ('group:eligible-suggestion', ?, 'Night Shift', 'After-dark thinkers.', 0, 0, '{}', '{}', ?, ?),
+         ('group:already-member', ?, 'Already here', '', 0, 0, '{}', '{}', ?, ?),
+         ('builtin:favorites', ?, 'Favorites', '', 0, 1, '{}', '{}', ?, ?)`,
+    ).run(userId, now, now, userId, now, now, userId, now, now);
+    db.prepare(
+      `INSERT INTO library_group_members
+         (user_id, group_id, bot_id, delete_protected_override, added_at, updated_at)
+       VALUES (?, 'group:already-member', ?, NULL, ?, ?),
+              (?, 'builtin:favorites', ?, NULL, ?, ?)`,
+    ).run(userId, botId, now, now, userId, botId, now, now);
+
+    const auxiliaryStart = auxiliaryProviderFactoryCalls.length;
+    const primaryStart = providerFactoryCalls.length;
+    const response = await client.request(
+      "/api/library/groups/suggestions",
+      jsonInit({ botId }),
+    );
+    const payload = await json(response);
+    assert.equal(response.status, 200, JSON.stringify(payload));
+    assert.deepEqual(payload.suggestions, []);
+    assert.equal(providerFactoryCalls.length, primaryStart);
+    assert.equal(auxiliaryProviderFactoryCalls.length, auxiliaryStart + 1);
+    const prompt = deterministicProvider.calls.at(-1)?.[1]?.content ?? "";
+    assert.match(prompt, /group:eligible-suggestion/u);
+    assert.doesNotMatch(prompt, /group:already-member|builtin:favorites/u);
+  });
+
   it("persists exact typed asset generation preferences and excludes General Images", async () => {
     const client = createClient();
     const registered = await client.request(
@@ -4336,7 +4423,7 @@ describe("API request integration", () => {
     assert.equal(builtinVoiceCalls.at(-1)?.pronunciationBase, "en-GB");
 
     const streamedText =
-      "This local reply begins speaking from its first prepared phrase while the remaining sentences continue through one isolated local voice worker.";
+      "TRIMFIXTURE opens this sentence. TRIMFIXTURE holds a meaningful clause safely, and we close the TRIMFIXTURE now.";
     const callsBeforeStream = builtinVoiceCalls.length;
     const streamedResponse = await client.request(
       "/api/voices/synthesize",
@@ -4371,15 +4458,22 @@ describe("API request integration", () => {
       streamedResponse.headers.get("x-prism-voice-engine"),
       "builtin-local-fallback",
     );
+    assert.equal(
+      streamedResponse.headers.get("x-prism-voice-pacing"),
+      "kokoro-punctuation-v1",
+    );
     const streamLines = (await streamedResponse.text())
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line) as {
         index: number;
         characterCount: number;
+        text: string;
+        sourceStart: number;
+        sourceEnd: number;
         audioBase64: string;
       });
-    assert.ok(streamLines.length >= 2);
+    assert.equal(streamLines.length, 3);
     assert.deepEqual(
       builtinVoiceCalls
         .slice(callsBeforeStream)
@@ -4398,6 +4492,84 @@ describe("API request integration", () => {
             .subarray(0, 4)
             .toString() === "RIFF",
       ),
+    );
+    assert.deepEqual(
+      streamLines.map((line) =>
+        deterministicWaveDurationMs(Buffer.from(line.audioBase64, "base64"))
+      ),
+      [260, 180, 280],
+    );
+    assert.deepEqual(
+      streamLines.map((line) =>
+        streamedText.slice(line.sourceStart, line.sourceEnd)
+      ),
+      streamLines.map((line) => line.text),
+    );
+
+    db.prepare(
+      "UPDATE users SET operating_system_voices_enabled = 1 WHERE id = ?",
+    ).run(userId);
+    const systemStreamResponse = await client.request(
+      "/api/voices/synthesize",
+      jsonInit({
+        text: streamedText,
+        mode: "english",
+        engine: "builtin",
+        streamChunks: true,
+        profile: {
+          ...normalizeBotAudioVoiceProfileV1(undefined),
+          systemVoiceName: "Fred",
+        },
+      }),
+    );
+    assert.equal(systemStreamResponse.status, 200);
+    assert.equal(systemStreamResponse.headers.get("x-prism-voice-pacing"), null);
+    const systemStreamLines = (await systemStreamResponse.text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { audioBase64: string });
+    assert.equal(systemStreamLines.length, 1);
+    assert.equal(
+      deterministicWaveDurationMs(
+        Buffer.from(systemStreamLines[0]!.audioBase64, "base64"),
+      ),
+      360,
+    );
+
+    const vocalActionStreamResponse = await client.request(
+      "/api/voices/synthesize",
+      jsonInit({
+        text: "TRIMFIXTURE begins. The TRIMFIXTURE ends.",
+        performanceText:
+          "TRIMFIXTURE begins. *laughs softly* The TRIMFIXTURE ends.",
+        mode: "english",
+        engine: "builtin",
+        streamChunks: true,
+        profile: normalizeBotAudioVoiceProfileV1(undefined),
+      }),
+    );
+    assert.equal(vocalActionStreamResponse.status, 200);
+    assert.equal(
+      vocalActionStreamResponse.headers.get("x-prism-voice-stream"),
+      "wav-chunks-v2",
+    );
+    const vocalActionStreamLines = (await vocalActionStreamResponse.text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    assert.deepEqual(
+      vocalActionStreamLines.map((line) => line.kind),
+      ["speech", "vocal-action", "speech"],
+    );
+    assert.deepEqual(
+      vocalActionStreamLines
+        .filter((line) => line.kind === "speech")
+        .map((line) =>
+          deterministicWaveDurationMs(
+            Buffer.from(String(line.audioBase64), "base64"),
+          )
+        ),
+      [260, 280],
     );
 
     const alignedResponse = await client.request(
@@ -4770,6 +4942,41 @@ describe("API request integration", () => {
       "The room needs a little more care.",
       now,
     );
+    db.prepare(
+      `INSERT INTO botcast_events
+         (id, user_id, episode_id, sequence, kind, payload_json, occurred_at)
+       VALUES (?, ?, ?,
+         (SELECT COALESCE(MAX(sequence), 0) + 1 FROM botcast_events
+           WHERE user_id = ? AND episode_id = ?),
+         'utterance', ?, ?)`,
+    ).run(
+      "signal-mute-performance-voice-event",
+      userId,
+      onlineEpisodeId,
+      userId,
+      onlineEpisodeId,
+      JSON.stringify({
+        messageId: "signal-online-mood-voice-message",
+        speakerRole: "host",
+        botId: "signal-voice-host",
+        mutePerformance: {
+          v: 1,
+          name: "mutePerformance",
+          durationMs: 12_000,
+          periodCount: 12,
+          interrupted: false,
+          elapsedCue: "*12 seconds pass without an audible word.*",
+          reactionBeats: [{
+            atMs: 7_000,
+            reactorBotId: "signal-voice-guest",
+            kind: "audible_quip",
+            action: "look_at_watch",
+            quip: "Any cursed damn day now.",
+          }],
+        },
+      }),
+      now,
+    );
     const interruptedPrimaryText =
       "I was explaining—... okay, never mind, I guess.";
     db.prepare(
@@ -4994,6 +5201,39 @@ describe("API request integration", () => {
         elevenLabsVoiceIsolationSeed("signal-voice-guest"),
       );
       assert.notEqual(reactionProviderBody.seed, providerBody.seed);
+      const beforeMuteReactionCalls = fetchRecorder.calls.length;
+      const muteReactionVoice = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          signalMessageId: "signal-online-mood-voice-message",
+          speakerBotId: "signal-voice-guest",
+          listenerReactionText: "Any cursed damn day now.",
+          mode: "english",
+          engine: "elevenlabs",
+          profile: {
+            ...normalizeBotAudioVoiceProfileV1(undefined),
+            elevenLabsVoiceId: "signal-provider-voice",
+          },
+        }),
+      );
+      assert.equal(muteReactionVoice.status, 200);
+      assert.equal(
+        JSON.parse(
+          String(fetchRecorder.calls[beforeMuteReactionCalls]?.init?.body),
+        ).text,
+        "Any cursed damn day now.",
+      );
+      const forgedMuteReaction = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          signalMessageId: "signal-online-mood-voice-message",
+          speakerBotId: "signal-voice-guest",
+          listenerReactionText: "This line was never saved.",
+          mode: "english",
+          engine: "elevenlabs",
+        }),
+      );
+      assert.equal(forgedMuteReaction.status, 400);
       const beforeInterruptedSpeakerCalls = fetchRecorder.calls.length;
       const interruptedSpeakerVoice = await client.request(
         "/api/voices/synthesize",

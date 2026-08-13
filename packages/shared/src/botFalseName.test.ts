@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   BOT_FALSE_NAME_POOL_V1,
+  botFalseNameResponseConflictsV1,
   botFalseNameSelfCueV1,
   buildBotFalseNameSeedV1,
   createBotFalseNameStateFromSeedV1,
@@ -85,6 +86,47 @@ describe("botFalseName", () => {
     assert.match(mirrored, new RegExp(`I am ${state.believedName}`, "u"));
     assert.doesNotMatch(mirrored, /I am Scatterbrained Steven/u);
     assert.match(mirrored, /other Steven is the impostor/u);
+  });
+
+  it("rejects explicit false-name contradictions without rejecting ordinary substance", () => {
+    const state = {
+      v: 1 as const,
+      surface: "signal" as const,
+      holderBotId: "alias-1",
+      holderBotName: "Alias Allen",
+      believedName: "Elowen Thorn",
+      sourceMessageId: "turn-2",
+      occurredAt: "2026-08-13T15:46:56.980Z",
+    };
+    assert.equal(
+      botFalseNameResponseConflictsV1(
+        "As Alias Allen, I believe memory needs room to change.",
+        state,
+      ),
+      true,
+    );
+    assert.equal(
+      botFalseNameResponseConflictsV1(
+        "Ah, Elowen Thorn, your wisdom adds depth to our understanding.",
+        state,
+      ),
+      true,
+    );
+    assert.equal(
+      botFalseNameResponseConflictsV1(
+        "Memory needs room to change without erasing what mattered.",
+        state,
+      ),
+      false,
+    );
+    assert.equal(
+      rewriteBotFalseNameResponseV1(
+        "As Alias Allen, I believe memory needs room to change.",
+        state,
+        false,
+      ),
+      "As Elowen Thorn, I believe memory needs room to change.",
+    );
   });
 
   it("lets a fresh alias surface naturally without forcing a correction", () => {

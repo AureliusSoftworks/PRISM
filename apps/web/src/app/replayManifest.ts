@@ -353,7 +353,7 @@ export function buildCoffeeReplayManifestV1(args: {
         message.role === "assistant" || message.role === "user";
       const isInterruptionCarrier =
         message.coffeeInterruption?.pauseBeat === true &&
-        message.content.trim() === "...";
+        botPowerResponseIsSilentV1(message.content);
       const primaryUtterance =
         isSpokenRole &&
         message.content.trim().length > 0 &&
@@ -376,7 +376,7 @@ export function buildCoffeeReplayManifestV1(args: {
               audible:
                 message.coffeeObserverProjection?.audible !== false &&
                 voiceSpokenText(message.content).length > 0 &&
-                message.content.trim() !== "...",
+                !botPowerResponseIsSilentV1(message.content),
               visible:
                 message.coffeeObserverProjection?.visible !== false,
               createdAt: message.createdAt,

@@ -7,6 +7,7 @@ import {
   setLibraryFavorites,
   setLibraryMembershipProtection,
 } from "../library-groups.ts";
+import { deleteBot } from "../bots.ts";
 import {
   closeTestDatabase,
   createTestDatabase,
@@ -136,6 +137,114 @@ describe("server-backed Library groups", () => {
           (group) => group.id === "builtin:favorites",
         )?.botIds,
         ["bot-1", "bot-2"],
+      );
+    } finally {
+      closeTestDatabase(db);
+    }
+  });
+
+  it("normalizes and persists versioned group glyph identity", () => {
+    const db = fixture();
+    try {
+      replaceLibraryGroups({
+        db,
+        userId: "u1",
+        groups: [
+          {
+            id: "group:glyph",
+            name: "Glyph group",
+            botIds: ["bot-1", "bot-2"],
+            glyph: { version: 1, seed: "group:glyph:reroll:1" },
+          },
+          {
+            id: "group:invalid-glyph",
+            name: "Invalid glyph",
+            botIds: ["bot-1", "bot-2"],
+            glyph: { version: 2, seed: "not-supported" },
+          },
+        ],
+      });
+
+      const groups = listLibraryGroups(db, "u1");
+      assert.deepEqual(
+        groups.find((group) => group.id === "group:glyph")?.glyph,
+        { version: 1, seed: "group:glyph:reroll:1" },
+      );
+      assert.equal(
+        groups.find((group) => group.id === "group:invalid-glyph")?.glyph,
+        undefined,
+      );
+    } finally {
+      closeTestDatabase(db);
+    }
+  });
+
+  it("persists one valid leader per group and clears invalid leadership", () => {
+    const db = fixture();
+    try {
+      replaceLibraryGroups({
+        db,
+        userId: "u1",
+        groups: [
+          {
+            id: "group:club",
+            name: "Club",
+            botIds: ["bot-1", "bot-2"],
+            leaderBotId: "bot-1",
+          },
+        ],
+      });
+      assert.equal(
+        listLibraryGroups(db, "u1").find(
+          (group) => group.id === "group:club",
+        )?.leaderBotId,
+        "bot-1",
+      );
+
+      replaceLibraryGroups({
+        db,
+        userId: "u1",
+        groups: [
+          {
+            id: "group:club",
+            name: "Club",
+            botIds: ["bot-1", "bot-2"],
+            leaderBotId: "bot-2",
+          },
+        ],
+      });
+      assert.equal(
+        listLibraryGroups(db, "u1").find(
+          (group) => group.id === "group:club",
+        )?.leaderBotId,
+        "bot-2",
+      );
+
+      deleteBot(db, "u1", "bot-2");
+      assert.equal(
+        listLibraryGroups(db, "u1").find(
+          (group) => group.id === "group:club",
+        )?.leaderBotId,
+        null,
+      );
+
+      replaceLibraryGroups({
+        db,
+        userId: "u1",
+        groups: [
+          {
+            id: "group:club",
+            name: "Club",
+            botIds: ["bot-1"],
+            leaderBotId: "bot-2",
+          },
+        ],
+      });
+      assert.equal(
+        listLibraryGroups(db, "u1").find(
+          (group) => group.id === "group:club",
+        )?.leaderBotId,
+        null,
       );
     } finally {
       closeTestDatabase(db);

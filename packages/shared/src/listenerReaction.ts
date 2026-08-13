@@ -139,6 +139,8 @@ export const LISTENER_REACTION_VOCAL_FOLEYS = [
   "sighs",
   "exhales",
   "chuckles",
+  "whistles",
+  "gasps",
 ] as const;
 export type ListenerReactionVocalFoley =
   (typeof LISTENER_REACTION_VOCAL_FOLEYS)[number];
@@ -243,6 +245,24 @@ export function normalizeListenerReactionSpokenCue(
   return SPOKEN_CUES.has(value as ListenerReactionSpokenCue)
     ? value as ListenerReactionSpokenCue
     : null;
+}
+
+/**
+ * Authorize a quip from either the fixed interaction bank or an exact,
+ * replay-stable performance cue supplied by the saved source message.
+ */
+export function listenerReactionTextIsAuthorizedV1(
+  value: unknown,
+  savedPerformanceCues: readonly string[] = [],
+): boolean {
+  const cue = typeof value === "string"
+    ? value.replace(/\s+/gu, " ").trim()
+    : "";
+  if (!cue || cue.length > 160) return false;
+  return Boolean(
+    normalizeListenerReactionSpokenCue(cue) ||
+      savedPerformanceCues.some((saved) => saved === cue),
+  );
 }
 
 export function normalizeBotCrosstalkInterruptedSpeakerCue(

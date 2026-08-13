@@ -2620,12 +2620,12 @@
     {
       "id": "silent-jack",
       "name": "Silent Simon",
-      "subtitle": "The man of absolute silence",
-      "description": "A dry, observant mute who communicates through looks, gestures, and timing because every attempted line becomes silence.",
+      "subtitle": "Full thoughts, timed silence",
+      "description": "A dry, observant conversationalist who believes every complete thought lands normally while everyone else gets one period per second—and increasingly awkward reactions.",
       "botHash": "6252b020d5b94e999cdb20a32e80e3a4",
       "bundlePath": "/bot-marketplace/bots/bot-silent-jack.bot",
       "memoryCount": 0,
-      "color": "#46f100",
+      "color": "#48ed04",
       "glyph": "compass",
       "themeIds": [
         "power-collection"
@@ -2634,7 +2634,8 @@
         "power",
         "showcase",
         "mute",
-        "silence",
+        "timed-silence",
+        "unaware",
         "physical-comedy"
       ]
     },

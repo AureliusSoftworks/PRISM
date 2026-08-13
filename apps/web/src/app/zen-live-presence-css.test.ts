@@ -395,8 +395,10 @@ describe("Zen live presence CSS", () => {
 
   it("locks the body and face placement to the final composed bot frame", () => {
     assert.match(pageSource, /const ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX = 190;/);
-    assert.match(pageSource, /xPct:\s*76\.81,/);
-    assert.match(pageSource, /yPct:\s*-38\.51,/);
+    assert.match(
+      pageSource,
+      /const ZEN_LIVE_BOT_LOCKED_BODY_PLACEMENT:[\s\S]*?xPct:\s*50,[\s\S]*?yPct:\s*50,/,
+    );
     assert.match(pageSource, /BOT_AVATAR_CANONICAL_FACE_REGISTRATION_STYLE/);
     assert.match(
       pageSource,
@@ -436,22 +438,13 @@ describe("Zen live presence CSS", () => {
       pageSource,
       /"--zen-live-bot-user-scale":\s*bodyScale\.toFixed\(4\)/,
     );
-    assert.match(pageSource, /data-depth-scaled="true"/);
+    assert.match(pageSource, /data-user-avatar-scale="true"/);
     assert.doesNotMatch(pageSource, /readZenLiveBotBodySize/);
     assert.doesNotMatch(pageSource, /readZenLiveBotFacePlacement/);
     assert.doesNotMatch(pageSource, /facePlacementScope/);
   });
 
-  it("retires manual Zen avatar resize controls", () => {
-    assert.doesNotMatch(pageSource, /resizeZenLiveBotAvatar/);
-    assert.doesNotMatch(pageSource, /zenLiveBotAvatarSizePx/);
-    assert.doesNotMatch(pageSource, /label: "Grow"/);
-    assert.doesNotMatch(pageSource, /label: "Shrink"/);
-    assert.match(pageSource, /data-depth-scaled="true"/);
-  });
-
-  /* Legacy assertions retained below as an inert migration record.
-  it("legacy manual Zen avatar resize controls", () => {
+  it("provides explicit persisted Zen avatar resize controls", () => {
     assert.match(
       pageSource,
       /const PRISM_ZEN_LIVE_BOT_AVATAR_LEGACY_SIZE_STORAGE_KEY =\s+"prism_zen_live_bot_avatar_size_v1";/,
@@ -598,7 +591,7 @@ describe("Zen live presence CSS", () => {
 
     const rigidScaleRule = ruleForSelectorNeedlesWithBody(
       [
-        '.zenLiveBotPresencePlate[data-depth-scaled="true"][data-avatar-render-mode="full"]',
+        '.zenLiveBotPresencePlate[data-user-avatar-scale="true"][data-avatar-render-mode="full"]',
         "> .botAmbientPresenceRig",
       ],
       "--zen-live-bot-avatar-size",
@@ -623,7 +616,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(pageSource, /avatarRenderMode === "mini"/);
     assert.match(pageSource, /<EmptyStateHeroMiniBot/);
-    assert.match(pageSource, /lightMode="breathing"/);
+    assert.doesNotMatch(pageSource, /lightMode="breathing"/);
     assert.match(pageSource, /faceEyeMovement="still"/);
     const compactScaleRule = ruleForSelectorNeedlesWithBody(
       [
@@ -633,7 +626,7 @@ describe("Zen live presence CSS", () => {
       "--zen-live-bot-mini-size",
     );
     assert.match(compactScaleRule, /transform:\s*none\s*;/);
-  }); */
+  });
 
   it("keeps body raster and face as fixed non-editable layers", () => {
     const bodyRule = ruleForExactSelector(".zenLiveBotPresenceBody");
@@ -4256,7 +4249,7 @@ describe("Zen live presence CSS", () => {
   it("clamps only to the viewport after a live-bot release", () => {
     assert.match(
       pageSource,
-      /setAvatarPositionClamped\(\s*\{\s*x: clientX - dragState\.offsetX,\s*y: clientY - dragState\.offsetY,\s*\},\s*true,?\s*\);/,
+      /if \(dragState\.moved && !cancelled\) \{[\s\S]*?setAvatarPositionClamped\(\s*\{\s*x: clientX - dragState\.offsetX,\s*y: clientY - dragState\.offsetY,[\s\S]*?true,?\s*\);/,
     );
     assert.match(pageSource, /function clampZenLiveBotAvatarPosition\(/);
     assert.match(

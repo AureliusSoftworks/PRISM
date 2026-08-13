@@ -12,7 +12,10 @@ import type {
   ListenerReactionSpokenCue,
   SocialSilenceMarkerV1,
 } from "./listenerReaction.js";
-import type { BotPowerObserverProjectionV1 } from "./botPower.js";
+import type {
+  BotPowerMutePerformanceV1,
+  BotPowerObserverProjectionV1,
+} from "./botPower.js";
 import type { BotIdentityShapeshiftStateV1 } from "./botIdentityShapeshift.js";
 import type { BotFalseNameStateV1 } from "./botFalseName.js";
 import type {
@@ -182,6 +185,11 @@ export {
 export {
   BOT_POWER_INTENT_MAX_LENGTH,
   BOT_POWER_CANONICAL_SILENCE_V1,
+  BOT_POWER_MUTE_PERFORMANCE_VERSION,
+  BOT_POWER_MUTE_MIN_DURATION_MS,
+  BOT_POWER_MUTE_MAX_DURATION_MS,
+  BOT_POWER_MUTE_REACTION_MAX,
+  BOT_POWER_MUTE_REACTION_MIN_SPACING_MS,
   BOT_POWER_AVATAR_SCALE_MODES_V1,
   BOT_POWER_AVATAR_SCALE_MULTIPLIER_V1,
   BOT_POWER_DESIGNATION_MAX_LENGTH,
@@ -201,8 +209,21 @@ export {
   applyBotPowerAddressedCopyResponseV1,
   applyBotPowerEternalIntroductionResponseV1,
   applyBotPowerEchoResponseV1,
+  applyBotPowerCursedTongueResponseV1,
   applyBotPowerMumbledResponseV1,
   applyBotPowerMuteResponseV1,
+  botPowerMuteEstimatedDurationMsV1,
+  botPowerMuteElapsedCueV1,
+  botPowerMuteInterruptionChanceV1,
+  botPowerMutePeriodsV1,
+  botPowerMutePrivateHistoryV1,
+  botPowerMutePublicResponseAtElapsedV1,
+  botPowerMuteObserverHistoryV1,
+  botPowerMuteReactionCountV1,
+  botPowerMuteReactionTemperamentFromPersonaV1,
+  createBotPowerMutePerformanceV1,
+  normalizeBotPowerMutePerformanceV1,
+  planBotPowerMuteReactionBeatsV1,
   applyBotPowerResponseBudgetV1,
   BOT_POWER_RESPONSE_BUDGET_MINIMAL_MAX_WORDS_V1,
   botPowerAddressedFandomCueFromEffectsV1,
@@ -312,6 +333,10 @@ export {
   BOT_POWER_BREATH_PERFORMANCE_TAGS_V1,
   botPowerMumblesSpeechFromEffectsV1,
   botPowerMumblesSpeechV1,
+  botPowerCursesSpeechFromEffectsV1,
+  botPowerCursesSpeechV1,
+  botPowerCursedTongueAuthoringCueV1,
+  botPowerResponseIsSemanticSilenceV1,
   botPowerSpeechObfuscationAuthoringCueV1,
   botPowerIntendedSpeechLooksGibberishV1,
   botPowerMirrorsIdentityV1,
@@ -372,6 +397,12 @@ export {
   type BotPowerCompileStatus,
   type BotPowerDesignationPlacement,
   type BotPowerEffectV1,
+  type BotPowerMutePerformanceV1,
+  type BotPowerMuteReactionBeatV1,
+  type BotPowerMuteReactionCandidateV1,
+  type BotPowerMuteReactionKindV1,
+  type BotPowerMuteReactionModeV1,
+  type BotPowerMuteReactionTemperamentV1,
   type BotPowerFrequency,
   type BotPowerGravityDirection,
   type BotPowerIneptitudeRoleV1,
@@ -550,6 +581,7 @@ export {
   BOT_FALSE_NAME_VERSION,
   botFalseNameChangesV1,
   botFalseNameObserverCueV1,
+  botFalseNameResponseConflictsV1,
   botFalseNameSeedHashV1,
   botFalseNameSelfCueV1,
   buildBotFalseNameSeedV1,
@@ -1584,6 +1616,8 @@ export interface ChatMessage {
   autoRecovery?: AutoRecoveryTraceV1;
   /** Saved deterministic hard-response branch from a Ready Power. */
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
+  /** Public replay-stable timed Mute presentation; private intent is never here. */
+  botPowerMutePerformance?: BotPowerMutePerformanceV1;
   /** Session-sticky Shapeshifter public form for Chat/Zen (and Coffee/Signal envelopes). */
   identityShapeshift?: BotIdentityShapeshiftStateV1;
   /** Session-sticky John/Jane Doe alias for Chat/Zen assistant tool payloads. */

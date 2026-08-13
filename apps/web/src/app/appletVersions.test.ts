@@ -29,6 +29,7 @@ import {
   BOT_POWER_THEME_COMPOUND_MODE_POLICY,
   BOT_POWER_RESPONSE_BUDGET_MODE_POLICY,
   BOT_POWER_SPEECH_OBFUSCATION_MODE_POLICY,
+  BOT_POWER_CURSED_TONGUE_MODE_POLICY,
   BOT_POWER_SPECTRAL_PERCEPTION_MODE_POLICY,
   BOT_POWER_VOICE_PRESENCE_MODE_POLICY,
   PRISM_APPLETS,
@@ -68,23 +69,23 @@ describe("applet version helpers", () => {
   });
 
   it("tracks the current visual applet versions for release provenance", () => {
-    assert.equal(PRISM_APPLETS.chat.version, "1.39");
-    assert.equal(PRISM_APPLETS.zen.version, "1.38");
-    assert.equal(PRISM_APPLETS.coffee.version, "2.51");
-    assert.equal(PRISM_APPLETS.debate.version, "0.31");
+    assert.equal(PRISM_APPLETS.chat.version, "1.40");
+    assert.equal(PRISM_APPLETS.zen.version, "1.39");
+    assert.equal(PRISM_APPLETS.coffee.version, "2.52");
+    assert.equal(PRISM_APPLETS.debate.version, "0.32");
     assert.equal(PRISM_APPLETS.debate.status, "preview");
-    assert.equal(PRISM_APPLETS.botcast.version, "1.61");
+    assert.equal(PRISM_APPLETS.botcast.version, "1.63");
     assert.equal(PRISM_APPLETS.botcast.name, "Signal");
-    assert.equal(PRISM_APPLETS.story.version, "0.31");
+    assert.equal(PRISM_APPLETS.story.version, "0.32");
     assert.equal(PRISM_APPLETS.story.status, "planned");
     assert.equal(PRISM_APPLETS.slate.version, "0.9");
     assert.equal(PRISM_APPLETS.slate.status, "preview");
-    assert.equal(prismAppletVersionLabel("chat"), "v1.39");
-    assert.equal(prismAppletVersionLabel("zen"), "v1.38");
-    assert.equal(prismAppletVersionLabel("coffee"), "v2.51");
-    assert.equal(prismAppletVersionLabel("debate"), "v0.31");
-    assert.equal(prismAppletVersionLabel("botcast"), "v1.61");
-    assert.equal(prismAppletVersionLabel("story"), "v0.31");
+    assert.equal(prismAppletVersionLabel("chat"), "v1.40");
+    assert.equal(prismAppletVersionLabel("zen"), "v1.39");
+    assert.equal(prismAppletVersionLabel("coffee"), "v2.52");
+    assert.equal(prismAppletVersionLabel("debate"), "v0.32");
+    assert.equal(prismAppletVersionLabel("botcast"), "v1.63");
+    assert.equal(prismAppletVersionLabel("story"), "v0.32");
     assert.equal(prismAppletVersionLabel("slate"), "v0.9");
   });
 
@@ -221,7 +222,7 @@ describe("applet version helpers", () => {
     assert.deepEqual(Object.keys(BOT_POWER_MUTE_MODE_POLICY), Object.keys(PRISM_APPLETS));
     for (const applet of Object.values(PRISM_APPLETS)) {
       const policy = BOT_POWER_MUTE_MODE_POLICY[applet.id];
-      if (applet.status === "planned") {
+      if (applet.status === "planned" && applet.id !== "story") {
         assert.equal(policy, "required_before_activation");
       } else if (applet.id !== "slate") {
         assert.equal(policy, "enforced");
@@ -234,7 +235,6 @@ describe("applet version helpers", () => {
       Object.keys(BOT_POWER_BREATHLESS_MODE_POLICY),
       Object.keys(PRISM_APPLETS),
     );
-    assert.deepEqual(BOT_POWER_BREATHLESS_MODE_POLICY, BOT_POWER_MUTE_MODE_POLICY);
     for (const applet of Object.values(PRISM_APPLETS)) {
       const policy = BOT_POWER_BREATHLESS_MODE_POLICY[applet.id];
       if (applet.status === "planned") {
@@ -498,6 +498,28 @@ describe("applet version helpers", () => {
       polling: "deferred",
       coffee: "direct",
       botcast: "adapted",
+      feed: "deferred",
+      games: "deferred",
+      story: "adapted",
+      gym: "deferred",
+      slate: "irrelevant",
+      pseudo: "deferred",
+      surf: "deferred",
+    });
+  });
+
+  it("declares an exhaustive Cursed Tongue policy for every applet", () => {
+    assert.deepEqual(
+      Object.keys(BOT_POWER_CURSED_TONGUE_MODE_POLICY),
+      Object.keys(PRISM_APPLETS),
+    );
+    assert.deepEqual(BOT_POWER_CURSED_TONGUE_MODE_POLICY, {
+      chat: "direct",
+      zen: "direct",
+      debate: "adapted",
+      polling: "deferred",
+      coffee: "direct",
+      botcast: "direct",
       feed: "deferred",
       games: "deferred",
       story: "adapted",

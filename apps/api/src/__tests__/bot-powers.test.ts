@@ -2,11 +2,15 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import {
+  applyBotPowerCursedTongueResponseV1,
   botPowerSourceHashForPowerV1,
   botPowerSourceHashV1,
   type CoffeePowerPlanV1,
 } from "@localai/shared";
-import { compileBotPowers } from "../bot-powers.ts";
+import {
+  compileBotPowers,
+  rewriteBotPowerCursedTongueAnswerV1,
+} from "../bot-powers.ts";
 import {
   applyCoffeeHearingRepeatMoodPenalty,
   applyCoffeePowerAfterSpeech,
@@ -286,6 +290,146 @@ test("Mumbling Jim compiles deterministic normal-volume gibberish without using 
   assert.match(result.powers[0]?.compiled?.selfCue ?? "", /HARD speech obfuscation|answer rationally/iu);
   assert.match(result.powers[0]?.compiled?.selfCue ?? "", /Never write mumbling|clear natural language/iu);
   assert.match(result.powers[0]?.compiled?.observerCue ?? "", /normal-volume gibberish/u);
+});
+
+test("Cursed Tongue compiles deterministic post-generation profanity without using the model", async () => {
+  const result = await compileBotPowers({
+    provider: {
+      name: "local",
+      async generateResponse() {
+        throw new Error("deterministic recovery must not call the model");
+      },
+      async embedText() { return []; },
+    },
+    botName: "Iris",
+    powers: [{
+      version: 1,
+      id: "cursed-tongue",
+      name: "Cursed Tongue",
+      intent: "Every non-silent public spoken reply gains frequent strong uncensored profanity after generation.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+  const compiled = result.powers[0]?.compiled;
+  assert.equal(result.powers[0]?.compileStatus, "ready");
+  assert.deepEqual(compiled?.effects, [{
+    type: "cursed_tongue",
+    version: 1,
+    frequency: "frequent",
+    strength: "strong",
+    vocabulary: "uncensored_non_slur",
+    phraseMode: "occasional_2_3_words",
+  }]);
+  assert.match(compiled?.selfCue ?? "", /draft fully natural clean speech only/iu);
+  assert.match(compiled?.observerCue ?? "", /only that adjusted wording/iu);
+});
+
+test("Cursed Tongue accepts a contextual provider rewrite and restores protected spans exactly", async () => {
+  const source = "*checks the archive* The plan keeps `const answer = 42` at https://example.com/a and [the record](https://example.com/source).";
+  let calls = 0;
+  let rewriteSystemPrompt = "";
+  let rewriteUsagePurpose = "";
+  const rewritten = await rewriteBotPowerCursedTongueAnswerV1({
+    provider: {
+      name: "local",
+      async generateResponse(messages, options) {
+        calls += 1;
+        rewriteSystemPrompt = messages[0]?.content ?? "";
+        rewriteUsagePurpose = options?.usagePurpose ?? "";
+        return "[[PRISM_CT_PROTECTED_0000]] The fucking plan keeps [[PRISM_CT_PROTECTED_0001]] at [[PRISM_CT_PROTECTED_0002]] and [[PRISM_CT_PROTECTED_0003]], damn it.";
+      },
+      async embedText() { return []; },
+    },
+    draftAnswer: source,
+    seed: "accepted",
+    usagePurpose: "chat_reply",
+  });
+  assert.equal(calls, 1);
+  assert.match(rewriteSystemPrompt, /Never sprinkle curse words mechanically/iu);
+  assert.match(rewriteSystemPrompt, /ingredient or item names/iu);
+  assert.equal(rewriteUsagePurpose, "chat_reply");
+  assert.match(rewritten, /fucking plan.*damn it/iu);
+  for (const protectedText of [
+    "*checks the archive*",
+    "`const answer = 42`",
+    "https://example.com/a",
+    "[the record](https://example.com/source)",
+  ]) assert.ok(rewritten.includes(protectedText), protectedText);
+});
+
+test("Cursed Tongue safely falls back when a provider response is unusable", async () => {
+  const source = "The archive plan keeps the source record intact.";
+  for (const response of ["", "The archive plan keeps the source record intact.", "[[PRISM_CT_PROTECTED_0000]] fucking"]) {
+    const rewritten = await rewriteBotPowerCursedTongueAnswerV1({
+      provider: {
+        name: "local",
+        async generateResponse() { return response; },
+        async embedText() { return []; },
+      },
+      draftAnswer: source,
+      seed: "fallback",
+    });
+    assert.equal(rewritten, applyBotPowerCursedTongueResponseV1(source, "fallback"));
+  }
+  const providerFailure = await rewriteBotPowerCursedTongueAnswerV1({
+    provider: {
+      name: "local",
+      async generateResponse() { throw new Error("offline"); },
+      async embedText() { return []; },
+    },
+    draftAnswer: source,
+    seed: "failure",
+  });
+  assert.equal(providerFailure, applyBotPowerCursedTongueResponseV1(source, "failure"));
+});
+
+test("blank prompt-authored cursed tongue name uses canonical display name", async () => {
+  const result = await compileBotPowers({
+    provider: {
+      name: "local",
+      async generateResponse() {
+        return JSON.stringify({
+          powers: [{
+            id: "cursed-tongue-blank",
+            name: "Cursing Curtis",
+            selfCue: "Be careful.",
+            observerCue: "He curses.",
+            effects: [{
+              type: "cursed_tongue",
+              version: 1,
+              frequency: "frequent",
+              strength: "strong",
+              vocabulary: "uncensored_non_slur",
+              phraseMode: "occasional_2_3_words",
+            }],
+            ruleLabels: ["Profanity"],
+          }],
+        });
+      },
+      async embedText() { return []; },
+    },
+    botName: "Curtis",
+    powers: [{
+      version: 1,
+      authoringMode: "prompt",
+      id: "cursed-tongue-blank",
+      name: "",
+      intent: "Every public reply should sound like a curse every time.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+
+  assert.equal(result.powers[0]?.compileStatus, "ready");
+  assert.equal(result.powers[0]?.name, "Cursed Tongue");
+  assert.deepEqual(result.powers[0]?.compiled?.sourceHash, botPowerSourceHashForPowerV1({
+    authoringMode: "prompt",
+    name: "",
+    intent: "Every public reply should sound like a curse every time.",
+  }));
 });
 
 test("Observant compiles deterministic holder-only Power immunity without using the model", async () => {
@@ -1103,9 +1247,13 @@ test("compiler creates hard mute rules without consulting the local model", asyn
     { type: "mouth_motion", mode: "sealed" },
   ]);
   assert.deepEqual(result.powers[0]?.compiled?.ruleLabels, [
-    "Muted",
+    "Unaware Mute",
+    "Timed public silence",
     "Sealed mouth",
   ]);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /substantive ordinary speech/u);
+  assert.doesNotMatch(result.powers[0]?.compiled?.selfCue ?? "", /period|silence|Mute/u);
+  assert.equal(result.powers[0]?.compiled?.observerCue, "");
 });
 
 test("compiler creates hard breathless rules without consulting the local model", async () => {

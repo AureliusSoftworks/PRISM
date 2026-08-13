@@ -3888,6 +3888,24 @@
   width: clamp(53px, 4.65vw, 74px);
 }
 
+.forumCamera[data-camera-view="wide"]
+  .botPosition[data-role="moderator"]
+  .botStagePresence {
+  --debate-moderator-micro-scale: var(--debate-moderator-micro-scale-wide, 1);
+}
+
+.forumCamera[data-camera-view="left"]
+  .botPosition[data-role="moderator"]
+  .botStagePresence {
+  --debate-moderator-micro-scale: var(--debate-moderator-micro-scale-left, 1);
+}
+
+.forumCamera[data-camera-view="right"]
+  .botPosition[data-role="moderator"]
+  .botStagePresence {
+  --debate-moderator-micro-scale: var(--debate-moderator-micro-scale-right, 1);
+}
+
 .botStagePresence[data-debate-stage-compact="true"] {
   position: relative;
   aspect-ratio: 1;
@@ -3933,7 +3951,7 @@
 }
 
 .botStagePresence[data-speaking="true"] {
-  transform: translateY(-6px) scale(var(--debate-presence-scale));
+  transform: translateY(-6px) scale(calc(var(--debate-presence-scale) * var(--debate-moderator-micro-scale, 1)));
   filter: drop-shadow(
       0 0 22px color-mix(in srgb, var(--debate-active-color) 32%, transparent)
     )
@@ -3941,26 +3959,26 @@
 }
 
 .botStagePresence:not([data-speaking="true"]) {
-  transform: scale(var(--debate-presence-scale));
+  transform: scale(calc(var(--debate-presence-scale) * var(--debate-moderator-micro-scale, 1)));
 }
 
 .botStagePresence:not(
     [data-speaking="true"]
   )[data-listening-reaction="attentive"] {
-  transform: translateY(-1px) scale(var(--debate-presence-scale));
+  transform: translateY(-1px) scale(calc(var(--debate-presence-scale) * var(--debate-moderator-micro-scale, 1)));
 }
 
 .botStagePresence:not(
     [data-speaking="true"]
   )[data-listening-reaction="question"] {
   transform: translateY(-2px) rotate(-0.7deg)
-    scale(var(--debate-presence-scale));
+    scale(calc(var(--debate-presence-scale) * var(--debate-moderator-micro-scale, 1)));
 }
 
 .botStagePresence:not(
     [data-speaking="true"]
   )[data-listening-reaction="divided"] {
-  transform: translateX(2px) rotate(0.55deg) scale(var(--debate-presence-scale));
+  transform: translateX(2px) rotate(0.55deg) scale(calc(var(--debate-presence-scale) * var(--debate-moderator-micro-scale, 1)));
 }
 
 .botStagePresence:not(
@@ -3969,7 +3987,7 @@
 .botStagePresence:not(
     [data-speaking="true"]
   )[data-listening-reaction="evidence"] {
-  transform: translateY(-3px) scale(var(--debate-presence-scale));
+  transform: translateY(-3px) scale(calc(var(--debate-presence-scale) * var(--debate-moderator-micro-scale, 1)));
   filter: drop-shadow(
       0 0 14px color-mix(in srgb, var(--debate-active-color) 18%, transparent)
     )
@@ -8193,6 +8211,46 @@
 }
 
 .alignmentTunerRole input[type="range"] {
+  width: 100%;
+  accent-color: #9f8cff;
+  cursor: pointer;
+}
+
+.alignmentModeratorScaleTuner {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--alignment-border);
+  border-radius: 18px;
+  padding: 14px 16px 16px;
+  background: var(--alignment-panel);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.18);
+}
+
+.alignmentModeratorScaleTuner > header,
+.alignmentModeratorScaleTuner label > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.alignmentModeratorScaleTuner > header > div,
+.alignmentModeratorScaleTuner label {
+  display: grid;
+  gap: 7px;
+}
+
+.alignmentModeratorScaleTuner strong,
+.alignmentModeratorScaleTuner output {
+  color: var(--alignment-ink);
+}
+
+.alignmentModeratorScaleTuner label > span {
+  color: var(--alignment-muted);
+  font-size: 9px;
+}
+
+.alignmentModeratorScaleTuner input[type="range"] {
   width: 100%;
   accent-color: #9f8cff;
   cursor: pointer;

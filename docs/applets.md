@@ -29,22 +29,46 @@ ship as `0.5.2` while Coffee is `v0.7`.
 
 | Applet  | Version | Status             | Notes                                                                                                                                                                                                                                                                                                       |
 | ------- | ------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Chat    | v1.39   | Active             | Full playground with independent saved conversations, six-tier size presentation, and complete session-sticky Shapeshifter embodiment inside each PRISM or persona Home.                                                                                                                                   |
-| Zen     | v1.38   | Active             | Calm one-to-one continuity with draggable six-tier embodiment, direct human access, and complete session-sticky Shapeshifter embodiment.                                                                                                                                                                    |
-| Coffee  | v2.51   | Active             | Two-to-five-bot tables with complete borrowed audiovisual identities, replay-safe form changes, local-only café Jazz beds, and faithful replay that seats Default Prism for the player.                                                                                                                     |
-| Signal  | v1.61   | Active             | Interview studio with complete borrowed audiovisual identities, replay-safe form changes, and Power-permissive bot or Producer-guest encounters.                                                                                                                                                           |
-| Debate  | v0.31   | Preview            | Power-permissive Forum and Turnabout proceedings with frozen public sources, replay-safe complete borrowed audiovisual identities, screen-off form changes, explicit advocacy consent, organic cast reactions, and durable verdicts. After completion: sibling Jury commentary with header copy, Coffee-style session synopsis, and ephemeral pick-a-bot inquiry into frozen reasoning. Object exhibits use an approved `{ADJECTIVE} {OBJECT}` record plus emoji, uploaded art, or a consistent synthesized stage sprite. Territory / Your idea accepts Prompt Center prompts and wildcard decks. |
+| Chat    | v1.40   | Active             | Full playground with independent saved conversations, timed unaware Mute delivery, six-tier size presentation, and complete session-sticky Shapeshifter embodiment inside each PRISM or persona Home.                                                                                                      |
+| Zen     | v1.39   | Active             | Calm one-to-one continuity with timed unaware Mute delivery, draggable six-tier embodiment, direct human access, and complete session-sticky Shapeshifter embodiment.                                                                                                                                       |
+| Coffee  | v2.52   | Active             | Two-to-five-bot tables with timed Mute reactions and floor breaks, complete borrowed audiovisual identities, replay-safe form changes, local-only café Jazz beds, and faithful replay that seats Default Prism for the player.                                                                            |
+| Signal  | v1.63   | Active             | Interview studio with replay-stable timed Mute performances and hard reaction cuts, complete borrowed audiovisual identities, replay-safe form changes, and Power-permissive bot or Producer-guest encounters.                                                                                             |
+| Debate  | v0.32   | Preview            | Power-permissive Forum and Turnabout proceedings with timed Mute floor timing, frozen public sources, replay-safe complete borrowed audiovisual identities, screen-off form changes, explicit advocacy consent, organic cast reactions, and durable verdicts. After completion: sibling Jury commentary with header copy, Coffee-style session synopsis, and ephemeral pick-a-bot inquiry into frozen reasoning. Object exhibits use an approved `{ADJECTIVE} {OBJECT}` record plus emoji, uploaded art, or a consistent synthesized stage sprite. Territory / Your idea accepts Prompt Center prompts and wildcard decks. |
 | Polling | v0.0    | Planned            | AI-powered polling across bot groups.                                                                                                                                                                                                                                                                       |
 | Feed    | v0.0    | Planned            | BotBook-style social feed.                                                                                                                                                                                                                                                                                  |
 | Games   | v0.0    | Planned            | Boardgame-like bot matches.                                                                                                                                                                                                                                                                                 |
-| Story   | v0.31   | Planned (disabled) | Early implementation retained for future work, but excluded from release navigation and session restoration.                                                                                                                                                                                                |
+| Story   | v0.32   | Planned (disabled) | Early implementation retained for future work with the private-intention/public-timed-silence Mute contract, but excluded from release navigation and session restoration.                                                                                                                                    |
 | Gym     | v0.0    | Planned            | Bot training and memory-development surface.                                                                                                                                                                                                                                                                |
-| Slate   | v0.8    | Preview            | Manuscript-first Writer's Cockpit with rich focused editing, durable AI proposals, in-canvas Continuity clarification, a curated Story Bible, safe section review exports, and private recovery.                                                                                                            |
+| Slate   | v0.9    | Preview            | Manuscript-first Writer's Cockpit with rich focused editing, durable AI proposals, in-canvas Continuity clarification, a curated Story Bible, safe section review exports, and private recovery.                                                                                                            |
 | Pseudo  | v0.0    | Planned            | Sketch/system space for almost-code.                                                                                                                                                                                                                                                                        |
 | Surf    | v0.0    | Planned            | Simple browsing plus optional bot screen viewing.                                                                                                                                                                                                                                                           |
 
 Debate's release boundary and platform QA gaps are recorded in
 [Debate v0.1 Preview verification](./debate-v0.1-verification.md).
+
+## Timed unaware Mute policy
+
+- A Mute holder authors ordinary substantive speech and privately remembers it
+  as delivered. Legacy Ready Mute snapshots receive this current runtime cue
+  without a database migration.
+- Non-exempt audiences receive one period per quantized second, starting with
+  `.` immediately, then one environmental elapsed-time cue. Physical actions
+  remain visible; voice and mouth motion remain sealed. Existing player speech
+  whitelists continue to receive clear speech.
+- The public, versioned performance record contains only duration, period
+  count, interruption state, elapsed cue, and deterministic reaction beats.
+  Intended speech stays holder-private and never enters public APIs, memories,
+  exports, another bot's history, or performance reactions.
+- Chat and Zen never fabricate player reactions. Coffee, Signal, and Debate
+  may add sparse persona-aware listener actions, allowed Foley, or transformed
+  quips while long silence is playing. These beats are replay direction only.
+  A genuine floor break truncates the public dots and privately preserves only
+  the holder's intended prefix plus interruption context.
+- Signal uses instant reaction cuts with at least a 2.5-second hold and returns
+  to the muted speaker between beats when time remains. Camera animation is
+  reserved for pre-performance generation/loading. Story retains the same
+  private/public history contract for future activation. Slate is irrelevant;
+  all other planned bot applets must implement it before activation.
 
 ## Slate roadmap
 
@@ -121,9 +145,47 @@ stages do not block the standalone preview.
   Slate has no bot-owned performance role, and unimplemented applets remain
   deferred.
 
+## Cursed Tongue Power policy
+
+- A ready `Cursed Tongue` Power preserves the holder's clean draft, then uses
+  the selected in-lane provider for a contextual second-pass public rewrite:
+  frequent strong uncensored non-slur profanity with a coherent human cadence,
+  never random curse-token insertion. Every non-silent public utterance gets at
+  least one natural curse; only actual silence outranks it. A deterministic
+  protected-span-preserving transform is retained only for provider failure or
+  invalid rewrite recovery.
+- Code, URLs, citations, evidence markers, bot links, stage directions, and
+  structured records are protected byte-for-byte. The player, voice playback,
+  every other bot, memory, replay, and public export receive only the adjusted
+  speech. The holder alone may receive its clean intended wording as private
+  self-history so it never learns to imitate the mutation; Power immunity does
+  not expose that clean original to another bot.
+- Chat, Zen, Coffee, and Signal apply the public transform directly. Debate
+  adapts it around evidence-bearing formal records, and the retained Story seam
+  adapts it to authored speaker scenes. Slate is irrelevant. Polling, Feed,
+  Games, Gym, Pseudo, Surf, and other planned applets remain deferred until
+  they own a participant speech surface.
+
 ## Changelog
 
+### 2026-08-13
+
+- Refined `Cursed Tongue` into a contextual, provider-backed public rewrite
+  pass across Chat, Zen, Coffee, Signal, Debate, and Story. Exact protected
+  spans and the holder's private clean history remain intact; deterministic
+  insertion is now recovery-only.
+
+- Advanced `Signal` to `v1.63`. Mid-interview host thank-yous now recover into
+  another substantive question, explicit guest sign-offs close Auto instead of
+  beginning a farewell loop, and session-sticky false-name contradictions are
+  rejected and retried with honest repair provenance before publication.
+
 ### 2026-08-12
+
+- Advanced `Chat` to `v1.40`, `Zen` to `v1.39`, `Coffee` to `v2.52`,
+  `Debate` to `v0.32`, and `Signal` to `v1.62` for Cursed Tongue's original
+  post-generation public profanity layer, protected technical/record spans,
+  holder-only clean self-history, and replay/export-safe mode integrations.
 
 - Advanced `Chat` to `v1.39`, `Zen` to `v1.38`, `Coffee` to `v2.51`,
   `Debate` to `v0.31`, and `Signal` to `v1.61`. Identity Crisis now borrows the
@@ -586,7 +648,8 @@ Sanchez`, and unaffected speakers keep their own naming habits. Coffee and
   recipient-scoped lift per completed source turn, persist explicit replay
   events, and feed the saved result into subsequent bot behavior. Slate is
   irrelevant, and planned applets remain deferred until they own compatible
-  participant state. Hard mute always wins because no spoken turn occurred.
+  participant state. Hard mute always wins because no audible turn reaches the
+  recipient.
 
 - Bumped `Coffee` to `v2.9` and `Signal` to `v1.15` for the original bounded identity
   mirroring. The latest bot to directly address a ready holder supplies only its

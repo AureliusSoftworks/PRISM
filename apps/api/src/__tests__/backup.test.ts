@@ -12,6 +12,7 @@ import {
 import {
   createPendingLivingShellAccountProgress,
 } from "../living-shell-progress.ts";
+import { listLibraryGroups } from "../library-groups.ts";
 import { listModelReasoningEffortPreferences } from "../model-effort-preferences.ts";
 import { listModelTurboPreferences } from "../model-turbo-preferences.ts";
 import {
@@ -2466,9 +2467,9 @@ describe("backup server-backed Library groups", () => {
       db.prepare(
         `INSERT INTO library_groups
           (id, user_id, name, description, delete_protected_default, built_in,
-           atmosphere_json, created_at, updated_at)
-         VALUES ('group:test', 'user-1', 'Test Group', '', 1, 0, '{}', ?, ?)`,
-      ).run(now, now);
+           atmosphere_json, glyph_json, leader_bot_id, created_at, updated_at)
+         VALUES ('group:test', 'user-1', 'Test Group', '', 1, 0, '{}', ?, 'library-bot', ?, ?)`,
+      ).run(JSON.stringify({ version: 1, seed: "group:test:reroll:1" }), now, now);
       db.prepare(
         `INSERT INTO library_group_members
           (user_id, group_id, bot_id, delete_protected_override, added_at,
@@ -2482,6 +2483,11 @@ describe("backup server-backed Library groups", () => {
         snapshot.libraryGroups?.[1]?.deleteProtectionByBotId["library-bot"],
         false,
       );
+      assert.deepEqual(snapshot.libraryGroups?.[1]?.glyph, {
+        version: 1,
+        seed: "group:test:reroll:1",
+      });
+      assert.equal(snapshot.libraryGroups?.[1]?.leaderBotId, "library-bot");
 
       db.prepare("DELETE FROM library_groups WHERE user_id = 'user-1'").run();
       importUserSnapshot(db, "user-1", snapshot, userKey);
@@ -2494,6 +2500,18 @@ describe("backup server-backed Library groups", () => {
         )
         .get() as { delete_protected_override: number };
       assert.equal(restored.delete_protected_override, 0);
+      assert.deepEqual(
+        listLibraryGroups(db, "user-1").find(
+          (group) => group.id === "group:test",
+        )?.glyph,
+        { version: 1, seed: "group:test:reroll:1" },
+      );
+      assert.equal(
+        listLibraryGroups(db, "user-1").find(
+          (group) => group.id === "group:test",
+        )?.leaderBotId,
+        "library-bot",
+      );
     });
   });
 });

@@ -1,4 +1,5 @@
 import {
+  botPowerResponseIsSilentV1,
   socialSilenceMessageIsMarkedV1,
   type SocialSilenceMarkerV1,
 } from "@localai/shared";
@@ -138,7 +139,7 @@ export function coffeeTableMessageContentIsVisible(
   // Hard Mute / social-silence "..." is intentional table presence — keep it.
   if (
     options?.keepPowerMuteEllipsis === true &&
-    /^(?:\.\.\.|…)$/u.test(normalized)
+    botPowerResponseIsSilentV1(normalized)
   ) {
     return true;
   }

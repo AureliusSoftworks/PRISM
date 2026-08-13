@@ -488,6 +488,8 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       built_in INTEGER NOT NULL DEFAULT 0,
       marketplace_theme_id TEXT,
       atmosphere_json TEXT NOT NULL DEFAULT '{}',
+      glyph_json TEXT NOT NULL DEFAULT '{}',
+      leader_bot_id TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -2318,6 +2320,31 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       name: string;
     }>).map((column) => column.name),
   );
+  const libraryGroupColumns = new Set(
+    (db.prepare("PRAGMA table_info(library_groups)").all() as Array<{
+      name: string;
+    }>).map((column) => column.name),
+  );
+  if (!libraryGroupColumns.has("glyph_json")) {
+    db.exec("ALTER TABLE library_groups ADD COLUMN glyph_json TEXT NOT NULL DEFAULT '{}';");
+  }
+  if (!libraryGroupColumns.has("leader_bot_id")) {
+    db.exec("ALTER TABLE library_groups ADD COLUMN leader_bot_id TEXT;");
+  }
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS clear_library_group_leader_after_member_delete
+    AFTER DELETE ON library_group_members
+    WHEN OLD.bot_id = (
+      SELECT leader_bot_id
+        FROM library_groups
+       WHERE user_id = OLD.user_id AND id = OLD.group_id
+    )
+    BEGIN
+      UPDATE library_groups
+         SET leader_bot_id = NULL
+       WHERE user_id = OLD.user_id AND id = OLD.group_id;
+    END;
+  `);
   const addReplayRecordingColumn = (
     name: string,
     definition: string,

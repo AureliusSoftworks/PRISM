@@ -142,21 +142,9 @@ export interface PrismCompanionModifierPresentation {
 }
 
 export function prismCompanionModifierPresentation(
-  platform: string,
-  optionWieldOnApple = false,
+  _platform: string,
 ): PrismCompanionModifierPresentation {
-  if (optionWieldOnApple && /Mac|iPhone|iPad/u.test(platform)) {
-    return { modifier: "option", modifierLabel: "Option" };
-  }
-  return /Mac|iPhone|iPad/u.test(platform)
-    ? {
-        modifier: "command",
-        modifierLabel: "Command",
-      }
-    : {
-        modifier: "control",
-        modifierLabel: "Control",
-      };
+  return { modifier: "option", modifierLabel: "Option" };
 }
 
 export function isPrismCompanionModifierKey(
@@ -169,37 +157,23 @@ export function isPrismCompanionModifierKey(
     shiftKey: boolean;
   },
   platform: string,
-  optionWieldOnApple = false,
 ): boolean {
-  if (!isPrismCompanionPlatformModifier(input, platform, optionWieldOnApple)) {
+  if (!isPrismCompanionPlatformModifier(input, platform)) {
     return false;
   }
-  return isPrismCompanionModifierHeld(input, platform, optionWieldOnApple);
+  return isPrismCompanionModifierHeld(input, platform);
 }
 
 export function isPrismCompanionPlatformModifier(
   input: { key: string; code?: string },
   platform: string,
-  optionWieldOnApple = false,
 ): boolean {
-  const presentation = prismCompanionModifierPresentation(
-    platform,
-    optionWieldOnApple,
+  void platform;
+  return (
+    input.key === "Alt" ||
+    input.code === "AltLeft" ||
+    input.code === "AltRight"
   );
-  if (presentation.modifier === "option") {
-    return (
-      input.key === "Alt" ||
-      input.code === "AltLeft" ||
-      input.code === "AltRight"
-    );
-  }
-  return presentation.modifier === "command"
-    ? input.key === "Meta" ||
-        input.code === "MetaLeft" ||
-        input.code === "MetaRight"
-    : input.key === "Control" ||
-        input.code === "ControlLeft" ||
-        input.code === "ControlRight";
 }
 
 export function isPrismCompanionModifierHeld(
@@ -210,24 +184,7 @@ export function isPrismCompanionModifierHeld(
     shiftKey: boolean;
   },
   platform: string,
-  optionWieldOnApple = false,
 ): boolean {
-  const presentation = prismCompanionModifierPresentation(
-    platform,
-    optionWieldOnApple,
-  );
-  if (presentation.modifier === "option") {
-    return input.altKey && !input.metaKey && !input.ctrlKey && !input.shiftKey;
-  }
-  if (presentation.modifier === "command") {
-    return (
-      input.metaKey && !input.altKey && !input.ctrlKey && !input.shiftKey
-    );
-  }
-  return (
-    input.ctrlKey &&
-    !input.altKey &&
-    !input.metaKey &&
-    !input.shiftKey
-  );
+  void platform;
+  return input.altKey && !input.metaKey && !input.ctrlKey && !input.shiftKey;
 }

@@ -15,6 +15,7 @@ import {
   companionLaneUsesQdrantMemorySummaries,
   inferChatToolRequestedImageSize,
   buildCoffeeContinuityPromptContext,
+  chatCursedTongueHolderHistoryV1,
   loadRecentCoffeeContinuityContexts,
   parseTitleResponse,
   processChatMessage,
@@ -28,7 +29,7 @@ import { rewindConversation } from "../conversations.ts";
 import { persistMemoryCandidates, restoreMemory } from "../memory.ts";
 import { RECENT_WINDOW_SIZE, summarizeThreadCompact } from "../memory-summarizer.ts";
 import { fallbackEmbedding, LocalOllamaProvider, selectProvider, type LlmProvider } from "../providers.ts";
-import { botPowerSourceHashV1, buildBotFalseNameSeedV1, parseStoredAssistantToolPayload, pickBotFalseNameFromPoolV1, type AssistantInterruptionReactionInput } from "@localai/shared";
+import { applyBotPowerCursedTongueResponseV1, botPowerSourceHashV1, buildBotFalseNameSeedV1, parseStoredAssistantToolPayload, pickBotFalseNameFromPoolV1, type AssistantInterruptionReactionInput } from "@localai/shared";
 import {
   createZenSessionMemoryCheckpoint,
   listZenSessionMemories,
@@ -37,6 +38,53 @@ const originalFetch = globalThis.fetch;
 
 /** 32 bytes for AES-256-GCM used by memory encryption in tests. */
 const CHAT_TEST_USER_KEY = Buffer.alloc(32, 7);
+
+describe("Cursed Tongue holder history", () => {
+  it("projects clean intended speech only into the matching holder prompt", () => {
+    const history = [
+      {
+        id: "holder-line",
+        role: "assistant" as const,
+        content: "The fucking archive is ready.",
+        createdAt: "2026-08-12T00:00:00.000Z",
+        botId: "holder",
+      },
+      {
+        id: "peer-line",
+        role: "assistant" as const,
+        content: "The goddamn peer line stays public.",
+        createdAt: "2026-08-12T00:00:01.000Z",
+        botId: "peer",
+      },
+    ];
+    const rows = history.map((message) => ({
+      id: message.id,
+      role: message.role,
+      content: message.content,
+      provider: "local",
+      model: "llama3.2",
+      bot_id: message.botId,
+      bot_name: null,
+      bot_color: null,
+      bot_glyph: null,
+      tool_payload: JSON.stringify({
+        v: 1,
+        botPowerIntendedSpeech: message.id === "holder-line"
+          ? "The archive is ready."
+          : "The peer line is clean but private to that peer.",
+      }),
+      created_at: message.createdAt,
+    }));
+    const projected = chatCursedTongueHolderHistoryV1({
+      history,
+      rows,
+      holderBotId: "holder",
+    });
+    assert.equal(projected[0]?.content, "The archive is ready.");
+    assert.equal(projected[1]?.content, "The goddamn peer line stays public.");
+    assert.equal(history[0]?.content, "The fucking archive is ready.");
+  });
+});
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
@@ -635,7 +683,22 @@ describe("bot-locked Chat lane", () => {
       },
     );
 
-    assert.equal(result.conversation.messages.at(-1)?.content, "*nods once* *sips coffee* ...");
+    const publicMessage = result.conversation.messages.at(-1);
+    assert.match(
+      publicMessage?.content ?? "",
+      /^\*nods once\* \*sips coffee\* \.{2} \*2 seconds pass without an audible word\.\*$/u,
+    );
+    assert.equal(publicMessage?.botPowerMutePerformance?.periodCount, 2);
+    assert.equal(publicMessage?.provider, "local");
+    assert.equal(publicMessage?.model, "llama3.2");
+    assert.equal(
+      "botPowerIntendedSpeech" in (publicMessage as unknown as Record<string, unknown>),
+      false,
+    );
+    const stored = db.prepare(
+      "SELECT tool_payload FROM messages WHERE id = ?",
+    ).get(publicMessage?.id) as { tool_payload: string };
+    assert.match(stored.tool_payload, /I can explain/u);
   });
 
   it("enforces addressed-insult Powers when the Chat provider omits the jab", async () => {
@@ -1014,7 +1077,10 @@ describe("bot-locked Chat lane", () => {
       },
     );
 
-    assert.equal(result.conversation.messages.at(-1)?.content, "*leans closer* ...");
+    assert.match(
+      result.conversation.messages.at(-1)?.content ?? "",
+      /^\*leans closer\* \.{2} \*2 seconds pass without an audible word\.\*$/u,
+    );
     assert.equal(
       result.conversation.messages.at(-1)?.botPowerExactResponse,
       "intermittent_mute",
@@ -1053,6 +1119,75 @@ describe("bot-locked Chat lane", () => {
     ).get() as { content: string };
     assert.equal(row.content, saved?.content);
   });
+
+  for (const mode of ["chat", "zen"] as const) {
+    it(`applies Cursed Tongue after generation in ${mode} and stores clean intent privately`, async () => {
+      const db = createChatTestDb();
+      const intended = "*checks the console* The archive plan keeps `const answer = 42` and https://example.com intact.";
+      installChatFetchStub(intended);
+      const name = "Cursed Tongue";
+      const intent = "Every non-silent public reply gains frequent strong profanity after generation.";
+      const powers = [{
+        version: 1,
+        id: "cursed-tongue",
+        name,
+        intent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(name, intent),
+          selfCue: "Draft clean speech only.",
+          observerCue: "Only adjusted speech is public.",
+          effects: [{
+            type: "cursed_tongue",
+            version: 1,
+            frequency: "frequent",
+            strength: "strong",
+            vocabulary: "uncensored_non_slur",
+            phraseMode: "occasional_2_3_words",
+          }],
+          ruleLabels: [],
+        },
+      }];
+      const result = await processChatMessage(
+        db,
+        "user-1",
+        "Explain the plan.",
+        CHAT_TEST_USER_KEY,
+        {
+          preferredProvider: "local",
+          autoMemory: false,
+          botId: "bot-1",
+          incognito: false,
+          mode,
+          botSystemPrompt: "You are Iris.",
+          botPowers: powers,
+        },
+      );
+      const cleanSpoken = mode === "zen"
+        ? "The archive plan keeps `const answer = 42` and https://example.com intact."
+        : intended;
+      const expected = applyBotPowerCursedTongueResponseV1(
+        cleanSpoken,
+        `${result.conversation.id}:bot-1:1`,
+      );
+      const saved = result.conversation.messages.at(-1);
+      assert.equal(saved?.content, expected);
+      assert.ok(saved?.content.includes("`const answer = 42`"));
+      assert.ok(saved?.content.includes("https://example.com"));
+      const row = db.prepare(
+        "SELECT content, tool_payload FROM messages WHERE role = 'assistant' ORDER BY rowid DESC LIMIT 1",
+      ).get() as { content: string; tool_payload: string | null };
+      assert.equal(row.content, expected);
+      const privateIntended = JSON.parse(row.tool_payload ?? "{}") as Record<string, unknown>;
+      assert.equal(privateIntended.botPowerIntendedSpeech, cleanSpoken);
+      assert.equal(
+        (saved as unknown as Record<string, unknown>).botPowerIntendedSpeech,
+        undefined,
+      );
+    });
+  }
 
   it("hard-echoes the user's addressed Chat message verbatim and nothing else", async () => {
     const db = createChatTestDb();

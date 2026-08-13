@@ -10,8 +10,19 @@ import {
   applyBotPowerEternalIntroductionResponseV1,
   applyBotPowerBotNamesV1,
   applyBotPowerEchoResponseV1,
+  applyBotPowerCursedTongueResponseV1,
   applyBotPowerMumbledResponseV1,
   applyBotPowerMuteResponseV1,
+  botPowerMuteEstimatedDurationMsV1,
+  botPowerMuteInterruptionChanceV1,
+  botPowerMuteObserverHistoryV1,
+  botPowerMutePeriodsV1,
+  botPowerMutePrivateHistoryV1,
+  botPowerMutePublicResponseAtElapsedV1,
+  botPowerMuteReactionCountV1,
+  createBotPowerMutePerformanceV1,
+  normalizeBotPowerMutePerformanceV1,
+  planBotPowerMuteReactionBeatsV1,
   applyBotPowerResponseBudgetV1,
   botPowerAddressedFandomCueV1,
   botPowerRequiresAddressedInsultV1,
@@ -64,6 +75,8 @@ import {
   botPowerPairwiseSizeCueFromEffectsV1,
   botPowerIsMutedV1,
   botPowerMumblesSpeechV1,
+  botPowerCursesSpeechV1,
+  botPowerCursedTongueAuthoringCueV1,
   botPowerIntendedSpeechLooksGibberishV1,
   botPowerSpeechObfuscationAuthoringCueV1,
   botPowerIgnoresOtherPowersV1,
@@ -79,6 +92,7 @@ import {
   botPowerPerceptionOverlapStartRatioV1,
   botPowerSelfCueLinesV1,
   botPowerResponseIsSilentV1,
+  botPowerResponseIsSemanticSilenceV1,
   botPowerResponseIsFirstIntroductionV1,
   botPowerSourceHashV1,
   botPowerSourceHashForPowerV1,
@@ -121,6 +135,195 @@ test("bot powers normalize to three bounded entries", () => {
   );
   assert.equal(powers.length, BOT_POWER_MAX_COUNT);
   assert.equal(powers[0]?.intent.length, 640);
+});
+
+test("timed mute quantizes post-budget intended speech and renders immediate dots", () => {
+  const concise = applyBotPowerResponseBudgetV1(
+    "One two three four five six seven eight nine ten eleven twelve thirteen fourteen.",
+    { type: "response_budget", mode: "minimal" },
+    1,
+  );
+  const performance = createBotPowerMutePerformanceV1({
+    intendedSpeech: concise,
+    maximumMs: 9_500,
+    seed: "chat:mute:one",
+  });
+  assert.equal(performance.durationMs % 1_000, 0);
+  assert.equal(performance.periodCount, performance.durationMs / 1_000);
+  assert.ok(performance.durationMs <= 9_000);
+  assert.equal(botPowerMutePeriodsV1(performance.periodCount).length, performance.periodCount);
+  const publicResponse = applyBotPowerMuteResponseV1(
+    "*raises one finger* I meant to explain the whole idea.",
+    performance,
+  );
+  assert.match(publicResponse, /^\*raises one finger\* \.+ \*\d+ seconds? pass without an audible word\.\*$/u);
+  assert.equal(botPowerResponseIsSemanticSilenceV1(publicResponse), true);
+});
+
+test("semantic silence recognizes legacy and action-plus-period responses", () => {
+  for (const value of [
+    "...",
+    "…",
+    ".",
+    "..............",
+    "*looks toward the door* ...",
+    "*looks toward the door* .............. *14 seconds pass without an audible word.*",
+  ]) {
+    assert.equal(botPowerResponseIsSemanticSilenceV1(value), true, value);
+    assert.equal(botPowerResponseIsSilentV1(value), true, value);
+  }
+  assert.equal(botPowerResponseIsSemanticSilenceV1("*looks up* .. hello"), false);
+  assert.equal(botPowerResponseIsSemanticSilenceV1("*14 seconds pass*"), false);
+});
+
+test("timed mute public frames begin immediately and defer the elapsed cue", () => {
+  const performance = createBotPowerMutePerformanceV1({
+    intendedSpeech: "One two three four five six seven eight nine ten.",
+    seed: "chat:mute:clock",
+  });
+  const publicResponse = applyBotPowerMuteResponseV1(
+    "*raises a hand* One two three four five six seven eight nine ten.",
+    performance,
+  );
+  assert.equal(
+    botPowerMutePublicResponseAtElapsedV1(publicResponse, performance, 0),
+    "*raises a hand* .",
+  );
+  assert.equal(
+    botPowerMutePublicResponseAtElapsedV1(publicResponse, performance, 1_999),
+    "*raises a hand* ..",
+  );
+  assert.match(
+    botPowerMutePublicResponseAtElapsedV1(
+      publicResponse,
+      performance,
+      performance.durationMs,
+    ),
+    /seconds? pass without an audible word/u,
+  );
+});
+
+test("timed mute observer history contains only visible actions and elapsed context", () => {
+  const performance = createBotPowerMutePerformanceV1({
+    intendedSpeech: "*looks at the clock* This sentence remains private to its author.",
+  });
+  assert.equal(
+    botPowerMuteObserverHistoryV1(
+      `*looks at the clock* ${".".repeat(performance.periodCount)} ${performance.elapsedCue}`,
+      performance,
+    ),
+    `*looks at the clock* ${performance.elapsedCue}`,
+  );
+  assert.equal(
+    botPowerMuteObserverHistoryV1("....", { v: 999 }),
+    BOT_POWER_CANONICAL_SILENCE_V1,
+  );
+});
+
+test("interrupted Mute private history retains only the intended prefix and cutoff notice", () => {
+  const intended =
+    "I would begin with the old lighthouse, follow the keeper through the storm, and finally explain why the lamp never went dark.";
+  const full = createBotPowerMutePerformanceV1({
+    intendedSpeech: intended,
+    seed: "mute:private:full",
+  });
+  const interrupted = createBotPowerMutePerformanceV1({
+    intendedSpeech: intended,
+    interruptedAtMs: Math.max(1_000, full.durationMs / 2),
+    seed: "mute:private:cut",
+  });
+  const privateHistory = botPowerMutePrivateHistoryV1({
+    intendedSpeech: intended,
+    performance: interrupted,
+  });
+  assert.ok(privateHistory.length < intended.length + 55);
+  assert.match(privateHistory, /You were interrupted before finishing/u);
+  assert.doesNotMatch(privateHistory, /lamp never went dark/u);
+  assert.equal(
+    botPowerMutePrivateHistoryV1({
+      intendedSpeech: intended,
+      performance: full,
+    }),
+    intended,
+  );
+});
+
+test("mute reaction beats are deterministic, bounded, spaced, and Power-aware", () => {
+  const candidates = [
+    { botId: "quiet", directAddressee: true, muted: true },
+    { botId: "breathless", breathless: true },
+    { botId: "cursed", cursedTongue: true },
+  ];
+  const first = planBotPowerMuteReactionBeatsV1({
+    seed: "coffee:mute:beat",
+    durationMs: 30_000,
+    candidates,
+    allowInterrupt: false,
+  });
+  assert.deepEqual(
+    first,
+    planBotPowerMuteReactionBeatsV1({
+      seed: "coffee:mute:beat",
+      durationMs: 30_000,
+      candidates,
+      allowInterrupt: false,
+    }),
+  );
+  assert.ok(first.length <= 3);
+  assert.equal(first[0]?.reactorBotId, "quiet");
+  assert.equal(first[0]?.kind, "visual");
+  assert.ok(first.every((beat) => beat.atMs <= 28_000));
+  assert.ok(first.every((beat, index) => index === 0 || beat.atMs - first[index - 1]!.atMs >= 4_000));
+  assert.notEqual(first.find((beat) => beat.reactorBotId === "breathless")?.kind, "lung_foley");
+});
+
+test("mute reaction density and interruption curves match the timed tiers", () => {
+  const countsAt = (durationMs: number) =>
+    Array.from({ length: 1_000 }, (_, index) =>
+      botPowerMuteReactionCountV1(durationMs, `tier:${durationMs}:${index}`),
+    );
+  assert.deepEqual(new Set(countsAt(5_000)), new Set([0]));
+  assert.deepEqual(new Set(countsAt(8_000)), new Set([0, 1]));
+  assert.deepEqual(new Set(countsAt(15_000)), new Set([1, 2]));
+  assert.deepEqual(new Set(countsAt(24_000)), new Set([1, 2]));
+  assert.deepEqual(new Set(countsAt(36_000)), new Set([2, 3]));
+  assert.equal(botPowerMuteInterruptionChanceV1(11_999), 0);
+  assert.equal(botPowerMuteInterruptionChanceV1(12_000), 0.1);
+  assert.equal(botPowerMuteInterruptionChanceV1(20_000), 0.25);
+  assert.equal(botPowerMuteInterruptionChanceV1(30_000), 0.45);
+  assert.equal(botPowerMuteInterruptionChanceV1(45_000), 0.6);
+  assert.equal(botPowerMuteInterruptionChanceV1(45_000, 0.4), 0.75);
+  assert.equal(botPowerMuteInterruptionChanceV1(12_000, 0, true), 0.75);
+});
+
+test("mute performance sanitizer rejects malformed private-looking metadata", () => {
+  assert.equal(normalizeBotPowerMutePerformanceV1({ v: 2, name: "mutePerformance" }), null);
+  const normalized = normalizeBotPowerMutePerformanceV1({
+    v: 1,
+    name: "mutePerformance",
+    durationMs: 13_501,
+    periodCount: 999,
+    interrupted: "yes",
+    elapsedCue: "leak intended speech",
+    intendedSpeech: "must not survive",
+    reactionBeats: [
+      { atMs: 4_000, reactorBotId: "listener", kind: "audible_quip", action: "glance", quip: "Hello?" },
+      { atMs: 5_000, reactorBotId: "too-close", kind: "visual", action: "shift" },
+    ],
+  });
+  assert.deepEqual(normalized, {
+    v: 1,
+    name: "mutePerformance",
+    durationMs: 14_000,
+    periodCount: 14,
+    interrupted: false,
+    elapsedCue: "*14 seconds pass without an audible word.*",
+    reactionBeats: [
+      { atMs: 4_000, reactorBotId: "listener", kind: "audible_quip", action: "glance", quip: "Hello?" },
+    ],
+  });
+  assert.equal("intendedSpeech" in (normalized ?? {}), false);
+  assert.equal(botPowerMuteEstimatedDurationMsV1("one two three", 1_500), 1_000);
 });
 
 test("addressed-insult Powers distinguish personal jabs from argument criticism and enforce a bounded fallback", () => {
@@ -568,6 +771,109 @@ test("mumbling is a normal-volume hard speech transform that preserves only phys
   );
 });
 
+test("Cursed Tongue deterministically layers strong profanity while protecting records", () => {
+  assert.deepEqual(normalizeBotPowerEffectV1({
+    type: "cursed_tongue",
+    version: 99,
+    frequency: "rare",
+    strength: "small",
+    vocabulary: "anything",
+  }), {
+    type: "cursed_tongue",
+    version: 1,
+    frequency: "frequent",
+    strength: "strong",
+    vocabulary: "uncensored_non_slur",
+    phraseMode: "occasional_2_3_words",
+  });
+  const name = "Cursed Tongue";
+  const intent = "Every public spoken line gains frequent strong profanity after generation.";
+  const powers = [{
+    version: 1,
+    id: "cursed-tongue",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1(name, intent),
+      selfCue: "Draft clean speech only.",
+      observerCue: "Only adjusted speech is public.",
+      effects: [normalizeBotPowerEffectV1({ type: "cursed_tongue" })!],
+      ruleLabels: [],
+    },
+  }];
+  const source = [
+    "*checks the archive* The careful plan keeps every protected artifact intact.",
+    "Use `const answer = 42`, then visit https://example.com/a?b=1.",
+    "See [the record](https://example.com/source) and [[source:scholar-1]].",
+    '{"kind":"evidence","content":"leave this clean"}',
+    "Tell [Mira](prism-bot://bot-mira) the final result plainly.",
+  ].join("\n");
+  const first = applyBotPowerCursedTongueResponseV1(source, "stable-turn");
+  const second = applyBotPowerCursedTongueResponseV1(source, "stable-turn");
+
+  assert.equal(botPowerCursesSpeechV1(powers), true);
+  assert.equal(first, second);
+  assert.match(first, /\b(?:fucking|goddamn|motherfucking|shitty|damn)\b/iu);
+  for (const protectedText of [
+    "*checks the archive*",
+    "`const answer = 42`",
+    "https://example.com/a?b=1",
+    "[the record](https://example.com/source)",
+    "[[source:scholar-1]]",
+    '{"kind":"evidence","content":"leave this clean"}',
+    "[Mira](prism-bot://bot-mira)",
+  ]) {
+    assert.ok(first.includes(protectedText), protectedText);
+  }
+  assert.equal(
+    applyBotPowerCursedTongueResponseV1("*nods once* ...", "silence"),
+    "*nods once* ...",
+  );
+  for (const protectedOnly of [
+    "https://example.com/a?b=1",
+    "```ts\nconst answer = 42;\n```",
+    '{"kind":"evidence","content":"leave this clean"}',
+  ]) {
+    const adjustedProtectedOnly = applyBotPowerCursedTongueResponseV1(
+      protectedOnly,
+      "protected-only",
+    );
+    assert.ok(adjustedProtectedOnly.endsWith(protectedOnly));
+    assert.match(
+      adjustedProtectedOnly.slice(0, -protectedOnly.length),
+      /\b(?:fucking|goddamn|motherfucking|shitty|damn)\b/iu,
+    );
+  }
+  assert.match(
+    botPowerCursedTongueAuthoringCueV1(),
+    /draft fully natural clean speech only/iu,
+  );
+  assert.ok(
+    Array.from({ length: 256 }, (_, index) =>
+      applyBotPowerCursedTongueResponseV1(
+        "This deliberately long ordinary statement contains enough words to demonstrate the stable public mutation without changing its meaning.",
+        `turn-${index}`,
+      )
+    ).some((sample) =>
+      /fucking goddamn|damn fucking|holy fucking shit|fucking bloody hell/iu.test(sample),
+    ),
+  );
+});
+
+test("Cursed Tongue composes after addressed-insult content", () => {
+  const insulted = applyBotPowerAddressedInsultV1(
+    "Your proposal ignores the cost.",
+    "Mira",
+    "composition",
+  );
+  const adjusted = applyBotPowerCursedTongueResponseV1(insulted, "composition");
+  assert.equal(botPowerResponseHasAddressedInsultV1(adjusted, "Mira"), true);
+  assert.match(adjusted, /\b(?:fucking|goddamn|motherfucking|shitty|damn)\b/iu);
+});
+
 test("voice presence does not override physical size or visibility presentation", () => {
   const name = "Loud";
   const intent = "A loud voice that cannot be overlooked.";
@@ -782,6 +1088,9 @@ test("mute Powers normalize and enforce silent action-aware responses", () => {
   assert.equal(applyBotPowerMuteResponseV1("**emphasis** Spoken words."), "...");
   assert.equal(botPowerResponseIsSilentV1("*nods once* ..."), true);
   assert.equal(botPowerResponseIsSilentV1("*nods once* I agree."), false);
+  assert.match(botPowerSelfCueLinesV1(powers)[0] ?? "", /substantive ordinary speech/u);
+  assert.doesNotMatch(botPowerSelfCueLinesV1(powers)[0] ?? "", /Never speak/u);
+  assert.deepEqual(botPowerObserverCueLinesV1("Silent Bob", powers), []);
 });
 
 test("legacy Ready mute Powers stay absolute when compiled effects are missing", () => {
@@ -807,6 +1116,8 @@ test("legacy Ready mute Powers stay absolute when compiled effects are missing",
   assert.equal(botPowerDefinitionIsExplicitMuteV1(name, intent), true);
   assert.deepEqual(activeBotPowerEffectsV1(legacyPowers), [{ type: "mute" }]);
   assert.equal(botPowerIsMutedV1(legacyPowers), true);
+  assert.match(botPowerSelfCueLinesV1(legacyPowers)[0] ?? "", /substantive ordinary speech/u);
+  assert.deepEqual(botPowerObserverCueLinesV1("Silent Bob", legacyPowers), []);
   assert.equal(botPowerIsMutedV1([{ ...legacyPowers[0], enabled: false }]), false);
   assert.equal(
     botPowerDefinitionIsExplicitMuteV1(

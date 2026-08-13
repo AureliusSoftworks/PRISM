@@ -1,5 +1,6 @@
 import type { CoffeeInterruptionEvent } from "./index.js";
 import type { CrosstalkFloorOutcome } from "./listenerReaction.js";
+import { botPowerResponseIsSilentV1 } from "./botPower.ts";
 
 export type CoffeeReactionStyle =
   | "neutral"
@@ -38,7 +39,7 @@ export function coffeeInterruptionTranscriptSegments(args: {
   const sourceMessageId = args.sourceMessageId.trim();
   const interruption = args.interruption;
   const structuralPause =
-    interruption?.pauseBeat === true || args.sourceContent.trim() === "...";
+    interruption?.pauseBeat === true || botPowerResponseIsSilentV1(args.sourceContent);
   if (
     !sourceMessageId ||
     !structuralPause ||

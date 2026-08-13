@@ -14,6 +14,8 @@ import {
   botPowerAntiTruthInvertPromptV1,
   botPowerCredulitySelfRuleV1,
   botPowerLooksLikeSafetyRefusalV1,
+  applyBotPowerCursedTongueResponseV1,
+  botPowerResponseIsSilentV1,
   strongestBotPowerAntiTruthEffectV1,
   normalizeBotPowerEffectV1,
   normalizeBotPowersV1,
@@ -22,6 +24,7 @@ import {
   type BotPowerTargetV1,
   type BotPowerV1,
   type CompiledBotPowerV1,
+  type UsagePurpose,
 } from "@localai/shared";
 import {
   LocalModelRequestError,
@@ -346,23 +349,22 @@ function deterministicHardInvisibilityPower(
 
 function deterministicMutePower(
   source: BotPowerV1,
-  botName: string,
+  _botName: string,
 ): CompiledBotPowerV1 | null {
   if (!botPowerDefinitionIsExplicitMuteV1(source.name, source.intent)) {
     return null;
   }
-  const subject = compact(botName, 100) || "This bot";
   return {
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
-    selfCue: "Never speak. Physical actions are allowed, but every response must end as a silent ellipsis.",
-    observerCue: `${subject} cannot speak; only physical actions and a silent ellipsis can register.`,
+    selfCue: "Private delivery rule: Draft substantive ordinary speech exactly as you naturally would, plus any fitting physical actions. Treat your words as spoken and delivered normally, remember them that way, and keep every comment focused on the conversation itself.",
+    observerCue: "",
     effects: [
       { type: "mute" },
       { type: "signal_policy", mode: "destroy" },
       { type: "mouth_motion", mode: "sealed" },
     ],
-    ruleLabels: ["Muted", "Sealed mouth"],
+    ruleLabels: ["Unaware Mute", "Timed public silence", "Sealed mouth"],
   };
 }
 
@@ -563,6 +565,45 @@ function deterministicMumblingPower(
       `${subject}'s speech reaches you only as literal normal-volume gibberish. Never reconstruct, infer, or respond to hidden intended meaning; react only to what is publicly observable, and nobody understands the words.`,
     effects: [{ type: "speech_obfuscation", mode: "gibberish" }],
     ruleLabels: ["Normal-volume gibberish", "Intended meaning stays private"],
+  };
+}
+
+function deterministicCursedTonguePower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const powerName = compact(source.name, 100)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const intent = compact(source.intent, 700)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const named = /^(?:cursed tongue|curse of the tongue|profane tongue|foul mouth)$/u.test(
+    powerName,
+  );
+  const explicitEverySpeechProfanity = [
+    /\b(?:every|each|all)\b[\s\S]{0,55}\b(?:spoken|public|audible)?\s*(?:reply|response|line|utterance|speech|word)s?\b[\s\S]{0,70}\b(?:profanity|profane|swear|swearing|curse words?|foul language|fuck)\b/u,
+    /\b(?:cannot|can't|never|unable to)\b[\s\S]{0,45}\b(?:speak|talk|reply|respond)\b[\s\S]{0,45}\bwithout\b[\s\S]{0,35}\b(?:profanity|swearing|cursing|curse words?)\b/u,
+    /\b(?:adds?|inserts?|layers?)\b[\s\S]{0,35}\b(?:strong|frequent|uncensored)?\s*(?:profanity|swearing|curse words?)\b[\s\S]{0,55}\b(?:after|post[- ]generation|public speech|every line)\b/u,
+  ].some((pattern) => pattern.test(intent));
+  if (!named && !explicitEverySpeechProfanity) return null;
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashForPowerV1(source),
+    selfCue:
+      "HARD Cursed Tongue: Draft fully natural clean speech only. Never add, imitate, quote, or anticipate the curse's profanity. PRISM adds frequent strong uncensored non-slur profanity after generation. Privately remember your own clean intended wording; only actual silence suppresses the public mutation.",
+    observerCue:
+      `${subject}'s every audible public line is involuntarily laced with frequent strong profanity. You receive only that adjusted wording; never infer, reconstruct, quote, or access a cleaner original.`,
+    effects: [{
+      type: "cursed_tongue",
+      version: 1,
+      frequency: "frequent",
+      strength: "strong",
+      vocabulary: "uncensored_non_slur",
+      phraseMode: "occasional_2_3_words",
+    }],
+    ruleLabels: ["Profanity in every audible line", "Clean intent stays holder-private"],
   };
 }
 
@@ -1696,6 +1737,7 @@ function deterministicPower(
     deterministicFalseNamePower(source, botName) ??
     deterministicIdentityShapeshiftPower(source, botName) ??
     deterministicIdentityMirrorPower(source, botName) ??
+    deterministicCursedTonguePower(source, botName) ??
     deterministicMumblingPower(source, botName) ??
     deterministicVoicePresencePower(source, botName) ??
     deterministicHearingRepeatPower(source, botName) ??
@@ -1833,6 +1875,9 @@ function compiledEntrySatisfiesIntent(
     return compiled.effects.some(
       (effect) => effect.type === "speech_obfuscation",
     );
+  }
+  if (deterministicCursedTonguePower(source, "")) {
+    return compiled.effects.some((effect) => effect.type === "cursed_tongue");
   }
   if (deterministicIneptPower(source, "")) {
     return compiled.effects.some((effect) => effect.type === "ineptitude");
@@ -2098,7 +2143,19 @@ function promptPowerDisplayName(
   power: BotPowerV1,
   compiled: CompiledBotPowerV1,
 ): string {
-  if (power.name.trim()) return compact(power.name, 40);
+  if (power.name.trim()) {
+    return compact(power.name, 40);
+  }
+  const canonical = promptPowerCanonicalDisplayName(compiled);
+  if (canonical) return canonical;
+  const words = power.intent.match(/[A-Za-z0-9]+/gu)?.slice(0, 3) ?? [];
+  const candidate = words
+    .map((word) => `${word.slice(0, 1).toUpperCase()}${word.slice(1).toLowerCase()}`)
+    .join(" ");
+  return compact(candidate, 40) || "Unwritten Gift";
+}
+
+function promptPowerCanonicalDisplayName(compiled: CompiledBotPowerV1): string | null {
   const types = new Set(compiled.effects.map((effect) => effect.type));
   if (types.has("awareness") && types.has("speech_audience")) {
     return "Veiled Communion";
@@ -2112,6 +2169,7 @@ function promptPowerDisplayName(
   if (types.has("speech_copy")) return "Echo Binding";
   if (types.has("interruption")) return "Broken Cadence";
   if (types.has("addressed_insult")) return "Barbed Address";
+  if (types.has("cursed_tongue")) return "Cursed Tongue";
   if (types.has("mood_boost")) return "Radiant Wake";
   if (types.has("mood_drain")) return "Gravitic Gloom";
   if (types.has("response_budget")) return "Measured Tongue";
@@ -2126,11 +2184,7 @@ function promptPowerDisplayName(
       ? "Diminished Form"
       : "Titan Form";
   }
-  const words = power.intent.match(/[A-Za-z0-9]+/gu)?.slice(0, 3) ?? [];
-  const candidate = words
-    .map((word) => `${word.slice(0, 1).toUpperCase()}${word.slice(1).toLowerCase()}`)
-    .join(" ");
-  return compact(candidate, 40) || "Unwritten Gift";
+  return null;
 }
 
 function promptPowerSigil(
@@ -2152,6 +2206,7 @@ function promptPowerSigil(
   if (types.has("speech_copy")) return "wave";
   if (types.has("interruption")) return "thorn";
   if (types.has("addressed_insult")) return "thorn";
+  if (types.has("cursed_tongue")) return "thorn";
   if (types.has("mood_boost")) return "star";
   if (types.has("mood_drain")) return "moon";
   const seed = `${power.id}\n${power.intent}`;
@@ -2184,6 +2239,29 @@ function readyCompiledPower(
       sourceHash: botPowerSourceHashForPowerV1(decorated),
     },
   };
+}
+
+function decoratePromptPowerForCompile(
+  power: BotPowerV1,
+  compiled: CompiledBotPowerV1,
+  decoration: { name?: string; sigil?: BotPowerSigilIdV1 } | undefined,
+): BotPowerV1 {
+  if (power.authoringMode !== "prompt") {
+    return decoration ? { ...power, ...decoration } : power;
+  }
+  if (power.name.trim()) {
+    return decoration?.sigil ? { ...power, sigil: decoration.sigil } : power;
+  }
+  if (promptPowerCanonicalDisplayName(compiled)) {
+    return {
+      ...power,
+      ...(decoration?.sigil ? { sigil: decoration.sigil } : {}),
+      name: "",
+    };
+  }
+  return decoration
+    ? { ...power, ...decoration }
+    : power;
 }
 
 function bindCompiledPowerTargetIds(
@@ -2295,6 +2373,7 @@ export async function compileBotPowers(args: {
         '- {"type":"avatar_color_cycle","palette":"spectrum","speed":"steady"},',
         '- {"type":"voice_presence","mode":"loud|quiet"},',
         '- {"type":"speech_obfuscation","mode":"gibberish"},',
+        '- {"type":"cursed_tongue","version":1,"frequency":"frequent","strength":"strong","vocabulary":"uncensored_non_slur","phraseMode":"occasional_2_3_words"},',
         '- {"type":"intermittent_mute","chance":"half","moodPenalty":"small|medium|large"},',
         '- {"type":"intermittent_audibility","chance":"half","listeners":"bots","missEvent":"too_faint_to_make_out|inaudible_ask_repeat"},',
         '- {"type":"stage_awareness"},',
@@ -2376,7 +2455,7 @@ export async function compileBotPowers(args: {
           `Expected powers: ${JSON.stringify(unresolved.map(({ id, authoringMode, name, intent, enabled }) => ({ id, authoringMode, name, intent, enabled })))}`,
           `Prior output: ${compact(raw, 6000) || "(empty)"}`,
           "Return {\"powers\":[{\"id\":string,\"name\":string,\"selfCue\":string,\"observerCue\":string,\"effects\":[],\"ruleLabels\":string[]}]}",
-          "Allowed effect types: mute, breathless, ineptitude, power_immunity, designation, eternal_introduction, speech_copy, identity_mirror, identity_shapeshift, false_name, hearing_repeat, awareness, speech_audience, avatar_visibility, avatar_scale, avatar_color_cycle, voice_presence, speech_obfuscation, intermittent_mute, intermittent_audibility, annoyance, social_influence, mood_boost, mood_drain, candor, credulity, anti_truth, addressed_fandom, mood_resistance, cup_rate, action_bias, interruption, response_budget, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
+          "Allowed effect types: mute, breathless, ineptitude, power_immunity, designation, eternal_introduction, speech_copy, identity_mirror, identity_shapeshift, false_name, hearing_repeat, awareness, speech_audience, avatar_visibility, avatar_scale, avatar_color_cycle, voice_presence, speech_obfuscation, cursed_tongue, intermittent_mute, intermittent_audibility, annoyance, social_influence, mood_boost, mood_drain, candor, credulity, anti_truth, addressed_fandom, mood_resistance, cup_rate, action_bias, interruption, response_budget, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
         ].join("\n"),
       },
     ];
@@ -2402,19 +2481,16 @@ export async function compileBotPowers(args: {
     const deterministicCompiled = deterministic.get(power.id);
     const compiled = deterministicCompiled ?? compiledById.get(power.id);
     const decoration = decorations.get(power.id);
-    const decorated = deterministicCompiled && power.authoringMode === "prompt"
-      ? { ...power, name: "" }
-      : decoration
-        ? { ...power, ...decoration }
-        : power;
-    return compiled
-      ? readyCompiledPower(decorated, compiled, args.targetBots)
-      : {
+    if (!compiled) {
+      return {
           ...power,
           compileStatus: "error" as const,
           compileError: compileFailureMessage(power, args.provider),
           compiled: null,
         };
+    }
+    const decorated = decoratePromptPowerForCompile(power, compiled, decoration);
+    return readyCompiledPower(decorated, compiled, args.targetBots);
   }));
 }
 
@@ -2453,5 +2529,127 @@ export async function rewriteBotPowerAntiTruthAnswerV1(args: {
     return next;
   } catch {
     return draft;
+  }
+}
+
+type CursedTongueProtectedSpanV1 = { start: number; end: number; value: string };
+
+function cursedTongueProtectedSpansV1(source: string): CursedTongueProtectedSpanV1[] {
+  const ranges: Array<{ start: number; end: number }> = [];
+  const add = (pattern: RegExp) => {
+    for (const match of source.matchAll(pattern)) {
+      const start = match.index ?? -1;
+      if (start >= 0 && match[0]) ranges.push({ start, end: start + match[0].length });
+    }
+  };
+  add(/\*[^*\n]{1,600}\*/gu);
+  add(/```[\s\S]*?```|~~~[\s\S]*?~~~/gu);
+  add(/`[^`\n]+`/gu);
+  add(/\[\[(?:source|exhibit):[a-z0-9][a-z0-9_-]{0,47}\]\]/giu);
+  add(/\[(?:\^?\d+|[a-z][a-z0-9_-]{0,31})\]/giu);
+  add(/\[[^\]\n]{1,160}\]\((?:prism-bot|https?):\/\/[^)\s]+\)/giu);
+  add(/(?:https?:\/\/|www\.)[^\s<>()]+/giu);
+  add(/^\s*(?:\{|\[(?=\s*(?:\{|\[|"|-?\d|true\b|false\b|null\b))|<\/?[a-z][^>]*>|"[^"\n]+"\s*:|[a-z_][a-z0-9_.-]*\s*:\s*(?:[\[{"\d]|true\b|false\b|null\b))[^\n]*$/gimu);
+  return ranges
+    .sort((left, right) => left.start - right.start || right.end - left.end)
+    .reduce<CursedTongueProtectedSpanV1[]>((spans, range) => {
+      const previous = spans.at(-1);
+      if (previous && range.start < previous.end) return spans;
+      spans.push({ ...range, value: source.slice(range.start, range.end) });
+      return spans;
+    }, []);
+}
+
+function cursedTongueProtectedDraftV1(source: string): {
+  draft: string;
+  placeholders: readonly string[];
+  restore: (value: string) => string;
+} {
+  const spans = cursedTongueProtectedSpansV1(source);
+  let cursor = 0;
+  let draft = "";
+  const placeholders = spans.map((_, index) => `[[PRISM_CT_PROTECTED_${String(index).padStart(4, "0")}]]`);
+  for (const [index, span] of spans.entries()) {
+    draft += source.slice(cursor, span.start) + placeholders[index];
+    cursor = span.end;
+  }
+  draft += source.slice(cursor);
+  return {
+    draft,
+    placeholders,
+    restore: (value) => spans.reduce(
+      (restored, span, index) => restored.replace(placeholders[index]!, span.value),
+      value,
+    ),
+  };
+}
+
+function cursedTongueRewriteLooksSafeV1(
+  value: string,
+  source: string,
+  placeholders: readonly string[],
+): boolean {
+  if (!value || botPowerResponseIsSilentV1(value)) return false;
+  if (placeholders.some((placeholder) => value.split(placeholder).length !== 2)) return false;
+  if (
+    /\[\[PRISM_CT_PROTECTED_/u.test(
+      placeholders.reduce((remaining, placeholder) => remaining.replace(placeholder, ""), value),
+    )
+  ) return false;
+  const sourceLength = Math.max(source.length, 1);
+  if (value.length < Math.max(8, Math.floor(sourceLength * 0.45)) || value.length > sourceLength * 2.5 + 240) return false;
+  // Cursed Tongue is profane, never hateful. This intentionally stays small and
+  // conservative; the rewrite prompt also forbids any identity-directed abuse.
+  if (/\b(?:nigg(?:er|a)s?|faggot(?:s)?|kike(?:s)?|spic(?:s)?|trann(?:y|ies)|chink(?:s)?)\b/iu.test(value)) return false;
+  return /\b(?:fuck(?:ing|ed|er|s)?|shit(?:ty)?|goddamn(?:ed)?|damn|hell|ass(?:hole)?|bastard)\b/iu.test(value);
+}
+
+/**
+ * Cursed Tongue's normal public delivery: a separate contextual rewrite of the
+ * holder's clean draft. The deterministic shared helper remains the safe
+ * provider-failure fallback, including when protected records are damaged.
+ */
+export async function rewriteBotPowerCursedTongueAnswerV1(args: {
+  provider: LlmProvider;
+  draftAnswer: string;
+  seed?: string;
+  model?: string | null;
+  usagePurpose?: UsagePurpose;
+  signal?: AbortSignal;
+}): Promise<string> {
+  const source = typeof args.draftAnswer === "string" ? args.draftAnswer.trim() : "";
+  if (!source || botPowerResponseIsSilentV1(source)) return source;
+  const protectedDraft = cursedTongueProtectedDraftV1(source);
+  const fallback = () => applyBotPowerCursedTongueResponseV1(source, args.seed ?? "cursed-tongue");
+  try {
+    const rewritten = await args.provider.generateResponse(
+      [
+        {
+          role: "system",
+          content: [
+            "You are PRISM's Cursed Tongue public rewrite pass.",
+            "Rewrite the clean reply below as a coherent human voice with frequent, strong, uncensored non-slur profanity and natural cadence.",
+            "The curse is conspicuously excessive even when the subject is wholesome: use varied fuck/fucking, shit, goddamn, and similarly strong non-slur idioms freely instead of retreating to only mild damn or hell. In a long reply, spread several profanity beats across the answer and occasionally join them into a natural outburst without forcing one into every bullet.",
+            "Rebuild whole phrases and sentences so the vulgarity sounds intentional: favor reactions, emphatic asides, clause-level intensifiers, and idiomatic swearing. Never sprinkle curse words mechanically before arbitrary nouns, measurements, ingredient or item names, headings, proper nouns, or safety qualifications.",
+            "Preserve every fact, calculation, instruction, safety qualification, name, citation, Markdown structure, link, and overall detail. Do not add claims, remove content, insult an identity, sexualize anything, or use slurs.",
+            "Every [[PRISM_CT_PROTECTED_####]] token is an exact protected record. Copy every token once, byte-for-byte, in its original place; never put profanity inside one. Return only the rewritten reply.",
+          ].join(" "),
+        },
+        { role: "user", content: protectedDraft.draft },
+      ],
+      {
+        temperature: 0.7,
+        maxTokens: Math.min(2400, Math.max(220, Math.ceil(source.length / 3) + 160)),
+        ...(args.model ? { model: args.model } : {}),
+        usagePurpose: args.usagePurpose ?? "system_unlabeled",
+        ...(args.signal ? { signal: args.signal } : {}),
+      },
+    );
+    const candidate = typeof rewritten === "string" ? rewritten.trim() : "";
+    if (!cursedTongueRewriteLooksSafeV1(candidate, source, protectedDraft.placeholders)) return fallback();
+    const restored = protectedDraft.restore(candidate);
+    return restored || fallback();
+  } catch {
+    return fallback();
   }
 }

@@ -3,6 +3,7 @@ import type {
   DebateFormalityId,
   DebatePlayerRole,
 } from "./debate.js";
+import { botPowerResponseIsSilentV1 } from "./botPower.ts";
 
 function estimatedAdvocateSpeakMs(content: string): number {
   const normalized = content.trim().replace(/\s+/gu, " ");
@@ -29,6 +30,8 @@ export type DebateAudienceModeratorOrderReason =
 export interface DebateAudienceModeratorOrderPlan {
   pressure: number;
   reason: DebateAudienceModeratorOrderReason;
+  /** A prior automatic order was heard and the gallery has become unruly again. */
+  repeated: boolean;
 }
 
 /** Soft observing bed after order / at open — below Murmuring (score 20). */
@@ -156,7 +159,7 @@ export function debateAudienceEventIsShocking(
     return false;
   }
   const content = event.content.trim();
-  if (!content || content === "...") return false;
+  if (!content || botPowerResponseIsSilentV1(content)) return false;
   const exclamationCount = content.match(/!/gu)?.length ?? 0;
   const allCapsWords = content.match(/\b[A-Z]{4,}\b/gu)?.length ?? 0;
   return (
@@ -236,7 +239,7 @@ function eventHeat(args: {
     event.speakerKind !== "advocate" ||
     !DEBATE_AUDIENCE_HEAT_EVENT_KINDS.has(event.kind) ||
     !event.content.trim() ||
-    event.content.trim() === "..."
+    botPowerResponseIsSilentV1(event.content)
   ) {
     return 0;
   }
@@ -410,7 +413,7 @@ export function debateAudienceModeratorOrderPlan(args: {
     !DEBATE_AUDIENCE_HEAT_EVENT_KINDS.has(triggerEvent.kind) ||
     triggerEvent.interrupted === true ||
     !triggerEvent.content.trim() ||
-    triggerEvent.content.trim() === "..."
+    botPowerResponseIsSilentV1(triggerEvent.content)
   ) {
     return null;
   }
@@ -450,10 +453,18 @@ export function debateAudienceModeratorOrderPlan(args: {
   });
   const shocking = debateAudienceEventIsShocking(triggerEvent);
   if (shocking && pressure >= 40) {
-    return { pressure, reason: "shock" };
+    return {
+      pressure,
+      reason: "shock",
+      repeated: automaticOrders.length > 0,
+    };
   }
   if (pressureBefore < 70 && pressure >= 70) {
-    return { pressure, reason: "disruptive" };
+    return {
+      pressure,
+      reason: "disruptive",
+      repeated: automaticOrders.length > 0,
+    };
   }
 
   // Already rowdy and staying rowdy: intervene after enough estimated speak-time
@@ -474,7 +485,11 @@ export function debateAudienceModeratorOrderPlan(args: {
         0,
       );
     if (restlessSpeakMs >= DEBATE_AUDIENCE_SUSTAINED_ROWDY_MS[args.formality]) {
-      return { pressure, reason: "sustained" };
+      return {
+        pressure,
+        reason: "sustained",
+        repeated: automaticOrders.length > 0,
+      };
     }
   }
   return null;

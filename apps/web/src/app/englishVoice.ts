@@ -1082,6 +1082,7 @@ async function playEnglishClauseGap(args: {
   roomAcoustics?: RoomAcousticsSend;
   stereoPan?: number;
   pacingProfile?: EnglishPacingProfileV1 | null;
+  kokoroPunctuationPacing?: boolean;
 }): Promise<number> {
   if (args.expectedGeneration !== generation) return 0;
   const gap = resolveEnglishClauseGap({
@@ -1092,6 +1093,7 @@ async function playEnglishClauseGap(args: {
     authoredPerformanceText: args.authoredPerformanceText,
     enabled: args.effectsEnabled,
     pacingProfile: args.pacingProfile,
+    kokoroPunctuationPacing: args.kokoroPunctuationPacing,
   });
   if (gap.breath) {
     const startedAt = Date.now();
@@ -1143,6 +1145,9 @@ async function playChunkedEnglishResponse(
     Number(response.headers.get("x-prism-voice-characters")) || 1,
   );
   const safeEstimatedDurationMs = Math.max(1, estimatedDurationMs);
+  const kokoroPunctuationPacing =
+    response.headers.get("x-prism-voice-pacing") ===
+    "kokoro-punctuation-v1";
   let consumedCharacters = 0;
   let playedChunks = 0;
   let playbackStarted = false;
@@ -1267,6 +1272,7 @@ async function playChunkedEnglishResponse(
         roomAcoustics,
         stereoPan,
         pacingProfile,
+        kokoroPunctuationPacing,
       });
       if (expectedGeneration !== generation) return;
       if (gapHeardMs > 0) {

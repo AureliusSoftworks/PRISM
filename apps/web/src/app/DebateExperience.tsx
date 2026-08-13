@@ -38,6 +38,7 @@ import {
   botIdentityPresentationTransitionActiveV1,
   botPowerObserverProjectionFromEffectsV1,
   botPowerStripBreathPerformanceTextV1,
+  botPowerMutePublicResponseAtElapsedV1,
   debateAdvocacyConsentMatchesSelection,
   debateEventIsAtmosphericVocalFoley,
   debateEventIsCanonicalSilence,
@@ -96,6 +97,7 @@ import {
   type DebateTurnaboutFormatStateV1,
   type DebateTurnaboutStatementV1,
   type BotPowerAvatarScaleMode,
+  type BotPowerMuteReactionBeatV1,
   type GraphicsQuality,
   type ModelPreparationFailure,
   type PrismCompanionDebateDraft,
@@ -215,11 +217,13 @@ import {
   DEBATE_AUDIENCE_LAYER_CROSSFADE_MS,
   DEBATE_AUDIENCE_ORDER_PEAK_HOLD_MS,
   DEBATE_AUDIENCE_ORDER_RETURN_MS,
-  DEBATE_AUDIENCE_PRESSURE_MIX_TRANSITION_MS,
+  DEBATE_AUDIENCE_ORDER_SWELL_MS,
   debateAudienceOrderCallMix,
+  debateAudienceOrderStragglerMix,
   debateAudiencePressureBand,
   debateAudiencePressureMix,
   debateAudiencePressureMixForScore,
+  debateAudiencePressureMixTransitionMs,
   debateAudiencePressureScore,
   debateAudienceTalkerIndices,
   debateAudienceVisualPressureBand,
@@ -373,6 +377,9 @@ import {
   DEBATE_STAGE_ALIGNMENT_ITEMS,
   DEBATE_STAGE_ALIGNMENT_ROLES,
   DEBATE_STAGE_ALIGNMENT_STEP,
+  DEBATE_STAGE_MODERATOR_MICRO_SCALE_MAX,
+  DEBATE_STAGE_MODERATOR_MICRO_SCALE_MIN,
+  DEBATE_STAGE_MODERATOR_MICRO_SCALE_STEP,
   DEBATE_STAGE_GAVEL_POSITION_MAX,
   DEBATE_STAGE_GAVEL_POSITION_MIN,
   DEBATE_STAGE_GAVEL_POSITION_STEP,
@@ -427,6 +434,7 @@ import {
   updateDebateStageGavelPose,
   updateDebateStageLightBlendMode,
   updateDebateStageLightMaskOpacity,
+  updateDebateStageModeratorMicroScale,
   updateDebateStageVoiceLevel,
   writeDebateStageAlignment,
   type DebateStageAlignmentItem,
@@ -1549,6 +1557,33 @@ function debateCameraTransition(
   }
   if (cameraMode !== "auto") return "move";
   return "cut";
+}
+
+const DEBATE_MUTE_REACTION_HOLD_MS = 2_500;
+
+function debateMuteReactionText(
+  beat: BotPowerMuteReactionBeatV1,
+): string {
+  if (
+    (beat.kind === "audible_quip" || beat.kind === "interrupt") &&
+    beat.quip
+  ) {
+    return beat.quip;
+  }
+  if (beat.kind === "lung_foley") {
+    return beat.foley === "whistle"
+      ? "whistles"
+      : beat.foley === "gasp"
+        ? "gasps"
+        : "sighs";
+  }
+  if (beat.action === "look_at_watch") return "looks at their watch";
+  if (beat.action === "tap_fingers") return "taps their fingers";
+  if (beat.action === "head_tilt") return "tilts their head";
+  if (beat.action === "lean_in") return "leans in";
+  if (beat.action === "look_away") return "looks away";
+  if (beat.action === "shift") return "shifts in their seat";
+  return "glances over";
 }
 
 const DEBATE_STAGE_ALIGNMENT_LABELS: Record<DebateStageAlignmentRole, string> =
@@ -5100,6 +5135,7 @@ export function DebateExperience(
   const playedAudienceOrderCueIdsRef = useRef<ReadonlySet<string>>(new Set());
   const previousAudiencePressureBandRef = useRef<{
     band: DebateAudiencePressureBand;
+    score: number;
     sessionId: string;
   } | null>(null);
   const judgeGavelCeremonyGateRef = useRef<DebateJudgeGavelCeremonyGate | null>(
@@ -5468,6 +5504,7 @@ export function DebateExperience(
     const previous = previousAudiencePressureBandRef.current;
     previousAudiencePressureBandRef.current = {
       band: currentAudiencePressureBand,
+      score: currentAudiencePressureScore,
       sessionId: session.id,
     };
     if (
@@ -5492,6 +5529,7 @@ export function DebateExperience(
   }, [
     activeSession,
     currentAudiencePressureBand,
+    currentAudiencePressureScore,
     props.audioEnabled,
     props.audioVolume,
   ]);
@@ -8607,7 +8645,8 @@ export function DebateExperience(
           resolve();
           return;
         }
-        const durationMs = debateRevealDurationMs(spokenText || event.content);
+        const durationMs = event.mutePerformance?.durationMs ??
+          debateRevealDurationMs(spokenText || event.content);
         const speechText = spokenText || event.content;
         if (durationMs <= 0) {
           replaceLiveReveal({
@@ -8664,10 +8703,13 @@ export function DebateExperience(
             return;
           }
           lastPresentationPublishAt = now;
-          const visibleContent = debateVisibleContentAtProgress(
-            event.content,
-            progress,
-          );
+          const visibleContent = event.mutePerformance
+            ? botPowerMutePublicResponseAtElapsedV1(
+                event.content,
+                event.mutePerformance,
+                progress * durationMs,
+              )
+            : debateVisibleContentAtProgress(event.content, progress);
           // Parent commits only when floor-break readiness flips — speech ticks
           // stay in the presentation store so the gallery can subscribe locally.
           const floorReady = visibleContent.length >= 24;
@@ -20158,9 +20200,11 @@ export function DebateExperience(
     session: DebateSessionV1,
     activeEvent: DebateEventV1 | null,
     thinkingBotId: string | null,
+    muteReactionBeat?: BotPowerMuteReactionBeatV1 | null,
   ): React.JSX.Element => {
     const activeJurorId =
-      activeEvent?.speakerKind === "juror" ? activeEvent.speakerBotId : null;
+      muteReactionBeat?.reactorBotId ??
+      (activeEvent?.speakerKind === "juror" ? activeEvent.speakerBotId : null);
     const chamberContent =
       activeEvent &&
       (activeEvent.kind === "jury_deliberation" ||
@@ -20172,7 +20216,9 @@ export function DebateExperience(
         ? liveReveal?.eventId === activeEvent.id
           ? liveReveal.visibleContent
           : activeEvent.content
-        : "";
+        : muteReactionBeat
+          ? debateMuteReactionText(muteReactionBeat)
+          : "";
     const chamberEventVisible =
       activeEvent !== null &&
       (activeEvent.kind === "jury_deliberation" ||
@@ -20180,7 +20226,8 @@ export function DebateExperience(
         (activeEvent.kind === "ballot" &&
           activeEvent.speakerKind === "juror") ||
         (activeEvent.kind === "reaction" &&
-          activeEvent.speakerKind === "juror"));
+          activeEvent.speakerKind === "juror") ||
+        Boolean(muteReactionBeat));
     const publicContent =
       activeEvent && liveReveal?.eventId === activeEvent.id
         ? liveReveal.visibleContent
@@ -20347,6 +20394,10 @@ export function DebateExperience(
                 reactingJurorIndices.has(index)
                   ? chamberListenerReaction
                   : null;
+              const muteReactionForJuror =
+                muteReactionBeat?.reactorBotId === juror.id
+                  ? muteReactionBeat
+                  : null;
               const foleyMouthShape = silentDeliberationPreparing
                 ? debateJuryDeliberationMouthShape(
                     index,
@@ -20382,6 +20433,9 @@ export function DebateExperience(
                   data-scale={presentation.scale}
                   data-color-cycle={presentation.colorCycle ? "true" : undefined}
                   data-listening-reaction={listenerReaction ?? undefined}
+                  data-mute-reaction={
+                    muteReactionForJuror?.action ?? undefined
+                  }
                   data-vocal-foley={foleyMouthShape ? "true" : undefined}
                   key={juror.id}
                   style={
@@ -20462,6 +20516,20 @@ export function DebateExperience(
                       aria-hidden="true"
                     >
                       *{sentenceCaseActionText(vocalFoleyTagText)}*
+                    </span>
+                  ) : null}
+                  {muteReactionForJuror ? (
+                    <span
+                      className={styles.botVocalFoleyTag}
+                      data-debate-mute-reaction="true"
+                      role="status"
+                    >
+                      {muteReactionForJuror.kind === "audible_quip" ||
+                      muteReactionForJuror.kind === "interrupt"
+                        ? debateMuteReactionText(muteReactionForJuror)
+                        : `*${sentenceCaseActionText(
+                            debateMuteReactionText(muteReactionForJuror),
+                          )}*`}
                     </span>
                   ) : null}
                   {silentDeliberationPreparing ? (
@@ -20780,6 +20848,18 @@ export function DebateExperience(
       );
       return offset.x === defaultOffset.x && offset.y === defaultOffset.y;
     });
+    const moderatorMicroScaleView =
+      stageAlignmentPreviewCamera === "moderator"
+        ? null
+        : stageAlignmentPreviewCamera;
+    const moderatorMicroScale = moderatorMicroScaleView
+      ? stageAlignmentDraft.moderatorMicroScales[moderatorMicroScaleView]
+      : null;
+    const defaultModeratorMicroScale = moderatorMicroScaleView
+      ? DEFAULT_DEBATE_STAGE_ALIGNMENT.moderatorMicroScales[
+          moderatorMicroScaleView
+        ]
+      : null;
     const gavelIsDefault = (["lowered", "raised"] as const).every(
       (pose) =>
         stageAlignmentDraft.gavel[pose].x ===
@@ -20970,7 +21050,7 @@ export function DebateExperience(
                       ? "Align every bot, nameplate, and glyph plate in the wide Forum without changing the close-ups."
                       : `Align the source pamphlet and exhibit independently in the ${stageAlignmentPreviewCameraLabel} debater close-up.`}{" "}
                   {stageAlignmentEvidenceOnlyCamera
-                    ? "Use the evidence controls below to position and scale the active asset."
+                    ? "Use the evidence controls below to position and scale the active asset, or calibrate the Moderator micro avatar."
                     : "Drag an item or use arrow keys to nudge by 0.5%; hold Shift for 2%. Select the active item in the exact controls below."}
                 </p>
                 <div>
@@ -21029,6 +21109,14 @@ export function DebateExperience(
                         stageAlignmentEvidenceOnlyCamera
                           ? normalizeDebateStageAlignment({
                               ...current,
+                              moderatorMicroScales: {
+                                ...current.moderatorMicroScales,
+                                [stageAlignmentPreviewCamera]:
+                                  DEFAULT_DEBATE_STAGE_ALIGNMENT
+                                    .moderatorMicroScales[
+                                    stageAlignmentPreviewCamera
+                                  ],
+                              },
                               evidenceTable: {
                                 exhibit: {
                                   ...current.evidenceTable.exhibit,
@@ -21068,6 +21156,8 @@ export function DebateExperience(
                             : normalizeDebateStageAlignment({
                                 ...current,
                                 wide: DEFAULT_DEBATE_STAGE_ALIGNMENT.wide,
+                                moderatorMicroScales:
+                                  DEFAULT_DEBATE_STAGE_ALIGNMENT.moderatorMicroScales,
                                 evidenceTable: {
                                   exhibit: {
                                     ...current.evidenceTable.exhibit,
@@ -22180,6 +22270,59 @@ export function DebateExperience(
                     device.
                   </small>
                 </section>
+                {moderatorMicroScaleView &&
+                moderatorMicroScale !== null &&
+                defaultModeratorMicroScale !== null ? (
+                  <section
+                    className={styles.alignmentModeratorScaleTuner}
+                    aria-label={`${stageAlignmentPreviewCameraLabel} moderator micro avatar scale`}
+                  >
+                    <header>
+                      <div>
+                        <span className={styles.eyebrow}>Moderator micro avatar</span>
+                        <strong>{stageAlignmentPreviewCameraLabel} scale</strong>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={moderatorMicroScale === defaultModeratorMicroScale}
+                        onClick={() =>
+                          setStageAlignmentDraft((current) =>
+                            updateDebateStageModeratorMicroScale(
+                              current,
+                              moderatorMicroScaleView,
+                              defaultModeratorMicroScale,
+                            ),
+                          )
+                        }
+                      >
+                        Reset scale
+                      </button>
+                    </header>
+                    <label>
+                      <span>
+                        Scale
+                        <output>{moderatorMicroScale.toFixed(0)}%</output>
+                      </span>
+                      <input
+                        type="range"
+                        min={DEBATE_STAGE_MODERATOR_MICRO_SCALE_MIN}
+                        max={DEBATE_STAGE_MODERATOR_MICRO_SCALE_MAX}
+                        step={DEBATE_STAGE_MODERATOR_MICRO_SCALE_STEP}
+                        value={moderatorMicroScale}
+                        aria-label={`${stageAlignmentPreviewCameraLabel} moderator micro avatar scale`}
+                        onChange={(event) =>
+                          setStageAlignmentDraft((current) =>
+                            updateDebateStageModeratorMicroScale(
+                              current,
+                              moderatorMicroScaleView,
+                              Number(event.currentTarget.value),
+                            ),
+                          )
+                        }
+                      />
+                    </label>
+                  </section>
+                ) : null}
                 {!stageAlignmentEvidenceOnlyCamera ? (
                   <section
                     className={styles.alignmentTuner}
@@ -22412,6 +22555,20 @@ export function DebateExperience(
             ) ?? null)
         : null) ??
       null;
+    const activeMuteReactionBeat =
+      activeEvent?.mutePerformance &&
+      liveReveal?.eventId === activeEvent.id &&
+      liveReveal.speechTiming
+        ? (activeEvent.mutePerformance.reactionBeats.findLast(
+            (beat) =>
+              liveReveal.speechTiming!.elapsedMs >= beat.atMs &&
+              liveReveal.speechTiming!.elapsedMs <=
+                Math.min(
+                  activeEvent.mutePerformance!.durationMs,
+                  beat.atMs + DEBATE_MUTE_REACTION_HOLD_MS,
+                ),
+          ) ?? null)
+        : null;
     const participantPlayerBotId =
       session.playerRole === "participant"
         ? session.playerSideId === "against"
@@ -22472,7 +22629,20 @@ export function DebateExperience(
           ? "for"
           : cameraSpeakerId === session.againstAdvocate.id
             ? "against"
-            : cameraParticipantFloorRole;
+          : cameraParticipantFloorRole;
+    const muteReactionCameraRole: DebateCameraView | null =
+      activeMuteReactionBeat?.reactorBotId === session.moderator.id
+        ? "moderator"
+        : activeMuteReactionBeat?.reactorBotId === session.forAdvocate.id
+          ? "left"
+          : activeMuteReactionBeat?.reactorBotId === session.againstAdvocate.id
+            ? "right"
+            : activeMuteReactionBeat &&
+                session.jury.jurors.some(
+                  (juror) => juror.id === activeMuteReactionBeat.reactorBotId,
+                )
+              ? "jury"
+              : null;
     const activeColor =
       activeRole === "moderator"
         ? session.moderator.color
@@ -22492,7 +22662,9 @@ export function DebateExperience(
       session.evidence,
       tableEvidenceStickyId,
     );
-    const cameraTransition = interruptCameraView
+    const cameraTransition = activeMuteReactionBeat
+      ? "cut"
+      : interruptCameraView
       ? "objection-pan"
       : speakerHandoff
         ? "handoff"
@@ -22501,6 +22673,9 @@ export function DebateExperience(
       speakerHandoff?.phase === "wide" || speakerHandoff?.phase === "evidence";
     const cameraView = galleryArriving
       ? "wide"
+      : muteReactionCameraRole &&
+          (effectiveCameraMode === "auto" || effectiveCameraMode === "jury")
+        ? muteReactionCameraRole
       : interruptCameraView
         ? interruptCameraView
         : recessSettledWide
@@ -23014,6 +23189,8 @@ export function DebateExperience(
       ? "jury"
       : recessGalleryPhase === "order"
         ? "order-peak"
+        : activeAudienceOrderResponse?.returningRoomTone
+          ? "order-stragglers"
         : debateOpeningGalleryHushed || recessGalleryPhase === "hush"
         ? "opening-hush"
         : galleryPrestartMurmur ||
@@ -23022,8 +23199,7 @@ export function DebateExperience(
           ? "prestart-murmur"
           : debateIdentPlaying !== null
             ? "ident"
-            : activeAudienceOrderResponse &&
-                !activeAudienceOrderResponse.returningRoomTone
+            : activeAudienceOrderResponse
               ? "order-peak"
               : audiencePressureBandTrue
                 ? "pressure-score"
@@ -23041,6 +23217,8 @@ export function DebateExperience(
               ? DEBATE_FOLEY_MIX
               : galleryMixBranch === "order-peak"
                 ? debateAudienceOrderCallMix(session.formality)
+                : galleryMixBranch === "order-stragglers"
+                  ? debateAudienceOrderStragglerMix(session.formality)
                 : galleryMixBranch === "pressure-score"
                   ? debateAudiencePressureMixForScore(
                       currentAudiencePressureScore,
@@ -23225,7 +23403,8 @@ export function DebateExperience(
     const liveGalleryBackgroundUrl = !ambientAudioActive
       ? null
       : galleryMixBranch === "prestart-murmur" ||
-          galleryMixBranch === "order-peak"
+          galleryMixBranch === "order-peak" ||
+          galleryMixBranch === "order-stragglers"
         ? DEBATE_AUDIENCE_MURMUR_URL
         : galleryMixBranch === "pressure-score"
           ? debateAudienceBackgroundUrlForPressureBand(
@@ -23243,9 +23422,8 @@ export function DebateExperience(
       !juryChamberVisible &&
       (galleryMixBranch === "prestart-murmur" ||
         galleryMixBranch === "order-peak" ||
-        (galleryMixBranch === "pressure-score" &&
-          audiencePressureBandTrue !== null &&
-          audiencePressureBandTrue !== "settled") ||
+        galleryMixBranch === "order-stragglers" ||
+        galleryMixBranch === "pressure-score" ||
         ((galleryMixBranch === "idle" || galleryMixBranch === "ducked") &&
           audienceChattering));
     const galleryTalkingAudioAudible = Boolean(
@@ -23293,8 +23471,15 @@ export function DebateExperience(
                 : activeAudienceOrderResponse
                   ? activeAudienceOrderResponse.returningRoomTone
                     ? DEBATE_AUDIENCE_ORDER_RETURN_MS
-                    : 480
-                  : DEBATE_AUDIENCE_PRESSURE_MIX_TRANSITION_MS
+                    : DEBATE_AUDIENCE_ORDER_SWELL_MS
+                  : debateAudiencePressureMixTransitionMs({
+                      previousScore:
+                        previousAudiencePressureBandRef.current?.sessionId ===
+                        session.id
+                          ? previousAudiencePressureBandRef.current.score
+                          : currentAudiencePressureScore,
+                      nextScore: currentAudiencePressureScore,
+                    })
           }
           preloadFoleyUrls={DEBATE_LIVE_FOLEY_PRELOAD_URLS}
           foleyRoomAcoustics={
@@ -23360,6 +23545,20 @@ export function DebateExperience(
             } as CSSProperties
           }
         >
+          {activeEvent?.mutePerformance &&
+          liveReveal?.eventId === activeEvent.id &&
+          (liveReveal.speechTiming?.elapsedMs ?? 0) >=
+            activeEvent.mutePerformance.durationMs ? (
+            <span
+              key={`mute-status:${activeEvent.id}`}
+              className={styles.visuallyHidden}
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              {activeEvent.mutePerformance.elapsedCue.replace(/^\*|\*$/gu, "")}
+            </span>
+          ) : null}
           {galleryArriving ? (
             <div
               className={styles.galleryArrivalStageMask}
@@ -23517,7 +23716,12 @@ export function DebateExperience(
                   </aside>
                 ) : null}
                 {juryChamberVisible ? (
-                  renderJuryChamber(session, activeEvent, juryThinkingBotId)
+                  renderJuryChamber(
+                    session,
+                    activeEvent,
+                    juryThinkingBotId,
+                    activeMuteReactionBeat,
+                  )
                 ) : (
                   <div
                     className={styles.forumCamera}
@@ -23556,8 +23760,13 @@ export function DebateExperience(
                           (presenting &&
                             speakerHandoff === null &&
                             activeSpeakerId === bot.id &&
-                            activeEvent?.kind !== "silence" &&
+                            activeEvent !== null &&
+                            !debateEventIsCanonicalSilence(activeEvent) &&
                             activeSpeechTiming !== null);
+                        const muteReactionForBot =
+                          activeMuteReactionBeat?.reactorBotId === bot.id
+                            ? activeMuteReactionBeat
+                            : null;
                         const speechTiming =
                           talking &&
                           liveReveal &&
@@ -23616,7 +23825,9 @@ export function DebateExperience(
                                 presentation.colorCycle ? "true" : undefined
                               }
                               data-listening-reaction={
-                                botListenerReaction ?? undefined
+                                muteReactionForBot
+                                  ? muteReactionForBot.action
+                                  : (botListenerReaction ?? undefined)
                               }
                               data-vocal-foley={
                                 foleyMouthShape ? "true" : undefined
@@ -23714,6 +23925,27 @@ export function DebateExperience(
                                   aria-hidden="true"
                                 >
                                   *{sentenceCaseActionText(vocalFoleyTagText)}*
+                                </span>
+                              ) : null}
+                              {muteReactionForBot ? (
+                                <span
+                                  className={styles.botVocalFoleyTag}
+                                  data-debate-mute-reaction="true"
+                                  data-interjection-attempt={
+                                    muteReactionForBot.kind === "interrupt"
+                                      ? "true"
+                                      : undefined
+                                  }
+                                  role="status"
+                                >
+                                  {muteReactionForBot.kind === "audible_quip" ||
+                                  muteReactionForBot.kind === "interrupt"
+                                    ? debateMuteReactionText(muteReactionForBot)
+                                    : `*${sentenceCaseActionText(
+                                        debateMuteReactionText(
+                                          muteReactionForBot,
+                                        ),
+                                      )}*`}
                                 </span>
                               ) : null}
                             </div>

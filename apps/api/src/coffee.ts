@@ -52,7 +52,10 @@ import {
   type ProviderMessage,
   type ProviderName,
 } from "./providers.ts";
-import { rewriteBotPowerAntiTruthAnswerV1 } from "./bot-powers.ts";
+import {
+  rewriteBotPowerAntiTruthAnswerV1,
+  rewriteBotPowerCursedTongueAnswerV1,
+} from "./bot-powers.ts";
 import {
   ABOUT_YOU_MEMORY_SOURCE,
   extractBotPreferredAddressMemoryCandidates,
@@ -167,6 +170,7 @@ import type {
   StageActionExclusionV1,
   StageActionMoodHintV1,
   StageActionPlanV1,
+  BotPowerMutePerformanceV1,
 } from "@localai/shared";
 import {
   applyBotPowerAddressedInsultV1,
@@ -176,6 +180,11 @@ import {
   applyBotIdentityShapeshiftResponseV1,
   applyBotPowerMumbledResponseV1,
   applyBotPowerMuteResponseV1,
+  createBotPowerMutePerformanceV1,
+  botPowerMutePrivateHistoryV1,
+  botPowerMuteObserverHistoryV1,
+  botPowerMuteReactionTemperamentFromPersonaV1,
+  normalizeBotPowerMutePerformanceV1,
   applyBotPowerResponseBudgetV1,
   botPowerInaudibleMissCueV1,
   botPowerMuteExemptsPlayerFromEffectsV1,
@@ -312,6 +321,7 @@ import {
   coffeePowerBotAudibleTo,
   coffeePowerBotEchoesAddressedSpeech,
   coffeePowerBotEternallyIntroduces,
+  coffeePowerBotCursesSpeech,
   coffeePowerBotMumblesSpeech,
   coffeePowerBotIgnoresOtherPowers,
   coffeePowerBotIsMuted,
@@ -3472,7 +3482,8 @@ function serializeCoffeeAssistantToolPayload(args: {
   autoRecovery?: AutoRecoveryTraceV1;
   autoRoute?: AutoRouteDecisionV1;
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
-  /** Server-only clear speech used by a Power-immune bot's private prompt. */
+  botPowerMutePerformance?: BotPowerMutePerformanceV1;
+  /** Server-only clean speech used by the Cursed Tongue holder's private prompt. */
   botPowerIntendedSpeech?: string | null;
   socialSilence?: SocialSilenceMarkerV1;
   crosstalkReclaim?: CrosstalkReclaimPlanV1;
@@ -3496,6 +3507,7 @@ function serializeCoffeeAssistantToolPayload(args: {
       args.autoRecovery ||
       args.autoRoute ||
       args.botPowerExactResponse ||
+      args.botPowerMutePerformance ||
       botPowerIntendedSpeech ||
       args.socialSilence ||
       args.crosstalkReclaim
@@ -3508,6 +3520,7 @@ function serializeCoffeeAssistantToolPayload(args: {
       autoRecovery: args.autoRecovery,
       autoRoute: args.autoRoute,
       botPowerExactResponse: args.botPowerExactResponse,
+      botPowerMutePerformance: args.botPowerMutePerformance,
       socialSilence: args.socialSilence,
       crosstalkReclaim: args.crosstalkReclaim,
     }));
@@ -3520,6 +3533,7 @@ function serializeCoffeeAssistantToolPayload(args: {
     !args.autoRecovery &&
     !args.autoRoute &&
     !args.botPowerExactResponse &&
+    !args.botPowerMutePerformance &&
     !botPowerIntendedSpeech &&
     !args.socialSilence &&
     !args.crosstalkReclaim
@@ -3536,6 +3550,9 @@ function serializeCoffeeAssistantToolPayload(args: {
     ...(args.autoRoute ? { autoRoute: args.autoRoute } : {}),
     ...(args.botPowerExactResponse
       ? { botPowerExactResponse: args.botPowerExactResponse }
+      : {}),
+    ...(args.botPowerMutePerformance
+      ? { botPowerMutePerformance: args.botPowerMutePerformance }
       : {}),
     ...(botPowerIntendedSpeech ? { botPowerIntendedSpeech } : {}),
     ...(args.socialSilence ? { socialSilence: args.socialSilence } : {}),
@@ -4746,11 +4763,16 @@ export function coffeeCrosstalkFloorOutcomeV1(args: {
 export function coffeeMessageBelongsInBotPromptHistory(message: {
   role: string;
   content: string;
+  botPowerMutePerformance?: BotPowerMutePerformanceV1;
   coffeeReplayEvents?: readonly unknown[] | null;
   coffeeUserAction?: unknown;
   socialSilence?: unknown;
 }): boolean {
-  if (message.role === "assistant" && /^(?:\.\.\.|…)$/u.test(message.content.trim())) {
+  if (
+    message.role === "assistant" &&
+    botPowerResponseIsSilentV1(message.content)
+  ) {
+    if (message.botPowerMutePerformance) return true;
     return socialSilenceMessageIsMarkedV1({
       content: message.content,
       marker: message.socialSilence,
@@ -13683,6 +13705,7 @@ function loadMessages(
       const coffeeReplayEvents = storedToolPayload.coffeeReplayEvents;
       const autoRecovery = storedToolPayload.autoRecovery;
       const botPowerExactResponse = storedToolPayload.botPowerExactResponse;
+      const botPowerMutePerformance = storedToolPayload.botPowerMutePerformance;
       const socialSilence = storedToolPayload.socialSilence;
       const crosstalkReclaim = storedToolPayload.crosstalkReclaim;
       const message: ChatMessage = {
@@ -13712,6 +13735,7 @@ function loadMessages(
           : { coffeeAudienceBotIds: parseStoredBotGroupIds(row.coffee_audience_bot_ids) }),
         ...(autoRecovery ? { autoRecovery } : {}),
         ...(botPowerExactResponse ? { botPowerExactResponse } : {}),
+        ...(botPowerMutePerformance ? { botPowerMutePerformance } : {}),
         ...(socialSilence ? { socialSilence } : {}),
         ...(crosstalkReclaim ? { crosstalkReclaim } : {}),
       };
@@ -13748,6 +13772,7 @@ function loadAllMessages(
       const coffeeReplayEvents = storedToolPayload.coffeeReplayEvents;
       const autoRecovery = storedToolPayload.autoRecovery;
       const botPowerExactResponse = storedToolPayload.botPowerExactResponse;
+      const botPowerMutePerformance = storedToolPayload.botPowerMutePerformance;
       const socialSilence = storedToolPayload.socialSilence;
       const crosstalkReclaim = storedToolPayload.crosstalkReclaim;
       const message: ChatMessage = {
@@ -13777,6 +13802,7 @@ function loadAllMessages(
           : { coffeeAudienceBotIds: parseStoredBotGroupIds(row.coffee_audience_bot_ids) }),
         ...(autoRecovery ? { autoRecovery } : {}),
         ...(botPowerExactResponse ? { botPowerExactResponse } : {}),
+        ...(botPowerMutePerformance ? { botPowerMutePerformance } : {}),
         ...(socialSilence ? { socialSilence } : {}),
         ...(crosstalkReclaim ? { crosstalkReclaim } : {}),
       };
@@ -13835,6 +13861,7 @@ export function coffeeMessagesVisibleInExport<
     role: string;
     content: string;
     socialSilence?: SocialSilenceMarkerV1;
+    botPowerMutePerformance?: BotPowerMutePerformanceV1;
     coffeeInterruption?: unknown;
   },
 >(
@@ -13847,7 +13874,8 @@ export function coffeeMessagesVisibleInExport<
     if (message.role !== "assistant") return true;
     if (message.coffeeInterruption !== undefined) return false;
     if (
-      message.content.trim() === "..." &&
+      botPowerResponseIsSilentV1(message.content) &&
+      !message.botPowerMutePerformance &&
       !socialSilenceMessageIsMarkedV1({
         content: message.content,
         marker: message.socialSilence,
@@ -13936,7 +13964,7 @@ function loadPendingCoffeeCrosstalkReclaim(
     | undefined;
   if (
     latest?.role !== "assistant" ||
-    latest.content.trim() !== "..." ||
+    !botPowerResponseIsSilentV1(latest.content) ||
     !latest.tool_payload
   ) {
     return null;
@@ -13962,6 +13990,48 @@ function loadPendingCoffeeCrosstalkReclaim(
   } catch {
     return null;
   }
+}
+
+export interface CoffeeMuteFloorBreakV1 {
+  speakerBotId: string;
+  interruptedBotId: string;
+  elapsedCue: string;
+  quip?: string;
+}
+
+/**
+ * Resolve the substantive floor handoff encoded by the latest timed-Mute
+ * performance. The reaction itself remains presentation-only; only this
+ * directed next-speaker decision reaches the ordinary Coffee turn machinery.
+ */
+export function coffeeMuteFloorBreakFromMessageV1(
+  message: Pick<
+    ChatMessage,
+    "role" | "botId" | "botPowerMutePerformance"
+  > | null | undefined,
+  eligibleBotIds: readonly string[],
+): CoffeeMuteFloorBreakV1 | null {
+  if (message?.role !== "assistant" || !message.botId) return null;
+  const performance = normalizeBotPowerMutePerformanceV1(
+    message.botPowerMutePerformance,
+  );
+  if (!performance?.interrupted) return null;
+  const eligible = new Set(eligibleBotIds);
+  const floorBreak = [...performance.reactionBeats]
+    .reverse()
+    .find(
+      (beat) =>
+        beat.kind === "interrupt" &&
+        beat.reactorBotId !== message.botId &&
+        eligible.has(beat.reactorBotId),
+    );
+  if (!floorBreak) return null;
+  return {
+    speakerBotId: floorBreak.reactorBotId,
+    interruptedBotId: message.botId,
+    elapsedCue: performance.elapsedCue,
+    ...(floorBreak.quip ? { quip: floorBreak.quip } : {}),
+  };
 }
 
 export function coffeeLatestMessageIdChanged(
@@ -17015,6 +17085,7 @@ async function generateCoffeeBotReply(args: {
   directPlayerObligation?: boolean;
   presentBotIds?: string[];
   crosstalkReclaim?: CrosstalkReclaimPlanV1;
+  muteFloorBreak?: CoffeeMuteFloorBreakV1;
   playerDepartureEpilogue?: { turnIndex: number; totalTurns: number };
   staleGuard?: {
     expectedLatestMessageId: string | null;
@@ -17034,6 +17105,7 @@ async function generateCoffeeBotReply(args: {
     directPlayerObligation = false,
     presentBotIds,
     crosstalkReclaim,
+    muteFloorBreak,
     playerDepartureEpilogue,
     staleGuard,
   } = args;
@@ -17313,10 +17385,14 @@ async function generateCoffeeBotReply(args: {
     routerReason =
       crosstalkReclaim?.speakerBotId === explicitDirectedSpeaker.id
         ? `Interrupted speaker ${explicitDirectedSpeaker.name} reclaimed the floor for one protected turn.`
+        : muteFloorBreak?.speakerBotId === explicitDirectedSpeaker.id
+          ? `${explicitDirectedSpeaker.name} took the floor after interrupting a prolonged silent response.`
         : `Director mode picked ${explicitDirectedSpeaker.name}.`;
     routerDirective =
       crosstalkReclaim?.speakerBotId === explicitDirectedSpeaker.id
         ? "Reclaim the floor with a new substantive line based only on the audience-heard fragment. Do not reconstruct or reveal the unheard suffix."
+        : muteFloorBreak?.speakerBotId === explicitDirectedSpeaker.id
+          ? "You just broke the prolonged silence. Follow your brief reaction with one substantive, in-character turn; respond only to the visible silence and elapsed time, never to unheard words."
         : "Start a fresh concrete beat tied to the latest table moment.";
   } else if (currentUserAddressedSpeaker) {
     pickedBotId = currentUserAddressedSpeaker.id;
@@ -17501,6 +17577,10 @@ async function generateCoffeeBotReply(args: {
     speakerEchoesAddressedSpeech &&
     (speakerEchoSource !== null || speakerHasSpokenInSession);
   const speakerMumblesForTurn = coffeePowerBotMumblesSpeech(
+    coffeePowerPlan,
+    speaker.id,
+  );
+  const speakerCursesForTurn = coffeePowerBotCursesSpeech(
     coffeePowerPlan,
     speaker.id,
   );
@@ -17806,12 +17886,12 @@ async function generateCoffeeBotReply(args: {
     speaker.id,
   );
   const speakerVisibleHistory = arrivalVisibleHistory.flatMap((message) => {
-    if (
-      message.role !== "assistant" ||
-      !message.botId ||
-      message.botId === speaker.id
-    ) {
-      return [message];
+    if (message.role !== "assistant" || !message.botId) return [message];
+    const intendedSpeech = (message as CoffeeInternalMessage)[
+      COFFEE_BOT_POWER_INTENDED_SPEECH
+    ];
+    if (message.botId === speaker.id) {
+      return [intendedSpeech ? { ...message, content: intendedSpeech } : message];
     }
     const visible = coffeePowerBotVisibleTo(
       coffeePowerPlan,
@@ -17829,16 +17909,26 @@ async function generateCoffeeBotReply(args: {
       message.coffeeAudienceBotIds.includes(speaker.id)
     );
     if (!visible && !audible) return [];
-    const intendedSpeech = (message as CoffeeInternalMessage)[
-      COFFEE_BOT_POWER_INTENDED_SPEECH
-    ];
+    const sourceCursesSpeech = coffeePowerBotCursesSpeech(
+      coffeePowerPlan,
+      message.botId,
+    );
     const sourceVoicePresence = coffeePowerVoicePresenceMode(
       coffeePowerPlan,
       message.botId,
     );
     return [audible
-      ? speakerIgnoresPeerPowers && intendedSpeech
+      ? speakerIgnoresPeerPowers && intendedSpeech && !sourceCursesSpeech
         ? { ...message, content: intendedSpeech }
+        : message.botPowerMutePerformance &&
+            botPowerResponseIsSilentV1(message.content)
+          ? {
+              ...message,
+              content: botPowerMuteObserverHistoryV1(
+                message.content,
+                message.botPowerMutePerformance,
+              ),
+            }
         : message
       : {
           ...message,
@@ -17870,10 +17960,10 @@ async function generateCoffeeBotReply(args: {
     latestTableMessageBeforePerception?.role === "assistant" &&
       latestVisibleTableMessage?.id === latestTableMessageBeforePerception.id &&
       (
-        latestVisibleTableMessage.content === "..." ||
+        botPowerResponseIsSilentV1(latestVisibleTableMessage.content) ||
         /too faint to make out/iu.test(latestVisibleTableMessage.content)
       ) &&
-      latestTableMessageBeforePerception.content !== "...",
+      !botPowerResponseIsSilentV1(latestTableMessageBeforePerception.content),
   );
   // Autonomous callers describe the latest assistant line before we know who
   // will speak. Replace that raw handoff when the selected speaker could not
@@ -18317,9 +18407,6 @@ async function generateCoffeeBotReply(args: {
         signal: settings.signal,
         isTerminalError: (error) => error instanceof CoffeeAutoStaleTurnError,
         validate: (raw) => {
-          if (speakerIsMutedForTurn && !speakerMuteExemptsPlayer) {
-            return { ok: true, value: applyBotPowerMuteResponseV1(raw) };
-          }
           if (speakerEternallyIntroduces) {
             return {
               ok: true,
@@ -18375,7 +18462,7 @@ async function generateCoffeeBotReply(args: {
   } else {
     if (cannedInterruptionReaction) {
       speakerReply =
-        cannedInterruptionReaction.text === "..." && !speakerUsesHardResponse
+        botPowerResponseIsSilentV1(cannedInterruptionReaction.text) && !speakerUsesHardResponse
           ? "I will be quiet."
           : cannedInterruptionReaction.text;
     } else {
@@ -18464,15 +18551,8 @@ async function generateCoffeeBotReply(args: {
         )
       : "";
   // Capture clear speech before Mute so Enlightened/Observant piercers can hear it.
-  const clearSpeechBeforeMute =
-    speakerIsMutedForTurn &&
-    typeof speakerReplyRepaired === "string" &&
-    speakerReplyRepaired.trim()
-      ? speakerReplyRepaired.trim().slice(0, 6_000)
-      : null;
-  if (speakerIsMutedForTurn && !speakerMuteExemptsPlayer) {
-    replyText = applyBotPowerMuteResponseV1(speakerReplyRepaired);
-  } else if (speakerEternallyIntroduces) {
+  let clearSpeechBeforeMute: string | null = null;
+  if (speakerEternallyIntroduces) {
     replyText = applyBotPowerEternalIntroductionResponseV1(
       speakerReplyRepaired,
       speaker.name,
@@ -18756,7 +18836,7 @@ async function generateCoffeeBotReply(args: {
       groupIds: group.map((bot) => bot.id),
     });
   }
-  if (!speakerUsesHardResponse && !socialSilenceMarker) {
+  if ((!speakerUsesHardResponse || speakerIsMuted) && !socialSilenceMarker) {
     replyText = maybeInjectAutonomousPeerAddress({
       replyText,
       turnKind,
@@ -18820,9 +18900,7 @@ async function generateCoffeeBotReply(args: {
   // Promote any plain `@Name` / bare-name peer references into prism-bot mention
   // markdown so the client renders the chip + lights the notified glyph on the
   // addressed bot's seat. Safe even when the model already used the markdown.
-  replyText = speakerIsMutedForTurn && !speakerMuteExemptsPlayer
-    ? applyBotPowerMuteResponseV1(replyText)
-    : speakerEternallyIntroduces
+  replyText = speakerEternallyIntroduces
       ? applyBotPowerEternalIntroductionResponseV1(
           replyText,
           speaker.name,
@@ -18913,7 +18991,7 @@ async function generateCoffeeBotReply(args: {
   const clearSpeechBeforeObfuscation = replyText;
   if (
     speakerMumblesForTurn &&
-    !speakerIsMutedForTurn &&
+    !speakerQuietIgnored &&
     !speakerEternallyIntroduces
   ) {
     replyText = applyBotPowerMumbledResponseV1(replyText);
@@ -18930,6 +19008,21 @@ async function generateCoffeeBotReply(args: {
         knownCoffeeSpeakerNames,
       );
   if (!replyText) replyText = "...";
+  let cleanSpeechBeforeCursedTongue = speakerMumblesForTurn
+    ? clearSpeechBeforeObfuscation
+    : replyText;
+  let cursedTonguePublicSpeech: string | null = null;
+  if (speakerCursesForTurn && !speakerIsMutedForTurn) {
+    replyText = await rewriteBotPowerCursedTongueAnswerV1({
+      provider: speakerProvider,
+      draftAnswer: replyText,
+      seed: `${row.id}:${speaker.id}:${history.length}`,
+      model: speakerOptions.model,
+      usagePurpose: "coffee_turn",
+      signal: settings.signal,
+    });
+    cursedTonguePublicSpeech = replyText;
+  }
   const relationshipSignals = speakerUsesHardResponse || socialSilenceMarker
     ? []
     : extractCoffeeRelationshipSignals({
@@ -19381,7 +19474,7 @@ async function generateCoffeeBotReply(args: {
     !socialSilenceMarker &&
     !speakerIsMutedForTurn &&
     !botPowerResponseIsSilentV1(replyText) &&
-    replyText.trim() !== "..." &&
+    !botPowerResponseIsSilentV1(replyText) &&
     replyText.trim().length > 0;
   if (replyIsSubstantiveCleanTurn) {
     const appliedIds = loadCoffeeDirectionalIrritationAppliedIds(
@@ -19473,6 +19566,66 @@ async function generateCoffeeBotReply(args: {
         },
       ]
     : baseCoffeeReplayEvents;
+  // Stage-direction and required-departure adapters can replace the already
+  // adjusted draft. Reassert Cursed Tongue at the true public boundary while
+  // retaining that final clean wording only for the holder's next prompt.
+  if (
+    speakerCursesForTurn &&
+    !speakerIsMutedForTurn &&
+    replyText !== cursedTonguePublicSpeech
+  ) {
+    cleanSpeechBeforeCursedTongue = replyText;
+    replyText = await rewriteBotPowerCursedTongueAnswerV1({
+      provider: speakerProvider,
+      draftAnswer: replyText,
+      seed: `${row.id}:${speaker.id}:${history.length}`,
+      model: speakerOptions.model,
+      usagePurpose: "coffee_turn",
+      signal: settings.signal,
+    });
+  }
+  let botPowerMutePerformance: BotPowerMutePerformanceV1 | undefined;
+  if (speakerIsMuted && !speakerMuteExemptsPlayer) {
+    clearSpeechBeforeMute = replyText.trim().slice(0, 6_000) || null;
+    botPowerMutePerformance = createBotPowerMutePerformanceV1({
+      intendedSpeech: replyText,
+      maximumMs: 18_000,
+      seed: `${row.id}:${speaker.id}:${assistantMessageId}:mute`,
+      reactionCandidates: turnGroup
+        .filter((bot) => bot.id !== speaker.id)
+        .map((bot) => {
+          const effects = coffeePowerPlan?.bots[bot.id]?.effects ?? [];
+          return {
+            botId: bot.id,
+            directAddressee: listenerTarget?.botId === bot.id,
+            muted: effects.some((effect) => effect.type === "mute"),
+            hardSpeechSuppressed: !coffeePowerBotCanSpeak(coffeePowerPlan, bot.id),
+            breathless: effects.some((effect) => effect.type === "breathless"),
+            cursedTongue: effects.some((effect) => effect.type === "cursed_tongue"),
+            temperament: botPowerMuteReactionTemperamentFromPersonaV1(
+              bot.systemPrompt,
+            ),
+            relationship:
+              durableRelationshipsBySource[speaker.id]?.[bot.id]?.moodKey,
+            mode: "coffee",
+          };
+        }),
+      allowInterrupt:
+        turnKind === "autonomous" && sessionSettings.crossTalk !== "rare",
+      interruptionChanceModifier:
+        sessionSettings.crossTalk === "pileup"
+          ? 0.15
+          : sessionSettings.crossTalk === "chatty"
+            ? 0.08
+            : 0,
+    });
+    clearSpeechBeforeMute = botPowerMutePrivateHistoryV1({
+      intendedSpeech: clearSpeechBeforeMute,
+      estimatedSpeech: replyText,
+      performance: botPowerMutePerformance,
+    });
+    replyText = applyBotPowerMuteResponseV1(replyText, botPowerMutePerformance);
+  }
   const assistantToolPayload = serializeCoffeeAssistantToolPayload({
     interruptionEvent,
     coffeeAmbientAction,
@@ -19491,9 +19644,12 @@ async function generateCoffeeBotReply(args: {
         : speakerMumblesForTurn
           ? "speech_obfuscation"
         : undefined,
+    botPowerMutePerformance,
     botPowerIntendedSpeech:
       speakerIsMutedForTurn && clearSpeechBeforeMute
         ? clearSpeechBeforeMute
+        : speakerCursesForTurn && !speakerIsMutedForTurn
+          ? cleanSpeechBeforeCursedTongue
         : speakerMumblesForTurn && !speakerIsMutedForTurn
           ? clearSpeechBeforeObfuscation
           : undefined,
@@ -21008,8 +21164,17 @@ export async function processCoffeeAutonomousTurn(
     userId,
     row.id,
   );
+  const coffeePowerPlan = resolveCoffeePowersForSession(db, userId, row.id);
+  const muteFloorBreak = coffeeMuteFloorBreakFromMessageV1(
+    history.at(-1),
+    group
+      .filter((bot) => coffeePowerBotCanSpeak(coffeePowerPlan, bot.id))
+      .map((bot) => bot.id),
+  );
   const effectiveDirectedSpeakerBotId =
-    crosstalkReclaim?.speakerBotId ?? directedSpeakerBotId;
+    crosstalkReclaim?.speakerBotId ??
+    muteFloorBreak?.speakerBotId ??
+    directedSpeakerBotId;
   const expectedLatestMessageId = loadLatestCoffeeMessageId(db, userId, row.id);
   const directedUserFocus =
     effectiveDirectedSpeakerBotId && typeof directedUserMessage === "string"
@@ -21021,6 +21186,11 @@ export async function processCoffeeAutonomousTurn(
       : "";
   const tableFocus = crosstalkReclaim
     ? `The audience heard you begin: "${crosstalkReclaim.heardFragment}"`
+    : muteFloorBreak
+      ? [
+          `${muteFloorBreak.elapsedCue} You interrupted that on-air silence${muteFloorBreak.quip ? ` with ${JSON.stringify(muteFloorBreak.quip)}` : ""}.`,
+          "Take the floor now with one substantive response based only on the visible silence and elapsed time.",
+        ].join(" ")
     : normalizedAutonomousFocus
     ? normalizedAutonomousFocus
     : playerDepartureEpilogue
@@ -21052,6 +21222,7 @@ export async function processCoffeeAutonomousTurn(
     presentBotIds,
     playerDepartureEpilogue,
     crosstalkReclaim: crosstalkReclaim ?? undefined,
+    muteFloorBreak: muteFloorBreak ?? undefined,
     staleGuard: { expectedLatestMessageId },
   });
 }

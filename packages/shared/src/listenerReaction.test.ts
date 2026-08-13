@@ -18,6 +18,7 @@ import {
   planSocialSilenceV1,
   resolveListenerReactionAtMs,
   listenerReactionHasCrosstalkAudio,
+  listenerReactionTextIsAuthorizedV1,
   socialSilenceMessageIsMarkedV1,
 } from "./listenerReaction.ts";
 import { DIRECTIONAL_IRRITATION_SNARK_CUES } from "./directionalIrritation.ts";
@@ -611,6 +612,24 @@ describe("listener reaction planning", () => {
 });
 
 describe("listener reaction validation and timing", () => {
+  it("authorizes only fixed cues or an exact saved performance quip", () => {
+    assert.equal(listenerReactionTextIsAuthorizedV1("mm-hmm"), true);
+    assert.equal(
+      listenerReactionTextIsAuthorizedV1(
+        "Any cursed damn day now.",
+        ["Any cursed damn day now."],
+      ),
+      true,
+    );
+    assert.equal(
+      listenerReactionTextIsAuthorizedV1(
+        "This line was never saved.",
+        ["Any cursed damn day now."],
+      ),
+      false,
+    );
+  });
+
   it("rejects malformed or self-listening payloads", () => {
     assert.equal(normalizeListenerReactionPlanV1({}), null);
     assert.equal(normalizeListenerReactionPlanV1({

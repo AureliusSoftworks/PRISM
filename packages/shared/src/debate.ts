@@ -7,11 +7,13 @@ import type {
 import type { BotAvatarDetailsV1 } from "./botAvatarDetails.js";
 import type { BotFaceStyle } from "./botAvatar.js";
 import type { BotVoicePreset } from "./botProfile.js";
-import type {
-  BotPowerEffectV1,
-  BotPowerResolvedThemeV1,
-  BotPowerV1,
-} from "./botPower.js";
+import {
+  botPowerResponseIsSilentV1,
+  type BotPowerEffectV1,
+  type BotPowerMutePerformanceV1,
+  type BotPowerResolvedThemeV1,
+  type BotPowerV1,
+} from "./botPower.ts";
 import type { LlmProviderName } from "./index.js";
 import type { AutoRouteDecisionV1 } from "./modelRouting.js";
 import type { LiveBakeArtifactV1 } from "./liveBake.js";
@@ -21,9 +23,6 @@ import {
   type ProviderReasoningEffort,
   type ReasoningEffort,
 } from "./reasoningEffort.ts";
-
-/** Keep silence compare local so Debate unit tests need no botPower value import. */
-const DEBATE_CANONICAL_SILENCE = "..." as const;
 
 export const DEBATE_SCHEMA_VERSION = 1 as const;
 export const DEBATE_FORMAT_SCHEMA_VERSION = 1 as const;
@@ -807,6 +806,8 @@ export interface DebateEventV1 {
   content: string;
   /** Private clear speech retained only so a Power-immune bot can understand an obfuscated speaker. */
   powerIntendedContent?: string;
+  /** Public replay-stable timed-silence presentation; contains no intended speech. */
+  mutePerformance?: BotPowerMutePerformanceV1;
   sourceIds: string[];
   parentEventId?: string | null;
   interrupted?: boolean;
@@ -2630,10 +2631,7 @@ export const DEBATE_MUTE_SILENCE_FALLBACK_HOLD_MS = 900;
 export function debateEventIsCanonicalSilence(
   event: Pick<DebateEventV1, "kind" | "content">,
 ): boolean {
-  return (
-    event.kind === "silence" ||
-    event.content.trim() === DEBATE_CANONICAL_SILENCE
-  );
+  return event.kind === "silence" || botPowerResponseIsSilentV1(event.content);
 }
 
 /**
@@ -2644,15 +2642,21 @@ export function debateEventIsCanonicalSilence(
 export function debateSilenceHoldDurationMs(
   event: Pick<
     DebateEventV1,
-    "kind" | "content" | "timing" | "powerIntendedContent"
+    "kind" | "content" | "timing" | "powerIntendedContent" | "mutePerformance"
   >,
 ): number {
+  if (event.mutePerformance?.durationMs) {
+    return Math.max(
+      DEBATE_MUTE_SILENCE_MIN_HOLD_MS,
+      Math.round(event.mutePerformance.durationMs),
+    );
+  }
   const fromTiming = event.timing?.estimatedDurationMs;
   if (typeof fromTiming === "number" && fromTiming > 0) {
     return Math.max(DEBATE_MUTE_SILENCE_MIN_HOLD_MS, Math.round(fromTiming));
   }
   const intended = event.powerIntendedContent?.trim() ?? "";
-  if (intended && intended !== DEBATE_CANONICAL_SILENCE) {
+  if (intended && !botPowerResponseIsSilentV1(intended)) {
     return Math.max(
       DEBATE_MUTE_SILENCE_MIN_HOLD_MS,
       debateEstimatedSpeechDurationMs(intended),

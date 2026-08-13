@@ -11,20 +11,31 @@ const cssSource = readFileSync(
   "utf8",
 );
 
-describe("Zen live avatar depth contract", () => {
-  it("derives scale from y-position and leaves no manual resize path", () => {
-    assert.match(pageSource, /resolveZenLiveAvatarDepth\(/);
-    assert.match(pageSource, /updateAvatarDepthForPosition\(clamped\)/);
-    assert.match(pageSource, /data-avatar-render-mode=\{avatarRenderMode\}/);
-    assert.doesNotMatch(pageSource, /resizeZenLiveBotAvatar/);
-    assert.doesNotMatch(pageSource, /zenLiveBotAvatarSizePx/);
-    assert.doesNotMatch(pageSource, /label: "Grow"/);
-    assert.doesNotMatch(pageSource, /label: "Shrink"/);
-    assert.match(pageSource, /data-depth-scaled="true"/);
-    assert.doesNotMatch(pageSource, /data-user-avatar-scale/);
+describe("Zen live avatar sizing contract", () => {
+  it("uses explicit persisted size controls instead of y-position depth", () => {
+    assert.match(pageSource, /function resizeZenLiveBotAvatarSizePx\(/);
+    assert.match(pageSource, /const \[zenLiveBotAvatarSizePx,/);
+    assert.match(pageSource, /label: "Grow"/);
+    assert.match(pageSource, /label: "Shrink"/);
+    assert.match(pageSource, /label: "Reset size"/);
+    assert.match(pageSource, /data-user-avatar-scale="true"/);
+    assert.doesNotMatch(pageSource, /resolveZenLiveAvatarDepth\(/);
+    assert.doesNotMatch(pageSource, /data-depth-scaled="true"/);
   });
 
-  it("turns before horizontal travel and keeps the shared face-and-Ink plane instantaneous", () => {
+  it("restores the authored full-size default and mini/full handoff", () => {
+    assert.match(pageSource, /const ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX = 480;/);
+    assert.match(pageSource, /const ZEN_LIVE_BOT_AVATAR_MAX_SIZE_PX = 480;/);
+    assert.match(pageSource, /const ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX = 184;/);
+    assert.match(pageSource, /const ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX = 240;/);
+    assert.match(pageSource, /avatarSizePx=\{zenLiveBotAvatarSizePx\}/);
+    assert.match(
+      cssSource,
+      /\.zenLiveBotPresencePlate\[data-user-avatar-scale="true"\]\[data-avatar-render-mode="full"\]/,
+    );
+  });
+
+  it("turns before horizontal travel and keeps the face-and-Ink plane instantaneous", () => {
     assert.match(pageSource, /orientAvatarForHorizontalTravel\(/);
     assert.match(pageSource, /snapZenLiveAvatarPositionForPresentation\(/);
     assert.match(pageSource, /facing=\{avatarFacing\}/);
@@ -35,16 +46,9 @@ describe("Zen live avatar depth contract", () => {
   });
 
   it("drives chassis light rotation and glass glare for autonomous presentation frames", () => {
-    assert.match(
-      pageSource,
-      /style\.setProperty\( "--bot-face-metal-light-rotation", `\$\{nextRotation\.toFixed\(2\)\}deg`, \)/,
-    );
+    assert.match(pageSource, /"--bot-face-metal-light-rotation"/);
     assert.match(pageSource, /"--bot-face-screen-glare-x"/);
     assert.match(pageSource, /"--bot-face-screen-glare-y"/);
     assert.match(pageSource, /"--bot-face-screen-glare-angle"/);
-    assert.match(
-      pageSource,
-      /setAvatarPositionClamped\( \{ x: nextMotion\.physics\.x, y: nextMotion\.physics\.y \}, false, true, \)/,
-    );
   });
 });

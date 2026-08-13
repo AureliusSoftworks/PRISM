@@ -16,6 +16,7 @@ export const BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS = 2;
 export interface BotLibraryGroupMaintenanceGroup {
   id: string;
   botIds: string[];
+  leaderBotId?: string | null;
   builtIn?: boolean;
   marketplaceThemeId?: string | null;
   updatedAt?: string;
@@ -165,6 +166,10 @@ export function pruneBotLibraryGroupsForExistingBots<
       return {
         ...group,
         botIds,
+        leaderBotId:
+          group.leaderBotId && botIds.includes(group.leaderBotId)
+            ? group.leaderBotId
+            : null,
       } as TGroup;
     }),
     minimumCustomBots

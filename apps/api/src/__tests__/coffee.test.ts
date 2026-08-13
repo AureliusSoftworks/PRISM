@@ -31,6 +31,7 @@ import {
   coffeeCrosstalkFloorOutcomeV1,
   coffeeLatestMessageIdChanged,
   coffeeMessageBelongsInBotPromptHistory,
+  coffeeMuteFloorBreakFromMessageV1,
   coffeeFallbackFocusPhrase,
   coffeeHistoryVisibleToSpeakerAfterFirmSeat,
   coffeeDepartureOpportunityRequiresExit,
@@ -170,6 +171,7 @@ import {
 import { encryptJson } from "../security.ts";
 import {
   DEFAULT_BOT_PROFILE_FIELDS,
+  applyBotPowerCursedTongueResponseV1,
   applyBotPowerMumbledResponseV1,
   botPowerSourceHashV1,
   coffeeDepartureChanceFromSocial,
@@ -235,6 +237,66 @@ const ALICE: CoffeeBotProfile = {
   maxTokens: 512,
   onlineEnabled: true,
 };
+
+describe("Coffee timed-Mute floor handoff", () => {
+  const interruptedPerformance = {
+    v: 1 as const,
+    name: "mutePerformance" as const,
+    durationMs: 14_000,
+    periodCount: 14,
+    interrupted: true,
+    elapsedCue: "*14 seconds pass without an audible word.*",
+    reactionBeats: [
+      {
+        atMs: 12_000,
+        reactorBotId: "bot-boris",
+        kind: "interrupt" as const,
+        action: "look_at_watch" as const,
+        quip: "Any day now.",
+      },
+    ],
+  };
+
+  it("keeps timed silence in model history so observers receive its elapsed cue", () => {
+    assert.equal(
+      coffeeMessageBelongsInBotPromptHistory({
+        role: "assistant",
+        content:
+          ".............. *14 seconds pass without an audible word.*",
+        botPowerMutePerformance: interruptedPerformance,
+      }),
+      true,
+    );
+  });
+
+  it("directs the interrupting reactor into the next substantive turn", () => {
+    const handoff = coffeeMuteFloorBreakFromMessageV1(
+      {
+        role: "assistant",
+        botId: "bot-alice",
+        botPowerMutePerformance: interruptedPerformance,
+      },
+      ["bot-alice", "bot-boris"],
+    );
+    assert.deepEqual(handoff, {
+      speakerBotId: "bot-boris",
+      interruptedBotId: "bot-alice",
+      elapsedCue: "*14 seconds pass without an audible word.*",
+      quip: "Any day now.",
+    });
+    assert.equal(
+      coffeeMuteFloorBreakFromMessageV1(
+        {
+          role: "assistant",
+          botId: "bot-alice",
+          botPowerMutePerformance: interruptedPerformance,
+        },
+        ["bot-alice"],
+      ),
+      null,
+    );
+  });
+});
 
 const BORIS: CoffeeBotProfile = {
   id: "bot-boris",
@@ -6012,6 +6074,132 @@ describe("Coffee group foundation", () => {
     const observerContext = JSON.stringify(chatBodies);
     assert.match(observerContext, new RegExp(expectedPublic.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
     assert.doesNotMatch(observerContext, /rational plan is to leave before sunrise/iu);
+  });
+
+  it("stores only Cursed Tongue public speech while restoring clean holder self-history", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-power-cursed-tongue";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const name = "Cursed Tongue";
+    const intent = "Every non-silent public reply gains frequent strong profanity after generation.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = ?").run(
+      JSON.stringify([{
+        version: 1,
+        id: "cursed-tongue",
+        name,
+        intent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(name, intent),
+          selfCue: "Draft clean speech only.",
+          observerCue: "Only adjusted speech is public.",
+          effects: [{
+            type: "cursed_tongue",
+            version: 1,
+            frequency: "frequent",
+            strength: "strong",
+            vocabulary: "uncensored_non_slur",
+            phraseMode: "occasional_2_3_words",
+          }],
+          ruleLabels: [],
+        },
+      }]),
+      ALICE.id,
+    );
+    await createCoffeeConversationWithId(db, userId, conversationId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      durationMinutes: 10,
+    });
+    const intended = "Boris, the archive plan keeps the source record intact before sunrise.";
+    const first = await withMockedCoffeeFetch(intended, () =>
+      processCoffeeTurn(
+        db,
+        userId,
+        {
+          conversationId,
+          message: "Alice, what is the plan?",
+          directedSpeakerBotId: ALICE.id,
+        },
+        { preferredProvider: "local", sessionRemainingMs: 120_000 },
+      ),
+    );
+    const frozenPlan = db.prepare(
+      "SELECT coffee_power_plan_json FROM conversations WHERE id = ?",
+    ).get(conversationId) as { coffee_power_plan_json: string | null };
+    assert.match(frozenPlan.coffee_power_plan_json ?? "", /cursed_tongue/u);
+    const parsedFrozenPlan = JSON.parse(frozenPlan.coffee_power_plan_json ?? "{}") as {
+      bots?: Record<string, { effects?: Array<{ type?: string }> }>;
+    };
+    assert.ok(
+      parsedFrozenPlan.bots?.[ALICE.id]?.effects?.some(
+        (effect) => effect.type === "cursed_tongue",
+      ),
+    );
+    const storedSpeaker = db.prepare(
+      `SELECT bot_id FROM messages
+        WHERE conversation_id = ? AND role = 'assistant'
+        ORDER BY created_at DESC LIMIT 1`,
+    ).get(conversationId) as { bot_id: string | null };
+    assert.equal(storedSpeaker.bot_id, ALICE.id);
+    const publicSpeech = first.conversation.messages.at(-1)?.content ?? "";
+    assert.match(publicSpeech, /\b(?:fucking|goddamn|motherfucking|shitty|damn)\b/iu);
+    assert.match(publicSpeech, /\[Boris\]\(prism-bot:\/\//u);
+
+    const stored = db.prepare(
+      `SELECT tool_payload FROM messages
+        WHERE conversation_id = ? AND role = 'assistant'
+        ORDER BY created_at DESC LIMIT 1`,
+    ).get(conversationId) as { tool_payload: string | null };
+    const privateIntended = typeof stored.tool_payload === "string"
+      ? (JSON.parse(stored.tool_payload) as Record<string, unknown>)
+          .botPowerIntendedSpeech
+      : null;
+    assert.equal(typeof privateIntended, "string");
+    assert.doesNotMatch(String(privateIntended), /\b(?:fucking|goddamn|motherfucking|shitty|damn)\b/iu);
+
+    const peerBodies: unknown[] = [];
+    await withMockedCoffeeFetch(
+      "I heard the adjusted line.",
+      () => processCoffeeTurn(
+        db,
+        userId,
+        {
+          conversationId,
+          message: "Boris, respond.",
+          directedSpeakerBotId: BORIS.id,
+        },
+        { preferredProvider: "local", sessionRemainingMs: 120_000 },
+      ),
+      { chatBodies: peerBodies },
+    );
+    const peerPrompt = JSON.stringify(peerBodies);
+    assert.ok(peerPrompt.includes(publicSpeech));
+    assert.equal(peerPrompt.includes(String(privateIntended)), false);
+
+    const holderBodies: unknown[] = [];
+    await withMockedCoffeeFetch(
+      "The follow-up stays clean in my draft.",
+      () => processCoffeeTurn(
+        db,
+        userId,
+        {
+          conversationId,
+          message: "Alice, continue.",
+          directedSpeakerBotId: ALICE.id,
+        },
+        { preferredProvider: "local", sessionRemainingMs: 120_000 },
+      ),
+      { chatBodies: holderBodies },
+    );
+    assert.ok(JSON.stringify(holderBodies).includes(String(privateIntended)));
+    assert.notEqual(
+      applyBotPowerCursedTongueResponseV1(privateIntended, "different"),
+      privateIntended,
+    );
   });
 
   it("lets an echo-bound Coffee bot originate one opening, then silences source-less repeats", async () => {

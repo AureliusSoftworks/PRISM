@@ -129,7 +129,7 @@ describe("avatar scale Power visual contract", () => {
     );
     assert.match(
       signalCss,
-      /\.episodeParticipantAvatar \[data-chat-mini-bot-avatar="true"\]\s*\{[^}]*width:\s*58px;[^}]*height:\s*58px;/u,
+      /\.episodeParticipantAvatar \[data-chat-mini-bot-avatar="true"\]\s*\{[^}]*width:\s*88px;[^}]*height:\s*88px;/u,
     );
     assert.doesNotMatch(
       signalCss,

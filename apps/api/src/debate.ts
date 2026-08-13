@@ -1,6 +1,7 @@
 import { createHash, randomInt, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { endDebatePerfSpan, startDebatePerfSpan } from "./debatePerfTiming.ts";
+import { rewriteBotPowerCursedTongueAnswerV1 } from "./bot-powers.ts";
 import {
   BOT_POWER_CANONICAL_SILENCE_V1,
   DEBATE_CASE_CARDS_PER_SIDE,
@@ -27,8 +28,15 @@ import {
   debateAudienceModeratorOrderPlan,
   debateAdvocacyConsentMatchesRouting,
   applyBotPowerEternalIntroductionResponseV1,
+  applyBotPowerCursedTongueResponseV1,
   applyBotPowerMumbledResponseV1,
   applyBotPowerMuteResponseV1,
+  createBotPowerMutePerformanceV1,
+  botPowerMutePrivateHistoryV1,
+  botPowerIsBreathlessFromEffectsV1,
+  botPowerMuteInterruptionChanceV1,
+  botPowerMuteReactionTemperamentFromPersonaV1,
+  botPowerMuteObserverHistoryV1,
   applyBotPowerResponseBudgetV1,
   botPowerBotNamingCueFromEffectsV1,
   botPowerEternallyIntroducesFromEffectsV1,
@@ -39,6 +47,9 @@ import {
   botPowerIneptRoleMisdirectionFromEffectsV1,
   botPowerObserverProjectionFromEffectsV1,
   botPowerSpeechObfuscationAuthoringCueV1,
+  botPowerCursedTongueAuthoringCueV1,
+  botPowerCursesSpeechFromEffectsV1,
+  botPowerResponseIsSilentV1,
   botPowerSubjectEffectsForObserverFromEffectsV1,
   botPowerTargetNameFromEffectsV1,
   botPowerVoicePresenceModeFromEffectsV1,
@@ -47,6 +58,8 @@ import {
   botIdentityPresentationScreenMaterialSeedV1,
   botIdentityPresentationVoicePresetV1,
   type BotPowerEffectV1,
+  type BotPowerMutePerformanceV1,
+  type BotPowerMuteReactionCandidateV1,
   debateAudiencePressureScore,
   debateJurySeatCount,
   appendDebateParticipantFavorability,
@@ -2253,6 +2266,7 @@ function debatePowerPolicy(
     type === "avatar_color_cycle" ||
     type === "voice_presence" ||
     type === "speech_obfuscation" ||
+    type === "cursed_tongue" ||
     type === "power_immunity" ||
     type === "identity_mirror" ||
     type === "identity_shapeshift" ||
@@ -4503,6 +4517,7 @@ function makeEvent(
     sideId?: DebateSideId | null;
     content: string;
     powerIntendedContent?: string;
+    mutePerformance?: BotPowerMutePerformanceV1;
     sourceIds?: string[];
     stepKey?: string;
     parentEventId?: string | null;
@@ -4539,6 +4554,7 @@ function makeEvent(
     ...(args.powerIntendedContent
       ? { powerIntendedContent: args.powerIntendedContent }
       : {}),
+    ...(args.mutePerformance ? { mutePerformance: args.mutePerformance } : {}),
     sourceIds: args.sourceIds ?? [],
     ...(args.parentEventId !== undefined
       ? { parentEventId: args.parentEventId }
@@ -4641,6 +4657,15 @@ function moderatorIsHardMuted(session: DebateSessionV1): boolean {
   return session.powerPlan.bots[session.moderator.id]?.hardMuted === true;
 }
 
+function debateSpeakerCursesSpeech(
+  session: DebateSessionV1,
+  botId: string,
+): boolean {
+  return botPowerCursesSpeechFromEffectsV1(
+    session.powerPlan.bots[botId]?.effects.map(({ effect }) => effect) ?? [],
+  );
+}
+
 function humanJudgeOwnsModeratorActions(
   session: Pick<DebateSessionV1, "playerRole">,
 ): boolean {
@@ -4704,7 +4729,7 @@ function debateEventIsCommonlyAudible(
   return listeners.every(
     (listener) =>
       debateBotPerception(session, event.speakerBotId!, listener.id, {
-        holderSpeaking: event.content !== BOT_POWER_CANONICAL_SILENCE_V1,
+        holderSpeaking: !botPowerResponseIsSilentV1(event.content),
       }).audible,
   );
 }
@@ -4736,7 +4761,7 @@ function moderatorEventPerception(
   audible: boolean;
   canonicalSilence: boolean;
 } {
-  const canonicalSilence = event.content === BOT_POWER_CANONICAL_SILENCE_V1;
+  const canonicalSilence = botPowerResponseIsSilentV1(event.content);
   const perception = debateBotPerception(
     session,
     session.moderator.id,
@@ -4906,11 +4931,11 @@ function projectDebateEventForObserver(
     session,
     event.speakerBotId,
     perspective,
-    event.content !== BOT_POWER_CANONICAL_SILENCE_V1,
+    !botPowerResponseIsSilentV1(event.content),
   );
   if (projection.audible) return publicEvent;
   if (
-    event.content === BOT_POWER_CANONICAL_SILENCE_V1 &&
+    botPowerResponseIsSilentV1(event.content) &&
     projection.visibility !== "hidden"
   ) {
     return publicEvent;
@@ -5358,7 +5383,7 @@ function publicTranscript(
     const ownSpeech = observerBotId === event.speakerBotId && includeOwnSpeech;
     const perception = observerBotId
       ? debateBotPerception(session, event.speakerBotId, observerBotId, {
-          holderSpeaking: event.content !== BOT_POWER_CANONICAL_SILENCE_V1,
+          holderSpeaking: !botPowerResponseIsSilentV1(event.content),
         })
       : null;
     const audible = ownSpeech
@@ -5367,19 +5392,31 @@ function publicTranscript(
         ? perception?.audible === true
         : debateEventIsCommonlyAudible(session, event);
     if (audible) {
+      const sourceCursesSpeech = debateSpeakerCursesSpeech(
+        session,
+        event.speakerBotId,
+      );
       const content =
-        observerBotId &&
+        ownSpeech && event.powerIntendedContent
+          ? event.powerIntendedContent
+        : observerBotId &&
+        !sourceCursesSpeech &&
         botPowerIgnoresOtherPowersFromEffectsV1(
           session.powerPlan.bots[observerBotId]?.effects.map(
             ({ effect }) => effect,
           ) ?? [],
         )
           ? (event.powerIntendedContent ?? event.content)
-          : event.content;
+          : event.mutePerformance && botPowerResponseIsSilentV1(event.content)
+            ? botPowerMuteObserverHistoryV1(
+                event.content,
+                event.mutePerformance,
+              )
+            : event.content;
       return [`${speaker}: ${content}`];
     }
     if (
-      event.content === BOT_POWER_CANONICAL_SILENCE_V1 &&
+      botPowerResponseIsSilentV1(event.content) &&
       perception?.visible
     ) {
       return [`${speaker}: ${BOT_POWER_CANONICAL_SILENCE_V1}`];
@@ -5417,7 +5454,7 @@ function debateAudienceReactionCooldownClear(
       (event.speakerKind !== "advocate" && event.speakerKind !== "player") ||
       !DEBATE_AUDIENCE_DIRECTOR_EVENT_KINDS.has(event.kind) ||
       !event.content.trim() ||
-      event.content.trim() === BOT_POWER_CANONICAL_SILENCE_V1
+      botPowerResponseIsSilentV1(event.content)
     ) {
       continue;
     }
@@ -5569,6 +5606,46 @@ function debatePeerBotNames(
     .map((bot) => bot.name);
 }
 
+function debateMuteReactionCandidates(
+  session: DebateSessionV1,
+  speakerBotId: string,
+): BotPowerMuteReactionCandidateV1[] {
+  const speaker = debateBots(session).find((bot) => bot.id === speakerBotId);
+  return debateBots(session)
+    .filter((candidate) => candidate.id !== speakerBotId)
+    .map((candidate) => {
+      const effects = debateFrozenPowerEffects(session, candidate.id);
+      return {
+        botId: candidate.id,
+        directAddressee: Boolean(
+          speaker?.sideId &&
+            candidate.sideId &&
+            candidate.sideId !== speaker.sideId,
+        ),
+        muted: session.powerPlan.bots[candidate.id]?.hardMuted === true,
+        breathless: botPowerIsBreathlessFromEffectsV1(effects),
+        cursedTongue: botPowerCursesSpeechFromEffectsV1(effects),
+        temperament: botPowerMuteReactionTemperamentFromPersonaV1(
+          candidate.systemPrompt,
+        ),
+        mood: session.formality,
+        relationship:
+          speaker?.sideId && candidate.sideId !== speaker.sideId
+            ? "opponent"
+            : candidate.role,
+        mode: "debate" as const,
+      };
+    });
+}
+
+function debateMuteInterruptionModifier(session: DebateSessionV1): number {
+  if (session.formality === "free_for_all") return 0.15;
+  if (session.formality === "heated") return 0.1;
+  if (session.formality === "plainspoken") return 0.03;
+  if (session.formality === "parliamentary") return -0.06;
+  return -0.03;
+}
+
 function debateFrozenPowerEffects(
   session: DebateSessionV1,
   botId: string,
@@ -5707,7 +5784,10 @@ function debateIneptitudeMisdirection(
   );
 }
 
-function powerPrompt(session: DebateSessionV1, botId: string): string {
+export function debatePowerPromptForBotV1(
+  session: DebateSessionV1,
+  botId: string,
+): string {
   const plan = session.powerPlan.bots[botId];
   if (!plan || plan.effects.length === 0) return "";
   const holder =
@@ -5737,6 +5817,16 @@ function powerPrompt(session: DebateSessionV1, botId: string): string {
     if (effect.type === "speech_obfuscation") {
       return [
         `- ${powerName} (${policy}): ${botPowerSpeechObfuscationAuthoringCueV1()}`,
+      ];
+    }
+    if (effect.type === "mute") {
+      return [
+        "- Private delivery contract: draft substantive ordinary speech for this assigned floor exactly as you naturally would. Treat the words as spoken and delivered normally, sincerely remember them that way, and keep every comment focused on the debate itself.",
+      ];
+    }
+    if (effect.type === "cursed_tongue") {
+      return [
+        `- ${powerName} (${policy}): ${botPowerCursedTongueAuthoringCueV1()}`,
       ];
     }
     return [`- ${powerName} (${policy}): ${JSON.stringify(effect)}`];
@@ -5824,9 +5914,9 @@ function debateTurnTiming(
   const intended =
     typeof durationContent === "string" ? durationContent.trim() : "";
   const durationSource =
-    intended && intended !== BOT_POWER_CANONICAL_SILENCE_V1
+    intended && !botPowerResponseIsSilentV1(intended)
       ? intended
-      : content === BOT_POWER_CANONICAL_SILENCE_V1
+      : botPowerResponseIsSilentV1(content)
         ? null
         : content;
   // Hard mute with no draft still owns the full floor clock so the camera
@@ -5857,7 +5947,7 @@ function debateSilenceTimingFromIntended(
   intended: string | null | undefined,
 ): DebateTurnTimingV1 | undefined {
   const clear = intended?.trim() ?? "";
-  if (!clear || clear === BOT_POWER_CANONICAL_SILENCE_V1) return undefined;
+  if (!clear || botPowerResponseIsSilentV1(clear)) return undefined;
   const estimatedDurationMs = debateEstimatedSpeechDurationMs(clear);
   return {
     limitMs: estimatedDurationMs,
@@ -5882,6 +5972,7 @@ async function generateSpeech(
   voicePerformanceCue?: DebateVoicePerformanceCue;
   audienceReaction?: DebateAudienceReactionV1;
   powerIntendedContent?: string;
+  mutePerformance?: BotPowerMutePerformanceV1;
 }> {
   if (snapshot.id === DEBATE_PLAYER_PARTICIPANT_BOT_ID) {
     throw new HttpError(
@@ -5892,15 +5983,13 @@ async function generateSpeech(
   const powerBot = session.powerPlan.bots[snapshot.id];
   const effects = powerBot?.effects.map((entry) => entry.effect) ?? [];
   const hardMuted = powerBot?.hardMuted === true;
-  // Intermittent mute skips generation. Hard-muted advocates still draft
-  // privately so presentation can hold the floor for the would-have-spoken
-  // duration; other roles keep the cheap silence short-circuit.
+  // Intermittent mute remains a skipped turn. Hard Mute always drafts private
+  // ordinary intent for every bot-owned role before public suppression.
   if (
     botPowerIntermittentMuteTurnIsIgnoredFromEffectsV1(
       effects,
       `${session.id}:${session.stepKey}:${snapshot.id}`,
-    ) ||
-    (hardMuted && snapshot.role !== "advocate")
+    )
   ) {
     return {
       content: BOT_POWER_CANONICAL_SILENCE_V1,
@@ -5935,7 +6024,7 @@ async function generateSpeech(
           personaVoicePrompt(snapshot),
           personaCapabilityPrompt(snapshot),
           observablePowerEncounterPrompt(),
-          powerPrompt(session, snapshot.id),
+          debatePowerPromptForBotV1(session, snapshot.id),
           "",
           evidencePrompt(session.evidence),
         ]
@@ -6059,6 +6148,7 @@ async function generateSpeech(
   const speechIsObfuscated = effects.some(
     (effect) => effect.type === "speech_obfuscation",
   );
+  const speechIsCursed = botPowerCursesSpeechFromEffectsV1(effects);
   const sanitized = sanitizeDebateStatementSources(intended, session.evidence);
   const clearlyNamed = sanitizeDebateSpeechNaming(
     session,
@@ -6067,24 +6157,46 @@ async function generateSpeech(
   );
   let named = clearlyNamed;
   let powerIntendedContent: string | undefined;
+  let mutePerformance: BotPowerMutePerformanceV1 | undefined;
   if (hardMuted) {
-    named = applyBotPowerMuteResponseV1(clearlyNamed);
-    if (clearlyNamed !== BOT_POWER_CANONICAL_SILENCE_V1) {
+    mutePerformance = createBotPowerMutePerformanceV1({
+      intendedSpeech: clearlyNamed,
+      maximumMs: debateAdvocateTurnTimeLimitMs(session, snapshot) ?? undefined,
+      seed: `${session.id}:${session.stepKey}:${snapshot.id}:${session.events.length}`,
+      reactionCandidates: debateMuteReactionCandidates(session, snapshot.id),
+    });
+    named = applyBotPowerMuteResponseV1(clearlyNamed, mutePerformance);
+    if (!botPowerResponseIsSilentV1(clearlyNamed)) {
       powerIntendedContent = clearlyNamed;
     }
   } else if (speechIsObfuscated) {
     named = applyBotPowerMumbledResponseV1(clearlyNamed);
-    if (clearlyNamed !== BOT_POWER_CANONICAL_SILENCE_V1) {
+    if (!botPowerResponseIsSilentV1(clearlyNamed)) {
       powerIntendedContent = clearlyNamed;
     }
   }
+  if (speechIsCursed && !hardMuted) {
+    if (!botPowerResponseIsSilentV1(clearlyNamed)) {
+      powerIntendedContent = clearlyNamed;
+    }
+    const rewriteLane = lanesForSession(runtime, session).find(
+      (lane) => lane.providerName === deliveryGeneration.provider && lane.model === deliveryGeneration.model,
+    ) ?? lanesForSession(runtime, session)[0]!;
+    named = await rewriteBotPowerCursedTongueAnswerV1({
+      provider: rewriteLane.provider,
+      draftAnswer: named,
+      seed: `${session.id}:${session.stepKey}:${snapshot.id}:${session.events.length}`,
+      model: rewriteLane.model,
+      usagePurpose: "debate_generation",
+    });
+  }
   const audienceReaction =
     hardMuted &&
-    named === BOT_POWER_CANONICAL_SILENCE_V1 &&
+    botPowerResponseIsSilentV1(named) &&
     (snapshot.role === "advocate" || snapshot.role === "juror")
       ? debateMuteSilenceAudienceReaction()
       : snapshot.role === "advocate" &&
-          named !== BOT_POWER_CANONICAL_SILENCE_V1 &&
+          !botPowerResponseIsSilentV1(named) &&
           botPowerVoicePresenceModeFromEffectsV1(effects) !== "quiet"
         ? await directDebateAudienceReaction({
             session,
@@ -6095,20 +6207,21 @@ async function generateSpeech(
         : null;
   endDebatePerfSpan(speechSpan, {
     botId: snapshot.id,
-    silent: named === BOT_POWER_CANONICAL_SILENCE_V1,
+    silent: botPowerResponseIsSilentV1(named),
     repaired: didCapabilityRepair,
   });
   return {
     content: named,
     sourceIds: sanitized.sourceIds,
-    silent: named === BOT_POWER_CANONICAL_SILENCE_V1,
+    silent: botPowerResponseIsSilentV1(named),
     provider: deliveryGeneration.provider,
     model: deliveryGeneration.model,
     ...(deliveryGeneration.autoRecovery
       ? { autoRecovery: deliveryGeneration.autoRecovery }
       : {}),
     ...(powerIntendedContent ? { powerIntendedContent } : {}),
-    ...(named !== BOT_POWER_CANONICAL_SILENCE_V1 && voicePerformanceCue
+    ...(mutePerformance ? { mutePerformance } : {}),
+    ...(!botPowerResponseIsSilentV1(named) && voicePerformanceCue
       ? { voicePerformanceCue }
       : {}),
     ...(audienceReaction ? { audienceReaction } : {}),
@@ -6143,23 +6256,56 @@ function deliverModeratorProceduralSpeech(
   content: string;
   silent: boolean;
   powerIntendedContent?: string;
+  mutePerformance?: BotPowerMutePerformanceV1;
 } {
   const clear = sanitizeDebateModeratorDelivery(intended);
-  if (!clear || moderatorIsHardMuted(session)) {
+  if (!clear) {
     return {
       content: BOT_POWER_CANONICAL_SILENCE_V1,
       silent: true,
     };
   }
-  if (clear === BOT_POWER_CANONICAL_SILENCE_V1) {
+  if (botPowerResponseIsSilentV1(clear)) {
     return {
       content: BOT_POWER_CANONICAL_SILENCE_V1,
       silent: true,
+    };
+  }
+  if (moderatorIsHardMuted(session)) {
+    const mutePerformance = createBotPowerMutePerformanceV1({
+      intendedSpeech: clear,
+      seed: `${session.id}:moderator-procedure:${session.events.length}:mute`,
+      reactionCandidates: debateMuteReactionCandidates(
+        session,
+        session.moderator.id,
+      ),
+    });
+    return {
+      content: applyBotPowerMuteResponseV1(clear, mutePerformance),
+      silent: true,
+      powerIntendedContent: clear,
+      mutePerformance,
     };
   }
   if (moderatorSpeechIsObfuscated(session)) {
+    const content = applyBotPowerMumbledResponseV1(clear);
     return {
-      content: applyBotPowerMumbledResponseV1(clear),
+      content: debateSpeakerCursesSpeech(session, session.moderator.id)
+        ? applyBotPowerCursedTongueResponseV1(
+            content,
+            `${session.id}:moderator-procedure:${session.events.length}`,
+          )
+        : content,
+      silent: false,
+      powerIntendedContent: clear,
+    };
+  }
+  if (debateSpeakerCursesSpeech(session, session.moderator.id)) {
+    return {
+      content: applyBotPowerCursedTongueResponseV1(
+        clear,
+        `${session.id}:moderator-procedure:${session.events.length}`,
+      ),
       silent: false,
       powerIntendedContent: clear,
     };
@@ -6172,10 +6318,9 @@ function ensureModeratorOpeningContent(
   event: DebateEventV1,
 ): DebateEventV1 {
   if (
-    event.content === BOT_POWER_CANONICAL_SILENCE_V1 ||
-    moderatorIsHardMuted(session)
+    botPowerResponseIsSilentV1(event.content)
   ) {
-    if (event.content === BOT_POWER_CANONICAL_SILENCE_V1) return event;
+    if (botPowerResponseIsSilentV1(event.content)) return event;
     const { powerIntendedContent: _privateIntended, ...rest } = event;
     return {
       ...rest,
@@ -6188,6 +6333,7 @@ function ensureModeratorOpeningContent(
   let clear =
     event.powerIntendedContent ??
     (obfuscated ? moderatorOpeningFallback(session) : event.content);
+  let clearChanged = false;
 
   if (session.playerRole === "participant") {
     const devils = devilAdvocateNames(session);
@@ -6201,6 +6347,7 @@ function ensureModeratorOpeningContent(
     ]
       .filter(Boolean)
       .join("\n\n");
+    clearChanged = true;
   } else {
     const normalized = clear.toLocaleLowerCase();
     const namesTheDocket = [
@@ -6212,8 +6359,14 @@ function ensureModeratorOpeningContent(
     );
     if (!namesTheDocket) {
       clear = `${moderatorOpeningFallback(session)}\n\n${clear}`;
+      clearChanged = true;
     }
   }
+
+  // generateSpeech already applied contextual public transforms. Keep that
+  // fluent result when the procedural guard did not have to repair its clean
+  // source; recovery-only copy still uses the deterministic hard fallback.
+  if (!clearChanged && event.powerIntendedContent) return event;
 
   const delivery = deliverModeratorProceduralSpeech(session, clear);
   const { powerIntendedContent: _privateIntended, ...rest } = event;
@@ -6228,6 +6381,9 @@ function ensureModeratorOpeningContent(
     ...(delivery.powerIntendedContent
       ? { powerIntendedContent: delivery.powerIntendedContent }
       : {}),
+    ...(delivery.mutePerformance
+      ? { mutePerformance: delivery.mutePerformance }
+      : {}),
   };
 }
 
@@ -6237,10 +6393,9 @@ function ensureModeratorClosingContent(
   winnerSideId: DebateSideId,
 ): DebateEventV1 {
   if (
-    event.content === BOT_POWER_CANONICAL_SILENCE_V1 ||
-    moderatorIsHardMuted(session)
+    botPowerResponseIsSilentV1(event.content)
   ) {
-    if (event.content === BOT_POWER_CANONICAL_SILENCE_V1) return event;
+    if (botPowerResponseIsSilentV1(event.content)) return event;
     const { powerIntendedContent: _privateIntended, ...rest } = event;
     return {
       ...rest,
@@ -6255,6 +6410,7 @@ function ensureModeratorClosingContent(
     (obfuscated
       ? moderatorClosingFallback(session, winnerSideId)
       : event.content);
+  let clearChanged = false;
   const normalized = clear.toLocaleLowerCase();
   const namesResult = normalized.includes(
     sideLabel(session, winnerSideId).trim().toLocaleLowerCase(),
@@ -6265,7 +6421,10 @@ function ensureModeratorClosingContent(
     );
   if (!(namesResult && endsProceeding)) {
     clear = `${clear}\n\n${moderatorClosingFallback(session, winnerSideId)}`;
+    clearChanged = true;
   }
+
+  if (!clearChanged && event.powerIntendedContent) return event;
 
   const delivery = deliverModeratorProceduralSpeech(session, clear);
   const { powerIntendedContent: _privateIntended, ...rest } = event;
@@ -6279,6 +6438,9 @@ function ensureModeratorClosingContent(
     content: delivery.content,
     ...(delivery.powerIntendedContent
       ? { powerIntendedContent: delivery.powerIntendedContent }
+      : {}),
+    ...(delivery.mutePerformance
+      ? { mutePerformance: delivery.mutePerformance }
       : {}),
   };
 }
@@ -6376,6 +6538,7 @@ async function moderatorBookendEvent(
     voicePerformanceCue: speech.voicePerformanceCue,
     audienceReaction: speech.audienceReaction,
     powerIntendedContent: speech.powerIntendedContent,
+    mutePerformance: speech.mutePerformance,
     stepKey: args.stepKey,
   });
 }
@@ -6811,7 +6974,7 @@ function updateCaseBoard(
       )) ||
     !event.sideId ||
     event.content === "Pass." ||
-    event.content === BOT_POWER_CANONICAL_SILENCE_V1 ||
+    botPowerResponseIsSilentV1(event.content) ||
     botPowerTextRequestsRepeat(event.content) ||
     (event.speakerBotId !== null &&
       !debateEventIsCommonlyAudible(session, event))
@@ -7259,7 +7422,7 @@ function priorSameSideRebuttalContents(
         event.kind === "speech" &&
         event.sideId === sideId &&
         event.stepKey === stepKey &&
-        event.content !== BOT_POWER_CANONICAL_SILENCE_V1 &&
+        !botPowerResponseIsSilentV1(event.content) &&
         !event.interrupted,
     )
     .map((event) => event.content);
@@ -7438,7 +7601,7 @@ function botHeardEvent(
 ): boolean {
   if (!event.speakerBotId || event.speakerBotId === listenerBotId) return true;
   return debateBotPerception(session, event.speakerBotId, listenerBotId, {
-    holderSpeaking: event.content !== BOT_POWER_CANONICAL_SILENCE_V1,
+    holderSpeaking: !botPowerResponseIsSilentV1(event.content),
   }).audible;
 }
 
@@ -7463,7 +7626,7 @@ function hearingRepeatReaction(
         ["intro", "speech", "reaction"].includes(event.kind) &&
         Boolean(event.speakerBotId) &&
         event.speakerBotId !== requester.id &&
-        event.content !== BOT_POWER_CANONICAL_SILENCE_V1 &&
+        !botPowerResponseIsSilentV1(event.content) &&
         botHeardEvent(session, event, requester.id),
     );
   if (!source?.speakerBotId) return null;
@@ -7509,7 +7672,7 @@ function personaSurpriseTrigger(
           (event.speakerKind === "advocate" ||
             event.speakerKind === "juror" ||
             event.speakerKind === "player") &&
-          event.content !== BOT_POWER_CANONICAL_SILENCE_V1,
+          !botPowerResponseIsSilentV1(event.content),
       ) ?? null
   );
 }
@@ -7639,7 +7802,7 @@ async function generatePersonaSurpriseReaction(
   if (
     !observer ||
     !personaSurpriseReactionIsConcise(content) ||
-    content === BOT_POWER_CANONICAL_SILENCE_V1
+    botPowerResponseIsSilentV1(content)
   ) {
     return null;
   }
@@ -7713,6 +7876,7 @@ const DAYTIME_SHOWDOWN_FLOOR_BREAK_STEPS = new Set([
 function interruptionCandidate(
   session: DebateSessionV1,
   speaker: DebateBotSnapshotV1,
+  speechEvent?: DebateEventV1,
 ): DebateBotSnapshotV1 | null {
   if (
     botPowerIgnoresOtherPowersFromEffectsV1(
@@ -7787,6 +7951,46 @@ function interruptionCandidate(
       .sort((a, b) => b.score - a.score || a.bot.id.localeCompare(b.bot.id))[0]
       ?.bot ?? null;
   if (powerInterrupter) return powerInterrupter;
+  const muteDurationMs = speechEvent?.mutePerformance?.durationMs ?? 0;
+  if (muteDurationMs >= 12_000) {
+    const eligible = debateBots(session)
+      .filter(
+        (candidate) =>
+          candidate.id !== speaker.id &&
+          candidate.id !== playerParticipantProxy(session)?.id &&
+          session.powerPlan.bots[candidate.id]?.hardMuted !== true &&
+          botHeardEvent(session, speechEvent!, candidate.id),
+      )
+      .sort((left, right) => {
+        const leftOpponent = Number(
+          Boolean(
+            speaker.sideId &&
+              left.sideId &&
+              left.sideId !== speaker.sideId,
+          ),
+        );
+        const rightOpponent = Number(
+          Boolean(
+            speaker.sideId &&
+              right.sideId &&
+              right.sideId !== speaker.sideId,
+          ),
+        );
+        return rightOpponent - leftOpponent || left.id.localeCompare(right.id);
+      });
+    const chance = botPowerMuteInterruptionChanceV1(
+      muteDurationMs,
+      debateMuteInterruptionModifier(session),
+    );
+    if (
+      eligible.length > 0 &&
+      stablePowerChance(
+        `${session.id}:${speechEvent!.id}:timed-mute-floor-break`,
+      ) < chance
+    ) {
+      return eligible[0]!;
+    }
+  }
   if (
     !debateUsesFreeForAllPerformance(session) ||
     speaker.role !== "advocate" ||
@@ -7847,7 +8051,7 @@ async function botFloorBreak(
   runtime: DebateAiRuntime,
 ): Promise<DebateBotFloorBreak | null> {
   if (session.stepKey === "intro" || speechEvent.kind !== "speech") return null;
-  const interrupter = interruptionCandidate(session, speaker);
+  const interrupter = interruptionCandidate(session, speaker, speechEvent);
   if (!interrupter) return null;
   const freeForAll = debateUsesFreeForAllPerformance(session);
   const cutoffRatio =
@@ -7856,11 +8060,63 @@ async function botFloorBreak(
       `${session.id}:${session.stepKey}:${interrupter.id}:cutoff`,
     ) *
       (freeForAll ? 0.16 : 0.18);
-  const cutoff = interruptedStatementPrefix(
-    speechEvent.content,
-    Math.floor(speechEvent.content.length * cutoffRatio),
-  );
-  if (cutoff.length < 36 || cutoff.length >= speechEvent.content.length - 8) {
+  const intendedCutoff =
+    speechEvent.mutePerformance && speechEvent.powerIntendedContent
+      ? interruptedStatementPrefix(
+          speechEvent.powerIntendedContent,
+          Math.floor(speechEvent.powerIntendedContent.length * cutoffRatio),
+        )
+      : null;
+  const baseInterruptedMutePerformance =
+    speechEvent.mutePerformance && intendedCutoff
+      ? createBotPowerMutePerformanceV1({
+          intendedSpeech: speechEvent.powerIntendedContent,
+          interruptedAtMs: speechEvent.mutePerformance.durationMs * cutoffRatio,
+          seed: `${session.id}:${speechEvent.id}:${interrupter.id}:interrupt`,
+          reactionCandidates: debateMuteReactionCandidates(
+            session,
+            speaker.id,
+          ),
+        })
+      : undefined;
+  const interruptedMutePerformance = baseInterruptedMutePerformance
+    ? {
+        ...baseInterruptedMutePerformance,
+        reactionBeats: [
+          ...baseInterruptedMutePerformance.reactionBeats
+            .filter(
+              (beat) =>
+                beat.atMs <= baseInterruptedMutePerformance.durationMs - 4_000,
+            )
+            .slice(0, 2),
+          {
+            atMs: baseInterruptedMutePerformance.durationMs,
+            reactorBotId: interrupter.id,
+            kind: "interrupt" as const,
+            action: "lean_in" as const,
+            quip: debateSpeakerCursesSpeech(session, interrupter.id)
+              ? await rewriteBotPowerCursedTongueAnswerV1({
+                  provider: lanesForSession(runtime, session)[0]!.provider,
+                  draftAnswer: "Objection!",
+                  seed: `${session.id}:${speechEvent.id}:${interrupter.id}:mute-interrupt`,
+                  model: lanesForSession(runtime, session)[0]!.model,
+                  usagePurpose: "debate_generation",
+                })
+              : "Objection!",
+          },
+        ],
+      }
+    : undefined;
+  const cutoff = interruptedMutePerformance && intendedCutoff
+    ? applyBotPowerMuteResponseV1(intendedCutoff, interruptedMutePerformance)
+    : interruptedStatementPrefix(
+        speechEvent.content,
+        Math.floor(speechEvent.content.length * cutoffRatio),
+      );
+  if (
+    !intendedCutoff &&
+    (cutoff.length < 36 || cutoff.length >= speechEvent.content.length - 8)
+  ) {
     return null;
   }
   const interruptedEvent: DebateEventV1 = {
@@ -7869,6 +8125,15 @@ async function botFloorBreak(
     sourceIds: debateSourceIdsFromText(cutoff, session.evidence),
     interrupted: true,
     interruptedBy: "bot",
+    ...(intendedCutoff
+      ? {
+          powerIntendedContent:
+            `${intendedCutoff}\n\n[Privately: your delivery was interrupted here.]`,
+        }
+      : {}),
+    ...(interruptedMutePerformance
+      ? { mutePerformance: interruptedMutePerformance }
+      : {}),
   };
   const interruptedSession = {
     ...session,
@@ -8189,7 +8454,17 @@ async function moderatorOvertimeCorrection(
 function moderatorAudienceOrderFallback(
   session: DebateSessionV1,
   reason: "shock" | "disruptive" | "sustained",
+  repeated = false,
 ): string {
+  if (repeated) {
+    if (session.formality === "parliamentary") {
+      return "I said order. The chamber will be silent.";
+    }
+    if (session.formality === "structured") {
+      return "I said order. Please settle.";
+    }
+    return "I said order. Silence.";
+  }
   if (session.formality === "parliamentary") {
     return "Order. The chamber will come to order.";
   }
@@ -8213,9 +8488,10 @@ async function moderatorAudienceOrderCorrection(
   session: DebateSessionV1,
   speechEvent: DebateEventV1,
   reason: "shock" | "disruptive" | "sustained",
+  repeated: boolean,
   runtime: DebateAiRuntime,
 ): Promise<DebateEventV1> {
-  const fallback = moderatorAudienceOrderFallback(session, reason);
+  const fallback = moderatorAudienceOrderFallback(session, reason, repeated);
   let correction: Awaited<ReturnType<typeof generateSpeech>>;
   try {
     correction = await generateSpeech(
@@ -8227,7 +8503,9 @@ async function moderatorAudienceOrderCorrection(
           : reason === "sustained"
             ? "The public gallery has stayed rowdy and is still talking over the proceeding."
             : "The public gallery has become disruptive and is talking over the proceeding.",
-        "The gavel has already struck. Call the room to order in one firm, persona-shaped utterance of two to twelve words.",
+        repeated
+          ? "The gallery ignored an earlier warning and the gavel has struck again. Make this second order call unmistakably firmer, in one persona-shaped utterance of two to twelve words."
+          : "The gavel has already struck. Call the room to order in one firm, persona-shaped utterance of two to twelve words.",
         "Speak at ordinary projection. Never shout, yell, or describe yourself as shouting; the gavel carries the authority.",
         `A natural response may resemble ${JSON.stringify(fallback)}, but do not copy it unless it genuinely fits your voice.`,
         "Use only procedural room control. Do not summarize, evaluate, rebut, introduce evidence, or award either side the floor.",
@@ -8301,6 +8579,7 @@ async function automaticAudienceOrderAfter(
         session,
         triggerEvent,
         plan.reason,
+        plan.repeated,
         runtime,
       )
     : null;
@@ -8334,6 +8613,7 @@ async function speechTransition(
     voicePerformanceCue: speech.voicePerformanceCue,
     audienceReaction: speech.audienceReaction,
     powerIntendedContent: speech.powerIntendedContent,
+    mutePerformance: speech.mutePerformance,
     timing: debateTurnTiming(
       session,
       snapshot,
@@ -8377,7 +8657,7 @@ async function speechTransition(
     sideId &&
     sideId !== session.playerSideId &&
     event.kind === "speech" &&
-    event.content !== BOT_POWER_CANONICAL_SILENCE_V1
+    !botPowerResponseIsSilentV1(event.content)
   ) {
     const assessment = await assessDebateParticipantContribution({
       session: withBoard,
@@ -8628,6 +8908,7 @@ async function moderatorPhaseTransition(
     voicePerformanceCue: speech.voicePerformanceCue,
     audienceReaction: speech.audienceReaction,
     powerIntendedContent: speech.powerIntendedContent,
+    mutePerformance: speech.mutePerformance,
   });
   return {
     session: upcoming,
@@ -8903,13 +9184,24 @@ function juryDiscussionTranscript(
         ? (session.jury.jurors.find((juror) => juror.id === event.speakerBotId)
             ?.name ?? "Juror")
         : "Jury";
+      const sourceCursesSpeech = event.speakerBotId
+        ? debateSpeakerCursesSpeech(session, event.speakerBotId)
+        : false;
       const content =
-        observerBotId &&
+        observerBotId === event.speakerBotId && event.powerIntendedContent
+          ? event.powerIntendedContent
+        : observerBotId &&
+        !sourceCursesSpeech &&
         botPowerIgnoresOtherPowersFromEffectsV1(
           debateFrozenPowerEffects(session, observerBotId),
         )
           ? (event.powerIntendedContent ?? event.content)
-          : event.content;
+          : event.mutePerformance && botPowerResponseIsSilentV1(event.content)
+            ? botPowerMuteObserverHistoryV1(
+                event.content,
+                event.mutePerformance,
+              )
+            : event.content;
       return `${speaker}: ${content}`;
     })
     .join("\n");
@@ -8943,7 +9235,7 @@ function juryBallotPrompt(
     adjudicatorEvidencePrompt(session),
     personaVoicePrompt(juror),
     personaCapabilityPrompt(juror),
-    powerPrompt(session, juror.id),
+    debatePowerPromptForBotV1(session, juror.id),
     `Motion: ${session.motion.motion}`,
     `For: ${session.motion.forSide.label}`,
     `Against: ${session.motion.againstSide.label}`,
@@ -9056,11 +9348,11 @@ async function generateJuryBallot(
   }
   const publicDelivery =
     stage === "final"
-      ? juryBallotPublicDelivery(session, juror.id, reason)
+      ? await juryBallotPublicDelivery(session, juror.id, reason, runtime)
       : { content: reason };
   reason = publicDelivery.content;
   const voicePerformanceCue =
-    stage === "final" && reason !== BOT_POWER_CANONICAL_SILENCE_V1
+    stage === "final" && !botPowerResponseIsSilentV1(reason)
       ? normalizeDebateVoicePerformanceCue(generation.value.deliveryCue)
       : null;
   return {
@@ -9254,15 +9546,17 @@ async function generateJuryDiscussionTurn(
       voicePerformanceCue: speech.voicePerformanceCue,
       audienceReaction: speech.audienceReaction,
       powerIntendedContent: speech.powerIntendedContent,
+      mutePerformance: speech.mutePerformance,
     }),
   };
 }
 
-function juryBallotPublicDelivery(
+async function juryBallotPublicDelivery(
   session: DebateSessionV1,
   jurorBotId: string,
   intendedReason: string,
-): { content: string; powerIntendedContent?: string } {
+  runtime: DebateAiRuntime,
+): Promise<{ content: string; powerIntendedContent?: string }> {
   const powerBot = session.powerPlan.bots[jurorBotId];
   const effects = powerBot?.effects.map((entry) => entry.effect) ?? [];
   if (
@@ -9278,8 +9572,29 @@ function juryBallotPublicDelivery(
     };
   }
   if (effects.some((effect) => effect.type === "speech_obfuscation")) {
+    const content = applyBotPowerMumbledResponseV1(intendedReason);
     return {
-      content: applyBotPowerMumbledResponseV1(intendedReason),
+      content: botPowerCursesSpeechFromEffectsV1(effects)
+        ? await rewriteBotPowerCursedTongueAnswerV1({
+            provider: lanesForSession(runtime, session)[0]!.provider,
+            draftAnswer: content,
+            seed: `${session.id}:jury_final:${jurorBotId}`,
+            model: lanesForSession(runtime, session)[0]!.model,
+            usagePurpose: "debate_generation",
+          })
+        : content,
+      powerIntendedContent: intendedReason,
+    };
+  }
+  if (botPowerCursesSpeechFromEffectsV1(effects)) {
+    return {
+      content: await rewriteBotPowerCursedTongueAnswerV1({
+        provider: lanesForSession(runtime, session)[0]!.provider,
+        draftAnswer: intendedReason,
+        seed: `${session.id}:jury_final:${jurorBotId}`,
+        model: lanesForSession(runtime, session)[0]!.model,
+        usagePurpose: "debate_generation",
+      }),
       powerIntendedContent: intendedReason,
     };
   }
@@ -9368,6 +9683,7 @@ async function generateJurySidebarTurn(
     voicePerformanceCue: speech.voicePerformanceCue,
     audienceReaction: speech.audienceReaction,
     powerIntendedContent: speech.powerIntendedContent,
+    mutePerformance: speech.mutePerformance,
   });
 }
 
@@ -9473,6 +9789,7 @@ async function juryAdvocateReactionTransition(
     voicePerformanceCue: reaction.voicePerformanceCue,
     audienceReaction: reaction.audienceReaction,
     powerIntendedContent: reaction.powerIntendedContent,
+    mutePerformance: reaction.mutePerformance,
   });
   const nextStep =
     sideId === "for"
@@ -9573,6 +9890,7 @@ async function participantOpponentReactionTransition(
     voicePerformanceCue: reaction.voicePerformanceCue,
     audienceReaction: reaction.audienceReaction,
     powerIntendedContent: reaction.powerIntendedContent,
+    mutePerformance: reaction.mutePerformance,
   });
   return {
     session: {
@@ -9711,6 +10029,7 @@ async function judgeAdvocateReactionTransition(
     voicePerformanceCue: reaction.voicePerformanceCue,
     audienceReaction: reaction.audienceReaction,
     powerIntendedContent: reaction.powerIntendedContent,
+    mutePerformance: reaction.mutePerformance,
     parentEventId: verdict.id,
   });
   const nextStep =
@@ -10183,6 +10502,7 @@ async function pressTurnaboutStatement(
     autoRecovery: clarification.autoRecovery,
     voicePerformanceCue: clarification.voicePerformanceCue,
     powerIntendedContent: clarification.powerIntendedContent,
+    mutePerformance: clarification.mutePerformance,
     statementId: statement.id,
   });
   const withClarification: DebateSessionV1 = {
@@ -10415,7 +10735,7 @@ async function advanceJuryStep(
       model: ballot.model,
       autoRecovery: ballot.autoRecovery,
       voicePerformanceCue: ballot.voicePerformanceCue,
-      ...(ballotContent === BOT_POWER_CANONICAL_SILENCE_V1
+      ...(botPowerResponseIsSilentV1(ballotContent)
         ? {
             audienceReaction: debateMuteSilenceAudienceReaction(),
             timing: debateSilenceTimingFromIntended(ballot.powerIntendedReason),
@@ -12584,6 +12904,7 @@ export async function submitDebateTurnaboutAction(
     voicePerformanceCue: reversal.voicePerformanceCue,
     audienceReaction: reversal.audienceReaction,
     powerIntendedContent: reversal.powerIntendedContent,
+    mutePerformance: reversal.mutePerformance,
   });
   newEvents.push(revelationEvent);
   const next = turnaboutNextStatement(session, nextState);
@@ -13646,10 +13967,27 @@ function participantFloorBreakContext(
   ) {
     throw new HttpError(400, "Wait for a complete phrase before interjecting.");
   }
-  const prefix = interruptedStatementPrefix(
-    target.content,
-    heardCharacterCount,
-  );
+  const publicProgress = heardCharacterCount / Math.max(1, target.content.length);
+  const intendedPrefix = target.mutePerformance && target.powerIntendedContent
+    ? interruptedStatementPrefix(
+        target.powerIntendedContent,
+        Math.floor(target.powerIntendedContent.length * publicProgress),
+      )
+    : null;
+  const interruptedMutePerformance = target.mutePerformance && intendedPrefix
+    ? createBotPowerMutePerformanceV1({
+        intendedSpeech: target.powerIntendedContent,
+        interruptedAtMs: target.mutePerformance.durationMs * publicProgress,
+        seed: `${session.id}:${target.id}:player-interrupt`,
+        reactionCandidates: debateMuteReactionCandidates(
+          session,
+          target.speakerBotId ?? "",
+        ),
+      })
+    : undefined;
+  const prefix = interruptedMutePerformance && intendedPrefix
+    ? applyBotPowerMuteResponseV1(intendedPrefix, interruptedMutePerformance)
+    : interruptedStatementPrefix(target.content, heardCharacterCount);
   if (!prefix) {
     throw new HttpError(409, "The speaker has not completed a phrase.");
   }
@@ -13660,6 +13998,15 @@ function participantFloorBreakContext(
     sourceIds: publicPrefix.sourceIds,
     interrupted: true,
     interruptedBy: "player",
+    ...(intendedPrefix
+      ? {
+          powerIntendedContent:
+            `${intendedPrefix}\n\n[Privately: your delivery was interrupted here.]`,
+        }
+      : {}),
+    ...(interruptedMutePerformance
+      ? { mutePerformance: interruptedMutePerformance }
+      : {}),
   };
   const retainedEvents = session.events
     .filter((event) => event.sequence <= target.sequence)
@@ -14149,10 +14496,11 @@ async function participantObjectionDecision(
   };
 }
 
-function participantObjectionModeratorDelivery(
+async function participantObjectionModeratorDelivery(
   session: DebateSessionV1,
   decision: DebateParticipantObjectionDecision,
-): Awaited<ReturnType<typeof generateSpeech>> {
+  runtime: DebateAiRuntime,
+): Promise<Awaited<ReturnType<typeof generateSpeech>>> {
   const powerBot = session.powerPlan.bots[session.moderator.id];
   const effects = powerBot?.effects.map((entry) => entry.effect) ?? [];
   if (
@@ -14186,17 +14534,32 @@ function participantObjectionModeratorDelivery(
       responseBudget?.mode === "minimal" ? 1 : 2,
     );
   }
+  const powerIntendedContent = content;
   if (effects.some((effect) => effect.type === "speech_obfuscation")) {
     content = applyBotPowerMumbledResponseV1(content);
+  }
+  if (botPowerCursesSpeechFromEffectsV1(effects)) {
+    const rewriteLane = lanesForSession(runtime, session)[0]!;
+    content = await rewriteBotPowerCursedTongueAnswerV1({
+      provider: rewriteLane.provider,
+      draftAnswer: content,
+      seed: `${session.id}:participant-objection:${session.events.length}`,
+      model: rewriteLane.model,
+      usagePurpose: "debate_generation",
+    });
   }
   const sanitized = sanitizeDebateStatementSources(content, session.evidence);
   return {
     content: sanitized.content,
     sourceIds: [],
-    silent: sanitized.content === BOT_POWER_CANONICAL_SILENCE_V1,
+    silent: botPowerResponseIsSilentV1(sanitized.content),
     provider: decision.generation.provider,
     model: decision.generation.model,
     autoRecovery: decision.generation.autoRecovery,
+    ...((effects.some((effect) => effect.type === "speech_obfuscation") ||
+    botPowerCursesSpeechFromEffectsV1(effects))
+      ? { powerIntendedContent }
+      : {}),
   };
 }
 
@@ -14681,7 +15044,7 @@ export async function prepareDebateParticipantFloorBreak(
         : "The objection does not displace the speaker's floor."
     }
     resolvedRuling = decision.ruling;
-    rulingText = participantObjectionModeratorDelivery(session, decision).content;
+    rulingText = (await participantObjectionModeratorDelivery(session, decision, runtime)).content;
   } else {
     const moderatorDelivery = await generateSpeech(
       session,
@@ -14728,7 +15091,7 @@ export async function prepareDebateParticipantFloorBreak(
       ].join(" "),
       runtime,
     );
-    if (!counter.silent && counter.content !== BOT_POWER_CANONICAL_SILENCE_V1) {
+    if (!counter.silent && !botPowerResponseIsSilentV1(counter.content)) {
       const content = sanitizeDebateDebaterText(counter.content);
       counterText = /^objection\b/iu.test(content)
         ? content
@@ -14755,12 +15118,12 @@ export async function prepareDebateParticipantFloorBreak(
       ].join(" "),
       runtime,
     );
-    if (!continuation.silent && continuation.content !== BOT_POWER_CANONICAL_SILENCE_V1) {
+    if (!continuation.silent && !botPowerResponseIsSilentV1(continuation.content)) {
       const remaining = participantObjectionContinuationContent(
         context.revisedSpeech.content,
         sanitizeDebateDebaterText(continuation.content),
       );
-      continuationText = remaining === BOT_POWER_CANONICAL_SILENCE_V1
+      continuationText = botPowerResponseIsSilentV1(remaining)
         ? null
         : remaining;
     }
@@ -15321,9 +15684,10 @@ export async function resolveDebateParticipantObjection(
       sanitizedReason.content,
       runtime,
     );
-    moderatorResponse = participantObjectionModeratorDelivery(
+    moderatorResponse = await participantObjectionModeratorDelivery(
       withReason,
       structuredRuling,
+      runtime,
     );
   }
   const normalizedWithdrawal =
@@ -15390,7 +15754,7 @@ export async function resolveDebateParticipantObjection(
         {
           kind:
             continuationGeneration.silent ||
-            continuationContent === BOT_POWER_CANONICAL_SILENCE_V1
+            botPowerResponseIsSilentV1(continuationContent)
               ? "silence"
               : "speech",
           speakerKind: "advocate",
@@ -16837,7 +17201,6 @@ async function generateDebateLifecycleSpeech(
   runtime: DebateAiRuntime,
 ): Promise<DebateLifecycleSpeech> {
   const fallback = debateLifecycleFallback(session, kind);
-  if (moderatorIsHardMuted(session)) return { content: fallback };
   try {
     const generation = await generateJson(
       lanesForSession(runtime, session),
@@ -16896,21 +17259,53 @@ async function generateDebateLifecycleSpeech(
   }
 }
 
+function debateLifecycleDelivery(
+  session: DebateSessionV1,
+  kind: DebateLifecycleKind,
+  speech?: DebateLifecycleSpeech,
+): {
+  content: string;
+  mutePerformance?: BotPowerMutePerformanceV1;
+  powerIntendedContent?: string;
+} {
+  const intended = speech?.content ?? debateLifecycleFallback(session, kind);
+  if (!moderatorIsHardMuted(session)) return { content: intended };
+  const mutePerformance = createBotPowerMutePerformanceV1({
+    intendedSpeech: intended,
+    maximumMs: 60_000,
+    seed: `${session.id}:${session.revision}:${kind}:mute-lifecycle`,
+    reactionCandidates: debateMuteReactionCandidates(
+      session,
+      session.moderator.id,
+    ),
+    allowInterrupt: false,
+  });
+  return {
+    content: applyBotPowerMuteResponseV1(intended, mutePerformance),
+    mutePerformance,
+    powerIntendedContent: botPowerMutePrivateHistoryV1({
+      intendedSpeech: intended,
+      performance: mutePerformance,
+    }),
+  };
+}
+
 function debatePauseAnnouncementEvent(
   session: DebateSessionV1,
   speech?: DebateLifecycleSpeech,
 ): DebateEventV1 {
   const hardMuted = moderatorIsHardMuted(session);
   const playerControlled = humanJudgeOwnsModeratorActions(session);
+  const delivery = debateLifecycleDelivery(session, "pause", speech);
   return makeEvent(session, {
     kind: hardMuted ? "silence" : "moderator_ruling",
     speakerKind: playerControlled ? "player" : "moderator",
     speakerBotId: session.moderator.id,
     sideId: null,
     stepKey: "pause",
-    content: hardMuted
-      ? BOT_POWER_CANONICAL_SILENCE_V1
-      : (speech?.content ?? debateLifecycleFallback(session, "pause")),
+    content: delivery.content,
+    mutePerformance: delivery.mutePerformance,
+    powerIntendedContent: delivery.powerIntendedContent,
     provider: speech?.provider,
     model: speech?.model,
     autoRecovery: speech?.autoRecovery,
@@ -16922,15 +17317,16 @@ function debateResumeGavelEvent(
   speech?: DebateLifecycleSpeech,
 ): DebateEventV1 {
   const playerControlled = humanJudgeOwnsModeratorActions(session);
+  const delivery = debateLifecycleDelivery(session, "resume", speech);
   return makeEvent(session, {
     kind: "judge_gavel",
     speakerKind: playerControlled ? "player" : "moderator",
     speakerBotId: session.moderator.id,
     sideId: null,
     stepKey: "resume",
-    content: moderatorIsHardMuted(session)
-      ? BOT_POWER_CANONICAL_SILENCE_V1
-      : (speech?.content ?? debateLifecycleFallback(session, "resume")),
+    content: delivery.content,
+    mutePerformance: delivery.mutePerformance,
+    powerIntendedContent: delivery.powerIntendedContent,
     provider: speech?.provider,
     model: speech?.model,
     autoRecovery: speech?.autoRecovery,

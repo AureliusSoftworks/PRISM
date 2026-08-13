@@ -152,6 +152,7 @@ describe("bot library group filtering", () => {
         {
           id: "group:stale-trio",
           botIds: ["bot-a", "bot-b", "bot-missing"],
+          leaderBotId: "bot-missing",
           builtIn: false,
         },
       ],
@@ -163,6 +164,7 @@ describe("bot library group filtering", () => {
       ["builtin:favorites", "group:stale-trio"]
     );
     assert.deepEqual(maintainedGroups[1]?.botIds, ["bot-a", "bot-b"]);
+    assert.equal(maintainedGroups[1]?.leaderBotId, null);
   });
 
   it("keeps create-group available when selected bots already share a group", () => {

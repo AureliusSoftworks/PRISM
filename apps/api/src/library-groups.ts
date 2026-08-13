@@ -19,6 +19,8 @@ export interface LibraryGroupV1 {
   botIds: string[];
   roomAtmosphere?: PrismJsonObject;
   marketplaceThemeId?: string | null;
+  glyph?: { version: 1; seed: string } | null;
+  leaderBotId?: string | null;
   deleteProtected: boolean;
   deleteProtectionByBotId: Record<string, boolean | null>;
   builtIn: boolean;
@@ -34,6 +36,8 @@ interface LibraryGroupRow {
   built_in: number;
   marketplace_theme_id: string | null;
   atmosphere_json: string;
+  glyph_json: string;
+  leader_bot_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -58,6 +62,20 @@ function parseJsonObject(value: string): PrismJsonObject {
     return normalizePrismJsonObject(JSON.parse(value));
   } catch {
     return {};
+  }
+}
+
+function normalizeGlyph(value: unknown): { version: 1; seed: string } | null {
+  if (!isRecord(value) || value.version !== 1) return null;
+  const seed = boundedText(value.seed, 160);
+  return seed ? { version: 1, seed } : null;
+}
+
+function parseGlyph(value: string): { version: 1; seed: string } | null {
+  try {
+    return normalizeGlyph(JSON.parse(value));
+  } catch {
+    return null;
   }
 }
 
@@ -103,6 +121,12 @@ function normalizeLibraryGroups(
       ]),
     );
     const atmosphere = normalizePrismJsonObject(candidate.roomAtmosphere);
+    const glyph = normalizeGlyph(candidate.glyph);
+    const requestedLeaderBotId = boundedText(candidate.leaderBotId, 160);
+    const leaderBotId =
+      id !== LIBRARY_FAVORITES_GROUP_ID && botIds.includes(requestedLeaderBotId)
+      ? requestedLeaderBotId
+      : null;
     byId.set(id, {
       id,
       name:
@@ -117,6 +141,8 @@ function normalizeLibraryGroups(
       ...(Object.keys(atmosphere).length > 0
         ? { roomAtmosphere: atmosphere }
         : {}),
+      ...(glyph ? { glyph } : {}),
+      leaderBotId,
       marketplaceThemeId: boundedText(candidate.marketplaceThemeId, 160) || null,
       deleteProtected: candidate.deleteProtected === true,
       deleteProtectionByBotId,
@@ -164,9 +190,9 @@ export function ensureLibraryFavoritesGroup(
   db.prepare(
     `INSERT OR IGNORE INTO library_groups
       (id, user_id, name, description, delete_protected_default, built_in,
-       atmosphere_json, created_at, updated_at)
+       atmosphere_json, glyph_json, created_at, updated_at)
      VALUES (?, ?, 'Favorites', 'Pinned bots you want to keep close.', 0, 1,
-             '{}', ?, ?)`,
+             '{}', '{}', ?, ?)`,
   ).run(LIBRARY_FAVORITES_GROUP_ID, userId, timestamp, timestamp);
 }
 
@@ -178,7 +204,8 @@ export function listLibraryGroups(
   const groups = db
     .prepare(
       `SELECT id, name, description, delete_protected_default, built_in,
-              marketplace_theme_id, atmosphere_json, created_at, updated_at
+              marketplace_theme_id, atmosphere_json, glyph_json, leader_bot_id,
+              created_at, updated_at
          FROM library_groups
         WHERE user_id = ?
         ORDER BY built_in DESC, name COLLATE NOCASE`,
@@ -201,6 +228,7 @@ export function listLibraryGroups(
   return groups.map((group) => {
     const groupMembers = membersByGroup.get(group.id) ?? [];
     const atmosphere = parseJsonObject(group.atmosphere_json);
+    const glyph = parseGlyph(group.glyph_json);
     return {
       id: group.id,
       name: group.name,
@@ -209,6 +237,12 @@ export function listLibraryGroups(
       ...(Object.keys(atmosphere).length > 0
         ? { roomAtmosphere: atmosphere }
         : {}),
+      ...(glyph ? { glyph } : {}),
+      leaderBotId: groupMembers.some(
+        (member) => member.bot_id === group.leader_bot_id,
+      )
+        ? group.leader_bot_id
+        : null,
       marketplaceThemeId: group.marketplace_theme_id,
       deleteProtected: Boolean(group.delete_protected_default),
       deleteProtectionByBotId: Object.fromEntries(
@@ -235,8 +269,9 @@ function persistLibraryGroups(
   const insertGroup = db.prepare(
     `INSERT INTO library_groups
       (id, user_id, name, description, delete_protected_default, built_in,
-       marketplace_theme_id, atmosphere_json, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       marketplace_theme_id, atmosphere_json, glyph_json, leader_bot_id,
+       created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const insertMember = db.prepare(
     `INSERT INTO library_group_members
@@ -253,6 +288,8 @@ function persistLibraryGroups(
       group.builtIn ? 1 : 0,
       group.marketplaceThemeId ?? null,
       JSON.stringify(group.roomAtmosphere ?? {}),
+      JSON.stringify(group.glyph ?? {}),
+      group.leaderBotId ?? null,
       group.createdAt,
       group.updatedAt,
     );

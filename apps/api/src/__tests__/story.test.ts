@@ -2,7 +2,9 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import {
+  applyBotPowerCursedTongueResponseV1,
   applyBotPowerMumbledResponseV1,
+  botPowerResponseIsSilentV1,
   botPowerDeterministicHalfChanceV1,
   botPowerSourceHashV1,
 } from "@localai/shared";
@@ -1055,7 +1057,12 @@ describe("Story API helpers", () => {
     );
 
     assert.equal(generated.status, "playing");
-    assert.equal(mutedScene?.narration, "...");
+    assert.equal(botPowerResponseIsSilentV1(mutedScene?.narration), true);
+    assert.ok(mutedScene?.mutePerformance);
+    assert.match(
+      mutedScene?.narration ?? "",
+      /seconds? pass without an audible word/u,
+    );
     assert.equal(mutedScene?.spritePose, "idle");
   });
 
@@ -1106,6 +1113,66 @@ describe("Story API helpers", () => {
     assert.equal(publicScene?.narration, applyBotPowerMumbledResponseV1(intended));
     assert.notEqual(publicScene?.narration, intended);
     assert.doesNotMatch(publicScene?.narration ?? "", /archive|key|glass/iu);
+  });
+
+  it("retains Cursed Tongue as a post-generation Story speech seam", async () => {
+    const db = createTestDb();
+    seedBot(db, "bot-a", "Ada");
+    seedBot(db, "bot-b", "Iris");
+    const name = "Cursed Tongue";
+    const intent = "Every non-silent public reply gains frequent strong profanity after generation.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'bot-b'").run(JSON.stringify([{
+      version: 1,
+      id: "cursed-tongue",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Draft clean speech only.",
+        observerCue: "Only adjusted speech is public.",
+        effects: [{
+          type: "cursed_tongue",
+          version: 1,
+          frequency: "frequent",
+          strength: "strong",
+          vocabulary: "uncensored_non_slur",
+          phraseMode: "occasional_2_3_words",
+        }],
+        ruleLabels: [],
+      },
+    }]));
+    const bots = loadStoryBotProfiles(db, "user-1", ["bot-a", "bot-b"]);
+    const created = createStorySession(db, "user-1", {
+      botIds: ["bot-a", "bot-b"],
+      provider: "local",
+      model: "test-model",
+    });
+    const episode = JSON.parse(episodeJson()) as {
+      id: string;
+      scenes: Array<{ id: string; speakerBotId?: string; narration: string }>;
+    };
+    const irisScene = episode.scenes.find((scene) => scene.speakerBotId === "bot-b");
+    assert.ok(irisScene);
+    const intended = irisScene.narration;
+    const generated = await generateStorySessionEpisode(db, "user-1", created.id, {
+      provider: new SequenceProvider([JSON.stringify(episode)]),
+      providerName: "local",
+      model: "test-model",
+      bots,
+    });
+    const publicScene = generated.episode?.scenes.find(
+      (scene) => scene.speakerBotId === "bot-b",
+    );
+    assert.equal(
+      publicScene?.narration,
+      applyBotPowerCursedTongueResponseV1(
+        intended,
+        `${episode.id}:${irisScene.id}:${episode.scenes.indexOf(irisScene)}`,
+      ),
+    );
   });
 
   it("persists a Quiet listener miss and repairs the dependent response without leaked words", async () => {

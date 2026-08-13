@@ -51,7 +51,10 @@ import {
   type ProviderMessage,
   type ProviderName,
 } from "./providers.ts";
-import { rewriteBotPowerAntiTruthAnswerV1 } from "./bot-powers.ts";
+import {
+  rewriteBotPowerAntiTruthAnswerV1,
+  rewriteBotPowerCursedTongueAnswerV1,
+} from "./bot-powers.ts";
 import {
   RECENT_WINDOW_SIZE,
   summarizeSandboxBotStatus,
@@ -128,6 +131,7 @@ import {
   applyBotPowerBotNamesV1,
   applyBotPowerMumbledResponseV1,
   applyBotPowerMuteResponseV1,
+  createBotPowerMutePerformanceV1,
   applyBotPowerResponseBudgetV1,
   botPowerIsAddressedQuestionV1,
   strongestBotPowerAntiTruthEffectV1,
@@ -138,6 +142,7 @@ import {
   botIdentityShapeshiftHolderPromptV1,
   botIdentityShapeshiftTargetChangesV1,
   botPowerBotNamingCueV1,
+  botPowerCursesSpeechV1,
   botPowerRequiresAddressedInsultV1,
   botPowerIgnoresOtherPowersV1,
   botPowerIneptitudeFinalTurnCueV1,
@@ -162,6 +167,7 @@ import {
   simulatedEffortTextPasses,
   simulatedEffortUsesThriftyPrompting,
   type SimulatedEffortLadderProfile,
+  type BotPowerMutePerformanceV1,
   type SimulatedEffortPassName,
   type SimulatedEffortTextPassName,
   normalizePrismMoodSensitivity,
@@ -6905,11 +6911,61 @@ function hydrateMessages(
       ...(assembled.botPowerExactResponse
         ? { botPowerExactResponse: assembled.botPowerExactResponse }
         : {}),
+      ...(assembled.botPowerMutePerformance
+        ? { botPowerMutePerformance: assembled.botPowerMutePerformance }
+        : {}),
       ...(assembled.identityShapeshift
         ? { identityShapeshift: assembled.identityShapeshift }
         : {}),
       ...(assembled.falseName ? { falseName: assembled.falseName } : {}),
     };
+  });
+}
+
+function chatPrivatePowerIntendedSpeech(raw: string | null): string | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const intended = typeof parsed.botPowerIntendedSpeech === "string"
+      ? parsed.botPowerIntendedSpeech.trim().slice(0, 6_000)
+      : "";
+    return intended || null;
+  } catch {
+    return null;
+  }
+}
+
+function withChatPrivatePowerIntendedSpeech(
+  serialized: string | null,
+  intendedSpeech: string | null | undefined,
+): string | null {
+  const intended = intendedSpeech?.trim().slice(0, 6_000) || "";
+  if (!intended) return serialized;
+  const root = serialized
+    ? JSON.parse(serialized) as Record<string, unknown>
+    : { v: 1 };
+  root.botPowerIntendedSpeech = intended;
+  return JSON.stringify(root);
+}
+
+/** Holder-only prompt projection; public hydration never exposes this field. */
+export function chatCursedTongueHolderHistoryV1(args: {
+  history: readonly ChatMessage[];
+  rows: readonly MessageRow[];
+  holderBotId: string | null;
+}): ChatMessage[] {
+  const rowsById = new Map(args.rows.map((row) => [row.id, row] as const));
+  return args.history.map((message) => {
+    const row = rowsById.get(message.id);
+    if (
+      message.role !== "assistant" ||
+      !row ||
+      row.bot_id !== args.holderBotId
+    ) {
+      return message;
+    }
+    const intended = chatPrivatePowerIntendedSpeech(row.tool_payload);
+    return intended ? { ...message, content: intended } : message;
   });
 }
 
@@ -8436,6 +8492,7 @@ export async function processChatMessage(
     botPowerEchoTurn && (isStarterPrompt || personaTransitionTurn);
   const botPowerEchoEnforcedTurn = botPowerEchoTurn && !botPowerEchoOpeningTurn;
   const botPowerMumblingTurn = settings.botPowerMumbling === true;
+  const botPowerCursedTongueTurn = botPowerCursesSpeechV1(settings.botPowers);
   const botPowerResponseBudgetTurn = settings.botPowerResponseBudget ?? null;
   const botPowerHardResponseTurn =
     botPowerMutedTurn ||
@@ -8864,7 +8921,7 @@ export async function processChatMessage(
     const starterSendGeneratedImageRequested =
       !botPowerHardResponseTurn && isStarterPrompt && Boolean(parsedAssistant.sendGeneratedImage?.prompt?.trim());
     let assistantDisplay = botPowerMutedTurn
-      ? applyBotPowerMuteResponseV1(assistantDisplayRaw)
+      ? assistantDisplayRaw
       : botPowerEternalIntroductionTurn
         ? applyBotPowerEternalIntroductionResponseV1(
             assistantDisplayRaw,
@@ -8899,7 +8956,7 @@ export async function processChatMessage(
       );
     }
     if (
-      (!botPowerHardResponseTurn || botPowerMumblingTurn) &&
+      (!botPowerHardResponseTurn || botPowerMumblingTurn || botPowerMutedTurn) &&
       webSearchStatus !== "blocked"
     ) {
       assistantDisplay = applyBotPowerResponseBudgetV1(
@@ -8993,8 +9050,29 @@ export async function processChatMessage(
           return resolved.action
             ? zenStageActionFromStageAction(resolved.action)
             : undefined;
-        })()
+      })()
       : undefined;
+    let botPowerMutePerformanceForTurn: BotPowerMutePerformanceV1 | undefined;
+    if (botPowerMutedTurn) {
+      botPowerMutePerformanceForTurn = createBotPowerMutePerformanceV1({
+        intendedSpeech: assistantDisplay,
+        seed: `${conversationId ?? "incognito"}:${assistantBotId ?? "prism"}:${history.length + 1}`,
+      });
+      assistantDisplay = applyBotPowerMuteResponseV1(
+        assistantDisplay,
+        botPowerMutePerformanceForTurn,
+      );
+    }
+    if (botPowerCursedTongueTurn && !botPowerMutedTurn) {
+      assistantDisplay = await rewriteBotPowerCursedTongueAnswerV1({
+        provider: primaryProvider,
+        draftAnswer: assistantDisplay,
+        seed: `${conversationId ?? "incognito"}:${assistantBotId ?? "prism"}:${history.length + 1}`,
+        model: modelUsed || primaryBotOverrides?.model,
+        usagePurpose: "chat_reply",
+        signal: settings.signal,
+      });
+    }
     const sendImgPromptIncRaw =
       botPowerHardResponseTurn || assistantOnlyCompanionTurn
       ? undefined
@@ -9189,6 +9267,9 @@ export async function processChatMessage(
         ? { botPowerExactResponse: "speech_copy" as const }
         : botPowerMumblingTurn
           ? { botPowerExactResponse: "speech_obfuscation" as const }
+        : {}),
+      ...(botPowerMutePerformanceForTurn
+        ? { botPowerMutePerformance: botPowerMutePerformanceForTurn }
         : {}),
       ...(persistedIdentityShapeshift
         ? { identityShapeshift: persistedIdentityShapeshift }
@@ -9580,6 +9661,13 @@ export async function processChatMessage(
       recentContextMessageLimit
     ) as MessageRow[];
   const history = hydrateMessages(historyRowsDesc.slice().reverse());
+  const cursedTongueHolderHistory = botPowerCursedTongueTurn || botPowerMutedTurn
+    ? chatCursedTongueHolderHistoryV1({
+        history,
+        rows: historyRowsDesc,
+        holderBotId: assistantMemoryBotId ?? activeMemoryBotId ?? assistantBotId ?? null,
+      })
+    : history;
   // A selected AskQuestion option is now treated as ordinary prose.
   // Only an explicit user request should start another AskQuestion turn.
   const askQuestionMode: "off" | "explicit" | "continuation" =
@@ -10092,10 +10180,10 @@ export async function processChatMessage(
     topicReset: settings.topicReset === true,
     chatHistory: botPowerEternalIntroductionTurn
       ? botPowerForgetfulPriorMessagesV1(
-          history,
+          cursedTongueHolderHistory,
           `forgetful:${mode}:${activeConversationId}:${activeMemoryBotId ?? "default"}:${history.length}:${promptUserMessage}`,
         )
-      : history,
+      : cursedTongueHolderHistory,
     userMessage: botPowerIneptUserPromptV1(
       settings.botPowers,
       promptUserMessage,
@@ -10164,6 +10252,7 @@ export async function processChatMessage(
     !memoryClarification &&
     !settings.prismInterruption &&
     !botPowerHardResponseTurn &&
+    !botPowerCursedTongueTurn &&
     !botPowerResponseBudgetTurn &&
     !incognitoForTurn &&
     !zenProgressiveReplyHasToolIntent(modelUserMessage) &&
@@ -10541,7 +10630,7 @@ export async function processChatMessage(
   const starterSendGeneratedImageRequested =
     !botPowerHardResponseTurn && isStarterPrompt && Boolean(parsedAssistant.sendGeneratedImage?.prompt?.trim());
   let assistantDisplay = botPowerMutedTurn
-    ? applyBotPowerMuteResponseV1(assistantDisplayRaw)
+    ? assistantDisplayRaw
     : botPowerEternalIntroductionTurn
       ? applyBotPowerEternalIntroductionResponseV1(
           assistantDisplayRaw,
@@ -10584,7 +10673,7 @@ export async function processChatMessage(
     );
   }
   if (
-    (!botPowerHardResponseTurn || botPowerMumblingTurn) &&
+    (!botPowerHardResponseTurn || botPowerMumblingTurn || botPowerMutedTurn) &&
     webSearchStatus !== "blocked"
   ) {
     assistantDisplay = applyBotPowerResponseBudgetV1(
@@ -10696,6 +10785,19 @@ export async function processChatMessage(
           : undefined;
       })()
     : undefined;
+  let botPowerCleanSpeechForTurn: string | undefined;
+  let botPowerMutePerformanceForTurn: BotPowerMutePerformanceV1 | undefined;
+  if (botPowerMutedTurn) {
+    botPowerCleanSpeechForTurn = assistantDisplay;
+    botPowerMutePerformanceForTurn = createBotPowerMutePerformanceV1({
+      intendedSpeech: assistantDisplay,
+      seed: `${activeConversationId}:${assistantBotId ?? "prism"}:${history.length + 1}`,
+    });
+    assistantDisplay = applyBotPowerMuteResponseV1(
+      assistantDisplay,
+      botPowerMutePerformanceForTurn,
+    );
+  }
   const manualAskQuestionForTurn = buildManualAskQuestionResultPayload({
     constraint: manualAskQuestionConstraint,
     assistantDisplay,
@@ -10820,26 +10922,37 @@ export async function processChatMessage(
         parsed: parsedAssistant.tellFictionalStory,
         askQuestion: assistantAskQuestionForTurn,
       });
-	  const persistedToolCallEvents = assistantOnlyCompanionTurn
-	    ? []
-	    : buildAssistantToolCallEvents({
-	        rawReply: assistantReplyRaw,
-	        ...(requestedWebSearchForTurn
-	          ? { parsedWebSearch: requestedWebSearchForTurn, webSearchStatus }
-	          : {}),
-	        ...((parsedAssistant.sendGeneratedImage ||
+  if (botPowerCursedTongueTurn && !botPowerMutedTurn) {
+    botPowerCleanSpeechForTurn = assistantDisplay;
+    assistantDisplay = await rewriteBotPowerCursedTongueAnswerV1({
+      provider: primaryProvider,
+      draftAnswer: assistantDisplay,
+      seed: `${activeConversationId}:${assistantBotId ?? "prism"}:${history.length + 1}`,
+      model: modelUsed || primaryBotOverrides?.model,
+      usagePurpose: "chat_reply",
+      signal: settings.signal,
+    });
+  }
+  const persistedToolCallEvents = assistantOnlyCompanionTurn
+    ? []
+    : buildAssistantToolCallEvents({
+        rawReply: assistantReplyRaw,
+        ...(requestedWebSearchForTurn
+          ? { parsedWebSearch: requestedWebSearchForTurn, webSearchStatus }
+          : {}),
+        ...((parsedAssistant.sendGeneratedImage ||
           sendImgPromptPersistedRaw !== sendImgPromptPersistedRequested) &&
         sendImgPromptPersistedRequested
           ? {
               parsedSendGeneratedImage: { prompt: sendImgPromptPersistedRequested },
             }
           : {}),
-	        ...(assistantAskQuestionForTurn
-	          ? { parsedAskQuestion: assistantAskQuestionForTurn }
-	          : {}),
-	        ...(requestedUserNotesForTurn
-	          ? { parsedUserNotes: requestedUserNotesForTurn, userNotesStatus }
-	          : {}),
+        ...(assistantAskQuestionForTurn
+          ? { parsedAskQuestion: assistantAskQuestionForTurn }
+          : {}),
+        ...(requestedUserNotesForTurn
+          ? { parsedUserNotes: requestedUserNotesForTurn, userNotesStatus }
+          : {}),
         imageSlot: persistedImageSlot,
         ...(persistedImageJobId ? { imageJobId: persistedImageJobId } : {}),
       });
@@ -10874,42 +10987,46 @@ export async function processChatMessage(
     assistantProseMessageId,
     assistantCreatedAt,
   );
-  const toolPayloadProseOnly = serializeAssistantInterruptionReactionReceipt(
-    serializeAssistantToolPayload({
-      askQuestion: assistantAskQuestionForTurn,
-      tellFictionalStory: tellFictionalStoryForTurn,
-	      moodKey: assistantMood.key,
-	      moodConfidence: assistantMood.confidence,
-	      zenDisplay:
-	        botPowerHardResponseTurn || assistantOnlyCompanionTurn
-	          ? undefined
-	          : parsedAssistant.zenDisplay,
-	      zenStageAction,
-	      zenTurn: zenTurnMarker,
-	      webSearch: webSearchForTurn,
-	      userNotes: userNotesForTurn,
-	      autoRecovery,
-	      autoRoute: settings.autoRouteDecision,
-	      reasoningEffort: settings.autoRouteDecision
-	        ? undefined
-	        : normalizeProviderReasoningEffort(
-	            settings.botOverrides?.reasoningEffort,
-	          ),
-	      turbo:
-	        settings.resolveTurboMode?.(providerNameUsed, modelUsed) === true,
-	      botPowerExactResponse: botPowerQuietIgnoredTurn
-	        ? "intermittent_mute"
+  const toolPayloadProseOnly = withChatPrivatePowerIntendedSpeech(
+    serializeAssistantInterruptionReactionReceipt(
+      serializeAssistantToolPayload({
+        askQuestion: assistantAskQuestionForTurn,
+        tellFictionalStory: tellFictionalStoryForTurn,
+        moodKey: assistantMood.key,
+        moodConfidence: assistantMood.confidence,
+        zenDisplay:
+          botPowerHardResponseTurn || assistantOnlyCompanionTurn
+            ? undefined
+            : parsedAssistant.zenDisplay,
+        zenStageAction,
+        zenTurn: zenTurnMarker,
+        webSearch: webSearchForTurn,
+        userNotes: userNotesForTurn,
+        autoRecovery,
+        autoRoute: settings.autoRouteDecision,
+        reasoningEffort: settings.autoRouteDecision
+          ? undefined
+          : normalizeProviderReasoningEffort(
+              settings.botOverrides?.reasoningEffort,
+            ),
+        turbo:
+          settings.resolveTurboMode?.(providerNameUsed, modelUsed) === true,
+        botPowerExactResponse: botPowerQuietIgnoredTurn
+          ? "intermittent_mute"
           : botPowerEchoEnforcedTurn
             ? "speech_copy"
-          : botPowerMumblingTurn
-            ? "speech_obfuscation"
-	        : undefined,
-      ...(persistedIdentityShapeshift
-        ? { identityShapeshift: persistedIdentityShapeshift }
-        : {}),
-      ...(persistedFalseName ? { falseName: persistedFalseName } : {}),
-	    }),
-    assistantInterruptionReaction,
+            : botPowerMumblingTurn
+              ? "speech_obfuscation"
+              : undefined,
+        botPowerMutePerformance: botPowerMutePerformanceForTurn,
+        ...(persistedIdentityShapeshift
+          ? { identityShapeshift: persistedIdentityShapeshift }
+          : {}),
+        ...(persistedFalseName ? { falseName: persistedFalseName } : {}),
+      }),
+      assistantInterruptionReaction,
+    ),
+    botPowerCleanSpeechForTurn,
   );
   const toolPayloadImageOnly = sentGeneratedImagePersisted
     ? serializeAssistantToolPayload({ sentGeneratedImage: sentGeneratedImagePersisted })

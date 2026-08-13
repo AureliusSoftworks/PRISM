@@ -8,7 +8,9 @@ import {
   DEBATE_PLAYER_JUDGE_BOT_ID,
   DEBATE_PLAYER_PARTICIPANT_BOT_ID,
   DEBATE_SCHEMA_VERSION,
+  applyBotPowerCursedTongueResponseV1,
   applyBotPowerMumbledResponseV1,
+  botPowerResponseIsSilentV1,
   debateParticipantGambitGradesV1,
   debateParticipantGambitOfferV1,
   botPowerSourceHashV1,
@@ -11510,6 +11512,66 @@ describe("Debate engine", () => {
     }
   });
 
+  it("adapts Cursed Tongue to Debate records while keeping clean intent private", async () => {
+    const db = createTestDb();
+    try {
+      const cursedPower = readyPower(
+        "moderator-cursed-tongue",
+        "Cursed Tongue",
+        "Every non-silent public reply gains frequent strong profanity after generation.",
+        [{
+          type: "cursed_tongue",
+          version: 1,
+          frequency: "frequent",
+          strength: "strong",
+          vocabulary: "uncensored_non_slur",
+          phraseMode: "occasional_2_3_words",
+        }],
+      );
+      let session = await createDebateForRole(db, "spectator", {
+        moderatorPowers: [cursedPower],
+      });
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "advance:cursed-moderator-intro:0001",
+        },
+        runtime(),
+      );
+      const intro = session.events.find(
+        (event) =>
+          event.stepKey === "intro" &&
+          event.speakerBotId === session.moderator.id,
+      );
+      assert.ok(intro?.powerIntendedContent);
+      assert.doesNotMatch(
+        intro?.powerIntendedContent ?? "",
+        /\b(?:fucking|goddamn|motherfucking|shitty|damn)\b/iu,
+      );
+      assert.match(
+        intro?.content ?? "",
+        /\b(?:fucking|goddamn|motherfucking|shitty|damn)\b/iu,
+      );
+      assert.notEqual(
+        applyBotPowerCursedTongueResponseV1(
+          intro?.powerIntendedContent,
+          "independent-contract-check",
+        ),
+        intro?.powerIntendedContent,
+      );
+      const publicSession = debateSessionForPlayer(session);
+      const publicIntro = publicSession.events.find((event) => event.id === intro?.id);
+      assert.equal(publicIntro?.content, intro?.content);
+      assert.equal(publicIntro?.powerIntendedContent, undefined);
+      assert.doesNotMatch(JSON.stringify(publicSession), /powerIntendedContent/u);
+    } finally {
+      db.close();
+    }
+  });
+
   it("keeps a Participant-role mumbled moderator opening fully obfuscated", async () => {
     const db = createTestDb();
     try {
@@ -11562,7 +11624,9 @@ describe("Debate engine", () => {
     );
     assert.match(source, /Hard fresh-contact rule: only the current instruction exists/u);
     assert.match(source, /applyBotPowerEternalIntroductionResponseV1/u);
-    assert.match(source, /hardMuted && snapshot\.role !== "advocate"/u);
+    assert.match(source, /createBotPowerMutePerformanceV1/u);
+    assert.match(source, /withoutDebatePowerIntendedContent/u);
+    assert.match(source, /botPowerMuteInterruptionChanceV1/u);
     assert.match(source, /debateMuteSilenceAudienceReaction/u);
     assert.match(source, /speakingForeperson/u);
     assert.match(
@@ -11624,13 +11688,14 @@ describe("Debate engine", () => {
         debateRuntime,
       );
       assert.equal(session.stepKey, "opening_for");
-      assert.deepEqual(
-        session.events.slice(-1).map((event) => ({
-          kind: event.kind,
-          speakerBotId: event.speakerBotId,
-          content: event.content,
-        })),
-        [{ kind: "silence", speakerBotId: "moderator", content: "..." }],
+      const moderatorOpening = session.events.at(-1);
+      assert.equal(moderatorOpening?.kind, "silence");
+      assert.equal(moderatorOpening?.speakerBotId, "moderator");
+      assert.equal(botPowerResponseIsSilentV1(moderatorOpening?.content), true);
+      assert.ok(moderatorOpening?.mutePerformance);
+      assert.match(
+        moderatorOpening?.content ?? "",
+        /seconds? pass without an audible word/u,
       );
 
       session = await advanceDebateSession(
@@ -11697,14 +11762,14 @@ describe("Debate engine", () => {
         debateRuntime,
       );
       assert.equal(session.stepKey, "challenge_for_answer");
-      assert.deepEqual(
-        session.events.slice(-1).map((event) => ({
-          kind: event.kind,
-          speakerBotId: event.speakerBotId,
-          content: event.content,
-        })),
-        [{ kind: "silence", speakerBotId: "moderator", content: "..." }],
+      const mutedChallengePrompt = session.events.at(-1);
+      assert.equal(mutedChallengePrompt?.kind, "silence");
+      assert.equal(mutedChallengePrompt?.speakerBotId, "moderator");
+      assert.equal(
+        botPowerResponseIsSilentV1(mutedChallengePrompt?.content),
+        true,
       );
+      assert.ok(mutedChallengePrompt?.mutePerformance);
 
       session = await advanceDebateSession(
         db,
@@ -11728,38 +11793,43 @@ describe("Debate engine", () => {
 
       const reloaded = getDebateSession(db, "user-1", session.id);
       assert.equal(reloaded.stepKey, "challenge_against_prompt");
-      assert.equal(
-        reloaded.events.filter(
-          (event) =>
-            event.speakerBotId === reloaded.moderator.id &&
-            event.kind === "silence" &&
-            event.content === "...",
-        ).length,
-        3,
+      const moderatorSilences = reloaded.events.filter(
+        (event) =>
+          event.speakerBotId === reloaded.moderator.id &&
+          event.kind === "silence" &&
+          botPowerResponseIsSilentV1(event.content),
+      );
+      assert.equal(moderatorSilences.length, 3);
+      assert.ok(
+        moderatorSilences.filter((event) => event.mutePerformance).length >= 2,
       );
       const paused = pauseDebateSession(db, "user-1", reloaded.id, {
         expectedRevision: reloaded.revision,
         idempotencyKey: "pause:muted:0001",
       });
-      assert.partialDeepStrictEqual(paused.events.at(-1), {
+      const pauseEvent = paused.events.at(-1);
+      assert.partialDeepStrictEqual(pauseEvent, {
         kind: "silence",
         speakerKind: "moderator",
         speakerBotId: paused.moderator.id,
         stepKey: "pause",
-        content: "...",
       });
+      assert.equal(botPowerResponseIsSilentV1(pauseEvent?.content), true);
+      assert.ok(pauseEvent?.mutePerformance);
       const resumed = resumeDebateSession(db, "user-1", paused.id, {
         expectedRevision: paused.revision,
         idempotencyKey: "resume:muted:0001",
       });
-      assert.partialDeepStrictEqual(resumed.events.at(-1), {
+      const resumeEvent = resumed.events.at(-1);
+      assert.partialDeepStrictEqual(resumeEvent, {
         kind: "judge_gavel",
         speakerKind: "moderator",
         speakerBotId: resumed.moderator.id,
         stepKey: "resume",
-        content: "...",
         gavelReason: "resume",
       });
+      assert.equal(botPowerResponseIsSilentV1(resumeEvent?.content), true);
+      assert.ok(resumeEvent?.mutePerformance);
       session = endDebateSessionEarly(db, "user-1", resumed.id, {
         expectedRevision: resumed.revision,
         idempotencyKey: "muted:end-early",
@@ -11779,19 +11849,19 @@ describe("Debate engine", () => {
         );
         assert.ok(completionMutation < 8);
       }
-      assert.partialDeepStrictEqual(session.events.at(0), {
-        kind: "silence",
-        speakerKind: "moderator",
-        speakerBotId: session.moderator.id,
-        content: "...",
-      });
-      assert.partialDeepStrictEqual(session.events.at(-1), {
-        kind: "silence",
-        speakerKind: "moderator",
-        speakerBotId: session.moderator.id,
-        stepKey: "closing_moderator",
-        content: "...",
-      });
+      const openingSilence = session.events.at(0);
+      assert.equal(openingSilence?.kind, "silence");
+      assert.equal(openingSilence?.speakerKind, "moderator");
+      assert.equal(openingSilence?.speakerBotId, session.moderator.id);
+      assert.equal(botPowerResponseIsSilentV1(openingSilence?.content), true);
+      assert.ok(openingSilence?.mutePerformance);
+      const closingSilence = session.events.at(-1);
+      assert.equal(closingSilence?.kind, "silence");
+      assert.equal(closingSilence?.speakerKind, "moderator");
+      assert.equal(closingSilence?.speakerBotId, session.moderator.id);
+      assert.equal(closingSilence?.stepKey, "closing_moderator");
+      assert.equal(botPowerResponseIsSilentV1(closingSilence?.content), true);
+      assert.ok(closingSilence?.mutePerformance);
     } finally {
       db.close();
     }
@@ -12428,9 +12498,12 @@ describe("Debate engine", () => {
       const moderatorEvents = intro.events.filter(
         (event) => event.speakerBotId === intro.moderator.id,
       );
-      assert.deepEqual(
-        moderatorEvents.map((event) => [event.kind, event.content]),
-        [["silence", "..."]],
+      assert.equal(moderatorEvents.length, 1);
+      assert.equal(moderatorEvents[0]?.kind, "silence");
+      assert.ok(moderatorEvents[0]?.mutePerformance);
+      assert.match(
+        moderatorEvents[0]?.content ?? "",
+        /^\.+ \*\d+ seconds pass without an audible word\.\*$/u,
       );
       const disclosure = intro.events.find(
         (event) =>

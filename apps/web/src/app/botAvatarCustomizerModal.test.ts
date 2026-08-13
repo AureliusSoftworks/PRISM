@@ -115,19 +115,19 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
     pageSource,
     /function BotAvatarMicroRenderer[\s\S]{0,3600}<CoffeeSeatPlateEmoji[\s\S]{0,100}\bpixelated\b/u,
   );
-  assert.match(
-    miniSource,
-    /forceBlinkPhase=\{previewBlink \? "closed" : "open"\}/,
-  );
+  assert.match(miniSource, /motionMode="mini-led"/);
+  assert.match(miniSource, /\bhardPixels\b/);
   assert.match(miniSource, /faceEyeMovement="still"/);
   assert.match(
     miniSource,
-    /faceEyeRotationDeg=\{\s*previewFaceStyle\.eyeRotationDeg\s*\}/,
+    /faceEyeRotationDeg=\{\s*faceStyle\.eyeRotationDeg\s*\}/,
   );
   assert.match(
     miniSource,
-    /faceBlinkRotationDeg=\{\s*previewFaceStyle\.blinkRotationDeg\s*\}/,
+    /faceBlinkRotationDeg=\{\s*faceStyle\.blinkRotationDeg\s*\}/,
   );
+  assert.match(miniSource, /faceStyle=\{faceStyle\}/);
+  assert.doesNotMatch(miniSource, /studio-micro-\$\{previewMode\}/);
   assert.match(miniSource, /className=\{styles\.botAvatarStudioMicroPreview\}/);
   assert.match(
     miniSource,
@@ -164,7 +164,20 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
   );
   assert.match(
     cssSource,
-    /\.messageMoodBadge\[data-face="coffee"\]\[data-variant="micro"\]\s*\{[\s\S]{0,900}#05080b[\s\S]{0,900}inset 0 0 0 1px/u,
+    /\.botAvatarStudioMiniPreviewViewport \.botAvatarStudioMiniAvatar\s*\{[^}]*--chat-mini-bot-lower-screen-nudge-x:\s*1px;[^}]*--chat-mini-bot-lower-screen-nudge-y:\s*1px;/u,
+  );
+  assert.match(
+    cssSource,
+    /\.botAvatarStudioMiniPreviewViewport \.emptyStateHeroMiniArt\s*\{[^}]*transform:\s*translateY\(-2px\);/u,
+  );
+  assert.match(
+    cssSource,
+    /\.botAvatarStudioMicroPreview\s+\.messageMoodBadge\[data-face="coffee"\]\[data-variant="micro"\]\s*\{[^}]*--bot-avatar-micro-screen-scale:\s*1\.12;[^}]*--bot-avatar-micro-face-nudge-x:\s*1px;[^}]*--bot-avatar-micro-face-nudge-y:\s*-1px;/u,
+  );
+  assert.match(pageSource, /data-bot-avatar-micro-screen="true"/);
+  assert.match(
+    cssSource,
+    /\.messageMoodBadge\[data-face="coffee"\]\[data-variant="micro"\]\s*\{[\s\S]{0,600}#05080b[\s\S]{0,400}box-shadow:\s*none/u,
   );
   assert.match(
     cssSource,
@@ -535,14 +548,9 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.doesNotMatch(faceTabSource, /<ColorGlyphPicker/);
   assert.match(pageSource, /ariaLabel="Shell color and identity badge"/);
   assert.match(pageSource, /return hslToHex\(hue, 100, currentLightness\)/);
-  assert.match(
-    pageSource,
-    /aria-label="Bot accent brightness\. Drag left and right to make the accent darker or brighter\."/,
-  );
-  assert.match(
-    pageSource,
-    /commitColorPick\(hslToHex\(currentHue, 100, nextLightness\)\)/,
-  );
+  assert.doesNotMatch(pageSource, /accentBrightness|setAccentBrightness/);
+  assert.doesNotMatch(pageSource, /Bot accent brightness/);
+  assert.doesNotMatch(pageSource, /handleLightnessChange/);
   assert.doesNotMatch(pageSource, /computePickedColor[\s\S]{0,700}clientY[^;]*\/ rect\.height/);
   assert.match(faceTabSource, /label="Thinking animation"/);
   assert.match(faceTabSource, /aria-label="Custom thinking animation frames"/);
@@ -737,7 +745,7 @@ test("two custom eyes share adjustable centered spacing across open and blink st
   assert.match(coffeeFaceSource, /--bot-face-eye-spacing/);
   assert.match(
     coffeeFaceSource,
-    /const blinkKey = `\$\{enabled[\s\S]*?:\$\{faceText\}:\$\{scheduleKey\}`/,
+    /const blinkKey = `\$\{blinkEnabled[\s\S]*?:\$\{faceText\}:\$\{scheduleKey\}`/,
   );
   assert.doesNotMatch(coffeeFaceSource, /const blinkKey = [^;]*faceEyeCount/);
   assert.match(cssSource, /\[data-custom-eye-pair-side="left"\]/);
@@ -1648,7 +1656,7 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   );
   assert.match(
     cssRuleBody(".colorGlyphInline"),
-    /grid-template-rows:\s*auto auto minmax\(0,\s*1fr\);/,
+    /grid-template-rows:\s*auto minmax\(0,\s*1fr\);/,
   );
   assert.match(
     cssRuleBody(".colorGlyphInline .colorSquare"),
@@ -1664,7 +1672,7 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
     /aria-label="Bot color hue\. Drag left and right to choose a hue\."/,
   );
   assert.doesNotMatch(pageSource, /accentLightnessMidpoint\(/);
-  assert.match(cssSource, /\.colorLightnessControl/);
+  assert.doesNotMatch(cssSource, /\.colorLightnessControl/);
   assert.doesNotMatch(
     cssSource,
     /--color-square-band-alpha/,

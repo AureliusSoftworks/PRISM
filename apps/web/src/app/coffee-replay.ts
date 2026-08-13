@@ -26,6 +26,7 @@ import {
   type BotFalseNameStateV1,
   type ListenerReactionPlanV1,
   type SocialSilenceMarkerV1,
+  type BotPowerMutePerformanceV1,
 } from "@localai/shared";
 import {
   formatSessionReviewDuration,
@@ -68,6 +69,7 @@ export interface CoffeeReplayMessageLike {
   coffeeUserAction?: CoffeeUserActionPayload;
   coffeeInterruption?: CoffeeInterruptionEvent;
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
+  botPowerMutePerformance?: BotPowerMutePerformanceV1;
   socialSilence?: SocialSilenceMarkerV1;
   moodKey?: string;
   autoRecovery?: unknown;

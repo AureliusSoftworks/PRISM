@@ -2,6 +2,10 @@ import type { LlmProviderName } from "./index.js";
 import type { AutoFallbackModelRef } from "./autoFallback.js";
 import type { AutoRouteDecisionV1 } from "./modelRouting.js";
 import type { StoryItemGlyphCategory, StorySpritePose } from "./storyThemes.js";
+import {
+  normalizeBotPowerMutePerformanceV1,
+  type BotPowerMutePerformanceV1,
+} from "./botPower.ts";
 
 export type StorySessionStatus = "generating" | "playing" | "complete" | "failed";
 export type StoryProgressStatus = "playing" | "complete";
@@ -74,6 +78,8 @@ export interface StoryScene {
   audienceBotIds?: string[];
   /** Replay-stable Loud outcome; this is mild irritation, never anger by itself. */
   annoyanceTargetBotId?: string;
+  /** Public replay-stable timed Mute presentation; contains no intended speech. */
+  mutePerformance?: BotPowerMutePerformanceV1;
   speakerName?: string;
   spritePose?: StorySpritePose;
   backgroundAssetId?: string;
@@ -334,6 +340,8 @@ function parseScenes(raw: unknown): StoryScene[] {
       `${field}.audienceBotIds`,
     );
     const annoyanceTargetBotId = readOptionalString(row.annoyanceTargetBotId);
+    const mutePerformance =
+      normalizeBotPowerMutePerformanceV1(row.mutePerformance) ?? undefined;
     if (spritePose && !STORY_SPRITE_POSE_SET.has(spritePose)) {
       throw new Error(`Unknown story sprite pose "${spritePose}".`);
     }
@@ -348,6 +356,7 @@ function parseScenes(raw: unknown): StoryScene[] {
           : null,
       ...(audienceBotIds ? { audienceBotIds } : {}),
       ...(annoyanceTargetBotId ? { annoyanceTargetBotId } : {}),
+      ...(mutePerformance ? { mutePerformance } : {}),
       ...(readOptionalString(row.speakerName) ? { speakerName: readOptionalString(row.speakerName) } : {}),
       ...(spritePose ? { spritePose: spritePose as StorySpritePose } : {}),
       ...(readOptionalString(row.backgroundAssetId)

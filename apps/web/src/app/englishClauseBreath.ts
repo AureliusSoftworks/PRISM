@@ -22,6 +22,19 @@ export interface EnglishClauseGapPlan {
 }
 
 /**
+ * Intended waits between normalized Kokoro windows. The server strips the
+ * generator's duplicated 300-460 ms outer silence while retaining a 40 ms
+ * phoneme safety pad, so these small waits control the join instead of stacking
+ * on a second full synthesis tail/head.
+ */
+export const KOKORO_DEFAULT_CLAUSE_PAUSE_MS = {
+  comma: 80,
+  clause: 120,
+  strong: 180,
+  glue: 0,
+} as const satisfies Record<EnglishClausePunctuationKind, number>;
+
+/**
  * Soft breath odds by trailing punctuation. Kept at zero — intermittent
  * mid-clause breaths sounded fake/disjointed; quiet profile pauses alone carry
  * pacing when the bot has a calibrated English profile.
@@ -117,9 +130,9 @@ function resolveClauseBreathPlan(args: {
 /**
  * Plans silence after an English stream chunk.
  *
- * Only the bot/player English pacing profile (Calibrate English pacing) sets
- * pause length. No Kokoro-specific hardcoded pause table — without a profile,
- * chunks play back-to-back and Kokoro keeps its natural delivery.
+ * A calibrated bot/player profile wins. Otherwise, only a server-tagged
+ * Kokoro punctuation stream receives the restrained default table; Premium,
+ * system voices, Babble, and token-only fallback chunks remain unchanged.
  */
 export function resolveEnglishClauseGap(args: {
   seed: string;
@@ -131,10 +144,15 @@ export function resolveEnglishClauseGap(args: {
   /** Hard Power: Ready breathless holders never emit mid-clause lung Foley. */
   breathless?: boolean;
   pacingProfile?: EnglishPacingProfileV1 | null;
+  kokoroPunctuationPacing?: boolean;
 }): EnglishClauseGapPlan {
   const kind = classifyEnglishClausePunctuation(args.trailingText);
   const profilePauseMs = englishPacingPauseMsForKind(args.pacingProfile, kind);
-  const pauseMs = profilePauseMs ?? 0;
+  const pauseMs =
+    profilePauseMs ??
+    (args.kokoroPunctuationPacing
+      ? KOKORO_DEFAULT_CLAUSE_PAUSE_MS[kind]
+      : 0);
   if (args.enabled === false || args.breathless === true || pauseMs <= 0) {
     return { pauseMs, kind, breath: null };
   }

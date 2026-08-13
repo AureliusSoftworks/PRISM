@@ -221,6 +221,54 @@ describe("botArchive", () => {
     assert.equal(stalePower?.intent, "A revised intent that invalidates compiled rules.");
   });
 
+  it("round-trips the versioned Cursed Tongue effect without weakening it", () => {
+    const name = "Cursed Tongue";
+    const intent = "Every non-silent public spoken output gains frequent strong profanity after generation.";
+    const archive = createPrismBotArchive({
+      botJson: baseBotJson({
+        bot: {
+          ...baseBotJson().bot,
+          powers: [{
+            version: 1,
+            id: "cursed-tongue",
+            name,
+            intent,
+            enabled: true,
+            compileStatus: "ready",
+            compiled: {
+              version: 1,
+              sourceHash: botPowerSourceHashV1(name, intent),
+              selfCue: "Draft clean speech only.",
+              observerCue: "Only adjusted speech is public.",
+              effects: [{
+                type: "cursed_tongue",
+                version: 1,
+                frequency: "frequent",
+                strength: "strong",
+                vocabulary: "uncensored_non_slur",
+                phraseMode: "occasional_2_3_words",
+              }],
+              ruleLabels: ["Frequent public profanity"],
+            },
+          }],
+        },
+      }),
+      memories: [],
+    });
+
+    assert.deepEqual(
+      parsePrismBotArchive(archive).botJson.bot.powers?.[0]?.compiled?.effects,
+      [{
+        type: "cursed_tongue",
+        version: 1,
+        frequency: "frequent",
+        strength: "strong",
+        vocabulary: "uncensored_non_slur",
+        phraseMode: "occasional_2_3_words",
+      }],
+    );
+  });
+
   it("upgrades targeted-Invisible archives without invalidating their source", () => {
     const name = "Invisible";
     const intent = "Can only be seen by Light Yagami.";

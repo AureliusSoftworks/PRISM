@@ -7,6 +7,7 @@ import { composeBotSystemPrompt } from "../apps/api/src/bots.ts";
 import {
   applyBotPowerAddressedInsultV1,
   applyBotPowerResponseBudgetV1,
+  botPowerCursesSpeechV1,
   botPowerIneptitudeFinalTurnCueV1,
   botPowerIneptUserPromptV1,
   botPowerIsAddressedQuestionV1,
@@ -14,7 +15,10 @@ import {
   strongestBotPowerAntiTruthEffectV1,
   strongestHardBotPowerResponseBudgetEffectV1,
 } from "@localai/shared";
-import { rewriteBotPowerAntiTruthAnswerV1 } from "../apps/api/src/bot-powers.ts";
+import {
+  rewriteBotPowerAntiTruthAnswerV1,
+  rewriteBotPowerCursedTongueAnswerV1,
+} from "../apps/api/src/bot-powers.ts";
 import {
   LocalOllamaProvider,
   OPENAI_DEFAULT_MODEL,
@@ -107,6 +111,16 @@ if (antiTruth && botPowerIsAddressedQuestionV1(input)) {
   antiTruthInverted = inverted !== response;
   response = inverted;
 }
+const cursedTongueApplied = botPowerCursesSpeechV1(bot.powers) && response.trim().length > 0;
+if (cursedTongueApplied) {
+  response = await rewriteBotPowerCursedTongueAnswerV1({
+    provider,
+    draftAnswer: response,
+    seed: `live-validation:${bot.name}:${input}`,
+    model,
+    usagePurpose: "system_unlabeled",
+  });
+}
 const runtimeAdjusted = response !== rawResponse;
 
 console.log(JSON.stringify({
@@ -135,6 +149,7 @@ console.log(JSON.stringify({
         },
       }
     : {}),
+  ...(cursedTongueApplied ? { cursedTongueApplied: true } : {}),
   response,
   wordCount: response.trim() ? response.trim().split(/\s+/u).length : 0,
 }, null, 2));

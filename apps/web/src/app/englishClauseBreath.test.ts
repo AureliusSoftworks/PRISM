@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  KOKORO_DEFAULT_CLAUSE_PAUSE_MS,
   classifyEnglishClausePunctuation,
   resolveEnglishClauseGap,
 } from "./englishClauseBreath.ts";
@@ -19,7 +20,7 @@ describe("english clause punctuation classification", () => {
 });
 
 describe("english clause gap planning", () => {
-  it("uses no injected pause without a bot English pacing profile", () => {
+  it("uses no injected pause for untagged Premium/system-style playback", () => {
     assert.equal(
       resolveEnglishClauseGap({
         seed: "a",
@@ -38,12 +39,49 @@ describe("english clause gap planning", () => {
     );
   });
 
-  it("honors the bot's calibrated English pacing profile", () => {
+  it("uses conservative defaults only for server-tagged Kokoro punctuation", () => {
+    assert.deepEqual(KOKORO_DEFAULT_CLAUSE_PAUSE_MS, {
+      comma: 80,
+      clause: 120,
+      strong: 180,
+      glue: 0,
+    });
     assert.equal(
       resolveEnglishClauseGap({
         seed: "a",
         chunkIndex: 0,
         trailingText: "hello,",
+        kokoroPunctuationPacing: true,
+      }).pauseMs,
+      80,
+    );
+    assert.equal(
+      resolveEnglishClauseGap({
+        seed: "a",
+        chunkIndex: 0,
+        trailingText: "hello.",
+        kokoroPunctuationPacing: true,
+      }).pauseMs,
+      180,
+    );
+    assert.equal(
+      resolveEnglishClauseGap({
+        seed: "a",
+        chunkIndex: 0,
+        trailingText: "token fallback",
+        kokoroPunctuationPacing: true,
+      }).pauseMs,
+      0,
+    );
+  });
+
+  it("lets the bot's calibrated English pacing profile override Kokoro defaults", () => {
+    assert.equal(
+      resolveEnglishClauseGap({
+        seed: "a",
+        chunkIndex: 0,
+        trailingText: "hello,",
+        kokoroPunctuationPacing: true,
         pacingProfile: {
           v: 1,
           ownerKind: "bot",
@@ -62,6 +100,7 @@ describe("english clause gap planning", () => {
         seed: "a",
         chunkIndex: 0,
         trailingText: "hello.",
+        kokoroPunctuationPacing: true,
         pacingProfile: {
           v: 1,
           ownerKind: "bot",

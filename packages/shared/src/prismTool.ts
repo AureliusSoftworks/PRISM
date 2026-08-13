@@ -33,6 +33,10 @@ import {
   type BotFalseNameStateV1,
 } from "./botFalseName.ts";
 import {
+  normalizeBotPowerMutePerformanceV1,
+  type BotPowerMutePerformanceV1,
+} from "./botPower.ts";
+import {
   normalizeBotCrosstalkInterruptedSpeakerCue,
   normalizeCrosstalkFloorOutcome,
   normalizeCrosstalkReclaimPlanV1,
@@ -569,6 +573,8 @@ export interface StoredAssistantToolEnvelope {
   turbo?: boolean;
   /** Internal marker for deterministic Power output that must not be sanitized on reload. */
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
+  /** Public replay-stable timed Mute presentation; contains no intended speech. */
+  botPowerMutePerformance?: BotPowerMutePerformanceV1;
   /** Chat/Zen sticky Library/Marketplace shapeshift form for the speaking holder. */
   identityShapeshift?: BotIdentityShapeshiftStateV1;
   /** Chat/Zen sticky John/Jane Doe alias for the speaking holder. */
@@ -623,6 +629,7 @@ export interface ParsedStoredAssistantToolPayload {
   reasoningEffort?: ProviderReasoningEffort;
   turbo?: boolean;
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
+  botPowerMutePerformance?: BotPowerMutePerformanceV1;
   identityShapeshift?: BotIdentityShapeshiftStateV1;
   falseName?: BotFalseNameStateV1;
   socialSilence?: SocialSilenceMarkerV1;
@@ -2395,6 +2402,9 @@ export function parseStoredAssistantToolPayload(
         root?.botPowerExactResponse === "speech_obfuscation"
           ? root.botPowerExactResponse
           : undefined;
+      const botPowerMutePerformance = root
+        ? normalizeBotPowerMutePerformanceV1(root.botPowerMutePerformance) ?? undefined
+        : undefined;
       const identityShapeshift = root
         ? normalizeBotIdentityShapeshiftStateV1(root.identityShapeshift) ?? undefined
         : undefined;
@@ -2424,6 +2434,7 @@ export function parseStoredAssistantToolPayload(
         ...(reasoningEffort ? { reasoningEffort } : {}),
         ...(turbo ? { turbo: true } : {}),
         ...(botPowerExactResponse ? { botPowerExactResponse } : {}),
+        ...(botPowerMutePerformance ? { botPowerMutePerformance } : {}),
         ...(identityShapeshift ? { identityShapeshift } : {}),
         ...(falseName ? { falseName } : {}),
         ...(socialSilence ? { socialSilence } : {}),
@@ -2464,6 +2475,8 @@ export function parseStoredAssistantToolPayload(
       row.botPowerExactResponse === "speech_obfuscation"
         ? row.botPowerExactResponse
         : undefined;
+    const botPowerMutePerformance =
+      normalizeBotPowerMutePerformanceV1(row.botPowerMutePerformance) ?? undefined;
     const identityShapeshift =
       normalizeBotIdentityShapeshiftStateV1(row.identityShapeshift) ?? undefined;
     const falseName = normalizeStoredFalseNameStateV1(row);
@@ -2512,6 +2525,7 @@ export function parseStoredAssistantToolPayload(
       ...(reasoningEffort ? { reasoningEffort } : {}),
       ...(turbo ? { turbo: true } : {}),
       ...(botPowerExactResponse ? { botPowerExactResponse } : {}),
+      ...(botPowerMutePerformance ? { botPowerMutePerformance } : {}),
       ...(identityShapeshift ? { identityShapeshift } : {}),
       ...(falseName ? { falseName } : {}),
       ...(socialSilence ? { socialSilence } : {}),
@@ -2546,6 +2560,7 @@ export function hydrateAssistantMessageParts(args: {
   reasoningEffort?: ProviderReasoningEffort;
   turbo?: boolean;
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
+  botPowerMutePerformance?: BotPowerMutePerformanceV1;
   identityShapeshift?: BotIdentityShapeshiftStateV1;
   falseName?: BotFalseNameStateV1;
   socialSilence?: SocialSilenceMarkerV1;
@@ -2591,6 +2606,9 @@ export function hydrateAssistantMessageParts(args: {
     ...(stored.botPowerExactResponse
       ? { botPowerExactResponse: stored.botPowerExactResponse }
       : {}),
+    ...(stored.botPowerMutePerformance
+      ? { botPowerMutePerformance: stored.botPowerMutePerformance }
+      : {}),
     ...(stored.identityShapeshift
       ? { identityShapeshift: stored.identityShapeshift }
       : {}),
@@ -2628,6 +2646,7 @@ export function serializeAssistantToolPayload(args: {
   reasoningEffort?: ProviderReasoningEffort;
   turbo?: boolean;
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
+  botPowerMutePerformance?: BotPowerMutePerformanceV1;
   identityShapeshift?: BotIdentityShapeshiftStateV1;
   falseName?: BotFalseNameStateV1;
   socialSilence?: SocialSilenceMarkerV1;
@@ -2676,6 +2695,9 @@ export function serializeAssistantToolPayload(args: {
       ? args.botPowerExactResponse
       : undefined;
   const hasBotPowerExactResponse = botPowerExactResponse !== undefined;
+  const botPowerMutePerformance =
+    normalizeBotPowerMutePerformanceV1(args.botPowerMutePerformance) ?? undefined;
+  const hasBotPowerMutePerformance = botPowerMutePerformance !== undefined;
   const identityShapeshift =
     normalizeBotIdentityShapeshiftStateV1(args.identityShapeshift) ?? undefined;
   const hasIdentityShapeshift = identityShapeshift !== undefined;
@@ -2706,6 +2728,7 @@ export function serializeAssistantToolPayload(args: {
     !hasReasoningEffort &&
     !hasTurbo &&
     !hasBotPowerExactResponse &&
+    !hasBotPowerMutePerformance &&
     !hasIdentityShapeshift &&
     !hasFalseName &&
     !hasSocialSilence &&
@@ -2732,6 +2755,7 @@ export function serializeAssistantToolPayload(args: {
     !hasReasoningEffort &&
     !hasTurbo &&
     !hasBotPowerExactResponse &&
+    !hasBotPowerMutePerformance &&
     !hasIdentityShapeshift &&
     !hasFalseName &&
     !hasSocialSilence &&
@@ -2759,6 +2783,7 @@ export function serializeAssistantToolPayload(args: {
     !hasReasoningEffort &&
     !hasTurbo &&
     !hasBotPowerExactResponse &&
+    !hasBotPowerMutePerformance &&
     !hasIdentityShapeshift &&
     !hasFalseName &&
     !hasSocialSilence &&
@@ -2797,6 +2822,7 @@ export function serializeAssistantToolPayload(args: {
     ...(hasReasoningEffort ? { reasoningEffort } : {}),
     ...(hasTurbo ? { turbo: true } : {}),
     ...(hasBotPowerExactResponse ? { botPowerExactResponse } : {}),
+    ...(hasBotPowerMutePerformance ? { botPowerMutePerformance } : {}),
     ...(hasIdentityShapeshift ? { identityShapeshift } : {}),
     ...(hasFalseName ? { falseName } : {}),
     ...(hasSocialSilence ? { socialSilence } : {}),

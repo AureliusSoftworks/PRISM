@@ -64,6 +64,11 @@ export function KeyboardShortcutSettings({
             Select a shortcut, then press a new key combination. Shortcuts must
             include Shift, Control, Option/Alt, or Command/Meta.
           </p>
+          <p className={styles.keyboardShortcutIntro}>
+            In immersive Zen, Cmd/Ctrl + enlarges the live avatar and Cmd/Ctrl
+            - shrinks it. The same controls are available by right-clicking the
+            avatar.
+          </p>
           <div className={styles.keyboardShortcutList}>
             {PRISM_KEYBOARD_SHORTCUT_DEFINITIONS.map((definition) => {
               const isRecording = recording === definition.action;

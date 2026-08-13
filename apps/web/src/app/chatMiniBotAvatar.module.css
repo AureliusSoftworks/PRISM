@@ -20,29 +20,10 @@
   color: var(--chat-mini-bot-color);
 }
 
-.root::before,
 .root::after {
   content: "";
   position: absolute;
   pointer-events: none;
-}
-
-/* The hero chassis should feel like a tiny object occupying the room, rather
-   than a badge pasted beside the title. Keep the light broad and low-energy so
-   the face and the bot's actual accent remain the focal points. */
-.root[data-size="hero"]::before,
-.root[data-size="room"]::before {
-  z-index: 0;
-  inset: 10% 3% 4%;
-  border-radius: 50%;
-  background: radial-gradient(
-    ellipse at 50% 48%,
-    color-mix(in srgb, var(--chat-mini-bot-color) 20%, transparent) 0 28%,
-    color-mix(in srgb, var(--chat-mini-bot-color) 9%, transparent) 48%,
-    transparent 74%
-  );
-  filter: blur(12px);
-  opacity: 0.86;
 }
 
 .root[data-size="hero"]::after,
@@ -74,61 +55,6 @@
   --chat-mini-bot-glyph-size: 11px;
   width: clamp(76px, 6.7vw, 94px);
   height: clamp(76px, 6.7vw, 94px);
-}
-
-/* Speaking is environmental light, not a painted chassis state. Keep this
-   broad layer behind every authored frame/light/screen plane, then let the
-   bot's own color softly bloom into the surrounding surface. */
-.talkingGlow {
-  position: absolute;
-  inset: 12%;
-  z-index: 1;
-  border-radius: 50%;
-  pointer-events: none;
-  background: radial-gradient(
-    circle at 50% 50%,
-    color-mix(
-        in srgb,
-        var(--bot-avatar-talking-glow-color, var(--chat-mini-bot-color)) 42%,
-        transparent
-      )
-      0 30%,
-    color-mix(
-        in srgb,
-        var(--bot-avatar-talking-glow-color, var(--chat-mini-bot-color)) 20%,
-        transparent
-      )
-      50%,
-    transparent 76%
-  );
-  filter: blur(10px) saturate(1.12);
-  opacity: 0;
-  transform: scale(0.9);
-  transition:
-    opacity 220ms ease-out,
-    transform 320ms cubic-bezier(0.22, 0.72, 0.24, 1);
-}
-
-.root[data-talking="true"] .talkingGlow {
-  opacity: 0.74;
-  transform: scale(1.08);
-}
-
-.root[data-size="badge"] .talkingGlow {
-  inset: 4%;
-  filter: blur(4px) saturate(1.08);
-}
-
-.root[data-size="hero"] .talkingGlow {
-  filter: blur(15px) saturate(1.12);
-}
-
-.root[data-size="room"] .talkingGlow {
-  filter: blur(9px) saturate(1.1);
-}
-
-.root[data-theme="light"][data-talking="true"] .talkingGlow {
-  opacity: 0.48;
 }
 
 .frame {
@@ -170,71 +96,6 @@
      after the chassis is reduced to a few dozen pixels. */
   opacity: 1;
   mix-blend-mode: color;
-}
-
-/* Home's selected bot is awake before the conversation begins. Reuse the
-   canonical authored spill and lamp-aperture masks so the mini reads as the
-   same chassis instead of a generic CSS glow. */
-.frameLightAura,
-.frameLightEmitter,
-.frameLightCore {
-  position: absolute;
-  left: var(--chat-mini-bot-frame-left);
-  top: var(--chat-mini-bot-frame-top);
-  width: var(--chat-mini-bot-frame-width);
-  height: var(--chat-mini-bot-frame-height);
-  pointer-events: none;
-  mix-blend-mode: screen;
-}
-
-.frameLightAura {
-  z-index: 4;
-  background: var(--chat-mini-bot-color);
-  -webkit-mask: url("/bot-frame/bot-frame-tint-mask.png?v=1000") center / 100%
-    100% no-repeat;
-  mask: url("/bot-frame/bot-frame-tint-mask.png?v=1000") center / 100% 100%
-    no-repeat;
-  filter: saturate(1.12) brightness(0.98);
-}
-
-.frameLightEmitter,
-.frameLightCore {
-  -webkit-mask: url("/bot-frame/bot-frame-led.png?v=1000") center / 100% 100%
-    no-repeat;
-  mask: url("/bot-frame/bot-frame-led.png?v=1000") center / 100% 100%
-    no-repeat;
-}
-
-.frameLightEmitter {
-  z-index: 5;
-  background: var(--chat-mini-bot-color);
-  filter: drop-shadow(
-    0 0 4px color-mix(in srgb, var(--chat-mini-bot-color) 62%, transparent)
-  );
-}
-
-.frameLightCore {
-  z-index: 6;
-  background: #ffffff;
-  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.92));
-}
-
-.root[data-light-mode="breathing"] .frameLightAura {
-  animation:
-    chatMiniBotLightAuraIgnite 600ms ease-out,
-    chatMiniBotLightAuraBreath 6.4s ease-in-out 600ms infinite;
-}
-
-.root[data-light-mode="breathing"] .frameLightEmitter {
-  animation:
-    chatMiniBotLightEmitterIgnite 600ms ease-out,
-    chatMiniBotLightEmitterBreath 6.4s ease-in-out 600ms infinite;
-}
-
-.root[data-light-mode="breathing"] .frameLightCore {
-  animation:
-    chatMiniBotLightCoreIgnite 600ms ease-out,
-    chatMiniBotLightCoreBreath 6.4s ease-in-out 600ms infinite;
 }
 
 .upperScreen,
@@ -285,7 +146,11 @@
 }
 
 .lowerScreenContent {
-  transform: scaleX(var(--chat-mini-bot-lower-screen-facing-scale-x, 1));
+  transform: translate(
+      var(--chat-mini-bot-lower-screen-nudge-x, 0px),
+      var(--chat-mini-bot-lower-screen-nudge-y, 0px)
+    )
+    scaleX(var(--chat-mini-bot-lower-screen-facing-scale-x, 1));
 }
 
 /* Lower glyph screen: (52,86)-(74,111) on 128px → ~41%/67%/18%/20% */
@@ -309,119 +174,6 @@
 .lowerScreen > * {
   position: relative;
   z-index: 1;
-}
-
-/* Hero and room portraits have enough physical pixels to suggest the same CRT
-   cell lattice as the full buckle. Badge portraits intentionally omit it so a
-   sub-pixel repeat cannot turn into moire or muddy the glyph silhouette. */
-.root:is([data-size="hero"], [data-size="room"]) .lowerScreen::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background:
-    repeating-linear-gradient(
-      90deg,
-      transparent 0
-        calc(
-          var(--chat-mini-buckle-crt-cell-pitch) -
-            var(--chat-mini-buckle-crt-line-width)
-        ),
-      rgb(0 0 0 / 0.76)
-        calc(
-          var(--chat-mini-buckle-crt-cell-pitch) -
-            var(--chat-mini-buckle-crt-line-width)
-        )
-        var(--chat-mini-buckle-crt-cell-pitch)
-    ),
-    repeating-linear-gradient(
-      0deg,
-      transparent 0
-        calc(
-          var(--chat-mini-buckle-crt-cell-pitch) -
-            var(--chat-mini-buckle-crt-line-width)
-        ),
-      rgb(0 0 0 / 0.68)
-        calc(
-          var(--chat-mini-buckle-crt-cell-pitch) -
-            var(--chat-mini-buckle-crt-line-width)
-        )
-        var(--chat-mini-buckle-crt-cell-pitch)
-    ),
-    radial-gradient(
-      circle at 50% 48%,
-      color-mix(in srgb, var(--chat-mini-bot-color) 18%, transparent) 0 46%,
-      color-mix(in srgb, var(--chat-mini-bot-color) 8%, transparent) 68%,
-      transparent 84%
-    );
-  opacity: var(--chat-mini-buckle-crt-opacity);
-}
-
-.root[data-size="hero"] {
-  --chat-mini-buckle-crt-cell-pitch: 2px;
-  --chat-mini-buckle-crt-line-width: 0.34px;
-  --chat-mini-buckle-crt-opacity: 0.78;
-}
-
-.root[data-size="room"] {
-  --chat-mini-buckle-crt-cell-pitch: 1.5px;
-  --chat-mini-buckle-crt-line-width: 0.3px;
-  --chat-mini-buckle-crt-opacity: 0.52;
-}
-
-@keyframes chatMiniBotLightAuraIgnite {
-  from { opacity: 0; }
-  to { opacity: 0.22; }
-}
-
-@keyframes chatMiniBotLightAuraBreath {
-  0%, 100% { opacity: 0.22; }
-  50% { opacity: 0.28; }
-}
-
-@keyframes chatMiniBotLightEmitterIgnite {
-  from { opacity: 0; }
-  to { opacity: 0.52; }
-}
-
-@keyframes chatMiniBotLightEmitterBreath {
-  0%, 100% { opacity: 0.52; }
-  50% { opacity: 0.58; }
-}
-
-@keyframes chatMiniBotLightCoreIgnite {
-  from { opacity: 0; }
-  to { opacity: 0.58; }
-}
-
-@keyframes chatMiniBotLightCoreBreath {
-  0%, 100% { opacity: 0.58; }
-  50% { opacity: 0.64; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .talkingGlow {
-    transition: none;
-  }
-
-  .root[data-light-mode="breathing"] .frameLightAura,
-  .root[data-light-mode="breathing"] .frameLightEmitter,
-  .root[data-light-mode="breathing"] .frameLightCore {
-    animation: none;
-  }
-
-  .root[data-light-mode="breathing"] .frameLightAura {
-    opacity: 0.24;
-  }
-
-  .root[data-light-mode="breathing"] .frameLightEmitter {
-    opacity: 0.55;
-  }
-
-  .root[data-light-mode="breathing"] .frameLightCore {
-    opacity: 0.62;
-  }
 }
 
 @media (max-width: 560px) {

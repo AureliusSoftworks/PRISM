@@ -45,6 +45,7 @@ export type BotPowerAvatarColorCycleModePolicy = BotPowerGhostModePolicy;
 export type BotPowerAvatarVisibilityModePolicy = BotPowerGhostModePolicy;
 export type BotPowerVoicePresenceModePolicy = BotPowerGhostModePolicy;
 export type BotPowerSpeechObfuscationModePolicy = BotPowerGhostModePolicy;
+export type BotPowerCursedTongueModePolicy = BotPowerGhostModePolicy;
 export type BotPowerAddressedFandomModePolicy = BotPowerGhostModePolicy;
 export type BotPowerCredulityModePolicy = BotPowerGhostModePolicy;
 export type BotPowerAntiTruthModePolicy = BotPowerGhostModePolicy;
@@ -77,19 +78,19 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   chat: {
     id: "chat",
     name: "Chat",
-    version: "1.39",
+    version: "1.40",
     status: "active",
   },
   zen: {
     id: "zen",
     name: "Zen",
-    version: "1.38",
+    version: "1.39",
     status: "active",
   },
   debate: {
     id: "debate",
     name: "Debate",
-    version: "0.31",
+    version: "0.32",
     status: "preview",
   },
   polling: {
@@ -101,13 +102,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "2.51",
+    version: "2.52",
     status: "active",
   },
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "1.61",
+    version: "1.63",
     status: "active",
   },
   feed: {
@@ -125,7 +126,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   story: {
     id: "story",
     name: "Story",
-    version: "0.31",
+    version: "0.32",
     status: "planned",
   },
   gym: {
@@ -347,7 +348,7 @@ export const BOT_POWER_MUTE_MODE_POLICY: Record<PrismAppletId, BotPowerMuteModeP
   botcast: "enforced",
   feed: "required_before_activation",
   games: "required_before_activation",
-  story: "required_before_activation",
+  story: "enforced",
   gym: "required_before_activation",
   slate: "not_applicable",
   pseudo: "required_before_activation",
@@ -657,6 +658,26 @@ export const BOT_POWER_SPEECH_OBFUSCATION_MODE_POLICY: Record<
   polling: "deferred",
   coffee: "direct",
   botcast: "adapted",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** Public profanity is direct in live speech lanes and adapted to formal records. */
+export const BOT_POWER_CURSED_TONGUE_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerCursedTongueModePolicy
+> = {
+  chat: "direct",
+  zen: "direct",
+  debate: "adapted",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
   feed: "deferred",
   games: "deferred",
   story: "adapted",

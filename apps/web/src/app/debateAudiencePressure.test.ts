@@ -6,11 +6,18 @@ import {
   type DebateFormalityId,
 } from "@localai/shared";
 import {
+  DEBATE_AUDIENCE_LAYER_CROSSFADE_MS,
   DEBATE_AUDIENCE_MIX_BED_CEILING,
+  DEBATE_AUDIENCE_ORDER_RETURN_MS,
+  DEBATE_AUDIENCE_ORDER_SWELL_MS,
+  DEBATE_AUDIENCE_PRESSURE_FALL_MS,
+  DEBATE_AUDIENCE_PRESSURE_RISE_MS,
   debateAudienceOrderCallMix,
+  debateAudienceOrderStragglerMix,
   debateAudiencePressureBand,
   debateAudiencePressureMix,
   debateAudiencePressureMixForScore,
+  debateAudiencePressureMixTransitionMs,
   debateAudiencePressureScore,
   debateAudienceTalkerCount,
   debateAudienceTalkerIndices,
@@ -115,6 +122,49 @@ describe("Debate audience pressure", () => {
         );
         assert.ok(mix.background + mix.grain + mix.foley <= 1 + 1e-9);
       }
+    }
+  });
+
+  it("gives the gallery audible inertia and a straggler tail after order", () => {
+    assert.ok(DEBATE_AUDIENCE_PRESSURE_RISE_MS >= 2_500);
+    assert.ok(
+      DEBATE_AUDIENCE_PRESSURE_FALL_MS > DEBATE_AUDIENCE_PRESSURE_RISE_MS,
+    );
+    assert.ok(DEBATE_AUDIENCE_ORDER_SWELL_MS >= 1_000);
+    assert.ok(DEBATE_AUDIENCE_ORDER_RETURN_MS >= 4_000);
+    assert.ok(DEBATE_AUDIENCE_LAYER_CROSSFADE_MS >= 1_500);
+    assert.equal(
+      debateAudiencePressureMixTransitionMs({
+        previousScore: 22,
+        nextScore: 70,
+      }),
+      DEBATE_AUDIENCE_PRESSURE_RISE_MS,
+    );
+    assert.equal(
+      debateAudiencePressureMixTransitionMs({
+        previousScore: 70,
+        nextScore: 12,
+      }),
+      DEBATE_AUDIENCE_PRESSURE_FALL_MS,
+    );
+
+    for (const formality of [
+      "parliamentary",
+      "structured",
+      "plainspoken",
+      "heated",
+      "free_for_all",
+    ] as const) {
+      const settled = debateAudiencePressureMix("settled", formality);
+      const stragglers = debateAudienceOrderStragglerMix(formality);
+      const peak = debateAudienceOrderCallMix(formality);
+      assert.ok(stragglers.grain > settled.grain);
+      assert.ok(stragglers.background >= settled.background);
+      assert.ok(stragglers.grain < peak.grain);
+      assert.ok(
+        stragglers.background + stragglers.grain <=
+          DEBATE_AUDIENCE_MIX_BED_CEILING + 1e-9,
+      );
     }
   });
 

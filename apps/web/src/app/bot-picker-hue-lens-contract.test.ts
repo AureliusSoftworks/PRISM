@@ -27,6 +27,7 @@ describe("bot-grid hue lens contract", () => {
     assert.match(signal, /aria-label="Clear Signal guest hue lens"/u);
     assert.match(signal, /debateCastLensSliderInputValue\([\s\S]{0,80}signalGridHueLensCenter/u);
     assert.match(signal, /debateCastHueFromLensSliderInput/u);
+    assert.match(signalCss, /\.signalBotPicker\s*\{[^}]*align-content:\s*start/u);
     assert.match(signalCss, /\.signalBotPickerHueLens input\s*\{[^}]*writing-mode:\s*vertical-lr/u);
 
     assert.equal((debate.match(/<BotPickerGrid\b/gu) ?? []).length, 1);

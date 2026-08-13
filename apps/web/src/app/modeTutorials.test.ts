@@ -45,14 +45,11 @@ describe("mode tutorials", () => {
     assert.match(step?.body ?? "", /full chassis would become unreadable/u);
   });
 
-  it("explains primary accent brightness without conflating Atmosphere", () => {
+  it("explains the canonical hue-only identity color", () => {
     const step = MODE_TUTORIALS.avatar.steps[2];
-    assert.match(step?.body ?? "", /accent brightness/u);
-    assert.match(step?.body ?? "", /only that color darker or brighter/u);
-    assert.match(
-      step?.body ?? "",
-      /without changing the alloy or Atmosphere accent/u,
-    );
+    assert.match(step?.body ?? "", /canonical fully saturated identity color/u);
+    assert.match(step?.body ?? "", /without a separate brightness modifier/u);
+    assert.doesNotMatch(step?.body ?? "", /accent brightness/u);
   });
 
   it("explains that typed asset rails remember their own generation model", () => {
@@ -83,15 +80,35 @@ describe("mode tutorials", () => {
     assert.match(continueHomeStep.body, /Random, New, Intro, or Off handoff/u);
   });
 
-  it("teaches automatic Zen avatar depth without manual resizing", () => {
+  it("teaches two-axis Zen hue string navigation with a stable target", () => {
+    const step = MODE_TUTORIALS.zen.steps.find(
+      (candidate) => candidate.heading === "Pluck the spectrum",
+    );
+    assert.ok(step);
+    assert.equal(
+      step.targetSelector,
+      '[data-tutorial-target="zen-hue-string"]',
+    );
+    assert.match(step.body, /Drag sideways to choose a hue/u);
+    assert.match(step.body, /Pull upward to narrow/u);
+    assert.match(step.body, /pull downward to broaden/u);
+    assert.match(step.body, /without changing the hue or breadth/u);
+    assert.match(step.body, /search scans the entire active group/u);
+    assert.match(step.body, /Home returns to the remembered-hue root/u);
+    assert.match(step.body, /two to five color nodes/u);
+    assert.match(step.body, /five is the maximum/u);
+    assert.match(step.body, /root restores the full five-color PRISM atmosphere/u);
+  });
+
+  it("teaches explicit Zen avatar sizing", () => {
     const step = MODE_TUTORIALS.zen.steps.find(
       (candidate) => candidate.heading === "Let context breathe",
     );
     assert.ok(step);
-    assert.match(step.body, /changes depth naturally with its vertical position/u);
-    assert.match(step.body, /higher in the room uses the crisp mini chassis/u);
-    assert.match(step.body, /moving lower brings forward the larger high-resolution avatar/u);
-    assert.match(step.body, /size is not adjusted manually/u);
+    assert.match(step.body, /Cmd\/Ctrl \+ enlarges it/u);
+    assert.match(step.body, /Grow, Shrink, and Reset size/u);
+    assert.match(step.body, /Full sizes use the high-resolution avatar/u);
+    assert.match(step.body, /compact sizes switch to the crisp mini chassis/u);
   });
 
   it("teaches that crossing the Zen midpoint turns the complete avatar screen", () => {
@@ -741,7 +758,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       copy,
-      /In LOCAL Auto, clicking the downward triangle gives a failed ignition/u,
+      /In LOCAL Auto, clicking the upright triangle gives a failed ignition/u,
     );
     assert.match(
       copy,
@@ -1086,6 +1103,10 @@ describe("mode tutorials", () => {
     assert.match(gavelCopy, /Most lines stay quiet/u);
     assert.match(gavelCopy, /LOCAL remains fully local/u);
     assert.match(gavelCopy, /bot Moderator sparsely strikes the gavel/u);
+    assert.match(gavelCopy, /deliberate inertia in both directions/u);
+    assert.match(gavelCopy, /taper of stragglers/u);
+    assert.match(gavelCopy, /repeat intervention strikes again/u);
+    assert.match(gavelCopy, /I said order\. Silence\./u);
     assert.match(gavelCopy, /PRISM never takes that authority from you/u);
     assert.match(gavelCopy, /protected mix headroom/u);
     assert.match(gavelCopy, /never inserts \*speaks loudly\*/u);
@@ -1458,6 +1479,20 @@ describe("mode tutorials", () => {
     );
   });
 
+  it("teaches group marks and exclusive leaders together", () => {
+    const identity = MODE_TUTORIALS.zen.steps.find(
+      (step) => step.heading === "Give the group its own mark",
+    );
+
+    assert.match(identity?.body ?? "", /Promote to leader/u);
+    assert.match(identity?.body ?? "", /simply reassigns it/u);
+    assert.match(identity?.body ?? "", /one point for each group they lead/u);
+    assert.equal(
+      identity?.targetSelector,
+      '[data-tutorial-target="chat-group-glyph-reroll"]',
+    );
+  });
+
   it("distinguishes Coffee privacy routing from contextual Auto", () => {
     const setup = MODE_TUTORIALS.coffee.steps.find(
       (step) => step.heading === "Set the table",
@@ -1777,7 +1812,10 @@ describe("mode tutorials", () => {
       setupCopy,
       /Hard mute and echo hosts can still take a Producer guest/u,
     );
-    assert.match(setupCopy, /on-air floor in canonical silence/u);
+    assert.match(
+      setupCopy,
+      /privately authors a normal opening[\s\S]*timed periods and an elapsed cue/u,
+    );
     assert.match(
       setupCopy,
       /mirrors the Producer's last public answer exactly/u,
@@ -2166,7 +2204,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /hold Command.*Control.*Wield Prism.*active field locks.*queue it once.*unique inputs in click order.*repeat clicks.*Escape restores the active field.*Command \+ Option.*opens the assistant menu at the orb/u,
+      /hold Option.*Wield Prism.*active field locks.*queue it once.*unique inputs in click order.*repeat clicks.*Escape restores the active field.*Command \+ Option.*opens the assistant menu at the orb/u,
     );
     assert.doesNotMatch(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
@@ -2845,7 +2883,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /both frozen cast members are muted[\s\S]*short visual exchange and closing/u,
+      /saved public transcript line begins with one period immediately[\s\S]*eligible late reaction can become a genuine floor interruption[\s\S]*both frozen cast members are muted[\s\S]*replay-stable timed exchange/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
@@ -3001,5 +3039,30 @@ describe("mode tutorials", () => {
       assert.match(body, /hard-routed to a wholly unrelated safe scene/u);
       assert.match(body, /valid session state/u);
     }
+  });
+
+  it("teaches timed unaware Mute without the legacy fixed ellipsis contract", () => {
+    for (const mode of [
+      "chat",
+      "zen",
+      "coffee",
+      "botcast",
+      "debate",
+    ] as const) {
+      const body = MODE_TUTORIALS[mode].steps
+        .map((step) => step.body)
+        .join(" ");
+      assert.match(body, /privately remembers a complete ordinary answer/u);
+      assert.match(body, /one period per second/u);
+      assert.match(body, /starting with \. immediately/u);
+      assert.match(body, /elapsed-time stage cue/u);
+      assert.match(body, /no voice or mouth movement/u);
+      assert.doesNotMatch(body, /only answers with \.\.\./u);
+    }
+    const chatBody = MODE_TUTORIALS.chat.steps.map((step) => step.body).join(" ");
+    assert.match(chatBody, /Chat and Zen never invent a reaction for the player/u);
+    const signalBody = MODE_TUTORIALS.botcast.steps.map((step) => step.body).join(" ");
+    assert.match(signalBody, /genuine floor break/u);
+    assert.doesNotMatch(signalBody, /saved transcript line is only \.\.\./u);
   });
 });

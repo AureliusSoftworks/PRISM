@@ -16,6 +16,7 @@ import {
   botPowerObserverCueLinesV1,
   botPowerSelfCueLinesV1,
   botPowerSpeechObfuscationAuthoringCueV1,
+  botPowerCursedTongueAuthoringCueV1,
   botPowerThemeMoodCueFromEffectsV1,
   botPowerResponseIsSilentV1,
   botPowerIntermittentMuteEffectFromEffectsV1,
@@ -942,6 +943,15 @@ export function coffeePowerBotMumblesSpeech(
   ) === true;
 }
 
+export function coffeePowerBotCursesSpeech(
+  plan: CoffeePowerPlanV1 | null,
+  botId: string,
+): boolean {
+  return plan?.bots[botId]?.effects.some(
+    (effect) => effect.type === "cursed_tongue",
+  ) === true;
+}
+
 export interface CoffeePowerHearingRepeatDirective {
   requesterBotId: string;
   repeatingBotId: string;
@@ -1205,6 +1215,11 @@ export function coffeePowersPromptForSpeaker(
     (own?.effects ?? []).some((effect) => effect.type === "speech_obfuscation")
   ) {
     lines.push(botPowerSpeechObfuscationAuthoringCueV1());
+  }
+  if (
+    (own?.effects ?? []).some((effect) => effect.type === "cursed_tongue")
+  ) {
+    lines.push(botPowerCursedTongueAuthoringCueV1());
   }
   for (const effect of own?.effects ?? []) {
     const targetNames = effect.type === "response_bond" || effect.type === "selective_memory"

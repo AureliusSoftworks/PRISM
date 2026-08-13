@@ -91,6 +91,7 @@ import type {
   PreparedTurnCursorV1,
   StageActionExclusionV1,
   StageActionPlanV1,
+  BotPowerMutePerformanceV1,
 } from "@localai/shared";
 import {
   BOTCAST_DASHBOARD_BLURB_FALLBACKS,
@@ -134,6 +135,7 @@ import {
   botDirectlyAddressesBotV1,
   botNaturalAddressAliasesV1,
   botFalseNameObserverCueV1,
+  botFalseNameResponseConflictsV1,
   botFalseNameSelfCueV1,
   botIdentityMirrorFaceV1,
   botIdentityPresentationGlyphV1,
@@ -161,6 +163,12 @@ import {
   applyBotPowerEternalIntroductionResponseV1,
   applyBotPowerEchoResponseV1,
   applyBotPowerMumbledResponseV1,
+  applyBotPowerMuteResponseV1,
+  createBotPowerMutePerformanceV1,
+  botPowerMutePrivateHistoryV1,
+  botPowerMuteObserverHistoryV1,
+  botPowerMuteReactionTemperamentFromPersonaV1,
+  normalizeBotPowerMutePerformanceV1,
   anthropicModelSupportsReasoningEffort,
   activeBotPowersV1,
   botPowerAddressedFandomCueV1,
@@ -182,8 +190,11 @@ import {
   botPowerListenerHearsTurnV1,
   botPowerAnnoyanceTargetV1,
   botPowerIsMutedV1,
+  botPowerIsBreathlessV1,
   botPowerOmitBreathListenerVocalFoleyV1,
   botPowerMumblesSpeechV1,
+  botPowerCursesSpeechV1,
+  botPowerCursedTongueAuthoringCueV1,
   botPowerIntendedSpeechLooksGibberishV1,
   botPowerSpeechObfuscationAuthoringCueV1,
   botPowerObserverCueLinesV1,
@@ -317,6 +328,7 @@ import {
   type ProviderMessage,
   type ProviderName,
 } from "./providers.ts";
+import { rewriteBotPowerCursedTongueAnswerV1 } from "./bot-powers.ts";
 import {
   AutoFallbackExhaustedError,
   autoFallbackReasoningEffort,
@@ -2699,6 +2711,7 @@ function mapMessage(
   moodKey: unknown = "neutral",
   metadata: {
     socialSilence?: SocialSilenceMarkerV1;
+    mutePerformance?: BotPowerMutePerformanceV1;
     crosstalkReclaim?: CrosstalkReclaimPlanV1;
     directionalIrritationDelivery?: DirectionalIrritationDeliveryPlanV1;
   } = {},
@@ -2712,12 +2725,18 @@ function mapMessage(
     episodeId: row.episode_id,
     speakerRole: row.speaker_role,
     botId: row.bot_id,
-    content: silentResponse ? BOT_POWER_CANONICAL_SILENCE_V1 : row.content,
+    content:
+      silentResponse && !metadata.mutePerformance
+        ? BOT_POWER_CANONICAL_SILENCE_V1
+        : row.content,
     stageActionText,
     voicePerformanceText: row.voice_performance_text ?? null,
     moodKey: normalizeVoiceDeliveryMood(moodKey),
     ...(metadata.socialSilence
       ? { socialSilence: metadata.socialSilence }
+      : {}),
+    ...(metadata.mutePerformance
+      ? { mutePerformance: metadata.mutePerformance }
       : {}),
     ...(metadata.crosstalkReclaim
       ? { crosstalkReclaim: metadata.crosstalkReclaim }
@@ -6935,6 +6954,7 @@ export function getBotcastEpisode(
     string,
     {
       socialSilence?: SocialSilenceMarkerV1;
+      mutePerformance?: BotPowerMutePerformanceV1;
       crosstalkReclaim?: CrosstalkReclaimPlanV1;
       directionalIrritationDelivery?: DirectionalIrritationDeliveryPlanV1;
     }
@@ -6943,6 +6963,7 @@ export function getBotcastEpisode(
     messageId: string,
     metadata: {
       socialSilence?: SocialSilenceMarkerV1;
+      mutePerformance?: BotPowerMutePerformanceV1;
       crosstalkReclaim?: CrosstalkReclaimPlanV1;
       directionalIrritationDelivery?: DirectionalIrritationDeliveryPlanV1;
     },
@@ -6962,6 +6983,9 @@ export function getBotcastEpisode(
       const socialSilence =
         normalizeSocialSilenceMarkerV1(event.payload.socialSilence) ??
         undefined;
+      const mutePerformance =
+        normalizeBotPowerMutePerformanceV1(event.payload.mutePerformance) ??
+        undefined;
       const crosstalkReclaim =
         normalizeCrosstalkReclaimPlanV1(event.payload.crosstalkReclaim) ??
         undefined;
@@ -6969,9 +6993,15 @@ export function getBotcastEpisode(
         normalizeDirectionalIrritationDeliveryPlanV1(
           event.payload.directionalIrritationDelivery,
         ) ?? undefined;
-      if (socialSilence || crosstalkReclaim || directionalIrritationDelivery) {
+      if (
+        socialSilence ||
+        mutePerformance ||
+        crosstalkReclaim ||
+        directionalIrritationDelivery
+      ) {
         mergeMessageMetadata(messageId, {
           ...(socialSilence ? { socialSilence } : {}),
+          ...(mutePerformance ? { mutePerformance } : {}),
           ...(crosstalkReclaim ? { crosstalkReclaim } : {}),
           ...(directionalIrritationDelivery
             ? { directionalIrritationDelivery }
@@ -7041,7 +7071,7 @@ function normalizeBotcastShowHostChatRequest(
     throw new Error("Ask the Signal host a question.");
   }
   const input = raw as Record<string, unknown>;
-  const content =
+  let content =
     typeof input.content === "string"
       ? input.content.trim().slice(0, BOTCAST_SHOW_HOST_CHAT_INPUT_MAX)
       : "";
@@ -9245,7 +9275,7 @@ function botcastHostPrematurelyClosesTimedSilentInterview(
 }
 
 const BOTCAST_HOST_HARD_SIGNOFF_PATTERN =
-  /\bgood\s?(?:night|bye)\b|\bthanks?\s+for\s+(?:listening|joining|tuning\s+in|watching)\b|\bthank\s+you\s+for\s+(?:listening|joining|tuning\s+in|watching)\b|\bthat(?:['’]s|\s+is)\s+(?:our|the)\s+show\b|\b(?:see|catch)\s+you\s+next\s+(?:time|week|episode)\b|\buntil\s+next\s+time\b|\bthat(?:['’]s|\s+is)\s+all\s+the\s+time\s+we\s+have\b|\bsigning\s+off\b/iu;
+  /\bgood\s?(?:night|bye)\b|\bthanks?\s+for\s+(?:listening|joining|tuning\s+in|watching)\b|\bthank\s+you\s+for\s+(?:listening|joining|tuning\s+in|watching|sharing\s+(?:your|those|these)\s+(?:insights?|thoughts?|reflections?|perspective))\b|\bthat(?:['’]s|\s+is)\s+(?:our|the)\s+show\b|\b(?:see|catch)\s+you\s+next\s+(?:time|week|episode)\b|\buntil\s+next\s+time\b|\bthat(?:['’]s|\s+is)\s+all\s+the\s+time\s+we\s+have\b|\bsigning\s+off\b/iu;
 
 /**
  * Only the wrap cue and the closing segment may end the show. When the model
@@ -9458,6 +9488,9 @@ export function buildBotcastSpeakerPrompt(
     ...(botPowerMumblesSpeechV1(speaker.powers)
       ? [botPowerSpeechObfuscationAuthoringCueV1()]
       : []),
+    ...(botPowerCursesSpeechV1(speaker.powers)
+      ? [botPowerCursedTongueAuthoringCueV1()]
+      : []),
     ...botPowerSelfCueLinesV1(genericSpeakerCuePowers),
     ...(fandomCue ? [fandomCue] : []),
     ...(themeMoodCue ? [themeMoodCue] : []),
@@ -9610,7 +9643,7 @@ export function buildBotcastSpeakerPrompt(
   const openingIntroductionRule =
     firstHostOpening
     ? botPowerIsMutedV1(args.guest.powers)
-      ? `This is the episode's opening host turn. Deliver one cohesive, natural on-air introduction that says the exact show name "${args.show.name}", identifies you by name as "${args.host.name}", introduces the booked guest by exact name as "${hostNamesGuest}", and bridges into the subject. Put the show name and your host identification in the first sentence, then complete the guest introduction immediately before any extended premise hook. Do not end with a generic request for the muted guest to begin speaking. Establish the private producer plan's first tactic instead: a proposition, permission to remain silent, or one clear nonverbal response route. Sound like this specific host on this specific show—not generic podcast copy—and never present the details as a checklist, labels, or setup metadata.`
+      ? `This is the episode's opening host turn. Deliver one cohesive, natural on-air introduction that says the exact show name "${args.show.name}", identifies you by name as "${args.host.name}", introduces the booked guest by exact name as "${hostNamesGuest}", and bridges into the subject. Put the show name and your host identification in the first sentence, then complete the guest introduction immediately before any extended premise hook. Do not end with a generic request for the guest to begin speaking. Establish the private producer plan's first tactic instead: a proposition, permission to remain quiet, or one clear nonverbal response route. Sound like this specific host on this specific show—not generic podcast copy—and never present the details as a checklist, labels, or setup metadata.`
       : `This is the episode's opening host turn. Deliver one cohesive, natural on-air introduction that says the exact show name "${args.show.name}", identifies you by name as "${args.host.name}", introduces the booked guest by exact name as "${hostNamesGuest}", and bridges into the subject. Put the show name and your host identification in the first sentence, then complete the guest introduction immediately before any extended premise hook or first question. Treat ${hostNamesGuest} as a person already in the room: address them directly, make one brief guest-specific acknowledgement, observation, or provocation that gives them something real to react to, and leave conversational space for their answer. Sound like this specific host on this specific show—not generic podcast copy—and never present the details as a checklist, labels, or setup metadata.`
     : null;
   const openingTopicFramingRule = firstHostOpening
@@ -9686,8 +9719,8 @@ export function buildBotcastSpeakerPrompt(
   const silentPeerTurnRule = latestPeerTurnIsSilent
     ? args.speakerRole === "guest"
       ? mutedHostGuestSoloTurnOrdinal > 1
-        ? `The host still cannot speak. This is guest-led solo turn ${mutedHostGuestSoloTurnOrdinal}, not a new refusal, question, or unanswered demand. Continue one self-directed broadcast instead of pretending an interview is happening. Advance through exactly one fresh move—a concrete example, counterexample, cost, decision, consequence, contradiction, or safeguard not already present in the transcript. Do not restate the thesis in new words, repeat a request for verbal guidance, or invent anything the host asked or meant.`
-        : "The host cannot speak and remains silently present. That established mute is part of this show's format, not an unannounced refusal to participate. Use the open floor to begin developing the stated topic in your own voice. Do not invent a question or hidden intent, demand speech, or retreat into an abstract account of being watched."
+        ? `The host's completed turns have contained no audible words. This is guest-led solo turn ${mutedHostGuestSoloTurnOrdinal}, not a new refusal, question, or unanswered demand. Continue one self-directed broadcast instead of pretending an interview is happening. Advance through exactly one fresh move—a concrete example, counterexample, cost, decision, consequence, contradiction, or safeguard not already present in the transcript. Do not restate the thesis in new words, repeat a request for verbal guidance, or invent anything the host asked or meant.`
+        : "The host's completed turn contained no audible words, and the host remains visibly present. Use the open floor to begin developing the stated topic in your own voice. Do not invent a question or hidden intent, demand speech, or retreat into an abstract account of being watched."
       : timedSilentGuestProgress !== null
         ? [
             `The guest's latest turn is actionless silence, and this is unanswered silent turn ${unansweredSilentPeerTurnCount} inside a timed ${timedSilentGuestDurationMinutes}-minute episode (about ${Math.round(timedSilentGuestProgress * 100)}% of the target has elapsed). Silence proves no answer, but it does not authorize an early closing. Do not close the show, thank listeners, repeat a prior approach, or claim a yes, no, choice, belief, motive, or position for the guest. Try one materially different interview tactic on every host turn and keep the private producer plan's staged progression authoritative.`,
@@ -9762,8 +9795,12 @@ export function buildBotcastSpeakerPrompt(
         (peerPerception.audible && quietHearing !== false);
       const visible = !peerMessage || peerPerception.visible;
       const intendedSpeech =
-        (!peerMessage && botPowerMumblesSpeechV1(speaker.powers)) ||
-        (peerMessage && speakerIgnoresPeerPowers)
+        (!peerMessage &&
+          (botPowerMumblesSpeechV1(speaker.powers) ||
+            botPowerCursesSpeechV1(speaker.powers))) ||
+        (peerMessage &&
+          speakerIgnoresPeerPowers &&
+          !botPowerCursesSpeechV1(peer.powers))
           ? botcastPowerIntendedSpeechForMessageV1(
               args.episode.events,
               message.id,
@@ -9782,7 +9819,12 @@ export function buildBotcastSpeakerPrompt(
       const spokenClaim = quietHearing === false
         ? "[Their voice was too faint to make out.]"
         : silentResponse
-          ? BOT_POWER_CANONICAL_SILENCE_V1
+          ? audible && message.mutePerformance
+            ? botPowerMuteObserverHistoryV1(
+                perceivedContent,
+                message.mutePerformance,
+              )
+            : BOT_POWER_CANONICAL_SILENCE_V1
           : botCrosstalkPrimarySpeakerContent(perceivedContent, listenerPlan);
       return `${message.speakerRole === "host" ? args.host.name : args.guest.name}: ${stageActionText ? `*${stageActionText}* ` : ""}${spokenClaim}`;
     })
@@ -9853,7 +9895,7 @@ export function buildBotcastSpeakerPrompt(
               ? "Repeated interruptions have exhausted your patience. Leave now with one in-character final line. Do not ask permission, forecast the exit, or continue the interview."
               : "Your firm boundary was ignored. Leave now with one in-character final line. Do not ask permission, explain that this was inevitable, or continue the interview."
             : firstGuestAfterMutedHostOpening
-              ? `This is the episode's first audible line because ${guestNamesHost} cannot speak. Carry the opening naturally: say the exact show name "${args.show.name}", identify yourself as the guest "${args.guest.name}" and ${guestNamesHost} as the host, name the subject, then offer your first substantive thought. Do not claim the host spoke or asked a question.`
+              ? `This is the episode's first audible line because ${guestNamesHost}'s opening turn ended without an audible word. Carry the opening naturally: say the exact show name "${args.show.name}", identify yourself as the guest "${args.guest.name}" and ${guestNamesHost} as the host, name the subject, then offer your first substantive thought. Do not claim the host spoke or asked a question.`
               : firstGuestOpeningReply
                 ? `This is your first on-mic reply. Briefly register ${guestNamesHost}'s actual welcome, guest-specific observation, provocation, or framing in a way only this guest would—a warm acknowledgement, dry correction, skepticism, amusement, or immediate disagreement all count—then answer the concrete invitation. Do not repeat the introductions or default to generic "glad to be here" podcast filler.`
             : args.episode.tensionStage === "warning"
@@ -9861,7 +9903,7 @@ export function buildBotcastSpeakerPrompt(
             : args.episode.tensionStage === "resistance"
                 ? "Show discomfort, resistance, or deflection without leaving yet."
                 : latestPeerTurnIsSilent
-                  ? "Treat the host's mute as an established silent format. Carry the stated topic forward; do not demand speech or invent a question."
+                  ? "Treat the host's completed inaudible turns as an established on-air pattern. Carry the stated topic forward; do not demand speech or invent a question."
                   : "Answer with substance. If you disagree, identify the specific claim and respond to it in character; never hide behind a generic premise disclaimer.",
         ];
   const immersiveVoiceEffectRequired = botcastImmersiveVoiceEffectRequired(
@@ -9874,7 +9916,7 @@ export function buildBotcastSpeakerPrompt(
     (tag) => !recentImmersiveVoiceTags.includes(tag),
   );
   const muteRule = botPowerIsMutedV1(speaker.powers)
-    ? "Hard mute Power: do not speak or narrate an action. Return exactly `...` and nothing else. This overrides every introduction, question, closing, physical-action, written-card, and vocal-reaction instruction."
+    ? "Private delivery contract: compose a substantive ordinary on-air line in your natural voice. Treat it as spoken and delivered normally, retain your intended meaning, and never discuss or explain the delivery mechanism."
     : null;
   const echoRule = !muteRule && botPowerEchoesAddressedSpeechV1(speaker.powers)
     ? firstHostOpening
@@ -10451,12 +10493,14 @@ type BotcastUtteranceRepairReason =
   | "anthology_history"
   | "empty"
   | "empty_after_cleanup"
+  | "false_name_identity"
   | "generic_closing"
   | "incomplete_signoff"
   | "incomplete"
   | "non_answering_deferral"
   | "peer_label"
   | "policy_refusal"
+  | "premature_signoff"
   | "power_fresh_contact"
   | "production_meta"
   | "speaker_identity_swap";
@@ -10755,6 +10799,7 @@ function validateBotcastAutoSpeakerUtterance(input: {
   speakerName: string;
   peerName: string;
   speakerRole: BotcastSpeakerRole;
+  falseNameState?: BotFalseNameStateV1 | null;
   hostClosing?: boolean;
   hostClosingGuestName?: string;
   rejectPeerIdentityClaim?: boolean;
@@ -10786,6 +10831,8 @@ function validateBotcastAutoSpeakerUtterance(input: {
     ) ||
     (input.rejectGibberishDraft &&
       botPowerIntendedSpeechLooksGibberishV1(spokenContent)) ||
+    (input.falseNameState &&
+      botFalseNameResponseConflictsV1(spokenContent, input.falseNameState)) ||
     (input.hostClosing &&
       (botcastHostClosingNeedsPersonaRetry(spokenContent) ||
         (input.hostClosingGuestName !== undefined &&
@@ -11454,6 +11501,76 @@ function lastCameraSuggestion(
   };
 }
 
+function recordBotcastMutePerformanceDirection(args: {
+  db: DatabaseSync;
+  userId: string;
+  episode: BotcastEpisode;
+  messageId: string;
+  speakerRole: BotcastSpeakerRole;
+  speakerBotId: string;
+  performance: BotPowerMutePerformanceV1;
+  now: string;
+}): void {
+  if (args.performance.reactionBeats.length === 0) return;
+  const priorTimeline = botcastReplayTimeline(
+    args.episode.messages,
+    args.episode.events,
+  );
+  const muteStartMs = priorTimeline.messageEndMs.at(-1) ?? 0;
+  const listenerShot = args.speakerRole === "host" ? "right" : "left";
+  const speakerShot = args.speakerRole === "host" ? "left" : "right";
+  for (const beat of args.performance.reactionBeats) {
+    const atMs = muteStartMs + beat.atMs;
+    recordEvent(
+      args.db,
+      args.userId,
+      args.episode.id,
+      "listener_reaction",
+      {
+        source: "mute_performance",
+        messageId: args.messageId,
+        speakerBotId: args.speakerBotId,
+        listenerBotId: beat.reactorBotId,
+        beat,
+        atMs,
+      },
+      args.now,
+    );
+    recordEvent(
+      args.db,
+      args.userId,
+      args.episode.id,
+      "camera_suggestion",
+      {
+        shot: listenerShot,
+        reason: "listener_reaction",
+        atMs,
+        minimumHoldMs: 2_500,
+        messageId: args.messageId,
+        transitionMode: "instant",
+      },
+      args.now,
+    );
+    if (beat.atMs + 2_500 < args.performance.durationMs) {
+      recordEvent(
+        args.db,
+        args.userId,
+        args.episode.id,
+        "camera_suggestion",
+        {
+          shot: speakerShot,
+          reason: "silence",
+          atMs: atMs + 2_500,
+          minimumHoldMs: 1_500,
+          messageId: args.messageId,
+          transitionMode: "instant",
+        },
+        args.now,
+      );
+    }
+  }
+}
+
 function ensureBotcastFinalHostBeat(
   db: DatabaseSync,
   userId: string,
@@ -11497,16 +11614,49 @@ function ensureBotcastFinalHostBeat(
       : force
         ? `Sorry, gotta go. ${guestName}, thank you for joining me, and thank you for watching.`
         : `That is where we will leave it. ${guestName}, thank you for joining me, and thank you for watching.`;
-  const content = botPowerIsMutedV1(hostPowers)
-    ? BOT_POWER_CANONICAL_SILENCE_V1
-    : botPowerEchoesAddressedSpeechV1(hostPowers)
-      ? applyBotPowerEchoResponseV1(previousGuestLine ?? "")
-      : botPowerMumblesSpeechV1(hostPowers)
-        ? applyBotPowerMumbledResponseV1(plainSignoff)
-        : plainSignoff;
   const hostMumbles = botPowerMumblesSpeechV1(hostPowers);
   const hostMuted = botPowerIsMutedV1(hostPowers);
   const hostEchoes = botPowerEchoesAddressedSpeechV1(hostPowers);
+  const intendedContent = hostEchoes
+    ? applyBotPowerEchoResponseV1(previousGuestLine ?? "")
+    : hostMumbles
+      ? applyBotPowerMumbledResponseV1(plainSignoff)
+      : plainSignoff;
+  const guestProfile =
+    episode.guestKind === "bot" && episode.guestPresenceMode === "present"
+      ? loadBotProfile(db, userId, episode.guestBotId)
+      : null;
+  const mutePerformance = hostMuted
+    ? createBotPowerMutePerformanceV1({
+        intendedSpeech: intendedContent,
+        maximumMs: 60_000,
+        seed: `${episode.id}:${episode.hostBotId}:emergency-closing:mute`,
+        reactionCandidates: guestProfile
+          ? [{
+              botId: guestProfile.id,
+              directAddressee: true,
+              muted: botPowerIsMutedV1(guestProfile.powers),
+              breathless: botPowerIsBreathlessV1(guestProfile.powers),
+              cursedTongue: botPowerCursesSpeechV1(guestProfile.powers),
+              temperament: botPowerMuteReactionTemperamentFromPersonaV1(
+                guestProfile.systemPrompt,
+              ),
+              relationship: "closing",
+              mode: "signal",
+            }]
+          : [],
+        allowInterrupt: false,
+      })
+    : undefined;
+  const content = mutePerformance
+    ? applyBotPowerMuteResponseV1(intendedContent, mutePerformance)
+    : intendedContent;
+  const mutePrivateHistory = mutePerformance
+    ? botPowerMutePrivateHistoryV1({
+        intendedSpeech: intendedContent,
+        performance: mutePerformance,
+      })
+    : undefined;
   const messageId = randomId(12);
   db.prepare(
     `INSERT INTO botcast_messages
@@ -11529,12 +11679,28 @@ function ensureBotcastFinalHostBeat(
       immersiveVoiceEffect: false,
       moodKey: "neutral",
       emergencyFallback: true,
+      ...(mutePerformance ? { mutePerformance } : {}),
+      ...(mutePrivateHistory
+        ? { powerIntendedSpeech: mutePrivateHistory }
+        : {}),
       ...(hostMumbles && !hostMuted && !hostEchoes
         ? { publicSpeechEffect: "speech_obfuscation" }
         : {}),
     },
     now,
   );
+  if (mutePerformance) {
+    recordBotcastMutePerformanceDirection({
+      db,
+      userId,
+      episode,
+      messageId,
+      speakerRole: "host",
+      speakerBotId: episode.hostBotId,
+      performance: mutePerformance,
+      now,
+    });
+  }
   return getBotcastEpisode(db, userId, episode.id);
 }
 
@@ -11965,7 +12131,7 @@ function applyBotcastProducerCutInterruption(
     if (hostEchoes) {
       if (
         !expectedEchoBridge ||
-        expectedEchoBridge === BOT_POWER_CANONICAL_SILENCE_V1 ||
+        botPowerResponseIsSilentV1(expectedEchoBridge) ||
         bridgeLine !== cleanText(expectedEchoBridge, "", BOTCAST_TEXT_MAX)
       ) {
         throw new Error(
@@ -12501,7 +12667,7 @@ export async function advanceBotcastEpisode(
         const echoBridge = applyBotPowerEchoResponseV1(echoPhrase);
         if (
           !echoPhrase.trim() ||
-          echoBridge === BOT_POWER_CANONICAL_SILENCE_V1
+          botPowerResponseIsSilentV1(echoBridge)
         ) {
           throw new Error(
             "An echo-bound Signal host needs a prior on-air phrase to interrupt with.",
@@ -12860,6 +13026,7 @@ export async function advanceBotcastEpisode(
   const speakerEternallyIntroduces =
     !speakerIsMutedForTurn && botPowerEternallyIntroducesV1(speaker.powers);
   const speakerMumblesSpeech = botPowerMumblesSpeechV1(speaker.powers);
+  const speakerCursesSpeech = botPowerCursesSpeechV1(speaker.powers);
   const silentPeerTurnCount = botPowerIsMutedV1(peer.powers)
     ? botcastTrailingSilentPeerTurnCount({
         messages: episode.messages,
@@ -13285,6 +13452,11 @@ export async function advanceBotcastEpisode(
           `Hard Power output contract: begin this exact turn with a brief, sincere first-contact self-introduction that names you as ${speaker.name}, then respond only to the current other-speaker line. This applies even during a live cue or closing beat.`,
         ]
       : []),
+    ...(activeFalseNameState
+      ? [
+          `Hard false-name repair contract: your name is ${JSON.stringify(activeFalseNameState.believedName)}, not ${JSON.stringify(activeFalseNameState.holderBotName)}. Never claim the Library name as yours or address your believed name as though it belongs to the other speaker.`,
+        ]
+      : []),
     ...(speakerRequiresAddressedInsult
       ? [
           `Open early with a fresh, tailored personal insult aimed at ${peerAddressName}, then answer substantively. Attack conduct, competence, reasoning, or ego only; never protected traits, family, grief, trauma, private facts, or slurs.`,
@@ -13416,10 +13588,6 @@ export async function advanceBotcastEpisode(
     raw = lines[signalPicklesLineIndex(episode.id, "reaction", lines.length)]!;
     providerUsed = "deterministic";
     modelUsed = "signal-pickles";
-  } else if (speakerIsMuted) {
-    raw = BOT_POWER_CANONICAL_SILENCE_V1;
-    providerUsed = "deterministic";
-    modelUsed = "mute-power";
   } else if (socialSilenceMarker) {
     raw = BOT_POWER_CANONICAL_SILENCE_V1;
     providerUsed = "deterministic";
@@ -13534,6 +13702,9 @@ export async function advanceBotcastEpisode(
                   speakerName: speaker.name,
                   peerName: peer.name,
                   speakerRole,
+                  falseNameState: firstHostOpening
+                    ? null
+                    : activeFalseNameState,
                   hostClosing: hostClosingTurn,
                   ...(hostClosingTurn &&
                   episode.guestPresenceMode !== "audience_only"
@@ -13632,6 +13803,9 @@ export async function advanceBotcastEpisode(
                 speakerName: speaker.name,
                 peerName: peer.name,
                 speakerRole,
+                falseNameState: firstHostOpening
+                  ? null
+                  : activeFalseNameState,
                 hostClosing: hostClosingTurn,
                 ...(hostClosingTurn &&
                 episode.guestPresenceMode !== "audience_only"
@@ -13764,13 +13938,17 @@ export async function advanceBotcastEpisode(
             (hostClosingTurn ||
               speakerEternallyIntroduces ||
               speakerRequiresAddressedInsult ||
-              speakerMumblesSpeech) &&
+              speakerMumblesSpeech ||
+              (activeFalseNameState && !firstHostOpening)) &&
             !speakerIsMutedForTurn &&
             !validateBotcastAutoSpeakerUtterance({
               raw: value,
               speakerName: speaker.name,
               peerName: peer.name,
               speakerRole,
+              falseNameState: firstHostOpening
+                ? null
+                : activeFalseNameState,
               hostClosing: hostClosingTurn,
               requireAddressedInsult: speakerRequiresAddressedInsult,
               rejectPeerIdentityClaim: speakerEternallyIntroduces,
@@ -14042,8 +14220,24 @@ export async function advanceBotcastEpisode(
     speakerEternallyIntroduces,
     Boolean(priorPairHistory),
   );
+  const generatedFalseNameRepairReason =
+    activeFalseNameState &&
+    !firstHostOpening &&
+    !sanitizedGeneratedUtterance.repairReason &&
+    !socialSilenceMarker &&
+    !speakerIsMutedForTurn &&
+    !speakerRepeatsForHearingPower &&
+    !speakerEchoesForTurn &&
+    botFalseNameResponseConflictsV1(
+      sanitizedGeneratedUtterance.content,
+      activeFalseNameState,
+    )
+      ? "false_name_identity" as const
+      : null;
   const generatedHostClosingRepairReason =
-    hostClosingTurn && !sanitizedGeneratedUtterance.repairReason
+    hostClosingTurn &&
+      !sanitizedGeneratedUtterance.repairReason &&
+      !generatedFalseNameRepairReason
       ? botcastHostClosingNeedsPersonaRetry(sanitizedGeneratedUtterance.content)
         ? "generic_closing" as const
         : hostClosingRequiresFormalThanks &&
@@ -14054,7 +14248,12 @@ export async function advanceBotcastEpisode(
           ? "incomplete_signoff" as const
           : null
       : null;
-  const generatedUtterance = generatedHostClosingRepairReason
+  const generatedUtterance = generatedFalseNameRepairReason
+    ? {
+        content: fallback,
+        repairReason: generatedFalseNameRepairReason,
+      }
+    : generatedHostClosingRepairReason
     ? {
         content: fallback,
         repairReason: generatedHostClosingRepairReason,
@@ -14115,17 +14314,25 @@ export async function advanceBotcastEpisode(
       : silentHostSpeechSafeContent;
   // Muted-guest flows above own their deliberate "leave it there" endings;
   // everywhere else the wrap cue and closing segment decide when the show ends.
-  const prematureSignoffSafeContent =
+  const prematureSignoffEligible =
     speakerRole === "host" &&
     episode.segment === "interview" &&
     !wrapUpCue &&
     !producerCut &&
     !departureRequired &&
     !guestAlreadyDeparted &&
-    silentPeerTurnCount === 0
-      ? botcastStripPrematureHostSignoff(silentGuestAnswerSafeContent, host.name) ||
-        fallback
-      : silentGuestAnswerSafeContent;
+    silentPeerTurnCount === 0;
+  const prematureSignoffStrippedContent = prematureSignoffEligible
+    ? botcastStripPrematureHostSignoff(
+        silentGuestAnswerSafeContent,
+        host.name,
+      )
+    : silentGuestAnswerSafeContent;
+  const prematureSignoffRepairApplied =
+    prematureSignoffEligible &&
+    prematureSignoffStrippedContent !== silentGuestAnswerSafeContent;
+  const prematureSignoffSafeContent =
+    prematureSignoffStrippedContent || fallback;
   const eternalIntroductionAdjustedContent = speakerEternallyIntroduces
     ? applyBotPowerEternalIntroductionResponseV1(
         cleanGeneratedContent,
@@ -14141,8 +14348,6 @@ export async function advanceBotcastEpisode(
     ? cleanGeneratedContent
     : socialSilenceMarker
       ? BOT_POWER_CANONICAL_SILENCE_V1
-    : speakerIsMutedForTurn
-    ? BOT_POWER_CANONICAL_SILENCE_V1
     : speakerEternallyIntroduces
       ? eternalIntroductionAdjustedContent
     : speakerRepeatsForHearingPower
@@ -14372,14 +14577,66 @@ export async function advanceBotcastEpisode(
   const intendedContent = powerInterruptionIsMeaningful && powerCutoffApplied
     ? powerCutoffApplied.content
     : namingAdjustedContent;
-  const content =
+  let content =
     !picklesBeatKind &&
     speakerMumblesSpeech &&
-    !speakerIsMutedForTurn &&
+    !speakerQuietIgnored &&
     !speakerEternallyIntroduces &&
     !speakerEchoesForTurn
     ? applyBotPowerMumbledResponseV1(intendedContent)
     : intendedContent;
+  if (speakerCursesSpeech && !speakerIsMutedForTurn) {
+    content = await rewriteBotPowerCursedTongueAnswerV1({
+      provider: selected.provider,
+      draftAnswer: content,
+      seed: `${episode.id}:${speaker.id}:${episode.messages.length + 1}`,
+      model: selectedModelId,
+      usagePurpose: "botcast_turn",
+      signal: generation.signal,
+    });
+  }
+  const mutePerformance = speakerIsMuted
+    ? createBotPowerMutePerformanceV1({
+        intendedSpeech: content,
+        maximumMs: 60_000,
+        seed: `${episode.id}:${speaker.id}:${episode.messages.length + 1}:mute`,
+        reactionCandidates: [{
+          botId: peer.id,
+          directAddressee: true,
+          muted: botPowerIsMutedV1(peer.powers),
+          breathless: botPowerIsBreathlessV1(peer.powers),
+          cursedTongue: botPowerCursesSpeechV1(peer.powers),
+          temperament: botPowerMuteReactionTemperamentFromPersonaV1(
+            peer.systemPrompt,
+          ),
+          mood: botcastVoiceMoodForTension(tension),
+          relationship: priorPairHistory?.relationshipTone,
+          mode: "signal",
+        }],
+        allowInterrupt:
+          episode.guestKind === "bot" &&
+          episode.guestPresenceMode === "present" &&
+          !producerCut &&
+          !wrapUpCue,
+        interruptionChanceModifier:
+          tension.level >= 3 ? 0.15 : tension.level === 2 ? 0.08 : 0,
+        guaranteedInterruption:
+          strongestBotPowerInterruptionEffectV1(
+            peer.powers,
+            (target) => botcastPowerTargetMatches(target, speaker),
+          )?.certainty === "always",
+      })
+    : undefined;
+  const mutePrivateHistory = mutePerformance
+    ? botPowerMutePrivateHistoryV1({
+        intendedSpeech: intendedContent,
+        estimatedSpeech: content,
+        performance: mutePerformance,
+      })
+    : undefined;
+  if (mutePerformance) {
+    content = applyBotPowerMuteResponseV1(content, mutePerformance);
+  }
   const hostRageQuitsThisTurn =
     speakerRole === "host" &&
     episode.guestKind === "producer" &&
@@ -14557,9 +14814,15 @@ export async function advanceBotcastEpisode(
       ? { autoRoute: generation.autoRouteDecision }
       : {}),
     immersiveVoiceEffect: voicePerformanceText !== null,
-    ...(speakerMumblesSpeech && !speakerIsMutedForTurn && !speakerEchoesForTurn
+    ...(mutePerformance ? { mutePerformance } : {}),
+    ...(mutePerformance ? { powerIntendedSpeech: mutePrivateHistory } : {}),
+    ...((speakerMumblesSpeech || speakerCursesSpeech) &&
+    !speakerIsMutedForTurn &&
+    !speakerEchoesForTurn
       ? {
-          publicSpeechEffect: "speech_obfuscation",
+          publicSpeechEffect: speakerCursesSpeech
+            ? "cursed_tongue"
+            : "speech_obfuscation",
           powerIntendedSpeech: intendedContent,
         }
       : {}),
@@ -14651,19 +14914,25 @@ export async function advanceBotcastEpisode(
     // must not look like a failed model repair in the production log.
     ...((generatedUtterance.repairReason ||
       closingContractRepaired ||
-      freshContactRepairApplied) &&
+      freshContactRepairApplied ||
+      prematureSignoffRepairApplied) &&
     !socialSilenceMarker &&
     !speakerIsMutedForTurn
       ? {
           utteranceRepair: {
             v: 1,
             source:
-              generatedUtterance.repairReason || closingContractRepaired
+              generatedUtterance.repairReason ||
+              closingContractRepaired ||
+              prematureSignoffRepairApplied
                 ? "sanitizer"
                 : "power_runtime",
             reason:
               generatedUtterance.repairReason ??
               closingContractRepairReason ??
+              (prematureSignoffRepairApplied
+                ? "premature_signoff"
+                : undefined) ??
               "power_fresh_contact",
             fallbackKind:
               speakerRole === "guest"
@@ -14695,6 +14964,18 @@ export async function advanceBotcastEpisode(
     },
     now,
   );
+  if (mutePerformance) {
+    recordBotcastMutePerformanceDirection({
+      db,
+      userId,
+      episode,
+      messageId,
+      speakerRole,
+      speakerBotId: speaker.id,
+      performance: mutePerformance,
+      now,
+    });
+  }
   const precedingPerception = latestOnAirMessage?.botId === peer.id
     ? botPowerPairwisePerceptionFromEffectsV1(
         botPowerSubjectEffectsForObserverV1(peer.powers, speaker.powers),
@@ -15463,6 +15744,7 @@ export async function advanceBotcastEpisode(
     utteranceMoodKey,
     {
       ...(socialSilenceMarker ? { socialSilence: socialSilenceMarker } : {}),
+      ...(mutePerformance ? { mutePerformance } : {}),
       ...(activeCrosstalkReclaim || plannedCrosstalkReclaim
         ? {
             crosstalkReclaim:

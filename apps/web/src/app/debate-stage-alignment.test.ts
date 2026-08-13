@@ -11,6 +11,9 @@ import {
   DEBATE_STAGE_GAVEL_ROTATION_MIN,
   DEBATE_STAGE_GAVEL_SIZE_MAX,
   DEBATE_STAGE_GAVEL_SIZE_MIN,
+  DEBATE_STAGE_MODERATOR_MICRO_SCALE_DEFAULT,
+  DEBATE_STAGE_MODERATOR_MICRO_SCALE_MAX,
+  DEBATE_STAGE_MODERATOR_MICRO_SCALE_MIN,
   DEBATE_STAGE_LIGHT_BLEND_MODES,
   debateStageAlignmentOffset,
   debateStageAlignmentStorageKey,
@@ -28,6 +31,7 @@ import {
   updateDebateStageGavelPose,
   updateDebateStageLightBlendMode,
   updateDebateStageLightMaskOpacity,
+  updateDebateStageModeratorMicroScale,
   updateDebateStageGalleryVolume,
   updateDebateStageVoiceLevel,
   writeDebateStageAlignment,
@@ -64,9 +68,9 @@ describe("Debate stage alignment", () => {
     assert.equal(DEBATE_STAGE_GAVEL_POSITION_MAX, 300);
   });
 
-  it("uses the approved version-twelve stage composition as its canonical default", () => {
+  it("uses the approved version-thirteen stage composition as its canonical default", () => {
     const expected = {
-      version: 12,
+      version: 13,
       wide: {
         for: {
           bot: { x: 0.01, y: -2 },
@@ -121,6 +125,11 @@ describe("Debate stage alignment", () => {
         against: 1,
       },
       galleryVolume: 1,
+      moderatorMicroScales: {
+        wide: DEBATE_STAGE_MODERATOR_MICRO_SCALE_DEFAULT,
+        left: DEBATE_STAGE_MODERATOR_MICRO_SCALE_DEFAULT,
+        right: DEBATE_STAGE_MODERATOR_MICRO_SCALE_DEFAULT,
+      },
     };
 
     assert.deepEqual(DEFAULT_DEBATE_STAGE_ALIGNMENT, expected);
@@ -168,7 +177,7 @@ describe("Debate stage alignment", () => {
         evidenceTable: { x: -999, y: 999, size: 12 },
       }),
       {
-        version: 12,
+        version: 13,
         wide: {
           for: {
             bot: { x: -12, y: 2.13 },
@@ -281,6 +290,11 @@ describe("Debate stage alignment", () => {
           against: 1,
         },
         galleryVolume: 1,
+        moderatorMicroScales: {
+          wide: DEBATE_STAGE_MODERATOR_MICRO_SCALE_DEFAULT,
+          left: DEBATE_STAGE_MODERATOR_MICRO_SCALE_DEFAULT,
+          right: DEBATE_STAGE_MODERATOR_MICRO_SCALE_DEFAULT,
+        },
       },
     );
   });
@@ -295,7 +309,7 @@ describe("Debate stage alignment", () => {
     };
     assert.equal(
       debateStageAlignmentStorageKey("user-1"),
-      "prism_debate_stage_alignment_v12:user-1",
+      "prism_debate_stage_alignment_v13:user-1",
     );
     assert.deepEqual(
       readDebateStageAlignment(storage, "user-1"),
@@ -443,6 +457,7 @@ describe("Debate stage alignment", () => {
       migrated.galleryVolume,
       DEFAULT_DEBATE_STAGE_ALIGNMENT.galleryVolume,
     );
+    values.delete("prism_debate_stage_alignment_v13:user-1");
     values.delete("prism_debate_stage_alignment_v12:user-1");
     values.delete("prism_debate_stage_alignment_v11:user-1");
     values.delete("prism_debate_stage_alignment_v10:user-1");
@@ -540,6 +555,10 @@ describe("Debate stage alignment", () => {
     assert.equal(style["--debate-moderator-view-offset-x"], "6%");
     assert.equal(style["--debate-moderator-view-nameplate-offset-y"], "-3%");
     assert.equal(style["--debate-moderator-view-glyph-offset-x"], "4%");
+    assert.equal(
+      style["--debate-moderator-micro-scale-wide"],
+      `${DEBATE_STAGE_MODERATOR_MICRO_SCALE_DEFAULT / 100}`,
+    );
     assert.equal(style["--debate-gavel-lowered-offset-x"], "2.5%");
     assert.equal(style["--debate-gavel-lowered-offset-y"], "-4%");
     assert.equal(style["--debate-gavel-lowered-rotation"], "11deg");
@@ -586,6 +605,46 @@ describe("Debate stage alignment", () => {
     assert.equal(style["--debate-light-blend-mode-light"], "screen");
     assert.equal(style["--debate-light-mask-opacity-dark"], "65%");
     assert.equal(style["--debate-light-mask-opacity-light"], "80%");
+  });
+
+  it("persists independent public-camera Moderator micro scales and defaults legacy data safely", () => {
+    const tuned = updateDebateStageModeratorMicroScale(
+      updateDebateStageModeratorMicroScale(
+        DEFAULT_DEBATE_STAGE_ALIGNMENT,
+        "wide",
+        DEBATE_STAGE_MODERATOR_MICRO_SCALE_MAX + 20,
+      ),
+      "left",
+      DEBATE_STAGE_MODERATOR_MICRO_SCALE_MIN - 20,
+    );
+    const independentlyTuned = updateDebateStageModeratorMicroScale(
+      tuned,
+      "right",
+      145,
+    );
+    assert.deepEqual(independentlyTuned.moderatorMicroScales, {
+      wide: DEBATE_STAGE_MODERATOR_MICRO_SCALE_MAX,
+      left: DEBATE_STAGE_MODERATOR_MICRO_SCALE_MIN,
+      right: 145,
+    });
+    assert.deepEqual(
+      normalizeDebateStageAlignment({ version: 12 }).moderatorMicroScales,
+      {
+        wide: DEBATE_STAGE_MODERATOR_MICRO_SCALE_DEFAULT,
+        left: DEBATE_STAGE_MODERATOR_MICRO_SCALE_DEFAULT,
+        right: DEBATE_STAGE_MODERATOR_MICRO_SCALE_DEFAULT,
+      },
+    );
+    const stored = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => stored.set(key, value),
+    };
+    writeDebateStageAlignment(storage, "moderator-scale", independentlyTuned);
+    assert.deepEqual(
+      readDebateStageAlignment(storage, "moderator-scale").moderatorMicroScales,
+      independentlyTuned.moderatorMicroScales,
+    );
   });
 
   it("updates one close-up item without mutating its bot or the Wide moderator", () => {
@@ -877,7 +936,7 @@ describe("Debate stage alignment", () => {
       },
     };
     writeDebateStageAlignment(storage, "mixer-user", withGallery);
-    assert.ok(values.has("prism_debate_stage_alignment_v12:mixer-user"));
+    assert.ok(values.has("prism_debate_stage_alignment_v13:mixer-user"));
     assert.deepEqual(
       readDebateStageAlignment(storage, "mixer-user").voiceLevels,
       withGallery.voiceLevels,

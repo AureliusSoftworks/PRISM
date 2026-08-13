@@ -1,4 +1,5 @@
 import {
+  botPowerMutePublicResponseAtElapsedV1,
   botPowerResponseIsSilentV1,
   socialSilenceMessageIsMarkedV1,
   type BotcastMessage,
@@ -66,7 +67,7 @@ export const debateVoiceCompletionFallbackDurationMs =
  */
 export function signalLiveCaptionText(
   reveal: BotcastSpeechRevealState | null | undefined,
-  message?: Pick<BotcastMessage, "content" | "socialSilence"> | null,
+  message?: Pick<BotcastMessage, "content" | "socialSilence" | "mutePerformance"> | null,
 ): string {
   if (
     !reveal ||
@@ -83,6 +84,13 @@ export function signalLiveCaptionText(
       mode: "signal",
     });
   if (markedSocialSilence) return "...";
+  if (message?.mutePerformance) {
+    return botPowerMutePublicResponseAtElapsedV1(
+      message.content,
+      message.mutePerformance,
+      reveal.elapsedMs,
+    );
+  }
   if (message && botPowerResponseIsSilentV1(message.content)) {
     return "";
   }

@@ -16,6 +16,15 @@ const turboFireGif = readFileSync(
 const turboFireStillPng = readFileSync(
   new URL("../../public/ui/turbo-fire-still.png", import.meta.url),
 );
+const maxElectricWebp = readFileSync(
+  new URL("../../public/ui/max-electric-loop.webp", import.meta.url),
+);
+const maxElectricGif = readFileSync(
+  new URL("../../public/ui/max-electric-loop.gif", import.meta.url),
+);
+const maxElectricStillPng = readFileSync(
+  new URL("../../public/ui/max-electric-still.png", import.meta.url),
+);
 const tutorialSource = readFileSync(
   new URL("./modeTutorials.ts", import.meta.url),
   "utf8",
@@ -152,8 +161,8 @@ describe("shared routing model picker integration", () => {
     assert.doesNotMatch(pageSource, /Account default/u);
   });
 
-  it("uses the inverted Minimal silhouette for Auto Turbo actions", () => {
-    assert.match(pageSource, /function InvertedMinimalAutoEffortIcon/u);
+  it("uses the upright triangle for Auto Turbo actions", () => {
+    assert.match(pageSource, /function AutoEffortIcon/u);
     assert.match(
       pageSource,
       /const effortInteractionDisabled =[\s\S]{0,100}autoSelected/u,
@@ -175,7 +184,7 @@ describe("shared routing model picker integration", () => {
       /const effortTriggerDisabled =[\s\S]{0,100}!effortDirectActionAvailable/u,
     );
     assert.match(pageSource, /Effort chosen automatically/u);
-    assert.match(pageSource, /<InvertedMinimalAutoEffortIcon \/>/u);
+    assert.match(pageSource, /<AutoEffortIcon \/>/u);
     assert.match(
       pageSource,
       /data-auto-turbo-toggle=\{[\s\S]{0,80}autoOnlineTurboToggleAvailable/u,
@@ -204,7 +213,7 @@ describe("shared routing model picker integration", () => {
     );
     assert.match(
       tutorialSource,
-      /In ONLINE Auto, clicking the downward Effort triangle invokes that same Turbo toggle/u,
+      /In ONLINE Auto, clicking the upright Effort triangle invokes that same Turbo toggle/u,
     );
   });
 
@@ -454,6 +463,45 @@ describe("shared routing model picker integration", () => {
     assert.match(
       tutorialSource,
       /Turbo remains active across screens and browser refreshes while you stay in the current applet[\s\S]{0,220}consciously re-enabled/u,
+    );
+  });
+
+  it("wraps Max around the full picker while preserving additive Turbo", () => {
+    assert.match(pageSource, /data-max-effort=\{maxEffortActive \? "true"/u);
+    assert.match(
+      pageSource,
+      /maxEffortActive \? \([\s\S]{0,180}composeModelMaxElectricity/u,
+    );
+    assert.match(pageSource, /data-turbo=\{turboVisuallyActive \? "true"/u);
+    assert.match(cssSource, /max-electric-loop\.webp/u);
+    assert.match(cssSource, /max-electric-loop\.gif/u);
+    assert.match(cssSource, /max-electric-still\.png/u);
+    assert.match(
+      cssSource,
+      /\.composeModelMaxElectricity\s*\{[^}]*pointer-events:\s*none[^}]*z-index:\s*5[^}]*image-rendering:\s*auto/u,
+    );
+    assert.match(
+      cssSource,
+      /body\[data-prism-theme="light"\][\s\S]{0,120}\.composeModelMaxElectricity\s*\{[^}]*mix-blend-mode:\s*multiply/u,
+    );
+    assert.match(
+      cssSource,
+      /prefers-reduced-motion: reduce[\s\S]*?\.composeModelMaxElectricity\s*\{[^}]*max-electric-still\.png/u,
+    );
+    assert.deepEqual(animatedWebpCanvasSize(maxElectricWebp), [1024, 96]);
+    const maxElectricFrameDurations =
+      animatedWebpFrameDurations(maxElectricWebp);
+    assert.equal(maxElectricFrameDurations.length, 8);
+    assert.ok(
+      maxElectricFrameDurations.every((duration) => duration === 80),
+      "expected the Zeus loop to run at 12.5 fps",
+    );
+    assert.deepEqual(gifCanvasSize(maxElectricGif), [1024, 96]);
+    assert.deepEqual(pngCanvasSize(maxElectricStillPng), [1024, 96]);
+    assert.ok(
+      statSync(
+        new URL("../../public/ui/max-electric-loop.webp", import.meta.url),
+      ).size < 300_000,
     );
   });
 

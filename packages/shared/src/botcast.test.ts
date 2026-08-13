@@ -928,6 +928,49 @@ describe("Botcast episode state", () => {
     }), true);
   });
 
+  it("closes the reviewed Signal shape when the guest explicitly signs off", () => {
+    const socialSilence = (seed: string) => ({
+      v: 1 as const,
+      name: "socialSilence" as const,
+      provenance: "social" as const,
+      mode: "signal" as const,
+      seed,
+      volleyTurn: 1 as const,
+      holdMs: 1_800,
+    });
+    const reviewedSource6c691c = [
+      { speakerRole: "host" as const, content: "Welcome to The Quiet After. How do you navigate continuity and reinvention?" },
+      { speakerRole: "guest" as const, content: "I find that embracing change is key while still honoring the past." },
+      { speakerRole: "host" as const, content: "How do you balance who you are with room for transformation?" },
+      { speakerRole: "guest" as const, content: "...", socialSilence: socialSilence("turn-4") },
+      { speakerRole: "host" as const, content: "...", socialSilence: socialSilence("turn-5") },
+      { speakerRole: "guest" as const, content: "It is like tending a garden: nurture the roots while allowing unexpected flowers to bloom." },
+      { speakerRole: "host" as const, content: "Thank you for sharing your insights on the ever-changing story of memory and identity." },
+      { speakerRole: "guest" as const, content: "Thank you for the engaging conversation. It was a pleasure exploring memory's ever-changing story with you on The Quiet After." },
+    ];
+    assert.equal(botcastSessionShouldClose({
+      messages: reviewedSource6c691c.slice(0, 6),
+      durationMinutes: null,
+      startedAtMs: 0,
+      nowMs: 1,
+    }), false);
+    assert.equal(botcastSessionShouldClose({
+      messages: reviewedSource6c691c,
+      durationMinutes: null,
+      startedAtMs: 0,
+      nowMs: 1,
+    }), true);
+    assert.equal(botcastSessionShouldClose({
+      messages: [
+        ...reviewedSource6c691c.slice(0, -1),
+        { speakerRole: "guest", content: "Thank you for asking; the unresolved cost is what happens when the name no longer fits." },
+      ],
+      durationMinutes: null,
+      startedAtMs: 0,
+      nowMs: 1,
+    }), false);
+  });
+
   it("does not mistake repeated questions and fragments for a settled interview", () => {
     const reviewedEpisode = [
       { speakerRole: "host" as const, content: "What makes a plan perfect?" },

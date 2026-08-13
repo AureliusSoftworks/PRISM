@@ -216,6 +216,8 @@ export type CoffeeSeatPlateEmojiProps = {
   pixelated?: boolean;
   /** Uses binary cell alpha for a hard-edged authoring guide. */
   hardPixels?: boolean;
+  /** Compact render tiers intentionally shed full-avatar motion/effects. */
+  motionMode?: "full" | "mini-led" | "static";
   /** Active speaking state for speech-driven mouth sync and blink eligibility. */
   isTalking: boolean;
   /** Full streamed-text viseme used to animate authored custom mouth glyphs. */
@@ -314,6 +316,7 @@ export function CoffeeSeatPlateEmoji({
   enabled,
   pixelated = false,
   hardPixels = false,
+  motionMode = "full",
   isTalking,
   mouthShape,
   blinkWhileTalking = true,
@@ -358,15 +361,21 @@ export function CoffeeSeatPlateEmoji({
   onBlinkPhaseChange,
   className,
 }: CoffeeSeatPlateEmojiProps): JSX.Element {
+  const fullMotion = motionMode === "full";
+  const staticFace = motionMode === "static";
+  const blinkEnabled = enabled && !staticFace;
+  const effectiveTalking = staticFace ? false : isTalking;
   const normalizedThinkingFrames =
     normalizeBotFaceThinkingFrames(faceThinkingFrames) ??
     DEFAULT_BOT_FACE_THINKING_FRAMES;
   const thinkingSpinnerActive =
-    enabled &&
+    fullMotion &&
+    blinkEnabled &&
     showThinkingSpinner &&
-    !isTalking &&
+    !effectiveTalking &&
     !botFaceThinkingSpinnerDisabled(normalizedThinkingFrames);
-  const questionGlyphActive = !thinkingSpinnerActive && showQuestionMark;
+  const questionGlyphActive =
+    fullMotion && !thinkingSpinnerActive && showQuestionMark;
   const faceMode = thinkingSpinnerActive
     ? "thinking"
     : questionGlyphActive
@@ -387,15 +396,19 @@ export function CoffeeSeatPlateEmoji({
     !Array.from(baseText).some((glyph) =>
       COFFEE_SEAT_SIP_MOUTH_GLYPHS.has(glyph),
     );
-  const normalizedFaceMouthAnimation =
-    normalizeBotFaceGlyphAnimation(faceMouthAnimation) ?? "none";
+  const normalizedFaceMouthAnimation = fullMotion
+    ? (normalizeBotFaceGlyphAnimation(faceMouthAnimation) ?? "none")
+    : "none";
   // Default mouths clear the authored glyph while talking so the plate
   // viseme (or mini binary `:0`) can drive the mouth.
   // "static" keeps the authored custom glyph visible and unanimated while
   // talking for a stable presentation.
   const hasCustomMouth = normalizedFaceMouthCharacter !== null;
   const renderedFaceMouthCharacter =
-    hasCustomMouth && isTalking && normalizedFaceMouthAnimation === "none"
+    fullMotion &&
+    hasCustomMouth &&
+    effectiveTalking &&
+    normalizedFaceMouthAnimation === "none"
       ? null
       : normalizedFaceMouthCharacter;
   const normalizedFaceBlinkBar =
@@ -423,8 +436,8 @@ export function CoffeeSeatPlateEmoji({
     ) ??
     null;
   const faceBlinkDisabled = normalizedFaceBlinkBar === "none";
-  const talkingPausesBlink = isTalking && !blinkWhileTalking;
-  const blinkKey = `${enabled ? "enabled" : "disabled"}:${talkingPausesBlink ? "talking" : "idle"}:${faceMode}:${normalizedFaceBlinkBar}:${faceText}:${scheduleKey}`;
+  const talkingPausesBlink = effectiveTalking && !blinkWhileTalking;
+  const blinkKey = `${blinkEnabled ? "enabled" : "disabled"}:${talkingPausesBlink ? "talking" : "idle"}:${faceMode}:${normalizedFaceBlinkBar}:${faceText}:${scheduleKey}`;
   const [blinkState, setBlinkState] = useState<CoffeeSeatPlateBlinkState>({
     phase: "open",
     key: blinkKey,
@@ -439,21 +452,23 @@ export function CoffeeSeatPlateEmoji({
   const [gazeSnapsOpen, setGazeSnapsOpen] = useState(false);
   const customMouthGlyphRef = useRef<HTMLSpanElement | null>(null);
   const previousBlinkPhaseRef = useRef<CoffeeSeatBlinkPhase>("open");
-  const isTalkingRef = useRef(isTalking);
+  const isTalkingRef = useRef(effectiveTalking);
   const blinkPhase = blinkState.key === blinkKey ? blinkState.phase : "open";
 
   useEffect(() => {
-    isTalkingRef.current = isTalking;
-  }, [isTalking]);
+    isTalkingRef.current = effectiveTalking;
+  }, [effectiveTalking]);
 
   const normalizedEyeMovement =
-    normalizeBotFaceEyeMovement(faceEyeMovement) ?? "still";
+    fullMotion
+      ? (normalizeBotFaceEyeMovement(faceEyeMovement) ?? "still")
+      : "still";
   const eyeMovementActive = botFaceEyeMovementIsActive(normalizedEyeMovement);
   useEffect(() => {
     if (
       !eyeMovementActive ||
       (eyeTimelineMs !== undefined && eyeTimelineMs !== null) ||
-      !enabled ||
+      !blinkEnabled ||
       thinkingSpinnerActive ||
       questionGlyphActive
     ) {
@@ -468,7 +483,7 @@ export function CoffeeSeatPlateEmoji({
     }, intervalMs);
     return () => window.clearInterval(id);
   }, [
-    enabled,
+    blinkEnabled,
     eyeAttentionState,
     eyeMovementActive,
     eyeTargetDirection,
@@ -483,6 +498,7 @@ export function CoffeeSeatPlateEmoji({
     const element = customMouthGlyphRef.current;
     if (
       !element ||
+      !fullMotion ||
       !renderedMouthGlyphForMotion ||
       thinkingSpinnerActive ||
       questionGlyphActive
@@ -502,6 +518,7 @@ export function CoffeeSeatPlateEmoji({
     };
   }, [
     faceMouthFont,
+    fullMotion,
     questionGlyphActive,
     renderedMouthGlyphForMotion,
     thinkingSpinnerActive,
@@ -511,7 +528,7 @@ export function CoffeeSeatPlateEmoji({
     setBlinkState({ phase: "open", key: blinkKey });
 
     if (
-      !enabled ||
+      !blinkEnabled ||
       faceBlinkDisabled ||
       talkingPausesBlink ||
       forcedBlinkPhase !== null ||
@@ -573,7 +590,7 @@ export function CoffeeSeatPlateEmoji({
   }, [
     blinkWhileTalking,
     blinkKey,
-    enabled,
+    blinkEnabled,
     faceBlinkDisabled,
     forcedBlinkPhase,
     questionGlyphActive,
@@ -599,7 +616,7 @@ export function CoffeeSeatPlateEmoji({
   }, [normalizedThinkingFrames.length, thinkingSpinnerActive]);
 
   const displayBlinkPhase: CoffeeSeatBlinkPhase =
-    !enabled ||
+    !blinkEnabled ||
     faceBlinkDisabled ||
     talkingPausesBlink ||
     thinkingSpinnerActive ||
@@ -613,7 +630,7 @@ export function CoffeeSeatPlateEmoji({
   const resolvedGaze = useMemo(
     () =>
       eyeMovementActive &&
-      enabled &&
+      blinkEnabled &&
       !thinkingSpinnerActive &&
       !questionGlyphActive
         ? (eyeGazeOverride ??
@@ -630,7 +647,7 @@ export function CoffeeSeatPlateEmoji({
           }))
         : { xPx: 0, yPx: 0, transitionMs: 0 },
     [
-      enabled,
+      blinkEnabled,
       eyeAttentionState,
       eyeGazeOverride,
       eyeMovementActive,
@@ -780,7 +797,7 @@ export function CoffeeSeatPlateEmoji({
     mouthShape ?? (inferredMouthOpen ? "open-wide" : "closed");
   const mouthOpen =
     !hasCustomMouth &&
-    isTalking &&
+    effectiveTalking &&
     streamedMouthShape !== "closed" &&
     streamedMouthShape !== "speech-closed" &&
     streamedMouthShape !== "narrow" &&
@@ -793,6 +810,7 @@ export function CoffeeSeatPlateEmoji({
     <span
       className={className}
       data-coffee-plate-emoji-glyphs={displayGlyphCount}
+      data-face-motion-mode={motionMode}
       data-coffee-plate-thinking-spinner={
         thinkingSpinnerActive ? "true" : undefined
       }
@@ -847,11 +865,13 @@ export function CoffeeSeatPlateEmoji({
       data-face-mouth-animation={
         renderedFaceMouthCharacter ? normalizedFaceMouthAnimation : undefined
       }
-      data-talking={isTalking ? "true" : undefined}
+      data-talking={effectiveTalking ? "true" : undefined}
       data-face-blink-bar={normalizedFaceBlinkBar}
       data-face-blink-count={normalizedFaceBlinkCount}
       data-coffee-plate-mouth-open={mouthOpen ? "true" : undefined}
-      data-coffee-plate-mouth-shape={isTalking ? streamedMouthShape : undefined}
+      data-coffee-plate-mouth-shape={
+        effectiveTalking ? streamedMouthShape : undefined
+      }
       style={
         {
           ["--bot-face-eye-scale" as string]: normalizedFaceEyeScale,

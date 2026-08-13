@@ -130,6 +130,7 @@ import {
   type BotIdentityShapeshiftStateV1,
   type BotPowerAvatarScaleMode,
   type BotPowerAvatarVisibilityModeV1,
+  type BotPowerMuteReactionBeatV1,
   type BotPowerVoicePresenceMode,
   type DirectionalIrritationDeliveryPlanV1,
   type ListenerReactionPlanV1,
@@ -360,6 +361,70 @@ import {
   debateCastLensSliderInputValue,
 } from "./debateCastHueLens";
 import styles from "./botcast.module.css";
+
+const SIGNAL_MUTE_REACTION_HOLD_MS = 2_500;
+
+function signalMuteReactionActionLabel(
+  action: BotPowerMuteReactionBeatV1["action"],
+): string {
+  if (action === "lean_in") return "leans in";
+  if (action === "head_tilt") return "tilts head";
+  if (action === "shift") return "shifts in their seat";
+  if (action === "look_away") return "looks away";
+  if (action === "look_at_watch") return "looks at their watch";
+  if (action === "tap_fingers") return "taps their fingers";
+  return "glances over";
+}
+
+function signalMuteReactionVisualAction(
+  action: BotPowerMuteReactionBeatV1["action"],
+): ListenerReactionPlanV1["visualAction"] {
+  if (action === "lean_in") return "lean_in";
+  if (action === "head_tilt") return "head_tilt";
+  if (action === "look_away" || action === "look_at_watch") {
+    return "thoughtful_hmm";
+  }
+  return "nod";
+}
+
+export function signalMuteReactionPlan(
+  message: Pick<BotcastMessage, "id" | "botId">,
+  performanceDurationMs: number,
+  beat: BotPowerMuteReactionBeatV1,
+): ListenerReactionPlanV1 {
+  const audibleQuip = beat.kind === "audible_quip" || beat.kind === "interrupt";
+  return {
+    v: 1,
+    name: "listenerReaction",
+    speakerBotId: message.botId,
+    listenerBotId: beat.reactorBotId,
+    messageId: message.id,
+    targetSource: "direct",
+    visualAction: signalMuteReactionVisualAction(beat.action),
+    ...(audibleQuip && beat.quip
+      ? { spokenCue: beat.quip as ListenerReactionPlanV1["spokenCue"] }
+      : {}),
+    ...(beat.kind === "lung_foley"
+      ? {
+          vocalFoley:
+            beat.foley === "whistle"
+              ? "whistles"
+              : beat.foley === "gasp"
+                ? "gasps"
+                : "sighs",
+        }
+      : {}),
+    ...(beat.kind === "interrupt"
+      ? { interjectionAttempt: true, floorOutcome: "yield" }
+      : {}),
+    targetProgress: Math.max(
+      0.3,
+      Math.min(0.9, beat.atMs / Math.max(1, performanceDurationMs)),
+    ),
+    seed: `${message.id}:mute:${beat.reactorBotId}:${beat.atMs}`,
+    cameraCutEligible: true,
+  };
+}
 
 export interface BotcastBotSummary {
   id: string;
@@ -2276,11 +2341,13 @@ export function BotcastExperience({
   );
   const listenerReactionAtMsByMessageIdRef = useRef(new Map<string, number>());
   const liveListenerReactionFiredRef = useRef(new Set<string>());
+  const liveMuteReactionFiredRef = useRef(new Set<string>());
   const liveListenerReactionPlaybackByMessageIdRef = useRef(
     new Map<string, Promise<boolean>>(),
   );
   const liveCameraPostSpeechHoldTimerRef = useRef<number | null>(null);
   const replayListenerReactionFiredRef = useRef(new Set<string>());
+  const replayMuteReactionFiredRef = useRef(new Set<string>());
   const deleteCancelButtonRef = useRef<HTMLButtonElement | null>(null);
   const deleteReturnFocusRef = useRef<HTMLElement | null>(null);
   const audiencePulseCloseButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -2633,6 +2700,8 @@ export function BotcastExperience({
     setHostInterruptionOrdinal(0);
     liveListenerReactionFiredRef.current.clear();
     replayListenerReactionFiredRef.current.clear();
+    liveMuteReactionFiredRef.current.clear();
+    replayMuteReactionFiredRef.current.clear();
     assignQueuedProducerCue(null);
   }, [
     activeEpisodeId,
@@ -6088,21 +6157,37 @@ export function BotcastExperience({
         currentEpisode.events,
         message.id,
       );
-      if (!plan) return;
-      listenerReactionPlanByMessageIdRef.current.set(message.id, plan);
-      const listener = botsById.get(plan.listenerBotId);
-      const interruptedBot = botsById.get(plan.speakerBotId);
-      if (listener) {
+      if (plan) {
+        listenerReactionPlanByMessageIdRef.current.set(message.id, plan);
+        const listener = botsById.get(plan.listenerBotId);
+        const interruptedBot = botsById.get(plan.speakerBotId);
+        if (listener) {
+          onPrefetchListenerReaction?.(
+            plan,
+            listener,
+            interruptedBot
+              ? botWithIdentityBeforeMessage(
+                  interruptedBot,
+                  currentEpisode,
+                  message,
+                )
+              : undefined,
+          );
+        }
+      }
+      for (const beat of message.mutePerformance?.reactionBeats ?? []) {
+        if (beat.kind === "visual") continue;
+        const muteListener = botsById.get(beat.reactorBotId);
+        if (!muteListener) continue;
+        const mutePlan = signalMuteReactionPlan(
+          message,
+          message.mutePerformance!.durationMs,
+          beat,
+        );
         onPrefetchListenerReaction?.(
-          plan,
-          listener,
-          interruptedBot
-            ? botWithIdentityBeforeMessage(
-                interruptedBot,
-                currentEpisode,
-                message,
-              )
-            : undefined,
+          mutePlan,
+          muteListener,
+          botsById.get(message.botId),
         );
       }
     },
@@ -6350,6 +6435,73 @@ export function BotcastExperience({
     ],
   );
 
+  const fireLiveMuteReactions = useCallback(
+    (message: BotcastMessage, elapsedMs: number): void => {
+      const performanceEnvelope = message.mutePerformance;
+      if (!performanceEnvelope) return;
+      for (const [index, beat] of performanceEnvelope.reactionBeats.entries()) {
+        const triggerAtMs = Math.max(
+          0,
+          beat.atMs - SIGNAL_LISTENER_REACTION_SCHEDULE_LEAD_MS,
+        );
+        if (elapsedMs < triggerAtMs) continue;
+        const key = `${message.id}:${index}`;
+        if (liveMuteReactionFiredRef.current.has(key)) continue;
+        liveMuteReactionFiredRef.current.add(key);
+        const plan = signalMuteReactionPlan(
+          message,
+          performanceEnvelope.durationMs,
+          beat,
+        );
+        if (!listenerReactionHasCrosstalkAudio(plan)) continue;
+        const listener = botsById.get(plan.listenerBotId);
+        if (!listener) continue;
+        const listenerRole =
+          selectedShow?.hostBotId === listener.id ? "host" : "guest";
+        void Promise.resolve(
+          onListenerReaction?.(
+            plan,
+            listener,
+            signalStudioVoicePan(selectedShow?.studioLayout, listenerRole),
+            0,
+            {
+              listener: createSignalReactionVoiceLifecycle(
+                plan.listenerBotId,
+                `${plan.messageId}:mute:${index}`,
+                beat.kind === "interrupt" ? "crosstalk" : "reaction",
+                plan.spokenCue ?? "",
+              ),
+              interrupted: createSignalReactionVoiceLifecycle(
+                plan.speakerBotId,
+                `${plan.messageId}:mute:${index}`,
+                "crosstalk",
+                "",
+              ),
+              listenerStartAtPerformanceMs:
+                performance.now() + Math.max(0, beat.atMs - elapsedMs),
+              ...(botsById.get(plan.speakerBotId) && episode
+                ? {
+                    interruptedBot: botWithIdentityBeforeMessage(
+                      botsById.get(plan.speakerBotId)!,
+                      episode,
+                      message,
+                    ),
+                  }
+                : {}),
+            },
+          ),
+        ).catch(() => false);
+      }
+    },
+    [
+      botsById,
+      createSignalReactionVoiceLifecycle,
+      episode,
+      onListenerReaction,
+      selectedShow,
+    ],
+  );
+
   const fireReplayListenerReaction = useCallback(
     (message: BotcastMessage, elapsedMs: number, durationMs: number): void => {
       const plan = listenerReactionPlanByMessageIdRef.current.get(message.id);
@@ -6418,6 +6570,60 @@ export function BotcastExperience({
     ],
   );
 
+  const fireReplayMuteReactions = useCallback(
+    (message: BotcastMessage, elapsedMs: number): void => {
+      const performanceEnvelope = message.mutePerformance;
+      if (!performanceEnvelope) return;
+      for (const [index, beat] of performanceEnvelope.reactionBeats.entries()) {
+        const key = `${message.id}:${index}`;
+        if (elapsedMs < beat.atMs) {
+          replayMuteReactionFiredRef.current.delete(key);
+          continue;
+        }
+        if (replayMuteReactionFiredRef.current.has(key)) continue;
+        replayMuteReactionFiredRef.current.add(key);
+        const plan = signalMuteReactionPlan(
+          message,
+          performanceEnvelope.durationMs,
+          beat,
+        );
+        if (!listenerReactionHasCrosstalkAudio(plan)) continue;
+        const listener = botsById.get(plan.listenerBotId);
+        if (!listener) continue;
+        const listenerRole =
+          selectedShow?.hostBotId === listener.id ? "host" : "guest";
+        void Promise.resolve(
+          onListenerReaction?.(
+            plan,
+            listener,
+            signalStudioVoicePan(selectedShow?.studioLayout, listenerRole),
+            0,
+            {
+              listener: createSignalReactionVoiceLifecycle(
+                plan.listenerBotId,
+                `${plan.messageId}:mute:${index}`,
+                beat.kind === "interrupt" ? "crosstalk" : "reaction",
+                plan.spokenCue ?? "",
+              ),
+              interrupted: createSignalReactionVoiceLifecycle(
+                plan.speakerBotId,
+                `${plan.messageId}:mute:${index}`,
+                "crosstalk",
+                "",
+              ),
+            },
+          ),
+        ).catch(() => false);
+      }
+    },
+    [
+      botsById,
+      createSignalReactionVoiceLifecycle,
+      onListenerReaction,
+      selectedShow,
+    ],
+  );
+
   const revealUtteranceWithoutAudio = useCallback(
     async (
       message: BotcastMessage,
@@ -6431,10 +6637,12 @@ export function BotcastExperience({
       });
       const durationMs = socialSilence
         ? message.socialSilence!.holdMs
-        : signalSilentCaptionRevealDurationMs(
-            message.stageActionText ?? message.content,
-            { stageAction: Boolean(message.stageActionText) },
-          );
+        : message.mutePerformance
+          ? message.mutePerformance.durationMs
+          : signalSilentCaptionRevealDurationMs(
+              message.stageActionText ?? message.content,
+              { stageAction: Boolean(message.stageActionText) },
+            );
       armListenerReactionTiming(message, durationMs);
       setLiveSpeech({
         messageId,
@@ -6448,6 +6656,7 @@ export function BotcastExperience({
         const elapsedMs = Math.min(durationMs, performance.now() - startedAt);
         onProgress?.(elapsedMs, durationMs);
         fireLiveListenerReaction(message, elapsedMs, durationMs);
+        fireLiveMuteReactions(message, elapsedMs);
         setLiveSpeech((current) =>
           current?.messageId === messageId
           ? {
@@ -6468,7 +6677,11 @@ export function BotcastExperience({
           : current,
       );
     },
-    [armListenerReactionTiming, fireLiveListenerReaction],
+    [
+      armListenerReactionTiming,
+      fireLiveListenerReaction,
+      fireLiveMuteReactions,
+    ],
   );
 
   const prepareEpisodeMessage = useCallback(
@@ -8379,11 +8592,13 @@ export function BotcastExperience({
     }
     if (replayPlaying) {
       fireReplayListenerReaction(replayActiveMessage, elapsedMs, durationMs);
+      fireReplayMuteReactions(replayActiveMessage, elapsedMs);
     }
   }, [
     armListenerReactionTiming,
     cacheListenerReactionPlan,
     fireReplayListenerReaction,
+    fireReplayMuteReactions,
     replayActiveMessage,
     replayDurationMs,
     replayElapsedMs,
@@ -9087,7 +9302,9 @@ export function BotcastExperience({
                 mode: "signal",
               }) &&
               signalVoicePerformanceTranscriptText(message).trim() !== "" &&
-              signalVoicePerformanceTranscriptText(message).trim() !== "...",
+              !botPowerResponseIsSilentV1(
+                signalVoicePerformanceTranscriptText(message),
+              ),
           )
         : undefined;
     const producerGuestHostPromptText = producerGuestHostPromptMessage
@@ -9162,12 +9379,58 @@ export function BotcastExperience({
             (listenerReactionPlan.interjectionAttempt ? 1_600 : 1_200),
         ),
     );
+    const muteReactionBeat =
+      args.activeMessage?.mutePerformance &&
+      (args.replay ? replayPlaying : speechIsPlaying)
+        ? (args.activeMessage.mutePerformance.reactionBeats.findLast(
+            (beat) =>
+              speechElapsedMs >= beat.atMs &&
+              speechElapsedMs <=
+                Math.min(
+                  args.activeMessage!.mutePerformance!.durationMs,
+                  beat.atMs + SIGNAL_MUTE_REACTION_HOLD_MS,
+                ),
+          ) ?? null)
+        : null;
     const roleIsListenerReacting = (role: "host" | "guest"): boolean =>
       Boolean(
-        listenerReactionActive &&
-        listenerReactionPlan?.listenerBotId ===
+        (muteReactionBeat?.reactorBotId ??
+          (listenerReactionActive
+            ? listenerReactionPlan?.listenerBotId
+            : null)) ===
           (role === "host" ? args.host?.id : args.guest?.id),
       );
+    const listenerReactionActionForRole = (): string | null =>
+      muteReactionBeat
+        ? signalMuteReactionActionLabel(muteReactionBeat.action)
+        : listenerReactionPlan
+          ? listenerReactionActionLabel(listenerReactionPlan.visualAction)
+          : null;
+    const listenerReactionTextForRole = (voiceMuted: boolean): string | null => {
+      if (muteReactionBeat) {
+        if (
+          (muteReactionBeat.kind === "audible_quip" ||
+            muteReactionBeat.kind === "interrupt") &&
+          muteReactionBeat.quip
+        ) {
+          return muteReactionBeat.quip;
+        }
+        if (muteReactionBeat.kind === "lung_foley") {
+          return muteReactionBeat.foley === "whistle"
+            ? "*whistles*"
+            : muteReactionBeat.foley === "gasp"
+              ? "*gasps*"
+              : "*sighs*";
+        }
+        return signalMuteReactionActionLabel(muteReactionBeat.action);
+      }
+      return (
+        (voiceMuted ? null : listenerReactionPlan?.spokenCue) ??
+        (listenerReactionPlan
+          ? listenerReactionActionLabel(listenerReactionPlan.visualAction)
+          : null)
+      );
+    };
     const replayParticipantIdForRole = (role: "host" | "guest"): string =>
       role === "host"
         ? args.currentEpisode.hostBotId
@@ -9717,7 +9980,8 @@ export function BotcastExperience({
                 }
                 data-listener-reaction={
                   roleIsListenerReacting("host")
-                    ? listenerReactionPlan?.visualAction
+                    ? (muteReactionBeat?.action ??
+                      listenerReactionPlan?.visualAction)
                     : undefined
                 }
               >
@@ -9745,23 +10009,21 @@ export function BotcastExperience({
                     *{sentenceCaseActionText(activeVoiceAction.action)}*
                   </span>
                 ) : null}
-                {roleIsListenerReacting("host") && listenerReactionPlan ? (
+                {roleIsListenerReacting("host") &&
+                (listenerReactionPlan || muteReactionBeat) ? (
                   <span
                     className={styles.listenerReactionText}
                     data-interjection-attempt={
-                      listenerReactionPlan.interjectionAttempt
+                      muteReactionBeat?.kind === "interrupt" ||
+                      listenerReactionPlan?.interjectionAttempt
                         ? "true"
                         : undefined
                     }
                     role="status"
-                    aria-label={`${args.host.name} ${listenerReactionActionLabel(listenerReactionPlan.visualAction)}`}
+                    aria-label={`${args.host.name} ${listenerReactionActionForRole() ?? "reacts"}`}
                   >
-                    {(args.host.muted
-                      ? null
-                      : listenerReactionPlan.spokenCue) ??
-                      listenerReactionActionLabel(
-                        listenerReactionPlan.visualAction,
-                      )}
+                    {listenerReactionTextForRole(Boolean(args.host.muted)) ??
+                      "reacts"}
                   </span>
                 ) : null}
               </div>
@@ -9837,7 +10099,8 @@ export function BotcastExperience({
                 }
                 data-listener-reaction={
                   roleIsListenerReacting("guest")
-                    ? listenerReactionPlan?.visualAction
+                    ? (muteReactionBeat?.action ??
+                      listenerReactionPlan?.visualAction)
                     : (producerStageGesture ?? undefined)
                 }
               >
@@ -9865,23 +10128,21 @@ export function BotcastExperience({
                     *{sentenceCaseActionText(activeVoiceAction.action)}*
                   </span>
                 ) : null}
-                {roleIsListenerReacting("guest") && listenerReactionPlan ? (
+                {roleIsListenerReacting("guest") &&
+                (listenerReactionPlan || muteReactionBeat) ? (
                   <span
                     className={styles.listenerReactionText}
                     data-interjection-attempt={
-                      listenerReactionPlan.interjectionAttempt
+                      muteReactionBeat?.kind === "interrupt" ||
+                      listenerReactionPlan?.interjectionAttempt
                         ? "true"
                         : undefined
                     }
                     role="status"
-                    aria-label={`${args.guest.name} ${listenerReactionActionLabel(listenerReactionPlan.visualAction)}`}
+                    aria-label={`${args.guest.name} ${listenerReactionActionForRole() ?? "reacts"}`}
                   >
-                    {(args.guest.muted
-                      ? null
-                      : listenerReactionPlan.spokenCue) ??
-                      listenerReactionActionLabel(
-                        listenerReactionPlan.visualAction,
-                      )}
+                    {listenerReactionTextForRole(Boolean(args.guest.muted)) ??
+                      "reacts"}
                   </span>
                 ) : null}
               </div>
@@ -10010,6 +10271,22 @@ export function BotcastExperience({
             <strong>{stagePublicName(args.host, "Host")}</strong>
             <span>{producerGuestHostPromptText}</span>
           </div>
+        ) : null}
+        {!args.replay &&
+        args.activeMessage?.mutePerformance &&
+        speechElapsedMs >= args.activeMessage.mutePerformance.durationMs ? (
+          <span
+            key={`mute-status:${args.activeMessage.id}`}
+            className={styles.screenReaderStatus}
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            {args.activeMessage.mutePerformance.elapsedCue.replace(
+              /^\*|\*$/gu,
+              "",
+            )}
+          </span>
         ) : null}
         {!args.replay && signalModelWarmup ? (
           <ModelWarmupIntermission

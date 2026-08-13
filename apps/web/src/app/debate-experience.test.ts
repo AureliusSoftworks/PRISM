@@ -3749,7 +3749,12 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /audiencePressureBandTrue === null[\s\S]{0,80}activeAudienceOrderResponse === null[\s\S]{0,40}\? 320[\s\S]{0,220}DEBATE_AUDIENCE_ORDER_RETURN_MS[\s\S]{0,80}: 480[\s\S]{0,80}DEBATE_AUDIENCE_PRESSURE_MIX_TRANSITION_MS/u,
+      /audiencePressureBandTrue === null[\s\S]{0,80}activeAudienceOrderResponse === null[\s\S]{0,40}\? 320[\s\S]{0,220}DEBATE_AUDIENCE_ORDER_RETURN_MS[\s\S]{0,100}DEBATE_AUDIENCE_ORDER_SWELL_MS[\s\S]{0,100}debateAudiencePressureMixTransitionMs/u,
+    );
+    assert.match(source, /debateAudienceOrderStragglerMix/u);
+    assert.match(
+      source,
+      /galleryMixBranch === "order-stragglers" \|\|\s*galleryMixBranch === "pressure-score"/u,
     );
     assert.match(
       source,
@@ -4773,6 +4778,19 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
+      /activeAudienceOrderResponse\?\.returningRoomTone[\s\S]{0,100}"order-stragglers"/u,
+    );
+    assert.match(
+      source,
+      /galleryMixBranch === "order-stragglers"[\s\S]{0,180}debateAudienceOrderStragglerMix/u,
+    );
+    assert.match(
+      source,
+      /galleryMixBranch === "order-stragglers" \|\|\s*galleryMixBranch === "pressure-score"/u,
+    );
+    assert.match(source, /debateAudiencePressureMixTransitionMs\(/u);
+    assert.match(
+      source,
       /ambientFoley=\{ambientAudioActive && !suppressSparseAmbient\}/u,
     );
     assert.match(
@@ -4912,6 +4930,20 @@ describe("Debate experience", () => {
     assert.match(source, /data-debate-stage-alignment-modal="true"/u);
     assert.match(source, /Save alignment/u);
     assert.match(source, /data-debate-alignment-voice-mixer="true"/u);
+    assert.match(source, /Moderator micro avatar/u);
+    assert.match(
+      source,
+      /aria-label=\{`\$\{stageAlignmentPreviewCameraLabel\} moderator micro avatar scale`\}/u,
+    );
+    assert.match(source, /updateDebateStageModeratorMicroScale/u);
+    assert.doesNotMatch(
+      source,
+      /stageAlignmentPreviewCamera === "moderator"[\s\S]{0,80}moderatorMicroScales/u,
+    );
+    assert.match(css, /--debate-moderator-micro-scale-wide/u);
+    assert.match(css, /--debate-moderator-micro-scale-left/u);
+    assert.match(css, /--debate-moderator-micro-scale-right/u);
+    assert.match(css, /\.alignmentModeratorScaleTuner/u);
     assert.match(source, /Voice levels/u);
     assert.match(source, /data-debate-alignment-mixer-test=/u);
     assert.match(source, /Gallery · Off/u);

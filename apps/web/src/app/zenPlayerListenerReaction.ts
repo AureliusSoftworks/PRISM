@@ -26,6 +26,12 @@ export function zenPlayerListenerVocalFoleyToActionSfxKind(
       return "sigh";
     case "chuckles":
       return "laugh";
+    case "gasps":
+      return "gasp";
+    case "whistles":
+      // No whistle pack exists yet; keep the reaction audible through the
+      // voice path while the action-SFX fallback remains intentionally quiet.
+      return "throat_clear";
     default: {
       const _exhaustive: never = vocalFoley;
       void _exhaustive;

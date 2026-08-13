@@ -46,10 +46,11 @@ describe("model effort slider", () => {
     );
   });
 
-  it("makes Auto the exact Minimal silhouette rotated downward", () => {
+  it("keeps Auto upright and rotates the Minimal silhouette downward", () => {
     const points = minimalIconSource.match(/points="([^"]+)"/u)?.[1];
     assert.ok(points);
-    assert.match(autoIconSource, /rotate\(180 48\.425 41\.935\)/u);
+    assert.doesNotMatch(autoIconSource, /rotate\(180 48\.425 41\.935\)/u);
+    assert.match(minimalIconSource, /rotate\(180 48\.425 41\.935\)/u);
     assert.match(autoIconSource, new RegExp(`points="${points}"`, "u"));
   });
 

@@ -51,6 +51,9 @@ describe("native Max effort overdrive", () => {
     assert.match(page, /requestReasoningEffort === "max"/u);
     assert.match(page, /aria-pressed=\{maxEffortActive\}/u);
     assert.match(page, /disabled=\{!maxEffortUnlocked\}/u);
+    assert.match(page, /data-max-effort=\{maxEffortActive \? "true"/u);
+    assert.match(page, /maxEffortActive \? \([\s\S]*composeModelMaxElectricity/u);
+    assert.match(page, /key=\{`max-electric-\$\{renderTheme\}`\}/u);
     assert.match(page, /reasoningEffort: "max"/u);
     assert.match(page, /effectiveModelReasoningEffortForRequest\([\s\S]*maxEffortTargetKey/u);
     assert.match(page, /foregroundReasoningEffort=\{sharedAccountForegroundReasoningEffort\(\)\}/u);
@@ -58,5 +61,6 @@ describe("native Max effort overdrive", () => {
       css,
       /body\[data-prism-theme="light"\][\s\S]*composeModelMaxToggle/u,
     );
+    assert.match(css, /\.composeModelMaxElectricity\s*\{[^}]*pointer-events:\s*none/u);
   });
 });

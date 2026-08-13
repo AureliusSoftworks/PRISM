@@ -13,7 +13,10 @@ import {
   applyBotPowerEchoResponseV1,
   applyBotPowerMumbledResponseV1,
   applyBotPowerMuteResponseV1,
+  createBotPowerMutePerformanceV1,
+  botPowerMuteReactionTemperamentFromPersonaV1,
   applyBotPowerResponseBudgetV1,
+  botPowerCursesSpeechV1,
   botPowerAddressedFandomCueV1,
   botPowerCandorResponseRuleV1,
   botPowerCredulitySelfRuleV1,
@@ -27,6 +30,8 @@ import {
   botPowerAnnoyanceEffectV1,
   botPowerAnnoyanceTargetV1,
   botPowerIsMutedV1,
+  botPowerIsBreathlessV1,
+  botPowerMuteExemptsPlayerV1,
   botPowerMumblesSpeechV1,
   botPowerIgnoresOtherPowersV1,
   botPowerIneptRoleMisdirectionV1,
@@ -79,6 +84,7 @@ import type {
   ProviderMessage,
   ProviderName,
 } from "./providers.ts";
+import { rewriteBotPowerCursedTongueAnswerV1 } from "./bot-powers.ts";
 import {
   prepareMessagesWithSimulatedEffort,
   runWithReasoningGenerationBudget,
@@ -1285,10 +1291,12 @@ function normalizeStoryEpisodePresentation(episode: StoryEpisodeManifest): Story
   return { ...episode, locations, scenes };
 }
 
-function applyStoryHardResponsePowers(
+async function applyStoryHardResponsePowers(
   episode: StoryEpisodeManifest,
   bots: readonly StoryBotProfile[],
-): StoryEpisodeManifest {
+  provider: LlmProvider,
+  model: string,
+): Promise<StoryEpisodeManifest> {
   const mutedBotIds = new Set(
     bots.filter((bot) => botPowerIsMutedV1(bot.powers)).map((bot) => bot.id),
   );
@@ -1304,6 +1312,9 @@ function applyStoryHardResponsePowers(
   );
   const mumblingBotIds = new Set(
     bots.filter((bot) => botPowerMumblesSpeechV1(bot.powers)).map((bot) => bot.id),
+  );
+  const cursedTongueBotIds = new Set(
+    bots.filter((bot) => botPowerCursesSpeechV1(bot.powers)).map((bot) => bot.id),
   );
   const powersByBotId = new Map(
     bots.map((bot) => [bot.id, bot.powers] as const),
@@ -1350,6 +1361,7 @@ function applyStoryHardResponsePowers(
     eternalIntroductionBotIds.size === 0 &&
     echoBotIds.size === 0 &&
     mumblingBotIds.size === 0 &&
+    cursedTongueBotIds.size === 0 &&
     !bots.some((bot) =>
       botPowerIntermittentMuteEffectV1(bot.powers) ||
       botPowerIntermittentAudibilityEffectV1(bot.powers) ||
@@ -1434,7 +1446,7 @@ function applyStoryHardResponsePowers(
     }
     if (
       scene.speakerBotId &&
-      (mutedBotIds.has(scene.speakerBotId) || intermittentMuteIgnored)
+      intermittentMuteIgnored
     ) {
       const mutedNarration = applyBotPowerMuteResponseV1(scene.narration);
       nextScene = {
@@ -1487,7 +1499,6 @@ function applyStoryHardResponsePowers(
     }
     if (
       currentSpeaker &&
-      !mutedBotIds.has(currentSpeaker.id) &&
       !intermittentMuteIgnored &&
       !echoBotIds.has(currentSpeaker.id)
     ) {
@@ -1505,12 +1516,61 @@ function applyStoryHardResponsePowers(
       mumblingBotIds.has(scene.speakerBotId) &&
       !eternalIntroductionBotIds.has(scene.speakerBotId) &&
       !echoBotIds.has(scene.speakerBotId) &&
-      !mutedBotIds.has(scene.speakerBotId) &&
       !intermittentMuteIgnored
     ) {
       nextScene = {
         ...nextScene,
         narration: applyBotPowerMumbledResponseV1(nextScene.narration),
+      };
+    }
+    if (
+      scene.speakerBotId &&
+      cursedTongueBotIds.has(scene.speakerBotId) &&
+      !mutedBotIds.has(scene.speakerBotId) &&
+      !intermittentMuteIgnored
+    ) {
+      nextScene = {
+        ...nextScene,
+        narration: await rewriteBotPowerCursedTongueAnswerV1({
+          provider,
+          draftAnswer: nextScene.narration,
+          seed: `${episode.id}:${scene.id}:${sceneIndex}`,
+          model,
+          usagePurpose: "story_generation",
+        }),
+      };
+    }
+    if (
+      scene.speakerBotId &&
+      mutedBotIds.has(scene.speakerBotId) &&
+      !intermittentMuteIgnored &&
+      !botPowerMuteExemptsPlayerV1(powersByBotId.get(scene.speakerBotId))
+    ) {
+      const mutePerformance = createBotPowerMutePerformanceV1({
+        intendedSpeech: nextScene.narration,
+        maximumMs: 60_000,
+        seed: `${episode.id}:${scene.id}:${sceneIndex}:mute`,
+        reactionCandidates: bots
+          .filter((bot) => bot.id !== scene.speakerBotId)
+          .map((bot) => ({
+            botId: bot.id,
+            muted: botPowerIsMutedV1(bot.powers),
+            breathless: botPowerIsBreathlessV1(bot.powers),
+            cursedTongue: botPowerCursesSpeechV1(bot.powers),
+            temperament: botPowerMuteReactionTemperamentFromPersonaV1(
+              bot.systemPrompt,
+            ),
+            mode: "story",
+          })),
+      });
+      nextScene = {
+        ...nextScene,
+        narration: applyBotPowerMuteResponseV1(
+          nextScene.narration,
+          mutePerformance,
+        ),
+        mutePerformance,
+        spritePose: nextScene.spritePose === "action" ? "action" : "idle",
       };
     }
     if (scene.speakerBotId && !mutedBotIds.has(scene.speakerBotId)) {
@@ -2354,7 +2414,12 @@ export async function generateStorySessionEpisode(
       modelId: args.model,
       run: async (signal) => {
         let generatedEpisode = await generateStoryEpisodeWithRepairs(args, signal);
-        generatedEpisode = applyStoryHardResponsePowers(generatedEpisode, args.bots);
+        generatedEpisode = await applyStoryHardResponsePowers(
+          generatedEpisode,
+          args.bots,
+          args.provider,
+          args.model,
+        );
         try {
           generatedEpisode = await repairStoryQuietContextDependencies({
             episode: generatedEpisode,

@@ -297,6 +297,33 @@ export function botFalseNameObserverCueV1(
   return `${who} sincerely answers to "${name}" and will not accept any other name as their own.`;
 }
 
+function escapedFalseNamePattern(value: string): string {
+  return value.trim().replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+/**
+ * Detects only explicit contradictions of the holder's persisted believed name.
+ * Ordinary mentions stay valid; this is for self-claims under the Library name
+ * and unmistakable vocative self-address such as "Elowen, your wisdom...".
+ */
+export function botFalseNameResponseConflictsV1(
+  text: string,
+  state: BotFalseNameStateV1,
+): boolean {
+  const holderName = escapedFalseNamePattern(state.holderBotName);
+  const believedName = escapedFalseNamePattern(state.believedName);
+  if (!holderName || !believedName) return false;
+  const claimsLibraryName = new RegExp(
+    `\\b(?:i\\s+am|i['’]m|my\\s+name\\s+is|call\\s+me)\\s+${holderName}(?=$|[\\s,.;:!?—])|\\bas\\s+${holderName}\\s*,\\s*(?:i|my|we)\\b`,
+    "iu",
+  ).test(text);
+  if (claimsLibraryName) return true;
+  return new RegExp(
+    `(?:^|[.!?…]\\s+)[“"'‘’]?\\s*(?:(?:ah|oh|well)[,!—\\s-]*)?${believedName}\\s*[,:—]\\s*(?:you|your|you['’]re|you\\s+are)\\b`,
+    "iu",
+  ).test(text);
+}
+
 /** Soft rewrite: replace accidental Library-name self-claims with the believed name. */
 export function rewriteBotFalseNameResponseV1(
   text: string,
@@ -324,6 +351,14 @@ export function rewriteBotFalseNameResponseV1(
         "giu",
       ),
       `I am ${believed}`,
+    );
+    rewritten = rewritten.replace(
+      new RegExp(
+        `\\bas\\s+${replacedName}(?=\\s*,\\s*(?:i|my|we)\\b)`,
+        "giu",
+      ),
+      (matched) =>
+        matched.startsWith("A") ? `As ${believed}` : `as ${believed}`,
     );
   }
   if (

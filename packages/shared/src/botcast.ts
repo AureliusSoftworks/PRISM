@@ -37,6 +37,7 @@ import {
   BOT_POWER_CANONICAL_SILENCE_V1,
   botPowerAvatarVisibilityModeV1,
   botPowerResponseIsSilentV1,
+  type BotPowerMutePerformanceV1,
   type BotPowerAvatarVisibilityModeV1,
   type BotPowerObserverPerspectiveV1,
   type BotPowerObserverVisibilityV1,
@@ -257,7 +258,7 @@ export function botcastEchoHostInterruptPhrase(args: {
     const message = args.messages[index]!;
     if (interruptedId && message.id === interruptedId) continue;
     const content = message.content.replace(/\s+/gu, " ").trim();
-    if (!content || content === BOT_POWER_CANONICAL_SILENCE_V1) continue;
+    if (!content || botPowerResponseIsSilentV1(content)) continue;
     return content;
   }
   return "";
@@ -1015,6 +1016,8 @@ export interface BotcastMessage {
   audienceDelivery?: BotcastMessageAudienceDeliveryV1;
   /** Provenance-marked ordinary silence; distinct from Power silence. */
   socialSilence?: SocialSilenceMarkerV1;
+  /** Public replay-stable timed Mute presentation; never contains intended speech. */
+  mutePerformance?: BotPowerMutePerformanceV1;
   /** One-turn protected link to the audience-heard interrupted fragment. */
   crosstalkReclaim?: CrosstalkReclaimPlanV1;
   /**
@@ -2260,6 +2263,7 @@ const BOTCAST_SIGNAL_STANDARD_MAX_UTTERANCE_MS = 24_000;
 export function botcastSignalStandardCadenceDurationMs(
   text: unknown,
   socialSilence?: SocialSilenceMarkerV1,
+  mutePerformance?: BotPowerMutePerformanceV1,
 ): number {
   const spokenText = typeof text === "string" ? text.trim() : "";
   if (
@@ -2273,7 +2277,7 @@ export function botcastSignalStandardCadenceDurationMs(
     return socialSilence.holdMs;
   }
   if (botPowerResponseIsSilentV1(spokenText)) {
-    return BOTCAST_DIRECTOR_MIN_SHOT_MS;
+    return mutePerformance?.durationMs ?? BOTCAST_DIRECTOR_MIN_SHOT_MS;
   }
   const wordCount = Math.max(
     1,
@@ -2377,7 +2381,7 @@ function botcastAverageWordCount(
 }
 
 const BOTCAST_NATURAL_REST_PATTERN =
-  /\b(?:ultimately|in the end|at the end of the day|that(?:'s| is) the point|that(?:'s| is) what matters|I think we(?:'ve| have) covered|there(?:'s| is) not much more|I(?:'ll| will) leave it there|final thought)\b/iu;
+  /\b(?:ultimately|in the end|at the end of the day|that(?:'s| is) the point|that(?:'s| is) what matters|I think we(?:'ve| have) covered|there(?:'s| is) not much more|I(?:'ll| will) leave it there|final thought|thank(?:s| you) for (?:the |this |our )?(?:conversation|discussion|interview)|it (?:has been|was)(?: truly)? (?:a )?pleasure (?:speaking|talking|discussing|exploring))\b/iu;
 
 const BOTCAST_MATURE_FAREWELL_PATTERN =
   /\b(?:good luck(?:\s+with\b[^.!?]*)?|take care(?:\s+of\s+(?:yourself|each other))?|I(?:'m| am) not sure there(?:'s| is) much more I can add|you(?:'ve| have) got (?:everything|all) you need|that(?:'s| is) all that matters now)\b/iu;
@@ -2938,7 +2942,7 @@ export function botcastProducerGuestThinkingDiscountMs(
 }
 
 export function botcastReplayTimeline(
-  messages: readonly (Pick<BotcastMessage, "content" | "socialSilence"> &
+  messages: readonly (Pick<BotcastMessage, "content" | "socialSilence" | "mutePerformance"> &
     Partial<Pick<BotcastMessage, "id">>)[],
   events: readonly BotcastReplayEvent[],
 ): {
@@ -2997,7 +3001,11 @@ export function botcastReplayTimeline(
       ? message.socialSilence!.holdMs
       : Math.max(
           BOTCAST_DIRECTOR_MIN_SHOT_MS,
-          botcastSignalStandardCadenceDurationMs(message.content),
+          botcastSignalStandardCadenceDurationMs(
+            message.content,
+            message.socialSilence,
+            message.mutePerformance,
+          ),
         );
     const overlap = perceptionOverlapByMessageId.get(messageId);
     const precedingIndex = overlap

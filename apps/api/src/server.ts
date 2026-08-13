@@ -539,9 +539,14 @@ import {
 } from "./user-notes.ts";
 import {
   importLegacyLibraryGroupsOnce,
+  LIBRARY_GROUP_MEMBER_LIMIT,
   listLibraryGroups,
   replaceLibraryGroups,
 } from "./library-groups.ts";
+import {
+  inferLibraryGroupSuggestions,
+  LIBRARY_GROUP_SUGGESTION_TIMEOUT_MS,
+} from "./library-group-suggestions.ts";
 import { createPrismDomainCapabilityRegistry } from "./prism-domain-capabilities.ts";
 import type { PrismCapabilityContext } from "./prism-capabilities.ts";
 import { prismSettingsPatchIsJournalable } from "./prism-settings-mutations.ts";
@@ -944,6 +949,7 @@ import {
   normalizeCrtFocus,
   normalizePrismTypographyScale,
   normalizeListenerReactionVocalFoley,
+  listenerReactionTextIsAuthorizedV1,
   normalizeBotCrosstalkInterruptedSpeakerCue,
   coffeeInterruptionTranscriptSegments,
   botCrosstalkPrimarySpeakerContent,
@@ -992,6 +998,7 @@ import {
   parseStoredPromptShortcutPayload,
   parseStoredPromptWildcardPayload,
   parseStoredToolPayload,
+  parseStoredAssistantToolPayload,
   parseStoredComfyUiWorkflows,
   withPromptShortcutResolvedPrompt,
   withPromptWildcardResolvedPrompt,
@@ -1051,6 +1058,7 @@ import {
   normalizeActionSfxPackOwnerKind,
   parseStoredTextModelDisplayNames,
   resolveBotAudioVoiceProfileV1,
+  stripBotProfileMetaSuffix,
 } from "@localai/shared";
 import { editImage, generateImage } from "./image-provider.ts";
 import { generateLocalImageBytesByModelId } from "./image-local-by-model.ts";
@@ -1196,6 +1204,7 @@ import {
 } from "./builtin-tts.ts";
 import { buildBabbleSpeechText } from "./babble-text.ts";
 import { splitLocalVoiceStreamSegments } from "./local-voice-stream.ts";
+import { trimPcmWaveChunkJoinSilence } from "./local-voice-wave.ts";
 import {
   localVoiceCalibrationState,
   localVoiceEngineCapabilities,
@@ -2161,6 +2170,7 @@ function resolveLocalVoiceDelivery(
   localEngine: ReturnType<typeof resolveLocalVoiceEngine>;
   pronunciation: ResolvedLocalVoicePronunciationV1;
   speechprint: ResolvedLocalVoiceSpeechprintV1;
+  usingSystemVoice: boolean;
 } {
   const profile = normalizeBotAudioVoiceProfileV1(profileValue);
   const localAccent = resolveLocalAccentFallback({
@@ -2186,20 +2196,21 @@ function resolveLocalVoiceDelivery(
       localProfile.accentLocale,
     ),
   });
+  const usingSystemVoice =
+    allowOperatingSystemVoices && Boolean(localProfile.systemVoiceName);
   const pronunciation = resolveLocalVoicePronunciation({
     profile: localProfile,
     localEngine,
-    usingSystemVoice:
-      allowOperatingSystemVoices && Boolean(localProfile.systemVoiceName),
+    usingSystemVoice,
   });
   return {
     localEngine,
     pronunciation,
+    usingSystemVoice,
     speechprint: resolveLocalVoiceSpeechprint({
       profile: localProfile,
       localEngine,
-      usingSystemVoice:
-        allowOperatingSystemVoices && Boolean(localProfile.systemVoiceName),
+      usingSystemVoice,
       pronunciation,
     }),
   };
@@ -2327,6 +2338,8 @@ async function sendLocalVoiceWaveStream(args: {
   speechprint?: ResolvedLocalVoiceSpeechprintV1;
   protectedPhrases?: readonly string[];
   performancePlan?: VoicePerformancePlanV1 | null;
+  /** Enables restrained punctuation orchestration for Kokoro, never system TTS. */
+  punctuationPacing?: boolean;
 }): Promise<void> {
   type LocalVoiceStreamItem =
     | {
@@ -2351,6 +2364,7 @@ async function sendLocalVoiceWaveStream(args: {
         ...splitLocalVoiceStreamSegments(
           segment.text,
           segment.sourceStart,
+          { punctuationPacing: args.punctuationPacing === true },
         ).map((chunk) => ({
           kind: "speech" as const,
           ...chunk,
@@ -2359,7 +2373,9 @@ async function sendLocalVoiceWaveStream(args: {
     }
   } else {
     streamItems.push(
-      ...splitLocalVoiceStreamSegments(args.text).map((chunk) => ({
+      ...splitLocalVoiceStreamSegments(args.text, 0, {
+        punctuationPacing: args.punctuationPacing === true,
+      }).map((chunk) => ({
         kind: "speech" as const,
         ...chunk,
       })),
@@ -2367,6 +2383,11 @@ async function sendLocalVoiceWaveStream(args: {
   }
   if (streamItems.length === 0)
     throw new Error("Speakable assistant text is required.");
+  const speechItemIndexes = streamItems.flatMap((item, index) =>
+    item.kind === "speech" ? [index] : [],
+  );
+  const firstSpeechItemIndex = speechItemIndexes[0] ?? -1;
+  const lastSpeechItemIndex = speechItemIndexes.at(-1) ?? -1;
   const generate = (text: string) =>
     builtinVoiceWaveGeneratorOverride({
       text,
@@ -2395,6 +2416,12 @@ async function sendLocalVoiceWaveStream(args: {
   );
   args.response.setHeader("x-prism-voice-engine", args.engineUsed);
   args.response.setHeader("x-prism-voice-characters", String(args.text.length));
+  if (args.punctuationPacing === true) {
+    args.response.setHeader(
+      "x-prism-voice-pacing",
+      "kokoro-punctuation-v1",
+    );
+  }
   setVoicePronunciationHeaders(args.response, args.pronunciation);
   setVoiceSpeechprintHeaders(args.response, args.speechprint);
   if (args.localEngine) {
@@ -2460,10 +2487,19 @@ async function sendLocalVoiceWaveStream(args: {
       writeActionChunk(item, index);
       continue;
     }
-    const wave = index === 0 && firstWave
+    const generatedWave = index === 0 && firstWave
       ? firstWave
       : await generate(item.text);
     if (args.signal.aborted || args.response.destroyed) return;
+    // Only server-tagged Instant/Kokoro streams reach this branch. Preserve
+    // natural outer silence for the utterance, but remove duplicated generator
+    // silence at every internal speech edge before the client's restrained gap.
+    const wave = args.punctuationPacing === true
+      ? trimPcmWaveChunkJoinSilence(generatedWave, {
+          trimLeading: index !== firstSpeechItemIndex,
+          trimTrailing: index !== lastSpeechItemIndex,
+        })
+      : generatedWave;
     writeSpeechChunk(wave, item, index);
   }
   args.response.end();
@@ -14039,7 +14075,7 @@ function buildRoutes(): RouteDefinition[] {
       }
       const liveActionAbort = new AbortController();
       const onLiveActionClientClose = () => {
-        if (!ctx.res.writableEnded) {
+        if (!ctx.res.writableEnded && !ctx.res.destroyed) {
           liveActionAbort.abort();
         }
       };
@@ -24311,6 +24347,7 @@ function buildRoutes(): RouteDefinition[] {
         Object.prototype.hasOwnProperty.call(raw, "listenerReactionFoley");
       const listenerReactionRequested =
         listenerReactionTextRequested || listenerReactionFoleyRequested;
+      let authorizedMuteReactionTexts: string[] = [];
       const interruptedSpeakerReactionRequested =
         Object.prototype.hasOwnProperty.call(
           raw,
@@ -24447,7 +24484,8 @@ function buildRoutes(): RouteDefinition[] {
       if (ordinaryMessageId) {
         const message = db
           .prepare(
-            `SELECT message.content, message.provider, message.role, message.bot_id, bot.powers_json
+            `SELECT message.content, message.provider, message.role, message.bot_id,
+                    message.tool_payload, bot.powers_json
                FROM messages AS message
                LEFT JOIN bots AS bot ON bot.id = message.bot_id
               WHERE message.id = ? AND message.user_id = ?`,
@@ -24458,6 +24496,7 @@ function buildRoutes(): RouteDefinition[] {
               provider?: string | null;
               role?: string;
               bot_id?: string | null;
+              tool_payload?: string | null;
               powers_json?: string | null;
             }
           | undefined;
@@ -24486,6 +24525,25 @@ function buildRoutes(): RouteDefinition[] {
           message?.content ?? raw.performanceText ?? raw.spokenText;
         persistedMessageProvider = message?.provider ?? null;
         sourceBotMuted = botPowerIsMutedV1(message?.powers_json);
+        if (listenerReactionRequested && requestedSpeakerBotId) {
+          const listenerBot = db
+            .prepare(
+              "SELECT powers_json FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
+            )
+            .get(requestedSpeakerBotId, userId) as
+            { powers_json?: string | null } | undefined;
+          sourceBotMuted = botPowerIsMutedV1(listenerBot?.powers_json);
+          authorizedMuteReactionTexts = (
+            parseStoredAssistantToolPayload(message?.tool_payload ?? null)
+              .botPowerMutePerformance?.reactionBeats ?? []
+          )
+            .filter(
+              (beat) =>
+                beat.reactorBotId === requestedSpeakerBotId &&
+                (beat.kind === "audible_quip" || beat.kind === "interrupt"),
+            )
+            .flatMap((beat) => beat.quip ? [beat.quip] : []);
+        }
         if (!listenerReactionRequested || !requestedSpeakerBotId) {
           sourceBotId = message?.bot_id ?? requestedSpeakerBotId;
         }
@@ -24545,6 +24603,17 @@ function buildRoutes(): RouteDefinition[] {
           userId,
           signalMessage.episode_id,
         );
+        authorizedMuteReactionTexts = (
+          signalEpisode.messages.find(
+            (message) => message.id === signalMessageId,
+          )?.mutePerformance?.reactionBeats ?? []
+        )
+          .filter(
+            (beat) =>
+              beat.reactorBotId === requestedSpeakerBotId &&
+              (beat.kind === "audible_quip" || beat.kind === "interrupt"),
+          )
+          .flatMap((beat) => beat.quip ? [beat.quip] : []);
         sourceText = botCrosstalkPrimarySpeakerContent(
           signalMessage.content,
           botcastListenerReactionForMessage(
@@ -24642,21 +24711,10 @@ function buildRoutes(): RouteDefinition[] {
               ? raw.listenerReactionText.replace(/\s+/gu, " ").trim()
               : "";
           if (
-            listenerReactionText !== "mm-hm" &&
-            listenerReactionText !== "mm-hmm" &&
-            listenerReactionText !== "I see" &&
-            listenerReactionText !== "hmm" &&
-            listenerReactionText !== "right" &&
-            listenerReactionText !== "oh" &&
-            listenerReactionText !== "go on" &&
-            listenerReactionText !== "sure, sure" &&
-            listenerReactionText !== "No, hold on." &&
-            listenerReactionText !== "Let me answer that." &&
-            listenerReactionText !== "That's not fair." &&
-            listenerReactionText !== "Wait a second." &&
-            listenerReactionText !== "Hold on." &&
-            listenerReactionText !== "Hang on." &&
-            listenerReactionText !== "One second."
+            !listenerReactionTextIsAuthorizedV1(
+              listenerReactionText,
+              authorizedMuteReactionTexts,
+            )
           ) {
             throw new HttpError(400, "Unsupported listener reaction.");
           }
@@ -24927,6 +24985,9 @@ function buildRoutes(): RouteDefinition[] {
               speechprint: localDelivery.speechprint,
               protectedPhrases: speechprintProtectedPhrases,
               performancePlan: localPerformancePlan,
+              punctuationPacing:
+                localDelivery.localEngine.resolved === "instant" &&
+                !localDelivery.usingSystemVoice,
             });
             return;
           }
@@ -25016,6 +25077,9 @@ function buildRoutes(): RouteDefinition[] {
               speechprint: localDelivery.speechprint,
               protectedPhrases: speechprintProtectedPhrases,
               performancePlan: localPerformancePlan,
+              punctuationPacing:
+                localDelivery.localEngine.resolved === "instant" &&
+                !localDelivery.usingSystemVoice,
             });
             return;
           }
@@ -25198,6 +25262,9 @@ function buildRoutes(): RouteDefinition[] {
                 speechprint: localDelivery.speechprint,
                 protectedPhrases: speechprintProtectedPhrases,
                 performancePlan: localPerformancePlan,
+                punctuationPacing:
+                  localDelivery.localEngine.resolved === "instant" &&
+                  !localDelivery.usingSystemVoice,
               });
               return;
             }
@@ -25515,6 +25582,109 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         groups: run.result.groups,
       });
+    }),
+    route("POST", "/api/library/groups/suggestions", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body =
+        ctx.body && typeof ctx.body === "object" && !Array.isArray(ctx.body)
+          ? (ctx.body as Record<string, unknown>)
+          : {};
+      const botId = typeof body.botId === "string" ? body.botId.trim().slice(0, 160) : "";
+      const bot = db
+        .prepare(
+          "SELECT id, name, system_prompt FROM bots WHERE id = ? AND user_id = ?",
+        )
+        .get(botId, userId) as
+        | { id: string; name: string; system_prompt: string }
+        | undefined;
+      if (!bot) throw new HttpError(404, "Bot not found.");
+
+      const groups = listLibraryGroups(db, userId);
+      const namesById = new Map(
+        (db
+          .prepare("SELECT id, name FROM bots WHERE user_id = ?")
+          .all(userId) as Array<{ id: string; name: string }>)
+          .map((row) => [row.id, row.name]),
+      );
+      const candidates = groups
+        .filter(
+          (group) =>
+            !group.builtIn &&
+            !group.botIds.includes(bot.id) &&
+            group.botIds.length < LIBRARY_GROUP_MEMBER_LIMIT,
+        )
+        .slice(0, 48)
+        .map((group) => ({
+          id: group.id,
+          name: group.name,
+          description: group.description,
+          memberNames: group.botIds
+            .map((memberId) => namesById.get(memberId))
+            .filter((name): name is string => Boolean(name)),
+        }));
+      if (candidates.length === 0) {
+        json(ctx.res, 200, {
+          ok: true,
+          suggestions: [],
+          unavailable: false,
+        });
+        return;
+      }
+
+      // Group recommendations are deliberately LOCAL-only. This uses the same
+      // auxiliary Ollama lane as other bounded system helpers, never the account
+      // provider or a remote fallback, and does not write any recommendation state.
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      const timeout = setTimeout(abort, LIBRARY_GROUP_SUGGESTION_TIMEOUT_MS);
+      ctx.req.once("aborted", abort);
+      ctx.res.once("close", abort);
+      try {
+        const user = getUserRow(userId);
+        const groupIds = await runWithUsageSession(
+          {
+            db,
+            userId,
+            privacyScope: "normal",
+            mode: "system",
+            surface: "group-home",
+            botId: bot.id,
+          },
+          () =>
+            inferLibraryGroupSuggestions({
+              provider: auxiliaryProviderFactoryOverride(
+                user.prism_default_llm_model,
+                dualOllamaWorkloadOptions(user),
+              ),
+              bot: {
+                name: bot.name,
+                purpose: stripBotProfileMetaSuffix(bot.system_prompt),
+              },
+              candidates,
+              signal: controller.signal,
+            }),
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          suggestions: groupIds,
+          unavailable: false,
+        });
+      } catch {
+        // A local-helper failure is not a valid empty recommendation. Keep it
+        // visible to the client while keeping this optional automatic action
+        // out of the page-wide error path.
+        if (!ctx.res.writableEnded) {
+          json(ctx.res, 200, {
+            ok: true,
+            suggestions: [],
+            unavailable: true,
+          });
+        }
+      } finally {
+        clearTimeout(timeout);
+        ctx.req.off("aborted", abort);
+        ctx.res.off("close", abort);
+      }
     }),
     route("GET", "/api/prism/capabilities", async (ctx) => {
       const userId = requireAuth(ctx);

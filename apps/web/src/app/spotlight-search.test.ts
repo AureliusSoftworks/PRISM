@@ -9,6 +9,18 @@ const cssSource = readFileSync(
 );
 
 describe("empty Chat Spotlight search", () => {
+  it("keeps the empty-Home bot browser mounted in both Zen and transcript Chat", () => {
+    assert.match(
+      pageSource,
+      /const zenEmptyHeroVisible =\s*sharedChatConversationPresentation &&\s*\(!detail \|\| detail\.messages\.length === 0\) &&\s*!pendingReplyVisible &&\s*!zenEphemeralUserActionMessage/,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /const zenEmptyHeroVisible =\s*chatLikeSurface &&/,
+    );
+    assert.equal(pageSource.match(/\{zenEmptyHeroVisible &&/g)?.length, 1);
+  });
+
   it("lets the polished Spotlight own search without the browser rail overlapping it", () => {
     const rendererSource = pageSource.slice(
       pageSource.indexOf("const renderChatCanvasPickerControls"),

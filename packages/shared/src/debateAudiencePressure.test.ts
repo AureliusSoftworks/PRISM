@@ -188,6 +188,48 @@ describe("Debate audience pressure", () => {
     assert.ok((plan?.pressure ?? 0) >= 70);
   });
 
+  it("marks a later rowdy rebuild as a repeat moderator intervention", () => {
+    const priorOrder: DebateEventV1 = {
+      ...speech("prior-order", 2),
+      kind: "moderator_ruling",
+      speakerKind: "moderator",
+      speakerBotId: "moderator",
+      sideId: null,
+      stepKey: "audience_order",
+      gavelReason: "audience_order",
+      content: "Order. Settle down.",
+    };
+    const longLine =
+      "The heated exchange keeps pressing the same combative point while the public gallery talks over the floor and refuses to settle. ".repeat(
+        5,
+      );
+    const firstAfterOrder = {
+      ...speech("after-order-1", 3),
+      content: longLine,
+    };
+    const secondAfterOrder = {
+      ...speech("after-order-2", 4),
+      content: longLine,
+    };
+    const thirdAfterOrder = {
+      ...speech("after-order-3", 5),
+      content: longLine,
+    };
+    const plan = debateAudienceModeratorOrderPlan({
+      events: [
+        priorOrder,
+        firstAfterOrder,
+        secondAfterOrder,
+        thirdAfterOrder,
+      ],
+      formality: "free_for_all",
+      playerRole: "spectator",
+      triggerEvent: thirdAfterOrder,
+    });
+    assert.ok(plan);
+    assert.equal(plan?.repeated, true);
+  });
+
   it("does not mint sustained order while the gallery is only restless", () => {
     const longLine =
       "Phones interrupt every lesson, and locking them away until the final bell protects attention without inventing a crisis. ".repeat(

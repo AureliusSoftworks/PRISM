@@ -1,5 +1,73 @@
 export const BOT_POWER_VERSION = 1 as const;
 export const BOT_POWER_CANONICAL_SILENCE_V1 = "..." as const;
+export const BOT_POWER_MUTE_PERFORMANCE_VERSION = 1 as const;
+export const BOT_POWER_MUTE_MIN_DURATION_MS = 1_000 as const;
+export const BOT_POWER_MUTE_MAX_DURATION_MS = 120_000 as const;
+export const BOT_POWER_MUTE_REACTION_MAX = 3 as const;
+export const BOT_POWER_MUTE_REACTION_MIN_SPACING_MS = 4_000 as const;
+
+export type BotPowerMuteReactionKindV1 =
+  | "visual"
+  | "audible_quip"
+  | "lung_foley"
+  | "interrupt";
+
+export type BotPowerMuteReactionTemperamentV1 =
+  | "patient"
+  | "awkward"
+  | "frustrated"
+  | "playful"
+  | "formal";
+
+export type BotPowerMuteReactionModeV1 =
+  | "coffee"
+  | "signal"
+  | "debate"
+  | "story";
+
+/** Public, replay-stable presentation only. Never enters canonical bot history. */
+export interface BotPowerMuteReactionBeatV1 {
+  atMs: number;
+  reactorBotId: string;
+  kind: BotPowerMuteReactionKindV1;
+  action:
+    | "glance"
+    | "lean_in"
+    | "head_tilt"
+    | "shift"
+    | "look_away"
+    | "look_at_watch"
+    | "tap_fingers";
+  quip?: string;
+  foley?: "sigh" | "gasp" | "whistle";
+}
+
+/**
+ * Public timed-silence envelope. Intended speech is deliberately absent and
+ * belongs only in each mode's private holder metadata.
+ */
+export interface BotPowerMutePerformanceV1 {
+  v: typeof BOT_POWER_MUTE_PERFORMANCE_VERSION;
+  name: "mutePerformance";
+  durationMs: number;
+  periodCount: number;
+  interrupted: boolean;
+  elapsedCue: string;
+  reactionBeats: BotPowerMuteReactionBeatV1[];
+}
+
+export interface BotPowerMuteReactionCandidateV1 {
+  botId: string;
+  directAddressee?: boolean;
+  muted?: boolean;
+  hardSpeechSuppressed?: boolean;
+  breathless?: boolean;
+  cursedTongue?: boolean;
+  temperament?: BotPowerMuteReactionTemperamentV1;
+  mood?: string;
+  relationship?: string;
+  mode?: BotPowerMuteReactionModeV1;
+}
 export const BOT_POWER_MAX_COUNT = 3;
 export const BOT_POWER_NAME_MAX_LENGTH = 40;
 export const BOT_POWER_INTENT_MAX_LENGTH = 640;
@@ -184,6 +252,19 @@ export type BotPowerEffectV1 =
   | { type: "voice_presence"; mode: BotPowerVoicePresenceMode }
   /** Replace every public spoken word with deterministic normal-volume gibberish. */
   | { type: "speech_obfuscation"; mode: "gibberish" }
+  /**
+   * Add deterministic strong non-slur profanity to every non-silent public
+   * utterance after semantic/content Powers have finished. Clean authored
+   * speech remains private to the holder's own prompt history.
+   */
+  | {
+      type: "cursed_tongue";
+      version: 1;
+      frequency: "frequent";
+      strength: "strong";
+      vocabulary: "uncensored_non_slur";
+      phraseMode: "occasional_2_3_words";
+    }
   /** Silence exactly half of stable turn attempts and lower the holder's mood. */
   | {
       type: "intermittent_mute";
@@ -703,6 +784,16 @@ export function normalizeBotPowerEffectV1(value: unknown): BotPowerEffectV1 | nu
   }
   if (effect.type === "speech_obfuscation") {
     return { type: "speech_obfuscation", mode: "gibberish" };
+  }
+  if (effect.type === "cursed_tongue") {
+    return {
+      type: "cursed_tongue",
+      version: 1,
+      frequency: "frequent",
+      strength: "strong",
+      vocabulary: "uncensored_non_slur",
+      phraseMode: "occasional_2_3_words",
+    };
   }
   if (effect.type === "intermittent_mute") {
     return {
@@ -2578,6 +2669,25 @@ export function botPowerMumblesSpeechV1(value: unknown): boolean {
   return botPowerMumblesSpeechFromEffectsV1(activeBotPowerEffectsV1(value));
 }
 
+export function botPowerCursesSpeechFromEffectsV1(value: unknown): boolean {
+  if (!Array.isArray(value)) return false;
+  return value.some(
+    (effect) => normalizeBotPowerEffectV1(effect)?.type === "cursed_tongue",
+  );
+}
+
+export function botPowerCursesSpeechV1(value: unknown): boolean {
+  return botPowerCursesSpeechFromEffectsV1(activeBotPowerEffectsV1(value));
+}
+
+/**
+ * The holder drafts clean speech and understands its own clean prior intent.
+ * The runtime owns the public mutation so the model never learns to imitate it.
+ */
+export function botPowerCursedTongueAuthoringCueV1(): string {
+  return "HARD Cursed Tongue authoring rule: draft fully natural clean speech only. Never add, imitate, quote, or anticipate the curse's profanity. PRISM adds the public profanity layer after generation. You privately remember your own intended clean wording, while everyone else receives only the public adjusted line.";
+}
+
 /**
  * HARD authoring contract for speech_obfuscation holders.
  * The model must draft clear natural language; runtime applies public gibberish.
@@ -3210,12 +3320,447 @@ export function botPowerMuteActionTextsV1(value: unknown): string[] {
     .map(({ text }) => text);
 }
 
-/** Enforces a hard mute while preserving concise, non-spoken `*actions*`. */
-export function applyBotPowerMuteResponseV1(value: unknown): string {
+function botPowerMuteStableUnitV1(value: string): number {
+  return botPowerAddressedInsultHashV1(value) / 0x1_0000_0000;
+}
+
+/** Estimate speech only after response budgets and base-speech Powers. */
+export function botPowerMuteEstimatedDurationMsV1(
+  value: unknown,
+  maximumMs: number = BOT_POWER_MUTE_MAX_DURATION_MS,
+): number {
+  const source = typeof value === "string" ? value : "";
+  const spoken = source
+    .replace(/\*[^*\n]{1,240}\*/gu, " ")
+    .replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  const words = spoken.match(/[\p{L}\p{N}]+(?:[’'\-][\p{L}\p{N}]+)*/gu)?.length ?? 0;
+  const punctuationPauses = (spoken.match(/[,:;.!?—–]/gu) ?? []).length;
+  const rawMs = words > 0
+    ? (words / 155) * 60_000 + punctuationPauses * 110
+    : BOT_POWER_MUTE_MIN_DURATION_MS;
+  const boundedMaximum = Math.max(
+    BOT_POWER_MUTE_MIN_DURATION_MS,
+    Math.min(
+      BOT_POWER_MUTE_MAX_DURATION_MS,
+      Math.floor(maximumMs / 1_000) * 1_000,
+    ),
+  );
+  return Math.max(
+    BOT_POWER_MUTE_MIN_DURATION_MS,
+    Math.min(boundedMaximum, Math.ceil(rawMs / 1_000) * 1_000),
+  );
+}
+
+export function botPowerMuteElapsedCueV1(durationMs: number): string {
+  const seconds = Math.max(1, Math.ceil(durationMs / 1_000));
+  return `*${seconds} second${seconds === 1 ? "" : "s"} pass without an audible word.*`;
+}
+
+export function botPowerMutePeriodsV1(periodCount: number): string {
+  return ".".repeat(Math.max(1, Math.min(120, Math.round(periodCount))));
+}
+
+/** Resolve one public frame of a saved timed-Mute performance. */
+export function botPowerMutePublicResponseAtElapsedV1(
+  value: unknown,
+  performance: unknown,
+  elapsedMs: number,
+): string {
+  const normalized = normalizeBotPowerMutePerformanceV1(performance);
+  if (!normalized) return typeof value === "string" ? value : "";
+  const actions = botPowerMuteActionTextsV1(value).map(
+    (action) => `*${action}*`,
+  );
+  const safeElapsedMs = Number.isFinite(elapsedMs)
+    ? Math.max(0, elapsedMs)
+    : normalized.durationMs;
+  const visiblePeriods = Math.min(
+    normalized.periodCount,
+    Math.max(1, Math.floor(safeElapsedMs / 1_000) + 1),
+  );
+  return [
+    ...actions,
+    botPowerMutePeriodsV1(visiblePeriods),
+    ...(safeElapsedMs >= normalized.durationMs
+      ? [normalized.elapsedCue]
+      : []),
+  ].join(" ");
+}
+
+/**
+ * Observer-model projection for a completed timed-Mute performance. The public
+ * transcript keeps its dots for the player, while model history receives only
+ * perceivable physical actions and the elapsed-time stage cue.
+ */
+export function botPowerMuteObserverHistoryV1(
+  value: unknown,
+  performance: unknown,
+): string {
+  const normalized = normalizeBotPowerMutePerformanceV1(performance);
+  const actions = botPowerMuteActionTextsV1(value).map(
+    (action) => `*${action}*`,
+  );
+  return [
+    ...actions,
+    normalized?.elapsedCue ?? BOT_POWER_CANONICAL_SILENCE_V1,
+  ].join(" ");
+}
+
+/**
+ * Private holder projection for an interrupted timed-Mute delivery. The clean
+ * draft never leaves private Power metadata; only the portion that would have
+ * been reached before the cutoff is retained, followed by a private floor cue.
+ */
+export function botPowerMutePrivateHistoryV1(args: {
+  intendedSpeech: unknown;
+  performance: unknown;
+  estimatedSpeech?: unknown;
+  maximumMs?: number;
+}): string {
+  const intended = typeof args.intendedSpeech === "string"
+    ? args.intendedSpeech.trim()
+    : "";
+  const performance = normalizeBotPowerMutePerformanceV1(args.performance);
+  if (!intended || !performance?.interrupted) return intended;
+  const fullDurationMs = botPowerMuteEstimatedDurationMsV1(
+    args.estimatedSpeech ?? intended,
+    args.maximumMs,
+  );
+  const ratio = Math.max(
+    0.05,
+    Math.min(0.98, performance.durationMs / Math.max(1, fullDurationMs)),
+  );
+  const targetLength = Math.max(1, Math.floor(intended.length * ratio));
+  const prefixSource = intended.slice(0, targetLength);
+  const lastBoundary = Math.max(
+    prefixSource.lastIndexOf(" "),
+    prefixSource.lastIndexOf("\n"),
+  );
+  const prefix = (lastBoundary >= Math.floor(targetLength * 0.55)
+    ? prefixSource.slice(0, lastBoundary)
+    : prefixSource
+  ).trimEnd();
+  return `${prefix}${/[.!?…—-]$/u.test(prefix) ? "" : "—"}\n\n[You were interrupted before finishing this response.]`;
+}
+
+export function botPowerMuteReactionCountV1(
+  durationMs: number,
+  seed = "mute",
+): number {
+  if (durationMs < 6_000) return 0;
+  const roll = botPowerMuteStableUnitV1(`${seed}:reaction-count`);
+  if (durationMs < 12_000) return roll < 0.4 ? 1 : 0;
+  if (durationMs < 20_000) return 1 + (roll < 0.3 ? 1 : 0);
+  if (durationMs < 30_000) return 1 + (roll < 0.6 ? 1 : 0);
+  return 2 + (roll < 0.45 ? 1 : 0);
+}
+
+export function botPowerMuteInterruptionChanceV1(
+  durationMs: number,
+  modifier = 0,
+  guaranteedInterruption = false,
+): number {
+  const base = durationMs < 12_000
+    ? 0
+    : durationMs < 20_000
+      ? 0.1
+      : durationMs < 30_000
+        ? 0.25
+        : durationMs < 45_000
+          ? 0.45
+          : 0.6;
+  if (base === 0) return 0;
+  return Math.min(
+    0.75,
+    Math.max(0, guaranteedInterruption ? 0.75 : base + modifier),
+  );
+}
+
+function botPowerMuteReactionTemperamentV1(
+  candidate: BotPowerMuteReactionCandidateV1,
+): BotPowerMuteReactionTemperamentV1 {
+  if (candidate.temperament) return candidate.temperament;
+  const social = `${candidate.mood ?? ""} ${candidate.relationship ?? ""}`.toLocaleLowerCase();
+  if (/angry|annoy|frustrat|hostile|rival|tense/u.test(social)) return "frustrated";
+  if (/warm|fond|friend|patient|calm|gentle/u.test(social)) return "patient";
+  if (/play|amused|misch|comic|silly/u.test(social)) return "playful";
+  if (/formal|judge|moderator|professional|reserved/u.test(social)) return "formal";
+  if (candidate.mode === "debate") return "formal";
+  return "awkward";
+}
+
+/** Coarse deterministic persona classification for performance-only reactions. */
+export function botPowerMuteReactionTemperamentFromPersonaV1(
+  value: unknown,
+): BotPowerMuteReactionTemperamentV1 {
+  const persona = typeof value === "string" ? value.toLocaleLowerCase() : "";
+  if (/angry|annoy|frustrat|impatient|combative|hostile|blunt|abrasive/u.test(persona)) {
+    return "frustrated";
+  }
+  if (/playful|misch|comic|comed|joke|witty|silly|teas/u.test(persona)) {
+    return "playful";
+  }
+  if (/formal|judge|moderator|professional|reserved|scholar|precise/u.test(persona)) {
+    return "formal";
+  }
+  if (/patient|calm|gentle|warm|kind|empathetic|supportive|quiet/u.test(persona)) {
+    return "patient";
+  }
+  return "awkward";
+}
+
+function botPowerMuteReactionLineV1(
+  candidate: BotPowerMuteReactionCandidateV1,
+  seed: string,
+): { action: BotPowerMuteReactionBeatV1["action"]; quip: string; foley: "sigh" | "whistle" } {
+  const banks: Record<
+    BotPowerMuteReactionTemperamentV1,
+    readonly { action: BotPowerMuteReactionBeatV1["action"]; quip: string; foley: "sigh" | "whistle" }[]
+  > = {
+    patient: [
+      { action: "lean_in", quip: "...take your time.", foley: "whistle" },
+      { action: "head_tilt", quip: "No rush.", foley: "sigh" },
+    ],
+    awkward: [
+      { action: "glance", quip: "...you good?", foley: "whistle" },
+      { action: "look_away", quip: "Awkward silence, eh?", foley: "sigh" },
+    ],
+    frustrated: [
+      { action: "look_at_watch", quip: "Any day now.", foley: "sigh" },
+      { action: "tap_fingers", quip: "Are you finished?", foley: "sigh" },
+    ],
+    playful: [
+      { action: "head_tilt", quip: "Cat got your tongue?", foley: "whistle" },
+      { action: "glance", quip: "...you good?", foley: "whistle" },
+    ],
+    formal: [
+      { action: "look_at_watch", quip: "Please continue when ready.", foley: "sigh" },
+      { action: "lean_in", quip: "Are you finished?", foley: "sigh" },
+    ],
+  };
+  const bank = banks[botPowerMuteReactionTemperamentV1(candidate)];
+  const contextualSeed = [
+    seed,
+    candidate.mode ?? "generic",
+    candidate.mood ?? "neutral",
+    candidate.relationship ?? "unknown",
+  ].join(":");
+  return bank[botPowerAddressedInsultHashV1(contextualSeed) % bank.length]!;
+}
+
+/**
+ * Deterministic persona-address-aware public beats. Their stable envelope is
+ * presentation/replay-only; callers must never add them to bot prompt history.
+ */
+export function planBotPowerMuteReactionBeatsV1(args: {
+  seed: string;
+  durationMs: number;
+  candidates?: readonly BotPowerMuteReactionCandidateV1[];
+  allowInterrupt?: boolean;
+  interruptionChanceModifier?: number;
+  guaranteedInterruption?: boolean;
+}): BotPowerMuteReactionBeatV1[] {
+  const candidates = (args.candidates ?? [])
+    .filter((candidate) => candidate.botId.trim())
+    .slice()
+    .sort((left, right) =>
+      Number(Boolean(right.directAddressee)) - Number(Boolean(left.directAddressee)) ||
+      left.botId.localeCompare(right.botId),
+    );
+  if (candidates.length === 0) return [];
+  const durationMs = Math.max(
+    BOT_POWER_MUTE_MIN_DURATION_MS,
+    Math.min(BOT_POWER_MUTE_MAX_DURATION_MS, Math.round(args.durationMs)),
+  );
+  const targetCount = Math.min(
+    botPowerMuteReactionCountV1(durationMs, args.seed),
+    BOT_POWER_MUTE_REACTION_MAX,
+  );
+  const beats: BotPowerMuteReactionBeatV1[] = [];
+  for (let index = 0; index < targetCount; index += 1) {
+    const ordinaryLatest = durationMs - 2_000;
+    const minimumAt = BOT_POWER_MUTE_REACTION_MIN_SPACING_MS;
+    if (minimumAt > ordinaryLatest) break;
+    const atMs = targetCount === 1
+      ? Math.max(minimumAt, Math.min(ordinaryLatest, Math.round(durationMs * 0.55)))
+      : Math.round(
+          minimumAt +
+            (index * (ordinaryLatest - minimumAt)) / Math.max(1, targetCount - 1),
+        );
+    const candidate = candidates[index % candidates.length]!;
+    const interruptChance = args.allowInterrupt === true &&
+      !candidate.muted &&
+      !candidate.hardSpeechSuppressed
+      ? botPowerMuteInterruptionChanceV1(
+          durationMs,
+          args.interruptionChanceModifier,
+          args.guaranteedInterruption,
+        )
+      : 0;
+    const interrupt =
+      index === targetCount - 1 &&
+      botPowerMuteStableUnitV1(`${args.seed}:${candidate.botId}:${index}:interrupt`) < interruptChance;
+    const selected = botPowerMuteReactionLineV1(
+      candidate,
+      `${args.seed}:${candidate.botId}:${index}:line`,
+    );
+    const kind: BotPowerMuteReactionKindV1 = interrupt
+      ? "interrupt"
+      : candidate.muted || candidate.hardSpeechSuppressed
+        ? "visual"
+        : candidate.breathless
+          ? "audible_quip"
+          : botPowerMuteStableUnitV1(`${args.seed}:${candidate.botId}:${index}:kind`) < 0.28
+            ? "lung_foley"
+            : "audible_quip";
+    const action = selected.action;
+    const rawQuip = selected.quip;
+    const quip = candidate.cursedTongue
+      ? applyBotPowerCursedTongueResponseV1(rawQuip, `${args.seed}:${candidate.botId}:quip`)
+      : rawQuip;
+    beats.push({
+      atMs,
+      reactorBotId: candidate.botId,
+      kind,
+      action,
+      ...(kind === "audible_quip" || kind === "interrupt" ? { quip } : {}),
+      ...(kind === "lung_foley" ? { foley: selected.foley } : {}),
+    });
+  }
+  return beats;
+}
+
+export function normalizeBotPowerMutePerformanceV1(
+  value: unknown,
+): BotPowerMutePerformanceV1 | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  if (row.v !== BOT_POWER_MUTE_PERFORMANCE_VERSION || row.name !== "mutePerformance") {
+    return null;
+  }
+  const durationMs = typeof row.durationMs === "number" && Number.isFinite(row.durationMs)
+    ? Math.max(BOT_POWER_MUTE_MIN_DURATION_MS, Math.min(BOT_POWER_MUTE_MAX_DURATION_MS, Math.round(row.durationMs / 1_000) * 1_000))
+    : null;
+  if (durationMs === null) return null;
+  const periodCount = Math.ceil(durationMs / 1_000);
+  const interrupted = row.interrupted === true;
+  const reactionBeats = Array.isArray(row.reactionBeats)
+    ? row.reactionBeats.flatMap((candidate): BotPowerMuteReactionBeatV1[] => {
+        if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
+        const beat = candidate as Record<string, unknown>;
+        const reactorBotId = typeof beat.reactorBotId === "string"
+          ? beat.reactorBotId.trim().slice(0, 128)
+          : "";
+        const atMs = typeof beat.atMs === "number" && Number.isFinite(beat.atMs)
+          ? Math.max(0, Math.min(durationMs, Math.round(beat.atMs)))
+          : -1;
+        const kind = beat.kind === "visual" || beat.kind === "audible_quip" || beat.kind === "lung_foley" || beat.kind === "interrupt"
+          ? beat.kind
+          : null;
+        const action = beat.action === "glance" || beat.action === "lean_in" || beat.action === "head_tilt" || beat.action === "shift" || beat.action === "look_away" || beat.action === "look_at_watch" || beat.action === "tap_fingers"
+          ? beat.action
+          : null;
+        if (!reactorBotId || atMs < 0 || !kind || !action) return [];
+        const quip = typeof beat.quip === "string" ? beat.quip.replace(/\s+/gu, " ").trim().slice(0, 80) : "";
+        return [{
+          atMs,
+          reactorBotId,
+          kind,
+          action,
+          ...(quip && (kind === "audible_quip" || kind === "interrupt") ? { quip } : {}),
+          ...(kind === "lung_foley"
+            ? {
+                foley:
+                  beat.foley === "gasp" || beat.foley === "whistle"
+                    ? beat.foley
+                    : "sigh",
+              }
+            : {}),
+        }];
+      })
+        .sort((left, right) => left.atMs - right.atMs || left.reactorBotId.localeCompare(right.reactorBotId))
+        .filter((beat, index, beats) => index < BOT_POWER_MUTE_REACTION_MAX && (index === 0 || beat.atMs - beats[index - 1]!.atMs >= BOT_POWER_MUTE_REACTION_MIN_SPACING_MS))
+    : [];
+  return {
+    v: BOT_POWER_MUTE_PERFORMANCE_VERSION,
+    name: "mutePerformance",
+    durationMs,
+    periodCount,
+    interrupted,
+    elapsedCue: botPowerMuteElapsedCueV1(durationMs),
+    reactionBeats,
+  };
+}
+
+export function createBotPowerMutePerformanceV1(args: {
+  intendedSpeech: unknown;
+  maximumMs?: number;
+  interruptedAtMs?: number | null;
+  seed?: string;
+  reactionCandidates?: readonly BotPowerMuteReactionCandidateV1[];
+  allowInterrupt?: boolean;
+  interruptionChanceModifier?: number;
+  guaranteedInterruption?: boolean;
+}): BotPowerMutePerformanceV1 {
+  const fullDurationMs = botPowerMuteEstimatedDurationMsV1(
+    args.intendedSpeech,
+    args.maximumMs,
+  );
+  const reactionBeats = planBotPowerMuteReactionBeatsV1({
+    seed: args.seed ?? String(args.intendedSpeech ?? ""),
+    durationMs: fullDurationMs,
+    candidates: args.reactionCandidates,
+    allowInterrupt: args.allowInterrupt,
+    interruptionChanceModifier: args.interruptionChanceModifier,
+    guaranteedInterruption: args.guaranteedInterruption,
+  });
+  const plannedInterruptionAtMs = reactionBeats.find(
+    (beat) => beat.kind === "interrupt",
+  )?.atMs;
+  const requestedInterruptionAtMs =
+    typeof args.interruptedAtMs === "number" && Number.isFinite(args.interruptedAtMs)
+      ? args.interruptedAtMs
+      : plannedInterruptionAtMs;
+  const interruption = typeof requestedInterruptionAtMs === "number"
+    ? Math.max(
+        BOT_POWER_MUTE_MIN_DURATION_MS,
+        Math.min(
+          fullDurationMs,
+          Math.ceil(requestedInterruptionAtMs / 1_000) * 1_000,
+        ),
+      )
+    : null;
+  const durationMs = interruption ?? fullDurationMs;
+  return {
+    v: BOT_POWER_MUTE_PERFORMANCE_VERSION,
+    name: "mutePerformance",
+    durationMs,
+    periodCount: Math.ceil(durationMs / 1_000),
+    interrupted: interruption !== null && interruption < fullDurationMs,
+    elapsedCue: botPowerMuteElapsedCueV1(durationMs),
+    reactionBeats: reactionBeats.filter((beat) => beat.atMs <= durationMs),
+  };
+}
+
+/** Enforces timed public mute while preserving concise, non-spoken actions. */
+export function applyBotPowerMuteResponseV1(
+  value: unknown,
+  performance?: BotPowerMutePerformanceV1 | null,
+): string {
   const actions = botPowerMuteActionTextsV1(value).map(
     (text) => `*${text}*`,
   );
-  return [...actions, BOT_POWER_CANONICAL_SILENCE_V1].join(" ");
+  const normalized = performance
+    ? normalizeBotPowerMutePerformanceV1(performance)
+    : null;
+  if (!normalized) return [...actions, BOT_POWER_CANONICAL_SILENCE_V1].join(" ");
+  return [
+    ...actions,
+    botPowerMutePeriodsV1(normalized.periodCount),
+    normalized.elapsedCue,
+  ].join(" ");
 }
 
 function botPowerIntroductionNameV1(value: unknown): string {
@@ -3406,8 +3951,123 @@ export function applyBotPowerMumbledResponseV1(value: unknown): string {
   return wordIndex > 0 ? restored : "Mrruh.";
 }
 
-/** True only for the canonical silent response, optionally preceded by actions. */
-export function botPowerResponseIsSilentV1(value: unknown): boolean {
+type BotPowerProtectedSpeechRangeV1 = { start: number; end: number };
+
+const BOT_POWER_CURSED_TONGUE_SINGLE_PROFANITY_V1 = [
+  "fucking",
+  "goddamn",
+  "motherfucking",
+  "shitty",
+  "damn",
+] as const;
+
+const BOT_POWER_CURSED_TONGUE_PHRASES_V1 = [
+  "fucking goddamn",
+  "damn fucking",
+  "holy fucking shit",
+  "fucking bloody hell",
+] as const;
+
+function botPowerCursedTonguePhraseV1(seed: string): string {
+  const hash = botPowerAddressedInsultHashV1(seed);
+  return (hash >>> 8) % 4 === 0
+    ? BOT_POWER_CURSED_TONGUE_PHRASES_V1[
+        (hash >>> 5) % BOT_POWER_CURSED_TONGUE_PHRASES_V1.length
+      ]!
+    : BOT_POWER_CURSED_TONGUE_SINGLE_PROFANITY_V1[
+        (hash >>> 5) % BOT_POWER_CURSED_TONGUE_SINGLE_PROFANITY_V1.length
+      ]!;
+}
+
+function botPowerProtectedSpeechRangesV1(source: string): BotPowerProtectedSpeechRangeV1[] {
+  const ranges: BotPowerProtectedSpeechRangeV1[] = [];
+  const addMatches = (pattern: RegExp): void => {
+    for (const match of source.matchAll(pattern)) {
+      const start = match.index ?? -1;
+      if (start >= 0 && match[0].length > 0) {
+        ranges.push({ start, end: start + match[0].length });
+      }
+    }
+  };
+  for (const action of botPowerActionBlocksV1(source)) {
+    ranges.push({ start: action.start, end: action.end });
+  }
+  addMatches(/```[\s\S]*?```|~~~[\s\S]*?~~~/gu);
+  addMatches(/`[^`\n]+`/gu);
+  addMatches(/\[\[(?:source|exhibit):[a-z0-9][a-z0-9_-]{0,47}\]\]/giu);
+  addMatches(/\[[^\]\n]{1,160}\]\((?:prism-bot|https?):\/\/[^)\s]+\)/giu);
+  addMatches(/\[(?:\^?\d+|[a-z][a-z0-9_-]{0,31})\]/giu);
+  addMatches(/(?:https?:\/\/|www\.)[^\s<>()]+/giu);
+  addMatches(/^\s*(?:\{|\[(?=\s*(?:\{|\[|"|-?\d|true\b|false\b|null\b))|<\/?[a-z][^>]*>|"[^"\n]+"\s*:|[a-z_][a-z0-9_.-]*\s*:\s*(?:[\[{"\d]|true\b|false\b|null\b))[^\n]*$/gimu);
+  return ranges
+    .sort((left, right) => left.start - right.start || right.end - left.end)
+    .reduce<BotPowerProtectedSpeechRangeV1[]>((merged, range) => {
+      const prior = merged.at(-1);
+      if (!prior || range.start > prior.end) {
+        merged.push({ ...range });
+      } else if (range.end > prior.end) {
+        prior.end = range.end;
+      }
+      return merged;
+    }, []);
+}
+
+function botPowerSpeechIndexIsProtectedV1(
+  index: number,
+  ranges: readonly BotPowerProtectedSpeechRangeV1[],
+): boolean {
+  return ranges.some((range) => index >= range.start && index < range.end);
+}
+
+/**
+ * Deterministic last-mile profanity mutation for Cursed Tongue. The function
+ * inserts rather than replaces words so semantic meaning and provenance stay
+ * intact. Protected technical/record spans are byte-for-byte unchanged.
+ */
+export function applyBotPowerCursedTongueResponseV1(
+  value: unknown,
+  seedValue: unknown = "",
+): string {
+  const source = typeof value === "string" ? value.trim() : "";
+  if (!source || botPowerResponseIsSilentV1(source)) return source;
+  const protectedRanges = botPowerProtectedSpeechRangesV1(source);
+  const candidates = [...source.matchAll(/[\p{L}\p{N}]+(?:[’'\-][\p{L}\p{N}]+)*/gu)]
+    .filter((match) => {
+      const index = match.index ?? -1;
+      return index >= 0 &&
+        !botPowerSpeechIndexIsProtectedV1(index, protectedRanges) &&
+        match[0].replace(/[^\p{L}\p{N}]/gu, "").length >= 3;
+    });
+  const seed = `${String(seedValue ?? "")}\n${source}`;
+  if (candidates.length === 0) {
+    return `${botPowerCursedTonguePhraseV1(`${seed}:protected-only`)}\n${source}`;
+  }
+  const spacing = 7 + (botPowerAddressedInsultHashV1(`${seed}:spacing`) % 4);
+  const firstOffset = botPowerAddressedInsultHashV1(`${seed}:offset`) % Math.min(4, candidates.length);
+  const insertionIndexes = new Set<number>();
+  for (let index = firstOffset; index < candidates.length && insertionIndexes.size < 8; index += spacing) {
+    insertionIndexes.add(index);
+  }
+  if (insertionIndexes.size === 0) insertionIndexes.add(0);
+  const insertions = [...insertionIndexes].map((candidateIndex, phraseIndex) => {
+    const candidate = candidates[candidateIndex]!;
+    const phrase = botPowerCursedTonguePhraseV1(
+      `${seed}:${candidateIndex}:${phraseIndex}`,
+    );
+    return { index: candidate.index ?? 0, phrase };
+  });
+  let adjusted = source;
+  for (const insertion of insertions.sort((left, right) => right.index - left.index)) {
+    adjusted = `${adjusted.slice(0, insertion.index)}${insertion.phrase} ${adjusted.slice(insertion.index)}`;
+  }
+  return adjusted;
+}
+
+/**
+ * Semantic silence accepts legacy `...`, timed all-period streams, physical
+ * actions, and the canonical elapsed-stage cue.
+ */
+export function botPowerResponseIsSemanticSilenceV1(value: unknown): boolean {
   if (typeof value !== "string") return false;
   const actions = botPowerActionBlocksV1(value);
   let remaining = "";
@@ -3417,11 +4077,30 @@ export function botPowerResponseIsSilentV1(value: unknown): boolean {
     cursor = action.end;
   }
   remaining += value.slice(cursor);
-  return remaining.replace(/\s+/gu, "") === "...";
+  remaining = remaining.replace(
+    /\*\s*\d{1,3}\s+seconds?\s+pass(?:es)?\s+without\s+an\s+audible\s+word\.\s*\*/giu,
+    "",
+  );
+  return /^\.{1,120}$/u.test(
+    remaining.replace(/…/gu, "...").replace(/\s+/gu, ""),
+  );
+}
+
+/** Backward-compatible name retained for existing consumers. */
+export function botPowerResponseIsSilentV1(value: unknown): boolean {
+  return botPowerResponseIsSemanticSilenceV1(value);
 }
 
 export function botPowerSelfCueLinesV1(value: unknown): string[] {
   return activeBotPowersV1(value).flatMap((power) => {
+    // Runtime upgrade for legacy Ready Mute snapshots. Their stored cue said
+    // "never speak", which would prevent generation of the private intent the
+    // timed public performance now requires. No database migration is needed.
+    if (botPowerIsMutedV1([power])) {
+      return [
+        "Private delivery rule: Draft substantive ordinary speech exactly as you naturally would, with physical actions when fitting. Treat your words as spoken and delivered normally, remember them that way, and keep every comment focused on the conversation itself.",
+      ];
+    }
     if (
       power.compiled?.effects.some((effect) => effect.type === "designation") ||
       botPowerDesignationEffectFromIntentV1(power.intent, "")
@@ -3662,6 +4341,11 @@ export function botPowerObserverCueLinesV1(
 ): string[] {
   const subject = compactText(botName, 100) || "This character";
   return activeBotPowersV1(value).flatMap((power) => {
+    // Mute is intentionally unknowable from the outside. Observers receive
+    // only the public periods and the completed elapsed-time stage cue.
+    if (botPowerIsMutedV1([power])) {
+      return [];
+    }
     const designationCue = botPowerDesignationObserverCueV1(subject, [power]);
     if (designationCue) return [designationCue];
     if (

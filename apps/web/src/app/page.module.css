@@ -1229,8 +1229,20 @@
 }
 
 .botAvatarStudioMiniPreviewViewport .botAvatarStudioMiniAvatar {
+  /* The emitted glyph reads one pixel left and high inside the buckle's
+     authored dark aperture. Move only that emission; the metal orb remains
+     registered to its raster. */
+  --chat-mini-bot-lower-screen-nudge-x: 1px;
+  --chat-mini-bot-lower-screen-nudge-y: 1px;
   width: 122px;
   height: 122px;
+}
+
+/* The full avatar's 128-cell face screen remains the placement authority.
+   Mini Ink uses the same square plane and receives only this preview-pixel
+   optical lift; the authored raster itself is never rewritten. */
+.botAvatarStudioMiniPreviewViewport .emptyStateHeroMiniArt {
+  transform: translateY(-2px);
 }
 
 .themeLight.botAvatarStudioThemeScope
@@ -1254,6 +1266,45 @@
 .botAvatarStudioMicroPreview {
   display: grid;
   place-items: center;
+}
+
+.botAvatarMicroScreen {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.botAvatarMicroScreenContent,
+.botAvatarMicroFaceRig {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  transform-origin: 50% 50%;
+}
+
+.botAvatarMicroScreenContent {
+  transform: scale(var(--bot-avatar-micro-screen-scale, 1));
+}
+
+.botAvatarMicroFaceRig {
+  z-index: 2;
+  transform: translate(
+    var(--bot-avatar-micro-face-nudge-x, 0px),
+    var(--bot-avatar-micro-face-nudge-y, 0px)
+  );
+}
+
+/* The preview keeps the established optical registration; the renderer's
+   canonical post-rotation flip now supplies the missing orientation. */
+.botAvatarStudioMicroPreview
+  .messageMoodBadge[data-face="coffee"][data-variant="micro"] {
+  --bot-avatar-micro-screen-scale: 1.12;
+  --bot-avatar-micro-face-nudge-x: 1px;
+  --bot-avatar-micro-face-nudge-y: -1px;
 }
 
 .botAvatarStudioMicroPreview
@@ -3774,10 +3825,10 @@
   translate: 0 0;
 }
 
-/* Zen depth magnifies one canonical authored raster. Keeping the inner canvas
-   fixed prevents container queries and phosphor geometry from laying the face
-   or Ink out differently as the bot travels toward the player. */
-.zenLiveBotPresencePlate[data-depth-scaled="true"][data-avatar-render-mode="full"]
+/* Zen size controls magnify one canonical authored raster. Keeping the inner
+   canvas fixed prevents container queries and phosphor geometry from laying
+   the face or Ink out differently at each explicit size. */
+.zenLiveBotPresencePlate[data-user-avatar-scale="true"][data-avatar-render-mode="full"]
   > .botAmbientPresenceRig {
   --zen-live-bot-avatar-size: var(--zen-live-bot-avatar-render-size, 190px);
   --zen-live-bot-avatar-body-size: var(
@@ -3785,6 +3836,12 @@
     190px
   );
   transform: scale(var(--zen-live-bot-user-scale, 1));
+  transform-origin: 50% 50%;
+  /* Keep dragging directly registered to the pointer. */
+  transition:
+    scale 180ms ease,
+    translate 180ms ease,
+    opacity 180ms ease;
 }
 
 /* The compact size band is a different authored object, not a downsampled HD
@@ -15404,31 +15461,52 @@
     );
 }
 
-.messagesFrame[data-mode="home"] {
+.messagesFrame[data-mode="home"],
+.messagesFrame[data-mode="directory"] {
   background:
     radial-gradient(
-      ellipse 78% 58% at 10% 18%,
-      color-mix(in srgb, #ff4d6d 7%, transparent),
+      ellipse 78% 58% at var(--home-halo-1-x, 10%) 18%,
+      color-mix(
+        in srgb,
+        var(--home-halo-1-color, #ff4d6d) 7%,
+        transparent
+      ),
       transparent 68%
     ),
     radial-gradient(
-      ellipse 82% 56% at 34% 4%,
-      color-mix(in srgb, #ff9f1c 5%, transparent),
+      ellipse 82% 56% at var(--home-halo-2-x, 34%) 4%,
+      color-mix(
+        in srgb,
+        var(--home-halo-2-color, #ff9f1c) 5%,
+        transparent
+      ),
       transparent 70%
     ),
     radial-gradient(
-      ellipse 86% 60% at 52% 50%,
-      color-mix(in srgb, #b7e63a 4%, transparent),
+      ellipse 86% 60% at var(--home-halo-3-x, 52%) 50%,
+      color-mix(
+        in srgb,
+        var(--home-halo-3-color, #b7e63a) 4%,
+        transparent
+      ),
       transparent 72%
     ),
     radial-gradient(
-      ellipse 82% 58% at 72% 16%,
-      color-mix(in srgb, #2fd3e3 6%, transparent),
+      ellipse 82% 58% at var(--home-halo-4-x, 72%) 16%,
+      color-mix(
+        in srgb,
+        var(--home-halo-4-color, #2fd3e3) 6%,
+        transparent
+      ),
       transparent 70%
     ),
     radial-gradient(
-      ellipse 80% 60% at 92% 40%,
-      color-mix(in srgb, #7b5cff 6%, transparent),
+      ellipse 80% 60% at var(--home-halo-5-x, 92%) 40%,
+      color-mix(
+        in srgb,
+        var(--home-halo-5-color, #7b5cff) 6%,
+        transparent
+      ),
       transparent 72%
     );
 }
@@ -15454,8 +15532,10 @@
     );
 }
 
-/* Home / zoomed-out — rainbow mood. Empty-state surface, regular
-   chat, no filter and no bot interaction yet. Structurally mirrors
+/* Home / Zen directory — contextual spectrum mood. Root uses the five
+   canonical PRISM colors; hue directories use 2–5 representative colors
+   from the visible window. Five is a hard ceiling, so a 25-row directory
+   has the same atmospheric density as a 5-row directory. Structurally mirrors
    the default orb (white core at the slider's X, soft halo behind
    it, bg-surface fade for compose-form continuity) but the single
    --accent halo is replaced with FIVE PRISM-color radials
@@ -15464,7 +15544,8 @@
    spectrum" rather than a hard rainbow stripe. The white orb stays
    at `var(--lens-thumb-x, 50%)` so it sits exactly under the
    slider thumb, matching every other mode. */
-.messagesFrame[data-mode="home"]::after {
+.messagesFrame[data-mode="home"]::after,
+.messagesFrame[data-mode="directory"]::after {
   filter: saturate(1.45);
   background:
     /* White core orb — still reads as the lens highlight, but with less
@@ -16316,8 +16397,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   border-radius: 18px;
 }
 
+.botGroupHero[data-room-variant="waiting"] .botGroupHeroIdentity {
+  max-width: min(70ch, 64%);
+}
+
 .botGroupHero[data-room-variant="waiting"] .botGroupHeroCopy {
-  max-width: min(66ch, 58%);
+  max-width: 100%;
 }
 
 .botGroupHero[data-room-variant="waiting"] .botGroupHeroEyebrow {
@@ -17324,9 +17409,40 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   gap: clamp(16px, 3vw, 34px);
 }
 
+.botGroupHeroIdentity {
+  min-width: 0;
+  max-width: min(64ch, 65%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.botGroupHeroIdentityMark {
+  width: 58px;
+  height: 58px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid
+    color-mix(in srgb, var(--bot-library-group-accent) 48%, var(--line));
+  border-radius: 16px;
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--bg-surface) 30%, transparent),
+      color-mix(in srgb, var(--bg) 20%, transparent)
+    ),
+    var(--bot-library-group-gradient);
+  color: color-mix(in srgb, #fff 86%, var(--bot-library-group-accent));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 34%, transparent),
+    0 9px 24px
+      color-mix(in srgb, var(--bot-library-group-accent) 18%, transparent);
+}
+
 .botGroupHeroCopy {
   min-width: 0;
-  max-width: min(58ch, 62%);
+  max-width: min(58ch, 100%);
   align-self: center;
 }
 
@@ -17458,6 +17574,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .botGroupHeroHeader {
     display: grid;
     gap: 15px;
+  }
+
+  .botGroupHeroIdentity {
+    max-width: none;
   }
 
   .botGroupHeroCopy,
@@ -18541,6 +18661,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     var(--chat-mini-bot-glyph-size, clamp(14px, 1.35vw, 17px)) - 2px
   );
   color: color-mix(in srgb, var(--chat-mini-bot-color, var(--accent)) 88%, #ffffff);
+  filter: none;
 }
 
 .emptyStateSelectedHeroCopy {
@@ -19971,6 +20092,30 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .chatBotTileBotGlyph {
   opacity: 1;
+}
+
+.botGroupLeaderCrown {
+  position: absolute;
+  z-index: 6;
+  top: max(3px, calc(var(--tile-size, 40px) * 0.06));
+  right: max(3px, calc(var(--tile-size, 40px) * 0.06));
+  width: clamp(17px, calc(var(--tile-size, 40px) * 0.24), 25px);
+  height: clamp(17px, calc(var(--tile-size, 40px) * 0.24), 25px);
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, #ffd95a 68%, var(--line));
+  border-radius: 999px;
+  color: color-mix(in srgb, #ffd95a 84%, #ffffff);
+  background: color-mix(in srgb, var(--bg) 88%, #ffd95a 12%);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--bg) 72%, transparent),
+    0 0 12px color-mix(in srgb, #ffd95a 34%, transparent);
+  pointer-events: none;
+}
+
+.chatBotPickerPixelGrid .botGroupLeaderCrown,
+.chatBotTileSolidSwatch .botGroupLeaderCrown {
+  display: none;
 }
 
 .chatBotTileBotGlyph > svg,
@@ -22567,79 +22712,29 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .messageMoodBadge[data-face="coffee"][data-variant="micro"] {
   width: 22px;
   height: 22px;
-  background:
-    radial-gradient(
-      circle at 38% 28%,
-      color-mix(in srgb, #ffffff 12%, transparent) 0 8%,
-      transparent 32%
-    ),
-    color-mix(in srgb, #05080b 91%, var(--coffee-bot-color) 9%);
+  background: color-mix(in srgb, #05080b 94%, var(--coffee-bot-color) 6%);
   border: 1px solid
     color-mix(in srgb, var(--coffee-bot-color) 72%, rgba(255, 255, 255, 0.16));
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, #ffffff 7%, transparent),
-    inset 0 0 8px color-mix(in srgb, var(--coffee-bot-color) 12%, transparent),
-    0 0 8px color-mix(in srgb, var(--coffee-bot-color) 28%, transparent);
+  box-shadow: none;
   overflow: visible;
   position: relative;
 }
 
+.messageMoodBadge[data-face="coffee"][data-variant="micro"],
+.messageMoodBadge[data-face="coffee"][data-variant="micro"] * {
+  animation: none !important;
+  transition: none !important;
+}
+
 .themeLight
   .messageMoodBadge[data-face="coffee"][data-variant="micro"] {
-  background:
-    radial-gradient(
-      circle at 38% 28%,
-      rgba(255, 255, 255, 0.92) 0 8%,
-      transparent 32%
-    ),
-    color-mix(in srgb, #f7fafc 94%, var(--coffee-bot-color) 6%);
+  background: color-mix(in srgb, #f7fafc 96%, var(--coffee-bot-color) 4%);
   border-color: color-mix(
     in srgb,
     var(--coffee-bot-color) 58%,
     rgba(5, 8, 11, 0.24)
   );
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.68),
-    inset 0 0 7px color-mix(in srgb, var(--coffee-bot-color) 9%, transparent),
-    0 0 7px color-mix(in srgb, var(--coffee-bot-color) 20%, transparent);
-}
-
-.botAvatarMicroTalkingGlow {
-  position: absolute;
-  inset: -12%;
-  z-index: 0;
-  border-radius: 50%;
-  pointer-events: none;
-  background: radial-gradient(
-    circle,
-    color-mix(in srgb, var(--coffee-bot-color) 44%, transparent) 0 30%,
-    color-mix(in srgb, var(--coffee-bot-color) 20%, transparent) 52%,
-    transparent 78%
-  );
-  filter: blur(5px) saturate(1.1);
-  opacity: 0;
-  transform: scale(0.9);
-  transition:
-    opacity 200ms ease-out,
-    transform 280ms cubic-bezier(0.22, 0.72, 0.24, 1);
-}
-
-.messageMoodBadge[data-face="coffee"][data-variant="micro"][data-talking="true"]
-  .botAvatarMicroTalkingGlow {
-  opacity: 0.7;
-  transform: scale(1.08);
-}
-
-.themeLight
-  .messageMoodBadge[data-face="coffee"][data-variant="micro"][data-talking="true"]
-  .botAvatarMicroTalkingGlow {
-  opacity: 0.46;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .botAvatarMicroTalkingGlow {
-    transition: none;
-  }
+  box-shadow: none;
 }
 
 .botAvatarMicroInk {
@@ -22668,13 +22763,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .messageMoodMicroFace {
   position: relative;
   z-index: 2;
-  --crt-core-opacity: 1;
-  --crt-beam-softness: 0.2px;
-  --crt-bloom-narrow-radius: 0.45px;
-  --crt-bloom-narrow-strength: 0.14;
-  --crt-bloom-wide-strength: 0.02;
-  --crt-phosphor-opacity: 0.05;
-  --crt-scanline-opacity: 0.01;
   display: block;
   font-family: var(--prism-face-font);
   font-size: 12px;
@@ -22683,18 +22771,41 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   letter-spacing: var(--prism-face-letter-spacing);
   font-variant-ligatures: none;
   color: #ffffff;
-  text-shadow: 0 0 1px color-mix(in srgb, currentColor 62%, transparent);
+  filter: none;
+  text-shadow: none;
   transform-origin: center center;
 }
 
 .themeLight .messageMoodMicroFace {
   color: #05080b;
-  text-shadow: 0 0 1px rgba(255, 255, 255, 0.46);
+  text-shadow: none;
+}
+
+.messageMoodMicroFace [data-coffee-plate-emoji-part],
+.messageMoodMicroFace [data-crt-glyph-layer="true"] {
+  filter: none;
+  text-shadow: none;
+}
+
+.messageMoodMicroFace [data-crt-glyph-layer="true"]::before {
+  display: none;
+}
+
+.messageMoodMicroFace [data-crt-glyph-layer="true"]::after {
+  color: currentColor;
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  -webkit-text-fill-color: currentColor;
+  -webkit-text-stroke: 0;
+  filter: none;
+  mix-blend-mode: normal;
+  text-shadow: none;
 }
 
 .signalArchiveMiniAvatar[data-size="room"] {
-  width: 58px;
-  height: 58px;
+  width: 88px;
+  height: 88px;
   transform: none;
 }
 
@@ -23546,7 +23657,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .markdownBody h2,
 .markdownBody h3,
 .markdownBody h4,
-.markdownBody h5 {
+.markdownBody h5,
+.markdownBody h6 {
   margin: 0.26em 0 0.08em;
   line-height: 1.24;
   font-weight: 700;
@@ -23578,6 +23690,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   color: var(--message-heading-color-h5, currentColor);
 }
 
+.markdownBody h6 {
+  font-size: 1em;
+  color: color-mix(in srgb, currentColor 82%, transparent);
+  letter-spacing: 0.015em;
+}
+
 .markdownBody ul,
 .markdownBody ol {
   margin: 0;
@@ -23586,6 +23704,46 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .markdownBody li {
   margin: 0.18em 0;
+}
+
+.markdownBody :global(.contains-task-list) {
+  padding-left: 0.25em;
+  list-style: none;
+}
+
+.markdownBody :global(.task-list-item) {
+  display: flex;
+  align-items: baseline;
+  gap: 0.52em;
+  list-style: none;
+}
+
+.markdownBody :global(.task-list-item) input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 1em;
+  height: 1em;
+  margin: 0;
+  accent-color: currentColor;
+}
+
+.markdownBody hr {
+  width: 100%;
+  height: 1px;
+  margin: 0.42em 0;
+  border: 0;
+  background: color-mix(in srgb, currentColor 22%, transparent);
+}
+
+.markdownBody del {
+  color: color-mix(in srgb, currentColor 68%, transparent);
+  text-decoration-thickness: 0.08em;
+}
+
+.markdownBody img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 12px;
 }
 
 .markdownBody blockquote {
@@ -27896,8 +28054,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   top: var(--zen-live-bot-avatar-y, 20px);
   z-index: 4;
   margin: 0;
-  contain: layout style;
-  will-change: transform, left, top, width;
+  will-change: transform, left, top;
 }
 
 .zenLiveBotPresencePlate * {
@@ -34648,6 +34805,57 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   border-color: var(--line-strong);
 }
 
+.composeModelMaxElectricity {
+  position: absolute;
+  pointer-events: none;
+  inset: 0;
+  z-index: 5;
+  border-radius: inherit;
+  background-image: url("/ui/max-electric-loop.gif");
+  background-image: image-set(
+    url("/ui/max-electric-loop.webp") type("image/webp"),
+    url("/ui/max-electric-loop.gif") type("image/gif")
+  );
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  image-rendering: auto;
+  filter: drop-shadow(
+    0 0 4px color-mix(in srgb, #55cfff 48%, transparent)
+  );
+  mix-blend-mode: screen;
+}
+
+.composeModelControl[data-max-effort="true"] {
+  border-color: color-mix(in srgb, #8fdcff 76%, var(--line-strong));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, #dff8ff 18%, transparent),
+    0 0 8px color-mix(in srgb, #36a9ff 18%, transparent);
+}
+
+:global(body[data-prism-theme="light"]) .composeModelMaxElectricity {
+  filter:
+    brightness(0)
+    saturate(100%)
+    invert(38%)
+    sepia(96%)
+    saturate(1820%)
+    hue-rotate(201deg)
+    brightness(94%)
+    contrast(100%)
+    drop-shadow(0 0 3px color-mix(in srgb, #2563eb 36%, transparent));
+  mix-blend-mode: multiply;
+  opacity: 0.84;
+}
+
+:global(body[data-prism-theme="light"])
+  .composeModelControl[data-max-effort="true"] {
+  border-color: color-mix(in srgb, #2563eb 68%, var(--line-strong));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, #7dd3fc 22%, transparent),
+    0 0 7px color-mix(in srgb, #2563eb 18%, transparent);
+}
+
 .composeModelControl[data-turbo="true"]::after {
   content: "";
   position: absolute;
@@ -35350,6 +35558,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .composeModelMaxElectricity {
+    background-image: url("/ui/max-electric-still.png");
+  }
+
   .composeModelTurboSmokeBurst {
     display: none;
   }
@@ -43887,6 +44099,224 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   gap: 9px;
 }
 
+.botPanelHubMemberships {
+  display: grid;
+  gap: 8px;
+  padding: 11px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color) 25%, var(--line));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-surface) 72%, transparent);
+}
+
+.botPanelHubMemberships > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.botPanelHubMemberships > header > span {
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.botPanelHubMemberships > header small {
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.botPanelHubMemberships > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.botPanelHubMembership {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 76px;
+  min-height: 76px;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  place-items: center;
+  gap: 5px;
+  padding: 8px 5px 7px;
+  border: 1px solid color-mix(in srgb, var(--bot-library-group-accent) 42%, var(--line));
+  border-radius: 14px;
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--bg-surface) 38%, transparent), color-mix(in srgb, var(--bg) 22%, transparent)),
+    var(--bot-library-group-gradient);
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+  transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.botPanelHubMembership > span {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, #fff 26%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-surface) 30%, transparent);
+  color: color-mix(in srgb, #fff 84%, var(--bot-library-group-accent));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 34%, transparent);
+}
+
+.botPanelHubMembership strong {
+  width: 100%;
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 10px;
+  font-weight: 780;
+  line-height: 1.1;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.botPanelHubMembership:hover,
+.botPanelHubMembership:focus-visible {
+  outline: none;
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--bot-library-group-accent) 76%, var(--line));
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--bot-library-group-accent) 22%, transparent);
+}
+
+.botPanelHubSuggestions {
+  display: grid;
+  gap: 8px;
+  padding: 11px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color) 25%, var(--line));
+  border-radius: 14px;
+  background:
+    radial-gradient(
+      circle at 100% 0%,
+      color-mix(in srgb, var(--editor-bot-color) 12%, transparent),
+      transparent 54%
+    ),
+    color-mix(in srgb, var(--bg-surface) 72%, transparent);
+}
+
+.botPanelHubSuggestions > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.botPanelHubSuggestions > header > span {
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.botPanelHubSuggestionsRefresh,
+.botPanelHubSuggestion > button {
+  -webkit-appearance: none;
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--bot-library-group-accent, var(--editor-bot-color)) 45%, var(--line));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg-surface) 68%, transparent);
+  color: var(--fg);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 780;
+  cursor: pointer;
+}
+
+.botPanelHubSuggestionsRefresh {
+  min-height: 27px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 7px;
+}
+
+.botPanelHubSuggestionsRefresh:hover:not(:disabled),
+.botPanelHubSuggestionsRefresh:focus-visible,
+.botPanelHubSuggestion > button:hover,
+.botPanelHubSuggestion > button:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--bot-library-group-accent, var(--editor-bot-color)) 78%, var(--line));
+  background: color-mix(in srgb, var(--bot-library-group-accent, var(--editor-bot-color)) 16%, var(--bg-surface));
+}
+
+.botPanelHubSuggestionsRefresh:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.botPanelHubSuggestionsStatus {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.botPanelHubSuggestionsStatus[data-error="true"] {
+  color: var(--danger);
+}
+
+.botPanelHubSuggestionList {
+  display: grid;
+  gap: 7px;
+}
+
+.botPanelHubSuggestion {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px;
+  border: 1px solid color-mix(in srgb, var(--bot-library-group-accent) 32%, var(--line));
+  border-radius: 11px;
+  background: var(--bot-library-group-gradient);
+}
+
+.botPanelHubSuggestion > span:first-child {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, #fff 26%, transparent);
+  border-radius: 10px;
+  color: color-mix(in srgb, #fff 84%, var(--bot-library-group-accent));
+  background: color-mix(in srgb, var(--bg-surface) 34%, transparent);
+}
+
+.botPanelHubSuggestion > span:nth-child(2) {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.botPanelHubSuggestion strong,
+.botPanelHubSuggestion small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.botPanelHubSuggestion strong {
+  color: var(--fg);
+  font-size: 11px;
+}
+
+.botPanelHubSuggestion small {
+  color: color-mix(in srgb, var(--fg-muted) 82%, var(--fg) 18%);
+  font-size: 10px;
+}
+
+.botPanelHubSuggestion > button {
+  min-height: 29px;
+  padding: 4px 9px;
+}
+
 .botPanelHubStudioGroup {
   min-width: 0;
   display: grid;
@@ -46028,6 +46458,19 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .settingsModelDisplayNameAction:hover {
   color: var(--fg);
+}
+
+.settingsModelDisplayNameEditButton {
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0;
+}
+
+.settingsModelDisplayNameEditButton svg {
+  width: 12px;
+  height: 12px;
 }
 
 .form button.settingsInfoButton,
@@ -48868,7 +49311,7 @@ a.settingsCreditItem:focus-visible {
 }
 
 .botLibraryContent[data-list-visible="true"] {
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .botLibraryContent[data-dashboard-active="true"][data-list-visible="true"] {
@@ -61181,6 +61624,24 @@ a.settingsCreditItem:focus-visible {
   pointer-events: none;
 }
 
+.botCardLeaderCrown {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 17px;
+  height: 17px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, #ffd95a 70%, var(--line));
+  border-radius: 999px;
+  color: #6b4700;
+  background: color-mix(in srgb, #ffd95a 88%, #ffffff);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--bg) 82%, transparent),
+    0 0 9px color-mix(in srgb, #ffd95a 46%, transparent);
+  pointer-events: none;
+}
+
 /* ── Bot glyph picker ────────────────────────────────────────────
    Dense, glyph-first grid. Compact square cells keep the chooser tidy
    while the glyph size/stroke relationship comes from BotGlyph itself:
@@ -62296,9 +62757,9 @@ a.settingsCreditItem:focus-visible {
   }
 }
 
-/* Color hue strip: X = hue 0→360° left to right. Lightness is authored by
-   the adjacent brightness rail; saturation stays at the canonical 100%.
-   Private-mode desaturation remains a separate presentation path. */
+/* Color hue strip: X = hue 0→360° left to right. The stored bot color owns
+   canonical lightness and stays at 100% saturation; no brightness control
+   post-processes its accent. Private-mode desaturation remains separate. */
 .colorSquare {
   position: relative;
   width: 100%;
@@ -62323,50 +62784,6 @@ a.settingsCreditItem:focus-visible {
     hsl(360, 100%, 50%)
   );
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
-}
-
-.colorLightnessControl {
-  width: 100%;
-  display: grid;
-  gap: 5px;
-  color: var(--fg-muted);
-  font-size: 9px;
-  font-weight: 760;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.colorLightnessControl > span {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.colorLightnessControl output {
-  color: var(--fg);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.04em;
-}
-
-.colorLightnessControl input[type="range"] {
-  width: 100%;
-  height: 18px;
-  margin: 0;
-  cursor: ew-resize;
-  accent-color: hsl(var(--picker-hue, 0), 100%, 50%);
-  background: linear-gradient(
-    to right,
-    hsl(var(--picker-hue, 0), 100%, 30%),
-    hsl(var(--picker-hue, 0), 100%, 50%),
-    hsl(var(--picker-hue, 0), 100%, 70%)
-  );
-  border-radius: 999px;
-}
-
-.colorLightnessControl input[type="range"]:focus-visible {
-  outline: 2px solid var(--fg);
-  outline-offset: 2px;
 }
 
 /* Tiny ring marking the currently picked hue. Vertically centered on
@@ -63957,31 +64374,52 @@ a.settingsCreditItem:focus-visible {
     );
 }
 
-.themeLight .messagesFrame[data-mode="home"] {
+.themeLight .messagesFrame[data-mode="home"],
+.themeLight .messagesFrame[data-mode="directory"] {
   background:
     radial-gradient(
-      ellipse 78% 58% at 10% 18%,
-      color-mix(in srgb, #ff4d6d 4.5%, transparent),
+      ellipse 78% 58% at var(--home-halo-1-x, 10%) 18%,
+      color-mix(
+        in srgb,
+        var(--home-halo-1-color, #ff4d6d) 4.5%,
+        transparent
+      ),
       transparent 68%
     ),
     radial-gradient(
-      ellipse 82% 56% at 34% 4%,
-      color-mix(in srgb, #ff9f1c 3.5%, transparent),
+      ellipse 82% 56% at var(--home-halo-2-x, 34%) 4%,
+      color-mix(
+        in srgb,
+        var(--home-halo-2-color, #ff9f1c) 3.5%,
+        transparent
+      ),
       transparent 70%
     ),
     radial-gradient(
-      ellipse 86% 60% at 52% 50%,
-      color-mix(in srgb, #b7e63a 2.75%, transparent),
+      ellipse 86% 60% at var(--home-halo-3-x, 52%) 50%,
+      color-mix(
+        in srgb,
+        var(--home-halo-3-color, #b7e63a) 2.75%,
+        transparent
+      ),
       transparent 72%
     ),
     radial-gradient(
-      ellipse 82% 58% at 72% 16%,
-      color-mix(in srgb, #2fd3e3 4%, transparent),
+      ellipse 82% 58% at var(--home-halo-4-x, 72%) 16%,
+      color-mix(
+        in srgb,
+        var(--home-halo-4-color, #2fd3e3) 4%,
+        transparent
+      ),
       transparent 70%
     ),
     radial-gradient(
-      ellipse 80% 60% at 92% 40%,
-      color-mix(in srgb, #7b5cff 4%, transparent),
+      ellipse 80% 60% at var(--home-halo-5-x, 92%) 40%,
+      color-mix(
+        in srgb,
+        var(--home-halo-5-color, #7b5cff) 4%,
+        transparent
+      ),
       transparent 72%
     ),
     linear-gradient(
@@ -65891,7 +66329,7 @@ a.settingsCreditItem:focus-visible {
       max(12px, calc(env(safe-area-inset-right) + 12px))
       calc(env(safe-area-inset-bottom) + 12px)
       max(12px, calc(env(safe-area-inset-left) + 12px));
-    grid-template-rows: clamp(150px, 26dvh, 230px) auto auto minmax(0, 1fr) auto;
+    grid-template-rows: clamp(150px, 26dvh, 230px) auto minmax(0, 1fr) auto;
     align-content: stretch;
     justify-items: stretch;
     border: 0;

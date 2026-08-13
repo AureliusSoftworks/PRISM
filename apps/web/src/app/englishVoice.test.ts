@@ -560,7 +560,7 @@ describe("English voice post processing", () => {
       assert.equal(playCount, 2);
       assert.equal(startCount, 1);
       assert.equal(endCount, 1);
-      // Forced clause pauses are off — chunks abut with speech segments only.
+      // Untagged streams (including system voice) still abut with speech only.
       assert.equal(segmentTimings.length, 2);
       assert.equal(segmentTimings[0]?.heard, true);
       assert.equal(segmentTimings[1]?.heard, true);
@@ -576,6 +576,63 @@ describe("English voice post processing", () => {
       );
       assert.ok(
         (segmentTimings[1]?.startMs ?? 0) >= (segmentTimings[0]?.endMs ?? 0),
+      );
+
+      playCount = 0;
+      startCount = 0;
+      endCount = 0;
+      segmentTimings.length = 0;
+      heardSpeechSegmentsAtPlaying.length = 0;
+      const pacedResponse = new Response(`${streamBody}\n`, {
+        headers: {
+          "content-type": "application/x-ndjson; charset=utf-8",
+          "x-prism-voice-stream": "wav-chunks-v1",
+          "x-prism-voice-characters": "13",
+          "x-prism-voice-engine": "builtin",
+          "x-prism-voice-pacing": "kokoro-punctuation-v1",
+        },
+      });
+      await enqueueChunkedEnglishVoice(
+        pacedResponse,
+        DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        "chunk-order-paced",
+        false,
+        1,
+        {
+          onStart: () => {
+            startCount += 1;
+          },
+          onEnd: () => {
+            endCount += 1;
+          },
+          onSegmentTiming: (timing) => {
+            segmentTimings.push(timing);
+          },
+        },
+        "builtin",
+        "neutral",
+        1_000,
+      );
+      assert.equal(playCount, 2);
+      assert.equal(startCount, 1);
+      assert.equal(endCount, 1);
+      assert.equal(segmentTimings.length, 3);
+      assert.deepEqual(
+        segmentTimings.map((segment) => ({
+          heard: segment.heard,
+          sourceStart: segment.sourceStart,
+          sourceEnd: segment.sourceEnd,
+        })),
+        [
+          { heard: true, sourceStart: 0, sourceEnd: 6 },
+          { heard: false, sourceStart: 6, sourceEnd: 6 },
+          { heard: true, sourceStart: 6, sourceEnd: 13 },
+        ],
+      );
+      assert.equal(
+        (segmentTimings[1]?.endMs ?? 0) -
+          (segmentTimings[1]?.startMs ?? 0),
+        180,
       );
     } finally {
       stopEnglishVoice();

@@ -49,7 +49,7 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.match(
       cssSource,
-      /\.lowerScreenContent\s*\{[\s\S]*?transform:\s*scaleX\(var\(--chat-mini-bot-lower-screen-facing-scale-x, 1\)\)/,
+      /\.lowerScreenContent\s*\{[\s\S]*?transform:\s*translate\([\s\S]*?\)\s*scaleX\(var\(--chat-mini-bot-lower-screen-facing-scale-x, 1\)\)/,
     );
     assert.match(
       componentSource,
@@ -58,7 +58,7 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.match(
       componentSource,
-      /\["--chat-mini-bot-upper-screen-facing-scale-x" as string\]:\s*directionIndependentFace \? "1" : screenFacingScaleX/,
+      /\["--chat-mini-bot-upper-screen-facing-scale-x" as string\]:\s*screenFacingScaleX/,
       "upper screen mirroring remains driven by explicit upper facing",
     );
     assert.match(
@@ -76,21 +76,10 @@ describe("chatMiniBotAvatar", () => {
       /\["--coffee-plate-emoji-face-scale-y" as string\]:\s*BOT_AVATAR_CANONICAL_FACE_SCALE_Y/,
       "the inner punctuation face must remain canonical to avoid a double flip",
     );
+    assert.doesNotMatch(componentSource, /directionIndependentFace|props\.thinking/);
     assert.match(
       pageSource,
-      /directionIndependentFace=\{\s*miniThinkingSpinnerActive \|\| showQuestionMark\s*\}/,
-    );
-    assert.match(
-      componentSource,
-      /const directionIndependentFace =\s*props\.thinking \|\| props\.directionIndependentFace === true/,
-    );
-    assert.match(
-      componentSource,
-      /directionIndependentFace \? "1" : screenFacingScaleX/,
-    );
-    assert.match(
-      pageSource,
-      /const avatarFacing = zenLiveBotFacingForCanvasSide\(avatarCanvasSide\)/,
+      /\[avatarFacing, setAvatarFacing\] = useState<ZenLiveAvatarFacing>\(\s*zenLiveBotFacingForCanvasSide\(avatarCanvasSide\)/,
     );
     assert.match(pageSource, /<EmptyStateHeroMiniBot[\s\S]{0,900}?facing=\{avatarFacing\}/);
     assert.match(pageSource, /<ZenLiveBotMannequin[\s\S]{0,240}?facing=\{avatarFacing\}/);
@@ -106,6 +95,10 @@ describe("chatMiniBotAvatar", () => {
     assert.match(
       pageCssSource,
       /\.emptyStateHeroMiniGlyph\s*\{[^}]*width:\s*calc\([^}]*--chat-mini-bot-glyph-size[^}]*- 2px[^}]*height:\s*calc\([^}]*--chat-mini-bot-glyph-size[^}]*- 2px/,
+    );
+    assert.match(
+      cssSource,
+      /\.lowerScreenContent\s*\{[^}]*transform:\s*translate\([^}]*--chat-mini-bot-lower-screen-nudge-x[^}]*--chat-mini-bot-lower-screen-nudge-y[^}]*\)\s*scaleX\(var\(--chat-mini-bot-lower-screen-facing-scale-x, 1\)\)/,
     );
   });
 
@@ -160,7 +153,7 @@ describe("chatMiniBotAvatar", () => {
     assert.doesNotMatch(componentSource, /magentaTintedRasterUrl/);
   });
 
-  it("adds the communication-style alloy and keeps illumination opt-in", () => {
+  it("keeps alloy identity while removing compact glow, phosphor, and breathing", () => {
     assert.match(cssSource, /\.frameBase/);
     assert.match(cssSource, /\.frameAlloy/);
     assert.match(cssSource, /bot-frame-mini-metal-mask\.png/);
@@ -215,56 +208,18 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.match(cssSource, /\.sizeBadge/);
     assert.doesNotMatch(cssSource, /\.frameOff|\.frameOn/);
-    assert.match(componentSource, /talking\?: boolean/);
-    assert.match(
-      componentSource,
-      /data-talking=\{props\.talking \? "true" : undefined\}/,
-    );
-    assert.match(componentSource, /data-bot-avatar-talking-glow="true"/);
-    assert.match(
-      componentSource,
-      /--bot-avatar-talking-glow-color/,
-    );
-    assert.match(cssSource, /\.talkingGlow\s*\{[^}]*opacity:\s*0/);
-    assert.match(
-      cssSource,
-      /\.root\[data-talking="true"\] \.talkingGlow\s*\{[^}]*opacity:\s*0\.74/,
-    );
-    assert.match(
-      cssSource,
-      /var\(--bot-avatar-talking-glow-color, var\(--chat-mini-bot-color\)\)/,
-    );
+    assert.doesNotMatch(componentSource, /talking\?: boolean|data-talking|talkingGlow/);
+    assert.doesNotMatch(cssSource, /talkingGlow|data-talking/);
     assert.doesNotMatch(componentSource, /data-tint-ready/);
     assert.match(componentSource, /size\?: "badge" \| "room" \| "hero"/);
-    assert.match(componentSource, /lightMode\?: "off" \| "breathing"/);
-    assert.match(componentSource, /const lightMode = props\.lightMode \?\? "off"/);
-    assert.match(componentSource, /data-light-mode=\{lightMode\}/);
-    assert.match(componentSource, /lightMode === "breathing"/);
-    assert.match(componentSource, /styles\.frameLightAura/);
-    assert.match(componentSource, /styles\.frameLightEmitter/);
-    assert.match(componentSource, /styles\.frameLightCore/);
-    assert.match(cssSource, /\.root\[data-size="hero"\]::before/);
+    assert.doesNotMatch(componentSource, /lightMode|frameLight/);
+    assert.doesNotMatch(cssSource, /frameLight|data-light-mode|Breath|Ignite/);
+    assert.doesNotMatch(cssSource, /\.root\[data-size="hero"\]::before/);
     assert.match(cssSource, /\.root\[data-size="hero"\]::after/);
     assert.match(cssSource, /width: clamp\(160px, 12\.5vw, 184px\)/);
     assert.match(cssSource, /width: 140px/);
-    assert.match(cssSource, /bot-frame-tint-mask\.png\?v=1000/);
-    assert.match(cssSource, /bot-frame-led\.png\?v=1000/);
-    assert.match(
-      cssSource,
-      /\.root\[data-light-mode="breathing"\] \.frameLightAura/,
-    );
-    assert.match(cssSource, /chatMiniBotLightAuraBreath 6\.4s/);
-    assert.match(cssSource, /chatMiniBotLightEmitterBreath 6\.4s/);
-    assert.match(cssSource, /chatMiniBotLightCoreBreath 6\.4s/);
-    assert.match(cssSource, /@media \(prefers-reduced-motion: reduce\)/);
-    assert.match(
-      cssSource,
-      /\.root:is\(\[data-size="hero"\], \[data-size="room"\]\) \.lowerScreen::before/,
-    );
-    assert.match(cssSource, /--chat-mini-buckle-crt-cell-pitch:\s*2px/);
-    assert.match(cssSource, /--chat-mini-buckle-crt-cell-pitch:\s*1\.5px/);
-    assert.match(cssSource, /repeating-linear-gradient\(\s*90deg/);
-    assert.match(cssSource, /repeating-linear-gradient\(\s*0deg/);
+    assert.doesNotMatch(cssSource, /bot-frame-tint-mask|bot-frame-led/);
+    assert.doesNotMatch(cssSource, /chat-mini-buckle-crt|repeating-linear-gradient/);
     assert.match(cssSource, /\.lowerScreen\s*\{[^}]*overflow:\s*hidden/);
     assert.doesNotMatch(
       cssSource,
@@ -276,17 +231,11 @@ describe("chatMiniBotAvatar", () => {
     assert.match(pageSource, /function EmptyStateHeroMiniBot\(/);
     assert.match(
       pageSource,
-      /<EmptyStateHeroMiniBot\s+bot=\{bot\}\s+resolvedTheme=\{resolvedTheme\}\s*\/>/,
+      /<EmptyStateHeroMiniBot\s+bot=\{bot\}\s+resolvedTheme=\{resolvedTheme\}\s+leadershipGroupCount=\{leadershipGroupCount\}\s*\/>/,
     );
     assert.match(pageSource, /size = "hero"/);
     assert.match(pageSource, /<ChatMiniBotAvatar\s+size=\{size\}/);
-    assert.match(pageSource, /talking=\{isTalking\}/);
-    assert.match(pageSource, /talking=\{previewTalking\}/);
-    assert.match(pageSource, /talking=\{galleryMouthAnimated\}/);
-    assert.match(
-      pageSource,
-      /lightMode=\{lightMode \?\? \(size === "hero" \? "breathing" : "off"\)\}/,
-    );
+    assert.doesNotMatch(componentSource, /data-talking|data-light-mode/);
     assert.match(pageSource, /SELECT THE BOT TO START THE CHAT/);
     assert.match(pageCssSource, /\.emptyStateHeroMiniBot\b/);
     assert.match(pageCssSource, /\.emptyStateHeroMiniFace\b/);
@@ -327,6 +276,9 @@ describe("chatMiniBotAvatar", () => {
         /\bpixelated\b/,
         "mini faces use pixel glyphs as part of the chassis charm",
       );
+      assert.match(miniFaceCall, /\bhardPixels\b/);
+      assert.match(miniFaceCall, /motionMode="mini-led"/);
+      assert.doesNotMatch(miniFaceCall, /showThinkingSpinner|showQuestionMark/);
       assert.doesNotMatch(miniFaceCall, /zenLiveBotPresenceFaceGlyph/);
     }
     assert.match(pageSource, /miniAvatarBinaryMouthShape/);
@@ -393,18 +345,14 @@ describe("chatMiniBotAvatar", () => {
     );
   });
 
-  it("supports suppressing behind/above art slots while thinking", () => {
-    assert.match(componentSource, /thinking: boolean/);
+  it("keeps mini Ink static and visible across non-face runtime states", () => {
+    assert.doesNotMatch(componentSource, /thinking: boolean|props\.thinking/);
     assert.match(componentSource, /behindFace\?: ReactNode/);
     assert.match(componentSource, /aboveFace\?: ReactNode/);
-    assert.match(
-      componentSource,
-      /props\.thinking \? null : props\.behindFace/,
-    );
-    assert.match(componentSource, /props\.thinking \? null : props\.aboveFace/);
-    assert.match(pageSource, /thinking=\{miniThinkingSpinnerActive\}/);
-    assert.match(pageSource, /thinking=\{previewThinkingSpinnerActive\}/);
-    assert.match(pageSource, /thinking=\{false\}/);
+    assert.match(componentSource, /\{props\.behindFace\}/);
+    assert.match(componentSource, /\{props\.aboveFace\}/);
+    assert.match(pageSource, /talking=\{false\}/);
+    assert.match(pageSource, /speechMotionActive=\{false\}/);
     assert.match(
       pageSource,
       /behindFace=\{renderAvatarDetailsInk\("behind-face"\)\}/,
@@ -413,25 +361,13 @@ describe("chatMiniBotAvatar", () => {
       pageSource,
       /aboveFace=\{renderAvatarDetailsInk\("above-face"\)\}/,
     );
-    assert.match(
-      pageSource,
-      /behindFace=\{renderMiniAvatarDetailsInk\("behind-face"\)\}/,
-    );
-    assert.match(
-      pageSource,
-      /aboveFace=\{renderMiniAvatarDetailsInk\("above-face"\)\}/,
-    );
-    assert.match(
-      pageSource,
-      /behindFace=\{renderGalleryAvatarDetails\("behind-face"\)\}/,
-    );
-    assert.match(
-      pageSource,
-      /aboveFace=\{renderGalleryAvatarDetails\("above-face"\)\}/,
-    );
+    assert.match(pageSource, /\{renderMiniAvatarDetailsInk\("behind-face"\)\}/);
+    assert.match(pageSource, /\{renderMiniAvatarDetailsInk\("above-face"\)\}/);
+    assert.match(pageSource, /\{renderGalleryAvatarDetails\("behind-face"\)\}/);
+    assert.match(pageSource, /\{renderGalleryAvatarDetails\("above-face"\)\}/);
   });
 
-  it("uses one upright authored micro renderer with still eyes and Ink", () => {
+  it("uses one correctly oriented static micro renderer with flat pixels and Ink", () => {
     assert.match(pageSource, /function BotAvatarMicroRenderer\(/);
     const microFaceFn = pageSource.slice(
       pageSource.indexOf("function BotAvatarMicroRenderer("),
@@ -448,12 +384,22 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.match(microFaceFn, /faceEyeMovement="still"/);
     assert.match(microFaceFn, /showQuestionMark=\{false\}/);
-    assert.match(microFaceFn, /data-avatar-render-tier="micro"/);
+    assert.match(microFaceFn, /motionMode="static"/);
+    assert.match(microFaceFn, /enabled=\{false\}/);
+    assert.match(microFaceFn, /hardPixels/);
+    assert.match(microFaceFn, /forceBlinkPhase="open"/);
+    assert.match(microFaceFn, /coffeeSeatPlateGlyph\([\s\S]*?"closed"/);
+    assert.match(microFaceFn, /talking=\{false\}/);
+    assert.match(microFaceFn, /mouthShape="closed"/);
     assert.match(
       microFaceFn,
-      /data-talking=\{props\.isTalking === true \? "true" : undefined\}/,
+      /\["--coffee-plate-emoji-face-scale-y" as string\]:\s*BOT_AVATAR_CANONICAL_FACE_SCALE_Y/,
     );
-    assert.match(microFaceFn, /styles\.botAvatarMicroTalkingGlow/);
+    assert.match(microFaceFn, /data-avatar-render-tier="micro"/);
+    assert.match(microFaceFn, /data-bot-avatar-micro-screen="true"/);
+    assert.match(microFaceFn, /styles\.botAvatarMicroScreenContent/);
+    assert.match(microFaceFn, /styles\.botAvatarMicroFaceRig/);
+    assert.doesNotMatch(microFaceFn, /data-talking|botAvatarMicroTalkingGlow/);
     assert.match(pageCssSource, /\[data-variant="micro"\]/);
     assert.match(
       pageCssSource,
@@ -463,11 +409,16 @@ describe("chatMiniBotAvatar", () => {
     assert.match(pageCssSource, /\.botAvatarMicroInk\s*\{[^}]*position:\s*absolute/);
     assert.match(
       pageCssSource,
-      /\.botAvatarMicroTalkingGlow\s*\{[^}]*opacity:\s*0/,
+      /\.botAvatarMicroScreen\s*\{[^}]*position:\s*absolute;[^}]*inset:\s*0;[^}]*overflow:\s*hidden;[^}]*border-radius:\s*inherit;/,
+    );
+    assert.doesNotMatch(pageCssSource, /botAvatarMicroTalkingGlow/);
+    assert.match(
+      pageCssSource,
+      /\[data-variant="micro"\],\s*\.messageMoodBadge\[data-face="coffee"\]\[data-variant="micro"\] \*\s*\{[^}]*animation:\s*none !important;[^}]*transition:\s*none !important/,
     );
     assert.match(
       pageCssSource,
-      /\[data-variant="micro"\]\[data-talking="true"\][\s\S]{0,120}\.botAvatarMicroTalkingGlow\s*\{[^}]*opacity:\s*0\.7/,
+      /\.messageMoodMicroFace \[data-crt-glyph-layer="true"\]::before\s*\{[^}]*display:\s*none/,
     );
     assert.match(
       pageSource,

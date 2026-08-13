@@ -168,8 +168,10 @@ test("talking gallery seats animate compact mouths without waking the full portr
   );
   assert.match(
     pageSource,
-    /galleryTalking && faceStyle\.mouthAnimation === "none"/u,
+    /miniAvatarBinaryMouthShape\(\{[\s\S]{0,220}talking:\s*galleryTalking/u,
   );
+  assert.match(pageSource, /motionMode="mini-led"/u);
+  assert.doesNotMatch(pageSource, /galleryTalking && faceStyle\.mouthAnimation === "none"/u);
   assert.match(
     pageSource,
     /debateAudienceRandom\([\s\S]{0,120}`mood:\$\{debateLiveSessionId \?\? "setup"\}:\$\{botSnapshot\.id\}`[\s\S]{0,40}\)\(\)/u,

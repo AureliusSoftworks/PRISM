@@ -2995,10 +2995,14 @@ describe("Signal experience shell", () => {
     assert.match(source, /if \(!libraryBot\) \{/u);
     assert.match(source, /data-interactive="false"/u);
     assert.match(css, /\.episodeGuest \{[^}]*right: 14px/u);
+    assert.match(
+      css,
+      /\.episodeParticipantChip \{[^}]*border: 0;[^}]*background: transparent;[^}]*box-shadow: none;/u,
+    );
     assert.match(source, /surface: "archive"/u);
     assert.match(
       css,
-      /\.episodeParticipantAvatar \[data-chat-mini-bot-avatar="true"\]/u,
+      /\.episodeParticipantAvatar \[data-chat-mini-bot-avatar="true"\][^}]*width: 88px;[^}]*height: 88px;/u,
     );
     assert.doesNotMatch(
       css,

@@ -135,4 +135,36 @@ describe("Signal live captions", () => {
     );
     assert.equal(signalLiveCaptionText(reveal, { content: "..." }), "");
   });
+
+  it("reveals a timed Mute performance at exactly one period per second", () => {
+    const message = {
+      content: ".............. *14 seconds pass without an audible word.*",
+      mutePerformance: {
+        v: 1 as const,
+        name: "mutePerformance" as const,
+        durationMs: 14_000,
+        periodCount: 14,
+        interrupted: false,
+        elapsedCue: "*14 seconds pass without an audible word.*",
+        reactionBeats: [],
+      },
+    };
+    const reveal = startBotcastSpeechReveal({
+      text: message.content,
+      durationMs: 14_000,
+    });
+
+    assert.equal(
+      signalLiveCaptionText(updateBotcastSpeechReveal(reveal, 0), message),
+      ".",
+    );
+    assert.equal(
+      signalLiveCaptionText(updateBotcastSpeechReveal(reveal, 1_999), message),
+      "..",
+    );
+    assert.equal(
+      signalLiveCaptionText(updateBotcastSpeechReveal(reveal, 14_000), message),
+      ".............. *14 seconds pass without an audible word.*",
+    );
+  });
 });

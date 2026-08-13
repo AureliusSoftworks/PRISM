@@ -725,14 +725,12 @@ export default function PrismCompanion({
   const [refractTutorialStage, setRefractTutorialStage] = useState<
     "summon" | "reroll" | "settle"
   >("summon");
-  const optionWieldOnApple = presentation === "zen";
   const modifierPresentation = useMemo(
     () =>
       prismCompanionModifierPresentation(
         typeof navigator === "undefined" ? "" : navigator.platform,
-        optionWieldOnApple,
       ),
-    [optionWieldOnApple],
+    [],
   );
   const shortcutPresentation = useMemo(() => {
     const platform = typeof navigator === "undefined" ? "" : navigator.platform;
@@ -3711,7 +3709,7 @@ export default function PrismCompanion({
           return;
         }
         if (
-          isPrismCompanionModifierKey(event, platform, optionWieldOnApple)
+          isPrismCompanionModifierKey(event, platform)
         ) {
           if (event.repeat || wieldStateRef.current.phase !== "idle") return;
           const pointer =
@@ -3807,7 +3805,7 @@ export default function PrismCompanion({
       }
       if (refracting) return;
 
-      if (isPrismCompanionModifierKey(event, platform, optionWieldOnApple)) {
+      if (isPrismCompanionModifierKey(event, platform)) {
         if (event.repeat || wieldStateRef.current.phase !== "idle") return;
         const pointer =
           wieldLastPointerRef.current ??
@@ -3824,12 +3822,9 @@ export default function PrismCompanion({
 
       const wielding = wieldStateRef.current;
       if (wielding.phase === "pending" || wielding.phase === "following") {
-        // Option may chord with Zen navbar shortcuts without ending the hold.
+        // Option may chord with navbar shortcuts without ending the hold.
         // The Alt keyup remains the single release boundary for Wield.
-        if (
-          optionWieldOnApple &&
-          isPrismCompanionModifierHeld(event, platform, optionWieldOnApple)
-        ) {
+        if (isPrismCompanionModifierHeld(event, platform)) {
           return;
         }
         if (event.key === "Escape") {
@@ -3841,11 +3836,7 @@ export default function PrismCompanion({
     };
     const onKeyUp = (event: KeyboardEvent): void => {
       if (
-        isPrismCompanionPlatformModifier(
-          event,
-          platform,
-          optionWieldOnApple,
-        )
+        isPrismCompanionPlatformModifier(event, platform)
       ) {
         resetPrismWield(false, true);
       }
@@ -3860,7 +3851,6 @@ export default function PrismCompanion({
     acceptPrismRefract,
     companionSuppressed,
     keyboardShortcut,
-    optionWieldOnApple,
     activatePrismConversation,
     releasePrismRefract,
     resetPrismWield,
