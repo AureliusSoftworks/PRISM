@@ -1,5 +1,5 @@
 /**
- * App-wide shared navbar chrome: idle auto-hide, Prism summon pin, and Wield hide.
+ * App-wide shared navbar chrome: idle auto-hide, Prism summon pin, and Wield reveal.
  * Driven from page shells + PrismCompanion without prop drilling.
  */
 
@@ -63,11 +63,10 @@ function blocksIdleHide(): boolean {
 
 function computeHidden(): boolean {
   if (companionOpen) return false;
-  // Dropdowns / Control-root discovery win over Zen Wield tuck so players can
-  // always see the controls they are about to use.
+  // Explicit holds always keep shortcut targets in view.
   if (isVisibilityHeld()) return false;
-  // Wield tuck is Zen-only; other modes keep the bar even while Wielding.
-  if (wielding && autoHideEnabled) return true;
+  // Wield is a Zen visibility hold; other modes already keep the bar present.
+  if (wielding) return false;
   return !visible;
 }
 
@@ -173,7 +172,7 @@ export function subscribeAppNavbarChrome(listener: Listener): () => void {
 }
 
 /**
- * Idle auto-hide and Wield tuck are Zen-only for now.
+ * Idle auto-hide and Wield reveal are Zen-only for now.
  * Chat, Signal, Debate, Coffee, Slate, and other shells keep a persistent bar.
  */
 export function setAppNavbarAutoHideEnabled(enabled: boolean): void {
@@ -220,7 +219,7 @@ export function holdAppNavbarForDropdown(): () => void {
 
 /**
  * Keep the navbar visible while Control is held or the Control-root shortcut
- * compass is showing. Wins over Zen Wield tuck so shortcut targets stay in view.
+ * compass is showing. Keeps shortcut targets in view alongside Zen Wield.
  */
 export function holdAppNavbarForControlShortcuts(): () => void {
   controlHoldCount += 1;
@@ -263,10 +262,8 @@ export function setAppNavbarWielding(next: boolean): void {
   wielding = next;
   if (next) {
     clearAutoHideTimer();
-    if (autoHideEnabled) {
-      visible = false;
-      autoHideArmed = true;
-    }
+    visible = true;
+    if (autoHideEnabled) autoHideArmed = true;
   } else {
     visible = true;
     if (autoHideEnabled && autoHideArmed && !blocksIdleHide()) {

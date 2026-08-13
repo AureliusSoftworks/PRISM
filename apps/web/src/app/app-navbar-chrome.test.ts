@@ -40,13 +40,13 @@ test("companion open pins the navbar visible over immersion hide", () => {
   setAppNavbarCompanionOpen(false);
 });
 
-test("wielding hides the navbar even after a fresh reveal", () => {
+test("wielding reveals and holds the Zen navbar", () => {
   resetChrome();
   setAppNavbarAutoHideEnabled(true);
-  revealAppNavbarForFreshSurface();
-  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
-  setAppNavbarWielding(true);
+  hideAppNavbarForImmersion();
   assert.equal(getAppNavbarChromeSnapshot().hidden, true);
+  setAppNavbarWielding(true);
+  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
   setAppNavbarWielding(false);
   assert.equal(getAppNavbarChromeSnapshot().hidden, false);
 });
@@ -69,7 +69,7 @@ test("pinned chrome stays visible during immersion hide requests", () => {
   pinAppNavbar(false);
 });
 
-test("non-Zen surfaces skip idle auto-hide and Wield tuck", () => {
+test("non-Zen surfaces skip idle auto-hide while Wield stays visible", () => {
   resetChrome();
   setAppNavbarAutoHideEnabled(false);
   hideAppNavbarForImmersion();
@@ -94,20 +94,21 @@ test("open navbar dropdown holds the bar against idle tuck", () => {
   assert.equal(getAppNavbarChromeSnapshot().dropdownHeld, false);
 });
 
-test("dropdown and Control holds win over Zen Wield tuck", () => {
+test("dropdown and Control holds remain visible during Zen Wield", () => {
   resetChrome();
+  hideAppNavbarForImmersion();
   setAppNavbarWielding(true);
-  assert.equal(getAppNavbarChromeSnapshot().hidden, true);
+  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
   const releaseDropdown = holdAppNavbarForDropdown();
   assert.equal(getAppNavbarChromeSnapshot().hidden, false);
   releaseDropdown();
-  assert.equal(getAppNavbarChromeSnapshot().hidden, true);
+  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
   const releaseControl = holdAppNavbarForControlShortcuts();
   assert.equal(getAppNavbarChromeSnapshot().controlHeld, true);
   assert.equal(getAppNavbarChromeSnapshot().hidden, false);
   releaseControl();
   assert.equal(getAppNavbarChromeSnapshot().controlHeld, false);
-  assert.equal(getAppNavbarChromeSnapshot().hidden, true);
+  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
   setAppNavbarWielding(false);
 });
 

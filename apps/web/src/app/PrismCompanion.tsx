@@ -725,12 +725,14 @@ export default function PrismCompanion({
   const [refractTutorialStage, setRefractTutorialStage] = useState<
     "summon" | "reroll" | "settle"
   >("summon");
+  const optionWieldOnApple = presentation === "zen";
   const modifierPresentation = useMemo(
     () =>
       prismCompanionModifierPresentation(
         typeof navigator === "undefined" ? "" : navigator.platform,
+        optionWieldOnApple,
       ),
-    [],
+    [optionWieldOnApple],
   );
   const shortcutPresentation = useMemo(() => {
     const platform = typeof navigator === "undefined" ? "" : navigator.platform;
@@ -1532,6 +1534,9 @@ export default function PrismCompanion({
       if (next === current) return;
       // Revive a dimmed/hidden orb as soon as Option wield begins.
       clearIdleDim();
+      // The navbar follows the modifier immediately; the orb's own movement
+      // still respects the short Wield arm delay below.
+      setAppNavbarWielding(true);
       wieldStateRef.current = next;
       const epoch = next.epoch;
       wieldArmTimerRef.current = window.setTimeout(() => {
@@ -3705,7 +3710,9 @@ export default function PrismCompanion({
           activatePrismConversation();
           return;
         }
-        if (isPrismCompanionModifierKey(event, platform)) {
+        if (
+          isPrismCompanionModifierKey(event, platform, optionWieldOnApple)
+        ) {
           if (event.repeat || wieldStateRef.current.phase !== "idle") return;
           const pointer =
             wieldLastPointerRef.current ??
@@ -3800,7 +3807,7 @@ export default function PrismCompanion({
       }
       if (refracting) return;
 
-      if (isPrismCompanionModifierKey(event, platform)) {
+      if (isPrismCompanionModifierKey(event, platform, optionWieldOnApple)) {
         if (event.repeat || wieldStateRef.current.phase !== "idle") return;
         const pointer =
           wieldLastPointerRef.current ??
@@ -3817,6 +3824,14 @@ export default function PrismCompanion({
 
       const wielding = wieldStateRef.current;
       if (wielding.phase === "pending" || wielding.phase === "following") {
+        // Option may chord with Zen navbar shortcuts without ending the hold.
+        // The Alt keyup remains the single release boundary for Wield.
+        if (
+          optionWieldOnApple &&
+          isPrismCompanionModifierHeld(event, platform, optionWieldOnApple)
+        ) {
+          return;
+        }
         if (event.key === "Escape") {
           event.preventDefault();
           event.stopPropagation();
@@ -3825,7 +3840,13 @@ export default function PrismCompanion({
       }
     };
     const onKeyUp = (event: KeyboardEvent): void => {
-      if (isPrismCompanionPlatformModifier(event, platform)) {
+      if (
+        isPrismCompanionPlatformModifier(
+          event,
+          platform,
+          optionWieldOnApple,
+        )
+      ) {
         resetPrismWield(false, true);
       }
     };
@@ -3839,6 +3860,7 @@ export default function PrismCompanion({
     acceptPrismRefract,
     companionSuppressed,
     keyboardShortcut,
+    optionWieldOnApple,
     activatePrismConversation,
     releasePrismRefract,
     resetPrismWield,

@@ -137,13 +137,17 @@ export function retainPrismCompanionRecovery(
 }
 
 export interface PrismCompanionModifierPresentation {
-  modifier: "command" | "control";
-  modifierLabel: "Command" | "Control";
+  modifier: "command" | "control" | "option";
+  modifierLabel: "Command" | "Control" | "Option";
 }
 
 export function prismCompanionModifierPresentation(
   platform: string,
+  optionWieldOnApple = false,
 ): PrismCompanionModifierPresentation {
+  if (optionWieldOnApple && /Mac|iPhone|iPad/u.test(platform)) {
+    return { modifier: "option", modifierLabel: "Option" };
+  }
   return /Mac|iPhone|iPad/u.test(platform)
     ? {
         modifier: "command",
@@ -165,16 +169,30 @@ export function isPrismCompanionModifierKey(
     shiftKey: boolean;
   },
   platform: string,
+  optionWieldOnApple = false,
 ): boolean {
-  if (!isPrismCompanionPlatformModifier(input, platform)) return false;
-  return isPrismCompanionModifierHeld(input, platform);
+  if (!isPrismCompanionPlatformModifier(input, platform, optionWieldOnApple)) {
+    return false;
+  }
+  return isPrismCompanionModifierHeld(input, platform, optionWieldOnApple);
 }
 
 export function isPrismCompanionPlatformModifier(
   input: { key: string; code?: string },
   platform: string,
+  optionWieldOnApple = false,
 ): boolean {
-  const presentation = prismCompanionModifierPresentation(platform);
+  const presentation = prismCompanionModifierPresentation(
+    platform,
+    optionWieldOnApple,
+  );
+  if (presentation.modifier === "option") {
+    return (
+      input.key === "Alt" ||
+      input.code === "AltLeft" ||
+      input.code === "AltRight"
+    );
+  }
   return presentation.modifier === "command"
     ? input.key === "Meta" ||
         input.code === "MetaLeft" ||
@@ -192,8 +210,15 @@ export function isPrismCompanionModifierHeld(
     shiftKey: boolean;
   },
   platform: string,
+  optionWieldOnApple = false,
 ): boolean {
-  const presentation = prismCompanionModifierPresentation(platform);
+  const presentation = prismCompanionModifierPresentation(
+    platform,
+    optionWieldOnApple,
+  );
+  if (presentation.modifier === "option") {
+    return input.altKey && !input.metaKey && !input.ctrlKey && !input.shiftKey;
+  }
   if (presentation.modifier === "command") {
     return (
       input.metaKey && !input.altKey && !input.ctrlKey && !input.shiftKey

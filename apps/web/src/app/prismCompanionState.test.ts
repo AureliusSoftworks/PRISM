@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   DEFAULT_PRISM_COMPANION_SESSION_IDLE_GAP_MS,
+  isPrismCompanionModifierHeld,
   isPrismCompanionModifierKey,
   parsePrismCompanionRecovery,
   parsePrismCompanionSessionRecord,
@@ -149,6 +150,61 @@ test("derives platform-aware Prism Wield modifier labels", () => {
     modifier: "control",
     modifierLabel: "Control",
   });
+  assert.deepEqual(prismCompanionModifierPresentation("MacIntel", true), {
+    modifier: "option",
+    modifierLabel: "Option",
+  });
+  assert.deepEqual(prismCompanionModifierPresentation("Win32", true), {
+    modifier: "control",
+    modifierLabel: "Control",
+  });
+});
+
+test("uses Option-only Wield for immersive Zen on Apple platforms", () => {
+  const option = {
+    key: "Alt",
+    code: "AltLeft",
+    altKey: true,
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false,
+  };
+  assert.equal(isPrismCompanionModifierKey(option, "MacIntel", true), true);
+  assert.equal(
+    isPrismCompanionModifierKey(
+      { ...option, key: "ArrowLeft", code: "ArrowLeft" },
+      "MacIntel",
+      true,
+    ),
+    false,
+  );
+  assert.equal(
+    isPrismCompanionModifierHeld(
+      {
+        altKey: option.altKey,
+        ctrlKey: option.ctrlKey,
+        metaKey: option.metaKey,
+        shiftKey: option.shiftKey,
+      },
+      "MacIntel",
+      true,
+    ),
+    true,
+  );
+  assert.equal(
+    isPrismCompanionModifierKey(
+      {
+        ...option,
+        key: "Meta",
+        code: "MetaLeft",
+        altKey: false,
+        metaKey: true,
+      },
+      "MacIntel",
+      true,
+    ),
+    false,
+  );
 });
 
 test("uses Command-only Wield on Apple platforms and leaves Option available", () => {

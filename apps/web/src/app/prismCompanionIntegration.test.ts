@@ -390,6 +390,19 @@ test("keeps the app shell crisp behind a local focus orb while pausing motion", 
   assert.match(component, /setAppNavbarCompanionOpen\(open\)/u);
   assert.match(component, /setAppNavbarWielding\(true\)/u);
   assert.match(component, /setAppNavbarWielding\(false\)/u);
+  assert.match(
+    component,
+    /Revive a dimmed\/hidden orb as soon as Option wield begins[\s\S]*clearIdleDim\(\);[\s\S]*setAppNavbarWielding\(true\);[\s\S]*wieldStateRef\.current = next/u,
+  );
+  assert.match(component, /const optionWieldOnApple = presentation === "zen"/u);
+  assert.match(
+    component,
+    /isPrismCompanionModifierKey\(event, platform, optionWieldOnApple\)/u,
+  );
+  assert.match(
+    component,
+    /Option may chord with Zen navbar shortcuts without ending the hold/u,
+  );
   assert.match(component, /document\.getAnimations\(\)/u);
   assert.match(
     component,
