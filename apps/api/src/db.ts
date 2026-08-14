@@ -751,6 +751,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
         CHECK(surface IN ('coffee', 'signal', 'debate', 'story')),
       session_id TEXT NOT NULL,
       body TEXT NOT NULL,
+      captures_json TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       PRIMARY KEY(user_id, surface, session_id),
@@ -2319,6 +2320,16 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
   `);
+  const appletSessionNoteColumns = new Set(
+    (db.prepare("PRAGMA table_info(applet_session_notes)").all() as Array<{
+      name: string;
+    }>).map((column) => column.name),
+  );
+  if (!appletSessionNoteColumns.has("captures_json")) {
+    db.exec(
+      "ALTER TABLE applet_session_notes ADD COLUMN captures_json TEXT NOT NULL DEFAULT '[]';",
+    );
+  }
   const replayRecordingColumns = new Set(
     (db.prepare("PRAGMA table_info(replay_recordings)").all() as Array<{
       name: string;

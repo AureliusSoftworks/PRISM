@@ -198,10 +198,17 @@ describe("backup applet session notes", () => {
       ).run("2026-08-09T20:00:00.000Z", "2026-08-09T20:00:00.000Z");
       db.prepare(
         `INSERT INTO applet_session_notes
-          (user_id, surface, session_id, body, created_at, updated_at)
-         VALUES ('user-1', 'coffee', 'coffee-note-session', ?, ?, ?)`,
+          (user_id, surface, session_id, body, captures_json, created_at, updated_at)
+         VALUES ('user-1', 'coffee', 'coffee-note-session', ?, ?, ?, ?)`,
       ).run(
         "- Remember the pause.\n- Revisit the ending.",
+        JSON.stringify([
+          {
+            body: "Remember the pause.",
+            startedAt: "2026-08-09T20:00:30.000Z",
+            committedAt: "2026-08-09T20:01:00.000Z",
+          },
+        ]),
         "2026-08-09T20:01:00.000Z",
         "2026-08-09T20:01:00.000Z",
       );
@@ -211,6 +218,10 @@ describe("backup applet session notes", () => {
         snapshot.sessionNotes?.[0]?.body,
         "- Remember the pause.\n- Revisit the ending.",
       );
+      assert.equal(
+        snapshot.sessionNotes?.[0]?.captures?.[0]?.startedAt,
+        "2026-08-09T20:00:30.000Z",
+      );
 
       db.prepare(
         "DELETE FROM applet_session_notes WHERE user_id = 'user-1'",
@@ -218,14 +229,18 @@ describe("backup applet session notes", () => {
       importUserSnapshot(db, "user-1", snapshot, userKey);
       const restored = db
         .prepare(
-          `SELECT body FROM applet_session_notes
+          `SELECT body, captures_json FROM applet_session_notes
             WHERE user_id = 'user-1' AND surface = 'coffee'
               AND session_id = 'coffee-note-session'`,
         )
-        .get() as { body: string };
+        .get() as { body: string; captures_json: string };
       assert.equal(
         restored.body,
         "- Remember the pause.\n- Revisit the ending.",
+      );
+      assert.equal(
+        JSON.parse(restored.captures_json)[0]?.startedAt,
+        "2026-08-09T20:00:30.000Z",
       );
     });
   });

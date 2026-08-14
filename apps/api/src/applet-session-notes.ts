@@ -9,11 +9,18 @@ export type AppletSessionNoteSurface =
   | "debate"
   | "story";
 
+export interface AppletSessionNoteCaptureV1 {
+  body: string;
+  startedAt: string;
+  committedAt: string;
+}
+
 export interface AppletSessionNoteV1 {
   v: 1;
   surface: AppletSessionNoteSurface;
   sessionId: string;
   body: string;
+  captures: AppletSessionNoteCaptureV1[];
   createdAt: string;
   updatedAt: string;
 }
@@ -22,6 +29,7 @@ interface AppletSessionNoteRow {
   surface: AppletSessionNoteSurface;
   session_id: string;
   body: string;
+  captures_json: string;
   created_at: string;
   updated_at: string;
 }
@@ -66,12 +74,44 @@ export function appletSessionBelongsToUser(
   return Boolean(coffee);
 }
 
+function readCaptureTimestamp(value: unknown): string | null {
+  if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) {
+    return null;
+  }
+  return new Date(value).toISOString();
+}
+
+function readAppletSessionNoteCaptures(value: string): AppletSessionNoteCaptureV1[] {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((candidate) => {
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+        return [];
+      }
+      const record = candidate as Record<string, unknown>;
+      const body =
+        typeof record.body === "string"
+          ? sentenceCaseAppletSessionNoteEntry(record.body)
+          : "";
+      const startedAt = readCaptureTimestamp(record.startedAt);
+      const committedAt = readCaptureTimestamp(record.committedAt);
+      return body && startedAt && committedAt
+        ? [{ body, startedAt, committedAt }]
+        : [];
+    }).slice(-400);
+  } catch {
+    return [];
+  }
+}
+
 function mapRow(row: AppletSessionNoteRow): AppletSessionNoteV1 {
   return {
     v: 1,
     surface: row.surface,
     sessionId: row.session_id,
     body: row.body,
+    captures: readAppletSessionNoteCaptures(row.captures_json),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -208,7 +248,7 @@ export function getAppletSessionNote(
 ): AppletSessionNoteV1 | null {
   const row = db
     .prepare(
-      `SELECT surface, session_id, body, created_at, updated_at
+      `SELECT surface, session_id, body, captures_json, created_at, updated_at
          FROM applet_session_notes
         WHERE user_id = ? AND surface = ? AND session_id = ?
         LIMIT 1`,
@@ -263,6 +303,7 @@ export function appendAppletSessionNote(
   surface: AppletSessionNoteSurface,
   sessionId: string,
   entry: string,
+  startedAt?: string | null,
 ): AppletSessionNoteV1 {
   const normalizedEntry = sentenceCaseAppletSessionNoteEntry(entry);
   if (!normalizedEntry) {
@@ -278,13 +319,41 @@ export function appendAppletSessionNote(
   const nextBody = formatAppletSessionNoteCollectionBody(
     collected ? `${collected}\n- ${normalizedEntry}` : `- ${normalizedEntry}`,
   );
-  const saved = saveAppletSessionNote(
-    db,
+  if (nextBody.length > APPLET_SESSION_NOTE_MAX_CHARACTERS) {
+    throw new Error(
+      `Session notes must be ${APPLET_SESSION_NOTE_MAX_CHARACTERS} characters or fewer.`,
+    );
+  }
+  const committedAt = new Date().toISOString();
+  const normalizedStartedAt = readCaptureTimestamp(startedAt) ?? committedAt;
+  const capture: AppletSessionNoteCaptureV1 = {
+    body: normalizedEntry,
+    startedAt:
+      Date.parse(normalizedStartedAt) > Date.parse(committedAt) + 60_000
+        ? committedAt
+        : normalizedStartedAt,
+    committedAt,
+  };
+  const captures = [...(existing?.captures ?? []), capture].slice(-400);
+  const now = committedAt;
+  db.prepare(
+    `INSERT INTO applet_session_notes
+       (user_id, surface, session_id, body, captures_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(user_id, surface, session_id) DO UPDATE SET
+       body = excluded.body,
+       captures_json = excluded.captures_json,
+       updated_at = excluded.updated_at`,
+  ).run(
     userId,
     surface,
-    sessionId,
+    sessionId.trim(),
     nextBody,
+    JSON.stringify(captures),
+    now,
+    now,
   );
+  const saved = getAppletSessionNote(db, userId, surface, sessionId);
   if (!saved) throw new Error("Session note could not be added.");
   return saved;
 }

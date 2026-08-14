@@ -16606,6 +16606,7 @@ function buildRoutes(): RouteDefinition[] {
             surface,
             sessionId,
             body.entry,
+            typeof body.startedAt === "string" ? body.startedAt : null,
           ),
         });
       } catch (error) {

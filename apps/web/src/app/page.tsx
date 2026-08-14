@@ -524,7 +524,9 @@ import {
 import {
   appendAppletSessionNoteToTranscript,
   appletSessionNoteRequestPath,
+  subscribeAppletSessionNoteSaved,
   type AppletSessionNoteResponse,
+  type AppletSessionNoteV1,
 } from "./appletSessionNotes";
 import {
   VIEWPORT_SAFE_AREA_DEFAULT_INSETS,
@@ -65571,6 +65573,8 @@ function HomeContent(): React.JSX.Element {
   const [storyMapOpen, setStoryMapOpen] = useState(false);
   const [storyInventoryOpen, setStoryInventoryOpen] = useState(false);
   const [storyTranscriptOpen, setStoryTranscriptOpen] = useState(false);
+  const [storySessionNote, setStorySessionNote] =
+    useState<AppletSessionNoteV1 | null>(null);
   const [storyDialogCursor, setStoryDialogCursor] = useState<StoryDialogCursor>(
     {
       sessionId: null,
@@ -65580,6 +65584,36 @@ function HomeContent(): React.JSX.Element {
   );
   const [storySetupPinned, setStorySetupPinned] = useState(false);
   const storyModelChoiceByProvider = globalModelChoiceByProvider;
+
+  useEffect(() => {
+    const sessionId = storySession?.id ?? null;
+    if (view !== "story" || !sessionId) {
+      setStorySessionNote(null);
+      return;
+    }
+    let active = true;
+    let receivedSavedNote = false;
+    void api<AppletSessionNoteResponse>(
+      appletSessionNoteRequestPath({ surface: "story", sessionId }),
+    )
+      .then((response) => {
+        if (active && !receivedSavedNote) setStorySessionNote(response.note);
+      })
+      .catch(() => {
+        if (active && !receivedSavedNote) setStorySessionNote(null);
+      });
+    const unsubscribe = subscribeAppletSessionNoteSaved((note) => {
+      if (note.surface === "story" && note.sessionId === sessionId) {
+        receivedSavedNote = true;
+        setStorySessionNote(note);
+      }
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [storySession?.id, view]);
+
   const turboAppletContextRef = useRef<string | null>(null);
   useEffect(() => {
     if (!user || !settings) {
@@ -139895,6 +139929,24 @@ function HomeContent(): React.JSX.Element {
     transcript: readonly StoryTranscriptEntry[],
   ): React.JSX.Element | null => {
     if (!storyTranscriptOpen) return null;
+    const notesAfterEntryId = new Map<
+      string,
+      AppletSessionNoteV1["captures"]
+    >();
+    for (const capture of storySessionNote?.captures ?? []) {
+      const startedAtMs = Date.parse(capture.startedAt);
+      const nearestEntry =
+        [...transcript]
+          .filter((entry) => Date.parse(entry.createdAt) <= startedAtMs)
+          .sort(
+            (left, right) =>
+              Date.parse(right.createdAt) - Date.parse(left.createdAt),
+          )[0] ?? transcript[0];
+      if (!nearestEntry) continue;
+      const notes = notesAfterEntryId.get(nearestEntry.id) ?? [];
+      notes.push(capture);
+      notesAfterEntryId.set(nearestEntry.id, notes);
+    }
     const transcriptText = transcript
       .map((entry) => {
         const speaker = entry.speakerBotId
@@ -139955,21 +140007,37 @@ function HomeContent(): React.JSX.Element {
               ? storyBotsById.get(entry.speakerBotId)
               : null;
             return (
-              <li
-                key={entry.id}
-                data-kind={entry.kind}
-                data-power-voice-presence={
-                  entryBot
-                    ? (botPowerVoicePresenceModeV1(entryBot.powers) ??
-                      undefined)
-                    : undefined
-                }
-              >
-                <span>{entry.kind}</span>
-                <p>{entry.text}</p>
-              </li>
+              <Fragment key={entry.id}>
+                <li
+                  data-kind={entry.kind}
+                  data-power-voice-presence={
+                    entryBot
+                      ? (botPowerVoicePresenceModeV1(entryBot.powers) ??
+                        undefined)
+                      : undefined
+                  }
+                >
+                  <span>{entry.kind}</span>
+                  <p>{entry.text}</p>
+                </li>
+                {(notesAfterEntryId.get(entry.id) ?? []).map((capture) => (
+                  <li
+                    key={`${capture.startedAt}:${capture.committedAt}`}
+                    data-kind="developer-note"
+                  >
+                    <span>Developer note · {capture.startedAt}</span>
+                    <p>{capture.body}</p>
+                  </li>
+                ))}
+              </Fragment>
             );
           })}
+          {storySessionNote?.body ? (
+            <li data-kind="session-notes">
+              <span>Session notes</span>
+              <p>{storySessionNote.body}</p>
+            </li>
+          ) : null}
         </ol>
       </aside>
     );

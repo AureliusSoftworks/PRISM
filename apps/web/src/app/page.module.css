@@ -4422,6 +4422,18 @@
   line-height: 1.4;
 }
 
+.storyTranscriptList li[data-kind="developer-note"] {
+  border-left-color: color-mix(in srgb, var(--accent, #9de7dd) 78%, white);
+  background: color-mix(in srgb, var(--accent, #9de7dd) 7%, transparent);
+}
+
+.storyTranscriptList li[data-kind="session-notes"] {
+  margin-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--fg) 12%, transparent);
+  border-left-color: color-mix(in srgb, var(--fg) 28%, transparent);
+  white-space: pre-line;
+}
+
 @media (max-width: 860px) {
   .storyShell {
     grid-template-columns: 1fr;

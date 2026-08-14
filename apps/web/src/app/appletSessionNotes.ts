@@ -7,11 +7,20 @@ export type AppletSessionNoteSurface =
   | "debate"
   | "story";
 
+export interface AppletSessionNoteCaptureV1 {
+  body: string;
+  /** The first keystroke in the fresh session-note composer. */
+  startedAt: string;
+  /** The later moment the note was committed. */
+  committedAt: string;
+}
+
 export interface AppletSessionNoteV1 {
   v: 1;
   surface: AppletSessionNoteSurface;
   sessionId: string;
   body: string;
+  captures: AppletSessionNoteCaptureV1[];
   createdAt: string;
   updatedAt: string;
 }
@@ -24,6 +33,29 @@ export interface AppletSessionNoteContext {
 export interface AppletSessionNoteResponse {
   ok: true;
   note: AppletSessionNoteV1 | null;
+}
+
+const APPLET_SESSION_NOTE_SAVED_EVENT = "prism:applet-session-note-saved";
+
+export function publishAppletSessionNoteSaved(
+  note: AppletSessionNoteV1,
+): void {
+  window.dispatchEvent(
+    new CustomEvent<AppletSessionNoteV1>(APPLET_SESSION_NOTE_SAVED_EVENT, {
+      detail: note,
+    }),
+  );
+}
+
+export function subscribeAppletSessionNoteSaved(
+  listener: (note: AppletSessionNoteV1) => void,
+): () => void {
+  const handleSavedNote = (event: Event): void => {
+    listener((event as CustomEvent<AppletSessionNoteV1>).detail);
+  };
+  window.addEventListener(APPLET_SESSION_NOTE_SAVED_EVENT, handleSavedNote);
+  return () =>
+    window.removeEventListener(APPLET_SESSION_NOTE_SAVED_EVENT, handleSavedNote);
 }
 
 export function appletSessionNoteRequestPath(
@@ -163,5 +195,120 @@ export function appendAppletSessionNoteToTranscript(
   const body = formatAppletSessionNoteCollectionBody(rawBody);
   const normalizedTranscript = transcript.trimEnd();
   if (!body) return normalizedTranscript;
-  return `${normalizedTranscript}\n\n## Session notes\n\n${body}\n`;
+  const captures =
+    typeof note === "object" && note !== null
+      ? normalizedAppletSessionNoteCaptures(note.captures)
+      : [];
+  const annotatedTranscript = insertAppletSessionNoteCaptures(
+    normalizedTranscript,
+    captures,
+  );
+  return `${annotatedTranscript}\n\n## Session notes\n\n${body}\n`;
+}
+
+const APPLET_SESSION_NOTE_ISO_TIMESTAMP =
+  /^\s*-\s*(?:Recorded|At|Created|Started|Updated|Completed):\s*(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z)/u;
+
+interface TranscriptTimestampAnchor {
+  lineIndex: number;
+  timestampMs: number;
+}
+
+function normalizedAppletSessionNoteCaptures(
+  captures: readonly AppletSessionNoteCaptureV1[] | undefined,
+): AppletSessionNoteCaptureV1[] {
+  if (!Array.isArray(captures)) return [];
+  return captures
+    .flatMap((capture) => {
+      const body = sentenceCaseAppletSessionNoteEntry(capture?.body ?? "");
+      const startedAtMs = Date.parse(capture?.startedAt ?? "");
+      const committedAtMs = Date.parse(capture?.committedAt ?? "");
+      return body && Number.isFinite(startedAtMs) && Number.isFinite(committedAtMs)
+        ? [
+            {
+              body,
+              startedAt: new Date(startedAtMs).toISOString(),
+              committedAt: new Date(committedAtMs).toISOString(),
+            },
+          ]
+        : [];
+    })
+    .sort((left, right) => left.startedAt.localeCompare(right.startedAt));
+}
+
+function transcriptTimestampAnchors(
+  lines: readonly string[],
+): TranscriptTimestampAnchor[] {
+  return lines.flatMap((line, lineIndex) => {
+    const timestamp = line.match(APPLET_SESSION_NOTE_ISO_TIMESTAMP)?.[1];
+    if (!timestamp) return [];
+    const timestampMs = Date.parse(timestamp);
+    return Number.isFinite(timestampMs) ? [{ lineIndex, timestampMs }] : [];
+  });
+}
+
+function noteInsertionLine(
+  lines: readonly string[],
+  timestampLineIndex: number,
+): number {
+  for (let index = timestampLineIndex + 1; index < lines.length; index += 1) {
+    if (/^#{2,3}\s/u.test(lines[index] ?? "")) {
+      let insertionLine = index;
+      while (
+        insertionLine > timestampLineIndex + 1 &&
+        !lines[insertionLine - 1]?.trim()
+      ) {
+        insertionLine -= 1;
+      }
+      return insertionLine;
+    }
+  }
+  return lines.length;
+}
+
+function nearestTranscriptTimestampLine(
+  anchors: readonly TranscriptTimestampAnchor[],
+  startedAtMs: number,
+): number | null {
+  const prior = anchors
+    .filter((anchor) => anchor.timestampMs <= startedAtMs)
+    .sort((left, right) => right.timestampMs - left.timestampMs)[0];
+  if (prior) return prior.lineIndex;
+  const next = [...anchors].sort(
+    (left, right) => left.timestampMs - right.timestampMs,
+  )[0];
+  return next?.lineIndex ?? null;
+}
+
+function insertAppletSessionNoteCaptures(
+  transcript: string,
+  captures: readonly AppletSessionNoteCaptureV1[],
+): string {
+  if (!transcript || captures.length === 0) return transcript;
+  const lines = transcript.split(/\r?\n/u);
+  const anchors = transcriptTimestampAnchors(lines);
+  const insertions = new Map<number, AppletSessionNoteCaptureV1[]>();
+
+  for (const capture of captures) {
+    const startedAtMs = Date.parse(capture.startedAt);
+    const timestampLine = nearestTranscriptTimestampLine(anchors, startedAtMs);
+    const insertionLine =
+      timestampLine === null
+        ? lines.length
+        : noteInsertionLine(lines, timestampLine);
+    const existing = insertions.get(insertionLine) ?? [];
+    existing.push(capture);
+    insertions.set(insertionLine, existing);
+  }
+
+  for (const [lineIndex, notes] of [...insertions.entries()].sort(
+    ([left], [right]) => right - left,
+  )) {
+    const annotationLines = notes.flatMap((capture) => [
+      "",
+      `> **Developer note · ${capture.startedAt}** — ${capture.body}`,
+    ]);
+    lines.splice(lineIndex, 0, ...annotationLines);
+  }
+  return lines.join("\n").trimEnd();
 }

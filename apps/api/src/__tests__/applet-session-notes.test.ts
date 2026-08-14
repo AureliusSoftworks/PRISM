@@ -89,11 +89,20 @@ describe("applet session notes", () => {
       "coffee",
       "coffee-1",
       "  keep   NASA casing  ",
+      "2026-08-14T18:01:02.345Z",
     );
     assert.equal(
       first.body,
       "- Remember the quiet turn.\n- Keep NASA casing.",
     );
+    assert.deepEqual(first.captures, [
+      {
+        body: "Keep NASA casing.",
+        startedAt: "2026-08-14T18:01:02.345Z",
+        committedAt: first.captures[0]?.committedAt,
+      },
+    ]);
+    assert.ok(Number.isFinite(Date.parse(first.captures[0]?.committedAt ?? "")));
 
     const second = appendAppletSessionNote(
       db,
@@ -101,6 +110,7 @@ describe("applet session notes", () => {
       "coffee",
       "coffee-1",
       "- revisit the ending?",
+      "2026-08-14T18:02:03.456Z",
     );
     assert.equal(
       second.body,
@@ -109,6 +119,33 @@ describe("applet session notes", () => {
     assert.equal(
       getAppletSessionNote(db, "user-1", "coffee", "coffee-1")?.body,
       second.body,
+    );
+    assert.equal(second.captures.length, 2);
+    assert.equal(second.captures[1]?.startedAt, "2026-08-14T18:02:03.456Z");
+    db.close();
+  });
+
+  it("preserves capture history when the consolidated appendix is edited", () => {
+    const db = fixture();
+    appendAppletSessionNote(
+      db,
+      "user-1",
+      "coffee",
+      "coffee-1",
+      "remember this turn",
+      "2026-08-14T18:03:04.567Z",
+    );
+    const edited = saveAppletSessionNote(
+      db,
+      "user-1",
+      "coffee",
+      "coffee-1",
+      "Remember this exact turn.",
+    );
+    assert.equal(edited?.captures.length, 1);
+    assert.equal(
+      edited?.captures[0]?.startedAt,
+      "2026-08-14T18:03:04.567Z",
     );
     db.close();
   });

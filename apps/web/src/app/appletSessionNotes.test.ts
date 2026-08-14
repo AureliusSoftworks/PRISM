@@ -62,8 +62,58 @@ describe("applet session notes", () => {
     );
   });
 
-  it("uses the plus composer for live Coffee, Signal, and Debate sessions", () => {
+  it("places each committed note after the nearest transcript turn using first-typing time", () => {
+    const transcript = [
+      "# Transcript",
+      "",
+      "## Transcript",
+      "",
+      "### Turn 01 | Prism",
+      "",
+      "- Recorded: 2026-08-14T18:00:00.000Z",
+      "",
+      "First line.",
+      "",
+      "### Turn 02 | Hector",
+      "",
+      "- Recorded: 2026-08-14T18:01:00.000Z",
+      "",
+      "Second line.",
+      "",
+      "## Event log",
+      "",
+      "Done.",
+    ].join("\n");
+    const output = appendAppletSessionNoteToTranscript(transcript, {
+      v: 1,
+      surface: "coffee",
+      sessionId: "coffee-1",
+      body: "- watch Hector's reaction",
+      captures: [
+        {
+          body: "watch Hector's reaction",
+          startedAt: "2026-08-14T18:01:10.000Z",
+          committedAt: "2026-08-14T18:01:40.000Z",
+        },
+      ],
+      createdAt: "2026-08-14T18:01:40.000Z",
+      updatedAt: "2026-08-14T18:01:40.000Z",
+    });
+
+    assert.match(
+      output,
+      /Second line\.\n\n> \*\*Developer note · 2026-08-14T18:01:10\.000Z\*\* — Watch Hector's reaction\.\n\n## Event log/u,
+    );
+    assert.match(
+      output,
+      /## Session notes\n\n- Watch Hector's reaction\./u,
+    );
+    assert.doesNotMatch(output, /Developer note · 2026-08-14T18:01:40/u);
+  });
+
+  it("uses the plus composer for live Coffee, Signal, Debate, and Story sessions", () => {
     assert.match(page, /surface="coffee"[\s\S]{0,100}sessionId=\{coffeeConversation\.id\}/u);
+    assert.match(page, /surface="story"[\s\S]{0,100}sessionId=\{storySession\.id\}/u);
     assert.match(signal, /surface="signal"[\s\S]{0,100}sessionId=\{episode\.id\}/u);
     assert.match(debate, /surface="debate"[\s\S]{0,100}sessionId=\{activeSession\.id\}/u);
     assert.match(companion, /data-session-note-trigger="true"/u);
@@ -72,9 +122,15 @@ describe("applet session notes", () => {
     assert.match(companion, /event\.currentTarget\.form\?\.requestSubmit\(\)/u);
     assert.match(companion, /method: "POST"/u);
     assert.match(companion, /entry,/u);
+    assert.match(companion, /sessionNoteTypingStartedAtRef/u);
+    assert.match(companion, /startedAt:/u);
+    assert.match(companion, /nextDraft\.length > 0/u);
     assert.match(companion, /sessionNoteSavingRef\.current/u);
     assert.match(companion, /setSessionNoteDraft\(""\)/u);
-    assert.match(companion, /Overlaps merge in the transcript/u);
+    assert.match(
+      companion,
+      /First keystroke marks transcript · overlaps merge/u,
+    );
     assert.match(companion, /Add note/u);
     assert.match(companion, /keyboardShortcutMatchesEvent\(keyboardShortcut, event\)/u);
     assert.match(companion, /setOpen\(false\)/u);
@@ -105,6 +161,9 @@ describe("applet session notes", () => {
       assert.match(source, /appendAppletSessionNoteToTranscript/u);
     }
     assert.match(page, /downloadCoffeeReplayTranscriptWithNote/u);
+    assert.match(page, /subscribeAppletSessionNoteSaved/u);
+    assert.match(page, /data-kind="developer-note"/u);
+    assert.match(page, /data-kind="session-notes"/u);
   });
 
   it("keeps the applet crisp behind a local dark focus orb", () => {

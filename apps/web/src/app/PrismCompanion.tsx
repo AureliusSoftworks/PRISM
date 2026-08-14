@@ -102,6 +102,7 @@ import {
 } from "./prismCompanionPresence";
 import {
   APPLET_SESSION_NOTE_ENTRY_MAX_CHARACTERS,
+  publishAppletSessionNoteSaved,
   type AppletSessionNoteResponse,
 } from "./appletSessionNotes";
 import {
@@ -760,6 +761,7 @@ export default function PrismCompanion({
   const personalNoteTitleRef = useRef<HTMLInputElement | null>(null);
   const refractPromptRef = useRef<HTMLInputElement | null>(null);
   const sessionNoteContextRef = useRef(sessionNoteContext);
+  const sessionNoteTypingStartedAtRef = useRef<string | null>(null);
   const surfaceRef = useRef(surface);
   const positionRef = useRef(position);
   const chatHomeDockPositionRef = useRef<PrismCompanionPosition | null>(null);
@@ -1991,6 +1993,7 @@ export default function PrismCompanion({
 
   const openSessionNote = useCallback((): void => {
     clearIdleDim();
+    sessionNoteTypingStartedAtRef.current = null;
     setSessionNoteDraft("");
     setOpen(true);
     setSessionNoteStatus("");
@@ -2019,6 +2022,8 @@ export default function PrismCompanion({
         body: JSON.stringify({
           ...sessionNoteContext,
           entry,
+          startedAt:
+            sessionNoteTypingStartedAtRef.current ?? new Date().toISOString(),
         }),
       });
       const payload = (await response.json().catch(() => ({}))) as
@@ -2035,6 +2040,8 @@ export default function PrismCompanion({
         sessionNoteContextRef.current?.surface === savingContext.surface &&
         sessionNoteContextRef.current.sessionId === savingContext.sessionId
       ) {
+        if (payload.note) publishAppletSessionNoteSaved(payload.note);
+        sessionNoteTypingStartedAtRef.current = null;
         setSessionNoteDraft("");
         setSessionNoteStatus("Note added to transcript");
         setOpen(false);
@@ -4907,7 +4914,7 @@ export default function PrismCompanion({
               >
                 <div className={styles.sessionNoteHeading}>
                   <span>Session note</span>
-                  <small>Overlaps merge in the transcript</small>
+                  <small>First keystroke marks transcript · overlaps merge</small>
                 </div>
                 <textarea
                   ref={composerRef}
@@ -4918,7 +4925,17 @@ export default function PrismCompanion({
                   placeholder="Capture a fresh note…"
                   enterKeyHint="done"
                   disabled={sessionNoteSaving}
-                  onChange={(event) => setSessionNoteDraft(event.target.value)}
+                  onChange={(event) => {
+                    const nextDraft = event.target.value;
+                    if (
+                      sessionNoteTypingStartedAtRef.current === null &&
+                      nextDraft.length > 0
+                    ) {
+                      sessionNoteTypingStartedAtRef.current =
+                        new Date().toISOString();
+                    }
+                    setSessionNoteDraft(nextDraft);
+                  }}
                   onKeyDown={(event) => {
                     if (event.key === "Escape") {
                       event.preventDefault();

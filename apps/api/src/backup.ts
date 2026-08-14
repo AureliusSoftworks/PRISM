@@ -9,6 +9,7 @@ import { normalizeMemoryTier } from "./memory.ts";
 import type { ProviderName } from "./providers.ts";
 import { normalizeVoicePreviewLine } from "./voice-preview-line.ts";
 import {
+  APPLET_SESSION_NOTE_ENTRY_MAX_CHARACTERS,
   APPLET_SESSION_NOTE_MAX_CHARACTERS,
   appletSessionBelongsToUser,
   readAppletSessionNoteSurface,
@@ -594,6 +595,11 @@ export interface BackupSnapshot {
     surface: "coffee" | "signal" | "debate" | "story";
     sessionId: string;
     body: string;
+    captures?: Array<{
+      body: string;
+      startedAt: string;
+      committedAt: string;
+    }>;
     createdAt: string;
     updatedAt: string;
   }>;
@@ -676,6 +682,49 @@ function backupJsonObject(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+}
+
+function backupAppletSessionNoteCaptures(value: unknown): Array<{
+  body: string;
+  startedAt: string;
+  committedAt: string;
+}> {
+  let parsed = value;
+  if (typeof value === "string") {
+    try {
+      parsed = JSON.parse(value) as unknown;
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.flatMap((candidate) => {
+    if (
+      !candidate ||
+      typeof candidate !== "object" ||
+      Array.isArray(candidate)
+    ) {
+      return [];
+    }
+    const record = candidate as Record<string, unknown>;
+    const body = typeof record.body === "string" ? record.body.trim() : "";
+    const startedAt =
+      typeof record.startedAt === "string" ? record.startedAt : "";
+    const committedAt =
+      typeof record.committedAt === "string" ? record.committedAt : "";
+    return body &&
+      body.length <= APPLET_SESSION_NOTE_ENTRY_MAX_CHARACTERS &&
+      Number.isFinite(Date.parse(startedAt)) &&
+      Number.isFinite(Date.parse(committedAt))
+      ? [
+          {
+            body,
+            startedAt: new Date(startedAt).toISOString(),
+            committedAt: new Date(committedAt).toISOString(),
+          },
+        ]
+      : [];
+  }).slice(-400);
 }
 
 function parseBackupJsonObject(raw: string | null | undefined): Record<string, unknown> {
@@ -2514,7 +2563,7 @@ export function exportUserSnapshot(
     .all(userId) as Array<Record<string, unknown>>;
   const sessionNotes = db
     .prepare(
-      `SELECT surface, session_id, body, created_at, updated_at
+      `SELECT surface, session_id, body, captures_json, created_at, updated_at
          FROM applet_session_notes
         WHERE user_id = ?
         ORDER BY updated_at, rowid`,
@@ -2960,6 +3009,7 @@ export function exportUserSnapshot(
       >[number]["surface"],
       sessionId: String(row.session_id),
       body: String(row.body),
+      captures: backupAppletSessionNoteCaptures(row.captures_json),
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
     })),
@@ -4545,8 +4595,8 @@ function importUserSnapshotWithinTransaction(
   if (snapshot.sessionNotes) {
     const insertSessionNote = db.prepare(
       `INSERT OR REPLACE INTO applet_session_notes
-         (user_id, surface, session_id, body, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+         (user_id, surface, session_id, body, captures_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     );
     for (const note of snapshot.sessionNotes) {
       const surface = readAppletSessionNoteSurface(note?.surface);
@@ -4566,6 +4616,7 @@ function importUserSnapshotWithinTransaction(
         surface,
         sessionId,
         body,
+        JSON.stringify(backupAppletSessionNoteCaptures(note.captures)),
         note.createdAt,
         note.updatedAt,
       );
