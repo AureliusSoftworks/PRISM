@@ -156,7 +156,11 @@ describe("Chat shell header layout", () => {
 
   it("makes contextual Auto the model default inside a binary privacy lane", () => {
     assert.match(pageSource, /const autoLabelShown = "Auto";/u);
-    assert.match(pageSource, /function InvertedMinimalAutoEffortIcon/u);
+    assert.match(pageSource, /function AutoEffortIcon/u);
+    assert.match(
+      pageSource,
+      /function AutoEffortIcon\(\): React\.JSX\.Element \{[\s\S]{0,420}d="M9 2\.75 15\.25 14H2\.75L9 2\.75Z"/u,
+    );
     assert.match(pageSource, /Effort chosen automatically/u);
     assert.doesNotMatch(pageSource, /Account default/u);
     assert.match(pageSource, /\(\["local", "online"\] as const\)\.map/u);

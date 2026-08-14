@@ -5,6 +5,7 @@ import { describe, it } from "node:test";
 import {
   FIRST_RUN_SETUP_STORAGE_KEY,
   FIRST_RUN_SETUP_STEPS,
+  FIRST_RUN_BATCH_FOUNDRY_GUIDANCE,
   clampFirstRunSetupStepIndex,
   clearFirstRunSetupCompletion,
   firstRunSetupProgressPercent,
@@ -27,6 +28,19 @@ describe("first-run onboarding", () => {
         "auto-models",
         "ready",
       ],
+    );
+  });
+
+  it("keeps living club rooms in contextual guidance, not first-run setup", () => {
+    // Reviewed with the living-room launch: club roster, compact LOD, and
+    // focused-bot actions require an authored saved group, so they belong in
+    // the Zen contextual walkthrough rather than account setup.
+    const setupLabels = FIRST_RUN_SETUP_STEPS.map(
+      (step) => `${step.id} ${step.title} ${step.shortTitle}`,
+    ).join(" ");
+    assert.doesNotMatch(
+      setupLabels,
+      /living club|group room|micro avatar|Talk to me|bot assets/iu,
     );
   });
 
@@ -80,6 +94,19 @@ describe("first-run onboarding", () => {
     assert.match(pageSource, /Tune the room and Your\s*seat &amp; the Jury/u);
     assert.match(pageSource, /Forum, Turnabout, atmosphere, roles/u);
     assert.match(pageSource, /without crowding the setup/u);
+  });
+
+  it("introduces the rich and lean automatic Batch Foundry thresholds", () => {
+    assert.match(FIRST_RUN_BATCH_FOUNDRY_GUIDANCE, /2–10 bots/u);
+    assert.match(FIRST_RUN_BATCH_FOUNDRY_GUIDANCE, /11–100/u);
+    assert.match(FIRST_RUN_BATCH_FOUNDRY_GUIDANCE, /rich full drafts/u);
+    assert.match(FIRST_RUN_BATCH_FOUNDRY_GUIDANCE, /recoverable progress still saves automatically/u);
+    assert.match(FIRST_RUN_BATCH_FOUNDRY_GUIDANCE, /model-authored Library group/u);
+    assert.match(FIRST_RUN_BATCH_FOUNDRY_GUIDANCE, /constellation chamber/u);
+    assert.match(FIRST_RUN_BATCH_FOUNDRY_GUIDANCE, /not Avatar Studio/u);
+    assert.match(FIRST_RUN_BATCH_FOUNDRY_GUIDANCE, /mini-avatar slot/u);
+    assert.match(FIRST_RUN_BATCH_FOUNDRY_GUIDANCE, /micro faces inside each generated color-and-glyph orb/u);
+    assert.match(pageSource, /FIRST_RUN_BATCH_FOUNDRY_GUIDANCE/u);
   });
 
   it("names chat routing separately from image and voice routing", () => {

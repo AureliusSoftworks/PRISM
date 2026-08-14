@@ -10,6 +10,8 @@ const PRISM_UNIVERSAL_INPUT_SELECTOR = [
   'input[type="text"]',
   'input[type="search"]',
   'input[type="url"]',
+  'input[type="email"]',
+  'input[type="tel"]',
   'input[type="number"]',
   "textarea",
   '[contenteditable="true"]',
@@ -17,8 +19,10 @@ const PRISM_UNIVERSAL_INPUT_SELECTOR = [
 ].join(", ");
 
 const PRISM_UNIVERSAL_INPUT_EXCLUDED_ANCESTOR_SELECTOR = [
-  '[data-prism-system-pause-exempt="true"]',
   '[data-prism-refract-ignore="true"]',
+  '[data-prism-companion-anchor="true"]',
+  '[data-prism-blocking-loader="true"]',
+  '[data-prism-model-warmup="true"]',
   '[data-live-episode="true"]',
   '[data-live-session-locked="true"]',
   '[data-replay="true"]',
@@ -110,7 +114,9 @@ export function prismUniversalInputIsEligible(
   }
   if (
     element instanceof HTMLInputElement &&
-    !["text", "search", "url", "number"].includes(element.type)
+    !["text", "search", "url", "email", "tel", "number"].includes(
+      element.type,
+    )
   ) {
     return false;
   }
@@ -168,7 +174,16 @@ export function prismUniversalInputContext(
     180,
   );
   const placeholder = compactText(element.getAttribute("placeholder"), 180);
-  const parts = [heading, placeholder, ...describedByText(element)]
+  const explicitContext = compactText(
+    element.dataset.prismRefractContext,
+    800,
+  );
+  const parts = [
+    explicitContext,
+    heading,
+    placeholder,
+    ...describedByText(element),
+  ]
     .filter(Boolean)
     .filter((value, index, values) => values.indexOf(value) === index);
   const declaredMaxLength =
@@ -250,6 +265,15 @@ interface InstalledInputTarget {
 
 let universalInputSequence = 0;
 
+function universalInputTargetId(
+  element: PrismUniversalInputElement,
+): string {
+  const semanticId = element.id.trim();
+  return semanticId
+    ? `prism-contextual-input-${encodeURIComponent(semanticId)}`
+    : `prism-contextual-input-${++universalInputSequence}`;
+}
+
 export function installPrismUniversalInputTargets(options: {
   root?: Document;
   generate: (request: PrismUniversalInputCandidateRequest) => Promise<string>;
@@ -275,7 +299,7 @@ export function installPrismUniversalInputTargets(options: {
       return;
     }
     if (element.hasAttribute("data-prism-refract-id")) return;
-    const id = `prism-contextual-input-${++universalInputSequence}`;
+    const id = universalInputTargetId(element);
     const target: PrismRefractFieldTarget = {
       id,
       kind: "field",
@@ -340,8 +364,10 @@ export function installPrismUniversalInputTargets(options: {
       "aria-readonly",
       "autocomplete",
       "contenteditable",
+      "data-prism-refract-context",
       "data-prism-refract-id",
       "data-prism-refract-ignore",
+      "data-prism-refract-target-kind",
       "disabled",
       "hidden",
       "id",

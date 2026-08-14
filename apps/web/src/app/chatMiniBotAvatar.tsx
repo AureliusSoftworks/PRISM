@@ -7,7 +7,6 @@ import {
   type BotAvatarFacing,
 } from "./bot-avatar-render-geometry";
 import styles from "./chatMiniBotAvatar.module.css";
-import { BotGroupLeadershipMark } from "./BotGroupLeadershipMark";
 
 export const CHAT_MINI_BOT_AVATAR_CANONICAL_SCREEN_SIZE = 128;
 export const CHAT_MINI_BOT_AVATAR_DARK_BASE_SRC =
@@ -94,11 +93,6 @@ export function ChatMiniBotAvatar(props: {
         draggable={false}
       />
       <span className={styles.frameAlloy} aria-hidden="true" />
-      <BotGroupLeadershipMark
-        groupCount={props.leadershipGroupCount}
-        surface="mini"
-        size={size}
-      />
       <span
         className={styles.upperScreen}
         data-chat-mini-upper-screen="true"

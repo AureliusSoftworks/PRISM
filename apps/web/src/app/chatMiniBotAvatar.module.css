@@ -4,6 +4,9 @@
 .root {
   --chat-mini-bot-color: var(--accent);
   --chat-mini-bot-alloy-color: #aeb8c1;
+  /* Register the compact buckle emission one display pixel above the authored
+     lower-screen center. Full-size and micro avatars use separate renderers. */
+  --chat-mini-bot-lower-screen-nudge-y: -1px;
   /* The 96px chassis raster is square, just like the HD source. Its aperture
      is already authored slightly wider than tall. Keep the displayed frame
      square so the canonical face plane is not compressed horizontally. */

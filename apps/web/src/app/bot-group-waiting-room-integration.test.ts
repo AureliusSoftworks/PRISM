@@ -33,15 +33,15 @@ function assertNoNetworkCalls(source: string): void {
 }
 
 describe("bot group waiting-room integration", () => {
-  it("keeps the experimental living room disabled behind the eligibility gate", () => {
-    assert.equal(BOT_GROUP_WAITING_ROOM_ENABLED, false);
+  it("enables living rooms behind the authored-group eligibility gate", () => {
+    assert.equal(BOT_GROUP_WAITING_ROOM_ENABLED, true);
     assert.match(
       pageSource,
       /const botGroupWaitingRoomEligible =\s*BOT_GROUP_WAITING_ROOM_ENABLED &&\s*Boolean\(user\)/,
     );
   });
 
-  it("keeps the room Chat-only and leaves Sandbox on the compact picker", () => {
+  it("keeps the room Chat-only and layers it around the existing grid", () => {
     assert.match(
       pageSource,
       /const botGroupWaitingRoomVisitEligible =\s*botGroupWaitingRoomEligible &&\s*view === "chat"/,
@@ -52,7 +52,7 @@ describe("bot group waiting-room integration", () => {
     );
     assert.match(
       pageSource,
-      /\{groupWaitingRoom \?\?\s*renderChatBotPickerGrid\(emptyStatePickerGeometry\)\}/,
+      /className=\{styles\.botGroupAquarium\}[\s\S]{0,320}\{groupWaitingRoom\}[\s\S]{0,160}\{renderChatBotPickerGrid\(emptyStatePickerGeometry\)\}/,
     );
     assert.equal(
       pageSource.match(/renderFocusedBotLibraryGroupWaitingRoom\(\{ heroBot \}\)/g)
@@ -77,11 +77,11 @@ describe("bot group waiting-room integration", () => {
     );
   });
 
-  it("owns and cleans every rotation, handoff, visibility, and motion listener", () => {
-    assert.match(
-      pageSource,
-      /clearBotGroupWaitingRoomRotationTimer\(false\);\s*clearBotGroupWaitingRoomHandoff\(\);/,
-    );
+  it("measures actual room space without rotation or handoff schedulers", () => {
+    assert.match(pageSource, /const observer = new ResizeObserver/);
+    assert.match(pageSource, /observer\.observe\(room\)/);
+    assert.match(pageSource, /return \(\) => observer\.disconnect\(\)/);
+    assert.match(pageSource, /resolveBotGroupRoomLayout\(\{/);
     assert.match(
       pageSource,
       /document\.addEventListener\("visibilitychange", handleVisibilityChange\);/,
@@ -98,19 +98,16 @@ describe("bot group waiting-room integration", () => {
       pageSource,
       /reducedMotionQuery\.removeEventListener\(\s*"change",\s*handleReducedMotionChange,?\s*\);/,
     );
-    assert.match(pageSource, /botGroupWaitingRoomRotationRemainingRef/);
-    assert.match(pageSource, /botGroupWaitingRoomRotationDeadlineRef/);
-    assert.match(
-      pageSource,
-      /if \(contextChanged\) \{[\s\S]{0,360}clearBotGroupWaitingRoomHandoff\(\);/,
-    );
+    assert.doesNotMatch(pageSource, /botGroupWaitingRoomRotationRemainingRef/);
+    assert.doesNotMatch(pageSource, /botGroupWaitingRoomRotationDeadlineRef/);
+    assert.doesNotMatch(pageSource, /clearBotGroupWaitingRoomHandoff/);
     assert.match(
       pageSource,
       /botGroupWaitingRoomRenderActive &&\s*!botGroupWaitingRoomObscured[\s\S]{0,320}setBotGroupWaitingRoomRosterInteracting\(false\);/,
     );
   });
 
-  it("uses semantic direct-manipulation presences without ambient writes", () => {
+  it("uses semantic mini and micro presences without Zen activation", () => {
     assert.match(
       pageSource,
       /className=\{styles\.botGroupWaitingRoomPresenceButton\}[\s\S]{0,180}data-tutorial-target="chat-bot-picker"/,
@@ -121,55 +118,52 @@ describe("bot group waiting-room integration", () => {
     );
     assert.match(
       pageSource,
-      /<EmptyStateHeroMiniBot[\s\S]*size="room"[\s\S]*scheduleKey=\{`group-aquarium-/,
+      /<EmptyStateHeroMiniBot[\s\S]*size="room"[\s\S]*scheduleKey=\{`waiting-room-/,
     );
     assert.match(
       pageSource,
       /if \(botGroupWaitingRoomRenderActive\) \{\s*e\.preventDefault\(\);[\s\S]{0,180}beginBotGroupCoffeeStaging\(liveDraft\)/,
     );
+    assert.match(pageSource, /<BotAvatarMicro/);
     assert.match(
       pageSource,
-      /view !== "chat" \|\|\s*!user \|\|\s*botGroupWaitingRoomVisitEligible \|\|[\s\S]{0,900}"\/api\/conversations\/zen\/open"/,
+      /placement\.lod === "micro" && !placement\.promoted[\s\S]{0,320}setBotGroupWaitingRoomPromotedBotId\(placement\.botId\)/,
     );
     assert.match(
       pageSource,
-      /previous\.id !== activeConversationId &&\s*!previous\.incognito &&\s*!botGroupWaitingRoomVisitEligible &&\s*!suppressRelationshipDepthRefresh/,
+      /openBotPanelHub\(bot, \{[\s\S]{0,320}origin: "group-room"/,
     );
-    assert.match(pageSource, /`Visit \$\{bot\.name\}'s Zen Home`/);
-    assert.match(
-      pageSource,
-      /resolveExistingPersonaHome\(\s*placement\.botId,\s*conversations/,
+    const presenceHandlerStart = pageSource.indexOf(
+      "const handleBotGroupWaitingRoomPresenceClick",
     );
-    assert.match(
-      pageSource,
-      /visitZenHome\(placement\.botId,[\s\S]{0,900}kind: "pending"/,
+    const roomRenderStart = pageSource.indexOf(
+      "const renderFocusedBotLibraryGroupWaitingRoom",
+      presenceHandlerStart,
     );
-    assert.match(
-      pageSource,
-      /commitSourceVisit:[\s\S]{0,300}botGroupWaitingRoomVisitRef\.current = next/,
+    assert.ok(presenceHandlerStart >= 0 && roomRenderStart > presenceHandlerStart);
+    const presenceHandlerSource = pageSource.slice(
+      presenceHandlerStart,
+      roomRenderStart,
     );
-    assert.match(
-      pageSource,
-      /await refreshConversation\(conversationId\);\s*options\.commitSourceVisit\?\.\(\);/,
-    );
+    assert.doesNotMatch(presenceHandlerSource, /visitZenHome|navigateToView\("zen"\)/);
     assert.match(
       pageSource,
       /botGroupWaitingRoomWithReturnCheckpoint\(current,[\s\S]{0,260}botGroupWaitingRoomSnapshot\(current\)/,
     );
   });
 
-  it("shares every obscuring surface between rotation and ambient pause inputs", () => {
+  it("pauses mini ambient presence behind every obscuring surface", () => {
     assert.match(
       pageSource,
       /const botGroupWaitingRoomObscured = Boolean\([\s\S]{0,460}sidebarOpen[\s\S]{0,460}panel !== null[\s\S]{0,460}botGroupCoffeeStaging !== null[\s\S]{0,460}botGroupRoomAtmosphereDialog !== null[\s\S]{0,460}imageLightbox !== null/,
     );
     assert.match(
       pageSource,
-      /const botGroupWaitingRoomPaused =[\s\S]{0,240}botGroupWaitingRoomObscured/,
+      /const botGroupWaitingRoomAmbientIsPaused =[\s\S]{0,760}botGroupWaitingRoomObscured/,
     );
     assert.match(
       pageSource,
-      /const botGroupWaitingRoomAmbientIsPaused =[\s\S]{0,760}interacting:\s*botGroupWaitingRoomObscured/,
+      /roomActive:[\s\S]{0,180}botGroupWaitingRoomLayout\.lod === "mini"/,
     );
   });
 
@@ -197,17 +191,29 @@ describe("bot group waiting-room integration", () => {
     );
   });
 
-  it("keeps dormant aquarium motion inaccessible from the restored group hero", () => {
+  it("keeps living-room presences calm around the interactive center grid", () => {
     assert.match(cssSource, /\.botGroupWaitingRoom \{/);
     assert.match(cssSource, /\.botGroupWaitingRoomPresenceButton:focus-visible/);
-    assert.match(cssSource, /@keyframes botGroupWaitingRoomArrival/);
-    assert.match(cssSource, /@keyframes botGroupWaitingRoomDeparture/);
+    assert.doesNotMatch(cssSource, /@keyframes botGroupWaitingRoomArrival/);
+    assert.doesNotMatch(cssSource, /@keyframes botGroupWaitingRoomDeparture/);
     assert.match(
       pageSource,
       /data-room-transition-anchor=\{bot\.id\}[\s\S]*?<EmptyStateHeroMiniBot/,
     );
     assert.match(cssSource, /@keyframes botGroupAquariumDrift/);
-    assert.match(pageSource, /beginBotGroupWaitingRoomPresenceDrag/);
+    assert.match(
+      waitingRoomSource,
+      /exclusionFootprint[\s\S]{0,260}roomCandidatesOutsideFootprint/,
+    );
+    assert.match(
+      pageSource,
+      /zenHueRootGeometry\.pickerWidth \+ motionGutter \* 2[\s\S]{0,500}exclusionFootprint/,
+    );
+    assert.match(
+      pageSource,
+      /data-room-roam-paused=\{[\s\S]{0,120}botGroupWaitingRoomRoamIsPaused/,
+    );
+    assert.doesNotMatch(pageSource, /beginBotGroupWaitingRoomPresenceDrag/);
     const heroStart = pageSource.indexOf(
       "const renderFocusedBotLibraryGroupHero",
     );
@@ -244,7 +250,9 @@ describe("bot group waiting-room integration", () => {
     );
     assert.ok(runtimeStart >= 0 && runtimeEnd > runtimeStart);
     const runtimeSource = pageSource.slice(runtimeStart, runtimeEnd);
-    assert.equal(runtimeSource.match(/window\.setTimeout\(/g)?.length, 1);
+    // One ambient timer plus one shared mini-blink timer. Neither fans out per
+    // avatar, and the micro LOD pauses both.
+    assert.equal(runtimeSource.match(/window\.setTimeout\(/g)?.length, 2);
     assertNoNetworkCalls(runtimeSource);
     assert.doesNotMatch(
       runtimeSource,
@@ -282,7 +290,7 @@ describe("bot group waiting-room integration", () => {
     assert.match(renderSource, /onFocusCapture=/);
   });
 
-  it("keeps ellipsis cues out of the accessibility tree and uses only mini avatars", () => {
+  it("keeps ellipsis cues hidden and switches between mini and lightweight micro avatars", () => {
     const renderStart = pageSource.indexOf(
       "const renderFocusedBotLibraryGroupWaitingRoom",
     );
@@ -302,11 +310,30 @@ describe("bot group waiting-room integration", () => {
       )?.[0] ?? "",
       /aria-live|role=/,
     );
-    assert.match(renderSource, /data-room-render-detail="mini"/);
+    assert.match(renderSource, /data-room-render-detail=\{miniPresence \? "mini" : "micro"\}/);
     assert.match(renderSource, /<span aria-hidden="true">…<\/span>/);
-    assert.match(renderSource, /<EmptyStateHeroMiniBot/);
+    assert.match(renderSource, /<BotGroupWaitingRoomPresenceAvatar/);
     assert.doesNotMatch(renderSource, /<ZenLiveBotMannequin|<BotAmbientPresenceRig/);
-    assert.match(waitingRoomSource, /BOT_GROUP_WAITING_ROOM_MAX_VISIBLE_BOTS = 24/);
-    assert.match(pageSource, /of \{visit\.eligibleBotIds\.length\} in view/);
+    assert.match(
+      cssSource,
+      /data-room-lod="micro"[\s\S]{0,180}\.botGroupWaitingRoomPresenceName[\s\S]{0,360}backdrop-filter: none[\s\S]{0,120}box-shadow: none/,
+    );
+    const compactAvatarStart = pageSource.indexOf(
+      "const BotGroupWaitingRoomPresenceAvatar",
+    );
+    const compactAvatarEnd = pageSource.indexOf(
+      "// ── Empty-state icon",
+      compactAvatarStart,
+    );
+    assert.ok(compactAvatarStart >= 0 && compactAvatarEnd > compactAvatarStart);
+    const compactAvatarSource = pageSource.slice(
+      compactAvatarStart,
+      compactAvatarEnd,
+    );
+    assert.match(compactAvatarSource, /memo\(/);
+    assert.match(compactAvatarSource, /<EmptyStateHeroMiniBot/);
+    assert.match(compactAvatarSource, /<BotAvatarMicro/);
+    assert.match(waitingRoomSource, /BOT_GROUP_WAITING_ROOM_MAX_MINI_BOTS = 24/);
+    assert.match(pageSource, /Showing \{staticRosterNames\.length\} of\{" "\}/);
   });
 });

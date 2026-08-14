@@ -44,6 +44,34 @@ function fixture() {
 }
 
 describe("server-backed Library groups", () => {
+  it("preserves 100 owned members and truncates only beyond the shared cap", () => {
+    const db = fixture();
+    try {
+      const insertBot = db.prepare(
+        `INSERT INTO bots (id, user_id, name, created_at, updated_at)
+         VALUES (?, 'u1', ?, '2026-08-13T00:00:00.000Z', '2026-08-13T00:00:00.000Z')`,
+      );
+      for (let index = 3; index <= 105; index += 1) {
+        insertBot.run(`bot-${index}`, `Bot ${index}`);
+      }
+      const groups = replaceLibraryGroups({
+        db,
+        userId: "u1",
+        groups: [{
+          id: "group:century",
+          name: "Century",
+          botIds: Array.from({ length: 105 }, (_, index) => `bot-${index + 1}`),
+        }],
+      });
+      const century = groups.find((group) => group.id === "group:century");
+      assert.equal(century?.botIds.length, 100);
+      assert.equal(century?.botIds.includes("bot-100"), true);
+      assert.equal(century?.botIds.includes("bot-101"), false);
+    } finally {
+      closeTestDatabase(db);
+    }
+  });
+
   it("imports browser-local groups once and preserves favorites", () => {
     const db = fixture();
     try {

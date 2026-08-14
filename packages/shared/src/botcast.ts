@@ -1648,7 +1648,7 @@ function normalizeSavedBotcastListenerReactionPlan(
     row.interruptedSpeakerCuePlayback === "crosstalk"
       ? row.interruptedSpeakerCuePlayback
       : undefined;
-  if (plan.interruptedSpeakerCue) {
+  if (plan.interruptedSpeakerCue || plan.publicInterruptedSpeakerCue) {
     return savedPlayback && plan.interruptedSpeakerCuePlayback !== savedPlayback
       ? { ...plan, interruptedSpeakerCuePlayback: savedPlayback }
       : plan;
@@ -2197,6 +2197,9 @@ export interface BotcastGuestInterruptionContext {
   bridgeLine: string;
   /** Canned annoyed tail spoken by the interrupted guest over the host bridge. */
   interruptedSpeakerCue?: BotCrosstalkInterruptedSpeakerCue;
+  /** Power-projected public retort; clean canned wording is omitted. */
+  publicInterruptedSpeakerCue?: string;
+  interruptedSpeakerCueSpeechEffect?: "speech_obfuscation";
 }
 
 export interface BotcastEpisodeAdvanceRequest {

@@ -64,7 +64,10 @@ const removedModules = [
 
 describe("Help diagnostics migration", () => {
   it("keeps shippable diagnostics and maintenance controls in Help", () => {
-    assert.match(pageSource, /data-settings-section="help"/u);
+    assert.match(
+      pageSource,
+      /className=\{`\$\{styles\.settingsSection\} \$\{styles\.settingsSectionWide\}`\}[\s\S]{0,100}data-settings-section="help"/u,
+    );
     assert.match(pageSource, /data-settings-action="test-local-service"/u);
     assert.match(pageSource, /data-settings-action="copy-support-report"/u);
     assert.match(pageSource, /data-settings-action="download-support-report"/u);
@@ -77,7 +80,8 @@ describe("Help diagnostics migration", () => {
   });
 
   it("links the safe standalone labs from an accessible same-window group", () => {
-    assert.match(pageSource, />Advanced<[\s\S]{0,180}>Diagnostics labs</u);
+    assert.match(pageSource, />Advanced</u);
+    assert.match(pageSource, />\s*Diagnostics labs\s*</u);
     assert.match(
       pageSource,
       /data-settings-action="open-voice-sync-lab"[\s\S]{0,100}href="\/qa-voice-sync"[\s\S]{0,160}>Voice Sync Lab</u,
@@ -86,6 +90,8 @@ describe("Help diagnostics migration", () => {
       pageSource,
       /data-settings-action="open-sound-fx-bench"[\s\S]{0,120}href="\/tools\/sound-fx-bench\.html"[\s\S]{0,160}>Sound FX Bench</u,
     );
+    assert.match(pageSource, /data-settings-action="open-debate-alignment-lab"/u);
+    assert.match(pageSource, />Debate Alignment Lab</u);
     assert.doesNotMatch(
       pageSource,
       /data-settings-action="open-(?:voice-sync-lab|sound-fx-bench)"[^>]*target=/u,

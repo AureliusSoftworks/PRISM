@@ -1,3 +1,5 @@
+import { BOT_LIBRARY_GROUP_MEMBER_MAX } from "@localai/shared";
+
 export type ImageOrigin =
   | "images_panel"
   | "zen_chat"
@@ -74,7 +76,7 @@ export function signalArtworkImagePurpose(
   return SIGNAL_LOGO_IMAGE_PURPOSE;
 }
 
-const MAX_RELATED_IMAGE_BOTS = 12;
+const MAX_RELATED_IMAGE_BOTS = BOT_LIBRARY_GROUP_MEMBER_MAX;
 
 export function normalizeImageRelatedBotIds(
   value: unknown,

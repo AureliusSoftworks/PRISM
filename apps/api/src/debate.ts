@@ -297,6 +297,7 @@ interface DebateBotRow {
   face_mouth_font: string | null;
   face_mouth_character: string | null;
   face_mouth_animation: string | null;
+  face_mouth_speech_poses: string | null;
   face_mouth_coffee_pucker: number | null;
   face_font_weight: number | null;
   face_eye_scale: number | null;
@@ -357,7 +358,7 @@ export interface DebateAiRuntime {
   responseMode?: ResponseMode;
   /** Ordered primary + same-lane fallback models. */
   lanes?: DebateGenerationLane[];
-  /** Always local; used only for asynchronous, non-blocking case-board distillation. */
+  /** Always local; Prism-owned auxiliary work, including Power rewrites. */
   auxiliary?: LlmProvider;
   preferredProvider: ProviderName;
   modelSelectionKind?: "auto" | "fixed";
@@ -374,6 +375,7 @@ const DEBATE_BOT_SELECT = `
          face_eyes_font, face_eye_character, face_eye_count, face_eye_spacing,
          face_eye_animation, face_mouth_font, face_mouth_character,
          face_mouth_animation, face_mouth_coffee_pucker, face_font_weight,
+         face_mouth_speech_poses,
          face_eye_scale, face_eye_offset_x, face_eye_offset_y,
          face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x,
          face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar,
@@ -1041,6 +1043,18 @@ function selectedLane(runtime: DebateAiRuntime): DebateGenerationLane {
       ? runtime.online
       : runtime.local)
   );
+}
+
+function debateCursedTongueRewriteLane(runtime: DebateAiRuntime): {
+  provider: LlmProvider;
+  model: string;
+} {
+  const fallback = selectedLane(runtime);
+  const provider = runtime.auxiliary ?? fallback.provider;
+  return {
+    provider,
+    model: provider.diagnosticModel?.trim() || fallback.model,
+  };
 }
 
 function debateRuntimeReasoningEffort(
@@ -2347,6 +2361,7 @@ function snapshotBot(
         faceMouthFont: row.face_mouth_font,
         faceMouthCharacter: row.face_mouth_character,
         faceMouthAnimation: row.face_mouth_animation,
+        faceMouthSpeechPoses: row.face_mouth_speech_poses,
         faceMouthCoffeePucker: row.face_mouth_coffee_pucker,
         faceFontWeight: row.face_font_weight,
         faceEyeScale: row.face_eye_scale,
@@ -4647,6 +4662,23 @@ function debateBots(session: DebateSessionV1): DebateBotSnapshotV1[] {
   ];
 }
 
+function debateMumbleProjectionOptions(
+  session: DebateSessionV1,
+  botId: string,
+  variationSeed: string,
+): {
+  pronunciationMapPoint: { x: number; y: number } | null;
+  variationSeed: string;
+} {
+  return {
+    pronunciationMapPoint:
+      normalizeBotAudioVoiceProfileV1(
+        debateBots(session).find((bot) => bot.id === botId)?.voiceProfile,
+      ).pronunciationMapPoint ?? null,
+    variationSeed,
+  };
+}
+
 function sideLabel(session: DebateSessionV1, sideId: DebateSideId): string {
   return sideId === "for"
     ? session.motion.forSide.label
@@ -5625,6 +5657,12 @@ function debateMuteReactionCandidates(
         muted: session.powerPlan.bots[candidate.id]?.hardMuted === true,
         breathless: botPowerIsBreathlessFromEffectsV1(effects),
         cursedTongue: botPowerCursesSpeechFromEffectsV1(effects),
+        mumbling: effects.some(
+          (effect) => effect.type === "speech_obfuscation",
+        ),
+        pronunciationMapPoint: normalizeBotAudioVoiceProfileV1(
+          candidate.voiceProfile,
+        ).pronunciationMapPoint ?? null,
         temperament: botPowerMuteReactionTemperamentFromPersonaV1(
           candidate.systemPrompt,
         ),
@@ -6170,7 +6208,14 @@ async function generateSpeech(
       powerIntendedContent = clearlyNamed;
     }
   } else if (speechIsObfuscated) {
-    named = applyBotPowerMumbledResponseV1(clearlyNamed);
+    named = applyBotPowerMumbledResponseV1(
+      clearlyNamed,
+      debateMumbleProjectionOptions(
+        session,
+        snapshot.id,
+        `${session.id}:${session.stepKey}:${snapshot.id}:${session.events.length}`,
+      ),
+    );
     if (!botPowerResponseIsSilentV1(clearlyNamed)) {
       powerIntendedContent = clearlyNamed;
     }
@@ -6179,9 +6224,7 @@ async function generateSpeech(
     if (!botPowerResponseIsSilentV1(clearlyNamed)) {
       powerIntendedContent = clearlyNamed;
     }
-    const rewriteLane = lanesForSession(runtime, session).find(
-      (lane) => lane.providerName === deliveryGeneration.provider && lane.model === deliveryGeneration.model,
-    ) ?? lanesForSession(runtime, session)[0]!;
+    const rewriteLane = debateCursedTongueRewriteLane(runtime);
     named = await rewriteBotPowerCursedTongueAnswerV1({
       provider: rewriteLane.provider,
       draftAnswer: named,
@@ -6288,7 +6331,14 @@ function deliverModeratorProceduralSpeech(
     };
   }
   if (moderatorSpeechIsObfuscated(session)) {
-    const content = applyBotPowerMumbledResponseV1(clear);
+    const content = applyBotPowerMumbledResponseV1(
+      clear,
+      debateMumbleProjectionOptions(
+        session,
+        session.moderator.id,
+        `${session.id}:moderator-procedure:${session.events.length}`,
+      ),
+    );
     return {
       content: debateSpeakerCursesSpeech(session, session.moderator.id)
         ? applyBotPowerCursedTongueResponseV1(
@@ -8079,6 +8129,29 @@ async function botFloorBreak(
           ),
         })
       : undefined;
+  const interrupterEffects = debateFrozenPowerEffects(session, interrupter.id);
+  let muteInterruptionQuip = interrupterEffects.some(
+    (effect) => effect.type === "speech_obfuscation",
+  )
+    ? applyBotPowerMumbledResponseV1(
+        "Objection!",
+        debateMumbleProjectionOptions(
+          session,
+          interrupter.id,
+          `${session.id}:${speechEvent.id}:${interrupter.id}:mute-interrupt`,
+        ),
+      )
+    : "Objection!";
+  if (debateSpeakerCursesSpeech(session, interrupter.id)) {
+    const rewriteLane = debateCursedTongueRewriteLane(runtime);
+    muteInterruptionQuip = await rewriteBotPowerCursedTongueAnswerV1({
+      provider: rewriteLane.provider,
+      draftAnswer: muteInterruptionQuip,
+      seed: `${session.id}:${speechEvent.id}:${interrupter.id}:mute-interrupt`,
+      model: rewriteLane.model,
+      usagePurpose: "debate_generation",
+    });
+  }
   const interruptedMutePerformance = baseInterruptedMutePerformance
     ? {
         ...baseInterruptedMutePerformance,
@@ -8094,15 +8167,7 @@ async function botFloorBreak(
             reactorBotId: interrupter.id,
             kind: "interrupt" as const,
             action: "lean_in" as const,
-            quip: debateSpeakerCursesSpeech(session, interrupter.id)
-              ? await rewriteBotPowerCursedTongueAnswerV1({
-                  provider: lanesForSession(runtime, session)[0]!.provider,
-                  draftAnswer: "Objection!",
-                  seed: `${session.id}:${speechEvent.id}:${interrupter.id}:mute-interrupt`,
-                  model: lanesForSession(runtime, session)[0]!.model,
-                  usagePurpose: "debate_generation",
-                })
-              : "Objection!",
+            quip: muteInterruptionQuip,
           },
         ],
       }
@@ -9572,14 +9637,21 @@ async function juryBallotPublicDelivery(
     };
   }
   if (effects.some((effect) => effect.type === "speech_obfuscation")) {
-    const content = applyBotPowerMumbledResponseV1(intendedReason);
+    const content = applyBotPowerMumbledResponseV1(
+      intendedReason,
+      debateMumbleProjectionOptions(
+        session,
+        jurorBotId,
+        `${session.id}:jury_final:${jurorBotId}`,
+      ),
+    );
     return {
       content: botPowerCursesSpeechFromEffectsV1(effects)
         ? await rewriteBotPowerCursedTongueAnswerV1({
-            provider: lanesForSession(runtime, session)[0]!.provider,
+            provider: debateCursedTongueRewriteLane(runtime).provider,
             draftAnswer: content,
             seed: `${session.id}:jury_final:${jurorBotId}`,
-            model: lanesForSession(runtime, session)[0]!.model,
+            model: debateCursedTongueRewriteLane(runtime).model,
             usagePurpose: "debate_generation",
           })
         : content,
@@ -9589,10 +9661,10 @@ async function juryBallotPublicDelivery(
   if (botPowerCursesSpeechFromEffectsV1(effects)) {
     return {
       content: await rewriteBotPowerCursedTongueAnswerV1({
-        provider: lanesForSession(runtime, session)[0]!.provider,
+        provider: debateCursedTongueRewriteLane(runtime).provider,
         draftAnswer: intendedReason,
         seed: `${session.id}:jury_final:${jurorBotId}`,
-        model: lanesForSession(runtime, session)[0]!.model,
+        model: debateCursedTongueRewriteLane(runtime).model,
         usagePurpose: "debate_generation",
       }),
       powerIntendedContent: intendedReason,
@@ -14536,10 +14608,17 @@ async function participantObjectionModeratorDelivery(
   }
   const powerIntendedContent = content;
   if (effects.some((effect) => effect.type === "speech_obfuscation")) {
-    content = applyBotPowerMumbledResponseV1(content);
+    content = applyBotPowerMumbledResponseV1(
+      content,
+      debateMumbleProjectionOptions(
+        session,
+        session.moderator.id,
+        `${session.id}:participant-objection:${session.events.length}`,
+      ),
+    );
   }
   if (botPowerCursesSpeechFromEffectsV1(effects)) {
-    const rewriteLane = lanesForSession(runtime, session)[0]!;
+    const rewriteLane = debateCursedTongueRewriteLane(runtime);
     content = await rewriteBotPowerCursedTongueAnswerV1({
       provider: rewriteLane.provider,
       draftAnswer: content,

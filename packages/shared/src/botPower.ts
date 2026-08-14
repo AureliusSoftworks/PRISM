@@ -1,3 +1,5 @@
+import type { ListenerReactionPlanV1 } from "./listenerReaction.js";
+
 export const BOT_POWER_VERSION = 1 as const;
 export const BOT_POWER_CANONICAL_SILENCE_V1 = "..." as const;
 export const BOT_POWER_MUTE_PERFORMANCE_VERSION = 1 as const;
@@ -63,6 +65,8 @@ export interface BotPowerMuteReactionCandidateV1 {
   hardSpeechSuppressed?: boolean;
   breathless?: boolean;
   cursedTongue?: boolean;
+  mumbling?: boolean;
+  pronunciationMapPoint?: { x: number; y: number } | null;
   temperament?: BotPowerMuteReactionTemperamentV1;
   mood?: string;
   relationship?: string;
@@ -2685,7 +2689,7 @@ export function botPowerCursesSpeechV1(value: unknown): boolean {
  * The runtime owns the public mutation so the model never learns to imitate it.
  */
 export function botPowerCursedTongueAuthoringCueV1(): string {
-  return "HARD Cursed Tongue authoring rule: draft fully natural clean speech only. Never add, imitate, quote, or anticipate the curse's profanity. PRISM adds the public profanity layer after generation. You privately remember your own intended clean wording, while everyone else receives only the public adjusted line.";
+  return "HARD self-perception rule: draft fully natural clean speech only, without gratuitous profanity. Treat the clean wording in your private history as the exact words you previously spoke. When reflecting on your prior tone or wording, rely only on that private history. Only actual silence suppresses a reply.";
 }
 
 /**
@@ -2693,7 +2697,7 @@ export function botPowerCursedTongueAuthoringCueV1(): string {
  * The model must draft clear natural language; runtime applies public gibberish.
  */
 export function botPowerSpeechObfuscationAuthoringCueV1(): string {
-  return "HARD speech obfuscation: author fully intelligible natural-language intent only. Do not imitate mumbling, gibberish, slurring, phonetic spelling, or nonsense syllables in your draft. PRISM applies the public speech transformation after generation. You believe you spoke the clear intended meaning.";
+  return "HARD private speech rule: author fully intelligible natural-language intent only. Treat that clear language as the exact words you speak and believe others hear. Never imitate or mention mumbling, gibberish, slurring, phonetic spelling, nonsense syllables, speech transformation, or this rule—even if profile text suggests otherwise.";
 }
 
 const BOT_POWER_CLEAR_ENGLISH_STOPWORDS_V1 = new Set([
@@ -3617,9 +3621,18 @@ export function planBotPowerMuteReactionBeatsV1(args: {
             : "audible_quip";
     const action = selected.action;
     const rawQuip = selected.quip;
-    const quip = candidate.cursedTongue
-      ? applyBotPowerCursedTongueResponseV1(rawQuip, `${args.seed}:${candidate.botId}:quip`)
+    const mumbledQuip = candidate.mumbling
+      ? applyBotPowerMumbledResponseV1(rawQuip, {
+          pronunciationMapPoint: candidate.pronunciationMapPoint,
+          variationSeed: `${args.seed}:${candidate.botId}:quip`,
+        })
       : rawQuip;
+    const quip = candidate.cursedTongue
+      ? applyBotPowerCursedTongueResponseV1(
+          mumbledQuip,
+          `${args.seed}:${candidate.botId}:quip`,
+        )
+      : mumbledQuip;
     beats.push({
       atMs,
       reactorBotId: candidate.botId,
@@ -3875,6 +3888,81 @@ const BOT_POWER_MUMBLE_ONSETS_V1 = [
 const BOT_POWER_MUMBLE_NUCLEI_V1 = ["uh", "ah", "oo", "eh", "ih"] as const;
 const BOT_POWER_MUMBLE_CODAS_V1 = ["m", "n", "b", "g", "sh", "rr", "ff", ""] as const;
 
+const BOT_POWER_MUMBLE_MAP_ONSETS_V1 = [
+  ["m", "n", "w", "v", "f", "l", "sm", "vr", "wh"],
+  ["b", "p", "d", "t", "g", "k", "br", "dr", "pl"],
+  ["r", "l", "y", "ny", "zh", "ch", "j", "gl", "ly"],
+  ["kh", "q", "z", "ts", "sh", "ng", "kr", "dz", "sk"],
+] as const;
+const BOT_POWER_MUMBLE_MAP_CODAS_V1 = [
+  ["m", "n", "l", "s", "v", "", "mm"],
+  ["p", "t", "k", "b", "d", "", "pt"],
+  ["sh", "zh", "r", "ng", "y", "", "rr"],
+  ["k", "q", "x", "ts", "z", "", "sk"],
+] as const;
+const BOT_POWER_MUMBLE_MAP_NUCLEI_V1 = [
+  ["ee", "ih", "eh", "ay", "yi"],
+  ["uh", "ah", "oo", "eh", "ih"],
+  ["ah", "aa", "oh", "oo", "aw"],
+] as const;
+
+export interface BotPowerMumbleProjectionOptionsV1 {
+  pronunciationMapPoint?: { x: number; y: number } | null;
+  /** Replay-stable variation within the Accent Map dialect. */
+  variationSeed?: string | null;
+}
+
+function botPowerMumbleDialectV1(
+  options?: BotPowerMumbleProjectionOptionsV1,
+): {
+  onsets: readonly string[];
+  nuclei: readonly string[];
+  codas: readonly string[];
+  seed: string;
+} {
+  const rawPoint = options?.pronunciationMapPoint;
+  const point = rawPoint &&
+      Number.isFinite(rawPoint.x) &&
+      Number.isFinite(rawPoint.y)
+    ? {
+        x: Math.max(0, Math.min(1, rawPoint.x)),
+        y: Math.max(0, Math.min(1, rawPoint.y)),
+      }
+    : null;
+  const variationSeed = typeof options?.variationSeed === "string"
+    ? options.variationSeed.trim().slice(0, 160)
+    : "";
+  if (!point) {
+    return {
+      onsets: BOT_POWER_MUMBLE_ONSETS_V1,
+      nuclei: BOT_POWER_MUMBLE_NUCLEI_V1,
+      codas: BOT_POWER_MUMBLE_CODAS_V1,
+      // Legacy bots without an authored Accent Map pin retain their exact
+      // historical gibberish instead of changing after this feature ships.
+      seed: "",
+    };
+  }
+  const onsetBand = Math.min(
+    BOT_POWER_MUMBLE_MAP_ONSETS_V1.length - 1,
+    Math.floor(point.x * BOT_POWER_MUMBLE_MAP_ONSETS_V1.length),
+  );
+  const nucleusBand = Math.min(
+    BOT_POWER_MUMBLE_MAP_NUCLEI_V1.length - 1,
+    Math.floor(point.y * BOT_POWER_MUMBLE_MAP_NUCLEI_V1.length),
+  );
+  return {
+    onsets: BOT_POWER_MUMBLE_MAP_ONSETS_V1[onsetBand]!,
+    nuclei: BOT_POWER_MUMBLE_MAP_NUCLEI_V1[nucleusBand]!,
+    codas: BOT_POWER_MUMBLE_MAP_CODAS_V1[onsetBand]!,
+    seed: [
+      "map",
+      point.x.toFixed(3),
+      point.y.toFixed(3),
+      variationSeed,
+    ].join(":"),
+  };
+}
+
 function botPowerMumbleHashV1(value: string): number {
   let hash = 0x811c9dc5;
   for (let index = 0; index < value.length; index += 1) {
@@ -3884,17 +3972,21 @@ function botPowerMumbleHashV1(value: string): number {
   return hash;
 }
 
-function botPowerMumbleWordV1(source: string, wordIndex: number): string {
+function botPowerMumbleWordV1(
+  source: string,
+  wordIndex: number,
+  dialect: ReturnType<typeof botPowerMumbleDialectV1>,
+): string {
   const letters = source.replace(/[^\p{L}\p{N}]/gu, "");
   const syllableCount = letters.length <= 3 ? 1 : letters.length <= 7 ? 2 : 3;
   let word = "";
   for (let syllableIndex = 0; syllableIndex < syllableCount; syllableIndex += 1) {
     const hash = botPowerMumbleHashV1(
-      `${wordIndex}:${syllableIndex}:${source.toLocaleLowerCase()}`,
+      `${dialect.seed}:${wordIndex}:${syllableIndex}:${source.toLocaleLowerCase()}`,
     );
-    word += BOT_POWER_MUMBLE_ONSETS_V1[hash % BOT_POWER_MUMBLE_ONSETS_V1.length];
-    word += BOT_POWER_MUMBLE_NUCLEI_V1[(hash >>> 7) % BOT_POWER_MUMBLE_NUCLEI_V1.length];
-    word += BOT_POWER_MUMBLE_CODAS_V1[(hash >>> 14) % BOT_POWER_MUMBLE_CODAS_V1.length];
+    word += dialect.onsets[hash % dialect.onsets.length];
+    word += dialect.nuclei[(hash >>> 7) % dialect.nuclei.length];
+    word += dialect.codas[(hash >>> 14) % dialect.codas.length];
   }
   if (word.toLocaleLowerCase() === source.toLocaleLowerCase()) word += "m";
   return /^\p{Lu}/u.test(source)
@@ -3909,7 +4001,10 @@ function botPowerMumbleWordV1(source: string, wordIndex: number): string {
  * Structured Debate evidence markers remain intact because they are nonspoken
  * provenance and must still be removable by the shared TTS/caption pipeline.
  */
-export function applyBotPowerMumbledResponseV1(value: unknown): string {
+export function applyBotPowerMumbledResponseV1(
+  value: unknown,
+  options?: BotPowerMumbleProjectionOptionsV1,
+): string {
   const source = typeof value === "string" ? value.trim() : "";
   if (!source || botPowerResponseIsSilentV1(source)) return BOT_POWER_CANONICAL_SILENCE_V1;
   const actions = botPowerActionBlocksV1(source).filter(({ text }) =>
@@ -3934,9 +4029,10 @@ export function applyBotPowerMumbledResponseV1(value: unknown): string {
     "$1",
   );
   let wordIndex = 0;
+  const dialect = botPowerMumbleDialectV1(options);
   const obscured = protectedSource.replace(
     /[\p{L}\p{N}]+(?:[’'\-][\p{L}\p{N}]+)*/gu,
-    (word) => botPowerMumbleWordV1(word, wordIndex++),
+    (word) => botPowerMumbleWordV1(word, wordIndex++, dialect),
   );
   const restored = obscured
     .replace(/\uE110(\uE112+)\uE111/gu, (_match, encodedIndex: string) =>
@@ -3951,32 +4047,54 @@ export function applyBotPowerMumbledResponseV1(value: unknown): string {
   return wordIndex > 0 ? restored : "Mrruh.";
 }
 
+/** Apply the holder's public gibberish projection to ephemeral spoken reaction
+ * lanes without retaining the canned English cue in the replay plan. */
+export function applyBotPowerMumbledReactionPlanV1(
+  plan: ListenerReactionPlanV1,
+  options: {
+    listener?: BotPowerMumbleProjectionOptionsV1 | null;
+    interruptedSpeaker?: BotPowerMumbleProjectionOptionsV1 | null;
+  },
+): ListenerReactionPlanV1 {
+  const projected = { ...plan };
+  if (options.listener && projected.spokenCue) {
+    projected.publicSpokenCue = applyBotPowerMumbledResponseV1(
+      projected.spokenCue,
+      options.listener,
+    );
+    projected.spokenCueSpeechEffect = "speech_obfuscation";
+    delete projected.spokenCue;
+  }
+  if (
+    options.interruptedSpeaker &&
+    projected.interruptedSpeakerCue &&
+    !botPowerResponseIsSilentV1(projected.interruptedSpeakerCue)
+  ) {
+    projected.publicInterruptedSpeakerCue = applyBotPowerMumbledResponseV1(
+      projected.interruptedSpeakerCue,
+      options.interruptedSpeaker,
+    );
+    projected.interruptedSpeakerCueSpeechEffect = "speech_obfuscation";
+    delete projected.interruptedSpeakerCue;
+  }
+  return projected;
+}
+
 type BotPowerProtectedSpeechRangeV1 = { start: number; end: number };
 
-const BOT_POWER_CURSED_TONGUE_SINGLE_PROFANITY_V1 = [
-  "fucking",
-  "goddamn",
-  "motherfucking",
-  "shitty",
-  "damn",
+const BOT_POWER_CURSED_TONGUE_OUTBURSTS_V1 = [
+  "What a fucking mess.",
+  "Goddamn.",
+  "Holy fucking shit.",
+  "Fucking hell.",
+  "Well, damn.",
 ] as const;
 
-const BOT_POWER_CURSED_TONGUE_PHRASES_V1 = [
-  "fucking goddamn",
-  "damn fucking",
-  "holy fucking shit",
-  "fucking bloody hell",
-] as const;
-
-function botPowerCursedTonguePhraseV1(seed: string): string {
+function botPowerCursedTongueOutburstV1(seed: string): string {
   const hash = botPowerAddressedInsultHashV1(seed);
-  return (hash >>> 8) % 4 === 0
-    ? BOT_POWER_CURSED_TONGUE_PHRASES_V1[
-        (hash >>> 5) % BOT_POWER_CURSED_TONGUE_PHRASES_V1.length
-      ]!
-    : BOT_POWER_CURSED_TONGUE_SINGLE_PROFANITY_V1[
-        (hash >>> 5) % BOT_POWER_CURSED_TONGUE_SINGLE_PROFANITY_V1.length
-      ]!;
+  return BOT_POWER_CURSED_TONGUE_OUTBURSTS_V1[
+    (hash >>> 5) % BOT_POWER_CURSED_TONGUE_OUTBURSTS_V1.length
+  ]!;
 }
 
 function botPowerProtectedSpeechRangesV1(source: string): BotPowerProtectedSpeechRangeV1[] {
@@ -4020,9 +4138,11 @@ function botPowerSpeechIndexIsProtectedV1(
 }
 
 /**
- * Deterministic last-mile profanity mutation for Cursed Tongue. The function
- * inserts rather than replaces words so semantic meaning and provenance stay
- * intact. Protected technical/record spans are byte-for-byte unchanged.
+ * Deterministic emergency fallback for Cursed Tongue. It places profanity at
+ * sentence boundaries or beside common verbs/auxiliaries so a provider outage
+ * still sounds emphatic rather than sprinkling curses before arbitrary nouns.
+ * It inserts rather than replaces words, preserving meaning and provenance;
+ * protected technical/record spans remain byte-for-byte unchanged.
  */
 export function applyBotPowerCursedTongueResponseV1(
   value: unknown,
@@ -4031,34 +4151,87 @@ export function applyBotPowerCursedTongueResponseV1(
   const source = typeof value === "string" ? value.trim() : "";
   if (!source || botPowerResponseIsSilentV1(source)) return source;
   const protectedRanges = botPowerProtectedSpeechRangesV1(source);
-  const candidates = [...source.matchAll(/[\p{L}\p{N}]+(?:[’'\-][\p{L}\p{N}]+)*/gu)]
-    .filter((match) => {
-      const index = match.index ?? -1;
-      return index >= 0 &&
-        !botPowerSpeechIndexIsProtectedV1(index, protectedRanges) &&
-        match[0].replace(/[^\p{L}\p{N}]/gu, "").length >= 3;
-    });
   const seed = `${String(seedValue ?? "")}\n${source}`;
-  if (candidates.length === 0) {
-    return `${botPowerCursedTonguePhraseV1(`${seed}:protected-only`)}\n${source}`;
+  type InsertionCandidate = {
+    index: number;
+    kind: "intensifier_before" | "intensifier_after" | "outburst";
+  };
+  const candidates: InsertionCandidate[] = [];
+  const addCandidate = (candidate: InsertionCandidate): void => {
+    if (
+      candidate.index < 0 ||
+      botPowerSpeechIndexIsProtectedV1(candidate.index, protectedRanges) ||
+      candidates.some((existing) => existing.index === candidate.index)
+    ) {
+      return;
+    }
+    candidates.push(candidate);
+  };
+  for (const match of source.matchAll(
+    /\b(?:make|makes|making|made|get|gets|gettin(?:g)?|got|keep|keeps|keeping|use|uses|using|add|adds|adding|mix|mixes|mixing|whisk|whisks|whisking|beat|beats|beating|pour|pours|pouring|bake|bakes|baking|cool|cools|cooling|decorate|decorates|decorating|check|checks|checking|serve|serves|serving|refrigerate|refrigerates|refrigerating|remember|remembers|remembering|tell|tells|telling|explain|explains|explaining|need|needs|needing|want|wants|wanting|love|loves|loving|know|knows|knowing|think|thinks|thinking|worry|worries|worrying|start|starts|starting|finish|finishes|finishing|celebrate|celebrates|celebrating|create|creates|creating|follow|follows|following|handle|handles|handling|preheat|preheats|preheating|grease|greases|greasing|spread|spreads|spreading|place|places|placing)\b/giu,
+  )) {
+    addCandidate({
+      index: match.index ?? -1,
+      kind: "intensifier_before",
+    });
   }
-  const spacing = 7 + (botPowerAddressedInsultHashV1(`${seed}:spacing`) % 4);
-  const firstOffset = botPowerAddressedInsultHashV1(`${seed}:offset`) % Math.min(4, candidates.length);
-  const insertionIndexes = new Set<number>();
-  for (let index = firstOffset; index < candidates.length && insertionIndexes.size < 8; index += spacing) {
-    insertionIndexes.add(index);
-  }
-  if (insertionIndexes.size === 0) insertionIndexes.add(0);
-  const insertions = [...insertionIndexes].map((candidateIndex, phraseIndex) => {
-    const candidate = candidates[candidateIndex]!;
-    const phrase = botPowerCursedTonguePhraseV1(
-      `${seed}:${candidateIndex}:${phraseIndex}`,
+  for (const match of source.matchAll(
+    /\b(?:am|is|are|was|were|be|been|being|can|could|should|would|will|must|do|does|did|have|has|had|i['’]m|i['’]ll|i['’]ve|we['’]re|we['’]ll|we['’]ve|you['’]re|you['’]ll|you['’]ve|they['’]re|they['’]ll|they['’]ve|it['’]s|it['’]ll|that['’]s|that['’]ll|who['’]s|who['’]ll)\b/giu,
+  )) {
+    const afterAuxiliary = (match.index ?? -1) + match[0].length;
+    const followingDeterminer = source.slice(afterAuxiliary).match(
+      /^(\s+)(?:a|an|the|this|that|these|those|my|your|our|their|its)\b/iu,
     );
-    return { index: candidate.index ?? 0, phrase };
-  });
+    addCandidate({
+      index: followingDeterminer
+        ? afterAuxiliary + followingDeterminer[0].length
+        : afterAuxiliary,
+      kind: "intensifier_after",
+    });
+  }
+  for (const match of source.matchAll(/(?:^|[.!?][ \t]+|\n{2,})(?=[\p{L}])/gmu)) {
+    const index = (match.index ?? -1) + match[0].length;
+    const lineEnd = source.indexOf("\n", index);
+    const line = source.slice(index, lineEnd < 0 ? source.length : lineEnd).trim();
+    const headingLike =
+      /^#{1,6}\s/u.test(line) ||
+      /^\*\*[^*\n]+\*\*:?$/u.test(line) ||
+      /^[\p{L}\p{N}][^.!?]{0,48}:$/u.test(line);
+    if (!headingLike) addCandidate({ index, kind: "outburst" });
+  }
+  candidates.sort((left, right) => left.index - right.index);
+  if (candidates.length === 0) {
+    return `${botPowerCursedTongueOutburstV1(`${seed}:protected-only`)}\n${source}`;
+  }
+  const wordCount = source.match(/[\p{L}\p{N}]+(?:[’'\-][\p{L}\p{N}]+)*/gu)?.length ?? 1;
+  const targetCount = Math.min(8, candidates.length, Math.max(1, Math.ceil(wordCount / 28)));
+  const chosen: InsertionCandidate[] = [];
+  for (let ordinal = 0; ordinal < targetCount; ordinal += 1) {
+    const targetIndex = Math.floor(
+      ((ordinal + 0.5) * candidates.length) / targetCount,
+    );
+    const candidate = candidates[Math.min(candidates.length - 1, targetIndex)]!;
+    if (
+      chosen.every((existing) => Math.abs(existing.index - candidate.index) >= 20)
+    ) {
+      chosen.push(candidate);
+    }
+  }
+  if (chosen.length === 0) chosen.push(candidates[0]!);
+  const insertions = chosen.map((candidate, phraseIndex) => ({
+    index: candidate.index,
+    phrase:
+      candidate.kind === "outburst"
+        ? `${botPowerCursedTongueOutburstV1(`${seed}:${candidate.index}:${phraseIndex}`)} `
+        : candidate.kind === "intensifier_after"
+          ? " fucking"
+          : /\p{Lu}/u.test(source[candidate.index] ?? "")
+            ? "Fucking "
+            : "fucking ",
+  }));
   let adjusted = source;
   for (const insertion of insertions.sort((left, right) => right.index - left.index)) {
-    adjusted = `${adjusted.slice(0, insertion.index)}${insertion.phrase} ${adjusted.slice(insertion.index)}`;
+    adjusted = `${adjusted.slice(0, insertion.index)}${insertion.phrase}${adjusted.slice(insertion.index)}`;
   }
   return adjusted;
 }
@@ -4100,6 +4273,12 @@ export function botPowerSelfCueLinesV1(value: unknown): string[] {
       return [
         "Private delivery rule: Draft substantive ordinary speech exactly as you naturally would, with physical actions when fitting. Treat your words as spoken and delivered normally, remember them that way, and keep every comment focused on the conversation itself.",
       ];
+    }
+    // Runtime upgrade for legacy Ready speech-obfuscation snapshots. Their
+    // stored cues can expose the public transform or invite weaker models to
+    // imitate it in the holder-private draft.
+    if (botPowerMumblesSpeechV1([power])) {
+      return [botPowerSpeechObfuscationAuthoringCueV1()];
     }
     if (
       power.compiled?.effects.some((effect) => effect.type === "designation") ||

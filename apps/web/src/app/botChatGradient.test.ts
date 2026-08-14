@@ -202,7 +202,7 @@ describe("selected bot chat gradient", () => {
     );
   });
 
-  it("keeps Chat and Zen canvas clicks in the current directory", () => {
+  it("keeps canvas clicks inside the current navbar group", () => {
     const pageSource = readFileSync(
       new URL("./page.tsx", import.meta.url),
       "utf8",
@@ -215,7 +215,7 @@ describe("selected bot chat gradient", () => {
       handlerStart,
     );
     const handlerSource = pageSource.slice(handlerStart, handlerEnd);
-    const jumpStart = pageSource.indexOf("function jumpCanvasToAllBotsHome");
+    const jumpStart = pageSource.indexOf("function jumpCanvasToCurrentGroupRoot");
     const jumpEnd = pageSource.indexOf(
       "function handleSandboxHeaderWordmarkClick",
       jumpStart,
@@ -224,7 +224,11 @@ describe("selected bot chat gradient", () => {
 
     assert.match(
       handlerSource,
-      /if \(view === "chat"\) \{[\s\S]{0,240}setCanvasSelectedBotIds[\s\S]{0,160}return;/,
+      /if \(view === "chat"\) \{[\s\S]{0,500}chatPresentation === "zen"[\s\S]{0,900}jumpCanvasToCurrentGroupRoot\(\)/,
+    );
+    assert.match(
+      pageSource,
+      /BOT_CANVAS_BACKGROUND_INTERACTIVE_SELECTOR[\s\S]{0,360}\[data-starter-compose-surface='true'\][\s\S]{0,120}\[data-zen-title-with-hero='true'\][\s\S]{0,120}\[data-tutorial-target='zen-hue-cable'\]/,
     );
     assert.doesNotMatch(
       handlerSource,
@@ -232,6 +236,14 @@ describe("selected bot chat gradient", () => {
     );
     assert.doesNotMatch(handlerSource, /returnFromRelationshipDepth\(/);
     assert.match(jumpSource, /resetEmptyStateBotSelection\(\)/);
-    assert.match(jumpSource, /performShowAllBotsView\(null/);
+    assert.match(jumpSource, /performShowAllBotsView\(null,[\s\S]{0,160}preserveGroupFilter: true/);
+    assert.doesNotMatch(
+      handlerSource,
+      /botLibraryGroupFilterId !== BOT_LIBRARY_GROUP_FILTER_ALL/,
+    );
+    assert.match(
+      pageSource,
+      /function performShowAllBotsView\([\s\S]{0,900}setBotLibraryGroupFilterId\(BOT_LIBRARY_GROUP_FILTER_ALL\)[\s\S]{0,260}ZEN_HUE_DIRECTORY_ROOT/,
+    );
   });
 });

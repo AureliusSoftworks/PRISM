@@ -447,6 +447,22 @@ describe("bot marketplace static catalog", () => {
           /Always interrupts the Signal bot host[\s\S]*every opening and interview turn/iu,
         );
       }
+      if (botId === "mumbling-jim") {
+        const voice = normalizeOptionalBotAudioVoiceProfileV1(
+          bundle.botJson.bot.authoredAudioVoiceProfile,
+        );
+        assert.deepEqual(voice?.pronunciationMapPoint, { x: 0.74, y: 0.33 });
+        assert.match(entry.description ?? "", /spoken reactions/iu);
+        assert.doesNotMatch(
+          bundle.botJson.systemPrompt ?? "",
+          /\bmumbling\b|\bgibberish\b|speech transformation/iu,
+        );
+        assert.deepEqual(bundle.botJson.profile?.facts.customFacts, []);
+        assert.match(
+          powers[0]?.compiled?.selfCue ?? "",
+          /HARD private speech rule/iu,
+        );
+      }
       if (botId === "identity-crisis-ian") {
         assert.deepEqual(entry.tags, [
           "power",

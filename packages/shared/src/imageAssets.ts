@@ -12,6 +12,19 @@ export const IMAGE_ASSET_KINDS = [
 
 export type ImageAssetKind = (typeof IMAGE_ASSET_KINDS)[number];
 
+/** Focused bot Assets order: Images, Signal, Debate, Atmospheres, then Slate. */
+export const BOT_IMAGE_ASSET_LIBRARY_KIND_ORDER = [
+  "general_image",
+  "signal_studio",
+  "signal_logo",
+  "debate_exhibit",
+  "home_atmosphere",
+  "zen_atmosphere",
+  "group_room_atmosphere",
+  "slate_cover",
+  "slate_visual_study",
+] as const satisfies readonly ImageAssetKind[];
+
 export const IMAGE_ASSET_SET_STATUSES = [
   "building",
   "ready",
@@ -94,6 +107,19 @@ export interface ImageAssetUsage {
 export interface ImageAssetCatalogPage {
   assets: ImageAssetSet[];
   nextCursor: string | null;
+}
+
+/** A non-empty, bot-scoped rail in the focused bot Assets panel. */
+export interface BotImageAssetLibrarySection {
+  kind: ImageAssetKind;
+  totalCount: number;
+  assets: ImageAssetSet[];
+}
+
+/** Exact image-library associations for one owned bot. */
+export interface BotImageAssetLibraryIndex {
+  botId: string;
+  sections: BotImageAssetLibrarySection[];
 }
 
 export interface ImageAssetStorageKindSummary {

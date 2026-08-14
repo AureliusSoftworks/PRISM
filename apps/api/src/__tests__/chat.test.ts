@@ -15,6 +15,7 @@ import {
   companionLaneUsesQdrantMemorySummaries,
   inferChatToolRequestedImageSize,
   buildCoffeeContinuityPromptContext,
+  chatCursedTongueEphemeralHolderHistoryV1,
   chatCursedTongueHolderHistoryV1,
   loadRecentCoffeeContinuityContexts,
   parseTitleResponse,
@@ -28,7 +29,7 @@ import {
 import { rewindConversation } from "../conversations.ts";
 import { persistMemoryCandidates, restoreMemory } from "../memory.ts";
 import { RECENT_WINDOW_SIZE, summarizeThreadCompact } from "../memory-summarizer.ts";
-import { fallbackEmbedding, LocalOllamaProvider, selectProvider, type LlmProvider } from "../providers.ts";
+import { fallbackEmbedding, getAuxiliaryProvider, LocalOllamaProvider, selectProvider, type LlmProvider } from "../providers.ts";
 import { applyBotPowerCursedTongueResponseV1, botPowerSourceHashV1, buildBotFalseNameSeedV1, parseStoredAssistantToolPayload, pickBotFalseNameFromPoolV1, type AssistantInterruptionReactionInput } from "@localai/shared";
 import {
   createZenSessionMemoryCheckpoint,
@@ -78,6 +79,34 @@ describe("Cursed Tongue holder history", () => {
     const projected = chatCursedTongueHolderHistoryV1({
       history,
       rows,
+      holderBotId: "holder",
+    });
+    assert.equal(projected[0]?.content, "The archive is ready.");
+    assert.equal(projected[1]?.content, "The goddamn peer line stays public.");
+    assert.equal(history[0]?.content, "The fucking archive is ready.");
+  });
+
+  it("projects clean Private Chat intent only for the matching holder", () => {
+    const history = [
+      {
+        id: "holder-line",
+        role: "assistant" as const,
+        content: "The fucking archive is ready.",
+        createdAt: "2026-08-12T00:00:00.000Z",
+        botId: "holder",
+        botPowerPrivateIntendedSpeech: "The archive is ready.",
+      },
+      {
+        id: "peer-line",
+        role: "assistant" as const,
+        content: "The goddamn peer line stays public.",
+        createdAt: "2026-08-12T00:00:01.000Z",
+        botId: "peer",
+        botPowerPrivateIntendedSpeech: "The peer line is clean but private to that peer.",
+      },
+    ];
+    const projected = chatCursedTongueEphemeralHolderHistoryV1({
+      history,
       holderBotId: "holder",
     });
     assert.equal(projected[0]?.content, "The archive is ready.");
@@ -1188,6 +1217,122 @@ describe("bot-locked Chat lane", () => {
       );
     });
   }
+
+  it("uses the auxiliary rewrite in Private Chat and keeps Curtis's next self-history clean", async () => {
+    const db = createChatTestDb();
+    const primaryPrompts: Array<Parameters<LlmProvider["generateResponse"]>[0]> = [];
+    let primaryCalls = 0;
+    let auxiliaryCalls = 0;
+    const primaryProvider: LlmProvider = {
+      name: "openai",
+      diagnosticModel: "primary-test-model",
+      async generateResponse(messages) {
+        primaryPrompts.push(messages);
+        primaryCalls += 1;
+        return messages.at(-1)?.content.includes("describe the tone")
+          ? "I would describe my tone as polite and straightforward."
+          : "I explained the archive plan politely and clearly.";
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    const auxiliaryProvider: LlmProvider = {
+      name: "local",
+      diagnosticModel: "auxiliary-test-model",
+      async generateResponse(messages, options) {
+        auxiliaryCalls += 1;
+        assert.equal(options?.model, "auxiliary-test-model");
+        const clean = messages.at(-1)?.content ?? "";
+        return clean.includes("describe my tone")
+          ? "I would fucking describe my tone as polite and straightforward."
+          : "I explained the fucking archive plan politely and clearly.";
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    const powers = [{
+      version: 1 as const,
+      id: "cursed-tongue",
+      name: "Cursed Tongue",
+      intent: "Every non-silent public reply gains frequent strong profanity after generation.",
+      enabled: true,
+      compileStatus: "ready" as const,
+      compiled: {
+        version: 1 as const,
+        sourceHash: botPowerSourceHashV1(
+          "Cursed Tongue",
+          "Every non-silent public reply gains frequent strong profanity after generation.",
+        ),
+        selfCue: "Draft clean speech only.",
+        observerCue: "Only adjusted speech is public.",
+        effects: [{
+          type: "cursed_tongue" as const,
+          version: 1 as const,
+          frequency: "frequent" as const,
+          strength: "strong" as const,
+          vocabulary: "uncensored_non_slur" as const,
+          phraseMode: "occasional_2_3_words" as const,
+        }],
+        ruleLabels: [],
+      },
+    }];
+    const settings = {
+      preferredProvider: "openai" as const,
+      providerFactory: (() => primaryProvider) as typeof selectProvider,
+      auxiliaryProviderFactory: (() => auxiliaryProvider) as typeof getAuxiliaryProvider,
+      prismDefaultLlmModel: "auxiliary-test-model",
+      autoMemory: false,
+      botId: "curtis",
+      incognito: true,
+      mode: "chat" as const,
+      starterPromptLabel: "Cursing Curtis",
+      botSystemPrompt: "You are Curtis.",
+      botPowers: powers,
+    };
+
+    const first = await processChatMessage(
+      db,
+      "user-1",
+      "Explain the archive plan.",
+      CHAT_TEST_USER_KEY,
+      settings,
+      "private-curtis",
+    );
+    const firstAssistant = first.conversation.messages.at(-1);
+    assert.match(firstAssistant?.content ?? "", /fucking/u);
+    assert.equal(
+      firstAssistant?.botPowerPrivateIntendedSpeech,
+      "I explained the archive plan politely and clearly.",
+    );
+    assert.doesNotMatch(
+      primaryPrompts[0]?.map((message) => message.content).join("\n") ?? "",
+      /Cursed Tongue|PRISM adds|public profanity|public mutation/iu,
+    );
+
+    const second = await processChatMessage(
+      db,
+      "user-1",
+      "How would you describe the tone and language you just used?",
+      CHAT_TEST_USER_KEY,
+      { ...settings, ephemeralMessages: first.conversation.messages },
+      "private-curtis",
+    );
+    const secondPrimaryPrompt = primaryPrompts.find((messages) =>
+      messages.at(-1)?.content.includes("describe the tone")
+    ) ?? [];
+    assert.ok(secondPrimaryPrompt.some((message) =>
+      message.role === "assistant" &&
+      message.content === "I explained the archive plan politely and clearly."
+    ));
+    assert.ok(secondPrimaryPrompt.every((message) =>
+      !message.content.includes("fucking archive plan")
+    ));
+    assert.match(second.conversation.messages.at(-1)?.content ?? "", /fucking/u);
+    assert.ok(primaryCalls >= 2);
+    assert.equal(auxiliaryCalls, 2);
+  });
 
   it("hard-echoes the user's addressed Chat message verbatim and nothing else", async () => {
     const db = createChatTestDb();

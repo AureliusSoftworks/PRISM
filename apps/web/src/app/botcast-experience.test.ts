@@ -620,7 +620,7 @@ describe("Signal experience shell", () => {
   });
 
   it("lets producers align and cosmetically treat the show-scoped studio", () => {
-    assert.match(source, />\s*Align stage\s*</u);
+    assert.match(source, />\s*Rehearse stage\s*</u);
     assert.match(source, /data-tutorial-target="botcast-stage-layout"/u);
     assert.match(source, /data-signal-layout-stage="true"/u);
     assert.match(source, /SIGNAL_STUDIO_LAYOUT_LABELS/u);
@@ -677,7 +677,14 @@ describe("Signal experience shell", () => {
     assert.match(css, /data-preview-theme="dark"/u);
     assert.match(source, /role="dialog"/u);
     assert.match(source, /aria-modal="true"/u);
-    assert.match(source, /Place the \{show\.name\} studio/u);
+    assert.match(source, /Rehearse \{show\.name\}/u);
+    assert.match(source, /data-tutorial-target="signal-studio-rehearsal"/u);
+    assert.match(source, /aria-controls="signal-rehearsal-fine-tuning"/u);
+    assert.match(source, /Fine tuning/u);
+    assert.match(
+      css,
+      /stageLayoutEditor\[data-fine-tuning="false"\][\s\S]{0,180}stageViewportColumn/u,
+    );
     assert.match(
       source,
       /studioLayoutEditorOpen && selectedShow && hostBot[\s\S]{0,180}renderStudioLayoutEditor/u,
@@ -757,7 +764,19 @@ describe("Signal experience shell", () => {
     assert.match(css, /\.stageScreenTreatment\s*\{/u);
     assert.match(css, /\.stageStudioGlowTuner\s*\{/u);
     assert.match(css, /\.signalFloorGlowLayer\s*\{/u);
-    assert.match(css, /@keyframes signalFilmGrainJitter/u);
+    const stageViewport = Array.from(
+      css.matchAll(/\.stageViewport\s*\{[^}]*\}/gu),
+    ).find(([rule]) => rule.includes("isolation: isolate"))?.[0] ?? "";
+    const filmGrainOverlay = Array.from(
+      css.matchAll(/\.stageViewport::after\s*\{[^}]*\}/gu),
+    ).find(([rule]) => rule.includes("signal-film-grain.svg"))?.[0] ?? "";
+    assert.match(stageViewport, /isolation:\s*isolate/u);
+    assert.match(stageViewport, /contain:\s*paint/u);
+    assert.doesNotMatch(
+      filmGrainOverlay,
+      /animation:\s*signalFilmGrainJitter/u,
+      "Signal's full-stage blended grain must stay static during live rendering.",
+    );
     assert.match(css, /@keyframes signalStudioTalkingLightFlicker/u);
     assert.match(css, /\.stageVoiceMixer\s*\{[^}]*display:\s*grid/u);
     assert.match(css, /\.stageVoiceMixerSliders\s*\{[^}]*repeat\(2/u);
@@ -1849,6 +1868,14 @@ describe("Signal experience shell", () => {
     assert.match(source, /signalEphemeralSpeechByBotId/u);
     assert.match(
       source,
+      /nextHostInterruptionCrosstalkPlan\?\.publicInterruptedSpeakerCue[\s\S]{0,220}interruptedSpeakerCueSpeechEffect:[\s\S]{0,80}"speech_obfuscation"/u,
+    );
+    assert.match(
+      source,
+      /listenerReactionInterruptedSpeakerTextV1\([\s\S]{0,80}interruptionCrosstalkPlan/u,
+    );
+    assert.match(
+      source,
       /onProgress: \(elapsedMs, durationMs\) =>[\s\S]{0,900}setSignalEphemeralSpeechByBotId/u,
     );
     assert.match(source, /onCancel: clearSpeech/u);
@@ -2339,8 +2366,23 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /setWatchBakeLabel\(null\);[\s\S]{0,120}beginEpisodeIntroBookend\(/u,
+      /setWatchBakeLabel\(null\);[\s\S]{0,900}setEpisodePreRoll\(watchBookend\);[\s\S]{0,120}setWatchPlaybackReady\(true\)/u,
     );
+    assert.match(
+      source,
+      /const \[watchAutoStartDraft, setWatchAutoStartDraft\] = useState\(false\)/u,
+    );
+    assert.match(
+      source,
+      /if \(!watchAutoStartDraft\) \{[\s\S]{0,2200}await watchPlaybackStart[\s\S]{0,2200}await beginEpisodeIntroBookend\(watchBookend, bakedEpisode\.id\)/u,
+    );
+    assert.match(
+      source,
+      /const startBufferedWatch[\s\S]{0,320}watchPlaybackStartResolveRef\.current = null;[\s\S]{0,80}resolve\(\)/u,
+    );
+    assert.match(source, /data-action="start-watch"/u);
+    assert.match(source, />\s*Start show\s*</u);
+    assert.match(source, /Fully buffered · ready when you are/u);
     assert.doesNotMatch(
       source,
       /topic:\s*"Baking the broadcast"/u,
@@ -2388,6 +2430,10 @@ describe("Signal experience shell", () => {
     assert.match(artworkActivitySource, /placement="docked"/u);
     assert.match(artworkActivitySource, /PrismBlockingLoader/u);
     assert.match(artworkActivitySource, /registerPrismSoftSynthesisJobs/u);
+    assert.match(
+      artworkActivitySource,
+      /if \(!job \|\| softJobCount === 0\) return null/u,
+    );
     assert.match(artworkActivitySource, /activeChildren/u);
     assert.match(artworkActivitySource, /queuedChildren/u);
     assert.match(artworkActivitySource, /Cancel artwork synthesis/u);

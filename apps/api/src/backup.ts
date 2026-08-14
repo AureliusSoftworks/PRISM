@@ -43,6 +43,8 @@ import {
   normalizeBotFaceGlyphAnimation,
   normalizeBotFaceEyeMovement,
   normalizeBotFaceMouthCharacter,
+  normalizeBotFaceCustomSpeechPoses,
+  parseStoredBotFaceCustomSpeechPoses,
   normalizeBotFaceMouthOffsetX,
   normalizeBotFaceMouthOffsetY,
   normalizeBotFaceMouthRotationDeg,
@@ -52,12 +54,14 @@ import {
   normalizeBotFaceThinkingScale,
   parseStoredBotFaceThinkingFrames,
   serializeBotFaceThinkingFrames,
+  serializeBotFaceCustomSpeechPosesForStorage,
   serializeBotAvatarDetailsV1,
   type BotAvatarDetailsV1,
   type BotFaceBlinkBar,
   type BotFaceEyeCount,
   type BotFaceFontId,
   type BotFaceGlyphAnimation,
+  type BotFaceCustomSpeechPoses,
   type BotFaceEyeMovement,
   type BotFaceThinkingFrames,
   normalizeBotAudioVoiceProfileV1,
@@ -215,6 +219,7 @@ export interface BackupUserSettings {
   zenAskQuestionPatienceMs: number;
   zenAutonomyEnabled: boolean;
   prismDefaultBotFaceThinkingFrames?: BotFaceThinkingFrames | null;
+  prismDefaultBotFaceMouthSpeechPoses?: BotFaceCustomSpeechPoses | null;
   prismDefaultLlmModel: string;
   prismImageToolLlmModel: string;
   devMemoriesEnabled: boolean;
@@ -270,6 +275,7 @@ export interface BackupBotSnapshot {
   faceMouthFont?: BotFaceFontId | null;
   faceMouthCharacter?: string | null;
   faceMouthAnimation?: BotFaceGlyphAnimation | null;
+  faceMouthSpeechPoses?: BotFaceCustomSpeechPoses | null;
   faceMouthCoffeePucker?: boolean;
   faceFontWeight?: number | null;
   faceEyeScale?: number | null;
@@ -1761,6 +1767,7 @@ export function exportUserSnapshot(
          zen_ask_question_patience_ms,
          zen_autonomy_enabled,
          prism_default_bot_face_thinking_frames,
+         prism_default_bot_face_mouth_speech_poses,
          prism_default_llm_model,
          prism_image_tool_llm_model,
          dev_memories_enabled,
@@ -1836,6 +1843,7 @@ export function exportUserSnapshot(
         zen_ask_question_patience_ms: number | null;
         zen_autonomy_enabled: number | null;
         prism_default_bot_face_thinking_frames: string | null;
+        prism_default_bot_face_mouth_speech_poses: string | null;
         prism_default_llm_model: string | null;
         prism_image_tool_llm_model: string | null;
         dev_memories_enabled: number;
@@ -1966,6 +1974,10 @@ export function exportUserSnapshot(
           parseStoredBotFaceThinkingFrames(
             user.prism_default_bot_face_thinking_frames,
           ) ?? DEFAULT_BOT_FACE_THINKING_FRAMES,
+        prismDefaultBotFaceMouthSpeechPoses:
+          parseStoredBotFaceCustomSpeechPoses(
+            user.prism_default_bot_face_mouth_speech_poses,
+          ),
         prismDefaultLlmModel: user.prism_default_llm_model ?? "",
         prismImageToolLlmModel: user.prism_image_tool_llm_model ?? "",
         voiceMode: normalizeVoiceMode(user.voice_mode),
@@ -2073,6 +2085,7 @@ export function exportUserSnapshot(
          face_mouth_font,
          face_mouth_character,
          face_mouth_animation,
+         face_mouth_speech_poses,
          face_mouth_coffee_pucker,
          face_font_weight,
          face_eye_scale,
@@ -2138,6 +2151,7 @@ export function exportUserSnapshot(
     face_mouth_font: string | null;
     face_mouth_character: string | null;
     face_mouth_animation: string | null;
+    face_mouth_speech_poses: string | null;
     face_mouth_coffee_pucker: number | null;
     face_font_weight: number | null;
     face_eye_scale: number | null;
@@ -2655,6 +2669,11 @@ export function exportUserSnapshot(
       faceMouthAnimation: normalizeBotFaceGlyphAnimation(
         bot.face_mouth_animation,
       ),
+      faceMouthSpeechPoses:
+        parseStoredBotFaceCustomSpeechPoses(bot.face_mouth_speech_poses) ??
+        (bot.face_mouth_animation === "custom"
+          ? parseStoredBotFaceCustomSpeechPoses(bot.face_mouth_character)
+          : null),
         faceMouthCoffeePucker: bot.face_mouth_coffee_pucker === 1,
         faceFontWeight: normalizeBotFaceFontWeight(bot.face_font_weight),
         faceEyeScale: normalizeBotFaceEyeScale(bot.face_eye_scale),
@@ -3501,6 +3520,7 @@ function importUserSnapshotWithinTransaction(
         zen_ask_question_patience_ms = ?,
         zen_autonomy_enabled = ?,
         prism_default_bot_face_thinking_frames = ?,
+        prism_default_bot_face_mouth_speech_poses = ?,
         prism_default_llm_model = ?,
         prism_image_tool_llm_model = ?,
         dev_memories_enabled = ?,
@@ -3628,6 +3648,9 @@ function importUserSnapshotWithinTransaction(
       normalizeZenAutonomyEnabled(settings.zenAutonomyEnabled) ? 1 : 0,
       serializeBotFaceThinkingFrames(
         settings.prismDefaultBotFaceThinkingFrames,
+      ),
+      serializeBotFaceCustomSpeechPosesForStorage(
+        settings.prismDefaultBotFaceMouthSpeechPoses,
       ),
       settings.prismDefaultLlmModel?.trim() ?? "",
       settings.prismImageToolLlmModel?.trim() ?? "",
@@ -3794,6 +3817,10 @@ function importUserSnapshotWithinTransaction(
       if (!bot || typeof bot.id !== "string" || bot.id.trim().length === 0)
         continue;
       const now = new Date().toISOString();
+      const legacySpeechPoses =
+        String(bot.faceMouthAnimation) === "custom"
+          ? normalizeBotFaceCustomSpeechPoses(bot.faceMouthCharacter)
+          : null;
       insertBot.run(
         bot.id.trim(),
         userId,
@@ -3855,7 +3882,8 @@ function importUserSnapshotWithinTransaction(
         normalizeBotFaceEyeMovement(bot.faceEyeAnimation) ??
           DEFAULT_BOT_FACE_EYE_MOVEMENT,
         normalizeBotFaceFontId(bot.faceMouthFont),
-        normalizeBotFaceMouthCharacter(bot.faceMouthCharacter),
+        legacySpeechPoses?.[0] ??
+          normalizeBotFaceMouthCharacter(bot.faceMouthCharacter),
         normalizeBotFaceGlyphAnimation(bot.faceMouthAnimation),
         normalizeBotFaceFontWeight(bot.faceFontWeight),
         normalizeBotFaceEyeScale(bot.faceEyeScale),
@@ -3912,6 +3940,14 @@ function importUserSnapshotWithinTransaction(
           : DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER
             ? 1
             : 0,
+        bot.id.trim(),
+        userId,
+      );
+      db.prepare(
+        "UPDATE bots SET face_mouth_speech_poses = ? WHERE id = ? AND user_id = ?",
+      ).run(
+        serializeBotFaceCustomSpeechPosesForStorage(bot.faceMouthSpeechPoses) ??
+          serializeBotFaceCustomSpeechPosesForStorage(legacySpeechPoses),
         bot.id.trim(),
         userId,
       );

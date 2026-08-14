@@ -18,28 +18,14 @@ describe("Library group leader integration", () => {
     assert.match(pageSource, /leaderBotId: botId/u);
   });
 
-  it("marks the current group leader with a crown on dashboard cards", () => {
+  it("keeps leadership semantic without adding visual badges to bots", () => {
     assert.match(
       pageSource,
       /activeBotLibraryGroupFilter\?\.leaderBotId === b\.id/u,
     );
-    assert.match(pageSource, /className=\{styles\.botGroupLeaderCrown\}/u);
-    assert.match(pageSource, /className=\{styles\.botCardLeaderCrown\}/u);
-  });
-
-  it("shares the Effort-shaped leadership mark across full and mini chassis", () => {
-    assert.match(
-      pageSource,
-      /<BotGroupLeadershipMark[\s\S]*?surface="full"/u,
-    );
-    assert.match(
-      miniSource,
-      /<BotGroupLeadershipMark[\s\S]*?surface="mini"/u,
-    );
-    assert.match(pageSource, /leadershipGroupCount=\{/u);
-    assert.match(
-      pageSource,
-      /leadershipGroupCount=\{botGroupLeadershipCount\([\s\S]*?botLibraryGroups/u,
-    );
+    assert.match(pageSource, /`leader of \$\{activeBotLibraryGroupFilter\.name\}`/u);
+    assert.doesNotMatch(pageSource, /botGroupLeaderCrown|botCardLeaderCrown/u);
+    assert.doesNotMatch(pageSource, /<BotGroupLeadershipMark/u);
+    assert.doesNotMatch(miniSource, /<BotGroupLeadershipMark/u);
   });
 });

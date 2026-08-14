@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   beginChatTurnSpeechLock,
+  CHAT_TRANSCRIPT_STREAM_RATE_MULTIPLIER,
   chatTurnSpeechTypeLocked,
   chatTurnStreamRateMultiplier,
   releaseChatTurnSpeechLock,
@@ -45,22 +46,22 @@ describe("Chat/Zen turn Speech Type policy", () => {
     assert.equal(chatTurnSpeechTypeLocked(null), false);
   });
 
-  it("applies stream rate only to Mute", () => {
-    const selection = (
-      voiceMode: ChatTurnSpeechSelection["voiceMode"],
-      englishVoiceEngine: ChatTurnSpeechSelection["englishVoiceEngine"] =
-        "builtin",
-    ): ChatTurnSpeechSelection => ({ voiceMode, englishVoiceEngine });
+  it("keeps visual text timing independent from Speech Type", () => {
+    assert.equal(chatTurnStreamRateMultiplier("zen", 2), 0.5);
+    assert.equal(chatTurnStreamRateMultiplier("zen", 0.5), 2);
+    assert.equal(chatTurnStreamRateMultiplier("zen", 0), 1);
+    assert.equal(chatTurnStreamRateMultiplier(null, 2), 1);
+  });
 
-    assert.equal(chatTurnStreamRateMultiplier(selection("mute"), 2), 0.5);
-    assert.equal(chatTurnStreamRateMultiplier(selection("mute"), 0.5), 2);
-    assert.equal(chatTurnStreamRateMultiplier(selection("mute"), 0), 1);
-    assert.equal(chatTurnStreamRateMultiplier(selection("english"), 2), 1);
+  it("gives transcript Chat a substantially faster visual cadence", () => {
+    assert.equal(CHAT_TRANSCRIPT_STREAM_RATE_MULTIPLIER, 2.5);
     assert.equal(
-      chatTurnStreamRateMultiplier(selection("english", "elevenlabs"), 2),
-      1,
+      chatTurnStreamRateMultiplier("chat", 1),
+      1 / CHAT_TRANSCRIPT_STREAM_RATE_MULTIPLIER,
     );
-    assert.equal(chatTurnStreamRateMultiplier(selection("babble"), 2), 1);
-    assert.equal(chatTurnStreamRateMultiplier(selection("bottish"), 2), 1);
+    assert.equal(
+      chatTurnStreamRateMultiplier("chat", 2),
+      1 / (2 * CHAT_TRANSCRIPT_STREAM_RATE_MULTIPLIER),
+    );
   });
 });

@@ -15,6 +15,8 @@ import {
   DEBATE_STAGE_MODERATOR_MICRO_SCALE_MAX,
   DEBATE_STAGE_MODERATOR_MICRO_SCALE_MIN,
   DEBATE_STAGE_LIGHT_BLEND_MODES,
+  applyDebateStageDirectionPreset,
+  debateStageDirectionPresetForAlignment,
   debateStageAlignmentOffset,
   debateStageAlignmentStorageKey,
   debateStageAlignmentStyle,
@@ -56,6 +58,36 @@ function evidencePlacement(
 }
 
 describe("Debate stage alignment", () => {
+  it("applies player-facing composition presets without touching precision systems", () => {
+    const customized = normalizeDebateStageAlignment({
+      ...DEFAULT_DEBATE_STAGE_ALIGNMENT,
+      gavel: {
+        lowered: { x: 12, y: 13, rotation: 14, size: 80 },
+        raised: { x: 22, y: 23, rotation: 24, size: 90 },
+      },
+      galleryVolume: 0.55,
+      lightMaskOpacities: { dark: 70, light: 65 },
+    });
+    const close = applyDebateStageDirectionPreset(customized, "close");
+
+    assert.equal(close.wide.for.bot.x, 4);
+    assert.equal(close.wide.against.bot.x, -4);
+    assert.equal(close.moderatorMicroScales.wide, 115);
+    assert.deepEqual(close.gavel, customized.gavel);
+    assert.deepEqual(close.evidenceTable, customized.evidenceTable);
+    assert.deepEqual(close.lightMaskOpacities, customized.lightMaskOpacities);
+    assert.equal(close.galleryVolume, customized.galleryVolume);
+    assert.equal(debateStageDirectionPresetForAlignment(close), "close");
+
+    const grand = applyDebateStageDirectionPreset(close, "grand");
+    assert.equal(grand.moderatorMicroScales.wide, 155);
+    assert.equal(debateStageDirectionPresetForAlignment(grand), "grand");
+
+    const balanced = applyDebateStageDirectionPreset(grand, "balanced");
+    assert.deepEqual(balanced.wide, DEFAULT_DEBATE_STAGE_ALIGNMENT.wide);
+    assert.equal(debateStageDirectionPresetForAlignment(balanced), "balanced");
+  });
+
   it("keeps independent evidence geometry for every public-floor camera", () => {
     for (const camera of ["wide", "left", "moderator", "right"] as const) {
       assert.equal(debateStageEvidenceViewForCamera(camera), camera);

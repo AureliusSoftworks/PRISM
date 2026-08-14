@@ -159,10 +159,12 @@ import {
   normalizeBotcastCameraFraming,
   parseStoredBotAvatarDetailsV1,
   resolveBotAudioVoiceProfileV1,
+  resolveBotPronunciationMapPointV1,
   rewriteBotFalseNameResponseV1,
   applyBotPowerEternalIntroductionResponseV1,
   applyBotPowerEchoResponseV1,
   applyBotPowerMumbledResponseV1,
+  applyBotPowerMumbledReactionPlanV1,
   applyBotPowerMuteResponseV1,
   createBotPowerMutePerformanceV1,
   botPowerMutePrivateHistoryV1,
@@ -715,9 +717,14 @@ export function signalVisualOnlyListenerReaction(
 ): ListenerReactionPlanV1 {
   const {
     spokenCue: _spokenCue,
+    publicSpokenCue: _publicSpokenCue,
+    spokenCueSpeechEffect: _spokenCueSpeechEffect,
     vocalFoley: _vocalFoley,
     interjectionAttempt: _interjectionAttempt,
     interruptedSpeakerCue: _interruptedSpeakerCue,
+    publicInterruptedSpeakerCue: _publicInterruptedSpeakerCue,
+    interruptedSpeakerCueSpeechEffect:
+      _interruptedSpeakerCueSpeechEffect,
     interruptedSpeakerCuePlayback: _interruptedSpeakerCuePlayback,
     ...visualOnly
   } = plan;
@@ -863,6 +870,7 @@ export type BotcastBotProfile = {
   faceMouthFont?: string | null;
   faceMouthCharacter?: string | null;
   faceMouthAnimation?: string | null;
+  faceMouthSpeechPoses?: string | null;
   faceMouthCoffeePucker?: boolean;
   faceFontWeight?: number | null;
   faceEyeScale?: number | null;
@@ -917,6 +925,8 @@ export interface BotcastGenerationOptions {
   /** Account consent gate for private multi-pass effort on local models. */
   experimentalAllModelEffortEnabled?: boolean;
   providerFactory?: typeof selectProvider;
+  /** Test seam for Prism-owned auxiliary work such as Power rewrites. */
+  auxiliaryProviderFactory?: typeof getAuxiliaryProvider;
   /** Cancels a live generation when its owning Signal request is abandoned. */
   signal?: AbortSignal;
   /** Test and host override; normal Signal turns use the bounded default. */
@@ -1802,76 +1812,76 @@ const BOTCAST_LOGO_PERSONA_MOTIFS: Readonly<
   Record<SignalPersonaTemperament, readonly string[]>
 > = {
   commanding: [
-    "a tensioned keystone held by one narrow break",
-    "an offset plumb line pinning two unequal planes",
-    "a compressed crownless arch under controlled pressure",
-    "a dark central wedge governing three restrained cuts",
-    "a locked axis interrupted by one exact refusal",
-    "a descending weight arrested just above its base",
+    "a brass padlock holding a frayed ribbon taut",
+    "a surveyor's plumb bob pinning down a curling map corner",
+    "a drawbridge stopping just before it closes on a small paper boat",
+    "a heavy paperweight holding one unruly stack of evidence cards in place",
+    "a referee's whistle caught between two stubborn chess knights",
+    "a descending elevator counterweight arrested above one lit floor button",
   ],
   contemplative: [
-    "an open labyrinth resolving into a quiet center",
-    "a paradoxical loop with one impossible inward turn",
-    "two nested horizons sharing a single absence",
-    "a suspended question-shaped void without punctuation",
-    "a folded path returning beside rather than onto itself",
-    "a still core surrounded by one incomplete orbit",
+    "a folded paper maze whose path returns to a single lamp",
+    "a ribbon loop that passes through its own paper window",
+    "two telescopes aimed at the same empty patch of night sky",
+    "a teacup balanced over the missing piece of its saucer",
+    "a winding footpath that returns beside a patient bench",
+    "a still stone in a glass of water with one unfinished ripple",
   ],
   playful: [
-    "a buoyant misfit tile escaping an orderly rhythm",
-    "a springing curve surprising a row of solemn marks",
-    "an offbeat pebble making a larger shape grin without a face",
-    "a neat stack undone by one joyful diagonal",
-    "a looping detour that lands precisely where it should not",
-    "two near-matching forms swapping their expected roles",
+    "a runaway domino wearing a tiny parade flag",
+    "a spring-loaded paperclip vaulting over a solemn ruler",
+    "a round pebble nudging one square tile out of a tidy mosaic",
+    "a neat stack of envelopes undone by one paper airplane",
+    "a looped garden hose arriving at the wrong flowerpot on purpose",
+    "two nearly identical umbrellas swapping their rainclouds",
   ],
   analytical: [
-    "an evidence notch revealing a hidden second contour",
-    "a calibrated aperture split by one diagnostic cut",
-    "three indexed planes exposing a concealed alignment",
-    "a measured grid fragment broken by the decisive clue",
-    "an annotation bracket becoming the object it isolates",
-    "a precise cross-section with one revealing interruption",
+    "an evidence card whose clipped corner becomes a magnifying lens over its own fingerprint",
+    "a brass caliper measuring the gap in a cracked ceramic cup",
+    "three numbered specimen slides revealing a hidden fingerprint",
+    "a ruled notebook grid interrupted by one magnifying glass",
+    "an annotation bracket closing around a loose thread on a coat button",
+    "a cross-sectioned pocket watch exposing one stopped gear",
   ],
   inventive: [
-    "an eccentric cam converting rotation into a clean ascent",
-    "an interlocking linkage with one elegant impossible joint",
-    "a compact mechanism unfolding beyond its own footprint",
-    "a counterweighted hinge caught at the moment of invention",
-    "a modular rail rerouting force through an unexpected gap",
-    "a nested gearless drive expressed through three moving planes",
+    "a hand-cranked cam lifting a tiny ladder out of its own toolbox",
+    "two interlocking wrenches joined by one delightfully impossible hinge",
+    "a compact folding ruler unfolding into a bridge",
+    "a counterweighted desk lamp caught at the moment it invents a new angle",
+    "a toy rail rerouting a marble through an unexpected trapdoor",
+    "a gearless bicycle chain pulling a paper kite into the air",
   ],
   warm: [
-    "two sheltering planes protecting a luminous inner interval",
-    "an open enclosure that makes room instead of closing it",
-    "a soft boundary passing one small form safely inward",
-    "two unequal arcs sharing the same protected center",
-    "a gathered fold preserving a deliberate opening",
-    "an embracing contour whose strength comes from its gap",
+    "two cupped hands sheltering a small lantern from the wind",
+    "an open birdhouse making room for one oversized nest",
+    "a gate holding itself open for a tiny rolling suitcase",
+    "two mismatched umbrellas sharing one dry patch of pavement",
+    "a gathered blanket preserving an opening for a sleeping cat",
+    "an embrace-shaped coat hook holding one borrowed scarf",
   ],
   creative: [
-    "an expressive stroke folding into its own counter-rhythm",
-    "three improvised planes resolving into confident asymmetry",
-    "a cut-paper gesture turning a mistake into the focal edge",
-    "a syncopated ribbon changing medium halfway through",
-    "a gestural mark held by one severe geometric anchor",
-    "an unfinished contour completed by its own negative space",
+    "a paintbrush folding its wet stroke into a paper bird",
+    "three torn paper shapes becoming an off-kilter stage curtain",
+    "a cut-paper mistake becoming the window in a tiny house",
+    "a ribbon changing into a pencil line halfway through a bow",
+    "a wild ink splash held in place by one exact binder clip",
+    "an unfinished chalk drawing completed by the shadow of its own eraser",
   ],
   adventurous: [
-    "a broken contour pointing decisively beyond its boundary",
-    "an ascending route crossing one compressed horizon",
-    "a compassless bearing defined by wake and departure",
-    "a narrow passage opening suddenly into forward space",
-    "a stepped trajectory refusing the enclosing frame",
-    "a distant point pulling three grounded forms into motion",
+    "a trail marker arrow breaking free from the edge of a folded map",
+    "a climbing rope crossing one sharply folded paper horizon",
+    "a small boat leaving a wake that points beyond its compass",
+    "a narrow canyon gate opening onto one distant campfire",
+    "a hiking boot stepping out of a dotted route line",
+    "a far-off kite pulling three grounded tent pegs into motion",
   ],
   neutral: [
-    "an offset interval balancing tension and release",
-    "a compact boundary transformed by one deliberate opening",
-    "two measured planes exchanging foreground and void",
-    "a centered mass made singular by one asymmetric cut",
-    "a simple path changing direction at its quietest point",
-    "three restrained forms resolving into one clear gesture",
+    "a balanced mobile holding one deliberately open envelope",
+    "a closed matchbox made surprising by one open drawer",
+    "two folded maps exchanging one missing landmark",
+    "a centered stone made singular by one chipped edge",
+    "a simple garden path changing direction around a quiet bench",
+    "three stacked books resolving into one hand offering a bookmark",
   ],
 };
 
@@ -1965,10 +1975,10 @@ const BOTCAST_LOGO_DESIGN_DISTANCE_MIN = 4;
 const BOTCAST_LOGO_DESIGN_ATTEMPTS = 256;
 const BOTCAST_LOGO_DESIGN_HISTORY_MAX = 16;
 
-// Only `lineLanguage` and `composition` reach the image prompt; the LLM
-// showThesis is the primary art direction there. The remaining genome fields
-// still drive per-user distinctiveness (signature/distance history) and the
-// fallback thesis for shows that predate generated identity.
+// The generated thesis is the primary art direction. The concrete persona
+// motif remains a backup visual sentence in the image prompt, while the more
+// abstract genome fields stay private to signature/distance allocation so they
+// cannot displace the host-specific, nameable subject.
 const BOTCAST_LOGO_DESIGN_FIELDS = [
   "personaMotif",
   "broadcastArchetype",
@@ -2033,7 +2043,7 @@ function logoDesignCandidate(
     signature: `signal-logo-v1:${temperament}:${indexes.join("-")}`,
     showThesis: cleanText(
       showThesis,
-      `A show-specific structural metaphor in which ${personaMotif} becomes audible through ${broadcastArchetype}.`,
+      `A host-specific visual story: ${personaMotif}. Preserve it as one clear, surprising physical action.`,
       BOTCAST_LOGO_THESIS_MAX,
     ),
     personaMotif,
@@ -2110,7 +2120,9 @@ function logoPromptForDesign(
       ? [`Provider-safe persona fingerprint: ${personaFingerprint}.`]
       : []),
     `Design brief, the primary art direction: ${design.showThesis}`,
-    "Draw exactly what the brief describes: one familiar, nameable visual subject or action, doing the one thing the brief says is happening to it. An unfamiliar viewer must be able to describe the mark in a short noun phrase. If any part of the brief reads as abstract design language, translate it into the clearest concrete subject that preserves its meaning; never render abstract geometry in place of a real subject.",
+    `Concrete backup visual sentence: ${design.personaMotif}. Preserve its familiar subject and the action happening to it whenever the design brief is vague, abstract, or only ornamental.`,
+    "Draw exactly what the brief describes: one familiar, nameable visual subject or action, doing the one specific surprising thing the brief says is happening to it. An unfamiliar viewer must be able to describe the mark in a short noun phrase. If any part of the brief reads as abstract design language, translate it into the clearest concrete subject that preserves its meaning; never render abstract geometry, an ornamental emblem, or a generic symbol in place of a real subject.",
+    "Broadcast cues are optional and must never replace the host-specific visual idea. If the brief uses one, integrate it inside, through, or directly on the physical subject itself; never attach a second signal glyph beside it: no detached radiating arcs, wireless marks, frequency rings, or floating audio lines.",
     `Style: render the subject with ${design.lineLanguage}, composed as ${design.composition}. Wherever this style conflicts with the brief, the brief wins.`,
     `Anchor the restrained palette in ${normalizeAccentColor(accentColor)} with only one or two complementary tones.`,
     "Do not use a standalone microphone, headphones, waveform, play button, RSS arcs, radio tower, speech bubble, vinyl record, or generic frequency ring. Do not draw an app-icon tile, circular badge, shield, crest, monogram, or podcast seal. A viewer must see a singular editorial symbol, never podcast clip art.",
@@ -2848,7 +2860,7 @@ function loadBotProfile(
     .prepare(
     `SELECT id, name, system_prompt, export_hash, clone_family_id, powers_json, color, glyph,
             face_eyes_font, face_eye_character, face_eye_count, face_mouth_font,
-            face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker,
+            face_mouth_character, face_mouth_animation, face_mouth_speech_poses, face_mouth_coffee_pucker,
             face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y,
             face_eye_rotation_deg, face_eye_spacing, face_mouth_scale, face_mouth_offset_x,
             face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar,
@@ -2875,6 +2887,7 @@ function loadBotProfile(
         face_mouth_font: string | null;
         face_mouth_character: string | null;
         face_mouth_animation: string | null;
+        face_mouth_speech_poses: string | null;
         face_mouth_coffee_pucker: number | null;
         face_font_weight: number | null;
         face_eye_scale: number | null;
@@ -2924,6 +2937,7 @@ function loadBotProfile(
     faceMouthFont: row.face_mouth_font,
     faceMouthCharacter: row.face_mouth_character,
     faceMouthAnimation: row.face_mouth_animation,
+    faceMouthSpeechPoses: row.face_mouth_speech_poses,
     faceMouthCoffeePucker: row.face_mouth_coffee_pucker === 1,
     faceFontWeight: row.face_font_weight,
     faceEyeScale: row.face_eye_scale,
@@ -4709,6 +4723,41 @@ function safeGeneratedLogoThesis(
   ) {
     return "";
   }
+
+  const clauses = thesis.match(
+    /^Persona fingerprint:\s*([\s\S]+?)\s+Emblem:\s*([\s\S]+?)\s+Art direction:\s*([\s\S]+)$/iu,
+  );
+  const personaFingerprint = clauses?.[1]?.trim() ?? "";
+  const emblem = clauses?.[2]?.trim() ?? "";
+  const artDirection = clauses?.[3]?.trim() ?? "";
+  if (
+    personaFingerprint.length < 20 ||
+    emblem.length < 24 ||
+    artDirection.length < 20
+  ) {
+    return "";
+  }
+  if (
+    /\b(?:abstract|non-figurative|geometr(?:y|ic)|planes?|contours?|intervals?|voids?|axes|ornamental (?:emblem|symbol|mark)|generic (?:symbol|emblem|podcast))\b/iu.test(
+      emblem,
+    )
+  ) {
+    return "";
+  }
+  if (
+    !/\b(?:a|an|the|one|two|three)\s+(?!abstract\b|geometric\b|ornamental\b|generic\b)[\p{L}\p{N}-]+/iu.test(
+      emblem,
+    )
+  ) {
+    return "";
+  }
+  if (
+    !/\b(?:becomes?|turns?|holds?|carries?|opens?|breaks?|folds?|balances?|spills?|reveals?|emits?|catches?|pulls?|pushes?|pins?|lifts?|unfolds?|changes?|measures?|exposes?|interrupts?|shelters?|shares?|steps?|escapes?|vaults?|nudges?|swaps?|reroutes?|offers?|completes?|transforms?|converts?|threads?|cuts?|cracks?|tugs?|leaks?|grows?|melts?|stitches?|stops?|closes?|leaves?|returns?|aims?|passes?|arrives?|lands?|wears?|dissolves?|index(?:es|ed|ing)?|registers?|traps?|releases?|draws?|writes?|casts?|throws?|curls?|winds?)\b/iu.test(
+      emblem,
+    )
+  ) {
+    return "";
+  }
   return thesis;
 }
 
@@ -5794,9 +5843,11 @@ export async function generateBotcastShowIdentity(
           "Translate persona into original musical behavior rather than a generic genre label. The direction should feel wrong for another host even if the instrument names were swapped. Favor character-bearing tensions such as brilliant control threatened by instability, public command carrying buried tragedy, or innocent delight moving with unstoppable confidence.",
           "musicIdentity must use no host or show name, artist, composer, song, franchise, character, recognizable melody, signature theme, quoted lyric, or imitation request. Describe only wholly original musical attributes.",
           "logoThesis is a compact, provider-safe persona design brief, not merely a logo concept. Write three dense clauses labeled 'Persona fingerprint:', 'Emblem:', and 'Art direction:' in one string, aiming for 350-650 characters total.",
-          "Persona fingerprint names the host's distinctive worldview, obsessions, social energy, contradictions, and creative or intellectual posture. Emblem chooses one familiar, nameable subject or action rooted in that identity and transforms only one part of it with a subtle broadcast behavior. Art direction turns the persona into specific material character, shape behavior, balance, edge language, and emotional temperature.",
+          "Persona fingerprint names the host's distinctive worldview, obsessions, social energy, contradictions, and creative or intellectual posture. Emblem chooses one familiar, nameable subject or action rooted in that identity and transforms only one part of it with a surprising physical action. Art direction turns the persona into specific material character, shape behavior, balance, edge language, and emotional temperature.",
+          "The Emblem clause must name the physical subject and the action in a short visual sentence. Give it one ingenious narrative twist or visual joke that belongs only to this host; abstract geometry, ornamental emblems, generic symbols, and generic podcast imagery are not acceptable subjects.",
+          "Broadcast cues are optional and subordinate to the host-specific idea. If one appears, integrate it into the subject's own material, mechanism, or action; never add detached radiating arcs, wireless marks, frequency rings, or a separate signal glyph beside it.",
           "Make enough choices persona-specific that the mark would feel wrong for a different host even after a palette swap. The persona must control the symbol; broadcast language stays subordinate. State what a viewer sees first and what is happening to it. Keep the subject recognizable at thumbnail size, and avoid briefs made only from abstract cuts, intervals, planes, contours, voids, or geometry.",
-          "The logo should communicate its premise before anyone reads the show name and make the host's identity unmistakable in how it does so. Favor a simple visual sentence such as an evidence tag whose clipped corner becomes a transmission pulse, then specify why its material, posture, and tension belong to this persona rather than to a generic podcast.",
+          "The logo should communicate its premise before anyone reads the show name and make the host's identity unmistakable in how it does so. Favor a simple visual sentence such as a brass caliper measuring the missing gap in a cracked ceramic cup, then specify why its material, posture, and tension belong to this persona rather than to a generic podcast.",
           "logoThesis must use no host or show name, portrait, character likeness, signature prop, lettering, initials, existing insignia, or recognizable entertainment-property imagery. Reject standalone microphones, headphones, waveforms, play buttons, RSS arcs, radio towers, vinyl records, speech bubbles, circular podcast badges, and generic audio clip art.",
           ...(hostIsMuted
             ? BOTCAST_MUTED_DASHBOARD_BLURB_DIRECTIONS
@@ -6677,8 +6728,10 @@ export async function generateBotcastShowLogoThesis(
           "You are revising only the logo direction for a premium interview show. Do not rename, rewrite, or otherwise alter the show.",
           "Return one JSON object with exactly one string field: logoThesis.",
           "Write three dense clauses labeled 'Persona fingerprint:', 'Emblem:', and 'Art direction:' in one string, aiming for 350-650 characters total.",
-          "Choose one familiar, nameable subject or action rooted in the host's identity, then transform only one part with a restrained broadcast behavior.",
+          "Choose one familiar, nameable subject or action rooted in the host's identity, then give it one ingenious narrative twist or visual joke by transforming only one small part of it.",
           "State what a viewer sees first. Keep the emblem recognizable at thumbnail size and make its materials, posture, tension, and emotional temperature specific to this host.",
+          "The Emblem clause must name the physical subject and the action in a short visual sentence. Reject abstract geometry, ornamental emblems, generic symbols, and generic podcast imagery even if the Art direction is vivid.",
+          "Broadcast cues are optional and subordinate to the host-specific idea. If one appears, integrate it into the subject's own material, mechanism, or action; never add detached radiating arcs, wireless marks, frequency rings, or a separate signal glyph beside it.",
           "Use no host or show name, portrait, character likeness, lettering, initials, existing insignia, or recognizable entertainment-property imagery.",
           "Reject standalone microphones, headphones, waveforms, play buttons, RSS arcs, radio towers, vinyl records, speech bubbles, circular podcast badges, and generic audio clip art.",
         ].join(" "),
@@ -8038,7 +8091,14 @@ function persistProducerCue(
       ? {
           interruptedMessageId: guestInterruption.messageId ?? null,
           interruptionBridgeLine: guestInterruption.bridgeLine,
-          ...(guestInterruption.interruptedSpeakerCue
+          ...(guestInterruption.publicInterruptedSpeakerCue
+            ? {
+                publicInterruptedSpeakerCue:
+                  guestInterruption.publicInterruptedSpeakerCue,
+                interruptedSpeakerCueSpeechEffect:
+                  "speech_obfuscation" as const,
+              }
+            : guestInterruption.interruptedSpeakerCue
             ? {
                 interruptedSpeakerCue:
                   guestInterruption.interruptedSpeakerCue,
@@ -8089,6 +8149,32 @@ function persistProducerCue(
     }
   }
   return after;
+}
+
+function botcastInterruptedSpeakerCueProjection(
+  profile: BotcastBotProfile,
+  powers: unknown,
+  cue: NonNullable<ListenerReactionPlanV1["interruptedSpeakerCue"]>,
+  variationSeed: string,
+): Pick<
+  BotcastGuestInterruptionContext,
+  | "interruptedSpeakerCue"
+  | "publicInterruptedSpeakerCue"
+  | "interruptedSpeakerCueSpeechEffect"
+> {
+  if (botPowerMumblesSpeechV1(powers) && !botPowerResponseIsSilentV1(cue)) {
+    return {
+      publicInterruptedSpeakerCue: applyBotPowerMumbledResponseV1(cue, {
+        pronunciationMapPoint: resolveBotPronunciationMapPointV1(
+          profile.authoredAudioVoiceProfile,
+          profile.audioVoiceProfileOverride,
+        ),
+        variationSeed,
+      }),
+      interruptedSpeakerCueSpeechEffect: "speech_obfuscation",
+    };
+  }
+  return { interruptedSpeakerCue: cue };
 }
 
 function applyBotcastHostRedirect(
@@ -11013,6 +11099,21 @@ function auxiliaryGenerationProvider(
   return { provider, providerName: "local", model };
 }
 
+function cursedTongueAuxiliaryGenerationProvider(
+  options: BotcastGenerationOptions,
+): { provider: LlmProvider; model: string } {
+  const provider = (options.auxiliaryProviderFactory ?? getAuxiliaryProvider)(
+    options.prismDefaultLlmModel,
+    { secondaryOllamaHost: options.secondaryOllamaHost },
+  );
+  return {
+    provider,
+    model:
+      provider.diagnosticModel?.trim() ||
+      resolveAuxiliaryOllamaModel(options.prismDefaultLlmModel),
+  };
+}
+
 async function generateAuxiliaryBotcastJson<T>(args: {
   generation: BotcastGenerationOptions;
   messages: ProviderMessage[];
@@ -11594,9 +11695,8 @@ function ensureBotcastFinalHostBeat(
   }
 
   const powerSnapshot = botcastEpisodePowerSnapshot(episode);
-  const hostPowers =
-    powerSnapshot?.hostPowers ??
-    loadBotProfile(db, userId, episode.hostBotId).powers;
+  const hostProfile = loadBotProfile(db, userId, episode.hostBotId);
+  const hostPowers = powerSnapshot?.hostPowers ?? hostProfile.powers;
   const guestName =
     powerSnapshot?.guestIdentity?.name ??
     (episode.guestKind === "producer"
@@ -11620,7 +11720,13 @@ function ensureBotcastFinalHostBeat(
   const intendedContent = hostEchoes
     ? applyBotPowerEchoResponseV1(previousGuestLine ?? "")
     : hostMumbles
-      ? applyBotPowerMumbledResponseV1(plainSignoff)
+      ? applyBotPowerMumbledResponseV1(plainSignoff, {
+          pronunciationMapPoint: resolveBotPronunciationMapPointV1(
+            hostProfile.authoredAudioVoiceProfile,
+            hostProfile.audioVoiceProfileOverride,
+          ),
+          variationSeed: `${episode.id}:emergency-closing`,
+        })
       : plainSignoff;
   const guestProfile =
     episode.guestKind === "bot" && episode.guestPresenceMode === "present"
@@ -11638,6 +11744,11 @@ function ensureBotcastFinalHostBeat(
               muted: botPowerIsMutedV1(guestProfile.powers),
               breathless: botPowerIsBreathlessV1(guestProfile.powers),
               cursedTongue: botPowerCursesSpeechV1(guestProfile.powers),
+              mumbling: botPowerMumblesSpeechV1(guestProfile.powers),
+              pronunciationMapPoint: resolveBotPronunciationMapPointV1(
+                guestProfile.authoredAudioVoiceProfile,
+                guestProfile.audioVoiceProfileOverride,
+              ),
               temperament: botPowerMuteReactionTemperamentFromPersonaV1(
                 guestProfile.systemPrompt,
               ),
@@ -12143,6 +12254,11 @@ function applyBotcastProducerCutInterruption(
         "Signal producer cut host interruption is not stored for this show.",
       );
     }
+    const interruptedGuestProfile = loadBotProfile(
+      db,
+      userId,
+      episode.guestBotId,
+    );
     return applyBotcastGuestInterruption(
       db,
       userId,
@@ -12151,7 +12267,14 @@ function applyBotcastProducerCutInterruption(
         messageId: latest.id,
         spokenContent,
         bridgeLine,
-        ...(interruptedSpeakerCue ? { interruptedSpeakerCue } : {}),
+        ...(interruptedSpeakerCue
+          ? botcastInterruptedSpeakerCueProjection(
+              interruptedGuestProfile,
+              interruptedSpeakerPowers,
+              interruptedSpeakerCue,
+              `${episode.id}:${latest.id}:producer-cut`,
+            )
+          : {}),
       },
       new Date().toISOString(),
     );
@@ -12754,6 +12877,14 @@ export async function advanceBotcastEpisode(
             `signal-host-crosstalk-v1:${episode.id}:${guestInterruption.messageId}:${bridgeLine}`,
           ))
         : undefined;
+      const interruptedGuestProfile = loadBotProfile(
+        db,
+        userId,
+        episode.guestBotId,
+      );
+      const interruptedGuestPowers =
+        botcastEpisodePowerSnapshotForRole(episode, "guest") ??
+        interruptedGuestProfile.powers;
       guestInterruption = {
         ...(guestInterruption.messageId
           ? { messageId: guestInterruption.messageId }
@@ -12762,7 +12893,14 @@ export async function advanceBotcastEpisode(
           ? { spokenContent: guestInterruption.spokenContent }
           : {}),
         bridgeLine,
-        ...(interruptedSpeakerCue ? { interruptedSpeakerCue } : {}),
+        ...(interruptedSpeakerCue
+          ? botcastInterruptedSpeakerCueProjection(
+              interruptedGuestProfile,
+              interruptedGuestPowers,
+              interruptedSpeakerCue,
+              `signal-host-crosstalk-v1:${episode.id}:${guestInterruption.messageId ?? "queued"}:${bridgeLine}:interrupted-speaker`,
+            )
+          : {}),
       };
     } else if (guestInterruption) {
       throw new Error(
@@ -14583,14 +14721,22 @@ export async function advanceBotcastEpisode(
     !speakerQuietIgnored &&
     !speakerEternallyIntroduces &&
     !speakerEchoesForTurn
-    ? applyBotPowerMumbledResponseV1(intendedContent)
+    ? applyBotPowerMumbledResponseV1(intendedContent, {
+        pronunciationMapPoint: resolveBotPronunciationMapPointV1(
+          speaker.authoredAudioVoiceProfile,
+          speaker.audioVoiceProfileOverride,
+        ),
+        variationSeed:
+          `${episode.id}:${speaker.id}:${episode.messages.length + 1}:turn`,
+      })
     : intendedContent;
   if (speakerCursesSpeech && !speakerIsMutedForTurn) {
+    const cursedTongueRewrite = cursedTongueAuxiliaryGenerationProvider(generation);
     content = await rewriteBotPowerCursedTongueAnswerV1({
-      provider: selected.provider,
+      provider: cursedTongueRewrite.provider,
       draftAnswer: content,
       seed: `${episode.id}:${speaker.id}:${episode.messages.length + 1}`,
-      model: selectedModelId,
+      model: cursedTongueRewrite.model,
       usagePurpose: "botcast_turn",
       signal: generation.signal,
     });
@@ -14606,6 +14752,11 @@ export async function advanceBotcastEpisode(
           muted: botPowerIsMutedV1(peer.powers),
           breathless: botPowerIsBreathlessV1(peer.powers),
           cursedTongue: botPowerCursesSpeechV1(peer.powers),
+          mumbling: botPowerMumblesSpeechV1(peer.powers),
+          pronunciationMapPoint: resolveBotPronunciationMapPointV1(
+            peer.authoredAudioVoiceProfile,
+            peer.audioVoiceProfileOverride,
+          ),
           temperament: botPowerMuteReactionTemperamentFromPersonaV1(
             peer.systemPrompt,
           ),
@@ -14637,6 +14788,12 @@ export async function advanceBotcastEpisode(
   if (mutePerformance) {
     content = applyBotPowerMuteResponseV1(content, mutePerformance);
   }
+  const publicPowerInterruptedContent = powerCutoffApplied
+    ? {
+        ...powerCutoffApplied,
+        content,
+      }
+    : null;
   const hostRageQuitsThisTurn =
     speakerRole === "host" &&
     episode.guestKind === "producer" &&
@@ -15138,14 +15295,14 @@ export async function advanceBotcastEpisode(
   );
   const plannedCrosstalkReclaim =
     powerInterruptionIsMeaningful &&
-    powerInterruptedContent &&
+    publicPowerInterruptedContent &&
     crosstalkFloorOutcome === "reclaim"
       ? normalizeCrosstalkReclaimPlanV1({
           v: 1,
           name: "crosstalkReclaim",
           interruptedMessageId: messageId,
           speakerBotId: speaker.id,
-          heardFragment: powerInterruptedContent.content,
+          heardFragment: publicPowerInterruptedContent.content,
           protectFromImmediateReinterruption: true,
         })
       : null;
@@ -15291,7 +15448,7 @@ export async function advanceBotcastEpisode(
     !botPowerIsMutedV1(listener.powers) &&
     !powerInterruptionAttemptProtected
   ) {
-    const cutoff = powerInterruptedContent ??
+    const cutoff = publicPowerInterruptedContent ??
       botcastPowerInterruptedContentV1(
         content,
         listenerReactionCandidate.targetProgress,
@@ -15358,10 +15515,30 @@ export async function advanceBotcastEpisode(
     if (speakerIsMutedForTurn || botPowerIsMutedV1(listener.powers)) {
       return signalVisualOnlyListenerReaction(listenerReactionCandidate);
     }
-    return botPowerOmitBreathListenerVocalFoleyV1(
+    const audiblePlan = botPowerOmitBreathListenerVocalFoleyV1(
       listenerReactionCandidate,
       listener.powers,
     );
+    return applyBotPowerMumbledReactionPlanV1(audiblePlan, {
+      listener: botPowerMumblesSpeechV1(listener.powers)
+        ? {
+            pronunciationMapPoint: resolveBotPronunciationMapPointV1(
+              listener.authoredAudioVoiceProfile,
+              listener.audioVoiceProfileOverride,
+            ),
+            variationSeed: `${audiblePlan.seed}:listener`,
+          }
+        : null,
+      interruptedSpeaker: speakerMumblesSpeech
+        ? {
+            pronunciationMapPoint: resolveBotPronunciationMapPointV1(
+              speaker.authoredAudioVoiceProfile,
+              speaker.audioVoiceProfileOverride,
+            ),
+            variationSeed: `${audiblePlan.seed}:interrupted-speaker`,
+          }
+        : null,
+    });
   })();
   if (listenerReaction) {
     recordEvent(

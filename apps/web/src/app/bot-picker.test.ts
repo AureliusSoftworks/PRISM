@@ -197,12 +197,16 @@ describe("shared bot picker", () => {
     );
   });
 
-  it("opens the focused Zen overview bot's management hub on reactivation", () => {
+  it("unfocuses the focused Zen overview bot on reactivation", () => {
     assert.match(
       pageSource,
-      /const tileActivation = resolveCanvasBotTileActivation\([\s\S]*?if \(tileActivation === "manage"\) \{[\s\S]*?openBotPanelHub\(b\);[\s\S]*?return;/u,
+      /const tileActivation = resolveCanvasBotTileActivation\([\s\S]*?if \(tileActivation === "unfocus"\) \{[\s\S]*?resetEmptyStateBotSelection\(\);[\s\S]*?return;/u,
     );
-    assert.match(pageSource, /"selected; activate to customize"/u);
+    assert.match(pageSource, /"selected; activate to unfocus"/u);
+    assert.doesNotMatch(
+      pageSource,
+      /if \(tileActivation === "unfocus"\) \{[\s\S]{0,420}openBotPanelHub\(b\)/u,
+    );
     assert.match(pageSource, /OPEN BOT PANEL/u);
   });
 

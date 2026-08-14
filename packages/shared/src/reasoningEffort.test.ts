@@ -301,12 +301,16 @@ describe("reasoning effort helpers", () => {
     ]) {
       assert.deepEqual(openAiReasoningEffortLevels(modelId), [
         "none",
+        "minimal",
         "low",
         "medium",
         "high",
         "xhigh",
       ]);
-      assert.equal(openAiReasoningEffortForRequest(modelId, "minimal"), null);
+      assert.equal(
+        openAiReasoningEffortForRequest(modelId, "minimal"),
+        "minimal",
+      );
       assert.equal(openAiReasoningEffortForRequest(modelId, "low"), "low");
       assert.equal(openAiModelSupportsMaxReasoningEffort(modelId), true);
       assert.equal(openAiReasoningEffortForRequest(modelId, "max"), "max");
@@ -316,7 +320,7 @@ describe("reasoning effort helpers", () => {
           modelId,
           preference: "minimal",
         }),
-        null,
+        "minimal",
       );
     }
     assert.deepEqual(openAiReasoningEffortLevels("gpt-5.5-pro"), []);

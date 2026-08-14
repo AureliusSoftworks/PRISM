@@ -1,5 +1,7 @@
 import type { EnglishVoiceEngine, VoiceMode } from "@localai/shared";
 
+import type { ChatPresentation } from "./chatVoicePolicy";
+
 export type ChatTurnSpeechSelection = Readonly<{
   voiceMode: VoiceMode;
   englishVoiceEngine: EnglishVoiceEngine;
@@ -43,15 +45,16 @@ export function releaseChatTurnSpeechLock(
   return lock?.runId === runId ? null : lock;
 }
 
-/**
- * The text stream-rate setting belongs only to silent Mute presentation.
- * Spoken modes are timed by their rendered audio clock.
- */
+export const CHAT_TRANSCRIPT_STREAM_RATE_MULTIPLIER = 2.5;
+
+/** Text presentation has its own clock; audible speech never changes this rate. */
 export function chatTurnStreamRateMultiplier(
-  selection: ChatTurnSpeechSelection,
+  presentation: ChatPresentation | null,
   streamRate: number,
 ): number {
-  if (selection.voiceMode !== "mute") return 1;
+  if (presentation === null) return 1;
   const safeRate = Number.isFinite(streamRate) && streamRate > 0 ? streamRate : 1;
-  return 1 / safeRate;
+  const surfaceRate =
+    presentation === "chat" ? CHAT_TRANSCRIPT_STREAM_RATE_MULTIPLIER : 1;
+  return 1 / (safeRate * surfaceRate);
 }

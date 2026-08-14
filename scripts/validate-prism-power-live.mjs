@@ -6,12 +6,15 @@ import { parsePrismBotArchive } from "../apps/web/src/app/botArchive.ts";
 import { composeBotSystemPrompt } from "../apps/api/src/bots.ts";
 import {
   applyBotPowerAddressedInsultV1,
+  applyBotPowerMumbledResponseV1,
   applyBotPowerResponseBudgetV1,
   botPowerCursesSpeechV1,
   botPowerIneptitudeFinalTurnCueV1,
   botPowerIneptUserPromptV1,
   botPowerIsAddressedQuestionV1,
+  botPowerMumblesSpeechV1,
   botPowerRequiresAddressedInsultV1,
+  resolveBotPronunciationMapPointV1,
   strongestBotPowerAntiTruthEffectV1,
   strongestHardBotPowerResponseBudgetEffectV1,
 } from "@localai/shared";
@@ -20,9 +23,11 @@ import {
   rewriteBotPowerCursedTongueAnswerV1,
 } from "../apps/api/src/bot-powers.ts";
 import {
+  getAuxiliaryProvider,
   LocalOllamaProvider,
   OPENAI_DEFAULT_MODEL,
   OpenAiProvider,
+  resolveAuxiliaryOllamaModel,
 } from "../apps/api/src/providers.ts";
 
 function flagValue(flag) {
@@ -35,8 +40,12 @@ const input = flagValue("--input")?.trim();
 const providerName = flagValue("--provider")?.trim().toLowerCase() || "local";
 const model = flagValue("--model")?.trim() ||
   (providerName === "openai" ? OPENAI_DEFAULT_MODEL : "llama3.2");
+const auxiliaryModel = resolveAuxiliaryOllamaModel(
+  flagValue("--aux-model")?.trim(),
+);
 const mode = flagValue("--mode")?.trim().toLowerCase() || "chat";
 const believedName = flagValue("--believed-name")?.trim() || null;
+const includeRewriteDraft = process.argv.includes("--include-rewrite-draft");
 
 if (
   !bundleArgument ||
@@ -45,7 +54,7 @@ if (
   !["local", "openai"].includes(providerName)
 ) {
   throw new Error(
-    "Usage: validate-prism-power-live.mjs --bundle PATH --input TEXT [--mode chat|zen] [--provider local|openai] [--model MODEL] [--believed-name NAME]",
+    "Usage: validate-prism-power-live.mjs --bundle PATH --input TEXT [--mode chat|zen] [--provider local|openai] [--model MODEL] [--aux-model MODEL] [--believed-name NAME]",
   );
 }
 if (providerName === "openai" && !process.env.OPENAI_API_KEY?.trim()) {
@@ -69,6 +78,20 @@ if (!systemPrompt) {
 const provider = providerName === "openai"
   ? new OpenAiProvider({ apiKey: process.env.OPENAI_API_KEY.trim() })
   : new LocalOllamaProvider();
+const auxiliaryProvider = getAuxiliaryProvider(auxiliaryModel);
+let cursedTongueRawRewrite = null;
+const diagnosticAuxiliaryProvider = includeRewriteDraft
+  ? {
+      ...auxiliaryProvider,
+      async generateResponse(messages, options) {
+        cursedTongueRawRewrite = await auxiliaryProvider.generateResponse(
+          messages,
+          options,
+        );
+        return cursedTongueRawRewrite;
+      },
+    }
+  : auxiliaryProvider;
 const finalTurnPowerCue = botPowerIneptitudeFinalTurnCueV1(bot.powers);
 const modelInput = botPowerIneptUserPromptV1(bot.powers, input);
 const rawResponse = await provider.generateResponse(
@@ -111,13 +134,27 @@ if (antiTruth && botPowerIsAddressedQuestionV1(input)) {
   antiTruthInverted = inverted !== response;
   response = inverted;
 }
+const privateIntendedResponse = response;
+const mumblingApplied = botPowerMumblesSpeechV1(bot.powers) && response.trim().length > 0;
+const mumblingMapPoint = mumblingApplied
+  ? resolveBotPronunciationMapPointV1(
+      bot.authoredAudioVoiceProfile,
+      bot.audioVoiceProfileOverride,
+    )
+  : null;
+if (mumblingApplied) {
+  response = applyBotPowerMumbledResponseV1(response, {
+    pronunciationMapPoint: mumblingMapPoint,
+    variationSeed: `live-validation:${bot.name}:${input}`,
+  });
+}
 const cursedTongueApplied = botPowerCursesSpeechV1(bot.powers) && response.trim().length > 0;
 if (cursedTongueApplied) {
   response = await rewriteBotPowerCursedTongueAnswerV1({
-    provider,
+    provider: diagnosticAuxiliaryProvider,
     draftAnswer: response,
     seed: `live-validation:${bot.name}:${input}`,
-    model,
+    model: auxiliaryModel,
     usagePurpose: "system_unlabeled",
   });
 }
@@ -149,7 +186,23 @@ console.log(JSON.stringify({
         },
       }
     : {}),
+  ...(mumblingApplied
+    ? {
+        mumblingApplied: true,
+        mumblingMapPoint,
+        privateIntendedResponse,
+      }
+    : {}),
   ...(cursedTongueApplied ? { cursedTongueApplied: true } : {}),
+  ...(cursedTongueApplied
+    ? {
+        cursedTongueProvider: auxiliaryProvider.name,
+        cursedTongueModel: auxiliaryModel,
+      }
+    : {}),
+  ...(includeRewriteDraft && cursedTongueRawRewrite
+    ? { cursedTongueRawRewrite }
+    : {}),
   response,
   wordCount: response.trim() ? response.trim().split(/\s+/u).length : 0,
 }, null, 2));

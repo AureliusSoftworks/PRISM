@@ -179,6 +179,7 @@ import {
   applyBotIdentityMirrorResponseV1,
   applyBotIdentityShapeshiftResponseV1,
   applyBotPowerMumbledResponseV1,
+  applyBotPowerMumbledReactionPlanV1,
   applyBotPowerMuteResponseV1,
   createBotPowerMutePerformanceV1,
   botPowerMutePrivateHistoryV1,
@@ -199,6 +200,7 @@ import {
   botPowerTargetNameFromEffectsV1,
   botPowerPerceptionOverlapStartRatioV1,
   botPowerResponseIsSilentV1,
+  listenerReactionHasAudio,
   botNaturalAddressAliasesV1,
   botIdentityMirrorFaceV1,
   botIdentityPresentationGlyphV1,
@@ -274,6 +276,7 @@ import {
   parseStoredBotPrompt,
   resolveFinalStageActionV1,
   resolveBotAudioVoiceProfileV1,
+  resolveBotPronunciationMapPointV1,
   rewriteBotFalseNameResponseV1,
   botPowerIsAddressedQuestionV1,
   applyBotPowerAntiTruthTrueNameLeakV1,
@@ -407,7 +410,7 @@ function lastCoffeeAudibleListenerBotId(
       const event = events[eventIndex];
       if (
         event?.kind === "listenerReaction" &&
-        (event.plan.spokenCue || event.plan.vocalFoley)
+        listenerReactionHasAudio(event.plan)
       ) {
         return event.plan.listenerBotId;
       }
@@ -462,6 +465,7 @@ export interface CoffeeBotProfile {
   faceMouthFont?: string | null;
   faceMouthCharacter?: string | null;
   faceMouthAnimation?: string | null;
+  faceMouthSpeechPoses?: string | null;
   faceMouthCoffeePucker?: boolean;
   faceFontWeight?: number | null;
   faceEyeScale?: number | null;
@@ -4823,6 +4827,9 @@ export function recordCoffeeInterruptionPause(args: {
   ) {
     throw new Error("Interrupting bot must be another seated Coffee bot.");
   }
+  const interrupterBot = args.interrupterBotId
+    ? group.find((bot) => bot.id === args.interrupterBotId) ?? null
+    : null;
   const crosstalkSeed = [
     "coffee-bot-crosstalk-v1",
     row.id,
@@ -5042,6 +5049,39 @@ export function recordCoffeeInterruptionPause(args: {
             ? undefined
             : botCrosstalkInterruptedSpeakerCueForSeed(crosstalkSeed)
       : undefined;
+  const interrupterMumbles = Boolean(
+    interrupterBot &&
+      coffeePowerPlan?.bots[interrupterBot.id]?.effects.some(
+        (effect) => effect.type === "speech_obfuscation",
+      ),
+  );
+  const interruptedBotMumbles = Boolean(
+    coffeePowerPlan?.bots[interruptedBot.id]?.effects.some(
+      (effect) => effect.type === "speech_obfuscation",
+    ),
+  );
+  const publicInterrupterCue =
+    interrupterCue && interrupterBot && interrupterMumbles
+      ? applyBotPowerMumbledResponseV1(interrupterCue, {
+          pronunciationMapPoint: resolveBotPronunciationMapPointV1(
+            interrupterBot.authoredAudioVoiceProfile,
+            interrupterBot.audioVoiceProfileOverride,
+          ),
+          variationSeed: `${crosstalkSeed}:interrupter`,
+        })
+      : null;
+  const publicInterruptedSpeakerCue =
+    interruptedSpeakerCue &&
+      interruptedBotMumbles &&
+      !botPowerResponseIsSilentV1(interruptedSpeakerCue)
+      ? applyBotPowerMumbledResponseV1(interruptedSpeakerCue, {
+          pronunciationMapPoint: resolveBotPronunciationMapPointV1(
+            interruptedBot.authoredAudioVoiceProfile,
+            interruptedBot.audioVoiceProfileOverride,
+          ),
+          variationSeed: `${crosstalkSeed}:interrupted-speaker`,
+        })
+      : null;
   const interruptionEvent: CoffeeInterruptionEvent = {
     kind: args.interrupterBotId ? "botInterruptsBot" : "playerInterruptsBot",
     interruptedBotId: args.interruptedBotId,
@@ -5053,8 +5093,23 @@ export function recordCoffeeInterruptionPause(args: {
       ? { visibleTokenCount: Math.max(1, Math.floor(args.visibleTokenCount)) }
       : {}),
     ...(interruptedSnippet ? { interruptedSnippet } : {}),
-    ...(interrupterCue ? { interrupterCue } : {}),
-    ...(interruptedSpeakerCue ? { interruptedSpeakerCue } : {}),
+    ...(publicInterrupterCue
+      ? {
+          publicInterrupterCue,
+          interrupterCueSpeechEffect: "speech_obfuscation" as const,
+        }
+      : interrupterCue
+        ? { interrupterCue }
+        : {}),
+    ...(publicInterruptedSpeakerCue
+      ? {
+          publicInterruptedSpeakerCue,
+          interruptedSpeakerCueSpeechEffect:
+            "speech_obfuscation" as const,
+        }
+      : interruptedSpeakerCue
+        ? { interruptedSpeakerCue }
+        : {}),
     ...(floorOutcome
       ? {
           floorOutcome,
@@ -6599,6 +6654,7 @@ type CoffeeBotProfileRow = {
   face_mouth_font: string | null;
   face_mouth_character: string | null;
   face_mouth_animation: string | null;
+  face_mouth_speech_poses: string | null;
   face_mouth_coffee_pucker: number | null;
   face_font_weight: number | null;
   face_eye_scale: number | null;
@@ -6654,6 +6710,7 @@ function mapCoffeeBotProfileRow(row: CoffeeBotProfileRow): CoffeeBotProfile {
     faceMouthFont: row.face_mouth_font ?? null,
     faceMouthCharacter: row.face_mouth_character ?? null,
     faceMouthAnimation: row.face_mouth_animation ?? null,
+    faceMouthSpeechPoses: row.face_mouth_speech_poses ?? null,
     faceMouthCoffeePucker: row.face_mouth_coffee_pucker === 1,
     faceFontWeight: typeof row.face_font_weight === "number" ? row.face_font_weight : null,
     faceEyeScale: typeof row.face_eye_scale === "number" ? row.face_eye_scale : null,
@@ -6742,6 +6799,7 @@ function loadCoffeeGroupProfileRows(
               ${selectOptionalBotColumn("face_mouth_font")},
               ${selectOptionalBotColumn("face_mouth_character")},
               ${selectOptionalBotColumn("face_mouth_animation")},
+              ${selectOptionalBotColumn("face_mouth_speech_poses")},
               ${selectOptionalBotColumn("face_mouth_coffee_pucker")},
               ${selectOptionalBotColumn("face_font_weight")},
               ${selectOptionalBotColumn("face_eye_scale")},
@@ -18994,7 +19052,13 @@ async function generateCoffeeBotReply(args: {
     !speakerQuietIgnored &&
     !speakerEternallyIntroduces
   ) {
-    replyText = applyBotPowerMumbledResponseV1(replyText);
+    replyText = applyBotPowerMumbledResponseV1(replyText, {
+      pronunciationMapPoint: resolveBotPronunciationMapPointV1(
+        speaker.authoredAudioVoiceProfile,
+        speaker.audioVoiceProfileOverride,
+      ),
+      variationSeed: `${row.id}:${speaker.id}:${history.length}:turn`,
+    });
   }
   // Power and exact-response paths may replace the sanitized model draft.
   // Speech-copy is deliberately byte-for-byte; the ordinary role/action gate
@@ -19008,16 +19072,19 @@ async function generateCoffeeBotReply(args: {
         knownCoffeeSpeakerNames,
       );
   if (!replyText) replyText = "...";
+  const cursedTongueRewriteProvider = speakerCursesForTurn
+    ? coffeeAuxiliaryProvider(settings)
+    : null;
   let cleanSpeechBeforeCursedTongue = speakerMumblesForTurn
     ? clearSpeechBeforeObfuscation
     : replyText;
   let cursedTonguePublicSpeech: string | null = null;
   if (speakerCursesForTurn && !speakerIsMutedForTurn) {
     replyText = await rewriteBotPowerCursedTongueAnswerV1({
-      provider: speakerProvider,
+      provider: cursedTongueRewriteProvider!,
       draftAnswer: replyText,
       seed: `${row.id}:${speaker.id}:${history.length}`,
-      model: speakerOptions.model,
+      model: cursedTongueRewriteProvider?.diagnosticModel,
       usagePurpose: "coffee_turn",
       signal: settings.signal,
     });
@@ -19349,9 +19416,34 @@ async function generateCoffeeBotReply(args: {
       })
     : null;
   const listenerReaction = listenerReactionRaw && listenerBot
-    ? botPowerOmitBreathListenerVocalFoleyV1(
-        listenerReactionRaw,
-        coffeePowerPlan?.bots[listenerBot.id]?.effects ?? [],
+    ? applyBotPowerMumbledReactionPlanV1(
+        botPowerOmitBreathListenerVocalFoleyV1(
+          listenerReactionRaw,
+          coffeePowerPlan?.bots[listenerBot.id]?.effects ?? [],
+        ),
+        {
+          listener: coffeePowerPlan?.bots[listenerBot.id]?.effects.some(
+            (effect) => effect.type === "speech_obfuscation",
+          )
+            ? {
+                pronunciationMapPoint: resolveBotPronunciationMapPointV1(
+                  listenerBot.authoredAudioVoiceProfile,
+                  listenerBot.audioVoiceProfileOverride,
+                ),
+                variationSeed: `${listenerReactionRaw.seed}:listener`,
+              }
+            : null,
+          interruptedSpeaker: speakerMumblesForTurn
+            ? {
+                pronunciationMapPoint: resolveBotPronunciationMapPointV1(
+                  speaker.authoredAudioVoiceProfile,
+                  speaker.audioVoiceProfileOverride,
+                ),
+                variationSeed:
+                  `${listenerReactionRaw.seed}:interrupted-speaker`,
+              }
+            : null,
+        },
       )
     : listenerReactionRaw;
   const stageActionMoodHint: StageActionMoodHintV1 = derivePrismMoodKey(
@@ -19576,10 +19668,10 @@ async function generateCoffeeBotReply(args: {
   ) {
     cleanSpeechBeforeCursedTongue = replyText;
     replyText = await rewriteBotPowerCursedTongueAnswerV1({
-      provider: speakerProvider,
+      provider: cursedTongueRewriteProvider!,
       draftAnswer: replyText,
       seed: `${row.id}:${speaker.id}:${history.length}`,
-      model: speakerOptions.model,
+      model: cursedTongueRewriteProvider?.diagnosticModel,
       usagePurpose: "coffee_turn",
       signal: settings.signal,
     });
@@ -19602,6 +19694,13 @@ async function generateCoffeeBotReply(args: {
             hardSpeechSuppressed: !coffeePowerBotCanSpeak(coffeePowerPlan, bot.id),
             breathless: effects.some((effect) => effect.type === "breathless"),
             cursedTongue: effects.some((effect) => effect.type === "cursed_tongue"),
+            mumbling: effects.some(
+              (effect) => effect.type === "speech_obfuscation",
+            ),
+            pronunciationMapPoint: resolveBotPronunciationMapPointV1(
+              bot.authoredAudioVoiceProfile,
+              bot.audioVoiceProfileOverride,
+            ),
             temperament: botPowerMuteReactionTemperamentFromPersonaV1(
               bot.systemPrompt,
             ),

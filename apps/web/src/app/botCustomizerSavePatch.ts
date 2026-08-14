@@ -6,6 +6,7 @@ import {
   type BotAudioVoiceProfileV1,
   type BotAvatarDetailsV1,
   type BotPowerV1,
+  type BotFaceCustomSpeechPoses,
 } from "@localai/shared";
 
 export interface BotCustomizerSavePristine {
@@ -35,6 +36,7 @@ export interface BotCustomizerSavePristine {
   faceMouthFont: string;
   faceMouthCharacter: string | null;
   faceMouthAnimation: string;
+  faceMouthSpeechPoses: BotFaceCustomSpeechPoses | null;
   faceMouthCoffeePucker: boolean;
   faceFontWeight: number;
   faceEyeScale: number;
@@ -94,6 +96,7 @@ export interface BotCustomizerSaveCurrent {
   faceMouthFont: string;
   faceMouthCharacter: string | null;
   faceMouthAnimation: string;
+  faceMouthSpeechPoses: BotFaceCustomSpeechPoses | null;
   faceMouthCoffeePucker: boolean;
   faceFontWeight: number;
   faceEyeScale: number;
@@ -144,6 +147,7 @@ export interface BotCustomizerSavePatch {
   faceMouthFont?: string;
   faceMouthCharacter?: string | null;
   faceMouthAnimation?: string;
+  faceMouthSpeechPoses?: BotFaceCustomSpeechPoses | null;
   faceMouthCoffeePucker?: boolean;
   faceFontWeight?: number;
   faceEyeScale?: number;
@@ -212,6 +216,7 @@ export function buildBotCustomizerSavePatch(
       faceMouthFont: current.faceMouthFont,
       faceMouthCharacter: current.faceMouthCharacter,
       faceMouthAnimation: current.faceMouthAnimation,
+      faceMouthSpeechPoses: current.faceMouthSpeechPoses,
       faceMouthCoffeePucker: current.faceMouthCoffeePucker,
       faceFontWeight: current.faceFontWeight,
       faceEyeScale: current.faceEyeScale,
@@ -309,6 +314,12 @@ export function buildBotCustomizerSavePatch(
   }
   if (current.faceMouthAnimation !== pristine.faceMouthAnimation) {
     patch.faceMouthAnimation = current.faceMouthAnimation;
+  }
+  if (
+    JSON.stringify(current.faceMouthSpeechPoses) !==
+    JSON.stringify(pristine.faceMouthSpeechPoses)
+  ) {
+    patch.faceMouthSpeechPoses = current.faceMouthSpeechPoses;
   }
   if (current.faceMouthCoffeePucker !== pristine.faceMouthCoffeePucker) {
     patch.faceMouthCoffeePucker = current.faceMouthCoffeePucker;

@@ -30,6 +30,7 @@ import {
   DEFAULT_BOT_FACE_FONT_ID,
   DEFAULT_BOT_FACE_FONT_WEIGHT,
   DEFAULT_BOT_FACE_GLYPH_ANIMATION,
+  DEFAULT_BOT_FACE_CUSTOM_SPEECH_POSES,
   DEFAULT_BOT_FACE_MOUTH_CHARACTER,
   DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER,
   DEFAULT_BOT_FACE_MOUTH_OFFSET_X,
@@ -61,6 +62,8 @@ import {
   normalizeBotFaceFontId,
   normalizeBotFaceFontWeight,
   normalizeBotFaceGlyphAnimation,
+  normalizeBotFaceCustomSpeechPoses,
+  botFaceCustomSpeechGlyphForMouthShape,
   normalizeBotFaceMouthCharacter,
   normalizeBotFaceMouthCoffeePucker,
   normalizeBotFaceMouthOffsetX,
@@ -71,6 +74,8 @@ import {
   parseStoredBotFaceThinkingFrames,
   randomBotFaceStyle,
   resolveBotFaceStyle,
+  serializeBotFaceCustomSpeechPosesForStorage,
+  parseStoredBotFaceCustomSpeechPoses,
   serializeBotFaceThinkingFrames,
 } from "./botAvatar.ts";
 
@@ -112,6 +117,7 @@ describe("bot avatar face style", () => {
       assert.equal(normalizeBotFaceGlyphAnimation(animation), animation);
     }
     assert.equal(normalizeBotFaceGlyphAnimation("bounce"), null);
+    assert.equal(normalizeBotFaceGlyphAnimation("custom"), null);
     assert.equal(normalizeBotFaceGlyphAnimation(null), null);
   });
 
@@ -199,6 +205,53 @@ describe("bot avatar face style", () => {
     assert.equal(normalizeBotFaceMouthCharacter(null), null);
   });
 
+  it("keeps Custom Speech as four semantic poses over the existing visemes", () => {
+    const poses = normalizeBotFaceCustomSpeechPoses("—·△○");
+    assert.deepEqual(poses, ["—", "·", "△", "○"]);
+    assert.deepEqual(
+      normalizeBotFaceCustomSpeechPoses(["—", "·", "△", "○"]),
+      ["—", "·", "△", "○"],
+    );
+    assert.equal(normalizeBotFaceCustomSpeechPoses("△○"), null);
+    assert.equal(normalizeBotFaceCustomSpeechPoses("😀·△○"), null);
+    assert.equal(
+      serializeBotFaceCustomSpeechPosesForStorage(["—", "·", "△", "○"]),
+      '["—","·","△","○"]',
+    );
+    assert.deepEqual(
+      parseStoredBotFaceCustomSpeechPoses('["—","·","△","○"]'),
+      DEFAULT_BOT_FACE_CUSTOM_SPEECH_POSES,
+    );
+    assert.equal(
+      botFaceCustomSpeechGlyphForMouthShape(poses!, "speech-closed"),
+      "·",
+    );
+    assert.equal(botFaceCustomSpeechGlyphForMouthShape(poses!, "open-wide"), "△");
+    assert.equal(botFaceCustomSpeechGlyphForMouthShape(poses!, "open-round"), "○");
+    assert.deepEqual(
+      resolveBotFaceStyle({
+        faceMouthSpeechPoses: ["—", "·", "△", "○"],
+      }).mouthSpeechPoses,
+      DEFAULT_BOT_FACE_CUSTOM_SPEECH_POSES,
+    );
+    assert.equal(
+      resolveBotFaceStyle({
+        faceMouthAnimation: "custom",
+        faceMouthCharacter: "△",
+      }).mouthAnimation,
+      DEFAULT_BOT_FACE_GLYPH_ANIMATION,
+    );
+    const customRestingMouth = resolveBotFaceStyle({
+      faceMouthCharacter: "V",
+      faceMouthSpeechPoses: ["—", "·", "△", "○"],
+    });
+    assert.equal(customRestingMouth.mouthCharacter, "V");
+    assert.deepEqual(
+      customRestingMouth.mouthSpeechPoses,
+      DEFAULT_BOT_FACE_CUSTOM_SPEECH_POSES,
+    );
+  });
+
   it("clamps and steps face font weight", () => {
     assert.equal(normalizeBotFaceFontWeight(612), 600);
     assert.equal(normalizeBotFaceFontWeight(613), 625);
@@ -217,6 +270,7 @@ describe("bot avatar face style", () => {
       mouthFont: "formal",
       mouthCharacter: DEFAULT_BOT_FACE_MOUTH_CHARACTER,
       mouthAnimation: DEFAULT_BOT_FACE_GLYPH_ANIMATION,
+      mouthSpeechPoses: null,
       mouthCoffeePucker: DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER,
       weight: DEFAULT_BOT_FACE_FONT_WEIGHT,
       eyeScale: DEFAULT_BOT_FACE_EYE_SCALE,
@@ -247,6 +301,7 @@ describe("bot avatar face style", () => {
       mouthFont: DEFAULT_BOT_FACE_FONT_ID,
       mouthCharacter: DEFAULT_BOT_FACE_MOUTH_CHARACTER,
       mouthAnimation: DEFAULT_BOT_FACE_GLYPH_ANIMATION,
+      mouthSpeechPoses: null,
       mouthCoffeePucker: DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER,
       weight: DEFAULT_BOT_FACE_FONT_WEIGHT,
       eyeScale: DEFAULT_BOT_FACE_EYE_SCALE,
@@ -312,8 +367,9 @@ describe("bot avatar face style", () => {
         eyeSpacing: 0.48,
         eyeAnimation: DEFAULT_BOT_FACE_EYE_MOVEMENT,
         mouthFont: "playful",
-        mouthCharacter: "△",
-        mouthAnimation: "flicker",
+      mouthCharacter: "△",
+      mouthAnimation: "flicker",
+      mouthSpeechPoses: null,
         mouthCoffeePucker: true,
         weight: 725,
         eyeScale: 1.2,

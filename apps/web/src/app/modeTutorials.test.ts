@@ -52,6 +52,16 @@ describe("mode tutorials", () => {
     assert.doesNotMatch(step?.body ?? "", /accent brightness/u);
   });
 
+  it("describes Batch Foundry's dedicated indexed constellation chamber", () => {
+    const step = MODE_TUTORIALS.avatar.steps[0];
+    assert.match(step?.body ?? "", /dedicated constellation chamber/u);
+    assert.match(step?.body ?? "", /fixed indexed seeds never reorder/u);
+    assert.match(step?.body ?? "", /2–20 reveal through the shared mini avatar/u);
+    assert.match(step?.body ?? "", /21–100 use the shared static micro face/u);
+    assert.match(step?.body ?? "", /generated color-and-glyph orb/u);
+    assert.match(step?.body ?? "", /Standard and Inspire keep the Creation chamber shell/u);
+  });
+
   it("explains that typed asset rails remember their own generation model", () => {
     const storageStep = MODE_TUTORIALS.chat.steps.find(
       (step) => step.body.includes("Space Lens"),
@@ -71,6 +81,17 @@ describe("mode tutorials", () => {
     assert.match(step?.body ?? "", /starts a chat or LLM turn/u);
   });
 
+  it("teaches the focused bot as a full-screen Lobby with an exact room return", () => {
+    const step = MODE_TUTORIALS.zen.steps.find(
+      (candidate) => candidate.heading === "Open the focused bot",
+    );
+    assert.ok(step);
+    assert.match(step.body, /full-screen Lobby/u);
+    assert.match(step.body, /steps forward at full size/u);
+    assert.match(step.body, /Avatar Studio opens as a deeper editing layer/u);
+    assert.match(step.body, /exact same room bot and keyboard focus/u);
+  });
+
   it("teaches that the Zen header bot picker invites a guest into the current Home", () => {
     const continueHomeStep = MODE_TUTORIALS.zen.steps.find(
       (step) => step.heading === "Continue this Home",
@@ -80,22 +101,24 @@ describe("mode tutorials", () => {
     assert.match(continueHomeStep.body, /Random, New, Intro, or Off handoff/u);
   });
 
-  it("teaches two-axis Zen hue string navigation with a stable target", () => {
+  it("teaches two-axis Zen Hue Cable navigation with a stable target", () => {
     const step = MODE_TUTORIALS.zen.steps.find(
       (candidate) => candidate.heading === "Pluck the spectrum",
     );
     assert.ok(step);
     assert.equal(
       step.targetSelector,
-      '[data-tutorial-target="zen-hue-string"]',
+      '[data-tutorial-target="zen-hue-cable"]',
     );
-    assert.match(step.body, /Drag sideways to choose a hue/u);
+    assert.match(step.body, /Drag sideways past the small pull threshold to choose a hue/u);
     assert.match(step.body, /Pull upward to narrow/u);
     assert.match(step.body, /pull downward to broaden/u);
     assert.match(step.body, /without changing the hue or breadth/u);
+    assert.match(step.body, /full vertical yank spans the complete available depth ladder/u);
     assert.match(step.body, /search scans the entire active group/u);
     assert.match(step.body, /Home returns to the remembered-hue root/u);
-    assert.match(step.body, /two to five color nodes/u);
+    assert.match(step.body, /one to five color nodes/u);
+    assert.match(step.body, /one-row card gallery/u);
     assert.match(step.body, /five is the maximum/u);
     assert.match(step.body, /root restores the full five-color PRISM atmosphere/u);
   });
@@ -242,6 +265,13 @@ describe("mode tutorials", () => {
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /During active assembly/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /Only the PRISM wordmark remains available/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /prior draft restored/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /three paths/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /one to five selected Library influences/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /2–100 bots/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /Counts 2–10 automatically generate and save every rich full draft/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /Counts 11–100 switch visibly/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /recoverable progress/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /one strong, two moderate, or three weak compound Powers/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /Auto chooses both model and effort automatically/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /perimeter dock/u);
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /lights stay dim and breathing/u);
@@ -1374,25 +1404,33 @@ describe("mode tutorials", () => {
   });
 
   it("teaches Zen navigation as relationship-specific Homes", () => {
-    const [chooseRelationship, groupRoom, continueHome, , context] =
-      MODE_TUTORIALS.zen.steps;
+    const chooseRelationship = MODE_TUTORIALS.zen.steps.find(
+      (step) => step.heading === "Choose a relationship",
+    );
+    const groupRoom = MODE_TUTORIALS.zen.steps.find(
+      (step) => step.heading === "Shape a saved group's room",
+    );
+    const continueHome = MODE_TUTORIALS.zen.steps.find(
+      (step) => step.heading === "Continue this Home",
+    );
+    const context = MODE_TUTORIALS.zen.steps.find(
+      (step) => step.heading === "Let context breathe",
+    );
 
-    assert.deepEqual(
-      {
-        ...chooseRelationship,
-        body: chooseRelationship?.body
-          .replace(/ A Shapeshifter sincerely becomes.*$/u, "")
-          .replace(
-            / A bot-name prefix or suffix changes only how its holder names other bots:.*$/u,
-            "",
-          ),
-      },
-      {
-        heading: "Choose a relationship",
-        body: "Choose PRISM or a persona to focus that relationship’s Home. A first click focuses a persona; select the focused tile again to open its customization panel, or send a message to begin Zen/Chat. Ready Powers stay active with that persona here and across PRISM; a muted persona can still act, but only answers with ... and never speaks aloud, while a breathless persona still speaks but never produces breath, sigh, or inhale Foley; a Copycat persona may originate one opening if nobody has addressed them yet, then repeats the latest addressed message exactly. A short-term-amnesia persona only sees your current message each turn—no earlier replies or broader topic unless that message states it—and answers naturally without amnesia coaching. A John/Jane Doe persona sincerely believes a random persona name for the session and reshuffles that name whenever short-term amnesia clears continuity. An Obsessed persona treats you as the star of each reply with fresh, intense admiration, while your agency, privacy, and safety boundaries still win. A radiant-joy persona makes that emotional warmth palpable without tracking or rewriting your mood. A sad-grouchy persona makes her draining presence equally palpable without changing your state; only bots that directly talk to her lose mood or motivation. Physical-size Powers render a persona slightly larger or smaller without changing the room layout. Microscopic stays fully unseen even while speaking, while Invisible stays half-translucent. Loud and Quiet Powers apply a small fixed voice-volume and text-size shift without changing physical size or visibility; Quiet can go unheard on half its turns and lose a little mood. A hard bare-minimum or brief Power is engine-bounded even if the model tries to elaborate. Clicking empty canvas space jumps straight back to All Bots Home. Escape returns you to the wider Library or saved group grid exactly where you left it. Inviting a guest keeps you in the current Home.",
-        clickLabel: "a PRISM or persona tile",
-        targetSelector: '[data-tutorial-target="chat-bot-picker"]',
-      },
+    assert.ok(chooseRelationship);
+    assert.equal(chooseRelationship.clickLabel, "a PRISM or persona tile");
+    assert.equal(
+      chooseRelationship.targetSelector,
+      '[data-tutorial-target="chat-bot-picker"]',
+    );
+    assert.match(chooseRelationship.body, /focus that relationship’s Home/u);
+    assert.match(
+      chooseRelationship.body,
+      /select the focused tile again to unfocus it; open its mini bot avatar for customization/u,
+    );
+    assert.match(
+      chooseRelationship.body,
+      /jump straight to any Avatar Studio section/u,
     );
     assert.equal(continueHome?.heading, "Continue this Home");
     assert.equal(continueHome?.clickLabel, "the message box at the bottom");
@@ -1432,9 +1470,9 @@ describe("mode tutorials", () => {
       groupRoom?.targetSelector,
       '[data-tutorial-target="chat-group-atmosphere"]',
     );
-    assert.equal(
-      context?.body,
-      "Recent messages stay visible while older continuity for this Home is carried through summaries and memory.",
+    assert.match(
+      context?.body ?? "",
+      /^Recent messages stay visible while older continuity for this Home is carried through summaries and memory\./u,
     );
   });
 
@@ -1466,12 +1504,18 @@ describe("mode tutorials", () => {
     );
   });
 
-  it("introduces saved group Atmospheres behind the standard grid", () => {
+  it("introduces saved group Atmospheres behind the living club", () => {
     const atmosphere = MODE_TUTORIALS.zen.steps.find(
       (step) => step.heading === "Shape a saved group's room",
     );
-    assert.match(atmosphere?.body ?? "", /reusable backdrop/);
-    assert.match(atmosphere?.body ?? "", /standard bot grid/);
+    assert.match(atmosphere?.body ?? "", /room Atmosphere/u);
+    assert.match(atmosphere?.body ?? "", /every valid member is present at once/u);
+    assert.match(atmosphere?.body ?? "", /grid remains the fixed, fully interactive center/u);
+    assert.match(atmosphere?.body ?? "", /drift calmly like an aquarium/u);
+    assert.match(atmosphere?.body ?? "", /Mini avatars/u);
+    assert.match(atmosphere?.body ?? "", /Micro avatars/u);
+    assert.match(atmosphere?.body ?? "", /Reduced Motion pause/u);
+    assert.match(atmosphere?.body ?? "", /never rotates, paginates, or hides members/u);
     assert.doesNotMatch(atmosphere?.body ?? "", /waiting room|Listen up/u);
     assert.equal(
       atmosphere?.targetSelector,
@@ -1479,17 +1523,19 @@ describe("mode tutorials", () => {
     );
   });
 
-  it("teaches group marks and exclusive leaders together", () => {
+  it("teaches spectrum tiles and exclusive leaders together", () => {
     const identity = MODE_TUTORIALS.zen.steps.find(
-      (step) => step.heading === "Give the group its own mark",
+      (step) => step.heading === "Recognize the group",
     );
 
+    assert.match(identity?.body ?? "", /Spectrum Tile/u);
+    assert.match(identity?.body ?? "", /Atmosphere/u);
     assert.match(identity?.body ?? "", /Promote to leader/u);
-    assert.match(identity?.body ?? "", /simply reassigns it/u);
-    assert.match(identity?.body ?? "", /one point for each group they lead/u);
+    assert.match(identity?.body ?? "", /simply reassigns leadership/u);
+    assert.match(identity?.body ?? "", /without placing a badge/u);
     assert.equal(
       identity?.targetSelector,
-      '[data-tutorial-target="chat-group-glyph-reroll"]',
+      '[data-tutorial-target="chat-group-spectrum-tile"]',
     );
   });
 
@@ -2673,6 +2719,14 @@ describe("mode tutorials", () => {
     );
   });
 
+  it("teaches Signal spectators that the opening buffer waits for them", () => {
+    const copy = MODE_TUTORIALS.botcast.steps[5]?.body ?? "";
+    assert.match(copy, /same intro card opens and waits/u);
+    assert.match(copy, /Press Start show whenever you want/u);
+    assert.match(copy, /enable Start automatically in setup/u);
+    assert.match(copy, /Prism keeps baking ahead/u);
+  });
+
   it("teaches the persistent host prompt for an interviewed Producer", () => {
     const controlRoom = MODE_TUTORIALS.botcast.steps.find(
       (step) => step.heading === "Produce from the control room",
@@ -2779,12 +2833,14 @@ describe("mode tutorials", () => {
     );
     assert.match(booking?.body ?? "", /whether they have coffee at all/u);
     assert.match(booking?.body ?? "", /cups only for bots who drink coffee/u);
-    assert.match(booking?.body ?? "", /drag the visible pieces/u);
-    assert.match(booking?.body ?? "", /separate Host and Guest floor glows/u);
-    assert.match(booking?.body ?? "", /extracted microphone masks/u);
-    assert.match(booking?.body ?? "", /saved film grain/u);
-    assert.match(booking?.body ?? "", /Hard Light, Screen, or Overlay/u);
-    assert.match(booking?.body ?? "", /100% Hard Light/u);
+    assert.match(
+      booking?.body ?? "",
+      /Drag bots, cups, and floor glow directly into place/u,
+    );
+    assert.match(
+      booking?.body ?? "",
+      /Fine tuning reveals the Light and Dark previews.*camera zoom and pan.*cast balance.*screen treatment.*room mix/u,
+    );
     assert.match(booking?.body ?? "", /faithful replay/u);
     assert.match(
       booking?.body ?? "",

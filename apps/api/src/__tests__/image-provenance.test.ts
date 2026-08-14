@@ -27,6 +27,15 @@ describe("image provenance", () => {
     );
   });
 
+  it("retains every bot in the maximum-size authored group", () => {
+    const botIds = Array.from({ length: 100 }, (_, index) => `bot-${index + 1}`);
+    assert.deepEqual(normalizeImageRelatedBotIds(botIds), botIds);
+    assert.deepEqual(
+      JSON.parse(serializeImageRelatedBotIds(botIds)) as string[],
+      botIds,
+    );
+  });
+
   it("keeps direct panel images in PRISM while recognizing applet origins", () => {
     assert.equal(
       imageOriginForGenerate({

@@ -1,4 +1,5 @@
 import {
+  BOT_LIBRARY_GROUP_MEMBER_MAX,
   PRISM_ORCHESTRATION_VERSION,
   parseStoredBotPrompt,
   parseStoredBotAvatarDetailsV1,
@@ -2728,12 +2729,12 @@ function libraryFavoritesCapability(): PrismCapabilityDefinition {
   return {
     descriptor: capabilityDescriptor,
     validateInput: (input) => {
-      const botIds = stringArray(input, "botIds", 24);
+      const botIds = stringArray(input, "botIds", BOT_LIBRARY_GROUP_MEMBER_MAX);
       if (botIds.length === 0) throw new Error("At least one bot is required.");
       return { botIds, favorite: input.favorite !== false };
     },
     preview: (context, input) => {
-      const rows = botRows(context, stringArray(input, "botIds", 24));
+      const rows = botRows(context, stringArray(input, "botIds", BOT_LIBRARY_GROUP_MEMBER_MAX));
       return simplePreview(
         `${input.favorite === false ? "Remove" : "Add"} ${rows.length} bot${
           rows.length === 1 ? "" : "s"
@@ -2746,7 +2747,7 @@ function libraryFavoritesCapability(): PrismCapabilityDefinition {
       const result = setLibraryFavorites({
         db: context.db,
         userId: context.userId,
-        botIds: stringArray(input, "botIds", 24),
+        botIds: stringArray(input, "botIds", BOT_LIBRARY_GROUP_MEMBER_MAX),
         favorite: input.favorite !== false,
         now: context.now,
       });
@@ -2911,7 +2912,7 @@ function libraryGroupCreateCapability(
   return {
     descriptor: capabilityDescriptor,
     validateInput: (input) => {
-      const botIds = stringArray(input, "botIds", 24);
+      const botIds = stringArray(input, "botIds", BOT_LIBRARY_GROUP_MEMBER_MAX);
       if (botIds.length < 2) throw new Error("A group needs at least two bots.");
       return {
         groupId:
@@ -2945,7 +2946,7 @@ function libraryGroupCreateCapability(
     },
     prepareProposal: dependencies.generateCoffeeGroupIdentity
       ? async (context, input) => {
-          const botIds = stringArray(input, "botIds", 24);
+          const botIds = stringArray(input, "botIds", BOT_LIBRARY_GROUP_MEMBER_MAX);
           const placeholders = botIds.map(() => "?").join(", ");
           const rows = context.db
             .prepare(
@@ -3013,7 +3014,7 @@ function libraryGroupCreateCapability(
         }
       : undefined,
     preview: (context, input) => {
-      const rows = botRows(context, stringArray(input, "botIds", 24));
+      const rows = botRows(context, stringArray(input, "botIds", BOT_LIBRARY_GROUP_MEMBER_MAX));
       if (rows.length < 2) throw new Error("The selected group is unavailable.");
       return {
         ...simplePreview(
@@ -3043,7 +3044,7 @@ function libraryGroupCreateCapability(
         name: requiredString(input, "name", 120),
         description:
           typeof input.description === "string" ? input.description : "",
-        botIds: stringArray(input, "botIds", 24),
+        botIds: stringArray(input, "botIds", BOT_LIBRARY_GROUP_MEMBER_MAX),
         deleteProtected: false,
         deleteProtectionByBotId: {},
         builtIn: false,

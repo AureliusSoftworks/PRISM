@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { holdAppNavbarForControlShortcuts } from "./appNavbarChrome";
 import {
@@ -9,6 +9,8 @@ import {
   controlShortcutGuideShouldShow,
   isControlHeldAlone,
   isControlKeyEvent,
+  isOptionHeldAlone,
+  isOptionKeyEvent,
   type ControlShortcutGuideEntry,
 } from "./controlShortcutGuide";
 import {
@@ -48,8 +50,11 @@ export function ControlShortcutGuide({
 }: ControlShortcutGuideProps): React.JSX.Element | null {
   const [mounted, setMounted] = useState(false);
   const [controlHeld, setControlHeld] = useState(false);
+  const [optionHeld, setOptionHeld] = useState(false);
+  const [prismWielding, setPrismWielding] = useState(false);
   const [recordingShortcut, setRecordingShortcut] = useState(false);
   const [visible, setVisible] = useState(false);
+  const optionHeldRef = useRef(false);
 
   const entries = useMemo(
     () => controlShortcutGuideEntries(shortcuts, platform),
@@ -66,6 +71,12 @@ export function ControlShortcutGuide({
       if (isControlKeyEvent(event) || isControlHeldAlone(event)) {
         setControlHeld(isControlHeldAlone(event));
       }
+      if (isOptionKeyEvent(event) || isOptionHeldAlone(event)) {
+        const nextOptionHeld = isOptionHeldAlone(event);
+        optionHeldRef.current = nextOptionHeld;
+        setOptionHeld(nextOptionHeld);
+        if (!nextOptionHeld) setPrismWielding(false);
+      }
     };
     const onKeyUp = (event: KeyboardEvent): void => {
       setRecordingShortcut(keyboardShortcutEventIsRecording(event));
@@ -74,18 +85,38 @@ export function ControlShortcutGuide({
       } else {
         setControlHeld(isControlHeldAlone(event));
       }
+      if (isOptionKeyEvent(event) || !event.altKey) {
+        optionHeldRef.current = false;
+        setOptionHeld(false);
+        setPrismWielding(false);
+      } else {
+        const nextOptionHeld = isOptionHeldAlone(event);
+        optionHeldRef.current = nextOptionHeld;
+        setOptionHeld(nextOptionHeld);
+      }
+    };
+    const onPointerMove = (): void => {
+      if (!optionHeldRef.current) return;
+      if (document.documentElement.hasAttribute("data-prism-wielding")) {
+        setPrismWielding(true);
+      }
     };
     const clear = (): void => {
       setControlHeld(false);
+      optionHeldRef.current = false;
+      setOptionHeld(false);
+      setPrismWielding(false);
       setRecordingShortcut(false);
     };
     window.addEventListener("keydown", onKeyDown, true);
     window.addEventListener("keyup", onKeyUp, true);
+    window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("blur", clear);
     document.addEventListener("visibilitychange", clear);
     return () => {
       window.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("keyup", onKeyUp, true);
+      window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("blur", clear);
       document.removeEventListener("visibilitychange", clear);
     };
@@ -94,23 +125,28 @@ export function ControlShortcutGuide({
   useEffect(() => {
     const shouldShow = controlShortcutGuideShouldShow({
       controlHeld,
-      prismWielding: false,
+      optionHeld,
+      prismWielding,
       recordingShortcut,
     });
     if (!shouldShow) {
       setVisible(false);
       return;
     }
-    // Reveal the navbar immediately — never flash shortcut UI over a tucked bar.
-    const releaseNavbar = holdAppNavbarForControlShortcuts();
+    // Control keeps its immediate chrome reveal. A stationary Option hold is
+    // completely quiet until the delayed Legend itself becomes visible.
+    let releaseNavbar = controlHeld
+      ? holdAppNavbarForControlShortcuts()
+      : null;
     const timer = window.setTimeout(() => {
+      releaseNavbar ??= holdAppNavbarForControlShortcuts();
       setVisible(true);
     }, CONTROL_SHORTCUT_GUIDE_SHOW_DELAY_MS);
     return () => {
       window.clearTimeout(timer);
-      releaseNavbar();
+      releaseNavbar?.();
     };
-  }, [controlHeld, recordingShortcut]);
+  }, [controlHeld, optionHeld, prismWielding, recordingShortcut]);
 
   if (!mounted || typeof document === "undefined" || entries.length === 0) {
     return null;

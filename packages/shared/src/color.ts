@@ -264,6 +264,65 @@ export function normalizeBotIdentityColor(
   return fullySaturateBotColor(trimmed).toLowerCase();
 }
 
+/** One saved bot color and its relative contribution to a Foundry blend. */
+export interface WeightedBotIdentityColor {
+  color: unknown;
+  weight: unknown;
+}
+
+/**
+ * Blend canonical bot identity colors for Bot Foundry inspiration.
+ *
+ * Hue lives on a circle, so this averages its unit-vector representation
+ * instead of treating 0° and 360° as opposite ends of a line. Lightness is
+ * averaged independently, then the result is returned through the normal
+ * fully-saturated identity-color path. Invalid, achromatic legacy, missing,
+ * and zero-weight entries do not participate. A perfectly neutral result has
+ * no honest hue in PRISM's saturated identity storage, so it returns null and
+ * lets the caller retain its existing color rather than inventing one.
+ */
+export function blendWeightedBotIdentityColors(
+  values: Iterable<WeightedBotIdentityColor>,
+): string | null {
+  let totalWeight = 0;
+  let hueX = 0;
+  let hueY = 0;
+  let lightness = 0;
+
+  for (const value of values) {
+    if (typeof value.color !== "string" || typeof value.weight !== "number") {
+      continue;
+    }
+    const color = value.color.trim();
+    const weight = value.weight;
+    if (
+      !/^#[0-9a-fA-F]{6}$/u.test(color) ||
+      !Number.isFinite(weight) ||
+      weight <= 0
+    ) {
+      continue;
+    }
+
+    const { h, s, l } = hexToHsl(color);
+    // Do not turn an achromatic legacy value into an arbitrary red source.
+    if (s < 0.5) continue;
+    const angle = (h * Math.PI) / 180;
+    hueX += Math.cos(angle) * weight;
+    hueY += Math.sin(angle) * weight;
+    lightness += l * weight;
+    totalWeight += weight;
+  }
+
+  if (totalWeight <= 0) return null;
+  const magnitude = Math.hypot(hueX, hueY);
+  if (magnitude <= totalWeight * 1e-9) return null;
+
+  const hue = ((Math.atan2(hueY, hueX) * 180) / Math.PI + 360) % 360;
+  return normalizeBotIdentityColor(
+    hslToHex(hue, 100, lightness / totalWeight),
+  );
+}
+
 /**
  * Resolve the environmental companion color for one bot.
  *

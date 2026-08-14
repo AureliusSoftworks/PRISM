@@ -2,7 +2,7 @@ export type CanvasBotMarqueeSelectionMode = "replace" | "toggle";
 
 export type CanvasBotDirectoryView = "chat" | "sandbox" | "coffee" | "other";
 
-export type CanvasBotTileActivation = "focus" | "manage";
+export type CanvasBotTileActivation = "focus" | "unfocus";
 
 export const BOT_BATCH_MENU_MIN_SELECTION = 2;
 
@@ -26,7 +26,7 @@ export function resolveCanvasBotTileActivation(args: {
     (args.conversationMessageCount === null ||
       args.conversationMessageCount === 0) &&
     args.focusedBotId === args.botId
-    ? "manage"
+    ? "unfocus"
     : "focus";
 }
 

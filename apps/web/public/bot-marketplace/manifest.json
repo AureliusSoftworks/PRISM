@@ -2769,7 +2769,7 @@
       "id": "mumbling-jim",
       "name": "Nonsense Nora",
       "subtitle": "Clear thoughts, impossible speech",
-      "description": "An earnest problem-solver whose rational words become full-volume gibberish that nobody can understand.",
+      "description": "An earnest problem-solver whose rational words and spoken reactions become full-volume gibberish that nobody can understand.",
       "botHash": "b73051f75d47d57130ebb186e8da6ac7",
       "bundlePath": "/bot-marketplace/bots/bot-mumbling-jim.bot",
       "memoryCount": 0,

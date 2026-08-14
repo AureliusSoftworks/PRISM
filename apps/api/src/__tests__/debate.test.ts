@@ -11531,6 +11531,23 @@ describe("Debate engine", () => {
       let session = await createDebateForRole(db, "spectator", {
         moderatorPowers: [cursedPower],
       });
+      const auxiliaryPrompts: ProviderMessage[][] = [];
+      const auxiliaryProvider: LlmProvider = {
+        name: "local",
+        diagnosticModel: "debate-auxiliary-test",
+        async generateResponse(messages) {
+          auxiliaryPrompts.push(messages);
+          return (messages.at(-1)?.content ?? "").replace(
+            /\b(?:This|The)\b/u,
+            "$& fucking",
+          );
+        },
+        async embedText() {
+          return [];
+        },
+      };
+      const cursedRuntime = runtime();
+      cursedRuntime.auxiliary = auxiliaryProvider;
       session = await advanceDebateSession(
         db,
         "user-1",
@@ -11539,7 +11556,7 @@ describe("Debate engine", () => {
           expectedRevision: session.revision,
           idempotencyKey: "advance:cursed-moderator-intro:0001",
         },
-        runtime(),
+        cursedRuntime,
       );
       const intro = session.events.find(
         (event) =>
@@ -11555,6 +11572,11 @@ describe("Debate engine", () => {
         intro?.content ?? "",
         /\b(?:fucking|goddamn|motherfucking|shitty|damn)\b/iu,
       );
+      assert.ok(auxiliaryPrompts.some((messages) =>
+        messages.some((message) =>
+          message.content.includes("Cursed Tongue public rewrite pass")
+        )
+      ));
       assert.notEqual(
         applyBotPowerCursedTongueResponseV1(
           intro?.powerIntendedContent,

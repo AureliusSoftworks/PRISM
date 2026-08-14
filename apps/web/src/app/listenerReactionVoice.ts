@@ -3,6 +3,8 @@ import {
   BOT_VOICE_GAIN_DB_MAX,
   DIRECTIONAL_IRRITATION_GAIN_DB_MAX,
   listenerReactionHasAudio,
+  listenerReactionInterruptedSpeakerTextV1,
+  listenerReactionSpokenTextV1,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotVoiceVolume,
   type BotAudioVoiceProfileV1,
@@ -93,7 +95,7 @@ export function listenerReactionVoiceCacheKey(args: {
 }): string {
   return JSON.stringify([
     args.plan.seed,
-    args.plan.spokenCue ?? "silent",
+    listenerReactionSpokenTextV1(args.plan) ?? "silent",
     args.plan.vocalFoley ?? "no-foley",
     args.mode,
     args.engine,
@@ -102,14 +104,17 @@ export function listenerReactionVoiceCacheKey(args: {
 }
 
 export function interruptedSpeakerReactionVoiceCacheKey(args: {
-  plan: Pick<ListenerReactionPlanV1, "seed" | "interruptedSpeakerCue">;
+  plan: Pick<
+    ListenerReactionPlanV1,
+    "seed" | "interruptedSpeakerCue" | "publicInterruptedSpeakerCue"
+  >;
   mode: ListenerReactionVoiceMode;
   engine: string;
   profile: BotAudioVoiceProfileV1;
 }): string {
   return JSON.stringify([
     args.plan.seed,
-    args.plan.interruptedSpeakerCue ?? "silent",
+    listenerReactionInterruptedSpeakerTextV1(args.plan) ?? "silent",
     "interrupted-speaker",
     args.mode,
     args.engine,
@@ -134,7 +139,7 @@ export async function playListenerReactionVoice(args: {
 }): Promise<boolean> {
   if (!listenerReactionHasAudio(args.plan)) return false;
   if (args.plan.vocalFoley && args.mode !== "english") return false;
-  const cue = args.plan.spokenCue ?? "...";
+  const cue = listenerReactionSpokenTextV1(args.plan) ?? "...";
   return playEphemeralReactionVoice({
     text: cue,
     seed: args.plan.seed,

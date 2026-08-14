@@ -2825,8 +2825,6 @@ describe("Zen live presence CSS", () => {
     );
 
     assert.doesNotMatch(css, /--zen-prism-ambient/);
-    assert.doesNotMatch(css, /zenLivePrismRainbowAura/);
-    assert.doesNotMatch(css, /zenLivePrismRainbowAura/);
 
     assert.match(
       pageSource,
@@ -2841,15 +2839,36 @@ describe("Zen live presence CSS", () => {
     }
   });
 
-  it("keeps Prism lamp response restrained while identity ink stays white", () => {
+  it("restores Prism's rainbow talking phosphor while identity ink stays white", () => {
     assert.doesNotMatch(css, /zenLiveBotTalkingLightFlicker/);
-    assert.doesNotMatch(css, /@keyframes zenLivePrismRainbowAura/);
+    assert.match(css, /@keyframes zenLivePrismRainbowPhosphor/);
     assert.match(css, /@keyframes zenLivePrismEmitterHueRotate/);
     assert.match(css, /@keyframes zenLivePrismFaceGlowHueRotate/);
     assert.match(css, /@keyframes zenLivePrismFaceGlowHueRotateLight/);
     assert.doesNotMatch(css, /@keyframes zenLivePrismRainbowInk\b/);
     assert.doesNotMatch(css, /@keyframes zenLivePrismRainbowInkLight\b/);
-    assert.doesNotMatch(css, /zenLivePrismRainbowAura/);
+
+    const talkingPhosphorRule = ruleForSelectorNeedlesWithBody(
+      [
+        '[data-prism-persona="true"]',
+        '[data-talking="true"]',
+        '.zenLiveBotPresenceFace::before',
+      ],
+      'background: var(--bot-face-frame-led-spectrum)',
+    );
+    assert.match(
+      talkingPhosphorRule,
+      /background:\s*var\(--bot-face-frame-led-spectrum\)\s*;/,
+    );
+    assert.match(talkingPhosphorRule, /mix-blend-mode:\s*screen\s*;/);
+    assert.match(
+      talkingPhosphorRule,
+      /animation:\s*zenLivePrismRainbowPhosphor 1\.7s linear infinite\s*;/,
+    );
+    assert.match(
+      css,
+      /@keyframes zenLivePrismRainbowPhosphor\s*\{[\s\S]*rotate\(0deg\)[\s\S]*rotate\(360deg\)/,
+    );
 
     const prismRule = ruleForExactSelector(
       '.zenLiveBotPresencePlate[data-prism-persona="true"]',
@@ -3240,12 +3259,24 @@ describe("Zen live presence CSS", () => {
       bodyRule,
       /--zen-live-bot-buckle-crt-cell-pitch:\s*clamp\(\s*1px,\s*calc\(var\(--zen-live-bot-body-frame-size\) \* 0\.0078125\),\s*4px\s*\)/,
     );
+    assert.match(
+      bodyRule,
+      /--zen-live-bot-buckle-crt-screen-scale:\s*1\.12\s*;/,
+    );
     const latticeRule = ruleForExactSelector(
       ".zenLiveBotPresenceBody::after",
     );
     assert.match(latticeRule, /content:\s*""\s*;/);
     assert.match(latticeRule, /z-index:\s*11\s*;/);
     assert.match(latticeRule, /border-radius:\s*50%\s*;/);
+    assert.match(
+      latticeRule,
+      /width:\s*calc\([\s\S]*?--zen-live-bot-body-glyph-size[\s\S]*?var\(--zen-live-bot-buckle-crt-screen-scale\)[\s\S]*?\)\s*;/,
+    );
+    assert.match(
+      latticeRule,
+      /height:\s*calc\([\s\S]*?--zen-live-bot-body-glyph-size[\s\S]*?var\(--zen-live-bot-buckle-crt-screen-scale\)[\s\S]*?\)\s*;/,
+    );
     assert.match(latticeRule, /repeating-linear-gradient\(\s*90deg/);
     assert.match(latticeRule, /repeating-linear-gradient\(\s*0deg/);
     assert.match(
@@ -3260,6 +3291,7 @@ describe("Zen live presence CSS", () => {
     const glyphRule = ruleForExactSelector(".zenLiveBotPresenceBotGlyph");
     assert.match(glyphRule, /z-index:\s*12\s*;/);
     assert.doesNotMatch(glyphRule, /repeating-linear-gradient/);
+    assert.doesNotMatch(glyphRule, /zen-live-bot-buckle-crt-screen-scale/);
   });
 
   it("quantizes every full-size phosphor glyph on one canonical surface", () => {

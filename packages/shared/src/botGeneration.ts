@@ -16,10 +16,12 @@ import {
   DEFAULT_BOT_FACE_MOUTH_OFFSET_X,
   DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
   DEFAULT_BOT_FACE_MOUTH_SCALE,
+  normalizeBotFaceEyeCount,
   resolveBotFaceStyle,
   type BotFaceStyle,
 } from "./botAvatar.ts";
 import {
+  DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
   normalizeBotAudioVoiceProfileV1,
   type BotAudioVoiceProfileV2,
 } from "./audioVoice.ts";
@@ -270,7 +272,7 @@ export interface BotGeneratedDraftV1 {
   avatarSfxPrompt: string;
   audioVoiceProfile: BotAudioVoiceProfileV2;
   voicePreviewLine: string;
-  /** Zero or one compiler-ready prompt-authored Power from the master brief. */
+  /** Zero to three compiler-ready prompt-authored Powers from the master brief. */
   powers: BotPowerV1[];
   settings: BotGeneratedSettingsV1;
 }
@@ -784,9 +786,18 @@ export function normalizeBotGeneratedDraftV1(
     BOT_GENERATION_VOICE_PREVIEW_MAX_LENGTH,
   ) || `Hello. I'm ${name}.`;
   const avatarSfxPrompt = compactText(value.avatarSfxPrompt, 400);
-  const powerPrompt = compactText(value.powerPrompt, BOT_POWER_INTENT_MAX_LENGTH);
-  const generatedPower: BotPowerV1 | null = powerPrompt
-    ? {
+  const powerPrompts = (
+    Array.isArray(value.powerPrompts)
+      ? value.powerPrompts
+      : [value.powerPrompt]
+  )
+    .flatMap((candidate) => {
+      const prompt = compactText(candidate, BOT_POWER_INTENT_MAX_LENGTH);
+      return prompt ? [prompt] : [];
+    })
+    .filter((prompt, index, prompts) => prompts.indexOf(prompt) === index)
+    .slice(0, 3);
+  const generatedPowers: BotPowerV1[] = powerPrompts.map((powerPrompt) => ({
         version: 1,
         id: `generated-${botPowerSourceHashForPowerV1({
           authoringMode: "prompt",
@@ -799,12 +810,11 @@ export function normalizeBotGeneratedDraftV1(
         enabled: true,
         compileStatus: "draft",
         compiled: null,
-      }
-    : null;
+      }));
   const personaSeedText = [
     name,
     voicePreviewLine,
-    powerPrompt,
+    ...powerPrompts,
     profile.purpose.statement,
     profile.purpose.legacyNotes,
     profile.core.traits,
@@ -834,7 +844,85 @@ export function normalizeBotGeneratedDraftV1(
       avatarSfxPrompt,
     ),
     voicePreviewLine,
-    powers: generatedPower ? [generatedPower] : [],
+    powers: generatedPowers,
     settings: normalizeGeneratedSettings(value.settings),
+  };
+}
+
+/**
+ * Hydrates the deliberately small automatic-batch schema into a complete
+ * persisted draft. Rich fields are rebuilt from fixed defaults so a
+ * permissive provider cannot smuggle excluded customization through.
+ */
+export function normalizeLeanBotGeneratedDraftV1(
+  value: unknown,
+): BotGeneratedDraftV1 | null {
+  if (!isRecord(value)) return null;
+  const faceInput = recordAt(value, "face");
+  const hydrated = normalizeBotGeneratedDraftV1({
+    name: value.name,
+    profile: value.profile,
+    color: value.color,
+    accentColor: null,
+    glyph: value.glyph,
+    face: {
+      faceEyesFont: faceInput.faceEyesFont,
+      faceEyeCount: faceInput.faceEyeCount,
+      faceEyeScale: faceInput.faceEyeScale,
+      faceMouthFont: faceInput.faceMouthFont,
+      faceMouthScale: faceInput.faceMouthScale,
+      intentionalCustomEyes: false,
+      intentionalCustomMouth: false,
+      intentionalCustomBlink: false,
+      intentionalEyeGeometryException: false,
+      intentionalMouthGeometryException: false,
+      intentionalBlinkGeometryException: false,
+    },
+    avatarDetails: { ink: [] },
+    avatarSfxPrompt: "",
+    voice: {
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+      baseVoiceId: value.voiceBaseId,
+    },
+    voicePreviewLine: value.voicePreviewLine,
+    powerPrompts: [],
+    settings: {},
+  });
+  if (!hydrated) return null;
+  const allowedFace = resolveBotFaceStyle(
+    {
+      faceEyesFont: faceInput.faceEyesFont,
+      faceEyeScale: faceInput.faceEyeScale,
+      faceMouthFont: faceInput.faceMouthFont,
+      faceMouthScale: faceInput.faceMouthScale,
+    },
+    hydrated.profile.core.communicationStyle,
+  );
+  const defaultFace = resolveBotFaceStyle({});
+  const eyeCount =
+    normalizeBotFaceEyeCount(faceInput.faceEyeCount) ??
+    defaultFace.eyeCount;
+  return {
+    ...hydrated,
+    accentColor: null,
+    face: {
+      ...defaultFace,
+      eyesFont: allowedFace.eyesFont,
+      eyeCount,
+      blinkCount: eyeCount,
+      eyeScale: allowedFace.eyeScale,
+      mouthFont: allowedFace.mouthFont,
+      mouthScale: allowedFace.mouthScale,
+    },
+    avatarDetails: null,
+    avatarSfxPrompt: "",
+    audioVoiceProfile: normalizeBotAudioVoiceProfileV1({
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+      baseVoiceId: value.voiceBaseId,
+      avatarSfx: null,
+      avatarSfxPrompt: "",
+      avatarSfxMuted: false,
+    }),
+    powers: [],
   };
 }

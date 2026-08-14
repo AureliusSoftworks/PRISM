@@ -3,6 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   IMAGE_ASSET_KINDS,
   IMAGE_ASSET_KIND_LABELS,
+  BOT_IMAGE_ASSET_LIBRARY_KIND_ORDER,
   imageAssetKindForImage,
   imageAssetMemberRoleForImage,
   isImageAssetKind,
@@ -15,7 +16,9 @@ import {
   type ImageAssetSource,
   type ImageAssetStorageSummary,
   type ImageAssetUsage,
+  type BotImageAssetLibraryIndex,
 } from "@localai/shared";
+import { normalizeImageRelatedBotIds } from "./image-provenance.ts";
 import { imageAssetUsageLabels } from "./image-asset-cleanup.ts";
 import { heuristicSmartTags } from "./image-asset-smart-memory.ts";
 import {
@@ -75,6 +78,7 @@ interface CatalogContext {
 
 export interface ListImageAssetCatalogOptions {
   kind: ImageAssetKind;
+  botId?: string | null;
   query?: string | null;
   cursor?: string | null;
   limit?: number;
@@ -181,6 +185,36 @@ function readNestedString(
   return typeof current === "string" && current.trim() ? current.trim() : null;
 }
 
+function readNestedArray(
+  value: Record<string, unknown>,
+  path: readonly string[],
+): unknown[] {
+  let current: unknown = value;
+  for (const key of path) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) {
+      return [];
+    }
+    current = (current as Record<string, unknown>)[key];
+  }
+  return Array.isArray(current) ? current : [];
+}
+
+function exactRecordId(value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const id = (value as Record<string, unknown>).id;
+  return typeof id === "string" && id.trim() ? id.trim() : null;
+}
+
+function tableExists(db: DatabaseSync, table: string): boolean {
+  return Boolean(
+    db
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+      )
+      .get(table),
+  );
+}
+
 export function ensureImageAssetLibrarySchema(db: DatabaseSync): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS image_asset_generation_preferences (
@@ -222,6 +256,19 @@ export function ensureImageAssetLibrarySchema(db: DatabaseSync): void {
       ON image_asset_sets(user_id, kind, status, updated_at DESC, id DESC);
     CREATE INDEX IF NOT EXISTS idx_image_asset_set_items_set_ordinal
       ON image_asset_set_items(set_id, ordinal, image_id);
+    CREATE TABLE IF NOT EXISTS image_bot_associations (
+      user_id TEXT NOT NULL,
+      image_id TEXT NOT NULL,
+      bot_id TEXT NOT NULL,
+      relation TEXT NOT NULL CHECK (relation IN ('owner', 'participant')),
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(user_id, image_id, bot_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(image_id) REFERENCES images(id) ON DELETE CASCADE,
+      FOREIGN KEY(bot_id) REFERENCES bots(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_image_bot_associations_user_bot_image
+      ON image_bot_associations(user_id, bot_id, image_id);
     CREATE TABLE IF NOT EXISTS image_asset_magenta_revisions (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -300,6 +347,372 @@ export function ensureImageAssetLibrarySchema(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS idx_image_asset_sets_smart_memory
       ON image_asset_sets(user_id, storage_tier, reuse_score, last_accessed_at);
   `);
+
+  const hasBotsTable = Boolean(
+    db
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'bots'")
+      .get(),
+  );
+  if (hasBotsTable) {
+    db.exec(`
+      CREATE TRIGGER IF NOT EXISTS image_bot_associations_after_insert
+      AFTER INSERT ON images
+      BEGIN
+        INSERT OR IGNORE INTO image_bot_associations
+          (user_id, image_id, bot_id, relation, created_at)
+        SELECT NEW.user_id, NEW.id, bots.id, 'participant', NEW.created_at
+          FROM bots
+          JOIN json_each(
+            CASE
+              WHEN json_valid(NEW.related_bot_ids) THEN NEW.related_bot_ids
+              ELSE '[]'
+            END
+          ) AS related_bot ON related_bot.value = bots.id
+         WHERE bots.user_id = NEW.user_id;
+        INSERT OR REPLACE INTO image_bot_associations
+          (user_id, image_id, bot_id, relation, created_at)
+        SELECT NEW.user_id, NEW.id, bots.id, 'owner', NEW.created_at
+          FROM bots
+         WHERE bots.user_id = NEW.user_id AND bots.id = NEW.bot_id;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS image_bot_associations_after_provenance_update
+      AFTER UPDATE OF user_id, bot_id, related_bot_ids ON images
+      BEGIN
+        DELETE FROM image_bot_associations
+         WHERE user_id = OLD.user_id AND image_id = OLD.id;
+        INSERT OR IGNORE INTO image_bot_associations
+          (user_id, image_id, bot_id, relation, created_at)
+        SELECT NEW.user_id, NEW.id, bots.id, 'participant', NEW.created_at
+          FROM bots
+          JOIN json_each(
+            CASE
+              WHEN json_valid(NEW.related_bot_ids) THEN NEW.related_bot_ids
+              ELSE '[]'
+            END
+          ) AS related_bot ON related_bot.value = bots.id
+         WHERE bots.user_id = NEW.user_id;
+        INSERT OR REPLACE INTO image_bot_associations
+          (user_id, image_id, bot_id, relation, created_at)
+        SELECT NEW.user_id, NEW.id, bots.id, 'owner', NEW.created_at
+          FROM bots
+         WHERE bots.user_id = NEW.user_id AND bots.id = NEW.bot_id;
+      END;
+    `);
+  }
+}
+
+/**
+ * Rebuilds the derivative ownership index from exact, tenant-owned IDs only.
+ * Images remain canonical provenance; persisted applet records supply additive
+ * legacy/backfill links without inspecting names, prompts, tags, or filenames.
+ */
+export function rebuildImageBotAssociations(
+  db: DatabaseSync,
+  userId: string,
+): void {
+  db.prepare("DELETE FROM image_bot_associations WHERE user_id = ?").run(userId);
+  const rows = db
+    .prepare(
+      `SELECT id, bot_id, related_bot_ids
+         FROM images
+        WHERE user_id = ?
+        ORDER BY created_at, id`,
+    )
+    .all(userId) as Array<{
+    id: string;
+    bot_id: string | null;
+    related_bot_ids: string | null;
+  }>;
+  const insert = db.prepare(
+    `INSERT INTO image_bot_associations
+       (user_id, image_id, bot_id, relation, created_at)
+     SELECT images.user_id, images.id, bots.id, ?, images.created_at
+       FROM images
+       JOIN bots
+         ON bots.id = ?
+        AND bots.user_id = images.user_id
+      WHERE images.id = ? AND images.user_id = ?
+     ON CONFLICT(user_id, image_id, bot_id) DO UPDATE SET
+       relation = CASE
+         WHEN excluded.relation = 'owner'
+           OR image_bot_associations.relation = 'owner'
+           THEN 'owner'
+         ELSE 'participant'
+       END,
+       created_at = excluded.created_at`,
+  );
+  const associate = (
+    imageId: string | null | undefined,
+    botId: string | null | undefined,
+    relation: "owner" | "participant",
+  ): void => {
+    const exactImageId = imageId?.trim();
+    const exactBotId = botId?.trim();
+    if (!exactImageId || !exactBotId) return;
+    insert.run(relation, exactBotId, exactImageId, userId);
+  };
+
+  // Canonical image provenance, including shared authored participants.
+  for (const row of rows) {
+    for (const botId of normalizeImageRelatedBotIds(
+      row.related_bot_ids,
+      row.bot_id,
+    )) {
+      associate(
+        row.id,
+        botId,
+        botId === row.bot_id ? "owner" : "participant",
+      );
+    }
+  }
+
+  // Chat and Zen are bot-locked when a persisted conversation carries bot_id.
+  // The direct image conversation link and current wallpaper pointer cover old
+  // rows that predate canonical image.bot_id / related_bot_ids persistence.
+  if (tableExists(db, "conversations")) {
+    const conversationImages = db
+      .prepare(
+        `SELECT DISTINCT images.id AS image_id, conversations.bot_id
+           FROM conversations
+           JOIN images
+             ON images.user_id = conversations.user_id
+            AND (
+              images.conversation_id = conversations.id
+              OR images.id = conversations.zen_wallpaper_image_id
+            )
+          WHERE conversations.user_id = ?
+            AND conversations.conversation_mode IN ('chat', 'zen')
+            AND conversations.bot_id IS NOT NULL`,
+      )
+      .all(userId) as Array<{ image_id: string; bot_id: string }>;
+    for (const row of conversationImages) {
+      associate(row.image_id, row.bot_id, "owner");
+    }
+
+    const wallpaperHistories = db
+      .prepare(
+        `SELECT bot_id, zen_wallpaper_history
+           FROM conversations
+          WHERE user_id = ?
+            AND conversation_mode IN ('chat', 'zen')
+            AND bot_id IS NOT NULL
+            AND json_valid(zen_wallpaper_history)`,
+      )
+      .all(userId) as Array<{
+      bot_id: string;
+      zen_wallpaper_history: string | null;
+    }>;
+    for (const row of wallpaperHistories) {
+      let entries: unknown[] = [];
+      try {
+        const parsed = JSON.parse(row.zen_wallpaper_history ?? "[]") as unknown;
+        entries = Array.isArray(parsed) ? parsed : [];
+      } catch {
+        entries = [];
+      }
+      for (const entry of entries) {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+        const imageId = (entry as Record<string, unknown>).imageId;
+        associate(
+          typeof imageId === "string" ? imageId : null,
+          row.bot_id,
+          "owner",
+        );
+      }
+    }
+
+    const coffeeConversationImages = db
+      .prepare(
+        `SELECT DISTINCT images.id AS image_id,
+                         conversations.bot_group_ids,
+                         conversations.coffee_absent_bot_ids,
+                         conversations.coffee_group_id
+           FROM conversations
+           JOIN images
+             ON images.user_id = conversations.user_id
+            AND images.conversation_id = conversations.id
+          WHERE conversations.user_id = ?
+            AND conversations.conversation_mode = 'coffee'`,
+      )
+      .all(userId) as Array<{
+      image_id: string;
+      bot_group_ids: string | null;
+      coffee_absent_bot_ids: string | null;
+      coffee_group_id: string | null;
+    }>;
+    const coffeeSeatIds = tableExists(db, "coffee_group_seats")
+      ? db.prepare(
+          `SELECT bot_id
+             FROM coffee_group_seats
+            WHERE user_id = ? AND group_id = ? AND bot_id IS NOT NULL
+            ORDER BY seat_index`,
+        )
+      : null;
+    for (const row of coffeeConversationImages) {
+      const absentBotIds = new Set(
+        normalizeImageRelatedBotIds(row.coffee_absent_bot_ids),
+      );
+      let participantBotIds = normalizeImageRelatedBotIds(
+        row.bot_group_ids,
+      ).filter((botId) => !absentBotIds.has(botId));
+      if (
+        participantBotIds.length === 0 &&
+        row.coffee_group_id &&
+        coffeeSeatIds
+      ) {
+        participantBotIds = (
+          coffeeSeatIds.all(userId, row.coffee_group_id) as Array<{
+            bot_id: string;
+          }>
+        )
+          .map((seat) => seat.bot_id)
+          .filter((botId) => !absentBotIds.has(botId));
+      }
+      for (const botId of participantBotIds) {
+        associate(row.image_id, botId, "participant");
+      }
+    }
+  }
+
+  // Per-bot Chat atmosphere is an exact authored ownership pointer.
+  const chatAtmospheres = db
+    .prepare(
+      `SELECT id AS bot_id, chat_atmosphere_image_id AS image_id
+         FROM bots
+        WHERE user_id = ? AND chat_atmosphere_image_id IS NOT NULL`,
+    )
+    .all(userId) as Array<{ bot_id: string; image_id: string }>;
+  for (const row of chatAtmospheres) {
+    associate(row.image_id, row.bot_id, "owner");
+  }
+
+  // Signal artwork belongs to the exact saved show host. Include every stored
+  // artwork pointer, including derived microphone masks and the show logo.
+  if (tableExists(db, "botcast_shows")) {
+    const shows = db
+      .prepare(
+        `SELECT host_bot_id, atmosphere_json
+           FROM botcast_shows
+          WHERE user_id = ?`,
+      )
+      .all(userId) as Array<{
+      host_bot_id: string;
+      atmosphere_json: string | null;
+    }>;
+    const signalArtworkPaths = [
+      ["imageId"],
+      ["dayAtmosphere", "imageId"],
+      ["nightAtmosphere", "imageId"],
+      ["dayAtmosphere", "microphoneTintMaskImageId"],
+      ["nightAtmosphere", "microphoneTintMaskImageId"],
+      ["studioLighting", "imageId"],
+      ["logo", "imageId"],
+    ] as const;
+    for (const show of shows) {
+      const atmosphere = parseJsonObject(show.atmosphere_json);
+      for (const path of signalArtworkPaths) {
+        associate(
+          readNestedString(atmosphere, path),
+          show.host_bot_id,
+          "owner",
+        );
+      }
+    }
+  }
+
+  // Saved library rooms and Coffee groups associate their exact atmosphere
+  // image with the exact current member/seat IDs. Empty seats are ignored.
+  if (
+    tableExists(db, "library_groups") &&
+    tableExists(db, "library_group_members")
+  ) {
+    const memberships = db
+      .prepare(
+        `SELECT groups.atmosphere_json, members.bot_id
+           FROM library_groups groups
+           JOIN library_group_members members
+             ON members.user_id = groups.user_id
+            AND members.group_id = groups.id
+          WHERE groups.user_id = ?`,
+      )
+      .all(userId) as Array<{
+      atmosphere_json: string | null;
+      bot_id: string;
+    }>;
+    for (const membership of memberships) {
+      associate(
+        readNestedString(parseJsonObject(membership.atmosphere_json), [
+          "imageId",
+        ]),
+        membership.bot_id,
+        "participant",
+      );
+    }
+  }
+  if (
+    tableExists(db, "coffee_groups") &&
+    tableExists(db, "coffee_group_seats")
+  ) {
+    const seats = db
+      .prepare(
+        `SELECT groups.atmosphere_json, seats.bot_id
+           FROM coffee_groups groups
+           JOIN coffee_group_seats seats
+             ON seats.user_id = groups.user_id
+            AND seats.group_id = groups.id
+          WHERE groups.user_id = ? AND seats.bot_id IS NOT NULL`,
+      )
+      .all(userId) as Array<{
+      atmosphere_json: string | null;
+      bot_id: string;
+    }>;
+    for (const seat of seats) {
+      associate(
+        readNestedString(parseJsonObject(seat.atmosphere_json), ["imageId"]),
+        seat.bot_id,
+        "participant",
+      );
+    }
+  }
+
+  // Debate exhibit sprites are attached to a frozen session by imageId. Link
+  // them to the exact frozen moderator, advocates, and jurors in that snapshot.
+  if (tableExists(db, "debate_sessions")) {
+    const sessions = db
+      .prepare(
+        `SELECT session_json
+           FROM debate_sessions
+          WHERE user_id = ?`,
+      )
+      .all(userId) as Array<{ session_json: string }>;
+    for (const row of sessions) {
+      const session = parseJsonObject(row.session_json);
+      const participantBotIds = new Set<string>();
+      for (const path of [
+        ["moderator", "id"],
+        ["forAdvocate", "id"],
+        ["againstAdvocate", "id"],
+      ] as const) {
+        const botId = readNestedString(session, path);
+        if (botId) participantBotIds.add(botId);
+      }
+      for (const juror of readNestedArray(session, ["jury", "jurors"])) {
+        const botId = exactRecordId(juror);
+        if (botId) participantBotIds.add(botId);
+      }
+      for (const exhibit of readNestedArray(session, ["evidence", "exhibits"])) {
+        if (!exhibit || typeof exhibit !== "object" || Array.isArray(exhibit)) {
+          continue;
+        }
+        const imageId = (exhibit as Record<string, unknown>).imageId;
+        if (typeof imageId !== "string" || !imageId.trim()) continue;
+        for (const botId of participantBotIds) {
+          associate(imageId, botId, "participant");
+        }
+      }
+    }
+  }
 }
 
 function upsertSet(
@@ -668,6 +1081,7 @@ export function synchronizeImageAssetCatalog(
   userId: string,
 ): void {
   ensureImageAssetLibrarySchema(db);
+  rebuildImageBotAssociations(db, userId);
   db.prepare(
     `DELETE FROM image_asset_sets
       WHERE user_id = ?
@@ -1071,6 +1485,18 @@ export function listImageAssetCatalog(
   const params: Array<string | number> = [];
   const clauses = ["sets.user_id = ?", "sets.kind = ?"];
   params.push(userId, options.kind);
+  if (options.botId?.trim()) {
+    clauses.push(`EXISTS (
+      SELECT 1
+        FROM image_asset_set_items bot_items
+        JOIN image_bot_associations bot_associations
+          ON bot_associations.image_id = bot_items.image_id
+         AND bot_associations.user_id = sets.user_id
+       WHERE bot_items.set_id = sets.id
+         AND bot_associations.bot_id = ?
+    )`);
+    params.push(options.botId.trim());
+  }
   if (!options.includeIncomplete) clauses.push("sets.status = 'ready'");
   if (options.source) {
     clauses.push("sets.source = ?");
@@ -1119,6 +1545,75 @@ export function listImageAssetCatalog(
   };
 }
 
+export function getBotImageAssetLibraryIndex(
+  db: DatabaseSync,
+  userId: string,
+  botId: string,
+  limitPerKind = 6,
+): BotImageAssetLibraryIndex {
+  synchronizeImageAssetCatalog(db, userId);
+  const limit = Number.isFinite(limitPerKind)
+    ? Math.min(12, Math.max(1, Math.floor(limitPerKind)))
+    : 6;
+  const countRows = db
+    .prepare(
+      `SELECT sets.kind, COUNT(DISTINCT sets.id) AS total_count
+         FROM image_asset_sets sets
+        WHERE sets.user_id = ?
+          AND sets.status = 'ready'
+          AND EXISTS (
+            SELECT 1
+              FROM image_asset_set_items bot_items
+              JOIN image_bot_associations bot_associations
+                ON bot_associations.image_id = bot_items.image_id
+               AND bot_associations.user_id = sets.user_id
+             WHERE bot_items.set_id = sets.id
+               AND bot_associations.bot_id = ?
+          )
+        GROUP BY sets.kind`,
+    )
+    .all(userId, botId) as Array<{
+    kind: string;
+    total_count: number | bigint;
+  }>;
+  const totals = new Map(
+    countRows
+      .filter((row) => isImageAssetKind(row.kind))
+      .map((row) => [row.kind as ImageAssetKind, Number(row.total_count)] as const),
+  );
+  const recentRows = db.prepare(
+    `SELECT sets.*
+       FROM image_asset_sets sets
+      WHERE sets.user_id = ?
+        AND sets.kind = ?
+        AND sets.status = 'ready'
+        AND EXISTS (
+          SELECT 1
+            FROM image_asset_set_items bot_items
+            JOIN image_bot_associations bot_associations
+              ON bot_associations.image_id = bot_items.image_id
+             AND bot_associations.user_id = sets.user_id
+           WHERE bot_items.set_id = sets.id
+             AND bot_associations.bot_id = ?
+        )
+      ORDER BY sets.updated_at DESC, sets.id DESC
+      LIMIT ?`,
+  );
+  return {
+    botId,
+    sections: BOT_IMAGE_ASSET_LIBRARY_KIND_ORDER.flatMap((kind) => {
+      const totalCount = totals.get(kind) ?? 0;
+      if (totalCount === 0) return [];
+      const rows = recentRows.all(userId, kind, botId, limit) as unknown as AssetSetRow[];
+      return [{
+        kind,
+        totalCount,
+        assets: mapAssetSetRows(db, userId, rows),
+      }];
+    }),
+  };
+}
+
 export function updateImageAssetPlayerTags(
   db: DatabaseSync,
   userId: string,
@@ -1153,6 +1648,40 @@ export function getImageAssetSet(
   const row = db
     .prepare("SELECT * FROM image_asset_sets WHERE id = ? AND user_id = ?")
     .get(assetSetId, userId) as unknown as AssetSetRow | undefined;
+  return row ? mapAssetSetRows(db, userId, [row])[0] ?? null : null;
+}
+
+export function getImageAssetSetForCatalog(
+  db: DatabaseSync,
+  userId: string,
+  assetSetId: string,
+  options: Pick<
+    ListImageAssetCatalogOptions,
+    "kind" | "botId" | "includeIncomplete"
+  >,
+): ImageAssetSet | null {
+  if (!isImageAssetKind(options.kind)) {
+    throw new ImageAssetLibraryError("invalid", "Choose a recognized asset kind.");
+  }
+  synchronizeImageAssetCatalog(db, userId);
+  const clauses = ["sets.id = ?", "sets.user_id = ?", "sets.kind = ?"];
+  const params: string[] = [assetSetId, userId, options.kind];
+  if (!options.includeIncomplete) clauses.push("sets.status = 'ready'");
+  if (options.botId?.trim()) {
+    clauses.push(`EXISTS (
+      SELECT 1
+        FROM image_asset_set_items bot_items
+        JOIN image_bot_associations bot_associations
+          ON bot_associations.image_id = bot_items.image_id
+         AND bot_associations.user_id = sets.user_id
+       WHERE bot_items.set_id = sets.id
+         AND bot_associations.bot_id = ?
+    )`);
+    params.push(options.botId.trim());
+  }
+  const row = db
+    .prepare(`SELECT sets.* FROM image_asset_sets sets WHERE ${clauses.join(" AND ")}`)
+    .get(...params) as unknown as AssetSetRow | undefined;
   return row ? mapAssetSetRows(db, userId, [row])[0] ?? null : null;
 }
 

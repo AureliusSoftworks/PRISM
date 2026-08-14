@@ -1448,6 +1448,7 @@ const AvatarDetailsEditorSession = forwardRef<
             faceMouthFont={faceStyle.mouthFont}
             faceMouthCharacter={faceStyle.mouthCharacter}
             faceMouthAnimation={faceStyle.mouthAnimation}
+            faceMouthSpeechPoses={faceStyle.mouthSpeechPoses}
             faceFontWeight={faceStyle.weight}
             faceEyeScale={faceStyle.eyeScale}
             faceEyeOffsetX={faceStyle.eyeOffsetX}

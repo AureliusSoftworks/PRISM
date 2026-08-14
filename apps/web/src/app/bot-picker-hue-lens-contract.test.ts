@@ -37,4 +37,24 @@ describe("bot-grid hue lens contract", () => {
     assert.match(tutorials, /long horizontal hue lens browses the canvas grid/u);
     assert.match(tutorials, /card grid has its own vertical hue lens on the right/u);
   });
+
+  it("keeps the Signal hue lens bounded to the scrollable bot-grid viewport", () => {
+    assert.match(
+      signalCss,
+      /\.signalBotPickerGridWithHueLens\s*\{[^}]*--signal-bot-picker-viewport-max-height:\s*238px[^}]*max-height:\s*var\(--signal-bot-picker-viewport-max-height\)[^}]*overflow:\s*hidden/u,
+    );
+    assert.match(
+      signalCss,
+      /\.signalBotPickerHueLens input\s*\{[^}]*height:\s*auto[^}]*flex:\s*1 1 0/u,
+    );
+    assert.doesNotMatch(
+      signalCss,
+      /\.signalBotPickerHueLens input\s*\{[^}]*height:\s*100%/u,
+    );
+    assert.match(
+      signal,
+      /signalBotPickerViewportRef\.current\?\.querySelector<HTMLElement>[\s\S]{0,180}grid\.scrollTop = 0/u,
+    );
+    assert.match(signal, /ref=\{signalBotPickerViewportRef\}/u);
+  });
 });

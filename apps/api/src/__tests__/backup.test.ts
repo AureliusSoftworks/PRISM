@@ -986,10 +986,11 @@ describe("backup Zen Atmosphere style notes", () => {
   it("exports and restores normalized style notes", () => {
     withBackupDatabase((db, userKey) => {
       db.prepare(
-        "UPDATE users SET zen_wallpaper_style_notes = ?, zen_wallpaper_blurred_edges_enabled = 0, zen_message_font_min_px = 18.4, zen_message_font_max_px = 36.7, experimental_all_model_effort_enabled = 1, coffee_experimental_table_angle_enabled = 1, psychic_mode_enabled = 1, prism_default_bot_face_thinking_frames = ? WHERE id = ?"
+        "UPDATE users SET zen_wallpaper_style_notes = ?, zen_wallpaper_blurred_edges_enabled = 0, zen_message_font_min_px = 18.4, zen_message_font_max_px = 36.7, experimental_all_model_effort_enabled = 1, coffee_experimental_table_angle_enabled = 1, psychic_mode_enabled = 1, prism_default_bot_face_thinking_frames = ?, prism_default_bot_face_mouth_speech_poses = ? WHERE id = ?"
       ).run(
         "  misty\n glass,   paper grain  ",
         '["?","!","?","…"]',
+        '["—","·","△","○"]',
         "user-1"
       );
 
@@ -1011,6 +1012,10 @@ describe("backup Zen Atmosphere style notes", () => {
         "?",
         "…",
       ]);
+      assert.deepEqual(
+        snapshot.settings?.prismDefaultBotFaceMouthSpeechPoses,
+        ["—", "·", "△", "○"],
+      );
 
       const longNotes = "x".repeat(MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH + 10);
       importUserSnapshot(
@@ -1028,6 +1033,7 @@ describe("backup Zen Atmosphere style notes", () => {
             coffeeExperimentalTableAngleEnabled: false,
             psychicModeEnabled: false,
             prismDefaultBotFaceThinkingFrames: [".", "o", "O", "o"],
+            prismDefaultBotFaceMouthSpeechPoses: ["_", "·", "V", "o"],
           },
         },
         userKey
@@ -1035,7 +1041,7 @@ describe("backup Zen Atmosphere style notes", () => {
 
       const restored = db
         .prepare(
-          "SELECT zen_wallpaper_style_notes, zen_wallpaper_blurred_edges_enabled, zen_message_font_min_px, zen_message_font_max_px, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, prism_default_bot_face_thinking_frames FROM users WHERE id = ?"
+          "SELECT zen_wallpaper_style_notes, zen_wallpaper_blurred_edges_enabled, zen_message_font_min_px, zen_message_font_max_px, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, prism_default_bot_face_thinking_frames, prism_default_bot_face_mouth_speech_poses FROM users WHERE id = ?"
         )
         .get("user-1") as {
         zen_wallpaper_style_notes: string;
@@ -1046,6 +1052,7 @@ describe("backup Zen Atmosphere style notes", () => {
         coffee_experimental_table_angle_enabled: number;
         psychic_mode_enabled: number;
         prism_default_bot_face_thinking_frames: string | null;
+        prism_default_bot_face_mouth_speech_poses: string | null;
       };
 
       assert.equal(
@@ -1059,6 +1066,10 @@ describe("backup Zen Atmosphere style notes", () => {
       assert.equal(restored.coffee_experimental_table_angle_enabled, 0);
       assert.equal(restored.psychic_mode_enabled, 0);
       assert.equal(restored.prism_default_bot_face_thinking_frames, '[".","o","O","o"]');
+      assert.equal(
+        restored.prism_default_bot_face_mouth_speech_poses,
+        '["_","·","V","o"]',
+      );
     });
   });
 
@@ -1170,8 +1181,8 @@ describe("backup bot avatar face style", () => {
         "8",
         "wobble",
         "formal",
-        "△",
-        "flicker",
+        "—·△○",
+        "custom",
         1,
         725,
         1.15,
@@ -1239,8 +1250,9 @@ describe("backup bot avatar face style", () => {
         faceEyeCharacter: "8",
         faceEyeAnimation: "natural",
         faceMouthFont: "formal",
-        faceMouthCharacter: "△",
-        faceMouthAnimation: "flicker",
+        faceMouthCharacter: "—",
+        faceMouthAnimation: null,
+        faceMouthSpeechPoses: ["—", "·", "△", "○"],
         faceMouthCoffeePucker: true,
         faceFontWeight: 725,
         faceEyeScale: 1.15,
@@ -1310,14 +1322,14 @@ describe("backup bot avatar face style", () => {
       });
 
       db.prepare(
-        "UPDATE bots SET name_pronunciation = '', self_referral = '', voice_preview_line = NULL, avatar_details_json = NULL, face_eyes_font = NULL, face_eye_character = NULL, face_eye_animation = NULL, face_mouth_font = NULL, face_mouth_character = NULL, face_mouth_animation = NULL, face_mouth_coffee_pucker = 0, face_font_weight = NULL, face_eye_scale = NULL, face_eye_offset_x = NULL, face_eye_offset_y = NULL, face_eye_rotation_deg = NULL, face_eye_count = 1, face_mouth_scale = NULL, face_mouth_offset_x = NULL, face_mouth_offset_y = NULL, face_mouth_rotation_deg = NULL, face_blink_bar = NULL, face_blink_scale = NULL, face_blink_offset_x = NULL, face_blink_offset_y = NULL, face_blink_rotation_deg = NULL, face_thinking_frames = NULL, face_thinking_scale = NULL, face_thinking_offset_x = NULL, face_thinking_offset_y = NULL WHERE id = ?"
+        "UPDATE bots SET name_pronunciation = '', self_referral = '', voice_preview_line = NULL, avatar_details_json = NULL, face_eyes_font = NULL, face_eye_character = NULL, face_eye_animation = NULL, face_mouth_font = NULL, face_mouth_character = NULL, face_mouth_animation = NULL, face_mouth_speech_poses = NULL, face_mouth_coffee_pucker = 0, face_font_weight = NULL, face_eye_scale = NULL, face_eye_offset_x = NULL, face_eye_offset_y = NULL, face_eye_rotation_deg = NULL, face_eye_count = 1, face_mouth_scale = NULL, face_mouth_offset_x = NULL, face_mouth_offset_y = NULL, face_mouth_rotation_deg = NULL, face_blink_bar = NULL, face_blink_scale = NULL, face_blink_offset_x = NULL, face_blink_offset_y = NULL, face_blink_rotation_deg = NULL, face_thinking_frames = NULL, face_thinking_scale = NULL, face_thinking_offset_x = NULL, face_thinking_offset_y = NULL WHERE id = ?"
       ).run("bot-1");
 
       importUserSnapshot(db, "user-1", snapshot, userKey);
 
       const restored = db
         .prepare(
-          "SELECT name_pronunciation, self_referral, voice_preview_line, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id FROM bots WHERE id = ?"
+          "SELECT name_pronunciation, self_referral, voice_preview_line, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_speech_poses, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id FROM bots WHERE id = ?"
         )
         .get("bot-1") as {
         name_pronunciation: string;
@@ -1330,6 +1342,7 @@ describe("backup bot avatar face style", () => {
         face_mouth_font: string | null;
         face_mouth_character: string | null;
         face_mouth_animation: string | null;
+        face_mouth_speech_poses: string | null;
         face_mouth_coffee_pucker: number;
         face_font_weight: number | null;
         face_eye_scale: number | null;
@@ -1363,8 +1376,12 @@ describe("backup bot avatar face style", () => {
       assert.equal(restored.face_eye_character, "8");
       assert.equal(restored.face_eye_animation, "natural");
       assert.equal(restored.face_mouth_font, "formal");
-      assert.equal(restored.face_mouth_character, "△");
-      assert.equal(restored.face_mouth_animation, "flicker");
+      assert.equal(restored.face_mouth_character, "—");
+      assert.equal(restored.face_mouth_animation, null);
+      assert.equal(
+        restored.face_mouth_speech_poses,
+        '["—","·","△","○"]',
+      );
       assert.equal(restored.face_mouth_coffee_pucker, 1);
       assert.equal(restored.face_font_weight, 725);
       assert.equal(restored.face_eye_scale, 1.15);
@@ -2456,38 +2473,50 @@ describe("backup spectral Power compatibility", () => {
 });
 
 describe("backup server-backed Library groups", () => {
-  it("round-trips membership protection overrides", () => {
+  it("round-trips 100 members and membership protection overrides", () => {
     withBackupDatabase((db, userKey) => {
       const now = "2026-07-26T01:00:00.000Z";
-      db.prepare(
+      const insertBot = db.prepare(
         `INSERT INTO bots
           (id, user_id, name, system_prompt, created_at, updated_at)
-         VALUES ('library-bot', 'user-1', 'Library Bot', '', ?, ?)`,
-      ).run(now, now);
+         VALUES (?, 'user-1', ?, '', ?, ?)`,
+      );
+      for (let index = 1; index <= 100; index += 1) {
+        insertBot.run(`library-bot-${index}`, `Library Bot ${index}`, now, now);
+      }
       db.prepare(
         `INSERT INTO library_groups
           (id, user_id, name, description, delete_protected_default, built_in,
            atmosphere_json, glyph_json, leader_bot_id, created_at, updated_at)
-         VALUES ('group:test', 'user-1', 'Test Group', '', 1, 0, '{}', ?, 'library-bot', ?, ?)`,
+         VALUES ('group:test', 'user-1', 'Test Group', '', 1, 0, '{}', ?, 'library-bot-1', ?, ?)`,
       ).run(JSON.stringify({ version: 1, seed: "group:test:reroll:1" }), now, now);
-      db.prepare(
+      const insertMember = db.prepare(
         `INSERT INTO library_group_members
           (user_id, group_id, bot_id, delete_protected_override, added_at,
            updated_at)
-         VALUES ('user-1', 'group:test', 'library-bot', 0, ?, ?)`,
-      ).run(now, now);
+         VALUES ('user-1', 'group:test', ?, ?, ?, ?)`,
+      );
+      for (let index = 1; index <= 100; index += 1) {
+        insertMember.run(
+          `library-bot-${index}`,
+          index === 1 ? 0 : null,
+          now,
+          now,
+        );
+      }
 
       const snapshot = exportUserSnapshot(db, "user-1", userKey);
       assert.equal(snapshot.libraryGroups?.[1]?.id, "group:test");
+      assert.equal(snapshot.libraryGroups?.[1]?.botIds.length, 100);
       assert.equal(
-        snapshot.libraryGroups?.[1]?.deleteProtectionByBotId["library-bot"],
+        snapshot.libraryGroups?.[1]?.deleteProtectionByBotId["library-bot-1"],
         false,
       );
       assert.deepEqual(snapshot.libraryGroups?.[1]?.glyph, {
         version: 1,
         seed: "group:test:reroll:1",
       });
-      assert.equal(snapshot.libraryGroups?.[1]?.leaderBotId, "library-bot");
+      assert.equal(snapshot.libraryGroups?.[1]?.leaderBotId, "library-bot-1");
 
       db.prepare("DELETE FROM library_groups WHERE user_id = 'user-1'").run();
       importUserSnapshot(db, "user-1", snapshot, userKey);
@@ -2496,10 +2525,16 @@ describe("backup server-backed Library groups", () => {
           `SELECT delete_protected_override
              FROM library_group_members
             WHERE user_id = 'user-1' AND group_id = 'group:test'
-              AND bot_id = 'library-bot'`,
+              AND bot_id = 'library-bot-1'`,
         )
         .get() as { delete_protected_override: number };
       assert.equal(restored.delete_protected_override, 0);
+      assert.equal(
+        listLibraryGroups(db, "user-1").find(
+          (group) => group.id === "group:test",
+        )?.botIds.length,
+        100,
+      );
       assert.deepEqual(
         listLibraryGroups(db, "user-1").find(
           (group) => group.id === "group:test",
@@ -2510,7 +2545,7 @@ describe("backup server-backed Library groups", () => {
         listLibraryGroups(db, "user-1").find(
           (group) => group.id === "group:test",
         )?.leaderBotId,
-        "library-bot",
+        "library-bot-1",
       );
     });
   });

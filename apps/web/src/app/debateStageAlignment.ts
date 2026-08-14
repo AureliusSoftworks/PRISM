@@ -74,6 +74,7 @@ export type DebateStageEvidenceView = "wide" | "left" | "moderator" | "right";
 export type DebateStageCameraView = DebateStageEvidenceView | "jury";
 export type DebateStageLightBlendMode =
   (typeof DEBATE_STAGE_LIGHT_BLEND_MODES)[number];
+export type DebateStageDirectionPreset = "balanced" | "close" | "grand";
 export type DebateStageAlignmentTarget =
   | `${DebateStageAlignmentRole}:${DebateStageAlignmentItem}`
   | `moderatorView:${DebateStageAlignmentItem}`;
@@ -325,6 +326,99 @@ export const DEFAULT_DEBATE_STAGE_ALIGNMENT: DebateStageAlignmentV13 = {
   galleryVolume: DEBATE_STAGE_GALLERY_VOLUME_DEFAULT,
   moderatorMicroScales: { ...DEFAULT_DEBATE_STAGE_MODERATOR_MICRO_SCALES },
 };
+
+/**
+ * Player-facing stage direction intentionally changes only the public Wide
+ * composition. Precision camera, evidence, gavel, light, and audio tuning stay
+ * untouched for the developer Alignment Lab.
+ */
+export function applyDebateStageDirectionPreset(
+  alignment: DebateStageAlignmentV13,
+  preset: DebateStageDirectionPreset,
+): DebateStageAlignmentV13 {
+  const base = normalizeDebateStageAlignment(alignment);
+  const balanced = DEFAULT_DEBATE_STAGE_ALIGNMENT.wide;
+  const wide: DebateStageAlignmentWideV4 =
+    preset === "close"
+      ? {
+          for: {
+            bot: { x: 4, y: -1 },
+            nameplate: { x: 5, y: -4 },
+            glyph: { x: 4, y: -6 },
+          },
+          moderator: {
+            bot: { x: 0, y: -3 },
+            nameplate: { x: 0, y: -10 },
+            glyph: { x: 0, y: 2 },
+          },
+          against: {
+            bot: { x: -4, y: -1 },
+            nameplate: { x: -5, y: -4 },
+            glyph: { x: -4, y: -6 },
+          },
+        }
+      : preset === "grand"
+        ? {
+            for: {
+              bot: { x: -2.5, y: -3 },
+              nameplate: { x: 2, y: -5 },
+              glyph: { x: 1.5, y: -7 },
+            },
+            moderator: {
+              bot: { x: 0, y: -6 },
+              nameplate: { x: 0, y: -12 },
+              glyph: { x: 0, y: 0 },
+            },
+            against: {
+              bot: { x: 2.5, y: -3 },
+              nameplate: { x: -2, y: -5 },
+              glyph: { x: -1.5, y: -7 },
+            },
+          }
+        : {
+            for: {
+              bot: { ...balanced.for.bot },
+              nameplate: { ...balanced.for.nameplate },
+              glyph: { ...balanced.for.glyph },
+            },
+            moderator: {
+              bot: { ...balanced.moderator.bot },
+              nameplate: { ...balanced.moderator.nameplate },
+              glyph: { ...balanced.moderator.glyph },
+            },
+            against: {
+              bot: { ...balanced.against.bot },
+              nameplate: { ...balanced.against.nameplate },
+              glyph: { ...balanced.against.glyph },
+            },
+          };
+  const moderatorScale =
+    preset === "grand" ? 155 : preset === "close" ? 115 : 130;
+  return normalizeDebateStageAlignment({
+    ...base,
+    wide,
+    moderatorMicroScales: {
+      ...base.moderatorMicroScales,
+      wide: moderatorScale,
+    },
+  });
+}
+
+export function debateStageDirectionPresetForAlignment(
+  alignment: DebateStageAlignmentV13,
+): DebateStageDirectionPreset | null {
+  for (const preset of ["balanced", "close", "grand"] as const) {
+    const candidate = applyDebateStageDirectionPreset(alignment, preset);
+    if (
+      JSON.stringify(candidate.wide) === JSON.stringify(alignment.wide) &&
+      candidate.moderatorMicroScales.wide ===
+        alignment.moderatorMicroScales.wide
+    ) {
+      return preset;
+    }
+  }
+  return null;
+}
 
 function normalizedNumber(
   value: unknown,

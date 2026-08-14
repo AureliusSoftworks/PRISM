@@ -98,7 +98,7 @@ describe("waiting-room Coffee staging integration", () => {
     assert.match(focusEffectSource, /request\.target === "room"/u);
     assert.match(
       focusEffectSource,
-      /data-room-presence-state="stable"[^']*button:not\(:disabled\)/u,
+      /\[data-room-presence-bot-id\] button:not\(:disabled\)/u,
     );
     assert.match(
       focusEffectSource,

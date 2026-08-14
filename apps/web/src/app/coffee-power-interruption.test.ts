@@ -223,7 +223,7 @@ test("Coffee plays the interrupter lead before an authoritative yield tail", () 
     source.indexOf("const continueCoffeeSession = async"),
     source.indexOf("continueCoffeeSessionRef.current = continueCoffeeSession"),
   );
-  const start = source.indexOf("const crosstalkPlan =");
+  const start = source.indexOf("const crosstalkPlanRaw =");
   const end = source.indexOf("// Whenever we leave Coffee view", start);
   const interruption = source.slice(start, end);
 
@@ -319,11 +319,11 @@ test("Copycat ellipsis follow-ons remain visible but never request reaction voic
 
   assert.match(
     signalPlayback,
-    /botCrosstalkInterruptedSpeakerCueHasAudio\([\s\S]*?sanitizedPlan\.interruptedSpeakerCue/u,
+    /listenerReactionInterruptedSpeakerHasAudioV1\(sanitizedPlan\)/u,
   );
   assert.match(
     coffeePlayback,
-    /botCrosstalkInterruptedSpeakerCueHasAudio\([\s\S]*?sanitizedPlan\.interruptedSpeakerCue/u,
+    /listenerReactionInterruptedSpeakerHasAudioV1\(sanitizedPlan\)/u,
   );
 });
 
@@ -349,7 +349,7 @@ test("social silence holds the visible ellipsis for its marked duration", () => 
 
   assert.match(
     source,
-    /const durationMs = Math\.max\(\s*deliveryPlan\.durationMs,\s*last\.socialSilence\?\.holdMs \?\? 0,\s*\)/u,
+    /const durationMs = Math\.max\(\s*deliveryPlan\.durationMs,\s*last\.socialSilence\?\.holdMs \?\? 0,\s*last\.botPowerMutePerformance\?\.durationMs \?\? 0,\s*\)/u,
   );
 });
 
@@ -373,7 +373,7 @@ test("bot-to-bot cut-ins surface spoken cue text and orphan-guard reveal voice",
   );
   assert.match(
     source,
-    /activeCoffeeListenerReaction\.spokenCue\?\.trim\(\) \|\|[\s\S]{0,80}listenerReactionActionLabel/u,
+    /listenerReactionSpokenTextV1\(activeCoffeeListenerReaction\) \|\|[\s\S]{0,80}listenerReactionActionLabel/u,
   );
   assert.match(
     source,

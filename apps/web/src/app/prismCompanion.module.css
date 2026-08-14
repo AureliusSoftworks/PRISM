@@ -257,6 +257,12 @@
   will-change: transform;
 }
 
+/* iPadOS-like pointer magnetism: once a safe Refract target owns the hover,
+   that illuminated field becomes the pointer and the free guiding light exits. */
+.anchor[data-wielding="true"][data-wield-hover-target="true"] {
+  opacity: 0;
+}
+
 .backdrop[data-wielding="true"] {
   opacity: 0;
   pointer-events: none;

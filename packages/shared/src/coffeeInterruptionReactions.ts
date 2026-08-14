@@ -50,7 +50,9 @@ export function coffeeInterruptionTranscriptSegments(args: {
   }
 
   const segments: CoffeeInterruptionTranscriptSegment[] = [];
-  const interrupterCue = interruption.interrupterCue?.trim();
+  const interrupterCue =
+    interruption.publicInterrupterCue?.trim() ||
+    interruption.interrupterCue?.trim();
   if (interrupterCue) {
     segments.push({
       id: `${sourceMessageId}:coffee-interruption:interrupter`,
@@ -61,7 +63,9 @@ export function coffeeInterruptionTranscriptSegments(args: {
       sequence: 0,
     });
   }
-  const interruptedSpeakerCue = interruption.interruptedSpeakerCue?.trim();
+  const interruptedSpeakerCue =
+    interruption.publicInterruptedSpeakerCue?.trim() ||
+    interruption.interruptedSpeakerCue?.trim();
   if (interruptedSpeakerCue) {
     segments.push({
       id: `${sourceMessageId}:coffee-interruption:interrupted`,

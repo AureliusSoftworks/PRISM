@@ -84,7 +84,7 @@ describe("bot canvas marquee selection", () => {
     );
   });
 
-  it("opens management only when the focused bot is activated again in the empty Chat overview", () => {
+  it("unfocuses only when the focused bot is activated again in the empty Chat overview", () => {
     const base = {
       view: "chat" as const,
       conversationMessageCount: 0,
@@ -92,7 +92,7 @@ describe("bot canvas marquee selection", () => {
       botId: "bot-a",
     };
 
-    assert.equal(resolveCanvasBotTileActivation(base), "manage");
+    assert.equal(resolveCanvasBotTileActivation(base), "unfocus");
     assert.equal(
       resolveCanvasBotTileActivation({ ...base, botId: "bot-b" }),
       "focus",

@@ -196,7 +196,7 @@ test("turns Turbo into a compatible ONLINE route when the current model cannot u
   assert.match(pageSource, /persistModelTurboPreference\(turboTarget, true\)/u);
 });
 
-test("mounts a Control-hold shortcut toast", () => {
+test("mounts a stationary modifier-hold shortcut toast", () => {
   assert.match(pageSource, /ControlShortcutGuide/u);
   assert.match(
     pageSource,
@@ -209,6 +209,15 @@ test("mounts a Control-hold shortcut toast", () => {
   assert.match(guideSource, /data-prism-control-shortcut-guide="true"/u);
   assert.match(guideSource, /holdAppNavbarForControlShortcuts\(\)/u);
   assert.match(guideSource, /CONTROL_ROOT_ACTIONS/u);
+  assert.match(guideSource, /const optionHeldRef = useRef\(false\)/u);
+  assert.match(
+    guideSource,
+    /hasAttribute\("data-prism-wielding"\)[\s\S]*setPrismWielding\(true\)/u,
+  );
+  assert.match(
+    guideSource,
+    /let releaseNavbar = controlHeld[\s\S]*window\.setTimeout\([\s\S]*holdAppNavbarForControlShortcuts\(\)[\s\S]*setVisible\(true\)/u,
+  );
   assert.doesNotMatch(guideSource, />Ctrl</u);
   assert.match(guideSource, /styles\.title/u);
   const guideCss = readFileSync(
@@ -221,7 +230,7 @@ test("mounts a Control-hold shortcut toast", () => {
   assert.doesNotMatch(guideCss, /\.compass\s*\{/u);
   assert.match(
     readFileSync(new URL("./controlShortcutGuide.ts", import.meta.url), "utf8"),
-    /return args\.controlHeld;/u,
+    /args\.controlHeld \|\| \(args\.optionHeld && !args\.prismWielding\)/u,
   );
   assert.match(
     companionSource,
@@ -244,7 +253,7 @@ test("updates contextual guidance without adding first-run setup", () => {
   assert.match(tutorialSource, /Option\+Command summons Prism/u);
   assert.match(
     tutorialSource,
-    /Hold Control for a moment to reveal a small shortcut toast[\s\S]*Wield Prism stays legend-free/u,
+    /Hold Option still for a moment to reveal a small shortcut toast[\s\S]*moving the pointer Wields Prism instead/u,
   );
   assert.match(tutorialSource, /scroll anywhere to move its pending value without moving the cursor/u);
   assert.match(

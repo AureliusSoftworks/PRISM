@@ -32,6 +32,7 @@ import {
   normalizeVoiceEffect,
   normalizeOptionalBotAudioVoiceProfileV1,
   resolveBotAudioVoiceProfileV1,
+  resolveBotPronunciationMapPointV1,
   resolveLocalVoicePronunciationLocale,
   normalizeVoiceMode,
   resolveVoicePlaybackTransform,
@@ -429,6 +430,27 @@ describe("audio voice normalization", () => {
         },
       ).pronunciationMapPoint,
       undefined,
+    );
+  });
+
+  it("resolves only an explicitly persisted Accent Map pin for Power dialects", () => {
+    assert.equal(resolveBotPronunciationMapPointV1(null, null), null);
+    assert.deepEqual(
+      resolveBotPronunciationMapPointV1(
+        JSON.stringify({
+          v: 3,
+          pronunciationMapPoint: { x: -0.2, y: 0.74 },
+        }),
+        null,
+      ),
+      { x: 0, y: 0.74 },
+    );
+    assert.deepEqual(
+      resolveBotPronunciationMapPointV1(
+        { v: 3, pronunciationMapPoint: { x: 0.2, y: 0.3 } },
+        { v: 3, pronunciationMapPoint: { x: 0.8, y: 0.9 } },
+      ),
+      { x: 0.8, y: 0.9 },
     );
   });
 

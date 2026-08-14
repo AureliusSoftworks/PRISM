@@ -49,7 +49,7 @@ test("mounts the global companion on product shells and submerges it behind top-
   assert.doesNotMatch(page, /surfaceId: "settings"/u);
   assert.match(
     page,
-    /companionSubmergedByMainPanel =\s*prismCompanionDisabledByMainPanel\(panel, botAvatarCustomizerOpen\)[\s\S]*submerged=\{companionSubmergedByMainPanel\}/u,
+    /companionSubmergedByMainPanel =\s*prismCompanionDisabledByMainPanel\([\s\S]*botAvatarCustomizerOpen \|\| botGeneratorOpen[\s\S]*submerged=\{companionSubmergedByMainPanel\}/u,
   );
   assert.match(page, /const globalRefractRouting = useMemo\(\(\) =>/u);
   assert.match(page, /refractRouting=\{globalRefractRouting\}/u);
@@ -392,7 +392,7 @@ test("keeps the app shell crisp behind a local focus orb while pausing motion", 
   assert.match(component, /setAppNavbarWielding\(false\)/u);
   assert.match(
     component,
-    /Revive a dimmed\/hidden orb as soon as Option wield begins[\s\S]*clearIdleDim\(\);[\s\S]*setAppNavbarWielding\(true\);[\s\S]*wieldStateRef\.current = next/u,
+    /clearIdleDim\(\);[\s\S]*Pointer movement is the sole visual Wield boundary[\s\S]*setAppNavbarWielding\(true\)/u,
   );
   assert.doesNotMatch(component, /optionWieldOnApple/u);
   assert.match(
@@ -549,7 +549,7 @@ test("dims the idle orb after settle, then vanishes after the same delay", () =>
   assert.match(component, /clearIdleDim\(\);\s*stopInertia\(false\)/u);
   assert.match(
     component,
-    /Revive a dimmed\/hidden orb as soon as Option wield begins/u,
+    /Pointer movement is the sole visual Wield boundary/u,
   );
   assert.match(
     component,

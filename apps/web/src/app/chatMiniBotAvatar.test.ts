@@ -91,10 +91,14 @@ describe("chatMiniBotAvatar", () => {
     assert.doesNotMatch(pageSource, /key=\{[^}]*avatarFacing/);
   });
 
-  it("keeps every mini buckle glyph two pixels inside its nominal size", () => {
+  it("keeps every mini buckle glyph one pixel inside its nominal size and raises it one pixel", () => {
     assert.match(
       pageCssSource,
-      /\.emptyStateHeroMiniGlyph\s*\{[^}]*width:\s*calc\([^}]*--chat-mini-bot-glyph-size[^}]*- 2px[^}]*height:\s*calc\([^}]*--chat-mini-bot-glyph-size[^}]*- 2px/,
+      /\.emptyStateHeroMiniGlyph\s*\{[^}]*width:\s*calc\([^}]*--chat-mini-bot-glyph-size[^}]*- 1px[^}]*height:\s*calc\([^}]*--chat-mini-bot-glyph-size[^}]*- 1px/,
+    );
+    assert.match(
+      cssSource,
+      /\.root\s*\{[^}]*--chat-mini-bot-lower-screen-nudge-y:\s*-1px/,
     );
     assert.match(
       cssSource,
@@ -306,7 +310,7 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.match(
       pageCssSource,
-      /\.emptyStateHeroMiniGlyph\s*\{[^}]*width:\s*calc\([^}]*--chat-mini-bot-glyph-size[^}]*- 2px[^}]*height:\s*calc\([^}]*--chat-mini-bot-glyph-size[^}]*- 2px/,
+      /\.emptyStateHeroMiniGlyph\s*\{[^}]*width:\s*calc\([^}]*--chat-mini-bot-glyph-size[^}]*- 1px[^}]*height:\s*calc\([^}]*--chat-mini-bot-glyph-size[^}]*- 1px/,
     );
     assert.match(
       pageCssSource,

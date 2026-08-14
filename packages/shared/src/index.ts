@@ -211,6 +211,7 @@ export {
   applyBotPowerEchoResponseV1,
   applyBotPowerCursedTongueResponseV1,
   applyBotPowerMumbledResponseV1,
+  applyBotPowerMumbledReactionPlanV1,
   applyBotPowerMuteResponseV1,
   botPowerMuteEstimatedDurationMsV1,
   botPowerMuteElapsedCueV1,
@@ -663,6 +664,7 @@ export {
   resolveLocalVoicePronunciationLocale,
   localVoicePronunciationOverrideIsActive,
   resolveBotAudioVoiceProfileV1,
+  resolveBotPronunciationMapPointV1,
   normalizeVoiceMode,
   normalizeVoiceDeliveryMood,
   elevenLabsVoiceDirectionForMood,
@@ -803,6 +805,7 @@ export {
   botFaceEyeMovementIsActive,
   DEFAULT_BOT_FACE_FONT_WEIGHT,
   DEFAULT_BOT_FACE_MOUTH_CHARACTER,
+  DEFAULT_BOT_FACE_CUSTOM_SPEECH_POSES,
   DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER,
   DEFAULT_BOT_FACE_MOUTH_OFFSET_X,
   DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
@@ -819,6 +822,7 @@ export {
   DISABLED_BOT_FACE_THINKING_FRAMES,
   botFaceThinkingSpinnerDisabled,
   botFaceThinkingFramesEqual,
+  botFaceCustomSpeechGlyphForMouthShape,
   botFaceFontFromVoicePreset,
   isBotFaceFontId,
   normalizeBotFaceBlinkBar,
@@ -838,6 +842,7 @@ export {
   normalizeBotFaceGlyphAnimation,
   normalizeBotFaceEyeMovement,
   normalizeBotFaceMouthCharacter,
+  normalizeBotFaceCustomSpeechPoses,
   normalizeBotFaceMouthCoffeePucker,
   normalizeBotFaceMouthOffsetX,
   normalizeBotFaceMouthOffsetY,
@@ -848,13 +853,16 @@ export {
   normalizeBotFaceThinkingOffsetY,
   normalizeBotFaceThinkingScale,
   parseStoredBotFaceThinkingFrames,
+  parseStoredBotFaceCustomSpeechPoses,
   randomBotFaceStyle,
   resolveBotFaceStyle,
   serializeBotFaceThinkingFrames,
+  serializeBotFaceCustomSpeechPosesForStorage,
   type BotFaceBlinkBar,
   type BotFaceEyeCount,
   type BotFaceFontId,
   type BotFaceGlyphAnimation,
+  type BotFaceCustomSpeechPoses,
   type BotFaceEyeMovement,
   type BotFaceStyle,
   type BotFaceStyleInput,
@@ -908,6 +916,7 @@ export {
   BOT_GENERATION_PROMPT_MAX_LENGTH,
   BOT_GENERATION_VOICE_PREVIEW_MAX_LENGTH,
   normalizeBotGeneratedDraftV1,
+  normalizeLeanBotGeneratedDraftV1,
   normalizeBotGenerationPrompt,
   type BotGeneratedAvatarDetailsInputV1,
   type BotGeneratedDraftV1,
@@ -920,6 +929,36 @@ export {
   type BotGeneratedSettingsV1,
   type BotGenerationGlyphId,
 } from "./botGeneration.js";
+export {
+  BOT_FOUNDRY_BATCH_MAX_COUNT,
+  BOT_FOUNDRY_BATCH_MIN_COUNT,
+  BOT_FOUNDRY_LEAN_BATCH_MIN_COUNT,
+  BOT_FOUNDRY_INSPIRATION_MAX_SOURCES,
+  BOT_FOUNDRY_INSPIRATION_MIN_SOURCES,
+  DEFAULT_BOT_FOUNDRY_POWER_OPTIONS,
+  botFoundryBatchIsLean,
+  botFoundryGenerationContextInstruction,
+  botFoundryPowerBudgetInstruction,
+  botFoundryPowerStrengthLabel,
+  explicitBotFoundryPowerCountFromBrief,
+  normalizeBotFoundryBatchGroupIdentityV1,
+  normalizeBotFoundryGenerationContextV1,
+  normalizeBotFoundryPowerOptionsV1,
+  resolveBotFoundryGenerationContextForBriefV1,
+  resolveBotFoundryPowerOptionsForBriefV1,
+  uniqueBotFoundryBatchGroupName,
+  type BotFoundryCreationMode,
+  type BotFoundryGenerationContextV1,
+  type BotFoundryBatchGroupIdentityV1,
+  type BotFoundryInspirationSourceV1,
+  type BotFoundryPowerCount,
+  type BotFoundryPowerOptionsV1,
+} from "./botFoundryCreation.js";
+
+export {
+  BOT_LIBRARY_GROUP_MEMBER_MAX,
+  BOT_LIBRARY_GROUP_MEMBER_MIN,
+} from "./libraryGroup.js";
 
 export {
   BOT_GENERATION_FIELD_REGISTRY_VERSION,
@@ -1358,6 +1397,7 @@ export {
   BOT_AUTO_ACCENT_HUE_OFFSET_DEGREES,
   DEFAULT_BOT_IDENTITY_COLOR,
   accentLightnessBand,
+  blendWeightedBotIdentityColors,
   clampAccentLightness,
   clampLuminance,
   contrastRatio,
@@ -1371,6 +1411,7 @@ export {
   relativeLuminance,
   resolveBotAccentColor,
   swatchBorderCompensation,
+  type WeightedBotIdentityColor,
 } from "./color.js";
 
 import type {
@@ -1570,6 +1611,11 @@ export interface ChatMessage {
   turbo?: boolean;
   /** Bot/persona id attributed to this message. Null/undefined = default PRISM. */
   botId?: string | null;
+  /**
+   * Private Chat transport only: the holder's clean intended speech before a
+   * public speech Power rewrote it. Never render, export, or persist this field.
+   */
+  botPowerPrivateIntendedSpeech?: string;
   /** Bot that generated the message (assistant only). Resolved from bots.name at read time. */
   botName?: string;
   /** Bot's associated accent color (CSS color string). Resolved from bots.color at read time. */
@@ -1680,8 +1726,12 @@ export interface CoffeeInterruptionEvent {
   reactionText?: string;
   /** Immediate canned cut-in spoken by the interrupting bot. */
   interrupterCue?: ListenerReactionSpokenCue;
+  publicInterrupterCue?: string;
+  interrupterCueSpeechEffect?: "speech_obfuscation";
   /** Annoyed canned tail spoken by the interrupted bot over the cut-in. */
   interruptedSpeakerCue?: BotCrosstalkInterruptedSpeakerCue;
+  publicInterruptedSpeakerCue?: string;
+  interruptedSpeakerCueSpeechEffect?: "speech_obfuscation";
   socialConsequences: CoffeeInterruptionSocialDelta[];
 }
 

@@ -165,6 +165,10 @@ describe("shared routing model picker integration", () => {
     assert.match(pageSource, /function AutoEffortIcon/u);
     assert.match(
       pageSource,
+      /function AutoEffortIcon\(\): React\.JSX\.Element \{[\s\S]{0,420}d="M9 2\.75 15\.25 14H2\.75L9 2\.75Z"/u,
+    );
+    assert.match(
+      pageSource,
       /const effortInteractionDisabled =[\s\S]{0,100}autoSelected/u,
     );
     assert.match(
@@ -214,6 +218,14 @@ describe("shared routing model picker integration", () => {
     assert.match(
       tutorialSource,
       /In ONLINE Auto, clicking the upright Effort triangle invokes that same Turbo toggle/u,
+    );
+    assert.match(
+      pageSource,
+      /if \(!autoSelected\) \{[\s\S]{0,120}persistGlobalModelSelection\(/u,
+    );
+    assert.match(
+      pageSource,
+      /else if \(selectedProvider === "local"\) \{[\s\S]{0,220}\[turboCandidate\.provider\]: AUTO_MODEL_CHOICE/u,
     );
   });
 
@@ -479,6 +491,14 @@ describe("shared routing model picker integration", () => {
     assert.match(
       cssSource,
       /\.composeModelMaxElectricity\s*\{[^}]*pointer-events:\s*none[^}]*z-index:\s*5[^}]*image-rendering:\s*auto/u,
+    );
+    assert.match(
+      cssSource,
+      /\.composeModelMaxElectricity\s*\{[^}]*background-size:\s*calc\(100% \+ 8px\) calc\(100% \+ 8px\)/u,
+    );
+    assert.doesNotMatch(
+      cssSource,
+      /\.composeModelMaxElectricity\s*\{[^}]*drop-shadow/u,
     );
     assert.match(
       cssSource,
@@ -897,6 +917,10 @@ describe("shared routing model picker integration", () => {
     assert.match(
       pageSource,
       /<ModelEffortIcon[\s\S]{0,120}level=\{rowEffort\}/u,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /<ModelEffortIcon[\s\S]{0,180}level=\{rowEffort\}[\s\S]{0,180}autoGlyph=/u,
     );
     assert.match(
       pageSource,

@@ -258,14 +258,19 @@ function coffeeSeatOpenMouthGlyph(
 
 /**
  * Mini avatars keep talking cheap: default mouths flip closed ↔ open-wide
- * (`:0`). Authored/special mouths stay on their resting glyph.
+ * (`:0`). Authored/special mouths stay on their resting glyph unless the
+ * separate Custom Speech module explicitly opts them into the same clock.
  */
 export function miniAvatarBinaryMouthShape(args: {
   talking: boolean;
   mouthShape: ZenLiveBotMouthShape;
   mouthCharacter?: string | null;
+  customSpeechEnabled?: boolean;
 }): ZenLiveBotMouthShape {
-  if (normalizeBotFaceMouthCharacter(args.mouthCharacter) !== null) {
+  if (
+    normalizeBotFaceMouthCharacter(args.mouthCharacter) !== null &&
+    args.customSpeechEnabled !== true
+  ) {
     return "closed";
   }
   if (!args.talking) return "closed";

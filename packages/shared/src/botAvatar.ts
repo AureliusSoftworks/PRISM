@@ -58,6 +58,31 @@ export const BOT_FACE_EYE_SPACING_MIN = 0.16;
 export const BOT_FACE_EYE_SPACING_MAX = 0.72;
 export const BOT_FACE_EYE_SPACING_STEP = 0.02;
 export const DEFAULT_BOT_FACE_MOUTH_CHARACTER: string | null = null;
+/**
+ * Four authored speech poses, in the stable semantic order Rest, Closure,
+ * Open, Round. Custom Speech deliberately maps the detailed live visemes into
+ * this small vocabulary rather than asking players to author every phoneme.
+ */
+export const BOT_FACE_CUSTOM_SPEECH_POSE_IDS = [
+  "rest",
+  "closure",
+  "open",
+  "round",
+] as const;
+export type BotFaceCustomSpeechPoseId =
+  (typeof BOT_FACE_CUSTOM_SPEECH_POSE_IDS)[number];
+export type BotFaceCustomSpeechPoses = readonly [
+  string,
+  string,
+  string,
+  string,
+];
+export const DEFAULT_BOT_FACE_CUSTOM_SPEECH_POSES: BotFaceCustomSpeechPoses = [
+  "—",
+  "·",
+  "△",
+  "○",
+];
 /** Custom mouths use the Coffee sip pucker unless the player explicitly opts out. */
 export const DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER = true;
 export const DEFAULT_BOT_FACE_FONT_WEIGHT = 600;
@@ -168,6 +193,8 @@ export interface BotFaceStyle {
   mouthFont: BotFaceFontId;
   mouthCharacter: string | null;
   mouthAnimation: BotFaceGlyphAnimation;
+  /** Present only for a valid Custom Speech configuration. */
+  mouthSpeechPoses: BotFaceCustomSpeechPoses | null;
   mouthCoffeePucker: boolean;
   weight: number;
   eyeScale: number;
@@ -199,6 +226,7 @@ export interface BotFaceStyleInput {
   faceMouthFont?: unknown;
   faceMouthCharacter?: unknown;
   faceMouthAnimation?: unknown;
+  faceMouthSpeechPoses?: unknown;
   faceMouthCoffeePucker?: unknown;
   faceFontWeight?: unknown;
   faceEyeScale?: unknown;
@@ -295,6 +323,77 @@ export function normalizeBotFaceEyeSpacing(value: unknown): number | null {
 
 export function normalizeBotFaceMouthCharacter(value: unknown): string | null {
   return normalizeBotFaceEyeCharacter(value);
+}
+
+/** Validates the separate four-pose Custom Speech value. */
+export function normalizeBotFaceCustomSpeechPoses(
+  value: unknown,
+): BotFaceCustomSpeechPoses | null {
+  const poses =
+    typeof value === "string"
+      ? splitBotFaceVisibleGraphemes(value)
+      : Array.isArray(value)
+        ? value.flatMap((pose) =>
+            typeof pose === "string"
+              ? splitBotFaceVisibleGraphemes(pose)
+              : [],
+          )
+        : [];
+  if (
+    poses.length !== BOT_FACE_CUSTOM_SPEECH_POSE_IDS.length ||
+    poses.some((pose) => botFaceGraphemeHasEmoji(pose))
+  ) {
+    return null;
+  }
+  return [poses[0]!, poses[1]!, poses[2]!, poses[3]!];
+}
+
+export function parseStoredBotFaceCustomSpeechPoses(
+  value: unknown,
+): BotFaceCustomSpeechPoses | null {
+  if (typeof value !== "string") return normalizeBotFaceCustomSpeechPoses(value);
+  try {
+    return normalizeBotFaceCustomSpeechPoses(JSON.parse(value));
+  } catch {
+    return normalizeBotFaceCustomSpeechPoses(value);
+  }
+}
+
+export function serializeBotFaceCustomSpeechPosesForStorage(
+  value: unknown,
+): string | null {
+  const poses = normalizeBotFaceCustomSpeechPoses(value);
+  return poses ? JSON.stringify(poses) : null;
+}
+
+/** Collapses the existing detailed live viseme vocabulary into Custom Speech. */
+export function botFaceCustomSpeechPoseForMouthShape(
+  mouthShape: string,
+): BotFaceCustomSpeechPoseId {
+  switch (mouthShape) {
+    case "closed":
+      return "rest";
+    case "speech-closed":
+      return "closure";
+    case "narrow":
+    case "dot":
+      return "closure";
+    case "open-round":
+    case "at":
+    case "click":
+      return "round";
+    default:
+      return "open";
+  }
+}
+
+export function botFaceCustomSpeechGlyphForMouthShape(
+  poses: BotFaceCustomSpeechPoses,
+  mouthShape: string,
+): string {
+  return poses[BOT_FACE_CUSTOM_SPEECH_POSE_IDS.indexOf(
+    botFaceCustomSpeechPoseForMouthShape(mouthShape),
+  )]!;
 }
 
 export function normalizeBotFaceMouthCoffeePucker(
@@ -617,9 +716,20 @@ export function resolveBotFaceStyle(
   const eyeCharacter =
     normalizeBotFaceEyeCharacter(input.faceEyeCharacter) ??
     DEFAULT_BOT_FACE_EYE_CHARACTER;
-  const mouthCharacter =
-    normalizeBotFaceMouthCharacter(input.faceMouthCharacter) ??
-    DEFAULT_BOT_FACE_MOUTH_CHARACTER;
+  const legacyPackedSpeechPoses =
+    input.faceMouthAnimation === "custom"
+      ? normalizeBotFaceCustomSpeechPoses(input.faceMouthCharacter)
+      : null;
+  const mouthCharacter = legacyPackedSpeechPoses
+    ? legacyPackedSpeechPoses[0]
+    : normalizeBotFaceMouthCharacter(input.faceMouthCharacter) ??
+      DEFAULT_BOT_FACE_MOUTH_CHARACTER;
+  const requestedMouthAnimation =
+    normalizeBotFaceGlyphAnimation(input.faceMouthAnimation) ??
+    DEFAULT_BOT_FACE_GLYPH_ANIMATION;
+  const mouthSpeechPoses =
+    parseStoredBotFaceCustomSpeechPoses(input.faceMouthSpeechPoses) ??
+    legacyPackedSpeechPoses;
   const eyeScale =
     normalizeBotFaceEyeScale(input.faceEyeScale) ??
     DEFAULT_BOT_FACE_EYE_SCALE;
@@ -671,9 +781,8 @@ export function resolveBotFaceStyle(
       DEFAULT_BOT_FACE_EYE_MOVEMENT,
     mouthFont: normalizeBotFaceFontId(input.faceMouthFont) ?? fallbackFont,
     mouthCharacter,
-    mouthAnimation:
-      normalizeBotFaceGlyphAnimation(input.faceMouthAnimation) ??
-      DEFAULT_BOT_FACE_GLYPH_ANIMATION,
+    mouthAnimation: requestedMouthAnimation,
+    mouthSpeechPoses,
     mouthCoffeePucker:
       normalizeBotFaceMouthCoffeePucker(input.faceMouthCoffeePucker) ??
       DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER,
@@ -770,6 +879,7 @@ export function randomBotFaceStyle(random = Math.random): BotFaceStyle {
     mouthFont,
     mouthCharacter: DEFAULT_BOT_FACE_MOUTH_CHARACTER,
     mouthAnimation: DEFAULT_BOT_FACE_GLYPH_ANIMATION,
+    mouthSpeechPoses: null,
     mouthCoffeePucker: DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER,
     weight,
     eyeScale,

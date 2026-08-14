@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
+  BOT_LIBRARY_GROUP_MEMBER_MAX,
   PRISM_ORCHESTRATION_VERSION,
   normalizePrismJsonObject,
   type PrismEntityReferenceV1,
@@ -9,7 +10,7 @@ import {
 import { randomId } from "./security.ts";
 
 export const LIBRARY_FAVORITES_GROUP_ID = "builtin:favorites";
-export const LIBRARY_GROUP_MEMBER_LIMIT = 24;
+export const LIBRARY_GROUP_MEMBER_LIMIT = BOT_LIBRARY_GROUP_MEMBER_MAX;
 const LIBRARY_GROUP_LIMIT = 100;
 
 export interface LibraryGroupV1 {

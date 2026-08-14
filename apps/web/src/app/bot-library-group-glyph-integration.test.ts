@@ -16,7 +16,7 @@ function sourceBetween(start: string, end: string): string {
   return pageSource.slice(startIndex, endIndex);
 }
 
-test("group glyph identity survives normalization and portable group transfer", () => {
+test("legacy group glyph identity remains readable in portable group transfer", () => {
   const normalization = sourceBetween(
     "function normalizeBotLibraryGroups(raw: unknown)",
     "function protectedBotIdsForBotLibraryGroups",
@@ -36,14 +36,15 @@ test("group glyph identity survives normalization and portable group transfer", 
   assert.match(importSource, /\{ glyph: manifestGlyph \}/u);
 });
 
-test("the bot hub renders accessible gradient-backed group memberships", () => {
+test("the bot hub renders accessible spectrum-tile group memberships", () => {
   const hub = sourceBetween(
     "{botPanelView === \"botHub\" && selectedBotPanelBot ? (",
     "{/* One form, two modes.",
   );
 
   assert.match(hub, /selectedBotLibraryGroups\.map\(\(group\)/u);
-  assert.match(hub, /<BotLibraryGroupGlyph[\s\S]*groupId=\{group\.id\}/u);
+  assert.match(hub, /<BotLibraryGroupSpectrumTile[\s\S]*groupName=\{group\.name\}/u);
+  assert.match(hub, /imageUrl=\{botLibraryGroupSpectrumImageUrl\(group\)\}/u);
   assert.match(hub, /botLibraryGroupVisualStyle\([\s\S]*groupBots/u);
   assert.match(hub, /aria-label=\{`Open \$\{group\.name\} group`\}/u);
   assert.match(cssSource, /\.botPanelHubMembership\s*\{/u);
@@ -51,22 +52,16 @@ test("the bot hub renders accessible gradient-backed group memberships", () => {
   assert.match(cssSource, /var\(--bot-library-group-gradient\)/u);
 });
 
-test("the focused group dashboard rerolls and persists only glyph identity", () => {
-  const reroll = sourceBetween(
-    "function rerollBotLibraryGroupGlyph(groupId: string)",
-    "function openBotGroupRoomAtmosphereDialog",
-  );
+test("the focused group dashboard uses spectrum identity without a reroll affordance", () => {
   const hero = sourceBetween(
     "const renderFocusedBotLibraryGroupHero =",
     "const renderChatCanvasPickerControls =",
   );
 
-  assert.match(reroll, /glyph:\s*rerollBotLibraryGroupGlyphIdentity/u);
-  assert.doesNotMatch(reroll, /name:|botIds:|updatedAt:/u);
-  assert.match(hero, /aria-label=\{groupGlyphRerollTitle\}/u);
-  assert.match(hero, /rerollBotLibraryGroupGlyph\(focusedBotLibraryGroup\.id\)/u);
-  assert.match(hero, /<BotLibraryGroupGlyph[\s\S]*focusedBotLibraryGroup\.glyph/u);
-  assert.match(hero, /data-tutorial-target="chat-group-glyph-reroll"/u);
+  assert.match(hero, /<BotLibraryGroupSpectrumTile[\s\S]*focusedBotLibraryGroup\.name/u);
+  assert.match(hero, /botLibraryGroupSpectrumImageUrl\([\s\S]*focusedBotLibraryGroup/u);
+  assert.match(hero, /data-tutorial-target="chat-group-spectrum-tile"/u);
+  assert.doesNotMatch(hero, /Reroll glyph|rerollBotLibraryGroupGlyph/u);
 });
 
 test("the bot hub requests and renders ephemeral local-only group suggestions", () => {

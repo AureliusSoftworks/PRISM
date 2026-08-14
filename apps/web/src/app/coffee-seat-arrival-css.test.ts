@@ -769,6 +769,29 @@ describe("Coffee seat arrival CSS", () => {
     );
   });
 
+  it("maps Custom Speech poses onto the existing live viseme clock", () => {
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /botFaceCustomSpeechGlyphForMouthShape\(\s*faceMouthSpeechPoses,\s*streamedMouthShape,\s*\)/,
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /part === "mouth" && customSpeechGlyph\s*\? customSpeechGlyph/,
+    );
+    assert.match(
+      pageSource,
+      /faceStyle\.mouthAnimation ===\s*DEFAULT_BOT_FACE_GLYPH_ANIMATION &&\s*faceStyle\.mouthSpeechPoses !== null/,
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /configuredFaceMouthAnimation === DEFAULT_BOT_FACE_GLYPH_ANIMATION &&\s*effectiveTalking/,
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /const normalizedFaceMouthAnimation = fullMotion\s*\? configuredFaceMouthAnimation\s*:\s*DEFAULT_BOT_FACE_GLYPH_ANIMATION/,
+    );
+  });
+
   it("keeps portable face weight data while disabling its render adjustment", () => {
     assert.match(coffeeSeatPlateEmojiSource, /faceFontWeight\?: number \| null/);
     assert.doesNotMatch(

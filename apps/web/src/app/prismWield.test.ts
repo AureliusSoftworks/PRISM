@@ -41,23 +41,14 @@ test("keeps Prism wieldable from Home while assistant menus stay protected", () 
   );
 });
 
-test("arms from a modifier-only timeout without changing state on stale timers", () => {
+test("keeps a modifier-only hold pending until the pointer actually moves", () => {
   const pending = transitionPrismWield(createPrismWieldState(), {
     type: "modifier-down",
     pointer: { x: 10, y: 20 },
   });
   assert.equal(pending.phase, "pending");
-  assert.equal(
-    transitionPrismWield(pending, {
-      type: "arm",
-      epoch: pending.epoch - 1,
-    }),
-    pending,
-  );
-  assert.equal(
-    transitionPrismWield(pending, { type: "arm", epoch: pending.epoch }).phase,
-    "following",
-  );
+  assert.equal(pending.pointer?.x, 10);
+  assert.equal(pending.pointer?.y, 20);
 });
 
 test("arms after four pixels of pointer travel and follows without React state", () => {
@@ -86,8 +77,9 @@ test("captures, returns, and finishes through explicit phases", () => {
     pointer: { x: 10, y: 20 },
   });
   const following = transitionPrismWield(pending, {
-    type: "arm",
+    type: "pointer-move",
     epoch: pending.epoch,
+    pointer: { x: 20, y: 20 },
   });
   const captured = transitionPrismWield(following, {
     type: "capture",
@@ -115,8 +107,9 @@ test("ignores capture and finish events from stale gestures", () => {
     pointer: { x: 0, y: 0 },
   });
   const following = transitionPrismWield(pending, {
-    type: "arm",
+    type: "pointer-move",
     epoch: pending.epoch,
+    pointer: { x: 8, y: 0 },
   });
   assert.equal(
     transitionPrismWield(following, {

@@ -52,6 +52,7 @@ import {
   normalizeBotFaceThinkingScale,
   serializeBotAudioVoiceProfileV1,
   serializeBotFaceThinkingFrames,
+  serializeBotFaceCustomSpeechPosesForStorage,
   type PrismJsonObject,
   type PrismJsonValue,
 } from "@localai/shared";
@@ -67,6 +68,7 @@ const DEFAULT_BOT_COLUMNS = [
   "prism_default_bot_face_mouth_font",
   "prism_default_bot_face_mouth_character",
   "prism_default_bot_face_mouth_animation",
+  "prism_default_bot_face_mouth_speech_poses",
   "prism_default_bot_face_mouth_coffee_pucker",
   "prism_default_bot_face_font_weight",
   "prism_default_bot_face_eye_scale",
@@ -178,6 +180,15 @@ function nextValues(patch: PrismJsonObject): DefaultBotValues {
       throw new Error("Invalid face thinking frames.");
     }
   }
+  let faceMouthSpeechPoses: string | null = null;
+  if (patch.faceMouthSpeechPoses !== null && patch.faceMouthSpeechPoses !== undefined) {
+    faceMouthSpeechPoses = serializeBotFaceCustomSpeechPosesForStorage(
+      patch.faceMouthSpeechPoses,
+    );
+    if (faceMouthSpeechPoses === null) {
+      throw new Error("Invalid face mouth speech poses.");
+    }
+  }
   return {
     prism_default_bot_name: null,
     prism_default_bot_system_prompt: null,
@@ -208,13 +219,16 @@ function nextValues(patch: PrismJsonObject): DefaultBotValues {
     prism_default_bot_face_mouth_character:
       patch.faceMouthCharacter === null
         ? null
-        : normalizeBotFaceMouthCharacter(patch.faceMouthCharacter),
+        : normalizeBotFaceMouthCharacter(
+            patch.faceMouthCharacter,
+          ),
     prism_default_bot_face_mouth_animation: requiredNormalized(
       patch.faceMouthAnimation,
       DEFAULT_BOT_FACE_GLYPH_ANIMATION,
       "mouth animation",
       normalizeBotFaceGlyphAnimation,
     ),
+    prism_default_bot_face_mouth_speech_poses: faceMouthSpeechPoses,
     prism_default_bot_face_mouth_coffee_pucker:
       typeof patch.faceMouthCoffeePucker === "boolean"
         ? patch.faceMouthCoffeePucker

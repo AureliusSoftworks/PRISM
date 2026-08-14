@@ -297,6 +297,157 @@ describe("API request integration", () => {
     assert.equal(generalImages.status, 404);
   });
 
+  it("filters asset libraries by exact bot provenance and returns bot rail summaries", async () => {
+    const client = createClient();
+    const registered = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "bot-assets-index@example.com",
+        password: "bot-assets-index-password",
+      }),
+    );
+    assert.equal(registered.status, 201);
+    const userId = String((await json(registered)).user.id);
+    const ownerResponse = await client.request(
+      "/api/bots",
+      jsonInit({ name: "Asset Owner" }),
+    );
+    const participantResponse = await client.request(
+      "/api/bots",
+      jsonInit({ name: "Asset Participant" }),
+    );
+    const unrelatedResponse = await client.request(
+      "/api/bots",
+      jsonInit({ name: "Asset Bystander" }),
+    );
+    assert.equal(ownerResponse.status, 201);
+    assert.equal(participantResponse.status, 201);
+    assert.equal(unrelatedResponse.status, 201);
+    const ownerBotId = String((await json(ownerResponse)).bot.id);
+    const participantBotId = String((await json(participantResponse)).bot.id);
+    const unrelatedBotId = String((await json(unrelatedResponse)).bot.id);
+    const createdAt = "2026-08-13T12:00:00.000Z";
+    db.prepare(
+      `INSERT INTO images
+         (id, user_id, bot_id, related_bot_ids, origin, prompt, url, provider,
+          model, purpose, local_rel_path, created_at)
+       VALUES ('bot-assets-shared', ?, ?, ?, 'images_panel',
+               'Exact shared constellation', '', 'openai', 'test-model',
+               'gallery', NULL, ?)`,
+    ).run(
+      userId,
+      ownerBotId,
+      JSON.stringify([ownerBotId, participantBotId]),
+      createdAt,
+    );
+    db.prepare(
+      `INSERT INTO images
+         (id, user_id, bot_id, related_bot_ids, origin, prompt, url, provider,
+          model, purpose, local_rel_path, created_at)
+       VALUES ('bot-assets-name-only', ?, NULL, '[]', 'images_panel',
+               ?, '', 'openai', 'test-model', 'gallery', NULL, ?)`,
+    ).run(userId, `Mentions ${participantBotId} but owns nothing`, createdAt);
+    db.prepare(
+      `INSERT INTO conversations
+         (id, user_id, title, conversation_mode, bot_id, created_at, updated_at)
+       VALUES ('bot-assets-chat', ?, 'Legacy Chat', 'chat', ?, ?, ?)`,
+    ).run(userId, participantBotId, createdAt, createdAt);
+    db.prepare(
+      `INSERT INTO images
+         (id, user_id, conversation_id, bot_id, related_bot_ids, origin, prompt,
+          url, provider, model, purpose, local_rel_path, created_at)
+       VALUES ('bot-assets-chat-derived', ?, 'bot-assets-chat', NULL, '[]',
+               'images_panel', 'Legacy handoff portrait', '', 'openai',
+               'test-model', 'gallery', NULL, '2026-08-12T12:00:00.000Z')`,
+    ).run(userId);
+
+    const filteredResponse = await client.request(
+      `/api/assets?kind=general_image&botId=${encodeURIComponent(participantBotId)}&q=constellation&source=generated`,
+    );
+    assert.equal(filteredResponse.status, 200);
+    const filtered = await json(filteredResponse);
+    assert.equal(filtered.assets.length, 1);
+    assert.equal(filtered.assets[0].members[0].imageId, "bot-assets-shared");
+    const sharedAssetSetId = String(filtered.assets[0].id);
+    const exactDetailResponse = await client.request(
+      `/api/assets/${encodeURIComponent(sharedAssetSetId)}/detail?kind=general_image&botId=${encodeURIComponent(participantBotId)}`,
+    );
+    assert.equal(exactDetailResponse.status, 200);
+    const exactDetail = await json(exactDetailResponse);
+    assert.equal(exactDetail.asset.id, sharedAssetSetId);
+    assert.equal(
+      exactDetail.asset.members[0].imageId,
+      "bot-assets-shared",
+    );
+    assert.equal(
+      (
+        await client.request(
+          `/api/assets/${encodeURIComponent(sharedAssetSetId)}/detail?kind=general_image&botId=${encodeURIComponent(unrelatedBotId)}`,
+        )
+      ).status,
+      404,
+    );
+    const derivedResponse = await client.request(
+      `/api/assets?kind=general_image&botId=${encodeURIComponent(participantBotId)}&q=legacy%20handoff`,
+    );
+    assert.equal(derivedResponse.status, 200);
+    const derived = await json(derivedResponse);
+    assert.equal(derived.assets.length, 1);
+    assert.equal(
+      derived.assets[0].members[0].imageId,
+      "bot-assets-chat-derived",
+    );
+
+    const indexResponse = await client.request(
+      `/api/bots/${encodeURIComponent(participantBotId)}/assets?limitPerKind=1`,
+    );
+    assert.equal(indexResponse.status, 200);
+    const index = (await json(indexResponse)).index;
+    assert.equal(index.botId, participantBotId);
+    assert.equal(index.sections.length, 1);
+    assert.equal(index.sections[0].kind, "general_image");
+    assert.equal(index.sections[0].totalCount, 2);
+    assert.equal(index.sections[0].assets.length, 1);
+    assert.equal(
+      index.sections[0].assets[0].members[0].imageId,
+      "bot-assets-shared",
+    );
+
+    const otherClient = createClient();
+    const otherRegistration = await otherClient.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "bot-assets-other@example.com",
+        password: "bot-assets-other-password",
+      }),
+    );
+    assert.equal(otherRegistration.status, 201);
+    assert.equal(
+      (
+        await otherClient.request(
+          `/api/bots/${encodeURIComponent(participantBotId)}/assets`,
+        )
+      ).status,
+      404,
+    );
+    assert.equal(
+      (
+        await otherClient.request(
+          `/api/assets?kind=general_image&botId=${encodeURIComponent(participantBotId)}`,
+        )
+      ).status,
+      404,
+    );
+    assert.equal(
+      (
+        await otherClient.request(
+          `/api/assets/${encodeURIComponent(sharedAssetSetId)}/detail?kind=general_image`,
+        )
+      ).status,
+      404,
+    );
+  });
+
   it("requires authentication for account memory settings endpoints", async () => {
     const anonymous = createClient();
     assert.equal((await anonymous.request("/api/settings/memories")).status, 400);
@@ -3241,6 +3392,7 @@ describe("API request integration", () => {
         faceEyeSpacing: 0.52,
         faceMouthCharacter: "△",
         faceMouthAnimation: "wobble",
+        faceMouthSpeechPoses: ["—", "·", "△", "○"],
         faceBlinkScale: 1.2,
         faceBlinkOffsetX: -0.08,
         faceBlinkOffsetY: 0.06,
@@ -3258,6 +3410,12 @@ describe("API request integration", () => {
     assert.equal(createdPayload.bot.face_eye_count, 2);
     assert.equal(createdPayload.bot.face_eye_spacing, 0.52);
     assert.equal(createdPayload.bot.face_mouth_animation, "wobble");
+    assert.deepEqual(createdPayload.bot.face_mouth_speech_poses, [
+      "—",
+      "·",
+      "△",
+      "○",
+    ]);
     assert.equal(createdPayload.bot.face_mouth_coffee_pucker, 1);
     assert.equal(createdPayload.bot.face_blink_scale, 1.2);
     assert.equal(createdPayload.bot.face_blink_offset_x, -0.08);
@@ -3277,6 +3435,7 @@ describe("API request integration", () => {
         faceEyeCount: 1,
         faceEyeSpacing: 0.28,
         faceMouthAnimation: "static",
+        faceMouthSpeechPoses: null,
         faceMouthCoffeePucker: false,
         faceBlinkScale: 0.85,
         faceBlinkOffsetX: 0.1,
@@ -3295,6 +3454,7 @@ describe("API request integration", () => {
     assert.equal(updatedPayload.bot.face_eye_count, 1);
     assert.equal(updatedPayload.bot.face_eye_spacing, 0.28);
     assert.equal(updatedPayload.bot.face_mouth_animation, "static");
+    assert.equal(updatedPayload.bot.face_mouth_speech_poses, null);
     assert.equal(updatedPayload.bot.face_mouth_coffee_pucker, 0);
     assert.equal(updatedPayload.bot.face_blink_scale, 0.85);
     assert.equal(updatedPayload.bot.face_blink_offset_x, 0.1);
@@ -3337,6 +3497,7 @@ describe("API request integration", () => {
         faceEyeSpacing: 0.48,
         faceMouthCharacter: "△",
         faceMouthAnimation: "wobble",
+        faceMouthSpeechPoses: ["—", "·", "△", "○"],
         faceBlinkScale: 1.25,
         faceBlinkOffsetX: -0.06,
         faceBlinkOffsetY: 0.08,
@@ -3356,6 +3517,10 @@ describe("API request integration", () => {
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceEyeCount, 2);
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceEyeSpacing, 0.48);
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceMouthAnimation, "wobble");
+    assert.deepEqual(
+      defaultPayload.defaultBot.prismDefaultBotFaceMouthSpeechPoses,
+      ["—", "·", "△", "○"],
+    );
     assert.equal(
       defaultPayload.defaultBot.prismDefaultBotFaceMouthCoffeePucker,
       true

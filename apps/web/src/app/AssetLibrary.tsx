@@ -11,7 +11,9 @@ import {
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import {
+  BOT_IMAGE_ASSET_LIBRARY_KIND_ORDER,
   IMAGE_ASSET_KIND_LABELS,
+  type BotImageAssetLibraryIndex,
   type ImageAssetCatalogPage,
   type ImageAssetKind,
   type ImageProviderName,
@@ -24,6 +26,7 @@ import {
 } from "./prismRefract";
 import sharedStyles from "./page.module.css";
 import styles from "./AssetLibrary.module.css";
+import { resolveAssetLibraryInitialSelection } from "./assetLibraryInitialSelection";
 import { useViewportAssetSrc } from "./useViewportAssetSrc";
 
 interface AssetApiResponse extends ImageAssetCatalogPage {
@@ -212,6 +215,23 @@ function AssetPreview({ asset }: { asset: ImageAssetSet }) {
   ) : (
     <span className={styles.missingPreview} aria-hidden="true">◇</span>
   );
+}
+
+function setAssetDetailState(
+  asset: ImageAssetSet,
+  setters: {
+    setDetail: (asset: ImageAssetSet | null) => void;
+    setTagDraft: (value: string) => void;
+    setMagentaConfirmation: (value: boolean) => void;
+    setCompressConfirmation: (value: boolean) => void;
+    setDeleteConfirmationId: (value: string | null) => void;
+  },
+): void {
+  setters.setDetail(asset);
+  setters.setTagDraft(asset.playerTags.join(", "));
+  setters.setMagentaConfirmation(false);
+  setters.setCompressConfirmation(false);
+  setters.setDeleteConfirmationId(null);
 }
 
 export function AssetRail({
@@ -456,10 +476,144 @@ export function AssetRail({
   );
 }
 
+export interface BotAssetLibraryIndexProps {
+  index: BotImageAssetLibraryIndex | null;
+  theme?: "light" | "dark";
+  loading?: boolean;
+  error?: string | null;
+  emptyMessage?: string;
+  onRetry?: () => void;
+}
+
+/**
+ * Read-only pre-library view for a focused bot. Mutations remain in the
+ * canonical Asset Library browser instead of being duplicated in the panel.
+ */
+export function BotAssetLibraryIndex({
+  index,
+  theme = "dark",
+  loading = false,
+  error = null,
+  emptyMessage = "No linked assets yet.",
+  onRetry,
+}: BotAssetLibraryIndexProps) {
+  const [openLibrary, setOpenLibrary] = useState<{
+    kind: ImageAssetKind;
+    initialAssetId: string | null;
+  } | null>(null);
+  const sections = useMemo(() => {
+    const order = new Map(
+      BOT_IMAGE_ASSET_LIBRARY_KIND_ORDER.map((kind, position) => [
+        kind,
+        position,
+      ]),
+    );
+    return [...(index?.sections ?? [])]
+      .filter((section) => section.totalCount > 0 && section.assets.length > 0)
+      .sort(
+        (left, right) =>
+          (order.get(left.kind) ?? Number.MAX_SAFE_INTEGER) -
+          (order.get(right.kind) ?? Number.MAX_SAFE_INTEGER),
+      );
+  }, [index]);
+
+  return (
+    <section
+      className={styles.botAssetIndex}
+      aria-label="Bot assets"
+      data-bot-asset-library-index={index?.botId ?? ""}
+    >
+      {loading ? (
+        <p className={styles.botAssetIndexState} aria-live="polite">
+          Loading assets…
+        </p>
+      ) : error ? (
+        <div className={styles.botAssetIndexState} role="alert">
+          <span>{error}</span>
+          {onRetry ? (
+            <button
+              type="button"
+              className={sharedStyles.linkButton}
+              onClick={onRetry}
+            >
+              Retry assets
+            </button>
+          ) : null}
+        </div>
+      ) : sections.length === 0 ? (
+        <p className={styles.botAssetIndexState}>{emptyMessage}</p>
+      ) : (
+        sections.map((section) => (
+          <section
+            key={section.kind}
+            className={styles.botAssetLibraryRail}
+            aria-label={IMAGE_ASSET_KIND_LABELS[section.kind]}
+            data-bot-asset-library-kind={section.kind}
+          >
+            <header>
+              <div>
+                <strong>{IMAGE_ASSET_KIND_LABELS[section.kind]}</strong>
+                <small>
+                  {section.totalCount} asset{section.totalCount === 1 ? "" : "s"}
+                </small>
+              </div>
+              <button
+                type="button"
+                className={sharedStyles.linkButton}
+                onClick={() =>
+                  setOpenLibrary({ kind: section.kind, initialAssetId: null })
+                }
+                aria-label={`View all ${IMAGE_ASSET_KIND_LABELS[
+                  section.kind
+                ].toLowerCase()}`}
+              >
+                View all
+              </button>
+            </header>
+            <div className={styles.botAssetLibraryThumbs}>
+              {section.assets.slice(0, 6).map((asset) => (
+                <button
+                  key={asset.id}
+                  type="button"
+                  className={`${styles.botAssetLibraryThumb} ${sharedStyles.imageThumbWrap}`}
+                  onClick={() =>
+                    setOpenLibrary({
+                      kind: section.kind,
+                      initialAssetId: asset.id,
+                    })
+                  }
+                  aria-label={`Open ${assetDisplayTitle(asset)}`}
+                  title={assetDisplayTitle(asset)}
+                >
+                  <AssetPreview asset={asset} />
+                </button>
+              ))}
+            </div>
+          </section>
+        ))
+      )}
+      {openLibrary && index ? (
+        <AssetLibraryModal
+          key={`${index.botId}:${openLibrary.kind}:${openLibrary.initialAssetId ?? "all"}`}
+          kind={openLibrary.kind}
+          theme={theme}
+          botId={index.botId}
+          initialAssetId={openLibrary.initialAssetId}
+          onClose={() => setOpenLibrary(null)}
+        />
+      ) : null}
+    </section>
+  );
+}
+
 export interface AssetLibraryModalProps {
   kind: ImageAssetKind;
   theme?: "light" | "dark";
   context?: string | null;
+  /** Exact bot ownership/participation filter. Never use context ranking here. */
+  botId?: string | null;
+  /** Opens the normal detail browser on this exact asset, regardless of catalog page. */
+  initialAssetId?: string | null;
   currentImageIds?: readonly string[];
   includeIncomplete?: boolean;
   allowDelete?: boolean;
@@ -471,6 +625,8 @@ export function AssetLibraryModal({
   kind,
   theme = "dark",
   context,
+  botId,
+  initialAssetId,
   currentImageIds = [],
   includeIncomplete = false,
   allowDelete = false,
@@ -481,10 +637,13 @@ export function AssetLibraryModal({
   const modalRootRef = useRef<HTMLDivElement | null>(null);
   const detailRef = useRef<HTMLElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const initialAssetOpenedRef = useRef<string | null>(null);
   const [query, setQuery] = useState("");
   const [source, setSource] = useState<"all" | "generated" | "uploaded">("all");
   const [usage, setUsage] = useState<"all" | "used" | "unused">("all");
-  const [sort, setSort] = useState<"relevance" | "recency">("relevance");
+  const [sort, setSort] = useState<"relevance" | "recency">(
+    initialAssetId ? "recency" : "relevance",
+  );
   const [assets, setAssets] = useState<ImageAssetSet[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -537,6 +696,7 @@ export function AssetLibraryModal({
         const params = new URLSearchParams({ kind, limit: "24", sort });
         if (query.trim()) params.set("q", query.trim());
         if (context?.trim()) params.set("context", context.trim());
+        if (botId?.trim()) params.set("botId", botId.trim());
         if (source !== "all") params.set("source", source);
         if (usage !== "all") params.set("usage", usage);
         if (includeIncomplete) params.set("includeIncomplete", "1");
@@ -552,7 +712,7 @@ export function AssetLibraryModal({
         setLoading(false);
       }
     },
-    [context, includeIncomplete, kind, query, sort, source, usage],
+    [botId, context, includeIncomplete, kind, query, sort, source, usage],
   );
 
   useEffect(() => {
@@ -647,14 +807,14 @@ export function AssetLibraryModal({
     };
   }, [onClose]);
 
-  const replaceAsset = (asset: ImageAssetSet): void => {
+  const replaceAsset = useCallback((asset: ImageAssetSet): void => {
     setDetail(asset);
     setAssets((current) =>
       current.map((candidate) => (candidate.id === asset.id ? asset : candidate)),
     );
-  };
+  }, []);
 
-  const openDetail = (asset: ImageAssetSet): void => {
+  const openDetail = useCallback((asset: ImageAssetSet): void => {
     setDetail(asset);
     setTagDraft(asset.playerTags.join(", "));
     setMagentaConfirmation(false);
@@ -679,7 +839,58 @@ export function AssetLibraryModal({
         }
       })();
     }
-  };
+  }, [replaceAsset]);
+
+  useEffect(() => {
+    const requestedAssetId = initialAssetId?.trim() ?? "";
+    if (
+      !requestedAssetId ||
+      detail ||
+      loading ||
+      initialAssetOpenedRef.current === requestedAssetId
+    ) return;
+    const controller = new AbortController();
+    void resolveAssetLibraryInitialSelection({
+      assets,
+      initialAssetId: requestedAssetId,
+      loadExact: async (assetId) => {
+        const params = new URLSearchParams({ kind });
+        if (botId?.trim()) params.set("botId", botId.trim());
+        if (includeIncomplete) params.set("includeIncomplete", "1");
+        const response = await readJson<{ ok: boolean; asset: ImageAssetSet }>(
+          await fetch(
+            `/api/assets/${encodeURIComponent(assetId)}/detail?${params.toString()}`,
+            { credentials: "include", signal: controller.signal },
+          ),
+        );
+        return response.asset;
+      },
+    })
+      .then((initialAsset) => {
+        if (controller.signal.aborted) return;
+        initialAssetOpenedRef.current = requestedAssetId;
+        if (!initialAsset) {
+          setError("This asset is no longer available in this library.");
+          return;
+        }
+        setAssetDetailState(initialAsset, {
+          setDetail,
+          setTagDraft,
+          setMagentaConfirmation,
+          setCompressConfirmation,
+          setDeleteConfirmationId,
+        });
+        window.requestAnimationFrame(() => {
+          detailRef.current?.scrollTo({ top: 0 });
+        });
+      })
+      .catch((caught) => {
+        if (caught instanceof DOMException && caught.name === "AbortError") return;
+        initialAssetOpenedRef.current = requestedAssetId;
+        setError(caught instanceof Error ? caught.message : "The asset could not be opened.");
+      });
+    return () => controller.abort();
+  }, [assets, botId, detail, includeIncomplete, initialAssetId, kind, loading]);
 
   const applyMagentaPass = async (): Promise<void> => {
     if (!detail || !magentaConfirmation || magentaBusy) return;
@@ -958,6 +1169,7 @@ export function AssetLibraryModal({
         aria-modal="true"
         aria-labelledby={headingId}
         data-asset-library-kind={kind}
+        data-asset-library-bot-id={botId?.trim() || undefined}
         onClick={(event) => event.stopPropagation()}
       >
         <header className={`${styles.modalHeader} ${sharedStyles.panelHeader}`}>

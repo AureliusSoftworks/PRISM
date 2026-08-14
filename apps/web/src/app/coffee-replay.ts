@@ -3,6 +3,7 @@ import { normalizeCoffeeMessageDelivery } from "./coffee-voice-text.ts";
 import {
   coffeeCupSipMessageGapForDuration,
   coffeeInterruptionTranscriptSegments,
+  listenerReactionSpokenTextV1,
   normalizeListenerReactionPlanV1,
   resolveBotIdentityMirrorVoiceV1,
   resolveBotIdentityShapeshiftVoiceV1,
@@ -913,8 +914,9 @@ function coffeeReviewReplayEventLine(
       event.plan.speakerBotId,
       botNameById,
     );
-    const audible = event.plan.spokenCue
-      ? ` + ${event.plan.spokenCue}`
+    const spokenCue = listenerReactionSpokenTextV1(event.plan);
+    const audible = spokenCue
+      ? ` + ${spokenCue}`
       : event.plan.vocalFoley
         ? ` + [${event.plan.vocalFoley}]`
         : "";

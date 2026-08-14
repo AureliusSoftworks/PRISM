@@ -27,6 +27,8 @@ export function coffeeInterrupterLeadPlanV1(
   return {
     ...plan,
     interruptedSpeakerCue: undefined,
+    publicInterruptedSpeakerCue: undefined,
+    interruptedSpeakerCueSpeechEffect: undefined,
     interruptedSpeakerCuePlayback: undefined,
   };
 }
@@ -38,7 +40,10 @@ export function coffeeAuthoritativeYieldTailPlanV1(
 ): ListenerReactionPlanV1 | null {
   if (
     interruption.floorOutcome !== "yield" ||
-    !interruption.interruptedSpeakerCue
+    !(
+      interruption.publicInterruptedSpeakerCue ||
+      interruption.interruptedSpeakerCue
+    )
   ) {
     return null;
   }
@@ -46,8 +51,22 @@ export function coffeeAuthoritativeYieldTailPlanV1(
     ...leadPlan,
     floorOutcome: "yield",
     spokenCue: undefined,
+    publicSpokenCue: undefined,
+    spokenCueSpeechEffect: undefined,
     vocalFoley: undefined,
-    interruptedSpeakerCue: interruption.interruptedSpeakerCue,
+    interruptedSpeakerCue: undefined,
+    ...(interruption.publicInterruptedSpeakerCue
+      ? {
+          publicInterruptedSpeakerCue:
+            interruption.publicInterruptedSpeakerCue,
+          interruptedSpeakerCueSpeechEffect:
+            "speech_obfuscation" as const,
+        }
+      : {
+          interruptedSpeakerCue: interruption.interruptedSpeakerCue,
+          publicInterruptedSpeakerCue: undefined,
+          interruptedSpeakerCueSpeechEffect: undefined,
+        }),
     interruptedSpeakerCuePlayback: "crosstalk",
   };
 }

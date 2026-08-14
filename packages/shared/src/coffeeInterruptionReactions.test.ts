@@ -95,6 +95,28 @@ describe("Coffee interruption reactions", () => {
     );
   });
 
+  it("prefers Power-projected gibberish without exposing canned English", () => {
+    const segments = coffeeInterruptionTranscriptSegments({
+      sourceMessageId: "pause-mumbled",
+      sourceContent: "...",
+      interruption: {
+        kind: "botInterruptsBot",
+        interruptedBotId: "speaker",
+        interrupterBotId: "interrupter",
+        pauseBeat: true,
+        publicInterrupterCue: "Mrahguh.",
+        interrupterCueSpeechEffect: "speech_obfuscation",
+        publicInterruptedSpeakerCue: "... yuhm nahsh.",
+        interruptedSpeakerCueSpeechEffect: "speech_obfuscation",
+        socialConsequences: [],
+      },
+    });
+    assert.deepEqual(
+      segments.map((segment) => segment.text),
+      ["Mrahguh.", "... yuhm nahsh."],
+    );
+  });
+
   it("rejects actions, non-bot interruptions, and malformed carriers", () => {
     assert.deepEqual(
       coffeeInterruptionTranscriptSegments({

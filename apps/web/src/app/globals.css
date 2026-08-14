@@ -255,6 +255,10 @@ body[data-prism-theme="light"] [data-navbar-picker-surface="true"] {
 html[data-prism-graphics-quality="medium"]
   [data-prism-expensive-effect="true"],
 html[data-prism-graphics-quality="low"]
+  [data-prism-expensive-effect="true"],
+html[data-prism-adaptive-quality="balanced"]
+  [data-prism-expensive-effect="true"],
+html[data-prism-adaptive-quality="minimal"]
   [data-prism-expensive-effect="true"] {
   contain: paint;
 }
@@ -264,10 +268,22 @@ html[data-prism-graphics-quality="low"]
 html[data-prism-graphics-quality="low"]
   [data-prism-decorative-motion="true"]::before,
 html[data-prism-graphics-quality="low"]
+  [data-prism-decorative-motion="true"]::after,
+html[data-prism-adaptive-quality="minimal"]
+  [data-prism-decorative-motion="true"],
+html[data-prism-adaptive-quality="minimal"]
+  [data-prism-decorative-motion="true"]::before,
+html[data-prism-adaptive-quality="minimal"]
   [data-prism-decorative-motion="true"]::after {
   animation: none !important;
 }
 
+html[data-prism-adaptive-quality="minimal"]
+  [data-prism-expensive-effect="true"],
+html[data-prism-adaptive-quality="minimal"]
+  [data-prism-expensive-effect="true"]::before,
+html[data-prism-adaptive-quality="minimal"]
+  [data-prism-expensive-effect="true"]::after,
 html[data-prism-graphics-quality="low"]
   [data-prism-expensive-effect="true"]::before,
 html[data-prism-graphics-quality="low"]
@@ -275,6 +291,30 @@ html[data-prism-graphics-quality="low"]
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
   filter: none !important;
+}
+
+/* Avatar Studio is DOM/CSS rather than a Pixi scene, so its fullscreen
+   compositing cost participates directly in the runtime frame governor. The
+   authored shell, face, ink, controls, and semantic camera motion remain; a
+   downgrade removes only backdrop compositing and ambient preview motion. */
+html[data-prism-adaptive-quality="balanced"]
+  [data-prism-adaptive-surface="avatar-studio"],
+html[data-prism-adaptive-quality="minimal"]
+  [data-prism-adaptive-surface="avatar-studio"] {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html[data-prism-adaptive-quality="minimal"]
+  [data-prism-adaptive-surface="avatar-studio"]
+  [data-avatar-studio-mini-preview="true"] *,
+html[data-prism-adaptive-quality="minimal"]
+  [data-prism-adaptive-surface="avatar-studio"]
+  [data-avatar-studio-mini-preview="true"] *::before,
+html[data-prism-adaptive-quality="minimal"]
+  [data-prism-adaptive-surface="avatar-studio"]
+  [data-avatar-studio-mini-preview="true"] *::after {
+  animation: none !important;
 }
 
 a {
@@ -429,7 +469,7 @@ html[data-relationship-depth-motion="pullback-swap"]::view-transition-new(relati
 /* Every registered prose field and choice gets this same visible generation
    contract. Surface styles may tune the resting field color through the custom
    property, but must not layer a second competing rainbow over this sheen. */
-[data-prism-refract-sheen="true"][data-prism-refract-state="generating"] {
+:root body [data-prism-refract-sheen="true"][data-prism-refract-state="generating"] {
   --prism-refract-sheen-surface: color-mix(
     in srgb,
     var(--bg-surface, var(--baseline-bg)) 88%,
@@ -470,9 +510,12 @@ html[data-relationship-depth-motion="pullback-swap"]::view-transition-new(relati
     0 0 22px -13px color-mix(in srgb, var(--prism-i, #b7e63a) 76%, transparent),
     0 0 34px -20px color-mix(in srgb, var(--prism-m, #7b5cff) 72%, transparent) !important;
   filter: saturate(1.12) brightness(1.04);
-  animation: prismRefractSheenFlow 1.7s linear infinite !important;
+  will-change: background-position, filter;
+  animation:
+    prismRefractSheenFlow 1.7s linear infinite,
+    prismRefractSheenPulse 920ms ease-in-out infinite alternate !important;
   caret-color: transparent !important;
-  cursor: progress !important;
+  cursor: pointer !important;
   user-select: none;
 }
 
@@ -485,8 +528,13 @@ html[data-relationship-depth-motion="pullback-swap"]::view-transition-new(relati
   }
 }
 
+@keyframes prismRefractSheenPulse {
+  from { filter: saturate(1.06) brightness(1.01); }
+  to { filter: saturate(1.2) brightness(1.08); }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  [data-prism-refract-sheen="true"][data-prism-refract-state="generating"] {
+  :root body [data-prism-refract-sheen="true"][data-prism-refract-state="generating"] {
     animation: none !important;
   }
 }

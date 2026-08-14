@@ -10,6 +10,10 @@ const pageSource = readFileSync(resolve(appDir, "page.tsx"), "utf8").replace(
   " ",
 );
 const cssSource = readFileSync(resolve(appDir, "page.module.css"), "utf8");
+const modeTutorialSource = readFileSync(
+  resolve(appDir, "modeTutorials.ts"),
+  "utf8",
+).replace(/\s+/gu, " ");
 const adjustmentPadSource = readFileSync(
   resolve(appDir, "AdjustmentPad.tsx"),
   "utf8",
@@ -164,7 +168,7 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
   );
   assert.match(
     cssSource,
-    /\.botAvatarStudioMiniPreviewViewport \.botAvatarStudioMiniAvatar\s*\{[^}]*--chat-mini-bot-lower-screen-nudge-x:\s*1px;[^}]*--chat-mini-bot-lower-screen-nudge-y:\s*1px;/u,
+    /\.botAvatarStudioMiniPreviewViewport \.botAvatarStudioMiniAvatar\s*\{[^}]*--chat-mini-bot-lower-screen-nudge-x:\s*1px;[^}]*--chat-mini-bot-lower-screen-nudge-y:\s*0px;/u,
   );
   assert.match(
     cssSource,
@@ -663,7 +667,29 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(mouthTabSource, /<BotAvatarGlyphAnimationControl/);
   assert.match(mouthTabSource, /label="Mouth animation"/);
   assert.match(mouthTabSource, /value=\{faceMouthAnimation\}/);
-  assert.match(mouthTabSource, /onChange=\{onMouthAnimationChange\}/);
+  assert.doesNotMatch(pageSource, /custom: "Custom Speech"/);
+  assert.match(mouthTabSource, /Custom Speech mouth poses/);
+  assert.match(mouthTabSource, /\["Rest", "Closed", "Open", "Round"\]/);
+  assert.match(mouthTabSource, /faceMouthAnimation === DEFAULT_BOT_FACE_GLYPH_ANIMATION/);
+  assert.match(mouthTabSource, /faceMouthSpeechPoses \? "Disable" : "Enable"/);
+  assert.match(mouthTabSource, /Reset poses/);
+  assert.match(mouthTabSource, /onMouthSpeechPosesChange\(next\)/);
+  assert.match(
+    cssSource,
+    /\.botAvatarCustomSpeechModule\s*\{[\s\S]*?grid-column:\s*1\s*\/\s*-1/,
+  );
+  assert.match(
+    pageSource,
+    /JSON\.stringify\(newBotFaceMouthSpeechPoses\)\s*!==\s*JSON\.stringify\(editPristine\.faceMouthSpeechPoses\)/,
+  );
+  assert.match(
+    pageSource,
+    /faceMouthAnimation !== DEFAULT_BOT_FACE_STYLE\.mouthAnimation \|\|\s*faceMouthSpeechPoses !== null \|\|/,
+  );
+  assert.match(
+    modeTutorialSource,
+    /Default can enable Custom Speech: four compact Rest, Closed, Open, and Round poses follow the live speech timing/,
+  );
   assert.match(pageSource, /none: "Default"/);
   assert.match(pageSource, /static: "None"/);
   assert.ok(

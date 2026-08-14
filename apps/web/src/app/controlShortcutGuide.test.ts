@@ -6,6 +6,8 @@ import {
   controlShortcutGuideShouldShow,
   isControlHeldAlone,
   isControlKeyEvent,
+  isOptionHeldAlone,
+  isOptionKeyEvent,
   readPrismCompanionOrbAnchor,
 } from "./controlShortcutGuide.ts";
 import { defaultPrismKeyboardShortcuts } from "./keyboardShortcuts.ts";
@@ -14,10 +16,11 @@ test("waits for an intentional Control hold before showing the guide", () => {
   assert.equal(CONTROL_SHORTCUT_GUIDE_SHOW_DELAY_MS, 1_500);
 });
 
-test("shows the guide only while Control is held", () => {
+test("shows the guide for Control or a stationary Option hold", () => {
   assert.equal(
     controlShortcutGuideShouldShow({
       controlHeld: true,
+      optionHeld: false,
       prismWielding: false,
       recordingShortcut: false,
     }),
@@ -26,6 +29,16 @@ test("shows the guide only while Control is held", () => {
   assert.equal(
     controlShortcutGuideShouldShow({
       controlHeld: false,
+      optionHeld: true,
+      prismWielding: false,
+      recordingShortcut: false,
+    }),
+    true,
+  );
+  assert.equal(
+    controlShortcutGuideShouldShow({
+      controlHeld: false,
+      optionHeld: true,
       prismWielding: true,
       recordingShortcut: false,
     }),
@@ -34,6 +47,7 @@ test("shows the guide only while Control is held", () => {
   assert.equal(
     controlShortcutGuideShouldShow({
       controlHeld: false,
+      optionHeld: false,
       prismWielding: false,
       recordingShortcut: false,
     }),
@@ -42,6 +56,7 @@ test("shows the guide only while Control is held", () => {
   assert.equal(
     controlShortcutGuideShouldShow({
       controlHeld: true,
+      optionHeld: true,
       prismWielding: true,
       recordingShortcut: true,
     }),
@@ -76,6 +91,29 @@ test("recognizes Control key events and alone-held Control", () => {
   );
   assert.equal(
     isControlHeldAlone({ ctrlKey: true, altKey: true, metaKey: false }),
+    false,
+  );
+});
+
+test("recognizes Option key events and an unchorded Option hold", () => {
+  assert.equal(isOptionKeyEvent({ key: "Alt", code: "AltLeft" }), true);
+  assert.equal(isOptionKeyEvent({ key: "Control", code: "ControlLeft" }), false);
+  assert.equal(
+    isOptionHeldAlone({
+      ctrlKey: false,
+      altKey: true,
+      metaKey: false,
+      shiftKey: false,
+    }),
+    true,
+  );
+  assert.equal(
+    isOptionHeldAlone({
+      ctrlKey: false,
+      altKey: true,
+      metaKey: true,
+      shiftKey: false,
+    }),
     false,
   );
 });

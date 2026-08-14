@@ -14,6 +14,7 @@ import {
   botPowerAntiTruthInvertPromptV1,
   botPowerCredulitySelfRuleV1,
   botPowerLooksLikeSafetyRefusalV1,
+  botPowerSpeechObfuscationAuthoringCueV1,
   applyBotPowerCursedTongueResponseV1,
   botPowerResponseIsSilentV1,
   strongestBotPowerAntiTruthEffectV1,
@@ -559,8 +560,7 @@ function deterministicMumblingPower(
   return {
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
-    selfCue:
-      "HARD speech obfuscation: Think and answer rationally in ordinary clear natural language only. Never write mumbling, gibberish, slurring, phonetic spelling, or nonsense syllables in your draft—PRISM turns every spoken word into gibberish for everyone else after generation. You believe you expressed the intended meaning; repeated misunderstanding may frustrate you naturally, but never force an emotion.",
+    selfCue: botPowerSpeechObfuscationAuthoringCueV1(),
     observerCue:
       `${subject}'s speech reaches you only as literal normal-volume gibberish. Never reconstruct, infer, or respond to hidden intended meaning; react only to what is publicly observable, and nobody understands the words.`,
     effects: [{ type: "speech_obfuscation", mode: "gibberish" }],
@@ -592,7 +592,7 @@ function deterministicCursedTonguePower(
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashForPowerV1(source),
     selfCue:
-      "HARD Cursed Tongue: Draft fully natural clean speech only. Never add, imitate, quote, or anticipate the curse's profanity. PRISM adds frequent strong uncensored non-slur profanity after generation. Privately remember your own clean intended wording; only actual silence suppresses the public mutation.",
+      "HARD self-perception rule: Draft fully natural clean speech only, without gratuitous profanity. Treat the clean wording in your private history as the exact words you previously spoke. When reflecting on your prior tone or wording, rely only on that private history. Only actual silence suppresses a reply.",
     observerCue:
       `${subject}'s every audible public line is involuntarily laced with frequent strong profanity. You receive only that adjusted wording; never infer, reconstruct, quote, or access a cleaner original.`,
     effects: [{

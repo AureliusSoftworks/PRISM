@@ -33,6 +33,7 @@ import {
   botPowerIsBreathlessV1,
   botPowerMuteExemptsPlayerV1,
   botPowerMumblesSpeechV1,
+  resolveBotPronunciationMapPointV1,
   botPowerIgnoresOtherPowersV1,
   botPowerIneptRoleMisdirectionV1,
   botPowerResponseIsSilentV1,
@@ -99,6 +100,8 @@ export interface StoryBotProfile {
   powers?: BotPowerV1[];
   color: string | null;
   glyph: string | null;
+  authoredAudioVoiceProfile?: string | null;
+  audioVoiceProfileOverride?: string | null;
   localModel: string | null;
   onlineModel: string | null;
   defaultModel: string | null;
@@ -117,6 +120,8 @@ export interface CreateStorySessionInput {
 
 export interface StoryGenerationInput {
   provider: LlmProvider;
+  /** Prism-owned auxiliary lane used for public Power rewrites. */
+  auxiliaryProvider?: LlmProvider;
   providerName: ProviderName;
   model: string;
   bots: StoryBotProfile[];
@@ -533,9 +538,13 @@ export function loadStoryBotProfiles(
   const hasCloneFamilyId = (
     db.prepare("PRAGMA table_info(bots)").all() as Array<{ name: string }>
   ).some((column) => column.name === "clone_family_id");
+  const botColumns = new Set(
+    (db.prepare("PRAGMA table_info(bots)").all() as Array<{ name: string }>)
+      .map((column) => column.name),
+  );
   const rows = db
     .prepare(
-      `SELECT id, name, system_prompt, ${hasCloneFamilyId ? "clone_family_id" : "NULL AS clone_family_id"}, powers_json, color, glyph, model, local_model, online_model,
+      `SELECT id, name, system_prompt, ${hasCloneFamilyId ? "clone_family_id" : "NULL AS clone_family_id"}, powers_json, color, glyph, ${botColumns.has("authored_audio_voice_profile") ? "authored_audio_voice_profile" : "NULL AS authored_audio_voice_profile"}, ${botColumns.has("audio_voice_profile_override") ? "audio_voice_profile_override" : "NULL AS audio_voice_profile_override"}, model, local_model, online_model,
               temperature, max_tokens, online_enabled, chat_enabled
          FROM bots
         WHERE user_id = ? AND id IN (${placeholders})`
@@ -548,6 +557,8 @@ export function loadStoryBotProfiles(
     powers_json: string | null;
     color: string | null;
     glyph: string | null;
+    authored_audio_voice_profile: string | null;
+    audio_voice_profile_override: string | null;
     model: string | null;
     local_model: string | null;
     online_model: string | null;
@@ -570,6 +581,8 @@ export function loadStoryBotProfiles(
       powers: parseStoredBotPowersV1(row.powers_json),
       color: row.color,
       glyph: row.glyph,
+      authoredAudioVoiceProfile: row.authored_audio_voice_profile,
+      audioVoiceProfileOverride: row.audio_voice_profile_override,
       localModel: row.local_model,
       onlineModel: row.online_model,
       defaultModel: row.model,
@@ -1296,6 +1309,7 @@ async function applyStoryHardResponsePowers(
   bots: readonly StoryBotProfile[],
   provider: LlmProvider,
   model: string,
+  auxiliaryProvider: LlmProvider = provider,
 ): Promise<StoryEpisodeManifest> {
   const mutedBotIds = new Set(
     bots.filter((bot) => botPowerIsMutedV1(bot.powers)).map((bot) => bot.id),
@@ -1520,7 +1534,15 @@ async function applyStoryHardResponsePowers(
     ) {
       nextScene = {
         ...nextScene,
-        narration: applyBotPowerMumbledResponseV1(nextScene.narration),
+        narration: applyBotPowerMumbledResponseV1(nextScene.narration, {
+          pronunciationMapPoint: currentSpeaker
+            ? resolveBotPronunciationMapPointV1(
+                currentSpeaker.authoredAudioVoiceProfile,
+                currentSpeaker.audioVoiceProfileOverride,
+              )
+            : null,
+          variationSeed: `${episode.id}:${scene.id}:${sceneIndex}:turn`,
+        }),
       };
     }
     if (
@@ -1532,10 +1554,10 @@ async function applyStoryHardResponsePowers(
       nextScene = {
         ...nextScene,
         narration: await rewriteBotPowerCursedTongueAnswerV1({
-          provider,
+          provider: auxiliaryProvider,
           draftAnswer: nextScene.narration,
           seed: `${episode.id}:${scene.id}:${sceneIndex}`,
-          model,
+          model: auxiliaryProvider.diagnosticModel?.trim() || model,
           usagePurpose: "story_generation",
         }),
       };
@@ -1557,6 +1579,11 @@ async function applyStoryHardResponsePowers(
             muted: botPowerIsMutedV1(bot.powers),
             breathless: botPowerIsBreathlessV1(bot.powers),
             cursedTongue: botPowerCursesSpeechV1(bot.powers),
+            mumbling: botPowerMumblesSpeechV1(bot.powers),
+            pronunciationMapPoint: resolveBotPronunciationMapPointV1(
+              bot.authoredAudioVoiceProfile,
+              bot.audioVoiceProfileOverride,
+            ),
             temperament: botPowerMuteReactionTemperamentFromPersonaV1(
               bot.systemPrompt,
             ),
@@ -2419,6 +2446,7 @@ export async function generateStorySessionEpisode(
           args.bots,
           args.provider,
           args.model,
+          args.auxiliaryProvider,
         );
         try {
           generatedEpisode = await repairStoryQuietContextDependencies({

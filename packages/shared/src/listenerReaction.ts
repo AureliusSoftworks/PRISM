@@ -154,6 +154,10 @@ export interface ListenerReactionPlanV1 {
   targetSource: ListenerReactionTargetSource;
   visualAction: ListenerReactionVisualAction;
   spokenCue?: ListenerReactionSpokenCue;
+  /** Public replacement for a Power-transformed spoken cue. The clean canned
+   * cue is deliberately omitted when this is present. */
+  publicSpokenCue?: string;
+  spokenCueSpeechEffect?: "speech_obfuscation";
   /** Provider-generated nonverbal vocal sound. ElevenLabs-only at playback. */
   vocalFoley?: ListenerReactionVocalFoley;
   /** A tense guest trying to cut across the host without taking transcript ownership. */
@@ -162,6 +166,9 @@ export interface ListenerReactionPlanV1 {
   floorOutcome?: CrosstalkFloorOutcome;
   /** Short annoyed follow-up spoken by the bot whose live line was cut off. */
   interruptedSpeakerCue?: BotCrosstalkInterruptedSpeakerCue;
+  /** Public replacement for a Power-transformed interrupted-speaker retort. */
+  publicInterruptedSpeakerCue?: string;
+  interruptedSpeakerCueSpeechEffect?: "speech_obfuscation";
   /** Whether the follow-up is already part of primary audio or needs its own overlap channel. */
   interruptedSpeakerCuePlayback?: BotCrosstalkInterruptedSpeakerPlayback;
   /** Relative position inside the speaker's delivery. Always 0.3..0.9. */
@@ -220,6 +227,17 @@ const SPOKEN_CUES = new Set<ListenerReactionSpokenCue>([
   "...The hell?",
   "What the fuck?",
 ]);
+
+export function normalizePowerProjectedReactionCueV1(
+  value: unknown,
+  effect: unknown,
+): string | undefined {
+  if (effect !== "speech_obfuscation" || typeof value !== "string") {
+    return undefined;
+  }
+  const cue = value.replace(/\s+/gu, " ").trim().slice(0, 160);
+  return cue || undefined;
+}
 const INTERRUPTED_SPEAKER_CUES = new Set<BotCrosstalkInterruptedSpeakerCue>(
   [
     ...BOT_CROSSTALK_INTERRUPTED_SPEAKER_CUES,
@@ -276,9 +294,31 @@ export function normalizeBotCrosstalkInterruptedSpeakerCue(
 }
 
 export function listenerReactionHasAudio(
-  plan: Pick<ListenerReactionPlanV1, "spokenCue" | "vocalFoley">,
+  plan: Pick<
+    ListenerReactionPlanV1,
+    "spokenCue" | "publicSpokenCue" | "vocalFoley"
+  >,
 ): boolean {
-  return Boolean(plan.spokenCue || plan.vocalFoley);
+  return Boolean(listenerReactionSpokenTextV1(plan) || plan.vocalFoley);
+}
+
+/** Exact public text played and captioned for a listener's spoken reaction. */
+export function listenerReactionSpokenTextV1(
+  plan: Pick<ListenerReactionPlanV1, "spokenCue" | "publicSpokenCue">,
+): string | null {
+  return plan.publicSpokenCue?.trim() || plan.spokenCue?.trim() || null;
+}
+
+/** Exact public text played for the interrupted speaker's crosstalk retort. */
+export function listenerReactionInterruptedSpeakerTextV1(
+  plan: Pick<
+    ListenerReactionPlanV1,
+    "interruptedSpeakerCue" | "publicInterruptedSpeakerCue"
+  >,
+): string | null {
+  return plan.publicInterruptedSpeakerCue?.trim() ||
+    plan.interruptedSpeakerCue?.trim() ||
+    null;
 }
 
 export function botCrosstalkInterruptedSpeakerCueHasAudio(
@@ -287,16 +327,30 @@ export function botCrosstalkInterruptedSpeakerCueHasAudio(
   return Boolean(cue && cue !== BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE);
 }
 
+export function listenerReactionInterruptedSpeakerHasAudioV1(
+  plan: Pick<
+    ListenerReactionPlanV1,
+    "interruptedSpeakerCue" | "publicInterruptedSpeakerCue"
+  >,
+): boolean {
+  const cue = listenerReactionInterruptedSpeakerTextV1(plan);
+  return Boolean(cue && cue !== BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE);
+}
+
 export function listenerReactionHasCrosstalkAudio(
   plan: Pick<
     ListenerReactionPlanV1,
-    "spokenCue" | "vocalFoley" | "interruptedSpeakerCue"
+    | "spokenCue"
+    | "publicSpokenCue"
+    | "vocalFoley"
+    | "interruptedSpeakerCue"
+    | "publicInterruptedSpeakerCue"
   >,
 ): boolean {
   return Boolean(
-    plan.spokenCue ||
+    listenerReactionSpokenTextV1(plan) ||
       plan.vocalFoley ||
-      botCrosstalkInterruptedSpeakerCueHasAudio(plan.interruptedSpeakerCue),
+      listenerReactionInterruptedSpeakerHasAudioV1(plan),
   );
 }
 
@@ -498,6 +552,10 @@ export function normalizeListenerReactionPlanV1(
   const spokenCue = SPOKEN_CUES.has(row.spokenCue as ListenerReactionSpokenCue)
     ? row.spokenCue as ListenerReactionSpokenCue
     : undefined;
+  const publicSpokenCue = normalizePowerProjectedReactionCueV1(
+    row.publicSpokenCue,
+    row.spokenCueSpeechEffect,
+  );
   const vocalFoley = normalizeListenerReactionVocalFoley(row.vocalFoley) ??
     undefined;
   const interjectionAttempt = row.interjectionAttempt === true;
@@ -506,6 +564,10 @@ export function normalizeListenerReactionPlanV1(
   const interruptedSpeakerCue =
     normalizeBotCrosstalkInterruptedSpeakerCue(row.interruptedSpeakerCue) ??
     undefined;
+  const publicInterruptedSpeakerCue = normalizePowerProjectedReactionCueV1(
+    row.publicInterruptedSpeakerCue,
+    row.interruptedSpeakerCueSpeechEffect,
+  );
   const interruptedSpeakerCuePlayback =
     row.interruptedSpeakerCuePlayback === "primary" ||
       row.interruptedSpeakerCuePlayback === "crosstalk"
@@ -536,13 +598,27 @@ export function normalizeListenerReactionPlanV1(
     messageId,
     targetSource,
     visualAction,
-    ...(spokenCue ? { spokenCue } : {}),
-    ...(!spokenCue && vocalFoley ? { vocalFoley } : {}),
+    ...(publicSpokenCue
+      ? {
+          publicSpokenCue,
+          spokenCueSpeechEffect: "speech_obfuscation" as const,
+        }
+      : spokenCue
+        ? { spokenCue }
+        : {}),
+    ...(!publicSpokenCue && !spokenCue && vocalFoley ? { vocalFoley } : {}),
     ...(interjectionAttempt ? { interjectionAttempt: true as const } : {}),
     ...(interjectionAttempt && floorOutcome ? { floorOutcome } : {}),
-    ...(interjectionAttempt && floorOutcome === "yield" && interruptedSpeakerCue
+    ...(interjectionAttempt && floorOutcome === "yield" &&
+    (publicInterruptedSpeakerCue || interruptedSpeakerCue)
       ? {
-          interruptedSpeakerCue,
+          ...(publicInterruptedSpeakerCue
+            ? {
+                publicInterruptedSpeakerCue,
+                interruptedSpeakerCueSpeechEffect:
+                  "speech_obfuscation" as const,
+              }
+            : { interruptedSpeakerCue }),
           interruptedSpeakerCuePlayback:
             interruptedSpeakerCuePlayback ?? "crosstalk",
         }
@@ -618,10 +694,12 @@ export function botCrosstalkPrimarySpeakerContent(
   content: string,
   plan: Pick<
     ListenerReactionPlanV1,
-    "interruptedSpeakerCue" | "interruptedSpeakerCuePlayback"
+    | "interruptedSpeakerCue"
+    | "publicInterruptedSpeakerCue"
+    | "interruptedSpeakerCuePlayback"
   > | null | undefined,
 ): string {
-  const cue = plan?.interruptedSpeakerCue;
+  const cue = plan ? listenerReactionInterruptedSpeakerTextV1(plan) : null;
   if (!cue || plan?.interruptedSpeakerCuePlayback !== "crosstalk") {
     return content;
   }

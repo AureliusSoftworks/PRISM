@@ -1497,14 +1497,14 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /DEBATE_STAGE_ALIGNMENT_ENABLED \? \([\s\S]*?className=\{styles\.studioUtilityButton\}[\s\S]*?onClick=\{openStageAlignment\}/u,
+      /className=\{styles\.studioUtilityButton\}[\s\S]*?data-tutorial-target="debate-stage-direction"[\s\S]*?setStageDirectionOpen\(true\)/u,
     );
-    assert.match(source, /\{renderStageAlignmentModal\(null\)\}/u);
+    assert.match(source, /\{renderStageAlignmentModal\(activeSession\)\}/u);
     assert.match(
       source,
       /data-alignment-source=\{session \? "session" : "dashboard"\}/u,
     );
-    assert.match(source, /fresh random Library cast/u);
+    assert.match(source, /Precision camera, prop, light, and audio calibration/u);
     assert.match(
       source,
       /const randomized = debateAlignmentPreviewCast\(\s*stageAlignmentCastCandidates\.map/u,
@@ -4915,19 +4915,18 @@ describe("Debate experience", () => {
     );
   });
 
-  it("provides a persistent Light and Dark stage alignment workspace", () => {
-    assert.match(source, /Align stage/u);
-    assert.match(
-      source,
-      /const DEBATE_STAGE_ALIGNMENT_ENABLED = prismBranchIsDev\(\s*process\.env\.NEXT_PUBLIC_PRISM_BRANCH/u,
-    );
-    assert.match(
-      source,
-      /if \(!DEBATE_STAGE_ALIGNMENT_ENABLED \|\| !stageAlignmentOpen\) return null/u,
-    );
+  it("offers calm stage direction while retaining the precision Alignment Lab", () => {
+    assert.match(source, /Stage direction/u);
+    assert.match(source, /data-debate-stage-direction="true"/u);
+    assert.match(source, /Close conversation/u);
+    assert.match(source, /Balanced forum/u);
+    assert.match(source, /Grand chamber/u);
+    assert.match(source, /applyDebateStageDirectionPreset/u);
+    assert.match(source, /if \(!stageAlignmentOpen\) return null/u);
     assert.match(source, /aria-label="More stage controls"/u);
     assert.match(source, /className=\{styles\.cameraAdvanced\}/u);
     assert.match(source, /data-debate-stage-alignment-modal="true"/u);
+    assert.match(source, /Debate Alignment Lab/u);
     assert.match(source, /Save alignment/u);
     assert.match(source, /data-debate-alignment-voice-mixer="true"/u);
     assert.match(source, /Moderator micro avatar/u);
@@ -5256,6 +5255,17 @@ describe("Debate experience", () => {
     assert.doesNotMatch(
       css,
       /\.alignmentTuner\s*\{[^}]*position:\s*(?:absolute|fixed)/u,
+    );
+  });
+
+  it("snapshots stage alignment updater input values before queueing state updates", () => {
+    assert.match(
+      source,
+      /const nextModeratorMicroScale = Number\(\s*event\.currentTarget\.value,?\s*\);[\s\S]{0,260}updateDebateStageModeratorMicroScale\([\s\S]{0,160}nextModeratorMicroScale/u,
+    );
+    assert.doesNotMatch(
+      source,
+      /setStageAlignmentDraft\(\(current\) =>[\s\S]{0,260}event\.currentTarget\.value/u,
     );
   });
 

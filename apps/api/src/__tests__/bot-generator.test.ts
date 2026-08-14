@@ -33,6 +33,38 @@ describe("bot generation route", () => {
     assert.doesNotMatch(routeSource, /requestElevenLabsVoiceCatalog/u);
     assert.doesNotMatch(routeSource, /voiceCatalog/u);
   });
+
+  it("rehydrates Inspire sources from owned Library rows", () => {
+    const routeSource = serverSource.slice(
+      serverSource.indexOf('route("POST", "/api/bots/generate-draft"'),
+      serverSource.indexOf('route("POST", "/api/bots"'),
+    );
+
+    assert.match(routeSource, /WHERE id = \? AND user_id = \?/u);
+    assert.match(routeSource, /SELECT id, name, system_prompt, color FROM bots/u);
+    assert.match(routeSource, /stripBotProfileMetaSuffix\(row\.system_prompt\)/u);
+    assert.match(routeSource, /Choose at least one bot from your Library/u);
+    assert.match(routeSource, /inspirationSources: inspirationRows\.map/u);
+    assert.match(routeSource, /blendWeightedBotIdentityColors\(/u);
+    assert.match(routeSource, /requestedGenerationContext\.mode === "inspire" && inspiredPrimaryColor/u);
+    assert.match(routeSource, /color: inspiredPrimaryColor/u);
+  });
+
+  it("re-resolves explicit brief Power intent for older clients before generation", () => {
+    const routeSource = serverSource.slice(
+      serverSource.indexOf('route("POST", "/api/bots/generate-draft"'),
+      serverSource.indexOf('route("POST", "/api/bots"'),
+    );
+
+    assert.match(
+      routeSource,
+      /resolveBotFoundryGenerationContextForBriefV1\(body\.generationContext, prompt\)/u,
+    );
+    assert.match(routeSource, /result\.draft\.powers\.length > 0/u);
+    assert.match(routeSource, /compileBotPowers\([\s\S]*?powers: result\.draft\.powers/u);
+    assert.match(routeSource, /powers: compiledPowers\?\.powers \?\? draft\.powers/u);
+    assert.match(routeSource, /includeBatchGroupIdentity/u);
+  });
 });
 
 function rawDraft(voiceId: string | null = null): Record<string, unknown> {
@@ -179,7 +211,145 @@ function rawDraft(voiceId: string | null = null): Record<string, unknown> {
   };
 }
 
+function rawLeanDraft(): Record<string, unknown> {
+  const rich = rawDraft();
+  return {
+    name: rich.name,
+    profile: rich.profile,
+    color: rich.color,
+    glyph: rich.glyph,
+    face: {
+      faceEyesFont: "warm",
+      faceEyeCount: 2,
+      faceEyeScale: 1.15,
+      faceMouthFont: "concise",
+      faceMouthScale: 0.85,
+    },
+    voiceBaseId: "voice-7",
+    voicePreviewLine: rich.voicePreviewLine,
+    batchGroupIdentity: {
+      name: "Midnight Relay",
+      description: "Distinct night-shift personalities linked by one shared signal.",
+    },
+  };
+}
+
 describe("PRISM bot generator", () => {
+  it("keeps a three-bot automatic batch on the rich schema and selected Power budget", async () => {
+    const generated = rawDraft();
+    generated.powerPrompts = [
+      "Static briefly reveals nearby hidden writing, but never private messages.",
+    ];
+    generated.batchGroupIdentity = {
+      name: "Midnight Relay",
+      description: "Three distinct night-shift personalities linked by one shared signal.",
+    };
+    let capturedOptions: GenerateOptions | undefined;
+    const provider = createDeterministicProvider([JSON.stringify(generated)]);
+    const deterministicGenerate = provider.generateResponse.bind(provider);
+    provider.generateResponse = async (messages, options) => {
+      capturedOptions = options;
+      return deterministicGenerate(messages, options);
+    };
+
+    const result = await generateBotDraft({
+      prompt: "Create three strange night-shift radio personalities.",
+      generationContext: {
+        mode: "batch",
+        powers: { enabled: true, count: 1, craziness: 60 },
+        resemblance: 50,
+        inspirationSources: [],
+        batchIndex: 1,
+        batchCount: 3,
+      },
+      includeBatchGroupIdentity: true,
+      provider,
+      providerName: "local",
+      model: "llama-local",
+      responseMode: "local",
+    });
+
+    const schema = JSON.stringify(capturedOptions?.jsonSchema);
+    assert.match(schema, /"avatarDetails"/u);
+    assert.match(schema, /"avatarSfxPrompt"/u);
+    assert.match(schema, /"powerPrompts":\{"type":"array","minItems":1,"maxItems":1/u);
+    assert.match(schema, /"elevenLabsDirection"/u);
+    assert.equal(result.draft.powers.length, 1);
+    assert.ok(result.draft.avatarDetails);
+    assert.equal(result.draft.accentColor, "#22b5ff");
+    assert.equal(result.draft.audioVoiceProfile.pitch, -0.1);
+    assert.deepEqual(result.batchGroupIdentity, generated.batchGroupIdentity);
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /rich automatic bot 1 of 3/u);
+    assert.match(
+      provider.calls[0]?.[0]?.content ?? "",
+      /Keep runtime Power mechanics separate from the underlying persona/u,
+    );
+    assert.match(
+      provider.calls[0]?.[0]?.content ?? "",
+      /post-generation speech transformation/u,
+    );
+  });
+
+  it("uses a genuinely lean schema, forces no Powers, and returns one group identity", async () => {
+    let capturedOptions: GenerateOptions | undefined;
+    const provider = createDeterministicProvider([JSON.stringify(rawLeanDraft())]);
+    const deterministicGenerate = provider.generateResponse.bind(provider);
+    provider.generateResponse = async (messages, options) => {
+      capturedOptions = options;
+      return deterministicGenerate(messages, options);
+    };
+    const result = await generateBotDraft({
+      prompt: "A century of strange night-shift radio personalities with Powers.",
+      generationContext: {
+        mode: "batch",
+        powers: { enabled: true, count: 3, craziness: 100 },
+        resemblance: 50,
+        inspirationSources: [],
+        batchIndex: 1,
+        batchCount: 100,
+      },
+      includeBatchGroupIdentity: true,
+      provider,
+      providerName: "local",
+      model: "llama-local",
+      responseMode: "local",
+    });
+    const schema = JSON.stringify(capturedOptions?.jsonSchema);
+    assert.match(schema, /"voiceBaseId"/u);
+    assert.match(schema, /"batchGroupIdentity"/u);
+    for (const forbidden of [
+      "powerPrompts",
+      "avatarDetails",
+      "accentColor",
+      "avatarSfxPrompt",
+      "faceEyeCharacter",
+      "faceMouthCharacter",
+      "faceThinkingFrames",
+      "elevenLabsDirection",
+      "pitch",
+      "warmth",
+    ]) {
+      assert.equal(schema.includes(`"${forbidden}"`), false, forbidden);
+    }
+    assert.deepEqual(result.batchGroupIdentity, {
+      name: "Midnight Relay",
+      description: "Distinct night-shift personalities linked by one shared signal.",
+    });
+    assert.deepEqual(result.draft.powers, []);
+    assert.equal(result.draft.avatarDetails, null);
+    assert.equal(result.draft.accentColor, null);
+    assert.equal(result.draft.face.eyeCount, 2);
+    assert.equal(result.draft.audioVoiceProfile.baseVoiceId, "voice-7");
+    assert.equal(result.draft.audioVoiceProfile.pitch, 0);
+    const leanPrompt = provider.calls[0]?.[0]?.content ?? "";
+    assert.match(leanPrompt, /lean automatic batch/u);
+    assert.match(leanPrompt, /Personality is the primary differentiator/u);
+    assert.match(leanPrompt, /Do not emit Powers/u);
+    assert.doesNotMatch(leanPrompt, /Avatar ink is a safe/u);
+    assert.doesNotMatch(leanPrompt, /Tune pitch, warmth/u);
+    assert.doesNotMatch(leanPrompt, /avatarSfxPrompt/u);
+  });
+
   it("scrubs memories, media, exact Voice IDs, routing, and secrets from field context", () => {
     assert.deepEqual(sanitizeBotGenerationFieldContext({
       name: "Mara",
@@ -294,6 +464,75 @@ describe("PRISM bot generator", () => {
     assert.equal(parsed.face.mouthOffsetY, 0);
   });
 
+  it("pins requested Power count, fixed strength budget, and craziness in the generation contract", async () => {
+    const generated = rawDraft();
+    generated.powerPrompts = [
+      "Rain reveals one hidden regret nearby, but never who owns it.",
+      "A spoken nickname briefly changes gravity for its speaker alone.",
+      "Every third silence grows visible moss, which vanishes when addressed.",
+    ];
+    let capturedOptions: GenerateOptions | undefined;
+    const provider = createDeterministicProvider([JSON.stringify(generated)]);
+    const deterministicGenerate = provider.generateResponse.bind(provider);
+    provider.generateResponse = async (messages, options) => {
+      capturedOptions = options;
+      return deterministicGenerate(messages, options);
+    };
+
+    const result = await generateBotDraft({
+      prompt: "A dreamlike night custodian.",
+      generationContext: {
+        mode: "standard",
+        powers: { enabled: true, count: 3, craziness: 88 },
+        resemblance: 50,
+        inspirationSources: [],
+        batchIndex: 1,
+        batchCount: 1,
+      },
+      provider,
+      providerName: "local",
+      model: "llama-local",
+      responseMode: "local",
+    });
+
+    assert.equal(result.draft.powers.length, 3);
+    assert.match(
+      JSON.stringify(capturedOptions?.jsonSchema),
+      /"powerPrompts":\{"type":"array","minItems":3,"maxItems":3/u,
+    );
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /exactly 3 distinct weak compound Powers/u);
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /interlock into one powerful compound kit/u);
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /Social influence \/ craziness is 88\/100/u);
+  });
+
+  it("weights Inspire sources while prohibiting identity cloning", async () => {
+    const provider = createDeterministicProvider([JSON.stringify(rawDraft())]);
+    await generateBotDraft({
+      prompt: "A new observer of impossible weather.",
+      generationContext: {
+        mode: "inspire",
+        powers: { enabled: false, count: 1, craziness: 50 },
+        resemblance: 72,
+        inspirationSources: [
+          { id: "a", name: "Mara", influence: 80, essence: "Dry folklore investigator." },
+          { id: "b", name: "Sol", influence: 25, essence: "Playful stellar gardener." },
+        ],
+        batchIndex: 1,
+        batchCount: 1,
+      },
+      provider,
+      providerName: "local",
+      model: "llama-local",
+      responseMode: "local",
+    });
+
+    const system = provider.calls[0]?.[0]?.content ?? "";
+    assert.match(system, /72\/100 overall resemblance/u);
+    assert.match(system, /Mara \(80\/100 influence\)/u);
+    assert.match(system, /Sol \(25\/100 influence\)/u);
+    assert.match(system, /without cloning names, exact identities/u);
+  });
+
   it("keeps LOCAL generation on the supplied local provider and requests structured output", async () => {
     const provider = createDeterministicProvider([JSON.stringify(rawDraft())]);
     const deterministicGenerate = provider.generateResponse.bind(provider);
@@ -338,7 +577,7 @@ describe("PRISM bot generator", () => {
     assert.doesNotMatch(JSON.stringify(capturedOptions?.jsonSchema), /selfReferral/u);
     assert.match(
       JSON.stringify(capturedOptions?.jsonSchema),
-      /"powerPrompt":\{"type":"string","minLength":24,"maxLength":640\}/u,
+      /"powerPrompts":\{"type":"array","minItems":0,"maxItems":0/u,
     );
     assert.match(JSON.stringify(capturedOptions?.jsonSchema), /intentionalCustomEyes/u);
     assert.match(JSON.stringify(capturedOptions?.jsonSchema), /intentionalCustomBlink/u);
@@ -367,12 +606,12 @@ describe("PRISM bot generator", () => {
     assert.match(provider.calls[0]?.[0]?.content ?? "", /start from analogous tones, then step to triadic\/contrasting/i);
     assert.match(
       provider.calls[0]?.[0]?.content ?? "",
-      /Always set powerPrompt to exactly one concise, player-readable sentence/u,
+      /Set powerPrompts to an empty array/u,
     );
     assert.match(provider.calls[0]?.[0]?.content ?? "", /whole character/u);
     assert.match(provider.calls[0]?.[0]?.content ?? "", /concrete trigger, affected target or subject, observable consequence, and a real boundary/u);
     assert.match(provider.calls[0]?.[0]?.content ?? "", /never remove another person's agency/u);
-    assert.match(provider.calls[0]?.[0]?.content ?? "", /generic buff, ordinary talent or job skill, personality restatement, random gimmick/u);
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /generic buff, ordinary talent, personality restatement/u);
     assert.match(provider.calls[0]?.[0]?.content ?? "", /Do not create stamps or raw image\/accessory data/u);
     assert.match(provider.calls[0]?.[0]?.content ?? "", /safe,\s*low-noise pixel-portrait accent layer/u);
     assert.match(

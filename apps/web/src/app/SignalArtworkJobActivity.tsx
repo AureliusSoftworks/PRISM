@@ -7,6 +7,7 @@ import {
   signalArtworkAssetLabel,
   signalArtworkJobHeadline,
   signalArtworkJobIsActive,
+  signalArtworkJobSoftSynthesisCount,
   type SignalArtworkJobSnapshot,
 } from "./signalArtworkJob";
 import { registerPrismSoftSynthesisJobs } from "./prismSoftSynthesisUi.ts";
@@ -90,11 +91,11 @@ export function SignalArtworkJobActivity({
 
   const softJobCount = useMemo(() => {
     if (!job) return 0;
-    if (signalArtworkJobIsActive(job)) {
-      return Math.max(1, activeAssets.length + queuedAssets.length);
-    }
-    // Finished card still occupies soft UI until dismissed.
-    return 1;
+    return signalArtworkJobSoftSynthesisCount(
+      job,
+      activeAssets.length,
+      queuedAssets.length,
+    );
   }, [activeAssets.length, job, queuedAssets.length]);
 
   useEffect(() => {
@@ -102,7 +103,10 @@ export function SignalArtworkJobActivity({
     return () => registerPrismSoftSynthesisJobs("signal-artwork", 0);
   }, [softJobCount]);
 
-  if (!job) return null;
+  // A successful receipt remains available to Signal's own poller, but it is
+  // no longer queue work and must not reappear when another source expands
+  // the shared Synthesis panel.
+  if (!job || softJobCount === 0) return null;
   const active = signalArtworkJobIsActive(job);
   const progress =
     job.totalCount > 0 ? job.completedCount / job.totalCount : null;

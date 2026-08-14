@@ -201,6 +201,45 @@ describe("typed local asset library", () => {
     assert.match(assetStyles, /\.magentaPass[\s\S]*display: grid/u);
   });
 
+  it("supports exact bot-scoped browsing and opens an initial asset in normal details", () => {
+    assert.match(assetSource, /botId\?: string \| null/u);
+    assert.match(assetSource, /initialAssetId\?: string \| null/u);
+    assert.match(
+      assetSource,
+      /if \(botId\?\.trim\(\)\) params\.set\("botId", botId\.trim\(\)\)/u,
+    );
+    assert.match(
+      assetSource,
+      /resolveAssetLibraryInitialSelection\(\{/u,
+    );
+    assert.match(assetSource, /\/api\/assets\/\$\{encodeURIComponent\(assetId\)\}\/detail/u);
+    assert.match(assetSource, /new URLSearchParams\(\{ kind \}\)/u);
+    assert.match(assetSource, /setAssetDetailState\(initialAsset/u);
+    assert.match(
+      assetSource,
+      /data-asset-library-bot-id=\{botId\?\.trim\(\) \|\| undefined\}/u,
+    );
+  });
+
+  it("provides read-only bot asset rails that open the exact filtered library", () => {
+    assert.match(assetSource, /export function BotAssetLibraryIndex/u);
+    assert.match(assetSource, /index: BotImageAssetLibraryIndex \| null/u);
+    assert.match(assetSource, /\.filter\(\(section\) => section\.totalCount > 0 && section\.assets\.length > 0\)/u);
+    assert.match(assetSource, /section\.assets\.slice\(0, 6\)\.map/u);
+    assert.match(assetSource, /data-bot-asset-library-kind=\{section\.kind\}/u);
+    assert.match(assetSource, /botId=\{index\.botId\}/u);
+    assert.match(
+      assetSource,
+      /initialAssetId=\{openLibrary\.initialAssetId\}/u,
+    );
+    const botIndex = assetSource.slice(
+      assetSource.indexOf("export function BotAssetLibraryIndex"),
+      assetSource.indexOf("export interface AssetLibraryModalProps"),
+    );
+    assert.doesNotMatch(botIndex, /onSynthesize|onUpload|PrismRefract/u);
+    assert.match(assetStyles, /\.botAssetLibraryThumbs[\s\S]*overflow-x: auto/u);
+  });
+
   it("reuses PRISM surface, form, gallery, and state primitives", () => {
     assert.match(assetSource, /import sharedStyles from "\.\/page\.module\.css"/u);
     for (const className of [

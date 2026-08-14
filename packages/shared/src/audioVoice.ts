@@ -2163,6 +2163,53 @@ export function resolveBotAudioVoiceProfileV1(
   });
 }
 
+/** Accent Map coordinates are optional authored identity, not a default voice
+ * value. Mumbling uses only an explicitly persisted pin so legacy bots retain
+ * their historical gibberish until someone moves them on the map. */
+export function resolveBotPronunciationMapPointV1(
+  authoredValue: unknown,
+  overrideValue: unknown,
+): LocalVoicePronunciationMapPoint | null {
+  const recordFor = (value: unknown): Record<string, unknown> | null => {
+    let candidate = value;
+    if (typeof candidate === "string") {
+      try {
+        candidate = JSON.parse(candidate);
+      } catch {
+        return null;
+      }
+    }
+    return candidate && typeof candidate === "object" && !Array.isArray(candidate)
+      ? candidate as Record<string, unknown>
+      : null;
+  };
+  const authored = recordFor(authoredValue);
+  const override = recordFor(overrideValue);
+  const source = override &&
+      Object.prototype.hasOwnProperty.call(override, "pronunciationMapPoint")
+    ? override
+    : authored &&
+        Object.prototype.hasOwnProperty.call(authored, "pronunciationMapPoint")
+      ? authored
+      : null;
+  if (!source || source.pronunciationMapPoint === null) return null;
+  const point = source.pronunciationMapPoint;
+  if (!point || typeof point !== "object" || Array.isArray(point)) return null;
+  const row = point as Record<string, unknown>;
+  if (
+    typeof row.x !== "number" ||
+    !Number.isFinite(row.x) ||
+    typeof row.y !== "number" ||
+    !Number.isFinite(row.y)
+  ) {
+    return null;
+  }
+  return {
+    x: Math.max(0, Math.min(1, row.x)),
+    y: Math.max(0, Math.min(1, row.y)),
+  };
+}
+
 export function parseStoredBotAudioVoiceProfileV1(
   value: unknown,
 ): BotAudioVoiceProfileV2 | null {

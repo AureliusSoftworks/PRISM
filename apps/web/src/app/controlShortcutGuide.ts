@@ -47,13 +47,12 @@ const GUIDE_SLOTS: Record<
 
 export function controlShortcutGuideShouldShow(args: {
   controlHeld: boolean;
+  optionHeld: boolean;
   prismWielding: boolean;
   recordingShortcut: boolean;
 }): boolean {
   if (args.recordingShortcut) return false;
-  // Wield is intentionally quiet. The compass is only discovery UI for the
-  // Control-root navbar controls, not feedback for Prism's Option/Control hold.
-  return args.controlHeld;
+  return args.controlHeld || (args.optionHeld && !args.prismWielding);
 }
 
 export function controlShortcutGuideEntries(
@@ -95,6 +94,26 @@ export function isControlHeldAlone(event: {
   metaKey: boolean;
 }): boolean {
   return event.ctrlKey && !event.altKey && !event.metaKey;
+}
+
+export function isOptionKeyEvent(event: {
+  key: string;
+  code?: string;
+}): boolean {
+  return (
+    event.key === "Alt" ||
+    event.code === "AltLeft" ||
+    event.code === "AltRight"
+  );
+}
+
+export function isOptionHeldAlone(event: {
+  ctrlKey: boolean;
+  altKey: boolean;
+  metaKey: boolean;
+  shiftKey: boolean;
+}): boolean {
+  return event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
 }
 
 export const PRISM_COMPANION_ANCHOR_SELECTOR =

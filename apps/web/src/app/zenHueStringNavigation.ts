@@ -1,6 +1,6 @@
-// The deepest Zenith directory is a two-row close-up. It gives the cable one
-// extra meaningful pull beyond the previous three-row floor.
-export const ZEN_HUE_DIRECTORY_MIN_ROWS = 2;
+// The deepest Zenith directory is a single, intimate row. It is deliberately
+// a card view rather than another density stage.
+export const ZEN_HUE_DIRECTORY_MIN_ROWS = 1;
 
 export type ZenHueDirectoryTier = "root" | number;
 
@@ -161,7 +161,7 @@ function logarithmicDetentPosition(index: number, lastIndex: number): number {
 
 /**
  * Maps vertical string travel onto discrete directory tiers. Logarithmic
- * detents reserve more physical travel near the intimate two-row view and
+ * detents reserve more physical travel near the intimate one-row view and
  * progressively compress the broader directories near the rainbow root.
  */
 export function zenHueTierForVerticalDrag(options: {
@@ -215,4 +215,159 @@ export function zenHueTierForVerticalDrag(options: {
     }
   }
   return zenHueTierAtIndex(candidateIndex, tiers);
+}
+
+/** Physical-only cable recoil. It never alters the committed directory. */
+export interface ZenHueCableSpringState {
+  displacement: number;
+  velocity: number;
+}
+
+export type ZenHueCableDragDirection = -1 | 0 | 1;
+
+export interface ZenHueCableTraversalStep {
+  deltaY: number;
+  direction: ZenHueCableDragDirection;
+  normalizedPull: number;
+  pullBoost: number;
+}
+
+export interface ZenHueCableTraversalStepOptions {
+  deltaY: number;
+  deadZonePx: number;
+  currentDirection: ZenHueCableDragDirection;
+  directionLatchPx: number;
+  pullScalePx?: number;
+  pullBoost?: number;
+}
+
+export interface ZenHueCableTraversalFrame {
+  normalizedPosition: number;
+  direction: ZenHueCableDragDirection;
+  normalizedPull: number;
+  tierSpeed: number;
+}
+
+export interface ZenHueCableTraversalFrameOptions
+  extends ZenHueCableTraversalStepOptions {
+  normalizedPosition: number;
+  elapsedSeconds: number;
+  tierCount: number;
+  baseTierSpeed?: number;
+}
+
+const ZEN_HUE_CABLE_PULL_BOOST_MAX = 1.85;
+const ZEN_HUE_CABLE_PULL_SCALE_PX = 170;
+
+export function zenHueCableTraversalStep(
+  options: ZenHueCableTraversalStepOptions,
+): ZenHueCableTraversalStep {
+  const deadZonePx = Math.max(0, options.deadZonePx);
+  const directionLatchPx = Math.max(
+    deadZonePx,
+    Math.max(1, options.directionLatchPx),
+  );
+  const pullScalePx = Math.max(1, options.pullScalePx ?? ZEN_HUE_CABLE_PULL_SCALE_PX);
+  const pullBoostMax = Math.max(1, options.pullBoost ?? ZEN_HUE_CABLE_PULL_BOOST_MAX);
+  const absDelta = Math.abs(options.deltaY);
+  if (absDelta <= deadZonePx) {
+    return {
+      deltaY: 0,
+      direction: options.currentDirection,
+      normalizedPull: 0,
+      pullBoost: 1,
+    };
+  }
+
+  let nextDirection = options.currentDirection;
+  if (nextDirection === 0) {
+    nextDirection = options.deltaY > 0 ? 1 : -1;
+  }
+
+  const nextOpposite = nextDirection === 1 ? options.deltaY < 0 : options.deltaY > 0;
+  if (nextOpposite && absDelta < directionLatchPx) {
+    return {
+      deltaY: 0,
+      direction: nextDirection,
+      normalizedPull: 0,
+      pullBoost: 1,
+    };
+  }
+  if (nextOpposite) {
+    nextDirection = options.deltaY > 0 ? 1 : -1;
+  }
+
+  const normalizedPull = Math.min(
+    1,
+    Math.max(0, (absDelta - deadZonePx) / pullScalePx),
+  );
+  const pullBoost = 1 + normalizedPull * (pullBoostMax - 1);
+  return {
+    deltaY: options.deltaY * pullBoost,
+    direction: nextDirection,
+    normalizedPull,
+    pullBoost,
+  };
+}
+
+/**
+ * Integrates a held cable pull. Position is normalized across the live tier
+ * ladder, so a full-strength pull crosses a 100-bot and a 100,000-bot
+ * directory in nearly the same time. `tierSpeed` still scales by tier count
+ * so every individual detent receives the same physical cadence.
+ */
+export function zenHueCableTraversalFrame(
+  options: ZenHueCableTraversalFrameOptions,
+): ZenHueCableTraversalFrame {
+  const step = zenHueCableTraversalStep(options);
+  const tierCount = Math.max(1, Math.floor(options.tierCount));
+  const elapsedSeconds = Math.max(0, Math.min(0.05, options.elapsedSeconds));
+  const baseTierSpeed = Math.max(0, options.baseTierSpeed ?? 1.35);
+  // Movement begins gently at the edge of the dead zone, then accelerates
+  // sharply as the cable is pulled taut. This keeps a small held deflection
+  // from racing through directories while preserving a fast full pull.
+  const pullResponse = Math.pow(step.normalizedPull, 1.2);
+  const tierSpeed =
+    baseTierSpeed * tierCount * pullResponse * step.pullBoost;
+  const normalizedVelocity = tierSpeed / tierCount;
+  const signedVelocity = step.direction * normalizedVelocity;
+  const active = step.deltaY !== 0 ? signedVelocity : 0;
+  return {
+    normalizedPosition: Math.max(
+      0,
+      Math.min(1, options.normalizedPosition + active * elapsedSeconds),
+    ),
+    direction: step.direction,
+    normalizedPull: step.normalizedPull,
+    tierSpeed: step.deltaY !== 0 ? signedVelocity * tierCount : 0,
+  };
+}
+
+export function zenHueTierForNormalizedPosition(
+  normalizedPosition: number,
+  tiers: readonly number[],
+): ZenHueDirectoryTier {
+  return zenHueTierAtIndex(
+    Math.round(Math.max(0, Math.min(1, normalizedPosition)) * tiers.length),
+    tiers,
+  );
+}
+
+export function stepZenHueCableSpring(
+  state: ZenHueCableSpringState,
+  elapsedSeconds: number,
+): ZenHueCableSpringState {
+  const dt = Math.max(0, Math.min(0.032, elapsedSeconds));
+  const stiffness = 430;
+  const damping = 21;
+  const acceleration =
+    -stiffness * state.displacement - damping * state.velocity;
+  const velocity = state.velocity + acceleration * dt;
+  return { displacement: state.displacement + velocity * dt, velocity };
+}
+
+export function zenHueCableSpringHasSettled(
+  state: ZenHueCableSpringState,
+): boolean {
+  return Math.abs(state.displacement) < 0.12 && Math.abs(state.velocity) < 2;
 }

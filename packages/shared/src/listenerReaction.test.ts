@@ -18,12 +18,48 @@ import {
   planSocialSilenceV1,
   resolveListenerReactionAtMs,
   listenerReactionHasCrosstalkAudio,
+  listenerReactionInterruptedSpeakerTextV1,
+  listenerReactionSpokenTextV1,
   listenerReactionTextIsAuthorizedV1,
   socialSilenceMessageIsMarkedV1,
 } from "./listenerReaction.ts";
 import { DIRECTIONAL_IRRITATION_SNARK_CUES } from "./directionalIrritation.ts";
 
 describe("listener reaction planning", () => {
+  it("normalizes Power-projected spoken cues as the only public reaction text", () => {
+    const normalized = normalizeListenerReactionPlanV1({
+      v: 1,
+      name: "listenerReaction",
+      speakerBotId: "speaker",
+      listenerBotId: "listener",
+      messageId: "message",
+      targetSource: "role",
+      visualAction: "nod",
+      spokenCue: "I see.",
+      publicSpokenCue: "Mrahguh.",
+      spokenCueSpeechEffect: "speech_obfuscation",
+      interjectionAttempt: true,
+      floorOutcome: "yield",
+      interruptedSpeakerCue: "... sure. Go ahead.",
+      publicInterruptedSpeakerCue: "... gruhm. Yahsh.",
+      interruptedSpeakerCueSpeechEffect: "speech_obfuscation",
+      interruptedSpeakerCuePlayback: "crosstalk",
+      targetProgress: 0.5,
+      seed: "reaction",
+      cameraCutEligible: true,
+    });
+
+    assert.ok(normalized);
+    assert.equal(normalized.spokenCue, undefined);
+    assert.equal(normalized.interruptedSpeakerCue, undefined);
+    assert.equal(listenerReactionSpokenTextV1(normalized), "Mrahguh.");
+    assert.equal(
+      listenerReactionInterruptedSpeakerTextV1(normalized),
+      "... gruhm. Yahsh.",
+    );
+    assert.equal(listenerReactionHasCrosstalkAudio(normalized), true);
+  });
+
   it("is deterministic and keeps Signal closing reactions visual-only", () => {
     const input = {
       episodeId: "episode-1",

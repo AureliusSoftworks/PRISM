@@ -17,7 +17,6 @@ import {
   DIRECTIONAL_IRRITATION_REBUFF_DELTA,
   DIRECTIONAL_IRRITATION_RECLAIM_CEILING,
   SIGNAL_PICKLES_SLOW_SIP_DURATION_MS,
-  applyBotPowerCursedTongueResponseV1,
   applyBotPowerMumbledResponseV1,
   botPowerResponseIsSilentV1,
   botPowerResponseHasAddressedInsultV1,
@@ -124,6 +123,7 @@ import {
   retrieveBotPairNarrativeMemories,
 } from "../memory.ts";
 import {
+  getAuxiliaryProvider,
   selectProvider,
   type GenerateOptions,
   type LlmProvider,
@@ -4169,8 +4169,12 @@ describe("Botcast persistence and isolation", () => {
 
   it("persists Mumbling Jim's gibberish as Signal's only on-air and replay context", async () => {
     const db = fixture();
-    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'host-1'").run(
+    const pronunciationMapPoint = { x: 0.18, y: 0.82 };
+    db.prepare(
+      "UPDATE bots SET powers_json = ?, authored_audio_voice_profile = ? WHERE id = 'host-1'",
+    ).run(
       mumblingPowers(),
+      JSON.stringify({ v: 3, pronunciationMapPoint }),
     );
     try {
       const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
@@ -4186,7 +4190,10 @@ describe("Botcast persistence and isolation", () => {
         {},
         generation(recordingProvider([intended], [])),
       );
-      const expectedPublic = applyBotPowerMumbledResponseV1(intended);
+      const expectedPublic = applyBotPowerMumbledResponseV1(intended, {
+        pronunciationMapPoint,
+        variationSeed: `${episode.id}:host-1:1:turn`,
+      });
       assert.equal(advanced.message?.content, expectedPublic);
       assert.doesNotMatch(advanced.message?.content ?? "", /rational|explanation|missing map/iu);
       const utterance = advanced.episode.events.find(
@@ -4290,6 +4297,14 @@ describe("Botcast persistence and isolation", () => {
     try {
       const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
       const intended = `Welcome to ${show.name}. I'm Mara Vale, joined by Ivo Stone to discuss the archive plan and its consequences.`;
+      const publicRewrite = intended.replace(
+        "joined by Ivo Stone",
+        "fucking joined by Ivo Stone",
+      );
+      const primaryCaptures: ProviderMessage[][] = [];
+      const auxiliaryCaptures: ProviderMessage[][] = [];
+      const primaryProvider = recordingProvider([intended], primaryCaptures);
+      const auxiliaryProvider = recordingProvider([publicRewrite], auxiliaryCaptures);
       const episode = createBotcastEpisode(db, "user-1", show.id, {
         guestBotId: "guest-1",
         topic: "Archive consequences",
@@ -4299,16 +4314,16 @@ describe("Botcast persistence and isolation", () => {
         "user-1",
         episode.id,
         {},
-        generation(recordingProvider([intended], [])),
+        {
+          ...generation(primaryProvider),
+          auxiliaryProviderFactory:
+            (() => auxiliaryProvider) as typeof getAuxiliaryProvider,
+        },
       );
       const publicSpeech = advanced.message?.content ?? "";
-      assert.equal(
-        publicSpeech,
-        applyBotPowerCursedTongueResponseV1(
-          intended,
-          `${episode.id}:host-1:1`,
-        ),
-      );
+      assert.equal(publicSpeech, publicRewrite);
+      assert.equal(primaryCaptures.length, 1);
+      assert.equal(auxiliaryCaptures.length, 1);
       const utterance = advanced.episode.events.find(
         (event) => event.kind === "utterance" && event.payload.messageId === advanced.message?.id,
       );
@@ -9903,6 +9918,10 @@ describe("Botcast persistence and isolation", () => {
       source,
       /speakerIsMutedForTurn \|\| botPowerIsMutedV1\(listener\.powers\)[\s\S]{0,120}signalVisualOnlyListenerReaction/u,
     );
+    assert.match(
+      source,
+      /applyBotPowerMumbledReactionPlanV1\(audiblePlan,[\s\S]{0,520}variationSeed: `\$\{audiblePlan\.seed\}:listener`/u,
+    );
   });
 
   it("creates and renames a stable host-owned show", () => {
@@ -10058,11 +10077,25 @@ describe("Botcast persistence and isolation", () => {
       assert.match(show.logo.prompt, /Style: render the subject with/iu);
       assert.ok(show.logo.prompt.includes(show.logo.design.lineLanguage));
       assert.ok(show.logo.prompt.includes(show.logo.design.composition));
+      assert.ok(show.logo.prompt.includes(show.logo.design.personaMotif));
       assert.ok(!show.logo.prompt.includes(show.logo.design.fusionMechanic));
       assert.ok(!show.logo.prompt.includes(show.logo.design.silhouette));
       assert.ok(!show.logo.prompt.includes(show.logo.design.negativeSpace));
       assert.match(show.logo.prompt, /familiar, nameable visual subject/iu);
-      assert.match(show.logo.prompt, /never render abstract geometry/iu);
+      assert.match(
+        show.logo.prompt,
+        /never render abstract geometry, an ornamental emblem/iu,
+      );
+      assert.match(show.logo.prompt, /Concrete backup visual sentence/iu);
+      assert.match(
+        show.logo.prompt,
+        /Broadcast cues are optional/iu,
+      );
+      assert.match(show.logo.prompt, /no detached radiating arcs/iu);
+      assert.match(
+        show.logo.design.personaMotif,
+        /evidence card|brass caliper|specimen slides|magnifying glass|annotation bracket|pocket watch/iu,
+      );
       assert.match(show.logo.prompt, /standalone microphone, headphones, waveform/iu);
       assert.match(show.logo.prompt, /never podcast clip art/iu);
       assert.match(show.logo.design.signature, /^signal-logo-v1:analytical:/u);
@@ -10461,7 +10494,7 @@ describe("Botcast persistence and isolation", () => {
             "A forensic archive arranged around annotated cultural ephemera, pinned redactions, specimen drawers, a magnifying lens, index cards, balance weights, and one severe violet clock.",
           music_identity: TEST_SIGNAL_MUSIC_IDENTITY,
           logo_thesis:
-            "An evidence tag has one clipped corner become a transmission pulse, so a piece of proof visibly turns into a broadcast.",
+            "Persona fingerprint: forensic cultural skepticism, severe editorial standards, and dry impatience with canned certainty. Emblem: a worn evidence tag has one clipped corner become a restrained transmission pulse, so proof visibly turns into broadcast. Art direction: charcoal paper, smoked-violet glass, exact registration marks, asymmetrical tension, and one surgical edge keep the mark archival, analytical, and unsentimental.",
           dashboard_blurbs: Array.from(
             { length: 24 },
             (_, index) =>
@@ -11020,7 +11053,7 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.match(result.show.logo.prompt, /the brief wins/iu);
       assert.ok(
-        !result.show.logo.prompt.includes(
+        result.show.logo.prompt.includes(
           result.show.logo.design.personaMotif,
         ),
       );
@@ -12227,6 +12260,49 @@ describe("Botcast persistence and isolation", () => {
         captures[0]?.[1]?.content ?? "",
         /Make the symbol feel tactile and forensic/u,
       );
+      assert.match(
+        captures[0]?.[0]?.content ?? "",
+        /ingenious narrative twist or visual joke/iu,
+      );
+      assert.match(
+        captures[0]?.[0]?.content ?? "",
+        /never add detached radiating arcs/iu,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rejects abstract, malformed, and actionless Signal logo theses", async () => {
+    const db = fixture();
+    try {
+      const invalidTheses = [
+        "Persona fingerprint: cool analytical distance and disciplined skepticism. Emblem: abstract geometry of nested planes, contours, intervals, and voids. Art direction: crisp cyan cuts, balanced asymmetry, and editorial restraint.",
+        "Persona fingerprint: cool analytical distance and disciplined skepticism. Emblem: nested planes exchange foreground and void around a broken contour. Art direction: crisp cyan cuts, balanced asymmetry, and editorial restraint.",
+        "Persona fingerprint: cool analytical distance and disciplined skepticism. Physical mark: a brass evidence tag catches one curling paper corner. Art direction: crisp cyan cuts, balanced asymmetry, and editorial restraint.",
+        "Persona fingerprint: cool analytical distance and disciplined skepticism. Emblem: a brass evidence tag beside a cracked ceramic cup. Art direction: crisp cyan cuts, balanced asymmetry, and editorial restraint.",
+      ];
+      for (const logoThesis of invalidTheses) {
+        const show = createBotcastShow(db, "user-1", {
+          hostBotId: "host-1",
+        });
+        const provider = recordingProvider(
+          [JSON.stringify({ logoThesis })],
+          [],
+        );
+        const result = await generateBotcastShowLogoThesis(
+          db,
+          "user-1",
+          show.id,
+          generation(provider),
+        );
+        assert.equal(result.generated, false);
+        assert.equal(result.show.logo.revision, show.logo.revision);
+        assert.equal(
+          result.show.logo.design.showThesis,
+          show.logo.design.showThesis,
+        );
+      }
     } finally {
       db.close();
     }
@@ -17734,6 +17810,139 @@ describe("Botcast persistence and isolation", () => {
           `${guestContent.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\\.\\.\\.`,
           "u",
         ),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("never lets a mumbled interruption cutoff leak private clear speech", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const privateGuestLine =
+      "The private rational explanation says the blue archive key opens the workshop before sunrise, but nobody should hear these clear words.";
+    const provider = recordingProvider(
+      [
+        "A generic opening that will use the safe introduction fallback.",
+        privateGuestLine,
+        "I interrupted because the audience could only react to what they actually heard.",
+      ],
+      captures,
+    );
+    const name = "Interrupting Tom";
+    const intent = "Cuts into every eligible bot turn.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'host-1'").run(
+      JSON.stringify([{
+        version: 1,
+        id: "power-interrupting",
+        name,
+        intent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(name, intent),
+          selfCue: "Cut into every eligible bot speaker's live turn.",
+          observerCue: "The host interrupts every eligible guest turn.",
+          effects: [{
+            type: "interruption",
+            frequency: "frequent",
+            strength: "large",
+            certainty: "always",
+            targets: [{ kind: "all" }],
+          }],
+          ruleLabels: ["Always interrupts"],
+        },
+      }]),
+    );
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'guest-1'").run(
+      mumblingPowers(),
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      let created = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Private speech boundaries",
+      });
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const floorOutcome = botcastCrosstalkFloorOutcomeV1({
+          seed: [
+            "signal-power-crosstalk-floor-v1",
+            created.id,
+            "guest",
+            0,
+            "host-1",
+          ].join(":"),
+          speaker: {
+            id: "guest-1",
+            systemPrompt:
+              "A guarded inventor who resists personal speculation and warns people before walking away.",
+          },
+          tension: { level: 0 },
+          canReclaim: true,
+        });
+        if (floorOutcome === "yield") break;
+        created = createBotcastEpisode(db, "user-1", show.id, {
+          guestBotId: "guest-1",
+          topic: `Private speech boundaries ${attempt + 1}`,
+        });
+      }
+
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      const interrupted = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      const publicCutoff = interrupted.message?.content ?? "";
+      assert.equal(interrupted.message?.speakerRole, "guest");
+      assert.match(publicCutoff, /—$/u);
+      assert.doesNotMatch(
+        publicCutoff,
+        /private rational|blue archive key|workshop before sunrise/iu,
+      );
+      const reaction = interrupted.episode.events.find(
+        (event) =>
+          event.kind === "listener_reaction" &&
+          (event.payload.plan as Record<string, unknown> | undefined)
+              ?.messageId === interrupted.message?.id,
+      );
+      const plan = reaction?.payload.plan as Record<string, unknown> | undefined;
+      assert.equal(plan?.interruptedSpeakerCue, undefined);
+      assert.equal(plan?.interruptedSpeakerCueSpeechEffect, "speech_obfuscation");
+      assert.ok(plan?.publicInterruptedSpeakerCue);
+      assert.equal(
+        (reaction?.payload.reclaim as Record<string, unknown> | undefined)
+          ?.heardFragment,
+        undefined,
+      );
+      assert.doesNotMatch(
+        JSON.stringify(interrupted.episode),
+        /private rational explanation|blue archive key/iu,
+      );
+
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      const observerPrompt = captures[2]!
+        .map((message) => message.content)
+        .join("\n");
+      assert.ok(observerPrompt.includes(publicCutoff));
+      assert.doesNotMatch(
+        observerPrompt,
+        /private rational explanation|blue archive key/iu,
       );
     } finally {
       db.close();

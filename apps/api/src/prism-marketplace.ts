@@ -29,6 +29,7 @@ import {
   normalizeBotFaceFontWeight,
   normalizeBotFaceGlyphAnimation,
   normalizeBotFaceMouthCharacter,
+  normalizeBotFaceCustomSpeechPoses,
   normalizeBotFaceMouthOffsetX,
   normalizeBotFaceMouthOffsetY,
   normalizeBotFaceMouthRotationDeg,
@@ -45,6 +46,7 @@ import {
   serializeBotAudioVoiceProfileV1,
   serializeBotAvatarDetailsV1,
   serializeBotPowersV1,
+  serializeBotFaceCustomSpeechPosesForStorage,
   serializeStoredBotPrompt,
   type BotProfileFields,
 } from "@localai/shared";
@@ -101,6 +103,7 @@ interface MarketplaceArchiveBot {
   faceMouthFont?: unknown;
   faceMouthCharacter?: unknown;
   faceMouthAnimation?: unknown;
+  faceMouthSpeechPoses?: unknown;
   faceMouthCoffeePucker?: unknown;
   faceFontWeight?: unknown;
   faceEyeScale?: unknown;
@@ -426,6 +429,10 @@ function insertMarketplaceBot(args: {
   const thinkingFrames = normalizeBotFaceThinkingFrames(
     bot.faceThinkingFrames,
   );
+  const legacySpeechPoses =
+    bot.faceMouthAnimation === "custom"
+      ? normalizeBotFaceCustomSpeechPoses(bot.faceMouthCharacter)
+      : null;
   args.db
     .prepare(
       `INSERT INTO bots
@@ -470,7 +477,8 @@ function insertMarketplaceBot(args: {
       normalizeBotFaceGlyphAnimation(bot.faceEyeAnimation) ??
         DEFAULT_BOT_FACE_GLYPH_ANIMATION,
       normalizeBotFaceFontId(bot.faceMouthFont),
-      normalizeBotFaceMouthCharacter(bot.faceMouthCharacter),
+      legacySpeechPoses?.[0] ??
+        normalizeBotFaceMouthCharacter(bot.faceMouthCharacter),
       normalizeBotFaceGlyphAnimation(bot.faceMouthAnimation) ??
         DEFAULT_BOT_FACE_GLYPH_ANIMATION,
       bot.faceMouthCoffeePucker === false ? 0 : 1,
@@ -518,6 +526,16 @@ function insertMarketplaceBot(args: {
     .run(
       normalizeBotFaceEyeSpacing(bot.faceEyeSpacing) ??
         DEFAULT_BOT_FACE_EYE_SPACING,
+      botId,
+      args.userId,
+    );
+  args.db
+    .prepare(
+      "UPDATE bots SET face_mouth_speech_poses = ? WHERE id = ? AND user_id = ?",
+    )
+    .run(
+      serializeBotFaceCustomSpeechPosesForStorage(bot.faceMouthSpeechPoses) ??
+        serializeBotFaceCustomSpeechPosesForStorage(legacySpeechPoses),
       botId,
       args.userId,
     );

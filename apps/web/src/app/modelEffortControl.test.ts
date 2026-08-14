@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import type { ModelReasoningEffortCapabilityV1 } from "@localai/shared";
 import {
   MODEL_EFFORT_ICON_PATHS,
+  MODEL_EFFORT_DEFAULT_ICON_PATH,
   modelEffortBaseline,
   modelEffortSliderLevels,
   modelEffortSliderProgress,
@@ -23,6 +24,10 @@ const autoIconSource = readFileSync(
   new URL("../../public/reasoning-effort/auto.svg", import.meta.url),
   "utf8",
 );
+const defaultIconSource = readFileSync(
+  new URL("../../public/reasoning-effort/default.svg", import.meta.url),
+  "utf8",
+);
 const minimalIconSource = readFileSync(
   new URL("../../public/reasoning-effort/minimal.svg", import.meta.url),
   "utf8",
@@ -39,19 +44,37 @@ describe("model effort slider", () => {
       "high",
       "xhigh",
     ]);
-    assert.equal(MODEL_EFFORT_ICON_PATHS.auto, "/reasoning-effort/auto.svg");
+    assert.equal(MODEL_EFFORT_ICON_PATHS.auto, MODEL_EFFORT_DEFAULT_ICON_PATH);
+    assert.equal(MODEL_EFFORT_ICON_PATHS.auto, "/reasoning-effort/default.svg");
+    assert.equal(
+      MODEL_EFFORT_ICON_PATHS.minimal,
+      "/reasoning-effort/minimal.svg",
+    );
     assert.notEqual(
       MODEL_EFFORT_ICON_PATHS.auto,
       MODEL_EFFORT_ICON_PATHS.minimal,
     );
   });
 
-  it("keeps Auto upright and rotates the Minimal silhouette downward", () => {
-    const points = minimalIconSource.match(/points="([^"]+)"/u)?.[1];
-    assert.ok(points);
-    assert.doesNotMatch(autoIconSource, /rotate\(180 48\.425 41\.935\)/u);
+  it("keeps Default filled, Auto triangular, and Minimal on its local glyph", () => {
+    const defaultCircleMatch = defaultIconSource.match(/<circle[^>]*>/u)?.[0];
+    assert.ok(defaultCircleMatch);
+    assert.ok(!defaultCircleMatch.includes("points="));
+    const noneCircleMatch = readFileSync(
+      new URL("../../public/reasoning-effort/none.svg", import.meta.url),
+      "utf8",
+    ).match(/<path[^>]*>/u)?.[0];
+    assert.ok(noneCircleMatch);
+    assert.notEqual(noneCircleMatch, defaultCircleMatch);
+    const minimalPoints = minimalIconSource.match(/points="([^"]+)"/u)?.[1];
+    const autoPoints = autoIconSource.match(/points="([^"]+)"/u)?.[1];
+    assert.ok(minimalPoints);
+    assert.equal(autoPoints, "48.425 0 96.85 83.87 0 83.87");
     assert.match(minimalIconSource, /rotate\(180 48\.425 41\.935\)/u);
-    assert.match(autoIconSource, new RegExp(`points="${points}"`, "u"));
+    assert.notEqual(MODEL_EFFORT_ICON_PATHS.none, MODEL_EFFORT_ICON_PATHS.minimal);
+    assert.doesNotMatch(MODEL_EFFORT_ICON_PATHS.minimal, /default\.svg$/u);
+    assert.match(defaultIconSource, /<circle[^>]*>/u);
+    assert.notEqual(autoPoints, minimalPoints);
   });
 
   it("keeps the slider capability-aware and evenly positioned", () => {

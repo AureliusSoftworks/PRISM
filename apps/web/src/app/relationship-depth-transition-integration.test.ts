@@ -127,7 +127,7 @@ describe("relationship-depth page integration", () => {
       pageSource,
       /event\.key !== "Escape"[\s\S]{0,500}returnFromRelationshipDepth\("escape"\)/,
     );
-    assert.match(pageSource, /function jumpCanvasToAllBotsHome\(/);
+    assert.match(pageSource, /function jumpCanvasToCurrentGroupRoot\(/);
     assert.doesNotMatch(
       pageSource,
       /handleEmptyStateBackgroundClick[\s\S]{0,2500}returnFromRelationshipDepth\(/,
@@ -282,7 +282,7 @@ describe("relationship-depth page integration", () => {
     );
   });
 
-  it("guards relationship returns while canvas clicks stay in the current Chat or Zen directory", () => {
+  it("guards relationship returns while Zen hue-directory escape stays local", () => {
     const returnRoute = sourceSlice(
       "async function returnFromRelationshipDepth",
       "async function visitZenHome",
@@ -322,10 +322,10 @@ describe("relationship-depth page integration", () => {
     );
     assert.doesNotMatch(pageSource, /relationshipDepthReturnBlockedByReply/);
     assert.match(pageSource, /performShowAllBotsView\(\);\s*void openZenMode\(\)/);
-    assert.match(pageSource, /function jumpCanvasToAllBotsHome\(/);
+    assert.match(pageSource, /function jumpCanvasToCurrentGroupRoot\(/);
     assert.match(
       backgroundClick,
-      /if \(view === "chat"\) \{[\s\S]{0,240}setCanvasSelectedBotIds[\s\S]{0,160}return;/,
+      /if \(view === "chat"\) \{[\s\S]{0,500}chatPresentation === "zen"[\s\S]{0,900}jumpCanvasToCurrentGroupRoot\(\)/,
     );
     assert.doesNotMatch(
       backgroundClick,
@@ -354,11 +354,11 @@ describe("relationship-depth page integration", () => {
     assert.match(tutorialSource, /heading: "Choose a relationship"/);
     assert.match(
       tutorialSource,
-      /select the focused tile again to open its customization panel, or send a message to begin Zen\/Chat/,
+      /select the focused tile again to unfocus it; open its mini bot avatar for customization, or send a message to begin Zen\/Chat/,
     );
     assert.match(
       tutorialSource,
-      /Clicking empty canvas space jumps straight back to All Bots Home/,
+      /Clicking empty canvas space clears bot and hue focus while keeping the navbar’s current All Bots, Ungrouped, or saved-group selection/,
     );
     assert.match(
       tutorialSource,

@@ -4,6 +4,7 @@ import {
   BOT_GENERATED_AVATAR_INK_MAX_PAINTED_PIXELS,
   BOT_GENERATION_PROMPT_MAX_LENGTH,
   normalizeBotGeneratedDraftV1,
+  normalizeLeanBotGeneratedDraftV1,
   normalizeBotGenerationPrompt,
 } from "./botGeneration.ts";
 import {
@@ -340,14 +341,19 @@ describe("normalizeBotGeneratedDraftV1", () => {
     assert.ok(Math.abs(generatedColor.l - 50) < 0.6);
   });
 
-  it("creates at most one compiler-ready prompt Power from a master draft", () => {
+  it("creates up to three compiler-ready prompt Powers from a master draft", () => {
     const value = completeDraft();
-    value.powerPrompt = "She can hear lies as broken glass, but only from detectives.";
+    value.powerPrompts = [
+      "She can hear lies as broken glass, but only from detectives.",
+      "Moonlight makes every promise hover visibly until the speaker fulfills it.",
+      "Old maps whisper one safe direction, but never the destination.",
+      "A fourth Power must be ignored by the bounded contract.",
+    ];
     const draft = normalizeBotGeneratedDraftV1(value);
     assert.ok(draft);
-    assert.equal(draft.powers.length, 1);
+    assert.equal(draft.powers.length, 3);
     assert.equal(draft.powers[0]?.authoringMode, "prompt");
-    assert.equal(draft.powers[0]?.intent, value.powerPrompt);
+    assert.equal(draft.powers[0]?.intent, value.powerPrompts[0]);
     assert.equal(draft.powers[0]?.compileStatus, "draft");
   });
 
@@ -637,6 +643,38 @@ describe("normalizeBotGeneratedDraftV1", () => {
       draft.avatarDetails?.screen.paintColorMapBase64,
       expected.avatarDetails?.screen.paintColorMapBase64,
     );
+  });
+});
+
+describe("normalizeLeanBotGeneratedDraftV1", () => {
+  it("deterministically strips rich batch output while preserving allowed identity", () => {
+    const rich = completeDraft();
+    rich.voiceBaseId = "voice-8";
+    const draft = normalizeLeanBotGeneratedDraftV1(rich);
+    assert.ok(draft);
+    assert.equal(draft.name, "Nyx");
+    assert.equal(draft.profile.core.traits, "patient, sly, observant");
+    assert.equal(draft.color, "#2f00ff");
+    assert.equal(draft.glyph, "moon");
+    assert.equal(draft.face.eyesFont, "warm");
+    assert.equal(draft.face.eyeCount, 2);
+    assert.equal(draft.face.eyeScale, 1.2);
+    assert.equal(draft.face.mouthFont, "concise");
+    assert.equal(draft.face.mouthScale, 0.9);
+    assert.equal(draft.face.eyeCharacter, null);
+    assert.equal(draft.face.mouthCharacter, null);
+    assert.equal(draft.face.blinkBar, " ");
+    assert.equal(draft.face.eyeAnimation, "natural");
+    assert.equal(draft.face.mouthAnimation, "none");
+    assert.equal(draft.avatarDetails, null);
+    assert.equal(draft.avatarSfxPrompt, "");
+    assert.equal(draft.accentColor, null);
+    assert.deepEqual(draft.powers, []);
+    assert.equal(draft.audioVoiceProfile.baseVoiceId, "voice-8");
+    assert.equal(draft.audioVoiceProfile.pitch, 0);
+    assert.equal(draft.audioVoiceProfile.warmth, 0);
+    assert.equal(draft.audioVoiceProfile.pace, 0);
+    assert.equal(draft.audioVoiceProfile.avatarSfx, undefined);
   });
 });
 

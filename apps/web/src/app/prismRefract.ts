@@ -60,10 +60,10 @@ export type PrismRefractTarget =
 
 export type PrismRefractModifierClickDecision =
   | "begin"
+  | "cancel"
   | "accept"
   | "accept-and-begin"
-  | "queue"
-  | "wait";
+  | "queue";
 
 export function prismRefractModifierClickDecision(input: {
   activeTargetId: string | null;
@@ -74,12 +74,55 @@ export function prismRefractModifierClickDecision(input: {
   if (!input.activeTargetId || input.activeTargetKind === "magic") {
     return "begin";
   }
-  // Same-target modifier clicks never reroll or enqueue duplicates — Spacebar
-  // remains the explicit reroll path once the current result has settled.
+  // The active sheen is the one deliberate in-page cancellation affordance.
+  // A second Wield click on that same target therefore cancels rather than
+  // silently waiting or enqueuing a duplicate.
   if (input.activeTargetId === input.clickedTargetId) {
-    return "wait";
+    return "cancel";
   }
   return input.canAccept ? "accept-and-begin" : "queue";
+}
+
+export const PRISM_REFRACT_GENERATION_TIMEOUT_MS = 180_000;
+
+export class PrismRefractGenerationTimeoutError extends Error {
+  constructor() {
+    super("Prism took too long to refract this field. Try it again.");
+    this.name = "PrismRefractGenerationTimeoutError";
+  }
+}
+
+/**
+ * Give every foreground Refract request a finite client lifecycle while still
+ * forwarding explicit cancellation to the underlying provider request.
+ */
+export async function runPrismRefractGenerationWithTimeout<T>(input: {
+  signal: AbortSignal;
+  run: (signal: AbortSignal) => Promise<T>;
+  timeoutMs?: number;
+}): Promise<T> {
+  if (input.signal.aborted) {
+    throw input.signal.reason instanceof Error
+      ? input.signal.reason
+      : new DOMException("The refraction was cancelled.", "AbortError");
+  }
+  const controller = new AbortController();
+  const forwardAbort = (): void => controller.abort(input.signal.reason);
+  input.signal.addEventListener("abort", forwardAbort, { once: true });
+  let timeoutId: ReturnType<typeof globalThis.setTimeout> | null = null;
+  const timeoutError = new PrismRefractGenerationTimeoutError();
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timeoutId = globalThis.setTimeout(() => {
+      controller.abort(timeoutError);
+      reject(timeoutError);
+    }, input.timeoutMs ?? PRISM_REFRACT_GENERATION_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([input.run(controller.signal), timeout]);
+  } finally {
+    if (timeoutId !== null) globalThis.clearTimeout(timeoutId);
+    input.signal.removeEventListener("abort", forwardAbort);
+  }
 }
 
 export interface RegisteredPrismRefractTarget {

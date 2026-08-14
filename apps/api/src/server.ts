@@ -878,6 +878,7 @@ import {
   composeHubAtmospherePrompt,
   composeChatAtmospherePrompt,
   chatAtmosphereUtcDate,
+  blendWeightedBotIdentityColors,
   fullySaturateBotColor,
   normalizeBotIdentityColor,
   GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE,
@@ -916,8 +917,10 @@ import {
   normalizeBotFaceThinkingScale,
   parseStoredBotAvatarDetailsV1,
   parseStoredBotFaceThinkingFrames,
+  parseStoredBotFaceCustomSpeechPoses,
   serializeBotAvatarDetailsV1,
   serializeBotFaceThinkingFrames,
+  serializeBotFaceCustomSpeechPosesForStorage,
   normalizeBotAudioVoiceProfileV1,
   localVoicePronunciationOverrideIsActive,
   normalizeLocalVoiceSpeechprintV1,
@@ -949,6 +952,8 @@ import {
   normalizeCrtFocus,
   normalizePrismTypographyScale,
   normalizeListenerReactionVocalFoley,
+  listenerReactionInterruptedSpeakerTextV1,
+  listenerReactionSpokenTextV1,
   listenerReactionTextIsAuthorizedV1,
   normalizeBotCrosstalkInterruptedSpeakerCue,
   coffeeInterruptionTranscriptSegments,
@@ -982,6 +987,7 @@ import {
   normalizePromptWildcardRunMetadata,
   normalizeModelReasoningEffortPreference,
   normalizeProviderReasoningEffort,
+  resolveBotFoundryGenerationContextForBriefV1,
   modelSupportsTurboMode,
   resolveModelReasoningEffortCapability,
   parseBuiltInPromptWildcardReference,
@@ -1058,6 +1064,7 @@ import {
   normalizeActionSfxPackOwnerKind,
   parseStoredTextModelDisplayNames,
   resolveBotAudioVoiceProfileV1,
+  resolveBotPronunciationMapPointV1,
   stripBotProfileMetaSuffix,
 } from "@localai/shared";
 import { editImage, generateImage } from "./image-provider.ts";
@@ -1093,7 +1100,9 @@ import {
 } from "./image-asset-cleanup.ts";
 import {
   deleteUnusedImageAssetSet,
+  getBotImageAssetLibraryIndex,
   getImageAssetSet,
+  getImageAssetSetForCatalog,
   getImageAssetSetForImage,
   imageAssetSelectionStorageBytes,
   imageAssetStorageSummary,
@@ -1590,6 +1599,10 @@ async function startPrismStorySession(
                 attempt.provider === "anthropic"
                   ? anthropicApiKey
                   : undefined,
+              ),
+              auxiliaryProvider: auxiliaryProviderFactoryOverride(
+                user.prism_default_llm_model,
+                dualOllamaWorkloadOptions(user),
               ),
               providerName: attempt.provider,
               model: attempt.model,
@@ -2772,6 +2785,7 @@ interface UserDbRow {
   prism_default_bot_face_mouth_font: string | null;
   prism_default_bot_face_mouth_character: string | null;
   prism_default_bot_face_mouth_animation: string | null;
+  prism_default_bot_face_mouth_speech_poses: string | null;
   prism_default_bot_face_mouth_coffee_pucker: number | null;
   prism_default_bot_face_font_weight: number | null;
   prism_default_bot_face_eye_scale: number | null;
@@ -3186,7 +3200,7 @@ function getUserRow(userId: string): UserDbRow {
   );
   const faceRotation = db
     .prepare(
-      "SELECT prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_eye_spacing, prism_default_bot_face_blink_count FROM users WHERE id = ?",
+      "SELECT prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_eye_spacing, prism_default_bot_face_blink_count, prism_default_bot_face_mouth_speech_poses FROM users WHERE id = ?",
     )
     .get(userId) as
     | {
@@ -3194,6 +3208,7 @@ function getUserRow(userId: string): UserDbRow {
         prism_default_bot_face_eye_count: number | null;
         prism_default_bot_face_eye_spacing: number | null;
         prism_default_bot_face_blink_count: number | null;
+        prism_default_bot_face_mouth_speech_poses: string | null;
       }
     | undefined;
   row.prism_default_bot_face_eye_rotation_deg =
@@ -3206,6 +3221,8 @@ function getUserRow(userId: string): UserDbRow {
     DEFAULT_BOT_FACE_EYE_SPACING;
   row.prism_default_bot_face_blink_count =
     faceRotation?.prism_default_bot_face_blink_count ?? null;
+  row.prism_default_bot_face_mouth_speech_poses =
+    faceRotation?.prism_default_bot_face_mouth_speech_poses ?? null;
   return row;
 }
 
@@ -7244,6 +7261,10 @@ function readBotFaceMouthCharacterForStorage(value: unknown): string | null {
   return normalizeBotFaceMouthCharacter(value);
 }
 
+function readBotFaceMouthSpeechPosesForStorage(value: unknown): string | null {
+  return serializeBotFaceCustomSpeechPosesForStorage(value);
+}
+
 function readBotFaceGlyphAnimationForStorage(
   value: unknown,
 ): BotFaceGlyphAnimation | null {
@@ -7395,6 +7416,25 @@ function botRowForResponse(row: Record<string, unknown>): Record<
   avatarDetails: ReturnType<typeof parseStoredBotAvatarDetailsV1>;
   powers: ReturnType<typeof parseStoredBotPowersV1>;
 } {
+  const storedSpeechPoses =
+    row.face_mouth_speech_poses ??
+    (typeof row.id === "string"
+      ? (
+          db
+            .prepare(
+              "SELECT face_mouth_speech_poses FROM bots WHERE id = ?",
+            )
+            .get(row.id) as
+            | { face_mouth_speech_poses?: string | null }
+            | undefined
+        )?.face_mouth_speech_poses
+      : null);
+  const legacySpeechPoses =
+    row.face_mouth_animation === "custom"
+      ? parseStoredBotFaceCustomSpeechPoses(row.face_mouth_character)
+      : null;
+  const mouthSpeechPoses =
+    parseStoredBotFaceCustomSpeechPoses(storedSpeechPoses) ?? legacySpeechPoses;
   const storedAccentColor = row.accent_color;
   const {
     avatar_details_json: avatarDetailsJson,
@@ -7404,6 +7444,13 @@ function botRowForResponse(row: Record<string, unknown>): Record<
   } = row;
   return {
     ...normalizeBotAudioVoiceProfilesForResponse(bot),
+    face_mouth_character:
+      legacySpeechPoses?.[0] ?? row.face_mouth_character ?? null,
+    face_mouth_animation:
+      row.face_mouth_animation === "custom"
+        ? DEFAULT_BOT_FACE_GLYPH_ANIMATION
+        : row.face_mouth_animation,
+    face_mouth_speech_poses: mouthSpeechPoses,
     face_eye_spacing:
       normalizeBotFaceEyeSpacing(row.face_eye_spacing) ??
       DEFAULT_BOT_FACE_EYE_SPACING,
@@ -7421,6 +7468,12 @@ function botRowsForResponse(rows: Record<string, unknown>[]) {
 }
 
 function normalizeDefaultBotSettingsForResponse(user: UserDbRow) {
+  const legacySpeechPoses =
+    user.prism_default_bot_face_mouth_animation === "custom"
+      ? parseStoredBotFaceCustomSpeechPoses(
+          user.prism_default_bot_face_mouth_character,
+        )
+      : null;
   return {
     prismDefaultBotName: "",
     prismDefaultBotSystemPrompt: "",
@@ -7439,13 +7492,19 @@ function normalizeDefaultBotSettingsForResponse(user: UserDbRow) {
       normalizeBotFaceFontId(user.prism_default_bot_face_mouth_font) ??
       DEFAULT_BOT_FACE_FONT_ID,
     prismDefaultBotFaceMouthCharacter:
+      legacySpeechPoses?.[0] ??
       normalizeBotFaceMouthCharacter(
         user.prism_default_bot_face_mouth_character,
-      ) ?? DEFAULT_BOT_FACE_MOUTH_CHARACTER,
+      ) ??
+      DEFAULT_BOT_FACE_MOUTH_CHARACTER,
     prismDefaultBotFaceMouthAnimation:
       normalizeBotFaceGlyphAnimation(
         user.prism_default_bot_face_mouth_animation,
       ) ?? DEFAULT_BOT_FACE_GLYPH_ANIMATION,
+    prismDefaultBotFaceMouthSpeechPoses:
+      parseStoredBotFaceCustomSpeechPoses(
+        user.prism_default_bot_face_mouth_speech_poses,
+      ) ?? legacySpeechPoses,
     prismDefaultBotFaceMouthCoffeePucker:
       user.prism_default_bot_face_mouth_coffee_pucker === 0
         ? false
@@ -14651,6 +14710,7 @@ function buildRoutes(): RouteDefinition[] {
       let runtimeBotQuietIgnored = false;
       let runtimeBotEchoAddressed = false;
       let runtimeBotMumbling = false;
+      let runtimeBotMumbleMapPoint: { x: number; y: number } | null = null;
       let runtimeBotResponseBudget: ReturnType<
         typeof strongestHardBotPowerResponseBudgetEffectV1
       > = null;
@@ -14661,13 +14721,15 @@ function buildRoutes(): RouteDefinition[] {
       if (runtimeBotId) {
         const bot = db
           .prepare(
-            "SELECT name, system_prompt, powers_json, online_enabled, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
+            "SELECT name, system_prompt, powers_json, authored_audio_voice_profile, audio_voice_profile_override, online_enabled, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
           )
           .get(runtimeBotId, userId) as
           | {
               name?: string;
               system_prompt?: string;
               powers_json?: string | null;
+              authored_audio_voice_profile?: string | null;
+              audio_voice_profile_override?: string | null;
               online_enabled?: number | null;
               flirt_enabled?: number | null;
               temperature?: number | null;
@@ -14679,6 +14741,10 @@ function buildRoutes(): RouteDefinition[] {
           | undefined;
         if (bot) {
           runtimeBotPowers = bot.powers_json ?? null;
+          runtimeBotMumbleMapPoint = resolveBotPronunciationMapPointV1(
+            bot.authored_audio_voice_profile,
+            bot.audio_voice_profile_override,
+          );
           runtimeBotMuted =
             botPowerIsMutedV1(bot.powers_json) &&
             !botPowerMuteExemptsPlayerV1(bot.powers_json);
@@ -15101,6 +15167,7 @@ function buildRoutes(): RouteDefinition[] {
             botPowerQuietIgnored: runtimeBotQuietIgnored,
             botPowerEchoAddressed: runtimeBotEchoAddressed,
             botPowerMumbling: runtimeBotMumbling,
+            botPowerMumbleMapPoint: runtimeBotMumbleMapPoint,
             botPowerResponseBudget: runtimeBotResponseBudget,
             botOverrides,
             progressiveZenVoice: progressiveZenVoiceRequested,
@@ -20063,9 +20130,11 @@ function buildRoutes(): RouteDefinition[] {
                       autoFallbackChain: runtime.autoFallbackChain,
                       experimentalAllModelEffortEnabled:
                         user.experimental_all_model_effort_enabled === 1,
+                      prismDefaultLlmModel: user.prism_default_llm_model,
                       signal,
                       ...(powerTheme ? { theme: powerTheme } : {}),
                       providerFactory: providerFactoryOverride,
+                      auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
                     },
                   ),
               );
@@ -20295,9 +20364,11 @@ function buildRoutes(): RouteDefinition[] {
                 autoFallbackChain: runtime.autoFallbackChain,
                 experimentalAllModelEffortEnabled:
                   user.experimental_all_model_effort_enabled === 1,
+                prismDefaultLlmModel: user.prism_default_llm_model,
                 signal: signalAdvanceAbort.signal,
                 ...(powerTheme ? { theme: powerTheme } : {}),
                 providerFactory: providerFactoryOverride,
+                auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
               },
             ),
         );
@@ -20367,7 +20438,9 @@ function buildRoutes(): RouteDefinition[] {
               autoFallbackChain: runtime.autoFallbackChain,
               experimentalAllModelEffortEnabled:
                 user.experimental_all_model_effort_enabled === 1,
+              prismDefaultLlmModel: user.prism_default_llm_model,
               providerFactory: providerFactoryOverride,
+              auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
             };
           },
         });
@@ -24348,6 +24421,7 @@ function buildRoutes(): RouteDefinition[] {
       const listenerReactionRequested =
         listenerReactionTextRequested || listenerReactionFoleyRequested;
       let authorizedMuteReactionTexts: string[] = [];
+      let authorizedInterruptedSpeakerReactionTexts: string[] = [];
       const interruptedSpeakerReactionRequested =
         Object.prototype.hasOwnProperty.call(
           raw,
@@ -24525,7 +24599,10 @@ function buildRoutes(): RouteDefinition[] {
           message?.content ?? raw.performanceText ?? raw.spokenText;
         persistedMessageProvider = message?.provider ?? null;
         sourceBotMuted = botPowerIsMutedV1(message?.powers_json);
-        if (listenerReactionRequested && requestedSpeakerBotId) {
+        if (
+          (listenerReactionRequested || interruptedSpeakerReactionRequested) &&
+          requestedSpeakerBotId
+        ) {
           const listenerBot = db
             .prepare(
               "SELECT powers_json FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
@@ -24533,9 +24610,11 @@ function buildRoutes(): RouteDefinition[] {
             .get(requestedSpeakerBotId, userId) as
             { powers_json?: string | null } | undefined;
           sourceBotMuted = botPowerIsMutedV1(listenerBot?.powers_json);
+          const storedPayload = parseStoredAssistantToolPayload(
+            message?.tool_payload ?? null,
+          );
           authorizedMuteReactionTexts = (
-            parseStoredAssistantToolPayload(message?.tool_payload ?? null)
-              .botPowerMutePerformance?.reactionBeats ?? []
+            storedPayload.botPowerMutePerformance?.reactionBeats ?? []
           )
             .filter(
               (beat) =>
@@ -24543,6 +24622,30 @@ function buildRoutes(): RouteDefinition[] {
                 (beat.kind === "audible_quip" || beat.kind === "interrupt"),
             )
             .flatMap((beat) => beat.quip ? [beat.quip] : []);
+          for (const event of storedPayload.coffeeReplayEvents ?? []) {
+            if (event.kind !== "listenerReaction") continue;
+            if (event.plan.listenerBotId === requestedSpeakerBotId) {
+              const cue = listenerReactionSpokenTextV1(event.plan);
+              if (cue) authorizedMuteReactionTexts.push(cue);
+            }
+            if (event.plan.speakerBotId === requestedSpeakerBotId) {
+              const cue = listenerReactionInterruptedSpeakerTextV1(
+                event.plan,
+              );
+              if (cue) authorizedInterruptedSpeakerReactionTexts.push(cue);
+            }
+          }
+          const interruption = storedPayload.coffeeInterruption;
+          if (interruption?.interrupterBotId === requestedSpeakerBotId) {
+            const cue = interruption.publicInterrupterCue?.trim() ||
+              interruption.interrupterCue?.trim();
+            if (cue) authorizedMuteReactionTexts.push(cue);
+          }
+          if (interruption?.interruptedBotId === requestedSpeakerBotId) {
+            const cue = interruption.publicInterruptedSpeakerCue?.trim() ||
+              interruption.interruptedSpeakerCue?.trim();
+            if (cue) authorizedInterruptedSpeakerReactionTexts.push(cue);
+          }
         }
         if (!listenerReactionRequested || !requestedSpeakerBotId) {
           sourceBotId = message?.bot_id ?? requestedSpeakerBotId;
@@ -24614,6 +24717,24 @@ function buildRoutes(): RouteDefinition[] {
               (beat.kind === "audible_quip" || beat.kind === "interrupt"),
           )
           .flatMap((beat) => beat.quip ? [beat.quip] : []);
+        const savedSignalReaction = botcastListenerReactionForMessage(
+          signalEpisode.events,
+          signalMessageId,
+        );
+        if (
+          savedSignalReaction?.listenerBotId === requestedSpeakerBotId
+        ) {
+          const cue = listenerReactionSpokenTextV1(savedSignalReaction);
+          if (cue) authorizedMuteReactionTexts.push(cue);
+        }
+        if (
+          savedSignalReaction?.speakerBotId === requestedSpeakerBotId
+        ) {
+          const cue = listenerReactionInterruptedSpeakerTextV1(
+            savedSignalReaction,
+          );
+          if (cue) authorizedInterruptedSpeakerReactionTexts.push(cue);
+        }
         sourceText = botCrosstalkPrimarySpeakerContent(
           signalMessage.content,
           botcastListenerReactionForMessage(
@@ -24736,9 +24857,16 @@ function buildRoutes(): RouteDefinition[] {
             "Interrupted-speaker reactions require a saved speaker message.",
           );
         }
+        const requestedInterruptedSpeakerReaction =
+          typeof raw.interruptedSpeakerReactionText === "string"
+            ? raw.interruptedSpeakerReactionText.replace(/\s+/gu, " ").trim()
+            : "";
         const interruptedSpeakerReaction =
           normalizeBotCrosstalkInterruptedSpeakerCue(
-            raw.interruptedSpeakerReactionText,
+            requestedInterruptedSpeakerReaction,
+          ) ??
+          authorizedInterruptedSpeakerReactionTexts.find(
+            (cue) => cue === requestedInterruptedSpeakerReaction,
           );
         if (!interruptedSpeakerReaction) {
           throw new HttpError(400, "Unsupported interrupted-speaker reaction.");
@@ -28086,6 +28214,10 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/assets", async (ctx) => {
       const userId = requireAuth(ctx);
       const kind = ctx.query.get("kind") ?? "";
+      const botId = ctx.query.get("botId")?.trim() || null;
+      if (botId && !botBelongsToUser(db, userId, botId)) {
+        throw new HttpError(404, "Bot not found.");
+      }
       const sourceValue = ctx.query.get("source");
       const usageValue = ctx.query.get("usage");
       const sortValue = ctx.query.get("sort");
@@ -28093,6 +28225,7 @@ function buildRoutes(): RouteDefinition[] {
       try {
         const page = listImageAssetCatalog(db, userId, {
           kind: kind as Parameters<typeof listImageAssetCatalog>[2]["kind"],
+          botId,
           query: ctx.query.get("q"),
           cursor: ctx.query.get("cursor"),
           limit: Number.isFinite(limitValue) ? limitValue : 24,
@@ -28118,6 +28251,42 @@ function buildRoutes(): RouteDefinition[] {
         }
         throw error;
       }
+    }),
+    route("GET", "/api/assets/:id/detail", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const kind = ctx.query.get("kind") ?? "";
+      const botId = ctx.query.get("botId")?.trim() || null;
+      if (!isImageAssetKind(kind)) {
+        throw new HttpError(400, "Choose a recognized asset kind.");
+      }
+      if (botId && !botBelongsToUser(db, userId, botId)) {
+        throw new HttpError(404, "Bot not found.");
+      }
+      const asset = getImageAssetSetForCatalog(db, userId, ctx.params.id, {
+        kind,
+        botId,
+        includeIncomplete: ctx.query.get("includeIncomplete") === "1",
+      });
+      if (!asset) throw new HttpError(404, "Asset set not found.");
+      json(ctx.res, 200, { ok: true, asset });
+    }),
+    route("GET", "/api/bots/:id/assets", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const botId = ctx.params.id?.trim();
+      if (!botId || !botBelongsToUser(db, userId, botId)) {
+        throw new HttpError(404, "Bot not found.");
+      }
+      const requestedLimit = Number(ctx.query.get("limitPerKind") ?? "6");
+      const limitPerKind = Number.isFinite(requestedLimit) ? requestedLimit : 6;
+      json(ctx.res, 200, {
+        ok: true,
+        index: getBotImageAssetLibraryIndex(
+          db,
+          userId,
+          botId,
+          limitPerKind,
+        ),
+      });
     }),
     route("GET", "/api/assets/generation-preferences", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -29100,6 +29269,44 @@ function buildRoutes(): RouteDefinition[] {
       if (!prompt) {
         throw new HttpError(400, "Describe the bot you want first.");
       }
+      const requestedGenerationContext =
+        resolveBotFoundryGenerationContextForBriefV1(body.generationContext, prompt);
+      const inspirationRows = requestedGenerationContext.mode === "inspire"
+        ? requestedGenerationContext.inspirationSources.flatMap((source) => {
+            const row = db
+              .prepare(
+                "SELECT id, name, system_prompt, color FROM bots WHERE id = ? AND user_id = ?",
+              )
+              .get(source.id, userId) as
+              | { id: string; name: string; system_prompt: string; color: string | null }
+              | undefined;
+            return row
+              ? [{
+                  id: row.id,
+                  name: row.name,
+                  influence: source.influence,
+                  essence: stripBotProfileMetaSuffix(row.system_prompt),
+                  color: row.color,
+                }]
+              : [];
+          })
+        : [];
+      if (
+        requestedGenerationContext.mode === "inspire" &&
+        inspirationRows.length === 0
+      ) {
+        throw new HttpError(400, "Choose at least one bot from your Library.");
+      }
+      const generationContext = {
+        ...requestedGenerationContext,
+        inspirationSources: inspirationRows.map(({ color: _color, ...source }) => source),
+      };
+      const inspiredPrimaryColor = blendWeightedBotIdentityColors(
+        inspirationRows.map(({ color, influence }) => ({
+          color,
+          weight: influence,
+        })),
+      );
 
       const storedAutoFallbackChain = parseStoredAutoFallbackChain(
         user.auto_fallback_chain,
@@ -29225,6 +29432,10 @@ function buildRoutes(): RouteDefinition[] {
           () =>
             generateBotDraft({
               prompt,
+              generationContext,
+              includeBatchGroupIdentity:
+                body.includeBatchGroupIdentity === true &&
+                generationContext.mode === "batch",
               provider,
               providerName: resolved.provider,
               model: resolved.model,
@@ -29265,12 +29476,16 @@ function buildRoutes(): RouteDefinition[] {
                   }),
               )
             : null;
+        const draft =
+          requestedGenerationContext.mode === "inspire" && inspiredPrimaryColor
+            ? { ...result.draft, color: inspiredPrimaryColor }
+            : result.draft;
         json(ctx.res, 200, {
           ok: true,
           ...result,
           draft: {
-            ...result.draft,
-            powers: compiledPowers?.powers ?? result.draft.powers,
+            ...draft,
+            powers: compiledPowers?.powers ?? draft.powers,
           },
         });
       } catch (error) {
@@ -29351,6 +29566,18 @@ function buildRoutes(): RouteDefinition[] {
       const faceMouthAnimation =
         readBotFaceGlyphAnimationForStorage(body.faceMouthAnimation) ??
         DEFAULT_BOT_FACE_GLYPH_ANIMATION;
+      const faceMouthSpeechPoses =
+        body.faceMouthSpeechPoses === null ||
+        body.faceMouthSpeechPoses === undefined
+          ? null
+          : readBotFaceMouthSpeechPosesForStorage(body.faceMouthSpeechPoses);
+      if (
+        body.faceMouthSpeechPoses !== null &&
+        body.faceMouthSpeechPoses !== undefined &&
+        faceMouthSpeechPoses === null
+      ) {
+        throw new Error("Invalid face mouth speech poses.");
+      }
       const faceMouthCoffeePucker = readBotFaceMouthCoffeePuckerForStorage(
         body.faceMouthCoffeePucker,
       );
@@ -29544,6 +29771,9 @@ function buildRoutes(): RouteDefinition[] {
         "UPDATE bots SET face_mouth_coffee_pucker = ? WHERE id = ? AND user_id = ?",
       ).run(faceMouthCoffeePucker, botId, userId);
       db.prepare(
+        "UPDATE bots SET face_mouth_speech_poses = ? WHERE id = ? AND user_id = ?",
+      ).run(faceMouthSpeechPoses, botId, userId);
+      db.prepare(
         "UPDATE bots SET face_eye_spacing = ? WHERE id = ? AND user_id = ?",
       ).run(faceEyeSpacing, botId, userId);
       db.prepare(
@@ -29617,6 +29847,8 @@ function buildRoutes(): RouteDefinition[] {
           face_mouth_font: faceMouthFont,
           face_mouth_character: faceMouthCharacter,
           face_mouth_animation: faceMouthAnimation,
+          face_mouth_speech_poses:
+            parseStoredBotFaceCustomSpeechPoses(faceMouthSpeechPoses),
           face_mouth_coffee_pucker: faceMouthCoffeePucker,
           face_font_weight: faceFontWeight,
           face_eye_scale: faceEyeScale,
@@ -29999,6 +30231,19 @@ function buildRoutes(): RouteDefinition[] {
           throw new Error("Invalid face mouth animation.");
         fields.push("face_mouth_animation = ?");
         values.push(faceMouthAnimation);
+      }
+      if (body.faceMouthSpeechPoses !== undefined) {
+        if (body.faceMouthSpeechPoses === null) {
+          fields.push("face_mouth_speech_poses = ?");
+          values.push(null);
+        } else {
+          const poses = readBotFaceMouthSpeechPosesForStorage(
+            body.faceMouthSpeechPoses,
+          );
+          if (poses === null) throw new Error("Invalid face mouth speech poses.");
+          fields.push("face_mouth_speech_poses = ?");
+          values.push(poses);
+        }
       }
       if (body.faceMouthCoffeePucker !== undefined) {
         if (typeof body.faceMouthCoffeePucker !== "boolean") {

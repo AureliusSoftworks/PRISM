@@ -2,7 +2,6 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import {
-  applyBotPowerCursedTongueResponseV1,
   applyBotPowerMumbledResponseV1,
   botPowerResponseIsSilentV1,
   botPowerDeterministicHalfChanceV1,
@@ -1157,8 +1156,12 @@ describe("Story API helpers", () => {
     const irisScene = episode.scenes.find((scene) => scene.speakerBotId === "bot-b");
     assert.ok(irisScene);
     const intended = irisScene.narration;
+    const publicRewrite = intended.replace("Bert steps", "Bert fucking steps");
+    const primaryProvider = new SequenceProvider([JSON.stringify(episode)]);
+    const auxiliaryProvider = new SequenceProvider([publicRewrite]);
     const generated = await generateStorySessionEpisode(db, "user-1", created.id, {
-      provider: new SequenceProvider([JSON.stringify(episode)]),
+      provider: primaryProvider,
+      auxiliaryProvider,
       providerName: "local",
       model: "test-model",
       bots,
@@ -1166,13 +1169,10 @@ describe("Story API helpers", () => {
     const publicScene = generated.episode?.scenes.find(
       (scene) => scene.speakerBotId === "bot-b",
     );
-    assert.equal(
-      publicScene?.narration,
-      applyBotPowerCursedTongueResponseV1(
-        intended,
-        `${episode.id}:${irisScene.id}:${episode.scenes.indexOf(irisScene)}`,
-      ),
-    );
+    assert.equal(publicScene?.narration, publicRewrite);
+    assert.equal(primaryProvider.calls.length, 1);
+    assert.equal(auxiliaryProvider.calls.length, 1);
+    assert.equal(auxiliaryProvider.calls[0]?.options?.model, "test-model");
   });
 
   it("persists a Quiet listener miss and repairs the dependent response without leaked words", async () => {

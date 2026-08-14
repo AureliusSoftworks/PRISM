@@ -7,6 +7,10 @@ const tutorialSource = readFileSync(
   new URL("./modeTutorials.ts", import.meta.url),
   "utf8",
 );
+const cssSource = readFileSync(
+  new URL("./page.module.css", import.meta.url),
+  "utf8",
+);
 
 test("only Auto uses the effort glyph as a direct Turbo toggle", () => {
   assert.doesNotMatch(pageSource, /fixedOnlineTurboToggleAvailable/u);
@@ -25,6 +29,34 @@ test("only Auto uses the effort glyph as a direct Turbo toggle", () => {
   assert.match(
     pageSource,
     /aria-pressed=\{\s*onlineTurboToggleAvailable[\s\S]{0,80}effortControl\.turboEnabled/u,
+  );
+});
+
+test("Auto effort and model-choice glyphs render with intended assets", () => {
+  assert.match(
+    pageSource,
+    /function AutoEffortIcon\(\): React\.JSX\.Element \{[\s\S]{0,420}d="M9 2\.75 15\.25 14H2\.75L9 2\.75Z"/u,
+  );
+  assert.ok(pageSource.includes("function AutoModelChoiceGlyph()"));
+  assert.ok(pageSource.includes("composeModelOptionAutoGlyph"));
+  assert.match(
+    cssSource,
+    /composeModelOptionAutoGlyph\s*\{[\s\S]{0,140}url\("\/icon-triangle\.svg"\)/u,
+  );
+});
+
+test("Auto Turbo toggle never persists a fixed model when Auto is selected", () => {
+  assert.match(
+    pageSource,
+    /const selectedProvider = settings\.preferredProvider;[\s\S]{0,180}=== AUTO_MODEL_CHOICE/u,
+  );
+  assert.match(
+    pageSource,
+    /if \(!autoSelected\) \{[\s\S]{0,120}persistGlobalModelSelection/u,
+  );
+  assert.match(
+    pageSource,
+    /else if \(selectedProvider === "local"\) \{[\s\S]{0,220}\[turboCandidate\.provider\]: AUTO_MODEL_CHOICE/u,
   );
 });
 

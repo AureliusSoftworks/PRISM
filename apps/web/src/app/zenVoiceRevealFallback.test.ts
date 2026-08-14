@@ -43,7 +43,7 @@ describe("Zen voice reveal fallback", () => {
     );
   });
 
-  it("keeps cold or queued local speech waiting on audio until the bounded worker settles", () => {
+  it("keeps cold or queued local voice preparation alive until the bounded worker settles", () => {
     assert.match(
       pageSource,
       /const ZEN_VOICE_REVEAL_PREPARATION_NOTICE_MS = 12000;/
@@ -116,7 +116,7 @@ describe("Zen voice reveal fallback", () => {
     );
   });
 
-  it("keeps both robot Speech Types on their audible reveal timing", () => {
+  it("keeps both robot Speech Types on an audible lifecycle for mouth motion", () => {
     const eligibilityStart = pageSource.indexOf(
       "const markLatestAssistantRevealEligible",
     );
@@ -153,7 +153,62 @@ describe("Zen voice reveal fallback", () => {
     assert.match(effectSource, /streamChunks: audioDrivesReveal/);
     assert.match(
       effectSource,
+      /const targetDurationMs =[\s\S]*?DEFAULT_CHAT_REVEAL_TIMING,[\s\S]*?proceduralTiming: \{ targetDurationMs \}/,
+    );
+    assert.doesNotMatch(
+      effectSource,
+      /const targetDurationMs =[\s\S]*?effectiveChatRevealTiming/,
+    );
+    assert.match(
+      effectSource,
       /if \(audioDrivesReveal\) \{[\s\S]*?releaseChatSpeechReveal\(revealKey\);[\s\S]*?chatRevealPaceByKeyRef\.current\.delete\(revealKey\);/,
+    );
+  });
+
+  it("advances Chat and Zen prose on a visual clock independent from speech", () => {
+    const resolverStart = pageSource.indexOf(
+      "function resolveAssistantRevealVisibleTokenCount",
+    );
+    const resolverEnd = pageSource.indexOf(
+      "\n  useEffect(() => {",
+      resolverStart,
+    );
+    const resolverSource = pageSource.slice(resolverStart, resolverEnd);
+    assert.match(
+      resolverSource,
+      /Speech timelines remain authoritative for audio, interruption, and mouth[\s\S]*?resolvePacedChatRevealVisibleTokenCount\(/,
+    );
+    assert.doesNotMatch(
+      resolverSource,
+      /return Math\.min\([\s\S]*?speechRevealVisibleTokenCount\(speechTimeline\)/,
+    );
+
+    const progressiveStart = pageSource.indexOf(
+      "const scheduleProgressiveZenSegment",
+    );
+    const progressiveEnd = pageSource.indexOf(
+      "const finishProgressiveZenStream",
+      progressiveStart,
+    );
+    const progressiveSource = pageSource.slice(
+      progressiveStart,
+      progressiveEnd,
+    );
+    assert.match(
+      progressiveSource,
+      /startDisplay\(\);[\s\S]*?const prepared = await preparedVoice;/,
+    );
+    assert.match(
+      progressiveSource,
+      /onStart:[\s\S]*?startAudioTimeline\(/,
+    );
+    assert.match(
+      pageSource,
+      /const textRevealInProgress =[\s\S]*?const speechInProgress =[\s\S]*?return textRevealInProgress \|\| speechInProgress;/,
+    );
+    assert.match(
+      pageSource,
+      /const textVisuallyComplete =[\s\S]*?const speechComplete =[\s\S]*?const visuallyComplete = textVisuallyComplete && speechComplete;/,
     );
   });
 

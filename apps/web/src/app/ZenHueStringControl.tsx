@@ -10,11 +10,17 @@ import {
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { createPortal } from "react-dom";
 
 import {
+  zenHueCableTraversalFrame,
+  type ZenHueCableDragDirection,
+  stepZenHueCableSpring,
+  zenHueCableSpringHasSettled,
   zenHueTierAtIndex,
-  zenHueTierForVerticalDrag,
+  zenHueTierForNormalizedPosition,
   zenHueTierIndex,
+  type ZenHueCableSpringState,
   type ZenHueDirectoryTier,
 } from "./zenHueStringNavigation";
 import styles from "./ZenHueStringControl.module.css";
@@ -24,18 +30,23 @@ const VIEWBOX_HEIGHT = 120;
 const STRING_LEFT = 24;
 const STRING_RIGHT = 976;
 const STRING_CENTER_Y = 60;
-const POINTER_DEAD_ZONE_PX = 7;
+const HUE_CYCLE_PULL_THRESHOLD_PX = 16;
+const BREADTH_TRAVERSAL_DEAD_ZONE_PX = 34;
+const BREADTH_TRAVERSAL_DIRECTION_LATCH_PX = 48;
+const ZEN_HUE_CABLE_CURSOR_LOCK_STYLE_RULE =
+  'html[data-zen-hue-cable-dragging="true"], html[data-zen-hue-cable-dragging="true"] * { cursor: none !important; }';
 
-export interface ZenHueStringNavigationUpdate {
+export interface ZenHueCableNavigationUpdate {
   sliderValue?: number;
   tier?: ZenHueDirectoryTier;
 }
 
-interface ZenHueStringControlProps {
+interface ZenHueCableControlProps {
   hueSliderValue: number | null;
   hueLabel: string;
   tier: ZenHueDirectoryTier;
   tiers: readonly number[];
+  rootRows: number;
   visibleBotCount: number;
   totalBotCount: number;
   trackColors: readonly string[];
@@ -43,7 +54,7 @@ interface ZenHueStringControlProps {
   showCue?: boolean;
   onDismissCue?: () => void;
   onVerticalTraversal?: () => void;
-  onNavigate: (update: ZenHueStringNavigationUpdate) => void;
+  onNavigate: (update: ZenHueCableNavigationUpdate) => void;
   onClear: () => void;
   onInteractionChange?: (active: boolean) => void;
 }
@@ -55,13 +66,22 @@ interface DragState {
   startTier: ZenHueDirectoryTier;
   previousTier: ZenHueDirectoryTier;
   untouchedRoot: boolean;
+  direction: ZenHueCableDragDirection;
+  normalizedPosition: number;
+  deltaY: number;
+  deltaX: number;
+  lastClientX: number;
+  previousClientY: number;
+  previousTime: number;
+  velocityY: number;
 }
 
-export default function ZenHueStringControl({
+export default function ZenHueCableControl({
   hueSliderValue,
   hueLabel,
   tier,
   tiers,
+  rootRows,
   visibleBotCount,
   totalBotCount,
   trackColors,
@@ -72,20 +92,41 @@ export default function ZenHueStringControl({
   onNavigate,
   onClear,
   onInteractionChange,
-}: ZenHueStringControlProps): React.JSX.Element {
+}: ZenHueCableControlProps): React.JSX.Element {
   const instructionsId = useId();
   const gradientId = useId().replaceAll(":", "");
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const latestNavigateRef = useRef(onNavigate);
+  const springFrameRef = useRef<number | null>(null);
+  const traversalFrameRef = useRef<number | null>(null);
+  const springRef = useRef<ZenHueCableSpringState>({
+    displacement: 0,
+    velocity: 0,
+  });
+  const springTimeRef = useRef(0);
+  const curveOffsetRef = useRef(0);
   const [dragging, setDragging] = useState(false);
+  const [curveOffset, setCurveOffset] = useState(0);
+  const [pullDeltaY, setPullDeltaY] = useState(0);
 
   useEffect(() => {
     latestNavigateRef.current = onNavigate;
   }, [onNavigate]);
 
+  useEffect(() => {
+    if (!dragging) return;
+    // Pointer capture keeps the Hue Cable receiving the active drag. The
+    // document flag guarantees nested controls cannot restore their own
+    // cursor while the viewport shield makes every other mouse target inert.
+    document.documentElement.dataset.zenHueCableDragging = "true";
+    return () => {
+      delete document.documentElement.dataset.zenHueCableDragging;
+    };
+  }, [dragging]);
+
   const scheduleNavigation = useCallback(
-    (update: ZenHueStringNavigationUpdate) => {
+    (update: ZenHueCableNavigationUpdate) => {
       // Traversal commits synchronously: there is no deferred frame, spring,
       // or interpolation layer that could produce a visual flicker.
       latestNavigateRef.current(update);
@@ -99,18 +140,90 @@ export default function ZenHueStringControl({
     return Math.max(0, Math.min(359, ((clientX - rect.left) / rect.width) * 359));
   }, []);
 
+  const setLiveCablePull = useCallback((deltaY: number) => {
+    // The cable still physically follows the hand while held. This is direct
+    // pointer feedback, not a traversal animation: it snaps back on release.
+    const offset =
+      Math.sign(deltaY) * Math.min(48, Math.pow(Math.abs(deltaY), 0.72) * 1.35);
+    curveOffsetRef.current = offset;
+    setCurveOffset(offset);
+    setPullDeltaY(deltaY);
+  }, []);
+
+  const setCableCurveOffset = useCallback((next: number) => {
+    curveOffsetRef.current = next;
+    setCurveOffset(next);
+  }, []);
+
+  const cancelRecoil = useCallback(() => {
+    if (springFrameRef.current !== null) {
+      cancelAnimationFrame(springFrameRef.current);
+      springFrameRef.current = null;
+    }
+    springRef.current = { displacement: 0, velocity: 0 };
+    springTimeRef.current = 0;
+  }, []);
+
+  const cancelTraversal = useCallback(() => {
+    if (traversalFrameRef.current !== null) {
+      cancelAnimationFrame(traversalFrameRef.current);
+      traversalFrameRef.current = null;
+    }
+  }, []);
+
+  const startRecoil = useCallback(
+    (initialVelocity: number) => {
+      const displacement = curveOffsetRef.current;
+      if (Math.abs(displacement) < 0.5) {
+        setCableCurveOffset(0);
+        return;
+      }
+      cancelRecoil();
+      springRef.current = {
+        displacement,
+        velocity: Math.max(-500, Math.min(500, initialVelocity)),
+      };
+      springTimeRef.current = performance.now();
+      const tick = (now: number) => {
+        const elapsed = Math.max(0, Math.min(32, now - springTimeRef.current));
+        springTimeRef.current = now;
+        springRef.current = stepZenHueCableSpring(
+          springRef.current,
+          elapsed / 1000,
+        );
+        if (zenHueCableSpringHasSettled(springRef.current)) {
+          springFrameRef.current = null;
+          setCableCurveOffset(0);
+          return;
+        }
+        setCableCurveOffset(springRef.current.displacement);
+        springFrameRef.current = requestAnimationFrame(tick);
+      };
+      springFrameRef.current = requestAnimationFrame(tick);
+    },
+    [cancelRecoil, setCableCurveOffset],
+  );
+
   const settleGesture = useCallback(
-    () => {
-      if (!dragRef.current) return;
+    (recoil: boolean) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      cancelTraversal();
       dragRef.current = null;
       setDragging(false);
+      setPullDeltaY(0);
       onInteractionChange?.(false);
+      if (recoil) startRecoil(drag.velocityY);
+      else {
+        cancelRecoil();
+        setCableCurveOffset(0);
+      }
     },
-    [onInteractionChange],
+    [cancelRecoil, cancelTraversal, onInteractionChange, setCableCurveOffset, startRecoil],
   );
 
   useEffect(() => {
-    const settle = () => settleGesture();
+    const settle = () => settleGesture(false);
     const settleOnVisibility = () => {
       if (document.visibilityState !== "visible") settle();
     };
@@ -121,12 +234,18 @@ export default function ZenHueStringControl({
       window.removeEventListener("blur", settle);
       window.removeEventListener("resize", settle);
       document.removeEventListener("visibilitychange", settleOnVisibility);
+      cancelRecoil();
+      cancelTraversal();
     };
-  }, [settleGesture]);
+  }, [cancelRecoil, cancelTraversal, settleGesture]);
 
   const handlePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       if (disabled || event.button !== 0) return;
+      cancelRecoil();
+      cancelTraversal();
+      setCableCurveOffset(0);
+      setPullDeltaY(0);
       event.currentTarget.setPointerCapture(event.pointerId);
       const untouchedRoot = hueSliderValue === null;
       const startTier = untouchedRoot && tiers.length > 0 ? tiers[0] : tier;
@@ -136,25 +255,82 @@ export default function ZenHueStringControl({
         startClientY: event.clientY,
         startTier,
         previousTier: startTier,
+        direction: 0,
+        normalizedPosition: tiers.length === 0 ? 1 : zenHueTierIndex(startTier, tiers) / tiers.length,
+        deltaY: 0,
+        deltaX: 0,
+        lastClientX: event.clientX,
         untouchedRoot,
+        previousClientY: event.clientY,
+        previousTime: event.timeStamp,
+        velocityY: 0,
       };
       setDragging(true);
       onInteractionChange?.(true);
+
       if (untouchedRoot && tiers.length > 0) {
         scheduleNavigation({
           sliderValue: sliderForClientX(event.clientX),
           tier: tiers[0],
         });
       }
+
+      // DOM event timestamps and animation-frame timestamps are not
+      // guaranteed to share an epoch (notably in WebKit). Starting from the
+      // rAF clock keeps a held vertical pull advancing on every browser.
+      let previousFrameTime = performance.now();
+      const traverse = (now: number) => {
+        const heldDrag = dragRef.current;
+        if (!heldDrag || heldDrag.pointerId !== event.pointerId) {
+          traversalFrameRef.current = null;
+          return;
+        }
+        const elapsedSeconds = Math.max(0, Math.min(0.05, now - previousFrameTime)) / 1000;
+        previousFrameTime = now;
+        const frame = zenHueCableTraversalFrame({
+          deltaY: heldDrag.deltaY,
+          deadZonePx: BREADTH_TRAVERSAL_DEAD_ZONE_PX,
+          currentDirection: heldDrag.direction,
+          directionLatchPx: BREADTH_TRAVERSAL_DIRECTION_LATCH_PX,
+          normalizedPosition: heldDrag.normalizedPosition,
+          elapsedSeconds,
+          tierCount: tiers.length,
+        });
+        heldDrag.direction = frame.direction;
+        heldDrag.normalizedPosition = frame.normalizedPosition;
+        const nextTier = zenHueTierForNormalizedPosition(frame.normalizedPosition, tiers);
+        if (nextTier !== heldDrag.previousTier) {
+          heldDrag.previousTier = nextTier;
+          onVerticalTraversal?.();
+          const update: ZenHueCableNavigationUpdate = { tier: nextTier };
+          const horizontalIntent =
+            Math.abs(heldDrag.deltaX) > HUE_CYCLE_PULL_THRESHOLD_PX &&
+            Math.abs(heldDrag.deltaX) >= Math.abs(heldDrag.deltaY) * 0.36;
+          const allBotsDownwardPull =
+            heldDrag.untouchedRoot && heldDrag.startTier === "root" && heldDrag.direction === 1;
+          if (!allBotsDownwardPull && (!heldDrag.untouchedRoot || horizontalIntent || nextTier !== "root")) {
+            update.sliderValue = sliderForClientX(heldDrag.lastClientX);
+          }
+          // This is the only tier publication path: one discrete transition
+          // per animation frame, even while the pointer is completely still.
+          scheduleNavigation(update);
+        }
+        traversalFrameRef.current = requestAnimationFrame(traverse);
+      };
+      traversalFrameRef.current = requestAnimationFrame(traverse);
     },
     [
       disabled,
+      cancelRecoil,
+      cancelTraversal,
       hueSliderValue,
       onInteractionChange,
+      onVerticalTraversal,
       scheduleNavigation,
       sliderForClientX,
       tier,
       tiers,
+      setCableCurveOffset,
     ],
   );
 
@@ -164,37 +340,34 @@ export default function ZenHueStringControl({
       if (!drag || drag.pointerId !== event.pointerId) return;
       const deltaX = event.clientX - drag.startClientX;
       const deltaY = event.clientY - drag.startClientY;
-      const verticalIntent =
-        Math.abs(deltaY) /
-        Math.max(1, Math.abs(deltaY) + Math.abs(deltaX) * 0.55);
-      const weightedDeltaY = deltaY * (0.35 + verticalIntent * 0.65);
-      const nextTier = zenHueTierForVerticalDrag({
-        startTier: drag.startTier,
-        previousTier: drag.previousTier,
-        tiers,
-        deltaY: weightedDeltaY,
-        travelPx: Math.max(120, surfaceRef.current?.clientHeight ?? 0) * 1.4,
-      });
-      const tierChanged = nextTier !== drag.previousTier;
-      if (tierChanged) {
-        drag.previousTier = nextTier;
-        onVerticalTraversal?.();
-      }
+      const elapsed = Math.max(
+        1,
+        Math.min(32, event.timeStamp - drag.previousTime),
+      );
+      drag.velocityY =
+        drag.velocityY * 0.72 +
+        ((event.clientY - drag.previousClientY) / elapsed) * 280;
+      drag.previousClientY = event.clientY;
+      drag.previousTime = event.timeStamp;
+      setLiveCablePull(deltaY);
+      drag.deltaY = deltaY;
+      drag.deltaX = deltaX;
+      drag.lastClientX = event.clientX;
 
       const horizontalIntent =
-        Math.abs(deltaX) > POINTER_DEAD_ZONE_PX &&
+        Math.abs(deltaX) > HUE_CYCLE_PULL_THRESHOLD_PX &&
         Math.abs(deltaX) >= Math.abs(deltaY) * 0.36;
-      const update: ZenHueStringNavigationUpdate = {};
-      if (!drag.untouchedRoot || horizontalIntent) {
+      const update: ZenHueCableNavigationUpdate = {};
+      const allBotsDownwardPull =
+        drag.untouchedRoot && drag.startTier === "root" && deltaY > BREADTH_TRAVERSAL_DEAD_ZONE_PX;
+      const shouldReportHue = !allBotsDownwardPull;
+      if (shouldReportHue) {
         update.sliderValue = sliderForClientX(event.clientX);
       }
-      if (tierChanged) update.tier = nextTier;
-      if (
-        tier === "root" &&
-        hueSliderValue !== null &&
-        horizontalIntent &&
-        tiers.length > 0
-      ) {
+      // A deliberate sideways pull from All Bots enters the deepest hue
+      // directory immediately. This also lets a remembered-hue root re-enter
+      // directly without needing a vertical detent first.
+      if (!allBotsDownwardPull && tier === "root" && horizontalIntent && tiers.length > 0) {
         update.tier = tiers[0];
         drag.startTier = tiers[0];
         drag.previousTier = tiers[0];
@@ -204,9 +377,8 @@ export default function ZenHueStringControl({
       }
     },
     [
-      hueSliderValue,
-      onVerticalTraversal,
       scheduleNavigation,
+      setLiveCablePull,
       sliderForClientX,
       tier,
       tiers,
@@ -220,7 +392,7 @@ export default function ZenHueStringControl({
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
-      settleGesture();
+      settleGesture(true);
     },
     [settleGesture],
   );
@@ -228,7 +400,7 @@ export default function ZenHueStringControl({
   const activeHueValue = hueSliderValue ?? 180;
   const beadX =
     STRING_LEFT + (activeHueValue / 359) * (STRING_RIGHT - STRING_LEFT);
-  const beadY = STRING_CENTER_Y;
+  const beadY = STRING_CENTER_Y + curveOffset;
   const leftSpan = Math.max(1, beadX - STRING_LEFT);
   const rightSpan = Math.max(1, STRING_RIGHT - beadX);
   const path = [
@@ -241,7 +413,18 @@ export default function ZenHueStringControl({
     `${STRING_RIGHT} ${STRING_CENTER_Y}`,
   ].join(" ");
   const breadthIndex = zenHueTierIndex(tier, tiers);
-  const breadthLabel = tier === "root" ? "Full rainbow" : `${tier} rows`;
+  const allBotsDownwardPull =
+    dragging && tier === "root" && pullDeltaY > BREADTH_TRAVERSAL_DEAD_ZONE_PX;
+  const whiteCablePullProgress = allBotsDownwardPull
+    ? Math.min(
+        1,
+        (pullDeltaY - BREADTH_TRAVERSAL_DEAD_ZONE_PX) /
+          (48 - BREADTH_TRAVERSAL_DEAD_ZONE_PX),
+      )
+    : 0;
+  const showHandle = hueSliderValue !== null || dragging;
+  const visibleRows = tier === "root" ? rootRows : tier;
+  const breadthLabel = `${visibleRows} ${visibleRows === 1 ? "row" : "rows"}`;
   const announcement =
     hueSliderValue === null
       ? `Full rainbow, ${totalBotCount} bots`
@@ -297,28 +480,35 @@ export default function ZenHueStringControl({
   };
 
   return (
-    <div
-      className={styles.root}
-      data-tutorial-target="zen-hue-string"
-      data-disabled={disabled ? "true" : undefined}
-      data-dragging={dragging ? "true" : undefined}
-      aria-describedby={instructionsId}
-    >
-      {showCue ? (
-        <div className={styles.cue} role="note">
-          <span>Drag sideways for hue. Pull up or down to change breadth.</span>
-          <button type="button" onClick={onDismissCue} aria-label="Dismiss hue string tip">
-            ×
-          </button>
-        </div>
-      ) : null}
+    <>
+      <div
+        className={styles.root}
+        data-tutorial-target="zen-hue-cable"
+        data-disabled={disabled ? "true" : undefined}
+        data-dragging={dragging ? "true" : undefined}
+        aria-describedby={instructionsId}
+      >
+        {showCue ? (
+          <div className={styles.cue} role="note">
+            <span>
+              Drag sideways for hue. Pull up or down to change breadth.
+            </span>
+            <button
+              type="button"
+              onClick={onDismissCue}
+              aria-label="Dismiss Hue Cable tip"
+            >
+              ×
+            </button>
+          </div>
+        ) : null}
       <div
         ref={surfaceRef}
         className={styles.surface}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
-        onPointerCancel={settleGesture}
+        onPointerCancel={() => settleGesture(false)}
       >
         <svg aria-hidden="true" className={styles.svg} viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`}>
           <defs>
@@ -341,9 +531,16 @@ export default function ZenHueStringControl({
             d={path}
             style={{ stroke: `url(#${gradientId})` }}
           />
+          {whiteCablePullProgress > 0 ? (
+            <path
+              className={styles.whiteout}
+              d={path}
+              style={{ opacity: whiteCablePullProgress }}
+            />
+          ) : null}
           <circle className={styles.endpoint} cx={STRING_LEFT} cy={STRING_CENTER_Y} r="7" />
           <circle className={styles.endpoint} cx={STRING_RIGHT} cy={STRING_CENTER_Y} r="7" />
-          {hueSliderValue !== null ? (
+          {showHandle ? (
             <>
               <circle className={styles.beadHalo} cx={beadX} cy={beadY} r="17" />
               <circle className={styles.bead} cx={beadX} cy={beadY} r="10" />
@@ -352,7 +549,7 @@ export default function ZenHueStringControl({
         </svg>
       </div>
       <span className={styles.status} aria-hidden="true">
-        {hueSliderValue === null ? "Full rainbow" : `${visibleBotCount}/${totalBotCount} · ${breadthLabel}`}
+        {visibleBotCount}/{totalBotCount} · {breadthLabel}
       </span>
       <button type="button" className={styles.all} onClick={onClear} disabled={disabled || hueSliderValue === null}>
         All
@@ -400,6 +597,26 @@ export default function ZenHueStringControl({
       <span className={styles.instructions} role="status" aria-live="polite">
         {announcement}
       </span>
-    </div>
+      </div>
+      {dragging
+        ? createPortal(
+            <>
+              <style>{ZEN_HUE_CABLE_CURSOR_LOCK_STYLE_RULE}</style>
+              <div
+                className={styles.dragShield}
+                data-zen-hue-cable-drag-shield="true"
+                aria-hidden="true"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                onContextMenu={(event) => event.preventDefault()}
+                onWheel={(event) => event.preventDefault()}
+              />
+            </>,
+            document.body,
+          )
+        : null}
+    </>
   );
 }

@@ -507,6 +507,7 @@ const OPENAI_MODERN_REASONING_LEVELS = [
 ] as const satisfies readonly ModelReasoningEffortPreference[];
 const OPENAI_GPT_5_6_REASONING_LEVELS = [
   "none",
+  "minimal",
   "low",
   "medium",
   "high",

@@ -15,6 +15,7 @@ import {
   type BotFaceEyeCount,
   type BotFaceFontId,
   type BotFaceGlyphAnimation,
+  type BotFaceCustomSpeechPoses,
   type BotFaceEyeMovement,
   type BotFaceThinkingFrames,
   type BotProfileFields,
@@ -60,6 +61,7 @@ export interface PrismBotArchiveJson {
     faceMouthFont?: BotFaceFontId | null;
     faceMouthCharacter?: string | null;
     faceMouthAnimation?: BotFaceGlyphAnimation | null;
+    faceMouthSpeechPoses?: BotFaceCustomSpeechPoses | null;
     faceMouthCoffeePucker?: boolean;
     faceFontWeight?: number | null;
     faceEyeScale?: number | null;

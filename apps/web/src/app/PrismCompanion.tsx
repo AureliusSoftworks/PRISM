@@ -145,17 +145,14 @@ import {
   prismRefractTargetIdAtPoint,
   registeredPrismRefractTarget,
   requestPrismRefract,
+  runPrismRefractGenerationWithTimeout,
   subscribePrismRefractRequests,
   type PrismRefractInvocation,
   type PrismRefractRequest,
   type RegisteredPrismRefractTarget,
 } from "./prismRefract";
+import { usePrismRefractionGate } from "./prismRefractionGate";
 import {
-  modelPreparationExperienceForSurface,
-  usePrismRefractionGate,
-} from "./prismRefractionGate";
-import {
-  PRISM_WIELD_ARM_DELAY_MS,
   createPrismWieldState,
   prismWieldCanArm,
   transitionPrismWield,
@@ -169,6 +166,7 @@ import {
 import {
   buildBotGeneratorBriefRefractContext,
   buildBotGeneratorRefractRequestTarget,
+  buildBotPowerRefractRequestTarget,
 } from "./botPowerRefract";
 import type { SpeechCharacterAlignment } from "./speechRevealTimeline";
 import {
@@ -635,9 +633,6 @@ export default function PrismCompanion({
 }: PrismCompanionProps): React.JSX.Element | null {
   const refractionGate = usePrismRefractionGate();
   const surfaceScope = prismCompanionSurfaceScope(surface);
-  const preparationExperience = modelPreparationExperienceForSurface(
-    surface.surfaceId,
-  );
   const privateRecoveryKey = useMemo(
     () => prismCompanionPrivateRecoveryStorageKey(accountKey),
     [accountKey],
@@ -797,7 +792,6 @@ export default function PrismCompanion({
   const refractTutorialRunRef = useRef(false);
   const onRefractTutorialCompleteRef = useRef(onRefractTutorialComplete);
   const wieldStateRef = useRef<PrismWieldState>(createPrismWieldState());
-  const wieldArmTimerRef = useRef<number | null>(null);
   const wieldFrameRef = useRef<number | null>(null);
   const wieldLastPointerRef = useRef<PrismWieldPoint | null>(null);
   const wieldVelocitySampleRef =
@@ -1076,11 +1070,14 @@ export default function PrismCompanion({
   }, []);
 
   const isIdlePresenceBlocked = useCallback((): boolean => {
+    const wieldPhase = wieldStateRef.current.phase;
+    const wieldVisualActive =
+      wieldPhase !== "idle" && wieldPhase !== "pending";
     return (
       openRef.current ||
       draggingRef.current ||
       inertialRef.current ||
-      wieldStateRef.current.phase !== "idle" ||
+      wieldVisualActive ||
       wieldTutorialVisibleRef.current ||
       refractTutorialVisibleRef.current ||
       refractSessionRef.current !== null ||
@@ -1356,6 +1353,7 @@ export default function PrismCompanion({
   const clearPrismWieldHover = useCallback((): void => {
     delete wieldHoverTargetRef.current?.dataset.prismRefractWieldHover;
     wieldHoverTargetRef.current = null;
+    anchorRef.current?.removeAttribute("data-wield-hover-target");
   }, []);
 
   const resetPrismWield = useCallback(
@@ -1366,6 +1364,7 @@ export default function PrismCompanion({
     ): void => {
       const state = wieldStateRef.current;
       const wasFollowing = state.phase === "following";
+      const wasPending = state.phase === "pending";
       const releasePointer = state.pointer ?? wieldLastPointerRef.current;
       const releaseVelocity = wasFollowing
         ? {
@@ -1388,10 +1387,6 @@ export default function PrismCompanion({
           type: "finish",
           epoch: returning.epoch,
         });
-      }
-      if (wieldArmTimerRef.current !== null) {
-        window.clearTimeout(wieldArmTimerRef.current);
-        wieldArmTimerRef.current = null;
       }
       if (wieldFrameRef.current !== null) {
         window.cancelAnimationFrame(wieldFrameRef.current);
@@ -1425,7 +1420,11 @@ export default function PrismCompanion({
         positionRef.current = next;
         setPosition(next);
         startInertia(releaseVelocity);
-      } else if (!options.skipCursorDock && !preserveCaptureReturn) {
+      } else if (
+        !options.skipCursorDock &&
+        !preserveCaptureReturn &&
+        !wasPending
+      ) {
         scheduleIdleDim();
       }
       if (shouldCompleteTutorial) {
@@ -1455,12 +1454,17 @@ export default function PrismCompanion({
     }
 
     const targetId = prismRefractTargetIdAtPoint(pointer.x, pointer.y);
-    const targetElement = targetId
-      ? registeredPrismRefractTarget(targetId)?.element ?? null
+    const registration = targetId
+      ? registeredPrismRefractTarget(targetId)
       : null;
+    const targetElement =
+      registration && !registration.target.disabled?.()
+        ? registration.element
+        : null;
     if (targetElement === wieldHoverTargetRef.current) return;
     clearPrismWieldHover();
     wieldHoverTargetRef.current = targetElement;
+    anchor.toggleAttribute("data-wield-hover-target", Boolean(targetElement));
     if (targetElement) {
       targetElement.dataset.prismRefractWieldHover = "true";
       if (
@@ -1480,15 +1484,13 @@ export default function PrismCompanion({
   const presentPrismWield = useCallback(
     (state: PrismWieldState): void => {
       if (state.phase !== "following") return;
-      if (wieldArmTimerRef.current !== null) {
-        window.clearTimeout(wieldArmTimerRef.current);
-        wieldArmTimerRef.current = null;
-      }
       if (!wieldReturnPositionRef.current) {
         wieldReturnPositionRef.current = positionRef.current;
       }
       clearIdleDim();
       stopInertia(false);
+      // Pointer movement is the sole visual Wield boundary. A stationary
+      // modifier hold leaves the ordinary cursor and resting Prism untouched.
       const pointer = state.pointer ?? wieldLastPointerRef.current;
       wieldVelocitySampleRef.current = pointer
         ? createPrismCompanionDragVelocitySample(
@@ -1530,33 +1532,9 @@ export default function PrismCompanion({
         pointer,
       });
       if (next === current) return;
-      // Revive a dimmed/hidden orb as soon as Option wield begins.
-      clearIdleDim();
-      // The navbar follows the modifier immediately; the orb's own movement
-      // still respects the short Wield arm delay below.
-      setAppNavbarWielding(true);
       wieldStateRef.current = next;
-      const epoch = next.epoch;
-      wieldArmTimerRef.current = window.setTimeout(() => {
-        if (!prismWieldCanArm(prismWieldAvailabilityRef.current)) {
-          resetPrismWield(false, false, { skipCursorDock: true });
-          return;
-        }
-        const beforeArm = wieldStateRef.current;
-        const armed = transitionPrismWield(beforeArm, {
-          type: "arm",
-          epoch,
-        });
-        if (armed === beforeArm) return;
-        wieldStateRef.current = armed;
-        presentPrismWield(armed);
-      }, PRISM_WIELD_ARM_DELAY_MS);
     },
-    [
-      clearIdleDim,
-      presentPrismWield,
-      resetPrismWield,
-    ],
+    [],
   );
 
   useLayoutEffect(() => {
@@ -2312,7 +2290,14 @@ export default function PrismCompanion({
       signal,
     }: PrismUniversalInputCandidateRequest): Promise<string> => {
       const target =
-        element.id === "bot-generator-prompt"
+        element.dataset.prismRefractTargetKind === "bot-power"
+          ? buildBotPowerRefractRequestTarget({
+              botId: element.dataset.prismRefractBotId || null,
+              botName: element.dataset.prismRefractBotName || "New bot",
+              context: element.dataset.prismRefractContext || field.context,
+              maxLength: field.maxLength,
+            })
+          : element.id === "bot-generator-prompt"
           ? buildBotGeneratorRefractRequestTarget({
               context: buildBotGeneratorBriefRefractContext({
                 brief: currentValue,
@@ -2353,12 +2338,11 @@ export default function PrismCompanion({
   );
 
   useEffect(() => {
-    if (companionSuppressed || sessionNoteContext) return;
+    if (sessionNoteContext) return;
     return installPrismUniversalInputTargets({
       generate: generatePrismUniversalInputCandidate,
     });
   }, [
-    companionSuppressed,
     generatePrismUniversalInputCandidate,
     sessionNoteContext,
   ]);
@@ -2671,8 +2655,8 @@ export default function PrismCompanion({
       const queuedCount = refractQueueRef.current.length;
       setRefractStatus(
         queuedCount > 0
-          ? `Prism is refracting ${target.label}. ${queuedCount} more queued.`
-          : `Prism is refracting ${target.label}.`,
+          ? `Prism is refracting ${target.label}. ${queuedCount} more queued. Keep working elsewhere, or click the rainbow sheen to cancel.`
+          : `Prism is refracting ${target.label}. Keep working elsewhere, or click the rainbow sheen to cancel.`,
       );
 
       refractAbortRef.current?.abort();
@@ -2765,10 +2749,13 @@ export default function PrismCompanion({
           // Foreground field Refract follows the globally selected provider
           // and model. Its in-field sheen is the complete loading treatment;
           // local cold starts must never summon the fullscreen model warmer.
-          const rawValue = await target.generate({
-            currentValue: target.read(),
-            rejectedValues,
+          const rawValue = await runPrismRefractGenerationWithTimeout({
             signal: controller.signal,
+            run: (generationSignal) => target.generate({
+              currentValue: target.read(),
+              rejectedValues,
+              signal: generationSignal,
+            }),
           });
           if (!requestOwnershipIsCurrent()) {
             return;
@@ -2891,7 +2878,9 @@ export default function PrismCompanion({
       markRefractTarget(session, session.phase);
       updateRefractSession(session);
       setRefractPrompt("");
-      setRefractStatus(`Prism is refracting ${target.label}.`);
+      setRefractStatus(
+        `Prism is refracting ${target.label}. Keep working elsewhere, or click the rainbow sheen to cancel.`,
+      );
       if (invocation === "focused-shortcut") {
         document.documentElement.setAttribute(
           PRISM_REFRACT_CURSOR_ATTRIBUTE,
@@ -2993,14 +2982,13 @@ export default function PrismCompanion({
       void (async () => {
         try {
           if (refractionGate && !target.ownsPresentation) {
-            await refractionGate.runLocalRefraction({
-              provider: "local",
-              experience: preparationExperience,
-              context: "refract",
+            // Magic Refract actions own their normal request routing. The
+            // presentation layer must not prewarm or substitute a local/Aux
+            // model when the navbar is set to another provider or model.
+            await refractionGate.withRefractionLoader({
               loader: {
                 title: target.label,
-                detail:
-                  "Prism is running this Wield action with a fullscreen hold so cold local starts stay visible.",
+                detail: "Prism is shaping this Wield action with your navbar routing.",
                 stepLabel: "Refracting",
               },
               work: async () => {
@@ -3021,7 +3009,6 @@ export default function PrismCompanion({
     });
   }, [
     onError,
-    preparationExperience,
     refractPrompt,
     refractionGate,
     releasePrismRefract,
@@ -3065,7 +3052,7 @@ export default function PrismCompanion({
 
   useEffect(
     () => {
-      if (companionSuppressed || sessionNoteContext) return;
+      if (sessionNoteContext) return;
       return subscribePrismRefractRequests(({ targetId, invocation }) => {
         const active = refractSessionRef.current;
         if (!active) {
@@ -3086,6 +3073,10 @@ export default function PrismCompanion({
           canAccept:
             active.phase === "ready" && active.candidateValue !== null,
         });
+        if (decision === "cancel") {
+          releasePrismRefract(true);
+          return;
+        }
         if (decision === "queue") {
           queuePrismRefractRequest({ targetId, invocation });
           return;
@@ -3101,8 +3092,8 @@ export default function PrismCompanion({
     [
       acceptPrismRefract,
       beginPrismRefract,
-      companionSuppressed,
       queuePrismRefractRequest,
+      releasePrismRefract,
       sessionNoteContext,
     ],
   );
@@ -3178,10 +3169,22 @@ export default function PrismCompanion({
         if (session.registration.target.kind !== "magic") {
           event.preventDefault();
           event.stopPropagation();
-          if (event.button === 0 && session.phase === "ready") {
-            acceptPrismRefract();
+          if (event.button === 0) {
+            if (session.phase === "generating" || session.phase === "error") {
+              releasePrismRefract(true);
+            } else if (session.phase === "ready") {
+              acceptPrismRefract();
+            }
           }
         }
+        return;
+      }
+      if (
+        session.registration.target.kind !== "magic" &&
+        session.phase === "generating"
+      ) {
+        // Refraction belongs to its captured field, not global focus. Let the
+        // player click, focus, and type elsewhere while this request runs.
         return;
       }
       const nextEditableControl =
@@ -3222,7 +3225,9 @@ export default function PrismCompanion({
         acceptPrismRefract();
         return;
       }
-      releasePrismRefract(true);
+      if (session.registration.target.kind === "magic") {
+        releasePrismRefract(true);
+      }
     };
     const preventCapturedFieldClick = (event: MouseEvent): void => {
       const eventTarget = event.target;
@@ -3736,7 +3741,16 @@ export default function PrismCompanion({
         return;
       }
       if (keyboardShortcutMatchesEvent(keyboardShortcut, event)) {
-        if (refractSessionRef.current) releasePrismRefract(true);
+        const activeRefract = refractSessionRef.current;
+        if (activeRefract?.phase === "generating") {
+          event.preventDefault();
+          event.stopPropagation();
+          setRefractStatus(
+            "Prism is still refracting. Click its rainbow sheen to cancel.",
+          );
+          return;
+        }
+        if (activeRefract) releasePrismRefract(true);
         resetPrismWield();
         event.preventDefault();
         event.stopPropagation();
@@ -3745,6 +3759,10 @@ export default function PrismCompanion({
       }
       const refracting = refractSessionRef.current;
       if (refracting) {
+        const eventTargetsCapturedField =
+          refracting.registration.target.kind !== "magic" &&
+          event.target instanceof Node &&
+          refracting.registration.element.contains(event.target);
         if (
           refracting.phase === "prompting" &&
           document.activeElement === refractPromptRef.current
@@ -3752,13 +3770,20 @@ export default function PrismCompanion({
           return;
         }
         if (event.key === "Escape") {
+          if (!eventTargetsCapturedField) return;
           event.preventDefault();
           event.stopPropagation();
+          if (refracting.phase === "generating") {
+            setRefractStatus(
+              "Click the rainbow sheen to cancel this refraction.",
+            );
+            return;
+          }
           releasePrismRefract(true);
           return;
         }
         if (
-          refracting.registration.target.kind !== "magic" &&
+          eventTargetsCapturedField &&
           event.key === " "
         ) {
           event.preventDefault();
@@ -3774,10 +3799,11 @@ export default function PrismCompanion({
           return;
         }
         if (
-          refracting.registration.target.kind !== "magic" &&
+          eventTargetsCapturedField &&
           (event.key === "Enter" || event.key === "Tab")
         ) {
           if (refracting.phase !== "ready") {
+            if (event.key === "Tab") return;
             event.preventDefault();
             setRefractStatus("Prism is still refracting.");
             return;
@@ -3787,7 +3813,7 @@ export default function PrismCompanion({
           return;
         }
         if (
-          refracting.registration.target.kind !== "magic" &&
+          eventTargetsCapturedField &&
           !event.metaKey &&
           !event.ctrlKey &&
           !event.altKey &&

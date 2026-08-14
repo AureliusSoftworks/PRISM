@@ -32,6 +32,7 @@ import {
   serializeBotAudioVoiceProfileV1,
   serializeBotAvatarDetailsV1,
   serializeBotFaceThinkingFrames,
+  serializeBotFaceCustomSpeechPosesForStorage,
   serializeBotPowersV1,
   type PrismJsonObject,
   type PrismJsonValue,
@@ -64,6 +65,7 @@ export const PRISM_JOURNALED_BOT_PATCH_KEYS = new Set([
   "faceMouthFont",
   "faceMouthCharacter",
   "faceMouthAnimation",
+  "faceMouthSpeechPoses",
   "faceMouthCoffeePucker",
   "faceFontWeight",
   "faceEyeScale",
@@ -116,6 +118,7 @@ const BOT_MUTATION_COLUMNS = [
   "face_mouth_font",
   "face_mouth_character",
   "face_mouth_animation",
+  "face_mouth_speech_poses",
   "face_mouth_coffee_pucker",
   "face_font_weight",
   "face_eye_scale",
@@ -411,6 +414,17 @@ function normalizedColumns(
       "mouth animation",
       normalizeBotFaceGlyphAnimation,
     );
+  }
+  if (own(patch, "faceMouthSpeechPoses")) {
+    if (patch.faceMouthSpeechPoses === null) {
+      next.face_mouth_speech_poses = null;
+    } else {
+      const poses = serializeBotFaceCustomSpeechPosesForStorage(
+        patch.faceMouthSpeechPoses,
+      );
+      if (poses === null) throw new Error("Invalid face mouth speech poses.");
+      next.face_mouth_speech_poses = poses;
+    }
   }
   if (own(patch, "faceMouthCoffeePucker")) {
     if (typeof patch.faceMouthCoffeePucker !== "boolean") {

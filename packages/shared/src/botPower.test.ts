@@ -12,6 +12,7 @@ import {
   applyBotPowerEchoResponseV1,
   applyBotPowerCursedTongueResponseV1,
   applyBotPowerMumbledResponseV1,
+  applyBotPowerMumbledReactionPlanV1,
   applyBotPowerMuteResponseV1,
   botPowerMuteEstimatedDurationMsV1,
   botPowerMuteInterruptionChanceV1,
@@ -275,6 +276,22 @@ test("mute reaction beats are deterministic, bounded, spaced, and Power-aware", 
   assert.ok(first.every((beat) => beat.atMs <= 28_000));
   assert.ok(first.every((beat, index) => index === 0 || beat.atMs - first[index - 1]!.atMs >= 4_000));
   assert.notEqual(first.find((beat) => beat.reactorBotId === "breathless")?.kind, "lung_foley");
+  const mumbled = planBotPowerMuteReactionBeatsV1({
+    seed: "signal:mute:mumbled-reactor",
+    durationMs: 12_000,
+    candidates: [{
+      botId: "mumbled",
+      mumbling: true,
+      pronunciationMapPoint: { x: 0.82, y: 0.16 },
+    }],
+    allowInterrupt: false,
+  });
+  const projectedQuip = mumbled.find((beat) => beat.quip)?.quip ?? "";
+  assert.ok(projectedQuip);
+  assert.doesNotMatch(
+    projectedQuip,
+    /take your time|No rush|you good|Awkward silence|Any day|finished|Cat got|Proceed when ready|waiting/iu,
+  );
 });
 
 test("mute reaction density and interruption curves match the timed tiers", () => {
@@ -771,6 +788,75 @@ test("mumbling is a normal-volume hard speech transform that preserves only phys
   );
 });
 
+test("mumbling derives replay-stable gibberish dialects from the Accent Map pin", () => {
+  const intended = "I see. If you say so, I will keep listening.";
+  const northwest = {
+    pronunciationMapPoint: { x: 0.12, y: 0.14 },
+    variationSeed: "reaction-1",
+  };
+  const southeast = {
+    pronunciationMapPoint: { x: 0.88, y: 0.84 },
+    variationSeed: "reaction-1",
+  };
+  const first = applyBotPowerMumbledResponseV1(intended, northwest);
+
+  assert.equal(first, applyBotPowerMumbledResponseV1(intended, northwest));
+  assert.notEqual(first, applyBotPowerMumbledResponseV1(intended, southeast));
+  assert.doesNotMatch(first, /\b(?:I|see|If|you|say|so|will|keep|listening)\b/iu);
+  assert.notEqual(
+    first,
+    applyBotPowerMumbledResponseV1(intended, {
+      ...northwest,
+      pronunciationMapPoint: { x: 0.18, y: 0.19 },
+    }),
+  );
+});
+
+test("mumbling projects spoken reaction lanes without retaining canned English", () => {
+  const projected = applyBotPowerMumbledReactionPlanV1(
+    {
+      v: 1,
+      name: "listenerReaction",
+      speakerBotId: "speaker",
+      listenerBotId: "listener",
+      messageId: "message",
+      targetSource: "role",
+      visualAction: "nod",
+      spokenCue: "I see.",
+      interjectionAttempt: true,
+      floorOutcome: "yield",
+      interruptedSpeakerCue: "... sure. Go ahead.",
+      interruptedSpeakerCuePlayback: "crosstalk",
+      targetProgress: 0.5,
+      seed: "reaction-seed",
+      cameraCutEligible: true,
+    },
+    {
+      listener: {
+        pronunciationMapPoint: { x: 0.2, y: 0.3 },
+        variationSeed: "listener",
+      },
+      interruptedSpeaker: {
+        pronunciationMapPoint: { x: 0.8, y: 0.7 },
+        variationSeed: "speaker",
+      },
+    },
+  );
+
+  assert.equal(projected.spokenCue, undefined);
+  assert.equal(projected.interruptedSpeakerCue, undefined);
+  assert.equal(projected.spokenCueSpeechEffect, "speech_obfuscation");
+  assert.equal(
+    projected.interruptedSpeakerCueSpeechEffect,
+    "speech_obfuscation",
+  );
+  assert.doesNotMatch(projected.publicSpokenCue ?? "", /I see/iu);
+  assert.doesNotMatch(
+    projected.publicInterruptedSpeakerCue ?? "",
+    /sure|Go ahead/iu,
+  );
+});
+
 test("Cursed Tongue deterministically layers strong profanity while protecting records", () => {
   assert.deepEqual(normalizeBotPowerEffectV1({
     type: "cursed_tongue",
@@ -851,6 +937,10 @@ test("Cursed Tongue deterministically layers strong profanity while protecting r
     botPowerCursedTongueAuthoringCueV1(),
     /draft fully natural clean speech only/iu,
   );
+  assert.doesNotMatch(
+    botPowerCursedTongueAuthoringCueV1(),
+    /Cursed Tongue|PRISM adds|public profanity|transformation/iu,
+  );
   assert.ok(
     Array.from({ length: 256 }, (_, index) =>
       applyBotPowerCursedTongueResponseV1(
@@ -872,6 +962,29 @@ test("Cursed Tongue composes after addressed-insult content", () => {
   const adjusted = applyBotPowerCursedTongueResponseV1(insulted, "composition");
   assert.equal(botPowerResponseHasAddressedInsultV1(adjusted, "Mira"), true);
   assert.match(adjusted, /\b(?:fucking|goddamn|motherfucking|shitty|damn)\b/iu);
+});
+
+test("Cursed Tongue fallback uses sentence and verb cadence instead of corrupting recipe records", () => {
+  const source = [
+    "Happy birthday to the lucky kid! Making a vanilla cake is a great way to celebrate.",
+    "Don’t worry if you’re not the best baker; I’ve got you covered.",
+    "",
+    "**Ingredients**",
+    "- 2 cups all-purpose flour",
+    "- 1 teaspoon salt",
+    "",
+    "**Safety**",
+    "Children should have adult supervision. Check every ingredient label for allergies.",
+  ].join("\n");
+  const adjusted = applyBotPowerCursedTongueResponseV1(source, "cake");
+
+  assert.match(adjusted, /\b(?:fucking|goddamn|damn)\b/iu);
+  assert.ok(adjusted.includes("**Ingredients**"));
+  assert.ok(adjusted.includes("**Safety**"));
+  assert.ok(adjusted.includes("2 cups all-purpose flour"));
+  assert.ok(adjusted.includes("1 teaspoon salt"));
+  assert.doesNotMatch(adjusted, /\*\*[^*]*(?:fuck|damn|shit)[^*]*\*\*/iu);
+  assert.doesNotMatch(adjusted, /(?:fuck\w*|goddamn|damn)\s+(?:flour|salt)\b/iu);
 });
 
 test("voice presence does not override physical size or visibility presentation", () => {

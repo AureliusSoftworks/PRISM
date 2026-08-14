@@ -533,4 +533,25 @@ describe("miniAvatarBinaryMouthShape", () => {
       "closed",
     );
   });
+
+  it("keeps the compact speech clock active for authored resting mouths when Custom Speech is enabled", () => {
+    assert.equal(
+      miniAvatarBinaryMouthShape({
+        talking: true,
+        mouthShape: "open-round",
+        mouthCharacter: "△",
+        customSpeechEnabled: true,
+      }),
+      "open-wide",
+    );
+    assert.equal(
+      miniAvatarBinaryMouthShape({
+        talking: true,
+        mouthShape: "speech-closed",
+        mouthCharacter: "△",
+        customSpeechEnabled: true,
+      }),
+      "closed",
+    );
+  });
 });

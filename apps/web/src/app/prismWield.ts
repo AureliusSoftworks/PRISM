@@ -1,4 +1,3 @@
-export const PRISM_WIELD_ARM_DELAY_MS = 150;
 export const PRISM_WIELD_MOVE_THRESHOLD_PX = 4;
 
 export interface PrismWieldPoint {
@@ -36,7 +35,6 @@ export function prismWieldCanArm({
 
 export type PrismWieldEvent =
   | { type: "modifier-down"; pointer: PrismWieldPoint }
-  | { type: "arm"; epoch: number }
   | { type: "pointer-move"; epoch: number; pointer: PrismWieldPoint }
   | { type: "capture"; epoch: number; pointer: PrismWieldPoint }
   | { type: "return"; epoch: number }
@@ -77,10 +75,6 @@ export function transitionPrismWield(
   }
   if (event.epoch !== state.epoch) return state;
 
-  if (event.type === "arm") {
-    if (state.phase !== "pending" || !state.pointer) return state;
-    return { ...state, phase: "following" };
-  }
   if (event.type === "pointer-move") {
     if (state.phase === "pending") {
       return {

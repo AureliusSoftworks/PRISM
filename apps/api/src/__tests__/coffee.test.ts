@@ -2,7 +2,7 @@ import { describe, it, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { selectProvider, type GenerateOptions, type LlmProvider } from "../providers.ts";
+import { getAuxiliaryProvider, selectProvider, type GenerateOptions, type LlmProvider } from "../providers.ts";
 import {
   COFFEE_GROUP_MAX_SIZE,
   COFFEE_GROUP_MIN_SIZE,
@@ -866,10 +866,7 @@ describe("Coffee listener reaction persistence", () => {
     assert.match(source, /departurePersistence === null/u);
     assert.match(source, /listenerIsInAudience/u);
     assert.match(source, /coffeePowerBotVisibleTo/u);
-    assert.match(
-      source,
-      /event\.plan\.spokenCue \|\| event\.plan\.vocalFoley/u,
-    );
+    assert.match(source, /listenerReactionHasAudio\(event\.plan\)/u);
     assert.doesNotMatch(
       source,
       /listenerReaction[\s\S]{0,120}coffeeBotSocialById\s*=/u,
@@ -6115,6 +6112,21 @@ describe("Coffee group foundation", () => {
       durationMinutes: 10,
     });
     const intended = "Boris, the archive plan keeps the source record intact before sunrise.";
+    const auxiliaryPrompts: Parameters<LlmProvider["generateResponse"]>[0][] = [];
+    const auxiliaryProvider: LlmProvider = {
+      name: "local",
+      diagnosticModel: "coffee-auxiliary-test",
+      async generateResponse(messages) {
+        auxiliaryPrompts.push(messages);
+        return (messages.at(-1)?.content ?? "").replace(
+          "archive plan",
+          "fucking archive plan",
+        );
+      },
+      async embedText() {
+        return [];
+      },
+    };
     const first = await withMockedCoffeeFetch(intended, () =>
       processCoffeeTurn(
         db,
@@ -6124,9 +6136,19 @@ describe("Coffee group foundation", () => {
           message: "Alice, what is the plan?",
           directedSpeakerBotId: ALICE.id,
         },
-        { preferredProvider: "local", sessionRemainingMs: 120_000 },
+        {
+          preferredProvider: "local",
+          sessionRemainingMs: 120_000,
+          auxiliaryProviderFactory:
+            (() => auxiliaryProvider) as typeof getAuxiliaryProvider,
+        },
       ),
     );
+    assert.ok(auxiliaryPrompts.some((messages) =>
+      messages.some((message) =>
+        message.content.includes("Cursed Tongue public rewrite pass")
+      )
+    ));
     const frozenPlan = db.prepare(
       "SELECT coffee_power_plan_json FROM conversations WHERE id = ?",
     ).get(conversationId) as { coffee_power_plan_json: string | null };

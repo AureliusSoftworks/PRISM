@@ -11,8 +11,10 @@ import {
 } from "react";
 import {
   BOT_FACE_BLINK_BAR_VALUES,
+  botFaceCustomSpeechGlyphForMouthShape,
   DEFAULT_BOT_FACE_BLINK_BAR,
   DEFAULT_BOT_FACE_EYE_SPACING,
+  DEFAULT_BOT_FACE_GLYPH_ANIMATION,
   DEFAULT_BOT_FACE_THINKING_FRAMES,
   botFaceThinkingSpinnerDisabled,
   botFaceThinkingFramesEqual,
@@ -45,6 +47,7 @@ import {
   type BotFaceEyeMovement,
   type BotFaceFontId,
   type BotFaceGlyphAnimation,
+  type BotFaceCustomSpeechPoses,
   type BotFaceThinkingFrames,
   type BotVoicePreset,
 } from "@localai/shared";
@@ -245,6 +248,8 @@ export type CoffeeSeatPlateEmojiProps = {
   faceMouthFont?: BotFaceFontId | null;
   faceMouthCharacter?: string | null;
   faceMouthAnimation?: BotFaceGlyphAnimation | null;
+  /** Four semantic Custom Speech poses, resolved from the portable face data. */
+  faceMouthSpeechPoses?: BotFaceCustomSpeechPoses | null;
   /** Retained for portable bot data; face weight adjustment is disabled. */
   faceFontWeight?: number | null;
   faceEyeScale?: number | null;
@@ -337,6 +342,7 @@ export function CoffeeSeatPlateEmoji({
   faceMouthFont,
   faceMouthCharacter,
   faceMouthAnimation,
+  faceMouthSpeechPoses,
   faceEyeScale,
   faceEyeOffsetX,
   faceEyeOffsetY,
@@ -396,9 +402,12 @@ export function CoffeeSeatPlateEmoji({
     !Array.from(baseText).some((glyph) =>
       COFFEE_SEAT_SIP_MOUTH_GLYPHS.has(glyph),
     );
+  const configuredFaceMouthAnimation =
+    normalizeBotFaceGlyphAnimation(faceMouthAnimation) ??
+    DEFAULT_BOT_FACE_GLYPH_ANIMATION;
   const normalizedFaceMouthAnimation = fullMotion
-    ? (normalizeBotFaceGlyphAnimation(faceMouthAnimation) ?? "none")
-    : "none";
+    ? configuredFaceMouthAnimation
+    : DEFAULT_BOT_FACE_GLYPH_ANIMATION;
   // Default mouths clear the authored glyph while talking so the plate
   // viseme (or mini binary `:0`) can drive the mouth.
   // "static" keeps the authored custom glyph visible and unanimated while
@@ -795,6 +804,16 @@ export function CoffeeSeatPlateEmoji({
       ));
   const streamedMouthShape =
     mouthShape ?? (inferredMouthOpen ? "open-wide" : "closed");
+  const customSpeechGlyph =
+    configuredFaceMouthAnimation === DEFAULT_BOT_FACE_GLYPH_ANIMATION &&
+    effectiveTalking &&
+    faceMouthSpeechPoses !== null &&
+    faceMouthSpeechPoses !== undefined
+      ? botFaceCustomSpeechGlyphForMouthShape(
+          faceMouthSpeechPoses,
+          streamedMouthShape,
+        )
+      : null;
   const mouthOpen =
     !hasCustomMouth &&
     effectiveTalking &&
@@ -962,7 +981,9 @@ export function CoffeeSeatPlateEmoji({
               customMouthRendered = true;
             }
             const renderedGlyph =
-              part === "mouth" && renderedFaceMouthCharacter
+              part === "mouth" && customSpeechGlyph
+                ? customSpeechGlyph
+                : part === "mouth" && renderedFaceMouthCharacter
                 ? renderedFaceMouthCharacter
                 : glyph;
             const renderCustomEyePair =

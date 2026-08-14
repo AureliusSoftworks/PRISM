@@ -9,6 +9,7 @@ import {
   ACCENT_LIGHTNESS_MIN_DARK,
   BOT_AUTO_ACCENT_HUE_OFFSET_DEGREES,
   accentLightnessBand,
+  blendWeightedBotIdentityColors,
   clampAccentLightness,
   clampLuminance,
   contrastRatio,
@@ -42,6 +43,67 @@ describe("fullySaturateBotColor", () => {
     const saturated = fullySaturateBotColor("#ff0055");
     assert.equal(fullySaturateBotColor(saturated), saturated);
     assert.equal(fullySaturateBotColor("  rebeccapurple  "), "rebeccapurple");
+  });
+});
+
+describe("blendWeightedBotIdentityColors", () => {
+  it("mixes equally weighted canonical hues and keeps full saturation", () => {
+    const color = blendWeightedBotIdentityColors([
+      { color: "#ff0000", weight: 1 },
+      { color: "#00ff00", weight: 1 },
+    ]);
+    assert.equal(color, "#ffff00");
+    assert.ok(Math.abs(hexToHsl(color ?? "#000000").s - 100) < 0.5);
+  });
+
+  it("pulls the circular hue blend toward a stronger source", () => {
+    const color = blendWeightedBotIdentityColors([
+      { color: "#ff0000", weight: 3 },
+      { color: "#ffff00", weight: 1 },
+    ]);
+    const hue = hexToHsl(color ?? "#000000").h;
+    assert.ok(hue > 13 && hue < 15, `expected a red-biased amber hue, got ${hue}`);
+  });
+
+  it("wraps hues around the red seam instead of averaging through cyan", () => {
+    assert.equal(
+      blendWeightedBotIdentityColors([
+        { color: "#ff002b", weight: 1 },
+        { color: "#ff2b00", weight: 1 },
+      ]),
+      "#ff0000",
+    );
+  });
+
+  it("returns no arbitrary saturated hue for opposing or neutral inputs", () => {
+    assert.equal(
+      blendWeightedBotIdentityColors([
+        { color: "#ff0000", weight: 1 },
+        { color: "#00ffff", weight: 1 },
+      ]),
+      null,
+    );
+    assert.equal(blendWeightedBotIdentityColors([{ color: "#808080", weight: 1 }]), null);
+  });
+
+  it("ignores malformed, missing, and zero-influence sources", () => {
+    assert.equal(
+      blendWeightedBotIdentityColors([
+        { color: "not-a-color", weight: 50 },
+        { color: null, weight: 50 },
+        { color: "#00ff00", weight: 0 },
+        { color: "#ff0000", weight: 1 },
+      ]),
+      "#ff0000",
+    );
+    assert.equal(blendWeightedBotIdentityColors([{ color: undefined, weight: 1 }]), null);
+  });
+
+  it("returns one valid source in canonical fully saturated form", () => {
+    assert.equal(
+      blendWeightedBotIdentityColors([{ color: " #9a7480 ", weight: 10 }]),
+      normalizeBotIdentityColor("#9a7480"),
+    );
   });
 });
 

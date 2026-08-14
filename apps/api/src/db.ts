@@ -28,8 +28,10 @@ import {
   createPrismTutorialProgress,
   directionalIrritationEdgeKey,
   fullySaturateBotColor,
+  normalizeBotFaceCustomSpeechPoses,
   normalizeDirectionalIrritationIntensity,
   sanitizePrismMoodState,
+  serializeBotFaceCustomSpeechPosesForStorage,
   type CoffeeSessionDurationMinutes,
 } from "@localai/shared";
 import {
@@ -263,6 +265,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       prism_default_bot_face_mouth_font TEXT,
       prism_default_bot_face_mouth_character TEXT,
       prism_default_bot_face_mouth_animation TEXT,
+      prism_default_bot_face_mouth_speech_poses TEXT,
       prism_default_bot_face_mouth_coffee_pucker INTEGER NOT NULL DEFAULT 1,
       prism_default_bot_face_font_weight INTEGER,
       prism_default_bot_face_eye_scale REAL,
@@ -1676,6 +1679,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       face_mouth_font TEXT,
       face_mouth_character TEXT,
       face_mouth_animation TEXT,
+      face_mouth_speech_poses TEXT,
       face_mouth_coffee_pucker INTEGER NOT NULL DEFAULT 1,
       face_font_weight INTEGER,
       face_eye_scale REAL,
@@ -3226,6 +3230,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     ["prism_default_bot_face_mouth_font", "TEXT"],
     ["prism_default_bot_face_mouth_character", "TEXT"],
     ["prism_default_bot_face_mouth_animation", "TEXT"],
+    ["prism_default_bot_face_mouth_speech_poses", "TEXT"],
     [
       "prism_default_bot_face_mouth_coffee_pucker",
       "INTEGER NOT NULL DEFAULT 1",
@@ -4145,6 +4150,54 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasBotFaceMouthAnimationColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_mouth_animation TEXT;");
+  }
+  const hasBotFaceMouthSpeechPosesColumn = botColumns.some(
+    (column) => column.name === "face_mouth_speech_poses",
+  );
+  if (!hasBotFaceMouthSpeechPosesColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_mouth_speech_poses TEXT;");
+  }
+  const legacyBotSpeechRows = db
+    .prepare(
+      "SELECT id, user_id, face_mouth_character FROM bots WHERE face_mouth_animation = 'custom' AND face_mouth_speech_poses IS NULL",
+    )
+    .all() as Array<{
+    id: string;
+    user_id: string;
+    face_mouth_character: string | null;
+  }>;
+  const migrateLegacyBotSpeech = db.prepare(
+    "UPDATE bots SET face_mouth_character = ?, face_mouth_animation = 'none', face_mouth_speech_poses = ? WHERE id = ? AND user_id = ?",
+  );
+  for (const row of legacyBotSpeechRows) {
+    const poses = normalizeBotFaceCustomSpeechPoses(row.face_mouth_character);
+    migrateLegacyBotSpeech.run(
+      poses?.[0] ?? row.face_mouth_character,
+      serializeBotFaceCustomSpeechPosesForStorage(poses),
+      row.id,
+      row.user_id,
+    );
+  }
+  const legacyUserSpeechRows = db
+    .prepare(
+      "SELECT id, prism_default_bot_face_mouth_character FROM users WHERE prism_default_bot_face_mouth_animation = 'custom' AND prism_default_bot_face_mouth_speech_poses IS NULL",
+    )
+    .all() as Array<{
+    id: string;
+    prism_default_bot_face_mouth_character: string | null;
+  }>;
+  const migrateLegacyUserSpeech = db.prepare(
+    "UPDATE users SET prism_default_bot_face_mouth_character = ?, prism_default_bot_face_mouth_animation = 'none', prism_default_bot_face_mouth_speech_poses = ? WHERE id = ?",
+  );
+  for (const row of legacyUserSpeechRows) {
+    const poses = normalizeBotFaceCustomSpeechPoses(
+      row.prism_default_bot_face_mouth_character,
+    );
+    migrateLegacyUserSpeech.run(
+      poses?.[0] ?? row.prism_default_bot_face_mouth_character,
+      serializeBotFaceCustomSpeechPosesForStorage(poses),
+      row.id,
+    );
   }
   const hasBotFaceMouthCoffeePuckerColumn = botColumns.some(
     (column) => column.name === "face_mouth_coffee_pucker",

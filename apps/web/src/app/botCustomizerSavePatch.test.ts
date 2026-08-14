@@ -35,6 +35,7 @@ const pristine: BotCustomizerSavePristine = {
   faceMouthFont: "warm",
   faceMouthCharacter: null,
   faceMouthAnimation: "none",
+  faceMouthSpeechPoses: null,
   faceMouthCoffeePucker: false,
   faceFontWeight: 500,
   faceEyeScale: 1,
@@ -96,6 +97,7 @@ const currentFromPristine = (
   faceMouthFont: pristine.faceMouthFont,
   faceMouthCharacter: pristine.faceMouthCharacter,
   faceMouthAnimation: pristine.faceMouthAnimation,
+  faceMouthSpeechPoses: pristine.faceMouthSpeechPoses,
   faceMouthCoffeePucker: pristine.faceMouthCoffeePucker,
   faceFontWeight: pristine.faceFontWeight,
   faceEyeScale: pristine.faceEyeScale,
@@ -273,6 +275,24 @@ describe("bot customizer save patch", () => {
         pristine
       ),
       { faceMouthCoffeePucker: true }
+    );
+  });
+
+  it("patches Custom Speech poses independently from the resting mouth", () => {
+    const poses = ["—", "·", "△", "○"] as const;
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ faceMouthSpeechPoses: poses }),
+        pristine,
+      ),
+      { faceMouthSpeechPoses: poses },
+    );
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ faceMouthSpeechPoses: null }),
+        { ...pristine, faceMouthSpeechPoses: poses },
+      ),
+      { faceMouthSpeechPoses: null },
     );
   });
 

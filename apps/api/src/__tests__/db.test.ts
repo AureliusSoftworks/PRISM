@@ -78,6 +78,59 @@ describe("bot Atmosphere accent migration", () => {
   });
 });
 
+describe("Custom Speech pose migration", () => {
+  it("moves unshipped packed mouth data into the nullable pose column", () => {
+    const db = new DatabaseSync(":memory:");
+    initializeDatabase(db);
+    db.prepare(
+      "INSERT INTO users (id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, created_at, last_active_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run(
+      "speech-user",
+      "speech@example.test",
+      "Speech",
+      "hash",
+      "salt",
+      "cipher",
+      "iv",
+      "tag",
+      "—·△○",
+      "custom",
+      "2026-08-13",
+      "2026-08-13",
+    );
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, face_mouth_character, face_mouth_animation, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ).run(
+      "speech-bot",
+      "speech-user",
+      "Speech Bot",
+      "—·△○",
+      "custom",
+      "2026-08-13",
+      "2026-08-13",
+    );
+
+    initializeDatabase(db);
+
+    const bot = db.prepare(
+      "SELECT face_mouth_character, face_mouth_animation, face_mouth_speech_poses FROM bots WHERE id = ?",
+    ).get("speech-bot") as Record<string, string>;
+    assert.equal(bot.face_mouth_character, "—");
+    assert.equal(bot.face_mouth_animation, "none");
+    assert.equal(bot.face_mouth_speech_poses, '["—","·","△","○"]');
+    const user = db.prepare(
+      "SELECT prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_speech_poses FROM users WHERE id = ?",
+    ).get("speech-user") as Record<string, string>;
+    assert.equal(user.prism_default_bot_face_mouth_character, "—");
+    assert.equal(user.prism_default_bot_face_mouth_animation, "none");
+    assert.equal(
+      user.prism_default_bot_face_mouth_speech_poses,
+      '["—","·","△","○"]',
+    );
+    db.close();
+  });
+});
+
 describe("memory ecology settings migration", () => {
   it("copies legacy auto_memory into both automatic learning permissions", () => {
     const db = new DatabaseSync(":memory:");
@@ -461,6 +514,11 @@ describe("createDatabase bot export hash migration", () => {
           (column) => column.name === "prism_default_bot_face_thinking_frames"
         )
       );
+      assert.ok(
+        userColumns.some(
+          (column) => column.name === "prism_default_bot_face_mouth_speech_poses",
+        ),
+      );
       assert.ok(userColumns.some((column) => column.name === "prism_default_bot_audio_voice_profile"));
       assert.ok(userColumns.some((column) => column.name === "default_system_voice_name"));
       assert.ok(userColumns.some((column) => column.name === "default_elevenlabs_voice_id"));
@@ -621,6 +679,9 @@ describe("createDatabase bot export hash migration", () => {
       assert.ok(columns.some((column) => column.name === "face_mouth_font"));
       assert.ok(columns.some((column) => column.name === "face_mouth_character"));
       assert.ok(columns.some((column) => column.name === "face_mouth_animation"));
+      assert.ok(
+        columns.some((column) => column.name === "face_mouth_speech_poses"),
+      );
       assert.equal(
         columns.find((column) => column.name === "face_mouth_coffee_pucker")
           ?.dflt_value,

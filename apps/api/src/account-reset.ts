@@ -182,6 +182,7 @@ export function restoreFactoryDefaultsInDatabase(
           prism_default_bot_face_eye_animation = NULL,
           prism_default_bot_face_mouth_font = NULL,
           prism_default_bot_face_mouth_character = NULL,
+          prism_default_bot_face_mouth_speech_poses = NULL,
           prism_default_bot_face_mouth_animation = NULL,
           prism_default_bot_face_mouth_coffee_pucker = ?,
           prism_default_bot_face_font_weight = NULL,

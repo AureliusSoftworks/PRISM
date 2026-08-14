@@ -32,7 +32,7 @@ function createBotDb(): DatabaseSync {
 }
 
 describe("group-room wallpaper request validation", () => {
-  it("normalizes bounded group fields and 2-24 unique member IDs", () => {
+  it("normalizes bounded group fields and 2-100 unique member IDs", () => {
     const context = readGroupRoomWallpaperRequestContext({
       groupName: "  Night   Shift  ",
       groupDescription: "  Friends\nwho think after midnight. ",
@@ -46,9 +46,9 @@ describe("group-room wallpaper request validation", () => {
 
     const maximum = readGroupRoomWallpaperRequestContext({
       groupName: "Full room",
-      memberBotIds: Array.from({ length: 24 }, (_, index) => `bot-${index}`),
+      memberBotIds: Array.from({ length: 100 }, (_, index) => `bot-${index}`),
     });
-    assert.equal(maximum.memberBotIds.length, 24);
+    assert.equal(maximum.memberBotIds.length, 100);
 
     assert.deepEqual(
       readGroupRoomWallpaperRequestContext({
@@ -72,7 +72,7 @@ describe("group-room wallpaper request validation", () => {
           groupName: "Solo",
           memberBotIds: ["bot-a"],
         }),
-      /requires 2-24/u
+      /requires 2-100/u
     );
     assert.throws(
       () =>
@@ -112,9 +112,9 @@ describe("group-room wallpaper request validation", () => {
       () =>
         readGroupRoomWallpaperRequestContext({
           groupName: "Too full",
-          memberBotIds: Array.from({ length: 25 }, (_, index) => `bot-${index}`),
+          memberBotIds: Array.from({ length: 101 }, (_, index) => `bot-${index}`),
         }),
-      /requires 2-24/u
+      /requires 2-100/u
     );
   });
 });

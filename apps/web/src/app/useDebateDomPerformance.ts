@@ -12,6 +12,10 @@ import {
   type PrismSceneQuality,
   type PrismSceneTimingWindow,
 } from "./prismSceneRuntime";
+import {
+  mostRestrictivePrismSceneQuality,
+  sessionBotSceneQualityCeilingForVisibleCount,
+} from "./sessionBotVisualQuality";
 
 const DEBATE_DOM_SCENE_ID = "debate-live-dom";
 
@@ -47,8 +51,9 @@ export function useDebateDomPerformance(options: {
   graphicsQuality: GraphicsQuality;
   objectCount: number;
 }): PrismSceneQuality {
-  const ceiling = prismSceneQualityCeilingForGraphicsQuality(
-    options.graphicsQuality,
+  const ceiling = mostRestrictivePrismSceneQuality(
+    prismSceneQualityCeilingForGraphicsQuality(options.graphicsQuality),
+    sessionBotSceneQualityCeilingForVisibleCount(options.objectCount),
   );
   const controller = useMemo(() => {
     const retina =

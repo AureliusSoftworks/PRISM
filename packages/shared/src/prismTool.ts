@@ -38,6 +38,7 @@ import {
 } from "./botPower.ts";
 import {
   normalizeBotCrosstalkInterruptedSpeakerCue,
+  normalizePowerProjectedReactionCueV1,
   normalizeCrosstalkFloorOutcome,
   normalizeCrosstalkReclaimPlanV1,
   normalizeListenerReactionPlanV1,
@@ -1232,10 +1233,18 @@ export function normalizeCoffeeInterruptionEvent(
   const reactionText = normalizeCoffeeInterruptionText(row.reactionText);
   const interrupterCue =
     normalizeListenerReactionSpokenCue(row.interrupterCue) ?? undefined;
+  const publicInterrupterCue = normalizePowerProjectedReactionCueV1(
+    row.publicInterrupterCue,
+    row.interrupterCueSpeechEffect,
+  );
   const interruptedSpeakerCue =
     normalizeBotCrosstalkInterruptedSpeakerCue(
       row.interruptedSpeakerCue,
     ) ?? undefined;
+  const publicInterruptedSpeakerCue = normalizePowerProjectedReactionCueV1(
+    row.publicInterruptedSpeakerCue,
+    row.interruptedSpeakerCueSpeechEffect,
+  );
   const socialConsequences = Array.isArray(row.socialConsequences)
     ? row.socialConsequences
         .slice(0, 50)
@@ -1264,8 +1273,23 @@ export function normalizeCoffeeInterruptionEvent(
     ...(floorOutcome ? { floorOutcome } : {}),
     ...(reclaim ? { reclaim } : {}),
     ...(reactionText ? { reactionText } : {}),
-    ...(interrupterCue ? { interrupterCue } : {}),
-    ...(interruptedSpeakerCue ? { interruptedSpeakerCue } : {}),
+    ...(publicInterrupterCue
+      ? {
+          publicInterrupterCue,
+          interrupterCueSpeechEffect: "speech_obfuscation" as const,
+        }
+      : interrupterCue
+        ? { interrupterCue }
+        : {}),
+    ...(publicInterruptedSpeakerCue
+      ? {
+          publicInterruptedSpeakerCue,
+          interruptedSpeakerCueSpeechEffect:
+            "speech_obfuscation" as const,
+        }
+      : interruptedSpeakerCue
+        ? { interruptedSpeakerCue }
+        : {}),
     socialConsequences,
   };
 }

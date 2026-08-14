@@ -43,6 +43,7 @@ import {
   botPowerAvatarScaleModeV1,
   botPowerHasAvatarColorCycleV1,
   botPowerAvatarVisibilityModeV1,
+  applyBotPowerMumbledReactionPlanV1,
   applyBotPowerEchoResponseV1,
   botPowerCupRateMultiplierForBotV1,
   botPowerIsMutedV1,
@@ -96,6 +97,8 @@ import {
   swapBotcastStudioLayoutSeats,
   listenerReactionActionLabel,
   listenerReactionHasCrosstalkAudio,
+  listenerReactionInterruptedSpeakerTextV1,
+  listenerReactionSpokenTextV1,
   resolveListenerReactionAtMs,
   socialSilenceMessageIsMarkedV1,
   replayCameraTransitionModeV2,
@@ -347,6 +350,7 @@ import {
 } from "./signalReplayVideoFrame";
 import { REPLAY_RECORDING_CHANGED_EVENT } from "./ReplayRenderCoordinator";
 import { ReplayMouthPresentationCapture } from "./ReplayMouthPresentationCapture";
+import { sessionBotVisualQualityForVisibleCount } from "./sessionBotVisualQuality";
 import {
   BotPickerGrid,
   BotPickerTile,
@@ -436,6 +440,8 @@ export interface BotcastBotSummary {
   echoesAddressedSpeech?: boolean;
   voiceGainMultiplier?: number;
   voicePresence?: BotPowerVoicePresenceMode | null;
+  mumbling?: boolean;
+  pronunciationMapPoint?: { x: number; y: number } | null;
   personaTemperament: SignalPersonaTemperament;
   producerGuest?: boolean;
   /** Actual mirror state; holder materials remain authoritative. */
@@ -601,7 +607,7 @@ function signalInterruptedSpeakerRetortDelayMs(
   durationMs: number,
 ): number {
   if (
-    !plan.interruptedSpeakerCue ||
+    !listenerReactionInterruptedSpeakerTextV1(plan) ||
     plan.interruptedSpeakerCuePlayback !== "crosstalk"
   ) {
     return INTERRUPTED_SPEAKER_RETORT_PAUSE_MS;
@@ -1715,7 +1721,7 @@ function avatarFallback(bot: BotcastBotSummary): ReactNode {
   );
 }
 
-function SignalShowLogo({
+export function SignalShowLogo({
   show,
   compact = false,
 }: {
@@ -2100,6 +2106,7 @@ export function BotcastExperience({
   const [signalGridHueLensCenter, setSignalGridHueLensCenter] = useState<
     number | null
   >(null);
+  const signalBotPickerViewportRef = useRef<HTMLDivElement>(null);
   const [topicDraft, setTopicDraft] = useState("");
   const [producerBriefDraft, setProducerBriefDraft] = useState("");
   const [producerGuestContextDraft, setProducerGuestContextDraft] =
@@ -2126,18 +2133,28 @@ export function BotcastExperience({
   const [playbackModeDraft, setPlaybackModeDraft] = useState<"live" | "watch">(
     "live",
   );
+  const [watchAutoStartDraft, setWatchAutoStartDraft] = useState(false);
   const [watchBakeLabel, setWatchBakeLabel] = useState<string | null>(null);
   const [watchBakeArtifact, setWatchBakeArtifact] =
     useState<LiveBakeArtifactV1 | null>(null);
   const [watchBakeStartedAt, setWatchBakeStartedAt] = useState<string | null>(
     null,
   );
+  const [watchPlaybackReady, setWatchPlaybackReady] = useState(false);
+  const watchPlaybackStartResolveRef = useRef<(() => void) | null>(null);
   const [episodeSetupLoadingId, setEpisodeSetupLoadingId] = useState<
     string | null
   >(null);
   const orchestrationLaunchHandledTokenRef = useRef<string | null>(null);
   const orchestrationLaunchStagedTokenRef = useRef<string | null>(null);
   const startEpisodeRef = useRef<() => Promise<void>>(async () => undefined);
+
+  useLayoutEffect(() => {
+    const grid = signalBotPickerViewportRef.current?.querySelector<HTMLElement>(
+      '[role="radiogroup"]',
+    );
+    if (grid) grid.scrollTop = 0;
+  }, [guestPickerGroupId, guestPickerSearch, signalGridHueLensCenter]);
   const [askAboutDraft, setAskAboutDraft] = useState("");
   const [queuedProducerCue, setQueuedProducerCue] =
     useState<BotcastProducerCue | null>(null);
@@ -2233,6 +2250,7 @@ export function BotcastExperience({
     null,
   );
   const [studioLayoutEditorOpen, setStudioLayoutEditorOpen] = useState(false);
+  const [studioFineTuningOpen, setStudioFineTuningOpen] = useState(false);
   const [studioLayoutPreviewTheme, setStudioLayoutPreviewTheme] = useState<
     "light" | "dark"
   >(theme);
@@ -2973,6 +2991,9 @@ export function BotcastExperience({
     setAutoRun(false);
     setBusy(false);
     setEpisodePreRoll(null);
+    setWatchPlaybackReady(false);
+    watchPlaybackStartResolveRef.current?.();
+    watchPlaybackStartResolveRef.current = null;
     assignSignalModelWarmup(null);
     signalModelWarmupVisibleRef.current = false;
     stopEpisodeOutro();
@@ -3145,6 +3166,7 @@ export function BotcastExperience({
     setWatchBakeLabel(null);
     setWatchBakeArtifact(null);
     setWatchBakeStartedAt(null);
+    setWatchPlaybackReady(false);
     setBusy(false);
   };
 
@@ -3563,7 +3585,7 @@ export function BotcastExperience({
       originalWordCount > 0
         ? Math.max(0.3, Math.min(0.9, heardWordCount / originalWordCount))
         : 0.6;
-    return {
+    const rawPlan: ListenerReactionPlanV1 = {
       v: 1,
       name: "listenerReaction",
       speakerBotId: activeGuestMessage.botId,
@@ -3583,7 +3605,18 @@ export function BotcastExperience({
       seed,
       cameraCutEligible: true,
     };
+    const interruptedBot = botsById.get(activeGuestMessage.botId);
+    return applyBotPowerMumbledReactionPlanV1(rawPlan, {
+      interruptedSpeaker: interruptedBot && interruptedBot.mumbling
+        ? {
+            pronunciationMapPoint:
+              interruptedBot.pronunciationMapPoint ?? null,
+            variationSeed: `${seed}:interrupted-speaker`,
+          }
+        : null,
+    });
   }, [
+    botsById,
     episode,
     hostBot,
     liveSpeech,
@@ -3632,6 +3665,7 @@ export function BotcastExperience({
     setStudioLayoutPreviewGuestId(previewGuestId ?? "");
     setStudioLayoutPreviewTheme(theme);
     setStudioCameraPreviewShot("wide");
+    setStudioFineTuningOpen(false);
     setStudioLayoutEditorOpen(true);
   };
   const hostShowAccent = selectedShow
@@ -5566,6 +5600,8 @@ export function BotcastExperience({
     stopIntroPreview();
     onPrepareUtterance?.();
     setWatchBakeLabel(null);
+    setWatchPlaybackReady(false);
+    watchPlaybackStartResolveRef.current = null;
     const { controller, runId } = beginEpisodeOperation();
     const selectedModelOption = episodeModelDraft
       ? (modelOptions.find((option) => option.id === episodeModelDraft) ?? null)
@@ -5877,27 +5913,84 @@ export function BotcastExperience({
         // card during intro and truncate faithful capture to a few seconds.
         suppressCompletedOutroFallbackRef.current = true;
         try {
+          let presentationEpisode = bakedEpisode;
+          let presentationArtifact = artifact;
           setEpisode(bakedEpisode);
           setAutoRun(false);
           await releaseSignalModelWarmup(bakedEpisode.id);
           if (!episodeOperationIsCurrent(controller, runId)) return;
           setWatchBakeLabel(null);
-          await beginEpisodeIntroBookend(
-            {
-              ...preRoll,
-              guestName:
-                bakedEpisode.guestName ?? guest?.name ?? preRoll.guestName,
-              topic: bakedEpisode.topic.trim() || preRoll.topic,
-              phase: "preparing",
-            },
-            bakedEpisode.id,
-          );
+          const watchBookend: SignalEpisodePreRoll = {
+            ...preRoll,
+            guestName:
+              bakedEpisode.guestName ?? guest?.name ?? preRoll.guestName,
+            topic: bakedEpisode.topic.trim() || preRoll.topic,
+            phase: "preparing",
+          };
+          if (!watchAutoStartDraft) {
+            const watchPlaybackStart = new Promise<void>((resolve) => {
+              watchPlaybackStartResolveRef.current = resolve;
+            });
+            // The title card is a true ready hold. Do not start its audio or
+            // faithful-master clock until the spectator chooses Start show.
+            setEpisodePreRoll(watchBookend);
+            setWatchPlaybackReady(true);
+            while (episodeOperationIsCurrent(controller, runId)) {
+              if (
+                presentationEpisode.status === "completed" ||
+                presentationArtifact.status === "ready"
+              ) {
+                await watchPlaybackStart;
+                break;
+              }
+              const nextAction = await Promise.race([
+                watchPlaybackStart.then(() => "start" as const),
+                new Promise<"poll">((resolve) =>
+                  window.setTimeout(
+                    () => resolve("poll"),
+                    LIVE_BAKE_POLL_INTERVAL_MS,
+                  ),
+                ),
+              ]);
+              if (nextAction === "start") break;
+              if (!episodeOperationIsCurrent(controller, runId)) return;
+              const polled = await request<{
+                episode: BotcastEpisode;
+                liveBake: LiveBakeArtifactV1;
+                baking?: boolean;
+              }>(
+                `/api/botcast/episodes/${encodeURIComponent(bakedEpisode.id)}/bake`,
+                {
+                  method: "POST",
+                  signal: controller.signal,
+                  body: JSON.stringify({ theme }),
+                },
+              );
+              presentationEpisode = polled.episode;
+              presentationArtifact = polled.liveBake;
+              latestCaptureEpisode = presentationEpisode;
+              openingMessageReceived =
+                openingMessageReceived || presentationEpisode.messages.length > 0;
+              setEpisode(presentationEpisode);
+              setWatchBakeArtifact(presentationArtifact);
+              if (presentationArtifact.status === "cancelled") {
+                throw new DOMException("Bake cancelled", "AbortError");
+              }
+              if (presentationArtifact.status === "failed") {
+                throw new Error(
+                  presentationArtifact.error || "Signal bake failed.",
+                );
+              }
+            }
+            watchPlaybackStartResolveRef.current = null;
+            setWatchPlaybackReady(false);
+            if (!episodeOperationIsCurrent(controller, runId)) return;
+          }
+          await beginEpisodeIntroBookend(watchBookend, bakedEpisode.id);
           await Promise.all([introPlayback.finished, visualMinimum]);
           if (!episodeOperationIsCurrent(controller, runId)) return;
           setEpisodePreRoll(null);
           const presentedWatchMessageIds = new Set<string>();
-          let presentationEpisode = bakedEpisode;
-          let presentationArtifact = artifact;
           while (episodeOperationIsCurrent(controller, runId)) {
             const bufferedMessages = presentationEpisode.messages.filter(
               (message) => !presentedWatchMessageIds.has(message.id),
@@ -6038,6 +6131,8 @@ export function BotcastExperience({
         stopSignalIntroAudio();
         setWatchBakeLabel(null);
         setEpisodePreRoll(null);
+        setWatchPlaybackReady(false);
+        watchPlaybackStartResolveRef.current = null;
         setAutoRun(false);
         if (unstartedEpisodeId && signalModelWarmupRef.current) {
           await releaseSignalModelWarmup(unstartedEpisodeId);
@@ -6068,6 +6163,8 @@ export function BotcastExperience({
         preRollGateResolveRef.current = null;
         episodeOperationAbortRef.current = null;
         setWatchBakeLabel(null);
+        setWatchPlaybackReady(false);
+        watchPlaybackStartResolveRef.current = null;
         setBusy(false);
       }
     }
@@ -6149,6 +6246,13 @@ export function BotcastExperience({
     preRollGateResolveRef.current?.();
     preRollGateResolveRef.current = null;
     stopSignalIntroAudio();
+  };
+
+  const startBufferedWatch = (): void => {
+    const resolve = watchPlaybackStartResolveRef.current;
+    if (!watchPlaybackReady || !resolve) return;
+    watchPlaybackStartResolveRef.current = null;
+    resolve();
   };
 
   const cacheListenerReactionPlan = useCallback(
@@ -6378,13 +6482,13 @@ export function BotcastExperience({
                 plan.listenerBotId,
                 plan.messageId,
                 "reaction",
-                plan.spokenCue ?? "",
+                listenerReactionSpokenTextV1(plan) ?? "",
               ),
               interrupted: createSignalReactionVoiceLifecycle(
                 plan.speakerBotId,
                 plan.messageId,
                 "crosstalk",
-                plan.interruptedSpeakerCue ?? "",
+                listenerReactionInterruptedSpeakerTextV1(plan) ?? "",
               ),
               listenerStartAtPerformanceMs:
                 performance.now() + Math.max(0, atMs - elapsedMs),
@@ -6469,7 +6573,7 @@ export function BotcastExperience({
                 plan.listenerBotId,
                 `${plan.messageId}:mute:${index}`,
                 beat.kind === "interrupt" ? "crosstalk" : "reaction",
-                plan.spokenCue ?? "",
+                listenerReactionSpokenTextV1(plan) ?? "",
               ),
               interrupted: createSignalReactionVoiceLifecycle(
                 plan.speakerBotId,
@@ -6532,13 +6636,13 @@ export function BotcastExperience({
                 plan.listenerBotId,
                 plan.messageId,
                 "reaction",
-                plan.spokenCue ?? "",
+                listenerReactionSpokenTextV1(plan) ?? "",
               ),
               interrupted: createSignalReactionVoiceLifecycle(
                 plan.speakerBotId,
                 plan.messageId,
                 "crosstalk",
-                plan.interruptedSpeakerCue ?? "",
+                listenerReactionInterruptedSpeakerTextV1(plan) ?? "",
               ),
               ...(botsById.get(plan.speakerBotId) && episode
                 ? {
@@ -6603,7 +6707,7 @@ export function BotcastExperience({
                 plan.listenerBotId,
                 `${plan.messageId}:mute:${index}`,
                 beat.kind === "interrupt" ? "crosstalk" : "reaction",
-                plan.spokenCue ?? "",
+                listenerReactionSpokenTextV1(plan) ?? "",
               ),
               interrupted: createSignalReactionVoiceLifecycle(
                 plan.speakerBotId,
@@ -7338,14 +7442,17 @@ export function BotcastExperience({
                             interruptionCrosstalkPlan.listenerBotId,
                             interruptionCrosstalkPlan.messageId,
                             "reaction",
-                            interruptionCrosstalkPlan.spokenCue ?? "",
+                            listenerReactionSpokenTextV1(
+                              interruptionCrosstalkPlan,
+                            ) ?? "",
                           ),
                           interrupted: createSignalReactionVoiceLifecycle(
                             interruptionCrosstalkPlan.speakerBotId,
                             interruptionCrosstalkPlan.messageId,
                             "crosstalk",
-                            interruptionCrosstalkPlan.interruptedSpeakerCue ??
-                              "",
+                            listenerReactionInterruptedSpeakerTextV1(
+                              interruptionCrosstalkPlan,
+                            ) ?? "",
                           ),
                           ...(interruptedBot && interruptedMessage
                             ? {
@@ -8001,7 +8108,14 @@ export function BotcastExperience({
           ? {
               messageId: activeGuestMessage.id,
               spokenContent,
-              ...(nextHostInterruptionCrosstalkPlan?.interruptedSpeakerCue
+              ...(nextHostInterruptionCrosstalkPlan?.publicInterruptedSpeakerCue
+                ? {
+                    publicInterruptedSpeakerCue:
+                      nextHostInterruptionCrosstalkPlan.publicInterruptedSpeakerCue,
+                    interruptedSpeakerCueSpeechEffect:
+                      "speech_obfuscation" as const,
+                  }
+                : nextHostInterruptionCrosstalkPlan?.interruptedSpeakerCue
                 ? {
                     interruptedSpeakerCue:
                       nextHostInterruptionCrosstalkPlan.interruptedSpeakerCue,
@@ -9165,6 +9279,11 @@ export function BotcastExperience({
       !guestDeparted && audienceParticipants?.guest.visible !== false;
     const guestHiddenFromAudience = !guestDeparted && !guestVisibleToAudience;
     const guestPresentOnStage = guestVisibleToAudience;
+    const signalStageVisibleBotCount =
+      Number(Boolean(args.host && hostVisibleToAudience)) +
+      Number(Boolean(args.guest && guestPresentOnStage));
+    const signalStageBotVisualQuality =
+      sessionBotVisualQualityForVisibleCount(signalStageVisibleBotCount);
     const pendingCrosstalkReclaim = botcastPendingCrosstalkReclaimV1(
       args.currentEpisode.messages,
     );
@@ -9425,7 +9544,11 @@ export function BotcastExperience({
         return signalMuteReactionActionLabel(muteReactionBeat.action);
       }
       return (
-        (voiceMuted ? null : listenerReactionPlan?.spokenCue) ??
+        (voiceMuted && listenerReactionPlan
+          ? null
+          : listenerReactionPlan
+            ? listenerReactionSpokenTextV1(listenerReactionPlan)
+            : null) ??
         (listenerReactionPlan
           ? listenerReactionActionLabel(listenerReactionPlan.visualAction)
           : null)
@@ -9871,6 +9994,8 @@ export function BotcastExperience({
         data-shot={args.shot}
         data-camera-transitions={stageCameraTransitionMode}
         data-replay={args.replay ? "true" : undefined}
+        data-session-bot-visual-quality={signalStageBotVisualQuality}
+        data-session-visible-bot-count={signalStageVisibleBotCount}
         data-guest-presence={args.currentEpisode.guestPresenceMode}
         data-audience-guest-visible={guestVisibleToAudience ? "true" : "false"}
         data-signal-power-pressure={socialPressure?.strength}
@@ -10398,6 +10523,7 @@ export function BotcastExperience({
         />
         {visibleBots.length > 0 ? (
           <div
+            ref={signalBotPickerViewportRef}
             className={styles.signalBotPickerGridWithHueLens}
             data-signal-grid-hue-lens="true"
           >
@@ -10908,11 +11034,11 @@ export function BotcastExperience({
         >
           <header className={styles.stageLayoutModalHeader}>
             <div>
-              <span className={styles.eyebrow}>Stage placement</span>
+              <span className={styles.eyebrow}>Rehearsal mode</span>
               <h2 id="signal-stage-layout-title">
-                Place the {show.name} studio
+                Rehearse {show.name}
               </h2>
-              <p>Set the cast, cups, voices, and room mix before air.</p>
+              <p>Directly place the cast and props. Everything autosaves.</p>
             </div>
             <button
               type="button"
@@ -10926,13 +11052,15 @@ export function BotcastExperience({
             </button>
           </header>
           <div className={styles.stageLayoutModalBody}>
-            <div className={styles.stageLayoutEditor}>
+            <div
+              className={styles.stageLayoutEditor}
+              data-fine-tuning={studioFineTuningOpen ? "true" : "false"}
+              data-tutorial-target="signal-studio-rehearsal"
+            >
               <div className={styles.stageLayoutEditorHeader}>
                 <p>
-                  Drag each bot{studioHasCoffeeCup ? " and cup" : ""} onto this
-                  show’s furniture, then drag each floor glow vertically to meet
-                  the chair or sideways to resize it. Today’s glow size is the
-                  maximum. Arrow keys make fine adjustments.
+                  Drag each bot{studioHasCoffeeCup ? ", cup," : ""} and floor
+                  glow into place. Arrow keys make fine adjustments.
                 </p>
                 <div>
                   <div
@@ -10966,33 +11094,57 @@ export function BotcastExperience({
                   </span>
                   <button
                     type="button"
-                    onClick={() => swapStudioLayoutSeats(show)}
+                    className={styles.stageFineTuningToggle}
+                    aria-expanded={studioFineTuningOpen}
+                    aria-controls="signal-rehearsal-soundcheck signal-rehearsal-voices signal-rehearsal-camera signal-rehearsal-screen signal-rehearsal-atmosphere"
+                    onClick={() =>
+                      setStudioFineTuningOpen((current) => !current)
+                    }
                   >
-                    Swap seats
+                    {studioFineTuningOpen ? "Hide fine tuning" : "Fine tuning"}
                   </button>
-                  <button type="button" onClick={() => resetStudioLayout(show)}>
-                    Reset positions
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.stageSoundcheckButton}
-                    data-active={studioSoundcheckRunning ? "true" : undefined}
-                    onClick={() => {
-                      if (studioSoundcheckRunning) {
-                        stopStudioSoundcheck();
-                      } else if (guest) {
-                        void runStudioSoundcheck(show, host, guest);
-                      }
-                    }}
-                    disabled={!guest || !introAudioEnabled || !onUtterance}
-                    aria-pressed={studioSoundcheckRunning}
-                  >
-                    {studioSoundcheckRunning ? "■ Stop check" : "▶ Test voices"}
-                  </button>
+                  {studioFineTuningOpen ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => swapStudioLayoutSeats(show)}
+                      >
+                        Swap seats
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => resetStudioLayout(show)}
+                      >
+                        Reset positions
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.stageSoundcheckButton}
+                        data-active={
+                          studioSoundcheckRunning ? "true" : undefined
+                        }
+                        onClick={() => {
+                          if (studioSoundcheckRunning) {
+                            stopStudioSoundcheck();
+                          } else if (guest) {
+                            void runStudioSoundcheck(show, host, guest);
+                          }
+                        }}
+                        disabled={!guest || !introAudioEnabled || !onUtterance}
+                        aria-pressed={studioSoundcheckRunning}
+                      >
+                        {studioSoundcheckRunning
+                          ? "■ Stop check"
+                          : "▶ Test voices"}
+                      </button>
+                    </>
+                  ) : null}
                 </div>
               </div>
               <div
                 className={styles.stageSoundcheckStatus}
+                id="signal-rehearsal-soundcheck"
+                hidden={!studioFineTuningOpen}
                 data-active={studioSoundcheckCaption ? "true" : undefined}
                 aria-live="polite"
               >
@@ -11010,7 +11162,9 @@ export function BotcastExperience({
                 )}
               </div>
               <section
+                id="signal-rehearsal-voices"
                 className={styles.stageVoiceMixer}
+                hidden={!studioFineTuningOpen}
                 aria-label="Signal voice level mixer"
               >
                 <header>
@@ -11035,7 +11189,7 @@ export function BotcastExperience({
                     stageAtmosphere.imageUrl ? "image" : "fallback"
                   }
                   style={stageStyle}
-                  aria-label={`Align the ${show.name} studio stage`}
+                  aria-label={`Rehearse the ${show.name} studio stage`}
                 >
                   <div className={styles.stageScene}>
                     <div className={styles.atmosphere} aria-hidden="true">
@@ -11102,6 +11256,7 @@ export function BotcastExperience({
                   </div>
                 </section>
                 <section
+                  id="signal-rehearsal-camera"
                   className={styles.stageCameraTuner}
                   aria-label="Show camera alignment"
                 >
@@ -11199,7 +11354,9 @@ export function BotcastExperience({
                 </section>
               </div>
               <section
+                id="signal-rehearsal-screen"
                 className={styles.stageScreenTreatment}
+                hidden={!studioFineTuningOpen}
                 aria-label="Signal screen treatment"
               >
                 <header>
@@ -11338,7 +11495,13 @@ export function BotcastExperience({
                   </small>
                 </div>
               </section>
-              {renderAtmosphereMixer(show)}
+              <div
+                id="signal-rehearsal-atmosphere"
+                className={styles.stageFineTuningAtmosphere}
+                hidden={!studioFineTuningOpen}
+              >
+                {renderAtmosphereMixer(show)}
+              </div>
             </div>
           </div>
         </section>
@@ -11576,7 +11739,7 @@ export function BotcastExperience({
               data-tutorial-target="botcast-stage-layout"
               onClick={openStudioLayoutEditor}
             >
-              Align stage
+              Rehearse stage
             </button>
           </div>
         </div>
@@ -11991,6 +12154,26 @@ export function BotcastExperience({
                 : `Target · about ${episodeDurationDraft} minutes`}
             </small>
           </label>
+          {playbackModeDraft === "watch" && !producerGuestSelected ? (
+            <label className={styles.watchAutoStartControl}>
+              <input
+                type="checkbox"
+                checked={watchAutoStartDraft}
+                onChange={(event) =>
+                  setWatchAutoStartDraft(event.currentTarget.checked)
+                }
+                disabled={busy}
+              />
+              <span>
+                <strong>Start automatically</strong>
+                <small>
+                  {watchAutoStartDraft
+                    ? "Play as soon as the opening runway is ready"
+                    : "Wait on the title card while more bakes ahead"}
+                </small>
+              </span>
+            </label>
+          ) : null}
           <button
             type="button"
             className={styles.goLiveButton}
@@ -12002,7 +12185,9 @@ export function BotcastExperience({
             }
           >
             {playbackModeDraft === "watch" && !producerGuestSelected
-              ? "Watch show"
+              ? watchAutoStartDraft
+                ? "Watch show"
+                : "Prepare show"
               : "Begin episode"}
           </button>
         </div>
@@ -12435,7 +12620,11 @@ export function BotcastExperience({
       return;
     }
     const now = Date.now();
-    if (livePresentedThinkingBot || signalVoicePreparationPending) {
+    if (
+      watchPlaybackReady ||
+      livePresentedThinkingBot ||
+      signalVoicePreparationPending
+    ) {
       if (signalAirTimeFreezeStartedAtRef.current === null) {
         signalAirTimeFreezeStartedAtRef.current = now;
       }
@@ -12449,6 +12638,7 @@ export function BotcastExperience({
   }, [
     episode,
     signalCameraPushMessageId,
+    watchPlaybackReady,
     livePresentedThinkingBot,
     signalVoicePreparationPending,
     signalEphemeralSpeechByBotId,
@@ -13130,6 +13320,7 @@ export function BotcastExperience({
           data-phase={episodePreRoll.phase}
           data-kind="intro"
           data-source={episodePreRoll.source}
+          data-watch-ready={watchPlaybackReady ? "true" : undefined}
             style={
               { "--botcast-accent": selectedShow.accentColor } as CSSProperties
             }
@@ -13158,14 +13349,31 @@ export function BotcastExperience({
                 ))}
             </div>
             <small>
-              {episodePreRoll.source === "elevenlabs"
-                ? "Original ElevenLabs show ident"
-                : "Signal Synth · generated locally"}
+              {watchPlaybackReady
+                ? watchBakeArtifact?.status === "ready" ||
+                  episode?.status === "completed"
+                  ? "Fully buffered · ready when you are"
+                  : `${liveBakeStatusCopy(watchBakeArtifact) ?? "Opening buffered"} · buffering ahead`
+                : episodePreRoll.source === "elevenlabs"
+                  ? "Original ElevenLabs show ident"
+                  : "Signal Synth · generated locally"}
             </small>
+            {watchPlaybackReady ? (
+              <button
+                type="button"
+                className={styles.watchStartButton}
+                data-action="start-watch"
+                onClick={startBufferedWatch}
+              >
+                Start show
+              </button>
+            ) : null}
           </div>
-            <button type="button" onClick={skipEpisodePreRoll}>
-              Skip intro
-            </button>
+            {!watchPlaybackReady ? (
+              <button type="button" onClick={skipEpisodePreRoll}>
+                Skip intro
+              </button>
+            ) : null}
         </section>
       ) : null}
       {episodeOutro && selectedShow ? (

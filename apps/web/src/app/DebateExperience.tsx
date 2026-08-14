@@ -417,7 +417,9 @@ import {
   DEBATE_STAGE_VOICE_LEVEL_MAX,
   DEBATE_STAGE_VOICE_LEVEL_STEP,
   DEFAULT_DEBATE_STAGE_ALIGNMENT,
+  applyDebateStageDirectionPreset,
   copyDebateStageAlignment,
+  debateStageDirectionPresetForAlignment,
   debateStageEvidenceViewForCamera,
   debateStageAlignmentOffset,
   debateStageAlignmentStyle,
@@ -441,6 +443,7 @@ import {
   type DebateStageAlignmentRole,
   type DebateStageAlignmentTarget,
   type DebateStageAlignmentV6,
+  type DebateStageDirectionPreset,
   type DebateStageEvidenceKind,
   type DebateStageEvidenceShadowV1,
   type DebateStageEvidenceView,
@@ -452,7 +455,6 @@ import {
   readDebateLiveCaptionsEnabled,
   writeDebateLiveCaptionsEnabled,
 } from "./debateLiveCaptionsPreference";
-import { prismBranchIsDev } from "./prismDevGating";
 import {
   BotPickerGrid,
   BotPickerTile,
@@ -696,6 +698,9 @@ export interface DebateExperienceProps {
   ) => ReactNode;
   onExit: () => void;
   onResetTutorial?: () => void;
+  /** Opens the developer-only precision rig from Help > Diagnostics Labs. */
+  alignmentLabLaunchToken?: number;
+  onAlignmentLabLaunchConsumed?: () => void;
   onPrepareUtterance?: (utterance: DebateUtterance) => Promise<void>;
   onResponseCueGeneration?: (args: {
     botId: string;
@@ -910,10 +915,6 @@ function debateDebriefAccent(
     session.jury.jurors.find((juror) => juror.id === bot.id)?.color ?? "#9c8cff"
   );
 }
-
-const DEBATE_STAGE_ALIGNMENT_ENABLED = prismBranchIsDev(
-  process.env.NEXT_PUBLIC_PRISM_BRANCH,
-);
 
 const DEBATE_GALLERY_COLORS = [
   "#ff5f8f",
@@ -4279,16 +4280,17 @@ export function DebateExperience(
       onPrewarmResponseCue?.(botId);
     }
   }, [activeSession, onPrewarmResponseCue]);
+  const debateVisibleBotCount =
+    liveAudienceBots.length +
+    (activeSession?.jury.enabled ? activeSession.jury.jurors.length : 0) +
+    3;
   const debateMaterialQuality = useDebateDomPerformance({
     active:
       view === "live" &&
       activeSession !== null &&
       activeSession.status !== "paused",
     graphicsQuality: props.graphicsQuality,
-    objectCount:
-      liveAudienceBots.length +
-      (activeSession?.jury.enabled ? activeSession.jury.jurors.length : 0) +
-      3,
+    objectCount: debateVisibleBotCount,
   });
   const presentationSuspended = usePrismPresentationSuspended();
   const appAwayFromUser = usePrismAppAwayFromUser();
@@ -4988,6 +4990,7 @@ export function DebateExperience(
     useState<DebateStageAlignmentV6>(() =>
       copyDebateStageAlignment(DEFAULT_DEBATE_STAGE_ALIGNMENT),
     );
+  const [stageDirectionOpen, setStageDirectionOpen] = useState(false);
   const [stageAlignmentOpen, setStageAlignmentOpen] = useState(false);
   const [stageAlignmentPreviewCastIds, setStageAlignmentPreviewCastIds] =
     useState<DebateCastSelection | null>(null);
@@ -5023,6 +5026,8 @@ export function DebateExperience(
       moderator: "bot",
       against: "bot",
     });
+  const alignmentLabLaunchTokenRef = useRef(0);
+  const openStageAlignmentRef = useRef<() => void>(() => undefined);
   const [stageAlignmentDraggingTarget, setStageAlignmentDraggingTarget] =
     useState<DebateStageAlignmentTarget | null>(null);
   const [presentationEventId, setPresentationEventId] = useState<string | null>(
@@ -5871,8 +5876,6 @@ export function DebateExperience(
     const audible = bots.filter((bot) => !bot.hardMuted);
     return audible.length >= 3 ? audible : bots;
   }, [bots]);
-  const stageAlignmentCanOpen =
-    new Set(stageAlignmentCastCandidates.map((bot) => bot.id)).size >= 3;
   const stageAlignmentPreviewCast = useMemo(() => {
     if (!stageAlignmentPreviewCastIds) return null;
     const moderator = botById.get(stageAlignmentPreviewCastIds.moderator);
@@ -7110,7 +7113,6 @@ export function DebateExperience(
   };
 
   const openStageAlignment = (): void => {
-    if (!DEBATE_STAGE_ALIGNMENT_ENABLED) return;
     if (!randomizeStageAlignmentPreviewCast()) return;
     setStageAlignmentDraft(copyDebateStageAlignment(stageAlignment));
     setStageAlignmentPreviewCamera("wide");
@@ -7132,6 +7134,33 @@ export function DebateExperience(
     setStageAlignmentDraggingTarget(null);
     stageAlignmentDragRef.current = null;
     setStageAlignmentOpen(true);
+  };
+  openStageAlignmentRef.current = openStageAlignment;
+
+  useEffect(() => {
+    const token = props.alignmentLabLaunchToken ?? 0;
+    if (token <= 0 || token === alignmentLabLaunchTokenRef.current) return;
+    alignmentLabLaunchTokenRef.current = token;
+    props.onAlignmentLabLaunchConsumed?.();
+    setStageDirectionOpen(false);
+    openStageAlignmentRef.current();
+  }, [props.alignmentLabLaunchToken, props.onAlignmentLabLaunchConsumed]);
+
+  const applyStageDirectionPreset = (
+    preset: DebateStageDirectionPreset,
+  ): void => {
+    const next = applyDebateStageDirectionPreset(stageAlignment, preset);
+    try {
+      writeDebateStageAlignment(
+        window.localStorage,
+        props.storageScopeId,
+        next,
+      );
+      setStageAlignment(next);
+      setStageAlignmentDraft(copyDebateStageAlignment(next));
+    } catch {
+      setError("Debate stage direction could not be saved on this device.");
+    }
   };
 
   const cancelStageAlignment = (): void => {
@@ -15788,23 +15817,17 @@ export function DebateExperience(
             </small>
             <i aria-hidden="true">›</i>
           </button>
-          {DEBATE_STAGE_ALIGNMENT_ENABLED ? (
-            <button
-              type="button"
-              className={styles.studioUtilityButton}
-              onClick={openStageAlignment}
-              disabled={!stageAlignmentCanOpen}
-              aria-label="Align stage"
-              title={
-                stageAlignmentCanOpen
-                  ? "Stage geometry for this account and device."
-                  : "Create at least three Library bots to calibrate the Debate stage."
-              }
-            >
-              <span aria-hidden="true">⌖</span>
-              Stage geometry
-            </button>
-          ) : null}
+          <button
+            type="button"
+            className={styles.studioUtilityButton}
+            data-tutorial-target="debate-stage-direction"
+            onClick={() => setStageDirectionOpen(true)}
+            aria-label="Open stage direction"
+            title="Choose the visual composition of the Forum."
+          >
+            <span aria-hidden="true">◇</span>
+            Stage direction
+          </button>
           <div
             className={styles.studioNavStatus}
             data-ready={debateCanStart ? "true" : undefined}
@@ -15933,7 +15956,6 @@ export function DebateExperience(
           </button>
         </div>
       ) : null}
-      {renderStageAlignmentModal(null)}
     </main>
   );
 
@@ -20756,10 +20778,98 @@ export function DebateExperience(
     );
   };
 
+  const renderStageDirectionPanel = (): React.JSX.Element | null => {
+    if (!stageDirectionOpen) return null;
+    const activePreset = debateStageDirectionPresetForAlignment(stageAlignment);
+    const options: readonly {
+      id: DebateStageDirectionPreset;
+      label: string;
+      description: string;
+      glyph: string;
+    }[] = [
+      {
+        id: "close",
+        label: "Close conversation",
+        description: "Draw the advocates inward for a more intimate exchange.",
+        glyph: "◁◆▷",
+      },
+      {
+        id: "balanced",
+        label: "Balanced forum",
+        description: "Keep the chamber clear, symmetrical, and easy to follow.",
+        glyph: "◇ ◆ ◇",
+      },
+      {
+        id: "grand",
+        label: "Grand chamber",
+        description: "Open the room and give the Moderator more presence.",
+        glyph: "◁  ▲  ▷",
+      },
+    ];
+    return (
+      <div
+        className={styles.stageDirectionBackdrop}
+        data-theme={props.theme}
+        onPointerDown={(event) => {
+          if (event.currentTarget === event.target) setStageDirectionOpen(false);
+        }}
+      >
+        <section
+          className={styles.stageDirectionPanel}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="debate-stage-direction-title"
+          data-debate-stage-direction="true"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setStageDirectionOpen(false);
+          }}
+        >
+          <header>
+            <div>
+              <span className={styles.eyebrow}>Stage direction</span>
+              <h2 id="debate-stage-direction-title">Shape the chamber</h2>
+              <p>Choose the feeling of the room. Changes save immediately.</p>
+            </div>
+            <button
+              type="button"
+              className={styles.stageDirectionClose}
+              onClick={() => setStageDirectionOpen(false)}
+              aria-label="Close stage direction"
+            >
+              ×
+            </button>
+          </header>
+          <div className={styles.stageDirectionOptions}>
+            {options.map((option, index) => (
+              <button
+                type="button"
+                key={option.id}
+                autoFocus={index === 0}
+                aria-pressed={activePreset === option.id}
+                data-selected={activePreset === option.id ? "true" : undefined}
+                onClick={() => applyStageDirectionPreset(option.id)}
+              >
+                <span aria-hidden="true">{option.glyph}</span>
+                <strong>{option.label}</strong>
+                <small>{option.description}</small>
+              </button>
+            ))}
+          </div>
+          {activePreset === null ? (
+            <p className={styles.stageDirectionCustomNote} role="status">
+              Custom Alignment Lab geometry is active. Choose a direction to
+              replace only the Wide composition.
+            </p>
+          ) : null}
+        </section>
+      </div>
+    );
+  };
+
   const renderStageAlignmentModal = (
     session: DebateSessionV1 | null,
   ): React.JSX.Element | null => {
-    if (!DEBATE_STAGE_ALIGNMENT_ENABLED || !stageAlignmentOpen) return null;
+    if (!stageAlignmentOpen) return null;
     if (!stageAlignmentPreviewCast) return null;
     const alignmentMotion = session?.motion ?? motion;
     const forSourceBot = stageAlignmentPreviewCast.forAdvocate;
@@ -20993,13 +21103,13 @@ export function DebateExperience(
           >
             <header className={styles.alignmentModalHeader}>
               <div>
-                <span className={styles.eyebrow}>Stage placement</span>
+                <span className={styles.eyebrow}>Developer tool</span>
                 <h2 id="debate-stage-alignment-title">
-                  Align the Prismatic Forum
+                  Debate Alignment Lab
                 </h2>
                 <p>
-                  Calibrate the Forum with a fresh random Library cast. Shuffle
-                  the cast to check varied silhouettes and voices.
+                  Precision camera, prop, light, and audio calibration. Shuffle
+                  the cast to test varied silhouettes and voices.
                 </p>
               </div>
               <div>
@@ -22209,13 +22319,15 @@ export function DebateExperience(
                             aria-label={`${label} Debate light blend mode`}
                             value={stageAlignmentDraft.lightBlendModes[theme]}
                             onChange={(event) => {
+                              const nextLightBlendMode =
+                                event.currentTarget
+                                  .value as DebateStageLightBlendMode;
                               setStageAlignmentPreviewTheme(theme);
                               setStageAlignmentDraft((current) =>
                                 updateDebateStageLightBlendMode(
                                   current,
                                   theme,
-                                  event.currentTarget
-                                    .value as DebateStageLightBlendMode,
+                                  nextLightBlendMode,
                                 ),
                               );
                             }}
@@ -22250,12 +22362,15 @@ export function DebateExperience(
                               }
                               aria-label={`${label} Debate color mask opacity`}
                               onChange={(event) => {
+                                const nextLightMaskOpacity = Number(
+                                  event.currentTarget.value,
+                                );
                                 setStageAlignmentPreviewTheme(theme);
                                 setStageAlignmentDraft((current) =>
                                   updateDebateStageLightMaskOpacity(
                                     current,
                                     theme,
-                                    Number(event.currentTarget.value),
+                                    nextLightMaskOpacity,
                                   ),
                                 );
                               }}
@@ -22310,15 +22425,18 @@ export function DebateExperience(
                         step={DEBATE_STAGE_MODERATOR_MICRO_SCALE_STEP}
                         value={moderatorMicroScale}
                         aria-label={`${stageAlignmentPreviewCameraLabel} moderator micro avatar scale`}
-                        onChange={(event) =>
+                        onChange={(event) => {
+                          const nextModeratorMicroScale = Number(
+                            event.currentTarget.value,
+                          );
                           setStageAlignmentDraft((current) =>
                             updateDebateStageModeratorMicroScale(
                               current,
                               moderatorMicroScaleView,
-                              Number(event.currentTarget.value),
+                              nextModeratorMicroScale,
                             ),
-                          )
-                        }
+                          );
+                        }}
                       />
                     </label>
                   </section>
@@ -23533,6 +23651,8 @@ export function DebateExperience(
           data-opening-preload={openingPreloading ? "true" : undefined}
           data-opening-launch={openingLaunching ? "true" : undefined}
           data-debate-material-quality={debateMaterialQuality}
+          data-session-bot-visual-quality={debateMaterialQuality}
+          data-session-visible-bot-count={debateVisibleBotCount}
           data-jury-chamber={juryChamberVisible ? "true" : undefined}
           data-evidence-on-table={activeEvidenceItem ? "true" : undefined}
           style={
@@ -24484,8 +24604,7 @@ export function DebateExperience(
                       </button>
                     );
                   })}
-                  {DEBATE_STAGE_ALIGNMENT_ENABLED ? (
-                    <details className={styles.cameraAdvanced}>
+                  <details className={styles.cameraAdvanced}>
                       <summary
                         aria-label="More stage controls"
                         title="More stage controls"
@@ -24500,15 +24619,15 @@ export function DebateExperience(
                             event.currentTarget
                               .closest("details")
                               ?.removeAttribute("open");
-                            openStageAlignment();
+                            setStageDirectionOpen(true);
                           }}
-                          aria-label="Align stage"
+                          aria-label="Open stage direction"
+                          data-tutorial-target="debate-stage-direction"
                         >
-                          Stage geometry
+                          Stage direction
                         </button>
                       </div>
                     </details>
-                  ) : null}
                 </div>
               </div>
               {!juryChamberVisible && !sealedCompleted ? (
@@ -25433,7 +25552,6 @@ export function DebateExperience(
             </form>
           )
         ) : null}
-        {renderStageAlignmentModal(session)}
       </>
     );
   };
@@ -25491,6 +25609,8 @@ export function DebateExperience(
           )
         : null}
       {experience}
+      {renderStageDirectionPanel()}
+      {renderStageAlignmentModal(activeSession)}
       {inventWarmup ? (
         <ModelWarmupIntermission
           phase={inventWarmup.phase}

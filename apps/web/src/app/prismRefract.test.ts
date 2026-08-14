@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  PrismRefractGenerationTimeoutError,
   nextPrismRefractChoice,
   prismRefractModifierClickDecision,
+  runPrismRefractGenerationWithTimeout,
 } from "./prismRefract.ts";
 
 describe("Prism Refract helpers", () => {
@@ -38,7 +40,7 @@ describe("Prism Refract helpers", () => {
     );
   });
 
-  it("ignores repeated same-target modifier clicks and accepts before continuing elsewhere", () => {
+  it("uses a repeated same-target click as the explicit cancel control", () => {
     const active = {
       activeTargetId: "topic",
       activeTargetKind: "field" as const,
@@ -49,7 +51,7 @@ describe("Prism Refract helpers", () => {
         ...active,
         clickedTargetId: "topic",
       }),
-      "wait",
+      "cancel",
     );
     assert.equal(
       prismRefractModifierClickDecision({
@@ -60,7 +62,7 @@ describe("Prism Refract helpers", () => {
     );
   });
 
-  it("never rerolls from modifier-click — Spacebar owns reroll", () => {
+  it("never rerolls from modifier-click — the active sheen cancels instead", () => {
     assert.equal(
       prismRefractModifierClickDecision({
         activeTargetId: "topic",
@@ -68,7 +70,7 @@ describe("Prism Refract helpers", () => {
         clickedTargetId: "topic",
         canAccept: false,
       }),
-      "wait",
+      "cancel",
     );
   });
 
@@ -91,5 +93,38 @@ describe("Prism Refract helpers", () => {
       }),
       "begin",
     );
+  });
+
+  it("settles stalled generation with a timeout and aborts its work signal", async () => {
+    const observed: { signal: AbortSignal | null } = { signal: null };
+    await assert.rejects(
+      runPrismRefractGenerationWithTimeout({
+        signal: new AbortController().signal,
+        timeoutMs: 5,
+        run: (signal) => {
+          observed.signal = signal;
+          return new Promise<string>(() => undefined);
+        },
+      }),
+      PrismRefractGenerationTimeoutError,
+    );
+    assert.equal(observed.signal?.aborted, true);
+  });
+
+  it("forwards explicit page-lifecycle cancellation to generation", async () => {
+    const parent = new AbortController();
+    const generation = runPrismRefractGenerationWithTimeout({
+      signal: parent.signal,
+      run: (signal) =>
+        new Promise<string>((_resolve, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => reject(signal.reason),
+            { once: true },
+          );
+        }),
+    });
+    parent.abort(new DOMException("Page left.", "AbortError"));
+    await assert.rejects(generation, { name: "AbortError" });
   });
 });
