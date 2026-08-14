@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 
 import { PrismDomAdaptiveQualityController } from "./prismDomAdaptiveQuality";
+import { publishPrismFrameRate } from "./prismFrameRate";
 
 export function PrismAdaptiveDomQualityGovernor(): null {
   useEffect(() => {
@@ -11,6 +12,9 @@ export function PrismAdaptiveDomQualityGovernor(): null {
     const controller = new PrismDomAdaptiveQualityController(performance.now());
     let frameId = 0;
     let previousFrameTime = performance.now();
+    let fpsWindowStartedAt = previousFrameTime;
+    let fpsWindowFrameCount = 0;
+    let hasPublishedFps = false;
 
     const publishQuality = (): void => {
       root.dataset.prismAdaptiveQuality = controller.quality;
@@ -18,12 +22,30 @@ export function PrismAdaptiveDomQualityGovernor(): null {
     publishQuality();
 
     const tick = (nowMs: number): void => {
+      const deltaMs = Math.max(0, nowMs - previousFrameTime);
+      const foreground = document.visibilityState === "visible";
       const result = controller.recordFrame({
         nowMs,
-        deltaMs: Math.max(0, nowMs - previousFrameTime),
-        foreground: document.visibilityState === "visible",
+        deltaMs,
+        foreground,
       });
       previousFrameTime = nowMs;
+      if (foreground && deltaMs > 0 && deltaMs <= 250) {
+        fpsWindowFrameCount += 1;
+        const elapsedMs = nowMs - fpsWindowStartedAt;
+        if (!hasPublishedFps) {
+          publishPrismFrameRate(1_000 / deltaMs);
+          hasPublishedFps = true;
+        } else if (elapsedMs >= 200) {
+          publishPrismFrameRate((fpsWindowFrameCount * 1_000) / elapsedMs);
+          fpsWindowStartedAt = nowMs;
+          fpsWindowFrameCount = 0;
+        }
+      } else {
+        fpsWindowStartedAt = nowMs;
+        fpsWindowFrameCount = 0;
+        hasPublishedFps = false;
+      }
       if (result.qualityChanged) publishQuality();
       frameId = window.requestAnimationFrame(tick);
     };

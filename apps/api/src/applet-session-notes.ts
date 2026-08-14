@@ -12,6 +12,7 @@ export type AppletSessionNoteSurface =
 export interface AppletSessionNoteCaptureV1 {
   body: string;
   startedAt: string;
+  fps?: number;
   committedAt: string;
 }
 
@@ -96,8 +97,15 @@ function readAppletSessionNoteCaptures(value: string): AppletSessionNoteCaptureV
           : "";
       const startedAt = readCaptureTimestamp(record.startedAt);
       const committedAt = readCaptureTimestamp(record.committedAt);
+      const fps =
+        typeof record.fps === "number" &&
+        Number.isFinite(record.fps) &&
+        record.fps >= 1 &&
+        record.fps <= 240
+          ? Math.round(record.fps)
+          : undefined;
       return body && startedAt && committedAt
-        ? [{ body, startedAt, committedAt }]
+        ? [{ body, startedAt, ...(fps === undefined ? {} : { fps }), committedAt }]
         : [];
     }).slice(-400);
   } catch {
@@ -304,6 +312,7 @@ export function appendAppletSessionNote(
   sessionId: string,
   entry: string,
   startedAt?: string | null,
+  fps?: number | null,
 ): AppletSessionNoteV1 {
   const normalizedEntry = sentenceCaseAppletSessionNoteEntry(entry);
   if (!normalizedEntry) {
@@ -332,6 +341,9 @@ export function appendAppletSessionNote(
       Date.parse(normalizedStartedAt) > Date.parse(committedAt) + 60_000
         ? committedAt
         : normalizedStartedAt,
+    ...(typeof fps === "number" && Number.isFinite(fps) && fps >= 1 && fps <= 240
+      ? { fps: Math.round(fps) }
+      : {}),
     committedAt,
   };
   const captures = [...(existing?.captures ?? []), capture].slice(-400);

@@ -105,6 +105,7 @@ import {
   publishAppletSessionNoteSaved,
   type AppletSessionNoteResponse,
 } from "./appletSessionNotes";
+import { currentPrismFrameRate } from "./prismFrameRate";
 import {
   PRISM_ORB_HANDOFF_DURATION_MS,
   normalizedPrismOrbPositionForRect,
@@ -762,6 +763,7 @@ export default function PrismCompanion({
   const refractPromptRef = useRef<HTMLInputElement | null>(null);
   const sessionNoteContextRef = useRef(sessionNoteContext);
   const sessionNoteTypingStartedAtRef = useRef<string | null>(null);
+  const sessionNoteTypingStartedFpsRef = useRef<number | null>(null);
   const surfaceRef = useRef(surface);
   const positionRef = useRef(position);
   const chatHomeDockPositionRef = useRef<PrismCompanionPosition | null>(null);
@@ -1994,6 +1996,7 @@ export default function PrismCompanion({
   const openSessionNote = useCallback((): void => {
     clearIdleDim();
     sessionNoteTypingStartedAtRef.current = null;
+    sessionNoteTypingStartedFpsRef.current = null;
     setSessionNoteDraft("");
     setOpen(true);
     setSessionNoteStatus("");
@@ -2024,6 +2027,7 @@ export default function PrismCompanion({
           entry,
           startedAt:
             sessionNoteTypingStartedAtRef.current ?? new Date().toISOString(),
+          fps: sessionNoteTypingStartedFpsRef.current,
         }),
       });
       const payload = (await response.json().catch(() => ({}))) as
@@ -2042,6 +2046,7 @@ export default function PrismCompanion({
       ) {
         if (payload.note) publishAppletSessionNoteSaved(payload.note);
         sessionNoteTypingStartedAtRef.current = null;
+        sessionNoteTypingStartedFpsRef.current = null;
         setSessionNoteDraft("");
         setSessionNoteStatus("Note added to transcript");
         setOpen(false);
@@ -4933,6 +4938,8 @@ export default function PrismCompanion({
                     ) {
                       sessionNoteTypingStartedAtRef.current =
                         new Date().toISOString();
+                      sessionNoteTypingStartedFpsRef.current =
+                        currentPrismFrameRate()?.fps ?? null;
                     }
                     setSessionNoteDraft(nextDraft);
                   }}

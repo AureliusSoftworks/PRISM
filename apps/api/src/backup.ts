@@ -598,10 +598,19 @@ export interface BackupSnapshot {
     captures?: Array<{
       body: string;
       startedAt: string;
+      fps?: number;
       committedAt: string;
     }>;
     createdAt: string;
     updatedAt: string;
+  }>;
+  /** Browser-rendered FPS captured once when each applet transcript entry appeared. */
+  transcriptFrameSamples?: Array<{
+    surface: "coffee" | "signal" | "debate" | "story";
+    sessionId: string;
+    entryId: string;
+    fps: number;
+    capturedAt: string;
   }>;
   /** Presentation-only response cues, including only the playback state actually persisted. */
   presenceBeats?: Array<{
@@ -687,6 +696,7 @@ function backupJsonObject(value: unknown): Record<string, unknown> {
 function backupAppletSessionNoteCaptures(value: unknown): Array<{
   body: string;
   startedAt: string;
+  fps?: number;
   committedAt: string;
 }> {
   let parsed = value;
@@ -712,6 +722,13 @@ function backupAppletSessionNoteCaptures(value: unknown): Array<{
       typeof record.startedAt === "string" ? record.startedAt : "";
     const committedAt =
       typeof record.committedAt === "string" ? record.committedAt : "";
+    const fps =
+      typeof record.fps === "number" &&
+      Number.isFinite(record.fps) &&
+      record.fps >= 1 &&
+      record.fps <= 240
+        ? Math.round(record.fps)
+        : undefined;
     return body &&
       body.length <= APPLET_SESSION_NOTE_ENTRY_MAX_CHARACTERS &&
       Number.isFinite(Date.parse(startedAt)) &&
@@ -720,6 +737,7 @@ function backupAppletSessionNoteCaptures(value: unknown): Array<{
           {
             body,
             startedAt: new Date(startedAt).toISOString(),
+            ...(fps === undefined ? {} : { fps }),
             committedAt: new Date(committedAt).toISOString(),
           },
         ]
@@ -2569,6 +2587,14 @@ export function exportUserSnapshot(
         ORDER BY updated_at, rowid`,
     )
     .all(userId) as Array<Record<string, unknown>>;
+  const transcriptFrameSamples = db
+    .prepare(
+      `SELECT surface, session_id, entry_id, fps, captured_at
+         FROM applet_transcript_frame_samples
+        WHERE user_id = ?
+        ORDER BY captured_at, rowid`,
+    )
+    .all(userId) as Array<Record<string, unknown>>;
   const botcastIntroAudio = db
     .prepare(
     `SELECT show_id, provider, model, prompt, content_type, audio_bytes,
@@ -3012,6 +3038,15 @@ export function exportUserSnapshot(
       captures: backupAppletSessionNoteCaptures(row.captures_json),
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
+    })),
+    transcriptFrameSamples: transcriptFrameSamples.map((row) => ({
+      surface: String(row.surface) as NonNullable<
+        BackupSnapshot["transcriptFrameSamples"]
+      >[number]["surface"],
+      sessionId: String(row.session_id),
+      entryId: String(row.entry_id),
+      fps: Number(row.fps),
+      capturedAt: String(row.captured_at),
     })),
     presenceBeats: presenceBeats.map((row) => ({
       id: String(row.id),
@@ -4619,6 +4654,40 @@ function importUserSnapshotWithinTransaction(
         JSON.stringify(backupAppletSessionNoteCaptures(note.captures)),
         note.createdAt,
         note.updatedAt,
+      );
+    }
+  }
+
+  if (snapshot.transcriptFrameSamples) {
+    const insertFrameSample = db.prepare(
+      `INSERT OR IGNORE INTO applet_transcript_frame_samples
+         (user_id, surface, session_id, entry_id, fps, captured_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    for (const sample of snapshot.transcriptFrameSamples) {
+      const surface = readAppletSessionNoteSurface(sample?.surface);
+      const sessionId = sample?.sessionId?.trim() ?? "";
+      const entryId = sample?.entryId?.trim() ?? "";
+      const fps = Number(sample?.fps);
+      if (
+        !surface ||
+        !sessionId ||
+        !entryId ||
+        !Number.isInteger(fps) ||
+        fps < 1 ||
+        fps > 240 ||
+        !Number.isFinite(Date.parse(sample?.capturedAt ?? "")) ||
+        !appletSessionBelongsToUser(db, userId, surface, sessionId)
+      ) {
+        continue;
+      }
+      insertFrameSample.run(
+        userId,
+        surface,
+        sessionId,
+        entryId,
+        fps,
+        new Date(sample.capturedAt).toISOString(),
       );
     }
   }

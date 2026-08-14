@@ -202,6 +202,10 @@ import {
   appletSessionNoteRequestPath,
   type AppletSessionNoteResponse,
 } from "./appletSessionNotes";
+import {
+  annotateAppletTranscriptFrameRates,
+  useAppletTranscriptFrameRate,
+} from "./appletTranscriptFrameRate";
 import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
 import { acquirePrismLivingSession } from "./prismPresentationSuspend";
 import { SIGNAL_STUDIO_FOLEY_ROOM_SEND } from "./roomAcoustics";
@@ -2033,6 +2037,7 @@ export function BotcastExperience({
   const [selectedShowId, setSelectedShowId] = useState<string | null>(null);
   const [episodes, setEpisodes] = useState<BotcastEpisodeSummary[]>([]);
   const [episode, setEpisode] = useState<BotcastEpisode | null>(null);
+  useAppletTranscriptFrameRate("signal", episode?.id, episode?.messages ?? []);
   useEffect(() => {
     if (!episode || episode.status !== "live") return;
     // Keep Signal speech + rundown alive while visuals sleep on minimize.
@@ -3744,7 +3749,7 @@ export function BotcastExperience({
     const targetShow =
       shows.find((show) => show.id === targetEpisode.showId) ?? selectedShow;
     if (!targetShow) return null;
-    const [recordingEvidence, presenceBeats, sessionNote] = await Promise.all([
+    const [recordingEvidence, presenceBeats, sessionMetadata] = await Promise.all([
       loadSessionReviewRecordingEvidence(
         "signal",
         targetEpisode.id,
@@ -3760,33 +3765,35 @@ export function BotcastExperience({
           sessionId: targetEpisode.id,
         }),
       )
-        .then((response) => response.note)
-        .catch(() => null),
+        .catch(() => ({ ok: true as const, note: null, frameSamples: [] })),
     ]);
     return {
       title: `${targetShow.name} — ${targetEpisode.title}`,
-      transcript: appendAppletSessionNoteToTranscript(
-        buildSignalReviewTranscript({
-          episode: targetEpisode,
-          show: targetShow,
-          host: {
-            id: targetEpisode.hostBotId,
-            name: botsById.get(targetEpisode.hostBotId)?.name ?? "Host",
-          },
-          guest: {
-            id: targetEpisode.guestBotId,
-            name:
-              targetEpisode.guestKind === "producer"
-                ? (targetEpisode.guestName ?? producerName)
-                : (botsById.get(targetEpisode.guestBotId)?.name ?? "Guest"),
-          },
-          modelLabel: targetEpisode.model
-            ? (modelLabels.get(targetEpisode.model) ?? targetEpisode.model)
-            : null,
-          recordingEvidence,
-          presenceBeats,
-        }),
-        sessionNote,
+      transcript: annotateAppletTranscriptFrameRates(
+        appendAppletSessionNoteToTranscript(
+          buildSignalReviewTranscript({
+            episode: targetEpisode,
+            show: targetShow,
+            host: {
+              id: targetEpisode.hostBotId,
+              name: botsById.get(targetEpisode.hostBotId)?.name ?? "Host",
+            },
+            guest: {
+              id: targetEpisode.guestBotId,
+              name:
+                targetEpisode.guestKind === "producer"
+                  ? (targetEpisode.guestName ?? producerName)
+                  : (botsById.get(targetEpisode.guestBotId)?.name ?? "Guest"),
+            },
+            modelLabel: targetEpisode.model
+              ? (modelLabels.get(targetEpisode.model) ?? targetEpisode.model)
+              : null,
+            recordingEvidence,
+            presenceBeats,
+          }),
+          sessionMetadata.note,
+        ),
+        sessionMetadata.frameSamples,
       ),
     };
   };

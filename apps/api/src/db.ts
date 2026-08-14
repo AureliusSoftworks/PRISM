@@ -759,6 +759,19 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     );
     CREATE INDEX IF NOT EXISTS idx_applet_session_notes_user_updated
       ON applet_session_notes(user_id, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS applet_transcript_frame_samples (
+      user_id TEXT NOT NULL,
+      surface TEXT NOT NULL
+        CHECK(surface IN ('coffee', 'signal', 'debate', 'story')),
+      session_id TEXT NOT NULL,
+      entry_id TEXT NOT NULL,
+      fps INTEGER NOT NULL CHECK(fps >= 1 AND fps <= 240),
+      captured_at TEXT NOT NULL,
+      PRIMARY KEY(user_id, surface, session_id, entry_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_applet_transcript_frame_samples_session
+      ON applet_transcript_frame_samples(user_id, surface, session_id, captured_at);
     CREATE TABLE IF NOT EXISTS images (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,

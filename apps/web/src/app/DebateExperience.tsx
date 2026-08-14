@@ -147,6 +147,10 @@ import {
   appletSessionNoteRequestPath,
   type AppletSessionNoteResponse,
 } from "./appletSessionNotes";
+import {
+  annotateAppletTranscriptFrameRates,
+  useAppletTranscriptFrameRate,
+} from "./appletTranscriptFrameRate";
 import { registerPrismSoftSynthesisJobs } from "./prismSoftSynthesisUi.ts";
 import {
   announcePrismSoftAssetJob,
@@ -3130,6 +3134,7 @@ export function formatDebateVerboseTranscript(
         return [
           `### ${String(event.sequence).padStart(3, "0")} · ${event.phase} · ${event.kind}`,
           "",
+          `- Event ID: ${event.id}`,
           `- Speaker: ${visibleEventName(session, event, playerName)} (${event.speakerKind})`,
           `- Side: ${debateSideLabel(session, event.sideId)}`,
           `- Step: ${event.stepKey}`,
@@ -4182,6 +4187,11 @@ export function DebateExperience(
   const [sessions, setSessions] = useState<DebateSessionListItemV1[]>([]);
   const [activeSession, setActiveSession] = useState<DebateSessionV1 | null>(
     null,
+  );
+  useAppletTranscriptFrameRate(
+    "debate",
+    activeSession?.id,
+    activeSession?.events ?? [],
   );
   useEffect(() => {
     if (view !== "baking" || !activeSession) return;
@@ -6228,7 +6238,7 @@ export function DebateExperience(
 
   const verboseTranscriptForSession = useCallback(
     async (session: DebateSessionV1): Promise<string> => {
-      const [presenceBeats, sessionNote] = await Promise.all([
+      const [presenceBeats, sessionMetadata] = await Promise.all([
         request<{ beats: BotPresenceBeatV1[] }>(
           `/api/presence-beats?surface=debate&sessionId=${encodeURIComponent(session.id)}`,
         )
@@ -6240,12 +6250,14 @@ export function DebateExperience(
             sessionId: session.id,
           }),
         )
-          .then((response) => response.note)
-          .catch(() => null),
+          .catch(() => ({ ok: true as const, note: null, frameSamples: [] })),
       ]);
-      return appendAppletSessionNoteToTranscript(
-        formatDebateVerboseTranscript(session, playerName, presenceBeats),
-        sessionNote,
+      return annotateAppletTranscriptFrameRates(
+        appendAppletSessionNoteToTranscript(
+          formatDebateVerboseTranscript(session, playerName, presenceBeats),
+          sessionMetadata.note,
+        ),
+        sessionMetadata.frameSamples,
       );
     },
     [playerName, request],
@@ -6365,7 +6377,7 @@ export function DebateExperience(
     }
     setReviewBundleCopyState("copying");
     try {
-      const [presenceBeats, sessionNote] = await Promise.all([
+      const [presenceBeats, sessionMetadata] = await Promise.all([
         request<{ beats: BotPresenceBeatV1[] }>(
           `/api/presence-beats?surface=debate&sessionId=${encodeURIComponent(activeSession.id)}`,
         )
@@ -6377,8 +6389,7 @@ export function DebateExperience(
             sessionId: activeSession.id,
           }),
         )
-          .then((response) => response.note)
-          .catch(() => null),
+          .catch(() => ({ ok: true as const, note: null, frameSamples: [] })),
       ]);
       const includeJury = debateArchivedJuryRecordIsCopyable({
         status: activeSession.status,
@@ -6386,15 +6397,18 @@ export function DebateExperience(
         playerRole: activeSession.playerRole,
       });
       await writeDebateClipboardText(
-        appendAppletSessionNoteToTranscript(
-          formatDebateCompleteReviewClipboard({
-            session: activeSession,
-            playerName,
-            presenceBeats,
-            caseBoardCards: visibleCaseBoard,
-            includeJury,
-          }),
-          sessionNote,
+        annotateAppletTranscriptFrameRates(
+          appendAppletSessionNoteToTranscript(
+            formatDebateCompleteReviewClipboard({
+              session: activeSession,
+              playerName,
+              presenceBeats,
+              caseBoardCards: visibleCaseBoard,
+              includeJury,
+            }),
+            sessionMetadata.note,
+          ),
+          sessionMetadata.frameSamples,
         ),
       );
       setReviewBundleCopyState("copied");

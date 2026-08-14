@@ -11,8 +11,16 @@ export interface AppletSessionNoteCaptureV1 {
   body: string;
   /** The first keystroke in the fresh session-note composer. */
   startedAt: string;
+  /** Live rendered frame rate at that first keystroke. */
+  fps?: number;
   /** The later moment the note was committed. */
   committedAt: string;
+}
+
+export interface AppletTranscriptFrameSampleV1 {
+  entryId: string;
+  fps: number;
+  capturedAt: string;
 }
 
 export interface AppletSessionNoteV1 {
@@ -33,6 +41,7 @@ export interface AppletSessionNoteContext {
 export interface AppletSessionNoteResponse {
   ok: true;
   note: AppletSessionNoteV1 | null;
+  frameSamples?: AppletTranscriptFrameSampleV1[];
 }
 
 const APPLET_SESSION_NOTE_SAVED_EVENT = "prism:applet-session-note-saved";
@@ -223,11 +232,16 @@ function normalizedAppletSessionNoteCaptures(
       const body = sentenceCaseAppletSessionNoteEntry(capture?.body ?? "");
       const startedAtMs = Date.parse(capture?.startedAt ?? "");
       const committedAtMs = Date.parse(capture?.committedAt ?? "");
+      const fps =
+        typeof capture?.fps === "number" && Number.isFinite(capture.fps)
+          ? Math.max(1, Math.min(240, Math.round(capture.fps)))
+          : undefined;
       return body && Number.isFinite(startedAtMs) && Number.isFinite(committedAtMs)
         ? [
             {
               body,
               startedAt: new Date(startedAtMs).toISOString(),
+              ...(fps === undefined ? {} : { fps }),
               committedAt: new Date(committedAtMs).toISOString(),
             },
           ]
@@ -236,9 +250,7 @@ function normalizedAppletSessionNoteCaptures(
     .sort((left, right) => left.startedAt.localeCompare(right.startedAt));
 }
 
-function transcriptTimestampAnchors(
-  lines: readonly string[],
-): TranscriptTimestampAnchor[] {
+function transcriptTimestampAnchors(lines: readonly string[]): TranscriptTimestampAnchor[] {
   return lines.flatMap((line, lineIndex) => {
     const timestamp = line.match(APPLET_SESSION_NOTE_ISO_TIMESTAMP)?.[1];
     if (!timestamp) return [];
@@ -254,10 +266,7 @@ function noteInsertionLine(
   for (let index = timestampLineIndex + 1; index < lines.length; index += 1) {
     if (/^#{2,3}\s/u.test(lines[index] ?? "")) {
       let insertionLine = index;
-      while (
-        insertionLine > timestampLineIndex + 1 &&
-        !lines[insertionLine - 1]?.trim()
-      ) {
+      while (insertionLine > timestampLineIndex + 1 && !lines[insertionLine - 1]?.trim()) {
         insertionLine -= 1;
       }
       return insertionLine;
@@ -293,9 +302,7 @@ function insertAppletSessionNoteCaptures(
     const startedAtMs = Date.parse(capture.startedAt);
     const timestampLine = nearestTranscriptTimestampLine(anchors, startedAtMs);
     const insertionLine =
-      timestampLine === null
-        ? lines.length
-        : noteInsertionLine(lines, timestampLine);
+      timestampLine === null ? lines.length : noteInsertionLine(lines, timestampLine);
     const existing = insertions.get(insertionLine) ?? [];
     existing.push(capture);
     insertions.set(insertionLine, existing);
@@ -306,7 +313,7 @@ function insertAppletSessionNoteCaptures(
   )) {
     const annotationLines = notes.flatMap((capture) => [
       "",
-      `> **Developer note · ${capture.startedAt}** — ${capture.body}`,
+      `> **Developer note · ${capture.startedAt}${capture.fps ? ` · ${capture.fps} FPS` : ""}** — ${capture.body}`,
     ]);
     lines.splice(lineIndex, 0, ...annotationLines);
   }

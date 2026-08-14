@@ -90,6 +90,7 @@ describe("applet session notes", () => {
       "coffee-1",
       "  keep   NASA casing  ",
       "2026-08-14T18:01:02.345Z",
+      57.6,
     );
     assert.equal(
       first.body,
@@ -99,6 +100,7 @@ describe("applet session notes", () => {
       {
         body: "Keep NASA casing.",
         startedAt: "2026-08-14T18:01:02.345Z",
+        fps: 58,
         committedAt: first.captures[0]?.committedAt,
       },
     ]);

@@ -206,12 +206,19 @@ describe("backup applet session notes", () => {
           {
             body: "Remember the pause.",
             startedAt: "2026-08-09T20:00:30.000Z",
+            fps: 57,
             committedAt: "2026-08-09T20:01:00.000Z",
           },
         ]),
         "2026-08-09T20:01:00.000Z",
         "2026-08-09T20:01:00.000Z",
       );
+      db.prepare(
+        `INSERT INTO applet_transcript_frame_samples
+          (user_id, surface, session_id, entry_id, fps, captured_at)
+         VALUES ('user-1', 'coffee', 'coffee-note-session', 'message-1', 59,
+                 '2026-08-09T20:00:15.000Z')`,
+      ).run();
 
       const snapshot = exportUserSnapshot(db, "user-1", userKey);
       assert.equal(
@@ -222,9 +229,15 @@ describe("backup applet session notes", () => {
         snapshot.sessionNotes?.[0]?.captures?.[0]?.startedAt,
         "2026-08-09T20:00:30.000Z",
       );
+      assert.equal(snapshot.sessionNotes?.[0]?.captures?.[0]?.fps, 57);
+      assert.equal(snapshot.transcriptFrameSamples?.[0]?.entryId, "message-1");
+      assert.equal(snapshot.transcriptFrameSamples?.[0]?.fps, 59);
 
       db.prepare(
         "DELETE FROM applet_session_notes WHERE user_id = 'user-1'",
+      ).run();
+      db.prepare(
+        "DELETE FROM applet_transcript_frame_samples WHERE user_id = 'user-1'",
       ).run();
       importUserSnapshot(db, "user-1", snapshot, userKey);
       const restored = db
@@ -242,6 +255,16 @@ describe("backup applet session notes", () => {
         JSON.parse(restored.captures_json)[0]?.startedAt,
         "2026-08-09T20:00:30.000Z",
       );
+      assert.equal(JSON.parse(restored.captures_json)[0]?.fps, 57);
+      const restoredFrameSample = db
+        .prepare(
+          `SELECT entry_id, fps FROM applet_transcript_frame_samples
+            WHERE user_id = 'user-1' AND surface = 'coffee'
+              AND session_id = 'coffee-note-session'`,
+        )
+        .get() as { entry_id: string; fps: number };
+      assert.equal(restoredFrameSample.entry_id, "message-1");
+      assert.equal(restoredFrameSample.fps, 59);
     });
   });
 });

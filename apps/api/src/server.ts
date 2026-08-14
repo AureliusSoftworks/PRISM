@@ -289,6 +289,11 @@ import {
   saveAppletSessionNote,
 } from "./applet-session-notes.ts";
 import {
+  listAppletTranscriptFrameSamples,
+  readAppletTranscriptFps,
+  recordAppletTranscriptFrameSample,
+} from "./applet-transcript-frame-samples.ts";
+import {
   DebateSourceInspectionError,
   inspectDebateSourceUrl,
 } from "./debate-source-inspection.ts";
@@ -16582,6 +16587,47 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, {
         ok: true,
         note: getAppletSessionNote(db, userId, surface, sessionId),
+        frameSamples: listAppletTranscriptFrameSamples(
+          db,
+          userId,
+          surface,
+          sessionId,
+        ),
+      });
+    }),
+    route("POST", "/api/transcript-frame-samples", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      const surface = readAppletSessionNoteSurface(body.surface);
+      const sessionId =
+        typeof body.sessionId === "string" ? body.sessionId.trim() : "";
+      const entryId =
+        typeof body.entryId === "string" ? body.entryId.trim() : "";
+      const fps = readAppletTranscriptFps(body.fps);
+      const capturedAt =
+        typeof body.capturedAt === "string"
+          ? body.capturedAt
+          : new Date().toISOString();
+      if (!surface || !sessionId || !entryId || fps === null) {
+        throw new HttpError(
+          400,
+          "surface, sessionId, entryId, and a valid frame rate are required.",
+        );
+      }
+      if (!appletSessionBelongsToUser(db, userId, surface, sessionId)) {
+        throw new HttpError(404, "Applet session not found.");
+      }
+      json(ctx.res, 200, {
+        ok: true,
+        sample: recordAppletTranscriptFrameSample(
+          db,
+          userId,
+          surface,
+          sessionId,
+          entryId,
+          fps,
+          capturedAt,
+        ),
       });
     }),
     route("PUT", "/api/session-notes", async (ctx) => {
@@ -16642,6 +16688,7 @@ function buildRoutes(): RouteDefinition[] {
             sessionId,
             body.entry,
             typeof body.startedAt === "string" ? body.startedAt : null,
+            readAppletTranscriptFps(body.fps),
           ),
         });
       } catch (error) {

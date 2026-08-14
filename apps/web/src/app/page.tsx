@@ -125,6 +125,7 @@ import {
 } from "./composerAction";
 import { PrismVisualLifecycleBridge } from "./PrismVisualLifecycleBridge";
 import { PrismAdaptiveDomQualityGovernor } from "./PrismAdaptiveDomQualityGovernor";
+import { subscribePrismFrameRate } from "./prismFrameRate";
 import {
   announcePrismNavbarPickerOpen,
   PRISM_NAVBAR_PICKER_OPEN_EVENT,
@@ -529,7 +530,13 @@ import {
   subscribeAppletSessionNoteSaved,
   type AppletSessionNoteResponse,
   type AppletSessionNoteV1,
+  type AppletTranscriptFrameSampleV1,
 } from "./appletSessionNotes";
+import {
+  annotateAppletTranscriptFrameRates,
+  subscribeAppletTranscriptFrameSample,
+  useAppletTranscriptFrameRate,
+} from "./appletTranscriptFrameRate";
 import {
   VIEWPORT_SAFE_AREA_DEFAULT_INSETS,
   clampPositionToViewportSafeArea,
@@ -10429,21 +10436,7 @@ function FpsCounter(): React.JSX.Element | null {
       setFps(null);
       return;
     }
-    let frameId = 0;
-    let frameCount = 0;
-    let windowStartedAt = performance.now();
-    const tick = (now: number): void => {
-      frameCount += 1;
-      const elapsed = now - windowStartedAt;
-      if (elapsed >= 500) {
-        setFps(Math.round((frameCount * 1000) / elapsed));
-        frameCount = 0;
-        windowStartedAt = now;
-      }
-      frameId = window.requestAnimationFrame(tick);
-    };
-    frameId = window.requestAnimationFrame(tick);
-    return () => window.cancelAnimationFrame(frameId);
+    return subscribePrismFrameRate((snapshot) => setFps(snapshot?.fps ?? null));
   }, [enabled]);
 
   if (!enabled || fps === null) return null;
@@ -63704,6 +63697,11 @@ function HomeContent(): React.JSX.Element {
   >(() => emptyCoffeeSeatBotIds());
   const [coffeeConversation, setCoffeeConversation] =
     useState<CoffeeConversationState | null>(null);
+  useAppletTranscriptFrameRate(
+    "coffee",
+    coffeeConversation?.id,
+    coffeeConversation?.messages ?? [],
+  );
   const [coffeePowerPlan, setCoffeePowerPlan] =
     useState<CoffeePowerPlanV1 | null>(null);
   const [coffeePowerWarnings, setCoffeePowerWarnings] = useState<string[]>([]);
@@ -65569,6 +65567,11 @@ function HomeContent(): React.JSX.Element {
   const [storySession, setStorySession] = useState<StorySessionDetail | null>(
     null,
   );
+  useAppletTranscriptFrameRate(
+    "story",
+    storySession?.id,
+    storySession?.transcript ?? [],
+  );
   const [storySelectedBotIds, setStorySelectedBotIds] = useState<string[]>([]);
   const [storyPremise, setStoryPremise] = useState("");
   const [storySearch, setStorySearch] = useState("");
@@ -65579,6 +65582,8 @@ function HomeContent(): React.JSX.Element {
   const [storyTranscriptOpen, setStoryTranscriptOpen] = useState(false);
   const [storySessionNote, setStorySessionNote] =
     useState<AppletSessionNoteV1 | null>(null);
+  const [storyTranscriptFrameSamples, setStoryTranscriptFrameSamples] =
+    useState<AppletTranscriptFrameSampleV1[]>([]);
   const [storyDialogCursor, setStoryDialogCursor] = useState<StoryDialogCursor>(
     {
       sessionId: null,
@@ -65593,6 +65598,7 @@ function HomeContent(): React.JSX.Element {
     const sessionId = storySession?.id ?? null;
     if (view !== "story" || !sessionId) {
       setStorySessionNote(null);
+      setStoryTranscriptFrameSamples([]);
       return;
     }
     let active = true;
@@ -65602,9 +65608,11 @@ function HomeContent(): React.JSX.Element {
     )
       .then((response) => {
         if (active && !receivedSavedNote) setStorySessionNote(response.note);
+        if (active) setStoryTranscriptFrameSamples(response.frameSamples ?? []);
       })
       .catch(() => {
         if (active && !receivedSavedNote) setStorySessionNote(null);
+        if (active) setStoryTranscriptFrameSamples([]);
       });
     const unsubscribe = subscribeAppletSessionNoteSaved((note) => {
       if (note.surface === "story" && note.sessionId === sessionId) {
@@ -65612,9 +65620,20 @@ function HomeContent(): React.JSX.Element {
         setStorySessionNote(note);
       }
     });
+    const unsubscribeFrameSample = subscribeAppletTranscriptFrameSample(
+      (detail) => {
+        if (detail.surface !== "story" || detail.sessionId !== sessionId) return;
+        setStoryTranscriptFrameSamples((current) =>
+          current.some((sample) => sample.entryId === detail.sample.entryId)
+            ? current
+            : [...current, detail.sample],
+        );
+      },
+    );
     return () => {
       active = false;
       unsubscribe();
+      unsubscribeFrameSample();
     };
   }, [storySession?.id, view]);
 
@@ -65861,15 +65880,17 @@ function HomeContent(): React.JSX.Element {
     if (heardCueLines.length > 0) {
       transcriptText = `${transcriptText.trimEnd()}\n\n## Response cues (heard only)\n\n${heardCueLines.join("\n")}\n`;
     }
-    const sessionNote = await api<AppletSessionNoteResponse>(
+    const sessionMetadata = await api<AppletSessionNoteResponse>(
       appletSessionNoteRequestPath({
         surface: "coffee",
         sessionId: coffeeConversation.id,
       }),
     )
-      .then((response) => response.note)
-      .catch(() => null);
-    return appendAppletSessionNoteToTranscript(transcriptText, sessionNote);
+      .catch(() => ({ ok: true as const, note: null, frameSamples: [] }));
+    return annotateAppletTranscriptFrameRates(
+      appendAppletSessionNoteToTranscript(transcriptText, sessionMetadata.note),
+      sessionMetadata.frameSamples,
+    );
   };
   const copyCoffeeTranscriptToClipboard = async (
     variant: SessionTranscriptVariant = "standard",
@@ -65918,7 +65939,7 @@ function HomeContent(): React.JSX.Element {
   ): Promise<void> => {
     if (!coffeeConversation) return;
     try {
-      const [transcriptResponse, sessionNote] = await Promise.all([
+      const [transcriptResponse, sessionMetadata] = await Promise.all([
         fetch(transcriptMarkdownUrl, { credentials: "same-origin" }),
         api<AppletSessionNoteResponse>(
           appletSessionNoteRequestPath({
@@ -65926,15 +65947,22 @@ function HomeContent(): React.JSX.Element {
             sessionId: coffeeConversation.id,
           }),
         )
-          .then((response) => response.note)
-          .catch(() => null),
+          .catch(() => ({ ok: true as const, note: null, frameSamples: [] })),
       ]);
       if (!transcriptResponse.ok) {
         throw new Error("The saved Coffee transcript is unavailable.");
       }
       const transcript = await transcriptResponse.text();
       const blob = new Blob(
-        [appendAppletSessionNoteToTranscript(transcript, sessionNote)],
+        [
+          annotateAppletTranscriptFrameRates(
+            appendAppletSessionNoteToTranscript(
+              transcript,
+              sessionMetadata.note,
+            ),
+            sessionMetadata.frameSamples,
+          ),
+        ],
         { type: "text/markdown;charset=utf-8" },
       );
       const url = URL.createObjectURL(blob);
@@ -108581,16 +108609,23 @@ function HomeContent(): React.JSX.Element {
               recordingEvidence,
             },
           });
-          const sessionNote = await api<AppletSessionNoteResponse>(
+          const sessionMetadata = await api<AppletSessionNoteResponse>(
             appletSessionNoteRequestPath({
               surface: "coffee",
               sessionId: coffeeConversation.id,
             }),
           )
-            .then((response) => response.note)
-            .catch(() => null);
+            .catch(() => ({ ok: true as const, note: null, frameSamples: [] }));
           const blob = new Blob(
-            [appendAppletSessionNoteToTranscript(transcript, sessionNote)],
+            [
+              annotateAppletTranscriptFrameRates(
+                appendAppletSessionNoteToTranscript(
+                  transcript,
+                  sessionMetadata.note,
+                ),
+                sessionMetadata.frameSamples,
+              ),
+            ],
             {
               type: "text/markdown;charset=utf-8",
             },
@@ -139936,6 +139971,9 @@ function HomeContent(): React.JSX.Element {
       string,
       AppletSessionNoteV1["captures"]
     >();
+    const frameRateByEntryId = new Map(
+      storyTranscriptFrameSamples.map((sample) => [sample.entryId, sample.fps]),
+    );
     for (const capture of storySessionNote?.captures ?? []) {
       const startedAtMs = Date.parse(capture.startedAt);
       const nearestEntry =
@@ -140020,7 +140058,12 @@ function HomeContent(): React.JSX.Element {
                       : undefined
                   }
                 >
-                  <span>{entry.kind}</span>
+                  <span>
+                    {entry.kind}
+                    {frameRateByEntryId.has(entry.id)
+                      ? ` · ${frameRateByEntryId.get(entry.id)} FPS`
+                      : ""}
+                  </span>
                   <p>{entry.text}</p>
                 </li>
                 {(notesAfterEntryId.get(entry.id) ?? []).map((capture) => (
@@ -140028,7 +140071,10 @@ function HomeContent(): React.JSX.Element {
                     key={`${capture.startedAt}:${capture.committedAt}`}
                     data-kind="developer-note"
                   >
-                    <span>Developer note · {capture.startedAt}</span>
+                    <span>
+                      Developer note · {capture.startedAt}
+                      {capture.fps ? ` · ${capture.fps} FPS` : ""}
+                    </span>
                     <p>{capture.body}</p>
                   </li>
                 ))}

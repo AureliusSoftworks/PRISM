@@ -56,6 +56,7 @@ export const FACTORY_RESET_USER_DATA_TABLES = [
   "bot_opinions",
   "bot_relationships",
   "applet_session_notes",
+  "applet_transcript_frame_samples",
   "developer_transcript_events",
   "conversation_exports",
   "conversation_sweep_batches",

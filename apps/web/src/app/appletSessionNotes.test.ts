@@ -93,6 +93,7 @@ describe("applet session notes", () => {
         {
           body: "watch Hector's reaction",
           startedAt: "2026-08-14T18:01:10.000Z",
+          fps: 57,
           committedAt: "2026-08-14T18:01:40.000Z",
         },
       ],
@@ -102,7 +103,7 @@ describe("applet session notes", () => {
 
     assert.match(
       output,
-      /Second line\.\n\n> \*\*Developer note · 2026-08-14T18:01:10\.000Z\*\* — Watch Hector's reaction\.\n\n## Event log/u,
+      /Second line\.\n\n> \*\*Developer note · 2026-08-14T18:01:10\.000Z · 57 FPS\*\* — Watch Hector's reaction\.\n\n## Event log/u,
     );
     assert.match(
       output,
@@ -124,6 +125,8 @@ describe("applet session notes", () => {
     assert.match(companion, /entry,/u);
     assert.match(companion, /sessionNoteTypingStartedAtRef/u);
     assert.match(companion, /startedAt:/u);
+    assert.match(companion, /fps: sessionNoteTypingStartedFpsRef\.current/u);
+    assert.match(companion, /currentPrismFrameRate\(\)\?\.fps/u);
     assert.match(companion, /nextDraft\.length > 0/u);
     assert.match(companion, /sessionNoteSavingRef\.current/u);
     assert.match(companion, /setSessionNoteDraft\(""\)/u);
