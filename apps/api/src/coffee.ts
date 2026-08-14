@@ -8606,6 +8606,44 @@ const COFFEE_STARTER_TOPIC_PROFILE_METADATA_WORDS = new Set([
   "trait",
 ]);
 
+// These are about the act of having a conversation, rather than a situation
+// the table can explore. They read especially badly in a four-option picker
+// because they ask the player to invent the topic for us.
+const COFFEE_STARTER_TOPIC_SELF_REFERENTIAL_WORDS = new Set([
+  "chat",
+  "coffee",
+  "conversation",
+  "discuss",
+  "discussion",
+  "everyone",
+  "group",
+  "participants",
+  "persona",
+  "prompt",
+  "table",
+  "talk",
+  "topic",
+]);
+
+const COFFEE_STARTER_TOPIC_ABSTRACT_ONLY_ROOTS = new Set([
+  "choice",
+  "courage",
+  "duty",
+  "fairness",
+  "forgiveness",
+  "freedom",
+  "justice",
+  "kindness",
+  "loyalty",
+  "mercy",
+  "morality",
+  "power",
+  "success",
+  "truth",
+  "virtue",
+  "wisdom",
+]);
+
 const COFFEE_STARTER_TOPIC_PASSIVE_ENDINGS = new Set([
   "ignit",
   "ignited",
@@ -8628,31 +8666,22 @@ const COFFEE_STARTER_TOPIC_SIMILARITY_WEAK_WORDS = new Set([
 ]);
 
 const COFFEE_DISTINCT_FILL_TOPICS = [
-  "The first practical test",
-  "A necessary compromise",
-  "The favorite exception",
-  "Useful discomfort at work",
-  "A promise under pressure",
-  "The cost of staying quiet",
-  "When good rules bend",
-  "A shortcut with consequences",
-  "The honest version",
-  "A duty nobody wanted",
-  "The small thing worth defending",
-  "When loyalty gets expensive",
-  "A plan that got weird",
-  "The quiet part of ambition",
-  "A kindness with limits",
-  "The rule nobody follows",
-  "A secret with witnesses",
-  "When certainty annoys everyone",
-  "The useful mistake",
-  "A victory that feels awkward",
-  "When the easy answer fails",
-  "A habit worth questioning",
-  "The problem with being helpful",
-  "A risk worth taking",
-  "The hard part of fairness",
+  "Which promise survives a deadline?",
+  "When does help become control?",
+  "Who pays for the shortcut?",
+  "What makes an apology count?",
+  "When should a rule bend?",
+  "Which secret changes the deal?",
+  "Can a favor become leverage?",
+  "Who gets the last word?",
+  "When does certainty close doors?",
+  "Which mistake deserves another chance?",
+  "Can honesty make things worse?",
+  "What turns advice into pressure?",
+  "When does loyalty become leverage?",
+  "Which risk is worth sharing?",
+  "Can success make a mess?",
+  "What should stay off-record?",
 ] as const;
 
 function coffeeStarterTopicFromPayloadItem(item: unknown): CoffeeStarterTopicCandidate | null {
@@ -8819,6 +8848,32 @@ function coffeeStarterTopicLooksLikeProfileCardLabel(
   return Boolean(lastRoot && COFFEE_STARTER_TOPIC_PASSIVE_ENDINGS.has(lastRoot));
 }
 
+function coffeeStarterTopicLooksGenericOrSelfReferential(label: string): boolean {
+  if (
+    /^(?:anything|something|whatever|general(?:ly)?|random|open|free[- ]?form)\b/iu.test(label) ||
+    /^(?:what|how|why|when|where|who|which)\s+(?:should|could|can|do|are|is|will|would)?\s*(?:we|everyone|the group|the table)\s+(?:talk|discuss|chat)\b/iu.test(
+      label,
+    ) ||
+    /^(?:the\s+)?(?:world|life|people|society|everything|things|ideas)(?:\s+today)?\??$/iu.test(label) ||
+    /\b(?:what|anything|something)\s+(?:else|interesting|to talk about)\b/iu.test(label) ||
+    /\b(?:coffee|conversation|discussion|table)\s+(?:topic|prompt|chat|talk)\b/iu.test(label)
+  ) {
+    return true;
+  }
+  const roots = coffeeStarterTopicContentRoots(label);
+  if (roots.some((root) => COFFEE_STARTER_TOPIC_SELF_REFERENTIAL_WORDS.has(root))) {
+    return true;
+  }
+  // Short pairings of abstract virtues make pleasant-looking but contextless
+  // menu labels ("Duty versus freedom"). Ask for a situation or a real
+  // persona anchor instead.
+  return (
+    roots.length > 0 &&
+    roots.length <= 3 &&
+    roots.every((root) => COFFEE_STARTER_TOPIC_ABSTRACT_ONLY_ROOTS.has(root))
+  );
+}
+
 function normalizeCoffeeStarterTopicLabel(raw: string): string | null {
   const normalized = raw
     .replace(/\s+/g, " ")
@@ -8900,6 +8955,7 @@ function selectCoffeeStarterTopicLabels(
     const label = normalizeCoffeeStarterTopicLabel(candidate.label);
     if (!label) continue;
     if (coffeeStarterTopicLooksLikeProfileCardLabel(label, group)) continue;
+    if (coffeeStarterTopicLooksGenericOrSelfReferential(label)) continue;
     if (coffeeStarterTopicMentionsMultipleBots(label, group)) continue;
     const keys = coffeeStarterTopicSimilarityKeys(label);
     if (keys.length === 0) continue;
@@ -10067,58 +10123,58 @@ const COFFEE_DETERMINISTIC_STARTER_TOPIC_QUARTETS = {
     "A clarinet nobody asked for",
   ],
   powerAndMercy: [
-    "Power without cruelty",
-    "Duty versus forgiveness",
-    "When mercy has limits",
-    "Justice after surrender",
+    "When does order need mercy?",
+    "Can forgiveness outlast command?",
+    "Who pays for peace by force?",
+    "A pardon with consequences",
   ],
   philosophy: [
-    "Is free will an illusion?",
-    "The cost of being right",
-    "A rule worth breaking",
-    "Wisdom after contradiction",
+    "Which truth deserves doubt?",
+    "Can virtue survive convenience?",
+    "When does reason become armor?",
+    "What makes a life useful?",
   ],
   engineering: [
-    "When systems fight back",
-    "The cost of clean logic",
-    "A bug worth keeping",
-    "When abstractions leak",
+    "When should a bug stay?",
+    "Who owns the brittle system?",
+    "Can clean logic hide harm?",
+    "Which shortcut breaks trust?",
   ],
   art: [
-    "What art owes truth",
-    "A beautiful lie",
-    "When style becomes substance",
-    "What beauty permits",
+    "When does beauty excuse harm?",
+    "Can style hide a weak idea?",
+    "Who gets to call it finished?",
+    "What truth can performance hold?",
   ],
   commerce: [
-    "What loyalty costs",
-    "A secret worth protecting",
-    "When profit needs mercy",
-    "A bargain with conscience",
+    "When does profit betray trust?",
+    "Which secret changes the price?",
+    "Can loyalty survive the ledger?",
+    "What makes a bargain fair?",
   ],
   afterparty: [
-    "The argument nobody will drop",
-    "A rule worth breaking",
-    "When kindness backfires",
-    "The joke that got serious",
+    "Which joke changed the room?",
+    "When does a dare go wrong?",
+    "Who has to clean up?",
+    "Can a rumor become evidence?",
   ],
   theatre: [
-    "The cost of being right",
-    "A rule worth breaking",
-    "When kindness backfires",
-    "A line nobody forgives",
+    "Which line changes the scene?",
+    "When does applause lie?",
+    "Who gets the final entrance?",
+    "Can a role become a cage?",
   ],
   still: [
-    "What silence protects",
-    "The cost of being right",
-    "A truth worth keeping",
-    "A silence worth breaking",
+    "What does silence protect?",
+    "When should a pause speak?",
+    "Which truth needs gentleness?",
+    "Can quiet hold a boundary?",
   ],
   default: [
-    "The cost of being right",
-    "When kindness backfires",
-    "A rule worth breaking",
-    "A truth worth keeping",
+    "Which promise survives a deadline?",
+    "When does help become control?",
+    "Who pays for the shortcut?",
+    "What makes an apology count?",
   ],
 } as const;
 
@@ -10256,48 +10312,6 @@ function selectPersonaRelevantCoffeeStarterTopics(
   ).slice(0, COFFEE_STARTER_TOPIC_COUNT);
 }
 
-function personaRefreshFallbackStarterCandidates(
-  labels: readonly string[]
-): string[] {
-  const output: string[] = [];
-  const seen = new Set<string>();
-  for (const rawLabel of labels) {
-    const normalizedLabel = normalizeCoffeeStarterTopicLabel(rawLabel);
-    if (!normalizedLabel) continue;
-    const variants = coffeeStarterTopicLabelIsCanned(normalizedLabel)
-      ? [
-          `${normalizedLabel} today`,
-          `How might we revisit ${normalizedLabel.toLocaleLowerCase()}`,
-        ]
-      : [normalizedLabel];
-    for (const variant of variants) {
-      const normalizedVariant = normalizeCoffeeStarterTopicLabel(variant);
-      if (!normalizedVariant || coffeeStarterTopicLabelIsCanned(normalizedVariant)) continue;
-      const key = normalizedVariant.toLocaleLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      output.push(normalizedVariant);
-    }
-  }
-  return output;
-}
-
-function decannifyPersonaStarterTopics(topics: readonly string[]): string[] {
-  const output: string[] = [];
-  const seen = new Set<string>();
-  for (const topic of topics) {
-    const candidates = personaRefreshFallbackStarterCandidates([topic]);
-    for (const candidate of candidates) {
-      if (seen.has(candidate.toLocaleLowerCase())) continue;
-      seen.add(candidate.toLocaleLowerCase());
-      output.push(candidate);
-      break;
-    }
-    if (output.length >= COFFEE_STARTER_TOPIC_COUNT) break;
-  }
-  return output;
-}
-
 function completeCoffeeStarterTopics(
   parsedTopics: readonly string[],
   group: CoffeeBotProfile[],
@@ -10323,13 +10337,9 @@ function completeCoffeeStarterTopics(
       ...buildDeterministicCoffeeStarterTopics(group, sessionSettings, memoryContext).map(
         (label) => ({ label }),
       ),
-      { label: "The cost of being right" },
-      { label: "When kindness backfires" },
-      { label: "A rule worth breaking" },
-      { label: "A truth worth keeping" },
       ...COFFEE_DISTINCT_FILL_TOPICS.map((label) => ({ label })),
     ];
-    const selectedTopics = selectCoffeeStarterTopicLabels(
+    return selectCoffeeStarterTopicLabels(
       [
         ...relevantTopics.map((label) => ({ label })),
         ...personaFallbackCandidates,
@@ -10339,36 +10349,6 @@ function completeCoffeeStarterTopics(
       COFFEE_STARTER_TOPIC_COUNT,
       { selectedKeys }
     ).slice(0, COFFEE_STARTER_TOPIC_COUNT);
-    if (selectedTopics.length === COFFEE_STARTER_TOPIC_COUNT) {
-      const decannifiedTopics = decannifyPersonaStarterTopics(selectedTopics);
-      if (decannifiedTopics.length === COFFEE_STARTER_TOPIC_COUNT) return decannifiedTopics;
-      return selectedTopics;
-    }
-    const fallbackSelectedKeys = coffeeStarterTopicSelectedKeys(selectedTopics);
-    const fallbackTopics = selectCoffeeStarterTopicLabels(
-      deterministicCandidates,
-      group,
-      COFFEE_STARTER_TOPIC_COUNT,
-      { selectedKeys: fallbackSelectedKeys }
-    );
-    if (fallbackTopics.length >= COFFEE_STARTER_TOPIC_COUNT) {
-      const decannifiedTopics = decannifyPersonaStarterTopics(
-        fallbackTopics.slice(0, COFFEE_STARTER_TOPIC_COUNT)
-      );
-      if (decannifiedTopics.length === COFFEE_STARTER_TOPIC_COUNT) {
-        return decannifiedTopics;
-      }
-      return fallbackTopics.slice(0, COFFEE_STARTER_TOPIC_COUNT);
-    }
-    const finalTopics = selectCoffeeStarterTopicLabels(
-      [...deterministicCandidates, ...COFFEE_DISTINCT_FILL_TOPICS.map((label) => ({ label }))],
-      group,
-      COFFEE_STARTER_TOPIC_COUNT,
-      { selectedKeys: new Set() }
-    ).slice(0, COFFEE_STARTER_TOPIC_COUNT);
-    const decannifiedTopics = decannifyPersonaStarterTopics(finalTopics);
-    if (decannifiedTopics.length === COFFEE_STARTER_TOPIC_COUNT) return decannifiedTopics;
-    return finalTopics;
   }
   if (coffeeGroupHasCanonFacetSignal(group)) {
     const contextTokens = coffeeStarterTopicRelevanceTokens([
@@ -10392,10 +10372,6 @@ function completeCoffeeStarterTopics(
         ...coffeeFacetStarterTopicCandidates(group).map((label) => ({ label })),
         ...buildDeterministicCoffeeStarterTopics(group, sessionSettings, memoryContext).map((label) => ({ label })),
         ...weakParsed,
-        { label: "The cost of being right" },
-        { label: "When kindness backfires" },
-        { label: "A rule worth breaking" },
-        { label: "A truth worth keeping" },
         ...COFFEE_DISTINCT_FILL_TOPICS.map((label) => ({ label })),
       ],
       group,
@@ -10408,10 +10384,6 @@ function completeCoffeeStarterTopics(
     [
       ...parsedTopics.map((label) => ({ label })),
       ...buildDeterministicCoffeeStarterTopics(group, sessionSettings, memoryContext).map((label) => ({ label })),
-      { label: "The cost of being right" },
-      { label: "When kindness backfires" },
-      { label: "A rule worth breaking" },
-      { label: "A truth worth keeping" },
       ...COFFEE_DISTINCT_FILL_TOPICS.map((label) => ({ label })),
     ],
     group,
@@ -11144,6 +11116,8 @@ export async function inferCoffeeStarterTopics(args: {
         "Do not quote memory text verbatim or make labels about memories.",
         "Do not usually name participants in labels; capture the underlying idea instead.",
         "Avoid generic filler like 'check-in', 'worth unpacking', or bland universal agreement phrasing.",
+        "Never make the subject the conversation itself: reject labels about topics, prompts, chatting, what the group should discuss, or a generic 'everyone' question.",
+        "A bare pairing of abstract virtues is not enough. Give it a concrete stake, decision, scene, consequence, or persona-grounded contrast.",
         "Example label shape only; do not reuse these verbatim: \"A formula worth guarding\", \"When certainty becomes arrogance\", \"Jellyfish Fields after work\", \"The quiet part of duty\".",
       ].join("\n"),
     },
@@ -11199,10 +11173,12 @@ export async function inferCoffeeStarterTopics(args: {
             content: [
               `The previous response produced ${acceptedGeneratedTopics.length} usable topics, but exactly four are required.`,
               `Seated bots: ${group.map((bot) => bot.name).join(", ")}.`,
+              ...formatCoffeeStarterFacetContext(group),
               `Do not repeat these current topics: ${JSON.stringify(visibleExcludedTopicLabels)}.`,
               "Return exactly four short, distinct topics for the whole table in this shape:",
               '{"candidates":[{"label":"..."},{"label":"..."},{"label":"..."},{"label":"..."}]}',
-              "Use 2–8 words per label. Ground each in the seated bots, avoid profile labels and generic filler, and do not include explanations.",
+              "Use 2–8 words per label. Ground each in a concrete conflict, shared work, or surprising contrast between the seated bots.",
+              "Reject abstract virtue pairings, profile labels, questions about what to discuss, and generic filler. Do not include explanations.",
             ].join("\n"),
           },
         ],
@@ -11268,121 +11244,9 @@ export async function inferCoffeeStarterTopics(args: {
     }
   } catch (error) {
     if (requireCompleteGeneratedSet) {
-      const fallbackTopics = completeCoffeeStarterTopics(
-        [...parsed, ...rankedCandidatePool],
-        group,
-        sessionSettings,
-        memoryContext,
-        excludedTopicLabels,
-        personaRelevantOnly
-      );
-      if (
-        rawOutput !== undefined &&
-        fallbackTopics.length === COFFEE_STARTER_TOPIC_COUNT
-      ) {
-        recordDeveloperTranscriptEvent({
-          kind: "tool",
-          purpose: "coffee_topic_candidate_ranking",
-          provider: provider.name,
-          model: diagnosticModel,
-          request: generationRequest,
-          rawOutput,
-          parsedOutput: {
-            rankedTopics: fallbackTopics,
-            parsedCandidateCount: acceptedGeneratedTopicCount,
-            usedFallback: true,
-          },
-          streaming: false,
-        fallback: true,
-      });
-        return fallbackTopics;
-      }
-      if (rawOutput !== undefined) {
-        const emergencySelectedKeys = coffeeStarterTopicSelectedKeys(excludedTopicLabels);
-        const emergencyFallbackTopics: string[] = [];
-        const emergencyCandidateLabels = personaRefreshFallbackStarterCandidates([
-          ...buildDeterministicCoffeeStarterTopics(group, sessionSettings, memoryContext),
-          ...COFFEE_DISTINCT_FILL_TOPICS,
-        ]);
-        for (const label of emergencyCandidateLabels) {
-          if (coffeeStarterTopicLabelIsCanned(label)) continue;
-          const normalized = normalizeCoffeeStarterTopicLabel(label);
-          if (!normalized) continue;
-          if (coffeeStarterTopicLooksLikeProfileCardLabel(normalized, group)) continue;
-          if (coffeeStarterTopicMentionsMultipleBots(normalized, group)) continue;
-          const keys = coffeeStarterTopicSimilarityKeys(normalized);
-          if (keys.length === 0) continue;
-          if (keys.some((key) => emergencySelectedKeys.has(key))) continue;
-          for (const key of keys) {
-            emergencySelectedKeys.add(key);
-          }
-          emergencyFallbackTopics.push(normalized);
-          if (emergencyFallbackTopics.length === COFFEE_STARTER_TOPIC_COUNT) {
-            break;
-          }
-        }
-        if (emergencyFallbackTopics.length === COFFEE_STARTER_TOPIC_COUNT) {
-          recordDeveloperTranscriptEvent({
-            kind: "tool",
-            purpose: "coffee_topic_candidate_ranking",
-            provider: provider.name,
-            model: diagnosticModel,
-            request: generationRequest,
-            rawOutput,
-            parsedOutput: {
-              rankedTopics: emergencyFallbackTopics,
-              parsedCandidateCount: acceptedGeneratedTopicCount,
-              usedFallback: true,
-            },
-            streaming: false,
-            fallback: true,
-          });
-          return emergencyFallbackTopics;
-        }
-        const exactEmergencyFallbackTopics: string[] = [];
-        const exactEmergencyExcluded = new Set(
-          excludedTopicLabels
-            .map((label) => normalizeCoffeeStarterTopicLabel(label)?.toLocaleLowerCase())
-            .filter((label): label is string => Boolean(label)),
-        );
-        for (const label of [
-          ...buildDeterministicCoffeeStarterTopics(group, sessionSettings, memoryContext),
-          ...COFFEE_DISTINCT_FILL_TOPICS,
-        ]) {
-          const normalized = normalizeCoffeeStarterTopicLabel(label);
-          if (!normalized) continue;
-          if (exactEmergencyExcluded.has(normalized.toLocaleLowerCase())) continue;
-          if (coffeeStarterTopicLooksLikeProfileCardLabel(normalized, group)) continue;
-          if (coffeeStarterTopicMentionsMultipleBots(normalized, group)) continue;
-          if (
-            exactEmergencyFallbackTopics.some(
-              (topic) => topic.toLocaleLowerCase() === normalized.toLocaleLowerCase(),
-            )
-          ) {
-            continue;
-          }
-          exactEmergencyExcluded.add(normalized.toLocaleLowerCase());
-          exactEmergencyFallbackTopics.push(normalized);
-          if (exactEmergencyFallbackTopics.length === COFFEE_STARTER_TOPIC_COUNT) {
-            recordDeveloperTranscriptEvent({
-              kind: "tool",
-              purpose: "coffee_topic_candidate_ranking",
-              provider: provider.name,
-              model: diagnosticModel,
-              request: generationRequest,
-              rawOutput,
-              parsedOutput: {
-                rankedTopics: exactEmergencyFallbackTopics,
-                parsedCandidateCount: acceptedGeneratedTopicCount,
-                usedFallback: true,
-              },
-              streaming: false,
-              fallback: true,
-            });
-            return exactEmergencyFallbackTopics;
-          }
-        }
-      }
+      // A pre-start reroll is atomic: after one bounded repair request, do
+      // not manufacture replacement labels locally. The client intentionally
+      // retains the visible quartet and lets the player try again.
       recordDeveloperTranscriptEvent({
         kind: "tool",
         purpose: "coffee_topic_candidate_ranking",

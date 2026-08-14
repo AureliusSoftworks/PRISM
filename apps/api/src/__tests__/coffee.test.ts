@@ -4766,16 +4766,16 @@ describe("Coffee group foundation", () => {
   it("flags quartets drawn entirely from static topic pools as canned", () => {
     assert.equal(
       coffeeGroupStarterTopicsLookCanned([
-        "Power without cruelty",
+        "When does order need mercy?",
         "Relentless optimism on shift",
-        "Is free will an illusion?",
-        "When mercy has limits",
+        "Which truth deserves doubt?",
+        "Can forgiveness outlast command?",
       ]),
       true,
     );
     assert.equal(
       coffeeGroupStarterTopicsLookCanned([
-        "Power without cruelty",
+        "When does order need mercy?",
         "Can mercy run a kitchen?",
       ]),
       false,
@@ -9110,12 +9110,12 @@ describe("inferCoffeeStarterTopics", () => {
         return JSON.stringify({
           topics: [
             {
-              label: "Power with mercy",
+              label: "When does power need mercy?",
               kind: "reflective",
               rationale: "Vader and Jesus can reflect on authority and compassion.",
             },
             {
-              label: "Duty versus freedom",
+              label: "Who pays for freedom by force?",
               kind: "tension",
               rationale: "Their values create a useful disagreement.",
             },
@@ -9157,8 +9157,8 @@ describe("inferCoffeeStarterTopics", () => {
     });
 
     assert.deepEqual(topics, [
-      "Power with mercy",
-      "Duty versus freedom",
+      "When does power need mercy?",
+      "Who pays for freedom by force?",
       "Everyday acts of courage",
       "Mercy after command",
     ]);
@@ -9346,14 +9346,14 @@ describe("inferCoffeeStarterTopics", () => {
     );
   });
 
-  it("falls back to locally generated topics when reroll repair still returns an incomplete model set", async () => {
+  it("rejects an incomplete reroll repair instead of padding it locally", async () => {
     let calls = 0;
     const partialTopics = [
       "When interruption outruns accuracy",
       "Can precision survive bad timing?",
       "Who pays for public correction?",
     ];
-    const topics = await inferCoffeeStarterTopics({
+    await assert.rejects(() => inferCoffeeStarterTopics({
       group: [ALICE, BORIS],
       sessionSettings: normalizeCoffeeSessionSettings(undefined),
       personaRelevantOnly: false,
@@ -9366,28 +9366,23 @@ describe("inferCoffeeStarterTopics", () => {
           });
         },
       } as never,
-    });
+    }), /current topics are unchanged/i);
 
-    assert.equal(topics.length, 4);
     assert.ok(calls >= 2);
-    for (const topic of partialTopics) {
-      assert.ok(topics.includes(topic));
-    }
-    assert.ok(topics.every((topic) => topic !== ""));
   });
 
-  it("falls back to deterministic reroll topics when repair returns unusable payloads", async () => {
+  it("keeps the visible quartet when a persona-aware reroll repair stays unusable", async () => {
     let calls = 0;
-    const topics = await inferCoffeeStarterTopics({
+    await assert.rejects(() => inferCoffeeStarterTopics({
       group: [ALICE, BORIS],
       sessionSettings: normalizeCoffeeSessionSettings(undefined),
       personaRelevantOnly: true,
       requireCompleteGeneratedSet: true,
       excludedTopics: [
-        "The first practical test",
-        "A necessary compromise",
-        "The favorite exception",
-        "A promise under pressure",
+        "Which promise survives a deadline?",
+        "When does help become control?",
+        "Who pays for the shortcut?",
+        "What makes an apology count?",
       ],
       provider: {
         async generateResponse(): Promise<string> {
@@ -9400,21 +9395,14 @@ describe("inferCoffeeStarterTopics", () => {
               ],
             });
           }
-          if (calls === 2) {
-            return JSON.stringify({
-              candidates: [
-                "What are we really saying about this?",
-              ],
-            });
-          }
-          return JSON.stringify({ candidates: ["one", "two", "three"] });
+          return JSON.stringify({
+            candidates: ["What should the group discuss?"],
+          });
         },
       } as never,
-    });
+    }), /current topics are unchanged/i);
 
-    assert.equal(topics.length, 4);
     assert.ok(calls >= 2);
-    assert.ok(topics.every((topic) => !topic.includes("A necessary compromise")));
   });
 
   it("repairs a partial reroll before leaving the current topics unchanged", async () => {
@@ -9466,7 +9454,7 @@ describe("inferCoffeeStarterTopics", () => {
     ]);
   });
 
-  it("recovers a malformed reroll into a deterministic persona-safe quartet", async () => {
+  it("leaves a malformed reroll unchanged instead of fabricating replacement topics", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-topic-reroll-malformed";
     const silentBotA: CoffeeBotProfile = {
@@ -9494,24 +9482,26 @@ describe("inferCoffeeStarterTopics", () => {
       starterTopics: currentTopics,
     });
 
-    const topics = await refreshCoffeeConversationStarterTopics(
+    await assert.rejects(() => refreshCoffeeConversationStarterTopics(
       db,
       userId,
       created.conversation.id,
       currentTopics,
       {
-        auxiliaryProviderFactory: () =>
-          ({
-            async generateResponse(): Promise<string> {
-              return "Not valid JSON at all.";
-            },
-          }) as never,
+        auxiliaryProviderFactory: () => ({
+          async generateResponse(): Promise<string> {
+            return "Not valid JSON at all.";
+          },
+        }) as never,
       },
-    );
+    ), /current topics are unchanged/i);
 
-    assert.equal(topics.length, 4);
-    assert.deepEqual(topics, [...new Set(topics)]);
-    assert.ok(topics.every((topic) => !coffeeStarterTopicLabelIsCanned(topic)));
+    assert.deepEqual(currentTopics, [
+      "The first practical test",
+      "A necessary compromise",
+      "The favorite exception",
+      "A promise under pressure",
+    ]);
   });
 
   it("feeds attending bot memories into the starter-topic inference prompt", async () => {
@@ -9566,7 +9556,7 @@ describe("inferCoffeeStarterTopics", () => {
   it("keeps legacy starter-topic string arrays compatible", async () => {
     const provider = {
       async generateResponse(): Promise<string> {
-        return `{"topics":["Power with mercy","Duty versus freedom","Everyday acts of courage"]}`;
+        return `{"topics":["When does power need mercy?","Who pays for freedom by force?","Can courage survive comfort?"]}`;
       },
     };
 
@@ -9578,22 +9568,23 @@ describe("inferCoffeeStarterTopics", () => {
 
     assert.equal(topics.length, 4);
     assert.deepEqual(topics.slice(0, 3), [
-      "Power with mercy",
-      "Duty versus freedom",
-      "Everyday acts of courage",
+      "When does power need mercy?",
+      "Who pays for freedom by force?",
+      "Can courage survive comfort?",
     ]);
   });
 
-  it("filters generic, duplicate, and dangling starter-topic labels", async () => {
+  it("filters malformed, generic, self-referential, and duplicate starter-topic labels", async () => {
     const provider = {
       async generateResponse(): Promise<string> {
         return JSON.stringify({
           topics: [
             { label: "1. Worth unpacking", kind: "reflective" },
-            { label: "Power with mercy", kind: "reflective" },
-            { label: "Power with mercy.", kind: "tension" },
+            { label: "Duty versus freedom", kind: "reflective" },
+            { label: "What should the group discuss?", kind: "tension" },
+            { label: "Coffee topic for everyone", kind: "scenario" },
+            { label: "The world today", kind: "wildcard" },
             { label: "bold angle on Stoic ethics as", kind: "scenario" },
-            { label: "Duty versus freedom", kind: "tension" },
             { label: "Everyday courage under pressure", kind: "scenario" },
           ],
         });
@@ -9606,12 +9597,9 @@ describe("inferCoffeeStarterTopics", () => {
       sessionSettings: normalizeCoffeeSessionSettings(undefined),
     });
 
-    assert.deepEqual(topics, [
-      "Power with mercy",
-      "Duty versus freedom",
-      "Everyday courage under pressure",
-      "Power without cruelty",
-    ]);
+    assert.equal(topics.length, 4);
+    assert.ok(topics.includes("Everyday courage under pressure"));
+    assert.ok(topics.every((topic) => !/duty versus freedom|group discuss|coffee topic|the world today|worth unpacking/iu.test(topic)));
   });
 
   it("excludes the visible set when generating replacement topics", async () => {
@@ -9804,10 +9792,10 @@ describe("inferCoffeeStarterTopics", () => {
 
     assert.equal(topics.length, 4);
     assert.deepEqual(topics, [
-      "Power without cruelty",
-      "Duty versus forgiveness",
-      "When mercy has limits",
-      "Justice after surrender",
+      "When does order need mercy?",
+      "Can forgiveness outlast command?",
+      "Who pays for peace by force?",
+      "A pardon with consequences",
     ]);
     assert.ok(topics.every((topic) => !/angle on|Alice and Boris/i.test(topic)));
   });
