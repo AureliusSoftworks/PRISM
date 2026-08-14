@@ -4,6 +4,7 @@ import {
   COFFEE_ATMOSPHERE_SPEAKER_BLEND_MS,
   coffeeAtmosphereActivity,
   coffeeAtmosphereHexColor,
+  coffeeAtmosphereGraphicsQualityForVisibleBots,
   coffeeAtmosphereMixColor,
   coffeeAtmosphereMotes,
   coffeeAtmospherePalette,
@@ -12,6 +13,12 @@ import {
 } from "./coffeeAtmosphere.ts";
 
 describe("Coffee atmosphere model", () => {
+  it("caps only peripheral atmosphere quality at crowded tables", () => {
+    assert.equal(coffeeAtmosphereGraphicsQualityForVisibleBots("high", 3), "high");
+    assert.equal(coffeeAtmosphereGraphicsQualityForVisibleBots("high", 4), "medium");
+    assert.equal(coffeeAtmosphereGraphicsQualityForVisibleBots("high", 5), "low");
+    assert.equal(coffeeAtmosphereGraphicsQualityForVisibleBots("medium", 5), "low");
+  });
   it("creates deterministic session/group-seeded motes", () => {
     const first = coffeeAtmosphereMotes("group:violet-room", 28);
     const revisited = coffeeAtmosphereMotes("group:violet-room", 28);

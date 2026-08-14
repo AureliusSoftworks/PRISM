@@ -128,6 +128,7 @@ import {
   coffeePlayerDepartureEpilogueFocus,
   coffeePlayerDepartureEpilogueShouldStop,
   coffeePlayerDepartureEpilogueTurnCount,
+  coffeeReplyNeedsConversationContinuityRepair,
   coffeeIdentityMirrorPromptForSpeaker,
   coffeeIdentityMirrorStatesFromHistory,
   applyCoffeeIdentityMirrorIrritation,
@@ -7817,6 +7818,39 @@ describe("Coffee group foundation", () => {
     );
   });
 
+  it("never summarizes a bot that spoke as absent", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const group = createCoffeeGroup(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+    });
+    const current = await createCoffeeConversationFromGroup(db, userId, group.id, {});
+    db.prepare(
+      `INSERT INTO messages
+         (id, conversation_id, user_id, role, content, bot_id, created_at)
+       VALUES (?, ?, ?, 'assistant', ?, ?, ?)`,
+    ).run(
+      "alice-attended",
+      current.conversation.id,
+      userId,
+      "I was here.",
+      ALICE.id,
+      new Date().toISOString(),
+    );
+
+    const context = loadCoffeeAttendanceContext({
+      db,
+      userId,
+      conversationId: current.conversation.id,
+      coffeeGroupId: group.id,
+      group: [ALICE, BORIS],
+      absentBotIds: [ALICE.id],
+    });
+    assert.equal(context?.currentAbsentBotNames.includes("Alice") ?? false, false);
+  });
+
   it("accepts expanded group session durations through 30 minutes", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
@@ -11720,6 +11754,36 @@ describe("stripCoffeeSpeakerPrefix", () => {
   });
 });
 
+describe("Coffee conversational continuity", () => {
+  const prior = [
+    {
+      role: "assistant",
+      content: "Saving water matters only if it changes what we do next.",
+      botName: "Mira",
+    },
+  ] as any;
+
+  it("accepts a reply anchored to the prior claim that moves the exchange", () => {
+    assert.equal(
+      coffeeReplyNeedsConversationContinuityRepair(
+        "But saving water can become avoidance; who actually gets the next call?",
+        prior,
+      ),
+      false,
+    );
+  });
+
+  it("rejects a detached wise quip that does not converse", () => {
+    assert.equal(
+      coffeeReplyNeedsConversationContinuityRepair(
+        "Gratitude often shines brightest in dark moments, revealing resilience.",
+        prior,
+      ),
+      true,
+    );
+  });
+});
+
 describe("coffee prompt leak cleanup", () => {
   it("detects instruction-shaped prompt leakage", () => {
     assert.equal(
@@ -12623,6 +12687,27 @@ describe("coffee prompt leak cleanup", () => {
     assert.equal(
       coffeeReplyLooksUnfinished("The decision to temper one's"),
       true
+    );
+  });
+
+  it("rejects a different bot label attached to first-person departure but keeps real address", () => {
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "[Rowan](prism-bot://bot-rowan), Thanks, everyone. I should get going.",
+        "Sol",
+        560,
+        ["Rowan", "Sol"],
+      ),
+      "",
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "[Rowan](prism-bot://bot-rowan), but does gratitude change who gets the next call?",
+        "Sol",
+        560,
+        ["Rowan", "Sol"],
+      ),
+      "[Rowan](prism-bot://bot-rowan), but does gratitude change who gets the next call?",
     );
   });
 

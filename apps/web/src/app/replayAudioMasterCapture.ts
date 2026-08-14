@@ -42,6 +42,8 @@ type ReplayAudioMasterCaptureSession = {
    * state is active. Coffee leaves this false.
    */
   compactThinkingGaps: boolean;
+  /** Coffee-only: discard cancelled/orphan thinking without a delivered line. */
+  requireLinkedThinkingMessage: boolean;
   /** Set when neither pause nor stop/restart can hold the recorder. */
   compactThinkingGapsDisabled: boolean;
   /** Defensive depth for overlapping presented thinking owners. */
@@ -321,6 +323,8 @@ export async function startReplayAudioMasterCapture(
     markIntro?: boolean;
     /** Signal only — pause the master during thinking / interruption holds. */
     compactThinkingGaps?: boolean;
+    /** Persist thinking direction only when it resolves into a real message. */
+    requireLinkedThinkingMessage?: boolean;
     voiceSelection?: ReplayVoiceSelectionSnapshotV2;
   } = {},
 ): Promise<boolean> {
@@ -353,6 +357,8 @@ export async function startReplayAudioMasterCapture(
       totalPausedMs: 0,
       pausedAt: null,
       compactThinkingGaps: options.compactThinkingGaps === true,
+      requireLinkedThinkingMessage:
+        options.requireLinkedThinkingMessage === true,
       compactThinkingGapsDisabled: false,
       compactHoldDepth: 0,
       needsRecorderRestart: false,
@@ -730,6 +736,8 @@ export function endReplayThinkingPresentation(args: {
   const active = capture.thinkingByParticipant.get(participantId);
   if (!active) return;
   capture.thinkingByParticipant.delete(participantId);
+  const followingMessageId = args.followingMessageId?.trim() || null;
+  if (capture.requireLinkedThinkingMessage && !followingMessageId) return;
   const compact = captureShouldCompactThinkingGaps(capture);
   const rawEndMs = Math.round(
     typeof args.atMs === "number" && Number.isFinite(args.atMs)
@@ -753,7 +761,7 @@ export function endReplayThinkingPresentation(args: {
     audible: active.audible,
     camera: active.camera,
     segment: active.segment,
-    followingMessageId: args.followingMessageId?.trim() || null,
+    followingMessageId,
     endReason: args.reason ?? "completed",
   };
   markReplayDirectionEvent({

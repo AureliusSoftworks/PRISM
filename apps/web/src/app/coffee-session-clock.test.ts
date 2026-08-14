@@ -4,6 +4,7 @@ import {
   coffeeSessionClockHoldReasons,
   coffeeSessionClockShouldTick,
   coffeeSessionEndsAtAfterPausedClockTick,
+  coffeeSessionElapsedMs,
   reconcileCoffeeSessionClock,
   type CoffeeSessionClockPhase,
 } from "./coffee-session-clock.ts";
@@ -30,6 +31,21 @@ describe("coffee session clock", () => {
     assert.equal(coffeeSessionEndsAtAfterPausedClockTick(10_000, -250), 10_000);
     assert.equal(coffeeSessionEndsAtAfterPausedClockTick(null), null);
     assert.equal(coffeeSessionEndsAtAfterPausedClockTick(Number.NaN), null);
+  });
+
+  it("counts Auto Coffee elapsed time up from zero and clamps at duration", () => {
+    assert.equal(
+      coffeeSessionElapsedMs({ durationMinutes: 10, endsAtMs: 700_000, nowMs: 100_000 }),
+      0,
+    );
+    assert.equal(
+      coffeeSessionElapsedMs({ durationMinutes: 10, endsAtMs: 700_000, nowMs: 190_000 }),
+      90_000,
+    );
+    assert.equal(
+      coffeeSessionElapsedMs({ durationMinutes: 10, endsAtMs: 700_000, nowMs: 900_000 }),
+      600_000,
+    );
   });
 
   it("tracks model warmup separately from manual autoplay pause", () => {

@@ -218,6 +218,55 @@ export function coffeeLoopTimerOwnsAutoplayTurn(args: {
   return args.scheduledForMs === null || args.scheduledForMs > args.nowMs;
 }
 
+/** Remaining delay on Coffee's monotonic autoplay deadline. */
+export function coffeeMonotonicDeadlineRemainingMs(
+  deadlineMs: number,
+  nowMs: number,
+): number {
+  if (!Number.isFinite(deadlineMs) || !Number.isFinite(nowMs)) return 0;
+  return Math.max(0, deadlineMs - nowMs);
+}
+
+export interface CoffeeAwkwardSilencePressure {
+  pressure: number;
+  focus: string | null;
+}
+
+/**
+ * Wall-clock dead-air pressure. Any new player or bot message resets it by
+ * becoming the latest activity timestamp; it never mutates the saved topic.
+ */
+export function coffeeAwkwardSilencePressure(args: {
+  lastActivityAtMs: number | null;
+  sessionStartedAtMs: number | null;
+  nowMs: number;
+  savedTopic?: string | null;
+}): CoffeeAwkwardSilencePressure {
+  const anchorMs = args.lastActivityAtMs ?? args.sessionStartedAtMs;
+  if (anchorMs === null || !Number.isFinite(anchorMs) || !Number.isFinite(args.nowMs)) {
+    return { pressure: 0, focus: null };
+  }
+  const inactiveMs = Math.max(0, args.nowMs - anchorMs);
+  if (inactiveMs < 35_000) return { pressure: 0, focus: null };
+  const pressure = Math.min(1, (inactiveMs - 35_000) / 40_000);
+  const topic = args.savedTopic?.trim();
+  if (inactiveMs < 65_000) {
+    return {
+      pressure,
+      focus:
+        "An awkward silence has settled. Break it naturally by questioning, contrasting, or making concrete one specific claim from the visible exchange. Do not offer a generic aphorism.",
+    };
+  }
+  return {
+    pressure,
+    focus: [
+      "The prior exchange has stalled. Make one natural pivot to a concrete new angle",
+      topic ? `that grows from the saved topic ${JSON.stringify(topic)}` : "that grows from the saved topic",
+      "without renaming or rewriting that topic. Ask something answerable or introduce a specific object, choice, consequence, or action.",
+    ].join(" "),
+  };
+}
+
 export function coffeeVoicePlaybackOwnsAutoplayGate(args: {
   busy: boolean;
   activeMessageId: string | null | undefined;

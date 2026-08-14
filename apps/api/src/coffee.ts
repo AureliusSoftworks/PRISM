@@ -961,6 +961,51 @@ function coffeeReplyNeedsRepeatRepair(
   );
 }
 
+const COFFEE_CONTINUITY_STOP_WORDS = new Set([
+  "about", "after", "again", "also", "because", "being", "could", "from",
+  "have", "into", "just", "more", "most", "only", "really", "should",
+  "some", "than", "that", "their", "there", "these", "they", "thing",
+  "this", "those", "through", "very", "what", "when", "where", "which",
+  "while", "with", "would", "your",
+]);
+
+function coffeeContinuityTokens(value: string): Set<string> {
+  return new Set(
+    visibleCoffeeSpeechForValueScan(value)
+      .toLocaleLowerCase()
+      .match(/[\p{L}\p{N}]{4,}/gu)
+      ?.filter((token) => !COFFEE_CONTINUITY_STOP_WORDS.has(token)) ?? [],
+  );
+}
+
+/**
+ * Autonomous table turns must visibly pick up the prior bot's claim and move
+ * it somewhere. This rejects detached aphorisms even when their wording is
+ * technically fresh.
+ */
+export function coffeeReplyNeedsConversationContinuityRepair(
+  replyText: string,
+  history: readonly ChatMessage[],
+): boolean {
+  const latestPeer = [...history]
+    .reverse()
+    .find((message) => message.role === "assistant");
+  if (!latestPeer) return false;
+  const priorTokens = coffeeContinuityTokens(latestPeer.content);
+  if (priorTokens.size === 0) return false;
+  const replyTokens = coffeeContinuityTokens(replyText);
+  const hasConcreteAnchor = [...priorTokens].some((token) => replyTokens.has(token));
+  const priorName = latestPeer.botName?.trim();
+  const namesPriorSpeaker = Boolean(
+    priorName && new RegExp(`(?:^|[\\s([*])${escapeRegExp(priorName)}(?:$|[\\s,.:)!?*])`, "iu").test(replyText),
+  );
+  const movesExchange =
+    /\?/u.test(replyText) ||
+    /\*[^*]+\*/u.test(replyText) ||
+    /\b(?:but|yet|however|instead|because|unless|except|so|then|if|what|why|how|who|which|cost|consequence|tradeoff|example)\b/iu.test(replyText);
+  return !(hasConcreteAnchor || namesPriorSpeaker) || !movesExchange;
+}
+
 /**
  * Ensure every seated bot has a valid social snapshot.
  */
@@ -3375,6 +3420,28 @@ function coffeeReplyContainsKnownSpeakerLabel(
   return false;
 }
 
+function coffeeReplyMisattributesDepartureSpeaker(
+  raw: string,
+  speakerName: string | null | undefined,
+  knownSpeakerNames: readonly string[],
+): boolean {
+  if (
+    !/\b(?:i\s+(?:should|need to|have to|must|am going to|am gonna|'m going to|'m gonna)\s+(?:go|leave|head out|get going)|i'm heading out|i am heading out)\b/iu.test(raw)
+  ) {
+    return false;
+  }
+  const normalizedSpeaker = speakerName?.trim().toLocaleLowerCase() ?? "";
+  return knownSpeakerNames.some((name) => {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed.toLocaleLowerCase() === normalizedSpeaker) return false;
+    const escaped = escapeRegExp(trimmed);
+    return new RegExp(
+      `^(?:\\*[^*\\n]+\\*\\s*)?(?:\\[${escaped}\\]\\(prism-bot:\\/\\/[^)]+\\)|${escaped})\\s*[,：:]`,
+      "iu",
+    ).test(raw.trim());
+  });
+}
+
 /**
  * Normalize a raw speaker draft into something safe for the visible Coffee
  * table. Returning an empty string signals "do not show this".
@@ -3416,6 +3483,15 @@ export function sanitizeCoffeeTableReply(
   const withoutCupDrinkingActions = stripCoffeeCupDrinkingStageActions(withStageActionsSanitized);
   if (!withoutCupDrinkingActions) return "";
   if (coffeeReplyContainsKnownSpeakerLabel(withoutCupDrinkingActions, knownSpeakerNames)) {
+    return "";
+  }
+  if (
+    coffeeReplyMisattributesDepartureSpeaker(
+      withoutCupDrinkingActions,
+      speakerName,
+      knownSpeakerNames,
+    )
+  ) {
     return "";
   }
   const withoutQuoteMarks = stripCoffeeVisibleQuoteMarks(withoutCupDrinkingActions);
@@ -6912,8 +6988,27 @@ export function loadCoffeeAttendanceContext(args: {
   recentLimit?: number;
 }): CoffeeAttendanceContext | null {
   const attendingBotIds = args.group.map((bot) => bot.id);
+  const attendedRows = args.db
+    .prepare(
+      `SELECT DISTINCT bot_id
+         FROM messages
+        WHERE user_id = ?
+          AND conversation_id = ?
+          AND role = 'assistant'
+          AND bot_id IS NOT NULL`,
+    )
+    .all(args.userId, args.conversationId) as Array<{ bot_id: string | null }>;
+  const actuallyAttendedBotIds = new Set(
+    attendedRows.flatMap((row) =>
+      typeof row.bot_id === "string" && row.bot_id.trim() ? [row.bot_id] : [],
+    ),
+  );
   const currentAbsentBotIds = Array.from(
-    new Set(args.absentBotIds.filter((id) => id.trim().length > 0))
+    new Set(
+      args.absentBotIds.filter(
+        (id) => id.trim().length > 0 && !actuallyAttendedBotIds.has(id),
+      ),
+    ),
   );
   const recentRows =
     typeof args.coffeeGroupId === "string" && args.coffeeGroupId.trim().length > 0
@@ -12966,6 +13061,7 @@ export function buildSpeakerPrompt(args: {
         "Respond to one specific claim, image, disagreement, or question from that line before adding your own angle. Do not restart with a standalone topic monologue as if nobody just spoke.",
         "Use only what the visible line actually establishes. If you introduce a new premise, label it as your own thought and bridge it explicitly from a word or claim the table can see.",
         "A bare agreement is not enough; make the connection visible through your own worldview.",
+        "Name the exact noun, choice, or claim you are answering, then add at least one conversational move: a contrast, question, concrete consequence, example, or physical action. A fresh-sounding universal truth is not a reply.",
       ]
     : [];
 
@@ -17668,6 +17764,17 @@ async function generateCoffeeBotReply(args: {
   if (speakerUsesHardResponse || speakerMumblesForTurn) {
     socialSilenceExclusions.push("power_silence");
   }
+  const conversationalContinuityRequired =
+    turnKind === "autonomous" &&
+    !directPlayerObligation &&
+    addressedBotId !== speaker.id &&
+    !interruptionEvent &&
+    !crosstalkReclaim &&
+    !playerDepartureEpilogue &&
+    !coffeeDepartureOpportunityRequiresExit(departureOpportunity) &&
+    !emptyCupGroupWrapRequired &&
+    !activePoll &&
+    !speakerUsesHardResponse;
   const socialSilencePlan = planSocialSilenceV1({
     mode: "coffee",
     seed: `${row.id}:${speaker.id}:${history.length}:social-silence`,
@@ -17863,6 +17970,13 @@ async function generateCoffeeBotReply(args: {
             : "...",
         }];
   });
+  const coffeeReplyNeedsTurnRepair = (replyText: string): boolean =>
+    coffeeReplyNeedsRepeatRepair(replyText, speakerVisibleHistory) ||
+    (conversationalContinuityRequired &&
+      coffeeReplyNeedsConversationContinuityRepair(
+        replyText,
+        speakerVisibleHistory,
+      ));
   const latestTableMessageBeforePerception =
     coffeeBotPromptHistory(arrivalVisibleHistory).at(-1) ?? null;
   const latestVisibleTableMessage =
@@ -18358,7 +18472,7 @@ async function generateCoffeeBotReply(args: {
             !sanitized ||
             coffeeReplyLooksLikePromptLeak(sanitized) ||
             coffeeReplyIsLowValueTableLine(sanitized) ||
-            coffeeReplyNeedsRepeatRepair(sanitized, speakerVisibleHistory)
+            coffeeReplyNeedsTurnRepair(sanitized)
           ) {
             return { ok: false, reason: "invalid_output" as const };
           }
@@ -18546,7 +18660,7 @@ async function generateCoffeeBotReply(args: {
     !socialSilenceMarker &&
     !autoAttemptAccepted &&
     replyText &&
-    (coffeeReplyNeedsRepeatRepair(replyText, speakerVisibleHistory) ||
+    (coffeeReplyNeedsTurnRepair(replyText) ||
       coffeeReplyIsLowValueTableLine(replyText))
   ) {
     try {
@@ -18568,7 +18682,7 @@ async function generateCoffeeBotReply(args: {
     !socialSilenceMarker &&
     !autoAttemptAccepted &&
     (!replyText ||
-    coffeeReplyNeedsRepeatRepair(replyText, speakerVisibleHistory) ||
+    coffeeReplyNeedsTurnRepair(replyText) ||
     coffeeReplyIsLowValueTableLine(replyText))
   ) {
     replyText = buildCoffeeFreshFallbackBeat({

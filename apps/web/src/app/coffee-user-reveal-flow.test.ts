@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   coffeeArrivalAutoplayCanScheduleNow,
   coffeeArrivalAutoplayRetryDelayMs,
+  coffeeAwkwardSilencePressure,
   coffeeAutoplayForceTurnShouldRun,
   coffeeAutoplayWatchdogShouldWake,
   coffeeCenterFeedMessagesDuringPendingReveal,
@@ -10,6 +11,7 @@ import {
   coffeeDirectedMentionBotIds,
   coffeeEmptyTurnAutoplayRetryDelayMs,
   coffeeLoopTimerOwnsAutoplayTurn,
+  coffeeMonotonicDeadlineRemainingMs,
   coffeePendingSubmittedUserLineVisible,
   coffeePersistedUserLineOwnsPendingReveal,
   coffeeRevealPreparationMayCommit,
@@ -563,6 +565,36 @@ describe("coffee user reveal flow", () => {
       coffeeAutoplayForceTurnShouldRun({ ...activeRoom, hasPresentBot: false }),
       false,
     );
+  });
+
+  it("uses monotonic deadlines and bounded wall-clock silence pressure", () => {
+    assert.equal(coffeeMonotonicDeadlineRemainingMs(12_000, 10_500), 1_500);
+    assert.equal(coffeeMonotonicDeadlineRemainingMs(12_000, 13_000), 0);
+    assert.deepEqual(
+      coffeeAwkwardSilencePressure({
+        lastActivityAtMs: 20_000,
+        sessionStartedAtMs: 0,
+        nowMs: 54_999,
+        savedTopic: "Gratitude",
+      }),
+      { pressure: 0, focus: null },
+    );
+    const breaker = coffeeAwkwardSilencePressure({
+      lastActivityAtMs: 20_000,
+      sessionStartedAtMs: 0,
+      nowMs: 60_000,
+      savedTopic: "Gratitude",
+    });
+    assert.ok(breaker.pressure > 0 && breaker.pressure <= 1);
+    assert.match(breaker.focus ?? "", /awkward silence/u);
+    const pivot = coffeeAwkwardSilencePressure({
+      lastActivityAtMs: 20_000,
+      sessionStartedAtMs: 0,
+      nowMs: 90_000,
+      savedTopic: "Gratitude",
+    });
+    assert.equal(pivot.pressure, 0.875);
+    assert.match(pivot.focus ?? "", /without renaming or rewriting/u);
   });
 
   it("returns ordered unique seated bot mentions for directed Coffee rounds", () => {

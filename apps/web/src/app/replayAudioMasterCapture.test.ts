@@ -541,6 +541,71 @@ test("thinking intervals retain presentation timing, silence, interruption, over
   }
 });
 
+test("Coffee capture persists thinking only when it resolves into a message", async () => {
+  const originalWindow = globalThis.window;
+  const originalMediaRecorder = globalThis.MediaRecorder;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { AudioContext: FakeAudioContext },
+  });
+  Object.defineProperty(globalThis, "MediaRecorder", {
+    configurable: true,
+    value: FakeMediaRecorder,
+  });
+
+  try {
+    assert.equal(
+      await startReplayAudioMasterCapture("coffee-linked-thinking", {
+        markIntro: false,
+        compactThinkingGaps: true,
+        requireLinkedThinkingMessage: true,
+      }),
+      true,
+    );
+    startReplayThinkingPresentation({
+      sourceId: "coffee-linked-thinking",
+      participantId: "orphan",
+      audible: false,
+      camera: "wide",
+      segment: "live",
+      atMs: 100,
+    });
+    endReplayThinkingPresentation({
+      sourceId: "coffee-linked-thinking",
+      participantId: "orphan",
+      reason: "cancelled",
+      atMs: 300,
+    });
+    startReplayThinkingPresentation({
+      sourceId: "coffee-linked-thinking",
+      participantId: "speaker",
+      audible: false,
+      camera: "speaker",
+      segment: "live",
+      atMs: 400,
+    });
+    endReplayThinkingPresentation({
+      sourceId: "coffee-linked-thinking",
+      participantId: "speaker",
+      followingMessageId: "delivered-line",
+      atMs: 800,
+    });
+    const result = await stopReplayAudioMasterCapture("coffee-linked-thinking");
+    const thinking = result?.direction.filter((event) => event.kind === "thinking") ?? [];
+    assert.equal(thinking.length, 1);
+    assert.equal(thinking[0]?.sourceMessageId, "delivered-line");
+  } finally {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: originalWindow,
+    });
+    Object.defineProperty(globalThis, "MediaRecorder", {
+      configurable: true,
+      value: originalMediaRecorder,
+    });
+  }
+});
+
 test("Signal compactThinkingGaps pauses the master clock across thinking holds", async () => {
   const originalWindow = globalThis.window;
   const originalMediaRecorder = globalThis.MediaRecorder;

@@ -41,7 +41,7 @@ describe("Coffee departure presentation", () => {
     );
   });
 
-  it("keeps Review behind an awaited, ordered live departure wrap", () => {
+  it("keeps ordinary completion distinct from an actual player departure", () => {
     const finishStart = pageSource.indexOf("const finishCoffeeSession =");
     const finishEnd = pageSource.indexOf(
       "finishCoffeeSessionRef.current = finishCoffeeSession",
@@ -49,19 +49,18 @@ describe("Coffee departure presentation", () => {
     );
     const finishSource = pageSource.slice(finishStart, finishEnd);
 
-    assert.match(finishSource, /awaitEpilogue: true/u);
-    assert.match(
-      finishSource,
-      /coffeeDepartureRevealMessageIndexes\([\s\S]*?presentNextDepartureTurn/u,
-    );
-    assert.ok(
-      finishSource.indexOf("queueCoffeeReveal({") <
-        finishSource.indexOf('assignCoffeeSessionPhase("finished")'),
-    );
-    assert.match(pageSource, /Wrapping up at the table…/u);
+    assert.match(finishSource, /\/synopsis/u);
+    assert.doesNotMatch(finishSource, /\/depart/u);
+    assert.doesNotMatch(finishSource, /awaitEpilogue/u);
+    assert.match(pageSource, /recordCoffeePlayerDepartureOnExit/u);
+    assert.match(pageSource, /\/depart/u);
     assert.match(
       MODE_TUTORIALS.coffee.steps.map((step) => step.body).join(" "),
-      /Wrapping up keeps the live table visible while every generated departure line streams and speaks in order/u,
+      /without recording that the player left their chair/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.coffee.steps.map((step) => step.body).join(" "),
+      /timer starts at 0:00 and counts active elapsed table time upward/u,
     );
   });
 });

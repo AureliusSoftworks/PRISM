@@ -1727,7 +1727,11 @@ describe("mode tutorials", () => {
     );
     assert.match(
       joinStep?.body ?? "",
-      /Review waits until those goodbyes finish/u,
+      /creates Review without recording that the player left their chair/u,
+    );
+    assert.match(
+      joinStep?.body ?? "",
+      /only actually leaving the live table creates departure direction/u,
     );
     assert.match(
       joinStep?.body ?? "",

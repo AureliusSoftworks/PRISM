@@ -31304,6 +31304,44 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   pointer-events: none;
 }
 
+/* A calculation reticle keeps authored face-like spinner frames from reading
+   as a shrunken idle face. It belongs to presentation, not the saved glyph. */
+.zenLiveBotPresenceThinkingGlyphAnchor::before {
+  content: "";
+  position: absolute;
+  width: 1.9em;
+  height: 1.9em;
+  border: 1px dashed color-mix(in srgb, currentColor 72%, transparent);
+  border-left-color: transparent;
+  border-radius: 50%;
+  opacity: 0.58;
+  animation: coffeeThinkingReticle 2.4s steps(12, end) infinite;
+}
+
+.zenLiveBotPresenceThinkingGlyphAnchor::after {
+  content: "";
+  position: absolute;
+  width: 0.22em;
+  height: 0.22em;
+  right: -0.9em;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0.45em currentColor;
+  opacity: 0.78;
+}
+
+@keyframes coffeeThinkingReticle {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zenLiveBotPresenceThinkingGlyphAnchor::before {
+    animation: none;
+  }
+}
+
 .zenLiveBotPresenceThinkingGlyph[data-coffee-plate-thinking-spinner="true"] {
   --zen-live-bot-spinner-glow-color: var(--coffee-bot-color);
   --crt-face-edge-color: var(--zen-live-bot-spinner-glow-color);

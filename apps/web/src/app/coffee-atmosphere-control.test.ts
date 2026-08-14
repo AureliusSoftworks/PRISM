@@ -15,6 +15,10 @@ const captureSource = readFileSync(
   new URL("./replayAudioMasterCapture.ts", import.meta.url),
   "utf8",
 );
+const cssSource = readFileSync(
+  new URL("./page.module.css", import.meta.url),
+  "utf8",
+);
 const layerSource = readFileSync(
   new URL("./SessionAtmosphereLayer.tsx", import.meta.url),
   "utf8",
@@ -39,6 +43,11 @@ test("Coffee Jazz is a wired local-only atmosphere control with stations", () =>
     jazzSource,
     /never part of CoffeeSessionSettings, group snapshots, or faithful/u,
   );
+});
+
+test("Coffee thinking has a distinct calculation reticle", () => {
+  assert.match(cssSource, /\.zenLiveBotPresenceThinkingGlyphAnchor::before/u);
+  assert.match(cssSource, /coffeeThinkingReticle/u);
 });
 
 test("Coffee Jazz preference stays outside CoffeeSessionSettings persistence", () => {

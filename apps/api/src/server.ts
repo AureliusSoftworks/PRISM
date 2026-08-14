@@ -21460,6 +21460,10 @@ function buildRoutes(): RouteDefinition[] {
         typeof body.directedUserMessage === "string"
           ? body.directedUserMessage
           : undefined;
+      const autonomousFocus =
+        typeof body.autonomousFocus === "string"
+          ? body.autonomousFocus
+          : undefined;
       const userIsComposing = body.userIsComposing === true;
       const presentBotIds = Array.isArray(body.presentBotIds)
         ? body.presentBotIds.filter(
@@ -21536,6 +21540,8 @@ function buildRoutes(): RouteDefinition[] {
             directedSpeakerBotId,
             directedUserMessage,
             presentBotIds,
+            undefined,
+            autonomousFocus,
           ),
       );
       json(ctx.res, 200, {
@@ -21898,6 +21904,10 @@ function buildRoutes(): RouteDefinition[] {
         typeof body.directedUserMessage === "string"
           ? body.directedUserMessage
           : undefined;
+      const autonomousFocus =
+        typeof body.autonomousFocus === "string"
+          ? body.autonomousFocus
+          : undefined;
       const presentBotIds = Array.isArray(body.presentBotIds)
         ? body.presentBotIds.filter(
             (value): value is string =>
@@ -22024,6 +22034,8 @@ function buildRoutes(): RouteDefinition[] {
                 directedSpeakerBotId,
                 directedUserMessage,
                 presentBotIds,
+                undefined,
+                autonomousFocus,
               );
             },
           ),

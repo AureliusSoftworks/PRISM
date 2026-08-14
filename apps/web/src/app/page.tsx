@@ -473,6 +473,7 @@ import {
 import {
   coffeeArrivalAutoplayCanScheduleNow,
   coffeeArrivalAutoplayRetryDelayMs,
+  coffeeAwkwardSilencePressure,
   coffeeAutoplayForceTurnShouldRun,
   coffeeAutoplayWatchdogShouldWake,
   coffeeCenterFeedMessagesDuringPendingReveal,
@@ -480,6 +481,7 @@ import {
   coffeeDirectedMentionBotIds,
   coffeeEmptyTurnAutoplayRetryDelayMs,
   coffeeLoopTimerOwnsAutoplayTurn,
+  coffeeMonotonicDeadlineRemainingMs,
   coffeePendingSubmittedUserLineVisible,
   coffeeUserTableTypingShouldRestart,
   coffeePersistedUserLineOwnsPendingReveal,
@@ -496,9 +498,9 @@ import {
 import {
   coffeeSessionClockHoldReasons,
   coffeeSessionClockShouldTick,
+  coffeeSessionElapsedMs,
   reconcileCoffeeSessionClock,
 } from "./coffee-session-clock";
-import { coffeeDepartureRevealMessageIndexes } from "./coffee-departure-presentation";
 import { coffeePollTurnUpdateFromResponse } from "./coffee-poll-turn-response";
 import {
   coffeeGroupAttendanceCanStart,
@@ -64427,6 +64429,7 @@ function HomeContent(): React.JSX.Element {
       directedSpeakerBotId?: string,
       directedUserMessage?: string,
       presentationGate?: Promise<unknown>,
+      autonomousFocus?: string,
     ) => Promise<void>
   >(async () => {});
   const coffeeAutoplayLastForcedAtMsRef = useRef(0);
@@ -64995,6 +64998,7 @@ function HomeContent(): React.JSX.Element {
   };
   const coffeeLoopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const coffeeLoopDeadlineMsRef = useRef<number | null>(null);
+  const coffeeLoopMonotonicDeadlineMsRef = useRef<number | null>(null);
   const coffeeTranscriptCloseTimerRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
@@ -66070,6 +66074,7 @@ function HomeContent(): React.JSX.Element {
       const voiceSelection = freezeRecordingVoiceSelection("coffee", sourceId);
       const started = await startReplayAudioMasterCapture(sourceId, {
         compactThinkingGaps: true,
+        requireLinkedThinkingMessage: true,
         markIntro: false,
         voiceSelection,
       });
@@ -66593,13 +66598,16 @@ function HomeContent(): React.JSX.Element {
     const requestInFlight =
       coffeeTurnAbortRef.current !== null ||
       coffeeContinueAbortRef.current !== null;
-    const lastAssistantMessage = activeConversation
+    const lastTableActivityMessage = activeConversation
       ? [...activeConversation.messages]
           .reverse()
-          .find((message) => message.role === "assistant")
+          .find(
+            (message) =>
+              message.role === "assistant" || message.role === "user",
+          )
       : null;
-    const parsedLastAssistantAtMs = lastAssistantMessage
-      ? Date.parse(lastAssistantMessage.createdAt)
+    const parsedLastTableActivityAtMs = lastTableActivityMessage
+      ? Date.parse(lastTableActivityMessage.createdAt)
       : Number.NaN;
     const shouldForceTurn = coffeeAutoplayForceTurnShouldRun({
       hasConversation: activeConversation !== null,
@@ -66615,8 +66623,8 @@ function HomeContent(): React.JSX.Element {
       timerPresent,
       timerScheduledForMs: coffeeLoopDeadlineMsRef.current,
       sessionEndsAtMs: endsAt,
-      lastAssistantAtMs: Number.isFinite(parsedLastAssistantAtMs)
-        ? parsedLastAssistantAtMs
+      lastAssistantAtMs: Number.isFinite(parsedLastTableActivityAtMs)
+        ? parsedLastTableActivityAtMs
         : null,
       sessionStartedAtMs: coffeeSessionStartedAtRef.current,
       lastForcedAtMs: coffeeAutoplayLastForcedAtMsRef.current,
@@ -66628,10 +66636,26 @@ function HomeContent(): React.JSX.Element {
       }
       coffeeLoopTimerRef.current = null;
       coffeeLoopDeadlineMsRef.current = null;
+      coffeeLoopMonotonicDeadlineMsRef.current = null;
       coffeeAutoplayLastForcedAtMsRef.current = coffeeSessionClockMs;
       coffeeTurnRhythmStateRef.current = "idle";
       setCoffeeTurnRhythmState("idle");
-      void continueCoffeeSessionRef.current(activeConversation.id, endsAt);
+      const awkwardSilence = coffeeAwkwardSilencePressure({
+        lastActivityAtMs: Number.isFinite(parsedLastTableActivityAtMs)
+          ? parsedLastTableActivityAtMs
+          : null,
+        sessionStartedAtMs: coffeeSessionStartedAtRef.current,
+        nowMs: coffeeSessionClockMs,
+        savedTopic: activeConversation.coffeeTopic,
+      });
+      void continueCoffeeSessionRef.current(
+        activeConversation.id,
+        endsAt,
+        undefined,
+        undefined,
+        undefined,
+        awkwardSilence.focus ?? undefined,
+      );
       return;
     }
     const shouldWake = coffeeAutoplayWatchdogShouldWake({
@@ -71541,6 +71565,7 @@ function HomeContent(): React.JSX.Element {
         clearTimeout(coffeeLoopTimerRef.current);
         coffeeLoopTimerRef.current = null;
         coffeeLoopDeadlineMsRef.current = null;
+        coffeeLoopMonotonicDeadlineMsRef.current = null;
       }
       if (coffeeCooldownTimerRef.current) {
         clearTimeout(coffeeCooldownTimerRef.current);
@@ -79318,6 +79343,7 @@ function HomeContent(): React.JSX.Element {
       clearTimeout(coffeeLoopTimerRef.current);
       coffeeLoopTimerRef.current = null;
       coffeeLoopDeadlineMsRef.current = null;
+      coffeeLoopMonotonicDeadlineMsRef.current = null;
     }
     if (coffeeCooldownTimerRef.current) {
       clearTimeout(coffeeCooldownTimerRef.current);
@@ -125747,6 +125773,7 @@ function HomeContent(): React.JSX.Element {
       coffeeLoopTimerRef.current = null;
     }
     coffeeLoopDeadlineMsRef.current = null;
+    coffeeLoopMonotonicDeadlineMsRef.current = null;
   };
   const scheduleCoffeeLoopTimer = (
     callback: () => void,
@@ -125756,15 +125783,25 @@ function HomeContent(): React.JSX.Element {
     const boundedDelayMs = Number.isFinite(delayMs)
       ? Math.max(0, Math.round(delayMs))
       : 0;
-    const timer = setTimeout(() => {
-      if (coffeeLoopTimerRef.current === timer) {
-        coffeeLoopTimerRef.current = null;
-        coffeeLoopDeadlineMsRef.current = null;
-      }
-      callback();
-    }, boundedDelayMs);
-    coffeeLoopTimerRef.current = timer;
+    const monotonicDeadlineMs = performance.now() + boundedDelayMs;
+    coffeeLoopMonotonicDeadlineMsRef.current = monotonicDeadlineMs;
     coffeeLoopDeadlineMsRef.current = Date.now() + boundedDelayMs;
+    const runWhenDue = (): void => {
+      const remainingMs = coffeeMonotonicDeadlineRemainingMs(
+        monotonicDeadlineMs,
+        performance.now(),
+      );
+      if (remainingMs > 1) {
+        const continuation = setTimeout(runWhenDue, remainingMs);
+        coffeeLoopTimerRef.current = continuation;
+        return;
+      }
+      coffeeLoopTimerRef.current = null;
+      coffeeLoopDeadlineMsRef.current = null;
+      coffeeLoopMonotonicDeadlineMsRef.current = null;
+      callback();
+    };
+    coffeeLoopTimerRef.current = setTimeout(runWhenDue, boundedDelayMs);
   };
   const scheduleCoffeeListenerReaction = (args: {
     message: CoffeeConversationMessage;
@@ -127992,9 +128029,8 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     coffeeSessionFinishInFlightRef.current = sessionId;
-    // Stop new live work immediately, but keep the table visible while its
-    // private epilogue is generated and presented. Review begins only after
-    // every new assistant departure turn has been heard and streamed.
+    // Ordinary completion closes the session in place. Only an explicit
+    // navigation/early-exit path has authority to persist playerDeparture.
     clearCoffeeArrivalTimer();
     clearCoffeeLoopTimer();
     resetCoffeeRhythm();
@@ -128016,68 +128052,24 @@ function HomeContent(): React.JSX.Element {
         ) {
           const response = await api<{
             ok: true;
-            epilogueComplete: boolean;
             conversation: CoffeeConversationState;
-          }>(`/api/coffee/sessions/${encodeURIComponent(sessionId)}/depart`, {
+          }>(`/api/coffee/sessions/${encodeURIComponent(sessionId)}/synopsis`, {
             method: "POST",
             body: JSON.stringify({
-              awaitEpilogue: true,
               preferredProvider: coffeeSessionProvider,
               responseMode: coffeeResponseModeForSendRef.current,
-              sessionRemainingMs: currentCoffeeSessionRemainingMs(),
               ...(coffeeSessionModelOverride
                 ? { modelOverride: coffeeSessionModelOverride }
                 : {}),
             }),
           });
-          const revealMessageIndexes = coffeeDepartureRevealMessageIndexes({
-            before: activeConversation.messages,
-            after: response.conversation.messages,
-          });
-          if (revealMessageIndexes.length > 0) {
-            await new Promise<void>((resolve) => {
-              const presentNextDepartureTurn = (position: number): void => {
-                const messageIndex = revealMessageIndexes[position];
-                const message = response.conversation.messages[messageIndex];
-                const speakerBotId = message?.botId?.trim();
-                if (!message || !speakerBotId) {
-                  if (position + 1 < revealMessageIndexes.length) {
-                    presentNextDepartureTurn(position + 1);
-                  } else {
-                    resolve();
-                  }
-                  return;
-                }
-                queueCoffeeReveal({
-                  conversation: {
-                    ...response.conversation,
-                    messages: response.conversation.messages.slice(
-                      0,
-                      messageIndex + 1,
-                    ),
-                  },
-                  speakerBotId,
-                  includeCooldown: false,
-                  prepareNextTurn: false,
-                  onReveal: () => {
-                    if (position + 1 < revealMessageIndexes.length) {
-                      presentNextDepartureTurn(position + 1);
-                    } else {
-                      resolve();
-                    }
-                  },
-                });
-              };
-              presentNextDepartureTurn(0);
-            });
-          }
           coffeeConversationRef.current = response.conversation;
           setCoffeeConversation((current) =>
             current?.id === sessionId ? response.conversation : current,
           );
         }
       } catch (error) {
-        console.warn("[coffee] failed to begin final table wrap", error);
+        console.warn("[coffee] failed to generate final session synopsis", error);
       } finally {
         assignCoffeeSessionEndsAtMs(null);
         setCoffeeActivePoll(null);
@@ -128129,6 +128121,7 @@ function HomeContent(): React.JSX.Element {
     const startAutonomousTurn = () => {
       coffeeLoopTimerRef.current = null;
       coffeeLoopDeadlineMsRef.current = null;
+      coffeeLoopMonotonicDeadlineMsRef.current = null;
       if (
         coffeeAutoplayPausedRef.current ||
         coffeeModelWarmupRef.current !== null
@@ -130344,6 +130337,7 @@ function HomeContent(): React.JSX.Element {
     directedSpeakerBotId?: string,
     directedUserMessage?: string,
     presentationGate?: Promise<unknown>,
+    autonomousFocus?: string,
   ) => {
     if (
       !conversationId ||
@@ -130421,6 +130415,7 @@ function HomeContent(): React.JSX.Element {
           directedSpeakerBotId,
           directedUserMessage,
           presentationGate,
+          autonomousFocus,
         );
       };
       const presentBotIds = currentCoffeePresentBotIdsForRequest(
@@ -130439,6 +130434,9 @@ function HomeContent(): React.JSX.Element {
         ...(directedSpeakerBotId ? { directedSpeakerBotId } : {}),
         ...(directedSpeakerBotId && directedUserMessage?.trim()
           ? { directedUserMessage: directedUserMessage.trim() }
+          : {}),
+        ...(autonomousFocus?.trim()
+          ? { autonomousFocus: autonomousFocus.trim() }
           : {}),
         ...(coffeeSessionModelOverride
           ? { modelOverride: coffeeSessionModelOverride }
@@ -130511,10 +130509,11 @@ function HomeContent(): React.JSX.Element {
               void continueCoffeeSession(
                 conversationId,
                 endsAtLive,
-                directedSpeakerBotId,
-                directedUserMessage,
-                presentationGate,
-              );
+              directedSpeakerBotId,
+              directedUserMessage,
+              presentationGate,
+              autonomousFocus,
+            );
             }, retryDelayMs);
           } else if (coffeeSessionPhaseRef.current === "arriving") {
             scheduleCoffeeArrivalAutonomousTurn(
@@ -134486,6 +134485,11 @@ function HomeContent(): React.JSX.Element {
       !previewingSession &&
       coffeeSessionPhase !== "topic" &&
       coffeeSessionPhase !== "finished";
+    const coffeeAutoplayElapsedMs = coffeeSessionElapsedMs({
+      durationMinutes: coffeeConversation?.coffeeSessionDurationMinutes,
+      endsAtMs: coffeeSessionEndsAtMs,
+      nowMs: coffeeSessionClockMs,
+    });
     /** Compact table only before a session exists — once a conversation is loaded, use full-size assets. */
     const compactCoffeeStage =
       coffeeSessionPhase === "selecting" && coffeeConversation === null;
@@ -135077,6 +135081,7 @@ function HomeContent(): React.JSX.Element {
               activeSpeakerColor={activeTableSpeakerColor}
               replayActive={coffeeReplayActive}
               graphicsQuality={graphicsQuality}
+              visibleBotCount={coffeeSessionVisibleBotCount}
             />
             <div className={styles.coffeeTableGlow} aria-hidden="true" />
             <div className={styles.coffeeTableAsset} aria-hidden="true" />
@@ -137290,7 +137295,7 @@ function HomeContent(): React.JSX.Element {
                     ? "The table is paused while Coffee waits to recover."
                     : "Bots take turns naturally as the conversation unfolds."}
             </p>
-            {coffeeSessionEndsAtMs != null &&
+            {coffeeAutoplayElapsedMs != null &&
             (coffeeSessionPhase === "live" ||
               coffeeSessionPhase === "arriving") ? (
               <p
@@ -137299,18 +137304,16 @@ function HomeContent(): React.JSX.Element {
                 aria-live="polite"
                 aria-label={
                   coffeeAutoplayPaused
-                    ? `${formatCoffeeSessionRemainingMs(coffeeSessionEndsAtMs - coffeeSessionClockMs)} remaining; temporarily paused`
-                    : `${formatCoffeeSessionRemainingMs(coffeeSessionEndsAtMs - coffeeSessionClockMs)} remaining in this coffee session`
+                    ? `${formatCoffeeSessionRemainingMs(coffeeAutoplayElapsedMs)} elapsed; temporarily paused`
+                    : `${formatCoffeeSessionRemainingMs(coffeeAutoplayElapsedMs)} elapsed in this Auto Coffee session`
                 }
               >
                 <span className={styles.coffeeAutoplayDockTimerValue}>
-                  {formatCoffeeSessionRemainingMs(
-                    coffeeSessionEndsAtMs - coffeeSessionClockMs,
-                  )}
+                  {formatCoffeeSessionRemainingMs(coffeeAutoplayElapsedMs)}
                 </span>
                 <span className={styles.coffeeAutoplayDockTimerSuffix}>
                   {" "}
-                  left
+                  elapsed
                 </span>
               </p>
             ) : null}

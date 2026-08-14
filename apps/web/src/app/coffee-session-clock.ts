@@ -44,6 +44,27 @@ export function coffeeSessionEndsAtAfterPausedClockTick(
   return endsAtMs + elapsedMs;
 }
 
+/** Active session time shown by Auto Coffee, clamped from 0 to its duration. */
+export function coffeeSessionElapsedMs(args: {
+  durationMinutes: number | null | undefined;
+  endsAtMs: number | null | undefined;
+  nowMs: number;
+}): number | null {
+  if (
+    typeof args.durationMinutes !== "number" ||
+    !Number.isFinite(args.durationMinutes) ||
+    args.durationMinutes <= 0 ||
+    typeof args.endsAtMs !== "number" ||
+    !Number.isFinite(args.endsAtMs) ||
+    !Number.isFinite(args.nowMs)
+  ) {
+    return null;
+  }
+  const durationMs = Math.max(0, args.durationMinutes * 60_000);
+  const remainingMs = Math.max(0, Math.min(durationMs, args.endsAtMs - args.nowMs));
+  return Math.max(0, Math.min(durationMs, durationMs - remainingMs));
+}
+
 export interface CoffeeSessionClockReconciliation {
   elapsedMs: number;
   nextEndsAtMs: number | null;

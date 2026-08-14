@@ -7,6 +7,7 @@ import { CoffeeAtmosphereController } from "./CoffeeAtmosphereController";
 import { PrismSceneHost, type PrismSceneHostReadyContext } from "./PrismSceneHost";
 import {
   coffeeAtmosphereActivity,
+  coffeeAtmosphereGraphicsQualityForVisibleBots,
   type CoffeeAtmospherePhase,
   type CoffeeAtmosphereTheme,
 } from "./coffeeAtmosphere";
@@ -25,6 +26,7 @@ export interface CoffeeAtmosphereSceneProps {
   activeSpeakerColor: string | null;
   replayActive: boolean;
   graphicsQuality: GraphicsQuality;
+  visibleBotCount: number;
 }
 
 type CoffeeAtmosphereRendererStatus =
@@ -57,7 +59,12 @@ export function CoffeeAtmosphereScene(
   const controllerRef = useRef<CoffeeAtmosphereController | null>(null);
   const readyContextRef = useRef<PrismSceneHostReadyContext | null>(null);
   const latestPropsRef = useRef(semanticState);
-  const initialGraphicsQualityRef = useRef(props.graphicsQuality);
+  const initialGraphicsQualityRef = useRef(
+    coffeeAtmosphereGraphicsQualityForVisibleBots(
+      props.graphicsQuality,
+      props.visibleBotCount,
+    ),
+  );
   const mountedRef = useRef(false);
   const [rendererStatus, setRendererStatus] =
     useState<CoffeeAtmosphereRendererStatus>("initializing");
@@ -146,9 +153,14 @@ export function CoffeeAtmosphereScene(
 
   useEffect(() => {
     hostRef.current?.setQualityCeiling(
-      prismSceneQualityCeilingForGraphicsQuality(props.graphicsQuality),
+      prismSceneQualityCeilingForGraphicsQuality(
+        coffeeAtmosphereGraphicsQualityForVisibleBots(
+          props.graphicsQuality,
+          props.visibleBotCount,
+        ),
+      ),
     );
-  }, [props.graphicsQuality]);
+  }, [props.graphicsQuality, props.visibleBotCount]);
 
   useEffect(() => {
     latestPropsRef.current = semanticState;
