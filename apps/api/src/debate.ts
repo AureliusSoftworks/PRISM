@@ -123,6 +123,7 @@ import {
   normalizeAutoRouteDecisionV1,
   normalizeAutoFallbackModelRef,
   normalizeProviderReasoningEffort,
+  modelSupportsTurboMode,
   resolveDebateForumRoundPlan,
   normalizeBotAudioVoiceProfileV1,
   parseStoredBotPrompt,
@@ -4247,6 +4248,39 @@ function assertMutation(
     );
   }
   return { session, idempotencyKey, replay: null };
+}
+
+/**
+ * Turbo is the one routing preference an open Debate may revise. The model
+ * and effort remain sealed; callers must separately ensure no turn is being
+ * generated or held in a preparation buffer.
+ */
+export function updateDebateSessionTurbo(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  request: { expectedRevision: number; idempotencyKey: string; turbo: unknown },
+): DebateSessionV1 {
+  const checked = assertMutation(db, userId, sessionId, request);
+  if (checked.replay) return checked.replay;
+  const session = checked.session;
+  if (session.status === "completed" || session.status === "cancelled") {
+    throw new HttpError(409, "This Debate is already finished.");
+  }
+  if (typeof request.turbo !== "boolean") {
+    throw new HttpError(400, "Turbo must be true or false.");
+  }
+  if (!modelSupportsTurboMode(session.provider, session.model)) {
+    throw new HttpError(400, "Turbo is unavailable for this model.");
+  }
+  return commitMutation(
+    db,
+    userId,
+    session,
+    { ...session, lastTurbo: request.turbo },
+    checked.idempotencyKey,
+    [],
+  );
 }
 
 function maxDebateEventSequence(

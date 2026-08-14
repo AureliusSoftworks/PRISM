@@ -69,6 +69,18 @@ const presentation = readFileSync(
 );
 
 describe("Debate experience", () => {
+  it("keeps model and effort read-only while exposing guarded session Turbo controls", () => {
+    assert.match(source, /modelSupportsTurboMode/u);
+    assert.match(source, /updateSessionTurbo/u);
+    assert.match(source, /\/api\/debates\/\$\{encodeURIComponent\(sessionId\)\}\/turbo/u);
+    assert.match(source, /session\.preparing === true[\s\S]{0,100}session\.baking === true/u);
+    assert.match(source, /automaticTurnPreparationSessionId === session\.id/u);
+    assert.match(source, /archiveTurboToggle/u);
+    assert.match(source, /session\.status !== "completed"/u);
+    assert.match(source, /turboToggle=\{\{/u);
+    assert.match(css, /\.archiveTurboToggle:disabled/u);
+  });
+
   it("maps frozen source provenance to stable physical evidence props", () => {
     assert.equal(debateEvidenceSourcePropKind({ id: "brave-2" }), "brave");
     assert.equal(debateEvidenceSourcePropKind({ id: "url-1" }), "url");

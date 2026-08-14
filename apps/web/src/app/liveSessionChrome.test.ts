@@ -87,6 +87,9 @@ test("live session chrome mounts model chip and theme-aware watermark", () => {
   assert.match(source, /data-live-session-model-chip="true"/u);
   assert.match(source, /MODEL_EFFORT_ICON_PATHS\[effortKey\]/u);
   assert.match(source, /modelChipTurbo/u);
+  assert.match(source, /turboToggle/u);
+  assert.match(source, /Turbo changes only future ungenerated Debate turns/u);
+  assert.match(css, /\.modelChipTurboToggle/u);
   assert.match(source, /data-live-session-watermark="true"/u);
   assert.match(source, /theme === "light" \? "#000000" : "#ffffff"/u);
   assert.match(css, /opacity:\s*0\.5/u);

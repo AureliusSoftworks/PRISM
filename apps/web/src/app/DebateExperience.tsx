@@ -67,6 +67,7 @@ import {
   debateSessionAwaitingDeferredStart,
   debateSessionAwaitingFirstPresentation,
   debateSpectatorAwaitingFirstWatch,
+  modelSupportsTurboMode,
   normalizeBotAudioVoiceControl,
   normalizeBotAudioVoiceProfileV1,
   hexToHsl,
@@ -5040,6 +5041,11 @@ export function DebateExperience(
     setAudiencePressurePresentationEventId,
   ] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [turboMutationSessionId, setTurboMutationSessionId] = useState<
+    string | null
+  >(null);
+  const [automaticTurnPreparationSessionId, setAutomaticTurnPreparationSessionId] =
+    useState<string | null>(null);
   const [newDuelGenerateBusy, setNewDuelGenerateBusy] = useState(false);
   const [motionOptionsBusy, setMotionOptionsBusy] = useState(false);
   const [inventWarmup, setInventWarmup] = useState<{
@@ -5722,6 +5728,64 @@ export function DebateExperience(
       }
     }
   }, [request]);
+
+  const updateSessionTurbo = useCallback(
+    async (sessionId: string, turbo: boolean, knownSession?: DebateSessionV1) => {
+      if (turboMutationSessionId) return;
+      setTurboMutationSessionId(sessionId);
+      setError(null);
+      try {
+        const session =
+          knownSession ??
+          (
+            await request<{ session: DebateSessionV1 }>(
+              `/api/debates/${encodeURIComponent(sessionId)}?perspective=live`,
+            )
+          ).session;
+        const result = await request<{ session: DebateSessionV1 }>(
+          `/api/debates/${encodeURIComponent(sessionId)}/turbo`,
+          requestBody({
+            turbo,
+            expectedRevision: session.revision,
+            idempotencyKey: nextMutationKey("debate-session-turbo"),
+          }),
+        );
+        if (!mountedRef.current) return;
+        activeSessionRef.current =
+          activeSessionRef.current?.id === result.session.id
+            ? result.session
+            : activeSessionRef.current;
+        setActiveSession((current) =>
+          current?.id === result.session.id ? result.session : current,
+        );
+        setSessions((current) =>
+          current.map((entry) =>
+            entry.id === result.session.id
+              ? {
+                  ...entry,
+                  status: result.session.status,
+                  phase: result.session.phase,
+                  turbo: result.session.lastTurbo,
+                  updatedAt: result.session.updatedAt,
+                }
+              : entry,
+          ),
+        );
+      } catch (caught) {
+        if (mountedRef.current) {
+          setError(
+            caught instanceof Error
+              ? caught.message
+              : "Turbo could not change for this Debate.",
+          );
+          void loadSessions();
+        }
+      } finally {
+        if (mountedRef.current) setTurboMutationSessionId(null);
+      }
+    },
+    [loadSessions, nextMutationKey, request, turboMutationSessionId],
+  );
 
   useEffect(() => {
     mountedRef.current = true;
@@ -10491,6 +10555,9 @@ export function DebateExperience(
     (reason: string): void => {
       const prepared = preparedTurnRef.current;
       preparedTurnRef.current = null;
+      setAutomaticTurnPreparationSessionId((current) =>
+        !prepared || current === prepared.sessionId ? null : current,
+      );
       if (!prepared) return;
       void props
         .request(`/api/turn-preparations/${encodeURIComponent(prepared.id)}`, {
@@ -10516,6 +10583,7 @@ export function DebateExperience(
       discardPreparedTurn("Superseded by the next automatic Debate turn.");
       const expectedSessionId = session.id;
       const expectedRevision = session.revision;
+      setAutomaticTurnPreparationSessionId(expectedSessionId);
       void props
         .request<{ preparation: PreparedTurnV1 }>(
           `/api/debates/${encodeURIComponent(session.id)}/turn-preparations`,
@@ -10542,6 +10610,9 @@ export function DebateExperience(
             current.stateCursor.revision !== expectedRevision ||
             current.phase !== "ready"
           ) {
+            setAutomaticTurnPreparationSessionId((current) =>
+              current === expectedSessionId ? null : current,
+            );
             void props
               .request(
                 `/api/turn-preparations/${encodeURIComponent(current.id)}`,
@@ -10559,7 +10630,11 @@ export function DebateExperience(
             revision: expectedRevision,
           };
         })
-        .catch(() => undefined);
+        .catch(() => {
+          setAutomaticTurnPreparationSessionId((current) =>
+            current === expectedSessionId ? null : current,
+          );
+        });
     },
     [discardPreparedTurn, onPrefetchPreparedUtterance, props],
   );
@@ -12084,6 +12159,9 @@ export function DebateExperience(
           prepared.revision === previous.revision
         ) {
           preparedTurnRef.current = null;
+          setAutomaticTurnPreparationSessionId((current) =>
+            current === previous.id ? null : current,
+          );
           try {
             result = await request<{ session: DebateSessionV1 }>(
               `/api/turn-preparations/${encodeURIComponent(prepared.id)}/commit`,
@@ -15242,6 +15320,18 @@ export function DebateExperience(
     const metaChips = debateArchiveMetaChips(session);
     const modelLabel = debateArchiveModelLabel(session);
     const effortLevel = debateArchiveEffortLevel(session);
+    const archiveTurboSupported = modelSupportsTurboMode(
+      session.provider ?? "local",
+      session.model ?? "",
+    );
+    const archiveTurboDisabled =
+      busy ||
+      turboMutationSessionId === session.id ||
+      session.preparing === true ||
+      session.baking === true ||
+      !archiveTurboSupported ||
+      session.status === "completed" ||
+      session.status === "cancelled";
     const castColors = session.castColors ?? [];
     const forAdvocateVisual = session.advocateVisuals?.find(
       (advocate) => advocate.sideId === "for",
@@ -15438,6 +15528,27 @@ export function DebateExperience(
                   {session.turbo ? <span aria-hidden="true">🔥</span> : null}
                   <span>{DEBATE_ARCHIVE_EFFORT_LABELS[effortLevel]}</span>
                 </span>
+                {session.status !== "completed" &&
+                session.status !== "cancelled" ? (
+                  <button
+                    type="button"
+                    className={styles.archiveTurboToggle}
+                    disabled={archiveTurboDisabled}
+                    onClick={() =>
+                      void updateSessionTurbo(session.id, !session.turbo)
+                    }
+                    aria-label={`Turn Turbo ${session.turbo ? "off" : "on"} for ${session.title}`}
+                    title={
+                      !archiveTurboSupported
+                        ? "Turbo is unavailable for this saved model."
+                        : session.preparing || session.baking
+                          ? "Turbo is locked while future Debate dialogue is generating."
+                          : "Turbo changes only future ungenerated Debate turns."
+                    }
+                  >
+                    {session.turbo ? "🔥 Turbo on" : "Turbo off"}
+                  </button>
+                ) : null}
               </div>
             </div>
             {session.synopsisText ? (
@@ -22620,6 +22731,19 @@ export function DebateExperience(
       effort: session.lastReasoningEffort ?? "auto",
       turbo: session.lastTurbo,
     });
+    const liveTurboSupported = modelSupportsTurboMode(
+      session.provider,
+      session.model,
+    );
+    const liveTurboDisabled =
+      busy ||
+      turboMutationSessionId === session.id ||
+      automaticTurnPreparationSessionId === session.id ||
+      session.liveBake?.status === "baking" ||
+      view === "baking" ||
+      !liveTurboSupported ||
+      session.status === "completed" ||
+      session.status === "cancelled";
     const spectatorAwaitingFirstWatch =
       debateSpectatorAwaitingFirstWatch(session);
     const awaitingDeferredStart = debateSessionAwaitingDeferredStart(session);
@@ -23761,6 +23885,10 @@ export function DebateExperience(
                 <LiveSessionModelChip
                   {...resolvedSessionRoutingChip}
                   className={styles.liveRoutingChip}
+                  turboToggle={{
+                    disabled: liveTurboDisabled,
+                    onChange: (turbo) => void updateSessionTurbo(session.id, turbo, session),
+                  }}
                 />
               </div>
               <h1 data-debate-motion-title="true" title={session.motion.motion}>

@@ -223,6 +223,7 @@ import {
   listDebateSessionExhibitAssets,
   attachDebateExhibitSprite,
   updateDebateExhibitEmoji,
+  updateDebateSessionTurbo,
   orderDebateAudience,
   pauseDebateSession,
   pauseDebateSessionWithPersona,
@@ -16332,7 +16333,15 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       json(ctx.res, 200, {
         ok: true,
-        sessions: listDebateSessions(db, userId),
+        sessions: listDebateSessions(db, userId).map((session) => ({
+          ...session,
+          preparing: turnPreparationRegistry.hasActiveSession(
+            userId,
+            "debate",
+            session.id,
+          ),
+          baking: liveBakeJobs.isDebateRunning(userId, session.id),
+        })),
       });
     }),
     route("GET", "/api/debates/:id", async (ctx) => {
@@ -16344,6 +16353,32 @@ function buildRoutes(): RouteDefinition[] {
           ctx.query.get("perspective") === "replay" ? "replay" : "live",
         ),
       });
+    }),
+    route("POST", "/api/debates/:id/turbo", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (
+        turnPreparationRegistry.hasActiveSession(
+          userId,
+          "debate",
+          ctx.params.id,
+        )
+      ) {
+        throw new HttpError(
+          409,
+          "Turbo cannot change while a Debate turn is prepared or generating.",
+        );
+      }
+      if (liveBakeJobs.isDebateRunning(userId, ctx.params.id)) {
+        throw new HttpError(409, "Turbo cannot change while this Debate is baking.");
+      }
+      const session = updateDebateSessionTurbo(
+        db,
+        userId,
+        ctx.params.id,
+        body as Parameters<typeof updateDebateSessionTurbo>[3],
+      );
+      json(ctx.res, 200, { ok: true, session: debateSessionForPlayer(session) });
     }),
     route("GET", "/api/debates/:id/exhibits", async (ctx) => {
       const userId = requireAuth(ctx);

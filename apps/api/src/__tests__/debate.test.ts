@@ -46,6 +46,7 @@ import {
   attachDebateExhibitSprite,
   bufferDebateArchiveReturn,
   updateDebateExhibitEmoji,
+  updateDebateSessionTurbo,
   orderDebateAudience,
   pauseDebateSession,
   pauseDebateSessionWithPersona,
@@ -2102,6 +2103,110 @@ describe("Debate engine", () => {
         frozenOverrideSource,
         /modelSelectionKind === "auto"/u,
       );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("changes only Turbo for an open Debate with revision and model guards", async () => {
+    const db = createTestDb();
+    try {
+      const debateRuntime = runtime();
+      debateRuntime.preferredProvider = "openai";
+      debateRuntime.local = {
+        provider: new DebateProviderStub(),
+        providerName: "openai",
+        model: "gpt-5.6",
+        reasoningEffort: "max",
+      };
+      const created = await createJudgeDebate(db, debateRuntime, {
+        deferStart: true,
+        idempotencyKey: "turbo-mutation:create",
+      });
+      const frozen = {
+        provider: created.provider,
+        model: created.model,
+        effort: created.lastReasoningEffort,
+        events: created.events,
+      };
+      const changed = updateDebateSessionTurbo(db, "user-1", created.id, {
+        expectedRevision: created.revision,
+        idempotencyKey: "turbo-mutation:on",
+        turbo: true,
+      });
+      assert.equal(changed.lastTurbo, true);
+      assert.equal(changed.revision, created.revision + 1);
+      assert.deepEqual(
+        {
+          provider: changed.provider,
+          model: changed.model,
+          effort: changed.lastReasoningEffort,
+          events: changed.events,
+        },
+        frozen,
+      );
+      assert.deepEqual(
+        updateDebateSessionTurbo(db, "user-1", created.id, {
+          expectedRevision: created.revision,
+          idempotencyKey: "turbo-mutation:on",
+          turbo: true,
+        }),
+        changed,
+      );
+      assert.throws(
+        () =>
+          updateDebateSessionTurbo(db, "user-1", created.id, {
+            expectedRevision: created.revision,
+            idempotencyKey: "turbo-mutation:unsupported",
+            turbo: false,
+          }),
+        (error: unknown) =>
+          error instanceof HttpError && error.statusCode === 409,
+      );
+      db.prepare(
+        "UPDATE debate_sessions SET session_json = ? WHERE id = ? AND user_id = ?",
+      ).run(
+        JSON.stringify({
+          ...changed,
+          provider: "local",
+          model: "debate-test",
+        }),
+        created.id,
+        "user-1",
+      );
+      assert.throws(
+        () =>
+          updateDebateSessionTurbo(db, "user-1", created.id, {
+            expectedRevision: changed.revision,
+            idempotencyKey: "turbo-mutation:unsupported-model",
+            turbo: true,
+          }),
+        (error: unknown) =>
+          error instanceof HttpError && error.statusCode === 400,
+      );
+      for (const status of ["completed", "cancelled"] as const) {
+        db.prepare(
+          "UPDATE debate_sessions SET status = ?, session_json = ? WHERE id = ? AND user_id = ?",
+        ).run(
+          status,
+          JSON.stringify({ ...changed, status }),
+          created.id,
+          "user-1",
+        );
+        assert.throws(
+          () =>
+            updateDebateSessionTurbo(db, "user-1", created.id, {
+              expectedRevision: changed.revision,
+              idempotencyKey: `turbo-mutation:${status}`,
+              turbo: false,
+            }),
+          (error: unknown) =>
+            error instanceof HttpError && error.statusCode === 409,
+        );
+      }
+      assert.match(serverSource, /\/api\/debates\/:id\/turbo/u);
+      assert.match(serverSource, /hasActiveSession\([\s\S]{0,120}"debate"/u);
+      assert.match(serverSource, /isDebateRunning\(userId, ctx\.params\.id\)/u);
     } finally {
       db.close();
     }

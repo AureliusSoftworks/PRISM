@@ -22,6 +22,10 @@ export function LiveSessionModelChip(props: {
   effortKey?: import("./liveSessionChromeLabels.ts").LiveSessionEffortKey;
   automatic?: boolean;
   turbo?: boolean;
+  turboToggle?: {
+    disabled: boolean;
+    onChange: (enabled: boolean) => void;
+  } | null;
   className?: string;
 }): JSX.Element {
   const effortKey = props.effortKey ?? "auto";
@@ -60,6 +64,18 @@ export function LiveSessionModelChip(props: {
         ) : null}
         <span>{props.effortLabel}</span>
       </span>
+      {props.turboToggle ? (
+        <button
+          type="button"
+          className={styles.modelChipTurboToggle}
+          disabled={props.turboToggle.disabled}
+          onClick={() => props.turboToggle?.onChange(!props.turbo)}
+          aria-label={`Turn Turbo ${props.turbo ? "off" : "on"} for this Debate`}
+          title="Turbo changes only future ungenerated Debate turns."
+        >
+          Turbo {props.turbo ? "on" : "off"}
+        </button>
+      ) : null}
     </p>
   );
 }

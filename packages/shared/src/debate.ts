@@ -1785,6 +1785,10 @@ export interface DebateSessionListItemV1 {
   reasoningEffort?: Exclude<ProviderReasoningEffort, "auto"> | null;
   /** Resolved Turbo state for the model shown on this archive row. */
   turbo?: boolean;
+  /** A future turn is already being generated or held for this archive row. */
+  preparing?: boolean;
+  /** A Spectator run is currently baking ahead. */
+  baking?: boolean;
   /** Moderator + advocate cast colors for Coffee-style archive chips. */
   castColors?: string[];
   /** Frozen advocate identities for the Archive card matchup crest. */

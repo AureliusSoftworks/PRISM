@@ -259,6 +259,24 @@ export class TurnPreparationRegistry {
     return clonePreparation(entry.public);
   }
 
+  /** A prepared or preparing turn must retain the routing it was authored with. */
+  hasActiveSession(
+    userId: string,
+    surface: PreparedTurnSurfaceV1,
+    sessionId: string,
+  ): boolean {
+    this.#cleanupExpired();
+    const id = this.#bySession.get(this.#sessionKey(userId, surface, sessionId));
+    if (!id) return false;
+    const entry = this.#entries.get(id);
+    if (!entry || entry.userId !== userId) return false;
+    return (
+      entry.public.phase === "preparing" ||
+      entry.public.phase === "ready" ||
+      entry.public.phase === "committing"
+    );
+  }
+
   discardUser(
     userId: string,
     reason: string,

@@ -697,7 +697,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /Leaving an unfinished Debate by any route/u);
     assert.match(copy, /Opening any archived Debate replays the full title card/u);
     assert.match(copy, /gallery fills gradually/u);
-    assert.match(copy, /saved provider, model, Effort, Turbo or Max state/u);
+    assert.match(copy, /saved provider, model, Effort or Max state, current session Turbo setting/u);
     assert.match(copy, /title first reads Preparing/u);
     assert.match(copy, /Start or Resume disabled until the first audible sequence/u);
     assert.match(copy, /Ready now · buffering ahead/u);
@@ -807,7 +807,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /excluding generation waits, explicit recesses/u);
     assert.match(copy, /Use setup copies its motion, title, room settings/u);
     assert.match(copy, /Open proceedings also offer Restart/u);
-    assert.match(copy, /Completed records never offer Restart/u);
+    assert.match(copy, /Completed records never offer Restart or Turbo changes/u);
     assert.match(copy, /currently selected model and routing remain in place/u);
     assert.match(copy, /whole chain fails/u);
     assert.match(copy, /LOCAL remains a hard offline guarantee/u);
