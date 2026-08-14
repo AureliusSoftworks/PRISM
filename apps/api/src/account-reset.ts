@@ -214,6 +214,8 @@ export function restoreFactoryDefaultsInDatabase(
           prism_default_bot_repetition_penalty = NULL,
           prism_default_llm_model = NULL,
           prism_image_tool_llm_model = NULL,
+          prism_refract_local_model = NULL,
+          prism_refract_online_model = NULL,
           dev_memories_enabled = 0,
           dev_memories_text = '',
           openai_key_ciphertext = NULL,

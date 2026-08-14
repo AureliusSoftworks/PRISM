@@ -51,9 +51,14 @@ test("mounts the global companion on product shells and submerges it behind top-
     page,
     /companionSubmergedByMainPanel =\s*prismCompanionDisabledByMainPanel\([\s\S]*botAvatarCustomizerOpen \|\| botGeneratorOpen[\s\S]*submerged=\{companionSubmergedByMainPanel\}/u,
   );
-  assert.match(page, /const globalRefractRouting = useMemo\(\(\) =>/u);
-  assert.match(page, /refractRouting=\{globalRefractRouting\}/u);
-  assert.match(component, /\.\.\.\(refractRouting \?\? \{\}\)/u);
+  assert.match(page, /const refractModelPicker = \(/u);
+  assert.match(page, /prismRefractLocalModel/u);
+  assert.match(page, /prismRefractOnlineModel/u);
+  assert.match(page, /refractModelPicker=\{refractModelPicker\}/u);
+  assert.match(page, /refractModelResponseMode=\{refractResponseMode\}/u);
+  assert.match(component, /refractModelPicker\?: ReactNode/u);
+  assert.match(component, /refractModelResponseMode\?:/u);
+  assert.doesNotMatch(component, /refractRouting/u);
 });
 
 test("docks only in the live default Chat Home empty hero", () => {
@@ -308,10 +313,6 @@ test("hands synthesized Signal bookings to the normal warmup and playback path",
 
 test("hands Story, Slate, and Image actions back to their normal product surfaces", () => {
   assert.match(page, /storySessionId: storySession\.id/u);
-  assert.match(
-    page,
-    /onOpenImagePrompt=\{async \(prompt\) => \{[\s\S]*await openAllImagesPanel\(\)/u,
-  );
   assert.match(page, /run\.capabilityId\.startsWith\("story\.session\."\)/u);
   assert.match(page, /await openStorySession\(resultSessionId\)/u);
   assert.match(page, /run\.capabilityId === "slate\.project\.create"/u);
@@ -674,15 +675,25 @@ test("keeps Prism anchored while an assistant menu is open", () => {
 
 test("switches the floating Prism panel among Synthesis, Chat, and Notes", () => {
   assert.match(component, /PrismCompanionViewTabs/u);
-  assert.match(component, /activeView="synthesis"/u);
   assert.match(component, /activeView="chat"/u);
   assert.match(component, /activeView="notes"/u);
   assert.match(component, /id="global-prism-synthesis"/u);
-  assert.match(component, /Describe what you want to synthesize/u);
-  assert.match(component, /await onOpenImagePrompt\(prompt\)/u);
-  assert.match(page, /onOpenImagePrompt=\{async \(prompt\) =>/u);
-  assert.match(page, /setImagePrompt\(prompt\)/u);
-  assert.match(page, /await openAllImagesPanel\(\)/u);
+  assert.match(
+    component,
+    /className=\{styles\.synthesisRefractCard\}[\s\S]*className=\{styles\.refractModelPicker\}/u,
+  );
+  assert.match(component, /className=\{styles\.refractLaneBadge\}/u);
+  const synthesisPanel =
+    component.match(
+      /open && panelView === "synthesis"[\s\S]*?open && panelView === "notes"/u,
+    )?.[0] ?? "";
+  assert.doesNotMatch(synthesisPanel, /PrismCompanionViewTabs|Open Images|synthesisEmptyOrb/u);
+  assert.match(component, /source=generated&limit=5&sort=recency/u);
+  assert.match(component, /className=\{styles\.synthesisRecentRail\}/u);
+  assert.match(component, /<AssetLibraryModal[\s\S]*initialAssetId=\{synthesisLibraryAssetId\}/u);
+  assert.match(component, /onClick=\{\(\) => setSynthesisLibraryAssetId\(asset\.id\)\}/u);
+  assert.doesNotMatch(component, /onOpenImagePrompt/u);
+  assert.doesNotMatch(page, /onOpenImagePrompt=\{async \(prompt\) =>/u);
   assert.match(component, /id="global-prism-notes"/u);
   assert.match(component, /fetch\("\/api\/prism\/notes"/u);
   assert.match(component, /method: personalNoteId \? "PUT" : "POST"/u);

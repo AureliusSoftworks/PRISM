@@ -10337,6 +10337,9 @@ interface UserSettings {
   prismDefaultLlmModel: string;
   /** Legacy compatibility only; image-intent routing now follows prismDefaultLlmModel. */
   prismImageToolLlmModel: string;
+  /** Independent Refract model selection restored whenever its LOCAL/ONLINE lane returns. */
+  prismRefractLocalModel: string;
+  prismRefractOnlineModel: string;
   /** Kept empty in the UI/API; the built-in Default assistant only exposes avatar customization. */
   prismDefaultBotName: string;
   prismDefaultBotSystemPrompt: string;
@@ -57190,46 +57193,103 @@ function HomeContent(): React.JSX.Element {
         botGeneratorEffortTarget.capability,
       )
     : "auto";
-  const globalRefractRouting = useMemo(() => {
-    const modelOverride =
-      botGeneratorModelChoice === AUTO_MODEL_CHOICE
-        ? null
-        : botGeneratorModelChoice;
-    const reasoningEffort =
-      modelOverride === null || !botGeneratorEffortTarget
-        ? null
-        : effectiveModelReasoningEffortForRequest(
-            settings,
-            botGeneratorEffortTarget,
-            maxEffortTargetKey,
-          );
-    const refractReasoningEffort =
-      reasoningEffort === "auto" ? null : reasoningEffort;
-    return {
-      preferredProvider: botGeneratorSelectedProvider,
-      responseMode: botGeneratorResponseMode,
-      modelOverride,
-      ...(refractReasoningEffort
-        ? { reasoningEffort: refractReasoningEffort }
-        : {}),
-      ...(modelOverride === null
-        ? {}
-        : {
-            turbo: savedModelTurboMode(
-              settings,
-              botGeneratorSelectedProvider,
-              modelOverride,
-            ),
-          }),
-    };
-  }, [
-    botGeneratorModelChoice,
-    botGeneratorEffortTarget,
-    botGeneratorResponseMode,
-    botGeneratorSelectedProvider,
-    maxEffortTargetKey,
+  const refractResponseMode = responseModeForProvider(
+    settings?.preferredProvider ?? "local",
+  );
+  const refractSavedChoice =
+    refractResponseMode === "local"
+      ? settings?.prismRefractLocalModel
+      : settings?.prismRefractOnlineModel;
+  const refractModelChoice =
+    refractResponseMode === "local"
+      ? visibleModelChoiceForProvider(
+          modelCatalog,
+          settings,
+          "local",
+          refractSavedChoice,
+        )
+      : visiblePreferredOnlineModelChoice(
+          modelCatalog,
+          settings,
+          refractSavedChoice,
+        );
+  const refractModelOptions = modelOptionsForResponseMode(
+    modelCatalog,
     settings,
-  ]);
+    refractResponseMode,
+  );
+  const refractSelectedProvider =
+    refractResponseMode === "local"
+      ? "local"
+      : inferOnlineProviderForModelId(refractModelChoice);
+  const refractModelSelectionMutationVersionRef = useRef(0);
+  const refractModelPicker = (
+    <ComposerModelPicker
+      value={refractModelChoice}
+      onChange={(nextChoice) => {
+        const nextModel =
+          nextChoice === AUTO_MODEL_CHOICE ? "" : nextChoice.trim();
+        const previousLocalModel = settings?.prismRefractLocalModel ?? "";
+        const previousOnlineModel = settings?.prismRefractOnlineModel ?? "";
+        const version = ++refractModelSelectionMutationVersionRef.current;
+        setSettings((current) =>
+          current
+            ? {
+                ...current,
+                ...(refractResponseMode === "local"
+                  ? { prismRefractLocalModel: nextModel }
+                  : { prismRefractOnlineModel: nextModel }),
+              }
+            : current,
+        );
+        void api<{
+          ok: true;
+          prismRefractLocalModel: string;
+          prismRefractOnlineModel: string;
+        }>("/api/settings/prism-refract-model", {
+          method: "PATCH",
+          body: JSON.stringify({ model: nextModel || null }),
+        })
+          .then((saved) => {
+            if (refractModelSelectionMutationVersionRef.current !== version) return;
+            setSettings((current) =>
+              current
+                ? {
+                    ...current,
+                    prismRefractLocalModel: saved.prismRefractLocalModel,
+                    prismRefractOnlineModel: saved.prismRefractOnlineModel,
+                  }
+                : current,
+            );
+          })
+          .catch((error) => {
+            if (refractModelSelectionMutationVersionRef.current !== version) return;
+            setSettings((current) =>
+              current
+                ? {
+                    ...current,
+                    prismRefractLocalModel: previousLocalModel,
+                    prismRefractOnlineModel: previousOnlineModel,
+                  }
+                : current,
+            );
+            console.warn("[prism] Refract model selection failed", error);
+          });
+      }}
+      options={refractModelOptions}
+      provider={refractResponseMode}
+      selectedProvider={refractSelectedProvider}
+      loading={modelCatalogLoading}
+      renderTheme={resolvedTheme}
+      ariaLabel={`Refract ${refractResponseMode.toUpperCase()} model`}
+      title="Refract model"
+      autoOptionMetaOverride="Let Prism choose in this lane"
+      placement="up"
+      minMenuWidthPx={260}
+      portalZIndex={856}
+      dismissPopoversSignal={composerPopoverDismissSignal}
+    />
+  );
   const botGeneratorModelLabel =
     botGeneratorModelChoice === AUTO_MODEL_CHOICE
       ? "Auto model"
@@ -108733,7 +108793,8 @@ function HomeContent(): React.JSX.Element {
           submerged={companionSubmergedByMainPanel}
           keyboardShortcut={keyboardShortcuts.prism}
           surface={prismCompanionSurfaceReference()}
-          refractRouting={globalRefractRouting}
+          refractModelPicker={refractModelPicker}
+          refractModelResponseMode={refractResponseMode}
           presentation={view === "chat" ? chatPresentation : null}
           zenSessionIdleGapMs={settings.zenSessionIdleGapMs}
           chatHomeHeroDocked={
@@ -108763,14 +108824,6 @@ function HomeContent(): React.JSX.Element {
             }
           }}
           onContinueFocusedChat={continuePrismAssistantInFocusedChat}
-          onOpenImagePrompt={async (prompt) => {
-            setImagePrompt(prompt);
-            setImageVariantManualOverride(false);
-            setImageGenerationVariant(
-              inferImageGenerationVariantFromPrompt(prompt),
-            );
-            await openAllImagesPanel();
-          }}
           wieldTutorialActive={prismTutorialShouldRun(
             tutorialProgress.prismWield,
           )}

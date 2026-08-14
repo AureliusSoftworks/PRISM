@@ -21,6 +21,7 @@ import {
   USER_NOTE_BODY_MAX,
   USER_NOTE_TITLE_MAX,
   type ChatMessage,
+  type ImageAssetSet,
   type EphemeralChatResolvedProvider,
   type PrismActionProposalV1,
   type PrismActionRunV1,
@@ -29,7 +30,6 @@ import {
   type PrismCompanionMessage,
   type PrismCompanionResponse,
   type PrismRefractResponse,
-  type ProviderReasoningEffort,
   type PrismCompanionSurfaceReference,
   type UserNotesPayload,
 } from "@localai/shared";
@@ -175,6 +175,7 @@ import {
   prismActionLabel,
   prismActionStatusLabel,
 } from "./prismActionPresentation";
+import { AssetLibraryModal } from "./AssetLibrary";
 import styles from "./prismCompanion.module.css";
 
 const PRISM_COMPANION_SYSTEM_PAUSE_REASON = "prism-companion";
@@ -267,14 +268,10 @@ export interface PrismCompanionProps {
   submerged?: boolean;
   keyboardShortcut: string | null;
   surface: PrismCompanionSurfaceReference;
-  /** Live global navbar routing snapshot for foreground field Refract. */
-  refractRouting?: {
-    preferredProvider: EphemeralChatResolvedProvider;
-    responseMode: "local" | "online";
-    modelOverride: string | null;
-    reasoningEffort?: Exclude<ProviderReasoningEffort, "auto">;
-    turbo?: boolean;
-  };
+  /** Parent-owned picker keeps Prism Refract model state separate from navbar chat routing. */
+  refractModelPicker?: ReactNode;
+  /** Global Refract lane for the read-only badge in Synthesis. */
+  refractModelResponseMode?: "local" | "online";
   /** Chat and Zen share one route; this is the authoritative view boundary. */
   presentation?: PrismCompanionPresentation;
   /** The account's existing "Same session after idle" duration. */
@@ -292,8 +289,6 @@ export interface PrismCompanionProps {
   onPersistentConversationChange?: (
     conversationId: string,
   ) => void | Promise<void>;
-  /** Opens the existing Images panel with this editable prompt prefilled. */
-  onOpenImagePrompt?: (prompt: string) => void | Promise<void>;
   onAction: (action: PrismCompanionActionIntent) => void | Promise<void>;
   onSpeak?: (
     text: string,
@@ -607,7 +602,8 @@ export default function PrismCompanion({
   submerged = false,
   keyboardShortcut,
   surface,
-  refractRouting,
+  refractModelPicker,
+  refractModelResponseMode = "local",
   presentation = null,
   zenSessionIdleGapMs = DEFAULT_PRISM_COMPANION_SESSION_IDLE_GAP_MS,
   chatHomeHeroDocked = false,
@@ -616,7 +612,6 @@ export default function PrismCompanion({
   onHomeBaseAppletSelect,
   onContinueFocusedChat,
   onPersistentConversationChange,
-  onOpenImagePrompt,
   onAction,
   onSpeak,
   onStopSpeaking,
@@ -646,9 +641,14 @@ export default function PrismCompanion({
   const [open, setOpen] = useState(false);
   const [panelView, setPanelView] = useState<PrismCompanionView>("chat");
   const [draft, setDraft] = useState("");
-  const [synthesisDraft, setSynthesisDraft] = useState("");
-  const [synthesisBusy, setSynthesisBusy] = useState(false);
-  const [synthesisStatus, setSynthesisStatus] = useState("");
+  const [recentSynthesisAssets, setRecentSynthesisAssets] = useState<ImageAssetSet[]>([]);
+  const [recentSynthesisAssetsLoading, setRecentSynthesisAssetsLoading] =
+    useState(false);
+  const [recentSynthesisAssetsUnavailable, setRecentSynthesisAssetsUnavailable] =
+    useState(false);
+  const [synthesisLibraryAssetId, setSynthesisLibraryAssetId] = useState<
+    string | null
+  >(null);
   const [personalNotes, setPersonalNotes] = useState<PrismPersonalNote[]>([]);
   const [personalNotesLoading, setPersonalNotesLoading] = useState(false);
   const [personalNoteBusy, setPersonalNoteBusy] = useState(false);
@@ -2233,27 +2233,39 @@ export default function PrismCompanion({
     resetPersonalNoteEditor,
   ]);
 
-  const openSynthesisPrompt = useCallback(async (): Promise<void> => {
-    const prompt = synthesisDraft.trim();
-    if (!prompt || synthesisBusy || !onOpenImagePrompt) return;
-    setSynthesisBusy(true);
-    setSynthesisStatus("Opening Images…");
-    try {
-      await onOpenImagePrompt(prompt);
-      setSynthesisDraft("");
-      setSynthesisStatus("");
-      setOpen(false);
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Prism could not open Images.";
-      setSynthesisStatus(message);
-      onError?.(message);
-    } finally {
-      setSynthesisBusy(false);
-    }
-  }, [onError, onOpenImagePrompt, synthesisBusy, synthesisDraft]);
+  useEffect(() => {
+    if (!open || panelView !== "synthesis") return;
+    const controller = new AbortController();
+    setRecentSynthesisAssetsLoading(true);
+    setRecentSynthesisAssetsUnavailable(false);
+    void fetch(
+      "/api/assets?kind=general_image&source=generated&limit=5&sort=recency",
+      { credentials: "include", signal: controller.signal },
+    )
+      .then(async (response) => {
+        const payload: unknown = await response.json().catch(() => null);
+        if (
+          !response.ok ||
+          !payload ||
+          typeof payload !== "object" ||
+          !Array.isArray((payload as { assets?: unknown }).assets)
+        ) {
+          throw new Error("Recent synthesized assets are unavailable.");
+        }
+        return (payload as { assets: ImageAssetSet[] }).assets;
+      })
+      .then((assets) => {
+        if (!controller.signal.aborted) setRecentSynthesisAssets(assets);
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        if (!controller.signal.aborted) setRecentSynthesisAssetsUnavailable(true);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setRecentSynthesisAssetsLoading(false);
+      });
+    return () => controller.abort();
+  }, [open, panelView, softSynthesisUi.jobCount]);
 
   useEffect(() => {
     if (viewRequest.requestId === handledViewRequestRef.current) return;
@@ -2325,7 +2337,6 @@ export default function PrismCompanion({
           target,
           currentValue,
           rejectedValues,
-          ...(refractRouting ?? {}),
         }),
         signal,
       });
@@ -2346,7 +2357,7 @@ export default function PrismCompanion({
       }
       return payload.value;
     },
-    [refractRouting],
+    [],
   );
 
   useEffect(() => {
@@ -5809,77 +5820,84 @@ export default function PrismCompanion({
             </form>
           ) : null}
           {open && panelView === "synthesis" ? (
-            <form
+            <section
               id="global-prism-synthesis"
-              className={`${styles.composer} ${styles.sessionNoteComposer} ${styles.synthesisComposer}`}
-              onSubmit={(event) => {
-                event.preventDefault();
-                void openSynthesisPrompt();
-              }}
+              className={`${styles.composer} ${styles.sessionNoteComposer} ${styles.synthesisPanel}`}
+              aria-label="Prism Refract settings and recent synthesized images"
             >
-              <PrismCompanionViewTabs
-                activeView="synthesis"
-                synthesisJobCount={softSynthesisUi.jobCount}
-              />
-              <div className={styles.sessionNoteHeading}>
-                <span>Synthesis</span>
-                <small>Continue in Images</small>
-              </div>
-              <button
-                type="button"
-                className={styles.synthesisEmptyOrb}
-                aria-label="Focus image prompt"
-                onClick={() => composerRef.current?.focus()}
+              {refractModelPicker ? (
+                <section className={styles.synthesisRefractCard}>
+                  <div className={styles.synthesisRefractCardHeading}>
+                    <span>Refract</span>
+                    <span
+                      className={styles.refractLaneBadge}
+                      data-lane={refractModelResponseMode}
+                      title="Follows the global LOCAL/ONLINE toggle"
+                      aria-label={`Refract lane ${(
+                        refractModelResponseMode ?? "local"
+                      ).toUpperCase()}`}
+                    >
+                      {(refractModelResponseMode ?? "local").toUpperCase()}
+                    </span>
+                  </div>
+                  <div className={styles.refractModelPicker}>
+                    {refractModelPicker}
+                  </div>
+                </section>
+              ) : null}
+              <section
+                className={styles.synthesisRecentRail}
+                aria-label="Recently synthesized images"
               >
-                <Plus aria-hidden="true" />
-              </button>
-              <textarea
-                ref={composerRef}
-                value={synthesisDraft}
-                rows={3}
-                maxLength={4_000}
-                aria-label="Image prompt"
-                placeholder="Describe what you want to synthesize…"
-                enterKeyHint="send"
-                onChange={(event) => {
-                  setSynthesisDraft(event.target.value);
-                  setSynthesisStatus("");
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    setOpen(false);
-                  } else if (
-                    shouldSubmitComposerOnEnter({
-                      key: event.key,
-                      shiftKey: event.shiftKey,
-                      isComposing: event.nativeEvent.isComposing,
+                <header>
+                  <span>Recent syntheses</span>
+                </header>
+                <div className={styles.synthesisRecentItems}>
+                  {recentSynthesisAssetsLoading ? (
+                    <small className={styles.synthesisRecentStatus}>
+                      Loading…
+                    </small>
+                  ) : recentSynthesisAssetsUnavailable ? (
+                    <small className={styles.synthesisRecentStatus}>
+                      Recent images are unavailable.
+                    </small>
+                  ) : recentSynthesisAssets.length === 0 ? (
+                    <small className={styles.synthesisRecentStatus}>
+                      No synthesized images yet.
+                    </small>
+                  ) : (
+                    recentSynthesisAssets.map((asset) => {
+                      const member =
+                        asset.members.find(
+                          (candidate) => candidate.role === "primary",
+                        ) ?? asset.members[0];
+                      if (!member) return null;
+                      const label = asset.title.trim() || member.prompt.trim();
+                      return (
+                        <button
+                          key={asset.id}
+                          type="button"
+                          className={styles.synthesisRecentItem}
+                          onClick={() => setSynthesisLibraryAssetId(asset.id)}
+                          aria-label={`Open ${label || "synthesized image"} in Asset Library`}
+                          title={label || "Open in Asset Library"}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={member.thumbnailUrl || member.url} alt="" />
+                        </button>
+                      );
                     })
-                  ) {
-                    event.preventDefault();
-                    if (!synthesisBusy && synthesisDraft.trim()) {
-                      event.currentTarget.form?.requestSubmit();
-                    }
-                  }
-                }}
-              />
-              <footer>
-                <small aria-live="polite">
-                  {synthesisStatus || "Enter opens this prompt in Images"}
-                </small>
-                <button
-                  type="submit"
-                  className={styles.sendButton}
-                  disabled={
-                    synthesisBusy ||
-                    !synthesisDraft.trim() ||
-                    !onOpenImagePrompt
-                  }
-                >
-                  Open Images
-                </button>
-              </footer>
-            </form>
+                  )}
+                </div>
+              </section>
+              {synthesisLibraryAssetId ? (
+                <AssetLibraryModal
+                  kind="general_image"
+                  initialAssetId={synthesisLibraryAssetId}
+                  onClose={() => setSynthesisLibraryAssetId(null)}
+                />
+              ) : null}
+            </section>
           ) : null}
           {open && panelView === "notes" ? (
             <form

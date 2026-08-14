@@ -223,6 +223,9 @@ export interface BackupUserSettings {
   prismDefaultBotFaceMouthSpeechPoses?: BotFaceCustomSpeechPoses | null;
   prismDefaultLlmModel: string;
   prismImageToolLlmModel: string;
+  /** Prism Refract keeps independent Auto/model choices for the LOCAL and ONLINE lanes. */
+  prismRefractLocalModel?: string;
+  prismRefractOnlineModel?: string;
   devMemoriesEnabled: boolean;
   devMemoriesText: string;
   openAiApiKey?: string;
@@ -1837,6 +1840,8 @@ export function exportUserSnapshot(
          prism_default_bot_face_mouth_speech_poses,
          prism_default_llm_model,
          prism_image_tool_llm_model,
+         prism_refract_local_model,
+         prism_refract_online_model,
          dev_memories_enabled,
          dev_memories_text,
          openai_key_ciphertext,
@@ -1913,6 +1918,8 @@ export function exportUserSnapshot(
         prism_default_bot_face_mouth_speech_poses: string | null;
         prism_default_llm_model: string | null;
         prism_image_tool_llm_model: string | null;
+        prism_refract_local_model: string | null;
+        prism_refract_online_model: string | null;
         dev_memories_enabled: number;
         dev_memories_text: string | null;
         openai_key_ciphertext: string | null;
@@ -2047,6 +2054,8 @@ export function exportUserSnapshot(
           ),
         prismDefaultLlmModel: user.prism_default_llm_model ?? "",
         prismImageToolLlmModel: user.prism_image_tool_llm_model ?? "",
+        prismRefractLocalModel: user.prism_refract_local_model ?? "",
+        prismRefractOnlineModel: user.prism_refract_online_model ?? "",
         voiceMode: normalizeVoiceMode(user.voice_mode),
         voiceEffectsEnabled: user.voice_effects_enabled !== 0,
         voiceVolume: normalizeBotVoiceVolume(user.voice_volume),
@@ -3608,6 +3617,8 @@ function importUserSnapshotWithinTransaction(
         prism_default_bot_face_mouth_speech_poses = ?,
         prism_default_llm_model = ?,
         prism_image_tool_llm_model = ?,
+        prism_refract_local_model = ?,
+        prism_refract_online_model = ?,
         dev_memories_enabled = ?,
         dev_memories_text = ?,
         openai_key_ciphertext = ?,
@@ -3739,6 +3750,8 @@ function importUserSnapshotWithinTransaction(
       ),
       settings.prismDefaultLlmModel?.trim() ?? "",
       settings.prismImageToolLlmModel?.trim() ?? "",
+      settings.prismRefractLocalModel?.trim() ?? "",
+      settings.prismRefractOnlineModel?.trim() ?? "",
       settings.devMemoriesEnabled ? 1 : 0,
       settings.devMemoriesText ?? "",
       encryptedOpenAiKey?.ciphertext ?? null,

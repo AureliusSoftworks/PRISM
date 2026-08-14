@@ -2821,6 +2821,8 @@ interface UserDbRow {
   prism_default_bot_repetition_penalty: number | null;
   prism_default_llm_model: string | null;
   prism_image_tool_llm_model: string | null;
+  prism_refract_local_model: string | null;
+  prism_refract_online_model: string | null;
   text_model_display_names: string | null;
   dev_memories_enabled: number;
   dev_memories_text: string;
@@ -3182,7 +3184,7 @@ function userBlocksOnlineCapabilities(
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, atmosphere_style, hub_atmosphere_enabled, hub_atmosphere_image_id, hub_atmosphere_image_style, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked, auto_memory, memory_learn_about_player, memory_learn_about_bots, memory_acquisition_sensitivity, memory_short_term_days, memory_long_term_threshold, memory_inferred_min_evidence, memory_inferred_threshold, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, online_auto_provider_bias, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, preferred_home_atmosphere_image_model, preferred_home_atmosphere_image_provider, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_count, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_blink_rotation_deg, prism_default_bot_face_thinking_frames, prism_default_bot_face_thinking_scale, prism_default_bot_face_thinking_offset_x, prism_default_bot_face_thinking_offset_y, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, zen_player_voice_enabled, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, atmosphere_style, hub_atmosphere_enabled, hub_atmosphere_image_id, hub_atmosphere_image_style, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked, auto_memory, memory_learn_about_player, memory_learn_about_bots, memory_acquisition_sensitivity, memory_short_term_days, memory_long_term_threshold, memory_inferred_min_evidence, memory_inferred_threshold, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, online_auto_provider_bias, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, preferred_home_atmosphere_image_model, preferred_home_atmosphere_image_provider, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_count, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_blink_rotation_deg, prism_default_bot_face_thinking_frames, prism_default_bot_face_thinking_scale, prism_default_bot_face_thinking_offset_x, prism_default_bot_face_thinking_offset_y, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, prism_refract_local_model, prism_refract_online_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, zen_player_voice_enabled, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -6315,6 +6317,8 @@ async function contextualTextRuntimeForUser<
   requestedTurbo?: unknown;
   frozenCandidateAllowlist?: unknown;
   frozenFallbackChain?: unknown;
+  /** Refract treats stale saved choices as Auto instead of routing them raw. */
+  fallbackWhenExplicitModelIsUnavailable?: boolean;
   routingContext: AutoRoutingContextV1;
 }) {
   const requestedProvider = readProvider(args.requestedProvider);
@@ -6376,9 +6380,18 @@ async function contextualTextRuntimeForUser<
         };
   const hiddenModelIds = parseHiddenBotModelIds(args.user.hidden_bot_model_ids);
   const hiddenModels = new Set(hiddenModelIds);
-  const explicitModelOverride = readCoffeeSessionSpeakerModel(
+  const requestedExplicitModelOverride = readCoffeeSessionSpeakerModel(
     args.modelOverride,
   );
+  const explicitModelOverride =
+    args.fallbackWhenExplicitModelIsUnavailable &&
+    requestedExplicitModelOverride &&
+    !(responseMode === "local"
+      ? routingCatalog.local
+      : routingCatalog.online
+    ).some((entry) => entry.id === requestedExplicitModelOverride)
+      ? null
+      : requestedExplicitModelOverride;
   const resolved = resolveAutoModel({
     provider: primaryProvider,
     lane: responseMode,
@@ -15429,40 +15442,24 @@ function buildRoutes(): RouteDefinition[] {
             : "A valid Prism Refract request is required.",
         );
       }
-      // Refract is foreground generation. It follows the same global privacy
-      // lane, Model/Auto selection, saved Effort, Turbo, and recovery chain as
-      // the navbar. The Settings background model is deliberately not used.
-      const requestedProvider =
-        request.preferredProvider ?? user.preferred_provider;
-      const requestedResponseMode =
-        request.responseMode ??
-        (requestedProvider === "local" ? "local" : "online");
-      const requestedLane = normalizeResponseMode(
-        requestedResponseMode,
-        requestedProvider === "local" ? "local" : "online",
-      );
+      // Refract is foreground generation, but its model belongs to Prism —
+      // never to the navbar/chat picker or a client-supplied provider. The
+      // account's global LOCAL/ONLINE mode is the hard privacy boundary.
       const effectiveResponseMode =
-        requestedLane === "auto"
-          ? requestedProvider === "local"
-            ? "local"
-            : "online"
-          : requestedLane;
-      const modelOverride = Object.prototype.hasOwnProperty.call(
-        request,
-        "modelOverride",
-      )
-        ? request.modelOverride
-        : effectiveResponseMode === "local"
-          ? user.preferred_local_model
-          : user.preferred_online_model;
+        user.preferred_provider === "local" ? "local" : "online";
+      const requestedProvider =
+        effectiveResponseMode === "local" ? "local" : user.preferred_provider;
+      const modelOverride =
+        effectiveResponseMode === "local"
+          ? user.prism_refract_local_model
+          : user.prism_refract_online_model;
       const refractRuntime = await contextualTextRuntimeForUser({
         userId,
         user,
         requestedProvider,
         requestedResponseMode: effectiveResponseMode,
         modelOverride,
-        requestedReasoningEffort: request.reasoningEffort,
-        requestedTurbo: request.turbo,
+        fallbackWhenExplicitModelIsUnavailable: true,
         routingContext: {
           surface: "prism-refract",
           inputText: request.currentValue,
@@ -26115,6 +26112,8 @@ function buildRoutes(): RouteDefinition[] {
           ...normalizeDefaultBotSettingsForResponse(user),
           prismDefaultLlmModel: user.prism_default_llm_model ?? "",
           prismImageToolLlmModel: user.prism_image_tool_llm_model ?? "",
+          prismRefractLocalModel: user.prism_refract_local_model ?? "",
+          prismRefractOnlineModel: user.prism_refract_online_model ?? "",
           textModelDisplayNames: parseStoredTextModelDisplayNames(
             user.text_model_display_names,
           ),
@@ -26609,6 +26608,52 @@ function buildRoutes(): RouteDefinition[] {
         }
         throw error;
       }
+    }),
+    route("PATCH", "/api/settings/prism-refract-model", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const body = ctx.body as Record<string, unknown>;
+      if (body.model !== undefined && body.model !== null && typeof body.model !== "string") {
+        throw new HttpError(400, "A Prism Refract model must be text or Auto.");
+      }
+      const model = typeof body.model === "string" ? body.model.trim().slice(0, 200) : "";
+      const responseMode = user.preferred_provider === "local" ? "local" : "online";
+      if (model) {
+        const userKey = responseMode === "online" ? decryptUserKey(userId) : null;
+        const catalog = await buildModelCatalog(
+          responseMode === "online"
+            ? (getOpenAiApiKeyForUser(userId, userKey!) ?? config.openAiApiKey)
+            : undefined,
+          user.secondary_ollama_host,
+          responseMode === "online"
+            ? (getAnthropicApiKeyForUser(userId, userKey!) ?? config.anthropicApiKey)
+            : undefined,
+        );
+        const hidden = new Set(parseHiddenBotModelIds(user.hidden_bot_model_ids));
+        const options = responseMode === "local" ? catalog.local : catalog.online;
+        if (hidden.has(model) || !options.some((entry) => entry.id === model)) {
+          throw new HttpError(
+            400,
+            `That model is unavailable in Prism's ${responseMode === "local" ? "LOCAL" : "ONLINE"} lane.`,
+          );
+        }
+      }
+      const column =
+        responseMode === "local"
+          ? "prism_refract_local_model"
+          : "prism_refract_online_model";
+      db.prepare(`UPDATE users SET ${column} = ? WHERE id = ?`).run(
+        model || null,
+        userId,
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        responseMode,
+        prismRefractLocalModel:
+          responseMode === "local" ? model : user.prism_refract_local_model ?? "",
+        prismRefractOnlineModel:
+          responseMode === "online" ? model : user.prism_refract_online_model ?? "",
+      });
     }),
     route("PATCH", "/api/default-bot", async (ctx) => {
       const userId = requireAuth(ctx);

@@ -955,43 +955,9 @@
   align-items: center;
 }
 
-.synthesisComposer {
-  min-height: 270px;
-}
-
-.synthesisEmptyOrb {
-  width: 72px;
-  height: 72px;
-  display: grid;
-  place-items: center;
-  justify-self: center;
-  padding: 0 !important;
-  border: 1px solid color-mix(in srgb, var(--companion-s) 52%, #fff) !important;
-  border-radius: 50% !important;
-  color: #f5fbff !important;
-  background:
-    radial-gradient(circle at 42% 34%, #ffffff24, transparent 35%),
-    color-mix(in srgb, var(--bg-surface, #151311) 86%, transparent) !important;
-  box-shadow:
-    inset 0 1px 0 #ffffff52,
-    inset 0 -12px 24px #0005,
-    0 0 32px color-mix(in srgb, var(--companion-s) 28%, transparent);
-  transition: transform 170ms ease, box-shadow 170ms ease;
-}
-
-.synthesisEmptyOrb:hover,
-.synthesisEmptyOrb:focus-visible {
-  outline: none;
-  transform: scale(1.06);
-  box-shadow:
-    inset 0 1px 0 #ffffff62,
-    inset 0 -12px 24px #0005,
-    0 0 42px color-mix(in srgb, var(--companion-s) 42%, transparent);
-}
-
-.synthesisEmptyOrb svg {
-  width: 26px;
-  height: 26px;
+.synthesisPanel {
+  width: min(390px, calc(100vw - 24px));
+  gap: 12px;
 }
 
 .personalNotesComposer {
@@ -1172,6 +1138,118 @@
 .composer textarea::placeholder { color: var(--fg-muted, #aaa4a0); }
 .composerStatus,
 .composer footer { display: flex; align-items: center; gap: 8px; }
+.synthesisRefractCard {
+  width: min(390px, calc(100vw - 24px));
+  display: grid;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid #9ceaff2f;
+  border-radius: 16px;
+  color: var(--fg, #edf3f8);
+  background:
+    radial-gradient(circle at 12% 0%, #e978d71a, transparent 50%),
+    color-mix(in srgb, var(--bg-surface, #151311) 96%, transparent);
+  box-shadow:
+    0 16px 38px -28px #000e,
+    inset 0 1px 0 #ffffff12;
+}
+.synthesisRefractCardHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #9ceaff;
+  font: 780 .56rem/1.25 system-ui, sans-serif;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+.refractModelPicker { flex: 0 1 124px; min-width: 0; }
+.refractModelPicker :global([data-prism-model-picker-trigger="true"]) {
+  max-width: 124px;
+  padding: 0 12px 0 10px;
+  border: 0;
+  border-radius: inherit;
+  color: var(--fg);
+  background: inherit;
+  font: inherit;
+}
+.synthesisRefractCard .refractModelPicker {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.synthesisRefractCard .refractModelPicker :global([data-prism-model-picker-trigger="true"]) {
+  max-width: none;
+  width: 100%;
+}
+.synthesisRecentRail {
+  display: grid;
+  gap: 7px;
+}
+.synthesisRecentRail > header > span {
+  color: var(--fg-muted, #aaa4a0);
+  font: 780 .56rem/1.2 system-ui, sans-serif;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+.synthesisRecentItems {
+  display: flex;
+  min-height: 76px;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 1px 1px 5px;
+  scrollbar-width: thin;
+}
+.synthesisRecentItem {
+  width: 76px;
+  min-width: 76px;
+  height: 76px;
+  padding: 0 !important;
+  overflow: hidden;
+  border: 1px solid #ffffff24 !important;
+  border-radius: 12px !important;
+  background: #090b10 !important;
+  box-shadow: 0 8px 16px -12px #000d;
+}
+.synthesisRecentItem:hover,
+.synthesisRecentItem:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--companion-s) 68%, white) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--companion-s) 22%, transparent);
+}
+.synthesisRecentItem img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+.synthesisRecentStatus {
+  align-self: center;
+  color: var(--fg-subtle, #77716d);
+  font: .58rem/1.3 system-ui, sans-serif;
+}
+.refractLaneBadge {
+  border: 1px solid #ffffff35;
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: #eff8ff;
+  background: #ffffff10;
+  font: 700 .5rem/1.2 system-ui, sans-serif;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+}
+.refractLaneBadge[data-lane="local"] {
+  border-color: #4fd0e733;
+  color: #9df1ff;
+  background: #4fd0e70f;
+}
+.refractLaneBadge[data-lane="online"] {
+  border-color: #d0a84f33;
+  color: #ffd89f;
+  background: #d0a84f12;
+}
+.refractModelPicker :global([data-prism-model-picker-trigger="true"]):disabled {
+  opacity: 1;
+}
 .composer footer { justify-content: flex-end; }
 .composer small { flex: 1 1 auto; color: var(--fg-subtle, #77716d); font: .56rem/1.3 system-ui, sans-serif; }
 .composer button { padding: 7px 12px; border: 0; border-radius: 999px; color: #071013; background: #9ceaff; font: 780 .65rem/1 system-ui, sans-serif; cursor: pointer; }
@@ -1422,12 +1500,44 @@
 }
 
 :global([data-theme="light"]) .thinking p,
+:global([data-theme="light"]) .synthesisRefractCard,
+:global([data-theme="light"]) .synthesisRefractCardHeading,
 :global([data-theme="light"]) .sessionNoteHeading > small,
 :global([data-theme="light"]) .sessionNoteComposer footer > small,
 :global([data-theme="light"]) .composer small,
 :global([data-theme="light"]) .refractTutorial p,
 :global([data-theme="light"]) .refractPrompt small {
   color: #52677d;
+}
+
+:global([data-theme="light"]) .synthesisRefractCard {
+  border-color: #54708b2f;
+  background:
+    radial-gradient(circle at 10% 0%, #ffecff19, transparent 45%),
+    linear-gradient(
+      180deg,
+      #ffffffd4 0%,
+      #edf4ffce 50%,
+      #f6ebffd1 100%
+    );
+}
+
+:global([data-theme="light"]) .refractLaneBadge {
+  border-color: #54708b3a;
+  color: #36516a;
+  background: #ffffff9e;
+}
+
+:global([data-theme="light"]) .refractLaneBadge[data-lane="local"] {
+  border-color: #0f7282;
+  color: #0b4b56;
+  background: #b6f3ff7d;
+}
+
+:global([data-theme="light"]) .refractLaneBadge[data-lane="online"] {
+  border-color: #8b6c21;
+  color: #5b4b17;
+  background: #ffe7ad77;
 }
 
 :global([data-theme="light"]) .markdown a,
@@ -1507,18 +1617,6 @@
   border-color: color-mix(in srgb, var(--companion-s) 48%, #54708b) !important;
   color: #1f3148 !important;
   background: color-mix(in srgb, var(--companion-s) 13%, #ffffff) !important;
-}
-
-:global([data-theme="light"]) .synthesisEmptyOrb {
-  color: #263d59 !important;
-  background:
-    radial-gradient(circle at 38% 27%, #ffffffec, transparent 29%),
-    linear-gradient(145deg, #fffefb, #e5f4ff 58%, #eee4ff) !important;
-  box-shadow:
-    inset 0 1px 0 #ffffff,
-    inset 0 -8px 17px #91aec42b,
-    0 8px 20px #5b769136,
-    0 0 25px color-mix(in srgb, var(--companion-s) 21%, transparent);
 }
 
 :global([data-theme="light"]) .personalNoteBlocked,

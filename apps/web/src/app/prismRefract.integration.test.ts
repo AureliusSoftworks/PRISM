@@ -465,10 +465,39 @@ describe("Prism Refract integration", () => {
     );
   });
 
-  it("never substitutes a local or auxiliary route for foreground Refract", () => {
+  it("keeps foreground Refract on Prism's dedicated mode-aware model contract", () => {
     assert.match(
       companionSource,
-      /body: JSON\.stringify\(\{[\s\S]*\.\.\.\(refractRouting \?\? \{\}\)[\s\S]*signal,/u,
+      /refractModelPicker\?: ReactNode/u,
+    );
+    assert.doesNotMatch(companionSource, /refractRouting/u);
+    assert.match(pageSource, /prismRefractLocalModel/u);
+    assert.match(pageSource, /prismRefractOnlineModel/u);
+    assert.match(pageSource, /api<\{[\s\S]*"\/api\/settings\/prism-refract-model"/u);
+    assert.match(pageSource, /provider=\{refractResponseMode\}/u);
+    assert.match(pageSource, /portalZIndex=\{856\}/u);
+    assert.match(
+      companionSource,
+      /panelView === "synthesis"[\s\S]*?className=\{styles\.synthesisRefractCard\}[\s\S]*className=\{styles\.refractModelPicker\}/u,
+    );
+    const chatPanelBranch =
+      companionSource.match(
+        /open && panelView === ["']chat["'][\s\S]*?open && panelView === ["']synthesis["']/u,
+      )?.[0] ?? "";
+    assert.ok(
+      chatPanelBranch.includes('panelView === "chat"') ||
+        chatPanelBranch.includes("panelView === 'chat'"),
+    );
+    assert.doesNotMatch(
+      chatPanelBranch,
+      /refractModelPicker|styles\.refractModelPicker/u,
+    );
+    assert.match(companionSource, /aria-label=\{`Refract lane /u);
+    assert.match(companionSource, /className=\{styles\.refractLaneBadge\}/u);
+    assert.match(companionSource, /data-lane=\{refractModelResponseMode\}/u);
+    assert.match(
+      companionSource,
+      /title="Follows the global LOCAL\/ONLINE toggle"/u,
     );
     const magicSubmission =
       companionSource.match(

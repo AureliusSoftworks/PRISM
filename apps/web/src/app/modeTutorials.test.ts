@@ -5,6 +5,16 @@ import { describe, it } from "node:test";
 import { MODE_TUTORIALS, modeTutorialStep } from "./modeTutorials.ts";
 
 describe("mode tutorials", () => {
+  it("explains Refract's separate model picker without weakening the privacy lane", () => {
+    const copy = Object.values(MODE_TUTORIALS)
+      .flatMap((tutorial) => tutorial.steps)
+      .map((step) => step.body)
+      .join(" ");
+    assert.match(copy, /own model picker in the Prism companion's Synthesis tab/u);
+    assert.match(copy, /LOCAL only offers local models and ONLINE only offers online models/u);
+    assert.match(copy, /each lane remembers its model or Auto choice/u);
+  });
+
   it("explains transient native Max without changing the ordinary ladder", () => {
     const copy = readFileSync(new URL("./modeTutorials.ts", import.meta.url), "utf8");
     assert.match(copy, /Extra High unlocks a separate Max overdrive toggle/u);
@@ -3058,13 +3068,14 @@ describe("mode tutorials", () => {
     }
   });
 
-  it("teaches the floating Prism Synthesis, Chat, and Notes views", () => {
+  it("teaches the focused Prism Synthesis surface alongside Chat and Notes", () => {
     for (const mode of ["chat", "zen"] as const) {
       const body = MODE_TUTORIALS[mode].steps
         .map((step) => step.body)
         .join(" ");
-      assert.match(body, /switch between Synthesis, Chat, and Notes/u);
-      assert.match(body, /opens that prompt in Images without generating/u);
+      assert.match(body, /Synthesis focused on Refract settings/u);
+      assert.match(body, /rail of recent synthesized images/u);
+      assert.match(body, /open that exact item in Asset Library/u);
       assert.match(body, /same saved or Private Prism conversation/u);
       assert.match(body, /create, reopen, edit, and delete/u);
       assert.match(body, /personal Notes stay unavailable.*Private/u);

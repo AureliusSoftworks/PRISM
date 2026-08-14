@@ -12,18 +12,21 @@ const botcastSource = readFileSync(
 );
 
 describe("Prism Refract API contract", () => {
-  it("requires auth and routes every foreground Refract through the global text runtime", () => {
+  it("requires auth and routes Refract through its own account-persisted, mode-bound runtime", () => {
     const route = serverSource.match(
       /route\("POST", "\/api\/prism\/refract"[\s\S]*?route\("GET", "\/api\/botcast\/shows"/u,
     )?.[0] ?? "";
     assert.match(route, /const userId = requireAuth\(ctx\)/u);
     assert.match(route, /normalizePrismRefractRequest\(ctx\.body\)/u);
-    assert.match(route, /request\.preferredProvider \?\? user\.preferred_provider/u);
-    assert.match(route, /user\.preferred_local_model/u);
-    assert.match(route, /user\.preferred_online_model/u);
+    assert.match(route, /user\.preferred_provider === "local" \? "local" : "online"/u);
+    assert.match(route, /user\.prism_refract_local_model/u);
+    assert.match(route, /user\.prism_refract_online_model/u);
+    assert.match(route, /fallbackWhenExplicitModelIsUnavailable: true/u);
+    assert.doesNotMatch(route, /request\.preferredProvider/u);
+    assert.doesNotMatch(route, /request\.modelOverride/u);
     assert.match(route, /contextualTextRuntimeForUser\(/u);
-    assert.match(route, /requestedReasoningEffort: request\.reasoningEffort/u);
-    assert.match(route, /requestedTurbo: request\.turbo/u);
+    assert.doesNotMatch(route, /requestedReasoningEffort: request\.reasoningEffort/u);
+    assert.doesNotMatch(route, /requestedTurbo: request\.turbo/u);
     assert.doesNotMatch(route, /resolveAuxiliaryOllamaModel\(/u);
     assert.match(route, /isPrismRefractDebateTextTarget\(request\.target\)/u);
     assert.match(route, /isPrismRefractInputTextTarget\(request\.target\)/u);
@@ -42,6 +45,18 @@ describe("Prism Refract API contract", () => {
     );
     assert.match(route, /generateDebateRefractDraft/u);
     assert.match(route, /generateBotcastRefractDraft/u);
+  });
+
+  it("only saves Refract models from the authenticated user's active privacy lane", () => {
+    const route = serverSource.match(
+      /route\("PATCH", "\/api\/settings\/prism-refract-model"[\s\S]*?route\("PATCH", "\/api\/default-bot"/u,
+    )?.[0] ?? "";
+    assert.match(route, /const userId = requireAuth\(ctx\)/u);
+    assert.match(route, /user\.preferred_provider === "local" \? "local" : "online"/u);
+    assert.match(route, /catalog\.local : catalog\.online/u);
+    assert.match(route, /That model is unavailable in Prism's/u);
+    assert.match(route, /prism_refract_local_model/u);
+    assert.match(route, /prism_refract_online_model/u);
   });
 
   it("keeps Prism Home and the floating companion on the same dedicated local model", () => {
