@@ -26618,26 +26618,11 @@ function buildRoutes(): RouteDefinition[] {
       }
       const model = typeof body.model === "string" ? body.model.trim().slice(0, 200) : "";
       const responseMode = user.preferred_provider === "local" ? "local" : "online";
-      if (model) {
-        const userKey = responseMode === "online" ? decryptUserKey(userId) : null;
-        const catalog = await buildModelCatalog(
-          responseMode === "online"
-            ? (getOpenAiApiKeyForUser(userId, userKey!) ?? config.openAiApiKey)
-            : undefined,
-          user.secondary_ollama_host,
-          responseMode === "online"
-            ? (getAnthropicApiKeyForUser(userId, userKey!) ?? config.anthropicApiKey)
-            : undefined,
-        );
-        const hidden = new Set(parseHiddenBotModelIds(user.hidden_bot_model_ids));
-        const options = responseMode === "local" ? catalog.local : catalog.online;
-        if (hidden.has(model) || !options.some((entry) => entry.id === model)) {
-          throw new HttpError(
-            400,
-            `That model is unavailable in Prism's ${responseMode === "local" ? "LOCAL" : "ONLINE"} lane.`,
-          );
-        }
-      }
+      // Persist the visible picker choice without a second live catalog
+      // discovery. Refract revalidates this id against the active lane at
+      // request time and falls back to Auto if it is no longer runnable.
+      // A transiently empty save-time catalog must not snap a valid choice
+      // back to Auto.
       const column =
         responseMode === "local"
           ? "prism_refract_local_model"

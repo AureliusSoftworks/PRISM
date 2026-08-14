@@ -47,14 +47,14 @@ describe("Prism Refract API contract", () => {
     assert.match(route, /generateBotcastRefractDraft/u);
   });
 
-  it("only saves Refract models from the authenticated user's active privacy lane", () => {
+  it("saves Refract choices in the authenticated user's active privacy lane without a brittle catalog probe", () => {
     const route = serverSource.match(
       /route\("PATCH", "\/api\/settings\/prism-refract-model"[\s\S]*?route\("PATCH", "\/api\/default-bot"/u,
     )?.[0] ?? "";
     assert.match(route, /const userId = requireAuth\(ctx\)/u);
     assert.match(route, /user\.preferred_provider === "local" \? "local" : "online"/u);
-    assert.match(route, /catalog\.local : catalog\.online/u);
-    assert.match(route, /That model is unavailable in Prism's/u);
+    assert.doesNotMatch(route, /buildModelCatalog/u);
+    assert.doesNotMatch(route, /That model is unavailable in Prism's/u);
     assert.match(route, /prism_refract_local_model/u);
     assert.match(route, /prism_refract_online_model/u);
   });
