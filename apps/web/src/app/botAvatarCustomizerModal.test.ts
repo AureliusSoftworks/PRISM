@@ -9,6 +9,10 @@ const pageSource = readFileSync(resolve(appDir, "page.tsx"), "utf8").replace(
   /\s+/gu,
   " ",
 );
+const botAvatarMicroSource = readFileSync(
+  resolve(appDir, "BotAvatarMicro.tsx"),
+  "utf8",
+).replace(/\s+/gu, " ");
 const cssSource = readFileSync(resolve(appDir, "page.module.css"), "utf8");
 const modeTutorialSource = readFileSync(
   resolve(appDir, "modeTutorials.ts"),
@@ -105,8 +109,27 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
     pageSource,
     /!foundryRitual \? \(\s*<div[\s\S]{0,100}className=\{styles\.botAvatarStudioMiniPreview\}/,
   );
+  assert.match(
+    pageSource,
+    /compactPreviewRenderSizeTierLabel = compactPreviewRenderSizeTier === "micro" \? "Micro preview" : "Mini preview"/,
+  );
+  assert.match(
+    pageSource,
+    /avatarRenderedSizeTierForMeasurements\(renderSize, renderSize, current\)/,
+  );
+  assert.match(
+    miniSource,
+    /compactPreviewIsMicro \? \([\s\S]*?<BotAvatarMicroRenderer[\s\S]*?\) : \(\s*<ChatMiniBotAvatar/,
+  );
+  assert.match(miniSource, /renderSizePx=\{compactPreviewRenderSize\}/);
+  assert.match(
+    miniSource,
+    /glyph=\{<BotGlyph name=\{glyph\} size=\{16\} \/>\}/,
+    "The 40px Micro state must retain the bot identity glyph",
+  );
   assert.match(miniSource, /data-avatar-studio-mini-eye-state=/);
   assert.match(miniSource, /<ChatMiniBotAvatar\s+size="room"/);
+  assert.match(miniSource, /renderSize=\{compactPreviewRenderSize\}/);
   assert.match(miniSource, /color=\{miniAccentColor\}/);
   assert.match(miniSource, /botFrameMetalAlloyColor\(voicePreset\)/);
   assert.match(
@@ -117,7 +140,7 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
   assert.match(miniSource, /avatarDetails=\{miniAvatarDetails\}/);
   assert.match(
     pageSource,
-    /function BotAvatarMicroRenderer[\s\S]{0,3600}<CoffeeSeatPlateEmoji[\s\S]{0,100}\bpixelated\b/u,
+    /function BotAvatarMicroRenderer[\s\S]{0,800}<BotAvatarMicro/u,
   );
   assert.match(miniSource, /motionMode="mini-led"/);
   assert.match(miniSource, /\bhardPixels\b/);
@@ -155,20 +178,19 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
   const miniViewportRule = cssRuleBody(
     ".botAvatarStudioMiniPreviewViewport",
   );
-  assert.match(miniViewportRule, /width:\s*122px;/);
-  assert.match(miniViewportRule, /height:\s*122px;/);
+  assert.match(miniViewportRule, /width:\s*220px;/);
+  assert.match(miniViewportRule, /height:\s*220px;/);
+  assert.match(miniSource, /data-tutorial-target="avatar-studio-scale-lab"/);
+  assert.match(miniSource, /aria-label="Compact avatar render size"/);
+  assert.match(miniSource, /<strong>Chassis scale<\/strong>/);
 
   assert.match(
     cssSource,
-    /\.botAvatarStudioMicroPreview\s+\.messageMoodBadge\[data-face="coffee"\]\[data-variant="micro"\]\s*\{[^}]*width:\s*36px;[^}]*height:\s*36px;/u,
+    /\.botAvatarStudioMicroPreview\s+\.messageMoodBadge\[data-face="coffee"\]\[data-variant="micro"\]\s*\{[^}]*width:\s*var\(--bot-avatar-studio-compact-preview-size, 36px\);[^}]*height:\s*var\(--bot-avatar-studio-compact-preview-size, 36px\);/u,
   );
   assert.match(
     cssSource,
-    /\.botAvatarStudioMicroPreview \.messageMoodMicroFace\s*\{[^}]*font-size:\s*15px;/u,
-  );
-  assert.match(
-    cssSource,
-    /\.botAvatarStudioMiniPreviewViewport \.botAvatarStudioMiniAvatar\s*\{[^}]*--chat-mini-bot-lower-screen-nudge-x:\s*1px;[^}]*--chat-mini-bot-lower-screen-nudge-y:\s*0px;/u,
+    /\.botAvatarStudioMicroPreview \.messageMoodMicroFace\s*\{[^}]*font-size:\s*calc\([^}]*--bot-avatar-studio-compact-preview-size/u,
   );
   assert.match(
     cssSource,
@@ -176,9 +198,12 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
   );
   assert.match(
     cssSource,
-    /\.botAvatarStudioMicroPreview\s+\.messageMoodBadge\[data-face="coffee"\]\[data-variant="micro"\]\s*\{[^}]*--bot-avatar-micro-screen-scale:\s*1\.12;[^}]*--bot-avatar-micro-face-nudge-x:\s*1px;[^}]*--bot-avatar-micro-face-nudge-y:\s*-1px;/u,
+    /--bot-avatar-micro-screen-scale:\s*1\.12;/u,
   );
-  assert.match(pageSource, /data-bot-avatar-micro-screen="true"/);
+  assert.match(
+    botAvatarMicroSource,
+    /data-bot-avatar-micro-screen="true"/,
+  );
   assert.match(
     cssSource,
     /\.messageMoodBadge\[data-face="coffee"\]\[data-variant="micro"\]\s*\{[\s\S]{0,600}#05080b[\s\S]{0,400}box-shadow:\s*none/u,
@@ -189,7 +214,7 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
   );
   assert.match(
     cssSource,
-    /\.themeLight \.messageMoodMicroFace\s*\{[^}]*color:\s*#05080b;/u,
+    /\.themeLight \.messageMoodMicroFace\s*\{[^}]*color:\s*var\(--bot-avatar-micro-face-phosphor-color, #ffffff\);/u,
   );
 });
 

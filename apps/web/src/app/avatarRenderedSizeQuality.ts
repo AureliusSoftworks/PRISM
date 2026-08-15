@@ -1,7 +1,8 @@
 export type AvatarRenderedSizeTier = "full" | "compact" | "micro";
 
-export const BOT_AVATAR_MICRO_ENTER_MAX_PX = 118;
-export const BOT_AVATAR_MICRO_EXIT_MIN_PX = 132;
+export const BOT_AVATAR_MICRO_ENTER_MAX_PX = 59;
+export const BOT_AVATAR_MICRO_EXIT_MIN_PX = 60;
+export const BOT_AVATAR_MICRO_FEATURES_HIDE_MAX_PX = 40;
 export const BOT_AVATAR_COMPACT_ENTER_MAX_PX = 224;
 export const BOT_AVATAR_COMPACT_EXIT_MIN_PX = 248;
 
@@ -11,13 +12,11 @@ export const BOT_AVATAR_COMPACT_EXIT_MIN_PX = 248;
  * repeatedly remounting a renderer at a boundary.
  */
 export function avatarRenderedSizeTierForMeasurements(
-  authoredWidthPx: number,
+  _authoredWidthPx: number,
   renderedWidthPx: number,
   currentTier: AvatarRenderedSizeTier = "full",
 ): AvatarRenderedSizeTier {
   if (
-    !Number.isFinite(authoredWidthPx) ||
-    authoredWidthPx <= 0 ||
     !Number.isFinite(renderedWidthPx) ||
     renderedWidthPx <= 0
   ) {
@@ -25,10 +24,10 @@ export function avatarRenderedSizeTierForMeasurements(
   }
 
   if (
-    authoredWidthPx <
+    renderedWidthPx <
     (currentTier === "micro"
       ? BOT_AVATAR_MICRO_EXIT_MIN_PX
-      : BOT_AVATAR_MICRO_ENTER_MAX_PX)
+      : BOT_AVATAR_MICRO_ENTER_MAX_PX + 1)
   ) {
     return "micro";
   }

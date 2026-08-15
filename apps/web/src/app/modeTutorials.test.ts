@@ -50,9 +50,12 @@ describe("mode tutorials", () => {
     assert.match(step?.body ?? "", /position it with the grid pad/u);
     assert.match(step?.body ?? "", /Click the canvas or press Enter/u);
     assert.match(step?.body ?? "", /Escape cancels/u);
-    assert.match(step?.body ?? "", /Mini and Micro previews/u);
-    assert.match(step?.body ?? "", /both include authored Ink/u);
-    assert.match(step?.body ?? "", /full chassis would become unreadable/u);
+    assert.match(step?.body ?? "", /single compact avatar scale preview/u);
+    assert.match(step?.body ?? "", /stays Mini at 60px and larger/u);
+    assert.match(step?.body ?? "", /Micro preview when compact scale drops to 59px or below/u);
+    assert.match(step?.body ?? "", /At 40px and below, face details and authored Ink are hidden/u);
+    assert.match(step?.body ?? "", /identity glyph remains visible/u);
+    assert.match(step?.body ?? "", /Drag Chassis scale from Badge through Room to Hero/u);
   });
 
   it("explains the canonical hue-only identity color", () => {
@@ -305,7 +308,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.avatar.steps[1]!.body,
-      /buckle and Mini\/Micro screens stay grid-free/u,
+      /buckle and Micro screens stay grid-free/u,
     );
     assert.match(
       MODE_TUTORIALS.avatar.steps[1]!.body,

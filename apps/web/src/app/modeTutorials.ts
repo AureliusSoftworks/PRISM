@@ -970,6 +970,27 @@ const CURRENT_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
   },
 };
 
+function currentAvatarScaleTutorialStep(
+  mode: TutorialMode,
+  step: ModeTutorialStep,
+): ModeTutorialStep {
+  if (mode !== "avatar" || step.heading !== "Tune it with live controls") {
+    return step;
+  }
+  return {
+    ...step,
+    body: step.body
+      .replace(
+        "Avatar Studio keeps Mini and Micro previews beside the full bot; both include authored Ink, while Micro is the face-only fallback used wherever a full chassis would become unreadable.",
+        "Avatar Studio keeps a single compact avatar scale preview: it stays Mini at 60px and larger, then transitions to a labeled Micro preview when compact scale drops to 59px or below. At 40px and below, face details and authored Ink are hidden while the identity glyph remains visible. Drag Chassis scale from Badge through Room to Hero to inspect the same normalized mini geometry at every production size; the face, Ink, frame, and buckle stay registered together. At the transition, the same Chassis scale remains selected so you can compare without a size jump.",
+      )
+      .replace(
+        "the buckle and Mini/Micro screens stay grid-free",
+        "the buckle and Micro screens stay grid-free",
+      ),
+  };
+}
+
 export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> =
   Object.fromEntries(
     (
@@ -981,7 +1002,10 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> =
         steps: tutorial.steps.map((step, index) =>
           currentTimedMutePowerTutorialStep(
             mode,
-            currentModelRoutingTutorialStep(step),
+            currentAvatarScaleTutorialStep(
+              mode,
+              currentModelRoutingTutorialStep(step),
+            ),
             index,
           ),
         ),

@@ -11,6 +11,10 @@ const componentSource = readFileSync(
   join(here, "chatMiniBotAvatar.tsx"),
   "utf8",
 );
+const microComponentSource = readFileSync(
+  join(here, "BotAvatarMicro.tsx"),
+  "utf8",
+);
 const cssSource = readFileSync(
   join(here, "chatMiniBotAvatar.module.css"),
   "utf8",
@@ -85,20 +89,24 @@ describe("chatMiniBotAvatar", () => {
     assert.match(pageSource, /<ZenLiveBotMannequin[\s\S]{0,240}?facing=\{avatarFacing\}/);
     assert.match(
       pageSource,
-      /facing=\{ambientFacing \?\? BOT_AVATAR_CANONICAL_FACING\}/,
+      /facing=\{\s*ambientFacing \?\? BOT_AVATAR_CANONICAL_FACING\s*\}/,
     );
     assert.doesNotMatch(componentSource, /key=\{?facing/);
     assert.doesNotMatch(pageSource, /key=\{[^}]*avatarFacing/);
   });
 
-  it("keeps every mini buckle glyph one pixel inside its nominal size and raises it one pixel", () => {
+  it("keeps every mini buckle and authored Ink on one shared registration", () => {
     assert.match(
       pageCssSource,
-      /\.emptyStateHeroMiniGlyph\s*\{[^}]*width:\s*calc\([^}]*--chat-mini-bot-glyph-size[^}]*- 1px[^}]*height:\s*calc\([^}]*--chat-mini-bot-glyph-size[^}]*- 1px/,
+      /\.emptyStateHeroMiniGlyph\s*\{[^}]*width:\s*calc\([^}]*var\(--chat-mini-bot-glyph-size[^}]*height:\s*calc\([^}]*var\(--chat-mini-bot-glyph-size/,
     );
     assert.match(
       cssSource,
-      /\.root\s*\{[^}]*--chat-mini-bot-lower-screen-nudge-y:\s*-1px/,
+      /\.root\s*\{[^}]*--chat-mini-bot-lower-screen-nudge-x:\s*1px[^}]*--chat-mini-bot-lower-screen-nudge-y:\s*0px/,
+    );
+    assert.match(
+      pageCssSource,
+      /\.emptyStateHeroMiniArt\s*\{[^}]*transform:\s*translateY\(-2px\)/,
     );
     assert.match(
       cssSource,
@@ -216,12 +224,22 @@ describe("chatMiniBotAvatar", () => {
     assert.doesNotMatch(cssSource, /talkingGlow|data-talking/);
     assert.doesNotMatch(componentSource, /data-tint-ready/);
     assert.match(componentSource, /size\?: "badge" \| "room" \| "hero"/);
+    assert.match(componentSource, /renderSize\?: number/);
+    assert.match(componentSource, /clampChatMiniBotAvatarRenderSize/);
+    assert.match(componentSource, /data-render-size=\{renderSize \?\? undefined\}/);
+    assert.match(
+      cssSource,
+      /width:\s*var\(--chat-mini-bot-render-size\)[^}]*height:\s*var\(--chat-mini-bot-render-size\)/,
+    );
     assert.doesNotMatch(componentSource, /lightMode|frameLight/);
     assert.doesNotMatch(cssSource, /frameLight|data-light-mode|Breath|Ignite/);
     assert.doesNotMatch(cssSource, /\.root\[data-size="hero"\]::before/);
     assert.match(cssSource, /\.root\[data-size="hero"\]::after/);
-    assert.match(cssSource, /width: clamp\(160px, 12\.5vw, 184px\)/);
-    assert.match(cssSource, /width: 140px/);
+    assert.match(
+      cssSource,
+      /--chat-mini-bot-render-size:\s*clamp\(160px, 12\.5vw, 184px\)/,
+    );
+    assert.match(cssSource, /--chat-mini-bot-render-size:\s*140px/);
     assert.doesNotMatch(cssSource, /bot-frame-tint-mask|bot-frame-led/);
     assert.doesNotMatch(cssSource, /chat-mini-buckle-crt|repeating-linear-gradient/);
     assert.match(cssSource, /\.lowerScreen\s*\{[^}]*overflow:\s*hidden/);
@@ -310,7 +328,7 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.match(
       pageCssSource,
-      /\.emptyStateHeroMiniGlyph\s*\{[^}]*width:\s*calc\([^}]*--chat-mini-bot-glyph-size[^}]*- 1px[^}]*height:\s*calc\([^}]*--chat-mini-bot-glyph-size[^}]*- 1px/,
+      /\.emptyStateHeroMiniGlyph\s*\{[^}]*width:\s*calc\([^}]*var\(--chat-mini-bot-glyph-size[^}]*height:\s*calc\([^}]*var\(--chat-mini-bot-glyph-size/,
     );
     assert.match(
       pageCssSource,
@@ -377,40 +395,78 @@ describe("chatMiniBotAvatar", () => {
       pageSource.indexOf("function BotAvatarMicroRenderer("),
       pageSource.indexOf("function MessageMoodFace("),
     );
-    assert.doesNotMatch(microFaceFn, /ChatMiniBotAvatar|BotGlyph/);
-    assert.match(microFaceFn, /avatarDetails\?: BotAvatarDetailsV1 \| null/);
-    assert.match(microFaceFn, /<AvatarDetailsMask/);
-    assert.match(microFaceFn, /detailLevel="audience"/);
-    assert.match(microFaceFn, /coreColor="ink"/);
+    assert.match(microFaceFn, /<BotAvatarMicro/);
+    assert.match(microFaceFn, /avatarDetails=\{props\.avatarDetails\}/);
+    assert.match(microFaceFn, /renderSizePx=\{props\.renderSizePx\}/);
+    assert.match(microFaceFn, /scheduleKey=\{props\.scheduleKey\}/);
+    assert.match(microComponentSource, /avatarDetails\?: BotAvatarDetailsV1 \| null/);
+    assert.match(microComponentSource, /<AvatarDetailsMask/);
+    assert.match(microComponentSource, /detailLevel="audience"/);
+    assert.match(microComponentSource, /coreColor="ink"/);
     assert.match(
-      microFaceFn,
+      microComponentSource,
+      /color=\{BOT_AVATAR_MICRO_PHOSPHOR_COLOR\}/,
+      "Micro Ink must remain white phosphor instead of borrowing the orb accent",
+    );
+    assert.match(
+      microComponentSource,
+      /--bot-avatar-micro-face-phosphor-color[\s\S]{0,100}BOT_AVATAR_MICRO_PHOSPHOR_COLOR/,
+      "Micro face glyphs must share the white-only phosphor contract",
+    );
+    assert.match(
+      microComponentSource,
       /`\$\{styles\.messageMoodCoffeeFace\} \$\{styles\.messageMoodMicroFace\}`/,
     );
-    assert.match(microFaceFn, /faceEyeMovement="still"/);
-    assert.match(microFaceFn, /showQuestionMark=\{false\}/);
-    assert.match(microFaceFn, /motionMode="static"/);
-    assert.match(microFaceFn, /enabled=\{false\}/);
-    assert.match(microFaceFn, /hardPixels/);
-    assert.match(microFaceFn, /forceBlinkPhase="open"/);
-    assert.match(microFaceFn, /coffeeSeatPlateGlyph\([\s\S]*?"closed"/);
-    assert.match(microFaceFn, /talking=\{false\}/);
-    assert.match(microFaceFn, /mouthShape="closed"/);
+    assert.match(microComponentSource, /faceEyeMovement="still"/);
+    assert.match(microComponentSource, /showQuestionMark=\{false\}/);
+    assert.match(microComponentSource, /motionMode="static"/);
+    assert.match(microComponentSource, /enabled=\{false\}/);
+    assert.match(microComponentSource, /hardPixels/);
+    assert.match(microComponentSource, /forceBlinkPhase="open"/);
+    assert.match(microComponentSource, /coffeeSeatPlateGlyph\([\s\S]*?"closed"/);
+    assert.match(microComponentSource, /talking=\{false\}/);
+    assert.match(microComponentSource, /mouthShape="closed"/);
     assert.match(
-      microFaceFn,
+      microComponentSource,
       /\["--coffee-plate-emoji-face-scale-y" as string\]:\s*BOT_AVATAR_CANONICAL_FACE_SCALE_Y/,
     );
-    assert.match(microFaceFn, /data-avatar-render-tier="micro"/);
-    assert.match(microFaceFn, /data-bot-avatar-micro-screen="true"/);
-    assert.match(microFaceFn, /styles\.botAvatarMicroScreenContent/);
-    assert.match(microFaceFn, /styles\.botAvatarMicroFaceRig/);
-    assert.doesNotMatch(microFaceFn, /data-talking|botAvatarMicroTalkingGlow/);
+    assert.match(microComponentSource, /data-avatar-render-tier="micro"/);
+    assert.match(
+      microComponentSource,
+      /props\.renderSizePx! <= BOT_AVATAR_MICRO_FEATURES_HIDE_MAX_PX/,
+    );
+    assert.match(
+      microComponentSource,
+      /data-avatar-micro-presentation=\{glyphOnly \? "glyph" : "face"\}/,
+    );
+    assert.match(
+      microComponentSource,
+      /glyphOnly \? \(\s*<span className=\{styles\.botAvatarMicroGlyph\}>\{props\.glyph\}<\/span>/,
+      "40px Micro avatars should replace face and Ink with the identity glyph",
+    );
+    assert.match(microComponentSource, /data-bot-avatar-micro-screen="true"/);
+    assert.match(microComponentSource, /styles\.botAvatarMicroScreenContent/);
+    assert.match(microComponentSource, /styles\.botAvatarMicroFaceRig/);
+    assert.doesNotMatch(microComponentSource, /data-talking|botAvatarMicroTalkingGlow/);
     assert.match(pageCssSource, /\[data-variant="micro"\]/);
     assert.match(
       pageCssSource,
       /\.messageMoodBadge\[data-face="coffee"\]\[data-variant="micro"\]\s*\{[^}]*border:\s*1px solid/,
     );
     assert.match(pageCssSource, /\.messageMoodMicroFace\s*\{[^}]*font-size:\s*12px/);
+    assert.match(
+      pageCssSource,
+      /\.messageMoodMicroFace\s*\{[^}]*color:\s*var\(--bot-avatar-micro-face-phosphor-color, #ffffff\)/,
+    );
+    assert.match(
+      pageCssSource,
+      /\.themeLight \.messageMoodMicroFace\s*\{[^}]*color:\s*var\(--bot-avatar-micro-face-phosphor-color, #ffffff\)/,
+    );
     assert.match(pageCssSource, /\.botAvatarMicroInk\s*\{[^}]*position:\s*absolute/);
+    assert.match(
+      pageCssSource,
+      /\.botAvatarMicroGlyph\s*\{[^}]*place-items:\s*center;[^}]*color:\s*var\(--bot-avatar-micro-face-phosphor-color, #ffffff\)/,
+    );
     assert.match(
       pageCssSource,
       /\.botAvatarMicroScreen\s*\{[^}]*position:\s*absolute;[^}]*inset:\s*0;[^}]*overflow:\s*hidden;[^}]*border-radius:\s*inherit;/,
@@ -433,5 +489,28 @@ describe("chatMiniBotAvatar", () => {
       pageCssSource,
       /\.zenLiveBotPresenceBody\[data-talking="true"\] \.zenLiveBotPresenceFace\s*\{[^}]*--bot-face-ambient-glow-opacity:\s*0\.52/,
     );
+  });
+
+  it("passes explicit micro render sizes from runtime call sites", () => {
+    const messageMoodFn = pageSource.slice(
+      pageSource.indexOf("function MessageMoodFace("),
+      pageSource.indexOf("function BotFoundryBatchSlotAvatar("),
+    );
+    const batchSlotFn = pageSource.slice(
+      pageSource.indexOf("function BotFoundryBatchSlotAvatar("),
+      pageSource.indexOf("const BotAvatarScreen ="),
+    );
+    assert.match(
+      messageMoodFn,
+      /renderSizePx=\{40\}/,
+      "message header micro variants should pass an explicit render size",
+    );
+    assert.match(messageMoodFn, /glyph=\{<BotGlyph name=\{props\.glyph\} size=\{16\} \/>\}/);
+    assert.match(
+      batchSlotFn,
+      /renderSizePx=\{40\}/,
+      "batch-foundry micro slots should pass an explicit render size",
+    );
+    assert.match(batchSlotFn, /glyph=\{<BotGlyph name=\{glyph\} size=\{16\} \/>\}/);
   });
 });

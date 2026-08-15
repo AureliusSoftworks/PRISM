@@ -1153,7 +1153,7 @@
     var(--editor-bot-color, var(--accent)) 58%,
     rgba(255, 255, 255, 0.14)
   );
-  color: #ffffff;
+  color: var(--bot-avatar-micro-face-phosphor-color, #ffffff);
 }
 
 .botAvatarCustomizer[data-foundry="true"] .botAvatarStudioMiniPreview {
@@ -1178,9 +1178,8 @@
 
 .botAvatarStudioMiniPreviewCluster {
   display: grid;
-  grid-template-columns: 122px 76px;
+  grid-template-columns: minmax(0, 220px);
   align-items: center;
-  gap: 12px;
 }
 
 .botAvatarStudioMiniClusterItem,
@@ -1223,19 +1222,60 @@
 .botAvatarStudioMiniPreviewViewport {
   display: grid;
   place-items: center;
-  width: 122px;
-  height: 122px;
+  width: 220px;
+  height: 220px;
   overflow: visible;
 }
 
-.botAvatarStudioMiniPreviewViewport .botAvatarStudioMiniAvatar {
-  /* Keep the Studio mini's authored horizontal correction, then raise its
-     emission one pixel from the previous +1px position. The metal orb remains
-     registered to its raster. */
-  --chat-mini-bot-lower-screen-nudge-x: 1px;
-  --chat-mini-bot-lower-screen-nudge-y: 0px;
-  width: 122px;
-  height: 122px;
+.botAvatarStudioScaleControl {
+  display: grid;
+  width: 100%;
+  gap: 5px;
+  color: rgba(239, 243, 249, 0.72);
+  font-size: 8px;
+  font-weight: 720;
+  letter-spacing: 0.08em;
+  pointer-events: auto;
+  text-transform: uppercase;
+}
+
+.botAvatarStudioScaleControl > span:first-child,
+.botAvatarStudioScaleStops {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.botAvatarStudioScaleControl output {
+  color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 76%,
+    #ffffff
+  );
+  font-variant-numeric: tabular-nums;
+}
+
+.botAvatarStudioScaleControl input {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--editor-bot-color, var(--accent));
+  cursor: ew-resize;
+}
+
+.botAvatarStudioScaleControl input:focus-visible {
+  outline: 2px solid
+    color-mix(
+      in srgb,
+      var(--editor-bot-color, var(--accent)) 76%,
+      #ffffff
+    );
+  outline-offset: 4px;
+}
+
+.botAvatarStudioScaleStops {
+  color: rgba(239, 243, 249, 0.46);
+  font-size: 6px;
+  letter-spacing: 0.12em;
 }
 
 /* The full avatar's 128-cell face screen remains the placement authority.
@@ -1263,9 +1303,27 @@
   color: color-mix(in srgb, var(--fg) 72%, var(--fg-muted));
 }
 
+.themeLight.botAvatarStudioThemeScope .botAvatarStudioScaleControl {
+  color: color-mix(in srgb, var(--fg) 76%, var(--fg-muted));
+}
+
+.themeLight.botAvatarStudioThemeScope .botAvatarStudioScaleControl output {
+  color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 68%,
+    var(--fg)
+  );
+}
+
+.themeLight.botAvatarStudioThemeScope .botAvatarStudioScaleStops {
+  color: color-mix(in srgb, var(--fg-muted) 76%, transparent);
+}
+
 .botAvatarStudioMicroPreview {
   display: grid;
   place-items: center;
+  width: var(--bot-avatar-studio-compact-preview-size, 36px);
+  height: var(--bot-avatar-studio-compact-preview-size, 36px);
 }
 
 .botAvatarMicroScreen {
@@ -1290,6 +1348,15 @@
   transform: scale(var(--bot-avatar-micro-screen-scale, 1));
 }
 
+.botAvatarMicroFaceContent {
+  position: absolute;
+  inset: 0;
+  transform: translate(
+    var(--bot-avatar-micro-content-shift-x, 0px),
+    var(--bot-avatar-micro-content-shift-y, 0px)
+  );
+}
+
 .botAvatarMicroFaceRig {
   z-index: 2;
   transform: translate(
@@ -1298,23 +1365,45 @@
   );
 }
 
+.botAvatarMicroGlyph {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  color: var(--bot-avatar-micro-face-phosphor-color, #ffffff);
+  pointer-events: none;
+}
+
+.botAvatarMicroGlyph > svg {
+  width: 64%;
+  height: 64%;
+  filter: none;
+}
+
 /* The preview keeps the established optical registration; the renderer's
    canonical post-rotation flip now supplies the missing orientation. */
 .botAvatarStudioMicroPreview
   .messageMoodBadge[data-face="coffee"][data-variant="micro"] {
   --bot-avatar-micro-screen-scale: 1.12;
-  --bot-avatar-micro-face-nudge-x: 1px;
-  --bot-avatar-micro-face-nudge-y: -1px;
-}
-
-.botAvatarStudioMicroPreview
-  .messageMoodBadge[data-face="coffee"][data-variant="micro"] {
-  width: 36px;
-  height: 36px;
+  --bot-avatar-micro-content-shift-x: calc(
+    var(--bot-avatar-studio-compact-preview-size, 36px) * -0.027778
+  );
+  --bot-avatar-micro-content-shift-y: 0px;
+  --bot-avatar-micro-face-nudge-x: calc(
+    var(--bot-avatar-studio-compact-preview-size, 36px) * 0.027778
+  );
+  --bot-avatar-micro-face-nudge-y: calc(
+    var(--bot-avatar-studio-compact-preview-size, 36px) * -0.027778
+  );
+  width: var(--bot-avatar-studio-compact-preview-size, 36px);
+  height: var(--bot-avatar-studio-compact-preview-size, 36px);
 }
 
 .botAvatarStudioMicroPreview .messageMoodMicroFace {
-  font-size: 15px;
+  font-size: calc(
+    var(--bot-avatar-studio-compact-preview-size, 36px) * 0.416667
+  );
 }
 
 .botAvatarFoundryCameraHud > span {
@@ -2747,8 +2836,7 @@
 
   .botAvatarCustomizer[data-foundry="true"]
     .botAvatarStudioMiniPreviewCluster {
-    grid-template-columns: 108px 64px;
-    gap: 8px;
+    grid-template-columns: minmax(0, 108px);
   }
 
   .botAvatarCustomizer[data-foundry="true"]
@@ -2757,6 +2845,11 @@
     .botAvatarStudioMiniPreviewViewport .botAvatarStudioMiniAvatar {
     width: 108px;
     height: 108px;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarStudioScaleControl {
+    display: none;
   }
 
   .botAvatarCustomizer[data-foundry="true"]
@@ -22804,7 +22897,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .themeLight .messageMoodMicroFace {
-  color: #05080b;
+  color: var(--bot-avatar-micro-face-phosphor-color, #ffffff);
   text-shadow: none;
 }
 

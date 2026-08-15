@@ -358,7 +358,11 @@ import {
   type AvatarDetailsEditorHandle,
 } from "./AvatarDetailsEditor";
 import { AvatarDetailsMask } from "./AvatarDetailsMask";
-import { ChatMiniBotAvatar } from "./chatMiniBotAvatar";
+import {
+  CHAT_MINI_BOT_AVATAR_MAX_RENDER_SIZE,
+  CHAT_MINI_BOT_AVATAR_MIN_RENDER_SIZE,
+  ChatMiniBotAvatar,
+} from "./chatMiniBotAvatar";
 import { BotAvatarMicro } from "./BotAvatarMicro";
 import { botGroupLeadershipCount } from "./botGroupLeadership";
 import {
@@ -18579,115 +18583,23 @@ function BotAvatarMicroRenderer(props: {
   faceStyle?: BotFaceStyle | null;
   scheduleKey?: string;
   avatarDetails?: BotAvatarDetailsV1 | null;
+  glyph?: ReactNode;
   className?: string;
+  renderSizePx?: number;
 }): React.JSX.Element {
-  const moodKey = props.moodKey;
-  const placement = props.placement ?? "trailing";
-  const scheduleKey = props.scheduleKey ?? `bot-avatar-micro-${moodKey}`;
-  const plateFace = coffeeSeatPlateGlyph(
-    coffeeSeatEmojiMoodFromPrism(moodKey),
-    "closed",
-  );
-  const color = props.color?.trim();
-  const hasAvatarDetails = avatarDetailsHasVisuals(props.avatarDetails);
-  const renderInk = (
-    depth: "behind-face" | "above-face",
-  ): React.JSX.Element | null =>
-    hasAvatarDetails ? (
-      <span
-        className={styles.botAvatarMicroInk}
-        data-avatar-details-depth={depth}
-      >
-        <AvatarDetailsMask
-          details={props.avatarDetails}
-          color={color}
-          detailLevel="audience"
-          faceGeometry={props.faceStyle}
-          blinkPhase="open"
-          talking={false}
-          speechMotionActive={false}
-          mouthShape="closed"
-          depth={depth}
-          staticRaster
-          coreColor="ink"
-          rasterSize={36}
-        />
-      </span>
-    ) : null;
-
   return (
-    <span
-      className={`${styles.messageMoodBadge} ${props.className ?? ""}`}
-      data-mood={moodKey}
-      data-placement={placement}
-      data-face="coffee"
-      data-variant="micro"
-      data-avatar-render-tier="micro"
-      data-avatar-details-visuals={hasAvatarDetails ? "true" : undefined}
-      style={
-        {
-          ...(color ? { ["--coffee-bot-color" as string]: color } : {}),
-          // The 90-degree plate face needs the canonical post-rotation flip.
-          // Without it, asymmetric punctuation reads as the opposite-facing
-          // face even though the micro orb itself is not mirrored.
-          ["--coffee-plate-emoji-face-scale-y" as string]:
-            BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
-          ["--avatar-details-facing-scale-x" as string]: "1",
-        } as CSSProperties
-      }
-      aria-hidden="true"
-    >
-      <span
-        className={styles.botAvatarMicroScreen}
-        data-bot-avatar-micro-screen="true"
-      >
-        <span className={styles.botAvatarMicroScreenContent}>
-          {renderInk("behind-face")}
-          <span className={styles.botAvatarMicroFaceRig}>
-            <CoffeeSeatPlateEmoji
-              enabled={false}
-              pixelated
-              hardPixels
-              motionMode="static"
-              isTalking={false}
-              mouthShape="closed"
-              scheduleKey={scheduleKey}
-              showQuestionMark={false}
-              baseText={plateFace.text}
-              rotateDeg={plateFace.rotateDeg}
-              voicePreset={props.voicePreset ?? "neutral"}
-              faceEyesFont={props.faceStyle?.eyesFont}
-              faceEyeCharacter={props.faceStyle?.eyeCharacter}
-              faceMouthFont={props.faceStyle?.mouthFont}
-              faceMouthCharacter={props.faceStyle?.mouthCharacter}
-              faceMouthAnimation={props.faceStyle?.mouthAnimation}
-              faceMouthSpeechPoses={props.faceStyle?.mouthSpeechPoses}
-              faceFontWeight={props.faceStyle?.weight}
-              faceEyeScale={props.faceStyle?.eyeScale}
-              faceEyeOffsetX={props.faceStyle?.eyeOffsetX}
-              faceEyeOffsetY={props.faceStyle?.eyeOffsetY}
-              faceEyeRotationDeg={props.faceStyle?.eyeRotationDeg}
-              faceEyeCount={props.faceStyle?.eyeCount}
-              faceBlinkCount={props.faceStyle?.blinkCount}
-              faceEyeSpacing={props.faceStyle?.eyeSpacing}
-              faceMouthScale={props.faceStyle?.mouthScale}
-              faceMouthOffsetX={props.faceStyle?.mouthOffsetX}
-              faceMouthOffsetY={props.faceStyle?.mouthOffsetY}
-              faceMouthRotationDeg={props.faceStyle?.mouthRotationDeg}
-              faceBlinkBar={props.faceStyle?.blinkBar}
-              faceBlinkScale={props.faceStyle?.blinkScale}
-              faceBlinkOffsetX={props.faceStyle?.blinkOffsetX}
-              faceBlinkOffsetY={props.faceStyle?.blinkOffsetY}
-              faceBlinkRotationDeg={props.faceStyle?.blinkRotationDeg}
-              faceEyeMovement="still"
-              forceBlinkPhase="open"
-              className={`${styles.messageMoodCoffeeFace} ${styles.messageMoodMicroFace}`}
-            />
-          </span>
-          {renderInk("above-face")}
-        </span>
-      </span>
-    </span>
+    <BotAvatarMicro
+      moodKey={props.moodKey}
+      placement={props.placement}
+      color={props.color}
+      voicePreset={props.voicePreset}
+      faceStyle={props.faceStyle}
+      scheduleKey={props.scheduleKey}
+      avatarDetails={props.avatarDetails}
+      glyph={props.glyph}
+      className={props.className}
+      renderSizePx={props.renderSizePx}
+    />
   );
 }
 
@@ -18705,6 +18617,7 @@ function MessageMoodFace(props: {
   forceBlinkPhase?: "open" | "closed" | null;
   scheduleKey?: string;
   avatarDetails?: BotAvatarDetailsV1 | null;
+  glyph?: BotGlyphName;
 }): React.JSX.Element {
   const variant = props.variant ?? "classic";
   if (variant === "micro") {
@@ -18715,6 +18628,8 @@ function MessageMoodFace(props: {
         color={props.color}
         faceStyle={props.faceStyle}
         avatarDetails={props.avatarDetails}
+        glyph={<BotGlyph name={props.glyph} size={16} />}
+        renderSizePx={40}
       />
     );
   }
@@ -21958,10 +21873,9 @@ function BotFoundryBatchSlotAvatar({
           color={preview.color}
           faceStyle={preview.face}
           className={styles.botFoundryBatchMicroAvatar}
+          glyph={<BotGlyph name={glyph} size={16} />}
+          renderSizePx={40}
         />
-        <span className={styles.botFoundryBatchOrbGlyph}>
-          <BotGlyph name={glyph} size={12} />
-        </span>
       </span>
     );
   }
@@ -22068,6 +21982,7 @@ function EmptyStateHeroMiniBot({
   scheduleKey,
   forceBlinkPhase,
   className,
+  renderSize,
   leadershipGroupCount = 0,
 }: {
   bot: Bot | null;
@@ -22082,6 +21997,7 @@ function EmptyStateHeroMiniBot({
   scheduleKey?: string;
   forceBlinkPhase?: "open" | "closed" | null;
   className?: string;
+  renderSize?: number;
   leadershipGroupCount?: number;
 }): React.JSX.Element {
   const defaultPrismPresence = bot === null;
@@ -22155,6 +22071,7 @@ function EmptyStateHeroMiniBot({
       className={[styles.emptyStateHeroMiniBot, className]
         .filter(Boolean)
         .join(" ")}
+      renderSize={renderSize}
       leadershipGroupCount={leadershipGroupCount}
       face={
         <>
@@ -22233,6 +22150,7 @@ const BotGroupWaitingRoomPresenceAvatar = memo(
     facing,
     visitSeed,
     forceBlinkPhase,
+    renderSize,
     leadershipGroupCount,
   }: {
     bot: Bot;
@@ -22242,6 +22160,7 @@ const BotGroupWaitingRoomPresenceAvatar = memo(
     facing: BotAvatarFacing;
     visitSeed: string;
     forceBlinkPhase: "open" | "closed";
+    renderSize: number;
     leadershipGroupCount: number;
   }): React.JSX.Element {
     return mini ? (
@@ -22253,6 +22172,7 @@ const BotGroupWaitingRoomPresenceAvatar = memo(
         size="room"
         scheduleKey={`waiting-room-${visitSeed}-${bot.id}`}
         forceBlinkPhase={forceBlinkPhase}
+        renderSize={renderSize}
         className={styles.botGroupWaitingRoomMiniBot}
         leadershipGroupCount={leadershipGroupCount}
       />
@@ -22261,7 +22181,9 @@ const BotGroupWaitingRoomPresenceAvatar = memo(
         color={bot.color}
         faceStyle={resolveBotFaceStyleForBot(bot)}
         avatarDetails={resolveBotAvatarDetails(bot)}
+        glyph={<BotGlyph name={bot.glyph} size={16} />}
         className={styles.botGroupWaitingRoomMicroBot}
+        renderSizePx={renderSize}
       />
     );
   },
@@ -31839,6 +31761,7 @@ function ZenLiveBotMannequin({
   const presenceBodyRef = useRef<HTMLSpanElement | null>(null);
   const [renderedSizeTier, setRenderedSizeTier] =
     useState<AvatarRenderedSizeTier>("full");
+  const [renderedSizePx, setRenderedSizePx] = useState<number>();
   const microFallbackActive = renderedSizeTier === "micro";
   useLayoutEffect(() => {
     const element = presenceBodyRef.current;
@@ -31863,6 +31786,9 @@ function ZenLiveBotMannequin({
               : 1;
       const authoredWidth = element.offsetWidth * powerScale;
       const renderedWidth = element.getBoundingClientRect().width;
+      if (Number.isFinite(renderedWidth) && renderedWidth > 0) {
+        setRenderedSizePx(renderedWidth);
+      }
       setRenderedSizeTier((current) =>
         avatarRenderedSizeTierForMeasurements(
           authoredWidth,
@@ -32236,7 +32162,9 @@ function ZenLiveBotMannequin({
           faceStyle={faceStyle}
           scheduleKey={`${scheduleKey}-micro`}
           avatarDetails={avatarDetails}
+          glyph={<BotGlyph name={glyph} size={16} />}
           className={styles.zenLiveBotPresenceMicroAvatar}
+          renderSizePx={renderedSizePx}
         />
       </span>
     );
@@ -40241,8 +40169,12 @@ function BotAvatarPreviewPanel({
   onStageBackgroundSelect?: () => void;
   leadershipGroupCount?: number;
 }): React.JSX.Element {
+  const [compactPreviewRenderSize, setCompactPreviewRenderSize] =
+    useState(122);
   const [foundryViewport, setFoundryViewport] =
     useState<BotAvatarFoundryViewport>(BOT_AVATAR_FOUNDRY_DEFAULT_VIEWPORT);
+  const [compactPreviewRenderSizeTier, setCompactPreviewRenderSizeTier] =
+    useState<AvatarRenderedSizeTier>("compact");
   const foundryViewportRef = useRef<BotAvatarFoundryViewport>(
     BOT_AVATAR_FOUNDRY_DEFAULT_VIEWPORT,
   );
@@ -40295,6 +40227,17 @@ function BotAvatarPreviewPanel({
     isDefaultPrismBot ? null : avatarDetailsColor,
     previewTheme,
   );
+  const compactPreviewRenderSizeTierLabel =
+    compactPreviewRenderSizeTier === "micro"
+      ? "Micro preview"
+      : "Mini preview";
+  const compactPreviewIsMicro = compactPreviewRenderSizeTier === "micro";
+  const compactPreviewSizeStyle = compactPreviewIsMicro
+    ? ({
+        ["--bot-avatar-studio-compact-preview-size" as string]:
+          `${compactPreviewRenderSize}px`,
+      } as CSSProperties)
+    : undefined;
   const miniFaceRegistrationStyle = {
     ...(miniHasAvatarArt
       ? BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE
@@ -40302,6 +40245,12 @@ function BotAvatarPreviewPanel({
     ["--coffee-plate-emoji-face-scale-y" as string]:
       BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
   } as CSSProperties;
+  const setCompactPreviewSize = useCallback((renderSize: number) => {
+    setCompactPreviewRenderSize(renderSize);
+    setCompactPreviewRenderSizeTier((current) =>
+      avatarRenderedSizeTierForMeasurements(renderSize, renderSize, current),
+    );
+  }, []);
   const miniSeatPlateGlyph = coffeeSeatPlateGlyph(
     "warm",
     miniAvatarBinaryMouthShape({
@@ -40767,17 +40716,38 @@ function BotAvatarPreviewPanel({
             data-avatar-studio-mini-eye-state={
               previewBlink ? "blink" : "open"
             }
-            role="img"
-            aria-label={`${titleName} mini avatar preview`}
+            role="group"
+            aria-label={`${titleName} compact avatar scale preview`}
           >
-            <div className={styles.botAvatarStudioMiniPreviewCluster}>
+            <div
+              className={styles.botAvatarStudioMiniPreviewCluster}
+              data-avatar-studio-preview-tier={compactPreviewRenderSizeTier}
+            >
               <div className={styles.botAvatarStudioMiniClusterItem}>
                 <span className={styles.botAvatarStudioMiniPreviewLabel}>
-                  Mini preview
+                  {compactPreviewRenderSizeTierLabel}
                 </span>
                 <div className={styles.botAvatarStudioMiniPreviewViewport}>
-                  <ChatMiniBotAvatar
+                  {compactPreviewIsMicro ? (
+                    <div
+                      className={styles.botAvatarStudioMicroPreview}
+                      style={compactPreviewSizeStyle}
+                    >
+                      <BotAvatarMicroRenderer
+                        moodKey={previewMood}
+                        color={miniAccentColor}
+                        voicePreset={voicePreset}
+                        faceStyle={faceStyle}
+                        scheduleKey={`${scheduleKey}-studio-micro`}
+                        avatarDetails={miniAvatarDetails}
+                        glyph={<BotGlyph name={glyph} size={16} />}
+                        renderSizePx={compactPreviewRenderSize}
+                      />
+                    </div>
+                  ) : (
+                    <ChatMiniBotAvatar
                     size="room"
+                    renderSize={compactPreviewRenderSize}
                     color={miniAccentColor}
                     alloyColor={
                       isDefaultPrismBot
@@ -40853,27 +40823,39 @@ function BotAvatarPreviewPanel({
                       />
                     }
                   />
-                </div>
-              </div>
-              <div
-                className={styles.botAvatarStudioMicroClusterItem}
-                data-avatar-studio-micro-preview="true"
-              >
-                <span className={styles.botAvatarStudioMiniPreviewLabel}>
-                  Micro preview
-                </span>
-                <div className={styles.botAvatarStudioMicroPreview}>
-                  <BotAvatarMicroRenderer
-                    moodKey={previewMood}
-                    color={miniAccentColor}
-                    voicePreset={voicePreset}
-                    faceStyle={faceStyle}
-                    scheduleKey={`${scheduleKey}-studio-micro`}
-                    avatarDetails={miniAvatarDetails}
-                  />
+                  )}
                 </div>
               </div>
             </div>
+            <label
+              className={styles.botAvatarStudioScaleControl}
+              data-tutorial-target="avatar-studio-scale-lab"
+            >
+              <span>
+                <strong>Chassis scale</strong>
+                <output>{compactPreviewRenderSize}px</output>
+              </span>
+              <input
+                type="range"
+                min={CHAT_MINI_BOT_AVATAR_MIN_RENDER_SIZE}
+                max={CHAT_MINI_BOT_AVATAR_MAX_RENDER_SIZE}
+                step={1}
+                value={compactPreviewRenderSize}
+                aria-label="Compact avatar render size"
+                aria-valuetext={`${compactPreviewRenderSize} pixels`}
+                onChange={(event) =>
+                  setCompactPreviewSize(Number(event.currentTarget.value))
+                }
+              />
+              <span
+                className={styles.botAvatarStudioScaleStops}
+                aria-hidden="true"
+              >
+                <span>Badge</span>
+                <span>Room</span>
+                <span>Hero</span>
+              </span>
+            </label>
           </div>
         ) : null}
         {foundryCameraEditable ? (
@@ -96405,6 +96387,7 @@ function HomeContent(): React.JSX.Element {
                               ? "closed"
                               : "open"
                           }
+                          renderSize={placement.visualSize}
                           leadershipGroupCount={botGroupLeadershipCount(
                             botLibraryGroups,
                             bot.id,
@@ -144243,6 +144226,10 @@ function HomeContent(): React.JSX.Element {
                                   bots,
                                   assistantFallbackBotId,
                                 )}
+                                glyph={
+                                  assistantDisplayBot?.glyph ??
+                                  DEFAULT_PRISM_BOT_GLYPH
+                                }
                                 avatarDetails={
                                   assistantDisplayBot
                                     ? resolveBotAvatarDetails(
@@ -146469,6 +146456,10 @@ function HomeContent(): React.JSX.Element {
                                 bots,
                                 assistantFallbackBotId,
                               )}
+                              glyph={
+                                assistantDisplayBot?.glyph ??
+                                DEFAULT_PRISM_BOT_GLYPH
+                              }
                               avatarDetails={
                                 assistantDisplayBot
                                   ? resolveBotAvatarDetails(assistantDisplayBot)

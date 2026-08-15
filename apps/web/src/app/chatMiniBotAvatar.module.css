@@ -4,9 +4,14 @@
 .root {
   --chat-mini-bot-color: var(--accent);
   --chat-mini-bot-alloy-color: #aeb8c1;
-  /* Register the compact buckle emission one display pixel above the authored
-     lower-screen center. Full-size and micro avatars use separate renderers. */
-  --chat-mini-bot-lower-screen-nudge-y: -1px;
+  --chat-mini-bot-render-size: 28px;
+  --chat-mini-bot-glyph-size: max(
+    7px,
+    calc(var(--chat-mini-bot-render-size) * 0.12)
+  );
+  /* One shared optical registration for every compact surface. */
+  --chat-mini-bot-lower-screen-nudge-x: 1px;
+  --chat-mini-bot-lower-screen-nudge-y: 0px;
   /* The 96px chassis raster is square, just like the HD source. Its aperture
      is already authored slightly wider than tall. Keep the displayed frame
      square so the canonical face plane is not compressed horizontally. */
@@ -21,6 +26,8 @@
   isolation: isolate;
   overflow: visible;
   color: var(--chat-mini-bot-color);
+  width: var(--chat-mini-bot-render-size);
+  height: var(--chat-mini-bot-render-size);
 }
 
 .root::after {
@@ -44,20 +51,17 @@
 }
 
 .sizeBadge {
-  width: 28px;
-  height: 28px;
+  --chat-mini-bot-render-size: 28px;
 }
 
 .sizeHero {
   --chat-mini-bot-glyph-size: clamp(20px, 1.9vw, 24px);
-  width: clamp(160px, 12.5vw, 184px);
-  height: clamp(160px, 12.5vw, 184px);
+  --chat-mini-bot-render-size: clamp(160px, 12.5vw, 184px);
 }
 
 .sizeRoom {
   --chat-mini-bot-glyph-size: 11px;
-  width: clamp(76px, 6.7vw, 94px);
-  height: clamp(76px, 6.7vw, 94px);
+  --chat-mini-bot-render-size: clamp(76px, 6.7vw, 94px);
 }
 
 .frame {
@@ -181,7 +185,6 @@
 
 @media (max-width: 560px) {
   .sizeHero {
-    width: 140px;
-    height: 140px;
+    --chat-mini-bot-render-size: 140px;
   }
 }

@@ -13,6 +13,18 @@ export const CHAT_MINI_BOT_AVATAR_DARK_BASE_SRC =
   "/bot-frame/bot-frame-mini-dark.png?v=2";
 export const CHAT_MINI_BOT_AVATAR_LIGHT_BASE_SRC =
   "/bot-frame/bot-frame-mini-light.png?v=2";
+export const CHAT_MINI_BOT_AVATAR_MIN_RENDER_SIZE = 28;
+export const CHAT_MINI_BOT_AVATAR_MAX_RENDER_SIZE = 220;
+
+export function clampChatMiniBotAvatarRenderSize(size: number): number {
+  if (!Number.isFinite(size)) return CHAT_MINI_BOT_AVATAR_MIN_RENDER_SIZE;
+  return Math.round(
+    Math.max(
+      CHAT_MINI_BOT_AVATAR_MIN_RENDER_SIZE,
+      Math.min(CHAT_MINI_BOT_AVATAR_MAX_RENDER_SIZE, size),
+    ),
+  );
+}
 
 /** Compact bot chassis for identity portraits. Mini screens are deliberately
  * flat LED pixels: the face owns blink + binary mouth state and the chassis
@@ -30,6 +42,12 @@ export function ChatMiniBotAvatar(props: {
   className?: string;
   /** `badge` is message-chip sized; `room` is aquarium sized; `hero` is the empty-state preview. */
   size?: "badge" | "room" | "hero";
+  /**
+   * Exact square footprint for surfaces whose layout owns avatar density.
+   * The chassis, screens, face, Ink, and glyph all remain registered to the
+   * same normalized coordinate plane while this value changes.
+   */
+  renderSize?: number;
   /** Visible direction for the mini face and Ink; the glyph stays readable. */
   facing?: BotAvatarFacing;
   /** Number of Library groups this bot represents as leader. */
@@ -40,6 +58,10 @@ export function ChatMiniBotAvatar(props: {
   const theme = props.theme ?? "dark";
   const facing = props.facing ?? BOT_AVATAR_CANONICAL_FACING;
   const screenFacingScaleX = botAvatarScreenFacingScaleX(facing);
+  const renderSize =
+    props.renderSize === undefined
+      ? null
+      : clampChatMiniBotAvatarRenderSize(props.renderSize);
   const frameBaseSrc =
     theme === "light"
       ? CHAT_MINI_BOT_AVATAR_LIGHT_BASE_SRC
@@ -59,6 +81,15 @@ export function ChatMiniBotAvatar(props: {
     ["--chat-mini-bot-lower-screen-facing-scale-x" as string]:
       "var(--bot-avatar-external-facing-scale-x, 1)",
     ["--avatar-details-facing-scale-x" as string]: "1",
+    ...(renderSize === null
+      ? null
+      : {
+          ["--chat-mini-bot-render-size" as string]: `${renderSize}px`,
+          ["--chat-mini-bot-glyph-size" as string]: `${Math.max(
+            7,
+            Math.round(renderSize * 0.12),
+          )}px`,
+        }),
   } as CSSProperties;
 
   const rootClassName = [
@@ -78,6 +109,7 @@ export function ChatMiniBotAvatar(props: {
       className={rootClassName}
       data-chat-mini-bot-avatar="true"
       data-size={size}
+      data-render-size={renderSize ?? undefined}
       data-theme={theme}
       data-avatar-facing={facing}
       style={rootStyle}
