@@ -100,7 +100,21 @@ describe("session review evidence", () => {
     assert.match(summary, /Replay availability: faithful/u);
     assert.match(summary, /Manifest version: 2/u);
     assert.match(summary, /Faithful audio duration: 00:05\.000/u);
+    assert.match(summary, /Recording duration alignment: matched \(delta 00:00\.000\)/u);
     assert.doesNotMatch(summary, /private|audio\.webm|video\.mp4/u);
+  });
+
+  it("warns when planned direction materially outlives the faithful master", () => {
+    const evidence = sessionReviewRecordingEvidenceFromRecording({
+      ...recording,
+      audioDurationMs: 3_547,
+    });
+    const summary = sessionReviewRecordingSummaryLines(evidence).join("\n");
+
+    assert.match(
+      summary,
+      /Recording duration alignment: warning — compiled timeline exceeds faithful audio by 00:01\.453/u,
+    );
   });
 
   it("orders private V2 direction and preserves silent thinking evidence", () => {

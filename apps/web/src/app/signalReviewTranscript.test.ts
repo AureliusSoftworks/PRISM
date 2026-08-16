@@ -325,6 +325,15 @@ describe("Signal review transcript", () => {
             ...episode.messages[0]!,
             content: "...",
             voicePerformanceText: null,
+            mutePerformance: {
+              v: 1,
+              name: "mutePerformance",
+              durationMs: 9_000,
+              periodCount: 9,
+              interrupted: false,
+              elapsedCue: "*9 seconds pass without an audible word.*",
+              reactionBeats: [],
+            },
           },
           episode.messages[1]!,
         ],
@@ -340,6 +349,10 @@ describe("Signal review transcript", () => {
     );
     assert.doesNotMatch(transcript, /spoken turns/u);
     assert.doesNotMatch(transcript, /Spoken Transcript/u);
+    assert.match(
+      transcript,
+      /- Visible transcript:\n    \.{9} \*9 seconds pass without an audible word\.\*/u,
+    );
     assert.match(transcript, /Use the visible transcript for user-visible quality/u);
   });
 
@@ -462,5 +475,56 @@ describe("Signal review transcript", () => {
       /kind=thinking \| sourceMessageId=message-1 \| payload=.*"audible":false/u,
     );
     assert.match(transcript, /"followingMessageId":"message-1"/u);
+  });
+
+  it("annotates the interrupted turn for a producer host redirect", () => {
+    const transcript = buildSignalReviewTranscript({
+      episode: {
+        ...episode,
+        messages: [episode.messages[0]!],
+        events: [
+          episode.events[2]!,
+          {
+            id: "event-redirect",
+            episodeId: episode.id,
+            sequence: 4,
+            kind: "producer_cue",
+            payload: {
+              kind: "ask_about",
+              detail: "Ask what the first failure cost.",
+              delivery: "redirect_host",
+              audience: "host",
+              interruptedMessageId: "message-1",
+            },
+            occurredAt: "2026-07-17T17:00:05.000Z",
+          },
+        ],
+        segments: [],
+      },
+      show,
+      host: { id: "host-1", name: "Ada" },
+      guest: { id: "guest-1", name: "Grace" },
+    });
+
+    assert.match(
+      transcript,
+      /- Producer redirect: yes — ask_about \(event event-redirect\); this canonical turn contains only the audience-heard prefix/u,
+    );
+  });
+
+  it("renders an explicit audible-response fallback for missing and empty cue arrays", () => {
+    for (const presenceBeats of [undefined, []] as const) {
+      const transcript = buildSignalReviewTranscript({
+        episode,
+        show,
+        host: { id: "host-1", name: "Ada" },
+        guest: { id: "guest-1", name: "Grace" },
+        presenceBeats,
+      });
+      assert.match(
+        transcript,
+        /## Response cues \(heard only\)\n\nNo audible response cues\./u,
+      );
+    }
   });
 });

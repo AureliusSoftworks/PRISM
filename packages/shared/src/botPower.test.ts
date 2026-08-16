@@ -26,6 +26,7 @@ import {
   planBotPowerMuteReactionBeatsV1,
   applyBotPowerResponseBudgetV1,
   botPowerAddressedFandomCueV1,
+  botPowerAddressedInsultPrimaryCueV1,
   botPowerRequiresAddressedInsultV1,
   botPowerResponseHasAddressedInsultV1,
   botPowerAvatarScaleModeFromEffectsV1,
@@ -343,7 +344,7 @@ test("mute performance sanitizer rejects malformed private-looking metadata", ()
   assert.equal(botPowerMuteEstimatedDurationMsV1("one two three", 1_500), 1_000);
 });
 
-test("addressed-insult Powers distinguish personal jabs from argument criticism and enforce a bounded fallback", () => {
+test("addressed-insult Powers accept personal jabs and repair rejected drafts without scaffold repetition", () => {
   const intent =
     "Every single reply must use ad hominem to insult whoever the bot is addressing.";
   const powers = [
@@ -372,6 +373,30 @@ test("addressed-insult Powers distinguish personal jabs from argument criticism 
     },
   ];
   assert.equal(botPowerRequiresAddressedInsultV1(powers), true);
+  const primaryCue = botPowerAddressedInsultPrimaryCueV1(
+    powers,
+    "Rick",
+    "the Hello world echo",
+  );
+  assert.match(primaryCue ?? "", /direct insult to Rick/u);
+  assert.match(primaryCue ?? "", /answer, echo, thanks, agreement, or help/iu);
+  assert.match(primaryCue ?? "", /never prepend a generic jab/iu);
+  assert.match(primaryCue ?? "", /rate only rare standout jabs/iu);
+  assert.match(primaryCue ?? "", /facts, tools, and safety/iu);
+  assert.match(primaryCue ?? "", /protected traits, private facts, trauma, or slurs/iu);
+  assert.match(
+    buildBotPowersPromptBlock([primaryCue ?? ""]),
+    /private facts, trauma, or slurs/iu,
+  );
+  const boundedStoryCue = botPowerAddressedInsultPrimaryCueV1(
+    powers,
+    "the directly addressed character or player (scene cast: Ada)",
+    "each Story scene spoken by this bot",
+  );
+  assert.match(
+    buildBotPowersPromptBlock([boundedStoryCue ?? ""]),
+    /HARD Ad Hominem rule/u,
+  );
   assert.equal(
     botPowerResponseHasAddressedInsultV1(
       "Rick, you're an insufferable fraud with a portal gun.",
@@ -408,8 +433,11 @@ test("addressed-insult Powers distinguish personal jabs from argument criticism 
       true,
     );
   }
-  assert.match(repaired, /“That argument fails because its premise is circular”/u);
-  assert.match(repaired, /that argument fails/iu);
+  assert.equal(
+    repaired.match(/That argument fails because its premise is circular\./gu)?.length,
+    1,
+  );
+  assert.doesNotMatch(repaired, /[“”]/u);
   assert.equal(
     applyBotPowerAddressedInsultV1(
       "Rick, you're an insufferable fraud with a portal gun.",
@@ -923,14 +951,9 @@ test("Cursed Tongue deterministically layers strong profanity while protecting r
     "```ts\nconst answer = 42;\n```",
     '{"kind":"evidence","content":"leave this clean"}',
   ]) {
-    const adjustedProtectedOnly = applyBotPowerCursedTongueResponseV1(
+    assert.equal(
+      applyBotPowerCursedTongueResponseV1(protectedOnly, "protected-only"),
       protectedOnly,
-      "protected-only",
-    );
-    assert.ok(adjustedProtectedOnly.endsWith(protectedOnly));
-    assert.match(
-      adjustedProtectedOnly.slice(0, -protectedOnly.length),
-      /\b(?:fucking|goddamn|motherfucking|shitty|damn)\b/iu,
     );
   }
   assert.match(
@@ -941,27 +964,50 @@ test("Cursed Tongue deterministically layers strong profanity while protecting r
     botPowerCursedTongueAuthoringCueV1(),
     /Cursed Tongue|PRISM adds|public profanity|transformation/iu,
   );
-  assert.ok(
-    Array.from({ length: 256 }, (_, index) =>
+  const cadenceSamples = Array.from({ length: 256 }, (_, index) =>
       applyBotPowerCursedTongueResponseV1(
         "This deliberately long ordinary statement contains enough words to demonstrate the stable public mutation without changing its meaning.",
         `turn-${index}`,
       )
-    ).some((sample) =>
-      /fucking goddamn|damn fucking|holy fucking shit|fucking bloody hell/iu.test(sample),
-    ),
   );
+  assert.ok(cadenceSamples.some((sample) =>
+    /holy fucking shit|for fuck's sake|goddamn well|sure as hell|honestly fucking/iu.test(sample),
+  ));
+  assert.ok(new Set(cadenceSamples).size >= 5);
+  assert.ok(cadenceSamples.every((sample) =>
+    !/\b(?:nigg(?:er|a)|faggot|kike|spic|tranny|chink)s?\b/iu.test(sample),
+  ));
 });
 
 test("Cursed Tongue composes after addressed-insult content", () => {
+  const source = "Your proposal ignores the cost.";
   const insulted = applyBotPowerAddressedInsultV1(
-    "Your proposal ignores the cost.",
+    source,
     "Mira",
     "composition",
   );
   const adjusted = applyBotPowerCursedTongueResponseV1(insulted, "composition");
   assert.equal(botPowerResponseHasAddressedInsultV1(adjusted, "Mira"), true);
   assert.match(adjusted, /\b(?:fucking|goddamn|motherfucking|shitty|damn)\b/iu);
+  assert.equal(adjusted.match(/Your proposal/gu)?.length, 1);
+  assert.doesNotMatch(adjusted, /[“”]/u);
+});
+
+test("Cursed Tongue preserves compound words and uses adjective-safe determiner grammar", () => {
+  const compounds = Array.from({ length: 96 }, (_, index) =>
+    applyBotPowerCursedTongueResponseV1(
+      "Taste-making is the work; the editor can make a stronger choice.",
+      `compound-${index}`,
+    )
+  );
+  assert.ok(compounds.every((sample) => sample.includes("Taste-making")));
+  assert.ok(compounds.every((sample) => !/Taste-(?:fucking|goddamn|damn|shitty)\s*making/iu.test(sample)));
+  assert.ok(compounds.every((sample) =>
+    !/\bthe (?:goddamn well|damn well|sure as hell|honestly fucking)\b/iu.test(sample),
+  ));
+  assert.ok(compounds.every((sample) =>
+    !/^(?:What a fucking mess|Goddamn|Holy fucking shit|Fucking hell|Well, damn|For fuck's sake|Shit, here we go|What in the goddamn hell)\./u.test(sample),
+  ));
 });
 
 test("Cursed Tongue fallback uses sentence and verb cadence instead of corrupting recipe records", () => {
@@ -983,6 +1029,7 @@ test("Cursed Tongue fallback uses sentence and verb cadence instead of corruptin
   assert.ok(adjusted.includes("**Safety**"));
   assert.ok(adjusted.includes("2 cups all-purpose flour"));
   assert.ok(adjusted.includes("1 teaspoon salt"));
+  assert.ok(adjusted.includes("Children should have adult supervision. Check every ingredient label for allergies."));
   assert.doesNotMatch(adjusted, /\*\*[^*]*(?:fuck|damn|shit)[^*]*\*\*/iu);
   assert.doesNotMatch(adjusted, /(?:fuck\w*|goddamn|damn)\s+(?:flour|salt)\b/iu);
 });

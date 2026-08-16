@@ -1,5 +1,6 @@
 import {
   BOTCAST_PRODUCER_GUEST_ID,
+  botPowerMutePublicResponseAtElapsedV1,
   botPowerResponseIsSilentV1,
   botcastReplayTimeline,
   heardBotPresenceBeatTextV1,
@@ -82,6 +83,7 @@ export function buildSignalReviewTranscript(
       left.occurredAt.localeCompare(right.occurredAt),
   );
   const utteranceEvents = new Map<string, BotcastReplayEvent>();
+  const producerRedirectsByMessageId = new Map<string, BotcastReplayEvent>();
   const silenceOnlyTurnCount = episode.messages.filter((message) =>
     botPowerResponseIsSilentV1(message.content),
   ).length;
@@ -91,7 +93,19 @@ export function buildSignalReviewTranscript(
     const messageId = payloadString(event, "messageId");
     if (event.kind === "utterance" && messageId)
       utteranceEvents.set(messageId, event);
+    const interruptedMessageId = payloadString(event, "interruptedMessageId");
+    if (
+      event.kind === "producer_cue" &&
+      event.payload.delivery === "redirect_host" &&
+      interruptedMessageId
+    ) {
+      producerRedirectsByMessageId.set(interruptedMessageId, event);
+    }
   }
+  const heardResponseCueLines = (args.presenceBeats ?? []).flatMap((beat) => {
+    const heard = heardBotPresenceBeatTextV1(beat).trim();
+    return heard ? [`- ${beat.speaker.name} (${beat.trigger}): ${heard}`] : [];
+  });
 
   const lines: string[] = [
     "# PRISM Signal Review Transcript",
@@ -151,6 +165,7 @@ export function buildSignalReviewTranscript(
   } else {
     episode.messages.forEach((message, index) => {
       const event = utteranceEvents.get(message.id);
+      const producerRedirect = producerRedirectsByMessageId.get(message.id);
       const participant = message.speakerRole === "host" ? host : guest;
       const segment = payloadString(event, "segment") ?? "unknown";
       const humanProducerGuest =
@@ -170,6 +185,13 @@ export function buildSignalReviewTranscript(
       const recordedAt = event?.occurredAt ?? message.createdAt;
       const autoRecovery = event?.payload.autoRecovery;
       const providerRecovery = event?.payload.providerRecovery;
+      const visibleTranscript = message.mutePerformance
+        ? botPowerMutePublicResponseAtElapsedV1(
+            message.content,
+            message.mutePerformance,
+            message.mutePerformance.durationMs,
+          )
+        : message.content;
       lines.push(
         `### Turn ${String(index + 1).padStart(2, "0")} | ${formatDuration(timeline.messageStartMs[index] ?? 0)} | ${participant.name} (${message.speakerRole})`,
         "",
@@ -196,10 +218,15 @@ export function buildSignalReviewTranscript(
               : "recorded repaired/fallback utterance; raw provider draft not preserved"
         }`,
         `- Immersive voice effect: ${event?.payload.immersiveVoiceEffect === true ? "yes" : "no"}`,
+        `- Producer redirect: ${
+          producerRedirect
+            ? `yes — ${payloadString(producerRedirect, "kind") ?? "producer cue"} (event ${producerRedirect.id}); this canonical turn contains only the audience-heard prefix`
+            : "None recorded"
+        }`,
         "- Stage action (avatar only):",
         indentBlock(message.stageActionText),
         "- Visible transcript:",
-        indentBlock(message.content),
+        indentBlock(visibleTranscript),
         "- Voice performance text:",
         indentBlock(message.voicePerformanceText),
         "",
@@ -211,12 +238,9 @@ export function buildSignalReviewTranscript(
     "",
     "## Response cues (heard only)",
     "",
-    ...(args.presenceBeats?.flatMap((beat) => {
-      const heard = heardBotPresenceBeatTextV1(beat).trim();
-      return heard
-        ? [`- ${beat.speaker.name} (${beat.trigger}): ${heard}`]
-        : [];
-    }) ?? ["No audible response cues."]),
+    ...(heardResponseCueLines.length > 0
+      ? heardResponseCueLines
+      : ["No audible response cues."]),
     "",
     "",
     "## Faithful Recording Evidence",

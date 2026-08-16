@@ -923,6 +923,7 @@ import {
   replayAudioMasterCaptureEvents,
   replayAudioMasterCaptureMouthTracks,
   replayAudioMasterCaptureVoiceLightTracks,
+  reconcileReplaySpeechDirection,
   setReplayAudioMasterCompactHold,
   startReplayAudioMasterCapture,
   stopReplayAudioMasterCapture,
@@ -71009,6 +71010,27 @@ function HomeContent(): React.JSX.Element {
           },
         }).catch(() => undefined);
       };
+      const closeCapturedSpeech = (
+        endReason: "completed" | "cancelled",
+      ): void => {
+        if (!captureSpeechStarted) return;
+        const endedAtMs = replayAudioMasterCaptureElapsedMs(message.episodeId);
+        reconcileReplaySpeechDirection({
+          sourceId: message.episodeId,
+          sourceMessageId: message.id,
+          speakerId: botSummary.id,
+          channel: voiceChannel,
+          endReason,
+          ...(endedAtMs === null ? {} : { atMs: endedAtMs }),
+        });
+        markReplayAudioMasterCapture({
+          sourceId: message.episodeId,
+          phase: "speech_end",
+          messageId: message.id,
+          ...(endedAtMs === null ? {} : { atMs: endedAtMs }),
+        });
+        captureSpeechStarted = false;
+      };
       const trackedLifecycle: VoicePlaybackLifecycle = {
         ...lifecycle,
         voiceLightTarget: botVoiceLightTarget(
@@ -71075,18 +71097,12 @@ function HomeContent(): React.JSX.Element {
           lifecycle.onStart?.(durationMs, alignment);
         },
         onEnd: () => {
-          if (captureSpeechStarted) {
-            markReplayAudioMasterCapture({
-              sourceId: message.episodeId,
-              phase: "speech_end",
-              messageId: message.id,
-            });
-            captureSpeechStarted = false;
-          }
+          closeCapturedSpeech("completed");
           if (playbackIsCurrent()) lifecycle.onEnd?.();
           recordHeardCompletion("completed");
         },
         onCancel: () => {
+          closeCapturedSpeech("cancelled");
           recordHeardCompletion("interrupted");
           lifecycle.onCancel?.();
         },

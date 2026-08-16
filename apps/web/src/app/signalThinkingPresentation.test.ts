@@ -1,12 +1,64 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  SIGNAL_COMPACT_THINKING_NOTICE_MAX_MS,
+  signalCompactThinkingNoticeAt,
   signalGenerationThinkingRole,
   signalPresentedThinkingRole,
   signalThinkingPresentationEndReason,
 } from "./signalThinkingPresentation.ts";
 
 describe("Signal thinking presentation", () => {
+  it("renders compact thinking metadata as a bounded non-blocking replay notice", () => {
+    const direction = [{
+      sequence: 1,
+      atMs: 800,
+      endMs: 801,
+      kind: "thinking" as const,
+      sourceMessageId: "host-line",
+      payload: {
+        participantId: "host-1",
+        botId: "host-1",
+        startMs: 800,
+        endMs: 801,
+        presentationDurationMs: 9_000,
+        timelineCompacted: true,
+        audible: false,
+        camera: "left",
+        segment: "interview",
+        followingMessageId: "host-line",
+        endReason: "completed",
+      },
+    }];
+
+    const notice = signalCompactThinkingNoticeAt({ direction, atMs: 900 });
+    assert.deepEqual(notice, {
+      participantId: "host-1",
+      sourceMessageId: "host-line",
+      presentationDurationMs: 9_000,
+      noticeDurationMs: 1_080,
+      label: "Thought for 9.0s · condensed",
+    });
+    assert.equal(
+      signalCompactThinkingNoticeAt({ direction, atMs: 1_880 }),
+      null,
+    );
+
+    const longNotice = signalCompactThinkingNoticeAt({
+      direction: [{
+        ...direction[0]!,
+        payload: {
+          ...direction[0]!.payload,
+          presentationDurationMs: 60_000,
+          endReason: "interrupted",
+        },
+      }],
+      atMs: 900,
+    });
+    assert.equal(longNotice?.noticeDurationMs, SIGNAL_COMPACT_THINKING_NOTICE_MAX_MS);
+    assert.match(longNotice?.label ?? "", /before interruption · condensed/u);
+  });
+
   it("attributes an interrupting producer cue to the host", () => {
     assert.equal(
       signalGenerationThinkingRole({

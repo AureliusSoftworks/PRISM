@@ -1662,3 +1662,4 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
   .avatarRig[data-ghostly-presence="true"] { transition: none; }
   .shell :global([data-prism-refract-state]) { animation: none; transition-duration: 1ms; }
 }
+.replayCompactThinkingNotice { position: absolute; top: 14px; right: 14px; z-index: 20; max-width: min(46%, 300px); border: 1px solid rgba(255,255,255,.16); border-radius: 999px; padding: 6px 10px; color: rgba(255,255,255,.82); background: rgba(4,6,11,.72); backdrop-filter: blur(9px) saturate(1.08); box-shadow: 0 8px 22px rgba(0,0,0,.28); font: 720 clamp(.54rem, .9vw, .68rem)/1.1 system-ui; letter-spacing: .035em; text-align: right; pointer-events: none; }

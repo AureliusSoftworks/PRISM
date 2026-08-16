@@ -1451,7 +1451,7 @@ export function normalizeBotPowerV1(value: unknown): BotPowerV1 | null {
         : "draft";
   return {
     version: BOT_POWER_VERSION,
-    id: compactText(power.id, 100) || `power-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "draft"}`,
+    id,
     ...(authoringMode ? { authoringMode } : {}),
     name,
     intent,
@@ -3234,6 +3234,22 @@ export function botPowerRequiresAddressedInsultFromEffectsV1(
   );
 }
 
+/** Primary-generation contract for target-aware Ad Hominem delivery. */
+export function botPowerAddressedInsultPrimaryCueV1(
+  value: unknown,
+  targetName: unknown,
+  contextLabel: unknown = "this reply",
+): string | null {
+  const effects =
+    Array.isArray(value) && value.some((entry) => entry?.type === "addressed_insult")
+      ? value
+      : activeBotPowerEffectsV1(value);
+  if (!botPowerRequiresAddressedInsultFromEffectsV1(effects)) return null;
+  const target = compactText(targetName, 140) || "the current addressee";
+  const context = compactText(contextLabel, 80) || "this reply";
+  return `HARD Ad Hominem rule for ${context}: one fresh direct insult to ${target} must carry the answer, echo, thanks, agreement, or help; never prepend a generic jab. Rate only rare standout jabs. Keep facts, tools, and safety correct. Attack conduct, competence, reasoning, choices, or ego only; never protected traits, private facts, trauma, or slurs.`;
+}
+
 /**
  * Conservative evidence check for an addressed personal attack. Criticism of an
  * idea alone does not count: the line needs both insulting language and a
@@ -3257,19 +3273,19 @@ export function botPowerResponseHasAddressedInsultV1(
   );
 }
 
-const BOT_POWER_ADDRESSED_INSULT_OPENERS_V1 = [
-  (target: string, focus: string) =>
-    `${target}, only a smug amateur could make ${focus} sound like a revelation`,
-  (target: string, focus: string) =>
-    `${target}, your attempt to sell ${focus} has all the structural integrity of wet cardboard`,
-  (target: string, focus: string) =>
-    `${target}, you're treating ${focus} like intellectual bankruptcy with better lighting`,
-  (target: string, focus: string) =>
-    `${target}, your ego is doing heroic work trying to pass ${focus} off as competent judgment`,
-  (target: string, focus: string) =>
-    `${target}, only an insufferable fraud would present ${focus} with that much confidence`,
-  (target: string, focus: string) =>
-    `${target}, your reasoning mangles ${focus} with the confidence of a practiced fool`,
+const BOT_POWER_ADDRESSED_INSULT_TAILS_V1 = [
+  (target: string) =>
+    `${target}, only a smug amateur could carry that much confidence on so little judgment.`,
+  (target: string) =>
+    `${target}, your reasoning still has all the structural integrity of wet cardboard.`,
+  (target: string) =>
+    `${target}, you're an insufferable fraud with more certainty than competence.`,
+  (target: string) =>
+    `${target}, your ego keeps outrunning your judgment like a practiced fool.`,
+  (target: string) =>
+    `${target}, only a clueless hack could sound that pleased with such lazy thinking.`,
+  (target: string) =>
+    `${target}, your credibility remains the casualty of your own arrogant reasoning.`,
 ] as const;
 
 function botPowerAddressedInsultHashV1(value: string): number {
@@ -3281,21 +3297,12 @@ function botPowerAddressedInsultHashV1(value: string): number {
   return hash;
 }
 
-function botPowerAddressedInsultFocusV1(value: string): string {
-  const spoken = value
-    .replace(/\*[^*\n]{1,120}\*/gu, " ")
-    .replace(/\[([^\]\n]{1,100})\]\(prism-bot:\/\/[^)\s]+\)/gu, "$1")
-    .replace(/\s+/gu, " ")
-    .trim();
-  const words = spoken.match(/[\p{L}\p{N}’'\-]+/gu) ?? [];
-  const bounded = words.slice(0, 9).join(" ");
-  return bounded ? `“${bounded}”` : "that thought";
-}
-
 /**
  * Last-line runtime enforcement for hard addressed-insult Powers. The bounded
- * opener targets conduct and competence only; it never invents private facts or
- * attacks protected traits, family, grief, or trauma.
+ * tail targets conduct and competence only; it never quotes or rewrites the
+ * canonical draft, invents private facts, or attacks protected traits, family,
+ * grief, or trauma. Primary generation owns tailored composition; this is only
+ * the deterministic safety net when that contract is rejected.
  */
 export function applyBotPowerAddressedInsultV1(
   value: unknown,
@@ -3455,7 +3462,11 @@ export function botPowerMuteReactionCountV1(
 ): number {
   if (durationMs < 6_000) return 0;
   const roll = botPowerMuteStableUnitV1(`${seed}:reaction-count`);
-  if (durationMs < 12_000) return roll < 0.4 ? 1 : 0;
+  // A silence that reaches eight seconds has already become an unmistakable
+  // social event. Keep six- and seven-second pauses sparse, but never let an
+  // eight-to-eleven-second performance resolve as an inert loading bar.
+  if (durationMs < 8_000) return roll < 0.4 ? 1 : 0;
+  if (durationMs < 12_000) return 1;
   if (durationMs < 20_000) return 1 + (roll < 0.3 ? 1 : 0);
   if (durationMs < 30_000) return 1 + (roll < 0.6 ? 1 : 0);
   return 2 + (roll < 0.45 ? 1 : 0);
@@ -4088,13 +4099,63 @@ const BOT_POWER_CURSED_TONGUE_OUTBURSTS_V1 = [
   "Holy fucking shit.",
   "Fucking hell.",
   "Well, damn.",
+  "For fuck's sake.",
+  "Shit, here we go.",
+  "What in the goddamn hell.",
 ] as const;
+
+const BOT_POWER_CURSED_TONGUE_BEFORE_VERB_V1 = [
+  "fucking ",
+  "goddamn ",
+  "damn well ",
+  "actually fucking ",
+  "sure as hell ",
+] as const;
+
+const BOT_POWER_CURSED_TONGUE_AFTER_AUXILIARY_V1 = [
+  " fucking",
+  " goddamn well",
+  " damn well",
+  " sure as hell",
+  " honestly fucking",
+] as const;
+
+const BOT_POWER_CURSED_TONGUE_AFTER_DETERMINER_V1 = [
+  " fucking",
+  " goddamn",
+  " damn",
+  " shitty",
+] as const;
+
+function botPowerCursedTonguePhraseV1(
+  seed: string,
+  phrases: readonly string[],
+): string {
+  const hash = botPowerAddressedInsultHashV1(seed);
+  return phrases[(hash >>> 7) % phrases.length]!;
+}
 
 function botPowerCursedTongueOutburstV1(seed: string): string {
   const hash = botPowerAddressedInsultHashV1(seed);
   return BOT_POWER_CURSED_TONGUE_OUTBURSTS_V1[
     (hash >>> 5) % BOT_POWER_CURSED_TONGUE_OUTBURSTS_V1.length
   ]!;
+}
+
+const BOT_POWER_CURSED_TONGUE_PROFANITY_V1 =
+  /\b(?:fuck(?:ing|ed|er|s)?|shit(?:ty)?|goddamn(?:ed)?|damn|hell|ass(?:hole)?|bastard)\b/giu;
+
+/** The public curse floor scales gently with the amount of ordinary speech. */
+export function botPowerCursedTongueMinimumProfanityV1(value: unknown): number {
+  const source = typeof value === "string" ? value : "";
+  const wordCount = source.match(/[\p{L}\p{N}]+(?:[’'\-][\p{L}\p{N}]+)*/gu)?.length ?? 1;
+  return Math.min(8, Math.max(1, Math.ceil(wordCount / 28)));
+}
+
+export function botPowerCursedTongueProfanityCountV1(value: unknown): number {
+  return typeof value === "string"
+    ? value.match(BOT_POWER_CURSED_TONGUE_PROFANITY_V1)?.length ?? 0
+    : 0;
 }
 
 function botPowerProtectedSpeechRangesV1(source: string): BotPowerProtectedSpeechRangeV1[] {
@@ -4110,12 +4171,35 @@ function botPowerProtectedSpeechRangesV1(source: string): BotPowerProtectedSpeec
   for (const action of botPowerActionBlocksV1(source)) {
     ranges.push({ start: action.start, end: action.end });
   }
+  // Treat a Markdown safety section as one protected record, not merely its
+  // heading. This keeps grammar transforms from changing an otherwise ordinary
+  // sentence such as "Children should have adult supervision" below the label.
+  for (const match of source.matchAll(
+    /^\s*\*\*(?:safety|warning|caution)\*\*:?\s*$/gimu,
+  )) {
+    const start = match.index ?? -1;
+    if (start < 0) continue;
+    const afterHeading = start + match[0].length;
+    const nextHeading = source.slice(afterHeading).search(
+      /^\s*\*\*[^*\n]+\*\*:?\s*$/mu,
+    );
+    ranges.push({
+      start,
+      end: nextHeading < 0 ? source.length : afterHeading + nextHeading,
+    });
+  }
   addMatches(/```[\s\S]*?```|~~~[\s\S]*?~~~/gu);
   addMatches(/`[^`\n]+`/gu);
+  addMatches(/__[^_\n]{1,600}__|~~[^~\n]{1,600}~~/gu);
   addMatches(/\[\[(?:source|exhibit):[a-z0-9][a-z0-9_-]{0,47}\]\]/giu);
   addMatches(/\[[^\]\n]{1,160}\]\((?:prism-bot|https?):\/\/[^)\s]+\)/giu);
   addMatches(/\[(?:\^?\d+|[a-z][a-z0-9_-]{0,31})\]/giu);
   addMatches(/(?:https?:\/\/|www\.)[^\s<>()]+/giu);
+  addMatches(/^\s{0,3}#{1,6}\s+[^\n]+$/gmu);
+  addMatches(/^\s*(?:=+|-{3,})\s*$/gmu);
+  addMatches(/^.*\|.*\|.*$/gmu);
+  addMatches(/^\s*(?:>\s*)?(?:(?:\*\*|__)?(?:warning|caution|safety)(?:\*\*|__)?\b|.*\b(?:do not|never|avoid)\b.*)$/gimu);
+  addMatches(/(?:\b\d+(?:[.,]\d+)?(?:\s*\/\s*\d+)?|[\u00bc-\u00be\u2150-\u215e])(?![.)]\s)(?:\s*(?:°\s*[CF]|%|ml|mL|L|g|kg|oz|lb|lbs|tsp|tbsp|teaspoons?|tablespoons?|cups?|inches?|cm|mm|minutes?|mins?|hours?|hrs?|seconds?|secs?))?/giu);
   addMatches(/^\s*(?:\{|\[(?=\s*(?:\{|\[|"|-?\d|true\b|false\b|null\b))|<\/?[a-z][^>]*>|"[^"\n]+"\s*:|[a-z_][a-z0-9_.-]*\s*:\s*(?:[\[{"\d]|true\b|false\b|null\b))[^\n]*$/gimu);
   return ranges
     .sort((left, right) => left.start - right.start || right.end - left.end)
@@ -4138,9 +4222,9 @@ function botPowerSpeechIndexIsProtectedV1(
 }
 
 /**
- * Deterministic emergency fallback for Cursed Tongue. It places profanity at
- * sentence boundaries or beside common verbs/auxiliaries so a provider outage
- * still sounds emphatic rather than sprinkling curses before arbitrary nouns.
+ * Deterministic normal delivery for Cursed Tongue. It places seeded, varied
+ * profanity at sentence boundaries or beside common verbs/auxiliaries so the
+ * result sounds emphatic rather than sprinkling curses before arbitrary nouns.
  * It inserts rather than replaces words, preserving meaning and provenance;
  * protected technical/record spans remain byte-for-byte unchanged.
  */
@@ -4154,7 +4238,11 @@ export function applyBotPowerCursedTongueResponseV1(
   const seed = `${String(seedValue ?? "")}\n${source}`;
   type InsertionCandidate = {
     index: number;
-    kind: "intensifier_before" | "intensifier_after" | "outburst";
+    kind:
+      | "intensifier_before"
+      | "intensifier_after"
+      | "adjective_after_determiner"
+      | "outburst";
   };
   const candidates: InsertionCandidate[] = [];
   const addCandidate = (candidate: InsertionCandidate): void => {
@@ -4168,7 +4256,7 @@ export function applyBotPowerCursedTongueResponseV1(
     candidates.push(candidate);
   };
   for (const match of source.matchAll(
-    /\b(?:make|makes|making|made|get|gets|gettin(?:g)?|got|keep|keeps|keeping|use|uses|using|add|adds|adding|mix|mixes|mixing|whisk|whisks|whisking|beat|beats|beating|pour|pours|pouring|bake|bakes|baking|cool|cools|cooling|decorate|decorates|decorating|check|checks|checking|serve|serves|serving|refrigerate|refrigerates|refrigerating|remember|remembers|remembering|tell|tells|telling|explain|explains|explaining|need|needs|needing|want|wants|wanting|love|loves|loving|know|knows|knowing|think|thinks|thinking|worry|worries|worrying|start|starts|starting|finish|finishes|finishing|celebrate|celebrates|celebrating|create|creates|creating|follow|follows|following|handle|handles|handling|preheat|preheats|preheating|grease|greases|greasing|spread|spreads|spreading|place|places|placing)\b/giu,
+    /(?<![\p{L}\p{N}’'\-])(?:make|makes|making|made|get|gets|gettin(?:g)?|got|keep|keeps|keeping|use|uses|using|add|adds|adding|mix|mixes|mixing|whisk|whisks|whisking|beat|beats|beating|pour|pours|pouring|bake|bakes|baking|cool|cools|cooling|decorate|decorates|decorating|check|checks|checking|serve|serves|serving|refrigerate|refrigerates|refrigerating|remember|remembers|remembering|tell|tells|telling|explain|explains|explaining|need|needs|needing|want|wants|wanting|love|loves|loving|know|knows|knowing|think|thinks|thinking|worry|worries|worrying|start|starts|starting|finish|finishes|finishing|celebrate|celebrates|celebrating|create|creates|creating|follow|follows|following|handle|handles|handling|preheat|preheats|preheating|grease|greases|greasing|spread|spreads|spreading|place|places|placing)\b/giu,
   )) {
     addCandidate({
       index: match.index ?? -1,
@@ -4186,7 +4274,9 @@ export function applyBotPowerCursedTongueResponseV1(
       index: followingDeterminer
         ? afterAuxiliary + followingDeterminer[0].length
         : afterAuxiliary,
-      kind: "intensifier_after",
+      kind: followingDeterminer
+        ? "adjective_after_determiner"
+        : "intensifier_after",
     });
   }
   for (const match of source.matchAll(/(?:^|[.!?][ \t]+|\n{2,})(?=[\p{L}])/gmu)) {
@@ -4200,34 +4290,66 @@ export function applyBotPowerCursedTongueResponseV1(
     if (!headingLike) addCandidate({ index, kind: "outburst" });
   }
   candidates.sort((left, right) => left.index - right.index);
+  const requiredAdditions = Math.max(
+    0,
+    botPowerCursedTongueMinimumProfanityV1(source) -
+      botPowerCursedTongueProfanityCountV1(source),
+  );
+  if (requiredAdditions === 0) return source;
   if (candidates.length === 0) {
-    return `${botPowerCursedTongueOutburstV1(`${seed}:protected-only`)}\n${source}`;
+    // A response made entirely from protected material is a record, not an
+    // ordinary spoken line. Leave its outer structure intact rather than
+    // turning JSON, code, a citation, or a bot link into prose plus a record.
+    return source;
   }
-  const wordCount = source.match(/[\p{L}\p{N}]+(?:[’'\-][\p{L}\p{N}]+)*/gu)?.length ?? 1;
-  const targetCount = Math.min(8, candidates.length, Math.max(1, Math.ceil(wordCount / 28)));
+  // Prefer grammatical lexical insertions. Sentence-opening outbursts remain a
+  // fallback for terse lines with no safe verb or auxiliary anchor, rather than
+  // becoming a repeated extra sentence beside otherwise transformable prose.
+  const lexicalCandidates = candidates.filter(
+    (candidate) => candidate.kind !== "outburst",
+  );
+  const eligibleCandidates =
+    lexicalCandidates.length > 0 ? lexicalCandidates : candidates;
+  const targetCount = Math.min(requiredAdditions, eligibleCandidates.length);
   const chosen: InsertionCandidate[] = [];
   for (let ordinal = 0; ordinal < targetCount; ordinal += 1) {
     const targetIndex = Math.floor(
-      ((ordinal + 0.5) * candidates.length) / targetCount,
+      ((ordinal + 0.5) * eligibleCandidates.length) / targetCount,
     );
-    const candidate = candidates[Math.min(candidates.length - 1, targetIndex)]!;
+    const candidate = eligibleCandidates[
+      Math.min(eligibleCandidates.length - 1, targetIndex)
+    ]!;
     if (
       chosen.every((existing) => Math.abs(existing.index - candidate.index) >= 20)
     ) {
       chosen.push(candidate);
     }
   }
-  if (chosen.length === 0) chosen.push(candidates[0]!);
+  if (chosen.length === 0) chosen.push(eligibleCandidates[0]!);
   const insertions = chosen.map((candidate, phraseIndex) => ({
     index: candidate.index,
     phrase:
       candidate.kind === "outburst"
         ? `${botPowerCursedTongueOutburstV1(`${seed}:${candidate.index}:${phraseIndex}`)} `
+        : candidate.kind === "adjective_after_determiner"
+          ? botPowerCursedTonguePhraseV1(
+              `${seed}:determiner:${candidate.index}:${phraseIndex}`,
+              BOT_POWER_CURSED_TONGUE_AFTER_DETERMINER_V1,
+            )
         : candidate.kind === "intensifier_after"
-          ? " fucking"
-          : /\p{Lu}/u.test(source[candidate.index] ?? "")
-            ? "Fucking "
-            : "fucking ",
+          ? botPowerCursedTonguePhraseV1(
+              `${seed}:after:${candidate.index}:${phraseIndex}`,
+              BOT_POWER_CURSED_TONGUE_AFTER_AUXILIARY_V1,
+            )
+          : (() => {
+              const phrase = botPowerCursedTonguePhraseV1(
+                `${seed}:before:${candidate.index}:${phraseIndex}`,
+                BOT_POWER_CURSED_TONGUE_BEFORE_VERB_V1,
+              );
+              return /\p{Lu}/u.test(source[candidate.index] ?? "")
+                ? `${phrase.charAt(0).toLocaleUpperCase()}${phrase.slice(1)}`
+                : phrase;
+            })(),
   }));
   let adjusted = source;
   for (const insertion of insertions.sort((left, right) => right.index - left.index)) {
@@ -4951,7 +5073,10 @@ export function buildBotPowersPromptBlock(
   maxTokens = BOT_POWER_PROMPT_MAX_TOKENS
 ): string {
   const deduped = Array.from(
-    new Set(lines.map((line) => compactText(line, 280)).filter(Boolean))
+    new Set(lines.map((line) => compactText(
+      line,
+      /^HARD Ad Hominem rule\b/u.test(line.trim()) ? 610 : 280,
+    )).filter(Boolean))
   );
   if (deduped.length === 0) return "";
   const prefix = "Active Powers:\n";
@@ -5035,7 +5160,10 @@ export function buildCoffeePowersPromptBlock(
   maxTokens = COFFEE_POWER_PROMPT_MAX_TOKENS
 ): string {
   const deduped = Array.from(
-    new Set(lines.map((line) => compactText(line, 280)).filter(Boolean))
+    new Set(lines.map((line) => compactText(
+      line,
+      /^HARD Ad Hominem rule\b/u.test(line.trim()) ? 610 : 280,
+    )).filter(Boolean))
   );
   if (deduped.length === 0) return "";
   const prefix = "Coffee Powers:\n";

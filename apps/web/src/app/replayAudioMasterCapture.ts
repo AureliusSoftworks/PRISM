@@ -7,6 +7,7 @@ import type {
   ReplayMouthShapeV2,
   ReplayMouthTrackV2,
   ReplayVoiceLightTrackV1,
+  ReplaySpeechActivityTrackV1,
   ReplayThinkingDirectionPayloadV2,
   ReplayVoiceSelectionSnapshotV2,
 } from "@localai/shared";
@@ -22,6 +23,7 @@ export type ReplayAudioMasterCaptureResult = {
   direction: ReplayDirectionEventV2[];
   mouthTracks: ReplayMouthTrackV2[];
   voiceLightTracks: ReplayVoiceLightTrackV1[];
+  speechActivityTracks?: ReplaySpeechActivityTrackV1[];
   voiceSelection?: ReplayVoiceSelectionSnapshotV2;
 };
 
@@ -59,6 +61,10 @@ type ReplayAudioMasterCaptureSession = {
   voiceLightCuesByParticipant: Map<
     string,
     ReplayVoiceLightTrackV1["cues"]
+  >;
+  speechActivityCuesByParticipant: Map<
+    string,
+    ReplaySpeechActivityTrackV1["cues"]
   >;
   voiceSelection?: ReplayVoiceSelectionSnapshotV2;
   thinkingByParticipant: Map<string, ReplayThinkingPresentation>;
@@ -154,7 +160,7 @@ export function prismAudioOutputNode(context: AudioContext): AudioNode {
 }
 
 /**
- * Local-only QoL beds (Coffee Jazz) hear on device speakers but never enter
+ * Local-only QoL beds (Coffee Jazz and café environment) hear on device speakers but never enter
  * the faithful audio-master capture tap on {@link prismAudioOutputNode}.
  */
 export function prismLocalOnlyAudioOutputNode(context: AudioContext): AudioNode {
@@ -366,6 +372,7 @@ export async function startReplayAudioMasterCapture(
       direction: [],
       mouthCuesByParticipant: new Map(),
       voiceLightCuesByParticipant: new Map(),
+      speechActivityCuesByParticipant: new Map(),
       ...(options.voiceSelection
         ? { voiceSelection: { ...options.voiceSelection } }
         : {}),
@@ -523,6 +530,43 @@ export function markReplayVoiceLightLevel(args: {
   }
   cues.push({ atMs, level });
   capture.voiceLightCuesByParticipant.set(participantId, cues);
+}
+
+export function markReplaySpeechActivity(args: {
+  sourceId: string;
+  participantId: string;
+  active: boolean;
+  atMs?: number;
+}): void {
+  const capture = activeCapture;
+  const participantId = args.participantId.trim();
+  if (!capture || capture.sourceId !== args.sourceId || !participantId) return;
+  const atMs = Math.max(0, Math.round(
+    typeof args.atMs === "number" && Number.isFinite(args.atMs)
+      ? args.atMs
+      : replayAudioMasterCaptureElapsedMs(args.sourceId) ?? 0,
+  ));
+  const cues = capture.speechActivityCuesByParticipant.get(participantId) ?? [];
+  const previous = cues.at(-1);
+  if (previous?.active === args.active) return;
+  cues.push({ atMs, active: args.active });
+  capture.speechActivityCuesByParticipant.set(participantId, cues);
+}
+
+function captureSpeechActivityTracks(
+  capture: ReplayAudioMasterCaptureSession,
+  endMs?: number,
+): ReplaySpeechActivityTrackV1[] {
+  return [...capture.speechActivityCuesByParticipant.entries()]
+    .map(([participantId, capturedCues]) => {
+      const cues = capturedCues.map((cue) => ({ ...cue }));
+      const finalCue = cues.at(-1);
+      if (endMs !== undefined && finalCue?.active) {
+        cues.push({ atMs: Math.max(finalCue.atMs, Math.round(endMs)), active: false });
+      }
+      return { participantId, cues };
+    })
+    .sort((left, right) => left.participantId.localeCompare(right.participantId));
 }
 
 function captureVoiceLightTracks(
@@ -684,6 +728,56 @@ export function markReplayDirectionEvent(args: {
     sourceMessageId: args.sourceMessageId ?? null,
     payload: { ...(args.payload ?? {}) },
   });
+}
+
+/**
+ * Replaces a planned speech end with the instant the shared output actually
+ * completed or was cancelled. Matching the message, speaker, and channel keeps
+ * overlapping reaction/crosstalk lanes independent.
+ */
+export function reconcileReplaySpeechDirection(args: {
+  sourceId: string;
+  sourceMessageId: string;
+  speakerId: string;
+  channel?: string;
+  endReason: "completed" | "cancelled";
+  atMs?: number;
+}): boolean {
+  const capture = activeCapture;
+  const sourceMessageId = args.sourceMessageId.trim();
+  const speakerId = args.speakerId.trim();
+  if (
+    !capture ||
+    capture.sourceId !== args.sourceId ||
+    !sourceMessageId ||
+    !speakerId
+  ) {
+    return false;
+  }
+  const channel = args.channel ?? "primary";
+  const event = [...capture.direction].reverse().find((candidate) =>
+    candidate.kind === "speech" &&
+    candidate.sourceMessageId === sourceMessageId &&
+    candidate.payload.active !== false &&
+    candidate.payload.audible !== false &&
+    candidate.payload.speakerId === speakerId &&
+    (candidate.payload.channel ?? "primary") === channel
+  );
+  if (!event) return false;
+  const actualEndMs = Math.max(
+    event.atMs + 1,
+    Math.round(
+      typeof args.atMs === "number" && Number.isFinite(args.atMs)
+        ? args.atMs
+        : replayAudioMasterCaptureElapsedMs(args.sourceId) ?? event.atMs + 1,
+    ),
+  );
+  event.endMs = actualEndMs;
+  event.payload = {
+    ...event.payload,
+    endReason: args.endReason,
+  };
+  return true;
 }
 
 /**
@@ -948,6 +1042,7 @@ export function stopReplayAudioMasterCapture(
       const contentType =
         capture.recorder.mimeType.split(";", 1)[0] || "audio/webm";
       const blob = new Blob(capture.chunks, { type: contentType });
+      const speechActivityTracks = captureSpeechActivityTracks(capture, durationMs);
       const result =
         blob.size > 0
           ? {
@@ -965,6 +1060,9 @@ export function stopReplayAudioMasterCapture(
               })),
               mouthTracks: captureMouthTracks(capture, durationMs),
               voiceLightTracks: captureVoiceLightTracks(capture, durationMs),
+              ...(speechActivityTracks.length > 0
+                ? { speechActivityTracks }
+                : {}),
               ...(capture.voiceSelection
                 ? { voiceSelection: { ...capture.voiceSelection } }
                 : {}),

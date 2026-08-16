@@ -1,8 +1,78 @@
 import type {
   BotcastProducerCueDelivery,
   BotcastSpeakerRole,
+  ReplayDirectionEventV2,
   ReplayThinkingDirectionPayloadV2,
 } from "@localai/shared";
+
+export const SIGNAL_COMPACT_THINKING_NOTICE_MIN_MS = 450;
+export const SIGNAL_COMPACT_THINKING_NOTICE_MAX_MS = 1_400;
+
+export type SignalCompactThinkingNotice = {
+  participantId: string;
+  sourceMessageId: string | null;
+  presentationDurationMs: number;
+  noticeDurationMs: number;
+  label: string;
+};
+
+function signalThinkingDurationLabel(durationMs: number): string {
+  if (durationMs < 1_000) return `${durationMs}ms`;
+  const seconds = durationMs / 1_000;
+  return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`;
+}
+
+/**
+ * Turns a removed Signal thinking hold into a short, non-blocking provenance
+ * notice. It never stretches the master timeline or replaces captured speech.
+ */
+export function signalCompactThinkingNoticeAt(args: {
+  direction: readonly ReplayDirectionEventV2[] | null | undefined;
+  atMs: number;
+}): SignalCompactThinkingNotice | null {
+  const atMs = Math.max(0, Number.isFinite(args.atMs) ? args.atMs : 0);
+  const candidates = (args.direction ?? []).flatMap((event) => {
+    if (
+      event.kind !== "thinking" ||
+      event.payload.timelineCompacted !== true ||
+      event.payload.active === false
+    ) {
+      return [];
+    }
+    const participantId =
+      typeof event.payload.participantId === "string"
+        ? event.payload.participantId.trim()
+        : "";
+    const presentationDurationMs = Math.max(
+      1,
+      Math.round(Number(event.payload.presentationDurationMs) || 0),
+    );
+    if (!participantId || presentationDurationMs <= 1) return [];
+    const noticeDurationMs = Math.min(
+      SIGNAL_COMPACT_THINKING_NOTICE_MAX_MS,
+      Math.max(
+        SIGNAL_COMPACT_THINKING_NOTICE_MIN_MS,
+        Math.round(presentationDurationMs * 0.12),
+      ),
+    );
+    if (atMs < event.atMs || atMs >= event.atMs + noticeDurationMs) return [];
+    const interrupted = event.payload.endReason === "interrupted";
+    return [{
+      event,
+      notice: {
+        participantId,
+        sourceMessageId: event.sourceMessageId ?? null,
+        presentationDurationMs,
+        noticeDurationMs,
+        label: `Thought for ${signalThinkingDurationLabel(presentationDurationMs)}${interrupted ? " before interruption" : ""} · condensed`,
+      } satisfies SignalCompactThinkingNotice,
+    }];
+  });
+  return candidates.sort((left, right) =>
+    right.event.atMs - left.event.atMs ||
+    right.event.sequence - left.event.sequence
+  )[0]?.notice ?? null;
+}
 
 export function signalGenerationThinkingRole(args: {
   scheduledSpeakerRole: BotcastSpeakerRole | null;

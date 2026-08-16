@@ -8,9 +8,11 @@ import {
   markReplayAudioMasterCapture,
   markReplayDirectionEvent,
   markReplayMouthShape,
+  markReplaySpeechActivity,
   markReplayVoiceLightLevel,
   prismAudioContext,
   prismAudioOutputNode,
+  reconcileReplaySpeechDirection,
   replayAudioMasterCaptureCompactsThinkingGaps,
   replayAudioMasterCaptureElapsedMs,
   routeAudioElementToPrismOutput,
@@ -243,6 +245,100 @@ test("the replay master captures the same shared output bus that reaches the dev
   }
 });
 
+test("Signal redirect cancellation and ordinary completion make actual speech ends authoritative", async () => {
+  const originalWindow = globalThis.window;
+  const originalMediaRecorder = globalThis.MediaRecorder;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { AudioContext: FakeAudioContext },
+  });
+  Object.defineProperty(globalThis, "MediaRecorder", {
+    configurable: true,
+    value: FakeMediaRecorder,
+  });
+
+  try {
+    primeReplayAudioMasterCapture();
+    assert.equal(
+      await startReplayAudioMasterCapture("signal-speech-close", {
+        markIntro: false,
+      }),
+      true,
+    );
+    markReplayDirectionEvent({
+      sourceId: "signal-speech-close",
+      kind: "speech",
+      sourceMessageId: "redirected-host-line",
+      atMs: 100,
+      endMs: 10_900,
+      payload: {
+        speakerId: "host-1",
+        audible: true,
+        channel: "primary",
+      },
+    });
+    assert.equal(
+      reconcileReplaySpeechDirection({
+        sourceId: "signal-speech-close",
+        sourceMessageId: "redirected-host-line",
+        speakerId: "host-1",
+        channel: "primary",
+        endReason: "cancelled",
+        atMs: 1_100,
+      }),
+      true,
+    );
+    markReplayDirectionEvent({
+      sourceId: "signal-speech-close",
+      kind: "speech",
+      sourceMessageId: "redirect-follow-up",
+      atMs: 1_200,
+      endMs: 5_000,
+      payload: {
+        speakerId: "host-1",
+        audible: true,
+        channel: "primary",
+      },
+    });
+    assert.equal(
+      reconcileReplaySpeechDirection({
+        sourceId: "signal-speech-close",
+        sourceMessageId: "redirect-follow-up",
+        speakerId: "host-1",
+        channel: "primary",
+        endReason: "completed",
+        atMs: 2_650,
+      }),
+      true,
+    );
+
+    const result = await stopReplayAudioMasterCapture("signal-speech-close");
+    const speech = result?.direction.filter((event) => event.kind === "speech");
+    assert.deepEqual(
+      speech?.map((event) => [
+        event.sourceMessageId,
+        event.atMs,
+        event.endMs,
+        event.payload.endReason,
+      ]),
+      [
+        ["redirected-host-line", 100, 1_100, "cancelled"],
+        ["redirect-follow-up", 1_200, 2_650, "completed"],
+      ],
+    );
+    assert.ok((speech?.[0]?.endMs ?? 0) < (speech?.[1]?.atMs ?? 0));
+  } finally {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: originalWindow,
+    });
+    Object.defineProperty(globalThis, "MediaRecorder", {
+      configurable: true,
+      value: originalMediaRecorder,
+    });
+  }
+});
+
 test("Coffee can share the recorder and failed captures fully release it", async () => {
   const originalWindow = globalThis.window;
   const originalMediaRecorder = globalThis.MediaRecorder;
@@ -316,6 +412,18 @@ test("mouth capture coalesces rendered shapes and snapshots the recording Voice 
       participantId: "host",
       shape: "closed",
       atMs: 100,
+    });
+    markReplaySpeechActivity({
+      sourceId: "baked-presentation",
+      participantId: "host",
+      active: true,
+      atMs: 100,
+    });
+    markReplaySpeechActivity({
+      sourceId: "baked-presentation",
+      participantId: "host",
+      active: false,
+      atMs: 300,
     });
     markReplayMouthShape({
       sourceId: "baked-presentation",
@@ -394,6 +502,15 @@ test("mouth capture coalesces rendered shapes and snapshots the recording Voice 
           { atMs: 100, level: 0.13 },
           { atMs: 360, level: 0.14 },
           { atMs: 400, level: 0 },
+        ],
+      },
+    ]);
+    assert.deepEqual(result?.speechActivityTracks, [
+      {
+        participantId: "host",
+        cues: [
+          { atMs: 100, active: true },
+          { atMs: 300, active: false },
         ],
       },
     ]);

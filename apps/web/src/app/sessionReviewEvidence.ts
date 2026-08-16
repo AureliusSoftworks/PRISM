@@ -9,6 +9,7 @@ import {
 } from "./replayClient.ts";
 
 export const SESSION_REVIEW_FORMAT_VERSION = 2 as const;
+const SESSION_REVIEW_DURATION_ALIGNMENT_TOLERANCE_MS = 500;
 
 export type SessionReviewRecordingEvidence =
   | { state: "unavailable" }
@@ -144,6 +145,25 @@ export function sessionReviewRecordingSummaryLines(
   if (evidence.state === "missing") {
     return ["- Recording diagnostics: no recording found"];
   }
+  const durationAlignment = (() => {
+    if (
+      evidence.audioDurationMs == null ||
+      evidence.timelineDurationMs == null ||
+      !Number.isFinite(evidence.audioDurationMs) ||
+      !Number.isFinite(evidence.timelineDurationMs)
+    ) {
+      return "unavailable";
+    }
+    const deltaMs = Math.round(
+      evidence.timelineDurationMs - evidence.audioDurationMs,
+    );
+    if (Math.abs(deltaMs) <= SESSION_REVIEW_DURATION_ALIGNMENT_TOLERANCE_MS) {
+      return `matched (delta ${formatSessionReviewDuration(Math.abs(deltaMs))})`;
+    }
+    return deltaMs > 0
+      ? `warning — compiled timeline exceeds faithful audio by ${formatSessionReviewDuration(deltaMs)}`
+      : `warning — faithful audio exceeds compiled timeline by ${formatSessionReviewDuration(Math.abs(deltaMs))}`;
+  })();
   return [
     "- Recording diagnostics: recorded",
     `- Recording ID: ${evidence.recordingId}`,
@@ -152,6 +172,7 @@ export function sessionReviewRecordingSummaryLines(
     `- Manifest version: ${evidence.manifestVersion ?? "None"}`,
     `- Faithful audio duration: ${formatSessionReviewDuration(evidence.audioDurationMs)}`,
     `- Compiled timeline duration: ${formatSessionReviewDuration(evidence.timelineDurationMs)}`,
+    `- Recording duration alignment: ${durationAlignment}`,
     `- Private direction events: ${evidence.direction.length}`,
     `- Recording warning present: ${evidence.warningPresent ? "yes (details withheld)" : "no"}`,
     `- Recording error present: ${evidence.errorPresent ? "yes (details withheld)" : "no"}`,

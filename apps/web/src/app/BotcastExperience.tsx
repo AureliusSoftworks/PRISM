@@ -258,6 +258,7 @@ import {
 import { signalEpisodeRetryDraft } from "./signalEpisodeRetry";
 import { signalDepartureRoleAfterPresentedMessage } from "./signalDeparturePresentation";
 import {
+  signalCompactThinkingNoticeAt,
   signalGenerationThinkingRole,
   signalPresentedThinkingRole,
   signalThinkingPresentationEndReason,
@@ -8507,6 +8508,16 @@ export function BotcastExperience({
       ) === true,
     [replayPresentationManifestV2],
   );
+  const replayCompactThinkingNotice = useMemo(
+    () =>
+      replayFaithful
+        ? signalCompactThinkingNoticeAt({
+            direction: replayPresentationManifestV2?.direction,
+            atMs: replayElapsedMs,
+          })
+        : null,
+    [replayElapsedMs, replayFaithful, replayPresentationManifestV2],
+  );
   const replayFaithfulBeat = replayFaithful
     ? (replayActiveTimeline?.beats.find(
         (beat) =>
@@ -10032,6 +10043,18 @@ export function BotcastExperience({
             CC
           </button>
         </div>
+        {args.replay && replayFaithful && replayCompactThinkingNotice ? (
+          <div
+            className={styles.replayCompactThinkingNotice}
+            data-participant-id={replayCompactThinkingNotice.participantId}
+            data-source-message-id={
+              replayCompactThinkingNotice.sourceMessageId ?? undefined
+            }
+            role="status"
+          >
+            {replayCompactThinkingNotice.label}
+          </div>
+        ) : null}
         <div className={styles.stageScene} data-signal-stage-scene="true">
           <div className={styles.atmosphere} aria-hidden="true">
             {!stageAtmosphere.imageUrl ? (
