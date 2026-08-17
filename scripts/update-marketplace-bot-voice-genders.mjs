@@ -46,11 +46,10 @@ const manifestPath = join(marketplaceRoot, "manifest.json");
 /** @typedef {"feminine" | "masculine" | "neutral"} CharacterGender */
 
 /**
- * Author-reviewed portable voice identities. Heart remains available to bot
- * authors, but no bundled persona uses the generic default. British voices are
- * reserved for personas whose authored delivery is explicitly British; the
- * pack does not pretend to supply French, Indian, German, or other accents it
- * does not install.
+ * Author-reviewed portable vocal identities. Heart remains available to bot
+ * authors, but no bundled persona uses the generic default. Vocal character
+ * and pronunciation are deliberately independent: the Accent Map carries the
+ * persona's regional speech identity without forcing timbre selection to do so.
  */
 const CURATED_BOT_IDS_BY_VOICE = {
   "voice-1": [],
@@ -58,7 +57,8 @@ const CURATED_BOT_IDS_BY_VOICE = {
     "iris",
     "marie-antoinette",
     "tiny-bill",
-    "alias-avery"
+    "alias-avery",
+    "scheherazade"
   ],
   "voice-3": [
     "rowan",
@@ -96,14 +96,16 @@ const CURATED_BOT_IDS_BY_VOICE = {
     "identity-crisis-ian",
     "following-jackson",
     "fibbing-phil",
-    "spectral-spencer"
+    "spectral-spencer",
+    "dorian-gray"
   ],
   "voice-4": [
     "pia",
     "mary-shelley",
     "jane-austen",
     "professor-mcgonagall",
-    "sad-sally"
+    "sad-sally",
+    "elizabeth-bennet"
   ],
   "voice-5": [
     "thomas-hobbes",
@@ -111,7 +113,9 @@ const CURATED_BOT_IDS_BY_VOICE = {
     "charles-darwin",
     "obi-wan-kenobi",
     "quiet-tim",
-    "crazy-brenda"
+    "crazy-brenda",
+    "sherlock-holmes",
+    "captain-nemo"
   ],
   "voice-6": ["sol", "misa-amane", "lazy-cameron"],
   "voice-7": [
@@ -168,6 +172,7 @@ const CURATED_BOT_IDS_BY_VOICE = {
     "william-shakespeare",
     "alan-watts",
     "andy-hominem",
+    "hueist-hugh",
     "hagrid",
     "harry-potter",
     "stewie-griffin",

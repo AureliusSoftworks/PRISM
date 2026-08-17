@@ -1,7 +1,7 @@
 {
   "schema": "prism-steam-marketplace-allowlist-v1",
   "version": 1,
-  "updatedAt": "2026-08-12",
+  "updatedAt": "2026-08-16",
   "description": "Fail-closed allowlist for Marketplace bots permitted in packaged Steam desktop builds. Steam-excluded persona bots remain available to development but require rights and provenance review before distribution.",
   "approvedBotIds": [
     "pia",
@@ -28,7 +28,13 @@
     "tiny-bill",
     "following-jackson",
     "fibbing-phil",
-    "spectral-spencer"
+    "spectral-spencer",
+    "andy-hominem",
+    "sherlock-holmes",
+    "elizabeth-bennet",
+    "captain-nemo",
+    "dorian-gray",
+    "scheherazade"
   ],
   "steamExcludedBotIds": [
     "george-washington",

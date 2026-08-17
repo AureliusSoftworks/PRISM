@@ -145,6 +145,8 @@ describe("bot marketplace static catalog", () => {
       ["shapeshifter-sam", "∞"],
       ["following-jackson", "·"],
       ["fibbing-phil", "^"],
+      ["andy-hominem", "¬"],
+      ["hueist-hugh", "◐"],
     ]);
     let customEyeCount = 0;
     let defaultEyeCount = 0;
@@ -179,9 +181,9 @@ describe("bot marketplace static catalog", () => {
       }
     }
 
-    assert.equal(expectedCustomEyes.size, 43);
-    assert.equal(customEyeCount, 43);
-    assert.equal(defaultEyeCount, 21);
+    assert.equal(expectedCustomEyes.size, 44);
+    assert.equal(customEyeCount, 44);
+    assert.equal(defaultEyeCount, 26);
   });
 
   it("ships the approved Carl Jung and Alan Watts avatar customizations", () => {
@@ -237,7 +239,7 @@ describe("bot marketplace static catalog", () => {
     const manifest = normalizeBotMarketplaceManifest(
       readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
     );
-    const expected = new Map<string, { name: string; effects: string[] }>([
+    const expected = new Map<string, { name?: string; names?: string[]; effects: string[] }>([
       ["Carl Jung", { name: "Depth Perception", effects: ["insight"] }],
       ["Jane Austen", { name: "Social Scalpel", effects: ["insight"] }],
       ["Sigmund Freud", { name: "Analytic Suspicion", effects: ["insight"] }],
@@ -295,12 +297,23 @@ describe("bot marketplace static catalog", () => {
     assert.equal(expected.size, 14);
   });
 
-  it("ships a growing Power Collection with described, portable personas", () => {
+  it("ships a five-bot Power Collection with described, portable personas", () => {
     const manifest = normalizeBotMarketplaceManifest(
       readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
     );
     const theme = manifest.themes.find((entry) => entry.id === "power-collection");
-    const expected = new Map<string, { name: string; effects: string[] }>([
+    const shelfIds = [
+      "silent-jack",
+      "lazy-cameron",
+      "tiny-bill",
+      "interrupting-tom",
+      "copycat-calvin",
+    ];
+    const expected = new Map<string, {
+      name?: string;
+      names?: string[];
+      effects: string[];
+    }>([
       ["silent-jack", { name: "Mute", effects: ["mute", "signal_policy", "mouth_motion"] }],
       ["lazy-cameron", { name: "Lazy", effects: ["response_budget"] }],
       [
@@ -365,23 +378,37 @@ describe("bot marketplace static catalog", () => {
           effects: ["avatar_visibility", "avatar_opacity", "signal_policy", "speech_audience"],
         },
       ],
+      [
+        "andy-hominem",
+        {
+          names: ["Ad Hominem", "Cursed Tongue"],
+          effects: ["addressed_insult", "cursed_tongue"],
+        },
+      ],
+      ["hueist-hugh", { name: "Racist", effects: ["chromatic_bias"] }],
     ]);
 
     assert.ok(theme);
-    assert.equal(theme.botIds.length > 5, true);
-    assert.deepEqual(theme.botIds, Array.from(expected.keys()));
-    assert.match(theme.description, /growing cast/iu);
+    assert.equal(theme.botIds.length, 5);
+    assert.deepEqual(theme.botIds, shelfIds);
+    assert.match(theme.description, /Five personas/iu);
     assert.equal(theme.botIds.includes("silent-tim"), false);
     assert.equal(manifest.bots.some((entry) => entry.id === "silent-tim"), false);
 
-    for (const botId of theme.botIds) {
+    for (const botId of expected.keys()) {
       const entry = manifest.bots.find((candidate) => candidate.id === botId);
       const expectation = expected.get(botId);
       assert.ok(entry, botId);
       assert.ok(expectation, botId);
       assert.equal((entry.subtitle?.trim().length ?? 0) > 0, true, `${botId} subtitle`);
       assert.equal((entry.description?.trim().length ?? 0) > 0, true, `${botId} description`);
-      assert.deepEqual(entry.themeIds, ["power-collection"], `${botId} collection`);
+      const onShelf = shelfIds.includes(botId);
+      assert.deepEqual(
+        entry.themeIds,
+        onShelf ? ["power-collection"] : [],
+        `${botId} collection`,
+      );
+      assert.equal(entry.marketplaceVisible, onShelf, `${botId} shelf visibility`);
 
       const bundle = readBotBundle(path.join(publicRoot, entry.bundlePath));
       const powers = normalizeBotPowersV1(bundle.botJson.bot.powers);
@@ -395,19 +422,63 @@ describe("bot marketplace static catalog", () => {
         true,
         `${botId} prompt`
       );
-      assert.equal(powers.length, 1, botId);
-      assert.equal(powers[0]?.name, expectation.name, botId);
-      assert.equal(powers[0]?.compileStatus, "ready", botId);
-      assert.equal(
-        powers[0]?.compiled?.sourceHash,
-        botPowerSourceHashV1(powers[0]?.name ?? "", powers[0]?.intent ?? ""),
-        botId
-      );
+      const expectedNames = expectation.names ?? [expectation.name ?? ""];
+      assert.equal(powers.length, expectedNames.length, botId);
+      assert.deepEqual(powers.map((power) => power.name), expectedNames, botId);
+      for (const power of powers) {
+        assert.equal(power.compileStatus, "ready", botId);
+        assert.equal(
+          power.compiled?.sourceHash,
+          botPowerSourceHashV1(power.name, power.intent),
+          botId
+        );
+      }
       assert.deepEqual(
-        powers[0]?.compiled?.effects.map((effect) => effect.type),
+        powers.flatMap((power) =>
+          power.compiled?.effects.map((effect) => effect.type) ?? []
+        ),
         expectation.effects,
         botId
       );
+      if (botId === "andy-hominem") {
+        assert.match(entry.subtitle ?? "", /profane personal attack/iu);
+        assert.match(entry.description ?? "", /bespoke insult/iu);
+        assert.deepEqual(
+          powers.flatMap((power) => power.compiled?.effects ?? []),
+          [
+            {
+              type: "addressed_insult",
+              trigger: "every_spoken_reply",
+              target: "current_addressee",
+              style: "fresh_tailored",
+            },
+            {
+              type: "cursed_tongue",
+              version: 1,
+              frequency: "frequent",
+              strength: "strong",
+              vocabulary: "uncensored_non_slur",
+              phraseMode: "occasional_2_3_words",
+            },
+          ],
+        );
+      }
+      if (botId === "hueist-hugh") {
+        assert.match(entry.subtitle ?? "", /phosphor color snob/iu);
+        assert.match(entry.description ?? "", /complementary cyan/iu);
+        assert.equal(entry.color, "#ff0000");
+        assert.deepEqual(powers[0]?.compiled?.effects, [
+          {
+            type: "chromatic_bias",
+            polarity: "hate",
+            color: { kind: "complementary_of_holder" },
+            strength: "large",
+            matchBandDeg: 30,
+          },
+        ]);
+        assert.match(powers[0]?.compiled?.selfCue ?? "", /phosphor color/iu);
+        assert.match(powers[0]?.compiled?.selfCue ?? "", /never mention human race/iu);
+      }
       if (botId === "tiny-bill") {
         const scale = powers[0]?.compiled?.effects.find(
           (effect) => effect.type === "avatar_scale",
@@ -594,7 +665,20 @@ describe("bot marketplace static catalog", () => {
       assert.equal(profile?.localEnginePreference, "voice-plus", `${entry.name} Voice+`);
       assert.equal(profile?.localVoiceSource, "portable", `${entry.name} portable source`);
       assert.equal(profile?.accentMode, "prefer-genuine", `${entry.name} accent mode`);
-      assert.equal(profile?.speechprintInfluence, "none", `${entry.name} portable speechprint`);
+      const expectedAccent = new Map([
+        ["sherlock-holmes", "modern-rp-english"],
+        ["captain-nemo", "indian-english"],
+        ["dorian-gray", "modern-rp-english"],
+        ["scheherazade", "middle-eastern-arabic-influenced-english"],
+      ]).get(entry.id);
+      if (expectedAccent) {
+        assert.equal(profile?.accentDefinitionId, expectedAccent, `${entry.name} Accent Map`);
+        assert.equal(profile?.speechprintInfluence, expectedAccent, `${entry.name} speechprint`);
+        assert.equal(typeof profile?.pronunciationMapPoint?.x, "number", `${entry.name} map X`);
+        assert.equal(typeof profile?.pronunciationMapPoint?.y, "number", `${entry.name} map Y`);
+      } else {
+        assert.equal(profile?.speechprintInfluence, "none", `${entry.name} portable speechprint`);
+      }
       for (const [field, value] of [
         ["openness", profile?.openness],
         ["weight", profile?.weight],
@@ -625,9 +709,20 @@ describe("bot marketplace static catalog", () => {
       ]));
       assert.equal(profile?.elevenLabsVoiceId, undefined, entry.name);
       assert.equal(profile?.elevenLabsVoiceIdOverride, undefined, entry.name);
+      const cleanVoiceIds = new Set([
+        "sherlock-holmes",
+        "elizabeth-bennet",
+        "captain-nemo",
+        "dorian-gray",
+        "scheherazade",
+      ]);
       assert.equal(
         profile?.elevenLabsEffect,
-        /^(?:darth\s+)?vader$/iu.test(entry.name) ? "resonance" : "chorus",
+        cleanVoiceIds.has(entry.id)
+          ? "clean"
+          : /^(?:darth\s+)?vader$/iu.test(entry.name)
+            ? "resonance"
+            : "chorus",
         `${entry.name} voice effect`,
       );
       assert.equal(profile?.voiceEffectExplicit, true, `${entry.name} explicit voice effect`);
@@ -916,6 +1011,10 @@ describe("bot marketplace static catalog", () => {
       ],
       ["story-literature", ["william-shakespeare", "mary-shelley", "edgar-allan-poe", "jane-austen", "homer"]],
       [
+        "public-domain-fiction",
+        ["sherlock-holmes", "elizabeth-bennet", "captain-nemo", "dorian-gray", "scheherazade"]
+      ],
+      [
         "power-collection",
         [
           "silent-jack",
@@ -923,18 +1022,6 @@ describe("bot marketplace static catalog", () => {
           "tiny-bill",
           "interrupting-tom",
           "copycat-calvin",
-          "joyful-nora",
-          "crazy-brenda",
-          "mumbling-jim",
-          "obsessed-kevin",
-          "identity-crisis-ian",
-          "sad-sally",
-          "forgetful-freddie",
-          "alias-avery",
-          "shapeshifter-sam",
-          "following-jackson",
-          "fibbing-phil",
-          "spectral-spencer",
         ]
       ]
     ]);

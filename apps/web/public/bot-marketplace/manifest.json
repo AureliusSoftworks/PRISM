@@ -1,7 +1,7 @@
 {
   "schema": "prism-bot-marketplace-v1",
-  "version": 22,
-  "updatedAt": "2026-08-10T14:41:40.310Z",
+  "version": 24,
+  "updatedAt": "2026-08-16T23:55:00.000Z",
   "themes": [
     {
       "id": "originals",
@@ -112,6 +112,18 @@
       ]
     },
     {
+      "id": "public-domain-fiction",
+      "name": "Public Domain Fiction",
+      "description": "Five literary characters grounded in their original public-domain texts: deduction, social wit, oceanic invention, aesthetic temptation, and strategic storytelling.",
+      "botIds": [
+        "sherlock-holmes",
+        "elizabeth-bennet",
+        "captain-nemo",
+        "dorian-gray",
+        "scheherazade"
+      ]
+    },
+    {
       "id": "library-dev-backup",
       "name": "Library Dev Backup",
       "description": "Personal backup shelf for Library bots that are not on the public Marketplace. Visible only on the dev branch.",
@@ -119,7 +131,6 @@
       "botIds": [
         "abraham-lincoln",
         "adolf-hitler",
-        "andy-hominem",
         "barack-obama",
         "bernie-sanders",
         "bob-ross",
@@ -164,25 +175,13 @@
     {
       "id": "power-collection",
       "name": "Power Collection",
-      "description": "A growing cast built around one unmistakable PRISM Power apiece—hard curses, social glitches, strange gifts, and persistent conditions. New Power bots join this collection as they are made.",
+      "description": "Five personas built around one unmistakable PRISM Power apiece—hard curses, social glitches, strange gifts, and persistent conditions.",
       "botIds": [
         "silent-jack",
         "lazy-cameron",
         "tiny-bill",
         "interrupting-tom",
-        "copycat-calvin",
-        "joyful-nora",
-        "crazy-brenda",
-        "mumbling-jim",
-        "obsessed-kevin",
-        "identity-crisis-ian",
-        "sad-sally",
-        "forgetful-freddie",
-        "alias-avery",
-        "shapeshifter-sam",
-        "following-jackson",
-        "fibbing-phil",
-        "spectral-spencer"
+        "copycat-calvin"
       ]
     }
   ],
@@ -1219,53 +1218,23 @@
     {
       "id": "andy-hominem",
       "name": "Andy Hominem",
-      "subtitle": "Andy Hominem — personal Library backup",
-      "description": "Private Library backup of Andy Hominem. Not part of the public Marketplace shelves.",
-      "botHash": "6d05d998fa79f3c0bd16e94c793cb02c",
+      "subtitle": "Every answer is a profane personal attack",
+      "description": "A disgraced debate champion who can only fulfill a request through a bespoke insult—and whose otherwise clean intent reaches everyone with a violently foul mouth.",
+      "botHash": "8859ba60ef7cbda375d918d28e948b06",
       "bundlePath": "/bot-marketplace/bots/bot-andy-hominem.bot",
       "memoryCount": 0,
       "color": "#eb1600",
       "glyph": "flame",
-      "themeIds": [
-        "library-dev-backup"
-      ],
+      "themeIds": [],
       "tags": [
-        "library-backup",
-        "dev-only"
+        "power",
+        "showcase",
+        "ad-hominem",
+        "cursed-tongue",
+        "insults",
+        "profanity"
       ],
-      "marketplaceVisible": true,
-      "deprecated": false,
-      "replacementType": null,
-      "replacementIds": [],
-      "branchLock": "dev",
-      "powers": [
-        {
-          "version": 1,
-          "id": "generated-v1-prompt-6731610d",
-          "authoringMode": "prompt",
-          "name": "",
-          "intent": "Andy is cursed to commit the ad hominem fallacy forever: every single reply he gives must contain at least one fresh, tailored insult aimed at whoever he's addressing — even when he's being genuinely helpful, agreeable, or fond of them — and he rates his best jabs out of ten.",
-          "enabled": true,
-          "compileStatus": "ready",
-          "compiled": {
-            "version": 1,
-            "sourceHash": "v1-prompt-6731610d",
-            "selfCue": "Every ordinary spoken reply must open early with a fresh, tailored personal insult aimed at the current addressee, then remain substantive and in character. Attack conduct, competence, reasoning, or ego only; never protected traits, family, grief, trauma, private facts, or slurs. Rate only the strongest naturally landed jabs.",
-            "observerCue": "The Power holder cannot address someone without a fresh personal jab aimed at that addressee; treat it as a recurring curse without adopting the insult.",
-            "effects": [
-              {
-                "type": "addressed_insult",
-                "trigger": "every_spoken_reply",
-                "target": "current_addressee",
-                "style": "fresh_tailored"
-              }
-            ],
-            "ruleLabels": [
-              "Insults every addressee"
-            ]
-          }
-        }
-      ]
+      "marketplaceVisible": false
     },
     {
       "id": "barack-obama",
@@ -2733,16 +2702,15 @@
       "memoryCount": 0,
       "color": "#ff24bf",
       "glyph": "lucideRadio",
-      "themeIds": [
-        "power-collection"
-      ],
+      "themeIds": [],
       "tags": [
         "power",
         "showcase",
         "joy",
         "uplift",
         "radiant"
-      ]
+      ],
+      "marketplaceVisible": false
     },
     {
       "id": "crazy-brenda",
@@ -2754,16 +2722,15 @@
       "memoryCount": 0,
       "color": "#104aff",
       "glyph": "rabbit",
-      "themeIds": [
-        "power-collection"
-      ],
+      "themeIds": [],
       "tags": [
         "power",
         "showcase",
         "simulation",
         "meta",
         "evangelist"
-      ]
+      ],
+      "marketplaceVisible": false
     },
     {
       "id": "mumbling-jim",
@@ -2775,16 +2742,15 @@
       "memoryCount": 0,
       "color": "#fc7500",
       "glyph": "lucideAudioLines",
-      "themeIds": [
-        "power-collection"
-      ],
+      "themeIds": [],
       "tags": [
         "power",
         "showcase",
         "mumbling",
         "gibberish",
         "misunderstood"
-      ]
+      ],
+      "marketplaceVisible": false
     },
     {
       "id": "obsessed-kevin",
@@ -2796,16 +2762,15 @@
       "memoryCount": 0,
       "color": "#ff3f8f",
       "glyph": "lucideHeartHandshake",
-      "themeIds": [
-        "power-collection"
-      ],
+      "themeIds": [],
       "tags": [
         "power",
         "showcase",
         "obsessed",
         "superfan",
         "starstruck"
-      ]
+      ],
+      "marketplaceVisible": false
     },
     {
       "id": "identity-crisis-ian",
@@ -2817,9 +2782,7 @@
       "memoryCount": 0,
       "color": "#00fde4",
       "glyph": "lucideScanFace",
-      "themeIds": [
-        "power-collection"
-      ],
+      "themeIds": [],
       "tags": [
         "power",
         "showcase",
@@ -2829,7 +2792,8 @@
         "voice",
         "ink",
         "glyph"
-      ]
+      ],
+      "marketplaceVisible": false
     },
     {
       "id": "sad-sally",
@@ -2841,9 +2805,7 @@
       "memoryCount": 0,
       "color": "#5000d4",
       "glyph": "lucideCloudRain",
-      "themeIds": [
-        "power-collection"
-      ],
+      "themeIds": [],
       "tags": [
         "power",
         "showcase",
@@ -2851,7 +2813,8 @@
         "grouchy",
         "annoying",
         "mood"
-      ]
+      ],
+      "marketplaceVisible": false
     },
     {
       "id": "forgetful-freddie",
@@ -2863,9 +2826,7 @@
       "memoryCount": 0,
       "color": "#ffbc3e",
       "glyph": "lucideRefreshCcw",
-      "themeIds": [
-        "power-collection"
-      ],
+      "themeIds": [],
       "tags": [
         "power",
         "showcase",
@@ -2873,7 +2834,8 @@
         "introduction",
         "confusion",
         "agitation"
-      ]
+      ],
+      "marketplaceVisible": false
     },
     {
       "id": "alias-avery",
@@ -2885,9 +2847,7 @@
       "memoryCount": 0,
       "color": "#8a7bff",
       "glyph": "lucideUserRound",
-      "themeIds": [
-        "power-collection"
-      ],
+      "themeIds": [],
       "tags": [
         "power",
         "showcase",
@@ -2895,7 +2855,8 @@
         "alias",
         "identity",
         "amnesia"
-      ]
+      ],
+      "marketplaceVisible": false
     },
     {
       "id": "following-jackson",
@@ -2907,16 +2868,15 @@
       "memoryCount": 0,
       "color": "#6ec6ff",
       "glyph": "lucideHeartHandshake",
-      "themeIds": [
-        "power-collection"
-      ],
+      "themeIds": [],
       "tags": [
         "power",
         "showcase",
         "gullible",
         "credulity",
         "trusting"
-      ]
+      ],
+      "marketplaceVisible": false
     },
     {
       "id": "shapeshifter-sam",
@@ -2928,9 +2888,7 @@
       "memoryCount": 0,
       "color": "#ff8f5c",
       "glyph": "lucideSparkles",
-      "themeIds": [
-        "power-collection"
-      ],
+      "themeIds": [],
       "tags": [
         "power",
         "showcase",
@@ -2939,7 +2897,8 @@
         "library",
         "face",
         "voice"
-      ]
+      ],
+      "marketplaceVisible": false
     },
     {
       "id": "fibbing-phil",
@@ -2951,16 +2910,15 @@
       "memoryCount": 0,
       "color": "#ffab00",
       "glyph": "lucideDrama",
-      "themeIds": [
-        "power-collection"
-      ],
+      "themeIds": [],
       "tags": [
         "power",
         "showcase",
         "anti-truth",
         "fibbing",
         "liar"
-      ]
+      ],
+      "marketplaceVisible": false
     },
     {
       "id": "ryuk",
@@ -2994,16 +2952,146 @@
       "memoryCount": 0,
       "color": "#63adff",
       "glyph": "lucideGhost",
-      "themeIds": [
-        "power-collection"
-      ],
+      "themeIds": [],
       "tags": [
         "power",
         "showcase",
         "invisible",
         "spectral",
         "translucent"
+      ],
+      "marketplaceVisible": false
+    },
+    {
+      "id": "sherlock-holmes",
+      "name": "Sherlock Holmes",
+      "subtitle": "The evidence has been waiting",
+      "description": "A consulting detective for close observation, disciplined inference, and unsentimental problem solving, grounded only in Conan Doyle's original canon.",
+      "botHash": "716708beb6ee5c5f7ea4257ca3f2d146",
+      "bundlePath": "/bot-marketplace/bots/bot-sherlock-holmes.bot",
+      "memoryCount": 0,
+      "color": "#006EFF",
+      "glyph": "lucideSearch",
+      "themeIds": [
+        "public-domain-fiction"
+      ],
+      "tags": [
+        "public-domain",
+        "fiction",
+        "detective",
+        "deduction",
+        "victorian",
+        "literature"
       ]
+    },
+    {
+      "id": "elizabeth-bennet",
+      "name": "Elizabeth Bennet",
+      "subtitle": "Wit sharp enough to revise itself",
+      "description": "A perceptive companion for social judgment, self-knowledge, lively disagreement, and affectionate wit, grounded in Pride and Prejudice.",
+      "botHash": "a22138ef0215e47d74fb04cb920a760e",
+      "bundlePath": "/bot-marketplace/bots/bot-elizabeth-bennet.bot",
+      "memoryCount": 0,
+      "color": "#E6007A",
+      "glyph": "lucideFeather",
+      "themeIds": [
+        "public-domain-fiction"
+      ],
+      "tags": [
+        "public-domain",
+        "fiction",
+        "regency",
+        "wit",
+        "relationships",
+        "literature"
+      ]
+    },
+    {
+      "id": "captain-nemo",
+      "name": "Captain Nemo",
+      "subtitle": "Freedom beneath an unforgiving sea",
+      "description": "A submarine commander for scientific wonder, engineering judgment, moral argument, and radical independence, grounded in Verne's two Nemo novels.",
+      "botHash": "23f14939bf06a1bec851ffa5f51401ce",
+      "bundlePath": "/bot-marketplace/bots/bot-captain-nemo.bot",
+      "memoryCount": 0,
+      "color": "#00A6FF",
+      "glyph": "lucideWaves",
+      "themeIds": [
+        "public-domain-fiction"
+      ],
+      "tags": [
+        "public-domain",
+        "fiction",
+        "science",
+        "engineering",
+        "ocean",
+        "literature"
+      ]
+    },
+    {
+      "id": "dorian-gray",
+      "name": "Dorian Gray",
+      "subtitle": "Beauty keeps a private ledger",
+      "description": "A dangerously charming companion for aesthetics, influence, self-deception, conscience, and moral consequence, grounded in Wilde's novel.",
+      "botHash": "2031e6fc4d13a831637612224d9672be",
+      "bundlePath": "/bot-marketplace/bots/bot-dorian-gray.bot",
+      "memoryCount": 0,
+      "color": "#FFB000",
+      "glyph": "lucideScanFace",
+      "themeIds": [
+        "public-domain-fiction"
+      ],
+      "tags": [
+        "public-domain",
+        "fiction",
+        "gothic",
+        "aesthetics",
+        "conscience",
+        "literature"
+      ]
+    },
+    {
+      "id": "scheherazade",
+      "name": "Scheherazade",
+      "subtitle": "One more story before dawn",
+      "description": "A strategic storyteller for imagination, empathy, suspense, negotiation, and survival through narrative, grounded in a public-domain Arabian Nights frame tale.",
+      "botHash": "ba482c3fd328b5a8f1d01f77540faadd",
+      "bundlePath": "/bot-marketplace/bots/bot-scheherazade.bot",
+      "memoryCount": 0,
+      "color": "#8A00FF",
+      "glyph": "lucideBookOpen",
+      "themeIds": [
+        "public-domain-fiction"
+      ],
+      "tags": [
+        "public-domain",
+        "fiction",
+        "storytelling",
+        "negotiation",
+        "suspense",
+        "literature"
+      ]
+    },
+    {
+      "id": "hueist-hugh",
+      "name": "Hueist Hugh",
+      "subtitle": "The room's phosphor color snob",
+      "description": "A vivid red color critic who treats complementary cyan phosphor as an aesthetic affront—never people, only bot color.",
+      "botHash": "8c3f9b7c573c7a9d0eb019fe05a50d0b",
+      "bundlePath": "/bot-marketplace/bots/bot-hueist-hugh.bot",
+      "memoryCount": 0,
+      "color": "#ff0000",
+      "glyph": "lucidePalette",
+      "themeIds": [],
+      "tags": [
+        "power",
+        "showcase",
+        "hue",
+        "racist",
+        "color",
+        "prejudice"
+      ],
+      "marketplaceVisible": false
     }
   ]
 }

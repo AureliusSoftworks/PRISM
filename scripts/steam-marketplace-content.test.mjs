@@ -201,12 +201,12 @@ test("the repository Marketplace satisfies the current Steam allowlist", async (
       path.join(runtimeDir, "STEAM_CONTENT_REPORT.md"),
       renderSteamContentReport(report),
     );
-    assert.equal(report.approvedBots.length, 25);
+    assert.equal(report.approvedBots.length, 31);
     assert.equal(report.excludedDevBotCount, 42);
     assert.equal(report.excludedSteamBots.length, 42);
     assert.deepEqual(
       await verifySteamRuntimeContent({ runtimeDir, policyPath }),
-      { botCount: 25, bundleCount: 25 },
+      { botCount: 31, bundleCount: 31 },
     );
   } finally {
     await fs.rm(fixtureRoot, { recursive: true, force: true });
