@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 
-export const DEBATE_STAGE_ALIGNMENT_VERSION = 13 as const;
+export const DEBATE_STAGE_ALIGNMENT_VERSION = 14 as const;
 /** Per-role voice gain on the alignment mixer (matches Signal's 0–125% range). */
 export const DEBATE_STAGE_VOICE_LEVEL_DEFAULT = 1;
 export const DEBATE_STAGE_VOICE_LEVEL_MAX = 1.25;
@@ -74,7 +74,6 @@ export type DebateStageEvidenceView = "wide" | "left" | "moderator" | "right";
 export type DebateStageCameraView = DebateStageEvidenceView | "jury";
 export type DebateStageLightBlendMode =
   (typeof DEBATE_STAGE_LIGHT_BLEND_MODES)[number];
-export type DebateStageDirectionPreset = "balanced" | "close" | "grand";
 export type DebateStageAlignmentTarget =
   | `${DebateStageAlignmentRole}:${DebateStageAlignmentItem}`
   | `moderatorView:${DebateStageAlignmentItem}`;
@@ -97,7 +96,11 @@ export interface DebateStageRolePlacementV4 {
   glyph: DebateStageOffsetV1;
 }
 
-export interface DebateStageAlignmentWideV4 {
+/**
+ * Canonical public-floor composition. Live presentation and replay both read
+ * this same Main arrangement; camera close-ups remain their own configurations.
+ */
+export interface DebateStageAlignmentMainV4 {
   for: DebateStageRolePlacementV4;
   moderator: DebateStageRolePlacementV4;
   against: DebateStageRolePlacementV4;
@@ -172,9 +175,9 @@ export interface DebateStageModeratorMicroScalesV1 {
   right: number;
 }
 
-export interface DebateStageAlignmentV13 {
+export interface DebateStageAlignmentV14 {
   version: typeof DEBATE_STAGE_ALIGNMENT_VERSION;
-  wide: DebateStageAlignmentWideV4;
+  main: DebateStageAlignmentMainV4;
   moderator: DebateStageRolePlacementV4;
   gavel: DebateStageGavelV3;
   evidenceTable: DebateStageEvidencePlacementsV10;
@@ -188,14 +191,15 @@ export interface DebateStageAlignmentV13 {
   moderatorMicroScales: DebateStageModeratorMicroScalesV1;
 }
 
-/** @deprecated Prefer DebateStageAlignmentV13 — kept as stable import aliases. */
-export type DebateStageAlignmentV12 = DebateStageAlignmentV13;
-export type DebateStageAlignmentV11 = DebateStageAlignmentV13;
-export type DebateStageAlignmentV10 = DebateStageAlignmentV13;
-export type DebateStageAlignmentV9 = DebateStageAlignmentV13;
-export type DebateStageAlignmentV8 = DebateStageAlignmentV13;
-export type DebateStageAlignmentV7 = DebateStageAlignmentV13;
-export type DebateStageAlignmentV6 = DebateStageAlignmentV13;
+/** @deprecated Saved versions normalize into the canonical V14 Main layout. */
+export type DebateStageAlignmentV13 = DebateStageAlignmentV14;
+export type DebateStageAlignmentV12 = DebateStageAlignmentV14;
+export type DebateStageAlignmentV11 = DebateStageAlignmentV14;
+export type DebateStageAlignmentV10 = DebateStageAlignmentV14;
+export type DebateStageAlignmentV9 = DebateStageAlignmentV14;
+export type DebateStageAlignmentV8 = DebateStageAlignmentV14;
+export type DebateStageAlignmentV7 = DebateStageAlignmentV14;
+export type DebateStageAlignmentV6 = DebateStageAlignmentV14;
 
 export const DEBATE_STAGE_ALIGNMENT_ROLES: readonly DebateStageAlignmentRole[] =
   ["for", "moderator", "against"];
@@ -272,9 +276,9 @@ export const DEFAULT_DEBATE_STAGE_MODERATOR_MICRO_SCALES: DebateStageModeratorMi
   right: DEBATE_STAGE_MODERATOR_MICRO_SCALE_DEFAULT,
 };
 
-export const DEFAULT_DEBATE_STAGE_ALIGNMENT: DebateStageAlignmentV13 = {
+export const DEFAULT_DEBATE_STAGE_ALIGNMENT: DebateStageAlignmentV14 = {
   version: DEBATE_STAGE_ALIGNMENT_VERSION,
-  wide: {
+  main: {
     for: {
       bot: { x: 0.01, y: -2 },
       nameplate: { x: 3, y: -4 },
@@ -326,99 +330,6 @@ export const DEFAULT_DEBATE_STAGE_ALIGNMENT: DebateStageAlignmentV13 = {
   galleryVolume: DEBATE_STAGE_GALLERY_VOLUME_DEFAULT,
   moderatorMicroScales: { ...DEFAULT_DEBATE_STAGE_MODERATOR_MICRO_SCALES },
 };
-
-/**
- * Player-facing stage direction intentionally changes only the public Wide
- * composition. Precision camera, evidence, gavel, light, and audio tuning stay
- * untouched for the developer Alignment Lab.
- */
-export function applyDebateStageDirectionPreset(
-  alignment: DebateStageAlignmentV13,
-  preset: DebateStageDirectionPreset,
-): DebateStageAlignmentV13 {
-  const base = normalizeDebateStageAlignment(alignment);
-  const balanced = DEFAULT_DEBATE_STAGE_ALIGNMENT.wide;
-  const wide: DebateStageAlignmentWideV4 =
-    preset === "close"
-      ? {
-          for: {
-            bot: { x: 4, y: -1 },
-            nameplate: { x: 5, y: -4 },
-            glyph: { x: 4, y: -6 },
-          },
-          moderator: {
-            bot: { x: 0, y: -3 },
-            nameplate: { x: 0, y: -10 },
-            glyph: { x: 0, y: 2 },
-          },
-          against: {
-            bot: { x: -4, y: -1 },
-            nameplate: { x: -5, y: -4 },
-            glyph: { x: -4, y: -6 },
-          },
-        }
-      : preset === "grand"
-        ? {
-            for: {
-              bot: { x: -2.5, y: -3 },
-              nameplate: { x: 2, y: -5 },
-              glyph: { x: 1.5, y: -7 },
-            },
-            moderator: {
-              bot: { x: 0, y: -6 },
-              nameplate: { x: 0, y: -12 },
-              glyph: { x: 0, y: 0 },
-            },
-            against: {
-              bot: { x: 2.5, y: -3 },
-              nameplate: { x: -2, y: -5 },
-              glyph: { x: -1.5, y: -7 },
-            },
-          }
-        : {
-            for: {
-              bot: { ...balanced.for.bot },
-              nameplate: { ...balanced.for.nameplate },
-              glyph: { ...balanced.for.glyph },
-            },
-            moderator: {
-              bot: { ...balanced.moderator.bot },
-              nameplate: { ...balanced.moderator.nameplate },
-              glyph: { ...balanced.moderator.glyph },
-            },
-            against: {
-              bot: { ...balanced.against.bot },
-              nameplate: { ...balanced.against.nameplate },
-              glyph: { ...balanced.against.glyph },
-            },
-          };
-  const moderatorScale =
-    preset === "grand" ? 155 : preset === "close" ? 115 : 130;
-  return normalizeDebateStageAlignment({
-    ...base,
-    wide,
-    moderatorMicroScales: {
-      ...base.moderatorMicroScales,
-      wide: moderatorScale,
-    },
-  });
-}
-
-export function debateStageDirectionPresetForAlignment(
-  alignment: DebateStageAlignmentV13,
-): DebateStageDirectionPreset | null {
-  for (const preset of ["balanced", "close", "grand"] as const) {
-    const candidate = applyDebateStageDirectionPreset(alignment, preset);
-    if (
-      JSON.stringify(candidate.wide) === JSON.stringify(alignment.wide) &&
-      candidate.moderatorMicroScales.wide ===
-        alignment.moderatorMicroScales.wide
-    ) {
-      return preset;
-    }
-  }
-  return null;
-}
 
 function normalizedNumber(
   value: unknown,
@@ -818,12 +729,14 @@ export function normalizeDebateStageAlignment(
     typeof value === "object" && value !== null
       ? (value as Record<string, unknown>)
       : {};
-  const nestedWide =
-    typeof candidate.wide === "object" && candidate.wide !== null
-      ? (candidate.wide as Record<string, unknown>)
-      : null;
-  const wideCandidate = nestedWide ?? candidate;
-  const legacyModerator = wideCandidate.moderator;
+  const nestedMain =
+    typeof candidate.main === "object" && candidate.main !== null
+      ? (candidate.main as Record<string, unknown>)
+      : typeof candidate.wide === "object" && candidate.wide !== null
+        ? (candidate.wide as Record<string, unknown>)
+        : null;
+  const mainCandidate = nestedMain ?? candidate;
+  const legacyModerator = mainCandidate.moderator;
   const lightBlendModes =
     typeof candidate.lightBlendModes === "object" &&
     candidate.lightBlendModes !== null
@@ -862,22 +775,22 @@ export function normalizeDebateStageAlignment(
       : {};
   return {
     version: DEBATE_STAGE_ALIGNMENT_VERSION,
-    wide: {
+    main: {
       for: normalizeStagePlacement(
-        wideCandidate.for,
-        DEFAULT_DEBATE_STAGE_ALIGNMENT.wide.for,
+        mainCandidate.for,
+        DEFAULT_DEBATE_STAGE_ALIGNMENT.main.for,
       ),
       moderator: normalizeStagePlacement(
         legacyModerator,
-        DEFAULT_DEBATE_STAGE_ALIGNMENT.wide.moderator,
+        DEFAULT_DEBATE_STAGE_ALIGNMENT.main.moderator,
       ),
       against: normalizeStagePlacement(
-        wideCandidate.against,
-        DEFAULT_DEBATE_STAGE_ALIGNMENT.wide.against,
+        mainCandidate.against,
+        DEFAULT_DEBATE_STAGE_ALIGNMENT.main.against,
       ),
     },
     moderator: normalizeStagePlacement(
-      nestedWide ? candidate.moderator : legacyModerator,
+      nestedMain ? candidate.moderator : legacyModerator,
       DEFAULT_DEBATE_STAGE_ALIGNMENT.moderator,
     ),
     gavel: {
@@ -949,7 +862,7 @@ export function debateStageAlignmentOffset(
   const { role, item, view } = debateStageAlignmentTargetParts(target);
   return view === "moderator"
     ? alignment.moderator[item]
-    : alignment.wide[role][item];
+    : alignment.main[role][item];
 }
 
 export function updateDebateStageAlignmentOffset(
@@ -969,11 +882,11 @@ export function updateDebateStageAlignmentOffset(
   }
   return normalizeDebateStageAlignment({
     ...alignment,
-    wide: {
-      ...alignment.wide,
+    main: {
+      ...alignment.main,
       [role]: {
-        ...alignment.wide[role],
-        [item]: { ...alignment.wide[role][item], ...update },
+        ...alignment.main[role],
+        [item]: { ...alignment.main[role][item], ...update },
       },
     },
   });
@@ -1120,6 +1033,10 @@ export function updateDebateStageEvidenceTable(
 }
 
 export function debateStageAlignmentStorageKey(scopeId: string): string {
+  return `prism_debate_stage_alignment_v14:${scopeId}`;
+}
+
+function v13DebateStageAlignmentStorageKey(scopeId: string): string {
   return `prism_debate_stage_alignment_v13:${scopeId}`;
 }
 
@@ -1178,6 +1095,7 @@ export function readDebateStageAlignment(
   try {
     const serialized =
       storage.getItem(debateStageAlignmentStorageKey(scopeId)) ??
+      storage.getItem(v13DebateStageAlignmentStorageKey(scopeId)) ??
       storage.getItem(v12DebateStageAlignmentStorageKey(scopeId)) ??
       storage.getItem(v11DebateStageAlignmentStorageKey(scopeId)) ??
       storage.getItem(v10DebateStageAlignmentStorageKey(scopeId)) ??
@@ -1225,24 +1143,24 @@ export function debateStageAlignmentStyle(
     [`--debate-${prefix}evidence-shadow-floor-scale-x`]: `${shadow.floorWidth / 100}`,
   });
   return {
-    "--debate-for-offset-x": `${normalized.wide.for.bot.x}%`,
-    "--debate-for-offset-y": `${normalized.wide.for.bot.y}%`,
-    "--debate-for-nameplate-offset-x": `${normalized.wide.for.nameplate.x}%`,
-    "--debate-for-nameplate-offset-y": `${normalized.wide.for.nameplate.y}%`,
-    "--debate-for-glyph-offset-x": `${normalized.wide.for.glyph.x}%`,
-    "--debate-for-glyph-offset-y": `${normalized.wide.for.glyph.y}%`,
-    "--debate-moderator-offset-x": `${normalized.wide.moderator.bot.x}%`,
-    "--debate-moderator-offset-y": `${normalized.wide.moderator.bot.y}%`,
-    "--debate-moderator-nameplate-offset-x": `${normalized.wide.moderator.nameplate.x}%`,
-    "--debate-moderator-nameplate-offset-y": `${normalized.wide.moderator.nameplate.y}%`,
-    "--debate-moderator-glyph-offset-x": `${normalized.wide.moderator.glyph.x}%`,
-    "--debate-moderator-glyph-offset-y": `${normalized.wide.moderator.glyph.y}%`,
-    "--debate-against-offset-x": `${normalized.wide.against.bot.x}%`,
-    "--debate-against-offset-y": `${normalized.wide.against.bot.y}%`,
-    "--debate-against-nameplate-offset-x": `${normalized.wide.against.nameplate.x}%`,
-    "--debate-against-nameplate-offset-y": `${normalized.wide.against.nameplate.y}%`,
-    "--debate-against-glyph-offset-x": `${normalized.wide.against.glyph.x}%`,
-    "--debate-against-glyph-offset-y": `${normalized.wide.against.glyph.y}%`,
+    "--debate-for-offset-x": `${normalized.main.for.bot.x}%`,
+    "--debate-for-offset-y": `${normalized.main.for.bot.y}%`,
+    "--debate-for-nameplate-offset-x": `${normalized.main.for.nameplate.x}%`,
+    "--debate-for-nameplate-offset-y": `${normalized.main.for.nameplate.y}%`,
+    "--debate-for-glyph-offset-x": `${normalized.main.for.glyph.x}%`,
+    "--debate-for-glyph-offset-y": `${normalized.main.for.glyph.y}%`,
+    "--debate-moderator-offset-x": `${normalized.main.moderator.bot.x}%`,
+    "--debate-moderator-offset-y": `${normalized.main.moderator.bot.y}%`,
+    "--debate-moderator-nameplate-offset-x": `${normalized.main.moderator.nameplate.x}%`,
+    "--debate-moderator-nameplate-offset-y": `${normalized.main.moderator.nameplate.y}%`,
+    "--debate-moderator-glyph-offset-x": `${normalized.main.moderator.glyph.x}%`,
+    "--debate-moderator-glyph-offset-y": `${normalized.main.moderator.glyph.y}%`,
+    "--debate-against-offset-x": `${normalized.main.against.bot.x}%`,
+    "--debate-against-offset-y": `${normalized.main.against.bot.y}%`,
+    "--debate-against-nameplate-offset-x": `${normalized.main.against.nameplate.x}%`,
+    "--debate-against-nameplate-offset-y": `${normalized.main.against.nameplate.y}%`,
+    "--debate-against-glyph-offset-x": `${normalized.main.against.glyph.x}%`,
+    "--debate-against-glyph-offset-y": `${normalized.main.against.glyph.y}%`,
     "--debate-moderator-view-offset-x": `${normalized.moderator.bot.x}%`,
     "--debate-moderator-view-offset-y": `${normalized.moderator.bot.y}%`,
     "--debate-moderator-view-nameplate-offset-x": `${normalized.moderator.nameplate.x}%`,
@@ -1325,7 +1243,10 @@ export function debateStageAlignmentStyle(
 export function formatDebateStageAlignmentClipboard(
   alignment: DebateStageAlignmentV6,
 ): string {
-  return JSON.stringify(normalizeDebateStageAlignment(alignment), null, 2);
+  return [
+    "export const DEFAULT_DEBATE_STAGE_ALIGNMENT: DebateStageAlignmentV14 =",
+    `${JSON.stringify(normalizeDebateStageAlignment(alignment), null, 2)};`,
+  ].join("\n");
 }
 
 export function formatDebateStageGavelClipboard(

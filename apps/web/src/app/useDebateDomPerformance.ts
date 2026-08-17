@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import type { GraphicsQuality } from "@localai/shared";
 import { prismSceneQualityCeilingForGraphicsQuality } from "./graphicsQuality";
 import {
@@ -12,10 +12,6 @@ import {
   type PrismSceneQuality,
   type PrismSceneTimingWindow,
 } from "./prismSceneRuntime";
-import {
-  mostRestrictivePrismSceneQuality,
-  sessionBotSceneQualityCeilingForVisibleCount,
-} from "./sessionBotVisualQuality";
 
 const DEBATE_DOM_SCENE_ID = "debate-live-dom";
 
@@ -51,31 +47,12 @@ export function useDebateDomPerformance(options: {
   graphicsQuality: GraphicsQuality;
   objectCount: number;
 }): PrismSceneQuality {
-  const ceiling = mostRestrictivePrismSceneQuality(
-    prismSceneQualityCeilingForGraphicsQuality(options.graphicsQuality),
-    sessionBotSceneQualityCeilingForVisibleCount(options.objectCount),
+  const renderedQuality = prismSceneQualityCeilingForGraphicsQuality(
+    options.graphicsQuality,
   );
   const controller = useMemo(() => {
-    const retina =
-      typeof window !== "undefined" && window.devicePixelRatio >= 2;
-    return new PrismAdaptiveQualityController(0, ceiling, {
-      // Retina Debate starts one tier softer so dual light masks drop sooner.
-      initialQuality:
-        retina && ceiling === "full"
-          ? "balanced"
-          : retina && ceiling === "balanced"
-            ? "minimal"
-            : ceiling,
-      badWindowsBeforeDrop: 1,
-      tierCooldownMs: 6_000,
-    });
-  }, [ceiling]);
-  const [qualityState, setQualityState] = useState<{
-    ceiling: PrismSceneQuality;
-    quality: PrismSceneQuality;
-  }>(() => ({ ceiling, quality: controller.quality }));
-  const quality =
-    qualityState.ceiling === ceiling ? qualityState.quality : ceiling;
+    return new PrismAdaptiveQualityController(0, renderedQuality);
+  }, [renderedQuality]);
 
   useEffect(() => {
     if (!options.active) {
@@ -88,7 +65,7 @@ export function useDebateDomPerformance(options: {
     let tickCount = 0;
     const foreground = (): boolean => document.visibilityState === "visible";
     publishDebateDomDiagnostics({
-      quality: controller.quality,
+      quality: renderedQuality,
       foreground: foreground(),
       objectCount: options.objectCount,
       tickCount,
@@ -104,12 +81,11 @@ export function useDebateDomPerformance(options: {
         activity: "interactive",
         foreground: foreground(),
       });
-      if (result.qualityChanged) {
-        setQualityState({ ceiling, quality: result.qualityChanged });
-      }
-      if (result.window || result.qualityChanged) {
+      if (result.window) {
         publishDebateDomDiagnostics({
-          quality: result.qualityChanged ?? controller.quality,
+          // Frame pressure is diagnostic only. The player-selected quality is
+          // the sole rendered tier.
+          quality: renderedQuality,
           frameWindow: result.window,
           foreground: foreground(),
           objectCount: options.objectCount,
@@ -124,7 +100,7 @@ export function useDebateDomPerformance(options: {
       controller.noteDiscontinuity(now);
       previousNow = now;
       publishDebateDomDiagnostics({
-        quality: controller.quality,
+        quality: renderedQuality,
         foreground: foreground(),
         objectCount: options.objectCount,
         tickCount,
@@ -137,7 +113,7 @@ export function useDebateDomPerformance(options: {
       document.removeEventListener("visibilitychange", handleVisibility);
       removePrismSceneDiagnostics(DEBATE_DOM_SCENE_ID);
     };
-  }, [ceiling, controller, options.active, options.objectCount]);
+  }, [controller, options.active, options.objectCount, renderedQuality]);
 
-  return quality;
+  return renderedQuality;
 }

@@ -15,8 +15,6 @@ import {
   DEBATE_STAGE_MODERATOR_MICRO_SCALE_MAX,
   DEBATE_STAGE_MODERATOR_MICRO_SCALE_MIN,
   DEBATE_STAGE_LIGHT_BLEND_MODES,
-  applyDebateStageDirectionPreset,
-  debateStageDirectionPresetForAlignment,
   debateStageAlignmentOffset,
   debateStageAlignmentStorageKey,
   debateStageAlignmentStyle,
@@ -58,34 +56,34 @@ function evidencePlacement(
 }
 
 describe("Debate stage alignment", () => {
-  it("applies player-facing composition presets without touching precision systems", () => {
-    const customized = normalizeDebateStageAlignment({
-      ...DEFAULT_DEBATE_STAGE_ALIGNMENT,
-      gavel: {
-        lowered: { x: 12, y: 13, rotation: 14, size: 80 },
-        raised: { x: 22, y: 23, rotation: 24, size: 90 },
-      },
-      galleryVolume: 0.55,
-      lightMaskOpacities: { dark: 70, light: 65 },
-    });
-    const close = applyDebateStageDirectionPreset(customized, "close");
+  it("exports complete normalized V14 Main defaults as source-ready TypeScript", () => {
+    const copied = formatDebateStageAlignmentClipboard(
+      DEFAULT_DEBATE_STAGE_ALIGNMENT,
+    );
 
-    assert.equal(close.wide.for.bot.x, 4);
-    assert.equal(close.wide.against.bot.x, -4);
-    assert.equal(close.moderatorMicroScales.wide, 115);
-    assert.deepEqual(close.gavel, customized.gavel);
-    assert.deepEqual(close.evidenceTable, customized.evidenceTable);
-    assert.deepEqual(close.lightMaskOpacities, customized.lightMaskOpacities);
-    assert.equal(close.galleryVolume, customized.galleryVolume);
-    assert.equal(debateStageDirectionPresetForAlignment(close), "close");
+    assert.match(
+      copied,
+      /^export const DEFAULT_DEBATE_STAGE_ALIGNMENT: DebateStageAlignmentV14 =/u,
+    );
+    assert.deepEqual(
+      JSON.parse(copied.slice(copied.indexOf("\n") + 1, -1)),
+      DEFAULT_DEBATE_STAGE_ALIGNMENT,
+    );
+  });
 
-    const grand = applyDebateStageDirectionPreset(close, "grand");
-    assert.equal(grand.moderatorMicroScales.wide, 155);
-    assert.equal(debateStageDirectionPresetForAlignment(grand), "grand");
+  it("stores every public-floor placement in the canonical Main layout", () => {
+    const moved = updateDebateStageAlignmentOffset(
+      DEFAULT_DEBATE_STAGE_ALIGNMENT,
+      debateStageAlignmentTarget("for", "bot", "wide"),
+      { x: 4, y: -1 },
+    );
 
-    const balanced = applyDebateStageDirectionPreset(grand, "balanced");
-    assert.deepEqual(balanced.wide, DEFAULT_DEBATE_STAGE_ALIGNMENT.wide);
-    assert.equal(debateStageDirectionPresetForAlignment(balanced), "balanced");
+    assert.deepEqual(moved.main.for.bot, { x: 4, y: -1 });
+    assert.deepEqual(
+      moved.evidenceTable,
+      DEFAULT_DEBATE_STAGE_ALIGNMENT.evidenceTable,
+    );
+    assert.deepEqual(moved.gavel, DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel);
   });
 
   it("keeps independent evidence geometry for every public-floor camera", () => {
@@ -100,10 +98,10 @@ describe("Debate stage alignment", () => {
     assert.equal(DEBATE_STAGE_GAVEL_POSITION_MAX, 300);
   });
 
-  it("uses the approved version-thirteen stage composition as its canonical default", () => {
+  it("uses the approved Main stage composition as its canonical default", () => {
     const expected = {
-      version: 13,
-      wide: {
+      version: 14,
+      main: {
         for: {
           bot: { x: 0.01, y: -2 },
           nameplate: { x: 3, y: -4 },
@@ -209,8 +207,8 @@ describe("Debate stage alignment", () => {
         evidenceTable: { x: -999, y: 999, size: 12 },
       }),
       {
-        version: 13,
-        wide: {
+        version: 14,
+        main: {
           for: {
             bot: { x: -12, y: 2.13 },
             nameplate: { x: 4.5, y: -4 },
@@ -341,7 +339,7 @@ describe("Debate stage alignment", () => {
     };
     assert.equal(
       debateStageAlignmentStorageKey("user-1"),
-      "prism_debate_stage_alignment_v13:user-1",
+      "prism_debate_stage_alignment_v14:user-1",
     );
     assert.deepEqual(
       readDebateStageAlignment(storage, "user-1"),
@@ -380,9 +378,9 @@ describe("Debate stage alignment", () => {
       }),
     );
     const migrated = readDebateStageAlignment(storage, "user-1");
-    assert.deepEqual(migrated.wide.moderator.bot, { x: 4, y: 3 });
-    assert.deepEqual(migrated.wide.moderator.nameplate, { x: 4, y: 3 });
-    assert.deepEqual(migrated.wide.moderator.glyph, { x: 0, y: 0 });
+    assert.deepEqual(migrated.main.moderator.bot, { x: 4, y: 3 });
+    assert.deepEqual(migrated.main.moderator.nameplate, { x: 4, y: 3 });
+    assert.deepEqual(migrated.main.moderator.glyph, { x: 0, y: 0 });
     assert.deepEqual(migrated.moderator.bot, { x: 6, y: -4 });
     assert.deepEqual(migrated.moderator.nameplate, { x: 6, y: -4 });
     assert.deepEqual(migrated.moderator.glyph, { x: 0, y: 0 });
@@ -422,8 +420,8 @@ describe("Debate stage alignment", () => {
       raised: { x: 11, y: -28, rotation: -18, size: 135 },
     });
     writeDebateStageAlignment(storage, "user-1", {
-      version: 7,
-      wide: {
+      version: 14,
+      main: {
         for: {
           bot: { x: 1, y: -2 },
           nameplate: { x: 2, y: -1 },
@@ -489,7 +487,7 @@ describe("Debate stage alignment", () => {
       migrated.galleryVolume,
       DEFAULT_DEBATE_STAGE_ALIGNMENT.galleryVolume,
     );
-    values.delete("prism_debate_stage_alignment_v13:user-1");
+    values.delete("prism_debate_stage_alignment_v14:user-1");
     values.delete("prism_debate_stage_alignment_v12:user-1");
     values.delete("prism_debate_stage_alignment_v11:user-1");
     values.delete("prism_debate_stage_alignment_v10:user-1");
@@ -550,8 +548,8 @@ describe("Debate stage alignment", () => {
 
   it("maps independent camera evidence placements into live forum CSS variables", () => {
     const alignment = normalizeDebateStageAlignment({
-      version: 7,
-      wide: {
+      version: 14,
+      main: {
         for: {
           bot: { x: 1, y: -2 },
           nameplate: { x: 2, y: -3 },
@@ -695,7 +693,7 @@ describe("Debate stage alignment", () => {
         updated,
         debateStageAlignmentTarget("moderator", "bot", "wide"),
       ),
-      DEFAULT_DEBATE_STAGE_ALIGNMENT.wide.moderator.bot,
+      DEFAULT_DEBATE_STAGE_ALIGNMENT.main.moderator.bot,
     );
     assert.deepEqual(
       debateStageAlignmentOffset(
@@ -708,8 +706,13 @@ describe("Debate stage alignment", () => {
       x: 2.5,
       y: -1,
     });
+    const copied = formatDebateStageAlignmentClipboard(updated);
+    assert.match(
+      copied,
+      /^export const DEFAULT_DEBATE_STAGE_ALIGNMENT: DebateStageAlignmentV14 =/u,
+    );
     assert.equal(
-      JSON.parse(formatDebateStageAlignmentClipboard(updated)).moderator
+      JSON.parse(copied.slice(copied.indexOf("\n") + 1, -1)).moderator
         .nameplate.x,
       2.5,
     );
@@ -762,7 +765,12 @@ describe("Debate stage alignment", () => {
       },
     );
     assert.deepEqual(
-      JSON.parse(formatDebateStageAlignmentClipboard(tuned)).lightBlendModes,
+      JSON.parse(
+        formatDebateStageAlignmentClipboard(tuned).slice(
+          formatDebateStageAlignmentClipboard(tuned).indexOf("\n") + 1,
+          -1,
+        ),
+      ).lightBlendModes,
       tuned.lightBlendModes,
     );
   });
@@ -812,7 +820,12 @@ describe("Debate stage alignment", () => {
       light: 70,
     });
     assert.deepEqual(
-      JSON.parse(formatDebateStageAlignmentClipboard(tuned)).gavel,
+      JSON.parse(
+        formatDebateStageAlignmentClipboard(tuned).slice(
+          formatDebateStageAlignmentClipboard(tuned).indexOf("\n") + 1,
+          -1,
+        ),
+      ).gavel,
       tuned.gavel,
     );
   });
@@ -959,7 +972,7 @@ describe("Debate stage alignment", () => {
       1,
     );
     assert.equal(withGallery.galleryVolume, 0.4);
-    assert.deepEqual(withGallery.wide, DEFAULT_DEBATE_STAGE_ALIGNMENT.wide);
+    assert.deepEqual(withGallery.main, DEFAULT_DEBATE_STAGE_ALIGNMENT.main);
     const values = new Map<string, string>();
     const storage = {
       getItem: (key: string) => values.get(key) ?? null,
@@ -968,7 +981,7 @@ describe("Debate stage alignment", () => {
       },
     };
     writeDebateStageAlignment(storage, "mixer-user", withGallery);
-    assert.ok(values.has("prism_debate_stage_alignment_v13:mixer-user"));
+    assert.ok(values.has("prism_debate_stage_alignment_v14:mixer-user"));
     assert.deepEqual(
       readDebateStageAlignment(storage, "mixer-user").voiceLevels,
       withGallery.voiceLevels,

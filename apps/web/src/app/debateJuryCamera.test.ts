@@ -3,17 +3,24 @@ import { describe, it } from "node:test";
 import type { DebateEventV1, DebateSessionV1 } from "@localai/shared";
 import {
   debateEventUsesJuryCamera,
+  debateJuryChamberStepActive,
+  debateJuryDeliberationStepActive,
   debateJuryEventCanPresent,
+  debateJuryEventIsPubliclyAudible,
   debateJuryPresentationKeepsForumCamera,
   debateJuryPresentationUsesChamber,
+  debateLiveCameraViewWithJuryLock,
 } from "./debateJuryCamera.ts";
 
-function session(): Pick<DebateSessionV1, "jury"> {
+function session(
+  stepKey = "closing_for",
+): Pick<DebateSessionV1, "jury" | "stepKey"> {
   return {
+    stepKey,
     jury: {
       jurors: [{ id: "juror-1" }],
     },
-  } as Pick<DebateSessionV1, "jury">;
+  } as Pick<DebateSessionV1, "jury" | "stepKey">;
 }
 
 function event(
@@ -63,9 +70,67 @@ describe("Debate Jury camera handoff", () => {
       ),
       true,
     );
+    assert.equal(
+      debateEventUsesJuryCamera(
+        event({
+          kind: "ballot",
+          speakerKind: "moderator",
+          speakerBotId: "moderator-1",
+          stepKey: "jury_moderator_ballot",
+        }),
+      ),
+      true,
+    );
   });
 
-  it("keeps inter-round Jury sidebar commentary and the moderator ballot out of the chamber", () => {
+  it("keeps jurors silent until a formal chamber beat", () => {
+    assert.equal(
+      debateJuryEventIsPubliclyAudible(
+        event({
+          kind: "jury_deliberation",
+          speakerKind: "juror",
+          speakerBotId: "juror-1",
+          stepKey: "jury_sidebar_2",
+        }),
+      ),
+      false,
+    );
+    assert.equal(
+      debateJuryEventIsPubliclyAudible(
+        event({
+          kind: "reaction",
+          speakerKind: "juror",
+          speakerBotId: "juror-1",
+          stepKey: "persona_reaction_2",
+        }),
+      ),
+      false,
+    );
+    assert.equal(
+      debateJuryEventIsPubliclyAudible(
+        event({
+          kind: "jury_deliberation",
+          speakerKind: "juror",
+          speakerBotId: "juror-1",
+          stepKey: "jury_deliberation_0",
+        }),
+      ),
+      true,
+    );
+    assert.equal(
+      debateJuryEventIsPubliclyAudible(
+        event({
+          kind: "speech",
+          speakerKind: "moderator",
+          speakerBotId: "moderator-1",
+          stepKey: "intro",
+        }),
+      ),
+      true,
+    );
+  });
+
+  it("keeps inter-round Jury sidebar commentary out of the chamber", () => {
     assert.equal(
       debateEventUsesJuryCamera(
         event({
@@ -84,17 +149,6 @@ describe("Debate Jury camera handoff", () => {
           speakerKind: "juror",
           speakerBotId: "juror-1",
           stepKey: "jury_sidebar_2",
-        }),
-      ),
-      false,
-    );
-    assert.equal(
-      debateEventUsesJuryCamera(
-        event({
-          kind: "ballot",
-          speakerKind: "moderator",
-          speakerBotId: "moderator-1",
-          stepKey: "jury_moderator_ballot",
         }),
       ),
       false,
@@ -134,6 +188,70 @@ describe("Debate Jury camera handoff", () => {
     );
   });
 
+  it("stays in the chamber while the next juror warms up during deliberation", () => {
+    const deliberation = event({
+      kind: "jury_deliberation",
+      speakerKind: "juror",
+      speakerBotId: "juror-1",
+      stepKey: "jury_deliberation_0",
+    });
+    assert.equal(
+      debateJuryPresentationKeepsForumCamera(session("jury_deliberation_1"), {
+        presenting: true,
+        event: deliberation,
+        preparingSpeakerBotId: "juror-2",
+      }),
+      false,
+    );
+    assert.equal(
+      debateJuryPresentationKeepsForumCamera(session("jury_deliberation_1"), {
+        presenting: true,
+        event: null,
+        preparingSpeakerBotId: "juror-2",
+      }),
+      false,
+    );
+  });
+
+  it("locks the live camera to Jury over Forum coverage, mute glances, and pause-Wide", () => {
+    assert.equal(
+      debateLiveCameraViewWithJuryLock({
+        juryCameraActive: true,
+        forumView: "wide",
+      }),
+      "jury",
+    );
+    assert.equal(
+      debateLiveCameraViewWithJuryLock({
+        juryCameraActive: true,
+        forumView: "left",
+      }),
+      "jury",
+    );
+    assert.equal(
+      debateLiveCameraViewWithJuryLock({
+        juryCameraActive: false,
+        forumView: "moderator",
+      }),
+      "moderator",
+    );
+    assert.equal(
+      debateJuryDeliberationStepActive(session("jury_deliberation_2")),
+      true,
+    );
+    assert.equal(debateJuryDeliberationStepActive(session("jury_final_0")), false);
+    assert.equal(debateJuryChamberStepActive(session("jury_initial_0")), true);
+    assert.equal(debateJuryChamberStepActive(session("jury_final_1")), true);
+    assert.equal(
+      debateJuryChamberStepActive(session("jury_moderator_ballot")),
+      true,
+    );
+    assert.equal(
+      debateJuryChamberStepActive(session("jury_aftermath_for")),
+      false,
+    );
+  });
+
   it("keeps ordinary ballots on the Forum and leaves an idle Jury step alone", () => {
     assert.equal(
       debateJuryPresentationKeepsForumCamera(session(), {
@@ -149,16 +267,52 @@ describe("Debate Jury camera handoff", () => {
       true,
     );
     assert.equal(
-      debateJuryPresentationKeepsForumCamera(session(), {
+      debateJuryPresentationKeepsForumCamera(session("jury_deliberation_0"), {
         presenting: false,
         event: event(),
+        preparingSpeakerBotId: null,
+      }),
+      true,
+    );
+    assert.equal(
+      debateJuryPresentationKeepsForumCamera(session("jury_deliberation_0"), {
+        presenting: false,
+        event: null,
         preparingSpeakerBotId: null,
       }),
       false,
     );
   });
 
-  it("cuts back to the Moderator camera for the fifth and final ballot", () => {
+  it("keeps the Forum for a Moderator re-intro even from a Jury bookmark", () => {
+    const deliberation = event({
+      kind: "jury_deliberation",
+      speakerKind: "juror",
+      speakerBotId: "juror-1",
+      stepKey: "jury_deliberation_0",
+    });
+    assert.equal(
+      debateJuryPresentationKeepsForumCamera(session("jury_deliberation_0"), {
+        presenting: false,
+        event: null,
+        preparingSpeakerBotId: "moderator-1",
+        resumeCeremonyActive: true,
+        bookmarkEvent: deliberation,
+      }),
+      true,
+    );
+    assert.equal(
+      debateJuryPresentationKeepsForumCamera(session("jury_deliberation_0"), {
+        presenting: false,
+        event: null,
+        preparingSpeakerBotId: null,
+        bookmarkEvent: event(),
+      }),
+      true,
+    );
+  });
+
+  it("keeps the Moderator's last ballot inside the Jury chamber", () => {
     const moderatorBallot = event({
       kind: "ballot",
       speakerKind: "moderator",
@@ -166,18 +320,29 @@ describe("Debate Jury camera handoff", () => {
       stepKey: "jury_moderator_ballot",
     });
     assert.equal(
-      debateJuryPresentationKeepsForumCamera(session(), {
+      debateJuryPresentationKeepsForumCamera(session("jury_moderator_ballot"), {
+        presenting: true,
+        event: moderatorBallot,
+        preparingSpeakerBotId: null,
+      }),
+      false,
+    );
+    assert.equal(
+      debateJuryPresentationUsesChamber(session("jury_moderator_ballot"), {
         presenting: true,
         event: moderatorBallot,
         preparingSpeakerBotId: null,
       }),
       true,
     );
+  });
+
+  it("stays in the chamber while the next juror prepares a final ballot", () => {
     assert.equal(
-      debateJuryPresentationUsesChamber(session(), {
+      debateJuryPresentationKeepsForumCamera(session("jury_final_1"), {
         presenting: true,
-        event: moderatorBallot,
-        preparingSpeakerBotId: null,
+        event: null,
+        preparingSpeakerBotId: "juror-2",
       }),
       false,
     );

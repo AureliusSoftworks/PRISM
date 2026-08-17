@@ -49,6 +49,19 @@ export function debateJuryCommentEvents(
     .sort((left, right) => left.sequence - right.sequence);
 }
 
+/** Comments the player has already reached — never spoil a Spectator bake. */
+export function debateHeardJuryCommentEvents(
+  session: DebateJuryRecordSession,
+  heardThroughSequence: number | null,
+  options?: { revealAll?: boolean },
+): DebateEventV1[] {
+  if (options?.revealAll) return debateJuryCommentEvents(session);
+  if (heardThroughSequence == null) return [];
+  return debateJuryCommentEvents(session).filter(
+    (event) => event.sequence <= heardThroughSequence,
+  );
+}
+
 export function debateLatestPendingJuryComment(
   session: DebateJuryRecordSession,
   playedEventIds: ReadonlySet<string>,

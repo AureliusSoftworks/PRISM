@@ -67,12 +67,15 @@ test("Retina-wide materials avoid live backdrop sampling and permanent camera pr
 test("audience detail keeps avatars while removing hidden material passes and idle filters", () => {
   assert.match(
     pageSource,
-    /"full" \| "reduced" \| "audience" \| "debate"/u,
+    /"full" \| "compact" \| "reduced" \| "audience" \| "debate"/u,
   );
   assert.match(pageSource, /staticAudiencePortrait[\s\S]*"audience"/u);
   assert.match(pageSource, /data-debate-optimized-avatar="true"/u);
   assert.match(pageSource, /detailLevel=\{avatarDetailsDetailLevel\}/u);
-  assert.match(pageSource, /staticRaster=\{detailLevel === "audience"\}/u);
+  assert.match(
+    pageSource,
+    /staticRaster=\{renderDetailLevel === "audience"\}/u,
+  );
   assert.match(
     avatarDetailsSource,
     /data-avatar-details-rendering="static-raster"/u,
@@ -168,11 +171,11 @@ test("talking gallery seats animate compact mouths without waking the full portr
   );
   assert.match(
     pageSource,
-    /miniAvatarBinaryMouthShape\(\{[\s\S]{0,220}talking:\s*galleryTalking/u,
+    /avatarState\.foleyMouthShape \?\?[\s\S]{0,120}galleryTalking \? "speech-closed" : "closed"/u,
   );
   assert.match(
     pageSource,
-    /mouthCharacter:\s*faceStyle\.mouthCharacter,[\s\S]{0,180}customSpeechEnabled:[\s\S]{0,180}faceStyle\.mouthSpeechPoses !== null/u,
+    /const galleryMouthShape = authoredMiniPortrait[\s\S]{0,400}avatarState\.foleyMouthShape/u,
   );
   assert.match(pageSource, /motionMode="mini-led"/u);
   assert.doesNotMatch(pageSource, /galleryTalking && faceStyle\.mouthAnimation === "none"/u);
@@ -187,49 +190,49 @@ test("talking gallery seats animate compact mouths without waking the full portr
   );
 });
 
-test("the Moderator uses the authored micro form unless its camera is active", () => {
+test("the Moderator uses the authored mini form in wide, left, and right cameras", () => {
   assert.match(
     debateSource,
-    /props\.renderBotAvatar\(bot, \{[\s\S]{0,260}highDefinition:[\s\S]{0,120}stageAlignmentPreviewCamera ===[\s\S]{0,180}compact:[\s\S]{0,120}stageAlignmentPreviewCamera !==/u,
+    /debateAvatarPresentation\(\{[\s\S]{0,120}consumer: "forum"[\s\S]{0,120}cameraView: stageAlignmentPreviewCamera/u,
   );
   assert.match(
     pageSource,
-    /const moderatorMiniPortrait =[\s\S]{0,100}avatarState\.role === "moderator"[\s\S]{0,80}!avatarState\.highDefinition[\s\S]{0,80}avatarState\.compact/u,
+    /const moderatorMiniPortrait =[\s\S]{0,140}avatarState\.consumer === "forum"[\s\S]{0,100}avatarState\.role === "moderator"[\s\S]{0,100}avatarState\.presentation === "mini"/u,
   );
   assert.match(
     pageSource,
-    /if \(moderatorMiniPortrait\)[\s\S]{0,1000}<BotAvatarMicroRenderer/u,
+    /className=\{[\s\S]{0,120}moderatorMiniPortrait[\s\S]{0,120}\? styles\.debateModeratorMiniAvatar/u,
   );
   assert.match(
     pageCss,
-    /:global\(\[data-debate-stage-compact="true"\]\)[\s\S]{0,100}> \.debateModeratorMicroAvatar[\s\S]{0,180}width:\s*36px[\s\S]{0,80}height:\s*36px/u,
+    /\.debateModeratorMiniAvatar\[data-size="room"\][\s\S]{0,120}width:\s*100%[\s\S]{0,80}height:\s*100%/u,
   );
   assert.doesNotMatch(pageSource, /stageAlignmentPreview/u);
 });
 
-test("Debate actors and Jury use HD avatars while the Moderator follows its camera", () => {
+test("Debate actors stay full while distant Moderator and Jury use explicit mini consumers", () => {
   assert.match(
     debateSource,
-    /role !== "moderator" \|\|\s*cameraView === "moderator"/u,
-    "both advocates stay HD while the live Moderator is promoted only in its own shot",
+    /consumer: "forum"[\s\S]{0,120}role,[\s\S]{0,120}cameraView/u,
+    "the live forum resolves presentation from its actual camera view",
   );
   assert.match(
     debateSource,
-    /role !== "moderator" \|\|\s*stageAlignmentPreviewCamera ===\s*"moderator"/u,
+    /consumer: "forum"[\s\S]{0,140}cameraView: stageAlignmentPreviewCamera/u,
     "Stage Placement should preview the same camera-owned quality boundary",
   );
   assert.match(
     debateSource,
-    /renderBotAvatar\(appearanceBot, \{[\s\S]{0,520}lookAtRole: null,[\s\S]{0,80}highDefinition: true,[\s\S]{0,80}compact: true/u,
-    "every Jury seat uses the full avatar material stack",
+    /consumer: "jury"[\s\S]{0,180}debateAvatarPresentation\(\{[\s\S]{0,100}consumer: "jury"/u,
+    "Jury seats use their explicit compact consumer policy",
   );
   assert.match(
     pageSource,
-    /const debateAvatarDetailLevel = staticAudiencePortrait[\s\S]{0,120}avatarState\.highDefinition[\s\S]{0,80}\? "full"[\s\S]{0,40}: "debate"/u,
+    /const debateAvatarDetailLevel = staticAudiencePortrait[\s\S]{0,100}\? "audience"[\s\S]{0,40}: "full"/u,
   );
   assert.match(pageSource, /detailLevel=\{debateAvatarDetailLevel\}/u);
   assert.match(
     pageSource,
-    /data-debate-avatar-quality=\{[\s\S]{0,100}"hd"[\s\S]{0,40}"optimized"/u,
+    /data-debate-avatar-quality=\{[\s\S]{0,100}"hd"[\s\S]{0,40}"mini"/u,
   );
 });

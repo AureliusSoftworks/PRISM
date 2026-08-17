@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { DebateSessionV1 } from "@localai/shared";
 import {
+  debateArchiveOpenCanRebaseMutation,
+  debateArchiveOpenShouldAdoptRefreshed,
   debateCanRetryStaleAutomaticAdvance,
   debateRequestIsRevisionConflict,
 } from "./debateRevisionRecovery.ts";
@@ -91,6 +93,84 @@ describe("Debate revision recovery", () => {
 
     assert.equal(
       debateCanRetryStaleAutomaticAdvance(previous, refreshed),
+      false,
+    );
+  });
+
+  it("rebases only an Archive spectator-bake reopen that remains in recess", () => {
+    const pausedSpectator = session(62, {
+      status: "paused",
+      playerRole: "spectator",
+      liveBake: { status: "baking" },
+    } as Partial<DebateSessionV1>);
+    const bakeAdvanced = session(63, {
+      status: "paused",
+      playerRole: "spectator",
+      liveBake: { status: "baking" },
+    } as Partial<DebateSessionV1>);
+
+    assert.equal(
+      debateArchiveOpenCanRebaseMutation(
+        pausedSpectator,
+        bakeAdvanced,
+        "resume-spectator-bake",
+      ),
+      true,
+    );
+    assert.equal(
+      debateArchiveOpenCanRebaseMutation(
+        pausedSpectator,
+        session(63, {
+          status: "live",
+          playerRole: "spectator",
+          liveBake: { status: "baking" },
+        } as Partial<DebateSessionV1>),
+        "resume-spectator-bake",
+      ),
+      false,
+    );
+  });
+
+  it("rebases a spectator ready-hold when bake or exhibit prep moved the revision", () => {
+    const previous = session(4, {
+      status: "live",
+      playerRole: "spectator",
+      liveBake: { status: "baking" },
+    } as Partial<DebateSessionV1>);
+    const bakeAdvanced = session(5, {
+      status: "live",
+      playerRole: "spectator",
+      liveBake: { status: "baking" },
+    } as Partial<DebateSessionV1>);
+    const alreadyHeld = session(5, {
+      status: "paused",
+      playerRole: "spectator",
+      pausedPresentationEventId: null,
+      liveBake: { status: "baking" },
+    } as Partial<DebateSessionV1>);
+
+    assert.equal(
+      debateArchiveOpenCanRebaseMutation(
+        previous,
+        bakeAdvanced,
+        "spectator-ready-hold",
+      ),
+      true,
+    );
+    assert.equal(
+      debateArchiveOpenCanRebaseMutation(
+        previous,
+        alreadyHeld,
+        "spectator-ready-hold",
+      ),
+      true,
+    );
+    assert.equal(
+      debateArchiveOpenShouldAdoptRefreshed(alreadyHeld, "spectator-ready-hold"),
+      true,
+    );
+    assert.equal(
+      debateArchiveOpenShouldAdoptRefreshed(bakeAdvanced, "spectator-ready-hold"),
       false,
     );
   });

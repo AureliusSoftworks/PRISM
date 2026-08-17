@@ -4,6 +4,7 @@ import type { DebateEventV1, DebateSessionV1 } from "@localai/shared";
 import {
   debateArchivedJuryRecordIsCopyable,
   debateEventIsJuryComment,
+  debateHeardJuryCommentEvents,
   debateJuryCommentEvents,
   debateLatestPendingJuryComment,
   formatDebateJuryRecord,
@@ -129,6 +130,25 @@ describe("Debate Jury record", () => {
     assert.equal(debateEventIsJuryComment(publicSpeech), false);
     assert.deepEqual(
       debateJuryCommentEvents(session()).map((event) => event.id),
+      ["jury-thought-1", "jury-formal-1"],
+    );
+  });
+
+  it("only lists Jury comments the player has already heard", () => {
+    const current = session();
+    assert.deepEqual(debateHeardJuryCommentEvents(current, null), []);
+    assert.deepEqual(
+      debateHeardJuryCommentEvents(current, 3).map((event) => event.id),
+      ["jury-thought-1"],
+    );
+    assert.deepEqual(
+      debateHeardJuryCommentEvents(current, 7).map((event) => event.id),
+      ["jury-thought-1", "jury-formal-1"],
+    );
+    assert.deepEqual(
+      debateHeardJuryCommentEvents(current, null, { revealAll: true }).map(
+        (event) => event.id,
+      ),
       ["jury-thought-1", "jury-formal-1"],
     );
   });

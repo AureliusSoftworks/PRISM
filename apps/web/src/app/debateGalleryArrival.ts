@@ -15,6 +15,9 @@ export const DEBATE_GALLERY_ARRIVAL_HURRY_INTERVAL_MS = 900;
 /** Quiet beat after the last seat lands before Gallery ready. */
 export const DEBATE_GALLERY_ARRIVAL_SETTLE_MS = 520;
 
+/** Participant / title-card load fade when seats did not walk in first. */
+export const DEBATE_GALLERY_OPENING_MURMUR_FADE_MS = 3_800;
+
 export type DebateGalleryArrivalSeat = {
   index: number;
   walkXPercent: number;
@@ -126,21 +129,65 @@ export function debateGallerySeatHasArrived(args: {
   return orderIndex < args.revealedCount;
 }
 
+function clampUnit(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(1, Math.max(0, value));
+}
+
 /**
- * Murmur bed gain while the gallery fills — 0% empty, 100% when every NPC
- * seat has walked in. Player seat does not advance the ramp.
- *
- * Ease-out (sqrt) so early arrivals are clearly audible instead of staying
- * near-silent for half the house, while the last seats still top out at full.
+ * Continuous 0–1 house fill while seats walk in. Uses the same linger / hurry
+ * clocks as the visible reveal, but keeps the fractional progress between
+ * seats so the murmur can glide instead of jumping.
+ */
+export function debateGalleryArrivalFillRatio(args: {
+  nonPlayerCount: number;
+  progressRatio: number | null;
+  bakeUnlocked: boolean;
+  elapsedMs: number;
+  unlockElapsedMs: number;
+}): number {
+  const n = Math.max(0, Math.floor(args.nonPlayerCount));
+  if (n <= 0) return args.bakeUnlocked ? 1 : 0;
+
+  const progress = clampUnit(args.progressRatio ?? 0);
+  const progressFill = progress * n;
+  const lingerFill =
+    Math.max(0, args.elapsedMs) / DEBATE_GALLERY_ARRIVAL_LINGER_INTERVAL_MS;
+  const soft = Math.max(progressFill, lingerFill);
+
+  if (!args.bakeUnlocked) {
+    return Math.min((n - 1) / n, soft / n);
+  }
+
+  const baseline = Math.min(n, soft);
+  const hurry =
+    Math.max(0, args.unlockElapsedMs) / DEBATE_GALLERY_ARRIVAL_HURRY_INTERVAL_MS;
+  return Math.min(1, (baseline + hurry) / n);
+}
+
+/**
+ * Ease-in murmur so an empty house stays nearly silent and the room gathers
+ * as people take their seats. Player seat does not advance the ramp.
  */
 export function debateGalleryArrivalMurmurGain(args: {
   revealedCount: number;
   nonPlayerCount: number;
+  fillRatio?: number;
 }): number {
   const nonPlayer = Math.max(0, Math.floor(args.nonPlayerCount));
   if (nonPlayer <= 0) return 1;
-  const revealed = Math.max(0, Math.floor(args.revealedCount));
-  if (revealed <= 0) return 0;
-  const linear = Math.min(1, revealed / nonPlayer);
-  return Math.sqrt(linear);
+  const linear =
+    args.fillRatio == null
+      ? Math.min(
+          1,
+          Math.max(0, Math.floor(args.revealedCount)) / nonPlayer,
+        )
+      : clampUnit(args.fillRatio);
+  return linear * linear;
+}
+
+/** Ease-in fade when the chamber loads without a seat walk-in. */
+export function debateGalleryOpeningMurmurGain(elapsedMs: number): number {
+  const linear = clampUnit(elapsedMs / DEBATE_GALLERY_OPENING_MURMUR_FADE_MS);
+  return linear * linear;
 }

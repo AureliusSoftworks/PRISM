@@ -343,12 +343,14 @@ describe("Debate experience", () => {
     assert.match(source, /debateGalleryArrivalRevealOrder/u);
     assert.match(source, /data-debate-arrival-mask/u);
     assert.match(source, /data-hold-scope=/u);
-    assert.match(source, /holdScope="full"/u);
+    assert.match(source, /holdScope="stage"/u);
     assert.match(source, /holdBackAction=/u);
     assert.match(source, /Leave Debate/u);
     assert.match(source, /DEBATE_OPENING_GAVEL_SETTLE_MS/u);
     assert.match(source, /debateOpeningGalleryHushed/u);
     assert.match(source, /debateGalleryArrivalMurmurGain/u);
+    assert.match(source, /debateGalleryArrivalFillRatio/u);
+    assert.match(source, /debateGalleryOpeningMurmurGain/u);
     assert.match(source, /prestart-murmur/u);
     assert.match(source, /opening-hush/u);
     assert.match(source, /DEBATE_AUDIENCE_PRESTART_MURMUR_MIX/u);
@@ -360,7 +362,7 @@ describe("Debate experience", () => {
     assert.match(css, /\.participantSlowTimeWash/u);
     assert.match(
       source,
-      /galleryMixBranch === "prestart-murmur" && galleryArriving/u,
+      /galleryMixBranch === "prestart-murmur" && galleryArriving[\s\S]{0,40}\? 280/u,
     );
     assert.match(source, /judgeGavelSmashRef\.current\?\.\("order"\)/u);
     assert.doesNotMatch(source, /setDebateOpeningFade\(true\)/u);
@@ -458,6 +460,51 @@ describe("Debate experience", () => {
     assert.match(source, /PrismRefractTarget target=\{synthesisMagic\}/u);
     assert.match(source, /data-tutorial-target="debate-synthesize"/u);
     assert.match(source, /Build the debate/u);
+  });
+
+  it("makes Shape the Debate rail links real Refract targets without changing ordinary clicks", () => {
+    assert.match(source, /id: DEBATE_STUDIO_NAV_MOTION_REFRACT_ID/u);
+    assert.match(source, /id: DEBATE_STUDIO_NAV_CAST_REFRACT_ID/u);
+    assert.match(source, /id: DEBATE_STUDIO_NAV_EVIDENCE_REFRACT_ID/u);
+    assert.match(source, /id: DEBATE_STUDIO_NAV_ARCHIVE_REFRACT_ID/u);
+    assert.match(source, /id: DEBATE_STUDIO_NAV_STAGE_LAYOUT_REFRACT_ID/u);
+    assert.match(
+      source,
+      /PrismRefractTarget target=\{panel\.magic\}[\s\S]*onClick=\{\(\) => setStudioPanel\(panel\.id\)\}/u,
+    );
+    assert.match(
+      source,
+      /run: \(direction\) => void refractMotionSection\(direction\)/u,
+    );
+    assert.match(source, /await synthesize\(direction, seed\)/u);
+    assert.match(source, /debateStudioNavMotionSeed/u);
+    assert.match(source, /run: \(\) => refractCastSection\(\)/u);
+    assert.match(source, /if \(!randomizeCast\(\)\)/u);
+    assert.match(
+      source,
+      /run: \(direction\) => void refractEvidenceSection\(direction\)/u,
+    );
+    assert.match(source, /"debate\.setup\.exhibitPair"/u);
+    assert.match(source, /debateEvidenceExhibitsFromObjectDrafts/u);
+    assert.match(source, /setEvidenceDecisionMade\(true\)/u);
+    assert.match(source, /run: \(\) => refractArchiveSection\(\)/u);
+    assert.match(source, /nextDebateArchiveHighlightId/u);
+    assert.match(source, /debateStudioNavArchiveNotice/u);
+    assert.match(source, /run: \(\) => refreshStageLayoutFromPrism\(\)/u);
+    assert.match(
+      source,
+      /The saved Main arrangement is unchanged/u,
+    );
+    assert.match(source, /tutorial: "debate-motion"/u);
+    assert.match(source, /data-tutorial-target="debate-archive"/u);
+    assert.match(
+      source,
+      /PrismRefractTarget target=\{archiveRailMagic\}[\s\S]*onClick=\{\(\) => setStudioPanel\("archive"\)\}/u,
+    );
+    assert.match(
+      source,
+      /PrismRefractTarget target=\{stageLayoutRailMagic\}[\s\S]*onClick=\{openStageAlignment\}/u,
+    );
   });
 
   it("grounds table-placed evidence with contact and cast shadows", () => {
@@ -583,7 +630,7 @@ describe("Debate experience", () => {
     assert.match(css, /\.territoryRandomizeButton\s*\{/u);
   });
 
-  it("wires Territory to Command Center prompts and wildcard decks", () => {
+  it("keeps Territory as ordinary text without shortcut language", () => {
     assert.match(source, /renderPickAwareComposer\?/u);
     assert.match(source, /expandComposerDraft\?/u);
     assert.match(
@@ -593,7 +640,7 @@ describe("Debate experience", () => {
     assert.doesNotMatch(source, /resolvePicksToPlainText/u);
     assert.match(
       source,
-      /const resolvedTopic = \(await expandDebateSeedDraft\(topic\)\)\.trim\(\)/u,
+      /const resolvedTopic = \(\s*await expandDebateSeedDraft\(topicOverride \?\? topic\)\s*\)\.trim\(\)/u,
     );
     assert.match(
       source,
@@ -790,7 +837,7 @@ describe("Debate experience", () => {
     assert.match(source, /liveBakeMayStartWatch/u);
     assert.match(source, /runSpectatorProgressiveBake/u);
     assert.match(source, /\/bake\/cancel/u);
-    assert.match(source, /Still preparing the next beat/u);
+    assert.doesNotMatch(source, /Still preparing the next beat/u);
     assert.match(source, /LIVE_BAKE_POLL_INTERVAL_MS/u);
     assert.match(
       source,
@@ -955,6 +1002,11 @@ describe("Debate experience", () => {
       startSource,
       /const bakePromise = runSpectatorProgressiveBake\(result\.session\.id\)/u,
     );
+    assert.match(
+      startSource,
+      /rebaseArchiveOpenMutation\([\s\S]{0,80}"spectator-ready-hold"/u,
+    );
+    assert.match(startSource, /startCreateIdempotencyKeyRef\.current/u);
   });
 
   it("opens from archive after a minimum runway, while background work keeps running", () => {
@@ -1364,11 +1416,16 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /const talking =[\s\S]{0,260}overlapSpeakingBotIds\.has\(bot\.id\)[\s\S]{0,220}speakerHandoff === null[\s\S]{0,180}activeSpeechTiming !== null/u,
+      /const talking =[\s\S]{0,260}overlapSpeakingBotIds\.has\(bot\.id\)[\s\S]{0,220}speakerHandoff === null[\s\S]{0,280}activeSpeechTiming !== null &&\s*!speechMouthResting/u,
     );
     assert.match(
       source,
-      /const talking =\s*silentDeliberationPreparing \|\|[\s\S]{0,180}speechTiming !== null/u,
+      /const talking =\s*presenting &&[\s\S]{0,180}speechTiming !== null &&\s*!speechMouthResting/u,
+    );
+    assert.match(source, /DEBATE_MOUTH_PAUSE_CLOSE_MS/u);
+    assert.match(
+      source,
+      /noteDebateSpeechVoiceProgress[\s\S]{0,700}DEBATE_MOUTH_PAUSE_CLOSE_MS/u,
     );
     assert.match(
       source,
@@ -1509,14 +1566,14 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /className=\{styles\.studioUtilityButton\}[\s\S]*?data-tutorial-target="debate-stage-direction"[\s\S]*?setStageDirectionOpen\(true\)/u,
+      /className=\{styles\.studioUtilityButton\}[\s\S]*?data-tutorial-target="debate-stage-layout"[\s\S]*?onClick=\{openStageAlignment\}/u,
     );
     assert.match(source, /\{renderStageAlignmentModal\(activeSession\)\}/u);
     assert.match(
       source,
       /data-alignment-source=\{session \? "session" : "dashboard"\}/u,
     );
-    assert.match(source, /Precision camera, prop, light, and audio calibration/u);
+    assert.match(source, /Place every Forum element directly/u);
     assert.match(
       source,
       /const randomized = debateAlignmentPreviewCast\(\s*stageAlignmentCastCandidates\.map/u,
@@ -1555,18 +1612,13 @@ describe("Debate experience", () => {
     assert.doesNotMatch(source, /\/jury\/skip-deliberation/u);
     assert.doesNotMatch(source, /debateAwaitsJuryDeliberationChoice/u);
     assert.match(source, /silentDeliberationPreparing/u);
-    assert.match(source, /juryDeliberationBubble/u);
-    assert.match(source, /debateJuryDeliberationMouthShape\(/u);
-    assert.match(source, /juryDeliberationMouthTickMs/u);
+    assert.doesNotMatch(source, /debateJuryDeliberationMouthShape\(/u);
+    assert.doesNotMatch(source, /juryDeliberationMouthTickMs/u);
     assert.match(
       source,
-      /!silentDeliberationPreparing &&\s*talking &&\s*activeEvent/u,
+      /const talking =\s*presenting &&[\s\S]{0,220}speechTiming !== null &&\s*!speechMouthResting/u,
     );
-    assert.match(
-      source,
-      /thinking:\s*!silentDeliberationPreparing &&\s*thinkingBotId === juror\.id/u,
-    );
-    assert.match(source, />\s*\.\.\.\s*</u);
+    assert.match(source, /The next juror will be heard in this chamber/u);
     assert.match(source, /debateJuryBallotVoiceCacheKey/u);
     assert.match(source, /jury\.preparedFinalBallots\.map/u);
     assert.match(source, /await onPrepareUtterance\(utterance\)/u);
@@ -1624,8 +1676,10 @@ describe("Debate experience", () => {
     for (const target of [
       "debate-new",
       "debate-presets",
+      "debate-motion",
       "debate-synthesize",
       "debate-cast",
+      "debate-archive",
       "debate-jury",
       "debate-jury-roster",
       "debate-jury-chamber",
@@ -2546,22 +2600,22 @@ describe("Debate experience", () => {
       /needsSpectatorBakeResume && session\.status === "paused"/u,
     );
     assert.match(source, /nextMutationKey\("exit-recess"\)/u);
+    assert.match(
+      source,
+      /recessRequest[\s\S]{0,120}\.catch\([\s\S]{0,280}already finished/u,
+    );
     assert.match(source, /exitRecovery: true/u);
     assert.match(source, /presentationEventId:\s*replayEventId/u);
     assert.match(source, /pausedPresentationEventId/u);
-    assert.match(source, /debateSessionAwaitsPresentationSeal/u);
     assert.match(source, /debateSpectatorAwaitingFirstWatch/u);
-    assert.match(source, /\/seal-presentation/u);
-    assert.match(source, /nextMutationKey\("seal-presentation"\)/u);
-    assert.match(source, /spectatorWatchPresentationCompleteRef/u);
     assert.match(
       source,
-      /!spectatorWatchPresentationCompleteRef\.current/u,
+      /settleDebatePresentationCallback\(onUtterance\?\.\(/u,
     );
-    assert.match(
-      source,
-      /lastPresentableId !== null &&\s*fresh\.some\(\(event\) => event\.id === lastPresentableId\)/u,
-    );
+    assert.match(source, /lastProgressAtMs: \(\) => lastVoiceProgressAtMs/u);
+    assert.match(source, /let lastVoiceProgressAtMs = 0/u);
+    assert.match(source, /DEBATE_PRESENTATION_FIRST_VOICE_STALL_MS/u);
+    assert.doesNotMatch(source, /\/seal-presentation/u);
     assert.match(source, /nextMutationKey\("spectator-ready-hold"\)/u);
     assert.match(source, /startSpectatorWatch\s*\?\s*"spectator-start"/u);
     assert.match(
@@ -2627,6 +2681,10 @@ describe("Debate experience", () => {
     assert.match(
       source,
       /pauseInFlightRef\.current \|\|\s*pauseOnCooldown/u,
+    );
+    assert.match(
+      source,
+      /data-action="pause"[\s\S]{0,280}disabled=\{\s*pauseInFlightRef\.current/u,
     );
     assert.doesNotMatch(source, /pauseOnGavelCooldown/u);
     assert.doesNotMatch(source, /\?\s*"Skip deliberation"\s*:\s*"End debate"/u);
@@ -2732,6 +2790,29 @@ describe("Debate experience", () => {
     assert.match(
       source,
       /audienceRoomToneReturnTimerRef[\s\S]{0,200}setAudiencePressureReset\(/u,
+    );
+  });
+
+  it("holds the floor while Pause is saving a recess", () => {
+    assert.match(
+      source,
+      /busy \|\|\s*presenting \|\|\s*pauseInFlightRef\.current \|\|\s*debateFloorMutationInFlightRef\.current/u,
+    );
+    assert.match(
+      source,
+      /if \(pauseInFlightRef\.current\) \{[\s\S]{0,280}return;[\s\S]{0,80}if \(mountedRef\.current\) setBusy\(false\)/u,
+    );
+    assert.match(
+      source,
+      /if \(!pauseInFlightRef\.current\) \{[\s\S]{0,80}debateFloorMutationInFlightRef\.current = false;[\s\S]{0,80}setBusy\(false\)/u,
+    );
+    assert.match(
+      source,
+      /pauseInFlightRef\.current \|\|[\s\S]{0,40}debateFloorMutationInFlightRef\.current[\s\S]{0,80}void advance\(false\)/u,
+    );
+    assert.match(
+      source,
+      /!pauseInFlightRef\.current &&[\s\S]{0,40}!debateFloorMutationInFlightRef\.current &&[\s\S]{0,40}!presentationSuspended/u,
     );
   });
 
@@ -2875,7 +2956,10 @@ describe("Debate experience", () => {
     assert.match(source, /data-conversation-facing=\{conversationFacing\}/u);
     assert.match(source, /className=\{styles\.debateAudienceChatterChip\}/u);
     assert.match(source, /role:\s*"audience"/u);
-    assert.match(source, /compact:\s*true/u);
+    assert.match(
+      source,
+      /consumer:\s*"gallery"[\s\S]{0,100}presentation:\s*debateAvatarPresentation\(\{[\s\S]{0,100}consumer:\s*"gallery"/u,
+    );
     assert.match(source, /foleyMouthShape/u);
     assert.doesNotMatch(
       source,
@@ -2958,7 +3042,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       page,
-      /const staticAudiencePortrait = avatarState\.role === "audience"/u,
+      /const staticAudiencePortrait =\s*avatarState\.presentation === "mini"/u,
     );
     assert.match(page, /blinkEnabled=\{false\}/u);
     assert.match(page, /runtimeEffectsEnabled=\{!staticAudiencePortrait\}/u);
@@ -2969,12 +3053,12 @@ describe("Debate experience", () => {
     );
     assert.match(
       page,
-      /const galleryAvatarDetails =[\s\S]{0,180}const galleryHasAvatarArt = avatarDetailsHasVisuals\(\s*galleryAvatarDetails,?\s*\);[\s\S]{0,1400}<AvatarDetailsMask[\s\S]{0,260}detailLevel="audience"[\s\S]{0,260}staticRaster[\s\S]{0,140}coreColor="ink"/u,
+      /const galleryAvatarDetails =[\s\S]{0,260}const galleryHasAvatarArt = avatarDetailsHasVisuals\(\s*galleryAvatarDetails,?\s*\);[\s\S]{0,1800}<AvatarDetailsMask[\s\S]{0,320}detailLevel="audience"[\s\S]{0,520}staticRaster[\s\S]{0,180}coreColor="ink"/u,
     );
     assert.match(page, /avatarDetailsColor=\{debateAvatarDetailsColor\}/u);
     assert.match(
       page,
-      /staticRaster=\{detailLevel === "audience"\}[\s\S]{0,100}coreColor=\{avatarDetailsCoreColor\}/u,
+      /staticRaster=\{renderDetailLevel === "audience"\}[\s\S]{0,100}coreColor=\{avatarDetailsCoreColor\}/u,
     );
     assert.match(
       source,
@@ -3018,11 +3102,11 @@ describe("Debate experience", () => {
     assert.match(source, /session\.jury\.jurors\.map/u);
     assert.match(
       source,
-      /renderJuryChamber\(session, activeEvent, juryThinkingBotId\)/u,
+      /renderJuryChamber\([\s\S]{0,180}session,[\s\S]{0,80}activeEvent,[\s\S]{0,80}juryThinkingBotId,[\s\S]{0,80}activeMuteReactionBeat/u,
     );
     assert.match(
       source,
-      /src=\{`\/coffee-table\/table_\$\{props\.theme\}\.png`\}/u,
+      /src=\{`\/debate\/overview-table-\$\{props\.theme\}\.png`\}/u,
     );
     assert.match(source, /className=\{styles\.juryChamberBots\}/u);
     assert.match(source, /className=\{styles\.juryTableRaster\}/u);
@@ -3064,7 +3148,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /const cameraView = galleryArriving\s*\?\s*"wide"/u,
+      /const forumCameraView = galleryArriving\s*\?\s*"wide"/u,
     );
     const juryCameraStart = source.indexOf("function debateJuryCameraIsActive");
     const juryCameraEnd = source.indexOf(
@@ -3075,16 +3159,7 @@ describe("Debate experience", () => {
     assert.doesNotMatch(juryCameraSource, /playerRole/u);
     assert.match(
       source,
-      /function debateJuryAutoChamberActive[\s\S]{0,220}jury_deliberation_/u,
-    );
-    const juryAutoChamberStart = source.indexOf("function debateJuryAutoChamberActive");
-    const juryAutoChamberEnd = source.indexOf(
-      "function debateJuryManualCameraAvailable",
-      juryAutoChamberStart,
-    );
-    assert.doesNotMatch(
-      source.slice(juryAutoChamberStart, juryAutoChamberEnd),
-      /jury_initial_|jury_final_|jury_moderator_ballot|jury_aftermath_/u,
+      /function debateJuryAutoChamberActive[\s\S]{0,220}debateJuryChamberStepActive/u,
     );
     assert.match(
       source,
@@ -3108,6 +3183,10 @@ describe("Debate experience", () => {
     assert.match(
       source,
       /function debatePresentationEvents[\s\S]{0,420}debateJuryEventCanPresent\(next, event\)/u,
+    );
+    assert.match(
+      source,
+      /debateJuryEventCanPresent\(next, event\) &&\s*debateJuryEventIsPubliclyAudible\(event\)/u,
     );
     assert.match(
       source,
@@ -3156,7 +3235,7 @@ describe("Debate experience", () => {
     assert.match(css, /\.juryChamberBots\s*\{[^}]*z-index:\s*2/u);
     assert.match(
       css,
-      /\.juryTableRaster\s*\{[^}]*top:\s*18%[^}]*z-index:\s*3[^}]*width:\s*min\(94%,\s*1120px\)/u,
+      /\.juryTableRaster\s*\{[^}]*bottom:\s*8%[^}]*z-index:\s*3[^}]*width:\s*min\(78%,\s*920px\)/u,
     );
     assert.match(css, /\.juryBallotPile\s*\{[^}]*top:\s*88%[^}]*z-index:\s*5/u);
     assert.match(css, /@keyframes jury-ballot-cast/u);
@@ -3206,7 +3285,7 @@ describe("Debate experience", () => {
     assert.equal(
       existsSync(
         fileURLToPath(
-          new URL("../../public/coffee-table/table_light.png", import.meta.url),
+          new URL("../../public/debate/overview-table-light.png", import.meta.url),
         ),
       ),
       true,
@@ -3214,7 +3293,7 @@ describe("Debate experience", () => {
     assert.equal(
       existsSync(
         fileURLToPath(
-          new URL("../../public/coffee-table/table_dark.png", import.meta.url),
+          new URL("../../public/debate/overview-table-dark.png", import.meta.url),
         ),
       ),
       true,
@@ -3296,10 +3375,11 @@ describe("Debate experience", () => {
       presentation,
       /hover an ellipsis to read a thought\. PRISM enters the chamber automatically/u,
     );
-    assert.match(
+    assert.doesNotMatch(
       source,
       /markJuryCommentPlayed\(pendingJuryComment\.id\)[\s\S]{0,700}consumeNewEvents\(beforeComment, throughComment, runId\)/u,
     );
+    assert.match(source, /debateJuryEventIsPubliclyAudible\(event\)/u);
     assert.match(
       source,
       /!debateEventIsJuryComment\(event\)[\s\S]{0,180}transcriptVisibleThroughSequence/u,
@@ -3312,7 +3392,7 @@ describe("Debate experience", () => {
     assert.doesNotMatch(source, /Copy Jury transcript for/u);
     assert.match(
       source,
-      /transcriptHeaderActions[\s\S]{0,500}debate-copy-all-review-data[\s\S]{0,900}debate-copy-jury-transcript[\s\S]{0,500}debate-copy-transcript/u,
+      /transcriptHeaderActions[\s\S]{0,900}debate-copy-all-review-data[\s\S]{0,900}debate-copy-jury-transcript[\s\S]{0,500}debate-copy-transcript/u,
     );
     assert.match(source, /liveRailPanel === "proceedings"/u);
     assert.match(
@@ -3336,11 +3416,11 @@ describe("Debate experience", () => {
     assert.match(source, /juryRecordReady/u);
     assert.match(
       source,
-      /const juryRecordReady = sealedCompleted && juryWasSeated/u,
+      /const juryRecordReady =[\s\S]{0,220}sealedCompleted \|\| juryCameraActive/u,
     );
     assert.match(
       source,
-      /Keep the live Jury widget through aftermath; swap only after the verdict seals/u,
+      /Keep the live Jury widget through the public floor/u,
     );
     assert.doesNotMatch(
       source,
@@ -3576,7 +3656,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       page,
-      /showThinkingSpinner=\{\s*avatarState\.thinking && !avatarState\.compact\s*\}/u,
+      /showThinkingSpinner=\{avatarState\.thinking\}/u,
     );
     assert.match(page, /isTalking=\{debateMouthActive\}/u);
     assert.match(
@@ -3597,7 +3677,7 @@ describe("Debate experience", () => {
     );
   });
 
-  it("uses the authored micro form for compact moderators and keeps turn-owned podium screens", () => {
+  it("uses the authored mini form for compact moderators and keeps turn-owned podium screens", () => {
     assert.match(source, /debateTurnOwnerBotId\(\{/u);
     assert.match(
       source,
@@ -3605,9 +3685,12 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /compact:\s*role === "moderator" &&\s*cameraView !== "moderator"/u,
+      /const avatarPresentation = debateAvatarPresentation\(\{[\s\S]{0,120}consumer:\s*"forum"[\s\S]{0,80}role,[\s\S]{0,80}cameraView/u,
     );
-    assert.match(source, /compact:\s*role === "moderator"/u);
+    assert.match(
+      source,
+      /cameraView:\s*stageAlignmentPreviewCamera/u,
+    );
     assert.match(source, /className=\{styles\.podiumGlyphPosition\}/u);
     assert.match(source, /className=\{styles\.podiumGlyphScreen\}/u);
     assert.match(
@@ -3623,20 +3706,20 @@ describe("Debate experience", () => {
     );
     assert.match(
       page,
-      /data-debate-compact=\{\s*avatarState\.compact \? "true" : undefined/u,
+      /data-debate-compact=\{\s*avatarState\.presentation === "mini" \? "true" : undefined/u,
     );
     assert.match(
       page,
-      /const debateAvatarDetailLevel = staticAudiencePortrait[\s\S]{0,120}avatarState\.highDefinition[\s\S]{0,80}\? "full"[\s\S]{0,40}: "debate"/u,
+      /const staticAudiencePortrait =\s*avatarState\.presentation === "mini";[\s\S]{0,180}const debateAvatarDetailLevel = staticAudiencePortrait/u,
     );
     assert.match(page, /detailLevel=\{debateAvatarDetailLevel\}/u);
     assert.match(
       source,
-      /data-debate-stage-compact=\{\s*role === "moderator" &&\s*cameraView !== "moderator"\s*\? "true"/u,
+      /data-debate-stage-compact=\{\s*avatarPresentation === "mini"\s*\? "true"/u,
     );
     assert.match(
       source,
-      /data-debate-stage-compact=\{\s*role === "moderator" &&\s*stageAlignmentPreviewCamera !== "moderator"\s*\? "true"/u,
+      /data-debate-stage-compact=\{\s*avatarPresentation === "mini"\s*\? "true"/u,
     );
     assert.match(
       page,
@@ -3654,10 +3737,13 @@ describe("Debate experience", () => {
       css,
       /\.botStagePresence\[data-debate-stage-compact="true"\]\s*\{[^}]*position:\s*relative[^}]*aspect-ratio:\s*1/u,
     );
-    assert.match(page, /if \(moderatorMiniPortrait\)[\s\S]{0,1000}<BotAvatarMicroRenderer/u);
+    assert.match(
+      page,
+      /className=\{[\s\S]{0,120}moderatorMiniPortrait[\s\S]{0,120}\? styles\.debateModeratorMiniAvatar/u,
+    );
     assert.match(
       pageCss,
-      /:global\(\[data-debate-stage-compact="true"\]\)\s*>\s*\.debateModeratorMicroAvatar\s*\{[^}]*position:\s*absolute[^}]*width:\s*36px[^}]*height:\s*36px[^}]*translateX\(-50%\)[^}]*transform-origin:\s*50% 100%/u,
+      /\.debateModeratorMiniAvatar\[data-size="room"\]\s*\{[^}]*width:\s*100%[^}]*height:\s*100%/u,
     );
     assert.doesNotMatch(
       pageCss,
@@ -3793,6 +3879,12 @@ describe("Debate experience", () => {
     assert.match(source, /DEBATE_AMBIENT_FOLEY_PROFILE/u);
     assert.match(source, /DEBATE_JURY_AMBIENT_FOLEY_PROFILE/u);
     assert.match(source, /DEBATE_JURY_CHAMBER_MIX/u);
+    assert.match(
+      source,
+      /const DEBATE_JURY_CHAMBER_MIX = \{[\s\S]{0,80}grain:\s*0\.1/u,
+    );
+    assert.match(source, /galleryMixBranch === "jury"/u);
+    assert.match(source, /DEBATE_JURY_CHAMBER_REACTION_TRIM/u);
     assert.match(source, /DEBATE_VOCAL_FOLEY_PROFILE/u);
     assert.match(source, /minDelayMs: 14_000/u);
     assert.match(source, /maxDelayMs: 32_000/u);
@@ -3834,7 +3926,7 @@ describe("Debate experience", () => {
     assert.match(source, /DEBATE_AUDIENCE_REACTIONS\[reactionKind\]/u);
     assert.match(
       source,
-      /playFoley\(\s*reaction\.url,[\s\S]{0,220}debate-audience-reaction:/u,
+      /playFoley\(\s*reaction\.url,[\s\S]{0,800}debate-audience-reaction:/u,
     );
   });
 
@@ -4148,22 +4240,14 @@ describe("Debate experience", () => {
       source,
       /setArchiveReturnReadiness\(\{[\s\S]{0,180}phase: "preparing"/u,
     );
-    const arrivalStart = source.indexOf(
-      "openingGalleryArrivalPromise = (async",
-    );
-    const returnBufferStart = source.indexOf(
-      "archive-return-buffer",
-      arrivalStart,
-    );
-    assert.ok(arrivalStart >= 0);
-    assert.ok(returnBufferStart > arrivalStart);
+    const returnBufferStart = source.indexOf("archive-return-buffer");
+    const arrivalWait = source.indexOf("await waitForDebateGalleryArrival");
+    assert.ok(returnBufferStart >= 0);
+    assert.ok(arrivalWait > returnBufferStart);
+    assert.match(source, /await waitForDebateGalleryArrival\(/u);
     assert.match(
       source,
-      /while \(openingIsCurrent\(\)\)[\s\S]{0,650}debateGalleryArrivalRevealedCount\([\s\S]{0,300}arrival\.arrivalComplete/u,
-    );
-    assert.match(
-      source,
-      /setView\("live"\)[\s\S]{0,420}const identPlaybackPromise = identReadyPromise\.then\(\(\) =>[\s\S]{0,80}playDebateIdent\("intro"\)[\s\S]{0,500}minimumArchiveBufferPromise[\s\S]{0,900}const voiceRunway = preloadReturnedDebateVoices\(session\)[\s\S]{0,180}voiceRunway\.criticalReady/u,
+      /await waitForDebateGalleryArrival\([\s\S]{0,1800}setView\("live"\)[\s\S]{0,500}identPlaybackPromise/u,
     );
     assert.match(source, /setOpeningPreloadSessionId\(null\)/u);
     assert.match(source, /setArchiveReturnReadySessionId\(/u);
@@ -4182,6 +4266,26 @@ describe("Debate experience", () => {
       source.indexOf("useEffect(() =>", source.indexOf("const openSession = async")),
     );
     assert.doesNotMatch(openSessionSource, /pauseOrResume\(/u);
+  });
+
+  it("rebases only archive-open lifecycle writes and copies a complete record from each archive card", () => {
+    assert.match(source, /const rebaseArchiveOpenMutation = async/u);
+    assert.match(source, /for \(let attempt = 0; attempt < 6; attempt \+= 1\)/u);
+    assert.match(source, /debateArchiveOpenCanRebaseMutation\(/u);
+    assert.match(source, /"resume-spectator-bake"/u);
+    assert.match(source, /"pause-return-recess"/u);
+    assert.match(source, /"spectator-ready-hold"/u);
+    assert.match(source, /debateArchiveOpenShouldAdoptRefreshed\(/u);
+    assert.match(source, /nextMutationKey\("bake-restore-recess"\)/u);
+    assert.match(source, /copyArchiveVerboseTranscript/u);
+    assert.match(
+      source,
+      /\/api\/debates\/\$\{encodeURIComponent\(archived\.id\)\}\?perspective=\$\{perspective\}/u,
+    );
+    assert.match(source, /await verboseTranscriptForSession\(result\.session\)/u);
+    assert.match(source, /event\.stopPropagation\(\)/u);
+    assert.match(source, /aria-busy=\{archiveTranscriptCopyState === "copying"\}/u);
+    assert.match(source, /Copy verbose transcript/u);
   });
 
   it("keeps buffering and voice-warming after readiness while the title card remains", () => {
@@ -4216,7 +4320,8 @@ describe("Debate experience", () => {
   it("detaches lookahead race-safely on an early Start and keeps catch-up synthesis in-world", () => {
     assert.match(source, /if \(launchFromTitleCard\) \{/u);
     assert.match(source, /archiveReturnTitleSessionIdRef\.current = null/u);
-    assert.match(source, /server revision check decides whether that[\s\S]{0,80}slice or Resume wins/u);
+    assert.match(source, /archiveReturnLookaheadAbortRef\.current\?\.abort\(\)/u);
+    assert.match(source, /lifecycle rebase absorbs that one revision/u);
     const gavelIndex = source.indexOf(
       'triggerJudgeGavelSmash("order", openingGavelEventId)',
     );
@@ -4343,7 +4448,7 @@ describe("Debate experience", () => {
     );
   });
 
-  it("offers manual Jury camera once the chamber is open, disabled before then", () => {
+  it("never offers Jury as a camera control; Auto enters the chamber as a required scene", () => {
     assert.match(
       source,
       /function debateJuryManualCameraAvailable[\s\S]{0,220}debateJuryAutoChamberActive\(session\)/u,
@@ -4358,24 +4463,10 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /session\.playerRole === "judge"[\s\S]{0,220}camera\.id === "auto"[\s\S]{0,180}camera\.id === "jury"/u,
+      /if \(camera\.id === "jury"\) return false;[\s\S]{0,80}session\.playerRole === "judge"[\s\S]{0,80}return camera\.id === "auto"/u,
     );
-    assert.match(
-      source,
-      /return camera\.id !== "jury" \|\| session\.jury\.enabled/u,
-    );
-    assert.match(
-      source,
-      /const juryCameraClosed =\s*camera\.id === "jury" &&\s*!debateJuryManualCameraAvailable\(session\)/u,
-    );
-    assert.match(
-      source,
-      /disabled=\{juryCameraClosed\}/u,
-    );
-    assert.match(
-      source,
-      /Jury camera opens during deliberation/u,
-    );
+    assert.doesNotMatch(source, /disabled=\{juryCameraClosed\}/u);
+    assert.doesNotMatch(source, /Jury camera opens during deliberation/u);
     assert.match(
       source,
       /if \(cameraMode !== "jury" \|\| !activeSession\) return;[\s\S]{0,180}selectDebateCameraMode\("auto"\)/u,
@@ -4383,6 +4474,15 @@ describe("Debate experience", () => {
     assert.match(
       source,
       /!juryChamberVisible &&\s*activeEvent\.speakerKind !== "juror"/u,
+    );
+    assert.match(source, /debateLiveCameraViewWithJuryLock/u);
+    assert.match(source, /Forum seats only\. Jurors never steal the camera/u);
+    assert.doesNotMatch(
+      source.slice(
+        source.indexOf("const muteReactionCameraRole"),
+        source.indexOf("const muteReactionCameraRole") + 650,
+      ),
+      /"jury"/u,
     );
   });
 
@@ -4426,10 +4526,24 @@ describe("Debate experience", () => {
       source,
       /const cameraSpeechEvent = debateEventCanOwnAutomaticCamera\([\s\S]{0,120}presenting/u,
     );
-    assert.match(source, /const cameraView = galleryArriving/u);
+    assert.match(source, /const forumCameraView = galleryArriving/u);
     assert.match(source, /recessSettledWide\s*\? "wide"/u);
-    assert.match(source, /juryCameraActive\s*\? "jury"/u);
+    assert.match(source, /debateLiveCameraViewWithJuryLock/u);
+    assert.match(
+      source,
+      /juryCameraActive,[\s\S]{0,80}forumView: forumCameraView/u,
+    );
+    assert.match(
+      source,
+      /juryCameraActive \|\|[\s\S]{0,80}debateEventUsesJuryCamera\(event\)/u,
+    );
     assert.match(source, /debateAutoCameraView\(cameraActiveRole\)/u);
+    assert.match(source, /resolveDebateSpeechCoverageView/u);
+    assert.match(source, /coverageCameraView &&/u);
+    assert.match(
+      source,
+      /debateEventIsModeratorMonologue\(event\)[\s\S]{0,220}setCoverageCameraView\(null\)/u,
+    );
     assert.match(
       source,
       /Metadata-only revision drift is safe to absorb without clearing[\s\S]{0,260}setActiveSession\(recovered\)[\s\S]{0,120}requestAdvance\(recovered\)/u,
@@ -4503,7 +4617,7 @@ describe("Debate experience", () => {
       /data-impact-material=\{\s*exhibit \? resolveDebateExhibitImpactMaterial\(exhibit\) : "paper"\s*\}/u,
     );
     assert.doesNotMatch(source, /judgeGavelCameraForced/u);
-    assert.match(source, /const cameraView = galleryArriving\s*\?\s*"wide"/u);
+    assert.match(source, /const forumCameraView = galleryArriving\s*\?\s*"wide"/u);
     assert.match(source, /const juryChamberVisible = cameraView === "jury"/u);
     assert.doesNotMatch(source, /data-locked=\{judgeGavelCameraForced/u);
     assert.doesNotMatch(source, /disabled=\{judgeGavelCameraForced/u);
@@ -4515,16 +4629,12 @@ describe("Debate experience", () => {
     assert.match(source, /data-camera-mode=\{effectiveCameraMode\}/u);
     assert.match(
       source,
-      /session\.playerRole === "judge"[\s\S]{0,220}camera\.id === "auto"[\s\S]{0,180}camera\.id === "jury"/u,
-    );
-    assert.match(
-      source,
-      /return camera\.id !== "jury" \|\| session\.jury\.enabled/u,
+      /if \(camera\.id === "jury"\) return false;[\s\S]{0,80}session\.playerRole === "judge"[\s\S]{0,80}return camera\.id === "auto"/u,
     );
     assert.doesNotMatch(source, /Watch Jury/u);
     assert.match(source, /data-silent-deliberation/u);
-    assert.match(source, /Their conversation remains unheard and uncaptioned/u);
-    assert.match(source, /juryDeliberationBubble/u);
+    assert.match(source, /The next juror will be heard in this chamber/u);
+    assert.doesNotMatch(source, /juryDeliberationBubble/u);
     assert.match(source, /foleyMouthShape/u);
     assert.match(
       css,
@@ -4611,7 +4721,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /const cameraTransition = interruptCameraView[\s\S]{0,80}\? "objection-pan"[\s\S]{0,80}speakerHandoff[\s\S]{0,120}\? "handoff"/u,
+      /const cameraTransition = activeMuteReactionBeat[\s\S]{0,80}\? "cut"[\s\S]{0,80}interruptCameraView[\s\S]{0,80}\? "objection-pan"[\s\S]{0,80}speakerHandoff[\s\S]{0,120}\? "handoff"/u,
     );
     assert.match(
       source,
@@ -4927,24 +5037,38 @@ describe("Debate experience", () => {
     );
   });
 
-  it("offers calm stage direction while retaining the precision Alignment Lab", () => {
-    assert.match(source, /Stage direction/u);
-    assert.match(source, /data-debate-stage-direction="true"/u);
-    assert.match(source, /Close conversation/u);
-    assert.match(source, /Balanced forum/u);
-    assert.match(source, /Grand chamber/u);
-    assert.match(source, /applyDebateStageDirectionPreset/u);
+  it("restores direct Main stage editing without chamber presets", () => {
+    assert.match(
+      source,
+      /const DEBATE_STAGE_LAYOUT_AUTHORING_ENABLED = prismDeveloperAuthoringEnabled/u,
+    );
+    assert.match(
+      source,
+      /const openStageAlignment = \(\): void => \{\s*if \(!DEBATE_STAGE_LAYOUT_AUTHORING_ENABLED\) return;/u,
+    );
+    assert.match(
+      source,
+      /\{DEBATE_STAGE_LAYOUT_AUTHORING_ENABLED \? \(\s*<PrismRefractTarget[\s\S]*?<button[\s\S]*?data-tutorial-target="debate-stage-layout"/u,
+    );
+    assert.match(source, /Stage layout/u);
+    assert.match(source, /data-tutorial-target="debate-stage-layout"/u);
+    assert.match(source, /onClick=\{openStageAlignment\}/u);
+    assert.doesNotMatch(source, /data-debate-stage-direction="true"/u);
+    assert.doesNotMatch(source, /Close conversation/u);
+    assert.doesNotMatch(source, /Balanced forum/u);
+    assert.doesNotMatch(source, /Grand chamber/u);
+    assert.doesNotMatch(source, /applyDebateStageDirectionPreset/u);
     assert.match(source, /if \(!stageAlignmentOpen\) return null/u);
     assert.match(source, /aria-label="More stage controls"/u);
     assert.match(source, /className=\{styles\.cameraAdvanced\}/u);
     assert.match(source, /data-debate-stage-alignment-modal="true"/u);
-    assert.match(source, /Debate Alignment Lab/u);
+    assert.match(source, /Main stage layout/u);
     assert.match(source, /Save alignment/u);
     assert.match(source, /data-debate-alignment-voice-mixer="true"/u);
-    assert.match(source, /Moderator micro avatar/u);
+    assert.match(source, /Moderator mini avatar/u);
     assert.match(
       source,
-      /aria-label=\{`\$\{stageAlignmentPreviewCameraLabel\} moderator micro avatar scale`\}/u,
+      /aria-label=\{`\$\{stageAlignmentPreviewCameraLabel\} moderator mini avatar scale`\}/u,
     );
     assert.match(source, /updateDebateStageModeratorMicroScale/u);
     assert.doesNotMatch(
@@ -4971,7 +5095,7 @@ describe("Debate experience", () => {
     assert.match(css, /\.alignmentVoiceMixerTest/u);
     assert.match(css, /\.alignmentGalleryRowdyToggle/u);
     assert.match(css, /data-gallery-heat/u);
-    assert.match(source, /Reset positions/u);
+    assert.match(source, /Reset Main/u);
     assert.match(source, /Drag an item or use arrow keys to nudge by 0\.5%/u);
     assert.match(source, /\(\["light", "dark"\] as const\)/u);
     assert.match(source, /\["wide", "left", "moderator", "right"\] as const/u);
@@ -5038,7 +5162,12 @@ describe("Debate experience", () => {
       source,
       /updateStageAlignmentTarget\(\s*target,\s*defaultOffset,\s*\)/u,
     );
-    assert.match(source, /Copy alignment data/u);
+    assert.match(source, /Copy Main defaults/u);
+    assert.match(source, /\? "Copied"/u);
+    assert.match(
+      source,
+      /Save the Main layout for\s*this account and device; live presentation and replay use that\s*saved Main layout\. Copy Main defaults instead copies a\s*source-ready V14 block and never changes shipped defaults\./u,
+    );
     assert.match(source, /formatDebateStageAlignmentClipboard/u);
     assert.match(source, /type="range"/u);
     assert.match(source, /writeDebateStageAlignment/u);
@@ -5336,6 +5465,53 @@ describe("Debate experience", () => {
     assert.doesNotMatch(
       css,
       /\.lobby,\s*\.setup,\s*\.live\s*\{[^}]*min-height:\s*100vh/u,
+    );
+  });
+
+  it("keeps gallery walk-in during return buffering and skips bake restart on bookmark", () => {
+    assert.match(
+      source,
+      /const skipBakeRestartOnBookmark = restoreMidPauseEventId !== null/u,
+    );
+    assert.match(source, /waitForDebateGalleryArrival\(/u);
+    assert.match(source, /holdScope="stage"/u);
+    assert.doesNotMatch(
+      source,
+      /progressRatio:\s*1,\s*[\s\S]{0,80}bakeUnlocked:\s*true/u,
+    );
+    assert.match(
+      source,
+      /restartSpectatorBakeIfNeeded\(result\.session, "resume"\)/u,
+    );
+    assert.match(
+      source,
+      /restartSpectatorBakeIfNeeded\(polled\.session, "stale-poll"\)/u,
+    );
+  });
+
+  it("lets a returning title card start from a prepared turn checkpoint", () => {
+    assert.match(source, /debateTurnCheckpointsFromSession\(session\)/u);
+    assert.match(source, /holdCheckpoints=\{/u);
+    assert.match(
+      source,
+      /titleCardPlayheadEventId \?\?[\s\S]{0,80}result\.session\.pausedPresentationEventId/u,
+    );
+    assert.match(source, /resumeCeremonyActive:/u);
+    assert.match(source, /const jumpedFromBookmark =/u);
+    assert.match(css, /\.identHoldCheckpoint\s*\{/u);
+  });
+
+  it("keeps spectator bake-ahead from blocking unheard floor playback", () => {
+    assert.match(source, /function debateSessionThroughPlayhead/u);
+    assert.match(source, /presentUnheardSpectatorTail/u);
+    assert.match(source, /const playheadPrevious = debateSessionThroughPlayhead/u);
+    assert.match(
+      source,
+      /void preloadDebateVoiceRunway\(\s*polled\.session,\s*freshRunway\.slice\(0, 1\),/u,
+    );
+    assert.match(
+      source,
+      /spectatorUnheardPresentable\.length === 0/u,
     );
   });
 });

@@ -5,6 +5,7 @@ import {
   DEBATE_EVIDENCE_EMOJI_CHOICES,
   applyDebateEvidenceExhibitAssetReuse,
   applyDebateEvidenceObjectNameEdit,
+  debateEvidenceExhibitsFromObjectDrafts,
   debateEvidenceObjectDraftFromExhibit,
   debateEvidenceObjectDraftFromPrismCandidate,
   debateEvidenceObjectFromPrismCandidate,
@@ -121,6 +122,65 @@ describe("Debate evidence object generator", () => {
       debateEvidenceObjectFromPrismCandidate("Weathered transit map."),
       null,
     );
+  });
+
+  it("turns Prism exhibit drafts into a replaceable Evidence packet slice", () => {
+    const exhibits = debateEvidenceExhibitsFromObjectDrafts([
+      {
+        adjective: "Frayed",
+        object: "blue work glove",
+        observation: "The index fingertip is stained cobalt blue.",
+        emoji: "🧤",
+        emojiCustomized: false,
+        createdBy: "prism",
+        visualKind: "emoji",
+        imageId: null,
+      },
+      {
+        adjective: "",
+        object: "",
+        observation: "",
+        emoji: "📦",
+        emojiCustomized: false,
+        createdBy: "prism",
+        visualKind: "emoji",
+        imageId: null,
+      },
+      {
+        adjective: "Folded",
+        object: "note",
+        observation: "",
+        emoji: "📝",
+        emojiCustomized: false,
+        createdBy: "prism",
+        visualKind: "synthesized",
+        imageId: "img-1",
+      },
+    ]);
+    assert.deepEqual(exhibits, [
+      {
+        id: "exhibit-1",
+        adjective: "Frayed",
+        object: "blue work glove",
+        title: "Frayed blue work glove",
+        observation: "The index fingertip is stained cobalt blue.",
+        emoji: "🧤",
+        visualKind: "emoji",
+        imageId: null,
+        createdBy: "prism",
+      },
+      {
+        id: "exhibit-2",
+        adjective: "Folded",
+        object: "note",
+        title: "Folded note",
+        observation: "Folded note.",
+        emoji: "📝",
+        visualKind: "synthesized",
+        imageId: "img-1",
+        createdBy: "prism",
+      },
+    ]);
   });
 
   it("turns a player-directed Prism draft into complete editable metadata", () => {

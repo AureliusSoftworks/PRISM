@@ -4,9 +4,12 @@ import {
   DEBATE_GALLERY_ARRIVAL_HURRY_INTERVAL_MS,
   DEBATE_GALLERY_ARRIVAL_LINGER_INTERVAL_MS,
   DEBATE_GALLERY_ARRIVAL_SETTLE_MS,
+  DEBATE_GALLERY_OPENING_MURMUR_FADE_MS,
+  debateGalleryArrivalFillRatio,
   debateGalleryArrivalRevealOrder,
   debateGalleryArrivalRevealedCount,
   debateGalleryArrivalMurmurGain,
+  debateGalleryOpeningMurmurGain,
   debateGallerySeatHasArrived,
 } from "./debateGalleryArrival.ts";
 
@@ -108,14 +111,32 @@ describe("debateGalleryArrival", () => {
     );
   });
 
-  it("ramps murmur gain from empty seats to a full house", () => {
+  it("glides house fill between seats and eases murmur in from silence", () => {
+    const halfLinger = debateGalleryArrivalFillRatio({
+      nonPlayerCount: 8,
+      progressRatio: 0,
+      bakeUnlocked: false,
+      elapsedMs: DEBATE_GALLERY_ARRIVAL_LINGER_INTERVAL_MS * 1.5,
+      unlockElapsedMs: 0,
+    });
+    assert.ok(halfLinger > 1 / 8);
+    assert.ok(halfLinger < 2 / 8);
+
     assert.equal(
       debateGalleryArrivalMurmurGain({ revealedCount: 0, nonPlayerCount: 8 }),
       0,
     );
     assert.equal(
       debateGalleryArrivalMurmurGain({ revealedCount: 4, nonPlayerCount: 8 }),
-      Math.sqrt(0.5),
+      0.25,
+    );
+    assert.equal(
+      debateGalleryArrivalMurmurGain({
+        revealedCount: 1,
+        nonPlayerCount: 8,
+        fillRatio: 0.5,
+      }),
+      0.25,
     );
     assert.equal(
       debateGalleryArrivalMurmurGain({ revealedCount: 8, nonPlayerCount: 8 }),
@@ -125,10 +146,19 @@ describe("debateGalleryArrival", () => {
       debateGalleryArrivalMurmurGain({ revealedCount: 0, nonPlayerCount: 0 }),
       1,
     );
-    // First seat is clearly above a linear 1/n step so gathering is audible.
+    // First seat stays quieter than a linear 1/n step so the room gathers.
     assert.ok(
-      debateGalleryArrivalMurmurGain({ revealedCount: 1, nonPlayerCount: 8 }) >
+      debateGalleryArrivalMurmurGain({ revealedCount: 1, nonPlayerCount: 8 }) <
         1 / 8,
+    );
+    assert.equal(debateGalleryOpeningMurmurGain(0), 0);
+    assert.equal(
+      debateGalleryOpeningMurmurGain(DEBATE_GALLERY_OPENING_MURMUR_FADE_MS / 2),
+      0.25,
+    );
+    assert.equal(
+      debateGalleryOpeningMurmurGain(DEBATE_GALLERY_OPENING_MURMUR_FADE_MS),
+      1,
     );
   });
 });

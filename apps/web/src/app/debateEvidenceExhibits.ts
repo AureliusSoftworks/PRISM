@@ -362,6 +362,32 @@ export function emptyDebateEvidenceObjectDraft(): DebateEvidenceObjectDraft {
   };
 }
 
+/**
+ * Turn Prism exhibit drafts into a replaceable Evidence packet slice.
+ * IDs restart at exhibit-1 so a section refresh does not keep stale sprites.
+ */
+export function debateEvidenceExhibitsFromObjectDrafts(
+  drafts: readonly DebateEvidenceObjectDraft[],
+): DebateEvidenceExhibitV1[] {
+  const exhibits: DebateEvidenceExhibitV1[] = [];
+  for (const draft of drafts) {
+    const title = debateEvidenceExhibitTitle(draft);
+    if (!title) continue;
+    exhibits.push({
+      id: `exhibit-${exhibits.length + 1}`,
+      adjective: draft.adjective,
+      object: draft.object,
+      title,
+      observation: draft.observation.trim() || `${title}.`,
+      emoji: draft.emoji,
+      visualKind: draft.imageId ? draft.visualKind : "emoji",
+      imageId: draft.imageId,
+      createdBy: draft.createdBy,
+    });
+  }
+  return exhibits;
+}
+
 export function nextDebateEvidenceExhibitId(
   evidence: DebateEvidencePacketV1,
 ): string {

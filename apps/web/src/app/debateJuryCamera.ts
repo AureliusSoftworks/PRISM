@@ -4,9 +4,15 @@ export interface DebateJuryCameraPresentationV1 {
   presenting: boolean;
   event: DebateEventV1 | null;
   preparingSpeakerBotId: string | null;
+  /** Moderator resume/re-intro owns the Forum even from a Jury bookmark. */
+  resumeCeremonyActive?: boolean;
+  /** Viewer's held floor line; bake-ahead stepKey must not steal the camera. */
+  bookmarkEvent?: DebateEventV1 | null;
 }
 
-export function debateEventUsesJuryCamera(event: DebateEventV1): boolean {
+export function debateEventUsesJuryCamera(
+  event: Pick<DebateEventV1, "kind" | "speakerKind" | "stepKey">,
+): boolean {
   // Sidebar remarks are Jury-authored, but remain inter-round commentary on
   // the public floor. The chamber is reserved for the formal record only.
   if (event.kind === "jury_deliberation") {
@@ -14,11 +20,25 @@ export function debateEventUsesJuryCamera(event: DebateEventV1): boolean {
   }
   if (event.kind === "ballot") {
     return (
-      event.speakerKind === "juror" &&
-      event.stepKey.startsWith("jury_final_")
+      (event.speakerKind === "juror" &&
+        event.stepKey.startsWith("jury_final_")) ||
+      (event.speakerKind === "moderator" &&
+        event.stepKey === "jury_moderator_ballot")
     );
   }
   return event.kind === "jury_verdict";
+}
+
+/**
+ * Jurors stay silent on the public floor. Between-turn thoughts and
+ * persona Foley belong in the bottom widget / Jury Record until the
+ * formal chamber scene is on the record.
+ */
+export function debateJuryEventIsPubliclyAudible(
+  event: Pick<DebateEventV1, "kind" | "speakerKind" | "stepKey">,
+): boolean {
+  if (event.speakerKind !== "juror") return true;
+  return debateEventUsesJuryCamera(event);
 }
 
 function debateEventNeedsJuryAccess(event: DebateEventV1): boolean {
@@ -26,6 +46,29 @@ function debateEventNeedsJuryAccess(event: DebateEventV1): boolean {
     event.speakerKind === "juror" ||
     event.kind === "jury_deliberation" ||
     event.kind === "jury_verdict"
+  );
+}
+
+/** Formal audible deliberation owns the chamber for the whole step. */
+export function debateJuryDeliberationStepActive(
+  session: Pick<DebateSessionV1, "stepKey">,
+): boolean {
+  return session.stepKey.startsWith("jury_deliberation_");
+}
+
+/**
+ * The required Jury scene: private leanings, heard deliberation, juror
+ * ballots, and the Moderator's last vote. Aftermath returns to the Forum.
+ */
+export function debateJuryChamberStepActive(
+  session: Pick<DebateSessionV1, "stepKey">,
+): boolean {
+  const step = session.stepKey;
+  return (
+    step.startsWith("jury_initial_") ||
+    step.startsWith("jury_deliberation_") ||
+    step.startsWith("jury_final_") ||
+    step === "jury_moderator_ballot"
   );
 }
 
@@ -57,15 +100,35 @@ export function debateJuryPresentationUsesChamber(
  * The saved Debate step can already point at Jury while the client is still
  * presenting the final advocate line and moderator handoff from the response.
  * Keep that queued public-floor material on the Forum camera until it lands.
+ * Once a chamber beat is on screen, or deliberation owns the step with no
+ * remaining public-floor line, stay in the room — even while the next juror
+ * warms a voice.
+ *
+ * Spectator bake-ahead may move `stepKey` into Jury while the viewer is still
+ * on a Forum bookmark or a Moderator re-intro. Those beats keep the Forum.
  */
 export function debateJuryPresentationKeepsForumCamera(
-  _session: Pick<DebateSessionV1, "jury">,
+  session: Pick<DebateSessionV1, "jury" | "stepKey">,
   presentation: DebateJuryCameraPresentationV1 | undefined,
 ): boolean {
-  if (!presentation?.presenting) return false;
-  if (presentation.preparingSpeakerBotId) return true;
-  if (presentation.event) {
-    return !debateEventUsesJuryCamera(presentation.event);
+  if (presentation?.resumeCeremonyActive) return true;
+  const shown = presentation?.event ?? presentation?.bookmarkEvent ?? null;
+  if (shown) {
+    return !debateEventUsesJuryCamera(shown);
+  }
+  if (presentation?.presenting || presentation?.preparingSpeakerBotId) {
+    return !debateJuryChamberStepActive(session);
   }
   return false;
+}
+
+/**
+ * Once the required Jury scene owns the camera, Forum coverage, mute glances,
+ * interrupts, pause-Wide, and gallery arrival must not leave the chamber.
+ */
+export function debateLiveCameraViewWithJuryLock<TView extends string>(args: {
+  juryCameraActive: boolean;
+  forumView: TView;
+}): TView | "jury" {
+  return args.juryCameraActive ? "jury" : args.forumView;
 }

@@ -173,6 +173,15 @@
   gap: 24px;
 }
 
+.dashboard > :global([data-session-ritual="debate"]),
+.dashboard > :global([data-session-setup-reuse="debate"]) {
+  width: 100%;
+}
+
+.dashboard .readinessPanel > :global([data-session-threshold="debate"]) {
+  margin-bottom: 2px;
+}
+
 .lobbyHeader h1,
 .setupHeader h1,
 .liveHeader h1 {
@@ -3075,6 +3084,13 @@
   padding: 7px 11px;
   font-size: 9px;
   font-weight: 700;
+}
+
+.participantFavorabilityMeter > span {
+  overflow: hidden;
+  max-width: 28vw;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .participantFavorabilityMeter > div {
@@ -7388,167 +7404,6 @@
     transparent;
 }
 
-.stageDirectionBackdrop {
-  --stage-direction-panel: rgba(17, 14, 23, 0.96);
-  --stage-direction-card: rgba(255, 255, 255, 0.045);
-  --stage-direction-line: rgba(203, 191, 255, 0.18);
-  --stage-direction-ink: #f1edf7;
-  --stage-direction-muted: #a49bad;
-  position: fixed;
-  inset: 0;
-  z-index: 945;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: rgba(5, 4, 8, 0.46);
-  backdrop-filter: blur(10px) saturate(0.9);
-}
-
-.stageDirectionBackdrop[data-theme="light"] {
-  --stage-direction-panel: rgba(250, 247, 244, 0.97);
-  --stage-direction-card: rgba(86, 69, 108, 0.045);
-  --stage-direction-line: rgba(81, 65, 102, 0.2);
-  --stage-direction-ink: #2b2530;
-  --stage-direction-muted: #706777;
-  background: rgba(224, 218, 220, 0.42);
-}
-
-.stageDirectionPanel {
-  width: min(720px, 100%);
-  overflow: hidden;
-  border: 1px solid var(--stage-direction-line);
-  border-radius: 22px;
-  color: var(--stage-direction-ink);
-  background:
-    radial-gradient(
-      circle at 50% -20%,
-      color-mix(in srgb, #a68eff 16%, transparent),
-      transparent 52%
-    ),
-    var(--stage-direction-panel);
-  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.42);
-}
-
-.stageDirectionPanel > header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 20px;
-  border-bottom: 1px solid var(--stage-direction-line);
-  padding: 22px 24px 18px;
-}
-
-.stageDirectionPanel h2 {
-  margin: 5px 0 4px;
-  font-family: var(--font-serif, ui-serif, Georgia, serif);
-  font-size: clamp(24px, 4vw, 34px);
-  font-weight: 500;
-  letter-spacing: -0.025em;
-}
-
-.stageDirectionPanel header p,
-.stageDirectionCustomNote {
-  margin: 0;
-  color: var(--stage-direction-muted);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.stageDirectionClose {
-  width: 34px;
-  height: 34px;
-  flex: 0 0 34px;
-  border: 1px solid var(--stage-direction-line);
-  border-radius: 999px;
-  padding: 0;
-  color: inherit;
-  background: var(--stage-direction-card);
-  font-size: 20px;
-  cursor: pointer;
-}
-
-.stageDirectionOptions {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  padding: 18px 20px 20px;
-}
-
-.stageDirectionOptions button {
-  min-width: 0;
-  min-height: 154px;
-  display: grid;
-  grid-template-rows: 50px auto 1fr;
-  align-content: start;
-  gap: 8px;
-  border: 1px solid var(--stage-direction-line);
-  border-radius: 16px;
-  padding: 16px;
-  color: inherit;
-  background: var(--stage-direction-card);
-  text-align: left;
-  cursor: pointer;
-  transition:
-    transform 160ms ease,
-    border-color 160ms ease,
-    background 160ms ease;
-}
-
-.stageDirectionOptions button:hover,
-.stageDirectionOptions button:focus-visible {
-  border-color: color-mix(in srgb, #b7a7ff 58%, var(--stage-direction-line));
-  outline: none;
-  transform: translateY(-2px);
-}
-
-.stageDirectionOptions button[data-selected="true"] {
-  border-color: color-mix(in srgb, #b7a7ff 70%, white);
-  background: color-mix(in srgb, #9b86ff 13%, var(--stage-direction-card));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, #b7a7ff 18%, transparent);
-}
-
-.stageDirectionOptions button > span {
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  color: color-mix(in srgb, #c6baff 82%, var(--stage-direction-ink));
-  font: 600 20px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
-  letter-spacing: 0.1em;
-  white-space: nowrap;
-}
-
-.stageDirectionOptions strong {
-  font-size: 13px;
-}
-
-.stageDirectionOptions small {
-  color: var(--stage-direction-muted);
-  font-size: 11px;
-  line-height: 1.45;
-}
-
-.stageDirectionCustomNote {
-  border-top: 1px solid var(--stage-direction-line);
-  padding: 12px 20px 14px;
-  text-align: center;
-}
-
-@media (max-width: 680px) {
-  .stageDirectionOptions {
-    grid-template-columns: 1fr;
-  }
-
-  .stageDirectionOptions button {
-    min-height: 0;
-    grid-template-columns: 72px 1fr;
-    grid-template-rows: auto auto;
-  }
-
-  .stageDirectionOptions button > span {
-    grid-row: 1 / 3;
-  }
-}
-
 .alignmentModalBackdrop {
   --alignment-surface: #100d16;
   --alignment-panel: #191520;
@@ -9396,10 +9251,11 @@
 
 .juryTableRaster {
   position: absolute;
-  top: 18%;
+  top: auto;
+  bottom: 8%;
   left: 50%;
   z-index: 3;
-  width: min(94%, 1120px);
+  width: min(78%, 920px);
   max-width: none;
   height: auto;
   transform: translateX(-50%);
@@ -14065,6 +13921,60 @@
   letter-spacing: 0.02em;
 }
 
+.identHoldCheckpoints {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  width: min(100%, 28rem);
+}
+
+.identHoldCheckpointsLabel {
+  color: #8f879a;
+  font-size: 10px;
+  font-weight: 720;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.identHoldCheckpointRow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+
+.identHoldCheckpoint {
+  -webkit-appearance: none;
+  appearance: none;
+  border: 1px solid color-mix(in srgb, #d8d2e3 28%, transparent);
+  border-radius: 999px;
+  padding: 6px 10px;
+  color: #d8d2e3;
+  background: rgba(12, 10, 16, 0.55);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.identHoldCheckpoint[data-active="true"] {
+  color: #050407;
+  border-color: color-mix(in srgb, #f4f0f7 55%, transparent);
+  background: linear-gradient(
+    135deg,
+    #f7f4ff 0%,
+    color-mix(in srgb, var(--debate-ident-for-color) 28%, #ffffff) 100%
+  );
+}
+
+.identHoldCheckpoint:hover:not([data-active="true"]),
+.identHoldCheckpoint:focus-visible {
+  border-color: color-mix(in srgb, #f4f0f7 42%, transparent);
+  color: #f4f0f7;
+}
+
 .identHoldAction {
   -webkit-appearance: none;
   appearance: none;
@@ -15258,8 +15168,8 @@
   line-height: 1.45;
 }
 
-/* Keep the public gallery above arriving stage masks only.
-   Gallery-ready uses a full intro card that covers the pit. */
+/* Keep the public gallery above arriving stage masks and stage-scoped title
+   cards so guests can walk in while Preparing / buffering is on the curtain. */
 .live[data-debate-room-presence="arriving"] .debateAudienceRow {
   position: relative;
   z-index: 150;

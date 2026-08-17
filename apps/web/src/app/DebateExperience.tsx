@@ -19,6 +19,12 @@ import {
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { prismDeveloperAuthoringEnabled } from "./prismDevGating";
+import {
+  DEBATE_PRESENTATION_CALLBACK_MAX_MS,
+  DEBATE_PRESENTATION_FIRST_VOICE_STALL_MS,
+  settleDebatePresentationCallback,
+} from "./debatePresentationLifecycle";
 import {
   DEBATE_EVIDENCE_ITEM_MAX_COUNT,
   DEBATE_FORMAT_CATALOG,
@@ -35,6 +41,7 @@ import {
   DEBATE_SETUP_PRESETS,
   BOT_IDENTITY_PRESENTATION_TRANSITION_MS,
   botPowerIsBreathlessV1,
+  pickBotSessionSurnameNameV1,
   botIdentityPresentationTransitionActiveV1,
   botPowerObserverProjectionFromEffectsV1,
   botPowerStripBreathPerformanceTextV1,
@@ -63,10 +70,10 @@ import {
   debateDebriefEligibleBots,
   debateRecessResumeFiller,
   debateRecessResumePresentationContent,
-  debateSessionAwaitsPresentationSeal,
   debateSessionAwaitingDeferredStart,
   debateSessionAwaitingFirstPresentation,
   debateSpectatorAwaitingFirstWatch,
+  debateChairFavorabilityAtPlayhead,
   modelSupportsTurboMode,
   normalizeBotAudioVoiceControl,
   normalizeBotAudioVoiceProfileV1,
@@ -213,9 +220,11 @@ import {
   debateSpectatorPrismAudienceSeat,
 } from "./debateAudience";
 import {
+  debateGalleryArrivalFillRatio,
   debateGalleryArrivalRevealOrder,
   debateGalleryArrivalRevealedCount,
   debateGalleryArrivalMurmurGain,
+  debateGalleryOpeningMurmurGain,
   debateGallerySeatHasArrived,
 } from "./debateGalleryArrival";
 import {
@@ -239,22 +248,35 @@ import {
   debateArchivedJuryRecordIsCopyable,
   debateEventIsJuryComment,
   debateEventIsJurySidebarComment,
+  debateHeardJuryCommentEvents,
   debateJuryCommentClockLabel,
-  debateJuryCommentEvents,
   debateJuryCommentKindLabel,
   debateJuryCommentSpeakerName,
   debateLatestPendingJuryComment,
   formatDebateJuryRecord,
 } from "./debateJuryRecord";
 import {
+  debateEventUsesJuryCamera,
+  debateJuryChamberStepActive,
   debateJuryEventCanPresent,
+  debateJuryEventIsPubliclyAudible,
   debateJuryPresentationKeepsForumCamera,
   debateJuryPresentationUsesChamber,
+  debateLiveCameraViewWithJuryLock,
   type DebateJuryCameraPresentationV1,
 } from "./debateJuryCamera";
 import {
+  debateTurnCheckpointEvent,
+  debateTurnCheckpointForEventId,
+  debateTurnCheckpointsFromSession,
+  type DebateTurnCheckpointV1,
+} from "./debateTurnCheckpoints";
+import {
+  debateArchiveOpenCanRebaseMutation,
+  debateArchiveOpenShouldAdoptRefreshed,
   debateCanRetryStaleAutomaticAdvance,
   debateRequestIsRevisionConflict,
+  type DebateArchiveOpenMutationKind,
 } from "./debateRevisionRecovery";
 import {
   debateUrlEvidenceSourceFromDraft,
@@ -266,9 +288,12 @@ import {
   applyDebateEvidenceExhibitSynthesizedImage,
   applyDebateEvidenceObjectNameEdit,
   debateMissingExhibitAssets,
+  debateEvidenceExhibitsFromObjectDrafts,
   debateEvidenceObjectDraftFromExhibit,
   debateEvidenceObjectDraftFromPrismCandidate,
+  debateEvidenceObjectFromPrismCandidate,
   nextDebateEvidenceExhibitId,
+  randomDebateEvidenceObject,
   replaceDebateEvidenceExhibit,
   searchDebateEvidenceEmojis,
   type DebateEvidenceObjectDraft,
@@ -281,6 +306,17 @@ import {
   type DebateJudgeQuickChoice,
 } from "./debateJudgeQuickChoices";
 import { randomDebateTerritory } from "./debateTerritoryRandomizer";
+import {
+  DEBATE_STUDIO_NAV_ARCHIVE_REFRACT_ID,
+  DEBATE_STUDIO_NAV_CAST_REFRACT_ID,
+  DEBATE_STUDIO_NAV_EVIDENCE_REFRACT_ID,
+  DEBATE_STUDIO_NAV_MOTION_REFRACT_ID,
+  DEBATE_STUDIO_NAV_STAGE_LAYOUT_REFRACT_ID,
+  debateStudioNavArchiveNotice,
+  debateStudioNavCastCanRandomize,
+  debateStudioNavMotionSeed,
+  nextDebateArchiveHighlightId,
+} from "./debateStudioNavRefract";
 import {
   DEBATE_PARTICIPATION_DEFAULT_DIFFICULTY,
   debateFavorabilityPosition,
@@ -354,6 +390,12 @@ import {
   type DebateModeratorCameraFocus,
   type DebateModeratorCameraView,
 } from "./debateIntroCamera";
+import {
+  debateSpeechCoverageNextTickMs,
+  resolveDebateSpeechCoverageView,
+  type DebateSpeechCameraView,
+} from "./debateSpeechCamera";
+import { DEBATE_MOUTH_PAUSE_CLOSE_MS } from "./debateSpeechMouth";
 import { debateVoiceCompletionFallbackDurationMs } from "./signalLiveCaptions";
 import {
   debateEventPrimaryTableEvidenceId,
@@ -422,9 +464,7 @@ import {
   DEBATE_STAGE_VOICE_LEVEL_MAX,
   DEBATE_STAGE_VOICE_LEVEL_STEP,
   DEFAULT_DEBATE_STAGE_ALIGNMENT,
-  applyDebateStageDirectionPreset,
   copyDebateStageAlignment,
-  debateStageDirectionPresetForAlignment,
   debateStageEvidenceViewForCamera,
   debateStageAlignmentOffset,
   debateStageAlignmentStyle,
@@ -447,8 +487,7 @@ import {
   type DebateStageAlignmentItem,
   type DebateStageAlignmentRole,
   type DebateStageAlignmentTarget,
-  type DebateStageAlignmentV6,
-  type DebateStageDirectionPreset,
+  type DebateStageAlignmentV14,
   type DebateStageEvidenceKind,
   type DebateStageEvidenceShadowV1,
   type DebateStageEvidenceView,
@@ -496,7 +535,6 @@ import {
   debateModeratorGavelSpeechLeadMs,
   debateVocalFoleyTargetId,
   debateAmbientVocalFoleyVoicePerformance,
-  debateJuryDeliberationMouthShape,
   debateVocalFoleyVoicePerformance,
   resolveDebateVocalFoleyTagText,
   type DebateAudienceBeat,
@@ -545,6 +583,10 @@ import type { VoicePlaybackCharacterAlignment } from "./voiceEffects";
 import type { ZenLiveBotMouthShape } from "./zenLiveMouth";
 import { DEBATE_STAGE_SOUNDCHECK_MESSAGE_PREFIX } from "./signalStageSoundcheck";
 import { useDebateDomPerformance } from "./useDebateDomPerformance";
+import {
+  debateAvatarPresentation,
+  type SessionAvatarPresentation,
+} from "./sessionAvatarPresentationPolicy";
 import {
   createDebatePresentationStore,
   type DebatePresentationSnapshot,
@@ -627,9 +669,8 @@ export interface DebateSpeechTiming {
 export interface DebateBotAvatarState {
   role: DebateForumRole | "audience";
   lookAtRole: DebateForumRole | null;
-  /** Enables the complete avatar material stack for camera-priority cast members. */
-  highDefinition: boolean;
-  compact: boolean;
+  consumer: "forum" | "jury" | "gallery";
+  presentation: SessionAvatarPresentation;
   talking: boolean;
   thinking: boolean;
   /** Frozen per-role stage fader shared with the bot's voice output path. */
@@ -738,8 +779,8 @@ export interface DebateExperienceProps {
   renderJudgeComposer?: (composer: DebateJudgeComposerRenderProps) => ReactNode;
   onJudgeComposerReveal?: () => void;
   /**
-   * Compact pick-aware composer for Motion Chamber seed fields
-   * (Prompt Center prompts + wildcard decks).
+   * Compact composer for Motion Chamber seed fields.
+   * Session shortcut language stays in immersive Zen; this field is ordinary text.
    */
   renderPickAwareComposer?: (state: {
     id?: string;
@@ -752,7 +793,7 @@ export interface DebateExperienceProps {
     className?: string;
     onBlur?: (value: string) => void;
   }) => ReactNode;
-  /** Finalize /prompts, !decks, and {slots}/{a|b} before consumption. */
+  /** Identity helper kept for shared wiring; Debate no longer expands shortcut language. */
   expandComposerDraft?: (rawDraft: string) => string | Promise<string>;
 }
 
@@ -776,6 +817,10 @@ export interface DebateJudgeComposerRenderProps {
 
 type DebateView = "dashboard" | "live" | "baking";
 type DebateStudioPanel = "motion" | "cast" | "evidence" | "archive";
+const DEBATE_STAGE_LAYOUT_AUTHORING_ENABLED = prismDeveloperAuthoringEnabled({
+  NODE_ENV: process.env.NODE_ENV,
+  NEXT_PUBLIC_PRISM_BRANCH: process.env.NEXT_PUBLIC_PRISM_BRANCH,
+});
 const DEBATE_ROWDINESS_SPECTRUM = [...DEBATE_FORMALITY_SPECTRUM].reverse();
 type DebateCastSlot = "moderator" | "forAdvocate" | "againstAdvocate";
 
@@ -856,7 +901,7 @@ type DebateStageAlignmentDrag = {
   startClientY: number;
   stageWidth: number;
   stageHeight: number;
-  startAlignment: DebateStageAlignmentV6;
+  startAlignment: DebateStageAlignmentV14;
 };
 
 const DEBATE_PLAYER_JUDGE_PRISM: DebateBotSummary = {
@@ -1026,8 +1071,12 @@ const DebateAudiencePortrait = memo(function DebateAudiencePortrait({
         renderBotAvatar(bot, {
           role: "audience",
           lookAtRole: null,
-          highDefinition: false,
-          compact: true,
+          consumer: "gallery",
+          presentation: debateAvatarPresentation({
+            consumer: "gallery",
+            role: "for",
+            cameraView: "wide",
+          }),
           // Ambient chatter animates only the compact mouth. A short semantic
           // reaction may still light the complete face when quality allows.
           talking: false,
@@ -1464,9 +1513,14 @@ const DEBATE_AUDIENCE_DUCKED_MIX = {
 } as const satisfies SessionAtmosphereMix;
 const DEBATE_JURY_CHAMBER_MIX = {
   background: 0.12,
-  grain: 0,
+  grain: 0.1,
   foley: 0.09,
 } as const satisfies SessionAtmosphereMix;
+const DEBATE_JURY_CHAMBER_REACTION_TRIM = 0.28;
+const DEBATE_JURY_CHAMBER_REACTION_LOW_CUT_HZ = 180;
+const DEBATE_JURY_CHAMBER_REACTION_HIGH_CUT_HZ = 2_400;
+const DEBATE_FORUM_REACTION_LOW_CUT_HZ = 110;
+const DEBATE_FORUM_REACTION_HIGH_CUT_HZ = 7_000;
 const DEBATE_AMBIENT_FOLEY_PROFILE = {
   minDelayMs: 14_000,
   maxDelayMs: 32_000,
@@ -1513,6 +1567,19 @@ function debateParticipantFloorRole(
   }
   const sideId = event.sideId ?? session.playerSideId;
   return sideId === "for" || sideId === "against" ? sideId : null;
+}
+
+function debateEventFloorRole(
+  session: DebateSessionV1 | null,
+  event: DebateEventV1 | null,
+): DebateForumRole | null {
+  if (!session || !event) return null;
+  const participantRole = debateParticipantFloorRole(session, event);
+  if (participantRole) return participantRole;
+  if (event.speakerBotId === session.moderator.id) return "moderator";
+  if (event.speakerBotId === session.forAdvocate.id) return "for";
+  if (event.speakerBotId === session.againstAdvocate.id) return "against";
+  return null;
 }
 
 function debateParticipantPrismAvatar(
@@ -1955,6 +2022,8 @@ function DebateFavorabilityMeter(props: {
   juryEnabled: boolean;
   juryLeaningPips?: readonly ("participant" | "opponent" | "neutral")[];
   detail?: string | null;
+  meterName?: string;
+  meterRole?: "participant" | "spectator";
 }): React.JSX.Element {
   const position = debateFavorabilityPosition(props.total);
   const playerColor =
@@ -1968,6 +2037,7 @@ function DebateFavorabilityMeter(props: {
   return (
     <div
       className={styles.participantFavorabilityMeter}
+      data-debate-favor-meter={props.meterRole ?? "participant"}
       style={
         {
           "--participant-meter-player-color": playerColor,
@@ -1975,7 +2045,7 @@ function DebateFavorabilityMeter(props: {
         } as CSSProperties
       }
       role="meter"
-      aria-label={`Favorability ${Math.round(props.total)}`}
+      aria-label={`${props.meterName ?? "Favorability"} ${Math.round(props.total)}`}
       aria-valuemin={-100}
       aria-valuemax={100}
       aria-valuenow={Math.round(props.total)}
@@ -2295,6 +2365,19 @@ function debateExpectedBotId(session: DebateSessionV1): string | null {
   return null;
 }
 
+function debateSessionThroughPlayhead(
+  session: DebateSessionV1,
+  lastHeardEventId: string | null,
+): DebateSessionV1 {
+  if (!lastHeardEventId) return session;
+  const heard = session.events.find((event) => event.id === lastHeardEventId);
+  if (!heard) return session;
+  return {
+    ...session,
+    events: session.events.filter((event) => event.sequence <= heard.sequence),
+  };
+}
+
 function debatePresentationEvents(
   previous: DebateSessionV1 | null,
   next: DebateSessionV1,
@@ -2307,6 +2390,7 @@ function debatePresentationEvents(
     (event) =>
       !previousEventIds.has(event.id) &&
       debateJuryEventCanPresent(next, event) &&
+      debateJuryEventIsPubliclyAudible(event) &&
       !(
         next.jury.enabled &&
         next.playerRole === "participant" &&
@@ -2334,12 +2418,12 @@ function debatePresentationEvents(
 }
 
 function debateJuryAutoChamberActive(session: DebateSessionV1): boolean {
-  return session.stepKey.startsWith("jury_deliberation_");
+  return debateJuryChamberStepActive(session);
 }
 
 /**
- * Manual Jury is an escape hatch when Auto fails to enter the chamber.
- * Keep it closed until visible deliberation owns the floor.
+ * Leftover recovery if cameraMode is still "jury" from an older session.
+ * Jury is not a selectable camera; Auto enters the chamber as a required scene.
  */
 function debateJuryManualCameraAvailable(session: DebateSessionV1): boolean {
   return session.jury.enabled && debateJuryAutoChamberActive(session);
@@ -2351,7 +2435,7 @@ function debateJuryCameraIsActive(
   presentation?: DebateJuryCameraPresentationV1,
 ): boolean {
   if (!session.jury.enabled) return false;
-  // Locked manual Jury shot — recovery path when Auto leaves you on the forum.
+  // Recover a leftover "jury" mode while the required chamber scene is up.
   if (cameraMode === "jury" && debateJuryManualCameraAvailable(session)) {
     return true;
   }
@@ -2784,6 +2868,7 @@ function DebateIdentOverlay({
   holdPhase,
   holdAction,
   holdBackAction,
+  holdCheckpoints,
 }: {
   kind: DebateIdentKind;
   session: DebateSessionV1;
@@ -2804,6 +2889,11 @@ function DebateIdentOverlay({
     label: string;
     disabled?: boolean;
     onClick: () => void;
+  };
+  holdCheckpoints?: {
+    checkpoints: readonly DebateTurnCheckpointV1[];
+    selectedId: string | null;
+    onSelect: (eventId: string) => void;
   };
 }): React.JSX.Element {
   const intro = kind === "intro";
@@ -2873,6 +2963,35 @@ function DebateIdentOverlay({
             ) : null}
             {holdDetail ? (
               <p className={styles.identHoldDetail}>{holdDetail}</p>
+            ) : null}
+            {holdCheckpoints && holdCheckpoints.checkpoints.length > 1 ? (
+              <div
+                className={styles.identHoldCheckpoints}
+                role="group"
+                aria-label="Start from a prepared turn"
+              >
+                <small className={styles.identHoldCheckpointsLabel}>
+                  Start from
+                </small>
+                <div className={styles.identHoldCheckpointRow}>
+                  {holdCheckpoints.checkpoints.map((checkpoint) => (
+                    <button
+                      key={checkpoint.id}
+                      type="button"
+                      className={styles.identHoldCheckpoint}
+                      data-active={
+                        holdCheckpoints.selectedId === checkpoint.id
+                          ? "true"
+                          : undefined
+                      }
+                      aria-pressed={holdCheckpoints.selectedId === checkpoint.id}
+                      onClick={() => holdCheckpoints.onSelect(checkpoint.eventId)}
+                    >
+                      {checkpoint.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             ) : null}
             {holdAction || holdBackAction ? (
               <div className={styles.identHoldActionRow}>
@@ -4062,14 +4181,21 @@ function debateBotPresentation(
       null;
     if (identitySource) identityEffect = "identity_shapeshift";
   }
-  const falseName = effects.some((effect) => effect.type === "false_name")
-    ? DEBATE_FALSE_NAMES[
-        stableIndex(
-          `${session.id}:${bot.id}:false-name`,
-          DEBATE_FALSE_NAMES.length,
-        )
-      ]
-    : null;
+  const falseNameEffect = effects.find((effect) => effect.type === "false_name");
+  const falseName =
+    falseNameEffect?.type === "false_name"
+      ? falseNameEffect.pool === "given_plus_random_surname"
+        ? pickBotSessionSurnameNameV1(
+            `${session.id}:${bot.id}:false-name`,
+            bot.name,
+          )
+        : DEBATE_FALSE_NAMES[
+            stableIndex(
+              `${session.id}:${bot.id}:false-name`,
+              DEBATE_FALSE_NAMES.length,
+            )
+          ]
+      : null;
   const visibilityEffect = effects.find(
     (effect) => effect.type === "avatar_visibility",
   );
@@ -4134,6 +4260,36 @@ function DebateIdentityPresentationBlackout({
   );
 }
 
+/**
+ * Approximate house fill while opening work continues. Unlock (buffer ready)
+ * hurries remaining seats; until then people linger in. Never dump the house
+ * in one frame.
+ */
+async function waitForDebateGalleryArrival(args: {
+  isCurrent: () => boolean;
+  nonPlayerCount: number;
+  progressRatio: () => number | null;
+  startedAt: number;
+  unlockAt: number | null;
+  onTick: (now: number) => void;
+}): Promise<"complete" | "cancelled"> {
+  while (args.isCurrent()) {
+    const now = Date.now();
+    args.onTick(now);
+    const arrival = debateGalleryArrivalRevealedCount({
+      nonPlayerCount: args.nonPlayerCount,
+      progressRatio: args.progressRatio(),
+      bakeUnlocked: args.unlockAt != null,
+      elapsedMs: now - args.startedAt,
+      unlockElapsedMs:
+        args.unlockAt == null ? 0 : Math.max(0, now - args.unlockAt),
+    });
+    if (arrival.arrivalComplete) return "complete";
+    await new Promise((resolve) => window.setTimeout(resolve, 50));
+  }
+  return "cancelled";
+}
+
 export function DebateExperience(
   props: DebateExperienceProps,
 ): React.JSX.Element {
@@ -4168,6 +4324,7 @@ export function DebateExperience(
   const spectatorBakeAbortRef = useRef<AbortController | null>(null);
   const spectatorBakeSessionIdRef = useRef<string | null>(null);
   const spectatorBakeArtifactRef = useRef<LiveBakeArtifactV1 | null>(null);
+  const spectatorBakeRestartAtMsRef = useRef(0);
   /** Opening buffer ready — remaining seats hurry in. */
   const [spectatorGalleryBakeUnlocked, setSpectatorGalleryBakeUnlocked] =
     useState(false);
@@ -4176,6 +4333,10 @@ export function DebateExperience(
   const [spectatorGalleryArrivalNowMs, setSpectatorGalleryArrivalNowMs] =
     useState(() => Date.now());
   const spectatorGalleryArrivalCompleteRef = useRef(false);
+  const galleryOpeningMurmurStartedAtRef = useRef<number | null>(null);
+  const [galleryOpeningMurmurNowMs, setGalleryOpeningMurmurNowMs] = useState(
+    () => Date.now(),
+  );
   const [observerPerspective, setObserverPerspective] = useState<
     "live" | "replay"
   >("live");
@@ -4199,6 +4360,17 @@ export function DebateExperience(
     const intervalId = window.setInterval(() => {
       setSpectatorGalleryArrivalNowMs(Date.now());
     }, 50);
+    return () => window.clearInterval(intervalId);
+  }, [activeSession, view]);
+  useEffect(() => {
+    if (view !== "live" || !activeSession) return;
+    if (spectatorGalleryArrivalCompleteRef.current) return;
+    const startedAt = Date.now();
+    galleryOpeningMurmurStartedAtRef.current = startedAt;
+    setGalleryOpeningMurmurNowMs(startedAt);
+    const intervalId = window.setInterval(() => {
+      setGalleryOpeningMurmurNowMs(Date.now());
+    }, 80);
     return () => window.clearInterval(intervalId);
   }, [activeSession, view]);
   const [persistedPresenceBeats, setPersistedPresenceBeats] = useState<
@@ -4525,6 +4697,8 @@ export function DebateExperience(
   const sealedCompletedRailRef = useRef(false);
   const [transcriptCopyState, setTranscriptCopyState] =
     useState<DebateClipboardState>("idle");
+  const [archiveTranscriptCopyStates, setArchiveTranscriptCopyStates] =
+    useState<Record<string, DebateClipboardState>>({});
   const [slateStorySessionId, setSlateStorySessionId] = useState<string | null>(
     null,
   );
@@ -4575,6 +4749,8 @@ export function DebateExperience(
   const archiveReturnLookaheadAbortRef = useRef<AbortController | null>(null);
   /** Guards delayed buffer responses from replacing a session after Start/Resume. */
   const archiveReturnTitleSessionIdRef = useRef<string | null>(null);
+  /** Reuse the same create key so a failed Start cannot spawn a second proceeding. */
+  const startCreateIdempotencyKeyRef = useRef<string | null>(null);
   const activeSessionRef = useRef(activeSession);
   useEffect(() => {
     activeSessionIdRef.current = activeSession?.id ?? null;
@@ -4605,6 +4781,42 @@ export function DebateExperience(
   const [liveReveal, setLiveRevealState] = useState<DebateLiveReveal | null>(
     null,
   );
+  const [speechMouthResting, setSpeechMouthResting] = useState(false);
+  const speechMouthRestingRef = useRef(false);
+  const speechMouthRestTimerRef = useRef<number | null>(null);
+  const lastSpeechElapsedMsRef = useRef<number | null>(null);
+  const lastSpeechEventIdRef = useRef<string | null>(null);
+  const clearDebateSpeechMouthRest = useCallback((): void => {
+    if (speechMouthRestTimerRef.current !== null) {
+      window.clearTimeout(speechMouthRestTimerRef.current);
+      speechMouthRestTimerRef.current = null;
+    }
+    if (speechMouthRestingRef.current) {
+      speechMouthRestingRef.current = false;
+      setSpeechMouthResting(false);
+    }
+  }, []);
+  const noteDebateSpeechVoiceProgress = useCallback((): void => {
+    if (speechMouthRestingRef.current) {
+      speechMouthRestingRef.current = false;
+      setSpeechMouthResting(false);
+    }
+    if (speechMouthRestTimerRef.current !== null) {
+      window.clearTimeout(speechMouthRestTimerRef.current);
+    }
+    speechMouthRestTimerRef.current = window.setTimeout(() => {
+      speechMouthRestTimerRef.current = null;
+      speechMouthRestingRef.current = true;
+      setSpeechMouthResting(true);
+    }, DEBATE_MOUTH_PAUSE_CLOSE_MS);
+  }, []);
+  useEffect(() => {
+    return () => {
+      if (speechMouthRestTimerRef.current !== null) {
+        window.clearTimeout(speechMouthRestTimerRef.current);
+      }
+    };
+  }, []);
   const replaceLiveReveal = useCallback(
     (next: DebateLiveReveal | null, renderBoundary = true): void => {
       if (next) {
@@ -4617,9 +4829,26 @@ export function DebateExperience(
       } else {
         presentationStore.clear(activeSessionIdRef.current);
       }
+      if (!next?.speechTiming) {
+        lastSpeechElapsedMsRef.current = null;
+        lastSpeechEventIdRef.current = null;
+        clearDebateSpeechMouthRest();
+      } else if (
+        lastSpeechEventIdRef.current !== next.eventId ||
+        lastSpeechElapsedMsRef.current == null ||
+        next.speechTiming.elapsedMs > lastSpeechElapsedMsRef.current
+      ) {
+        lastSpeechEventIdRef.current = next.eventId;
+        lastSpeechElapsedMsRef.current = next.speechTiming.elapsedMs;
+        noteDebateSpeechVoiceProgress();
+      }
       if (renderBoundary) setLiveRevealState(next);
     },
-    [presentationStore],
+    [
+      clearDebateSpeechMouthRest,
+      noteDebateSpeechVoiceProgress,
+      presentationStore,
+    ],
   );
   const updateLiveReveal = useCallback(
     (
@@ -4878,6 +5107,13 @@ export function DebateExperience(
   const [resumeCeremonySessionId, setResumeCeremonySessionId] = useState<
     string | null
   >(null);
+  const resumeCeremonySessionIdRef = useRef<string | null>(null);
+  resumeCeremonySessionIdRef.current = resumeCeremonySessionId;
+  const [checkpointPlayheadEventId, setCheckpointPlayheadEventId] = useState<
+    string | null
+  >(null);
+  const checkpointPlayheadEventIdRef = useRef<string | null>(null);
+  checkpointPlayheadEventIdRef.current = checkpointPlayheadEventId;
   const [debateIdentPlaying, setDebateIdentPlaying] =
     useState<DebateIdentKind | null>(null);
   /** Archive-open preparation owns the title card until its first spoken beat is hot. */
@@ -4926,9 +5162,6 @@ export function DebateExperience(
   const [leaveDebateArmed, setLeaveDebateArmed] = useState(false);
   const [leaveDebatePortalTarget, setLeaveDebatePortalTarget] =
     useState<HTMLElement | null>(null);
-  const spectatorPresentationSealInFlightRef = useRef<string | null>(null);
-  /** True only after Spectator watch finishes the full presentation loop. */
-  const spectatorWatchPresentationCompleteRef = useRef(false);
   const [judgeGavelCeremony, setJudgeGavelCeremony] =
     useState<DebateJudgeGavelCeremony | null>(null);
   const [interjectionDraft, setInterjectionDraft] = useState("");
@@ -4990,18 +5223,15 @@ export function DebateExperience(
     juryDeliberationInFlightSessionId,
     setJuryDeliberationInFlightSessionId,
   ] = useState<string | null>(null);
-  const [juryDeliberationMouthTickMs, setJuryDeliberationMouthTickMs] =
-    useState(0);
   const [objectionRulingDecision, setObjectionRulingDecision] =
     useState<DebateObjectionRulingDecision | null>(null);
-  const [stageAlignment, setStageAlignment] = useState<DebateStageAlignmentV6>(
+  const [stageAlignment, setStageAlignment] = useState<DebateStageAlignmentV14>(
     () => copyDebateStageAlignment(DEFAULT_DEBATE_STAGE_ALIGNMENT),
   );
   const [stageAlignmentDraft, setStageAlignmentDraft] =
-    useState<DebateStageAlignmentV6>(() =>
+    useState<DebateStageAlignmentV14>(() =>
       copyDebateStageAlignment(DEFAULT_DEBATE_STAGE_ALIGNMENT),
     );
-  const [stageDirectionOpen, setStageDirectionOpen] = useState(false);
   const [stageAlignmentOpen, setStageAlignmentOpen] = useState(false);
   const [stageAlignmentPreviewCastIds, setStageAlignmentPreviewCastIds] =
     useState<DebateCastSelection | null>(null);
@@ -5131,6 +5361,9 @@ export function DebateExperience(
   const transcriptCopyResetTimerRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
+  const archiveTranscriptCopyResetTimersRef = useRef(
+    new Map<string, ReturnType<typeof setTimeout>>(),
+  );
   const caseBoardCopyResetTimerRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
@@ -5799,6 +6032,8 @@ export function DebateExperience(
 
   useEffect(() => {
     mountedRef.current = true;
+    const archiveTranscriptCopyResetTimers =
+      archiveTranscriptCopyResetTimersRef.current;
     void loadSessions();
     return () => {
       mountedRef.current = false;
@@ -5810,6 +6045,10 @@ export function DebateExperience(
         clearTimeout(transcriptCopyResetTimerRef.current);
         transcriptCopyResetTimerRef.current = null;
       }
+      for (const timer of archiveTranscriptCopyResetTimers.values()) {
+        clearTimeout(timer);
+      }
+      archiveTranscriptCopyResetTimers.clear();
       if (caseBoardCopyResetTimerRef.current) {
         clearTimeout(caseBoardCopyResetTimerRef.current);
         caseBoardCopyResetTimerRef.current = null;
@@ -6012,6 +6251,9 @@ export function DebateExperience(
   }, [sourceDrawerId]);
   const activeSessionId = activeSession?.id ?? null;
   const activeSessionEventCount = activeSession?.events.length ?? 0;
+  useEffect(() => {
+    setCheckpointPlayheadEventId(null);
+  }, [activeSessionId]);
   const pendingJuryComment = activeSession
     ? debateLatestPendingJuryComment(activeSession, playedJuryCommentIds)
     : null;
@@ -6030,6 +6272,14 @@ export function DebateExperience(
         presenting,
         event: cameraPresentationEvent,
         preparingSpeakerBotId: voicePreparationSpeakerBotId,
+        resumeCeremonyActive:
+          resumeCeremonySessionId === activeSession.id,
+        bookmarkEvent: debateTurnCheckpointEvent(
+          activeSession,
+          checkpointPlayheadEventId ??
+            activeSession.pausedPresentationEventId ??
+            presentationEventId,
+        ),
       })
     : false;
   const introCameraStateRef = useRef<{
@@ -6044,6 +6294,9 @@ export function DebateExperience(
   const [introCameraView, setIntroCameraView] =
     useState<DebateModeratorCameraView | null>(null);
   const [introCameraTick, setIntroCameraTick] = useState(0);
+  const [coverageCameraView, setCoverageCameraView] =
+    useState<DebateSpeechCameraView | null>(null);
+  const [coverageCameraTick, setCoverageCameraTick] = useState(0);
   // Speech ticks often skip React liveReveal (store-only updates). Intro camera
   // must follow the presentation store or it stays locked on Moderator.
   const introCameraSpeechSnapshot = useSyncExternalStore(
@@ -6059,6 +6312,8 @@ export function DebateExperience(
       view !== "live" ||
       !presenting ||
       !event ||
+      juryCameraActive ||
+      debateEventUsesJuryCamera(event) ||
       !debateEventIsModeratorMonologue(event) ||
       (effectiveCameraMode !== "auto" && effectiveCameraMode !== "jury")
     ) {
@@ -6122,6 +6377,80 @@ export function DebateExperience(
     effectiveCameraMode,
     introCameraSpeechSnapshot,
     introCameraTick,
+    juryCameraActive,
+    presenting,
+    view,
+  ]);
+  useEffect(() => {
+    const session = activeSession;
+    const event = cameraPresentationEvent;
+    const speakerRole = debateEventFloorRole(session, event);
+    if (
+      !session ||
+      !event ||
+      !speakerRole ||
+      view !== "live" ||
+      !presenting ||
+      juryCameraActive ||
+      debateEventUsesJuryCamera(event) ||
+      debateEventIsModeratorMonologue(event) ||
+      (effectiveCameraMode !== "auto" && effectiveCameraMode !== "jury")
+    ) {
+      setCoverageCameraView(null);
+      return;
+    }
+    const spoken = debateSpokenText(event.content);
+    const durationMs = Math.max(
+      1,
+      introCameraSpeechSnapshot.eventId === event.id
+        ? (introCameraSpeechSnapshot.speechTiming?.durationMs ??
+          debateRevealDurationMs(spoken))
+        : debateRevealDurationMs(spoken),
+    );
+    const elapsedMs =
+      introCameraSpeechSnapshot.eventId === event.id
+        ? (introCameraSpeechSnapshot.speechTiming?.elapsedMs ??
+          Math.round(
+            (introCameraSpeechSnapshot.visibleContent.length /
+              Math.max(1, spoken.length)) *
+              durationMs,
+          ))
+        : 0;
+    const coverageView = resolveDebateSpeechCoverageView({
+      speakerRole,
+      elapsedMs,
+      durationMs,
+      seed: event.id,
+      content: spoken,
+    });
+    setCoverageCameraView(coverageView);
+    const remainingMs = debateSpeechCoverageNextTickMs({
+      elapsedMs,
+      durationMs,
+      seed: event.id,
+      content: spoken,
+    });
+    // Speech snapshots drive most cuts. Only timer-nudge an imminent
+    // boundary, or the leave while a coverage shot is already up.
+    if (
+      remainingMs != null &&
+      remainingMs > 0 &&
+      (coverageView !== null || remainingMs <= 480)
+    ) {
+      const timer = window.setTimeout(
+        () => setCoverageCameraTick((tick) => tick + 1),
+        Math.max(16, remainingMs),
+      );
+      return () => window.clearTimeout(timer);
+    }
+    return undefined;
+  }, [
+    activeSession,
+    cameraPresentationEvent,
+    coverageCameraTick,
+    effectiveCameraMode,
+    introCameraSpeechSnapshot,
+    juryCameraActive,
     presenting,
     view,
   ]);
@@ -6283,6 +6612,47 @@ export function DebateExperience(
       transcriptCopyResetTimerRef.current = null;
     }, 1_800);
   }, [activeSession, transcriptCopyState, verboseTranscriptForSession]);
+
+  const copyArchiveVerboseTranscript = useCallback(
+    async (archived: DebateSessionListItemV1): Promise<void> => {
+      if (archiveTranscriptCopyStates[archived.id] === "copying") return;
+      const previousTimer = archiveTranscriptCopyResetTimersRef.current.get(
+        archived.id,
+      );
+      if (previousTimer) clearTimeout(previousTimer);
+      setArchiveTranscriptCopyStates((current) => ({
+        ...current,
+        [archived.id]: "copying",
+      }));
+      try {
+        const perspective = archived.status === "completed" ? "replay" : "live";
+        const result = await request<{ session: DebateSessionV1 }>(
+          `/api/debates/${encodeURIComponent(archived.id)}?perspective=${perspective}`,
+        );
+        await writeDebateClipboardText(
+          await verboseTranscriptForSession(result.session),
+        );
+        setArchiveTranscriptCopyStates((current) => ({
+          ...current,
+          [archived.id]: "copied",
+        }));
+      } catch {
+        setArchiveTranscriptCopyStates((current) => ({
+          ...current,
+          [archived.id]: "failed",
+        }));
+      }
+      const resetTimer = setTimeout(() => {
+        setArchiveTranscriptCopyStates((current) => ({
+          ...current,
+          [archived.id]: "idle",
+        }));
+        archiveTranscriptCopyResetTimersRef.current.delete(archived.id);
+      }, 1_800);
+      archiveTranscriptCopyResetTimersRef.current.set(archived.id, resetTimer);
+    },
+    [archiveTranscriptCopyStates, request, verboseTranscriptForSession],
+  );
 
   const createDebateStoryInSlate = useCallback(async (): Promise<void> => {
     if (!activeSession || !onCreateSlateStory || slateStorySessionId) return;
@@ -6954,6 +7324,7 @@ export function DebateExperience(
   }, [castHueLensCenter, visibleCastBots]);
 
   const startNewDebate = (): void => {
+    startCreateIdempotencyKeyRef.current = null;
     setView("dashboard");
     setStudioPanel("motion");
     setRoomTuningOpen(false);
@@ -7119,12 +7490,12 @@ export function DebateExperience(
     setActiveJurySeatIndex(seatIndex);
   };
 
-  const randomizeCast = (): void => {
+  const randomizeCast = (): boolean => {
     const nextCast =
       playerRole === "spectator"
         ? randomDebateCast(bots.map((bot) => bot.id))
         : randomDebatePlayerJudgeCast(bots.map((bot) => bot.id));
-    if (!nextCast) return;
+    if (!nextCast) return false;
     const resolvedCast =
       playerRole === "judge"
         ? { ...nextCast, moderator: cast.moderator }
@@ -7154,6 +7525,7 @@ export function DebateExperience(
           ? participantOpponentCastSlot
           : "moderator",
     );
+    return true;
   };
 
   const stopStageAlignmentSoundCheck = (): void => {
@@ -7191,6 +7563,7 @@ export function DebateExperience(
   };
 
   const openStageAlignment = (): void => {
+    if (!DEBATE_STAGE_LAYOUT_AUTHORING_ENABLED) return;
     if (!randomizeStageAlignmentPreviewCast()) return;
     setStageAlignmentDraft(copyDebateStageAlignment(stageAlignment));
     setStageAlignmentPreviewCamera("wide");
@@ -7220,26 +7593,8 @@ export function DebateExperience(
     if (token <= 0 || token === alignmentLabLaunchTokenRef.current) return;
     alignmentLabLaunchTokenRef.current = token;
     props.onAlignmentLabLaunchConsumed?.();
-    setStageDirectionOpen(false);
     openStageAlignmentRef.current();
   }, [props.alignmentLabLaunchToken, props.onAlignmentLabLaunchConsumed]);
-
-  const applyStageDirectionPreset = (
-    preset: DebateStageDirectionPreset,
-  ): void => {
-    const next = applyDebateStageDirectionPreset(stageAlignment, preset);
-    try {
-      writeDebateStageAlignment(
-        window.localStorage,
-        props.storageScopeId,
-        next,
-      );
-      setStageAlignment(next);
-      setStageAlignmentDraft(copyDebateStageAlignment(next));
-    } catch {
-      setError("Debate stage direction could not be saved on this device.");
-    }
-  };
 
   const cancelStageAlignment = (): void => {
     stopStageAlignmentSoundCheck();
@@ -7636,8 +7991,10 @@ export function DebateExperience(
   );
 
   const synthesize = useCallback(
-    async (direction = ""): Promise<void> => {
-      const resolvedTopic = (await expandDebateSeedDraft(topic)).trim();
+    async (direction = "", topicOverride?: string): Promise<void> => {
+      const resolvedTopic = (
+        await expandDebateSeedDraft(topicOverride ?? topic)
+      ).trim();
       if (!resolvedTopic || busy) return;
       inventWarmupAbortRef.current?.abort();
       const warmupController = new AbortController();
@@ -7997,6 +8354,233 @@ export function DebateExperience(
     }),
     [busy, generateNewDuelFromPrism, inventWarmup, newDuelGenerateBusy, props.bots.length],
   );
+
+  const refractMotionSection = useCallback(
+    async (direction: string): Promise<void> => {
+      setStudioPanel("motion");
+      const seed = debateStudioNavMotionSeed({
+        topic,
+        motion: motion.motion,
+        randomTerritory: randomDebateTerritory,
+      });
+      if (seed !== topic) setTopic(seed);
+      await synthesize(direction, seed);
+    },
+    [motion.motion, synthesize, topic],
+  );
+
+  const refractCastSection = (): void => {
+    setStudioPanel("cast");
+    if (!debateStudioNavCastCanRandomize(bots.length, playerRole)) {
+      setError(
+        playerRole === "spectator"
+          ? "Create at least three Library bots to seat a Spectator proceeding."
+          : "Create at least two Library bots to seat this proceeding.",
+      );
+      return;
+    }
+    if (!randomizeCast()) {
+      setError("Prism could not reseat the proceeding from the Library.");
+      return;
+    }
+    setRefractionNotice({
+      title: "Cast refreshed",
+      detail: "Prism reseated the proceeding. Willingness checks start fresh.",
+    });
+  };
+
+  const refractEvidenceSection = useCallback(
+    async (direction: string): Promise<void> => {
+      setStudioPanel("evidence");
+      const seed =
+        direction.trim() ||
+        motion.motion.trim() ||
+        topic.trim() ||
+        "a surprising physical prop for this proceeding";
+      const controller = new AbortController();
+      const refractField = async (
+        kind: PrismRefractDebateTextTargetKind,
+        currentValue: string,
+        rejectedValues: readonly string[] = [],
+      ): Promise<string> => {
+        try {
+          return await generateDebateRefractField(
+            kind,
+            currentValue,
+            rejectedValues,
+            controller.signal,
+          );
+        } catch (caught) {
+          if (
+            caught instanceof DOMException &&
+            caught.name === "AbortError"
+          ) {
+            throw caught;
+          }
+          return "";
+        }
+      };
+      try {
+        const [pair1, research, scholar, notes] = await Promise.all([
+          refractField("debate.setup.exhibitPair", seed),
+          refractField("debate.setup.researchQuery", researchQuery),
+          refractField("debate.setup.scholarQuery", scholarQuery),
+          refractField("debate.setup.playerNotes", evidence.notes),
+        ]);
+        const pair2 = await refractField("debate.setup.exhibitPair", seed, [
+          pair1,
+        ]);
+        const drafts: DebateEvidenceObjectDraft[] = [];
+        for (const pair of [pair1, pair2]) {
+          const parsed = debateEvidenceObjectFromPrismCandidate(pair);
+          if (parsed) drafts.push(parsed);
+        }
+        while (drafts.length < 2) {
+          drafts.push(
+            randomDebateEvidenceObject(
+              Math.random,
+              drafts.map((draft) => debateEvidenceExhibitTitle(draft)),
+            ),
+          );
+        }
+        const exhibits = debateEvidenceExhibitsFromObjectDrafts(drafts.slice(0, 2));
+        setEvidence((current) => ({
+          ...current,
+          notes: notes || current.notes,
+          exhibits,
+        }));
+        if (research) setResearchQuery(research);
+        if (scholar) setScholarQuery(scholar);
+        setEvidenceObjectSeed("");
+        setEvidenceObjectDraft(null);
+        setEditingExhibitId(null);
+        setEvidenceDecisionMade(true);
+        setRefractionNotice({
+          title: "Evidence refreshed",
+          detail:
+            "Prism drafted a fresh optional packet. Existing sources stay; search still waits for you.",
+        });
+      } catch (caught) {
+        if (
+          caught instanceof DOMException &&
+          caught.name === "AbortError"
+        ) {
+          return;
+        }
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : "Prism could not refresh the evidence packet.",
+        );
+      }
+    },
+    [
+      evidence.notes,
+      generateDebateRefractField,
+      motion.motion,
+      researchQuery,
+      scholarQuery,
+      topic,
+    ],
+  );
+
+  const refractArchiveSection = (): void => {
+    setStudioPanel("archive");
+    const highlightedId = nextDebateArchiveHighlightId(
+      sessions.map((session) => session.id),
+      expandedArchiveSessionId,
+    );
+    if (highlightedId) setExpandedArchiveSessionId(highlightedId);
+    setRefractionNotice(
+      debateStudioNavArchiveNotice({
+        highlightedId,
+        sessionCount: sessions.length,
+        alreadyExpanded: highlightedId === expandedArchiveSessionId,
+      }),
+    );
+  };
+
+  const refreshStageLayoutFromPrism = (): void => {
+    if (stageAlignmentOpen) {
+      stopStageAlignmentSoundCheck();
+      if (!randomizeStageAlignmentPreviewCast()) return;
+      setStageAlignmentPreviewEvidenceEmoji(
+        pickDebateStageAlignmentEvidenceEmoji(),
+      );
+      setRefractionNotice({
+        title: "Stage preview refreshed",
+        detail:
+          "Prism shuffled the preview cast and exhibit emoji. The saved Main arrangement is unchanged.",
+      });
+      return;
+    }
+    openStageAlignment();
+  };
+
+  const motionRailMagic = useMemo<PrismRefractMagicTarget>(
+    () => ({
+      id: DEBATE_STUDIO_NAV_MOTION_REFRACT_ID,
+      label: "Rebuild the debate motion",
+      kind: "magic",
+      ownsPresentation: true,
+      disabled: () =>
+        busy ||
+        motionOptionsBusy ||
+        newDuelGenerateBusy ||
+        inventWarmup !== null,
+      run: (direction) => void refractMotionSection(direction),
+    }),
+    [
+      busy,
+      inventWarmup,
+      motionOptionsBusy,
+      newDuelGenerateBusy,
+      refractMotionSection,
+    ],
+  );
+
+  const castRailMagic: PrismRefractMagicTarget = {
+    id: DEBATE_STUDIO_NAV_CAST_REFRACT_ID,
+    label: "Reseat the proceeding",
+    kind: "magic",
+    ownsPresentation: true,
+    disabled: () =>
+      busy || !debateStudioNavCastCanRandomize(bots.length, playerRole),
+    run: () => refractCastSection(),
+  };
+
+  const evidenceRailMagic = useMemo<PrismRefractMagicTarget>(
+    () => ({
+      id: DEBATE_STUDIO_NAV_EVIDENCE_REFRACT_ID,
+      label: "Refresh optional evidence",
+      kind: "magic",
+      disabled: () => busy || evidenceObjectSuggestionBusy,
+      run: (direction) => void refractEvidenceSection(direction),
+    }),
+    [
+      busy,
+      evidenceObjectSuggestionBusy,
+      refractEvidenceSection,
+    ],
+  );
+
+  const archiveRailMagic: PrismRefractMagicTarget = {
+    id: DEBATE_STUDIO_NAV_ARCHIVE_REFRACT_ID,
+    label: "Highlight another proceeding",
+    kind: "magic",
+    ownsPresentation: true,
+    disabled: () => busy,
+    run: () => refractArchiveSection(),
+  };
+
+  const stageLayoutRailMagic: PrismRefractMagicTarget = {
+    id: DEBATE_STUDIO_NAV_STAGE_LAYOUT_REFRACT_ID,
+    label: "Refresh the stage preview",
+    kind: "magic",
+    ownsPresentation: true,
+    disabled: () => busy || bots.length < 3,
+    run: () => refreshStageLayoutFromPrism(),
+  };
 
   const selectSlate = (slate: DebateMotionSlateV1): void => {
     setMotion(copyDebateMotionSlate(slate));
@@ -8867,7 +9451,6 @@ export function DebateExperience(
     ): void => {
       if (!props.audioEnabled || props.audioVolume <= 0) return;
       if (participantSlowTimeActive) return;
-      if (juryCameraActive) return;
       if (
         (reactionKind === "question" || reactionKind === "session") &&
         !debateAudienceAllowsAttentiveFoley(debateMaterialQuality)
@@ -8881,12 +9464,17 @@ export function DebateExperience(
       const reaction = DEBATE_AUDIENCE_REACTIONS[reactionKind];
       const intensityScale =
         intensity === 1 ? 0.5 : intensity === 2 ? 0.76 : 1;
+      const chamberMuffled = juryCameraActive;
       audienceReactionFoleyUntilRef.current = now + reaction.durationMs * 0.9;
       audienceReactionFoleyStartsRef.current += 1;
       debateAtmosphereControllerRef.current?.playFoley(reaction.url, {
-        trim: reaction.trim * intensityScale,
-        lowCutHz: 110,
-        highCutHz: 7_000,
+        trim: reaction.trim * intensityScale * (chamberMuffled ? DEBATE_JURY_CHAMBER_REACTION_TRIM : 1),
+        lowCutHz: chamberMuffled
+          ? DEBATE_JURY_CHAMBER_REACTION_LOW_CUT_HZ
+          : DEBATE_FORUM_REACTION_LOW_CUT_HZ,
+        highCutHz: chamberMuffled
+          ? DEBATE_JURY_CHAMBER_REACTION_HIGH_CUT_HZ
+          : DEBATE_FORUM_REACTION_HIGH_CUT_HZ,
         stereoPan: -0.08,
         tag: `debate-audience-reaction:${eventId}`,
       });
@@ -8908,6 +9496,7 @@ export function DebateExperience(
       if (
         event.speakerKind === "system" ||
         event.kind === "silence" ||
+        !debateJuryEventIsPubliclyAudible(event) ||
         debateEventIsCanonicalSilence(event) ||
         (event.kind === "judge_gavel" &&
           event.gavelReason === "intervention") ||
@@ -9234,6 +9823,14 @@ export function DebateExperience(
               event,
               preparingSpeakerBotId:
                 utterance?.speaker?.id ?? event.speakerBotId,
+              resumeCeremonyActive:
+                resumeCeremonySessionIdRef.current === next.id,
+              bookmarkEvent: debateTurnCheckpointEvent(
+                next,
+                checkpointPlayheadEventIdRef.current ??
+                  next.pausedPresentationEventId ??
+                  event.id,
+              ),
             },
           ),
           gavelLed: gavelCue !== null,
@@ -9668,17 +10265,19 @@ export function DebateExperience(
             speechTiming: null,
           });
           let playbackProgressSeen = false;
+          let lastVoiceProgressAtMs = 0;
           let playbackDurationMs = Math.max(
             1,
             debateRevealDurationMs(spokenText || event.content),
           );
-          const played = await onUtterance?.({
+          const played = await settleDebatePresentationCallback(onUtterance?.({
             ...utterance,
             spokenText,
             voicePerformanceText,
             lifecycle: {
               onStart: (durationMs, alignment) => {
                 if (presentationRunRef.current !== runId) return;
+                lastVoiceProgressAtMs = Date.now();
                 scheduleProceedingsReveal(next.id, event.sequence);
                 playbackDurationMs = Math.max(
                   1,
@@ -9707,6 +10306,7 @@ export function DebateExperience(
               },
               onProgress: (elapsedMs, durationMs) => {
                 if (presentationRunRef.current !== runId) return;
+                lastVoiceProgressAtMs = Date.now();
                 playbackProgressSeen = true;
                 playbackDurationMs = Math.max(1, durationMs);
                 updateLiveReveal((current) =>
@@ -9738,7 +10338,13 @@ export function DebateExperience(
                 });
               },
             },
-          });
+          }),
+          {
+            stallMs: DEBATE_PRESENTATION_FIRST_VOICE_STALL_MS,
+            maxMs: DEBATE_PRESENTATION_CALLBACK_MAX_MS,
+            lastProgressAtMs: () => lastVoiceProgressAtMs,
+          },
+        );
           if (presentationRunRef.current !== runId) return;
           if (!played || !playbackProgressSeen) {
             await new Promise((resolve) => window.setTimeout(resolve, 720));
@@ -10092,17 +10698,19 @@ export function DebateExperience(
         let playbackCancelled = false;
         let playbackAlignment: VoicePlaybackCharacterAlignment | null = null;
         let playbackCompletionContent = "";
+        let lastVoiceProgressAtMs = 0;
         let playbackDurationMs = Math.max(
           1,
           debateRevealDurationMs(spokenText || event.content),
         );
         let lastSpeechRenderAt = 0;
         let lastSemanticKey = "";
-        const played = await onUtterance?.({
+        const played = await settleDebatePresentationCallback(onUtterance?.({
           ...utterance,
           lifecycle: {
             onStart: (durationMs, alignment) => {
               if (presentationRunRef.current !== runId) return;
+              lastVoiceProgressAtMs = Date.now();
               scheduleProceedingsReveal(next.id, event.sequence);
               playbackAlignment = alignment ?? null;
               playbackDurationMs = Math.max(
@@ -10133,6 +10741,7 @@ export function DebateExperience(
             },
             onProgress: (elapsedMs, durationMs) => {
               if (presentationRunRef.current !== runId) return;
+              lastVoiceProgressAtMs = Date.now();
               playbackProgressSeen = true;
               playbackDurationMs = Math.max(1, durationMs);
               const now = performance.now();
@@ -10199,7 +10808,13 @@ export function DebateExperience(
               );
             },
           },
-        });
+        }),
+        {
+          stallMs: DEBATE_PRESENTATION_FIRST_VOICE_STALL_MS,
+          maxMs: DEBATE_PRESENTATION_CALLBACK_MAX_MS,
+          lastProgressAtMs: () => lastVoiceProgressAtMs,
+        },
+        );
         if (presentationRunRef.current !== runId) return;
         if (playbackCancelled) return;
         if (!played && playbackProgressSeen) {
@@ -10208,7 +10823,8 @@ export function DebateExperience(
               ? { ...current, speechTiming: null }
               : current,
           );
-          return;
+          includeInProceedings = true;
+          continue;
         }
         if (!played || !playbackProgressSeen) {
           scheduleProceedingsReveal(next.id, event.sequence);
@@ -10287,22 +10903,6 @@ export function DebateExperience(
       setOverlapSpeakingBotIds(new Set());
       replaceLiveReveal(null);
       setVoicePreparationSpeakerBotId(null);
-      if (next.playerRole === "spectator") {
-        const allPresentable = debatePresentationEvents(
-          null,
-          next,
-          debateJuryCameraIsActive(
-            debateCameraModeForSession(cameraModeRef.current, next),
-            next,
-          ),
-        );
-        const lastPresentableId = allPresentable.at(-1)?.id ?? null;
-        // Only seal after the final presentable beat — not after a partial
-        // recess resume batch or a suspend abort.
-        spectatorWatchPresentationCompleteRef.current =
-          lastPresentableId !== null &&
-          fresh.some((event) => event.id === lastPresentableId);
-      }
     },
     [
       debateMaterialQuality,
@@ -10332,74 +10932,6 @@ export function DebateExperience(
     selectDebateCameraMode("auto");
   }, [activeSession, cameraMode, selectDebateCameraMode]);
 
-  useEffect(() => {
-    const session = activeSession;
-    if (!session?.jury.enabled || view !== "live") {
-      setJuryDeliberationMouthTickMs(0);
-      return;
-    }
-    const silentPreparing =
-      juryDeliberationInFlightSessionId === session.id ||
-      session.jury.phase === "initial_ballots" ||
-      session.jury.phase === "deliberating";
-    if (!silentPreparing) {
-      setJuryDeliberationMouthTickMs(0);
-      return;
-    }
-    setJuryDeliberationMouthTickMs(Date.now());
-    const intervalId = window.setInterval(() => {
-      setJuryDeliberationMouthTickMs(Date.now());
-    }, 120);
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [
-    activeSession,
-    juryDeliberationInFlightSessionId,
-    view,
-  ]);
-
-  useEffect(() => {
-    if (
-      !juryCameraActive ||
-      !activeSession ||
-      !pendingJuryComment ||
-      busy ||
-      presenting
-    ) {
-      return;
-    }
-
-    markJuryCommentPlayed(pendingJuryComment.id);
-    const runId = presentationRunRef.current + 1;
-    presentationRunRef.current = runId;
-    const beforeComment = {
-      ...activeSession,
-      events: activeSession.events.filter(
-        (event) => event.sequence < pendingJuryComment.sequence,
-      ),
-    };
-    const throughComment = {
-      ...activeSession,
-      events: activeSession.events.filter(
-        (event) => event.sequence <= pendingJuryComment.sequence,
-      ),
-    };
-    setPresenting(true);
-    void consumeNewEvents(beforeComment, throughComment, runId).finally(() => {
-      if (presentationRunRef.current !== runId) return;
-      setSpeakerHandoff(null);
-      setPresenting(false);
-    });
-  }, [
-    activeSession,
-    busy,
-    consumeNewEvents,
-    juryCameraActive,
-    markJuryCommentPlayed,
-    pendingJuryComment,
-    presenting,
-  ]);
 
   const playDebateIdent = useCallback(
     async (kind: DebateIdentKind): Promise<void> => {
@@ -10669,9 +11201,6 @@ export function DebateExperience(
       presentationRunRef.current = runId;
       presentationPlaybackEventIdRef.current = null;
       activeSessionIdRef.current = next.id;
-      if (next.playerRole === "spectator") {
-        spectatorWatchPresentationCompleteRef.current = false;
-      }
       presentationStore.clear();
       setVoicePreparationSpeakerBotId(null);
       setSpeakerHandoff(null);
@@ -10816,6 +11345,54 @@ export function DebateExperience(
     ],
   );
 
+  const presentUnheardSpectatorTail = useCallback(async (): Promise<void> => {
+    const session = activeSessionRef.current;
+    if (
+      !session ||
+      session.playerRole !== "spectator" ||
+      (session.status !== "live" && session.status !== "completed") ||
+      presenting ||
+      busy ||
+      pauseInFlightRef.current ||
+      debateFloorMutationInFlightRef.current ||
+      presentationSuspended
+    ) {
+      return;
+    }
+    const previous = debateSessionThroughPlayhead(
+      session,
+      presentationPlaybackEventIdRef.current,
+    );
+    const fresh = debatePresentationEvents(previous, session, false);
+    if (fresh.length === 0) return;
+    // #region agent log
+    fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "296f82",
+      },
+      body: JSON.stringify({
+        sessionId: "296f82",
+        runId: "post-fix",
+        hypothesisId: "H",
+        location: "DebateExperience.tsx:presentUnheardSpectatorTail",
+        message: "spectator unheard tail",
+        data: {
+          freshCount: fresh.length,
+          playheadEventId: presentationPlaybackEventIdRef.current,
+          bakerStepKey: session.stepKey,
+          bakeStatus: session.liveBake?.status ?? null,
+          status: session.status,
+          firstFreshStepKey: fresh[0]?.stepKey ?? null,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+    await adoptSession(previous, session);
+  }, [adoptSession, busy, presentationSuspended, presenting]);
+
   const runSpectatorProgressiveBake = async (
     sessionId: string,
   ): Promise<DebateSessionV1 | null> => {
@@ -10871,6 +11448,58 @@ export function DebateExperience(
     return session;
   };
 
+  /**
+   * Pause ends the in-process bake job while leaving status "baking". Resume
+   * and a stale heartbeat must start a fresh job so the floor can keep moving.
+   */
+  const restartSpectatorBakeIfNeeded = useCallback(
+    (session: DebateSessionV1, reason: "resume" | "stale-poll"): void => {
+      if (session.playerRole !== "spectator") return;
+      if (session.status !== "live") return;
+      if (session.liveBake?.status === "ready") return;
+      if (reason === "stale-poll") {
+        const restartedRecently =
+          Date.now() - spectatorBakeRestartAtMsRef.current < 10_000;
+        if (
+          restartedRecently ||
+          !liveBakeShouldResumeOnOpen(session.liveBake)
+        ) {
+          return;
+        }
+      }
+      spectatorBakeRestartAtMsRef.current = Date.now();
+      // #region agent log
+      fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Debug-Session-Id": "296f82",
+        },
+        body: JSON.stringify({
+          sessionId: "296f82",
+          runId: "post-fix",
+          hypothesisId: "F",
+          location: "DebateExperience.tsx:restartSpectatorBakeIfNeeded",
+          message: "restart spectator bake after pause or stale heartbeat",
+          data: {
+            reason,
+            debateSessionId: session.id,
+            stepKey: session.stepKey,
+            revision: session.revision,
+            bakeStatus: session.liveBake?.status ?? null,
+            phaseLabel: session.liveBake?.progress?.phaseLabel ?? null,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      void request(`/api/debates/${encodeURIComponent(session.id)}/bake`, {
+        ...requestBody({}),
+      }).catch(() => undefined);
+    },
+    [request],
+  );
+
   const cancelSpectatorBake = async (): Promise<void> => {
     archiveOpenRunRef.current += 1;
     archiveReturnBufferAbortRef.current?.abort();
@@ -10901,6 +11530,7 @@ export function DebateExperience(
     setSpectatorGalleryBakeUnlocked(false);
     setSpectatorGalleryArrivalUnlockedAt(null);
     spectatorGalleryArrivalCompleteRef.current = false;
+    galleryOpeningMurmurStartedAtRef.current = null;
     setOpeningPreloadSessionId(null);
     setOpeningLaunchSessionId(null);
     setArchiveReturnReadySessionId(null);
@@ -10911,6 +11541,49 @@ export function DebateExperience(
     setActiveSession(null);
     setView("dashboard");
     setBusy(false);
+  };
+
+  /**
+   * Spectator bake persists append-only progress while Archive Open is seating
+   * the gallery. Rebase only those reopen lifecycle operations after a
+   * revision conflict; ordinary optimistic Debate mutations remain strict.
+   */
+  const rebaseArchiveOpenMutation = async (
+    previous: DebateSessionV1,
+    kind: DebateArchiveOpenMutationKind,
+    operation: (session: DebateSessionV1) => Promise<DebateSessionV1>,
+    signal: AbortSignal,
+  ): Promise<DebateSessionV1> => {
+    let current = previous;
+    let lastConflict: unknown = null;
+    // A live bake can commit more than once while gallery arrival is finishing.
+    // Keep this bounded so genuine competing floor actions still surface.
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      try {
+        return await operation(current);
+      } catch (caught) {
+        if (!debateRequestIsRevisionConflict(caught)) throw caught;
+        lastConflict = caught;
+      }
+      const refreshed = await props.request<{ session: DebateSessionV1 }>(
+        `/api/debates/${encodeURIComponent(current.id)}?perspective=live`,
+        { signal },
+      );
+      if (debateArchiveOpenShouldAdoptRefreshed(refreshed.session, kind)) {
+        return refreshed.session;
+      }
+      if (
+        !debateArchiveOpenCanRebaseMutation(
+          current,
+          refreshed.session,
+          kind,
+        )
+      ) {
+        throw lastConflict;
+      }
+      current = refreshed.session;
+    }
+    throw lastConflict;
   };
 
   const openSession = async (
@@ -10931,7 +11604,6 @@ export function DebateExperience(
     let archiveOpeningLifted = false;
     let archiveOpeningBookmarkEventId: string | null = null;
     let openingGalleryStartedAtMs: number | null = null;
-    let openingGalleryArrivalPromise: Promise<void> | null = null;
     setBusy(true);
     setOpeningLaunchSessionId(null);
     setOpeningPreloadSessionId(null);
@@ -10988,11 +11660,13 @@ export function DebateExperience(
       setSpectatorGalleryArrivalUnlockedAt(null);
       setSpectatorGalleryArrivalNowMs(openingGalleryStartedAtMs);
       spectatorGalleryArrivalCompleteRef.current = false;
+    galleryOpeningMurmurStartedAtRef.current = null;
       if (!needsSpectatorBakeResume) {
         setSpectatorBake(null);
         spectatorBakeArtifactRef.current = null;
       }
       activeSessionIdRef.current = session.id;
+      setCheckpointPlayheadEventId(null);
       setActiveSession(session);
       setObserverPerspective("live");
       setView("baking");
@@ -11003,38 +11677,6 @@ export function DebateExperience(
         window.requestAnimationFrame(() => resolve()),
       );
       if (!openingIsCurrent()) return;
-      if (!needsSpectatorBakeResume) {
-        const arrivalStartedAt = openingGalleryStartedAtMs ?? Date.now();
-        const unlockAt = Date.now();
-        const audienceCount = debateAudienceBotCount(props.graphicsQuality);
-        const nonPlayerCount = Math.max(
-          0,
-          audienceCount - (session.playerRole === "spectator" ? 1 : 0),
-        );
-        setSpectatorGalleryBakeUnlocked(true);
-        setSpectatorGalleryArrivalUnlockedAt(unlockAt);
-        // Seat arrivals are the visible clock for the same work happening
-        // below: frozen-runtime text generation, room/ident warmup, and voice
-        // synthesis. Start the walk-in before awaiting any provider request.
-        openingGalleryArrivalPromise = (async (): Promise<void> => {
-          while (openingIsCurrent()) {
-            const now = Date.now();
-            setSpectatorGalleryArrivalNowMs(now);
-            const arrival = debateGalleryArrivalRevealedCount({
-              nonPlayerCount,
-              progressRatio: null,
-              bakeUnlocked: true,
-              elapsedMs: now - arrivalStartedAt,
-              unlockElapsedMs: now - unlockAt,
-            });
-            if (arrival.arrivalComplete) {
-              spectatorGalleryArrivalCompleteRef.current = true;
-              return;
-            }
-            await new Promise((resolve) => window.setTimeout(resolve, 50));
-          }
-        })();
-      }
       const restoreReadyHold =
         needsSpectatorBakeResume &&
         session.status === "paused" &&
@@ -11049,45 +11691,57 @@ export function DebateExperience(
         archiveOpeningLifted = true;
         archiveOpeningBookmarkEventId =
           session.pausedPresentationEventId ?? null;
-        session = (
-          await props.request<{ session: DebateSessionV1 }>(
-            `/api/debates/${encodeURIComponent(session.id)}/resume`,
-            {
-              ...requestBody({
-                expectedRevision: session.revision,
-                idempotencyKey: nextMutationKey("bake-lift-recess"),
-                exitRecovery: true,
-                quietSave: true,
-              }),
-              signal: archiveReturnController.signal,
-            },
-          )
-        ).session;
+        session = await rebaseArchiveOpenMutation(
+          session,
+          "resume-spectator-bake",
+          async (current) =>
+            (
+              await props.request<{ session: DebateSessionV1 }>(
+                `/api/debates/${encodeURIComponent(current.id)}/resume`,
+                {
+                  ...requestBody({
+                    expectedRevision: current.revision,
+                    idempotencyKey: nextMutationKey("bake-lift-recess"),
+                    exitRecovery: true,
+                    quietSave: true,
+                  }),
+                  signal: archiveReturnController.signal,
+                },
+              )
+            ).session,
+          archiveReturnController.signal,
+        );
       } else if (
         !needsSpectatorBakeResume &&
         debateSessionNeedsReturnPause(session)
       ) {
-        session = (
-          await props.request<{ session: DebateSessionV1 }>(
-            `/api/debates/${encodeURIComponent(session.id)}/pause`,
-            {
-              ...requestBody({
-                expectedRevision: session.revision,
-                idempotencyKey: nextMutationKey("return-recess"),
-                exitRecovery: true,
-                presentationEventId:
-                  [...session.events]
-                    .reverse()
-                    .find(
-                      (event) =>
-                        event.speakerKind !== "system" &&
-                        event.kind !== "error",
-                    )?.id ?? null,
-              }),
-              signal: archiveReturnController.signal,
-            },
-          )
-        ).session;
+        session = await rebaseArchiveOpenMutation(
+          session,
+          "pause-return-recess",
+          async (current) =>
+            (
+              await props.request<{ session: DebateSessionV1 }>(
+                `/api/debates/${encodeURIComponent(current.id)}/pause`,
+                {
+                  ...requestBody({
+                    expectedRevision: current.revision,
+                    idempotencyKey: nextMutationKey("return-recess"),
+                    exitRecovery: true,
+                    presentationEventId:
+                      [...current.events]
+                        .reverse()
+                        .find(
+                          (event) =>
+                            event.speakerKind !== "system" &&
+                            event.kind !== "error",
+                        )?.id ?? null,
+                  }),
+                  signal: archiveReturnController.signal,
+                },
+              )
+            ).session,
+          archiveReturnController.signal,
+        );
       }
 
       let minimumArchiveBufferPromise: Promise<{
@@ -11176,92 +11830,56 @@ export function DebateExperience(
         setSpectatorGalleryBakeUnlocked(false);
         setSpectatorGalleryArrivalUnlockedAt(null);
         spectatorGalleryArrivalCompleteRef.current = false;
+    galleryOpeningMurmurStartedAtRef.current = null;
         activeSessionIdRef.current = session.id;
         setActiveSession(session);
         setObserverPerspective("live");
-        if (!liveBakeMayStartWatch(session.liveBake, 0)) {
-          setView("baking");
-          setBusy(true);
+        const skipBakeRestartOnBookmark = restoreMidPauseEventId !== null;
+        setView("baking");
+        setBusy(true);
+        if (
+          !skipBakeRestartOnBookmark &&
+          !liveBakeMayStartWatch(session.liveBake, 0)
+        ) {
           const unlocked = await runSpectatorProgressiveBake(session.id);
           if (!mountedRef.current || !unlocked) return;
           session = unlocked;
-          const audienceCount = debateAudienceBotCount(props.graphicsQuality);
-          const nonPlayerCount = Math.max(0, audienceCount - 1);
-          const bakeStartedMs = Date.parse(bakeStartedIso) || Date.now();
-          setSpectatorGalleryBakeUnlocked(true);
-          const unlockAt = Date.now();
-          setSpectatorGalleryArrivalUnlockedAt(unlockAt);
-          while (mountedRef.current) {
-            const now = Date.now();
-            setSpectatorGalleryArrivalNowMs(now);
-            const arrival = debateGalleryArrivalRevealedCount({
-              nonPlayerCount,
-              progressRatio: liveBakeProgressRatio(
-                spectatorBakeArtifactRef.current,
-              ),
-              bakeUnlocked: true,
-              elapsedMs: now - bakeStartedMs,
-              unlockElapsedMs: now - unlockAt,
-            });
-            if (arrival.arrivalComplete) {
-              spectatorGalleryArrivalCompleteRef.current = true;
-              break;
-            }
-            await new Promise((resolve) => window.setTimeout(resolve, 50));
-          }
-          if (!mountedRef.current) return;
-        } else {
-          // Buffer already met — kick bake in background; hurry seats then ready.
+        } else if (!skipBakeRestartOnBookmark) {
+          // Buffer already met — keep bake warm. Bookmark returns skip this
+          // start: pause-restore would kill the job.
           void props
             .request(`/api/debates/${encodeURIComponent(session.id)}/bake`, {
               ...requestBody({}),
             })
             .catch(() => undefined);
-          setView("baking");
-          setSpectatorGalleryBakeUnlocked(true);
-          const unlockAt = Date.now();
-          setSpectatorGalleryArrivalUnlockedAt(unlockAt);
-          const audienceCount = debateAudienceBotCount(props.graphicsQuality);
-          const nonPlayerCount = Math.max(0, audienceCount - 1);
-          const bakeStartedMs = Date.parse(bakeStartedIso) || Date.now();
-          while (mountedRef.current) {
-            const now = Date.now();
-            setSpectatorGalleryArrivalNowMs(now);
-            const arrival = debateGalleryArrivalRevealedCount({
-              nonPlayerCount,
-              progressRatio: 1,
-              bakeUnlocked: true,
-              elapsedMs: now - bakeStartedMs,
-              unlockElapsedMs: now - unlockAt,
-            });
-            if (arrival.arrivalComplete) {
-              spectatorGalleryArrivalCompleteRef.current = true;
-              break;
-            }
-            await new Promise((resolve) => window.setTimeout(resolve, 50));
-          }
-          if (!mountedRef.current) return;
         }
-        setSpectatorBake(null);
-        spectatorBakeArtifactRef.current = null;
         // Restore the recess we lifted so Open still lands on Start / Resume.
         if (
           (restoreReadyHold || restoreMidPauseEventId !== null) &&
           session.status !== "paused"
         ) {
-          session = (
-            await props.request<{ session: DebateSessionV1 }>(
-              `/api/debates/${encodeURIComponent(session.id)}/pause`,
-              requestBody({
-                expectedRevision: session.revision,
-                idempotencyKey: nextMutationKey("bake-restore-recess"),
-                exitRecovery: true,
-                presentationEventId: restoreReadyHold
-                  ? null
-                  : restoreMidPauseEventId,
-              }),
-            )
-          ).session;
+          session = await rebaseArchiveOpenMutation(
+            session,
+            "pause-return-recess",
+            async (current) =>
+              (
+                await props.request<{ session: DebateSessionV1 }>(
+                  `/api/debates/${encodeURIComponent(current.id)}/pause`,
+                  {
+                    ...requestBody({
+                      expectedRevision: current.revision,
+                      idempotencyKey: nextMutationKey("bake-restore-recess"),
+                      exitRecovery: true,
+                      presentationEventId: restoreReadyHold
+                        ? null
+                        : restoreMidPauseEventId,
+                    }),
+                    signal: archiveReturnController.signal,
+                  },
+                )
+              ).session,
+            archiveReturnController.signal,
+          );
           archiveOpeningLifted = false;
         }
       }
@@ -11288,52 +11906,6 @@ export function DebateExperience(
       setActiveSession(session);
       setExhaustedExitOpen(false);
       const identReadyPromise = preloadDebateIdentAudio("intro");
-      if (!spectatorGalleryArrivalCompleteRef.current) {
-        if (openingGalleryArrivalPromise) {
-          await openingGalleryArrivalPromise;
-        } else {
-          const arrivalStartedAt = openingGalleryStartedAtMs ?? Date.now();
-          const unlockAt = Date.now();
-          const audienceCount = debateAudienceBotCount(props.graphicsQuality);
-          const nonPlayerCount = Math.max(
-            0,
-            audienceCount - (session.playerRole === "spectator" ? 1 : 0),
-          );
-          setSpectatorGalleryBakeUnlocked(true);
-          setSpectatorGalleryArrivalUnlockedAt(unlockAt);
-          while (openingIsCurrent()) {
-            const now = Date.now();
-            setSpectatorGalleryArrivalNowMs(now);
-            const arrival = debateGalleryArrivalRevealedCount({
-              nonPlayerCount,
-              progressRatio: null,
-              bakeUnlocked: true,
-              elapsedMs: now - arrivalStartedAt,
-              unlockElapsedMs: now - unlockAt,
-            });
-            if (arrival.arrivalComplete) {
-              spectatorGalleryArrivalCompleteRef.current = true;
-              break;
-            }
-            await new Promise((resolve) => window.setTimeout(resolve, 50));
-          }
-        }
-      }
-      if (!openingIsCurrent()) return;
-      setSpectatorBakeStartedAt(null);
-      setSpectatorGalleryBakeUnlocked(false);
-      setSpectatorGalleryArrivalUnlockedAt(null);
-      setView("live");
-      // Every return gets the complete shared title ident. The minimum server
-      // runway and its first critical voice continue behind the title; the
-      // static hold remains Preparing if either outlasts the ident.
-      await new Promise<void>((resolve) =>
-        window.requestAnimationFrame(() => resolve()),
-      );
-      if (!openingIsCurrent()) return;
-      const identPlaybackPromise = identReadyPromise.then(() =>
-        playDebateIdent("intro"),
-      );
       let minimumBufferResult: DebateArchiveReturnBufferResponse | null = null;
       if (minimumArchiveBufferPromise) {
         const minimumBufferOutcome = await minimumArchiveBufferPromise;
@@ -11357,6 +11929,46 @@ export function DebateExperience(
         }
       }
       const voiceRunway = preloadReturnedDebateVoices(session);
+      if (!spectatorGalleryArrivalCompleteRef.current) {
+        const arrivalStartedAt = openingGalleryStartedAtMs ?? Date.now();
+        const audienceCount = debateAudienceBotCount(props.graphicsQuality);
+        const nonPlayerCount = Math.max(
+          0,
+          audienceCount - (session.playerRole === "spectator" ? 1 : 0),
+        );
+        const unlockAt = Date.now();
+        setSpectatorGalleryBakeUnlocked(true);
+        setSpectatorGalleryArrivalUnlockedAt(unlockAt);
+        const arrival = await waitForDebateGalleryArrival({
+          isCurrent: openingIsCurrent,
+          nonPlayerCount,
+          progressRatio: () =>
+            liveBakeProgressRatio(spectatorBakeArtifactRef.current),
+          startedAt: arrivalStartedAt,
+          unlockAt,
+          onTick: (now) => setSpectatorGalleryArrivalNowMs(now),
+        });
+        if (arrival === "complete") {
+          spectatorGalleryArrivalCompleteRef.current = true;
+        }
+      }
+      if (!openingIsCurrent()) return;
+      setSpectatorBake(null);
+      spectatorBakeArtifactRef.current = null;
+      setSpectatorBakeStartedAt(null);
+      setSpectatorGalleryBakeUnlocked(false);
+      setSpectatorGalleryArrivalUnlockedAt(null);
+      setView("live");
+      // Every return gets the complete shared title ident. The minimum server
+      // runway and its first critical voice continue behind the title; the
+      // static hold remains Preparing if either outlasts the ident.
+      await new Promise<void>((resolve) =>
+        window.requestAnimationFrame(() => resolve()),
+      );
+      if (!openingIsCurrent()) return;
+      const identPlaybackPromise = identReadyPromise.then(() =>
+        playDebateIdent("intro"),
+      );
       await Promise.all([
         voiceRunway.criticalReady,
         identPlaybackPromise,
@@ -11884,6 +12496,7 @@ export function DebateExperience(
       deferStart?: boolean;
       evidenceOverride?: DebateEvidencePacketV1;
       idempotencyLabel: string;
+      idempotencyKey?: string;
     },
   ): Record<string, unknown> => ({
     presetId: effectivePresetId,
@@ -11935,7 +12548,8 @@ export function DebateExperience(
     turbo: props.turbo,
     theme: props.theme,
     ...(options.deferStart ? { deferStart: true } : {}),
-    idempotencyKey: nextMutationKey(options.idempotencyLabel),
+    idempotencyKey:
+      options.idempotencyKey ?? nextMutationKey(options.idempotencyLabel),
   });
 
   const ensureDebateMotionTitle = async (): Promise<typeof motion> => {
@@ -12013,20 +12627,26 @@ export function DebateExperience(
     setBusy(true);
     setSetupRestoreNotice(null);
     setError(null);
+    let createdSession: DebateSessionV1 | null = null;
     try {
       const titledMotion = await ensureDebateMotionTitle();
       const missingExhibits = generateAllExhibitAssetsBeforeDebate
         ? debateMissingExhibitAssets(evidence)
         : [];
 
+      if (!startCreateIdempotencyKeyRef.current) {
+        startCreateIdempotencyKeyRef.current = nextMutationKey("create");
+      }
       const result = await props.request<{ session: DebateSessionV1 }>(
         "/api/debates",
         requestBody(
           buildDebateCreateBody(titledMotion, {
             idempotencyLabel: "create",
+            idempotencyKey: startCreateIdempotencyKeyRef.current,
           }),
         ),
       );
+      createdSession = result.session;
       if (missingExhibits.length > 0) {
         finishDebateExhibitSynthesisInBackground(
           result.session.id,
@@ -12042,6 +12662,7 @@ export function DebateExperience(
         setSpectatorGalleryBakeUnlocked(false);
         setSpectatorGalleryArrivalUnlockedAt(null);
         spectatorGalleryArrivalCompleteRef.current = false;
+    galleryOpeningMurmurStartedAtRef.current = null;
         clearDebateDebrief();
         selectDebateCameraMode("auto");
         setTurnaboutObjecting(false);
@@ -12059,46 +12680,56 @@ export function DebateExperience(
         const audienceCount = debateAudienceBotCount(props.graphicsQuality);
         const nonPlayerCount = Math.max(0, audienceCount - 1);
         const bakeStartedMs = Date.parse(bakeStartedIso) || Date.now();
-        setSpectatorGalleryBakeUnlocked(true);
         const unlockAt = Date.now();
+        setSpectatorGalleryBakeUnlocked(true);
         setSpectatorGalleryArrivalUnlockedAt(unlockAt);
-        while (mountedRef.current) {
-          const now = Date.now();
-          setSpectatorGalleryArrivalNowMs(now);
-          const arrival = debateGalleryArrivalRevealedCount({
-            nonPlayerCount,
-            progressRatio: liveBakeProgressRatio(
-              spectatorBakeArtifactRef.current,
-            ),
-            bakeUnlocked: true,
-            elapsedMs: now - bakeStartedMs,
-            unlockElapsedMs: now - unlockAt,
-          });
-          if (arrival.arrivalComplete) break;
-          await new Promise((resolve) => window.setTimeout(resolve, 50));
-        }
-        if (!mountedRef.current) return;
+        const arrival = await waitForDebateGalleryArrival({
+          isCurrent: () => mountedRef.current,
+          nonPlayerCount,
+          progressRatio: () =>
+            liveBakeProgressRatio(spectatorBakeArtifactRef.current),
+          startedAt: bakeStartedMs,
+          unlockAt,
+          onTick: (now) => setSpectatorGalleryArrivalNowMs(now),
+        });
+        if (arrival !== "complete") return;
         // Hold the gallery paused until the player presses Start.
         // presentationEventId stays null so progressive mid-bake holds still
         // count as awaitingFirstWatch (Start-from-beginning, not Resume delta).
-        const held = await props.request<{ session: DebateSessionV1 }>(
-          `/api/debates/${encodeURIComponent(session.id)}/pause`,
-          requestBody({
-            expectedRevision: session.revision,
-            idempotencyKey: nextMutationKey("spectator-ready-hold"),
-            exitRecovery: true,
-            presentationEventId: null,
-          }),
+        // Bake / exhibit prep can still write one more revision here — rebase
+        // onto that write instead of dumping the player back to setup.
+        const holdController = new AbortController();
+        const holdKey = nextMutationKey("spectator-ready-hold");
+        const heldSession = await rebaseArchiveOpenMutation(
+          session,
+          "spectator-ready-hold",
+          async (current) =>
+            (
+              await props.request<{ session: DebateSessionV1 }>(
+                `/api/debates/${encodeURIComponent(current.id)}/pause`,
+                {
+                  ...requestBody({
+                    expectedRevision: current.revision,
+                    idempotencyKey: holdKey,
+                    exitRecovery: true,
+                    presentationEventId: null,
+                  }),
+                  signal: holdController.signal,
+                },
+              )
+            ).session,
+          holdController.signal,
         );
         if (!mountedRef.current) return;
+        startCreateIdempotencyKeyRef.current = null;
         clearDebateDebrief();
         selectDebateCameraMode("auto");
         setTurnaboutObjecting(false);
         setTurnaboutEvidenceSourceId("");
         setObserverPerspective("live");
         presentationStore.clear();
-        activeSessionIdRef.current = held.session.id;
-        setActiveSession(held.session);
+        activeSessionIdRef.current = heldSession.id;
+        setActiveSession(heldSession);
         setSpectatorBake(null);
         spectatorBakeArtifactRef.current = null;
         setSpectatorBakeStartedAt(null);
@@ -12108,6 +12739,7 @@ export function DebateExperience(
         setBusy(false);
         return;
       }
+      startCreateIdempotencyKeyRef.current = null;
       if (mountedRef.current) setBusy(false);
       selectDebateCameraMode("auto");
       setView("live");
@@ -12125,10 +12757,25 @@ export function DebateExperience(
         setSpectatorGalleryArrivalUnlockedAt(null);
         return;
       }
+      if (createdSession) {
+        try {
+          const refreshed = await props.request<{ session: DebateSessionV1 }>(
+            `/api/debates/${encodeURIComponent(createdSession.id)}?perspective=live`,
+          );
+          createdSession = refreshed.session;
+          if (mountedRef.current) {
+            activeSessionIdRef.current = createdSession.id;
+            setActiveSession(createdSession);
+          }
+          void loadSessions();
+        } catch {
+          // Keep the create-key so Retry Start reopens this proceeding.
+        }
+      }
       setError(
         debateErrorClipboardText(caught, "The Debate could not start."),
       );
-      if (playerRole === "spectator") {
+      if (playerRole === "spectator" && !createdSession) {
         setView("dashboard");
         setSpectatorBake(null);
         spectatorBakeArtifactRef.current = null;
@@ -12148,6 +12795,7 @@ export function DebateExperience(
         !previous ||
         busy ||
         presenting ||
+        pauseInFlightRef.current ||
         debateFloorMutationInFlightRef.current
       ) {
         return;
@@ -12298,12 +12946,13 @@ export function DebateExperience(
             ),
           );
         }
-        if (mountedRef.current) setBusy(false);
         if (pauseInFlightRef.current) {
           // Graceful Pause owns the floor; discard this advance presentation.
-          debateFloorMutationInFlightRef.current = false;
+          // Leave busy and the floor lock set so the 280ms auto-advance cannot
+          // start the next line before the recess save returns.
           return;
         }
+        if (mountedRef.current) setBusy(false);
         const adoption = adoptSession(previous, result.session);
         debateFloorMutationInFlightRef.current = false;
         await adoption;
@@ -12319,11 +12968,13 @@ export function DebateExperience(
         );
       } finally {
         await finishResponseCue?.();
-        debateFloorMutationInFlightRef.current = false;
+        if (!pauseInFlightRef.current) {
+          debateFloorMutationInFlightRef.current = false;
+          if (mountedRef.current) setBusy(false);
+        }
         if (preparingJuryDeliberation && mountedRef.current) {
           setJuryDeliberationInFlightSessionId(null);
         }
-        if (mountedRef.current) setBusy(false);
       }
     },
     [
@@ -12391,21 +13042,34 @@ export function DebateExperience(
       earlyEndOpen ||
       exhaustedExitOpen ||
       presentationSuspended ||
-      appAwayFromUser
+      appAwayFromUser ||
+      pauseInFlightRef.current ||
+      debateFloorMutationInFlightRef.current
     ) {
       return;
     }
-    // While progressive bake is healthy, never ask the presenter to invent —
-    // wait for the baker. Mid-sit live fallback opts back into on-demand advance.
+    // While progressive bake is healthy, never ask the presenter to invent.
+    // Already-baked unheard lines still play; the baker is background only.
     if (
       activeSession.playerRole === "spectator" &&
       activeSession.liveBake?.status === "baking" &&
       !spectatorBakeLiveFallback
     ) {
+      void presentUnheardSpectatorTail();
       return;
     }
     const timer = window.setTimeout(
-      () => void advance(false),
+      () => {
+        // Pause cuts `presenting` immediately. Recheck here so a timer armed
+        // just before the click cannot start the next line over the recess.
+        if (
+          pauseInFlightRef.current ||
+          debateFloorMutationInFlightRef.current
+        ) {
+          return;
+        }
+        void advance(false);
+      },
       DEBATE_AUTO_ADVANCE_DELAY_MS,
     );
     return () => window.clearTimeout(timer);
@@ -12419,17 +13083,30 @@ export function DebateExperience(
     exhaustedExitOpen,
     presentationSuspended,
     presenting,
+    presentUnheardSpectatorTail,
     spectatorBakeLiveFallback,
     view,
   ]);
 
-  // Keep watching the baker while a Spectator sit is open and still baking.
+  useEffect(() => {
+    if (view !== "live" || presenting || busy || presentationSuspended) return;
+    void presentUnheardSpectatorTail();
+  }, [
+    activeSession,
+    busy,
+    presentationSuspended,
+    presentUnheardSpectatorTail,
+    presenting,
+    view,
+  ]);
+
+  // Keep watching the baker while a Spectator sit is open so bake-ahead, and a
+  // finished bake, can still deliver unheard lines after a presented beat ends.
   useEffect(() => {
     if (
       view !== "live" ||
       !activeSession ||
       activeSession.playerRole !== "spectator" ||
-      activeSession.liveBake?.status !== "baking" ||
       spectatorBakeLiveFallback
     ) {
       return;
@@ -12437,6 +13114,7 @@ export function DebateExperience(
     const sessionId = activeSession.id;
     let cancelled = false;
     let pollInFlight = false;
+    let lastBakeDebugLogAt = 0;
     const tick = async (): Promise<void> => {
       if (pollInFlight) return;
       pollInFlight = true;
@@ -12447,6 +13125,58 @@ export function DebateExperience(
         );
         if (cancelled || !mountedRef.current) return;
         if (activeSessionIdRef.current !== sessionId) return;
+        // #region agent log
+        {
+          const heartbeatAt = polled.session.liveBake?.progress?.heartbeatAt;
+          const heartbeatAgeMs = heartbeatAt
+            ? Date.now() - new Date(heartbeatAt).getTime()
+            : null;
+          if (Date.now() - lastBakeDebugLogAt >= 8000) {
+            lastBakeDebugLogAt = Date.now();
+            fetch(
+              "http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2",
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "X-Debug-Session-Id": "296f82",
+                },
+                body: JSON.stringify({
+                  sessionId: "296f82",
+                    runId: "post-fix",
+                  hypothesisId: "C",
+                  location: "DebateExperience.tsx:bakePoll",
+                  message: "spectator bake poll",
+                  data: {
+                    status: polled.session.status,
+                    stepKey: polled.session.stepKey,
+                    revision: polled.session.revision,
+                    bakeStatus: polled.session.liveBake?.status ?? null,
+                    phaseLabel:
+                      polled.session.liveBake?.progress?.phaseLabel ?? null,
+                    heartbeatAgeMs,
+                    presenting,
+                    spectatorBakeLiveFallback,
+                    blocksAutoAdvance: false,
+                    unheardRunwayCount: debatePresentationEvents(
+                      debateSessionThroughPlayhead(
+                        activeSession,
+                        presentationPlaybackEventIdRef.current,
+                      ),
+                      polled.session,
+                      false,
+                    ).length,
+                  },
+                  timestamp: Date.now(),
+                }),
+              },
+            ).catch(() => {});
+          }
+        }
+        // #endregion
+        if (polled.session.status === "live") {
+          restartSpectatorBakeIfNeeded(polled.session, "stale-poll");
+        }
         const previous = activeSession;
         if (previous.id !== sessionId) return;
         let acceptedPolledRevision =
@@ -12464,11 +13194,16 @@ export function DebateExperience(
         } else if (
           !busy &&
           !presenting &&
+          !pauseInFlightRef.current &&
           !debateFloorMutationInFlightRef.current &&
           !presentationSuspended
         ) {
-          const freshRunway = debatePresentationEvents(
+          const playheadPrevious = debateSessionThroughPlayhead(
             previous,
+            presentationPlaybackEventIdRef.current,
+          );
+          const freshRunway = debatePresentationEvents(
+            playheadPrevious,
             polled.session,
             debateJuryCameraIsActive(
               debateCameraModeForSession(
@@ -12478,13 +13213,15 @@ export function DebateExperience(
               polled.session,
             ),
           );
-          await preloadDebateVoiceRunway(
+          // Voice prep stays per-line inside consumeNewEvents. Waiting for the
+          // whole remaining runway here left the floor frozen on a baker label.
+          void preloadDebateVoiceRunway(
             polled.session,
-            freshRunway,
+            freshRunway.slice(0, 1),
           );
           if (cancelled || !mountedRef.current) return;
           if (activeSessionIdRef.current !== sessionId) return;
-          await adoptSession(previous, polled.session);
+          await adoptSession(playheadPrevious, polled.session);
           acceptedPolledRevision = true;
         } else {
           // Never absorb a new event revision while its predecessor is still
@@ -12493,7 +13230,7 @@ export function DebateExperience(
           // may advance independently while still baking. A terminal bake state
           // stays withheld so this poller survives to adopt the final revision.
           if (
-            polled.session.liveBake?.status === "baking" &&
+            polled.session.liveBake &&
             JSON.stringify(previous.liveBake) !==
               JSON.stringify(polled.session.liveBake)
           ) {
@@ -12532,84 +13269,11 @@ export function DebateExperience(
     presenting,
     preloadDebateVoiceRunway,
     props.request,
+    restartSpectatorBakeIfNeeded,
     spectatorBakeLiveFallback,
     view,
   ]);
 
-  useEffect(() => {
-    const session = activeSession;
-    if (
-      view !== "live" ||
-      !session ||
-      !debateSessionAwaitsPresentationSeal(session) ||
-      session.status !== "live" ||
-      busy ||
-      presenting ||
-      earlyEndOpen ||
-      presentationSuspended ||
-      appAwayFromUser ||
-      !spectatorWatchPresentationCompleteRef.current ||
-      debateFloorMutationInFlightRef.current ||
-      pauseInFlightRef.current
-    ) {
-      return;
-    }
-    if (spectatorPresentationSealInFlightRef.current === session.id) {
-      return;
-    }
-    let cancelled = false;
-    spectatorPresentationSealInFlightRef.current = session.id;
-    void (async () => {
-      setBusy(true);
-      setError(null);
-      try {
-        await new Promise<void>((resolve) =>
-          window.setTimeout(resolve, DEBATE_IDENT_OUTRO_LEAD_MS),
-        );
-        if (cancelled || !mountedRef.current) return;
-        await playDebateIdent("outro");
-        if (cancelled || !mountedRef.current) return;
-        const result = await props.request<{ session: DebateSessionV1 }>(
-          `/api/debates/${encodeURIComponent(session.id)}/seal-presentation`,
-          requestBody({
-            expectedRevision: session.revision,
-            idempotencyKey: nextMutationKey("seal-presentation"),
-          }),
-        );
-        if (cancelled || !mountedRef.current) return;
-        setActiveSession(result.session);
-        void loadSessions();
-      } catch (caught) {
-        if (!cancelled && mountedRef.current) {
-          setError(
-            caught instanceof Error
-              ? caught.message
-              : "The Debate could not be sealed after the closing.",
-          );
-        }
-      } finally {
-        if (spectatorPresentationSealInFlightRef.current === session.id) {
-          spectatorPresentationSealInFlightRef.current = null;
-        }
-        if (mountedRef.current) setBusy(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // busy is intentionally omitted: this effect sets busy itself and must not
-    // cancel the seal when that local busy flag flips.
-  }, [
-    activeSession,
-    appAwayFromUser,
-    earlyEndOpen,
-    loadSessions,
-    nextMutationKey,
-    playDebateIdent,
-    presentationSuspended,
-    presenting,
-    view,
-  ]);
 
   useEffect(() => {
     const pendingRuling = activeSession?.objectionRuling;
@@ -13045,7 +13709,6 @@ export function DebateExperience(
 
   const cancelCurrentPresentation = (): void => {
     presentationRunRef.current += 1;
-    spectatorWatchPresentationCompleteRef.current = false;
     cancelJudgeGavelCeremonyRef.current?.();
     props.onStopUtterance?.();
     void stopDebateIdentAudio();
@@ -13076,7 +13739,6 @@ export function DebateExperience(
     event: DebateEventV1,
   ): void => {
     presentationRunRef.current += 1;
-    spectatorWatchPresentationCompleteRef.current = false;
     cancelJudgeGavelCeremonyRef.current?.();
     onReleaseUtterance?.(DEBATE_INTERRUPT_PRIMARY_RELEASE_MS);
     stopDebateAmbientBotVocalization();
@@ -13117,7 +13779,6 @@ export function DebateExperience(
     eventId: string | null,
   ): void => {
     presentationRunRef.current += 1;
-    spectatorWatchPresentationCompleteRef.current = false;
     cancelJudgeGavelCeremonyRef.current?.();
     props.onStopUtterance?.();
     void stopDebateIdentAudio();
@@ -13613,6 +14274,19 @@ export function DebateExperience(
     ) {
       return;
     }
+    if (
+      previous.status === "completed" ||
+      previous.status === "cancelled" ||
+      previous.status === "failed"
+    ) {
+      interruptPresentationForRecess(interruptedPresentationEventId(previous));
+      if (mountedRef.current) {
+        setPresenting(false);
+        setBusy(false);
+      }
+      void loadSessions();
+      return;
+    }
     const resume = previous.status === "paused";
     if (
       !resume &&
@@ -13621,7 +14295,6 @@ export function DebateExperience(
     ) {
       return;
     }
-    spectatorPresentationSealInFlightRef.current = null;
     pauseInFlightRef.current = true;
     debateFloorMutationInFlightRef.current = true;
     const startSpectatorWatch =
@@ -13640,10 +14313,14 @@ export function DebateExperience(
       : null;
     const bufferedReturnGavel = startFromTitleCard || resumeBufferedArchive;
     let titleStartCommitted = false;
+    const titleCardPlayheadEventId =
+      launchFromTitleCard ? checkpointPlayheadEventIdRef.current : null;
+    const heldBeforeResumeId =
+      titleCardPlayheadEventId ?? previous.pausedPresentationEventId ?? null;
     const heldBeforeResume = resume
-      ? previous.pausedPresentationEventId
+      ? heldBeforeResumeId
         ? (previous.events.find(
-            (event) => event.id === previous.pausedPresentationEventId,
+            (event) => event.id === heldBeforeResumeId,
           ) ?? null)
         : null
       : null;
@@ -13661,10 +14338,11 @@ export function DebateExperience(
       ? (previous.pausedPresentationEventId ?? null)
       : interruptedPresentationEventId(previous);
     if (launchFromTitleCard) {
-      // Revoke title ownership immediately, but let any already-dispatched
-      // server slice finish. The server revision check decides whether that
-      // slice or Resume wins; the loser persists nothing.
+      // Revoke title ownership immediately and cancel deeper lookahead so
+      // Start does not keep racing a second buffer write. An already-dispatched
+      // slice may still land; lifecycle rebase absorbs that one revision.
       archiveReturnTitleSessionIdRef.current = null;
+      archiveReturnLookaheadAbortRef.current?.abort();
     }
     if (!resume) {
       // Always cut immediately — same floor-hold contract as leaving mid-speech.
@@ -13743,19 +14421,27 @@ export function DebateExperience(
             idempotencyKey: `${lifecycleIdempotencyKey}:announce`,
           }),
         );
-      let quiet: { session: DebateSessionV1 };
-      try {
-        quiet = await requestQuietLifecycle(previous);
-      } catch (caught) {
-        if (!debateRequestIsRevisionConflict(caught)) throw caught;
-        const refreshed = await props.request<{ session: DebateSessionV1 }>(
-          `/api/debates/${encodeURIComponent(previous.id)}?perspective=live`,
-        );
-        if (!resume && refreshed.session.status === "paused") {
-          quiet = refreshed;
-        } else if (resume && refreshed.session.status !== "paused") {
-          quiet = refreshed;
-        } else {
+      let quiet: { session: DebateSessionV1 } | null = null;
+      let lifecycleSession = previous;
+      let lastLifecycleConflict: unknown = null;
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        try {
+          quiet = await requestQuietLifecycle(lifecycleSession);
+          break;
+        } catch (caught) {
+          if (!debateRequestIsRevisionConflict(caught)) throw caught;
+          lastLifecycleConflict = caught;
+          const refreshed = await props.request<{ session: DebateSessionV1 }>(
+            `/api/debates/${encodeURIComponent(previous.id)}?perspective=live`,
+          );
+          if (!resume && refreshed.session.status === "paused") {
+            quiet = refreshed;
+            break;
+          }
+          if (resume && refreshed.session.status !== "paused") {
+            quiet = refreshed;
+            break;
+          }
           if (!resume && !replayEventId) {
             replayEventId =
               debatePresentationEvents(
@@ -13773,8 +14459,31 @@ export function DebateExperience(
                   event.speakerKind !== "system" && event.kind !== "error",
               )?.id ?? null;
           }
-          quiet = await requestQuietLifecycle(refreshed.session);
+          lifecycleSession = refreshed.session;
+          if (mountedRef.current) {
+            activeSessionRef.current = lifecycleSession;
+            setActiveSession(lifecycleSession);
+          }
         }
+      }
+      if (!quiet) {
+        throw lastLifecycleConflict instanceof Error
+          ? lastLifecycleConflict
+          : new Error("Debate changed while this turn was being prepared. Refresh and retry.");
+      }
+      if (
+        !resume &&
+        (quiet.session.status === "completed" ||
+          quiet.session.status === "cancelled" ||
+          quiet.session.status === "failed")
+      ) {
+        if (mountedRef.current) {
+          setPresenting(false);
+          setBusy(false);
+          setActiveSession(quiet.session);
+        }
+        void loadSessions();
+        return;
       }
       if (!resume && quiet.session.status !== "paused") {
         // A Participant who has spent all three recesses receives an in-world
@@ -13833,6 +14542,7 @@ export function DebateExperience(
             event.stepKey === (resume ? "resume" : "pause"),
         );
       if (resume) {
+        restartSpectatorBakeIfNeeded(result.session, "resume");
         if (startPreparedOpening || startSpectatorWatch) {
           const firstOpeningEventId =
             debatePresentationEvents(null, result.session, false).find(
@@ -13879,7 +14589,36 @@ export function DebateExperience(
           return;
         }
         const heldEventId =
-          result.session.pausedPresentationEventId ?? replayEventId;
+          titleCardPlayheadEventId ??
+          result.session.pausedPresentationEventId ??
+          replayEventId;
+        // #region agent log
+        fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "296f82",
+          },
+          body: JSON.stringify({
+            sessionId: "296f82",
+            runId: "post-fix",
+            hypothesisId: "G",
+            location: "DebateExperience.tsx:pauseOrResume.heldEventId",
+            message: "debate resume held event",
+            data: {
+              heldEventId,
+              titleCardPlayheadEventId,
+              pausedPresentationEventId:
+                result.session.pausedPresentationEventId ?? null,
+              heldStepKey:
+                result.session.events.find((event) => event.id === heldEventId)
+                  ?.stepKey ?? null,
+              bakerStepKey: result.session.stepKey,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
         const pausedPresentationEvent = heldEventId
           ? result.session.events.find((event) => event.id === heldEventId)
           : undefined;
@@ -13903,10 +14642,16 @@ export function DebateExperience(
           });
         }
         if (pausedPresentationEvent) {
-          const filledSession = debateSessionWithRecessResumeFiller(
-            result.session,
-            pausedPresentationEvent.id,
-          );
+          const jumpedFromBookmark =
+            Boolean(titleCardPlayheadEventId) &&
+            titleCardPlayheadEventId !==
+              result.session.pausedPresentationEventId;
+          const filledSession = jumpedFromBookmark
+            ? result.session
+            : debateSessionWithRecessResumeFiller(
+                result.session,
+                pausedPresentationEvent.id,
+              );
           await adoptSession(
             {
               ...filledSession,
@@ -13951,6 +14696,7 @@ export function DebateExperience(
             // The replay projection omits lifecycle housekeeping only so it is
             // not voiced twice. Restore the complete canonical record once the
             // unheard floor tail has finished.
+            setCheckpointPlayheadEventId(null);
             setActiveSession(result.session);
             setPauseCooldownUntilMs(Date.now() + DEBATE_PAUSE_COOLDOWN_MS);
             void loadSessions();
@@ -13960,6 +14706,7 @@ export function DebateExperience(
         if (resumeCeremonyStarted && mountedRef.current) {
           setResumeCeremonySessionId(null);
         }
+        if (launchFromTitleCard) setCheckpointPlayheadEventId(null);
         setActiveSession(result.session);
         setPauseCooldownUntilMs(Date.now() + DEBATE_PAUSE_COOLDOWN_MS);
       } else {
@@ -13982,6 +14729,28 @@ export function DebateExperience(
         if (!titleStartCommitted) {
           playPreparedOpeningTitleMusic(previous.id);
         }
+      }
+      const alreadyFinished = /already finished/iu.test(
+        caught instanceof Error ? caught.message : String(caught ?? ""),
+      );
+      if (alreadyFinished) {
+        if (mountedRef.current) {
+          setPresenting(false);
+          setBusy(false);
+        }
+        void loadSessions();
+        return;
+      }
+      try {
+        const refreshed = await props.request<{ session: DebateSessionV1 }>(
+          `/api/debates/${encodeURIComponent(previous.id)}?perspective=live`,
+        );
+        if (mountedRef.current) {
+          activeSessionRef.current = refreshed.session;
+          setActiveSession(refreshed.session);
+        }
+      } catch {
+        // Keep the last known session so Retry Start still has an id.
       }
       setError(
         caught instanceof Error
@@ -14139,7 +14908,6 @@ export function DebateExperience(
     presentationStore.clear();
     activeSessionIdRef.current = null;
     activeSessionRef.current = null;
-    spectatorPresentationSealInFlightRef.current = null;
     spectatorBakeAbortRef.current?.abort();
     if (
       previous?.playerRole === "spectator" &&
@@ -14212,6 +14980,12 @@ export function DebateExperience(
     void recessRequest
       .catch((caught) => {
         if (!mountedRef.current) return;
+        const message =
+          caught instanceof Error ? caught.message : "";
+        if (/already finished/iu.test(message)) {
+          void loadSessions();
+          return;
+        }
         setError(
           caught instanceof Error
             ? `Returned to Debate Studio, but the recess could not be saved: ${caught.message}`
@@ -15379,6 +16153,16 @@ export function DebateExperience(
           : session.status === "paused"
             ? "In recess"
             : "In progress";
+    const archiveTranscriptCopyState =
+      archiveTranscriptCopyStates[session.id] ?? "idle";
+    const archiveTranscriptCopyLabel =
+      archiveTranscriptCopyState === "copying"
+        ? "Copying transcript…"
+        : archiveTranscriptCopyState === "copied"
+          ? "Transcript copied"
+          : archiveTranscriptCopyState === "failed"
+            ? "Copy failed — try again"
+            : "Copy verbose transcript";
     return (
       <li
         key={session.id}
@@ -15572,6 +16356,19 @@ export function DebateExperience(
               </div>
             ) : null}
             <div className={styles.archiveActions}>
+              <button
+                type="button"
+                className={styles.archiveReuseButton}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void copyArchiveVerboseTranscript(session);
+                }}
+                disabled={archiveTranscriptCopyState === "copying"}
+                aria-busy={archiveTranscriptCopyState === "copying"}
+                aria-label={`${archiveTranscriptCopyLabel} for ${session.title}`}
+              >
+                {archiveTranscriptCopyLabel}
+              </button>
               <button
                 type="button"
                 className={styles.archiveOpenButton}
@@ -15874,17 +16671,18 @@ export function DebateExperience(
           {(
             [
               {
-                id: "motion",
+                id: "motion" as const,
                 index: "01",
                 label: "Motion",
                 detail: motionComplete
                   ? "Debate prepared"
                   : "Shape the question",
                 complete: motionComplete,
-                tutorial: undefined,
+                tutorial: "debate-motion",
+                magic: motionRailMagic,
               },
               {
-                id: "cast",
+                id: "cast" as const,
                 index: "02",
                 label: "Cast",
                 detail: roleChecksComplete
@@ -15894,9 +16692,10 @@ export function DebateExperience(
                     : "Seat the proceeding",
                 complete: castComplete && roleChecksComplete,
                 tutorial: "debate-cast",
+                magic: castRailMagic,
               },
               {
-                id: "evidence",
+                id: "evidence" as const,
                 index: "03",
                 label: "Evidence",
                 detail:
@@ -15907,52 +16706,70 @@ export function DebateExperience(
                       : "Optional",
                 complete: evidenceDecisionMade,
                 tutorial: "debate-evidence",
+                magic: evidenceRailMagic,
               },
-            ] as const
+            ]
           ).map((panel) => (
-            <button
-              type="button"
-              className={styles.studioNavButton}
-              data-active={studioPanel === panel.id ? "true" : undefined}
-              data-complete={panel.complete ? "true" : undefined}
-              data-tutorial-target={panel.tutorial}
-              aria-pressed={studioPanel === panel.id}
-              onClick={() => setStudioPanel(panel.id)}
-              key={panel.id}
-            >
-              <span>{panel.index}</span>
-              <strong>{panel.label}</strong>
-              <small>{panel.detail}</small>
-              <i aria-hidden="true">{panel.complete ? "✓" : "·"}</i>
-            </button>
+            <PrismRefractTarget target={panel.magic} key={panel.id}>
+              {(binding) => (
+                <button
+                  {...binding}
+                  type="button"
+                  className={styles.studioNavButton}
+                  data-active={studioPanel === panel.id ? "true" : undefined}
+                  data-complete={panel.complete ? "true" : undefined}
+                  data-tutorial-target={panel.tutorial}
+                  aria-pressed={studioPanel === panel.id}
+                  onClick={() => setStudioPanel(panel.id)}
+                >
+                  <span>{panel.index}</span>
+                  <strong>{panel.label}</strong>
+                  <small>{panel.detail}</small>
+                  <i aria-hidden="true">{panel.complete ? "✓" : "·"}</i>
+                </button>
+              )}
+            </PrismRefractTarget>
           ))}
           <span className={styles.studioNavRule} />
-          <button
-            type="button"
-            className={styles.studioNavButton}
-            data-active={studioPanel === "archive" ? "true" : undefined}
-            aria-pressed={studioPanel === "archive"}
-            aria-label="Open proceeding archive"
-            onClick={() => setStudioPanel("archive")}
-          >
-            <span>↳</span>
-            <strong>Archive</strong>
-            <small>
-              {sessions.length} proceeding{sessions.length === 1 ? "" : "s"}
-            </small>
-            <i aria-hidden="true">›</i>
-          </button>
-          <button
-            type="button"
-            className={styles.studioUtilityButton}
-            data-tutorial-target="debate-stage-direction"
-            onClick={() => setStageDirectionOpen(true)}
-            aria-label="Open stage direction"
-            title="Choose the visual composition of the Forum."
-          >
-            <span aria-hidden="true">◇</span>
-            Stage direction
-          </button>
+          <PrismRefractTarget target={archiveRailMagic}>
+            {(binding) => (
+              <button
+                {...binding}
+                type="button"
+                className={styles.studioNavButton}
+                data-active={studioPanel === "archive" ? "true" : undefined}
+                aria-pressed={studioPanel === "archive"}
+                aria-label="Open proceeding archive"
+                data-tutorial-target="debate-archive"
+                onClick={() => setStudioPanel("archive")}
+              >
+                <span>↳</span>
+                <strong>Archive</strong>
+                <small>
+                  {sessions.length} proceeding{sessions.length === 1 ? "" : "s"}
+                </small>
+                <i aria-hidden="true">›</i>
+              </button>
+            )}
+          </PrismRefractTarget>
+          {DEBATE_STAGE_LAYOUT_AUTHORING_ENABLED ? (
+            <PrismRefractTarget target={stageLayoutRailMagic}>
+              {(binding) => (
+                <button
+                  {...binding}
+                  type="button"
+                  className={styles.studioUtilityButton}
+                  data-tutorial-target="debate-stage-layout"
+                  onClick={openStageAlignment}
+                  aria-label="Edit stage layout"
+                  title="Place every Forum stage element and copy source-ready Main defaults."
+                >
+                  <span aria-hidden="true">⌖</span>
+                  Stage layout
+                </button>
+              )}
+            </PrismRefractTarget>
+          ) : null}
           <div
             className={styles.studioNavStatus}
             data-ready={debateCanStart ? "true" : undefined}
@@ -20074,13 +20891,14 @@ export function DebateExperience(
     if (!jurySeated) {
       return null;
     }
-    // Keep the live Jury widget through aftermath; swap only after the verdict seals.
-    if (session.status !== "completed") {
-      return null;
-    }
-    const comments = debateJuryCommentEvents(session);
+    const sealed = session.status === "completed";
+    const comments = debateHeardJuryCommentEvents(
+      session,
+      transcriptVisibleThroughSequence,
+      { revealAll: sealed },
+    );
     const splitLabel =
-      session.jury.phase === "complete"
+      session.jury.phase === "complete" && sealed
         ? `${session.jury.forVotes}–${session.jury.againstVotes} · timestamped commentary`
         : "Timestamped · separate from proceedings";
     return (
@@ -20089,13 +20907,14 @@ export function DebateExperience(
         aria-label="Timestamped Jury comments"
         data-tutorial-target="debate-jury-record"
         data-phase={session.jury.phase}
+        data-live={sealed ? undefined : "true"}
       >
         <header>
           <div>
             <p className={styles.eyebrow}>Jury record</p>
             <span>{splitLabel}</span>
           </div>
-          <small>Sealed</small>
+          <small>{sealed ? "Sealed" : "In session"}</small>
         </header>
         {comments.length > 0 ? (
           <ol>
@@ -20117,7 +20936,11 @@ export function DebateExperience(
             ))}
           </ol>
         ) : (
-          <p>The Jury reached its result without public commentary.</p>
+          <p>
+            {sealed
+              ? "The Jury reached its result without public commentary."
+              : "Heard Jury thoughts and deliberation appear here as the chamber speaks."}
+          </p>
         )}
       </section>
     );
@@ -20530,11 +21353,11 @@ export function DebateExperience(
                   ? (liveReveal.speechTiming ?? null)
                   : null;
               const talking =
-                silentDeliberationPreparing ||
-                (presenting &&
-                  activeJurorId === juror.id &&
-                  activeEvent?.kind !== "silence" &&
-                  speechTiming !== null);
+                presenting &&
+                activeJurorId === juror.id &&
+                activeEvent?.kind !== "silence" &&
+                speechTiming !== null &&
+                !speechMouthResting;
               const listenerReaction =
                 presenting &&
                 activeJurorId !== juror.id &&
@@ -20545,12 +21368,8 @@ export function DebateExperience(
                 muteReactionBeat?.reactorBotId === juror.id
                   ? muteReactionBeat
                   : null;
-              const foleyMouthShape = silentDeliberationPreparing
-                ? debateJuryDeliberationMouthShape(
-                    index,
-                    juryDeliberationMouthTickMs || Date.now(),
-                  )
-                : !talking && debateAmbientBotVocalization?.targetId === juror.id
+              const foleyMouthShape =
+                !talking && debateAmbientBotVocalization?.targetId === juror.id
                   ? debateAmbientBotVocalizationMouthShape(juror.id)
                   : null;
               const vocalFoleyTagText = resolveDebateVocalFoleyTagText({
@@ -20572,9 +21391,7 @@ export function DebateExperience(
                   data-seat={index}
                   data-speaking={talking ? "true" : undefined}
                   data-thinking={
-                    !silentDeliberationPreparing && thinkingBotId === juror.id
-                      ? "true"
-                      : undefined
+                    thinkingBotId === juror.id ? "true" : undefined
                   }
                   data-visibility={presentation.visibility}
                   data-scale={presentation.scale}
@@ -20594,7 +21411,6 @@ export function DebateExperience(
                 >
                   <div className={styles.juryChamberAvatar}>
                     {props.renderBotAvatar ? (
-                      !silentDeliberationPreparing &&
                       talking &&
                       activeEvent ? (
                         <DebateActiveAvatarConsumer
@@ -20611,8 +21427,12 @@ export function DebateExperience(
                                   ? "for"
                                   : "against",
                             lookAtRole: null,
-                            highDefinition: true,
-                            compact: true,
+                            consumer: "jury",
+                            presentation: debateAvatarPresentation({
+                              consumer: "jury",
+                              role: "for",
+                              cameraView: "jury",
+                            }),
                             talking,
                             thinking: thinkingBotId === juror.id,
                             voiceLevel: 1,
@@ -20630,19 +21450,17 @@ export function DebateExperience(
                                 ? "for"
                                 : "against",
                           lookAtRole: null,
-                          highDefinition: true,
-                          compact: true,
+                          consumer: "jury",
+                          presentation: debateAvatarPresentation({
+                            consumer: "jury",
+                            role: "for",
+                            cameraView: "jury",
+                          }),
                           talking,
-                          // Thinking freezes the mouth closed — keep deliberation
-                          // chatter alive even while the next ballot prepares.
-                          thinking:
-                            !silentDeliberationPreparing &&
-                            thinkingBotId === juror.id,
+                          thinking: thinkingBotId === juror.id,
                           voiceLevel: 1,
                           colorCycle: presentation.colorCycle,
-                          speechTiming: silentDeliberationPreparing
-                            ? null
-                            : speechTiming,
+                          speechTiming,
                           foleyMouthShape,
                           listenerReaction,
                         })
@@ -20679,14 +21497,7 @@ export function DebateExperience(
                           )}*`}
                     </span>
                   ) : null}
-                  {silentDeliberationPreparing ? (
-                    <i
-                      className={`${styles.juryThoughtChip} ${styles.juryDeliberationBubble}`}
-                      aria-hidden="true"
-                    >
-                      ...
-                    </i>
-                  ) : pendingJuryThoughtBotId === juror.id ? (
+                  {pendingJuryThoughtBotId === juror.id ? (
                     <i
                       className={styles.juryThoughtChip}
                       aria-label={`${juror.name} has a thought`}
@@ -20772,12 +21583,12 @@ export function DebateExperience(
             </div>
           </div>
         ) : null}
-        {/* The transparent raster is intentionally above the bots so its
-            tabletop occludes their lower frames. */}
+        {/* Wide/overview table — above the bots so the tabletop occludes
+            their lower frames, matching the Forum establishing shot. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           className={styles.juryTableRaster}
-          src={`/coffee-table/table_${props.theme}.png`}
+          src={`/debate/overview-table-${props.theme}.png`}
           alt=""
           aria-hidden="true"
         />
@@ -20883,7 +21694,7 @@ export function DebateExperience(
                 "No leaning is displayed before deliberation."
               )
             ) : silentDeliberationPreparing ? (
-              "Their conversation remains unheard and uncaptioned while the Jury’s reasoning and final ballot recordings are prepared."
+              "The next juror will be heard in this chamber."
             ) : session.jury.phase === "final_ballots" ? (
               session.playerRole === "participant" ? (
                 "Individual reasons and ballots remain sealed until the aggregate verdict."
@@ -20893,100 +21704,12 @@ export function DebateExperience(
                 "Each final vote appears as it is cast."
               )
             ) : session.jury.phase === "waiting" ? (
-              "The Jury follows the public floor and talks between turns."
+              "The Jury follows the public floor in silence until deliberation."
             ) : (
               `The ${debatePublicMaterialName(session.formality).toLowerCase()} remains at the center of the table.`
             )}
           </p>
         </div>
-      </div>
-    );
-  };
-
-  const renderStageDirectionPanel = (): React.JSX.Element | null => {
-    if (!stageDirectionOpen) return null;
-    const activePreset = debateStageDirectionPresetForAlignment(stageAlignment);
-    const options: readonly {
-      id: DebateStageDirectionPreset;
-      label: string;
-      description: string;
-      glyph: string;
-    }[] = [
-      {
-        id: "close",
-        label: "Close conversation",
-        description: "Draw the advocates inward for a more intimate exchange.",
-        glyph: "◁◆▷",
-      },
-      {
-        id: "balanced",
-        label: "Balanced forum",
-        description: "Keep the chamber clear, symmetrical, and easy to follow.",
-        glyph: "◇ ◆ ◇",
-      },
-      {
-        id: "grand",
-        label: "Grand chamber",
-        description: "Open the room and give the Moderator more presence.",
-        glyph: "◁  ▲  ▷",
-      },
-    ];
-    return (
-      <div
-        className={styles.stageDirectionBackdrop}
-        data-theme={props.theme}
-        onPointerDown={(event) => {
-          if (event.currentTarget === event.target) setStageDirectionOpen(false);
-        }}
-      >
-        <section
-          className={styles.stageDirectionPanel}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="debate-stage-direction-title"
-          data-debate-stage-direction="true"
-          onKeyDown={(event) => {
-            if (event.key === "Escape") setStageDirectionOpen(false);
-          }}
-        >
-          <header>
-            <div>
-              <span className={styles.eyebrow}>Stage direction</span>
-              <h2 id="debate-stage-direction-title">Shape the chamber</h2>
-              <p>Choose the feeling of the room. Changes save immediately.</p>
-            </div>
-            <button
-              type="button"
-              className={styles.stageDirectionClose}
-              onClick={() => setStageDirectionOpen(false)}
-              aria-label="Close stage direction"
-            >
-              ×
-            </button>
-          </header>
-          <div className={styles.stageDirectionOptions}>
-            {options.map((option, index) => (
-              <button
-                type="button"
-                key={option.id}
-                autoFocus={index === 0}
-                aria-pressed={activePreset === option.id}
-                data-selected={activePreset === option.id ? "true" : undefined}
-                onClick={() => applyStageDirectionPreset(option.id)}
-              >
-                <span aria-hidden="true">{option.glyph}</span>
-                <strong>{option.label}</strong>
-                <small>{option.description}</small>
-              </button>
-            ))}
-          </div>
-          {activePreset === null ? (
-            <p className={styles.stageDirectionCustomNote} role="status">
-              Custom Alignment Lab geometry is active. Choose a direction to
-              replace only the Wide composition.
-            </p>
-          ) : null}
-        </section>
       </div>
     );
   };
@@ -21228,13 +21951,15 @@ export function DebateExperience(
           >
             <header className={styles.alignmentModalHeader}>
               <div>
-                <span className={styles.eyebrow}>Developer tool</span>
+                <span className={styles.eyebrow}>Stage layout</span>
                 <h2 id="debate-stage-alignment-title">
-                  Debate Alignment Lab
+                  Main stage layout
                 </h2>
                 <p>
-                  Precision camera, prop, light, and audio calibration. Shuffle
-                  the cast to test varied silhouettes and voices.
+                  Place every Forum element directly. Save the Main layout for
+                  this account and device; live presentation and replay use that
+                  saved Main layout. Copy Main defaults instead copies a
+                  source-ready V14 block and never changes shipped defaults.
                 </p>
               </div>
               <div>
@@ -21261,7 +21986,7 @@ export function DebateExperience(
                       ? "Copied"
                       : stageAlignmentCopyState === "failed"
                         ? "Copy failed"
-                        : "Copy alignment data"}
+                        : "Copy Main defaults"}
                 </button>
                 <button type="button" onClick={cancelStageAlignment}>
                   Cancel
@@ -21280,10 +22005,10 @@ export function DebateExperience(
               <div className={styles.alignmentEditorHeader}>
                 <p>
                   {stageAlignmentPreviewCamera === "moderator"
-                    ? "Align the moderator bot, nameplate, and glyph plate independently from Wide."
+                    ? "Place the moderator bot, nameplate, and glyph plate independently from Main."
                     : stageAlignmentPreviewCamera === "wide"
-                      ? "Align every bot, nameplate, and glyph plate in the wide Forum without changing the close-ups."
-                      : `Align the source pamphlet and exhibit independently in the ${stageAlignmentPreviewCameraLabel} debater close-up.`}{" "}
+                      ? "Place every bot, nameplate, and glyph plate in the Main Forum without changing the close-ups."
+                      : `Place the source pamphlet and exhibit independently in the ${stageAlignmentPreviewCameraLabel} debater close-up.`}{" "}
                   {stageAlignmentEvidenceOnlyCamera
                     ? "Use the evidence controls below to position and scale the active asset, or calibrate the Moderator micro avatar."
                     : "Drag an item or use arrow keys to nudge by 0.5%; hold Shift for 2%. Select the active item in the exact controls below."}
@@ -21307,7 +22032,7 @@ export function DebateExperience(
                           key={previewCamera}
                         >
                           {previewCamera === "wide"
-                            ? "Wide"
+                            ? "Main"
                             : previewCamera === "left"
                               ? "Left"
                               : previewCamera === "moderator"
@@ -21390,7 +22115,7 @@ export function DebateExperience(
                               })
                             : normalizeDebateStageAlignment({
                                 ...current,
-                                wide: DEFAULT_DEBATE_STAGE_ALIGNMENT.wide,
+                                main: DEFAULT_DEBATE_STAGE_ALIGNMENT.main,
                                 moderatorMicroScales:
                                   DEFAULT_DEBATE_STAGE_ALIGNMENT.moderatorMicroScales,
                                 evidenceTable: {
@@ -21413,7 +22138,7 @@ export function DebateExperience(
                     {stageAlignmentPreviewCamera === "moderator"
                       ? "Reset moderator"
                       : stageAlignmentPreviewCamera === "wide"
-                        ? "Reset positions"
+                      ? "Reset Main"
                         : "Reset evidence"}
                   </button>
                 </div>
@@ -21463,6 +22188,11 @@ export function DebateExperience(
                             role,
                             "bot",
                           );
+                          const avatarPresentation = debateAvatarPresentation({
+                            consumer: "forum",
+                            role,
+                            cameraView: stageAlignmentPreviewCamera,
+                          });
                           return (
                             <div
                               className={`${styles.botPosition} ${styles.alignmentHandle}`}
@@ -21499,8 +22229,7 @@ export function DebateExperience(
                                 }
                                 data-scale={presentation.scale}
                                 data-debate-stage-compact={
-                                  role === "moderator" &&
-                                  stageAlignmentPreviewCamera !== "moderator"
+                                  avatarPresentation === "mini"
                                     ? "true"
                                     : undefined
                                 }
@@ -21509,14 +22238,8 @@ export function DebateExperience(
                                   props.renderBotAvatar(bot, {
                                     role,
                                     lookAtRole: null,
-                                    highDefinition:
-                                      role !== "moderator" ||
-                                      stageAlignmentPreviewCamera ===
-                                        "moderator",
-                                    compact:
-                                      role === "moderator" &&
-                                      stageAlignmentPreviewCamera !==
-                                        "moderator",
+                                    consumer: "forum",
+                                    presentation: avatarPresentation,
                                     talking: soundCheckPlaying,
                                     thinking: false,
                                     voiceLevel: debateStageVoiceLevelForRole(
@@ -22515,11 +23238,11 @@ export function DebateExperience(
                 defaultModeratorMicroScale !== null ? (
                   <section
                     className={styles.alignmentModeratorScaleTuner}
-                    aria-label={`${stageAlignmentPreviewCameraLabel} moderator micro avatar scale`}
+                    aria-label={`${stageAlignmentPreviewCameraLabel} moderator mini avatar scale`}
                   >
                     <header>
                       <div>
-                        <span className={styles.eyebrow}>Moderator micro avatar</span>
+                        <span className={styles.eyebrow}>Moderator mini avatar</span>
                         <strong>{stageAlignmentPreviewCameraLabel} scale</strong>
                       </div>
                       <button
@@ -22549,7 +23272,7 @@ export function DebateExperience(
                         max={DEBATE_STAGE_MODERATOR_MICRO_SCALE_MAX}
                         step={DEBATE_STAGE_MODERATOR_MICRO_SCALE_STEP}
                         value={moderatorMicroScale}
-                        aria-label={`${stageAlignmentPreviewCameraLabel} moderator micro avatar scale`}
+                        aria-label={`${stageAlignmentPreviewCameraLabel} moderator mini avatar scale`}
                         onChange={(event) => {
                           const nextModeratorMicroScale = Number(
                             event.currentTarget.value,
@@ -22734,6 +23457,11 @@ export function DebateExperience(
       -100,
       Math.min(100, Number(participation?.favorability?.total) || 0),
     );
+    const spectatorChairFavorability = debateChairFavorabilityAtPlayhead({
+      events: session.events,
+      playheadEventId:
+        presentationPlaybackEventIdRef.current ?? presentationEventId,
+    });
     const participationPatience = debateParticipationPatience({
       session,
       formality: session.formality,
@@ -22765,12 +23493,26 @@ export function DebateExperience(
       debateSessionAwaitingFirstPresentation(session);
     const readyToBeginOverlay =
       awaitingFirstPresentation || awaitingDeferredStart;
+    const spectatorUnheardPresentable = debatePresentationEvents(
+      debateSessionThroughPlayhead(
+        session,
+        presentationPlaybackEventIdRef.current ?? presentationEventId,
+      ),
+      session,
+      false,
+    );
     const archiveReadinessForSession =
       archiveReturnReadiness?.sessionId === session.id
         ? archiveReturnReadiness
         : null;
     const titleCardHolding =
       readyToBeginOverlay || archiveReadinessForSession !== null;
+    const turnCheckpoints = debateTurnCheckpointsFromSession(session);
+    const selectedTurnCheckpoint = debateTurnCheckpointForEventId(
+      turnCheckpoints,
+      checkpointPlayheadEventId ?? session.pausedPresentationEventId,
+      session.events,
+    );
     const openingPreloading = openingPreloadSessionId === session.id;
     const openingLaunching = openingLaunchSessionId === session.id;
     const galleryArriving = view === "baking";
@@ -22792,6 +23534,12 @@ export function DebateExperience(
       ? (session.events.find((event) => event.id === presentationEventId) ??
         null)
       : null;
+    const idleCameraAnchor =
+      presentedEvent ??
+      debateTurnCheckpointEvent(
+        session,
+        checkpointPlayheadEventId ?? session.pausedPresentationEventId,
+      );
     const cameraSpeechEvent = debateEventCanOwnAutomaticCamera(
       presentedEvent,
       presenting,
@@ -22807,6 +23555,9 @@ export function DebateExperience(
         ? ([...session.events]
             .reverse()
             .find((event) =>
+              (idleCameraAnchor
+                ? event.sequence <= idleCameraAnchor.sequence
+                : !debateEventUsesJuryCamera(event)) &&
               debateEventCanOwnIdleCamera(event, juryCameraActive),
             ) ?? null)
         : null) ??
@@ -22886,6 +23637,7 @@ export function DebateExperience(
           : cameraSpeakerId === session.againstAdvocate.id
             ? "against"
           : cameraParticipantFloorRole;
+    // Forum seats only. Jurors never steal the camera during public-floor speech.
     const muteReactionCameraRole: DebateCameraView | null =
       activeMuteReactionBeat?.reactorBotId === session.moderator.id
         ? "moderator"
@@ -22893,12 +23645,7 @@ export function DebateExperience(
           ? "left"
           : activeMuteReactionBeat?.reactorBotId === session.againstAdvocate.id
             ? "right"
-            : activeMuteReactionBeat &&
-                session.jury.jurors.some(
-                  (juror) => juror.id === activeMuteReactionBeat.reactorBotId,
-                )
-              ? "jury"
-              : null;
+            : null;
     const activeColor =
       activeRole === "moderator"
         ? session.moderator.color
@@ -22927,7 +23674,7 @@ export function DebateExperience(
         : debateCameraTransition(effectiveCameraMode, activeEvent);
     const speakerHandoffKeepsWide =
       speakerHandoff?.phase === "wide" || speakerHandoff?.phase === "evidence";
-    const cameraView = galleryArriving
+    const forumCameraView = galleryArriving
       ? "wide"
       : muteReactionCameraRole &&
           (effectiveCameraMode === "auto" || effectiveCameraMode === "jury")
@@ -22936,19 +23683,26 @@ export function DebateExperience(
         ? interruptCameraView
         : recessSettledWide
         ? "wide"
-        : juryCameraActive
-              ? "jury"
-              : speakerHandoffKeepsWide && effectiveCameraMode === "auto"
-                ? "wide"
-                : introCameraView &&
-                    (effectiveCameraMode === "auto" ||
-                      effectiveCameraMode === "jury") &&
-                    !speakerHandoff
-                  ? introCameraView
-                  : effectiveCameraMode === "auto" ||
-                      effectiveCameraMode === "jury"
-                    ? debateAutoCameraView(cameraActiveRole)
-                    : effectiveCameraMode;
+        : speakerHandoffKeepsWide && effectiveCameraMode === "auto"
+          ? "wide"
+          : introCameraView &&
+              (effectiveCameraMode === "auto" ||
+                effectiveCameraMode === "jury") &&
+              !speakerHandoff
+            ? introCameraView
+            : coverageCameraView &&
+                (effectiveCameraMode === "auto" ||
+                  effectiveCameraMode === "jury") &&
+                !speakerHandoff
+              ? coverageCameraView
+            : effectiveCameraMode === "auto" ||
+                effectiveCameraMode === "jury"
+              ? debateAutoCameraView(cameraActiveRole)
+              : effectiveCameraMode;
+    const cameraView = debateLiveCameraViewWithJuryLock({
+      juryCameraActive,
+      forumView: forumCameraView,
+    });
     const evidenceView = debateStageEvidenceViewForCamera(cameraView);
     const participantFloorRailVisible =
       (participantOpponentSpeechActive && !judgeGavelKeyboardBlocked) ||
@@ -23191,8 +23945,13 @@ export function DebateExperience(
       session.jury.jurors.length > 0 ||
       session.jury.finalBallots.length > 0 ||
       session.jury.phase === "complete";
-    // Jury Record replaces the live Jury widget only after the Debate seals.
-    const juryRecordReady = sealedCompleted && juryWasSeated;
+    // Keep the live Jury widget through the public floor. The transcript
+    // box replaces it only while the camera is inside the chamber, then
+    // seals after the Debate completes.
+    const juryRecordReady =
+      juryWasSeated &&
+      session.playerRole !== "participant" &&
+      (sealedCompleted || juryCameraActive);
     const participantJurySealed =
       session.jury.enabled &&
       session.playerRole === "participant" &&
@@ -23410,13 +24169,38 @@ export function DebateExperience(
       debateIdentPlaying === null &&
       !participantJurySealed &&
       (session.status === "live" || session.status === "waiting_for_player");
+    const galleryArrivalFillRatio = galleryArriving
+      ? debateGalleryArrivalFillRatio({
+          nonPlayerCount: galleryArrivalRevealOrder.length,
+          progressRatio: liveBakeProgressRatio(spectatorBake),
+          bakeUnlocked: spectatorGalleryBakeUnlocked,
+          elapsedMs: Math.max(
+            0,
+            spectatorGalleryArrivalNowMs - galleryArrivalStartedMs,
+          ),
+          unlockElapsedMs: spectatorGalleryArrivalUnlockedAt
+            ? Math.max(
+                0,
+                spectatorGalleryArrivalNowMs - spectatorGalleryArrivalUnlockedAt,
+              )
+            : 0,
+        })
+      : null;
     const galleryArrivalMurmurGain = galleryArriving
       ? debateGalleryArrivalMurmurGain({
           revealedCount: galleryArrivalReveal?.revealedCount ?? 0,
           nonPlayerCount: galleryArrivalRevealOrder.length,
+          fillRatio: galleryArrivalFillRatio ?? undefined,
         })
       : titleCardHolding
-        ? 1
+        ? spectatorGalleryArrivalCompleteRef.current
+          ? 1
+          : debateGalleryOpeningMurmurGain(
+              galleryOpeningMurmurStartedAtRef.current == null
+                ? 0
+                : galleryOpeningMurmurNowMs -
+                    galleryOpeningMurmurStartedAtRef.current,
+            )
         : null;
     const galleryPrestartMurmur =
       galleryArrivalMurmurGain !== null && !debateOpeningGalleryHushed;
@@ -23675,11 +24459,11 @@ export function DebateExperience(
               : DEBATE_AUDIENCE_ROOM_BASELINE_URL;
     const liveGalleryUsesCrosstalk =
       ambientAudioActive &&
-      !juryChamberVisible &&
       (galleryMixBranch === "prestart-murmur" ||
         galleryMixBranch === "order-peak" ||
         galleryMixBranch === "order-stragglers" ||
         galleryMixBranch === "pressure-score" ||
+        galleryMixBranch === "jury" ||
         ((galleryMixBranch === "idle" || galleryMixBranch === "ducked") &&
           audienceChattering));
     const galleryTalkingAudioAudible = Boolean(
@@ -23720,7 +24504,7 @@ export function DebateExperience(
           lifecycleTransitionMs={DEBATE_AUDIENCE_LAYER_CROSSFADE_MS}
           mixTransitionMs={
             galleryMixBranch === "prestart-murmur" && galleryArriving
-              ? 140
+              ? 280
               : audiencePressureBandTrue === null &&
                   activeAudienceOrderResponse === null
                 ? 320
@@ -23817,21 +24601,7 @@ export function DebateExperience(
               {activeEvent.mutePerformance.elapsedCue.replace(/^\*|\*$/gu, "")}
             </span>
           ) : null}
-          {galleryArriving ? (
-            <div
-              className={styles.galleryArrivalStageMask}
-              data-debate-arrival-mask="true"
-              role="status"
-              aria-live="polite"
-            >
-              <p className={styles.galleryArrivalKicker}>The Forum</p>
-              <strong>The gallery is arriving</strong>
-              <p>
-                Guests are finding their seats while the opening is prepared.
-                Progress is saved if you leave.
-              </p>
-            </div>
-          ) : debateIdentPlaying ? (
+          {debateIdentPlaying ? (
             <DebateIdentOverlay kind={debateIdentPlaying} session={session} />
           ) : session.status === "paused" &&
             !presenting &&
@@ -23841,7 +24611,7 @@ export function DebateExperience(
               kind="intro"
               session={session}
               hold
-              holdScope="full"
+              holdScope="stage"
               holdPhase={archiveReadinessForSession?.phase}
               holdTitle={
                 archiveReadinessForSession?.phase === "preparing"
@@ -23877,7 +24647,60 @@ export function DebateExperience(
                 onClick: () => void pauseOrResume(),
                 action: readyToBeginOverlay ? "start" : "resume",
               }}
+              holdCheckpoints={
+                turnCheckpoints.length > 1
+                  ? {
+                      checkpoints: turnCheckpoints,
+                      selectedId: selectedTurnCheckpoint?.id ?? null,
+                      onSelect: (eventId) => {
+                        // #region agent log
+                        fetch(
+                          "http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2",
+                          {
+                            method: "POST",
+                            headers: {
+                              "Content-Type": "application/json",
+                              "X-Debug-Session-Id": "296f82",
+                            },
+                            body: JSON.stringify({
+                              sessionId: "296f82",
+                              runId: "post-fix",
+                              hypothesisId: "G",
+                              location:
+                                "DebateExperience.tsx:holdCheckpoints.onSelect",
+                              message: "debate turn checkpoint selected",
+                              data: {
+                                eventId,
+                                stepKey:
+                                  debateTurnCheckpointEvent(session, eventId)
+                                    ?.stepKey ?? null,
+                              },
+                              timestamp: Date.now(),
+                            }),
+                          },
+                        ).catch(() => {});
+                        // #endregion
+                        setCheckpointPlayheadEventId(eventId);
+                        setPresentationEventId(eventId);
+                      },
+                    }
+                  : undefined
+              }
             />
+          ) : galleryArriving ? (
+            <div
+              className={styles.galleryArrivalStageMask}
+              data-debate-arrival-mask="true"
+              role="status"
+              aria-live="polite"
+            >
+              <p className={styles.galleryArrivalKicker}>The Forum</p>
+              <strong>The gallery is arriving</strong>
+              <p>
+                Guests are finding their seats while the opening is prepared.
+                Progress is saved if you leave.
+              </p>
+            </div>
           ) : null}
           <header className={styles.liveHeader}>
             <span aria-hidden="true" />
@@ -23931,10 +24754,34 @@ export function DebateExperience(
                   theme={props.theme}
                   contained
                 />
-                {session.playerRole === "participant" &&
-                (liveParticipationDifficulty === "coach" ||
-                  (participantSlowTimeActive && !liveParticipantFloorBreak) ||
-                  participationRecess.denials > 0) ? (
+                {session.playerRole === "spectator" &&
+                !spectatorAwaitingFirstWatch &&
+                !galleryArriving &&
+                !debateIdentPlaying &&
+                !(
+                  session.status === "paused" &&
+                  !presenting &&
+                  titleCardHolding
+                ) ? (
+                  <aside
+                    className={styles.participantLiveHud}
+                    aria-label="Moderator favor"
+                  >
+                    <DebateFavorabilityMeter
+                      total={spectatorChairFavorability.total}
+                      playerSideId="for"
+                      playerLabel={session.forAdvocate.name}
+                      opponentLabel={session.againstAdvocate.name}
+                      juryEnabled={false}
+                      detail={spectatorChairFavorability.latestReason}
+                      meterName="Moderator favor"
+                      meterRole="spectator"
+                    />
+                  </aside>
+                ) : session.playerRole === "participant" &&
+                  (liveParticipationDifficulty === "coach" ||
+                    (participantSlowTimeActive && !liveParticipantFloorBreak) ||
+                    participationRecess.denials > 0) ? (
                   <aside
                     className={styles.participantLiveHud}
                     aria-label="Participation status"
@@ -24016,6 +24863,11 @@ export function DebateExperience(
                               ),
                               effect: presentation.identityEffect,
                             });
+                        const avatarPresentation = debateAvatarPresentation({
+                          consumer: "forum",
+                          role,
+                          cameraView,
+                        });
                         const talking =
                           responseCueSpeakerBotId === bot.id ||
                           overlapSpeakingBotIds.has(bot.id) ||
@@ -24024,7 +24876,8 @@ export function DebateExperience(
                             activeSpeakerId === bot.id &&
                             activeEvent !== null &&
                             !debateEventIsCanonicalSilence(activeEvent) &&
-                            activeSpeechTiming !== null);
+                            activeSpeechTiming !== null &&
+                            !speechMouthResting);
                         const muteReactionForBot =
                           activeMuteReactionBeat?.reactorBotId === bot.id
                             ? activeMuteReactionBeat
@@ -24095,8 +24948,7 @@ export function DebateExperience(
                                 foleyMouthShape ? "true" : undefined
                               }
                               data-debate-stage-compact={
-                                role === "moderator" &&
-                                cameraView !== "moderator"
+                                avatarPresentation === "mini"
                                   ? "true"
                                   : undefined
                               }
@@ -24118,14 +24970,10 @@ export function DebateExperience(
                                               moderatorTalking: talking,
                                               speechElapsedMs:
                                                 speechTiming?.elapsedMs ?? null,
-                                            })
-                                          : null,
-                                      highDefinition:
-                                        role !== "moderator" ||
-                                        cameraView === "moderator",
-                                      compact:
-                                        role === "moderator" &&
-                                        cameraView !== "moderator",
+                                          })
+                                        : null,
+                                      consumer: "forum",
+                                      presentation: avatarPresentation,
                                       talking,
                                       thinking: thinkingBotId === bot.id,
                                       voiceLevel: debateStageVoiceLevelForRole(
@@ -24147,14 +24995,10 @@ export function DebateExperience(
                                             moderatorTalking: talking,
                                             speechElapsedMs:
                                               speechTiming?.elapsedMs ?? null,
-                                          })
-                                        : null,
-                                    highDefinition:
-                                      role !== "moderator" ||
-                                      cameraView === "moderator",
-                                    compact:
-                                      role === "moderator" &&
-                                      cameraView !== "moderator",
+                                        })
+                                      : null,
+                                    consumer: "forum",
+                                    presentation: avatarPresentation,
                                     talking,
                                     thinking: thinkingBotId === bot.id,
                                     voiceLevel: debateStageVoiceLevelForRole(
@@ -24435,26 +25279,6 @@ export function DebateExperience(
                       Resume Debate
                     </button>
                   </div>
-                ) : session.playerRole === "spectator" &&
-                  !galleryArriving &&
-                  session.liveBake?.status === "baking" &&
-                  !spectatorBakeLiveFallback &&
-                  session.status === "live" &&
-                  !presenting &&
-                  !titleCardHolding ? (
-                  <div
-                    className={styles.stageStateOverlay}
-                    data-kind="paused"
-                    role="status"
-                    aria-live="polite"
-                  >
-                    <span aria-hidden="true">◇</span>
-                    <strong>Still preparing the next beat…</strong>
-                    <small>
-                      {liveBakeStatusCopy(session.liveBake) ||
-                        "Prism is baking ahead so the gallery can continue without inventing live."}
-                    </small>
-                  </div>
                 ) : judgeGuidedStep && !presenting && !juryChamberVisible ? (
                   renderJudgeGuidedControls(session, judgeGuidedStep)
                 ) : session.status === "waiting_for_player" &&
@@ -24484,7 +25308,8 @@ export function DebateExperience(
                   </div>
                 ) : session.status === "completed" &&
                   !presenting &&
-                  !juryChamberVisible ? (
+                  !juryChamberVisible &&
+                  spectatorUnheardPresentable.length === 0 ? (
                   <div
                     className={styles.stageStateOverlay}
                     data-kind="verdict"
@@ -24572,7 +25397,6 @@ export function DebateExperience(
                         data-tutorial-target="debate-pause"
                         onClick={() => void pauseOrResume()}
                         disabled={
-                          busy ||
                           pauseInFlightRef.current ||
                           pauseOnCooldown ||
                           participationRecess.rageRush ||
@@ -24708,17 +25532,12 @@ export function DebateExperience(
                 >
                   <span>Camera</span>
                   {DEBATE_CAMERA_VIEWS.filter((camera) => {
+                    if (camera.id === "jury") return false;
                     if (session.playerRole === "judge") {
-                      return (
-                        camera.id === "auto" ||
-                        (session.jury.enabled && camera.id === "jury")
-                      );
+                      return camera.id === "auto";
                     }
-                    return camera.id !== "jury" || session.jury.enabled;
+                    return true;
                   }).map((camera) => {
-                    const juryCameraClosed =
-                      camera.id === "jury" &&
-                      !debateJuryManualCameraAvailable(session);
                     return (
                       <button
                         type="button"
@@ -24728,16 +25547,11 @@ export function DebateExperience(
                             : undefined
                         }
                         aria-pressed={effectiveCameraMode === camera.id}
-                        disabled={juryCameraClosed}
                         title={
-                          juryCameraClosed
-                            ? "Jury camera opens during deliberation"
-                            : session.playerRole === "judge" &&
-                                camera.id === "auto"
-                              ? "PRISM directs the public floor automatically"
-                              : camera.id === "jury"
-                                ? "Enter the Jury chamber"
-                                : undefined
+                          session.playerRole === "judge" &&
+                          camera.id === "auto"
+                            ? "PRISM directs the public floor automatically"
+                            : undefined
                         }
                         onClick={() => selectDebateCameraMode(camera.id)}
                         key={camera.id}
@@ -24746,7 +25560,8 @@ export function DebateExperience(
                       </button>
                     );
                   })}
-                  <details className={styles.cameraAdvanced}>
+                  {DEBATE_STAGE_LAYOUT_AUTHORING_ENABLED ? (
+                    <details className={styles.cameraAdvanced}>
                       <summary
                         aria-label="More stage controls"
                         title="More stage controls"
@@ -24761,15 +25576,16 @@ export function DebateExperience(
                             event.currentTarget
                               .closest("details")
                               ?.removeAttribute("open");
-                            setStageDirectionOpen(true);
+                            openStageAlignment();
                           }}
-                          aria-label="Open stage direction"
-                          data-tutorial-target="debate-stage-direction"
+                          aria-label="Edit stage layout"
+                          data-tutorial-target="debate-stage-layout"
                         >
-                          Stage direction
+                          Stage layout
                         </button>
                       </div>
                     </details>
+                  ) : null}
                 </div>
               </div>
               {!juryChamberVisible && !sealedCompleted ? (
@@ -25751,7 +26567,6 @@ export function DebateExperience(
           )
         : null}
       {experience}
-      {renderStageDirectionPanel()}
       {renderStageAlignmentModal(activeSession)}
       {inventWarmup ? (
         <ModelWarmupIntermission
