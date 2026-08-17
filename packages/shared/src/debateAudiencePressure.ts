@@ -89,6 +89,13 @@ const DEBATE_AUDIENCE_HEAT_EVENT_KINDS = new Set<DebateEventV1["kind"]>([
   "revelation",
   "speech",
   "testimony",
+  // The gallery hears the human Participant like any other advocate: a wild
+  // or shocking player line heats the room, so the moderator's order math
+  // matches what the chamber audibly feels. Player turns still cannot
+  // *trigger* an order call or count toward its spacing — those paths
+  // independently require an advocate speaker — the heat simply carries to
+  // the next bot floor, where the call can land.
+  "player_turn",
 ]);
 
 /** Crowd stays quieter through the body of a live monologue. */

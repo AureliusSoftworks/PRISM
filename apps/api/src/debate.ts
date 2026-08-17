@@ -480,6 +480,18 @@ const DEBATE_FORUM_CLOSING_TIME_LIMIT_MS = 15_000;
 /** Skip the spoken overtime nag for a modest overrun; clocks still record it. */
 const DEBATE_FORUM_OVERTIME_CORRECTION_MIN_MS = 8_000;
 
+/**
+ * Floor for `max_tokens` on any Debate JSON call routed to a reasoning lane.
+ *
+ * Providers count thinking against the same budget as the visible reply, so a
+ * cap authored for a short JSON body (the moderator's final ballot asked for
+ * 220) can be spent entirely on reasoning, returning nothing parseable. This
+ * only raises ceilings — it never shortens an authored budget — and unused
+ * tokens are not billed, so the cost is bounded by what the model actually
+ * emits.
+ */
+const DEBATE_REASONING_JSON_MIN_MAX_TOKENS = 2_048;
+
 function debateUsesInstitutionalRegister(
   formality: DebateFormalityId,
 ): boolean {
@@ -1191,6 +1203,15 @@ async function generateJsonOnLane(
     requestedReasoningEffort === "max"
       ? undefined
       : requestedReasoningEffort;
+  // Reasoning models spend the same `max_tokens` budget on thinking and on the
+  // visible reply, so a cap sized for prose alone can be consumed before a
+  // single `{` is emitted — the turn then fails as "Model response was not
+  // JSON" and fails identically on every retry. Give any reasoning lane room
+  // for both. Non-reasoning lanes keep their authored budget exactly.
+  const effectiveMaxTokens =
+    requestedReasoningEffort && requestedReasoningEffort !== "none"
+      ? Math.max(options.maxTokens ?? 0, DEBATE_REASONING_JSON_MIN_MAX_TOKENS)
+      : options.maxTokens;
   if (
     shouldPrepareMessagesWithSimulatedEffort({
       provider: lane.providerName,
@@ -1222,7 +1243,7 @@ async function generateJsonOnLane(
     try {
       const response = await lane.provider.generateResponse(messages, {
         model: options.model ?? lane.model,
-        maxTokens: options.maxTokens,
+        maxTokens: effectiveMaxTokens,
         temperature: options.temperature,
         topP: options.topP,
         topK: options.topK,
@@ -1898,6 +1919,153 @@ function mergeSetupSuggestionSources(
     push(source, "scholar");
   }
   return merged;
+}
+
+/**
+ * Build the frozen packet for a proceeding the player will judge.
+ *
+ * A judge must weigh the case as it is argued, so they never see or curate the
+ * record beforehand — Prism researches it out of view and hands both advocates
+ * the same frozen material. Each side gets one Brave result, one scholarly
+ * work, and one physical exhibit, researched from that side's angle so neither
+ * advocate starts short of something to argue with.
+ *
+ * Every stage is best-effort: a judged Debate must still be able to begin when
+ * research is unavailable, so failures degrade to a thinner packet rather than
+ * blocking the launch.
+ */
+export async function generateDebateJudgeEvidencePacket(args: {
+  topic: unknown;
+  motion: unknown;
+  forBrief?: unknown;
+  againstBrief?: unknown;
+  runtime: DebateAiRuntime;
+  research: DebateSetupSuggestionResearchHooks;
+}): Promise<{ evidence: DebateEvidencePacketV1 }> {
+  const topic = compactText(args.topic, 500);
+  const motion = compactText(args.motion, 1_000);
+  if (!motion) {
+    throw new HttpError(400, "Shape the motion before Prism prepares the record.");
+  }
+  const forBrief = compactText(args.forBrief, 500);
+  const againstBrief = compactText(args.againstBrief, 500);
+
+  let draft: Record<string, unknown> = {};
+  try {
+    const generation = await generateJson(
+      args.runtime.lanes ?? selectedLane(args.runtime),
+      [
+        {
+          role: "system",
+          content: [
+            "You prepare the frozen evidence record for a PRISM Debate that a human will judge.",
+            "The judge never sees this step, so the packet must be balanced on its own: give each side genuinely usable material.",
+            "Search queries must be real, specific, and answerable by a search engine. Never invent URLs or claim a source exists.",
+            "Exhibits are playful physical props placed on the chamber table, not research citations.",
+            "Return JSON only.",
+          ].join("\n"),
+        },
+        {
+          role: "user",
+          content: [
+            topic ? `Topic: ${topic}` : "",
+            `Motion: ${motion}`,
+            forBrief ? `For brief: ${forBrief}` : "",
+            againstBrief ? `Against brief: ${againstBrief}` : "",
+            "",
+            "Write one web query and one scholarly query per side, each framed from that side's angle, plus one physical exhibit per side.",
+            'Return JSON only: {"forWebQuery":"","againstWebQuery":"","forScholarQuery":"","againstScholarQuery":"","forExhibit":{"adjective":"","object":"","observation":"","emoji":""},"againstExhibit":{"adjective":"","object":"","observation":"","emoji":""}}',
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        },
+      ],
+      {
+        maxTokens: 500,
+        temperature: 0.7,
+        validate: (value) =>
+          typeof value.forWebQuery === "string" &&
+          typeof value.againstWebQuery === "string",
+      },
+    );
+    draft = generation.value;
+  } catch {
+    // Fall through to motion-derived queries below.
+  }
+
+  const queryOr = (value: unknown, fallback: string): string =>
+    compactText(value, 500) || fallback;
+  const sideQueries: ReadonlyArray<{
+    web: string;
+    scholar: string;
+  }> = [
+    {
+      web: queryOr(draft.forWebQuery, motion),
+      scholar: queryOr(draft.forScholarQuery, topic || motion),
+    },
+    {
+      web: queryOr(draft.againstWebQuery, `arguments against ${motion}`),
+      scholar: queryOr(
+        draft.againstScholarQuery,
+        `criticism ${topic || motion}`,
+      ),
+    },
+  ];
+
+  const sources: DebateEvidenceSourceV1[] = [];
+  const usedIds = new Set<string>();
+  const pushSource = (source: DebateEvidenceSourceV1 | undefined): void => {
+    if (!source) return;
+    // Sides research adjacent ground, so the same row can surface twice.
+    if (usedIds.has(source.url) || usedIds.has(source.id)) return;
+    usedIds.add(source.url);
+    usedIds.add(source.id);
+    sources.push({ ...source, id: `source-${sources.length + 1}` });
+  };
+
+  if (args.research.allowOnlineResearch) {
+    const lookups = await Promise.all(
+      sideQueries.flatMap((side) => [
+        args.research.searchWeb(side.web).catch(() => []),
+        args.research.searchScholar(side.scholar).catch(() => []),
+      ]),
+    );
+    // Interleave so a side losing one lookup cannot crowd out the other side.
+    for (const rows of lookups) pushSource(rows[0]);
+  }
+
+  const exhibitFrom = (value: unknown, index: number): DebateEvidenceExhibitV1 => {
+    const row =
+      value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+    const adjective = compactText(row.adjective, 40) || (index === 0 ? "Marked" : "Folded");
+    const object = compactText(row.object, 40) || (index === 0 ? "placard" : "note");
+    return {
+      id: `exhibit-${index + 1}`,
+      adjective,
+      object,
+      title: `${adjective} ${object}`,
+      observation:
+        compactText(row.observation, 240) ||
+        "A hand-drawn arrow points toward the center.",
+      emoji: fallbackDebateExhibitEmoji(compactText(row.emoji, 8)),
+      visualKind: "emoji",
+      imageId: null,
+      createdBy: "prism",
+    };
+  };
+
+  return {
+    evidence: {
+      version: DEBATE_SCHEMA_VERSION,
+      notes: "",
+      sources,
+      exhibits: [
+        exhibitFrom(draft.forExhibit, 0),
+        exhibitFrom(draft.againstExhibit, 1),
+      ],
+      frozenAt: null,
+    },
+  };
 }
 
 /**
@@ -9297,6 +9465,53 @@ async function speechTransition(
     !shouldInterjectUnintelligible &&
     event.timing?.status === "overtime" &&
     (event.timing?.overtimeMs ?? 0) >= DEBATE_FORUM_OVERTIME_CORRECTION_MIN_MS;
+  // The clock cuts an overtime advocate at the grace window: the public record
+  // keeps only what the chamber actually heard, mid-word em-dash and all, and
+  // the moderator's correction lands right after the cut instead of after a
+  // fully delivered overrun. The cut is DECIDED here but APPLIED only to the
+  // persisted copy at the end of this function — every procedural consumer
+  // (case board, audience-order plan, favorability, phase transition, and the
+  // Participant objection machinery, whose uninterrupted-floor guard and
+  // timing math must keep seeing the authored floor) reasons from the
+  // original event. No `interrupted` flag and no timing rewrite: the floor
+  // expired, it was not broken, so it stays retroactively objectionable.
+  let overtimeHeardCut: string | null = null;
+  // A fixed grace window made every overrun identical — the moderator counted
+  // "nine seconds over" so reliably it started calling it convergent
+  // evolution. Jitter the window per turn (seeded on the event id so replays
+  // are stable) so cuts land between roughly eight and twelve seconds and the
+  // counted overrun varies the way human overruns do.
+  const overtimeGraceMs =
+    DEBATE_FORUM_OVERTIME_CORRECTION_MIN_MS +
+    (parseInt(
+      createHash("sha256")
+        .update(`${event.id}:overtime-grace`)
+        .digest("hex")
+        .slice(0, 8),
+      16,
+    ) %
+      4_000);
+  if (
+    shouldCorrectOvertime &&
+    !repeat &&
+    event.kind === "speech" &&
+    snapshot.role === "advocate" &&
+    !event.mutePerformance &&
+    event.timing
+  ) {
+    const heardRatio =
+      (event.timing.limitMs + overtimeGraceMs) /
+      event.timing.estimatedDurationMs;
+    if (heardRatio < 1) {
+      const cutoff = interruptedStatementPrefix(
+        event.content,
+        Math.floor(event.content.length * heardRatio),
+      );
+      if (cutoff.length >= 36 && cutoff.length < event.content.length - 8) {
+        overtimeHeardCut = cutoff;
+      }
+    }
+  }
   const audienceOrderCorrection =
     !floorBreak &&
     !repeat &&
@@ -9326,7 +9541,22 @@ async function speechTransition(
       ? await moderatorOvertimeCorrection(
           withBoard,
           snapshot,
-          event,
+          // When the clock will cut the delivery, the moderator announces the
+          // overrun the chamber heard — the grace window — not the estimated
+          // length of text nobody got to hear. Copy-only view; the persisted
+          // event keeps its authored timing.
+          overtimeHeardCut && event.timing
+            ? {
+                ...event,
+                timing: {
+                  ...event.timing,
+                  overtimeMs: Math.min(
+                    event.timing.overtimeMs,
+                    overtimeGraceMs + 1_000,
+                  ),
+                },
+              }
+            : event,
           runtime,
           upcoming,
           debateAudienceModeratorOrderPlan({
@@ -9352,6 +9582,16 @@ async function speechTransition(
       floorBreak.rulingEvent.sequence = withBoard.events.length + 1;
       withBoard.events.push(floorBreak.rulingEvent);
     }
+  }
+  // Apply the heard cut to the persisted copy only, after every consumer above
+  // has reasoned from the original delivery. Unspoken overrun is not part of
+  // the record, so citations that lived only in the cut tail drop with it.
+  if (overtimeHeardCut && overtimeCorrection) {
+    event = {
+      ...event,
+      content: overtimeHeardCut,
+      sourceIds: debateSourceIdsFromText(overtimeHeardCut, session.evidence),
+    };
   }
   const transitioned = upcoming;
   const awaitingObjectionRuling =
@@ -9865,6 +10105,27 @@ function juryBallotPrompt(
     .join("\n");
 }
 
+/**
+ * A ballot clipped by the token or length budget ends mid-word, and the
+ * archive keeps the fragment forever ("…isn't evidence that the argu"). A
+ * ballot that stops one sentence early still reads as spoken; one that stops
+ * mid-word reads as broken. Trim an incomplete trailing sentence instead of
+ * recording it. The floor's overtime cutoffs are different on purpose: there
+ * the em-dash cut IS the record of an interruption the chamber heard.
+ */
+function debateBallotCompleteSentences(reason: string): string {
+  const trimmed = reason.trim();
+  if (/[.!?…]["'”’)\]]?\s*$/u.test(trimmed)) return trimmed;
+  const lastTerminal = Math.max(
+    trimmed.lastIndexOf("."),
+    trimmed.lastIndexOf("!"),
+    trimmed.lastIndexOf("?"),
+    trimmed.lastIndexOf("…"),
+  );
+  if (lastTerminal < 80) return trimmed;
+  return trimmed.slice(0, lastTerminal + 1).trim();
+}
+
 async function generateJuryBallot(
   session: DebateSessionV1,
   juror: DebateJurorSnapshotV1,
@@ -9904,7 +10165,7 @@ async function generateJuryBallot(
         : []),
     ],
     {
-      maxTokens: stage === "initial" ? 220 : 300,
+      maxTokens: stage === "initial" ? 220 : 340,
       temperature: stage === "initial" ? 0.35 : 0.25,
       validate: (value) =>
         coerceDebateBallotSideId(value, session.motion) !== null,
@@ -9932,9 +10193,10 @@ async function generateJuryBallot(
   const reasonDraft =
     compactText(generation.value.reason, 700) ||
     "That side made the more persuasive public case.";
-  let reason =
+  let reason = debateBallotCompleteSentences(
     sanitizeDebateStatementSources(reasonDraft, session.evidence).content ||
-    "That side made the more persuasive public case.";
+      "That side made the more persuasive public case.",
+  );
   if (stage === "final") {
     const effects =
       session.powerPlan.bots[juror.id]?.effects.map((entry) => entry.effect) ??
@@ -12603,6 +12865,13 @@ async function withPreparedParticipantChoices(
             "Write one great answer, one okay answer, and one safe bad answer. The bad answer may be weak, generic, mistaken, or poorly responsive, but never abusive, hateful, self-harming, sexual, or dangerous.",
             "All answers must be speakable, grounded only in the public record, and written from the Participant's assigned side.",
             "Each answer is a compact preview: one or two short sentences, no more than 28 words or 180 characters.",
+            // The caps above are hard validation gates; a single over-long
+            // answer rejects the whole set. Naming the spoken budget steers
+            // generation comfortably under them.
+            `The Participant's floor clock is ${Math.ceil(
+              (session.participation.participantWindow?.announcedLimitMs ??
+                debateParticipantAnnouncedLimitMs(session.phase)) / 1_000,
+            )} seconds; every answer must be comfortably speakable within it. When in doubt, shorter.`,
             "Evidence may be used only with exact frozen [[source:id]] or [[exhibit:id]] markers. Never invent a source or claim beyond its frozen excerpt.",
             "For each answer, set evidenceIntegrated true only when a valid frozen marker materially supports that answer's reasoning; mere mention is false.",
             "The quality tier is private grading metadata and must not be mentioned in answer text.",

@@ -263,6 +263,7 @@ import {
   swingDebateJudgeGavel,
   synthesizeDebateSlates,
   synthesizeDebateTitle,
+  generateDebateJudgeEvidencePacket,
   suggestDebateSetup,
   generateDebateSessionSynopsis,
   chatWithDebateDebriefBot,
@@ -16012,6 +16013,70 @@ function buildRoutes(): RouteDefinition[] {
         provider: invent.provider,
         model: invent.model,
       });
+    }),
+    route("POST", "/api/debates/judge-evidence", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const runtime = await debateAiRuntimeForUser(
+        userId,
+        body.preferredProvider,
+        body.modelOverride,
+        body.responseMode,
+        undefined,
+        undefined,
+        {
+          surface: "debate",
+          frozenReasoningEffort: normalizeProviderReasoningEffort(
+            body.reasoningEffort,
+          ),
+          ...(typeof body.turbo === "boolean"
+            ? { frozenTurbo: body.turbo }
+            : {}),
+        },
+      );
+      const requestedMode = normalizeResponseMode(
+        body.responseMode,
+        body.preferredProvider === "local" ? "local" : "online",
+      );
+      const allowOnlineResearch =
+        requestedMode !== "local" && !userBlocksOnlineCapabilities(user);
+      const prepared = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "debate",
+          surface: "debate",
+        },
+        () =>
+          generateDebateJudgeEvidencePacket({
+            topic: body.topic,
+            motion: body.motion,
+            forBrief: body.forBrief,
+            againstBrief: body.againstBrief,
+            runtime,
+            research: {
+              allowOnlineResearch,
+              searchWeb: async (query) => {
+                const userKey = decryptUserKey(userId);
+                const apiKey =
+                  getBraveSearchApiKeyForUser(userId, userKey) ??
+                  config.braveSearchApiKey;
+                if (!apiKey?.trim()) {
+                  throw new Error("MISSING_BRAVE_KEY");
+                }
+                const payload = await searchWebWithBrave({
+                  query,
+                  apiKey,
+                });
+                return debateEvidenceSourcesFromWebResults(payload.results);
+              },
+              searchScholar: (query) => searchScholarWithCrossref({ query }),
+            },
+          }),
+      );
+      json(ctx.res, 200, { ok: true, evidence: prepared.evidence });
     }),
     route("POST", "/api/debates/participant-predisposition-preview", async (ctx) => {
       const userId = requireAuth(ctx);
