@@ -134,6 +134,22 @@ export const PRONUNCIATION_ATLAS_LENSES: readonly PronunciationAtlasLens[] = [
     44.2,
   ),
   pronunciationAtlasLensFromCoordinates(
+    "south-america",
+    "S. America",
+    -82,
+    -35,
+    -34,
+    13,
+  ),
+  pronunciationAtlasLensFromCoordinates(
+    "isles",
+    "The Isles",
+    -11.8,
+    50,
+    3.6,
+    58.2,
+  ),
+  pronunciationAtlasLensFromCoordinates(
     "europe",
     "Europe",
     -11.5,
@@ -148,6 +164,22 @@ export const PRONUNCIATION_ATLAS_LENSES: readonly PronunciationAtlasLens[] = [
     54.3,
     32,
     71.5,
+  ),
+  pronunciationAtlasLensFromCoordinates(
+    "mediterranean",
+    "Mediterranean",
+    -10,
+    29.5,
+    33,
+    44.5,
+  ),
+  pronunciationAtlasLensFromCoordinates(
+    "eastern-europe",
+    "E. Europe",
+    19,
+    42,
+    47,
+    60,
   ),
   pronunciationAtlasLensFromCoordinates(
     "africa-mideast",
@@ -173,6 +205,22 @@ export const PRONUNCIATION_ATLAS_LENSES: readonly PronunciationAtlasLens[] = [
     24.7,
     144.9,
     41.9,
+  ),
+  pronunciationAtlasLensFromCoordinates(
+    "southeast-asia",
+    "Southeast Asia",
+    98,
+    -11,
+    141,
+    23,
+  ),
+  pronunciationAtlasLensFromCoordinates(
+    "oceania",
+    "Oceania",
+    112,
+    -48,
+    180,
+    -8,
   ),
 ];
 

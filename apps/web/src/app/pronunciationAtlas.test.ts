@@ -347,14 +347,14 @@ describe("Pronunciation Atlas", () => {
     // lens containing both. Same-point variant groups (London) are excluded:
     // they are deliberately co-located and chosen by name, never by zoom.
     // Same-metro pairs — real places only miles apart, like New York beside
-    // Newark or London beside Essex — accept a lower 8px floor: regional
-    // lenses frame whole regions instead of zooming into one harbor, and
-    // the Nearby chips disambiguate those neighbors by name.
+    // Newark — accept a lower 8px floor: the Northeast US lens frames the
+    // whole region instead of zooming into one harbor, and the Nearby chips
+    // disambiguate those neighbors by name.
     const PAD_W = 640;
     const PAD_H = 320;
     const MIN_SEP = 24;
     const SAME_METRO_MIN_SEP = 8;
-    const SAME_METRO_WORLD_SEP = 1.5;
+    const SAME_METRO_WORLD_SEP = 1;
     const locations = new Map<string, { x: number; y: number }>();
     for (const anchor of PRONUNCIATION_ATLAS_ANCHORS) {
       const key = `${anchor.point.x.toFixed(6)}:${anchor.point.y.toFixed(6)}`;
@@ -444,11 +444,56 @@ describe("Pronunciation Atlas", () => {
     assert.deepEqual(withinIds("world"), []);
     assert.deepEqual(withinIds("north-america"), ["us-east", "us-northeast"]);
     assert.deepEqual(withinIds("us-east"), ["us-northeast"]);
-    assert.deepEqual(withinIds("east-asia"), ["northeast-asia"]);
-    // Scandinavia reaches beyond Europe's frame, so neither contains the other.
-    assert.deepEqual(withinIds("europe"), []);
+    assert.deepEqual(withinIds("europe"), ["isles"]);
+    assert.deepEqual(withinIds("east-asia"), [
+      "northeast-asia",
+      "southeast-asia",
+    ]);
+    // Regional frames that reach beyond their broad neighbors stand as
+    // siblings without footprints.
     assert.deepEqual(withinIds("scandinavia"), []);
+    assert.deepEqual(withinIds("mediterranean"), []);
+    assert.deepEqual(withinIds("eastern-europe"), []);
+    assert.deepEqual(withinIds("south-america"), []);
+    assert.deepEqual(withinIds("oceania"), []);
     assert.deepEqual(withinIds("us-northeast"), []);
+  });
+
+  it("frames uncrowded regions so every inhabited anchor has a home lens", () => {
+    const members = (id: string): string[] => {
+      const lens = pronunciationAtlasLensForId(id);
+      return [
+        ...new Set(
+          PRONUNCIATION_ATLAS_ANCHORS.filter((anchor) =>
+            pronunciationAtlasLensContainsPoint(anchor.point, lens),
+          ).map((anchor) => anchor.accentDefinitionId),
+        ),
+      ].sort();
+    };
+    assert.deepEqual(members("oceania"), [
+      "australian-english",
+      "new-zealand-english",
+      "pacific-island-english",
+    ]);
+    assert.deepEqual(members("southeast-asia"), [
+      "cantonese-influenced-english",
+      "filipino-english",
+      "indonesian-influenced-english",
+      "singapore-english",
+      "thai-influenced-english",
+      "vietnamese-influenced-english",
+    ]);
+    // Every anchor on the map falls inside at least one focused lens.
+    for (const anchor of PRONUNCIATION_ATLAS_ANCHORS) {
+      assert.ok(
+        PRONUNCIATION_ATLAS_LENSES.some(
+          (lens) =>
+            lens.size < 1 &&
+            pronunciationAtlasLensContainsPoint(anchor.point, lens),
+        ),
+        `${anchor.id} has no home lens`,
+      );
+    }
   });
 
   it("scales keyboard travel to the lens and keeps world travel legacy-exact", () => {
