@@ -39,10 +39,7 @@ export interface PronunciationAtlasProps {
   onPreview: (selection: PronunciationAtlasSelection) => void;
   onCommit: (selection: PronunciationAtlasSelection) => void;
   onCancel?: (selection: PronunciationAtlasSelection) => void;
-  onPreviewSource?: () => void;
-  onPreviewCurrent?: () => void;
   onContinue?: () => void;
-  previewDisabled?: boolean;
   color?: string;
   disabled?: boolean;
   className?: string;
@@ -99,10 +96,7 @@ export function PronunciationAtlas({
   onPreview,
   onCommit,
   onCancel,
-  onPreviewSource,
-  onPreviewCurrent,
   onContinue,
-  previewDisabled = false,
   color,
   disabled = false,
   className,
@@ -162,7 +156,7 @@ export function PronunciationAtlas({
       <div className={styles.heading}>
         <span>
           <strong>{label}</strong>
-          <small>Choose where this voice comes from</small>
+          <small>Place a regional pronunciation starting point</small>
         </span>
         <output aria-live="polite">{summary}</output>
       </div>
@@ -330,37 +324,16 @@ export function PronunciationAtlas({
           </div>
         </details>
       </div>
-      {onPreviewSource || onPreviewCurrent || onContinue ? (
-        <div className={styles.previewBar} aria-label="Pronunciation previews">
-          {onPreviewSource ? (
-            <button
-              type="button"
-              disabled={disabled || previewDisabled}
-              onClick={onPreviewSource}
-            >
-              Original
-            </button>
-          ) : null}
-          {onPreviewCurrent ? (
-            <button
-              type="button"
-              disabled={disabled || previewDisabled}
-              data-primary="true"
-              onClick={onPreviewCurrent}
-            >
-              With accent
-            </button>
-          ) : null}
-          {onContinue ? (
-            <button
-              type="button"
-              disabled={disabled || !padValue.selection.point}
-              data-primary="true"
-              onClick={onContinue}
-            >
-              Continue to Local
-            </button>
-          ) : null}
+      {onContinue ? (
+        <div className={styles.previewBar} aria-label="Accent map actions">
+          <button
+            type="button"
+            disabled={disabled || !padValue.selection.point}
+            data-primary="true"
+            onClick={onContinue}
+          >
+            Continue to Local
+          </button>
         </div>
       ) : null}
     </section>

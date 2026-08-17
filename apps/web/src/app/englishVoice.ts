@@ -33,7 +33,10 @@ import {
   type VoicePlaybackLifecycle,
 } from "./voiceEffects.ts";
 import type { PreSpeechBreathPlan } from "./preSpeechBreath.ts";
-import { resolveEnglishClauseGap } from "./englishClauseBreath.ts";
+import {
+  remainingEnglishClausePauseMs,
+  resolveEnglishClauseGap,
+} from "./englishClauseBreath.ts";
 import type { RoomAcousticsSend } from "./roomAcoustics.ts";
 import {
   prismAudioContext,
@@ -1083,6 +1086,7 @@ async function playEnglishClauseGap(args: {
   stereoPan?: number;
   pacingProfile?: EnglishPacingProfileV1 | null;
   kokoroPunctuationPacing?: boolean;
+  alreadySilentMs?: number;
 }): Promise<number> {
   if (args.expectedGeneration !== generation) return 0;
   const gap = resolveEnglishClauseGap({
@@ -1095,6 +1099,10 @@ async function playEnglishClauseGap(args: {
     pacingProfile: args.pacingProfile,
     kokoroPunctuationPacing: args.kokoroPunctuationPacing,
   });
+  const pauseMs = remainingEnglishClausePauseMs(
+    gap.pauseMs,
+    args.alreadySilentMs,
+  );
   if (gap.breath) {
     const startedAt = Date.now();
     await playPreSpeechBreath({
@@ -1106,7 +1114,7 @@ async function playEnglishClauseGap(args: {
     });
     return Math.max(0, Date.now() - startedAt);
   }
-  return waitEnglishClausePauseMs(gap.pauseMs, args.expectedGeneration);
+  return waitEnglishClausePauseMs(pauseMs, args.expectedGeneration);
 }
 
 /**
@@ -1157,6 +1165,7 @@ async function playChunkedEnglishResponse(
     index: number;
     sourceEnd: number;
   } | null = null;
+  let previousChunkEndedAtMs = 0;
 
   const remainingEstimateAfterCharacters = (charactersHeard: number): number =>
     safeEstimatedDurationMs *
@@ -1261,6 +1270,10 @@ async function playChunkedEnglishResponse(
     }
 
     if (previousSpeechChunk) {
+      const alreadySilentMs =
+        previousChunkEndedAtMs > 0
+          ? Math.max(0, Date.now() - previousChunkEndedAtMs)
+          : 0;
       const gapHeardMs = await playEnglishClauseGap({
         trailingText: previousSpeechChunk.text,
         chunkIndex: previousSpeechChunk.index,
@@ -1273,6 +1286,7 @@ async function playChunkedEnglishResponse(
         stereoPan,
         pacingProfile,
         kokoroPunctuationPacing,
+        alreadySilentMs,
       });
       if (expectedGeneration !== generation) return;
       if (gapHeardMs > 0) {
@@ -1387,6 +1401,7 @@ async function playChunkedEnglishResponse(
       index: chunk.index,
       sourceEnd: chunk.sourceEnd ?? chunk.sourceStart ?? 0,
     };
+    previousChunkEndedAtMs = Date.now();
     playedChunks += 1;
     consumedCharacters += chunk.characterCount;
     reportLifecycleProgress(

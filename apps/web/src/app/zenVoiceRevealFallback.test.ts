@@ -165,7 +165,7 @@ describe("Zen voice reveal fallback", () => {
     );
   });
 
-  it("advances Chat and Zen prose on a visual clock independent from speech", () => {
+  it("advances immersive Zen prose on a visual clock independent from speech", () => {
     const resolverStart = pageSource.indexOf(
       "function resolveAssistantRevealVisibleTokenCount",
     );

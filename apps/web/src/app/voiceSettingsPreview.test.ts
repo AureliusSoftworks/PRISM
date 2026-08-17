@@ -730,15 +730,7 @@ describe("voice settings preview", () => {
     assert.match(pageStyles, /\.botVoiceNameGrid/);
   });
 
-  it("keeps Accent previews on one engine and clears stale provider hints", () => {
-    assert.match(
-      pageSource,
-      /function profileWithOriginalPronunciation\([\s\S]*?accentDefinitionId: null/,
-    );
-    assert.match(
-      pageSource,
-      /const originalProfile =\s*profileWithOriginalPronunciation\([\s\S]*?const premium = Boolean\([\s\S]*?englishVoiceEngine: premium/,
-    );
+  it("clears stale Premium provider hints when voices change", () => {
     assert.match(
       pageSource,
       /elevenLabsVoiceIdOverride: value,[\s\S]*?elevenLabsNativeAccentHint: null/,

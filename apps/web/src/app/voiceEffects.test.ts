@@ -15,6 +15,10 @@ import {
   voiceReleaseGainAt,
   voiceLiltDetuneCents,
 } from "./voiceEffects.ts";
+import {
+  SIGNAL_LISTENER_REACTION_VOICE_GAIN,
+  signalListenerReactionVoiceGain,
+} from "./listenerReactionVoice.ts";
 
 describe("voice textures", () => {
   it("treats retired CRT texture profiles as clean", () => {
@@ -55,6 +59,19 @@ describe("engine-agnostic voice effects", () => {
     assert.equal(voiceReleaseGainAt(0.8, 0), 0.8);
     assert.ok(voiceReleaseGainAt(0.8, 0.5) > 0.5);
     assert.ok(voiceReleaseGainAt(0.8, 1) < 0.000_001);
+  });
+
+  it("keeps ordinary Signal listener words at half gain without lowering interruption crosstalk", () => {
+    assert.equal(SIGNAL_LISTENER_REACTION_VOICE_GAIN, 0.5);
+    assert.equal(signalListenerReactionVoiceGain({ spokenCue: "Hmm." }), 0.5);
+    assert.equal(
+      signalListenerReactionVoiceGain({
+        spokenCue: "Hold on.",
+        interjectionAttempt: true,
+      }),
+      1,
+    );
+    assert.equal(signalListenerReactionVoiceGain({}), 1);
   });
 
   it("uses the portable profile effect when a playback lane does not override it", () => {
@@ -263,7 +280,15 @@ describe("engine-agnostic voice effects", () => {
       /waitForReactionVoiceStart\(args\.startDelayMs \?\? 0, args\.signal\)/u,
     );
     assert.match(pageSource, /listenerReactionHasAudio\(plan\)/u);
-    assert.match(pageSource, /listenerReactionFoley: args\.plan\.vocalFoley/u);
+    assert.match(pageSource, /signalListenerReactionPlanForPlaybackV1\(/u);
+    assert.match(
+      pageSource,
+      /const clip = pending \? await pending : null/u,
+    );
+    assert.match(
+      pageSource,
+      /if \(playbackPlan\.interjectionAttempt\) \{\s*listenerReactionVoiceClipCacheRef\.current\.delete\(key\)/u,
+    );
     assert.match(
       pageSource,
       /interruptedSpeakerCuePlayback !== "primary"/u,

@@ -134,6 +134,20 @@ function resolveClauseBreathPlan(args: {
  * Kokoro punctuation stream receives the restrained default table; Premium,
  * system voices, Babble, and token-only fallback chunks remain unchanged.
  */
+/** Drop planned silence that the listener already sat through waiting for audio. */
+export function remainingEnglishClausePauseMs(
+  plannedPauseMs: number,
+  alreadySilentMs = 0,
+): number {
+  const planned = Number.isFinite(plannedPauseMs)
+    ? Math.max(0, Math.round(plannedPauseMs))
+    : 0;
+  const already = Number.isFinite(alreadySilentMs)
+    ? Math.max(0, Math.round(alreadySilentMs))
+    : 0;
+  return Math.max(0, planned - already);
+}
+
 export function resolveEnglishClauseGap(args: {
   seed: string;
   chunkIndex: number;

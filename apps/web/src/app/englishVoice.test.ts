@@ -69,6 +69,10 @@ describe("English voice post processing", () => {
     );
     assert.match(
       source,
+      /alreadySilentMs/u,
+    );
+    assert.match(
+      source,
       /export async function prepareEnglishVoice\(\)[\s\S]*?if \(preparedMedia\)[\s\S]*?return;[\s\S]*?beginMediaUnlock\(\);/
     );
     assert.match(

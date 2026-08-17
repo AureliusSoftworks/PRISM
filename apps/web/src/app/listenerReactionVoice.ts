@@ -34,6 +34,21 @@ import type { RoomAcousticsSend } from "./roomAcoustics.ts";
 
 export type ListenerReactionVoiceMode = "english" | "bottish" | "babble";
 
+/** Ordinary Signal backchannels sit beneath the line that owns the mic. */
+export const SIGNAL_LISTENER_REACTION_VOICE_GAIN = 0.5;
+
+/** Interrupting a turn is crosstalk, not a quiet listener acknowledgement. */
+export function signalListenerReactionVoiceGain(
+  plan: Pick<
+    ListenerReactionPlanV1,
+    "interjectionAttempt" | "spokenCue" | "publicSpokenCue"
+  >,
+): number {
+  return !plan.interjectionAttempt && listenerReactionSpokenTextV1(plan)
+    ? SIGNAL_LISTENER_REACTION_VOICE_GAIN
+    : 1;
+}
+
 /** A perceptible beat after a cut-in before the interrupted bot answers back. */
 export const INTERRUPTED_SPEAKER_RETORT_PAUSE_MS = 850;
 
@@ -93,10 +108,15 @@ export function listenerReactionVoiceCacheKey(args: {
   engine: string;
   profile: BotAudioVoiceProfileV1;
 }): string {
+  const spoken = listenerReactionSpokenTextV1(args.plan) ?? "silent";
+  const foley = args.plan.vocalFoley ?? "no-foley";
+  const identity = args.plan.interjectionAttempt
+    ? args.plan.seed
+    : `${args.plan.listenerBotId}:${spoken}:${foley}`;
   return JSON.stringify([
-    args.plan.seed,
-    listenerReactionSpokenTextV1(args.plan) ?? "silent",
-    args.plan.vocalFoley ?? "no-foley",
+    identity,
+    spoken,
+    foley,
     args.mode,
     args.engine,
     args.profile,

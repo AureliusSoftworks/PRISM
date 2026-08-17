@@ -39,7 +39,7 @@ describe("cross-accent local voice pronunciation controls", () => {
     assert.match(pageSource, /playerAudioVoiceProfile: nextProfile/u);
   });
 
-  it("keeps Avatar Studio map interactions save-only while keeping explicit preview controls", () => {
+  it("keeps Avatar Studio map interactions save-only and auditions beneath the bot", () => {
     const avatarAtlasSource = pageSource.slice(
       pageSource.indexOf("selection={avatarPronunciationSelection}"),
       pageSource.indexOf(
@@ -54,20 +54,64 @@ describe("cross-accent local voice pronunciation controls", () => {
       avatarAtlasSource,
       /void playPronunciationAtlasPreview\(nextProfile\)/,
     );
+    assert.doesNotMatch(avatarAtlasSource, /onPreviewSource|onPreviewCurrent/u);
     assert.match(
-      avatarAtlasSource,
-      /onPreviewSource=\{\(\) => \{[\s\S]*?sourceProfile[\s\S]*?pronunciationBase:\s*"follow-voice"[\s\S]*?influence:\s*"none"[\s\S]*?void playPronunciationAtlasPreview\(sourceProfile\);[\s\S]*?\}\}/u,
-    );
-    assert.match(
-      avatarAtlasSource,
-      /onPreviewCurrent=\{\(\) =>\s*void playPronunciationAtlasPreview\(audioVoiceProfile\)/u,
+      pageSource,
+      /voiceTestDock=\{\s*<BotAvatarVoiceTestDock[\s\S]*?onPreview=\{playAvatarVoicePreview\}/u,
     );
   });
 
-  it("compares the authored source against the current phoneme stack", () => {
-    assert.match(pageSource, /pronunciationBase: "follow-voice"/u);
-    assert.match(atlasSource, />\s*Original\s*</u);
-    assert.match(atlasSource, />\s*With accent\s*</u);
+  it("keeps pin preview, commit, and nearby choices silent in every map", () => {
+    assert.match(
+      atlasSource,
+      /onPreview=\{\(next\) => \{\s*setDraftValue\(next\);\s*onPreview\(next\.selection\);\s*\}\}/u,
+    );
+    assert.match(
+      atlasSource,
+      /onCommit=\{\(next\) => \{[\s\S]*?onCommit\(committed\.selection\);[\s\S]*?\}\}/u,
+    );
+    assert.match(atlasSource, /onClick=\{\(\) => commitSelection\(candidate\.selection\)\}/u);
+    const silentInteractionSource = atlasSource.slice(
+      atlasSource.indexOf("<AdjustmentPad"),
+      atlasSource.indexOf("<div className={styles.controls}>"),
+    );
+    assert.doesNotMatch(
+      silentInteractionSource,
+      /onPreviewSource|onPreviewCurrent|previewVoice|playPronunciationAtlasPreview|previewSelectedVoice/u,
+    );
+
+    const zenAtlasSource = pageSource.slice(
+      pageSource.indexOf('label="Zen accent map"'),
+      pageSource.indexOf('label="Zen accent map"') + 4200,
+    );
+    const zenCommitSource = zenAtlasSource.slice(
+      zenAtlasSource.indexOf("onCommit="),
+    );
+    assert.match(zenCommitSource, /playerAudioVoiceProfile: nextProfile/u);
+    assert.doesNotMatch(
+      zenCommitSource,
+      /previewSelectedVoice|playPronunciationAtlasPreview|\.play\(/u,
+    );
+  });
+
+  it("keeps synthesis out of the map and inside the bot's audition dock", () => {
+    assert.doesNotMatch(
+      atlasSource,
+      /onPreviewSource|onPreviewCurrent|previewVoice|playPronunciationAtlasPreview|previewSelectedVoice|\.play\(/u,
+    );
+    assert.match(pageSource, /aria-label="Test this bot's voice"/u);
+    assert.match(pageSource, /onClick=\{\(\) => void playChoice\(choice\)\}/u);
+    assert.match(pageSource, /onClick=\{\(\) => void playChoice\("current"\)\}/u);
+    const auditionDockSource = pageSource.slice(
+      pageSource.indexOf("function BotAvatarVoiceTestDock"),
+      pageSource.indexOf("function botAvatarFaceIsDefault"),
+    );
+    assert.doesNotMatch(auditionDockSource, /onKeyDown|autoPlay|useEffect/u);
+  });
+
+  it("never renders an Accent Map audition button", () => {
+    assert.doesNotMatch(atlasSource, />\s*Original\s*</u);
+    assert.doesNotMatch(atlasSource, />\s*With accent\s*</u);
   });
 
   it("offers Russian-influenced English through the shared Speechprint catalog", () => {

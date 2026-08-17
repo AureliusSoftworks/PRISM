@@ -60,7 +60,7 @@ describe("Pronunciation Atlas", () => {
   it("places representative anchors on their real projected regions", () => {
     const expectedPoints = {
       "base-en-US": { x: 0.226, y: 0.279 },
-      "base-en-GB": { x: 0.5, y: 0.214 },
+      "base-en-GB": { x: 0.493, y: 0.199 },
       "influence-brazilian-portuguese-influenced-english": {
         x: 0.367,
         y: 0.588,
@@ -175,7 +175,7 @@ describe("Pronunciation Atlas", () => {
 
   it("pins the selected foundation instead of following the voice source", () => {
     const american = PRONUNCIATION_ATLAS_ANCHORS.find(
-      (anchor) => anchor.base === "en-US",
+      (anchor) => anchor.pronunciationBase === "en-US",
     );
     assert.ok(american);
     const selected = pronunciationAtlasSelectionAtPoint(
@@ -242,6 +242,48 @@ describe("Pronunciation Atlas", () => {
     assert.ok(candidates.some(({ label }) => label === "British"));
   });
 
+  it("exposes the co-located London constellation without inferring a variant", () => {
+    const london = PRONUNCIATION_ATLAS_ANCHORS.find(
+      (anchor) => anchor.accentDefinitionId === "modern-rp-english",
+    );
+    assert.ok(london);
+    const dropped = pronunciationAtlasSelectionAtPoint(london.point, {
+      ...britishFrench,
+      accentDefinitionId: null,
+      influence: "none",
+    });
+    assert.equal(dropped.accentDefinitionId, "modern-rp-english");
+    const candidates = pronunciationAtlasNearbyCandidates(dropped);
+    for (const id of [
+      "modern-rp-english",
+      "cockney-english",
+      "estuary-english",
+      "multicultural-london-english",
+      "essex-english",
+    ]) {
+      assert.ok(
+        candidates.some(
+          ({ selection }) => selection.accentDefinitionId === id,
+        ),
+        id,
+      );
+    }
+  });
+
+  it("keeps every nearby local-variant choice on the exact global pin", () => {
+    const london = PRONUNCIATION_ATLAS_ANCHORS.find(
+      (anchor) => anchor.accentDefinitionId === "modern-rp-english",
+    );
+    assert.ok(london);
+    const cockney = pronunciationAtlasNearbyCandidates(
+      { ...britishFrench, point: london.point },
+    ).find(
+      ({ selection }) => selection.accentDefinitionId === "cockney-english",
+    );
+    assert.ok(cockney);
+    assert.deepEqual(cockney.selection.point, london.point);
+  });
+
   it("commits a nearby choice to its authored anchor", () => {
     const france = PRONUNCIATION_ATLAS_ANCHORS.find(
       (anchor) => anchor.influence === "french-influenced-english",
@@ -249,7 +291,7 @@ describe("Pronunciation Atlas", () => {
     assert.ok(france);
     const candidates = pronunciationAtlasNearbyCandidates(
       { ...britishFrench, point: france.point },
-      6,
+      16,
     );
     const german = candidates.find(({ label }) => label === "German");
     assert.ok(german);

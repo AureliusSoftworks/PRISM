@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   KOKORO_DEFAULT_CLAUSE_PAUSE_MS,
   classifyEnglishClausePunctuation,
+  remainingEnglishClausePauseMs,
   resolveEnglishClauseGap,
 } from "./englishClauseBreath.ts";
 
@@ -137,5 +138,14 @@ describe("english clause gap planning", () => {
         null,
       );
     }
+  });
+});
+
+describe("english clause pause remainder", () => {
+  it("does not stack a planned pause on silence the listener already heard", () => {
+    assert.equal(remainingEnglishClausePauseMs(300, 0), 300);
+    assert.equal(remainingEnglishClausePauseMs(300, 120), 180);
+    assert.equal(remainingEnglishClausePauseMs(300, 480), 0);
+    assert.equal(remainingEnglishClausePauseMs(180, Number.NaN), 180);
   });
 });
