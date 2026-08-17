@@ -58,17 +58,17 @@ Do not build a giant universal Power engine when a shared contract and small ada
 
 ## Maintain the Power Collection
 
-When the user assigns a Power to a named showcase bot, publish or refresh that bot in the Marketplace's growing `power-collection` group as part of the same change. The collection is append-only by default and has no five-bot limit. Keep every bot independently installable while preserving collection install as one Library group. Skip publication only when the user explicitly asks for a private experiment or publishing would introduce a meaningful unresolved risk; record that decision in the verification notes.
+When the user assigns a Power to a named showcase bot, publish or refresh that bot as a Marketplace entry in the same change. The public `power-collection` shelf is the founding five (Silent Jack, Lazy Cameron, Tiny Bill, Interrupting Tom, Copycat Calvin). Do not append new showcase bots to that group unless the user asks. Keep recipes and `.bot` bundles for off-shelf Power bots so they can be refreshed or re-shelved later. Skip publication only when the user explicitly asks for a private experiment or publishing would introduce a meaningful unresolved risk; record that decision in the verification notes.
 
 Use `scripts/update-power-bot-marketplace.mjs` as the canonical collection recipe and preserve every unrelated Marketplace entry or bundle. For each named Power bot:
 
-1. Keep a stable Marketplace ID and hash, add or update its recipe, and append its ID to the `power-collection` roster without pruning earlier showcase bots.
+1. Keep a stable Marketplace ID and hash, add or update its recipe, and leave `power-collection` membership unchanged unless the user asked to add this bot to that shelf.
 2. Give it a concise card subtitle and description plus a complete structured profile. Describe the character and lived condition, not the implementation.
 3. Export the ready portable Power, authored prompt/profile, curated face and unique thinking spinner, authored voice profile, and a short preview line. Recompile deterministic hard rules so old Library snapshots cannot publish stale semantics; preserve ready prompt-only Powers when no structured effect honestly matches.
 4. Run the updater in `--dry-run` mode against the source Library first, then `--apply` with a new workspace backup directory. Never modify the source Library database and never overwrite an existing backup.
-5. Extend `botMarketplaceCatalog.test.ts` with collection membership, descriptions, profile/prompt presence, ready source hashes, effect contracts, curated face inventory, and the full unbounded roster. Verify a second dry run reports no changes.
+5. Extend `botMarketplaceCatalog.test.ts` with descriptions, profile/prompt presence, ready source hashes, effect contracts, curated face inventory, and the current five-bot `power-collection` roster. Off-shelf Power bots remain in the catalog files without that group membership. Verify a second dry run reports no changes.
 
-Installing the collection must recreate it as a Library group through the existing Marketplace theme flow. Do not add a bespoke installer or UI cap when the shared theme/group path already supports the growing roster.
+Installing the founding five must recreate them as a Library group through the existing Marketplace theme flow. Do not add a bespoke installer.
 
 ## Cover every mode
 
@@ -111,6 +111,6 @@ Report the result in this order:
 - **Outcome**: already integrated, completed, or blocked;
 - **Power contract**: the exact lived rule and assumptions;
 - **Mode coverage**: concise current/planned-mode decisions;
-- **Marketplace**: showcase bot, description, and `power-collection` membership or an explicit reason publication was skipped;
+- **Marketplace**: showcase bot, description, and whether it sits on the five-bot `power-collection` shelf or was left off-shelf by request;
 - **Verification**: exact deterministic checks plus live provider/model, sampled mode(s), scenario, and result;
 - **Gaps**: only real remaining limitations or live-model/manual validation.

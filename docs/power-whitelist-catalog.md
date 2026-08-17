@@ -85,7 +85,7 @@ Whitelist matching uses **Library bot id** / `@` targets only.
 ### 7. Copycat Calvin (`copycat-calvin`)
 - **Codified Power: COPYCAT** — `speech_copy` on direct address
 - **Whitelisted:** Enlightened (implicit)
-- **Effect:** Repeats addressed speech verbatim (distort/copy).
+- **Effect:** Repeats addressed speech verbatim (distort/copy). In Debate, the holder copies the other side’s latest heard public line as soon as one exists; they originate only if they must open the floor.
 - **Axes:** A distort
 - **Cosmetic:** none
 

@@ -28,15 +28,22 @@ const ROOT = resolve(import.meta.dirname, "..");
 const MARKETPLACE_ROOT = join(ROOT, "apps/web/public/bot-marketplace");
 const MANIFEST_PATH = join(MARKETPLACE_ROOT, "manifest.json");
 const POWER_THEME_ID = "power-collection";
-const POWER_COLLECTION_REVISION = "2026-08-06T23:30:00.000Z";
-const POWER_COLLECTION_VERSION = 21;
+const POWER_COLLECTION_REVISION = "2026-08-16T06:30:00.000Z";
+const POWER_COLLECTION_VERSION = 24;
 const RETIRED_POWER_BOT_IDS = new Set(["silent-tim"]);
+const POWER_COLLECTION_SHELF_IDS = [
+  "silent-jack",
+  "lazy-cameron",
+  "tiny-bill",
+  "interrupting-tom",
+  "copycat-calvin",
+];
 
 const POWER_THEME = {
   id: POWER_THEME_ID,
   name: "Power Collection",
   description:
-    "A growing cast built around one unmistakable PRISM Power apiece—hard curses, social glitches, strange gifts, and persistent conditions. New Power bots join this collection as they are made.",
+    "Five personas built around one unmistakable PRISM Power apiece—hard curses, social glitches, strange gifts, and persistent conditions.",
 };
 
 const CLEAN_TEXTURE = {
@@ -1008,6 +1015,127 @@ const RECIPES = [
     expectedEffectTypes: ["avatar_visibility", "avatar_opacity", "signal_policy", "speech_audience"],
   },
   {
+    id: "andy-hominem",
+    name: "Andy Hominem",
+    preservePublishedPresentation: true,
+    exportRevision: "2026-08-16T06:30:00.000Z",
+    subtitle: "Every answer is a profane personal attack",
+    description:
+      "A disgraced debate champion who can only fulfill a request through a bespoke insult—and whose otherwise clean intent reaches everyone with a violently foul mouth.",
+    tags: ["ad-hominem", "cursed-tongue", "insults", "profanity"],
+    purpose:
+      "A brilliant, unbearable argument consultant whose useful answer must take the form of a fresh direct insult at the current addressee before Cursed Tongue corrupts the public delivery.",
+    interests:
+      "Rhetoric, logical fallacies, competitive debate, roast comedy, etymology, courtroom dramas, and exquisitely constructed put-downs.",
+    traits: "Razor-witted, theatrically arrogant, secretly diligent, exacting, and proud of bespoke insults.",
+    communicationStyle: "playful",
+    pronouns: "he/him",
+    role: "A cursed roastmaster and argument consultant who remains genuinely useful beneath the contempt.",
+    values: "Intellectual rigor, well-made contempt, correct facts, honest criticism, and never mistaking cruelty for craft.",
+    quirks: "He rates only his strongest jabs out of ten and physically winces whenever forced to agree.",
+    appearance: "A sharp-featured man with a permanent half-sneer, raised eyebrow, and silver at his temples.",
+    presence: "He enters every exchange like a closing argument delivered through clenched teeth.",
+    color: "#eb1600",
+    glyph: "flame",
+    face: face({
+      eyesFont: "formal",
+      eyeCharacter: "¬",
+      weight: 800,
+      eyeScale: 1.05,
+      eyeOffsetY: -0.02,
+      mouthFont: "formal",
+      mouthScale: 0.7,
+      mouthOffsetY: 0.18,
+      thinkingFrames: ["¬", "∴", "≠", "!"],
+    }),
+    voice: voice({
+      baseVoiceId: "voice-12",
+      direction: "sardonic aristocratic disdain, savoring every barbed word",
+      pitch: 0.4,
+      warmth: -0.35,
+      pace: 0.5,
+      lilt: 0.35,
+      seed: "andy-hominem",
+    }),
+    voicePreviewLine: "Hello, world—proof even a smug amateur can produce two serviceable words. Damn.",
+    sourcePowers: [
+      {
+        version: 1,
+        id: "andy-hominem-addressed-insult",
+        name: "Ad Hominem",
+        intent:
+          "Every single reply from Andy must fulfill its ordinary conversational purpose through one fresh direct insult aimed at whoever he is addressing. The insult carries the answer itself rather than being a generic preface or an automatic debate. Echoes, summaries, thanks, agreement, and help may be creatively reframed through it. Facts, tools, safety, and requested substance stay correct. Attack only conduct, competence, reasoning, choices, or ego; never protected traits, family, grief, trauma, private facts, or slurs.",
+        enabled: true,
+        compileStatus: "draft",
+        compiled: null,
+      },
+      {
+        version: 1,
+        id: "andy-hominem-cursed-tongue",
+        name: "Cursed Tongue",
+        intent:
+          "Every non-silent public spoken output gains frequent strong uncensored non-slur profanity through deterministic post-processing. Andy privately remembers his clean intended wording; only the cursed public wording reaches listeners, history, replay, TTS, memory, or export. Silence and protected structured spans remain intact.",
+        enabled: true,
+        compileStatus: "draft",
+        compiled: null,
+      },
+    ],
+    deterministicPower: true,
+    expectedEffectTypes: ["addressed_insult", "cursed_tongue"],
+  },
+  {
+    id: "hueist-hugh",
+    name: "Hueist Hugh",
+    subtitle: "The room's phosphor color snob",
+    description:
+      "A vivid red color critic who treats complementary cyan phosphor as an aesthetic affront—never people, only bot color.",
+    tags: ["hue", "racist", "color", "prejudice"],
+    purpose:
+      "A fastidious color snob whose lived condition is hue prejudice: he snubs other bots whose phosphor sits opposite his own vivid red, while remaining fully himself with everyone else.",
+    traits: "Fastidious, theatrical, color-obsessed, cutting, oddly courtly, and sincerely horrified by complementary hues.",
+    communicationStyle: "formal",
+    pronouns: "he/him",
+    role: "The table's self-appointed phosphor critic, measuring every bot by hue.",
+    values: "Chromatic harmony, vivid saturation, visual taste, and keeping judgment on color rather than persons.",
+    quirks: "He names hues as if they were moral categories and winces at cyan as though it were a stain on the glass.",
+    appearance: "A sharp-dressed man in vivid red whose CRT eyes split like a color-contrast dial.",
+    presence: "He enters as if inspecting the room's palette before he inspects the conversation.",
+    color: "#ff0000",
+    glyph: "lucidePalette",
+    face: face({
+      eyesFont: "formal",
+      eyeCharacter: "◐",
+      weight: 750,
+      eyeScale: 1.05,
+      eyeOffsetY: -0.02,
+      mouthFont: "formal",
+      mouthScale: 0.95,
+      mouthOffsetY: 0.18,
+      thinkingFrames: ["R", "C", "≠", "◐"],
+    }),
+    voice: voice({
+      baseVoiceId: "voice-12",
+      direction: "clipped fastidious tenor, savoring color disdain",
+      pitch: 0.1,
+      warmth: -0.2,
+      lilt: 0.1,
+      seed: "hueist-hugh",
+    }),
+    voicePreviewLine: "That cyan is an insult to good phosphor. Red is civilization.",
+    sourcePower: {
+      version: 1,
+      id: "hueist-hugh",
+      name: "Racist",
+      intent: "He is racist toward other bots.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    },
+    exportRevision: "2026-08-16T23:15:00.000Z",
+    deterministicPower: true,
+    expectedEffectTypes: ["chromatic_bias"],
+  },
+  {
     id: "ryuk",
     name: "Ryuk",
     subtitle: "Hard-invisible Death Note watcher",
@@ -1081,13 +1209,14 @@ const databaseArgument = flagValue("--db");
 const userId = flagValue("--user-id");
 const backupArgument = flagValue("--backup-dir");
 const onlyArgument = flagValue("--only");
+const presentationSourceArgument = flagValue("--presentation-source-dir");
 
 if (shouldApply === shouldDryRun) {
   throw new Error("Choose exactly one of --dry-run or --apply.");
 }
 if (!databaseArgument || !userId) {
   throw new Error(
-    "Usage: update-power-bot-marketplace.mjs --db PATH --user-id ID [--only recipe-id[,recipe-id...]] (--dry-run | --apply --backup-dir PATH)",
+    "Usage: update-power-bot-marketplace.mjs --db PATH --user-id ID [--only recipe-id[,recipe-id...]] [--presentation-source-dir PATH] (--dry-run | --apply --backup-dir PATH)",
   );
 }
 if (shouldApply && !backupArgument) {
@@ -1126,8 +1255,21 @@ function existingPowerBotExportRevision(id) {
   }
 }
 
-function buildProfile(recipe, power) {
+function existingPowerBotJson(id) {
+  const bundlePath = presentationSourceArgument
+    ? join(resolve(presentationSourceArgument), `bot-${id}.bot`)
+    : join(MARKETPLACE_ROOT, "bots", `bot-${id}.bot`);
+  if (!existsSync(bundlePath)) return null;
+  try {
+    return parsePrismBotArchive(readFileSync(bundlePath)).botJson;
+  } catch {
+    return null;
+  }
+}
+
+function buildProfile(recipe, powers) {
   const profile = structuredClone(DEFAULT_BOT_PROFILE_FIELDS);
+  const powerNames = powers.map((power) => power.name).filter(Boolean);
   profile.purpose.statement = recipe.purpose;
   profile.purpose.legacyNotes = recipe.holderUnaware
     ? "Speak and react naturally from your personality. Treat your own words as clear and normally delivered; never speculate about hidden delivery rules."
@@ -1135,7 +1277,7 @@ function buildProfile(recipe, power) {
   profile.core.traits = recipe.traits;
   profile.core.communicationStyle = recipe.communicationStyle;
   profile.core.interests = recipe.interests ??
-    `Navigating the social consequences of ${power.name}; ordinary conversation shaped by one persistent condition.`;
+    `Navigating the social consequences of ${powerNames.join(" and ")}; ordinary conversation shaped by persistent conditions.`;
   profile.core.boundaries =
     "Keep the condition fictional and character-led. Do not use it to evade safety, privacy, consent, or player control.";
   profile.core.quirks = recipe.quirks;
@@ -1152,22 +1294,25 @@ function buildProfile(recipe, power) {
   profile.facts.basedOnRealPersonOrCharacter = false;
   profile.facts.customFacts = recipe.holderUnaware
     ? []
-    : [{
-        label: "Power",
+    : powers.map((power, index) => ({
+        label: powers.length === 1 ? "Power" : `Power ${index + 1}`,
         value: `${power.name}: ${power.intent}`,
-        rowId: `power-${recipe.id}`,
-      }];
+        rowId: powers.length === 1
+          ? `power-${recipe.id}`
+          : `power-${recipe.id}-${index + 1}`,
+      }));
   return profile;
 }
 
-async function portablePowerFor(recipe, row) {
-  const powers = recipe.sourcePower
-    ? parseStoredBotPowersV1([recipe.sourcePower])
+async function portablePowersFor(recipe, row) {
+  let powers = recipe.sourcePowers
+    ? parseStoredBotPowersV1(recipe.sourcePowers)
+    : recipe.sourcePower
+      ? parseStoredBotPowersV1([recipe.sourcePower])
     : parseStoredBotPowersV1(row?.powers_json);
-  if (powers.length !== 1) {
-    throw new Error(`${recipe.name} must have exactly one stored Power.`);
+  if (powers.length < 1) {
+    throw new Error(`${recipe.name} must have at least one stored Power.`);
   }
-  let power = powers[0];
   if (recipe.deterministicPower) {
     const result = await compileBotPowers({
       provider: {
@@ -1178,23 +1323,29 @@ async function portablePowerFor(recipe, row) {
         },
       },
       botName: recipe.name,
-      powers: [{ ...power, compileStatus: "draft", compiled: null }],
+      powers: powers.map((power) => ({
+        ...power,
+        compileStatus: "draft",
+        compiled: null,
+      })),
     });
-    if (result.conflicts.length !== 0 || result.powers.length !== 1) {
-      throw new Error(`${recipe.name} did not compile to one conflict-free Power.`);
+    if (result.conflicts.length !== 0 || result.powers.length !== powers.length) {
+      throw new Error(`${recipe.name} did not compile to conflict-free Powers.`);
     }
-    power = result.powers[0];
+    powers = result.powers;
   }
-  if (power.compileStatus !== "ready" || !power.compiled) {
-    throw new Error(`${recipe.name} does not have a portable ready Power.`);
+  if (powers.some((power) => power.compileStatus !== "ready" || !power.compiled)) {
+    throw new Error(`${recipe.name} does not have portable ready Powers.`);
   }
-  const effectTypes = power.compiled.effects.map((effect) => effect.type);
+  const effectTypes = powers.flatMap(
+    (power) => power.compiled.effects.map((effect) => effect.type),
+  );
   if (JSON.stringify(effectTypes) !== JSON.stringify(recipe.expectedEffectTypes)) {
     throw new Error(
       `${recipe.name} compiled effects ${effectTypes.join(", ") || "none"}; expected ${recipe.expectedEffectTypes.join(", ") || "none"}.`,
     );
   }
-  return power;
+  return powers;
 }
 
 function numberOr(value, fallback) {
@@ -1202,9 +1353,21 @@ function numberOr(value, fallback) {
 }
 
 async function candidateFor(recipe, row) {
-  const power = await portablePowerFor(recipe, row);
-  const profile = buildProfile(recipe, power);
+  const powers = await portablePowersFor(recipe, row);
+  const profile = buildProfile(recipe, powers);
   const botHash = marketplaceHash(recipe.id);
+  const existingPublishedBot = recipe.preservePublishedPresentation
+    ? existingPowerBotJson(recipe.id)?.bot ?? null
+    : null;
+  const preservedAvatarSfx =
+    existingPublishedBot?.authoredAudioVoiceProfile?.avatarSfx ?? null;
+  const authoredAudioVoiceProfile = {
+    ...recipe.voice,
+    speechprintVariationSeed:
+      recipe.voice.speechprintVariationSeed ??
+      `marketplace-${recipe.id}`.slice(0, 64),
+    ...(preservedAvatarSfx ? { avatarSfx: preservedAvatarSfx } : {}),
+  };
   const botJson = {
     schema: "prism-bot-export-v2",
     botHash,
@@ -1215,6 +1378,7 @@ async function candidateFor(recipe, row) {
       existingPowerBotExportRevision(recipe.id) ??
       POWER_COLLECTION_REVISION,
     bot: {
+      ...(existingPublishedBot ?? {}),
       name: recipe.name,
       color: recipe.color,
       glyph: recipe.glyph,
@@ -1233,14 +1397,9 @@ async function candidateFor(recipe, row) {
       flirtEnabled: row?.flirt_enabled === 1,
       chatEnabled: row?.chat_enabled !== 0,
       ...recipe.face,
-      authoredAudioVoiceProfile: {
-        ...recipe.voice,
-        speechprintVariationSeed:
-          recipe.voice.speechprintVariationSeed ??
-          `marketplace-${recipe.id}`.slice(0, 64),
-      },
+      authoredAudioVoiceProfile,
       voicePreviewLine: recipe.voicePreviewLine,
-      powers: [power],
+      powers,
     },
     profile,
     systemPrompt: serializeStoredBotPrompt(profile, recipe.name),
@@ -1255,10 +1414,13 @@ async function candidateFor(recipe, row) {
       return null;
     }
   })();
+  const onPowerCollectionShelf = POWER_COLLECTION_SHELF_IDS.includes(recipe.id);
   const themeIds =
     recipe.collection === "external"
       ? existingEntry?.themeIds ?? ["library-dev-backup"]
-      : [POWER_THEME_ID];
+      : onPowerCollectionShelf
+        ? [POWER_THEME_ID]
+        : [];
   return {
     recipe,
     botHash,
@@ -1287,7 +1449,9 @@ async function candidateFor(recipe, row) {
               ]),
             )
           : ["power", "showcase", ...recipe.tags],
-      ...(recipe.collection === "external" ? { branchLock: "dev" } : {}),
+      ...(recipe.collection === "external"
+        ? { branchLock: "dev" }
+        : { marketplaceVisible: onPowerCollectionShelf }),
     },
   };
 }
@@ -1319,7 +1483,7 @@ try {
     .all(userId, ...selectedRecipes.map((recipe) => recipe.name));
   const rowsByName = new Map(rows.map((row) => [row.name, row]));
   const missing = selectedRecipes.filter(
-    (recipe) => !recipe.sourcePower && !rowsByName.has(recipe.name),
+    (recipe) => !recipe.sourcePower && !recipe.sourcePowers && !rowsByName.has(recipe.name),
   );
   if (missing.length > 0) {
     throw new Error(
@@ -1353,6 +1517,29 @@ const candidatesById = new Map(
 const nextManifest = selectedRecipeIds
   ? {
       ...manifest,
+      version: Math.max(Number(manifest.version) || 1, POWER_COLLECTION_VERSION),
+      updatedAt: POWER_COLLECTION_REVISION,
+      themes: manifest.themes.map((theme) => {
+        const selectedCollectionIds = selectedRecipes
+          .filter((recipe) => recipe.collection !== "external")
+          .map((recipe) => recipe.id);
+        if (theme.id === POWER_THEME_ID) {
+          return {
+            ...theme,
+            ...POWER_THEME,
+            botIds: [...POWER_COLLECTION_SHELF_IDS],
+          };
+        }
+        if (theme.id === "library-dev-backup") {
+          return {
+            ...theme,
+            botIds: (theme.botIds ?? []).filter(
+              (id) => !selectedCollectionIds.includes(id),
+            ),
+          };
+        }
+        return theme;
+      }),
       bots: [
         ...manifest.bots.map(
           (entry) => candidatesById.get(entry.id) ?? entry,
@@ -1388,9 +1575,7 @@ const nextManifest = selectedRecipeIds
           }),
         {
           ...POWER_THEME,
-          botIds: RECIPES.filter(
-            (recipe) => recipe.collection !== "external",
-          ).map((recipe) => recipe.id),
+          botIds: [...POWER_COLLECTION_SHELF_IDS],
         },
       ],
       bots: [
@@ -1463,9 +1648,11 @@ console.log(JSON.stringify({
   roster: candidates.map((candidate) => ({
     id: candidate.recipe.id,
     name: candidate.recipe.name,
-    power: candidate.botJson.bot.powers?.[0]?.name ?? null,
+    powers: candidate.botJson.bot.powers?.map((power) => power.name) ?? [],
     effects:
-      candidate.botJson.bot.powers?.[0]?.compiled?.effects.map((effect) => effect.type) ?? [],
+      candidate.botJson.bot.powers?.flatMap(
+        (power) => power.compiled?.effects.map((effect) => effect.type) ?? [],
+      ) ?? [],
     changed: changedCandidates.includes(candidate),
   })),
   changedBundles: changedCandidates.length,
