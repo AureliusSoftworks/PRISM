@@ -35,6 +35,41 @@ describe("Signal automatic camera direction", () => {
     );
   });
 
+  it("lets lingering coverage leave the speaker without stealing reaction cuts", () => {
+    assert.equal(
+      signalLiveAutoCameraShot({
+        baseShot: "left",
+        speakingShot: "left",
+        coverageShot: "wide",
+        botThinking: false,
+        producerGuestThinking: false,
+      }),
+      "wide",
+    );
+    assert.equal(
+      signalLiveAutoCameraShot({
+        baseShot: "left",
+        speakingShot: "left",
+        coverageShot: "right",
+        listenerReactionShot: "right",
+        botThinking: false,
+        producerGuestThinking: false,
+      }),
+      "right",
+    );
+    assert.equal(
+      signalLiveAutoCameraShot({
+        baseShot: "left",
+        speakingShot: "left",
+        coverageShot: "right",
+        listenerReactionShot: "left",
+        botThinking: false,
+        producerGuestThinking: false,
+      }),
+      "left",
+    );
+  });
+
   it("cuts directly to live speech, but releases a prior hold for real thinking", () => {
     assert.equal(
       signalLiveAutoCameraShot({

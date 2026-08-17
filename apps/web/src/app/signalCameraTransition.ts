@@ -30,10 +30,13 @@ export function signalLiveAutoCameraShot(args: {
   listenerReactionShot?: SignalDirectedCameraShot | null;
   speakingShot?: SignalDirectedCameraShot | null;
   postSpeechHoldShot?: SignalDirectedCameraShot | null;
+  /** Mid-speech Wide breaths, listener glances, and guest introductions. */
+  coverageShot?: SignalDirectedCameraShot | null;
   botThinking: boolean;
   producerGuestThinking: boolean;
 }): SignalDirectedCameraShot {
   if (args.listenerReactionShot) return args.listenerReactionShot;
+  if (args.coverageShot) return args.coverageShot;
   if (args.speakingShot) return args.speakingShot;
   // A real wait immediately releases the previous speaker; a held reaction
   // must not conceal the bot that is visibly thinking.

@@ -23,7 +23,29 @@ export type SignalSynthNote = {
   attackMs: number;
   releaseMs: number;
   lowpassHz: number;
+  treatment?: SignalSynthInstrumentTreatment;
+  articulation?: SignalSynthArticulation;
 };
+
+export type SignalSynthPhraseGrammar =
+  | "declaration"
+  | "call-and-answer"
+  | "turning-figure"
+  | "lifted-close";
+
+export type SignalSynthInstrumentTreatment =
+  | "brass-pulse"
+  | "glass-harp"
+  | "reed-pluck"
+  | "organ-glow";
+
+export type SignalSynthArticulation = "legato" | "marcato" | "plucked" | "bell";
+
+export type SignalSynthProductionTexture =
+  | "clean"
+  | "tape-warmth"
+  | "broadcast-air"
+  | "shimmer";
 
 export type SignalSynthIdentPlan = {
   durationMs: number;
@@ -33,12 +55,25 @@ export type SignalSynthIdentPlan = {
   register: "low" | "low-middle" | "middle" | "middle-high";
   contour: "descending" | "turning" | "bouncing" | "stepwise" | "asymmetric" | "arch" | "ascending" | "balanced";
   ending: "hard" | "resolve" | "lift" | "button";
+  phraseGrammar: SignalSynthPhraseGrammar;
+  melodyInstrument: SignalSynthInstrumentTreatment;
+  supportInstrument: SignalSynthInstrumentTreatment;
+  productionTexture: SignalSynthProductionTexture;
+  textureSeed: number;
   notes: SignalSynthNote[];
 };
 
 type SignalSynthTemperamentRecipe = Omit<
   SignalSynthIdentPlan,
-  "durationMs" | "temperament" | "palette" | "notes"
+  | "durationMs"
+  | "temperament"
+  | "palette"
+  | "phraseGrammar"
+  | "melodyInstrument"
+  | "supportInstrument"
+  | "productionTexture"
+  | "textureSeed"
+  | "notes"
 > & {
   rootMidi: number;
   motif: readonly [number, number, number, number];
@@ -377,6 +412,128 @@ const SIGNAL_SYNTH_PALETTE_MOTIF_BEATS: Record<
   broadcast: [0, 1, 2.25, 3.75],
 };
 
+type SignalSynthPhraseGrammarRecipe = {
+  motifOrder: readonly [number, number, number, number];
+  motifBeatScale: number;
+  motifBeatOffsets: readonly [number, number, number, number];
+  pulseBeatScale: number;
+  pulseBeatOffsets: readonly [number, number, number, number];
+  articulation: SignalSynthArticulation;
+};
+
+// These are short phrase grammars, not free-form composition. Each has a
+// recognisable gesture and preserves the fourth motif tone as the cadence.
+const SIGNAL_SYNTH_PHRASE_GRAMMARS: Record<
+  SignalSynthPhraseGrammar,
+  SignalSynthPhraseGrammarRecipe
+> = {
+  declaration: {
+    motifOrder: [0, 1, 2, 3],
+    motifBeatScale: 0.92,
+    motifBeatOffsets: [0, 0.04, 0.08, 0.12],
+    pulseBeatScale: 0.94,
+    pulseBeatOffsets: [0, 0.03, 0, 0.04],
+    articulation: "marcato",
+  },
+  "call-and-answer": {
+    motifOrder: [0, 2, 1, 3],
+    motifBeatScale: 0.84,
+    motifBeatOffsets: [0, 0.1, 0.34, 0.46],
+    pulseBeatScale: 0.88,
+    pulseBeatOffsets: [0, 0.14, 0.04, 0.16],
+    articulation: "plucked",
+  },
+  "turning-figure": {
+    motifOrder: [0, 1, 0, 3],
+    motifBeatScale: 0.9,
+    motifBeatOffsets: [0, -0.08, 0.14, 0.28],
+    pulseBeatScale: 0.9,
+    pulseBeatOffsets: [0, -0.05, 0.08, 0.02],
+    articulation: "bell",
+  },
+  "lifted-close": {
+    motifOrder: [1, 2, 0, 3],
+    motifBeatScale: 0.82,
+    motifBeatOffsets: [0, 0.16, 0.3, 0.58],
+    pulseBeatScale: 0.86,
+    pulseBeatOffsets: [0, 0.08, 0.12, 0.2],
+    articulation: "legato",
+  },
+};
+
+const SIGNAL_SYNTH_PHRASE_GRAMMAR_NAMES: readonly SignalSynthPhraseGrammar[] = [
+  "declaration",
+  "call-and-answer",
+  "turning-figure",
+  "lifted-close",
+];
+
+const SIGNAL_SYNTH_INSTRUMENTS: readonly SignalSynthInstrumentTreatment[] = [
+  "brass-pulse",
+  "glass-harp",
+  "reed-pluck",
+  "organ-glow",
+];
+
+const SIGNAL_SYNTH_SUPPORT_INSTRUMENT: Record<
+  SignalSynthInstrumentTreatment,
+  SignalSynthInstrumentTreatment
+> = {
+  "brass-pulse": "organ-glow",
+  "glass-harp": "organ-glow",
+  "reed-pluck": "brass-pulse",
+  "organ-glow": "glass-harp",
+};
+
+const SIGNAL_SYNTH_TEXTURES: readonly SignalSynthProductionTexture[] = [
+  "clean",
+  "tape-warmth",
+  "broadcast-air",
+  "shimmer",
+];
+
+const SIGNAL_SYNTH_PRIMARY_INSTRUMENT: Record<
+  SignalMusicPalette,
+  SignalSynthInstrumentTreatment
+> = {
+  cinematic: "brass-pulse",
+  magical: "glass-harp",
+  nautical: "reed-pluck",
+  mechanical: "brass-pulse",
+  noir: "reed-pluck",
+  chamber: "organ-glow",
+  folk: "reed-pluck",
+  theatrical: "brass-pulse",
+  cosmic: "organ-glow",
+  broadcast: "brass-pulse",
+};
+
+const SIGNAL_SYNTH_PRIMARY_TEXTURE: Record<
+  SignalMusicPalette,
+  SignalSynthProductionTexture
+> = {
+  cinematic: "tape-warmth",
+  magical: "shimmer",
+  nautical: "clean",
+  mechanical: "broadcast-air",
+  noir: "tape-warmth",
+  chamber: "clean",
+  folk: "tape-warmth",
+  theatrical: "broadcast-air",
+  cosmic: "shimmer",
+  broadcast: "broadcast-air",
+};
+
+const SIGNAL_SYNTH_GRAMMAR_BY_ENDING: Record<
+  SignalSynthIdentPlan["ending"],
+  readonly [SignalSynthPhraseGrammar, SignalSynthPhraseGrammar]
+> = {
+  hard: ["declaration", "turning-figure"],
+  resolve: ["turning-figure", "lifted-close"],
+  lift: ["call-and-answer", "lifted-close"],
+  button: ["declaration", "call-and-answer"],
+};
+
 function stableHash(value: string): number {
   let hash = 2166136261;
   for (let index = 0; index < value.length; index += 1) {
@@ -384,6 +541,35 @@ function stableHash(value: string): number {
     hash = Math.imul(hash, 16777619);
   }
   return hash >>> 0;
+}
+
+function stableSeedVariant(value: string): number {
+  let hash = stableHash(value);
+  hash ^= hash >>> 16;
+  hash = Math.imul(hash, 0x7feb352d);
+  hash ^= hash >>> 15;
+  hash = Math.imul(hash, 0x846ca68b);
+  return (hash ^ (hash >>> 16)) >>> 0;
+}
+
+function seededProfileVariant<T extends string>(args: {
+  seed: string;
+  primary: T;
+  secondary: T;
+  variants: readonly T[];
+}): T {
+  const remaining = args.variants.filter(
+    (variant) => variant !== args.primary && variant !== args.secondary,
+  );
+  const weighted = [
+    args.primary,
+    args.primary,
+    args.primary,
+    args.secondary,
+    args.secondary,
+    ...remaining,
+  ];
+  return weighted[stableSeedVariant(args.seed) % weighted.length]!;
 }
 
 function midiFrequency(midi: number): number {
@@ -400,7 +586,34 @@ export function buildSignalSynthIdentPlan(args: {
   const hash = stableHash(args.seed);
   const tempoBpm = args.profile.tempoBpm;
   const beatMs = 60_000 / tempoBpm;
-  const root = recipe.rootMidi + palette.rootShift + (hash % 3);
+  const grammarPreference = SIGNAL_SYNTH_GRAMMAR_BY_ENDING[args.profile.ending];
+  const phraseGrammar = seededProfileVariant({
+    seed: `${args.seed}:phrase`,
+    primary: grammarPreference[0],
+    secondary: grammarPreference[1],
+    variants: SIGNAL_SYNTH_PHRASE_GRAMMAR_NAMES,
+  });
+  const grammar = SIGNAL_SYNTH_PHRASE_GRAMMARS[phraseGrammar];
+  const primaryInstrument = SIGNAL_SYNTH_PRIMARY_INSTRUMENT[args.profile.palette];
+  const melodyInstrument = seededProfileVariant({
+    seed: `${args.seed}:instrument`,
+    primary: primaryInstrument,
+    secondary: SIGNAL_SYNTH_SUPPORT_INSTRUMENT[primaryInstrument],
+    variants: SIGNAL_SYNTH_INSTRUMENTS,
+  });
+  const supportInstrument = SIGNAL_SYNTH_SUPPORT_INSTRUMENT[melodyInstrument];
+  const primaryTexture = SIGNAL_SYNTH_PRIMARY_TEXTURE[args.profile.palette];
+  const productionTexture = seededProfileVariant({
+    seed: `${args.seed}:texture`,
+    primary: primaryTexture,
+    secondary: primaryTexture === "clean" ? "tape-warmth" : "clean",
+    variants: SIGNAL_SYNTH_TEXTURES,
+  });
+  // Keep the ident recognizable for its profile while giving each show/identity
+  // seed a bounded harmonic fingerprint. The final motif note remains fixed so
+  // seed variation adds authorship without changing the profile's cadence.
+  const rootVariation = (hash % 7) - 3;
+  const root = recipe.rootMidi + palette.rootShift + rootVariation;
   const notes: SignalSynthNote[] = [];
 
   for (const interval of recipe.supportIntervals) {
@@ -418,10 +631,17 @@ export function buildSignalSynthIdentPlan(args: {
         950,
         recipe.melodyLowpassHz * palette.lowpassScale - 1_450,
       ),
+      treatment: supportInstrument,
+      articulation: "legato",
     });
   }
 
-  for (const beat of recipe.pulseBeats) {
+  for (const [index, recipeBeat] of recipe.pulseBeats.entries()) {
+    const beat = Math.max(
+      0,
+      recipeBeat * grammar.pulseBeatScale +
+        grammar.pulseBeatOffsets[index % grammar.pulseBeatOffsets.length]!,
+    );
     notes.push({
       startMs: 180 + beat * beatMs,
       durationMs: beatMs * 0.82,
@@ -436,16 +656,28 @@ export function buildSignalSynthIdentPlan(args: {
       attackMs: args.profile.ending === "hard" ? 5 : 12,
       releaseMs: 190,
       lowpassHz: args.profile.ending === "hard" ? 620 : 470,
+      treatment: melodyInstrument,
+      articulation: "marcato",
     });
   }
 
-  const motifBeats = SIGNAL_SYNTH_PALETTE_MOTIF_BEATS[args.profile.palette];
+  const paletteMotifBeats = SIGNAL_SYNTH_PALETTE_MOTIF_BEATS[args.profile.palette];
+  const motifBeats = paletteMotifBeats.map((beat, index) => Math.max(
+    0,
+    beat * grammar.motifBeatScale + grammar.motifBeatOffsets[index]!,
+  ));
   const melodyOffset = args.profile.temperament === "commanding"
     ? 0
     : args.profile.temperament === "contemplative"
       ? 7
       : 12;
-  recipe.motif.forEach((interval, index) => {
+  const motifIntervals = [
+    recipe.motif[grammar.motifOrder[0]]!,
+    recipe.motif[grammar.motifOrder[1]]!,
+    recipe.motif[grammar.motifOrder[2]]!,
+    recipe.motif[grammar.motifOrder[3]]!,
+  ] as const;
+  motifIntervals.forEach((interval, index) => {
     const finalNote = index === recipe.motif.length - 1;
     notes.push({
       startMs: 60 + motifBeats[index]! * beatMs,
@@ -464,6 +696,8 @@ export function buildSignalSynthIdentPlan(args: {
             : 620) * palette.melodyReleaseScale
         : 210 * palette.melodyReleaseScale,
       lowpassHz: recipe.melodyLowpassHz * palette.lowpassScale,
+      treatment: melodyInstrument,
+      articulation: grammar.articulation,
     });
   });
 
@@ -478,6 +712,8 @@ export function buildSignalSynthIdentPlan(args: {
       releaseMs: (args.profile.ending === "button" ? 360 : 620) *
         palette.melodyReleaseScale,
       lowpassHz: recipe.melodyLowpassHz * palette.lowpassScale + 450,
+      treatment: melodyInstrument,
+      articulation: grammar.articulation,
     });
   }
 
@@ -489,6 +725,11 @@ export function buildSignalSynthIdentPlan(args: {
     register: args.profile.register,
     contour: args.profile.contour,
     ending: args.profile.ending,
+    phraseGrammar,
+    melodyInstrument,
+    supportInstrument,
+    productionTexture,
+    textureSeed: hash,
     notes,
   };
 }
@@ -539,6 +780,11 @@ export function buildSignalSynthOutroPlan(seed: string): SignalSynthIdentPlan {
     register: "middle",
     contour: "descending",
     ending: "resolve",
+    phraseGrammar: "declaration",
+    melodyInstrument: "organ-glow",
+    supportInstrument: "organ-glow",
+    productionTexture: "clean",
+    textureSeed: hash,
     notes,
   };
 }
@@ -548,6 +794,59 @@ function waveSample(waveform: SignalSynthNote["waveform"], phase: number): numbe
   if (waveform === "triangle") return (2 / Math.PI) * Math.asin(sine);
   if (waveform === "soft-square") return Math.tanh(sine * 2.4);
   return sine;
+}
+
+function instrumentSample(args: {
+  treatment: SignalSynthInstrumentTreatment;
+  waveform: SignalSynthNote["waveform"];
+  phase: number;
+  offset: number;
+  sampleRate: number;
+}): number {
+  const base = waveSample(args.waveform, args.phase);
+  if (args.treatment === "brass-pulse") {
+    return Math.tanh(base + Math.sin(args.phase * 2) * 0.38 + Math.sin(args.phase * 3) * 0.14);
+  }
+  if (args.treatment === "glass-harp") {
+    const ring = Math.exp(-args.offset / (args.sampleRate * 0.72));
+    return (base + Math.sin(args.phase * 2.01) * 0.32 + Math.sin(args.phase * 4.02) * 0.12) * ring;
+  }
+  if (args.treatment === "reed-pluck") {
+    const pluck = Math.exp(-args.offset / (args.sampleRate * 0.38));
+    return (base * 0.68 + Math.sin(args.phase * 2) * 0.24 + Math.sin(args.phase * 5) * 0.08) *
+      (0.64 + pluck * 0.36);
+  }
+  return base * 0.74 + Math.sin(args.phase * 2) * 0.2 + Math.sin(args.phase * 0.5) * 0.06;
+}
+
+function textureSample(args: {
+  texture: SignalSynthProductionTexture;
+  sample: number;
+  phase: number;
+  sampleIndex: number;
+  textureSeed: number;
+}): number {
+  if (args.texture === "tape-warmth") {
+    return Math.tanh(args.sample * 1.12) + Math.sin((args.sampleIndex + args.textureSeed) * 0.017) * 0.006;
+  }
+  if (args.texture === "broadcast-air") {
+    return args.sample * 0.96 + Math.sin((args.sampleIndex + args.textureSeed) * 0.071) * 0.009;
+  }
+  if (args.texture === "shimmer") {
+    return args.sample + Math.sin(args.phase * 2.003) * 0.1 + Math.sin(args.phase * 3.997) * 0.035;
+  }
+  return args.sample;
+}
+
+function articulationGain(
+  articulation: SignalSynthArticulation | undefined,
+  offset: number,
+  sampleRate: number,
+): number {
+  if (articulation === "plucked") return 0.68 + Math.exp(-offset / (sampleRate * 0.24)) * 0.32;
+  if (articulation === "bell") return 0.48 + Math.exp(-offset / (sampleRate * 0.56)) * 0.52;
+  if (articulation === "marcato") return 0.8 + Math.exp(-offset / (sampleRate * 0.1)) * 0.2;
+  return 1;
 }
 
 function writeWaveText(view: DataView, offset: number, value: string): void {
@@ -576,10 +875,28 @@ export function encodeSignalSynthIdentWave(
       const target = startSample + offset;
       if (target >= samples.length) break;
       phase += (2 * Math.PI * frequency) / sampleRate;
-      filtered += filterAlpha * (waveSample(note.waveform, phase) - filtered);
+      const raw = instrumentSample({
+        treatment: note.treatment ?? "organ-glow",
+        waveform: note.waveform,
+        phase,
+        offset,
+        sampleRate,
+      });
+      filtered += filterAlpha * (raw - filtered);
       const attack = Math.min(1, offset / attackSamples);
       const release = Math.min(1, (noteSampleCount - offset) / releaseSamples);
-      samples[target] += filtered * note.gain * Math.max(0, Math.min(attack, release));
+      const shaped = textureSample({
+        texture: plan.productionTexture,
+        sample: filtered,
+        phase,
+        sampleIndex: target,
+        textureSeed: plan.textureSeed,
+      });
+      samples[target] += shaped * note.gain * articulationGain(
+        note.articulation,
+        offset,
+        sampleRate,
+      ) * Math.max(0, Math.min(attack, release));
     }
   }
 

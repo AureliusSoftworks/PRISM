@@ -2,6 +2,7 @@ import {
   botPowerResponseIsSilentV1,
   botcastCameraModeAt,
   botcastCameraShotAt,
+  botcastAutoCoverageShotAt,
   botcastGuestHasDepartedAt,
   botcastHostHasDepartedAt,
   botcastListenerReactionForMessage,
@@ -593,6 +594,12 @@ export function signalFaithfulReplayCameraState(args: {
     shot: signalLiveAutoCameraShot({
       baseShot,
       speakingShot,
+      coverageShot: speakingShot
+        ? botcastAutoCoverageShotAt({
+            events: args.episode.events,
+            elapsedMs: eventElapsedMs,
+          })
+        : null,
       botThinking:
         hostThinking ||
         (args.episode.guestKind !== "producer" && guestThinking),

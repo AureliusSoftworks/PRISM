@@ -98,11 +98,75 @@ describe("Signal Synth ident", () => {
     );
   });
 
+  it("gives same-profile shows distinct deterministic harmonic fingerprints", () => {
+    const first = buildSignalSynthIdentPlan({
+      profile: profile("neutral", "show-a"),
+      seed: "show-a:identity-a",
+    });
+    const second = buildSignalSynthIdentPlan({
+      profile: profile("neutral", "show-a"),
+      seed: "show-a:identity-b",
+    });
+    const firstAgain = buildSignalSynthIdentPlan({
+      profile: profile("neutral", "show-a"),
+      seed: "show-a:identity-a",
+    });
+    assert.deepEqual(first, firstAgain);
+    assert.notDeepEqual(
+      first.notes.map((note) => [note.midi, note.startMs]),
+      second.notes.map((note) => [note.midi, note.startMs]),
+    );
+  });
+
+  it("selects bounded phrase grammars, instruments, and production textures by seed", () => {
+    const sharedProfile = profile("neutral", "signal-variation-profile", {
+      studioIdentity: "A midnight broadcast observatory with instruments and a small audience.",
+    });
+    const plans = Array.from({ length: 32 }, (_, index) =>
+      buildSignalSynthIdentPlan({
+        profile: sharedProfile,
+        seed: `signal-variation-${index}`,
+      }),
+    );
+    const first = plans[0]!;
+    assert.deepEqual(
+      first,
+      buildSignalSynthIdentPlan({ profile: sharedProfile, seed: "signal-variation-0" }),
+    );
+    assert.ok(new Set(plans.map((plan) => plan.phraseGrammar)).size >= 3);
+    assert.ok(new Set(plans.map((plan) => plan.melodyInstrument)).size >= 3);
+    assert.ok(new Set(plans.map((plan) => plan.productionTexture)).size >= 3);
+    assert.ok(
+      new Set(plans.map((plan) => plan.notes.map((note) => note.startMs).join(","))).size >= 3,
+      "seeded grammars should change the rhythmic form",
+    );
+    assert.ok(
+      new Set(plans.map((plan) => `${plan.phraseGrammar}:${plan.melodyInstrument}:${plan.productionTexture}`)).size >= 8,
+      "seeds should select materially different sound DNA",
+    );
+    for (const plan of plans) {
+      assert.equal(plan.durationMs, SIGNAL_SYNTH_IDENT_DURATION_MS);
+      for (const note of plan.notes) {
+        assert.ok(note.startMs >= 0 && note.startMs < plan.durationMs);
+        assert.ok(note.durationMs > 0 && note.durationMs <= plan.durationMs);
+        assert.ok(note.midi >= 24 && note.midi <= 96);
+        assert.ok(note.attackMs >= 0 && note.releaseMs >= 0);
+        assert.ok(note.lowpassHz >= 400 && note.lowpassHz <= 6_000);
+      }
+    }
+  });
+
   it("renders an ordinary mono PCM wave without a live AudioContext", () => {
-    const bytes = encodeSignalSynthIdentWave(
+    const plan = buildSignalSynthIdentPlan({
+      profile: profile("neutral", "show-a:host-a"),
+      seed: "show-a:host-a",
+    });
+    const bytes = encodeSignalSynthIdentWave(plan, 8_000);
+    const sameBytes = encodeSignalSynthIdentWave(plan, 8_000);
+    const differentBytes = encodeSignalSynthIdentWave(
       buildSignalSynthIdentPlan({
         profile: profile("neutral", "show-a:host-a"),
-        seed: "show-a:host-a",
+        seed: "show-a:host-b",
       }),
       8_000,
     );
@@ -114,7 +178,11 @@ describe("Signal Synth ident", () => {
     assert.equal(view.getUint16(20, true), 1);
     assert.equal(view.getUint16(22, true), 1);
     assert.equal(view.getUint32(24, true), 8_000);
+    assert.equal(view.getUint32(40, true), bytes.byteLength - 44);
+    assert.equal(bytes.byteLength, 44 + SIGNAL_SYNTH_IDENT_DURATION_MS * 16);
     assert.ok(bytes.byteLength > 44);
+    assert.deepEqual(new Uint8Array(bytes), new Uint8Array(sameBytes));
+    assert.notDeepEqual(new Uint8Array(bytes), new Uint8Array(differentBytes));
   });
 
   it("builds a shorter deterministic resolving outro", () => {

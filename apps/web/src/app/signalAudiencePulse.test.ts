@@ -3,8 +3,10 @@ import { describe, it } from "node:test";
 
 import {
   formatSignalAudienceViews,
+  signalAudienceRatingColor,
   signalAudienceReviews,
   signalAudienceSnapshot,
+  signalShowsByAudienceRating,
   type SignalAudienceEpisode,
 } from "./signalAudiencePulse.ts";
 
@@ -162,5 +164,59 @@ describe("Signal audience pulse", () => {
     assert.equal(formatSignalAudienceViews(842), "842");
     assert.equal(formatSignalAudienceViews(1_240), "1.2K");
     assert.equal(formatSignalAudienceViews(18_400), "18.4K");
+  });
+
+  it("interpolates audience rating colors from red through yellow to green", () => {
+    assert.equal(signalAudienceRatingColor(null), null);
+    assert.equal(signalAudienceRatingColor(Number.NaN), null);
+    assert.equal(signalAudienceRatingColor(0), "hsl(0 84% 60%)");
+    assert.equal(signalAudienceRatingColor(1.25), "hsl(30 84% 60%)");
+    assert.equal(signalAudienceRatingColor(2.5), "hsl(60 84% 60%)");
+    assert.equal(signalAudienceRatingColor(3.75), "hsl(90 84% 60%)");
+    assert.equal(signalAudienceRatingColor(5), "hsl(120 84% 60%)");
+    assert.equal(signalAudienceRatingColor(99), "hsl(120 84% 60%)");
+  });
+
+  it("ranks reviewed shows by rating, then confidence, before unrated shows", () => {
+    const ranked = signalShowsByAudienceRating([
+      {
+        id: "unrated-new",
+        name: "Unrated New",
+        updatedAt: "2026-08-04T00:00:00.000Z",
+        audienceRating: null,
+        audienceReviewCount: 0,
+      },
+      {
+        id: "trusted",
+        name: "Trusted",
+        updatedAt: "2026-08-01T00:00:00.000Z",
+        audienceRating: 4.7,
+        audienceReviewCount: 5,
+      },
+      {
+        id: "early",
+        name: "Early",
+        updatedAt: "2026-08-03T00:00:00.000Z",
+        audienceRating: 4.7,
+        audienceReviewCount: 1,
+      },
+      {
+        id: "good",
+        name: "Good",
+        updatedAt: "2026-08-02T00:00:00.000Z",
+        audienceRating: 4.5,
+        audienceReviewCount: 8,
+      },
+      {
+        id: "unrated-old",
+        name: "Unrated Old",
+        updatedAt: "2026-07-01T00:00:00.000Z",
+      },
+    ]);
+
+    assert.deepEqual(
+      ranked.map((show) => show.id),
+      ["trusted", "early", "good", "unrated-new", "unrated-old"],
+    );
   });
 });
