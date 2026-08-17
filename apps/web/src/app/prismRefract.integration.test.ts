@@ -52,15 +52,17 @@ describe("Prism Refract integration", () => {
     );
     assert.doesNotMatch(companionSource, /focusedPrismRefractTargetId/u);
     assert.match(companionSource, /installPrismUniversalInputTargets/u);
-    assert.match(universalInputSource, /input\[type="text"\]/u);
-    assert.match(universalInputSource, /input\[type="search"\]/u);
-    assert.match(universalInputSource, /input\[type="email"\]/u);
-    assert.match(universalInputSource, /input\[type="tel"\]/u);
+    assert.match(universalInputSource, /PROSE_INPUT_TYPES/u);
+    assert.match(universalInputSource, /BOUNDED_INPUT_TYPES/u);
+    assert.match(universalInputSource, /HTMLSelectElement/u);
+    assert.match(universalInputSource, /root\.type === "radio"/u);
+    assert.match(universalInputSource, /root\.type === "checkbox"/u);
     assert.match(universalInputSource, /textarea/u);
     assert.match(universalInputSource, /contenteditable/u);
     assert.match(universalInputSource, /registerPrismRefractTarget/u);
+    assert.match(universalInputSource, /registerPrismRefractDomTargetResolver/u);
     assert.doesNotMatch(universalInputSource, /aria-keyshortcuts/u);
-    assert.match(universalInputSource, /MutationObserver/u);
+    assert.match(universalInputSource, /record\.removedNodes/u);
     assert.match(universalInputSource, /PRIVATE_INPUT_PATTERN/u);
     assert.match(universalInputSource, /DESTRUCTIVE_INPUT_PATTERN/u);
     assert.match(universalInputSource, /data-live-session-locked/u);
@@ -200,6 +202,26 @@ describe("Prism Refract integration", () => {
     assert.match(
       debateSource,
       /run: \(direction\) => synthesize\(direction\)/u,
+    );
+    assert.match(
+      debateSource,
+      /id: DEBATE_STUDIO_NAV_MOTION_REFRACT_ID[\s\S]*refractMotionSection/u,
+    );
+    assert.match(
+      debateSource,
+      /id: DEBATE_STUDIO_NAV_CAST_REFRACT_ID[\s\S]*refractCastSection/u,
+    );
+    assert.match(
+      debateSource,
+      /id: DEBATE_STUDIO_NAV_EVIDENCE_REFRACT_ID[\s\S]*refractEvidenceSection/u,
+    );
+    assert.match(
+      debateSource,
+      /id: DEBATE_STUDIO_NAV_ARCHIVE_REFRACT_ID[\s\S]*refractArchiveSection/u,
+    );
+    assert.match(
+      debateSource,
+      /id: DEBATE_STUDIO_NAV_STAGE_LAYOUT_REFRACT_ID[\s\S]*refreshStageLayoutFromPrism/u,
     );
     assert.match(
       tutorialSource,
@@ -474,11 +496,19 @@ describe("Prism Refract integration", () => {
     assert.match(pageSource, /prismRefractLocalModel/u);
     assert.match(pageSource, /prismRefractOnlineModel/u);
     assert.match(pageSource, /api<\{[\s\S]*"\/api\/settings\/prism-refract-model"/u);
+    assert.match(
+      pageSource,
+      /body: JSON\.stringify\(\{[\s\S]{0,180}responseMode: refractResponseMode/u,
+    );
     assert.match(pageSource, /provider=\{refractResponseMode\}/u);
-    assert.match(pageSource, /portalZIndex=\{856\}/u);
+    assert.match(pageSource, /portalZIndex=\{861\}/u);
     assert.match(
       companionSource,
-      /panelView === "synthesis"[\s\S]*?className=\{styles\.synthesisRefractCard\}[\s\S]*className=\{styles\.refractModelPicker\}/u,
+      /panelView === "synthesis"[\s\S]*?className=\{styles\.synthesisRefractRow\}[\s\S]*className=\{styles\.refractModelPicker\}/u,
+    );
+    assert.match(
+      companionSource,
+      /target\.closest\('\[data-compose-model-menu="true"\]'\)/u,
     );
     const chatPanelBranch =
       companionSource.match(
@@ -537,6 +567,19 @@ describe("Prism Refract integration", () => {
     assert.match(
       companionSource,
       /target\.preview\(choice\.value\);[\s\S]*waitForPrismRefractPreviewPaint\([\s\S]*kind: "choice"[\s\S]*phase: "ready"/u,
+    );
+    assert.match(
+      companionSource,
+      /const clearIncompleteGeneration[\s\S]*active\.phase !== "generating"[\s\S]*releasePrismRefract\(true\)/u,
+    );
+    assert.ok(
+      (companionSource.match(/\.finally\(clearIncompleteGeneration\)/gu) ?? [])
+        .length >= 2,
+      "choice and field generation must both clear incomplete terminal paths",
+    );
+    assert.match(
+      companionSource,
+      /currentRegistration\?\.element !== currentSession\.registration\.element[\s\S]*releasePrismRefract\(true\)/u,
     );
     assert.match(
       companionSource,

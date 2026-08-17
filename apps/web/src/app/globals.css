@@ -247,43 +247,33 @@ body[data-prism-theme="light"] [data-navbar-picker-surface="true"] {
   }
 }
 
-/* Player-selected graphics ceilings. High intentionally adds no overrides and
-   preserves today's adaptive rendering. Medium bounds expensive scene paint;
+/* Player-selected graphics ceilings. High intentionally adds no overrides.
+   Medium bounds expensive scene paint;
    Low also freezes explicitly decorative motion and drops authored GPU filters.
    Semantic arrivals, speech, clocks, and input feedback are never tagged as
    decorative, so quality settings cannot hide product state. */
 html[data-prism-graphics-quality="medium"]
   [data-prism-expensive-effect="true"],
 html[data-prism-graphics-quality="low"]
-  [data-prism-expensive-effect="true"],
-html[data-prism-adaptive-quality="balanced"]
-  [data-prism-expensive-effect="true"],
-html[data-prism-adaptive-quality="minimal"]
   [data-prism-expensive-effect="true"] {
   contain: paint;
 }
 
 html[data-prism-graphics-quality="low"]
-  [data-prism-decorative-motion="true"],
+  [data-prism-decorative-motion="true"]:not(
+    [data-crt-phosphor="bot"] [data-prism-decorative-motion="true"]
+  ),
 html[data-prism-graphics-quality="low"]
-  [data-prism-decorative-motion="true"]::before,
+  [data-prism-decorative-motion="true"]:not(
+    [data-crt-phosphor="bot"] [data-prism-decorative-motion="true"]
+  )::before,
 html[data-prism-graphics-quality="low"]
-  [data-prism-decorative-motion="true"]::after,
-html[data-prism-adaptive-quality="minimal"]
-  [data-prism-decorative-motion="true"],
-html[data-prism-adaptive-quality="minimal"]
-  [data-prism-decorative-motion="true"]::before,
-html[data-prism-adaptive-quality="minimal"]
-  [data-prism-decorative-motion="true"]::after {
+  [data-prism-decorative-motion="true"]:not(
+    [data-crt-phosphor="bot"] [data-prism-decorative-motion="true"]
+  )::after {
   animation: none !important;
 }
 
-html[data-prism-adaptive-quality="minimal"]
-  [data-prism-expensive-effect="true"],
-html[data-prism-adaptive-quality="minimal"]
-  [data-prism-expensive-effect="true"]::before,
-html[data-prism-adaptive-quality="minimal"]
-  [data-prism-expensive-effect="true"]::after,
 html[data-prism-graphics-quality="low"]
   [data-prism-expensive-effect="true"]::before,
 html[data-prism-graphics-quality="low"]
@@ -291,30 +281,6 @@ html[data-prism-graphics-quality="low"]
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
   filter: none !important;
-}
-
-/* Avatar Studio is DOM/CSS rather than a Pixi scene, so its fullscreen
-   compositing cost participates directly in the runtime frame governor. The
-   authored shell, face, ink, controls, and semantic camera motion remain; a
-   downgrade removes only backdrop compositing and ambient preview motion. */
-html[data-prism-adaptive-quality="balanced"]
-  [data-prism-adaptive-surface="avatar-studio"],
-html[data-prism-adaptive-quality="minimal"]
-  [data-prism-adaptive-surface="avatar-studio"] {
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-}
-
-html[data-prism-adaptive-quality="minimal"]
-  [data-prism-adaptive-surface="avatar-studio"]
-  [data-avatar-studio-mini-preview="true"] *,
-html[data-prism-adaptive-quality="minimal"]
-  [data-prism-adaptive-surface="avatar-studio"]
-  [data-avatar-studio-mini-preview="true"] *::before,
-html[data-prism-adaptive-quality="minimal"]
-  [data-prism-adaptive-surface="avatar-studio"]
-  [data-avatar-studio-mini-preview="true"] *::after {
-  animation: none !important;
 }
 
 a {

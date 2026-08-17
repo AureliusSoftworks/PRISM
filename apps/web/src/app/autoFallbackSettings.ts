@@ -207,24 +207,15 @@ export function autoFallbackAvailableForPrimary(args: {
 }
 
 /**
- * AUTO's editor may be entered whenever Settings contains at least one
- * runnable fallback. The currently selected Primary is intentionally ignored:
- * it may duplicate the only fallback, and AUTO is where the user can choose a
- * different Primary without first changing the LOCAL/ONLINE route.
+ * Contextual Auto is available whenever the selected privacy lane has a
+ * runnable model. Saved entries only influence recovery order; they are not a
+ * prerequisite because the runtime appends the rest of the eligible catalog.
  */
 export function autoFallbackSelectablePrimary(args: {
   chain: AutoFallbackChainV1 | null | undefined;
   runnable: readonly AutoFallbackModelRef[];
 }): AutoFallbackModelRef | null {
-  return (
-    args.runnable.find((primary) =>
-      autoFallbackAvailableForPrimary({
-        primary,
-        chain: args.chain,
-        runnable: args.runnable,
-      }),
-    ) ?? null
-  );
+  return args.runnable[0] ?? null;
 }
 
 export function autoFallbackModeSelectable(args: {

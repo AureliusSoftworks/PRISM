@@ -25,11 +25,28 @@ import {
   sessionAmbientFoleyUrlFrom,
   sessionAtmosphereBusVolume,
   sessionAtmosphereLoopEndTime,
+  sessionAtmosphereLoopIsRecordable,
   signalAtmosphereMixLevelFromRelative,
   signalAtmosphereRelativeMixLevel,
   signalSessionAtmosphereActive,
   startSessionAtmosphere,
 } from "./session-atmosphere-audio.ts";
+
+test("background and grain loops independently opt out of faithful-master capture", () => {
+  const options = {
+    backgroundRecordable: false,
+    grainRecordable: false,
+  };
+  assert.equal(sessionAtmosphereLoopIsRecordable("background", options), false);
+  assert.equal(sessionAtmosphereLoopIsRecordable("grain", options), false);
+  assert.equal(
+    sessionAtmosphereLoopIsRecordable("grain", {
+      ...options,
+      grainRecordable: true,
+    }),
+    true,
+  );
+});
 
 test("Signal keeps its atmosphere alive through a completed episode's outro", () => {
   const base = {
@@ -966,12 +983,12 @@ test("loop leveler recovers very quiet ambience before applying the mix bus", ()
       ambientFoley: false,
     });
     assert.equal(gains.length, 3);
-    assert.equal(gains[0]?.gain.value, SESSION_ATMOSPHERE_LOOP_PRE_GAIN);
+    assert.equal(gains[0]?.gain.value, 1);
+    assert.equal(gains[1]?.gain.value, SESSION_ATMOSPHERE_LOOP_PRE_GAIN);
     assert.equal(
-      gains[1]?.gain.value,
+      gains[2]?.gain.value,
       DEFAULT_SESSION_ATMOSPHERE_MIX.background,
     );
-    assert.equal(gains[2]?.gain.value, 1);
     assert.equal(
       compressors[0]?.threshold.value,
       SESSION_ATMOSPHERE_LOOP_COMPRESSOR.threshold,
@@ -1023,13 +1040,13 @@ test("loop leveler recovers very quiet ambience before applying the mix bus", ()
       volume: 0.5,
       mix: { background: 0.2, grain: 0, foley: 2 },
     });
-    assert.equal(gains[0]?.gain.value, SESSION_ATMOSPHERE_LOOP_PRE_GAIN);
-    assert.equal(gains[1]?.gain.value, 0.1);
-    assert.equal(gains[2]?.gain.value, 1);
+    assert.equal(gains[0]?.gain.value, 1);
+    assert.equal(gains[1]?.gain.value, SESSION_ATMOSPHERE_LOOP_PRE_GAIN);
+    assert.equal(gains[2]?.gain.value, 0.1);
     assert.equal(gains[3]?.gain.value, 1.0625);
 
     controller.setPresentationSuspended(true, 0);
-    assert.equal(gains[1]?.gain.value, 0);
+    assert.equal(gains[2]?.gain.value, 0);
     assert.equal(gains[3]?.gain.value, 0);
     assert.equal(controller.playFoley("/audio/session-atmosphere/paper.mp3"), false);
 
@@ -1038,10 +1055,10 @@ test("loop leveler recovers very quiet ambience before applying the mix bus", ()
       mix: { background: 0.4, grain: 0, foley: 1 },
     });
     // Mix updates stash while suspended and stay silent.
-    assert.equal(gains[1]?.gain.value, 0);
+    assert.equal(gains[2]?.gain.value, 0);
 
     controller.setPresentationSuspended(false, 0);
-    assert.ok(Math.abs((gains[1]?.gain.value ?? -1) - 0.32) < 1e-9);
+    assert.ok(Math.abs((gains[2]?.gain.value ?? -1) - 0.32) < 1e-9);
     assert.ok(Math.abs((gains[3]?.gain.value ?? -1) - 0.85) < 1e-9);
 
     controller.stop();

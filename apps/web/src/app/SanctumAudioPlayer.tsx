@@ -1,7 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { routeAudioElementToPrismOutput } from "./replayAudioMasterCapture";
 import styles from "./SanctumAudioPlayer.module.css";
+
+export const SANCTUM_AUDIO_PLAYER_RELEASE_MS = 320;
 
 function formatClock(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
@@ -15,36 +18,99 @@ export function SanctumAudioPlayer({
   src,
   label,
   emptyLabel = "Select a clip to audition",
+  kicker = "Sanctum player",
+  volume = 1,
 }: {
   src: string | null;
   label: string | null;
   emptyLabel?: string;
+  kicker?: string;
+  volume?: number;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const fadeRunRef = useRef(0);
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const [current, setCurrent] = useState(0);
   const [duration, setDuration] = useState(0);
+  const boundedVolume = Math.max(0, Math.min(1, volume));
+
+  const cancelRelease = useCallback((): void => {
+    fadeRunRef.current += 1;
+    if (audioRef.current) audioRef.current.volume = boundedVolume;
+  }, [boundedVolume]);
+
+  const release = useCallback(async (): Promise<void> => {
+    const audio = audioRef.current;
+    if (!audio || audio.paused) return;
+    const run = fadeRunRef.current + 1;
+    fadeRunRef.current = run;
+    const startedAt = performance.now();
+    const startVolume = audio.volume;
+    await new Promise<void>((resolve) => {
+      const tick = (now: number): void => {
+        if (fadeRunRef.current !== run) {
+          resolve();
+          return;
+        }
+        const progress = Math.min(
+          1,
+          Math.max(0, (now - startedAt) / SANCTUM_AUDIO_PLAYER_RELEASE_MS),
+        );
+        audio.volume =
+          startVolume * Math.cos(progress * Math.PI * 0.5);
+        if (progress < 1) window.requestAnimationFrame(tick);
+        else resolve();
+      };
+      window.requestAnimationFrame(tick);
+    });
+    if (fadeRunRef.current !== run) return;
+    audio.pause();
+    audio.volume = boundedVolume;
+  }, [boundedVolume]);
 
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
-    setPlaying(false);
-    setError(false);
-    setCurrent(0);
-    setDuration(0);
-    if (!src) {
-      audio.removeAttribute("src");
+    let cancelled = false;
+    const install = async (): Promise<void> => {
+      await release();
+      if (cancelled) return;
+      cancelRelease();
+      setPlaying(false);
+      setError(false);
+      setCurrent(0);
+      setDuration(0);
+      if (!src) {
+        audio.removeAttribute("src");
+        audio.load();
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
+      audio.src = src;
       audio.load();
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    audio.src = src;
-    audio.load();
-  }, [src]);
+    };
+    void install();
+    return () => {
+      cancelled = true;
+    };
+  }, [cancelRelease, release, src]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const cleanup = routeAudioElementToPrismOutput(audio);
+    return () => {
+      void release().finally(() => cleanup?.());
+    };
+  }, [release]);
+
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.volume = boundedVolume;
+  }, [boundedVolume]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -58,7 +124,7 @@ export function SanctumAudioPlayer({
   return (
     <div className={styles.stage}>
       <div className={styles.labelBlock}>
-        <span className={styles.kicker}>Sanctum player</span>
+        <span className={styles.kicker}>{kicker}</span>
         <strong>{label?.trim() || emptyLabel}</strong>
       </div>
       <div
@@ -105,9 +171,10 @@ export function SanctumAudioPlayer({
             const audio = audioRef.current;
             if (!audio || empty) return;
             if (audio.paused) {
+              cancelRelease();
               void audio.play().catch(() => setError(true));
             } else {
-              audio.pause();
+              void release();
             }
           }}
         >

@@ -17,9 +17,9 @@ test("FPS counter is opt-in, persisted locally, and mounted in the app shell", (
   assert.match(pageSource, /Show FPS counter/u);
 });
 
-test("FPS counter stays tiny and pinned to the top-left", () => {
+test("FPS counter stays tiny and pinned to the bottom-left", () => {
   assert.match(
     cssSource,
-    /\.fpsCounter\s*\{[\s\S]*position:\s*fixed;[\s\S]*top:\s*4px;[\s\S]*left:\s*6px;[\s\S]*font:\s*600 9px/u,
+    /\.fpsCounter\s*\{[\s\S]*position:\s*fixed;[\s\S]*bottom:\s*4px;[\s\S]*left:\s*6px;[\s\S]*font:\s*600 9px/u,
   );
 });

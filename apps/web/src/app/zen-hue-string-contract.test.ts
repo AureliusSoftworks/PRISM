@@ -80,7 +80,10 @@ describe("Zen hue string integration contract", () => {
       control.indexOf("const handlePointerDown"),
       control.indexOf("const handlePointerMove"),
     );
-    assert.match(downBody, /scheduleNavigation\(update\)/u);
+    assert.doesNotMatch(
+      downBody.slice(0, downBody.indexOf("const traverse")),
+      /scheduleNavigation\(/u,
+    );
     assert.match(control, /HUE_CYCLE_PULL_THRESHOLD_PX = 16/u);
     assert.match(control, /BREADTH_TRAVERSAL_DEAD_ZONE_PX = 34/u);
     assert.match(control, /const traverse = \(now: number\)/u);
@@ -90,20 +93,37 @@ describe("Zen hue string integration contract", () => {
     assert.match(control, /data-tutorial-target="zen-hue-cable"/u);
   });
 
-  it("preloads untouched-root pull with seeded hue and first tier so immediate drag can move", () => {
+  it("keeps pointer-down and horizontal hue travel at the current breadth", () => {
     const downBody = control.slice(
       control.indexOf("const handlePointerDown"),
       control.indexOf("const handlePointerMove"),
     );
     assert.match(downBody, /const untouchedRoot = hueSliderValue === null;/u);
-    assert.match(
-      downBody,
-      /const startTier = untouchedRoot && tiers\.length > 0 \? tiers\[0\] : tier;/u,
+    assert.match(downBody, /const startTier = tier;/u);
+    assert.doesNotMatch(downBody, /tier: tiers\[0\]/u);
+    const moveBody = control.slice(
+      control.indexOf("const handlePointerMove"),
+      control.indexOf("const handlePointerUp"),
     );
+    assert.match(moveBody, /zenHueCableAcceleratedSliderStep/u);
+    assert.match(moveBody, /update\.sliderValue = nextSliderValue/u);
     assert.match(
-      downBody,
-      /if \(untouchedRoot && tiers\.length > 0\) \{[\s\S]*?sliderValue: sliderForClientX\(event\.clientX\)[\s\S]*?tier: tiers\[0\][\s\S]*?\}/u,
+      moveBody,
+      /!allBotsDownwardPull && \(!drag\.untouchedRoot \|\| horizontalIntent\)/u,
     );
+    assert.doesNotMatch(
+      moveBody,
+      /update\.tier\s*=\s*tiers|drag\.startTier\s*=\s*tiers/u,
+    );
+  });
+
+  it("adds modest horizontal gain and dissipating release inertia", () => {
+    assert.match(control, /zenHueCableAcceleratedSliderStep/u);
+    assert.match(control, /stepZenHueCableHorizontalInertia/u);
+    assert.match(control, /zenHueCableHorizontalInertiaHasSettled/u);
+    assert.match(control, /startHorizontalInertia/u);
+    assert.match(control, /prefers-reduced-motion: reduce/u);
+    assert.match(control, /cancelHorizontalInertia/u);
   });
 
   it("enters a non-root tier from All Bots with a seeded hue", () => {
@@ -116,36 +136,28 @@ describe("Zen hue string integration contract", () => {
     assert.match(page, /HUE_LENS_SLIDER_RANGE \/ 2/u);
   });
 
-  it("enters the deepest hue directory from All Bots on a deliberate lateral pull", () => {
-    const moveBody = control.slice(
-      control.indexOf("const handlePointerMove"),
-      control.indexOf("const handlePointerUp"),
-    );
-    assert.match(moveBody, /A deliberate sideways pull from All Bots/u);
-    assert.match(
-      moveBody,
-      /if \(!allBotsDownwardPull && tier === "root" && horizontalIntent && tiers\.length > 0\)/u,
-    );
-    assert.match(moveBody, /update\.tier = tiers\[0\]/u);
-    assert.match(
-      moveBody,
-      /if \(update\.sliderValue !== undefined \|\| update\.tier !== undefined\)/u,
-    );
-  });
-
   it("uses one animation clock for held breadth traversal", () => {
     const downBody = control.slice(
       control.indexOf("const handlePointerDown"),
       control.indexOf("const handlePointerMove"),
     );
     assert.match(downBody, /let previousFrameTime = performance\.now\(\)/u);
-    assert.match(downBody, /now - previousFrameTime/u);
+    assert.match(
+      downBody,
+      /zenHueCableFrameElapsedSeconds\([\s\S]*?now,[\s\S]*?previousFrameTime/u,
+    );
     assert.doesNotMatch(downBody, /let previousFrameTime = event\.timeStamp/u);
+    assert.doesNotMatch(
+      downBody,
+      /Math\.min\(0\.05, now - previousFrameTime\)/u,
+    );
   });
 
-  it("whitens and locks the cable's hue rail during an all-bots downward pull", () => {
+  it("whitens blocked overpull at both cable boundaries", () => {
     assert.match(control, /const allBotsDownwardPull =\s*drag\.untouchedRoot && drag\.startTier === "root"/u);
     assert.match(control, /!allBotsDownwardPull/u);
+    assert.match(control, /zenHueCableBoundaryWhiteoutProgress\(\{/u);
+    assert.match(control, /tier,[\s\S]*tiers,[\s\S]*deltaY: pullDeltaY/u);
     assert.match(control, /whiteCablePullProgress/u);
     assert.match(control, /className=\{styles\.whiteout\}/u);
     const cableStyles = readFileSync(
@@ -153,6 +165,10 @@ describe("Zen hue string integration contract", () => {
       "utf8",
     );
     assert.match(cableStyles, /\.whiteout\s*\{[\s\S]*?stroke: #ffffff/u);
+    assert.match(
+      cableStyles,
+      /:global\(\.themeLight\) \.whiteout\s*\{[\s\S]*?stroke: #000000/u,
+    );
   });
 
   it("uses pure traversal math for direction latch and pull-speed scaling", () => {
@@ -204,6 +220,40 @@ describe("Zen hue string integration contract", () => {
     assert.doesNotMatch(control, /requestPointerLock|exitPointerLock|movementX|movementY/u);
   });
 
+  it("restores the desktop cursor at the rendered handle before ending the drag", () => {
+    const upBody = control.slice(
+      control.indexOf("const handlePointerUp"),
+      control.indexOf("const activeHueValue"),
+    );
+    assert.match(control, /import \{ setDesktopCursorPosition \} from "\.\/desktopShell"/u);
+    assert.match(upBody, /drag\.releasing = true/u);
+    assert.match(upBody, /zenHueCableHandleClientPoint\(\{/u);
+    assert.match(
+      upBody,
+      /setDesktopCursorPosition\(handlePoint\.x, handlePoint\.y\)\.finally/u,
+    );
+    assert.match(
+      upBody,
+      /if \(dragRef\.current\?\.pointerId === pointerId\)[\s\S]*settleGesture\(true\)/u,
+    );
+  });
+
+  it("continues a held breadth pull when the viewport shield receives events after a rerender", () => {
+    const upBody = control.slice(
+      control.indexOf("const handlePointerUp"),
+      control.indexOf("const activeHueValue"),
+    );
+    assert.match(upBody, /const surface = surfaceRef\.current/u);
+    assert.match(upBody, /surface\?\.hasPointerCapture\(event\.pointerId\)/u);
+    const shieldBody = control.slice(
+      control.indexOf('data-zen-hue-cable-drag-shield="true"'),
+      control.indexOf("</>", control.indexOf('data-zen-hue-cable-drag-shield="true"')),
+    );
+    assert.match(shieldBody, /onPointerMove=\{handlePointerMove\}/u);
+    assert.match(shieldBody, /onPointerUp=\{handlePointerUp\}/u);
+    assert.match(shieldBody, /onPointerCancel=\{\(\) => settleGesture\(false\)\}/u);
+  });
+
   it("does not animate grid traversal", () => {
     assert.doesNotMatch(page, /function useZenHuePickerMotion/u);
     assert.doesNotMatch(page, /useZenHuePickerMotion\(/u);
@@ -215,33 +265,113 @@ describe("Zen hue string integration contract", () => {
       "utf8",
     );
     assert.match(navigation, /ZEN_HUE_DIRECTORY_MIN_ROWS = 1/u);
+    assert.match(navigation, /ZEN_HUE_DIRECTORY_ONE_ROW_COLUMNS = 10/u);
+    assert.match(
+      navigation,
+      /safeRows === ZEN_HUE_DIRECTORY_MIN_ROWS[\s\S]*?ZEN_HUE_DIRECTORY_ONE_ROW_COLUMNS/u,
+    );
   });
 
   it("forces the one-row Zen directory to remain large named cards", () => {
     assert.match(page, /forceNamedCards: zenHueDirectoryTier === ZEN_HUE_DIRECTORY_MIN_ROWS/u);
+    assert.match(page, /const \{ width: pickerWidth, height: basePickerHeight \} = forceNamedCards\s*\? baseFrame/u);
+    assert.match(page, /const baseMaxTileSize = forceNamedCards\s*\? PICKER_MAX_TILE_SIZE/u);
+    assert.match(page, /const contentAlignedPickerHeight = forceNamedCards\s*\? pickerHeight/u);
     assert.match(page, /forceNamedCards \|\|[\s\S]*?PICKER_TILE_NAME_MIN_SIZE/u);
     assert.match(page, /flattenTile: !forceNamedCards/u);
     assert.match(page, /crosshairCursor: !forceNamedCards/u);
     assert.match(page, /dotCursor: !forceNamedCards/u);
   });
 
-  it("uses the committed directory for a contextual atmosphere and restores root", () => {
-    assert.match(page, /const zenHueAtmosphereBots = useMemo/u);
-    assert.match(
-      page,
-      /Search suspends the string, then restores this[\s\S]*?exact palette/u,
-    );
+  it("blends the stable group gradient over the active hue atmosphere by semantic depth", () => {
     assert.match(
       page,
       /zenHueDirectoryState\.tier === "root" \? "home" : "directory"/u,
     );
+    assert.match(
+      page,
+      /homeDirectoryGradientSourceColors[\s\S]*pickerSourceBots\.flatMap/u,
+    );
+    assert.match(
+      page,
+      /homeDirectoryHueSourceColors[\s\S]*?zenHueDirectoryTier !== null[\s\S]*?\? filteredBots[\s\S]*?: pickerSourceBots/u,
+    );
+    assert.match(
+      page,
+      /gradient: buildVars\(homeDirectoryGradientSourceColors\)[\s\S]*?hue: buildVars\(homeDirectoryHueSourceColors\)/u,
+    );
+    assert.match(
+      page,
+      /!emptyStateSearchActive[\s\S]*?zenHueGradientOverlayOpacity\([\s\S]*?zenHueDirectoryState\.tier[\s\S]*?zenHueDirectoryLayoutState\.tiers[\s\S]*?: 1/u,
+    );
+    assert.match(page, /--home-gradient-overlay-opacity/u);
+    assert.match(page, /data-home-directory-atmosphere-layer="hue"/u);
+    assert.match(page, /data-home-directory-atmosphere-layer="gradient"/u);
+    assert.doesNotMatch(page, /rootColors: PRISM_WORDMARK_PALETTE/u);
+    assert.match(page, /--home-palette-coherence/u);
+    assert.match(page, /--home-palette-saturation/u);
     assert.match(page, /rootNodePositions = \[10, 34, 52, 72, 92\]/u);
     assert.match(
       styles,
-      /\.messagesFrame\[data-mode="home"\],[\s\S]*?\.messagesFrame\[data-mode="directory"\]/u,
+      /\.homeDirectoryAtmospherePainter\s*\{/u,
     );
     assert.match(styles, /var\(--home-halo-1-color, #ff4d6d\)/u);
     assert.match(styles, /var\(--home-halo-5-color, #7b5cff\)/u);
+    assert.match(styles, /--home-room-base: #050608/u);
+    assert.match(styles, /@property --home-palette-coherence/u);
+    assert.match(styles, /@property --home-palette-saturation/u);
+    assert.match(
+      styles,
+      /filter: saturate\(var\(--home-palette-saturation, 1\)\)/u,
+    );
+    assert.match(
+      styles,
+      /\.homeDirectoryAtmospherePainter\[data-home-directory-atmosphere-layer="gradient"\][\s\S]*?opacity: var\(--home-gradient-overlay-opacity, 1\)/u,
+    );
+  });
+
+  it("isolates the Home and directory paint from the shell accent cascade", () => {
+    assert.match(
+      page,
+      /function renderHomeDirectoryAtmospherePainter\(\): React\.JSX\.Element \| null \{[\s\S]*?data-home-directory-atmosphere-layer="hue"[\s\S]*?style=\{homeDirectoryAtmosphereStyles\.hue\}[\s\S]*?data-home-directory-atmosphere-layer="gradient"[\s\S]*?style=\{homeDirectoryAtmosphereStyles\.gradient\}/u,
+    );
+    const framePainterMounts = page.match(
+      /className=\{styles\.messagesFrame\}[\s\S]{0,650}?onContextMenu=\{handleMessagesFrameContextMenu\}\s*>\s*\{renderHomeDirectoryAtmospherePainter\(\)\}/gu,
+    );
+    assert.equal(framePainterMounts?.length, 2);
+    assert.match(
+      page,
+      /\{renderHomeDirectoryAtmospherePainter\(\)\}[\s\S]{0,180}?\{hubAtmosphereMounted/u,
+    );
+    assert.match(
+      styles,
+      /\.homeDirectoryAtmospherePainter\s*\{[\s\S]*?position: absolute;[\s\S]*?inset: 0;[\s\S]*?z-index: 0;[\s\S]*?background:/u,
+    );
+    assert.match(
+      styles,
+      /\.homeDirectoryAtmospherePainter\[data-home-directory-atmosphere-layer="hue"\]::after\s*\{[\s\S]*?content: "";[\s\S]*?position: absolute;[\s\S]*?inset: 0;/u,
+    );
+    assert.doesNotMatch(
+      styles,
+      /\.homeDirectoryAtmospherePainter\[data-home-directory-atmosphere-layer="gradient"\]::after/u,
+      "the stable gradient pane must not duplicate the moving Hue Cable bloom",
+    );
+    assert.match(
+      styles,
+      /\.appLayout\[data-chat-sidebar-hidden="true"\]\[data-accent-active="true"\]:not\([\s\S]*?\)\s*\.messagesFrame\s*\{[\s\S]*?background:/u,
+    );
+    assert.doesNotMatch(
+      styles,
+      /\.messagesFrame\[data-mode="(?:home|directory)"\]/u,
+    );
+    assert.doesNotMatch(
+      styles,
+      /data-accent-active[^\{]*\.homeDirectoryAtmospherePainter/u,
+    );
+    assert.match(
+      styles,
+      /\.themeLight \.homeDirectoryAtmospherePainter\s*\{[\s\S]*?background:/u,
+    );
   });
 
   it("keeps dormant atmosphere layers typed so they can respawn", () => {
@@ -252,14 +382,22 @@ describe("Zen hue string integration contract", () => {
       /vars\[`--home-halo-\$\{i \+ 1\}-color`\] = "transparent"/u,
     );
     assert.match(styles, /@property --home-halo-5-presence/u);
+    assert.match(styles, /@property --home-halo-5-color/u);
     assert.match(
       styles,
-      /--home-halo-5-visible-color:[\s\S]*?var\(--home-halo-5-presence, 1\)/u,
+      /--home-halo-5-visible-color:[\s\S]*?var\(--home-halo-5-presence, 100%\)/u,
+    );
+    assert.match(page, /--home-halo-\$\{i \+ 1\}-presence`\] = "100%"/u);
+    assert.match(page, /--home-halo-\$\{i \+ 1\}-presence`\] = "0%"/u);
+    assert.doesNotMatch(
+      styles,
+      /var\(--home-halo-[1-5]-presence[^\)]*\)\s*\*/u,
     );
     assert.match(
       styles,
       /--home-halo-5-presence 220ms ease-out/u,
     );
+    assert.match(styles, /--home-halo-5-color 320ms ease-out/u);
   });
 
   it("keeps the Hue lens's discrete PRISM bars on the pulling string", () => {

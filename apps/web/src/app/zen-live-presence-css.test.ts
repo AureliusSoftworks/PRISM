@@ -3261,7 +3261,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       bodyRule,
-      /--zen-live-bot-buckle-crt-screen-scale:\s*1\.12\s*;/,
+      /--zen-live-bot-buckle-crt-screen-scale:\s*1\.26\s*;/,
     );
     const latticeRule = ruleForExactSelector(
       ".zenLiveBotPresenceBody::after",
@@ -4352,7 +4352,7 @@ describe("Zen live presence CSS", () => {
     assert.doesNotMatch(css, /\.zenZoomReturnButton\b/);
   });
 
-  it("keeps only the Private conversation control inside the fresh Zen hero", () => {
+  it("keeps Private chat and a non-persisting Hear them action inside the fresh Zen hero", () => {
     assert.match(
       pageSource,
       /const renderZenSplashControls = \(\) =>\s*zenCanvasPrivateControlActive \? \(\s*<div\s*className=\{styles\.zenSplashControls\}/,
@@ -4369,12 +4369,19 @@ describe("Zen live presence CSS", () => {
       /data-tutorial-target="private-chat-new"[\s\S]*<span>Private chat<\/span>/u,
     );
     assert.match(pageSource, /title="Private chat — no memories saved"/u);
+    assert.match(pageSource, /className=\{styles\.zenSplashHearButton\}/u);
+    assert.match(pageSource, /data-zen-hear-bot=\{heroBot\.id\}/u);
+    assert.match(pageSource, /\? "Preparing…"[\s\S]*?: "Speaking…"[\s\S]*?: "Hear them"/u);
+    assert.match(pageSource, /void playZenHeroVoicePreview\([\s\S]*?heroBot,/u);
+    assert.match(pageSource, /aria-describedby="zen-hear-them-status"/u);
     assert.equal(
       pageSource.match(/\{renderZenSplashControls\(\)\}/g)?.length,
       2,
     );
     assert.match(css, /\.zenSplashControls\b/);
     assert.match(css, /\.zenSplashPrivateButton\b/);
+    assert.match(css, /\.zenSplashHearButton\b/);
+    assert.match(css, /\.zenHeroVoicePreviewStatus\b/);
     assert.doesNotMatch(css, /\.zenSplashModelPicker\b/);
     assert.doesNotMatch(css, /\.zenSplashModelMenu\b/);
   });

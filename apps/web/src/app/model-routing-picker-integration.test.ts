@@ -225,7 +225,7 @@ describe("shared routing model picker integration", () => {
     );
     assert.match(
       pageSource,
-      /else if \(selectedProvider === "local"\) \{[\s\S]{0,220}\[turboCandidate\.provider\]: AUTO_MODEL_CHOICE/u,
+      /else \{[\s\S]{0,520}\[turboCandidate\.provider\]: AUTO_MODEL_CHOICE/u,
     );
   });
 
@@ -494,7 +494,7 @@ describe("shared routing model picker integration", () => {
     );
     assert.match(
       cssSource,
-      /\.composeModelMaxElectricity\s*\{[^}]*background-size:\s*calc\(100% \+ 8px\) calc\(100% \+ 8px\)/u,
+      /\.composeModelMaxElectricity\s*\{[^}]*background-size:\s*calc\(100% \+ 20px\) calc\(100% \+ 8px\)/u,
     );
     assert.doesNotMatch(
       cssSource,

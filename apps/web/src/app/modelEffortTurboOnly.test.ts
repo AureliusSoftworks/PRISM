@@ -46,9 +46,15 @@ test("Auto effort and model-choice glyphs render with intended assets", () => {
 });
 
 test("Auto Turbo toggle never persists a fixed model when Auto is selected", () => {
+  assert.match(pageSource, /AUTO_MODEL_TURBO_PREFERENCE_ID/u);
+  assert.match(pageSource, /function savedAutoTurboMode/u);
   assert.match(
     pageSource,
-    /const selectedProvider = settings\.preferredProvider;[\s\S]{0,180}=== AUTO_MODEL_CHOICE/u,
+    /const autoSelected = effortTrigger\.dataset\.autoTurboAction === "true"/u,
+  );
+  assert.match(
+    pageSource,
+    /if \(autoSelected && autoProvider === "local"\)[\s\S]{0,180}turbo-denied/u,
   );
   assert.match(
     pageSource,
@@ -56,7 +62,32 @@ test("Auto Turbo toggle never persists a fixed model when Auto is selected", () 
   );
   assert.match(
     pageSource,
-    /else if \(selectedProvider === "local"\) \{[\s\S]{0,220}\[turboCandidate\.provider\]: AUTO_MODEL_CHOICE/u,
+    /else \{[\s\S]{0,520}\[turboCandidate\.provider\]: AUTO_MODEL_CHOICE/u,
+  );
+  assert.doesNotMatch(
+    pageSource.match(
+      /else \{[\s\S]{0,520}\[turboCandidate\.provider\]: AUTO_MODEL_CHOICE/u,
+    )?.[0] ?? "",
+    /turboCandidate\.id/u,
+  );
+  assert.match(
+    pageSource,
+    /if \(autoSelected\) \{[\s\S]{0,520}if \(!nextTurboEnabled\)[\s\S]{0,220}persistAutoTurboPreference\(false\)/u,
+  );
+  assert.match(
+    pageSource,
+    /if \(target\?\.turboSupported\) \{[\s\S]{0,220}persistAutoTurboPreference\(true\)[\s\S]{0,180}Enabling continues below/u,
+  );
+});
+
+test("the Auto triangle spins only for active generation and honors reduced motion", () => {
+  assert.match(
+    cssSource,
+    /data-generating="true"\][\s\S]{0,80}> \.modelEffortAutoIcon[\s\S]{0,40}> svg\s*\{[\s\S]{0,180}modelEffortThinkingSpin/u,
+  );
+  assert.match(
+    cssSource,
+    /prefers-reduced-motion: reduce[\s\S]*data-generating="true"\][\s\S]{0,80}> \.modelEffortAutoIcon[\s\S]{0,40}> svg\s*\{[\s\S]{0,80}animation:\s*none/u,
   );
 });
 

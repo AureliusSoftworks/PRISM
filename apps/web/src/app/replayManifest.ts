@@ -21,6 +21,7 @@ import {
   type ReplayManifestV2,
   type ReplayMouthTrackV2,
   type ReplayVoiceLightTrackV1,
+  type ReplaySpeechActivityTrackV1,
   type ReplayParticipantSnapshotV1,
   type ReplayUtteranceV1,
   type ReplayVoiceSelectionSnapshotV2,
@@ -750,6 +751,7 @@ function replayManifestV2FromV1(
   capturedDirection: readonly ReplayDirectionEventV2[] = [],
   capturedMouthTracks: readonly ReplayMouthTrackV2[] = [],
   capturedVoiceLightTracks: readonly ReplayVoiceLightTrackV1[] = [],
+  capturedSpeechActivityTracks: readonly ReplaySpeechActivityTrackV1[] = [],
   voiceSelection?: ReplayVoiceSelectionSnapshotV2,
 ): ReplayManifestV2 {
   const direction = buildReplayDirectionV2(manifest, capturedDirection);
@@ -803,6 +805,7 @@ function replayManifestV2FromV1(
     direction: directedWithSnapshot,
     ...((capturedMouthTracks.length > 0 ||
       capturedVoiceLightTracks.length > 0 ||
+      capturedSpeechActivityTracks.length > 0 ||
       voiceSelection)
       ? {
           presentation: {
@@ -813,6 +816,14 @@ function replayManifestV2FromV1(
             ...(capturedVoiceLightTracks.length > 0
               ? {
                   voiceLightTracks: capturedVoiceLightTracks.map((track) => ({
+                    participantId: track.participantId,
+                    cues: track.cues.map((cue) => ({ ...cue })),
+                  })),
+                }
+              : {}),
+            ...(capturedSpeechActivityTracks.length > 0
+              ? {
+                  speechActivityTracks: capturedSpeechActivityTracks.map((track) => ({
                     participantId: track.participantId,
                     cues: track.cues.map((cue) => ({ ...cue })),
                   })),
@@ -833,6 +844,7 @@ export function buildSignalReplayManifestV2(
     capturedDirection?: readonly ReplayDirectionEventV2[];
     capturedMouthTracks?: readonly ReplayMouthTrackV2[];
     capturedVoiceLightTracks?: readonly ReplayVoiceLightTrackV1[];
+    capturedSpeechActivityTracks?: readonly ReplaySpeechActivityTrackV1[];
     voiceSelection?: ReplayVoiceSelectionSnapshotV2;
   },
 ): ReplayManifestV2 {
@@ -840,6 +852,7 @@ export function buildSignalReplayManifestV2(
     capturedDirection = [],
     capturedMouthTracks = [],
     capturedVoiceLightTracks = [],
+    capturedSpeechActivityTracks = [],
     voiceSelection,
     ...legacyArgs
   } = args;
@@ -848,6 +861,7 @@ export function buildSignalReplayManifestV2(
     capturedDirection,
     capturedMouthTracks,
     capturedVoiceLightTracks,
+    capturedSpeechActivityTracks,
     voiceSelection,
   );
 }
@@ -857,6 +871,7 @@ export function buildCoffeeReplayManifestV2(
     capturedDirection?: readonly ReplayDirectionEventV2[];
     capturedMouthTracks?: readonly ReplayMouthTrackV2[];
     capturedVoiceLightTracks?: readonly ReplayVoiceLightTrackV1[];
+    capturedSpeechActivityTracks?: readonly ReplaySpeechActivityTrackV1[];
     voiceSelection?: ReplayVoiceSelectionSnapshotV2;
   },
 ): ReplayManifestV2 {
@@ -864,6 +879,7 @@ export function buildCoffeeReplayManifestV2(
     capturedDirection = [],
     capturedMouthTracks = [],
     capturedVoiceLightTracks = [],
+    capturedSpeechActivityTracks = [],
     voiceSelection,
     ...legacyArgs
   } = args;
@@ -872,6 +888,7 @@ export function buildCoffeeReplayManifestV2(
     capturedDirection,
     capturedMouthTracks,
     capturedVoiceLightTracks,
+    capturedSpeechActivityTracks,
     voiceSelection,
   );
 }

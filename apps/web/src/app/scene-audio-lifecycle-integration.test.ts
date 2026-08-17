@@ -67,7 +67,7 @@ describe("scene audio lifecycle wiring", () => {
   it("invalidates stale Debate voice work before every exit path", () => {
     assert.match(
       pageSource,
-      /if \(view === "debate"\) \{\s*debateVoiceSurfaceActiveRef\.current = false;\s*\}[\s\S]{0,80}stopPrismSceneAudio\(\)/u,
+      /if \(view === "debate"\) \{\s*debateVoiceSurfaceActiveRef\.current = false;\s*\}[\s\S]{0,180}if \(view === "coffee"\) \{\s*coffeeVoiceSurfaceActiveRef\.current = false;\s*\}[\s\S]{0,80}stopPrismSceneAudio\(\)/u,
     );
     assert.match(
       pageSource,
@@ -101,6 +101,10 @@ describe("scene audio lifecycle wiring", () => {
     assert.ok(
       coffeeExit.indexOf("stopAudioForStateExit()") <
         coffeeExit.indexOf("setCoffeeConversation(null)"),
+    );
+    assert.match(
+      pageSource,
+      /if \(view !== "coffee"\) \{\s*coffeeVoiceSurfaceActiveRef\.current = false;[\s\S]{0,180}coffeeRevealDeliveryEpochRef\.current \+= 1/u,
     );
   });
 

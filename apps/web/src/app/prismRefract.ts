@@ -159,6 +159,9 @@ type TargetRegistration = {
 
 const registrations = new Map<string, TargetRegistration>();
 const requestListeners = new Set<(request: PrismRefractRequest) => void>();
+const domTargetResolvers = new Set<
+  (element: Element) => RegisteredPrismRefractTarget | null
+>();
 
 export function registerPrismRefractTarget(
   id: string,
@@ -177,6 +180,38 @@ export function registeredPrismRefractTarget(
   const element = registration?.element() ?? null;
   if (!registration || !element || !element.isConnected) return null;
   return { target: registration.descriptor(), element };
+}
+
+/**
+ * Add a lazy, capability-based DOM resolver without replacing the explicit
+ * registry used by authored Refract targets. Resolvers run only for the
+ * element under Wield/focus, so mounting Prism never scans the whole page.
+ */
+export function registerPrismRefractDomTargetResolver(
+  resolver: (element: Element) => RegisteredPrismRefractTarget | null,
+): () => void {
+  domTargetResolvers.add(resolver);
+  return () => domTargetResolvers.delete(resolver);
+}
+
+export function resolvePrismRefractTargetForElement(
+  element: Element,
+): RegisteredPrismRefractTarget | null {
+  const registeredElement = element.closest<HTMLElement>(
+    `[${PRISM_REFRACT_TARGET_ATTRIBUTE}]`,
+  );
+  const registeredId = registeredElement?.getAttribute(
+    PRISM_REFRACT_TARGET_ATTRIBUTE,
+  );
+  const registered = registeredId
+    ? registeredPrismRefractTarget(registeredId)
+    : null;
+  if (registered && !registered.target.disabled?.()) return registered;
+  for (const resolver of domTargetResolvers) {
+    const resolved = resolver(element);
+    if (resolved && !resolved.target.disabled?.()) return resolved;
+  }
+  return null;
 }
 
 export function subscribePrismRefractRequests(
@@ -204,16 +239,8 @@ export function prismRefractTargetIdAtPoint(
   root: Document = document,
 ): string | null {
   for (const candidate of root.elementsFromPoint(x, y)) {
-    const element = candidate.closest<HTMLElement>(
-      `[${PRISM_REFRACT_TARGET_ATTRIBUTE}]`,
-    );
-    const targetId = element?.getAttribute(PRISM_REFRACT_TARGET_ATTRIBUTE);
-    const registration = targetId
-      ? registeredPrismRefractTarget(targetId)
-      : null;
-    if (targetId && registration && !registration.target.disabled?.()) {
-      return targetId;
-    }
+    const registration = resolvePrismRefractTargetForElement(candidate);
+    if (registration) return registration.target.id;
   }
   return null;
 }
@@ -221,11 +248,9 @@ export function prismRefractTargetIdAtPoint(
 export function focusedPrismRefractTargetId(
   activeElement: Element | null,
 ): string | null {
-  return (
-    activeElement
-      ?.closest<HTMLElement>(`[${PRISM_REFRACT_TARGET_ATTRIBUTE}]`)
-      ?.getAttribute(PRISM_REFRACT_TARGET_ATTRIBUTE) || null
-  );
+  return activeElement
+    ? resolvePrismRefractTargetForElement(activeElement)?.target.id ?? null
+    : null;
 }
 
 export function nextPrismRefractChoice(
@@ -246,13 +271,44 @@ export function nextPrismRefractChoice(
     (choice) =>
       !choice.disabled && choice.value !== "" && choice.value !== currentValue,
   );
-  const pool = eligible.length > 0 ? eligible : fallback;
+  const stationaryFallback = choices.filter(
+    (choice) => !choice.disabled && choice.value !== "",
+  );
+  const pool =
+    eligible.length > 0
+      ? eligible
+      : fallback.length > 0
+        ? fallback
+        : stationaryFallback;
   if (pool.length === 0) return null;
   const index = Math.min(
     pool.length - 1,
     Math.max(0, Math.floor(random() * pool.length)),
   );
   return pool[index] ?? null;
+}
+
+export function randomPrismSteppedValue(input: {
+  min: number;
+  max: number;
+  step: number;
+  random?: () => number;
+}): number | null {
+  if (
+    !Number.isFinite(input.min) ||
+    !Number.isFinite(input.max) ||
+    !Number.isFinite(input.step) ||
+    input.max < input.min ||
+    input.step <= 0
+  ) {
+    return null;
+  }
+  const count = Math.floor((input.max - input.min) / input.step);
+  const roll = Math.min(
+    0.999999999,
+    Math.max(0, (input.random ?? Math.random)()),
+  );
+  return input.min + Math.floor(roll * (count + 1)) * input.step;
 }
 
 export interface PrismRefractBinding {

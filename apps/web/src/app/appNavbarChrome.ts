@@ -22,7 +22,7 @@ type Listener = () => void;
 let visible = true;
 let autoHideArmed = false;
 let autoHideEnabled = true;
-/** Live Coffee / Debate / Signal sits: collapse the shared navbar entirely. */
+/** Live Coffee / Debate / Signal sits, plus Avatar Foundry: collapse the shared navbar entirely. */
 let sessionHidden = false;
 let pinned = false;
 let dropdownHoldCount = 0;
@@ -140,8 +140,8 @@ export function getAppNavbarChromeServerSnapshot(): AppNavbarChromeSnapshot {
 
 /**
  * Fully hide and collapse the shared navbar for locked live applet sessions
- * (Coffee arriving/live, Debate baking/live, Signal on-air). Independent of
- * Zen idle tuck — restores when the sit ends.
+ * (Coffee arriving/live, Debate baking/live, Signal on-air) and Avatar
+ * Foundry. Independent of Zen idle tuck — restores when the sit ends.
  */
 export function setAppNavbarSessionHidden(hidden: boolean): void {
   if (sessionHidden === hidden) return;

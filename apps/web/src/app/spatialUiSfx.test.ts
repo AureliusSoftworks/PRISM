@@ -13,8 +13,8 @@ import {
 
 test("ships a varied tactile UI library with real local assets", () => {
   const sources = Object.values(SPATIAL_UI_SFX_SOURCES).flat();
-  assert.equal(sources.length, 28);
-  assert.equal(new Set(sources).size, 28);
+  assert.equal(sources.length, 29);
+  assert.equal(new Set(sources).size, 29);
   assert.equal(SPATIAL_UI_SFX_SOURCES["bot-hover"].length, 4);
   assert.equal(SPATIAL_UI_SFX_SOURCES["bot-select"].length, 3);
   assert.deepEqual(SPATIAL_UI_SFX_SOURCES["turbo-on"], [
@@ -31,6 +31,10 @@ test("ships a varied tactile UI library with real local assets", () => {
     "/audio/ui-asmr/bot-select-03.mp3",
   ]);
   assert.equal(SPATIAL_UI_SFX_CONFIG["effort-tick"].cooldownMs, 0);
+  assert.deepEqual(SPATIAL_UI_SFX_SOURCES["max-on"], [
+    "/audio/ui-asmr/max-electrical-zap-02.mp3",
+  ]);
+  assert.equal(SPATIAL_UI_SFX_CONFIG["max-on"].volume, 0.055);
   assert.deepEqual(SPATIAL_UI_SFX_SOURCES["foundry-clank"], [
     "/audio/debate/exhibits/impact-metal.mp3",
   ]);
@@ -67,6 +71,14 @@ test("registers the spatial UI layer and identifies every bot-card surface", () 
   assert.match(
     pageSource,
     /playSpatialUiSfx\(\s*nextTurboEnabled \? "turbo-on" : "turbo-off",\s*\{ anchor: event\.currentTarget \},\s*\)/u,
+  );
+  assert.match(
+    pageSource,
+    /if \(nextMaxEffortActive\) \{[\s\S]{0,120}playSpatialUiSfx\("max-on", \{[\s\S]{0,100}anchor: event\.currentTarget/u,
+  );
+  assert.match(
+    pageSource,
+    /effortControl\.onMaxChange\(nextMaxEffortActive\)/u,
   );
 });
 
@@ -127,6 +139,10 @@ test("classifies high-value controls into restrained semantic cue families", () 
   assert.equal(
     spatialUiSfxCueForControl({ explicitCue: "turbo-off" }),
     "turbo-off",
+  );
+  assert.equal(
+    spatialUiSfxCueForControl({ explicitCue: "max-on" }),
+    "max-on",
   );
   assert.equal(
     spatialUiSfxCueForControl({ label: "Save bot" }),

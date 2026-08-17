@@ -194,11 +194,11 @@ export class PrismSceneHost {
 
   setQualityCeiling(qualityCeiling: PrismSceneQuality): void {
     if (this.adaptiveQuality.ceiling === qualityCeiling) return;
-    const qualityChanged = this.adaptiveQuality.setCeiling(
+    const changed = this.adaptiveQuality.setCeiling(
       qualityCeiling,
       this.now(),
     );
-    if (qualityChanged) this.applyQuality();
+    if (changed) this.applyQuality();
     this.reconcileActivity(true);
     this.invalidate();
   }
@@ -245,10 +245,6 @@ export class PrismSceneHost {
       activity: this.effectiveActivity,
       foreground: this.lifecycle.lifecycle === "foreground",
     });
-    if (result.qualityChanged) {
-      this.applyQuality();
-      this.reconcileActivity(true);
-    }
     if (result.window) this.applyTimingWindow(result.window);
     this.options.onTick?.({
       deltaMs: ticker.elapsedMS,

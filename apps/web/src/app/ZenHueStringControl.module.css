@@ -77,6 +77,12 @@
   pointer-events: none;
 }
 
+/* The blocked-pull cue needs the same contrast inversion as the rest of the
+   cable: white on the dark canvas, black on the Light Mode canvas. */
+:global(.themeLight) .whiteout {
+  stroke: #000000;
+}
+
 .endpoint {
   fill: color-mix(in srgb, var(--bg-deep) 78%, var(--fg) 22%);
   stroke: color-mix(in srgb, var(--fg) 34%, transparent);

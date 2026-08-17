@@ -560,6 +560,7 @@ function actionLabel(action: PrismCompanionActionIntent): string {
       ? "Open Avatar Studio"
       : `Open ${action.tool[0]?.toUpperCase()}${action.tool.slice(1)}`;
   }
+  if (action.type === "open_flight_recorder") return "Open Flight Recorder";
   if (action.type === "create_bot") return "Create a bot";
   if (action.type === "export_bot") return "Export bot";
   return action.direction === "zen-to-slate"
@@ -2698,6 +2699,22 @@ export default function PrismCompanion({
           currentElement: current?.element ?? null,
         });
       };
+      const clearIncompleteGeneration = (): void => {
+        const active = refractSessionRef.current;
+        if (
+          runId !== refractRunRef.current ||
+          !active ||
+          active.phase !== "generating" ||
+          active.registration.target.id !== target.id ||
+          active.registration.element !== element
+        ) {
+          return;
+        }
+        // Every settled async branch must either publish ready/error or tear
+        // down the captured presentation. Explicit cancellation increments
+        // refractRunRef before aborting, so this cleanup is idempotent.
+        releasePrismRefract(true);
+      };
 
       if (target.kind === "choice") {
         void (async () => {
@@ -2727,7 +2744,12 @@ export default function PrismCompanion({
               value: choice.value,
               signal: controller.signal,
             });
-            if (!previewPainted || !requestOwnershipIsCurrent()) {
+            if (!previewPainted) {
+              throw new Error(
+                `Prism could not display the refracted ${target.label}.`,
+              );
+            }
+            if (!requestOwnershipIsCurrent()) {
               return;
             }
             const readySession = {
@@ -2759,7 +2781,7 @@ export default function PrismCompanion({
             );
             onError?.(message);
           }
-        })();
+        })().finally(clearIncompleteGeneration);
         return;
       }
 
@@ -2838,11 +2860,12 @@ export default function PrismCompanion({
           );
           onError?.(message);
         }
-      })();
+      })().finally(clearIncompleteGeneration);
     },
     [
       markRefractTarget,
       onError,
+      releasePrismRefract,
       updateRefractSession,
     ],
   );
@@ -3293,10 +3316,21 @@ export default function PrismCompanion({
       eventTarget.blur();
       event.stopPropagation();
     };
+    const restoreOnWindowBlur = (): void => releasePrismRefract(true);
+    const restoreOnVisibilityChange = (): void => {
+      if (document.visibilityState !== "visible") releasePrismRefract(true);
+    };
     const restoreIfTargetUnmounts = new MutationObserver(() => {
       refreshQueuedPrismRefractTargets();
       const currentSession = refractSessionRef.current;
-      if (currentSession && !currentSession.registration.element.isConnected) {
+      const currentRegistration = currentSession
+        ? registeredPrismRefractTarget(currentSession.registration.target.id)
+        : null;
+      if (
+        currentSession &&
+        (!currentSession.registration.element.isConnected ||
+          currentRegistration?.element !== currentSession.registration.element)
+      ) {
         releasePrismRefract(true);
       }
     });
@@ -3312,6 +3346,8 @@ export default function PrismCompanion({
     window.addEventListener("click", preventCapturedFieldClick, true);
     window.addEventListener("beforeinput", preventCapturedFieldInput, true);
     window.addEventListener("focusin", preventCapturedFieldFocus, true);
+    window.addEventListener("blur", restoreOnWindowBlur);
+    document.addEventListener("visibilitychange", restoreOnVisibilityChange);
     return () => {
       restoreIfTargetUnmounts.disconnect();
       window.removeEventListener("pointermove", revealCursor, true);
@@ -3323,6 +3359,11 @@ export default function PrismCompanion({
         true,
       );
       window.removeEventListener("focusin", preventCapturedFieldFocus, true);
+      window.removeEventListener("blur", restoreOnWindowBlur);
+      document.removeEventListener(
+        "visibilitychange",
+        restoreOnVisibilityChange,
+      );
     };
   }, [
     acceptPrismRefract,
@@ -3535,6 +3576,16 @@ export default function PrismCompanion({
     const dismissIfExternal = (event: Event): void => {
       const target = event.target;
       if (target instanceof Node && anchorRef.current?.contains(target)) return;
+      // Refract's shared model picker portals its listbox to document.body so
+      // it cannot be clipped by the companion panel. Treat that portal as a
+      // continuation of the companion, otherwise a model press immediately
+      // looks like an external interaction and tears down Synthesis.
+      if (
+        target instanceof Element &&
+        target.closest('[data-compose-model-menu="true"]')
+      ) {
+        return;
+      }
       setOpen(false);
     };
     window.addEventListener("pointerdown", dismissIfExternal, true);
@@ -5826,8 +5877,8 @@ export default function PrismCompanion({
               aria-label="Prism Refract settings and recent synthesized images"
             >
               {refractModelPicker ? (
-                <section className={styles.synthesisRefractCard}>
-                  <div className={styles.synthesisRefractCardHeading}>
+                <div className={styles.synthesisRefractRow}>
+                  <div className={styles.synthesisRefractIdentity}>
                     <span>Refract</span>
                     <span
                       className={styles.refractLaneBadge}
@@ -5843,7 +5894,7 @@ export default function PrismCompanion({
                   <div className={styles.refractModelPicker}>
                     {refractModelPicker}
                   </div>
-                </section>
+                </div>
               ) : null}
               <section
                 className={styles.synthesisRecentRail}

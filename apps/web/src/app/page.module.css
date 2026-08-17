@@ -158,8 +158,9 @@
   pointer-events: none;
 }
 
-/* Ink authoring is a flat inspection mode. Preview live temporarily changes
-   screenMode back to live, restoring the full phosphor and chassis treatment. */
+/* Face-feature and Ink authoring use a flat inspection mode. Leaving Eyes or
+   Mouth—or choosing Preview live in Details—restores the full phosphor and
+   chassis treatment. */
 .botAvatarMannequinStage[data-avatar-ink-authoring="true"]
   .botAvatarFoundryCameraRig
   .botAmbientUnderglow {
@@ -331,7 +332,7 @@
 }
 
 .botGeneratorBackdrop[data-avatar-foundry="true"] {
-  inset: var(--app-shell-top-nav-height, 60px) 0 0;
+  inset: 0;
   z-index: 170;
   padding: 0;
   background: #030407;
@@ -340,9 +341,9 @@
 }
 
 .botAvatarCustomizerBackdrop[data-avatar-foundry="true"] {
-  /* This backdrop alone owns the app-nav clearance. The studio is absolute
-     inside it, so no descendant repeats the viewport offset. */
-  inset: var(--app-shell-top-nav-height, 60px) 0 0;
+  /* Foundry owns the full viewport. The shared navbar hides while this
+     surface is open, so no descendant repeats a top-nav offset. */
+  inset: 0;
   z-index: 170;
   min-height: 0;
   background: #030407;
@@ -1153,7 +1154,7 @@
     var(--editor-bot-color, var(--accent)) 58%,
     rgba(255, 255, 255, 0.14)
   );
-  color: var(--bot-avatar-micro-face-phosphor-color, #ffffff);
+  color: #ffffff;
 }
 
 .botAvatarCustomizer[data-foundry="true"] .botAvatarStudioMiniPreview {
@@ -1174,6 +1175,136 @@
   pointer-events: none;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+}
+
+/* Developer-only comparison controls stay within the Studio preview. The
+   attributes below scope each expensive layer independently, preserving the
+   production avatar contract and all saved Avatar Studio draft fields. */
+.avatarStudioPerformanceWidget {
+  position: absolute;
+  top: 20px;
+  right: 22px;
+  z-index: 24;
+  display: grid;
+  gap: 5px;
+  min-width: 148px;
+  margin: 0;
+  padding: 8px 10px 9px;
+  border: 1px solid rgb(112 199 255 / 0.42);
+  border-radius: 10px;
+  background: rgb(5 11 18 / 0.82);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 0.32);
+  color: rgb(224 244 255 / 0.88);
+  font-size: 10px;
+  line-height: 1.2;
+  pointer-events: auto;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.avatarStudioPerformanceWidget legend {
+  padding: 0;
+  color: #8dd9ff;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.avatarStudioPerformanceWidget > span {
+  color: rgb(224 244 255 / 0.54);
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.avatarStudioPerformanceWidget label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.avatarStudioPerformanceWidget input {
+  margin: 0;
+  accent-color: #6ed1ff;
+}
+
+.botAvatarMannequinStage[data-avatar-performance-phosphor="false"]
+  .zenLiveBotPresenceFaceEmissionMask {
+  --crt-phosphor-opacity: 0 !important;
+  --crt-phosphor-midtone-strength: 0 !important;
+  --crt-phosphor-bright-strength: 0 !important;
+  --crt-unlit-phosphor-opacity: 0 !important;
+}
+
+.botAvatarMannequinStage[data-avatar-performance-glass="false"]
+  .botFaceScreenGlass,
+.botAvatarMannequinStage[data-avatar-performance-glass="false"]
+  .zenLiveBotPresenceScreenGlassOverlay,
+.botAvatarMannequinStage[data-avatar-performance-glass="false"]
+  .botAvatarFoundryBuckleGlass {
+  display: none !important;
+}
+
+.botAvatarMannequinStage[data-avatar-performance-metal="false"]
+  .botFaceFrameMetalLight,
+.botAvatarMannequinStage[data-avatar-performance-metal="false"]
+  .botFaceFrameMetalScratchLayer,
+.botAvatarMannequinStage[data-avatar-performance-metal="false"]
+  [data-frame-material-layer="alloy"] {
+  display: none !important;
+}
+
+.botAvatarMannequinStage[data-avatar-performance-crt-texture="false"]
+  :is(
+    .botFaceCrtNoiseLayer,
+    .botFaceCrtPixelGridLayer,
+    .botFaceCrtGrimeLayer,
+    .botFaceCrtBreathingLayer
+  ) {
+  display: none !important;
+  filter: none !important;
+  animation: none !important;
+}
+
+.botAvatarMannequinStage[data-avatar-performance-frame-lights="false"]
+  :is(
+    .botFaceFrameLedAura,
+    .botFaceFrameLedGlow,
+    .botFaceFrameLedCore,
+    .botAvatarFoundryFrameModuleLights,
+    .botAvatarFoundryFrameModuleLamp
+  ) {
+  display: none !important;
+  filter: none !important;
+  animation: none !important;
+}
+
+.botAvatarMannequinStage[data-avatar-performance-motion="false"]
+  :is(.botAvatarFoundryBotAssembly, .botAmbientPresenceBody, .botAmbientUnderglow) {
+  animation: none !important;
+  transform: none !important;
+  will-change: auto !important;
+}
+
+.botAvatarMannequinStage[data-avatar-performance-ambient-glow="false"]
+  :is(.botAmbientUnderglow, .botAmbientSpeakingLight, .botAmbientSpeakingPulse) {
+  display: none !important;
+  filter: none !important;
+  animation: none !important;
+}
+
+.botAvatarMannequinStage[data-avatar-performance-backdrop="false"] {
+  background: #101622 !important;
+  box-shadow: none !important;
+}
+
+.botAvatarMannequinStage[data-avatar-performance-backdrop="false"]::before,
+.botAvatarMannequinStage[data-avatar-performance-backdrop="false"]::after,
+.botAvatarMannequinStage[data-avatar-performance-backdrop="false"]
+  .botAvatarFoundryPlatform {
+  display: none !important;
 }
 
 .botAvatarStudioMiniPreviewCluster {
@@ -1278,13 +1409,6 @@
   letter-spacing: 0.12em;
 }
 
-/* The full avatar's 128-cell face screen remains the placement authority.
-   Mini Ink uses the same square plane and receives only this preview-pixel
-   optical lift; the authored raster itself is never rewritten. */
-.botAvatarStudioMiniPreviewViewport .emptyStateHeroMiniArt {
-  transform: translateY(-2px);
-}
-
 .themeLight.botAvatarStudioThemeScope
   .botAvatarCustomizer[data-foundry="true"]
   .botAvatarStudioMiniPreview {
@@ -1379,6 +1503,17 @@
   width: 64%;
   height: 64%;
   filter: none;
+}
+
+.botAvatarMicroIdentityPixel {
+  position: absolute;
+  inset: 0;
+  display: block;
+  background: var(--bot-avatar-micro-identity-color-dark, #7c6cff);
+}
+
+.themeLight .botAvatarMicroIdentityPixel {
+  background: var(--bot-avatar-micro-identity-color-light, #5f50d8);
 }
 
 /* The preview keeps the established optical registration; the renderer's
@@ -2850,18 +2985,6 @@
   .botAvatarCustomizer[data-foundry="true"]
     .botAvatarStudioScaleControl {
     display: none;
-  }
-
-  .botAvatarCustomizer[data-foundry="true"]
-    .botAvatarStudioMicroPreview
-    .messageMoodBadge[data-face="coffee"][data-variant="micro"] {
-    width: 30px;
-    height: 30px;
-  }
-
-  .botAvatarCustomizer[data-foundry="true"]
-    .botAvatarStudioMicroPreview .messageMoodMicroFace {
-    font-size: 13px;
   }
 
   .botAvatarFoundryCameraHud {
@@ -13965,7 +14088,7 @@
 .fpsCounter {
   position: fixed;
   z-index: 2147483000;
-  top: 4px;
+  bottom: 4px;
   left: 6px;
   padding: 1px 4px;
   border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
@@ -15567,79 +15690,136 @@
 }
 
 @property --home-halo-1-presence {
-  syntax: "<number>";
+  syntax: "<percentage>";
   inherits: true;
-  initial-value: 0;
+  initial-value: 0%;
+}
+
+@property --home-halo-1-color {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #ff4d6d;
 }
 
 @property --home-halo-2-presence {
-  syntax: "<number>";
+  syntax: "<percentage>";
   inherits: true;
-  initial-value: 0;
+  initial-value: 0%;
+}
+
+@property --home-halo-2-color {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #ff9f1c;
 }
 
 @property --home-halo-3-presence {
-  syntax: "<number>";
+  syntax: "<percentage>";
   inherits: true;
-  initial-value: 0;
+  initial-value: 0%;
+}
+
+@property --home-halo-3-color {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #b7e63a;
 }
 
 @property --home-halo-4-presence {
-  syntax: "<number>";
+  syntax: "<percentage>";
   inherits: true;
-  initial-value: 0;
+  initial-value: 0%;
+}
+
+@property --home-halo-4-color {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #2fd3e3;
 }
 
 @property --home-halo-5-presence {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 0%;
+}
+
+@property --home-halo-5-color {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #7b5cff;
+}
+
+@property --home-palette-coherence {
   syntax: "<number>";
   inherits: true;
   initial-value: 0;
 }
 
-.messagesFrame[data-mode="home"],
-.messagesFrame[data-mode="directory"] {
+@property --home-palette-saturation {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+
+.homeDirectoryAtmospherePainter {
+  --home-room-base: #050608;
   --home-halo-1-visible-color: color-mix(
     in srgb,
     var(--home-halo-1-color, #ff4d6d)
-      calc(var(--home-halo-1-presence, 1) * 100%),
+      var(--home-halo-1-presence, 100%),
     transparent
   );
   --home-halo-2-visible-color: color-mix(
     in srgb,
     var(--home-halo-2-color, #ff9f1c)
-      calc(var(--home-halo-2-presence, 1) * 100%),
+      var(--home-halo-2-presence, 100%),
     transparent
   );
   --home-halo-3-visible-color: color-mix(
     in srgb,
     var(--home-halo-3-color, #b7e63a)
-      calc(var(--home-halo-3-presence, 1) * 100%),
+      var(--home-halo-3-presence, 100%),
     transparent
   );
   --home-halo-4-visible-color: color-mix(
     in srgb,
     var(--home-halo-4-color, #2fd3e3)
-      calc(var(--home-halo-4-presence, 1) * 100%),
+      var(--home-halo-4-presence, 100%),
     transparent
   );
   --home-halo-5-visible-color: color-mix(
     in srgb,
     var(--home-halo-5-color, #7b5cff)
-      calc(var(--home-halo-5-presence, 1) * 100%),
+      var(--home-halo-5-presence, 100%),
     transparent
   );
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  isolation: isolate;
+  opacity: 1;
   transition:
+    opacity 320ms ease-out,
+    --home-halo-1-color 320ms ease-out,
     --home-halo-1-presence 220ms ease-out,
+    --home-halo-2-color 320ms ease-out,
     --home-halo-2-presence 220ms ease-out,
+    --home-halo-3-color 320ms ease-out,
     --home-halo-3-presence 220ms ease-out,
+    --home-halo-4-color 320ms ease-out,
     --home-halo-4-presence 220ms ease-out,
-    --home-halo-5-presence 220ms ease-out;
+    --home-halo-5-color 320ms ease-out,
+    --home-halo-5-presence 220ms ease-out,
+    --home-palette-coherence 320ms ease-out,
+    --home-palette-saturation 320ms ease-out;
   background:
     radial-gradient(
       ellipse 78% 58% at var(--home-halo-1-x, 10%) 18%,
       color-mix(
         in srgb,
-        var(--home-halo-1-visible-color) 7%,
+        var(--home-halo-1-visible-color) 24%,
         transparent
       ),
       transparent 68%
@@ -15648,7 +15828,7 @@
       ellipse 82% 56% at var(--home-halo-2-x, 34%) 4%,
       color-mix(
         in srgb,
-        var(--home-halo-2-visible-color) 5%,
+        var(--home-halo-2-visible-color) 20%,
         transparent
       ),
       transparent 70%
@@ -15657,7 +15837,7 @@
       ellipse 86% 60% at var(--home-halo-3-x, 52%) 50%,
       color-mix(
         in srgb,
-        var(--home-halo-3-visible-color) 4%,
+        var(--home-halo-3-visible-color) 18%,
         transparent
       ),
       transparent 72%
@@ -15666,7 +15846,7 @@
       ellipse 82% 58% at var(--home-halo-4-x, 72%) 16%,
       color-mix(
         in srgb,
-        var(--home-halo-4-visible-color) 6%,
+        var(--home-halo-4-visible-color) 22%,
         transparent
       ),
       transparent 70%
@@ -15675,16 +15855,27 @@
       ellipse 80% 60% at var(--home-halo-5-x, 92%) 40%,
       color-mix(
         in srgb,
-        var(--home-halo-5-visible-color) 6%,
+        var(--home-halo-5-visible-color) 22%,
         transparent
       ),
       transparent 72%
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, #10131a 8%, var(--home-room-base)) 0%,
+      var(--home-room-base) 100%
     );
 }
 
+/* The stable active-group gradient is the upper pane of the Zen atmosphere.
+   Semantic directory depth only changes this opacity: root fully covers the
+   hue room below, while the one-row close-up fully reveals it. */
+.homeDirectoryAtmospherePainter[data-home-directory-atmosphere-layer="gradient"] {
+  opacity: var(--home-gradient-overlay-opacity, 1);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .messagesFrame[data-mode="home"],
-  .messagesFrame[data-mode="directory"] {
+  .homeDirectoryAtmospherePainter {
     transition: none;
   }
 }
@@ -15710,21 +15901,32 @@
     );
 }
 
-/* Home / Zen directory — contextual spectrum mood. Root uses the five
-   canonical PRISM colors; hue directories use 2–5 representative colors
-   from the visible window. Five is a hard ceiling, so a 25-row directory
-   has the same atmospheric density as a 5-row directory. Structurally mirrors
-   the default orb (white core at the slider's X, soft halo behind
-   it, bg-surface fade for compose-form continuity) but the single
+/* Home / Zen directory — two complete painters blend the contextual mood.
+   The hue-specific room sits below the stable active-group gradient; depth
+   fades only the upper painter to make the colors appear to merge. Because
+   these painters sit above the messagesFrame background, shell
+   accent selectors can keep serving engaged conversations without recoloring
+   an empty Home or directory. Wallpapers mount after it at the same stack
+   level and remain visible. The painter uses up to five representative colors
+   from their respective bot sets. A broad spectrum keeps its complete color
+   range while narrow hue families receive a modest saturation lift. It
+   mirrors the default orb (white core at the slider's X,
+   soft halo behind it, bg-surface fade for compose-form continuity) but the single
    --accent halo is replaced with FIVE PRISM-color radials
    distributed across the bottom edge. Their overlap zones blend
    into each other in srgb so the band reads as "blurred prism
    spectrum" rather than a hard rainbow stripe. The white orb stays
    at `var(--lens-thumb-x, 50%)` so it sits exactly under the
    slider thumb, matching every other mode. */
-.messagesFrame[data-mode="home"]::after,
-.messagesFrame[data-mode="directory"]::after {
-  filter: saturate(1.45);
+/* The hue pane owns the moving Hue Cable bloom. The stable group-gradient
+   pane remains atmosphere-only, so its duplicate pseudo-element cannot stack
+   a second white glare beneath the moving bead. */
+.homeDirectoryAtmospherePainter[data-home-directory-atmosphere-layer="hue"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  filter: saturate(var(--home-palette-saturation, 1));
   background:
     /* White core orb — still reads as the lens highlight, but with less
        broad white spill so the PRISM band underneath stays saturated. */
@@ -15745,13 +15947,10 @@
         color-mix(in srgb, #ffffff 2%, transparent) 60%,
         transparent 82%
       ),
-    /* Five dynamic halos — populated from the bot library's PRISM
-       families via inline CSS variables (--home-halo-N-x and
-       --home-halo-N-color). Unused slots receive color `transparent`
-       so their gradient layer collapses to nothing via color-mix
-       (transparent, transparent → transparent), letting the rainbow
-       scale from 1 color (single bot family) up to 5 (full PRISM
-       spread) without conditional CSS. Wide-and-short (38% × 28%)
+    /* Five mounted dynamic halos — populated only from visible bot colors.
+       Percentage presence keeps dormant layers color-typed for WebKit, while
+       palette coherence controls a precomputed saturation lift. Wide-and-short
+       (38% × 28%)
        so halos hug the bottom edge rather than billowing upward;
        four-stop falloff (44% → 20% → 6% → transparent) softens
        overlap zones into smooth color transitions. */
@@ -16264,6 +16463,80 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   backdrop-filter: blur(18px) saturate(1.18);
 }
 
+/* The All Bots rail reuses Coffee's search and group controls, whose base
+   treatment intentionally assumes a dark Coffee stage. Give that shared
+   chrome a complete light-surface contract here instead of bleaching the
+   dark treatment with a parent background. */
+.themeLight .canvasBotBrowserRail {
+  color: color-mix(in srgb, var(--fg-muted) 82%, var(--accent));
+  border-color: color-mix(in srgb, var(--line-strong) 58%, var(--fg-muted));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, #fff 84%, var(--bg-surface)),
+    color-mix(in srgb, var(--bg-surface) 92%, var(--bg))
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 14px 32px rgba(38, 54, 78, 0.12);
+}
+
+.themeLight .canvasBotBrowserRail .coffeeSearchBar {
+  color: color-mix(in srgb, var(--fg-muted) 82%, var(--fg));
+}
+
+.themeLight .canvasBotBrowserRail .coffeeSearchBar input {
+  color: var(--fg);
+}
+
+.themeLight .canvasBotBrowserRail .coffeeSearchBar input::placeholder {
+  color: color-mix(in srgb, var(--fg-muted) 72%, transparent);
+}
+
+.themeLight .canvasBotBrowserRail .botLibraryGroupControl {
+  --bot-library-group-trigger-text: color-mix(
+    in srgb,
+    var(--fg) 88%,
+    #192333 12%
+  );
+  --bot-library-group-trigger-muted: color-mix(
+    in srgb,
+    var(--fg-muted) 86%,
+    transparent
+  );
+  --bot-library-group-trigger-shadow: none;
+  border-color: color-mix(in srgb, var(--fg-muted) 40%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #fff 82%, transparent),
+      color-mix(in srgb, var(--bg-surface) 90%, transparent)
+    ),
+    var(--bot-library-group-gradient);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.88),
+    0 3px 10px rgba(38, 54, 78, 0.1);
+}
+
+.themeLight .canvasBotBrowserRail .botLibraryGroupTrigger::before {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.5),
+    rgba(255, 255, 255, 0.22)
+  );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+}
+
+.themeLight .canvasBotBrowserRail .botLibraryGroupCreate {
+  border-left-color: color-mix(in srgb, var(--fg-muted) 28%, transparent);
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+}
+
+.themeLight .canvasBotBrowserRail .botLibraryGroupCreate:hover,
+.themeLight .canvasBotBrowserRail .botLibraryGroupCreate:focus-visible {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  color: var(--fg);
+}
+
 .chatCanvasPickerControls {
   align-self: center;
   width: min(
@@ -16340,6 +16613,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .botGroupHeroStage {
+  --bot-group-hero-navbar-clearance: max(
+    0px,
+    calc(
+      var(
+          --app-shell-top-nav-height,
+          calc(60px + env(safe-area-inset-top, 0px))
+        ) - calc(60px + env(safe-area-inset-top, 0px))
+    )
+  );
+
   position: relative;
   isolation: isolate;
   order: 0;
@@ -16349,7 +16632,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   box-sizing: border-box;
   display: grid;
   place-items: center;
-  padding: 32px 0;
+  /* The shared nav can grow when its controls wrap. Its baseline height is
+     already accounted for by the chat grid; only its measured expansion
+     needs to move this hero and its action row down. */
+  padding: calc(32px + var(--bot-group-hero-navbar-clearance)) 0 32px;
 }
 
 .botGroupHeroStage[data-room-variant="waiting"] {
@@ -17551,7 +17837,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       color-mix(in srgb, var(--bg) 64%, transparent)
     ),
     var(--bot-library-group-gradient);
-  background-blend-mode: normal, multiply;
+  background-blend-mode: normal, normal;
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, #fff 76%, transparent),
     inset 0 -1px 0 color-mix(in srgb, #000 8%, transparent),
@@ -17701,7 +17987,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 @media (max-width: 820px) {
   .botGroupHeroStage {
     width: 100%;
-    padding-block: 32px;
+    padding-block: calc(32px + var(--bot-group-hero-navbar-clearance)) 32px;
   }
 
   .botGroupHeroStage[data-room-variant="waiting"] {
@@ -17800,7 +18086,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       color-mix(in srgb, var(--bg) 74%, transparent)
     ),
     var(--bot-library-group-gradient);
-  background-blend-mode: normal, multiply;
+  background-blend-mode: normal, normal;
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, #fff 74%, transparent),
     inset 0 -1px 0 color-mix(in srgb, #000 8%, transparent),
@@ -18719,6 +19005,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   display: grid;
   place-items: center;
   pointer-events: none;
+  transform: translateY(-2px);
 }
 
 .emptyStateHeroMiniArt [data-avatar-details-mask="true"] {
@@ -18745,6 +19032,110 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   transform: translate(-50%, -50%)
     scale(var(--zen-live-bot-face-scale, 1));
   transform-origin: 50% 50%;
+}
+
+.coffeeSeatMiniAvatar {
+  align-self: center;
+  justify-self: center;
+  z-index: 4;
+}
+
+.coffeeSeatMiniAvatarArt {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  transform: translateY(-2px);
+}
+
+.coffeeSeatMiniAvatarArt [data-avatar-details-mask="true"] {
+  filter: none;
+  mix-blend-mode: normal;
+}
+
+.coffeeSeatMiniAvatarArt[data-avatar-details-depth="behind-face"] {
+  z-index: 1;
+}
+
+.coffeeSeatMiniAvatarArt[data-avatar-details-depth="above-face"] {
+  z-index: 3;
+}
+
+.coffeeSeatMiniAvatarFaceRig {
+  position: absolute;
+  left: var(--zen-live-bot-face-x, 50%);
+  top: var(--zen-live-bot-face-y, 50%);
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(var(--zen-live-bot-face-scale, 1));
+  transform-origin: 50% 50%;
+}
+
+.coffeeSeatMiniAvatarFaceRig[data-avatar-direction-independent-screen="thinking"] {
+  /* ChatMiniBotAvatar turns the complete face plane toward the table. The
+     authored thinking mark is a screen-owned cue, so counter that turn. */
+  transform: translate(-50%, -50%) scale(var(--zen-live-bot-face-scale, 1))
+    scaleX(var(--chat-mini-bot-upper-screen-facing-scale-x, 1));
+}
+
+.coffeeSeatPlateEmoji.coffeeSeatMiniAvatarFace {
+  --crt-core-opacity: 1;
+  --crt-bloom-opacity: 0;
+  --crt-bloom-narrow-strength: 0;
+  --crt-bloom-wide-strength: 0;
+  --crt-phosphor-opacity: 0;
+  --crt-scanline-opacity: 0;
+  display: inline-grid;
+  font-family: var(--prism-face-font);
+  font-size: var(--zen-live-bot-avatar-face-glyph-size, 21.7cqw);
+  line-height: 1;
+  font-weight: var(--prism-face-weight);
+  letter-spacing: var(--prism-face-letter-spacing);
+  font-variant-ligatures: none;
+  position: relative;
+  z-index: 2;
+  --crt-face-edge-color: var(--chat-mini-bot-color, var(--accent));
+  --zen-live-bot-face-phosphor-ink: var(--chat-mini-bot-color, var(--accent));
+  color: var(--chat-mini-bot-color, var(--accent));
+  filter: none;
+  text-shadow: none;
+  transform-origin: center center;
+}
+
+.coffeeSeatPlateEmoji.coffeeSeatMiniAvatarFace
+  [data-coffee-plate-emoji-part],
+.coffeeSeatPlateEmoji.coffeeSeatMiniAvatarFace
+  [data-crt-glyph-layer="true"] {
+  filter: none;
+  text-shadow: none;
+}
+
+.coffeeSeatPlateEmoji.coffeeSeatMiniAvatarFace
+  [data-crt-glyph-layer="true"]::before {
+  display: none;
+}
+
+.coffeeSeatPlateEmoji.coffeeSeatMiniAvatarFace
+  [data-crt-glyph-layer="true"]::after {
+  color: currentColor;
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  -webkit-text-fill-color: currentColor;
+  -webkit-text-stroke: 0;
+  filter: none;
+  mix-blend-mode: normal;
+  text-shadow: none;
+}
+
+.coffeeSeatMiniAvatarGlyph {
+  width: var(--chat-mini-bot-glyph-size, 12px);
+  height: var(--chat-mini-bot-glyph-size, 12px);
+  color: color-mix(in srgb, var(--chat-mini-bot-color, var(--accent)) 88%, #ffffff);
+  filter: none;
 }
 
 .coffeeSeatPlateEmoji.emptyStateHeroMiniFace {
@@ -18798,12 +19189,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .emptyStateHeroMiniGlyph {
-  width: calc(
-    var(--chat-mini-bot-glyph-size, clamp(14px, 1.35vw, 17px)) - 1px
-  );
-  height: calc(
-    var(--chat-mini-bot-glyph-size, clamp(14px, 1.35vw, 17px)) - 1px
-  );
+  width: var(--chat-mini-bot-glyph-size, clamp(14px, 1.35vw, 17px));
+  height: var(--chat-mini-bot-glyph-size, clamp(14px, 1.35vw, 17px));
   color: color-mix(in srgb, var(--chat-mini-bot-color, var(--accent)) 88%, #ffffff);
   filter: none;
 }
@@ -22830,14 +23217,30 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .messageMoodBadge[data-face="coffee"][data-variant="micro"] {
-  width: 22px;
-  height: 22px;
+  width: var(--bot-avatar-micro-render-size, 22px);
+  height: var(--bot-avatar-micro-render-size, 22px);
   background: color-mix(in srgb, #05080b 94%, var(--coffee-bot-color) 6%);
   border: 1px solid
     color-mix(in srgb, var(--coffee-bot-color) 72%, rgba(255, 255, 255, 0.16));
   box-shadow: none;
   overflow: visible;
   position: relative;
+}
+
+.messageMoodBadge[data-face="coffee"][data-variant="micro"][data-avatar-micro-presentation="block"] {
+  width: 4px;
+  height: 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.messageMoodBadge[data-face="coffee"][data-variant="micro"][data-avatar-micro-presentation="pixel"] {
+  width: 1px;
+  height: 1px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .messageMoodBadge[data-face="coffee"][data-variant="micro"],
@@ -22890,7 +23293,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   font-weight: var(--prism-face-weight);
   letter-spacing: var(--prism-face-letter-spacing);
   font-variant-ligatures: none;
-  color: #ffffff;
+  color: var(--bot-avatar-micro-face-phosphor-color, #ffffff);
   filter: none;
   text-shadow: none;
   transform-origin: center center;
@@ -27606,6 +28009,45 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   );
 }
 
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .zenSplashHearButton {
+  width: 96px;
+  min-width: 96px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 13px;
+  border: 1px solid color-mix(in srgb, var(--accent) 46%, var(--line));
+  border-radius: 999px;
+  color: var(--accent-text);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-surface));
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .zenSplashHearButton[data-status="generating"],
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .zenSplashHearButton[data-status="playing"] {
+  border-color: color-mix(in srgb, var(--accent) 76%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.zenHeroVoicePreviewStatus {
+  flex-basis: 100%;
+  min-height: 14px;
+  margin: -1px 4px 0;
+  color: color-mix(in srgb, var(--fg) 66%, var(--fg-muted));
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+}
+
+.zenHeroVoicePreviewStatus[data-error="true"] {
+  color: var(--danger, #d86b6b);
+}
+
 .composeBotMenu.zenSplashBotMenu {
   min-width: min(240px, calc(100vw - 24px)) !important;
   max-width: min(300px, calc(100vw - 24px));
@@ -28590,9 +29032,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 /* Session bot visual quality ---------------------------------------------
-   Cast growth may simplify decorative materials, never semantic face, Ink,
-   identity color, mouth motion, or Power presentation. These selectors only
-   activate beneath Coffee, Signal, and Debate session roots. */
+   An explicit player graphics ceiling may simplify decorative materials,
+   never semantic face, Ink, identity color, mouth motion, or Power
+   presentation. These selectors only activate beneath session roots. */
 :is(
     [data-session-bot-visual-quality="balanced"],
     [data-session-bot-visual-quality="reduced"],
@@ -28612,28 +29054,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     [data-session-bot-visual-quality="reduced"],
     [data-session-bot-visual-quality="minimal"]
   )
-  :is(.botFaceFrameTint, .botFaceFrameLed, .zenLiveBotPresenceFaceEmissionMask) {
+  :is(.botFaceFrameTint, .botFaceFrameLed) {
   animation: none !important;
   will-change: auto;
-}
-
-:is(
-    [data-session-bot-visual-quality="balanced"],
-    [data-session-bot-visual-quality="reduced"],
-    [data-session-bot-visual-quality="minimal"]
-  )
-  :is(.botFaceCrtNoiseLayer, .botFaceCrtBreathingLayer) {
-  display: none;
-}
-
-:is(
-    [data-session-bot-visual-quality="balanced"],
-    [data-session-bot-visual-quality="reduced"],
-    [data-session-bot-visual-quality="minimal"]
-  )
-  .botFaceCrtGrimeLayer {
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
 }
 
 [data-session-bot-visual-quality="balanced"] .botAmbientUnderglow {
@@ -28687,86 +29110,21 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     [data-session-bot-visual-quality="reduced"],
     [data-session-bot-visual-quality="minimal"]
   )
-  .zenLiveBotPresenceFaceEmissionMask::before,
-:is(
-    [data-session-bot-visual-quality="reduced"],
-    [data-session-bot-visual-quality="minimal"]
-  )
-  .zenLiveBotPresenceFaceEmissionMask::after,
-:is(
-    [data-session-bot-visual-quality="reduced"],
-    [data-session-bot-visual-quality="minimal"]
-  )
-  .zenLiveBotPresenceBody
-  [data-crt-glyph-layer="true"]::before,
-:is(
-    [data-session-bot-visual-quality="reduced"],
-    [data-session-bot-visual-quality="minimal"]
-  )
-  .zenLiveBotPresenceBody
-  [data-crt-glyph-layer="true"]::after {
-  content: none;
-  display: none;
-}
-
-:is(
-    [data-session-bot-visual-quality="reduced"],
-    [data-session-bot-visual-quality="minimal"]
-  )
-  .zenLiveBotPresenceBody
-  [data-crt-glyph-layer="true"] {
-  filter: none;
-  text-shadow: 0 0 0.08em
-    color-mix(in srgb, var(--crt-face-edge-color) 38%, transparent);
-}
-
-:is(
-    [data-session-bot-visual-quality="reduced"],
-    [data-session-bot-visual-quality="minimal"]
-  )
   :is(.botFaceFrameLedAura, .botFaceFrameLedGlow) {
   display: none;
 }
 
-:is(
-    [data-session-bot-visual-quality="reduced"],
-    [data-session-bot-visual-quality="minimal"]
-  )
-  .zenLiveBotPresenceBody
-  :is(
-    [data-avatar-details-emission],
-    [data-avatar-details-motion-group]
-  ) {
-  animation: none !important;
-}
-
 [data-session-bot-visual-quality="minimal"]
-  .zenLiveBotPresenceFace::before,
-[data-session-bot-visual-quality="minimal"]
-  :is(
-    .botFaceCrtGrimeLayer,
-    .botFaceCrtPixelGridLayer,
-    .zenLiveBotPresenceScreenGlassOverlay
-  ) {
+  .zenLiveBotPresenceFace::before {
   display: none;
 }
 
 /* Rendered-size quality --------------------------------------------------
-   A compact full avatar keeps its authored chassis and live speech mouth but
-   does not pay for phosphor bloom that cannot read at its on-screen size. */
+   A compact full avatar keeps the complete screen and speech experience. Only
+   peripheral chassis light and ambient drift may simplify at smaller sizes. */
 .zenLiveBotPresenceBody[data-render-detail="compact"]
-  :is(.botFaceCrtNoiseLayer, .botFaceCrtBreathingLayer),
-.zenLiveBotPresenceBody[data-render-detail="compact"]
-  :is(.botFaceFrameLedAura, .botFaceFrameLedGlow),
-.zenLiveBotPresenceBody[data-render-detail="compact"]
-  [data-avatar-details-emission="glow"] {
+  :is(.botFaceFrameLedAura, .botFaceFrameLedGlow) {
   display: none;
-}
-
-.zenLiveBotPresenceBody[data-render-detail="compact"]
-  .botFaceCrtGrimeLayer {
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
 }
 
 .zenLiveBotPresenceBody[data-render-detail="compact"]
@@ -28775,30 +29133,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .zenLiveBotPresenceFace::before {
   box-shadow: none;
   filter: none;
-}
-
-.zenLiveBotPresenceBody[data-render-detail="compact"]
-  .zenLiveBotPresenceFaceEmissionMask {
-  animation: none;
-  filter: none;
-}
-
-.zenLiveBotPresenceBody[data-render-detail="compact"]
-  .zenLiveBotPresenceFaceEmissionMask::before,
-.zenLiveBotPresenceBody[data-render-detail="compact"]
-  .zenLiveBotPresenceFaceEmissionMask::after,
-.zenLiveBotPresenceBody[data-render-detail="compact"]
-  [data-crt-glyph-layer="true"]::before,
-.zenLiveBotPresenceBody[data-render-detail="compact"]
-  [data-crt-glyph-layer="true"]::after {
-  content: none;
-  display: none;
-}
-
-.zenLiveBotPresenceBody[data-render-detail="compact"]
-  [data-crt-glyph-layer="true"] {
-  filter: none;
-  text-shadow: none;
 }
 
 .botAmbientPresenceRig:has(
@@ -28810,76 +29144,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   ) {
   animation: none;
   will-change: auto;
-}
-
-/* Runtime pressure applies the same progressive material cuts globally.
-   These rules intentionally never target the face glyph or its mouth part:
-   speech remains semantic even at the minimum decorative tier. */
-:global(html[data-prism-adaptive-quality="balanced"])
-  .botAmbientPresenceRig[data-motion-active="true"]
-  :is(.botAmbientPresenceBody, .botAmbientUnderglow),
-:global(html[data-prism-adaptive-quality="minimal"])
-  .botAmbientPresenceRig[data-motion-active="true"]
-  :is(.botAmbientPresenceBody, .botAmbientUnderglow),
-:global(html[data-prism-adaptive-quality="balanced"])
-  .zenLiveBotPresenceFaceEmissionMask,
-:global(html[data-prism-adaptive-quality="minimal"])
-  .zenLiveBotPresenceFaceEmissionMask {
-  animation: none !important;
-  will-change: auto;
-}
-
-:global(html[data-prism-adaptive-quality="balanced"])
-  :is(.botFaceCrtNoiseLayer, .botFaceCrtBreathingLayer),
-:global(html[data-prism-adaptive-quality="minimal"])
-  :is(.botFaceCrtNoiseLayer, .botFaceCrtBreathingLayer) {
-  display: none;
-}
-
-:global(html[data-prism-adaptive-quality="balanced"])
-  .botFaceCrtGrimeLayer,
-:global(html[data-prism-adaptive-quality="minimal"])
-  .botFaceCrtGrimeLayer {
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
-}
-
-:global(html[data-prism-adaptive-quality="minimal"])
-  :is(.botAmbientUnderglow, .botAmbientSpeakingLight),
-:global(html[data-prism-adaptive-quality="minimal"])
-  :is(.botFaceFrameLedAura, .botFaceFrameLedGlow),
-:global(html[data-prism-adaptive-quality="minimal"])
-  [data-avatar-details-emission="glow"] {
-  display: none;
-}
-
-:global(html[data-prism-adaptive-quality="minimal"])
-  .zenLiveBotPresenceFace,
-:global(html[data-prism-adaptive-quality="minimal"])
-  .zenLiveBotPresenceFace::before {
-  box-shadow: none;
-  filter: none;
-}
-
-:global(html[data-prism-adaptive-quality="minimal"])
-  .zenLiveBotPresenceFaceEmissionMask::before,
-:global(html[data-prism-adaptive-quality="minimal"])
-  .zenLiveBotPresenceFaceEmissionMask::after,
-:global(html[data-prism-adaptive-quality="minimal"])
-  .zenLiveBotPresenceBody
-  [data-crt-glyph-layer="true"]::before,
-:global(html[data-prism-adaptive-quality="minimal"])
-  .zenLiveBotPresenceBody
-  [data-crt-glyph-layer="true"]::after {
-  content: none;
-  display: none;
-}
-
-:global(html[data-prism-adaptive-quality="minimal"])
-  .zenLiveBotPresenceBody
-  [data-crt-glyph-layer="true"] {
-  filter: none;
-  text-shadow: none;
 }
 
 @keyframes botAmbientHoverDrift {
@@ -29032,7 +29296,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   /* The buckle's physical CRT field is larger than the persona mark painted
      on it. Size that field independently so its boundary can meet the inner
      bezel without scaling the glyph or changing the canonical cell pitch. */
-  --zen-live-bot-buckle-crt-screen-scale: 1.12;
+  --zen-live-bot-buckle-crt-screen-scale: 1.26;
   position: relative;
   z-index: 8;
   width: var(--zen-live-bot-avatar-size, clamp(156px, 14.8vw, 196px));
@@ -31399,42 +31663,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 /* A calculation reticle keeps authored face-like spinner frames from reading
    as a shrunken idle face. It belongs to presentation, not the saved glyph. */
-.zenLiveBotPresenceThinkingGlyphAnchor::before {
-  content: "";
-  position: absolute;
-  width: 1.9em;
-  height: 1.9em;
-  border: 1px dashed color-mix(in srgb, currentColor 72%, transparent);
-  border-left-color: transparent;
-  border-radius: 50%;
-  opacity: 0.58;
-  animation: coffeeThinkingReticle 2.4s steps(12, end) infinite;
-}
-
-.zenLiveBotPresenceThinkingGlyphAnchor::after {
-  content: "";
-  position: absolute;
-  width: 0.22em;
-  height: 0.22em;
-  right: -0.9em;
-  border-radius: 50%;
-  background: currentColor;
-  box-shadow: 0 0 0.45em currentColor;
-  opacity: 0.78;
-}
-
-@keyframes coffeeThinkingReticle {
-  to {
-    transform: rotate(1turn);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .zenLiveBotPresenceThinkingGlyphAnchor::before {
-    animation: none;
-  }
-}
-
 .zenLiveBotPresenceThinkingGlyph[data-coffee-plate-thinking-spinner="true"] {
   --zen-live-bot-spinner-glow-color: var(--coffee-bot-color);
   --crt-face-edge-color: var(--zen-live-bot-spinner-glow-color);
@@ -35301,8 +35529,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   );
   background-position: center;
   background-repeat: no-repeat;
-  /* Let the electrical loop sit just outside the pill, not inside its border. */
-  background-size: calc(100% + 8px) calc(100% + 8px);
+  /* Keep the loop tall enough to frame the pill, with extra horizontal reach
+     beyond its split-control ends. */
+  background-size: calc(100% + 20px) calc(100% + 8px);
   image-rendering: auto;
   mix-blend-mode: screen;
 }
@@ -36271,7 +36500,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   height: 18px;
 }
 
-.composeModelEffortTrigger[data-generating="true"] > .modelEffortIcon {
+.composeModelEffortTrigger[data-generating="true"] > .modelEffortIcon,
+.composeModelEffortTrigger[data-generating="true"]
+  > .modelEffortAutoIcon
+  > svg {
   animation: modelEffortThinkingSpin 1.2s linear infinite;
   transform-origin: center;
   will-change: transform;
@@ -36292,12 +36524,19 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .composeModelEffortTrigger[data-generating="true"]:hover:not(:disabled)
   > .modelEffortIcon,
 .composeModelEffortTrigger[data-generating="true"]:focus-visible
-  > .modelEffortIcon {
+  > .modelEffortIcon,
+.composeModelEffortTrigger[data-generating="true"]:hover:not(:disabled)
+  > .modelEffortAutoIcon,
+.composeModelEffortTrigger[data-generating="true"]:focus-visible
+  > .modelEffortAutoIcon {
   transform: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .composeModelEffortTrigger[data-generating="true"] > .modelEffortIcon {
+  .composeModelEffortTrigger[data-generating="true"] > .modelEffortIcon,
+  .composeModelEffortTrigger[data-generating="true"]
+    > .modelEffortAutoIcon
+    > svg {
     animation: none;
   }
 }
@@ -42013,6 +42252,16 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     calc(60px + env(safe-area-inset-top, 0px))
   );
   --bot-lobby-management-width: min(58vw, 1080px);
+  --bot-lobby-pane: color-mix(in srgb, var(--bg-surface) 92%, transparent);
+  --bot-lobby-bar: color-mix(in srgb, var(--bg-surface) 96%, transparent);
+  --bot-lobby-card: color-mix(in srgb, var(--bg) 58%, var(--bg-surface));
+  --bot-lobby-subtle: color-mix(in srgb, var(--bg) 72%, var(--bg-surface));
+  --bot-lobby-border: color-mix(
+    in srgb,
+    var(--line-strong) 70%,
+    transparent
+  );
+  --bot-lobby-shadow: color-mix(in srgb, #000000 80%, transparent);
   --panel-width: 100vw;
   top: var(--bot-lobby-nav-height);
   width: 100vw;
@@ -42037,7 +42286,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     var(--editor-bot-color) 22%,
     var(--line)
   );
-  background: color-mix(in srgb, var(--bg-surface) 90%, transparent);
+  background: var(--bot-lobby-pane);
   backdrop-filter: blur(18px);
   box-shadow: 0 12px 34px -30px #000000;
 }
@@ -42047,39 +42296,32 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   z-index: 102;
   width: var(--bot-lobby-management-width);
   min-width: 0;
+  min-height: 0;
   margin-left: auto;
-  padding: clamp(18px, 2.4vw, 34px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  align-content: stretch;
+  gap: 0;
+  padding: 0;
   overflow: hidden;
-  border-left: 1px solid
-    color-mix(in srgb, var(--editor-bot-color) 20%, var(--line));
-  background: color-mix(in srgb, var(--bg-surface) 78%, transparent);
+  border-left: 1px solid var(--bot-lobby-border);
+  background: var(--bot-lobby-pane);
   backdrop-filter: blur(18px);
   box-shadow: -28px 0 70px -58px #000000;
 }
 
 .panelBots[data-bot-panel-view="botHub"] .botPanelHubManagement {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: 14px;
-  row-gap: 14px;
-  padding: 0 5px 22px 0;
-}
-
-.panelBots[data-bot-panel-view="botHub"] .botPanelHubHero,
-.panelBots[data-bot-panel-view="botHub"] .botPanelHubTalkAction,
-.panelBots[data-bot-panel-view="botHub"] .botPanelHubSectionHeading,
-.panelBots[data-bot-panel-view="botHub"] .botPanelHubActions,
-.panelBots[data-bot-panel-view="botHub"] .botPanelHubComposer {
-  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  padding: 18px clamp(16px, 2.4vw, 34px) 22px;
+  overflow-y: auto;
 }
 
 .panelBots[data-bot-panel-view="botHub"] .botPanelHubActions {
   grid-template-columns: minmax(0, 1fr) minmax(220px, 0.46fr);
   align-items: start;
   gap: 14px;
-}
-
-.panelBots[data-bot-panel-view="botHub"] .botPanelHubComposer {
-  margin-top: 0;
 }
 
 .panelBots[data-bot-panel-view="home"],
@@ -44764,9 +45006,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   display: grid;
   gap: 8px;
   padding: 11px;
-  border: 1px solid color-mix(in srgb, var(--editor-bot-color) 25%, var(--line));
+  border: 1px solid var(--line);
   border-radius: 14px;
-  background: color-mix(in srgb, var(--bg-surface) 72%, transparent);
+  background: color-mix(in srgb, var(--bg) 58%, var(--bg-surface));
 }
 
 .botPanelHubMemberships > header {
@@ -44846,15 +45088,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   display: grid;
   gap: 8px;
   padding: 11px;
-  border: 1px solid color-mix(in srgb, var(--editor-bot-color) 25%, var(--line));
+  border: 1px solid var(--line);
   border-radius: 14px;
   background:
     radial-gradient(
       circle at 100% 0%,
-      color-mix(in srgb, var(--editor-bot-color) 12%, transparent),
+      color-mix(in srgb, var(--editor-bot-color) 7%, transparent),
       transparent 54%
     ),
-    color-mix(in srgb, var(--bg-surface) 72%, transparent);
+    color-mix(in srgb, var(--bg) 58%, var(--bg-surface));
 }
 
 .botPanelHubSuggestions > header {
@@ -45056,6 +45298,96 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   padding-right: 2px;
 }
 
+.botPanelHubSectionNav {
+  min-width: 0;
+  display: flex;
+  gap: 4px;
+  padding: 10px clamp(16px, 2.4vw, 34px);
+  border-bottom: 1px solid var(--line);
+  background: var(--bot-lobby-bar);
+}
+
+.botPanelHubSectionNav a {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 760;
+  text-decoration: none;
+}
+
+.botPanelHubSectionNav a:hover,
+.botPanelHubSectionNav a:focus-visible {
+  border-color: var(--line-strong);
+  background: color-mix(in srgb, var(--fg) 6%, var(--bg-surface));
+  color: var(--fg);
+  outline: none;
+}
+
+.botPanelHubSection {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  scroll-margin-top: 14px;
+}
+
+.botPanelHubSection:target {
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color) 48%, var(--line));
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--editor-bot-color) 6%, var(--bg-surface));
+}
+
+.botPanelHubOverviewLinks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.botPanelHubOverviewLinks a {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bot-lobby-subtle);
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.botPanelHubOverviewLinks a:hover,
+.botPanelHubOverviewLinks a:focus-visible {
+  border-color: var(--line-strong);
+  background: color-mix(in srgb, var(--editor-bot-color) 10%, var(--bg-surface));
+  outline: none;
+}
+
+.botPanelHubOverviewLinks strong {
+  font-size: 12px;
+  font-weight: 780;
+}
+
+.botPanelHubOverviewLinks small {
+  color: var(--fg-muted);
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+
+.botPanelHubComposerDock {
+  min-width: 0;
+  padding: 10px clamp(16px, 2.4vw, 34px) max(12px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+  background: var(--bot-lobby-bar);
+  box-shadow: 0 -12px 28px -28px var(--bot-lobby-shadow);
+}
+
 .botPanelHubTalkAction {
   -webkit-appearance: none;
   appearance: none;
@@ -45128,10 +45460,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   display: grid;
   gap: 10px;
   padding: 12px;
-  border: 1px solid
-    color-mix(in srgb, var(--editor-bot-color) 24%, var(--line));
+  border: 1px solid var(--line);
   border-radius: 16px;
-  background: color-mix(in srgb, var(--bg-surface) 76%, transparent);
+  background: var(--bot-lobby-card);
 }
 
 .botPanelHubModule > header,
@@ -45258,19 +45589,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botPanelHubComposer {
-  position: sticky;
-  z-index: 4;
-  bottom: -1px;
   display: grid;
   gap: 7px;
-  margin-top: 4px;
-  padding: 12px 2px 2px;
-  background: linear-gradient(
-    180deg,
-    transparent,
-    color-mix(in srgb, var(--bg) 94%, transparent) 18%,
-    var(--bg) 42%
-  );
+  margin: 0;
+  padding: 0;
 }
 
 .botPanelHubComposer > label {
@@ -45332,6 +45654,31 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .botPanelHubComposer > small {
   color: var(--fg-subtle);
   font-size: 9.5px;
+}
+
+@media (min-width: 821px) {
+  .panelBots[data-bot-panel-view="botHub"] #bot-lobby-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .panelBots[data-bot-panel-view="botHub"] #bot-lobby-overview > .botPanelHubHero,
+  .panelBots[data-bot-panel-view="botHub"] #bot-lobby-overview > .botPanelHubTalkAction,
+  .panelBots[data-bot-panel-view="botHub"] #bot-lobby-overview > .botPanelHubOverviewLinks {
+    grid-column: 1 / -1;
+  }
+
+  .panelBots[data-bot-panel-view="botHub"] #bot-lobby-library {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  .panelBots[data-bot-panel-view="botHub"] #bot-lobby-library > header {
+    grid-column: 1 / -1;
+  }
+
+  .panelBots[data-bot-panel-view="botHub"] #bot-lobby-library > .botPanelHubModule {
+    align-self: start;
+  }
 }
 
 .botPanelHubVoiceTest {
@@ -45734,24 +46081,31 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
   .panelBots[data-bot-panel-view="botHub"] > .botPanelHub {
     border-left: 0;
-    padding: 14px;
+    padding: 0;
   }
 
   .panelBots[data-bot-panel-view="botHub"] .botPanelHubManagement {
     grid-template-columns: minmax(0, 1fr);
-    padding-right: 2px;
+    gap: 16px;
+    padding: 14px 14px 18px;
   }
 
-  .panelBots[data-bot-panel-view="botHub"] .botPanelHubHero,
-  .panelBots[data-bot-panel-view="botHub"] .botPanelHubTalkAction,
-  .panelBots[data-bot-panel-view="botHub"] .botPanelHubSectionHeading,
-  .panelBots[data-bot-panel-view="botHub"] .botPanelHubActions,
-  .panelBots[data-bot-panel-view="botHub"] .botPanelHubComposer {
-    grid-column: 1;
+  .botPanelHubSectionNav {
+    overflow-x: auto;
+    padding: 9px 14px;
+    scrollbar-width: none;
   }
 
   .panelBots[data-bot-panel-view="botHub"] .botPanelHubActions {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .botPanelHubOverviewLinks {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .botPanelHubComposerDock {
+    padding: 9px 14px max(10px, env(safe-area-inset-bottom));
   }
 }
 
@@ -50418,6 +50772,7 @@ a.settingsCreditItem:focus-visible {
 /* Panel header traffic lights mirror the conversation-panel action buttons. */
 .panelHeaderIconButton.panelHeaderSaveButton,
 .panelHeaderIconButton.panelHeaderImportButton,
+.panelHeaderIconButton.panelHeaderCopyButton,
 .panelHeaderIconButton.panelHeaderDangerTrashButton,
 .panelHeaderIconButton.panelHeaderPrivateButton {
   width: 28px;
@@ -52665,30 +53020,52 @@ a.settingsCreditItem:focus-visible {
  * preview with its controls removed. The grid is indexed before work starts,
  * so concurrent model responses can only reveal their own waiting seed. */
 .botFoundryBatchChamber {
+  --batch-canvas: #05070b;
+  --batch-canvas-soft: #0a0f18;
+  --batch-panel: rgba(11, 16, 25, 0.84);
+  --batch-panel-strong: rgba(16, 23, 35, 0.92);
+  --batch-card: rgba(255, 255, 255, 0.035);
+  --batch-card-hover: rgba(255, 255, 255, 0.055);
+  --batch-line: rgba(204, 222, 255, 0.13);
+  --batch-line-strong: rgba(204, 222, 255, 0.22);
+  --batch-ink: #f1f5fc;
+  --batch-muted: #a6b3c8;
+  --batch-subtle: #7f8ca2;
   min-height: 100%;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  color: #e9eef7;
+  color: var(--batch-ink);
   background:
-    radial-gradient(circle at 72% 22%, rgba(84, 136, 255, 0.14), transparent 32%),
-    radial-gradient(circle at 42% 80%, rgba(142, 88, 255, 0.12), transparent 40%),
-    #05070b;
+    radial-gradient(circle at 76% 18%, rgba(80, 137, 255, 0.16), transparent 30%),
+    radial-gradient(circle at 48% 92%, rgba(151, 92, 255, 0.13), transparent 38%),
+    linear-gradient(135deg, var(--batch-canvas), var(--batch-canvas-soft));
 }
 
 .botFoundryBatchHeader {
-  min-height: 104px;
+  min-height: 118px;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 24px;
-  padding: 26px clamp(24px, 4vw, 62px) 20px;
-  border-bottom: 1px solid rgba(204, 222, 255, 0.12);
-  background: linear-gradient(180deg, rgba(8, 12, 20, 0.94), rgba(8, 12, 20, 0.54));
+  gap: clamp(24px, 4vw, 64px);
+  padding: 24px clamp(26px, 4vw, 64px);
+  border-bottom: 1px solid var(--batch-line);
+  background: color-mix(in srgb, var(--batch-panel-strong) 90%, transparent);
+  box-shadow: 0 14px 42px rgba(0, 0, 0, 0.14);
+  backdrop-filter: blur(18px) saturate(120%);
+  -webkit-backdrop-filter: blur(18px) saturate(120%);
 }
 
-.botFoundryBatchHeader > div:first-child > span,
-.botFoundryBatchConstellationHeading > span {
-  color: #a8b7d2;
+.botFoundryBatchTitle,
+.botFoundryBatchBriefHeading,
+.botFoundryBatchConstellationHeading > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.botFoundryBatchTitle > span,
+.botFoundryBatchBriefHeading > span,
+.botFoundryBatchConstellationHeading > div:first-child > span {
+  color: var(--batch-muted);
   font-size: 0.7rem;
   font-weight: 800;
   letter-spacing: 0.13em;
@@ -52696,16 +53073,64 @@ a.settingsCreditItem:focus-visible {
 }
 
 .botFoundryBatchHeader h3 {
-  margin: 4px 0 3px;
-  color: #f4f7ff;
+  margin: 0;
+  color: var(--batch-ink);
   font-size: clamp(1.45rem, 2.5vw, 2.15rem);
   letter-spacing: -0.035em;
 }
 
 .botFoundryBatchHeader p {
   margin: 0;
-  color: #9ca9be;
+  color: var(--batch-muted);
   font-size: 0.82rem;
+}
+
+.botFoundryBatchHeaderTools {
+  min-width: min(440px, 42vw);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: clamp(16px, 2.4vw, 34px);
+}
+
+.botFoundryBatchJourney {
+  min-width: 270px;
+  display: grid;
+  grid-template-columns: auto minmax(22px, 1fr) auto minmax(22px, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  color: var(--batch-subtle);
+  font-size: 0.64rem;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.botFoundryBatchJourney > i {
+  height: 1px;
+  background: linear-gradient(90deg, var(--batch-line-strong), var(--batch-line));
+}
+
+.botFoundryBatchJourney > span {
+  position: relative;
+  white-space: nowrap;
+}
+
+.botFoundryBatchJourney > span[data-current="true"] {
+  color: var(--batch-ink);
+}
+
+.botFoundryBatchJourney > span[data-current="true"]::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: -10px;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 72%, transparent);
+  transform: translateY(-50%);
 }
 
 .botFoundryBatchHeaderActions {
@@ -52715,17 +53140,30 @@ a.settingsCreditItem:focus-visible {
 }
 
 .botFoundryBatchHeaderActions > button {
-  width: 30px;
-  height: 30px;
-  padding: 0 0 2px;
-  color: #aeb9ca;
+  width: 38px;
+  height: 38px;
+  padding: 0 0 3px;
+  color: var(--batch-muted);
   font: inherit;
   font-size: 1.25rem;
   line-height: 1;
-  border: 1px solid rgba(204, 222, 255, 0.16);
-  border-radius: 9px;
-  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--batch-line);
+  border-radius: 11px;
+  background: var(--batch-card);
   cursor: pointer;
+  transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
+}
+
+.botFoundryBatchHeaderActions > button:hover:not(:disabled) {
+  color: var(--batch-ink);
+  border-color: var(--batch-line-strong);
+  background: var(--batch-card-hover);
+}
+
+.botFoundryBatchHeaderActions > button:focus-visible,
+.botFoundryBatchBrief :is(textarea, input, button):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 72%, white 12%);
+  outline-offset: 3px;
 }
 
 .botFoundryBatchHeaderActions > button:disabled {
@@ -52736,159 +53174,438 @@ a.settingsCreditItem:focus-visible {
 .botFoundryBatchWorkspace {
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  grid-template-columns: minmax(380px, 440px) minmax(0, 1fr);
+  gap: clamp(18px, 2.2vw, 34px);
+  padding: clamp(18px, 2.4vw, 36px);
 }
 
 .botFoundryBatchBrief {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 13px;
-  padding: 24px clamp(20px, 3vw, 42px);
+  gap: 14px;
+  padding: clamp(20px, 2vw, 28px);
   overflow-y: auto;
-  border-right: 1px solid rgba(204, 222, 255, 0.11);
-  background: rgba(9, 13, 21, 0.78);
+  border: 1px solid var(--batch-line);
+  border-radius: 22px;
+  background: linear-gradient(160deg, var(--batch-panel-strong), var(--batch-panel));
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 color-mix(in srgb, white 7%, transparent);
+  backdrop-filter: blur(18px) saturate(118%);
+  -webkit-backdrop-filter: blur(18px) saturate(118%);
+}
+
+.botFoundryBatchBriefHeading {
+  padding: 2px 2px 4px;
+}
+
+.botFoundryBatchBriefHeading strong {
+  color: var(--batch-ink);
+  font-size: 0.92rem;
+  font-weight: 650;
+  line-height: 1.35;
 }
 
 .botFoundryBatchBrief > label:not(.botGeneratorCountControl),
 .botFoundryBatchBrief .botGeneratorCountControl {
-  color: #cbd5e8;
+  color: var(--batch-ink);
 }
 
 .botFoundryBatchBrief textarea {
-  min-height: 154px;
-  color: #e9eef7;
-  border-color: rgba(204, 222, 255, 0.18);
-  background: rgba(0, 0, 0, 0.24);
+  width: 100%;
+  min-height: 168px;
+  resize: vertical;
+  padding: 14px 15px;
+  color: var(--batch-ink);
+  font: inherit;
+  font-size: 0.86rem;
+  line-height: 1.55;
+  border: 1px solid var(--batch-line-strong);
+  border-radius: 13px;
+  outline: none;
+  background: color-mix(in srgb, var(--batch-canvas) 64%, transparent);
+  box-shadow: inset 0 1px 10px rgba(0, 0, 0, 0.18);
+}
+
+.botFoundryBatchBrief textarea::placeholder {
+  color: var(--batch-subtle);
+}
+
+.botFoundryBatchBrief textarea:focus {
+  border-color: color-mix(in srgb, var(--accent) 66%, var(--batch-line-strong));
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--accent) 13%, transparent),
+    inset 0 1px 10px rgba(0, 0, 0, 0.16);
+}
+
+.botFoundryBatchPromptField {
+  display: grid;
+  gap: 8px;
+}
+
+.botFoundryBatchFieldHeading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.botFoundryBatchFieldHeading > label {
+  margin: 0;
+  color: var(--batch-ink);
+  font-size: 0.78rem;
+  font-weight: 740;
+}
+
+.botFoundryBatchFieldHeading > span {
+  color: var(--batch-subtle);
+  font-size: 0.66rem;
+  white-space: nowrap;
+}
+
+.botFoundryBatchBrief .botGeneratorPromptMeta {
+  margin-top: 0;
+  color: var(--batch-subtle);
+  font-size: 0.68rem;
+  line-height: 1.35;
 }
 
 .botFoundryBatchBrief .botGeneratorCountControl {
   margin: 0;
-  background: rgba(134, 164, 225, 0.06);
-  border-color: rgba(172, 196, 242, 0.16);
+  padding: 15px 16px;
+  border-color: var(--batch-line);
+  background: var(--batch-card);
+}
+
+.botFoundryBatchBrief .botGeneratorCountControl strong {
+  color: var(--batch-ink);
+  font-size: 0.8rem;
+}
+
+.botFoundryBatchBrief .botGeneratorCountControl small {
+  color: var(--batch-subtle);
+  line-height: 1.35;
+}
+
+.botFoundryBatchBrief .botGeneratorRangeRail {
+  color: var(--batch-muted);
+}
+
+.botFoundryBatchBrief .botGeneratorCountValue {
+  color: var(--batch-ink);
+  border-color: var(--batch-line-strong);
+  background: color-mix(in srgb, var(--accent) 9%, var(--batch-card));
 }
 
 .botFoundryBatchStatus {
+  position: relative;
   display: grid;
-  gap: 4px;
-  padding: 12px 13px;
-  border: 1px solid rgba(155, 194, 255, 0.22);
-  border-radius: 12px;
-  background: linear-gradient(135deg, rgba(90, 142, 255, 0.13), rgba(169, 97, 255, 0.07));
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  padding: 13px 15px 13px 18px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--batch-line));
+  border-radius: 14px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, var(--batch-card)), var(--batch-card));
+}
+
+.botFoundryBatchStatus::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 30%, transparent));
 }
 
 .botFoundryBatchStatus > span {
-  color: #aabbdc;
+  color: var(--batch-muted);
   font-size: 0.7rem;
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
-.botFoundryBatchStatus strong { font-size: 0.95rem; }
-.botFoundryBatchStatus small,
-.botFoundryBatchLeanNote { color: #9eabc0; font-size: 0.75rem; line-height: 1.42; }
-.botFoundryBatchLeanNote { margin: 0; }
+.botFoundryBatchStatus strong {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  align-self: center;
+  color: var(--batch-ink);
+  font-size: 0.86rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 
-.botFoundryBatchBrief > .botGeneratorPrimaryAction {
-  min-height: 42px;
+.botFoundryBatchStatus small,
+.botFoundryBatchLeanNote {
+  color: var(--batch-muted);
+  font-size: 0.72rem;
+  line-height: 1.42;
+}
+
+.botFoundryBatchLeanNote {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--batch-line);
+  border-radius: 13px;
+  background: var(--batch-card);
+}
+
+.botFoundryBatchBrief .botGeneratorPowerToggle {
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid var(--batch-line);
+  border-radius: 13px;
+  background: var(--batch-card);
+  cursor: pointer;
+}
+
+.botFoundryBatchBrief .botGeneratorPowerToggle:hover {
+  border-color: var(--batch-line-strong);
+  background: var(--batch-card-hover);
+}
+
+.botFoundryBatchBrief .botGeneratorPowerToggle strong {
+  color: var(--batch-ink);
+  font-size: 0.78rem;
+}
+
+.botFoundryBatchBrief .botGeneratorPowerToggle small {
+  color: var(--batch-muted);
+}
+
+.botFoundryBatchBriefFooter {
+  display: grid;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.botFoundryBatchBriefFooter > .botGeneratorPrimaryAction {
+  min-height: 48px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  margin-top: auto;
-  padding: 0 15px;
+  width: 100%;
+  padding: 0 18px;
   color: var(--accent-contrast, #ffffff);
   font: inherit;
-  font-size: 0.82rem;
-  font-weight: 720;
+  font-size: 0.84rem;
+  font-weight: 760;
   border: 1px solid color-mix(in srgb, var(--accent) 82%, #ffffff 8%);
-  border-radius: 10px;
-  background: var(--accent);
-  box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 22%, transparent);
+  border-radius: 13px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 94%, white 6%), var(--accent));
+  box-shadow: 0 12px 28px color-mix(in srgb, var(--accent) 25%, transparent);
   cursor: pointer;
+  transition: transform 140ms ease, filter 140ms ease, box-shadow 140ms ease;
 }
 
-.botFoundryBatchBrief > .botGeneratorPrimaryAction:disabled { opacity: 0.52; cursor: wait; }
+.botFoundryBatchBriefFooter > .botGeneratorPrimaryAction:hover:not(:disabled) {
+  filter: brightness(1.06);
+  box-shadow: 0 15px 34px color-mix(in srgb, var(--accent) 31%, transparent);
+  transform: translateY(-1px);
+}
+
+.botFoundryBatchBriefFooter > .botGeneratorPrimaryAction:disabled {
+  opacity: 0.48;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.botFoundryBatchBriefFooter > small {
+  color: var(--batch-subtle);
+  font-size: 0.66rem;
+  line-height: 1.35;
+  text-align: center;
+}
 
 .botFoundryBatchConstellation {
   min-width: 0;
   min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 16px;
-  padding: 24px clamp(18px, 3.6vw, 52px);
+  gap: 14px;
 }
 
-.botFoundryBatchConstellationHeading { display: grid; gap: 5px; }
-.botFoundryBatchConstellationHeading strong { max-width: 64ch; color: #dbe4f3; font-size: 0.88rem; font-weight: 580; line-height: 1.45; }
+.botFoundryBatchConstellationHeading {
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 0 4px;
+}
 
-.botFoundryBatchSlotGrid {
+.botFoundryBatchConstellationHeading strong {
+  max-width: 64ch;
+  color: var(--batch-ink);
+  font-size: 0.87rem;
+  font-weight: 590;
+  line-height: 1.45;
+}
+
+.botFoundryBatchStageSummary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.botFoundryBatchStageSummary > span {
+  min-height: 27px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  color: var(--batch-muted);
+  font-size: 0.65rem;
+  font-weight: 720;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--batch-line);
+  border-radius: 999px;
+  background: var(--batch-card);
+  white-space: nowrap;
+}
+
+.botFoundryBatchStage {
+  position: relative;
+  min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
-  align-content: start;
-  gap: 11px;
-  padding: 4px 6px 18px 2px;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+  padding: clamp(18px, 2.5vw, 34px);
+  overflow: hidden;
+  border: 1px solid var(--batch-line);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 50% 46%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 34%),
+    linear-gradient(var(--batch-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--batch-line) 1px, transparent 1px),
+    color-mix(in srgb, var(--batch-panel) 66%, transparent);
+  background-size: auto, 44px 44px, 44px 44px, auto;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 6%, transparent),
+    0 24px 80px rgba(0, 0, 0, 0.12);
+}
+
+.botFoundryBatchStage::before,
+.botFoundryBatchStage::after {
+  content: "";
+  position: absolute;
+  width: 240px;
+  height: 240px;
+  border: 1px solid color-mix(in srgb, var(--accent) 12%, transparent);
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+.botFoundryBatchStage::before {
+  top: -155px;
+  right: -80px;
+}
+
+.botFoundryBatchStage::after {
+  bottom: -185px;
+  left: -50px;
+}
+
+.botFoundryBatchStageCue {
+  position: relative;
+  z-index: 1;
+  justify-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  color: var(--batch-muted);
+  font-size: 0.68rem;
+  border: 1px solid var(--batch-line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--batch-panel-strong) 78%, transparent);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+}
+
+.botFoundryBatchStageCue svg {
+  color: color-mix(in srgb, var(--accent) 76%, var(--batch-ink));
+}
+
+.botFoundryBatchSlotGrid {
+  position: relative;
+  z-index: 1;
+  grid-row: 2;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 154px));
+  align-content: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 12px;
   overflow: auto;
 }
 
 .botFoundryBatchSlot {
   position: relative;
-  min-height: 112px;
+  min-width: 0;
+  min-height: 126px;
   display: grid;
   grid-template-rows: 1fr auto;
   place-items: center;
-  gap: 5px;
-  padding: 11px 7px 8px;
-  border: 1px solid rgba(204, 222, 255, 0.1);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.025);
+  gap: 8px;
+  padding: 18px 10px 11px;
+  border: 1px solid var(--batch-line);
+  border-radius: 18px;
+  background: linear-gradient(155deg, var(--batch-card-hover), var(--batch-card));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 5%, transparent);
 }
 
 .botFoundryBatchSlot[data-slot-state="complete"] {
-  border-color: color-mix(in srgb, var(--bot-foundry-slot-color) 46%, rgba(204, 222, 255, 0.17));
-  background: color-mix(in srgb, var(--bot-foundry-slot-color) 9%, rgba(255, 255, 255, 0.025));
+  border-color: color-mix(in srgb, var(--bot-foundry-slot-color) 48%, var(--batch-line));
+  background: linear-gradient(155deg, color-mix(in srgb, var(--bot-foundry-slot-color) 13%, var(--batch-card-hover)), var(--batch-card));
   animation: botFoundryBatchReveal 420ms cubic-bezier(.2, .75, .25, 1) both;
 }
 
-.botFoundryBatchSlot[data-slot-state="failed"] { border-color: rgba(255, 145, 145, 0.38); background: rgba(255, 103, 103, 0.055); }
+.botFoundryBatchSlot[data-slot-state="failed"] {
+  border-color: rgba(255, 145, 145, 0.42);
+  background: rgba(255, 103, 103, 0.065);
+}
 
 .botFoundryBatchSlotIndex {
   position: absolute;
-  top: 7px;
-  left: 8px;
-  color: #73819a;
+  top: 9px;
+  left: 11px;
+  color: var(--batch-subtle);
   font-size: 0.63rem;
   font-variant-numeric: tabular-nums;
 }
 
 .botFoundryBatchSeed {
-  width: 18px;
-  height: 18px;
-  border: 1px solid rgba(186, 204, 236, 0.32);
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--batch-line-strong);
   border-radius: 999px;
-  background: radial-gradient(circle, rgba(209, 223, 250, 0.35) 0 12%, transparent 14%);
-  box-shadow: 0 0 0 5px rgba(168, 190, 235, 0.035), 0 0 18px rgba(142, 170, 255, 0.09);
+  background: radial-gradient(circle, var(--batch-muted) 0 11%, transparent 13%);
+  box-shadow:
+    0 0 0 7px color-mix(in srgb, var(--batch-muted) 5%, transparent),
+    0 0 22px color-mix(in srgb, var(--accent) 13%, transparent);
 }
 
 .botFoundryBatchSlotLabel {
   width: 100%;
   overflow: hidden;
-  color: #aebbd0;
-  font-size: 0.68rem;
+  color: var(--batch-muted);
+  font-size: 0.7rem;
+  font-weight: 620;
   line-height: 1.15;
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.botFoundryBatchSlot[data-slot-state="complete"] .botFoundryBatchSlotLabel { color: #eff4ff; }
+.botFoundryBatchSlot[data-slot-state="complete"] .botFoundryBatchSlotLabel { color: var(--batch-ink); }
 .botFoundryBatchSlot[data-slot-state="failed"] .botFoundryBatchSlotLabel { color: #ffc0c0; }
 
 .botFoundryBatchMiniAvatar {
-  width: 66px;
-  height: 66px;
+  width: 76px;
+  height: 76px;
   max-width: 100%;
   max-height: 100%;
 }
@@ -52908,21 +53625,192 @@ a.settingsCreditItem:focus-visible {
 .botFoundryBatchMicroAvatar { transform: scale(0.86); }
 .botFoundryBatchOrbGlyph { position: absolute; right: -4px; bottom: -4px; display: grid; place-items: center; width: 18px; height: 18px; color: var(--bot-foundry-slot-color); border: 1px solid color-mix(in srgb, var(--bot-foundry-slot-color) 45%, #0b0d13); border-radius: 999px; background: #0b0d13; }
 
+.botFoundryBatchSlotGrid[data-batch-slot-count="2"] {
+  grid-template-columns: repeat(2, minmax(210px, 250px));
+  gap: clamp(20px, 3vw, 42px);
+}
+
+.botFoundryBatchSlotGrid[data-batch-slot-count="2"] .botFoundryBatchSlot {
+  min-height: clamp(220px, 31vh, 290px);
+  border-radius: 24px;
+}
+
+.botFoundryBatchSlotGrid[data-batch-slot-count="2"] .botFoundryBatchMiniAvatar {
+  width: 132px;
+  height: 132px;
+}
+
+.botFoundryBatchSlotGrid:is(
+  [data-batch-slot-count="3"],
+  [data-batch-slot-count="4"]
+) {
+  grid-template-columns: repeat(auto-fit, minmax(165px, 210px));
+  gap: clamp(14px, 2vw, 26px);
+}
+
+.botFoundryBatchSlotGrid:is(
+  [data-batch-slot-count="3"],
+  [data-batch-slot-count="4"]
+) .botFoundryBatchSlot {
+  min-height: clamp(178px, 24vh, 230px);
+}
+
+.botFoundryBatchSlotGrid:is(
+  [data-batch-slot-count="3"],
+  [data-batch-slot-count="4"]
+) .botFoundryBatchMiniAvatar {
+  width: 104px;
+  height: 104px;
+}
+
+.botFoundryBatchChamber[data-avatar-render-tier="micro"] .botFoundryBatchSlotGrid {
+  grid-template-columns: repeat(auto-fill, minmax(82px, 1fr));
+  align-content: start;
+  justify-content: stretch;
+  gap: 9px;
+}
+
+.botFoundryBatchChamber[data-avatar-render-tier="micro"] .botFoundryBatchSlot {
+  min-height: 100px;
+  padding: 14px 7px 8px;
+  border-radius: 14px;
+}
+
+.themeLight.botAvatarStudioThemeScope .botFoundryBatchChamber {
+  --batch-canvas: #edf3f8;
+  --batch-canvas-soft: #f7f9fc;
+  --batch-panel: rgba(247, 250, 253, 0.84);
+  --batch-panel-strong: rgba(255, 255, 255, 0.93);
+  --batch-card: rgba(59, 85, 111, 0.045);
+  --batch-card-hover: rgba(59, 85, 111, 0.075);
+  --batch-line: rgba(67, 91, 116, 0.14);
+  --batch-line-strong: rgba(67, 91, 116, 0.23);
+  --batch-ink: #172638;
+  --batch-muted: #5d7085;
+  --batch-subtle: #7c8c9e;
+  background:
+    radial-gradient(circle at 76% 18%, rgba(104, 157, 207, 0.17), transparent 31%),
+    radial-gradient(circle at 45% 92%, rgba(189, 158, 210, 0.17), transparent 39%),
+    linear-gradient(135deg, var(--batch-canvas), var(--batch-canvas-soft));
+}
+
+.themeLight.botAvatarStudioThemeScope .botFoundryBatchHeader {
+  box-shadow: 0 14px 42px rgba(53, 73, 94, 0.08);
+}
+
+.themeLight.botAvatarStudioThemeScope .botFoundryBatchBrief,
+.themeLight.botAvatarStudioThemeScope .botFoundryBatchStage {
+  box-shadow:
+    0 24px 68px rgba(53, 73, 94, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.88);
+}
+
+.themeLight.botAvatarStudioThemeScope .botFoundryBatchBrief textarea {
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: inset 0 1px 6px rgba(53, 73, 94, 0.08);
+}
+
+.themeLight.botAvatarStudioThemeScope .botFoundryBatchStage {
+  background:
+    radial-gradient(circle at 50% 46%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 34%),
+    linear-gradient(var(--batch-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--batch-line) 1px, transparent 1px),
+    rgba(255, 255, 255, 0.48);
+  background-size: auto, 44px 44px, 44px 44px, auto;
+}
+
+.themeLight.botAvatarStudioThemeScope .botFoundryBatchStageCue {
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: 0 8px 24px rgba(53, 73, 94, 0.08);
+}
+
+.themeLight.botAvatarStudioThemeScope .botFoundryBatchSlot {
+  box-shadow:
+    0 12px 28px rgba(53, 73, 94, 0.065),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.themeLight.botAvatarStudioThemeScope .botFoundryBatchSlot[data-slot-state="failed"] .botFoundryBatchSlotLabel {
+  color: #a43f4f;
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botFoundryBatchBrief
+  .botGeneratorRange::-webkit-slider-runnable-track {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 70%, #ffffff 12%) 0%,
+    color-mix(in srgb, var(--accent) 70%, #ffffff 12%)
+      var(--bot-foundry-batch-count-progress),
+    rgba(50, 74, 98, 0.14) var(--bot-foundry-batch-count-progress)
+  );
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botFoundryBatchBrief
+  .botGeneratorRange::-moz-range-track {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 70%, #ffffff 12%) 0%,
+    color-mix(in srgb, var(--accent) 70%, #ffffff 12%)
+      var(--bot-foundry-batch-count-progress),
+    rgba(50, 74, 98, 0.14) var(--bot-foundry-batch-count-progress)
+  );
+}
+
 @keyframes botFoundryBatchReveal { from { opacity: 0; transform: scale(0.88); } to { opacity: 1; transform: scale(1); } }
 
 @media (prefers-reduced-motion: reduce) {
   .botFoundryBatchSlot[data-slot-state="complete"] { animation: none; }
+  .botFoundryBatchBriefFooter > .botGeneratorPrimaryAction { transition: none; }
+}
+
+@media (max-width: 1180px) {
+  .botFoundryBatchHeaderTools { min-width: 0; }
+  .botFoundryBatchJourney { display: none; }
+  .botFoundryBatchWorkspace { grid-template-columns: minmax(340px, 390px) minmax(0, 1fr); }
+  .botFoundryBatchStageSummary > span:last-child { display: none; }
+  .botFoundryBatchSlotGrid[data-batch-slot-count="2"] { grid-template-columns: repeat(2, minmax(155px, 210px)); }
+}
+
+@media (max-width: 900px) {
+  .botFoundryBatchWorkspace {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(360px, 1fr);
+    overflow-y: auto;
+  }
+
+  .botFoundryBatchBrief { overflow: visible; }
+  .botFoundryBatchConstellation { min-height: 520px; }
 }
 
 @media (max-width: 760px) {
-  .botFoundryBatchHeader { min-height: 0; padding: 18px 18px 15px; }
+  .botFoundryBatchHeader { min-height: 0; padding: 16px 18px; }
   .botFoundryBatchHeader p { display: none; }
-  .botFoundryBatchWorkspace { grid-template-columns: 1fr; grid-template-rows: auto minmax(260px, 1fr); }
-  .botFoundryBatchBrief { max-height: 48dvh; padding: 18px; border-right: 0; border-bottom: 1px solid rgba(204, 222, 255, 0.11); }
-  .botFoundryBatchConstellation { padding: 18px; }
-  .botFoundryBatchSlotGrid { grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 8px; }
+  .botFoundryBatchHeaderTools { flex: none; }
+  .botFoundryBatchWorkspace { gap: 14px; padding: 14px; }
+  .botFoundryBatchBrief { padding: 18px; border-radius: 18px; }
+  .botFoundryBatchConstellation { min-height: 440px; }
+  .botFoundryBatchConstellationHeading { align-items: flex-start; }
+  .botFoundryBatchStageSummary { display: none; }
+  .botFoundryBatchStage { padding: 14px; border-radius: 18px; }
+  .botFoundryBatchSlotGrid { grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); align-content: start; gap: 8px; padding: 8px; }
   .botFoundryBatchSlot { min-height: 96px; padding: 9px 5px 7px; }
   .botFoundryBatchMiniAvatar { width: 55px; height: 55px; }
+  .botFoundryBatchSlotGrid[data-batch-slot-count="2"] { grid-template-columns: repeat(2, minmax(120px, 1fr)); gap: 10px; }
+  .botFoundryBatchSlotGrid[data-batch-slot-count="2"] .botFoundryBatchSlot { min-height: 170px; }
+  .botFoundryBatchSlotGrid[data-batch-slot-count="2"] .botFoundryBatchMiniAvatar { width: 90px; height: 90px; }
+}
+
+@media (max-width: 520px) {
+  .botFoundryBatchHeader h3 { font-size: 1.22rem; }
+  .botFoundryBatchHeaderActions .botGeneratorModeBadge { display: none; }
+  .botFoundryBatchFieldHeading > span { display: none; }
+  .botFoundryBatchBrief .botGeneratorCountControl { grid-template-columns: 1fr; }
+  .botFoundryBatchBrief .botGeneratorCountValue { justify-self: start; }
+  .botFoundryBatchStatus { grid-template-columns: 1fr; }
+  .botFoundryBatchStatus strong { grid-row: auto; grid-column: auto; }
+  .botFoundryBatchSlotGrid[data-batch-slot-count="2"] { grid-template-columns: 1fr; }
 }
 
 .botGeneratedBriefCard p {
@@ -54435,12 +55323,21 @@ a.settingsCreditItem:focus-visible {
   font-weight: 760;
 }
 
-.botPowerSourcePrompt p {
+.botPowerSourcePrompt p,
+.botPowerSourcePrompt textarea {
   margin: 0;
   color: var(--fg);
   font-size: 12px;
   line-height: 1.45;
   white-space: pre-wrap;
+}
+
+.botPowerSourcePrompt textarea {
+  width: 100%;
+  resize: vertical;
+  border: 0;
+  background: transparent;
+  font: inherit;
 }
 
 .botPowerSourcePrompt small {
@@ -65977,14 +66874,13 @@ a.settingsCreditItem:focus-visible {
     );
 }
 
-.themeLight .messagesFrame[data-mode="home"],
-.themeLight .messagesFrame[data-mode="directory"] {
+.themeLight .homeDirectoryAtmospherePainter {
   background:
     radial-gradient(
       ellipse 78% 58% at var(--home-halo-1-x, 10%) 18%,
       color-mix(
         in srgb,
-        var(--home-halo-1-visible-color, #ff4d6d) 4.5%,
+        var(--home-halo-1-visible-color, #ff4d6d) 13%,
         transparent
       ),
       transparent 68%
@@ -65993,7 +66889,7 @@ a.settingsCreditItem:focus-visible {
       ellipse 82% 56% at var(--home-halo-2-x, 34%) 4%,
       color-mix(
         in srgb,
-        var(--home-halo-2-visible-color, #ff9f1c) 3.5%,
+        var(--home-halo-2-visible-color, #ff9f1c) 11%,
         transparent
       ),
       transparent 70%
@@ -66002,7 +66898,7 @@ a.settingsCreditItem:focus-visible {
       ellipse 86% 60% at var(--home-halo-3-x, 52%) 50%,
       color-mix(
         in srgb,
-        var(--home-halo-3-visible-color, #b7e63a) 2.75%,
+        var(--home-halo-3-visible-color, #b7e63a) 9%,
         transparent
       ),
       transparent 72%
@@ -66011,7 +66907,7 @@ a.settingsCreditItem:focus-visible {
       ellipse 82% 58% at var(--home-halo-4-x, 72%) 16%,
       color-mix(
         in srgb,
-        var(--home-halo-4-visible-color, #2fd3e3) 4%,
+        var(--home-halo-4-visible-color, #2fd3e3) 12%,
         transparent
       ),
       transparent 70%
@@ -66020,7 +66916,7 @@ a.settingsCreditItem:focus-visible {
       ellipse 80% 60% at var(--home-halo-5-x, 92%) 40%,
       color-mix(
         in srgb,
-        var(--home-halo-5-visible-color, #7b5cff) 4%,
+        var(--home-halo-5-visible-color, #7b5cff) 12%,
         transparent
       ),
       transparent 72%
@@ -66520,6 +67416,12 @@ a.settingsCreditItem:focus-visible {
 }
 
 .themeLight .panel.panelBots[data-bot-panel-view="botHub"] {
+  --bot-lobby-pane: color-mix(in srgb, #ffffff 92%, #eee9e4 8%);
+  --bot-lobby-bar: color-mix(in srgb, #ffffff 96%, #f2eeea 4%);
+  --bot-lobby-card: color-mix(in srgb, #ffffff 82%, #ebe6e1 18%);
+  --bot-lobby-subtle: color-mix(in srgb, #ffffff 70%, #ece7e2 30%);
+  --bot-lobby-border: rgba(44, 38, 34, 0.16);
+  --bot-lobby-shadow: rgba(30, 25, 22, 0.3);
   background: transparent;
 }
 
@@ -69396,8 +70298,8 @@ a.settingsCreditItem:focus-visible {
 }
 
 /*
- * Wraps the title button + a delete button that swaps in for the duration on
- * hover/focus, mirroring the Chat sidebar pattern.
+ * Wraps the title button + review-copy and delete buttons that swap in for the
+ * duration on hover/focus, mirroring the Chat sidebar pattern.
  */
 .coffeeGroupSessionRow {
   position: relative;
@@ -69443,10 +70345,10 @@ a.settingsCreditItem:focus-visible {
   transition: opacity 120ms ease;
 }
 
+.coffeeGroupSessionCopyButton,
 .coffeeGroupSessionDeleteButton {
   position: absolute;
   top: 50%;
-  right: 6px;
   width: 18px;
   height: 18px;
   display: inline-grid;
@@ -69470,6 +70372,22 @@ a.settingsCreditItem:focus-visible {
     border-color 120ms ease;
 }
 
+.coffeeGroupSessionCopyButton {
+  right: 28px;
+}
+
+.coffeeGroupSessionDeleteButton {
+  right: 6px;
+}
+
+.coffeeGroupSessionCopyButton svg {
+  width: 10px;
+  height: 10px;
+}
+
+.coffeeGroupSessionRow:hover .coffeeGroupSessionCopyButton,
+.coffeeGroupSessionRow:focus-within .coffeeGroupSessionCopyButton,
+.coffeeGroupSessionCopyButton:focus-visible,
 .coffeeGroupSessionRow:hover .coffeeGroupSessionDeleteButton,
 .coffeeGroupSessionRow:focus-within .coffeeGroupSessionDeleteButton,
 .coffeeGroupSessionDeleteButton:focus-visible {
@@ -69481,6 +70399,20 @@ a.settingsCreditItem:focus-visible {
 .coffeeGroupSessionRow:hover .coffeeGroupSessionDuration,
 .coffeeGroupSessionRow:focus-within .coffeeGroupSessionDuration {
   opacity: 0;
+}
+
+.coffeeGroupSessionCopyButton:hover:not(:disabled),
+.coffeeGroupSessionCopyButton:focus-visible,
+.coffeeGroupSessionCopyButton[data-copy-state="copied"] {
+  outline: none;
+  color: #ffffff;
+  border-color: rgba(120, 200, 255, 0.55);
+  background: rgba(38, 119, 176, 0.45);
+  transform: translateY(-50%) scale(1.06);
+}
+
+.coffeeGroupSessionCopyButton:disabled {
+  cursor: wait;
 }
 
 .coffeeGroupSessionDeleteButton:hover,
@@ -69672,7 +70604,7 @@ a.settingsCreditItem:focus-visible {
   overflow-y: hidden;
 }
 
-.coffeeWorkspace[data-mode="group-setup"] {
+.coffeeWorkspace:is([data-mode="group-home"], [data-mode="table-setup"]) {
   align-content: stretch;
   grid-template-rows: minmax(0, 1fr) auto;
   row-gap: clamp(10px, 1.5vw, 14px);
@@ -69701,7 +70633,8 @@ a.settingsCreditItem:focus-visible {
   overflow: hidden;
 }
 
-.coffeeWorkspace[data-mode="group-setup"] .coffeeStage {
+.coffeeWorkspace:is([data-mode="group-home"], [data-mode="table-setup"])
+  .coffeeStage {
   align-self: stretch;
   min-height: 0;
 }
@@ -69928,7 +70861,8 @@ a.settingsCreditItem:focus-visible {
   min-height: clamp(300px, 38vh, 420px);
 }
 
-.coffeeWorkspace[data-mode="group-setup"] .coffeeTableCanvas {
+.coffeeWorkspace:is([data-mode="group-home"], [data-mode="table-setup"])
+  .coffeeTableCanvas {
   align-self: stretch;
   place-items: center;
   height: 100%;
@@ -69945,7 +70879,7 @@ a.settingsCreditItem:focus-visible {
   flex: 0 0 auto;
 }
 
-.coffeeWorkspace[data-mode="group-setup"]
+.coffeeWorkspace:is([data-mode="group-home"], [data-mode="table-setup"])
   .coffeeTableCanvas
   > .coffeeTableScene {
   align-self: center;
@@ -70491,6 +71425,64 @@ a.settingsCreditItem:focus-visible {
   pointer-events: none;
 }
 
+.coffeeContextSparkChip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + clamp(8px, 0.8vw, 12px));
+  z-index: 21;
+  max-width: min(420px, 58vw);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 5px 6px 5px 11px;
+  border: 1px solid color-mix(in srgb, var(--accent, #fff) 34%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-surface, #0b0b0b) 91%, transparent);
+  color: var(--text-primary, rgba(255, 255, 255, 0.88));
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(15px);
+  pointer-events: auto;
+  transform: translateX(-50%);
+  font-size: 0.72rem;
+  font-weight: 720;
+  text-transform: capitalize;
+}
+
+.coffeeContextSparkChip > span:nth-child(2) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coffeeContextSparkChip button {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  cursor: pointer;
+}
+
+.coffeeContextSparkChip button:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.coffeeContextSparkChip button:focus-visible {
+  outline: 2px solid var(--accent, #fff);
+  outline-offset: 1px;
+}
+
+.coffeeContextSparkChip svg {
+  width: 13px;
+  height: 13px;
+}
+
 .coffeeShhControl {
   position: absolute;
   right: clamp(18px, 2.2vw, 30px);
@@ -70946,6 +71938,216 @@ a.settingsCreditItem:focus-visible {
   flex: 1 1 auto;
   isolation: isolate;
   transform: translateY(var(--coffee-canvas-y));
+}
+
+.coffeeContextSparkLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  pointer-events: none;
+  transition: opacity 220ms ease;
+}
+
+.coffeeContextSparkLayer[data-receded="true"] {
+  opacity: 0.2;
+}
+
+.coffeeContextSparkCue {
+  position: absolute;
+  left: 50%;
+  top: 8%;
+  margin: 0;
+  padding: 7px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-surface, #0a0a0a) 88%, transparent);
+  color: var(--text-muted, rgba(255, 255, 255, 0.66));
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(14px);
+  transform: translateX(-50%);
+  font-size: 0.68rem;
+  pointer-events: none;
+}
+
+.coffeeContextSpark {
+  position: absolute;
+  width: clamp(190px, 20vw, 290px);
+  min-height: 64px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  border: 1px solid
+    color-mix(in srgb, var(--coffee-context-spark-color) 52%, rgba(255, 255, 255, 0.15));
+  border-radius: 18px;
+  background:
+    radial-gradient(
+      circle at 12% 10%,
+      color-mix(in srgb, var(--coffee-context-spark-color) 22%, transparent),
+      transparent 56%
+    ),
+    color-mix(in srgb, var(--bg-surface, #111) 90%, transparent);
+  box-shadow:
+    0 18px 44px rgba(0, 0, 0, 0.28),
+    0 0 30px -18px var(--coffee-context-spark-color);
+  backdrop-filter: blur(18px) saturate(1.12);
+  pointer-events: auto;
+  overflow: hidden;
+  animation: coffee-context-spark-arrive 360ms cubic-bezier(0.2, 0.9, 0.24, 1)
+    both;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease,
+    border-color 180ms ease;
+}
+
+.coffeeContextSpark[data-position="0"] {
+  left: clamp(12px, 2.5%, 34px);
+  top: 20%;
+}
+
+.coffeeContextSpark[data-position="1"] {
+  right: clamp(12px, 2.5%, 34px);
+  top: 32%;
+}
+
+.coffeeContextSpark[data-position="2"] {
+  left: clamp(24px, 5%, 68px);
+  bottom: 17%;
+}
+
+.coffeeContextSpark[data-armed="true"] {
+  border-color: var(--coffee-context-spark-color);
+  box-shadow:
+    0 20px 48px rgba(0, 0, 0, 0.32),
+    0 0 38px -14px var(--coffee-context-spark-color);
+}
+
+.coffeeContextSparkMain {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 24px 38px minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
+  padding: 10px 4px 10px 11px;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary, #f5f5f5);
+  text-align: left;
+  cursor: pointer;
+}
+
+.coffeeContextSparkMain:disabled,
+.coffeeContextSparkDismiss:disabled {
+  cursor: default;
+}
+
+.coffeeContextSparkApplet {
+  display: grid;
+  place-items: center;
+  color: var(--coffee-context-spark-color);
+}
+
+.coffeeContextSparkApplet svg {
+  width: 17px;
+  height: 17px;
+}
+
+.coffeeContextSparkBot {
+  width: 38px;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--coffee-context-spark-color) 26%, #090909);
+  border: 1px solid color-mix(in srgb, var(--coffee-context-spark-color) 70%, transparent);
+  color: color-mix(in srgb, var(--coffee-context-spark-color) 78%, white);
+  font-size: 1.15rem;
+  font-weight: 820;
+  text-shadow: 0 0 10px var(--coffee-context-spark-color);
+}
+
+.coffeeContextSparkCopy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.coffeeContextSparkCopy strong,
+.coffeeContextSparkCopy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.coffeeContextSparkCopy strong {
+  font-size: 0.78rem;
+  line-height: 1.25;
+}
+
+.coffeeContextSparkCopy small {
+  color: var(--text-muted, rgba(255, 255, 255, 0.58));
+  font-size: 0.64rem;
+  white-space: nowrap;
+}
+
+.coffeeContextSparkDismiss {
+  width: 32px;
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  background: transparent;
+  color: var(--text-muted, rgba(255, 255, 255, 0.5));
+  cursor: pointer;
+}
+
+.coffeeContextSparkDismiss svg {
+  width: 14px;
+  height: 14px;
+}
+
+.coffeeContextSparkMain:hover:not(:disabled),
+.coffeeContextSparkDismiss:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--coffee-context-spark-color) 11%, transparent);
+}
+
+.coffeeContextSparkMain:focus-visible,
+.coffeeContextSparkDismiss:focus-visible {
+  outline: 2px solid var(--coffee-context-spark-color);
+  outline-offset: -3px;
+}
+
+@keyframes coffee-context-spark-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 900px) {
+  .coffeeContextSpark {
+    width: min(220px, 43vw);
+  }
+
+  .coffeeContextSpark[data-position="0"] {
+    top: 12%;
+  }
+
+  .coffeeContextSpark[data-position="1"] {
+    top: 22%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coffeeContextSpark,
+  .coffeeContextSparkLayer {
+    animation: none;
+    transition-duration: 80ms;
+  }
 }
 
 /* Banner + center card + topic chips — one vertical stack centered on the table. */
@@ -73283,9 +74485,9 @@ a.settingsCreditItem:focus-visible {
   );
   aspect-ratio: 1;
   flex-shrink: 0;
-  isolation: isolate;
+  isolation: auto;
   overflow: visible;
-  transition: transform 140ms ease;
+  transition: none;
 }
 
 @supports (width: 1cqw) {
@@ -73308,7 +74510,7 @@ a.settingsCreditItem:focus-visible {
   --bot-face-frame-opacity: 1;
   --coffee-seat-plate-shift-x: clamp(-13px, -0.82vw, -8px);
   position: absolute;
-  isolation: isolate;
+  isolation: auto;
   inset: 0;
   z-index: 1;
   box-sizing: border-box;
@@ -75772,6 +76974,7 @@ a.settingsCreditItem:focus-visible {
 .coffeeSeat[data-replay-review-enabled="true"]:focus-visible
   .coffeeSeatCluster {
   transform: translateY(-2px) scale(1.025);
+  transition: transform 140ms ease;
 }
 
 .coffeeSeat[data-replay-review-enabled="true"]:hover .coffeeSeatGlowPill,
@@ -76460,49 +77663,6 @@ a.settingsCreditItem:focus-visible {
   pointer-events: none;
 }
 
-.coffeeSeatThinkingIndicator {
-  position: absolute;
-  top: -8px;
-  right: -4px;
-  min-width: 30px;
-  min-height: 20px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  border: 1px solid
-    color-mix(in srgb, var(--coffee-bot-color) 58%, rgba(255, 255, 255, 0.25));
-  background: color-mix(in srgb, #070707 74%, var(--coffee-bot-color) 26%);
-  color: rgba(255, 255, 255, 0.95);
-  font-size: 0.72rem;
-  line-height: 1;
-  letter-spacing: 0.08em;
-  box-shadow:
-    0 0 0 3px rgba(0, 0, 0, 0.26),
-    0 0 18px color-mix(in srgb, var(--coffee-bot-color) 36%, transparent);
-  pointer-events: none;
-}
-
-.coffeeSeatThinkingIndicator[data-badge-side="left"] {
-  left: -4px;
-  right: auto;
-}
-
-.coffeeSeatThinkingIndicator[data-badge-side="right"] {
-  right: -4px;
-  left: auto;
-}
-
-.coffeeSeatThinkingIndicator .typingDots {
-  --typing-accent: rgba(255, 255, 255, 0.95);
-  --typing-dot-gap: 0.14em;
-  font-size: 0.92rem;
-}
-
-.coffeeSeatThinkingIndicator .typingDots span {
-  min-width: 0.16em;
-}
-
 .coffeeSeatActionBadge {
   position: relative;
   z-index: 1;
@@ -76553,8 +77713,22 @@ a.settingsCreditItem:focus-visible {
   line-height: 1.2;
 }
 
-.coffeeSeat[data-coffee-listener-reaction="true"] .coffeeSeatCluster {
+.coffeeSeat[data-coffee-listener-reaction="true"] .coffeeSeatCluster,
+.coffeeSeat[data-coffee-authored-action-reaction] .coffeeSeatCluster {
+  isolation: auto;
+  transition: none;
   transform-origin: 50% 68%;
+}
+
+.coffeeSeat[data-coffee-listener-reaction="true"] .coffeeSeatPlate,
+.coffeeSeat[data-coffee-listener-reaction="true"] .coffeeSeatGlowPill,
+.coffeeSeat[data-coffee-listener-reaction="true"] .botFaceFrame,
+.coffeeSeat[data-coffee-authored-action-reaction] .coffeeSeatPlate,
+.coffeeSeat[data-coffee-authored-action-reaction] .coffeeSeatGlowPill,
+.coffeeSeat[data-coffee-authored-action-reaction] .botFaceFrame {
+  isolation: auto;
+  filter: none;
+  transition: none;
 }
 
 .coffeeSeat[data-coffee-listener-reaction-action="nod"] .coffeeSeatCluster {
@@ -76577,7 +77751,6 @@ a.settingsCreditItem:focus-visible {
   animation: coffeeListenerWarmth 980ms ease-in-out both;
 }
 
-.coffeeSeat[data-coffee-authored-action-reaction] .coffeeSeatCluster,
 .coffeeReplayPlayerSeat[data-coffee-authored-action-reaction]
   .coffeeReplayPlayerAvatar {
   transform-origin: 50% 68%;
@@ -76610,19 +77783,19 @@ a.settingsCreditItem:focus-visible {
 @keyframes coffeeAuthoredActionNod {
   0%,
   100% {
-    transform: translateY(0) rotate(0deg) scaleY(1);
+    transform: translate3d(0, 0, 0) rotate(0deg);
   }
   18% {
-    transform: translateY(5px) rotate(0.45deg) scaleY(0.985);
+    transform: translate3d(0, 5px, 0) rotate(0.45deg);
   }
   31% {
-    transform: translateY(-1px) rotate(0deg) scaleY(1);
+    transform: translate3d(0, -1px, 0) rotate(0deg);
   }
   48% {
-    transform: translateY(4px) rotate(0.35deg) scaleY(0.988);
+    transform: translate3d(0, 4px, 0) rotate(0.35deg);
   }
   67% {
-    transform: translateY(-1px) rotate(0deg) scaleY(1);
+    transform: translate3d(0, -1px, 0) rotate(0deg);
   }
 }
 
@@ -76645,16 +77818,16 @@ a.settingsCreditItem:focus-visible {
 @keyframes coffeeAuthoredActionBurp {
   0%,
   100% {
-    transform: translateY(0) scaleY(1);
+    transform: translate3d(0, 0, 0);
   }
   28% {
-    transform: translateY(-3px) scaleY(1.018);
+    transform: translate3d(0, -3px, 0);
   }
   48% {
-    transform: translateY(2px) scaleY(0.992);
+    transform: translate3d(0, 2px, 0);
   }
   68% {
-    transform: translateY(-1px) scaleY(1.006);
+    transform: translate3d(0, -1px, 0);
   }
 }
 
@@ -76680,24 +77853,24 @@ a.settingsCreditItem:focus-visible {
 @keyframes coffeeListenerNod {
   0%,
   100% {
-    transform: translateY(0);
+    transform: translate3d(0, 0, 0);
   }
   42% {
-    transform: translateY(4px) scaleY(0.985);
+    transform: translate3d(0, 4px, 0);
   }
   68% {
-    transform: translateY(-1px);
+    transform: translate3d(0, -1px, 0);
   }
 }
 
 @keyframes coffeeListenerLeanIn {
   0%,
   100% {
-    transform: translateY(0) scale(1);
+    transform: translate3d(0, 0, 0);
   }
   48%,
   72% {
-    transform: translateY(-3px) scale(1.018);
+    transform: translate3d(0, -3px, 0);
   }
 }
 
@@ -76729,6 +77902,7 @@ a.settingsCreditItem:focus-visible {
   .coffeeSeat[data-coffee-authored-action-reaction] .coffeeSeatCluster {
     animation: none;
     transform: none;
+    isolation: auto;
   }
 
   .coffeeSeat[data-coffee-listener-reaction="true"] .coffeeSeatPlateEmoji,
@@ -77979,6 +79153,147 @@ a.settingsCreditItem:focus-visible {
   z-index: 1;
 }
 
+.coffeeGroupOverview[data-coffee-table-setup="true"] {
+  gap: 10px;
+  border-color: color-mix(in srgb, var(--coffee-group-primary, #f2b66d) 34%, rgba(255, 255, 255, 0.16));
+}
+
+.coffeeGroupOverview[data-coffee-table-setup="true"]
+  .coffeeGroupOverviewHeader {
+  grid-template-columns: 1fr;
+}
+
+.coffeeGroupOverview[data-coffee-table-setup="true"]
+  .coffeeGroupOverviewHeader
+  > :first-child {
+  display: none;
+}
+
+.coffeeGroupOverview[data-coffee-table-setup="true"]
+  .coffeeGroupOverviewGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.coffeeGroupOverview[data-coffee-table-setup="true"]
+  .coffeeGroupOverviewGrid
+  > :first-child,
+.coffeeGroupOverview[data-coffee-table-setup="true"]
+  .coffeeGroupOverviewGrid
+  > :nth-child(3) {
+  display: none;
+}
+
+.coffeeTableSetupHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+  padding: 2px 4px 9px;
+  border-bottom: 1px solid
+    color-mix(
+      in srgb,
+      var(--coffee-group-primary, #f2b66d) 28%,
+      rgba(255, 255, 255, 0.12)
+    );
+}
+
+.coffeeTableSetupHeader > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.coffeeTableSetupHeader h2 {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.96);
+  font-size: clamp(1rem, 1.4vw, 1.24rem);
+  line-height: 1.1;
+}
+
+.coffeeTableSetupHeader > div > span {
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.coffeeGroupHomeLaunch {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 3px 12px;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.24);
+}
+
+.coffeeGroupHomeLaunch > span {
+  color: rgba(255, 255, 255, 0.64);
+  font-size: 0.62rem;
+  font-weight: 820;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.coffeeGroupHomeLaunch > strong {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.72rem;
+}
+
+.coffeeGroupHomeLaunch > button,
+.coffeeTableSetupBackButton {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 36px;
+  border: 1px solid color-mix(in srgb, var(--coffee-group-primary, #f2b66d) 52%, rgba(255, 255, 255, 0.18));
+  border-radius: 999px;
+  padding: 8px 14px;
+  color: #fff;
+  background: color-mix(in srgb, var(--coffee-group-primary, #f2b66d) 18%, rgba(0, 0, 0, 0.54));
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 780;
+  cursor: pointer;
+}
+
+.coffeeTableSetupBackButton {
+  grid-column: auto;
+  grid-row: auto;
+}
+
+.coffeeTableSetupPrimaryButton {
+  min-height: 40px;
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--coffee-group-primary, #f2b66d) 58%,
+      rgba(255, 255, 255, 0.2)
+    );
+  border-radius: 999px;
+  padding: 0 18px;
+  color: #1a0f06;
+  background: color-mix(
+    in srgb,
+    var(--coffee-group-primary, #f2b66d) 84%,
+    white 16%
+  );
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 820;
+  cursor: pointer;
+}
+
+.coffeeTableSetupPrimaryButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
 .coffeeGroupOverviewHeader {
   display: grid;
   grid-template-columns: minmax(220px, 0.58fr) minmax(0, 1fr);
@@ -78103,6 +79418,72 @@ a.settingsCreditItem:focus-visible {
   font-size: 0.66rem;
   font-weight: 750;
   cursor: pointer;
+}
+
+.coffeeTableSetupFooter {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--coffee-group-primary, #f2b66d) 34%,
+      rgba(255, 255, 255, 0.14)
+    );
+  border-radius: 14px;
+  background: color-mix(
+    in srgb,
+    var(--coffee-group-primary, #f2b66d) 8%,
+    rgba(0, 0, 0, 0.38)
+  );
+}
+
+.coffeeTableSetupFooterCopy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.coffeeTableSetupFooterCopy > span {
+  color: color-mix(
+    in srgb,
+    var(--coffee-group-primary, #f2b66d) 70%,
+    rgba(255, 255, 255, 0.72)
+  );
+  font-size: 0.6rem;
+  font-weight: 820;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.coffeeTableSetupFooterCopy > strong {
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 0.72rem;
+  line-height: 1.3;
+}
+
+.coffeeTableSetupFooterCopy ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 10px;
+  margin: 0;
+  padding: 0;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.64rem;
+  line-height: 1.35;
+  list-style: none;
+}
+
+.coffeeTableSetupFooterCopy li:not(:last-child)::after {
+  content: " ·";
+  color: color-mix(
+    in srgb,
+    var(--coffee-group-primary, #f2b66d) 58%,
+    transparent
+  );
 }
 
 .coffeeGroupPresetField {
@@ -81214,6 +82595,105 @@ a.settingsCreditItem:focus-visible {
   cursor: not-allowed;
 }
 
+.coffeeAtmosphereAudioCard {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(201, 166, 108, 0.2);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 88% 8%, rgba(119, 86, 176, 0.12), transparent 34%),
+    linear-gradient(145deg, rgba(111, 76, 39, 0.13), rgba(255, 255, 255, 0.025));
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.045),
+    0 14px 34px rgba(0, 0, 0, 0.15);
+}
+
+.coffeeAtmosphereSourcePicker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.coffeeAtmosphereSourcePicker button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--coffee-muted);
+  font: 720 0.72rem/1 system-ui;
+  letter-spacing: 0.035em;
+  cursor: pointer;
+  transition: color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.coffeeAtmosphereSourcePicker button[data-active="true"] {
+  color: rgba(255, 246, 224, 0.98);
+  background: linear-gradient(135deg, rgba(156, 112, 58, 0.62), rgba(91, 59, 36, 0.5));
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.08), 0 5px 14px rgba(0, 0, 0, 0.2);
+}
+
+.coffeeAtmosphereSourcePicker button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.coffeeAtmosphereFallbackField,
+.coffeeAtmosphereCustomSummary {
+  display: grid;
+  gap: 6px;
+}
+
+.coffeeAtmosphereFallbackField > span,
+.coffeeAtmosphereCustomSummary > span {
+  color: var(--coffee-muted);
+  font: 700 0.63rem/1 system-ui;
+  letter-spacing: 0.085em;
+  text-transform: uppercase;
+}
+
+.coffeeAtmosphereCustomSummary strong {
+  color: rgba(255, 248, 234, 0.93);
+  font-size: 0.82rem;
+}
+
+.coffeeAtmosphereActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.coffeeAtmosphereActions button {
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font: 730 0.7rem/1 system-ui;
+  cursor: pointer;
+}
+
+.coffeeAtmospherePrimaryAction {
+  border: 1px solid rgba(232, 196, 128, 0.48);
+  background: linear-gradient(135deg, rgba(156, 112, 58, 0.66), rgba(77, 51, 31, 0.68));
+  color: rgba(255, 246, 224, 0.98);
+  box-shadow: 0 7px 20px rgba(0, 0, 0, 0.18);
+}
+
+.coffeeAtmosphereUndoAction {
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  background: rgba(255, 255, 255, 0.045);
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.coffeeAtmosphereActions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .coffeeSettingsRange {
   width: 100%;
   margin: 4px 0 2px;
@@ -81543,12 +83023,40 @@ a.settingsCreditItem:focus-visible {
 }
 
 .coffeeError {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   width: 100%;
   padding: 12px 16px;
   border-radius: 12px;
   background: color-mix(in srgb, #ff4d4d 10%, transparent);
   color: #ff8888;
   font-size: 0.9rem;
+}
+
+.coffeeErrorActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.coffeeRecoveryStatus {
+  position: absolute;
+  left: 50%;
+  bottom: 88px;
+  z-index: 18;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 7px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.78);
+  background: rgba(8, 10, 14, 0.84);
+  font-size: 11px;
+  letter-spacing: 0.025em;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.24);
 }
 
 .coffeeInterruptionCue {
@@ -82005,6 +83513,21 @@ a.settingsCreditItem:focus-visible {
     min-width: 0;
   }
 
+  .coffeeTableSetupHeader,
+  .coffeeTableSetupFooter {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .coffeeTableSetupHeader {
+    flex-direction: column;
+  }
+
+  .coffeeTableSetupHeader .coffeeTableSetupBackButton,
+  .coffeeTableSetupFooter .coffeeTableSetupPrimaryButton {
+    width: 100%;
+  }
+
   .coffeeGroupOverview .coffeeAutoTopicToggle,
   .coffeeGroupOverview .coffeeSend {
     grid-column: 1 / -1;
@@ -82395,6 +83918,7 @@ a.settingsCreditItem:focus-visible {
     .coffeeDeleteAllSessionsButton,
     .coffeeGroupDeleteButton,
     .coffeeSessionDeleteButton,
+    .coffeeGroupSessionCopyButton,
     .coffeeGroupSessionDeleteButton,
     .coffeeCreateGroupButton,
     .coffeeExitSessionButton,
@@ -82840,8 +84364,7 @@ a.settingsCreditItem:focus-visible {
   color: var(--fg-muted);
 }
 
-.themeLight.coffeeShell .coffeeTableTypingLine .typingDots,
-.themeLight.coffeeShell .coffeeSeatThinkingIndicator .typingDots {
+.themeLight.coffeeShell .coffeeTableTypingLine .typingDots {
   --typing-accent: color-mix(in srgb, var(--fg) 82%, var(--accent) 18%);
 }
 
@@ -82964,7 +84487,6 @@ a.settingsCreditItem:focus-visible {
   :where(
     .coffeeSeatThoughtBubble,
     .coffeeSeatInterruptedBubble,
-    .coffeeSeatThinkingIndicator,
     .coffeeReplayActionPanel
   ) {
   border-color: color-mix(in srgb, var(--coffee-bot-color) 38%, var(--line));
@@ -83375,6 +84897,34 @@ a.settingsCreditItem:focus-visible {
   );
   color: rgba(58, 36, 14, 0.92);
   box-shadow: 0 0 0 1px rgba(115, 77, 32, 0.12);
+}
+
+.themeLight.coffeeShell .coffeeAtmosphereAudioCard {
+  border-color: rgba(115, 77, 32, 0.18);
+  background:
+    radial-gradient(circle at 88% 8%, rgba(119, 86, 176, 0.08), transparent 34%),
+    linear-gradient(145deg, rgba(225, 199, 156, 0.25), rgba(255, 255, 255, 0.72));
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.8), 0 12px 28px rgba(85, 61, 39, 0.1);
+}
+
+.themeLight.coffeeShell .coffeeAtmosphereSourcePicker {
+  border-color: rgba(75, 48, 21, 0.12);
+  background: rgba(75, 48, 21, 0.055);
+}
+
+.themeLight.coffeeShell .coffeeAtmosphereSourcePicker button[data-active="true"] {
+  color: rgba(58, 36, 14, 0.94);
+  background: linear-gradient(135deg, rgba(214, 178, 118, 0.72), rgba(245, 229, 199, 0.92));
+}
+
+.themeLight.coffeeShell .coffeeAtmosphereCustomSummary strong {
+  color: var(--fg);
+}
+
+.themeLight.coffeeShell .coffeeAtmosphereUndoAction {
+  border-color: rgba(75, 48, 21, 0.14);
+  background: rgba(255, 255, 255, 0.56);
+  color: rgba(58, 36, 14, 0.78);
 }
 
 .themeLight.coffeeShell .coffeeSettingsDivider {

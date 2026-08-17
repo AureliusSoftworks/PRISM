@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   BOT_POWER_ADDRESSED_FANDOM_MODE_POLICY,
+  BOT_POWER_CHROMATIC_BIAS_MODE_POLICY,
   BOT_POWER_ANNOYANCE_MODE_POLICY,
   BOT_POWER_AVATAR_SCALE_MODE_POLICY,
   BOT_POWER_AVATAR_COLOR_CYCLE_MODE_POLICY,
@@ -69,23 +70,23 @@ describe("applet version helpers", () => {
   });
 
   it("tracks the current visual applet versions for release provenance", () => {
-    assert.equal(PRISM_APPLETS.chat.version, "1.41");
-    assert.equal(PRISM_APPLETS.zen.version, "1.40");
-    assert.equal(PRISM_APPLETS.coffee.version, "2.54");
-    assert.equal(PRISM_APPLETS.debate.version, "0.34");
+    assert.equal(PRISM_APPLETS.chat.version, "1.46");
+    assert.equal(PRISM_APPLETS.zen.version, "1.45");
+    assert.equal(PRISM_APPLETS.coffee.version, "2.61");
+    assert.equal(PRISM_APPLETS.debate.version, "0.42");
     assert.equal(PRISM_APPLETS.debate.status, "preview");
-    assert.equal(PRISM_APPLETS.botcast.version, "1.67");
+    assert.equal(PRISM_APPLETS.botcast.version, "1.77");
     assert.equal(PRISM_APPLETS.botcast.name, "Signal");
-    assert.equal(PRISM_APPLETS.story.version, "0.33");
+    assert.equal(PRISM_APPLETS.story.version, "0.38");
     assert.equal(PRISM_APPLETS.story.status, "planned");
     assert.equal(PRISM_APPLETS.slate.version, "0.9");
     assert.equal(PRISM_APPLETS.slate.status, "preview");
-    assert.equal(prismAppletVersionLabel("chat"), "v1.41");
-    assert.equal(prismAppletVersionLabel("zen"), "v1.40");
-    assert.equal(prismAppletVersionLabel("coffee"), "v2.54");
-    assert.equal(prismAppletVersionLabel("debate"), "v0.34");
-    assert.equal(prismAppletVersionLabel("botcast"), "v1.67");
-    assert.equal(prismAppletVersionLabel("story"), "v0.33");
+    assert.equal(prismAppletVersionLabel("chat"), "v1.46");
+    assert.equal(prismAppletVersionLabel("zen"), "v1.45");
+    assert.equal(prismAppletVersionLabel("coffee"), "v2.61");
+    assert.equal(prismAppletVersionLabel("debate"), "v0.42");
+    assert.equal(prismAppletVersionLabel("botcast"), "v1.77");
+    assert.equal(prismAppletVersionLabel("story"), "v0.38");
     assert.equal(prismAppletVersionLabel("slate"), "v0.9");
   });
 
@@ -368,6 +369,28 @@ describe("applet version helpers", () => {
     assert.deepEqual(BOT_POWER_ADDRESSED_FANDOM_MODE_POLICY, {
       chat: "direct",
       zen: "direct",
+      debate: "adapted",
+      polling: "deferred",
+      coffee: "adapted",
+      botcast: "adapted",
+      feed: "deferred",
+      games: "deferred",
+      story: "adapted",
+      gym: "deferred",
+      slate: "irrelevant",
+      pseudo: "deferred",
+      surf: "deferred",
+    });
+  });
+
+  it("declares an exhaustive hue-prejudice policy for every applet", () => {
+    assert.deepEqual(
+      Object.keys(BOT_POWER_CHROMATIC_BIAS_MODE_POLICY),
+      Object.keys(PRISM_APPLETS),
+    );
+    assert.deepEqual(BOT_POWER_CHROMATIC_BIAS_MODE_POLICY, {
+      chat: "cue",
+      zen: "cue",
       debate: "adapted",
       polling: "deferred",
       coffee: "adapted",

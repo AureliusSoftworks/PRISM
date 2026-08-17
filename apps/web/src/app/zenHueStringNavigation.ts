@@ -1,6 +1,9 @@
 // The deepest Zenith directory is a single, intimate row. It is deliberately
 // a card view rather than another density stage.
 export const ZEN_HUE_DIRECTORY_MIN_ROWS = 1;
+// The one-row close-up is intentionally shorter than the rest of the ladder so
+// its named bot cards can become the largest, most legible picker treatment.
+export const ZEN_HUE_DIRECTORY_ONE_ROW_COLUMNS = 10;
 
 export type ZenHueDirectoryTier = "root" | number;
 
@@ -22,6 +25,12 @@ export interface ZenHueDirectoryLayout {
 
 export const ZEN_HUE_ATMOSPHERE_MAX_NODES = 5;
 
+export interface ZenHueAtmospherePalette {
+  coherence: number;
+  saturation: number;
+  representativeColors: string[];
+}
+
 export function zenHueAtmosphereNodeCount(
   tier: ZenHueDirectoryTier,
 ): number {
@@ -32,26 +41,97 @@ export function zenHueAtmosphereNodeCount(
   );
 }
 
-export function zenHueAtmosphereColors(options: {
+function parseHexColor(color: string): [number, number, number] | null {
+  const clean = color.trim().replace(/^#/u, "");
+  const expanded =
+    clean.length === 3
+      ? clean
+          .split("")
+          .map((channel) => `${channel}${channel}`)
+          .join("")
+      : clean;
+  if (!/^[0-9a-f]{6}$/iu.test(expanded)) return null;
+  return [
+    Number.parseInt(expanded.slice(0, 2), 16) / 255,
+    Number.parseInt(expanded.slice(2, 4), 16) / 255,
+    Number.parseInt(expanded.slice(4, 6), 16) / 255,
+  ];
+}
+
+function hueAndUsableChroma(
+  color: string,
+): { hue: number; usableChroma: number } | null {
+  const channels = parseHexColor(color);
+  if (!channels) return null;
+  const [red, green, blue] = channels;
+  const max = Math.max(red, green, blue);
+  const min = Math.min(red, green, blue);
+  const chroma = max - min;
+  if (chroma <= 0.015) return null;
+
+  let sector = 0;
+  if (max === red) sector = (green - blue) / chroma;
+  else if (max === green) sector = (blue - red) / chroma + 2;
+  else sector = (red - green) / chroma + 4;
+  const hue = wrapZenHue(sector * 60);
+  // RGB chroma already falls away for near-gray and near-black colors. The
+  // small floor above rejects unstable hues that should not steer the room.
+  return { hue, usableChroma: chroma };
+}
+
+/**
+ * Reduces the visible bot palette to representative spectrum nodes and a
+ * circular hue resultant. A coherent family earns extra saturation; a broad
+ * spectrum keeps its complete representative gradient at baseline saturation.
+ * Every bot contributes in proportion to its usable RGB chroma, so gray
+ * identity colors do not invent an atmosphere.
+ *
+ * The returned palette is intentionally independent from directory tier.
+ * Zen composes depth with two painters instead: a hue-specific atmosphere
+ * below the broad group gradient, whose opacity fades toward the one-row
+ * directory. Keeping that blend out of the palette math makes it reversible.
+ */
+export function zenHueAtmospherePalette(options: {
   tier: ZenHueDirectoryTier;
   visibleColors: readonly string[];
-  rootColors: readonly string[];
-}): string[] {
-  if (options.tier === "root") {
-    return options.rootColors.slice(0, ZEN_HUE_ATMOSPHERE_MAX_NODES);
-  }
-  const candidates = options.visibleColors.filter(
-    (color) => color.trim().length > 0,
-  );
-  if (candidates.length === 0) return [];
-  const count = zenHueAtmosphereNodeCount(options.tier);
-  if (count === 1) return [candidates[Math.floor(candidates.length / 2)]!];
-  return Array.from({ length: count }, (_, index) => {
-    const candidateIndex = Math.round(
-      (index / (count - 1)) * Math.max(0, candidates.length - 1),
-    );
-    return candidates[candidateIndex]!;
+}): ZenHueAtmospherePalette {
+  const candidates = options.visibleColors.flatMap((color) => {
+    const parsed = hueAndUsableChroma(color);
+    return parsed ? [{ color: color.trim(), ...parsed }] : [];
   });
+  if (candidates.length === 0) {
+    return { coherence: 0, saturation: 1, representativeColors: [] };
+  }
+
+  let vectorX = 0;
+  let vectorY = 0;
+  let totalWeight = 0;
+  for (const candidate of candidates) {
+    const radians = (candidate.hue * Math.PI) / 180;
+    vectorX += Math.cos(radians) * candidate.usableChroma;
+    vectorY += Math.sin(radians) * candidate.usableChroma;
+    totalWeight += candidate.usableChroma;
+  }
+  const coherence = Math.max(
+    0,
+    Math.min(1, Math.hypot(vectorX, vectorY) / Math.max(totalWeight, 0.001)),
+  );
+  const saturation = 1 + coherence * 0.45;
+  const sorted = [...candidates].sort(
+    (a, b) => a.hue - b.hue || a.color.localeCompare(b.color),
+  );
+  const count = Math.min(ZEN_HUE_ATMOSPHERE_MAX_NODES, sorted.length);
+  const representativeColors =
+    count === 1
+      ? [sorted[Math.floor(sorted.length / 2)]!.color]
+      : Array.from({ length: count }, (_, index) => {
+          const candidateIndex = Math.round(
+            (index / (count - 1)) * Math.max(0, sorted.length - 1),
+          );
+          return sorted[candidateIndex]!.color;
+        });
+
+  return { coherence, saturation, representativeColors };
 }
 
 export function wrapZenHue(value: number): number {
@@ -66,6 +146,9 @@ export function zenHueDirectoryColumns(
   minimumColumns = 1,
 ): number {
   const safeRows = Math.max(1, Math.floor(rows));
+  if (safeRows === ZEN_HUE_DIRECTORY_MIN_ROWS) {
+    return ZEN_HUE_DIRECTORY_ONE_ROW_COLUMNS;
+  }
   const aspect = Math.max(1, frameWidth / Math.max(1, frameHeight));
   return Math.max(minimumColumns, Math.round(safeRows * aspect));
 }
@@ -142,6 +225,19 @@ export function zenHueTierIndex(
         : bestIndex,
     0,
   );
+}
+
+/**
+ * Opacity for the broad group-gradient painter above the hue-specific room.
+ * Root fully preserves the familiar spectrum; the deepest directory fully
+ * reveals the selected hue. Intermediate row tiers blend monotonically.
+ */
+export function zenHueGradientOverlayOpacity(
+  tier: ZenHueDirectoryTier,
+  tiers: readonly number[],
+): number {
+  if (tier === "root" || tiers.length === 0) return 1;
+  return Math.max(0, Math.min(1, zenHueTierIndex(tier, tiers) / tiers.length));
 }
 
 export function zenHueTierAtIndex(
@@ -223,6 +319,18 @@ export interface ZenHueCableSpringState {
   velocity: number;
 }
 
+export interface ZenHueCableHorizontalInertiaState {
+  sliderValue: number;
+  velocity: number;
+}
+
+export interface ZenHueCableHorizontalStepOptions {
+  sliderValue: number;
+  deltaClientX: number;
+  surfaceWidth: number;
+  gain?: number;
+}
+
 export type ZenHueCableDragDirection = -1 | 0 | 1;
 
 export interface ZenHueCableTraversalStep {
@@ -258,6 +366,127 @@ export interface ZenHueCableTraversalFrameOptions
 
 const ZEN_HUE_CABLE_PULL_BOOST_MAX = 1.85;
 const ZEN_HUE_CABLE_PULL_SCALE_PX = 170;
+export const ZEN_HUE_CABLE_HORIZONTAL_GAIN = 1.18;
+const ZEN_HUE_CABLE_HORIZONTAL_FRICTION_PER_FRAME = 0.86;
+
+export interface ZenHueCableHandleClientPointOptions {
+  svgX: number;
+  svgY: number;
+  viewBoxWidth: number;
+  viewBoxHeight: number;
+  clientLeft: number;
+  clientTop: number;
+  clientWidth: number;
+  clientHeight: number;
+}
+
+/**
+ * Maps a point from the cable SVG into webview client coordinates. The SVG
+ * uses the browser default `xMidYMid meet` preservation, so its fitted viewBox
+ * can be letterboxed inside the interactive surface.
+ */
+export function zenHueCableHandleClientPoint(
+  options: ZenHueCableHandleClientPointOptions,
+): { x: number; y: number } {
+  const viewBoxWidth = Math.max(1, options.viewBoxWidth);
+  const viewBoxHeight = Math.max(1, options.viewBoxHeight);
+  const clientWidth = Math.max(0, options.clientWidth);
+  const clientHeight = Math.max(0, options.clientHeight);
+  const scale = Math.min(
+    clientWidth / viewBoxWidth,
+    clientHeight / viewBoxHeight,
+  );
+  const renderedWidth = viewBoxWidth * scale;
+  const renderedHeight = viewBoxHeight * scale;
+  return {
+    x:
+      options.clientLeft +
+      (clientWidth - renderedWidth) / 2 +
+      options.svgX * scale,
+    y:
+      options.clientTop +
+      (clientHeight - renderedHeight) / 2 +
+      options.svgY * scale,
+  };
+}
+
+export function zenHueCableAcceleratedSliderStep(
+  options: ZenHueCableHorizontalStepOptions,
+): number {
+  const surfaceWidth = Math.max(1, options.surfaceWidth);
+  const gain = Math.max(1, options.gain ?? ZEN_HUE_CABLE_HORIZONTAL_GAIN);
+  const delta = (options.deltaClientX / surfaceWidth) * 359 * gain;
+  return Math.max(0, Math.min(359, options.sliderValue + delta));
+}
+
+export function stepZenHueCableHorizontalInertia(
+  state: ZenHueCableHorizontalInertiaState,
+  elapsedSeconds: number,
+): ZenHueCableHorizontalInertiaState {
+  const dt = Math.max(0, Math.min(0.032, elapsedSeconds));
+  const friction = Math.pow(
+    ZEN_HUE_CABLE_HORIZONTAL_FRICTION_PER_FRAME,
+    dt * 60,
+  );
+  const velocity = state.velocity * friction;
+  const unboundedSliderValue = state.sliderValue + velocity * dt;
+  const sliderValue = Math.max(0, Math.min(359, unboundedSliderValue));
+  return {
+    sliderValue,
+    velocity: sliderValue === unboundedSliderValue ? velocity : 0,
+  };
+}
+
+export function zenHueCableHorizontalInertiaHasSettled(
+  state: ZenHueCableHorizontalInertiaState,
+): boolean {
+  return Math.abs(state.velocity) < 2;
+}
+
+export interface ZenHueCableBoundaryWhiteoutOptions {
+  tier: ZenHueDirectoryTier;
+  tiers: readonly number[];
+  deltaY: number;
+  deadZonePx: number;
+  fullWhitePullPx?: number;
+}
+
+/**
+ * Turns blocked overpull into a visual-only whiteout. Downward pull is blocked
+ * at the rainbow root; upward pull is blocked at the deepest hue directory.
+ */
+export function zenHueCableBoundaryWhiteoutProgress(
+  options: ZenHueCableBoundaryWhiteoutOptions,
+): number {
+  const deadZonePx = Math.max(0, options.deadZonePx);
+  const deepestTier = options.tiers[0];
+  const blockedPullPx =
+    options.tier === "root" && options.deltaY > deadZonePx
+      ? options.deltaY
+      : deepestTier !== undefined &&
+          options.tier === deepestTier &&
+          options.deltaY < -deadZonePx
+        ? -options.deltaY
+        : 0;
+  if (blockedPullPx <= deadZonePx) return 0;
+  const fullWhitePullPx = Math.max(
+    deadZonePx + 1,
+    options.fullWhitePullPx ?? 48,
+  );
+  return Math.min(
+    1,
+    (blockedPullPx - deadZonePx) / (fullWhitePullPx - deadZonePx),
+  );
+}
+
+/** Converts rAF's millisecond clock to a bounded seconds delta. */
+export function zenHueCableFrameElapsedSeconds(
+  nowMs: number,
+  previousMs: number,
+): number {
+  if (!Number.isFinite(nowMs) || !Number.isFinite(previousMs)) return 0;
+  return Math.max(0, Math.min(50, nowMs - previousMs)) / 1000;
+}
 
 export function zenHueCableTraversalStep(
   options: ZenHueCableTraversalStepOptions,

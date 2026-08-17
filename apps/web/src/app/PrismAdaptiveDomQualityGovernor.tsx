@@ -7,8 +7,6 @@ import { publishPrismFrameRate } from "./prismFrameRate";
 
 export function PrismAdaptiveDomQualityGovernor(): null {
   useEffect(() => {
-    const root = document.documentElement;
-    const previousQuality = root.dataset.prismAdaptiveQuality;
     const controller = new PrismDomAdaptiveQualityController(performance.now());
     let frameId = 0;
     let previousFrameTime = performance.now();
@@ -16,15 +14,10 @@ export function PrismAdaptiveDomQualityGovernor(): null {
     let fpsWindowFrameCount = 0;
     let hasPublishedFps = false;
 
-    const publishQuality = (): void => {
-      root.dataset.prismAdaptiveQuality = controller.quality;
-    };
-    publishQuality();
-
     const tick = (nowMs: number): void => {
       const deltaMs = Math.max(0, nowMs - previousFrameTime);
       const foreground = document.visibilityState === "visible";
-      const result = controller.recordFrame({
+      controller.recordFrame({
         nowMs,
         deltaMs,
         foreground,
@@ -46,18 +39,12 @@ export function PrismAdaptiveDomQualityGovernor(): null {
         fpsWindowFrameCount = 0;
         hasPublishedFps = false;
       }
-      if (result.qualityChanged) publishQuality();
       frameId = window.requestAnimationFrame(tick);
     };
     frameId = window.requestAnimationFrame(tick);
 
     return () => {
       window.cancelAnimationFrame(frameId);
-      if (previousQuality === undefined) {
-        delete root.dataset.prismAdaptiveQuality;
-      } else {
-        root.dataset.prismAdaptiveQuality = previousQuality;
-      }
     };
   }, []);
 

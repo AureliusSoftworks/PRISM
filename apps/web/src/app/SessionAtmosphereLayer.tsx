@@ -27,6 +27,8 @@ export interface SessionAtmosphereLayerProps {
   backgroundTone?: SessionAtmosphereBackgroundTone;
   /** When false, background beds stay local-only and skip the audio master. */
   backgroundRecordable?: boolean;
+  /** When false, grain beds stay local-only and skip the audio master. */
+  grainRecordable?: boolean;
   foleyRoomAcoustics?: RoomAcousticsSend;
   backgroundRoomAcoustics?: RoomAcousticsSend;
   allowMixBoost?: boolean;
@@ -61,6 +63,7 @@ export function SessionAtmosphereLayer({
   mix,
   backgroundTone = "neutral",
   backgroundRecordable = true,
+  grainRecordable = true,
   foleyRoomAcoustics,
   backgroundRoomAcoustics,
   allowMixBoost = false,
@@ -129,6 +132,7 @@ export function SessionAtmosphereLayer({
       startTransitionMs: lifecycleTransitionMs,
       backgroundTone,
       backgroundRecordable,
+      grainRecordable,
       foleyRoomAcoustics,
       backgroundRoomAcoustics,
       allowMixBoost,
@@ -171,6 +175,7 @@ export function SessionAtmosphereLayer({
     ambientBotVocalizations,
     ambientBotVocalizationProfile,
     backgroundRecordable,
+    grainRecordable,
     backgroundTone,
     backgroundRoomAcoustics,
     backgroundUrl,

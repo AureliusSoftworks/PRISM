@@ -13,19 +13,25 @@ const page = read("./page.tsx");
 const tutorials = read("./modeTutorials.ts");
 
 describe("stage direction and rehearsal", () => {
-  it("keeps Debate's player control semantic and moves precision work to Help", () => {
-    assert.match(debate, /data-debate-stage-direction="true"/u);
-    assert.match(debate, /Close conversation/u);
-    assert.match(debate, /Balanced forum/u);
-    assert.match(debate, /Grand chamber/u);
-    assert.match(debate, /data-tutorial-target="debate-stage-direction"/u);
-    assert.match(debateCss, /\.stageDirectionOptions/u);
+  it("keeps Debate stage placement direct and canonical", () => {
+    assert.match(debate, /data-tutorial-target="debate-stage-layout"/u);
+    assert.match(debate, /onClick=\{openStageAlignment\}/u);
+    assert.doesNotMatch(debate, /Close conversation/u);
+    assert.doesNotMatch(debate, /Balanced forum/u);
+    assert.doesNotMatch(debate, /Grand chamber/u);
+    assert.doesNotMatch(debateCss, /\.stageDirectionOptions/u);
 
     assert.match(page, /data-settings-action="open-debate-alignment-lab"/u);
-    assert.match(page, />Debate Alignment Lab</u);
+    assert.match(
+      page,
+      /\{DEBATE_STAGE_LAYOUT_AUTHORING_ENABLED \? \([\s\S]*?data-settings-action="open-debate-alignment-lab"/u,
+    );
+    assert.match(page, />Stage layout</u);
     assert.match(page, /alignmentLabLaunchToken=/u);
     assert.match(debate, /data-debate-stage-alignment-modal="true"/u);
-    assert.match(debate, /Precision camera, prop, light, and audio calibration/u);
+    assert.match(debate, /Drag an item or use arrow keys to nudge by 0\.5%/u);
+    assert.match(tutorials, /canonical Main arrangement/u);
+    assert.match(tutorials, /data-tutorial-target="debate-stage-layout"/u);
   });
 
   it("opens Signal as a stage-first autosaving rehearsal", () => {

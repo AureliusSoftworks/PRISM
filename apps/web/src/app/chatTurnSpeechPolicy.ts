@@ -45,9 +45,18 @@ export function releaseChatTurnSpeechLock(
   return lock?.runId === runId ? null : lock;
 }
 
-export const CHAT_TRANSCRIPT_STREAM_RATE_MULTIPLIER = 2.5;
+/**
+ * Zen should feel live without making a completed response wait around for a
+ * theatrical typewriter. The persisted Zen rate remains a user preference on
+ * top of this intentionally quick baseline.
+ */
+export const ZEN_CANVAS_STREAM_RATE_MULTIPLIER = 12;
 
-/** Text presentation has its own clock; audible speech never changes this rate. */
+/**
+ * Text presentation has its own clock; audible speech never changes this
+ * rate. Transcript Chat bypasses the visual reveal clock entirely in the
+ * surface, so this helper only scales immersive Zen.
+ */
 export function chatTurnStreamRateMultiplier(
   presentation: ChatPresentation | null,
   streamRate: number,
@@ -55,6 +64,6 @@ export function chatTurnStreamRateMultiplier(
   if (presentation === null) return 1;
   const safeRate = Number.isFinite(streamRate) && streamRate > 0 ? streamRate : 1;
   const surfaceRate =
-    presentation === "chat" ? CHAT_TRANSCRIPT_STREAM_RATE_MULTIPLIER : 1;
+    presentation === "zen" ? ZEN_CANVAS_STREAM_RATE_MULTIPLIER : 1;
   return 1 / (safeRate * surfaceRate);
 }

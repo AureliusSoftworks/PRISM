@@ -1,15 +1,18 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import {
   beginChatTurnSpeechLock,
-  CHAT_TRANSCRIPT_STREAM_RATE_MULTIPLIER,
+  ZEN_CANVAS_STREAM_RATE_MULTIPLIER,
   chatTurnSpeechTypeLocked,
   chatTurnStreamRateMultiplier,
   releaseChatTurnSpeechLock,
   resolveChatTurnSpeechSelection,
   type ChatTurnSpeechSelection,
 } from "./chatTurnSpeechPolicy.ts";
+
+const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 
 describe("Chat/Zen turn Speech Type policy", () => {
   it("keeps the submitted selection authoritative for the whole reply", () => {
@@ -47,21 +50,52 @@ describe("Chat/Zen turn Speech Type policy", () => {
   });
 
   it("keeps visual text timing independent from Speech Type", () => {
-    assert.equal(chatTurnStreamRateMultiplier("zen", 2), 0.5);
-    assert.equal(chatTurnStreamRateMultiplier("zen", 0.5), 2);
-    assert.equal(chatTurnStreamRateMultiplier("zen", 0), 1);
+    assert.equal(
+      chatTurnStreamRateMultiplier("zen", 2),
+      1 / (2 * ZEN_CANVAS_STREAM_RATE_MULTIPLIER),
+    );
+    assert.equal(
+      chatTurnStreamRateMultiplier("zen", 0.5),
+      1 / (0.5 * ZEN_CANVAS_STREAM_RATE_MULTIPLIER),
+    );
+    assert.equal(
+      chatTurnStreamRateMultiplier("zen", 0),
+      1 / ZEN_CANVAS_STREAM_RATE_MULTIPLIER,
+    );
     assert.equal(chatTurnStreamRateMultiplier(null, 2), 1);
   });
 
-  it("gives transcript Chat a substantially faster visual cadence", () => {
-    assert.equal(CHAT_TRANSCRIPT_STREAM_RATE_MULTIPLIER, 2.5);
+  it("keeps transcript Chat unscaled because it bypasses the reveal clock", () => {
     assert.equal(
       chatTurnStreamRateMultiplier("chat", 1),
-      1 / CHAT_TRANSCRIPT_STREAM_RATE_MULTIPLIER,
+      1,
     );
     assert.equal(
       chatTurnStreamRateMultiplier("chat", 2),
-      1 / (2 * CHAT_TRANSCRIPT_STREAM_RATE_MULTIPLIER),
+      1 / 2,
+    );
+  });
+
+  it("gives immersive Zen a mostly-instant visual cadence", () => {
+    assert.equal(ZEN_CANVAS_STREAM_RATE_MULTIPLIER, 12);
+    assert.equal(
+      chatTurnStreamRateMultiplier("zen", 1),
+      1 / ZEN_CANVAS_STREAM_RATE_MULTIPLIER,
+    );
+    assert.equal(
+      chatTurnStreamRateMultiplier("zen", 2),
+      1 / (2 * ZEN_CANVAS_STREAM_RATE_MULTIPLIER),
+    );
+  });
+
+  it("bypasses assistant token scheduling in transcript Chat only", () => {
+    assert.match(
+      pageSource,
+      /const chatAssistantTypingMechanicsActive\s*=\s*sharedChatConversationPresentation && chatPresentation === "zen"/u,
+    );
+    assert.match(
+      pageSource,
+      /Transcript Chat renders\s+incoming bot text instantly/u,
     );
   });
 });

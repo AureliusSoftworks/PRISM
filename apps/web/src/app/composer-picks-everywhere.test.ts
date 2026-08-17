@@ -12,16 +12,15 @@ const slateSource = readFileSync(
   "utf8",
 );
 
-describe("composer picks everywhere", () => {
-  it("expands Prompt Center prompts and wildcard decks for non-chat composers", () => {
-    assert.match(pageSource, /function expandComposerDraft\(rawDraft: string\)/u);
+describe("composer shortcut language is Zen-only", () => {
+  it("keeps Prompt Center authoring picks while gating session composers to Zen", () => {
     assert.match(
       pageSource,
-      /async function expandComposerDraftOperative\(rawDraft: string\): Promise<string>/u,
+      /const composerShortcutLanguageEnabled = chatImmersivePresentation/u,
     );
     assert.match(
       pageSource,
-      /const renderPickAwareComposer = \([\s\S]{0,200}PickAwareComposerFieldState/u,
+      /const sessionComposerPromptPicks = composerShortcutLanguageEnabled\s*\? commandCenterPromptPicks\s*: EMPTY_COMPOSER_COMMAND_PICKS/u,
     );
     assert.match(
       pageSource,
@@ -29,14 +28,30 @@ describe("composer picks everywhere", () => {
     );
     assert.match(
       pageSource,
-      /const renderPickAwareComposer = [\s\S]{0,2400}?chipPointerBehavior="delete"/u,
+      /const renderPickAwareComposer = \([\s\S]{0,200}PickAwareComposerFieldState/u,
+    );
+    assert.match(
+      pageSource,
+      /const renderPickAwareComposer = [\s\S]{0,2400}?promptPicks=\{EMPTY_COMPOSER_COMMAND_PICKS\}[\s\S]{0,200}wildcardPicks=\{EMPTY_COMPOSER_COMMAND_PICKS\}[\s\S]{0,200}shortcutChipsEnabled=\{false\}/u,
+    );
+    assert.match(
+      pageSource,
+      /function expandComposerDraft\(rawDraft: string\): string \{\s*return rawDraft;/u,
+    );
+    assert.match(
+      pageSource,
+      /async function expandComposerDraftOperative\(\s*rawDraft: string,\s*\): Promise<string> \{\s*return rawDraft;/u,
+    );
+    assert.match(
+      pageSource,
+      /composerShortcutLanguageEnabled &&[\s\S]{0,240}resolveCommandCenterPromptShortcuts/u,
     );
   });
 
-  it("wires Coffee table composers to prompts and wildcard decks", () => {
+  it("keeps Coffee table composers as ordinary text", () => {
     assert.match(
       pageSource,
-      /variant: "coffee-table"[\s\S]{0,2200}promptPicks: commandCenterPromptPicks[\s\S]{0,200}wildcardPicks: composerWildcardDeckPicks/u,
+      /variant: "coffee-table"[\s\S]{0,2200}promptPicks: EMPTY_COMPOSER_COMMAND_PICKS[\s\S]{0,200}wildcardPicks: EMPTY_COMPOSER_COMMAND_PICKS/u,
     );
     assert.match(
       pageSource,
@@ -48,7 +63,7 @@ describe("composer picks everywhere", () => {
     );
   });
 
-  it("preserves Signal's single-line topic input while enriching multiline composers", () => {
+  it("preserves Signal's single-line topic input without shortcut language", () => {
     assert.match(signalSource, /renderPickAwareComposer\?/u);
     assert.match(signalSource, /expandComposerDraft\?/u);
     assert.match(
@@ -74,10 +89,6 @@ describe("composer picks everywhere", () => {
     );
     assert.match(
       pageSource,
-      /const renderPickAwareComposer = [\s\S]{0,1800}?resolveShortcutPickToText=\{resolveComposerPromptPickToPlainText\}[\s\S]{0,120}shortcutChipsEnabled/u,
-    );
-    assert.match(
-      pageSource,
       /resolveComposerPromptPickToPlainText[\s\S]{0,200}isComposerWildcardDeckPick[\s\S]{0,200}isCommandCenterPromptShortcut/u,
     );
     assert.doesNotMatch(
@@ -96,7 +107,6 @@ describe("composer picks everywhere", () => {
       signalSource,
       /id: "botcast-premise-inspiration"[\s\S]{0,200}onChange: setShowPremiseInspirationDraft/u,
     );
-    // Saved show Premise stays a plain textarea; booking fields keep pick-aware powers.
     assert.match(
       signalSource,
       /id=\{`signal-show-premise-\$\{selectedShow\.id\}`\}[\s\S]{0,800}setShowPremiseDraft/u,
@@ -111,11 +121,11 @@ describe("composer picks everywhere", () => {
     );
     assert.match(
       pageSource,
-      /variant: "signal"[\s\S]{0,1400}promptPicks: commandCenterPromptPicks[\s\S]{0,200}wildcardPicks: composerWildcardDeckPicks/u,
+      /variant: "signal"[\s\S]{0,1400}promptPicks: EMPTY_COMPOSER_COMMAND_PICKS[\s\S]{0,200}wildcardPicks: EMPTY_COMPOSER_COMMAND_PICKS/u,
     );
   });
 
-  it("wires the Slate project companion to pick-aware expansion", () => {
+  it("keeps the Slate project companion without expanding shortcut language", () => {
     assert.match(slateSource, /renderPickAwareComposer\?/u);
     assert.match(slateSource, /expandComposerDraft\?/u);
     assert.match(
@@ -128,11 +138,11 @@ describe("composer picks everywhere", () => {
     );
     assert.match(
       pageSource,
-      /<SlateWorkspace[\s\S]{0,800}renderPickAwareComposer=\{renderPickAwareComposer\}[\s\S]{0,200}expandComposerDraft=\{expandComposerDraftOperative\}/u,
+      /<SlateWorkspace[\s\S]{0,2400}renderPickAwareComposer=\{renderPickAwareComposer\}[\s\S]{0,200}expandComposerDraft=\{expandComposerDraftOperative\}/u,
     );
   });
 
-  it("wires Debate Territory to prompts and wildcard decks", () => {
+  it("keeps Debate Territory as ordinary text", () => {
     const debateSource = readFileSync(
       new URL("./DebateExperience.tsx", import.meta.url),
       "utf8",

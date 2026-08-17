@@ -5,8 +5,28 @@ import {
   normalizePrismMarketplaceBranchLock,
   prismAvatarDetailsPaneEnabled,
   prismBranchIsDev,
+  prismDeveloperAuthoringEnabled,
   prismMarketplaceBranchLockAllows,
 } from "./prismDevGating.ts";
+
+test("developer authoring stays on local/dev builds and out of Main releases", () => {
+  assert.equal(prismDeveloperAuthoringEnabled({ NODE_ENV: "development" }), true);
+  assert.equal(
+    prismDeveloperAuthoringEnabled({
+      NODE_ENV: "production",
+      NEXT_PUBLIC_PRISM_BRANCH: "dev",
+    }),
+    true,
+  );
+  assert.equal(
+    prismDeveloperAuthoringEnabled({
+      NODE_ENV: "production",
+      NEXT_PUBLIC_PRISM_BRANCH: "main",
+    }),
+    false,
+  );
+  assert.equal(prismDeveloperAuthoringEnabled({ NODE_ENV: "production" }), false);
+});
 
 test("avatar details stay locked on release branches without an override", () => {
   for (const branch of ["release", "release/0.8.0", "release-candidate"]) {

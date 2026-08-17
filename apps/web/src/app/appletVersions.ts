@@ -47,6 +47,7 @@ export type BotPowerVoicePresenceModePolicy = BotPowerGhostModePolicy;
 export type BotPowerSpeechObfuscationModePolicy = BotPowerGhostModePolicy;
 export type BotPowerCursedTongueModePolicy = BotPowerGhostModePolicy;
 export type BotPowerAddressedFandomModePolicy = BotPowerGhostModePolicy;
+export type BotPowerChromaticBiasModePolicy = BotPowerGhostModePolicy;
 export type BotPowerCredulityModePolicy = BotPowerGhostModePolicy;
 export type BotPowerAntiTruthModePolicy = BotPowerGhostModePolicy;
 export type BotPowerIntermittentMuteModePolicy =
@@ -78,19 +79,19 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   chat: {
     id: "chat",
     name: "Chat",
-    version: "1.41",
+    version: "1.46",
     status: "active",
   },
   zen: {
     id: "zen",
     name: "Zen",
-    version: "1.40",
+    version: "1.45",
     status: "active",
   },
   debate: {
     id: "debate",
     name: "Debate",
-    version: "0.34",
+    version: "0.42",
     status: "preview",
   },
   polling: {
@@ -102,13 +103,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "2.54",
+    version: "2.61",
     status: "active",
   },
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "1.67",
+    version: "1.77",
     status: "active",
   },
   feed: {
@@ -126,7 +127,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   story: {
     id: "story",
     name: "Story",
-    version: "0.33",
+    version: "0.38",
     status: "planned",
   },
   gym: {
@@ -437,6 +438,26 @@ export const BOT_POWER_ADDRESSED_FANDOM_MODE_POLICY: Record<
 > = {
   chat: "direct",
   zen: "direct",
+  debate: "adapted",
+  polling: "deferred",
+  coffee: "adapted",
+  botcast: "adapted",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** Exhaustive hue-prejudice policy: bots judge phosphor color, never people or the player. */
+export const BOT_POWER_CHROMATIC_BIAS_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerChromaticBiasModePolicy
+> = {
+  chat: "cue",
+  zen: "cue",
   debate: "adapted",
   polling: "deferred",
   coffee: "adapted",

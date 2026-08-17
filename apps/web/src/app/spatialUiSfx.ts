@@ -27,6 +27,7 @@ export const SPATIAL_UI_SFX_SOURCES = {
   ],
   // Deliberately uncooldowned so a range drag acknowledges every crossed tick.
   "effort-tick": ["/audio/ui-asmr/bot-select-03.mp3"],
+  "max-on": ["/audio/ui-asmr/max-electrical-zap-02.mp3"],
   confirm: [
     "/audio/prism-companion/glass-tap-01.mp3",
     "/audio/prism-companion/glass-tap-02.mp3",
@@ -57,6 +58,7 @@ export const SPATIAL_UI_SFX_CONFIG: Record<
   "panel-close": { cooldownMs: 90, volume: 0.18 },
   toggle: { cooldownMs: 55, volume: 0.16 },
   "effort-tick": { cooldownMs: 0, volume: 0.09 },
+  "max-on": { cooldownMs: 140, volume: 0.055 },
   confirm: { cooldownMs: 80, volume: 0.2 },
   "foundry-clank": { cooldownMs: 90, volume: 0.16 },
   // These generated cues carry more energy than the short tactile UI library.

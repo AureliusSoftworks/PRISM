@@ -38,7 +38,7 @@ describe("Auto fallback settings", () => {
     );
   });
 
-  it("renders separate ordered LOCAL and ONLINE fallback chains", () => {
+  it("renders separate ordered LOCAL and ONLINE Auto priorities", () => {
     assert.match(pageSource, /fallbackRowsForLane/);
     assert.match(pageSource, /\["local", "online"\] as const/);
     assert.match(pageSource, /AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT/);
@@ -48,7 +48,9 @@ describe("Auto fallback settings", () => {
     assert.match(pageSource, /Drag to reorder/u);
     assert.match(pageSource, /event\.key === "ArrowUp"/u);
     assert.match(pageSource, /aria-live="polite"/u);
-    assert.match(pageSource, /\+ Add \$\{laneLabel\} fallback/);
+    assert.match(pageSource, /\+ Add \$\{laneLabel\} priority/);
+    assert.match(pageSource, /appends every other eligible model in the lane/u);
+    assert.match(pageSource, /ONLINE ends with one bundled local attempt/u);
   });
 
   it("keeps Auto inside the selected lane and lets fixed models override it", () => {
@@ -247,14 +249,14 @@ describe("Auto fallback settings", () => {
         chain: { v: 1, fallbacks: [local] },
         runnable: [local, openai],
       }),
-      false,
+      true,
     );
     assert.deepEqual(
       autoFallbackSelectablePrimary({
         chain: { v: 1, fallbacks: [local] },
         runnable: [local, openai],
       }),
-      null,
+      local,
     );
     assert.equal(
       autoFallbackAvailableForPrimary({
@@ -266,18 +268,19 @@ describe("Auto fallback settings", () => {
     );
   });
 
-  it("keeps AUTO unavailable until at least one configured fallback is runnable", () => {
+  it("keeps Auto available without configured priorities when the lane can run", () => {
     assert.equal(
       autoFallbackModeSelectable({ chain: null, runnable: [local, openai] }),
-      false,
+      true,
     );
     assert.equal(
       autoFallbackModeSelectable({
         chain: { v: 1, fallbacks: [anthropic] },
         runnable: [local, openai],
       }),
-      false,
+      true,
     );
+    assert.equal(autoFallbackModeSelectable({ chain: null, runnable: [] }), false);
   });
 
   it("sends the binary privacy lane independently of contextual Auto", () => {

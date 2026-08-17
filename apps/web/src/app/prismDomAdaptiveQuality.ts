@@ -1,18 +1,7 @@
-import type { PrismSceneQuality } from "./prismSceneRuntime";
-
 export const PRISM_DOM_FRAME_FLOOR_FPS = 30;
 export const PRISM_DOM_SAMPLE_WINDOW_SIZE = 12;
 export const PRISM_DOM_SAMPLE_WARMUP_MS = 500;
 export const PRISM_DOM_SLEEP_DELTA_MS = 250;
-export const PRISM_DOM_DROP_COOLDOWN_MS = 450;
-export const PRISM_DOM_RECOVERY_COOLDOWN_MS = 8_000;
-export const PRISM_DOM_GOOD_WINDOWS_BEFORE_RECOVERY = 4;
-
-const QUALITY_ORDER: readonly PrismSceneQuality[] = [
-  "full",
-  "balanced",
-  "minimal",
-];
 
 export interface PrismDomFrameWindow {
   observedFps: number;
@@ -31,7 +20,6 @@ export interface PrismDomFrameSampleResult {
   accepted: boolean;
   ignoredReason?: "inactive" | "warmup" | "sleep-delta";
   window?: PrismDomFrameWindow;
-  qualityChanged?: PrismSceneQuality;
 }
 
 function percentile(sorted: readonly number[], fraction: number): number {
@@ -72,28 +60,20 @@ export function prismDomFrameWindow(
 }
 
 /**
- * Governs costly DOM/CSS presentation independently from authored content.
- * It sheds quality quickly below 30 FPS and restores it only after sustained
- * headroom, preventing camera transitions from repeatedly crossing tiers.
+ * Observes DOM/CSS frame pressure without changing presentation quality.
+ * Rendering diagnostics retain the cadence windows while explicit player
+ * graphics settings remain the only quality control.
  */
 export class PrismDomAdaptiveQualityController {
-  private qualityValue: PrismSceneQuality = "full";
   private ignoredUntilMs: number;
   private samples: number[] = [];
-  private goodWindowCount = 0;
-  private lastTierChangeMs = Number.NEGATIVE_INFINITY;
 
   constructor(nowMs = 0) {
     this.ignoredUntilMs = nowMs + PRISM_DOM_SAMPLE_WARMUP_MS;
   }
 
-  get quality(): PrismSceneQuality {
-    return this.qualityValue;
-  }
-
   noteDiscontinuity(nowMs: number): void {
     this.samples = [];
-    this.goodWindowCount = 0;
     this.ignoredUntilMs = nowMs + PRISM_DOM_SAMPLE_WARMUP_MS;
   }
 
@@ -117,45 +97,9 @@ export class PrismDomAdaptiveQualityController {
 
     const window = prismDomFrameWindow(this.samples);
     this.samples = [];
-    let qualityChanged: PrismSceneQuality | undefined;
-    if (window.belowFloor) {
-      this.goodWindowCount = 0;
-      if (sample.nowMs - this.lastTierChangeMs >= PRISM_DOM_DROP_COOLDOWN_MS) {
-        qualityChanged = this.changeTier(1, sample.nowMs);
-      }
-    } else if (window.recoveryHeadroom && this.qualityValue !== "full") {
-      this.goodWindowCount += 1;
-      if (
-        this.goodWindowCount >= PRISM_DOM_GOOD_WINDOWS_BEFORE_RECOVERY &&
-        sample.nowMs - this.lastTierChangeMs >=
-          PRISM_DOM_RECOVERY_COOLDOWN_MS
-      ) {
-        qualityChanged = this.changeTier(-1, sample.nowMs);
-        this.goodWindowCount = 0;
-      }
-    } else {
-      this.goodWindowCount = 0;
-    }
-
     return {
       accepted: true,
       window,
-      ...(qualityChanged ? { qualityChanged } : {}),
     };
-  }
-
-  private changeTier(
-    direction: -1 | 1,
-    nowMs: number,
-  ): PrismSceneQuality | undefined {
-    const currentIndex = QUALITY_ORDER.indexOf(this.qualityValue);
-    const next = QUALITY_ORDER[
-      Math.max(0, Math.min(QUALITY_ORDER.length - 1, currentIndex + direction))
-    ];
-    if (!next || next === this.qualityValue) return undefined;
-    this.qualityValue = next;
-    this.lastTierChangeMs = nowMs;
-    this.samples = [];
-    return next;
   }
 }

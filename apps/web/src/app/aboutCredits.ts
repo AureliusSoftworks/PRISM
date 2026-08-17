@@ -300,7 +300,7 @@ export const ABOUT_CREDIT_GROUPS: readonly AboutCreditGroup[] = [
         id: "generated-assets",
         name: "Generated production assets",
         description:
-          "Selected imagery, voices, music, and foley generated through PRISM's connected OpenAI and ElevenLabs tools, then reviewed and integrated in-house.",
+          "Selected imagery, voices, music, foley, and UI earcons generated through PRISM's connected OpenAI and ElevenLabs tools, then reviewed and integrated in-house.",
       },
       {
         id: "subtlex",

@@ -355,7 +355,7 @@ test("copies a full companion bubble without hijacking links or text selection",
   );
   assert.match(
     tutorials,
-    /Click any Prism or You message bubble to copy its full text; dragging across text still selects it normally/u,
+    /Right-click an assistant message in Chat to reveal the model and effort glyph used for that reply/u,
   );
 });
 
@@ -680,8 +680,14 @@ test("switches the floating Prism panel among Synthesis, Chat, and Notes", () =>
   assert.match(component, /id="global-prism-synthesis"/u);
   assert.match(
     component,
-    /className=\{styles\.synthesisRefractCard\}[\s\S]*className=\{styles\.refractModelPicker\}/u,
+    /className=\{styles\.synthesisRefractRow\}[\s\S]*className=\{styles\.refractModelPicker\}/u,
   );
+  assert.match(companionCss, /\.synthesisRefractRow\s*\{/u);
+  assert.match(
+    companionCss,
+    /\.refractModelPicker\s*>\s*:global\(\[data-provider\]\)[\s\S]*?height:\s*32px/u,
+  );
+  assert.doesNotMatch(companionCss, /\.synthesisRefractCard\s*\{/u);
   assert.match(component, /className=\{styles\.refractLaneBadge\}/u);
   const synthesisPanel =
     component.match(

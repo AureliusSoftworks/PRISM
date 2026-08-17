@@ -71,6 +71,8 @@ export interface AssetRailProps {
   synthesizeDisabled?: boolean;
   onOpenStorageSettings?: () => void;
   onUpload?: () => void;
+  onUndo?: () => void | Promise<void>;
+  undoLabel?: string;
   /** General Images owns its existing header picker; typed rails own this compact choice. */
   generation?: AssetRailGenerationControl;
   onSynthesize: (
@@ -245,6 +247,8 @@ export function AssetRail({
   synthesizeDisabled = false,
   onOpenStorageSettings,
   onUpload,
+  onUndo,
+  undoLabel = "Undo",
   generation,
   onSynthesize,
   onSelect,
@@ -323,6 +327,17 @@ export function AssetRail({
           </small>
         </div>
         <div className={styles.railHeaderActions}>
+          {onUndo ? (
+            <button
+              type="button"
+              className={sharedStyles.linkButton}
+              onClick={() => void onUndo()}
+              disabled={disabled}
+              aria-label={undoLabel === "Undo" ? "Undo" : `Undo ${undoLabel}`}
+            >
+              ↶ {undoLabel}
+            </button>
+          ) : null}
           {onOpenStorageSettings ? (
             <button
               type="button"

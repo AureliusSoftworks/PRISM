@@ -2,7 +2,7 @@ export const FIRST_RUN_WELCOME_STORAGE_KEY = "prism_first_run_welcome_v1";
 export const FIRST_RUN_SETUP_STORAGE_KEY = "prism_desktop_first_run_complete_v4";
 
 export const FIRST_RUN_BATCH_FOUNDRY_GUIDANCE =
-  "Batch Foundry opens its own constellation chamber, not Avatar Studio: it automatically creates and saves 2–10 bots from rich full drafts with optional Powers, revealing each saved bot in its fixed mini-avatar slot before opening one model-authored Library group. At 11–100 bots, it switches visibly to lean personality-first generation with Powers and bespoke avatar, voice, Ink, and SFX customization off; the same fixed slots use static micro faces inside each generated color-and-glyph orb, and recoverable progress still saves automatically.";
+  "Batch Foundry opens its own constellation chamber, not Avatar Studio: it automatically creates and saves 2–10 bots from rich full drafts with optional Powers, revealing each saved bot in its fixed mini-avatar slot before opening one model-authored Library group. At 11–100 bots, it switches visibly to lean personality-first generation with Powers and bespoke avatar, Ink, and SFX customization off; every member still receives a persona-aware voice and Accent Map casting. The same fixed slots use static micro faces inside each generated color-and-glyph orb, and recoverable progress still saves automatically.";
 
 export function clearFirstRunSetupCompletion(storage: {
   removeItem(key: string): void;
@@ -48,7 +48,12 @@ export const FIRST_RUN_SETUP_STEPS: readonly FirstRunSetupStep[] = [
   },
   { id: "openai", title: "Connect OpenAI", shortTitle: "OpenAI", optional: true },
   { id: "anthropic", title: "Connect Anthropic", shortTitle: "Anthropic", optional: true },
-  { id: "elevenlabs", title: "Connect ElevenLabs", shortTitle: "Voice", optional: true },
+  {
+    id: "elevenlabs",
+    title: "Connect ElevenLabs for voice and music",
+    shortTitle: "Voice & music",
+    optional: true,
+  },
   {
     id: "auto-models",
     title: "Meet contextual Auto",

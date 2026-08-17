@@ -10,14 +10,19 @@ const cssSource = readFileSync(
 
 describe("empty Chat Spotlight search", () => {
   it("keeps the empty-Home bot browser mounted in both Zen and transcript Chat", () => {
+    const visibilitySource = pageSource.slice(
+      pageSource.indexOf("const zenEmptyHeroVisible ="),
+      pageSource.indexOf("const prismHomeEmptyHeroVisible ="),
+    );
     assert.match(
-      pageSource,
-      /const zenEmptyHeroVisible =\s*sharedChatConversationPresentation &&\s*\(!detail \|\| detail\.messages\.length === 0\) &&\s*!pendingReplyVisible &&\s*!zenEphemeralUserActionMessage/,
+      visibilitySource,
+      /const zenEmptyHeroVisible =\s*sharedChatConversationPresentation &&\s*\(!detail \|\| detail\.messages\.length === 0\) &&\s*!pendingReplyVisible &&\s*!zenEphemeralUserActionMessage;/,
     );
     assert.doesNotMatch(
       pageSource,
       /const zenEmptyHeroVisible =\s*chatLikeSurface &&/,
     );
+    assert.doesNotMatch(visibilitySource, /emptyStateSearchActive/);
     assert.equal(pageSource.match(/\{zenEmptyHeroVisible &&/g)?.length, 1);
   });
 
@@ -49,7 +54,6 @@ describe("empty Chat Spotlight search", () => {
     );
     assert.match(pageSource, /className=\{styles\.emptyStateSearchField\}/);
     assert.match(pageSource, /className=\{styles\.emptyStateSearchInput\}/);
-    assert.match(pageSource, /className=\{styles\.emptyStateSearchGroupPicker\}/);
   });
 
   it("keeps the persistent Spotlight focused while its query activates", () => {

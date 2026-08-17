@@ -348,72 +348,6 @@ export const CrtPixelTextGlyph = forwardRef<
         `${rasterKey ?? ""}:${fontRevision}`,
         binaryAlpha,
       );
-      // #region agent log
-      {
-        const miniRoot = node.closest<HTMLElement>(
-          "[data-chat-mini-bot-avatar='true']",
-        );
-        const inDebateGallery =
-          miniRoot?.className.includes("debateGalleryMiniAvatar") === true ||
-          node
-            .closest("[data-debate-audience-portrait='true']")
-            ?.getAttribute("data-debate-audience-portrait") === "true" ||
-          Boolean(
-            node.closest(
-              ".debateAudienceBotPortrait, [class*='debateAudienceBotPortrait']",
-            ),
-          );
-        if (inDebateGallery || miniRoot) {
-          const computed = window.getComputedStyle(node);
-          const after = window.getComputedStyle(node, "::after");
-          const before = window.getComputedStyle(node, "::before");
-          const width = Number.parseFloat(computed.width) || node.offsetWidth;
-          const height =
-            Number.parseFloat(computed.height) || node.offsetHeight;
-          fetch(
-            "http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2",
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "X-Debug-Session-Id": "518322",
-              },
-              body: JSON.stringify({
-                sessionId: "518322",
-                runId: "pre-fix",
-                hypothesisId: nextMask ? "B" : "A",
-                location: "PhosphorPixelGlyph.tsx:renderMask",
-                message: "mini/gallery CRT glyph mask raster",
-                data: {
-                  content,
-                  enabled,
-                  inDebateGallery,
-                  miniSize: miniRoot?.dataset.size ?? null,
-                  maskOk: Boolean(nextMask),
-                  width,
-                  height,
-                  visibility: computed.visibility,
-                  color: computed.color,
-                  textFill: computed.webkitTextFillColor,
-                  afterDisplay: after.display,
-                  afterContent: after.content,
-                  afterBackground: after.backgroundImage || after.background,
-                  afterVisibility: after.visibility,
-                  beforeDisplay: before.display,
-                  beforeContent: before.content,
-                  pendingAttr: enabled && !nextMask,
-                  readyAttr: Boolean(nextMask),
-                  faceClass: node
-                    .closest("[data-coffee-plate-emoji-glyphs]")
-                    ?.className?.slice(0, 180),
-                },
-                timestamp: Date.now(),
-              }),
-            },
-          ).catch(() => {});
-        }
-      }
-      // #endregion
       if (!cancelled && nextMask) {
         setRenderedMask((current) =>
           current?.content === content &&
@@ -456,7 +390,7 @@ export const CrtPixelTextGlyph = forwardRef<
   }, [binaryAlpha, content, enabled, rasterKey]);
 
   const maskUrl =
-    renderedMask?.content === content ? renderedMask.url : null;
+    enabled && renderedMask?.content === content ? renderedMask.url : null;
   const style = maskUrl
     ? ({
         ["--crt-phosphor-pixel-mask" as string]: `url("${maskUrl}")`,
@@ -464,65 +398,6 @@ export const CrtPixelTextGlyph = forwardRef<
           `${renderedMask?.overscanPx ?? 0}px`,
       } as CSSProperties)
     : undefined;
-
-  // #region agent log
-  useLayoutEffect(() => {
-    const node = localRef.current;
-    if (!node || !enabled) return;
-    const inDebateGallery = Boolean(
-      node.closest(
-        ".debateAudienceBotPortrait, [class*='debateAudienceBotPortrait'], [class*='debateGalleryMiniAvatar']",
-      ),
-    );
-    if (!inDebateGallery) return;
-    const computed = window.getComputedStyle(node);
-    const after = window.getComputedStyle(node, "::after");
-    const before = window.getComputedStyle(node, "::before");
-    fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "518322",
-      },
-      body: JSON.stringify({
-        sessionId: "518322",
-        runId: "pre-fix",
-        hypothesisId: maskUrl ? "B" : "A",
-        location: "PhosphorPixelGlyph.tsx:postPaint",
-        message: "gallery glyph post-paint computed style",
-        data: {
-          content,
-          maskReadyAttr: node.dataset.crtPixelMaskReady ?? null,
-          maskPendingAttr: node.dataset.crtPixelMaskPending ?? null,
-          hasMaskUrl: Boolean(maskUrl),
-          visibility: computed.visibility,
-          opacity: computed.opacity,
-          color: computed.color,
-          fontSize: computed.fontSize,
-          width: computed.width,
-          height: computed.height,
-          afterDisplay: after.display,
-          afterContent: after.content,
-          afterBackground: (after.backgroundImage || after.background || "").slice(
-            0,
-            120,
-          ),
-          afterOpacity: after.opacity,
-          afterMaskImage: (after.maskImage || after.webkitMaskImage || "").slice(
-            0,
-            80,
-          ),
-          beforeDisplay: before.display,
-          beforeBackground: (before.backgroundImage || before.background || "").slice(
-            0,
-            80,
-          ),
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-  }, [content, enabled, maskUrl]);
-  // #endregion
 
   return (
     <span

@@ -91,7 +91,7 @@ describe("Help diagnostics migration", () => {
       /data-settings-action="open-sound-fx-bench"[\s\S]{0,120}href="\/tools\/sound-fx-bench\.html"[\s\S]{0,160}>Sound FX Bench</u,
     );
     assert.match(pageSource, /data-settings-action="open-debate-alignment-lab"/u);
-    assert.match(pageSource, />Debate Alignment Lab</u);
+    assert.match(pageSource, />Stage layout</u);
     assert.doesNotMatch(
       pageSource,
       /data-settings-action="open-(?:voice-sync-lab|sound-fx-bench)"[^>]*target=/u,

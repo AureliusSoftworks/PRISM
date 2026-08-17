@@ -3,47 +3,219 @@ import { describe, it } from "node:test";
 
 import {
   ZEN_HUE_DIRECTORY_MIN_ROWS,
+  ZEN_HUE_DIRECTORY_ONE_ROW_COLUMNS,
   clampZenHueDirectoryState,
+  stepZenHueCableHorizontalInertia,
+  zenHueCableAcceleratedSliderStep,
+  zenHueCableHandleClientPoint,
+  zenHueCableBoundaryWhiteoutProgress,
+  zenHueCableFrameElapsedSeconds,
+  zenHueCableHorizontalInertiaHasSettled,
   zenHueCableTraversalFrame,
   zenHueCableTraversalStep,
   type ZenHueCableDragDirection,
   stepZenHueCableSpring,
   wrapZenHue,
-  zenHueAtmosphereColors,
+  zenHueAtmospherePalette,
   zenHueAtmosphereNodeCount,
   zenHueDirectoryColumns,
   zenHueDirectoryLayout,
+  zenHueGradientOverlayOpacity,
   zenHueTierForNormalizedPosition,
   zenHueTierForVerticalDrag,
   zenHueCableSpringHasSettled,
 } from "./zenHueStringNavigation.ts";
 
 describe("Zen hue string directory math", () => {
+  it("maps the rendered SVG handle through xMidYMid meet letterboxing", () => {
+    assert.deepEqual(
+      zenHueCableHandleClientPoint({
+        svgX: 500,
+        svgY: 60,
+        viewBoxWidth: 1_000,
+        viewBoxHeight: 120,
+        clientLeft: 100,
+        clientTop: 200,
+        clientWidth: 760,
+        clientHeight: 78,
+      }),
+      { x: 480, y: 239 },
+    );
+  });
+
+  it("accelerates horizontal cable travel and clamps it to the spectrum", () => {
+    const gained = zenHueCableAcceleratedSliderStep({
+      sliderValue: 180,
+      deltaClientX: 100,
+      surfaceWidth: 1_000,
+    });
+    assert.ok(gained > 180 + 35.9);
+    assert.equal(
+      zenHueCableAcceleratedSliderStep({
+        sliderValue: 350,
+        deltaClientX: 100,
+        surfaceWidth: 1_000,
+      }),
+      359,
+    );
+  });
+
+  it("carries horizontal hue momentum, loses energy, and settles", () => {
+    let state = { sliderValue: 180, velocity: 240 };
+    const first = stepZenHueCableHorizontalInertia(state, 1 / 60);
+    assert.ok(first.sliderValue > state.sliderValue);
+    assert.ok(first.velocity > 0 && first.velocity < state.velocity);
+    state = first;
+    for (let frame = 0; frame < 120; frame += 1) {
+      state = stepZenHueCableHorizontalInertia(state, 1 / 60);
+    }
+    assert.equal(zenHueCableHorizontalInertiaHasSettled(state), true);
+
+    const boundary = stepZenHueCableHorizontalInertia(
+      { sliderValue: 358, velocity: 420 },
+      0.032,
+    );
+    assert.deepEqual(boundary, { sliderValue: 359, velocity: 0 });
+  });
+
+  it("whitens only blocked overpull at the root and deepest boundaries", () => {
+    const tiers = [1, 2, 3, 4, 5];
+    const progress = (tier: "root" | number, deltaY: number) =>
+      zenHueCableBoundaryWhiteoutProgress({
+        tier,
+        tiers,
+        deltaY,
+        deadZonePx: 34,
+        fullWhitePullPx: 48,
+      });
+
+    assert.equal(progress("root", 34), 0);
+    assert.equal(progress("root", 41), 0.5);
+    assert.equal(progress("root", 48), 1);
+    assert.equal(progress(1, -34), 0);
+    assert.equal(progress(1, -41), 0.5);
+    assert.equal(progress(1, -48), 1);
+    assert.equal(progress(1, 48), 0);
+    assert.equal(progress("root", -48), 0);
+    assert.equal(progress(3, -48), 0);
+    assert.equal(progress(3, 48), 0);
+  });
+
+  it("preserves a normal animation-frame duration while capping stalls", () => {
+    assert.equal(zenHueCableFrameElapsedSeconds(1016, 1000), 0.016);
+    assert.equal(zenHueCableFrameElapsedSeconds(1200, 1000), 0.05);
+    assert.equal(zenHueCableFrameElapsedSeconds(900, 1000), 0);
+  });
+
+  it("crosses a breadth tier while held on ordinary rAF timestamps", () => {
+    const tiers = [1, 2, 3, 4, 5];
+    let previousMs = 1_000;
+    let position = 0;
+    let direction: ZenHueCableDragDirection = 0;
+    for (let frameIndex = 1; frameIndex <= 20; frameIndex += 1) {
+      const nowMs = 1_000 + frameIndex * 16;
+      const frame = zenHueCableTraversalFrame({
+        normalizedPosition: position,
+        deltaY: 220,
+        deadZonePx: 34,
+        currentDirection: direction,
+        directionLatchPx: 48,
+        elapsedSeconds: zenHueCableFrameElapsedSeconds(nowMs, previousMs),
+        tierCount: tiers.length,
+      });
+      position = frame.normalizedPosition;
+      direction = frame.direction;
+      previousMs = nowMs;
+    }
+    assert.notEqual(zenHueTierForNormalizedPosition(position, tiers), tiers[0]);
+  });
+
   it("caps the contextual atmosphere at five nodes regardless of root size", () => {
     assert.equal(zenHueAtmosphereNodeCount(2), 2);
     assert.equal(zenHueAtmosphereNodeCount(4), 4);
     assert.equal(zenHueAtmosphereNodeCount(5), 5);
     assert.equal(zenHueAtmosphereNodeCount(25), 5);
     assert.equal(zenHueAtmosphereNodeCount("root"), 5);
-    assert.deepEqual(
-      zenHueAtmosphereColors({
-        tier: 2,
-        visibleColors: ["red", "orange", "yellow", "green"],
-        rootColors: ["p", "r", "i", "s", "m"],
-      }),
-      ["red", "green"],
-    );
-    assert.deepEqual(
-      zenHueAtmosphereColors({
-        tier: "root",
-        visibleColors: ["cyan"],
-        rootColors: ["p", "r", "i", "s", "m", "extra"],
-      }),
-      ["p", "r", "i", "s", "m"],
-    );
+    const palette = zenHueAtmospherePalette({
+      tier: 2,
+      visibleColors: ["#ff0000", "#ff8800", "#ffff00", "#00ff00"],
+    });
+    assert.equal(palette.representativeColors.length, 4);
+    const narrowPalette = zenHueAtmospherePalette({
+      tier: 1,
+      visibleColors: ["#ff0000", "#ff8800", "#ffff00", "#00ff00"],
+    });
+    assert.equal(narrowPalette.representativeColors.length, 4);
+    assert.deepEqual(narrowPalette.representativeColors, palette.representativeColors);
+    assert.ok(palette.representativeColors.every((color) => color.startsWith("#")));
+  });
+
+  it("keeps atmosphere palette composition stable across directory tiers", () => {
+    const visibleColors = [
+      "#ff0000",
+      "#ff8800",
+      "#ffff00",
+      "#00ff00",
+      "#00ffff",
+      "#0000ff",
+      "#ff00ff",
+    ];
+    const rootPalette = zenHueAtmospherePalette({
+      tier: "root",
+      visibleColors,
+    });
+    const traversalTiers = [1, 2, 3, 4, 5] as const;
+    for (const tier of traversalTiers) {
+      assert.deepEqual(
+        zenHueAtmospherePalette({
+          tier,
+          visibleColors,
+        }),
+        rootPalette,
+      );
+    }
+  });
+
+  it("fades the broad gradient monotonically from root to the one-row hue room", () => {
+    const tiers = [1, 2, 3, 4, 5] as const;
+    assert.equal(zenHueGradientOverlayOpacity("root", tiers), 1);
+    assert.equal(zenHueGradientOverlayOpacity(5, tiers), 0.8);
+    assert.equal(zenHueGradientOverlayOpacity(3, tiers), 0.4);
+    assert.equal(zenHueGradientOverlayOpacity(1, tiers), 0);
+    assert.equal(zenHueGradientOverlayOpacity("root", []), 1);
+  });
+
+  it("keeps a full spectrum colorful and boosts a clustered atmosphere", () => {
+    const fullSpectrum = zenHueAtmospherePalette({
+      tier: "root",
+      visibleColors: [
+        "#ff0000",
+        "#ffff00",
+        "#00ff00",
+        "#00ffff",
+        "#0000ff",
+        "#ff00ff",
+      ],
+    });
+    const clustered = zenHueAtmospherePalette({
+      tier: "root",
+      visibleColors: ["#ff2438", "#ff3b30", "#f04455", "#ff5263"],
+    });
+
+    assert.ok(fullSpectrum.coherence < 0.05);
+    assert.ok(fullSpectrum.saturation <= 1.03);
+    assert.ok(clustered.coherence > 0.95);
+    assert.ok(clustered.coherence > fullSpectrum.coherence + 0.8);
+    assert.ok(clustered.saturation > 1.42);
+    assert.ok(clustered.saturation > fullSpectrum.saturation + 0.4);
   });
 
   it("derives capacities from the fixed frame down to the one-row close-up", () => {
+    assert.equal(
+      zenHueDirectoryColumns(1, 1200, 300, 12),
+      ZEN_HUE_DIRECTORY_ONE_ROW_COLUMNS,
+    );
+    assert.equal(zenHueDirectoryColumns(2, 1200, 300, 12), 12);
     assert.equal(zenHueDirectoryColumns(3, 1200, 300, 12), 12);
     const layout = zenHueDirectoryLayout({
       totalBots: 122,
@@ -55,6 +227,20 @@ describe("Zen hue string directory math", () => {
       minimumColumns: 12,
     });
     assert.deepEqual(layout.tiers, [ZEN_HUE_DIRECTORY_MIN_ROWS, 2, 3, 4, 5]);
+  });
+
+  it("retains the shorter one-row tier when eleven bots are filterable", () => {
+    const layout = zenHueDirectoryLayout({
+      totalBots: 11,
+      filterableBots: 11,
+      frameWidth: 1200,
+      frameHeight: 300,
+      rootRows: 2,
+      rootCols: 6,
+      minimumColumns: 12,
+    });
+
+    assert.deepEqual(layout.tiers, [ZEN_HUE_DIRECTORY_MIN_ROWS]);
   });
 
   it("keeps root outside the integer directory ladder and clamps stale tiers", () => {

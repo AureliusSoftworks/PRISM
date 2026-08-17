@@ -429,11 +429,24 @@ function sessionAtmosphereOutputDestination(
   context: AudioContext,
   bus: SessionAtmosphereBus,
   backgroundRecordable: boolean,
+  grainRecordable: boolean,
 ): AudioNode {
-  if (bus === "background" && !backgroundRecordable) {
+  if (
+    (bus === "background" && !backgroundRecordable) ||
+    (bus === "grain" && !grainRecordable)
+  ) {
     return prismLocalOnlyAudioOutputNode(context);
   }
   return prismAudioOutputNode(context);
+}
+
+export function sessionAtmosphereLoopIsRecordable(
+  bus: "background" | "grain",
+  options: { backgroundRecordable: boolean; grainRecordable: boolean },
+): boolean {
+  return bus === "background"
+    ? options.backgroundRecordable
+    : options.grainRecordable;
 }
 
 function levelSessionAtmosphereSource(
@@ -447,6 +460,7 @@ function levelSessionAtmosphereSource(
     "lowCutHz" | "highCutHz" | "stereoPan"
   >,
   backgroundRecordable = true,
+  grainRecordable = true,
 ): SessionAtmosphereSourceLeveler | null {
   const context = sessionAtmosphereContext();
   if (!context) return null;
@@ -463,6 +477,7 @@ function levelSessionAtmosphereSource(
         context,
         bus,
         backgroundRecordable,
+        grainRecordable,
       ),
     );
   } catch {
@@ -623,6 +638,8 @@ export function startSessionAtmosphere(args: {
   backgroundTone?: SessionAtmosphereBackgroundTone;
   /** When false, background beds stay on speakers only and skip the master tap. */
   backgroundRecordable?: boolean;
+  /** When false, grain beds stay on speakers only and skip the master tap. */
+  grainRecordable?: boolean;
   foleyRoomAcoustics?: RoomAcousticsSend;
   backgroundRoomAcoustics?: RoomAcousticsSend;
   allowMixBoost?: boolean;
@@ -644,6 +661,7 @@ export function startSessionAtmosphere(args: {
   let restoredVolume = volume;
   let restoredMix = mix;
   const backgroundRecordable = args.backgroundRecordable !== false;
+  const grainRecordable = args.grainRecordable !== false;
   const activeAudio = new Map<
     HTMLAudioElement,
     SessionAtmosphereActiveSource
@@ -816,13 +834,20 @@ export function startSessionAtmosphere(args: {
           : args.foleyRoomAcoustics,
         options,
         backgroundRecordable,
+        grainRecordable,
       ),
     } satisfies SessionAtmosphereActiveSource;
-    // Local-only background may still use HTMLAudio fallback during capture.
+    const loopRecordable =
+      bus === "foley" ||
+      sessionAtmosphereLoopIsRecordable(bus, {
+        backgroundRecordable,
+        grainRecordable,
+      });
+    // Local-only loops may still use HTMLAudio fallback during capture.
     if (
       !source.leveler &&
       replayAudioMasterCaptureActive() &&
-      !(bus === "background" && !backgroundRecordable)
+      loopRecordable
     ) {
       return null;
     }
@@ -903,6 +928,7 @@ export function startSessionAtmosphere(args: {
               context,
               bus,
               backgroundRecordable,
+              grainRecordable,
             ),
           ),
         };

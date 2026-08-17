@@ -25,18 +25,32 @@ describe("Prism Refract helpers", () => {
     });
   });
 
-  it("never returns placeholders, disabled options, or the current choice", () => {
+  it("never returns placeholders or disabled options", () => {
     assert.equal(
       nextPrismRefractChoice(
         [
           { value: "", label: "Choose…" },
-          { value: "a", label: "A" },
           { value: "b", label: "B", disabled: true },
         ],
         "a",
         [],
       ),
       null,
+    );
+  });
+
+  it("can keep the sole valid constrained value instead of failing", () => {
+    assert.deepEqual(
+      nextPrismRefractChoice(
+        [
+          { value: "", label: "Choose…" },
+          { value: "only", label: "Only" },
+        ],
+        "only",
+        [],
+        () => 0,
+      ),
+      { value: "only", label: "Only" },
     );
   });
 

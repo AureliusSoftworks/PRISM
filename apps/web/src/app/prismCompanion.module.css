@@ -1138,48 +1138,46 @@
 .composer textarea::placeholder { color: var(--fg-muted, #aaa4a0); }
 .composerStatus,
 .composer footer { display: flex; align-items: center; gap: 8px; }
-.synthesisRefractCard {
-  width: min(390px, calc(100vw - 24px));
-  display: grid;
-  gap: 8px;
-  padding: 9px 10px;
-  border: 1px solid #9ceaff2f;
-  border-radius: 16px;
-  color: var(--fg, #edf3f8);
-  background:
-    radial-gradient(circle at 12% 0%, #e978d71a, transparent 50%),
-    color-mix(in srgb, var(--bg-surface, #151311) 96%, transparent);
-  box-shadow:
-    0 16px 38px -28px #000e,
-    inset 0 1px 0 #ffffff12;
-}
-.synthesisRefractCardHeading {
+.synthesisRefractRow {
+  width: 100%;
+  min-height: 34px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
+  padding: 2px 0;
+  color: var(--fg, #edf3f8);
+}
+.synthesisRefractIdentity {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
   color: #9ceaff;
   font: 780 .56rem/1.25 system-ui, sans-serif;
   letter-spacing: .09em;
   text-transform: uppercase;
 }
-.refractModelPicker { flex: 0 1 124px; min-width: 0; }
+.refractModelPicker {
+  flex: 0 1 144px;
+  min-width: 0;
+}
+.refractModelPicker > :global([data-provider]) {
+  width: 100%;
+  height: 32px;
+  border-color: #9ceaff2f;
+  background: color-mix(in srgb, var(--bg-surface, #151311) 88%, transparent);
+  box-shadow: inset 0 1px 0 #ffffff0d;
+}
 .refractModelPicker :global([data-prism-model-picker-trigger="true"]) {
-  max-width: 124px;
+  width: 100%;
+  max-width: none;
   padding: 0 12px 0 10px;
   border: 0;
   border-radius: inherit;
   color: var(--fg);
-  background: inherit;
+  background: transparent;
   font: inherit;
-}
-.synthesisRefractCard .refractModelPicker {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.synthesisRefractCard .refractModelPicker :global([data-prism-model-picker-trigger="true"]) {
-  max-width: none;
-  width: 100%;
 }
 .synthesisRecentRail {
   display: grid;
@@ -1500,8 +1498,7 @@
 }
 
 :global([data-theme="light"]) .thinking p,
-:global([data-theme="light"]) .synthesisRefractCard,
-:global([data-theme="light"]) .synthesisRefractCardHeading,
+:global([data-theme="light"]) .synthesisRefractIdentity,
 :global([data-theme="light"]) .sessionNoteHeading > small,
 :global([data-theme="light"]) .sessionNoteComposer footer > small,
 :global([data-theme="light"]) .composer small,
@@ -1510,16 +1507,9 @@
   color: #52677d;
 }
 
-:global([data-theme="light"]) .synthesisRefractCard {
+:global([data-theme="light"]) .refractModelPicker > :global([data-provider]) {
   border-color: #54708b2f;
-  background:
-    radial-gradient(circle at 10% 0%, #ffecff19, transparent 45%),
-    linear-gradient(
-      180deg,
-      #ffffffd4 0%,
-      #edf4ffce 50%,
-      #f6ebffd1 100%
-    );
+  background: #ffffffa8;
 }
 
 :global([data-theme="light"]) .refractLaneBadge {
