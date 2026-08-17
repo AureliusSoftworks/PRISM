@@ -109,7 +109,7 @@ test("Ink can temporarily reveal the animated avatar without unmounting its canv
   assert.match(pageSource, /setInkLivePreview\(true\);\s*setPreviewMode\("talking"\);/);
   assert.match(
     pageSource,
-    /screenMode=\{\s*activeControlTab === "details" && !inkLivePreview/,
+    /avatarStudioPreviewScreenMode:\s*\"off\" \| \"synthesis\" \| \"live\" \| \"editing\"/,
   );
   assert.match(
     pageSource,
@@ -118,5 +118,37 @@ test("Ink can temporarily reveal the animated avatar without unmounting its canv
   assert.match(
     cssSource,
     /\.botAvatarFoundryScreenOverlay:not\(\[data-screen-overlay-visible="true"\]\)[\s\S]*?visibility:\s*hidden;/,
+  );
+});
+
+test("Eye placement keeps the authored full face live", () => {
+  assert.match(
+    pageSource,
+    /avatarStudioPreviewScreenMode: "off" \| "synthesis" \| "live" \| "editing" =[\s\S]*?activeControlTab === "details" && !inkLivePreview\s*\?\s*"editing"\s*:\s*"live"/,
+  );
+  assert.match(
+    pageSource,
+    /function BotAvatarPreviewPanel\([\s\S]*?<ZenLiveBotMannequin[\s\S]*?minimumRenderedSizeTier="full"/,
+    "the editable Studio mannequin must not lose its face during transient compact measurements",
+  );
+  assert.match(
+    pageSource,
+    /faceEyeOffsetX=\{faceStyle\.eyeOffsetX\}[\s\S]*?faceEyeOffsetY=\{faceStyle\.eyeOffsetY\}/,
+  );
+});
+
+test("Mouth placement keeps the authored full face live", () => {
+  assert.match(
+    pageSource,
+    /minimumRenderedSizeTier="full"[\s\S]*?pixelPerfectInk=\{screenMode === "editing"\}/,
+    "the full renderer floor must coexist with the Details-only editing treatment",
+  );
+  assert.match(
+    pageSource,
+    /faceMouthOffsetX=\{faceStyle\.mouthOffsetX\}[\s\S]*?faceMouthOffsetY=\{faceStyle\.mouthOffsetY\}/,
+  );
+  assert.match(
+    pageSource,
+    /\{screenMode === "live" \|\| screenMode === "synthesis" \? \(/,
   );
 });

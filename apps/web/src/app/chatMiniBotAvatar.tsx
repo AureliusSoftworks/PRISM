@@ -13,8 +13,8 @@ export const CHAT_MINI_BOT_AVATAR_DARK_BASE_SRC =
   "/bot-frame/bot-frame-mini-dark.png?v=2";
 export const CHAT_MINI_BOT_AVATAR_LIGHT_BASE_SRC =
   "/bot-frame/bot-frame-mini-light.png?v=2";
-export const CHAT_MINI_BOT_AVATAR_MIN_RENDER_SIZE = 28;
-export const CHAT_MINI_BOT_AVATAR_MAX_RENDER_SIZE = 220;
+export const CHAT_MINI_BOT_AVATAR_MIN_RENDER_SIZE = 1;
+export const CHAT_MINI_BOT_AVATAR_MAX_RENDER_SIZE = 299;
 
 export function clampChatMiniBotAvatarRenderSize(size: number): number {
   if (!Number.isFinite(size)) return CHAT_MINI_BOT_AVATAR_MIN_RENDER_SIZE;

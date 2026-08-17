@@ -86,7 +86,7 @@ test("Avatar Studio DOM and CSS give one owner to viewport height and reserve na
 
   assert.match(
     backdrop,
-    /inset:\s*var\(--app-shell-top-nav-height, 60px\) 0 0;/,
+    /inset:\s*0;/,
   );
   assert.match(modal, /position:\s*absolute;/u);
   assert.match(modal, /inset:\s*0;/u);

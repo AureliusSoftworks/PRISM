@@ -107,14 +107,21 @@ test("Zen, Coffee, and live Signal resolve each visible bot's SFX and live state
   assert.match(zenSource, /showThinkingSpinner \|\| transitioning/);
 
   const coffeeSource = sourceBefore(
-    "scheduleKey={`coffee-live-${bot.id}`}",
+    "scheduleKey: `coffee-live-${bot.id}`,",
     4_000,
   );
   assert.match(
-    coffeeSource,
-    /avatarSfx=\{[\s\S]{0,240}coffeeReplayUsesAudioMaster[\s\S]{0,180}botAvatarSfxForVoiceBus\([\s\S]{0,120}botAvatarSfxForBot\(bot\)/u,
+    pageSource,
+    /const seatAvatarSfxGain = coffeeSeatAvatarSfxBusGain\(/u,
   );
-  assert.match(coffeeSource, /seatThinkingVisualActive/);
+  assert.match(
+    pageSource,
+    /botAvatarSfxForVoiceBus\(\s*botAvatarSfxForBot\(bot\)[\s\S]{0,120}seatAvatarSfxGain/u,
+  );
+  assert.match(
+    coffeeSource,
+    /avatarSfx: seatAvatarSfx,[\s\S]{0,100}avatarSfxState: seatAvatarSfxState/u,
+  );
 
   const signalSource = sourceBefore(
     "scheduleKey={`botcast-${avatarState.role}-${bot.id}`}",

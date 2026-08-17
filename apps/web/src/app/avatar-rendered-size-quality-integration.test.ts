@@ -22,36 +22,53 @@ test("the shared full-avatar renderer derives detail from on-screen size", () =>
   assert.match(pageSource, /renderedSizeTier === "compact"/u);
   assert.match(pageSource, /data-render-detail=\{renderDetailLevel\}/u);
   assert.match(pageSource, /data-avatar-render-size-tier=\{renderedSizeTier\}/u);
+  assert.match(pageSource, /minimumRenderedSizeTier = "micro"/u);
+  assert.doesNotMatch(pageSource, /transitionSamplingUntilMs/u);
+  assert.doesNotMatch(pageSource, /sampleCameraTransition/u);
 });
 
-test("compact avatars remove unreadable phosphor work but retain the live face", () => {
-  const compactRules = pageCss.slice(
-    pageCss.indexOf("Rendered-size quality"),
-    pageCss.indexOf("Runtime pressure applies"),
+test("compact rendered widths use the authored Mini chassis", () => {
+  const compactBranch = pageSource.slice(
+    pageSource.indexOf("if (compactFallbackActive)"),
+    pageSource.indexOf('if (renderDetailLevel === "audience"'),
   );
-  assert.match(compactRules, /data-render-detail="compact"/u);
-  assert.match(compactRules, /botFaceCrtNoiseLayer/u);
-  assert.match(compactRules, /data-avatar-details-emission="glow"/u);
-  assert.match(compactRules, /data-crt-glyph-layer="true"/u);
-  assert.doesNotMatch(
-    compactRules,
-    /zenLiveBotPresenceFaceGlyph[^{]*\{[^}]*display:\s*none/u,
-  );
-  assert.doesNotMatch(
-    compactRules,
-    /coffeeSeatPlateEmoji[^{]*\{[^}]*animation:\s*none/u,
-  );
+  assert.match(compactBranch, /data-render-detail="compact"/u);
+  assert.match(compactBranch, /data-avatar-render-size-tier="compact"/u);
+  assert.match(compactBranch, /<FullAvatarCompactFallback/u);
+  assert.match(compactBranch, /renderSizePx=\{renderedSizePx\}/u);
+  assert.match(pageSource, /function FullAvatarCompactFallback/u);
+  assert.match(pageSource, /<ChatMiniBotAvatar/u);
 });
 
-test("runtime pressure removes Signal ambience without suppressing mouth state", () => {
-  const runtimeRules = pageCss.slice(
-    pageCss.indexOf("Runtime pressure applies"),
-    pageCss.indexOf("@keyframes botAmbientHoverDrift"),
+test("Signal stage avatars retain the full animated face", () => {
+  const signalExperienceStart = pageSource.indexOf("<BotcastExperience");
+  const signalAvatarStart = pageSource.indexOf(
+    "renderAvatar={(botSummary, avatarState) => {",
+    signalExperienceStart,
   );
-  assert.match(runtimeRules, /data-prism-adaptive-quality="balanced"/u);
-  assert.match(runtimeRules, /data-prism-adaptive-quality="minimal"/u);
-  assert.doesNotMatch(runtimeRules, /coffeeSeatPlateEmoji/u);
-  assert.match(signalCss, /data-prism-adaptive-quality="minimal"/u);
+  const signalAvatarEnd = pageSource.indexOf(
+    "renderMug={(botSummary, mugState) => {",
+    signalAvatarStart,
+  );
+  const signalAvatarRenderer = pageSource.slice(
+    signalAvatarStart,
+    signalAvatarEnd,
+  );
+  const signalStageMannequins = [
+    ...signalAvatarRenderer.matchAll(/<ZenLiveBotMannequin[\s\S]*?\/>/gu),
+  ];
+
+  assert.equal(signalStageMannequins.length, 2);
+  for (const [mannequin] of signalStageMannequins) {
+    assert.match(mannequin, /minimumRenderedSizeTier="full"/u);
+    assert.match(mannequin, /isTalking=\{avatarState\.talking\}/u);
+    assert.match(mannequin, /mouthShape=\{avatarState\.mouthShape\}/u);
+  }
+});
+
+test("runtime pressure has no CSS path that degrades session avatars", () => {
+  assert.doesNotMatch(pageCss, /data-prism-adaptive-quality/u);
+  assert.doesNotMatch(signalCss, /data-prism-adaptive-quality/u);
   assert.match(signalSource, /mouthShape:\s*ZenLiveBotMouthShape/u);
   assert.match(signalSource, /mouthShape,/u);
   assert.match(pageSource, /isTalking=\{avatarState\.talking\}/u);

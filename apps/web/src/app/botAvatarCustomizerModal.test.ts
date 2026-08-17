@@ -9,10 +9,6 @@ const pageSource = readFileSync(resolve(appDir, "page.tsx"), "utf8").replace(
   /\s+/gu,
   " ",
 );
-const botAvatarMicroSource = readFileSync(
-  resolve(appDir, "BotAvatarMicro.tsx"),
-  "utf8",
-).replace(/\s+/gu, " ");
 const cssSource = readFileSync(resolve(appDir, "page.module.css"), "utf8");
 const modeTutorialSource = readFileSync(
   resolve(appDir, "modeTutorials.ts"),
@@ -37,6 +33,10 @@ const apiServerSource = readFileSync(
 );
 const coffeeFaceSource = readFileSync(
   resolve(appDir, "CoffeeSeatPlateEmoji.tsx"),
+  "utf8",
+).replace(/\s+/gu, " ");
+const microAvatarSource = readFileSync(
+  resolve(appDir, "BotAvatarMicro.tsx"),
   "utf8",
 ).replace(/\s+/gu, " ");
 const tauriConfig = JSON.parse(
@@ -98,6 +98,66 @@ test("avatar customization is a floating modal that reuses the Zen mannequin", (
   assert.match(cssSource, /\.botProfileBuilder\.botAvatarCustomizer/);
 });
 
+test("Avatar Studio keeps developer performance layers local to its live preview", () => {
+  assert.match(
+    pageSource,
+    /type AvatarStudioPerformanceEffect =[^;]*"phosphor"[^;]*"glass"[^;]*"metal"[^;]*"crt-texture"[^;]*"frame-lights"[^;]*"motion"[^;]*"ambient-glow"[^;]*"backdrop"[\s\S]*?;/,
+  );
+  assert.match(pageSource, /label: "Phosphor"/);
+  assert.match(pageSource, /label: "Glass"/);
+  assert.match(pageSource, /label: "Metal"/);
+  assert.match(pageSource, /label: "CRT texture"/);
+  assert.match(pageSource, /label: "Frame lights"/);
+  assert.match(pageSource, /label: "Motion"/);
+  assert.match(pageSource, /label: "Ambient glow"/);
+  assert.match(pageSource, /label: "Backdrop"/);
+  assert.match(pageSource, /data-avatar-studio-performance-widget="true"/);
+  assert.match(pageSource, /Developer · Performance layers/);
+  assert.match(pageSource, /type="checkbox"/);
+  assert.match(pageSource, /setPerformanceEffects\(\(current\) => \(\{[\s\S]*?\[effect\]: enabled/);
+  assert.match(pageSource, /setPerformanceEffects\(AVATAR_STUDIO_PERFORMANCE_EFFECTS_ENABLED\)/);
+  assert.match(pageSource, /data-avatar-performance-phosphor=/);
+  assert.match(pageSource, /data-avatar-performance-glass=/);
+  assert.match(pageSource, /data-avatar-performance-metal=/);
+  assert.match(pageSource, /data-avatar-performance-crt-texture=/);
+  assert.match(pageSource, /data-avatar-performance-frame-lights=/);
+  assert.match(pageSource, /data-avatar-performance-motion=/);
+  assert.match(pageSource, /data-avatar-performance-ambient-glow=/);
+  assert.match(pageSource, /data-avatar-performance-backdrop=/);
+  assert.match(
+    cssSource,
+    /data-avatar-performance-phosphor="false"[\s\S]*?--crt-phosphor-opacity:\s*0 !important/,
+  );
+  assert.match(
+    cssSource,
+    /data-avatar-performance-glass="false"[\s\S]*?\.botFaceScreenGlass/,
+  );
+  assert.match(
+    cssSource,
+    /data-avatar-performance-metal="false"[\s\S]*?\.botFaceFrameMetalLight/,
+  );
+  assert.match(
+    cssSource,
+    /data-avatar-performance-crt-texture="false"[\s\S]*?\.botFaceCrtNoiseLayer[\s\S]*?display:\s*none !important/,
+  );
+  assert.match(
+    cssSource,
+    /data-avatar-performance-frame-lights="false"[\s\S]*?\.botFaceFrameLedAura[\s\S]*?display:\s*none !important/,
+  );
+  assert.match(
+    cssSource,
+    /data-avatar-performance-motion="false"[\s\S]*?\.botAvatarFoundryBotAssembly[\s\S]*?animation:\s*none !important/,
+  );
+  assert.match(
+    cssSource,
+    /data-avatar-performance-ambient-glow="false"[\s\S]*?\.botAmbientUnderglow[\s\S]*?display:\s*none !important/,
+  );
+  assert.match(
+    cssSource,
+    /data-avatar-performance-backdrop="false"[\s\S]*?background:\s*#101622 !important/,
+  );
+});
+
 test("Avatar Studio keeps a draft-driven mini preview visible with authored eye states", () => {
   const miniPreview = pageSource.match(
     /data-avatar-studio-mini-preview="true"([\s\S]*?)\{foundryCameraEditable \? \(/,
@@ -111,21 +171,38 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
   );
   assert.match(
     pageSource,
-    /compactPreviewRenderSizeTierLabel = compactPreviewRenderSizeTier === "micro" \? "Micro preview" : "Mini preview"/,
+    /compactPreviewRenderSizeTier === "micro" \? "Micro preview" : "Mini preview"/,
   );
   assert.match(
     pageSource,
-    /avatarRenderedSizeTierForMeasurements\(renderSize, renderSize, current\)/,
+    /--bot-avatar-studio-compact-preview-size[\s\S]{0,100}`\$\{compactPreviewRenderSize\}px`/,
+  );
+  assert.match(
+    pageSource,
+    /compactPreviewIsMicro \? \(\s*<div[\s\S]{0,200}<BotAvatarMicroRenderer/,
+  );
+  assert.match(
+    miniSource,
+    /data-avatar-studio-preview-tier=\{compactPreviewRenderSizeTier\}/,
+  );
+  assert.match(
+    pageSource,
+    /avatarRenderedSizeTierForMeasurements\(\s*renderSize,\s*renderSize,\s*current,\s*"micro",\s*\)/,
   );
   assert.match(
     miniSource,
     /compactPreviewIsMicro \? \([\s\S]*?<BotAvatarMicroRenderer[\s\S]*?\) : \(\s*<ChatMiniBotAvatar/,
+    "Avatar Studio compact preview should switch between mini and micro variants through one conditional branch",
   );
-  assert.match(miniSource, /renderSizePx=\{compactPreviewRenderSize\}/);
+  assert.match(
+    miniSource,
+    /renderSizePx=\{compactPreviewRenderSize\}/,
+    "Micro preview must receive render-size measurement for feature gating",
+  );
   assert.match(
     miniSource,
     /glyph=\{<BotGlyph name=\{glyph\} size=\{16\} \/>\}/,
-    "The 40px Micro state must retain the bot identity glyph",
+    "The 28px Micro state must retain the bot identity glyph",
   );
   assert.match(miniSource, /data-avatar-studio-mini-eye-state=/);
   assert.match(miniSource, /<ChatMiniBotAvatar\s+size="room"/);
@@ -141,6 +218,7 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
   assert.match(
     pageSource,
     /function BotAvatarMicroRenderer[\s\S]{0,800}<BotAvatarMicro/u,
+    "Studio Micro must use the shared static renderer contract",
   );
   assert.match(miniSource, /motionMode="mini-led"/);
   assert.match(miniSource, /\bhardPixels\b/);
@@ -148,6 +226,11 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
   assert.match(
     miniSource,
     /faceEyeRotationDeg=\{\s*faceStyle\.eyeRotationDeg\s*\}/,
+  );
+  assert.match(
+    miniSource,
+    /faceEyeSpacing=\{\s*faceStyle\.eyeSpacing\s*\}/,
+    "Studio Mini must preserve the authored two-eye spacing from the canonical face geometry",
   );
   assert.match(
     miniSource,
@@ -182,7 +265,21 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
   assert.match(miniViewportRule, /height:\s*220px;/);
   assert.match(miniSource, /data-tutorial-target="avatar-studio-scale-lab"/);
   assert.match(miniSource, /aria-label="Compact avatar render size"/);
+  assert.match(
+    miniSource,
+    /min=\{CHAT_MINI_BOT_AVATAR_MIN_RENDER_SIZE\}/,
+    "Micro should keep scaling to the compact preview's existing minimum",
+  );
+  assert.match(
+    miniSource,
+    /max=\{CHAT_MINI_BOT_AVATAR_MAX_RENDER_SIZE\}/,
+    "The compact scale lab must reach the 299px Mini ceiling",
+  );
   assert.match(miniSource, /<strong>Chassis scale<\/strong>/);
+  assert.match(
+    miniSource,
+    /aria-label=\{`\$\{titleName\} compact avatar scale preview`\}/,
+  );
 
   assert.match(
     cssSource,
@@ -192,25 +289,48 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
     cssSource,
     /\.botAvatarStudioMicroPreview \.messageMoodMicroFace\s*\{[^}]*font-size:\s*calc\([^}]*--bot-avatar-studio-compact-preview-size/u,
   );
+  assert.doesNotMatch(
+    cssSource,
+    /\.botAvatarStudioMiniPreviewViewport \.emptyStateHeroMini(?:Glyph|Art|Avatar)/u,
+    "Studio must exercise the same mini registration used by production surfaces",
+  );
   assert.match(
     cssSource,
-    /\.botAvatarStudioMiniPreviewViewport \.emptyStateHeroMiniArt\s*\{[^}]*transform:\s*translateY\(-2px\);/u,
+    /\.botAvatarStudioMiniPreviewCluster\s*\{[^}]*grid-template-columns:\s*minmax\(0, 220px\);/u,
   );
   assert.match(
     cssSource,
-    /--bot-avatar-micro-screen-scale:\s*1\.12;/u,
+    /--bot-avatar-micro-screen-scale:\s*1\.12;/,
   );
   assert.match(
-    botAvatarMicroSource,
-    /data-bot-avatar-micro-screen="true"/,
+    cssSource,
+    /--bot-avatar-micro-content-shift-x:\s*calc\(\s*var\(--bot-avatar-studio-compact-preview-size,\s*36px\)\s*\*\s*-0\.027778\s*\);/,
   );
+  assert.match(
+    cssSource,
+    /--bot-avatar-micro-face-nudge-x:\s*calc\(\s*var\(--bot-avatar-studio-compact-preview-size,\s*36px\)\s*\*\s*0\.027778\s*\);/,
+  );
+  assert.match(
+    cssSource,
+    /--bot-avatar-micro-face-nudge-y:\s*calc\(\s*var\(--bot-avatar-studio-compact-preview-size,\s*36px\)\s*\*\s*-0\.027778\s*\);/,
+  );
+  assert.match(microAvatarSource, /data-bot-avatar-micro-screen="true"/);
+  assert.match(microAvatarSource, /botAvatarMicroPresentationForSize\(props\.renderSizePx\)/u);
+  assert.match(microAvatarSource, /const showMicroFaceFeatures = presentation === "face"/u);
+  assert.match(
+    microAvatarSource,
+    /data-avatar-micro-presentation=\{presentation\}/u,
+  );
+  assert.match(microAvatarSource, /const showIdentityPixel = presentation === "block" \|\| presentation === "pixel"/u);
+  assert.match(microAvatarSource, /styles\.botAvatarMicroIdentityPixel/u);
+  assert.match(microAvatarSource, /normalizeAccentForTheme\(identityColor, "light"\)/u);
   assert.match(
     cssSource,
     /\.messageMoodBadge\[data-face="coffee"\]\[data-variant="micro"\]\s*\{[\s\S]{0,600}#05080b[\s\S]{0,400}box-shadow:\s*none/u,
   );
   assert.match(
     cssSource,
-    /\.messageMoodMicroFace\s*\{[^}]*font-size:\s*12px;[^}]*color:\s*#ffffff;/u,
+    /\.messageMoodMicroFace\s*\{[^}]*font-size:\s*12px;[^}]*color:\s*var\(--bot-avatar-micro-face-phosphor-color, #ffffff\);/u,
   );
   assert.match(
     cssSource,
@@ -218,8 +338,9 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
   );
 });
 
-test("Avatar Studio requires an Accent pin before named voice casting", () => {
+test("Avatar Studio gates named voice casting only while an Accent pin is missing", () => {
   assert.match(pageSource, /const avatarVoiceAccentReady = Boolean/);
+  assert.match(pageSource, /avatarPronunciationSelection\.point/);
   assert.match(pageSource, /label: "1 Accent"/);
   assert.match(pageSource, /label: "2 Local"/);
   assert.match(pageSource, /label: "3 Premium"/);
@@ -228,6 +349,10 @@ test("Avatar Studio requires an Accent pin before named voice casting", () => {
   assert.match(pageSource, /PREMIUM · OPTIONAL/);
   assert.match(cssSource, /\.botVoiceAccentGate/);
   assert.match(cssSource, /\.botVoiceNameGrid/);
+  assert.match(
+    pageSource,
+    /activeControlTab === "voice" && !avatarVoiceAccentReady/,
+  );
 });
 
 test("Voice stages cannot replace another Avatar Studio module console", () => {
@@ -1311,7 +1436,7 @@ test("default Prism bot card opens an avatar-only customizer path", () => {
   assert.match(apiServerSource, /prismDefaultBotGlyph: ""/);
 });
 
-test("avatar customization uses the workspace below the shared navbar as a foundry", () => {
+test("avatar customization uses the full viewport as a foundry", () => {
   const backdropRule = cssRuleBody(".botAvatarCustomizerBackdrop");
   const foundryBackdropRule = cssRuleBody(
     '.botAvatarCustomizerBackdrop[data-avatar-foundry="true"]',
@@ -1333,7 +1458,7 @@ test("avatar customization uses the workspace below the shared navbar as a found
   );
   assert.match(
     foundryBackdropRule,
-    /inset:\s*var\(--app-shell-top-nav-height, 60px\) 0 0;/,
+    /inset:\s*0;/,
   );
   assert.match(foundryBackdropRule, /z-index:\s*170;/);
   assert.match(foundryBackdropRule, /backdrop-filter:\s*none;/);
@@ -1542,11 +1667,11 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
     pageSource,
     /<BotPowerRune power=\{\{ \.\.\.power, sigil \}\} size=\{64\} \/>/u,
   );
-  assert.match(pageSource, /data-power-source="locked"/u);
+  assert.match(pageSource, /data-power-source="editable"/u);
   assert.match(pageSource, /Original prompt/u);
   assert.match(
     pageSource,
-    /Locked after creation\. Rerolls always build from this\./u,
+    /Rerolls rebuild from this idea\. Edit it if the Power came out wrong\./u,
   );
   assert.match(pageSource, /onCompile\(next, power\.id\)/u);
   assert.match(pageSource, /onCompile\(powers, power\.id\)/u);
@@ -1555,7 +1680,11 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(pageSource, /compiledById\.get\(power\.id\) \?\? power/u);
   assert.match(pageSource, /Reroll Power/u);
   assert.match(pageSource, /Reroll rune/u);
-  assert.match(pageSource, /Reroll the generated Power name and rune/u);
+  assert.match(pageSource, /await onRerollPresentation\(power\)/u);
+  assert.match(pageSource, /setRerollingPresentationId\(power\.id\)/u);
+  assert.match(pageSource, /rerollBotPowerPresentationV1\(\s*current,\s*nextName/u);
+  assert.match(pageSource, /powers:\s*newBotPowers/u);
+  assert.match(pageSource, /Generate a new Power from the original prompt/u);
   assert.match(
     pageSource,
     /randomizeSemanticBotField\(\s*"power\.name",\s*power\.name/u,
@@ -1567,30 +1696,14 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.doesNotMatch(pageSource, /BOT_POWER_SIGIL_GLYPHS/u);
   assert.match(pageSource, /Pop Power\?/u);
   assert.match(pageSource, /\/api\/bot-powers\/compile/);
-  assert.match(
-    pageSource,
-    /data-tutorial-target="avatar-studio-synthesis-routing"/,
-  );
-  assert.match(
-    pageSource,
-    /ariaLabel="Model for Avatar Studio synthesis"/,
-  );
-  assert.match(
-    pageSource,
-    /preferredProvider,[\s\S]*?responseMode,[\s\S]*?\.\.\.\(modelOverride \? \{ modelOverride \} : \{\}\)/,
-  );
+  assert.match(pageSource, /routing:\s*"refract"/);
   assert.match(cssSource, /\.botAvatarStudioRoutingControls\s*\{/);
-  assert.match(pageSource, /seedBotStudioSynthesisModelChoice\(\)/);
   assert.match(cssSource, /\.botPowersPanel/);
   assert.match(
     cssSource,
     /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/,
   );
   assert.doesNotMatch(pageSource, /Generation Lens|Browse Lenses|LensTile/);
-  assert.match(
-    pageSource,
-    /resetLabel=\{\s*isDefaultPrismBot\s*\?\s*"Reset voice"\s*:\s*"Restore original voice"\s*\}/,
-  );
   assert.match(pageSource, /setPreviewMode\("talking"\)/);
   assert.match(pageSource, /const avatarControlTabsVisible = true;/);
   assert.match(pageSource, /visibleAvatarTabs\.map\(\(tab\) =>/);
@@ -1707,7 +1820,7 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   );
   assert.match(
     cssRuleBody(".colorGlyphInline"),
-    /grid-template-rows:\s*auto minmax\(0,\s*1fr\);/,
+    /grid-template-rows:\s*auto auto minmax\(0,\s*1fr\);/,
   );
   assert.match(
     cssRuleBody(".colorGlyphInline .colorSquare"),
@@ -2593,12 +2706,12 @@ test("Powers read as an app-wide bot trait across active surfaces", () => {
   assert.match(cssSource, /\.botPowerBehaviorCard/u);
 });
 
-test("Power authoring locks its source, rerolls one artifact, and explains behavior plainly", () => {
-  assert.match(pageSource, /data-power-source="locked"/u);
+test("Power authoring keeps its source editable, rerolls one artifact, and explains behavior plainly", () => {
+  assert.match(pageSource, /data-power-source="editable"/u);
   assert.match(pageSource, /Original prompt/u);
   assert.match(
     pageSource,
-    /Locked after creation\. Rerolls always build from this\./u,
+    /Rerolls rebuild from this idea\. Edit it if the Power came out wrong\./u,
   );
   assert.match(pageSource, /onCompile\(next, power\.id\)/u);
   assert.match(pageSource, /onCompile\(powers, power\.id\)/u);

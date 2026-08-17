@@ -90,8 +90,8 @@ describe("avatar scale Power visual contract", () => {
       pageSource,
       /className=\{styles\.storySpriteWrap\}[\s\S]{0,260}data-power-avatar-scale=\{[\s\S]{0,120}botPowerAvatarScaleModeV1\(npcActor\.bot\.powers\)/u,
     );
-    assert.match(pageCss, /\.storySpriteWrap\[data-power-avatar-scale="tiny"\] \{ scale: 0\.5; \}/u);
-    assert.match(pageCss, /\.storySpriteWrap\[data-power-avatar-scale="small"\] \{ scale: 0\.75; \}/u);
+    assert.match(pageCss, /\.storySpriteWrap\[data-power-avatar-scale="tiny"\]\s*\{\s*scale: 0\.5;\s*\}/u);
+    assert.match(pageCss, /\.storySpriteWrap\[data-power-avatar-scale="small"\]\s*\{\s*scale: 0\.75;\s*\}/u);
     assert.match(pageCss, /data-power-avatar-scale="large"[^}]*scale: 1\.25; translate: -6% 0/u);
     assert.match(pageCss, /data-power-avatar-scale="giant"[^}]*scale: 1\.5; translate: -16% 0/u);
     assert.match(pageCss, /data-power-avatar-scale="colossal"[^}]*scale: 3; translate: -58% 0/u);
@@ -100,15 +100,19 @@ describe("avatar scale Power visual contract", () => {
   it("switches unreadable full avatars to the shared Ink-aware micro form", () => {
     assert.match(
       pageSource,
-      /BOT_AVATAR_MICRO_FALLBACK_MAX_PX = 118/u,
+      /const microFallbackActive = renderedSizeTier === "micro"/u,
     );
     assert.match(
       pageSource,
-      /setMicroFallbackActive\([\s\S]{0,120}width < BOT_AVATAR_MICRO_FALLBACK_MAX_PX/u,
+      /avatarRenderedSizeTierForMeasurements\([\s\S]{0,180}minimumRenderedSizeTier/u,
     );
     assert.match(
       pageSource,
       /if \(microFallbackActive\)[\s\S]{0,700}<BotAvatarMicroRenderer[\s\S]{0,500}avatarDetails=\{avatarDetails\}/u,
+    );
+    assert.match(
+      pageSource,
+      /minimumRenderedSizeTier: "compact"/u,
     );
     assert.match(
       pageCss,

@@ -424,7 +424,11 @@ describe("Avatar Details Studio integration", () => {
   it("mounts the lightweight canvas directly inside the canonical CRT", () => {
     assert.match(
       pageSource,
-      /screenMode=\{\s*activeControlTab === "details" && !inkLivePreview\s*\? "editing"\s*: "live"\s*\}/,
+      /avatarStudioPreviewScreenMode: "off" | "synthesis" | "live" | "editing" =[\\s\\S]*activeControlTab === "details" && !inkLivePreview\s*\?\s*"editing"\s*:\s*"live"/,
+    );
+    assert.match(
+      pageSource,
+      /screenMode=\{avatarStudioPreviewScreenMode\}/,
     );
     assert.match(
       pageSource,
@@ -948,8 +952,28 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.match(maskSource, /data-avatar-details-ink-motion/);
     assert.match(maskCss, /\.speechMotion\[data-avatar-details-ink-motion="pulsate"\]/);
     assert.match(maskCss, /--bot-face-mouth-pulse-scale-x/);
-    assert.match(maskCss, /\.speechMotion\[data-avatar-details-ink-motion="flicker"\]/);
-    assert.match(maskCss, /--bot-face-mouth-speech-opacity/);
+    assert.match(
+      maskCss,
+      /\.speechMotion\[data-avatar-details-ink-role="speech"\]\[data-avatar-details-ink-motion="flicker"\]/,
+    );
+    assert.doesNotMatch(
+      maskCss,
+      /--bot-face-mouth-speech-opacity/,
+      "Speech ink Flicker must not borrow Mouth animation opacity",
+    );
+    assert.match(
+      maskCss,
+      /@keyframes avatarDetailsSpeechInkFlicker[\s\S]*opacity:\s*0/,
+    );
+    assert.match(
+      maskCss,
+      /@keyframes avatarDetailsSpeechInkFlicker[\s\S]*0%,\s*30%,\s*44%,\s*70%,\s*89%,\s*100%\s*\{\s*opacity:\s*1[\s\S]*31%,\s*43%,\s*71%,\s*88%\s*\{\s*opacity:\s*0/,
+      "Flicker must alternate visible and transparent lens beats",
+    );
+    assert.match(
+      maskSource,
+      /inkRole="speech"[\s\S]{0,160}motion=\{speechMotion\}/,
+    );
     assert.match(maskCss, /\.speechMotion\[data-avatar-details-ink-motion="wobble"\]/);
     assert.match(maskSource, /avatarDetailsSpeechMotionOrigin\(/);
     assert.match(

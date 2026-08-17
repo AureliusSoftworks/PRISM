@@ -105,8 +105,29 @@
   --avatar-details-speech-scale-y: var(--bot-face-mouth-pulse-scale-y, 1);
 }
 
-.speechMotion[data-avatar-details-ink-motion="flicker"] {
-  opacity: var(--bot-face-mouth-speech-opacity, 1);
+.speechMotion[data-avatar-details-ink-role="speech"][data-avatar-details-ink-motion="flicker"] {
+  /* Flicker belongs to the temporary Speech-ink plane only. The live eyes and
+     mouth are sibling layers in the shared face rig, so a fully transparent
+     beat reveals their current viseme instead of dimming or freezing them. */
+  animation: avatarDetailsSpeechInkFlicker 520ms steps(1, end) infinite;
+}
+
+@keyframes avatarDetailsSpeechInkFlicker {
+  0%,
+  30%,
+  44%,
+  70%,
+  89%,
+  100% {
+    opacity: 1;
+  }
+
+  31%,
+  43%,
+  71%,
+  88% {
+    opacity: 0;
+  }
 }
 
 .speechMotion[data-avatar-details-ink-motion="wobble"] {

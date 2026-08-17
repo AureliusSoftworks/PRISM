@@ -1,11 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
-import {
-  mostRestrictivePrismSceneQuality,
-  sessionBotSceneQualityCeilingForVisibleCount,
-  sessionBotVisualQualityForVisibleCount,
-} from "./sessionBotVisualQuality.ts";
 
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 const pageCss = readFileSync(
@@ -25,46 +20,48 @@ const debatePerformanceSource = readFileSync(
   "utf8",
 );
 
-test("session bot quality steps down as full-size casts grow", () => {
-  assert.equal(sessionBotVisualQualityForVisibleCount(0), "full");
-  assert.equal(sessionBotVisualQualityForVisibleCount(2), "full");
-  assert.equal(sessionBotVisualQualityForVisibleCount(3), "balanced");
-  assert.equal(sessionBotVisualQualityForVisibleCount(4), "reduced");
-  assert.equal(sessionBotVisualQualityForVisibleCount(5), "minimal");
-  assert.equal(sessionBotVisualQualityForVisibleCount(Number.NaN), "full");
+test("removes the cast-count quality stepper from production", () => {
+  assert.equal(
+    existsSync(new URL("./sessionBotVisualQuality.ts", import.meta.url)),
+    false,
+  );
+  for (const source of [pageSource, signalSource, debateSource]) {
+    assert.doesNotMatch(
+      source,
+      /sessionBotVisualQualityForVisibleCount|sessionBotSceneQualityCeilingForVisibleCount/u,
+    );
+  }
 });
 
-test("scene ceilings preserve the strictest player, cast, or runtime limit", () => {
-  assert.equal(sessionBotSceneQualityCeilingForVisibleCount(2), "full");
-  assert.equal(sessionBotSceneQualityCeilingForVisibleCount(4), "balanced");
-  assert.equal(sessionBotSceneQualityCeilingForVisibleCount(5), "minimal");
-  assert.equal(
-    mostRestrictivePrismSceneQuality("full", "balanced"),
-    "balanced",
-  );
-  assert.equal(
-    mostRestrictivePrismSceneQuality("minimal", "full"),
-    "minimal",
-  );
-});
-
-test("Coffee, Signal, and Debate expose session-only quality contracts", () => {
+test("Coffee, Signal, and Debate pin runtime session tiers to full presentation", () => {
   assert.match(pageSource, /data-session-bot-visual-quality/u);
-  assert.match(pageSource, /coffeeSessionBotVisualQuality/u);
-  assert.match(pageSource, /coffeeSessionAvatarDetailLevel/u);
+  assert.match(pageSource, /const coffeeSessionBotVisualQuality = "full"/u);
   assert.match(signalSource, /data-session-bot-visual-quality/u);
   assert.match(signalSource, /signalStageVisibleBotCount/u);
+  assert.match(
+    signalSource,
+    /const signalStageBotVisualQuality = signalAvatarPresentation\(\)/u,
+  );
   assert.match(debateSource, /data-session-bot-visual-quality/u);
   assert.match(
     debatePerformanceSource,
-    /sessionBotSceneQualityCeilingForVisibleCount\(options\.objectCount\)/u,
+    /prismSceneQualityCeilingForGraphicsQuality\([\s\S]{0,80}options\.graphicsQuality/u,
   );
+  assert.doesNotMatch(
+    debatePerformanceSource,
+    /sessionBotSceneQualityCeilingForVisibleCount/u,
+  );
+  assert.match(
+    debatePerformanceSource,
+    /controller\.recordFrame[\s\S]{0,500}quality: renderedQuality/u,
+  );
+  assert.doesNotMatch(debatePerformanceSource, /setQualityState/u);
 });
 
-test("lower tiers remove decorative work without hiding semantic faces", () => {
+test("lower tiers remove only peripheral work and preserve bot screens", () => {
   assert.match(
     pageCss,
-    /data-session-bot-visual-quality="balanced"[\s\S]*botFaceCrtNoiseLayer/u,
+    /data-session-bot-visual-quality="balanced"[\s\S]*botAmbientUnderglow/u,
   );
   assert.match(
     pageCss,
@@ -80,14 +77,6 @@ test("lower tiers remove decorative work without hiding semantic faces", () => {
   );
   assert.doesNotMatch(
     qualityRules,
-    /zenLiveBotPresenceFaceGlyph[^}]*display:\s*none/u,
-  );
-  assert.doesNotMatch(
-    qualityRules,
-    /\[data-avatar-details-emission\][^{]*\{[^}]*display:\s*none/u,
-  );
-  assert.match(
-    qualityRules,
-    /data-avatar-details-emission="glow"[^}]*\{[^}]*display:\s*none/u,
+    /(?:FaceEmissionMask|CrtNoiseLayer|CrtBreathingLayer|CrtGrimeLayer|data-crt-glyph-layer|data-avatar-details-emission|data-avatar-details-motion-group)/u,
   );
 });

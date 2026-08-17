@@ -29,27 +29,64 @@ describe("live avatar mouth synchronization", () => {
   });
 
   it("keeps released Signal visemes on the active message and provider alignment", () => {
+    const roleIsSpeaking = signalSource.slice(
+      signalSource.indexOf("const roleIsSpeaking ="),
+      signalSource.indexOf("const roleAvatarScaleMode ="),
+    );
     const avatar = signalSource.slice(
       signalSource.indexOf("const avatar = ("),
       signalSource.indexOf("const hostAvatar ="),
     );
     assert.match(
-      avatar,
-      /talking && args\.activeMessage[\s\S]{0,180}text: args\.activeMessage\.content/u,
+      roleIsSpeaking,
+      /signalLivePrimaryAvatarSpeech\(\{[\s\S]{0,140}liveSpeech:[\s\S]{0,100}role,[\s\S]{0,120}elapsedMs: projectedLiveSpeechElapsedMs[\s\S]{0,40}\}\)\.talking/u,
+      "Signal must keep the active speaker talking for the full audible utterance",
+    );
+    assert.doesNotMatch(
+      roleIsSpeaking,
+      /botcastSpeechRevealIsVoicing/u,
+      "Phrase-level silence must not switch off Signal's utterance-level talking state",
+    );
+    assert.match(
+      roleIsSpeaking,
+      /if \(args\.replay\) \{[\s\S]{0,400}speechIsPlaying[\s\S]{0,240}args\.activeMessage\?\.speakerRole === role/u,
+      "Procedural Signal replay must retain its own speech clock",
     );
     assert.match(
       avatar,
-      /text: args\.activeMessage\.content,[\s\S]{0,180}alignment: speechReveal\?\.alignment/u,
+      /signalLivePrimaryAvatarSpeech\(\{[\s\S]{0,140}liveSpeech:[\s\S]{0,100}role,[\s\S]{0,120}elapsedMs: projectedLiveSpeechElapsedMs[\s\S]{0,40}\}\)\.mouthShape/u,
+    );
+    assert.match(
+      signalSource,
+      /signalLiveSpeechProjectedElapsedMs\(\{[\s\S]{0,180}signalLiveSpeechPlaybackClockRef\.current[\s\S]{0,100}signalLiveMouthVisualNowMs/u,
+      "Signal must keep producing visual mouth frames between sparse audio callbacks",
+    );
+    assert.match(
+      signalSource,
+      /setLiveSpeech\(\{[\s\S]{0,100}message,[\s\S]{0,80}audible: true,[\s\S]{0,120}startBotcastSpeechReveal/u,
     );
     assert.match(avatar, /crtSpeechMouthShapeAtAlignedElapsedMs\(\{/u);
     assert.match(
       avatar,
-      /rawMouthShape === "closed"/u,
-      "Signal must idle lips on literal closed pause shapes",
+      /const mouthShape = rawMouthShape/u,
+      "Signal must preserve literal closed pause shapes from the aligned viseme clock",
+    );
+    assert.doesNotMatch(
+      avatar,
+      /botcastSpeechRevealIsVoicing/u,
+      "Signal must not freeze the aligned viseme clock while segment timing is still empty",
+    );
+  });
+
+  it("keeps Signal's active avatar attached to the audible speech clock", () => {
+    assert.match(
+      signalSource,
+      /const liveActiveMessage = signalLiveActiveMessage\(\{[\s\S]{0,180}liveSpeech,[\s\S]{0,180}episodeMessages:/u,
+      "The exact audible message must not wait for the episode snapshot to commit",
     );
     assert.match(
-      avatar,
-      /botcastSpeechRevealIsVoicing\(speechReveal\) === false/u,
+      signalSource,
+      /setLiveSpeech\(\{[\s\S]{0,100}messageId: message\.id,[\s\S]{0,80}message,[\s\S]{0,80}audible: true/u,
     );
   });
 
