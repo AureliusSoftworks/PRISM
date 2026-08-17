@@ -5,6 +5,7 @@ import {
   botPowerSourceHashV1,
   fullySaturateBotColor,
   parseStoredBotPrompt,
+  serializeBotAudioVoiceProfileV1,
   serializeStoredBotPrompt,
 } from "@localai/shared";
 import {
@@ -137,6 +138,34 @@ describe("composeBotSystemPrompt", () => {
     assert.equal(composeBotSystemPrompt(null, null), undefined);
     assert.equal(composeBotSystemPrompt("", ""), undefined);
     assert.equal(composeBotSystemPrompt("   ", "   "), undefined);
+  });
+
+  it("colors the Default companion from the stored account voice profile alone", () => {
+    // Default Prism has no bot row: its users-row persona columns stay null
+    // and only `prism_default_bot_audio_voice_profile` (edited from the
+    // Default customize voice tab) carries identity. The serialized column
+    // value must be enough to produce the vernacular authoring cue, because
+    // the /api/chat prismHomeTurn branch passes exactly these nulls.
+    const stored = serializeBotAudioVoiceProfileV1({
+      v: 2,
+      baseVoiceId: "voice-1",
+      vernacularId: "scots",
+    });
+    const prompt = composeBotSystemPrompt(null, null, undefined, null, {
+      audioVoiceProfile: stored,
+    });
+    assert.ok(prompt, "expected the vernacular cue alone to compose a prompt");
+    assert.match(prompt!, /Vernacular — Scots: /u);
+    assert.equal(prompt!.endsWith(PRISM_RUNTIME_GROUNDING), true);
+    // Without a saved vernacular the Default companion stays promptless, so
+    // Home/Zen turns keep shipping only the built-in Prism voice.
+    const plain = composeBotSystemPrompt(null, null, undefined, null, {
+      audioVoiceProfile: serializeBotAudioVoiceProfileV1({
+        v: 2,
+        baseVoiceId: "voice-1",
+      }),
+    });
+    assert.equal(plain, undefined);
   });
 
   it("strips structured bot-editor metadata before composing with name", () => {

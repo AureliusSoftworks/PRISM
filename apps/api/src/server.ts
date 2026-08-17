@@ -14404,6 +14404,18 @@ function buildRoutes(): RouteDefinition[] {
             },
           );
         }
+      } else {
+        // Default Prism reacts with the same account-level voice profile that
+        // colors its Home/Zen replies, so live-action beats stay in vernacular.
+        personaSystemPrompt = composeBotSystemPrompt(
+          user.prism_default_bot_name,
+          user.prism_default_bot_system_prompt,
+          undefined,
+          null,
+          {
+            audioVoiceProfile: user.prism_default_bot_audio_voice_profile,
+          },
+        );
       }
       const liveActionAbort = new AbortController();
       const onLiveActionClientClose = () => {
@@ -15104,6 +15116,18 @@ function buildRoutes(): RouteDefinition[] {
             generationOverrides.repetitionPenalty = bot.repetition_penalty;
           }
         }
+      } else if (prismHomeTurn) {
+        // Default Prism composes from the account-level persona columns the
+        // Default customize view edits, so its saved voice profile's
+        // vernacular colors Home/Zen replies exactly like a bot's would.
+        botAudioVoiceProfile = user.prism_default_bot_audio_voice_profile;
+        botSystemPrompt = composeBotSystemPrompt(
+          user.prism_default_bot_name,
+          user.prism_default_bot_system_prompt,
+          undefined,
+          null,
+          { audioVoiceProfile: user.prism_default_bot_audio_voice_profile },
+        );
       }
       if (!starterPromptLabel && mode === "zen" && runtimeBotId == null) {
         starterPromptLabel = "Prism";
