@@ -11,6 +11,8 @@ import {
   botPowerMumblesSpeechV1,
   botPowerSelfCueLinesV1,
   botPowerSpeechObfuscationAuthoringCueV1,
+  botVernacularAuthoringCueV1,
+  botVernacularIdFromStoredVoiceProfile,
   buildBotPowersPromptBlock,
   fullySaturateBotColor,
   stripBotProfileMetaSuffix,
@@ -141,6 +143,13 @@ export function composeBotSystemPrompt(
     believedName?: string | null;
     /** Saved identity color so complementary hue bias can name the opposite. */
     identityColor?: string | null;
+    /**
+     * The bot's effective audio voice profile (override ?? authored) as the
+     * stored JSON string or a parsed record. Only the vernacular identity is
+     * read from it: the word-side twin of the Accent pin becomes an authoring
+     * cue so the bot phrases replies in its chosen variety.
+     */
+    audioVoiceProfile?: unknown;
   },
 ): string | undefined {
   const savedName = typeof name === "string" ? name.trim() : "";
@@ -206,7 +215,12 @@ export function composeBotSystemPrompt(
     ...(directFandomCue ? [directFandomCue] : []),
     ...(chromaticCue ? [chromaticCue] : []),
   ]);
-  if (!trimmedName && !trimmedPrompt && !powersPrompt) return undefined;
+  const vernacularCue = botVernacularAuthoringCueV1(
+    botVernacularIdFromStoredVoiceProfile(options?.audioVoiceProfile),
+  );
+  if (!trimmedName && !trimmedPrompt && !powersPrompt && !vernacularCue) {
+    return undefined;
+  }
   const preamble = displayName.length > 0
     ? `You are ${displayName}. When the user addresses you as ${displayName}, respond as ${displayName}.`
     : "";
@@ -222,6 +236,7 @@ export function composeBotSystemPrompt(
     preamble,
     interactionPolicy,
     trimmedPrompt,
+    vernacularCue,
     directConversationPowerPolicy,
     powersPrompt,
   ].filter(

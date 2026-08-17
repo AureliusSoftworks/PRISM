@@ -14154,7 +14154,7 @@ function buildRoutes(): RouteDefinition[] {
       ) {
         const bot = db
           .prepare(
-            "SELECT name, system_prompt, semantic_facets, powers_json, color, online_enabled, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
+            "SELECT name, system_prompt, semantic_facets, powers_json, color, authored_audio_voice_profile, audio_voice_profile_override, online_enabled, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
           )
           .get(effectiveBotId, userId) as
           | {
@@ -14163,6 +14163,8 @@ function buildRoutes(): RouteDefinition[] {
               semantic_facets?: string | null;
               powers_json?: string | null;
               color?: string | null;
+              authored_audio_voice_profile?: string | null;
+              audio_voice_profile_override?: string | null;
               online_enabled?: number | null;
               flirt_enabled?: number | null;
               temperature?: number | null;
@@ -14185,7 +14187,12 @@ function buildRoutes(): RouteDefinition[] {
             bot.system_prompt,
             bot.flirt_enabled === 1,
             bot.powers_json,
-            { identityColor: bot.color ?? null },
+            {
+              identityColor: bot.color ?? null,
+              audioVoiceProfile:
+                bot.audio_voice_profile_override ??
+                bot.authored_audio_voice_profile,
+            },
           );
           facetLines.push(...readBotSemanticFacetSummary(bot.semantic_facets));
           if (bot.online_enabled === 0 && effectiveProvider !== "local") {
@@ -14369,7 +14376,7 @@ function buildRoutes(): RouteDefinition[] {
       if (request.activeBotId) {
         const bot = db
           .prepare(
-            "SELECT name, system_prompt, powers_json, color, flirt_enabled FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
+            "SELECT name, system_prompt, powers_json, color, authored_audio_voice_profile, audio_voice_profile_override, flirt_enabled FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
           )
           .get(request.activeBotId, userId) as
           | {
@@ -14377,6 +14384,8 @@ function buildRoutes(): RouteDefinition[] {
               system_prompt?: string;
               powers_json?: string | null;
               color?: string | null;
+              authored_audio_voice_profile?: string | null;
+              audio_voice_profile_override?: string | null;
               flirt_enabled?: number | null;
             }
           | undefined;
@@ -14387,7 +14396,12 @@ function buildRoutes(): RouteDefinition[] {
             bot.system_prompt,
             bot.flirt_enabled === 1,
             bot.powers_json,
-            { identityColor: bot.color ?? null },
+            {
+              identityColor: bot.color ?? null,
+              audioVoiceProfile:
+                bot.audio_voice_profile_override ??
+                bot.authored_audio_voice_profile,
+            },
           );
         }
       }
@@ -14975,6 +14989,7 @@ function buildRoutes(): RouteDefinition[] {
       > = null;
       let botForcesLocalProvider = false;
       let botPersonaPrompt: string | undefined;
+      let botAudioVoiceProfile: string | null | undefined;
       let botFlirtEnabled: boolean | undefined;
       const generationOverrides: GenerateOptions = {};
       if (runtimeBotId) {
@@ -15020,6 +15035,9 @@ function buildRoutes(): RouteDefinition[] {
             basePrompt: bot.system_prompt ?? "",
           });
           botPersonaPrompt = runtimePersonaPrompt;
+          botAudioVoiceProfile =
+            bot.audio_voice_profile_override ??
+            bot.authored_audio_voice_profile;
           botFlirtEnabled = bot.flirt_enabled === 1;
           if (botPowerIntermittentMuteEffectV1(bot.powers_json)) {
             const stableTurnOrdinal = incognito
@@ -15054,7 +15072,10 @@ function buildRoutes(): RouteDefinition[] {
             runtimePersonaPrompt,
             bot.flirt_enabled === 1,
             bot.powers_json,
-            { identityColor: bot.color ?? null },
+            {
+              identityColor: bot.color ?? null,
+              audioVoiceProfile: botAudioVoiceProfile,
+            },
           );
           const themeMoodCue = botPowerThemeMoodCueV1(
             bot.powers_json,
@@ -15487,6 +15508,7 @@ function buildRoutes(): RouteDefinition[] {
             botPowerShapeshift: runtimeBotShapeshift,
             botPowerFalseName: runtimeBotFalseName,
             botPersonaPrompt,
+            botAudioVoiceProfile,
             botFlirtEnabled,
             botPowerQuietIgnored: runtimeBotQuietIgnored,
             botPowerEchoAddressed: runtimeBotEchoAddressed,
@@ -24139,7 +24161,7 @@ function buildRoutes(): RouteDefinition[] {
       }
       const bot = db
         .prepare(
-          "SELECT name, system_prompt, semantic_facets, powers_json, color, flirt_enabled, online_enabled, temperature, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND user_id = ?",
+          "SELECT name, system_prompt, semantic_facets, powers_json, color, authored_audio_voice_profile, audio_voice_profile_override, flirt_enabled, online_enabled, temperature, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND user_id = ?",
         )
         .get(botId, userId) as
         | {
@@ -24148,6 +24170,8 @@ function buildRoutes(): RouteDefinition[] {
             semantic_facets?: string | null;
             powers_json?: string | null;
             color?: string | null;
+            authored_audio_voice_profile?: string | null;
+            audio_voice_profile_override?: string | null;
             flirt_enabled?: number | null;
             online_enabled?: number | null;
             temperature?: number | null;
@@ -24168,7 +24192,12 @@ function buildRoutes(): RouteDefinition[] {
         bot.system_prompt,
         bot.flirt_enabled === 1,
         bot.powers_json,
-        { identityColor: bot.color ?? null },
+        {
+          identityColor: bot.color ?? null,
+          audioVoiceProfile:
+            bot.audio_voice_profile_override ??
+            bot.authored_audio_voice_profile,
+        },
       );
       const runtime = await contextualTextRuntimeForUser({
         userId,

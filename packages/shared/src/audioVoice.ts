@@ -1,3 +1,8 @@
+import {
+  normalizeBotVernacularId,
+  type BotVernacularId,
+} from "./botVernacular.ts";
+
 /** Account-wide voice mode. This is intentionally separate from BotVoicePreset,
  * which controls how a bot writes rather than how it sounds. */
 export type VoiceMode = "mute" | "english" | "babble" | "bottish";
@@ -515,6 +520,9 @@ export interface BotAudioVoiceProfileV2 {
   /** Provider-neutral Accent Map identity. Legacy profiles resolve from the
    * Speechprint influence and pronunciation foundation instead. */
   accentDefinitionId?: VoiceAccentDefinitionId | null;
+  /** Word-side twin of the Accent pin: shapes what the bot writes, never how
+   * text is pronounced. Authored identity; absent means plain speech. */
+  vernacularId?: BotVernacularId | null;
   /** Exact normalized Accent Map position. The chosen influence remains approximate. */
   pronunciationMapPoint?: LocalVoicePronunciationMapPoint;
   speechprintInfluence?: LocalVoiceSpeechprintInfluence;
@@ -695,6 +703,7 @@ export interface BotLocalVoiceProfileV1 {
   pronunciation?: {
     base: LocalVoicePronunciationBase;
     accentDefinitionId?: VoiceAccentDefinitionId | null;
+    vernacularId?: BotVernacularId | null;
     mapPoint?: LocalVoicePronunciationMapPoint;
   };
   speechprint: LocalVoiceSpeechprintV1;
@@ -1638,6 +1647,7 @@ function flattenBotAudioVoiceProfileV3Record(
     pronunciationBase: pronunciation.base,
     accentDefinitionId:
       pronunciation.accentDefinitionId ?? value.accentDefinitionId,
+    vernacularId: pronunciation.vernacularId ?? value.vernacularId,
     pronunciationMapPoint: pronunciation.mapPoint,
     speechprintInfluence: speechprint.influence,
     speechprintStrength: speechprint.strength,
@@ -1737,6 +1747,10 @@ export function normalizeBotAudioVoiceProfileV1(
     record.accentDefinitionId,
     fallbackProfile.accentDefinitionId ?? null,
   );
+  const vernacularId = normalizeBotVernacularId(
+    record.vernacularId,
+    fallbackProfile.vernacularId ?? null,
+  );
   return {
     v: 2,
     enabled: legacy ? true : record.enabled !== false,
@@ -1804,6 +1818,7 @@ export function normalizeBotAudioVoiceProfileV1(
       fallbackProfile.pronunciationBase ?? "follow-voice",
     ),
     ...(accentDefinitionId ? { accentDefinitionId } : {}),
+    ...(vernacularId ? { vernacularId } : {}),
     ...(pronunciationMapPoint ? { pronunciationMapPoint } : {}),
     speechprintInfluence,
     speechprintStrength: normalizeLocalVoiceSpeechprintStrength(
@@ -1935,6 +1950,9 @@ function normalizeBotAudioVoiceProfileFallback(
             ),
           }
         : { accentDefinitionId: undefined }),
+      ...(normalizeBotVernacularId(value.vernacularId)
+        ? { vernacularId: normalizeBotVernacularId(value.vernacularId) }
+        : { vernacularId: undefined }),
       ...(pronunciationMapPoint
         ? { pronunciationMapPoint }
         : { pronunciationMapPoint: undefined }),
@@ -2027,6 +2045,9 @@ export function normalizeBotAudioVoiceProfileV3(
         base: normalizeLocalVoicePronunciationBase(profile.pronunciationBase),
         ...(profile.accentDefinitionId
           ? { accentDefinitionId: profile.accentDefinitionId }
+          : {}),
+        ...(profile.vernacularId
+          ? { vernacularId: profile.vernacularId }
           : {}),
         ...(profile.pronunciationMapPoint
           ? { mapPoint: { ...profile.pronunciationMapPoint } }

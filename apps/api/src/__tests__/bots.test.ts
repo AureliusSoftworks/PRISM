@@ -48,6 +48,54 @@ describe("composeBotSystemPrompt", () => {
     assert.equal(prompt!.endsWith(PRISM_RUNTIME_GROUNDING), true);
   });
 
+  it("speaks the saved vernacular after the persona and never without one", () => {
+    const profile = JSON.stringify({
+      v: 2,
+      enabled: true,
+      baseVoiceId: "voice-5",
+      vernacularId: "scots",
+      pitch: 0,
+      warmth: 0,
+      pace: 0,
+      lilt: 0,
+      bottishTone: 0.45,
+      eqTilt: 0,
+      gainDb: 0,
+      volume: 1,
+      texture: {
+        preset: "clean",
+        amount: 0,
+        bandwidth: 1,
+        noise: 0,
+        instability: 0,
+        distortion: 0,
+        damage: 0,
+      },
+    });
+    const prompt = composeBotSystemPrompt(
+      "Lachlan",
+      "A dry-witted lighthouse keeper.",
+      false,
+      undefined,
+      { audioVoiceProfile: profile },
+    );
+    assert.ok(prompt);
+    assert.match(prompt!, /Vernacular — Scots: /u);
+    // Persona first, then the vernacular colors it.
+    assert.ok(
+      prompt!.indexOf("lighthouse keeper") < prompt!.indexOf("Vernacular — "),
+    );
+    assert.match(prompt!, /never respell words phonetically/u);
+    const plain = composeBotSystemPrompt(
+      "Lachlan",
+      "A dry-witted lighthouse keeper.",
+      false,
+      undefined,
+      { audioVoiceProfile: null },
+    );
+    assert.doesNotMatch(plain ?? "", /Vernacular/u);
+  });
+
   it("trims whitespace on both fields before composing", () => {
     const prompt = composeBotSystemPrompt("  Tim  ", "   You help with code.   ");
     assert.ok(prompt);
@@ -108,6 +156,58 @@ describe("composeBotSystemPrompt", () => {
     const prompt = composeBotSystemPrompt("DJ K-Razor", "");
     assert.ok(prompt);
     assert.match(prompt!, /You are DJ K-Razor\./);
+  });
+
+  it("folds the saved vernacular into an authoring cue after the persona", () => {
+    const prompt = composeBotSystemPrompt(
+      "Murph",
+      "You are a diner regular.",
+      false,
+      "[]",
+      {
+        audioVoiceProfile: JSON.stringify({
+          v: 2,
+          baseVoiceId: "voice-1",
+          vernacularId: "scots",
+        }),
+      },
+    );
+    assert.ok(prompt);
+    assert.match(prompt!, /Vernacular — Scots:/);
+    // Words only — the cue forbids phonetic respelling because the accent
+    // stack owns pronunciation.
+    assert.match(prompt!, /never respell words phonetically/);
+    // The cue colors the persona; it never replaces or precedes it.
+    assert.ok(
+      prompt!.indexOf("You are a diner regular.") <
+        prompt!.indexOf("Vernacular — Scots:"),
+    );
+    // V3-shaped overrides read the same identity.
+    const v3Prompt = composeBotSystemPrompt("Murph", "", false, "[]", {
+      audioVoiceProfile: {
+        v: 3,
+        local: { pronunciation: { vernacularId: "noir" } },
+      },
+    });
+    assert.match(v3Prompt ?? "", /Vernacular — Noir narrator:/);
+  });
+
+  it("keeps plain-speech bots free of any vernacular cue", () => {
+    for (const audioVoiceProfile of [
+      undefined,
+      null,
+      JSON.stringify({ v: 2, baseVoiceId: "voice-1" }),
+      "{broken",
+    ]) {
+      const prompt = composeBotSystemPrompt(
+        "Tim",
+        "You are concise.",
+        false,
+        "[]",
+        { audioVoiceProfile },
+      );
+      assert.doesNotMatch(prompt ?? "", /Vernacular/, String(audioVoiceProfile));
+    }
   });
 
   it("adds gentle rejection guidance when flirt mode is disabled", () => {

@@ -274,6 +274,7 @@ import { BotCreationRitual } from "./BotCreationRitual";
 import { AdjustmentPad } from "./AdjustmentPad";
 import { PronunciationAtlas } from "./PronunciationAtlas";
 import {
+  PRONUNCIATION_ATLAS_ANCHORS,
   type PronunciationAtlasSelection,
 } from "./pronunciationAtlasModel";
 import {
@@ -1361,6 +1362,10 @@ import {
   coffeeCupStatusForProgress,
   continuityFrameworkVersionLabel,
   applyBotNamePronunciations,
+  BOT_VERNACULAR_DEFINITIONS,
+  botVernacularDefinitionForId,
+  type BotVernacularId,
+  type VoiceAccentDefinitionId,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotAudioVoiceControl,
   normalizeBotAvatarSfxV1,
@@ -10656,6 +10661,98 @@ function profileWithPronunciationAtlasSelection(
       localAccent.speechprintInfluence,
     ),
   });
+}
+
+/**
+ * The Accent Map selection a vernacular's home-pin handshake applies. Mirrors
+ * choosing that anchor on the map itself; the pin move is always a one-tap
+ * suggestion the player accepted, never an automatic side effect.
+ */
+function vernacularHandshakeSelection(
+  profile: BotAudioVoiceProfileV1,
+  accentDefinitionId: VoiceAccentDefinitionId,
+): PronunciationAtlasSelection | null {
+  const anchor = PRONUNCIATION_ATLAS_ANCHORS.find(
+    (candidate) => candidate.accentDefinitionId === accentDefinitionId,
+  );
+  if (!anchor) return null;
+  const current = pronunciationAtlasSelectionForProfile(profile);
+  return {
+    ...current,
+    accentDefinitionId,
+    influence: anchor.influence ?? "none",
+    ...(anchor.pronunciationBase
+      ? { pronunciationBase: anchor.pronunciationBase }
+      : {}),
+    point: { ...anchor.point },
+  };
+}
+
+/**
+ * Vernacular is the word-side twin of the Accent pin: it shapes what the bot
+ * writes while the pin keeps owning pronunciation. Deliberately no strength
+ * control — a character speaks their variety or they do not.
+ */
+function BotVernacularPicker({
+  profile,
+  onSelect,
+  onMovePin,
+}: {
+  profile: BotAudioVoiceProfileV1;
+  onSelect: (vernacularId: BotVernacularId | null) => void;
+  onMovePin: (accentDefinitionId: VoiceAccentDefinitionId) => void;
+}): React.JSX.Element {
+  const normalized = normalizeBotAudioVoiceProfileV1(profile);
+  const active = normalized.vernacularId ?? null;
+  const activeDefinition = botVernacularDefinitionForId(active);
+  const pairedAccentId = activeDefinition?.accentDefinitionId ?? null;
+  const handshakeVisible = Boolean(
+    pairedAccentId && normalized.accentDefinitionId !== pairedAccentId,
+  );
+  return (
+    <section className={styles.botVernacularPicker} aria-label="Vernacular">
+      <header>
+        <strong>Vernacular</strong>
+        <p>
+          How this bot phrases things — words and turns of phrase. The pin
+          above still owns pronunciation.
+        </p>
+      </header>
+      <div role="radiogroup" aria-label="Vernacular choices">
+        <button
+          type="button"
+          role="radio"
+          aria-checked={active === null}
+          onClick={() => onSelect(null)}
+        >
+          <span>None</span>
+          <em>Plain speech</em>
+        </button>
+        {BOT_VERNACULAR_DEFINITIONS.map((definition) => (
+          <button
+            key={definition.id}
+            type="button"
+            role="radio"
+            aria-checked={active === definition.id}
+            onClick={() => onSelect(definition.id)}
+          >
+            <span>{definition.label}</span>
+            <em>“{definition.example}”</em>
+          </button>
+        ))}
+      </div>
+      {handshakeVisible && activeDefinition && pairedAccentId ? (
+        <div className={styles.botVernacularHandshake}>
+          <span>
+            {activeDefinition.label} pairs with its home accent pin — move it?
+          </span>
+          <button type="button" onClick={() => onMovePin(pairedAccentId)}>
+            Move pin
+          </button>
+        </div>
+      ) : null}
+    </section>
+  );
 }
 
 type ElevenLabsVoiceIdResolution =
@@ -40084,7 +40181,16 @@ function BotAvatarVoiceTestDock({
     const resolvedChoice =
       requestedChoice === "current" ? currentMode : requestedChoice;
     if (resolvedChoice === "mute") return;
-    const previewText = previewLine.trim() || (await resolvePreviewText());
+    // A chosen vernacular auditions with its own example line so picking one
+    // is immediately audible. A player-typed line always wins: vernacular
+    // never rewrites supplied text, it only colors what the bot authors.
+    const vernacularExample =
+      botVernacularDefinitionForId(normalizedProfile.vernacularId)?.example ??
+      "";
+    const previewText =
+      previewLine.trim() ||
+      vernacularExample ||
+      (await resolvePreviewText());
     if (!previewText.trim()) return;
     const forcedMode =
       resolvedChoice === "premium" ? "english" : resolvedChoice;
@@ -45762,26 +45868,54 @@ function BotAvatarCustomizerModal({
       activeAdjustmentTarget === "pronunciation"
     ) {
       return (
-        <PronunciationAtlas
-          selection={avatarPronunciationSelection}
-          color={activeFoundryModule.color}
-          onPreview={(selection) =>
-            onAudioVoiceProfileChange(
-              profileWithPronunciationAtlasSelection(
+        <>
+          <PronunciationAtlas
+            selection={avatarPronunciationSelection}
+            color={activeFoundryModule.color}
+            onPreview={(selection) =>
+              onAudioVoiceProfileChange(
+                profileWithPronunciationAtlasSelection(
+                  audioVoiceProfile,
+                  selection,
+                ),
+              )
+            }
+            onCommit={(selection) => {
+              const nextProfile = profileWithPronunciationAtlasSelection(
                 audioVoiceProfile,
                 selection,
-              ),
-            )
-          }
-          onCommit={(selection) => {
-            const nextProfile = profileWithPronunciationAtlasSelection(
-              audioVoiceProfile,
-              selection,
-            );
-            onAudioVoiceProfileChange(nextProfile, { saveImmediately: true });
-          }}
-          onContinue={() => setActiveAdjustmentTarget("local")}
-        />
+              );
+              onAudioVoiceProfileChange(nextProfile, { saveImmediately: true });
+            }}
+            onContinue={() => setActiveAdjustmentTarget("local")}
+          />
+          <BotVernacularPicker
+            profile={audioVoiceProfile}
+            onSelect={(vernacularId) =>
+              onAudioVoiceProfileChange(
+                normalizeBotAudioVoiceProfileV1({
+                  ...normalizeBotAudioVoiceProfileV1(audioVoiceProfile),
+                  vernacularId,
+                }),
+                { saveImmediately: true },
+              )
+            }
+            onMovePin={(accentDefinitionId) => {
+              const selection = vernacularHandshakeSelection(
+                audioVoiceProfile,
+                accentDefinitionId,
+              );
+              if (!selection) return;
+              onAudioVoiceProfileChange(
+                profileWithPronunciationAtlasSelection(
+                  audioVoiceProfile,
+                  selection,
+                ),
+                { saveImmediately: true },
+              );
+            }}
+          />
+        </>
       );
     }
     if (activeControlTab === "voice" && !avatarVoiceAccentReady) {

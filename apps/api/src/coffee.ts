@@ -3969,6 +3969,12 @@ function buildCoffeePromptLeakRepairMessages(args: {
     args.speaker.name,
     args.speaker.systemPrompt,
     args.speaker.flirtEnabled === true,
+    undefined,
+    {
+      audioVoiceProfile:
+        args.speaker.audioVoiceProfileOverride ??
+        args.speaker.authoredAudioVoiceProfile,
+    },
   );
   const messages: ProviderMessage[] = [];
   if (speakerSystemPrompt) {
@@ -4034,6 +4040,12 @@ function buildCoffeeRepeatRepairMessages(args: {
     args.speaker.name,
     args.speaker.systemPrompt,
     args.speaker.flirtEnabled === true,
+    undefined,
+    {
+      audioVoiceProfile:
+        args.speaker.audioVoiceProfileOverride ??
+        args.speaker.authoredAudioVoiceProfile,
+    },
   );
   const messages: ProviderMessage[] = [];
   if (speakerSystemPrompt) {
@@ -13488,6 +13500,15 @@ export function buildSpeakerPrompt(args: {
     speaker.name,
     borrowedPersonaPrompt,
     speaker.flirtEnabled === true,
+    undefined,
+    {
+      // A borrowed public form speaks with its own voice — vernacular included.
+      audioVoiceProfile:
+        identityMirrorState?.targetVoice ??
+        identityShapeshiftState?.targetVoice ??
+        speaker.audioVoiceProfileOverride ??
+        speaker.authoredAudioVoiceProfile,
+    },
   );
   const cloneIdentityPrompt = buildCloneFamilyIdentityPrompt(speaker, group);
   const peers = group.filter((bot) => bot.id !== speaker.id);

@@ -243,6 +243,8 @@ import {
   debateDebriefEligibleBots,
   normalizeDebateSessionSynopsis,
   DEBATE_SESSION_SYNOPSIS_MAX_LENGTH,
+  botVernacularAuthoringCueV1,
+  botVernacularIdFromStoredVoiceProfile,
 } from "@localai/shared";
 import {
   AutoFallbackExhaustedError,
@@ -5449,10 +5451,14 @@ function debateSpeechIncludesEvidenceCoverage(
 }
 
 function personaVoicePrompt(snapshot: DebateBotSnapshotV1): string {
+  const vernacularCue = botVernacularAuthoringCueV1(
+    botVernacularIdFromStoredVoiceProfile(snapshot.voiceProfile),
+  );
   return [
     `Persona voice is binding: speak as ${snapshot.name}, using only diction, idioms, cadence, confidence, and rhetorical habits that their saved persona would plausibly use.`,
     "Do not smooth their voice into generic polished-debater, corporate, academic, or assistant language. A formal Debate role changes the structure of a turn, not the persona's vocabulary or fluency.",
     "Let the persona be imperfect when appropriate: simple wording, bluntness, enthusiasm, uncertainty, eccentric phrasing, or limited rhetorical polish are all preferable to out-of-character eloquence.",
+    ...(vernacularCue ? [vernacularCue] : []),
   ].join("\n");
 }
 

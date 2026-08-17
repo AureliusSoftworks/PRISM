@@ -4088,6 +4088,9 @@ export interface UserChatSettings {
   botSystemPrompt?: string;
   /** Raw bot profile prompt used to recompose false-name display preambles. */
   botPersonaPrompt?: string;
+  /** Effective stored audio voice profile (override ?? authored); carries the
+   * vernacular identity through false-name and shapeshift recomposition. */
+  botAudioVoiceProfile?: unknown;
   botFlirtEnabled?: boolean;
   /** Ready bot Powers used for turn-scoped naming cues and output enforcement. */
   botPowers?: unknown;
@@ -4705,6 +4708,7 @@ function applyIdentityShapeshiftToBotSystemPromptV1(args: {
   mode: ChatMode;
   prismHome: boolean;
   believedName?: string | null;
+  holderAudioVoiceProfile?: unknown;
 }): string | undefined {
   if (!args.state) return args.basePrompt;
   const recomposed = composeBotSystemPrompt(
@@ -4712,7 +4716,12 @@ function applyIdentityShapeshiftToBotSystemPromptV1(args: {
     args.state.targetPersonaPrompt,
     undefined,
     args.botPowers,
-    args.believedName ? { believedName: args.believedName } : undefined,
+    {
+      ...(args.believedName ? { believedName: args.believedName } : {}),
+      // The borrowed public form carries its own voice — vernacular included.
+      audioVoiceProfile:
+        args.state.targetVoice ?? args.holderAudioVoiceProfile,
+    },
   );
   if (isZenMode(args.mode)) {
     return composeZenPrismSystemPrompt(recomposed, { prismHome: args.prismHome });
@@ -4818,6 +4827,7 @@ function applyChatZenFalseNameToBotSystemPromptV1(args: {
   basePrompt: string | undefined;
   holderName: string | undefined;
   botPersonaPrompt?: string;
+  botAudioVoiceProfile?: unknown;
   botFlirtEnabled?: boolean;
   botPowers: unknown;
   state: BotFalseNameStateV1 | null;
@@ -4830,7 +4840,10 @@ function applyChatZenFalseNameToBotSystemPromptV1(args: {
     args.botPersonaPrompt,
     args.botFlirtEnabled,
     args.botPowers,
-    { believedName: args.state.believedName },
+    {
+      believedName: args.state.believedName,
+      audioVoiceProfile: args.botAudioVoiceProfile,
+    },
   );
   if (isZenMode(args.mode)) {
     return composeZenPrismSystemPrompt(recomposed, { prismHome: args.prismHome });
@@ -8727,6 +8740,7 @@ export async function processChatMessage(
       basePrompt: effectiveBotSystemPrompt,
       holderName: settings.starterPromptLabel,
       botPersonaPrompt: settings.botPersonaPrompt,
+      botAudioVoiceProfile: settings.botAudioVoiceProfile,
       botFlirtEnabled: settings.botFlirtEnabled,
       botPowers: settings.botPowers,
       state: activeFalseNameState,
@@ -8741,6 +8755,7 @@ export async function processChatMessage(
       mode,
       prismHome: activeBotId == null,
       believedName: activeFalseNameState?.believedName,
+      holderAudioVoiceProfile: settings.botAudioVoiceProfile,
     });
     const promptMessages = buildPromptMessages({
       botSystemPrompt: promptBotSystemPrompt,
@@ -10178,6 +10193,7 @@ export async function processChatMessage(
     basePrompt: effectiveBotSystemPrompt,
     holderName: settings.starterPromptLabel,
     botPersonaPrompt: settings.botPersonaPrompt,
+    botAudioVoiceProfile: settings.botAudioVoiceProfile,
     botFlirtEnabled: settings.botFlirtEnabled,
     botPowers: settings.botPowers,
     state: activeFalseNameState,
@@ -10192,6 +10208,7 @@ export async function processChatMessage(
     mode,
     prismHome: activeBotId == null,
     believedName: activeFalseNameState?.believedName,
+    holderAudioVoiceProfile: settings.botAudioVoiceProfile,
   });
 	  const promptMessages = buildPromptMessages({
     botSystemPrompt: promptBotSystemPrompt,

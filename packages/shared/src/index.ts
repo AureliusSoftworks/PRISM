@@ -627,6 +627,18 @@ export {
 } from "./botFalseName.js";
 
 export {
+  BOT_VERNACULAR_DEFINITIONS,
+  BOT_VERNACULAR_IDS,
+  BOT_VERNACULAR_SHARED_RULES_V1,
+  botVernacularAuthoringCueV1,
+  botVernacularDefinitionForId,
+  botVernacularIdFromStoredVoiceProfile,
+  normalizeBotVernacularId,
+  type BotVernacularDefinitionV1,
+  type BotVernacularId,
+} from "./botVernacular.js";
+
+export {
   BOT_AUDIO_VOICE_IDS,
   BUILTIN_ACCENT_REALIZATION_BLEND_WEIGHT,
   PRISM_BUILTIN_ENGLISH_VOICES,
