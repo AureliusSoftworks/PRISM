@@ -1,4 +1,3 @@
-import { normalizeBotFaceMouthCharacter } from "@localai/shared";
 import {
   crtSpeechMouthShapeFromVisibleTextProgress,
   zenLiveBotMouthShapeFromVisibleTextProgress,
@@ -254,44 +253,6 @@ function coffeeSeatOpenMouthGlyph(
   if (mouthShape === "open-small") return ":o";
   if (mouthShape === "open-round") return ":O";
   return null;
-}
-
-/**
- * Mini avatars keep talking cheap: default mouths flip closed ↔ open-wide
- * (`:0`). Authored/special mouths stay on their resting glyph unless the
- * separate Custom Speech module explicitly opts them into the same clock.
- */
-export function miniAvatarBinaryMouthShape(args: {
-  talking: boolean;
-  mouthShape: ZenLiveBotMouthShape;
-  mouthCharacter?: string | null;
-  customSpeechEnabled?: boolean;
-}): ZenLiveBotMouthShape {
-  if (
-    normalizeBotFaceMouthCharacter(args.mouthCharacter) !== null &&
-    args.customSpeechEnabled !== true
-  ) {
-    return "closed";
-  }
-  if (!args.talking) return "closed";
-  switch (args.mouthShape) {
-    case "open-wide":
-    case "open-small":
-    case "open-round":
-    case "at":
-    case "click":
-      return "open-wide";
-    case "closed":
-    case "speech-closed":
-    case "narrow":
-    case "dot":
-      return "closed";
-    default: {
-      const _exhaustive: never = args.mouthShape;
-      void _exhaustive;
-      return "closed";
-    }
-  }
 }
 
 export function coffeeSeatPlateGlyph(

@@ -774,10 +774,74 @@ export function coffeeTranscriptVisibleMessages<
         mode: "coffee",
       })
     ) {
-      return true;
+      return false;
     }
     return normalizeCoffeeMessageDelivery(message.content).hasDialogue;
   });
+}
+
+export interface CoffeePublicTranscriptDeveloperCounts {
+  visibleMessages: number;
+  storedEvents: number;
+  dialogue: number;
+  systemRows: number;
+  actions: number;
+  silence: number;
+  interruptionSegments: number;
+}
+
+export interface CoffeePublicTranscriptProjection {
+  projectedRows: CoffeeReplayMessageLike[];
+  visibleRows: CoffeeReplayMessageLike[];
+  developerCounts: CoffeePublicTranscriptDeveloperCounts;
+}
+
+/**
+ * Canonical public Coffee transcript. Table Talk, Review, copy, and download
+ * must all consume this projection so intentional silence and internal event
+ * rows cannot disagree across surfaces.
+ */
+export function projectCoffeePublicTranscript(args: {
+  messages: readonly CoffeeReplayMessageLike[];
+  bots?: readonly CoffeeTranscriptBotIdentity[];
+}): CoffeePublicTranscriptProjection {
+  const projectedRows = coffeeTranscriptMessagesWithInterruptions(args);
+  const visibleRows = coffeeTranscriptVisibleMessages(projectedRows);
+  const silence = args.messages.filter((message) =>
+    socialSilenceMessageIsMarkedV1({
+      content: message.content,
+      marker: message.socialSilence,
+      mode: "coffee",
+    }),
+  ).length;
+  const actions = args.messages.filter(
+    (message) =>
+      Boolean(message.coffeeAmbientAction) ||
+      Boolean(message.coffeeStageAction) ||
+      Boolean(message.coffeeUserAction),
+  ).length;
+  const interruptionSegments = projectedRows.filter((message) =>
+    Boolean(message.transcriptInterruptionSegment),
+  ).length;
+  const systemRows = args.messages.filter(
+    (message) => message.role === "system",
+  ).length;
+  const dialogue = visibleRows.filter(
+    (message) => message.role === "user" || message.role === "assistant",
+  ).length;
+  return {
+    projectedRows,
+    visibleRows,
+    developerCounts: {
+      visibleMessages: visibleRows.length,
+      storedEvents: args.messages.length,
+      dialogue,
+      systemRows,
+      actions,
+      silence,
+      interruptionSegments,
+    },
+  };
 }
 
 function coffeeReviewTableText(
@@ -1045,10 +1109,11 @@ export function formatCoffeeReviewClipboardText(args: {
     })),
   );
   const replayEvents = replayEventEntries.map(({ event }) => event);
-  const messages = coffeeTranscriptMessagesWithInterruptions({
+  const projection = projectCoffeePublicTranscript({
     messages: args.messages,
     bots: context?.bots,
   });
+  const messages = projection.projectedRows;
   const botNameById = new Map<string, string>();
   for (const bot of context?.bots ?? []) {
     if (bot.id.trim() && bot.name.trim()) botNameById.set(bot.id, bot.name);
@@ -1059,7 +1124,7 @@ export function formatCoffeeReviewClipboardText(args: {
     }
   }
 
-  const visibleMessages = coffeeTranscriptVisibleMessages(messages);
+  const visibleMessages = projection.visibleRows;
   const attendedBotIds = new Set<string>();
   for (const event of replayEvents) {
     if (event.kind === "arrival") attendedBotIds.add(event.botId);
@@ -1115,7 +1180,7 @@ export function formatCoffeeReviewClipboardText(args: {
     )
   );
   const settings = coffeeReviewSettingsText(context?.settings);
-  const reviewTurns = messages.filter((message) => {
+  const reviewTurns = visibleMessages.filter((message) => {
     if (message.role !== "assistant" && message.role !== "user") return false;
     return Boolean(
       coffeeReviewTableText(message) ||
@@ -1277,15 +1342,28 @@ export function coffeeActionsForMessage(message: CoffeeReplayMessageLike): strin
   const stageAction = message.coffeeStageAction?.action
     ? stripCoffeeVisibleQuoteMarks(message.coffeeStageAction.action.replace(/\s+/g, " ").trim())
     : "";
-  if (stageAction) return [stageAction];
+  const sanitizedStageAction = stageAction
+    ? sanitizeCoffeeActionForBot(stageAction)
+    : "";
+  if (sanitizedStageAction) return [sanitizedStageAction];
   const actions = extractStageDirections(message.content).actions
-    .map((action) => stripCoffeeVisibleQuoteMarks(action.replace(/\s+/g, " ").trim()))
+    .map((action) =>
+      sanitizeCoffeeActionForBot(
+        stripCoffeeVisibleQuoteMarks(action.replace(/\s+/g, " ").trim()),
+      ),
+    )
     .filter((action) => action.length > 0);
   const ambientAction =
     message.coffeeAmbientAction?.source === "scripted"
-      ? stripCoffeeVisibleQuoteMarks(message.coffeeAmbientAction.action.replace(/\s+/g, " ").trim())
+      ? sanitizeCoffeeActionForBot(
+          stripCoffeeVisibleQuoteMarks(
+            message.coffeeAmbientAction.action.replace(/\s+/g, " ").trim(),
+          ),
+        )
       : "";
-  return ambientAction && !actions.includes(ambientAction) ? [...actions, ambientAction] : actions;
+  return ambientAction && !actions.includes(ambientAction)
+    ? [...actions, ambientAction]
+    : actions;
 }
 
 export function collectCoffeeReplayActionsForBot(

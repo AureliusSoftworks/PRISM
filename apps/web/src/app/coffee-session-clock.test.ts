@@ -48,7 +48,7 @@ describe("coffee session clock", () => {
     );
   });
 
-  it("tracks model warmup separately from manual autoplay pause", () => {
+  it("holds only for model work, not a manually paused table", () => {
     assert.deepEqual(
       coffeeSessionClockHoldReasons({
         autoplayPaused: false,
@@ -63,7 +63,7 @@ describe("coffee session clock", () => {
         modelWarmup: true,
         foregroundGeneration: true,
       }),
-      ["manual_autoplay_pause", "model_warmup", "foreground_generation"],
+      ["model_warmup", "foreground_generation"],
     );
     // Player composing is deliberately not a hold reason: bots keep talking
     // while the user types, so session time keeps flowing.

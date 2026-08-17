@@ -45,6 +45,8 @@ test("the selected Coffee topic stays framed under the navbar", () => {
     pageSource,
     /className=\{styles\.coffeeSessionTopicLabel\}[\s\S]*Topic/,
   );
+  assert.match(pageSource, /resolveCoffeeTopicDisplayTitle\(/);
+  assert.match(pageSource, /coffeeSessionTopicTitle/);
   assert.doesNotMatch(
     pageSource,
     /coffeeThread[\s\S]{0,400}coffeeSessionTopicFrame/,

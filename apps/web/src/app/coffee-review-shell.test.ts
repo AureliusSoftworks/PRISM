@@ -4,6 +4,10 @@ import test from "node:test";
 
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 const cssSource = readFileSync(new URL("./page.module.css", import.meta.url), "utf8");
+const tutorialSource = readFileSync(
+  new URL("./modeTutorials.ts", import.meta.url),
+  "utf8",
+);
 
 test("completed Coffee sessions enter read-only review before replay starts", () => {
   assert.match(
@@ -17,7 +21,7 @@ test("completed Coffee sessions enter read-only review before replay starts", ()
   assert.match(pageSource, /onClick=\{toggleCoffeeReplayPlayback\}/);
   assert.match(
     pageSource,
-    /coffeeGroupStartComposerVisible\s*\?\s*renderCoffeeGroupStartComposer\(\)\s*:\s*coffeeChromePolicy\.reviewActive\s*\?\s*null\s*:\s*renderShellComposer/,
+    /coffeeSelectedGroup !== null\s*\?\s*null\s*:\s*coffeeChromePolicy\.reviewActive\s*\?\s*null\s*:/,
   );
   assert.match(
     pageSource,
@@ -40,7 +44,7 @@ test("completed Coffee review keeps the table clear behind a Signal-like header"
   assert.match(cssSource, /\.coffeeReviewHeader\s*\{/);
 });
 
-test("Coffee review copies transcripts instead of exporting transcript files", () => {
+test("Coffee review copies and downloads the same canonical public transcript", () => {
   assert.doesNotMatch(pageSource, /exportCoffeeSession/u);
   assert.doesNotMatch(pageSource, /Download Session/u);
   assert.match(
@@ -52,7 +56,40 @@ test("Coffee review copies transcripts instead of exporting transcript files", (
     /loadSessionReviewRecordingEvidence\("coffee", coffeeConversation\.id\)/u,
   );
   assert.match(pageSource, /formatCoffeeReviewClipboardText\(\{[\s\S]*recordingEvidence,/u);
+  assert.match(
+    pageSource,
+    /const publicTranscript = projectCoffeePublicTranscript\(\{/u,
+  );
+  assert.match(pageSource, /publicTranscript\.visibleRows\.length/u);
+  assert.match(
+    pageSource,
+    /const downloadCoffeeReplayTranscriptWithNote = async \(\)[\s\S]{0,700}coffeeTranscriptText\("standard"\)/u,
+  );
+  assert.doesNotMatch(
+    pageSource,
+    /downloadCoffeeReplayTranscriptWithNote = async[\s\S]{0,700}fetch\(transcriptMarkdownUrl/u,
+  );
   assert.match(pageSource, /data-copy-state=/u);
+});
+
+test("previous Coffee sessions copy a verbose review transcript beside Delete", () => {
+  assert.match(
+    pageSource,
+    /const copyPreviousCoffeeSessionVerboseTranscript = async \([\s\S]{0,1200}\/export`[\s\S]{0,240}JSON\.stringify\(\{ format: "developer" \}\)[\s\S]{0,500}writeClipboardText\(exported\.markdown\)/u,
+  );
+  assert.match(
+    pageSource,
+    /className=\{styles\.coffeeGroupSessionCopyButton\}[\s\S]{0,1200}copyPreviousCoffeeSessionVerboseTranscript\([\s\S]{0,600}className=\{styles\.coffeeGroupSessionDeleteButton\}/u,
+  );
+  assert.match(
+    pageSource,
+    /Copy verbose transcript for \$\{sessionLabel\} Coffee Review/u,
+  );
+  assert.match(cssSource, /\.coffeeGroupSessionCopyButton \{\s*right: 28px;/u);
+  assert.match(
+    tutorialSource,
+    /heading: "Review previous tables"[\s\S]{0,500}clipboard button beside Delete[\s\S]{0,300}coffee-recent-sessions/u,
+  );
 });
 
 test("replay seats Default Prism with the pot as the motion anchor", () => {

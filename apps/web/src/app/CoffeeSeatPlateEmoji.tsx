@@ -53,6 +53,7 @@ import {
 } from "@localai/shared";
 import {
   applyCoffeeSeatBlink,
+  coffeeSeatBlinkKeepsFaceStill,
   type CoffeeSeatBlinkPhase,
 } from "./coffee-seat-plate-blink.ts";
 import {
@@ -71,6 +72,8 @@ import {
   type BotFaceGazeDirection,
   type BotFaceGazeFrame,
 } from "./botFaceEyeMovement.ts";
+import { coffeeSeatThinkingPresentationActive } from "./coffee-seat-thinking-presentation.ts";
+import { coffeeSeatRenderedMouthGlyph } from "./coffee-seat-rendered-mouth.ts";
 import { CrtPixelTextGlyph } from "./PhosphorPixelGlyph";
 
 function randomBetween(lo: number, hi: number): number {
@@ -219,7 +222,7 @@ export type CoffeeSeatPlateEmojiProps = {
   pixelated?: boolean;
   /** Uses binary cell alpha for a hard-edged authoring guide. */
   hardPixels?: boolean;
-  /** Compact render tiers intentionally shed full-avatar motion/effects. */
+  /** Mini keeps semantic mouth motion; static is reserved for micro avatars. */
   motionMode?: "full" | "mini-led" | "static";
   /** Active speaking state for speech-driven mouth sync and blink eligibility. */
   isTalking: boolean;
@@ -369,17 +372,24 @@ export function CoffeeSeatPlateEmoji({
 }: CoffeeSeatPlateEmojiProps): JSX.Element {
   const fullMotion = motionMode === "full";
   const staticFace = motionMode === "static";
+  const mouthMotionEnabled = !staticFace;
   const blinkEnabled = enabled && !staticFace;
   const effectiveTalking = staticFace ? false : isTalking;
   const normalizedThinkingFrames =
     normalizeBotFaceThinkingFrames(faceThinkingFrames) ??
     DEFAULT_BOT_FACE_THINKING_FRAMES;
-  const thinkingSpinnerActive =
-    fullMotion &&
-    blinkEnabled &&
-    showThinkingSpinner &&
-    !effectiveTalking &&
-    !botFaceThinkingSpinnerDisabled(normalizedThinkingFrames);
+  // Thinking is semantic screen content, not optional blink decoration. A
+  // compact or reduced-motion seat still replaces the normal face with the
+  // authored frame; only frame-to-frame animation is allowed to stop.
+  const thinkingSpinnerActive = coffeeSeatThinkingPresentationActive({
+    showThinkingSpinner,
+    isTalking: effectiveTalking,
+    thinkingSpinnerDisabled: botFaceThinkingSpinnerDisabled(
+      normalizedThinkingFrames,
+    ),
+  });
+  const thinkingSpinnerMotionActive =
+    thinkingSpinnerActive && fullMotion && blinkEnabled;
   const questionGlyphActive =
     fullMotion && !thinkingSpinnerActive && showQuestionMark;
   const faceMode = thinkingSpinnerActive
@@ -405,16 +415,16 @@ export function CoffeeSeatPlateEmoji({
   const configuredFaceMouthAnimation =
     normalizeBotFaceGlyphAnimation(faceMouthAnimation) ??
     DEFAULT_BOT_FACE_GLYPH_ANIMATION;
-  const normalizedFaceMouthAnimation = fullMotion
+  const normalizedFaceMouthAnimation = mouthMotionEnabled
     ? configuredFaceMouthAnimation
     : DEFAULT_BOT_FACE_GLYPH_ANIMATION;
-  // Default mouths clear the authored glyph while talking so the plate
-  // viseme (or mini binary `:0`) can drive the mouth.
+  // Default mouths clear the authored glyph while talking so the streamed
+  // plate viseme can drive the mouth at both Full HD and Mini sizes.
   // "static" keeps the authored custom glyph visible and unanimated while
   // talking for a stable presentation.
   const hasCustomMouth = normalizedFaceMouthCharacter !== null;
   const renderedFaceMouthCharacter =
-    fullMotion &&
+    mouthMotionEnabled &&
     hasCustomMouth &&
     effectiveTalking &&
     normalizedFaceMouthAnimation === "none"
@@ -444,7 +454,9 @@ export function CoffeeSeatPlateEmoji({
         }) === "mouth",
     ) ??
     null;
-  const faceBlinkDisabled = normalizedFaceBlinkBar === "none";
+  const faceBlinkDisabled = coffeeSeatBlinkKeepsFaceStill(
+    normalizedFaceBlinkBar,
+  );
   const talkingPausesBlink = effectiveTalking && !blinkWhileTalking;
   const blinkKey = `${blinkEnabled ? "enabled" : "disabled"}:${talkingPausesBlink ? "talking" : "idle"}:${faceMode}:${normalizedFaceBlinkBar}:${faceText}:${scheduleKey}`;
   const [blinkState, setBlinkState] = useState<CoffeeSeatPlateBlinkState>({
@@ -507,7 +519,7 @@ export function CoffeeSeatPlateEmoji({
     const element = customMouthGlyphRef.current;
     if (
       !element ||
-      !fullMotion ||
+      !mouthMotionEnabled ||
       !renderedMouthGlyphForMotion ||
       thinkingSpinnerActive ||
       questionGlyphActive
@@ -527,7 +539,7 @@ export function CoffeeSeatPlateEmoji({
     };
   }, [
     faceMouthFont,
-    fullMotion,
+    mouthMotionEnabled,
     questionGlyphActive,
     renderedMouthGlyphForMotion,
     thinkingSpinnerActive,
@@ -609,7 +621,8 @@ export function CoffeeSeatPlateEmoji({
   ]);
 
   useEffect(() => {
-    if (!thinkingSpinnerActive) {
+    if (!thinkingSpinnerMotionActive) {
+      setThinkingSpinnerFrameIndex(0);
       return;
     }
 
@@ -622,7 +635,7 @@ export function CoffeeSeatPlateEmoji({
     return () => {
       clearInterval(id);
     };
-  }, [normalizedThinkingFrames.length, thinkingSpinnerActive]);
+  }, [normalizedThinkingFrames.length, thinkingSpinnerMotionActive]);
 
   const displayBlinkPhase: CoffeeSeatBlinkPhase =
     !blinkEnabled ||
@@ -814,6 +827,14 @@ export function CoffeeSeatPlateEmoji({
           streamedMouthShape,
         )
       : null;
+  // A live viseme can change several times inside one painted frame. Running
+  // each shape through the synchronous canvas-to-PNG phosphor raster blocks
+  // that frame (and can leave the previous mask visible indefinitely under
+  // load). Keep authored/static custom mouths pixel-masked, but render mouths
+  // that actively swap speech glyphs through the native phosphor text layer.
+  const liveMouthGlyphSwapActive =
+    effectiveTalking &&
+    (renderedFaceMouthCharacter === null || customSpeechGlyph !== null);
   const mouthOpen =
     !hasCustomMouth &&
     effectiveTalking &&
@@ -981,10 +1002,12 @@ export function CoffeeSeatPlateEmoji({
               customMouthRendered = true;
             }
             const renderedGlyph =
-              part === "mouth" && customSpeechGlyph
-                ? customSpeechGlyph
-                : part === "mouth" && renderedFaceMouthCharacter
-                ? renderedFaceMouthCharacter
+              part === "mouth"
+                ? coffeeSeatRenderedMouthGlyph({
+                    baseGlyph: glyph,
+                    customSpeechGlyph,
+                    renderedFaceMouthCharacter,
+                  })
                 : glyph;
             const renderCustomEyePair =
               part === "eyes" &&
@@ -1051,7 +1074,10 @@ export function CoffeeSeatPlateEmoji({
                   <CrtPixelTextGlyph
                     ref={part === "mouth" ? customMouthGlyphRef : undefined}
                     content={renderedGlyph}
-                    enabled={pixelated}
+                    enabled={
+                      pixelated &&
+                      !(part === "mouth" && liveMouthGlyphSwapActive)
+                    }
                     binaryAlpha={hardPixels}
                     rasterKey={partFaceFont ?? "default"}
                   />

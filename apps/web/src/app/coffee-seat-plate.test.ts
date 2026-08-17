@@ -16,7 +16,6 @@ import {
   coffeeSeatSipMouthOffsetY,
   coffeeSeatScreenRelativeFeatureRotationDeg,
   coffeeSeatScreenRelativeMouthRotationDeg,
-  miniAvatarBinaryMouthShape,
   resolveCoffeeSeatSipFacePresentation,
 } from "./coffee-seat-plate.ts";
 
@@ -484,74 +483,19 @@ describe("coffeeSeatPlateGlyph", () => {
   });
 });
 
-describe("miniAvatarBinaryMouthShape", () => {
-  it("flips default mouths between closed and open-wide (:0)", () => {
-    assert.equal(
-      miniAvatarBinaryMouthShape({
-        talking: false,
-        mouthShape: "open-wide",
-        mouthCharacter: null,
-      }),
-      "closed",
-    );
-    assert.equal(
-      miniAvatarBinaryMouthShape({
-        talking: true,
-        mouthShape: "open-small",
-        mouthCharacter: null,
-      }),
-      "open-wide",
-    );
-    assert.equal(
-      miniAvatarBinaryMouthShape({
-        talking: true,
-        mouthShape: "speech-closed",
-        mouthCharacter: null,
-      }),
-      "closed",
-    );
-    assert.deepEqual(
-      coffeeSeatPlateGlyph(
-        "warm",
-        miniAvatarBinaryMouthShape({
-          talking: true,
-          mouthShape: "open-round",
-          mouthCharacter: null,
-        }),
-      ),
-      { text: ":0", rotateDeg: 90 },
-    );
-  });
-
-  it("freezes authored special mouths", () => {
-    assert.equal(
-      miniAvatarBinaryMouthShape({
-        talking: true,
-        mouthShape: "open-wide",
-        mouthCharacter: "△",
-      }),
-      "closed",
-    );
-  });
-
-  it("keeps the compact speech clock active for authored resting mouths when Custom Speech is enabled", () => {
-    assert.equal(
-      miniAvatarBinaryMouthShape({
-        talking: true,
-        mouthShape: "open-round",
-        mouthCharacter: "△",
-        customSpeechEnabled: true,
-      }),
-      "open-wide",
-    );
-    assert.equal(
-      miniAvatarBinaryMouthShape({
-        talking: true,
-        mouthShape: "speech-closed",
-        mouthCharacter: "△",
-        customSpeechEnabled: true,
-      }),
-      "closed",
-    );
+describe("compact mouth glyphs", () => {
+  it("preserves each Mini viseme instead of collapsing them to :0", () => {
+    assert.deepEqual(coffeeSeatPlateGlyph("warm", "open-small"), {
+      text: ":o",
+      rotateDeg: 90,
+    });
+    assert.deepEqual(coffeeSeatPlateGlyph("warm", "open-round"), {
+      text: ":O",
+      rotateDeg: 90,
+    });
+    assert.deepEqual(coffeeSeatPlateGlyph("warm", "at"), {
+      text: ":@",
+      rotateDeg: 90,
+    });
   });
 });

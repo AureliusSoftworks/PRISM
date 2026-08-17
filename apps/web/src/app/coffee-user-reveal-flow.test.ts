@@ -14,7 +14,9 @@ import {
   coffeeMonotonicDeadlineRemainingMs,
   coffeePendingSubmittedUserLineVisible,
   coffeePersistedUserLineOwnsPendingReveal,
+  coffeeRevealLineIsCutOffV1,
   coffeeRevealPreparationMayCommit,
+  coffeeRevealVoiceEndSealsTableLineV1,
   coffeeSentenceCaseTableProse,
   coffeeShouldQueueAssistantRevealAfterUserTyping,
   coffeeShouldIgnoreStaleTurnResponse,
@@ -104,6 +106,38 @@ describe("coffee user reveal flow", () => {
       coffeeRevealPreparationMayCommit({
         preparedEpoch: interruptedRevealEpoch,
         currentEpoch: interruptedRevealEpoch + 1,
+      }),
+      false,
+    );
+  });
+
+  it("does not seal a table line when voice ends because the speaker was cut off", () => {
+    assert.equal(
+      coffeeRevealLineIsCutOffV1("line-1", "line-1"),
+      true,
+    );
+    assert.equal(coffeeRevealLineIsCutOffV1("line-1", "line-2"), false);
+    assert.equal(
+      coffeeRevealVoiceEndSealsTableLineV1({
+        messageId: "line-1",
+        activeMessageId: "line-1",
+        cutOffMessageId: null,
+      }),
+      true,
+    );
+    assert.equal(
+      coffeeRevealVoiceEndSealsTableLineV1({
+        messageId: "line-1",
+        activeMessageId: "line-1",
+        cutOffMessageId: "line-1",
+      }),
+      false,
+    );
+    assert.equal(
+      coffeeRevealVoiceEndSealsTableLineV1({
+        messageId: "line-1",
+        activeMessageId: "line-2",
+        cutOffMessageId: null,
       }),
       false,
     );

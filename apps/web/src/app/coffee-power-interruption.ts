@@ -20,6 +20,80 @@ export interface CoffeeAutomaticCutInCandidate {
   chance: number;
 }
 
+export interface CoffeeAutomaticCutInPreparedPlanV1 {
+  candidate: CoffeeAutomaticCutInCandidate;
+  leadPlan: ListenerReactionPlanV1;
+  triggerProgress: number;
+  minimumVisibleWords: number;
+  mustInterruptDuringTurn: boolean;
+  unconditionalInterruption: boolean;
+}
+
+export interface CoffeeAutomaticCutInPreparedPlanCacheV1 {
+  cacheKey: string;
+  plan: CoffeeAutomaticCutInPreparedPlanV1 | null;
+}
+
+/**
+ * Cheap roster fingerprint so typewriter ticks can reuse a cut-in plan until
+ * the speaking opportunity, addressed bot, or seated candidates change.
+ */
+export function coffeeAutomaticCutInPreparedPlanCacheKeyV1(args: {
+  opportunityKey: string;
+  interruptedBotId: string;
+  directlyAddressedBotId: string | null;
+  crossTalk: "rare" | "normal" | "chatty" | "pileup";
+  candidateBotIds: readonly string[];
+  powerPlanRevision: string;
+}): string {
+  const candidateIds = [...args.candidateBotIds].sort().join(",");
+  return [
+    args.opportunityKey,
+    args.interruptedBotId,
+    args.directlyAddressedBotId ?? "",
+    args.crossTalk,
+    args.powerPlanRevision,
+    candidateIds,
+  ].join(":");
+}
+
+/** Count interruption effects per bot without serializing the whole power plan. */
+export function coffeeAutomaticCutInPowerPlanRevisionV1(
+  plan: CoffeePowerPlanV1 | null | undefined,
+): string {
+  if (!plan?.bots) return "";
+  return Object.values(plan.bots)
+    .map((bot) => {
+      const interruptionCount = (bot.effects ?? []).filter(
+        (effect) => effect.type === "interruption",
+      ).length;
+      const obfuscationCount = (bot.effects ?? []).filter(
+        (effect) => effect.type === "speech_obfuscation",
+      ).length;
+      return `${bot.botId}:${interruptionCount}:${obfuscationCount}`;
+    })
+    .sort()
+    .join("|");
+}
+
+/**
+ * Remember a prepared automatic cut-in plan for one cache key. A null miss is
+ * stored so empty rosters do not rebuild every typewriter tick, but a later
+ * arrival changes the key and can still produce a cut-in.
+ */
+export function rememberCoffeeAutomaticCutInPreparedPlanV1(
+  cache: { current: CoffeeAutomaticCutInPreparedPlanCacheV1 | null },
+  cacheKey: string,
+  build: () => CoffeeAutomaticCutInPreparedPlanV1 | null,
+): CoffeeAutomaticCutInPreparedPlanV1 | null {
+  if (cache.current?.cacheKey === cacheKey) {
+    return cache.current.plan;
+  }
+  const plan = build();
+  cache.current = { cacheKey, plan };
+  return plan;
+}
+
 /** Play only the interrupter's lead-in until the server decides the floor. */
 export function coffeeInterrupterLeadPlanV1(
   plan: ListenerReactionPlanV1,
@@ -31,6 +105,17 @@ export function coffeeInterrupterLeadPlanV1(
     interruptedSpeakerCueSpeechEffect: undefined,
     interruptedSpeakerCuePlayback: undefined,
   };
+}
+
+/** After a cut-in, the next generated line belongs to whoever won the floor. */
+export function coffeeInterruptionContinueSpeakerBotIdV1(args: {
+  floorOutcome: CoffeeInterruptionEvent["floorOutcome"] | undefined;
+  interruptedBotId: string;
+  interrupterBotId: string;
+}): string {
+  return args.floorOutcome === "reclaim"
+    ? args.interruptedBotId
+    : args.interrupterBotId;
 }
 
 /** Build the yielding tail only when the server authoritatively chose yield. */

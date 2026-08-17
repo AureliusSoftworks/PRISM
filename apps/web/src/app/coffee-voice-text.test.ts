@@ -110,7 +110,7 @@ describe("Coffee voice text", () => {
     );
     assert.match(
       pageSource,
-      /const startCoffeeVoiceForReveal = async \( message: CoffeeConversationMessage, speakerBotId: string, revealDeliveryEpoch: number, \)[\s\S]*?const revealVoiceIsCurrent = \(\): boolean => coffeeRevealPreparationMayCommit\(\{ preparedEpoch: revealDeliveryEpoch, currentEpoch: coffeeRevealDeliveryEpochRef\.current,/u,
+      /const startCoffeeVoiceForReveal = async \( message: CoffeeConversationMessage, speakerBotId: string, revealDeliveryEpoch: number, \)[\s\S]*?const revealVoiceIsCurrent = \(\): boolean => coffeeVoiceSurfaceActiveRef\.current &&[\s\S]*?coffeeRevealPreparationMayCommit\(\{ preparedEpoch: revealDeliveryEpoch, currentEpoch: coffeeRevealDeliveryEpochRef\.current,/u,
     );
     assert.match(
       pageSource,
@@ -136,6 +136,21 @@ describe("Coffee voice text", () => {
     assert.match(
       pageSource,
       /startCoffeeVoiceForReveal\( pendingMessage, args\.speakerBotId, revealDeliveryEpoch, \)/u,
+    );
+  });
+
+  it("does not treat a cut-off Coffee voice ending as a finished table line", () => {
+    const liveVoice = pageSource.slice(
+      pageSource.indexOf("const startCoffeeVoiceForReveal = async"),
+      pageSource.indexOf("const startCoffeePlayerVoiceForReveal = async"),
+    );
+    assert.match(
+      liveVoice,
+      /coffeeRevealVoiceEndSealsTableLineV1\(\{[\s\S]{0,220}cutOffMessageId: coffeeCutOffRevealMessageIdRef\.current/u,
+    );
+    assert.match(
+      liveVoice,
+      /coffeeVoiceSurfaceActiveRef\.current &&/u,
     );
   });
 

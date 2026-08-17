@@ -211,7 +211,7 @@ describe("Coffee player response UI wiring", () => {
     );
     assert.match(
       pageSource,
-      /const transcriptMessagesWithInterruptions =\s*coffeeTranscriptMessagesWithInterruptions\(\{[\s\S]*?messages:\s*transcriptSourceMessages,[\s\S]*?const transcriptMessages = coffeeTranscriptVisibleMessages\(\s*transcriptMessagesWithInterruptions,/,
+      /const transcriptProjection = projectCoffeePublicTranscript\(\{[\s\S]*?messages:\s*transcriptSourceMessages,[\s\S]*?const transcriptMessages = transcriptProjection\.visibleRows;/,
     );
     assert.match(
       pageSource,

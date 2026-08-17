@@ -6,12 +6,17 @@ import type {
   CoffeePowerPlanV1,
   ListenerReactionPlanV1,
 } from "@localai/shared";
+import type { CoffeeAutomaticCutInPreparedPlanCacheV1 } from "./coffee-power-interruption.ts";
 import {
   coffeeAuthoritativeYieldTailPlanV1,
   coffeeAutomaticCutInCandidateV1,
+  coffeeAutomaticCutInPowerPlanRevisionV1,
+  coffeeAutomaticCutInPreparedPlanCacheKeyV1,
   coffeeDirectionalIrritationDeliveryForPlan,
+  coffeeInterruptionContinueSpeakerBotIdV1,
   coffeeInterrupterLeadPlanV1,
   coffeeInterruptionTriggerProgressV1,
+  rememberCoffeeAutomaticCutInPreparedPlanV1,
 } from "./coffee-power-interruption.ts";
 
 const plan: CoffeePowerPlanV1 = {
@@ -64,6 +69,25 @@ test("the interrupter lead strips the interrupted speaker tail", () => {
   assert.equal(lead.spokenCue, "Hold on.");
   assert.equal(lead.interruptedSpeakerCue, undefined);
   assert.equal(lead.interruptedSpeakerCuePlayback, undefined);
+});
+
+test("a reclaim cut-in continues the interrupted speaker, not the interrupter", () => {
+  assert.equal(
+    coffeeInterruptionContinueSpeakerBotIdV1({
+      floorOutcome: "reclaim",
+      interruptedBotId: "alice",
+      interrupterBotId: "tom",
+    }),
+    "alice",
+  );
+  assert.equal(
+    coffeeInterruptionContinueSpeakerBotIdV1({
+      floorOutcome: "yield",
+      interruptedBotId: "alice",
+      interrupterBotId: "tom",
+    }),
+    "tom",
+  );
 });
 
 test("an authoritative yield restores only the interrupted speaker tail", () => {
@@ -228,6 +252,14 @@ test("Coffee plays the interrupter lead before an authoritative yield tail", () 
   const interruption = source.slice(start, end);
 
   assert.ok(start >= 0 && end > start);
+  assert.match(
+    source,
+    /rememberCoffeeAutomaticCutInPreparedPlanV1\(\s*coffeeAutomaticCutInPreparedPlanRef/u,
+  );
+  assert.match(
+    source,
+    /rememberCoffeeAutomaticCutInPreparedPlanV1[\s\S]+prefetchCoffeeListenerReactionRef\.current\(leadPlan\)[\s\S]+if \(!preparedPlan\) return/u,
+  );
   assert.match(interruption, /buildBotCrosstalkListenerReactionPlanV1/u);
   assert.match(
     interruption,
@@ -259,11 +291,51 @@ test("Coffee plays the interrupter lead before an authoritative yield tail", () 
   );
   assert.match(
     interruption,
-    /const interruptionAudioHandoff = authoritativeYieldTailPlan[\s\S]{0,180}Promise\.resolve\(leadPlayback\)[\s\S]{0,240}playCoffeeListenerReactionRef\.current\(\s*authoritativeYieldTailPlan/u,
+    /const interruptionAudioHandoff = Promise\.resolve\(leadPlayback\)[\s\S]{0,220}if \(!authoritativeYieldTailPlan\) return;[\s\S]{0,120}playCoffeeListenerReactionRef\.current\(\s*authoritativeYieldTailPlan/u,
   );
   assert.match(
     interruption,
-    /continueCoffeeSessionRef\.current\([\s\S]{0,420}interruptionAudioHandoff/u,
+    /coffeeCutOffRevealMessageIdRef\.current = pendingMessage\.id/u,
+  );
+  assert.match(
+    interruption,
+    /coffeeRevealCompleteFnRef\.current = null/u,
+  );
+  assert.ok(
+    interruption.indexOf("coffeeCutOffRevealMessageIdRef.current = pendingMessage.id") <
+      interruption.indexOf("await prepareCoffeeCrosstalkRef.current(leadPlan)"),
+  );
+  assert.ok(
+    interruption.indexOf("cancelAnimationFrame(coffeeTypewriterRafRef.current)") <
+      interruption.indexOf("await prepareCoffeeCrosstalkRef.current(leadPlan)"),
+  );
+  assert.ok(
+    interruption.indexOf("coffeeCutOffRevealMessageIdRef.current = pendingMessage.id") <
+      interruption.indexOf("presentCoffeeListenerReaction("),
+  );
+  assert.match(
+    interruption,
+    /setCoffeePendingRevealConversation\(\(current\) => \{[\s\S]{0,520}content: cutoffSnippet/u,
+  );
+  assert.match(
+    source,
+    /const applyReveal = \(\) => \{[\s\S]{0,280}coffeeRevealLineIsCutOffV1\(/u,
+  );
+  assert.match(
+    source,
+    /if \(coffeeRevealLineIsCutOffV1\(\s*last\.id,\s*coffeeCutOffRevealMessageIdRef\.current,?\s*\)\) \{\s*return;/u,
+  );
+  assert.match(
+    source,
+    /Keep any cut-off message id so a late voice `onEnd` cannot dump the rest/u,
+  );
+  assert.match(
+    interruption,
+    /interruptionEvent\.floorOutcome === "reclaim"/u,
+  );
+  assert.match(
+    interruption,
+    /continueCoffeeSessionRef\.current\([\s\S]{0,420}continueSpeakerBotId[\s\S]{0,80}continueUserMessage[\s\S]{0,80}interruptionAudioHandoff/u,
   );
   assert.match(
     continuation,
@@ -378,5 +450,105 @@ test("bot-to-bot cut-ins surface spoken cue text and orphan-guard reveal voice",
   assert.match(
     source,
     /if \(!revealDeliveryIsCurrent\(\)\) \{[\s\S]{0,260}const voiceOwnedReveal =[\s\S]{0,220}voiceSynthesisAbortRef\.current\?\.abort\(\);[\s\S]{0,600}if \(voiceOwnedReveal\)[\s\S]{0,500}stopVoicePlaybackPreservingPreparedMode\([\s\S]{0,220}else \{[\s\S]{0,120}coffeeVoiceSeenMessageIdsRef\.current\.delete\(pendingMessage\.id\)/u,
+  );
+});
+
+test("automatic cut-in cache keys ignore candidate roster order", () => {
+  const left = coffeeAutomaticCutInPreparedPlanCacheKeyV1({
+    opportunityKey: "job-1:speaking",
+    interruptedBotId: "alice",
+    directlyAddressedBotId: null,
+    crossTalk: "pileup",
+    candidateBotIds: ["tom", "boris"],
+    powerPlanRevision: "boris:0:0|tom:1:0",
+  });
+  const right = coffeeAutomaticCutInPreparedPlanCacheKeyV1({
+    opportunityKey: "job-1:speaking",
+    interruptedBotId: "alice",
+    directlyAddressedBotId: null,
+    crossTalk: "pileup",
+    candidateBotIds: ["boris", "tom"],
+    powerPlanRevision: "boris:0:0|tom:1:0",
+  });
+
+  assert.equal(left, right);
+});
+
+test("a later arrival can still cut in after an empty-roster miss", () => {
+  const cacheBox: { current: CoffeeAutomaticCutInPreparedPlanCacheV1 | null } = {
+    current: null,
+  };
+  let builds = 0;
+  const emptyKey = coffeeAutomaticCutInPreparedPlanCacheKeyV1({
+    opportunityKey: "job-2:speaking",
+    interruptedBotId: "alice",
+    directlyAddressedBotId: null,
+    crossTalk: "pileup",
+    candidateBotIds: [],
+    powerPlanRevision: coffeeAutomaticCutInPowerPlanRevisionV1(plan),
+  });
+  const first = rememberCoffeeAutomaticCutInPreparedPlanV1(
+    cacheBox,
+    emptyKey,
+    () => {
+      builds += 1;
+      return null;
+    },
+  );
+  const second = rememberCoffeeAutomaticCutInPreparedPlanV1(
+    cacheBox,
+    emptyKey,
+    () => {
+      builds += 1;
+      return null;
+    },
+  );
+  const arrivalKey = coffeeAutomaticCutInPreparedPlanCacheKeyV1({
+    opportunityKey: "job-2:speaking",
+    interruptedBotId: "alice",
+    directlyAddressedBotId: null,
+    crossTalk: "pileup",
+    candidateBotIds: ["tom"],
+    powerPlanRevision: coffeeAutomaticCutInPowerPlanRevisionV1(plan),
+  });
+  const prepared = {
+    candidate: coffeeAutomaticCutInCandidateV1({
+      candidateBotIds: ["tom"],
+      interruptedBotId: "alice",
+      socialByBotId: undefined,
+      powerPlan: plan,
+      crossTalk: "pileup",
+    }),
+    leadPlan: coffeeInterrupterLeadPlanV1(deterministicCrosstalkPlan),
+    triggerProgress: 0.35,
+    minimumVisibleWords: 4,
+    mustInterruptDuringTurn: false,
+    unconditionalInterruption: false,
+  };
+  assert.ok(prepared.candidate);
+  const third = rememberCoffeeAutomaticCutInPreparedPlanV1(
+    cacheBox,
+    arrivalKey,
+    () => {
+      builds += 1;
+      return {
+        candidate: prepared.candidate!,
+        leadPlan: prepared.leadPlan,
+        triggerProgress: prepared.triggerProgress,
+        minimumVisibleWords: prepared.minimumVisibleWords,
+        mustInterruptDuringTurn: prepared.mustInterruptDuringTurn,
+        unconditionalInterruption: prepared.unconditionalInterruption,
+      };
+    },
+  );
+
+  assert.equal(first, null);
+  assert.equal(second, null);
+  assert.equal(builds, 2);
+  assert.equal(third?.candidate.botId, "tom");
+  assert.notEqual(emptyKey, arrivalKey);
+  assert.equal(
+    coffeeAutomaticCutInPowerPlanRevisionV1(plan),
+    "tom:1:0",
   );
 });

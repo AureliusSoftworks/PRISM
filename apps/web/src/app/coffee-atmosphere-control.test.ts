@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import test from "node:test";
 
 const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
@@ -45,9 +45,15 @@ test("Coffee Jazz is a wired local-only atmosphere control with stations", () =>
   );
 });
 
-test("Coffee thinking has a distinct calculation reticle", () => {
-  assert.match(cssSource, /\.zenLiveBotPresenceThinkingGlyphAnchor::before/u);
-  assert.match(cssSource, /coffeeThinkingReticle/u);
+test("Coffee thinking keeps only its authored screen spinner", () => {
+  assert.match(source, /showThinkingSpinner=\{seatThinkingVisualActive\}/u);
+  assert.doesNotMatch(source, /coffeeSeatThinkingIndicator/u);
+  assert.doesNotMatch(cssSource, /coffeeSeatThinkingIndicator/u);
+  assert.doesNotMatch(
+    cssSource,
+    /\.zenLiveBotPresenceThinkingGlyphAnchor::(?:before|after)/u,
+  );
+  assert.doesNotMatch(cssSource, /coffeeThinkingReticle/u);
 });
 
 test("Coffee Jazz preference stays outside CoffeeSessionSettings persistence", () => {
@@ -74,6 +80,27 @@ test("Coffee Jazz preference stays outside CoffeeSessionSettings persistence", (
   );
 });
 
+test("every new Coffee Group starts with one random bundled song", () => {
+  assert.match(source, /randomCoffeeJazzStationId/u);
+  assert.match(
+    source,
+    /const chooseCoffeeJazzStationForNewGroup = useCallback[\s\S]{0,360}\[groupId\]: stationId/u,
+  );
+  assert.equal(
+    source.match(/chooseCoffeeJazzStationForNewGroup\(response\.group\.id\);/gu)
+      ?.length,
+    3,
+  );
+  assert.match(
+    source,
+    /const openCoffeeGroup[\s\S]{0,900}previous\.stationIdByGroupId\[group\.id\] \?\? previous\.stationId/u,
+  );
+  assert.match(
+    source,
+    /\[coffeeSelectedGroup\.id\]: stationId/u,
+  );
+});
+
 test("Coffee shares tactful foley and cup-synchronized audio with Signal", () => {
   assert.match(source, /<SessionAtmosphereLayer/u);
   assert.match(source, /coffeeCupRootRef=\{/u);
@@ -88,44 +115,68 @@ test("Coffee shares tactful foley and cup-synchronized audio with Signal", () =>
   );
 });
 
-test("Coffee idle presence is richer, local, and yields to real table activity", () => {
+test("Coffee foley stays dense under live speech while idle vocal Foley yields", () => {
   assert.match(source, /ambientFoleyUrls=\{COFFEE_AMBIENT_FOLEY_URLS\}/u);
   assert.match(source, /ambientFoleyProfile=\{COFFEE_AMBIENT_FOLEY_PROFILE\}/u);
+  assert.match(source, /deferFoley=\{\s*coffeeReplayPlaying\s*\}/u);
   assert.match(
     source,
     /ambientBotVocalizationProfile=\{\s*COFFEE_AMBIENT_BOT_VOCALIZATION_PROFILE\s*\}/u,
   );
   assert.match(
     source,
-    /deferFoley=\{\s*coffeeTurnRhythmState !== "idle" \|\| coffeeReplayPlaying\s*\}/u,
-  );
-  assert.match(
-    source,
     /deferBotVocalization=\{\s*coffeeTurnRhythmState !== "idle" \|\| coffeeReplayPlaying\s*\}/u,
   );
-  assert.match(source, /coffeeAmbientPresenceWord\(/u);
-  assert.match(source, /engine: "builtin"/u);
-  assert.match(source, /explicitOnlineContext: false/u);
-  assert.match(source, /channel: "presence"/u);
-  assert.match(source, /releaseRealtimeVoiceAudio\("presence", 140\)/u);
+  assert.match(atmosphereSource, /shouldDeferFoley/u);
+  assert.match(atmosphereSource, /timer = window\.setTimeout\(scheduleFoley, 4_000\)/u);
+});
+
+test("ambient listener chatter reuses reaction ownership without transcription or providers", () => {
+  assert.match(source, /coffeeAmbientListenerAcknowledgementPlan\(/u);
+  assert.match(source, /presentCoffeeListenerReaction\(/u);
+  assert.match(source, /coffeeAmbientListenerCandidateIsEligible\(/u);
+  assert.match(source, /coffeeAmbientListenerPlanIsLocal\(plan\)/u);
+  assert.match(
+    source,
+    /plan && coffeeAmbientListenerPlanIsLocal\(plan\)[\s\S]{0,80}\? "builtin"/u,
+  );
+  assert.match(source, /listenerGain = coffeeAmbientListenerPlanIsLocal/u);
+  assert.match(source, /stereoPan: listenerStereoPan/u);
+  assert.match(source, /seatListenerReactionSpeaking/u);
   assert.doesNotMatch(
     source,
-    /coffeeAmbientPresenceWord[\s\S]{0,500}\/api\/messages/u,
+    /coffeeAmbientListenerAcknowledgementPlan[\s\S]{0,1200}\/api\/messages/u,
   );
 });
 
-test("Coffee Jazz routes through local-only output and skips the master tap", () => {
+test("Coffee Jazz and its environmental loop route locally outside the master", () => {
   assert.match(captureSource, /export function prismLocalOnlyAudioOutputNode/u);
   assert.match(
     captureSource,
     /Speakers only — never connected to the faithful-master capture tap/u,
   );
   assert.match(atmosphereSource, /backgroundRecordable/u);
+  assert.match(atmosphereSource, /grainRecordable/u);
   assert.match(atmosphereSource, /prismLocalOnlyAudioOutputNode/u);
   assert.match(layerSource, /backgroundRecordable/u);
+  assert.match(layerSource, /grainRecordable/u);
   assert.match(source, /backgroundRecordable=\{false\}/u);
+  assert.match(source, /grainRecordable=\{false\}/u);
   assert.match(source, /backgroundTone="warm-low"/u);
   assert.match(source, /coffeeJazzBackgroundUrl\(coffeeJazzAtmosphere\)/u);
+  assert.match(source, /grainUrl=\{/u);
+  assert.match(source, /COFFEE_SHOP_ENVIRONMENT_URL/u);
+  assert.match(source, /coffeeShopEnvironmentMix\(coffeeForegroundVoiceActive\)/u);
+  assert.match(source, /mixTransitionMs=\{COFFEE_SHOP_ENVIRONMENT_DUCK_MS\}/u);
+  assert.match(source, /lifecycleTransitionMs=\{450\}/u);
+  assert.ok(
+    statSync(
+      new URL(
+        "../../public/audio/coffee/ambience/coffee-shop-foley-forest-loop.mp3",
+        import.meta.url,
+      ),
+    ).size > 400_000,
+  );
 });
 
 test("Coffee master replay keeps jazz overlay while silencing recordable atmosphere", () => {

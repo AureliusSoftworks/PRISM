@@ -29,6 +29,7 @@ import {
   coffeeTranscriptVisibleMessages,
   collectCoffeeReplayActionsForBot,
   formatCoffeeReviewClipboardText,
+  projectCoffeePublicTranscript,
   sanitizeCoffeeActionForBot,
 } from "./coffee-replay.ts";
 import { createBotIdentityMirrorStateV1 } from "@localai/shared";
@@ -869,7 +870,7 @@ describe("coffee replay helpers", () => {
     );
   });
 
-  it("keeps provenance-marked social silence visible and holds it in replay", () => {
+  it("keeps provenance-marked social silence stage-only and holds it in replay", () => {
     const socialSilence = {
       v: 1 as const,
       name: "socialSilence" as const,
@@ -886,8 +887,57 @@ describe("coffee replay helpers", () => {
       socialSilence,
     };
 
-    assert.deepEqual(coffeeTranscriptVisibleMessages([message]), [message]);
+    assert.deepEqual(coffeeTranscriptVisibleMessages([message]), []);
     assert.equal(coffeeReplayCompletionHoldMs(message, false), 1_600);
+    const publicCopy = formatCoffeeReviewClipboardText({ messages: [message] });
+    assert.doesNotMatch(publicCopy, /(?:Bot|Assistant):\s*\.\.\./u);
+    assert.doesNotMatch(publicCopy, /Visible transcript:[\s\S]{0,40}\.\.\./u);
+  });
+
+  it("projects one public transcript and categorized developer accounting", () => {
+    const projection = projectCoffeePublicTranscript({
+      messages: [
+        { id: "user", role: "user", content: "Hello." },
+        {
+          id: "silence",
+          role: "assistant",
+          content: "...",
+          socialSilence: {
+            v: 1,
+            name: "socialSilence",
+            provenance: "social",
+            mode: "coffee",
+            seed: "silence",
+            volleyTurn: 1,
+            holdMs: 1_200,
+          },
+        },
+        {
+          id: "reply",
+          role: "assistant",
+          content: "...",
+          coffeeInterruption: {
+            kind: "botInterruptsBot",
+            interruptedBotId: "first",
+            interrupterBotId: "second",
+            pauseBeat: true,
+            publicInterrupterCue: "Wait—",
+            socialConsequences: [],
+          },
+        },
+        { id: "system", role: "system", content: "Session synopsis: Done." },
+      ],
+    });
+
+    assert.equal(
+      projection.visibleRows.some((message) => message.id === "silence"),
+      false,
+    );
+    assert.equal(projection.developerCounts.visibleMessages, 3);
+    assert.equal(projection.developerCounts.storedEvents, 4);
+    assert.equal(projection.developerCounts.silence, 1);
+    assert.equal(projection.developerCounts.interruptionSegments, 1);
+    assert.equal(projection.developerCounts.systemRows, 1);
   });
 
   it("hides stale account-metadata synopsis rows from Table talk", () => {
@@ -1232,6 +1282,39 @@ describe("coffee replay helpers", () => {
       "sets the cup down",
     ]);
     assert.equal(sanitizeCoffeeActionForBot('"strokes beard" thoughtfully'), "strokes beard thoughtfully");
+  });
+
+  it("does not lift reclaim speech into the Coffee seat action badge", () => {
+    const hermione = {
+      id: "reclaim-1",
+      role: "assistant" as const,
+      botName: "Hermione Granger",
+      content:
+        "*Let me finish—Dumbledore knew that curse would end him, and he cast the Patronus anyway* That's the actual proof, not just the standing still.",
+    };
+    const harry = {
+      id: "cut-1",
+      role: "assistant" as const,
+      botName: "Harry Potter",
+      content: "*The Patronus was a choi—*",
+      coffeeStageAction: {
+        v: 1 as const,
+        name: "coffeeStageAction" as const,
+        source: "llm" as const,
+        category: "gesture" as const,
+        action: "Let me finish—Dumbledore knew that curse would end him",
+        seed: "reclaim-leak",
+      },
+    };
+
+    assert.deepEqual(coffeeActionsForMessage(hermione), []);
+    assert.deepEqual(coffeeActionsForMessage(harry), []);
+    assert.equal(
+      sanitizeCoffeeActionForBot(
+        "Let me finish—Dumbledore knew that curse would end him, and he cast the Patronus anyway",
+      ),
+      "",
+    );
   });
 
   it("removes internal bot mention hrefs from Coffee action text", () => {

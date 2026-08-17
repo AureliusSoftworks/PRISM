@@ -14,21 +14,31 @@ const pageCss = readFileSync(
 ).replace(/\s+/gu, " ");
 
 describe("Coffee group dashboard composer routing", () => {
-  it("renders a Start Session action instead of an editable composer", () => {
+  it("routes group home through the compact Table Setup desk and one footer", () => {
+    assert.match(pageSource, /<h2>Table Setup<\/h2>/);
+    assert.match(pageSource, /Set the table/);
+    assert.match(pageSource, /← Back to group/);
+    assert.match(pageSource, /coffeeTableSetupFooter/);
+    assert.match(pageSource, /coffeeTableSetupPrimaryButton/);
+    assert.match(pageSource, /coffeeTableGuestSummary/);
+    assert.match(pageSource, /coffeeTableTopicSummary/);
+    assert.match(pageSource, /coffeeTableVisitSummary/);
+    assert.match(pageSource, /coffeeTablePresetSummary/);
+    assert.match(pageSource, /more needed/);
+    assert.equal(
+      (
+        pageSource.match(
+          /onClick=\{\(\) => void startCoffeeSessionFromSelectedSetup\(\)\}/g,
+        ) ?? []
+      ).length,
+      1,
+    );
     assert.match(
       pageSource,
-      /coffeeSessionPhase === "selecting" && !conversationActive && coffeeSelectedGroup !== null/,
+      /coffeeSelectedGroup !== null\s*\? null\s*:\s*coffeeChromePolicy\.reviewActive/,
     );
-    assert.match(pageSource, /data-coffee-group-start-composer="true"/);
-    assert.match(
-      pageSource,
-      /`Start session with \$\{coffeeGroupStartCount\}`/,
-    );
-    assert.match(pageSource, /void startCoffeeSessionFromSelectedSetup\(\);/);
-    assert.match(
-      pageSource,
-      /coffeeGroupStartComposerVisible\s*\? renderCoffeeGroupStartComposer\(\)/,
-    );
+    assert.doesNotMatch(pageSource, /data-coffee-group-start-composer=/);
+    assert.doesNotMatch(pageSource, /SessionThresholdCard/);
   });
 
   it("keeps the typed topic composer behind an active Coffee conversation", () => {

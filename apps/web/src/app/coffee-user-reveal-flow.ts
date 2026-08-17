@@ -49,6 +49,31 @@ export function coffeeRevealPreparationMayCommit(args: {
   return args.preparedEpoch === args.currentEpoch;
 }
 
+/** True when this table line was cut off and must not finish typing or seal. */
+export function coffeeRevealLineIsCutOffV1(
+  messageId: string | null | undefined,
+  cutOffMessageId: string | null | undefined,
+): boolean {
+  const id = messageId?.trim();
+  if (!id) return false;
+  return cutOffMessageId?.trim() === id;
+}
+
+/**
+ * A cut-off line must not seal as if the speaker finished. Voice `onEnd` after
+ * an abort would otherwise dump the rest of the table text.
+ */
+export function coffeeRevealVoiceEndSealsTableLineV1(args: {
+  messageId: string;
+  activeMessageId: string | null | undefined;
+  cutOffMessageId: string | null | undefined;
+}): boolean {
+  const messageId = args.messageId.trim();
+  if (!messageId) return false;
+  if (coffeeRevealLineIsCutOffV1(messageId, args.cutOffMessageId)) return false;
+  return args.activeMessageId?.trim() === messageId;
+}
+
 export function coffeeArrivalAutoplayCanScheduleNow(
   state: CoffeeUserRevealFlowState,
 ): boolean {

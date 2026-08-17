@@ -19,6 +19,7 @@ describe("Coffee empty-cup behavior", () => {
       pageSource,
       /data-cup-empty-attempt=\{\s*emptyCupAttemptActive \? "true" : undefined\s*\}/u,
     );
+    assert.match(pageSource, /!coffeeSkipEmptyCupVisual/u);
   });
 
   it("uses a short reach, returns the cup, and frowns after realization", () => {

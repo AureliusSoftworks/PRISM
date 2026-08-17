@@ -565,15 +565,15 @@ describe("Coffee seat arrival CSS", () => {
     );
   });
 
-  it("keeps shared face parts fixed while Default uses visemes and custom mouths stay authored", () => {
+  it("keeps shared face parts fixed while Default yields to visemes and authored mouth modes stay intact", () => {
     assert.match(coffeeSeatPlateEmojiSource, /const hasCustomMouth =/);
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /const renderedFaceMouthCharacter = hasCustomMouth/,
+      /const renderedFaceMouthCharacter =\s*mouthMotionEnabled\s*&&\s*hasCustomMouth\s*&&\s*effectiveTalking\s*&&\s*normalizedFaceMouthAnimation === "none"\s*\?\s*null\s*:\s*normalizedFaceMouthCharacter/,
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /!hasCustomMouth &&\s*isTalking &&/,
+      /!hasCustomMouth &&\s*effectiveTalking &&/,
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
@@ -776,7 +776,7 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /part === "mouth" && customSpeechGlyph\s*\? customSpeechGlyph/,
+      /coffeeSeatRenderedMouthGlyph\(\{[\s\S]{0,180}customSpeechGlyph,[\s\S]{0,180}renderedFaceMouthCharacter/,
     );
     assert.match(
       pageSource,
@@ -788,7 +788,7 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /const normalizedFaceMouthAnimation = fullMotion\s*\? configuredFaceMouthAnimation\s*:\s*DEFAULT_BOT_FACE_GLYPH_ANIMATION/,
+      /const normalizedFaceMouthAnimation = mouthMotionEnabled\s*\? configuredFaceMouthAnimation\s*:\s*DEFAULT_BOT_FACE_GLYPH_ANIMATION/,
     );
   });
 
@@ -856,24 +856,31 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       phosphorPixelGlyphSource,
-      /\[content, enabled, rasterKey\]/,
+      /\[binaryAlpha, content, enabled, rasterKey\]/,
     );
   });
 
   it("keeps the authored CRT face glow live through talking", () => {
-    assert.match(coffeeSeatPlateEmojiSource, /data-crt-glyph-layer="true"/);
+    assert.match(coffeeSeatPlateEmojiSource, /<CrtPixelTextGlyph/);
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /data-coffee-plate-emoji-part=\{part\}[\s\S]*data-crt-glyph-layer="true"[\s\S]*data-crt-glyph-content=\{renderedGlyph\}/,
+      /data-coffee-plate-emoji-part=\{part\}[\s\S]{0,1200}<CrtPixelTextGlyph[\s\S]{0,300}content=\{renderedGlyph\}/,
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /data-crt-glyph-content=\{thinkingSpinnerGlyph\}/,
+      /<CrtPixelTextGlyph[\s\S]{0,180}content=\{thinkingSpinnerGlyph\}/,
     );
-    assert.match(coffeeSeatPlateEmojiSource, /data-crt-glyph-content="\?"/);
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /data-crt-glyph-content=\{renderedGlyph\}/,
+      /<CrtPixelTextGlyph[\s\S]{0,180}content="\?"/,
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /<CrtPixelTextGlyph[\s\S]{0,300}content=\{renderedGlyph\}/,
+    );
+    assert.match(
+      phosphorPixelGlyphSource,
+      /data-crt-glyph-layer="true"[\s\S]{0,120}data-crt-glyph-content=\{content\}/,
     );
     assert.doesNotMatch(
       coffeeSeatPlateEmojiSource,
@@ -2118,7 +2125,7 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       pageSource,
-      /: coffeeSetupComposerVisible\s*\?\s*renderCoffeeSetupComposer\(\)\s*:\s*coffeeGroupStartComposerVisible\s*\?\s*renderCoffeeGroupStartComposer\(\)\s*:\s*coffeeChromePolicy\.reviewActive\s*\?\s*null\s*:\s*renderShellComposer\(\{/,
+      /: coffeeSetupComposerVisible\s*\?\s*renderCoffeeSetupComposer\(\)\s*:\s*coffeeSelectedGroup !== null\s*\?\s*null\s*:\s*coffeeChromePolicy\.reviewActive\s*\?\s*null\s*:/,
     );
 
     const setupButtonRule = ruleForExactSelector(".coffeeSetupComposerButton");
@@ -2834,5 +2841,39 @@ describe("Coffee seat arrival CSS", () => {
       liveQuestionRule,
       /font-size:\s*var\(\s*--zen-live-bot-avatar-question-glyph-size,\s*27\.5cqw\s*\)\s*;/,
     );
+  });
+
+  it("keeps Coffee interrupt reactions on cheap compositor transforms", () => {
+    const keyframesBody = (name: string) => {
+      const start = css.indexOf(`@keyframes ${name}`);
+      assert.ok(start >= 0, `Missing @keyframes ${name}`);
+      const next = css.indexOf("@keyframes", start + 1);
+      return next === -1 ? css.slice(start) : css.slice(start, next);
+    };
+
+    const nod = keyframesBody("coffeeListenerNod");
+    const lean = keyframesBody("coffeeListenerLeanIn");
+    assert.match(nod, /translate3d/);
+    assert.match(lean, /translate3d/);
+    assert.doesNotMatch(nod, /scaleY|scale\(/);
+    assert.doesNotMatch(lean, /scaleY|scale\(/);
+
+    const clusterRule = ruleForExactSelector(
+      '.coffeeSeat[data-coffee-listener-reaction="true"] .coffeeSeatCluster',
+    );
+    assert.match(clusterRule, /isolation:\s*auto/);
+    assert.match(clusterRule, /transition:\s*none/);
+
+    const liveClusterRule = ruleForExactSelector(".coffeeSeatCluster");
+    assert.match(liveClusterRule, /isolation:\s*auto/);
+    assert.match(liveClusterRule, /transition:\s*none/);
+
+    const plateRule = ruleForExactSelector(
+      '.coffeeSeat[data-coffee-listener-reaction="true"] .coffeeSeatPlate',
+    );
+    assert.match(plateRule, /filter:\s*none/);
+    assert.match(plateRule, /isolation:\s*auto/);
+
+    assert.match(css, /\.coffeeSeatPlate\s*\{[^}]*isolation:\s*auto/u);
   });
 });
