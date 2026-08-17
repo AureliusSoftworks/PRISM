@@ -1,8 +1,13 @@
-import { resolve, sep } from "node:path";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join, resolve, sep } from "node:path";
 import {
   applyLocalVoiceSpeechprintToIpa,
   applyVoiceAccentFieldToIpa,
+  builtinAccentRealizationBlend,
+  enforceAmericanRhoticIpa,
   localVoicePronunciationOverrideIsActive,
+  type BuiltinAccentRealizationBlendV1,
   localVoiceSpeechprintIsActive,
   normalizeBotAudioVoiceProfileV1,
   normalizeLocalVoiceSpeechprintV1,
@@ -101,9 +106,56 @@ export async function generatePrismVoicePackWaveInProcess(args: {
         targetIpa: pronunciation.targetIpa,
         tts,
         options,
+        // Style dominates phoneme tokens for coda R, so a cross-region accent
+        // additionally shades this utterance's style toward the target region.
+        blend: builtinAccentRealizationBlend({
+          engineVoiceId: pronunciation.engineVoiceId,
+          targetLocale: pronunciation.targetLocale,
+        }),
       })
     : await tts.generate(pronunciation.sourceText, options);
   return Buffer.from(audio.toWav());
+}
+
+let kokoroVoicesDirCache: string | null | undefined;
+
+function kokoroVoicesDirectory(): string | null {
+  if (kokoroVoicesDirCache !== undefined) return kokoroVoicesDirCache;
+  try {
+    // The engine resolves voice styles from its own package layout
+    // (`dist/../voices`); mirror that so no network path can ever be involved.
+    const requireFromHere = createRequire(import.meta.url);
+    kokoroVoicesDirCache = join(
+      dirname(requireFromHere.resolve("kokoro-js")),
+      "..",
+      "voices",
+    );
+  } catch {
+    kokoroVoicesDirCache = null;
+  }
+  return kokoroVoicesDirCache;
+}
+
+const builtinVoiceStyleCache = new Map<string, Float32Array>();
+
+function builtinVoiceStyle(engineVoiceId: string): Float32Array | null {
+  if (!/^[a-z]{2}_[a-z]+$/u.test(engineVoiceId)) return null;
+  const cached = builtinVoiceStyleCache.get(engineVoiceId);
+  if (cached) return cached;
+  const voicesDir = kokoroVoicesDirectory();
+  if (!voicesDir) return null;
+  try {
+    const bin = readFileSync(join(voicesDir, `${engineVoiceId}.bin`));
+    const style = new Float32Array(
+      bin.buffer,
+      bin.byteOffset,
+      Math.floor(bin.byteLength / 4),
+    );
+    builtinVoiceStyleCache.set(engineVoiceId, style);
+    return style;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -263,8 +315,15 @@ async function buildTargetIpa(args: {
   const phonemes: string[] = [];
   for (const part of parts) {
     if (!part.text.trim()) continue;
-    const ipa = await phonemizeEnglish(part.text, args.locale);
-    if (!ipa) continue;
+    const phonemized = await phonemizeEnglish(part.text, args.locale);
+    if (!phonemized) continue;
+    // Hard-R enforcement is base normalization, not accent styling: it runs on
+    // every part — protected ranges included — whenever the target base is
+    // en-US, mirroring how the base locale itself applies to protected parts.
+    const ipa =
+      args.locale === "en-GB"
+        ? phonemized
+        : enforceAmericanRhoticIpa(phonemized).ipa;
     phonemes.push(
       part.protected
         ? ipa
@@ -289,6 +348,7 @@ async function generateTargetIpaAudio(args: {
   targetIpa: string;
   tts: import("kokoro-js").KokoroTTS;
   options: NonNullable<Parameters<import("kokoro-js").KokoroTTS["generate"]>[1]>;
+  blend?: BuiltinAccentRealizationBlendV1 | null;
 }): Promise<Awaited<ReturnType<import("kokoro-js").KokoroTTS["generate"]>>> {
   if (
     typeof args.tts.tokenizer !== "function" ||
@@ -302,5 +362,81 @@ async function generateTargetIpaAudio(args: {
   const { input_ids } = args.tts.tokenizer(args.targetIpa, {
     truncation: true,
   });
+  if (args.blend) {
+    const blended = await generateBlendedStyleAudio({
+      input_ids,
+      tts: args.tts,
+      voice: String(args.options.voice ?? ""),
+      blend: args.blend,
+    });
+    if (blended) return blended;
+    // A missing style surface falls back to the plain voice: speech keeps
+    // working and the accent still carries the target IPA.
+  }
   return args.tts.generate_from_ids(input_ids, args.options);
+}
+
+function builtinVoiceStyleGroupMean(
+  engineVoiceIds: readonly string[],
+  offset: number,
+): Float64Array | null {
+  if (engineVoiceIds.length === 0) return null;
+  const mean = new Float64Array(256);
+  for (const engineVoiceId of engineVoiceIds) {
+    const style = builtinVoiceStyle(engineVoiceId);
+    if (!style || style.length < offset + 256) return null;
+    for (let index = 0; index < 256; index += 1) {
+      mean[index] += style[offset + index]!;
+    }
+  }
+  for (let index = 0; index < 256; index += 1) {
+    mean[index] /= engineVoiceIds.length;
+  }
+  return mean;
+}
+
+/**
+ * Reproduces the pinned Kokoro 1.2.1 style path (256-float row selected by
+ * token count) with one change: the row is translated by the accent
+ * direction — mean(target-region voices) minus mean(native-region voices).
+ * A uniform translation moves the accent while preserving each voice's
+ * distance from every other voice, so bots keep distinct voices. Tokens and
+ * pacing are untouched.
+ */
+async function generateBlendedStyleAudio(args: {
+  input_ids: ReturnType<import("kokoro-js").KokoroTTS["tokenizer"]>["input_ids"];
+  tts: import("kokoro-js").KokoroTTS;
+  voice: string;
+  blend: BuiltinAccentRealizationBlendV1;
+}): Promise<Awaited<ReturnType<import("kokoro-js").KokoroTTS["generate"]>> | null> {
+  const model = (args.tts as unknown as {
+    model?: (inputs: Record<string, unknown>) => Promise<{
+      waveform: { data: Float32Array };
+    }>;
+  }).model;
+  if (typeof model !== "function") return null;
+  const baseStyle = builtinVoiceStyle(args.voice);
+  if (!baseStyle) return null;
+  const tokenCount = Math.min(
+    Math.max((args.input_ids.dims.at(-1) ?? 2) - 2, 0),
+    509,
+  );
+  const offset = 256 * tokenCount;
+  if (baseStyle.length < offset + 256) return null;
+  const toward = builtinVoiceStyleGroupMean(args.blend.towardEngineVoiceIds, offset);
+  const away = builtinVoiceStyleGroupMean(args.blend.awayEngineVoiceIds, offset);
+  if (!toward || !away) return null;
+  const weight = Math.max(0, Math.min(2, args.blend.weight));
+  const mixed = new Float32Array(256);
+  for (let index = 0; index < 256; index += 1) {
+    mixed[index] =
+      baseStyle[offset + index]! + weight * (toward[index]! - away[index]!);
+  }
+  const { Tensor, RawAudio } = await import("@huggingface/transformers");
+  const { waveform } = await model({
+    input_ids: args.input_ids,
+    style: new Tensor("float32", mixed, [1, 256]),
+    speed: new Tensor("float32", [1], [1]),
+  });
+  return new RawAudio(waveform.data, 24_000);
 }

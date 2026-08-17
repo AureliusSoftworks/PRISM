@@ -125,7 +125,7 @@ describe("built-in English audio", () => {
     );
     assert.equal(
       americanTarget.targetIpa,
-      "pˈiːɾɚ pˈaɪpɚ pˈɪkt ɐ pˈɛk ʌv pˈɪkəld pˈɛpɚz",
+      "pˈiːɾəɹ pˈaɪpəɹ pˈɪkt ɐ pˈɛk ʌv pˈɪkəld pˈɛpəɹz",
     );
     assert.equal(nativeBritish.targetIpa, britishTarget.targetIpa);
     assert.equal(nativeAmerican.targetIpa, americanTarget.targetIpa);
@@ -198,6 +198,42 @@ describe("built-in English audio", () => {
     assert.equal(plan.targetIpa, sharedProjection.ipa);
     assert.equal(plan.targetLocale, "en-GB");
     assert.equal(plan.voiceLocale, "en-US");
+  });
+
+  it("enforces hard American Rs on a stubborn British base voice", async () => {
+    const plan = await preparePrismVoicePackPronunciation({
+      text: "Her early birthday work turned out first.",
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        baseVoiceId: "voice-4",
+        accentDefinitionId: "american-english",
+      },
+    });
+    assert.equal(plan.voiceLocale, "en-GB");
+    assert.equal(plan.targetLocale, "en-US");
+    // Every NURSE vowel carries an explicit ɹ token the voice cannot skip;
+    // none of espeak's non-rhotic spellings (ɜː, ɚ, ːɹ) survive.
+    assert.equal(
+      plan.targetIpa,
+      "hɜɹ ˈɜɹli bˈɜɹθdeɪ wˈɜɹk tˈɜɹnd ˈaʊt fˈɜɹst",
+    );
+    assert.doesNotMatch(plan.targetIpa ?? "", /ɜː|ɚ|ːɹ/u);
+  });
+
+  it("keeps regional American pins on the rhotic en-US base for British voices", async () => {
+    const plan = await preparePrismVoicePackPronunciation({
+      text: "Park the car forever.",
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        baseVoiceId: "voice-4",
+        accentDefinitionId: "texas-english",
+        // A stale saved base must not drag a Texas pin back to en-GB.
+        pronunciationBase: "en-GB",
+      },
+    });
+    assert.equal(plan.voiceLocale, "en-GB");
+    assert.equal(plan.targetLocale, "en-US");
+    assert.equal(plan.targetIpa, "pˈɑɹk ðə kˈɑɹ fəɹˈɛvəɹ");
   });
 
   it("parses installed macOS voices and exposes English choices", () => {
@@ -362,6 +398,23 @@ describe("built-in English audio", () => {
         speechprintInfluence: "indian-english",
         speechprintStrength: "balanced",
         speechprintVariationSeed: "runtime-qualification",
+      },
+    });
+    assert.equal(wave.subarray(0, 4).toString("ascii"), "RIFF");
+    assert.equal(wave.subarray(8, 12).toString("ascii"), "WAVE");
+    assert.ok(wave.length > 44);
+  });
+
+  it("renders a hard-R American pin on a British voice through the blended style row", {
+    skip: !builtinEnglishAvailable(),
+  }, async () => {
+    const wave = await generateBuiltinEnglishWave({
+      text: "Her early work turned out first.",
+      profile: {
+        v: 2,
+        enabled: true,
+        baseVoiceId: "voice-4",
+        accentDefinitionId: "american-english",
       },
     });
     assert.equal(wave.subarray(0, 4).toString("ascii"), "RIFF");

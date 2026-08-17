@@ -457,7 +457,7 @@ describe("voice Phase 1 boundary", () => {
     assert.equal(requestBody?.model_id, "eleven_v3");
     assert.equal(
       requestBody?.text,
-      "[German accent] [hushed] [measured] \"/zə dˈoːɹ ɪz ɔːlɹˌɛdi ˈoʊpən/\".",
+      "[German accent] [hushed] [measured] \"/zə dˈɔːɹ ɪz ɔːlɹˌɛdi ˈoʊpən/\".",
     );
     assert.equal(request.text, text);
     assert.doesNotMatch(requestBody?.text as string, /warmly/u);
@@ -471,7 +471,7 @@ describe("voice Phase 1 boundary", () => {
         nativeAccent: "British",
         accentDefinitionId: "american-english",
         expectedText:
-          "[American accent] \"/pˈiːɾɚ pˈaɪpɚ pˈɪkt ɐ pˈɛk ʌv pˈɪkəld pˈɛpɚz/\".",
+          "[American accent] \"/pˈiːɾəɹ pˈaɪpəɹ pˈɪkt ɐ pˈɛk ʌv pˈɪkəld pˈɛpəɹz/\".",
       },
       {
         voiceId: "american-premium-voice",
@@ -570,7 +570,7 @@ describe("voice Phase 1 boundary", () => {
 
     assert.equal(
       requestBody?.text,
-      "[German accent] \"/wˈɔltɚ vˈeɪts/\".",
+      "[German accent] \"/wˈɔltəɹ vˈeɪts/\".",
     );
   });
 
@@ -890,10 +890,10 @@ describe("voice Phase 1 boundary", () => {
     assert.match(requestedUrl, /british-premium-voice\/with-timestamps/u);
     assert.equal(
       providerText,
-      "[American accent] [hushed] [sighs] \"/pˈiːɾɚ pˈaɪpɚ pˈɪkt ɐ pˈɛk ʌv pˈɪkəld pˈɛpɚz/\". [laughs]",
+      "[American accent] [hushed] [sighs] \"/pˈiːɾəɹ pˈaɪpəɹ pˈɪkt ɐ pˈɛk ʌv pˈɪkəld pˈɛpəɹz/\". [laughs]",
     );
     assert.equal(speech.alignment?.characters.join(""), spokenText);
-    assert.doesNotMatch(speech.alignment?.characters.join("") ?? "", /[\/\[\]ˈɾɚ]/u);
+    assert.doesNotMatch(speech.alignment?.characters.join("") ?? "", /[\/\[\]ˈɾɚɹ]/u);
     assert.equal(request.text, sourceText);
   });
 
