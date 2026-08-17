@@ -346,15 +346,15 @@ describe("Pronunciation Atlas", () => {
     // 24px on a 640x320 world pad must be at least 24px apart inside some
     // lens containing both. Same-point variant groups (London) are excluded:
     // they are deliberately co-located and chosen by name, never by zoom.
-    // Same-metro pairs — real places only miles apart, like New York and
-    // Newark — accept a lower 8px floor: the Northeast US lens frames the
-    // whole region instead of zooming 90x into one harbor, and the Nearby
-    // chips disambiguate those neighbors by name.
+    // Same-metro pairs — real places only miles apart, like New York beside
+    // Newark or London beside Essex — accept a lower 8px floor: regional
+    // lenses frame whole regions instead of zooming into one harbor, and
+    // the Nearby chips disambiguate those neighbors by name.
     const PAD_W = 640;
     const PAD_H = 320;
     const MIN_SEP = 24;
     const SAME_METRO_MIN_SEP = 8;
-    const SAME_METRO_WORLD_SEP = 1;
+    const SAME_METRO_WORLD_SEP = 1.5;
     const locations = new Map<string, { x: number; y: number }>();
     for (const anchor of PRONUNCIATION_ATLAS_ANCHORS) {
       const key = `${anchor.point.x.toFixed(6)}:${anchor.point.y.toFixed(6)}`;
@@ -444,7 +444,10 @@ describe("Pronunciation Atlas", () => {
     assert.deepEqual(withinIds("world"), []);
     assert.deepEqual(withinIds("north-america"), ["us-east", "us-northeast"]);
     assert.deepEqual(withinIds("us-east"), ["us-northeast"]);
-    assert.deepEqual(withinIds("europe"), ["isles"]);
+    assert.deepEqual(withinIds("east-asia"), ["northeast-asia"]);
+    // Scandinavia reaches beyond Europe's frame, so neither contains the other.
+    assert.deepEqual(withinIds("europe"), []);
+    assert.deepEqual(withinIds("scandinavia"), []);
     assert.deepEqual(withinIds("us-northeast"), []);
   });
 

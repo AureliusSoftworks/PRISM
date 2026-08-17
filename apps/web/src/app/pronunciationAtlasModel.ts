@@ -134,20 +134,20 @@ export const PRONUNCIATION_ATLAS_LENSES: readonly PronunciationAtlasLens[] = [
     44.2,
   ),
   pronunciationAtlasLensFromCoordinates(
-    "isles",
-    "The Isles",
-    -11.8,
-    50,
-    3.6,
-    58.2,
-  ),
-  pronunciationAtlasLensFromCoordinates(
     "europe",
     "Europe",
     -11.5,
     35.5,
     33,
     60.5,
+  ),
+  pronunciationAtlasLensFromCoordinates(
+    "scandinavia",
+    "Scandinavia",
+    3.5,
+    54.3,
+    32,
+    71.5,
   ),
   pronunciationAtlasLensFromCoordinates(
     "africa-mideast",
@@ -165,6 +165,14 @@ export const PRONUNCIATION_ATLAS_LENSES: readonly PronunciationAtlasLens[] = [
     -11,
     145,
     42,
+  ),
+  pronunciationAtlasLensFromCoordinates(
+    "northeast-asia",
+    "Northeast Asia",
+    110.2,
+    24.7,
+    144.9,
+    41.9,
   ),
 ];
 
