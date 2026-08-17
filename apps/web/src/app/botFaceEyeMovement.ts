@@ -15,24 +15,25 @@ export interface BotFaceGazeFrame {
   transitionMs: number;
 }
 
+/**
+ * Eye movement selects *cadence only* — how often the eye moves and how
+ * quickly it gets there. How far it travels is identical across every mode and
+ * comes from eye size alone (see `botFaceGazeTravel`), so Paranoid is a
+ * restless Natural rather than a wider-roaming one.
+ *
+ * `idleCenterChance` and `speakingGlanceChance` belong here rather than with
+ * travel: they set how often a fixation is a glance instead of a rest, which
+ * is frequency, not distance.
+ */
 type BotFaceGazeProfile = {
   holdMinMs: number;
   holdSpanMs: number;
-  maxX: number;
-  maxY: number;
   transitionMinMs: number;
   transitionSpanMs: number;
   /** Chance idle gazes rest on center instead of glancing. */
   idleCenterChance: number;
-  /** Scales state-authored amplitudes before clamping. */
-  amplitudeScale: number;
   /** Chance speaking eyes glance away from dead-center. */
   speakingGlanceChance: number;
-  /**
-   * Extra bias toward extreme left/right for paranoid scanning.
-   * 0 = none; 1 = almost always pinned near the edges.
-   */
-  extremeBias: number;
 };
 
 const BOT_FACE_GAZE_PROFILES: Record<
@@ -42,52 +43,61 @@ const BOT_FACE_GAZE_PROFILES: Record<
   natural: {
     holdMinMs: 3_000,
     holdSpanMs: 4_000,
-    maxX: 4,
-    maxY: 2,
     transitionMinMs: 180,
     transitionSpanMs: 80,
     idleCenterChance: 0.42,
-    amplitudeScale: 1,
     speakingGlanceChance: 0.24,
-    extremeBias: 0,
   },
   nervous: {
     holdMinMs: 900,
     holdSpanMs: 1_300,
-    maxX: 5,
-    maxY: 2.5,
     transitionMinMs: 90,
     transitionSpanMs: 70,
     idleCenterChance: 0.2,
-    amplitudeScale: 1.18,
     speakingGlanceChance: 0.48,
-    extremeBias: 0.12,
   },
   frantic: {
     holdMinMs: 280,
     holdSpanMs: 620,
-    maxX: 6.2,
-    maxY: 3.1,
     transitionMinMs: 48,
     transitionSpanMs: 55,
     idleCenterChance: 0.07,
-    amplitudeScale: 1.38,
     speakingGlanceChance: 0.72,
-    extremeBias: 0.28,
   },
   paranoid: {
     holdMinMs: 140,
     holdSpanMs: 520,
-    maxX: 7.2,
-    maxY: 3.6,
     transitionMinMs: 28,
     transitionSpanMs: 48,
     idleCenterChance: 0.02,
-    amplitudeScale: 1.62,
     speakingGlanceChance: 0.9,
-    extremeBias: 0.72,
   },
 };
+
+/** Gaze travel at the default eye scale, shared by every movement mode. */
+const BOT_FACE_GAZE_BASE_MAX_X = 5;
+const BOT_FACE_GAZE_BASE_MAX_Y = 2.5;
+
+/**
+ * Travel envelope for an eye, derived from its size alone.
+ *
+ * A bigger eye has more socket to cross, so it should sweep proportionally
+ * further; the arc reads the same at every size. Movement mode is deliberately
+ * not an input here.
+ */
+export function botFaceGazeTravel(eyeScale?: number | null): {
+  maxX: number;
+  maxY: number;
+} {
+  const scale =
+    typeof eyeScale === "number" && Number.isFinite(eyeScale) && eyeScale > 0
+      ? eyeScale
+      : 1;
+  return {
+    maxX: BOT_FACE_GAZE_BASE_MAX_X * scale,
+    maxY: BOT_FACE_GAZE_BASE_MAX_Y * scale,
+  };
+}
 
 /** Live eye-timeline tick rate — busier modes refresh more often. */
 export function botFaceEyeMovementLiveIntervalMs(
@@ -149,19 +159,6 @@ function rounded(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-function applyExtremeBias(
-  xPx: number,
-  sample: (channel: string) => number,
-  extremeBias: number,
-  maxX: number,
-): number {
-  if (extremeBias <= 0) return xPx;
-  if (sample("extreme") >= extremeBias) return xPx;
-  const side = sample("extreme-side") < 0.5 ? -1 : 1;
-  const edge = maxX * (0.72 + sample("extreme-depth") * 0.28);
-  return side * edge;
-}
-
 /** Pure, seek-stable gaze choreography. It owns no timers or experience state. */
 export function resolveBotFaceGazeFrame(args: {
   seed: string;
@@ -170,6 +167,8 @@ export function resolveBotFaceGazeFrame(args: {
   state: BotFaceAttentionState;
   targetDirection?: BotFaceGazeDirection;
   movement?: BotFaceEyeMovement | null;
+  /** Eye size; the sole input to how far the gaze travels. */
+  eyeScale?: number | null;
 }): BotFaceGazeFrame {
   const movement = args.movement ?? "natural";
   if (!botFaceEyeMovementIsActive(movement)) {
@@ -184,18 +183,20 @@ export function resolveBotFaceGazeFrame(args: {
     unit(`${stateSeed}:${fixation.index}:${channel}`);
   const signed = (channel: string) => sample(channel) * 2 - 1;
   const target = args.targetDirection ?? 0;
-  const amp = profile.amplitudeScale;
+  const { maxX, maxY } = botFaceGazeTravel(args.eyeScale);
 
-  let xPx = 0;
-  let yPx = 0;
+  // Displacements are fractions of the travel envelope, never raw pixels, so
+  // the same choreography scales cleanly with eye size and stays identical
+  // across movement modes.
+  let x = 0;
+  let y = 0;
   if (args.state === "thinking") {
     const thinkingSide = sample("side") < 0.5 ? -1 : 1;
-    xPx = thinkingSide * (1.8 + sample("x") * 1.1) * amp;
-    yPx = -(1.1 + sample("y") * 0.9) * amp;
+    x = thinkingSide * (0.36 + sample("x") * 0.22);
+    y = -(0.44 + sample("y") * 0.36);
   } else if (args.state === "listening") {
-    xPx =
-      target * (2.25 + sample("target") * 0.85) * amp + signed("x") * 0.7 * amp;
-    yPx = signed("y") * 0.75 * amp;
+    x = target * (0.45 + sample("target") * 0.17) + signed("x") * 0.14;
+    y = signed("y") * 0.3;
   } else if (args.state === "speaking") {
     if (target === 0) {
       // Room-facing speech: keep natural idle-like wander with frequent
@@ -203,29 +204,27 @@ export function resolveBotFaceGazeFrame(args: {
       const roomGlanceChance = Math.max(profile.speakingGlanceChance, 0.62);
       const glance = sample("glance") > 1 - roomGlanceChance;
       const side = sample("side") < 0.5 ? -1 : 1;
-      xPx = glance
-        ? side * (1.35 + sample("target") * 1.35) * amp + signed("x") * 0.55 * amp
-        : signed("x") * 2.4 * amp;
+      x = glance
+        ? side * (0.27 + sample("target") * 0.27) + signed("x") * 0.11
+        : signed("x") * 0.48;
     } else {
       const glance = sample("glance") > 1 - profile.speakingGlanceChance;
-      xPx = glance
-        ? target * (1.2 + sample("target") * 0.8) * amp + signed("x") * amp
-        : signed("x") * 0.85 * amp;
+      x = glance
+        ? target * (0.24 + sample("target") * 0.16) + signed("x") * 0.2
+        : signed("x") * 0.17;
     }
     // Match Avatar Studio's speech simulation: talking can glance sideways,
     // but the eye line remains vertically registered while the mouth moves.
-    yPx = 0;
+    y = 0;
   } else {
     const restingCentered = sample("center") < profile.idleCenterChance;
-    xPx = restingCentered ? 0 : signed("x") * 3.2 * amp;
-    yPx = restingCentered ? 0 : signed("y") * 1.35 * amp;
+    x = restingCentered ? 0 : signed("x") * 0.64;
+    y = restingCentered ? 0 : signed("y") * 0.54;
   }
 
-  xPx = applyExtremeBias(xPx, sample, profile.extremeBias, profile.maxX);
-
   return {
-    xPx: rounded(Math.max(-profile.maxX, Math.min(profile.maxX, xPx))),
-    yPx: rounded(Math.max(-profile.maxY, Math.min(profile.maxY, yPx))),
+    xPx: rounded(Math.max(-maxX, Math.min(maxX, x * maxX))),
+    yPx: rounded(Math.max(-maxY, Math.min(maxY, y * maxY))),
     transitionMs:
       profile.transitionMinMs +
       Math.round(sample("transition") * profile.transitionSpanMs),

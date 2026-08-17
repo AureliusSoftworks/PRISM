@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import type { BotFaceEyeMovement } from "@localai/shared";
 import {
   botFaceEyeMovementLiveIntervalMs,
+  botFaceGazeTravel,
   resolveBotFaceGazeFrame,
 } from "./botFaceEyeMovement.ts";
 
@@ -150,10 +151,12 @@ describe("bot eye movement modes", () => {
     assert.ok(frame.yPx < 0);
   });
 
-  it("pushes paranoid gazes farther and more often to the edges", () => {
-    let extremeHits = 0;
-    let naturalHits = 0;
+  it("moves paranoid eyes more often, but never farther, than natural", () => {
     const samples = 240;
+    let paranoidMaxTravel = 0;
+    let naturalMaxTravel = 0;
+    let paranoidMoves = 0;
+    let naturalMoves = 0;
     for (let index = 0; index < samples; index += 1) {
       const paranoid = resolveBotFaceGazeFrame({
         seed: `paranoid:${index}`,
@@ -167,11 +170,36 @@ describe("bot eye movement modes", () => {
         state: "idle",
         movement: "natural",
       });
-      if (Math.abs(paranoid.xPx) >= 5) extremeHits += 1;
-      if (Math.abs(natural.xPx) >= 5) naturalHits += 1;
+      paranoidMaxTravel = Math.max(paranoidMaxTravel, Math.abs(paranoid.xPx));
+      naturalMaxTravel = Math.max(naturalMaxTravel, Math.abs(natural.xPx));
+      if (paranoid.xPx !== 0 || paranoid.yPx !== 0) paranoidMoves += 1;
+      if (natural.xPx !== 0 || natural.yPx !== 0) naturalMoves += 1;
     }
-    assert.ok(extremeHits > naturalHits);
-    assert.ok(extremeHits > samples * 0.35);
+    // Frequency is the whole difference between modes.
+    assert.ok(paranoidMoves > naturalMoves);
+    // Distance is not: both modes share one travel envelope. Sampled maxima
+    // differ by a hair only because the busier mode takes more draws at it,
+    // so compare against the shared bound rather than for exact equality.
+    const { maxX } = botFaceGazeTravel();
+    assert.ok(paranoidMaxTravel <= maxX);
+    assert.ok(naturalMaxTravel <= maxX);
+    assert.ok(Math.abs(paranoidMaxTravel - naturalMaxTravel) < 0.25);
+  });
+
+  it("scales gaze travel by eye size alone", () => {
+    const frameFor = (eyeScale?: number) =>
+      resolveBotFaceGazeFrame({
+        seed: "travel",
+        timelineMs: 0,
+        state: "idle",
+        movement: "natural",
+        eyeScale,
+      });
+    const small = Math.abs(frameFor(0.7).xPx);
+    const base = Math.abs(frameFor().xPx);
+    const large = Math.abs(frameFor(1.3).xPx);
+    assert.ok(small < base);
+    assert.ok(base < large);
   });
 
   it("composes gaze separately and keeps blink and reduced motion snap-safe", () => {

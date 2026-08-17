@@ -666,6 +666,7 @@ export function CoffeeSeatPlateEmoji({
             state: eyeAttentionState,
             targetDirection: eyeTargetDirection,
             movement: normalizedEyeMovement,
+            eyeScale: faceEyeScale,
           }))
         : { xPx: 0, yPx: 0, transitionMs: 0 },
     [
@@ -676,6 +677,7 @@ export function CoffeeSeatPlateEmoji({
       eyeStateStartedAtMs,
       eyeTargetDirection,
       eyeTimeline,
+      faceEyeScale,
       normalizedEyeMovement,
       questionGlyphActive,
       scheduleKey,

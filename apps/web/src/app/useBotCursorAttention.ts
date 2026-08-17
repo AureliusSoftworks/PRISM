@@ -31,6 +31,8 @@ export function useBotCursorAttention(args: {
   enabled: boolean;
   movement: BotFaceEyeMovement | null | undefined;
   facingScaleX?: -1 | 1;
+  /** Eye size; the sole input to how far the gaze travels. */
+  eyeScale?: number | null;
 }): BotFaceGazeFrame | null {
   const [gaze, setGaze] = useState<BotFaceGazeFrame | null>(null);
 
@@ -121,6 +123,7 @@ export function useBotCursorAttention(args: {
             clientY: event.clientY,
             rect,
             facingScaleX: args.facingScaleX,
+            eyeScale: args.eyeScale,
           }),
         );
         armIdleRelease();
@@ -152,6 +155,7 @@ export function useBotCursorAttention(args: {
           clientY: event.clientY,
           rect,
           facingScaleX: args.facingScaleX,
+          eyeScale: args.eyeScale,
         }),
       );
       armIdleRelease();
@@ -167,7 +171,13 @@ export function useBotCursorAttention(args: {
       clearTimer(idleTimer);
       clearTimer(followTimer);
     };
-  }, [args.enabled, args.facingScaleX, args.movement, args.targetRef]);
+  }, [
+    args.enabled,
+    args.eyeScale,
+    args.facingScaleX,
+    args.movement,
+    args.targetRef,
+  ]);
 
   return gaze;
 }

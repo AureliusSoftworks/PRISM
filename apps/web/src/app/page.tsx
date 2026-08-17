@@ -32195,6 +32195,7 @@ function ZenLiveBotMannequin({
       screenMode === "live",
     movement: faceStyle.eyeAnimation,
     facingScaleX: screenFacingScaleX === "-1" ? -1 : 1,
+    eyeScale: faceStyle.eyeScale,
   });
   const presenceBodyStyle = {
     ...(canonicalIdentityMaterialStyle ?? {}),

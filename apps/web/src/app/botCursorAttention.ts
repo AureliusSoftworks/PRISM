@@ -1,10 +1,15 @@
 import type { BotFaceEyeMovement } from "@localai/shared";
+import { botFaceGazeTravel } from "./botFaceEyeMovement.ts";
 
+/**
+ * Cadence and attentiveness only. How far the eye travels to reach the cursor
+ * is shared with idle gaze and comes from eye size alone (`botFaceGazeTravel`),
+ * so every mode sweeps the same distance — Paranoid just catches the cursor
+ * more eagerly and more often.
+ */
 export interface BotCursorAttentionProfile {
   radiusScale: number;
   catchChance: number;
-  maxX: number;
-  maxY: number;
   transitionMs: number;
   followMinMs: number;
   followSpanMs: number;
@@ -21,8 +26,6 @@ const BOT_CURSOR_ATTENTION_PROFILES: Record<
   natural: {
     radiusScale: 1.12,
     catchChance: 0.24,
-    maxX: 4,
-    maxY: 2,
     transitionMs: 210,
     followMinMs: 720,
     followSpanMs: 620,
@@ -34,8 +37,6 @@ const BOT_CURSOR_ATTENTION_PROFILES: Record<
   nervous: {
     radiusScale: 1.42,
     catchChance: 0.4,
-    maxX: 5,
-    maxY: 2.5,
     transitionMs: 140,
     followMinMs: 880,
     followSpanMs: 720,
@@ -47,8 +48,6 @@ const BOT_CURSOR_ATTENTION_PROFILES: Record<
   frantic: {
     radiusScale: 1.82,
     catchChance: 0.58,
-    maxX: 6.2,
-    maxY: 3.1,
     transitionMs: 86,
     followMinMs: 1_000,
     followSpanMs: 840,
@@ -60,8 +59,6 @@ const BOT_CURSOR_ATTENTION_PROFILES: Record<
   paranoid: {
     radiusScale: 2.28,
     catchChance: 0.78,
-    maxX: 7.2,
-    maxY: 3.6,
     transitionMs: 58,
     followMinMs: 1_180,
     followSpanMs: 1_020,
@@ -116,8 +113,11 @@ export function botCursorAttentionGaze(args: {
   rect: Pick<DOMRect, "left" | "top" | "width" | "height">;
   /** Counter-mirrors local eye motion when the complete face looks left. */
   facingScaleX?: -1 | 1;
+  /** Eye size; the sole input to how far the gaze travels. */
+  eyeScale?: number | null;
 }): { xPx: number; yPx: number; transitionMs: number } {
   const profile = BOT_CURSOR_ATTENTION_PROFILES[args.movement];
+  const { maxX, maxY } = botFaceGazeTravel(args.eyeScale);
   const centerX = args.rect.left + args.rect.width / 2;
   const centerY = args.rect.top + args.rect.height / 2;
   const xRadius = Math.max(1, args.rect.width * 0.55);
@@ -125,8 +125,8 @@ export function botCursorAttentionGaze(args: {
   const xUnit = Math.max(-1, Math.min(1, (args.clientX - centerX) / xRadius));
   const yUnit = Math.max(-1, Math.min(1, (args.clientY - centerY) / yRadius));
   return {
-    xPx: rounded(xUnit * profile.maxX * (args.facingScaleX ?? 1)),
-    yPx: rounded(yUnit * profile.maxY),
+    xPx: rounded(xUnit * maxX * (args.facingScaleX ?? 1)),
+    yPx: rounded(yUnit * maxY),
     transitionMs: profile.transitionMs,
   };
 }

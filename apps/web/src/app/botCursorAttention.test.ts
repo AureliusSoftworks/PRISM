@@ -23,9 +23,37 @@ describe("full-size bot cursor attention", () => {
     assert.ok(natural.catchChance < nervous.catchChance);
     assert.ok(nervous.catchChance < frantic.catchChance);
     assert.ok(frantic.catchChance < paranoid.catchChance);
-    assert.ok(natural.maxX < nervous.maxX);
-    assert.ok(nervous.maxX < frantic.maxX);
-    assert.ok(frantic.maxX < paranoid.maxX);
+  });
+
+  it("keeps gaze travel identical across movements and scaled by eye size", () => {
+    const rect = { left: 0, top: 0, width: 100, height: 100 };
+    // Cursor pinned far past the edge so every mode is clamped to its own
+    // maximum travel — the strongest test that the envelope is shared.
+    const pinned = (
+      movement: "natural" | "nervous" | "frantic" | "paranoid",
+      eyeScale?: number,
+    ) =>
+      botCursorAttentionGaze({
+        movement,
+        clientX: 10_000,
+        clientY: 10_000,
+        rect,
+        eyeScale,
+      });
+
+    const natural = pinned("natural");
+    for (const movement of ["nervous", "frantic", "paranoid"] as const) {
+      const gaze = pinned(movement);
+      assert.equal(gaze.xPx, natural.xPx);
+      assert.equal(gaze.yPx, natural.yPx);
+    }
+
+    // Eye size is the only thing that changes how far the eye travels.
+    const small = pinned("natural", 0.7);
+    const large = pinned("natural", 1.3);
+    assert.ok(small.xPx < natural.xPx);
+    assert.ok(natural.xPx < large.xPx);
+    assert.ok(small.yPx < large.yPx);
   });
 
   it("notices only nearby cursor passes and remains probabilistic", () => {
