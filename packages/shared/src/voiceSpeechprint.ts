@@ -12,10 +12,10 @@ import {
   type VoiceAccentDefinitionId,
 } from "./audioVoice.ts";
 
-export const LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION = "2026.08.15.2";
+export const LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION = "2026.08.17.1";
 /** SHA-256 of the qualified Instant IPA matrix (see speechprint-runtime.test.ts). */
 export const LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256 =
-  "12987cf84107a09a7e30f622abab894ab6121b86128ada16d6dae96b19040e91";
+  "4ca68747b11c138e18e9a6098da3b867bb6760538c81a4870aaf115709c11b2f";
 
 export interface LocalVoiceSpeechprintCapabilityV1 {
   id: Exclude<LocalVoiceSpeechprintInfluence, "none">;
@@ -874,6 +874,20 @@ interface SpeechprintRule {
   optional?: boolean;
 }
 
+/**
+ * Coda R: after a vowel nucleus, before a consonant or a word boundary.
+ * Shared by every non-rhotic accent list so they all drop the same R's. The
+ * classes are pinned to what espeak-style en-US IPA emits around a coda ɹ:
+ * length-marked nuclei ("ɑːɹ" hard, "ɔːɹ" York — rhotic enforcement keeps
+ * FORCE's ː), reduced vowels ᵻ/ᵿ, and a following flap ɾ ("party"), U+0261 ɡ
+ * ("cargo"), glottal ʔ ("certain" once NURSE gains its hard R), or geminate ɹ
+ * ("Icarus" ɑːɹɹ — the coda half drops, the onset half fails the vowel
+ * lookbehind and survives). A vowel after ɹ never matches: that R is
+ * linking/onset even in non-rhotic accents.
+ */
+const POSTVOCALIC_R_DROP_PATTERN =
+  /(?<=[iɪeɛæaɑɒɔoʊuʌəɚɝɐɜɞœøyɨʉᵻᵿː])ɹ(?=[ptkbdgɡfvθðszʃʒʔhmnŋlɹɾwj,.;:!?)]|$)/gu;
+
 const SPEECHPRINT_RULES: Record<
   Exclude<LocalVoiceSpeechprintInfluence, "none">,
   readonly SpeechprintRule[]
@@ -1181,8 +1195,7 @@ const SPEECHPRINT_RULES: Record<
     {
       id: "postvocalic-r-drop",
       tier: "light",
-      pattern:
-        /(?<=[iɪeɛæaɑɒɔoʊuʌəɚɝɐɜɞœøyɨʉ])ɹ(?=[ptkbdgfvθðszʃʒhmnŋlwj,.;:!?)]|$)/gu,
+      pattern: POSTVOCALIC_R_DROP_PATTERN,
       replacement: "",
     },
     {
@@ -1257,10 +1270,11 @@ const SPEECHPRINT_RULES: Record<
     {
       id: "postvocalic-r-drop",
       tier: "light",
-      pattern:
-        /(?<=[iɪeɛæaɑɒɔoʊuʌəɚɝɐɜɞœøyɨʉ])ɹ(?=[ptkbdgfvθðszʃʒhmnŋlwj,.;:!?)]|$)/gu,
+      pattern: POSTVOCALIC_R_DROP_PATTERN,
       replacement: "",
     },
+    { id: "rhotacized-schwa", tier: "light", pattern: /ɚ/gu, replacement: "ə" },
+    { id: "rhotacized-nurse", tier: "light", pattern: /ɝ/gu, replacement: "ɜ" },
     {
       id: "thought-raised",
       tier: "balanced",
@@ -1378,7 +1392,7 @@ const SPEECHPRINT_RULES: Record<
     {
       id: "postvocalic-r-drop",
       tier: "light",
-      pattern: /(?<=[iɪeɛæaɑɒɔoʊuʌəɚɝɐɜɞœøyɨʉ])ɹ(?=[ptkbdgfvθðszʃʒhmnŋlwj,.;:!?)]|$)/gu,
+      pattern: POSTVOCALIC_R_DROP_PATTERN,
       replacement: "",
     },
     { id: "rhotacized-schwa", tier: "light", pattern: /ɚ/gu, replacement: "ə" },
@@ -1429,7 +1443,7 @@ const SPEECHPRINT_RULES: Record<
     {
       id: "postvocalic-r-drop",
       tier: "light",
-      pattern: /(?<=[iɪeɛæaɑɒɔoʊuʌəɚɝɐɜɞœøyɨʉ])ɹ(?=[ptkbdgfvθðszʃʒhmnŋlwj,.;:!?)]|$)/gu,
+      pattern: POSTVOCALIC_R_DROP_PATTERN,
       replacement: "",
     },
     { id: "rhotacized-schwa", tier: "light", pattern: /ɚ/gu, replacement: "ə" },
@@ -1441,8 +1455,7 @@ const SPEECHPRINT_RULES: Record<
     {
       id: "postvocalic-r-drop",
       tier: "light",
-      pattern:
-        /(?<=[iɪeɛæaɑɒɔoʊuʌəɚɝɐɜɞœøyɨʉ])ɹ(?=[ptkbdgfvθðszʃʒhmnŋlwj,.;:!?)]|$)/gu,
+      pattern: POSTVOCALIC_R_DROP_PATTERN,
       replacement: "",
     },
     { id: "rhotacized-schwa", tier: "light", pattern: /ɚ/gu, replacement: "ə" },
@@ -1509,13 +1522,23 @@ const SPEECHPRINT_RULES: Record<
     {
       id: "postvocalic-r-drop",
       tier: "light",
-      pattern: /(?<=[iɪeɛæaɑɒɔoʊuʌəɚɝɐɜɞœøyɨʉ])ɹ(?=[ptkbdgfvθðszʃʒhmnŋlwj,.;:!?)]|$)/gu,
+      pattern: POSTVOCALIC_R_DROP_PATTERN,
       replacement: "",
     },
+    { id: "rhotacized-schwa", tier: "light", pattern: /ɚ/gu, replacement: "ə" },
+    { id: "rhotacized-nurse", tier: "light", pattern: /ɝ/gu, replacement: "ɜː" },
     { id: "l-vocalize", tier: "balanced", pattern: /l(?=[,.;:!?)]?$)/gu, replacement: "w", optional: true },
     { id: "theta-front", tier: "strong", pattern: /θ/gu, replacement: "f", optional: true },
   ],
   "multicultural-london-english": [
+    {
+      id: "postvocalic-r-drop",
+      tier: "light",
+      pattern: POSTVOCALIC_R_DROP_PATTERN,
+      replacement: "",
+    },
+    { id: "rhotacized-schwa", tier: "light", pattern: /ɚ/gu, replacement: "ə" },
+    { id: "rhotacized-nurse", tier: "light", pattern: /ɝ/gu, replacement: "ɜː" },
     { id: "theta-stop", tier: "light", pattern: /θ/gu, replacement: "t", optional: true },
     { id: "eth-stop", tier: "balanced", pattern: /ð/gu, replacement: "d", optional: true },
     { id: "price-front", tier: "balanced", pattern: /aɪ/gu, replacement: "ɑɪ" },
@@ -1525,9 +1548,11 @@ const SPEECHPRINT_RULES: Record<
     {
       id: "postvocalic-r-drop",
       tier: "light",
-      pattern: /(?<=[iɪeɛæaɑɒɔoʊuʌəɚɝɐɜɞœøyɨʉ])ɹ(?=[ptkbdgfvθðszʃʒhmnŋlwj,.;:!?)]|$)/gu,
+      pattern: POSTVOCALIC_R_DROP_PATTERN,
       replacement: "",
     },
+    { id: "rhotacized-schwa", tier: "light", pattern: /ɚ/gu, replacement: "ə" },
+    { id: "rhotacized-nurse", tier: "light", pattern: /ɝ/gu, replacement: "ɜː" },
     { id: "l-vocalize", tier: "balanced", pattern: /l(?=[,.;:!?)]?$)/gu, replacement: "w" },
     { id: "theta-front", tier: "strong", pattern: /θ/gu, replacement: "f", optional: true },
   ],
@@ -1848,10 +1873,11 @@ const SPEECHPRINT_RULES: Record<
     {
       id: "postvocalic-r-drop",
       tier: "light",
-      pattern:
-        /(?<=[iɪeɛæaɑɒɔoʊuʌəɚɝɐɜɞœøyɨʉ])ɹ(?=[ptkbdgfvθðszʃʒhmnŋlwj,.;:!?)]|$)/gu,
+      pattern: POSTVOCALIC_R_DROP_PATTERN,
       replacement: "",
     },
+    { id: "rhotacized-schwa", tier: "light", pattern: /ɚ/gu, replacement: "ə" },
+    { id: "rhotacized-nurse", tier: "light", pattern: /ɝ/gu, replacement: "ɜ" },
     { id: "kit-central", tier: "balanced", pattern: /ɪ/gu, replacement: "ə" },
     {
       id: "dress-raised",
@@ -1982,10 +2008,11 @@ const SPEECHPRINT_RULES: Record<
     {
       id: "postvocalic-r-drop",
       tier: "light",
-      pattern:
-        /(?<=[iɪeɛæaɑɒɔoʊuʌəɚɝɐɜɞœøyɨʉ])ɹ(?=[ptkbdgfvθðszʃʒhmnŋlwj,.;:!?)]|$)/gu,
+      pattern: POSTVOCALIC_R_DROP_PATTERN,
       replacement: "",
     },
+    { id: "rhotacized-schwa", tier: "light", pattern: /ɚ/gu, replacement: "ə" },
+    { id: "rhotacized-nurse", tier: "light", pattern: /ɝ/gu, replacement: "ɜ" },
     {
       id: "trap-raised",
       tier: "balanced",
