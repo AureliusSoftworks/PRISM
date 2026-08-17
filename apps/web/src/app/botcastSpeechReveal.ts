@@ -5,7 +5,6 @@ import {
   type SpeechActivityWindow,
 } from "./speechActivity.ts";
 import {
-  buildCharacterAlignmentFromSegmentTimings,
   revealAtMsFromSegmentTimings,
   speechActivityWindowsForSegmentClock,
   type SpeechSegmentTiming,
@@ -187,15 +186,11 @@ export function startBotcastSpeechReveal({
   // When useSegmentClock is false, segmentTimings is already nullish
   // (see the guard above), so there is no non-clock fallback array.
   const segments = useSegmentClock ? [...(segmentTimings ?? [])] : null;
-  const segmentAlignment =
-    segments && segments.length > 0
-      ? buildCharacterAlignmentFromSegmentTimings(text, segments)
-      : null;
-  const mouthAlignment = alignmentTimingIsUsable(segmentAlignment)
-    ? segmentAlignment
-    : alignmentTimingIsUsable(alignment)
-      ? alignment
-      : null;
+  // A segment clock is incremental: unplayed characters are deliberately not
+  // timed yet. Never expose that partial clock as a full-utterance provider
+  // alignment; the Signal avatar resolves each audible segment directly.
+  const mouthAlignment =
+    !useSegmentClock && alignmentTimingIsUsable(alignment) ? alignment : null;
   const segmentCompletionTimes = useSegmentClock
     ? revealAtMsFromSegmentTimings(
         sourceTokens.map((token) => token.text),
