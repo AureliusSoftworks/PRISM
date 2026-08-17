@@ -187,6 +187,116 @@ fn terminate_one(child: &mut Child) {
     terminate_children(&mut [child]);
 }
 
+/// Command-line markers identifying a Prism runtime process we own.
+#[cfg(unix)]
+const PRISM_RUNTIME_PROCESS_MARKERS: &[&str] = &[
+    "/Resources/runtime/apps/api/dist/server.js",
+    "/Resources/runtime/apps/web/.next/standalone",
+    "/Application Support/Prism/bin/qdrant",
+];
+
+/// Reap Prism runtime processes leaked by a previous shell.
+///
+/// A runtime child always has a live desktop shell as its parent, so anything
+/// reparented to init (ppid 1) is definitionally leaked — the shell was
+/// SIGKILLed, force-quit, or crashed before `stop_runtime` could run. Those
+/// strays keep holding 19787/19788, which pushes the next launch onto a
+/// fallback port and quietly leaves two full stacks running. Restricting to
+/// ppid 1 is what makes this safe: a genuinely running Prism instance owns its
+/// children, so this can never disturb one.
+///
+/// Best-effort throughout — never block startup.
+#[cfg(unix)]
+fn reap_leaked_prism_runtimes(app: &AppHandle) {
+    let listing = match Command::new("/bin/ps")
+        .args(["-eo", "pid=,ppid=,args="])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+    {
+        Ok(output) => String::from_utf8_lossy(&output.stdout).into_owned(),
+        Err(_) => return,
+    };
+
+    let mut reaped = 0usize;
+    for line in listing.lines() {
+        let mut parts = line.split_whitespace();
+        let (Some(pid_raw), Some(ppid_raw)) = (parts.next(), parts.next()) else {
+            continue;
+        };
+        if ppid_raw != "1" {
+            continue;
+        }
+        let Ok(pid) = pid_raw.parse::<i32>() else {
+            continue;
+        };
+        if pid <= 1 {
+            continue;
+        }
+        if !PRISM_RUNTIME_PROCESS_MARKERS
+            .iter()
+            .any(|marker| line.contains(marker))
+        {
+            continue;
+        }
+        unsafe {
+            libc::kill(pid, libc::SIGTERM);
+        }
+        reaped += 1;
+    }
+
+    if reaped > 0 {
+        emit_log(
+            app,
+            "prism",
+            &format!("Reaped {reaped} leaked Prism runtime process(es) from a previous session."),
+        );
+    }
+}
+
+#[cfg(not(unix))]
+fn reap_leaked_prism_runtimes(_app: &AppHandle) {
+    // The Job Object guarantees the tree dies with the shell.
+}
+
+/// Latest shutdown signal seen, 0 when none. Written from a signal handler, so
+/// only async-signal-safe work happens there; a watcher thread does the rest.
+#[cfg(unix)]
+static PRISM_SHUTDOWN_SIGNAL: std::sync::atomic::AtomicI32 =
+    std::sync::atomic::AtomicI32::new(0);
+
+#[cfg(unix)]
+extern "C" fn prism_note_shutdown_signal(signal: i32) {
+    PRISM_SHUTDOWN_SIGNAL.store(signal, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Run `stop_runtime` on Ctrl-C, `kill`, and terminal hangup.
+///
+/// Tauri's `RunEvent::Exit` covers quitting through the UI, but not a signal —
+/// and since runtime children now live in their own process groups, a terminal
+/// Ctrl-C during `tauri dev` no longer reaches them on its own. Without this,
+/// every interrupted local build would strand a full stack.
+#[cfg(unix)]
+fn install_shutdown_signal_guard(app: AppHandle) {
+    unsafe {
+        for signal in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
+            let handler: extern "C" fn(i32) = prism_note_shutdown_signal;
+            libc::signal(signal, handler as libc::sighandler_t);
+        }
+    }
+    std::thread::spawn(move || loop {
+        if PRISM_SHUTDOWN_SIGNAL.load(std::sync::atomic::Ordering::SeqCst) != 0 {
+            let state: State<'_, RuntimeState> = app.state();
+            stop_runtime(&state);
+            std::process::exit(0);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    });
+}
+
+#[cfg(not(unix))]
+fn install_shutdown_signal_guard(_app: AppHandle) {}
+
 use tauri::menu::MenuBuilder;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::utils::config::BackgroundThrottlingPolicy;
@@ -485,7 +595,24 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
     let web_stderr_file = web_stdout_file.try_clone()
         .map_err(|e| io_error(format!("Failed to clone web log handle: {e}")))?;
 
+    // Clear strays from a previous shell before probing ports, so a leaked
+    // runtime cannot push this launch onto a fallback port.
+    reap_leaked_prism_runtimes(app);
+
     let api_port = pick_available_port(DEFAULT_API_PORT, &[])?;
+    if api_port != DEFAULT_API_PORT {
+        // Surfaced loudly: this almost always means another Prism is still
+        // alive, so the window about to open is a second stack rather than the
+        // build just staged.
+        emit_log(
+            app,
+            "prism",
+            &format!(
+                "WARNING: port {DEFAULT_API_PORT} is already in use by another live Prism instance; \
+                 this shell fell back to {api_port}. Quit the other instance if you meant to test this build.",
+            ),
+        );
+    }
     let web_port = pick_available_port(DEFAULT_WEB_PORT, &[api_port])?;
     let localai_api_origin = format!("http://127.0.0.1:{api_port}");
     // Honour the persisted LAN-access preference: bind to 0.0.0.0 when the
@@ -825,6 +952,10 @@ fn main() {
             setup_tray(app)?;
 
             let app_handle = app.handle().clone();
+
+            // Arm before any runtime child exists, so an interrupt at any point
+            // during startup still tears the tree down.
+            install_shutdown_signal_guard(app_handle.clone());
 
             // Spawn startup work on a background thread so the event loop can
             // start immediately and paint the splash screen.

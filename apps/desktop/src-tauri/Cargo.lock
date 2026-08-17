@@ -2516,6 +2516,7 @@ dependencies = [
 name = "prism_desktop"
 version = "0.15.0"
 dependencies = [
+ "libc",
  "objc2",
  "objc2-app-kit",
  "serde",
