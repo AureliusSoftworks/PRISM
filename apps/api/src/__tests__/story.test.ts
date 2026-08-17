@@ -2,6 +2,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import {
+  applyBotPowerAddressedInsultV1,
+  applyBotPowerCursedTongueResponseV1,
   applyBotPowerMumbledResponseV1,
   botPowerResponseIsSilentV1,
   botPowerDeterministicHalfChanceV1,
@@ -58,6 +60,14 @@ function createTestDb(): DatabaseSync {
       online_enabled INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
+    );
+    CREATE TABLE bot_global_moods (
+      user_id TEXT NOT NULL,
+      bot_id TEXT NOT NULL,
+      mood_key TEXT NOT NULL,
+      source TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, bot_id)
     );
     CREATE TABLE conversations (
       id TEXT PRIMARY KEY,
@@ -384,6 +394,25 @@ class SequenceProvider implements LlmProvider {
 }
 
 describe("Story API helpers", () => {
+  it("loads shared global mood into Story persona context", () => {
+    const db = createTestDb();
+    try {
+      seedBot(db, "bot-a", "Alice");
+      seedBot(db, "bot-b", "Bert");
+      db.prepare(
+        `INSERT INTO bot_global_moods
+          (user_id, bot_id, mood_key, source, updated_at)
+         VALUES ('user-1', 'bot-a', 'warm', 'signal_feedback', ?)`,
+      ).run("2026-08-14T00:00:00.000Z");
+      const bots = loadStoryBotProfiles(db, "user-1", ["bot-a", "bot-b"]);
+      assert.match(bots[0]?.systemPrompt ?? "", /warm, receptive emotional undertone/u);
+      assert.match(bots[0]?.systemPrompt ?? "", /soft behavioral context/u);
+      assert.match(bots[1]?.systemPrompt ?? "", /neutral, centered emotional baseline/u);
+    } finally {
+      db.close();
+    }
+  });
+
   it("persists a frozen Auto routing snapshot and preserves Anthropic provenance", () => {
     const db = createTestDb();
     try {
@@ -1142,6 +1171,29 @@ describe("Story API helpers", () => {
         }],
         ruleLabels: [],
       },
+    }, {
+      version: 1,
+      id: "ad-hominem",
+      name: "Ad Hominem",
+      intent: "Every ordinary reply fulfills its purpose through a direct insult aimed at the addressee.",
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(
+          "Ad Hominem",
+          "Every ordinary reply fulfills its purpose through a direct insult aimed at the addressee.",
+        ),
+        selfCue: "Answer through a direct insult aimed at the current addressee.",
+        observerCue: "The reply lands as a personal insult.",
+        effects: [{
+          type: "addressed_insult",
+          trigger: "every_spoken_reply",
+          target: "current_addressee",
+          style: "fresh_tailored",
+        }],
+        ruleLabels: [],
+      },
     }]));
     const bots = loadStoryBotProfiles(db, "user-1", ["bot-a", "bot-b"]);
     const created = createStorySession(db, "user-1", {
@@ -1156,12 +1208,21 @@ describe("Story API helpers", () => {
     const irisScene = episode.scenes.find((scene) => scene.speakerBotId === "bot-b");
     assert.ok(irisScene);
     const intended = irisScene.narration;
-    const publicRewrite = intended.replace("Bert steps", "Bert fucking steps");
+    const irisSceneIndex = episode.scenes.findIndex(
+      (scene) => scene.speakerBotId === "bot-b",
+    );
+    const insultedRewrite = applyBotPowerAddressedInsultV1(
+      intended,
+      "the player",
+      `${episode.id}:${irisScene.id}:${irisSceneIndex}:addressed-insult`,
+    );
+    const publicRewrite = applyBotPowerCursedTongueResponseV1(
+      insultedRewrite,
+      `${episode.id}:${irisScene.id}:${irisSceneIndex}`,
+    );
     const primaryProvider = new SequenceProvider([JSON.stringify(episode)]);
-    const auxiliaryProvider = new SequenceProvider([publicRewrite]);
     const generated = await generateStorySessionEpisode(db, "user-1", created.id, {
       provider: primaryProvider,
-      auxiliaryProvider,
       providerName: "local",
       model: "test-model",
       bots,
@@ -1171,8 +1232,11 @@ describe("Story API helpers", () => {
     );
     assert.equal(publicScene?.narration, publicRewrite);
     assert.equal(primaryProvider.calls.length, 1);
-    assert.equal(auxiliaryProvider.calls.length, 1);
-    assert.equal(auxiliaryProvider.calls[0]?.options?.model, "test-model");
+    assert.match(
+      JSON.stringify(primaryProvider.calls[0]?.messages),
+      /HARD Ad Hominem primary-generation rule/u,
+    );
+    assert.match(JSON.stringify(primaryProvider.calls[0]?.messages), /scene cast: Ada/u);
   });
 
   it("persists a Quiet listener miss and repairs the dependent response without leaked words", async () => {

@@ -103,6 +103,9 @@ describe("buildDeveloperTranscript", () => {
     assert.match(transcript, /### Call 1/u);
     assert.match(transcript, /Purpose \/ routing decision: coffee_turn/u);
     assert.match(transcript, /Selected topic: A useful disagreement/u);
+    assert.match(transcript, /## Coffee Event Accounting/u);
+    assert.match(transcript, /1 visible messages · 1 stored events/u);
+    assert.match(transcript, /Actions: 1/u);
     assert.match(transcript, /#### System prompts/u);
     assert.match(transcript, /#### Raw model \/ service output/u);
     assert.match(transcript, /#### Parsed output/u);

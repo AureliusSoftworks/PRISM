@@ -7,6 +7,8 @@ import {
   normalizeElevenLabsVoiceDirection,
   normalizeVoiceMode,
   normalizeVoiceDeliveryMood,
+  voiceAccentDefinitionForId,
+  voiceAccentDefinitionForLegacyProfile,
   voicePerformanceTextFromActionCues,
   voiceSpokenText,
   ELEVENLABS_VOICE_STABILITY_DEFAULT,
@@ -142,6 +144,7 @@ type ElevenLabsSpeechArgs = {
   text: string;
   profile: BotAudioVoiceProfileV1;
   deliveryMood?: VoiceDeliveryMood;
+  protectedPhrases?: readonly string[];
   seed?: number;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
@@ -190,11 +193,203 @@ function normalizeElevenLabsTaggedText(
   return taggedText;
 }
 
-function elevenLabsSpeechInput(args: ElevenLabsSpeechArgs): {
+type ElevenLabsTextProjectionSegment = {
+  providerText: string;
+  sourceText: string | null;
+};
+
+type ElevenLabsAccentProjection = {
+  text: string;
+  segments: ElevenLabsTextProjectionSegment[];
+  hasInlineIpa: boolean;
+};
+
+type PrepareAccentMapTargetIpa =
+  typeof import("./builtin-tts-runtime.ts").prepareAccentMapTargetIpa;
+
+const ELEVENLABS_IPA_WORD_SOURCE =
+  String.raw`[\p{L}\p{M}\p{N}]+(?:[’'][\p{L}\p{M}\p{N}]+)*(?:-[\p{L}\p{M}\p{N}]+(?:[’'][\p{L}\p{M}\p{N}]+)*)*`;
+const ELEVENLABS_IPA_WORD_PATTERN = new RegExp(
+  ELEVENLABS_IPA_WORD_SOURCE,
+  "gu",
+);
+const ELEVENLABS_IPA_RUN_PATTERN = new RegExp(
+  `${ELEVENLABS_IPA_WORD_SOURCE}(?:[ \t]+${ELEVENLABS_IPA_WORD_SOURCE})*`,
+  "gu",
+);
+
+function identityProjection(value: string): ElevenLabsTextProjectionSegment {
+  return { providerText: value, sourceText: value };
+}
+
+function inlineIpaProjection(
+  sourceText: string,
+  targetIpa: string,
+): ElevenLabsTextProjectionSegment[] | null {
+  const ipa = targetIpa
+    .replace(/[\r\n"/]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (!ipa) return null;
+  const sourceWords = [...sourceText.matchAll(ELEVENLABS_IPA_WORD_PATTERN)];
+  const ipaWords = ipa.split(/\s+/gu);
+  const segments: ElevenLabsTextProjectionSegment[] = [
+    { providerText: "\"/", sourceText: null },
+  ];
+  if (sourceWords.length > 0 && sourceWords.length === ipaWords.length) {
+    let sourceCursor = 0;
+    for (let index = 0; index < sourceWords.length; index += 1) {
+      const sourceWord = sourceWords[index]!;
+      const sourceStart = sourceWord.index ?? sourceCursor;
+      if (sourceStart > sourceCursor) {
+        segments.push({
+          providerText: " ",
+          sourceText: sourceText.slice(sourceCursor, sourceStart),
+        });
+      }
+      segments.push({
+        providerText: ipaWords[index]!,
+        sourceText: sourceWord[0],
+      });
+      sourceCursor = sourceStart + sourceWord[0].length;
+    }
+    if (sourceCursor < sourceText.length) {
+      segments.push({
+        providerText: " ",
+        sourceText: sourceText.slice(sourceCursor),
+      });
+    }
+  } else {
+    segments.push({ providerText: ipa, sourceText });
+  }
+  segments.push({ providerText: "/\"", sourceText: null });
+  return segments;
+}
+
+async function accentProjectionForPlainText(args: {
+  text: string;
+  profile: BotAudioVoiceProfileV1;
+  protectedPhrases?: readonly string[];
+  prepareTargetIpa: PrepareAccentMapTargetIpa;
+}): Promise<ElevenLabsAccentProjection> {
+  const runs = [...args.text.matchAll(ELEVENLABS_IPA_RUN_PATTERN)];
+  if (runs.length === 0) {
+    return {
+      text: args.text,
+      segments: args.text ? [identityProjection(args.text)] : [],
+      hasInlineIpa: false,
+    };
+  }
+  const plans = await Promise.all(
+    runs.map((run) =>
+      args.prepareTargetIpa({
+        text: run[0],
+        profile: args.profile,
+        protectedPhrases: args.protectedPhrases,
+      }),
+    ),
+  );
+  const segments: ElevenLabsTextProjectionSegment[] = [];
+  let cursor = 0;
+  let hasInlineIpa = false;
+  for (let index = 0; index < runs.length; index += 1) {
+    const run = runs[index]!;
+    const start = run.index ?? cursor;
+    if (start > cursor) {
+      segments.push(identityProjection(args.text.slice(cursor, start)));
+    }
+    const sourceText = run[0];
+    const projection = plans[index]?.targetIpa
+      ? inlineIpaProjection(sourceText, plans[index]!.targetIpa!)
+      : null;
+    if (projection) {
+      segments.push(...projection);
+      hasInlineIpa = true;
+    } else {
+      segments.push(identityProjection(sourceText));
+    }
+    cursor = start + sourceText.length;
+  }
+  if (cursor < args.text.length) {
+    segments.push(identityProjection(args.text.slice(cursor)));
+  }
+  return {
+    text: segments.map((segment) => segment.providerText).join(""),
+    segments,
+    hasInlineIpa,
+  };
+}
+
+async function elevenLabsAccentProjection(
+  args: ElevenLabsSpeechArgs,
+  normalizedProfile: ReturnType<typeof normalizeBotAudioVoiceProfileV1>,
+): Promise<ElevenLabsAccentProjection> {
+  const target =
+    voiceAccentDefinitionForId(normalizedProfile.accentDefinitionId) ??
+    voiceAccentDefinitionForLegacyProfile({
+      pronunciationBase: normalizedProfile.pronunciationBase,
+      speechprintInfluence: normalizedProfile.speechprintInfluence,
+    });
+  if (!target) {
+    return {
+      text: args.text,
+      segments: [identityProjection(args.text)],
+      hasInlineIpa: false,
+    };
+  }
+  // Keep the Emscripten phonemizer out of API startup and ordinary Premium
+  // requests. It loads locally only when a saved Accent Map needs target IPA.
+  const { prepareAccentMapTargetIpa } = await import(
+    "./builtin-tts-runtime.ts"
+  );
+  const segments: ElevenLabsTextProjectionSegment[] = [];
+  let cursor = 0;
+  let hasInlineIpa = false;
+  const tags = [...args.text.matchAll(ELEVENLABS_AUDIO_TAG_PATTERN)];
+  for (const tag of tags) {
+    const start = tag.index ?? cursor;
+    if (start > cursor) {
+      const projection = await accentProjectionForPlainText({
+        text: args.text.slice(cursor, start),
+        profile: normalizedProfile,
+        protectedPhrases: args.protectedPhrases,
+        prepareTargetIpa: prepareAccentMapTargetIpa,
+      });
+      segments.push(...projection.segments);
+      hasInlineIpa ||= projection.hasInlineIpa;
+    }
+    segments.push({ providerText: tag[0], sourceText: null });
+    cursor = start + tag[0].length;
+  }
+  if (cursor < args.text.length) {
+    const projection = await accentProjectionForPlainText({
+      text: args.text.slice(cursor),
+      profile: normalizedProfile,
+      protectedPhrases: args.protectedPhrases,
+      prepareTargetIpa: prepareAccentMapTargetIpa,
+    });
+    segments.push(...projection.segments);
+    hasInlineIpa ||= projection.hasInlineIpa;
+  }
+  return {
+    text: segments.map((segment) => segment.providerText).join(""),
+    segments,
+    hasInlineIpa,
+  };
+}
+
+type ElevenLabsSpeechInput = {
   text: string;
   model: ElevenLabsTtsModel;
   directionPrefix: string;
-} {
+  sourceText: string;
+  projectionSegments: ElevenLabsTextProjectionSegment[];
+  hasInlineIpa: boolean;
+};
+
+async function elevenLabsSpeechInput(
+  args: ElevenLabsSpeechArgs,
+): Promise<ElevenLabsSpeechInput> {
   const normalizedProfile = normalizeBotAudioVoiceProfileV1(args.profile);
   const authoredDirection = normalizeElevenLabsVoiceDirection(
     normalizedProfile.elevenLabsDirection,
@@ -222,7 +417,11 @@ function elevenLabsSpeechInput(args: ElevenLabsSpeechArgs): {
       .filter(Boolean)
       .join(", ") || null,
   );
-  const model = direction || hasAudioTags
+  const accentProjection = await elevenLabsAccentProjection(
+    args,
+    normalizedProfile,
+  );
+  const model = direction || hasAudioTags || accentProjection.hasInlineIpa
     ? "eleven_v3"
     : normalizeElevenLabsTtsModel(args.model);
   const directionPrefix = direction
@@ -232,14 +431,24 @@ function elevenLabsSpeechInput(args: ElevenLabsSpeechArgs): {
         .join(" ")} `
     : "";
   return {
-    text: `${directionPrefix}${args.text}`,
+    text: `${directionPrefix}${accentProjection.text}`,
     model,
     directionPrefix,
+    sourceText: args.text,
+    projectionSegments: [
+      ...(directionPrefix
+        ? [{ providerText: directionPrefix, sourceText: null }]
+        : []),
+      ...accentProjection.segments,
+    ],
+    hasInlineIpa: accentProjection.hasInlineIpa,
   };
 }
 
-function elevenLabsSpeechRequestBody(args: ElevenLabsSpeechArgs): string {
-  const input = elevenLabsSpeechInput(args);
+function elevenLabsSpeechRequestBody(
+  args: ElevenLabsSpeechArgs,
+  input: ElevenLabsSpeechInput,
+): string {
   return JSON.stringify({
     text: input.text,
     model_id: input.model,
@@ -335,6 +544,93 @@ function withoutEmbeddedAudioTagAlignment(
   };
 }
 
+function trimVoiceCharacterAlignment(
+  alignment: VoiceCharacterAlignment,
+): VoiceCharacterAlignment | null {
+  let start = 0;
+  let end = alignment.characters.length;
+  while (start < end && alignment.characters[start]!.trim() === "") start += 1;
+  while (end > start && alignment.characters[end - 1]!.trim() === "") end -= 1;
+  if (start === end) return null;
+  return {
+    characters: alignment.characters.slice(start, end),
+    characterStartTimesSeconds:
+      alignment.characterStartTimesSeconds.slice(start, end),
+    characterEndTimesSeconds:
+      alignment.characterEndTimesSeconds.slice(start, end),
+  };
+}
+
+/**
+ * ElevenLabs aligns against the provider request, which now contains inline
+ * IPA rather than the saved transcript. Project each IPA timing window back
+ * onto its original word and omit private direction/audio-tag markup.
+ */
+function projectInlineIpaAlignmentToSource(
+  alignment: VoiceCharacterAlignment | null,
+  input: ElevenLabsSpeechInput,
+): VoiceCharacterAlignment | null {
+  if (!alignment) return null;
+  const providerCharacters = Array.from(input.text);
+  if (
+    alignment.characters.length !== providerCharacters.length ||
+    alignment.characters.join("") !== providerCharacters.join("")
+  ) {
+    return null;
+  }
+  const projected: VoiceCharacterAlignment = {
+    characters: [],
+    characterStartTimesSeconds: [],
+    characterEndTimesSeconds: [],
+  };
+  let providerCursor = 0;
+  for (const segment of input.projectionSegments) {
+    const segmentCharacters = Array.from(segment.providerText);
+    const segmentEnd = providerCursor + segmentCharacters.length;
+    if (
+      providerCharacters.slice(providerCursor, segmentEnd).join("") !==
+      segmentCharacters.join("")
+    ) {
+      return null;
+    }
+    if (segment.sourceText !== null) {
+      const sourceCharacters = Array.from(segment.sourceText);
+      const starts = alignment.characterStartTimesSeconds.slice(
+        providerCursor,
+        segmentEnd,
+      );
+      const ends = alignment.characterEndTimesSeconds.slice(
+        providerCursor,
+        segmentEnd,
+      );
+      if (
+        sourceCharacters.join("") === segmentCharacters.join("") &&
+        sourceCharacters.length === segmentCharacters.length
+      ) {
+        projected.characters.push(...sourceCharacters);
+        projected.characterStartTimesSeconds.push(...starts);
+        projected.characterEndTimesSeconds.push(...ends);
+      } else if (sourceCharacters.length > 0 && starts.length > 0) {
+        const windowStart = Math.min(...starts);
+        const windowEnd = Math.max(...ends);
+        const duration = Math.max(0, windowEnd - windowStart);
+        for (let index = 0; index < sourceCharacters.length; index += 1) {
+          projected.characters.push(sourceCharacters[index]!);
+          projected.characterStartTimesSeconds.push(
+            windowStart + duration * (index / sourceCharacters.length),
+          );
+          projected.characterEndTimesSeconds.push(
+            windowStart + duration * ((index + 1) / sourceCharacters.length),
+          );
+        }
+      }
+    }
+    providerCursor = segmentEnd;
+  }
+  if (providerCursor !== providerCharacters.length) return null;
+  return trimVoiceCharacterAlignment(projected);
+}
+
 /**
  * ElevenLabs can occasionally return a valid audio envelope whose character
  * timing stops at a strict prefix of the requested line. Treat only that
@@ -367,10 +663,12 @@ export async function requestElevenLabsSpeech(args: {
   text: string;
   profile: BotAudioVoiceProfileV1;
   deliveryMood?: VoiceDeliveryMood;
+  protectedPhrases?: readonly string[];
   seed?: number;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
 }): Promise<Response> {
+  const input = await elevenLabsSpeechInput(args);
   const fetchImpl = args.fetchImpl ?? fetch;
   const response = await fetchImpl(
     `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(args.voiceId)}/stream?output_format=mp3_44100_128`,
@@ -381,7 +679,7 @@ export async function requestElevenLabsSpeech(args: {
         "content-type": "application/json",
         "xi-api-key": args.apiKey,
       },
-      body: elevenLabsSpeechRequestBody(args),
+      body: elevenLabsSpeechRequestBody(args, input),
     }
   );
   if (!response.ok) await throwElevenLabsSpeechError(response);
@@ -394,7 +692,7 @@ export async function requestElevenLabsSpeech(args: {
 export async function requestElevenLabsSpeechWithTimestamps(
   args: ElevenLabsSpeechArgs
 ): Promise<ElevenLabsTimestampedSpeech> {
-  const input = elevenLabsSpeechInput(args);
+  const input = await elevenLabsSpeechInput(args);
   const fetchImpl = args.fetchImpl ?? fetch;
   const response = await fetchImpl(
     `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(args.voiceId)}/with-timestamps?output_format=mp3_44100_128`,
@@ -405,7 +703,7 @@ export async function requestElevenLabsSpeechWithTimestamps(
         "content-type": "application/json",
         "xi-api-key": args.apiKey,
       },
-      body: elevenLabsSpeechRequestBody(args),
+      body: elevenLabsSpeechRequestBody(args, input),
     }
   );
   if (!response.ok) await throwElevenLabsSpeechError(response);
@@ -421,23 +719,46 @@ export async function requestElevenLabsSpeechWithTimestamps(
   if (!audioBase64) {
     throw new ElevenLabsVoiceError(502, "ElevenLabs returned empty timestamped audio.");
   }
-  const alignment = withoutDirectionPrefixAlignment(
-    normalizeVoiceCharacterAlignment(payload.alignment),
-    input.directionPrefix
-  );
-  const normalizedAlignment = withoutDirectionPrefixAlignment(
-    normalizeVoiceCharacterAlignment(payload.normalized_alignment),
-    input.directionPrefix
-  );
-  const spokenAlignment = withoutEmbeddedAudioTagAlignment(alignment, args.text);
-  const spokenNormalizedAlignment = withoutEmbeddedAudioTagAlignment(
-    normalizedAlignment,
-    args.text,
+  const providerAlignment = normalizeVoiceCharacterAlignment(payload.alignment);
+  const providerNormalizedAlignment = normalizeVoiceCharacterAlignment(
+    payload.normalized_alignment,
   );
   if (
     voiceCharacterAlignmentIsIncomplete(
+      providerAlignment ?? providerNormalizedAlignment,
+      input.text,
+    )
+  ) {
+    throw new ElevenLabsVoiceError(
+      502,
+      "ElevenLabs returned speech that ended before the requested line.",
+    );
+  }
+  const alignment = input.hasInlineIpa
+    ? projectInlineIpaAlignmentToSource(providerAlignment, input)
+    : withoutDirectionPrefixAlignment(
+        providerAlignment,
+        input.directionPrefix,
+      );
+  const normalizedAlignment = input.hasInlineIpa
+    ? projectInlineIpaAlignmentToSource(providerNormalizedAlignment, input)
+    : withoutDirectionPrefixAlignment(
+        providerNormalizedAlignment,
+        input.directionPrefix,
+      );
+  const spokenAlignment = input.hasInlineIpa
+    ? alignment
+    : withoutEmbeddedAudioTagAlignment(alignment, input.sourceText);
+  const spokenNormalizedAlignment = input.hasInlineIpa
+    ? normalizedAlignment
+    : withoutEmbeddedAudioTagAlignment(
+        normalizedAlignment,
+        input.sourceText,
+      );
+  if (
+    voiceCharacterAlignmentIsIncomplete(
       spokenAlignment ?? spokenNormalizedAlignment,
-      args.text,
+      input.sourceText,
     )
   ) {
     throw new ElevenLabsVoiceError(

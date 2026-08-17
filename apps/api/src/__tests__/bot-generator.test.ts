@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import { createDeterministicProvider } from "../test-support.ts";
 import {
   BotGenerationError,
+  botGenerationModelSupportsStructuredOutput,
   generateBotDraft,
   generateBotField,
   parseGeneratedBotDraftText,
@@ -30,8 +31,28 @@ describe("bot generation route", () => {
     assert.match(routeSource, /resolvedEffortCapability\.levels\.includes\(requestedReasoningEffort\)/u);
     assert.match(routeSource, /resolved\.autoRoute\?\.reasoningEffort/u);
     assert.match(routeSource, /reasoningEffort,/u);
-    assert.doesNotMatch(routeSource, /requestElevenLabsVoiceCatalog/u);
-    assert.doesNotMatch(routeSource, /voiceCatalog/u);
+    assert.match(routeSource, /buildBotGenerationVoiceCatalogForUser/u);
+    assert.match(routeSource, /voiceCatalog,/u);
+  });
+
+  it("builds one account-eligible voice catalog for direct and internal generation", () => {
+    const helperSource = serverSource.slice(
+      serverSource.indexOf("async function buildBotGenerationVoiceCatalogForUser"),
+      serverSource.indexOf("async function checkPrismCreditMonitorForUser"),
+    );
+    const internalSource = serverSource.slice(
+      serverSource.indexOf("const prismCapabilityRegistry"),
+      serverSource.indexOf("function botIdsFromPrismCapabilityInput"),
+    );
+
+    assert.match(helperSource, /operating_system_voices_enabled !== 0/u);
+    assert.match(helperSource, /getSystemVoiceCapabilities/u);
+    assert.match(helperSource, /args\.onlineAllowed && args\.userKey/u);
+    assert.match(helperSource, /requestElevenLabsVoiceCatalog/u);
+    assert.match(helperSource, /elevenlabs_voice_collection_id/u);
+    assert.match(internalSource, /buildBotGenerationVoiceCatalogForUser/u);
+    assert.match(internalSource, /onlineAllowed: false/u);
+    assert.match(internalSource, /voiceCatalog,/u);
   });
 
   it("rehydrates Inspire sources from owned Library rows", () => {
@@ -215,6 +236,7 @@ function rawLeanDraft(): Record<string, unknown> {
   const rich = rawDraft();
   return {
     name: rich.name,
+    namePronunciation: rich.namePronunciation,
     profile: rich.profile,
     color: rich.color,
     glyph: rich.glyph,
@@ -235,6 +257,209 @@ function rawLeanDraft(): Record<string, unknown> {
 }
 
 describe("PRISM bot generator", () => {
+  it("hydrates every batch draft with its own persisted Accent Map location", async () => {
+    const generate = (batchIndex: number) =>
+      generateBotDraft({
+        prompt: "A midnight field crew",
+        generationContext: {
+          mode: "batch",
+          powers: { enabled: false, count: 1, craziness: 50 },
+          resemblance: 50,
+          inspirationSources: [],
+          batchIndex,
+          batchCount: 3,
+        },
+        provider: createDeterministicProvider([JSON.stringify(rawDraft())]),
+        providerName: "local",
+        model: "llama-local",
+        responseMode: "local",
+      });
+    const [first, second, third] = await Promise.all([generate(1), generate(2), generate(3)]);
+    const points = [first, second, third].map(
+      ({ draft }) => draft.audioVoiceProfile.pronunciationMapPoint,
+    );
+    assert.ok(points.every(Boolean));
+    assert.equal(
+      new Set(points.map((point) => `${point!.x}:${point!.y}`)).size,
+      3,
+    );
+  });
+
+  it("uses the same eligible voice and Accent Map contract for standard and automatic drafts", async () => {
+    const standard = rawDraft();
+    standard.voice = {
+      ...(standard.voice as Record<string, unknown>),
+      voiceIdentity: "premium:allotted-voice",
+      accentDefinitionId: "irish-english",
+      speechprintStrength: "light",
+      elevenLabsEffect: "chorus",
+    };
+    const lean = rawLeanDraft();
+    lean.voice = {
+      voiceIdentity: "os:Alex",
+      baseVoiceId: "voice-3",
+      accentDefinitionId: "british-english",
+      speechprintStrength: "balanced",
+      elevenLabsEffect: "chorus",
+      elevenLabsDirection: null,
+      elevenLabsStability: 0.5,
+      pitch: -0.2,
+      warmth: 0.1,
+      openness: 0,
+      weight: 0,
+      brightness: 0,
+      resonance: 0,
+      pace: -0.15,
+      lilt: 0.2,
+      bottishTone: 0.45,
+      eqTilt: 0,
+      gainDb: 0,
+      volume: 1,
+    };
+    const richProvider = createDeterministicProvider([
+      "Keep the archive keeper's voice measured.",
+      JSON.stringify(standard),
+    ]);
+    const leanProvider = createDeterministicProvider([
+      "Keep the operator's voice attentive.",
+      JSON.stringify(lean),
+    ]);
+    const catalog = {
+      operatingSystemVoiceNames: ["Alex"],
+      premiumVoices: [{ voiceId: "allotted-voice", name: "Archive" }],
+    };
+    const richResult = await generateBotDraft({
+      prompt: "An Irish archive keeper.", provider: richProvider, providerName: "local",
+      model: "llama-local", responseMode: "local", voiceCatalog: catalog, reasoningEffort: "low",
+    });
+    const leanResult = await generateBotDraft({
+      prompt: "A careful night operator.", provider: leanProvider, providerName: "local",
+      model: "llama-local", responseMode: "local", voiceCatalog: catalog,
+      generationContext: { mode: "batch", powers: { enabled: false, count: 0, craziness: 0 }, resemblance: 50, inspirationSources: [], batchIndex: 12, batchCount: 12 }, reasoningEffort: "low",
+    });
+    assert.equal(richResult.draft.audioVoiceProfile.elevenLabsVoiceId, "allotted-voice");
+    assert.equal(richResult.draft.audioVoiceProfile.accentDefinitionId, "irish-english");
+    assert.equal(richResult.draft.namePronunciation, "MAH-ruh VAYL");
+    assert.equal(leanResult.draft.audioVoiceProfile.systemVoiceName, "Alex");
+    assert.equal(leanResult.draft.audioVoiceProfile.accentDefinitionId, "british-english");
+    assert.ok(leanResult.draft.audioVoiceProfile.pronunciationMapPoint);
+    assert.equal(leanResult.draft.audioVoiceProfile.pace, -0.15);
+    assert.equal(leanResult.draft.namePronunciation, "MAH-ruh VAYL");
+    const prompts = [...richProvider.calls, ...leanProvider.calls]
+      .map((call) => call[0]?.content ?? "").join("\n");
+    assert.match(prompts, /portable:voice-28/u);
+    assert.match(prompts, /premium:allotted-voice/u);
+    assert.match(prompts, /os:Alex/u);
+    assert.match(
+      prompts,
+      /1-3 comma-separated delivery cues[\s\S]*never end mid-word/u,
+    );
+  });
+
+  it("uses Prism unless the player explicitly requests another voice effect", async () => {
+    const modelDraft = rawDraft();
+    modelDraft.voice = {
+      ...(modelDraft.voice as Record<string, unknown>),
+      elevenLabsEffect: "radio",
+    };
+    const defaultProvider = createDeterministicProvider([
+      "Keep the delivery restrained.",
+      JSON.stringify(modelDraft),
+    ]);
+    const explicitProvider = createDeterministicProvider([
+      "Give the delivery a broadcast texture.",
+      JSON.stringify(modelDraft),
+    ]);
+    const defaults = await generateBotDraft({
+      prompt: "A midnight archive keeper.",
+      provider: defaultProvider,
+      providerName: "local",
+      model: "llama-local",
+      responseMode: "local",
+      reasoningEffort: "low",
+    });
+    const explicit = await generateBotDraft({
+      prompt: "A midnight archive keeper with a radio voice effect.",
+      provider: explicitProvider,
+      providerName: "local",
+      model: "llama-local",
+      responseMode: "local",
+      reasoningEffort: "low",
+    });
+    assert.equal(defaults.draft.audioVoiceProfile.elevenLabsEffect, "chorus");
+    assert.equal(explicit.draft.audioVoiceProfile.elevenLabsEffect, "radio");
+  });
+
+  it("skips a known incompatible structured-output model before using its online fallback", async () => {
+    const incompatible = createDeterministicProvider(["should not run"]);
+    const fallback = createDeterministicProvider([JSON.stringify(rawDraft())]);
+
+    const result = await generateBotDraft({
+      prompt: "Create a concise folklore investigator.",
+      provider: incompatible,
+      providerName: "openai",
+      model: "gpt-3.5-turbo",
+      responseMode: "online",
+      autoFallbackChain: {
+        v: 1,
+        fallbacks: [{ provider: "openai", model: "gpt-5.6-luna" }],
+      },
+      openAiApiKey: "configured-for-test",
+      providerFactory: () => fallback,
+    });
+
+    assert.equal(
+      botGenerationModelSupportsStructuredOutput({
+        provider: "openai",
+        model: "gpt-3.5-turbo",
+      }),
+      false,
+    );
+    assert.equal(incompatible.calls.length, 0);
+    assert.equal(fallback.calls.length, 1);
+    assert.equal(result.providerNameUsed, "openai");
+    assert.equal(result.modelUsed, "gpt-5.6-luna");
+  });
+
+  it("rejects generic Power activation filler and retries a valid generated Power", async () => {
+    const placeholder = rawDraft();
+    placeholder.powerPrompts = ["Lantern Voice Power activated!"];
+    const canonical = rawDraft();
+    canonical.powerPrompts = ["Cursed Tongue Power activated!"];
+    const primary = createDeterministicProvider([JSON.stringify(placeholder)]);
+    const fallback = createDeterministicProvider([JSON.stringify(canonical)]);
+
+    const result = await generateBotDraft({
+      prompt: "Create a warm cooking guide with one Power.",
+      generationContext: {
+        mode: "standard",
+        powers: { enabled: true, count: 1, craziness: 50 },
+        resemblance: 50,
+        inspirationSources: [],
+      },
+      provider: primary,
+      providerName: "openai",
+      model: "primary-online",
+      responseMode: "auto",
+      autoFallbackChain: {
+        v: 1,
+        fallbacks: [{ provider: "anthropic", model: "fallback-online" }],
+      },
+      openAiApiKey: "configured-for-test",
+      anthropicApiKey: "configured-for-test",
+      providerFactory: () => fallback,
+    });
+
+    assert.equal(primary.calls.length, 1);
+    assert.equal(fallback.calls.length, 1);
+    assert.equal(result.providerNameUsed, "anthropic");
+    assert.equal(result.modelUsed, "fallback-online");
+    assert.equal(
+      result.draft.powers[0]?.intent,
+      "Every non-silent public spoken reply is involuntarily laced with frequent strong non-slur profanity; their private intended wording stays clean.",
+    );
+  });
+
   it("keeps a three-bot automatic batch on the rich schema and selected Power budget", async () => {
     const generated = rawDraft();
     generated.powerPrompts = [
@@ -270,6 +495,7 @@ describe("PRISM bot generator", () => {
     });
 
     const schema = JSON.stringify(capturedOptions?.jsonSchema);
+    assert.equal(capturedOptions?.allowFinalLocalFallback, false);
     assert.match(schema, /"avatarDetails"/u);
     assert.match(schema, /"avatarSfxPrompt"/u);
     assert.match(schema, /"powerPrompts":\{"type":"array","minItems":1,"maxItems":1/u);
@@ -315,7 +541,8 @@ describe("PRISM bot generator", () => {
       responseMode: "local",
     });
     const schema = JSON.stringify(capturedOptions?.jsonSchema);
-    assert.match(schema, /"voiceBaseId"/u);
+    assert.match(schema, /"voiceIdentity"/u);
+    assert.match(schema, /"accentDefinitionId"/u);
     assert.match(schema, /"batchGroupIdentity"/u);
     for (const forbidden of [
       "powerPrompts",
@@ -325,9 +552,6 @@ describe("PRISM bot generator", () => {
       "faceEyeCharacter",
       "faceMouthCharacter",
       "faceThinkingFrames",
-      "elevenLabsDirection",
-      "pitch",
-      "warmth",
     ]) {
       assert.equal(schema.includes(`"${forbidden}"`), false, forbidden);
     }
@@ -426,6 +650,32 @@ describe("PRISM bot generator", () => {
     );
   });
 
+  it("repairs a prompt-fragment Power title with a fresh valid fallback", async () => {
+    const provider = createDeterministicProvider([
+      JSON.stringify({ value: "When Jim Makes" }),
+    ]);
+    const result = await generateBotField({
+      fieldKey: "power.name",
+      currentValue: "Mask Relay",
+      context: {
+        power: {
+          name: "Mask Relay",
+          prompt: "A floating puppet speaks whenever the bot is asked a personal question.",
+        },
+      },
+      provider,
+      providerName: "local",
+      model: "llama-local",
+      responseMode: "local",
+    });
+
+    assert.equal(result.fieldKey, "power.name");
+    assert.equal(typeof result.value, "string");
+    assert.notEqual(result.value, "Mask Relay");
+    assert.doesNotMatch(String(result.value), /^(?:when|whenever|while|if)\b/iu);
+    assert.equal(provider.calls.length, 1);
+  });
+
   it("parses fenced model JSON while keeping premium voice identity unlinked", () => {
     const parsed = parseGeneratedBotDraftText(
       `\n\`\`\`json\n${JSON.stringify(rawDraft("premium-mara"))}\n\`\`\``,
@@ -433,7 +683,7 @@ describe("PRISM bot generator", () => {
     assert.ok(parsed);
     assert.equal(parsed.name, "Mara Vale");
     assert.equal(parsed.accentColor, "#22b5ff");
-    assert.equal(parsed.namePronunciation, "");
+    assert.equal(parsed.namePronunciation, "MAH-ruh VAYL");
     assert.equal(parsed.selfReferral, "");
     assert.equal(parsed.audioVoiceProfile.elevenLabsVoiceId, undefined);
     assert.equal(parsed.audioVoiceProfile.elevenLabsVoiceInitialized, true);
@@ -573,7 +823,7 @@ describe("PRISM bot generator", () => {
     assert.match(JSON.stringify(capturedOptions?.jsonSchema), /"openness"/u);
     assert.match(JSON.stringify(capturedOptions?.jsonSchema), /"resonance"/u);
     assert.match(JSON.stringify(capturedOptions?.jsonSchema), /faceThinkingScale/u);
-    assert.doesNotMatch(JSON.stringify(capturedOptions?.jsonSchema), /namePronunciation/u);
+    assert.match(JSON.stringify(capturedOptions?.jsonSchema), /namePronunciation/u);
     assert.doesNotMatch(JSON.stringify(capturedOptions?.jsonSchema), /selfReferral/u);
     assert.match(
       JSON.stringify(capturedOptions?.jsonSchema),
@@ -589,9 +839,9 @@ describe("PRISM bot generator", () => {
     assert.match(provider.calls[0]?.[0]?.content ?? "", /named local PRISM Voice Pack timbre/u);
     assert.match(
       provider.calls[0]?.[0]?.content ?? "",
-      /Accent and map location are separate player-authored choices/u,
+      /match canonical regional pronunciation when confidently known/u,
     );
-    assert.match(provider.calls[0]?.[0]?.content ?? "", /Do not select or link an ElevenLabs voice/u);
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /Always set namePronunciation/u);
     assert.match(provider.calls[0]?.[0]?.content ?? "", /response cues/u);
     assert.match(provider.calls[0]?.[0]?.content ?? "", /vocal weight/u);
     assert.match(provider.calls[0]?.[0]?.content ?? "", /avatarSfxPrompt/u);

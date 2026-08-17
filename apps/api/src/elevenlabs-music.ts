@@ -6,6 +6,9 @@ import {
 import { normalizeSignalGenerationKeywords } from "./signal-generation-keywords.ts";
 
 export const SIGNAL_ELEVENLABS_MUSIC_MODEL = "music_v2";
+export const COFFEE_ELEVENLABS_MUSIC_MODEL = "music_v2";
+export const COFFEE_SOUNDTRACK_DURATION_MS = 90_000;
+export const COFFEE_SOUNDTRACK_MAX_BYTES = 12 * 1024 * 1024;
 const SIGNAL_INTRO_AUDIO_MAX_BYTES = 4 * 1024 * 1024;
 
 export class ElevenLabsMusicError extends Error {
@@ -225,8 +228,11 @@ export function buildSignalElevenLabsOutdentCompositionPlan(args: {
   };
 }
 
-async function musicError(response: Response): Promise<ElevenLabsMusicError> {
-  let detail = "ElevenLabs could not compose the Signal music identity.";
+async function musicError(
+  response: Response,
+  fallback = "ElevenLabs could not compose the Signal music identity.",
+): Promise<ElevenLabsMusicError> {
+  let detail = fallback;
   try {
     const payload = await response.json() as Record<string, unknown>;
     const nested = payload.detail && typeof payload.detail === "object"
@@ -283,6 +289,68 @@ export async function requestSignalElevenLabsMusic(args: {
   const contentType = response.headers.get("content-type")?.split(";")[0]?.trim();
   if (!contentType?.startsWith("audio/")) {
     throw new ElevenLabsMusicError(502, "ElevenLabs returned invalid Signal music.");
+  }
+  return {
+    audioBytes,
+    contentType,
+    requestId: response.headers.get("request-id"),
+  };
+}
+
+/** Shared Music v2 prompt path for cached Coffee group beds. */
+export async function requestCoffeeGroupElevenLabsMusic(args: {
+  apiKey: string;
+  prompt: string;
+  signal?: AbortSignal;
+  fetchImpl?: typeof fetch;
+}): Promise<{ audioBytes: Buffer; contentType: string; requestId: string | null }> {
+  const response = await (args.fetchImpl ?? fetch)(
+    "https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192",
+    {
+      method: "POST",
+      signal: args.signal,
+      headers: {
+        "content-type": "application/json",
+        "xi-api-key": args.apiKey,
+      },
+      body: JSON.stringify({
+        prompt: args.prompt,
+        model_id: COFFEE_ELEVENLABS_MUSIC_MODEL,
+        music_length_ms: COFFEE_SOUNDTRACK_DURATION_MS,
+        force_instrumental: true,
+      }),
+    },
+  );
+  if (!response.ok) {
+    throw await musicError(
+      response,
+      "ElevenLabs Music is unavailable; bundled Coffee Jazz is playing.",
+    );
+  }
+  const announcedLength = Number(response.headers.get("content-length") ?? 0);
+  if (
+    Number.isFinite(announcedLength) &&
+    announcedLength > COFFEE_SOUNDTRACK_MAX_BYTES
+  ) {
+    throw new ElevenLabsMusicError(
+      502,
+      "ElevenLabs returned oversized Coffee music.",
+    );
+  }
+  const audioBytes = Buffer.from(await response.arrayBuffer());
+  const contentType = response.headers
+    .get("content-type")
+    ?.split(";")[0]
+    ?.trim();
+  if (
+    audioBytes.length === 0 ||
+    audioBytes.length > COFFEE_SOUNDTRACK_MAX_BYTES ||
+    !contentType?.startsWith("audio/")
+  ) {
+    throw new ElevenLabsMusicError(
+      502,
+      "ElevenLabs returned invalid Coffee music.",
+    );
   }
   return {
     audioBytes,

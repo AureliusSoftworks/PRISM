@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
+  isAutoModelTurboPreferenceId,
   modelSupportsTurboMode,
   type ModelTurboPreferenceV1,
   type NativeReasoningEffortProvider,
@@ -15,12 +16,24 @@ interface ModelTurboPreferenceRow {
   updated_at: string;
 }
 
+export function isAutoModelTurboPreference(
+  provider: NativeReasoningEffortProvider,
+  modelId: string,
+): boolean {
+  return provider === "openai" && isAutoModelTurboPreferenceId(modelId);
+}
+
 function preferenceFromRow(
   row: ModelTurboPreferenceRow,
 ): ModelTurboPreferenceV1 | null {
   const provider = normalizeModelEffortProvider(row.provider);
   const modelId = normalizeModelEffortModelId(row.model_id);
-  if (!provider || !modelId || !modelSupportsTurboMode(provider, modelId)) {
+  if (
+    !provider ||
+    !modelId ||
+    (!modelSupportsTurboMode(provider, modelId) &&
+      !isAutoModelTurboPreference(provider, modelId))
+  ) {
     return null;
   }
   return { provider, modelId, turbo: true, updatedAt: row.updated_at };
@@ -52,7 +65,12 @@ export function findModelTurboPreference(
   provider: NativeReasoningEffortProvider,
   modelId: string,
 ): boolean {
-  if (!modelSupportsTurboMode(provider, modelId)) return false;
+  if (
+    !modelSupportsTurboMode(provider, modelId) &&
+    !isAutoModelTurboPreference(provider, modelId)
+  ) {
+    return false;
+  }
   try {
     return Boolean(
       db
@@ -92,7 +110,10 @@ export function setModelTurboPreference(
     ).run(args.userId, args.provider, args.modelId);
     return null;
   }
-  if (!modelSupportsTurboMode(args.provider, args.modelId)) {
+  if (
+    !modelSupportsTurboMode(args.provider, args.modelId) &&
+    !isAutoModelTurboPreference(args.provider, args.modelId)
+  ) {
     throw new Error("Turbo is unavailable for this model.");
   }
   const updatedAt = args.updatedAt ?? new Date().toISOString();

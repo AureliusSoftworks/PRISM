@@ -1,6 +1,8 @@
 import {
+  BOT_POWER_INTENT_MAX_LENGTH,
   BOT_POWER_SIGIL_IDS_V1,
   BOT_POWER_VERSION,
+  botPowerFallbackTitleV1,
   botPowerDefinitionIsExplicitInterruptionV1,
   botPowerDefinitionIsUnconditionalInterruptionV1,
   botPowerDefinitionIsExplicitMuteV1,
@@ -8,6 +10,7 @@ import {
   botPowerDefinitionIsSimulationEvangelistV1,
   botPowerDesignationEffectFromIntentV1,
   botPowerAvatarScaleModeFromDescriptionV1,
+  botPowerChromaticBiasEffectsFromIntentV1,
   botPowerSourceHashForPowerV1,
   botPowerSourceHashV1,
   botPowerAntiTruthSelfRuleV1,
@@ -15,17 +18,15 @@ import {
   botPowerCredulitySelfRuleV1,
   botPowerLooksLikeSafetyRefusalV1,
   botPowerSpeechObfuscationAuthoringCueV1,
-  applyBotPowerCursedTongueResponseV1,
-  botPowerResponseIsSilentV1,
   strongestBotPowerAntiTruthEffectV1,
   normalizeBotPowerEffectV1,
+  normalizeBotPowerGeneratedTitleV1,
   normalizeBotPowersV1,
   type BotPowerEffectV1,
   type BotPowerSigilIdV1,
   type BotPowerTargetV1,
   type BotPowerV1,
   type CompiledBotPowerV1,
-  type UsagePurpose,
 } from "@localai/shared";
 import {
   LocalModelRequestError,
@@ -578,15 +579,20 @@ function deterministicCursedTonguePower(
   const intent = compact(source.intent, 700)
     .toLowerCase()
     .replace(/[’]/gu, "'");
-  const named = /^(?:cursed tongue|curse of the tongue|profane tongue|foul mouth)$/u.test(
-    powerName,
-  );
+  const isCursedTongueActivation = (value: string): boolean =>
+    /^(?:cursed tongue|curse of(?: the)? tongue|profane tongue|foul mouth)(?: power)?(?:[\s!.,;:()-]+(?:is\s+)?(?:activated|active|enabled))?[!.,;:()-]*$/u.test(
+      value,
+    );
+  const named = isCursedTongueActivation(powerName);
+  const activationAlias = isCursedTongueActivation(intent);
   const explicitEverySpeechProfanity = [
-    /\b(?:every|each|all)\b[\s\S]{0,55}\b(?:spoken|public|audible)?\s*(?:reply|response|line|utterance|speech|word)s?\b[\s\S]{0,70}\b(?:profanity|profane|swear|swearing|curse words?|foul language|fuck)\b/u,
+    /\b(?:every|each|all)\b[\s\S]{0,55}\b(?:spoken|public|audible)?\s*(?:reply|response|line|utterance|speech|word)s?\b[\s\S]{0,70}\b(?:profanity|profane|swear|swearing|curse(?:s|d| words?)?|foul language|fuck)\b/u,
     /\b(?:cannot|can't|never|unable to)\b[\s\S]{0,45}\b(?:speak|talk|reply|respond)\b[\s\S]{0,45}\bwithout\b[\s\S]{0,35}\b(?:profanity|swearing|cursing|curse words?)\b/u,
     /\b(?:adds?|inserts?|layers?)\b[\s\S]{0,35}\b(?:strong|frequent|uncensored)?\s*(?:profanity|swearing|curse words?)\b[\s\S]{0,55}\b(?:after|post[- ]generation|public speech|every line)\b/u,
+    /\b(?:everything|every(?:thing)?|all)\b[\s\S]{0,28}\b(?:they|he|she|it|this bot)\b[\s\S]{0,28}\b(?:say|says|said|speak|speaks|spoke|talk|talks|utter|utters)\b[\s\S]{0,45}\b(?:vulgar|profane|profanity|foul)\b/u,
+    /\b(?:their|his|her|its)\b[\s\S]{0,18}\b(?:every|all)\b[\s\S]{0,24}\b(?:word|line|reply|response|utterance)\b[\s\S]{0,42}\b(?:vulgar|profane|profanity|foul)\b/u,
   ].some((pattern) => pattern.test(intent));
-  if (!named && !explicitEverySpeechProfanity) return null;
+  if (!named && !activationAlias && !explicitEverySpeechProfanity) return null;
   const subject = compact(botName, 100) || "This bot";
   return {
     version: BOT_POWER_VERSION,
@@ -975,17 +981,31 @@ function deterministicFalseNamePower(
   const intent = compact(source.intent, 600)
     .toLowerCase()
     .replace(/[’']/gu, "'");
+  const haystack = `${name} ${intent}`;
+  const explicitSurnameName =
+    /^(?:surname drift|shifting surname|new last name|session surname)$/u.test(
+      name,
+    );
+  const surnameLanguage =
+    explicitSurnameName ||
+    /\b(?:new|random|different|fresh|another)\s+(?:last\s+names?|surnames?|family\s+names?)\b/u.test(
+      haystack,
+    ) ||
+    /\b(?:last\s+names?|surnames?|family\s+names?)\s+(?:each|every|per)\s+session\b/u.test(
+      haystack,
+    ) ||
+    /\b(?:changes?|changing|gets?|has|have)\s+(?:a\s+)?(?:new\s+)?(?:last\s+name|surname)\b/u.test(
+      haystack,
+    );
   const explicitName =
     /^(?:john(?:\/| |-)jane doe|jane(?:\/| |-)john doe|john doe|jane doe|false name|wrong name|alias)$/u.test(
       name,
     );
   const falseNameLanguage =
     /\b(?:john(?:\/| |-)jane\s+doe|jane(?:\/| |-)john\s+doe|john\s+doe|jane\s+doe)\b/u.test(
-      `${name} ${intent}`,
+      haystack,
     ) ||
-    /\b(?:false|wrong|fake|random|stolen|forgotten)\s+name\b/u.test(
-      `${name} ${intent}`,
-    ) ||
+    /\b(?:false|wrong|fake|random|stolen|forgotten)\s+name\b/u.test(haystack) ||
     /\bbelieves?\s+(?:their|his|her|its|a)\s+name\s+is\b/u.test(intent) ||
     /\bconvinced\s+(?:its|their|his|her)\s+name\s+is\b/u.test(intent) ||
     /\brandom\s+(?:full\s+)?name\s+each\s+(?:session|turn)\b/u.test(intent);
@@ -997,17 +1017,38 @@ function deterministicFalseNamePower(
   // Anti-truth also mentions invented names; do not steal that contract.
   const antiTruthLanguage =
     /\b(?:anti[- ]?truth|fibbing|compulsive\s+liar|pathological\s+liar)\b/u.test(
-      `${name} ${intent}`,
+      haystack,
     ) ||
     /\bcan(?:not|'t)\s+tell\s+the\s+truth\b/u.test(intent) ||
     /\bonly\s+(?:tells?|speak(?:s|ing)?)\s+lies?\b/u.test(intent);
-  if (
-    antiTruthLanguage ||
-    (!explicitName && (!falseNameLanguage || shapeshiftLanguage))
-  ) {
+  if (antiTruthLanguage || shapeshiftLanguage) {
     return null;
   }
   const subject = compact(botName, 100) || "This bot";
+  if (surnameLanguage) {
+    return {
+      version: BOT_POWER_VERSION,
+      sourceHash: botPowerSourceHashV1(source.name, source.intent),
+      selfCue:
+        "Keep your given name. Each session, add a new last name and treat that full name as yours until short-term amnesia clears it. Answer to both the short given name and the full name. The player is never a target.",
+      observerCue:
+        `${subject} is using a new last name this session and still answers to their given name; the last name reshuffles when short-term amnesia wipes continuity.`,
+      effects: [
+        {
+          type: "false_name",
+          continuity: "session_sticky_until_amnesia",
+          pool: "given_plus_random_surname",
+        },
+      ],
+      ruleLabels: [
+        "New last name each session",
+        "Reshuffles with short-term amnesia",
+      ],
+    };
+  }
+  if (!explicitName && !falseNameLanguage) {
+    return null;
+  }
   return {
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
@@ -1218,6 +1259,45 @@ function deterministicAddressedFandomPower(
   };
 }
 
+function deterministicChromaticBiasPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const effects = botPowerChromaticBiasEffectsFromIntentV1(source.name, source.intent);
+  if (effects.length === 0) return null;
+  const subject = compact(botName, 100) || "This bot";
+  const labels = effects.map((effect) => {
+    if (effect.color.kind === "complementary_of_holder") {
+      return effect.polarity === "love"
+        ? "Loves complementary hues"
+        : "Hates complementary hues";
+    }
+    return effect.polarity === "love"
+      ? `Favors ${effect.color.label} hues`
+      : `Hates ${effect.color.label} hues`;
+  });
+  const selfSummary = effects.map((effect) => {
+    if (effect.color.kind === "complementary_of_holder") {
+      return effect.polarity === "love"
+        ? "favor bots whose phosphor hue is opposite your own"
+        : "snub bots whose phosphor hue is opposite your own";
+    }
+    return effect.polarity === "love"
+      ? `favor bots near ${effect.color.label}`
+      : `snub bots near ${effect.color.label}`;
+  });
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue:
+      `You judge other bots by phosphor color: ${selfSummary.join("; ")}. Show it in tone and attention without puppeting anyone. Never apply this to the player or to people; never mention human race, ethnicity, or slurs.`,
+    observerCue:
+      `${subject} treats other bots according to phosphor hue (${labels.join(", ").toLowerCase()}); this is never about people or the player.`,
+    effects,
+    ruleLabels: labels.slice(0, 8),
+  };
+}
+
 function deterministicAddressedInsultPower(
   source: BotPowerV1,
   botName: string,
@@ -1251,7 +1331,7 @@ function deterministicAddressedInsultPower(
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
     selfCue:
-      "Every ordinary spoken reply must open early with a fresh, tailored personal insult aimed at the current addressee, then remain substantive and in character. Attack conduct, competence, reasoning, or ego only; never protected traits, family, grief, trauma, private facts, or slurs. Rate only the strongest naturally landed jabs.",
+      "Every ordinary spoken reply must fulfill its conversational purpose through a fresh direct insult aimed at the current addressee. The insult carries the answer itself rather than opening a debate or being prepended to an otherwise normal reply. Echoes, summaries, thanks, agreement, and help may be creatively reframed through the insult; facts, tools, and safety remain correct. Attack conduct, competence, reasoning, choices, or ego only; never protected traits, family, grief, trauma, private facts, or slurs. Rate only the strongest naturally landed jabs.",
     observerCue:
       `${subject} cannot address someone without a fresh personal jab aimed at that addressee; treat it as their recurring curse without adopting the insult.`,
     effects: [
@@ -1751,6 +1831,7 @@ function deterministicPower(
     deterministicInterruptionPower(source, botName) ??
     deterministicAddressedInsultPower(source, botName) ??
     deterministicAddressedFandomPower(source, botName) ??
+    deterministicChromaticBiasPower(source, botName) ??
     deterministicGhostPower(source, botName) ??
     deterministicInvisiblePower(source, botName) ??
     deterministicAvatarColorCyclePower(source, botName) ??
@@ -1798,10 +1879,14 @@ function normalizeCompiledEntry(
   const ruleLabels = rawRuleLabels.length > 0
     ? rawRuleLabels.map((label) => compact(label, 100)).filter(Boolean).slice(0, 8)
     : [];
-  if (!selfCue && !observerCue && effects.length === 0) return null;
+  const cursedTongueAllowed = Boolean(deterministicCursedTonguePower(source, ""));
+  const authorizedEffects = effects.filter(
+    (effect) => effect.type !== "cursed_tongue" || cursedTongueAllowed,
+  );
+  if (!selfCue && !observerCue && authorizedEffects.length === 0) return null;
   const targetedInvisible =
     compact(source.name, 120).toLowerCase() === "invisible" &&
-    effects.some((effect) => effect.type === "awareness");
+    authorizedEffects.some((effect) => effect.type === "awareness");
   return {
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
@@ -1809,13 +1894,13 @@ function normalizeCompiledEntry(
     observerCue,
     effects: targetedInvisible
       ? [
-          ...effects.filter((effect) => effect.type !== "avatar_visibility"),
+          ...authorizedEffects.filter((effect) => effect.type !== "avatar_visibility"),
           {
             type: "avatar_visibility",
             mode: "hidden",
           } satisfies BotPowerEffectV1,
         ].slice(0, 8)
-      : effects,
+      : authorizedEffects,
     ruleLabels: targetedInvisible
       ? Array.from(
           new Set([
@@ -1905,8 +1990,17 @@ function compiledEntrySatisfiesIntent(
   if (deterministicIdentityShapeshiftPower(source, "")) {
     return compiled.effects.some((effect) => effect.type === "identity_shapeshift");
   }
-  if (deterministicFalseNamePower(source, "")) {
-    return compiled.effects.some((effect) => effect.type === "false_name");
+  const requiredFalseName = deterministicFalseNamePower(source, "");
+  if (requiredFalseName) {
+    const requiredPool = requiredFalseName.effects.find(
+      (effect) => effect.type === "false_name",
+    );
+    return compiled.effects.some(
+      (effect) =>
+        effect.type === "false_name" &&
+        (requiredPool?.type !== "false_name" ||
+          effect.pool === requiredPool.pool),
+    );
   }
   if (deterministicIdentityMirrorPower(source, "")) {
     return compiled.effects.some((effect) => effect.type === "identity_mirror");
@@ -1922,6 +2016,17 @@ function compiledEntrySatisfiesIntent(
   }
   if (deterministicAddressedFandomPower(source, "")) {
     return compiled.effects.some((effect) => effect.type === "addressed_fandom");
+  }
+  if (deterministicChromaticBiasPower(source, "")) {
+    const required = deterministicChromaticBiasPower(source, "");
+    return Boolean(
+      required &&
+        required.effects.every((needed) =>
+          compiled.effects.some(
+            (effect) => JSON.stringify(effect) === JSON.stringify(needed),
+          ),
+        ),
+    );
   }
   if (deterministicGhostPower(source, "")) {
     return compiled.effects.some(
@@ -2002,13 +2107,25 @@ function compiledEntriesByDraft(
     if (!normalized || !compiledEntrySatisfiesIntent(normalized, power)) continue;
     const generatedEntry = generated[generatedIndex] as Record<string, unknown>;
     if (power.authoringMode === "prompt") {
-      const name = compact(generatedEntry.name, 40);
+      const name = normalizeBotPowerGeneratedTitleV1(generatedEntry.name);
+      const cursedTongueTitle =
+        /^(?:cursed tongue|curse of(?: the)? tongue|profane tongue|foul mouth)$/u.test(
+          name.toLowerCase().replace(/[’]/gu, "'"),
+        );
+      const allowedName =
+        name &&
+        !(
+          cursedTongueTitle &&
+          !normalized.effects.some((effect) => effect.type === "cursed_tongue")
+        )
+          ? name
+          : "";
       const sigil = typeof generatedEntry.sigil === "string" &&
           (BOT_POWER_SIGIL_IDS_V1 as readonly string[]).includes(generatedEntry.sigil)
         ? generatedEntry.sigil as BotPowerSigilIdV1
         : undefined;
-      if (name || sigil) decorations?.set(power.id, {
-        ...(name ? { name } : {}),
+      if (allowedName || sigil) decorations?.set(power.id, {
+        ...(allowedName ? { name: allowedName } : {}),
         ...(sigil ? { sigil } : {}),
       });
     }
@@ -2143,16 +2260,13 @@ function promptPowerDisplayName(
   power: BotPowerV1,
   compiled: CompiledBotPowerV1,
 ): string {
-  if (power.name.trim()) {
-    return compact(power.name, 40);
+  const generatedTitle = normalizeBotPowerGeneratedTitleV1(power.name);
+  if (generatedTitle) {
+    return generatedTitle;
   }
   const canonical = promptPowerCanonicalDisplayName(compiled);
   if (canonical) return canonical;
-  const words = power.intent.match(/[A-Za-z0-9]+/gu)?.slice(0, 3) ?? [];
-  const candidate = words
-    .map((word) => `${word.slice(0, 1).toUpperCase()}${word.slice(1).toLowerCase()}`)
-    .join(" ");
-  return compact(candidate, 40) || "Unwritten Gift";
+  return botPowerFallbackTitleV1(`${power.id}\n${power.intent}`, power.name);
 }
 
 function promptPowerCanonicalDisplayName(compiled: CompiledBotPowerV1): string | null {
@@ -2164,11 +2278,18 @@ function promptPowerCanonicalDisplayName(compiled: CompiledBotPowerV1): string |
   if (types.has("speech_audience")) return "Bound Voice";
   if (types.has("mute")) return "Silent Oath";
   if (types.has("identity_shapeshift")) return "Shapeshifter";
-  if (types.has("false_name")) return "John/Jane Doe";
+  if (types.has("false_name")) {
+    const falseName = compiled.effects.find((effect) => effect.type === "false_name");
+    return falseName?.type === "false_name" &&
+      falseName.pool === "given_plus_random_surname"
+      ? "Surname Drift"
+      : "John/Jane Doe";
+  }
   if (types.has("identity_mirror")) return "Borrowed Self";
   if (types.has("speech_copy")) return "Echo Binding";
   if (types.has("interruption")) return "Broken Cadence";
   if (types.has("addressed_insult")) return "Barbed Address";
+  if (types.has("chromatic_bias")) return "Hue Prejudice";
   if (types.has("cursed_tongue")) return "Cursed Tongue";
   if (types.has("mood_boost")) return "Radiant Wake";
   if (types.has("mood_drain")) return "Gravitic Gloom";
@@ -2206,6 +2327,7 @@ function promptPowerSigil(
   if (types.has("speech_copy")) return "wave";
   if (types.has("interruption")) return "thorn";
   if (types.has("addressed_insult")) return "thorn";
+  if (types.has("chromatic_bias")) return "prism";
   if (types.has("cursed_tongue")) return "thorn";
   if (types.has("mood_boost")) return "star";
   if (types.has("mood_drain")) return "moon";
@@ -2249,7 +2371,7 @@ function decoratePromptPowerForCompile(
   if (power.authoringMode !== "prompt") {
     return decoration ? { ...power, ...decoration } : power;
   }
-  if (power.name.trim()) {
+  if (normalizeBotPowerGeneratedTitleV1(power.name)) {
     return decoration?.sigil ? { ...power, sigil: decoration.sigil } : power;
   }
   if (promptPowerCanonicalDisplayName(compiled)) {
@@ -2307,11 +2429,24 @@ function bindCompiledPowerTargetIds(
 
 export async function compileBotPowers(args: {
   provider: LlmProvider;
+  model?: string | null;
   botName?: string;
   systemPrompt?: string;
   powers: unknown;
   targetBots?: readonly { id: string; name: string }[];
 }): Promise<{ powers: BotPowerV1[]; conflicts: string[] }> {
+  const requestedModel = compact(args.model, 200);
+  const provider: LlmProvider = requestedModel
+    ? {
+        ...args.provider,
+        diagnosticModel: requestedModel,
+        generateResponse: (messages, options) =>
+          args.provider.generateResponse(messages, {
+            ...options,
+            model: requestedModel,
+          }),
+      }
+    : args.provider;
   const drafts = normalizeBotPowersV1(args.powers).map((power) => ({
     ...power,
     compileStatus: "draft" as const,
@@ -2319,21 +2454,42 @@ export async function compileBotPowers(args: {
   }));
   if (drafts.length === 0) return { powers: [], conflicts: [] };
 
+  const tooShortIds = new Set(
+    drafts
+      .filter(
+        (power) =>
+          power.authoringMode === "prompt" &&
+          compact(power.intent, BOT_POWER_INTENT_MAX_LENGTH).length < 3,
+      )
+      .map((power) => power.id),
+  );
   const deterministic = new Map<string, CompiledBotPowerV1>();
   for (const power of drafts) {
+    if (tooShortIds.has(power.id)) continue;
     const compiled = deterministicPower(power, args.botName ?? "");
     if (compiled) deterministic.set(power.id, compiled);
   }
-  const modelDrafts = drafts.filter((power) => !deterministic.has(power.id));
+  const modelDrafts = drafts.filter(
+    (power) => !deterministic.has(power.id) && !tooShortIds.has(power.id),
+  );
   if (modelDrafts.length === 0) {
     return finalizeCompiledPowers(
-      drafts.map((power) =>
-        readyCompiledPower(
+      drafts.map((power) => {
+        if (tooShortIds.has(power.id)) {
+          return {
+            ...power,
+            compileStatus: "error" as const,
+            compileError:
+              "Describe the Power in a short sentence, then create it again.",
+            compiled: null,
+          };
+        }
+        return readyCompiledPower(
           power.authoringMode === "prompt" ? { ...power, name: "" } : power,
           deterministic.get(power.id)!,
           args.targetBots,
-        ),
-      ),
+        );
+      }),
     );
   }
 
@@ -2364,7 +2520,7 @@ export async function compileBotPowers(args: {
         '- {"type":"speech_copy","trigger":"direct_address"},',
         '- {"type":"identity_mirror","trigger":"direct_bot_address"},',
         '- {"type":"identity_shapeshift","pool":"library_or_marketplace","continuity":"session_sticky_until_amnesia"},',
-        '- {"type":"false_name","continuity":"session_sticky_until_amnesia","pool":"mixed_persona_names"},',
+        '- {"type":"false_name","continuity":"session_sticky_until_amnesia","pool":"mixed_persona_names|given_plus_random_surname"} — mixed replaces the whole believed name; given_plus_random_surname keeps the Library given name and adds a new last name each session,',
         '- {"type":"hearing_repeat","frequency":"occasional|frequent","moodPenalty":"small|medium|large"},',
         '- {"type":"awareness","allowed":[target...],"excluded":[target...] (optional)},',
         '- {"type":"speech_audience","allowed":[target...],"excluded":[target...] (optional)},',
@@ -2390,6 +2546,7 @@ export async function compileBotPowers(args: {
         '- {"type":"credulity","strength":"small|medium|large"},',
         '- {"type":"anti_truth","strength":"small|medium|large"},',
         '- {"type":"addressed_fandom","strength":"small|medium|large"},',
+        '- {"type":"chromatic_bias","polarity":"love|hate","color":{"kind":"named","hue":0_to_360,"label":"red"}|{"kind":"complementary_of_holder"},"strength":"small|medium|large","matchBandDeg":30} means the holder favors or snubs other bots by phosphor hue; omit color or use racist/complementary wording for the opposite of the holder; never target the player or people,',
         '- {"type":"addressed_insult","trigger":"every_spoken_reply","target":"current_addressee","style":"fresh_tailored"},',
         '- {"type":"mood_resistance","polarity":"positive|negative|both","strength":"small|medium|large"},',
         '- {"type":"cup_rate","rate":"none|slow|fast|very_fast"},',
@@ -2408,14 +2565,14 @@ export async function compileBotPowers(args: {
   ];
   let raw: string;
   try {
-    raw = await args.provider.generateResponse(messages, {
+    raw = await provider.generateResponse(messages, {
       temperature: 0.1,
       maxTokens: BOT_POWER_COMPILE_MAX_TOKENS,
       jsonMode: true,
       usagePurpose: "memory_inference",
     });
   } catch (error) {
-    const compileError = providerFailureMessage(args.provider, error);
+    const compileError = providerFailureMessage(provider, error);
     return finalizeCompiledPowers(drafts.map((power) => {
       const deterministicPower = deterministic.get(power.id);
       return deterministicPower
@@ -2455,12 +2612,12 @@ export async function compileBotPowers(args: {
           `Expected powers: ${JSON.stringify(unresolved.map(({ id, authoringMode, name, intent, enabled }) => ({ id, authoringMode, name, intent, enabled })))}`,
           `Prior output: ${compact(raw, 6000) || "(empty)"}`,
           "Return {\"powers\":[{\"id\":string,\"name\":string,\"selfCue\":string,\"observerCue\":string,\"effects\":[],\"ruleLabels\":string[]}]}",
-          "Allowed effect types: mute, breathless, ineptitude, power_immunity, designation, eternal_introduction, speech_copy, identity_mirror, identity_shapeshift, false_name, hearing_repeat, awareness, speech_audience, avatar_visibility, avatar_scale, avatar_color_cycle, voice_presence, speech_obfuscation, cursed_tongue, intermittent_mute, intermittent_audibility, annoyance, social_influence, mood_boost, mood_drain, candor, credulity, anti_truth, addressed_fandom, mood_resistance, cup_rate, action_bias, interruption, response_budget, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
+          "Allowed effect types: mute, breathless, ineptitude, power_immunity, designation, eternal_introduction, speech_copy, identity_mirror, identity_shapeshift, false_name, hearing_repeat, awareness, speech_audience, avatar_visibility, avatar_scale, avatar_color_cycle, voice_presence, speech_obfuscation, cursed_tongue, intermittent_mute, intermittent_audibility, annoyance, social_influence, mood_boost, mood_drain, candor, credulity, anti_truth, addressed_fandom, chromatic_bias, mood_resistance, cup_rate, action_bias, interruption, response_budget, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
         ].join("\n"),
       },
     ];
     try {
-      const repairedRaw = await args.provider.generateResponse(repairMessages, {
+      const repairedRaw = await provider.generateResponse(repairMessages, {
         temperature: 0,
         maxTokens: BOT_POWER_COMPILE_MAX_TOKENS,
         jsonMode: true,
@@ -2478,6 +2635,15 @@ export async function compileBotPowers(args: {
   }
 
   return finalizeCompiledPowers(drafts.map((power) => {
+    if (tooShortIds.has(power.id)) {
+      return {
+        ...power,
+        compileStatus: "error" as const,
+        compileError:
+          "Describe the Power in a short sentence, then create it again.",
+        compiled: null,
+      };
+    }
     const deterministicCompiled = deterministic.get(power.id);
     const compiled = deterministicCompiled ?? compiledById.get(power.id);
     const decoration = decorations.get(power.id);
@@ -2485,7 +2651,7 @@ export async function compileBotPowers(args: {
       return {
           ...power,
           compileStatus: "error" as const,
-          compileError: compileFailureMessage(power, args.provider),
+          compileError: compileFailureMessage(power, provider),
           compiled: null,
         };
     }
@@ -2529,127 +2695,5 @@ export async function rewriteBotPowerAntiTruthAnswerV1(args: {
     return next;
   } catch {
     return draft;
-  }
-}
-
-type CursedTongueProtectedSpanV1 = { start: number; end: number; value: string };
-
-function cursedTongueProtectedSpansV1(source: string): CursedTongueProtectedSpanV1[] {
-  const ranges: Array<{ start: number; end: number }> = [];
-  const add = (pattern: RegExp) => {
-    for (const match of source.matchAll(pattern)) {
-      const start = match.index ?? -1;
-      if (start >= 0 && match[0]) ranges.push({ start, end: start + match[0].length });
-    }
-  };
-  add(/\*[^*\n]{1,600}\*/gu);
-  add(/```[\s\S]*?```|~~~[\s\S]*?~~~/gu);
-  add(/`[^`\n]+`/gu);
-  add(/\[\[(?:source|exhibit):[a-z0-9][a-z0-9_-]{0,47}\]\]/giu);
-  add(/\[(?:\^?\d+|[a-z][a-z0-9_-]{0,31})\]/giu);
-  add(/\[[^\]\n]{1,160}\]\((?:prism-bot|https?):\/\/[^)\s]+\)/giu);
-  add(/(?:https?:\/\/|www\.)[^\s<>()]+/giu);
-  add(/^\s*(?:\{|\[(?=\s*(?:\{|\[|"|-?\d|true\b|false\b|null\b))|<\/?[a-z][^>]*>|"[^"\n]+"\s*:|[a-z_][a-z0-9_.-]*\s*:\s*(?:[\[{"\d]|true\b|false\b|null\b))[^\n]*$/gimu);
-  return ranges
-    .sort((left, right) => left.start - right.start || right.end - left.end)
-    .reduce<CursedTongueProtectedSpanV1[]>((spans, range) => {
-      const previous = spans.at(-1);
-      if (previous && range.start < previous.end) return spans;
-      spans.push({ ...range, value: source.slice(range.start, range.end) });
-      return spans;
-    }, []);
-}
-
-function cursedTongueProtectedDraftV1(source: string): {
-  draft: string;
-  placeholders: readonly string[];
-  restore: (value: string) => string;
-} {
-  const spans = cursedTongueProtectedSpansV1(source);
-  let cursor = 0;
-  let draft = "";
-  const placeholders = spans.map((_, index) => `[[PRISM_CT_PROTECTED_${String(index).padStart(4, "0")}]]`);
-  for (const [index, span] of spans.entries()) {
-    draft += source.slice(cursor, span.start) + placeholders[index];
-    cursor = span.end;
-  }
-  draft += source.slice(cursor);
-  return {
-    draft,
-    placeholders,
-    restore: (value) => spans.reduce(
-      (restored, span, index) => restored.replace(placeholders[index]!, span.value),
-      value,
-    ),
-  };
-}
-
-function cursedTongueRewriteLooksSafeV1(
-  value: string,
-  source: string,
-  placeholders: readonly string[],
-): boolean {
-  if (!value || botPowerResponseIsSilentV1(value)) return false;
-  if (placeholders.some((placeholder) => value.split(placeholder).length !== 2)) return false;
-  if (
-    /\[\[PRISM_CT_PROTECTED_/u.test(
-      placeholders.reduce((remaining, placeholder) => remaining.replace(placeholder, ""), value),
-    )
-  ) return false;
-  const sourceLength = Math.max(source.length, 1);
-  if (value.length < Math.max(8, Math.floor(sourceLength * 0.45)) || value.length > sourceLength * 2.5 + 240) return false;
-  // Cursed Tongue is profane, never hateful. This intentionally stays small and
-  // conservative; the rewrite prompt also forbids any identity-directed abuse.
-  if (/\b(?:nigg(?:er|a)s?|faggot(?:s)?|kike(?:s)?|spic(?:s)?|trann(?:y|ies)|chink(?:s)?)\b/iu.test(value)) return false;
-  return /\b(?:fuck(?:ing|ed|er|s)?|shit(?:ty)?|goddamn(?:ed)?|damn|hell|ass(?:hole)?|bastard)\b/iu.test(value);
-}
-
-/**
- * Cursed Tongue's normal public delivery: a separate contextual rewrite of the
- * holder's clean draft. The deterministic shared helper remains the safe
- * provider-failure fallback, including when protected records are damaged.
- */
-export async function rewriteBotPowerCursedTongueAnswerV1(args: {
-  provider: LlmProvider;
-  draftAnswer: string;
-  seed?: string;
-  model?: string | null;
-  usagePurpose?: UsagePurpose;
-  signal?: AbortSignal;
-}): Promise<string> {
-  const source = typeof args.draftAnswer === "string" ? args.draftAnswer.trim() : "";
-  if (!source || botPowerResponseIsSilentV1(source)) return source;
-  const protectedDraft = cursedTongueProtectedDraftV1(source);
-  const fallback = () => applyBotPowerCursedTongueResponseV1(source, args.seed ?? "cursed-tongue");
-  try {
-    const rewritten = await args.provider.generateResponse(
-      [
-        {
-          role: "system",
-          content: [
-            "You are PRISM's Cursed Tongue public rewrite pass.",
-            "Rewrite the clean reply below as a coherent human voice with frequent, strong, uncensored non-slur profanity and natural cadence.",
-            "The curse is conspicuously excessive even when the subject is wholesome: use varied fuck/fucking, shit, goddamn, and similarly strong non-slur idioms freely instead of retreating to only mild damn or hell. In a long reply, spread several profanity beats across the answer and occasionally join them into a natural outburst without forcing one into every bullet.",
-            "Rebuild whole phrases and sentences so the vulgarity sounds intentional: favor reactions, emphatic asides, clause-level intensifiers, and idiomatic swearing. Never sprinkle curse words mechanically before arbitrary nouns, measurements, ingredient or item names, headings, proper nouns, or safety qualifications.",
-            "Preserve every fact, calculation, instruction, safety qualification, name, citation, Markdown structure, link, and overall detail. Do not add claims, remove content, insult an identity, sexualize anything, or use slurs.",
-            "Every [[PRISM_CT_PROTECTED_####]] token is an exact protected record. Copy every token once, byte-for-byte, in its original place; never put profanity inside one. Return only the rewritten reply.",
-          ].join(" "),
-        },
-        { role: "user", content: protectedDraft.draft },
-      ],
-      {
-        temperature: 0.7,
-        maxTokens: Math.min(2400, Math.max(220, Math.ceil(source.length / 3) + 160)),
-        ...(args.model ? { model: args.model } : {}),
-        usagePurpose: args.usagePurpose ?? "system_unlabeled",
-        ...(args.signal ? { signal: args.signal } : {}),
-      },
-    );
-    const candidate = typeof rewritten === "string" ? rewritten.trim() : "";
-    if (!cursedTongueRewriteLooksSafeV1(candidate, source, protectedDraft.placeholders)) return fallback();
-    const restored = protectedDraft.restore(candidate);
-    return restored || fallback();
-  } catch {
-    return fallback();
   }
 }

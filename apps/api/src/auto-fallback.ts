@@ -28,6 +28,9 @@ export interface AutoFallbackRunResult<T> {
   recovery?: AutoRecoveryTraceV1;
 }
 
+/** Auto may inspect the whole eligible lane, but one request stays bounded. */
+export const AUTO_FALLBACK_TOTAL_TIMEOUT_MAX_MS = 600_000;
+
 /** The primary keeps its configured effort; recovery attempts prioritize speed. */
 export function autoFallbackReasoningEffort<
   T extends ProviderReasoningEffort | undefined,
@@ -111,19 +114,38 @@ export async function runAutoFallbackChain<T = string>(args: {
     args.attempts.length < minimumAttemptCount ||
     args.attempts.length > AUTO_FALLBACK_CHAIN_MAX_ATTEMPT_COUNT
   ) {
-    throw new Error("Auto requires one primary model and one to five fallback models.");
+    throw new Error(
+      `Auto requires one primary model and between one and ${AUTO_FALLBACK_CHAIN_MAX_ATTEMPT_COUNT - 1} recovery routes.`,
+    );
   }
   const now = args.now ?? Date.now;
   const startedAt = now();
-  const deadline = startedAt + Math.max(1, Math.floor(args.totalTimeoutMs));
+  const totalTimeoutMs = Math.min(
+    AUTO_FALLBACK_TOTAL_TIMEOUT_MAX_MS,
+    Math.max(1, Math.floor(args.totalTimeoutMs)),
+  );
+  const deadline = startedAt + totalTimeoutMs;
   const validate = args.validate ?? (validateAutoFallbackText as (raw: string) => AutoFallbackValidationResult<T>);
   const traces: AutoFallbackAttemptTraceV1[] = [];
+  const finalAttemptIndex = args.attempts.length - 1;
+  const finalAttempt = args.attempts[finalAttemptIndex];
+  const reservesFinalLocalRecovery =
+    args.attempts[0]?.provider !== "local" && finalAttempt?.provider === "local";
+  const finalLocalRecoveryReserveMs = reservesFinalLocalRecovery
+    ? Math.min(60_000, Math.max(1, Math.floor(totalTimeoutMs / 3)))
+    : 0;
 
   for (const [attemptIndex, attempt] of args.attempts.entries()) {
     rethrowOuterCancellation(args.signal);
     const attemptStartedAt = now();
     const remainingMs = deadline - attemptStartedAt;
     if (remainingMs <= 0) break;
+    const finalLocalRecoveryPending =
+      reservesFinalLocalRecovery && attemptIndex < finalAttemptIndex;
+    const availableAttemptMs = finalLocalRecoveryPending
+      ? remainingMs - finalLocalRecoveryReserveMs
+      : remainingMs;
+    if (availableAttemptMs <= 0) continue;
 
     if (attempt.available === false) {
       traces.push({
@@ -149,8 +171,8 @@ export async function runAutoFallbackChain<T = string>(args: {
       ),
     );
     const controller = new AbortController();
-    const attemptBudgetMs = Math.min(perAttemptTimeoutMs, remainingMs);
-    const exhaustsTotalBudget = attemptBudgetMs >= remainingMs;
+    const attemptBudgetMs = Math.min(perAttemptTimeoutMs, availableAttemptMs);
+    const exhaustsAvailableBudget = attemptBudgetMs >= availableAttemptMs;
     let timedOut = false;
     const timeout = setTimeout(() => {
       timedOut = true;
@@ -209,7 +231,7 @@ export async function runAutoFallbackChain<T = string>(args: {
         outcome: "failed",
         reason: timedOut ? "timeout" : "provider_error",
       });
-      if (timedOut && exhaustsTotalBudget) break;
+      if (timedOut && exhaustsAvailableBudget && !finalLocalRecoveryPending) break;
       if (now() >= deadline) break;
       void error;
     } finally {

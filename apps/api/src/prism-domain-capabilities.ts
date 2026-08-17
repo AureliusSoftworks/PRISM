@@ -2530,6 +2530,12 @@ function botDeleteCapability(): PrismCapabilityDefinition {
               AND COALESCE(source, 'direct') != 'about_you'`,
         )
         .get(context.userId, String(row.id)) as { count: number };
+      const hostedShows = context.db
+        .prepare(
+          `SELECT COUNT(*) AS count FROM botcast_shows
+            WHERE user_id = ? AND host_bot_id = ?`,
+        )
+        .get(context.userId, String(row.id)) as { count: number };
       return {
         ...simplePreview(
           `Delete ${String(row.name)} and quarantine its bot-scoped data for 30 days.`,
@@ -2546,6 +2552,9 @@ function botDeleteCapability(): PrismCapabilityDefinition {
         consequences: [
           `${Number(memories.count).toLocaleString()} bot-scoped memories will be quarantined.`,
           "Historical messages remain, but their bot link is restored only if Undo is used.",
+          ...(Number(hostedShows.count) > 0
+            ? [`${Number(hostedShows.count)} hosted Signal archive${Number(hostedShows.count) === 1 ? " remains" : "s remain"}; future production pauses until a new host consents.`]
+            : []),
         ],
       };
     },

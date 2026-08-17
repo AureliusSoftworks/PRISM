@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { composeBotRuntimePersona } from "./bot-global-mood.ts";
 import {
   PRISM_DEFAULT_STORY_THEME,
   PRISM_DEFAULT_STORY_THEME_ID,
@@ -9,7 +10,9 @@ import {
   STORY_LOCATION_COUNT_MAX,
   STORY_LOCATION_COUNT_MIN,
   applyBotPowerEternalIntroductionResponseV1,
+  applyBotPowerAddressedInsultV1,
   applyBotPowerBotNamesV1,
+  applyBotPowerCursedTongueResponseV1,
   applyBotPowerEchoResponseV1,
   applyBotPowerMumbledResponseV1,
   applyBotPowerMuteResponseV1,
@@ -18,6 +21,8 @@ import {
   applyBotPowerResponseBudgetV1,
   botPowerCursesSpeechV1,
   botPowerAddressedFandomCueV1,
+  botPowerAddressedInsultPrimaryCueV1,
+  botPowerChromaticBiasCueV1,
   botPowerCandorResponseRuleV1,
   botPowerCredulitySelfRuleV1,
   botPowerAntiTruthSelfRuleV1,
@@ -44,6 +49,7 @@ import {
   botPowerSubjectEffectsForObserverV1,
   botPowerAvatarVisibilityModeV1,
   botPowerSelfCueLinesV1,
+  botPowerRequiresAddressedInsultV1,
   botPowerThemeMoodCueV1,
   buildBotPowersPromptBlock,
   strongestBotPowerCandorEffectV1,
@@ -85,7 +91,6 @@ import type {
   ProviderMessage,
   ProviderName,
 } from "./providers.ts";
-import { rewriteBotPowerCursedTongueAnswerV1 } from "./bot-powers.ts";
 import {
   prepareMessagesWithSimulatedEffort,
   runWithReasoningGenerationBudget,
@@ -120,8 +125,6 @@ export interface CreateStorySessionInput {
 
 export interface StoryGenerationInput {
   provider: LlmProvider;
-  /** Prism-owned auxiliary lane used for public Power rewrites. */
-  auxiliaryProvider?: LlmProvider;
   providerName: ProviderName;
   model: string;
   bots: StoryBotProfile[];
@@ -130,6 +133,8 @@ export interface StoryGenerationInput {
   theme?: BotPowerResolvedThemeV1;
   reasoningEffort?: ReasoningEffort;
   turbo?: boolean;
+  /** Disable provider-internal recovery when the caller owns an explicit route plan. */
+  allowFinalLocalFallback?: boolean;
 }
 
 interface StorySessionRow {
@@ -576,7 +581,12 @@ export function loadStoryBotProfiles(
     return {
       id: row.id,
       name: row.name,
-      systemPrompt: row.system_prompt ?? "",
+      systemPrompt: composeBotRuntimePersona({
+        db,
+        userId,
+        botId: row.id,
+        basePrompt: row.system_prompt ?? "",
+      }),
       cloneFamilyId: row.clone_family_id,
       powers: parseStoredBotPowersV1(row.powers_json),
       color: row.color,
@@ -1309,7 +1319,8 @@ async function applyStoryHardResponsePowers(
   bots: readonly StoryBotProfile[],
   provider: LlmProvider,
   model: string,
-  auxiliaryProvider: LlmProvider = provider,
+  reasoningEffort?: ReasoningEffort,
+  turbo?: boolean,
 ): Promise<StoryEpisodeManifest> {
   const mutedBotIds = new Set(
     bots.filter((bot) => botPowerIsMutedV1(bot.powers)).map((bot) => bot.id),
@@ -1526,6 +1537,23 @@ async function applyStoryHardResponsePowers(
       };
     }
     if (
+      currentSpeaker &&
+      botPowerRequiresAddressedInsultV1(currentSpeaker.powers) &&
+      !mutedBotIds.has(currentSpeaker.id) &&
+      !eternalIntroductionBotIds.has(currentSpeaker.id) &&
+      !echoBotIds.has(currentSpeaker.id) &&
+      !intermittentMuteIgnored
+    ) {
+      nextScene = {
+        ...nextScene,
+        narration: applyBotPowerAddressedInsultV1(
+          nextScene.narration,
+          priorSpeaker?.name ?? "the player",
+          `${episode.id}:${scene.id}:${sceneIndex}:addressed-insult`,
+        ),
+      };
+    }
+    if (
       scene.speakerBotId &&
       mumblingBotIds.has(scene.speakerBotId) &&
       !eternalIntroductionBotIds.has(scene.speakerBotId) &&
@@ -1553,13 +1581,10 @@ async function applyStoryHardResponsePowers(
     ) {
       nextScene = {
         ...nextScene,
-        narration: await rewriteBotPowerCursedTongueAnswerV1({
-          provider: auxiliaryProvider,
-          draftAnswer: nextScene.narration,
-          seed: `${episode.id}:${scene.id}:${sceneIndex}`,
-          model: auxiliaryProvider.diagnosticModel?.trim() || model,
-          usagePurpose: "story_generation",
-        }),
+        narration: applyBotPowerCursedTongueResponseV1(
+          nextScene.narration,
+          `${episode.id}:${scene.id}:${sceneIndex}`,
+        ),
       };
     }
     if (
@@ -2046,6 +2071,19 @@ function storyGenerationPrompt(args: StoryGenerationInput): string {
         "the character, player, or audience addressed",
         "Story scene",
       );
+      const chromaticCue = botPowerChromaticBiasCueV1({
+        powers: bot.powers,
+        holderColor: bot.color,
+        holderBotId: bot.id,
+        peers: args.bots
+          .filter((peer) => peer.id !== bot.id)
+          .map((peer) => ({
+            botId: peer.id,
+            name: peer.name,
+            color: peer.color,
+          })),
+        modeLabel: "Story scene",
+      });
       const themeMoodCue = botPowerThemeMoodCueV1(bot.powers, args.theme);
       const ineptitudeMisdirection = botPowerIneptRoleMisdirectionV1(
         bot.powers,
@@ -2054,10 +2092,23 @@ function storyGenerationPrompt(args: StoryGenerationInput): string {
       );
       const genericSelfCuePowers = bot.powers?.filter(
         (power) => !power.compiled?.effects.some(
-          (effect) => effect.type === "ineptitude",
+          (effect) =>
+            effect.type === "ineptitude" ||
+            effect.type === "addressed_insult",
         ),
       );
+      const addressedInsultCue = botPowerAddressedInsultPrimaryCueV1(
+        bot.powers,
+        `the directly addressed character or player (scene cast: ${args.bots
+          .filter((target) => target.id !== bot.id)
+          .map((target) => target.name)
+          .join(", ") || "the player"})`,
+        "each Story scene spoken by this bot",
+      );
       const powers = buildBotPowersPromptBlock([
+        // Keep the hard first-call contract ahead of softer cues so it cannot
+        // be dropped by the bounded Story Power block.
+        ...(addressedInsultCue ? [addressedInsultCue] : []),
         ...(ineptitudeMisdirection ? [ineptitudeMisdirection] : []),
         ...(botPowerBotNamingCueV1(
           bot.name,
@@ -2072,6 +2123,7 @@ function storyGenerationPrompt(args: StoryGenerationInput): string {
           : []),
         ...botPowerSelfCueLinesV1(genericSelfCuePowers),
         ...(fandomCue ? [fandomCue] : []),
+        ...(chromaticCue ? [chromaticCue] : []),
         ...(themeMoodCue ? [themeMoodCue] : []),
         ...args.bots
           .filter((peer) => peer.id !== bot.id)
@@ -2310,6 +2362,9 @@ function storyGenerationOptions(args: StoryGenerationInput): GenerateOptions {
       jsonSchema: STORY_COMPACT_EPISODE_JSON_SCHEMA,
       jsonSchemaName: "prism_story_outline",
       usagePurpose: "story_generation",
+      ...(args.allowFinalLocalFallback === false
+        ? { allowFinalLocalFallback: false }
+        : {}),
     };
   }
   return {
@@ -2322,6 +2377,9 @@ function storyGenerationOptions(args: StoryGenerationInput): GenerateOptions {
     jsonSchema: STORY_EPISODE_JSON_SCHEMA,
     jsonSchemaName: "prism_story_episode",
     usagePurpose: "story_generation",
+    ...(args.allowFinalLocalFallback === false
+      ? { allowFinalLocalFallback: false }
+      : {}),
   };
 }
 
@@ -2446,7 +2504,8 @@ export async function generateStorySessionEpisode(
           args.bots,
           args.provider,
           args.model,
-          args.auxiliaryProvider,
+          args.reasoningEffort,
+          args.turbo,
         );
         try {
           generatedEpisode = await repairStoryQuietContextDependencies({

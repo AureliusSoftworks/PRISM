@@ -10,6 +10,7 @@ import type {
 import {
   filterConflictingMemories,
   normalizeMemoryDurability,
+  reconcileLegacySignalPairNarrativeMemoriesForBot,
 } from "./memory.ts";
 import { normalizeMemoryDisplayText } from "./memory-validation.ts";
 import { decryptJson } from "./security.ts";
@@ -330,13 +331,19 @@ export function loadBotMemoryPanelPayload(args: {
   limit?: number;
 }): BotMemoryPanelPayload {
   const { db, userId, userKey, botId } = args;
-  materializeShortTermMemoryDecay(db, userId);
   const bot = db
     .prepare("SELECT id FROM bots WHERE id = ? AND user_id = ?")
     .get(botId, userId) as { id?: string } | undefined;
   if (!bot?.id) {
     throw new HttpError(404, "Bot not found.");
   }
+  reconcileLegacySignalPairNarrativeMemoriesForBot({
+    db,
+    userId,
+    sourceBotId: botId,
+    userKey,
+  });
+  materializeShortTermMemoryDecay(db, userId);
 
   const conversationId = args.conversationId?.trim() || null;
   let sessionOpinion: SessionOpinion | null = null;

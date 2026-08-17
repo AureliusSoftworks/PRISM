@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  AUTO_FALLBACK_TOTAL_TIMEOUT_MAX_MS,
   AutoFallbackExhaustedError,
   autoFallbackReasoningEffort,
   runAutoFallbackChain,
@@ -18,6 +19,10 @@ function attempt(
 }
 
 describe("Auto fallback runner", () => {
+  it("keeps the whole-route budget bounded", () => {
+    assert.equal(AUTO_FALLBACK_TOTAL_TIMEOUT_MAX_MS, 600_000);
+  });
+
   it("preserves primary effort and disables thinking on every fallback", () => {
     assert.equal(autoFallbackReasoningEffort(0, "high"), "high");
     assert.equal(autoFallbackReasoningEffort(1, "high"), "none");
@@ -112,25 +117,55 @@ describe("Auto fallback runner", () => {
     assert.equal(result.attempts.length, 6);
   });
 
-  it("rejects chains outside the one-to-five fallback range", async () => {
+  it("rejects route plans outside the runtime attempt bound", async () => {
     await assert.rejects(
       runAutoFallbackChain({
         attempts: [attempt("local", "primary", async () => "unused")],
         perAttemptTimeoutMs: 100,
         totalTimeoutMs: 100,
       }),
-      /one primary model and one to five fallback models/,
+      /one primary model and between one and 63 recovery routes/,
     );
     await assert.rejects(
       runAutoFallbackChain({
-        attempts: Array.from({ length: 7 }, (_, index) =>
+        attempts: Array.from({ length: 65 }, (_, index) =>
           attempt("local", `model-${index}`, async () => "unused"),
         ),
         perAttemptTimeoutMs: 100,
         totalTimeoutMs: 100,
       }),
-      /one primary model and one to five fallback models/,
+      /one primary model and between one and 63 recovery routes/,
     );
+  });
+
+  it("reserves time for an explicit final local recovery attempt", async () => {
+    const calls: string[] = [];
+    const result = await runAutoFallbackChain({
+      attempts: [
+        attempt("openai", "primary", async () => {
+          calls.push("primary");
+          throw new Error("next");
+        }),
+        attempt("anthropic", "priority", async () => {
+          calls.push("priority");
+          throw new Error("next");
+        }),
+        attempt("openai", "remainder", async () => {
+          calls.push("remainder");
+          throw new Error("next");
+        }),
+        attempt("local", "llama3.2", async () => {
+          calls.push("local");
+          return "recovered locally";
+        }),
+      ],
+      perAttemptTimeoutMs: 100,
+      totalTimeoutMs: 300,
+    });
+
+    assert.equal(result.value, "recovered locally");
+    assert.equal(result.provider, "local");
+    assert.deepEqual(calls, ["primary", "priority", "remainder", "local"]);
   });
 
   it("skips unavailable attempts and fails after all three", async () => {

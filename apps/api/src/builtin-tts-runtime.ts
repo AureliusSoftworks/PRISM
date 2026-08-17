@@ -1,6 +1,7 @@
 import { resolve, sep } from "node:path";
 import {
   applyLocalVoiceSpeechprintToIpa,
+  applyVoiceAccentFieldToIpa,
   localVoicePronunciationOverrideIsActive,
   localVoiceSpeechprintIsActive,
   normalizeBotAudioVoiceProfileV1,
@@ -8,7 +9,12 @@ import {
   prismBuiltinEnglishVoice,
   resolveLocalAccentFallback,
   resolveLocalVoicePronunciationLocale,
+  resolveVoiceAccentField,
+  voiceAccentDefinitionForId,
+  voiceAccentDefinitionForLegacyProfile,
   type BotAudioVoiceProfileV1,
+  type PrismBuiltinEnglishVoice,
+  type VoiceAccentFieldResolutionV1,
 } from "@localai/shared";
 import { phonemize } from "phonemizer";
 import {
@@ -20,6 +26,20 @@ export {
   PRISM_BUILTIN_TTS_MODEL_ID,
   prismBuiltinTtsModelRoot,
 } from "./builtin-tts-assets.ts";
+
+export interface PrismVoicePackPronunciationPlan {
+  sourceText: string;
+  engineVoiceId: PrismBuiltinEnglishVoice["engineVoiceId"];
+  voiceLocale: string;
+  targetLocale: "en-US" | "en-GB";
+  targetIpa: string | null;
+}
+
+export interface AccentMapTargetIpaPlan {
+  sourceText: string;
+  targetLocale: "en-US" | "en-GB";
+  targetIpa: string | null;
+}
 
 let kokoroTtsPromise: Promise<import("kokoro-js").KokoroTTS> | null = null;
 let kokoroModelRoot: string | null = null;
@@ -68,9 +88,63 @@ export async function generatePrismVoicePackWaveInProcess(args: {
   profile: BotAudioVoiceProfileV1;
   protectedPhrases?: readonly string[];
 }): Promise<Buffer> {
+  const tts = await getKokoroTts();
+  const pronunciation = await preparePrismVoicePackPronunciation(args);
+  const options = {
+    voice: pronunciation.engineVoiceId,
+    // Pace is applied once by PRISM's formant-preserving playback worklet.
+    speed: 1,
+  } as const;
+  const audio = pronunciation.targetIpa
+    ? await generateTargetIpaAudio({
+        sourceText: pronunciation.sourceText,
+        targetIpa: pronunciation.targetIpa,
+        tts,
+        options,
+      })
+    : await tts.generate(pronunciation.sourceText, options);
+  return Buffer.from(audio.toWav());
+}
+
+/**
+ * Resolve the Accent Map into target IPA without changing the visible source
+ * text or the selected voice identity. Explicit map targets always take the
+ * phoneme path so pronunciation never falls back to a voice name or locale.
+ */
+export async function preparePrismVoicePackPronunciation(args: {
+  text: string;
+  profile: BotAudioVoiceProfileV1;
+  protectedPhrases?: readonly string[];
+}): Promise<PrismVoicePackPronunciationPlan> {
   const profile = normalizeBotAudioVoiceProfileV1(args.profile);
   const voice = prismBuiltinEnglishVoice(profile.baseVoiceId);
-  const tts = await getKokoroTts();
+  const target = await prepareAccentMapTargetIpa({
+    ...args,
+    voiceLocale: voice.locale,
+  });
+  return {
+    sourceText: target.sourceText,
+    engineVoiceId: voice.engineVoiceId,
+    voiceLocale: voice.locale,
+    targetLocale: target.targetLocale,
+    targetIpa: target.targetIpa,
+  };
+}
+
+/**
+ * Resolve the provider-neutral Accent Map into target IPA. This helper stays
+ * independent from voice identity so Local and Premium can share the exact
+ * same phonology while rendering it through different engines.
+ */
+export async function prepareAccentMapTargetIpa(args: {
+  text: string;
+  profile: BotAudioVoiceProfileV1;
+  protectedPhrases?: readonly string[];
+  voiceLocale?: string;
+}): Promise<AccentMapTargetIpaPlan> {
+  const profile = normalizeBotAudioVoiceProfileV1(args.profile);
+  const voiceLocale =
+    args.voiceLocale ?? prismBuiltinEnglishVoice(profile.baseVoiceId).locale;
   const localAccent = resolveLocalAccentFallback({
     accentDefinitionId: profile.accentDefinitionId,
     pronunciationBase: profile.pronunciationBase,
@@ -81,32 +155,41 @@ export async function generatePrismVoicePackWaveInProcess(args: {
     strength: profile.speechprintStrength,
     variationSeed: profile.speechprintVariationSeed,
   });
-  const options = {
-    voice: voice.engineVoiceId,
-    // Pace is applied once by PRISM's formant-preserving playback worklet.
-    speed: 1,
-  } as const;
-  const pronunciationLocale = resolveLocalVoicePronunciationLocale(
-    localAccent.pronunciationBase,
-    voice.locale,
+  const accentField = resolveVoiceAccentField({
+    point: profile.pronunciationMapPoint,
+    accentDefinitionId: profile.accentDefinitionId,
+    pronunciationBase: profile.pronunciationBase,
+    speechprintInfluence: profile.speechprintInfluence,
+  });
+  const fieldPrimary = accentField.layers[0];
+  const targetLocale = resolveLocalVoicePronunciationLocale(
+    fieldPrimary?.pronunciationBase ?? localAccent.pronunciationBase,
+    voiceLocale,
   );
   const phonemeControlActive =
+    (voiceAccentDefinitionForId(profile.accentDefinitionId) ??
+      voiceAccentDefinitionForLegacyProfile({
+        pronunciationBase: profile.pronunciationBase,
+        speechprintInfluence: profile.speechprintInfluence,
+      })) !== null ||
     localVoiceSpeechprintIsActive(speechprint) ||
     localVoicePronunciationOverrideIsActive(
       localAccent.pronunciationBase,
-      voice.locale,
+      voiceLocale,
     );
-  const audio = phonemeControlActive
-    ? await generateSpeechprintAudio({
-        text: args.text,
-        locale: pronunciationLocale,
-        speechprint,
-        protectedPhrases: args.protectedPhrases,
-        tts,
-        options,
-      })
-    : await tts.generate(args.text, options);
-  return Buffer.from(audio.toWav());
+  return {
+    sourceText: args.text,
+    targetLocale,
+    targetIpa: phonemeControlActive
+      ? await buildTargetIpa({
+          text: args.text,
+          locale: targetLocale,
+          speechprint,
+          accentField,
+          protectedPhrases: args.protectedPhrases,
+        })
+      : null,
+  };
 }
 
 function escapedPattern(value: string): string {
@@ -156,22 +239,13 @@ async function phonemizeEnglish(text: string, locale: string): Promise<string> {
   return lines.join(" ").trim();
 }
 
-async function generateSpeechprintAudio(args: {
+async function buildTargetIpa(args: {
   text: string;
   locale: string;
   speechprint: ReturnType<typeof normalizeLocalVoiceSpeechprintV1>;
+  accentField: VoiceAccentFieldResolutionV1;
   protectedPhrases?: readonly string[];
-  tts: import("kokoro-js").KokoroTTS;
-  options: NonNullable<Parameters<import("kokoro-js").KokoroTTS["generate"]>[1]>;
-}): Promise<Awaited<ReturnType<import("kokoro-js").KokoroTTS["generate"]>>> {
-  if (
-    typeof args.tts.tokenizer !== "function" ||
-    typeof args.tts.generate_from_ids !== "function"
-  ) {
-    throw new Error(
-      "Pinned Kokoro 1.2.1 phoneme/token-ID interface is unavailable.",
-    );
-  }
+}): Promise<string> {
   const ranges = protectedSpeechRanges(args.text, args.protectedPhrases);
   const parts: Array<{ text: string; protected: boolean }> = [];
   let cursor = 0;
@@ -194,15 +268,38 @@ async function generateSpeechprintAudio(args: {
     phonemes.push(
       part.protected
         ? ipa
-        : applyLocalVoiceSpeechprintToIpa({
-            ipa,
-            speechprint: args.speechprint,
-          }).ipa,
+        : args.accentField.legacy
+          ? applyLocalVoiceSpeechprintToIpa({
+              ipa,
+              speechprint: args.speechprint,
+            }).ipa
+          : applyVoiceAccentFieldToIpa({
+              ipa,
+              resolution: args.accentField,
+              strength: args.speechprint.strength,
+              variationSeed: args.speechprint.variationSeed,
+            }).ipa,
     );
   }
-  const transformedIpa = phonemes.join(" ").replace(/\s+/gu, " ").trim();
-  if (!transformedIpa) return args.tts.generate(args.text, args.options);
-  const { input_ids } = args.tts.tokenizer(transformedIpa, {
+  return phonemes.join(" ").replace(/\s+/gu, " ").trim();
+}
+
+async function generateTargetIpaAudio(args: {
+  sourceText: string;
+  targetIpa: string;
+  tts: import("kokoro-js").KokoroTTS;
+  options: NonNullable<Parameters<import("kokoro-js").KokoroTTS["generate"]>[1]>;
+}): Promise<Awaited<ReturnType<import("kokoro-js").KokoroTTS["generate"]>>> {
+  if (
+    typeof args.tts.tokenizer !== "function" ||
+    typeof args.tts.generate_from_ids !== "function"
+  ) {
+    throw new Error(
+      "Pinned Kokoro 1.2.1 phoneme/token-ID interface is unavailable.",
+    );
+  }
+  if (!args.targetIpa) return args.tts.generate(args.sourceText, args.options);
+  const { input_ids } = args.tts.tokenizer(args.targetIpa, {
     truncation: true,
   });
   return args.tts.generate_from_ids(input_ids, args.options);

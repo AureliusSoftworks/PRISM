@@ -10,6 +10,9 @@ import {
   BOT_AUTO_ACCENT_HUE_OFFSET_DEGREES,
   accentLightnessBand,
   blendWeightedBotIdentityColors,
+  botIdentityHueDeg,
+  circularHueDistanceDeg,
+  complementaryHueDeg,
   clampAccentLightness,
   clampLuminance,
   contrastRatio,
@@ -43,6 +46,16 @@ describe("fullySaturateBotColor", () => {
     const saturated = fullySaturateBotColor("#ff0055");
     assert.equal(fullySaturateBotColor(saturated), saturated);
     assert.equal(fullySaturateBotColor("  rebeccapurple  "), "rebeccapurple");
+  });
+});
+
+describe("identity hue helpers", () => {
+  it("measures circular distance and complementary hues", () => {
+    assert.equal(circularHueDistanceDeg(10, 350), 20);
+    assert.equal(circularHueDistanceDeg(0, 180), 180);
+    assert.equal(complementaryHueDeg(10), 190);
+    assert.equal(botIdentityHueDeg("#808080"), null);
+    assert.ok((botIdentityHueDeg("#ff0033") ?? -1) > 340 || (botIdentityHueDeg("#ff0033") ?? -1) < 20);
   });
 });
 

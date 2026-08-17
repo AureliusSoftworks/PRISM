@@ -420,42 +420,6 @@ export function applyPrismDefaultBotPatch(args: {
   expectedFingerprint?: string | null;
 }): PrismDefaultBotMutation {
   const mutation = previewPrismDefaultBotPatch(args);
-  // #region agent log
-  fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Debug-Session-Id": "2836be",
-    },
-    body: JSON.stringify({
-      sessionId: "2836be",
-      hypothesisId: "B",
-      location: "prism-default-bot-mutations.ts:applyPrismDefaultBotPatch",
-      message: "Default Prism patch applied",
-      data: {
-        userId: args.userId,
-        changedKeys: mutation.changedKeys,
-        voiceChanged: mutation.changedKeys.includes(
-          "prism_default_bot_audio_voice_profile",
-        ),
-        beforeVoicePreview:
-          typeof mutation.before.prism_default_bot_audio_voice_profile ===
-          "string"
-            ? mutation.before.prism_default_bot_audio_voice_profile.slice(0, 220)
-            : mutation.before.prism_default_bot_audio_voice_profile,
-        afterVoicePreview:
-          typeof mutation.after.prism_default_bot_audio_voice_profile === "string"
-            ? mutation.after.prism_default_bot_audio_voice_profile.slice(0, 220)
-            : mutation.after.prism_default_bot_audio_voice_profile,
-        patchHasAudioVoiceProfile: Object.prototype.hasOwnProperty.call(
-          args.patch,
-          "audioVoiceProfile",
-        ),
-      },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
   if (mutation.changedKeys.length > 0) {
     writeValues(args.db, args.userId, mutation.after);
   }

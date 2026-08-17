@@ -16,6 +16,7 @@ import {
   OpenAiProvider,
   openAiModelUsesMaxCompletionTokens,
   openAiModelUsesFixedDefaultTemperature,
+  openAiReasoningAwareCompletionTokenLimit,
   readOpenAiErrorMessage,
   resetModelCatalogCacheForTests,
   SECONDARY_OLLAMA_MODEL_PREFIX,
@@ -1299,6 +1300,30 @@ describe("openAiModelUsesMaxCompletionTokens", () => {
   });
 });
 
+describe("openAiReasoningAwareCompletionTokenLimit", () => {
+  it("keeps authored visible-reply capacity separate from hidden reasoning", () => {
+    assert.equal(
+      openAiReasoningAwareCompletionTokenLimit("gpt-5.6-sol", 2_000, "xhigh"),
+      4_048,
+    );
+    assert.equal(
+      openAiReasoningAwareCompletionTokenLimit("gpt-5.6-sol", 2_000, "max"),
+      6_096,
+    );
+  });
+
+  it("does not add headroom when the provider has no requested reasoning effort", () => {
+    assert.equal(
+      openAiReasoningAwareCompletionTokenLimit("gpt-4o-mini", 2_000, "xhigh"),
+      2_000,
+    );
+    assert.equal(
+      openAiReasoningAwareCompletionTokenLimit("gpt-5.6-sol", 2_000, "none"),
+      2_000,
+    );
+  });
+});
+
 describe("OpenAiProvider request shape", () => {
   const originalFetch = globalThis.fetch;
 
@@ -1344,6 +1369,27 @@ describe("OpenAiProvider request shape", () => {
 
     assert.equal(body.max_completion_tokens, 2000);
     assert.equal(body.max_tokens, undefined);
+  });
+
+  it("adds completion headroom for GPT-5.6 XHigh reasoning", async () => {
+    let body: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const provider = new OpenAiProvider({ apiKey: "sk-test" });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "gpt-5.6-sol",
+      maxTokens: 2_000,
+      reasoningEffort: "xhigh",
+    });
+
+    assert.equal(body.max_completion_tokens, 4_048);
+    assert.equal(body.reasoning_effort, "xhigh");
   });
 
   it("omits temperature for o-series models even when a custom value is set", async () => {
@@ -1818,6 +1864,26 @@ describe("OpenAiProvider error surfacing", () => {
       () => provider.generateResponse([{ role: "user", content: "hi" }]),
       /OpenAI request failed \(429\): Rate limit exceeded/
     );
+  });
+
+  it("does not cross into the bundled local fallback when the caller owns recovery", async () => {
+    const requestedUrls: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      requestedUrls.push(String(input));
+      return new Response("Provider unavailable", { status: 503 });
+    }) as typeof fetch;
+
+    const provider = new OpenAiProvider({ apiKey: "sk-test" });
+    await assert.rejects(
+      () =>
+        provider.generateResponse([{ role: "user", content: "hi" }], {
+          allowFinalLocalFallback: false,
+        }),
+      /OpenAI request failed \(503\)/u,
+    );
+
+    assert.equal(requestedUrls.length, 1);
+    assert.equal(requestedUrls[0], "https://api.openai.com/v1/chat/completions");
   });
 
 });

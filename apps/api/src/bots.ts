@@ -2,8 +2,11 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   activeBotPowersV1,
   botFalseNameSelfCueV1,
+  botPowerFalseNamePoolV1,
   botPowerAddressedFandomCueV1,
+  botPowerAddressedInsultPrimaryCueV1,
   botPowerBotNamingCueV1,
+  botPowerChromaticBiasCueV1,
   botPowerIneptitudeRoleCueV1,
   botPowerMumblesSpeechV1,
   botPowerSelfCueLinesV1,
@@ -136,6 +139,8 @@ export function composeBotSystemPrompt(
   options?: {
     /** Session-sticky John/Jane Doe alias; Library name stays for routing. */
     believedName?: string | null;
+    /** Saved identity color so complementary hue bias can name the opposite. */
+    identityColor?: string | null;
   },
 ): string | undefined {
   const savedName = typeof name === "string" ? name.trim() : "";
@@ -156,18 +161,33 @@ export function composeBotSystemPrompt(
     "the user speaking with you",
     "Direct conversation",
   );
-  const falseNameCue = believedName ? botFalseNameSelfCueV1(believedName) : "";
+  const chromaticCue = botPowerChromaticBiasCueV1({
+    powers,
+    holderColor: options?.identityColor,
+    modeLabel: "Direct conversation",
+  });
+  const falseNameCue = believedName
+    ? botFalseNameSelfCueV1(believedName, {
+        pool: botPowerFalseNamePoolV1(powers),
+        holderName: savedName,
+      })
+    : "";
   const directIneptitudeCue = botPowerIneptitudeRoleCueV1(
     powers,
     "conversation",
   );
-  const genericSelfCuePowers = directIneptitudeCue
-    ? activeBotPowersV1(powers).filter(
-        (power) => !power.compiled?.effects.some(
-          (effect) => effect.type === "ineptitude",
-        ),
-      )
-    : powers;
+  const directInsultCue = botPowerAddressedInsultPrimaryCueV1(
+    powers,
+    "the user speaking with you",
+    "direct conversation",
+  );
+  const genericSelfCuePowers = activeBotPowersV1(powers).filter(
+    (power) => !power.compiled?.effects.some(
+      (effect) =>
+        (directIneptitudeCue && effect.type === "ineptitude") ||
+        effect.type === "addressed_insult",
+    ),
+  );
   const powersPrompt = buildBotPowersPromptBlock([
     ...(directIneptitudeCue ? [directIneptitudeCue] : []),
     ...(namingCue ? [namingCue] : []),
@@ -175,6 +195,7 @@ export function composeBotSystemPrompt(
     ...(botPowerMumblesSpeechV1(powers)
       ? [botPowerSpeechObfuscationAuthoringCueV1()]
       : []),
+    ...(directInsultCue ? [directInsultCue] : []),
     ...botPowerSelfCueLinesV1(genericSelfCuePowers).filter((line) => {
       // Prefer the concrete believed-name cue over the generic compiled selfCue.
       if (!believedName) return true;
@@ -183,6 +204,7 @@ export function composeBotSystemPrompt(
       );
     }),
     ...(directFandomCue ? [directFandomCue] : []),
+    ...(chromaticCue ? [chromaticCue] : []),
   ]);
   if (!trimmedName && !trimmedPrompt && !powersPrompt) return undefined;
   const preamble = displayName.length > 0

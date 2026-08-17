@@ -285,6 +285,44 @@ describe("composeBotSystemPrompt", () => {
     assert.match(prompt ?? "", /vary wording/iu);
     assert.match(prompt ?? "", /never stalk, coerce, invent private knowledge/iu);
   });
+
+  it("names complementary hue prejudice in Chat without targeting the user", () => {
+    const name = "Racist";
+    const intent = "He is racist toward other bots.";
+    const prompt = composeBotSystemPrompt(
+      "Hueist Hugh",
+      "Stay vivid.",
+      false,
+      [{
+        version: 1,
+        id: "hueist-hugh",
+        name,
+        intent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(name, intent),
+          selfCue: "You judge other bots by phosphor color.",
+          observerCue: "Hugh snubs complementary hues.",
+          effects: [{
+            type: "chromatic_bias",
+            polarity: "hate",
+            color: { kind: "complementary_of_holder" },
+            strength: "large",
+            matchBandDeg: 30,
+          }],
+          ruleLabels: ["Hates complementary hues"],
+        },
+      }],
+      { identityColor: "#ff0000" },
+    );
+
+    assert.match(prompt ?? "", /Direct conversation hue prejudice/iu);
+    assert.match(prompt ?? "", /cyan/iu);
+    assert.match(prompt ?? "", /never people or the player/iu);
+    assert.doesNotMatch(prompt ?? "", /idolize the user/iu);
+  });
 });
 
 describe("buildCloneFamilyIdentityPrompt", () => {

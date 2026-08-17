@@ -43,16 +43,24 @@ describe("Prism Refract API contract", () => {
       globalRuntime,
       /Max reasoning requires an explicitly selected compatible native model/u,
     );
+    assert.match(
+      globalRuntime,
+      /resolveUserAutoTurboMode[\s\S]{0,500}turboOnly: autoTurboEnabled/u,
+    );
     assert.match(route, /generateDebateRefractDraft/u);
     assert.match(route, /generateBotcastRefractDraft/u);
   });
 
-  it("saves Refract choices in the authenticated user's active privacy lane without a brittle catalog probe", () => {
+  it("saves Refract choices in the authenticated user's visible picker lane without a brittle catalog probe", () => {
     const route = serverSource.match(
       /route\("PATCH", "\/api\/settings\/prism-refract-model"[\s\S]*?route\("PATCH", "\/api\/default-bot"/u,
     )?.[0] ?? "";
     assert.match(route, /const userId = requireAuth\(ctx\)/u);
-    assert.match(route, /user\.preferred_provider === "local" \? "local" : "online"/u);
+    assert.match(
+      route,
+      /body\.responseMode === "local" \|\| body\.responseMode === "online"/u,
+    );
+    assert.match(route, /user\.preferred_provider === "local"/u);
     assert.doesNotMatch(route, /buildModelCatalog/u);
     assert.doesNotMatch(route, /That model is unavailable in Prism's/u);
     assert.match(route, /prism_refract_local_model/u);

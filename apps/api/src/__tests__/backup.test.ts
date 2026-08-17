@@ -27,6 +27,43 @@ import {
   parseStoredBotPowersV1,
 } from "@localai/shared";
 import { encryptJson } from "../security.ts";
+import {
+  readGlobalBotMood,
+  setGlobalBotMood,
+} from "../bot-global-mood.ts";
+
+describe("backup global bot mood", () => {
+  it("round-trips account-owned mood state with the bot snapshot", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare(
+        `INSERT INTO bots
+          (id, user_id, name, system_prompt, chat_enabled, created_at, updated_at)
+         VALUES ('bot-a', 'user-1', 'Alice', 'A careful critic.', 1, ?, ?)`,
+      ).run("2026-08-14T00:00:00.000Z", "2026-08-14T00:00:00.000Z");
+      setGlobalBotMood(
+        db,
+        "user-1",
+        "bot-a",
+        "guarded",
+        "signal_feedback",
+        "2026-08-14T02:00:00.000Z",
+      );
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(
+        snapshot.bots.find((bot) => bot.id === "bot-a")?.globalMood,
+        "guarded",
+      );
+      db.prepare(
+        "DELETE FROM bot_global_moods WHERE user_id = 'user-1'",
+      ).run();
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      assert.equal(
+        readGlobalBotMood(db, "user-1", "bot-a").moodKey,
+        "guarded",
+      );
+    });
+  });
+});
 
 describe("backup memory ecology", () => {
   it("round-trips memory ecology settings, lineage, timestamps, targets, and receipts", () => {
@@ -441,6 +478,13 @@ describe("backup Coffee Groups", () => {
                 ('user-1', 'group-active', 2, 'coffee-bot-a', ?)`,
       ).run(updatedAt, updatedAt, updatedAt);
       db.prepare(
+        `INSERT INTO coffee_group_soundtracks
+           (group_id, user_id, generation_status, provider, model, prompt,
+            content_type, audio_bytes, duration_ms, revision, created_at, updated_at)
+         VALUES ('group-active', 'user-1', 'ready', 'elevenlabs', 'music_v2',
+                 'Original calm cafe instrumental', 'audio/mpeg', ?, 45000, 2, ?, ?)`,
+      ).run(Buffer.from([1, 2, 3]), createdAt, updatedAt);
+      db.prepare(
         `INSERT INTO coffee_groups
            (id, user_id, name, coffee_settings, archived_at, created_at, updated_at)
          VALUES ('group-archived', 'user-1', 'Archived', '{}', ?, ?, ?)`,
@@ -460,6 +504,17 @@ describe("backup Coffee Groups", () => {
         moodSummary: { warmth: 0.8, tension: 0.1 },
         ethos: "Curiosity without hurry.",
         atmosphere: null,
+        soundtrack: {
+          provider: "elevenlabs",
+          model: "music_v2",
+          prompt: "Original calm cafe instrumental",
+          contentType: "audio/mpeg",
+          audioBase64: Buffer.from([1, 2, 3]).toString("base64"),
+          durationMs: 45_000,
+          revision: 2,
+          createdAt,
+          updatedAt,
+        },
         synthesis: {
           version: 1,
           items: {
@@ -516,6 +571,19 @@ describe("backup Coffee Groups", () => {
           { seat_index: 4, bot_id: null },
         ],
       );
+      const restoredSoundtrack = db.prepare(
+        `SELECT provider, model, prompt, content_type, audio_bytes,
+                duration_ms, revision
+           FROM coffee_group_soundtracks
+          WHERE user_id = 'user-1' AND group_id = 'group-active'`,
+      ).get() as Record<string, string | number | Uint8Array>;
+      assert.equal(restoredSoundtrack.provider, "elevenlabs");
+      assert.equal(restoredSoundtrack.model, "music_v2");
+      assert.equal(restoredSoundtrack.prompt, "Original calm cafe instrumental");
+      assert.equal(restoredSoundtrack.content_type, "audio/mpeg");
+      assert.deepEqual([...restoredSoundtrack.audio_bytes as Uint8Array], [1, 2, 3]);
+      assert.equal(restoredSoundtrack.duration_ms, 45_000);
+      assert.equal(restoredSoundtrack.revision, 2);
     });
   });
 

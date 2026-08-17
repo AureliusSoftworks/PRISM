@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { advertise, type AdvertiseOptions } from "dnssd-advertise";
 import type { AppConfig } from "@localai/config";
@@ -19,6 +19,7 @@ export type DiscoveryRuntime = {
   desktopMode?: boolean;
   nativeDnsSdAvailable?: boolean;
   spawnNative?: typeof spawn;
+  execFileSyncNative?: typeof execFileSync;
 };
 
 export function buildDiscoveryTxt(): Record<string, string> {
@@ -46,10 +47,62 @@ export function buildDiscoveryServiceDescriptor(
   };
 }
 
+/**
+ * Reap `dns-sd` advertisers left behind by a previous Prism instance.
+ *
+ * A healthy advertiser always has a live API parent, so any that has been
+ * reparented to init (ppid 1) is definitionally leaked — the API was killed
+ * with a signal it could not catch (SIGKILL, force quit, crash) and its
+ * shutdown path never ran. Those orphans keep advertising `_prism._tcp`
+ * forever and accumulate one per launch.
+ *
+ * Restricting to ppid 1 is what makes this safe: a concurrently running Prism
+ * owns its advertiser, so this can never disturb a live sibling instance.
+ * Best-effort throughout — discovery is optional and must never block startup.
+ */
+function reapOrphanedNativeAdvertisers(
+  descriptor: DiscoveryServiceDescriptor,
+  runSync: typeof execFileSync,
+): void {
+  let listing: string;
+  try {
+    listing = runSync("/bin/ps", ["-eo", "pid=,ppid=,args="], {
+      encoding: "utf8",
+      timeout: 2_000,
+    });
+  } catch {
+    return;
+  }
+
+  for (const line of listing.split("\n")) {
+    const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/u.exec(line);
+    if (!match) continue;
+    const [, pidRaw, ppidRaw, args] = match;
+    if (ppidRaw !== "1") continue;
+    if (!args.includes("dns-sd") || !args.includes(descriptor.serviceType)) {
+      continue;
+    }
+    // Only our own service name, so unrelated `_prism._tcp` advertisers on the
+    // machine (an older install, a different server name) are left alone.
+    if (!args.includes(descriptor.options.name)) continue;
+    const pid = Number(pidRaw);
+    if (!Number.isInteger(pid) || pid <= 1) continue;
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      // Already gone, or not ours to signal.
+    }
+  }
+}
+
 function startNativeMacDiscovery(
   descriptor: DiscoveryServiceDescriptor,
   spawnNative: typeof spawn,
+  runSync: typeof execFileSync = execFileSync,
 ): StopDiscovery | null {
+  // Clear leaked advertisers from prior runs before adding another.
+  reapOrphanedNativeAdvertisers(descriptor, runSync);
+
   let child: ChildProcess;
   try {
     child = spawnNative(
@@ -126,6 +179,7 @@ export function startPrismDiscovery(
     const stop = startNativeMacDiscovery(
       descriptor,
       runtime.spawnNative ?? spawn,
+      runtime.execFileSyncNative ?? execFileSync,
     );
     if (stop) {
       console.log(

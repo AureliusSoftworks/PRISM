@@ -260,9 +260,91 @@ function ambientPayloads(messages: readonly DeveloperTranscriptMessage[]): Array
   return ambient;
 }
 
+function coffeeDeveloperTranscriptCounts(
+  messages: readonly DeveloperTranscriptMessage[],
+): {
+  visibleMessages: number;
+  storedEvents: number;
+  dialogue: number;
+  systemRows: number;
+  actions: number;
+  silence: number;
+  interruptionSegments: number;
+} {
+  let visibleStoredRows = 0;
+  let dialogue = 0;
+  let systemRows = 0;
+  let actions = 0;
+  let silence = 0;
+  let interruptionSegments = 0;
+  for (const message of messages) {
+    const payload = parseJsonRecord(message.toolPayload);
+    const marker = payload?.socialSilence as
+      | SocialSilenceMarkerV1
+      | undefined;
+    const markedSilence = socialSilenceMessageIsMarkedV1({
+      content: message.content,
+      marker,
+      mode: "coffee",
+    });
+    if (markedSilence) silence += 1;
+    if (
+      payload?.coffeeAmbientAction !== undefined ||
+      payload?.coffeeStageAction !== undefined ||
+      payload?.coffeeUserAction !== undefined
+    ) {
+      actions += 1;
+    }
+    const interruption = isJsonRecord(payload?.coffeeInterruption)
+      ? payload.coffeeInterruption
+      : null;
+    if (interruption?.kind === "botInterruptsBot") {
+      if (nullableText(interruption.publicInterrupterCue ?? interruption.interrupterCue)) {
+        interruptionSegments += 1;
+      }
+      if (
+        nullableText(
+          interruption.publicInterruptedSpeakerCue ??
+            interruption.interruptedSpeakerCue,
+        )
+      ) {
+        interruptionSegments += 1;
+      }
+    }
+    if (message.role === "system") {
+      systemRows += 1;
+      const publicSystemRow =
+        message.content.trim().length > 0 &&
+        !/\b(?:your\s+)?account\s+(?:display\s+name\s+is|has\s+not\s+provided\s+a\s+display\s+name\s+yet)\b/iu.test(
+          message.content,
+        );
+      if (publicSystemRow) visibleStoredRows += 1;
+      continue;
+    }
+    if (markedSilence) continue;
+    const hasDialogue = /[\p{L}\p{N}]/u.test(voiceSpokenText(message.content));
+    if (!hasDialogue) continue;
+    visibleStoredRows += 1;
+    if (message.role === "user" || message.role === "assistant") dialogue += 1;
+  }
+  return {
+    visibleMessages: visibleStoredRows + interruptionSegments,
+    storedEvents: messages.length,
+    dialogue: dialogue + interruptionSegments,
+    systemRows,
+    actions,
+    silence,
+    interruptionSegments,
+  };
+}
+
 export function buildDeveloperTranscript(input: BuildDeveloperTranscriptInput): string {
   const exportedAt = input.exportedAt ?? new Date().toISOString();
   const messageById = new Map(input.messages.map((message) => [message.id, message]));
+  const coffeeCounts =
+    input.conversation.mode === "coffee"
+      ? coffeeDeveloperTranscriptCounts(input.messages)
+      : null;
   const lines: string[] = [
     "# PRISM Developer Transcript",
     `> Exported ${exportedAt}`,
@@ -279,6 +361,19 @@ export function buildDeveloperTranscript(input: BuildDeveloperTranscriptInput): 
     `- Stored messages: ${input.messages.length}`,
     `- Recorded external calls: ${input.events.length}`,
     "",
+    ...(coffeeCounts
+      ? [
+          "## Coffee Event Accounting",
+          "",
+          `- ${coffeeCounts.visibleMessages} visible messages · ${coffeeCounts.storedEvents} stored events`,
+          `- Dialogue: ${coffeeCounts.dialogue}`,
+          `- System rows: ${coffeeCounts.systemRows}`,
+          `- Actions: ${coffeeCounts.actions}`,
+          `- Silence: ${coffeeCounts.silence}`,
+          `- Interruption segments: ${coffeeCounts.interruptionSegments}`,
+          "",
+        ]
+      : []),
     "## LLM, Search, and Tool Calls",
     "",
   ];
@@ -411,3 +506,8 @@ export function sensitiveEnvironmentValues(
     .map(([, value]) => value!)
     .filter((value) => value.trim().length >= 4);
 }
+import {
+  socialSilenceMessageIsMarkedV1,
+  voiceSpokenText,
+  type SocialSilenceMarkerV1,
+} from "@localai/shared";

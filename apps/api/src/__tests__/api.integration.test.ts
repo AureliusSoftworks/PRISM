@@ -960,7 +960,7 @@ describe("API request integration", () => {
     assert.equal(generationEvent.provider, "local");
     assert.equal(generationEvent.model, "deterministic-test-model");
     assert.deepEqual(generationPayload.request.participantBotIds, botIds);
-    assert.equal(generationPayload.request.requestedCandidateCount, 12);
+    assert.equal(generationPayload.request.requestedCandidateCount, 8);
     assert.deepEqual(generationPayload.request.rankingDimensions, [
       "relevance",
       "depth",
@@ -970,7 +970,7 @@ describe("API request integration", () => {
     ]);
     assert.equal(
       generationPayload.rawOutput,
-      deterministicReply,
+      `${deterministicReply}\n[repair]\n${deterministicReply}`,
       JSON.stringify(generationPayload)
     );
     assert.deepEqual(generationPayload.parsedOutput.rankedTopics, candidates);
@@ -1786,6 +1786,39 @@ describe("API request integration", () => {
     assert.deepEqual(resetPayload.modelTurboPreferences, []);
   });
 
+  it("persists the Refract model in the picker lane instead of snapping back to Auto", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "refract-model-picker-lane@example.com",
+        password: "refract-model-picker-lane-password",
+      }),
+    );
+    assert.equal(register.status, 201);
+
+    const savedOnline = await client.request(
+      "/api/settings/prism-refract-model",
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-5.6-sol",
+          responseMode: "online",
+        }),
+      },
+    );
+    assert.equal(savedOnline.status, 200, await savedOnline.clone().text());
+    const onlinePayload = await json(savedOnline);
+    assert.equal(onlinePayload.responseMode, "online");
+    assert.equal(onlinePayload.prismRefractOnlineModel, "gpt-5.6-sol");
+    assert.equal(onlinePayload.prismRefractLocalModel, "");
+
+    const loaded = await json(await client.request("/api/settings"));
+    assert.equal(loaded.settings.prismRefractOnlineModel, "gpt-5.6-sol");
+    assert.equal(loaded.settings.prismRefractLocalModel, "");
+  });
+
   it("persists the account-level Home atmosphere style", async () => {
     const client = createClient();
     const register = await client.request(
@@ -2254,6 +2287,69 @@ describe("API request integration", () => {
     assert.equal((await json(response)).ok, true);
     assert.deepEqual(auxiliaryProviderFactoryCalls.slice(auxiliaryStart), []);
     assert.deepEqual(providerFactoryCalls.slice(providerStart), ["openai"]);
+  });
+
+  it("routes Avatar Studio power compilation through the account Refract model", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "studio-refract-compiler@example.com",
+        password: "studio-refract-compiler-password",
+      })
+    );
+    assert.equal(register.status, 201);
+
+    db.prepare(
+      `UPDATE users
+          SET preferred_provider = ?,
+              prism_refract_local_model = ?,
+              prism_default_llm_model = ?
+        WHERE email = ?`
+    ).run(
+      "local",
+      "qwen3:8b",
+      "qwen3:1.7b",
+      "studio-refract-compiler@example.com"
+    );
+
+    const auxiliaryStart = auxiliaryProviderFactoryCalls.length;
+    const providerStart = providerFactoryCalls.length;
+    const seenModels: Array<string | undefined> = [];
+    const originalGenerateResponse = deterministicProvider.generateResponse;
+    deterministicProvider.generateResponse = async (messages, options) => {
+      seenModels.push(options?.model);
+      return originalGenerateResponse(messages, options);
+    };
+    try {
+      const response = await client.request(
+        "/api/bot-powers/compile",
+        jsonInit({
+          botName: "Filibuster Finch",
+          systemPrompt: "A ceremonial orator.",
+          routing: "refract",
+          powers: [
+            {
+              version: 1,
+              id: "uninterruptible-oration",
+              authoringMode: "prompt",
+              name: "",
+              intent: "Speaks only in ceremonial Shakespearean.",
+              enabled: true,
+              compileStatus: "draft",
+              compiled: null,
+            },
+          ],
+        })
+      );
+      assert.equal(response.status, 200);
+      assert.equal((await json(response)).ok, true);
+      assert.deepEqual(auxiliaryProviderFactoryCalls.slice(auxiliaryStart), []);
+      assert.deepEqual(providerFactoryCalls.slice(providerStart), ["local"]);
+      assert.ok(seenModels.includes("qwen3:8b"));
+    } finally {
+      deterministicProvider.generateResponse = originalGenerateResponse;
+    }
   });
 
   it("persists text model display names per account through Settings", async () => {

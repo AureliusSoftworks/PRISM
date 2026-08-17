@@ -5,6 +5,7 @@ import {
   normalizeBotFalseNameStateV1,
   type BotFalseNameStateV1,
   type BotFalseNameSurfaceV1,
+  type BotPowerFalseNamePoolV1,
 } from "@localai/shared";
 
 export function resolveBotFalseNameStateV1(args: {
@@ -17,26 +18,33 @@ export function resolveBotFalseNameStateV1(args: {
   reshuffleToken?: string | null;
   sourceMessageId: string;
   occurredAt: string;
+  pool?: BotPowerFalseNamePoolV1;
 }): {
   state: BotFalseNameStateV1;
   justChanged: boolean;
   pending: BotFalseNameStateV1 | null;
 } {
+  const pool = args.pool ?? "mixed_persona_names";
   const reuseSticky =
     !args.reshuffleToken && args.sticky !== null
       ? normalizeBotFalseNameStateV1(args.sticky)
       : null;
-  if (reuseSticky) {
+  if (
+    reuseSticky &&
+    (reuseSticky.pool ?? "mixed_persona_names") === pool
+  ) {
     return { state: reuseSticky, justChanged: false, pending: null };
   }
   const next = createBotFalseNameStateFromSeedV1({
     surface: args.surface,
     holderBotId: args.holderBotId,
     holderBotName: args.holderBotName,
+    pool,
     seed: buildBotFalseNameSeedV1({
       conversationId: args.conversationId,
       holderBotId: args.holderBotId,
       reshuffleToken: args.reshuffleToken,
+      pool,
     }),
     sourceMessageId: args.sourceMessageId,
     occurredAt: args.occurredAt,

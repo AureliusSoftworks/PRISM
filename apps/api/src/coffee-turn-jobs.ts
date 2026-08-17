@@ -1,10 +1,13 @@
 import { randomId } from "./security.ts";
 import type {
   CoffeeTurnJobPhase,
+  CoffeeTurnJobRetryMetadataV1,
   CoffeeTurnJobStatus,
   CoffeeTurnResponse,
+  CoffeeTurnModelSelectionKind,
   ReasoningEffort,
 } from "@localai/shared";
+import { coffeeTurnJobFailureV1 } from "./coffee-turn-failure.ts";
 
 export const COFFEE_TURN_JOB_TTL_MS = 12 * 60_000;
 
@@ -34,6 +37,8 @@ function publicStatus(job: InternalCoffeeTurnJob): CoffeeTurnJobStatus {
     updatedAt: job.updatedAt,
     interruptEligibleAt: job.interruptEligibleAt,
     ...(job.response ? { response: job.response } : {}),
+    ...(job.failure ? { failure: job.failure } : {}),
+    ...(job.retry ? { retry: job.retry } : {}),
     ...(job.error ? { error: job.error } : {}),
   };
 }
@@ -62,6 +67,10 @@ export function startCoffeeTurnJob(args: {
    * never cancel a response already being prepared for the player. */
   supersedeExisting?: boolean;
   effort?: ReasoningEffort | null;
+  selectionKind?: CoffeeTurnModelSelectionKind;
+  retry?: CoffeeTurnJobRetryMetadataV1;
+  latestMessageCursor?: string | null;
+  getLatestMessageCursor?: () => string | null;
   /** Test and embedding override; production jobs outlive bounded AUTO recovery. */
   ttlMs?: number;
   run: (context: {
@@ -87,6 +96,7 @@ export function startCoffeeTurnJob(args: {
     startedAt,
     updatedAt: startedAt,
     interruptEligibleAt: null,
+    ...(args.retry ? { retry: args.retry } : {}),
     controller,
     expiresAtMs: Date.now() + (args.ttlMs ?? COFFEE_TURN_JOB_TTL_MS),
   };
@@ -113,6 +123,14 @@ export function startCoffeeTurnJob(args: {
     (error: unknown) => {
       if (job.phase === "interrupted" || controller.signal.aborted) return;
       job.error = error instanceof Error ? error.message : "Coffee turn failed.";
+      job.failure = coffeeTurnJobFailureV1({
+        error,
+        selectionKind: args.selectionKind ?? "fixed",
+        speakerBotId: job.speakerBotId,
+        latestMessageCursor:
+          args.getLatestMessageCursor?.() ?? args.latestMessageCursor ?? null,
+        retry: args.retry ?? null,
+      });
       setPhase("failed");
     }
   );

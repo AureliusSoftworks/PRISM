@@ -1806,6 +1806,18 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       PRIMARY KEY (user_id, bot_scope_key),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS bot_global_moods (
+      user_id TEXT NOT NULL,
+      bot_id TEXT NOT NULL,
+      mood_key TEXT NOT NULL DEFAULT 'neutral'
+        CHECK (mood_key IN ('joyful', 'warm', 'neutral', 'guarded', 'strained')),
+      source TEXT NOT NULL DEFAULT 'signal_feedback'
+        CHECK (source IN ('signal_feedback', 'backup_restore')),
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, bot_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(bot_id) REFERENCES bots(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS bot_relationships (
       user_id TEXT NOT NULL,
       source_bot_id TEXT NOT NULL,
@@ -1933,6 +1945,33 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(group_id) REFERENCES coffee_groups(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS coffee_group_soundtracks (
+      group_id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      generation_status TEXT NOT NULL DEFAULT 'preparing'
+        CHECK(generation_status IN ('preparing', 'generating', 'ready', 'failed', 'unavailable')),
+      generation_token TEXT,
+      provider TEXT,
+      model TEXT,
+      prompt TEXT,
+      content_type TEXT,
+      audio_bytes BLOB,
+      duration_ms INTEGER,
+      revision INTEGER NOT NULL DEFAULT 0,
+      previous_provider TEXT,
+      previous_model TEXT,
+      previous_prompt TEXT,
+      previous_content_type TEXT,
+      previous_audio_bytes BLOB,
+      previous_duration_ms INTEGER,
+      previous_revision INTEGER,
+      previous_updated_at TEXT,
+      error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(group_id) REFERENCES coffee_groups(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS coffee_presets (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -1952,6 +1991,39 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(group_id) REFERENCES coffee_groups(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS coffee_context_sparks (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      source_applet TEXT NOT NULL
+        CHECK(source_applet IN ('signal', 'debate', 'coffee')),
+      source_session_id TEXT NOT NULL,
+      source_title TEXT NOT NULL,
+      source_date TEXT NOT NULL,
+      source_role TEXT NOT NULL,
+      source_participant_bot_ids TEXT NOT NULL DEFAULT '[]',
+      inspired_bot_id TEXT NOT NULL,
+      display_prompt TEXT NOT NULL,
+      state TEXT NOT NULL DEFAULT 'available'
+        CHECK(state IN ('available', 'armed', 'used', 'dismissed', 'stale')),
+      created_at TEXT NOT NULL,
+      consumed_at TEXT,
+      updated_at TEXT NOT NULL,
+      UNIQUE(user_id, conversation_id, source_applet),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+      FOREIGN KEY(inspired_bot_id) REFERENCES bots(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_coffee_context_sparks_conversation
+      ON coffee_context_sparks(user_id, conversation_id, state, created_at);
+    CREATE TABLE IF NOT EXISTS coffee_context_spark_runs (
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      generated_at TEXT NOT NULL,
+      PRIMARY KEY(user_id, conversation_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS botcast_shows (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -1970,6 +2042,21 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       UNIQUE(user_id, host_bot_id),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS botcast_host_recovery_candidates (
+      user_id TEXT NOT NULL,
+      show_id TEXT NOT NULL,
+      bot_id TEXT NOT NULL,
+      identity_hash TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('compatible', 'incompatible', 'refused')),
+      reason TEXT NOT NULL,
+      screening_model TEXT,
+      checked_at TEXT NOT NULL,
+      PRIMARY KEY(user_id, show_id, bot_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(show_id) REFERENCES botcast_shows(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_botcast_host_recovery_show
+      ON botcast_host_recovery_candidates(user_id, show_id);
     CREATE TABLE IF NOT EXISTS botcast_show_intro_audio (
       show_id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -1984,6 +2071,18 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       outdent_audio_bytes BLOB,
       outdent_duration_ms INTEGER,
       revision INTEGER NOT NULL DEFAULT 1,
+      previous_provider TEXT,
+      previous_model TEXT,
+      previous_prompt TEXT,
+      previous_content_type TEXT,
+      previous_audio_bytes BLOB,
+      previous_duration_ms INTEGER,
+      previous_outdent_prompt TEXT,
+      previous_outdent_content_type TEXT,
+      previous_outdent_audio_bytes BLOB,
+      previous_outdent_duration_ms INTEGER,
+      previous_revision INTEGER,
+      previous_updated_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -1999,6 +2098,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       audio_bytes BLOB NOT NULL,
       duration_ms INTEGER NOT NULL,
       revision INTEGER NOT NULL DEFAULT 1,
+      previous_provider TEXT,
+      previous_model TEXT,
+      previous_prompt TEXT,
+      previous_content_type TEXT,
+      previous_audio_bytes BLOB,
+      previous_duration_ms INTEGER,
+      previous_revision INTEGER,
+      previous_updated_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -2440,6 +2547,43 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   addBotcastIntroAudioColumn("outdent_content_type", "TEXT");
   addBotcastIntroAudioColumn("outdent_audio_bytes", "BLOB");
   addBotcastIntroAudioColumn("outdent_duration_ms", "INTEGER");
+  addBotcastIntroAudioColumn("previous_provider", "TEXT");
+  addBotcastIntroAudioColumn("previous_model", "TEXT");
+  addBotcastIntroAudioColumn("previous_prompt", "TEXT");
+  addBotcastIntroAudioColumn("previous_content_type", "TEXT");
+  addBotcastIntroAudioColumn("previous_audio_bytes", "BLOB");
+  addBotcastIntroAudioColumn("previous_duration_ms", "INTEGER");
+  addBotcastIntroAudioColumn("previous_outdent_prompt", "TEXT");
+  addBotcastIntroAudioColumn("previous_outdent_content_type", "TEXT");
+  addBotcastIntroAudioColumn("previous_outdent_audio_bytes", "BLOB");
+  addBotcastIntroAudioColumn("previous_outdent_duration_ms", "INTEGER");
+  addBotcastIntroAudioColumn("previous_revision", "INTEGER");
+  addBotcastIntroAudioColumn("previous_updated_at", "TEXT");
+  const botcastAtmosphereAudioColumns = new Set(
+    (
+      db
+        .prepare("PRAGMA table_info(botcast_show_atmosphere_audio)")
+        .all() as Array<{ name: string }>
+    ).map((column) => column.name),
+  );
+  const addBotcastAtmosphereAudioColumn = (
+    name: string,
+    definition: string,
+  ): void => {
+    if (botcastAtmosphereAudioColumns.has(name)) return;
+    db.exec(
+      `ALTER TABLE botcast_show_atmosphere_audio ADD COLUMN ${name} ${definition};`,
+    );
+    botcastAtmosphereAudioColumns.add(name);
+  };
+  addBotcastAtmosphereAudioColumn("previous_provider", "TEXT");
+  addBotcastAtmosphereAudioColumn("previous_model", "TEXT");
+  addBotcastAtmosphereAudioColumn("previous_prompt", "TEXT");
+  addBotcastAtmosphereAudioColumn("previous_content_type", "TEXT");
+  addBotcastAtmosphereAudioColumn("previous_audio_bytes", "BLOB");
+  addBotcastAtmosphereAudioColumn("previous_duration_ms", "INTEGER");
+  addBotcastAtmosphereAudioColumn("previous_revision", "INTEGER");
+  addBotcastAtmosphereAudioColumn("previous_updated_at", "TEXT");
 
   const legalAcceptanceColumns = db
     .prepare("PRAGMA table_info(legal_acceptances)")
@@ -3699,6 +3843,41 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       "ALTER TABLE coffee_groups ADD COLUMN synthesis_json TEXT NOT NULL DEFAULT '{}';",
     );
   }
+  const coffeeGroupSoundtrackColumns = new Set(
+    (
+      db.prepare("PRAGMA table_info(coffee_group_soundtracks)").all() as Array<{
+        name: string;
+      }>
+    ).map((column) => column.name),
+  );
+  const addCoffeeGroupSoundtrackColumn = (
+    name: string,
+    definition: string,
+  ): void => {
+    if (coffeeGroupSoundtrackColumns.has(name)) return;
+    db.exec(
+      `ALTER TABLE coffee_group_soundtracks ADD COLUMN ${name} ${definition};`,
+    );
+    coffeeGroupSoundtrackColumns.add(name);
+  };
+  addCoffeeGroupSoundtrackColumn("previous_provider", "TEXT");
+  addCoffeeGroupSoundtrackColumn("previous_model", "TEXT");
+  addCoffeeGroupSoundtrackColumn("previous_prompt", "TEXT");
+  addCoffeeGroupSoundtrackColumn("previous_content_type", "TEXT");
+  addCoffeeGroupSoundtrackColumn("previous_audio_bytes", "BLOB");
+  addCoffeeGroupSoundtrackColumn("previous_duration_ms", "INTEGER");
+  addCoffeeGroupSoundtrackColumn("previous_revision", "INTEGER");
+  addCoffeeGroupSoundtrackColumn("previous_updated_at", "TEXT");
+  // Generation flights are process-local. A restart leaves the group intact and
+  // converts an abandoned flight into an honest Jazz-fallback state.
+  db.exec(`
+    UPDATE coffee_group_soundtracks
+       SET generation_status = CASE WHEN audio_bytes IS NULL THEN 'failed' ELSE 'ready' END,
+           generation_token = NULL,
+           error = COALESCE(error, 'Generation was interrupted; bundled Coffee Jazz is playing.'),
+           updated_at = datetime('now')
+     WHERE generation_status = 'generating';
+  `);
   const sweepBatchColumns = db
     .prepare("PRAGMA table_info(conversation_sweep_batches)")
     .all() as Array<{ name: string }>;
@@ -4714,6 +4893,9 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     "CREATE INDEX IF NOT EXISTS idx_bot_opinions_user_bot ON bot_opinions (user_id, bot_id);",
   );
   db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_bot_global_moods_user_bot ON bot_global_moods (user_id, bot_id);",
+  );
+  db.exec(
     "CREATE INDEX IF NOT EXISTS idx_bot_relationships_user_source ON bot_relationships (user_id, source_bot_id);",
   );
   db.exec(
@@ -4793,6 +4975,9 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_coffee_group_seats_group ON coffee_group_seats (user_id, group_id, seat_index);",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_coffee_group_soundtracks_user ON coffee_group_soundtracks (user_id, updated_at DESC);",
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_coffee_group_events_group ON coffee_group_events (user_id, group_id, created_at DESC);",

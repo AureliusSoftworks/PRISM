@@ -273,6 +273,10 @@ test("recognizes explicit safe commands without executing them", () => {
     [{ type: "navigate", destination: "slate" }],
   );
   assert.deepEqual(
+    prismCompanionDirectActionIntents("Open the Flight Recorder.", context),
+    [{ type: "open_flight_recorder" }],
+  );
+  assert.deepEqual(
     prismCompanionDirectActionIntents("Export this bot.", context),
     [{ type: "export_bot", botId: "owned" }],
   );

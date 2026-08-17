@@ -19,6 +19,10 @@ import {
   resolveDbPath,
   upsertPrismMoodState,
 } from "./db.ts";
+import {
+  composeBotRuntimePersona,
+  neutralizeGlobalBotMood,
+} from "./bot-global-mood.ts";
 import { buildApiRootLandingHtml } from "./api-root-landing.ts";
 import {
   buildDeveloperTranscript,
@@ -192,6 +196,12 @@ import {
   updateCoffeeConversationSettings,
 } from "./coffee.ts";
 import {
+  consumeCoffeeContextSpark,
+  ensureCoffeeContextSparks,
+  resolveCoffeeContextSparkForTurn,
+  updateCoffeeContextSparkState,
+} from "./coffee-context-sparks.ts";
+import {
   cancelCoffeeTurnJobsForConversation,
   getActiveCoffeeTurnJobForConversation,
   getCoffeeTurnJob,
@@ -306,6 +316,7 @@ import {
   botcastPreparedTurnCursor,
   botcastRoutingSnapshot,
   cancelBotcastEpisode,
+  castBotcastShowRecoveryHost,
   chatWithBotcastShowHost,
   createBotcastShow,
   deleteBotcastShow,
@@ -333,6 +344,7 @@ import {
   projectBotcastEpisodeForAudienceV1,
   projectBotcastEpisodeForObserverV2,
   recordBotcastRoutingSnapshot,
+  screenBotcastShowHostRecovery,
   readBotcastShowAtmosphereAudio,
   readBotcastShowIntroAudio,
   readBotcastShowOutdentAudio,
@@ -342,11 +354,14 @@ import {
   resolveBotcastProducerGuestName,
   setBotcastEpisodeCameraMode,
   setBotcastModelWarmupHold,
+  signalAutoFallbackExhaustionIsValidationOnly,
   signalAutoFallbackHttpStatus,
   signalAutoFallbackPublicMessage,
   signalOnlineTurnHttpStatus,
   storeBotcastShowAtmosphereAudio,
   storeBotcastShowIntroAudio,
+  refreshBotcastShowLocalIdent,
+  undoBotcastShowAudioPackage,
   updateBotcastShow,
 } from "./botcast.ts";
 import {
@@ -356,6 +371,16 @@ import {
   buildSignalElevenLabsOutdentCompositionPlan,
   requestSignalElevenLabsMusic,
 } from "./elevenlabs-music.ts";
+import {
+  beginCoffeeGroupSoundtrackGeneration,
+  buildCoffeeGroupSoundtrackPrompt,
+  completeCoffeeGroupSoundtrackGeneration,
+  ensureCoffeeGroupSoundtrack,
+  failCoffeeGroupSoundtrackGeneration,
+  readCoffeeGroupSoundtrackAudio,
+  requestCoffeeGroupElevenLabsMusic,
+  undoCoffeeGroupSoundtrack,
+} from "./coffee-soundtrack.ts";
 import {
   AVATAR_ELEVENLABS_SFX_MODEL,
   AVATAR_ELEVENLABS_SFX_PROMPT_MAX_CHARACTERS,
@@ -430,6 +455,7 @@ import {
   upsertReplayVoiceTake,
 } from "./replay-recordings.ts";
 import type {
+  BotGenerationVoiceCatalogV1,
   CoffeeGroupSynthesisItem,
   ReplayManifestV1,
   ReplayManifestV2,
@@ -791,6 +817,7 @@ import {
 } from "./model-readiness.ts";
 import { cleanupResolvedPromptWithModel } from "./composer-cleanup.ts";
 import {
+  inferZenVoicePreview,
   inferVoicePreviewLine,
   normalizeVoicePreviewLine,
   voicePreviewLineSoundsLikeAudioCheck,
@@ -825,12 +852,14 @@ import {
   setModelReasoningEffortPreference,
 } from "./model-effort-preferences.ts";
 import {
+  isAutoModelTurboPreference,
   listModelTurboPreferences,
   resetModelTurboPreferences,
   setModelTurboPreference,
 } from "./model-turbo-preferences.ts";
 import {
   allModelReasoningEffortCursorHash,
+  resolveUserAutoTurboMode,
   resolveUserModelReasoningEffort,
   resolveUserModelTurboMode,
 } from "./model-effort-runtime.ts";
@@ -1061,6 +1090,7 @@ import {
   type PrismCompanionCardV1,
   type PrismCompanionSurfaceReference,
   type PrismRefractSignalTextTarget,
+  type AutoFallbackChainV1,
   type AutoFallbackModelRef,
   type AutoRoutingContextV1,
   ACTION_SFX_PACK_CLIP_COUNT,
@@ -1521,6 +1551,10 @@ async function startPrismStorySession(
     responseLane === "online" ? anthropicApiKey : undefined,
   );
   const hiddenModelIds = parseHiddenBotModelIds(user.hidden_bot_model_ids);
+  const autoTurboEnabled =
+    responseLane === "online" &&
+    storyModelOverride === null &&
+    resolveUserAutoTurboMode(db, context.userId);
   const resolvedAuto = resolveAutoModel({
     provider: effectiveProvider,
     lane: responseLane,
@@ -1536,6 +1570,7 @@ async function startPrismStorySession(
       outputTokens: 2_048,
       simulatedEffortEnabled: true,
     },
+    turboOnly: autoTurboEnabled,
   });
   effectiveProvider = resolvedAuto.provider;
   const storedReasoningEffort = resolveUserModelReasoningEffort(db, {
@@ -1547,7 +1582,19 @@ async function startPrismStorySession(
   const candidateAllowlist = (
     responseLane === "local" ? catalog.local : catalog.online
   )
-    .filter((entry) => !hiddenModels.has(entry.id))
+    .filter(
+      (entry) =>
+        !hiddenModels.has(entry.id) &&
+        (!autoTurboEnabled ||
+          modelSupportsTurboMode(
+            entry.provider === "anthropic"
+              ? "anthropic"
+              : entry.provider === "local"
+                ? "local"
+                : "openai",
+            entry.id,
+          )),
+    )
     .map((entry): AutoFallbackModelRef => ({
       provider:
         entry.provider === "anthropic"
@@ -1561,11 +1608,27 @@ async function startPrismStorySession(
     provider: resolvedAuto.provider,
     model: resolvedAuto.model,
   };
-  const configuredFallbacks = parseStoredAutoFallbackChain(
-    user.auto_fallback_chain,
+  const configuredFallbacks = turboCapableAutoFallbackChain(
+    parseStoredAutoFallbackChain(user.auto_fallback_chain),
+    autoTurboEnabled,
   );
+  const storyAutoRoutingChain: AutoFallbackChainV1 | null = resolvedAuto.autoRoute
+    ? {
+        v: 1,
+        fallbacks: configuredFallbacks?.fallbacks ?? [],
+        eligibleCandidates: candidateAllowlist,
+        ...(responseLane === "online"
+          ? {
+              finalLocalRecovery: {
+                provider: "local" as const,
+                model: REQUIRED_PRIMARY_LOCAL_MODEL_ID,
+              },
+            }
+          : {}),
+      }
+    : null;
   const generationChain =
-    autoFallbackResolvedChain(primaryRef, configuredFallbacks) ?? [primaryRef];
+    autoFallbackResolvedChain(primaryRef, storyAutoRoutingChain) ?? [primaryRef];
   const session = createStorySession(db, context.userId, {
     botIds,
     premise,
@@ -1606,17 +1669,16 @@ async function startPrismStorySession(
                   ? anthropicApiKey
                   : undefined,
               ),
-              auxiliaryProvider: auxiliaryProviderFactoryOverride(
-                user.prism_default_llm_model,
-                dualOllamaWorkloadOptions(user),
-              ),
               providerName: attempt.provider,
               model: attempt.model,
-              turbo: resolveUserModelTurboMode(db, {
-                userId: context.userId,
-                provider: attempt.provider,
-                modelId: attempt.model,
-              }),
+              allowFinalLocalFallback: false,
+              turbo:
+                (autoTurboEnabled && attempt.provider !== "local") ||
+                resolveUserModelTurboMode(db, {
+                  userId: context.userId,
+                  provider: attempt.provider,
+                  modelId: attempt.model,
+                }),
               bots: storyBots,
               premise,
               ...(powerTheme ? { theme: powerTheme } : {}),
@@ -1672,6 +1734,11 @@ const prismCapabilityRegistry = createPrismDomainCapabilityRegistry({
   generateBotDraft: async (context, brief) => {
     const user = getUserRow(context.userId);
     const model = resolveAuxiliaryOllamaModel(user.prism_default_llm_model);
+    const voiceCatalog = await buildBotGenerationVoiceCatalogForUser({
+      userId: context.userId,
+      user,
+      onlineAllowed: false,
+    });
     const generated = await runWithUsageSession(
       {
         db,
@@ -1690,6 +1757,7 @@ const prismCapabilityRegistry = createPrismDomainCapabilityRegistry({
           providerName: "local",
           model,
           responseMode: "local",
+          voiceCatalog,
         }),
     );
     if (generated.draft.powers.length === 0) return generated.draft;
@@ -2058,35 +2126,6 @@ function persistPremiumVoiceDefaults(
     authored_audio_voice_profile: string | null;
     audio_voice_profile_override: string | null;
   }>;
-  // #region agent log
-  fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Debug-Session-Id": "2836be",
-    },
-    body: JSON.stringify({
-      sessionId: "2836be",
-      hypothesisId: "A,C,E",
-      location: "server.ts:persistPremiumVoiceDefaults:entry",
-      message: "Persisting premium voice defaults",
-      data: {
-        userId,
-        voiceCount: voices.length,
-        rawPrismProfileLength:
-          typeof user.prism_default_bot_audio_voice_profile === "string"
-            ? user.prism_default_bot_audio_voice_profile.length
-            : 0,
-        rawPrismProfilePreview:
-          typeof user.prism_default_bot_audio_voice_profile === "string"
-            ? user.prism_default_bot_audio_voice_profile.slice(0, 220)
-            : null,
-        botCount: bots.length,
-      },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
   const initialization = initializePremiumVoiceDefaults({
     userId,
     voices,
@@ -2102,23 +2141,6 @@ function persistPremiumVoiceDefaults(
     initialization.botUpdates.length === 0 &&
     !initialization.prismDefaultBotAudioVoiceProfile
   ) {
-    // #region agent log
-    fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "2836be",
-      },
-      body: JSON.stringify({
-        sessionId: "2836be",
-        hypothesisId: "A",
-        location: "server.ts:persistPremiumVoiceDefaults:noop",
-        message: "No premium voice writes needed",
-        data: { userId },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     return { assignedBotIds: [], assignedDefaultPrism: false };
   }
 
@@ -2140,29 +2162,6 @@ function persistPremiumVoiceDefaults(
       const serialized = serializeBotAudioVoiceProfileV1(
         initialization.prismDefaultBotAudioVoiceProfile,
       );
-      // #region agent log
-      fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Debug-Session-Id": "2836be",
-        },
-        body: JSON.stringify({
-          sessionId: "2836be",
-          hypothesisId: "A,D",
-          location: "server.ts:persistPremiumVoiceDefaults:writePrism",
-          message: "Overwriting Default Prism voice profile",
-          data: {
-            userId,
-            writtenPreview: serialized.slice(0, 280),
-            assignedVoiceId:
-              initialization.prismDefaultBotAudioVoiceProfile.elevenLabsVoiceId ??
-              null,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       db.prepare(
         `UPDATE users
             SET prism_default_bot_audio_voice_profile = ?
@@ -2499,6 +2498,25 @@ async function sendLocalVoiceWaveStream(args: {
     );
   };
 
+  const nextSpeechItemIndex = (from: number): number => {
+    for (let index = from; index < streamItems.length; index += 1) {
+      if (streamItems[index]?.kind === "speech") return index;
+    }
+    return -1;
+  };
+  const firstSpeechIndex = nextSpeechItemIndex(0);
+  let pendingSpeech: Promise<Buffer> | null =
+    firstSpeechIndex === 0 && firstWave
+      ? Promise.resolve(firstWave)
+      : firstSpeechIndex >= 0
+        ? generate(
+            (streamItems[firstSpeechIndex] as Extract<
+              LocalVoiceStreamItem,
+              { kind: "speech" }
+            >).text,
+          )
+        : null;
+
   for (let index = 0; index < streamItems.length; index += 1) {
     if (args.signal.aborted || args.response.destroyed) return;
     const item = streamItems[index]!;
@@ -2506,9 +2524,18 @@ async function sendLocalVoiceWaveStream(args: {
       writeActionChunk(item, index);
       continue;
     }
-    const generatedWave = index === 0 && firstWave
-      ? firstWave
-      : await generate(item.text);
+    const generatedWave = await pendingSpeech;
+    const upcomingSpeechIndex = nextSpeechItemIndex(index + 1);
+    pendingSpeech =
+      upcomingSpeechIndex >= 0
+        ? generate(
+            (streamItems[upcomingSpeechIndex] as Extract<
+              LocalVoiceStreamItem,
+              { kind: "speech" }
+            >).text,
+          )
+        : null;
+    if (!generatedWave) return;
     if (args.signal.aborted || args.response.destroyed) return;
     // Only server-tagged Instant/Kokoro streams reach this branch. Preserve
     // natural outer silence for the utterance, but remove duplicated generator
@@ -5680,6 +5707,44 @@ function getElevenLabsApiKeyForUser(
   );
 }
 
+async function buildBotGenerationVoiceCatalogForUser(args: {
+  userId: string;
+  user: Pick<
+    UserDbRow,
+    "operating_system_voices_enabled" | "elevenlabs_voice_collection_id"
+  >;
+  userKey?: Buffer;
+  onlineAllowed: boolean;
+}): Promise<BotGenerationVoiceCatalogV1> {
+  const operatingSystemVoiceNames =
+    args.user.operating_system_voices_enabled !== 0
+      ? (await getSystemVoiceCapabilities()).voices.map((voice) => voice.name)
+      : [];
+  const elevenLabsApiKey =
+    args.onlineAllowed && args.userKey
+      ? getElevenLabsApiKeyForUser(args.userId, args.userKey) ??
+        config.elevenLabsApiKey
+      : undefined;
+  const premiumVoices = elevenLabsApiKey
+    ? await requestElevenLabsVoiceCatalog({
+        apiKey: elevenLabsApiKey,
+        collectionId: args.user.elevenlabs_voice_collection_id,
+      })
+        .then((voices) =>
+          voices.map((voice) => ({
+            voiceId: voice.voiceId,
+            name: voice.name,
+            nativeAccentHint:
+              Object.entries(voice.labels).find(([key]) =>
+                /accent|language|locale|nationality/iu.test(key),
+              )?.[1] ?? null,
+          })),
+        )
+        .catch(() => [])
+    : [];
+  return { operatingSystemVoiceNames, premiumVoices };
+}
+
 async function checkPrismCreditMonitorForUser(
   userId: string,
   force = false,
@@ -5832,10 +5897,12 @@ function debateAutoRoutingContext(
     | "lastReasoningEffort"
     | "lastTurbo"
     | "latestAutoRoute"
+    | "modelSelectionKind"
   >,
 ): AutoRoutingContextV1 & {
   frozenReasoningEffort?: ProviderReasoningEffort;
   frozenTurbo?: boolean;
+  frozenModelSelectionKind?: "auto" | "fixed";
 } {
   const evidenceSources = session.evidence.sources.flatMap((source) => [
     source.title,
@@ -5870,6 +5937,7 @@ function debateAutoRoutingContext(
     outputTokens: shortTurn ? 900 : 2_400,
     structuredOutput: true,
     highStakes: true,
+    frozenModelSelectionKind: session.modelSelectionKind ?? "fixed",
     ...(session.lastReasoningEffort
       ? { frozenReasoningEffort: session.lastReasoningEffort }
       : session.latestAutoRoute?.reasoningEffort
@@ -5891,6 +5959,7 @@ async function debateAiRuntimeForUser(
   requestedRoutingContext?: AutoRoutingContextV1 & {
     frozenReasoningEffort?: ProviderReasoningEffort;
     frozenTurbo?: boolean;
+    frozenModelSelectionKind?: "auto" | "fixed";
   },
 ): Promise<DebateAiRuntime> {
   const user = getUserRow(userId);
@@ -5955,6 +6024,10 @@ async function debateAiRuntimeForUser(
     requestedRoutingContext?.frozenReasoningEffort,
   );
   const frozenTurbo = requestedRoutingContext?.frozenTurbo;
+  const autoTurboEnabled =
+    responseLane === "online" &&
+    modelOverride === null &&
+    resolveUserAutoTurboMode(db, userId);
   const resolvedPrimary = resolveAutoModel({
     provider: preferredProvider,
     lane: responseLane,
@@ -5971,6 +6044,7 @@ async function debateAiRuntimeForUser(
       outputTokens: 2_400,
       ...requestedRoutingContext,
     },
+    turboOnly: autoTurboEnabled,
   });
   const primaryEffort =
     frozenReasoningEffort !== "auto"
@@ -6031,6 +6105,8 @@ async function debateAiRuntimeForUser(
       turbo:
         typeof frozenTurbo === "boolean"
           ? frozenTurbo
+          : autoTurboEnabled
+            ? true
           : resolveUserModelTurboMode(db, {
               userId,
               provider: providerName,
@@ -6061,24 +6137,64 @@ async function debateAiRuntimeForUser(
         .map(normalizeAutoFallbackModelRef)
         .filter((entry): entry is AutoFallbackModelRef => entry !== null)
     : [];
-  const configuredChain = parseStoredAutoFallbackChain(
-    user.auto_fallback_chain,
+  const configuredChain = turboCapableAutoFallbackChain(
+    parseStoredAutoFallbackChain(user.auto_fallback_chain),
+    autoTurboEnabled,
+  );
+  const candidateAllowlist: AutoFallbackModelRef[] = (
+    responseLane === "local"
+      ? routingCatalog.local.map((entry) => ({
+          provider: "local" as const,
+          model: entry.id,
+        }))
+      : routingCatalog.online.map((entry) => ({
+          provider:
+            entry.provider === "anthropic"
+              ? ("anthropic" as const)
+              : ("openai" as const),
+          model: entry.id,
+        }))
+  ).filter(
+    (entry) =>
+      !hiddenModelIds.includes(entry.model) &&
+      (!autoTurboEnabled || modelSupportsTurboMode(entry.provider, entry.model)),
   );
   const primaryRef: AutoFallbackModelRef = {
     provider: primary.providerName,
     model: primary.model,
   };
+  const modelSelectionKind =
+    requestedRoutingContext?.frozenModelSelectionKind ??
+    (resolvedPrimary.autoRoute ? "auto" : "fixed");
   const frozenFallbacks =
     frozenChain.length > 1
       ? frozenChain.slice(1).filter(
           (entry) =>
-            (entry.provider === "local" ? "local" : "online") === responseLane,
+            responseLane === "local"
+              ? entry.provider === "local"
+              : entry.provider !== "local" || modelSelectionKind === "auto",
         )
       : [];
+  const runtimeAutoRoutingChain: AutoFallbackChainV1 | null =
+    modelSelectionKind === "auto"
+      ? {
+          v: 1,
+          fallbacks: configuredChain?.fallbacks ?? [],
+          eligibleCandidates: candidateAllowlist,
+          ...(responseLane === "online"
+            ? {
+                finalLocalRecovery: {
+                  provider: "local" as const,
+                  model: REQUIRED_PRIMARY_LOCAL_MODEL_ID,
+                },
+              }
+            : {}),
+        }
+      : null;
   const resolvedChain =
     hasFrozenChain
       ? [primaryRef, ...frozenFallbacks]
-      : (autoFallbackResolvedChain(primaryRef, configuredChain) ?? [primaryRef]);
+      : (autoFallbackResolvedChain(primaryRef, runtimeAutoRoutingChain) ?? [primaryRef]);
   const seen = new Set<string>();
   const lanes = resolvedChain
     .filter((entry) => {
@@ -6112,21 +6228,10 @@ async function debateAiRuntimeForUser(
     preferredProvider: primary.providerName,
     responseMode: responseLane,
     lanes,
-    modelSelectionKind: resolvedPrimary.autoRoute ? "auto" : "fixed",
-    autoCandidateAllowlist: (
-      responseLane === "local"
-        ? routingCatalog.local.map((entry) => ({
-            provider: "local" as const,
-            model: entry.id,
-          }))
-        : routingCatalog.online.map((entry) => ({
-            provider:
-              entry.provider === "anthropic"
-                ? ("anthropic" as const)
-                : ("openai" as const),
-            model: entry.id,
-          }))
-    ).filter((entry) => !hiddenModelIds.includes(entry.model)),
+    modelSelectionKind,
+    ...(modelSelectionKind === "auto"
+      ? { autoCandidateAllowlist: candidateAllowlist }
+      : {}),
     ...(resolvedPrimary.autoRoute
       ? { autoRoute: resolvedPrimary.autoRoute }
       : {}),
@@ -6290,6 +6395,33 @@ function readCoffeeSessionSpeakerModel(value: unknown): string | null {
   return model?.toLowerCase() === "auto" ? null : model;
 }
 
+function latestCoffeeMessageCursor(
+  userId: string,
+  conversationId: string,
+): string | null {
+  const row = db
+    .prepare(
+      `SELECT id
+         FROM messages
+        WHERE user_id = ? AND conversation_id = ?
+        ORDER BY created_at DESC, rowid DESC
+        LIMIT 1`,
+    )
+    .get(userId, conversationId) as { id: string } | undefined;
+  return row?.id ?? null;
+}
+
+function turboCapableAutoFallbackChain(
+  chain: AutoFallbackChainV1 | null,
+  turboOnly: boolean,
+): AutoFallbackChainV1 | null {
+  if (!chain || !turboOnly) return chain;
+  const fallbacks = chain.fallbacks.filter((entry) =>
+    modelSupportsTurboMode(entry.provider, entry.model),
+  );
+  return fallbacks.length > 0 ? { ...chain, fallbacks } : null;
+}
+
 /**
  * Resolves one text generation against the selected privacy lane. Legacy AUTO
  * inputs are accepted only as reads and collapse to the lane implied by the
@@ -6392,6 +6524,12 @@ async function contextualTextRuntimeForUser<
     ).some((entry) => entry.id === requestedExplicitModelOverride)
       ? null
       : requestedExplicitModelOverride;
+  const modelSelectionKind =
+    explicitModelOverride === null ? ("auto" as const) : ("fixed" as const);
+  const autoTurboEnabled =
+    responseMode === "online" &&
+    explicitModelOverride === null &&
+    resolveUserAutoTurboMode(db, args.userId);
   const resolved = resolveAutoModel({
     provider: primaryProvider,
     lane: responseMode,
@@ -6405,6 +6543,7 @@ async function contextualTextRuntimeForUser<
       ...args.routingContext,
       simulatedEffortEnabled: true,
     },
+    turboOnly: autoTurboEnabled,
   });
   const storedReasoningEffort = resolveUserModelReasoningEffort(db, {
       userId: args.userId,
@@ -6448,7 +6587,14 @@ async function contextualTextRuntimeForUser<
   const candidateAllowlist = (
     responseMode === "local" ? routingCatalog.local : routingCatalog.online
   )
-    .filter((entry) => !hiddenModels.has(entry.id))
+    .filter(
+      (entry) =>
+        !hiddenModels.has(entry.id) &&
+        (!autoTurboEnabled || modelSupportsTurboMode(
+          entry.provider === "anthropic" ? "anthropic" : entry.provider === "local" ? "local" : "openai",
+          entry.id,
+        )),
+    )
     .map((entry): AutoFallbackModelRef => ({
       provider:
         entry.provider === "anthropic"
@@ -6466,10 +6612,38 @@ async function contextualTextRuntimeForUser<
               .filter(
                 (entry): entry is AutoFallbackModelRef =>
                   entry !== null &&
-                  (entry.provider === "local" ? "local" : "online") ===
-                    responseMode,
+                  (responseMode === "local"
+                    ? entry.provider === "local"
+                    : entry.provider !== "local" ||
+                      modelSelectionKind === "auto"),
               )
           : [])
+      : null;
+  const configuredAutoPriorities =
+    frozenFallbacks !== null
+      ? frozenFallbacks
+      : (turboCapableAutoFallbackChain(
+          parseStoredAutoFallbackChain(args.user.auto_fallback_chain),
+          autoTurboEnabled,
+        )?.fallbacks ?? []);
+  const runtimeAutoRoutingChain: AutoFallbackChainV1 | null =
+    modelSelectionKind === "auto"
+      ? {
+          v: 1,
+          // Settings entries are ordering hints. Every other eligible model is
+          // appended by the shared resolver, then ONLINE receives one explicit
+          // bundled-local recovery attempt.
+          fallbacks: configuredAutoPriorities,
+          eligibleCandidates: candidateAllowlist,
+          ...(responseMode === "online"
+            ? {
+                finalLocalRecovery: {
+                  provider: "local" as const,
+                  model: REQUIRED_PRIMARY_LOCAL_MODEL_ID,
+                },
+              }
+            : {}),
+        }
       : null;
   return {
     responseMode,
@@ -6479,21 +6653,19 @@ async function contextualTextRuntimeForUser<
     turbo:
       typeof args.requestedTurbo === "boolean"
         ? args.requestedTurbo
+        : autoTurboEnabled
+          ? true
         : resolveUserModelTurboMode(db, {
             userId: args.userId,
             provider: resolved.provider,
             modelId: resolved.model,
           }),
     autoRoute: resolved.autoRoute,
+    modelSelectionKind,
     candidateAllowlist,
     openAiApiKey,
     anthropicApiKey,
-    autoFallbackChain:
-      frozenFallbacks !== null
-        ? frozenFallbacks.length > 0
-          ? { v: 1 as const, fallbacks: frozenFallbacks }
-          : null
-        : parseStoredAutoFallbackChain(args.user.auto_fallback_chain),
+    autoFallbackChain: runtimeAutoRoutingChain,
   };
 }
 
@@ -7610,36 +7782,6 @@ function normalizeDefaultBotSettingsForResponse(user: UserDbRow) {
       const raw = user.prism_default_bot_audio_voice_profile;
       const parsed = parseStoredBotAudioVoiceProfileV1(raw);
       const resolved = parsed ?? normalizeBotAudioVoiceProfileV1(undefined);
-      // #region agent log
-      fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Debug-Session-Id": "2836be",
-        },
-        body: JSON.stringify({
-          sessionId: "2836be",
-          hypothesisId: "C,E",
-          location: "server.ts:normalizeDefaultBotSettingsForResponse",
-          message: "Serving Default Prism voice profile",
-          data: {
-            userId: user.id,
-            rawIsNull: raw == null,
-            rawLength: typeof raw === "string" ? raw.length : 0,
-            parseFailed: typeof raw === "string" && raw.trim().length > 0 && !parsed,
-            usedBuiltinDefault: !parsed,
-            baseVoiceId: resolved.baseVoiceId,
-            pitch: resolved.pitch,
-            pace: resolved.pace,
-            systemVoiceName: resolved.systemVoiceName ?? null,
-            elevenLabsVoiceId: resolved.elevenLabsVoiceId ?? null,
-            elevenLabsVoiceInitialized:
-              resolved.elevenLabsVoiceInitialized === true,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       return resolved;
     })(),
     prismDefaultBotTemperature: BOT_TEMPERATURE_DEFAULT,
@@ -8926,6 +9068,99 @@ function queueInitialCoffeeGroupSynthesis(
       queueCoffeeGroupSynthesisItem(userId, groupId, "atmosphere"),
     );
   }
+}
+
+const coffeeGroupSoundtrackFlights = new Map<string, Promise<void>>();
+
+function queueCoffeeGroupSoundtrack(
+  userId: string,
+  groupId: string,
+  requestedProvider?: unknown,
+  direction?: unknown,
+): Promise<void> {
+  const flightKey = `${userId}:${groupId}`;
+  const existingFlight = coffeeGroupSoundtrackFlights.get(flightKey);
+  if (existingFlight) return existingFlight;
+  const generationDb = db;
+  const flight = (async () => {
+    const group = getCoffeeGroup(generationDb, userId, groupId);
+    if (!group) return;
+    const user = getUserRow(userId);
+    const effectiveProvider = readProvider(requestedProvider) ?? user.preferred_provider;
+    if (effectiveProvider === "local") {
+      ensureCoffeeGroupSoundtrack(
+        generationDb,
+        userId,
+        groupId,
+        "unavailable",
+        "Custom music is available in ONLINE mode; bundled Coffee Jazz is playing.",
+      );
+      return;
+    }
+    const userKey = decryptUserKey(userId);
+    const apiKey = getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
+    if (!apiKey) {
+      ensureCoffeeGroupSoundtrack(
+        generationDb,
+        userId,
+        groupId,
+        "unavailable",
+        "Connect ElevenLabs to compose custom music; bundled Coffee Jazz is playing.",
+      );
+      return;
+    }
+    const token = beginCoffeeGroupSoundtrackGeneration(
+      generationDb,
+      userId,
+      groupId,
+    );
+    if (!token) return;
+    try {
+      const profiles = loadCoffeeGroupProfiles(
+        generationDb,
+        userId,
+        group.botGroupIds,
+        { includeRuntimePersona: false },
+      );
+      const prompt = buildCoffeeGroupSoundtrackPrompt({
+        groupName: group.name,
+        ethos: group.ethos,
+        bots: profiles.map((profile) => ({
+          name: profile.name,
+          personaSnippet: stripBotProfileMetaSuffix(profile.systemPrompt),
+        })),
+        direction,
+      });
+      const music = await requestCoffeeGroupElevenLabsMusic({ apiKey, prompt });
+      completeCoffeeGroupSoundtrackGeneration(
+        generationDb,
+        userId,
+        groupId,
+        token,
+        {
+          prompt,
+          contentType: music.contentType,
+          audioBytes: music.audioBytes,
+        },
+      );
+    } catch (error) {
+      failCoffeeGroupSoundtrackGeneration(
+        generationDb,
+        userId,
+        groupId,
+        token,
+        error instanceof Error
+          ? error.message
+          : "Custom music could not be prepared; bundled Coffee Jazz is playing.",
+      );
+    }
+  })().finally(() => {
+    if (coffeeGroupSoundtrackFlights.get(flightKey) === flight) {
+      coffeeGroupSoundtrackFlights.delete(flightKey);
+    }
+  });
+  coffeeGroupSoundtrackFlights.set(flightKey, flight);
+  return flight;
 }
 
 function buildRoutes(): RouteDefinition[] {
@@ -13918,7 +14153,7 @@ function buildRoutes(): RouteDefinition[] {
       ) {
         const bot = db
           .prepare(
-            "SELECT name, system_prompt, semantic_facets, powers_json, online_enabled, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
+            "SELECT name, system_prompt, semantic_facets, powers_json, color, online_enabled, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
           )
           .get(effectiveBotId, userId) as
           | {
@@ -13926,6 +14161,7 @@ function buildRoutes(): RouteDefinition[] {
               system_prompt?: string;
               semantic_facets?: string | null;
               powers_json?: string | null;
+              color?: string | null;
               online_enabled?: number | null;
               flirt_enabled?: number | null;
               temperature?: number | null;
@@ -13948,6 +14184,7 @@ function buildRoutes(): RouteDefinition[] {
             bot.system_prompt,
             bot.flirt_enabled === 1,
             bot.powers_json,
+            { identityColor: bot.color ?? null },
           );
           facetLines.push(...readBotSemanticFacetSummary(bot.semantic_facets));
           if (bot.online_enabled === 0 && effectiveProvider !== "local") {
@@ -14131,13 +14368,14 @@ function buildRoutes(): RouteDefinition[] {
       if (request.activeBotId) {
         const bot = db
           .prepare(
-            "SELECT name, system_prompt, powers_json, flirt_enabled FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
+            "SELECT name, system_prompt, powers_json, color, flirt_enabled FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
           )
           .get(request.activeBotId, userId) as
           | {
               name?: string;
               system_prompt?: string;
               powers_json?: string | null;
+              color?: string | null;
               flirt_enabled?: number | null;
             }
           | undefined;
@@ -14148,6 +14386,7 @@ function buildRoutes(): RouteDefinition[] {
             bot.system_prompt,
             bot.flirt_enabled === 1,
             bot.powers_json,
+            { identityColor: bot.color ?? null },
           );
         }
       }
@@ -14740,13 +14979,14 @@ function buildRoutes(): RouteDefinition[] {
       if (runtimeBotId) {
         const bot = db
           .prepare(
-            "SELECT name, system_prompt, powers_json, authored_audio_voice_profile, audio_voice_profile_override, online_enabled, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
+            "SELECT name, system_prompt, powers_json, color, authored_audio_voice_profile, audio_voice_profile_override, online_enabled, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
           )
           .get(runtimeBotId, userId) as
           | {
               name?: string;
               system_prompt?: string;
               powers_json?: string | null;
+              color?: string | null;
               authored_audio_voice_profile?: string | null;
               audio_voice_profile_override?: string | null;
               online_enabled?: number | null;
@@ -14772,7 +15012,13 @@ function buildRoutes(): RouteDefinition[] {
           );
           runtimeBotShapeshift = botPowerShapeshiftsIdentityV1(bot.powers_json);
           runtimeBotFalseName = botPowerBelievesFalseNameV1(bot.powers_json);
-          botPersonaPrompt = bot.system_prompt ?? undefined;
+          const runtimePersonaPrompt = composeBotRuntimePersona({
+            db,
+            userId,
+            botId: runtimeBotId,
+            basePrompt: bot.system_prompt ?? "",
+          });
+          botPersonaPrompt = runtimePersonaPrompt;
           botFlirtEnabled = bot.flirt_enabled === 1;
           if (botPowerIntermittentMuteEffectV1(bot.powers_json)) {
             const stableTurnOrdinal = incognito
@@ -14804,9 +15050,10 @@ function buildRoutes(): RouteDefinition[] {
           // `__tests__/bots.test.ts`.
           botSystemPrompt = composeBotSystemPrompt(
             bot.name,
-            bot.system_prompt,
+            runtimePersonaPrompt,
             bot.flirt_enabled === 1,
             bot.powers_json,
+            { identityColor: bot.color ?? null },
           );
           const themeMoodCue = botPowerThemeMoodCueV1(
             bot.powers_json,
@@ -14850,6 +15097,21 @@ function buildRoutes(): RouteDefinition[] {
         getBraveSearchApiKeyForUser(userId, userKey) ??
         config.braveSearchApiKey;
       const responseLane = effectiveProvider === "local" ? "local" : "online";
+      const autoTurboEnabled =
+        !prismHomeTurn &&
+        responseLane === "online" &&
+        !botForcesLocalProvider &&
+        !assistantInterruptionModelOverride &&
+        !explicitModelOverride &&
+        resolveUserAutoTurboMode(db, userId);
+      const chatModelCatalog = await buildModelCatalog(
+        responseLane === "online" ? openAiApiKey : undefined,
+        user.secondary_ollama_host,
+        responseLane === "online" ? anthropicApiKey : undefined,
+      );
+      const chatHiddenModelIds = parseHiddenBotModelIds(
+        user.hidden_bot_model_ids,
+      );
       const resolvedAuto = prismHomeTurn
         ? {
             provider: "local" as const,
@@ -14863,12 +15125,8 @@ function buildRoutes(): RouteDefinition[] {
               ? null
               : (assistantInterruptionModelOverride ??
                 explicitModelOverride),
-            hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
-            catalog: await buildModelCatalog(
-              responseLane === "online" ? openAiApiKey : undefined,
-              user.secondary_ollama_host,
-              responseLane === "online" ? anthropicApiKey : undefined,
-            ),
+            hiddenModelIds: chatHiddenModelIds,
+            catalog: chatModelCatalog,
             onlineAutoProviderBias: clampOnlineAutoProviderBias(
               user.online_auto_provider_bias,
             ),
@@ -14879,7 +15137,54 @@ function buildRoutes(): RouteDefinition[] {
               toolUse: Boolean(manualTool),
               simulatedEffortEnabled: true,
             },
+            turboOnly: autoTurboEnabled,
           });
+      const chatAutoRoutingChain: AutoFallbackChainV1 | null =
+        resolvedAuto.autoRoute
+          ? {
+              v: 1,
+              fallbacks:
+                turboCapableAutoFallbackChain(
+                  parseStoredAutoFallbackChain(user.auto_fallback_chain),
+                  autoTurboEnabled,
+                )?.fallbacks ?? [],
+              eligibleCandidates: (
+                responseLane === "local"
+                  ? chatModelCatalog.local
+                  : chatModelCatalog.online
+              )
+                .filter(
+                  (entry) =>
+                    !chatHiddenModelIds.includes(entry.id) &&
+                    (!autoTurboEnabled ||
+                      modelSupportsTurboMode(
+                        entry.provider === "anthropic"
+                          ? "anthropic"
+                          : entry.provider === "local"
+                            ? "local"
+                            : "openai",
+                        entry.id,
+                      )),
+                )
+                .map((entry) => ({
+                  provider:
+                    entry.provider === "anthropic"
+                      ? ("anthropic" as const)
+                      : entry.provider === "local"
+                        ? ("local" as const)
+                        : ("openai" as const),
+                  model: entry.id,
+                })),
+              ...(responseLane === "online"
+                ? {
+                    finalLocalRecovery: {
+                      provider: "local" as const,
+                      model: REQUIRED_PRIMARY_LOCAL_MODEL_ID,
+                    },
+                  }
+                : {}),
+            }
+          : null;
       effectiveProvider = resolvedAuto.provider;
       generationOverrides.model = resolvedAuto.model;
       const storedReasoningEffort = resolveUserModelReasoningEffort(db, {
@@ -15098,9 +15403,7 @@ function buildRoutes(): RouteDefinition[] {
             starterPromptLabel,
             secondaryOllamaHost: user.secondary_ollama_host,
             responseMode: effectiveProvider === "local" ? "local" : "online",
-            autoFallbackChain: parseStoredAutoFallbackChain(
-              user.auto_fallback_chain,
-            ),
+            autoFallbackChain: chatAutoRoutingChain,
             resolveReasoningEffort: (provider, model) =>
               resolvedAuto.autoRoute?.provider === provider &&
               resolvedAuto.autoRoute.model === model
@@ -15111,6 +15414,7 @@ function buildRoutes(): RouteDefinition[] {
                     modelId: model,
                   }),
             resolveTurboMode: (provider, model) =>
+              (autoTurboEnabled && provider !== "local") ||
               resolveUserModelTurboMode(db, {
                 userId,
                 provider,
@@ -15605,7 +15909,6 @@ function buildRoutes(): RouteDefinition[] {
             : {}),
         },
       );
-      const botCandidates = promptBotWildcardCandidates(db, userId);
       const slates = await runWithUsageSession(
         {
           db,
@@ -15620,7 +15923,6 @@ function buildRoutes(): RouteDefinition[] {
             body.formality,
             runtime,
             body.direction,
-            botCandidates,
           ),
       );
       json(ctx.res, 200, { ok: true, slates });
@@ -17969,6 +18271,28 @@ function buildRoutes(): RouteDefinition[] {
       });
       json(ctx.res, 201, { ok: true, show });
     }),
+    route("POST", "/api/botcast/shows/:id/host-recovery/screen", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const recovery = await screenBotcastShowHostRecovery(db, userId, ctx.params.id, {
+        prismDefaultLlmModel: user.prism_default_llm_model,
+        auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
+      });
+      json(ctx.res, 200, { ok: true, recovery });
+    }),
+    route("POST", "/api/botcast/shows/:id/host-recovery/cast", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const body = ctx.body as Record<string, unknown>;
+      if (typeof body.botId !== "string" || !body.botId.trim()) {
+        throw new HttpError(400, "Choose a bot to ask.");
+      }
+      const result = await castBotcastShowRecoveryHost(db, userId, ctx.params.id, body.botId.trim(), {
+        prismDefaultLlmModel: user.prism_default_llm_model,
+        auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
+      });
+      json(ctx.res, 200, { ok: true, result });
+    }),
     route("POST", "/api/botcast/shows/:id/host-chat", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
@@ -19265,6 +19589,104 @@ function buildRoutes(): RouteDefinition[] {
     ),
     route(
       "POST",
+      "/api/botcast/shows/:id/ident-audio/generate",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const user = getUserRow(userId);
+        if (userBlocksOnlineCapabilities(user)) {
+          throw new HttpError(
+            409,
+            "Switch to AUTO or ONLINE before creating a Premium Signal ident.",
+          );
+        }
+        const show = getBotcastShow(db, userId, ctx.params.id);
+        const body = ctx.body as Record<string, unknown>;
+        const keywords = normalizeSignalGenerationKeywords(body.keywords);
+        const userKey = decryptUserKey(userId);
+        const apiKey =
+          getElevenLabsApiKeyForUser(userId, userKey) ??
+          config.elevenLabsApiKey;
+        if (!apiKey) {
+          throw new HttpError(
+            409,
+            "Add an ElevenLabs API key in Settings first.",
+          );
+        }
+        const host = db
+          .prepare(
+            "SELECT system_prompt FROM bots WHERE id = ? AND user_id = ?",
+          )
+          .get(show.hostBotId, userId) as { system_prompt: string } | undefined;
+        if (!host) throw new HttpError(404, "Signal host bot not found.");
+        const musicSeed = `${show.hostBotId}:${show.id}:music:${show.musicIdentity.revision}`;
+        const musicProfile = buildSignalMusicProfile({
+          temperament: signalPersonaTemperamentFor(host.system_prompt),
+          seed: musicSeed,
+          identity: show.musicIdentity.profile,
+          premise: show.premise,
+          hostingStyle: show.hostingStyle,
+          studioIdentity: show.studioIdentity,
+        });
+        const compositionPlan = buildSignalElevenLabsMusicCompositionPlan({
+          profile: musicProfile,
+          seed: musicSeed,
+          keywords,
+        });
+        const previousOutdent = readBotcastShowOutdentAudio(
+          db,
+          userId,
+          show.id,
+        );
+        const controller = new AbortController();
+        const onClose = () => controller.abort();
+        ctx.req.once("close", onClose);
+        try {
+          const music = await requestSignalElevenLabsMusic({
+            apiKey,
+            compositionPlan,
+            signal: controller.signal,
+          });
+          if (controller.signal.aborted) return;
+          const savedShow = storeBotcastShowIntroAudio(db, userId, show.id, {
+            model: SIGNAL_ELEVENLABS_MUSIC_MODEL,
+            prompt: JSON.stringify(compositionPlan),
+            contentType: music.contentType,
+            audioBytes: music.audioBytes,
+            durationMs: BOTCAST_ELEVENLABS_INTRO_DURATION_MS,
+            outdent: previousOutdent
+              ? {
+                  prompt: previousOutdent.prompt,
+                  contentType: previousOutdent.contentType,
+                  audioBytes: previousOutdent.audioBytes,
+                  durationMs: previousOutdent.durationMs,
+                }
+              : undefined,
+          });
+          if (music.requestId) {
+            ctx.res.setHeader("x-prism-provider-request-id", music.requestId);
+          }
+          json(ctx.res, 201, { ok: true, show: savedShow });
+          void checkPrismCreditMonitorForUser(userId, true);
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          if (error instanceof ElevenLabsMusicError) {
+            throw new HttpError(
+              error.status === 401 || error.status === 403
+                ? 401
+                : error.status === 429
+                  ? 429
+                  : 502,
+              error.message,
+            );
+          }
+          throw error;
+        } finally {
+          ctx.req.off("close", onClose);
+        }
+      },
+    ),
+    route(
+      "POST",
       "/api/botcast/shows/:id/atmosphere-audio/generate",
       async (ctx) => {
         const userId = requireAuth(ctx);
@@ -19385,6 +19807,33 @@ function buildRoutes(): RouteDefinition[] {
     route("DELETE", "/api/botcast/shows/:id/intro-audio", async (ctx) => {
       const userId = requireAuth(ctx);
       const show = deleteBotcastShowIntroAudio(db, userId, ctx.params.id);
+      json(ctx.res, 200, { ok: true, show });
+    }),
+    route("DELETE", "/api/botcast/shows/:id/ident-audio", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const show = refreshBotcastShowLocalIdent(db, userId, ctx.params.id);
+      json(ctx.res, 200, { ok: true, show });
+    }),
+    route("POST", "/api/botcast/shows/:id/audio/undo", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const show = undoBotcastShowAudioPackage(db, userId, ctx.params.id);
+      if (!show) {
+        throw new HttpError(409, "There is no previous Signal audio package to restore.");
+      }
+      json(ctx.res, 200, { ok: true, show });
+    }),
+    route("POST", "/api/botcast/shows/:id/logo/undo", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const current = getBotcastShow(db, userId, ctx.params.id);
+      if (!current.logo.previousImageUrl && !current.logo.previousImageId) {
+        throw new HttpError(409, "There is no previous Signal logo to restore.");
+      }
+      if (signalArtworkJobs.hasActiveJobForShow(userId, current.id)) {
+        throw new HttpError(409, "This show’s custom look is still generating.");
+      }
+      const show = updateBotcastShow(db, userId, current.id, {
+        undoLogo: true,
+      });
       json(ctx.res, 200, { ok: true, show });
     }),
     route("PATCH", "/api/botcast/shows/:id", async (ctx) => {
@@ -19591,6 +20040,9 @@ function buildRoutes(): RouteDefinition[] {
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       const body = ctx.body as Record<string, unknown>;
+      // #region agent log
+      fetch('http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'aec877'},body:JSON.stringify({sessionId:'aec877',runId:'pre-fix',hypothesisId:'B',location:'server.ts:POST /episodes',message:'episode create entered',data:{guestKind: body.guestKind === 'producer' ? 'producer' : 'bot',topicHasBrace: typeof body.topic === 'string' && body.topic.includes('{'),briefHasBrace: typeof body.producerBrief === 'string' && body.producerBrief.includes('{'),topicHasSlash: typeof body.topic === 'string' && body.topic.includes('/'),briefHasBang: typeof body.producerBrief === 'string' && body.producerBrief.includes('!')},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       const explicitModelOverride = readCoffeeSessionSpeakerModel(
         body.modelOverride,
       );
@@ -19673,46 +20125,6 @@ function buildRoutes(): RouteDefinition[] {
         : typeof body.producerBrief === "string"
           ? body.producerBrief
           : "";
-      if (
-        !producerGuest &&
-        (promptWildcardNames(episodeTopic).length > 0 ||
-          promptWildcardNames(episodeProducerBrief).length > 0)
-      ) {
-        const botCandidates = promptBotWildcardCandidates(db, userId);
-        const wildcardProvider = providerFactoryOverride(
-          preferredProvider,
-          runtime.openAiApiKey,
-          user.secondary_ollama_host,
-          runtime.anthropicApiKey,
-        );
-        const wildcardModel = modelOverride;
-        const wildcardOverrides = {
-          model: wildcardModel,
-          temperature: 0.72,
-          maxTokens: 400,
-          usagePurpose: "prompt_wildcard" as const,
-        };
-        if (promptWildcardNames(episodeTopic).length > 0) {
-          episodeTopic = (
-            await resolvePromptWildcardsWithModel({
-              prompt: episodeTopic,
-              provider: wildcardProvider,
-              botCandidates,
-              generationOverrides: wildcardOverrides,
-            })
-          ).prompt;
-        }
-        if (promptWildcardNames(episodeProducerBrief).length > 0) {
-          episodeProducerBrief = (
-            await resolvePromptWildcardsWithModel({
-              prompt: episodeProducerBrief,
-              provider: wildcardProvider,
-              botCandidates,
-              generationOverrides: wildcardOverrides,
-            })
-          ).prompt;
-        }
-      }
       const surface = {
         surfaceId: "signal" as const,
         signalShowId: ctx.params.id,
@@ -19723,7 +20135,9 @@ function buildRoutes(): RouteDefinition[] {
         surface,
         "ui",
       );
-      const proposal = prismCapabilityRegistry.createProposal({
+      let proposal;
+      try {
+        proposal = prismCapabilityRegistry.createProposal({
         context: capabilityContext,
         capabilityId: "signal.episode.create",
         input: {
@@ -19744,7 +20158,13 @@ function buildRoutes(): RouteDefinition[] {
               : Number(body.durationMinutes),
           playbackMode: body.playbackMode === "watch" ? "watch" : "live",
         },
-      });
+        });
+      } catch (error) {
+        // #region agent log
+        fetch('http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'aec877'},body:JSON.stringify({sessionId:'aec877',runId:'pre-fix',hypothesisId:'C',location:'server.ts:createProposal',message:'createProposal threw',data:{errorName: error instanceof Error ? error.name : typeof error, errorMessage: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? (error.stack ?? '').split('\n').slice(0, 12) : []},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+        throw error;
+      }
       const run = await prismCapabilityRegistry.executeProposal({
         context: capabilityContext,
         proposalId: proposal.id,
@@ -19755,6 +20175,9 @@ function buildRoutes(): RouteDefinition[] {
             ? body.prismIdempotencyKey.trim().slice(0, 240)
             : `ui:signal:create:${randomId()}`,
       });
+      // #region agent log
+      fetch('http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'aec877'},body:JSON.stringify({sessionId:'aec877',runId:'pre-fix',hypothesisId:'A',location:'server.ts:executeProposal',message:'episode capability finished',data:{status: run.status, error: run.error ?? null, hasEpisodeId: Boolean(run.result && typeof run.result === 'object' && !Array.isArray(run.result) && typeof run.result.episodeId === 'string')},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       if (
         run.status !== "committed" ||
         !run.result ||
@@ -20323,6 +20746,9 @@ function buildRoutes(): RouteDefinition[] {
               ...(typeof cueRecord?.detail === "string"
                 ? { detail: cueRecord.detail }
                 : {}),
+              ...(typeof cueRecord?.directQuote === "string"
+                ? { directQuote: cueRecord.directQuote }
+                : {}),
             }
           : undefined;
       if (cueDelivery && !cue) {
@@ -20455,8 +20881,34 @@ function buildRoutes(): RouteDefinition[] {
       } catch (error) {
         if (signalAdvanceAbort.signal.aborted) return;
         if (error instanceof AutoFallbackExhaustedError) {
+          const httpStatus = signalAutoFallbackHttpStatus(error);
+          const validationOnly =
+            signalAutoFallbackExhaustionIsValidationOnly(error);
+          // #region agent log
+          fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Debug-Session-Id": "ad2b15",
+            },
+            body: JSON.stringify({
+              sessionId: "ad2b15",
+              runId: "pre-fix",
+              hypothesisId: "A",
+              location: "server.ts:botcast advance AutoFallbackExhaustedError",
+              message: "signal advance mapped auto exhaustion",
+              data: {
+                httpStatus,
+                validationOnly,
+                publicMessage: signalAutoFallbackPublicMessage(error),
+                reasons: error.attempts.map((attempt) => attempt.reason ?? null),
+              },
+              timestamp: Date.now(),
+            }),
+          }).catch(() => {});
+          // #endregion
           throw new HttpError(
-            signalAutoFallbackHttpStatus(error),
+            httpStatus,
             signalAutoFallbackPublicMessage(error),
           );
         }
@@ -20659,11 +21111,14 @@ function buildRoutes(): RouteDefinition[] {
           ? { starterTopicsByBotId: body.starterTopicsByBotId }
           : {}),
       });
+      ensureCoffeeGroupSoundtrack(db, userId, group.id);
+      const persistedGroup = getCoffeeGroup(db, userId, group.id) ?? group;
       json(ctx.res, 201, {
         ok: true,
-        group,
+        group: persistedGroup,
       });
       queueInitialCoffeeGroupSynthesis(userId, group.id, pendingSynthesisItems);
+      void queueCoffeeGroupSoundtrack(userId, group.id, body.preferredProvider);
     }),
     route("POST", "/api/coffee/groups/setup-suggestion", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -20785,6 +21240,55 @@ function buildRoutes(): RouteDefinition[] {
       if (!existing) throw new HttpError(404, "Coffee group not found.");
       void queueCoffeeGroupSynthesisItem(userId, existing.id, item);
       json(ctx.res, 202, {
+        ok: true,
+        group: getCoffeeGroup(db, userId, existing.id),
+      });
+    }),
+    route("POST", "/api/coffee/groups/:id/soundtrack/regenerate", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const existing = getCoffeeGroup(db, userId, ctx.params.id);
+      if (!existing) throw new HttpError(404, "Coffee group not found.");
+      const body = ctx.body as Record<string, unknown>;
+      const user = getUserRow(userId);
+      const effectiveProvider = readProvider(body.preferredProvider) ?? user.preferred_provider;
+      if (effectiveProvider === "local") {
+        throw new HttpError(409, "Custom Coffee music requires ONLINE mode. Bundled Coffee Jazz remains available.");
+      }
+      const userKey = decryptUserKey(userId);
+      if (!(getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey)) {
+        throw new HttpError(409, "Connect ElevenLabs before regenerating Coffee music.");
+      }
+      const direction = normalizePrismRefractDirection(body.direction);
+      void queueCoffeeGroupSoundtrack(
+        userId,
+        existing.id,
+        effectiveProvider,
+        direction,
+      );
+      json(ctx.res, 202, {
+        ok: true,
+        group: getCoffeeGroup(db, userId, existing.id),
+      });
+    }),
+    route("GET", "/api/coffee/groups/:id/soundtrack/audio", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const audio = readCoffeeGroupSoundtrackAudio(db, userId, ctx.params.id);
+      if (!audio) throw new HttpError(404, "Coffee group soundtrack not found.");
+      ctx.res.statusCode = 200;
+      ctx.res.setHeader("content-type", audio.contentType);
+      ctx.res.setHeader("content-length", String(audio.audioBytes.byteLength));
+      ctx.res.setHeader("cache-control", "private, max-age=3600");
+      ctx.res.setHeader("etag", `\"coffee-${ctx.params.id}-${audio.revision}\"`);
+      ctx.res.end(audio.audioBytes);
+    }),
+    route("POST", "/api/coffee/groups/:id/soundtrack/undo", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const existing = getCoffeeGroup(db, userId, ctx.params.id);
+      if (!existing) throw new HttpError(404, "Coffee group not found.");
+      if (!undoCoffeeGroupSoundtrack(db, userId, existing.id)) {
+        throw new HttpError(409, "There is no previous Coffee soundtrack to restore.");
+      }
+      json(ctx.res, 200, {
         ok: true,
         group: getCoffeeGroup(db, userId, existing.id),
       });
@@ -21059,28 +21563,31 @@ function buildRoutes(): RouteDefinition[] {
         Number.isFinite(body.sessionRemainingMs)
           ? Math.max(0, body.sessionRemainingMs)
           : null;
-      const openAiApiKey =
-        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
-      const anthropicApiKey =
-        getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
       const departureDb = db;
       const departureProviderFactory = providerFactoryOverride;
       const departureAuxiliaryProviderFactory =
         auxiliaryProviderFactoryOverride;
+      const departureRuntime = await contextualTextRuntimeForUser({
+        userId,
+        user,
+        requestedProvider: effectiveProvider,
+        requestedResponseMode: body.responseMode,
+        modelOverride: sessionSpeakerModel,
+        routingContext: {
+          surface: "coffee",
+          inputText: "The player has left the Coffee table.",
+          outputTokens: 900,
+        },
+      });
       const jobKey = `${userId}:${conversationId}`;
       const departureTurnSettings = {
-        preferredProvider: effectiveProvider,
+        preferredProvider: departureRuntime.provider,
         preferredLocalModel: user.preferred_local_model,
         preferredOnlineModel: user.preferred_online_model,
-        responseMode: normalizeResponseMode(
-          body.responseMode,
-          effectiveProvider === "local" ? "local" : "online",
-        ),
-        autoFallbackChain: parseStoredAutoFallbackChain(
-          user.auto_fallback_chain,
-        ),
-        openAiApiKey,
-        anthropicApiKey,
+        responseMode: departureRuntime.responseMode,
+        autoFallbackChain: departureRuntime.autoFallbackChain,
+        openAiApiKey: departureRuntime.openAiApiKey,
+        anthropicApiKey: departureRuntime.anthropicApiKey,
         secondaryOllamaHost: user.secondary_ollama_host,
         experimentalDualOllamaEnabled:
           user.experimental_dual_ollama_enabled === 1,
@@ -21101,7 +21608,9 @@ function buildRoutes(): RouteDefinition[] {
           secondaryOllamaHost: user.secondary_ollama_host,
         },
         sessionRemainingMs,
-        ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
+        sessionSpeakerModel: departureRuntime.model,
+        reasoningEffort: departureRuntime.reasoningEffort,
+        autoRouteDecision: departureRuntime.autoRoute,
       };
       const shouldStart =
         departure.recorded &&
@@ -21214,6 +21723,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/coffee/sessions/:id/topic", async (ctx) => {
       const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
       const body = ctx.body as Record<string, unknown>;
       const conversationId = ctx.params.id;
       const conversation = await runWithUsageSession(
@@ -21226,11 +21736,24 @@ function buildRoutes(): RouteDefinition[] {
           conversationId,
         },
         () =>
-          setCoffeeConversationTopic(db, userId, conversationId, body.topic, {
-            selectionSource: body.selectionSource,
-            candidates: body.candidates,
-            source: "coffee_topic_picker",
-          }),
+          setCoffeeConversationTopic(
+            db,
+            userId,
+            conversationId,
+            body.topic,
+            {
+              selectionSource: body.selectionSource,
+              candidates: body.candidates,
+              source: "coffee_topic_picker",
+            },
+            {
+              prismDefaultLlmModel: user.prism_default_llm_model,
+              secondaryOllamaHost: user.secondary_ollama_host,
+              experimentalDualOllamaEnabled:
+                user.experimental_dual_ollama_enabled === 1,
+              auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
+            },
+          ),
       );
       json(ctx.res, 200, {
         ok: true,
@@ -21403,32 +21926,36 @@ function buildRoutes(): RouteDefinition[] {
         }
         const user = getUserRow(userId);
         const userKey = decryptUserKey(userId);
-        const openAiApiKey =
-          getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
-        const anthropicApiKey =
-          getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
         const effectiveProvider = requestedProvider ?? user.preferred_provider;
         const sessionSpeakerModel = readCoffeeSessionSpeakerModel(
           body.modelOverride,
         );
+        const pollRuntime = await contextualTextRuntimeForUser({
+          userId,
+          user,
+          requestedProvider: effectiveProvider,
+          requestedResponseMode: body.responseMode,
+          modelOverride: sessionSpeakerModel,
+          routingContext: {
+            surface: "coffee",
+            inputText: "Collect the current Coffee poll votes.",
+            outputTokens: 220,
+            structuredOutput: true,
+          },
+        });
         const result = await collectCoffeePollVotes(
           db,
           userId,
           ctx.params.id,
           ctx.params.pollId,
           {
-            preferredProvider: effectiveProvider,
+            preferredProvider: pollRuntime.provider,
             preferredLocalModel: user.preferred_local_model,
             preferredOnlineModel: user.preferred_online_model,
-            responseMode: normalizeResponseMode(
-              body.responseMode,
-              effectiveProvider === "local" ? "local" : "online",
-            ),
-            autoFallbackChain: parseStoredAutoFallbackChain(
-              user.auto_fallback_chain,
-            ),
-            openAiApiKey,
-            anthropicApiKey,
+            responseMode: pollRuntime.responseMode,
+            autoFallbackChain: pollRuntime.autoFallbackChain,
+            openAiApiKey: pollRuntime.openAiApiKey,
+            anthropicApiKey: pollRuntime.anthropicApiKey,
             secondaryOllamaHost: user.secondary_ollama_host,
             experimentalDualOllamaEnabled:
               user.experimental_dual_ollama_enabled === 1,
@@ -21447,7 +21974,9 @@ function buildRoutes(): RouteDefinition[] {
               secondaryOllamaHost: user.secondary_ollama_host,
             },
             sessionRemainingMs,
-            ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
+            sessionSpeakerModel: pollRuntime.model,
+            reasoningEffort: pollRuntime.reasoningEffort,
+            autoRouteDecision: pollRuntime.autoRoute,
           },
           { structuredBallots: true },
         );
@@ -21525,11 +22054,19 @@ function buildRoutes(): RouteDefinition[] {
       );
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
-      const openAiApiKey =
-        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
-      const anthropicApiKey =
-        getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
       const effectiveProvider = requestedProvider ?? user.preferred_provider;
+      const autonomousRuntime = await contextualTextRuntimeForUser({
+        userId,
+        user,
+        requestedProvider: effectiveProvider,
+        requestedResponseMode: body.responseMode,
+        modelOverride: sessionSpeakerModel,
+        routingContext: {
+          surface: "coffee",
+          inputText: autonomousFocus ?? directedUserMessage ?? "Coffee table turn",
+          outputTokens: 900,
+        },
+      });
       const result = await runWithUsageSession(
         {
           db,
@@ -21546,18 +22083,13 @@ function buildRoutes(): RouteDefinition[] {
             userId,
             ctx.params.id,
             {
-              preferredProvider: effectiveProvider,
+              preferredProvider: autonomousRuntime.provider,
               preferredLocalModel: user.preferred_local_model,
               preferredOnlineModel: user.preferred_online_model,
-              responseMode: normalizeResponseMode(
-                body.responseMode,
-                effectiveProvider === "local" ? "local" : "online",
-              ),
-              autoFallbackChain: parseStoredAutoFallbackChain(
-                user.auto_fallback_chain,
-              ),
-              openAiApiKey,
-              anthropicApiKey,
+              responseMode: autonomousRuntime.responseMode,
+              autoFallbackChain: autonomousRuntime.autoFallbackChain,
+              openAiApiKey: autonomousRuntime.openAiApiKey,
+              anthropicApiKey: autonomousRuntime.anthropicApiKey,
               secondaryOllamaHost: user.secondary_ollama_host,
               experimentalDualOllamaEnabled:
                 user.experimental_dual_ollama_enabled === 1,
@@ -21578,7 +22110,9 @@ function buildRoutes(): RouteDefinition[] {
                 secondaryOllamaHost: user.secondary_ollama_host,
               },
               sessionRemainingMs,
-              ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
+              sessionSpeakerModel: autonomousRuntime.model,
+              reasoningEffort: autonomousRuntime.reasoningEffort,
+              autoRouteDecision: autonomousRuntime.autoRoute,
             },
             userIsComposing,
             directedSpeakerBotId,
@@ -21642,6 +22176,40 @@ function buildRoutes(): RouteDefinition[] {
         conversation,
       });
     }),
+    route("GET", "/api/coffee/sessions/:id/context-sparks", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const sparks = await ensureCoffeeContextSparks({
+        db,
+        userId,
+        conversationId: ctx.params.id,
+        prismDefaultLlmModel: user.prism_default_llm_model,
+        secondaryOllamaHost: user.secondary_ollama_host,
+        experimentalDualOllamaEnabled:
+          user.experimental_dual_ollama_enabled === 1,
+      });
+      json(ctx.res, 200, { ok: true, sparks });
+    }),
+    route(
+      "PATCH",
+      "/api/coffee/sessions/:id/context-sparks/:sparkId",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const body = (ctx.body ?? {}) as Record<string, unknown>;
+        const state = body.state;
+        if (state !== "available" && state !== "armed" && state !== "dismissed") {
+          throw new HttpError(400, "Invalid Context Spark state.");
+        }
+        const sparks = updateCoffeeContextSparkState({
+          db,
+          userId,
+          conversationId: ctx.params.id,
+          sparkId: ctx.params.sparkId,
+          state,
+        });
+        json(ctx.res, 200, { ok: true, sparks });
+      },
+    ),
     route("POST", "/api/coffee/turn", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -21675,6 +22243,23 @@ function buildRoutes(): RouteDefinition[] {
         typeof body.directedSpeakerBotId === "string"
           ? body.directedSpeakerBotId
           : undefined;
+      const contextSparkId =
+        typeof body.contextSparkId === "string" && body.contextSparkId.trim()
+          ? body.contextSparkId.trim()
+          : undefined;
+      if (contextSparkId && !conversationId) {
+        throw new HttpError(400, "Context Sparks require an existing Coffee session.");
+      }
+      const contextSpark = conversationId
+        ? resolveCoffeeContextSparkForTurn({
+            db,
+            userId,
+            conversationId,
+            sparkId: contextSparkId,
+          })
+        : null;
+      const effectiveDirectedSpeakerBotId =
+        contextSpark?.inspiredBotId ?? directedSpeakerBotId;
       const presentBotIds = Array.isArray(body.presentBotIds)
         ? body.presentBotIds.filter(
             (value): value is string =>
@@ -21713,7 +22298,7 @@ function buildRoutes(): RouteDefinition[] {
           mode: "coffee",
           surface: "coffee",
           conversationId: conversationId ?? null,
-          botId: directedSpeakerBotId ?? null,
+          botId: effectiveDirectedSpeakerBotId ?? null,
         },
         () =>
           processCoffeeTurn(
@@ -21724,7 +22309,8 @@ function buildRoutes(): RouteDefinition[] {
               groupBotIds,
               message,
               playerInterruption,
-              directedSpeakerBotId,
+              directedSpeakerBotId: effectiveDirectedSpeakerBotId,
+              contextSparkPrivateContext: contextSpark?.privateContext,
               presentBotIds,
             },
             {
@@ -21760,6 +22346,14 @@ function buildRoutes(): RouteDefinition[] {
             },
           ),
       );
+      if (contextSpark && result.speakerBotId && !result.stale) {
+        consumeCoffeeContextSpark({
+          db,
+          userId,
+          conversationId: conversationId!,
+          sparkId: contextSpark.id,
+        });
+      }
       json(ctx.res, 200, {
         ok: true,
         ...result,
@@ -21944,6 +22538,18 @@ function buildRoutes(): RouteDefinition[] {
         typeof body.directedSpeakerBotId === "string"
           ? body.directedSpeakerBotId
           : undefined;
+      const contextSparkId =
+        kind === "user" && typeof body.contextSparkId === "string"
+          ? body.contextSparkId.trim() || undefined
+          : undefined;
+      const contextSpark = resolveCoffeeContextSparkForTurn({
+        db,
+        userId,
+        conversationId,
+        sparkId: contextSparkId,
+      });
+      const effectiveDirectedSpeakerBotId =
+        contextSpark?.inspiredBotId ?? directedSpeakerBotId;
       const directedUserMessage =
         typeof body.directedUserMessage === "string"
           ? body.directedUserMessage
@@ -21952,6 +22558,18 @@ function buildRoutes(): RouteDefinition[] {
         typeof body.autonomousFocus === "string"
           ? body.autonomousFocus
           : undefined;
+      const retryOfJobId =
+        typeof body.retryOfJobId === "string" ? body.retryOfJobId.trim() : "";
+      const expectedLatestMessageCursor =
+        body.expectedLatestMessageCursor === null
+          ? null
+          : typeof body.expectedLatestMessageCursor === "string"
+            ? body.expectedLatestMessageCursor.trim()
+            : undefined;
+      const excludedSpeakerBotId =
+        typeof body.excludedSpeakerBotId === "string"
+          ? body.excludedSpeakerBotId.trim()
+          : "";
       const presentBotIds = Array.isArray(body.presentBotIds)
         ? body.presentBotIds.filter(
             (value): value is string =>
@@ -21983,6 +22601,44 @@ function buildRoutes(): RouteDefinition[] {
                   : 1,
             }
           : undefined;
+      const currentLatestMessageCursor = latestCoffeeMessageCursor(
+        userId,
+        conversationId,
+      );
+      const priorJob = retryOfJobId
+        ? getCoffeeTurnJob(userId, retryOfJobId)
+        : null;
+      if (retryOfJobId) {
+        if (
+          !priorJob ||
+          priorJob.phase !== "failed" ||
+          priorJob.conversationId !== conversationId ||
+          !priorJob.failure
+        ) {
+          throw new HttpError(409, "Coffee retry lineage is no longer valid.");
+        }
+        if (
+          expectedLatestMessageCursor === undefined ||
+          expectedLatestMessageCursor !== currentLatestMessageCursor ||
+          priorJob.failure.latestMessageCursor !== expectedLatestMessageCursor
+        ) {
+          throw new HttpError(
+            409,
+            "Coffee changed after that failed turn. Continue from the latest table state.",
+          );
+        }
+        if (
+          excludedSpeakerBotId &&
+          excludedSpeakerBotId !== priorJob.failure.speakerBotId
+        ) {
+          throw new HttpError(409, "Coffee retry speaker exclusion is stale.");
+        }
+      } else if (
+        expectedLatestMessageCursor !== undefined ||
+        excludedSpeakerBotId
+      ) {
+        throw new HttpError(400, "Coffee retry metadata requires retryOfJobId.");
+      }
       if (kind === "autonomous") {
         const activeJob = getActiveCoffeeTurnJobForConversation(
           userId,
@@ -22005,11 +22661,35 @@ function buildRoutes(): RouteDefinition[] {
           outputTokens: 900,
         },
       });
+      const retryOrdinal = priorJob ? (priorJob.retry?.ordinal ?? 0) + 1 : 0;
+      if (runtime.modelSelectionKind === "fixed" && retryOrdinal > 1) {
+        throw new HttpError(409, "The selected Coffee model already used its one retry.");
+      }
+      if (runtime.modelSelectionKind === "auto" && retryOrdinal > 2) {
+        throw new HttpError(409, "Coffee automatic recovery is exhausted.");
+      }
+      if (excludedSpeakerBotId && runtime.modelSelectionKind !== "auto") {
+        throw new HttpError(400, "Fixed-model Coffee cannot substitute another speaker route.");
+      }
+      const retry = priorJob
+        ? {
+            v: 1 as const,
+            retryOfJobId: priorJob.id,
+            expectedLatestMessageCursor: currentLatestMessageCursor,
+            ordinal: retryOrdinal,
+            ...(excludedSpeakerBotId ? { excludedSpeakerBotId } : {}),
+          }
+        : undefined;
       const jobDb = db;
       const status = startCoffeeTurnJob({
         userId,
         conversationId,
         supersedeExisting: kind === "user",
+        selectionKind: runtime.modelSelectionKind,
+        latestMessageCursor: currentLatestMessageCursor,
+        getLatestMessageCursor: () =>
+          latestCoffeeMessageCursor(userId, conversationId),
+        ...(retry ? { retry } : {}),
         run: async ({ signal, setPhase }) =>
           await runWithUsageSession(
             {
@@ -22019,7 +22699,7 @@ function buildRoutes(): RouteDefinition[] {
               mode: "coffee",
               surface: "coffee",
               conversationId,
-              botId: directedSpeakerBotId ?? null,
+              botId: effectiveDirectedSpeakerBotId ?? null,
             },
             async () => {
               const settings = {
@@ -22056,18 +22736,28 @@ function buildRoutes(): RouteDefinition[] {
                 autoRouteDecision: runtime.autoRoute,
               };
               if (kind !== "autonomous") {
-                return processCoffeeTurn(
+                const result = await processCoffeeTurn(
                   jobDb,
                   userId,
                   {
                     conversationId,
                     message,
                     playerInterruption,
-                    directedSpeakerBotId,
+                    directedSpeakerBotId: effectiveDirectedSpeakerBotId,
+                    contextSparkPrivateContext: contextSpark?.privateContext,
                     presentBotIds,
                   },
                   settings,
                 );
+                if (contextSpark && result.speakerBotId && !result.stale) {
+                  consumeCoffeeContextSpark({
+                    db: jobDb,
+                    userId,
+                    conversationId,
+                    sparkId: contextSpark.id,
+                  });
+                }
+                return result;
               }
               return processCoffeeAutonomousTurn(
                 jobDb,
@@ -22080,6 +22770,7 @@ function buildRoutes(): RouteDefinition[] {
                 presentBotIds,
                 undefined,
                 autonomousFocus,
+                excludedSpeakerBotId || undefined,
               );
             },
           ),
@@ -23372,6 +24063,113 @@ function buildRoutes(): RouteDefinition[] {
         ).run(line, botId, userId);
       }
       json(ctx.res, 200, { ok: true, line });
+    }),
+    route("POST", "/api/zen/voice-preview", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const botId =
+        typeof body.botId === "string" ? body.botId.trim().slice(0, 160) : "";
+      if (!botId) {
+        throw new HttpError(400, "Choose a focused bot before hearing them.");
+      }
+      const bot = db
+        .prepare(
+          "SELECT name, system_prompt, semantic_facets, powers_json, color, flirt_enabled, online_enabled, temperature, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND user_id = ?",
+        )
+        .get(botId, userId) as
+        | {
+            name?: string;
+            system_prompt?: string;
+            semantic_facets?: string | null;
+            powers_json?: string | null;
+            color?: string | null;
+            flirt_enabled?: number | null;
+            online_enabled?: number | null;
+            temperature?: number | null;
+            top_p?: number | null;
+            top_k?: number | null;
+            repetition_penalty?: number | null;
+          }
+        | undefined;
+      if (!bot) throw new HttpError(404, "Focused bot not found.");
+      if (botPowerIsMutedV1(bot.powers_json)) {
+        throw new HttpError(409, "This bot is muted by an active Power.");
+      }
+      const user = getUserRow(userId);
+      const forceLocal = userBlocksOnlineCapabilities(user) || bot.online_enabled === 0;
+      const personaName = bot.name?.trim() || "this character";
+      const persona = composeBotSystemPrompt(
+        personaName,
+        bot.system_prompt,
+        bot.flirt_enabled === 1,
+        bot.powers_json,
+        { identityColor: bot.color ?? null },
+      );
+      const runtime = await contextualTextRuntimeForUser({
+        userId,
+        user,
+        requestedProvider: forceLocal ? "local" : body.preferredProvider,
+        requestedResponseMode: forceLocal ? "local" : body.responseMode,
+        modelOverride: forceLocal ? null : body.modelOverride,
+        requestedReasoningEffort: normalizeProviderReasoningEffort(
+          body.reasoningEffort,
+        ),
+        requestedTurbo: body.turbo,
+        routingContext: {
+          surface: "zen",
+          inputText: `${personaName}\n${persona}`,
+          outputTokens: 120,
+        },
+      });
+      const provider = selectProvider(
+        runtime.provider,
+        runtime.openAiApiKey,
+        user.secondary_ollama_host,
+        runtime.anthropicApiKey,
+      );
+      const atmosphere =
+        typeof body.atmosphere === "string"
+          ? body.atmosphere.replace(/\s+/gu, " ").trim().slice(0, 560)
+          : "";
+      const variationSeed =
+        typeof body.variationSeed === "string"
+          ? body.variationSeed.trim().slice(0, 120)
+          : "";
+      const abort = new AbortController();
+      const onClientClose = () => abort.abort();
+      ctx.req.once("aborted", onClientClose);
+      ctx.res.once("close", onClientClose);
+      try {
+        const text = await inferZenVoicePreview(
+          provider,
+          { botName: personaName, persona, atmosphere, variationSeed },
+          {
+            model: runtime.model,
+            reasoningEffort: runtime.reasoningEffort,
+            turbo: runtime.turbo,
+            temperature: bot.temperature ?? 0.96,
+            topP: bot.top_p ?? undefined,
+            topK: bot.top_k ?? undefined,
+            repetitionPenalty: bot.repetition_penalty ?? undefined,
+            maxTokens: 120,
+            usagePurpose: "voice_preview",
+            signal: abort.signal,
+          },
+        );
+        if (abort.signal.aborted) return;
+        // Deliberately no conversation, message, memory, transcript, or bot-row
+        // mutation. This is an explicit one-shot audition owned by the Zen hero.
+        json(ctx.res, 200, {
+          ok: true,
+          text,
+          provider: runtime.provider,
+          model: runtime.model,
+          responseMode: runtime.responseMode,
+        });
+      } finally {
+        ctx.req.off("aborted", onClientClose);
+        ctx.res.off("close", onClientClose);
+      }
     }),
     route("POST", "/api/avatar/sfx/generate", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -25351,6 +26149,7 @@ function buildRoutes(): RouteDefinition[] {
             text: boundary.elevenLabsText,
             profile: boundary.profile,
             deliveryMood: request.deliveryMood,
+            protectedPhrases: speechprintProtectedPhrases,
             seed: providerVoiceSeed,
             signal: controller.signal,
           });
@@ -25397,6 +26196,7 @@ function buildRoutes(): RouteDefinition[] {
           text: boundary.elevenLabsText,
           profile: boundary.profile,
           deliveryMood: request.deliveryMood,
+          protectedPhrases: speechprintProtectedPhrases,
           seed: providerVoiceSeed,
           signal: controller.signal,
         });
@@ -25526,6 +26326,48 @@ function buildRoutes(): RouteDefinition[] {
         ctx.req.off("aborted", onClose);
         ctx.res.off("close", onClose);
       }
+    }),
+    route("POST", "/api/flight-recorder/summary", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const trace =
+        ctx.body && typeof ctx.body === "object" &&
+        typeof (ctx.body as { trace?: unknown }).trace === "string"
+          ? (ctx.body as { trace: string }).trace
+          : "";
+      const safeEvents = trace
+        .split(/\r?\n/gu)
+        .filter((line) =>
+          /^\d{4}-\d{2}-\d{2}T[^\s]+\s+\[(?:INFO|WARN|ERROR)\]\s+[a-z0-9_-]{1,32}\.[a-z0-9_.-]{1,64}(?:\s+[a-zA-Z][a-zA-Z0-9_-]{0,47}=(?:true|false|-?\d+(?:\.\d+)?|[a-zA-Z0-9_.:-]{1,120}))*$/u.test(
+            line,
+          ),
+        )
+        .slice(-480);
+      if (safeEvents.length === 0) {
+        throw new HttpError(400, "Prism needs a valid local Flight Recorder trace.");
+      }
+      const user = getUserRow(userId);
+      const provider = getAuxiliaryProvider(user.prism_default_llm_model, {
+        secondaryOllamaHost: user.secondary_ollama_host,
+        experimentalDualOllama: user.experimental_dual_ollama_enabled === 1,
+      });
+      const summary = await provider.generateResponse(
+        [
+          {
+            role: "system",
+            content:
+              "You are PRISM's local Flight Recorder reader. Explain only observable state transitions and cautious hypotheses from content-free event telemetry. Never claim access to prompts, messages, memories, credentials, audio, or hidden reasoning. Be concise: at most 4 sentences.",
+          },
+          {
+            role: "user",
+            content: `Local event timeline:\n${safeEvents.join("\n")}`,
+          },
+        ],
+        { temperature: 0.1, maxTokens: 180 },
+      );
+      json(ctx.res, 200, {
+        summary: summary.replace(/\s+/gu, " ").trim().slice(0, 1200),
+        model: provider.diagnosticModel ?? resolveAuxiliaryOllamaModel(user.prism_default_llm_model),
+      });
     }),
     route("POST", "/api/prism-companion", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -26311,7 +27153,11 @@ function buildRoutes(): RouteDefinition[] {
         throw new HttpError(400, "A valid provider and model are required.");
       }
       const turbo = body.turbo === true;
-      if (turbo && !modelSupportsTurboMode(provider, modelId)) {
+      if (
+        turbo &&
+        !modelSupportsTurboMode(provider, modelId) &&
+        !isAutoModelTurboPreference(provider, modelId)
+      ) {
         throw new HttpError(400, "Turbo is unavailable for this model.");
       }
       const preference = setModelTurboPreference(db, {
@@ -26616,8 +27462,24 @@ function buildRoutes(): RouteDefinition[] {
       if (body.model !== undefined && body.model !== null && typeof body.model !== "string") {
         throw new HttpError(400, "A Prism Refract model must be text or Auto.");
       }
+      if (
+        body.responseMode !== undefined &&
+        body.responseMode !== "local" &&
+        body.responseMode !== "online"
+      ) {
+        throw new HttpError(400, "A Prism Refract response mode must be LOCAL or ONLINE.");
+      }
       const model = typeof body.model === "string" ? body.model.trim().slice(0, 200) : "";
-      const responseMode = user.preferred_provider === "local" ? "local" : "online";
+      // Persist the lane shown beside this picker. An in-flight global provider
+      // save must not write a concrete choice into the opposite slot and make
+      // the controlled picker snap back to Auto. Generation still resolves
+      // the current server-side privacy lane independently at request time.
+      const responseMode =
+        body.responseMode === "local" || body.responseMode === "online"
+          ? body.responseMode
+          : user.preferred_provider === "local"
+            ? "local"
+            : "online";
       // Persist the visible picker choice without a second live catalog
       // discovery. Refract revalidates this id against the active lane at
       // request time and falls back to Auto if it is no longer runnable.
@@ -29176,30 +30038,47 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
       const body = ctx.body as Record<string, unknown>;
-      // Avatar Studio may send an explicit lane/model. Archive import and other
-      // callers that omit routing keep the paired auxiliary (local helper) path.
+      // Avatar Studio sends routing:"refract" so compile follows Prism's
+      // Refract picker, never the navbar or Background helper. Archive import
+      // and other callers that omit routing keep the paired auxiliary path.
+      const useRefractRouting = body.routing === "refract";
       const hasClientRouting =
+        useRefractRouting ||
         body.responseMode != null ||
         body.preferredProvider != null ||
         body.modelOverride != null;
       let compileProvider;
+      let compileModel: string | null = null;
       if (hasClientRouting) {
-        const requestedResponseMode = normalizeResponseMode(
-          body.responseMode,
-          user.preferred_provider === "local" ? "local" : "online",
-        );
+        const requestedResponseMode = useRefractRouting
+          ? user.preferred_provider === "local"
+            ? "local"
+            : "online"
+          : normalizeResponseMode(
+              body.responseMode,
+              user.preferred_provider === "local" ? "local" : "online",
+            );
         const responseMode =
           requestedResponseMode === "auto"
             ? user.preferred_provider === "local"
               ? "local"
               : "online"
             : requestedResponseMode;
-        const requestedProvider = readProvider(body.preferredProvider);
-        const requestedModelOverride = readModelOverride(body.modelOverride);
+        const requestedProvider = useRefractRouting
+          ? responseMode === "local"
+            ? "local"
+            : user.preferred_provider
+          : readProvider(body.preferredProvider);
+        const requestedModelOverride = useRefractRouting
+          ? responseMode === "local"
+            ? user.prism_refract_local_model
+            : user.prism_refract_online_model
+          : readModelOverride(body.modelOverride);
+        const trimmedModelOverride = requestedModelOverride?.trim() || "";
         const explicitModelOverride =
-          requestedModelOverride?.toLowerCase() === "auto"
+          !trimmedModelOverride || trimmedModelOverride.toLowerCase() === "auto"
             ? null
-            : requestedModelOverride;
+            : trimmedModelOverride;
         const primaryProvider: ProviderName =
           responseMode === "local"
             ? "local"
@@ -29231,7 +30110,7 @@ function buildRoutes(): RouteDefinition[] {
             user.online_auto_provider_bias,
           ),
           routingContext: {
-            surface: "bot-powers",
+            surface: useRefractRouting ? "prism-refract" : "bot-powers",
             inputText: JSON.stringify(body.powers ?? []),
             structuredOutput: true,
             outputTokens: 2_000,
@@ -29244,10 +30123,14 @@ function buildRoutes(): RouteDefinition[] {
           user.secondary_ollama_host,
           anthropicApiKey,
         );
+        compileModel = resolved.model;
       } else {
         compileProvider = auxiliaryProviderFactoryOverride(
           user.prism_default_llm_model ?? undefined,
           dualOllamaWorkloadOptions(user),
+        );
+        compileModel = resolveAuxiliaryOllamaModel(
+          user.prism_default_llm_model,
         );
       }
       const result = await runWithUsageSession(
@@ -29261,6 +30144,7 @@ function buildRoutes(): RouteDefinition[] {
         () =>
           compileBotPowers({
             provider: compileProvider,
+            model: compileModel,
             botName: typeof body.botName === "string" ? body.botName : "",
             systemPrompt:
               typeof body.systemPrompt === "string" ? body.systemPrompt : "",
@@ -29477,6 +30361,12 @@ function buildRoutes(): RouteDefinition[] {
       const anthropicApiKey = onlineAllowed
         ? (getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey)
         : undefined;
+      const voiceCatalog = await buildBotGenerationVoiceCatalogForUser({
+        userId,
+        user,
+        userKey,
+        onlineAllowed,
+      });
       const catalog = await buildModelCatalog(
         openAiApiKey,
         user.secondary_ollama_host,
@@ -29571,6 +30461,7 @@ function buildRoutes(): RouteDefinition[] {
               openAiApiKey,
               anthropicApiKey,
               secondaryOllamaHost: user.secondary_ollama_host,
+              voiceCatalog,
               signal: controller.signal,
             }),
         );
@@ -30023,6 +30914,18 @@ function buildRoutes(): RouteDefinition[] {
         .get(ctx.params.id, userId) as Record<string, unknown> | undefined;
       if (!row) throw new HttpError(404, "Bot not found.");
       json(ctx.res, 200, { ok: true, bot: botRowForResponse(row) });
+    }),
+    route("POST", "/api/bots/:id/mood/neutralize", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        const mood = neutralizeGlobalBotMood(db, userId, ctx.params.id);
+        json(ctx.res, 200, { ok: true, mood });
+      } catch (error) {
+        if (error instanceof Error && error.message === "Bot not found.") {
+          throw new HttpError(404, error.message);
+        }
+        throw error;
+      }
     }),
     route("PATCH", "/api/bots/selected/delete-protection", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -31748,6 +32651,14 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   shuttingDown = true;
   console.log(`Received ${signal}; shutting down Prism API.`);
 
+  // Stop advertising first. This is near-instant, and it owns a child process
+  // that outlives us if we never reach it — so it must not sit behind the
+  // flushing work below, where an impatient SIGKILL would strand the advertiser.
+  if (stopDiscovery) {
+    await stopDiscovery();
+    stopDiscovery = null;
+  }
+
   if (slateContinuityWorker) {
     await slateContinuityWorker.stop();
     slateContinuityWorker = null;
@@ -31756,11 +32667,6 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   if (slateRecoveryCoordinator) {
     await slateRecoveryCoordinator.dispose({ flush: true });
     slateRecoveryCoordinator = null;
-  }
-
-  if (stopDiscovery) {
-    await stopDiscovery();
-    stopDiscovery = null;
   }
 
   await new Promise<void>((resolve) => {
@@ -31838,6 +32744,11 @@ if (process.env.PRISM_API_DISABLE_AUTOSTART !== "1") {
   });
   process.on("SIGTERM", () => {
     void shutdown("SIGTERM").then(() => process.exit(0));
+  });
+  // Closing a terminal sends SIGHUP. Node's default action terminates without
+  // running exit handlers, which would strand the discovery advertiser.
+  process.on("SIGHUP", () => {
+    void shutdown("SIGHUP").then(() => process.exit(0));
   });
 
   const lanAccessEnabled = resolveLanAccessEnabled(config);

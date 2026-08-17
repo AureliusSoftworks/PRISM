@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
+  AUTO_MODEL_TURBO_PREFERENCE_ID,
   effectiveModelReasoningEffort,
   modelSupportsTurboMode,
   modelReasoningEffortPreferenceKey,
@@ -80,6 +81,19 @@ export function resolveUserModelTurboMode(
       args.provider,
       args.modelId,
     )
+  );
+}
+
+/** Auto Turbo is one account preference, not a concrete model selection. */
+export function resolveUserAutoTurboMode(
+  db: DatabaseSync,
+  userId: string,
+): boolean {
+  return findModelTurboPreference(
+    db,
+    userId,
+    "openai",
+    AUTO_MODEL_TURBO_PREFERENCE_ID,
   );
 }
 

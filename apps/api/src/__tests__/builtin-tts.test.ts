@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
   PRISM_BUILTIN_ENGLISH_VOICES,
+  applyLocalVoiceSpeechprintToIpa,
+  VOICE_ACCENT_MAP_ANCHORS,
 } from "@localai/shared";
 import {
   builtinEnglishAvailable,
@@ -13,7 +16,11 @@ import {
   selectSystemVoice,
   systemEnglishGenerationSettings,
 } from "../builtin-tts.ts";
-import { protectedSpeechRanges } from "../builtin-tts-runtime.ts";
+import {
+  preparePrismVoicePackPronunciation,
+  protectedSpeechRanges,
+} from "../builtin-tts-runtime.ts";
+import { phonemize } from "phonemizer";
 
 function pcmWave(
   dataBytes: number,
@@ -76,6 +83,121 @@ describe("built-in English audio", () => {
         { start: 37, end: 49 },
       ],
     );
+  });
+
+  it("maps Peter Piper bidirectionally without changing text or voice identity", async () => {
+    const sourceText = "Peter Piper picked a peck of pickled peppers.";
+    const plan = (
+      baseVoiceId: "voice-1" | "voice-4",
+      accentDefinitionId: "american-english" | "british-english",
+      stalePronunciationBase: "en-US" | "en-GB",
+    ) =>
+      preparePrismVoicePackPronunciation({
+        text: sourceText,
+        profile: {
+          ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+          baseVoiceId,
+          accentDefinitionId,
+          pronunciationBase: stalePronunciationBase,
+        },
+      });
+    const [britishTarget, americanTarget, nativeBritish, nativeAmerican] =
+      await Promise.all([
+        plan("voice-1", "british-english", "en-US"),
+        plan("voice-4", "american-english", "en-GB"),
+        plan("voice-4", "british-english", "en-US"),
+        plan("voice-1", "american-english", "en-GB"),
+      ]);
+
+    assert.equal(britishTarget.sourceText, sourceText);
+    assert.equal(americanTarget.sourceText, sourceText);
+    assert.equal(nativeBritish.sourceText, sourceText);
+    assert.equal(nativeAmerican.sourceText, sourceText);
+    assert.equal(britishTarget.engineVoiceId, "af_heart");
+    assert.equal(americanTarget.engineVoiceId, "bf_emma");
+    assert.equal(britishTarget.voiceLocale, "en-US");
+    assert.equal(americanTarget.voiceLocale, "en-GB");
+    assert.equal(britishTarget.targetLocale, "en-GB");
+    assert.equal(americanTarget.targetLocale, "en-US");
+    assert.equal(
+      britishTarget.targetIpa,
+      "pˈiːtə pˈaɪpə pˈɪkt ɐ pˈɛk ɒv pˈɪkəld pˈɛpəz",
+    );
+    assert.equal(
+      americanTarget.targetIpa,
+      "pˈiːɾɚ pˈaɪpɚ pˈɪkt ɐ pˈɛk ʌv pˈɪkəld pˈɛpɚz",
+    );
+    assert.equal(nativeBritish.targetIpa, britishTarget.targetIpa);
+    assert.equal(nativeAmerican.targetIpa, americanTarget.targetIpa);
+    assert.notEqual(britishTarget.targetIpa, americanTarget.targetIpa);
+  });
+
+  it("projects a saved Cockney pin deterministically without changing text or timbre", async () => {
+    const london = VOICE_ACCENT_MAP_ANCHORS.find(
+      (anchor) => anchor.accentDefinitionId === "cockney-english",
+    );
+    assert.ok(london);
+    const sourceText = "This thoughtful river runs far from home.";
+    const profile = {
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+      baseVoiceId: "voice-1" as const,
+      accentDefinitionId: "cockney-english",
+      pronunciationBase: "en-GB" as const,
+      pronunciationMapPoint: london.point,
+      speechprintInfluence: "cockney-english" as const,
+      speechprintStrength: "balanced" as const,
+      speechprintVariationSeed: "cockney-runtime",
+    };
+    const first = await preparePrismVoicePackPronunciation({
+      text: sourceText,
+      profile,
+    });
+    const second = await preparePrismVoicePackPronunciation({
+      text: sourceText,
+      profile,
+    });
+    assert.deepEqual(second, first);
+    assert.equal(first.sourceText, sourceText);
+    assert.equal(first.engineVoiceId, "af_heart");
+    assert.equal(first.voiceLocale, "en-US");
+    assert.equal(first.targetLocale, "en-GB");
+    assert.match(first.targetIpa ?? "", /f/u);
+  });
+
+  it("maps the tuned PRISM-zikkv Cockney sample exactly at shared runtime strength", async () => {
+    const sourceText = "Vincent went to get a bottle of water";
+    const profile = {
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+      baseVoiceId: "voice-1" as const,
+      accentDefinitionId: "cockney-english",
+      pronunciationBase: "en-GB" as const,
+      speechprintInfluence: "cockney-english" as const,
+      speechprintStrength: "balanced" as const,
+      speechprintVariationSeed: "zikkv-cockney",
+    };
+    const expectedIpa = "vˈiːnsɪnʔ weɪnʔ tə ɡɛʔ ə bˈɒʔo ə wˈɔːʔə";
+    const [plan, sharedProjection] = await Promise.all([
+      preparePrismVoicePackPronunciation({
+        text: sourceText,
+        profile,
+      }),
+      (async () => {
+        const sourceIpa = (await phonemize(sourceText, "en")).join(" ").trim();
+        return applyLocalVoiceSpeechprintToIpa({
+          ipa: sourceIpa,
+          speechprint: {
+            influence: "cockney-english",
+            strength: "balanced",
+            variationSeed: "zikkv-cockney",
+          },
+        });
+      })(),
+    ]);
+
+    assert.equal(plan.targetIpa, expectedIpa);
+    assert.equal(plan.targetIpa, sharedProjection.ipa);
+    assert.equal(plan.targetLocale, "en-GB");
+    assert.equal(plan.voiceLocale, "en-US");
   });
 
   it("parses installed macOS voices and exposes English choices", () => {

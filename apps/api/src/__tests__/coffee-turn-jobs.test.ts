@@ -10,6 +10,7 @@ import {
   setCoffeeTurnJobPhase,
   startCoffeeTurnJob,
 } from "../coffee-turn-jobs.ts";
+import { AutoFallbackExhaustedError } from "../auto-fallback.ts";
 
 describe("Coffee turn jobs", () => {
   it("retains jobs beyond the ten-minute AUTO ceiling", () => {
@@ -171,5 +172,36 @@ describe("Coffee turn jobs", () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
     assert.equal(getCoffeeTurnJob("u5", started.id), null);
     assert.equal(aborted, true);
+  });
+
+  it("publishes retry lineage and the latest cursor with a structured failure", async () => {
+    let latestCursor = "message-7";
+    const started = startCoffeeTurnJob({
+      userId: "u-lineage",
+      conversationId: "c-lineage",
+      selectionKind: "auto",
+      retry: {
+        v: 1,
+        retryOfJobId: "job-previous",
+        expectedLatestMessageCursor: "message-6",
+        ordinal: 1,
+      },
+      latestMessageCursor: "message-6",
+      getLatestMessageCursor: () => latestCursor,
+      run: async ({ setPhase }) => {
+        setPhase("thinking", "mira");
+        latestCursor = "message-8";
+        throw new AutoFallbackExhaustedError([]);
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const failed = getCoffeeTurnJob("u-lineage", started.id);
+    assert.equal(failed?.phase, "failed");
+    assert.equal(failed?.failure?.speakerBotId, "mira");
+    assert.equal(failed?.failure?.latestMessageCursor, "message-8");
+    assert.equal(failed?.failure?.retry?.retryOfJobId, "job-previous");
+    assert.equal(failed?.retry?.ordinal, 1);
+    assert.match(failed?.error ?? "", /All Auto models failed/u);
   });
 });

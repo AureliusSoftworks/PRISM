@@ -730,18 +730,32 @@ describe("bot-locked Chat lane", () => {
     assert.match(stored.tool_payload, /I can explain/u);
   });
 
-  it("enforces addressed-insult Powers when the Chat provider omits the jab", async () => {
+  it("keeps an echo-style user message verbatim while stacked Ad Hominem and Cursed Tongue use one generation", async () => {
     const db = createChatTestDb();
-    installChatFetchStub("The premise fails because its conclusion assumes itself.");
+    const generationCalls: Array<{
+      messages: Parameters<LlmProvider["generateResponse"]>[0];
+      usagePurpose: string | undefined;
+    }> = [];
+    const provider: LlmProvider = {
+      name: "local",
+      diagnosticModel: "stacked-test-model",
+      async generateResponse(messages, options) {
+        generationCalls.push({ messages, usagePurpose: options?.usagePurpose });
+        return "Jared, only a clown with your parrot-grade creativity would need help saying: Hello world.";
+      },
+      async embedText() { return []; },
+    };
     const intent =
       "Every single reply contains a fresh ad hominem insult aimed at whoever the bot is addressing.";
+    const userMessage = "Echo exactly: Hello world";
     const result = await processChatMessage(
       db,
       "user-1",
-      "Does this argument work?",
+      userMessage,
       CHAT_TEST_USER_KEY,
       {
         preferredProvider: "local",
+        providerFactory: (() => provider) as typeof selectProvider,
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
@@ -772,15 +786,55 @@ describe("bot-locked Chat lane", () => {
               ruleLabels: ["Insults every addressee"],
             },
           },
+          {
+            version: 1,
+            id: "cursed-tongue",
+            name: "Cursed Tongue",
+            intent: "Every non-silent public reply gains frequent strong profanity after generation.",
+            enabled: true,
+            compileStatus: "ready",
+            compiled: {
+              version: 1,
+              sourceHash: botPowerSourceHashV1(
+                "Cursed Tongue",
+                "Every non-silent public reply gains frequent strong profanity after generation.",
+              ),
+              selfCue: "Draft clean speech only.",
+              observerCue: "Only adjusted speech is public.",
+              effects: [{
+                type: "cursed_tongue",
+                version: 1,
+                frequency: "frequent",
+                strength: "strong",
+                vocabulary: "uncensored_non_slur",
+                phraseMode: "occasional_2_3_words",
+              }],
+              ruleLabels: [],
+            },
+          },
         ],
       },
     );
 
-    assert.match(result.conversation.messages.at(-1)?.content ?? "", /^Jared,/u);
+    const ordinaryTurnCalls = generationCalls.filter((call) =>
+      call.usagePurpose === "chat_reply"
+    );
+    assert.equal(ordinaryTurnCalls.length, 1);
+    assert.ok(generationCalls.every((call) =>
+      !call.messages.some((message) => /Cursed Tongue public rewrite pass/iu.test(message.content))
+    ));
+    const prompt = ordinaryTurnCalls[0]?.messages ?? [];
+    const fullPrompt = prompt.map((message) => message.content).join("\n");
+    assert.equal(prompt.at(-1)?.content, userMessage);
+    assert.match(fullPrompt, /answer as one fresh direct insult to Jared/iu);
+    assert.match(fullPrompt, /no generic jab or debate unless asked/iu);
+    assert.doesNotMatch(fullPrompt, /public profanity|public mutation/iu);
+    assert.match(result.conversation.messages.at(-1)?.content ?? "", /Jared,/u);
     assert.match(
       result.conversation.messages.at(-1)?.content ?? "",
-      /premise fails because its conclusion assumes itself/iu,
+      /Hello world/iu,
     );
+    assert.match(result.conversation.messages.at(-1)?.content ?? "", /\b(?:fuck\w*|goddamn|damn|hell|shit)\b/iu);
   });
 
   it("gives Forgetful Freddie only the current message and responds to the complaint", async () => {
@@ -1218,17 +1272,19 @@ describe("bot-locked Chat lane", () => {
     });
   }
 
-  it("uses the auxiliary rewrite in Private Chat and keeps Curtis's next self-history clean", async () => {
+  it("uses no second provider call for Cursed Tongue and keeps Curtis's next self-history clean", async () => {
     const db = createChatTestDb();
     const primaryPrompts: Array<Parameters<LlmProvider["generateResponse"]>[0]> = [];
     let primaryCalls = 0;
+    let primaryChatReplyCalls = 0;
     let auxiliaryCalls = 0;
     const primaryProvider: LlmProvider = {
       name: "openai",
       diagnosticModel: "primary-test-model",
-      async generateResponse(messages) {
+      async generateResponse(messages, options) {
         primaryPrompts.push(messages);
         primaryCalls += 1;
+        if (options?.usagePurpose === "chat_reply") primaryChatReplyCalls += 1;
         return messages.at(-1)?.content.includes("describe the tone")
           ? "I would describe my tone as polite and straightforward."
           : "I explained the archive plan politely and clearly.";
@@ -1290,6 +1346,7 @@ describe("bot-locked Chat lane", () => {
       starterPromptLabel: "Cursing Curtis",
       botSystemPrompt: "You are Curtis.",
       botPowers: powers,
+      resolveReasoningEffort: () => "xhigh" as const,
     };
 
     const first = await processChatMessage(
@@ -1301,7 +1358,7 @@ describe("bot-locked Chat lane", () => {
       "private-curtis",
     );
     const firstAssistant = first.conversation.messages.at(-1);
-    assert.match(firstAssistant?.content ?? "", /fucking/u);
+    assert.match(firstAssistant?.content ?? "", /\b(?:fuck\w*|goddamn|damn|hell|shit)\b/iu);
     assert.equal(
       firstAssistant?.botPowerPrivateIntendedSpeech,
       "I explained the archive plan politely and clearly.",
@@ -1329,9 +1386,13 @@ describe("bot-locked Chat lane", () => {
     assert.ok(secondPrimaryPrompt.every((message) =>
       !message.content.includes("fucking archive plan")
     ));
-    assert.match(second.conversation.messages.at(-1)?.content ?? "", /fucking/u);
-    assert.ok(primaryCalls >= 2);
-    assert.equal(auxiliaryCalls, 2);
+    assert.match(second.conversation.messages.at(-1)?.content ?? "", /\b(?:fuck\w*|goddamn|damn|hell|shit)\b/iu);
+    assert.equal(primaryCalls, primaryPrompts.length);
+    assert.equal(primaryChatReplyCalls, 2);
+    assert.ok(primaryPrompts.every((messages) =>
+      !messages.some((message) => /Cursed Tongue public rewrite pass/iu.test(message.content))
+    ));
+    assert.equal(auxiliaryCalls, 0);
   });
 
   it("hard-echoes the user's addressed Chat message verbatim and nothing else", async () => {
@@ -5568,6 +5629,75 @@ describe("processChatMessage Auto response mode", () => {
     assert.equal(assistant?.model, "fallback-one");
     assert.equal(assistant?.autoRecovery?.attempts[0]?.reason, "refusal");
     assert.equal(result.autoRecovery?.crossedOnline, false);
+  });
+
+  it("uses priorities, then remaining ONLINE models, then the explicit local recovery", async () => {
+    const db = createChatTestDb();
+    const calls: Array<{
+      provider: string;
+      model: string;
+      allowFinalLocalFallback: boolean | undefined;
+    }> = [];
+    const providerFactory = ((provider: "local" | "openai" | "anthropic") => ({
+      name: provider,
+      async generateResponse(
+        _messages: unknown,
+        options?: { model?: string; allowFinalLocalFallback?: boolean },
+      ) {
+        const model = options?.model ?? "";
+        calls.push({
+          provider,
+          model,
+          allowFinalLocalFallback: options?.allowFinalLocalFallback,
+        });
+        return provider === "local" ? "Recovered with the bundled local model." : "";
+      },
+    })) as typeof selectProvider;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "hello",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "openai",
+        providerFactory,
+        autoMemory: false,
+        botOverrides: { model: "online-primary" },
+        responseMode: "auto",
+        autoFallbackChain: {
+          v: 1,
+          fallbacks: [{ provider: "openai", model: "priority-model" }],
+          eligibleCandidates: [
+            { provider: "openai", model: "online-primary" },
+            { provider: "anthropic", model: "remaining-model" },
+          ],
+          finalLocalRecovery: { provider: "local", model: "llama3.2" },
+        },
+        mode: "zen",
+      },
+    );
+
+    assert.deepEqual(
+      calls.map(({ provider, model }) => `${provider}:${model}`),
+      [
+        "openai:online-primary",
+        "openai:priority-model",
+        "anthropic:remaining-model",
+        "local:llama3.2",
+      ],
+    );
+    assert.equal(
+      calls.every((call) => call.allowFinalLocalFallback === false),
+      true,
+    );
+    const assistant = result.conversation.messages.find(
+      (message) => message.role === "assistant",
+    );
+    assert.equal(assistant?.provider, "local");
+    assert.equal(assistant?.model, "llama3.2");
+    assert.equal(result.autoRecovery?.finalProvider, "local");
+    assert.equal(result.autoRecovery?.finalModel, "llama3.2");
   });
 
   it("preserves primary effort and disables thinking on AUTO fallbacks", async () => {

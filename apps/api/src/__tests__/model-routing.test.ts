@@ -170,6 +170,19 @@ describe("resolveAutoModel", () => {
 
     assertAutoRoute(resolved, "anthropic", "claude-sonnet-4-6", "online");
   });
+
+  it("keeps contextual Auto on Turbo-capable ONLINE candidates when Turbo is enabled", () => {
+    const resolved = resolveAutoModel({
+      provider: "openai",
+      lane: "online",
+      hiddenModelIds: [],
+      catalog: catalog(),
+      turboOnly: true,
+    });
+
+    assertAutoRoute(resolved, "openai", "gpt-4o-mini", "online");
+    assert.notEqual(resolved.provider, "anthropic");
+  });
 });
 
 describe("sanitizeHiddenModelIds", () => {

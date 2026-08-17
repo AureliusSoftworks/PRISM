@@ -91,7 +91,31 @@ export class LiveBakeJobManager {
       signal: controller.signal,
     })
       .then(() => undefined)
-      .catch(() => undefined)
+      .catch((error) => {
+        // #region agent log
+        fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "296f82",
+          },
+          body: JSON.stringify({
+            sessionId: "296f82",
+            runId: "pre-fix",
+            hypothesisId: "B",
+            location: "live-bake-jobs.ts:startDebateBake:catch",
+            message: "spectator bake job swallowed an error",
+            data: {
+              debateSessionId: args.sessionId,
+              errorName: error instanceof Error ? error.name : typeof error,
+              errorMessage:
+                error instanceof Error ? error.message.slice(0, 240) : String(error),
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+      })
       .finally(() => {
         const current = this.jobs.get(key);
         if (current?.controller === controller) this.jobs.delete(key);

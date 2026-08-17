@@ -167,6 +167,11 @@ import {
   listModelTurboPreferences,
   setModelTurboPreference,
 } from "./model-turbo-preferences.ts";
+import {
+  GLOBAL_BOT_MOOD_KEYS,
+  setGlobalBotMood,
+  type GlobalBotMoodKey,
+} from "./bot-global-mood.ts";
 
 export interface BackupUserSettings {
   theme: "light" | "dark" | "system";
@@ -252,6 +257,8 @@ export interface BackupBotSnapshot {
   namePronunciation?: string;
   selfReferral?: string;
   systemPrompt: string;
+  /** Account-owned runtime state; portable .bot and .bots exports omit it. */
+  globalMood?: GlobalBotMoodKey;
   /** Account backups preserve server-owned clone lineage as bot ids. */
   cloneFamilyId?: string | null;
   voicePreviewLine?: string | null;
@@ -340,6 +347,17 @@ export interface BackupCoffeeGroupSnapshot {
   moodSummary: Record<string, unknown>;
   ethos: string;
   atmosphere: BackupCoffeeGroupAtmosphere | null;
+  soundtrack?: {
+    provider: "elevenlabs";
+    model: string;
+    prompt: string;
+    contentType: string;
+    audioBase64: string;
+    durationMs: number;
+    revision: number;
+    createdAt: string;
+    updatedAt: string;
+  } | null;
   synthesis: Record<string, unknown>;
   archivedAt: string | null;
   createdAt: string;
@@ -2189,7 +2207,9 @@ export function exportUserSnapshot(
          chat_enabled,
          visibility,
          created_at,
-         updated_at
+         updated_at,
+         (SELECT mood_key FROM bot_global_moods AS mood
+           WHERE mood.user_id = bots.user_id AND mood.bot_id = bots.id) AS global_mood_key
        FROM bots
        WHERE user_id = ?
        ORDER BY updated_at DESC`,
@@ -2200,6 +2220,7 @@ export function exportUserSnapshot(
     name_pronunciation: string | null;
     self_referral: string | null;
     system_prompt: string;
+    global_mood_key: string | null;
     clone_family_id: string | null;
     voice_preview_line: string | null;
     export_hash: string | null;
@@ -2283,6 +2304,27 @@ export function exportUserSnapshot(
     created_at: string;
     updated_at: string;
   }>;
+  const coffeeGroupSoundtracks = db
+    .prepare(
+      `SELECT group_id, model, prompt, content_type, audio_bytes, duration_ms,
+              revision, created_at, updated_at
+         FROM coffee_group_soundtracks
+        WHERE user_id = ? AND audio_bytes IS NOT NULL`,
+    )
+    .all(userId) as Array<{
+      group_id: string;
+      model: string;
+      prompt: string;
+      content_type: string;
+      audio_bytes: Uint8Array;
+      duration_ms: number;
+      revision: number;
+      created_at: string;
+      updated_at: string;
+    }>;
+  const coffeeGroupSoundtrackByGroupId = new Map(
+    coffeeGroupSoundtracks.map((row) => [row.group_id, row] as const),
+  );
   const coffeeGroupPayload = coffeeGroups.map(
     (group): BackupCoffeeGroupSnapshot => {
       const seatRows = db
@@ -2317,6 +2359,7 @@ export function exportUserSnapshot(
       } catch {
         coffeeSettings = normalizeCoffeeSessionSettings(undefined);
       }
+      const soundtrack = coffeeGroupSoundtrackByGroupId.get(group.id);
       return {
         id: group.id,
         name: group.name,
@@ -2333,6 +2376,21 @@ export function exportUserSnapshot(
           group.atmosphere_json,
           group.updated_at,
         ),
+        ...(soundtrack
+          ? {
+              soundtrack: {
+              provider: "elevenlabs",
+              model: soundtrack.model,
+              prompt: soundtrack.prompt,
+              contentType: soundtrack.content_type,
+              audioBase64: Buffer.from(soundtrack.audio_bytes).toString("base64"),
+              durationMs: soundtrack.duration_ms,
+              revision: soundtrack.revision,
+              createdAt: soundtrack.created_at,
+              updatedAt: soundtrack.updated_at,
+              },
+            }
+          : {}),
         synthesis: parseBackupJsonObject(group.synthesis_json),
         archivedAt: group.archived_at,
         createdAt: group.created_at,
@@ -2713,6 +2771,11 @@ export function exportUserSnapshot(
           ? { selfReferral: normalizeBotSelfReferral(bot.self_referral) }
           : {}),
         systemPrompt: bot.system_prompt,
+        ...(GLOBAL_BOT_MOOD_KEYS.includes(
+          bot.global_mood_key as GlobalBotMoodKey,
+        ) && bot.global_mood_key !== "neutral"
+          ? { globalMood: bot.global_mood_key as GlobalBotMoodKey }
+          : {}),
         ...(bot.clone_family_id ? { cloneFamilyId: bot.clone_family_id } : {}),
         ...(normalizeVoicePreviewLine(bot.voice_preview_line)
         ? {
@@ -4057,6 +4120,22 @@ function importUserSnapshotWithinTransaction(
         bot.id.trim(),
         userId,
       );
+      if (
+        bot.globalMood &&
+        GLOBAL_BOT_MOOD_KEYS.includes(bot.globalMood) &&
+        bot.globalMood !== "neutral"
+      ) {
+        setGlobalBotMood(
+          db,
+          userId,
+          bot.id.trim(),
+          bot.globalMood,
+          "backup_restore",
+          typeof bot.updatedAt === "string" && bot.updatedAt.trim()
+            ? bot.updatedAt
+            : now,
+        );
+      }
     }
   }
 
@@ -4166,6 +4245,33 @@ function importUserSnapshotWithinTransaction(
           seats[seatIndex],
           updatedAt,
         );
+      }
+      if (
+        group.soundtrack?.provider === "elevenlabs" &&
+        typeof group.soundtrack.audioBase64 === "string" &&
+        /^audio\/(?:mpeg|mp3)$/iu.test(group.soundtrack.contentType)
+      ) {
+        const soundtrackBytes = Buffer.from(group.soundtrack.audioBase64, "base64");
+        if (soundtrackBytes.length > 0 && soundtrackBytes.length <= 12 * 1024 * 1024) {
+          db.prepare(
+            `INSERT OR REPLACE INTO coffee_group_soundtracks
+               (group_id, user_id, generation_status, generation_token,
+                provider, model, prompt, content_type, audio_bytes, duration_ms,
+                revision, error, created_at, updated_at)
+             VALUES (?, ?, 'ready', NULL, 'elevenlabs', ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+          ).run(
+            groupId,
+            userId,
+            group.soundtrack.model,
+            group.soundtrack.prompt,
+            group.soundtrack.contentType,
+            soundtrackBytes,
+            Math.max(3_000, Math.round(group.soundtrack.durationMs)),
+            Math.max(1, Math.round(group.soundtrack.revision)),
+            group.soundtrack.createdAt || createdAt,
+            group.soundtrack.updatedAt || updatedAt,
+          );
+        }
       }
     }
   }

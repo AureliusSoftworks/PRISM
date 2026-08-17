@@ -14,6 +14,7 @@ import {
   resetModelTurboPreferences,
   setModelTurboPreference,
 } from "../model-turbo-preferences.ts";
+import { AUTO_MODEL_TURBO_PREFERENCE_ID } from "@localai/shared";
 import {
   allModelReasoningEffortCursorHash,
   resolveUserModelReasoningEffort,
@@ -92,6 +93,25 @@ describe("model effort preferences", () => {
     );
     assert.equal(resetModelTurboPreferences(db, "user-1"), 1);
     assert.deepEqual(listModelTurboPreferences(db, "user-1"), []);
+  });
+
+  it("persists contextual Auto Turbo without turning Auto into a fixed model", () => {
+    const db = createTestDatabase();
+    setModelTurboPreference(db, {
+      userId: "user-1",
+      provider: "openai",
+      modelId: AUTO_MODEL_TURBO_PREFERENCE_ID,
+      turbo: true,
+    });
+    assert.equal(
+      findModelTurboPreference(
+        db,
+        "user-1",
+        "openai",
+        AUTO_MODEL_TURBO_PREFERENCE_ID,
+      ),
+      true,
+    );
   });
 
   it("upserts exact provider/model preferences and deletes Default", () => {

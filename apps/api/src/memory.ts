@@ -1057,15 +1057,24 @@ export function persistBotPairNarrativeMemory(args: {
   sourceMessageIds?: readonly string[];
   userKey: Buffer;
   createdAt?: string;
+  /** A completed episode contained repeated audience-visible behavior with a lasting consequence. */
+  salient?: boolean;
 }): UserMemory | null {
   ensureMemoryEcologyMemorySchema(args.db);
-  materializeShortTermMemoryDecay(args.db, args.userId);
   const sourceBotId = args.sourceBotId.trim();
   const targetBotId = args.targetBotId.trim();
   const text = args.text.replace(/\s+/gu, " ").trim().slice(0, 2_000);
   if (!sourceBotId || !targetBotId || sourceBotId === targetBotId || !text) {
     return null;
   }
+  reconcileLegacySignalPairNarrativeMemories({
+    db: args.db,
+    userId: args.userId,
+    sourceBotId,
+    targetBotId,
+    userKey: args.userKey,
+  });
+  materializeShortTermMemoryDecay(args.db, args.userId);
   const id = randomId(12);
   const createdAt = args.createdAt ?? new Date().toISOString();
   const conversationId = args.conversationId?.trim() || null;
@@ -1077,14 +1086,15 @@ export function persistBotPairNarrativeMemory(args: {
     args.userKey,
   );
   const confidence = 0.98;
-  const tier = normalizeMemoryTierForUser(
-    args.db,
-    args.userId,
-    undefined,
-    confidence,
-    confidence,
-    "direct",
-  );
+  const tier = shouldPromoteSignalPairNarrativeMemory({
+    db: args.db,
+    userId: args.userId,
+    sourceBotId,
+    targetBotId,
+    salient: args.salient === true,
+  })
+    ? "long_term"
+    : "short_term";
   args.db.prepare(
     `INSERT INTO memories
       (id, user_id, conversation_id, bot_id, target_bot_id, ciphertext, iv, tag,
@@ -1149,6 +1159,190 @@ export function persistBotPairNarrativeMemory(args: {
   };
 }
 
+/** Three completed pair encounters are enough to make later exact-pair history durable. */
+export const SIGNAL_PAIR_NARRATIVE_PROMOTION_ENCOUNTERS = 3;
+
+function signalPairNarrativeEncounterCount(args: {
+  db: DatabaseSync;
+  userId: string;
+  sourceBotId: string;
+  targetBotId: string;
+}): number {
+  const row = args.db.prepare(
+    `SELECT COUNT(DISTINCT memory.conversation_id) AS count
+       FROM memories AS memory
+       JOIN botcast_episodes AS episode
+         ON episode.id = memory.conversation_id
+        AND episode.user_id = memory.user_id
+      WHERE memory.user_id = ?
+        AND memory.bot_id = ?
+        AND memory.target_bot_id = ?
+        AND memory.category = 'bot_relation'
+        AND memory.source = 'direct'
+        AND episode.status = 'completed'
+        AND episode.guest_kind = 'bot'
+        AND ((episode.host_bot_id = memory.bot_id AND episode.guest_bot_id = memory.target_bot_id)
+          OR (episode.guest_bot_id = memory.bot_id AND episode.host_bot_id = memory.target_bot_id))`,
+  ).get(args.userId, args.sourceBotId, args.targetBotId) as { count?: number } | undefined;
+  return Number(row?.count ?? 0);
+}
+
+function signalPairNarrativeIsSalient(text: string): boolean {
+  return /\brepeated interruptions?\b|\brepeatedly interrupted\b|\b(?:left|walked out|departure)\b[\s\S]{0,120}\binterrupting\b|\binterrupting\b[\s\S]{0,120}\b(?:left|walked out|departure)\b/iu.test(
+    text,
+  );
+}
+
+function signalPairNarrativePromotionAllowed(
+  db: DatabaseSync,
+  userId: string,
+): boolean {
+  return readMemoryEcologySettings(db, userId).longTermPromotionThreshold <= 0.98;
+}
+
+function shouldPromoteSignalPairNarrativeMemory(args: {
+  db: DatabaseSync;
+  userId: string;
+  sourceBotId: string;
+  targetBotId: string;
+  salient: boolean;
+  encounterCount?: number;
+}): boolean {
+  if (!signalPairNarrativePromotionAllowed(args.db, args.userId)) return false;
+  if (args.salient) return true;
+  const encounterCount = args.encounterCount ?? signalPairNarrativeEncounterCount(args);
+  return encounterCount + 1 >= SIGNAL_PAIR_NARRATIVE_PROMOTION_ENCOUNTERS;
+}
+
+/**
+ * Reconciles only the authenticated directed Signal edge, rather than running
+ * an opaque database-wide rewrite. Old ordinary 0.98 rows become short-term;
+ * records that already satisfy today's repeated-encounter or salient-event
+ * policy remain durable.
+ */
+export function reconcileLegacySignalPairNarrativeMemories(args: {
+  db: DatabaseSync;
+  userId: string;
+  sourceBotId: string;
+  targetBotId: string;
+  userKey: Buffer;
+}): number {
+  ensureMemoryEcologyMemorySchema(args.db);
+  const sourceBotId = args.sourceBotId.trim();
+  const targetBotId = args.targetBotId.trim();
+  if (!sourceBotId || !targetBotId || sourceBotId === targetBotId) return 0;
+  const rows = args.db.prepare(
+    `SELECT memory.id AS id, memory.user_id AS user_id,
+            memory.conversation_id AS conversation_id, memory.bot_id AS bot_id,
+            memory.target_bot_id AS target_bot_id, memory.ciphertext AS ciphertext,
+            memory.iv AS iv, memory.tag AS tag, memory.confidence AS confidence,
+            memory.base_confidence AS base_confidence,
+            memory.category AS category, memory.tier AS tier,
+            memory.lifecycle AS lifecycle, memory.durability AS durability,
+            memory.source AS source, memory.certainty AS certainty,
+            memory.source_message_ids AS source_message_ids,
+            memory.last_reinforced_at AS last_reinforced_at,
+            memory.created_at AS created_at
+       FROM memories AS memory
+       JOIN botcast_episodes AS episode
+         ON episode.id = memory.conversation_id
+        AND episode.user_id = memory.user_id
+      WHERE memory.user_id = ?
+        AND memory.bot_id = ?
+        AND memory.target_bot_id = ?
+        AND memory.category = 'bot_relation'
+        AND memory.source = 'direct'
+        AND (memory.tier = 'long_term' OR memory.lifecycle = 'long_term')
+        AND episode.status = 'completed'
+        AND episode.guest_kind = 'bot'
+        AND ((episode.host_bot_id = memory.bot_id AND episode.guest_bot_id = memory.target_bot_id)
+          OR (episode.guest_bot_id = memory.bot_id AND episode.host_bot_id = memory.target_bot_id))`,
+  ).all(args.userId, sourceBotId, targetBotId) as MemoryRow[];
+  if (rows.length === 0) return 0;
+  const encounterCount = signalPairNarrativeEncounterCount({
+    db: args.db,
+    userId: args.userId,
+    sourceBotId,
+    targetBotId,
+  });
+  const demote = args.db.prepare(
+    `UPDATE memories
+        SET tier = 'short_term',
+            lifecycle = 'short_term',
+            base_confidence = COALESCE(base_confidence, confidence),
+            last_reinforced_at = COALESCE(last_reinforced_at, created_at)
+      WHERE id = ? AND user_id = ?`,
+  );
+  let changed = 0;
+  for (const row of rows) {
+    let salient = false;
+    try {
+      salient = signalPairNarrativeIsSalient(
+        decryptMemoryRow(row, args.userKey, args.db).text,
+      );
+    } catch {
+      // A corrupt encrypted row remains untouched; ordinary retrieval will
+      // surface its existing decryption failure instead of silently deleting it.
+      continue;
+    }
+    if (
+      shouldPromoteSignalPairNarrativeMemory({
+        db: args.db,
+        userId: args.userId,
+        sourceBotId,
+        targetBotId,
+        salient,
+        encounterCount,
+      })
+    ) {
+      continue;
+    }
+    changed += Number(demote.run(row.id, args.userId).changes ?? 0);
+  }
+  return changed;
+}
+
+/** Reconciles the Signal pair rows shown in one authenticated bot dossier. */
+export function reconcileLegacySignalPairNarrativeMemoriesForBot(args: {
+  db: DatabaseSync;
+  userId: string;
+  sourceBotId: string;
+  userKey: Buffer;
+}): number {
+  ensureMemoryEcologyMemorySchema(args.db);
+  const sourceBotId = args.sourceBotId.trim();
+  if (!sourceBotId) return 0;
+  const hasSignalEpisodes = args.db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'botcast_episodes'",
+  ).get();
+  if (!hasSignalEpisodes) return 0;
+  const rows = args.db.prepare(
+    `SELECT DISTINCT memory.target_bot_id AS target_bot_id
+       FROM memories AS memory
+       JOIN botcast_episodes AS episode
+         ON episode.id = memory.conversation_id
+        AND episode.user_id = memory.user_id
+      WHERE memory.user_id = ?
+        AND memory.bot_id = ?
+        AND memory.target_bot_id IS NOT NULL
+        AND memory.category = 'bot_relation'
+        AND memory.source = 'direct'
+        AND (memory.tier = 'long_term' OR memory.lifecycle = 'long_term')
+        AND episode.status = 'completed'
+        AND episode.guest_kind = 'bot'`,
+  ).all(args.userId, sourceBotId) as Array<{ target_bot_id: string }>;
+  return rows.reduce(
+    (changed, row) => changed + reconcileLegacySignalPairNarrativeMemories({
+      db: args.db,
+      userId: args.userId,
+      sourceBotId,
+      targetBotId: row.target_bot_id,
+      userKey: args.userKey,
+    }),
+    0,
+  );
+}
+
 /** Decrypt only memories on the requested directed bot pair. */
 export function retrieveBotPairNarrativeMemories(args: {
   db: DatabaseSync;
@@ -1158,10 +1352,15 @@ export function retrieveBotPairNarrativeMemories(args: {
   userKey: Buffer;
   limit?: number;
 }): UserMemory[] {
-  materializeShortTermMemoryDecay(args.db, args.userId);
   const sourceBotId = args.sourceBotId.trim();
   const targetBotId = args.targetBotId.trim();
   if (!sourceBotId || !targetBotId || sourceBotId === targetBotId) return [];
+  reconcileLegacySignalPairNarrativeMemories({
+    ...args,
+    sourceBotId,
+    targetBotId,
+  });
+  materializeShortTermMemoryDecay(args.db, args.userId);
   const limit = Math.max(1, Math.min(20, Math.floor(args.limit ?? 4)));
   const rows = args.db.prepare(
     `SELECT id, user_id, conversation_id, bot_id, target_bot_id, ciphertext, iv,

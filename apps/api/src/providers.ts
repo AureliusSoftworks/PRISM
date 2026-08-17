@@ -45,6 +45,13 @@ export interface GenerateOptions {
   /** Optional JSON Schema for providers that support structured JSON output. */
   jsonSchema?: Record<string, unknown>;
   jsonSchemaName?: string;
+  /**
+   * Lets callers with their own ordered recovery policy suppress the provider's
+   * bundled llama3.2 failsafe. Without this, one failed ONLINE attempt can
+   * silently spend another full model timeout in LOCAL before the caller's
+   * configured ONLINE fallback gets a chance to run.
+   */
+  allowFinalLocalFallback?: boolean;
   /** Ollama-only residency override for system-owned local lanes. */
   ollamaKeepAlive?: string | number;
 }
@@ -349,6 +356,34 @@ function openAiReasoningStyleChatApi(modelId: string): boolean {
  */
 export function openAiModelUsesMaxCompletionTokens(modelId: string): boolean {
   return openAiReasoningStyleChatApi(modelId);
+}
+
+/**
+ * OpenAI reasoning models count hidden reasoning against
+ * `max_completion_tokens`. Bot maxTokens is authored as the public reply
+ * budget, so reserve separate headroom for reasoning instead of letting High
+ * and XHigh silently truncate the visible answer.
+ */
+export function openAiReasoningAwareCompletionTokenLimit(
+  modelId: string,
+  maxTokens: number,
+  reasoningEffort: ProviderReasoningEffort | undefined,
+): number {
+  const requested = openAiReasoningEffortForRequest(modelId, reasoningEffort);
+  const reserve = requested === "minimal"
+    ? 256
+    : requested === "low"
+      ? 512
+      : requested === "medium"
+        ? 1_024
+        : requested === "high"
+          ? 1_536
+          : requested === "xhigh"
+            ? 2_048
+            : requested === "max"
+              ? 4_096
+              : 0;
+  return Math.min(32_768, Math.max(1, Math.round(maxTokens)) + reserve);
 }
 
 /**
@@ -1559,6 +1594,8 @@ export class LocalOllamaProvider implements LlmProvider {
  * The included Ollama model is the final recovery path for text generation.
  * Keep this at the provider boundary so every normal provider caller gets the
  * same recovery without duplicating it in Chat, Coffee, or server routes.
+ * Callers that already own an ordered, privacy-lane-scoped recovery chain may
+ * explicitly suppress it for that request.
  */
 const FINAL_LOCAL_OLLAMA_FALLBACK_MODEL = "llama3.2";
 
@@ -1576,6 +1613,7 @@ async function generateWithFinalLocalOllamaFallback(args: {
     // would undermine the caller's stop request.
     if (
       args.skipFinalLocalFallback ||
+      args.options?.allowFinalLocalFallback === false ||
       isAbortFailure(primaryError, args.options?.signal)
     ) {
       throw primaryError;
@@ -1653,7 +1691,12 @@ export class OpenAiProvider implements LlmProvider {
     }
     if (typeof options?.maxTokens === "number") {
       if (openAiModelUsesMaxCompletionTokens(modelId)) {
-        requestBody.max_completion_tokens = options.maxTokens;
+        requestBody.max_completion_tokens =
+          openAiReasoningAwareCompletionTokenLimit(
+            modelId,
+            options.maxTokens,
+            options.reasoningEffort,
+          );
       } else {
         requestBody.max_tokens = options.maxTokens;
       }

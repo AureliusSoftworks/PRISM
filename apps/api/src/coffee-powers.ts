@@ -7,6 +7,11 @@ import {
   botPowerDesignationEffectFromIntentV1,
   botPowerDesignationObserverCueFromEffectsV1,
   botPowerAddressedFandomCueFromEffectsV1,
+  botPowerAddressedInsultPrimaryCueV1,
+  botPowerChromaticBiasCueFromEffectsV1,
+  botPowerChromaticBiasColorMatchesV1,
+  botPowerChromaticBiasEffectsFromEffectsV1,
+  botPowerChromaticBiasResolvedHueV1,
   botPowerCandorResponseRuleV1,
   botPowerCandorTriggerV1,
   botPowerCredulitySelfRuleV1,
@@ -51,6 +56,7 @@ import {
   type CoffeeReplayPowerMoodBoostEventPayload,
   type CoffeeReplayPowerMoodDrainEventPayload,
   type CoffeeReplayPowerAnnoyanceEventPayload,
+  type BotPowerChromaticBiasPeerV1,
   type ResolvedCoffeePowerBotV1,
 } from "@localai/shared";
 import {
@@ -1104,10 +1110,19 @@ export function coffeePowersPromptForSpeaker(
   addressedFandomTargetLabel?: string | null,
   theme?: BotPowerResolvedThemeV1,
   sizeCueAlreadyNoticedBotIds: ReadonlySet<string> = new Set(),
+  chromaticCast: readonly BotPowerChromaticBiasPeerV1[] = [],
 ): string {
   if (!plan) return "";
   const lines: string[] = [];
   const own = plan.bots[speakerBotId];
+  const addressedInsultCue = botPowerAddressedInsultPrimaryCueV1(
+    own?.effects ?? [],
+    addressedFandomTargetLabel ?? "the current table addressee",
+    "this Coffee turn",
+  );
+  // This hard first-call contract must survive the bounded Power prompt even
+  // when softer authored and observer cues consume the remaining budget.
+  if (addressedInsultCue) lines.push(addressedInsultCue);
   const ineptitudeMisdirection = botPowerIneptRoleMisdirectionFromEffectsV1(
     own?.effects ?? [],
     "coffee",
@@ -1136,7 +1151,17 @@ export function coffeePowersPromptForSpeaker(
   if (own?.effects.some((effect) => effect.type === "speech_copy")) {
     lines.push("Hard Copycat rule: on your first turn, if nobody has addressed speech to you yet, originate one short in-character opening. After that, repeat only the latest speech addressed directly to you, verbatim, with no added words or actions; if there is no addressed speech, remain silent.");
   }
-  if (own?.effects.some((effect) => effect.type === "false_name")) {
+  if (
+    own?.effects.some(
+      (effect) =>
+        effect.type === "false_name" &&
+        effect.pool === "given_plus_random_surname",
+    )
+  ) {
+    lines.push(
+      "Hard surname rule: keep your given name and use this session's last name as part of your public name.",
+    );
+  } else if (own?.effects.some((effect) => effect.type === "false_name")) {
     lines.push(
       "Hard false-name rule: sincerely believe your session name is not your Library label; use only the assigned believed name for this turn.",
     );
@@ -1175,6 +1200,16 @@ export function coffeePowersPromptForSpeaker(
     "Coffee",
   );
   if (fandomCue) lines.push(fandomCue);
+  const holderColor = chromaticCast.find((peer) => peer.botId === speakerBotId)?.color ?? null;
+  const chromaticCue = botPowerChromaticBiasCueFromEffectsV1({
+    effects: own?.effects ?? [],
+    holderColor,
+    holderBotId: speakerBotId,
+    peers: chromaticCast,
+    modeLabel: "Coffee",
+    currentAddresseeName: addressedFandomTargetLabel,
+  });
+  if (chromaticCue) lines.push(chromaticCue);
   const themeMoodCue = botPowerThemeMoodCueFromEffectsV1(
     own?.effects ?? [],
     theme,
@@ -1667,4 +1702,131 @@ export function applyCoffeePowerMoodDrainAfterDirectAddress<T extends { disposit
     },
     events,
   };
+}
+
+export function applyCoffeePowerChromaticBiasAfterSpeech<T extends { disposition: number }>(args: {
+  plan: CoffeePowerPlanV1 | null;
+  speakerBotId: string;
+  sourceMessageId: string;
+  sourceContent: string;
+  recipientBotIds: readonly string[];
+  socialByBotId: Record<string, T>;
+  chromaticCast: readonly BotPowerChromaticBiasPeerV1[];
+  existingBoostEvents?: readonly CoffeeReplayPowerMoodBoostEventPayload[];
+  existingDrainEvents?: readonly CoffeeReplayPowerMoodDrainEventPayload[];
+  occurredAt: string;
+}): {
+  socialByBotId: Record<string, T>;
+  boostEvents: CoffeeReplayPowerMoodBoostEventPayload[];
+  drainEvents: CoffeeReplayPowerMoodDrainEventPayload[];
+} {
+  const holder = args.plan?.bots[args.speakerBotId];
+  const effects = botPowerChromaticBiasEffectsFromEffectsV1(holder?.effects ?? []);
+  if (
+    effects.length === 0 ||
+    botPowerResponseIsSilentV1(args.sourceContent)
+  ) {
+    return {
+      socialByBotId: args.socialByBotId,
+      boostEvents: [],
+      drainEvents: [],
+    };
+  }
+  const holderColor =
+    args.chromaticCast.find((peer) => peer.botId === args.speakerBotId)?.color ??
+    null;
+  const alreadyBoosted = new Set(
+    (args.existingBoostEvents ?? []).map(
+      (event) => `${event.sourceMessageId}\n${event.botId}`,
+    ),
+  );
+  const alreadyDrained = new Set(
+    (args.existingDrainEvents ?? []).map(
+      (event) => `${event.sourceMessageId}\n${event.botId}`,
+    ),
+  );
+  const next = { ...args.socialByBotId };
+  const boostEvents: CoffeeReplayPowerMoodBoostEventPayload[] = [];
+  const drainEvents: CoffeeReplayPowerMoodDrainEventPayload[] = [];
+  const powerId = holder?.powerIds[0] ?? "chromatic-bias";
+  const powerName = holder?.powerNames?.[0] ?? "Hue Prejudice";
+  const colorById = new Map(
+    args.chromaticCast.map((peer) => [peer.botId ?? "", peer.color ?? null]),
+  );
+
+  for (const targetId of new Set(args.recipientBotIds)) {
+    if (targetId === args.speakerBotId) continue;
+    if (coffeePowerBotIgnoresOtherPowers(args.plan, targetId)) continue;
+    if (!coffeePowerBotVisibleTo(args.plan, args.speakerBotId, targetId)) continue;
+    const previous = next[targetId];
+    if (!previous) continue;
+    const peerColor = colorById.get(targetId) ?? null;
+    let polarity: "love" | "hate" | null = null;
+    let strength: BotPowerStrength = "medium";
+    for (const effect of effects) {
+      const hue = botPowerChromaticBiasResolvedHueV1(effect, holderColor);
+      if (hue === null) continue;
+      if (!botPowerChromaticBiasColorMatchesV1(hue, peerColor, effect.matchBandDeg)) {
+        continue;
+      }
+      if (effect.polarity === "hate") {
+        polarity = "hate";
+        strength = effect.strength;
+        break;
+      }
+      polarity = "love";
+      strength = effect.strength;
+    }
+    if (!polarity) continue;
+    const key = `${args.sourceMessageId}\n${targetId}`;
+    const dispositionBefore = clamp01(previous.disposition);
+    if (polarity === "love") {
+      if (alreadyBoosted.has(key)) continue;
+      const dispositionAfter = clamp01(
+        dispositionBefore +
+          strengthDelta(strength) *
+            resistanceMultiplier(args.plan!, targetId, "positive"),
+      );
+      next[targetId] = { ...previous, disposition: dispositionAfter };
+      boostEvents.push({
+        v: 1,
+        name: "coffeeReplayEvent",
+        kind: "powerMoodBoost",
+        botId: targetId,
+        sourceBotId: args.speakerBotId,
+        sourceMessageId: args.sourceMessageId,
+        powerId,
+        powerName,
+        strength,
+        dispositionBefore,
+        dispositionAfter,
+        occurredAt: args.occurredAt,
+      });
+      alreadyBoosted.add(key);
+      continue;
+    }
+    if (alreadyDrained.has(key)) continue;
+    const dispositionAfter = clamp01(
+      dispositionBefore -
+        strengthDelta(strength) *
+          resistanceMultiplier(args.plan!, targetId, "negative"),
+    );
+    next[targetId] = { ...previous, disposition: dispositionAfter };
+    drainEvents.push({
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "powerMoodDrain",
+      botId: targetId,
+      sourceBotId: args.speakerBotId,
+      sourceMessageId: args.sourceMessageId,
+      powerId,
+      powerName,
+      strength,
+      dispositionBefore,
+      dispositionAfter,
+      occurredAt: args.occurredAt,
+    });
+    alreadyDrained.add(key);
+  }
+  return { socialByBotId: next, boostEvents, drainEvents };
 }

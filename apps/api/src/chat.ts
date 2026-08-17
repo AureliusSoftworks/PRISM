@@ -51,10 +51,7 @@ import {
   type ProviderMessage,
   type ProviderName,
 } from "./providers.ts";
-import {
-  rewriteBotPowerAntiTruthAnswerV1,
-  rewriteBotPowerCursedTongueAnswerV1,
-} from "./bot-powers.ts";
+import { rewriteBotPowerAntiTruthAnswerV1 } from "./bot-powers.ts";
 import {
   RECENT_WINDOW_SIZE,
   summarizeSandboxBotStatus,
@@ -98,6 +95,7 @@ import type {
   AutoRouteDecisionV1,
   AutoRecoveryTraceV1,
   BotFalseNameStateV1,
+  BotPowerFalseNamePoolV1,
   BotIdentityShapeshiftStateV1,
   BotPowerResponseBudgetEffectV1,
   ImageProviderName,
@@ -127,6 +125,7 @@ import {
   applyPrismMoodPowerIgnoredTurn,
   applyBotPowerEternalIntroductionResponseV1,
   applyBotPowerAddressedInsultV1,
+  applyBotPowerCursedTongueResponseV1,
   applyBotPowerEchoResponseV1,
   applyBotPowerBotNamesV1,
   applyBotPowerMumbledResponseV1,
@@ -142,8 +141,11 @@ import {
   botIdentityShapeshiftHolderPromptV1,
   botIdentityShapeshiftTargetChangesV1,
   botPowerBotNamingCueV1,
+  botPowerAddressedInsultPrimaryCueV1,
   botPowerCursesSpeechV1,
+  botPowerFalseNamePoolV1,
   botPowerRequiresAddressedInsultV1,
+  buildBotPowersPromptBlock,
   botPowerIgnoresOtherPowersV1,
   botPowerIneptitudeFinalTurnCueV1,
   botPowerIneptUserPromptV1,
@@ -3109,6 +3111,7 @@ async function generateChatResponse(args: {
           const raw = await provider.generateResponse(prepared.messages, {
             ...prepared.overrides,
             usagePurpose: index === 0 ? "chat_reply" : "chat_fallback",
+            allowFinalLocalFallback: false,
             signal,
           });
           return maybeRepairGuidedFinalAnswer({
@@ -4779,6 +4782,7 @@ function resolveChatZenFalseNameV1(args: {
   history: readonly ChatMessage[];
   eternallyIntroduces: boolean;
   now?: string;
+  pool?: BotPowerFalseNamePoolV1;
 }): {
   activeState: BotFalseNameStateV1 | null;
   justChanged: boolean;
@@ -4801,6 +4805,7 @@ function resolveChatZenFalseNameV1(args: {
     reshuffleToken,
     sourceMessageId: `false-name-pending:${args.conversationId}:${args.holderBotId}:${args.history.length}`,
     occurredAt: args.now ?? new Date().toISOString(),
+    pool: args.pool,
   });
   return {
     activeState: resolution.state,
@@ -4853,6 +4858,7 @@ function persistFalseNameStateForMessageV1(
     holderBotId: state.holderBotId,
     holderBotName: state.holderBotName,
     believedName: state.believedName,
+    pool: state.pool,
     sourceMessageId: messageId,
     occurredAt,
   });
@@ -8493,7 +8499,7 @@ export async function processChatMessage(
       ? assistantBotId.trim()
       : null;
   const opinionBotIdForTurn = personaTransitionTurn ? assistantBotId : activeBotId;
-  const effectiveBotSystemPrompt = isZenMode(mode)
+  const baseEffectiveBotSystemPrompt = isZenMode(mode)
     ? composeZenPrismSystemPrompt(settings.botSystemPrompt, {
         prismHome: activeBotId == null,
       })
@@ -8521,6 +8527,18 @@ export async function processChatMessage(
   const botPowerEchoEnforcedTurn = botPowerEchoTurn && !botPowerEchoOpeningTurn;
   const botPowerMumblingTurn = settings.botPowerMumbling === true;
   const botPowerCursedTongueTurn = botPowerCursesSpeechV1(settings.botPowers);
+  const addressedInsultPrimaryCue = botPowerAddressedInsultPrimaryCueV1(
+    settings.botPowers,
+    settings.userDisplayName?.trim() || "the user",
+    mode === "zen" ? "this Zen reply" : "this Chat reply",
+  );
+  const addressedInsultPromptBlock = addressedInsultPrimaryCue
+    ? buildBotPowersPromptBlock([addressedInsultPrimaryCue])
+    : "";
+  const effectiveBotSystemPrompt = addressedInsultPromptBlock &&
+      !baseEffectiveBotSystemPrompt?.includes("HARD Ad Hominem primary-generation rule")
+    ? [baseEffectiveBotSystemPrompt, addressedInsultPromptBlock].filter(Boolean).join("\n\n")
+    : baseEffectiveBotSystemPrompt;
   const botPowerResponseBudgetTurn = settings.botPowerResponseBudget ?? null;
   const botPowerHardResponseTurn =
     botPowerMutedTurn ||
@@ -8700,6 +8718,7 @@ export async function processChatMessage(
               shapeshiftHolderBotId,
             history,
             eternallyIntroduces: botPowerEternalIntroductionTurn,
+            pool: botPowerFalseNamePoolV1(settings.botPowers),
           })
         : { activeState: null, justChanged: false, pendingState: null };
     const activeFalseNameState = falseNameResolution.activeState;
@@ -9103,14 +9122,10 @@ export async function processChatMessage(
     let botPowerPrivateIntendedSpeechForTurn: string | undefined;
     if (botPowerCursedTongueTurn && !botPowerMutedTurn) {
       botPowerPrivateIntendedSpeechForTurn = assistantDisplay.trim().slice(0, 6_000) || undefined;
-      assistantDisplay = await rewriteBotPowerCursedTongueAnswerV1({
-        provider: auxiliaryProvider,
-        draftAnswer: assistantDisplay,
-        seed: `${conversationId ?? "incognito"}:${assistantBotId ?? "prism"}:${history.length + 1}`,
-        model: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
-        usagePurpose: "chat_reply",
-        signal: settings.signal,
-      });
+      assistantDisplay = applyBotPowerCursedTongueResponseV1(
+        assistantDisplay,
+        `${conversationId ?? "incognito"}:${assistantBotId ?? "prism"}:${history.length + 1}`,
+      );
     }
     const sendImgPromptIncRaw =
       botPowerHardResponseTurn || assistantOnlyCompanionTurn
@@ -10154,6 +10169,7 @@ export async function processChatMessage(
             settings.starterPromptLabel?.trim() || shapeshiftHolderBotId,
           history,
           eternallyIntroduces: botPowerEternalIntroductionTurn,
+          pool: botPowerFalseNamePoolV1(settings.botPowers),
         })
       : { activeState: null, justChanged: false, pendingState: null };
   const activeFalseNameState = falseNameResolution.activeState;
@@ -10969,14 +10985,10 @@ export async function processChatMessage(
       });
   if (botPowerCursedTongueTurn && !botPowerMutedTurn) {
     botPowerCleanSpeechForTurn = assistantDisplay;
-    assistantDisplay = await rewriteBotPowerCursedTongueAnswerV1({
-      provider: auxiliaryProvider,
-      draftAnswer: assistantDisplay,
-      seed: `${activeConversationId}:${assistantBotId ?? "prism"}:${history.length + 1}`,
-      model: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
-      usagePurpose: "chat_reply",
-      signal: settings.signal,
-    });
+    assistantDisplay = applyBotPowerCursedTongueResponseV1(
+      assistantDisplay,
+      `${activeConversationId}:${assistantBotId ?? "prism"}:${history.length + 1}`,
+    );
   }
   const persistedToolCallEvents = assistantOnlyCompanionTurn
     ? []
