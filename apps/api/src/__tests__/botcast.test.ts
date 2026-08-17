@@ -2816,6 +2816,53 @@ describe("Botcast persistence and isolation", () => {
     assert.match(instruction, /not a corporation, employer, or corporate network/u);
   });
 
+  it("speaks the saved vernacular in Signal turns and never without one", () => {
+    const promptFor = (authoredAudioVoiceProfile: string | null) => {
+      const messages = buildBotcastSpeakerPrompt({
+        show: {
+          name: "The Night Desk",
+          premise: "Slow interviews after midnight.",
+          hostingStyle: "wry",
+        } as never,
+        episode: {
+          id: "episode-vernacular",
+          topic: "Lighthouse economics",
+          producerBrief: null,
+          segment: "interview",
+          messages: [],
+          events: [],
+          tensionStage: "calm",
+          guestPresenceMode: "two_way",
+        } as never,
+        host: {
+          id: "host-1",
+          name: "Lachlan",
+          systemPrompt: "A dry-witted lighthouse keeper.",
+          cloneFamilyId: null,
+          authoredAudioVoiceProfile,
+        },
+        guest: {
+          id: "guest-1",
+          name: "Ivo",
+          systemPrompt: "A patient economist.",
+          cloneFamilyId: null,
+        },
+        speakerRole: "host",
+      });
+      return messages[0]?.content ?? "";
+    };
+    const spoken = promptFor(
+      JSON.stringify({ v: 2, enabled: true, vernacularId: "scots" }),
+    );
+    assert.match(spoken, /Vernacular — Scots: /u);
+    // Persona first, then the vernacular colors it.
+    assert.ok(
+      spoken.indexOf("lighthouse keeper") < spoken.indexOf("Vernacular — "),
+    );
+    assert.match(spoken, /never respell words phonetically/u);
+    assert.doesNotMatch(promptFor(null), /Vernacular/u);
+  });
+
   it("keeps Producer action-only stage text visible and tiers host notice", () => {
     const disruptivePrompt = buildBotcastSpeakerPrompt({
       show: {

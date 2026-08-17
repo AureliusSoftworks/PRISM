@@ -169,6 +169,8 @@ import {
   botPowerFalseNamePoolV1,
   botPowerMirrorsIdentityV1,
   botPowerShapeshiftsIdentityV1,
+  botVernacularAuthoringCueV1,
+  botVernacularIdFromStoredVoiceProfile,
   createBotFalseNameStateV1,
   createBotIdentityMirrorStateV1,
   composeBotIdentityMirrorPowersV1,
@@ -8885,8 +8887,8 @@ export interface BotcastPromptBuildArgs {
         | "modelWarmupHoldStartedAt"
       >
     >;
-  host: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt" | "cloneFamilyId" | "powers" | "color">;
-  guest: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt" | "cloneFamilyId" | "powers" | "color">;
+  host: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt" | "cloneFamilyId" | "powers" | "color" | "authoredAudioVoiceProfile" | "audioVoiceProfileOverride">;
+  guest: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt" | "cloneFamilyId" | "powers" | "color" | "authoredAudioVoiceProfile" | "audioVoiceProfileOverride">;
   speakerRole: BotcastSpeakerRole;
   theme?: BotPowerResolvedThemeV1;
   cue?: BotcastProducerCue;
@@ -10248,6 +10250,15 @@ export function buildBotcastSpeakerPrompt(
   const shapeshiftIsActivePersonaSource = Boolean(
     activeIdentityShapeshiftState && !activeIdentityMirrorState,
   );
+  // The borrowed public form carries its own voice — vernacular included.
+  const effectivePersonaVernacularCue = botVernacularAuthoringCueV1(
+    botVernacularIdFromStoredVoiceProfile(
+      activeIdentityMirrorState?.targetVoice ??
+        activeIdentityShapeshiftState?.targetVoice ??
+        speaker.audioVoiceProfileOverride ??
+        speaker.authoredAudioVoiceProfile,
+    ),
+  );
   const powerEncounterRule = speakerEternallyIntroduces
     ? null
     : botcastPowerEncounterRule({
@@ -10681,6 +10692,7 @@ export function buildBotcastSpeakerPrompt(
               : "Keep this turn conversational and brisk: one to three concise sentences, usually 12 to 45 spoken words.",
         immersiveVoiceRule,
         `Persona:\n${effectivePersonaPrompt}`,
+        ...(effectivePersonaVernacularCue ? [effectivePersonaVernacularCue] : []),
         ...(priorPairHistoryRule ? [priorPairHistoryRule] : []),
         ...(identityMirrorPrompt ? [identityMirrorPrompt] : []),
         ...(identityShapeshiftPrompt ? [identityShapeshiftPrompt] : []),
