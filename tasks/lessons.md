@@ -1,3 +1,33 @@
+### 2026-08-16 · architecture
+**Trigger**: Signal producer "Say this" gibberish went through Auto; every model failed, then local llama error became a 503 instead of airing the queued line.
+**Lesson**: Producer `directQuote` / Say this is a host read, not a prompt contract. Skip the model. Frame it as a Producer note (`The Producer sent this in.`) and speak the queued words exactly. Do not send that text through Auto, sanitizer repairs, response budgets, mumble, or Cursed Tongue.
+**Applies to**: `composeBotcastProducerDirectQuoteUtterance` in `packages/shared/src/botcast.ts`, `advanceBotcastEpisode` in `apps/api/src/botcast.ts`
+
+### 2026-08-16 · UX
+**Trigger**: Coffee review of “Magic that isn't actually magic” — 5FPS, 7s Auto hops, 77s dead air after a cutoff.
+**Lesson**: Floor reclaim and max-speed pileup cannot wait on Opus/Terra thinking. Keep reclaim cutoffs like `Let me finish—` instead of treating them as invalid output. Reorder Coffee Auto recovery so Opus-class hops are last; swap a heavy Auto primary only on reclaim. Clamp effort to none on reclaim, pileup, and max-speed. A bot talking over the player must not mark itself as the interrupted bot. Skip empty-cup frown/reach on crowded pileup, and drop Coffee seat materials only after FPS falls below 24 on a 4+ seat table.
+**Applies to**: `coffeeReplyLooksUnfinished` reclaim cutoff, `coffeePreferFastAutoFallbackChain`, `coffeeTurnPreferFastPace`, `maybeBuildBotInterruptionEvent`, `coffee-seat-load-shed.ts`
+
+### 2026-08-16 · UX
+**Trigger**: Coffee review of “Magic that isn't actually magic” — lag plus Harry/Hermione talking in seat action text.
+**Lesson**: Bare `let` is spoken reclaim language (`Let me finish`), not a stage verb. Keep `lets`/`letting` for gestures like `lets a beat pass`. Unwrap reclaim/first-person/`The Patronus was a choi—` wraps onto the table line; never let them win the seat action badge. `coffeeActionsForMessage` must sanitize stored `coffeeStageAction` the same way.
+**Applies to**: `looksLikeSpokenProseMiswrappedAsAction` / unmarked stage start in `botMention.ts`, `coffeeActionsForMessage`, `isValidCoffeeStageAction`
+
+### 2026-08-16 · UX
+**Trigger**: Signal's All bots group pill opened (chevron flipped) but the group list never appeared.
+**Lesson**: Chat's `.composeBotMenu` opens upward with parent-relative `bottom: calc(100% + 6px)`. Shared BotPicker group menus portal onto `document.body` with `position: fixed`. Always set an explicit `bottom` (`auto` when opening down, a pixel value when opening up) so that leftover Chat CSS cannot collapse the menu to zero height. Flip above the trigger when Signal/Debate sit low on screen.
+**Applies to**: `placeBotPickerGroupMenu` in `botPickerGroupMenu.ts`, `BotPickerToolbar` portal
+
+### 2026-08-16 · UX
+**Trigger**: Debate Copycat Calvin repeated the moderator intro or went silent after one original floor, and the chair ignored a mumbled/garbled advocate line.
+**Lesson**: After a Copycat's first Debate floor, hard-repeat the opposing side's latest heard public line — not any line that merely names the holder. If the Copycat speaks second, copy immediately; originate only when the other side has not spoken yet. Skip echo-avoidance retries and post-copy sanitizers that would invent a new argument. If a public advocate line is unintelligible, the bot chair cuts in after it lands; a human Judge keeps that call.
+**Applies to**: `debateLatestCopycatSourceSpeech` in `packages/shared/src/debate.ts`, Copycat/unintelligible adapters in `apps/api/src/debate.ts`
+
+### 2026-08-16 · UX
+**Trigger**: Avatar Studio kept rolling Cursed Tongue for a last-name-each-session idea; the original prompt was a leftover letter and rerolls rebuilt from that locked scrap.
+**Lesson**: Last-name-each-session is a runtime Power (Surname Drift), not a profile wildcard. Do not lock the original Power idea after create — players edit that text and reroll. Never let the model invent Cursed Tongue unless the prompt is actually about profanity. One- or two-character prompts should fail, not become a built-in.
+**Applies to**: `BotPowersEditor` in `page.tsx`, `deterministicFalseNamePower` / compile guards in `bot-powers.ts`, `false_name` pool `given_plus_random_surname`.
+
 ### 2026-08-06 · design
 **Trigger**: Steam prep — marketplace bots shipped with packaged second-person lore as "memories."
 **Lesson**: Marketplace `.bot` packs must ship with empty memories (`memoryCount` 0, no `memories.json`). Persona/identity lives in `bot.json`; memories are earned via player and bot interaction. Use `scripts/strip-marketplace-bot-memories.mjs`; Steam staging refuses `memoryCount !== 0`.
@@ -975,3 +1005,13 @@
 **Trigger**: Fibbing Phil hub preview announced "My name is Fibbing Phil" despite Anti-truth.
 **Lesson**: Powers must override conflicting *system* prompts (forced name intros, mode scaffolding) but never beat *player* control (authored names, direct instructions). Hub voice preview should speak Power-aliased names; compiler order must not let false_name steal Anti-truth intents that mention invented aliases.
 **Applies to**: bot powers, hub voice preview, compileBotPowers coalesce order
+
+### 2026-08-16 · [design]
+**Trigger**: Debate Auto coverage was asked never to cut to Jury; Jury is only for deliberation.
+**Lesson**: The Jury chamber is a required scene, not a camera. Auto may glance at forum seats (Left, Moderator, Right, Wide) during speech, but never Jury. Enter the chamber automatically for leanings, deliberation, and ballots; do not put Jury on the camera strip.
+**Applies to**: Debate Auto coverage, `debateSpeechCamera.ts`, camera controls, Debate tutorials
+
+### 2026-08-16 · [workflow]
+**Trigger**: After aligning Signal’s producer-comments caret, the agent asked Jared to report back.
+**Lesson**: One-shot product fixes ship and stop. No verification AskQuestion unless we are already iterating.
+**Applies to**: Agent communication after PRISM bugfixes
