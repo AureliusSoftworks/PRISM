@@ -109,6 +109,84 @@ impl CommandNoWindow for Command {
     }
 }
 
+// Unix counterpart to the Windows Job Object above: give each runtime child its
+// own process group so the child *and everything it spawns* can be signalled as
+// a unit. Without this, grandchildren (the API's `dns-sd` LAN advertiser, TTS
+// workers) survive their parent and reparent to init.
+trait CommandOwnProcessGroup {
+    fn own_process_group(&mut self) -> &mut Self;
+}
+impl CommandOwnProcessGroup for Command {
+    fn own_process_group(&mut self) -> &mut Self {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            // 0 = use the child's own pid as the new process group id.
+            self.process_group(0);
+        }
+        self
+    }
+}
+
+/// Stop runtime children and everything they spawned.
+///
+/// `Child::kill()` sends SIGKILL to a single pid. SIGKILL cannot be caught, so
+/// the API's shutdown handler never runs, `stopDiscovery()` never fires, and its
+/// `dns-sd` advertiser is orphaned to init — where it lives forever, still
+/// advertising `_prism._tcp`. Signal the whole process group instead: SIGTERM so
+/// each runtime can shut down cleanly, then SIGKILL for anything still standing.
+#[cfg(unix)]
+fn terminate_children(children: &mut [&mut Child]) {
+    fn signal_group(pid: u32, signal: &str) {
+        // `kill -SIG -PGID` targets the group. Shelling out keeps this
+        // dependency-free; the crate has no `libc`.
+        let _ = Command::new("/bin/kill")
+            .args([signal, &format!("-{pid}")])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+
+    for child in children.iter() {
+        signal_group(child.id(), "-TERM");
+    }
+
+    // Give every runtime the same grace period, in parallel, so quitting stays
+    // fast regardless of how many children are still draining.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        if children
+            .iter_mut()
+            .all(|child| matches!(child.try_wait(), Ok(Some(_))))
+        {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    for child in children.iter_mut() {
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            continue;
+        }
+        signal_group(child.id(), "-KILL");
+        let _ = child.wait();
+    }
+}
+
+#[cfg(not(unix))]
+fn terminate_children(children: &mut [&mut Child]) {
+    // The Job Object tears the whole tree down with the process.
+    for child in children.iter_mut() {
+        let _ = child.kill();
+    }
+}
+
+/// Single-child convenience for the spawn-failure rollback paths.
+fn terminate_one(child: &mut Child) {
+    terminate_children(&mut [child]);
+}
+
 use tauri::menu::MenuBuilder;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::utils::config::BackgroundThrottlingPolicy;
@@ -435,6 +513,7 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
         .stdout(Stdio::from(qdrant_stdout_file))
         .stderr(Stdio::from(qdrant_stderr_file))
         .no_window()
+        .own_process_group()
         .spawn()
         .map_err(|e| io_error(format!("Failed to start bundled Qdrant: {e}")))?;
     assign_to_child_job(&qdrant_child);
@@ -456,7 +535,8 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::from(api_stderr_file))
-        .no_window();
+        .no_window()
+        .own_process_group();
     let playwright_browsers = root.join("playwright-browsers");
     if playwright_browsers.exists() {
         api_command.env("PLAYWRIGHT_BROWSERS_PATH", playwright_browsers);
@@ -464,7 +544,7 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
     let mut api_child = api_command
         .spawn()
         .map_err(|e| {
-            let _ = qdrant_child.kill();
+            terminate_one(&mut qdrant_child);
             io_error(format!("Failed to start Prism API: {e}"))
         })?;
 
@@ -488,10 +568,11 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
         .stdout(Stdio::piped())
         .stderr(Stdio::from(web_stderr_file))
         .no_window()
+        .own_process_group()
         .spawn()
         .map_err(|e| {
-            let _ = api_child.kill();
-            let _ = qdrant_child.kill();
+            terminate_one(&mut api_child);
+            terminate_one(&mut qdrant_child);
             io_error(format!("Failed to start Prism web runtime: {e}"))
         })?;
 
@@ -575,15 +656,21 @@ fn wait_for_web(web_port: u16, api_port: u16, state: &RuntimeState, app: &AppHan
 }
 
 fn stop_runtime(state: &RuntimeState) {
-    if let Ok(mut guard) = state.qdrant_child.lock() {
-        if let Some(mut child) = guard.take() { let _ = child.kill(); }
+    // Take ownership of all three first, then signal them together, so every
+    // runtime shares one grace period instead of queueing behind the last.
+    let mut owned: Vec<Child> = Vec::new();
+    for slot in [&state.web_child, &state.api_child, &state.qdrant_child] {
+        if let Ok(mut guard) = slot.lock() {
+            if let Some(child) = guard.take() {
+                owned.push(child);
+            }
+        }
     }
-    if let Ok(mut guard) = state.api_child.lock() {
-        if let Some(mut child) = guard.take() { let _ = child.kill(); }
+    if owned.is_empty() {
+        return;
     }
-    if let Ok(mut guard) = state.web_child.lock() {
-        if let Some(mut child) = guard.take() { let _ = child.kill(); }
-    }
+    let mut borrowed: Vec<&mut Child> = owned.iter_mut().collect();
+    terminate_children(&mut borrowed);
 }
 
 fn is_app_quitting(app_handle: &AppHandle) -> bool {
@@ -651,6 +738,21 @@ fn toggle_fullscreen(window: tauri::WebviewWindow) -> Result<bool, String> {
 }
 
 #[tauri::command]
+fn set_cursor_position(
+    window: tauri::WebviewWindow,
+    x: f64,
+    y: f64,
+) -> Result<bool, String> {
+    if !x.is_finite() || !y.is_finite() {
+        return Ok(false);
+    }
+    window
+        .set_cursor_position(tauri::LogicalPosition::new(x, y))
+        .map_err(|error| format!("Could not position the cursor: {error}"))?;
+    Ok(true)
+}
+
+#[tauri::command]
 fn open_emoji_picker(app: AppHandle) -> Result<bool, String> {
     #[cfg(target_os = "macos")]
     {
@@ -689,6 +791,7 @@ fn main() {
         .manage(AppLifecycleState::new())
         .invoke_handler(tauri::generate_handler![
             toggle_fullscreen,
+            set_cursor_position,
             open_emoji_picker
         ])
         .on_window_event(|window, event| {

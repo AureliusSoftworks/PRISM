@@ -45,3 +45,30 @@ export async function openDesktopEmojiPicker(): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Places the native desktop cursor in webview client coordinates. Browsers do
+ * not expose cursor warping, so the ordinary web build deliberately no-ops.
+ */
+export async function setDesktopCursorPosition(
+  clientX: number,
+  clientY: number,
+): Promise<boolean> {
+  if (
+    typeof window === "undefined" ||
+    !Number.isFinite(clientX) ||
+    !Number.isFinite(clientY)
+  ) {
+    return false;
+  }
+  const invoke = window.__TAURI__?.core?.invoke;
+  if (!invoke) return false;
+  try {
+    return await invoke<boolean>("set_cursor_position", {
+      x: clientX,
+      y: clientY,
+    });
+  } catch {
+    return false;
+  }
+}
