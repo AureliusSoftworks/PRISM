@@ -50,7 +50,7 @@ describe("focused bot panel integration", () => {
     );
     assert.match(
       cssSource,
-      /\.panelBots\[data-bot-panel-view="botHub"\] \.botPanelHubManagement[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/,
+      /\.panelBots\[data-bot-panel-view="botHub"\] \.botPanelHubManagement\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\)/,
     );
     const showcase = pageSource.slice(
       pageSource.indexOf("const renderBotHubShowcase"),
@@ -80,28 +80,84 @@ describe("focused bot panel integration", () => {
     );
   });
 
-  it("renders the focused experience in its fixed modular order", () => {
+  it("organizes the focused experience into navigable Overview, Customize, and Library sections", () => {
     const start = pageSource.indexOf(
       '{botPanelView === "botHub" && selectedBotPanelBot ?',
     );
     const end = pageSource.indexOf("{/* One form, two modes.", start);
     assert.ok(start >= 0 && end > start);
     const hubSource = pageSource.slice(start, end);
+    const navigation = hubSource.indexOf('aria-label="Bot Lobby sections"');
+    const overview = hubSource.indexOf('id="bot-lobby-overview"');
     const talk = hubSource.indexOf('data-tutorial-target="bot-hub-talk-to-me"');
+    const customize = hubSource.indexOf('id="bot-lobby-customize"');
+    const library = hubSource.indexOf('id="bot-lobby-library"');
     const resources = hubSource.indexOf(
       'data-tutorial-target="bot-hub-resources"',
     );
     const assets = hubSource.indexOf('data-tutorial-target="bot-hub-assets"');
-    const manage = hubSource.indexOf("botPanelHubSectionHeading");
     const composer = hubSource.indexOf("<FocusedBotPanelComposer");
     assert.ok(
-      talk >= 0 &&
-        talk < resources &&
-        resources < assets &&
-        assets < manage &&
-        manage < composer,
+      navigation >= 0 &&
+        overview > navigation &&
+        talk > overview &&
+        customize > talk &&
+        library > customize &&
+        resources > library &&
+        assets > resources &&
+        composer > library,
+    );
+    assert.match(hubSource, /href="#bot-lobby-overview"[\s\S]*?href="#bot-lobby-customize"[\s\S]*?href="#bot-lobby-library"/u);
+    assert.match(hubSource, /<footer className=\{styles\.botPanelHubComposerDock\}>[\s\S]*?<FocusedBotPanelComposer/u);
+    assert.match(hubSource, /<strong>Talk to me<\/strong>[\s\S]*?Start a fresh one-on-one with this bot\./u);
+    assert.doesNotMatch(
+      hubSource.slice(overview, customize),
+      /BotAssetLibraryIndex/u,
     );
     assert.doesNotMatch(hubSource, /openImagesPanelForBot/);
+    assert.match(
+      cssSource,
+      /\.panelBots\[data-bot-panel-view="botHub"\] > \.botPanelHub\s*\{[\s\S]*?grid-template-rows:\s*auto minmax\(0, 1fr\) auto;[\s\S]*?overflow:\s*hidden;/u,
+    );
+    assert.match(
+      cssSource,
+      /\.botPanelHubComposerDock\s*\{[\s\S]*?border-top:\s*1px solid var\(--line\)/u,
+    );
+    assert.match(
+      cssSource,
+      /@media \(min-width: 821px\)[\s\S]*?#bot-lobby-library\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)[\s\S]*?align-items:\s*start;/u,
+    );
+    assert.match(
+      cssSource,
+      /@media \(max-width: 820px\)[\s\S]*?\.botPanelHubSectionNav\s*\{[\s\S]*?overflow-x:\s*auto;/u,
+    );
+    assert.match(
+      cssSource,
+      /\.botPanelHubSectionNav a:hover,[\s\S]*?\.botPanelHubSectionNav a:focus-visible\s*\{[\s\S]*?outline:\s*none;/u,
+    );
+    assert.match(
+      cssSource,
+      /\.panelBots\[data-bot-panel-view="botHub"\]\s*\{[\s\S]*?--bot-lobby-pane:[\s\S]*?--bot-lobby-card:[\s\S]*?--bot-lobby-subtle:/u,
+    );
+    assert.match(
+      cssSource,
+      /\.themeLight \.panel\.panelBots\[data-bot-panel-view="botHub"\]\s*\{[\s\S]*?--bot-lobby-pane:[\s\S]*?--bot-lobby-card:[\s\S]*?--bot-lobby-subtle:/u,
+    );
+  });
+
+  it("neutralizes only the focused bot's server-owned global mood", () => {
+    assert.match(
+      pageSource,
+      /async function neutralizeBotMood\(bot: Bot\)[\s\S]*?`\/api\/bots\/\$\{encodeURIComponent\(bot\.id\)\}\/mood\/neutralize`[\s\S]*?method: "POST"/u,
+    );
+    assert.match(
+      pageSource,
+      /data-tutorial-target="bot-hub-neutralize-mood"[\s\S]*?void neutralizeBotMood\(selectedBotPanelBot\)[\s\S]*?<strong>[\s\S]*?Neutralize mood/u,
+    );
+    assert.match(
+      pageSource,
+      /Reset this bot&apos;s shared mood across modes\./u,
+    );
   });
 
   it("resolves Signal by exact host identity and reuses its logo and navigation", () => {

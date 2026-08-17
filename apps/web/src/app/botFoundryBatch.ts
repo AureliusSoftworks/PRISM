@@ -1,9 +1,70 @@
 import {
+  normalizeBotNamePronunciation,
   serializeStoredBotPrompt,
   type BotGeneratedDraftV1,
 } from "@localai/shared";
 
-export const BOT_FOUNDRY_AUTOMATIC_CONCURRENCY = 3;
+/** Every rich/high-detail cast (2-10 members) can launch in one ONLINE wave.
+ * Larger lean casts reuse this provider-safe bound instead of bursting up to
+ * 100 simultaneous long-output requests. */
+export const BOT_FOUNDRY_AUTOMATIC_CONCURRENCY = 10;
+
+/** Online casts use the selected pending width up to the safe ceiling. A
+ * single local Ollama host stays serial so concurrent long generations do not
+ * contend for the same model and make every member slower. */
+export function botFoundryAutomaticConcurrencyForLane(
+  lane: "local" | "online",
+  pendingCount = BOT_FOUNDRY_AUTOMATIC_CONCURRENCY,
+): number {
+  if (lane === "local") return 1;
+  return Math.min(
+    BOT_FOUNDRY_AUTOMATIC_CONCURRENCY,
+    Math.max(1, Math.floor(pendingCount)),
+  );
+}
+
+/** Serializes partial-group writes without making generation workers wait for
+ * each save. While one write is in flight, newer snapshots replace the stale
+ * pending snapshot; flush still guarantees the newest completed cast is
+ * durable before the run exits, including after cancellation. */
+export function createLatestBotFoundryBatchPersistence<T>(
+  persist: (snapshot: T) => Promise<void>,
+): {
+  push: (snapshot: T) => void;
+  flush: () => Promise<void>;
+} {
+  let pendingSnapshot: T | undefined;
+  let hasPendingSnapshot = false;
+  let activeDrain: Promise<void> | null = null;
+
+  const startDrain = (): Promise<void> => {
+    if (activeDrain) return activeDrain;
+    activeDrain = (async () => {
+      while (hasPendingSnapshot) {
+        const snapshot = pendingSnapshot as T;
+        hasPendingSnapshot = false;
+        await persist(snapshot);
+      }
+    })().finally(() => {
+      activeDrain = null;
+      if (hasPendingSnapshot) void startDrain();
+    });
+    return activeDrain;
+  };
+
+  return {
+    push(snapshot) {
+      pendingSnapshot = snapshot;
+      hasPendingSnapshot = true;
+      void startDrain();
+    },
+    async flush() {
+      while (activeDrain || hasPendingSnapshot) {
+        await (activeDrain ?? startDrain());
+      }
+    },
+  };
+}
 
 /** The deliberately small, non-persisted identity projection for a live batch
  * slot. The saved bot remains the source of truth; this merely lets the
@@ -72,7 +133,7 @@ export function generatedBotDraftCreatePayload(
 ): Record<string, unknown> {
   return {
     name: draft.name,
-    namePronunciation: "",
+    namePronunciation: normalizeBotNamePronunciation(draft.namePronunciation),
     selfReferral: "",
     systemPrompt: serializeStoredBotPrompt(draft.profile, draft.name),
     onlineEnabled: true,
@@ -125,12 +186,14 @@ export async function runAutomaticBotFoundryJobs<T>(args: {
   indices: readonly number[];
   run: (index: number) => Promise<T>;
   concurrency?: number;
+  shouldStop?: () => boolean;
   onSettled?: (result: AutomaticBotFoundryJobResult<T>) => void | Promise<void>;
 }): Promise<AutomaticBotFoundryJobResult<T>[]> {
   const indices = Array.from(new Set(args.indices)).filter(
     (index) => Number.isInteger(index) && index >= 1,
   );
   const results: AutomaticBotFoundryJobResult<T>[] = [];
+  const inputOrder = new Map(indices.map((index, position) => [index, position]));
   let cursor = 0;
   const concurrency = Math.min(
     indices.length,
@@ -138,6 +201,7 @@ export async function runAutomaticBotFoundryJobs<T>(args: {
   );
   const worker = async (): Promise<void> => {
     while (cursor < indices.length) {
+      if (args.shouldStop?.()) return;
       const index = indices[cursor++]!;
       let result: AutomaticBotFoundryJobResult<T>;
       try {
@@ -154,5 +218,8 @@ export async function runAutomaticBotFoundryJobs<T>(args: {
     }
   };
   await Promise.all(Array.from({ length: concurrency }, () => worker()));
-  return results.sort((left, right) => left.index - right.index);
+  return results.sort(
+    (left, right) =>
+      (inputOrder.get(left.index) ?? 0) - (inputOrder.get(right.index) ?? 0),
+  );
 }

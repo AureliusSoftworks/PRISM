@@ -32,10 +32,10 @@ test("new bot creation starts with a bounded, privacy-labelled prompt", () => {
   assert.match(pageSource, /maxLength=\{BOT_GENERATION_PROMPT_MAX_LENGTH\}/u);
   assert.match(pageSource, /data-tutorial-target="bot-generator-prompt"/u);
   assert.match(pageSource, /data-tutorial-target="bot-generator-routing"/u);
-  assert.match(pageSource, /Navbar routing/u);
+  assert.match(pageSource, /Refract/u);
   assert.match(pageSource, /Auto model/u);
   assert.match(pageSource, /automatic effort/u);
-  assert.match(pageSource, /next draft uses those live account settings/u);
+  assert.match(pageSource, /Change that model in Prism → Synthesis/u);
   assert.doesNotMatch(pageSource, /ariaLabel="Model for this bot draft"/u);
   assert.match(pageSource, /Nothing is saved until you choose Create bot\./u);
   assert.match(pageSource, /data-mode=/u);
@@ -139,7 +139,10 @@ test("Avatar Studio exposes atomic semantic and bounded local field dice", () =>
   assert.match(reroll, /botFieldGenerationRunRef/u);
   assert.match(reroll, /pushBotAvatarUndoSnapshot\(\)/u);
   assert.match(reroll, /preferredProvider:\s*settings\?\.preferredProvider\s*\?\?\s*"local"/u);
-  assert.doesNotMatch(reroll, /\.\.\.\(modelOverride \? \{ modelOverride \} : \{\}\)/u);
+  assert.match(
+    reroll,
+    /botGeneratorModelChoice !== AUTO_MODEL_CHOICE[\s\S]{0,80}modelOverride: botGeneratorModelChoice/u,
+  );
   assert.match(pageSource, /function BotFieldRandomizerButton/u);
   assert.match(pageSource, /label="temperature"/u);
   assert.match(pageSource, /BOT_POWER_SIGIL_IDS_V1/u);
@@ -191,23 +194,22 @@ test("closing regeneration preserves the current unsaved draft", () => {
   assert.match(pageSource, /Keep current draft/u);
 });
 
-test("foundry generation locks shared top-navbar controls and keeps only wordmark navigation", () => {
+test("foundry generation hides the shared navbar and cancels from foundry close", () => {
   assert.match(
     pageSource,
     /const botFoundryGenerationLocked = botGeneratorOpen && botGeneratorBusy;/u,
   );
   assert.match(
     pageSource,
-    /const wordmarkOnlyMode =[\s\S]{0,120}botFoundryGenerationLocked \|\| options\.wordmarkOnlyLock === true;/u,
-  );
-  assert.match(
-    pageSource,
     /Cancel this in-flight bot draft and return to the foundry brief screen without saving a bot\?/u,
   );
-  assert.match(pageSource, /onClick: handleBotGeneratorWordmarkNavigation,/u);
   assert.match(
     pageSource,
-    /onClick=\{handleBotGeneratorWordmarkNavigation\}/u,
+    /if \(botGeneratorBusy\) \{\s*const confirmCancellation = window\.confirm\(/u,
+  );
+  assert.match(
+    pageSource,
+    /cancelBotGeneratorGenerationAndReturnToFoundryBrief\(\)/u,
   );
   assert.match(
     pageSource,
@@ -217,27 +219,18 @@ test("foundry generation locks shared top-navbar controls and keeps only wordmar
     pageSource,
     /applyBotAvatarDraftSnapshot\(generationSnapshot\.draft\)/u,
   );
-  assert.match(pageSource, /if \(botGeneratorBusy\) return;/u);
-  assert.match(pageSource, /inert=\{wordmarkOnlyMode \? true : undefined\}/u);
   assert.match(pageSource, /botFoundryGenerationLockIsActive\(\)/u);
   assert.match(
     pageSource,
-    /renderAppSwitcher\(\{[\s\S]{0,120}disabled: botFoundryGenerationLocked/u,
+    /botGeneratorOpen \|\|[\s\S]{0,80}botAvatarCustomizerOpen \|\|[\s\S]{0,80}view === "coffee"/u,
   );
-  assert.match(
-    pageSource,
-    /const foundryWordmarkOnlyLockActions: UniversalNavbarDisabledMap = \{[\s\S]{0,260}promptCenter: true,[\s\S]{0,180}hub: true,\s*\};/u,
-  );
-  assert.match(
-    pageSource,
-    /disabledActions: universalDisabledActions,[\s\S]{0,80}disabledActionTooltips:\s*universalDisabledTooltips/u,
-  );
+  assert.match(pageSource, /setAppNavbarSessionHidden\(sessionHidden\)/u);
 });
 
-test("the generator stays below shared navbar chrome and has a responsive review surface", () => {
+test("the generator fills the viewport without shared navbar chrome and has a responsive review surface", () => {
   assert.match(
     cssSource,
-    /\.botGeneratorBackdrop\[data-avatar-foundry="true"\]\s*\{[\s\S]*?inset:\s*var\(--app-shell-top-nav-height, 60px\) 0 0;[\s\S]*?z-index:\s*170/u,
+    /\.botGeneratorBackdrop\[data-avatar-foundry="true"\]\s*\{[\s\S]*?inset:\s*0;[\s\S]*?z-index:\s*170/u,
   );
   assert.match(pageSource, /styles\.botAvatarStudioThemeScope/u);
   assert.doesNotMatch(

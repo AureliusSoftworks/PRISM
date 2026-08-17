@@ -7,6 +7,9 @@ import {
   BOT_GROUP_WAITING_ROOM_MICRO_CELL_SIZE,
   BOT_GROUP_WAITING_ROOM_MINI_CELL_HEIGHT,
   BOT_GROUP_WAITING_ROOM_MINI_CELL_WIDTH,
+  BOT_GROUP_WAITING_ROOM_MINI_VISUAL_SIZE_MAX,
+  BOT_GROUP_WAITING_ROOM_MINI_VISUAL_SIZE_MIN,
+  botGroupWaitingRoomMiniMetrics,
   botGroupWaitingRoomIsEligible,
   createBotGroupWaitingRoomVisit,
   reconcileBotGroupWaitingRoomVisit,
@@ -115,6 +118,7 @@ describe("living club-room eligibility", () => {
 describe("resolveBotGroupRoomLayout", () => {
   it("uses mini through the 24-bot maximum when measured capacity permits", () => {
     for (const count of [2, 12, 24]) {
+      const metrics = botGroupWaitingRoomMiniMetrics(count);
       const layout = resolveBotGroupRoomLayout({
         botIds: botIds(count),
         width: 900,
@@ -126,14 +130,32 @@ describe("resolveBotGroupRoomLayout", () => {
         layout.placements.every(
           (placement) =>
             placement.lod === "mini" &&
-            placement.width === BOT_GROUP_WAITING_ROOM_MINI_CELL_WIDTH &&
-            placement.height === BOT_GROUP_WAITING_ROOM_MINI_CELL_HEIGHT,
+            placement.width === metrics.cellWidth &&
+            placement.height === metrics.cellHeight &&
+            placement.visualSize === metrics.visualSize,
         ),
         true,
       );
       assertNoOverlaps(layout.placements);
     }
     assert.equal(BOT_GROUP_WAITING_ROOM_MAX_MINI_BOTS, 24);
+  });
+
+  it("gives smaller groups larger coherent mini footprints", () => {
+    const two = botGroupWaitingRoomMiniMetrics(2);
+    const six = botGroupWaitingRoomMiniMetrics(6);
+    const twentyFour = botGroupWaitingRoomMiniMetrics(24);
+    assert.equal(two.visualSize, BOT_GROUP_WAITING_ROOM_MINI_VISUAL_SIZE_MAX);
+    assert.equal(
+      twentyFour.visualSize,
+      BOT_GROUP_WAITING_ROOM_MINI_VISUAL_SIZE_MIN,
+    );
+    assert.ok(two.visualSize > six.visualSize);
+    assert.ok(six.visualSize > twentyFour.visualSize);
+    for (const metrics of [two, six, twentyFour]) {
+      assert.equal(metrics.cellWidth, metrics.visualSize + 12);
+      assert.equal(metrics.cellHeight, metrics.visualSize + 28);
+    }
   });
 
   it("uses micro for 25, 50, and 100 bots and keeps every member", () => {

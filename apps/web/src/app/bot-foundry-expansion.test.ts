@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const stylesSource = readFileSync(new URL("./page.module.css", import.meta.url), "utf8");
 
 describe("Bot Foundry expansion integration", () => {
   it("launches Create, Inspire, and Batch from one Foundry container", () => {
@@ -50,6 +51,18 @@ describe("Bot Foundry expansion integration", () => {
     assert.match(pageSource, /<HueLensControl/u);
     assert.match(pageSource, /botFoundryInspirationVisibleBots/u);
     assert.match(pageSource, /botFoundryInspirationInfluence\[id\] \?\? 50/u);
+    assert.match(
+      pageSource,
+      /const nextInfluence = Number\(\s*event\.currentTarget\.value,\s*\);/u,
+    );
+    assert.match(
+      pageSource,
+      /setBotFoundryInspirationInfluence\(\(current\) => \(\{[\s\S]*?\[id\]: nextInfluence,/u,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /setBotFoundryInspirationInfluence\(\(current\) => \(\{[\s\S]*?\[id\]: Number\(event\.currentTarget\.value\)/u,
+    );
     assert.match(pageSource, />Overall resemblance</u);
   });
 
@@ -98,10 +111,21 @@ describe("Bot Foundry expansion integration", () => {
 
   it("saves automatic batches with honest progress, retry, and dashboard handoff", () => {
     assert.match(pageSource, /runAutomaticBotFoundryJobs\(/u);
+    assert.match(pageSource, /botFoundryAutomaticConcurrencyForLane\(/u);
+    assert.match(pageSource, /remainingIndices\.length/u);
+    assert.match(pageSource, /createLatestBotFoundryBatchPersistence\(/u);
+    assert.match(pageSource, /await partialGroupPersistence\.flush\(\)/u);
+    assert.match(pageSource, /shouldStop: \(\) =>/u);
+    assert.match(pageSource, /index === 1 && !working\.groupIdentity/u);
+    assert.doesNotMatch(
+      pageSource,
+      /if \(!working\.groupIdentity\) \{\s*const first = await createOne\(1, true\)/u,
+    );
     assert.match(pageSource, /data-tutorial-target="bot-foundry-batch-progress"/u);
     assert.match(pageSource, /Created \$\{working\.createdBotIds\.length\} of \$\{working\.total\}/u);
     assert.match(pageSource, /retry continues only the missing members/u);
     assert.match(pageSource, /generatedBotDraftCreatePayload\(generated\.draft\)/u);
+    assert.match(pageSource, /setNewBotNamePronunciation\([\s\S]*?draft\.namePronunciation/u);
     assert.match(pageSource, /await persistBotFoundryBatchGroup\(working\)/u);
     assert.match(pageSource, /focusBotFoundryBatchGroup\(working\.groupId\)/u);
     assert.match(pageSource, /includeBatchGroupIdentity/u);
@@ -124,6 +148,24 @@ describe("Bot Foundry expansion integration", () => {
       1,
       "Only the dedicated chamber split may branch on Batch mode",
     );
+  });
+
+  it("presents Batch as a responsive brief-to-constellation workspace in both themes", () => {
+    assert.match(pageSource, /Batch Foundry workflow/u);
+    assert.match(pageSource, /01 · Shape the cast/u);
+    assert.match(pageSource, /02 · Indexed cast assembly/u);
+    assert.match(pageSource, /data-batch-stage-intro="true"/u);
+    assert.match(pageSource, /indexed seats/u);
+    assert.match(stylesSource, /\.botFoundryBatchBriefFooter/u);
+    assert.match(
+      stylesSource,
+      /\.botFoundryBatchSlotGrid\[data-batch-slot-count="2"\]/u,
+    );
+    assert.match(
+      stylesSource,
+      /\.themeLight\.botAvatarStudioThemeScope \.botFoundryBatchChamber/u,
+    );
+    assert.match(stylesSource, /@media \(max-width: 900px\)/u);
   });
 
   it("uses the canonical compact tier boundary for batch slots", () => {

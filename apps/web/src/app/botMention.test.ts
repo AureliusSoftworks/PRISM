@@ -548,6 +548,36 @@ describe("extractStageDirections", () => {
     assert.deepEqual(out.actions, []);
   });
 
+  it("keeps reclaim dialogue on the table instead of the seat action badge", () => {
+    const reclaim = extractStageDirections(
+      "*Let me finish—Dumbledore knew that curse would end him, and he cast the Patronus anyway* That's the actual proof, not just the standing still.",
+    );
+    assert.equal(
+      reclaim.mainText,
+      "Let me finish—Dumbledore knew that curse would end him, and he cast the Patronus anyway That's the actual proof, not just the standing still.",
+    );
+    assert.deepEqual(reclaim.actions, []);
+
+    const unmarked = extractStageDirections(
+      "Let me finish—Dumbledore knew that curse would end him, and he cast the Patronus anyway That's the actual proof, not just the standing still.",
+    );
+    assert.equal(
+      unmarked.mainText,
+      "Let me finish—Dumbledore knew that curse would end him, and he cast the Patronus anyway That's the actual proof, not just the standing still.",
+    );
+    assert.deepEqual(unmarked.actions, []);
+
+    const truncated = extractStageDirections(
+      "*The Patronus was a choi—* Hang on.",
+    );
+    assert.equal(truncated.mainText, "The Patronus was a choi— Hang on.");
+    assert.deepEqual(truncated.actions, []);
+
+    const directorBeat = extractStageDirections("*lets a beat pass* The point stands.");
+    assert.equal(directorBeat.mainText, "The point stands.");
+    assert.deepEqual(directorBeat.actions, ["lets a beat pass"]);
+  });
+
   it("unwraps inline emphasis instead of deleting words from regular conversation", () => {
     const out = extractStageDirections("Ah, but a rock can't make a snack—it's the *thought* that counts.");
     assert.equal(out.mainText, "Ah, but a rock can't make a snack—it's the thought that counts.");

@@ -9,6 +9,10 @@ import {
   filterBotPickerItems,
   sortBotPickerItems,
 } from "./botPickerFilter.ts";
+import {
+  BOT_PICKER_GROUP_MENU_GAP_PX,
+  placeBotPickerGroupMenu,
+} from "./botPickerGroupMenu.ts";
 
 const source = readFileSync(
   fileURLToPath(new URL("./BotPicker.tsx", import.meta.url)),
@@ -163,6 +167,17 @@ describe("shared bot picker", () => {
     );
   });
 
+  it("keeps Chat and Zen cards alphabetical until the Hue Cable is anchored", () => {
+    assert.match(
+      pageSource,
+      /const hueCableCardOrderingActive =\s*zenHueStringEligible &&\s*zenHueDirectoryState\.hueAnchor !== null/u,
+    );
+    assert.match(
+      pageSource,
+      /hueCableCardOrderingActive\s*\?\s*\[\.\.\.filteredBots\]\s*:\s*sortBotPickerItems\(filteredBots, false\)/u,
+    );
+  });
+
   it("provides shared grid, tile, toolbar, and arrow-key behavior", () => {
     assert.match(source, /export function BotPickerGrid/u);
     assert.match(source, /export function BotPickerTile/u);
@@ -179,11 +194,37 @@ describe("shared bot picker", () => {
     assert.match(source, /aria-haspopup="listbox"/u);
     assert.match(source, /ArrowDown[\s\S]{0,220}ArrowUp/u);
     assert.match(source, /createPortal\([\s\S]*botLibraryGroupMenu/u);
+    assert.match(source, /placeBotPickerGroupMenu/u);
+    assert.match(source, /groupMenuPortal/u);
     assert.match(source, /group\.count === 1[\s\S]*"1 bot"/u);
     assert.match(signalSource, /groupItems=\{bots\}/u);
     assert.match(signalSource, /groupTheme=\{theme\}/u);
     assert.match(debateSource, /groupItems=\{bots\}/u);
     assert.match(debateSource, /groupTheme=\{props\.theme\}/u);
+  });
+
+  it("overrides Chat's upward composer menu so a body portal can sit on screen", () => {
+    assert.match(
+      pageCssSource,
+      /\.composeBotMenu \{[\s\S]*?bottom: calc\(100% \+ 6px\)/u,
+    );
+    const below = placeBotPickerGroupMenu(
+      { top: 80, right: 320, bottom: 112, width: 180 },
+      { width: 1280, height: 800 },
+    );
+    assert.equal(below.position, "fixed");
+    assert.equal(below.bottom, "auto");
+    assert.equal(below.top, 112 + BOT_PICKER_GROUP_MENU_GAP_PX);
+
+    const above = placeBotPickerGroupMenu(
+      { top: 640, right: 320, bottom: 672, width: 180 },
+      { width: 1280, height: 800 },
+    );
+    assert.equal(above.top, "auto");
+    assert.equal(
+      above.bottom,
+      800 - 640 + BOT_PICKER_GROUP_MENU_GAP_PX,
+    );
   });
 
   it("reuses the navbar group picker in Library workflow controls", () => {

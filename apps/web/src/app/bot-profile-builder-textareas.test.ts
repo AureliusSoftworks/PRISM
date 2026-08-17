@@ -9,7 +9,7 @@ const pageSource = readFileSync(join(here, "page.tsx"), "utf8");
 const cssSource = readFileSync(join(here, "page.module.css"), "utf8");
 
 describe("bot profile builder textareas", () => {
-  it("uses pick-aware durable fields with explicit snapshot resolution", () => {
+  it("uses pick-aware profile fields without shortcut language", () => {
     const builderStart = pageSource.indexOf("function BotProfileBuilder(");
     assert.ok(builderStart >= 0);
     const builderEnd = pageSource.indexOf(
@@ -20,12 +20,10 @@ describe("bot profile builder textareas", () => {
     const builderSource = pageSource.slice(builderStart, builderEnd);
 
     assert.match(builderSource, /renderPickAwareComposer/u);
-    assert.match(builderSource, /durableSnapshot: true/u);
     assert.match(builderSource, /botProfilePickAwareField/u);
     assert.match(builderSource, /const renderProfileTextarea = /u);
     assert.match(builderSource, /<textarea/u);
-
-    assert.match(pageSource, /Resolve & Save/u);
+    assert.doesNotMatch(pageSource, /Resolve & Save/u);
     assert.match(
       pageSource,
       /<BotProfileBuilder[\s\S]{0,900}renderPickAwareComposer=\{renderPickAwareComposer\}/u,

@@ -364,6 +364,13 @@ describe("selected bot library showcase", () => {
     assert.match(pageSource, /BOT_AVATAR_PREVIEW_MOUTH_SHAPES/);
     assert.match(pageSource, /window\.setInterval\(advanceMouthShape, 118\)/);
     assert.match(pageSource, /mouthShape=\{previewMouthShape\}/);
+    assert.match(pageSource, /data-bot-hub-mouth-renderer="isolated"/);
+    assert.match(
+      pageSource,
+      /useSyncExternalStore\(\s*subscribeBotHubVoicePreviewMouth/,
+    );
+    assert.doesNotMatch(pageSource, /setBotHubPreviewMouthShape/);
+    assert.doesNotMatch(pageSource, /setBotHubPreviewVoicing/);
     assert.doesNotMatch(
       pageSource.slice(
         pageSource.indexOf("const renderBotHubShowcase"),
@@ -400,7 +407,7 @@ describe("selected bot library showcase", () => {
     );
     assert.match(
       pageSource,
-      /const previewPlaybackActive = previewStatus === "playing";\s*const previewTalking = previewPlaybackActive && botHubPreviewVoicing/,
+      /const previewPlaybackActive = previewStatus === "playing";[\s\S]{0,240}mouthSnapshot\.botId === showcaseVoiceId[\s\S]{0,120}mouthSnapshot\.talking/,
     );
     assert.match(pageSource, /isTalking=\{previewTalking\}/);
     assert.match(

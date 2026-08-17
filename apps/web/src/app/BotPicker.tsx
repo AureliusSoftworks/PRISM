@@ -10,6 +10,7 @@ import type {
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { buildBotLibraryGroupVisualVariables } from "./botLibraryGroupVisual";
+import { placeBotPickerGroupMenu } from "./botPickerGroupMenu";
 import sharedStyles from "./BotPicker.module.css";
 import pickerStyles from "./page.module.css";
 
@@ -322,19 +323,12 @@ export function BotPickerToolbar({
       const trigger = groupTriggerRef.current;
       if (!trigger) return;
       const rect = trigger.getBoundingClientRect();
-      const width = Math.max(240, rect.width);
-      const left = Math.max(
-        8,
-        Math.min(rect.right - width, window.innerWidth - width - 8),
+      setGroupMenuStyle(
+        placeBotPickerGroupMenu(rect, {
+          width: window.innerWidth,
+          height: window.innerHeight,
+        }),
       );
-      setGroupMenuStyle({
-        position: "fixed",
-        top: Math.min(rect.bottom + 6, window.innerHeight - 80),
-        left,
-        width,
-        maxHeight: Math.max(120, window.innerHeight - rect.bottom - 14),
-        zIndex: 4200,
-      });
     };
     update();
     window.addEventListener("resize", update);
@@ -449,7 +443,7 @@ export function BotPickerToolbar({
             ? createPortal(
                 <div
                   ref={groupMenuRef}
-                  className={`${pickerStyles.composeBotMenu} ${pickerStyles.botLibraryGroupMenu}`}
+                  className={`${pickerStyles.composeBotMenu} ${pickerStyles.botLibraryGroupMenu} ${sharedStyles.groupMenuPortal}`}
                   style={groupMenuStyle}
                 >
                   <div

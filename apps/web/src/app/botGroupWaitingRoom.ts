@@ -6,6 +6,44 @@ export const BOT_GROUP_WAITING_ROOM_MINI_CELL_WIDTH = 104;
 export const BOT_GROUP_WAITING_ROOM_MINI_CELL_HEIGHT = 112;
 export const BOT_GROUP_WAITING_ROOM_MICRO_CELL_SIZE = 44;
 export const BOT_GROUP_WAITING_ROOM_MICRO_VISUAL_SIZE = 36;
+export const BOT_GROUP_WAITING_ROOM_MINI_VISUAL_SIZE_MIN = 84;
+export const BOT_GROUP_WAITING_ROOM_MINI_VISUAL_SIZE_MAX = 136;
+
+export interface BotGroupRoomMiniMetrics {
+  visualSize: number;
+  cellWidth: number;
+  cellHeight: number;
+}
+
+/**
+ * Fewer presences deserve more visual weight. This is deliberately continuous
+ * across the supported mini range so adding or removing one group member does
+ * not jump to an unrelated CSS preset.
+ */
+export function botGroupWaitingRoomMiniMetrics(
+  rawBotCount: number,
+): BotGroupRoomMiniMetrics {
+  const botCount = clamp(
+    Math.round(finiteNonNegative(rawBotCount)),
+    BOT_GROUP_WAITING_ROOM_MIN_BOTS,
+    BOT_GROUP_WAITING_ROOM_MAX_MINI_BOTS,
+  );
+  const progress =
+    (botCount - BOT_GROUP_WAITING_ROOM_MIN_BOTS) /
+    (BOT_GROUP_WAITING_ROOM_MAX_MINI_BOTS -
+      BOT_GROUP_WAITING_ROOM_MIN_BOTS);
+  const visualSize = Math.round(
+    BOT_GROUP_WAITING_ROOM_MINI_VISUAL_SIZE_MAX -
+      progress *
+        (BOT_GROUP_WAITING_ROOM_MINI_VISUAL_SIZE_MAX -
+          BOT_GROUP_WAITING_ROOM_MINI_VISUAL_SIZE_MIN),
+  );
+  return {
+    visualSize,
+    cellWidth: visualSize + 12,
+    cellHeight: visualSize + 28,
+  };
+}
 
 export type BotGroupRoomLod = "mini" | "micro";
 
@@ -294,11 +332,12 @@ function resolveBotGroupAquariumLayout({
   promotedBotId: string | null;
   exclusionFootprint: BotGroupRoomFootprint;
 }): BotGroupRoomLayout {
+  const miniMetrics = botGroupWaitingRoomMiniMetrics(botIds.length);
   const miniCandidates = roomCandidatesOutsideFootprint({
     width,
     height,
-    cellWidth: BOT_GROUP_WAITING_ROOM_MINI_CELL_WIDTH,
-    cellHeight: BOT_GROUP_WAITING_ROOM_MINI_CELL_HEIGHT,
+    cellWidth: miniMetrics.cellWidth,
+    cellHeight: miniMetrics.cellHeight,
     exclusionFootprint,
     minimumCount: botIds.length,
   });
@@ -309,11 +348,11 @@ function resolveBotGroupAquariumLayout({
       : "micro";
   const cellWidth =
     lod === "mini"
-      ? BOT_GROUP_WAITING_ROOM_MINI_CELL_WIDTH
+      ? miniMetrics.cellWidth
       : BOT_GROUP_WAITING_ROOM_MICRO_CELL_SIZE;
   const cellHeight =
     lod === "mini"
-      ? BOT_GROUP_WAITING_ROOM_MINI_CELL_HEIGHT
+      ? miniMetrics.cellHeight
       : BOT_GROUP_WAITING_ROOM_MICRO_CELL_SIZE;
   const resolvedCandidates =
     lod === "mini"
@@ -351,7 +390,7 @@ function resolveBotGroupAquariumLayout({
       centerY: candidate.y + cellHeight / 2,
       visualSize:
         lod === "mini"
-          ? BOT_GROUP_WAITING_ROOM_MINI_CELL_WIDTH
+          ? miniMetrics.visualSize
           : BOT_GROUP_WAITING_ROOM_MICRO_VISUAL_SIZE,
       promoted: false,
       displaced: false,
@@ -482,6 +521,7 @@ export function resolveBotGroupRoomLayout({
     width,
     height,
   );
+  const miniMetrics = botGroupWaitingRoomMiniMetrics(botIds.length);
   if (exclusionFootprint && botIds.length > 0) {
     return resolveBotGroupAquariumLayout({
       botIds,
@@ -491,8 +531,8 @@ export function resolveBotGroupRoomLayout({
       exclusionFootprint,
     });
   }
-  const miniColumns = Math.floor(width / BOT_GROUP_WAITING_ROOM_MINI_CELL_WIDTH);
-  const miniRows = Math.floor(height / BOT_GROUP_WAITING_ROOM_MINI_CELL_HEIGHT);
+  const miniColumns = Math.floor(width / miniMetrics.cellWidth);
+  const miniRows = Math.floor(height / miniMetrics.cellHeight);
   const miniCapacity = Math.max(0, miniColumns * miniRows);
   const lod: BotGroupRoomLod =
     botIds.length <=
@@ -511,11 +551,11 @@ export function resolveBotGroupRoomLayout({
       rows: 0,
       cellWidth:
         lod === "mini"
-          ? BOT_GROUP_WAITING_ROOM_MINI_CELL_WIDTH
+          ? miniMetrics.cellWidth
           : BOT_GROUP_WAITING_ROOM_MICRO_CELL_SIZE,
       cellHeight:
         lod === "mini"
-          ? BOT_GROUP_WAITING_ROOM_MINI_CELL_HEIGHT
+          ? miniMetrics.cellHeight
           : BOT_GROUP_WAITING_ROOM_MICRO_CELL_SIZE,
       miniCapacity,
       promotedBotId: null,
@@ -526,11 +566,11 @@ export function resolveBotGroupRoomLayout({
 
   const cellWidth =
     lod === "mini"
-      ? BOT_GROUP_WAITING_ROOM_MINI_CELL_WIDTH
+      ? miniMetrics.cellWidth
       : BOT_GROUP_WAITING_ROOM_MICRO_CELL_SIZE;
   const cellHeight =
     lod === "mini"
-      ? BOT_GROUP_WAITING_ROOM_MINI_CELL_HEIGHT
+      ? miniMetrics.cellHeight
       : BOT_GROUP_WAITING_ROOM_MICRO_CELL_SIZE;
   const columns = chooseBalancedColumnCount({
     count: botIds.length,
@@ -578,7 +618,7 @@ export function resolveBotGroupRoomLayout({
           height: cellHeight,
           centerX: slot.x + cellWidth / 2,
           centerY: slot.y + cellHeight / 2,
-          visualSize: cellWidth,
+          visualSize: miniMetrics.visualSize,
           promoted: false,
           displaced: false,
         };

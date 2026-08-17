@@ -239,7 +239,7 @@ function looksLikeStageDirectionAction(inner: string): boolean {
   }
   // Keep this conservative: only treat common physical/social action verbs
   // as stage directions when the token is embedded in prose.
-  return /^(?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically)\s+)?(?:arches?|arching|arranges?|arranging|eyes?|eyeing|glances?|glancing|looks?|looking|nods?|nodding|shrugs?|shrugging|sighs?|sighing|smiles?|smiling|grins?|grinning|frowns?|frowning|pinches?|pinching|winces?|wincing|grimaces?|grimacing|laughs?|laughing|chuckles?|chuckling|snickers?|snickering|snorts?|snorting|gasps?|gasping|screams?|screaming|dances?|dancing|whispers?|whispering|murmurs?|murmuring|pauses?|pausing|hesitates?|hesitating|stares?|staring|glares?|glaring|gestures?|gesturing|points?|pointing|waves?|waving|blinks?|blinking|rolls?|rolling|shifts?|shifting|tilts?|tilting|crosses?|crossing|folds?|folding|leans?|leaning|turns?|turning|steps?|stepping|reaches?|reaching|lifts?|lifting|raises?|raising|lowers?|lowering|settles?|settling|regards?|regarding|holds?|holding|draws?|drawing|meets?|meeting|watches?|watching|traces?|tracing|straightens?|straightening|releases?|releasing|lets?|letting|mutters?|muttering|nudges?|nudging|pulls?|pulling|grabs?|grabbing|seizes?|seizing|snatches?|snatching|scoffs?|scoffing|slides?|sliding|strokes?|stroking|rubs?|rubbing|scratches?|scratching|takes?|taking|taps?|tapping|clears?|clearing|swallows?|swallowing|coughs?|coughing|hacks?|hacking|ahems?|aheming|farts?|farting|flatulates?|flatulating|toots?|tooting|burps?|burping|belches?|belching|eructates?|eructating|passes?|passing|breaks?|breaking|brings?|bringing|drums?|drumming|twirls?|twirling|pats?|patting|pushes?|pushing|touches?|touching|wipes?|wiping|sniffs?|sniffing|exhales?|exhaling|inhales?|inhaling|plucks?|plucking|ponders?|pondering|sets?|setting|squints?|squinting)\b/u.test(
+  return /^(?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically)\s+)?(?:arches?|arching|arranges?|arranging|eyes?|eyeing|glances?|glancing|looks?|looking|nods?|nodding|shrugs?|shrugging|sighs?|sighing|smiles?|smiling|grins?|grinning|frowns?|frowning|pinches?|pinching|winces?|wincing|grimaces?|grimacing|laughs?|laughing|chuckles?|chuckling|snickers?|snickering|snorts?|snorting|gasps?|gasping|screams?|screaming|dances?|dancing|whispers?|whispering|murmurs?|murmuring|pauses?|pausing|hesitates?|hesitating|stares?|staring|glares?|glaring|gestures?|gesturing|points?|pointing|waves?|waving|blinks?|blinking|rolls?|rolling|shifts?|shifting|tilts?|tilting|crosses?|crossing|folds?|folding|leans?|leaning|turns?|turning|steps?|stepping|reaches?|reaching|lifts?|lifting|raises?|raising|lowers?|lowering|settles?|settling|regards?|regarding|holds?|holding|draws?|drawing|meets?|meeting|watches?|watching|traces?|tracing|straightens?|straightening|releases?|releasing|lets|letting|mutters?|muttering|nudges?|nudging|pulls?|pulling|grabs?|grabbing|seizes?|seizing|snatches?|snatching|scoffs?|scoffing|slides?|sliding|strokes?|stroking|rubs?|rubbing|scratches?|scratching|takes?|taking|taps?|tapping|clears?|clearing|swallows?|swallowing|coughs?|coughing|hacks?|hacking|ahems?|aheming|farts?|farting|flatulates?|flatulating|toots?|tooting|burps?|burping|belches?|belching|eructates?|eructating|passes?|passing|breaks?|breaking|brings?|bringing|drums?|drumming|twirls?|twirling|pats?|patting|pushes?|pushing|touches?|touching|wipes?|wiping|sniffs?|sniffing|exhales?|exhaling|inhales?|inhaling|plucks?|plucking|ponders?|pondering|sets?|setting|squints?|squinting)\b/u.test(
     normalized
   );
 }
@@ -253,9 +253,19 @@ export function looksLikeSpokenProseMiswrappedAsAction(inner: string): boolean {
   const normalized = inner.replace(/\s+/g, " ").trim();
   if (!normalized) return false;
   if (/\?/u.test(normalized)) return true;
-  if (looksLikeStageDirectionAction(normalized)) return false;
   const words = normalized.split(/\s+/).filter(Boolean);
   const lower = normalized.toLowerCase();
+  // Reclaim snarks and first-person dialogue ("Let me finish—…") are speech.
+  // Bare `let` must not win just because `lets a beat pass` is a gesture.
+  if (
+    /^(?:let me|let's|let us|i wasn't|as i was|excuse me|don't cut|hold on|hang on|hold that thought)\b/iu.test(
+      lower,
+    )
+  ) {
+    return true;
+  }
+  if (words.length >= 3 && /[—–-]$/u.test(normalized)) return true;
+  if (looksLikeStageDirectionAction(normalized)) return false;
   // Conversational contractions are almost never physical stage cues.
   if (
     /\b(?:doesn't|don't|isn't|aren't|won't|can't|shouldn't|wouldn't|couldn't|let's|i'm|you're|we're|they're|it's)\b/iu.test(
@@ -264,11 +274,11 @@ export function looksLikeSpokenProseMiswrappedAsAction(inner: string): boolean {
   ) {
     return true;
   }
-  // Sentence-shaped openers ("It lets us…", "I suppose…") that are too long
-  // to be a stage beat.
+  // Sentence-shaped openers ("It lets us…", "I suppose…", "The Patronus…")
+  // that are too long to be a stage beat.
   if (
-    words.length >= 6 &&
-    /^(?:it|i|we|you|they|he|she|this|that|there|what|why|how|when|where|who|exactly|sure|well|yes|no|maybe|perhaps|actually|honestly|surrealism)\b/iu.test(
+    words.length >= 4 &&
+    /^(?:it|i|we|you|they|he|she|the|a|an|this|that|there|what|why|how|when|where|who|exactly|sure|well|yes|no|maybe|perhaps|actually|honestly|surrealism)\b/iu.test(
       lower,
     )
   ) {
@@ -319,7 +329,7 @@ const LEADING_UNMARKED_STAGE_START_RE = new RegExp(
     String.raw`(?:his|her|their|its)\s+(?:eyes?|gaze|breath(?:ing)?|jaw|mouth|shoulders?)\b`,
     String.raw`|eyes?\s+(?:narrow|narrowing|widen|widening|shift|shifting|glance|glancing|gaze|gazing|roll|rolling)\b`,
     String.raw`|(?:narrows?|narrowing)\s+(?:(?:his|her|their|its)\s+)?(?:eyes?|gaze)\b`,
-    String.raw`|(?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically)\s+)?(?:arches?|arching|arranges?|arranging|leans?|leaning|eyes?|eyeing|glances?|glancing|gazes?|gazing|glares?|glaring|stares?|staring|looks?|looking|nods?|nodding|shrugs?|shrugging|sighs?|sighing|smiles?|smiling|grins?|grinning|frowns?|frowning|pinches?|pinching|winces?|wincing|grimaces?|grimacing|laughs?|laughing|chuckles?|chuckling|snickers?|snickering|snorts?|snorting|blinks?|blinking|turns?|turning|shifts?|shifting|tilts?|tilting|folds?|folding|pauses?|pausing|reaches?|reaching|lifts?|lifting|raises?|raising|lowers?|lowering|settles?|settling|regards?|regarding|holds?|holding|draws?|drawing|meets?|meeting|watches?|watching|traces?|tracing|straightens?|straightening|releases?|releasing|lets?|letting|sips?|sipping|takes?|taking|picks?|picking|plucks?|plucking|ponders?|pondering|sets?|setting|squints?|squinting|strokes?|stroking|rubs?|rubbing|scratches?|scratching|taps?|tapping|clears?|clearing|swallows?|swallowing|coughs?|coughing|hacks?|hacking|ahems?|aheming|farts?|farting|flatulates?|flatulating|toots?|tooting|burps?|burping|belches?|belching|eructates?|eructating|passes?|passing|breaks?|breaking|brings?|bringing|drums?|drumming|nudges?|nudging|pulls?|pulling|grabs?|grabbing|seizes?|seizing|snatches?|snatching|slides?|sliding|twirls?|twirling|pats?|patting|pushes?|pushing|touches?|touching|wipes?|wiping|sniffs?|sniffing|exhales?|exhaling|inhales?|inhaling)\b(?!\s+(?:like|are|is)\b)`,
+    String.raw`|(?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically)\s+)?(?:arches?|arching|arranges?|arranging|leans?|leaning|eyes?|eyeing|glances?|glancing|gazes?|gazing|glares?|glaring|stares?|staring|looks?|looking|nods?|nodding|shrugs?|shrugging|sighs?|sighing|smiles?|smiling|grins?|grinning|frowns?|frowning|pinches?|pinching|winces?|wincing|grimaces?|grimacing|laughs?|laughing|chuckles?|chuckling|snickers?|snickering|snorts?|snorting|blinks?|blinking|turns?|turning|shifts?|shifting|tilts?|tilting|folds?|folding|pauses?|pausing|reaches?|reaching|lifts?|lifting|raises?|raising|lowers?|lowering|settles?|settling|regards?|regarding|holds?|holding|draws?|drawing|meets?|meeting|watches?|watching|traces?|tracing|straightens?|straightening|releases?|releasing|lets|letting|sips?|sipping|takes?|taking|picks?|picking|plucks?|plucking|ponders?|pondering|sets?|setting|squints?|squinting|strokes?|stroking|rubs?|rubbing|scratches?|scratching|taps?|tapping|clears?|clearing|swallows?|swallowing|coughs?|coughing|hacks?|hacking|ahems?|aheming|farts?|farting|flatulates?|flatulating|toots?|tooting|burps?|burping|belches?|belching|eructates?|eructating|passes?|passing|breaks?|breaking|brings?|bringing|drums?|drumming|nudges?|nudging|pulls?|pulling|grabs?|grabbing|seizes?|seizing|snatches?|snatching|slides?|sliding|twirls?|twirling|pats?|patting|pushes?|pushing|touches?|touching|wipes?|wiping|sniffs?|sniffing|exhales?|exhaling|inhales?|inhaling)\b(?!\s+(?:like|are|is)\b)`,
     String.raw`)`,
   ].join(""),
   "iu"

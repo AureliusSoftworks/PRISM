@@ -83,6 +83,37 @@ describe("bot group canvas filtering", () => {
     );
   });
 
+  it("uses complete light-theme dashboard chrome and clears expanded navbar height", () => {
+    assert.match(
+      cssSource,
+      /\.themeLight \.canvasBotBrowserRail\s*\{[\s\S]*?background:\s*linear-gradient\([\s\S]*?#fff 84%/,
+    );
+    assert.match(
+      cssSource,
+      /\.themeLight \.canvasBotBrowserRail \.coffeeSearchBar input\s*\{[\s\S]*?color:\s*var\(--fg\)/,
+    );
+    assert.match(
+      cssSource,
+      /\.themeLight \.canvasBotBrowserRail \.botLibraryGroupControl\s*\{[\s\S]*?--bot-library-group-trigger-text:[\s\S]*?--bot-library-group-trigger-shadow:\s*none/,
+    );
+    assert.match(
+      cssSource,
+      /\.botGroupHeroStage\s*\{[\s\S]*?--bot-group-hero-navbar-clearance:[\s\S]*?--app-shell-top-nav-height[\s\S]*?padding:\s*calc\(32px \+ var\(--bot-group-hero-navbar-clearance\)\) 0 32px/,
+    );
+    assert.match(
+      cssSource,
+      /\.themeLight \.botGroupHero\s*\{[\s\S]*?background-blend-mode:\s*normal, normal/,
+    );
+    assert.match(
+      cssSource,
+      /\.themeLight \.botGroupDashboard\s*\{[\s\S]*?background-blend-mode:\s*normal, normal/,
+    );
+    assert.match(
+      cssSource,
+      /@media \(max-width: 820px\)\s*\{[\s\S]*?\.botGroupHeroStage\s*\{[\s\S]*?padding-block:\s*calc\(32px \+ var\(--bot-group-hero-navbar-clearance\)\) 32px/,
+    );
+  });
+
   it("keeps future built-in groups selectable while reserving mutable hero controls", () => {
     assert.match(
       pageSource,

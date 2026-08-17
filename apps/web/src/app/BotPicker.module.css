@@ -49,6 +49,19 @@
   white-space: nowrap;
 }
 
+/*
+  Chat's composer menu opens upward with parent-relative `bottom`.
+  This toolbar portals onto document.body with position:fixed, so
+  placement (including an explicit `bottom: auto` when opening down)
+  is applied inline. Do not set `bottom` here with !important — that
+  would block opening above the trigger when Signal sits low on screen.
+*/
+.groupMenuPortal {
+  position: fixed;
+  left: auto;
+  right: auto;
+}
+
 @media (max-width: 680px) {
   .toolbar,
   .toolbar[data-compact="true"] {
