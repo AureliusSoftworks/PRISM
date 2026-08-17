@@ -434,6 +434,30 @@ function premiumNativeAccentAliases(
   return aliases;
 }
 
+/**
+ * Regional American accents keep the rhotic en-US pronunciation base even when
+ * the underlying voice is British. Without this pin, a Texas or Bay Area
+ * accent on a British base voice phonemized through en-GB and every hard R
+ * silently disappeared. Deliberately non-rhotic American regions (New York,
+ * Eastern New England) stay in this set: their rule lists drop exactly the
+ * coda R's they intend to, which requires the rhotic base to exist first.
+ */
+const AMERICAN_PRONUNCIATION_BASE_INFLUENCES = new Set<
+  Exclude<LocalVoiceSpeechprintInfluence, "none">
+>([
+  "canadian-english",
+  "new-york-english",
+  "southern-us-english",
+  "southern-california-english",
+  "bay-area-english",
+  "inland-north-english",
+  "texas-english",
+  "appalachian-english",
+  "eastern-new-england-english",
+  "north-florida-english",
+  "miami-english",
+]);
+
 export const VOICE_ACCENT_DEFINITIONS: readonly VoiceAccentDefinitionV1[] = [
   {
     id: "american-english",
@@ -471,6 +495,9 @@ export const VOICE_ACCENT_DEFINITIONS: readonly VoiceAccentDefinitionV1[] = [
       capability.label,
     ),
     localSpeechprintFallback: capability.id,
+    ...(AMERICAN_PRONUNCIATION_BASE_INFLUENCES.has(capability.id)
+      ? { localPronunciationBaseFallback: "en-US" as const }
+      : {}),
   })),
 ];
 
@@ -2770,4 +2797,55 @@ export function applyVoiceAccentFieldToIpa(args: {
     }
   }
   return { ipa, appliedRuleIds: [...appliedRuleIds].sort() };
+}
+
+interface AmericanRhoticEnforcementRule {
+  id: string;
+  pattern: RegExp;
+  replacement: string;
+}
+
+/**
+ * espeak's en-US output keeps British-shaped tokens: NURSE surfaces as plain
+ * "ɜː" with no rhotic at all (bird => bˈɜːd), lettER as the r-colored "ɚ",
+ * and long vowels keep their length mark before a coda "ɹ" (hard => hˈɑːɹd).
+ * American base voices render those rhotically out of habit, but British base
+ * voices read the same tokens with their native non-rhotic prior and swallow
+ * the R. The engine's training G2P (misaki) writes American English as plain
+ * short vowel plus explicit "ɹ" — her => hɜɹ, or => ɔɹ, ɚ => əɹ, no "ː" —
+ * so these rewrites restate every hard R as a token no voice can skip.
+ */
+const AMERICAN_RHOTIC_ENFORCEMENT_RULES: readonly AmericanRhoticEnforcementRule[] = [
+  // NURSE gains its missing rhotic; "ɜːɹ" (furry) is handled by length strip.
+  { id: "nurse-hard-r", pattern: /ɜː(?!ɹ)/gu, replacement: "ɜɹ" },
+  // R-colored schwa becomes an explicit schwa + R; "ɚɹ" (martyr) collapses.
+  { id: "rhotic-schwa-hard-r", pattern: /ɚɹ?/gu, replacement: "əɹ" },
+  // FORCE joins NORTH before R (horse–hoarse merger): "oːɹ" (four) => "ɔːɹ".
+  { id: "rhotic-force-merge", pattern: /oː(?=ɹ)/gu, replacement: "ɔː" },
+  // Length marks before R invite the non-rhotic long-vowel reading; drop them
+  // — except for "ɔː": bare "ɔ" is essentially unseen in British training
+  // data, so a translated British style falls back open and unrounded
+  // (floor => "flar"). The long form keeps the rounding while the style
+  // translation and the explicit "ɹ" carry the American R.
+  { id: "rhotic-coda-length", pattern: /(?<!ɔ)ː(?=ɹ)/gu, replacement: "" },
+];
+
+/**
+ * Rewrites en-US base IPA so every hard R is an explicit token. Runs on the
+ * pronunciation base BEFORE accent-field rules, so deliberately non-rhotic
+ * accents (New York, RP on an American base) still see — and can delete —
+ * the coda R their postvocalic-r-drop rules target. Idempotent.
+ */
+export function enforceAmericanRhoticIpa(ipa: string): {
+  ipa: string;
+  appliedRuleIds: string[];
+} {
+  let result = ipa;
+  const appliedRuleIds: string[] = [];
+  for (const rule of AMERICAN_RHOTIC_ENFORCEMENT_RULES) {
+    const next = result.replace(rule.pattern, rule.replacement);
+    if (next !== result) appliedRuleIds.push(rule.id);
+    result = next;
+  }
+  return { ipa: result, appliedRuleIds };
 }

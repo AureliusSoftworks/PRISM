@@ -628,8 +628,11 @@ export {
 
 export {
   BOT_AUDIO_VOICE_IDS,
+  BUILTIN_ACCENT_REALIZATION_BLEND_WEIGHT,
   PRISM_BUILTIN_ENGLISH_VOICES,
+  builtinAccentRealizationBlend,
   prismBuiltinEnglishVoice,
+  type BuiltinAccentRealizationBlendV1,
   BOT_VOICE_TEXTURE_PRESETS,
   BOT_VOICE_TEXTURE_PRESET_LABELS,
   BOT_VOICE_TEXTURE_RECIPES,

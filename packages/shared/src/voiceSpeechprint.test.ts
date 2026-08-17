@@ -8,6 +8,7 @@ import {
   applyLocalVoiceSpeechprintMelodyToIpa,
   applyLocalVoiceSpeechprintToIpa,
   applyVoiceAccentFieldToIpa,
+  enforceAmericanRhoticIpa,
   premiumVoiceNativeAccentHintFromLabels,
   resolveLocalAccentFallback,
   resolvePremiumAccentDirection,
@@ -344,6 +345,54 @@ describe("local voice Speechprints", () => {
         pronunciationBase: "en-GB",
         speechprintInfluence: "none",
       },
+    );
+    // Regional American accents stay on the rhotic en-US base even when the
+    // saved profile carries a British voice's follow-voice base.
+    assert.deepEqual(
+      resolveLocalAccentFallback({
+        accentDefinitionId: "texas-english",
+        pronunciationBase: "en-GB",
+        speechprintInfluence: "none",
+      }),
+      {
+        pronunciationBase: "en-US",
+        speechprintInfluence: "texas-english",
+      },
+    );
+  });
+
+  it("enforces explicit hard Rs for the American pronunciation base", () => {
+    const enforced = enforceAmericanRhoticIpa(
+      "hɜː bˈɜːd hˈɑːɹd fˈoːɹ lˈɛɾɚ mˈɑːɹɾɚɹ fˈɜːɹi",
+    );
+    assert.equal(
+      enforced.ipa,
+      "hɜɹ bˈɜɹd hˈɑɹd fˈɔːɹ lˈɛɾəɹ mˈɑɹɾəɹ fˈɜɹi",
+    );
+    assert.deepEqual(enforced.appliedRuleIds, [
+      "nurse-hard-r",
+      "rhotic-schwa-hard-r",
+      "rhotic-force-merge",
+      "rhotic-coda-length",
+    ]);
+    // Idempotent: re-enforcing enforced output changes nothing, so protected
+    // and unprotected parts can be normalized independently.
+    assert.deepEqual(enforceAmericanRhoticIpa(enforced.ipa), {
+      ipa: enforced.ipa,
+      appliedRuleIds: [],
+    });
+    // Non-rhotic accent rules can still delete the explicit coda R.
+    assert.equal(
+      applyLocalVoiceSpeechprintToIpa({
+        ipa: enforceAmericanRhoticIpa("bˈɜːd").ipa,
+        speechprint: {
+          influence: "modern-rp-english",
+          strength: "light",
+          variationSeed: "rp-hard-r",
+        },
+        includeProsody: false,
+      }).ipa,
+      "bˈɜd",
     );
   });
 

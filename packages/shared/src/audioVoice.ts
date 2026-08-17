@@ -360,6 +360,90 @@ export function prismBuiltinEnglishVoice(
   );
 }
 
+export interface BuiltinAccentRealizationBlendV1 {
+  towardEngineVoiceIds: readonly string[];
+  awayEngineVoiceIds: readonly string[];
+  weight: number;
+}
+
+/**
+ * Weight 1 moves a voice by exactly the mean style difference between the two
+ * regional groups. Measured on the packaged engine: every shipped cross-region
+ * voice lands a solid rhotic F3 dip at 1.0, while pitch, pacing, and pairwise
+ * voice separation stay at their native values.
+ */
+export const BUILTIN_ACCENT_REALIZATION_BLEND_WEIGHT = 1;
+
+/**
+ * Regional style groups used to derive the accent direction. Deliberately
+ * excludes novelty or off-manifold styles (am_adam, am_santa, whispered
+ * af_nicole) so the group mean captures accent, not character extremes.
+ */
+const BUILTIN_ACCENT_REALIZATION_GROUPS: Record<
+  "a" | "b",
+  Record<LocalVoicePresentation, readonly string[]>
+> = {
+  a: {
+    feminine: [
+      "af_heart",
+      "af_bella",
+      "af_aoede",
+      "af_kore",
+      "af_sarah",
+      "af_jessica",
+      "af_nova",
+      "af_river",
+      "af_sky",
+      "af_alloy",
+    ],
+    masculine: [
+      "am_michael",
+      "am_fenrir",
+      "am_puck",
+      "am_echo",
+      "am_eric",
+      "am_liam",
+      "am_onyx",
+    ],
+  },
+  b: {
+    feminine: ["bf_emma", "bf_alice", "bf_isabella", "bf_lily"],
+    masculine: ["bm_george", "bm_fable", "bm_daniel", "bm_lewis"],
+  },
+};
+
+/**
+ * The packaged engine realizes accents through a per-voice style vector, and
+ * that style dominates phoneme tokens for coda R: a British style renders an
+ * American target's explicit "ɹ" silently, no matter how the IPA is written.
+ * When the Accent Map's target locale disagrees with the voice's native
+ * region, the utterance's style row is translated by the accent direction —
+ * mean(target-region group) minus mean(native-region group). A uniform
+ * translation carries the accent while preserving every pairwise difference
+ * between voices, so Daniel, George, and Lewis stay three distinct people
+ * with the same accent instead of collapsing into one shared anchor voice.
+ * The bot's selected voice identity never changes — this shades one
+ * utterance's rendering, exactly like the target IPA it accompanies.
+ */
+export function builtinAccentRealizationBlend(args: {
+  engineVoiceId: string;
+  targetLocale: "en-US" | "en-GB";
+}): BuiltinAccentRealizationBlendV1 | null {
+  const region = args.targetLocale === "en-GB" ? "b" : "a";
+  if (!/^[ab][fm]_/u.test(args.engineVoiceId)) return null;
+  if (args.engineVoiceId.startsWith(region)) return null;
+  const nativeRegion = region === "a" ? "b" : "a";
+  const presentation: LocalVoicePresentation =
+    args.engineVoiceId[1] === "m" ? "masculine" : "feminine";
+  return {
+    towardEngineVoiceIds:
+      BUILTIN_ACCENT_REALIZATION_GROUPS[region][presentation],
+    awayEngineVoiceIds:
+      BUILTIN_ACCENT_REALIZATION_GROUPS[nativeRegion][presentation],
+    weight: BUILTIN_ACCENT_REALIZATION_BLEND_WEIGHT,
+  };
+}
+
 export const BOT_VOICE_TEXTURE_PRESETS = [
   "clean",
   "crt-speaker",

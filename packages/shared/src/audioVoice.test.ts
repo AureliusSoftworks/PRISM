@@ -10,6 +10,7 @@ import {
   VOICE_DELIVERY_RATE_BY_MOOD,
   applyVoiceDeliveryMoodToProfile,
   applyBotNamePronunciations,
+  builtinAccentRealizationBlend,
   botAudioVoiceProfileForFeelLane,
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V3,
@@ -451,6 +452,78 @@ describe("audio voice normalization", () => {
         { v: 3, pronunciationMapPoint: { x: 0.8, y: 0.9 } },
       ),
       { x: 0.8, y: 0.9 },
+    );
+  });
+
+  it("realizes cross-region accents as a group-mean translation that keeps voices distinct", () => {
+    const AMERICAN_MASCULINE = [
+      "am_michael",
+      "am_fenrir",
+      "am_puck",
+      "am_echo",
+      "am_eric",
+      "am_liam",
+      "am_onyx",
+    ];
+    const BRITISH_MASCULINE = ["bm_george", "bm_fable", "bm_daniel", "bm_lewis"];
+    const georgeBlend = builtinAccentRealizationBlend({
+      engineVoiceId: "bm_george",
+      targetLocale: "en-US",
+    });
+    assert.deepEqual(georgeBlend, {
+      towardEngineVoiceIds: AMERICAN_MASCULINE,
+      awayEngineVoiceIds: BRITISH_MASCULINE,
+      weight: 1,
+    });
+    // Every same-presentation voice shares the same direction, so the
+    // translation preserves what makes Daniel, George, and Lewis different.
+    assert.deepEqual(
+      builtinAccentRealizationBlend({
+        engineVoiceId: "bm_daniel",
+        targetLocale: "en-US",
+      }),
+      georgeBlend,
+    );
+    assert.deepEqual(
+      builtinAccentRealizationBlend({
+        engineVoiceId: "bf_emma",
+        targetLocale: "en-US",
+      })?.towardEngineVoiceIds.slice(0, 2),
+      ["af_heart", "af_bella"],
+    );
+    // The mirrored direction swaps the groups.
+    assert.deepEqual(
+      builtinAccentRealizationBlend({
+        engineVoiceId: "am_puck",
+        targetLocale: "en-GB",
+      }),
+      {
+        towardEngineVoiceIds: BRITISH_MASCULINE,
+        awayEngineVoiceIds: AMERICAN_MASCULINE,
+        weight: 1,
+      },
+    );
+    // Native pairings and unknown engine ids never blend.
+    assert.equal(
+      builtinAccentRealizationBlend({
+        engineVoiceId: "af_heart",
+        targetLocale: "en-US",
+      }),
+      null,
+    );
+    assert.equal(
+      builtinAccentRealizationBlend({
+        engineVoiceId: "bf_emma",
+        targetLocale: "en-GB",
+      }),
+      null,
+    );
+    assert.equal(
+      builtinAccentRealizationBlend({
+        engineVoiceId: "system-voice",
+        targetLocale: "en-US",
+      }),
+      null,
     );
   });
 
