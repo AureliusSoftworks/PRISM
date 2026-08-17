@@ -613,6 +613,7 @@ export const LOCAL_VOICE_SPEECHPRINT_INFLUENCES = [
   "new-zealand-english",
   "canadian-english",
   "new-york-english",
+  "new-jersey-english",
   "southern-us-english",
   "southern-california-english",
   "bay-area-english",

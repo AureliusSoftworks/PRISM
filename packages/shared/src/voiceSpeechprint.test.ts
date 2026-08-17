@@ -20,7 +20,7 @@ const SAMPLE_IPA = "θɪs ɹɪvɚ wɪl ðɹaɪv vɛɹi faɹ";
 
 describe("local voice Speechprints", () => {
   it("publishes broad versioned Instant-compatible profiles for both bases", () => {
-    assert.equal(LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.length, 62);
+    assert.equal(LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.length, 63);
     assert.match(LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256, /^[a-f0-9]{64}$/u);
     for (const capability of LOCAL_VOICE_SPEECHPRINT_CAPABILITIES) {
       assert.deepEqual(capability.supportedBaseLocales, ["en-US", "en-GB"]);
@@ -150,6 +150,10 @@ describe("local voice Speechprints", () => {
       ["cockney-english", "θɪs hɑɹ", /f/u],
       ["inland-north-english", "bæg", /eə/u],
       ["texas-english", "pɛn taɪm", /pɪn/u],
+      // "curtains" => "coy-tins" from both the raw espeak NURSE (ɜː) and the
+      // hard-R enforced form (ɜɹ); an onset ɹ ("furry") never coalesces.
+      ["new-jersey-english", "kˈɜːtənz", /kˈɔɪtənz/u],
+      ["new-jersey-english", "kˈɜɹtənz bˈɜɹd fˈɜɹi", /kˈɔɪtənz bˈɔɪd fˈɜɹi/u],
       ["parisian-french-influenced-english", "θɪs ɹɛd", /^s/u],
       ["northern-italian-influenced-english", "ɹɛd", /^ɾ/u],
     ] as const;

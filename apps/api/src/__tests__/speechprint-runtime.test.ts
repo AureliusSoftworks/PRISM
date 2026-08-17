@@ -42,10 +42,10 @@ describe("Speechprint phoneme runtime snapshots", () => {
         }
       }
     }
-    assert.equal(rows.length, 372);
+    assert.equal(rows.length, 378);
     assert.equal(
       createHash("sha256").update(JSON.stringify(rows)).digest("hex"),
-      "4ca68747b11c138e18e9a6098da3b867bb6760538c81a4870aaf115709c11b2f",
+      "cdca080907b6a0f622ecfa4d69f20c54af340955ad91358234581bc23f8a9f5d",
     );
   });
 });

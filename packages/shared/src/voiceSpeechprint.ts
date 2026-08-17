@@ -12,10 +12,10 @@ import {
   type VoiceAccentDefinitionId,
 } from "./audioVoice.ts";
 
-export const LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION = "2026.08.17.1";
+export const LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION = "2026.08.17.2";
 /** SHA-256 of the qualified Instant IPA matrix (see speechprint-runtime.test.ts). */
 export const LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256 =
-  "4ca68747b11c138e18e9a6098da3b867bb6760538c81a4870aaf115709c11b2f";
+  "cdca080907b6a0f622ecfa4d69f20c54af340955ad91358234581bc23f8a9f5d";
 
 export interface LocalVoiceSpeechprintCapabilityV1 {
   id: Exclude<LocalVoiceSpeechprintInfluence, "none">;
@@ -222,6 +222,11 @@ const LOCAL_VOICE_SPEECHPRINT_DESCRIPTORS = [
     id: "new-york-english",
     label: "New York English",
     description: "A restrained New York English pronunciation profile.",
+  },
+  {
+    id: "new-jersey-english",
+    label: "New Jersey English",
+    description: "A restrained New Jersey English pronunciation profile.",
   },
   {
     id: "southern-us-english",
@@ -447,6 +452,7 @@ const AMERICAN_PRONUNCIATION_BASE_INFLUENCES = new Set<
 >([
   "canadian-english",
   "new-york-english",
+  "new-jersey-english",
   "southern-us-english",
   "southern-california-english",
   "bay-area-english",
@@ -529,6 +535,7 @@ const VOICE_ACCENT_MAP_COORDINATES = {
   "new-zealand-english": [174.78, -41.29],
   "canadian-english": [-75.7, 45.42],
   "new-york-english": [-74.01, 40.71],
+  "new-jersey-english": [-74.17, 40.73],
   "southern-us-english": [-84.39, 33.75],
   "southern-california-english": [-118.24, 34.05],
   "bay-area-english": [-122.27, 37.8],
@@ -1281,6 +1288,65 @@ const SPEECHPRINT_RULES: Record<
       pattern: /ɔ/gu,
       replacement: "oə",
     },
+    {
+      id: "trap-tensing",
+      tier: "strong",
+      pattern: /æ(?=[mnfθs])/gu,
+      replacement: "eə",
+      optional: true,
+    },
+  ],
+  "new-jersey-english": [
+    // "Wooder" — THOUGHT rounds up before a flap ("water" => "wooder").
+    // Ordered before thought-raised so the raised form cannot eat the ɔ.
+    {
+      id: "water-wooder",
+      tier: "strong",
+      pattern: /ɔː?(?=ɾ)/gu,
+      replacement: "ʊ",
+      optional: true,
+    },
+    // The classic NURSE–CHOICE coalescence: a closed-syllable NURSE becomes
+    // "oy", so "curtains" => "coy-tins", "bird" => "boid", "first" =>
+    // "foist". Matches the raw espeak form (ɜː), the hard-R enforced form
+    // (ɜɹ), and bare ɜ, but never before a real onset ɹ ("furry" stays
+    // rhotic) and never word-finally ("her" falls to the r-drop instead).
+    {
+      id: "nurse-choice",
+      tier: "light",
+      pattern: /ɜː?ɹ?(?=[ptkbdfvθðszʃʒʧʤmnŋlgɡɾʔ])/gu,
+      replacement: "ɔɪ",
+    },
+    // Raised THOUGHT ("coffee" => "cawfee") with a guard so it never bites
+    // the CHOICE diphthong nurse-choice just wrote.
+    {
+      id: "thought-raised",
+      tier: "balanced",
+      pattern: /ɔː?(?!ɪ)/gu,
+      replacement: "oə",
+    },
+    {
+      id: "theta-stop",
+      tier: "balanced",
+      pattern: /θ/gu,
+      replacement: "t",
+      optional: true,
+    },
+    {
+      id: "eth-stop",
+      tier: "balanced",
+      pattern: /ð/gu,
+      replacement: "d",
+      optional: true,
+    },
+    {
+      id: "postvocalic-r-drop",
+      tier: "light",
+      pattern: POSTVOCALIC_R_DROP_PATTERN,
+      replacement: "",
+    },
+    { id: "rhotacized-schwa", tier: "light", pattern: /ɚ/gu, replacement: "ə" },
+    { id: "rhotacized-nurse", tier: "light", pattern: /ɝ/gu, replacement: "ɜ" },
     {
       id: "trap-tensing",
       tier: "strong",
