@@ -52,6 +52,189 @@ export function pronunciationAtlasPointForCoordinates(
 export const PRONUNCIATION_ATLAS_ANCHORS: readonly PronunciationAtlasAnchor[] =
   VOICE_ACCENT_MAP_ANCHORS;
 
+/**
+ * A lens is a square window onto the unit map: the pad, artwork, and pointer
+ * precision all zoom into it while every stored pin stays in global map
+ * space. Squares preserve the 2:1 equirectangular display aspect, and the
+ * lens itself is ephemeral view state — never part of the saved selection.
+ */
+export interface PronunciationAtlasLens {
+  id: string;
+  label: string;
+  /** Top-left corner in unit map space. */
+  x: number;
+  y: number;
+  /** Edge length in unit map space; 1 is the whole world. */
+  size: number;
+}
+
+function pronunciationAtlasLensFromCoordinates(
+  id: string,
+  label: string,
+  westDegrees: number,
+  southDegrees: number,
+  eastDegrees: number,
+  northDegrees: number,
+): PronunciationAtlasLens {
+  const topLeft = pronunciationAtlasPointForCoordinates(
+    westDegrees,
+    northDegrees,
+  );
+  const bottomRight = pronunciationAtlasPointForCoordinates(
+    eastDegrees,
+    southDegrees,
+  );
+  const size = Math.max(bottomRight.x - topLeft.x, bottomRight.y - topLeft.y);
+  return {
+    id,
+    label,
+    x: Math.max(
+      0,
+      Math.min(1 - size, topLeft.x + (bottomRight.x - topLeft.x) / 2 - size / 2),
+    ),
+    y: Math.max(
+      0,
+      Math.min(1 - size, topLeft.y + (bottomRight.y - topLeft.y) / 2 - size / 2),
+    ),
+    size,
+  };
+}
+
+/**
+ * Ordered broad-to-narrow within each hemisphere so adjacent chips read as
+ * drill levels (N. America → US East → New York). The tuned boxes guarantee
+ * that every pair of distinct anchor locations closer than 24px at world
+ * zoom is separated to at least 24px by some lens containing both — pinned
+ * by pronunciationAtlas.test.ts, so a growing catalog keeps its elbow room.
+ */
+export const PRONUNCIATION_ATLAS_LENSES: readonly PronunciationAtlasLens[] = [
+  { id: "world", label: "World", x: 0, y: 0, size: 1 },
+  pronunciationAtlasLensFromCoordinates(
+    "north-america",
+    "N. America",
+    -127,
+    14,
+    -60,
+    52,
+  ),
+  pronunciationAtlasLensFromCoordinates(
+    "us-east",
+    "US East",
+    -92,
+    24.5,
+    -66,
+    46.5,
+  ),
+  pronunciationAtlasLensFromCoordinates(
+    "us-northeast",
+    "Northeast US",
+    -77.5,
+    38.8,
+    -69.5,
+    44.2,
+  ),
+  pronunciationAtlasLensFromCoordinates(
+    "isles",
+    "The Isles",
+    -11.8,
+    50,
+    3.6,
+    58.2,
+  ),
+  pronunciationAtlasLensFromCoordinates(
+    "europe",
+    "Europe",
+    -11.5,
+    35.5,
+    33,
+    60.5,
+  ),
+  pronunciationAtlasLensFromCoordinates(
+    "africa-mideast",
+    "Africa & Mideast",
+    -18,
+    -35,
+    60,
+    40,
+  ),
+  pronunciationAtlasLensFromCoordinates("south-asia", "S. Asia", 66, 4, 94, 36),
+  pronunciationAtlasLensFromCoordinates(
+    "east-asia",
+    "E. Asia",
+    95,
+    -11,
+    145,
+    42,
+  ),
+];
+
+export function pronunciationAtlasLensForId(
+  value: unknown,
+): PronunciationAtlasLens {
+  return (
+    PRONUNCIATION_ATLAS_LENSES.find((lens) => lens.id === value) ??
+    PRONUNCIATION_ATLAS_LENSES[0]!
+  );
+}
+
+/** Global map point → lens display point. Unclamped so an off-lens pin
+ * presents at the pad edge in its true direction. */
+export function projectPronunciationAtlasPointIntoLens(
+  point: AdjustmentPadPoint,
+  lens: PronunciationAtlasLens,
+): AdjustmentPadPoint {
+  return {
+    x: (point.x - lens.x) / lens.size,
+    y: (point.y - lens.y) / lens.size,
+  };
+}
+
+/** Lens display point → global map point, clamped to the map. */
+export function pronunciationAtlasPointFromLensProjection(
+  point: AdjustmentPadPoint,
+  lens: PronunciationAtlasLens,
+): AdjustmentPadPoint {
+  return clampPronunciationAtlasPoint({
+    x: lens.x + point.x * lens.size,
+    y: lens.y + point.y * lens.size,
+  });
+}
+
+export function pronunciationAtlasLensContainsPoint(
+  point: AdjustmentPadPoint,
+  lens: PronunciationAtlasLens,
+): boolean {
+  return (
+    point.x >= lens.x &&
+    point.x <= lens.x + lens.size &&
+    point.y >= lens.y &&
+    point.y <= lens.y + lens.size
+  );
+}
+
+/**
+ * The deeper lenses whose windows sit fully inside the given lens — the
+ * "you can drill further here" marks a zoomed view paints as footprints
+ * (N. America shows US East and New York; US East shows New York). The
+ * world never marks footprints permanently: eight rectangles over the whole
+ * map would be clutter, so at world zoom footprints appear only while a
+ * lens chip is hovered or focused.
+ */
+export function pronunciationAtlasLensesWithin(
+  lens: PronunciationAtlasLens,
+): readonly PronunciationAtlasLens[] {
+  if (lens.size >= 1) return [];
+  return PRONUNCIATION_ATLAS_LENSES.filter(
+    (candidate) =>
+      candidate.id !== lens.id &&
+      candidate.size < lens.size &&
+      candidate.x >= lens.x - 1e-9 &&
+      candidate.y >= lens.y - 1e-9 &&
+      candidate.x + candidate.size <= lens.x + lens.size + 1e-9 &&
+      candidate.y + candidate.size <= lens.y + lens.size + 1e-9,
+  );
+}
+
 function squaredDistance(
   left: AdjustmentPadPoint,
   right: AdjustmentPadPoint,
@@ -251,6 +434,24 @@ export function nudgePronunciationAtlasSelection(
   else if (direction === "up") point.y -= delta;
   else point.y += delta;
   return pronunciationAtlasSelectionAtPoint(point, current);
+}
+
+/**
+ * Keyboard travel scaled to the active lens so arrow keys cover the same
+ * on-screen distance at every zoom. The world lens (size 1) is exactly the
+ * legacy step, preserving established keyboard behavior.
+ */
+export function nudgePronunciationAtlasSelectionInLens(
+  current: PronunciationAtlasSelection,
+  direction: AdjustmentPadDirection,
+  multiplier: number,
+  lens: PronunciationAtlasLens,
+): PronunciationAtlasSelection {
+  return nudgePronunciationAtlasSelection(
+    current,
+    direction,
+    multiplier * lens.size,
+  );
 }
 
 function baseLabel(base: "en-US" | "en-GB"): string {

@@ -59,6 +59,11 @@
   pointer-events: none;
   opacity: 0;
   animation: atlasMaterialize 520ms steps(8, end) forwards;
+  /* Lens view: 1 / lens.size, with the window origin as percent offsets.
+   * Defaults reproduce the untransformed world exactly. */
+  --atlas-lens-zoom: 1;
+  --atlas-lens-pos-x: 50%;
+  --atlas-lens-pos-y: 50%;
 }
 
 .world {
@@ -72,16 +77,99 @@
   );
   -webkit-mask-image: url("/voice/pronunciation-atlas-earth-equirectangular-v2.svg");
   mask-image: url("/voice/pronunciation-atlas-earth-equirectangular-v2.svg");
-  -webkit-mask-position: center;
-  mask-position: center;
+  -webkit-mask-position: var(--atlas-lens-pos-x) var(--atlas-lens-pos-y);
+  mask-position: var(--atlas-lens-pos-x) var(--atlas-lens-pos-y);
   -webkit-mask-repeat: no-repeat;
   mask-repeat: no-repeat;
-  -webkit-mask-size: 100% 100%;
-  mask-size: 100% 100%;
+  -webkit-mask-size: calc(var(--atlas-lens-zoom) * 100%)
+    calc(var(--atlas-lens-zoom) * 100%);
+  mask-size: calc(var(--atlas-lens-zoom) * 100%)
+    calc(var(--atlas-lens-zoom) * 100%);
+  transition:
+    mask-size 420ms ease,
+    mask-position 420ms ease,
+    -webkit-mask-size 420ms ease,
+    -webkit-mask-position 420ms ease;
   opacity: 0.54;
   filter: drop-shadow(
     0 0 5px
       color-mix(in srgb, var(--pronunciation-atlas-color) 28%, transparent)
+  );
+}
+
+.borders {
+  position: absolute;
+  inset: 0;
+  display: block;
+  background: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 72%,
+    #ffffff 10%
+  );
+  -webkit-mask-image: url("/voice/pronunciation-atlas-borders-equirectangular-v1.svg");
+  mask-image: url("/voice/pronunciation-atlas-borders-equirectangular-v1.svg");
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: var(--atlas-lens-pos-x) var(--atlas-lens-pos-y);
+  mask-position: var(--atlas-lens-pos-x) var(--atlas-lens-pos-y);
+  -webkit-mask-size: calc(var(--atlas-lens-zoom) * 100%)
+    calc(var(--atlas-lens-zoom) * 100%);
+  mask-size: calc(var(--atlas-lens-zoom) * 100%)
+    calc(var(--atlas-lens-zoom) * 100%);
+  /* Countries and states surface only once a lens is active: hidden at the
+   * world's clean silhouette, easing toward 0.42 as the zoom deepens. */
+  opacity: clamp(0, (var(--atlas-lens-zoom) - 1.4) * 0.18, 0.42);
+  transition:
+    opacity 420ms ease,
+    mask-size 420ms ease,
+    mask-position 420ms ease,
+    -webkit-mask-size 420ms ease,
+    -webkit-mask-position 420ms ease;
+}
+
+.lensFootprint {
+  position: absolute;
+  border: 1px dashed
+    color-mix(in srgb, var(--pronunciation-atlas-color) 52%, transparent);
+  border-radius: 3px;
+  background: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 7%,
+    transparent
+  );
+  transition:
+    left 420ms ease,
+    top 420ms ease,
+    width 420ms ease,
+    height 420ms ease,
+    border-color 200ms ease,
+    background 200ms ease;
+}
+
+.lensFootprint > small {
+  position: absolute;
+  left: 3px;
+  bottom: calc(100% + 2px);
+  color: color-mix(in srgb, var(--pronunciation-atlas-color) 72%, #ffffff 18%);
+  font-size: 7px;
+  font-weight: 790;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0.75;
+}
+
+.lensFootprint[data-emphasized="true"] {
+  border-style: solid;
+  border-color: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 78%,
+    #ffffff 12%
+  );
+  background: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 16%,
+    transparent
   );
 }
 
@@ -102,6 +190,13 @@
       color-mix(in srgb, var(--pronunciation-atlas-color) 34%, transparent)
         calc(25% - 0.5px) 25%
     );
+  /* The graticule zooms with the lens so lines keep their longitudes. */
+  background-size: calc(var(--atlas-lens-zoom) * 100%)
+    calc(var(--atlas-lens-zoom) * 100%);
+  background-position: var(--atlas-lens-pos-x) var(--atlas-lens-pos-y);
+  transition:
+    background-size 420ms ease,
+    background-position 420ms ease;
   mask-image: radial-gradient(ellipse, #000 44%, transparent 92%);
 }
 
@@ -130,7 +225,8 @@
   gap: 9px;
 }
 
-.nearby {
+.nearby,
+.lenses {
   min-width: 0;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -138,7 +234,8 @@
   gap: 8px;
 }
 
-.nearby > span {
+.nearby > span,
+.lenses > span {
   color: var(--fg-muted, #8e9bab);
   font-size: 8px;
   font-weight: 790;
@@ -147,12 +244,53 @@
   white-space: nowrap;
 }
 
-.nearby > div {
+.nearby > div,
+.lenses > div {
   min-width: 0;
   display: flex;
   gap: 5px;
   overflow-x: auto;
   scrollbar-width: thin;
+}
+
+.lenses button {
+  min-height: 26px;
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--pronunciation-atlas-color) 16%,
+      var(--line, #303846)
+    );
+  border-radius: 999px;
+  color: var(--fg-muted, #8e9bab);
+  background: transparent;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 740;
+  cursor: pointer;
+}
+
+.lenses button:is(:hover, :focus-visible),
+.lenses button[data-active="true"] {
+  outline: none;
+  color: var(--fg, #f5f7fb);
+  border-color: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 58%,
+    #ffffff 12%
+  );
+  background: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 16%,
+    rgba(255, 255, 255, 0.035)
+  );
+}
+
+.lenses button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .nearby button {

@@ -4,10 +4,17 @@ import { LOCAL_VOICE_SPEECHPRINT_CAPABILITIES } from "@localai/shared";
 
 import {
   PRONUNCIATION_ATLAS_ANCHORS,
+  PRONUNCIATION_ATLAS_LENSES,
   nudgePronunciationAtlasSelection,
+  nudgePronunciationAtlasSelectionInLens,
   normalizePronunciationAtlasSelection,
+  projectPronunciationAtlasPointIntoLens,
   pronunciationAtlasAnchorForSelection,
+  pronunciationAtlasLensContainsPoint,
+  pronunciationAtlasLensesWithin,
+  pronunciationAtlasLensForId,
   pronunciationAtlasPointForCoordinates,
+  pronunciationAtlasPointFromLensProjection,
   pronunciationAtlasNaturalSelection,
   pronunciationAtlasNearbyCandidates,
   pronunciationAtlasPointForSelection,
@@ -313,5 +320,155 @@ describe("Pronunciation Atlas", () => {
       pronunciationAtlasNaturalSelection("en-US").accentDefinitionId,
       null,
     );
+  });
+
+  it("keeps every lens a square window inside the unit map, world first", () => {
+    assert.equal(PRONUNCIATION_ATLAS_LENSES[0]?.id, "world");
+    assert.deepEqual(
+      { ...PRONUNCIATION_ATLAS_LENSES[0] },
+      { id: "world", label: "World", x: 0, y: 0, size: 1 },
+    );
+    assert.equal(
+      new Set(PRONUNCIATION_ATLAS_LENSES.map((lens) => lens.id)).size,
+      PRONUNCIATION_ATLAS_LENSES.length,
+    );
+    for (const lens of PRONUNCIATION_ATLAS_LENSES) {
+      assert.ok(lens.label.trim().length > 0, lens.id);
+      assert.ok(lens.size > 0 && lens.size <= 1, lens.id);
+      assert.ok(lens.x >= 0 && lens.x + lens.size <= 1 + 1e-9, lens.id);
+      assert.ok(lens.y >= 0 && lens.y + lens.size <= 1 + 1e-9, lens.id);
+    }
+    assert.equal(pronunciationAtlasLensForId("nowhere").id, "world");
+  });
+
+  it("separates every crowded anchor pair through at least one lens", () => {
+    // The elbow-room contract: any two distinct anchor locations closer than
+    // 24px on a 640x320 world pad must be at least 24px apart inside some
+    // lens containing both. Same-point variant groups (London) are excluded:
+    // they are deliberately co-located and chosen by name, never by zoom.
+    // Same-metro pairs — real places only miles apart, like New York and
+    // Newark — accept a lower 8px floor: the Northeast US lens frames the
+    // whole region instead of zooming 90x into one harbor, and the Nearby
+    // chips disambiguate those neighbors by name.
+    const PAD_W = 640;
+    const PAD_H = 320;
+    const MIN_SEP = 24;
+    const SAME_METRO_MIN_SEP = 8;
+    const SAME_METRO_WORLD_SEP = 1;
+    const locations = new Map<string, { x: number; y: number }>();
+    for (const anchor of PRONUNCIATION_ATLAS_ANCHORS) {
+      const key = `${anchor.point.x.toFixed(6)}:${anchor.point.y.toFixed(6)}`;
+      if (!locations.has(key)) locations.set(key, anchor.point);
+    }
+    const points = [...locations.values()];
+    const separation = (
+      a: { x: number; y: number },
+      b: { x: number; y: number },
+      size = 1,
+    ): number =>
+      Math.hypot(
+        ((a.x - b.x) / size) * PAD_W,
+        ((a.y - b.y) / size) * PAD_H,
+      );
+    for (let i = 0; i < points.length; i += 1) {
+      for (let j = i + 1; j < points.length; j += 1) {
+        const worldSeparation = separation(points[i]!, points[j]!);
+        if (worldSeparation >= MIN_SEP) continue;
+        const required =
+          worldSeparation < SAME_METRO_WORLD_SEP
+            ? SAME_METRO_MIN_SEP
+            : MIN_SEP;
+        assert.ok(
+          PRONUNCIATION_ATLAS_LENSES.some(
+            (lens) =>
+              lens.size < 1 &&
+              pronunciationAtlasLensContainsPoint(points[i]!, lens) &&
+              pronunciationAtlasLensContainsPoint(points[j]!, lens) &&
+              separation(points[i]!, points[j]!, lens.size) >= required,
+          ),
+          `no lens separates ${JSON.stringify(points[i])} and ${JSON.stringify(points[j])}`,
+        );
+      }
+    }
+  });
+
+  it("projects between lens and map space losslessly and keeps pins global", () => {
+    const northeast = pronunciationAtlasLensForId("us-northeast");
+    assert.ok(northeast.size < 0.05);
+    for (const anchor of PRONUNCIATION_ATLAS_ANCHORS) {
+      const projected = projectPronunciationAtlasPointIntoLens(
+        anchor.point,
+        northeast,
+      );
+      const restored = pronunciationAtlasPointFromLensProjection(
+        projected,
+        northeast,
+      );
+      if (pronunciationAtlasLensContainsPoint(anchor.point, northeast)) {
+        assert.ok(Math.abs(restored.x - anchor.point.x) < 1e-9);
+        assert.ok(Math.abs(restored.y - anchor.point.y) < 1e-9);
+        assert.ok(projected.x >= 0 && projected.x <= 1);
+        assert.ok(projected.y >= 0 && projected.y <= 1);
+      }
+    }
+    // The Northeast frame spans Boston through the New York metro.
+    const inside = PRONUNCIATION_ATLAS_ANCHORS.filter((anchor) =>
+      pronunciationAtlasLensContainsPoint(anchor.point, northeast),
+    ).map((anchor) => anchor.accentDefinitionId);
+    assert.deepEqual(
+      [...new Set(inside)].sort(),
+      [
+        "eastern-new-england-english",
+        "new-jersey-english",
+        "new-york-english",
+      ],
+    );
+    // A committed selection through the lens stores global coordinates.
+    const padCenter = { x: 0.5, y: 0.5 };
+    const global = pronunciationAtlasPointFromLensProjection(
+      padCenter,
+      northeast,
+    );
+    const selected = pronunciationAtlasSelectionAtPoint(global, britishFrench);
+    assert.deepEqual(selected.point, global);
+    assert.ok(pronunciationAtlasLensContainsPoint(selected.point!, northeast));
+  });
+
+  it("marks deeper lens footprints only where a lens fully contains them", () => {
+    const withinIds = (id: string): string[] =>
+      pronunciationAtlasLensesWithin(pronunciationAtlasLensForId(id)).map(
+        (lens) => lens.id,
+      );
+    // The world never paints permanent footprints — eight rectangles over
+    // the full map would be clutter; hover previews cover discovery there.
+    assert.deepEqual(withinIds("world"), []);
+    assert.deepEqual(withinIds("north-america"), ["us-east", "us-northeast"]);
+    assert.deepEqual(withinIds("us-east"), ["us-northeast"]);
+    assert.deepEqual(withinIds("europe"), ["isles"]);
+    assert.deepEqual(withinIds("us-northeast"), []);
+  });
+
+  it("scales keyboard travel to the lens and keeps world travel legacy-exact", () => {
+    const world = pronunciationAtlasLensForId("world");
+    const origin = pronunciationAtlasNaturalSelection("en-US");
+    assert.deepEqual(
+      nudgePronunciationAtlasSelectionInLens(origin, "right", 1, world),
+      nudgePronunciationAtlasSelection(origin, "right", 1),
+    );
+    const northeast = pronunciationAtlasLensForId("us-northeast");
+    const start = pronunciationAtlasSelectionAtPoint(
+      { x: northeast.x + northeast.size / 2, y: northeast.y + northeast.size / 2 },
+      britishFrench,
+    );
+    const nudged = nudgePronunciationAtlasSelectionInLens(
+      start,
+      "right",
+      1,
+      northeast,
+    );
+    const travelled =
+      pronunciationAtlasPointForSelection(nudged).x -
+      pronunciationAtlasPointForSelection(start).x;
+    assert.ok(Math.abs(travelled - 0.01 * northeast.size) < 1e-9);
   });
 });

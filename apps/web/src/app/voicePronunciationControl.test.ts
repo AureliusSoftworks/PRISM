@@ -109,6 +109,53 @@ describe("cross-accent local voice pronunciation controls", () => {
     assert.doesNotMatch(auditionDockSource, /onKeyDown|autoPlay|useEffect/u);
   });
 
+  it("drills into crowded regions through ephemeral lenses that never persist", () => {
+    // The lens zooms the pad, artwork, and pointer math; committed pins stay
+    // in global map space and no lens id ever rides the saved selection.
+    assert.match(atlasSource, /PRONUNCIATION_ATLAS_LENSES\.map/u);
+    assert.match(atlasSource, /aria-label="Map lens"/u);
+    assert.match(atlasSource, /useState<string>\("world"\)/u);
+    assert.match(
+      atlasSource,
+      /pronunciationAtlasPointFromLensProjection\(point, lens\)/u,
+    );
+    assert.doesNotMatch(atlasSource, /lensId:\s|lens:\s*lens/u);
+    // Switching lenses drops any stale draft measured in the old lens frame.
+    assert.match(atlasSource, /setDraftValue\(null\);\s*setLensId/u);
+    // The artwork zoom is pure CSS custom properties over the pinned mask.
+    assert.match(atlasCssSource, /--atlas-lens-zoom: 1;/u);
+    assert.match(
+      atlasCssSource,
+      /mask-size: calc\(var\(--atlas-lens-zoom\) \* 100%\)/u,
+    );
+    assert.match(
+      atlasCssSource,
+      /mask-position: var\(--atlas-lens-pos-x\) var\(--atlas-lens-pos-y\)/u,
+    );
+  });
+
+  it("surfaces countries and states only when drilled in, with footprint marks", () => {
+    // Borders are a second georeferenced Natural Earth mask that stays
+    // invisible on the world's clean silhouette and fades in with the lens.
+    assert.match(
+      atlasCssSource,
+      /url\("\/voice\/pronunciation-atlas-borders-equirectangular-v1\.svg"\)/u,
+    );
+    assert.match(
+      atlasCssSource,
+      /\.borders[\s\S]{0,900}?opacity: clamp\(0, \(var\(--atlas-lens-zoom\) - 1\.4\) \* 0\.18, 0\.42\)/u,
+    );
+    // Deeper-lens footprints render as labeled marks inside the map overlay;
+    // hovering or focusing a chip previews that lens's footprint.
+    assert.match(atlasSource, /pronunciationAtlasLensesWithin\(lens\)/u);
+    assert.match(atlasSource, /className=\{styles\.lensFootprint\}/u);
+    assert.match(atlasSource, /data-emphasized=\{emphasized \? "true" : undefined\}/u);
+    assert.match(atlasSource, /onMouseEnter=\{\(\) => setPreviewLensId\(candidate\.id\)\}/u);
+    // The map layer stays presentation-only; footprints live inside the
+    // aria-hidden overlay and never introduce interactive anchor nodes.
+    assert.match(atlasSource, /className=\{styles\.map\} aria-hidden="true"/u);
+  });
+
   it("never renders an Accent Map audition button", () => {
     assert.doesNotMatch(atlasSource, />\s*Original\s*</u);
     assert.doesNotMatch(atlasSource, />\s*With accent\s*</u);

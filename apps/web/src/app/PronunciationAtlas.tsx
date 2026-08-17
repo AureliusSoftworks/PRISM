@@ -18,19 +18,26 @@ import type {
 } from "./adjustmentPadModel";
 import styles from "./PronunciationAtlas.module.css";
 import {
-  nudgePronunciationAtlasSelection,
   normalizePronunciationAtlasSelection,
+  nudgePronunciationAtlasSelectionInLens,
+  PRONUNCIATION_ATLAS_LENSES,
+  projectPronunciationAtlasPointIntoLens,
+  pronunciationAtlasLensesWithin,
+  pronunciationAtlasLensForId,
   pronunciationAtlasNaturalSelection,
   pronunciationAtlasNearbyCandidates,
   pronunciationAtlasLocationText,
   pronunciationAtlasPointForSelection,
+  pronunciationAtlasPointFromLensProjection,
   pronunciationAtlasSelectionAtPoint,
   pronunciationAtlasValueText,
+  type PronunciationAtlasLens,
   type PronunciationAtlasSelection,
 } from "./pronunciationAtlasModel";
 
 interface PronunciationAtlasPadValue {
   selection: PronunciationAtlasSelection;
+  /** The pin's lens-space display point; selection.point stays global. */
   point: AdjustmentPadPoint;
 }
 
@@ -48,19 +55,74 @@ export interface PronunciationAtlasProps {
 
 function padValueForSelection(
   selection: PronunciationAtlasSelection,
+  lens: PronunciationAtlasLens,
 ): PronunciationAtlasPadValue {
   const normalized = normalizePronunciationAtlasSelection(selection);
   return {
     selection: normalized,
-    point: pronunciationAtlasPointForSelection(normalized),
+    point: projectPronunciationAtlasPointIntoLens(
+      pronunciationAtlasPointForSelection(normalized),
+      lens,
+    ),
   };
 }
 
-function PronunciationAtlasMap(): ReactElement {
+function PronunciationAtlasMap({
+  lens,
+  previewLens,
+}: {
+  lens: PronunciationAtlasLens;
+  previewLens: PronunciationAtlasLens | null;
+}): ReactElement {
+  const zoomed = lens.size < 1;
+  const lensStyle = zoomed
+    ? ({
+        "--atlas-lens-zoom": `${1 / lens.size}`,
+        "--atlas-lens-pos-x": `${(lens.x / (1 - lens.size)) * 100}%`,
+        "--atlas-lens-pos-y": `${(lens.y / (1 - lens.size)) * 100}%`,
+      } as CSSProperties)
+    : undefined;
+  // A zoomed view always marks where deeper lenses can take you; the world
+  // stays clean and marks a footprint only for the hovered or focused chip.
+  const footprints = [
+    ...pronunciationAtlasLensesWithin(lens).map((candidate) => ({
+      lens: candidate,
+      emphasized: candidate.id === previewLens?.id,
+    })),
+    ...(previewLens &&
+    previewLens.id !== lens.id &&
+    !pronunciationAtlasLensesWithin(lens).some(
+      (candidate) => candidate.id === previewLens.id,
+    )
+      ? [{ lens: previewLens, emphasized: true }]
+      : []),
+  ];
   return (
-    <div className={styles.map} aria-hidden="true">
+    <div className={styles.map} aria-hidden="true" style={lensStyle}>
       <span className={styles.world} />
+      <span className={styles.borders} />
       <div className={styles.longitudeLines} />
+      {footprints.map(({ lens: mark, emphasized }) => {
+        const origin = projectPronunciationAtlasPointIntoLens(
+          { x: mark.x, y: mark.y },
+          lens,
+        );
+        return (
+          <span
+            key={mark.id}
+            className={styles.lensFootprint}
+            data-emphasized={emphasized ? "true" : undefined}
+            style={{
+              left: `${origin.x * 100}%`,
+              top: `${origin.y * 100}%`,
+              width: `${(mark.size / lens.size) * 100}%`,
+              height: `${(mark.size / lens.size) * 100}%`,
+            }}
+          >
+            <small>{mark.label}</small>
+          </span>
+        );
+      })}
       <div className={styles.scan} />
     </div>
   );
@@ -105,30 +167,43 @@ export function PronunciationAtlas({
   const normalizedSelection = normalizePronunciationAtlasSelection(selection);
   const [draftValue, setDraftValue] =
     useState<PronunciationAtlasPadValue | null>(null);
+  // The lens is view state only: it zooms the pad, artwork, and pointer
+  // precision while every committed pin stays in global map space.
+  const [lensId, setLensId] = useState<string>("world");
+  const [previewLensId, setPreviewLensId] = useState<string | null>(null);
+  const lens = pronunciationAtlasLensForId(lensId);
+  const previewLens = previewLensId
+    ? pronunciationAtlasLensForId(previewLensId)
+    : null;
   const padValue: PronunciationAtlasPadValue =
-    draftValue ?? padValueForSelection(normalizedSelection);
+    draftValue ?? padValueForSelection(normalizedSelection, lens);
 
   const adapter = useMemo<AdjustmentPadAdapter<PronunciationAtlasPadValue>>(
     () => ({
       toPoint: (value) => value.point,
       fromPoint: (point, current) => ({
         point,
-        selection: pronunciationAtlasSelectionAtPoint(point, current.selection),
+        selection: pronunciationAtlasSelectionAtPoint(
+          pronunciationAtlasPointFromLensProjection(point, lens),
+          current.selection,
+        ),
       }),
       nudge: (value, direction, multiplier) => {
-        const nextSelection = nudgePronunciationAtlasSelection(
+        const nextSelection = nudgePronunciationAtlasSelectionInLens(
           value.selection,
           direction,
           multiplier,
+          lens,
         );
-        return padValueForSelection(nextSelection);
+        return padValueForSelection(nextSelection, lens);
       },
       valueText: (value) => pronunciationAtlasValueText(value.selection),
     }),
-    [],
+    [lens],
   );
   const restoreValue = padValueForSelection(
     pronunciationAtlasNaturalSelection(normalizedSelection.sourceLocale),
+    lens,
   );
   const summary = pronunciationAtlasLocationText(padValue.selection);
   const nearbyCandidates = pronunciationAtlasNearbyCandidates(
@@ -173,17 +248,52 @@ export function PronunciationAtlas({
           onPreview(next.selection);
         }}
         onCommit={(next) => {
-          const committed = padValueForSelection(next.selection);
+          const committed = padValueForSelection(next.selection, lens);
           setDraftValue(null);
           onCommit(committed.selection);
         }}
         onCancel={(restored) => {
-          const committed = padValueForSelection(restored.selection);
+          const committed = padValueForSelection(restored.selection, lens);
           setDraftValue(null);
           onCancel?.(committed.selection);
         }}
-        renderOverlay={() => <PronunciationAtlasMap />}
+        renderOverlay={() => (
+          <PronunciationAtlasMap lens={lens} previewLens={previewLens} />
+        )}
       />
+      <div className={styles.lenses}>
+        <span>Lens</span>
+        <div role="group" aria-label="Map lens">
+          {PRONUNCIATION_ATLAS_LENSES.map((candidate) => (
+            <button
+              key={candidate.id}
+              type="button"
+              data-active={candidate.id === lens.id ? "true" : undefined}
+              aria-pressed={candidate.id === lens.id}
+              disabled={disabled}
+              onMouseEnter={() => setPreviewLensId(candidate.id)}
+              onMouseLeave={() =>
+                setPreviewLensId((current) =>
+                  current === candidate.id ? null : current,
+                )
+              }
+              onFocus={() => setPreviewLensId(candidate.id)}
+              onBlur={() =>
+                setPreviewLensId((current) =>
+                  current === candidate.id ? null : current,
+                )
+              }
+              onClick={() => {
+                // A stale draft's display point belongs to the old lens.
+                setDraftValue(null);
+                setLensId(candidate.id);
+              }}
+            >
+              {candidate.label}
+            </button>
+          ))}
+        </div>
+      </div>
       <div className={styles.nearby}>
         <span>Nearby choices</span>
         <div role="group" aria-label="Nearby accent choices">
