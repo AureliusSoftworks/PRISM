@@ -4,6 +4,7 @@
  */
 
 import {
+  modelSupportsTurboMode,
   resolveModelReasoningEffortCapability,
   type ModelReasoningEffortPreference,
 } from "./reasoningEffort.ts";
@@ -151,6 +152,8 @@ export interface ResolveAutoModelInput {
    */
   onlineAutoProviderBias?: number | null;
   routingContext?: AutoRoutingContextV1;
+  /** Restrict contextual ONLINE Auto to models eligible for Turbo. */
+  turboOnly?: boolean;
   priceForModel?: (
     provider: AutoModelProvider,
     modelId: string,
@@ -511,7 +514,12 @@ function contextualAutoRoute(input: ResolveAutoModelInput): AutoRouteDecisionV1 
   const hidden = new Set(sanitizeHiddenModelIds(input.hiddenModelIds));
   const candidates = laneCatalogModels(input.catalog, lane)
     .map((candidate) => ({ ...candidate, id: candidate.id.trim() }))
-    .filter((candidate) => candidate.id && !hidden.has(candidate.id));
+    .filter(
+      (candidate) =>
+        candidate.id &&
+        !hidden.has(candidate.id) &&
+        (!input.turboOnly || modelSupportsTurboMode(candidate.provider, candidate.id)),
+    );
   if (candidates.length === 0) return null;
 
   const complexity = routingComplexity(input.routingContext);

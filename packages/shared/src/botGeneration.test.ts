@@ -3,10 +3,13 @@ import { describe, it } from "node:test";
 import {
   BOT_GENERATED_AVATAR_INK_MAX_PAINTED_PIXELS,
   BOT_GENERATION_PROMPT_MAX_LENGTH,
+  CURSED_TONGUE_GENERATED_AUTHORING_PROMPT,
   normalizeBotGeneratedDraftV1,
+  normalizeGeneratedBotPowerPromptV1,
   normalizeLeanBotGeneratedDraftV1,
   normalizeBotGenerationPrompt,
 } from "./botGeneration.ts";
+import { BOT_AUDIO_VOICE_IDS } from "./audioVoice.ts";
 import {
   decodeBotAvatarDetailsPaintColorMap,
 } from "./botAvatarDetails.ts";
@@ -161,7 +164,7 @@ describe("normalizeBotGeneratedDraftV1", () => {
     const draft = normalizeBotGeneratedDraftV1(completeDraft());
     assert.ok(draft);
     assert.equal(draft.name, "Nyx");
-    assert.equal(draft.namePronunciation, "");
+    assert.equal(draft.namePronunciation, "nicks");
     assert.equal(draft.selfReferral, "");
     assert.equal(draft.profile.core.communicationStyle, "warm");
     assert.deepEqual(draft.profile.core.responseCues?.waiting, [
@@ -200,7 +203,9 @@ describe("normalizeBotGeneratedDraftV1", () => {
     assert.equal(draft.audioVoiceProfile.elevenLabsVoiceId, undefined);
     assert.equal(draft.audioVoiceProfile.elevenLabsVoiceIdOverride, undefined);
     assert.equal(draft.audioVoiceProfile.elevenLabsVoiceInitialized, true);
-    assert.equal(draft.audioVoiceProfile.accentLocale, "en-US");
+    assert.ok(draft.audioVoiceProfile.accentDefinitionId);
+    assert.ok(draft.audioVoiceProfile.pronunciationMapPoint);
+    assert.ok(["light", "balanced", "strong"].includes(draft.audioVoiceProfile.speechprintStrength ?? ""));
     assert.equal(draft.audioVoiceProfile.systemVoiceName, undefined);
     assert.equal(draft.audioVoiceProfile.elevenLabsDirection, "hushed, wry, deliberate");
     assert.equal(draft.audioVoiceProfile.openness, -0.25);
@@ -212,6 +217,141 @@ describe("normalizeBotGeneratedDraftV1", () => {
       "Soft celestial relay ticks and a low glass shimmer",
     );
     assert.equal(draft.settings.maxTokens, 1800);
+  });
+
+  it("preserves model-authored accent, eligible identity, and an explicit alternate effect", () => {
+    const source = completeDraft();
+    source.voice = {
+      ...(source.voice as Record<string, unknown>),
+      voiceIdentity: "premium:allotted-voice",
+      accentDefinitionId: "german-influenced-english",
+      speechprintStrength: "strong",
+      elevenLabsEffect: "radio",
+    };
+    const draft = normalizeBotGeneratedDraftV1(source, {
+      premiumVoices: [{ voiceId: "allotted-voice", name: "Archive" }],
+      preserveModelVoiceEffect: true,
+    }, () => 0);
+    assert.ok(draft);
+    assert.equal(draft.audioVoiceProfile.elevenLabsVoiceId, "allotted-voice");
+    assert.equal(draft.audioVoiceProfile.accentDefinitionId, "german-influenced-english");
+    assert.equal(draft.audioVoiceProfile.speechprintStrength, "strong");
+    assert.equal(draft.audioVoiceProfile.elevenLabsEffect, "radio");
+  });
+
+  it("forces Prism when the model invents an unrequested alternate voice effect", () => {
+    const source = completeDraft();
+    source.voice = {
+      ...(source.voice as Record<string, unknown>),
+      elevenLabsEffect: "deep-space",
+    };
+    const draft = normalizeBotGeneratedDraftV1(source, undefined, () => 0);
+    assert.ok(draft);
+    assert.equal(draft.audioVoiceProfile.elevenLabsEffect, "chorus");
+  });
+
+  it("assigns a valid random portable voice, Accent Map anchor, strength, and Prism effect when absent", () => {
+    const source = completeDraft();
+    source.voice = {};
+    const draft = normalizeBotGeneratedDraftV1(source, undefined, () => 0.99);
+    assert.ok(draft);
+    assert.equal(draft.audioVoiceProfile.baseVoiceId, BOT_AUDIO_VOICE_IDS.at(-1));
+    assert.ok(draft.audioVoiceProfile.accentDefinitionId);
+    assert.ok(draft.audioVoiceProfile.pronunciationMapPoint);
+    assert.equal(draft.audioVoiceProfile.speechprintStrength, "strong");
+    assert.equal(draft.audioVoiceProfile.elevenLabsEffect, "chorus");
+  });
+
+  it("places each generated batch sibling at a distinct deterministic Accent Map point", () => {
+    const source = completeDraft();
+    source.voice = { accentDefinitionId: "german-influenced-english" };
+    const points = [1, 2, 3, 4].map((batchIndex) => {
+      const draft = normalizeBotGeneratedDraftV1(source, {
+        generatedAccentMapLocation: {
+          seed: "A midnight field crew",
+          batchIndex,
+          batchCount: 4,
+        },
+      });
+      assert.ok(draft?.audioVoiceProfile.pronunciationMapPoint);
+      assert.equal(
+        draft.audioVoiceProfile.accentDefinitionId,
+        "german-influenced-english",
+      );
+      return draft!.audioVoiceProfile.pronunciationMapPoint!;
+    });
+    assert.equal(new Set(points.map(({ x, y }) => `${x}:${y}`)).size, 4);
+    assert.deepEqual(
+      normalizeBotGeneratedDraftV1(source, {
+        generatedAccentMapLocation: {
+          seed: "A midnight field crew",
+          batchIndex: 2,
+          batchCount: 4,
+        },
+      })?.audioVoiceProfile.pronunciationMapPoint,
+      points[1],
+    );
+  });
+
+  it("derives a one-off generated pin from the bot identity as well as its brief", () => {
+    const firstSource = completeDraft();
+    const secondSource = completeDraft();
+    firstSource.name = "Northstar Ada";
+    secondSource.name = "Harbor Jules";
+    firstSource.voice = { accentDefinitionId: "american-english" };
+    secondSource.voice = { accentDefinitionId: "american-english" };
+    const catalog = {
+      generatedAccentMapLocation: {
+        seed: "A dependable night operator",
+        batchIndex: 1,
+        batchCount: 1,
+      },
+    };
+    const first = normalizeBotGeneratedDraftV1(firstSource, catalog);
+    const second = normalizeBotGeneratedDraftV1(secondSource, catalog);
+    assert.ok(first?.audioVoiceProfile.pronunciationMapPoint);
+    assert.ok(second?.audioVoiceProfile.pronunciationMapPoint);
+    assert.notDeepEqual(
+      first.audioVoiceProfile.pronunciationMapPoint,
+      second.audioVoiceProfile.pronunciationMapPoint,
+    );
+  });
+
+  it("preserves a valid persona-authored map target without requiring literal geography in the brief", () => {
+    const source = completeDraft();
+    source.voice = {
+      ...(source.voice as Record<string, unknown>),
+      accentDefinitionId: "german-influenced-english",
+      speechprintStrength: "strong",
+      pronunciationMapPoint: { x: 0.74, y: 0.33 },
+    };
+    const draft = normalizeBotGeneratedDraftV1(source, undefined, () => 0);
+    assert.ok(draft);
+    assert.equal(draft.audioVoiceProfile.accentDefinitionId, "german-influenced-english");
+    assert.equal(draft.audioVoiceProfile.speechprintStrength, "strong");
+    assert.deepEqual(draft.audioVoiceProfile.pronunciationMapPoint, {
+      x: 0.74,
+      y: 0.33,
+    });
+  });
+
+  it("permits OS voices only when capability data supplies them and keeps every portable voice eligible", () => {
+    const source = completeDraft();
+    source.voice = { voiceIdentity: "os:Alex" };
+    const noOptIn = normalizeBotGeneratedDraftV1(source, undefined, () => 0);
+    const optedIn = normalizeBotGeneratedDraftV1(source, {
+      operatingSystemVoiceNames: ["Alex"],
+    }, () => 0);
+    assert.ok(noOptIn && optedIn);
+    assert.equal(noOptIn.audioVoiceProfile.systemVoiceName, undefined);
+    assert.equal(optedIn.audioVoiceProfile.systemVoiceName, "Alex");
+    for (const voiceId of BOT_AUDIO_VOICE_IDS) {
+      source.voice = { voiceIdentity: `portable:${voiceId}` };
+      assert.equal(
+        normalizeBotGeneratedDraftV1(source, undefined, () => 0)?.audioVoiceProfile.baseVoiceId,
+        voiceId,
+      );
+    }
   });
 
   it("defaults unrequested generated eye and mouth glyphs while preserving deliberate canon", () => {
@@ -355,6 +495,25 @@ describe("normalizeBotGeneratedDraftV1", () => {
     assert.equal(draft.powers[0]?.authoringMode, "prompt");
     assert.equal(draft.powers[0]?.intent, value.powerPrompts[0]);
     assert.equal(draft.powers[0]?.compileStatus, "draft");
+  });
+
+  it("canonicalizes known Cursed Tongue activation filler and rejects generic activation filler", () => {
+    assert.equal(
+      normalizeGeneratedBotPowerPromptV1("Cursed Tongue Power activated!"),
+      CURSED_TONGUE_GENERATED_AUTHORING_PROMPT,
+    );
+    assert.equal(normalizeGeneratedBotPowerPromptV1("Lantern Voice Power activated!"), "");
+
+    const cursedTongue = completeDraft();
+    cursedTongue.powerPrompts = ["Cursed Tongue Power activated!"];
+    assert.equal(
+      normalizeBotGeneratedDraftV1(cursedTongue)?.powers[0]?.intent,
+      CURSED_TONGUE_GENERATED_AUTHORING_PROMPT,
+    );
+
+    const genericActivation = completeDraft();
+    genericActivation.powerPrompts = ["Lantern Voice Power activated!"];
+    assert.deepEqual(normalizeBotGeneratedDraftV1(genericActivation)?.powers, []);
   });
 
   it("keeps legacy null and malformed generated Power prompts removable by normalizing them to no draft Power", () => {
@@ -647,12 +806,13 @@ describe("normalizeBotGeneratedDraftV1", () => {
 });
 
 describe("normalizeLeanBotGeneratedDraftV1", () => {
-  it("deterministically strips rich batch output while preserving allowed identity", () => {
+  it("keeps the shared voice and Accent Map contract while stripping rich visual output", () => {
     const rich = completeDraft();
     rich.voiceBaseId = "voice-8";
     const draft = normalizeLeanBotGeneratedDraftV1(rich);
     assert.ok(draft);
     assert.equal(draft.name, "Nyx");
+    assert.equal(draft.namePronunciation, "nicks");
     assert.equal(draft.profile.core.traits, "patient, sly, observant");
     assert.equal(draft.color, "#2f00ff");
     assert.equal(draft.glyph, "moon");
@@ -671,9 +831,11 @@ describe("normalizeLeanBotGeneratedDraftV1", () => {
     assert.equal(draft.accentColor, null);
     assert.deepEqual(draft.powers, []);
     assert.equal(draft.audioVoiceProfile.baseVoiceId, "voice-8");
-    assert.equal(draft.audioVoiceProfile.pitch, 0);
-    assert.equal(draft.audioVoiceProfile.warmth, 0);
-    assert.equal(draft.audioVoiceProfile.pace, 0);
+    assert.equal(draft.audioVoiceProfile.pitch, 0.2);
+    assert.equal(draft.audioVoiceProfile.warmth, 0.35);
+    assert.equal(draft.audioVoiceProfile.pace, -0.15);
+    assert.ok(draft.audioVoiceProfile.accentDefinitionId);
+    assert.equal(draft.audioVoiceProfile.elevenLabsEffect, "chorus");
     assert.equal(draft.audioVoiceProfile.avatarSfx, undefined);
   });
 });

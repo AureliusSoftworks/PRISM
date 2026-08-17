@@ -530,6 +530,26 @@ export const LOCAL_VOICE_SPEECHPRINT_INFLUENCES = [
   "canadian-english",
   "new-york-english",
   "southern-us-english",
+  "southern-california-english",
+  "bay-area-english",
+  "inland-north-english",
+  "texas-english",
+  "appalachian-english",
+  "eastern-new-england-english",
+  "north-florida-english",
+  "miami-english",
+  "modern-rp-english",
+  "cockney-english",
+  "estuary-english",
+  "multicultural-london-english",
+  "essex-english",
+  "parisian-french-influenced-english",
+  "southern-french-influenced-english",
+  "northern-german-influenced-english",
+  "bavarian-german-influenced-english",
+  "northern-italian-influenced-english",
+  "southern-italian-influenced-english",
+  "andalusian-spanish-influenced-english",
   "caribbean-english",
   "north-african-arabic-influenced-english",
   "middle-eastern-arabic-influenced-english",
@@ -1320,6 +1340,21 @@ export function normalizeElevenLabsVoiceEffect(value: unknown): VoiceEffect {
   return normalizeVoiceEffect(value);
 }
 
+export const ELEVENLABS_VOICE_DIRECTION_MAX_CHARACTERS = 48;
+
+function truncateVoiceDirectionAtWordBoundary(value: string): string {
+  if (value.length <= ELEVENLABS_VOICE_DIRECTION_MAX_CHARACTERS) {
+    return value;
+  }
+  const clipped = value
+    .slice(0, ELEVENLABS_VOICE_DIRECTION_MAX_CHARACTERS)
+    .trimEnd();
+  const boundary = clipped.lastIndexOf(" ");
+  return boundary >= Math.floor(ELEVENLABS_VOICE_DIRECTION_MAX_CHARACTERS * 0.6)
+    ? clipped.slice(0, boundary)
+    : clipped;
+}
+
 export function normalizeElevenLabsVoiceDirection(
   value: unknown,
   fallback: string | null = null,
@@ -1334,13 +1369,13 @@ export function normalizeElevenLabsVoiceDirection(
       .trim()
       .replace(/^\[+|\]+$/gu, "")
       .replace(/\s+/gu, " ")
-      .trim()
-      .slice(0, 48);
-    if (!direction) continue;
-    const key = direction.toLocaleLowerCase();
+      .trim();
+    const boundedDirection = truncateVoiceDirectionAtWordBoundary(direction);
+    if (!boundedDirection) continue;
+    const key = boundedDirection.toLocaleLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    directions.push(direction);
+    directions.push(boundedDirection);
     if (directions.length >= 3) break;
   }
   return directions.length > 0 ? directions.join(", ").slice(0, 240) : null;

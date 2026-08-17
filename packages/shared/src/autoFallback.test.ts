@@ -85,6 +85,69 @@ describe("Auto fallback contracts", () => {
     );
   });
 
+  it("treats saved entries as priorities before remaining eligible models and final local recovery", () => {
+    const runtimeChain = {
+      v: 1 as const,
+      fallbacks: [
+        { provider: "anthropic" as const, model: "claude-priority" },
+        { provider: "openai" as const, model: "gpt-primary" },
+      ],
+      eligibleCandidates: [
+        { provider: "openai" as const, model: "gpt-primary" },
+        { provider: "openai" as const, model: "gpt-remainder" },
+        { provider: "anthropic" as const, model: "claude-priority" },
+      ],
+      finalLocalRecovery: {
+        provider: "local" as const,
+        model: "llama3.2",
+      },
+    };
+
+    assert.deepEqual(
+      autoFallbackResolvedChain(
+        { provider: "openai", model: "gpt-primary" },
+        runtimeChain,
+      ),
+      [
+        { provider: "openai", model: "gpt-primary" },
+        { provider: "anthropic", model: "claude-priority" },
+        { provider: "openai", model: "gpt-remainder" },
+        { provider: "local", model: "llama3.2" },
+      ],
+    );
+    assert.equal(
+      serializeAutoFallbackChain({
+        ...runtimeChain,
+        fallbacks: [{ provider: "anthropic", model: "claude-priority" }],
+      }),
+      JSON.stringify({
+        v: 2,
+        local: [],
+        online: [{ provider: "anthropic", model: "claude-priority" }],
+      }),
+    );
+  });
+
+  it("reserves the bounded route plan's final slot for bundled local recovery", () => {
+    const resolved = autoFallbackResolvedChain(
+      { provider: "openai", model: "gpt-primary" },
+      {
+        v: 1,
+        fallbacks: [],
+        eligibleCandidates: Array.from({ length: 80 }, (_, index) => ({
+          provider: "openai" as const,
+          model: `gpt-${index}`,
+        })),
+        finalLocalRecovery: { provider: "local", model: "llama3.2" },
+      },
+    );
+    assert.equal(resolved?.length, 64);
+    assert.deepEqual(resolved?.at(-1), {
+      provider: "local",
+      model: "llama3.2",
+    });
+  });
+
   it("partitions a mixed legacy chain into independent LOCAL and ONLINE chains", () => {
     const mixed = {
       v: 1 as const,

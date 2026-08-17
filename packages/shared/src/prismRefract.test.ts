@@ -101,7 +101,7 @@ test("normalizes a bounded registered Signal text target", () => {
   assert.equal(request.turbo, true);
 });
 
-test("preserves native Max as transient Refract routing without adding it to saved effort", () => {
+test("keeps legacy routing hints bounded for server-side neutralization", () => {
   const request = normalizePrismRefractRequest({
     target: {
       kind: "prism.input.text",
@@ -119,6 +119,7 @@ test("preserves native Max as transient Refract routing without adding it to sav
     reasoningEffort: "max",
   });
   assert.equal(request.reasoningEffort, "max");
+  assert.equal(request.modelOverride, "gpt-5.6-sol");
 });
 
 test("normalizes a contextual Debate setup target without trusting extra fields", () => {

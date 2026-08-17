@@ -14,9 +14,14 @@ import {
   BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
   BOTCAST_DIRECTOR_MIN_SHOT_MS,
+  BOTCAST_SIGNAL_MUTE_ELAPSED_CUE_HOLD_MS,
   BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS,
+  BOTCAST_PRODUCER_DIRECT_QUOTE_LEAD_IN,
+  BOTCAST_PRODUCER_DIRECT_QUOTE_MAX,
   BOTCAST_VOICE_LEVEL_DEFAULT,
   BOTCAST_VOICE_LEVEL_MAX,
+  botcastDirectQuoteTurnMaxTokens,
+  composeBotcastProducerDirectQuoteUtterance,
   applyBotcastProducerCueToTension,
   botcastAutoCameraLeadInMs,
   botcastFallbackStudioAccentVariantForSeed,
@@ -25,6 +30,9 @@ import {
   botcastCameraOffsetXPercent,
   botcastCameraOffsetYPercent,
   botcastDirectorSuggestion,
+  botcastDirectorCoverageSuggestions,
+  botcastAutoCoverageShotAt,
+  botcastCameraSuggestionReasonAt,
   botcastDepartureMessageIdForRole,
   botcastEchoHostInterruptPhrase,
   botcastEpisodeDepartureOutcome,
@@ -71,6 +79,26 @@ import {
   swapBotcastStudioLayoutSeats,
   type BotcastReplayEvent,
 } from "./botcast.ts";
+
+describe("Signal producer direct quotes", () => {
+  it("gives a short story enough room to air in one host turn", () => {
+    const story = "Gerald the potato rolled forty feet. ".repeat(40).trim();
+    assert.ok(story.length > 400);
+    assert.ok(story.length < BOTCAST_PRODUCER_DIRECT_QUOTE_MAX);
+    const tokens = botcastDirectQuoteTurnMaxTokens(story);
+    assert.ok(tokens > 160);
+    assert.ok(tokens >= Math.ceil(story.split(/\s+/u).length * 1.6));
+  });
+
+  it("frames the queued words as a Producer note without rewriting them", () => {
+    const quote = "zzzzzzzz bababa beep boop bap";
+    assert.equal(
+      composeBotcastProducerDirectQuoteUtterance(quote),
+      `${BOTCAST_PRODUCER_DIRECT_QUOTE_LEAD_IN} ${quote}`,
+    );
+    assert.equal(composeBotcastProducerDirectQuoteUtterance("  "), "");
+  });
+});
 
 describe("Signal show camera framing", () => {
   it("keeps independent bounded framing for left, right, and wide cameras", () => {
@@ -127,6 +155,34 @@ describe("Signal fallback studio accents", () => {
     assert.equal(
       botcastSignalStandardCadenceDurationMs("..."),
       BOTCAST_DIRECTOR_MIN_SHOT_MS,
+    );
+    const mutePerformance = {
+      v: 1 as const,
+      name: "mutePerformance" as const,
+      durationMs: 9_000,
+      periodCount: 9,
+      interrupted: false,
+      elapsedCue: "*9 seconds pass without an audible word.*",
+      reactionBeats: [],
+    };
+    assert.equal(
+      botcastSignalStandardCadenceDurationMs(
+        "......... *9 seconds pass without an audible word.*",
+        undefined,
+        mutePerformance,
+      ),
+      9_000 + BOTCAST_SIGNAL_MUTE_ELAPSED_CUE_HOLD_MS,
+    );
+    const muteTimeline = botcastReplayTimeline(
+      [{
+        content: "......... *9 seconds pass without an audible word.*",
+        mutePerformance,
+      }],
+      [],
+    );
+    assert.equal(
+      muteTimeline.messageEndMs[0]! - muteTimeline.messageStartMs[0]!,
+      9_000 + BOTCAST_SIGNAL_MUTE_ELAPSED_CUE_HOLD_MS,
     );
     const replayLine = "One two three four five six seven eight nine ten eleven twelve.";
     const replayTimeline = botcastReplayTimeline(
@@ -1546,6 +1602,64 @@ describe("Botcast replay director", () => {
     assert.equal(botcastCameraShotAt({ events, elapsedMs: 4_500 }), "left");
     assert.equal(botcastCameraShotAt({ events, elapsedMs: 5_500 }), "wide");
     assert.equal(botcastCameraShotAt({ events, elapsedMs: 6_000 }), "right");
+  });
+
+  it("plans lingering coverage cuts without using the ignored transition cadence", () => {
+    const coverage = botcastDirectorCoverageSuggestions({
+      speakerShot: "left",
+      listenerShot: "right",
+      speakerStartMs: 1_000,
+      utteranceEndMs: 18_000,
+      seed: "coverage-host-line",
+      content:
+        "We have been circling this for a while. The room can take a breath. Then I come back to the question.",
+      messageId: "msg-1",
+    });
+    assert.ok(coverage.length >= 1);
+    assert.ok(
+      coverage.some(
+        (suggestion) =>
+          suggestion.reason === "coverage" || suggestion.reason === "cutaway",
+      ),
+    );
+    assert.equal(
+      coverage.some((suggestion) => suggestion.reason === "transition"),
+      false,
+    );
+    const first = coverage[0]!;
+    assert.ok(first.atMs >= 1_000 + 6_200);
+    const events: BotcastReplayEvent[] = [
+      {
+        id: "speaker",
+        episodeId: "episode-1",
+        sequence: 1,
+        kind: "camera_suggestion",
+        payload: { shot: "left", reason: "speaker", atMs: 1_000 },
+        occurredAt: "2026-01-01T00:00:00.000Z",
+      },
+      ...coverage.map((suggestion, index) => ({
+        id: `coverage-${index}`,
+        episodeId: "episode-1",
+        sequence: index + 2,
+        kind: "camera_suggestion" as const,
+        payload: { ...suggestion },
+        occurredAt: "2026-01-01T00:00:01.000Z",
+      })),
+    ];
+    assert.equal(botcastCameraShotAt({ events, elapsedMs: 1_500 }), "left");
+    assert.equal(
+      botcastAutoCoverageShotAt({ events, elapsedMs: 1_500 }),
+      null,
+    );
+    const coverageAt = first.atMs + 80;
+    assert.equal(
+      botcastCameraSuggestionReasonAt({ events, elapsedMs: coverageAt }),
+      first.reason,
+    );
+    assert.equal(
+      botcastAutoCoverageShotAt({ events, elapsedMs: coverageAt }),
+      first.shot,
+    );
   });
 
   it("keeps the guest on stage until the saved departure beat", () => {

@@ -2,7 +2,12 @@ export const AUTO_FALLBACK_CHAIN_VERSION = 1 as const;
 export const FALLBACK_CHAINS_VERSION = 2 as const;
 export const AUTO_FALLBACK_CHAIN_MIN_FALLBACK_COUNT = 1 as const;
 export const AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT = 5 as const;
-export const AUTO_FALLBACK_CHAIN_MAX_ATTEMPT_COUNT = 6 as const;
+/**
+ * Runtime Auto plans may include the complete visible model catalog in addition
+ * to the five user-authored priorities stored per lane. Keep a defensive bound
+ * without treating the Settings priority list as the exhaustive route list.
+ */
+export const AUTO_FALLBACK_CHAIN_MAX_ATTEMPT_COUNT = 64 as const;
 export const AUTO_FALLBACK_CHAIN_MAX_TOTAL_FALLBACK_COUNT = 10 as const;
 /** @deprecated Use AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT. */
 export const AUTO_FALLBACK_CHAIN_FALLBACK_COUNT =
@@ -28,7 +33,18 @@ export interface AutoFallbackModelRef {
 
 export interface AutoFallbackChainV1 {
   v: typeof AUTO_FALLBACK_CHAIN_VERSION;
+  /** User-authored ordering hints. Persisted Settings keep at most five per lane. */
   fallbacks: AutoFallbackModelRef[];
+  /**
+   * Runtime-only eligible routes appended after the authored priorities.
+   * Serialization deliberately strips this field.
+   */
+  eligibleCandidates?: AutoFallbackModelRef[];
+  /**
+   * Runtime-only last-resort recovery. ONLINE Auto uses the bundled local model;
+   * LOCAL and fixed-model requests leave this unset.
+   */
+  finalLocalRecovery?: AutoFallbackModelRef;
 }
 
 export interface FallbackChainsV2 {
@@ -193,20 +209,44 @@ export function autoFallbackResolvedChain(
 ): AutoFallbackModelRef[] | null {
   const normalizedPrimary = normalizeAutoFallbackModelRef(primary);
   const lane = normalizedPrimary?.provider === "local" ? "local" : "online";
-  const normalizedChain = normalizedPrimary
-    ? fallbackChainForLane(chain, lane)
-    : null;
-  if (!normalizedPrimary || !normalizedChain) return null;
-  const primaryKey = autoFallbackModelKey(normalizedPrimary);
-  const primaryLane = normalizedPrimary.provider === "local" ? "local" : "online";
-  const remainingFallbacks = normalizedChain.fallbacks.filter(
-    (fallback) =>
-      autoFallbackModelKey(fallback) !== primaryKey &&
-      (fallback.provider === "local" ? "local" : "online") === primaryLane,
-  );
-  return remainingFallbacks.length > 0
-    ? [normalizedPrimary, ...remainingFallbacks]
-    : null;
+  if (!normalizedPrimary || !chain) return null;
+
+  const authoredPriorities = fallbackChainForLane(chain, lane)?.fallbacks ?? [];
+  const eligibleCandidates = Array.isArray(chain.eligibleCandidates)
+    ? chain.eligibleCandidates
+        .map(normalizeAutoFallbackModelRef)
+        .filter((entry): entry is AutoFallbackModelRef => entry !== null)
+        .filter(
+          (entry) => (entry.provider === "local" ? "local" : "online") === lane,
+        )
+    : [];
+  const finalLocalRecovery =
+    lane === "online"
+      ? normalizeAutoFallbackModelRef(chain.finalLocalRecovery)
+      : null;
+  const ordered = [
+    normalizedPrimary,
+    ...authoredPriorities,
+    ...eligibleCandidates,
+  ];
+  const seen = new Set<string>();
+  const reservesFinalLocalSlot = finalLocalRecovery?.provider === "local";
+  const resolved = ordered
+    .filter((entry) => {
+      const key = autoFallbackModelKey(entry);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(
+      0,
+      AUTO_FALLBACK_CHAIN_MAX_ATTEMPT_COUNT -
+        (reservesFinalLocalSlot ? 1 : 0),
+    );
+  if (finalLocalRecovery?.provider === "local") {
+    resolved.push(finalLocalRecovery);
+  }
+  return resolved.length > 1 ? resolved : null;
 }
 
 export function normalizeAutoRecoveryTrace(

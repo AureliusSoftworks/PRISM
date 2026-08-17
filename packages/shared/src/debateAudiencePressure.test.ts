@@ -184,8 +184,12 @@ describe("Debate audience pressure", () => {
       triggerEvent: third,
     });
     assert.ok(plan);
-    assert.ok(plan?.reason === "sustained" || plan?.reason === "disruptive");
-    assert.ok((plan?.pressure ?? 0) >= 70);
+    assert.ok(
+      plan?.reason === "sustained" ||
+        plan?.reason === "disruptive" ||
+        plan?.reason === "restless",
+    );
+    assert.ok((plan?.pressure ?? 0) >= 45);
   });
 
   it("marks a later rowdy rebuild as a repeat moderator intervention", () => {
@@ -230,7 +234,32 @@ describe("Debate audience pressure", () => {
     assert.equal(plan?.repeated, true);
   });
 
-  it("does not mint sustained order while the gallery is only restless", () => {
+  it("lets heated sittings call order once the gallery is restless", () => {
+    const longLine =
+      "This heated exchange keeps the gallery talking over the floor while the advocate presses the same combative point. ".repeat(
+        3,
+      );
+    const first = {
+      ...speech("heat-restless-1", 1),
+      content: longLine,
+    };
+    const second = {
+      ...speech("heat-restless-2", 2),
+      content: longLine,
+    };
+    const plan = debateAudienceModeratorOrderPlan({
+      events: [first, second],
+      formality: "heated",
+      playerRole: "spectator",
+      triggerEvent: second,
+    });
+    assert.ok(plan);
+    assert.ok(plan?.reason === "restless" || plan?.reason === "sustained");
+    assert.ok((plan?.pressure ?? 0) >= 45);
+    assert.ok((plan?.pressure ?? 0) < 70);
+  });
+
+  it("does not mint sustained order while a quieter sitting is only restless", () => {
     const longLine =
       "Phones interrupt every lesson, and locking them away until the final bell protects attention without inventing a crisis. ".repeat(
         3,

@@ -3,7 +3,10 @@ import type {
   WebSearchPayload,
 } from "./prismTool.js";
 import type { PrismMoodIgnoredQuestionPenaltyLevel } from "./mood.js";
-import type { AutoRecoveryTraceV1 } from "./autoFallback.js";
+import type {
+  AutoFallbackAttemptTraceV1,
+  AutoRecoveryTraceV1,
+} from "./autoFallback.js";
 import type { AutoRouteDecisionV1 } from "./modelRouting.js";
 import type {
   BotCrosstalkInterruptedSpeakerCue,
@@ -201,6 +204,9 @@ export {
   BOT_POWER_QUIET_VOICE_GAIN_MULTIPLIER_V1,
   BOT_POWER_SIGIL_IDS_V1,
   BOT_POWER_VERSION,
+  botPowerFallbackTitleV1,
+  normalizeBotPowerGeneratedTitleV1,
+  rerollBotPowerPresentationV1,
   COFFEE_POWER_PROMPT_MAX_CHARS,
   COFFEE_POWER_PROMPT_MAX_TOKENS,
   activeBotPowerEffectsV1,
@@ -210,6 +216,11 @@ export {
   applyBotPowerEternalIntroductionResponseV1,
   applyBotPowerEchoResponseV1,
   applyBotPowerCursedTongueResponseV1,
+  BOT_POWER_CURSED_TONGUE_MAX_PER_SENTENCE_V1,
+  BOT_POWER_CURSED_TONGUE_MIN_PER_SENTENCE_V1,
+  botPowerCursedTongueMinimumProfanityV1,
+  botPowerCursedTongueProfanityCountV1,
+  botPowerCursedTongueSentenceRangesV1,
   applyBotPowerMumbledResponseV1,
   applyBotPowerMumbledReactionPlanV1,
   applyBotPowerMuteResponseV1,
@@ -229,6 +240,15 @@ export {
   BOT_POWER_RESPONSE_BUDGET_MINIMAL_MAX_WORDS_V1,
   botPowerAddressedFandomCueFromEffectsV1,
   botPowerAddressedFandomCueV1,
+  botPowerChromaticBiasCueFromEffectsV1,
+  botPowerChromaticBiasCueV1,
+  botPowerChromaticBiasColorMatchesV1,
+  botPowerChromaticBiasEffectsFromEffectsV1,
+  botPowerChromaticBiasEffectsFromIntentV1,
+  botPowerChromaticBiasResolvedHueV1,
+  botPowerHueLabelV1,
+  BOT_POWER_CHROMATIC_BIAS_MATCH_BAND_DEG_V1,
+  botPowerAddressedInsultPrimaryCueV1,
   botPowerRequiresAddressedInsultV1,
   botPowerRequiresAddressedInsultFromEffectsV1,
   botPowerResponseHasAddressedInsultV1,
@@ -343,6 +363,9 @@ export {
   botPowerMirrorsIdentityV1,
   botPowerShapeshiftsIdentityV1,
   botPowerBelievesFalseNameV1,
+  botPowerFalseNamePoolV1,
+  botPowerFalseNamePoolFromEffectsV1,
+  normalizeBotPowerFalseNamePoolV1,
   botPowerMuteActionTextsV1,
   botPowerObserverProjectionFromEffectsV1,
   botPowerObserverProjectionV1,
@@ -392,12 +415,17 @@ export {
   strongestBotPowerResponseBudgetEffectV1,
   strongestHardBotPowerResponseBudgetEffectV1,
   type BotPowerBondDirection,
+  type BotPowerChromaticBiasColorV1,
+  type BotPowerChromaticBiasEffectV1,
+  type BotPowerChromaticBiasPeerV1,
+  type BotPowerChromaticBiasPolarityV1,
   type BotPowerAvatarScaleMode,
   type BotPowerAvatarVisibilityModeV1,
   type BotPowerAuthoringModeV1,
   type BotPowerCompileStatus,
   type BotPowerDesignationPlacement,
   type BotPowerEffectV1,
+  type BotPowerFalseNamePoolV1,
   type BotPowerMutePerformanceV1,
   type BotPowerMuteReactionBeatV1,
   type BotPowerMuteReactionCandidateV1,
@@ -579,6 +607,7 @@ export {
 
 export {
   BOT_FALSE_NAME_POOL_V1,
+  BOT_SESSION_SURNAME_POOL_V1,
   BOT_FALSE_NAME_VERSION,
   botFalseNameChangesV1,
   botFalseNameObserverCueV1,
@@ -590,6 +619,8 @@ export {
   createBotFalseNameStateV1,
   normalizeBotFalseNameStateV1,
   pickBotFalseNameFromPoolV1,
+  pickBotSessionSurnameNameV1,
+  botGivenNameFromLibraryNameV1,
   rewriteBotFalseNameResponseV1,
   type BotFalseNameStateV1,
   type BotFalseNameSurfaceV1,
@@ -676,6 +707,7 @@ export {
   NEUTRAL_COFFEE_VOICE_DELIVERY_ENVELOPE,
   VOICE_DELIVERY_RATE_BY_MOOD,
   ELEVENLABS_VOICE_DIRECTION_BY_MOOD,
+  ELEVENLABS_VOICE_DIRECTION_MAX_CHARACTERS,
   ELEVENLABS_VOICE_SPEED_MIN,
   ELEVENLABS_VOICE_SPEED_MAX,
   BOT_AUDIO_VOICE_PACE_RATE_DEPTH,
@@ -915,11 +947,13 @@ export {
   BOT_GENERATION_GLYPH_IDS,
   BOT_GENERATION_PROMPT_MAX_LENGTH,
   BOT_GENERATION_VOICE_PREVIEW_MAX_LENGTH,
+  botGenerationVoiceIdentityOptions,
   normalizeBotGeneratedDraftV1,
   normalizeLeanBotGeneratedDraftV1,
   normalizeBotGenerationPrompt,
   type BotGeneratedAvatarDetailsInputV1,
   type BotGeneratedDraftV1,
+  type BotGenerationVoiceCatalogV1,
   type BotGeneratedInkPathV1,
   type BotGeneratedInkPointV1,
   type BotGeneratedInkPrimitiveV1,
@@ -1168,11 +1202,13 @@ export {
 } from "./comfyUiWorkflow.js";
 
 export {
+  AUTO_MODEL_TURBO_PREFERENCE_ID,
   MODEL_REASONING_EFFORT_PREFERENCE_VALUES,
   REASONING_EFFORT_VALUES,
   anthropicModelSupportsReasoningEffort,
   anthropicReasoningEffortForRequest,
   effectiveModelReasoningEffort,
+  isAutoModelTurboPreferenceId,
   modelReasoningEffortPreferenceKey,
   modelSupportsNativeReasoningEffort,
   modelSupportsTurboMode,
@@ -1405,6 +1441,9 @@ export {
   fullySaturateBotColor,
   hexToHsl,
   hslToHex,
+  circularHueDistanceDeg,
+  complementaryHueDeg,
+  botIdentityHueDeg,
   normalizeAccentForTheme,
   normalizeBotIdentityColor,
   pickReadableText,
@@ -1484,6 +1523,7 @@ export type UsagePurpose =
   | "debate_generation"
   | "debate_synopsis"
   | "debate_debrief"
+  | "flight_recorder_summary"
   | "embedding"
   | "image_generation"
   | "bot_profile_picture"
@@ -2594,6 +2634,29 @@ export interface CoffeeGroupAtmosphere {
   updatedAt: string;
 }
 
+export type CoffeeGroupSoundtrackStatus =
+  | "preparing"
+  | "generating"
+  | "ready"
+  | "failed"
+  | "unavailable";
+
+/** Public metadata for the cached, group-owned Coffee music bed. Audio is served separately. */
+export interface CoffeeGroupSoundtrack {
+  status: CoffeeGroupSoundtrackStatus;
+  generating: boolean;
+  provider: "elevenlabs" | null;
+  model: string | null;
+  prompt: string | null;
+  contentType: string | null;
+  durationMs: number | null;
+  revision: number;
+  /** True when the immediately previous generated bed can replace the current one. */
+  undoAvailable: boolean;
+  updatedAt: string;
+  error?: string;
+}
+
 export interface CoffeeGroup {
   id: string;
   userId: string;
@@ -2602,6 +2665,8 @@ export interface CoffeeGroup {
   ethos: string;
   /** Character-free café artwork composited behind the Coffee table. */
   atmosphere: CoffeeGroupAtmosphere | null;
+  /** Original instrumental group bed; bundled Coffee Jazz remains its fallback. */
+  soundtrack: CoffeeGroupSoundtrack | null;
   /** Independent completion and retry state for generated identity items. */
   synthesis: CoffeeGroupSynthesisState;
   botGroupIds: string[];
@@ -3366,6 +3431,40 @@ export interface CoffeeSessionCreateResponse {
   teams?: CoffeeTeamState;
 }
 
+export type CoffeeContextSparkSourceApplet = "signal" | "debate" | "coffee";
+
+export type CoffeeContextSparkState =
+  | "available"
+  | "armed"
+  | "used"
+  | "dismissed"
+  | "stale";
+
+/** A grounded invitation to revisit something an attending bot experienced. */
+export interface CoffeeContextSpark {
+  id: string;
+  conversationId: string;
+  sourceApplet: CoffeeContextSparkSourceApplet;
+  sourceSessionId: string;
+  sourceTitle: string;
+  sourceDate: string;
+  inspiredBotId: string;
+  inspiredBotName: string;
+  inspiredBotColor: string | null;
+  inspiredBotGlyph: string | null;
+  prompt: string;
+  state: CoffeeContextSparkState;
+  createdAt: string;
+}
+
+export interface CoffeeContextSparksResponse {
+  sparks: CoffeeContextSpark[];
+}
+
+export interface CoffeeContextSparkPatchRequest {
+  state: Extract<CoffeeContextSparkState, "available" | "armed" | "dismissed">;
+}
+
 /** Request body for `POST /api/coffee/sessions/:id/user-action`. */
 export interface CoffeeUserActionRequest {
   /** Action-only composer input, e.g. `*leans back and folds arms*`. */
@@ -3437,6 +3536,8 @@ export interface CoffeeTurnRequest {
   playerInterruption?: CoffeePlayerInterruptionInput;
   /** Optional director-mode pick for this user turn. */
   directedSpeakerBotId?: string;
+  /** Armed historical source whose participating bot should answer first. */
+  contextSparkId?: string;
   /**
    * Client-visible bots currently seated at the live table. During Coffee's
    * opening arrivals, the server routes turns only among these bots.
@@ -3479,6 +3580,36 @@ export type CoffeeTurnJobPhase =
   | "stale"
   | "failed";
 
+export type CoffeeTurnModelSelectionKind = "auto" | "fixed";
+
+export type CoffeeTurnJobFailureCode =
+  | "auto_fallback_exhausted"
+  | "provider_unavailable"
+  | "invalid_output"
+  | "stale_retry"
+  | "cancelled"
+  | "unknown";
+
+export interface CoffeeTurnJobRetryMetadataV1 {
+  v: 1;
+  retryOfJobId: string;
+  expectedLatestMessageCursor: string | null;
+  ordinal: number;
+  excludedSpeakerBotId?: string;
+}
+
+/** Privacy-safe, machine-readable failure details for bounded Coffee recovery. */
+export interface CoffeeTurnJobFailureV1 {
+  v: 1;
+  code: CoffeeTurnJobFailureCode;
+  selectionKind: CoffeeTurnModelSelectionKind;
+  attempts: AutoFallbackAttemptTraceV1[];
+  speakerBotId: string | null;
+  latestMessageCursor: string | null;
+  retry: CoffeeTurnJobRetryMetadataV1 | null;
+  retryable: boolean;
+}
+
 export interface CoffeeTurnJobStatus {
   id: string;
   conversationId: string | null;
@@ -3488,6 +3619,9 @@ export interface CoffeeTurnJobStatus {
   updatedAt: string;
   interruptEligibleAt: string | null;
   response?: CoffeeTurnResponse;
+  /** Structured recovery contract. `error` remains during compatibility rollout. */
+  failure?: CoffeeTurnJobFailureV1;
+  retry?: CoffeeTurnJobRetryMetadataV1;
   error?: string;
 }
 
@@ -3525,6 +3659,7 @@ export interface CoffeePollPlayerVoteRequest {
 export interface CoffeePollPlayerVoteResponse {
   poll: CoffeePoll;
 }
+export * from "./autoCameraDirector.js";
 export * from "./botcast.js";
 export * from "./actionSfxPack.js";
 export * from "./englishPacingProfile.js";
@@ -3558,5 +3693,7 @@ export * from "./softAssetJobs.js";
 export * from "./slateHandoff.js";
 export * from "./debate.js";
 export * from "./debateParticipation.js";
+export * from "./debateChairFavorability.js";
 export * from "./coffeeGroupSetup.js";
+export * from "./coffeeTopicTitle.js";
 export * from "./debateAudiencePressure.js";

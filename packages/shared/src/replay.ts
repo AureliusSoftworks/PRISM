@@ -175,6 +175,17 @@ export interface ReplayVoiceLightTrackV1 {
   cues: ReplayVoiceLightCueV1[];
 }
 
+/** Baked semantic speech activity; distinct from natural audio-energy lamps. */
+export interface ReplaySpeechActivityCueV1 {
+  atMs: number;
+  active: boolean;
+}
+
+export interface ReplaySpeechActivityTrackV1 {
+  participantId: string;
+  cues: ReplaySpeechActivityCueV1[];
+}
+
 export type ReplayCameraTransitionModeV2 = "animated" | "instant";
 export type ReplayCameraTransitionPresetV2 = "signal-camera-v1";
 
@@ -199,6 +210,7 @@ export interface ReplayVoiceSelectionSnapshotV2 {
 export interface ReplayPresentationV2 {
   mouthTracks: ReplayMouthTrackV2[];
   voiceLightTracks?: ReplayVoiceLightTrackV1[];
+  speechActivityTracks?: ReplaySpeechActivityTrackV1[];
   voiceSelection?: ReplayVoiceSelectionSnapshotV2;
 }
 
@@ -1135,6 +1147,25 @@ export function replayVoiceLightLevelAtV2(
   );
 }
 
+/** Resolves the recorded speech-activity state without inferring from visemes. */
+export function replaySpeechActivityAtV2(
+  manifest: ReplayManifestV2,
+  participantId: string,
+  atMs: number,
+): boolean | null {
+  const track = manifest.presentation?.speechActivityTracks?.find(
+    (candidate) => candidate.participantId === participantId,
+  );
+  if (!track || track.cues.length === 0) return null;
+  const targetMs = Math.max(0, Number.isFinite(atMs) ? atMs : 0);
+  let active = false;
+  for (const cue of track.cues) {
+    if (cue.atMs > targetMs) break;
+    active = cue.active;
+  }
+  return active;
+}
+
 export function replayCameraTransitionModeV2(
   scene: ReplaySceneSnapshotV2 | null | undefined,
 ): ReplayCameraTransitionModeV2 {
@@ -1402,6 +1433,27 @@ export function replayManifestV2IsValid(
             return false;
           }
           priorCueAtMs = atMs;
+        }
+      }
+    }
+    if (presentation.speechActivityTracks !== undefined) {
+      if (!Array.isArray(presentation.speechActivityTracks)) return false;
+      const activityParticipantIds = new Set<string>();
+      for (const rawTrack of presentation.speechActivityTracks) {
+        if (!rawTrack || typeof rawTrack !== "object" || Array.isArray(rawTrack)) return false;
+        const track = rawTrack as Record<string, unknown>;
+        const participantId = boundedId(track.participantId);
+        if (!participantId || activityParticipantIds.has(participantId) || !Array.isArray(track.cues)) return false;
+        activityParticipantIds.add(participantId);
+        let priorCueAtMs = -1;
+        let priorActive: boolean | null = null;
+        for (const rawCue of track.cues) {
+          if (!rawCue || typeof rawCue !== "object" || Array.isArray(rawCue)) return false;
+          const cue = rawCue as Record<string, unknown>;
+          const atMs = finiteNonNegativeNumber(cue.atMs);
+          if (atMs === null || atMs < priorCueAtMs || typeof cue.active !== "boolean" || cue.active === priorActive) return false;
+          priorCueAtMs = atMs;
+          priorActive = cue.active;
         }
       }
     }

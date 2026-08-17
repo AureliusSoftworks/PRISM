@@ -863,6 +863,15 @@ describe("audio voice normalization", () => {
     assert.equal(profile.elevenLabsDirection, "warm, hushed, with measured pauses");
   });
 
+  it("does not cut a generated direction cue through the middle of a word", () => {
+    assert.equal(
+      normalizeElevenLabsVoiceDirection(
+        "grounded conversational delivery with crisp phrasing",
+      ),
+      "grounded conversational delivery with crisp",
+    );
+  });
+
   it("detects modified texture recipes and restores canonical defaults", () => {
     assert.equal(botVoiceTextureIsModified({ ...BOT_VOICE_TEXTURE_RECIPES.lofi }), false);
     assert.equal(botVoiceTextureIsModified({ ...BOT_VOICE_TEXTURE_RECIPES.lofi, noise: 0.4 }), true);

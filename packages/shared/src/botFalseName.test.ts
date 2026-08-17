@@ -3,12 +3,15 @@ import { describe, it } from "node:test";
 
 import {
   BOT_FALSE_NAME_POOL_V1,
+  BOT_SESSION_SURNAME_POOL_V1,
   botFalseNameResponseConflictsV1,
   botFalseNameSelfCueV1,
+  botGivenNameFromLibraryNameV1,
   buildBotFalseNameSeedV1,
   createBotFalseNameStateFromSeedV1,
   normalizeBotFalseNameStateV1,
   pickBotFalseNameFromPoolV1,
+  pickBotSessionSurnameNameV1,
   rewriteBotFalseNameResponseV1,
 } from "./botFalseName.ts";
 
@@ -126,6 +129,47 @@ describe("botFalseName", () => {
         false,
       ),
       "As Elowen Thorn, I believe memory needs room to change.",
+    );
+  });
+
+  it("keeps the given name and attaches a session surname", () => {
+    assert.ok(BOT_SESSION_SURNAME_POOL_V1.length >= 40);
+    assert.equal(botGivenNameFromLibraryNameV1("Vex"), "Vex");
+    const seed = buildBotFalseNameSeedV1({
+      conversationId: "conv-surname",
+      holderBotId: "vex",
+      pool: "given_plus_random_surname",
+    });
+    const first = pickBotSessionSurnameNameV1(seed, "Vex");
+    const again = pickBotSessionSurnameNameV1(seed, "Vex");
+    assert.equal(first, again);
+    assert.match(first, /^Vex \S+$/u);
+    assert.notEqual(first, "Vex");
+    const state = createBotFalseNameStateFromSeedV1({
+      surface: "chat",
+      holderBotId: "vex",
+      holderBotName: "Vex",
+      seed,
+      pool: "given_plus_random_surname",
+      sourceMessageId: "msg-s",
+      occurredAt: "2026-08-16T18:00:00.000Z",
+    });
+    assert.equal(state.pool, "given_plus_random_surname");
+    assert.equal(state.believedName, first);
+    assert.match(
+      botFalseNameSelfCueV1(state.believedName, {
+        pool: "given_plus_random_surname",
+        holderName: "Vex",
+      }),
+      /keep answering to "Vex"/iu,
+    );
+    assert.equal(
+      botFalseNameResponseConflictsV1("I am Vex, and that is enough for now.", state),
+      false,
+    );
+    assert.equal(
+      botFalseNameResponseConflictsV1("My last name is Placeholder.", state),
+      true,
     );
   });
 

@@ -24,6 +24,7 @@ export type DebateAudiencePressureReaction =
 
 export type DebateAudienceModeratorOrderReason =
   | "shock"
+  | "restless"
   | "disruptive"
   | "sustained";
 
@@ -51,11 +52,25 @@ export const DEBATE_AUDIENCE_SUSTAINED_ROWDY_MS = {
 } as const satisfies Record<DebateFormalityId, number>;
 
 /**
- * Disruptive floor for sustained-order eligibility (meter band ≥ disruptive).
- * Restless murmur alone must not mint an automatic call to order — that kept
- * quiet plainspoken sittings getting "gallery will settle" overtime bridges.
+ * Disruptive floor. Crossing this still earns an immediate order in every
+ * Rowdiness, including quieter sittings.
  */
-export const DEBATE_AUDIENCE_SUSTAINED_ROWDY_PRESSURE = 70;
+export const DEBATE_AUDIENCE_DISRUPTIVE_PRESSURE = 70;
+
+/**
+ * Heated and free-for-all sittings may gavel once the gallery is Restless.
+ * Quieter Rowdiness still waits for Disruptive so a murmur does not mint
+ * "gallery will settle" overtime bridges.
+ */
+export const DEBATE_AUDIENCE_SUSTAINED_ROWDY_PRESSURE = 45;
+
+export function debateAudienceSustainedOrderPressure(
+  formality: DebateFormalityId,
+): number {
+  return formality === "heated" || formality === "free_for_all"
+    ? DEBATE_AUDIENCE_SUSTAINED_ROWDY_PRESSURE
+    : DEBATE_AUDIENCE_DISRUPTIVE_PRESSURE;
+}
 
 const DEBATE_AUDIENCE_EVENT_HEAT = {
   parliamentary: 5,
@@ -459,17 +474,32 @@ export function debateAudienceModeratorOrderPlan(args: {
       repeated: automaticOrders.length > 0,
     };
   }
-  if (pressureBefore < 70 && pressure >= 70) {
+  if (
+    pressureBefore < DEBATE_AUDIENCE_DISRUPTIVE_PRESSURE &&
+    pressure >= DEBATE_AUDIENCE_DISRUPTIVE_PRESSURE
+  ) {
     return {
       pressure,
       reason: "disruptive",
       repeated: automaticOrders.length > 0,
     };
   }
+  const sustainedFloor = debateAudienceSustainedOrderPressure(args.formality);
+  if (
+    sustainedFloor < DEBATE_AUDIENCE_DISRUPTIVE_PRESSURE &&
+    pressureBefore < sustainedFloor &&
+    pressure >= sustainedFloor
+  ) {
+    return {
+      pressure,
+      reason: "restless",
+      repeated: automaticOrders.length > 0,
+    };
+  }
 
   // Already rowdy and staying rowdy: intervene after enough estimated speak-time
   // so Daytime Showdown cannot sit loud forever without a call to order.
-  if (pressure >= DEBATE_AUDIENCE_SUSTAINED_ROWDY_PRESSURE) {
+  if (pressure >= sustainedFloor) {
     const sinceSequence = lastOrderSequence ?? 0;
     const restlessSpeakMs = args.events
       .filter(

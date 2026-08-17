@@ -10,12 +10,12 @@ import {
   type LocalVoiceSpeechprintStrength,
   type LocalVoiceSpeechprintV1,
   type VoiceAccentDefinitionId,
-} from "./audioVoice.js";
+} from "./audioVoice.ts";
 
-export const LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION = "2026.08.9";
+export const LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION = "2026.08.15.2";
 /** SHA-256 of the qualified Instant IPA matrix (see speechprint-runtime.test.ts). */
 export const LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256 =
-  "827e0b63e76fec41e23a641c390628c54100b445c04175342a8e790dc2e72359";
+  "12987cf84107a09a7e30f622abab894ab6121b86128ada16d6dae96b19040e91";
 
 export interface LocalVoiceSpeechprintCapabilityV1 {
   id: Exclude<LocalVoiceSpeechprintInfluence, "none">;
@@ -37,6 +37,44 @@ export interface VoiceAccentDefinitionV1 {
   premiumNativeAccentAliases: readonly string[];
   localSpeechprintFallback: LocalVoiceSpeechprintInfluence;
   localPronunciationBaseFallback?: "en-US" | "en-GB";
+}
+
+export interface VoiceAccentMapPointV1 {
+  x: number;
+  y: number;
+}
+
+export interface VoiceAccentMapAnchorV1 {
+  id: string;
+  point: VoiceAccentMapPointV1;
+  accentDefinitionId: VoiceAccentDefinitionId;
+  pronunciationBase?: "en-US" | "en-GB";
+  influence?: Exclude<LocalVoiceSpeechprintInfluence, "none">;
+  /** Co-located choices are explicit variants, never demographic inference. */
+  variantGroup?: string;
+  fieldDefault?: boolean;
+}
+
+export interface VoiceAccentFieldLayerV1 {
+  accentDefinitionId: VoiceAccentDefinitionId;
+  pronunciationBase: LocalVoicePronunciationBase;
+  influence: LocalVoiceSpeechprintInfluence;
+  weight: number;
+}
+
+export interface VoiceAccentFieldResolutionV1 {
+  legacy: boolean;
+  layers: readonly VoiceAccentFieldLayerV1[];
+}
+
+export function voiceAccentMapPointForCoordinates(
+  longitudeDegrees: number,
+  latitudeDegrees: number,
+): VoiceAccentMapPointV1 {
+  return {
+    x: (longitudeDegrees + 180) / 360,
+    y: (90 - latitudeDegrees) / 180,
+  };
 }
 
 const SUPPORTED_BASE_LOCALES = ["en-US", "en-GB"] as const;
@@ -191,6 +229,106 @@ const LOCAL_VOICE_SPEECHPRINT_DESCRIPTORS = [
     description: "A restrained Southern U.S. English pronunciation profile.",
   },
   {
+    id: "southern-california-english",
+    label: "Southern California English",
+    description: "A restrained coastal Southern California English profile.",
+  },
+  {
+    id: "bay-area-english",
+    label: "Bay Area English",
+    description: "A restrained San Francisco Bay Area English profile.",
+  },
+  {
+    id: "inland-north-english",
+    label: "Inland North English",
+    description: "A restrained Great Lakes Inland North English profile.",
+  },
+  {
+    id: "texas-english",
+    label: "Texas English",
+    description: "A restrained contemporary Texas English profile.",
+  },
+  {
+    id: "appalachian-english",
+    label: "Appalachian English",
+    description: "A restrained central and southern Appalachian English profile.",
+  },
+  {
+    id: "eastern-new-england-english",
+    label: "Eastern New England English",
+    description: "A restrained coastal Eastern New England English profile.",
+  },
+  {
+    id: "north-florida-english",
+    label: "North Florida English",
+    description: "A restrained North Florida and lower coastal South English profile.",
+  },
+  {
+    id: "miami-english",
+    label: "Miami English",
+    description: "A restrained Miami English regional profile without demographic inference.",
+  },
+  {
+    id: "modern-rp-english",
+    label: "Modern RP / Standard Southern British",
+    description: "A restrained contemporary non-regional Southern British profile.",
+  },
+  {
+    id: "cockney-english",
+    label: "Cockney English",
+    description: "A restrained traditional East London English profile.",
+  },
+  {
+    id: "estuary-english",
+    label: "Estuary English",
+    description: "A restrained Thames Estuary and southeast English profile.",
+  },
+  {
+    id: "multicultural-london-english",
+    label: "Multicultural London English",
+    description: "A restrained contemporary London multiethnolect profile selected only by name.",
+  },
+  {
+    id: "essex-english",
+    label: "Essex English",
+    description: "A restrained Essex and eastward Thames English profile.",
+  },
+  {
+    id: "parisian-french-influenced-english",
+    label: "Paris-region French-influenced English",
+    description: "A restrained Paris-region French pronunciation influence.",
+  },
+  {
+    id: "southern-french-influenced-english",
+    label: "Southern French-influenced English",
+    description: "A restrained southern French pronunciation and rhythm influence.",
+  },
+  {
+    id: "northern-german-influenced-english",
+    label: "Northern German-influenced English",
+    description: "A restrained northern German pronunciation influence.",
+  },
+  {
+    id: "bavarian-german-influenced-english",
+    label: "Bavarian German-influenced English",
+    description: "A restrained southern German pronunciation influence.",
+  },
+  {
+    id: "northern-italian-influenced-english",
+    label: "Northern Italian-influenced English",
+    description: "A restrained northern Italian pronunciation influence.",
+  },
+  {
+    id: "southern-italian-influenced-english",
+    label: "Southern Italian-influenced English",
+    description: "A restrained southern Italian pronunciation and rhythm influence.",
+  },
+  {
+    id: "andalusian-spanish-influenced-english",
+    label: "Andalusian Spanish-influenced English",
+    description: "A restrained Andalusian Spanish pronunciation influence.",
+  },
+  {
     id: "caribbean-english",
     label: "Caribbean English",
     description: "A restrained Caribbean English pronunciation profile.",
@@ -335,6 +473,221 @@ export const VOICE_ACCENT_DEFINITIONS: readonly VoiceAccentDefinitionV1[] = [
     localSpeechprintFallback: capability.id,
   })),
 ];
+
+const VOICE_ACCENT_MAP_COORDINATES = {
+  "spanish-influenced-english": [-3.7, 40.4],
+  "latin-american-spanish-influenced-english": [-74.07, 4.71],
+  "mexican-spanish-influenced-english": [-99.13, 19.43],
+  "brazilian-portuguese-influenced-english": [-47.9, -15.8],
+  "european-portuguese-influenced-english": [-9.14, 38.72],
+  "mandarin-influenced-english": [116.4, 39.9],
+  "cantonese-influenced-english": [114.17, 22.32],
+  "japanese-influenced-english": [139.7, 35.7],
+  "korean-influenced-english": [127, 37.6],
+  "indian-english": [77.2, 28.6],
+  "pakistani-english": [73.05, 33.68],
+  "bengali-influenced-english": [90.41, 23.81],
+  "sri-lankan-english": [79.86, 6.93],
+  "french-influenced-english": [2.35, 48.86],
+  "german-influenced-english": [13.4, 52.52],
+  "dutch-influenced-english": [4.9, 52.37],
+  "nordic-influenced-english": [18.07, 59.33],
+  "polish-influenced-english": [21.01, 52.23],
+  "greek-influenced-english": [23.73, 37.98],
+  "russian-influenced-english": [37.62, 55.75],
+  "italian-influenced-english": [12.5, 41.9],
+  "irish-english": [-6.26, 53.35],
+  "scottish-english": [-3.19, 55.95],
+  "australian-english": [149.13, -35.28],
+  "new-zealand-english": [174.78, -41.29],
+  "canadian-english": [-75.7, 45.42],
+  "new-york-english": [-74.01, 40.71],
+  "southern-us-english": [-84.39, 33.75],
+  "southern-california-english": [-118.24, 34.05],
+  "bay-area-english": [-122.27, 37.8],
+  "inland-north-english": [-87.63, 41.88],
+  "texas-english": [-97.74, 30.27],
+  "appalachian-english": [-82.55, 35.6],
+  "eastern-new-england-english": [-71.06, 42.36],
+  "north-florida-english": [-84.28, 30.44],
+  "miami-english": [-80.19, 25.76],
+  "modern-rp-english": [-0.13, 51.51],
+  "cockney-english": [-0.13, 51.51],
+  "estuary-english": [-0.13, 51.51],
+  "multicultural-london-english": [-0.13, 51.51],
+  "essex-english": [0.47, 51.73],
+  "parisian-french-influenced-english": [2.35, 48.86],
+  "southern-french-influenced-english": [5.37, 43.3],
+  "northern-german-influenced-english": [10, 53.55],
+  "bavarian-german-influenced-english": [11.58, 48.14],
+  "northern-italian-influenced-english": [9.19, 45.46],
+  "southern-italian-influenced-english": [14.27, 40.85],
+  "andalusian-spanish-influenced-english": [-5.98, 37.39],
+  "caribbean-english": [-76.79, 17.97],
+  "north-african-arabic-influenced-english": [10.18, 36.8],
+  "middle-eastern-arabic-influenced-english": [46.68, 24.71],
+  "persian-influenced-english": [51.39, 35.69],
+  "turkish-influenced-english": [32.86, 39.93],
+  "nigerian-english": [3.38, 6.52],
+  "east-african-english": [36.82, -1.29],
+  "south-african-english": [28.05, -26.2],
+  "filipino-english": [120.98, 14.6],
+  "vietnamese-influenced-english": [105.83, 21.03],
+  "thai-influenced-english": [100.5, 13.76],
+  "indonesian-influenced-english": [106.85, -6.2],
+  "singapore-english": [103.82, 1.35],
+  "pacific-island-english": [178.45, -18.14],
+} as const satisfies Record<
+  Exclude<LocalVoiceSpeechprintInfluence, "none">,
+  readonly [number, number]
+>;
+
+const LONDON_VARIANTS = new Set<LocalVoiceSpeechprintInfluence>([
+  "modern-rp-english",
+  "cockney-english",
+  "estuary-english",
+  "multicultural-london-english",
+]);
+
+export const VOICE_ACCENT_MAP_ANCHORS: readonly VoiceAccentMapAnchorV1[] = [
+  {
+    id: "base-en-US",
+    point: voiceAccentMapPointForCoordinates(-98.5, 39.8),
+    pronunciationBase: "en-US",
+    accentDefinitionId: "american-english",
+  },
+  {
+    id: "base-en-GB",
+    point: voiceAccentMapPointForCoordinates(-2.5, 54.2),
+    pronunciationBase: "en-GB",
+    accentDefinitionId: "british-english",
+  },
+  ...LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.map((capability) => {
+    const [longitude, latitude] = VOICE_ACCENT_MAP_COORDINATES[capability.id];
+    return {
+      id: `influence-${capability.id}`,
+      point: voiceAccentMapPointForCoordinates(longitude, latitude),
+      influence: capability.id,
+      accentDefinitionId: capability.id,
+      ...(LONDON_VARIANTS.has(capability.id)
+        ? {
+            variantGroup: "london",
+            ...(capability.id === "modern-rp-english"
+              ? { fieldDefault: true }
+              : {}),
+          }
+        : {}),
+    } satisfies VoiceAccentMapAnchorV1;
+  }),
+];
+
+export function normalizeVoiceAccentMapPoint(
+  value: unknown,
+): VoiceAccentMapPointV1 | null {
+  if (!value || typeof value !== "object") return null;
+  const point = value as { x?: unknown; y?: unknown };
+  if (typeof point.x !== "number" || typeof point.y !== "number") return null;
+  if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+  return {
+    x: Math.max(0, Math.min(1, point.x)),
+    y: Math.max(0, Math.min(1, point.y)),
+  };
+}
+
+function voiceAccentMapDistanceSquared(
+  left: VoiceAccentMapPointV1,
+  right: VoiceAccentMapPointV1,
+): number {
+  const rawX = Math.abs(left.x - right.x);
+  const dx = Math.min(rawX, 1 - rawX);
+  const latitudeScale = Math.max(0.28, Math.cos((left.y - 0.5) * Math.PI));
+  const dy = left.y - right.y;
+  return (dx * latitudeScale) ** 2 + dy ** 2;
+}
+
+function voiceAccentMapLocationKey(anchor: VoiceAccentMapAnchorV1): string {
+  return anchor.variantGroup ?? `${anchor.point.x.toFixed(6)}:${anchor.point.y.toFixed(6)}`;
+}
+
+function fieldAnchorForLocation(
+  anchors: readonly VoiceAccentMapAnchorV1[],
+  explicitId: VoiceAccentDefinitionId | null,
+): VoiceAccentMapAnchorV1 {
+  return (
+    anchors.find((anchor) => anchor.accentDefinitionId === explicitId) ??
+    anchors.find((anchor) => anchor.fieldDefault) ??
+    anchors[0]!
+  );
+}
+
+export function resolveVoiceAccentField(args: {
+  point?: unknown;
+  accentDefinitionId?: unknown;
+  pronunciationBase: unknown;
+  speechprintInfluence: unknown;
+  limit?: number;
+}): VoiceAccentFieldResolutionV1 {
+  const point = normalizeVoiceAccentMapPoint(args.point);
+  const explicitId = normalizeVoiceAccentDefinitionId(args.accentDefinitionId);
+  if (!point) {
+    const fallback = resolveLocalAccentFallback(args);
+    const definition =
+      voiceAccentDefinitionForId(explicitId) ??
+      voiceAccentDefinitionForLegacyProfile(args);
+    return {
+      legacy: true,
+      layers: definition
+        ? [
+            {
+              accentDefinitionId: definition.id,
+              pronunciationBase: fallback.pronunciationBase,
+              influence: fallback.speechprintInfluence,
+              weight: 1,
+            },
+          ]
+        : [],
+    };
+  }
+
+  const locations = new Map<string, VoiceAccentMapAnchorV1[]>();
+  for (const anchor of VOICE_ACCENT_MAP_ANCHORS) {
+    const key = voiceAccentMapLocationKey(anchor);
+    locations.set(key, [...(locations.get(key) ?? []), anchor]);
+  }
+  const ranked = [...locations.values()]
+    .map((anchors) => ({
+      anchor: fieldAnchorForLocation(anchors, explicitId),
+      distanceSquared: voiceAccentMapDistanceSquared(point, anchors[0]!.point),
+      explicit: anchors.some((anchor) => anchor.accentDefinitionId === explicitId),
+    }))
+    .sort((left, right) => left.distanceSquared - right.distanceSquared)
+    .slice(0, Math.max(1, Math.min(4, Math.floor(args.limit ?? 3))));
+  const rawWeights = ranked.map((entry) => {
+    const proximity = 1 / (entry.distanceSquared + 0.00018);
+    return proximity ** 1.35 * (entry.explicit ? 2.75 : 1);
+  });
+  const total = rawWeights.reduce((sum, weight) => sum + weight, 0) || 1;
+  const layers = ranked
+    .map((entry, index) => {
+      const definition = voiceAccentDefinitionForId(
+        entry.anchor.accentDefinitionId,
+      );
+      return {
+        accentDefinitionId: entry.anchor.accentDefinitionId,
+        pronunciationBase:
+          entry.anchor.pronunciationBase ??
+          definition?.localPronunciationBaseFallback ??
+          normalizeLocalVoicePronunciationBase(args.pronunciationBase),
+        influence:
+          entry.anchor.influence ??
+          definition?.localSpeechprintFallback ??
+          "none",
+        weight: rawWeights[index]! / total,
+      };
+    })
+    .sort((left, right) => right.weight - left.weight);
+  return { legacy: false, layers };
+}
 
 export function voiceAccentDefinitionForId(
   value: unknown,
@@ -915,6 +1268,288 @@ const SPEECHPRINT_RULES: Record<
       replacement: "eː",
       optional: true,
     },
+  ],
+  "southern-california-english": [
+    { id: "cot-caught-merge", tier: "light", pattern: /ɔ/gu, replacement: "ɑ" },
+    {
+      id: "trap-nasal-raise",
+      tier: "balanced",
+      pattern: /æ(?=[mnŋ])/gu,
+      replacement: "eə",
+      optional: true,
+    },
+    {
+      id: "goose-front",
+      tier: "strong",
+      pattern: /u/gu,
+      replacement: "ʉ",
+      optional: true,
+    },
+  ],
+  "bay-area-english": [
+    { id: "cot-caught-merge", tier: "light", pattern: /ɔ/gu, replacement: "ɑ" },
+    {
+      id: "goose-front",
+      tier: "balanced",
+      pattern: /u/gu,
+      replacement: "ʉ",
+      optional: true,
+    },
+    {
+      id: "goat-front",
+      tier: "strong",
+      pattern: /oʊ/gu,
+      replacement: "əʉ",
+      optional: true,
+    },
+  ],
+  "inland-north-english": [
+    { id: "trap-raise", tier: "light", pattern: /æ/gu, replacement: "eə" },
+    {
+      id: "lot-front",
+      tier: "balanced",
+      pattern: /ɑ/gu,
+      replacement: "a",
+      optional: true,
+    },
+    {
+      id: "thought-lower",
+      tier: "strong",
+      pattern: /ɔ/gu,
+      replacement: "ɑ",
+      optional: true,
+    },
+  ],
+  "texas-english": [
+    { id: "pin-pen-merge", tier: "light", pattern: /ɛ(?=[mnŋ])/gu, replacement: "ɪ" },
+    {
+      id: "price-monophthong-voiced",
+      tier: "balanced",
+      pattern: /aɪ(?=[bdgvmnlɹzʒ])/gu,
+      replacement: "aː",
+    },
+    {
+      id: "face-monophthong",
+      tier: "strong",
+      pattern: /eɪ/gu,
+      replacement: "eː",
+      optional: true,
+    },
+  ],
+  "appalachian-english": [
+    { id: "pin-pen-merge", tier: "light", pattern: /ɛ(?=[mnŋ])/gu, replacement: "ɪ" },
+    { id: "price-monophthong", tier: "balanced", pattern: /aɪ/gu, replacement: "aː" },
+    {
+      id: "goat-monophthong",
+      tier: "strong",
+      pattern: /oʊ/gu,
+      replacement: "oː",
+      optional: true,
+    },
+  ],
+  "eastern-new-england-english": [
+    {
+      id: "postvocalic-r-drop",
+      tier: "light",
+      pattern: /(?<=[iɪeɛæaɑɒɔoʊuʌəɚɝɐɜɞœøyɨʉ])ɹ(?=[ptkbdgfvθðszʃʒhmnŋlwj,.;:!?)]|$)/gu,
+      replacement: "",
+    },
+    { id: "rhotacized-schwa", tier: "light", pattern: /ɚ/gu, replacement: "ə" },
+    { id: "rhotacized-nurse", tier: "light", pattern: /ɝ/gu, replacement: "ɜ" },
+    {
+      id: "start-broad",
+      tier: "balanced",
+      pattern: /ɑɹ/gu,
+      replacement: "aː",
+      optional: true,
+    },
+  ],
+  "north-florida-english": [
+    { id: "pin-pen-merge", tier: "light", pattern: /ɛ(?=[mnŋ])/gu, replacement: "ɪ" },
+    {
+      id: "price-monophthong-voiced",
+      tier: "balanced",
+      pattern: /aɪ(?=[bdgvmnlɹzʒ])/gu,
+      replacement: "aː",
+      optional: true,
+    },
+    {
+      id: "face-monophthong",
+      tier: "strong",
+      pattern: /eɪ/gu,
+      replacement: "eː",
+      optional: true,
+    },
+  ],
+  "miami-english": [
+    { id: "lot-front", tier: "light", pattern: /ɑ/gu, replacement: "a" },
+    {
+      id: "eth-d",
+      tier: "balanced",
+      pattern: /ð/gu,
+      replacement: "d",
+      optional: true,
+    },
+    {
+      id: "r-tap",
+      tier: "strong",
+      pattern: /ɹ/gu,
+      replacement: "ɾ",
+      optional: true,
+    },
+  ],
+  "modern-rp-english": [
+    {
+      id: "postvocalic-r-drop",
+      tier: "light",
+      pattern: /(?<=[iɪeɛæaɑɒɔoʊuʌəɚɝɐɜɞœøyɨʉ])ɹ(?=[ptkbdgfvθðszʃʒhmnŋlwj,.;:!?)]|$)/gu,
+      replacement: "",
+    },
+    { id: "rhotacized-schwa", tier: "light", pattern: /ɚ/gu, replacement: "ə" },
+    { id: "rhotacized-nurse", tier: "light", pattern: /ɝ/gu, replacement: "ɜː" },
+    { id: "goat-british", tier: "balanced", pattern: /oʊ/gu, replacement: "əʊ" },
+  ],
+  "cockney-english": [
+    { id: "h-drop", tier: "light", pattern: /h/gu, replacement: "", optional: true },
+    {
+      id: "postvocalic-r-drop",
+      tier: "light",
+      pattern:
+        /(?<=[iɪeɛæaɑɒɔoʊuʌəɚɝɐɜɞœøyɨʉ])ɹ(?=[ptkbdgfvθðszʃʒhmnŋlwj,.;:!?)]|$)/gu,
+      replacement: "",
+    },
+    { id: "rhotacized-schwa", tier: "light", pattern: /ɚ/gu, replacement: "ə" },
+    { id: "rhotacized-nurse", tier: "light", pattern: /ɝ/gu, replacement: "ɜː" },
+    {
+      id: "theta-front",
+      tier: "balanced",
+      pattern: /θ/gu,
+      replacement: "f",
+    },
+    { id: "eth-front", tier: "balanced", pattern: /ð/gu, replacement: "v" },
+    {
+      id: "dress-after-w-before-nt",
+      tier: "balanced",
+      pattern: /wɛ(?=nt)/gu,
+      replacement: "weɪ",
+    },
+    {
+      id: "stressed-kit-lengthen-before-n",
+      tier: "balanced",
+      pattern: /ˈɪ(?=n)/gu,
+      replacement: "ˈiː",
+    },
+    {
+      id: "weak-schwa-before-nt",
+      tier: "balanced",
+      pattern: /ə(?=nt)/gu,
+      replacement: "ɪ",
+    },
+    { id: "t-glottal-final", tier: "balanced", pattern: /t(?=[,.;:!?)]|$)/gu, replacement: "ʔ" },
+    {
+      id: "t-glottal-before-schwa",
+      tier: "balanced",
+      pattern: /(?<=[iɪeɛæaɑɒɔoʊuʌəɚɝɐɜɞœøyɨʉː])t(?=ə)/gu,
+      replacement: "ʔ",
+    },
+    {
+      id: "article-centralize",
+      tier: "balanced",
+      pattern: /^(?:ɐ|ə)(?=[,.;:!?)]|$)/gu,
+      replacement: "ə",
+    },
+    {
+      id: "of-reduction",
+      tier: "balanced",
+      pattern: /^ɒv(?=[,.;:!?)]|$)/gu,
+      replacement: "ə",
+    },
+    {
+      id: "syllabic-l-vocalize",
+      tier: "balanced",
+      pattern: /əl(?=[,.;:!?)]|$)/gu,
+      replacement: "o",
+    },
+    {
+      id: "t-glottal-between-vowels",
+      tier: "strong",
+      pattern: /(?<=[iɪeɛæaɑɒɔoʊuʌəɚɝɐɜɞœøyɨʉː])t(?=[iɪeɛæaɑɒɔoʊuʌəɚɝɐɜɞœøyɨʉ])/gu,
+      replacement: "ʔ",
+    },
+    { id: "price-broad", tier: "strong", pattern: /aɪ/gu, replacement: "ɑɪ", optional: true },
+  ],
+  "estuary-english": [
+    {
+      id: "postvocalic-r-drop",
+      tier: "light",
+      pattern: /(?<=[iɪeɛæaɑɒɔoʊuʌəɚɝɐɜɞœøyɨʉ])ɹ(?=[ptkbdgfvθðszʃʒhmnŋlwj,.;:!?)]|$)/gu,
+      replacement: "",
+    },
+    { id: "l-vocalize", tier: "balanced", pattern: /l(?=[,.;:!?)]?$)/gu, replacement: "w", optional: true },
+    { id: "theta-front", tier: "strong", pattern: /θ/gu, replacement: "f", optional: true },
+  ],
+  "multicultural-london-english": [
+    { id: "theta-stop", tier: "light", pattern: /θ/gu, replacement: "t", optional: true },
+    { id: "eth-stop", tier: "balanced", pattern: /ð/gu, replacement: "d", optional: true },
+    { id: "price-front", tier: "balanced", pattern: /aɪ/gu, replacement: "ɑɪ" },
+    { id: "goat-front", tier: "strong", pattern: /əʊ|oʊ/gu, replacement: "oʊ", optional: true },
+  ],
+  "essex-english": [
+    {
+      id: "postvocalic-r-drop",
+      tier: "light",
+      pattern: /(?<=[iɪeɛæaɑɒɔoʊuʌəɚɝɐɜɞœøyɨʉ])ɹ(?=[ptkbdgfvθðszʃʒhmnŋlwj,.;:!?)]|$)/gu,
+      replacement: "",
+    },
+    { id: "l-vocalize", tier: "balanced", pattern: /l(?=[,.;:!?)]?$)/gu, replacement: "w" },
+    { id: "theta-front", tier: "strong", pattern: /θ/gu, replacement: "f", optional: true },
+  ],
+  "parisian-french-influenced-english": [
+    // Paris is a specific French-English profile, not a light-weight alias
+    // for France on the map. Keep the shared French foundation so its Strong
+    // setting remains audible in Instant and in Premium's target IPA path.
+    { id: "theta-s", tier: "light", pattern: /θ/gu, replacement: "s" },
+    { id: "eth-z", tier: "balanced", pattern: /ð/gu, replacement: "z" },
+    { id: "strut-open-a", tier: "balanced", pattern: /ʌ/gu, replacement: "a" },
+    { id: "r-uvular", tier: "balanced", pattern: /ɹ/gu, replacement: "ʁ" },
+    // These monophthongs keep Strong recognizably Paris-region French rather
+    // than making it indistinguishable from the broader French preset.
+    { id: "face-monophthong", tier: "strong", pattern: /eɪ/gu, replacement: "e" },
+    { id: "goat-monophthong", tier: "strong", pattern: /oʊ/gu, replacement: "o" },
+    { id: "near-close-i", tier: "strong", pattern: /ɪ/gu, replacement: "i" },
+    { id: "h-drop", tier: "strong", pattern: /h/gu, replacement: "" },
+  ],
+  "southern-french-influenced-english": [
+    { id: "theta-s", tier: "light", pattern: /θ/gu, replacement: "s" },
+    { id: "r-uvular", tier: "balanced", pattern: /ɹ/gu, replacement: "ʁ", optional: true },
+    { id: "schwa-full", tier: "balanced", pattern: /ə/gu, replacement: "e", optional: true },
+  ],
+  "northern-german-influenced-english": [
+    { id: "w-labiodental", tier: "light", pattern: /w/gu, replacement: "v" },
+    { id: "r-uvular", tier: "balanced", pattern: /ɹ/gu, replacement: "ʁ", optional: true },
+    { id: "final-d-devoice", tier: "strong", pattern: /d(?=[,.;:!?)]?$)/gu, replacement: "t", optional: true },
+  ],
+  "bavarian-german-influenced-english": [
+    { id: "w-labiodental", tier: "light", pattern: /w/gu, replacement: "v" },
+    { id: "r-tap", tier: "balanced", pattern: /ɹ/gu, replacement: "ɾ", optional: true },
+    { id: "final-z-devoice", tier: "strong", pattern: /z(?=[,.;:!?)]?$)/gu, replacement: "s", optional: true },
+  ],
+  "northern-italian-influenced-english": [
+    { id: "r-tap", tier: "light", pattern: /ɹ/gu, replacement: "ɾ" },
+    { id: "theta-t", tier: "balanced", pattern: /θ/gu, replacement: "t", optional: true },
+    { id: "near-close-i", tier: "strong", pattern: /ɪ/gu, replacement: "i", optional: true },
+  ],
+  "southern-italian-influenced-english": [
+    { id: "r-tap", tier: "light", pattern: /ɹ/gu, replacement: "ɾ" },
+    { id: "theta-t", tier: "balanced", pattern: /θ/gu, replacement: "t" },
+    { id: "strut-open-a", tier: "balanced", pattern: /ʌ/gu, replacement: "a" },
+    { id: "final-schwa", tier: "strong", pattern: /(?<=[ptkbdgfvszʃʒmnlrɾ])(?=[,.;:!?)]?$)/gu, replacement: "ə", optional: true },
+  ],
+  "andalusian-spanish-influenced-english": [
+    { id: "theta-s", tier: "light", pattern: /θ/gu, replacement: "s" },
+    { id: "eth-d", tier: "balanced", pattern: /ð/gu, replacement: "d" },
+    { id: "r-tap", tier: "balanced", pattern: /ɹ/gu, replacement: "ɾ", optional: true },
+    { id: "final-s-soften", tier: "strong", pattern: /s(?=[,.;:!?)]?$)/gu, replacement: "h", optional: true },
   ],
   "latin-american-spanish-influenced-english": [
     { id: "theta-t", tier: "light", pattern: /θ/gu, replacement: "t" },
@@ -1508,6 +2143,11 @@ const STRESS_RHYTHM_PROFILES: Partial<
     schwaRestore: "ə",
     rhoticRestore: "œ",
   },
+  "parisian-french-influenced-english": {
+    bias: "final",
+    schwaRestore: "ə",
+    rhoticRestore: "œ",
+  },
 };
 
 /**
@@ -1534,6 +2174,7 @@ const MELODY_PROFILES: Partial<
   "brazilian-portuguese-influenced-english": { contour: "penult-nuclear" },
   "european-portuguese-influenced-english": { contour: "penult-nuclear" },
   "french-influenced-english": { contour: "final-group" },
+  "parisian-french-influenced-english": { contour: "final-group" },
 };
 
 interface IpaNucleus {
@@ -1717,6 +2358,15 @@ function shouldSkipStressRhythmWord(word: string): boolean {
   if (/\d/u.test(word)) return true;
   if (/[A-Z]{2,}/u.test(word)) return true;
   if (/[_/\\@#]/u.test(word)) return true;
+  return false;
+}
+
+function shouldSkipPhonemeRules(word: string): boolean {
+  const { body } = splitTrailingPunctuation(word);
+  if (!body) return true;
+  if (/\d/u.test(body)) return true;
+  if (/[A-Z]{2,}/u.test(body)) return true;
+  if (/[_/\\@#]/u.test(body)) return true;
   return false;
 }
 
@@ -1985,6 +2635,9 @@ export function applyLocalVoiceSpeechprintMelodyToIpa(args: {
 export function applyLocalVoiceSpeechprintToIpa(args: {
   ipa: string;
   speechprint: LocalVoiceSpeechprintV1;
+  /** Continuous-map activation. Omitted preserves the exact legacy path. */
+  activationWeight?: number;
+  includeProsody?: boolean;
 }): { ipa: string; appliedRuleIds: string[] } {
   const influence = normalizeLocalVoiceSpeechprintInfluence(
     args.speechprint.influence,
@@ -1998,21 +2651,32 @@ export function applyLocalVoiceSpeechprintToIpa(args: {
     `speechprint-${influence}`.slice(0, 64),
   );
   const maximumTier = TIER_WEIGHT[strength];
+  const activationWeight = Math.max(
+    0,
+    Math.min(1, args.activationWeight ?? 1),
+  );
+  if (activationWeight <= 0) return { ipa: args.ipa, appliedRuleIds: [] };
   const appliedRuleIds = new Set<string>();
   const afterSwaps = args.ipa
     .split(/(\s+)/gu)
     .map((word) => {
       if (!word || /^\s+$/u.test(word)) return word;
+      if (shouldSkipPhonemeRules(word)) return word;
       let result = word;
       for (const rule of SPEECHPRINT_RULES[influence]) {
         if (TIER_WEIGHT[rule.tier] > maximumTier) continue;
-        if (
+        if (activationWeight < 1) {
+          const probability =
+            activationWeight *
+            (rule.optional ? optionalRuleThreshold(strength) : 1);
+          if (
+            stableUnitInterval(`${seed}:field:${rule.id}:${word}`) >= probability
+          ) continue;
+        } else if (
           rule.optional &&
           stableUnitInterval(`${seed}:${rule.id}:${word}`) >=
             optionalRuleThreshold(strength)
-        ) {
-          continue;
-        }
+        ) continue;
         const next = result.replace(rule.pattern, rule.replacement);
         if (next !== result) appliedRuleIds.add(rule.id);
         result = next;
@@ -2020,6 +2684,10 @@ export function applyLocalVoiceSpeechprintToIpa(args: {
       return result;
     })
     .join("");
+
+  if (args.includeProsody === false) {
+    return { ipa: afterSwaps, appliedRuleIds: [...appliedRuleIds].sort() };
+  }
 
   const rhythmProfile = STRESS_RHYTHM_PROFILES[influence];
   const afterRhythm = rhythmProfile
@@ -2047,4 +2715,59 @@ export function applyLocalVoiceSpeechprintToIpa(args: {
   });
   for (const ruleId of melody.appliedRuleIds) appliedRuleIds.add(ruleId);
   return { ipa: melody.ipa, appliedRuleIds: [...appliedRuleIds].sort() };
+}
+
+/**
+ * Applies a continuous Accent Map field as one restrained primary layer plus
+ * sparse deterministic neighboring features. The source transcript and voice
+ * identity never enter this provider-neutral IPA projection.
+ */
+export function applyVoiceAccentFieldToIpa(args: {
+  ipa: string;
+  resolution: VoiceAccentFieldResolutionV1;
+  strength: LocalVoiceSpeechprintStrength;
+  variationSeed: string;
+}): { ipa: string; appliedRuleIds: string[] } {
+  if (args.resolution.legacy) {
+    const layer = args.resolution.layers[0];
+    if (!layer || layer.influence === "none") {
+      return { ipa: args.ipa, appliedRuleIds: [] };
+    }
+    return applyLocalVoiceSpeechprintToIpa({
+      ipa: args.ipa,
+      speechprint: {
+        influence: layer.influence,
+        strength: args.strength,
+        variationSeed: args.variationSeed,
+      },
+    });
+  }
+
+  let ipa = args.ipa;
+  const appliedRuleIds = new Set<string>();
+  for (const [index, layer] of args.resolution.layers.entries()) {
+    if (layer.influence === "none") continue;
+    const activationWeight =
+      index === 0
+        ? Math.min(1, 0.35 + layer.weight * 0.8)
+        : Math.min(0.32, layer.weight * 0.45);
+    const applied = applyLocalVoiceSpeechprintToIpa({
+      ipa,
+      speechprint: {
+        influence: layer.influence,
+        strength: args.strength,
+        variationSeed: `${args.variationSeed}:${layer.accentDefinitionId}`.slice(
+          0,
+          64,
+        ),
+      },
+      activationWeight,
+      includeProsody: false,
+    });
+    ipa = applied.ipa;
+    for (const ruleId of applied.appliedRuleIds) {
+      appliedRuleIds.add(`${layer.accentDefinitionId}:${ruleId}`);
+    }
+  }
+  return { ipa, appliedRuleIds: [...appliedRuleIds].sort() };
 }

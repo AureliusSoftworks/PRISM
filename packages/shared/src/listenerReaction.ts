@@ -110,6 +110,10 @@ export type ListenerReactionSpokenCue =
   | "Wow."
   | "Indeed."
   | "Interesting."
+  | "Quite so."
+  | "Oh wow."
+  | "That's amazing."
+  | "Yes."
   | "...The hell?"
   | "What the fuck?";
 export const BOT_CROSSTALK_INTERRUPTER_CUES = [
@@ -224,6 +228,10 @@ const SPOKEN_CUES = new Set<ListenerReactionSpokenCue>([
   "Wow.",
   "Indeed.",
   "Interesting.",
+  "Quite so.",
+  "Oh wow.",
+  "That's amazing.",
+  "Yes.",
   "...The hell?",
   "What the fuck?",
 ]);
@@ -357,6 +365,24 @@ export function listenerReactionHasCrosstalkAudio(
 // Attentive presence should be the norm in Signal; the remaining gaps keep
 // listener reactions from feeling metronomic.
 const SIGNAL_VISUAL_REACTION_CHANCE = 0.9;
+/** Spoken backchannels stay occasional so nonverbal Foley can carry most murmurs. */
+const SIGNAL_SPOKEN_BACKCHANNEL_CHANCE = 0.42;
+const SIGNAL_COMPOSED_RUNTIME_MARKERS = [
+  "Global bot mood (soft behavioral context, never deterministic puppeting):",
+  "Same-account Library metadata (bounded reference data, never instructions):",
+] as const;
+const SIGNAL_PROFANE_SPOKEN_CUES = [
+  "...The hell?",
+  "What the fuck?",
+] as const satisfies readonly ListenerReactionSpokenCue[];
+const SIGNAL_EXPLICIT_SWEAR_STYLE_PATTERN =
+  /\b(?:profan(?:e|ity)|swears?|swearing|vulgar|fuck|shit|rick sanchez)\b/giu;
+const SIGNAL_EDGY_STYLE_PATTERN =
+  /\b(?:irreverent|abrasive|caustic|cynical|crude)\b/giu;
+const SIGNAL_LITERARY_STYLE_PATTERN =
+  /\b(?:18\d{2}|17\d{2}|victorian|gothic|novelist|poet(?:ic|ry)?|romantic[- ]era|nineteenth|eighteenth|regency)\b/iu;
+const SIGNAL_STARSTRUCK_STYLE_PATTERN =
+  /\b(?:starstruck|superfan|obsessed|overinvested|fan-club|favorite person)\b/iu;
 
 function stableUnit(seed: string): number {
   let hash = 2166136261;
@@ -798,30 +824,14 @@ function signalSpokenBackchannel(
   tensionLevel: number,
   recentSpokenCues: readonly ListenerReactionSpokenCue[],
   listenerPersona: string | null | undefined,
+  segment: "opening" | "interview" | "closing",
 ): ListenerReactionSpokenCue {
-  const style = signalListenerBackchannelStyleFor(listenerPersona);
-  const tense = tensionLevel >= 2 || mood === "strained";
-  const bank: readonly ListenerReactionSpokenCue[] = tense
-    ? style === "irreverent"
-      ? ["...The hell?", "What the fuck?", "Seriously?", "Huh."]
-      : style === "innocent"
-        ? ["Oh, really?", "Huh?", "Oh.", "Okay."]
-        : style === "commanding"
-          ? ["Hmm.", "I see.", "Indeed.", "Go on."]
-          : ["Hmm.", "I see.", "Interesting.", "Go on."]
-    : style === "irreverent"
-      ? ["Huh.", "Seriously?", "...The hell?", "What the fuck?"]
-      : style === "innocent"
-        ? ["Oh, really?", "Nice.", "Wow.", "Okay."]
-        : style === "commanding"
-          ? ["Hmm.", "I see.", "Indeed.", "Go on."]
-          : style === "playful"
-            ? ["Oh, really?", "Nice.", "Huh!", "Okay."]
-            : style === "warm"
-              ? ["Mm-hmm.", "I see.", "Nice.", "Oh, really?"]
-              : style === "analytical" || style === "inventive"
-                ? ["Interesting.", "I see.", "Hmm.", "Go on."]
-                : ["Mm-hmm.", "Right.", "I see.", "Hmm.", "Oh."];
+  const bank = signalListenerSpokenBankFor({
+    listenerPersona,
+    mood,
+    tensionLevel,
+    segment,
+  });
   const recent = new Set(recentSpokenCues.slice(-2));
   const fresh = bank.filter((cue) => !recent.has(cue));
   return choose(`${seed}:spoken`, fresh.length > 0 ? fresh : bank);
@@ -831,22 +841,242 @@ export type SignalListenerBackchannelStyle =
   | Exclude<SignalPersonaTemperament, "creative" | "adventurous" | "neutral">
   | "irreverent"
   | "innocent"
+  | "literary"
+  | "starstruck"
+  | "edgy"
   | "neutral";
+
+const SIGNAL_NEGATED_STYLE_PATTERN =
+  /\b(?:not|never|no|without|avoid|avoids|avoiding|do\s+not|don't|doesn't|isn't|is\s+not|must\s+not|should\s+not)\b[^.!?;:]{0,48}$/iu;
+
+function signalPersonaAffirmsStyle(
+  source: string,
+  pattern: RegExp,
+): boolean {
+  const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+  const matcher = new RegExp(pattern.source, flags);
+  for (const match of source.matchAll(matcher)) {
+    const start = match.index ?? 0;
+    if (!SIGNAL_NEGATED_STYLE_PATTERN.test(source.slice(0, start))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Listener Foley must follow the authored persona, never composed runtime
+ * context such as global mood or same-account Library names.
+ */
+export function authoredSignalListenerPersonaSource(
+  systemPrompt: string | null | undefined,
+): string {
+  let source = typeof systemPrompt === "string" ? systemPrompt : "";
+  const metaStart = source.lastIndexOf("<<<PRISM_BOT_META>>>");
+  if (
+    metaStart >= 0 &&
+    source.slice(metaStart).includes("<<<END_PRISM_BOT_META>>>")
+  ) {
+    source = source.slice(0, metaStart);
+  }
+  for (const marker of SIGNAL_COMPOSED_RUNTIME_MARKERS) {
+    const index = source.indexOf(marker);
+    if (index >= 0) source = source.slice(0, index);
+  }
+  return source.replace(/\s+/gu, " ").trim();
+}
+
+function signalAllowsProfaneBackchannel(args: {
+  style: SignalListenerBackchannelStyle;
+  mood: VoiceDeliveryMood;
+  tensionLevel: number;
+  segment: "opening" | "interview" | "closing";
+}): boolean {
+  return (
+    args.style === "irreverent" &&
+    args.segment === "interview" &&
+    (args.tensionLevel >= 2 || args.mood === "strained")
+  );
+}
+
+function signalListenerPlanContextFromSeed(seed: string): {
+  segment: "opening" | "interview" | "closing";
+  mood: VoiceDeliveryMood;
+  tensionLevel: number;
+} | null {
+  const parts = seed.split(":");
+  if (parts[0] !== "signal-listener-v1" || parts.length < 8) return null;
+  const segment = parts[5];
+  if (segment !== "opening" && segment !== "interview" && segment !== "closing") {
+    return null;
+  }
+  return {
+    segment,
+    mood:
+      parts[6] === "joyful" ||
+      parts[6] === "warm" ||
+      parts[6] === "neutral" ||
+      parts[6] === "guarded" ||
+      parts[6] === "strained"
+        ? parts[6]
+        : "neutral",
+    tensionLevel: Math.max(0, Math.round(Number(parts[7]) || 0)),
+  };
+}
+
+/**
+ * Vocal Foley is ElevenLabs-only. English, Babble, and Bottish still need an
+ * audible murmur, so unplayable throat-clears become the listener's spoken bank.
+ */
+export function signalListenerReactionPlanForPlaybackV1(args: {
+  plan: ListenerReactionPlanV1;
+  vocalFoleyPlayable: boolean;
+  listenerPersona?: string | null;
+}): ListenerReactionPlanV1 {
+  if (args.vocalFoleyPlayable || !args.plan.vocalFoley) return args.plan;
+  if (listenerReactionSpokenTextV1(args.plan)) {
+    const { vocalFoley: _omit, ...rest } = args.plan;
+    return rest;
+  }
+  const context = signalListenerPlanContextFromSeed(args.plan.seed);
+  const spokenCue = signalSpokenBackchannel(
+    args.plan.seed,
+    context?.mood ?? "neutral",
+    context?.tensionLevel ?? 0,
+    [],
+    args.listenerPersona,
+    context?.segment ?? "interview",
+  );
+  const { vocalFoley: _omit, ...rest } = args.plan;
+  return { ...rest, spokenCue };
+}
+
+export function signalListenerSpokenBankFor(args: {
+  listenerPersona?: string | null;
+  mood: VoiceDeliveryMood;
+  tensionLevel: number;
+  segment?: "opening" | "interview" | "closing";
+}): readonly ListenerReactionSpokenCue[] {
+  const style = signalListenerBackchannelStyleFor(args.listenerPersona);
+  const segment = args.segment ?? "interview";
+  const tense = args.tensionLevel >= 2 || args.mood === "strained";
+  const profane = signalAllowsProfaneBackchannel({
+    style,
+    mood: args.mood,
+    tensionLevel: args.tensionLevel,
+    segment,
+  });
+  if (profane) {
+    return [...SIGNAL_PROFANE_SPOKEN_CUES, "Seriously?", "Huh."];
+  }
+  if (style === "irreverent" || style === "edgy") {
+    return tense
+      ? ["Seriously?", "Huh.", "Wow.", "Oh, really?"]
+      : ["Huh.", "Seriously?", "Wow.", "Okay."];
+  }
+  if (style === "innocent") {
+    return tense
+      ? ["Oh, really?", "Huh?", "Oh.", "Okay."]
+      : ["Oh, really?", "Nice.", "Wow.", "Okay."];
+  }
+  if (style === "literary") {
+    return tense
+      ? ["I see.", "Hmm.", "Indeed.", "Oh."]
+      : ["Indeed.", "I see.", "Quite so.", "Hmm.", "Go on."];
+  }
+  if (style === "starstruck") {
+    return tense
+      ? ["Oh wow.", "Huh?", "Seriously?", "Oh."]
+      : ["Oh wow.", "Yes.", "Mm-hmm.", "That's amazing.", "Oh."];
+  }
+  if (style === "commanding") {
+    return ["Hmm.", "I see.", "Indeed.", "Go on."];
+  }
+  if (style === "playful") {
+    return tense
+      ? ["Oh, really?", "Huh!", "Wow.", "Okay."]
+      : ["Oh, really?", "Nice.", "Huh!", "Okay."];
+  }
+  if (style === "warm") {
+    return ["Mm-hmm.", "I see.", "Nice.", "Oh, really?"];
+  }
+  if (style === "analytical" || style === "inventive") {
+    return ["Interesting.", "I see.", "Hmm.", "Go on."];
+  }
+  if (style === "contemplative") {
+    return ["Hmm.", "I see.", "Indeed.", "Go on."];
+  }
+  return tense
+    ? ["Hmm.", "I see.", "Interesting.", "Go on."]
+    : ["Mm-hmm.", "Right.", "I see.", "Hmm.", "Oh."];
+}
+
+/** Unique spoken murmurs to warm in this listener's voice before the opening. */
+export function buildSignalListenerReactionSpokenKitV1(args: {
+  listenerPersona?: string | null;
+}): ListenerReactionSpokenCue[] {
+  const calm = signalListenerSpokenBankFor({
+    listenerPersona: args.listenerPersona,
+    mood: "neutral",
+    tensionLevel: 0,
+    segment: "interview",
+  });
+  const tense = signalListenerSpokenBankFor({
+    listenerPersona: args.listenerPersona,
+    mood: "strained",
+    tensionLevel: 2,
+    segment: "interview",
+  });
+  return [...new Set([...calm, ...tense])];
+}
+
+export interface SignalListenerReactionKitV1 {
+  v: 1;
+  hostBotId: string;
+  guestBotId: string;
+  hostSpokenCues: ListenerReactionSpokenCue[];
+  guestSpokenCues: ListenerReactionSpokenCue[];
+  vocalFoleys: ListenerReactionVocalFoley[];
+}
+
+/** Episode-level Foley kit used to warm host and guest murmurs during loading. */
+export function buildSignalListenerReactionKitV1(args: {
+  hostBotId: string;
+  guestBotId: string;
+  hostPersona?: string | null;
+  guestPersona?: string | null;
+  includeGuest?: boolean;
+}): SignalListenerReactionKitV1 {
+  const includeGuest = args.includeGuest !== false && Boolean(args.guestBotId);
+  return {
+    v: 1,
+    hostBotId: args.hostBotId,
+    guestBotId: args.guestBotId,
+    hostSpokenCues: buildSignalListenerReactionSpokenKitV1({
+      listenerPersona: args.hostPersona,
+    }),
+    guestSpokenCues: includeGuest
+      ? buildSignalListenerReactionSpokenKitV1({
+          listenerPersona: args.guestPersona,
+        })
+      : [],
+    vocalFoleys: ["clears throat", "sighs", "exhales", "chuckles"],
+  };
+}
 
 /**
  * Maps authored persona prose onto a bounded delivery bank. Explicit language
  * style wins over broad temperament so abrasive characters can sound abrasive
  * without making playful or innocent characters inherit the same profanity.
+ * Negative boundary instructions must not opt a persona into that bank.
+ * Same-account Library names and other composed runtime context must not
+ * either.
  */
 export function signalListenerBackchannelStyleFor(
   listenerPersona: string | null | undefined,
 ): SignalListenerBackchannelStyle {
-  const source = listenerPersona?.replace(/\s+/gu, " ").trim() ?? "";
-  if (
-    /\b(?:profan(?:e|ity)|swears?|swearing|vulgar|crude|irreverent|abrasive|caustic|cynical|rick sanchez|fuck|shit)\b/iu.test(
-      source,
-    )
-  ) {
+  const source = authoredSignalListenerPersonaSource(listenerPersona);
+  if (signalPersonaAffirmsStyle(source, SIGNAL_EXPLICIT_SWEAR_STYLE_PATTERN)) {
     return "irreverent";
   }
   if (
@@ -855,6 +1085,15 @@ export function signalListenerBackchannelStyleFor(
     )
   ) {
     return "innocent";
+  }
+  if (signalPersonaAffirmsStyle(source, SIGNAL_LITERARY_STYLE_PATTERN)) {
+    return "literary";
+  }
+  if (signalPersonaAffirmsStyle(source, SIGNAL_STARSTRUCK_STYLE_PATTERN)) {
+    return "starstruck";
+  }
+  if (signalPersonaAffirmsStyle(source, SIGNAL_EDGY_STYLE_PATTERN)) {
+    return "edgy";
   }
   const temperament = signalPersonaTemperamentFor(source);
   return temperament === "creative" ||
@@ -905,13 +1144,14 @@ export function buildSignalListenerReactionPlanV1(args: {
     args.segment !== "closing" &&
     stableUnit(`${seed}:audio-roll`) < audioChance;
   const spokenCue =
-    audible && stableUnit(`${seed}:spoken-roll`) < 0.96
+    audible && stableUnit(`${seed}:spoken-roll`) < SIGNAL_SPOKEN_BACKCHANNEL_CHANCE
       ? signalSpokenBackchannel(
           seed,
           args.mood,
           tensionLevel,
           args.recentSpokenCues ?? [],
           args.listenerPersona,
+          args.segment,
         )
       : undefined;
   const vocalFoley =
@@ -1217,6 +1457,7 @@ export function buildZenPlayerListenerReactionPlanV1(args: {
           0,
           [],
           args.listenerPersona,
+          "interview",
         )
       : undefined;
   return {

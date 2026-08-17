@@ -97,6 +97,7 @@ test("accepts only allowlisted companion actions and caps the result", () => {
   assert.deepEqual(
     normalizePrismCompanionActionIntents([
       { type: "navigate", destination: "home" },
+      { type: "open_flight_recorder" },
       { type: "delete_bot", botId: "danger" },
       { type: "open_tool", tool: "marketplace" },
       { type: "export_bot", botId: " bot-1 " },
@@ -104,8 +105,8 @@ test("accepts only allowlisted companion actions and caps the result", () => {
     ]),
     [
       { type: "navigate", destination: "home" },
+      { type: "open_flight_recorder" },
       { type: "open_tool", tool: "marketplace" },
-      { type: "export_bot", botId: "bot-1" },
     ],
   );
 });

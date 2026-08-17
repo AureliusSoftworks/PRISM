@@ -31,6 +31,7 @@ import {
   type BotCrosstalkInterruptedSpeakerCue,
   type CrosstalkReclaimPlanV1,
   type ListenerReactionPlanV1,
+  type SignalListenerReactionKitV1,
   type SocialSilenceMarkerV1,
 } from "./listenerReaction.ts";
 import {
@@ -43,6 +44,10 @@ import {
   type BotPowerObserverVisibilityV1,
 } from "./botPower.ts";
 import { signalPicklesSipCueFromEvent } from "./signalPickles.ts";
+import {
+  planAutoCameraCoverage,
+  type AutoCameraCoverageBeat,
+} from "./autoCameraDirector.ts";
 
 export type BotcastEpisodeSegment = "opening" | "interview" | "closing";
 export type BotcastEpisodeStatus = "live" | "completed" | "cancelled";
@@ -902,6 +907,9 @@ export interface BotcastLogoState {
   prompt: string;
   imageUrl: string | null;
   imageId: string | null;
+  /** One-step history. Older show-logo revisions are not retained by the show. */
+  previousImageUrl: string | null;
+  previousImageId: string | null;
   revision: number;
   status: "fallback" | "ready" | "failed";
   fallbackGlyph: BotcastLogoGlyph;
@@ -919,6 +927,7 @@ export interface BotcastIntroAudioState {
   outdentDurationMs: number;
   revision: number;
   model: string | null;
+  undoAvailable: boolean;
 }
 
 export interface BotcastAtmosphereAudioState {
@@ -927,6 +936,7 @@ export interface BotcastAtmosphereAudioState {
   durationMs: number;
   revision: number;
   model: string | null;
+  undoAvailable: boolean;
 }
 
 /** Saved, editable direction plus the provider-safe fingerprint derived from it. */
@@ -971,6 +981,29 @@ export interface BotcastShow {
   createdAt: string;
   updatedAt: string;
   episodeCount: number;
+  /** Derived from completed persona reviews; used to rank the Signal show rail. */
+  audienceRating?: number | null;
+  audienceReviewCount?: number;
+}
+
+/** A private, show-scoped assessment used only while recovering a vacant host. */
+export interface BotcastHostRecoveryCandidate {
+  botId: string;
+  status: "compatible" | "incompatible" | "refused" | "unavailable";
+  reason: string;
+  checkedAt: string | null;
+}
+
+export interface BotcastHostRecoveryResponse {
+  showId: string;
+  identityHash: string;
+  candidates: BotcastHostRecoveryCandidate[];
+}
+
+export interface BotcastHostRecoveryCastResponse {
+  status: "accepted" | "declined";
+  reason: string;
+  show: BotcastShow;
 }
 
 export type BotcastShowHostChatRole = "user" | "assistant";
@@ -1085,6 +1118,38 @@ export interface BotcastSegmentRecord {
 export interface BotcastProducerCue {
   kind: BotcastProducerCueKind;
   detail?: string;
+  /** Exact words the host must speak on air. Direction stays in `detail`. */
+  directQuote?: string;
+}
+
+export const BOTCAST_PRODUCER_DIRECT_QUOTE_MAX = 4_000;
+/** Extra completion tokens so the host can ease into a required quote. */
+export const BOTCAST_PRODUCER_DIRECT_QUOTE_LEAD_IN_TOKENS = 80;
+export const BOTCAST_PRODUCER_DIRECT_QUOTE_TURN_TOKENS_MAX = 2_048;
+/** Spoken framing for a producer "Say this" line. The queued words follow as-is. */
+export const BOTCAST_PRODUCER_DIRECT_QUOTE_LEAD_IN =
+  "The Producer sent this in.";
+
+/** Completion budget for a host turn that must air a producer quote in full. */
+export function botcastDirectQuoteTurnMaxTokens(directQuote: string): number {
+  const words = directQuote.trim().split(/\s+/u).filter(Boolean).length;
+  if (words === 0) return 0;
+  return Math.min(
+    BOTCAST_PRODUCER_DIRECT_QUOTE_TURN_TOKENS_MAX,
+    Math.max(160, Math.ceil(words * 1.6) + BOTCAST_PRODUCER_DIRECT_QUOTE_LEAD_IN_TOKENS),
+  );
+}
+
+/**
+ * Hosts read producer "Say this" lines exactly. The lead-in is the only
+ * extra flavor; the queued words are not rewritten by a model.
+ */
+export function composeBotcastProducerDirectQuoteUtterance(
+  directQuote: string,
+): string {
+  const quote = directQuote.trim();
+  if (!quote) return "";
+  return `${BOTCAST_PRODUCER_DIRECT_QUOTE_LEAD_IN} ${quote}`;
 }
 
 export const BOTCAST_SOUNDBOARD_CUE_KINDS = [
@@ -1616,11 +1681,27 @@ export interface BotcastCameraSuggestion {
     | "departure"
     | "empty_chair"
     | "silence"
-    | "closing";
+    | "closing"
+    | "coverage"
+    | "cutaway";
   atMs: number;
   minimumHoldMs: number;
   /** Utterance cameras may carry the speaking message id for interrupt cleanup. */
   messageId?: string;
+}
+
+export const BOTCAST_AUTO_COVERAGE_REASONS = [
+  "coverage",
+  "cutaway",
+  "introduction",
+] as const;
+
+/** True when Auto should honor this suggestion over a live speaker lock. */
+export function botcastReasonIsAutoCoverage(reason: unknown): boolean {
+  return (
+    typeof reason === "string" &&
+    (BOTCAST_AUTO_COVERAGE_REASONS as readonly string[]).includes(reason)
+  );
 }
 
 const BOTCAST_DIRECTIONAL_IRRITATION_SNARK_CUE_SET = new Set<string>([
@@ -2110,6 +2191,8 @@ export interface BotcastEpisode extends BotcastEpisodeSummary {
   messages: BotcastMessage[];
   segments: BotcastSegmentRecord[];
   events: BotcastReplayEvent[];
+  /** Persona-shaped listener murmurs to warm during the opening wait. */
+  listenerReactionKit?: SignalListenerReactionKitV1;
 }
 
 export interface BotcastShowCreateRequest {
@@ -2154,6 +2237,8 @@ export interface BotcastShowPatchRequest {
   regenerateNightAtmosphere?: boolean;
   logoImageUrl?: string | null;
   logoImageId?: string | null;
+  /** Internal one-step reversal of the current and previous show logo. */
+  undoLogo?: boolean;
   /** Internal persona-first thesis supplied by Signal's identity pass. */
   logoThesis?: string;
   regenerateLogo?: boolean;
@@ -2252,6 +2337,8 @@ export function botcastVoiceMoodForTension(
 
 export const BOTCAST_DIRECTOR_MIN_SHOT_MS = 3_200;
 export const BOTCAST_DIRECTOR_HYSTERESIS_MS = 1_100;
+/** Readable post-silence window for Signal's environmental elapsed-time cue. */
+export const BOTCAST_SIGNAL_MUTE_ELAPSED_CUE_HOLD_MS = 1_500;
 const BOTCAST_SIGNAL_STANDARD_WORD_DURATION_MS = 350;
 const BOTCAST_SIGNAL_STANDARD_STRONG_PAUSE_MS = 160;
 const BOTCAST_SIGNAL_STANDARD_SOFT_PAUSE_MS = 70;
@@ -2280,7 +2367,9 @@ export function botcastSignalStandardCadenceDurationMs(
     return socialSilence.holdMs;
   }
   if (botPowerResponseIsSilentV1(spokenText)) {
-    return mutePerformance?.durationMs ?? BOTCAST_DIRECTOR_MIN_SHOT_MS;
+    return mutePerformance
+      ? mutePerformance.durationMs + BOTCAST_SIGNAL_MUTE_ELAPSED_CUE_HOLD_MS
+      : BOTCAST_DIRECTOR_MIN_SHOT_MS;
   }
   const wordCount = Math.max(
     1,
@@ -2314,15 +2403,16 @@ export function applyBotcastProducerCueToTension(
   current: BotcastTensionState,
   cue: BotcastProducerCue,
 ): BotcastTensionState {
+  const cueText = `${cue.detail ?? ""} ${cue.directQuote ?? ""}`;
   const boundaryLanguage =
     cue.kind === "ask_about" &&
     /\b(?:trauma|abuse|crime|death|family|secret|scandal|failure|fear|afraid|scared|regret|narciss(?:ist|ism|istic)?|diagnos(?:e|ed|es|ing|is)|insecure|insecurity|anxiety|anxious|psychological|psychology)\b/iu.test(
-      cue.detail ?? "",
+      cueText,
     );
   const explicitPressureDirection =
     cue.kind === "ask_about" &&
     /\b(?:(?:be|get|grow)\s+(?:mean(?:er)?|cruel(?:er)?|harsher|nastier)|(?:annoy|offend|insult|humiliate|antagonize|provoke|enrage|needle|taunt)\s+(?:him|her|them|(?:(?:a|the|your|this|that)\s+)?guest)|(?:try\s+to\s+)?(?:make|force|get)\s+(?:him|her|them|(?:(?:a|the|your|this|that)\s+)?guest)\s+(?:to\s+)?(?:leave|walk\s*out|quit|rage[-\s]?quit)|(?:drive|run)\s+(?:him|her|them|(?:(?:a|the|your|this|that)\s+)?guest)\s+(?:off|out\s+of)\s+(?:the\s+)?(?:show|episode|studio)|rage[-\s]?quit|walkout)\b/iu.test(
-      cue.detail ?? "",
+      cueText,
     );
   const delta =
     cue.kind === "press_harder" ||
@@ -2774,6 +2864,71 @@ export function botcastDirectorSuggestion(args: {
   };
 }
 
+function botcastCoverageShotForBeat(
+  beat: AutoCameraCoverageBeat,
+  listenerShot: BotcastDirectedCameraShot | null,
+): BotcastDirectedCameraShot {
+  if (beat.kind === "cutaway" && listenerShot) return listenerShot;
+  return "wide";
+}
+
+/**
+ * Extra Auto cuts after a speaker close-up has lingered: Wide breaths and
+ * occasional glances at the other on-stage person. Returns both the coverage
+ * windows and the speaker-return cuts so replay does not stick on Wide.
+ */
+export function botcastDirectorCoverageSuggestions(args: {
+  speakerShot: BotcastDirectedCameraShot;
+  listenerShot?: BotcastDirectedCameraShot | null;
+  speakerStartMs: number;
+  utteranceEndMs: number;
+  seed: string;
+  content?: string;
+  messageId?: string;
+  /** Coverage must finish before this timestamp (departure, intro, etc.). */
+  latestAtMs?: number;
+}): BotcastCameraSuggestion[] {
+  const speakerStartMs = Math.max(0, Math.round(args.speakerStartMs));
+  const utteranceEndMs = Math.max(speakerStartMs, Math.round(args.utteranceEndMs));
+  const latestAtMs = Math.min(
+    utteranceEndMs,
+    args.latestAtMs == null ? utteranceEndMs : Math.round(args.latestAtMs),
+  );
+  const remainingMs = latestAtMs - speakerStartMs;
+  const listenerShot = args.listenerShot ?? null;
+  const beats = planAutoCameraCoverage({
+    utteranceDurationMs: remainingMs,
+    seed: args.seed,
+    content: args.content,
+    allowCutaway: listenerShot !== null && listenerShot !== args.speakerShot,
+    listenerCount: listenerShot ? 1 : 0,
+  });
+  const suggestions: BotcastCameraSuggestion[] = [];
+  for (const beat of beats) {
+    const atMs = speakerStartMs + beat.offsetMs;
+    const endMs = Math.min(latestAtMs, atMs + beat.durationMs);
+    if (endMs <= atMs) continue;
+    const shot = botcastCoverageShotForBeat(beat, listenerShot);
+    suggestions.push({
+      shot,
+      reason: beat.kind === "cutaway" ? "cutaway" : "coverage",
+      atMs,
+      minimumHoldMs: Math.max(1, endMs - atMs),
+      ...(args.messageId ? { messageId: args.messageId } : {}),
+    });
+    if (endMs < latestAtMs) {
+      suggestions.push({
+        shot: args.speakerShot,
+        reason: "speaker",
+        atMs: endMs,
+        minimumHoldMs: BOTCAST_DIRECTOR_MIN_SHOT_MS,
+        ...(args.messageId ? { messageId: args.messageId } : {}),
+      });
+    }
+  }
+  return suggestions;
+}
+
 export function botcastCameraShotAt(args: {
   events: readonly BotcastReplayEvent[];
   elapsedMs: number;
@@ -2827,6 +2982,62 @@ export function botcastCameraShotAt(args: {
     }
   }
   return shot;
+}
+
+export function botcastCameraSuggestionReasonAt(args: {
+  events: readonly BotcastReplayEvent[];
+  elapsedMs: number;
+}): string | null {
+  let mode: BotcastCameraShot = "auto";
+  let reason: string | null = null;
+  for (const event of botcastTimedCameraEvents(args.events, args.elapsedMs)) {
+    if (event.kind === "camera_mode") {
+      const candidate = event.payload.mode;
+      if (
+        candidate === "auto" ||
+        candidate === "left" ||
+        candidate === "right" ||
+        candidate === "wide"
+      ) {
+        mode = candidate;
+        if (mode !== "auto") reason = null;
+      }
+      continue;
+    }
+    if (event.kind === "camera_suggestion") {
+      const candidate = event.payload.shot;
+      if (
+        mode === "auto" &&
+        candidate === "wide" &&
+        event.payload.reason === "transition"
+      ) {
+        continue;
+      }
+      if (
+        candidate === "left" ||
+        candidate === "right" ||
+        candidate === "wide"
+      ) {
+        const nextReason = event.payload.reason;
+        reason = typeof nextReason === "string" ? nextReason : null;
+      }
+    }
+  }
+  return reason;
+}
+
+/** Live/replay Auto may leave the speaker for these editorial suggestions. */
+export function botcastAutoCoverageShotAt(args: {
+  events: readonly BotcastReplayEvent[];
+  elapsedMs: number;
+}): BotcastDirectedCameraShot | null {
+  if (
+    botcastCameraModeAt(args) !== "auto" ||
+    !botcastReasonIsAutoCoverage(botcastCameraSuggestionReasonAt(args))
+  ) {
+    return null;
+  }
+  return botcastCameraShotAt(args);
 }
 
 function botcastParticipantHasDepartedAt(

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { applyBotPowerMumbledResponseV1 } from "./botPower.ts";
 import {
   DEBATE_EVIDENCE_ITEM_MAX_COUNT,
   DEBATE_EVIDENCE_SOURCE_MAX_COUNT,
@@ -47,6 +48,13 @@ import {
   normalizeDebateSetupPresetId,
   debateDebriefEligibleBots,
   sanitizeDebateDebaterText,
+  debateSpeechLooksLikePromptLeak,
+  debateClaimSentenceIsProceduralFloorGrant,
+  debatePowerCopiesAddressedSpeech,
+  debateLatestAddressedPublicSpeech,
+  debateLatestCopycatSourceSpeech,
+  debatePublicSpeechLooksUnintelligible,
+  debateFloorSpeechWarrantsUnintelligibleCutoff,
   sanitizeDebateStatementSources,
   debateSessionAwaitsPresentationSeal,
   debateSessionFloorIsSettled,
@@ -908,7 +916,7 @@ test("normalizes Debate session synopsis and seals Participant Jury from debrief
   );
 });
 
-test("Spectator floor settlement awaits a presentation seal until watched", () => {
+test("only legacy Spectator floor settlement records await a presentation seal", () => {
   assert.equal(
     debateSessionAwaitsPresentationSeal({
       playerRole: "spectator",
@@ -1284,5 +1292,208 @@ test("normalizeDebateSetupSuggestionV1 rejects unknown bots and thin exhibit pac
       ["bot-a", "bot-b"],
     ),
     null,
+  );
+});
+
+test("rejects Debate production-instruction speech as a prompt leak", () => {
+  assert.equal(
+    debateSpeechLooksLikePromptLeak(
+      'Give the Intrinsic motivation opening argument. Evidence participation assignment: discuss exhibit-1. Return JSON only: {"content":"your public statement","deliveryCue":null}',
+    ),
+    true,
+  );
+  assert.equal(
+    debateSpeechLooksLikePromptLeak(
+      "Passions are fickle: today it’s violin, tomorrow it’s pirate hats.",
+    ),
+    false,
+  );
+});
+
+test("keeps floor grants and leaked instructions off the case board", () => {
+  assert.equal(
+    debateClaimSentenceIsProceduralFloorGrant("Echo Ellen, rebuttal."),
+    true,
+  );
+  assert.equal(
+    debateClaimSentenceIsProceduralFloorGrant(
+      "Echo Ellen has the scheduled closing.",
+    ),
+    true,
+  );
+  assert.equal(
+    debateClaimSentenceIsProceduralFloorGrant(
+      "Intrinsic motivation is the stronger force that sustains self-directed drive through adversity.",
+    ),
+    false,
+  );
+});
+
+test("treats Echo self-cue compiles as addressed-speech copy even with empty effects", () => {
+  assert.equal(
+    debatePowerCopiesAddressedSpeech({
+      powers: [
+        {
+          version: 1,
+          id: "power-copycat",
+          name: "Echoes",
+          intent: "Can only repeat the latest words spoken directly to her, verbatim.",
+          enabled: true,
+          compileStatus: "ready",
+          compiled: {
+            version: 1,
+            sourceHash: "v1-echo",
+            selfCue:
+              "Repeat the latest speech addressed to you verbatim. Say nothing else.",
+            observerCue: "Echo Ellen can only echo the latest speech addressed to them.",
+            effects: [],
+            ruleLabels: ["Echoes addressed speech"],
+          },
+        },
+      ],
+    }),
+    true,
+  );
+});
+
+test("copies the latest public line that names the holder, never leaked director notes", () => {
+  assert.equal(
+    debateLatestAddressedPublicSpeech(
+      [
+        {
+          kind: "speech",
+          speakerBotId: "moderator",
+          stepKey: "intro",
+          content:
+            "Echo Ellen speaks for intrinsic motivation; Stewie Griffin speaks for extrinsic factors. Echo Ellen, you’re up first.",
+        },
+        {
+          kind: "speech",
+          speakerBotId: "echo",
+          stepKey: "opening_for",
+          content:
+            "Give the Intrinsic motivation opening argument. Return JSON only: {\"content\":\"your public statement\"}",
+        },
+      ],
+      { id: "echo", name: "Echo Ellen" },
+    ),
+    "Echo Ellen speaks for intrinsic motivation; Stewie Griffin speaks for extrinsic factors. Echo Ellen, you’re up first.",
+  );
+});
+
+test("Copycat source prefers the opposing floor over a named moderator intro", () => {
+  const opposingGibberish = applyBotPowerMumbledResponseV1(
+    "Limits keep neighborhoods intact without a citywide rule.",
+  );
+  assert.equal(
+    debateLatestCopycatSourceSpeech(
+      [
+        {
+          kind: "speech",
+          speakerBotId: "moderator",
+          sideId: null,
+          stepKey: "intro",
+          content:
+            "Copycat Calvin speaks for Build Near Rail. Copycat Calvin, you’re up first.",
+        },
+        {
+          kind: "speech",
+          speakerBotId: "calvin",
+          sideId: "for",
+          stepKey: "opening_for",
+          content: "Rail access is the civic spine of this motion.",
+        },
+        {
+          kind: "speech",
+          speakerBotId: "nora",
+          sideId: "against",
+          stepKey: "opening_against",
+          content: opposingGibberish,
+        },
+      ],
+      { id: "calvin", sideId: "for" },
+    ),
+    opposingGibberish,
+  );
+});
+
+test("Copycat source skips leaks, silence, and the holder's own line", () => {
+  assert.equal(
+    debateLatestCopycatSourceSpeech(
+      [
+        {
+          kind: "speech",
+          speakerBotId: "basil",
+          sideId: "against",
+          stepKey: "opening_against",
+          content: "Return JSON only: {\"content\":\"your public statement\"}",
+        },
+        {
+          kind: "silence",
+          speakerBotId: "basil",
+          sideId: "against",
+          stepKey: "challenge_against",
+          content: "...",
+        },
+        {
+          kind: "player_turn",
+          speakerBotId: "prism:player-participant",
+          sideId: "against",
+          stepKey: "rebuttal_against_player",
+          content: "Neighborhoods need room to adapt without naming Calvin.",
+        },
+      ],
+      { id: "calvin", sideId: "for" },
+    ),
+    "Neighborhoods need room to adapt without naming Calvin.",
+  );
+});
+
+test("Copycat source is available before the holder has spoken", () => {
+  assert.equal(
+    debateLatestCopycatSourceSpeech(
+      [
+        {
+          kind: "speech",
+          speakerBotId: "avery",
+          sideId: "for",
+          stepKey: "opening_for",
+          content: "Rail access is the civic spine of this motion.",
+        },
+      ],
+      { id: "calvin", sideId: "against" },
+    ),
+    "Rail access is the civic spine of this motion.",
+  );
+});
+
+test("treats mumbled public floor as unintelligible and mute as not", () => {
+  const mumbled = applyBotPowerMumbledResponseV1(
+    "Limits keep neighborhoods intact without a citywide rule.",
+  );
+  assert.equal(debatePublicSpeechLooksUnintelligible(mumbled), true);
+  assert.equal(
+    debatePublicSpeechLooksUnintelligible(
+      "Limits keep neighborhoods intact without a citywide rule.",
+    ),
+    false,
+  );
+  assert.equal(debatePublicSpeechLooksUnintelligible("..."), false);
+  assert.equal(
+    debateFloorSpeechWarrantsUnintelligibleCutoff({
+      kind: "speech",
+      content: "A clear opening on housing near rail.",
+      speakerKind: "advocate",
+      speakerEffects: [{ type: "speech_obfuscation", mode: "gibberish" }],
+    }),
+    true,
+  );
+  assert.equal(
+    debateFloorSpeechWarrantsUnintelligibleCutoff({
+      kind: "speech",
+      content: mumbled,
+      speakerKind: "moderator",
+    }),
+    false,
   );
 });

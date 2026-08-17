@@ -4,18 +4,22 @@ import {
   LOCAL_VOICE_SPEECHPRINT_CAPABILITIES,
   LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256,
   VOICE_ACCENT_DEFINITIONS,
+  VOICE_ACCENT_MAP_ANCHORS,
   applyLocalVoiceSpeechprintMelodyToIpa,
   applyLocalVoiceSpeechprintToIpa,
+  applyVoiceAccentFieldToIpa,
   premiumVoiceNativeAccentHintFromLabels,
   resolveLocalAccentFallback,
   resolvePremiumAccentDirection,
+  resolveVoiceAccentField,
+  voiceAccentDefinitionForId,
 } from "@localai/shared";
 
 const SAMPLE_IPA = "θɪs ɹɪvɚ wɪl ðɹaɪv vɛɹi faɹ";
 
 describe("local voice Speechprints", () => {
   it("publishes broad versioned Instant-compatible profiles for both bases", () => {
-    assert.equal(LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.length, 42);
+    assert.equal(LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.length, 62);
     assert.match(LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256, /^[a-f0-9]{64}$/u);
     for (const capability of LOCAL_VOICE_SPEECHPRINT_CAPABILITIES) {
       assert.deepEqual(capability.supportedBaseLocales, ["en-US", "en-GB"]);
@@ -43,6 +47,182 @@ describe("local voice Speechprints", () => {
           definition.localSpeechprintFallback === "none",
       ),
     );
+  });
+
+  it("normalizes a continuous field with smooth deterministic weights", () => {
+    assert.equal(
+      voiceAccentDefinitionForId(" Cockney-English ")?.id,
+      "cockney-english",
+    );
+    const london = VOICE_ACCENT_MAP_ANCHORS.find(
+      (anchor) => anchor.accentDefinitionId === "modern-rp-english",
+    );
+    assert.ok(london);
+    const first = resolveVoiceAccentField({
+      point: london.point,
+      accentDefinitionId: "modern-rp-english",
+      pronunciationBase: "en-GB",
+      speechprintInfluence: "modern-rp-english",
+    });
+    const shifted = resolveVoiceAccentField({
+      point: { x: london.point.x + 0.0005, y: london.point.y },
+      accentDefinitionId: "modern-rp-english",
+      pronunciationBase: "en-GB",
+      speechprintInfluence: "modern-rp-english",
+    });
+    assert.equal(first.legacy, false);
+    assert.ok(Math.abs(first.layers.reduce((sum, layer) => sum + layer.weight, 0) - 1) < 1e-12);
+    assert.ok(Math.abs(shifted.layers.reduce((sum, layer) => sum + layer.weight, 0) - 1) < 1e-12);
+    assert.ok(
+      first.layers.every(
+        (layer, index) =>
+          index === 0 || first.layers[index - 1]!.weight >= layer.weight,
+      ),
+    );
+    assert.deepEqual(
+      resolveVoiceAccentField({
+        point: london.point,
+        accentDefinitionId: "modern-rp-english",
+        pronunciationBase: "en-GB",
+        speechprintInfluence: "modern-rp-english",
+      }),
+      first,
+    );
+    assert.ok(Math.abs((first.layers[0]?.weight ?? 0) - (shifted.layers[0]?.weight ?? 0)) < 0.03);
+    const applied = applyVoiceAccentFieldToIpa({
+      ipa: "θɪs ɹɪvɚ faɹ hɑm",
+      resolution: first,
+      strength: "balanced",
+      variationSeed: "stable-london-bot",
+    });
+    assert.deepEqual(
+      applyVoiceAccentFieldToIpa({
+        ipa: "θɪs ɹɪvɚ faɹ hɑm",
+        resolution: first,
+        strength: "balanced",
+        variationSeed: "stable-london-bot",
+      }),
+      applied,
+    );
+  });
+
+  it("keeps an explicit co-located London variant dominant", () => {
+    const cockney = VOICE_ACCENT_MAP_ANCHORS.find(
+      (anchor) => anchor.accentDefinitionId === "cockney-english",
+    );
+    assert.ok(cockney);
+    const field = resolveVoiceAccentField({
+      point: cockney.point,
+      accentDefinitionId: "cockney-english",
+      pronunciationBase: "en-GB",
+      speechprintInfluence: "cockney-english",
+    });
+    assert.equal(field.layers[0]?.accentDefinitionId, "cockney-english");
+    assert.ok((field.layers[0]?.weight ?? 0) > (field.layers[1]?.weight ?? 0));
+  });
+
+  it("preserves the exact legacy single-Speechprint path without a point", () => {
+    const resolution = resolveVoiceAccentField({
+      accentDefinitionId: "new-york-english",
+      pronunciationBase: "en-US",
+      speechprintInfluence: "new-york-english",
+    });
+    const speechprint = {
+      influence: "new-york-english" as const,
+      strength: "balanced" as const,
+      variationSeed: "legacy-new-york",
+    };
+    assert.equal(resolution.legacy, true);
+    assert.deepEqual(
+      applyVoiceAccentFieldToIpa({
+        ipa: SAMPLE_IPA,
+        resolution,
+        strength: speechprint.strength,
+        variationSeed: speechprint.variationSeed,
+      }),
+      applyLocalVoiceSpeechprintToIpa({ ipa: SAMPLE_IPA, speechprint }),
+    );
+  });
+
+  it("applies stable regional distinctions for London, the U.S., and Europe", () => {
+    const cases = [
+      ["cockney-english", "θɪs hɑɹ", /f/u],
+      ["inland-north-english", "bæg", /eə/u],
+      ["texas-english", "pɛn taɪm", /pɪn/u],
+      ["parisian-french-influenced-english", "θɪs ɹɛd", /^s/u],
+      ["northern-italian-influenced-english", "ɹɛd", /^ɾ/u],
+    ] as const;
+    for (const [influence, ipa, expected] of cases) {
+      const result = applyLocalVoiceSpeechprintToIpa({
+        ipa,
+        speechprint: {
+          influence,
+          strength: "balanced",
+          variationSeed: `regional-${influence}`,
+        },
+      });
+      assert.match(result.ipa, expected, influence);
+    }
+  });
+
+  it("renders the tuned Cockney sample with a bounded broad-East-London shape", () => {
+    const source = "vˈɪnsənt wɛnt tə ɡɛt ɐ bˈɒtəl ɒv wˈɔːtə";
+    const balanced = applyLocalVoiceSpeechprintToIpa({
+      ipa: source,
+      speechprint: {
+        influence: "cockney-english",
+        strength: "balanced",
+        variationSeed: "zikkv-cockney",
+      },
+    });
+    const strong = applyLocalVoiceSpeechprintToIpa({
+      ipa: source,
+      speechprint: {
+        influence: "cockney-english",
+        strength: "strong",
+        variationSeed: "zikkv-cockney",
+      },
+    });
+    const light = applyLocalVoiceSpeechprintToIpa({
+      ipa: source,
+      speechprint: {
+        influence: "cockney-english",
+        strength: "light",
+        variationSeed: "zikkv-cockney",
+      },
+    });
+
+    assert.equal(
+      balanced.ipa,
+      "vˈiːnsɪnʔ weɪnʔ tə ɡɛʔ ə bˈɒʔo ə wˈɔːʔə",
+    );
+    assert.equal(light.ipa, source);
+    assert.equal(strong.ipa, balanced.ipa);
+    assert.match(strong.ipa, / weɪnʔ tə ɡɛʔ /u);
+    assert.doesNotMatch(strong.ipa, / weɪnʔ ʔə ɡɛʔ /u);
+    for (const ruleId of [
+      "article-centralize",
+      "dress-after-w-before-nt",
+      "of-reduction",
+      "stressed-kit-lengthen-before-n",
+      "syllabic-l-vocalize",
+      "t-glottal-before-schwa",
+      "t-glottal-final",
+      "weak-schwa-before-nt",
+    ]) {
+      assert.ok(balanced.appliedRuleIds.includes(ruleId), ruleId);
+    }
+
+    const codeLike = applyLocalVoiceSpeechprintToIpa({
+      ipa: "PRISM_42 THING_42",
+      speechprint: {
+        influence: "cockney-english",
+        strength: "strong",
+        variationSeed: "zikkv-code",
+      },
+    });
+    assert.equal(codeLike.ipa, "PRISM_42 THING_42");
+    assert.equal(codeLike.appliedRuleIds.length, 0);
   });
 
   it("resolves shared Premium accent cues without changing language", () => {
@@ -283,6 +463,52 @@ describe("local voice Speechprints", () => {
     assert.deepEqual(germanLight.appliedRuleIds, ["w-labiodental"]);
     assert.equal(frenchLight.ipa.includes("ʁ"), false);
     assert.equal(germanLight.ipa.includes("ʁ"), false);
+  });
+
+  it("gives Paris-region French a graduated, distinct Strong delivery", () => {
+    const source = "θɪs ðʌɹ hɪm eɪnd oʊvɚ";
+    const speechprint = (strength: "light" | "balanced" | "strong") =>
+      applyLocalVoiceSpeechprintToIpa({
+        ipa: source,
+        speechprint: {
+          influence: "parisian-french-influenced-english",
+          strength,
+          variationSeed: "paris-region-character",
+        },
+      });
+    const light = speechprint("light");
+    const balanced = speechprint("balanced");
+    const strong = speechprint("strong");
+    const broaderFrenchStrong = applyLocalVoiceSpeechprintToIpa({
+      ipa: source,
+      speechprint: {
+        influence: "french-influenced-english",
+        strength: "strong",
+        variationSeed: "paris-region-character",
+      },
+    });
+
+    assert.ok(light.appliedRuleIds.includes("theta-s"));
+    assert.equal(light.appliedRuleIds.includes("eth-z"), false);
+    assert.equal(light.appliedRuleIds.includes("r-uvular"), false);
+    assert.ok(balanced.appliedRuleIds.includes("eth-z"));
+    assert.ok(balanced.appliedRuleIds.includes("strut-open-a"));
+    assert.ok(balanced.appliedRuleIds.includes("r-uvular"));
+    for (const ruleId of [
+      "near-close-i",
+      "h-drop",
+      "face-monophthong",
+      "goat-monophthong",
+    ]) {
+      assert.ok(strong.appliedRuleIds.includes(ruleId), ruleId);
+    }
+    assert.ok(
+      strong.appliedRuleIds.some((ruleId) => ruleId.startsWith("melody-")),
+    );
+    assert.notEqual(light.ipa, balanced.ipa);
+    assert.notEqual(balanced.ipa, strong.ipa);
+    assert.notEqual(strong.ipa, broaderFrenchStrong.ipa);
+    assert.match(strong.ipa, /end ov/u);
   });
 
   it("gives Russian-influenced English a restrained welcome progression", () => {

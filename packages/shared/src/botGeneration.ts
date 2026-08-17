@@ -22,6 +22,13 @@ import {
 } from "./botAvatar.ts";
 import {
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+  BOT_AUDIO_VOICE_IDS,
+  LOCAL_VOICE_SPEECHPRINT_INFLUENCES,
+  VOICE_EFFECTS,
+  normalizeLocalVoiceSpeechprintInfluence,
+  normalizeLocalVoicePronunciationMapPoint,
+  normalizeBotNamePronunciation,
+  normalizeVoiceAccentDefinitionId,
   normalizeBotAudioVoiceProfileV1,
   type BotAudioVoiceProfileV2,
 } from "./audioVoice.ts";
@@ -42,10 +49,18 @@ import {
   botPowerSourceHashForPowerV1,
   type BotPowerV1,
 } from "./botPower.ts";
+import { VOICE_ACCENT_MAP_ANCHORS } from "./voiceSpeechprint.ts";
 
 export const BOT_GENERATION_DRAFT_VERSION = 1 as const;
 export const BOT_GENERATION_PROMPT_MAX_LENGTH = 2_000;
 export const BOT_GENERATION_VOICE_PREVIEW_MAX_LENGTH = 240;
+const BOT_GENERATION_ACCENT_DEFINITION_IDS = [
+  "american-english",
+  "british-english",
+  ...LOCAL_VOICE_SPEECHPRINT_INFLUENCES.filter((id) => id !== "none"),
+] as const;
+export const CURSED_TONGUE_GENERATED_AUTHORING_PROMPT =
+  "Every non-silent public spoken reply is involuntarily laced with frequent strong non-slur profanity; their private intended wording stays clean.";
 /** Generated ink is an accent layer, not a fully painted portrait. */
 export const BOT_GENERATED_AVATAR_INK_MAX_PATHS = 8;
 export const BOT_GENERATED_AVATAR_INK_MAX_PAINTED_PIXELS = 900;
@@ -65,6 +80,34 @@ const BOT_GENERATED_PORTRAIT_MOUTH_WINDOW = {
   minY: 81,
   maxY: 98,
 } as const;
+
+function generatedPowerActivationLabel(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[’]/gu, "'")
+    .replace(/[^a-z0-9']+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+/**
+ * Generation occasionally returns a UI-status string in place of a Power
+ * authoring prompt. Keep known Cursed Tongue activations useful, but reject
+ * generic "Name Power activated" placeholders so the generator retries.
+ */
+export function normalizeGeneratedBotPowerPromptV1(value: unknown): string {
+  const prompt = compactText(value, BOT_POWER_INTENT_MAX_LENGTH);
+  if (!prompt) return "";
+  const activation = generatedPowerActivationLabel(prompt);
+  if (/^(?:cursed tongue|curse of(?: the)? tongue|profane tongue|foul mouth)(?: power)?(?: (?:is )?(?:activated|active|enabled))?$/u.test(activation)) {
+    return CURSED_TONGUE_GENERATED_AUTHORING_PROMPT;
+  }
+  if (/^[a-z][a-z0-9' -]{0,80}\s+power\s+(?:is\s+)?(?:activated|active|enabled)$/u.test(activation)) {
+    return "";
+  }
+  return prompt;
+}
 
 /**
  * A shared semantic subset of the bot icon library. Keep these concrete nouns
@@ -275,6 +318,43 @@ export interface BotGeneratedDraftV1 {
   /** Zero to three compiler-ready prompt-authored Powers from the master brief. */
   powers: BotPowerV1[];
   settings: BotGeneratedSettingsV1;
+}
+
+/** Candidate identities are assembled by the server for one generation run.
+ * Portable voices are always present; OS and Premium identities are opt-in. */
+export interface BotGenerationVoiceCatalogV1 {
+  /** Internal generation context: alternate processing is accepted only when
+   * the player's brief explicitly asks for a non-Prism voice effect. */
+  preserveModelVoiceEffect?: boolean;
+  operatingSystemVoiceNames?: readonly string[];
+  premiumVoices?: readonly {
+    voiceId: string;
+    name?: string;
+    nativeAccentHint?: string | null;
+  }[];
+  /** Server-owned placement context for a newly generated Accent Map pin.
+   * It is never read from saved or imported bot data. */
+  generatedAccentMapLocation?: {
+    seed: string;
+    batchIndex: number;
+    batchCount: number;
+  };
+}
+
+export function botGenerationVoiceIdentityOptions(
+  catalog: BotGenerationVoiceCatalogV1 | undefined,
+): string[] {
+  const portable = BOT_AUDIO_VOICE_IDS.map((voiceId) => `portable:${voiceId}`);
+  const system = (catalog?.operatingSystemVoiceNames ?? [])
+    .filter((name): name is string => typeof name === "string")
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0 && name.length <= 240)
+    .map((name) => `os:${name}`);
+  const premium = (catalog?.premiumVoices ?? [])
+    .flatMap((voice) => typeof voice?.voiceId === "string" ? [voice.voiceId.trim()] : [])
+    .filter((voiceId) => voiceId.length > 0 && voiceId.length <= 240)
+    .map((voiceId) => `premium:${voiceId}`);
+  return Array.from(new Set([...portable, ...system, ...premium]));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -669,12 +749,135 @@ function normalizeGeneratedAvatarDetails(value: unknown): BotAvatarDetailsV1 | n
   };
 }
 
+function stableGeneratedLocationIndex(seed: string): number {
+  let hash = 2_166_136_261;
+  for (const character of seed) {
+    hash ^= character.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return hash >>> 0;
+}
+
+function generatedAccentMapPlacement(args: {
+  accentDefinitionId: string;
+  seed: string;
+  batchIndex: number;
+  batchCount: number;
+}): { x: number; y: number } {
+  const anchors = VOICE_ACCENT_MAP_ANCHORS.filter(
+    (anchor) => anchor.accentDefinitionId === args.accentDefinitionId,
+  );
+  const fallbackIndex = stableGeneratedLocationIndex(args.seed);
+  const anchor =
+    anchors[fallbackIndex % Math.max(1, anchors.length)] ??
+    VOICE_ACCENT_MAP_ANCHORS[
+      fallbackIndex % VOICE_ACCENT_MAP_ANCHORS.length
+    ]!;
+  // A batch slot owns a tiny, deterministic offset around its real Accent Map
+  // anchor. This keeps all generated pins distinct without changing the
+  // selected regional pronunciation field.
+  const slot = Math.max(1, Math.floor(args.batchIndex));
+  const ring = Math.floor((slot - 1) / BOT_GENERATION_ACCENT_DEFINITION_IDS.length);
+  const placementHash = stableGeneratedLocationIndex(
+    `${args.seed}\u241f${slot}\u241f${Math.max(1, Math.floor(args.batchCount))}`,
+  );
+  const angle = ((placementHash % 360_000) / 1_000) * (Math.PI / 180);
+  const radius =
+    0.0025 + ((placementHash >>> 12) % 4) * 0.0011 + ring * 0.0004;
+  return {
+    x: Math.max(0, Math.min(1, anchor.point.x + Math.cos(angle) * radius)),
+    y: Math.max(0, Math.min(1, anchor.point.y + Math.sin(angle) * radius)),
+  };
+}
+
 function normalizeGeneratedVoice(
   value: unknown,
   personaText = "",
   avatarSfxPrompt = "",
+  catalog?: BotGenerationVoiceCatalogV1,
+  random: () => number = Math.random,
 ): BotAudioVoiceProfileV2 {
   const record = isRecord(value) ? value : {};
+  const identities = botGenerationVoiceIdentityOptions(catalog);
+  const requestedIdentity = compactText(record.voiceIdentity, 280);
+  const legacyPortable =
+    typeof record.baseVoiceId === "string" &&
+    (BOT_AUDIO_VOICE_IDS as readonly string[]).includes(record.baseVoiceId)
+      ? `portable:${record.baseVoiceId}`
+      : "";
+  const identity = identities.includes(requestedIdentity)
+    ? requestedIdentity
+    : identities.includes(legacyPortable)
+      ? legacyPortable
+      : identities[Math.min(identities.length - 1, Math.floor(random() * identities.length))]!;
+  const selectedPortable = identity.startsWith("portable:")
+    ? identity.slice("portable:".length)
+    : null;
+  const selectedSystem = identity.startsWith("os:")
+    ? identity.slice("os:".length)
+    : null;
+  const selectedPremium = identity.startsWith("premium:")
+    ? identity.slice("premium:".length)
+    : null;
+  const premium = selectedPremium
+    ? (catalog?.premiumVoices ?? []).find((voice) => voice.voiceId === selectedPremium)
+    : undefined;
+  const accentDefinitionId = normalizeVoiceAccentDefinitionId(
+    record.accentDefinitionId,
+  );
+  const generatedLocation = catalog?.generatedAccentMapLocation;
+  const batchIndex = Math.max(
+    1,
+    Math.floor(generatedLocation?.batchIndex ?? 1),
+  );
+  const batchCount = Math.max(
+    1,
+    Math.floor(generatedLocation?.batchCount ?? 1),
+  );
+  const locationSeed = [generatedLocation?.seed, personaText]
+    .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
+    .join("\n") || "generated-bot";
+  const deterministicAccentIndex =
+    batchCount > 1
+      ? batchIndex - 1
+      : stableGeneratedLocationIndex(locationSeed);
+  // Preserve the model-authored Accent Map identity when it is valid. Batch
+  // distribution belongs to the pin coordinates, not to the pronunciation
+  // identity; siblings may correctly share an accent while owning distinct
+  // locations inside that field.
+  const resolvedAccentDefinitionId =
+    accentDefinitionId ??
+    BOT_GENERATION_ACCENT_DEFINITION_IDS[
+      deterministicAccentIndex % BOT_GENERATION_ACCENT_DEFINITION_IDS.length
+    ]!;
+  const requestedMapPoint = normalizeLocalVoicePronunciationMapPoint(
+    record.pronunciationMapPoint,
+  );
+  const pronunciationMapPoint =
+    batchCount === 1 && requestedMapPoint
+      ? requestedMapPoint
+      : generatedAccentMapPlacement({
+          accentDefinitionId: resolvedAccentDefinitionId,
+          seed: locationSeed,
+          batchIndex,
+          batchCount,
+        });
+  const isBritish = resolvedAccentDefinitionId === "british-english";
+  const localAccent = {
+    pronunciationBase: isBritish ? "en-GB" as const : "en-US" as const,
+    speechprintInfluence: normalizeLocalVoiceSpeechprintInfluence(
+      resolvedAccentDefinitionId === "american-english" || isBritish
+        ? "none"
+        : resolvedAccentDefinitionId,
+    ),
+  };
+  const strength = record.speechprintStrength === "light" ||
+      record.speechprintStrength === "strong" ||
+      record.speechprintStrength === "balanced"
+    ? record.speechprintStrength
+    : null;
+  const resolvedStrength = strength ??
+    (["light", "balanced", "strong"] as const)[Math.min(2, Math.floor(random() * 3))]!;
   const corporality =
     typeof record.corporality === "number" && Number.isFinite(record.corporality)
       ? record.corporality
@@ -683,26 +886,36 @@ function normalizeGeneratedVoice(
     ...record,
     v: 2,
     enabled: true,
-    systemVoiceName: null,
-    elevenLabsVoiceId: null,
+    baseVoiceId: selectedPortable ?? DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2.baseVoiceId,
+    systemVoiceName: selectedSystem,
+    elevenLabsVoiceId: selectedPremium,
     elevenLabsVoiceIdOverride: null,
-    // A generated bot intentionally starts local-only. Mark the premium lane
-    // initialized so account default assignment cannot silently relink it.
+    // Mark the lane initialized even without Premium so account defaults never
+    // silently replace a deliberate generator casting.
     elevenLabsVoiceInitialized: true,
+    elevenLabsNativeAccentHint: premium?.nativeAccentHint ?? null,
+    elevenLabsEffect:
+      catalog?.preserveModelVoiceEffect === true &&
+      VOICE_EFFECTS.includes(record.elevenLabsEffect as never)
+        ? record.elevenLabsEffect
+        : "chorus",
     voiceEffectExplicit: true,
     corporality,
     avatarSfx: null,
     avatarSfxPrompt,
+    accentDefinitionId: resolvedAccentDefinitionId,
+    pronunciationMapPoint,
+    pronunciationBase: localAccent.pronunciationBase,
+    accentLocale: localAccent.pronunciationBase === "en-GB" ? "en-GB" : "en-US",
+    speechprintInfluence: localAccent.speechprintInfluence,
+    speechprintStrength: resolvedStrength,
   });
   const {
-    systemVoiceName: _systemVoiceName,
-    elevenLabsVoiceId: _elevenLabsVoiceId,
-    elevenLabsVoiceIdOverride: _elevenLabsVoiceIdOverride,
     avatarSfx: _avatarSfx,
     avatarSfxMuted: _avatarSfxMuted,
-    ...portable
+    ...profile
   } = normalized;
-  return portable;
+  return profile;
 }
 
 function normalizeGeneratedSettings(value: unknown): BotGeneratedSettingsV1 {
@@ -729,6 +942,8 @@ export function normalizeBotGenerationPrompt(value: unknown): string {
  */
 export function normalizeBotGeneratedDraftV1(
   value: unknown,
+  catalog?: BotGenerationVoiceCatalogV1,
+  random: () => number = Math.random,
 ): BotGeneratedDraftV1 | null {
   if (!isRecord(value)) return null;
   const name = compactText(value.name, 80) || "New bot";
@@ -792,7 +1007,7 @@ export function normalizeBotGeneratedDraftV1(
       : [value.powerPrompt]
   )
     .flatMap((candidate) => {
-      const prompt = compactText(candidate, BOT_POWER_INTENT_MAX_LENGTH);
+      const prompt = normalizeGeneratedBotPowerPromptV1(candidate);
       return prompt ? [prompt] : [];
     })
     .filter((prompt, index, prompts) => prompts.indexOf(prompt) === index)
@@ -828,8 +1043,8 @@ export function normalizeBotGeneratedDraftV1(
   return {
     v: BOT_GENERATION_DRAFT_VERSION,
     name,
-    // Keep schema fields for archive compatibility, but never auto-fill them.
-    namePronunciation: "",
+    namePronunciation:
+      normalizeBotNamePronunciation(value.namePronunciation) || name,
     selfReferral: "",
     profile,
     color: normalizeGeneratedBotHueColor(value.color),
@@ -842,6 +1057,8 @@ export function normalizeBotGeneratedDraftV1(
       value.voice,
       personaSeedText,
       avatarSfxPrompt,
+      catalog,
+      random,
     ),
     voicePreviewLine,
     powers: generatedPowers,
@@ -856,11 +1073,14 @@ export function normalizeBotGeneratedDraftV1(
  */
 export function normalizeLeanBotGeneratedDraftV1(
   value: unknown,
+  catalog?: BotGenerationVoiceCatalogV1,
+  random: () => number = Math.random,
 ): BotGeneratedDraftV1 | null {
   if (!isRecord(value)) return null;
   const faceInput = recordAt(value, "face");
   const hydrated = normalizeBotGeneratedDraftV1({
     name: value.name,
+    namePronunciation: value.namePronunciation,
     profile: value.profile,
     color: value.color,
     accentColor: null,
@@ -880,14 +1100,13 @@ export function normalizeLeanBotGeneratedDraftV1(
     },
     avatarDetails: { ink: [] },
     avatarSfxPrompt: "",
-    voice: {
-      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
-      baseVoiceId: value.voiceBaseId,
-    },
+    // Accept older automatic-batch drafts while new schemas use the shared
+    // rich voice object.
+    voice: value.voice ?? { baseVoiceId: value.voiceBaseId },
     voicePreviewLine: value.voicePreviewLine,
     powerPrompts: [],
     settings: {},
-  });
+  }, catalog, random);
   if (!hydrated) return null;
   const allowedFace = resolveBotFaceStyle(
     {
@@ -917,8 +1136,7 @@ export function normalizeLeanBotGeneratedDraftV1(
     avatarDetails: null,
     avatarSfxPrompt: "",
     audioVoiceProfile: normalizeBotAudioVoiceProfileV1({
-      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
-      baseVoiceId: value.voiceBaseId,
+      ...hydrated.audioVoiceProfile,
       avatarSfx: null,
       avatarSfxPrompt: "",
       avatarSfxMuted: false,

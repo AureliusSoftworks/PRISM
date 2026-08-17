@@ -98,6 +98,10 @@ export interface PrismRefractRequest {
   target: PrismRefractTextTarget;
   currentValue: string;
   rejectedValues: string[];
+  /**
+   * Legacy client routing hints. Refract's server route intentionally ignores
+   * them and resolves its saved model inside the account's global privacy lane.
+   */
   preferredProvider?: EphemeralChatResolvedProvider;
   responseMode?: ResponseMode;
   modelOverride?: string | null;

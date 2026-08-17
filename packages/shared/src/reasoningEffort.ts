@@ -434,6 +434,16 @@ export interface ModelTurboPreferenceV1 {
   updatedAt?: string;
 }
 
+/** Reserved persisted preference key for contextual ONLINE Auto Turbo. */
+export const AUTO_MODEL_TURBO_PREFERENCE_ID = "__prism_auto_turbo__";
+
+export function isAutoModelTurboPreferenceId(value: unknown): boolean {
+  return (
+    typeof value === "string" &&
+    value.trim().toLowerCase() === AUTO_MODEL_TURBO_PREFERENCE_ID
+  );
+}
+
 function openAiPriorityModelFamily(
   modelId: string,
   family: string,

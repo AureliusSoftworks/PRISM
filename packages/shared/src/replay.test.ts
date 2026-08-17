@@ -12,6 +12,7 @@ import {
   replayMouthShapeAtV2,
   replaySceneAtV2,
   replayVoiceLightLevelAtV2,
+  replaySpeechActivityAtV2,
   replayTimelineToWebVttV1,
   type ReplayManifestV1,
   type ReplayManifestV2,
@@ -465,6 +466,16 @@ const manifestV2: ReplayManifestV2 = {
         ],
       },
     ],
+    speechActivityTracks: [
+      {
+        participantId: "host",
+        cues: [
+          { atMs: 1_000, active: true },
+          { atMs: 1_300, active: false },
+          { atMs: 1_500, active: true },
+        ],
+      },
+    ],
   },
   visual: manifest.visual,
 };
@@ -552,6 +563,14 @@ test("V2 interpolates compact voice-light cues without anticipating across gaps"
     ),
     null,
   );
+});
+
+test("V2 preserves semantic speech activity across closed-mouth gaps", () => {
+  assert.equal(replaySpeechActivityAtV2(manifestV2, "host", 999), false);
+  assert.equal(replaySpeechActivityAtV2(manifestV2, "host", 1_100), true);
+  assert.equal(replaySpeechActivityAtV2(manifestV2, "host", 1_350), false);
+  assert.equal(replaySpeechActivityAtV2(manifestV2, "host", 1_550), true);
+  assert.equal(replaySpeechActivityAtV2(manifestV2, "guest", 1_100), null);
 });
 
 test("V2 presentation validation requires coalesced mouth shapes", () => {

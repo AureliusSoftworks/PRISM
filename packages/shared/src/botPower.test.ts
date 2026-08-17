@@ -11,6 +11,10 @@ import {
   applyBotPowerBotNamesV1,
   applyBotPowerEchoResponseV1,
   applyBotPowerCursedTongueResponseV1,
+  BOT_POWER_CURSED_TONGUE_MAX_PER_SENTENCE_V1,
+  BOT_POWER_CURSED_TONGUE_MIN_PER_SENTENCE_V1,
+  botPowerCursedTongueProfanityCountV1,
+  botPowerCursedTongueSentenceRangesV1,
   applyBotPowerMumbledResponseV1,
   applyBotPowerMumbledReactionPlanV1,
   applyBotPowerMuteResponseV1,
@@ -96,6 +100,7 @@ import {
   botPowerResponseIsSilentV1,
   botPowerResponseIsSemanticSilenceV1,
   botPowerResponseIsFirstIntroductionV1,
+  botPowerFallbackTitleV1,
   botPowerSourceHashV1,
   botPowerSourceHashForPowerV1,
   botPowerSigilForPowerV1,
@@ -104,6 +109,7 @@ import {
   botPowerVoiceGainMultiplierV1,
   botPowerVoicePresenceModeV1,
   buildBotPowersSelfPromptV1,
+  buildBotPowersPromptBlock,
   composeBotIdentityMirrorPowersV1,
   buildCoffeePowersPromptBlock,
   coffeePowerCupRateMultiplierV1,
@@ -111,7 +117,9 @@ import {
   coffeePowerVesselModeV1,
   estimateCoffeePowerTokensV1,
   normalizeBotPowersV1,
+  normalizeBotPowerGeneratedTitleV1,
   parseStoredBotPowersV1,
+  rerollBotPowerPresentationV1,
   serializeBotPowersV1,
   strongestBotPowerCandorEffectV1,
   strongestBotPowerAddressedFandomEffectV1,
@@ -137,6 +145,81 @@ test("bot powers normalize to three bounded entries", () => {
   );
   assert.equal(powers.length, BOT_POWER_MAX_COUNT);
   assert.equal(powers[0]?.intent.length, 640);
+});
+
+test("prompt-generated Power titles reject conditional fragments while authored titles persist", () => {
+  assert.equal(normalizeBotPowerGeneratedTitleV1("When Jim Makes"), "");
+  assert.equal(normalizeBotPowerGeneratedTitleV1("Borrowed Voice"), "Borrowed Voice");
+  const fallback = botPowerFallbackTitleV1("rune-reroll", "Borrowed Voice");
+  assert.ok(fallback);
+  assert.notEqual(fallback, "Borrowed Voice");
+
+  const promptPower = normalizeBotPowersV1([{
+    version: 1,
+    id: "fragment",
+    authoringMode: "prompt",
+    name: "When Jim Makes",
+    intent: "A floating puppet answers personal questions.",
+    enabled: true,
+    compileStatus: "draft",
+    compiled: null,
+  }])[0]!;
+  assert.ok(promptPower.name);
+  assert.doesNotMatch(promptPower.name, /^(?:when|whenever|while|if)\b/iu);
+  assert.equal(promptPower.intent, "A floating puppet answers personal questions.");
+  assert.equal(promptPower.enabled, true);
+  assert.equal(
+    parseStoredBotPowersV1(serializeBotPowersV1([promptPower]))[0]?.name,
+    promptPower.name,
+  );
+
+  const authored = normalizeBotPowersV1([{
+    version: 1,
+    id: "authored",
+    name: "When Stars Fall",
+    intent: "A legacy authored Power.",
+    enabled: true,
+    compileStatus: "draft",
+    compiled: null,
+  }])[0]!;
+  assert.equal(authored.name, "When Stars Fall");
+});
+
+test("a prompt Power reroll persists only its fresh title and rune presentation", () => {
+  const intent = "A floating puppet answers personal questions.";
+  const sourceHash = botPowerSourceHashForPowerV1({
+    authoringMode: "prompt",
+    name: "Mask Relay",
+    intent,
+  });
+  const power = {
+    version: 1 as const,
+    id: "presentation-reroll",
+    authoringMode: "prompt" as const,
+    name: "Mask Relay",
+    intent,
+    sigil: "aether" as const,
+    enabled: true,
+    compileStatus: "ready" as const,
+    compiled: {
+      version: 1 as const,
+      sourceHash,
+      selfCue: "Let the puppet answer.",
+      observerCue: "A puppet takes over personal answers.",
+      effects: [{ type: "action_bias" as const, cue: "Let the puppet answer.", frequency: "occasional" as const }],
+      ruleLabels: ["Puppet answers"],
+    },
+  };
+  const rerolled = rerollBotPowerPresentationV1(power, "Borrowed Voice");
+  assert.equal(rerolled.name, "Borrowed Voice");
+  assert.notEqual(rerolled.sigil, power.sigil);
+  assert.equal(rerolled.intent, power.intent);
+  assert.equal(rerolled.enabled, power.enabled);
+  assert.deepEqual(rerolled.compiled, power.compiled);
+  assert.deepEqual(
+    parseStoredBotPowersV1(serializeBotPowersV1([rerolled]))[0],
+    rerolled,
+  );
 });
 
 test("timed mute quantizes post-budget intended speech and renders immediate dots", () => {
@@ -301,7 +384,9 @@ test("mute reaction density and interruption curves match the timed tiers", () =
       botPowerMuteReactionCountV1(durationMs, `tier:${durationMs}:${index}`),
     );
   assert.deepEqual(new Set(countsAt(5_000)), new Set([0]));
-  assert.deepEqual(new Set(countsAt(8_000)), new Set([0, 1]));
+  assert.deepEqual(new Set(countsAt(7_000)), new Set([0, 1]));
+  assert.deepEqual(new Set(countsAt(8_000)), new Set([1]));
+  assert.deepEqual(new Set(countsAt(11_000)), new Set([1]));
   assert.deepEqual(new Set(countsAt(15_000)), new Set([1, 2]));
   assert.deepEqual(new Set(countsAt(24_000)), new Set([1, 2]));
   assert.deepEqual(new Set(countsAt(36_000)), new Set([2, 3]));
@@ -312,6 +397,26 @@ test("mute reaction density and interruption curves match the timed tiers", () =
   assert.equal(botPowerMuteInterruptionChanceV1(45_000), 0.6);
   assert.equal(botPowerMuteInterruptionChanceV1(45_000, 0.4), 0.75);
   assert.equal(botPowerMuteInterruptionChanceV1(12_000, 0, true), 0.75);
+});
+
+test("a nine-second Signal Mute turn always gives the listener one awkward beat", () => {
+  const beats = planBotPowerMuteReactionBeatsV1({
+    seed:
+      "2d3e93da21bca16e794eae8b:ecfc19c0034e5faf1852f3d0:4:mute",
+    durationMs: 9_000,
+    candidates: [{
+      botId: "57abdbdd9bd7317190854871",
+      directAddressee: true,
+      temperament: "frustrated",
+      mode: "signal",
+    }],
+    allowInterrupt: true,
+  });
+
+  assert.equal(beats.length, 1);
+  assert.equal(beats[0]?.reactorBotId, "57abdbdd9bd7317190854871");
+  assert.ok((beats[0]?.atMs ?? 0) >= 4_000);
+  assert.ok((beats[0]?.atMs ?? 0) <= 7_000);
 });
 
 test("mute performance sanitizer rejects malformed private-looking metadata", () => {
@@ -979,6 +1084,40 @@ test("Cursed Tongue deterministically layers strong profanity while protecting r
   ));
 });
 
+test("Cursed Tongue keeps one to four curse tokens in every spoken sentence", () => {
+  const source = [
+    "The careful plan keeps every protected artifact intact.",
+    "Tell Mira the final result plainly.",
+    "I already put one damn marker in this line.",
+  ].join(" ");
+  const adjusted = applyBotPowerCursedTongueResponseV1(source, "density-floor");
+  const sentences = botPowerCursedTongueSentenceRangesV1(adjusted);
+  assert.ok(sentences.length >= 3);
+  for (const range of sentences) {
+    const count = botPowerCursedTongueProfanityCountV1(
+      adjusted.slice(range.start, range.end),
+    );
+    assert.ok(
+      count >= BOT_POWER_CURSED_TONGUE_MIN_PER_SENTENCE_V1,
+      `${adjusted.slice(range.start, range.end)} has ${count}`,
+    );
+    assert.ok(
+      count <= BOT_POWER_CURSED_TONGUE_MAX_PER_SENTENCE_V1,
+      `${adjusted.slice(range.start, range.end)} has ${count}`,
+    );
+  }
+  const alreadyMaxed = applyBotPowerCursedTongueResponseV1(
+    "This fucking goddamn shitty damn line is already saturated.",
+    "already-maxed",
+  );
+  assert.equal(
+    botPowerCursedTongueProfanityCountV1(alreadyMaxed),
+    botPowerCursedTongueProfanityCountV1(
+      "This fucking goddamn shitty damn line is already saturated.",
+    ),
+  );
+});
+
 test("Cursed Tongue composes after addressed-insult content", () => {
   const source = "Your proposal ignores the cost.";
   const insulted = applyBotPowerAddressedInsultV1(
@@ -1025,10 +1164,10 @@ test("Cursed Tongue fallback uses sentence and verb cadence instead of corruptin
   const adjusted = applyBotPowerCursedTongueResponseV1(source, "cake");
 
   assert.match(adjusted, /\b(?:fucking|goddamn|damn)\b/iu);
-  assert.ok(adjusted.includes("**Ingredients**"));
-  assert.ok(adjusted.includes("**Safety**"));
-  assert.ok(adjusted.includes("2 cups all-purpose flour"));
-  assert.ok(adjusted.includes("1 teaspoon salt"));
+  assert.match(adjusted, /(?:^|\n)\*\*Ingredients\*\*/u);
+  assert.match(adjusted, /(?:^|\n)\*\*Safety\*\*/u);
+  assert.match(adjusted, /(?:^|\n)- 2 cups all-purpose flour/u);
+  assert.match(adjusted, /(?:^|\n)- 1 teaspoon salt/u);
   assert.ok(adjusted.includes("Children should have adult supervision. Check every ingredient label for allergies."));
   assert.doesNotMatch(adjusted, /\*\*[^*]*(?:fuck|damn|shit)[^*]*\*\*/iu);
   assert.doesNotMatch(adjusted, /(?:fuck\w*|goddamn|damn)\s+(?:flour|salt)\b/iu);
@@ -2530,6 +2669,28 @@ test("identity mirror borrows public active effects without recursive identity o
   );
   assert.equal(botPowerEternallyIntroducesV1(composed), true);
   assert.equal(botPowerBelievesFalseNameV1(composed), true);
+  assert.deepEqual(
+    normalizeBotPowerEffectV1({
+      type: "false_name",
+      continuity: "session_sticky_until_amnesia",
+      pool: "given_plus_random_surname",
+    }),
+    {
+      type: "false_name",
+      continuity: "session_sticky_until_amnesia",
+      pool: "given_plus_random_surname",
+    },
+  );
+  assert.equal(
+    botPowerBelievesFalseNameV1([
+      power("surname", [{
+        type: "false_name",
+        continuity: "session_sticky_until_amnesia",
+        pool: "given_plus_random_surname",
+      }]),
+    ]),
+    true,
+  );
   assert.equal(
     activeBotPowerEffectsV1(composed).some(
       (effect) =>

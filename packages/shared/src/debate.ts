@@ -8,6 +8,8 @@ import type { BotAvatarDetailsV1 } from "./botAvatarDetails.js";
 import type { BotFaceStyle } from "./botAvatar.js";
 import type { BotVoicePreset } from "./botProfile.js";
 import {
+  botPowerCopiesAddressedSpeechV1,
+  botPowerIntendedSpeechLooksGibberishV1,
   botPowerResponseIsSilentV1,
   type BotPowerEffectV1,
   type BotPowerMutePerformanceV1,
@@ -2612,6 +2614,228 @@ export function sanitizeDebateDebaterText(content: string): string {
     .trim();
 }
 
+const DEBATE_PROMPT_LEAK_ANYWHERE_PATTERNS = [
+  /return json only/iu,
+  /evidence participation assignment/iu,
+  /never mention these production instructions/iu,
+  /an audible floor clock gives you/iu,
+  /public debate so far:/iu,
+  /choose deliverycue/iu,
+  /\{\s*"content"\s*:\s*"your public statement"/iu,
+  /give the .{0,80} opening argument/iu,
+] as const;
+
+/**
+ * True when public Debate speech is director notes or the JSON contract
+ * instead of an in-character floor line.
+ */
+export function debateSpeechLooksLikePromptLeak(raw: string): boolean {
+  const normalized = raw.replace(/\s+/gu, " ").trim();
+  if (!normalized) return false;
+  return DEBATE_PROMPT_LEAK_ANYWHERE_PATTERNS.some((pattern) =>
+    pattern.test(normalized),
+  );
+}
+
+/**
+ * True when a case-board sentence is a floor grant, time call, or leaked
+ * production instruction rather than an argued claim.
+ */
+export function debateClaimSentenceIsProceduralFloorGrant(
+  sentence: string,
+): boolean {
+  const trimmed = sentence.trim();
+  if (!trimmed) return true;
+  if (debateSpeechLooksLikePromptLeak(trimmed)) return true;
+  return (
+    /,\s*(?:rebuttal|closing)\.?$/iu.test(trimmed) ||
+    /\byou have the scheduled\b/iu.test(trimmed) ||
+    /\bhas the scheduled (?:rebuttal|closing|opening)\b/iu.test(trimmed) ||
+    /\byou(?:'re| are) up first\b/iu.test(trimmed)
+  );
+}
+
+const DEBATE_ADDRESSED_SPEECH_KINDS = new Set<string>([
+  "speech",
+  "moderator_ruling",
+  "phase",
+  "ballot",
+  "jury_verdict",
+]);
+
+function escapeDebateNamePattern(name: string): string {
+  return name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+function debateEffectsIncludeSpeechCopy(value: unknown): boolean {
+  if (!Array.isArray(value)) return false;
+  return value.some(
+    (effect) =>
+      Boolean(
+        effect &&
+          typeof effect === "object" &&
+          "type" in effect &&
+          effect.type === "speech_copy",
+      ),
+  );
+}
+
+/**
+ * Frozen Echo/Copycat Powers, including marketplace compiles that kept the
+ * self-cue but dropped `speech_copy` from `effects`.
+ */
+export function debatePowerCopiesAddressedSpeech(args: {
+  planEffects?: unknown;
+  powers?: readonly BotPowerV1[] | null;
+}): boolean {
+  if (botPowerCopiesAddressedSpeechV1(args.powers)) return true;
+  if (debateEffectsIncludeSpeechCopy(args.planEffects)) return true;
+  for (const power of args.powers ?? []) {
+    const compiled = power.compiled;
+    if (!compiled) continue;
+    if (debateEffectsIncludeSpeechCopy(compiled.effects)) return true;
+    if (
+      /repeat the latest speech addressed to you verbatim/iu.test(
+        compiled.selfCue,
+      )
+    ) {
+      return true;
+    }
+    if (
+      compiled.ruleLabels.some((label) =>
+        /echoes addressed speech|copies addressed speech/iu.test(label),
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Latest public line from another speaker that names this bot. Never returns
+ * leaked production instructions.
+ */
+export function debateLatestAddressedPublicSpeech(
+  events: readonly Pick<
+    DebateEventV1,
+    "kind" | "content" | "speakerBotId" | "stepKey"
+  >[],
+  holder: { id: string; name: string },
+): string | null {
+  const name = holder.name.trim();
+  if (!name) return null;
+  const namePattern = new RegExp(`\\b${escapeDebateNamePattern(name)}\\b`, "iu");
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (!event) continue;
+    if (event.speakerBotId === holder.id) continue;
+    if (debateEventIsTranscriptHousekeeping(event)) continue;
+    if (debateEventIsAtmosphericVocalFoley(event)) continue;
+    if (event.kind === "case_board" || event.kind === "silence") continue;
+    if (!DEBATE_ADDRESSED_SPEECH_KINDS.has(event.kind)) continue;
+    if (!event.content || debateSpeechLooksLikePromptLeak(event.content)) {
+      continue;
+    }
+    if (!namePattern.test(event.content)) continue;
+    return event.content;
+  }
+  return null;
+}
+
+const DEBATE_COPYCAT_SOURCE_KINDS = new Set<string>([
+  "speech",
+  "player_turn",
+  "silence",
+]);
+
+/**
+ * Latest heard public floor from the opposing side, including canonical mute
+ * silence. Debate Copycat uses this whenever the other side has spoken, so a
+ * second-chair Copycat does not invent an opening.
+ */
+export function debateLatestCopycatSourceSpeech(
+  events: readonly Pick<
+    DebateEventV1,
+    "kind" | "content" | "speakerBotId" | "sideId" | "stepKey"
+  >[],
+  holder: { id: string; sideId: DebateSideId | null },
+): string | null {
+  if (!holder.sideId) return null;
+  const opposingSideId: DebateSideId =
+    holder.sideId === "for" ? "against" : "for";
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (!event) continue;
+    if (event.speakerBotId === holder.id) continue;
+    if (event.sideId !== opposingSideId) continue;
+    if (!DEBATE_COPYCAT_SOURCE_KINDS.has(event.kind)) continue;
+    if (debateEventIsTranscriptHousekeeping(event)) continue;
+    if (debateEventIsAtmosphericVocalFoley(event)) continue;
+    if (!event.content) continue;
+    if (debateSpeechLooksLikePromptLeak(event.content)) continue;
+    if (debateClaimSentenceIsProceduralFloorGrant(event.content)) continue;
+    return event.content;
+  }
+  return null;
+}
+
+/** Saved step for a bot-chair cutoff after an unintelligible public floor. */
+export const DEBATE_UNINTELLIGIBLE_FLOOR_STEP_KEY = "unintelligible_floor" as const;
+
+/**
+ * True when heard public Debate speech is garbled rather than a recognizable
+ * argument. Canonical mute silence is a different Power and is not nonsense.
+ */
+export function debatePublicSpeechLooksUnintelligible(content: string): boolean {
+  if (!content.trim() || botPowerResponseIsSilentV1(content)) return false;
+  if (debateSpeechLooksLikePromptLeak(content)) return false;
+  return botPowerIntendedSpeechLooksGibberishV1(content);
+}
+
+function debateEffectsIncludeSpeechObfuscation(value: unknown): boolean {
+  if (!Array.isArray(value)) return false;
+  return value.some((entry) => {
+    const effect =
+      entry &&
+      typeof entry === "object" &&
+      "effect" in entry &&
+      entry.effect &&
+      typeof entry.effect === "object"
+        ? entry.effect
+        : entry;
+    return Boolean(
+      effect &&
+        typeof effect === "object" &&
+        "type" in effect &&
+        effect.type === "speech_obfuscation",
+    );
+  });
+}
+
+/**
+ * True when a landed advocate/participant floor should draw a chair cutoff:
+ * public obfuscation, or content that is itself unintelligible.
+ */
+export function debateFloorSpeechWarrantsUnintelligibleCutoff(args: {
+  kind: string;
+  content: string;
+  speakerKind: string;
+  interrupted?: boolean;
+  speakerEffects?: unknown;
+}): boolean {
+  if (args.interrupted === true) return false;
+  if (args.speakerKind !== "advocate" && args.speakerKind !== "player") {
+    return false;
+  }
+  if (args.kind !== "speech" && args.kind !== "player_turn") return false;
+  if (!args.content.trim() || botPowerResponseIsSilentV1(args.content)) {
+    return false;
+  }
+  if (debateEffectsIncludeSpeechObfuscation(args.speakerEffects)) return true;
+  return debatePublicSpeechLooksUnintelligible(args.content);
+}
+
 export function debateEstimatedSpeechDurationMs(content: string): number {
   const normalized = debateSpokenText(content);
   if (!normalized) return 0;
@@ -2695,9 +2919,9 @@ const DEBATE_ACTIVE_PRESENTATION_EVENT_KINDS = new Set<DebateEventKind>([
 ]);
 
 /**
- * Spectator Debates keep `status: "live"` (or paused) after the floor finishes
- * until the player has fully watched the closing. Pause, leave, and return all
- * stay on the live recess path until this seal lands.
+ * Legacy Spectator records created before terminal completion moved into the
+ * reducer can still await a presentation seal. New records complete with their
+ * durable closing event instead of relying on a browser callback.
  */
 export function debateSessionAwaitsPresentationSeal(
   session: Pick<

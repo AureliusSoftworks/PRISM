@@ -250,6 +250,32 @@ export const DEFAULT_BOT_IDENTITY_COLOR = "#7c6cff";
 /** Hue offset for the stable analogous Atmosphere accent. */
 export const BOT_AUTO_ACCENT_HUE_OFFSET_DEGREES = 52;
 
+/** Shortest distance around the hue circle, in degrees (0–180). */
+export function circularHueDistanceDeg(a: number, b: number): number {
+  const ah = ((a % 360) + 360) % 360;
+  const bh = ((b % 360) + 360) % 360;
+  const delta = Math.abs(ah - bh);
+  return Math.min(delta, 360 - delta);
+}
+
+/** Hue 180° across the wheel from `hue`. */
+export function complementaryHueDeg(hue: number): number {
+  return (((hue % 360) + 360) % 360 + 180) % 360;
+}
+
+/**
+ * Honest identity hue in degrees, or null when the value has no usable
+ * chromatic hue (invalid hex, missing, or near-gray).
+ */
+export function botIdentityHueDeg(color: unknown): number | null {
+  if (typeof color !== "string") return null;
+  const trimmed = color.trim();
+  if (!/^#[0-9a-fA-F]{6}$/u.test(trimmed)) return null;
+  const { h, s } = hexToHsl(trimmed);
+  if (s < 8) return null;
+  return ((h % 360) + 360) % 360;
+}
+
 /**
  * Normalize a portable bot identity color. Identity colors are deliberately
  * stricter than legacy CSS presentation values: only six-digit hex can cross

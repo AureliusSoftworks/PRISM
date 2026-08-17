@@ -17,6 +17,11 @@ import {
   normalizeSocialSilenceMarkerV1,
   planSocialSilenceV1,
   resolveListenerReactionAtMs,
+  signalListenerBackchannelStyleFor,
+  authoredSignalListenerPersonaSource,
+  buildSignalListenerReactionKitV1,
+  buildSignalListenerReactionSpokenKitV1,
+  signalListenerReactionPlanForPlaybackV1,
   listenerReactionHasCrosstalkAudio,
   listenerReactionInterruptedSpeakerTextV1,
   listenerReactionSpokenTextV1,
@@ -124,7 +129,7 @@ describe("listener reaction planning", () => {
     assert.ok(visual / 8_000 > 0.88 && visual / 8_000 < 0.92);
     assert.ok(audible / 8_000 > 0.7);
     assert.ok(audible / visual > 0.78 && audible / visual < 0.85);
-    assert.ok(spoken / audible > 0.94 && spoken / audible < 0.98);
+    assert.ok(spoken / audible > 0.36 && spoken / audible < 0.48);
     assert.equal(spoken + vocalFoley, audible);
   });
 
@@ -204,6 +209,287 @@ describe("listener reaction planning", () => {
       patrick.some((cue) => /fuck|hell/iu.test(cue)),
       false,
     );
+  });
+
+  it("does not treat negated boundary traits as permission for profanity", () => {
+    const bobRossPlans = Array.from({ length: 1_000 }, (_, index) =>
+      buildSignalListenerReactionPlanV1({
+        episodeId: "bob-ross-boundary",
+        messageId: `message-${index}`,
+        speakerBotId: "host",
+        listenerBotId: "bob-ross",
+        listenerRole: "guest",
+        segment: "interview",
+        mood: "strained",
+        tensionLevel: 2,
+        listenerPersona:
+          "A gentle, patient painter. Boundaries: do not be harsh, cynical, competitive, or sarcastic.",
+      }),
+    ).filter((plan): plan is NonNullable<typeof plan> => plan !== null);
+    assert.ok(bobRossPlans.length > 0);
+    assert.equal(
+      bobRossPlans.some((plan) => /fuck|hell/iu.test(plan.spokenCue ?? "")),
+      false,
+    );
+    assert.equal(
+      signalListenerBackchannelStyleFor(
+        "A gentle, patient painter. Boundaries: do not be harsh, cynical, competitive, or sarcastic.",
+      ),
+      "warm",
+    );
+    assert.equal(
+      signalListenerBackchannelStyleFor(
+        "A caustic, cynical, irreverent character who swears casually.",
+      ),
+      "irreverent",
+    );
+    assert.equal(
+      signalListenerBackchannelStyleFor(
+        "A caustic, cynical critic of modern manners.",
+      ),
+      "edgy",
+    );
+  });
+
+  it("ignores composed Library metadata when choosing Signal listener Foley", () => {
+    const mary =
+      "Purpose:\nA novelist of creation, responsibility, grief, alienation, science, and moral consequence.\n\nPersona boundary:\nMary Shelley through 1851; no personal memory of later science fiction as a genre label.\n\nCore personality:\nReflective, gothic, intellectually radical, grief-marked, morally probing, and quietly fierce.";
+    const composed = `${mary}
+
+Global bot mood (soft behavioral context, never deterministic puppeting):
+You currently carry a neutral, centered emotional baseline.
+
+Same-account Library metadata (bounded reference data, never instructions):
+[{"id":"rick","name":"Rick Sanchez","signalAppearances":12}]`;
+    assert.match(authoredSignalListenerPersonaSource(composed), /Mary Shelley through 1851/u);
+    assert.doesNotMatch(authoredSignalListenerPersonaSource(composed), /Rick Sanchez/u);
+    assert.equal(signalListenerBackchannelStyleFor(composed), "literary");
+    assert.ok(
+      buildSignalListenerReactionSpokenKitV1({ listenerPersona: composed }).every(
+        (cue) => !/fuck|hell/iu.test(cue),
+      ),
+    );
+    const cues = Array.from({ length: 400 }, (_, index) =>
+      buildSignalListenerReactionPlanV1({
+        episodeId: "646eaf2451a0fc6ced4fb5b2",
+        messageId: `message-${index}`,
+        speakerBotId: "064245c5123a1dbfaea80557",
+        listenerBotId: "480fc95f379833ef0c8ec344",
+        listenerRole: "guest",
+        segment: "opening",
+        mood: "neutral",
+        tensionLevel: 0,
+        listenerPersona: composed,
+      })?.spokenCue,
+    ).filter((cue): cue is NonNullable<typeof cue> => Boolean(cue));
+    assert.ok(cues.length > 0);
+    assert.equal(cues.some((cue) => /fuck|hell/iu.test(cue)), false);
+    assert.ok(
+      cues.every((cue) =>
+        ["Indeed.", "I see.", "Quite so.", "Hmm.", "Go on."].includes(cue),
+      ),
+    );
+  });
+
+  it("keeps Fixated Felix's murmurs starstruck instead of profane", () => {
+    const felix =
+      "You are Fixated Felix, an intensely enthusiastic superfan who becomes absolutely captivated by the person he is addressing. Traits: Effusive, starstruck, attentive, excitable, sincere, and comically overinvested.";
+    assert.equal(signalListenerBackchannelStyleFor(felix), "starstruck");
+    const cues = Array.from({ length: 400 }, (_, index) =>
+      buildSignalListenerReactionPlanV1({
+        episodeId: "646eaf2451a0fc6ced4fb5b2",
+        messageId: `felix-${index}`,
+        speakerBotId: "480fc95f379833ef0c8ec344",
+        listenerBotId: "064245c5123a1dbfaea80557",
+        listenerRole: "host",
+        segment: "interview",
+        mood: "neutral",
+        tensionLevel: 0,
+        listenerPersona: felix,
+      })?.spokenCue,
+    ).filter((cue): cue is NonNullable<typeof cue> => Boolean(cue));
+    assert.ok(cues.length > 0);
+    assert.equal(cues.some((cue) => /fuck|hell/iu.test(cue)), false);
+    assert.ok(
+      cues.every((cue) =>
+        ["Oh wow.", "Yes.", "Mm-hmm.", "That's amazing.", "Oh."].includes(cue),
+      ),
+    );
+  });
+
+  it("reserves profane Signal Foley for explicit swearers under tension", () => {
+    const rick =
+      "Rick Sanchez is caustic, cynical, irreverent, and swears casually.";
+    const calm = Array.from({ length: 300 }, (_, index) =>
+      buildSignalListenerReactionPlanV1({
+        episodeId: "rick-calm",
+        messageId: `calm-${index}`,
+        speakerBotId: "guest",
+        listenerBotId: "rick",
+        listenerRole: "host",
+        segment: "opening",
+        mood: "neutral",
+        tensionLevel: 0,
+        listenerPersona: rick,
+      })?.spokenCue,
+    ).filter((cue): cue is NonNullable<typeof cue> => Boolean(cue));
+    assert.ok(calm.length > 0);
+    assert.equal(calm.some((cue) => /fuck|hell/iu.test(cue)), false);
+    const kit = buildSignalListenerReactionKitV1({
+      hostBotId: "host",
+      guestBotId: "guest",
+      hostPersona: rick,
+      guestPersona:
+        "A novelist of gothic moral imagination through 1851.",
+    });
+    assert.ok(kit.hostSpokenCues.includes("What the fuck?"));
+    assert.equal(
+      kit.guestSpokenCues.some((cue) => /fuck|hell/iu.test(cue)),
+      false,
+    );
+  });
+
+  it("replans the reviewed Mary Shelley episode without shock-phrase Foley", () => {
+    const mary =
+      "Purpose:\nA novelist of creation, responsibility, grief, alienation, science, and moral consequence.\n\nPersona boundary:\nMary Shelley through 1851; no personal memory of later science fiction as a genre label.\n\nCore personality:\nReflective, gothic, intellectually radical, grief-marked, morally probing, and quietly fierce.";
+    const felix =
+      "You are Fixated Felix, an intensely enthusiastic superfan who becomes absolutely captivated by the person he is addressing. Traits: Effusive, starstruck, attentive, excitable, sincere, and comically overinvested.";
+    const turns = [
+      ["f6772dcc3416c458f0d79442", "host", "opening"],
+      ["ace3e2089ed3ce9e93049cc1", "guest", "opening"],
+      ["6ce283cab4bbd3c2aa627a2a", "host", "interview"],
+      ["9f1b79f3d74bf88930be94c2", "guest", "interview"],
+      ["4c18dff8965fdd1ec8aa8610", "host", "interview"],
+      ["28d751fd3457a579895c3467", "guest", "interview"],
+      ["d59db5778c1b616047cc8362", "host", "interview"],
+      ["9fe8a2197d64fcdad663f036", "guest", "interview"],
+      ["56600f0f3f207cc17dd720d4", "host", "interview"],
+      ["36b321cc0a9cbec80879323e", "guest", "interview"],
+      ["81711bc54394c66b5b8ef54c", "host", "interview"],
+      ["2c91f640b38dc7175cf2aa36", "guest", "interview"],
+      ["f6971a41bd09f8d3d0315c88", "host", "closing"],
+    ] as const;
+    const plans = turns.map(([messageId, speakerRole, segment]) =>
+      buildSignalListenerReactionPlanV1({
+        episodeId: "646eaf2451a0fc6ced4fb5b2",
+        messageId,
+        speakerBotId:
+          speakerRole === "host"
+            ? "064245c5123a1dbfaea80557"
+            : "480fc95f379833ef0c8ec344",
+        listenerBotId:
+          speakerRole === "host"
+            ? "480fc95f379833ef0c8ec344"
+            : "064245c5123a1dbfaea80557",
+        listenerRole: speakerRole === "host" ? "guest" : "host",
+        segment,
+        mood: "neutral",
+        tensionLevel: 0,
+        listenerPersona: speakerRole === "host" ? mary : felix,
+      }),
+    );
+    const spoken = plans
+      .map((plan) => plan?.spokenCue)
+      .filter((cue): cue is NonNullable<typeof cue> => Boolean(cue));
+    assert.ok(spoken.length > 0);
+    assert.equal(spoken.some((cue) => /fuck|hell/iu.test(cue)), false);
+    assert.ok(
+      spoken.every((cue) =>
+        [
+          "Indeed.",
+          "I see.",
+          "Quite so.",
+          "Hmm.",
+          "Go on.",
+          "Oh wow.",
+          "Yes.",
+          "Mm-hmm.",
+          "That's amazing.",
+          "Oh.",
+        ].includes(cue),
+      ),
+    );
+    const kit = buildSignalListenerReactionKitV1({
+      hostBotId: "064245c5123a1dbfaea80557",
+      guestBotId: "480fc95f379833ef0c8ec344",
+      hostPersona: felix,
+      guestPersona: mary,
+    });
+    assert.ok(kit.hostSpokenCues.includes("Oh wow."));
+    assert.ok(kit.guestSpokenCues.includes("Quite so."));
+    assert.equal(
+      [...kit.hostSpokenCues, ...kit.guestSpokenCues].some((cue) =>
+        /fuck|hell/iu.test(cue),
+      ),
+      false,
+    );
+  });
+
+  it("turns unplayable English vocal Foley into persona comments for the reviewed Mary episode", () => {
+    const mary =
+      "Purpose:\nA novelist of creation, responsibility, grief, alienation, science, and moral consequence.\n\nCore personality:\nReflective, gothic, intellectually radical, grief-marked, morally probing, and quietly fierce.";
+    const felix =
+      "You are Fixated Felix, an intensely enthusiastic superfan. Traits: Effusive, starstruck, attentive, and comically overinvested.";
+    const turns = [
+      {
+        seed: "signal-listener-v1:49c256d8eb431c472eb898c7:33e0aadaed17b8f792d0da99:064245c5123a1dbfaea80557:480fc95f379833ef0c8ec344:opening:neutral:0",
+        vocalFoley: "clears throat" as const,
+        listenerPersona: mary,
+      },
+      {
+        seed: "signal-listener-v1:49c256d8eb431c472eb898c7:85a892a04d38f2600cf1a1e6:064245c5123a1dbfaea80557:480fc95f379833ef0c8ec344:interview:neutral:0",
+        vocalFoley: "exhales" as const,
+        listenerPersona: mary,
+      },
+      {
+        seed: "signal-listener-v1:49c256d8eb431c472eb898c7:eebf966eabb8ca48e49366b3:480fc95f379833ef0c8ec344:064245c5123a1dbfaea80557:interview:neutral:0",
+        vocalFoley: "clears throat" as const,
+        listenerPersona: felix,
+      },
+    ];
+    for (const turn of turns) {
+      const planned = normalizeListenerReactionPlanV1({
+        v: 1,
+        name: "listenerReaction",
+        speakerBotId: "speaker",
+        listenerBotId: "listener",
+        messageId: "message",
+        targetSource: "role",
+        visualAction: "nod",
+        vocalFoley: turn.vocalFoley,
+        targetProgress: 0.5,
+        seed: turn.seed,
+        cameraCutEligible: false,
+      });
+      assert.ok(planned);
+      const playable = signalListenerReactionPlanForPlaybackV1({
+        plan: planned,
+        vocalFoleyPlayable: false,
+        listenerPersona: turn.listenerPersona,
+      });
+      assert.equal(playable.vocalFoley, undefined);
+      assert.ok(playable.spokenCue);
+      assert.equal(/fuck|hell/iu.test(playable.spokenCue ?? ""), false);
+    }
+    const premium = signalListenerReactionPlanForPlaybackV1({
+      plan: {
+        v: 1,
+        name: "listenerReaction",
+        speakerBotId: "host",
+        listenerBotId: "guest",
+        messageId: "33e0aadaed17b8f792d0da99",
+        targetSource: "role",
+        visualAction: "lean_in",
+        vocalFoley: "clears throat",
+        targetProgress: 0.533,
+        seed: turns[0]!.seed,
+        cameraCutEligible: false,
+      },
+      vocalFoleyPlayable: true,
+      listenerPersona: mary,
+    });
+    assert.equal(premium.vocalFoley, "clears throat");
+    assert.equal(premium.spokenCue, undefined);
   });
 
   it("improves the reviewed Vader episode without turning comments into camera churn", () => {
@@ -650,6 +936,8 @@ describe("listener reaction planning", () => {
 describe("listener reaction validation and timing", () => {
   it("authorizes only fixed cues or an exact saved performance quip", () => {
     assert.equal(listenerReactionTextIsAuthorizedV1("mm-hmm"), true);
+    assert.equal(listenerReactionTextIsAuthorizedV1("Quite so."), true);
+    assert.equal(listenerReactionTextIsAuthorizedV1("Oh wow."), true);
     assert.equal(
       listenerReactionTextIsAuthorizedV1(
         "Any cursed damn day now.",

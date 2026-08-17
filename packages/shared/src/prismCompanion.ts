@@ -98,6 +98,7 @@ export type PrismCompanionHandoffDirection =
 export type PrismCompanionActionIntent =
   | { type: "navigate"; destination: "home" | "slate" }
   | { type: "open_tool"; tool: PrismCompanionToolId }
+  | { type: "open_flight_recorder" }
   | { type: "create_bot" }
   | { type: "export_bot"; botId: string }
   | { type: "begin_handoff"; direction: PrismCompanionHandoffDirection };
@@ -359,6 +360,7 @@ export function normalizePrismCompanionActionIntent(
     return { type: value.type, tool: value.tool as PrismCompanionToolId };
   }
   if (value.type === "create_bot") return { type: value.type };
+  if (value.type === "open_flight_recorder") return { type: value.type };
   if (value.type === "export_bot") {
     const botId = boundedId(value.botId);
     return botId ? { type: value.type, botId } : null;
