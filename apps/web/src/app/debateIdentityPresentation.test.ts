@@ -220,13 +220,42 @@ test("Debate mirror borrows target identity while retaining holder materials", (
   }
   assert.equal(mirrored.powers[0]?.id, "target-power");
 
-  assert.equal(
-    debateIdentityAppearanceBotV1({
-      holder,
-      target,
-      effect: "identity_shapeshift",
-    }),
+  // Shapeshifter takes the target's face, chassis, and voice, but the holder's
+  // authored identity anchors — name, color, glyph — always persist so the
+  // chamber can still tell who actually holds the floor. The disguise is
+  // carried by the "Appearing as …" label, not by overwriting the speaker.
+  const shifted = debateIdentityAppearanceBotV1({
+    holder,
     target,
-    "Shapeshifter must continue copying the complete public form",
+    effect: "identity_shapeshift",
+  });
+  assert.equal(shifted.id, holder.id, "Shapeshifter keeps the holder's mechanical id");
+  assert.equal(shifted.name, holder.name, "Shapeshifter keeps the holder's name");
+  assert.equal(shifted.color, holder.color, "Shapeshifter keeps the holder's color");
+  assert.equal(shifted.glyph, holder.glyph, "Shapeshifter keeps the holder's glyph");
+  assert.equal(shifted.role, holder.role);
+  assert.equal(shifted.sideId, holder.sideId);
+  assert.equal(shifted.provider, holder.provider);
+  assert.equal(shifted.model, holder.model);
+  assert.equal(shifted.revision, holder.revision);
+  assert.equal(
+    shifted.systemPrompt,
+    target.systemPrompt,
+    "Shapeshifter still wears the target's persona",
+  );
+  assert.deepEqual(
+    shifted.avatarDetails,
+    targetInk,
+    "Shapeshifter still wears the target's face",
+  );
+  assert.deepEqual(
+    shifted.replayVisualSnapshot,
+    target.replayVisualSnapshot,
+    "Shapeshifter still wears the target's frozen visual form",
+  );
+  assert.deepEqual(
+    shifted.voiceProfile,
+    target.voiceProfile,
+    "Shapeshifter still speaks with the target's voice",
   );
 });

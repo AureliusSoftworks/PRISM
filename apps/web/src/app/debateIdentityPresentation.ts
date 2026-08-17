@@ -28,7 +28,10 @@ export interface DebateIdentityPresentationChangeV1 {
  * Build the public avatar passed to Debate rendering. Identity Crisis borrows
  * the target identity while keeping the holder's color, client voice effect,
  * communication chassis, frame, mechanical id, seat, and routing boundary.
- * Shapeshifter deliberately keeps the prior complete-target presentation.
+ * Shapeshifter takes the target's face, chassis, and voice, but the holder's
+ * authored identity anchors — name, color, glyph — always persist so the
+ * chamber can still tell who actually holds the floor. The disguise is carried
+ * by the "Appearing as …" label, not by overwriting the speaker.
  */
 export function debateIdentityAppearanceBotV1(args: {
   holder: DebateBotSnapshotV1;
@@ -36,7 +39,21 @@ export function debateIdentityAppearanceBotV1(args: {
   effect: DebateIdentityPresentationEffectV1 | null;
 }): DebateBotSnapshotV1 {
   if (!args.target || !args.effect) return args.holder;
-  if (args.effect === "identity_shapeshift") return args.target;
+  if (args.effect === "identity_shapeshift") {
+    return {
+      ...args.target,
+      version: args.holder.version,
+      id: args.holder.id,
+      name: args.holder.name,
+      role: args.holder.role,
+      sideId: args.holder.sideId,
+      color: args.holder.color,
+      glyph: args.holder.glyph,
+      provider: args.holder.provider,
+      model: args.holder.model,
+      revision: args.holder.revision,
+    };
+  }
 
   const holderVisual = args.holder.replayVisualSnapshot ?? null;
   const targetVisual = args.target.replayVisualSnapshot ?? null;

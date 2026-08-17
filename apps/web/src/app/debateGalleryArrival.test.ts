@@ -111,7 +111,7 @@ describe("debateGalleryArrival", () => {
     );
   });
 
-  it("glides house fill between seats and eases murmur in from silence", () => {
+  it("glides house fill between seats and steps murmur audibly from an empty room", () => {
     const halfLinger = debateGalleryArrivalFillRatio({
       nonPlayerCount: 8,
       progressRatio: 0,
@@ -122,13 +122,27 @@ describe("debateGalleryArrival", () => {
     assert.ok(halfLinger > 1 / 8);
     assert.ok(halfLinger < 2 / 8);
 
+    // The arrival is the diegetic buffer gauge: wall-clock lingering may send
+    // in a few stragglers but can never fill the house on its own — a stalled
+    // bake holds visibly short of full.
+    const stalledForever = debateGalleryArrivalFillRatio({
+      nonPlayerCount: 8,
+      progressRatio: 0,
+      bakeUnlocked: false,
+      elapsedMs: DEBATE_GALLERY_ARRIVAL_LINGER_INTERVAL_MS * 40,
+      unlockElapsedMs: 0,
+    });
+    assert.equal(stalledForever, 3 / 8);
+
+    // Silent only while the house is truly empty; the first arrival takes an
+    // audible step (the floor) and the bed grows linearly to full.
     assert.equal(
       debateGalleryArrivalMurmurGain({ revealedCount: 0, nonPlayerCount: 8 }),
       0,
     );
     assert.equal(
       debateGalleryArrivalMurmurGain({ revealedCount: 4, nonPlayerCount: 8 }),
-      0.25,
+      0.7,
     );
     assert.equal(
       debateGalleryArrivalMurmurGain({
@@ -136,7 +150,7 @@ describe("debateGalleryArrival", () => {
         nonPlayerCount: 8,
         fillRatio: 0.5,
       }),
-      0.25,
+      0.7,
     );
     assert.equal(
       debateGalleryArrivalMurmurGain({ revealedCount: 8, nonPlayerCount: 8 }),
@@ -146,11 +160,30 @@ describe("debateGalleryArrival", () => {
       debateGalleryArrivalMurmurGain({ revealedCount: 0, nonPlayerCount: 0 }),
       1,
     );
-    // First seat stays quieter than a linear 1/n step so the room gathers.
     assert.ok(
-      debateGalleryArrivalMurmurGain({ revealedCount: 1, nonPlayerCount: 8 }) <
-        1 / 8,
+      debateGalleryArrivalMurmurGain({ revealedCount: 1, nonPlayerCount: 8 }) >=
+        0.4,
     );
+
+    // Rejoining a half-full house: the local watch clock eases the bed in
+    // linearly instead of popping at the crowd's level.
+    assert.equal(
+      debateGalleryArrivalMurmurGain({
+        revealedCount: 8,
+        nonPlayerCount: 8,
+        watchElapsedMs: DEBATE_GALLERY_OPENING_MURMUR_FADE_MS / 2,
+      }),
+      0.5,
+    );
+    assert.equal(
+      debateGalleryArrivalMurmurGain({
+        revealedCount: 8,
+        nonPlayerCount: 8,
+        watchElapsedMs: DEBATE_GALLERY_OPENING_MURMUR_FADE_MS,
+      }),
+      1,
+    );
+
     assert.equal(debateGalleryOpeningMurmurGain(0), 0);
     assert.equal(
       debateGalleryOpeningMurmurGain(DEBATE_GALLERY_OPENING_MURMUR_FADE_MS / 2),

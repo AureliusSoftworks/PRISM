@@ -53,7 +53,11 @@ export function debateAvatarPresentation(args: {
   role: DebateAvatarRole;
   cameraView: DebateAvatarCameraView;
 }): SessionAvatarPresentation {
-  if (args.consumer === "jury" || args.consumer === "gallery") return "mini";
+  // The Jury chamber seats its jurors at a real table: full mannequins whose
+  // lower frames the tabletop occludes. Only the background gallery strip
+  // keeps the compact ring plates.
+  if (args.consumer === "jury") return "full";
+  if (args.consumer === "gallery") return "mini";
   return args.role === "moderator" &&
     debateForumModeratorUsesMini(args.cameraView)
     ? "mini"

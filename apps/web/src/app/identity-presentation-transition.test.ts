@@ -125,10 +125,18 @@ test("Identity Crisis borrows identity while Shapeshifter retains full-form pres
     /identityMirrorStates\.get\(bot\.id\) \?\?[\s\S]*identityShapeshiftStates\.get\(bot\.id\)[\s\S]*targetBotName\.trim\(\)/u,
     "Signal nameplates and captions must use the borrowed diegetic name",
   );
+  // Identity Crisis nameplates still read as the borrowed identity; the
+  // Shapeshifter keeps the holder's own name and glyph, with the disguise
+  // carried by the "Appearing as …" label instead.
   assert.match(
     debateSource,
-    /displayName: identitySource\?\.name \?\? displayName/u,
-    "Debate nameplates must use the borrowed diegetic name",
+    /displayName: shapeshifting\s*\?\s*displayName\s*:\s*\(identitySource\?\.name \?\? displayName\)/u,
+    "Debate nameplates borrow the diegetic name for mirrors only",
+  );
+  assert.match(
+    debateSource,
+    /glyph: shapeshifting \? bot\.glyph : \(identitySource\?\.glyph \?\? bot\.glyph\)/u,
+    "Shapeshifter nameplates keep the holder's authored glyph",
   );
   assert.match(
     pageSource,
@@ -147,8 +155,8 @@ test("Identity Crisis borrows identity while Shapeshifter retains full-form pres
   );
   assert.match(
     debateIdentitySource,
-    /if \(args\.effect === "identity_shapeshift"\) return args\.target/u,
-    "Shapeshifter must retain complete target presentation",
+    /if \(args\.effect === "identity_shapeshift"\) \{[\s\S]{0,80}\.\.\.args\.target,[\s\S]{0,200}name: args\.holder\.name,[\s\S]{0,120}color: args\.holder\.color,[\s\S]{0,40}glyph: args\.holder\.glyph,/u,
+    "Shapeshifter wears the target's form while keeping the holder's name, color, and glyph",
   );
   assert.match(
     debateIdentitySource,

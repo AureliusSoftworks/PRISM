@@ -7,6 +7,15 @@
 export const DEBATE_GALLERY_ARRIVAL_LINGER_INTERVAL_MS = 2_200;
 
 /**
+ * The arrival is the diegetic buffer gauge: the house must fill at the pace
+ * the bake actually advances. Wall-clock lingering may only send in a few
+ * stragglers past what progress justifies — never fill the room on its own —
+ * so a slow bake reads as "people are still arriving," not a full room stuck
+ * on a spinner.
+ */
+export const DEBATE_GALLERY_ARRIVAL_LINGER_MAX_SEATS = 3;
+
+/**
  * Post-unlock seat pace. Stay rhythmic — never dump the remaining house in a
  * single burst (the old 140ms hurry read as a pop-in).
  */
@@ -92,7 +101,9 @@ export function debateGalleryArrivalRevealedCount(args: {
   const lingerFill = Math.floor(
     Math.max(0, args.elapsedMs) / DEBATE_GALLERY_ARRIVAL_LINGER_INTERVAL_MS,
   );
-  const soft = Math.max(progressFill, lingerFill);
+  const soft =
+    progressFill +
+    Math.min(DEBATE_GALLERY_ARRIVAL_LINGER_MAX_SEATS, lingerFill);
 
   if (!args.bakeUnlocked) {
     return {
@@ -153,7 +164,9 @@ export function debateGalleryArrivalFillRatio(args: {
   const progressFill = progress * n;
   const lingerFill =
     Math.max(0, args.elapsedMs) / DEBATE_GALLERY_ARRIVAL_LINGER_INTERVAL_MS;
-  const soft = Math.max(progressFill, lingerFill);
+  const soft =
+    progressFill +
+    Math.min(DEBATE_GALLERY_ARRIVAL_LINGER_MAX_SEATS, lingerFill);
 
   if (!args.bakeUnlocked) {
     return Math.min((n - 1) / n, soft / n);
@@ -168,22 +181,41 @@ export function debateGalleryArrivalFillRatio(args: {
 /**
  * Ease-in murmur so an empty house stays nearly silent and the room gathers
  * as people take their seats. Player seat does not advance the ramp.
+ *
+ * `watchElapsedMs` is the local time since the player has been watching the
+ * arrival. The house-fill clock runs from the server bake start, so rejoining
+ * a bake already in progress saturates the fill instantly — the watch cap
+ * guarantees the murmur still gathers audibly from silence and lands at the
+ * same full level heard on the Start / chapter-select hold.
  */
 export function debateGalleryArrivalMurmurGain(args: {
   revealedCount: number;
   nonPlayerCount: number;
   fillRatio?: number;
+  watchElapsedMs?: number;
 }): number {
+  // Linear, not squared: an eased square crushes the opening seconds to
+  // near-zero, which reads as a broken silence rather than a gentle start.
+  const watchCap =
+    args.watchElapsedMs == null
+      ? 1
+      : clampUnit(args.watchElapsedMs / DEBATE_GALLERY_OPENING_MURMUR_FADE_MS);
   const nonPlayer = Math.max(0, Math.floor(args.nonPlayerCount));
-  if (nonPlayer <= 0) return 1;
+  if (nonPlayer <= 0) return watchCap;
+  // The bed is silent only while the house is actually empty. The moment the
+  // first bot strolls in, the murmur takes a clearly audible step (the floor)
+  // and grows with each arrival; the atmosphere layer's own mix transition
+  // rounds each step off. The watch cap exists for rejoining a half-full
+  // house — it eases the bed in instead of popping at the crowd's level.
+  const revealed = Math.max(0, Math.floor(args.revealedCount));
+  if (revealed < 1) return 0;
   const linear =
     args.fillRatio == null
-      ? Math.min(
-          1,
-          Math.max(0, Math.floor(args.revealedCount)) / nonPlayer,
-        )
+      ? Math.min(1, revealed / nonPlayer)
       : clampUnit(args.fillRatio);
-  return linear * linear;
+  const floor = 0.4;
+  const crowd = floor + (1 - floor) * linear;
+  return Math.min(crowd, watchCap);
 }
 
 /** Ease-in fade when the chamber loads without a seat walk-in. */

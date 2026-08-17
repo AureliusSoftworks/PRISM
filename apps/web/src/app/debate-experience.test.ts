@@ -1463,19 +1463,18 @@ describe("Debate experience", () => {
     );
   });
 
-  it("offers all three recovery paths when an advocate declines", () => {
+  it("offers every recovery path when an advocate declines, including asking again", () => {
+    assert.match(source, /Ask again/u);
     assert.match(source, /Swap sides/u);
     assert.match(source, /Change bot/u);
     assert.match(source, /Revise motion/u);
-    assert.match(
-      source,
-      /disabled=\{!castComplete \|\| busy \|\| declinedChecks\.length > 0\}/u,
-    );
-    assert.match(source, /Resolve declined role/u);
-    assert.match(
-      source,
-      /if \(!castComplete \|\| declinedChecks\.length > 0\) return/u,
-    );
+    // A decline never disables the consent button or blocks a re-check —
+    // rerolling is always allowed; launch still requires every advocate to
+    // accept server-side.
+    assert.match(source, /disabled=\{!castComplete \|\| busy\}/u);
+    assert.doesNotMatch(source, /Resolve declined role/u);
+    assert.match(source, /if \(!castComplete\) return/u);
+    assert.match(source, /asking again is always allowed/u);
     assert.match(source, /stickyDeclinedConsentForCast/u);
     assert.match(
       source,
@@ -1530,9 +1529,11 @@ describe("Debate experience", () => {
       source,
       /studioPanel === "cast" \? renderCastStep\(\) : null/u,
     );
+    // The Evidence panel renders for every role except the judge, whose
+    // record is prepared out of view and sealed from them.
     assert.match(
       source,
-      /studioPanel === "evidence" \? renderEvidenceStep\(\) : null/u,
+      /studioPanel === "evidence" && !judgeOwnsHiddenEvidence[\s\S]{0,40}\? renderEvidenceStep\(\)[\s\S]{0,20}: null/u,
     );
     assert.match(source, /\{renderForumReadout\(\)\}/u);
     assert.match(source, /\{renderReviewStep\(\)\}/u);
@@ -3174,7 +3175,7 @@ describe("Debate experience", () => {
     assert.match(source, /data-silent-deliberation/u);
     assert.match(
       source,
-      /const cameraPresentationEvent =[\s\S]{0,360}debateJuryCameraIsActive\(effectiveCameraMode, activeSession, \{[\s\S]{0,160}preparingSpeakerBotId: voicePreparationSpeakerBotId/u,
+      /const cameraPresentationEvent =[\s\S]{0,1400}debateJuryCameraIsActive\(effectiveCameraMode, activeSession, \{[\s\S]{0,160}preparingSpeakerBotId: voicePreparationSpeakerBotId/u,
     );
     assert.match(
       source,
@@ -3233,28 +3234,30 @@ describe("Debate experience", () => {
       /frozenVoiceProfile \?\?[\s\S]{0,100}settings\.prismDefaultBotAudioVoiceProfile/u,
     );
     assert.match(css, /\.juryChamberBots\s*\{[^}]*z-index:\s*2/u);
+    // The tabletop tucks under the lower seat pair so it occludes their
+    // frames — a table the jurors sit at, not a disc floating beneath them.
     assert.match(
       css,
-      /\.juryTableRaster\s*\{[^}]*bottom:\s*8%[^}]*z-index:\s*3[^}]*width:\s*min\(78%,\s*920px\)/u,
+      /\.juryTableRaster\s*\{[^}]*bottom:\s*-6%[^}]*z-index:\s*3[^}]*width:\s*min\(72%,\s*880px\)/u,
     );
     assert.match(css, /\.juryBallotPile\s*\{[^}]*top:\s*88%[^}]*z-index:\s*5/u);
     assert.match(css, /@keyframes jury-ballot-cast/u);
     assert.match(css, /@keyframes jury-vote-reveal/u);
     assert.match(
       css,
-      /\.juryChamberSeat\[data-seat="0"\]\s*\{[^}]*left:\s*27%[^}]*top:\s*53%[^}]*width:\s*clamp\(146px,\s*13\.5vw,\s*210px\)/u,
+      /\.juryChamberSeat\[data-seat="0"\]\s*\{[^}]*left:\s*27%[^}]*top:\s*53%[^}]*width:\s*clamp\(204px,\s*18\.9vw,\s*294px\)/u,
     );
     assert.match(
       css,
-      /\.juryChamberSeat\[data-seat="1"\]\s*\{[^}]*left:\s*73%[^}]*top:\s*53%[^}]*width:\s*clamp\(146px,\s*13\.5vw,\s*210px\)/u,
+      /\.juryChamberSeat\[data-seat="1"\]\s*\{[^}]*left:\s*73%[^}]*top:\s*53%[^}]*width:\s*clamp\(204px,\s*18\.9vw,\s*294px\)/u,
     );
     assert.match(
       css,
-      /\.juryChamberSeat\[data-seat="2"\]\s*\{[^}]*left:\s*38%[^}]*top:\s*69%[^}]*width:\s*clamp\(146px,\s*13\.5vw,\s*210px\)/u,
+      /\.juryChamberSeat\[data-seat="2"\]\s*\{[^}]*left:\s*38%[^}]*top:\s*69%[^}]*width:\s*clamp\(204px,\s*18\.9vw,\s*294px\)/u,
     );
     assert.match(
       css,
-      /\.juryChamberSeat\[data-seat="3"\]\s*\{[^}]*left:\s*62%[^}]*top:\s*69%[^}]*width:\s*clamp\(146px,\s*13\.5vw,\s*210px\)/u,
+      /\.juryChamberSeat\[data-seat="3"\]\s*\{[^}]*left:\s*62%[^}]*top:\s*69%[^}]*width:\s*clamp\(204px,\s*18\.9vw,\s*294px\)/u,
     );
     assert.doesNotMatch(css, /\.juryChamberSeat\[data-seat="5"\]/u);
     assert.match(
@@ -4510,7 +4513,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /const cameraPresentationEvent =[\s\S]{0,320}const juryCameraActive = activeSession[\s\S]{0,180}debateJuryCameraIsActive\(effectiveCameraMode, activeSession, \{/u,
+      /const cameraPresentationEvent =[\s\S]{0,1400}const juryCameraActive = activeSession[\s\S]{0,180}debateJuryCameraIsActive\(effectiveCameraMode, activeSession, \{/u,
     );
     const juryCameraStart = source.indexOf("function debateJuryCameraIsActive");
     const juryCameraEnd = source.indexOf(

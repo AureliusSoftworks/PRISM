@@ -18,15 +18,15 @@ export function debateEventUsesJuryCamera(
   if (event.kind === "jury_deliberation") {
     return !event.stepKey.startsWith("jury_sidebar_");
   }
+  // The chamber belongs to the jurors' own record. The Moderator's deciding
+  // ballot and the aggregate score are proceedings of the floor: the camera
+  // returns to the Forum and the Moderator delivers both from the bench.
   if (event.kind === "ballot") {
     return (
-      (event.speakerKind === "juror" &&
-        event.stepKey.startsWith("jury_final_")) ||
-      (event.speakerKind === "moderator" &&
-        event.stepKey === "jury_moderator_ballot")
+      event.speakerKind === "juror" && event.stepKey.startsWith("jury_final_")
     );
   }
-  return event.kind === "jury_verdict";
+  return false;
 }
 
 /**
@@ -57,8 +57,9 @@ export function debateJuryDeliberationStepActive(
 }
 
 /**
- * The required Jury scene: private leanings, heard deliberation, juror
- * ballots, and the Moderator's last vote. Aftermath returns to the Forum.
+ * The required Jury scene: private leanings, heard deliberation, and juror
+ * ballots. The Moderator's deciding vote and the verdict are Forum beats,
+ * so the chamber releases the camera once the last juror has spoken.
  */
 export function debateJuryChamberStepActive(
   session: Pick<DebateSessionV1, "stepKey">,
@@ -67,8 +68,7 @@ export function debateJuryChamberStepActive(
   return (
     step.startsWith("jury_initial_") ||
     step.startsWith("jury_deliberation_") ||
-    step.startsWith("jury_final_") ||
-    step === "jury_moderator_ballot"
+    step.startsWith("jury_final_")
   );
 }
 

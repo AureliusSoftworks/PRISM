@@ -1738,6 +1738,34 @@ const DEBATE_LIVE_FOLEY_PRELOAD_URLS = [
   "/audio/voice-presence/breath-deliberate-02-v2.mp3",
 ];
 
+/**
+ * Camera views swap their matte and layered foreground rasters through CSS
+ * selectors, and CSS-referenced images are only fetched/decoded on first
+ * paint — so the first cut into a view could show the new backdrop while its
+ * foreground assets were still decoding. Warm every raster for the active
+ * theme once, at mount, so every later cut lands fully dressed.
+ */
+const DEBATE_SCENE_RASTERS_BY_THEME: Record<"dark" | "light", string[]> = {
+  dark: [
+    "/debate/forum-dark.webp",
+    "/debate/forum-dark-foreground.png",
+    "/debate/moderator-dark.webp",
+    "/debate/moderator-dark-foreground.png",
+    "/debate/gallery-chamber-dark.webp",
+  ],
+  light: [
+    "/debate/forum-light.webp",
+    "/debate/forum-light-foreground.png",
+    "/debate/forum-light-mask.png",
+    "/debate/forum-light-mask-foreground.png",
+    "/debate/moderator-light.webp",
+    "/debate/moderator-light-foreground.png",
+    "/debate/moderator-light-mask.png",
+    "/debate/moderator-light-mask-foreground.png",
+    "/debate/gallery-chamber-light.webp",
+  ],
+};
+
 function DebateForumLightMasks(props: {
   depth: "backdrop" | "foreground";
 }): React.JSX.Element {
@@ -4208,15 +4236,23 @@ function debateBotPresentation(
       cast.some((participant) => participant.id === target.botId),
     { holderSpeaking: true },
   );
+  // Shapeshifter changes the visible form, not who the chamber is addressing.
+  // The holder keeps their authored name and glyph (and color, applied in
+  // debateIdentityAppearanceBotV1) so the floor can still identify the speaker;
+  // "Appearing as …" carries the disguise. Identity Crisis still reads as the
+  // borrowed identity, which is the point of that Power.
+  const shapeshifting = identityEffect === "identity_shapeshift";
   return {
-    displayName: identitySource?.name ?? displayName,
+    displayName: shapeshifting
+      ? displayName
+      : (identitySource?.name ?? displayName),
     identityLabel: identitySource
       ? `Appearing as ${identitySource.name}`
       : falseName
         ? `Believes: ${falseName}`
         : null,
     identityEffect,
-    glyph: identitySource?.glyph ?? bot.glyph,
+    glyph: shapeshifting ? bot.glyph : (identitySource?.glyph ?? bot.glyph),
     voiceSourceBotId: identitySource?.id ?? bot.id,
     visibility:
       observerProjection.visibility === "hidden"
@@ -4326,6 +4362,16 @@ export function DebateExperience(
   const spectatorBakeArtifactRef = useRef<LiveBakeArtifactV1 | null>(null);
   const spectatorBakeRestartAtMsRef = useRef(0);
   /** Opening buffer ready — remaining seats hurry in. */
+  /**
+   * Whether this open actually has to wait on a bake.
+   *
+   * The gallery walk-in is the diegetic buffer gauge, so it only earns its
+   * place when there is something to wait for. When the buffer is already met
+   * the chamber shows a plain designated loader instead — an empty house
+   * "gathering" for a wait that is not happening reads as a broken animation.
+   */
+  const [spectatorBakeNeedsBuffering, setSpectatorBakeNeedsBuffering] =
+    useState(false);
   const [spectatorGalleryBakeUnlocked, setSpectatorGalleryBakeUnlocked] =
     useState(false);
   const [spectatorGalleryArrivalUnlockedAt, setSpectatorGalleryArrivalUnlockedAt] =
@@ -4333,6 +4379,7 @@ export function DebateExperience(
   const [spectatorGalleryArrivalNowMs, setSpectatorGalleryArrivalNowMs] =
     useState(() => Date.now());
   const spectatorGalleryArrivalCompleteRef = useRef(false);
+  const spectatorGalleryWatchStartedAtRef = useRef<number | null>(null);
   const galleryOpeningMurmurStartedAtRef = useRef<number | null>(null);
   const [galleryOpeningMurmurNowMs, setGalleryOpeningMurmurNowMs] = useState(
     () => Date.now(),
@@ -4345,6 +4392,10 @@ export function DebateExperience(
   const [motionTuningOpen, setMotionTuningOpen] = useState(false);
   const [castTuningOpen, setCastTuningOpen] = useState(false);
   const [evidenceDecisionMade, setEvidenceDecisionMade] = useState(false);
+  // A judge must weigh the case as argued, so the record is prepared out of
+  // view. Keyed by motion so reshaping the question re-researches it once.
+  const judgeEvidenceRequestedForRef = useRef<string | null>(null);
+  const [judgeEvidencePreparing, setJudgeEvidencePreparing] = useState(false);
   const [sessions, setSessions] = useState<DebateSessionListItemV1[]>([]);
   const [activeSession, setActiveSession] = useState<DebateSessionV1 | null>(
     null,
@@ -4357,11 +4408,38 @@ export function DebateExperience(
   useEffect(() => {
     if (view !== "baking" || !activeSession) return;
     setSpectatorGalleryArrivalNowMs(Date.now());
+    // 160ms is plenty: the murmur math feeds the atmosphere layer's own
+    // 280ms mix transition, and seat reveals step at 900ms+. A 50ms clock
+    // just re-rendered the whole live tree at 20Hz during arrival.
     const intervalId = window.setInterval(() => {
       setSpectatorGalleryArrivalNowMs(Date.now());
-    }, 50);
+    }, 160);
     return () => window.clearInterval(intervalId);
   }, [activeSession, view]);
+  useEffect(() => {
+    const rasters =
+      DEBATE_SCENE_RASTERS_BY_THEME[
+        props.theme === "light" ? "light" : "dark"
+      ];
+    for (const url of rasters) {
+      const image = new Image();
+      image.src = url;
+      void image.decode().catch(() => {
+        // Best-effort warm-up; a failed decode just falls back to lazy load.
+      });
+    }
+  }, [props.theme]);
+  // Local watch clock for the arrival murmur: survives bake poll re-renders,
+  // resets only when the player actually leaves the arrival screen.
+  useEffect(() => {
+    if (view === "baking") {
+      if (spectatorGalleryWatchStartedAtRef.current == null) {
+        spectatorGalleryWatchStartedAtRef.current = Date.now();
+      }
+    } else {
+      spectatorGalleryWatchStartedAtRef.current = null;
+    }
+  }, [view]);
   useEffect(() => {
     if (view !== "live" || !activeSession) return;
     if (spectatorGalleryArrivalCompleteRef.current) return;
@@ -4370,7 +4448,7 @@ export function DebateExperience(
     setGalleryOpeningMurmurNowMs(startedAt);
     const intervalId = window.setInterval(() => {
       setGalleryOpeningMurmurNowMs(Date.now());
-    }, 80);
+    }, 160);
     return () => window.clearInterval(intervalId);
   }, [activeSession, view]);
   const [persistedPresenceBeats, setPersistedPresenceBeats] = useState<
@@ -6267,6 +6345,23 @@ export function DebateExperience(
           (event) => event.id === presentationEventId,
         ) ?? null)
       : null;
+  // Viewer-position anchor for the Jury camera. Voice prep clears the live
+  // playhead between beats, and Spectator bake-ahead may already have moved
+  // session.stepKey into the Jury chamber; without the last presented event
+  // standing in as the bookmark, the camera flashes into the chamber during
+  // every prep gap and snaps back when the next floor line lands.
+  const lastPresentationAnchorRef = useRef<{
+    sessionId: string;
+    eventId: string;
+  } | null>(null);
+  useEffect(() => {
+    if (activeSession && presentationEventId) {
+      lastPresentationAnchorRef.current = {
+        sessionId: activeSession.id,
+        eventId: presentationEventId,
+      };
+    }
+  }, [activeSession, presentationEventId]);
   const juryCameraActive = activeSession
     ? debateJuryCameraIsActive(effectiveCameraMode, activeSession, {
         presenting,
@@ -6278,7 +6373,10 @@ export function DebateExperience(
           activeSession,
           checkpointPlayheadEventId ??
             activeSession.pausedPresentationEventId ??
-            presentationEventId,
+            presentationEventId ??
+            (lastPresentationAnchorRef.current?.sessionId === activeSession.id
+              ? lastPresentationAnchorRef.current.eventId
+              : null),
         ),
       })
     : false;
@@ -7042,11 +7140,16 @@ export function DebateExperience(
     roleChecks.length === expectedRoleCheckCount &&
     declinedChecks.length === 0 &&
     !consentNeedsReconfirmation;
+  // The judge never curates the record, so the Evidence step is not theirs to
+  // complete — Prism prepares it out of view instead.
+  const judgeOwnsHiddenEvidence = playerRole === "judge";
   const debateCanStart =
     motionComplete &&
     castComplete &&
     roleChecksComplete &&
-    evidenceDecisionMade &&
+    (judgeOwnsHiddenEvidence
+      ? !judgeEvidencePreparing
+      : evidenceDecisionMade) &&
     !(playerRole === "participant" && format !== "forum");
   const selectedPreset = DEBATE_SETUP_PRESETS.find(
     (preset) => preset.id === selectedPresetId,
@@ -8391,6 +8494,9 @@ export function DebateExperience(
 
   const refractEvidenceSection = useCallback(
     async (direction: string): Promise<void> => {
+      // Wielding Prism at the record is still a way of seeing it, so the judge
+      // is held out here too.
+      if (judgeOwnsHiddenEvidence) return;
       setStudioPanel("evidence");
       const seed =
         direction.trim() ||
@@ -8588,9 +8694,13 @@ export function DebateExperience(
   };
 
   const checkRoles = async (): Promise<void> => {
-    // A refusal is sticky for this prepared assignment. The player must
-    // change the bot, side, or motion before another consent request exists.
-    if (!castComplete || declinedChecks.length > 0) return;
+    // A refusal reflects how the persona read this assignment on that pass, not
+    // a permanent verdict — asking again is always allowed, with the same bot,
+    // model, and Effort. The response replaces every check wholesale, so a
+    // stale decline cannot survive a reroll. Launch still requires every
+    // advocate to accept (validateConsents), so rerolling can never override a
+    // standing refusal; it only asks the question again.
+    if (!castComplete) return;
     setBusy(true);
     setError(null);
     try {
@@ -8629,6 +8739,55 @@ export function DebateExperience(
       setBusy(false);
     }
   };
+
+  // Research the frozen record out of view whenever the player is the judge.
+  // Best-effort: a failed lookup leaves an empty packet and still lets the
+  // proceeding begin, exactly as "continue without evidence" would.
+  useEffect(() => {
+    if (view !== "dashboard" || !judgeOwnsHiddenEvidence || !motionComplete) {
+      return;
+    }
+    const motionKey = `${motion.motion.trim()}|${motion.forSide.brief.trim()}|${motion.againstSide.brief.trim()}`;
+    if (judgeEvidenceRequestedForRef.current === motionKey) return;
+    judgeEvidenceRequestedForRef.current = motionKey;
+    let cancelled = false;
+    setJudgeEvidencePreparing(true);
+    void (async () => {
+      try {
+        const result = await props.request<{
+          evidence: DebateEvidencePacketV1;
+        }>(
+          "/api/debates/judge-evidence",
+          requestBody({
+            topic,
+            motion: motion.motion,
+            forBrief: motion.forSide.brief,
+            againstBrief: motion.againstSide.brief,
+            preferredProvider:
+              props.modelOverride?.provider ?? props.preferredProvider,
+            modelOverride: props.modelOverride?.model,
+            responseMode: props.responseMode,
+            reasoningEffort: props.reasoningEffort,
+            turbo: props.turbo,
+          }),
+        );
+        if (cancelled) return;
+        setEvidence(result.evidence);
+      } catch {
+        // Leave the packet empty; the Debate still begins.
+        if (!cancelled) setEvidence(EMPTY_EVIDENCE);
+      } finally {
+        if (!cancelled) {
+          setEvidenceDecisionMade(true);
+          setJudgeEvidencePreparing(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [judgeOwnsHiddenEvidence, motionComplete, motion, view]);
 
   const swapAdvocates = (): void => {
     if (playerRole === "participant") return;
@@ -10266,6 +10425,7 @@ export function DebateExperience(
           });
           let playbackProgressSeen = false;
           let lastVoiceProgressAtMs = 0;
+          let lastSpeechRenderAt = 0;
           let playbackDurationMs = Math.max(
             1,
             debateRevealDurationMs(spokenText || event.content),
@@ -10278,6 +10438,7 @@ export function DebateExperience(
               onStart: (durationMs, alignment) => {
                 if (presentationRunRef.current !== runId) return;
                 lastVoiceProgressAtMs = Date.now();
+                lastSpeechRenderAt = performance.now();
                 scheduleProceedingsReveal(next.id, event.sequence);
                 playbackDurationMs = Math.max(
                   1,
@@ -10309,6 +10470,18 @@ export function DebateExperience(
                 lastVoiceProgressAtMs = Date.now();
                 playbackProgressSeen = true;
                 playbackDurationMs = Math.max(1, durationMs);
+                // Same frame-pressure throttle the other voiced paths use:
+                // each unthrottled progress tick re-renders the whole live
+                // tree, which is what dragged speech beats to ~40 FPS.
+                const now = performance.now();
+                if (
+                  elapsedMs < playbackDurationMs &&
+                  now - lastSpeechRenderAt <
+                    DEBATE_LIVE_SPEECH_RENDER_INTERVAL_MS
+                ) {
+                  return;
+                }
+                lastSpeechRenderAt = now;
                 updateLiveReveal((current) =>
                   current?.eventId === event.id
                     ? {
@@ -10436,6 +10609,7 @@ export function DebateExperience(
               visibleContent: "",
               speechTiming: null,
             });
+            let interrupterSpeechRenderAt = 0;
             const objectionPlay = onUtterance({
               ...interrupterUtterance,
               voiceChannel: "crosstalk",
@@ -10462,6 +10636,18 @@ export function DebateExperience(
                 },
                 onProgress: (elapsedMs, durationMs) => {
                   if (presentationRunRef.current !== runId) return;
+                  // Crosstalk progress was the last unthrottled tick source:
+                  // interrupt overlaps render two live speakers at once, so
+                  // unthrottled root re-renders here hurt the most.
+                  const now = performance.now();
+                  if (
+                    elapsedMs < Math.max(1, durationMs) &&
+                    now - interrupterSpeechRenderAt <
+                      DEBATE_LIVE_SPEECH_RENDER_INTERVAL_MS
+                  ) {
+                    return;
+                  }
+                  interrupterSpeechRenderAt = now;
                   updateLiveReveal((current) =>
                     current?.eventId === interruptPair.interrupter.id
                       ? {
@@ -11527,6 +11713,7 @@ export function DebateExperience(
     setSpectatorBake(null);
     spectatorBakeArtifactRef.current = null;
     setSpectatorBakeStartedAt(null);
+    setSpectatorBakeNeedsBuffering(false);
     setSpectatorGalleryBakeUnlocked(false);
     setSpectatorGalleryArrivalUnlockedAt(null);
     spectatorGalleryArrivalCompleteRef.current = false;
@@ -11727,7 +11914,13 @@ export function DebateExperience(
                     expectedRevision: current.revision,
                     idempotencyKey: nextMutationKey("return-recess"),
                     exitRecovery: true,
+                    // The player's recorded watch position always wins. The
+                    // generation frontier is only a fallback for sessions that
+                    // never captured one (crash, force-quit): background
+                    // buffering may run far ahead of what was actually seen,
+                    // and resuming at the frontier skips everything between.
                     presentationEventId:
+                      current.pausedPresentationEventId ??
                       [...current.events]
                         .reverse()
                         .find(
@@ -11827,6 +12020,11 @@ export function DebateExperience(
           openingGalleryStartedAtMs ?? Date.now(),
         ).toISOString();
         setSpectatorBakeStartedAt(bakeStartedIso);
+        // Decide once, at open: when the buffer is already met there is no
+        // wait to dramatize, so the house does not gather.
+        setSpectatorBakeNeedsBuffering(
+          !liveBakeMayStartWatch(session.liveBake, 0),
+        );
         setSpectatorGalleryBakeUnlocked(false);
         setSpectatorGalleryArrivalUnlockedAt(null);
         spectatorGalleryArrivalCompleteRef.current = false;
@@ -12659,6 +12857,9 @@ export function DebateExperience(
         spectatorBakeArtifactRef.current = result.session.liveBake ?? null;
         const bakeStartedIso = new Date().toISOString();
         setSpectatorBakeStartedAt(bakeStartedIso);
+        // A freshly created proceeding has nothing baked yet, so the wait is
+        // always real and the house always gathers.
+        setSpectatorBakeNeedsBuffering(true);
         setSpectatorGalleryBakeUnlocked(false);
         setSpectatorGalleryArrivalUnlockedAt(null);
         spectatorGalleryArrivalCompleteRef.current = false;
@@ -12797,6 +12998,15 @@ export function DebateExperience(
         presenting ||
         pauseInFlightRef.current ||
         debateFloorMutationInFlightRef.current
+      ) {
+        return;
+      }
+      // A terminal proceeding has nothing left to advance. Spectator replay
+      // presents the remaining record from what is already held locally.
+      if (
+        previous.status === "completed" ||
+        previous.status === "cancelled" ||
+        previous.status === "failed"
       ) {
         return;
       }
@@ -12961,11 +13171,25 @@ export function DebateExperience(
         }
       } catch (caught) {
         await finishResponseCue?.();
-        setError(
-          caught instanceof Error
-            ? caught.message
-            : "The turn was unavailable.",
-        );
+        const message = caught instanceof Error ? caught.message : "";
+        if (/already finished/iu.test(message)) {
+          // The server completed this proceeding while the client was still
+          // replaying — spectator bake-ahead ends at the closing commit. Not
+          // an error: adopt the terminal record quietly and let the replay
+          // finish presenting what it already holds.
+          try {
+            const refreshed = await request<{ session: DebateSessionV1 }>(
+              `/api/debates/${encodeURIComponent(previous.id)}?perspective=live`,
+            );
+            if (mountedRef.current) {
+              await adoptSession(previous, refreshed.session);
+            }
+          } catch {
+            // The follow-up read is best-effort; the local record still plays.
+          }
+        } else {
+          setError(message || "The turn was unavailable.");
+        }
       } finally {
         await finishResponseCue?.();
         if (!pauseInFlightRef.current) {
@@ -15003,9 +15227,50 @@ export function DebateExperience(
       });
   };
 
+  /**
+   * First press is a soft pause taken in-world: the player calls for a recess
+   * and stays seated while the chamber plays the request. Nothing navigates,
+   * so the Studio never flashes behind the ceremony.
+   */
+  const softPauseForRecess = async (): Promise<void> => {
+    const pending = activeSessionRef.current ?? activeSession;
+    const exitIntent = debateStudioExitIntent({
+      session: pending,
+      exitPending: exitLiveSessionInFlightRef.current,
+      pausePending: pauseInFlightRef.current,
+    });
+    if (exitIntent !== "request_recess" || !pending) return;
+    // Ceremonial, not immediate: requestExitRecess reads this to decide whether
+    // to announce the recess and adopt it into the live chamber.
+    exitLiveSessionImmediateRef.current = false;
+    pauseInFlightRef.current = true;
+    try {
+      const outcome = await requestExitRecess(pending);
+      if (!mountedRef.current || outcome.accepted) return;
+      setRefractionNotice({
+        title: "Recess denied",
+        detail: outcome.rageRush
+          ? "The chamber has lost patience. The floor continues."
+          : "The Moderator kept the floor. You remain seated.",
+      });
+    } catch (caught) {
+      if (!mountedRef.current) return;
+      setError(
+        caught instanceof Error
+          ? `The recess could not be called: ${caught.message}`
+          : "The recess could not be called.",
+      );
+    } finally {
+      pauseInFlightRef.current = false;
+    }
+  };
+
   const activateLeaveDebate = (): void => {
     if (!leaveDebateArmed) {
       setLeaveDebateArmed(true);
+      // Queue the recess behind the arming press. It is deliberately not
+      // awaited: arming the button must stay instant.
+      void softPauseForRecess();
       return;
     }
     exitLiveSessionToStudio();
@@ -16698,13 +16963,21 @@ export function DebateExperience(
                 id: "evidence" as const,
                 index: "03",
                 label: "Evidence",
-                detail:
-                  debateEvidenceItemCount(evidence) > 0 || evidence.notes.trim()
+                detail: judgeOwnsHiddenEvidence
+                  ? judgeEvidencePreparing
+                    ? "Prism is preparing the record…"
+                    : "Sealed from the judge"
+                  : debateEvidenceItemCount(evidence) > 0 ||
+                      evidence.notes.trim()
                     ? "Packet prepared"
                     : evidenceDecisionMade
                       ? "No evidence"
                       : "Optional",
-                complete: evidenceDecisionMade,
+                complete: judgeOwnsHiddenEvidence
+                  ? !judgeEvidencePreparing
+                  : evidenceDecisionMade,
+                // A judge cannot open the record they are about to weigh.
+                locked: judgeOwnsHiddenEvidence,
                 tutorial: "debate-evidence",
                 magic: evidenceRailMagic,
               },
@@ -16718,14 +16991,24 @@ export function DebateExperience(
                   className={styles.studioNavButton}
                   data-active={studioPanel === panel.id ? "true" : undefined}
                   data-complete={panel.complete ? "true" : undefined}
+                  data-locked={
+                    "locked" in panel && panel.locked ? "true" : undefined
+                  }
                   data-tutorial-target={panel.tutorial}
                   aria-pressed={studioPanel === panel.id}
+                  disabled={"locked" in panel && panel.locked}
                   onClick={() => setStudioPanel(panel.id)}
                 >
                   <span>{panel.index}</span>
                   <strong>{panel.label}</strong>
                   <small>{panel.detail}</small>
-                  <i aria-hidden="true">{panel.complete ? "✓" : "·"}</i>
+                  <i aria-hidden="true">
+                    {"locked" in panel && panel.locked
+                      ? "🔒"
+                      : panel.complete
+                        ? "✓"
+                        : "·"}
+                  </i>
                 </button>
               )}
             </PrismRefractTarget>
@@ -16792,7 +17075,9 @@ export function DebateExperience(
         <div className={styles.dashboardDesk} data-studio-panel={studioPanel}>
           {studioPanel === "motion" ? renderMotionStep() : null}
           {studioPanel === "cast" ? renderCastStep() : null}
-          {studioPanel === "evidence" ? renderEvidenceStep() : null}
+          {studioPanel === "evidence" && !judgeOwnsHiddenEvidence
+            ? renderEvidenceStep()
+            : null}
           {studioPanel === "archive" ? renderArchive() : null}
         </div>
         <aside className={styles.dashboardRail}>
@@ -18247,10 +18532,15 @@ export function DebateExperience(
       {declinedChecks.length > 0 ? (
         <div className={styles.refusalRecovery}>
           <p>
-            A declined assignment cannot be overridden. Preserve the bot’s
-            authored boundary.
+            This bot declined the assignment. You can ask again as many times as
+            you like — personas often read a role differently on a second pass.
+            A standing refusal still cannot be overridden: the Debate only
+            begins once every advocate has actually accepted.
           </p>
           <div>
+            <button type="button" onClick={() => void checkRoles()}>
+              Ask again
+            </button>
             {playerRole !== "participant" ? (
               <button type="button" onClick={swapAdvocates}>
                 Swap sides
@@ -18291,10 +18581,12 @@ export function DebateExperience(
         <button
           type="button"
           className={styles.primaryButton}
-          disabled={!castComplete || busy || declinedChecks.length > 0}
+          disabled={!castComplete || busy}
           onClick={() => {
             if (roleChecksComplete) {
-              setStudioPanel("evidence");
+              // The judge has no Evidence step to advance into; the record is
+              // already being prepared out of view.
+              if (!judgeOwnsHiddenEvidence) setStudioPanel("evidence");
               return;
             }
             void checkRoles();
@@ -18306,7 +18598,7 @@ export function DebateExperience(
               ? "Reconfirming privately…"
               : "Checking privately…"
             : declinedChecks.length > 0
-              ? "Resolve declined role"
+              ? "Ask again"
             : roleChecksComplete
               ? "Choose evidence →"
               : consentNeedsReconfirmation
@@ -23515,7 +23807,9 @@ export function DebateExperience(
     );
     const openingPreloading = openingPreloadSessionId === session.id;
     const openingLaunching = openingLaunchSessionId === session.id;
-    const galleryArriving = view === "baking";
+    // Bots walk in only when there is a real buffer to cover. Otherwise the
+    // chamber shows the designated loader and the seats stay as they are.
+    const galleryArriving = view === "baking" && spectatorBakeNeedsBuffering;
     const roomPresence = galleryArriving
       ? ("arriving" as const)
       : debateRoomPresence({
@@ -23952,11 +24246,21 @@ export function DebateExperience(
       juryWasSeated &&
       session.playerRole !== "participant" &&
       (sealedCompleted || juryCameraActive);
+    // The server flips the Jury phase the moment deliberation begins, but the
+    // chamber seals only after the moderator's hand-off finishes presenting:
+    // while a public floor beat is still being spoken, the announcement is
+    // heard to its end and the room stays alive under it. Sealed-chamber
+    // events never lift the hold.
     const participantJurySealed =
       session.jury.enabled &&
       session.playerRole === "participant" &&
       session.jury.phase !== "waiting" &&
-      session.jury.phase !== "disabled";
+      session.jury.phase !== "disabled" &&
+      !(
+        presenting &&
+        presentedEvent &&
+        !debateEventUsesJuryCamera(presentedEvent)
+      );
     const turnaboutFloorOwnerBotId =
       session.formatState.format === "turnabout"
         ? session.formatState.floorOwnerBotId
@@ -24191,6 +24495,14 @@ export function DebateExperience(
           revealedCount: galleryArrivalReveal?.revealedCount ?? 0,
           nonPlayerCount: galleryArrivalRevealOrder.length,
           fillRatio: galleryArrivalFillRatio ?? undefined,
+          watchElapsedMs:
+            spectatorGalleryWatchStartedAtRef.current == null
+              ? undefined
+              : Math.max(
+                  0,
+                  spectatorGalleryArrivalNowMs -
+                    spectatorGalleryWatchStartedAtRef.current,
+                ),
         })
       : titleCardHolding
         ? spectatorGalleryArrivalCompleteRef.current
@@ -24565,11 +24877,7 @@ export function DebateExperience(
             participantSlowTimeActive ? "true" : undefined
           }
           data-debate-room-presence={roomPresence}
-          data-gallery-ready-hold={
-            titleCardHolding && !galleryArriving
-              ? "true"
-              : undefined
-          }
+          data-gallery-ready-hold={titleCardHolding ? "true" : undefined}
           data-opening-preload={openingPreloading ? "true" : undefined}
           data-opening-launch={openingLaunching ? "true" : undefined}
           data-debate-material-quality={debateMaterialQuality}
@@ -25240,10 +25548,7 @@ export function DebateExperience(
                       </button>
                     </div>
                   ) : null
-                ) : session.jury.enabled &&
-                  session.playerRole === "participant" &&
-                  session.jury.phase !== "waiting" &&
-                  session.jury.phase !== "disabled" &&
+                ) : participantJurySealed &&
                   session.jury.phase !== "complete" ? (
                   <div
                     className={styles.stageStateOverlay}

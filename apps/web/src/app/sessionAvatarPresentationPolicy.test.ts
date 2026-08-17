@@ -68,13 +68,16 @@ describe("session avatar presentation policy", () => {
         );
       }
     }
+    // Jurors sit at the chamber table as full mannequins; the seat geometry
+    // (306x408 boxes, tabletop occluding lower frames) is authored for the
+    // complete body, not the gallery ring plate.
     assert.equal(
       debateAvatarPresentation({
         consumer: "jury",
         role: "for",
         cameraView: "jury",
       }),
-      "mini",
+      "full",
     );
     assert.equal(
       debateAvatarPresentation({

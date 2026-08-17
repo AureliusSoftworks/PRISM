@@ -8893,6 +8893,27 @@
   isolation: isolate;
 }
 
+/* The chamber is a room, not a void: the shared chamber plate supplies walls
+   and depth, graded down hard so the jurors and the sidebar glow stay the
+   subject. Sits under the aura (z1) and everything staged above it. */
+.juryChamber::before {
+  position: absolute;
+  inset: -2%;
+  z-index: 0;
+  background: url("/debate/gallery-chamber-dark.webp") center 34% / cover
+    no-repeat;
+  filter: brightness(0.4) saturate(0.72) blur(2px);
+  opacity: 0.6;
+  content: "";
+  pointer-events: none;
+}
+
+.juryChamber[data-theme="light"]::before {
+  background-image: url("/debate/gallery-chamber-light.webp");
+  filter: brightness(0.92) saturate(0.8) blur(2px);
+  opacity: 0.5;
+}
+
 .juryChamber[data-theme="light"] {
   background:
     radial-gradient(
@@ -8986,8 +9007,8 @@
 
 .juryChamberSeat {
   position: absolute;
-  width: clamp(150px, 14vw, 220px);
-  height: clamp(200px, 18.7vw, 294px);
+  width: clamp(210px, 19.5vw, 306px);
+  height: clamp(280px, 26vw, 408px);
   transform: translate(-50%, -50%);
   color: var(--jury-seat-color);
   filter: saturate(0.82) brightness(0.86);
@@ -9085,26 +9106,26 @@
 .juryChamberSeat[data-seat="0"] {
   left: 27%;
   top: 53%;
-  width: clamp(146px, 13.5vw, 210px);
-  height: clamp(194px, 18vw, 280px);
+  width: clamp(204px, 18.9vw, 294px);
+  height: clamp(272px, 25.2vw, 392px);
 }
 .juryChamberSeat[data-seat="1"] {
   left: 73%;
   top: 53%;
-  width: clamp(146px, 13.5vw, 210px);
-  height: clamp(194px, 18vw, 280px);
+  width: clamp(204px, 18.9vw, 294px);
+  height: clamp(272px, 25.2vw, 392px);
 }
 .juryChamberSeat[data-seat="2"] {
   left: 38%;
   top: 69%;
-  width: clamp(146px, 13.5vw, 210px);
-  height: clamp(194px, 18vw, 280px);
+  width: clamp(204px, 18.9vw, 294px);
+  height: clamp(272px, 25.2vw, 392px);
 }
 .juryChamberSeat[data-seat="3"] {
   left: 62%;
   top: 69%;
-  width: clamp(146px, 13.5vw, 210px);
-  height: clamp(194px, 18vw, 280px);
+  width: clamp(204px, 18.9vw, 294px);
+  height: clamp(272px, 25.2vw, 392px);
 }
 .juryChamberSeat[data-seat="4"] {
   left: 87%;
@@ -9252,13 +9273,18 @@
 .juryTableRaster {
   position: absolute;
   top: auto;
-  bottom: 8%;
+  /* Tucked up under the lower seat pair (top: 69%) so the tabletop actually
+     occludes their lower frames — a table the jurors sit at, not a disc
+     floating beneath them. */
+  bottom: -6%;
   left: 50%;
   z-index: 3;
-  width: min(78%, 920px);
+  width: min(72%, 880px);
   max-width: none;
   height: auto;
   transform: translateX(-50%);
+  filter: saturate(1.08) contrast(1.1) brightness(0.96)
+    drop-shadow(0 30px 48px rgba(0, 0, 0, 0.6));
   pointer-events: none;
   user-select: none;
 }
@@ -10142,6 +10168,17 @@
 .studioNavButton:hover {
   color: var(--debate-studio-ink);
   background: color-mix(in srgb, var(--debate-studio-ink) 4.5%, transparent);
+}
+
+/* Sealed from the judge: legible as a real step, plainly not theirs to open. */
+.studioNavButton[data-locked="true"] {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.studioNavButton[data-locked="true"]:hover {
+  background: transparent;
+  color: inherit;
 }
 
 .studioNavButton[data-active="true"] {
@@ -14151,6 +14188,20 @@
   inset: 0;
   z-index: 140;
   padding-bottom: calc(clamp(118px, 10vw, 160px) + 36px);
+}
+
+/* While a hold card is up, the card is the only voice on screen: the gallery
+   strip fades to a quiet silhouette beneath it instead of painting seats and
+   progress chrome over the card's controls. The murmur bed keeps playing —
+   only the visual yields. It fades back the moment the hold ends. */
+.live[data-gallery-ready-hold="true"] .debateAudienceRow {
+  opacity: 0.14;
+  pointer-events: none;
+  transition: opacity 480ms ease;
+}
+
+.live .debateAudienceRow {
+  transition: opacity 480ms ease;
 }
 
 .identOverlay[data-hold="true"] .identComposition,

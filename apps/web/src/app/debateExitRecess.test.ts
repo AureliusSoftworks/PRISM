@@ -101,9 +101,11 @@ test("Leave Debate stays portal-mounted, enabled, and requires two activations",
     exitBlock,
     /const exitIntent = debateStudioExitIntent\(\{[\s\S]{0,220}exitPending: exitLiveSessionInFlightRef\.current,[\s\S]{0,120}pausePending: pauseInFlightRef\.current/u,
   );
+  // First activation arms the button and queues the in-world soft recess
+  // without navigating; only the second activation leaves the chamber.
   assert.match(
     activateBlock,
-    /if \(!leaveDebateArmed\) \{[\s\S]{0,100}setLeaveDebateArmed\(true\);[\s\S]{0,50}return;[\s\S]{0,80}exitLiveSessionToStudio\(\)/u,
+    /if \(!leaveDebateArmed\) \{[\s\S]{0,140}setLeaveDebateArmed\(true\);[\s\S]{0,300}void softPauseForRecess\(\);[\s\S]{0,60}return;[\s\S]{0,80}exitLiveSessionToStudio\(\)/u,
   );
   const portalStart = source.indexOf(
     "liveSessionActive && activeSession && leaveDebatePortalTarget",
@@ -164,8 +166,28 @@ test("confirmed leave returns to Studio before recess housekeeping settles", () 
     exitBlock.indexOf("recessRequest = requestExitRecess(pending)") <
       exitBlock.indexOf("returnLiveSessionToStudio(pending, {"),
   );
-  assert.doesNotMatch(exitBlock, /await requestExitRecess/u);
-  assert.match(exitBlock, /return is deliberately not blocked/u);
+  // The confirmed-leave path never awaits recess housekeeping; the soft-pause
+  // path may await freely because it stays seated and never navigates.
+  const softPauseStart = exitBlock.indexOf("const softPauseForRecess");
+  assert.ok(softPauseStart > 0, "soft pause must live beside the exit path");
+  const confirmedLeaveBlock = exitBlock.slice(0, softPauseStart);
+  const softPauseBlock = exitBlock.slice(
+    softPauseStart,
+    exitBlock.indexOf("const activateLeaveDebate", softPauseStart),
+  );
+  assert.doesNotMatch(confirmedLeaveBlock, /await requestExitRecess/u);
+  assert.match(confirmedLeaveBlock, /return is deliberately not blocked/u);
+  assert.match(softPauseBlock, /await requestExitRecess\(pending\)/u);
+  assert.match(
+    softPauseBlock,
+    /exitLiveSessionImmediateRef\.current = false;/u,
+    "soft pause keeps the ceremonial announce path",
+  );
+  assert.doesNotMatch(
+    softPauseBlock,
+    /returnLiveSessionToStudio/u,
+    "soft pause never navigates",
+  );
 });
 
 test("exhausted Participants leave without a fourth request and reopen at the final checkpoint", () => {
