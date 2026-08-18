@@ -9,6 +9,22 @@ const pageSource = readFileSync(join(appDir, "page.tsx"), "utf8");
 const cssSource = readFileSync(join(appDir, "page.module.css"), "utf8");
 
 describe("Coffee live immersion", () => {
+  it("tags a seated bot in the composer on click, one tag at a time", () => {
+    assert.match(
+      pageSource,
+      /const tagCoffeeBotInComposer[\s\S]{0,700}PRISM_BOT_MARKDOWN_LINK_RE\.source[\s\S]{0,400}setCoffeeDraft\(nextDraft\)/u,
+    );
+    assert.match(
+      pageSource,
+      /if \(liveSeatTagEnabled\) \{\s*tagCoffeeBotInComposer\(bot\);/u,
+    );
+    // Live seats clamp above the composer so the player is never clipped.
+    assert.match(
+      pageSource,
+      /coffeeLivePlayerSeatPosition\(coffeeReviewLayout\)/u,
+    );
+  });
+
   it("omits waiter presentation and keeps the live player off camera", () => {
     assert.doesNotMatch(pageSource, /coffeeBarScene|coffeeWaiterVisit/u);
     assert.match(

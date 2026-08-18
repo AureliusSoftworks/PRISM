@@ -101,9 +101,11 @@ describe("session avatar presentation policy", () => {
       pageSource.indexOf("function FullAvatarCompactFallback"),
     );
     assert.doesNotMatch(coffeeRenderer, /ChatMiniBotAvatar|BotAvatarMicroRenderer/u);
+    // The live player stand-in follows the table shed tier (uniform mini on
+    // crowded low-FPS tables); only replay pins the stand-in to full.
     assert.match(
       pageSource,
-      /coffee-replay-player-[\s\S]{0,800}minimumRenderedSizeTier="full"/u,
+      /coffee-replay-player-[\s\S]{0,900}minimumRenderedSizeTier=\{\s*coffeeReplayActive\s*\?\s*"full"\s*:\s*coffeeLiveMinimumRenderedSizeTier\s*\}/u,
     );
     assert.match(
       pageSource,

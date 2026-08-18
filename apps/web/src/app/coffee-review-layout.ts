@@ -54,3 +54,22 @@ export function coffeeReviewBotPosition(
 ): CoffeeReviewParticipantPosition | null {
   return coffeeReviewParticipantLayout(botCount).bots[layoutIndex] ?? null;
 }
+
+/**
+ * Live stages park the composer along the bottom edge, so the player's seat
+ * rises off the pure review circle just far enough to clear it. Replay keeps
+ * the untouched circle — there is no composer over the review stage.
+ */
+export const COFFEE_LIVE_PLAYER_SEAT_MAX_TOP_PERCENT = 72;
+
+export function coffeeLivePlayerSeatPosition(
+  layout: CoffeeReviewParticipantLayout,
+): CoffeeReviewParticipantPosition {
+  return {
+    ...layout.player,
+    topPercent: Math.min(
+      layout.player.topPercent,
+      COFFEE_LIVE_PLAYER_SEAT_MAX_TOP_PERCENT,
+    ),
+  };
+}

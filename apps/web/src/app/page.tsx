@@ -631,6 +631,7 @@ import {
   sanitizeCoffeeActionForBot,
 } from "./coffee-replay";
 import {
+  coffeeLivePlayerSeatPosition,
   coffeeReviewBotPosition,
   coffeeReviewParticipantLayout,
 } from "./coffee-review-layout";
@@ -1792,6 +1793,7 @@ import {
   findAtMentionTokenPlain,
   getBotMentionDisplayLength,
   getBotMentionDisplayText,
+  PRISM_BOT_MARKDOWN_LINK_RE,
   type BotMentionPick,
 } from "./botMention";
 import {
@@ -134457,6 +134459,22 @@ function HomeContent(): React.JSX.Element {
       </section>
     );
   };
+  /** Review note: one click on a seated bot tags them in the composer. Only
+   * one bot may be tagged per message (context stays focused), so clicking a
+   * different bot replaces the existing tag rather than stacking mentions. */
+  const tagCoffeeBotInComposer = (bot: { id: string; name: string }): void => {
+    const mention = `[${bot.name}](prism-bot://${encodeURIComponent(bot.id)})`;
+    const withoutMentions = coffeeDraftRef.current
+      .replace(new RegExp(PRISM_BOT_MARKDOWN_LINK_RE.source, "gi"), "")
+      .replace(/^[\s,]+/u, "")
+      .replace(/\s{2,}/gu, " ");
+    const nextDraft =
+      withoutMentions.length > 0
+        ? `${mention} ${withoutMentions}`
+        : `${mention} `;
+    coffeeDraftRef.current = nextDraft;
+    setCoffeeDraft(nextDraft);
+  };
   const sipCoffeePlayerCup = (): void => {
     const activeConversation = coffeeConversationRef.current;
     if (!activeConversation || coffeePlayerCupSipping) return;
@@ -137038,7 +137056,14 @@ function HomeContent(): React.JSX.Element {
                 className={styles.coffeeReplayPlayerSeat}
                 style={{
                   left: `${coffeeReviewLayout.player.leftPercent}%`,
-                  top: `${coffeeReviewLayout.player.topPercent}%`,
+                  // Live tables clamp the seat above the composer; replay
+                  // keeps the pure review circle (no composer overlays it).
+                  top: `${
+                    coffeeReplayActive
+                      ? coffeeReviewLayout.player.topPercent
+                      : coffeeLivePlayerSeatPosition(coffeeReviewLayout)
+                          .topPercent
+                  }%`,
                   bottom: "auto",
                   transform: "translate(-50%, -50%)",
                 }}
@@ -137145,7 +137170,15 @@ function HomeContent(): React.JSX.Element {
                       thinkingScheduleKey={`coffee-replay-player-thinking-${coffeeConversation?.id ?? "review"}`}
                       showThinkingSpinner={coffeeReplayPlayerThinking}
                       detailLevel="full"
-                      minimumRenderedSizeTier="full"
+                      // Review note: when the crowd shed drops the table to
+                      // mini, the player's stand-in shrinks with everyone
+                      // else instead of towering over the cast. Replay stays
+                      // pinned full like the rest of the review stage.
+                      minimumRenderedSizeTier={
+                        coffeeReplayActive
+                          ? "full"
+                          : coffeeLiveMinimumRenderedSizeTier
+                      }
                       screenMaterialSeed="prism-default"
                       frameMaterialSeed={PRISM_FACTORY_CLEAN_FRAME_SEED}
                       metalAlloyEnabled={false}
@@ -137975,18 +138008,29 @@ function HomeContent(): React.JSX.Element {
                 activeCoffeeCupTopOffAnimation == null &&
                 coffeePotDrag?.pouringBotId !== bot.id &&
                 !coffeeReplayActive;
+              const liveSeatTagEnabled =
+                conversationActive &&
+                !coffeeReplayActive &&
+                (coffeeSessionPhase === "live" ||
+                  coffeeSessionPhase === "arriving") &&
+                !seatLiveDeparting;
               const seatInteractive =
-                !seatLiveDeparting && replayActionReviewEnabled;
+                (!seatLiveDeparting && replayActionReviewEnabled) ||
+                liveSeatTagEnabled;
               const seatAriaLabel = seatLiveDeparting
                 ? `${bot.name} is leaving the coffee table`
                 : replayActionReviewEnabled
                     ? `Show ${bot.name} actions so far`
-                    : seatTeamLabel
-                      ? `${bot.name} at the coffee table, ${seatTeamLabel}`
-                      : `${bot.name} at the coffee table`;
+                    : liveSeatTagEnabled
+                      ? `Tag ${bot.name} in your next message`
+                      : seatTeamLabel
+                        ? `${bot.name} at the coffee table, ${seatTeamLabel}`
+                        : `${bot.name} at the coffee table`;
               const seatTitle = replayActionReviewEnabled
                   ? `Show ${bot.name} actions so far`
-                  : undefined;
+                  : liveSeatTagEnabled
+                    ? `Tag ${bot.name} in your message`
+                    : undefined;
               const replayActionPopoverSelected =
                 replayActionReviewEnabled &&
                 coffeeReplayActionPanelBotId === bot.id;
@@ -138288,6 +138332,10 @@ function HomeContent(): React.JSX.Element {
                         setCoffeeReplayActionPanelPlacement(null);
                       }
                       setCoffeeReplayActionPanelBotId(bot.id);
+                      return;
+                    }
+                    if (liveSeatTagEnabled) {
+                      tagCoffeeBotInComposer(bot);
                     }
                   }}
                   onContextMenu={(event) => {

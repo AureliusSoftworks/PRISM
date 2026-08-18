@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  COFFEE_LIVE_PLAYER_SEAT_MAX_TOP_PERCENT,
+  coffeeLivePlayerSeatPosition,
   coffeeReviewBotPosition,
   coffeeReviewParticipantLayout,
 } from "./coffee-review-layout.ts";
@@ -45,5 +47,15 @@ describe("Coffee review participant layout", () => {
     assert.ok((five[2]?.leftPercent ?? 0) > 50);
     assert.ok((five[3]?.leftPercent ?? 100) < 50);
     assert.ok((five[4]?.leftPercent ?? 0) > 50);
+  });
+
+  it("lifts the live player seat above the composer; replay keeps the circle", () => {
+    const layout = coffeeReviewParticipantLayout(4);
+    // The pure circle parks the player low enough to sit under the composer.
+    assert.ok(layout.player.topPercent > COFFEE_LIVE_PLAYER_SEAT_MAX_TOP_PERCENT);
+    const live = coffeeLivePlayerSeatPosition(layout);
+    assert.equal(live.topPercent, COFFEE_LIVE_PLAYER_SEAT_MAX_TOP_PERCENT);
+    assert.equal(live.leftPercent, layout.player.leftPercent);
+    assert.equal(live.angleDeg, layout.player.angleDeg);
   });
 });
