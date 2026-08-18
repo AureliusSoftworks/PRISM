@@ -397,6 +397,11 @@ const BOTCAST_SHOW_HOST_CHAT_EPISODE_LIMIT = 12;
 const BOTCAST_SHOW_HOST_CHAT_ARCHIVE_MAX = 48_000;
 export const SIGNAL_LOCAL_TURN_TIMEOUT_MS = 45_000;
 const SIGNAL_ONLINE_TURN_ATTEMPT_TIMEOUT_MS = 30_000;
+/** Ordinary turns retry once. The closing is the last thing an audience
+ * hears and carries the strictest validator, so it may ask for more before
+ * the deterministic sign-off takes the turn away from the host. */
+const SIGNAL_ONLINE_TURN_MAX_ATTEMPTS = 4;
+const SIGNAL_HOST_CLOSING_TURN_ATTEMPTS = 4;
 const SIGNAL_ONLINE_TURN_TOTAL_TIMEOUT_MS = 45_000;
 const SIGNAL_ONLINE_TURN_RETRY_DELAY_MS = 250;
 
@@ -593,7 +598,10 @@ export async function runSignalOnlineTurn(args: {
   );
   const maxAttempts = Math.max(
     1,
-    Math.min(2, Math.floor(args.maxAttempts ?? 2)),
+    Math.min(
+      SIGNAL_ONLINE_TURN_MAX_ATTEMPTS,
+      Math.floor(args.maxAttempts ?? 2),
+    ),
   );
   const deadline = startedAt + totalTimeoutMs;
   const attempts: SignalOnlineTurnAttemptV1[] = [];
@@ -8538,6 +8546,45 @@ export function botcastClosingReopenUtterancesV1(
   ).length;
 }
 
+/**
+ * Deterministic sign-off used when every model attempt fails the closing
+ * contract. It varies by episode because the same literal closing three shows
+ * running reads as a system message, not a host — and it still satisfies
+ * botcastHostClosingHasFormalThanks, since a fallback that could not pass the
+ * check it replaces is the most generic closing in the room.
+ */
+export function botcastDeterministicHostClosingV1(args: {
+  episodeId: string;
+  guestName: string;
+  audienceOnly: boolean;
+  force?: boolean;
+}): string {
+  const guest = args.guestName.trim();
+  if (args.force) {
+    return args.audienceOnly || !guest
+      ? "Sorry, gotta go. Thank you for watching."
+      : `Sorry, gotta go. ${guest}, thank you for joining me, and thank you for watching.`;
+  }
+  const audienceOnly = [
+    "That is where we will leave it. Thank you for watching.",
+    "We will have to stop there. Thank you all for watching.",
+    "That is our time. Thank you for watching.",
+    "Let us leave it there. Thank you all for watching.",
+  ];
+  const withGuest = [
+    `That is where we will leave it. ${guest}, thank you for joining me, and thank you for watching.`,
+    `We will have to stop there. ${guest}, thank you for joining me, and thank you all for watching.`,
+    `That is our time. Thank you for joining me, ${guest}, and thank you for watching.`,
+    `Let us leave it there. ${guest}, thank you for joining me, and thank you all for watching.`,
+  ];
+  const variants = args.audienceOnly || !guest ? audienceOnly : withGuest;
+  let hash = 0;
+  for (const character of `signal-host-closing:${args.episodeId}`) {
+    hash = (hash * 31 + character.codePointAt(0)!) % 2_147_483_647;
+  }
+  return variants[hash % variants.length]!;
+}
+
 function botcastHasUtteranceInSegment(
   episode: Pick<BotcastEpisode, "events">,
   speakerRole: BotcastSpeakerRole,
@@ -12488,14 +12535,12 @@ function ensureBotcastFinalHostBeat(
     .slice()
     .reverse()
     .find((message) => message.speakerRole === "guest")?.content;
-  const plainSignoff =
-    episode.guestPresenceMode === "audience_only"
-      ? force
-        ? "Sorry, gotta go. Thank you for watching."
-        : "That is where we will leave it. Thank you for watching."
-      : force
-        ? `Sorry, gotta go. ${guestName}, thank you for joining me, and thank you for watching.`
-        : `That is where we will leave it. ${guestName}, thank you for joining me, and thank you for watching.`;
+  const plainSignoff = botcastDeterministicHostClosingV1({
+    episodeId: episode.id,
+    guestName,
+    audienceOnly: episode.guestPresenceMode === "audience_only",
+    force,
+  });
   const hostMumbles = botPowerMumblesSpeechV1(hostPowers);
   const hostMuted = botPowerIsMutedV1(hostPowers);
   const hostEchoes = botPowerEchoesAddressedSpeechV1(hostPowers);
@@ -14817,6 +14862,9 @@ export async function advanceBotcastEpisode(
             options: onlineTurnOptions,
             attemptTimeoutMs: onlineBudgetMs,
             totalTimeoutMs: onlineBudgetMs,
+            ...(hostClosingTurn
+              ? { maxAttempts: SIGNAL_HOST_CLOSING_TURN_ATTEMPTS }
+              : {}),
             validate: (candidate) =>
               validateBotcastAutoSpeakerUtterance({
                 raw: candidate,
@@ -15221,7 +15269,11 @@ export async function advanceBotcastEpisode(
                     ? `Before you go, ${hostNamesGuest}—thank you for joining me. Thank you all for watching.`
                     : `Wait—where are you going, ${hostNamesGuest}? Thank you for joining me, and thank you all for watching.`
                   : `${hostNamesGuest} has left the studio. Thank you for joining me, and thank you all for watching.`
-                : `That is where we will leave it. ${hostNamesGuest}, thank you for joining me, and thank you for watching.`
+                : botcastDeterministicHostClosingV1({
+                    episodeId: episode.id,
+                    guestName: hostNamesGuest,
+                    audienceOnly: false,
+                  })
               : wrapUpCue
                 ? `${hostNamesGuest}, before we close, what final thought would you leave with our listeners?`
                 : hostRecoveryFallback)

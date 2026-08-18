@@ -58,6 +58,7 @@ import {
   botcastHostClosingHasFormalThanks,
   botcastLatestQuietHearingHeardV1,
   botcastClosingReopenUtterancesV1,
+  botcastDeterministicHostClosingV1,
   botcastHostCallsAfterDepartingGuest,
   botcastCrosstalkFloorOutcomeV1,
   botcastPlanDirectionalIrritationForMeaningfulCutoffV1,
@@ -10003,6 +10004,43 @@ describe("Botcast persistence and isolation", () => {
     } finally {
       db.close();
     }
+  });
+
+  it("varies the deterministic closing and passes its own thanks contract", () => {
+    const guestName = "Marcus Aurelius";
+    const closings = new Set(
+      ["7366473a", "5f427a44", "7d6c314c", "0d704497"].map((episodeId) =>
+        botcastDeterministicHostClosingV1({
+          episodeId,
+          guestName,
+          audienceOnly: false,
+        }),
+      ),
+    );
+    // Three shows running closed on the identical literal; the fallback must
+    // not read as one system message shared by every episode.
+    assert.ok(closings.size > 1);
+    // A fallback that cannot satisfy the check that rejected the model's
+    // draft is the most generic closing in the room.
+    for (const closing of closings) {
+      assert.equal(
+        botcastHostClosingHasFormalThanks(closing, guestName),
+        true,
+        closing,
+      );
+    }
+    assert.equal(
+      botcastDeterministicHostClosingV1({
+        episodeId: "7366473a",
+        guestName,
+        audienceOnly: false,
+      }),
+      botcastDeterministicHostClosingV1({
+        episodeId: "7366473a",
+        guestName,
+        audienceOnly: false,
+      }),
+    );
   });
 
   it("anchors a producer redirect to the audience-heard prefix", () => {
