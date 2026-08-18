@@ -14394,6 +14394,26 @@ export async function advanceBotcastEpisode(
           },
         ]
       : []),
+    // A producer redirect truncates the host's line to what the audience
+    // actually heard, but the turn instruction below only says "do not repeat
+    // the fragment" without ever saying what it was — and a wrap_up cue
+    // delivered as a redirect never reaches that instruction at all, because
+    // the wrapping-up branch wins the ladder first. Both leave the model to
+    // infer the cut from history, and it re-reads the whole line on air.
+    // Anchor the continuation the same way the crosstalk reclaim does.
+    ...(cueDelivery === "redirect_host" && hostRedirect?.spokenContent.trim()
+      ? [
+          {
+            role: "system" as const,
+            content: [
+              "Producer redirect: your line was cut mid-thought and the audience already heard its opening.",
+              `The exact audience-heard prefix is: ${JSON.stringify(hostRedirect.spokenContent)}.`,
+              "Continue from the end of that prefix with new words only, exactly as if you had never stopped speaking.",
+              "Never restate, paraphrase, or restart any part of the prefix, and never begin again from your opening address.",
+            ].join(" "),
+          },
+        ]
+      : []),
     ...(forceSocialSilencePayoff
       ? [
           {

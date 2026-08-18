@@ -10005,6 +10005,27 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("anchors a producer redirect to the audience-heard prefix", () => {
+    const source = readFileSync(
+      new URL("../botcast.ts", import.meta.url),
+      "utf8",
+    );
+    // Review 7366473a: a wrap_up cue delivered as redirect_host re-read the
+    // whole host line on air, because the only continuation instruction lives
+    // in a ternary the wrapping-up branch wins first, and it never quotes the
+    // prefix anyway. The anchor must not be conditioned on either.
+    const anchor = source.slice(
+      source.indexOf('"Producer redirect: your line was cut mid-thought'),
+    );
+    assert.match(
+      source,
+      /cueDelivery === "redirect_host" && hostRedirect\?\.spokenContent\.trim\(\)/u,
+    );
+    assert.match(anchor, /The exact audience-heard prefix is/u);
+    assert.match(anchor, /JSON\.stringify\(hostRedirect\.spokenContent\)/u);
+    assert.match(anchor, /Never restate, paraphrase, or restart any part/u);
+  });
+
   it("keeps the floor open for one exchange after a cue reopens the closing", () => {
     const segment = (sequence: number, name: string) => ({
       sequence,
