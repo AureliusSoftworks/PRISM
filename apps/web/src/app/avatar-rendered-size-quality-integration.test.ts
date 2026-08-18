@@ -63,7 +63,11 @@ test("Signal stage avatars retain the full animated face", () => {
     // Signal stage bots are HD, always. The static "full" pin keeps them out
     // of the rendered-size governor entirely — no load shed, no measurement,
     // no HD↔Mini swaps under camera-shot transitions.
-    assert.match(mannequin, /minimumRenderedSizeTier="full"/u);
+    // Full HD unless the sticky per-session stage shed has engaged.
+    assert.match(
+      mannequin,
+      /minimumRenderedSizeTier=\{\s*signalStageLoadShedding \? "compact" : "full"\s*\}/u,
+    );
     assert.match(mannequin, /isTalking=\{avatarState\.talking\}/u);
     assert.match(mannequin, /mouthShape=\{avatarState\.mouthShape\}/u);
   }

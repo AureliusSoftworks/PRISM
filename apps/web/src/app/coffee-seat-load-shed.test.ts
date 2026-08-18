@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   coffeeSeatShouldDropRenderedSize,
   coffeeSeatShouldSkipEmptyCupVisual,
+  stageShouldDropRenderedSize,
 } from "./coffee-seat-load-shed.ts";
 
 describe("Coffee seat load shed", () => {
@@ -69,6 +70,27 @@ describe("Coffee seat load shed", () => {
         seatedCount: 3,
         currentlyShedding: true,
       }),
+      true,
+    );
+  });
+
+  it("sheds Signal and Debate stages below 24 FPS and stays shed all session", () => {
+    assert.equal(
+      stageShouldDropRenderedSize({ fps: 18, currentlyShedding: false }),
+      true,
+    );
+    assert.equal(
+      stageShouldDropRenderedSize({ fps: 48, currentlyShedding: false }),
+      false,
+    );
+    assert.equal(
+      stageShouldDropRenderedSize({ fps: null, currentlyShedding: false }),
+      false,
+    );
+    // A stage has no crowd to thin, so once shed it never re-promotes
+    // mid-session — not even at a recovered 60 FPS.
+    assert.equal(
+      stageShouldDropRenderedSize({ fps: 60, currentlyShedding: true }),
       true,
     );
   });

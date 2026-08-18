@@ -543,6 +543,7 @@ import {
 import {
   coffeeSeatShouldDropRenderedSize,
   coffeeSeatShouldSkipEmptyCupVisual,
+  stageShouldDropRenderedSize,
 } from "./coffee-seat-load-shed";
 import { coffeePollTurnUpdateFromResponse } from "./coffee-poll-turn-response";
 import {
@@ -65420,6 +65421,41 @@ function HomeContent(): React.JSX.Element {
       );
     });
   }, [coffeeSessionPhase]);
+  // Signal and Debate stage sheds are sticky per live session: once a stage
+  // misses frames, its mannequins stay on Mini materials until the session
+  // ends instead of oscillating with the shed's own FPS recovery.
+  const [signalStageLoadShedding, setSignalStageLoadShedding] =
+    useState(false);
+  useEffect(() => {
+    if (!signalLiveSessionActive) {
+      setSignalStageLoadShedding(false);
+      return;
+    }
+    return subscribePrismFrameRate((snapshot) => {
+      setSignalStageLoadShedding((current) =>
+        stageShouldDropRenderedSize({
+          fps: snapshot?.fps ?? null,
+          currentlyShedding: current,
+        }),
+      );
+    });
+  }, [signalLiveSessionActive]);
+  const [debateStageLoadShedding, setDebateStageLoadShedding] =
+    useState(false);
+  useEffect(() => {
+    if (!debateLiveSessionActive) {
+      setDebateStageLoadShedding(false);
+      return;
+    }
+    return subscribePrismFrameRate((snapshot) => {
+      setDebateStageLoadShedding((current) =>
+        stageShouldDropRenderedSize({
+          fps: snapshot?.fps ?? null,
+          currentlyShedding: current,
+        }),
+      );
+    });
+  }, [debateLiveSessionActive]);
   const playCoffeeDeadAirAsideRef = useRef<
     (plan: DeadAirAsidePlanV1) => Promise<boolean>
   >(async () => false);
@@ -143181,7 +143217,9 @@ function HomeContent(): React.JSX.Element {
                         metalAlloyEnabled={!playerJudgePrism}
                         privateMode={false}
                         runtimeEffectsEnabled={!staticAudiencePortrait}
-                        minimumRenderedSizeTier="full"
+                        minimumRenderedSizeTier={
+                          debateStageLoadShedding ? "compact" : "full"
+                        }
                         leadershipGroupCount={
                           playerJudgePrism
                             ? 0
@@ -143840,7 +143878,9 @@ function HomeContent(): React.JSX.Element {
                       scheduleKey="botcast-producer-prism"
                       thinkingScheduleKey="botcast-producer-prism-thinking"
                       showThinkingSpinner={avatarState.thinking}
-                      minimumRenderedSizeTier="full"
+                      minimumRenderedSizeTier={
+                        signalStageLoadShedding ? "compact" : "full"
+                      }
                       eyeAttentionState={
                         avatarState.thinking
                           ? "thinking"
@@ -144003,7 +144043,9 @@ function HomeContent(): React.JSX.Element {
                     }
                     scheduleKey={`botcast-${avatarState.role}-${bot.id}`}
                     showThinkingSpinner={avatarState.thinking}
-                    minimumRenderedSizeTier="full"
+                    minimumRenderedSizeTier={
+                      signalStageLoadShedding ? "compact" : "full"
+                    }
                     eyeAttentionState={
                       avatarState.thinking
                         ? "thinking"

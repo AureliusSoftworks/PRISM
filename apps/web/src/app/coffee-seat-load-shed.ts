@@ -26,6 +26,20 @@ export function coffeeSeatShouldDropRenderedSize(args: {
 }
 
 /**
+ * Signal and Debate stages carry a small fixed cast, so there is no crowd to
+ * thin: a stage that has missed frames once stays shed for the rest of its
+ * live session, and Full HD returns with the next session. Re-promoting on
+ * the shed's own recovered FPS would restart the HD↔Mini swap loop.
+ */
+export function stageShouldDropRenderedSize(args: {
+  fps: number | null;
+  currentlyShedding: boolean;
+}): boolean {
+  if (args.currentlyShedding) return true;
+  return args.fps !== null && args.fps < COFFEE_SEAT_LOAD_SHED_ENTER_FPS;
+}
+
+/**
  * Empty-mug reach/frown on every seat is extra paint during pileup. Skip the
  * visual while the table is crowded or already shedding frames.
  */
