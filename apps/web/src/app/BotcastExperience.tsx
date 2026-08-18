@@ -8345,8 +8345,7 @@ export function BotcastExperience({
     if (
       !episode ||
       episode.status !== "live" ||
-      episode.playbackMode === "watch" ||
-      episode.segment === "closing"
+      episode.playbackMode === "watch"
     )
       return;
     const activeHostMessage = episode.messages.find(
@@ -13374,8 +13373,12 @@ export function BotcastExperience({
       setProducerGuestSipActive(false);
     }, durationMs);
   };
-  const producerCueAvailable =
-    episode?.status === "live" && episode.segment !== "closing";
+  // The closing segment stays open to the producer: a cue sent during the
+  // wrap reopens the interview for one more exchange instead of being
+  // dropped, so the control room keeps the floor for as long as the episode
+  // is live. A completed episode is finished — its recording is already
+  // sealed — and the composer closes with it.
+  const producerCueAvailable = episode?.status === "live";
   const queuedCueCanInterruptGuest =
     Boolean(queuedProducerCue) &&
     Boolean(nextHostInterruptionBridge) &&

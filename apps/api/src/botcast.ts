@@ -8502,6 +8502,42 @@ function activeBotcastWrapUpCue(
   };
 }
 
+/**
+ * Utterances aired since a producer cue reopened the interview out of the
+ * closing segment, or null when the show is not on a reopened floor.
+ *
+ * The reopened floor is worth exactly one exchange: the host's cued question
+ * and the guest's answer. Counting them is what keeps the floor open for the
+ * answer — the closing segment hands the mic to the host alone, so promoting
+ * back to closing the moment the cue airs would end the show on the question
+ * and the guest would never get to reply.
+ */
+export function botcastClosingReopenUtterancesV1(
+  episode: Pick<BotcastEpisode, "events">,
+): number | null {
+  let reopenSequence: number | null = null;
+  let closingSeen = false;
+  for (const event of episode.events) {
+    if (event.kind !== "segment") continue;
+    if (event.payload.segment === "closing") {
+      closingSeen = true;
+      reopenSequence = null;
+      continue;
+    }
+    if (closingSeen && event.payload.segment === "interview") {
+      reopenSequence = event.sequence;
+    }
+  }
+  if (reopenSequence === null) return null;
+  const reopenedAtSequence = reopenSequence;
+  return episode.events.filter(
+    (event) =>
+      event.sequence > reopenedAtSequence &&
+      event.kind === "utterance" &&
+      event.payload.interruptionBridge !== true,
+  ).length;
+}
+
 function botcastHasUtteranceInSegment(
   episode: Pick<BotcastEpisode, "events">,
   speakerRole: BotcastSpeakerRole,
@@ -13441,12 +13477,33 @@ export async function advanceBotcastEpisode(
   if (input.cueDelivery && !requestedCue) {
     throw new Error("Signal cue delivery requires a producer cue.");
   }
-  // A queued producer cue can race the guest's departure response. Once the
-  // episode is closing, discard that stale direction and continue the saved
-  // closing beat instead of stranding the live show on an error banner.
+  // A cue sent while the show is closing is the producer saying "not yet".
+  // Reopen the interview for one more exchange rather than dropping the
+  // direction: the cue defers the close on the turn it airs, and the guest's
+  // answer promotes the episode straight back to closing, so the show gets
+  // exactly one more volley before its wrap.
+  //
+  // A queued cue can still race the guest's departure, and once the chair is
+  // empty there is nobody left to answer. That case keeps the old behaviour —
+  // discard the stale direction and continue the saved closing beat instead
+  // of stranding the live show on an error banner.
   if (requestedCue && episode.segment === "closing") {
-    requestedCue = undefined;
-    guestInterruption = undefined;
+    const guestCanStillAnswer =
+      episode.guestPresenceMode !== "audience_only" &&
+      botcastEpisodeDepartureOutcome(episode.events) !== "guest_departed";
+    if (guestCanStillAnswer) {
+      transitionEpisodeSegment(
+        db,
+        userId,
+        episode,
+        "interview",
+        new Date().toISOString(),
+      );
+      episode = getBotcastEpisode(db, userId, episodeId);
+    } else {
+      requestedCue = undefined;
+      guestInterruption = undefined;
+    }
   }
   // A cue that rode a sanitizer-repaired host turn never actually aired.
   // Re-arm it once for the host's next turn instead of losing the direction.
@@ -13785,6 +13842,12 @@ export async function advanceBotcastEpisode(
       guestPowerSnapshot &&
       !botPowerIsMutedV1(guestPowerSnapshot),
   );
+  // A producer cue that reopened the floor out of closing buys one exchange:
+  // hold the interview open until both the cued host turn and the guest's
+  // answer have aired, then let the ordinary rules close the show again.
+  const closingReopenUtterances = botcastClosingReopenUtterancesV1(episode);
+  const closingReopenOwesAnExchange =
+    closingReopenUtterances !== null && closingReopenUtterances < 2;
   const nextSegment = departurePending
     ? episode.segment
     : mutuallyMutedEpisodeShouldClose || unansweredMutedGuestShouldClose
@@ -13797,15 +13860,17 @@ export async function advanceBotcastEpisode(
             ? "closing"
           : wrapUpCue || pendingPicklesReaction
               ? episode.segment
-              : sessionShouldClose
-                ? requestedCue
-                  ? episode.segment
-                  : "closing"
-                : botcastSegmentForTurn({
-                    current: episode.segment,
-                    utteranceCount: episode.messages.length,
-                    guestDeparted: guestAlreadyDeparted,
-                  });
+              : closingReopenOwesAnExchange
+                ? episode.segment
+                : sessionShouldClose
+                  ? requestedCue
+                    ? episode.segment
+                    : "closing"
+                  : botcastSegmentForTurn({
+                      current: episode.segment,
+                      utteranceCount: episode.messages.length,
+                      guestDeparted: guestAlreadyDeparted,
+                    });
   if (nextSegment !== episode.segment) {
     transitionEpisodeSegment(db, userId, episode, nextSegment, now);
     episode = getBotcastEpisode(db, userId, episodeId);

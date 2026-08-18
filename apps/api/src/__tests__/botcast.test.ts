@@ -57,6 +57,7 @@ import {
   botcastHostClaimsSilentGuestAnswered,
   botcastHostClosingHasFormalThanks,
   botcastLatestQuietHearingHeardV1,
+  botcastClosingReopenUtterancesV1,
   botcastHostCallsAfterDepartingGuest,
   botcastCrosstalkFloorOutcomeV1,
   botcastPlanDirectionalIrritationForMeaningfulCutoffV1,
@@ -10002,6 +10003,111 @@ describe("Botcast persistence and isolation", () => {
     } finally {
       db.close();
     }
+  });
+
+  it("keeps the floor open for one exchange after a cue reopens the closing", () => {
+    const segment = (sequence: number, name: string) => ({
+      sequence,
+      kind: "segment" as const,
+      payload: { segment: name },
+    });
+    const utterance = (sequence: number) => ({
+      sequence,
+      kind: "utterance" as const,
+      payload: {},
+    });
+
+    // Never reopened: the ordinary closing owes nobody an exchange.
+    assert.equal(
+      botcastClosingReopenUtterancesV1({
+        events: [segment(1, "opening"), segment(2, "interview"), segment(3, "closing")],
+      } as never),
+      null,
+    );
+
+    // Reopened, nothing aired yet — the cued host turn still has to happen.
+    assert.equal(
+      botcastClosingReopenUtterancesV1({
+        events: [segment(3, "closing"), segment(4, "interview")],
+      } as never),
+      0,
+    );
+
+    // The host asked, but the guest has not answered: the floor stays open.
+    assert.equal(
+      botcastClosingReopenUtterancesV1({
+        events: [segment(3, "closing"), segment(4, "interview"), utterance(5)],
+      } as never),
+      1,
+    );
+
+    // Question and answer both aired — the show may close again.
+    assert.equal(
+      botcastClosingReopenUtterancesV1({
+        events: [
+          segment(3, "closing"),
+          segment(4, "interview"),
+          utterance(5),
+          utterance(6),
+        ],
+      } as never),
+      2,
+    );
+
+    // A closing that follows the reopened exchange ends the reopen, so a
+    // second wrap is not treated as still owing the first cue's answer.
+    assert.equal(
+      botcastClosingReopenUtterancesV1({
+        events: [
+          segment(3, "closing"),
+          segment(4, "interview"),
+          utterance(5),
+          utterance(6),
+          segment(7, "closing"),
+        ],
+      } as never),
+      null,
+    );
+  });
+
+  it("leaves an Anthropic reasoning model room to speak after it thinks", async () => {
+    const db = fixture();
+    const options: GenerateOptions[] = [];
+    const provider: LlmProvider = {
+      name: "anthropic",
+      async generateResponse(_messages, generationOptions) {
+        options.push(generationOptions);
+        return "Against the Person is live. I'm Mara Vale, and Ivo Stone is with me. Ivo, let's start with the claim itself.";
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+    const episode = createBotcastEpisode(db, "user-1", show.id, {
+      guestBotId: "guest-1",
+      topic: "Pilot",
+      preferredProvider: "anthropic",
+      modelOverride: "claude-sonnet-5",
+    });
+    await advanceBotcastEpisode(
+      db,
+      "user-1",
+      episode.id,
+      {},
+      {
+        preferredProvider: "anthropic",
+        providerFactory: (() => provider) as typeof selectProvider,
+      },
+    );
+
+    // Reasoning is paid out of the same completion budget as the spoken line.
+    // At the bare on-air cap the chain of thought consumes the turn and the
+    // model returns an empty or mid-word-truncated reply, which the validator
+    // rejects — so every Anthropic attempt fails and the episode walks its
+    // whole fallback chain. This floor is the same one OpenAI reasoning
+    // models already get.
+    assert.equal(options[0]?.maxTokens, 384);
   });
 
   it("recovers an empty opening without speaking the raw episode title as the premise", async () => {
