@@ -45,6 +45,30 @@ describe("adaptive DOM quality integration", () => {
     assert.doesNotMatch(governor, /setAttribute\([^)]*prism-adaptive-quality/u);
   });
 
+  it("detects longtask support from the registry, not from a thrown error", () => {
+    // `observe()` aborts with a console warning on an unsupported entry type
+    // rather than throwing, so a try/catch can never detect WebKit's missing
+    // longtask API. That left the observer non-null on the desktop webview,
+    // made the event-loop-lag fallback unreachable, and pinned the meter at
+    // `busy 0ms/s` in every session regardless of load.
+    assert.match(
+      governor,
+      /PerformanceObserver\.supportedEntryTypes[\s\S]{0,60}includes\("longtask"\)/u,
+    );
+    assert.match(governor, /if \(supportsLongTask\) \{/u);
+  });
+
+  it("still measures main-thread busy time where longtask is unavailable", () => {
+    // Low FPS with near-zero busy is the signature of compositor/GPU cost
+    // rather than scripting; that distinction only exists if this fallback
+    // can actually run.
+    assert.match(governor, /loopLagMsInWindow/u);
+    assert.match(
+      governor,
+      /busyMsPerSecond = longTaskObserver[\s\S]{0,160}loopLagMsInWindow/u,
+    );
+  });
+
   it("reports stalls honestly instead of sampling only the fast frames", () => {
     // Slow frames count with their full duration; only suspension-sized gaps
     // reset the window. Discarding >250ms frames and publishing single-frame
