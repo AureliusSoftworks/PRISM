@@ -4,9 +4,14 @@ import {
   debateLiveCaptionPage,
   debateLiveCaptionPages,
   normalizeDebateLiveCaptionText,
+  signalLiveCaptionPage,
 } from "./debateLiveCaption.ts";
 
 describe("Debate live captions", () => {
+  it("is the shared source of truth for Signal's caption page bound", () => {
+    assert.equal(signalLiveCaptionPage, debateLiveCaptionPage);
+  });
+
   it("removes raw Markdown furniture from speech shown on stage", () => {
     assert.equal(
       normalizeDebateLiveCaptionText(

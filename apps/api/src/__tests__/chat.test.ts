@@ -15,9 +15,11 @@ import {
   companionLaneUsesQdrantMemorySummaries,
   inferChatToolRequestedImageSize,
   buildCoffeeContinuityPromptContext,
+  buildCoffeeGroupContinuityPromptContext,
   chatCursedTongueEphemeralHolderHistoryV1,
   chatCursedTongueHolderHistoryV1,
   loadRecentCoffeeContinuityContexts,
+  loadRecentCoffeeGroupContinuityContexts,
   parseTitleResponse,
   processChatMessage,
   refreshConversationTitle,
@@ -406,6 +408,7 @@ function seedCoffeeContinuityConversation(
     id: string;
     userId?: string;
     botIds: string[];
+    coffeeGroupId?: string | null;
     title?: string;
     topic?: string | null;
     meetingSummary?: string | null;
@@ -417,15 +420,17 @@ function seedCoffeeContinuityConversation(
   const userId = options.userId ?? "user-1";
   db.prepare(
     `INSERT INTO conversations (
-       id, user_id, title, conversation_mode, bot_group_ids, coffee_topic,
+       id, user_id, title, conversation_mode, bot_group_ids, coffee_group_id,
+       coffee_topic,
        coffee_meeting_summary, coffee_meeting_summary_updated_at, incognito,
        created_at, updated_at
-     ) VALUES (?, ?, ?, 'coffee', ?, ?, ?, ?, ?, ?, ?)`
+     ) VALUES (?, ?, ?, 'coffee', ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     options.id,
     userId,
     options.title ?? "Coffee Session",
     JSON.stringify(options.botIds),
+    options.coffeeGroupId ?? null,
     options.topic ?? null,
     options.meetingSummary ?? null,
     options.meetingSummary ? options.updatedAt : null,
@@ -574,6 +579,70 @@ describe("Coffee continuity context for private chats", () => {
       withoutCurrentSession.map((context) => context.conversationId),
       ["coffee-mid", "coffee-old"]
     );
+  });
+
+  it("scopes Coffee Group Memories to the group and never across tables", () => {
+    const db = createChatTestDb();
+    seedCoffeeContinuityConversation(db, {
+      id: "group-a-session-1",
+      botIds: ["bot-1", "bot-2", "bot-3"],
+      coffeeGroupId: "group-a",
+      topic: "The gate argument",
+      sessionSynopsis:
+        "Session synopsis: The trio agreed the garden gate stays until spring.",
+      updatedAt: "2026-01-04T00:00:00.000Z",
+    });
+    seedCoffeeContinuityConversation(db, {
+      id: "group-b-session-1",
+      botIds: ["bot-1", "bot-4", "bot-5"],
+      coffeeGroupId: "group-b",
+      sessionSynopsis:
+        "Session synopsis: A different cast argued about lighthouse duty.",
+      updatedAt: "2026-01-05T00:00:00.000Z",
+    });
+    seedCoffeeContinuityConversation(db, {
+      id: "one-off-session",
+      botIds: ["bot-1", "bot-2", "bot-3"],
+      coffeeGroupId: null,
+      sessionSynopsis:
+        "Session synopsis: A one-off table with no group identity.",
+      updatedAt: "2026-01-06T00:00:00.000Z",
+    });
+
+    const groupA = loadRecentCoffeeGroupContinuityContexts({
+      db,
+      userId: "user-1",
+      coffeeGroupId: "group-a",
+      speakerBotId: "bot-1",
+    });
+    assert.deepEqual(
+      groupA.map((context) => context.conversationId),
+      ["group-a-session-1"]
+    );
+    // The same bot at a different table never carries group-a lore along,
+    // and one-off sessions grant no cross-session lore at all.
+    const groupB = loadRecentCoffeeGroupContinuityContexts({
+      db,
+      userId: "user-1",
+      coffeeGroupId: "group-b",
+      speakerBotId: "bot-1",
+    });
+    assert.deepEqual(
+      groupB.map((context) => context.conversationId),
+      ["group-b-session-1"]
+    );
+    assert.deepEqual(
+      loadRecentCoffeeGroupContinuityContexts({
+        db,
+        userId: "user-1",
+        coffeeGroupId: null,
+        speakerBotId: "bot-1",
+      }),
+      []
+    );
+    const prompt = buildCoffeeGroupContinuityPromptContext(groupA) ?? "";
+    assert.match(prompt, /Shared Coffee Group lore/u);
+    assert.match(prompt, /Never retell them to anyone outside this group/u);
   });
 
   it("injects recent Coffee summaries into private bot chat prompts", async () => {

@@ -29,7 +29,11 @@ test("speech progress is isolated through the session presentation store", () =>
   assert.match(debateSource, /DebateLiveCaptionConsumer/u);
   assert.match(debateSource, /DebateTurnClockConsumer/u);
   assert.match(debateSource, /DebateActiveAvatarConsumer/u);
-  assert.match(debateSource, /DebateTranscriptBodyConsumer/u);
+  // The transcript rail no longer subscribes to per-character progress at
+  // all: a streaming turn is withheld and drops in whole once it completes,
+  // so the rail re-renders once per turn instead of once per character.
+  assert.doesNotMatch(debateSource, /DebateTranscriptBodyConsumer/u);
+  assert.doesNotMatch(debateSource, /DebateStreamingTranscriptArticle/u);
   assert.match(
     debateSource,
     /presentationStore\.getSnapshot\(\)[\s\S]*heardCharacterCount/u,

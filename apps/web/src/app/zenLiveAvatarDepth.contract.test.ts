@@ -24,10 +24,16 @@ describe("Zen live avatar sizing contract", () => {
   });
 
   it("restores the authored full-size default and mini/full handoff", () => {
-    assert.match(pageSource, /const ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX = 480;/);
-    assert.match(pageSource, /const ZEN_LIVE_BOT_AVATAR_MAX_SIZE_PX = 480;/);
-    assert.match(pageSource, /const ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX = 184;/);
-    assert.match(pageSource, /const ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX = 240;/);
+    assert.match(pageSource, /const ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX = 380;/);
+    assert.match(pageSource, /const ZEN_LIVE_BOT_AVATAR_MAX_SIZE_PX = 380;/);
+    assert.match(
+      pageSource,
+      /const ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX = ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX - 1;/,
+    );
+    assert.match(
+      pageSource,
+      /const ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX = BOT_AVATAR_COMPACT_EXIT_MIN_PX - ZEN_LIVE_BOT_AVATAR_HD_HOLD_PX;/,
+    );
     assert.match(pageSource, /avatarSizePx=\{zenLiveBotAvatarSizePx\}/);
     assert.match(
       cssSource,

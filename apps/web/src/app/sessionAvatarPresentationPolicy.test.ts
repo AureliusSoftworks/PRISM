@@ -111,7 +111,7 @@ describe("session avatar presentation policy", () => {
     );
     assert.match(
       pageSource,
-      /if \(minimumRenderedSizeTier === "full"\) return;[\s\S]{0,400}getBoundingClientRect/u,
+      /if \(minimumRenderedSizeTier === "full"\) \{[\s\S]{0,400}setRenderedSizeTier\("full"\);\s*return;[\s\S]{0,600}getBoundingClientRect/u,
     );
   });
 

@@ -3,6 +3,7 @@ import { getAppConfig } from "@localai/config";
 import {
   anthropicReasoningEffortForRequest,
   modelSupportsTurboMode,
+  normalizeProviderReasoningEffort,
   openAiReasoningEffortForRequest,
   type ProviderReasoningEffort,
   type UsagePurpose,
@@ -54,6 +55,14 @@ export interface GenerateOptions {
   allowFinalLocalFallback?: boolean;
   /** Ollama-only residency override for system-owned local lanes. */
   ollamaKeepAlive?: string | number;
+  /**
+   * Local-only native chain-of-thought override. Leave unset to let the
+   * provider derive it from usage purpose + reasoning effort; `false` always
+   * disables it. Structured-output requests never think regardless.
+   */
+  think?: boolean;
+  /** Receives the model's own chain-of-thought when native thinking ran. */
+  onNativeThinking?: (thinking: string) => void;
 }
 
 export type ProviderName = "local" | "openai" | "anthropic";
@@ -84,6 +93,8 @@ export interface ModelCatalogEntry {
   isDefault?: boolean;
   localHost?: "primary" | "secondary";
   hostLabel?: string;
+  /** LOCAL model reports the Ollama native `thinking` capability. */
+  thinking?: boolean;
   /** When set, this entry is only for the Images panel (not chat text models). */
   imageSource?: "ollama" | "comfyui" | "comfyui-workflow" | "comfyui-remote";
 }
@@ -739,6 +750,7 @@ function toCatalogEntry(
     label?: string;
     localHost?: "primary" | "secondary";
     hostLabel?: string;
+    thinking?: boolean;
   } = {}
 ): ModelCatalogEntry {
   return {
@@ -748,6 +760,7 @@ function toCatalogEntry(
     isDefault: id === defaultId || undefined,
     ...(options.localHost ? { localHost: options.localHost } : {}),
     ...(options.hostLabel ? { hostLabel: options.hostLabel } : {}),
+    ...(options.thinking ? { thinking: true } : {}),
   };
 }
 
@@ -1060,6 +1073,140 @@ export async function resolveLocalOllamaTarget(
   };
 }
 
+/** Caps one `/api/show` capability probe so chat turns cannot stall on it. */
+const LOCAL_THINKING_PROBE_TIMEOUT_MS = 4_000;
+/** Extra num_predict budget for the chain-of-thought ahead of the reply. */
+const LOCAL_NATIVE_THINKING_TOKEN_HEADROOM = 1_024;
+const LOCAL_THINKING_CAPABILITY_TTL_MS = 5 * 60_000;
+const LOCAL_THINKING_CAPABILITY_ERROR_TTL_MS = 60_000;
+
+const localThinkingCapabilityCache = new Map<
+  string,
+  { value: boolean; expiresAt: number }
+>();
+
+export function resetLocalThinkingCapabilityCacheForTests(): void {
+  localThinkingCapabilityCache.clear();
+}
+
+/** Whether this Ollama model reports the native `thinking` capability. */
+async function ollamaModelSupportsThinking(
+  host: string,
+  model: string,
+): Promise<boolean> {
+  const cacheKey = `${host}::${model}`;
+  const cached = localThinkingCapabilityCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  let value = false;
+  let ttlMs = LOCAL_THINKING_CAPABILITY_TTL_MS;
+  try {
+    const response = await fetch(`${host}/api/show`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model }),
+      signal: AbortSignal.timeout(LOCAL_THINKING_PROBE_TIMEOUT_MS),
+    });
+    if (response.ok) {
+      const payload = (await response.json()) as {
+        capabilities?: unknown;
+      };
+      value =
+        Array.isArray(payload.capabilities) &&
+        payload.capabilities.includes("thinking");
+    } else {
+      ttlMs = LOCAL_THINKING_CAPABILITY_ERROR_TTL_MS;
+    }
+  } catch {
+    ttlMs = LOCAL_THINKING_CAPABILITY_ERROR_TTL_MS;
+  }
+  localThinkingCapabilityCache.set(cacheKey, {
+    value,
+    expiresAt: Date.now() + ttlMs,
+  });
+  return value;
+}
+
+/**
+ * Whether the resolved local model natively thinks. Never throws: an
+ * unreachable host or unsafe paired-host reference reports `false`, which
+ * callers treat as "keep the simulated ladder".
+ */
+export async function localModelSupportsNativeThinking(
+  model?: string | null,
+  options: DualOllamaWorkloadOptions = {},
+): Promise<boolean> {
+  try {
+    const target = await resolveLocalOllamaTarget(
+      model?.trim() || config.ollamaModel,
+      options,
+    );
+    return await ollamaModelSupportsThinking(target.host, target.model);
+  } catch {
+    return false;
+  }
+}
+
+/** Visible conversational turns where an unset Effort thinks by default. */
+const LOCAL_NATIVE_THINK_DEFAULT_PURPOSES: ReadonlySet<UsagePurpose> = new Set([
+  "chat_reply",
+  "chat_fallback",
+]);
+/** Visible turns where thinking follows an explicitly chosen Effort only, so
+ * multi-bot tables and long-form generators keep their fast default. */
+const LOCAL_NATIVE_THINK_EFFORT_PURPOSES: ReadonlySet<UsagePurpose> = new Set([
+  "coffee_turn",
+  "botcast_turn",
+  "debate_generation",
+  "story_generation",
+]);
+
+/**
+ * Effort→thinking mapping for thinking-capable local models: None never
+ * thinks, Minimal and above always think, and an unset Effort thinks on the
+ * 1:1 chat lanes (the Minimal default). Structured output and private
+ * preparation passes never think.
+ */
+function localNativeThinkRequested(options?: GenerateOptions): boolean {
+  if (options?.think === false) return false;
+  if (options?.jsonSchema || options?.jsonMode) return false;
+  if (options?.think === true) return true;
+  const purpose = options?.usagePurpose;
+  if (!purpose) return false;
+  const effort = normalizeProviderReasoningEffort(options?.reasoningEffort);
+  if (effort === "none") return false;
+  if (effort === "auto") return LOCAL_NATIVE_THINK_DEFAULT_PURPOSES.has(purpose);
+  return (
+    LOCAL_NATIVE_THINK_DEFAULT_PURPOSES.has(purpose) ||
+    LOCAL_NATIVE_THINK_EFFORT_PURPOSES.has(purpose)
+  );
+}
+
+/**
+ * Thinking-capable models drift toward their trained assistant identity mid
+ * chain-of-thought — a small R1 distill will happily reintroduce itself as
+ * DeepSeek-R1 over an authored persona. Whenever native thinking runs, pin
+ * the persona again at the recency seam of the prompt.
+ */
+export const LOCAL_NATIVE_THINKING_PERSONA_GUARD = [
+  "Private reminder: stay fully in the character defined by your",
+  "instructions above, including while reasoning privately. Never say you",
+  "are the underlying language model and never name your model, vendor, or",
+  "training unless your instructions themselves do.",
+].join(" ");
+
+/** Salvages chain-of-thought a model inlined as `<think>…</think>` tags. */
+function splitInlineThinkBlock(text: string): {
+  text: string;
+  thinking: string;
+} {
+  const match = text.match(/^<think>([\s\S]*?)<\/think>\s*/u);
+  if (!match) return { text, thinking: "" };
+  return {
+    text: text.slice(match[0].length).trim(),
+    thinking: (match[1] ?? "").trim(),
+  };
+}
+
 async function discoverOpenAiModelIds(openAiApiKey?: string): Promise<string[]> {
   if (!openAiApiKey) return [];
   try {
@@ -1253,6 +1400,20 @@ async function buildUncachedModelCatalog(
   ]);
   const localIds = uniqueModelIdsByLabel([config.ollamaModel, ...discoveredLocal]);
   const secondaryLocalIds = uniqueModelIdsByLabel(discoveredSecondaryLocal);
+  const probeThinkingIds = async (
+    host: string | null,
+    ids: string[],
+  ): Promise<Set<string>> => {
+    if (!host || ids.length === 0) return new Set();
+    const flags = await Promise.all(
+      ids.map((id) => ollamaModelSupportsThinking(host, id)),
+    );
+    return new Set(ids.filter((_, index) => flags[index]));
+  };
+  const [primaryThinkingIds, secondaryThinkingIds] = await Promise.all([
+    probeThinkingIds(config.ollamaHost, localIds),
+    probeThinkingIds(privateSecondaryHost, secondaryLocalIds),
+  ]);
   const onlineIds = openAiApiKey
     ? preferOpenAiChatVariants(
         uniqueModelIds([
@@ -1275,6 +1436,7 @@ async function buildUncachedModelCatalog(
         toCatalogEntry(id, "local", config.ollamaModel, {
           localHost: "primary",
           hostLabel: "Primary host",
+          thinking: primaryThinkingIds.has(id),
         })
       ),
       ...secondaryLocalIds.map((id) =>
@@ -1282,6 +1444,7 @@ async function buildUncachedModelCatalog(
           label: `${modelLabelFromId(id, "local")} (Paired host)`,
           localHost: "secondary",
           hostLabel: "Paired host",
+          thinking: secondaryThinkingIds.has(id),
         })
       ),
     ],
@@ -1414,15 +1577,36 @@ export class LocalOllamaProvider implements LlmProvider {
     if (typeof options?.repetitionPenalty === "number") {
       ollamaOptions.repeat_penalty = options.repetitionPenalty;
     }
+    // Thinking-capable models (Qwen3, DeepSeek-R1, etc.) otherwise default to
+    // routing the visible reply into `message.thinking` and leave `content`
+    // empty, which breaks Prism chat (and any follow-up like
+    // sendGeneratedImage / Comfy). Thinking is therefore explicit: the
+    // effort→thinking mapping requests it, the capability probe confirms the
+    // model actually supports it, and everything else stays `think: false`.
+    const think =
+      localNativeThinkRequested(options) &&
+      (await ollamaModelSupportsThinking(ollamaHost, model));
+    if (think && typeof ollamaOptions.num_predict === "number") {
+      // Ollama counts thinking tokens against num_predict; keep room for the
+      // visible reply after the chain-of-thought.
+      ollamaOptions.num_predict =
+        ollamaOptions.num_predict + LOCAL_NATIVE_THINKING_TOKEN_HEADROOM;
+    }
+    const outboundMessages = think
+      ? [
+          ...messages,
+          {
+            role: "system" as const,
+            content: LOCAL_NATIVE_THINKING_PERSONA_GUARD,
+          },
+        ]
+      : messages;
     const requestBody: Record<string, unknown> = {
       model,
       stream: false,
-      messages,
+      messages: outboundMessages,
       keep_alive: options?.ollamaKeepAlive ?? "10m",
-      // Thinking-capable models (Qwen3, DeepSeek-R1, etc.) otherwise default to
-      // routing the visible reply into `message.thinking` and leave `content` empty,
-      // which breaks Prism chat (and any follow-up like sendGeneratedImage / Comfy).
-      think: false,
+      think,
     };
     if (options?.jsonSchema) {
       requestBody.format = options.jsonSchema;
@@ -1502,9 +1686,25 @@ export class LocalOllamaProvider implements LlmProvider {
     const hasToolCalls = Array.isArray(toolCalls) && toolCalls.length > 0;
 
     let text = trimmedContent;
+    let nativeThinking = trimmedThinking;
+    if (text) {
+      // Some model builds inline the block instead of using `message.thinking`,
+      // even when `think:false` was requested (e.g. an imported GGUF whose
+      // Ollama manifest doesn't declare the `thinking` capability, so the
+      // request-time `think` flag never reaches the model's own template).
+      const inline = splitInlineThinkBlock(text);
+      if (inline.text) {
+        text = inline.text;
+        nativeThinking = nativeThinking || inline.thinking;
+      }
+    }
     if (!text && trimmedThinking.length > 0) {
       // Last resort when the server still omits `content` (older Ollama / edge builds).
       text = trimmedThinking;
+      nativeThinking = "";
+    }
+    if (think && nativeThinking && text !== nativeThinking) {
+      options?.onNativeThinking?.(nativeThinking);
     }
 
     if (!text) {

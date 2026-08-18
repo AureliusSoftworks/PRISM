@@ -1,4 +1,4 @@
-export const BOT_GROUP_COFFEE_STAGING_MIN_SELECTED = 2;
+export const BOT_GROUP_COFFEE_STAGING_MIN_SELECTED = 3;
 export const BOT_GROUP_COFFEE_STAGING_MAX_SELECTED = 5;
 export const BOT_GROUP_COFFEE_STAGING_RANKING_STRATEGY =
   "local-token-overlap" as const;

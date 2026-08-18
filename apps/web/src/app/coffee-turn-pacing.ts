@@ -1,5 +1,20 @@
 import type { CoffeeSessionSettings } from "@localai/shared";
 
+/**
+ * Debate parity (`DEBATE_PARTICIPATION_CLOCK_RATE = 1/8`): a composing player
+ * slows the autonomous table to one-eighth speed instead of freezing it, so
+ * bots still act but reliably yield the floor to a message in progress.
+ */
+export const COFFEE_PLAYER_COMPOSING_DELAY_MULTIPLIER = 8;
+
+export function coffeePlayerComposingDelayMultiplier(
+  rhythmState: string,
+): number {
+  return rhythmState === "playerComposing"
+    ? COFFEE_PLAYER_COMPOSING_DELAY_MULTIPLIER
+    : 1;
+}
+
 const COFFEE_REPLY_DELAY_MIN_MS = 12_000;
 const COFFEE_REPLY_DELAY_MAX_MS = 28_000;
 const COFFEE_REPLY_DELAY_FAST_MIN_MS = 650;

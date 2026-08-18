@@ -4440,7 +4440,7 @@ describe("Debate experience", () => {
       "const DebateFoleyTranscriptNotation",
     );
     const notationEnd = source.indexOf(
-      "const DebateStreamingTranscriptArticle",
+      "function debateEvidenceExhibitImageUrl",
       notationStart,
     );
     const notation = source.slice(notationStart, notationEnd);

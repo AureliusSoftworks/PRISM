@@ -4,10 +4,16 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { getAuxiliaryProvider, selectProvider, type GenerateOptions, type LlmProvider } from "../providers.ts";
 import {
+  COFFEE_GROUP_INVITE_MIN_SIZE,
   COFFEE_GROUP_MAX_SIZE,
   COFFEE_GROUP_MIN_SIZE,
   COFFEE_OPENING_ARRIVAL_WINDOW_MS,
+  COFFEE_WRAP_UP_REMAINING_MS,
   advanceCoffeeTeamStateAfterReply,
+  assertCoffeeInviteBotCount,
+  coffeeBotPlannedDepartureDueV1,
+  coffeeBotPlannedDepartureV1,
+  coffeeTurnTextureV1,
   autoTagPeerMentionsInCoffeeReply,
   applyCoffeeMoodSessionNoShows,
   applyCoffeeEmptyCupMoodHits,
@@ -1379,6 +1385,235 @@ describe("normalizeCoffeeGroupBotIds", () => {
   it("throws when the input is not an array", () => {
     assert.throws(() => normalizeCoffeeGroupBotIds("bot-a" as unknown), /Coffee groups need/);
     assert.throws(() => normalizeCoffeeGroupBotIds(undefined), /Coffee groups need/);
+  });
+});
+
+describe("assertCoffeeInviteBotCount", () => {
+  it("keeps two-guest tables in Signal by requiring three invited bots", () => {
+    assert.throws(() => assertCoffeeInviteBotCount(["bot-a", "bot-b"]), /Signal/u);
+    assert.throws(
+      () => assertCoffeeInviteBotCount(["bot-a", "bot-a", "bot-b", null]),
+      new RegExp(`at least ${COFFEE_GROUP_INVITE_MIN_SIZE}`)
+    );
+    assert.doesNotThrow(() =>
+      assertCoffeeInviteBotCount(["bot-a", "bot-b", "bot-c"])
+    );
+  });
+
+  it("leaves stored 2-bot sessions loadable through the structural floor", () => {
+    assert.equal(COFFEE_GROUP_MIN_SIZE, 2);
+    assert.equal(COFFEE_GROUP_INVITE_MIN_SIZE, 3);
+    assert.deepEqual(normalizeCoffeeGroupBotIds(["bot-a", "bot-b"]), [
+      "bot-a",
+      "bot-b",
+    ]);
+  });
+});
+
+describe("coffeeBotPlannedDepartureV1", () => {
+  it("splits a large cast across all three departure bands deterministically", () => {
+    const bands = new Map<string, number>();
+    for (let index = 0; index < 60; index += 1) {
+      const plan = coffeeBotPlannedDepartureV1({
+        conversationId: "conv-departure-bands",
+        botId: `bot-${index}`,
+        durationMinutes: 10,
+      });
+      bands.set(plan.band, (bands.get(plan.band) ?? 0) + 1);
+      assert.deepEqual(
+        coffeeBotPlannedDepartureV1({
+          conversationId: "conv-departure-bands",
+          botId: `bot-${index}`,
+          durationMinutes: 10,
+        }),
+        plan
+      );
+    }
+    assert.ok((bands.get("significantly-early") ?? 0) > 0);
+    assert.ok((bands.get("little-early") ?? 0) > 0);
+    assert.ok((bands.get("on-time") ?? 0) > 0);
+    // The middle band is the common case in a 1/5 : 3/5 : 1/5 split.
+    assert.ok(
+      (bands.get("little-early") ?? 0) > (bands.get("significantly-early") ?? 0)
+    );
+  });
+
+  it("keeps untimed sessions and the wrap window on existing behavior", () => {
+    assert.deepEqual(
+      coffeeBotPlannedDepartureV1({
+        conversationId: "conv-untimed",
+        botId: "bot-any",
+        durationMinutes: null,
+      }),
+      { band: "on-time", departAtRemainingMs: 0 }
+    );
+    const earlyBot = Array.from({ length: 40 }, (_, index) => `bot-${index}`).find(
+      (botId) =>
+        coffeeBotPlannedDepartureV1({
+          conversationId: "conv-due-check",
+          botId,
+          durationMinutes: 10,
+        }).band !== "on-time"
+    );
+    assert.ok(earlyBot);
+    const plan = coffeeBotPlannedDepartureV1({
+      conversationId: "conv-due-check",
+      botId: earlyBot!,
+      durationMinutes: 10,
+    });
+    assert.equal(
+      coffeeBotPlannedDepartureDueV1({
+        conversationId: "conv-due-check",
+        botId: earlyBot!,
+        durationMinutes: 10,
+        sessionRemainingMs: plan.departAtRemainingMs + 60_000,
+      }),
+      false
+    );
+    assert.equal(
+      coffeeBotPlannedDepartureDueV1({
+        conversationId: "conv-due-check",
+        botId: earlyBot!,
+        durationMinutes: 10,
+        sessionRemainingMs: Math.max(
+          COFFEE_WRAP_UP_REMAINING_MS + 1_000,
+          plan.departAtRemainingMs
+        ),
+      }),
+      true
+    );
+    // Inside the wrap window the whole-table close owns the ending.
+    assert.equal(
+      coffeeBotPlannedDepartureDueV1({
+        conversationId: "conv-due-check",
+        botId: earlyBot!,
+        durationMinutes: 10,
+        sessionRemainingMs: 1_000,
+      }),
+      false
+    );
+  });
+
+  it("forces a graceful required exit beat once a planned slip-out is due", () => {
+    const earlyBot = Array.from({ length: 40 }, (_, index) => `bot-${index}`).find(
+      (botId) =>
+        coffeeBotPlannedDepartureV1({
+          conversationId: "conv-planned-exit",
+          botId,
+          durationMinutes: 10,
+        }).band !== "on-time"
+    );
+    assert.ok(earlyBot);
+    const plan = coffeeBotPlannedDepartureV1({
+      conversationId: "conv-planned-exit",
+      botId: earlyBot!,
+      durationMinutes: 10,
+    });
+    const speaker = { ...ALICE, id: earlyBot!, name: "Early Leaver" };
+    const opportunity = buildCoffeeDepartureOpportunity({
+      conversationId: "conv-planned-exit",
+      speaker,
+      seatBotIds: [speaker.id, BORIS.id, CARA.id],
+      history: [
+        {
+          role: "assistant",
+          content: "A thought from earlier.",
+          botId: speaker.id,
+        } as never,
+      ],
+      social: {
+        disposition: 0.6,
+        valuesFriction: 0.2,
+        restraint: 0.6,
+        engagement: 0.7,
+        leavePressure: 0.2,
+      },
+      sessionRemainingMs: Math.max(
+        COFFEE_WRAP_UP_REMAINING_MS + 1_000,
+        plan.departAtRemainingMs
+      ),
+      durationMinutes: 10,
+    });
+    assert.match(opportunity ?? "", /required exit beat/i);
+    assert.match(opportunity ?? "", /never mention rules, timers/i);
+  });
+});
+
+describe("coffeeTurnTextureV1", () => {
+  it("mixes quick beats and quiet asides into autonomous turns deterministically", () => {
+    const peers = [
+      { id: BORIS.id, name: BORIS.name },
+      { id: CARA.id, name: CARA.name },
+    ];
+    const kinds = new Map<string, number>();
+    for (let ordinal = 0; ordinal < 200; ordinal += 1) {
+      const args = {
+        conversationId: "conv-texture",
+        turnOrdinal: ordinal,
+        crossTalk: "chatty" as const,
+        speakerBotId: ALICE.id,
+        peers,
+        lastSpeakerBotId: BORIS.id,
+      };
+      const texture = coffeeTurnTextureV1(args);
+      kinds.set(texture.kind, (kinds.get(texture.kind) ?? 0) + 1);
+      assert.deepEqual(coffeeTurnTextureV1(args), texture);
+      if (texture.kind === "aside") {
+        // A side-thread prefers whoever spoke last.
+        assert.equal(texture.toBotId, BORIS.id);
+      }
+    }
+    assert.ok((kinds.get("full") ?? 0) > 100);
+    assert.ok((kinds.get("quick") ?? 0) > 0);
+    assert.ok((kinds.get("aside") ?? 0) > 0);
+  });
+
+  it("keeps rare tables mostly full-statement", () => {
+    let textured = 0;
+    for (let ordinal = 0; ordinal < 100; ordinal += 1) {
+      const texture = coffeeTurnTextureV1({
+        conversationId: "conv-rare",
+        turnOrdinal: ordinal,
+        crossTalk: "rare",
+        speakerBotId: ALICE.id,
+        peers: [{ id: BORIS.id, name: BORIS.name }],
+      });
+      if (texture.kind !== "full") textured += 1;
+    }
+    assert.ok(textured < 30);
+  });
+
+  it("catches cross-bot echoes hidden behind a mention or spoken address", () => {
+    const history = [
+      {
+        role: "assistant",
+        botId: BORIS.id,
+        botName: BORIS.name,
+        content:
+          "[Momo](prism-bot://bot-momo), Back to the question—the secret—which detail changes the answer?",
+      } as never,
+    ];
+    assert.equal(
+      coffeeReplyRepeatsRecentAssistant(
+        "Back to the question—the secret—which detail changes the answer?",
+        history,
+      ),
+      true,
+    );
+    assert.equal(
+      coffeeReplyRepeatsRecentAssistant("A genuinely new thought.", history),
+      false,
+    );
+  });
+
+  it("keeps planned micro-reactions that ordinary turns would reject", () => {
+    assert.equal(
+      sanitizeCoffeeTableReply("Fair enough.", ALICE.name, 110, [], {
+        allowMicroReaction: true,
+      }),
+      "Fair enough."
+    );
+    assert.equal(sanitizeCoffeeTableReply("Fair enough.", ALICE.name), "");
   });
 });
 
@@ -10419,6 +10654,31 @@ describe("inferCoffeeStarterTopics", () => {
     );
   });
 
+  it("seeds fresh persona-anchored chips per session when the topic model is down", async () => {
+    const provider = {
+      async generateResponse(): Promise<string> {
+        throw new Error("offline");
+      },
+    };
+    const run = (sessionVariationKey: string) =>
+      inferCoffeeStarterTopics({
+        provider: provider as never,
+        group: [ALICE, BORIS, CARA],
+        sessionSettings: normalizeCoffeeSessionSettings(undefined),
+        personaRelevantOnly: true,
+        sessionVariationKey,
+      });
+    const first = await run("session-a");
+    const repeat = await run("session-a");
+    const other = await run("session-b");
+
+    assert.equal(first.length, 4);
+    // Same session key replays the same chips; a new session gets a new set.
+    assert.deepEqual(first, repeat);
+    assert.notDeepEqual(first, other);
+    assert.ok(first.every((topic) => !coffeeStarterTopicLabelIsCanned(topic)));
+  });
+
   it("falls back when starter-topic inference returns invalid JSON", async () => {
     const provider = {
       async generateResponse(): Promise<string> {
@@ -12430,6 +12690,17 @@ describe("coffee prompt leak cleanup", () => {
   it("detects low-value filler and meta table-management lines", () => {
     assert.equal(coffeeReplyIsPunctuationOnly("…"), true);
     assert.equal(coffeeReplyIsPunctuationOnly(" ...?! "), true);
+    // A mention with no speech is an empty table line, not an aside.
+    assert.equal(
+      coffeeReplyIsPunctuationOnly("[Beatrix](prism-bot://bot-beatrix),"),
+      true,
+    );
+    assert.equal(
+      coffeeReplyIsPunctuationOnly(
+        "[Beatrix](prism-bot://bot-beatrix), fair point about the ledger.",
+      ),
+      false,
+    );
     assert.equal(coffeeReplyIsPunctuationOnly("*looks down* …"), false);
     assert.equal(sanitizeCoffeeTableReply("Alice: …", "Alice"), "");
     assert.equal(coffeeReplyIsLowValueTableLine("Fair point."), true);
@@ -13377,6 +13648,37 @@ describe("coffee prompt leak cleanup", () => {
       line,
       /\b(cost|test|case|detail|break|choice|rule|mistake|responsibility|purpose|failure|consequence)\b/i
     );
+  });
+
+  it("speaks echo-repair fallbacks in the bot's own frame of reference", () => {
+    const base = {
+      speaker: { id: "bot-ilya", name: "Ilya" },
+      conversationId: "persona-fallback",
+      historyLength: 9,
+      topic: "Rival Noodle Vendor",
+      personaConcepts: ["chess"],
+      maxChars: 160,
+    };
+    const line = buildCoffeeFreshFallbackBeat(base);
+    // Persona-tinged beat, not a moderator-voiced refocus question.
+    assert.match(line, /chess/i);
+    assert.doesNotMatch(line, /which example best answers|back to the question/i);
+    assert.equal(buildCoffeeFreshFallbackBeat(base), line);
+
+    // With every persona line exhausted, the topic pool still backstops.
+    const exhausted = buildCoffeeFreshFallbackBeat({
+      ...base,
+      avoidTexts: [
+        "Everything routes back to chess for me — even this.",
+        "My chess instincts say there is more underneath this.",
+        "Strip this down to chess and I would know where I stand.",
+        "I keep testing this against chess, and it does not settle.",
+        "Somewhere in chess there is a better answer to this.",
+        "Rival Noodle Vendor looks different through chess.",
+      ],
+    });
+    assert.doesNotMatch(exhausted, /chess/i);
+    assert.match(exhausted, /Rival Noodle Vendor/i);
   });
 
   it("keeps emergency and fresh fallbacks anchored to the Coffee topic", () => {
@@ -15359,7 +15661,7 @@ describe("coffee social state helpers", () => {
 
     assert.throws(
       () => sipCoffeeJoinPlayerCup(db, userId, created.conversation.id),
-      /only available while joining/i,
+      /serve mode has no player mug/i,
     );
   });
 

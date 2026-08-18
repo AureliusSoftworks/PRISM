@@ -562,6 +562,8 @@ export interface StoredAssistantToolEnvelope {
   coffeeUserAction?: CoffeeUserActionPayload;
   /** Coffee-only spoken interruption metadata carried by a hidden pause row. */
   coffeeInterruption?: CoffeeInterruptionEvent;
+  /** Coffee-only quiet side remark to one seated peer (half-volume playback). */
+  coffeeAside?: CoffeeAsidePayload;
   /** Coffee-only hidden state beats used by replay, not visible transcript prose. */
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   /** Privacy-safe record of a successful Auto recovery. */
@@ -624,6 +626,7 @@ export interface ParsedStoredAssistantToolPayload {
   zenStageAction?: ZenStageActionPayload;
   coffeeUserAction?: CoffeeUserActionPayload;
   coffeeInterruption?: CoffeeInterruptionEvent;
+  coffeeAside?: CoffeeAsidePayload;
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   autoRecovery?: AutoRecoveryTraceV1;
   autoRoute?: AutoRouteDecisionV1;
@@ -1164,6 +1167,32 @@ function normalizeCoffeeInterruptionSocialDelta(
  * Normalize persisted Coffee interruption metadata without turning its
  * transcript-only cues into ordinary assistant conversation rows.
  */
+/**
+ * Coffee-only quiet aside: this line is a low-voiced side remark aimed at one
+ * seated peer. The whole table can still hear it — players hear it at half
+ * volume — so it is presentation metadata, never an audience restriction.
+ */
+export interface CoffeeAsidePayload {
+  toBotId: string;
+  toName: string;
+}
+
+export function normalizeCoffeeAsidePayload(
+  value: unknown,
+): CoffeeAsidePayload | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const row = value as Record<string, unknown>;
+  const toBotId =
+    typeof row.toBotId === "string" ? row.toBotId.trim().slice(0, 180) : "";
+  const toName =
+    typeof row.toName === "string"
+      ? row.toName.replace(/\s+/gu, " ").trim().slice(0, 100)
+      : "";
+  return toBotId && toName ? { toBotId, toName } : undefined;
+}
+
 export function normalizeCoffeeInterruptionEvent(
   value: unknown,
 ): CoffeeInterruptionEvent | undefined {
@@ -2402,6 +2431,9 @@ export function parseStoredAssistantToolPayload(
       const coffeeInterruption = root
         ? normalizeCoffeeInterruptionEvent(root.coffeeInterruption)
         : undefined;
+      const coffeeAside = root
+        ? normalizeCoffeeAsidePayload(root.coffeeAside)
+        : undefined;
       const coffeeReplayEvents = root
         ? normalizeCoffeeReplayEventPayloads(root.coffeeReplayEvents)
         : [];
@@ -2452,6 +2484,7 @@ export function parseStoredAssistantToolPayload(
         ...(zenStageAction ? { zenStageAction } : {}),
         ...(coffeeUserAction ? { coffeeUserAction } : {}),
         ...(coffeeInterruption ? { coffeeInterruption } : {}),
+        ...(coffeeAside ? { coffeeAside } : {}),
         ...(coffeeReplayEvents.length > 0 ? { coffeeReplayEvents } : {}),
         ...(autoRecovery ? { autoRecovery } : {}),
         ...(autoRoute ? { autoRoute } : {}),
@@ -2481,6 +2514,7 @@ export function parseStoredAssistantToolPayload(
     const coffeeInterruption = normalizeCoffeeInterruptionEvent(
       row.coffeeInterruption,
     );
+    const coffeeAside = normalizeCoffeeAsidePayload(row.coffeeAside);
     const coffeeReplayEvents = normalizeCoffeeReplayEventPayloads(row.coffeeReplayEvents);
     const autoRecovery = normalizeStoredAutoRecoveryTrace(row.autoRecovery);
     const autoRoute = normalizeAutoRouteDecisionV1(row.autoRoute);
@@ -2578,6 +2612,7 @@ export function hydrateAssistantMessageParts(args: {
   zenStageAction?: ZenStageActionPayload;
   coffeeUserAction?: CoffeeUserActionPayload;
   coffeeInterruption?: CoffeeInterruptionEvent;
+  coffeeAside?: CoffeeAsidePayload;
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   autoRecovery?: AutoRecoveryTraceV1;
   autoRoute?: AutoRouteDecisionV1;
@@ -2618,6 +2653,7 @@ export function hydrateAssistantMessageParts(args: {
     ...(stored.coffeeInterruption
       ? { coffeeInterruption: stored.coffeeInterruption }
       : {}),
+    ...(stored.coffeeAside ? { coffeeAside: stored.coffeeAside } : {}),
     ...(stored.coffeeReplayEvents && stored.coffeeReplayEvents.length > 0
       ? { coffeeReplayEvents: stored.coffeeReplayEvents }
       : {}),
@@ -2664,6 +2700,7 @@ export function serializeAssistantToolPayload(args: {
   coffeeStageAction?: CoffeeStageActionPayload;
   zenStageAction?: ZenStageActionPayload;
   coffeeUserAction?: CoffeeUserActionPayload;
+  coffeeAside?: CoffeeAsidePayload;
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   autoRecovery?: AutoRecoveryTraceV1;
   autoRoute?: AutoRouteDecisionV1;
@@ -2696,6 +2733,8 @@ export function serializeAssistantToolPayload(args: {
   const hasZenStageAction = zenStageAction !== undefined;
   const coffeeUserAction = normalizeCoffeeUserActionPayload(args.coffeeUserAction);
   const hasCoffeeUserAction = coffeeUserAction !== undefined;
+  const coffeeAside = normalizeCoffeeAsidePayload(args.coffeeAside);
+  const hasCoffeeAside = coffeeAside !== undefined;
   const coffeeReplayEvents = normalizeCoffeeReplayEventPayloads(args.coffeeReplayEvents);
   const hasCoffeeReplayEvents = coffeeReplayEvents.length > 0;
   const autoRecovery = normalizeStoredAutoRecoveryTrace(args.autoRecovery);
@@ -2746,6 +2785,7 @@ export function serializeAssistantToolPayload(args: {
     !hasCoffeeStageAction &&
     !hasZenStageAction &&
     !hasCoffeeUserAction &&
+    !hasCoffeeAside &&
     !hasCoffeeReplayEvents &&
     !hasAutoRecovery &&
     !hasAutoRoute &&
@@ -2773,6 +2813,7 @@ export function serializeAssistantToolPayload(args: {
     !hasCoffeeStageAction &&
     !hasZenStageAction &&
     !hasCoffeeUserAction &&
+    !hasCoffeeAside &&
     !hasCoffeeReplayEvents &&
     !hasAutoRecovery &&
     !hasAutoRoute &&
@@ -2801,6 +2842,7 @@ export function serializeAssistantToolPayload(args: {
     !hasCoffeeStageAction &&
     !hasZenStageAction &&
     !hasCoffeeUserAction &&
+    !hasCoffeeAside &&
     !hasCoffeeReplayEvents &&
     !hasAutoRecovery &&
     !hasAutoRoute &&
@@ -2840,6 +2882,7 @@ export function serializeAssistantToolPayload(args: {
     ...(hasCoffeeStageAction ? { coffeeStageAction } : {}),
     ...(hasZenStageAction ? { zenStageAction } : {}),
     ...(hasCoffeeUserAction ? { coffeeUserAction } : {}),
+    ...(hasCoffeeAside ? { coffeeAside } : {}),
     ...(hasCoffeeReplayEvents ? { coffeeReplayEvents } : {}),
     ...(hasAutoRecovery ? { autoRecovery } : {}),
     ...(hasAutoRoute ? { autoRoute } : {}),

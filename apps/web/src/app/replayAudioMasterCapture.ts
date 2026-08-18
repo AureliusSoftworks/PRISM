@@ -41,7 +41,7 @@ type ReplayAudioMasterCaptureSession = {
   pausedAt: number | null;
   /**
    * Signal-only: pause the whole master while a bot's presented thinking
-   * state is active. Coffee leaves this false.
+   * state is active. Signal and Coffee both enable this.
    */
   compactThinkingGaps: boolean;
   /** Coffee-only: discard cancelled/orphan thinking without a delivered line. */
@@ -327,7 +327,7 @@ export async function startReplayAudioMasterCapture(
   sourceId: string,
   options: {
     markIntro?: boolean;
-    /** Signal only — pause the master during thinking / interruption holds. */
+    /** Pause the master during thinking / synthesis holds (Signal and Coffee). */
     compactThinkingGaps?: boolean;
     /** Persist thinking direction only when it resolves into a real message. */
     requireLinkedThinkingMessage?: boolean;
@@ -678,8 +678,9 @@ function resumeCaptureRecorder(capture: ReplayAudioMasterCaptureSession): void {
 }
 
 /**
- * Signal hold for presented thinking intervals. Coffee captures ignore this
- * (compactThinkingGaps stays false).
+ * Depth-counted hold for presented thinking and voice-preparation intervals.
+ * Signal holds during thinking; Coffee holds during bot thinking and while a
+ * player line's voice is still synthesizing.
  */
 export function setReplayAudioMasterCompactHold(
   sourceId: string,

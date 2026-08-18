@@ -12,10 +12,11 @@ import {
   type SimulatedEffortLadderProfile,
   type SimulatedEffortPassName,
 } from "@localai/shared";
-import type {
-  GenerateOptions,
-  LlmProvider,
-  ProviderMessage,
+import {
+  localModelSupportsNativeThinking,
+  type GenerateOptions,
+  type LlmProvider,
+  type ProviderMessage,
 } from "./providers.ts";
 
 export type SimulatedEffortSurface =
@@ -193,6 +194,14 @@ export async function prepareMessagesWithSimulatedEffort(args: {
   // Defense in depth: callers normally use the capability helper above, but
   // no direct invocation may turn an ONLINE request into multiple passes.
   if (args.provider.name !== "local") return args.messages;
+  if (
+    args.effort === "minimal" &&
+    (await localModelSupportsNativeThinking(args.options.model))
+  ) {
+    // Minimal on a thinking-capable model is pure native reasoning: the
+    // model's own chain-of-thought replaces the single simulated pass.
+    return args.messages;
+  }
   const ladderProfile = normalizeSimulatedEffortLadderProfile(
     args.ladderProfile,
   );

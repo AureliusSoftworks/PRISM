@@ -145,6 +145,7 @@ import {
   collectCoffeePollVotes,
   buildCoffeePollExportLines,
   coffeeMessagesVisibleInExport,
+  assertCoffeeInviteBotCount,
   coffeeConversationHasPlayerDeparture,
   coffeePreparedTurnCursor,
   buildCoffeeTeamExportLines,
@@ -2356,6 +2357,7 @@ async function sendLocalVoiceWaveStream(args: {
   pronunciation?: ResolvedLocalVoicePronunciationV1;
   speechprint?: ResolvedLocalVoiceSpeechprintV1;
   protectedPhrases?: readonly string[];
+  deliveryMood?: string;
   performancePlan?: VoicePerformancePlanV1 | null;
   /** Enables restrained punctuation orchestration for Kokoro, never system TTS. */
   punctuationPacing?: boolean;
@@ -2414,6 +2416,7 @@ async function sendLocalVoiceWaveStream(args: {
       allowOperatingSystemVoices: args.allowOperatingSystemVoices,
       signal: args.signal,
       protectedPhrases: args.protectedPhrases,
+      deliveryMood: args.deliveryMood,
     });
   // Prepare the first phrase before committing a 200 response so startup
   // failures still retain the route's normal actionable 503 behavior.
@@ -9056,19 +9059,17 @@ function queueInitialCoffeeGroupSynthesis(
   groupId: string,
   items: readonly CoffeeGroupSynthesisItem[],
 ): void {
+  // Debate parity: media assets (atmosphere, soundtrack) synthesize only on
+  // demand from the group's own controls. Identity text still fills empty
+  // fields so a new group never lacks a name or ethos.
   const identityItems = items.filter(
     (item): item is "name" | "ethos" => item === "name" || item === "ethos",
   );
-  const identity = Promise.all(
+  void Promise.all(
     identityItems.map((item) =>
       queueCoffeeGroupSynthesisItem(userId, groupId, item),
     ),
   );
-  if (items.includes("atmosphere")) {
-    void identity.then(() =>
-      queueCoffeeGroupSynthesisItem(userId, groupId, "atmosphere"),
-    );
-  }
 }
 
 const coffeeGroupSoundtrackFlights = new Map<string, Promise<void>>();
@@ -21205,7 +21206,10 @@ function buildRoutes(): RouteDefinition[] {
       if (typeof body.ethos !== "string" || body.ethos.trim().length === 0) {
         pendingSynthesisItems.push("ethos");
       }
+      // Atmosphere stays "pending" but is never auto-run: media assets are
+      // synthesized on demand from the group's own controls (Debate parity).
       pendingSynthesisItems.push("atmosphere");
+      assertCoffeeInviteBotCount(groupBotIds);
       const group = createCoffeeGroup(db, userId, {
         name: body.name,
         ethos: body.ethos,
@@ -21229,7 +21233,6 @@ function buildRoutes(): RouteDefinition[] {
         group: persistedGroup,
       });
       queueInitialCoffeeGroupSynthesis(userId, group.id, pendingSynthesisItems);
-      void queueCoffeeGroupSoundtrack(userId, group.id, body.preferredProvider);
     }),
     route("POST", "/api/coffee/groups/setup-suggestion", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -21297,6 +21300,7 @@ function buildRoutes(): RouteDefinition[] {
       const groupBotIds = Array.isArray(body.groupBotIds)
         ? body.groupBotIds
         : undefined;
+      if (groupBotIds !== undefined) assertCoffeeInviteBotCount(groupBotIds);
       const user = getUserRow(userId);
       const group = await updateCoffeeGroupWithGeneratedTopics(
         db,
@@ -21414,6 +21418,8 @@ function buildRoutes(): RouteDefinition[] {
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       const body = ctx.body as Record<string, unknown>;
+      const inviteGroup = getCoffeeGroup(db, userId, ctx.params.id);
+      if (inviteGroup) assertCoffeeInviteBotCount(inviteGroup.botGroupIds);
       const initialPoll =
         body.initialPoll &&
         typeof body.initialPoll === "object" &&
@@ -21476,6 +21482,7 @@ function buildRoutes(): RouteDefinition[] {
       const groupBotIds = Array.isArray(body.groupBotIds)
         ? body.groupBotIds
         : undefined;
+      assertCoffeeInviteBotCount(groupBotIds);
       const initialPoll =
         body.initialPoll &&
         typeof body.initialPoll === "object" &&
@@ -22333,6 +22340,7 @@ function buildRoutes(): RouteDefinition[] {
       const groupBotIds = Array.isArray(body.groupBotIds)
         ? body.groupBotIds
         : undefined;
+      if (!conversationId) assertCoffeeInviteBotCount(groupBotIds);
       const interruptionInput =
         body.playerInterruption && typeof body.playerInterruption === "object"
           ? (body.playerInterruption as Record<string, unknown>)
@@ -22581,6 +22589,11 @@ function buildRoutes(): RouteDefinition[] {
                       sessionSpeakerModel: runtime.model,
                       reasoningEffort: runtime.reasoningEffort,
                       autoRouteDecision: runtime.autoRoute,
+                      composingCharCount:
+                        typeof body.composingCharCount === "number" &&
+                        Number.isFinite(body.composingCharCount)
+                          ? Math.max(0, Math.floor(body.composingCharCount))
+                          : undefined,
                     },
                     body.userIsComposing === true,
                     directedSpeakerBotId,
@@ -22845,6 +22858,11 @@ function buildRoutes(): RouteDefinition[] {
                 sessionSpeakerModel: runtime.model,
                 reasoningEffort: runtime.reasoningEffort,
                 autoRouteDecision: runtime.autoRoute,
+                composingCharCount:
+                  typeof body.composingCharCount === "number" &&
+                  Number.isFinite(body.composingCharCount)
+                    ? Math.max(0, Math.floor(body.composingCharCount))
+                    : undefined,
               };
               if (kind !== "autonomous") {
                 const result = await processCoffeeTurn(
@@ -24507,9 +24525,12 @@ function buildRoutes(): RouteDefinition[] {
         }
       } else {
         if (!ownerLabel) ownerLabel = "the player";
+        // The player is never voiced directly: the Default Prism voice is the
+        // player's audible stand-in. The legacy player profile is retired.
         voiceProfile =
-          parseStoredBotAudioVoiceProfileV1(user.player_audio_voice_profile) ??
-          normalizeBotAudioVoiceProfileV1(undefined);
+          parseStoredBotAudioVoiceProfileV1(
+            user.prism_default_bot_audio_voice_profile,
+          ) ?? normalizeBotAudioVoiceProfileV1(undefined);
       }
 
       const voiceId = resolveElevenLabsVoiceId(voiceProfile);
@@ -24695,9 +24716,11 @@ function buildRoutes(): RouteDefinition[] {
           }
         }
       } else {
+        // Player pacing packs also speak with the Default Prism stand-in.
         voiceProfile =
-          parseStoredBotAudioVoiceProfileV1(user.player_audio_voice_profile) ??
-          normalizeBotAudioVoiceProfileV1(undefined);
+          parseStoredBotAudioVoiceProfileV1(
+            user.prism_default_bot_audio_voice_profile,
+          ) ?? normalizeBotAudioVoiceProfileV1(undefined);
       }
 
       const voiceId = resolveElevenLabsVoiceId(voiceProfile);
@@ -25980,11 +26003,24 @@ function buildRoutes(): RouteDefinition[] {
       // replace existing ElevenLabs or operating-system identities.
       const resolvedElevenLabsVoiceId =
         resolveElevenLabsVoiceId(requestedProfile) ?? legacyElevenLabsVoiceId;
+      // A deliberately authored Accent Map identity (accent pin, speechprint,
+      // or exact map point) exists only on the local phoneme-and-style
+      // pipeline. The account-level legacy system-voice default must not
+      // silently replace it: operating-system voices have no style surface,
+      // so the authored accent would vanish entirely.
+      const authoredLocalAccentIdentity =
+        Boolean(requestedProfile.accentDefinitionId) ||
+        (requestedProfile.speechprintInfluence !== undefined &&
+          requestedProfile.speechprintInfluence !== "none") ||
+        Boolean(requestedProfile.pronunciationMapPoint);
       const profile = normalizeBotAudioVoiceProfileV1({
         ...requestedProfile,
         elevenLabsVoiceId: resolvedElevenLabsVoiceId,
         systemVoiceName:
-          requestedProfile.systemVoiceName ?? user.default_system_voice_name,
+          requestedProfile.systemVoiceName ??
+          (authoredLocalAccentIdentity
+            ? null
+            : user.default_system_voice_name),
       });
       const allowOperatingSystemVoices =
         user.operating_system_voices_enabled !== 0 ||
@@ -26120,6 +26156,7 @@ function buildRoutes(): RouteDefinition[] {
               pronunciation: localDelivery.pronunciation,
               speechprint: localDelivery.speechprint,
               protectedPhrases: speechprintProtectedPhrases,
+              deliveryMood: request.deliveryMood,
               performancePlan: localPerformancePlan,
               punctuationPacing:
                 localDelivery.localEngine.resolved === "instant" &&
@@ -26212,6 +26249,7 @@ function buildRoutes(): RouteDefinition[] {
               pronunciation: localDelivery.pronunciation,
               speechprint: localDelivery.speechprint,
               protectedPhrases: speechprintProtectedPhrases,
+              deliveryMood: request.deliveryMood,
               performancePlan: localPerformancePlan,
               punctuationPacing:
                 localDelivery.localEngine.resolved === "instant" &&
@@ -26399,6 +26437,7 @@ function buildRoutes(): RouteDefinition[] {
                 pronunciation: localDelivery.pronunciation,
                 speechprint: localDelivery.speechprint,
                 protectedPhrases: speechprintProtectedPhrases,
+                deliveryMood: request.deliveryMood,
                 performancePlan: localPerformancePlan,
                 punctuationPacing:
                   localDelivery.localEngine.resolved === "instant" &&

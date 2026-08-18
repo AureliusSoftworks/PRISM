@@ -838,17 +838,29 @@ describe("Coffee seat arrival CSS", () => {
       /<CrtPixelTextGlyph[\s\S]{0,260}rasterKey=\{partFaceFont \?\? "default"\}/,
     );
     assert.match(phosphorPixelGlyphSource, /rasterKey\?: string \| number \| null/);
+    // Loadedness is part of the raster identity: a fallback-font raster baked
+    // before the authored webfont arrives can never be replayed as final.
     assert.match(
       phosphorPixelGlyphSource,
-      /rasterizeTextMask\([\s\S]{0,180}`\$\{rasterKey \?\? ""\}:\$\{fontRevision\}`/,
+      /document\.fonts\?\.check\(fontProbe, content\)/,
+    );
+    assert.match(
+      phosphorPixelGlyphSource,
+      /rasterizeTextMask\([\s\S]{0,220}fontReady \? "font-ready" : `font-pending-\$\{fontRevision\}`/,
+    );
+    // The probe is built from longhands because `computed.font` serializes to
+    // an empty string for these glyphs, which silently skipped the reload.
+    assert.match(
+      phosphorPixelGlyphSource,
+      /const fontProbe = `\$\{computed\.fontStyle\} \$\{computed\.fontWeight\} \$\{computed\.fontSize\} \$\{computed\.fontFamily\}`/,
+    );
+    assert.match(
+      phosphorPixelGlyphSource,
+      /document\.fonts[\s\S]{0,80}\.load\(fontProbe, content\)[\s\S]{0,80}\.then\(handleFontsLoaded/,
     );
     assert.match(
       phosphorPixelGlyphSource,
       /document\.fonts\?\.ready\.then\(handleFontsLoaded\)/,
-    );
-    assert.match(
-      phosphorPixelGlyphSource,
-      /document\.fonts[\s\S]{0,80}\.load\(authoredFont, content\)[\s\S]{0,80}\.then\(handleFontsLoaded/,
     );
     assert.match(
       phosphorPixelGlyphSource,

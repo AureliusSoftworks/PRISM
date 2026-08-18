@@ -56,6 +56,7 @@ import {
   botcastGuestClaimsSilentHostSpoke,
   botcastHostClaimsSilentGuestAnswered,
   botcastHostClosingHasFormalThanks,
+  botcastLatestQuietHearingHeardV1,
   botcastHostCallsAfterDepartingGuest,
   botcastCrosstalkFloorOutcomeV1,
   botcastPlanDirectionalIrritationForMeaningfulCutoffV1,
@@ -358,6 +359,72 @@ it("requires the final Signal beat to thank both guest and audience", () => {
       "Ivo Stone",
     ),
     false,
+  );
+  // The established short address counts: after twenty turns of "Benny", a
+  // close thanking "Benny" must not be rejected for omitting the full name —
+  // that rejection cascaded through every model and forced the deterministic
+  // fallback line onto an otherwise healthy closing beat.
+  assert.equal(
+    botcastHostClosingHasFormalThanks(
+      "That's our show. Thanks for sittin' with me, Benny. Thank you all for watching.",
+      "Bigoted Benny",
+    ),
+    true,
+  );
+  assert.equal(
+    botcastHostClosingHasFormalThanks(
+      "That's our show. Thanks, Stone, for the straight answers. Thank you for listening.",
+      "Ivo Stone",
+    ),
+    true,
+  );
+  // Only the distinctive final word is an accepted short form.
+  assert.equal(
+    botcastHostClosingHasFormalThanks(
+      "That's our show. Thanks, Bigoted, whoever ye are. Thank you for watching.",
+      "Bigoted Benny",
+    ),
+    false,
+  );
+});
+
+it("reads the latest quiet-hearing outcome per speaker-listener pair", () => {
+  const events = [
+    {
+      kind: "power_effect" as const,
+      payload: {
+        effect: "quiet_hearing",
+        sourceBotId: "host-1",
+        sourceMessageId: "m1",
+        listenerBotId: "guest-1",
+        heard: true,
+      },
+    },
+    {
+      kind: "power_effect" as const,
+      payload: {
+        effect: "quiet_hearing",
+        sourceBotId: "host-1",
+        sourceMessageId: "m2",
+        listenerBotId: "guest-1",
+        heard: false,
+      },
+    },
+  ];
+  // The most recent roll for the pair wins; the fairness valve uses a `false`
+  // here to force the host's repeat to land instead of rolling fifty-fifty
+  // again, so consecutive misses can never stack past one.
+  assert.equal(
+    botcastLatestQuietHearingHeardV1(events, "host-1", "guest-1"),
+    false,
+  );
+  assert.equal(
+    botcastLatestQuietHearingHeardV1(events, "host-1", "guest-2"),
+    null,
+  );
+  assert.equal(
+    botcastLatestQuietHearingHeardV1(events.slice(0, 1), "host-1", "guest-1"),
+    true,
   );
 });
 

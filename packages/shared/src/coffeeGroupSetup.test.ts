@@ -64,9 +64,9 @@ describe("normalizeCoffeeGroupSetupSuggestionV1", () => {
   it("pads seats to five and drops duplicate roster ids", () => {
     const suggestion = normalizeCoffeeGroupSetupSuggestionV1(
       {
-        name: "Paired Table",
-        ethos: "Two voices are enough when the contrast is sharp.",
-        groupBotIds: ["bot-a", "bot-a", "bot-b"],
+        name: "Trio Table",
+        ethos: "Three voices are enough when the contrast is sharp.",
+        groupBotIds: ["bot-a", "bot-a", "bot-b", "bot-c"],
         starterTopics: ["Open with a quiet dare.", "Trade one unfinished idea."],
       } satisfies Partial<CoffeeGroupSetupSuggestionV1>,
       ["bot-a", "bot-b", "bot-c"],
@@ -75,7 +75,7 @@ describe("normalizeCoffeeGroupSetupSuggestionV1", () => {
     assert.deepEqual(suggestion.groupBotIds, [
       "bot-a",
       "bot-b",
-      null,
+      "bot-c",
       null,
       null,
     ]);

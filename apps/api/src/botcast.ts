@@ -9878,6 +9878,28 @@ function botcastQuietHearingOutcomeV1(
   return null;
 }
 
+/** Latest recorded quiet-hearing outcome from this speaker to this listener,
+ * across any message. Null before the first recorded roll. */
+export function botcastLatestQuietHearingHeardV1(
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
+  sourceBotId: string,
+  listenerBotId: string,
+): boolean | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.kind !== "power_effect") continue;
+    if (
+      event.payload.effect === "quiet_hearing" &&
+      event.payload.sourceBotId === sourceBotId &&
+      event.payload.listenerBotId === listenerBotId &&
+      typeof event.payload.heard === "boolean"
+    ) {
+      return event.payload.heard;
+    }
+  }
+  return null;
+}
+
 function botcastLatestAnnoyanceCueV1(
   events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
   targetBotId: string,
@@ -11462,13 +11484,28 @@ export function botcastHostClosingHasFormalThanks(
     .replace(/\s+/gu, " ")
     .trim();
   if (!spoken || !guestName.trim()) return false;
-  const escapedGuestName = guestName
-    .trim()
-    .replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-  const thanksGuest = new RegExp(
-    `(?:\\bthank(?:s| you)?\\b[^.!?]{0,56}\\b${escapedGuestName}\\b|\\b${escapedGuestName}\\b[^.!?]{0,56}\\bthank(?:s| you)?\\b)`,
-    "iu",
-  ).test(spoken);
+  // Twenty turns of "Benny" make "Bigoted Benny" an unnatural close. Accept
+  // the full name or the distinctive final word of a multi-word name, so this
+  // check cannot reject every model's natural address in a row and force the
+  // deterministic fallback line onto an otherwise healthy closing beat.
+  const trimmedGuestName = guestName.trim();
+  const guestNameWords = trimmedGuestName.split(/\s+/u);
+  const shortAddress =
+    guestNameWords.length > 1 ? (guestNameWords.at(-1) ?? "") : "";
+  const guestAddressForms = [
+    trimmedGuestName,
+    ...(shortAddress.length >= 3 ? [shortAddress] : []),
+  ];
+  const thanksGuest = guestAddressForms.some((addressForm) => {
+    const escapedAddressForm = addressForm.replace(
+      /[.*+?^${}()|[\]\\]/gu,
+      "\\$&",
+    );
+    return new RegExp(
+      `(?:\\bthank(?:s| you)?\\b[^.!?]{0,56}\\b${escapedAddressForm}\\b|\\b${escapedAddressForm}\\b[^.!?]{0,56}\\bthank(?:s| you)?\\b)`,
+      "iu",
+    ).test(spoken);
+  });
   const thanksAudience =
     /\bthank(?:s| you)?(?:\s+all)?\s+for\s+(?:joining\s+us|watching|listening|tuning\s+in)\b/iu.test(
       spoken,
@@ -16134,12 +16171,24 @@ export async function advanceBotcastEpisode(
   const hasQuietHearingRoll = Boolean(
     botPowerIntermittentAudibilityEffectV1(speaker.powers),
   );
+  // Fairness valve: a miss instructs the listener to ask for a repeat, so the
+  // repeat itself always lands. Without this, back-to-back fifty-fifty misses
+  // can eat a whole exchange — and at the end of an episode, its payoff.
+  const listenerMissedSpeakersPriorLine =
+    hasQuietHearingRoll &&
+    botcastLatestQuietHearingHeardV1(
+      episode.events,
+      speaker.id,
+      listener.id,
+    ) === false;
   const listenerHeardLine = listenerPerception.audible &&
-    (!hasQuietHearingRoll || botPowerListenerHearsTurnV1({
-      powers: speaker.powers,
-      stableTurnKey: `${episode.id}:${messageId}`,
-      listenerBotId: listener.id,
-    }));
+    (!hasQuietHearingRoll ||
+      listenerMissedSpeakersPriorLine ||
+      botPowerListenerHearsTurnV1({
+        powers: speaker.powers,
+        stableTurnKey: `${episode.id}:${messageId}`,
+        listenerBotId: listener.id,
+      }));
   if (hasQuietHearingRoll && episode.guestKind !== "producer") {
     recordEvent(
       db,

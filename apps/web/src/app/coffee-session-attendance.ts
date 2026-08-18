@@ -63,7 +63,7 @@ export function coffeeGroupSessionExcludedBotIds(
 export function coffeeGroupAttendanceCanStart(
   groupBotIds: readonly string[],
   excludedBotIds: ReadonlySet<string> | readonly string[],
-  minimumAttending = 2
+  minimumAttending = 3
 ): boolean {
   return coffeeGroupAttendingBotIds(groupBotIds, excludedBotIds).length >= minimumAttending;
 }

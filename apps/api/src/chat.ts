@@ -14,7 +14,9 @@ import {
 } from "./coffee-continuity.ts";
 export {
   buildCoffeeContinuityPromptContext,
+  buildCoffeeGroupContinuityPromptContext,
   loadRecentCoffeeContinuityContexts,
+  loadRecentCoffeeGroupContinuityContexts,
 } from "./coffee-continuity.ts";
 export type { CoffeeContinuityContext } from "./coffee-continuity.ts";
 import {
@@ -42,6 +44,7 @@ import {
 import {
   getAuxiliaryProvider,
   LocalOllamaProvider,
+  localModelSupportsNativeThinking,
   selectProvider,
   ANTHROPIC_DEFAULT_MODEL,
   OPENAI_DEFAULT_MODEL,
@@ -1449,12 +1452,48 @@ function shouldSimulateReasoningEffort(args: {
   provider: LlmProvider;
   botOverrides: GenerateOptions | undefined;
   effort: ReasoningEffort;
+  /** LOCAL model natively thinks: Minimal is pure native reasoning. */
+  localNativeThinking?: boolean;
 }): boolean {
   if (args.effort === "auto" || args.effort === "none") return false;
+  if (args.localNativeThinking === true && args.effort === "minimal") {
+    return false;
+  }
   return !providerModelSupportsNativeReasoningEffort(
     args.provider,
     args.botOverrides,
   );
+}
+
+const NATIVE_THINKING_PAYLOAD_MAX_CHARS = 8_000;
+
+/** Readable Psychic record for a turn whose reasoning was the model's own
+ * chain-of-thought, with no planning passes to summarize it. */
+function nativeThinkingPsychicThought(args: {
+  nativeThinking: string;
+  effort: ReasoningEffort;
+  provider: ProviderName;
+  model: string;
+}): PsychicThoughtPayload {
+  const firstLine =
+    args.nativeThinking
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .find(Boolean) ?? "";
+  return {
+    v: 1,
+    summary:
+      (firstLine || "Thought through the reply natively.").slice(0, 200),
+    effort: args.effort,
+    provider: args.provider,
+    ...(args.model ? { model: args.model } : {}),
+    planningMode: "native",
+    nativeThinking: args.nativeThinking.slice(
+      0,
+      NATIVE_THINKING_PAYLOAD_MAX_CHARS,
+    ),
+    createdAt: new Date().toISOString(),
+  };
 }
 
 function simulatedEffortLadderProfileForSettings(args: {
@@ -2981,6 +3020,11 @@ async function generateChatResponse(args: {
     requestedModel ??
     describeRequestedModel(args.provider, args.botOverrides);
   let planningTrace: Awaited<ReturnType<typeof runPsychicPlanningPass>> = null;
+  let nativeThinkingForTurn: string | null = null;
+  let effortForNativeThinking: ReasoningEffort = "auto";
+  const collectNativeThinking = (thinking: string): void => {
+    nativeThinkingForTurn = thinking;
+  };
   const prepareAttempt = async (
     provider: LlmProvider,
     model: string,
@@ -2991,6 +3035,7 @@ async function generateChatResponse(args: {
     messages: ProviderMessage[];
     overrides: GenerateOptions | undefined;
   }> => {
+    nativeThinkingForTurn = null;
     const requestedOverride = normalizeProviderReasoningEffort(
       botOverrides?.reasoningEffort,
     );
@@ -2999,11 +3044,23 @@ async function generateChatResponse(args: {
       (requestedOverride === "max"
         ? "max"
         : args.resolveReasoningEffort?.(provider.name, model));
-    const providerEffort = normalizeProviderReasoningEffort(
+    const requestedProviderEffort = normalizeProviderReasoningEffort(
       savedEffort ?? botOverrides?.reasoningEffort,
     );
+    const localNativeThinking =
+      provider.name === "local" &&
+      (await localModelSupportsNativeThinking(model, {
+        secondaryOllamaHost: args.secondaryOllamaHost ?? undefined,
+      }));
+    // A thinking-capable local model without a saved Effort defaults to
+    // Minimal: one native chain-of-thought, no simulated passes.
+    const providerEffort: ProviderReasoningEffort =
+      requestedProviderEffort === "auto" && localNativeThinking
+        ? "minimal"
+        : requestedProviderEffort;
     const effort: ReasoningEffort =
       providerEffort === "max" ? "xhigh" : providerEffort;
+    effortForNativeThinking = effort;
     const turbo = args.resolveTurboMode?.(provider.name, model) === true;
     const overrides: GenerateOptions | undefined = botOverrides
       ? {
@@ -3025,6 +3082,7 @@ async function generateChatResponse(args: {
       provider,
       botOverrides: overrides,
       effort,
+      localNativeThinking,
     });
     const simulatedEffortNotice = simulatedEffortNoticeDetail({
       provider,
@@ -3062,13 +3120,31 @@ async function generateChatResponse(args: {
   }>(result: T): T & {
     psychicThought?: PsychicThoughtPayload;
     psychicDebug?: PsychicDebugPayload;
-  } => ({
-    ...result,
-    ...(planningTrace?.psychicThought
-      ? { psychicThought: planningTrace.psychicThought }
-      : {}),
-    ...(planningTrace?.debug ? { psychicDebug: planningTrace.debug } : {}),
-  });
+  } => {
+    const nativeThinking = nativeThinkingForTurn?.trim() ?? "";
+    const tracedThought = planningTrace?.psychicThought;
+    const psychicThought = nativeThinking
+      ? tracedThought
+        ? {
+            ...tracedThought,
+            nativeThinking: nativeThinking.slice(
+              0,
+              NATIVE_THINKING_PAYLOAD_MAX_CHARS,
+            ),
+          }
+        : nativeThinkingPsychicThought({
+            nativeThinking,
+            effort: effortForNativeThinking,
+            provider: result.providerNameUsed,
+            model: result.modelUsed,
+          })
+      : tracedThought;
+    return {
+      ...result,
+      ...(psychicThought ? { psychicThought } : {}),
+      ...(planningTrace?.debug ? { psychicDebug: planningTrace.debug } : {}),
+    };
+  };
 
   const resolvedChain = autoFallbackResolvedChain(
     { provider: args.provider.name, model: primaryModel },
@@ -3113,6 +3189,7 @@ async function generateChatResponse(args: {
             usagePurpose: index === 0 ? "chat_reply" : "chat_fallback",
             allowFinalLocalFallback: false,
             signal,
+            onNativeThinking: collectNativeThinking,
           });
           return maybeRepairGuidedFinalAnswer({
             reply: raw,
@@ -3186,7 +3263,11 @@ async function generateChatResponse(args: {
       const raw = await args.provider.generateResponse(
         prepared.messages,
         withGenerationSignal(
-          { ...prepared.overrides, usagePurpose: "chat_reply" },
+          {
+            ...prepared.overrides,
+            usagePurpose: "chat_reply",
+            onNativeThinking: collectNativeThinking,
+          },
           signal,
         ),
       );

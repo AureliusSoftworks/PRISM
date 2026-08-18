@@ -18,6 +18,8 @@ export interface PsychicThoughtDisplayLine {
     label: string;
     summary: string;
   }>;
+  /** The model's own chain-of-thought when native thinking produced the turn. */
+  nativeThinking?: string;
 }
 
 const PSYCHIC_PASS_LABELS: Record<PsychicThoughtPass["stage"], string> = {
@@ -47,17 +49,22 @@ export interface PsychicThoughtMessageLike {
 export function psychicPlanningModeLabel(
   planningMode: PsychicThoughtPayload["planningMode"],
   passCount?: number,
+  nativeThinking?: boolean,
 ): string | undefined {
   if (planningMode === "simulated") {
     const normalizedPassCount =
       typeof passCount === "number" && Number.isFinite(passCount)
         ? Math.max(0, Math.round(passCount))
         : 0;
-    return normalizedPassCount > 0
-      ? `Simulated · ${normalizedPassCount} ${normalizedPassCount === 1 ? "pass" : "passes"}`
-      : "Simulated";
+    const base =
+      normalizedPassCount > 0
+        ? `Simulated · ${normalizedPassCount} ${normalizedPassCount === 1 ? "pass" : "passes"}`
+        : "Simulated";
+    return nativeThinking ? `${base} · native thinking` : base;
   }
-  if (planningMode === "native") return "Native + public plan";
+  if (planningMode === "native") {
+    return nativeThinking ? "Native thinking" : "Native + public plan";
+  }
   if (planningMode === "public") return "Public plan";
   return undefined;
 }
@@ -76,9 +83,11 @@ export function psychicThoughtDisplayLineForMessage(
     }))
     .filter((pass) => Boolean(pass.summary));
   const visiblePasses = passes.length > 1 ? passes : undefined;
+  const nativeThinking = message.psychicThought?.nativeThinking?.trim();
   const meta = psychicPlanningModeLabel(
     message.psychicThought?.planningMode,
     message.psychicThought?.passCount,
+    Boolean(nativeThinking),
   );
   if (summary) {
     return {
@@ -95,6 +104,7 @@ export function psychicThoughtDisplayLineForMessage(
           ? `Psychic, ${meta}: ${summary}`
           : `Psychic summary: ${summary}`,
       ...(visiblePasses ? { passes: visiblePasses } : {}),
+      ...(nativeThinking ? { nativeThinking } : {}),
     };
   }
   if (!options.pendingThinking || !options.pendingDelayElapsed) return null;

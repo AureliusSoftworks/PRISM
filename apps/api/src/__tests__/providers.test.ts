@@ -18,6 +18,7 @@ import {
   openAiModelUsesFixedDefaultTemperature,
   openAiReasoningAwareCompletionTokenLimit,
   readOpenAiErrorMessage,
+  resetLocalThinkingCapabilityCacheForTests,
   resetModelCatalogCacheForTests,
   SECONDARY_OLLAMA_MODEL_PREFIX,
   selectProvider,
@@ -626,6 +627,133 @@ describe("LocalOllamaProvider secondary routing", () => {
     });
     assert.equal(requestedBody.think, false);
     assert.equal(response, "final answer via thinking field");
+  });
+
+  it("enables native thinking for chat replies on thinking-capable models", async () => {
+    resetLocalThinkingCapabilityCacheForTests();
+    let chatBody: Record<string, unknown> = {};
+    let showProbes = 0;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/show")) {
+        showProbes += 1;
+        return new Response(
+          JSON.stringify({ capabilities: ["completion", "thinking"] }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      chatBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({
+          message: { content: "the answer", thinking: "private chain of thought" },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new LocalOllamaProvider();
+    const collected: string[] = [];
+    // Unset effort on a chat reply is the Minimal default: thinking turns on.
+    const response = await provider.generateResponse(
+      [{ role: "user", content: "hi" }],
+      {
+        model: "deepseek-r1:1.5b",
+        usagePurpose: "chat_reply",
+        maxTokens: 512,
+        onNativeThinking: (thinking) => collected.push(thinking),
+      }
+    );
+    assert.equal(showProbes, 1);
+    assert.equal(chatBody.think, true);
+    assert.equal(
+      (chatBody.options as { num_predict?: number } | undefined)?.num_predict,
+      512 + 1_024,
+    );
+    // Thinking turns pin the persona at the recency seam so the model's
+    // trained assistant identity cannot steamroll the authored character.
+    const outbound = chatBody.messages as Array<{
+      role: string;
+      content: string;
+    }>;
+    assert.equal(outbound.at(-1)?.role, "system");
+    assert.match(
+      outbound.at(-1)?.content ?? "",
+      /stay fully in the character[\s\S]*never name your model/u,
+    );
+    assert.equal(response, "the answer");
+    assert.deepEqual(collected, ["private chain of thought"]);
+  });
+
+  it("keeps think off for Effort None, private passes, and structured output", async () => {
+    resetLocalThinkingCapabilityCacheForTests();
+    const chatBodies: Array<Record<string, unknown>> = [];
+    let showProbes = 0;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/show")) {
+        showProbes += 1;
+        return new Response(
+          JSON.stringify({ capabilities: ["completion", "thinking"] }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      chatBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      return new Response(
+        JSON.stringify({ message: { content: "ok" } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new LocalOllamaProvider();
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "deepseek-r1:8b",
+      usagePurpose: "chat_reply",
+      reasoningEffort: "none",
+    });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "deepseek-r1:8b",
+      usagePurpose: "psychic_planning",
+      reasoningEffort: "high",
+    });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "deepseek-r1:8b",
+      usagePurpose: "chat_reply",
+      reasoningEffort: "high",
+      jsonMode: true,
+    });
+    assert.deepEqual(
+      chatBodies.map((body) => body.think),
+      [false, false, false],
+    );
+    // None of these were eligible, so the capability probe never ran.
+    assert.equal(showProbes, 0);
+  });
+
+  it("keeps think off when the model does not report the thinking capability", async () => {
+    resetLocalThinkingCapabilityCacheForTests();
+    let chatBody: Record<string, unknown> = {};
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/show")) {
+        return new Response(
+          JSON.stringify({ capabilities: ["completion"] }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      chatBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ message: { content: "plain reply" } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new LocalOllamaProvider();
+    const response = await provider.generateResponse(
+      [{ role: "user", content: "hi" }],
+      { model: "llama3.2", usagePurpose: "chat_reply", reasoningEffort: "high" }
+    );
+    assert.equal(chatBody.think, false);
+    assert.equal(response, "plain reply");
   });
 
   it("asks Ollama for JSON object output when jsonMode is enabled", async () => {

@@ -3,7 +3,13 @@ export const COFFEE_SEAT_LOAD_SHED_EXIT_FPS = 42;
 
 /**
  * Drop Coffee seats off Full HD materials only after a crowded table is
- * already missing frames. Hysteresis keeps the chassis from flickering.
+ * already missing frames.
+ *
+ * The shed is sticky while the table stays crowded: recovered FPS during a
+ * shed is mostly the shed's own effect, so re-promoting on an FPS band alone
+ * turns the seats into an HD↔Mini oscillator (promote → frames tank → shed →
+ * frames recover → promote…). Full HD returns once the crowd itself is gone
+ * and frames are genuinely smooth again.
  */
 export function coffeeSeatShouldDropRenderedSize(args: {
   fps: number | null;
@@ -12,7 +18,9 @@ export function coffeeSeatShouldDropRenderedSize(args: {
 }): boolean {
   if (args.fps === null) return args.currentlyShedding;
   if (args.currentlyShedding) {
-    return args.fps < COFFEE_SEAT_LOAD_SHED_EXIT_FPS;
+    return (
+      args.seatedCount >= 4 || args.fps < COFFEE_SEAT_LOAD_SHED_EXIT_FPS
+    );
   }
   return args.fps < COFFEE_SEAT_LOAD_SHED_ENTER_FPS && args.seatedCount >= 4;
 }

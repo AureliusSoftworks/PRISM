@@ -37,6 +37,9 @@ export function modelEffortRequestValue(
 export function modelEffortBaseline(
   capability: ModelReasoningEffortCapabilityV1,
 ): ReasoningEffort {
+  // Thinking-capable local models default to Minimal: one native
+  // chain-of-thought per reply, no simulated passes.
+  if (capability.mode === "native-thinking") return "minimal";
   return capability.mode === "simulated" ? "none" : "auto";
 }
 
@@ -53,7 +56,8 @@ export function modelEffortSliderLevels(
   capability: ModelReasoningEffortCapabilityV1,
 ): ReasoningEffort[] {
   if (capability.mode === "unavailable") return [];
-  return capability.mode === "simulated"
+  return capability.mode === "simulated" ||
+    capability.mode === "native-thinking"
     ? [...capability.levels]
     : ["auto", ...capability.levels];
 }

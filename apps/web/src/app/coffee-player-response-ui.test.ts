@@ -185,6 +185,19 @@ describe("Coffee player response UI wiring", () => {
     );
   });
 
+  it("compacts the player's voice-preparation gap out of the faithful master", () => {
+    // Hold begins with the instant provisional stream and always releases
+    // once player voice resolves (started, muted, or failed) — Signal parity.
+    assert.match(
+      pageSource,
+      /setCoffeeTurnRhythmState\("userTableTyping"\);[\s\S]{0,400}setReplayAudioMasterCompactHold\(activeConversation\.id, true\)/,
+    );
+    assert.match(
+      pageSource,
+      /startCoffeePlayerVoiceForReveal\(trimmed\)\.finally\(\(\) =>\s*setReplayAudioMasterCompactHold\(activeConversation\.id, false\),?\s*\)/,
+    );
+  });
+
   it("hands a finished player line to botThinking before a queued bot reveal", () => {
     assert.match(
       pageSource,
@@ -196,19 +209,19 @@ describe("Coffee player response UI wiring", () => {
     );
   });
 
-  it("feeds accepted pending turns into Table talk without revealing bot prose early", () => {
+  it("drops whole settled lines into Table talk and never streams the panel", () => {
     assert.match(
       pageSource,
       /const liveTranscriptMessages =\s*coffeePendingRevealConversation\?\.id === coffeeConversation\.id[\s\S]*?coffeePendingRevealConversation\.messages[\s\S]*?coffeeConversation\.messages/,
     );
     assert.match(
       pageSource,
-      /pendingTranscriptMessageId && !pendingTranscriptRevealStarted[\s\S]*?message\.id !== pendingTranscriptMessageId/,
+      /pendingTranscriptMessageId && !pendingTranscriptRevealSettled[\s\S]*?message\.id !== pendingTranscriptMessageId/,
     );
-    assert.match(
-      pageSource,
-      /pendingTranscriptLineTyping[\s\S]*?revealPlainTextWithBotMentions\([\s\S]*?coffeeTypewriterLength/,
-    );
+    // The panel has no partial-reveal branch: a pending line is filtered out
+    // until its table reveal settles, then rendered whole.
+    assert.doesNotMatch(pageSource, /transcript-typing-/);
+    assert.doesNotMatch(pageSource, /pendingTranscriptLineTyping/);
     assert.match(
       pageSource,
       /const transcriptProjection = projectCoffeePublicTranscript\(\{[\s\S]*?messages:\s*transcriptSourceMessages,[\s\S]*?const transcriptMessages = transcriptProjection\.visibleRows;/,

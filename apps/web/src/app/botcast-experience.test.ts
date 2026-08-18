@@ -2149,6 +2149,18 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /data-signal-live-caption="true"/u);
     assert.match(source, /data-caption-rows="adaptive"/u);
+    // Debate's caption paging bounds Signal subtitles to the same page of
+    // text; the whole revealed prefix must never stack on stage again.
+    assert.match(
+      source,
+      /const delayedLiveCaptionPage = signalLiveCaptionPage\(delayedLiveCaption\)/u,
+    );
+    assert.match(source, /\{delayedLiveCaptionPage\.text\}/u);
+    assert.match(source, /\{presenceBeatCaptionPage\.text \|\| "…"\}/u);
+    assert.doesNotMatch(
+      source,
+      /data-caption-rows="adaptive">\{delayedLiveCaption\}</u,
+    );
     assert.match(source, /<i aria-hidden="true" \/>/u);
     assert.match(source, /data-signal-captions-toggle="true"/u);
     assert.match(source, /liveCaptionsEnabled &&/u);
@@ -2185,6 +2197,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /data-signal-producer-host-prompt="true"/u);
     assert.match(source, /data-signal-transcript-panel-state="collapsed"/u);
+    assert.match(source, /\{producerGuestHostPromptPage\.text\}/u);
     assert.match(
       css,
       /\.liveCaption\[data-signal-producer-host-prompt="true"\] span\s*\{[^}]*max-height:\s*min\(38vh,\s*13\.5rem\);[^}]*overflow-y:\s*auto;/u,

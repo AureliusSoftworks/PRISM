@@ -168,6 +168,53 @@ export const DEFAULT_COFFEE_SESSION_SETTINGS: CoffeeSessionSettings = {
   memoryCallbacks: "recent",
 };
 
+/**
+ * Debate-style simplified surface: one Table mood choice derives every pacing
+ * number, so the visible controls are mood + reply length + two toggles. The
+ * stored shape is unchanged — presets, groups, imports, and hand-tuned legacy
+ * values keep working; a table whose numbers match no mood reads as "custom".
+ */
+export const COFFEE_TABLE_MOOD_PRESETS: Readonly<
+  Record<
+    CoffeeTableEnergy,
+    Pick<
+      CoffeeSessionSettings,
+      "responseDelayBias" | "crossTalk" | "breathingRoom" | "humanPacing"
+    >
+  >
+> = {
+  still: { responseDelayBias: 30, crossTalk: "rare", breathingRoom: 70, humanPacing: 35 },
+  relaxed: { responseDelayBias: 45, crossTalk: "normal", breathingRoom: 45, humanPacing: 50 },
+  buzzy: { responseDelayBias: 65, crossTalk: "chatty", breathingRoom: 30, humanPacing: 55 },
+  theatre: { responseDelayBias: 76, crossTalk: "chatty", breathingRoom: 24, humanPacing: 50 },
+  afterparty: { responseDelayBias: 95, crossTalk: "pileup", breathingRoom: 5, humanPacing: 70 },
+};
+
+/** Applies one mood: sets tableEnergy and derives every pacing number from it. */
+export function applyCoffeeTableMood(
+  settings: CoffeeSessionSettings,
+  mood: CoffeeTableEnergy,
+): CoffeeSessionSettings {
+  return {
+    ...settings,
+    tableEnergy: mood,
+    ...COFFEE_TABLE_MOOD_PRESETS[mood],
+  };
+}
+
+/** The mood whose derived numbers these settings exactly match, else "custom". */
+export function coffeeTableMoodForSettings(
+  settings: CoffeeSessionSettings,
+): CoffeeTableEnergy | "custom" {
+  const preset = COFFEE_TABLE_MOOD_PRESETS[settings.tableEnergy];
+  return preset.responseDelayBias === settings.responseDelayBias &&
+    preset.crossTalk === settings.crossTalk &&
+    preset.breathingRoom === settings.breathingRoom &&
+    preset.humanPacing === settings.humanPacing
+    ? settings.tableEnergy
+    : "custom";
+}
+
 /** Absolute ceiling for tabletop reply length (layout + latency guardrail). */
 export const COFFEE_TABLE_REPLY_MAX_CHARS_HARD = 240;
 

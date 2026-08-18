@@ -826,7 +826,11 @@ describe("API request integration", () => {
       .prepare("SELECT id FROM users WHERE email = ?")
       .get(email) as { id: string };
     const createdAt = "2026-07-14T20:00:00.000Z";
-    const botIds = ["coffee-topic-trace-bot-1", "coffee-topic-trace-bot-2"];
+    const botIds = [
+      "coffee-topic-trace-bot-1",
+      "coffee-topic-trace-bot-2",
+      "coffee-topic-trace-bot-3",
+    ];
     const insertBot = db.prepare(
       `INSERT INTO bots
          (id, user_id, name, system_prompt, online_enabled, created_at, updated_at)
@@ -845,6 +849,14 @@ describe("API request integration", () => {
       user.id,
       "Skeptic",
       "You test certainty through dissent and practical consequences.",
+      createdAt,
+      createdAt
+    );
+    insertBot.run(
+      botIds[2],
+      user.id,
+      "Dreamer",
+      "You chase the improbable idea hiding inside every plan.",
       createdAt,
       createdAt
     );
@@ -990,7 +1002,11 @@ describe("API request integration", () => {
       .prepare("SELECT id FROM users WHERE email = ?")
       .get(email) as { id: string };
     const createdAt = "2026-07-14T20:30:00.000Z";
-    const botIds = ["coffee-initial-topic-bot-1", "coffee-initial-topic-bot-2"];
+    const botIds = [
+      "coffee-initial-topic-bot-1",
+      "coffee-initial-topic-bot-2",
+      "coffee-initial-topic-bot-3",
+    ];
     const insertBot = db.prepare(
       `INSERT INTO bots
          (id, user_id, name, system_prompt, online_enabled, created_at, updated_at)
@@ -1009,6 +1025,14 @@ describe("API request integration", () => {
       user.id,
       "Builder",
       "You turn a prompt into a practical next step.",
+      createdAt,
+      createdAt
+    );
+    insertBot.run(
+      botIds[2],
+      user.id,
+      "Archivist",
+      "You connect today's question to something remembered.",
       createdAt,
       createdAt
     );
@@ -1132,7 +1156,7 @@ describe("API request integration", () => {
     assert.equal(register.status, 201);
     const userId = String((await json(register)).user.id);
     const now = "2026-07-23T18:00:00.000Z";
-    const botIds = ["pot-table-a", "pot-table-b"];
+    const botIds = ["pot-table-a", "pot-table-b", "pot-table-c"];
     const insertBot = db.prepare(
       `INSERT INTO bots
          (id, user_id, name, system_prompt, online_enabled, created_at, updated_at)
@@ -1140,6 +1164,7 @@ describe("API request integration", () => {
     );
     insertBot.run(botIds[0], userId, "Avery", "Practical.", now, now);
     insertBot.run(botIds[1], userId, "Blake", "Curious.", now, now);
+    insertBot.run(botIds[2], userId, "Cameron", "Steady.", now, now);
 
     const created = await client.request(
       "/api/coffee/sessions",

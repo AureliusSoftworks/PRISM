@@ -259,6 +259,7 @@ import {
   signalSilentCaptionRevealDurationMs,
   signalVoiceCompletionFallbackDurationMs,
 } from "./signalLiveCaptions";
+import { signalLiveCaptionPage } from "./debateLiveCaption";
 import { signalVoiceStartTimeoutMs } from "./signalVoiceFallback";
 import {
   DEFAULT_SIGNAL_LIVE_CAPTIONS_ENABLED,
@@ -9821,6 +9822,19 @@ export function BotcastExperience({
           producerGuestHostPromptMessage,
         ).trim()
       : "";
+    // Debate's caption paging is the source of truth for how much subtitle
+    // text stays on screen at once; Signal shows the same current page
+    // instead of stacking the whole revealed prefix.
+    const delayedLiveCaptionPage = signalLiveCaptionPage(delayedLiveCaption);
+    const producerGuestHostPromptPage = signalLiveCaptionPage(
+      producerGuestHostPromptText,
+    );
+    const presenceBeatCaptionPage = signalLiveCaptionPage(
+      presenceBeat?.surface === "signal" &&
+        presenceBeat.completion === "playing"
+        ? presenceBeat.text.slice(0, presenceBeat.heardCharacterCount)
+        : "",
+    );
     const speechElapsedMs = args.replay
       ? Math.max(0, replayInterviewFootageElapsedMs - replayMessageStartMs)
       : projectedLiveSpeechElapsedMs;
@@ -10816,14 +10830,18 @@ export function BotcastExperience({
           <div
             className={styles.liveCaption}
             data-signal-live-caption="true"
+            data-caption-page={presenceBeatCaptionPage.pageIndex + 1}
+            data-caption-pages={presenceBeatCaptionPage.pageCount}
             aria-live="polite"
           >
             <i aria-hidden="true" />
             <div>
               <strong>{presenceBeat.speaker.name}</strong>
-              <span data-caption-rows="adaptive">
-                {presenceBeat.text.slice(0, presenceBeat.heardCharacterCount) ||
-                  "…"}
+              <span
+                key={`presence:${presenceBeatCaptionPage.pageIndex}`}
+                data-caption-rows="adaptive"
+              >
+                {presenceBeatCaptionPage.text || "…"}
               </span>
             </div>
           </div>
@@ -10837,6 +10855,8 @@ export function BotcastExperience({
             data-signal-live-caption="true"
             data-message-id={args.activeMessage.id}
             data-speaker-role={args.activeMessage.speakerRole}
+            data-caption-page={delayedLiveCaptionPage.pageIndex + 1}
+            data-caption-pages={delayedLiveCaptionPage.pageCount}
             aria-live="off"
           >
             <i aria-hidden="true" />
@@ -10848,7 +10868,12 @@ export function BotcastExperience({
                     ? stagePublicName(args.guest, "Guest")
                     : delayedLiveCaptionSpeaker}
               </strong>
-              <span data-caption-rows="adaptive">{delayedLiveCaption}</span>
+              <span
+                key={`${args.activeMessage.id}:${delayedLiveCaptionPage.pageIndex}`}
+                data-caption-rows="adaptive"
+              >
+                {delayedLiveCaptionPage.text}
+              </span>
             </div>
           </div>
         ) : liveCaptionsEnabled &&
@@ -10860,13 +10885,18 @@ export function BotcastExperience({
             data-signal-transcript-panel-state="collapsed"
             data-message-id={producerGuestHostPromptMessage.id}
             data-speaker-role="host"
+            data-caption-page={producerGuestHostPromptPage.pageIndex + 1}
+            data-caption-pages={producerGuestHostPromptPage.pageCount}
             aria-live="off"
           >
             <i aria-hidden="true" />
             <div>
               <strong>{stagePublicName(args.host, "Host")}</strong>
-              <span data-caption-rows="adaptive">
-                {producerGuestHostPromptText}
+              <span
+                key={`${producerGuestHostPromptMessage.id}:${producerGuestHostPromptPage.pageIndex}`}
+                data-caption-rows="adaptive"
+              >
+                {producerGuestHostPromptPage.text}
               </span>
             </div>
           </div>

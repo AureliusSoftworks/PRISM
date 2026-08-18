@@ -12,10 +12,10 @@ import {
   type VoiceAccentDefinitionId,
 } from "./audioVoice.ts";
 
-export const LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION = "2026.08.17.2";
+export const LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION = "2026.08.17.3";
 /** SHA-256 of the qualified Instant IPA matrix (see speechprint-runtime.test.ts). */
 export const LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256 =
-  "cdca080907b6a0f622ecfa4d69f20c54af340955ad91358234581bc23f8a9f5d";
+  "e20a85599130ba2888330759230591882a0e414a207730b3f870b76ad79f2241";
 
 export interface LocalVoiceSpeechprintCapabilityV1 {
   id: Exclude<LocalVoiceSpeechprintInfluence, "none">;
@@ -1259,9 +1259,11 @@ const SPEECHPRINT_RULES: Record<
       replacement: "ʌʊ",
     },
     {
+      // The merger never applies before R (NORTH/FORCE keep the rounded
+      // vowel — "floor" is not "flar") or inside CHOICE ("ɔɪ").
       id: "cot-caught-merge",
       tier: "strong",
-      pattern: /ɔ/gu,
+      pattern: /ɔ(?!ː?ɹ|ɪ)/gu,
       replacement: "ɑ",
       optional: true,
     },
@@ -1283,9 +1285,11 @@ const SPEECHPRINT_RULES: Record<
     { id: "rhotacized-schwa", tier: "light", pattern: /ɚ/gu, replacement: "ə" },
     { id: "rhotacized-nurse", tier: "light", pattern: /ɝ/gu, replacement: "ɜ" },
     {
+      // CHOICE ("ɔɪ") keeps its diphthong; the raise targets THOUGHT only.
+      // Coda-R contexts are already handled by the earlier r-drop tier.
       id: "thought-raised",
       tier: "balanced",
-      pattern: /ɔ/gu,
+      pattern: /ɔ(?!ɪ)/gu,
       replacement: "oə",
     },
     {
@@ -1377,7 +1381,14 @@ const SPEECHPRINT_RULES: Record<
     },
   ],
   "southern-california-english": [
-    { id: "cot-caught-merge", tier: "light", pattern: /ɔ/gu, replacement: "ɑ" },
+    // Merged everywhere except before R (NORTH/FORCE stay rounded — "the
+    // floor is yours" must not surface as "the flar is yars") and in CHOICE.
+    {
+      id: "cot-caught-merge",
+      tier: "light",
+      pattern: /ɔ(?!ː?ɹ|ɪ)/gu,
+      replacement: "ɑ",
+    },
     {
       id: "trap-nasal-raise",
       tier: "balanced",
@@ -1394,7 +1405,13 @@ const SPEECHPRINT_RULES: Record<
     },
   ],
   "bay-area-english": [
-    { id: "cot-caught-merge", tier: "light", pattern: /ɔ/gu, replacement: "ɑ" },
+    // Same pre-R and CHOICE carve-outs as Southern California.
+    {
+      id: "cot-caught-merge",
+      tier: "light",
+      pattern: /ɔ(?!ː?ɹ|ɪ)/gu,
+      replacement: "ɑ",
+    },
     {
       id: "goose-front",
       tier: "balanced",
@@ -1420,9 +1437,10 @@ const SPEECHPRINT_RULES: Record<
       optional: true,
     },
     {
+      // Lowering skips pre-R NORTH/FORCE and the CHOICE diphthong.
       id: "thought-lower",
       tier: "strong",
-      pattern: /ɔ/gu,
+      pattern: /ɔ(?!ː?ɹ|ɪ)/gu,
       replacement: "ɑ",
       optional: true,
     },
@@ -2222,8 +2240,9 @@ interface StressRhythmProfile {
 }
 
 /**
- * Phase 1 Romance stress/rhythm profiles. Non-listed influences keep sound
- * swaps only until a later ruleset bump.
+ * Phase 1 Romance stress/rhythm profiles; phase 3 adds the syllable-timed
+ * South Asian English family. Non-listed influences keep sound swaps only
+ * until a later ruleset bump.
  */
 const STRESS_RHYTHM_PROFILES: Partial<
   Record<Exclude<LocalVoiceSpeechprintInfluence, "none">, StressRhythmProfile>
@@ -2268,6 +2287,28 @@ const STRESS_RHYTHM_PROFILES: Partial<
     schwaRestore: "ə",
     rhoticRestore: "œ",
   },
+  // South Asian English is syllable-timed: unstressed vowels keep their
+  // fullness instead of reducing, and lexical prominence drifts early.
+  "indian-english": {
+    bias: "early",
+    schwaRestore: "a",
+    rhoticRestore: "a",
+  },
+  "pakistani-english": {
+    bias: "early",
+    schwaRestore: "a",
+    rhoticRestore: "a",
+  },
+  "sri-lankan-english": {
+    bias: "early",
+    schwaRestore: "a",
+    rhoticRestore: "a",
+  },
+  "bengali-influenced-english": {
+    bias: "early",
+    schwaRestore: "a",
+    rhoticRestore: "a",
+  },
 };
 
 /**
@@ -2295,6 +2336,15 @@ const MELODY_PROFILES: Partial<
   "european-portuguese-influenced-english": { contour: "penult-nuclear" },
   "french-influenced-english": { contour: "final-group" },
   "parisian-french-influenced-english": { contour: "final-group" },
+  // Hiberno-English keeps alternating internal peaks with a blooming final;
+  // Scottish English levels the run-up into one decisive nuclear group; the
+  // South Asian family often places the nuclear accent before the final word.
+  "irish-english": { contour: "wave-final" },
+  "scottish-english": { contour: "final-group" },
+  "indian-english": { contour: "penult-nuclear" },
+  "pakistani-english": { contour: "penult-nuclear" },
+  "sri-lankan-english": { contour: "penult-nuclear" },
+  "bengali-influenced-english": { contour: "penult-nuclear" },
 };
 
 interface IpaNucleus {

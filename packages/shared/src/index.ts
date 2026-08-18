@@ -354,6 +354,7 @@ export {
   BOT_POWER_BREATH_PERFORMANCE_TAGS_V1,
   botPowerMumblesSpeechFromEffectsV1,
   botPowerMumblesSpeechV1,
+  botPowerSpeechRegistersV1,
   botPowerCursesSpeechFromEffectsV1,
   botPowerCursesSpeechV1,
   botPowerCursedTongueAuthoringCueV1,
@@ -627,11 +628,38 @@ export {
 } from "./botFalseName.js";
 
 export {
+  VOICE_INTONATION_CONTOUR_DEFINITIONS,
+  VOICE_INTONATION_CONTOUR_IDS,
+  VOICE_INTONATION_FULL_DEPTH_SECONDS,
+  voiceIntonationContourCentsAt,
+  voiceIntonationContourDefinitionForId,
+  voiceIntonationContourForAccentDefinition,
+  voiceIntonationDetuneCents,
+  voiceIntonationPlanForProfile,
+  type VoiceIntonationContourDefinitionV1,
+  type VoiceIntonationContourId,
+  type VoiceIntonationKeyframeV1,
+  type VoiceIntonationPlanV1,
+} from "./voiceIntonation.js";
+
+export {
+  BOT_SPEECH_REGISTER_DEFINITIONS,
+  BOT_SPEECH_REGISTER_IDS,
+  BOT_SPEECH_REGISTER_SHARED_RULES_V1,
+  botSpeechRegisterAuthoringCueV1,
+  botSpeechRegisterDefinitionForId,
+  normalizeBotSpeechRegisterId,
+  type BotSpeechRegisterDefinitionV1,
+  type BotSpeechRegisterId,
+} from "./botSpeechRegister.js";
+
+export {
   BOT_VERNACULAR_DEFINITIONS,
   BOT_VERNACULAR_IDS,
   BOT_VERNACULAR_SHARED_RULES_V1,
   botVernacularAuthoringCueV1,
   botVernacularDefinitionForId,
+  botVernacularIdForAccentDefinition,
   botVernacularIdFromStoredVoiceProfile,
   normalizeBotVernacularId,
   type BotVernacularDefinitionV1,
@@ -643,6 +671,8 @@ export {
   BUILTIN_ACCENT_REALIZATION_BLEND_WEIGHT,
   PRISM_BUILTIN_ENGLISH_VOICES,
   builtinAccentRealizationBlend,
+  builtinMelodicityRealizationBlend,
+  builtinMoodRealizationBlend,
   prismBuiltinEnglishVoice,
   type BuiltinAccentRealizationBlendV1,
   BOT_VOICE_TEXTURE_PRESETS,
@@ -1028,6 +1058,7 @@ export {
   normalizeCoffeeReplayEventPayload,
   normalizeZenDisplayMetadata,
   normalizeStoredZenAssistantTurnPayload,
+  normalizeCoffeeAsidePayload,
   parseAssistantPrismTools,
   parseStoredAssistantToolPayload,
   parseStoredToolPayload,
@@ -1036,6 +1067,7 @@ export {
   type AskQuestionOption,
   type AskQuestionPayload,
   type CoffeeAmbientActionPayload,
+  type CoffeeAsidePayload,
   type CoffeeStageActionPayload,
   type CoffeeReplayArrivalEventPayload,
   type CoffeeReplayBaristaDeliveryEventPayload,
@@ -1471,6 +1503,7 @@ export {
 import type {
   AskQuestionPayload,
   CoffeeAmbientActionPayload,
+  CoffeeAsidePayload,
   CoffeeStageActionPayload,
   CoffeeReplayEventPayload,
   CoffeeUserActionPayload,
@@ -1707,6 +1740,8 @@ export interface ChatMessage {
   coffeeUserAction?: CoffeeUserActionPayload;
   /** Coffee-only interruption metadata projected into transcript-only spoken lines. */
   coffeeInterruption?: CoffeeInterruptionEvent;
+  /** Coffee-only quiet side remark to one seated peer (half-volume playback). */
+  coffeeAside?: CoffeeAsidePayload;
   /** Coffee-only hidden replay state beats; not shown in normal transcripts. */
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   /** Frozen participant ids allowed to hear this Coffee line, or null for all. */
@@ -2707,8 +2742,11 @@ export {
   COFFEE_AUTO_HARD_CAP_MS,
   COFFEE_BAR_ORDER_MAX_LENGTH,
   COFFEE_SPEAKER_REPLY_MAX_OUTPUT_TOKENS_HARD,
+  COFFEE_TABLE_MOOD_PRESETS,
   COFFEE_TABLE_REPLY_MAX_CHARS_HARD,
   DEFAULT_COFFEE_SESSION_SETTINGS,
+  applyCoffeeTableMood,
+  coffeeTableMoodForSettings,
   coffeeEffectiveHistoryLimit,
   coffeeEffectiveMemoryCallbacks,
   coffeeFarewellReplyDelay,

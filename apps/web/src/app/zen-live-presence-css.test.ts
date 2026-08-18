@@ -453,20 +453,27 @@ describe("Zen live presence CSS", () => {
       pageSource,
       /const PRISM_ZEN_LIVE_BOT_AVATAR_SIZE_STORAGE_KEY =\s+"prism_zen_live_bot_avatar_size_v2";/,
     );
-    assert.match(pageSource, /const ZEN_LIVE_BOT_AVATAR_MIN_SIZE_PX = 94;/);
+    // The floor is the smallest face-bearing Micro stage, so shrinking can
+    // reach the Micro presentation without ever losing the face.
     assert.match(
       pageSource,
-      /const ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX = 184;/,
+      /const ZEN_LIVE_BOT_AVATAR_MIN_SIZE_PX =\s+BOT_AVATAR_MICRO_FEATURES_HIDE_MAX_PX \+ 1;/,
     );
     assert.match(
       pageSource,
-      /const ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX = 240;/,
+      /const ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX =\s+ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX - 1;/,
+    );
+    // Zen holds the HD chassis a little below the shared Full HD floor.
+    assert.match(pageSource, /const ZEN_LIVE_BOT_AVATAR_HD_HOLD_PX = 60;/);
+    assert.match(
+      pageSource,
+      /const ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX =\s+BOT_AVATAR_COMPACT_EXIT_MIN_PX - ZEN_LIVE_BOT_AVATAR_HD_HOLD_PX;/,
     );
     assert.match(
       pageSource,
-      /const ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX = 480;/,
+      /const ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX = 380;/,
     );
-    assert.match(pageSource, /const ZEN_LIVE_BOT_AVATAR_MAX_SIZE_PX = 480;/);
+    assert.match(pageSource, /const ZEN_LIVE_BOT_AVATAR_MAX_SIZE_PX = 380;/);
     assert.match(pageSource, /const ZEN_LIVE_BOT_AVATAR_SIZE_STEP_PX = 24;/);
     assert.match(pageSource, /const ZEN_LIVE_BOT_PROSE_WIDTH_MIN_PX = 680;/);
     assert.match(
@@ -480,13 +487,16 @@ describe("Zen live presence CSS", () => {
       /function persistZenLiveBotAvatarSizePx\(sizePx: number\): void/,
     );
     assert.match(pageSource, /function resizeZenLiveBotAvatarSizePx\(/);
+    // Plain stepping: the Mini and Full HD bands touch at the shared renderer
+    // boundary, so no authored dead-zone jump remains in either direction.
     assert.match(
       pageSource,
-      /direction === "shrink"[\s\S]*?current === ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX[\s\S]*?return ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX;/,
+      /function resizeZenLiveBotAvatarSizePx\(\s*value: unknown,\s*direction: "grow" \| "shrink",\s*\): number \{\s*const current = normalizeZenLiveBotAvatarSizePx\(value\);\s*return normalizeZenLiveBotAvatarSizePx\(/,
     );
+    assert.doesNotMatch(pageSource, /gapMidpoint/);
     assert.match(
       pageSource,
-      /direction === "grow"[\s\S]*?current === ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX[\s\S]*?return ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX;/,
+      /if \(size >= ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX\) return "full";\s*if \(size <= BOT_AVATAR_MICRO_ENTER_MAX_PX\) return "micro";\s*return "mini";/,
     );
     assert.match(
       pageSource,
@@ -498,7 +508,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       pageSource,
-      /function zenLiveBotAvatarRenderMode\([\s\S]*?\): "mini" \| "full"/,
+      /function zenLiveBotAvatarRenderMode\([\s\S]*?\): "micro" \| "mini" \| "full"/,
     );
     assert.match(
       pageSource,

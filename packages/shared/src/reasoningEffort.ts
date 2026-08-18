@@ -493,7 +493,12 @@ export function modelSupportsTurboMode(
 }
 
 export interface ModelReasoningEffortCapabilityV1 {
-  mode: "native" | "simulated" | "unavailable";
+  /**
+   * `native-thinking` — LOCAL model with its own trained chain-of-thought
+   * (DeepSeek R1, Qwen3, …): Minimal runs pure native thinking, higher rungs
+   * layer the simulated ladder on top of it.
+   */
+  mode: "native" | "native-thinking" | "simulated" | "unavailable";
   levels: readonly ModelReasoningEffortPreference[];
   supportsNone: boolean;
   /** Request-only native Max overdrive; deliberately absent from `levels`. */
@@ -545,6 +550,11 @@ const LOCAL_SIMULATED_REASONING_LEVELS = [
   "medium",
   "high",
   "xhigh",
+] as const satisfies readonly ModelReasoningEffortPreference[];
+/** Native thinking is on/off; without simulation only those stops remain. */
+const LOCAL_NATIVE_THINKING_ONLY_LEVELS = [
+  "none",
+  "minimal",
 ] as const satisfies readonly ModelReasoningEffortPreference[];
 
 export function normalizeReasoningEffort(value: unknown): ReasoningEffort {
@@ -718,9 +728,21 @@ export function resolveModelReasoningEffortCapability(args: {
   modelId: string;
   /** Pass `false` to make simulated Effort unavailable for non-native models. */
   simulatedEffortEnabled?: boolean;
+  /** LOCAL model reports the Ollama `thinking` capability (DeepSeek R1, Qwen3, …). */
+  localNativeThinking?: boolean;
 }): ModelReasoningEffortCapabilityV1 {
   const simulatedEnabled = args.simulatedEffortEnabled !== false;
   if (args.provider === "local") {
+    if (args.localNativeThinking === true) {
+      return {
+        mode: "native-thinking",
+        levels: simulatedEnabled
+          ? LOCAL_SIMULATED_REASONING_LEVELS
+          : LOCAL_NATIVE_THINKING_ONLY_LEVELS,
+        supportsNone: true,
+        supportsMax: false,
+      };
+    }
     if (simulatedEnabled) {
       return {
         mode: "simulated",
@@ -803,6 +825,8 @@ export function effectiveModelReasoningEffort(args: {
   modelId: string;
   preference: unknown;
   simulatedEffortEnabled?: boolean;
+  /** LOCAL model reports the Ollama `thinking` capability. */
+  localNativeThinking?: boolean;
 }): ModelReasoningEffortPreference | null {
   const preference = normalizeModelReasoningEffortPreference(args.preference);
   if (!preference) return null;

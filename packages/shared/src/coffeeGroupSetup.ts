@@ -5,7 +5,7 @@ import {
 } from "./coffeeSettings.ts";
 
 /** Soft caps for Wield Prism → New Coffee Group invent. */
-export const COFFEE_GROUP_SETUP_SUGGESTION_BOT_MIN = 2;
+export const COFFEE_GROUP_SETUP_SUGGESTION_BOT_MIN = 3;
 export const COFFEE_GROUP_SETUP_SUGGESTION_BOT_MAX = 5;
 export const COFFEE_GROUP_SETUP_SUGGESTION_TOPIC_MIN = 2;
 export const COFFEE_GROUP_SETUP_SUGGESTION_TOPIC_MAX = 6;

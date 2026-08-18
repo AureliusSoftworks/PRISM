@@ -174,6 +174,123 @@ export function loadRecentCoffeeContinuityContexts(args: {
   return contexts;
 }
 
+/**
+ * Coffee Group Memories: summary-level lore owned by the group itself, not by
+ * any one bot. Every current member shares it, and because it is keyed to the
+ * group id a bot can never retell one table's sessions at a different table.
+ * One-off sessions (no group) carry no cross-session lore at all.
+ */
+export function loadRecentCoffeeGroupContinuityContexts(args: {
+  db: DatabaseSync;
+  userId: string;
+  coffeeGroupId: string | null | undefined;
+  /** Sessions whose restricted-audience lines excluded this bot stay unseen. */
+  speakerBotId: string;
+  limit?: number;
+  excludeConversationId?: string | null;
+}): CoffeeContinuityContext[] {
+  const coffeeGroupId =
+    typeof args.coffeeGroupId === "string" ? args.coffeeGroupId.trim() : "";
+  const speakerBotId = args.speakerBotId.trim();
+  if (!coffeeGroupId || !speakerBotId) return [];
+  const excludedConversationId = args.excludeConversationId?.trim() || null;
+  const limit = Math.max(
+    0,
+    Math.min(10, Math.floor(args.limit ?? COFFEE_CONTINUITY_DEFAULT_LIMIT))
+  );
+  if (limit === 0) return [];
+  const rows = args.db
+    .prepare(
+      `SELECT c.id, c.title, c.coffee_topic, c.coffee_meeting_summary,
+              c.updated_at,
+              (SELECT m.content
+                 FROM messages m
+                WHERE m.conversation_id = c.id
+                  AND m.user_id = c.user_id
+                  AND m.role = 'system'
+                  AND m.content LIKE ?
+                ORDER BY m.created_at DESC
+                LIMIT 1) AS session_synopsis
+         FROM conversations c
+        WHERE c.user_id = ?
+          AND c.conversation_mode = 'coffee'
+          AND COALESCE(c.incognito, 0) = 0
+          AND c.coffee_group_id = ?
+          AND (
+            COALESCE(c.coffee_meeting_summary, '') != ''
+            OR EXISTS (
+              SELECT 1
+                FROM messages m_summary
+               WHERE m_summary.conversation_id = c.id
+                 AND m_summary.user_id = c.user_id
+                 AND m_summary.role = 'system'
+                 AND m_summary.content LIKE ?
+            )
+          )
+          AND NOT EXISTS (
+            SELECT 1
+              FROM messages m_hidden
+             WHERE m_hidden.conversation_id = c.id
+               AND m_hidden.user_id = c.user_id
+               AND m_hidden.role = 'assistant'
+               AND m_hidden.coffee_audience_bot_ids IS NOT NULL
+               AND m_hidden.coffee_audience_bot_ids NOT LIKE ?
+          )
+        ORDER BY c.updated_at DESC
+        LIMIT ?`
+    )
+    .all(
+      `${COFFEE_SESSION_SYNOPSIS_PREFIX}%`,
+      args.userId,
+      coffeeGroupId,
+      `${COFFEE_SESSION_SYNOPSIS_PREFIX}%`,
+      `%"${speakerBotId}"%`,
+      COFFEE_CONTINUITY_QUERY_LIMIT
+    ) as Array<{
+      id: string;
+      title: string | null;
+      coffee_topic: string | null;
+      coffee_meeting_summary: string | null;
+      session_synopsis: string | null;
+      updated_at: string;
+    }>;
+
+  const contexts: CoffeeContinuityContext[] = [];
+  for (const row of rows) {
+    if (row.id === excludedConversationId) continue;
+    const summary =
+      normalizeCoffeeContinuityText(row.session_synopsis) ??
+      normalizeCoffeeContinuityText(row.coffee_meeting_summary);
+    if (!summary) continue;
+    contexts.push({
+      conversationId: row.id,
+      title: normalizeCoffeeContinuityText(row.title, 90) ?? "Coffee Session",
+      topic: normalizeCoffeeContinuityTopic(row.coffee_topic),
+      summary,
+      updatedAt: row.updated_at,
+    });
+    if (contexts.length >= limit) break;
+  }
+  return contexts;
+}
+
+/** Group-lore variant of the continuity prompt block, shared by every member. */
+export function buildCoffeeGroupContinuityPromptContext(
+  contexts: readonly CoffeeContinuityContext[]
+): string | null {
+  if (contexts.length === 0) return null;
+  return [
+    "Shared Coffee Group lore (previous sessions of this exact group):",
+    "Every member of this group shares these summary-level notes. You may casually refer back to them the way regulars revisit an old conversation, and you may hold small side-threads about them. Never retell them to anyone outside this group, never invent exact quotes, and let the present conversation stay primary.",
+    ...contexts.map((context, index) => {
+      const label = context.topic
+        ? `${context.title} - topic: ${context.topic}`
+        : context.title;
+      return `- ${index + 1}. ${label}: ${context.summary}`;
+    }),
+  ].join("\n");
+}
+
 export function buildCoffeeContinuityPromptContext(
   contexts: readonly CoffeeContinuityContext[]
 ): string | null {

@@ -387,6 +387,45 @@ describe("reasoning effort helpers", () => {
     );
   });
 
+  it("marks thinking-capable local models native-thinking with the full ladder", () => {
+    const thinkingLocal = resolveModelReasoningEffortCapability({
+      provider: "local",
+      modelId: "deepseek-r1:1.5b",
+      localNativeThinking: true,
+    });
+    assert.equal(thinkingLocal.mode, "native-thinking");
+    assert.equal(thinkingLocal.supportsNone, true);
+    assert.equal(thinkingLocal.supportsMax, false);
+    assert.deepEqual(thinkingLocal.levels, [
+      "none",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
+    // Without simulation only the honest native stops remain.
+    assert.deepEqual(
+      resolveModelReasoningEffortCapability({
+        provider: "local",
+        modelId: "deepseek-r1:1.5b",
+        localNativeThinking: true,
+        simulatedEffortEnabled: false,
+      }).levels,
+      ["none", "minimal"],
+    );
+    // Saved rungs stay valid for the native-thinking ladder.
+    assert.equal(
+      effectiveModelReasoningEffort({
+        provider: "local",
+        modelId: "deepseek-r1:1.5b",
+        preference: "minimal",
+        localNativeThinking: true,
+      }),
+      "minimal",
+    );
+  });
+
   it("preserves native and fixed online effort behavior when simulation is enabled", () => {
     assert.equal(
       resolveModelReasoningEffortCapability({

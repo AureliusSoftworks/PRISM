@@ -334,6 +334,7 @@ export const CrtPixelTextGlyph = forwardRef<
     let cancelled = false;
     let frameId: number | null = null;
     let fontRevision = 0;
+    const requestedFontProbes = new Set<string>();
     const render = (): void => {
       if (frameId !== null) cancelAnimationFrame(frameId);
       frameId = requestAnimationFrame(() => {
@@ -341,11 +342,38 @@ export const CrtPixelTextGlyph = forwardRef<
         renderMask();
       });
     };
+    const handleFontsLoaded = (): void => {
+      if (cancelled) return;
+      fontRevision += 1;
+      render();
+    };
     const renderMask = (): void => {
+      // The raster cache key otherwise looks identical before and after the
+      // authored webfont finishes loading (the family list does not change),
+      // so a cold-load fallback raster would be replayed by every later
+      // mount. Fold loadedness into the raster identity and kick the lazy
+      // face load with a parseable probe — `computed.font` serializes to ""
+      // for these glyphs, which silently skipped the old reload path.
+      const computed = window.getComputedStyle(node);
+      const fontProbe = `${computed.fontStyle} ${computed.fontWeight} ${computed.fontSize} ${computed.fontFamily}`;
+      let fontReady = true;
+      try {
+        fontReady = document.fonts?.check(fontProbe, content) ?? true;
+      } catch {
+        // Unparseable probe (e.g., transient zero font size): raster anyway.
+      }
+      if (!fontReady && !requestedFontProbes.has(fontProbe)) {
+        requestedFontProbes.add(fontProbe);
+        void document.fonts
+          ?.load(fontProbe, content)
+          .then(handleFontsLoaded, () => undefined);
+      }
       const nextMask = rasterizeTextMask(
         node,
         content,
-        `${rasterKey ?? ""}:${fontRevision}`,
+        `${rasterKey ?? ""}:${
+          fontReady ? "font-ready" : `font-pending-${fontRevision}`
+        }`,
         binaryAlpha,
       );
       if (!cancelled && nextMask) {
@@ -366,18 +394,7 @@ export const CrtPixelTextGlyph = forwardRef<
     // for the next animation frame briefly exposes the browser's raw font and
     // makes every spinner step appear to change resolution.
     renderMask();
-    const handleFontsLoaded = (): void => {
-      if (cancelled) return;
-      fontRevision += 1;
-      render();
-    };
     void document.fonts?.ready.then(handleFontsLoaded);
-    const authoredFont = window.getComputedStyle(node).font;
-    if (authoredFont) {
-      void document.fonts
-        ?.load(authoredFont, content)
-        .then(handleFontsLoaded, () => undefined);
-    }
     document.fonts?.addEventListener("loadingdone", handleFontsLoaded);
     const observer = new ResizeObserver(render);
     observer.observe(node);

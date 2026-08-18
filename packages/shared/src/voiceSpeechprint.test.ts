@@ -145,6 +145,61 @@ describe("local voice Speechprints", () => {
     );
   });
 
+  it("keeps NORTH/FORCE rounded and CHOICE intact through the cot-caught merger", () => {
+    // "the floor is yours, boy, on the lawn" — the merger owns THOUGHT/LOT
+    // ("on", "lawn") but must never touch pre-R vowels or the CHOICE
+    // diphthong: a Southern California pin saying "the flar is yars" is the
+    // exact artifact this pins against.
+    const socal = applyLocalVoiceSpeechprintToIpa({
+      ipa: "ðə flˈɔːɹ ɪz jˈɔːɹz bˈɔɪ ɔn ðə lˈɔːn",
+      speechprint: {
+        influence: "southern-california-english",
+        strength: "balanced",
+        variationSeed: "socal-floor",
+      },
+    });
+    assert.doesNotMatch(socal.ipa, /ɑː?ɹ/u);
+    assert.match(socal.ipa, /flˈɔːɹ/u);
+    assert.match(socal.ipa, /jˈɔːɹz/u);
+    assert.match(socal.ipa, /bˈɔɪ/u);
+    assert.match(socal.ipa, /ɑn/u);
+    assert.match(socal.ipa, /lˈɑːn/u);
+  });
+
+  it("gives the Celtic and South Asian dialects their own phrase melodies", () => {
+    const irish = applyLocalVoiceSpeechprintToIpa({
+      ipa: "ðə mˈɔɹnɪŋ bˈoʊts kˈeɪm ˈɪn ɐɡˈɛn",
+      speechprint: {
+        influence: "irish-english",
+        strength: "balanced",
+        variationSeed: "melody-pin",
+      },
+    });
+    assert.ok(irish.appliedRuleIds.includes("melody-contour-wave-final"));
+    const indian = applyLocalVoiceSpeechprintToIpa({
+      ipa: "ðə kˈɑmpjuːɾɚ ɹɪpˈoːɹt wɜz ɹˈɛdi tədˈeɪ",
+      speechprint: {
+        influence: "indian-english",
+        strength: "balanced",
+        variationSeed: "melody-pin",
+      },
+    });
+    assert.ok(
+      indian.appliedRuleIds.includes("melody-contour-penult-nuclear"),
+    );
+    // Syllable timing: early stress bias plus unreduced vowels.
+    assert.ok(indian.appliedRuleIds.includes("rhythm-stress-early"));
+    const scottish = applyLocalVoiceSpeechprintToIpa({
+      ipa: "ðə mˈɔɹnɪŋ bˈoʊts kˈeɪm ˈɪn ɐɡˈɛn",
+      speechprint: {
+        influence: "scottish-english",
+        strength: "balanced",
+        variationSeed: "melody-pin",
+      },
+    });
+    assert.ok(scottish.appliedRuleIds.includes("melody-contour-final-group"));
+  });
+
   it("applies stable regional distinctions for London, the U.S., and Europe", () => {
     const cases = [
       ["cockney-english", "θɪs hɑɹ", /f/u],

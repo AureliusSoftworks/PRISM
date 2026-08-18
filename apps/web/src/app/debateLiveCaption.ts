@@ -83,3 +83,7 @@ export function debateLiveCaptionPage(
     text: pages[pageIndex] ?? "",
   };
 }
+
+/** Signal reuses Debate's caption paging verbatim: Debate's page limit is the
+ * source of truth for how many subtitle lines any stage may stack. */
+export const signalLiveCaptionPage = debateLiveCaptionPage;

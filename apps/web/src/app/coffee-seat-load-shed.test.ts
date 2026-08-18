@@ -33,7 +33,7 @@ describe("Coffee seat load shed", () => {
     );
   });
 
-  it("stays shed until FPS recovers past 42", () => {
+  it("keeps a crowded table shed even when the shed itself recovers FPS", () => {
     assert.equal(
       coffeeSeatShouldDropRenderedSize({
         fps: 30,
@@ -42,13 +42,34 @@ describe("Coffee seat load shed", () => {
       }),
       true,
     );
+    // Recovered frames while still crowded are the shed's own effect;
+    // re-promoting here restarts the HD↔Mini swap loop.
     assert.equal(
       coffeeSeatShouldDropRenderedSize({
         fps: 45,
         seatedCount: 5,
         currentlyShedding: true,
       }),
+      true,
+    );
+  });
+
+  it("returns to Full HD once the crowd is gone and frames are smooth", () => {
+    assert.equal(
+      coffeeSeatShouldDropRenderedSize({
+        fps: 45,
+        seatedCount: 3,
+        currentlyShedding: true,
+      }),
       false,
+    );
+    assert.equal(
+      coffeeSeatShouldDropRenderedSize({
+        fps: 30,
+        seatedCount: 3,
+        currentlyShedding: true,
+      }),
+      true,
     );
   });
 

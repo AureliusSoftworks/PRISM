@@ -913,6 +913,8 @@ export interface PsychicThoughtPayload {
   passCount?: number;
   /** Distinct user-readable summaries for completed planning passes. */
   passes?: PsychicThoughtPass[];
+  /** The model's own chain-of-thought when native thinking produced the turn. */
+  nativeThinking?: string;
   createdAt: string;
 }
 
@@ -1214,6 +1216,7 @@ export function normalizePsychicThoughtPayload(value: unknown): PsychicThoughtPa
       : undefined;
   const passCount = readPromptShortcutRange(row.passCount);
   const passes = normalizePsychicThoughtPasses(row.passes);
+  const nativeThinking = readPromptShortcutString(row.nativeThinking, 8_000);
   return {
     v: 1,
     summary,
@@ -1223,6 +1226,7 @@ export function normalizePsychicThoughtPayload(value: unknown): PsychicThoughtPa
     ...(planningMode ? { planningMode } : {}),
     ...(passCount !== undefined ? { passCount } : {}),
     ...(passes.length > 0 ? { passes } : {}),
+    ...(nativeThinking ? { nativeThinking } : {}),
     createdAt,
   };
 }

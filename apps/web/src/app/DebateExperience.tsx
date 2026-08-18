@@ -570,6 +570,7 @@ import {
 import {
   DEBATE_JUDGE_GAVEL_CUE_WINDOW_MS,
   DEBATE_JUDGE_GAVEL_MISSED_BEAT_MS,
+  DEBATE_JUDGE_GAVEL_ORDER_ESCALATE_WINDOW_MS,
   DEBATE_JUDGE_GAVEL_SMASH_WINDOW_MS,
   debateJudgeGavelCooldownBlocks,
   debateJudgeGavelSpaceAction,
@@ -3670,39 +3671,6 @@ const DebateMarkdownBody = memo(
     previous.onSource === next.onSource,
 );
 
-const DebateTranscriptBodyConsumer = memo(
-  function DebateTranscriptBodyConsumer(props: {
-    store: DebatePresentationStore;
-    sessionId: string;
-    event: DebateEventV1;
-    evidence: DebateEvidencePacketV1;
-    onSource: (id: string) => void;
-  }): React.JSX.Element {
-    const snapshot = useSyncExternalStore(
-      props.store.subscribe,
-      props.store.getSnapshot,
-      props.store.getSnapshot,
-    );
-    // Streaming articles must never fall back to the completed speech while the
-    // presentation store is still catching up (voice prep / empty reveal arming).
-    const content =
-      snapshot.sessionId === props.sessionId &&
-      snapshot.eventId === props.event.id
-        ? snapshot.visibleContent
-        : "";
-    return content ? (
-      <div className={styles.transcriptMarkdown}>
-        <p>{debateSpokenText(content)}</p>
-      </div>
-    ) : (
-      <span
-        className={styles.liveProseCursor}
-        aria-label="Speaker is beginning"
-      />
-    );
-  },
-);
-
 const DebateVisibleTextConsumer = memo(
   function DebateVisibleTextConsumer(props: {
     store: DebatePresentationStore;
@@ -3792,45 +3760,6 @@ const DebateFoleyTranscriptNotation = memo(
         <i aria-hidden="true" />
         <strong>{props.beat.speaker.name}</strong>
         <span aria-hidden="true">Foley</span>
-      </article>
-    );
-  },
-);
-
-const DebateStreamingTranscriptArticle = memo(
-  function DebateStreamingTranscriptArticle(props: {
-    store: DebatePresentationStore;
-    session: DebateSessionV1;
-    event: DebateEventV1;
-    playerName: string;
-    onSource: (id: string) => void;
-  }): React.JSX.Element {
-    return (
-      <article
-        data-kind={props.event.kind}
-        data-side={props.event.sideId ?? undefined}
-        data-streaming="true"
-      >
-        <header>
-          <strong>
-            {visibleEventName(props.session, props.event, props.playerName)}
-          </strong>
-          <span>
-            {props.event.interrupted
-              ? "interrupted"
-              : props.event.stepKey.startsWith("persona_reaction_")
-                ? "vocal reaction"
-                : props.event.kind.replace("_", " ")}{" "}
-            · {props.event.phase}
-          </span>
-        </header>
-        <DebateTranscriptBodyConsumer
-          store={props.store}
-          sessionId={props.session.id}
-          event={props.event}
-          evidence={props.session.evidence}
-          onSource={props.onSource}
-        />
       </article>
     );
   },
@@ -5457,6 +5386,21 @@ export function DebateExperience(
   > | null>(null);
   const judgeGavelSmashCounterRef = useRef(0);
   const judgeGavelSmashUntilRef = useRef(0);
+  // Double-smack escalation: first strike calms the room, a second within the
+  // window opens the intervention deck. State drives the button label; the ref
+  // mirrors it for the mount-once keyboard listener.
+  const [judgeGavelOrderEscalateUntilMs, setJudgeGavelOrderEscalateUntilMs] =
+    useState(0);
+  const judgeGavelOrderEscalateUntilRef = useRef(0);
+  const armJudgeGavelOrderEscalation = (nowMs: number): void => {
+    const until = nowMs + DEBATE_JUDGE_GAVEL_ORDER_ESCALATE_WINDOW_MS;
+    judgeGavelOrderEscalateUntilRef.current = until;
+    setJudgeGavelOrderEscalateUntilMs(until);
+  };
+  const clearJudgeGavelOrderEscalation = (): void => {
+    judgeGavelOrderEscalateUntilRef.current = 0;
+    setJudgeGavelOrderEscalateUntilMs(0);
+  };
   const judgeGavelSmashShowmanshipKindRef =
     useRef<DebateModeratorGavelCue["kind"]>("order");
   const judgeGavelSmashClearTimerRef = useRef<number | null>(null);
@@ -5486,6 +5430,7 @@ export function DebateExperience(
     interventionAvailable: false,
     liveJudge: false,
     orderAvailable: false,
+    callTimeAvailable: false,
     blockedNotice: null as string | null,
   });
   const judgeGavelSmashRef = useRef<
@@ -5664,6 +5609,7 @@ export function DebateExperience(
       !busy &&
       !audienceOrderSavingRef.current &&
       activeSession?.judgeGavel?.status !== "awaiting_message",
+    callTimeAvailable: judgeCanCallTimeNow,
     blockedNotice: judgeGavelShortcutBlockedNotice,
   };
 
@@ -5672,6 +5618,22 @@ export function DebateExperience(
     const timeout = window.setTimeout(() => setAutoRecoveryNotice(null), 5_200);
     return () => window.clearTimeout(timeout);
   }, [autoRecoveryNotice]);
+
+  useEffect(() => {
+    if (
+      judgeGavelOrderEscalateUntilMs <= 0 ||
+      judgeGavelOrderEscalateUntilMs <= Date.now()
+    ) {
+      return;
+    }
+    // One-shot: when the escalation window lapses, the next smack calms the
+    // room again instead of opening the intervention deck.
+    const timeout = window.setTimeout(() => {
+      judgeGavelOrderEscalateUntilRef.current = 0;
+      setJudgeGavelOrderEscalateUntilMs(0);
+    }, Math.max(0, judgeGavelOrderEscalateUntilMs - Date.now()));
+    return () => window.clearTimeout(timeout);
+  }, [judgeGavelOrderEscalateUntilMs]);
 
   useEffect(() => {
     const cooldownUntil = Date.parse(
@@ -5713,6 +5675,8 @@ export function DebateExperience(
         orderAvailable: context.orderAvailable,
         nowMs,
         smashUntilMs: judgeGavelSmashUntilRef.current,
+        callTimeAvailable: context.callTimeAvailable,
+        orderEscalateUntilMs: judgeGavelOrderEscalateUntilRef.current,
       });
       if (!action) {
         if (
@@ -5740,9 +5704,18 @@ export function DebateExperience(
         return;
       }
       if (action === "intervene") {
+        judgeGavelOrderEscalateUntilRef.current = 0;
+        setJudgeGavelOrderEscalateUntilMs(0);
         void swingJudgeGavelRef.current?.();
         return;
       }
+      // First smack: calm the room and arm the escalation window so a second
+      // smack in a row opens the intervention deck.
+      judgeGavelOrderEscalateUntilRef.current =
+        nowMs + DEBATE_JUDGE_GAVEL_ORDER_ESCALATE_WINDOW_MS;
+      setJudgeGavelOrderEscalateUntilMs(
+        judgeGavelOrderEscalateUntilRef.current,
+      );
       void orderDebateAudienceRef.current?.();
     };
     window.addEventListener("keydown", onKeyDown);
@@ -21120,21 +21093,16 @@ export function DebateExperience(
                 );
               }
               const event = entry.event;
+              // Shared contract with Coffee's Table talk: the rail never
+              // streams — a turn drops in whole once its stage presentation
+              // has finished.
               const streaming =
                 presentationEventId === event.id &&
                 (presenting ||
                   (liveReveal?.eventId === event.id &&
                     liveReveal.visibleContent.length < event.content.length));
-              return streaming ? (
-                <DebateStreamingTranscriptArticle
-                  key={event.id}
-                  store={presentationStore}
-                  session={session}
-                  event={event}
-                  playerName={playerName}
-                  onSource={setSourceDrawerId}
-                />
-              ) : (
+              if (streaming) return null;
+              return (
                 <DebateCompletedTranscriptArticle
                   key={event.id}
                   session={session}
@@ -24062,12 +24030,17 @@ export function DebateExperience(
       !judgeJuryGavelLocked &&
       !judgeObjectionAwaitingRuling &&
       session.judgeGavel?.status !== "awaiting_message";
+    // A single smack calms the room; smacking again while the order call still
+    // hangs in the air escalates to the intervention deck. Overtime keeps its
+    // single-smack "Call time" — the human Judge owns that clock.
     const judgeUnifiedGavelAction = judgeGavelCeremonyReady
       ? ("cue" as const)
       : judgeGavelInterventionEligibleNow
         ? judgeCanCallTime
           ? ("call-time" as const)
-          : ("intervene" as const)
+          : judgeGavelOrderEscalateUntilMs > 0
+            ? ("intervene" as const)
+            : ("order" as const)
         : ("order" as const);
     const audienceNeedsOrder =
       currentAudiencePressureBand === "restless" ||
@@ -24102,9 +24075,11 @@ export function DebateExperience(
         judgeUnifiedGavelAction === "intervene" ||
         judgeUnifiedGavelAction === "call-time"
       ) {
+        clearJudgeGavelOrderEscalation();
         void swingJudgeGavel(judgeUnifiedGavelAction === "call-time");
         return;
       }
+      armJudgeGavelOrderEscalation(Date.now());
       void orderDebateAudience();
     };
     const listenerReaction = debateGalleryReaction(activePublicContent);
