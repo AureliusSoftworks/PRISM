@@ -138,19 +138,23 @@ const JUDGEMENTAL_ACTIONS: readonly WeightedStageActionEntry[] = [
 ] as const;
 
 const GUARDED_ACTIONS: readonly WeightedStageActionEntry[] = [
-  { category: "guarded", action: "folds their arms", weight: 3 },
+  { category: "guarded", action: "closes off a little", weight: 3 },
   { category: "guarded", action: "holds still a moment", weight: 2 },
   { category: "guarded", action: "keeps their face even", weight: 2 },
   { category: "guarded", action: "pulls back slightly", weight: 2 },
   { category: "guarded", action: "watches without committing", weight: 1 },
 ] as const;
 
+// Scripted Director beats stay body-neutral on purpose: the Director cannot
+// see a speaker's anatomy, so it never scripts fingers, arms, or shoulders.
+// Bespoke-anatomy beats (claws, antennae, tiny fists) belong to the persona
+// invite path, where the model knows its own body.
 const RESTLESS_ACTIONS: readonly WeightedStageActionEntry[] = [
-  { category: "restless", action: "drums their fingers once", weight: 3 },
+  { category: "restless", action: "leans back an inch", weight: 3 },
   { category: "restless", action: "shifts their weight", weight: 2 },
   { category: "restless", action: "glances toward the door", weight: 2 },
   { category: "restless", action: "taps the table lightly", weight: 2 },
-  { category: "restless", action: "rolls a shoulder", weight: 1 },
+  { category: "restless", action: "stirs restlessly in place", weight: 1 },
 ] as const;
 
 const STAGE_ACTION_BLOCK_RE = /\*+([^*\n]+?)\*+/u;
@@ -158,6 +162,16 @@ const LEADING_STAGE_ACTION_RE = /^\s*\*+([^*\n]+?)\*+\s*/u;
 const THIRD_PERSON_VERB_RE = /^[a-z]+(?:s|es|ies)\b/iu;
 const FIRST_PERSON_RE = /^(?:i|i'm|im|i've|id|i'd)\b/iu;
 const ING_START_RE = /^[a-z]+ing\b/iu;
+/**
+ * Personas with bespoke anatomy narrate beats subject-first ("antennae perk
+ * up", "tail flicks once"). English s-plurals already sneak past the verb
+ * check ("eyes" reads like a verb); this list covers the body parts whose
+ * plural or mass form does not end in `s`.
+ */
+const BODY_PART_SUBJECT_RE =
+  /^(?:antennae|antenna|hooves|feet|teeth|fur|hair|plumage|mane|carapace|exoskeleton|halo|aura|static|smoke|mist|glow)\b/iu;
+const NON_ACTION_SECOND_WORD_RE =
+  /^\S+\s+(?:is|are|was|were|am|be|been|being|has|have|had|will|would|shall|should|can|could|may|might|must|do|does|did|that|which|who|of|in|on|and|or)\b/iu;
 
 function stableUnit(seed: string): number {
   let hash = 2166136261;
@@ -278,6 +292,21 @@ function laneAllowsCupActions(lane: StageActionLaneV1): boolean {
 }
 
 /**
+ * Scripted beats assume a two-eyed face; a one-eyed speaker (avatar
+ * `faceEyeCount` of 1) narrows "their eye" instead. Persona-authored actions
+ * are left untouched — the model writes for its own body.
+ */
+function applyStageActionEyeCountV1(
+  action: string,
+  speakerEyeCount: number | null | undefined,
+): string {
+  if (speakerEyeCount === 1) {
+    return action.replace(/\btheir eyes\b/u, "their eye");
+  }
+  return action;
+}
+
+/**
  * Selects one deterministic scripted action, skipping recent repeats when possible.
  */
 export function selectScriptedStageActionV1(args: {
@@ -289,6 +318,7 @@ export function selectScriptedStageActionV1(args: {
   source?: Exclude<StageActionSourceV1, "llm">;
   categoryOverride?: StageActionCategoryV1;
   actionOverride?: string;
+  speakerEyeCount?: number | null;
 }): StageActionV1 | null {
   const seed = normalizeWhitespace(args.seed).slice(0, 160);
   if (!seed) return null;
@@ -343,7 +373,7 @@ export function selectScriptedStageActionV1(args: {
       name: "stageAction",
       source: args.source ?? "director",
       category: candidate.category,
-      action: candidate.action,
+      action: applyStageActionEyeCountV1(candidate.action, args.speakerEyeCount),
       seed,
       lane: args.lane,
     };
@@ -355,7 +385,7 @@ export function selectScriptedStageActionV1(args: {
     name: "stageAction",
     source: args.source ?? "director",
     category: fallback.category,
-    action: fallback.action,
+    action: applyStageActionEyeCountV1(fallback.action, args.speakerEyeCount),
     seed,
     lane: args.lane,
   };
@@ -379,7 +409,10 @@ export function validateStageActionTextV1(args: {
   const words = wordCount(action);
   if (words < STAGE_ACTION_MIN_WORDS || words > STAGE_ACTION_MAX_WORDS) return null;
   if (FIRST_PERSON_RE.test(action) || ING_START_RE.test(action)) return null;
-  if (!THIRD_PERSON_VERB_RE.test(action)) return null;
+  const verbLed = THIRD_PERSON_VERB_RE.test(action);
+  const bodyPartLed =
+    BODY_PART_SUBJECT_RE.test(action) && !NON_ACTION_SECOND_WORD_RE.test(action);
+  if (!verbLed && !bodyPartLed) return null;
   if (/["""'''「」]/u.test(action)) return null;
 
   const banned = new Set<string>();
@@ -454,9 +487,26 @@ export function extractAndStripStageActionV1(args: {
     };
   }
 
+  // A multi-word leading `*block*` is a stage direction even when validation
+  // rejects it (first-person, participant name, odd grammar). Speaking it is
+  // always wrong, so drop it; single-word blocks stay — that is emphasis.
+  let working = raw;
+  const rawLeading = raw.match(LEADING_STAGE_ACTION_RE);
+  if (rawLeading) {
+    const inner = normalizeWhitespace(rawLeading[1] ?? "");
+    const innerWords = wordCount(inner);
+    if (
+      innerWords >= STAGE_ACTION_MIN_WORDS &&
+      innerWords <= STAGE_ACTION_MAX_WORDS &&
+      !/["“”‘’'「」]/u.test(inner)
+    ) {
+      working = raw.slice(rawLeading[0].length);
+    }
+  }
+
   let firstValid: string | null = null;
   const spokenText = normalizeWhitespace(
-    raw.replace(new RegExp(STAGE_ACTION_BLOCK_RE.source, "gu"), (full, inner) => {
+    working.replace(new RegExp(STAGE_ACTION_BLOCK_RE.source, "gu"), (full, inner) => {
       if (firstValid) return " ";
       const validated = validateStageActionTextV1({
         action: String(inner ?? ""),
@@ -665,6 +715,7 @@ export function resolveFinalStageActionV1(args: {
   powerAction?: { cue: string; frequency?: "occasional" | "frequent" } | null;
   /** False when an upstream contract may supply an action but must not invent one. */
   directorFallback?: boolean;
+  speakerEyeCount?: number | null;
 }): { action: StageActionV1 | null; spokenText: string } {
   const postExclusion = args.postGenerationExclusions?.find(Boolean);
   if (args.plan.decision === "excluded" || postExclusion) {
@@ -737,6 +788,7 @@ export function resolveFinalStageActionV1(args: {
     recentActions: args.recentActions,
     allowCupActions: args.allowCupActions,
     source: "director",
+    speakerEyeCount: args.speakerEyeCount,
   });
   return {
     action: director,

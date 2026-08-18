@@ -11,6 +11,8 @@ import {
   applyVoiceDeliveryMoodToProfile,
   applyBotNamePronunciations,
   builtinAccentRealizationBlend,
+  builtinMelodicityRealizationBlend,
+  builtinMoodRealizationBlend,
   botAudioVoiceProfileForFeelLane,
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V3,
@@ -522,6 +524,120 @@ describe("audio voice normalization", () => {
       builtinAccentRealizationBlend({
         engineVoiceId: "system-voice",
         targetLocale: "en-US",
+      }),
+      null,
+    );
+  });
+
+  it("realizes delivery moods as balanced American-only style directions", () => {
+    assert.deepEqual(
+      builtinMoodRealizationBlend({
+        engineVoiceId: "bm_george",
+        deliveryMood: "joyful",
+      }),
+      {
+        towardEngineVoiceIds: ["am_santa", "am_fenrir", "am_eric"],
+        awayEngineVoiceIds: ["am_onyx", "am_echo", "am_adam"],
+        weight: 0.5,
+      },
+    );
+    // The feminine hush is anchored on the catalog's one true whisper voice.
+    assert.deepEqual(
+      builtinMoodRealizationBlend({
+        engineVoiceId: "af_sky",
+        deliveryMood: "guarded",
+      }),
+      {
+        towardEngineVoiceIds: ["af_nicole"],
+        awayEngineVoiceIds: ["af_jessica", "af_sarah", "af_heart"],
+        weight: 0.4,
+      },
+    );
+    // Every direction keeps both sides same-presentation American voices so
+    // gender and accent cancel — a mood must never move a bot across regions.
+    for (const mood of ["joyful", "warm", "guarded", "strained"]) {
+      for (const engineVoiceId of ["af_heart", "am_puck"]) {
+        const blend = builtinMoodRealizationBlend({
+          engineVoiceId,
+          deliveryMood: mood,
+        });
+        assert.ok(blend, `${mood}:${engineVoiceId}`);
+        const gender = engineVoiceId[1];
+        for (const id of [
+          ...blend.towardEngineVoiceIds,
+          ...blend.awayEngineVoiceIds,
+        ]) {
+          assert.match(id, new RegExp(`^a${gender}_`, "u"), `${mood}:${id}`);
+        }
+        assert.ok(blend.weight > 0 && blend.weight <= 0.5, `${mood} weight`);
+      }
+    }
+    // Neutral, unknown moods, and non-engine voices stay untouched.
+    assert.equal(
+      builtinMoodRealizationBlend({
+        engineVoiceId: "bf_emma",
+        deliveryMood: "neutral",
+      }),
+      null,
+    );
+    assert.equal(
+      builtinMoodRealizationBlend({
+        engineVoiceId: "bf_emma",
+        deliveryMood: "furious",
+      }),
+      null,
+    );
+    assert.equal(
+      builtinMoodRealizationBlend({
+        engineVoiceId: "system-voice",
+        deliveryMood: "joyful",
+      }),
+      null,
+    );
+  });
+
+  it("scales melodic range per dialect, reversing the direction to narrow", () => {
+    const irish = builtinMelodicityRealizationBlend({
+      engineVoiceId: "bm_george",
+      accentDefinitionId: "irish-english",
+    });
+    assert.deepEqual(irish, {
+      towardEngineVoiceIds: ["am_santa", "am_fenrir", "am_liam"],
+      awayEngineVoiceIds: ["am_onyx", "am_echo", "am_adam"],
+      weight: 0.25,
+    });
+    // Scottish narrows: same axis, swapped poles, positive weight — the
+    // runtime clamps negative weights so reversal must happen here.
+    const scottish = builtinMelodicityRealizationBlend({
+      engineVoiceId: "bm_george",
+      accentDefinitionId: "scottish-english",
+    });
+    assert.deepEqual(scottish?.towardEngineVoiceIds, [
+      "am_onyx",
+      "am_echo",
+      "am_adam",
+    ]);
+    assert.equal(scottish?.weight, 0.2);
+    // Legacy influence-only profiles resolve; unmapped accents stay natural.
+    assert.equal(
+      builtinMelodicityRealizationBlend({
+        engineVoiceId: "af_sky",
+        accentDefinitionId: null,
+        speechprintInfluence: "indian-english",
+      })?.weight,
+      0.15,
+    );
+    assert.equal(
+      builtinMelodicityRealizationBlend({
+        engineVoiceId: "bm_george",
+        accentDefinitionId: "texas-english",
+      }),
+      null,
+    );
+    assert.equal(
+      builtinMelodicityRealizationBlend({
+        engineVoiceId: "system-voice",
+        accentDefinitionId: "irish-english",
       }),
       null,
     );

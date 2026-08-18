@@ -146,12 +146,14 @@ export function coffeePersistedUserLineOwnsPendingReveal<
 >(args: { messages: readonly T[]; userRevealText: string }): boolean {
   const normalizedPending = args.userRevealText.replace(/\s+/g, " ").trim();
   if (!normalizedPending) return false;
-  const latestStoredUserMessage = coffeeSubmittedUserMessageFromTurn(
-    args.messages,
-  );
-  return (
-    latestStoredUserMessage?.content.replace(/\s+/g, " ").trim() ===
-    normalizedPending
+  // Any persisted copy owns the pending line — not just the latest user
+  // message. A follow-up action message (e.g. `*twiddles thumbs*`) becomes the
+  // newest user row, and matching only against it re-surfaced the previous
+  // send as a phantom pending line beside its persisted twin.
+  return args.messages.some(
+    (message) =>
+      message.role === "user" &&
+      message.content.replace(/\s+/g, " ").trim() === normalizedPending,
   );
 }
 

@@ -581,6 +581,7 @@ const COFFEE_REFILL_REQUEST_RECENT_TABLE_TURNS = 8;
 const COFFEE_REFILL_REQUEST_WRAP_UP_BUFFER_MS = 45_000;
 const COFFEE_MOOD_NO_SHOW_GUARDED_CHANCE_MAX = 0.42;
 const COFFEE_MOOD_NO_SHOW_STRAINED_CHANCE_MAX = 0.88;
+const COFFEE_MOOD_NO_SHOW_SORE_FLOOR_CHANCE = 0.25;
 const COFFEE_IMAGE_MODEL_TAG = "coffee-image-request";
 const COFFEE_TEAM_SIDE_MIN_SIZE = 1;
 const COFFEE_TEAM_SIDE_MAX_SIZE = 4;
@@ -6948,6 +6949,32 @@ function applyCoffeeGroupSessionExclusions(
   return { attendingSeatBotIds, absentBotIds };
 }
 
+/**
+ * A stored group snapshot is the mood a bot LEFT the last session with, and a
+ * wrapped table always ends looking sour (leavePressure near 1, engagement
+ * drained) even after a good night. Attendance rolls for the next session run
+ * on the rested version: the night resolves most of the leave pressure and
+ * recovers mood toward baseline, so only genuinely burned bots stay reluctant.
+ */
+export function restCoffeeSocialSnapshotBetweenSessions(
+  social: CoffeeBotSocialSnapshot | undefined
+): CoffeeBotSocialSnapshot {
+  const snapshot = sanitizeCoffeeSocialSnapshot(social);
+  return sanitizeCoffeeSocialSnapshot({
+    disposition:
+      DEFAULT_COFFEE_SOCIAL.disposition -
+      (DEFAULT_COFFEE_SOCIAL.disposition - snapshot.disposition) * 0.4,
+    valuesFriction:
+      DEFAULT_COFFEE_SOCIAL.valuesFriction +
+      (snapshot.valuesFriction - DEFAULT_COFFEE_SOCIAL.valuesFriction) * 0.4,
+    restraint: snapshot.restraint,
+    engagement:
+      DEFAULT_COFFEE_SOCIAL.engagement -
+      (DEFAULT_COFFEE_SOCIAL.engagement - snapshot.engagement) * 0.4,
+    leavePressure: snapshot.leavePressure * 0.15,
+  });
+}
+
 function coffeeMoodNoShowPressure(social: CoffeeBotSocialSnapshot): number {
   const snapshot = sanitizeCoffeeSocialSnapshot(social);
   return clampCoffeeSocialValue(
@@ -7014,14 +7041,20 @@ export function applyCoffeeMoodSessionNoShows(args: {
   const candidates = attendingSeatBotIds
     .map((botId, seatIndex) => {
       if (!botId) return null;
-      const social = sanitizeCoffeeSocialSnapshot(args.socialByBotId[botId]);
-      const chance = coffeeMoodNoShowChance(social);
+      const departed = sanitizeCoffeeSocialSnapshot(args.socialByBotId[botId]);
+      const rested = restCoffeeSocialSnapshotBetweenSessions(departed);
+      // Bots who left the last table genuinely burned out stay reluctant even
+      // after a night off; ordinary wrap fatigue rests away entirely.
+      const soreFloor = coffeeSocialSnapshotIsNearDesaturated(departed)
+        ? COFFEE_MOOD_NO_SHOW_SORE_FLOOR_CHANCE
+        : 0;
+      const chance = Math.max(coffeeMoodNoShowChance(rested), soreFloor);
       if (chance <= 0) return null;
       return {
         botId,
         seatIndex,
         chance,
-        pressure: coffeeMoodNoShowPressure(social),
+        pressure: coffeeMoodNoShowPressure(rested),
       };
     })
     .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate))
@@ -12453,6 +12486,40 @@ export function consecutiveCoffeeSocialSilenceTurns(
     count += 1;
   }
   return count;
+}
+
+/**
+ * True when the latest table message is the player addressing this bot by
+ * plain-typed name (no mention chip): "Plankton, do you have BBQ chicken
+ * pizza there?" Mention chips flow through the directed-speaker path, but a
+ * typed name never set directPlayerObligation, so the addressed bot could
+ * legally answer a direct question with social silence and leave the player
+ * hanging (review 8e012a9d: the BBQ question died in a 138s "thinking" hold).
+ */
+export function coffeePlayerPlainlyAddressesBot(
+  history: readonly Pick<ChatMessage, "role" | "content">[],
+  botName: string | null | undefined,
+): boolean {
+  const latest = history.at(-1);
+  if (!latest || latest.role !== "user") return false;
+  const content = latest.content?.trim();
+  if (!content) return false;
+  const name = botName?.trim();
+  if (!name) return false;
+  const candidates = new Set<string>([name]);
+  const firstToken = name.split(/\s+/u)[0];
+  if (firstToken && firstToken.length >= 3) candidates.add(firstToken);
+  for (const candidate of candidates) {
+    const escaped = escapeRegExp(candidate);
+    if (
+      new RegExp(`(?:^|[\\s(*"'])${escaped}(?:$|[\\s,.:;!?)*"'])`, "iu").test(
+        content,
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function coffeeCannedInterruptionReaction(args: {
@@ -18671,7 +18738,12 @@ async function generateCoffeeBotReply(args: {
     };
   }
   const socialSilenceExclusions: SocialSilenceExclusionV1[] = [];
-  if (turnKind !== "autonomous" || directPlayerObligation || interruptionEvent) {
+  if (
+    turnKind !== "autonomous" ||
+    directPlayerObligation ||
+    interruptionEvent ||
+    coffeePlayerPlainlyAddressesBot(history, speaker.name)
+  ) {
     socialSilenceExclusions.push("direct_player_obligation");
   }
   if (sessionKickoff) socialSilenceExclusions.push("kickoff");
@@ -20446,6 +20518,7 @@ async function generateCoffeeBotReply(args: {
       ...(listenerReaction ? ["listener_reaction" as const] : []),
     ],
     allowCupActions: allowCupStageActions,
+    speakerEyeCount: speaker.faceEyeCount ?? null,
   });
   const canStoreActionOnlyReply = userActionOnly;
   const candidateCoffeeStageAction =

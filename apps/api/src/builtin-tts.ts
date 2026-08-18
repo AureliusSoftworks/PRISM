@@ -498,6 +498,7 @@ async function generatePrismVoicePackWave(args: {
   text: string;
   profile: BotAudioVoiceProfileV1;
   protectedPhrases?: readonly string[];
+  deliveryMood?: string;
   signal?: AbortSignal;
 }): Promise<Buffer> {
   if (args.signal?.aborted) throw new DOMException("Aborted", "AbortError");
@@ -522,6 +523,9 @@ export async function generateBuiltinEnglishWave(args: {
   profile: BotAudioVoiceProfileV1;
   allowOperatingSystemVoices?: boolean;
   protectedPhrases?: readonly string[];
+  /** Delivery mood realized as a style-space direction by the voice pack.
+   * Operating-system voices ignore it: they have no style surface. */
+  deliveryMood?: string;
   signal?: AbortSignal;
 }): Promise<Buffer> {
   const profile = normalizeBotAudioVoiceProfileV1(args.profile);

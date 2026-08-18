@@ -7,6 +7,7 @@ import {
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
   botVernacularAuthoringCueV1,
   botVernacularDefinitionForId,
+  botVernacularIdForAccentDefinition,
   botVernacularIdFromStoredVoiceProfile,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotAudioVoiceProfileV3,
@@ -15,7 +16,7 @@ import {
 } from "@localai/shared";
 
 describe("bot vernacular catalog", () => {
-  it("publishes cultural varieties and registers with complete picker copy", () => {
+  it("publishes regional varieties with complete catalog copy", () => {
     assert.equal(BOT_VERNACULAR_DEFINITIONS.length, BOT_VERNACULAR_IDS.length);
     assert.equal(
       new Set(BOT_VERNACULAR_DEFINITIONS.map((definition) => definition.id))
@@ -30,31 +31,35 @@ describe("bot vernacular catalog", () => {
     }
   });
 
-  it("pairs geographic varieties with real Accent Map homes and leaves registers unpinned", () => {
+  it("anchors every vernacular to a real Accent Map home", () => {
+    // Registers moved to the Powers system, so every remaining entry is
+    // regional and must resolve to a live accent definition.
     for (const definition of BOT_VERNACULAR_DEFINITIONS) {
-      if (definition.accentDefinitionId) {
-        assert.ok(
+      assert.ok(
+        definition.accentDefinitionId &&
           voiceAccentDefinitionForId(definition.accentDefinitionId),
-          `${definition.id} points at a missing accent definition`,
-        );
-      }
+        `${definition.id} needs a live accent home`,
+      );
     }
     assert.equal(
       botVernacularDefinitionForId("scots")?.accentDefinitionId,
       "scottish-english",
     );
     assert.equal(
-      botVernacularDefinitionForId("southern-us")?.accentDefinitionId,
-      "southern-us-english",
-    );
-    // Registers have no geography; the handshake never suggests a pin for them.
-    assert.equal(
-      botVernacularDefinitionForId("noir")?.accentDefinitionId,
-      undefined,
+      botVernacularDefinitionForId("new-york")?.accentDefinitionId,
+      "new-york-english",
     );
     assert.equal(
-      botVernacularDefinitionForId("archaic")?.accentDefinitionId,
-      undefined,
+      botVernacularDefinitionForId("new-england")?.accentDefinitionId,
+      "eastern-new-england-english",
+    );
+    assert.equal(
+      botVernacularDefinitionForId("canadian")?.accentDefinitionId,
+      "canadian-english",
+    );
+    assert.equal(
+      botVernacularDefinitionForId("kiwi")?.accentDefinitionId,
+      "new-zealand-english",
     );
   });
 
@@ -99,6 +104,33 @@ describe("bot vernacular catalog", () => {
     assert.equal(botVernacularAuthoringCueV1("klingon"), "");
     assert.equal(normalizeBotVernacularId(" SCOTS "), "scots");
     assert.equal(normalizeBotVernacularId("klingon"), null);
+  });
+
+  it("derives the vernacular from the accent pin unless one is authored", () => {
+    assert.equal(
+      botVernacularIdFromStoredVoiceProfile(
+        JSON.stringify({ v: 2, accentDefinitionId: "cockney-english" }),
+      ),
+      "cockney",
+    );
+    assert.equal(
+      botVernacularIdFromStoredVoiceProfile({
+        v: 3,
+        local: { pronunciation: { accentDefinitionId: "irish-english" } },
+      }),
+      "hiberno-english",
+    );
+    // An authored regional id still outranks the pin.
+    assert.equal(
+      botVernacularIdFromStoredVoiceProfile({
+        accentDefinitionId: "scottish-english",
+        vernacularId: "aussie",
+      }),
+      "aussie",
+    );
+    assert.equal(botVernacularIdForAccentDefinition(" Texas-English "), "southern-us");
+    assert.equal(botVernacularIdForAccentDefinition("miami-english"), null);
+    assert.equal(botVernacularIdForAccentDefinition(42), null);
   });
 
   it("rides the audio voice profile through V2, V3, and stored JSON", () => {

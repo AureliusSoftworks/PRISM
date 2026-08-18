@@ -47,6 +47,7 @@ process.on("message", (message: unknown) => {
         text: message.text,
         profile: message.profile,
         protectedPhrases: message.protectedPhrases,
+        deliveryMood: message.deliveryMood,
       });
       await send({
         type: "result",

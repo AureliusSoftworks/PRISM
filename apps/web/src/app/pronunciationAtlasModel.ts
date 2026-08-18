@@ -291,6 +291,96 @@ export function pronunciationAtlasLensesWithin(
   );
 }
 
+/**
+ * The lenses one click can drill into from the given view. The world offers
+ * every top-level lens (those not nested inside another); a zoomed view
+ * offers its contained lenses. These are the map's own click targets — the
+ * world view is navigation-only, so its regions must always be visible.
+ */
+export function pronunciationAtlasDrillCandidates(
+  lens: PronunciationAtlasLens,
+): readonly PronunciationAtlasLens[] {
+  if (lens.size < 1) return pronunciationAtlasLensesWithin(lens);
+  return PRONUNCIATION_ATLAS_LENSES.filter(
+    (candidate) =>
+      candidate.size < 1 &&
+      !PRONUNCIATION_ATLAS_LENSES.some(
+        (parent) =>
+          parent.size < 1 &&
+          parent.id !== candidate.id &&
+          candidate.size < parent.size &&
+          candidate.x >= parent.x - 1e-9 &&
+          candidate.y >= parent.y - 1e-9 &&
+          candidate.x + candidate.size <= parent.x + parent.size + 1e-9 &&
+          candidate.y + candidate.size <= parent.y + parent.size + 1e-9,
+      ),
+  );
+}
+
+/** The broadest one-level drill target whose window covers the point. */
+export function pronunciationAtlasDrillLensAtPoint(
+  point: AdjustmentPadPoint,
+  within: PronunciationAtlasLens,
+): PronunciationAtlasLens | null {
+  const containing = pronunciationAtlasDrillCandidates(within).filter(
+    (candidate) => pronunciationAtlasLensContainsPoint(point, candidate),
+  );
+  if (containing.length === 0) return null;
+  return [...containing].sort((left, right) => right.size - left.size)[0]!;
+}
+
+/**
+ * The drill target nearest the point, for open-ocean world clicks: the world
+ * view never places a pin, so every click must lead somewhere.
+ */
+export function pronunciationAtlasNearestDrillLens(
+  point: AdjustmentPadPoint,
+  within: PronunciationAtlasLens,
+): PronunciationAtlasLens | null {
+  const candidates = pronunciationAtlasDrillCandidates(within);
+  if (candidates.length === 0) return null;
+  return [...candidates].sort((left, right) => {
+    const leftCenter = {
+      x: left.x + left.size / 2,
+      y: left.y + left.size / 2,
+    };
+    const rightCenter = {
+      x: right.x + right.size / 2,
+      y: right.y + right.size / 2,
+    };
+    return (
+      squaredDistance(point, leftCenter) - squaredDistance(point, rightCenter)
+    );
+  })[0]!;
+}
+
+/**
+ * Explicit co-located variants (the London group) surfaced inside the lens
+ * that contains them. Chips appear only after drilling in, replacing the old
+ * always-on Nearby list: variants stay explicit choices, never inferred from
+ * a click location.
+ */
+export function pronunciationAtlasVariantCandidatesInLens(
+  lens: PronunciationAtlasLens,
+  current: PronunciationAtlasSelection,
+): readonly PronunciationAtlasCandidate[] {
+  if (lens.size >= 1) return [];
+  const normalized = normalizePronunciationAtlasSelection(current);
+  return PRONUNCIATION_ATLAS_ANCHORS.filter(
+    (anchor) =>
+      anchor.variantGroup &&
+      pronunciationAtlasLensContainsPoint(anchor.point, lens),
+  ).map((anchor) => ({
+    id: anchor.id,
+    label: pronunciationAtlasAnchorLabel(anchor),
+    selection: selectionForPronunciationAtlasAnchor(
+      anchor,
+      normalized,
+      anchor.point,
+    ),
+  }));
+}
+
 function squaredDistance(
   left: AdjustmentPadPoint,
   right: AdjustmentPadPoint,

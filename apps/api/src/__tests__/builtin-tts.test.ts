@@ -405,6 +405,23 @@ describe("built-in English audio", () => {
     assert.ok(wave.length > 44);
   });
 
+  it("renders a delivery mood through the blended style row without an accent pin", {
+    skip: !builtinEnglishAvailable(),
+  }, async () => {
+    const wave = await generateBuiltinEnglishWave({
+      text: "The morning report is ready.",
+      deliveryMood: "guarded",
+      profile: {
+        v: 2,
+        enabled: true,
+        baseVoiceId: "voice-4",
+      },
+    });
+    assert.equal(wave.subarray(0, 4).toString("ascii"), "RIFF");
+    assert.equal(wave.subarray(8, 12).toString("ascii"), "WAVE");
+    assert.ok(wave.length > 44);
+  });
+
   it("renders a hard-R American pin on a British voice through the blended style row", {
     skip: !builtinEnglishAvailable(),
   }, async () => {

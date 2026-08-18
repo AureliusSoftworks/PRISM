@@ -109,12 +109,26 @@ function parseJsonColumn(value) {
   }
 }
 
+function portableAvatarSfx(avatarSfx) {
+  if (!avatarSfx || typeof avatarSfx !== "object") return undefined;
+  const next = { ...avatarSfx };
+  // Keep play flags / volume / source metadata, but do not ship multi-MB
+  // personal thinking-loop blobs into Marketplace bundles.
+  if ("audioDataUrl" in next) delete next.audioDataUrl;
+  return next;
+}
+
 function stripElevenLabsIdentity(profile) {
   if (!profile) return profile;
   const next = structuredClone(profile);
   delete next.elevenLabsVoiceId;
   delete next.elevenLabsVoiceIdOverride;
   delete next.elevenLabsVoiceInitialized;
+  if (next.avatarSfx) {
+    const strippedSfx = portableAvatarSfx(next.avatarSfx);
+    if (strippedSfx) next.avatarSfx = strippedSfx;
+    else delete next.avatarSfx;
+  }
   return next;
 }
 

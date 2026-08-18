@@ -15233,6 +15233,7 @@ export async function advanceBotcastEpisode(
     participantNames: [host.name, guest.name],
     allowCupActions: false,
     directorFallback: !producerCueStageActionEligible,
+    speakerEyeCount: speaker.faceEyeCount ?? null,
   });
   const performance = extractBotcastVoicePerformance(
     resolvedStageAction.spokenText,

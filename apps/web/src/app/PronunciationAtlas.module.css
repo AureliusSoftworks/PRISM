@@ -59,6 +59,10 @@
   pointer-events: none;
   opacity: 0;
   animation: atlasMaterialize 520ms steps(8, end) forwards;
+  /* The scanline sweeps forever; bound its damage to this box and keep the
+   * artwork layers below compositing instead of repainting. */
+  contain: layout paint;
+  isolation: isolate;
   /* Lens view: 1 / lens.size, with the window origin as percent offsets.
    * Defaults reproduce the untransformed world exactly. */
   --atlas-lens-zoom: 1;
@@ -95,6 +99,10 @@
     0 0 5px
       color-mix(in srgb, var(--pronunciation-atlas-color) 28%, transparent)
   );
+  /* The 829KB vector mask plus drop-shadow must rasterize once into its own
+   * compositor layer; without this the infinite scanline repaints it every
+   * frame and the whole Studio drops to slideshow frame rates. */
+  will-change: transform;
 }
 
 .borders {
@@ -125,6 +133,9 @@
     mask-position 420ms ease,
     -webkit-mask-size 420ms ease,
     -webkit-mask-position 420ms ease;
+  /* Same isolation as the earth silhouette: the borders mask is its own
+   * cached layer, not a per-frame vector rasterization. */
+  will-change: transform;
 }
 
 .lensFootprint {
@@ -137,13 +148,23 @@
     var(--pronunciation-atlas-color) 7%,
     transparent
   );
+  /* Regions stay invisible until the cursor is actually over one; the map
+   * reads as clean artwork rather than a grid of click targets. */
+  opacity: 0;
+  pointer-events: auto;
   transition:
     left 420ms ease,
     top 420ms ease,
     width 420ms ease,
     height 420ms ease,
     border-color 200ms ease,
-    background 200ms ease;
+    background 200ms ease,
+    opacity 160ms ease;
+}
+
+.lensFootprint:hover {
+  opacity: 0.92;
+  border-style: solid;
 }
 
 .lensFootprint > small {
@@ -215,6 +236,8 @@
   );
   filter: blur(2px);
   animation: atlasScan 3.8s linear infinite;
+  /* Promoted up front so the sweep is pure compositor work. */
+  will-change: transform;
 }
 
 .controls {
@@ -513,4 +536,16 @@
   .strength button {
     flex: 1 1 0;
   }
+}
+
+/* Drill-down navigation: the world view is a navigator, not a placement
+ * surface — the cursor says so, and region footprints read as targets. */
+.atlas[data-atlas-view="world"] .pad {
+  cursor: zoom-in;
+}
+
+.lenses output {
+  color: var(--muted, #93a0b4);
+  font-size: 10px;
+  align-self: center;
 }

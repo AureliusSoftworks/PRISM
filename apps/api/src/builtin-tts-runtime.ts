@@ -5,6 +5,8 @@ import {
   applyLocalVoiceSpeechprintToIpa,
   applyVoiceAccentFieldToIpa,
   builtinAccentRealizationBlend,
+  builtinMelodicityRealizationBlend,
+  builtinMoodRealizationBlend,
   enforceAmericanRhoticIpa,
   localVoicePronunciationOverrideIsActive,
   type BuiltinAccentRealizationBlendV1,
@@ -92,6 +94,7 @@ export async function generatePrismVoicePackWaveInProcess(args: {
   text: string;
   profile: BotAudioVoiceProfileV1;
   protectedPhrases?: readonly string[];
+  deliveryMood?: unknown;
 }): Promise<Buffer> {
   const tts = await getKokoroTts();
   const pronunciation = await preparePrismVoicePackPronunciation(args);
@@ -100,18 +103,45 @@ export async function generatePrismVoicePackWaveInProcess(args: {
     // Pace is applied once by PRISM's formant-preserving playback worklet.
     speed: 1,
   } as const;
-  const audio = pronunciation.targetIpa
+  // Style dominates phoneme tokens, so both accents and delivery moods are
+  // realized as measured directions in style space. The deltas compose: a
+  // guarded Texan stays a guarded Texan.
+  const profileForBlends = normalizeBotAudioVoiceProfileV1(args.profile);
+  const blends = [
+    builtinAccentRealizationBlend({
+      engineVoiceId: pronunciation.engineVoiceId,
+      targetLocale: pronunciation.targetLocale,
+    }),
+    builtinMoodRealizationBlend({
+      engineVoiceId: pronunciation.engineVoiceId,
+      deliveryMood: args.deliveryMood,
+    }),
+    // Dialect melodic range: Irish widens, Scottish narrows, South Asian
+    // English lifts slightly — the style-space floor under the client-side
+    // intonation contour.
+    builtinMelodicityRealizationBlend({
+      engineVoiceId: pronunciation.engineVoiceId,
+      accentDefinitionId: profileForBlends.accentDefinitionId,
+      speechprintInfluence: profileForBlends.speechprintInfluence,
+    }),
+  ].filter(
+    (blend): blend is BuiltinAccentRealizationBlendV1 => blend !== null,
+  );
+  // A mood without an accent pin still needs the direct style path: phonemize
+  // the text exactly as the plain engine path would (no enforcement, no
+  // accent rules) so only the delivery changes, never the pronunciation.
+  const targetIpa =
+    pronunciation.targetIpa ??
+    (blends.length > 0
+      ? await phonemizeEnglish(pronunciation.sourceText, pronunciation.targetLocale)
+      : null);
+  const audio = targetIpa
     ? await generateTargetIpaAudio({
         sourceText: pronunciation.sourceText,
-        targetIpa: pronunciation.targetIpa,
+        targetIpa,
         tts,
         options,
-        // Style dominates phoneme tokens for coda R, so a cross-region accent
-        // additionally shades this utterance's style toward the target region.
-        blend: builtinAccentRealizationBlend({
-          engineVoiceId: pronunciation.engineVoiceId,
-          targetLocale: pronunciation.targetLocale,
-        }),
+        blends,
       })
     : await tts.generate(pronunciation.sourceText, options);
   return Buffer.from(audio.toWav());
@@ -348,7 +378,7 @@ async function generateTargetIpaAudio(args: {
   targetIpa: string;
   tts: import("kokoro-js").KokoroTTS;
   options: NonNullable<Parameters<import("kokoro-js").KokoroTTS["generate"]>[1]>;
-  blend?: BuiltinAccentRealizationBlendV1 | null;
+  blends?: readonly BuiltinAccentRealizationBlendV1[];
 }): Promise<Awaited<ReturnType<import("kokoro-js").KokoroTTS["generate"]>>> {
   if (
     typeof args.tts.tokenizer !== "function" ||
@@ -362,12 +392,12 @@ async function generateTargetIpaAudio(args: {
   const { input_ids } = args.tts.tokenizer(args.targetIpa, {
     truncation: true,
   });
-  if (args.blend) {
+  if (args.blends && args.blends.length > 0) {
     const blended = await generateBlendedStyleAudio({
       input_ids,
       tts: args.tts,
       voice: String(args.options.voice ?? ""),
-      blend: args.blend,
+      blends: args.blends,
     });
     if (blended) return blended;
     // A missing style surface falls back to the plain voice: speech keeps
@@ -398,16 +428,16 @@ function builtinVoiceStyleGroupMean(
 /**
  * Reproduces the pinned Kokoro 1.2.1 style path (256-float row selected by
  * token count) with one change: the row is translated by the accent
- * direction — mean(target-region voices) minus mean(native-region voices).
- * A uniform translation moves the accent while preserving each voice's
- * distance from every other voice, so bots keep distinct voices. Tokens and
- * pacing are untouched.
+ * directions — accent (target region minus native region) and delivery mood,
+ * summed. Each direction's groups are balanced so only the intended quality
+ * moves, and a uniform translation preserves each voice's distance from every
+ * other voice, so bots keep distinct voices. Tokens and pacing are untouched.
  */
 async function generateBlendedStyleAudio(args: {
   input_ids: ReturnType<import("kokoro-js").KokoroTTS["tokenizer"]>["input_ids"];
   tts: import("kokoro-js").KokoroTTS;
   voice: string;
-  blend: BuiltinAccentRealizationBlendV1;
+  blends: readonly BuiltinAccentRealizationBlendV1[];
 }): Promise<Awaited<ReturnType<import("kokoro-js").KokoroTTS["generate"]>> | null> {
   const model = (args.tts as unknown as {
     model?: (inputs: Record<string, unknown>) => Promise<{
@@ -423,14 +453,18 @@ async function generateBlendedStyleAudio(args: {
   );
   const offset = 256 * tokenCount;
   if (baseStyle.length < offset + 256) return null;
-  const toward = builtinVoiceStyleGroupMean(args.blend.towardEngineVoiceIds, offset);
-  const away = builtinVoiceStyleGroupMean(args.blend.awayEngineVoiceIds, offset);
-  if (!toward || !away) return null;
-  const weight = Math.max(0, Math.min(2, args.blend.weight));
   const mixed = new Float32Array(256);
   for (let index = 0; index < 256; index += 1) {
-    mixed[index] =
-      baseStyle[offset + index]! + weight * (toward[index]! - away[index]!);
+    mixed[index] = baseStyle[offset + index]!;
+  }
+  for (const blend of args.blends) {
+    const toward = builtinVoiceStyleGroupMean(blend.towardEngineVoiceIds, offset);
+    const away = builtinVoiceStyleGroupMean(blend.awayEngineVoiceIds, offset);
+    if (!toward || !away) return null;
+    const weight = Math.max(0, Math.min(2, blend.weight));
+    for (let index = 0; index < 256; index += 1) {
+      mixed[index] += weight * (toward[index]! - away[index]!);
+    }
   }
   const { Tensor, RawAudio } = await import("@huggingface/transformers");
   const { waveform } = await model({

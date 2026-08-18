@@ -296,6 +296,66 @@ test("Mumbling Jim compiles deterministic normal-volume gibberish without using 
   assert.match(result.powers[0]?.compiled?.observerCue ?? "", /normal-volume gibberish/u);
 });
 
+test("Noir and Archaic registers compile deterministically into speech_register Powers", async () => {
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("provider should not be needed");
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Marlowe",
+    powers: [
+      {
+        version: 1,
+        id: "noir-cloak",
+        name: "Noir Narrator",
+        intent: "He narrates everything like a hardboiled 1920s detective working a case.",
+        enabled: true,
+        compileStatus: "draft",
+        compiled: null,
+      },
+      {
+        version: 1,
+        id: "olde-tongue",
+        name: "Ye Olde Tongue",
+        intent: "Speaks in archaic Shakespearean English with thees and thous.",
+        enabled: true,
+        compileStatus: "draft",
+        compiled: null,
+      },
+    ],
+  });
+
+  assert.equal(calls, 0);
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [
+    { type: "speech_register", register: "noir" },
+  ]);
+  assert.match(
+    result.powers[0]?.compiled?.selfCue ?? "",
+    /Speech register — Noir narrator/u,
+  );
+  assert.match(
+    result.powers[0]?.compiled?.selfCue ?? "",
+    /never respell words phonetically/u,
+  );
+  assert.match(
+    result.powers[0]?.compiled?.observerCue ?? "",
+    /not a malfunction/u,
+  );
+  assert.deepEqual(result.powers[1]?.compiled?.effects, [
+    { type: "speech_register", register: "archaic" },
+  ]);
+  assert.match(
+    result.powers[1]?.compiled?.selfCue ?? "",
+    /Speech register — Archaic English/u,
+  );
+});
+
 test("Cursed Tongue compiles deterministic post-generation profanity without using the model", async () => {
   const result = await compileBotPowers({
     provider: {

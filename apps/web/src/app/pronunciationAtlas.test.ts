@@ -5,6 +5,10 @@ import { LOCAL_VOICE_SPEECHPRINT_CAPABILITIES } from "@localai/shared";
 import {
   PRONUNCIATION_ATLAS_ANCHORS,
   PRONUNCIATION_ATLAS_LENSES,
+  pronunciationAtlasDrillCandidates,
+  pronunciationAtlasDrillLensAtPoint,
+  pronunciationAtlasNearestDrillLens,
+  pronunciationAtlasVariantCandidatesInLens,
   nudgePronunciationAtlasSelection,
   nudgePronunciationAtlasSelectionInLens,
   normalizePronunciationAtlasSelection,
@@ -214,6 +218,64 @@ describe("Pronunciation Atlas", () => {
     assert.equal(
       selected.accentDefinitionId,
       "french-influenced-english",
+    );
+  });
+
+  it("drills broad-first from the world and covers every anchor with a region", () => {
+    const world = pronunciationAtlasLensForId("world");
+    const topLevel = pronunciationAtlasDrillCandidates(world);
+    assert.ok(topLevel.length >= 8);
+    assert.ok(topLevel.every((lens) => lens.size < 1));
+    // Nested lenses never appear at the top level.
+    assert.ok(!topLevel.some((lens) => lens.id === "isles"));
+    assert.ok(!topLevel.some((lens) => lens.id === "us-east"));
+    // Every anchor is reachable through some world region.
+    for (const anchorEntry of PRONUNCIATION_ATLAS_ANCHORS) {
+      assert.ok(
+        topLevel.some((lens) =>
+          pronunciationAtlasLensContainsPoint(anchorEntry.point, lens),
+        ),
+        anchorEntry.id,
+      );
+    }
+    const texas = pronunciationAtlasPointForCoordinates(-97.74, 30.27);
+    assert.equal(
+      pronunciationAtlasDrillLensAtPoint(texas, world)?.id,
+      "north-america",
+    );
+    // The world never dead-ends: open-ocean clicks resolve to the nearest region.
+    assert.ok(
+      pronunciationAtlasNearestDrillLens({ x: 0.38, y: 0.75 }, world),
+    );
+    // Inside a region, open space has no drill target — that is where pins land.
+    const northAmerica = pronunciationAtlasLensForId("north-america");
+    const vancouver = pronunciationAtlasPointForCoordinates(-123.1, 49.3);
+    assert.equal(
+      pronunciationAtlasDrillLensAtPoint(vancouver, northAmerica),
+      null,
+    );
+  });
+
+  it("surfaces the co-located London variants only inside their lens", () => {
+    const isles = pronunciationAtlasLensForId("isles");
+    const variants = pronunciationAtlasVariantCandidatesInLens(
+      isles,
+      pronunciationAtlasNaturalSelection("en-GB"),
+    );
+    assert.equal(variants.length, 4);
+    assert.ok(variants.some((variant) => variant.label === "Cockney"));
+    assert.ok(
+      variants.every(
+        (variant) => variant.selection.accentDefinitionId,
+      ),
+    );
+    // The world view offers no variant chips: choices come after drilling in.
+    assert.deepEqual(
+      pronunciationAtlasVariantCandidatesInLens(
+        pronunciationAtlasLensForId("world"),
+        pronunciationAtlasNaturalSelection("en-GB"),
+      ),
+      [],
     );
   });
 

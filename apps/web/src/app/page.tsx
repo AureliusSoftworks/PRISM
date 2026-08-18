@@ -6658,6 +6658,10 @@ function coffeeTeamOutcomeText(
 const COFFEE_TRANSCRIPT_CLOSE_MS = 180;
 const COFFEE_SEND_COOLDOWN_MS = 2200;
 const COFFEE_CUP_REFILL_SIP_LOCK_MS = 3_200;
+/** Player voice prep that has not started audio by now reveals silently. */
+const COFFEE_PLAYER_VOICE_START_FAILSAFE_MS = 12_000;
+/** A thinking seat with no in-flight work self-recovers after this long. */
+const COFFEE_STUCK_THINKING_WATCHDOG_MS = 45_000;
 const ZEN_SUCCESSIVE_MESSAGE_CONTEXT_LIMIT = 6;
 const COFFEE_BOT_REVEAL_DELAY_MIN_MS = COFFEE_DELIVERY_MIN_DURATION_MS;
 const COFFEE_BOT_REVEAL_DELAY_MAX_MS = COFFEE_DELIVERY_MAX_DURATION_MS;
@@ -8288,13 +8292,19 @@ function coffeeSeatMoodVisualMetrics(
     : coffeeSeatFallbackSaturationForMood(mood);
   const nearDesaturated =
     social != null && coffeeSocialSnapshotIsNearDesaturated(social);
+  // Checked-out bots read muted, never ghost-grey: the semantic scale bottoms
+  // out at 0.06, but on screen the bot must stay recognizably itself (Coffee
+  // review 8e012a9d: "Plankton is nearly completely desaturated").
   const saturation = nearDesaturated
-    ? Math.min(rawSaturation, COFFEE_NEAR_DESATURATED_SATURATION)
+    ? Math.max(
+        Math.min(rawSaturation, COFFEE_NEAR_DESATURATED_SATURATION),
+        0.38,
+      )
     : Math.max(rawSaturation, 0.54);
   const belowNeutral = Math.max(0, 1 - Math.min(1, saturation));
   const aboveNeutral = Math.max(0, saturation - 1);
-  const grayscaleLimit = nearDesaturated ? 0.86 : 0.38;
-  const grayscaleWeight = nearDesaturated ? 0.9 : 0.55;
+  const grayscaleLimit = nearDesaturated ? 0.52 : 0.38;
+  const grayscaleWeight = nearDesaturated ? 0.7 : 0.55;
   return {
     saturation: Number(saturation.toFixed(3)),
     grayscale: Number(
@@ -65792,6 +65802,8 @@ function HomeContent(): React.JSX.Element {
   const coffeeActivePlayerVoiceTextRef = useRef<string | null>(null);
   const coffeeCenterMessageScrollRef = useRef<HTMLDivElement | null>(null);
   const coffeeTurnAbortRef = useRef<AbortController | null>(null);
+  /** Wall-clock ms when the stuck-thinking watchdog first saw the dead shape. */
+  const coffeeStuckThinkingSinceMsRef = useRef<number | null>(null);
   const coffeeContinueAbortRef = useRef<AbortController | null>(null);
   const coffeePreparedTurnRef = useRef<PreparedCoffeeLookahead | null>(null);
   const coffeePreparedVoiceClipRef = useRef<
@@ -67408,6 +67420,65 @@ function HomeContent(): React.JSX.Element {
     const parsedLastTableActivityAtMs = lastTableActivityMessage
       ? Date.parse(lastTableActivityMessage.createdAt)
       : Number.NaN;
+    // Review 8e012a9d: a "thinking" seat with no in-flight work blocks BOTH
+    // autoplay recovery paths (pendingSpeaker counts as pendingReveal for the
+    // force turn; non-idle rhythm blocks the wake watchdog), so Plankton held
+    // a dangling player question for ~138s. Track how long that dead shape
+    // persists and self-recover: surface any stalled reveal as plain text,
+    // clear the seat, and hand the floor back to the stalled speaker.
+    const stuckThinkingShape =
+      (phase === "live" || phase === "arriving") &&
+      coffeeTurnRhythmStateRef.current === "botThinking" &&
+      coffeePendingSpeakerBotId !== null &&
+      !requestInFlight &&
+      !timerPresent;
+    if (!stuckThinkingShape) {
+      coffeeStuckThinkingSinceMsRef.current = null;
+    } else {
+      const stuckSinceMs =
+        coffeeStuckThinkingSinceMsRef.current ?? coffeeSessionClockMs;
+      coffeeStuckThinkingSinceMsRef.current = stuckSinceMs;
+      if (
+        activeConversation &&
+        coffeeSessionClockMs - stuckSinceMs >= COFFEE_STUCK_THINKING_WATCHDOG_MS
+      ) {
+        coffeeStuckThinkingSinceMsRef.current = null;
+        const stalledBotId = coffeePendingSpeakerBotId;
+        const queuedAfterUser = coffeePendingRevealAfterUserRef.current;
+        coffeePendingRevealAfterUserRef.current = null;
+        const recoveredConversation =
+          queuedAfterUser?.conversation ?? coffeePendingRevealConversation;
+        if (recoveredConversation?.id === activeConversation.id) {
+          coffeeConversationRef.current = recoveredConversation;
+          setCoffeeConversation(recoveredConversation);
+        }
+        setCoffeePendingRevealConversation(null);
+        setCoffeePendingSpeakerBotId(null);
+        coffeeTurnRhythmStateRef.current = "idle";
+        setCoffeeTurnRhythmState("idle");
+        if (
+          !coffeeAutoplayPausedRef.current &&
+          coffeeModelWarmupRef.current === null &&
+          (endsAt === null || coffeeSessionClockMs < endsAt)
+        ) {
+          if (recoveredConversation) {
+            scheduleCoffeeAutonomousTurnRef.current(
+              activeConversation.id,
+              endsAt,
+              1,
+              900,
+            );
+          } else {
+            void continueCoffeeSessionRef.current(
+              activeConversation.id,
+              endsAt,
+              stalledBotId ?? undefined,
+            );
+          }
+        }
+        return;
+      }
+    }
     const shouldForceTurn = coffeeAutoplayForceTurnShouldRun({
       hasConversation: activeConversation !== null,
       hasPresentBot: phase === "live" || coffeeFirmlySeatedBotIds().length > 0,
@@ -127770,9 +127841,14 @@ function HomeContent(): React.JSX.Element {
     return await new Promise<number | null>((resolve) => {
       let settled = false;
       let playerAlignment: SpeechCharacterAlignment | null = null;
+      let voiceStartFailsafeTimer: number | null = null;
       const settle = (durationMs: number | null) => {
         if (settled) return;
         settled = true;
+        if (voiceStartFailsafeTimer !== null) {
+          window.clearTimeout(voiceStartFailsafeTimer);
+          voiceStartFailsafeTimer = null;
+        }
         const resolvedDurationMs =
           durationMs && durationMs > 0 ? durationMs : fallbackDuration;
         coffeePlayerVoiceStartedAtMsRef.current = performance.now();
@@ -127783,6 +127859,16 @@ function HomeContent(): React.JSX.Element {
         };
         resolve(resolvedDurationMs);
       };
+      // Voice preparation must never wedge the table. Errors settle above, but
+      // a hung fetch or an engine that never reports start would hold the
+      // reveal queue behind this line forever (review 8e012a9d: SpongeBob's
+      // reply stayed invisible until a player poke). Reveal on the provisional
+      // plan if nothing has started within the failsafe window.
+      voiceStartFailsafeTimer = window.setTimeout(() => {
+        voiceStartFailsafeTimer = null;
+        controller.abort();
+        settle(null);
+      }, COFFEE_PLAYER_VOICE_START_FAILSAFE_MS);
       const lifecycle = {
         deliveryEnvelope: NEUTRAL_COFFEE_VOICE_DELIVERY_ENVELOPE,
         voiceLightTarget: botVoiceLightTarget(
@@ -132457,7 +132543,32 @@ function HomeContent(): React.JSX.Element {
     // in parallel; settle still waits for delivery (+ audible start) before
     // bot processing, so orchestration timing stays the same.
     if (!sendParallelDuringThinkingBot) {
+      const supersededReveal = coffeePendingRevealAfterUserRef.current;
       coffeePendingRevealAfterUserRef.current = null;
+      const supersededLatest = supersededReveal?.conversation.messages.at(-1);
+      if (
+        supersededReveal &&
+        supersededLatest?.role === "assistant" &&
+        !playerInterruption
+      ) {
+        // The queued line never started; the player spoke first. Register a
+        // real cut-off instead of silently dropping the queue — otherwise the
+        // next conversation sync dumps the bot's full text onto the table with
+        // no reveal and no voice (review 8e012a9d: "revealed Spongebob's next
+        // message before he could say it").
+        playerInterruption = {
+          interruptedMessageId: supersededLatest.id,
+          interruptedBotId: supersededReveal.speakerBotId,
+          visibleTokenCount: 1,
+        };
+        coffeeCutOffRevealMessageIdRef.current = supersededLatest.id;
+        setCoffeeInterruptedSnippet({
+          botId: supersededReveal.speakerBotId,
+          snippet: interruptedMidWordSnippet(supersededLatest.content, 1),
+          sourceMessageId: supersededLatest.id,
+          createdAtMs: Date.now(),
+        });
+      }
     }
     clearCoffeeRhythmTimers();
     coffeeRevealTypingDurationMsRef.current = randomCoffeeRevealDelayMs(
@@ -134474,6 +134585,10 @@ function HomeContent(): React.JSX.Element {
         : `${mention} `;
     coffeeDraftRef.current = nextDraft;
     setCoffeeDraft(nextDraft);
+    coffeeComposerRichRef.current?.setValue(nextDraft);
+    // The click lands on a seat, not the input; hand focus straight to the
+    // composer so the tagged message can be typed immediately.
+    window.requestAnimationFrame(() => coffeeComposerRichRef.current?.focus());
   };
   const sipCoffeePlayerCup = (): void => {
     const activeConversation = coffeeConversationRef.current;
@@ -136374,6 +136489,21 @@ function HomeContent(): React.JSX.Element {
       coffeeAtmosphereImage?.imageId &&
       !coffeeAtmosphereImageFailedIds.has(coffeeAtmosphereImage.imageId),
     );
+    // Mood no-shows are decided server-side at session start; the table owes
+    // the player one plain sentence so nobody waits on a chair that stays empty.
+    const coffeeAbsentBotNames = (coffeeConversation?.coffeeAbsentBotIds ?? [])
+      .map((botId) => coffeeBotsById.get(botId)?.name?.trim())
+      .filter((name): name is string => Boolean(name));
+    const coffeeAbsentNoteText =
+      coffeeAbsentBotNames.length > 0 &&
+      !coffeeReplayActive &&
+      (coffeeSessionPhase === "arriving" || coffeeSessionPhase === "live")
+        ? `${
+            coffeeAbsentBotNames.length === 1
+              ? coffeeAbsentBotNames[0]
+              : `${coffeeAbsentBotNames.slice(0, -1).join(", ")} and ${coffeeAbsentBotNames.at(-1)}`
+          } couldn't make it tonight.`
+        : null;
     return (
       <section
         ref={coffeeStageRef}
@@ -136445,6 +136575,11 @@ function HomeContent(): React.JSX.Element {
         ) : null}
         {coffeeChromePolicy.liveSessionActive || coffeeIntroPlaying ? (
           <LiveSessionPrismWatermark theme={resolvedTheme} />
+        ) : null}
+        {coffeeAbsentNoteText ? (
+          <p className={styles.coffeeAbsentNote} role="status">
+            {coffeeAbsentNoteText}
+          </p>
         ) : null}
         <div className={styles.coffeeTableCanvas}>
           {coffeeSessionPhase === "finished" && !coffeeReplayActive ? (
@@ -137232,10 +137367,17 @@ function HomeContent(): React.JSX.Element {
                   </button>
                 ) : null}
                 <div className={styles.coffeeReplayPlayerNameplate}>
+                  {/* The nameplate pot is replay furniture (the pour-motion
+                    * dock). On a live table it sat beside the sip mug as a
+                    * second, inert coffee object — review 8e012a9d: "Which one
+                    * should be active right now?" Hide it outside replay. */}
                   <span
                     ref={coffeeReplayPotDockRef}
                     className={styles.coffeeReplayPlayerPot}
                     data-pot-away={coffeeReplayPotMotion ? "true" : undefined}
+                    data-pot-live-hidden={
+                      !coffeeReplayActive ? "true" : undefined
+                    }
                     aria-hidden="true"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}

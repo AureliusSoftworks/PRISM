@@ -9,7 +9,11 @@
  *   node --experimental-strip-types scripts/promote-library-design-to-marketplace.mjs \
  *     --dry-run --db PATH --user-id ID [--only id[,id...]]
  *   node --experimental-strip-types scripts/promote-library-design-to-marketplace.mjs \
- *     --apply --db PATH --user-id ID --workspace-backup PATH --db-backup PATH [--only id[,id...]]
+ *     --apply --db PATH --user-id ID --workspace-backup PATH [--db-backup PATH] [--only id[,id...]]
+ *
+ * --db-backup is optional. This updater only writes Marketplace archives, so a
+ * full live-database copy is not required. Pass it only when you explicitly
+ * want a snapshot of the whole Prism save file.
  */
 
 import { execFileSync } from "node:child_process";
@@ -131,10 +135,8 @@ const onlyArgument = flagValue("--only");
 if (shouldApply === explicitDryRun) {
   throw new Error("Choose either --dry-run or --apply.");
 }
-if (shouldApply && (!workspaceBackupArgument || !databaseBackupArgument)) {
-  throw new Error(
-    "Applying requires --workspace-backup PATH and --db-backup PATH.",
-  );
+if (shouldApply && !workspaceBackupArgument) {
+  throw new Error("Applying requires --workspace-backup PATH.");
 }
 
 function assertDatabaseIntegrity(database, label) {
@@ -626,17 +628,22 @@ if (existsSync(workspaceBackupArgument)) {
     `Refusing to overwrite workspace backup: ${workspaceBackupArgument}`,
   );
 }
-if (existsSync(databaseBackupArgument)) {
+if (databaseBackupArgument && existsSync(databaseBackupArgument)) {
   throw new Error(
     `Refusing to overwrite database backup: ${databaseBackupArgument}`,
   );
 }
-if (resolve(databaseBackupArgument) === resolve(databaseArgument)) {
+if (
+  databaseBackupArgument &&
+  resolve(databaseBackupArgument) === resolve(databaseArgument)
+) {
   throw new Error("The database backup must differ from the live database.");
 }
 
 const workspaceBackupPath = resolve(workspaceBackupArgument);
-const databaseBackupPath = resolve(databaseBackupArgument);
+const databaseBackupPath = databaseBackupArgument
+  ? resolve(databaseBackupArgument)
+  : null;
 mkdirSync(workspaceBackupPath, { recursive: true });
 copyFileSync(manifestPath, join(workspaceBackupPath, "manifest.json"));
 for (const target of marketplaceTargets) {
@@ -663,13 +670,15 @@ writeFileSync(
   )}\n`,
 );
 
-mkdirSync(dirname(databaseBackupPath), { recursive: true });
-await backup(db, databaseBackupPath);
-const backupDb = new DatabaseSync(databaseBackupPath, { readOnly: true });
-try {
-  assertDatabaseIntegrity(backupDb, "Backup database");
-} finally {
-  backupDb.close();
+if (databaseBackupPath) {
+  mkdirSync(dirname(databaseBackupPath), { recursive: true });
+  await backup(db, databaseBackupPath);
+  const backupDb = new DatabaseSync(databaseBackupPath, { readOnly: true });
+  try {
+    assertDatabaseIntegrity(backupDb, "Backup database");
+  } finally {
+    backupDb.close();
+  }
 }
 
 const revision = new Date().toISOString();

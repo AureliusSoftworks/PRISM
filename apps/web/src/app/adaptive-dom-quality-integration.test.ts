@@ -45,6 +45,25 @@ describe("adaptive DOM quality integration", () => {
     assert.doesNotMatch(governor, /setAttribute\([^)]*prism-adaptive-quality/u);
   });
 
+  it("reports stalls honestly instead of sampling only the fast frames", () => {
+    // Slow frames count with their full duration; only suspension-sized gaps
+    // reset the window. Discarding >250ms frames and publishing single-frame
+    // instant rates made a 3 FPS room read as 33 (once 240) and kept the
+    // FPS-gated load sheds from engaging.
+    assert.match(
+      governor,
+      /PRISM_FRAME_RATE_SUSPENSION_GAP_MS = 10_000/u,
+    );
+    assert.match(
+      governor,
+      /deltaMs <= PRISM_FRAME_RATE_SUSPENSION_GAP_MS/u,
+    );
+    assert.match(governor, /fpsWindowFrameCount \* 1_000/u);
+    assert.doesNotMatch(governor, /deltaMs <= 250/u);
+    assert.doesNotMatch(governor, /1_000 \/ deltaMs/u);
+    assert.doesNotMatch(governor, /hasPublishedFps/u);
+  });
+
   it("keeps scene and Debate frame sampling observe-only", () => {
     assert.match(sceneHost, /adaptiveQuality\.recordFrame/u);
     assert.doesNotMatch(sceneHost, /result\.qualityChanged/u);

@@ -8,7 +8,7 @@ import {
   type LocalVoiceSpeechprintInfluence,
   type LocalVoiceSpeechprintStrength,
 } from "@localai/shared";
-import { useId, useMemo, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactElement } from "react";
 
 import { AdjustmentPad } from "./AdjustmentPad";
@@ -20,17 +20,18 @@ import styles from "./PronunciationAtlas.module.css";
 import {
   normalizePronunciationAtlasSelection,
   nudgePronunciationAtlasSelectionInLens,
-  PRONUNCIATION_ATLAS_LENSES,
   projectPronunciationAtlasPointIntoLens,
-  pronunciationAtlasLensesWithin,
+  pronunciationAtlasDrillCandidates,
+  pronunciationAtlasDrillLensAtPoint,
   pronunciationAtlasLensForId,
   pronunciationAtlasNaturalSelection,
-  pronunciationAtlasNearbyCandidates,
+  pronunciationAtlasNearestDrillLens,
   pronunciationAtlasLocationText,
   pronunciationAtlasPointForSelection,
   pronunciationAtlasPointFromLensProjection,
   pronunciationAtlasSelectionAtPoint,
   pronunciationAtlasValueText,
+  pronunciationAtlasVariantCandidatesInLens,
   type PronunciationAtlasLens,
   type PronunciationAtlasSelection,
 } from "./pronunciationAtlasModel";
@@ -69,10 +70,8 @@ function padValueForSelection(
 
 function PronunciationAtlasMap({
   lens,
-  previewLens,
 }: {
   lens: PronunciationAtlasLens;
-  previewLens: PronunciationAtlasLens | null;
 }): ReactElement {
   const zoomed = lens.size < 1;
   const lensStyle = zoomed
@@ -82,27 +81,16 @@ function PronunciationAtlasMap({
         "--atlas-lens-pos-y": `${(lens.y / (1 - lens.size)) * 100}%`,
       } as CSSProperties)
     : undefined;
-  // A zoomed view always marks where deeper lenses can take you; the world
-  // stays clean and marks a footprint only for the hovered or focused chip.
-  const footprints = [
-    ...pronunciationAtlasLensesWithin(lens).map((candidate) => ({
-      lens: candidate,
-      emphasized: candidate.id === previewLens?.id,
-    })),
-    ...(previewLens &&
-    previewLens.id !== lens.id &&
-    !pronunciationAtlasLensesWithin(lens).some(
-      (candidate) => candidate.id === previewLens.id,
-    )
-      ? [{ lens: previewLens, emphasized: true }]
-      : []),
-  ];
+  // Footprints are the map's own click targets now: the world always shows
+  // its regions (clicking one drills in), and zoomed views mark where a
+  // deeper drill is available.
+  const footprints = pronunciationAtlasDrillCandidates(lens);
   return (
     <div className={styles.map} aria-hidden="true" style={lensStyle}>
       <span className={styles.world} />
       <span className={styles.borders} />
       <div className={styles.longitudeLines} />
-      {footprints.map(({ lens: mark, emphasized }) => {
+      {footprints.map((mark) => {
         const origin = projectPronunciationAtlasPointIntoLens(
           { x: mark.x, y: mark.y },
           lens,
@@ -111,7 +99,6 @@ function PronunciationAtlasMap({
           <span
             key={mark.id}
             className={styles.lensFootprint}
-            data-emphasized={emphasized ? "true" : undefined}
             style={{
               left: `${origin.x * 100}%`,
               top: `${origin.y * 100}%`,
@@ -123,7 +110,7 @@ function PronunciationAtlasMap({
           </span>
         );
       })}
-      <div className={styles.scan} />
+      <div className={styles.scan} data-prism-decorative-motion="true" />
     </div>
   );
 }
@@ -170,25 +157,45 @@ export function PronunciationAtlas({
   // The lens is view state only: it zooms the pad, artwork, and pointer
   // precision while every committed pin stays in global map space.
   const [lensId, setLensId] = useState<string>("world");
-  const [previewLensId, setPreviewLensId] = useState<string | null>(null);
+  // Pointer clicks that land on a drill target navigate instead of placing
+  // the pin; the intent is stashed here and resolved on commit.
+  const pendingDrillRef = useRef<string | null>(null);
   const lens = pronunciationAtlasLensForId(lensId);
-  const previewLens = previewLensId
-    ? pronunciationAtlasLensForId(previewLensId)
-    : null;
   const padValue: PronunciationAtlasPadValue =
     draftValue ?? padValueForSelection(normalizedSelection, lens);
 
   const adapter = useMemo<AdjustmentPadAdapter<PronunciationAtlasPadValue>>(
     () => ({
       toPoint: (value) => value.point,
-      fromPoint: (point, current) => ({
-        point,
-        selection: pronunciationAtlasSelectionAtPoint(
-          pronunciationAtlasPointFromLensProjection(point, lens),
-          current.selection,
-        ),
-      }),
+      fromPoint: (point, current) => {
+        const globalPoint = pronunciationAtlasPointFromLensProjection(
+          point,
+          lens,
+        );
+        // The world view is navigation-only: every click resolves to a
+        // region (nearest, for open-ocean clicks). Zoomed views drill only
+        // when the click lands inside a deeper footprint.
+        const drill =
+          lens.size >= 1
+            ? pronunciationAtlasDrillLensAtPoint(globalPoint, lens) ??
+              pronunciationAtlasNearestDrillLens(globalPoint, lens)
+            : pronunciationAtlasDrillLensAtPoint(globalPoint, lens);
+        if (drill) {
+          pendingDrillRef.current = drill.id;
+          return current;
+        }
+        pendingDrillRef.current = null;
+        return {
+          point,
+          selection: pronunciationAtlasSelectionAtPoint(
+            globalPoint,
+            current.selection,
+          ),
+        };
+      },
       nudge: (value, direction, multiplier) => {
+        // Keyboard travel stays global and precise; it never drills.
+        pendingDrillRef.current = null;
         const nextSelection = nudgePronunciationAtlasSelectionInLens(
           value.selection,
           direction,
@@ -206,7 +213,8 @@ export function PronunciationAtlas({
     lens,
   );
   const summary = pronunciationAtlasLocationText(padValue.selection);
-  const nearbyCandidates = pronunciationAtlasNearbyCandidates(
+  const variantCandidates = pronunciationAtlasVariantCandidatesInLens(
+    lens,
     padValue.selection,
   );
   const fallbackId = useId();
@@ -221,6 +229,7 @@ export function PronunciationAtlas({
     <section
       className={`${styles.atlas}${className ? ` ${className}` : ""}`}
       data-pronunciation-atlas="true"
+      data-atlas-view={lens.size < 1 ? "region" : "world"}
       style={
         color
           ? ({ "--pronunciation-atlas-color": color } as CSSProperties)
@@ -245,59 +254,57 @@ export function PronunciationAtlas({
         disabled={disabled}
         onPreview={(next) => {
           setDraftValue(next);
-          onPreview(next.selection);
+          if (!pendingDrillRef.current) onPreview(next.selection);
         }}
         onCommit={(next) => {
+          const drillTarget = pendingDrillRef.current;
+          if (drillTarget) {
+            // Navigation, not placement: zoom in and leave the pin alone.
+            pendingDrillRef.current = null;
+            setDraftValue(null);
+            setLensId(drillTarget);
+            return;
+          }
           const committed = padValueForSelection(next.selection, lens);
           setDraftValue(null);
           onCommit(committed.selection);
         }}
         onCancel={(restored) => {
+          pendingDrillRef.current = null;
           const committed = padValueForSelection(restored.selection, lens);
           setDraftValue(null);
           onCancel?.(committed.selection);
         }}
-        renderOverlay={() => (
-          <PronunciationAtlasMap lens={lens} previewLens={previewLens} />
-        )}
+        renderOverlay={() => <PronunciationAtlasMap lens={lens} />}
       />
-      <div className={styles.lenses}>
-        <span>Lens</span>
-        <div role="group" aria-label="Map lens">
-          {PRONUNCIATION_ATLAS_LENSES.map((candidate) => (
+      <div className={styles.lenses} data-atlas-view-bar="true">
+        <span>View</span>
+        <div role="group" aria-label="Map view">
+          {lens.size < 1 ? (
             <button
-              key={candidate.id}
               type="button"
-              data-active={candidate.id === lens.id ? "true" : undefined}
-              aria-pressed={candidate.id === lens.id}
               disabled={disabled}
-              onMouseEnter={() => setPreviewLensId(candidate.id)}
-              onMouseLeave={() =>
-                setPreviewLensId((current) =>
-                  current === candidate.id ? null : current,
-                )
-              }
-              onFocus={() => setPreviewLensId(candidate.id)}
-              onBlur={() =>
-                setPreviewLensId((current) =>
-                  current === candidate.id ? null : current,
-                )
-              }
               onClick={() => {
-                // A stale draft's display point belongs to the old lens.
+                pendingDrillRef.current = null;
                 setDraftValue(null);
-                setLensId(candidate.id);
+                setLensId("world");
               }}
             >
-              {candidate.label}
+              ◂ World map
             </button>
-          ))}
+          ) : null}
+          <output>
+            {lens.size < 1
+              ? lens.label
+              : "Click a region to zoom in; pins are placed up close."}
+          </output>
         </div>
       </div>
+      {variantCandidates.length > 0 ? (
       <div className={styles.nearby}>
-        <span>Nearby choices</span>
-        <div role="group" aria-label="Nearby accent choices">
-          {nearbyCandidates.map((candidate) => {
+        <span>Local variants</span>
+        <div role="group" aria-label="Local accent variants">
+          {variantCandidates.map((candidate) => {
             const active =
               candidate.selection.accentDefinitionId
                 ? candidate.selection.accentDefinitionId ===
@@ -322,6 +329,7 @@ export function PronunciationAtlas({
           })}
         </div>
       </div>
+      ) : null}
       <div className={styles.controls}>
         {padValue.selection.accentDefinitionId ||
         padValue.selection.influence !== "none" ? (

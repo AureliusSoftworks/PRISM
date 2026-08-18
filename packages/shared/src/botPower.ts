@@ -1,5 +1,9 @@
 import type { ListenerReactionPlanV1 } from "./listenerReaction.js";
 import {
+  normalizeBotSpeechRegisterId,
+  type BotSpeechRegisterId,
+} from "./botSpeechRegister.js";
+import {
   botIdentityHueDeg,
   circularHueDistanceDeg,
   complementaryHueDeg,
@@ -270,6 +274,8 @@ export type BotPowerEffectV1 =
   | { type: "voice_presence"; mode: BotPowerVoicePresenceMode }
   /** Replace every public spoken word with deterministic normal-volume gibberish. */
   | { type: "speech_obfuscation"; mode: "gibberish" }
+  /** Grant a canonical placeless speaking style (noir narration, archaic English). */
+  | { type: "speech_register"; register: BotSpeechRegisterId }
   /**
    * Add deterministic strong non-slur profanity to every non-silent public
    * utterance after semantic/content Powers have finished. Every curseable
@@ -896,6 +902,12 @@ export function normalizeBotPowerEffectV1(value: unknown): BotPowerEffectV1 | nu
   }
   if (effect.type === "speech_obfuscation") {
     return { type: "speech_obfuscation", mode: "gibberish" };
+  }
+  if (effect.type === "speech_register") {
+    const register = normalizeBotSpeechRegisterId(
+      (effect as { register?: unknown }).register,
+    );
+    return register ? { type: "speech_register", register } : null;
   }
   if (effect.type === "cursed_tongue") {
     return {
@@ -2827,6 +2839,19 @@ export function botPowerMumblesSpeechFromEffectsV1(value: unknown): boolean {
 
 export function botPowerMumblesSpeechV1(value: unknown): boolean {
   return botPowerMumblesSpeechFromEffectsV1(activeBotPowerEffectsV1(value));
+}
+
+export function botPowerSpeechRegistersV1(
+  value: unknown,
+): BotSpeechRegisterId[] {
+  const registers = new Set<BotSpeechRegisterId>();
+  for (const effect of activeBotPowerEffectsV1(value)) {
+    const normalized = normalizeBotPowerEffectV1(effect);
+    if (normalized?.type === "speech_register") {
+      registers.add(normalized.register);
+    }
+  }
+  return [...registers];
 }
 
 export function botPowerCursesSpeechFromEffectsV1(value: unknown): boolean {

@@ -449,6 +449,159 @@ export function builtinAccentRealizationBlend(args: {
   };
 }
 
+/**
+ * Delivery moods realized the same way as accents: a measured direction in
+ * style space. Both sides of every direction are same-presentation American
+ * voices, so gender identity and accent cancel in the difference and the
+ * delta carries only delivery — a mood never nudges a bot across regions and
+ * composes cleanly with the accent direction. Weights come from a ladder
+ * measurement per mood and presentation (F0, melodic range, tempo, spectral
+ * tilt, voicing fraction) chosen where the mood clearly lands while the
+ * voice remains unmistakably itself; 0.7 and above drifts identity.
+ *
+ * Acoustic anchors, measured on the packaged voices: af_nicole is the true
+ * whisper (half-voiced, flat melody, breath-forward tilt) and powers the
+ * feminine guarded hush; the catalog has no masculine whisper, so masculine
+ * guarded is subdued — lowered, darkened, slowed — instead. Strained presses
+ * faster and brighter; on masculine voices it overlaps joyful at the
+ * synthesis layer and relies on the mood rate transforms (joyful brisk,
+ * strained held back) for the rest of the separation.
+ */
+const BUILTIN_MOOD_REALIZATION_DIRECTIONS: Record<
+  Exclude<VoiceDeliveryMood, "neutral">,
+  Record<
+    LocalVoicePresentation,
+    { toward: readonly string[]; away: readonly string[]; weight: number }
+  >
+> = {
+  joyful: {
+    feminine: {
+      toward: ["af_jessica", "af_heart", "af_sarah"],
+      away: ["af_river", "af_alloy", "af_nova"],
+      weight: 0.5,
+    },
+    masculine: {
+      toward: ["am_santa", "am_fenrir", "am_eric"],
+      away: ["am_onyx", "am_echo", "am_adam"],
+      weight: 0.5,
+    },
+  },
+  warm: {
+    feminine: {
+      toward: ["af_bella", "af_kore", "af_aoede"],
+      away: ["af_jessica", "af_sarah"],
+      weight: 0.5,
+    },
+    masculine: {
+      toward: ["am_michael", "am_onyx"],
+      away: ["am_eric", "am_fenrir"],
+      weight: 0.35,
+    },
+  },
+  guarded: {
+    feminine: {
+      toward: ["af_nicole"],
+      away: ["af_jessica", "af_sarah", "af_heart"],
+      weight: 0.4,
+    },
+    masculine: {
+      toward: ["am_onyx", "am_echo"],
+      away: ["am_fenrir", "am_eric"],
+      weight: 0.5,
+    },
+  },
+  strained: {
+    feminine: {
+      toward: ["af_sarah", "af_jessica"],
+      away: ["af_aoede", "af_bella", "af_nicole"],
+      weight: 0.4,
+    },
+    masculine: {
+      toward: ["am_eric"],
+      away: ["am_onyx", "am_michael"],
+      weight: 0.35,
+    },
+  },
+};
+
+/**
+ * Melodic range as a style direction: wide-melody voices minus flat-melody
+ * voices, per presentation, American-only on both sides so gender and accent
+ * cancel (measured F0 IQR extremes: am_santa 94 vs am_onyx 21). Dialects
+ * scale it — Irish speech ranges wider, Scottish narrower (the direction
+ * simply reverses; the runtime clamps negative weights), South Asian English
+ * slightly wider. This supports the client-side intonation contour from
+ * underneath rather than replacing it.
+ */
+const BUILTIN_MELODICITY_DIRECTIONS: Record<
+  LocalVoicePresentation,
+  { wide: readonly string[]; flat: readonly string[] }
+> = {
+  feminine: {
+    wide: ["af_jessica", "af_sarah", "af_kore"],
+    flat: ["af_river", "af_bella", "af_alloy"],
+  },
+  masculine: {
+    wide: ["am_santa", "am_fenrir", "am_liam"],
+    flat: ["am_onyx", "am_echo", "am_adam"],
+  },
+};
+
+const BUILTIN_MELODICITY_BY_ACCENT: ReadonlyMap<string, number> = new Map([
+  ["irish-english", 0.25],
+  ["scottish-english", -0.2],
+  ["indian-english", 0.15],
+  ["pakistani-english", 0.15],
+  ["sri-lankan-english", 0.15],
+  ["bengali-influenced-english", 0.15],
+]);
+
+export function builtinMelodicityRealizationBlend(args: {
+  engineVoiceId: string;
+  accentDefinitionId: unknown;
+  speechprintInfluence?: unknown;
+}): BuiltinAccentRealizationBlendV1 | null {
+  if (!/^[ab][fm]_/u.test(args.engineVoiceId)) return null;
+  const accentId =
+    normalizeVoiceAccentDefinitionId(args.accentDefinitionId) ??
+    normalizeVoiceAccentDefinitionId(args.speechprintInfluence);
+  const signedWeight = accentId
+    ? BUILTIN_MELODICITY_BY_ACCENT.get(accentId) ?? 0
+    : 0;
+  if (signedWeight === 0) return null;
+  const presentation: LocalVoicePresentation =
+    args.engineVoiceId[1] === "m" ? "masculine" : "feminine";
+  const direction = BUILTIN_MELODICITY_DIRECTIONS[presentation];
+  return signedWeight > 0
+    ? {
+        towardEngineVoiceIds: direction.wide,
+        awayEngineVoiceIds: direction.flat,
+        weight: signedWeight,
+      }
+    : {
+        towardEngineVoiceIds: direction.flat,
+        awayEngineVoiceIds: direction.wide,
+        weight: -signedWeight,
+      };
+}
+
+export function builtinMoodRealizationBlend(args: {
+  engineVoiceId: string;
+  deliveryMood: unknown;
+}): BuiltinAccentRealizationBlendV1 | null {
+  const mood = normalizeVoiceDeliveryMood(args.deliveryMood);
+  if (mood === "neutral") return null;
+  if (!/^[ab][fm]_/u.test(args.engineVoiceId)) return null;
+  const presentation: LocalVoicePresentation =
+    args.engineVoiceId[1] === "m" ? "masculine" : "feminine";
+  const direction = BUILTIN_MOOD_REALIZATION_DIRECTIONS[mood][presentation];
+  return {
+    towardEngineVoiceIds: direction.toward,
+    awayEngineVoiceIds: direction.away,
+    weight: direction.weight,
+  };
+}
+
 export const BOT_VOICE_TEXTURE_PRESETS = [
   "clean",
   "crt-speaker",

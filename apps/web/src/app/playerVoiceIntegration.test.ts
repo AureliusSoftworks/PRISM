@@ -4,64 +4,49 @@ import test from "node:test";
 
 const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 
-test("Chat settings expose the persisted Zen player voice controls", () => {
-  assert.match(source, /Speak my messages in Zen/);
-  assert.match(source, /id="settings-player-premium-voice"/);
-  assert.match(source, /id="settings-player-local-voice"/);
-  assert.match(source, /Premium voice/);
-  assert.match(source, /Local fallback/);
-  assert.match(source, /playerAudioVoiceProfile/);
-  assert.match(source, /zenPlayerVoiceEnabled/);
-  assert.match(source, /Preview Premium voice/);
-  assert.match(source, /Preview local fallback/);
-});
-
-test("Zen player voice toggle captures the checked value before updating state", () => {
-  const toggleStart = source.indexOf("Speak my messages in Zen");
-  const toggleMarkup = source.slice(Math.max(0, toggleStart - 1_200), toggleStart);
-
-  assert.match(
-    toggleMarkup,
-    /const checked = event\.currentTarget\.checked;[\s\S]*?zenPlayerVoiceEnabled: checked/,
-  );
-  assert.doesNotMatch(
-    toggleMarkup,
-    /setSettings\(\(previous\)[\s\S]*?event\.currentTarget\.checked/,
-  );
-});
-
-test("immersive Zen reveals player text through the player-voice presentation path", () => {
+function zenPlayerRevealSource(): string {
   const start = source.indexOf("const presentChatPlayerMessage =");
+  assert.ok(start >= 0, "presentChatPlayerMessage must exist");
   const end = source.indexOf("const playSignalProducerGuestActionSfx", start);
-  const playerPlayback = source.slice(start, end);
+  assert.ok(end > start, "player reveal block must precede Signal SFX");
+  return source.slice(start, end);
+}
+
+test("the player never audibly talks in Zen", () => {
+  const playerReveal = zenPlayerRevealSource();
+  // The player line streams on the quiet reveal clock only: no synthesis
+  // request, no audio enqueue, no player voice profile anywhere.
+  assert.match(playerReveal, /runSilentFallback\(\);/u);
+  assert.doesNotMatch(
+    playerReveal,
+    /resolvePlayerVoicePlayback|\/api\/voices\/synthesize|enqueueEnglishVoice/u,
+  );
+  assert.doesNotMatch(source, /zenPlayerVoiceEnabled/u);
+  assert.doesNotMatch(source, /playerAudioVoiceProfile/u);
+  assert.doesNotMatch(source, /Speak my messages in Zen/u);
+  assert.doesNotMatch(source, /from "\.\/playerVoice"/u);
+  assert.doesNotMatch(source, /id="settings-player-premium-voice"/u);
+  assert.doesNotMatch(source, /id="settings-player-local-voice"/u);
+});
+
+test("immersive Zen still reveals player text on the quiet reveal clock", () => {
+  const playerReveal = zenPlayerRevealSource();
   assert.match(
-    playerPlayback,
+    playerReveal,
     /voiceSpokenText\(messageText, \{ leadingMarkedAction: true \}\)/,
   );
   assert.match(
-    playerPlayback,
-    /const voiceSelection = voicePlaybackSelectionRef\.current;/,
+    playerReveal,
+    /const silentRevealDurationMs = fallbackDurationMs;/u,
   );
+  assert.match(playerReveal, /startChatSpeechReveal/);
+  assert.match(playerReveal, /bundledActionSfxCueAtMs/);
+  assert.match(playerReveal, /playChatPlayerActionSfx\(messageText\)/);
+  assert.match(playerReveal, /cancelReveal/u);
   assert.match(
-    playerPlayback,
-    /resolvePlayerVoicePlayback\(\{[\s\S]*?voiceMode: voiceSelection\.voiceMode,[\s\S]*?englishVoiceEngine: voiceSelection\.englishVoiceEngine/,
+    playerReveal,
+    /setZenPlayerSpeechReveal\(\{ messageId, content: messageText, revealKey \}\);/u,
   );
-  assert.match(
-    playerPlayback,
-    /enqueueEnglishVoice\([\s\S]*?cleanProfile,[\s\S]*?revealKey,[\s\S]*?false,/,
-  );
-  assert.match(
-    playerPlayback,
-    /const performanceText = voicePerformanceTextFromActionCues\(messageText, \{[\s\S]*?leadingMarkedAction: true,[\s\S]*?omitLocalFoleyTags: true/,
-  );
-  assert.match(
-    playerPlayback,
-    /engine === "elevenlabs" && performanceText[\s\S]*?elevenLabsText: performanceText/,
-  );
-  assert.match(playerPlayback, /bundledActionSfxCueAtMs/);
-  assert.match(playerPlayback, /playChatPlayerActionSfx\(messageText\)/);
-  assert.match(playerPlayback, /startChatSpeechReveal/);
-
   assert.match(
     source,
     /if \(chatImmersivePresentation\) \{[\s\S]*?presentChatPlayerMessage\([\s\S]*?optimisticMessageId/u,
@@ -69,34 +54,6 @@ test("immersive Zen reveals player text through the player-voice presentation pa
   assert.match(
     source,
     /chatImmersivePresentation &&[\s\S]*?zenPlayerRevealTimeline[\s\S]*?speechRevealVisibleTokenCount/,
-  );
-});
-
-test("immersive Zen uses audio-owned player reveal while transcript Chat stays immediate", () => {
-  const start = source.indexOf("const presentChatPlayerMessage =");
-  const end = source.indexOf("const playSignalProducerGuestActionSfx", start);
-  const playerPlayback = source.slice(start, end);
-
-  assert.match(
-    playerPlayback,
-    /let revealStarted = false;[\s\S]*?if \(revealStarted \|\| revealFinished \|\| controller\.signal\.aborted\) return;[\s\S]*?revealStarted = true;/u,
-  );
-  assert.match(
-    playerPlayback,
-    /onStart: \(durationMs\) => \{[\s\S]*?flushSync\(\(\) => \{[\s\S]*?beginReveal\(/u,
-  );
-  assert.doesNotMatch(playerPlayback, /waitForPlayerTextPaint/u);
-  assert.match(
-    playerPlayback,
-    /const silentRevealDurationMs = fallbackDurationMs;/u,
-  );
-  assert.match(
-    playerPlayback,
-    /!settings\.zenPlayerVoiceEnabled \|\|[\s\S]*?settings\.voiceVolume <= 0[\s\S]*?runSilentFallback\(\)/u,
-  );
-  assert.equal(
-    source.match(/presentChatPlayerMessage\([^)]*optimistic[^)]*\)/gu)?.length,
-    2,
   );
   assert.equal(
     source.match(
@@ -106,44 +63,7 @@ test("immersive Zen uses audio-owned player reveal while transcript Chat stays i
   );
   assert.match(
     source,
-    /Chat returns through its dedicated renderer above\.[\s\S]*Sandbox-only, so it must never consume[\s\S]*Chat's player-voice reveal timeline/u,
-  );
-  assert.match(playerPlayback, /onCancel: cancelReveal/u);
-  assert.match(
-    source,
-    /const zenPlayerMessageRevealActive = Boolean\([\s\S]*?!speechRevealTimelineComplete\(timeline\)/u,
-  );
-  assert.match(
-    source,
-    /const zenInitialThinkingActive =[\s\S]*?!zenPlayerMessageRevealActive[\s\S]*?pendingReplyStartMessageCount === 0/u,
-  );
-  assert.match(
-    source,
-    /setZenPlayerSpeechReveal\(\{ messageId, content: messageText, revealKey \}\);[\s\S]*?setZenInitialStarterOverlayActive\(false\);/u,
-  );
-  assert.match(
-    source,
-    /const zenPendingReplyPlaceholderVisible =[\s\S]*?!zenPlayerMessageRevealActive[\s\S]*?!chatAssistantRevealInProgress/u,
-  );
-  assert.match(
-    source,
-    /const zenInitialThinkingNode = useMemo\(\(\) => \{[\s\S]*?if \(!zenInitialThinkingActive\) return null;/u,
-  );
-  assert.doesNotMatch(source, /zenInitialReplyRevealActive/u);
-  assert.match(
-    source,
-    /: !zenPlayerMessageRevealActive &&\s*\(zenFollowupActive \|\|/u,
-  );
-});
-
-test("Zen keeps the player speech clock across message updates and holds text until it exists", () => {
-  assert.match(
-    source,
-    /for \(const temporalKey of chatSpeechRevealByKeyRef\.current\.keys\(\)\) \{[\s\S]*?if \(temporalKey\.startsWith\("zen-player:"\)\) continue;[\s\S]*?!activeMessageKeys\.has\(temporalKey\)/u,
-  );
-  assert.match(
-    source,
-    /const forcedVisibleTokenCount = zenPlayerRevealMatches[\s\S]*?zenPlayerRevealTimeline[\s\S]*?speechRevealVisibleTokenCount\(zenPlayerRevealTimeline\)[\s\S]*?: 0/u,
+    /for \(const temporalKey of chatSpeechRevealByKeyRef\.current\.keys\(\)\) \{[\s\S]*?if \(temporalKey\.startsWith\("zen-player:"\)\) continue;/u,
   );
   assert.match(
     source,
@@ -151,37 +71,18 @@ test("Zen keeps the player speech clock across message updates and holds text un
   );
 });
 
-test("Zen arms sparse listening reactions on the player speech clock", () => {
-  const start = source.indexOf("const presentChatPlayerMessage =");
-  const end = source.indexOf("const playSignalProducerGuestActionSfx", start);
-  const playerPlayback = source.slice(start, end);
-
-  assert.match(source, /buildZenPlayerListenerReactionPlanV1/);
-  assert.match(source, /zenLiveBotActionFromPlayerListenerReaction/);
-  assert.match(source, /zenPlayerListenerVocalFoleyToActionSfxKind/);
-  assert.match(source, /isZenPlayerListeningReactionAction/);
-  assert.match(
-    playerPlayback,
-    /buildZenPlayerListenerReactionPlanV1\(\{[\s\S]*?listenerBotId: listeningBot\.id/u,
+test("spoken player presence defers to the Default Prism voice", () => {
+  // Zen action foley, Signal producer-guest cues, and Debate player foley all
+  // speak through the Default PRISM voice profile — never a player voice.
+  const playerSfxOwners = source.match(
+    /ownerKind: "player",\s*voiceProfile: settings\.prismDefaultBotAudioVoiceProfile/gu,
+  );
+  assert.ok(
+    (playerSfxOwners?.length ?? 0) >= 3,
+    "player-owned foley must route through the Default PRISM voice",
   );
   assert.match(
-    playerPlayback,
-    /listeningReactionAtMs = resolveListenerReactionAtMs\(/u,
-  );
-  assert.match(
-    playerPlayback,
-    /setZenLiveBotAction\(\s*zenLiveBotActionFromPlayerListenerReaction\(/u,
-  );
-  assert.match(
-    playerPlayback,
-    /playPreparedCoffeeActionSfx\(\{[\s\S]*?kind,[\s\S]*?ownerKind: "bot"/u,
-  );
-  assert.match(
-    playerPlayback,
-    /finishChatSpeechReveal\(revealKey\);[\s\S]*?clearListeningReaction\(\)/u,
-  );
-  assert.doesNotMatch(
-    playerPlayback,
-    /zenPlayerMessageRevealActive\s*=\s*false/u,
+    source,
+    /coffeePlayerPlaybackProfile\(\s*settings\.prismDefaultBotAudioVoiceProfile,?\s*\)/u,
   );
 });

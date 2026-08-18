@@ -42,6 +42,59 @@ describe("stageActionDirector", () => {
     );
   });
 
+  it("keeps every scripted Director beat body-neutral", () => {
+    // The Director cannot see a speaker's anatomy; fingers/arms/shoulders are
+    // persona-invite territory (the model writes for its own body).
+    const moodHints = [
+      "neutral",
+      "warm",
+      "joyful",
+      "guarded",
+      "strained",
+      "amused",
+      "stern",
+      "attentive",
+      "waiting",
+      "confused",
+    ] as const;
+    for (const moodHint of moodHints) {
+      for (let index = 0; index < 40; index += 1) {
+        const action = selectScriptedStageActionV1({
+          lane: "coffee",
+          seed: `coffee:anatomy:${moodHint}:${index}`,
+          moodHint,
+        });
+        assert.ok(action);
+        assert.doesNotMatch(
+          action!.action,
+          /\b(?:finger|fingers|arm|arms|shoulder|shoulders|hand|hands|fist|fists)\b/iu,
+          `scripted beat assumes limbs: "${action!.action}"`,
+        );
+      }
+    }
+  });
+
+  it("narrows a single eye for one-eyed speakers", () => {
+    let sawSingularEye = false;
+    for (let index = 0; index < 200 && !sawSingularEye; index += 1) {
+      const twoEyed = selectScriptedStageActionV1({
+        lane: "coffee",
+        seed: `coffee:eye:${index}`,
+        moodHint: "stern",
+      });
+      if (twoEyed?.action !== "narrows their eyes") continue;
+      const oneEyed = selectScriptedStageActionV1({
+        lane: "coffee",
+        seed: `coffee:eye:${index}`,
+        moodHint: "stern",
+        speakerEyeCount: 1,
+      });
+      assert.equal(oneEyed?.action, "narrows their eye");
+      sawSingularEye = true;
+    }
+    assert.ok(sawSingularEye, "never sampled the narrowed-eyes beat");
+  });
+
   it("honors exclusions before the invite roll", () => {
     const plan = planStageActionV1({
       lane: "signal",
@@ -145,6 +198,52 @@ describe("stageActionDirector", () => {
     });
     assert.equal(stripped.action, "narrows their eyes");
     assert.equal(stripped.spokenText, "Sure.");
+  });
+
+  it("accepts body-part-led beats from bespoke anatomy personas", () => {
+    // "antennae" is a Latin plural, so the s-form verb heuristic missed it and
+    // the beat was spoken on the table (Coffee review 8e012a9d, turn 2).
+    const leading = extractLeadingStageActionV1({
+      text: "*antennae perk up slightly* The Chum Bucket's pizza is superior by design.",
+      lane: "coffee",
+    });
+    assert.deepEqual(leading, {
+      action: "antennae perk up slightly",
+      spokenText: "The Chum Bucket's pizza is superior by design.",
+    });
+    // Copular sentences that merely start with a body part stay spoken.
+    assert.equal(
+      validateStageActionTextV1({
+        action: "antennae are delicate instruments",
+        lane: "coffee",
+      }),
+      null,
+    );
+  });
+
+  it("drops an invalid multi-word leading action instead of speaking it", () => {
+    const firstPerson = extractAndStripStageActionV1({
+      text: "*I fold my arms* Fine, have it your way.",
+      lane: "coffee",
+    });
+    assert.equal(firstPerson.action, null);
+    assert.equal(firstPerson.spokenText, "Fine, have it your way.");
+
+    const namesParticipant = extractAndStripStageActionV1({
+      text: "*glares at Squidward* The crust is the point.",
+      lane: "coffee",
+      participantNames: ["Squidward", "SpongeBob"],
+    });
+    assert.equal(namesParticipant.action, null);
+    assert.equal(namesParticipant.spokenText, "The crust is the point.");
+
+    // Single-word leading emphasis is not a stage direction; keep it spoken.
+    const emphasis = extractAndStripStageActionV1({
+      text: "*This* is the best pizza in Bikini Bottom.",
+      lane: "coffee",
+    });
+    assert.equal(emphasis.action, null);
+    assert.equal(emphasis.spokenText, "*This* is the best pizza in Bikini Bottom.");
   });
 
   it("keeps valid model actions and falls back to the Director otherwise", () => {

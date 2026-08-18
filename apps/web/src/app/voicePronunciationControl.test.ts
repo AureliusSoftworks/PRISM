@@ -34,9 +34,9 @@ describe("cross-accent local voice pronunciation controls", () => {
     );
   });
 
-  it("offers the same control for the Zen player voice", () => {
-    assert.match(pageSource, /label="Zen accent map"/u);
-    assert.match(pageSource, /playerAudioVoiceProfile: nextProfile/u);
+  it("offers no player accent map — player speech defers to Default PRISM", () => {
+    assert.doesNotMatch(pageSource, /label="Zen accent map"/u);
+    assert.doesNotMatch(pageSource, /playerAudioVoiceProfile/u);
   });
 
   it("keeps Avatar Studio map interactions save-only and auditions beneath the bot", () => {
@@ -79,19 +79,6 @@ describe("cross-accent local voice pronunciation controls", () => {
       silentInteractionSource,
       /onPreviewSource|onPreviewCurrent|previewVoice|playPronunciationAtlasPreview|previewSelectedVoice/u,
     );
-
-    const zenAtlasSource = pageSource.slice(
-      pageSource.indexOf('label="Zen accent map"'),
-      pageSource.indexOf('label="Zen accent map"') + 4200,
-    );
-    const zenCommitSource = zenAtlasSource.slice(
-      zenAtlasSource.indexOf("onCommit="),
-    );
-    assert.match(zenCommitSource, /playerAudioVoiceProfile: nextProfile/u);
-    assert.doesNotMatch(
-      zenCommitSource,
-      /previewSelectedVoice|playPronunciationAtlasPreview|\.play\(/u,
-    );
   });
 
   it("keeps synthesis out of the map and inside the bot's audition dock", () => {
@@ -112,8 +99,14 @@ describe("cross-accent local voice pronunciation controls", () => {
   it("drills into crowded regions through ephemeral lenses that never persist", () => {
     // The lens zooms the pad, artwork, and pointer math; committed pins stay
     // in global map space and no lens id ever rides the saved selection.
-    assert.match(atlasSource, /PRONUNCIATION_ATLAS_LENSES\.map/u);
-    assert.match(atlasSource, /aria-label="Map lens"/u);
+    // Lens chips are gone: the map itself is the navigator. The world view
+    // stashes drill intent instead of placing the pin, and a single control
+    // returns to the globe.
+    assert.doesNotMatch(atlasSource, /PRONUNCIATION_ATLAS_LENSES\.map/u);
+    assert.match(atlasSource, /aria-label="Map view"/u);
+    assert.match(atlasSource, /◂ World map/u);
+    assert.match(atlasSource, /pendingDrillRef\.current = drill\.id;\s*return current;/u);
+    assert.match(atlasSource, /pronunciationAtlasNearestDrillLens\(globalPoint, lens\)/u);
     assert.match(atlasSource, /useState<string>\("world"\)/u);
     assert.match(
       atlasSource,
@@ -235,7 +228,9 @@ describe("cross-accent local voice pronunciation controls", () => {
   });
 
   it("offers nearby accent choices and a single stage-level audition dock", () => {
-    assert.match(atlasSource, /Nearby choices/u);
+    assert.doesNotMatch(atlasSource, /Nearby choices/u);
+    assert.match(atlasSource, /Local variants/u);
+    assert.match(atlasSource, /variantCandidates\.length > 0/u);
     assert.match(atlasSource, /pronunciationAtlasNearbyCandidates/u);
     assert.match(pageSource, /className=\{styles\.botAvatarVoiceTestDock\}/u);
     assert.match(pageSource, /English[\s\S]*Premium[\s\S]*Babble[\s\S]*Bottish/u);

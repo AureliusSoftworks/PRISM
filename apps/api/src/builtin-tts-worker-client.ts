@@ -7,6 +7,7 @@ export interface BuiltinTtsChildRequest {
   text: string;
   profile: BotAudioVoiceProfileV1;
   protectedPhrases?: string[];
+  deliveryMood?: string;
 }
 
 export type BuiltinTtsChildResponse =
@@ -29,6 +30,7 @@ type GenerateArgs = {
   text: string;
   profile: BotAudioVoiceProfileV1;
   protectedPhrases?: readonly string[];
+  deliveryMood?: string;
   signal?: AbortSignal;
 };
 
@@ -166,6 +168,7 @@ export class BuiltinTtsWorkerClient {
         ...(args.protectedPhrases?.length
           ? { protectedPhrases: [...args.protectedPhrases] }
           : {}),
+        ...(args.deliveryMood ? { deliveryMood: args.deliveryMood } : {}),
       };
       const job: PendingJob = {
         request,

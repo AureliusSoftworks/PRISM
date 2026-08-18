@@ -252,14 +252,18 @@ describe("mode tutorials", () => {
     assert.match(step?.body ?? "", /short in-character activity caption/u);
     assert.match(
       step?.body ?? "",
-      /submitted words stay off the canvas until their audio actually starts/u,
+      /submitted words stream onto the canvas from a quiet reveal clock/u,
+    );
+    assert.match(step?.body ?? "", /the player is never voiced aloud/u);
+    assert.match(
+      step?.body ?? "",
+      /spoken player presence defers to the Default Prism voice/u,
     );
     assert.match(
       step?.body ?? "",
       /Prompt Center send with wildcards in immersive Zen first resolves to its concrete final wording/u,
     );
-    assert.match(step?.body ?? "", /neither the raw command nor an unresolved placeholder flashes or speaks early/u);
-    assert.match(step?.body ?? "", /if voice cannot start, Zen safely continues in text/u);
+    assert.match(step?.body ?? "", /neither the raw command nor an unresolved placeholder flashes early/u);
     assert.match(
       step?.body ?? "",
       /Transcript Chat treats \/prompts, !decks, and \{slots\} as ordinary words/u,
@@ -494,7 +498,7 @@ describe("mode tutorials", () => {
     assert.match(step.body, /does not move the bot across regions/u);
     assert.match(step.body, /without exposing engine regions/u);
     assert.match(step.body, /All accents/u);
-    assert.match(step.body, /Nearby choices/u);
+    assert.match(step.body, /named local variants such as Cockney as explicit chips/u);
     assert.match(step.body, /Moving, dropping, or choosing a pin is always silent/u);
     assert.match(step.body, /buttons beneath that bot in its preview panel/u);
     assert.match(step.body, /One pin controls both engines/u);
@@ -2225,13 +2229,14 @@ describe("mode tutorials", () => {
           copy,
           /Action text stays visual and is never read aloud as dialogue/u,
         );
+        assert.match(copy, /Player lines are never voiced aloud/u);
         assert.match(
           copy,
-          /recognized vocal Action such as laughs becomes an ElevenLabs performance direction/u,
+          /PRISM speaks it with the Default Prism voice/u,
         );
         assert.match(
           copy,
-          /fart, burp, and cough actions stay out of the voice request and play their bundled local Foley/u,
+          /fart, burp, and cough actions play their bundled local Foley/u,
         );
       }
     }

@@ -5,6 +5,10 @@ import { useEffect } from "react";
 import { PrismDomAdaptiveQualityController } from "./prismDomAdaptiveQuality";
 import { publishPrismFrameRate } from "./prismFrameRate";
 
+/** Gaps beyond this are machine suspensions (sleep, debugger, tab thaw), not
+ * slow frames; they reset the window instead of polluting the average. */
+const PRISM_FRAME_RATE_SUSPENSION_GAP_MS = 10_000;
+
 export function PrismAdaptiveDomQualityGovernor(): null {
   useEffect(() => {
     const controller = new PrismDomAdaptiveQualityController(performance.now());
@@ -12,7 +16,6 @@ export function PrismAdaptiveDomQualityGovernor(): null {
     let previousFrameTime = performance.now();
     let fpsWindowStartedAt = previousFrameTime;
     let fpsWindowFrameCount = 0;
-    let hasPublishedFps = false;
 
     const tick = (nowMs: number): void => {
       const deltaMs = Math.max(0, nowMs - previousFrameTime);
@@ -23,13 +26,15 @@ export function PrismAdaptiveDomQualityGovernor(): null {
         foreground,
       });
       previousFrameTime = nowMs;
-      if (foreground && deltaMs > 0 && deltaMs <= 250) {
+      // Long frames are real frames: a 300ms main-thread stall is exactly the
+      // signal this meter exists to report, so it counts with its full
+      // duration. Discarding slow frames (and publishing single-frame instant
+      // rates on resume) made a 3 FPS room read as 33 — and once as 240 —
+      // which also kept the FPS-gated load sheds from ever engaging.
+      if (foreground && deltaMs > 0 && deltaMs <= PRISM_FRAME_RATE_SUSPENSION_GAP_MS) {
         fpsWindowFrameCount += 1;
         const elapsedMs = nowMs - fpsWindowStartedAt;
-        if (!hasPublishedFps) {
-          publishPrismFrameRate(1_000 / deltaMs);
-          hasPublishedFps = true;
-        } else if (elapsedMs >= 200) {
+        if (elapsedMs >= 200) {
           publishPrismFrameRate((fpsWindowFrameCount * 1_000) / elapsedMs);
           fpsWindowStartedAt = nowMs;
           fpsWindowFrameCount = 0;
@@ -37,7 +42,6 @@ export function PrismAdaptiveDomQualityGovernor(): null {
       } else {
         fpsWindowStartedAt = nowMs;
         fpsWindowFrameCount = 0;
-        hasPublishedFps = false;
       }
       frameId = window.requestAnimationFrame(tick);
     };

@@ -97,6 +97,40 @@ describe("composeBotSystemPrompt", () => {
     assert.doesNotMatch(plain ?? "", /Vernacular/u);
   });
 
+  it("composes power-granted speech registers as full sections, not truncated block lines", () => {
+    const powers = JSON.stringify([
+      {
+        version: 1,
+        id: "noir-cloak",
+        name: "Noir Narrator",
+        intent: "Narrates like a hardboiled detective.",
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(
+            "Noir Narrator",
+            "Narrates like a hardboiled detective.",
+          ),
+          selfCue: "unused: the canonical register section replaces this",
+          observerCue: "Speaks in noir narration.",
+          effects: [{ type: "speech_register", register: "noir" }],
+          ruleLabels: ["Noir narrator"],
+        },
+      },
+    ]);
+    const prompt = composeBotSystemPrompt("Marlowe", "A private eye.", false, powers);
+    assert.ok(prompt);
+    // Full canonical guidance survives — the compact powers block would have
+    // clipped it at 280 characters.
+    assert.match(
+      prompt!,
+      /Speech register — Noir narrator: [\s\S]*slow right hook/u,
+    );
+    assert.match(prompt!, /Register rules: keep standard English spelling/u);
+    assert.doesNotMatch(prompt!, /Active Powers:[\s\S]*Speech register/u);
+  });
+
   it("trims whitespace on both fields before composing", () => {
     const prompt = composeBotSystemPrompt("  Tim  ", "   You help with code.   ");
     assert.ok(prompt);

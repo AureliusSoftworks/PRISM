@@ -2049,6 +2049,20 @@ describe("Coffee seat arrival CSS", () => {
     );
   });
 
+  it("floors checked-out seat saturation so bots never go ghost-grey", () => {
+    // Review 8e012a9d: Plankton rendered nearly colorless at disposition 0.01.
+    // The semantic mood scale may bottom out, but the rendered seat keeps a
+    // recognizable tint (0.38 floor) and bounded grayscale.
+    assert.match(
+      pageSource,
+      /nearDesaturated\s*\?\s*Math\.max\(\s*Math\.min\(rawSaturation, COFFEE_NEAR_DESATURATED_SATURATION\),\s*0\.38,\s*\)/u,
+    );
+    assert.match(
+      pageSource,
+      /const grayscaleLimit = nearDesaturated \? 0\.52 : 0\.38;/u,
+    );
+  });
+
   it("keeps Table Talk permanent for joined Coffee sessions", () => {
     assert.match(
       pageSource,

@@ -11,6 +11,8 @@ import {
   botPowerMumblesSpeechV1,
   botPowerSelfCueLinesV1,
   botPowerSpeechObfuscationAuthoringCueV1,
+  botPowerSpeechRegistersV1,
+  botSpeechRegisterAuthoringCueV1,
   botVernacularAuthoringCueV1,
   botVernacularIdFromStoredVoiceProfile,
   buildBotPowersPromptBlock,
@@ -194,7 +196,10 @@ export function composeBotSystemPrompt(
     (power) => !power.compiled?.effects.some(
       (effect) =>
         (directIneptitudeCue && effect.type === "ineptitude") ||
-        effect.type === "addressed_insult",
+        effect.type === "addressed_insult" ||
+        // Registers carry canonical long-form cues emitted as their own
+        // section below; the compact powers block would truncate them.
+        effect.type === "speech_register",
     ),
   );
   const powersPrompt = buildBotPowersPromptBlock([
@@ -218,7 +223,18 @@ export function composeBotSystemPrompt(
   const vernacularCue = botVernacularAuthoringCueV1(
     botVernacularIdFromStoredVoiceProfile(options?.audioVoiceProfile),
   );
-  if (!trimmedName && !trimmedPrompt && !powersPrompt && !vernacularCue) {
+  // Power-granted speech registers keep their full canonical guidance by
+  // composing as sections rather than compact powers-block lines.
+  const registerCues = botPowerSpeechRegistersV1(powers)
+    .map((register) => botSpeechRegisterAuthoringCueV1(register))
+    .filter((cue) => cue.length > 0);
+  if (
+    !trimmedName &&
+    !trimmedPrompt &&
+    !powersPrompt &&
+    !vernacularCue &&
+    registerCues.length === 0
+  ) {
     return undefined;
   }
   const preamble = displayName.length > 0
@@ -237,6 +253,7 @@ export function composeBotSystemPrompt(
     interactionPolicy,
     trimmedPrompt,
     vernacularCue,
+    ...registerCues,
     directConversationPowerPolicy,
     powersPrompt,
   ].filter(

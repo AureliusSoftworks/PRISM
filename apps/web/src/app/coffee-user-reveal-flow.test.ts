@@ -283,6 +283,22 @@ describe("coffee user reveal flow", () => {
     );
   });
 
+  it("keeps ownership when a follow-up action message is the newest user row", () => {
+    // Coffee review 8e012a9d: sending `*twiddles thumbs*` after a text message
+    // re-surfaced the earlier send as a phantom line beside its persisted twin.
+    assert.equal(
+      coffeePersistedUserLineOwnsPendingReveal({
+        messages: [
+          { role: "user", content: "...oh really? I'll have to check that out." },
+          { role: "assistant", content: "You're gonna love it!" },
+          { role: "user", content: "*Twiddles thumbs*" },
+        ],
+        userRevealText: "...oh really? I'll have to check that out.",
+      }),
+      true,
+    );
+  });
+
   it("keeps Power Mute ellipsis visible when asked", () => {
     assert.equal(
       coffeeTableMessageContentIsVisible("...", undefined, {

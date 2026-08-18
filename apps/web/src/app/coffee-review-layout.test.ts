@@ -49,6 +49,19 @@ describe("Coffee review participant layout", () => {
     assert.ok((five[4]?.leftPercent ?? 0) > 50);
   });
 
+  it("draws small tables on a tighter ring so seats hug the table", () => {
+    const twoBot = coffeeReviewParticipantLayout(2);
+    const fiveBot = coffeeReviewParticipantLayout(5);
+    const radialX = (position: { leftPercent: number }) =>
+      Math.abs(position.leftPercent - 50);
+    const twoBotMax = Math.max(...twoBot.bots.map(radialX));
+    const fiveBotMax = Math.max(...fiveBot.bots.map(radialX));
+    // A duo's seats sit meaningfully closer to the table than a full ring's.
+    assert.ok(twoBotMax < fiveBotMax * 0.82);
+    // The player contracts on the same scale so the circle stays a circle.
+    assert.ok(twoBot.player.topPercent < fiveBot.player.topPercent);
+  });
+
   it("lifts the live player seat above the composer; replay keeps the circle", () => {
     const layout = coffeeReviewParticipantLayout(4);
     // The pure circle parks the player low enough to sit under the composer.

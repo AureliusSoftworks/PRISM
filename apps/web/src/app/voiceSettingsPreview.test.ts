@@ -718,13 +718,15 @@ describe("voice settings preview", () => {
     assert.match(pageSource, /2 Local/);
     assert.match(pageSource, /3 Premium/);
     assert.match(pageSource, /import \{ PronunciationAtlas \}/);
-    assert.match(pageSource, /label="Zen accent map"/);
+    // The player has no accent map or local voice picker: player speech stays
+    // silent in Zen and defers to the Default PRISM voice elsewhere.
+    assert.doesNotMatch(pageSource, /label="Zen accent map"/);
+    assert.doesNotMatch(pageSource, /filteredPlayerLocalVoiceOptions/);
     assert.doesNotMatch(
       pageSource,
       /Use the Pronunciation Atlas in the Vocalizer console above/,
     );
     assert.match(pageSource, /filteredSystemVoiceOptions\.map/);
-    assert.match(pageSource, /filteredPlayerLocalVoiceOptions\.map/);
     assert.doesNotMatch(pageSource, /selectOfflineVoiceAccent/);
     assert.match(pageStyles, /\.botVoicePresentationChips/);
     assert.match(pageStyles, /\.botVoiceNameGrid/);

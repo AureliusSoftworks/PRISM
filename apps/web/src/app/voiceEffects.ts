@@ -5,6 +5,8 @@ import {
   normalizeBotAudioVoiceProfileV1,
   normalizeBotVoiceVolume,
   normalizeVoiceEffect,
+  voiceIntonationDetuneCents,
+  voiceIntonationPlanForProfile,
   expectedVoicePlaybackDurationMs,
   resolveBotVoiceCharacter,
   resolveVoicePlaybackTransform,
@@ -658,6 +660,7 @@ export async function renderOfflineVoiceTake(args: {
     node.playbackRate.setValueAtTime(transform.tempo, 0);
     node.formantStrength.setValueAtTime(1, 0);
     const basePitchCents = transform.pitchCents + effectDetuneCents;
+    const intonationPlan = voiceIntonationPlanForProfile(profile);
     for (
       let elapsedSeconds = 0, index = 0;
       elapsedSeconds < speechDurationSeconds;
@@ -666,7 +669,14 @@ export async function renderOfflineVoiceTake(args: {
       const pitchRatio = 2 ** (
         (
           basePitchCents +
-          voiceLiltDetuneCents(profile.lilt, elapsedSeconds)
+          voiceLiltDetuneCents(profile.lilt, elapsedSeconds) +
+          // Dialect intonation: this buffer is the phrase, so the contour
+          // spans it and resets naturally at the next streamed clause.
+          voiceIntonationDetuneCents(
+            intonationPlan,
+            elapsedSeconds,
+            speechDurationSeconds,
+          )
         ) / 1_200
       );
       if (index === 0) node.pitch.setValueAtTime(pitchRatio, 0);
@@ -1206,7 +1216,12 @@ export async function playRealtimeVoiceBytes(args: {
         plan: voiceEffect.pitchCorrection,
         pitchOffsetCentsAt: (elapsedSeconds) =>
           (args.detuneCents ?? transform.pitchCents) +
-          voiceLiltDetuneCents(profile.lilt, elapsedSeconds),
+          voiceLiltDetuneCents(profile.lilt, elapsedSeconds) +
+          voiceIntonationDetuneCents(
+            voiceIntonationPlanForProfile(profile),
+            elapsedSeconds,
+            playbackDurationSeconds,
+          ),
       })
     : [];
   const FormantCorrectionNode = await formantCorrectionNodeConstructor(context);
@@ -1251,12 +1266,16 @@ export async function playRealtimeVoiceBytes(args: {
       startAt,
     );
     const basePitchCents = (args.detuneCents ?? transform.pitchCents) + effectDetuneCents;
+    const intonationPlan = voiceIntonationPlanForProfile(profile);
     const pitchAutomationTimes = new Set<number>([0]);
-    if (profile.lilt !== 0) {
+    if (profile.lilt !== 0 || intonationPlan) {
       const contourStep = 0.32;
       for (let at = contourStep; at < playbackDurationSeconds; at += contourStep) {
         pitchAutomationTimes.add(at);
       }
+      // The phrase-final keyframe carries the terminal fall or rise; make
+      // sure the ramp actually lands on it.
+      pitchAutomationTimes.add(Math.max(0, playbackDurationSeconds - 0.02));
     }
     for (const point of pitchCorrectionPoints) {
       if (point.atSeconds > 0 && point.atSeconds < playbackDurationSeconds) {
@@ -1271,6 +1290,11 @@ export async function playRealtimeVoiceBytes(args: {
       const cents =
         basePitchCents +
         voiceLiltDetuneCents(profile.lilt, elapsedSeconds) +
+        voiceIntonationDetuneCents(
+          intonationPlan,
+          elapsedSeconds,
+          playbackDurationSeconds,
+        ) +
         voicePitchCorrectionCentsAt(pitchCorrectionPoints, elapsedSeconds);
       const pitchRatio = 2 ** (cents / 1_200);
       if (index === 0) {

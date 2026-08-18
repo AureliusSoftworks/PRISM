@@ -70,6 +70,7 @@ import {
   coffeeRepairMaxTokensForTurn,
   coffeeSpeakerMaxTokensForTurn,
   coffeeTopicRequiresDirectPersonalAnswer,
+  coffeePlayerPlainlyAddressesBot,
   coffeeSocialSilenceChanceV1,
   coffeeUserMessageIsActionOnly,
   collectCoffeePollVotes,
@@ -5756,6 +5757,54 @@ describe("Coffee group foundation", () => {
       result.attendingSeatBotIds.filter((id): id is string => typeof id === "string"),
       [ALICE.id, CARA.id]
     );
+  });
+
+  it("rests ordinary wrap fatigue between sessions so the cast comes back", () => {
+    // Every wrapped table ends with leave pressure near 1 and engagement
+    // drained; that is bedtime, not a grudge. Even a guaranteed roll must not
+    // turn last night's goodbye into today's empty chairs.
+    const wrapFatigue = {
+      disposition: 0.15,
+      valuesFriction: 0.8,
+      restraint: 0.81,
+      engagement: 0.295,
+      leavePressure: 0.99,
+    };
+    const result = applyCoffeeMoodSessionNoShows({
+      seatBotIds: [ALICE.id, BORIS.id, CARA.id],
+      socialByBotId: {
+        [ALICE.id]: wrapFatigue,
+        [BORIS.id]: wrapFatigue,
+        [CARA.id]: wrapFatigue,
+      },
+      random: () => 0,
+    });
+
+    assert.deepEqual(result.moodAbsentBotIds, []);
+    assert.deepEqual(result.absentBotIds, []);
+    assert.deepEqual(
+      result.attendingSeatBotIds.filter((id): id is string => typeof id === "string"),
+      [ALICE.id, BORIS.id, CARA.id]
+    );
+
+    // A genuine blowup exit (near-desaturated when the bot left) keeps a
+    // reluctance floor even after resting overnight.
+    const blowup = applyCoffeeMoodSessionNoShows({
+      seatBotIds: [ALICE.id, BORIS.id, CARA.id],
+      socialByBotId: {
+        [BORIS.id]: {
+          disposition: 0.01,
+          valuesFriction: 1,
+          restraint: 0.94,
+          engagement: 0.045,
+          leavePressure: 0.99,
+        },
+        [ALICE.id]: wrapFatigue,
+        [CARA.id]: wrapFatigue,
+      },
+      random: () => 0.2,
+    });
+    assert.deepEqual(blowup.moodAbsentBotIds, [BORIS.id]);
   });
 
   it("marks bad-mood Coffee group invitees absent when starting a later session", async () => {
@@ -14602,6 +14651,37 @@ describe("Coffee direct mention routing helpers", () => {
       "I’d test the smallest risky assumption first."
     );
     assert.match(retryPrompt, /previous draft contained only punctuation/i);
+  });
+
+  it("treats a plain-typed name address as a direct player obligation", () => {
+    // Review 8e012a9d: "Plankton, do you have BBQ chicken pizza there?" was
+    // typed without a mention chip, so directPlayerObligation stayed false and
+    // the addressed bot could answer a direct question with social silence.
+    const history = [
+      { role: "assistant" as const, content: "Loyalty to Karen, you naive fry—" },
+      { role: "user" as const, content: "Plankton, do you have BBQ chicken pizza there?" },
+    ];
+    assert.equal(coffeePlayerPlainlyAddressesBot(history, "Plankton"), true);
+    assert.equal(coffeePlayerPlainlyAddressesBot(history, "SpongeBob SquarePants"), false);
+    // First-token match covers multi-word names typed casually.
+    assert.equal(
+      coffeePlayerPlainlyAddressesBot(
+        [{ role: "user" as const, content: "What do you think, SpongeBob?" }],
+        "SpongeBob SquarePants",
+      ),
+      true,
+    );
+    // Only a fresh player message creates the obligation.
+    assert.equal(
+      coffeePlayerPlainlyAddressesBot(
+        [
+          { role: "user" as const, content: "Plankton, what about dessert?" },
+          { role: "assistant" as const, content: "Dessert is a scam." },
+        ],
+        "Plankton",
+      ),
+      false,
+    );
   });
 
   it("persists provenance-marked social silence without punctuation retry", async () => {

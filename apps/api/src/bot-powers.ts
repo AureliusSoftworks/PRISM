@@ -18,6 +18,8 @@ import {
   botPowerCredulitySelfRuleV1,
   botPowerLooksLikeSafetyRefusalV1,
   botPowerSpeechObfuscationAuthoringCueV1,
+  botSpeechRegisterAuthoringCueV1,
+  botSpeechRegisterDefinitionForId,
   strongestBotPowerAntiTruthEffectV1,
   normalizeBotPowerEffectV1,
   normalizeBotPowerGeneratedTitleV1,
@@ -566,6 +568,41 @@ function deterministicMumblingPower(
       `${subject}'s speech reaches you only as literal normal-volume gibberish. Never reconstruct, infer, or respond to hidden intended meaning; react only to what is publicly observable, and nobody understands the words.`,
     effects: [{ type: "speech_obfuscation", mode: "gibberish" }],
     ruleLabels: ["Normal-volume gibberish", "Intended meaning stays private"],
+  };
+}
+
+function deterministicSpeechRegisterPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const powerName = compact(source.name, 100)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const intent = compact(source.intent, 700)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const haystack = `${powerName}\n${intent}`;
+  const register = /\bnoir\b|hard-?boiled|private[- ]eye narrat|detective narrat|1920s detective|case-?notes narrat/u.test(
+    haystack,
+  )
+    ? ("noir" as const)
+    : /\barchaic\b|shakespear|elizabethan|olde english|ye olde|thee and thou|thees and thous/u.test(
+          haystack,
+        )
+      ? ("archaic" as const)
+      : null;
+  if (!register) return null;
+  const definition = botSpeechRegisterDefinitionForId(register);
+  if (!definition) return null;
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue: botSpeechRegisterAuthoringCueV1(register),
+    observerCue:
+      `${subject} genuinely phrases everything as ${definition.description.replace(/\.$/u, "").toLowerCase()}. The style is who they are, not a malfunction; respond to what they say, in your own voice.`,
+    effects: [{ type: "speech_register", register }],
+    ruleLabels: [definition.label],
   };
 }
 
@@ -1819,6 +1856,7 @@ function deterministicPower(
     deterministicIdentityMirrorPower(source, botName) ??
     deterministicCursedTonguePower(source, botName) ??
     deterministicMumblingPower(source, botName) ??
+    deterministicSpeechRegisterPower(source, botName) ??
     deterministicVoicePresencePower(source, botName) ??
     deterministicHearingRepeatPower(source, botName) ??
     deterministicAddressedSpeechCopyPower(source, botName) ??
@@ -1959,6 +1997,11 @@ function compiledEntrySatisfiesIntent(
   if (deterministicMumblingPower(source, "")) {
     return compiled.effects.some(
       (effect) => effect.type === "speech_obfuscation",
+    );
+  }
+  if (deterministicSpeechRegisterPower(source, "")) {
+    return compiled.effects.some(
+      (effect) => effect.type === "speech_register",
     );
   }
   if (deterministicCursedTonguePower(source, "")) {
@@ -2529,6 +2572,7 @@ export async function compileBotPowers(args: {
         '- {"type":"avatar_color_cycle","palette":"spectrum","speed":"steady"},',
         '- {"type":"voice_presence","mode":"loud|quiet"},',
         '- {"type":"speech_obfuscation","mode":"gibberish"},',
+        '- {"type":"speech_register","register":"noir"} (or "archaic"; a consistent placeless speaking style the holder always uses),',
         '- {"type":"cursed_tongue","version":1,"frequency":"frequent","strength":"strong","vocabulary":"uncensored_non_slur","phraseMode":"occasional_2_3_words"},',
         '- {"type":"intermittent_mute","chance":"half","moodPenalty":"small|medium|large"},',
         '- {"type":"intermittent_audibility","chance":"half","listeners":"bots","missEvent":"too_faint_to_make_out|inaudible_ask_repeat"},',
@@ -2612,7 +2656,7 @@ export async function compileBotPowers(args: {
           `Expected powers: ${JSON.stringify(unresolved.map(({ id, authoringMode, name, intent, enabled }) => ({ id, authoringMode, name, intent, enabled })))}`,
           `Prior output: ${compact(raw, 6000) || "(empty)"}`,
           "Return {\"powers\":[{\"id\":string,\"name\":string,\"selfCue\":string,\"observerCue\":string,\"effects\":[],\"ruleLabels\":string[]}]}",
-          "Allowed effect types: mute, breathless, ineptitude, power_immunity, designation, eternal_introduction, speech_copy, identity_mirror, identity_shapeshift, false_name, hearing_repeat, awareness, speech_audience, avatar_visibility, avatar_scale, avatar_color_cycle, voice_presence, speech_obfuscation, cursed_tongue, intermittent_mute, intermittent_audibility, annoyance, social_influence, mood_boost, mood_drain, candor, credulity, anti_truth, addressed_fandom, chromatic_bias, mood_resistance, cup_rate, action_bias, interruption, response_budget, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
+          "Allowed effect types: mute, breathless, ineptitude, power_immunity, designation, eternal_introduction, speech_copy, identity_mirror, identity_shapeshift, false_name, hearing_repeat, awareness, speech_audience, avatar_visibility, avatar_scale, avatar_color_cycle, voice_presence, speech_obfuscation, speech_register, cursed_tongue, intermittent_mute, intermittent_audibility, annoyance, social_influence, mood_boost, mood_drain, candor, credulity, anti_truth, addressed_fandom, chromatic_bias, mood_resistance, cup_rate, action_bias, interruption, response_budget, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
         ].join("\n"),
       },
     ];

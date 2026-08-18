@@ -11,6 +11,7 @@ import {
   type CoffeeInterruptionEvent,
   type CoffeeInterruptionTranscriptSegmentKind,
   type CoffeeAmbientActionPayload,
+  type CoffeeAsidePayload,
   type CoffeeStageActionPayload,
   type CoffeeUserActionPayload,
   type CoffeeCupTopOffSnapshot,
@@ -69,6 +70,7 @@ export interface CoffeeReplayMessageLike {
   coffeeStageAction?: CoffeeStageActionPayload;
   coffeeUserAction?: CoffeeUserActionPayload;
   coffeeInterruption?: CoffeeInterruptionEvent;
+  coffeeAside?: CoffeeAsidePayload;
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   botPowerMutePerformance?: BotPowerMutePerformanceV1;
   socialSilence?: SocialSilenceMarkerV1;

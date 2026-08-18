@@ -2,15 +2,16 @@ import type { VoiceAccentDefinitionId } from "./audioVoice.ts";
 
 /**
  * Vernacular is the word-side twin of the Accent Map pin: the pin owns how a
- * bot sounds, a vernacular owns how it phrases things. It is authored bot
- * identity — chosen explicitly in the editor, never inferred from anything —
- * and it shapes only the words the bot writes. Pronunciation stays with the
+ * bot sounds, a vernacular owns how it phrases things. The pin implies it —
+ * placing a named regional pin grants that region's phrasing with no separate
+ * control — and it shapes only the words the bot writes. Pronunciation stays with the
  * accent stack, which is why every entry insists on standard spelling: the
  * phonemizer reads ordinary orthography and the pin supplies the sound.
  *
- * Entries are deliberately cultural or stylistic registers, not ethnolects.
- * There is no strength control on purpose: a character speaks their variety
- * or they do not.
+ * Entries are deliberately cultural regional varieties, not ethnolects.
+ * Placeless stylistic registers (noir narration, archaic English) live in the
+ * Powers system instead — see botSpeechRegister.ts. There is no strength
+ * control on purpose: a character speaks their variety or they do not.
  */
 export const BOT_VERNACULAR_IDS = [
   "southern-us",
@@ -18,8 +19,10 @@ export const BOT_VERNACULAR_IDS = [
   "hiberno-english",
   "aussie",
   "cockney",
-  "noir",
-  "archaic",
+  "new-york",
+  "new-england",
+  "canadian",
+  "kiwi",
 ] as const;
 
 export type BotVernacularId = (typeof BOT_VERNACULAR_IDS)[number];
@@ -33,7 +36,7 @@ export interface BotVernacularDefinitionV1 {
   example: string;
   /** Variety-specific authoring guidance injected at prompt time. */
   guidance: string;
-  /** Suggested Accent Map pairing; registers without a geography omit it. */
+  /** The Accent Map region that grants this vernacular. */
   accentDefinitionId?: VoiceAccentDefinitionId;
 }
 
@@ -105,28 +108,54 @@ export const BOT_VERNACULAR_DEFINITIONS: readonly BotVernacularDefinitionV1[] = 
     accentDefinitionId: "cockney-english",
   },
   {
-    id: "noir",
-    label: "Noir narrator",
-    description: "Hardboiled case-notes narration.",
-    example: "The bug walked in at midnight, the way trouble always does.",
+    id: "new-york",
+    label: "New York",
+    description: "Brisk, direct New York City phrasing.",
+    example: "You want coffee? There's a bodega right there — nobody waits on line all day.",
     guidance:
-      "You phrase things like a hardboiled noir narrator. Keep sentences " +
-      "clipped, observations world-weary, and metaphors drawn from rain, " +
-      "smoke, neon, and old debts, with the occasional simile that lands " +
-      "like a slow right hook. Stay atmospheric rather than parodic, and " +
-      "let the dry wit surface between the shadows.",
+      "You phrase things with a brisk New York City voice. Say waiting on " +
+      "line rather than in line, reach for bodega, stoop, the train, and " +
+      "schlep, and let the occasional Yiddish-flavored loan like schmear or " +
+      "schmutz land where it's natural. Be direct and quick with warmth " +
+      "underneath — impatience as affection, never rudeness.",
+    accentDefinitionId: "new-york-english",
   },
   {
-    id: "archaic",
-    label: "Archaic English",
-    description: "Thee-and-thou stage English, kept clear.",
-    example: "Thou hast asked well; attend, and I shall answer.",
+    id: "new-england",
+    label: "New England",
+    description: "Boston-area phrasing, wicked understated.",
+    example: "That shortcut past the rotary is wicked quick, kid.",
     guidance:
-      "You phrase things in clear archaic English. Use thee, thou, and thy " +
-      "with correct forms — thou hast, thou art, thou wilt — plus 'tis, " +
-      "prithee, and gentle inversions like Ask me what thou wilt. Verily and " +
-      "forsooth appear rarely. Beneath the costume the meaning stays modern " +
-      "and effortless to follow.",
+      "You phrase things with a Boston-area New England voice. Use wicked as " +
+      "the intensifier of choice, plus rotary, packie, frappe, grinder, the " +
+      "T, and bang a U-ey where they fit naturally. Keep the delivery dry, " +
+      "loyal, and unimpressed on the surface with real warmth underneath.",
+    accentDefinitionId: "eastern-new-england-english",
+  },
+  {
+    id: "canadian",
+    label: "Canadian",
+    description: "Gentle Canadian markers, eh kept rare.",
+    example: "Grab your toque — we'll stop for a double-double on the way, eh?",
+    guidance:
+      "You phrase things with a gentle Canadian voice. Reach for toque, " +
+      "double-double, loonie and toonie, keener, hydro for electricity, " +
+      "washroom, and pop, with distances in klicks. A soft reflexive sorry " +
+      "and a tag-question eh appear only now and then — restraint is the " +
+      "charm; this is seasoning, never a moose joke.",
+    accentDefinitionId: "canadian-english",
+  },
+  {
+    id: "kiwi",
+    label: "Kiwi",
+    description: "New Zealand slang and easy understatement.",
+    example: "Yeah-nah, sweet as — chuck your jandals on and we'll sort it.",
+    guidance:
+      "You phrase things with a natural New Zealand voice. Use sweet as, " +
+      "yeah-nah and nah-yeah, keen, heaps, jandals, togs, bach for a holiday " +
+      "house, and dairy for the corner shop, with chur appearing rarely. " +
+      "Favor easy understatement — she'll be right carries most storms.",
+    accentDefinitionId: "new-zealand-english",
   },
 ];
 
@@ -152,11 +181,45 @@ export function botVernacularDefinitionForId(
 }
 
 /**
- * Reads a vernacular id out of a stored audio voice profile in any of its
- * persisted shapes (raw JSON string, flattened V1/V2 record, or V3 with the
- * id nested beside the Accent Map identity under local.pronunciation).
- * Deliberately a tolerant duck-read so prompt composition never needs the
- * full profile normalizer.
+ * The Accent Map pin implies its region's phrasing: pin a bot in Cockney and
+ * it speaks Cockney, no separate choice. Many regions share one vernacular
+ * (Texas, Appalachia, and North Florida all phrase Southern) and most regions
+ * have none yet. Placeless registers are Powers, not vernaculars.
+ */
+const BOT_VERNACULAR_ACCENT_EXTENSIONS: Readonly<Record<string, BotVernacularId>> = {
+  "texas-english": "southern-us",
+  "appalachian-english": "southern-us",
+  "north-florida-english": "southern-us",
+};
+
+const BOT_VERNACULAR_BY_ACCENT_DEFINITION: ReadonlyMap<string, BotVernacularId> =
+  new Map([
+    ...BOT_VERNACULAR_DEFINITIONS.flatMap((definition) =>
+      definition.accentDefinitionId
+        ? ([[definition.accentDefinitionId, definition.id]] as const)
+        : [],
+    ),
+    ...Object.entries(BOT_VERNACULAR_ACCENT_EXTENSIONS),
+  ]);
+
+export function botVernacularIdForAccentDefinition(
+  accentDefinitionId: unknown,
+): BotVernacularId | null {
+  if (typeof accentDefinitionId !== "string") return null;
+  return (
+    BOT_VERNACULAR_BY_ACCENT_DEFINITION.get(
+      accentDefinitionId.trim().toLocaleLowerCase(),
+    ) ?? null
+  );
+}
+
+/**
+ * Resolves the vernacular a stored audio voice profile speaks, in any of its
+ * persisted shapes (raw JSON string, flattened V1/V2 record, or V3 nested
+ * under local.pronunciation). An explicitly authored regional vernacularId
+ * wins, otherwise the accent identity derives it, including legacy profiles
+ * that stored only the Speechprint influence. Deliberately a tolerant duck-read so prompt
+ * composition never needs the full profile normalizer.
  */
 export function botVernacularIdFromStoredVoiceProfile(
   value: unknown,
@@ -174,13 +237,31 @@ export function botVernacularIdFromStoredVoiceProfile(
   if (!record || typeof record !== "object") return null;
   const profile = record as {
     vernacularId?: unknown;
-    pronunciation?: { vernacularId?: unknown } | null;
-    local?: { pronunciation?: { vernacularId?: unknown } | null } | null;
+    accentDefinitionId?: unknown;
+    speechprintInfluence?: unknown;
+    pronunciation?: {
+      vernacularId?: unknown;
+      accentDefinitionId?: unknown;
+    } | null;
+    local?: {
+      pronunciation?: {
+        vernacularId?: unknown;
+        accentDefinitionId?: unknown;
+      } | null;
+      speechprint?: { influence?: unknown } | null;
+    } | null;
   };
   return (
     normalizeBotVernacularId(profile.local?.pronunciation?.vernacularId) ??
     normalizeBotVernacularId(profile.pronunciation?.vernacularId) ??
-    normalizeBotVernacularId(profile.vernacularId)
+    normalizeBotVernacularId(profile.vernacularId) ??
+    botVernacularIdForAccentDefinition(
+      profile.local?.pronunciation?.accentDefinitionId ??
+        profile.pronunciation?.accentDefinitionId ??
+        profile.accentDefinitionId ??
+        profile.local?.speechprint?.influence ??
+        profile.speechprintInfluence,
+    )
   );
 }
 

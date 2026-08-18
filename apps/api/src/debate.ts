@@ -1242,8 +1242,9 @@ async function generateJsonOnLane(
   }
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
+    let response = "";
     try {
-      const response = await lane.provider.generateResponse(messages, {
+      response = await lane.provider.generateResponse(messages, {
         model: options.model ?? lane.model,
         maxTokens: effectiveMaxTokens,
         temperature: options.temperature,
@@ -1264,12 +1265,19 @@ async function generateJsonOnLane(
       return parsed;
     } catch (error) {
       lastError = error;
+      console.warn(
+        `[debate] generateJsonOnLane attempt ${attempt + 1}/2 failed (${lane.providerName}/${options.model ?? lane.model}): ${error instanceof Error ? error.message : String(error)}`,
+        `raw response: ${response.slice(0, 2_000)}`,
+      );
+      const wasParseFailure =
+        error instanceof Error && error.message === "Model response was not JSON.";
       messages = [
         ...messages,
         {
           role: "system",
-          content:
-            'Your prior output was malformed. Return one valid JSON object only, with every requested key. If the schema includes sideId, it must be exactly the string "for" or "against" — never a side label.',
+          content: wasParseFailure
+            ? 'Your prior output was not valid JSON. Return one valid JSON object only — no prose, no reasoning, no markdown fences before or after it — with every requested key. If the schema includes sideId, it must be exactly the string "for" or "against" — never a side label.'
+            : 'Your prior reply was valid JSON but was missing or misformatted one or more requested keys. Return one valid JSON object only, with every requested key present and correctly typed. If the schema includes sideId, it must be exactly the string "for" or "against" — never a side label.',
         },
       ];
     }
@@ -2456,6 +2464,7 @@ function debatePowerPolicy(
     type === "avatar_color_cycle" ||
     type === "voice_presence" ||
     type === "speech_obfuscation" ||
+    type === "speech_register" ||
     type === "cursed_tongue" ||
     type === "power_immunity" ||
     type === "identity_mirror" ||
