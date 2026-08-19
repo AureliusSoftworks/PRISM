@@ -2794,6 +2794,16 @@ const COFFEE_CHARACTER_IMMERSION_BREAK_PATTERNS = [
   /\b(?:not\s+possible|can't|cannot)\s+(?:in|within)\s+this\s+chat\b/i,
   /\bi\s+do\s+not\s+(?:physically\s+)?(?:exist|have a physical form)\b/i,
   /\bas\s+(?:an?\s+)?(?:llm|large language model)\b/i,
+  // Asking the operator to supply missing prompt text. A bot that cannot make
+  // out a line has in-character ways to say so; addressing whoever assembled
+  // the transcript is not one of them, and it reads as the table dissolving.
+  /\b(?:don't|do not|can't|cannot)\s+see\s+(?:\S+\s+){0,3}?(?:actual|exact)\s+(?:line|message|words|response|statement)\b/i,
+  /\b(?:could|can)\s+you\s+(?:please\s+)?(?:paste|re-?send|resend|share)\b/i,
+  /\b(?:paste|share)\s+(?:me\s+)?(?:what|the)\s+(?:\S+\s+){0,3}?(?:just\s+)?(?:said|line|message)\b/i,
+  /\b(?:isn't|is not|aren't|are not|wasn't|was not)\s+included\s+in\s+your\s+(?:message|prompt|transcript)\b/i,
+  /\b(?:shows?|appears?|displays?)\s+(?:up\s+)?as\s+(?:only\s+)?(?:an?\s+)?(?:ellipsis|`?\.{3}`?)\b/i,
+  /\bonce\s+i\s+(?:can\s+)?see\s+(?:her|his|their|the)\s+(?:words|line|message|response)\b/i,
+  /\bi'?m?\s+ready\s+to\s+respond\b/i,
 ] as const;
 
 const COFFEE_STAGE_ACTION_VERB_RE =
@@ -5556,10 +5566,30 @@ function coffeeDirectionalIrritationHeardRatio(args: {
   return null;
 }
 
+/**
+ * A stored turn that carries no dialogue at all — an interruption pause or a
+ * chosen silence, both persisted as a bare ellipsis so replays and exports
+ * never claim a bot said something it did not.
+ */
+const COFFEE_SILENT_TURN_CONTENT_RE = /^[\s]*(?:\.{2,}|…+)[\s]*$/u;
+
+/**
+ * Reads to a model as missing input rather than as a beat of silence, so it
+ * asks the operator to paste the line it thinks it is missing — which is how a
+ * table ends up with "I don't see McGonagall's actual line in your message".
+ * Silence is a real thing that happened at the table, so name it as one.
+ */
+const COFFEE_SILENT_TURN_PROMPT_TEXT = "*[stayed quiet — said nothing]*";
+
 function coffeeBotPromptHistory(messages: readonly ChatMessage[]): ChatMessage[] {
-  return messages.filter((message) => {
-    return coffeeMessageBelongsInBotPromptHistory(message);
-  });
+  return messages
+    .filter((message) => coffeeMessageBelongsInBotPromptHistory(message))
+    .map((message) =>
+      message.role === "assistant" &&
+      COFFEE_SILENT_TURN_CONTENT_RE.test(message.content)
+        ? { ...message, content: COFFEE_SILENT_TURN_PROMPT_TEXT }
+        : message,
+    );
 }
 
 function coffeeMessageTimestampMs(message: ChatMessage): number | null {
