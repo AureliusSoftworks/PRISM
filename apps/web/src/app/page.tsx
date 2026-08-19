@@ -129,6 +129,12 @@ import { PrismVisualLifecycleBridge } from "./PrismVisualLifecycleBridge";
 import { PrismAdaptiveDomQualityGovernor } from "./PrismAdaptiveDomQualityGovernor";
 import { subscribePrismFrameRate } from "./prismFrameRate";
 import {
+  formatPrismMainThreadCensus,
+  installPrismMainThreadCensus,
+  prismMainThreadCensus,
+  type PrismMainThreadCensus,
+} from "./prismMainThreadCensus";
+import {
   announcePrismNavbarPickerOpen,
   PRISM_NAVBAR_PICKER_OPEN_EVENT,
   PrismMenuSurface,
@@ -6681,6 +6687,9 @@ const COFFEE_STUCK_THINKING_WATCHDOG_MS = 45_000;
 // How often the stall watchdog re-evaluates. Slow on purpose: it exists to
 // unwedge a dead table, not to animate anything.
 const COFFEE_STALL_RECOVERY_TICK_MS = 5_000;
+// The badge census is a diagnostic readout, not an animation. One second is
+// fast enough to watch a leak climb and slow enough to cost nothing.
+const FPS_COUNTER_CENSUS_SAMPLE_MS = 1_000;
 /** After this much visible thinking, another bot may mutter a stew aside. */
 const COFFEE_STEW_ASIDE_DELAY_MS = 6_500;
 const ZEN_SUCCESSIVE_MESSAGE_CONTEXT_LIMIT = 6;
@@ -10538,6 +10547,7 @@ function FpsCounter(): React.JSX.Element | null {
   const [enabled, setEnabled] = useState(false);
   const [fps, setFps] = useState<number | null>(null);
   const [mainThreadBusyMs, setMainThreadBusyMs] = useState<number | null>(null);
+  const [census, setCensus] = useState<PrismMainThreadCensus | null>(null);
 
   useEffect(() => {
     const readEnabled = (): void => {
@@ -10560,16 +10570,36 @@ function FpsCounter(): React.JSX.Element | null {
     });
   }, [enabled]);
 
+  useEffect(() => {
+    if (!enabled) {
+      setCensus(null);
+      return;
+    }
+    // The wrappers only start counting from here, so the first readings after
+    // enabling the badge undercount anything already scheduled. What matters is
+    // the slope, not the absolute floor.
+    installPrismMainThreadCensus();
+    const sample = (): void => setCensus(prismMainThreadCensus());
+    sample();
+    const id = window.setInterval(sample, FPS_COUNTER_CENSUS_SAMPLE_MS);
+    return () => window.clearInterval(id);
+  }, [enabled]);
+
   if (!enabled || fps === null) return null;
   // Busy ms/s says WHY frames are missing: ~1000 means the main thread is
   // saturated (renders/scripts), while LOW busy at LOW fps is the smoking gun
   // for compositor/GPU cost — so zero is a meaningful reading and always shows.
   const busySuffix =
     mainThreadBusyMs !== null ? ` · busy ${mainThreadBusyMs}ms/s` : "";
+  // And the census says WHAT is piling up, which neither of the other two can:
+  // Coffee decays monotonically and does not recover through a silent table, so
+  // the question is which of these counts climbs alongside it.
+  const censusSuffix = census ? ` · ${formatPrismMainThreadCensus(census)}` : "";
   return (
-    <output className={styles.fpsCounter} aria-label={`Frames per second: ${fps}${busySuffix}`}>
+    <output className={styles.fpsCounter} aria-label={`Frames per second: ${fps}${busySuffix}${censusSuffix}`}>
       {fps} FPS
       {busySuffix}
+      {censusSuffix}
     </output>
   );
 }
