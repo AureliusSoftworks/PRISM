@@ -774,6 +774,31 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     );
     CREATE INDEX IF NOT EXISTS idx_applet_transcript_frame_samples_session
       ON applet_transcript_frame_samples(user_id, surface, session_id, captured_at);
+    -- One periodic reading of what is piling up on the main thread. Frame
+    -- samples say a session got slow; these say what grew while it did, which
+    -- is the only question a thirty-minute unattended run can answer on its
+    -- own. Keyed by elapsed_ms so a sampler that fires twice in a millisecond
+    -- cannot collide with itself.
+    CREATE TABLE IF NOT EXISTS applet_main_thread_census_samples (
+      user_id TEXT NOT NULL,
+      surface TEXT NOT NULL
+        CHECK(surface IN ('coffee', 'signal', 'debate', 'story')),
+      session_id TEXT NOT NULL,
+      elapsed_ms INTEGER NOT NULL CHECK(elapsed_ms >= 0),
+      captured_at TEXT NOT NULL,
+      fps INTEGER CHECK(fps IS NULL OR (fps >= 0 AND fps <= 240)),
+      raf_pending INTEGER NOT NULL DEFAULT 0,
+      intervals_live INTEGER NOT NULL DEFAULT 0,
+      timeouts_pending INTEGER NOT NULL DEFAULT 0,
+      dom_elements INTEGER,
+      animations_running INTEGER,
+      heap_mb REAL,
+      render_rates_json TEXT NOT NULL DEFAULT '[]',
+      PRIMARY KEY(user_id, surface, session_id, elapsed_ms),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_applet_main_thread_census_session
+      ON applet_main_thread_census_samples(user_id, surface, session_id, elapsed_ms);
     CREATE TABLE IF NOT EXISTS images (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,

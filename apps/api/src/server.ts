@@ -306,6 +306,12 @@ import {
   recordAppletTranscriptFrameSample,
 } from "./applet-transcript-frame-samples.ts";
 import {
+  listAppletMainThreadCensusSamples,
+  readAppletMainThreadCensusSample,
+  recordAppletMainThreadCensusSamples,
+  summarizeAppletMainThreadCensus,
+} from "./applet-main-thread-census-samples.ts";
+import {
   DebateSourceInspectionError,
   inspectDebateSourceUrl,
 } from "./debate-source-inspection.ts";
@@ -16990,6 +16996,47 @@ function buildRoutes(): RouteDefinition[] {
           userId,
           surface,
           sessionId,
+        ),
+        mainThreadCensus: listAppletMainThreadCensusSamples(
+          db,
+          userId,
+          surface,
+          sessionId,
+        ),
+        mainThreadCensusSummary: summarizeAppletMainThreadCensus(
+          listAppletMainThreadCensusSamples(db, userId, surface, sessionId),
+        ),
+      });
+    }),
+    route("POST", "/api/main-thread-census-samples", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      const surface = readAppletSessionNoteSurface(body.surface);
+      const sessionId =
+        typeof body.sessionId === "string" ? body.sessionId.trim() : "";
+      if (!surface || !sessionId) {
+        throw new HttpError(400, "surface and sessionId are required.");
+      }
+      // Samples arrive batched because the client posting them is the same
+      // main thread being measured: one request per reading would add the
+      // load the series exists to explain.
+      const samples = (Array.isArray(body.samples) ? body.samples : [])
+        .map(readAppletMainThreadCensusSample)
+        .filter((sample) => sample !== null);
+      if (samples.length === 0) {
+        throw new HttpError(400, "At least one usable census sample is required.");
+      }
+      if (!appletSessionBelongsToUser(db, userId, surface, sessionId)) {
+        throw new HttpError(404, "Applet session not found.");
+      }
+      json(ctx.res, 200, {
+        ok: true,
+        recorded: recordAppletMainThreadCensusSamples(
+          db,
+          userId,
+          surface,
+          sessionId,
+          samples,
         ),
       });
     }),
