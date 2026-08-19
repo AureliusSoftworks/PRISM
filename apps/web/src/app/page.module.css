@@ -5302,9 +5302,16 @@
   border-radius: 0;
 }
 
+/* Invariant: only a phase the player can actually SEE may capture input.
+   `entering` sits at opacity 0 for a frame and `fading` lands at opacity 0,
+   so an overlay stuck in either phase is an invisible full-surface click
+   eater — review f1e340d8 froze every workspace control (Table Talk still
+   scrolled, because this overlay renders at `scope="workspace"`) while the
+   main thread sat idle at 33 FPS. A transition is far too short to be worth
+   guarding clicks with something nobody can see. */
 .viewSwitchOverlay[data-phase="entering"] {
   opacity: 0;
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 .viewSwitchOverlay[data-phase="visible"] {
@@ -5314,7 +5321,7 @@
 
 .viewSwitchOverlay[data-phase="fading"] {
   opacity: 0;
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 .viewSwitchOverlayInner {
@@ -28961,6 +28968,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   transition: transform 220ms cubic-bezier(0.22, 0.72, 0.24, 1);
 }
 
+/* Light mode: a colored glow cannot lighten a pale table, and hard-light's
+   50%-luminance crossover draws a hard visible edge exactly where the glow
+   gradient crosses it — the stark rings around every Coffee seat. Multiply
+   tints the surface the way a real colored light would and fades cleanly
+   into transparent, so the halo reads as light instead of an outline. */
+.themeLight .botAmbientPresenceRig {
+  --bot-light-glow-blend-mode: multiply;
+}
+
 .botAmbientUnderglow {
   position: absolute;
   left: var(--zen-live-bot-body-x, 50%);
@@ -29166,6 +29182,42 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   ) {
   animation: none;
   will-change: auto;
+}
+
+/* A shed seat must drop the expensive compositing, not just the motion.
+   `.botAmbientUnderglow::after` is a blurred (up to 22px), blend-mode
+   composited surface roughly 2.4x the seat's own width, and
+   `.botAmbientSpeakingPulse` blends too. Blend modes force the backdrop to be
+   rasterized and read back, so five seats' worth of them dominate the frame
+   budget on a crowded table — which is why dropping to Mini materials alone
+   never recovered the frame rate. Under the shed the wide halo goes away and
+   the remaining glow composites normally; the small contact shadow stays, so
+   the seat still reads as grounded. */
+.botAmbientPresenceRig:has(
+    .zenLiveBotPresenceBody[data-render-detail="compact"]
+  )
+  .botAmbientUnderglow::after {
+  display: none;
+}
+
+.botAmbientPresenceRig:has(
+    .zenLiveBotPresenceBody[data-render-detail="compact"]
+  )
+  .botAmbientSpeakingPulse,
+.botAmbientPresenceRig:has(
+    .zenLiveBotPresenceBody[data-render-detail="compact"]
+  )
+  .botAmbientSpeakingLight {
+  mix-blend-mode: normal;
+  filter: none;
+}
+
+/* Micro seats are too small for any of it to read; drop the whole rig. */
+.botAmbientPresenceRig:has(
+    .zenLiveBotPresenceBody[data-render-detail="micro"]
+  )
+  :is(.botAmbientUnderglow, .botAmbientSpeakingLight, .botAmbientSpeakingPulse) {
+  display: none;
 }
 
 @keyframes botAmbientHoverDrift {
@@ -70843,6 +70895,15 @@ a.settingsCreditItem:focus-visible {
   min-height: clamp(360px, 44vh, 540px);
 }
 
+/* Frame-shedding tables pause decorative motion: steam, ambient drifts, and
+ * other purely cosmetic animations stop paying style/paint tax while the
+ * main thread is already missing frames. Speech, reveals, and input stay live. */
+.coffeeStage[data-motion-shed="true"] [data-prism-decorative-motion="true"],
+.coffeeStage[data-motion-shed="true"] [data-prism-decorative-motion="true"] * {
+  animation-play-state: paused !important;
+  transition: none !important;
+}
+
 .coffeeAbsentNote {
   position: absolute;
   top: 10px;
@@ -70880,6 +70941,15 @@ a.settingsCreditItem:focus-visible {
 .coffeeStage[data-model-warmup="failed"] .coffeeTableCanvas {
   filter: grayscale(1) saturate(0);
   transition-duration: 600ms;
+}
+
+/* While the room is held for recovery the whole canvas sits under a
+ * grayscale filter; idle animations kept forcing full filtered repaints and
+ * pinned a paused table at 1 FPS (session 09fc81db). A held room holds still. */
+.coffeeStage[data-model-warmup="entering"] .coffeeTableCanvas *,
+.coffeeStage[data-model-warmup="held"] .coffeeTableCanvas *,
+.coffeeStage[data-model-warmup="failed"] .coffeeTableCanvas * {
+  animation-play-state: paused !important;
 }
 
 .coffeeStage[data-model-warmup="held"] .coffeeTableCanvas *,
@@ -72743,7 +72813,7 @@ a.settingsCreditItem:focus-visible {
 /* Player mug (Signal parity): docked beside the Prism stand-in, click to sip. */
 .coffeePlayerCupButton {
   position: absolute;
-  right: -14px;
+  left: -14px;
   bottom: 8px;
   z-index: 3;
   display: grid;
@@ -72754,6 +72824,10 @@ a.settingsCreditItem:focus-visible {
   border: 0;
   background: transparent;
   cursor: pointer;
+  /* The player seat is pointer-transparent (drag/stage gestures pass through),
+   * which silently swallowed every mug click — the sip button never worked.
+   * Re-enable events for the one interactive control in the seat. */
+  pointer-events: auto;
 }
 
 .coffeePlayerCupButton:disabled {
@@ -72781,6 +72855,31 @@ a.settingsCreditItem:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
   outline-offset: 2px;
   border-radius: 10px;
+}
+
+/* Two reviews running asked "how do I drink my coffee?" — pulse the mug a few
+ * times as the session opens so it reads as pressable without a hover. */
+@keyframes coffeePlayerCupHint {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-3px) scale(1.1);
+    filter: drop-shadow(
+      0 0 10px color-mix(in srgb, var(--accent) 70%, transparent)
+    );
+  }
+}
+
+.coffeePlayerCupButton .coffeeCup {
+  animation: coffeePlayerCupHint 900ms ease-in-out 1400ms 3;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coffeePlayerCupButton .coffeeCup {
+    animation: none;
+  }
 }
 
 .coffeeReplayPlayerNameplate {

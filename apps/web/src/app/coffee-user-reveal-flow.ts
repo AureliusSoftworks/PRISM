@@ -424,3 +424,66 @@ export function coffeeVisibleDirectedMentionBotIds(
   }
   return out;
 }
+
+/*
+ * `coffeeTypewriterCommitBudgetMs` and `coffeeComposerDraftSyncDelayMs` used to
+ * live here. Both widened their interval as frames collapsed and narrowed it as
+ * frames recovered, which is a feedback loop rather than a fix — the same flaw
+ * that retired the avatar load sheds. Reveal progress now bypasses top-level
+ * state entirely (`coffeeRevealProgressChannel`), and the composer draft
+ * settles on a fixed debounce.
+ */
+
+/**
+ * Rhythm states the Coffee table can sit in. Mirrors `CoffeeTurnRhythmState`
+ * in page.tsx; kept structural so the stall predicate below is testable
+ * without pulling the component in.
+ */
+export type CoffeeTableRhythmStateV1 =
+  | "idle"
+  | "botThinking"
+  | "playerComposing"
+  | "userTableTyping"
+  | "tableTyping"
+  | "cooldown";
+
+/**
+ * Is the table in a shape where nothing can make it move again?
+ *
+ * All of these share one signature: no request in flight, no timer armed, and
+ * nothing progressing — the room is silent with an idle main thread and the
+ * composer disabled. Session 8e012a9d lost ~138s to a thinking seat that had
+ * lost its request; session 6d6f1239 sat silent for seven minutes on a pending
+ * reveal that never started; session 2253b3903a sat for 100 minutes with the
+ * rhythm parked at `cooldown` after its hand-off timer was cancelled without
+ * anyone resetting the state.
+ *
+ * `cooldownTimerArmed` is the important negative case: a healthy cooldown looks
+ * identical to a stranded one except that its hand-off timer is still pending.
+ * Without that input the predicate would start counting against every ordinary
+ * cooldown, and any tightening of the threshold would start cutting real turns
+ * short.
+ */
+export function coffeeTableStallShapeV1(args: {
+  phase: string;
+  requestInFlight: boolean;
+  loopTimerArmed: boolean;
+  cooldownTimerArmed: boolean;
+  rhythmState: CoffeeTableRhythmStateV1;
+  pendingRevealPresent: boolean;
+  pendingSpeakerPresent: boolean;
+}): boolean {
+  if (args.phase !== "live" && args.phase !== "arriving") return false;
+  if (args.requestInFlight || args.loopTimerArmed) return false;
+  // A pending hand-off is progress, not a stall.
+  if (args.cooldownTimerArmed) return false;
+  if (args.rhythmState === "tableTyping" || args.rhythmState === "userTableTyping") {
+    return false;
+  }
+  if (args.rhythmState === "cooldown") return true;
+  if (args.pendingRevealPresent) return true;
+  if (args.pendingSpeakerPresent) {
+    return args.rhythmState === "botThinking" || args.rhythmState === "idle";
+  }
+  return false;
+}

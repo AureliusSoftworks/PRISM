@@ -266,6 +266,67 @@ export function ensurePrismAudioContextRunning(): void {
 let audioContextKeepAliveOwners = 0;
 let releaseAudioContextKeepAliveListeners: (() => void) | null = null;
 let audioContextKeepAliveInterval: number | null = null;
+let audioContextKeepAliveTone: {
+  context: AudioContext;
+  source: ConstantSourceNode;
+  gain: GainNode;
+} | null = null;
+
+/**
+ * A merely-running AudioContext outputs nothing, and WebKit's render-throttle
+ * heuristic (and macOS App Nap) only exempts pages that are actually playing
+ * audio — session 9c2a7b79 froze to 1 FPS with an idle main thread until a
+ * foley clip happened to play and the throttle lifted. While the keepalive is
+ * held, render a constant −80 dBFS tone so the page counts as audible.
+ */
+function startAudioContextKeepAliveTone(): void {
+  const context = prismAudioContext();
+  if (!context) return;
+  if (audioContextKeepAliveTone?.context === context) return;
+  stopAudioContextKeepAliveTone();
+  try {
+    const source = context.createConstantSource();
+    source.offset.value = 1;
+    const gain = context.createGain();
+    gain.gain.value = 0.0001;
+    source.connect(gain);
+    gain.connect(context.destination);
+    source.start();
+    audioContextKeepAliveTone = { context, source, gain };
+  } catch {
+    audioContextKeepAliveTone = null;
+  }
+}
+
+function stopAudioContextKeepAliveTone(): void {
+  if (!audioContextKeepAliveTone) return;
+  try {
+    audioContextKeepAliveTone.source.stop();
+    audioContextKeepAliveTone.source.disconnect();
+    audioContextKeepAliveTone.gain.disconnect();
+  } catch {
+    // Context may already be closed; nothing to release.
+  }
+  audioContextKeepAliveTone = null;
+}
+
+let renderThrottleNudgeUntilMs = 0;
+
+/**
+ * One-shot recovery for a throttled webview with no live session claimed
+ * (e.g. parked on the topic picker): play the inaudible tone briefly so
+ * WebKit lifts frame throttling. Deduped to one nudge per 15 seconds.
+ */
+export function nudgePrismRenderThrottleRecovery(nowMs = Date.now()): void {
+  if (audioContextKeepAliveOwners > 0) return;
+  if (nowMs < renderThrottleNudgeUntilMs) return;
+  renderThrottleNudgeUntilMs = nowMs + 15_000;
+  ensurePrismAudioContextRunning();
+  startAudioContextKeepAliveTone();
+  window.setTimeout(() => {
+    if (audioContextKeepAliveOwners === 0) stopAudioContextKeepAliveTone();
+  }, 10_000);
+}
 
 /**
  * Keep the shared AudioContext running across minimize/hide for live sessions
@@ -278,7 +339,10 @@ export function acquirePrismAudioContextKeepAlive(): () => void {
     typeof document !== "undefined" &&
     typeof window !== "undefined"
   ) {
-    const bump = (): void => ensurePrismAudioContextRunning();
+    const bump = (): void => {
+      ensurePrismAudioContextRunning();
+      startAudioContextKeepAliveTone();
+    };
     const handleVisibility = (): void => {
       bump();
     };
@@ -304,6 +368,7 @@ export function acquirePrismAudioContextKeepAlive(): () => void {
     released = true;
     audioContextKeepAliveOwners = Math.max(0, audioContextKeepAliveOwners - 1);
     if (audioContextKeepAliveOwners > 0) return;
+    stopAudioContextKeepAliveTone();
     releaseAudioContextKeepAliveListeners?.();
     releaseAudioContextKeepAliveListeners = null;
   };
@@ -311,6 +376,8 @@ export function acquirePrismAudioContextKeepAlive(): () => void {
 
 export function resetPrismAudioContextKeepAliveForTests(): void {
   audioContextKeepAliveOwners = 0;
+  stopAudioContextKeepAliveTone();
+  renderThrottleNudgeUntilMs = 0;
   releaseAudioContextKeepAliveListeners?.();
   releaseAudioContextKeepAliveListeners = null;
   if (audioContextKeepAliveInterval !== null) {

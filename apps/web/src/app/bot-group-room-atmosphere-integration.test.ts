@@ -182,8 +182,22 @@ describe("saved group room atmosphere integration", () => {
       focusEffectSource,
       /node\.setAttribute\("aria-hidden", "true"\)/u,
     );
-    assert.match(focusEffectSource, /node\.setAttribute\("inert", ""\)/u);
-    assert.match(focusEffectSource, /node\.removeAttribute\("inert"\)/u);
+    // Inerting the background is refcounted rather than attribute-sniffed.
+    // Two overlapping panel effects each read the other's `inert` as
+    // pre-existing, so both cleanups declined to remove it and the background
+    // latched permanently non-interactive — clicks dead, scrolling still alive
+    // because `inert` does not stop scroll.
+    assert.match(focusEffectSource, /applyPrismInert\(node\)/u);
+    assert.match(focusEffectSource, /releasePrismInert\(node\)/u);
+    assert.match(
+      pageSource,
+      /function applyPrismInert\(node: HTMLElement\): void \{[\s\S]{0,400}node\.dataset\.prismInert = String\(held \+ 1\);\s*node\.setAttribute\("inert", ""\);/u,
+    );
+    // A hold that was never Prism's is never taken away.
+    assert.match(
+      pageSource,
+      /function releasePrismInert\(node: HTMLElement\): void \{[\s\S]{0,400}prismInertForeign === "true"[\s\S]{0,80}return;[\s\S]{0,40}\}\s*node\.removeAttribute\("inert"\);/u,
+    );
     assert.match(
       focusEffectSource,
       /document\.addEventListener\("keydown", handleAtmosphereDialogKeyDown, true\)/u,

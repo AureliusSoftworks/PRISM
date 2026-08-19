@@ -1,87 +1,93 @@
-# Handoff: confirmation & reversibility policy (PRISM web)
+# Handoff: Coffee Mode freeze — typewriter reconciliation
 
-Generated: 2026-08-12 · Branch: `dev` @ `86707ae6` · Status: shipped and merged, but an **uncommitted correction to a real bug is sitting in the working tree** — commit it first.
+Generated: 2026-08-19 (updated) · Branch: dev · Status: freeze #1 mitigated, freeze #2's identified vetoes all closed. Unstaged, unflown.
 
 ## Mission
 
-Codify a confirmation/reversibility policy for `apps/web`, following the existing design-token pattern: a policy module, unit tests, a source-scanning contract test with a ratchet allowlist, and a section in `docs/design-system.md`. This is the sequel to the earlier "magic buttons" consolidation — one canonical mechanism, bespoke variants deleted, plus a guard that stops new ones appearing.
+Coffee Mode freezes hard enough that Jared has force-quit Prism twice. Definition of done: a 5-bot Coffee table stays typeable for a full session, messages commit in authored order, and the app never needs force-quitting.
 
-**Explicitly out of scope this pass:** migrating any call sites, and unifying per-applet accent colors (`docs/brand-ethos.md` says colors suggest plurality — unify structure, not palette).
+**There are two distinct freezes.** Do not conflate them.
 
-Definition of done: the four deliverables exist, `npm run lint` and `npm run typecheck` pass, and no new test failures vs. baseline.
+## Freeze #1 (saturation) — what landed
 
-## Current state
+Reveal progress no longer travels through `HomeContent` state per character.
 
-- ✅ **Committed** as `86707ae6` on `dev`: `confirmationPolicy.ts`, `confirmationPolicy.test.ts`, `confirmation-contract.test.ts`, and the `## Confirmation and reversibility` section in `docs/design-system.md`.
-- ✅ Branch cleanup done: 12 fully-merged local branches deleted. Four remain with unmerged work — `codex/debate-gallery-preload`, `codex/debate-v02-integration`, `feat/debate-conduct-v0.2`, `feat/signal-live-recording` — plus `dev` and `main`.
-- 🔄 **Uncommitted in the working tree**: corrections to all four files fixing a genuine bug (see below). Tests pass at 26/26 with them applied. **This is the immediate next action.**
-- ⬜ Visual in-app verification — impossible in that session (app requires login). Source tests only. Still outstanding.
-- ⬜ Migration of the 9 surfaces that already have a real inverse (the backlog this policy exists to create).
+- **New module** [apps/web/src/app/coffeeRevealProgressChannel.ts](apps/web/src/app/coffeeRevealProgressChannel.ts) — a module-level store in the house `botHubVoicePreviewMouth` shape: `publishCoffeeRevealProgress(length)`, `subscribeCoffeeRevealProgress`, `coffeeRevealVisibleLength()`, plus `coffeeRevealCoarseShouldCommit` and `COFFEE_REVEAL_COARSE_COMMIT_MS = 120`.
+- **Two publish helpers in `HomeContent`** (next to the state, ~`page.tsx:65540`): `advanceCoffeeTypewriterLength({nowMs, length, totalLength})` for the RAF steps (exact to the channel every frame, coarse React mirror once per 120ms mouth phase, always on the final character) and `assignCoffeeTypewriterLength(length)` for discrete jumps (reset / settle / seal).
+- **`coffeeTypewriterLengthRef` is gone.** It was assigned during render (`page.tsx:65508`), which only worked because every length change forced a render. All five readers now call `coffeeRevealVisibleLength()`.
+- **`coffeeTypewriterLength` state survives but is deliberately coarse** — it drives only mouth-cadence consumers: seat mouth shapes, stage-direction badges, gaze mentions, player plate mouth.
+- **New leaf component `CoffeeRevealTypewriterLine`** at module scope (~`page.tsx:31809`), `memo`, `useSyncExternalStore`. It is the only thing that renders per character. Both the bot line and the player line use it; replay passes `fixedLength={coffeeReplayTypewriterLength}`.
+- **Center-feed auto-follow moved into the leaf's `useLayoutEffect`**, via the stable `followCoffeeCenterFeedReveal` callback, so the scroll is ordered after the text it follows. The top-level auto-follow effect keeps its other triggers.
+- **Three effects converted from a length dependency to a channel subscription**, keeping their closures intact: the automatic cut-in gate, the player action SFX cue, the bot action SFX + authored-reaction cue. All three callees are fired-key idempotent, and the cut-in callback re-checks `coffeeAutomaticCutInConsideredRef` on entry.
+- **`coffeeSessionClockMs` stays a dependency of the cut-in effect on purpose.** A holding reveal publishes nothing, and `holdLongEnough` is the branch that exists for that pause — the 1 Hz re-subscribe is what re-checks it. The hold window itself now reads `Date.now()` so a subscription closure cannot age.
+- **Both FPS-gated budgets deleted.** `coffeeTypewriterCommitBudgetMs` and `coffeeComposerDraftSyncDelayMs` are gone from [coffee-user-reveal-flow.ts](apps/web/src/app/coffee-user-reveal-flow.ts) (a comment marks the grave). The composer draft sync is back on the committed constant `COFFEE_COMPOSER_PARENT_DRAFT_SYNC_MS = 240`.
 
-### The uncommitted correction — why it matters
+Nothing is committed. `page.tsx` also carries Jared's in-flight work — **never `git add -A`**.
 
-The first commit mapped capability `undo: "quarantine"` → `soft` → affordance `none`. That was wrong: quarantine is a hidden 30-day journal, not a browsable archive, so `none` would give the user **no route at all** to a recovery that exists. It also contradicted the session's own classification table, which put `delete-bot-panel-title` at `undo`.
+## Freeze #2 (deadlock) — what landed
 
-Fixed by mapping both `inverse` and `quarantine` to `reversible`, and by no longer deriving `bulk`/`soft` from the descriptor at all (`bulk` is a property of the *invocation* — `conversations.quarantine` serves both one id and `{all:true}`; `soft` is a UI-model property). Also fixed: the `count` ratchet only caught growth, not shrinkage; four copies of the scan logic hoisted into two shared functions; doc said 40 surfaces, actual is 39.
+The rhythm state could park on `"cooldown"` with nothing able to release it: `cooldown` disables the composer, the reconciliation effect ([page.tsx:69149](apps/web/src/app/page.tsx)) deliberately refuses to reset out of it, and `clearCoffeeRhythmTimers` cancels the hand-off timer that `cooldown` exists to bridge to without touching the state.
+
+The watchdog that should have caught this **already matched the shape** — `deadPendingReveal` is true during any cooldown, since `queueCoffeeReveal` sets the pending reveal before the state. It could not fire because it measured elapsed time on `coffeeSessionClockMs`, which model warmup deliberately freezes (`if (!modelWarmupActive) setCoffeeSessionClockMs(now)`), *and* that same clock was its only regular re-evaluation driver. A recovery path must not share a clock with the thing it recovers from.
+
+- **Recovery, time base** — the stall threshold now measures on `Date.now()`, not the pausable session clock.
+- **Recovery, tick** — new `COFFEE_STALL_RECOVERY_TICK_MS = 5_000` interval and `coffeeStallRecoveryTickMs` dep, live only while the phase is `live`/`arriving`, so the watchdog keeps evaluating no matter what holds the session clock. 0.2 Hz; negligible against the render budget.
+- **Predicate extracted** — the dead-shape check is now `coffeeTableStallShapeV1` in [coffee-user-reveal-flow.ts](apps/web/src/app/coffee-user-reveal-flow.ts), unit-tested. It gains a `cooldown` clause **and** a `cooldownTimerArmed` input: a healthy cooldown and a stranded one are identical apart from that pending timer, so without it the watchdog would count against every ordinary cooldown.
+- **Prevention** — `clearCoffeeRhythmTimers` releases the rhythm to `idle` when it cancels an armed cooldown timer; `beginSpeakingAndScheduleReveal` gained `releaseStalledHandoff()` on the `durationMs === null` path and on a rejected promise. Both are epoch-guarded: a stale epoch means another turn took the floor and owns the state, so those cases still return silently.
+- **What actually froze the clock, most likely.** `releaseCoffeeModelWarmup` returns early on `phase === "failed"`, so a failed warmup is terminal until a retry replaces it — and `modelWarmupActive` treated any non-null warmup as active, so a single failed warmup froze `coffeeSessionClockMs` for the rest of the session. That is the mechanism behind a 100-minute wedge, and it fits the timing (a new turn after the 5th seat arrives triggers a warmup). `modelWarmupActive` now excludes the `failed` phase.
+- **Recovery deliberately still declines to resume autoplay while a warmup is failed.** Releasing the rhythm un-greys the composer and hands the player the floor; restarting autoplay against a model that is genuinely unavailable would only spin, so the retry affordance owns that. If the wanted behaviour is full self-resume, `releaseCoffeeModelWarmup()` belongs in the recovery body before that gate — it is a product call, not an oversight.
+- The three sites that clear `coffeeCooldownTimerRef` directly (~:70051, :72862, :80735) were checked and left alone: they are teardown paths (leaving the view, ending the session) where the predicate's `live`/`arriving` phase check already excludes a stall, and the new `cooldown` clause covers them by recovery anyway.
+- Ruled out by inspection, deliberately left alone: `waitForActiveCoffeeSipBeforeTalk` is bounded (`COFFEE_SIP_TALK_FALLBACK_MS = 3_200`), and both `coffeeTurnAbortRef` / `coffeeContinueAbortRef` clear in `finally` with identity guards. `requestInFlight` was **not** loosened — a hung fetch with no timeout remains a theoretical veto on the watchdog, and is the first place to look if a wedge survives this.
+
+**Be honest about what this is.** Which veto actually fired in session `2253b3903a` cannot be determined from source. What shipped is: every veto I could identify is closed, the recovery no longer shares a clock with the thing it recovers from, and the stall shapes are under unit test. If a table wedges again, that is new information, not a regression — start from `requestInFlight`.
+
+## Honest sufficiency — do not call freeze #1 fixed yet
+
+Freeze #2's fix is verifiable from source (pure predicate under unit test, plus source-shape pins on the wiring). Freeze #1's is not, and this is the part that still needs a flight.
+
+Reveal-driven full-surface renders go from ~60 Hz (healthy frames) to ~8.3 Hz. That is a real 7× cut, but **`setCoffeeLiveAvatarSpeech` still commits at mouth-shape rate during voiced speech** (`coffeeLiveAvatarSpeechProgressShouldCommit`, [zenLiveMouth.ts:1220](apps/web/src/app/zenLiveMouth.ts)), which lands at the same cadence. Whether ~8 Hz clears the ratchet depends on whether one `HomeContent` render finishes under 120ms, which cannot be measured from source.
+
+**The discriminating run to ask Jared for:** a 5-bot reveal with voice on, then the same table with voice muted, watching the `busy Nms/s` readout in the FPS badge.
+- Muted dramatically better → `setCoffeeLiveAvatarSpeech` is the next target, and the same channel carries it (publish mouth shape per participant instead of a snapshot into state).
+- Both still bad → the cost is the ~700 lines of per-seat computation upstream of `coffeeSeatAvatarRenderKey`, and the seat map needs its own memo boundary. Note `CoffeeSeatAvatarRenderer` is already `memo`'d on `renderKey` alone, so the avatar subtree itself is protected — the expense is everything computed *before* the key.
 
 ## Next actions (in order)
 
-1. **Stage and commit the correction.** The three `.ts` files are yours alone — stage them directly. `docs/design-system.md` is **shared with a live parallel session**, so stage only your hunk:
-
-   ```bash
-   cd "/Users/jared/Developer/Web Apps/PRISM" && git diff -- docs/design-system.md > /tmp/doc.patch && sed -n '1,4p' /tmp/doc.patch > /tmp/mine.patch && sed -n '/^@@ -95,32/,/^@@ -145,12/p' /tmp/doc.patch | sed '$d' >> /tmp/mine.patch && git apply --cached /tmp/mine.patch
-   ```
-
-   Verify with `git diff --cached --stat` — it must show **only** `docs/design-system.md` with roughly +47/-32, no other files. Then `git add` the three `.ts` files and commit. Prefer a **follow-up commit over `--amend`**: `dev`'s tip is live and another session may have branched from it.
-
-2. Re-run the two test files (command in Verification). Expect 26/26.
-
-3. Re-run `npm run lint` and `npm run typecheck` — both were clean for these files.
-
-4. Optional, if asked: push `dev`. It is **13 commits ahead of `origin/dev` and was deliberately not pushed**.
+1. Get the voice-on / voice-muted comparison from Jared and pick the branch above.
+2. Nothing for freeze #2 unless a table wedges again. If one does: the recovery now fires on a 45s wall-clock threshold, so a wedge lasting minutes means the watchdog is still being vetoed — check `requestInFlight` first (a fetch with no timeout leaving `coffeeTurnAbortRef` set is the one veto deliberately left in place).
+3. **The replay typewriter is the same defect, untouched.** The replay reveal RAF (`page.tsx:68401/68411`) still commits per character into `coffeeReplayTypewriterLength` state — a full-surface reconcile per character while scrubbing a recording. It was left alone because the reported freeze is live-only, but Jared reviews sessions *through* replay, so a freeze while scrubbing is this. Wiring it onto the same channel is mechanical: `CoffeeRevealTypewriterLine` already accepts `fixedLength`, so replay would pass `null` and publish instead.
+4. **The composer draft sync can now be removed, and that was not true when this fix was written.** It was left in place because `placeholder` sat in the `useEditor` deps and TipTap mounted with `content: value`, so a Coffee phase flip mid-typing rebuilt the editor from the parent's lagging draft — stopping the sync would have widened that loss window from 240ms to the whole session. `4fcfb179` closed that: the placeholder is read through a ref, and recreation now seeds from `pendingValueRef ?? lastEmittedRef` rather than `value`. With the hazard gone, keystrokes can stop reaching top-level state entirely (publish upward only on send, keeping the coarse `coffeeComposerHasDraft` boolean for the `playerComposing` rhythm at `page.tsx:69053`), which removes the last ~4 Hz of typing-driven full-surface renders. Fly the table first — this may already be inaudible next to the mouth-cadence renders.
 
 ## Decisions & constraints
 
-- **User chose** "finish the task first, then merge that one branch" over merging all branches, and "delete local fully-merged branches only" over touching `origin`. **`origin` was left untouched** — five remote branches remain, including a stale `origin/feat/confirmation-policy` that predates this work.
-- `dev` received three commits (`3782f089`, `15f03151`, `14343704`) from the parallel Codex session as part of this merge. They are that session's design-token/model-display-name work, not this task's.
-- Policy precedence is fixed and was not re-litigated: online boundary → irreversible → bulk → reversible → soft.
-- Rule 2 is implemented as `!reversible && !soft`, **not** a bare `!reversible`. Under the literal reading rule 5 is unreachable (rule 4 claims every case it could match), which would make the `none` tier dead code. This interpretation is documented in both the module and the doc — do not "simplify" it back.
-- `confirm`-tier actions must carry a written reason; the validator checks the **resolved** tier, and a reason on a lower tier is not an error.
+- **Avatar tier shedding is dead everywhere and must stay dead.** Coffee seats, Signal stage, and Debate stage all pin `minimumRenderedSizeTier="full"`. `busy 3519ms/s` disproved the GPU theory.
+- **This repo has no Prettier.** No config, no dependency, no format script — `page.tsx` is hand-formatted and `npx prettier --write` reformats ~4,200 lines of it. It was run once this session and reverted by 3-way merge against `prettier(HEAD)`; do not run it.
+- Jared prefers fixes delivered without proactive test runs — run tests to verify a fix you doubt, or when touching a hot path like this one.
+- Work directly on `dev`. Never branch, never push unless asked. Jared also commits from Cursor.
 
 ## Landmines
 
-- **A parallel Codex session shares this working tree** and commits into it mid-session. At handoff there were ~29 modified files, only 4 of them this task's. **Never `git add -A`.** It has already committed onto a feature branch created by this session once.
-- **`docs/design-system.md` is co-edited** by that session (it owns `## Tooltip chrome` and the typeface/radius edits). Always stage it by hunk.
-- **The brief's "~5 pre-existing test failures" is wrong.** True baseline is **166 failures / 3651 tests**. The two named files (`botAvatarCustomizerModal.test.ts`, `prismCompanionIntegration.test.ts`) do account for exactly 5; the other 161 are mostly source-scanning contract tests broken by the Codex commits `dev` inherited. Compare the failure **set**, not the count — a count match can hide one test flipping green and another red.
-- The absolute repo path contains a space ("Web Apps"), so `new URL(...).pathname` percent-encodes and `readFileSync` fails. Use `fileURLToPath` — both contract tests already do.
-- **Bracket discriminator:** the surface scanner matches `(?<!\[)role="alertdialog"`. JSX is `role="alertdialog"`; CSS selectors are `[role="alertdialog"]`. Drop the lookbehind and two selector strings (`page.tsx`, `prismUniversalInputRefract.ts`) become false positives.
-- `confirmationPolicy.ts` must never contain the literal `window.confirm` — the scanner skips `.test.ts` but not source, so it would self-trip.
-- 12 lint errors and 314 warnings exist repo-wide and are pre-existing. Confirm none are in your files rather than expecting a clean run.
+- **FPS-gated intervals are feedback loops, not fixes.** They widen as frames collapse and narrow as they recover, so they oscillate — the same flaw that retired the load sheds. `coffeeRevealProgressChannel.ts` carries no frame-rate input at all; keep it that way.
+- **Hunk-level staging silently drops hunks.** Filtering `git diff` hunks into `git apply --cached` breaks once earlier hunks are staged. After any partial staging, verify: `git show HEAD:<path> | grep -c "<removed symbol>"`.
+- **`page.tsx` is ~149k lines and one component.** That is *why* this bug is severe — there is no smaller reconciliation boundary.
+- The `busy Nms/s` readout settles GPU-vs-CPU arguments. `busy 0ms/s` at 66 FPS = deadlock; `busy 3519ms/s` at 1 FPS = reconciliation storm. Use it before theorizing.
+- The ordering inversion in review `47d7aa3d` (Jared's `Soooooooo` recorded 12s before Peter's reply to the prior message) is **plausibly** relieved by this fix but unverified. `coffeePendingRevealAfterUserRef` and `coffeeDeferBotRevealForPlayerLineRef` sequence by timing, not by an explicit commit order — if the inversion survives, that is where to look.
 
 ## Map
 
-- `apps/web/src/app/confirmationPolicy.ts` — types, `confirmationAffordanceFor()`, `validateConfirmationActions()`, `reversibilityFromCapability()`.
-- `apps/web/src/app/confirmationPolicy.test.ts` — 26 unit tests; the precedence block is the important half.
-- `apps/web/src/app/confirmation-contract.test.ts` — the ratchet. `GRANDFATHERED_NATIVE_DIALOGS` (9 call sites, keyed `file :: first-40-chars-of-copy` + `count`) and `GRANDFATHERED_SURFACES` (39 entries, grouped by tier with per-entry rationale).
-- `docs/design-system.md` — `## Confirmation and reversibility`, placed after `## What is deliberately _not_ unified` as specified.
-- `apps/web/src/app/design-tokens-contract.test.ts` — the pattern template this work follows.
-- Server ground truth: `apps/api/src/prism-capabilities.ts` (registry, undo), `prism-domain-capabilities.ts` (per-capability `undo:` values), `packages/shared/src/prismOrchestration.ts` (`PrismCapabilityDescriptorV1`).
+- [apps/web/src/app/coffeeRevealProgressChannel.ts](apps/web/src/app/coffeeRevealProgressChannel.ts) — the channel.
+- [apps/web/src/app/page.tsx](apps/web/src/app/page.tsx) — `CoffeeRevealTypewriterLine` ~:31809, coarse state + publish helpers ~:65530, reveal RAF loops ~:69100-69390, cut-in subscription ~:69543, SFX subscriptions ~:73560/:73630, draft sync ~:88790, `activeTypewriterLength` ~:135921.
+- [apps/web/src/app/voiceLightEnvelope.ts](apps/web/src/app/voiceLightEnvelope.ts) — per-element publish pattern, :144-194.
+- [apps/web/src/app/botHubVoicePreviewMouth.ts](apps/web/src/app/botHubVoicePreviewMouth.ts) — the external-store shape the channel copies.
+- Commands: `npm run dev` · `node --test apps/web/src/app/<file>.test.ts` · `npm run typecheck` · `npm run lint`
+- Environment: web on :18788, API on :18787. Jared runs the app; **logged-in UI checks are his**.
 
-```bash
-cd "/Users/jared/Developer/Web Apps/PRISM/apps/web" && node --test --experimental-strip-types src/app/confirmationPolicy.test.ts src/app/confirmation-contract.test.ts
-```
+## Verification (state as of this handoff)
 
-```bash
-cd "/Users/jared/Developer/Web Apps/PRISM" && npm run lint && npm run typecheck
-```
-
-## Verification
-
-- Two test files: **26 pass, 0 fail**.
-- The ratchet is not vacuous — proven by temporarily changing a `count: 2` to `count: 3` and confirming the staleness test fails with `fell from 3 to 2`. Re-run that check if you touch the scanner.
-- Full suite: `node --test --experimental-strip-types src/app/*.test.ts` from `apps/web`. Expect ~167 failures; **none attributable to this work**. The one new failure vs. baseline (`composites free-roam motion as one registered avatar unit`, in `zen-live-presence-css.test.ts`) belongs to the parallel session.
-- **Visual confirmation remains outstanding.** The app requires a login that could not be performed, so nothing here was verified in a browser. Say so plainly rather than implying otherwise.
-
-## Key finding worth preserving
-
-The inventory's payoff, now in the doc: **in both bots and images the bulk delete route is strictly less recoverable than the single-item route.** `DELETE /api/bots/:id` and `DELETE /api/images/:id` go through the capability registry with 30-day quarantine undo; `DELETE /api/bots/selected`, `DELETE /api/bots`, and `DELETE /api/images` are raw SQL with no journal entry. The modals look identical while resting on completely different guarantees. This is what makes the bulk rule load-bearing rather than taste. Nine surfaces already have a real inverse and confirm only by habit — that is the migration backlog.
+- `npm run typecheck` — fully clean. (The two `SessionReviewRecordingEvidence` errors noted earlier were resolved by the parallel session.)
+- `npm run lint` — 0 errors in the touched files. Three pre-existing errors remain in `CoffeeSeatPlateEmoji.tsx` and `PronunciationAtlas.tsx`.
+- `node --test apps/web/src/app/*.test.ts` (the whole web suite, not just `coffee-*`) — **zero new failures attributable to this change**, verified by diffing the failure set against a detached worktree at `HEAD` with `node_modules` symlinked. Re-run against `f3160dc0`: 177 failures now vs 182 at `HEAD`; 6 fixed, 1 new. That one new failure — `traps focus, makes the background inert, and restores the opener` in `bot-group-room-atmosphere-integration.test.ts` — is Jared's in-flight work: the test pins `node.setAttribute("inert", "")`, which he replaced with the still-uncommitted `applyPrismInert(node)` / `releasePrismInert(node)` (4 occurrences in the tree, 0 at `HEAD`).
+  Reproduce the comparison with: `git worktree add --detach <tmp> HEAD`, symlink root and `apps/web` `node_modules` in, run the suite in both, `comm -23` the sorted `✖` lines.
+- Re-run after the freeze #2 fix, against `371fda86`: 177 failures now vs 182 at `HEAD`, same single non-attributable `inert` failure.
+- Updated source-shape pins: `coffee-live-immersion.test.ts` asserts the channel wiring, that neither FPS-gated helper can return, and the whole freeze #2 recovery path; `coffee-user-reveal-flow.test.ts` covers the channel's publish/subscribe, the fixed coarse cadence, and `coffeeTableStallShapeV1` (including that a healthy armed cooldown is *not* a stall and a stranded one is).
+- One pre-existing pin was rewritten rather than widened: `never wedges the table on stuck reveals or dead thinking seats` anchored on a byte distance (`[\s\S]{0,700}`) between `stuckThinkingShape` and the threshold constant, and broke the moment a comment landed between them. It now anchors on the relationship (`if (!stuckThinkingShape) { coffeeStuckThinkingSinceMsRef.current = null;`).

@@ -23,10 +23,19 @@ import {
   coffeeShouldWaitForPendingBotRevealBeforeNextTurn,
   coffeeSubmittedUserMessageFromTurn,
   coffeeTableMessageContentIsVisible,
+  coffeeTableStallShapeV1,
   coffeeUserTableTypingShouldRestart,
   coffeeVoicePlaybackOwnsAutoplayGate,
   coffeeVisibleDirectedMentionBotIds,
 } from "./coffee-user-reveal-flow.ts";
+import {
+  COFFEE_REVEAL_COARSE_COMMIT_MS,
+  coffeeRevealCoarseShouldCommit,
+  coffeeRevealVisibleLength,
+  publishCoffeeRevealProgress,
+  resetCoffeeRevealProgressForTests,
+  subscribeCoffeeRevealProgress,
+} from "./coffeeRevealProgressChannel.ts";
 
 describe("coffee user reveal flow", () => {
   it("keeps only the Coffee table composer rich by default", () => {
@@ -687,6 +696,164 @@ describe("coffee user reveal flow", () => {
         "Hey Patrick Star, look at S".length,
       ),
       ["bot-patrick", "bot-sponge"],
+    );
+  });
+});
+
+describe("Coffee reveal progress channel", () => {
+  it("publishes every character without going through React state", () => {
+    resetCoffeeRevealProgressForTests();
+    const seen: number[] = [];
+    const unsubscribe = subscribeCoffeeRevealProgress(() => {
+      seen.push(coffeeRevealVisibleLength());
+    });
+    for (const length of [1, 2, 3]) publishCoffeeRevealProgress(length);
+    // Republishing the same character is not a change and must not notify.
+    publishCoffeeRevealProgress(3);
+    publishCoffeeRevealProgress(-4);
+    unsubscribe();
+    publishCoffeeRevealProgress(9);
+    assert.deepEqual(seen, [1, 2, 3, 0]);
+    assert.equal(coffeeRevealVisibleLength(), 9);
+    resetCoffeeRevealProgressForTests();
+  });
+
+  it("mirrors into coarse React state on a fixed cadence, never a frame-rate one", () => {
+    // Review 47d7aa3d: per-character full-surface reconciliation pinned a
+    // five-seat table at 1 FPS. Seat mouths animate at one phase, so the
+    // mirror commits no faster than that — and the interval is a constant, not
+    // a function of measured FPS, because an FPS-gated interval oscillates.
+    assert.equal(COFFEE_REVEAL_COARSE_COMMIT_MS, 120);
+    assert.equal(
+      coffeeRevealCoarseShouldCommit({
+        nowMs: 1_000,
+        lastCommitAtMs: 960,
+        nextLength: 12,
+        totalLength: 90,
+      }),
+      false,
+    );
+    assert.equal(
+      coffeeRevealCoarseShouldCommit({
+        nowMs: 1_080,
+        lastCommitAtMs: 960,
+        nextLength: 12,
+        totalLength: 90,
+      }),
+      true,
+    );
+    // A finished line always lands, so it never sits a phase short of complete.
+    assert.equal(
+      coffeeRevealCoarseShouldCommit({
+        nowMs: 1_000,
+        lastCommitAtMs: 999,
+        nextLength: 90,
+        totalLength: 90,
+      }),
+      true,
+    );
+  });
+});
+
+describe("Coffee table stall recovery", () => {
+  const healthy = {
+    phase: "live",
+    requestInFlight: false,
+    loopTimerArmed: false,
+    cooldownTimerArmed: false,
+    rhythmState: "idle" as const,
+    pendingRevealPresent: false,
+    pendingSpeakerPresent: false,
+  };
+
+  it("leaves a healthy cooldown alone while its hand-off timer is armed", () => {
+    // A live cooldown and a stranded one are identical apart from this timer.
+    // Counting against the healthy one would eventually cut real turns short.
+    assert.equal(
+      coffeeTableStallShapeV1({
+        ...healthy,
+        rhythmState: "cooldown",
+        cooldownTimerArmed: true,
+        pendingRevealPresent: true,
+      }),
+      false,
+    );
+  });
+
+  it("catches a cooldown whose hand-off timer was cancelled", () => {
+    // Session 2253b3903a: 100 minutes at 66 FPS with busy 0ms/s, Send greyed,
+    // because `cooldown` disables the composer and the reconciliation effect
+    // refuses to reset out of it.
+    assert.equal(
+      coffeeTableStallShapeV1({
+        ...healthy,
+        rhythmState: "cooldown",
+        cooldownTimerArmed: false,
+        pendingRevealPresent: true,
+      }),
+      true,
+    );
+    // Also when nothing is pending — the bare stranded state, which the older
+    // shape check could not see at all.
+    assert.equal(
+      coffeeTableStallShapeV1({
+        ...healthy,
+        rhythmState: "cooldown",
+        cooldownTimerArmed: false,
+      }),
+      true,
+    );
+  });
+
+  it("keeps the shapes the earlier watchdog already covered", () => {
+    // Review 8e012a9d: a thinking seat that lost its request.
+    assert.equal(
+      coffeeTableStallShapeV1({
+        ...healthy,
+        rhythmState: "botThinking",
+        pendingSpeakerPresent: true,
+      }),
+      true,
+    );
+    // Session 6d6f1239: a pending reveal that never started.
+    assert.equal(
+      coffeeTableStallShapeV1({ ...healthy, pendingRevealPresent: true }),
+      true,
+    );
+    // A pending speaker with the rhythm already back at idle.
+    assert.equal(
+      coffeeTableStallShapeV1({ ...healthy, pendingSpeakerPresent: true }),
+      true,
+    );
+  });
+
+  it("never fires while anything is still progressing", () => {
+    for (const progressing of [
+      { requestInFlight: true },
+      { loopTimerArmed: true },
+      { rhythmState: "tableTyping" as const },
+      { rhythmState: "userTableTyping" as const },
+      { phase: "topic" },
+      { phase: "finished" },
+    ]) {
+      assert.equal(
+        coffeeTableStallShapeV1({
+          ...healthy,
+          pendingRevealPresent: true,
+          pendingSpeakerPresent: true,
+          ...progressing,
+        }),
+        false,
+        JSON.stringify(progressing),
+      );
+    }
+  });
+
+  it("stays quiet on an ordinary idle table between turns", () => {
+    assert.equal(coffeeTableStallShapeV1(healthy), false);
+    assert.equal(
+      coffeeTableStallShapeV1({ ...healthy, rhythmState: "playerComposing" }),
+      false,
     );
   });
 });

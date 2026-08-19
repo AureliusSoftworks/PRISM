@@ -526,9 +526,17 @@ import {
   coffeeShouldWaitForPendingBotRevealBeforeNextTurn,
   coffeeSubmittedUserMessageFromTurn,
   coffeeTableMessageContentIsVisible,
+  coffeeTableStallShapeV1,
   coffeeVoicePlaybackOwnsAutoplayGate,
   coffeeVisibleDirectedMentionBotIds,
 } from "./coffee-user-reveal-flow";
+import {
+  coffeeRevealCoarseShouldCommit,
+  coffeeRevealServerVisibleLength,
+  coffeeRevealVisibleLength,
+  publishCoffeeRevealProgress,
+  subscribeCoffeeRevealProgress,
+} from "./coffeeRevealProgressChannel";
 import {
   coffeeSessionClockHoldReasons,
   coffeeSessionClockShouldTick,
@@ -1892,6 +1900,7 @@ import {
   renderPlainTextWithBotMentions,
   renderPrismBotMarkdownAnchor,
   revealPlainTextWithBotMentions,
+  type RenderPlainTextOptions,
 } from "./BotMentionRichText";
 import { syncPrismBotMentionMarksInEditorDom } from "./botMentionTipTapDom";
 import { shouldSubmitComposerOnEnter } from "./composerKeyPolicy";
@@ -6115,6 +6124,16 @@ type ClientAccessState = "checking" | "allowed" | "blocked";
 const AUTO_TITLE_REFRESH_DELAYS_MS = [1500, 4000, 8000] as const;
 const VIEW_SWITCH_OVERLAY_MIN_VISIBLE_MS = 320;
 const VIEW_SWITCH_OVERLAY_FADE_OUT_MS = 280;
+/**
+ * Absolute ceiling on how long the mode-switch scrim may exist, no matter
+ * which phase it is parked in. The phase machine advances on a rAF and on
+ * timers whose cleanups can cancel them, and rAF does not run at all in a
+ * backgrounded window — so a player who steps away mid-transition could come
+ * back to a scrim that never finished. Nothing legitimate outlives this.
+ */
+const VIEW_SWITCH_OVERLAY_MAX_LIFETIME_MS = 6000;
+/** rAF backstop: advance `entering` even if no frame is ever served. */
+const VIEW_SWITCH_OVERLAY_ENTER_FAILSAFE_MS = 400;
 // Which post-auth surface is currently rendered. Product Chat owns the
 // immersive Hub canvas (`chat`); `sandbox` is retained as a compatibility
 // branch for stale in-memory navigation and developer links.
@@ -6659,6 +6678,11 @@ const COFFEE_CUP_REFILL_SIP_LOCK_MS = 3_200;
 const COFFEE_PLAYER_VOICE_START_FAILSAFE_MS = 12_000;
 /** A thinking seat with no in-flight work self-recovers after this long. */
 const COFFEE_STUCK_THINKING_WATCHDOG_MS = 45_000;
+// How often the stall watchdog re-evaluates. Slow on purpose: it exists to
+// unwedge a dead table, not to animate anything.
+const COFFEE_STALL_RECOVERY_TICK_MS = 5_000;
+/** After this much visible thinking, another bot may mutter a stew aside. */
+const COFFEE_STEW_ASIDE_DELAY_MS = 6_500;
 const ZEN_SUCCESSIVE_MESSAGE_CONTEXT_LIMIT = 6;
 const COFFEE_BOT_REVEAL_DELAY_MIN_MS = COFFEE_DELIVERY_MIN_DURATION_MS;
 const COFFEE_BOT_REVEAL_DELAY_MAX_MS = COFFEE_DELIVERY_MAX_DURATION_MS;
@@ -10513,6 +10537,7 @@ const FPS_COUNTER_CHANGED_EVENT = "prism:fps-counter-changed";
 function FpsCounter(): React.JSX.Element | null {
   const [enabled, setEnabled] = useState(false);
   const [fps, setFps] = useState<number | null>(null);
+  const [mainThreadBusyMs, setMainThreadBusyMs] = useState<number | null>(null);
 
   useEffect(() => {
     const readEnabled = (): void => {
@@ -10526,15 +10551,25 @@ function FpsCounter(): React.JSX.Element | null {
   useEffect(() => {
     if (!enabled) {
       setFps(null);
+      setMainThreadBusyMs(null);
       return;
     }
-    return subscribePrismFrameRate((snapshot) => setFps(snapshot?.fps ?? null));
+    return subscribePrismFrameRate((snapshot) => {
+      setFps(snapshot?.fps ?? null);
+      setMainThreadBusyMs(snapshot?.longTaskMsPerSecond ?? null);
+    });
   }, [enabled]);
 
   if (!enabled || fps === null) return null;
+  // Busy ms/s says WHY frames are missing: ~1000 means the main thread is
+  // saturated (renders/scripts), while LOW busy at LOW fps is the smoking gun
+  // for compositor/GPU cost — so zero is a meaningful reading and always shows.
+  const busySuffix =
+    mainThreadBusyMs !== null ? ` · busy ${mainThreadBusyMs}ms/s` : "";
   return (
-    <output className={styles.fpsCounter} aria-label={`Frames per second: ${fps}`}>
+    <output className={styles.fpsCounter} aria-label={`Frames per second: ${fps}${busySuffix}`}>
       {fps} FPS
+      {busySuffix}
     </output>
   );
 }
@@ -17305,6 +17340,39 @@ function collectRightPanelInertTargets(panelNode: HTMLElement): HTMLElement[] {
     targets.push(child);
   }
   return targets;
+}
+
+/**
+ * Apply `inert` while recording that Prism owns it, and how many overlays are
+ * currently relying on it. Ownership cannot be inferred from "did this node
+ * already have `inert`?": when two panel effects overlap, the second reads the
+ * first's `inert` as pre-existing and its cleanup then declines to remove it,
+ * latching the background permanently non-interactive — clicks dead, scrolling
+ * still alive, because `inert` does not stop scroll.
+ */
+function applyPrismInert(node: HTMLElement): void {
+  const held = Number(node.dataset.prismInert ?? "0");
+  if (held === 0 && node.hasAttribute("inert")) {
+    // Genuinely pre-existing (someone else's); never take it away later.
+    node.dataset.prismInertForeign = "true";
+  }
+  node.dataset.prismInert = String(held + 1);
+  node.setAttribute("inert", "");
+}
+
+/** Release one hold applied by {@link applyPrismInert}. */
+function releasePrismInert(node: HTMLElement): void {
+  const remaining = Math.max(0, Number(node.dataset.prismInert ?? "0") - 1);
+  if (remaining > 0) {
+    node.dataset.prismInert = String(remaining);
+    return;
+  }
+  delete node.dataset.prismInert;
+  if (node.dataset.prismInertForeign === "true") {
+    delete node.dataset.prismInertForeign;
+    return;
+  }
+  node.removeAttribute("inert");
 }
 
 /** Focus cycle for an open right panel includes the shared top navbar. */
@@ -31724,6 +31792,71 @@ interface CoffeeSeatAvatarRendererProps {
   mannequinProps: ZenLiveBotMannequinProps;
 }
 
+/**
+ * The revealing Coffee table line, and the only thing that re-renders per
+ * character.
+ *
+ * Live reveal progress is published to `coffeeRevealProgressChannel` rather
+ * than into `HomeContent` state, because `HomeContent` is the whole app
+ * surface: five HD seats, mugs, nameplates, table talk, and every other lane's
+ * tree. Reconciling all of that on each typed character is what pinned a
+ * five-seat table at 1 FPS. This component subscribes on its own, so a typed
+ * character costs one small text render and nothing else.
+ *
+ * Replay drives its own length (`coffeeReplayTypewriterLength` is a genuine
+ * React state on a separate clock), so `fixedLength` overrides the channel.
+ */
+const CoffeeRevealTypewriterLine = memo(function CoffeeRevealTypewriterLine({
+  text,
+  totalDisplayLength,
+  fixedLength,
+  renderOptions,
+  caretClassName,
+  caretHolding,
+  onRevealed,
+}: {
+  text: string;
+  /** Display length the caret disappears at — stage directions already dropped. */
+  totalDisplayLength: number;
+  /** Replay supplies its length; live passes null and reads the channel. */
+  fixedLength: number | null;
+  renderOptions: RenderPlainTextOptions;
+  caretClassName: string;
+  /** Rendered as a caret marker only when defined — live bot lines pass it. */
+  caretHolding?: boolean;
+  /** Runs after each revealed length paints — the center feed follows here. */
+  onRevealed?: () => void;
+}): React.JSX.Element {
+  const channelLength = useSyncExternalStore(
+    subscribeCoffeeRevealProgress,
+    coffeeRevealVisibleLength,
+    coffeeRevealServerVisibleLength,
+  );
+  const revealedLength = fixedLength ?? channelLength;
+  // The center feed follows the reveal from here rather than from a top-level
+  // effect: the length it should follow no longer passes through state, and
+  // running it in this component's layout effect keeps the scroll ordered
+  // after the text it is following.
+  useLayoutEffect(() => {
+    onRevealed?.();
+  }, [revealedLength, onRevealed]);
+  return (
+    <>
+      {revealPlainTextWithBotMentions(text, revealedLength, renderOptions)}
+      {revealedLength < totalDisplayLength ? (
+        <span className={caretClassName} aria-hidden="true">
+          {caretHolding === undefined ? null : (
+            <span
+              data-coffee-caret-holding={caretHolding ? "true" : undefined}
+            />
+          )}
+          │
+        </span>
+      ) : null}
+    </>
+  );
+});
+
 const CoffeeSeatAvatarRenderer = memo(
   function CoffeeSeatAvatarRenderer({
     ambientProps,
@@ -31789,10 +31922,15 @@ function FullAvatarCompactFallback({
     ["--coffee-plate-emoji-face-scale-y" as string]:
       BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
   } as CSSProperties;
+  // The thinking mark is a screen-owned cue that takes over the face: the Full
+  // HD path swaps its entire content rig for the thinking screen, so authored
+  // Ink disappears with it. Mini draws the mark inside the face rig instead,
+  // leaving the art to render straight over it — the above-face Ink layer even
+  // sits at a higher z-index than the rig. Clear the art for the same beat.
   const renderAvatarDetailsInk = (
     depth: "behind-face" | "above-face",
   ): React.JSX.Element | null =>
-    hasAvatarArt ? (
+    hasAvatarArt && !showThinkingSpinner ? (
       <span
         className={styles.coffeeSeatMiniAvatarArt}
         data-avatar-details-depth={depth}
@@ -48921,6 +49059,12 @@ function HomeContent(): React.JSX.Element {
     typeof setTimeout
   > | null>(null);
   const viewSwitchOverlayEnterFrameRef = useRef<number | null>(null);
+  const viewSwitchOverlayEnterFailsafeRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+  const viewSwitchOverlayLifetimeTimerRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
   const pendingPrivateExitOnChatHomeRef = useRef(false);
   const disarmPrivateModeForAppletSwitchRef = useRef<(next: View) => void>(
     () => {},
@@ -48963,6 +49107,10 @@ function HomeContent(): React.JSX.Element {
     if (viewSwitchOverlayEnterFrameRef.current !== null) {
       cancelAnimationFrame(viewSwitchOverlayEnterFrameRef.current);
       viewSwitchOverlayEnterFrameRef.current = null;
+    }
+    if (viewSwitchOverlayEnterFailsafeRef.current) {
+      clearTimeout(viewSwitchOverlayEnterFailsafeRef.current);
+      viewSwitchOverlayEnterFailsafeRef.current = null;
     }
   }, []);
   const triggerConversationModeExitCompaction = useCallback(
@@ -49023,6 +49171,16 @@ function HomeContent(): React.JSX.Element {
         setViewSwitchOverlayPhase("visible");
         viewSwitchOverlayEnterFrameRef.current = null;
       });
+      // A backgrounded window serves no frames, so the rAF above can simply
+      // never run; `clearViewSwitchOverlayTimers` can also cancel it from an
+      // effect cleanup without advancing the phase. Either way the scrim
+      // would sit in `entering` forever, so drive it from a timer too.
+      viewSwitchOverlayEnterFailsafeRef.current = setTimeout(() => {
+        viewSwitchOverlayEnterFailsafeRef.current = null;
+        setViewSwitchOverlayPhase((phase) =>
+          phase === "entering" ? "visible" : phase,
+        );
+      }, VIEW_SWITCH_OVERLAY_ENTER_FAILSAFE_MS);
       const href = prismHrefForSurfaceView(next);
       router.replace(href);
     },
@@ -49079,6 +49237,36 @@ function HomeContent(): React.JSX.Element {
     setPendingIncognito(false);
     pendingPrivateExitOnChatHomeRef.current = false;
   }, [view, viewSwitchOverlayPhase, viewSwitchTarget]);
+  // Absolute backstop for the scrim, independent of every phase timer above.
+  // Those effects all return `clearViewSwitchOverlayTimers`, so a dependency
+  // change can disarm a pending advance and leave the overlay parked; this
+  // watchdog is armed once when the overlay appears and is only ever cleared
+  // by the overlay actually reaching `hidden`.
+  useEffect(() => {
+    if (viewSwitchOverlayPhase === "hidden") {
+      if (viewSwitchOverlayLifetimeTimerRef.current) {
+        clearTimeout(viewSwitchOverlayLifetimeTimerRef.current);
+        viewSwitchOverlayLifetimeTimerRef.current = null;
+      }
+      return;
+    }
+    if (viewSwitchOverlayLifetimeTimerRef.current) return;
+    viewSwitchOverlayLifetimeTimerRef.current = setTimeout(() => {
+      viewSwitchOverlayLifetimeTimerRef.current = null;
+      clearViewSwitchOverlayTimers();
+      setViewSwitchOverlayPhase("hidden");
+      setViewSwitchTarget(null);
+    }, VIEW_SWITCH_OVERLAY_MAX_LIFETIME_MS);
+  }, [clearViewSwitchOverlayTimers, viewSwitchOverlayPhase]);
+  useEffect(
+    () => () => {
+      if (viewSwitchOverlayLifetimeTimerRef.current) {
+        clearTimeout(viewSwitchOverlayLifetimeTimerRef.current);
+        viewSwitchOverlayLifetimeTimerRef.current = null;
+      }
+    },
+    [],
+  );
   useEffect(() => clearViewSwitchOverlayTimers, [clearViewSwitchOverlayTimers]);
   const viewSwitchOverlayLabel = useMemo(() => {
     if (viewSwitchTarget === "chat") return "Opening Zen";
@@ -56131,12 +56319,11 @@ function HomeContent(): React.JSX.Element {
       (node) => ({
         node,
         ariaHidden: node.getAttribute("aria-hidden"),
-        inert: node.hasAttribute("inert"),
       }),
     );
     for (const { node } of siblingStates) {
       node.setAttribute("aria-hidden", "true");
-      node.setAttribute("inert", "");
+      applyPrismInert(node);
     }
     const focusFrame = window.requestAnimationFrame(() => {
       const currentActiveElement = document.activeElement;
@@ -56195,15 +56382,13 @@ function HomeContent(): React.JSX.Element {
     return () => {
       window.cancelAnimationFrame(focusFrame);
       document.removeEventListener("keydown", handlePanelKeyDown, true);
-      for (const { node, ariaHidden, inert } of siblingStates) {
+      for (const { node, ariaHidden } of siblingStates) {
         if (ariaHidden === null) {
           node.removeAttribute("aria-hidden");
         } else {
           node.setAttribute("aria-hidden", ariaHidden);
         }
-        if (!inert) {
-          node.removeAttribute("inert");
-        }
+        releasePrismInert(node);
       }
       const focusReturn = panelFocusReturnRef.current;
       if (focusReturn && document.contains(focusReturn)) {
@@ -60829,12 +61014,11 @@ function HomeContent(): React.JSX.Element {
           .map((node) => ({
             node,
             ariaHidden: node.getAttribute("aria-hidden"),
-            inert: node.hasAttribute("inert"),
           }))
       : [];
     for (const { node } of siblingStates) {
       node.setAttribute("aria-hidden", "true");
-      node.setAttribute("inert", "");
+      applyPrismInert(node);
     }
     const focusFrame = window.requestAnimationFrame(() => {
       const focusable = panelFocusableElements(panelNode);
@@ -60885,13 +61069,13 @@ function HomeContent(): React.JSX.Element {
         handleAtmosphereDialogKeyDown,
         true,
       );
-      for (const { node, ariaHidden, inert } of siblingStates) {
+      for (const { node, ariaHidden } of siblingStates) {
         if (ariaHidden === null) {
           node.removeAttribute("aria-hidden");
         } else {
           node.setAttribute("aria-hidden", ariaHidden);
         }
-        if (!inert) node.removeAttribute("inert");
+        releasePrismInert(node);
       }
       const opener = botGroupRoomAtmosphereDialogOpenerRef.current;
       const dialogClosed =
@@ -64807,7 +64991,15 @@ function HomeContent(): React.JSX.Element {
     setCoffeeSessionPhase(phase);
   };
   useEffect(() => {
-    if (coffeeSessionPhase !== "live" && coffeeSessionPhase !== "arriving") {
+    // The claim starts at the topic picker, not first speech: an unclaimed
+    // page gets render-throttled by WebKit/App Nap when the player steps
+    // away, and the throttle can stick after they return (session 9c2a7b79
+    // froze at the picker at 1 FPS with an idle main thread).
+    if (
+      coffeeSessionPhase !== "live" &&
+      coffeeSessionPhase !== "arriving" &&
+      coffeeSessionPhase !== "topic"
+    ) {
       return;
     }
     const ownerId = coffeeConversation?.id?.trim() || "coffee-live";
@@ -65397,13 +65589,48 @@ function HomeContent(): React.JSX.Element {
   const [coffeeTurnRhythmState, setCoffeeTurnRhythmState] =
     useState<CoffeeTurnRhythmState>("idle");
   const coffeeTurnRhythmStateRef = useRef<CoffeeTurnRhythmState>("idle");
-  /** Visible length during `userTableTyping` and `tableTyping` center typewriter (shared RAF). */
+  /**
+   * Coarse mirror of the center typewriter's visible length during
+   * `userTableTyping` and `tableTyping` (shared RAF), committed at most once
+   * per mouth phase. The exact per-character count lives in
+   * `coffeeRevealProgressChannel`: publishing it into state here reconciled the
+   * whole app surface on every character, which is what pinned a five-seat
+   * table at 1 FPS. Only consumers that animate at mouth cadence read this —
+   * seat mouths, stage-direction badges, gaze. The visible line, cut-in timing,
+   * and action SFX read the channel and never render the surface.
+   */
   const [coffeeTypewriterLength, setCoffeeTypewriterLength] = useState(0);
-  const coffeeTypewriterLengthRef = useRef(0);
-  coffeeTypewriterLengthRef.current = coffeeTypewriterLength;
+  const coffeeTypewriterCoarseCommitAtMsRef = useRef(0);
   const [coffeeTypewriterHolding, setCoffeeTypewriterHolding] = useState(false);
   const [coffeeTypewriterEmphasisActive, setCoffeeTypewriterEmphasisActive] =
     useState(false);
+  /** Discrete jump (reset, settle, seal): publish exactly and mirror at once. */
+  function assignCoffeeTypewriterLength(length: number): void {
+    publishCoffeeRevealProgress(length);
+    coffeeTypewriterCoarseCommitAtMsRef.current =
+      typeof performance === "undefined" ? 0 : performance.now();
+    setCoffeeTypewriterLength(coffeeRevealVisibleLength());
+  }
+  /** RAF advance: exact every frame, coarse mirror on the fixed cadence. */
+  function advanceCoffeeTypewriterLength(args: {
+    nowMs: number;
+    length: number;
+    totalLength: number;
+  }): void {
+    publishCoffeeRevealProgress(args.length);
+    if (
+      !coffeeRevealCoarseShouldCommit({
+        nowMs: args.nowMs,
+        lastCommitAtMs: coffeeTypewriterCoarseCommitAtMsRef.current,
+        nextLength: args.length,
+        totalLength: args.totalLength,
+      })
+    ) {
+      return;
+    }
+    coffeeTypewriterCoarseCommitAtMsRef.current = args.nowMs;
+    setCoffeeTypewriterLength(coffeeRevealVisibleLength());
+  }
   const [coffeeSipTalkGateEpochByBotId, setCoffeeSipTalkGateEpochByBotId] =
     useState<Record<string, number>>({});
   const [coffeePendingSpeakerBotId, setCoffeePendingSpeakerBotId] = useState<
@@ -65802,6 +66029,24 @@ function HomeContent(): React.JSX.Element {
   const coffeeTurnAbortRef = useRef<AbortController | null>(null);
   /** Wall-clock ms when the stuck-thinking watchdog first saw the dead shape. */
   const coffeeStuckThinkingSinceMsRef = useRef<number | null>(null);
+  /** Stew asides: another bot takes advantage of a long thinking window. */
+  const coffeeStewAsideSinceMsRef = useRef<number | null>(null);
+  const coffeeStewAsideInFlightRef = useRef(false);
+  const coffeeStewAsideFiredKeysRef = useRef<Set<string>>(new Set());
+  /** The stew-aside reveal currently on the table, so a superseding reveal
+   * can trail it off at exactly the heard fragment. */
+  const coffeeStewAsideActiveRevealRef = useRef<{
+    messageId: string;
+    botId: string;
+    content: string;
+  } | null>(null);
+  const coffeeRunStewAsideRef = useRef<
+    (args: {
+      conversationId: string;
+      thinkerBotId: string;
+      commentatorBotId: string;
+    }) => Promise<void>
+  >(async () => {});
   const coffeeContinueAbortRef = useRef<AbortController | null>(null);
   const coffeePreparedTurnRef = useRef<PreparedCoffeeLookahead | null>(null);
   const coffeePreparedVoiceClipRef = useRef<
@@ -66493,10 +66738,12 @@ function HomeContent(): React.JSX.Element {
   const loadCoffeeTranscriptMessagesForClipboard = async (
     conversation: CoffeeConversationState,
   ): Promise<CoffeeConversationMessage[]> => {
+    // Deliberately no cache shortcut. A review export is a one-off user
+    // action, not a hot path, and a Table talk cache captured earlier in the
+    // session can be short at the head — which silently shipped exports whose
+    // opening turns existed in the recording but not in the transcript. Always
+    // ask the server for the complete history, then merge live rows on top.
     const cached = coffeeTranscriptMessagesByConversationId[conversation.id];
-    if (cached) {
-      return mergeCoffeeTranscriptMessageSources(cached, conversation.messages);
-    }
     setCoffeeTranscriptLoadingConversationId(conversation.id);
     setCoffeeTranscriptLoadError(null);
     try {
@@ -66522,7 +66769,11 @@ function HomeContent(): React.JSX.Element {
             ? err.message
             : "Could not load full Table talk.",
       });
-      if (conversation.messages.length > 0) return [...conversation.messages];
+      const fallback = mergeCoffeeTranscriptMessageSources(
+        cached,
+        conversation.messages,
+      );
+      if (fallback.length > 0) return fallback;
       throw err;
     } finally {
       setCoffeeTranscriptLoadingConversationId((current) =>
@@ -67246,6 +67497,17 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     coffeeSessionSettingsRef.current = coffeeSessionSettings;
   }, [coffeeSessionSettings]);
+  /**
+   * Pin the center feed to the newest text as a line reveals. The typewriter
+   * calls this after the characters it just drew, because reveal progress no
+   * longer passes through state for the effect below to depend on.
+   */
+  const followCoffeeCenterFeedReveal = useCallback((): void => {
+    if (!coffeeCenterAutoFollowRef.current) return;
+    const node = coffeeCenterMessageScrollRef.current;
+    if (!node) return;
+    node.scrollTop = Math.max(0, node.scrollHeight - node.clientHeight);
+  }, []);
   useLayoutEffect(() => {
     const node = coffeeCenterMessageScrollRef.current;
     if (!node) return;
@@ -67333,7 +67595,14 @@ function HomeContent(): React.JSX.Element {
 
     const reconcileClock = (minimumElapsedMs = 0): void => {
       const now = Date.now();
-      const modelWarmupActive = coffeeModelWarmupRef.current !== null;
+      // A warmup in progress holds the clock so the player is not charged for
+      // model load time. A *failed* warmup is terminal — `releaseCoffeeModelWarmup`
+      // returns early on that phase and only a retry clears it — so treating it
+      // as active froze the session clock indefinitely, which in turn froze
+      // every recovery path that measured against it (session 2253b3903a).
+      const modelWarmupActive =
+        coffeeModelWarmupRef.current !== null &&
+        coffeeModelWarmupRef.current.phase !== "failed";
       const holdReasons = coffeeSessionClockHoldReasons({
         autoplayPaused: coffeeAutoplayPausedRef.current,
         modelWarmup: modelWarmupActive,
@@ -67399,6 +67668,23 @@ function HomeContent(): React.JSX.Element {
     },
     [],
   );
+  // The stall watchdog below only re-runs when its dependencies change, and
+  // its one regular driver was `coffeeSessionClockMs` — which model warmup
+  // deliberately freezes. A recovery path that stops evaluating whenever the
+  // table is held is not a recovery path, so give it a tick of its own.
+  const [coffeeStallRecoveryTickMs, setCoffeeStallRecoveryTickMs] = useState(0);
+  useEffect(() => {
+    if (
+      view !== "coffee" ||
+      (coffeeSessionPhase !== "live" && coffeeSessionPhase !== "arriving")
+    ) {
+      return;
+    }
+    const id = window.setInterval(() => {
+      setCoffeeStallRecoveryTickMs(Date.now());
+    }, COFFEE_STALL_RECOVERY_TICK_MS);
+    return () => window.clearInterval(id);
+  }, [view, coffeeSessionPhase]);
   useEffect(() => {
     const activeConversation = coffeeConversationRef.current;
     const phase = coffeeSessionPhaseRef.current;
@@ -67424,21 +67710,35 @@ function HomeContent(): React.JSX.Element {
     // a dangling player question for ~138s. Track how long that dead shape
     // persists and self-recover: surface any stalled reveal as plain text,
     // clear the seat, and hand the floor back to the stalled speaker.
-    const stuckThinkingShape =
-      (phase === "live" || phase === "arriving") &&
-      coffeeTurnRhythmStateRef.current === "botThinking" &&
-      coffeePendingSpeakerBotId !== null &&
-      !requestInFlight &&
-      !timerPresent;
+    // Dead shapes, all sharing "no request, no timer, nothing progressing":
+    // a thinking seat that lost its request; a pending reveal that never
+    // started (session 6d6f1239: the interruption-reclaim sequence left the
+    // reveal state set and the table sat silent for seven minutes — the
+    // force-turn treats any pending reveal as progress); or a pending
+    // speaker with the rhythm already back at idle.
+    const rhythmNow = coffeeTurnRhythmStateRef.current;
+    const stuckThinkingShape = coffeeTableStallShapeV1({
+      phase,
+      requestInFlight,
+      loopTimerArmed: timerPresent,
+      cooldownTimerArmed: coffeeCooldownTimerRef.current !== null,
+      rhythmState: rhythmNow,
+      pendingRevealPresent: coffeePendingRevealConversation !== null,
+      pendingSpeakerPresent: coffeePendingSpeakerBotId !== null,
+    });
     if (!stuckThinkingShape) {
       coffeeStuckThinkingSinceMsRef.current = null;
     } else {
-      const stuckSinceMs =
-        coffeeStuckThinkingSinceMsRef.current ?? coffeeSessionClockMs;
+      // Wall clock, not `coffeeSessionClockMs`: the session clock is
+      // deliberately pausable (autoplay pause, model warmup) and a recovery
+      // watchdog that stops counting whenever the thing it recovers from also
+      // holds the clock can never fire. Session 2253b3903a sat 100 minutes.
+      const nowMs = Date.now();
+      const stuckSinceMs = coffeeStuckThinkingSinceMsRef.current ?? nowMs;
       coffeeStuckThinkingSinceMsRef.current = stuckSinceMs;
       if (
         activeConversation &&
-        coffeeSessionClockMs - stuckSinceMs >= COFFEE_STUCK_THINKING_WATCHDOG_MS
+        nowMs - stuckSinceMs >= COFFEE_STUCK_THINKING_WATCHDOG_MS
       ) {
         coffeeStuckThinkingSinceMsRef.current = null;
         const stalledBotId = coffeePendingSpeakerBotId;
@@ -67454,10 +67754,17 @@ function HomeContent(): React.JSX.Element {
         setCoffeePendingSpeakerBotId(null);
         coffeeTurnRhythmStateRef.current = "idle";
         setCoffeeTurnRhythmState("idle");
+        // Releasing the rhythm above is the unwedge: the composer un-greys and
+        // the player has the floor back either way. Resuming autoplay is the
+        // separate question, and a failed warmup still declines it on purpose —
+        // the model is genuinely unavailable, so the retry affordance owns that,
+        // not a watchdog that would only spin. `Date.now()` rather than the
+        // session clock for the same reason as the threshold above: no recovery
+        // decision should read a clock the table can hold.
         if (
           !coffeeAutoplayPausedRef.current &&
           coffeeModelWarmupRef.current === null &&
-          (endsAt === null || coffeeSessionClockMs < endsAt)
+          (endsAt === null || nowMs < endsAt)
         ) {
           if (recoveredConversation) {
             scheduleCoffeeAutonomousTurnRef.current(
@@ -67475,6 +67782,62 @@ function HomeContent(): React.JSX.Element {
           }
         }
         return;
+      }
+    }
+    // Stew asides: a long visible thinking window invites another bot to
+    // mutter over the wait ("While A stews on that…"). At most once per
+    // thinking window, never during reveals, never inside the wrap window.
+    const stewShape =
+      phase === "live" &&
+      coffeeTurnRhythmStateRef.current === "botThinking" &&
+      coffeePendingSpeakerBotId !== null &&
+      requestInFlight &&
+      coffeePendingRevealConversation === null;
+    if (!stewShape) {
+      coffeeStewAsideSinceMsRef.current = null;
+    } else {
+      const stewSinceMs =
+        coffeeStewAsideSinceMsRef.current ?? coffeeSessionClockMs;
+      coffeeStewAsideSinceMsRef.current = stewSinceMs;
+      const thinkerBotId = coffeePendingSpeakerBotId;
+      const stewKey = `${coffeeActiveTurnJobIdRef.current ?? "turn"}:${thinkerBotId}`;
+      if (
+        activeConversation &&
+        coffeeSessionClockMs - stewSinceMs >= COFFEE_STEW_ASIDE_DELAY_MS &&
+        !coffeeStewAsideInFlightRef.current &&
+        !coffeeStewAsideFiredKeysRef.current.has(stewKey) &&
+        coffeeSessionSettingsRef.current.crossTalk !== "rare" &&
+        (endsAt === null || coffeeSessionClockMs < endsAt - 30_000)
+      ) {
+        const commentatorIds = coffeeFirmlySeatedBotIds().filter(
+          (botId) => botId !== thinkerBotId,
+        );
+        if (commentatorIds.length > 0) {
+          const commentatorBotId =
+            commentatorIds[
+              hashToUnsignedInt(`${stewKey}:stew-commentator`) %
+                commentatorIds.length
+            ]!;
+          coffeeStewAsideFiredKeysRef.current.add(stewKey);
+          if (coffeeStewAsideFiredKeysRef.current.size > 64) {
+            const oldest = coffeeStewAsideFiredKeysRef.current
+              .values()
+              .next().value;
+            if (typeof oldest === "string") {
+              coffeeStewAsideFiredKeysRef.current.delete(oldest);
+            }
+          }
+          coffeeStewAsideInFlightRef.current = true;
+          void coffeeRunStewAsideRef
+            .current({
+              conversationId: activeConversation.id,
+              thinkerBotId,
+              commentatorBotId,
+            })
+            .finally(() => {
+              coffeeStewAsideInFlightRef.current = false;
+            });
+        }
       }
     }
     const shouldForceTurn = coffeeAutoplayForceTurnShouldRun({
@@ -67566,6 +67929,8 @@ function HomeContent(): React.JSX.Element {
     coffeeSessionPhase,
     coffeePendingRevealConversation,
     coffeePendingSpeakerBotId,
+    // Independent of the pausable session clock — see the tick above.
+    coffeeStallRecoveryTickMs,
     coffeeTurnRhythmState,
     prismSystemPaused,
   ]);
@@ -68879,13 +69244,13 @@ function HomeContent(): React.JSX.Element {
       coffeeTurnRhythmState !== "tableTyping" &&
       coffeeTurnRhythmState !== "userTableTyping"
     ) {
-      setCoffeeTypewriterLength(0);
+      assignCoffeeTypewriterLength(0);
       return;
     }
     if (coffeeTurnRhythmState === "userTableTyping") {
       const full = clampCoffeeTableText(coffeeUserRevealText);
       if (!full) {
-        setCoffeeTypewriterLength(0);
+        assignCoffeeTypewriterLength(0);
         return;
       }
       // Pace the typewriter on visible (display) length so a long
@@ -68903,11 +69268,11 @@ function HomeContent(): React.JSX.Element {
       if (
         !coffeeUserTableTypingShouldRestart({
           settled: coffeeUserTableTypingSettledRef.current,
-          visibleLength: coffeeTypewriterLengthRef.current,
+          visibleLength: coffeeRevealVisibleLength(),
           fullDisplayLength: charCount,
         })
       ) {
-        setCoffeeTypewriterLength(charCount);
+        assignCoffeeTypewriterLength(charCount);
         return;
       }
       coffeeUserTableTypingSettledRef.current = false;
@@ -68922,7 +69287,7 @@ function HomeContent(): React.JSX.Element {
         audioDurationMs: provisionalDurationMs,
         audioAlignment: null,
       });
-      setCoffeeTypewriterLength(0);
+      assignCoffeeTypewriterLength(0);
       setCoffeeTypewriterHolding(false);
       const startMs = performance.now();
       let lastPublishedLength = -1;
@@ -68965,7 +69330,11 @@ function HomeContent(): React.JSX.Element {
         const nextHolding = coffeeDeliveryIsHoldingAtMs(deliveryPlan, elapsed);
         if (nextLen !== lastPublishedLength) {
           lastPublishedLength = nextLen;
-          setCoffeeTypewriterLength(nextLen);
+          advanceCoffeeTypewriterLength({
+            nowMs: now,
+            length: nextLen,
+            totalLength: charCount,
+          });
         }
         if (nextHolding !== lastPublishedHolding) {
           lastPublishedHolding = nextHolding;
@@ -68977,7 +69346,7 @@ function HomeContent(): React.JSX.Element {
         if (!deliveryComplete || !coffeePlayerVoiceRevealReadyRef.current) {
           if (deliveryComplete && lastPublishedLength < charCount) {
             lastPublishedLength = charCount;
-            setCoffeeTypewriterLength(charCount);
+            assignCoffeeTypewriterLength(charCount);
           }
           coffeeTypewriterRafRef.current = requestAnimationFrame(step);
           return;
@@ -68992,7 +69361,7 @@ function HomeContent(): React.JSX.Element {
         coffeePendingRevealAfterUserRef.current = null;
         // Hand the finished line to the pending-feed overlay before any
         // queued bot reveal mutates pending-conversation deps.
-        setCoffeeTypewriterLength(charCount);
+        assignCoffeeTypewriterLength(charCount);
         setCoffeeTurnRhythmState("botThinking");
         if (queued) {
           queueCoffeeRevealFnRef.current(queued);
@@ -69009,7 +69378,7 @@ function HomeContent(): React.JSX.Element {
     const pendingMessages = coffeePendingRevealConversation?.messages ?? [];
     const last = pendingMessages[pendingMessages.length - 1];
     if (!last || last.role !== "assistant") {
-      setCoffeeTypewriterLength(
+      assignCoffeeTypewriterLength(
         last
           ? getBotMentionDisplayLength(
               extractStageDirections(last.content).mainText,
@@ -69024,7 +69393,7 @@ function HomeContent(): React.JSX.Element {
     );
     const charCount = Array.from(displayText).length;
     if (charCount === 0) {
-      setCoffeeTypewriterLength(0);
+      assignCoffeeTypewriterLength(0);
       return;
     }
     if (coffeeRevealLineIsCutOffV1(last.id, coffeeCutOffRevealMessageIdRef.current)) {
@@ -69059,7 +69428,7 @@ function HomeContent(): React.JSX.Element {
       last.botPowerMutePerformance?.durationMs ?? 0,
     );
     coffeeRevealTypingDurationMsRef.current = durationMs;
-    setCoffeeTypewriterLength(0);
+    assignCoffeeTypewriterLength(0);
     setCoffeeTypewriterHolding(false);
     setCoffeeTypewriterEmphasisActive(false);
     let elapsed = 0;
@@ -69095,11 +69464,16 @@ function HomeContent(): React.JSX.Element {
       const nextEmphasis = Boolean(
         emphasis && nextLen >= emphasis.end && elapsed - emphasisAt <= 220,
       );
-      // Skip no-op React commits — late sessions re-render the whole Coffee
-      // surface, so publishing every RAF was a major FPS drain.
+      // The exact character goes to the reveal channel every frame; the coarse
+      // React mirror lands once per mouth phase. Per-character reconciliation
+      // is what pinned a five-seat table at 1 FPS (review f2647f86).
       if (nextLen !== lastPublishedLength) {
         lastPublishedLength = nextLen;
-        setCoffeeTypewriterLength(nextLen);
+        advanceCoffeeTypewriterLength({
+          nowMs: now,
+          length: nextLen,
+          totalLength: charCount,
+        });
       }
       if (nextHolding !== lastPublishedHolding) {
         lastPublishedHolding = nextHolding;
@@ -69121,7 +69495,7 @@ function HomeContent(): React.JSX.Element {
         ) {
           return;
         }
-        setCoffeeTypewriterLength(charCount);
+        assignCoffeeTypewriterLength(charCount);
         setCoffeeTypewriterHolding(false);
         setCoffeeTypewriterEmphasisActive(false);
         coffeeRevealCompleteFnRef.current?.();
@@ -69236,6 +69610,10 @@ function HomeContent(): React.JSX.Element {
           speakerBotId: interruptedBotId,
           interrupterBotId: candidate.botId,
           targetProgress: triggerProgress,
+          // Some cut-ins catch themselves and hand the floor back ("Yeah,
+          // and that's why— sorry, no, go ahead."); the interrupted bot then
+          // reclaims and finishes the line. Seed-matched with the server.
+          allowInterrupterYield: true,
         });
         const candidateBot = bots.find((bot) => bot.id === candidate.botId);
         const interruptedBot = bots.find((bot) => bot.id === interruptedBotId);
@@ -69292,332 +69670,351 @@ function HomeContent(): React.JSX.Element {
       mustInterruptDuringTurn,
       unconditionalInterruption,
     } = preparedPlan;
-    const visibleText = Array.from(
-      getBotMentionDisplayText(
-        extractStageDirections(clampCoffeeTableText(pendingMessage.content))
-          .mainText,
-      ),
-    )
-      .slice(0, coffeeTypewriterLength)
-      .join("");
-    const visibleWordCount = visibleText
-      .trim()
-      .split(/\s+/u)
-      .filter(Boolean).length;
-    const totalLength = Math.max(
-      1,
-      getBotMentionDisplayLength(
-        extractStageDirections(clampCoffeeTableText(pendingMessage.content))
-          .mainText,
-      ),
-    );
-    const progress = coffeeTypewriterLength / totalLength;
-    if (coffeeTypewriterHolding) {
-      if (coffeeSpeakingHoldRef.current?.key !== opportunityKey) {
-        coffeeSpeakingHoldRef.current = {
-          key: opportunityKey,
-          startedAtMs: coffeeSessionClockMs,
-        };
+    // Reveal progress rides the channel now instead of a render, so the
+    // cut-in gate subscribes rather than re-running as a Coffee-wide
+    // reconcile per character. `coffeeAutomaticCutInConsideredRef` makes
+    // re-entry a no-op once this opportunity has been spent, and the hold
+    // window reads the wall clock so a subscription closure cannot age.
+    const considerCutInAtVisibleLength = (): void => {
+      if (coffeeAutomaticCutInConsideredRef.current.has(opportunityKey)) return;
+      const visibleText = Array.from(
+        getBotMentionDisplayText(
+          extractStageDirections(clampCoffeeTableText(pendingMessage.content))
+            .mainText,
+        ),
+      )
+        .slice(0, coffeeRevealVisibleLength())
+        .join("");
+      const visibleWordCount = visibleText
+        .trim()
+        .split(/\s+/u)
+        .filter(Boolean).length;
+      const totalLength = Math.max(
+        1,
+        getBotMentionDisplayLength(
+          extractStageDirections(clampCoffeeTableText(pendingMessage.content))
+            .mainText,
+        ),
+      );
+      const progress = coffeeRevealVisibleLength() / totalLength;
+      if (coffeeTypewriterHolding) {
+        if (coffeeSpeakingHoldRef.current?.key !== opportunityKey) {
+          coffeeSpeakingHoldRef.current = {
+            key: opportunityKey,
+            startedAtMs: Date.now(),
+          };
+        }
+      } else {
+        coffeeSpeakingHoldRef.current = null;
       }
-    } else {
-      coffeeSpeakingHoldRef.current = null;
-    }
-    const holdLongEnough =
-      coffeeSpeakingHoldRef.current?.key === opportunityKey &&
-      coffeeSessionClockMs - coffeeSpeakingHoldRef.current.startedAtMs >= 550;
-    if (
-      visibleWordCount < minimumVisibleWords ||
-      (progress < triggerProgress && !holdLongEnough)
-    ) {
-      return;
-    }
-    const assistantCount = conversation.messages.filter(
-      (message) => message.role === "assistant",
-    ).length;
-    if (
-      !unconditionalInterruption &&
-      assistantCount - coffeeLastAutomaticCutInAssistantCountRef.current < 3
-    ) {
-      return;
-    }
-    coffeeAutomaticCutInConsideredRef.current.add(opportunityKey);
-    const roll =
-      hashToUnsignedInt(`${opportunityKey}:${candidate.botId}`) / 0xffffffff;
-    if (!mustInterruptDuringTurn && roll >= candidate.chance) return;
-    void (async () => {
-      try {
-        const latestVisibleText = Array.from(
-          getBotMentionDisplayText(
-            extractStageDirections(clampCoffeeTableText(pendingMessage.content))
-              .mainText,
-          ),
-        )
-          .slice(0, coffeeTypewriterLengthRef.current)
-          .join("");
-        const visibleTokens = tokenizeMessageReveal(latestVisibleText);
-        if (visibleTokens.length === 0) return;
-        coffeeLastAutomaticCutInAssistantCountRef.current = assistantCount;
-        const cutoffSnippet = interruptedMidWordSnippet(
-          pendingMessage.content,
-          Math.max(1, visibleTokens.length),
-        );
-        // Freeze the heard words before fetching the interrupter clip. Waiting
-        // let the typewriter finish the sentence and dump the rest after audio
-        // already stopped.
-        coffeeCutOffRevealMessageIdRef.current = pendingMessage.id;
-        coffeeRevealCompleteFnRef.current = null;
-        if (coffeeRevealTimerRef.current) {
-          clearTimeout(coffeeRevealTimerRef.current);
-          coffeeRevealTimerRef.current = null;
-        }
-        if (coffeeTypewriterRafRef.current != null) {
-          cancelAnimationFrame(coffeeTypewriterRafRef.current);
-          coffeeTypewriterRafRef.current = null;
-        }
-        setCoffeeTypewriterHolding(false);
-        setCoffeePendingRevealConversation((current) => {
-          if (
-            !current?.messages.some(
-              (message) => message.id === pendingMessage.id,
-            )
-          ) {
-            return current;
-          }
-          return {
-            ...current,
-            messages: current.messages.map((message) =>
-              message.id === pendingMessage.id
-                ? { ...message, content: cutoffSnippet }
-                : message,
+      const holdLongEnough =
+        coffeeSpeakingHoldRef.current?.key === opportunityKey &&
+        Date.now() - coffeeSpeakingHoldRef.current.startedAtMs >= 550;
+      if (
+        visibleWordCount < minimumVisibleWords ||
+        (progress < triggerProgress && !holdLongEnough)
+      ) {
+        return;
+      }
+      const assistantCount = conversation.messages.filter(
+        (message) => message.role === "assistant",
+      ).length;
+      if (
+        !unconditionalInterruption &&
+        assistantCount - coffeeLastAutomaticCutInAssistantCountRef.current < 3
+      ) {
+        return;
+      }
+      // A table needs some history before anyone talks over anyone: dice-based
+      // cut-ins never fire on the opening lines (review f2647f86: Meg cut off
+      // Brian's very first sentence of the night on a bare 5% roll).
+      if (!unconditionalInterruption && assistantCount < 3) {
+        return;
+      }
+      coffeeAutomaticCutInConsideredRef.current.add(opportunityKey);
+      const roll =
+        hashToUnsignedInt(`${opportunityKey}:${candidate.botId}`) / 0xffffffff;
+      if (!mustInterruptDuringTurn && roll >= candidate.chance) return;
+      void (async () => {
+        try {
+          const latestVisibleText = Array.from(
+            getBotMentionDisplayText(
+              extractStageDirections(
+                clampCoffeeTableText(pendingMessage.content),
+              ).mainText,
             ),
-          };
-        });
-        const liveConversation = coffeeConversationRef.current;
-        if (
-          liveConversation?.messages.some(
-            (message) => message.id === pendingMessage.id,
           )
-        ) {
-          const patchedConversation = {
-            ...liveConversation,
-            messages: liveConversation.messages.map((message) =>
-              message.id === pendingMessage.id
-                ? { ...message, content: cutoffSnippet }
-                : message,
-            ),
-          };
-          coffeeConversationRef.current = patchedConversation;
-          setCoffeeConversation(patchedConversation);
-        }
-        await prepareCoffeeCrosstalkRef.current(leadPlan);
-        if (
-          coffeeCutOffRevealMessageIdRef.current !== pendingMessage.id ||
-          coffeeActiveTurnJobIdRef.current !== turnJobId
-        ) {
-          return;
-        }
-        const interruptedVoiceController = voiceSynthesisAbortRef.current;
-        const interruptedVoiceMode =
-          voicePlaybackSelectionRef.current.voiceMode;
-        let interruptedVoiceReleaseTimer: number | null = null;
-        const releaseInterruptedVoice = (): void => {
-          interruptedVoiceReleaseTimer = null;
-          const stillOwnsInterruptedVoice =
-            coffeeActiveVoiceMessageIdRef.current === pendingMessage.id ||
-            (interruptedVoiceController !== null &&
-              voiceSynthesisAbortRef.current === interruptedVoiceController);
-          if (!stillOwnsInterruptedVoice) return;
-          if (
-            interruptedVoiceController !== null &&
-            voiceSynthesisAbortRef.current === interruptedVoiceController
-          ) {
-            interruptedVoiceController.abort();
-            voiceSynthesisAbortRef.current = null;
-          }
-          releaseVoicePlaybackPreservingPreparedMode(
-            interruptedVoiceMode,
-            COFFEE_BOT_INTERRUPTION_RELEASE_MS,
-          );
-        };
-        const scheduleInterruptedVoiceRelease = (delayMs: number): void => {
-          if (interruptedVoiceReleaseTimer !== null) {
-            window.clearTimeout(interruptedVoiceReleaseTimer);
-          }
-          interruptedVoiceReleaseTimer = window.setTimeout(
-            releaseInterruptedVoice,
-            delayMs,
-          );
-        };
-        // The safety window handles muted/failed cues. When audio does start,
-        // its device-output lifecycle replaces this with the exact authored
-        // overlap so the cutoff follows what the player actually hears.
-        scheduleInterruptedVoiceRelease(
-          COFFEE_BOT_INTERRUPTION_AUDIO_START_TIMEOUT_MS,
-        );
-        // Show the interrupter lean-in + cue while the current speaker is still
-        // the active table voice. Audio-only play left "ghost speech" with no
-        // mouth/bubble when interrupt APIs later failed or the cue never became
-        // a table line.
-        const leadSpokenCue = listenerReactionSpokenTextV1(leadPlan);
-        if (leadSpokenCue) {
-          upsertCoffeeLiveInterruptionTableSegments([
-            {
-              id: `${pendingMessage.id}:coffee-interruption:interrupter`,
-              sourceMessageId: pendingMessage.id,
-              kind: "interrupterCue",
-              speakerBotId: candidate.botId,
-              text: leadSpokenCue,
-              sequence: 0,
-            },
-          ]);
-        }
-        const leadPlayback = presentCoffeeListenerReaction(
-          leadPlan,
-          "live",
-          `cutin:${turnJobId}:${candidate.botId}`,
-          {
-            onStart: () => {
-              scheduleInterruptedVoiceRelease(
-                COFFEE_BOT_INTERRUPTION_OVERLAP_MS,
-              );
-            },
-          },
-          () => scheduleInterruptedVoiceRelease(0),
-        );
-        await api(
-          `/api/coffee/turn-jobs/${encodeURIComponent(turnJobId)}/interrupt`,
-          {
-            method: "POST",
-          },
-        );
-        const pause = await api<{
-          ok: true;
-          conversation: CoffeeConversationState;
-          interruption: CoffeeInterruptionEvent;
-        }>(
-          `/api/coffee/sessions/${encodeURIComponent(conversation.id)}/interruption-pause`,
-          {
-            method: "POST",
-            body: JSON.stringify({
-              interruptedBotId,
-              interruptedMessageId: pendingMessage.id,
-              visibleTokenCount: Math.max(1, visibleTokens.length),
-              interrupterBotId: candidate.botId,
-              activeTurnId: turnJobId,
-              targetPhase: "speaking",
-            }),
-          },
-        );
-        const authoritativeYieldTailPlan = coffeeAuthoritativeYieldTailPlanV1(
-          leadPlan,
-          pause.interruption,
-        );
-        coffeeConversationRef.current = pause.conversation;
-        const interruptionAudioHandoff = Promise.resolve(leadPlayback)
-          .catch(() => false)
-          .then(async () => {
-            if (!authoritativeYieldTailPlan) return;
-            await playCoffeeListenerReactionRef.current(
-              authoritativeYieldTailPlan,
-            );
-          });
-        if (coffeeRevealTimerRef.current)
-          clearTimeout(coffeeRevealTimerRef.current);
-        coffeeRevealTimerRef.current = null;
-        if (coffeeTypewriterRafRef.current != null)
-          cancelAnimationFrame(coffeeTypewriterRafRef.current);
-        coffeeTypewriterRafRef.current = null;
-        coffeeActiveTurnJobIdRef.current = null;
-        setCoffeeActiveTurnJob(null);
-        setCoffeePendingRevealConversation(null);
-        setCoffeePendingSpeakerBotId(null);
-        setCoffeeTypewriterHolding(false);
-        setCoffeeBusy(false);
-        setCoffeeAutoBusy(false);
-        setCoffeeTurnRhythmState("idle");
-        setCoffeeConversation(pause.conversation);
-        const interruptedSnippet =
-          pause.interruption.interruptedSnippet ??
-          pause.conversation.messages.find(
-            (message) => message.id === pendingMessage.id,
-          )?.content ??
-          interruptedMidWordSnippet(
+            .slice(0, coffeeRevealVisibleLength())
+            .join("");
+          const visibleTokens = tokenizeMessageReveal(latestVisibleText);
+          if (visibleTokens.length === 0) return;
+          coffeeLastAutomaticCutInAssistantCountRef.current = assistantCount;
+          const cutoffSnippet = interruptedMidWordSnippet(
             pendingMessage.content,
             Math.max(1, visibleTokens.length),
           );
-        setCoffeeInterruptedSnippet({
-          botId: interruptedBotId,
-          snippet: interruptedSnippet,
-          sourceMessageId: pendingMessage.id,
-          createdAtMs: Date.now(),
-        });
-        const interruptionEvent = pause.interruption;
-        if (coffeeInterruptionCueTimerRef.current) {
-          clearTimeout(coffeeInterruptionCueTimerRef.current);
+          // Freeze the heard words before fetching the interrupter clip. Waiting
+          // let the typewriter finish the sentence and dump the rest after audio
+          // already stopped.
+          coffeeCutOffRevealMessageIdRef.current = pendingMessage.id;
+          coffeeRevealCompleteFnRef.current = null;
+          if (coffeeRevealTimerRef.current) {
+            clearTimeout(coffeeRevealTimerRef.current);
+            coffeeRevealTimerRef.current = null;
+          }
+          if (coffeeTypewriterRafRef.current != null) {
+            cancelAnimationFrame(coffeeTypewriterRafRef.current);
+            coffeeTypewriterRafRef.current = null;
+          }
+          setCoffeeTypewriterHolding(false);
+          setCoffeePendingRevealConversation((current) => {
+            if (
+              !current?.messages.some(
+                (message) => message.id === pendingMessage.id,
+              )
+            ) {
+              return current;
+            }
+            return {
+              ...current,
+              messages: current.messages.map((message) =>
+                message.id === pendingMessage.id
+                  ? { ...message, content: cutoffSnippet }
+                  : message,
+              ),
+            };
+          });
+          const liveConversation = coffeeConversationRef.current;
+          if (
+            liveConversation?.messages.some(
+              (message) => message.id === pendingMessage.id,
+            )
+          ) {
+            const patchedConversation = {
+              ...liveConversation,
+              messages: liveConversation.messages.map((message) =>
+                message.id === pendingMessage.id
+                  ? { ...message, content: cutoffSnippet }
+                  : message,
+              ),
+            };
+            coffeeConversationRef.current = patchedConversation;
+            setCoffeeConversation(patchedConversation);
+          }
+          await prepareCoffeeCrosstalkRef.current(leadPlan);
+          if (
+            coffeeCutOffRevealMessageIdRef.current !== pendingMessage.id ||
+            coffeeActiveTurnJobIdRef.current !== turnJobId
+          ) {
+            return;
+          }
+          const interruptedVoiceController = voiceSynthesisAbortRef.current;
+          const interruptedVoiceMode =
+            voicePlaybackSelectionRef.current.voiceMode;
+          let interruptedVoiceReleaseTimer: number | null = null;
+          const releaseInterruptedVoice = (): void => {
+            interruptedVoiceReleaseTimer = null;
+            const stillOwnsInterruptedVoice =
+              coffeeActiveVoiceMessageIdRef.current === pendingMessage.id ||
+              (interruptedVoiceController !== null &&
+                voiceSynthesisAbortRef.current === interruptedVoiceController);
+            if (!stillOwnsInterruptedVoice) return;
+            if (
+              interruptedVoiceController !== null &&
+              voiceSynthesisAbortRef.current === interruptedVoiceController
+            ) {
+              interruptedVoiceController.abort();
+              voiceSynthesisAbortRef.current = null;
+            }
+            releaseVoicePlaybackPreservingPreparedMode(
+              interruptedVoiceMode,
+              COFFEE_BOT_INTERRUPTION_RELEASE_MS,
+            );
+          };
+          const scheduleInterruptedVoiceRelease = (delayMs: number): void => {
+            if (interruptedVoiceReleaseTimer !== null) {
+              window.clearTimeout(interruptedVoiceReleaseTimer);
+            }
+            interruptedVoiceReleaseTimer = window.setTimeout(
+              releaseInterruptedVoice,
+              delayMs,
+            );
+          };
+          // The safety window handles muted/failed cues. When audio does start,
+          // its device-output lifecycle replaces this with the exact authored
+          // overlap so the cutoff follows what the player actually hears.
+          scheduleInterruptedVoiceRelease(
+            COFFEE_BOT_INTERRUPTION_AUDIO_START_TIMEOUT_MS,
+          );
+          // Show the interrupter lean-in + cue while the current speaker is still
+          // the active table voice. Audio-only play left "ghost speech" with no
+          // mouth/bubble when interrupt APIs later failed or the cue never became
+          // a table line.
+          const leadSpokenCue = listenerReactionSpokenTextV1(leadPlan);
+          if (leadSpokenCue) {
+            upsertCoffeeLiveInterruptionTableSegments([
+              {
+                id: `${pendingMessage.id}:coffee-interruption:interrupter`,
+                sourceMessageId: pendingMessage.id,
+                kind: "interrupterCue",
+                speakerBotId: candidate.botId,
+                text: leadSpokenCue,
+                sequence: 0,
+              },
+            ]);
+          }
+          const leadPlayback = presentCoffeeListenerReaction(
+            leadPlan,
+            "live",
+            `cutin:${turnJobId}:${candidate.botId}`,
+            {
+              onStart: () => {
+                scheduleInterruptedVoiceRelease(
+                  COFFEE_BOT_INTERRUPTION_OVERLAP_MS,
+                );
+              },
+            },
+            () => scheduleInterruptedVoiceRelease(0),
+          );
+          await api(
+            `/api/coffee/turn-jobs/${encodeURIComponent(turnJobId)}/interrupt`,
+            {
+              method: "POST",
+            },
+          );
+          const pause = await api<{
+            ok: true;
+            conversation: CoffeeConversationState;
+            interruption: CoffeeInterruptionEvent;
+          }>(
+            `/api/coffee/sessions/${encodeURIComponent(conversation.id)}/interruption-pause`,
+            {
+              method: "POST",
+              body: JSON.stringify({
+                interruptedBotId,
+                interruptedMessageId: pendingMessage.id,
+                visibleTokenCount: Math.max(1, visibleTokens.length),
+                interrupterBotId: candidate.botId,
+                activeTurnId: turnJobId,
+                targetPhase: "speaking",
+              }),
+            },
+          );
+          const authoritativeYieldTailPlan = coffeeAuthoritativeYieldTailPlanV1(
+            leadPlan,
+            pause.interruption,
+          );
+          coffeeConversationRef.current = pause.conversation;
+          const interruptionAudioHandoff = Promise.resolve(leadPlayback)
+            .catch(() => false)
+            .then(async () => {
+              if (!authoritativeYieldTailPlan) return;
+              await playCoffeeListenerReactionRef.current(
+                authoritativeYieldTailPlan,
+              );
+            });
+          if (coffeeRevealTimerRef.current)
+            clearTimeout(coffeeRevealTimerRef.current);
+          coffeeRevealTimerRef.current = null;
+          if (coffeeTypewriterRafRef.current != null)
+            cancelAnimationFrame(coffeeTypewriterRafRef.current);
+          coffeeTypewriterRafRef.current = null;
+          coffeeActiveTurnJobIdRef.current = null;
+          setCoffeeActiveTurnJob(null);
+          setCoffeePendingRevealConversation(null);
+          setCoffeePendingSpeakerBotId(null);
+          setCoffeeTypewriterHolding(false);
+          setCoffeeBusy(false);
+          setCoffeeAutoBusy(false);
+          setCoffeeTurnRhythmState("idle");
+          setCoffeeConversation(pause.conversation);
+          const interruptedSnippet =
+            pause.interruption.interruptedSnippet ??
+            pause.conversation.messages.find(
+              (message) => message.id === pendingMessage.id,
+            )?.content ??
+            interruptedMidWordSnippet(
+              pendingMessage.content,
+              Math.max(1, visibleTokens.length),
+            );
+          setCoffeeInterruptedSnippet({
+            botId: interruptedBotId,
+            snippet: interruptedSnippet,
+            sourceMessageId: pendingMessage.id,
+            createdAtMs: Date.now(),
+          });
+          const interruptionEvent = pause.interruption;
+          if (coffeeInterruptionCueTimerRef.current) {
+            clearTimeout(coffeeInterruptionCueTimerRef.current);
+          }
+          setCoffeeLiveInterruptionCue(interruptionEvent);
+          const pauseMessage = pause.conversation.messages
+            .slice()
+            .reverse()
+            .find(
+              (message) =>
+                message.role === "assistant" &&
+                message.coffeeInterruption?.interruptedMessageId ===
+                  pendingMessage.id,
+            );
+          const authoritativeSegments = coffeeInterruptionTranscriptSegments({
+            sourceMessageId: pauseMessage?.id ?? pendingMessage.id,
+            sourceContent: pauseMessage?.content ?? "...",
+            interruption: interruptionEvent,
+          });
+          if (authoritativeSegments.length > 0) {
+            // Replace provisional lead IDs with the persisted segment identity.
+            setCoffeeLiveInterruptionTableSegments(
+              authoritativeSegments.map((segment) => ({
+                ...segment,
+                text: segment.text.trim(),
+              })),
+            );
+            scheduleCoffeeLiveInterruptionTableClear();
+          }
+          coffeeInterruptionCueTimerRef.current = setTimeout(() => {
+            setCoffeeLiveInterruptionCue((current) =>
+              current === interruptionEvent ? null : current,
+            );
+            coffeeInterruptionCueTimerRef.current = null;
+          }, COFFEE_INTERRUPTION_CUE_HIDE_MS);
+          const continueSpeakerBotId = coffeeInterruptionContinueSpeakerBotIdV1(
+            {
+              floorOutcome: interruptionEvent.floorOutcome,
+              interruptedBotId,
+              interrupterBotId: candidate.botId,
+            },
+          );
+          const continueUserMessage =
+            interruptionEvent.floorOutcome === "reclaim"
+              ? undefined
+              : `${bots.find((bot) => bot.id === interruptedBotId)?.name ?? "The previous speaker"} was cut off mid-sentence. Respond with one relevant contribution; do not invent or reveal the unseen remainder.`;
+          window.setTimeout(() => {
+            void continueCoffeeSessionRef.current(
+              conversation.id,
+              undefined,
+              continueSpeakerBotId,
+              continueUserMessage,
+              interruptionAudioHandoff,
+            );
+          }, 120);
+        } catch (error) {
+          // Interrupt failed after the cue started — kill orphan audio/visual so
+          // the interrupter does not "speak" without a table line.
+          clearCoffeeListenerReaction(true);
+          clearCoffeeLiveInterruptionTableSegments();
+          if (!isAbortLikeError(error)) {
+            setCoffeeError(
+              error instanceof Error
+                ? error.message
+                : "Coffee interruption failed.",
+            );
+          }
         }
-        setCoffeeLiveInterruptionCue(interruptionEvent);
-        const pauseMessage = pause.conversation.messages
-          .slice()
-          .reverse()
-          .find(
-            (message) =>
-              message.role === "assistant" &&
-              message.coffeeInterruption?.interruptedMessageId ===
-                pendingMessage.id,
-          );
-        const authoritativeSegments = coffeeInterruptionTranscriptSegments({
-          sourceMessageId: pauseMessage?.id ?? pendingMessage.id,
-          sourceContent: pauseMessage?.content ?? "...",
-          interruption: interruptionEvent,
-        });
-        if (authoritativeSegments.length > 0) {
-          // Replace provisional lead IDs with the persisted segment identity.
-          setCoffeeLiveInterruptionTableSegments(
-            authoritativeSegments.map((segment) => ({
-              ...segment,
-              text: segment.text.trim(),
-            })),
-          );
-          scheduleCoffeeLiveInterruptionTableClear();
-        }
-        coffeeInterruptionCueTimerRef.current = setTimeout(() => {
-          setCoffeeLiveInterruptionCue((current) =>
-            current === interruptionEvent ? null : current,
-          );
-          coffeeInterruptionCueTimerRef.current = null;
-        }, COFFEE_INTERRUPTION_CUE_HIDE_MS);
-        const continueSpeakerBotId = coffeeInterruptionContinueSpeakerBotIdV1({
-          floorOutcome: interruptionEvent.floorOutcome,
-          interruptedBotId,
-          interrupterBotId: candidate.botId,
-        });
-        const continueUserMessage =
-          interruptionEvent.floorOutcome === "reclaim"
-            ? undefined
-            : `${bots.find((bot) => bot.id === interruptedBotId)?.name ?? "The previous speaker"} was cut off mid-sentence. Respond with one relevant contribution; do not invent or reveal the unseen remainder.`;
-        window.setTimeout(() => {
-          void continueCoffeeSessionRef.current(
-            conversation.id,
-            undefined,
-            continueSpeakerBotId,
-            continueUserMessage,
-            interruptionAudioHandoff,
-          );
-        }, 120);
-      } catch (error) {
-        // Interrupt failed after the cue started — kill orphan audio/visual so
-        // the interrupter does not "speak" without a table line.
-        clearCoffeeListenerReaction(true);
-        clearCoffeeLiveInterruptionTableSegments();
-        if (!isAbortLikeError(error)) {
-          setCoffeeError(
-            error instanceof Error
-              ? error.message
-              : "Coffee interruption failed.",
-          );
-        }
-      }
-    })();
+      })();
+    };
+    considerCutInAtVisibleLength();
+    return subscribeCoffeeRevealProgress(considerCutInAtVisibleLength);
   }, [
     bots,
     clearCoffeeListenerReaction,
@@ -69625,11 +70022,14 @@ function HomeContent(): React.JSX.Element {
     coffeePendingRevealConversation,
     coffeePendingSpeakerBotId,
     coffeePowerPlan,
+    // The session clock stays a dependency even though progress arrives on the
+    // channel: a holding reveal publishes nothing, and `holdLongEnough` is the
+    // branch that exists for exactly that pause. The 1 Hz re-subscribe is what
+    // re-checks it.
     coffeeSessionClockMs,
     coffeeSessionSettings.crossTalk,
     coffeeTurnRhythmState,
     coffeeTypewriterHolding,
-    coffeeTypewriterLength,
     presentCoffeeListenerReaction,
     scheduleCoffeeLiveInterruptionTableClear,
     upsertCoffeeLiveInterruptionTableSegments,
@@ -69689,7 +70089,7 @@ function HomeContent(): React.JSX.Element {
       assignCoffeeArrivedBotIds([]);
       assignCoffeeSessionEndsAtMs(null);
       setCoffeeTurnRhythmState("idle");
-      setCoffeeTypewriterLength(0);
+      assignCoffeeTypewriterLength(0);
       setCoffeePendingSpeakerBotId(null);
       setCoffeePendingRevealConversation(null);
       coffeePendingRevealAfterUserRef.current = null;
@@ -73293,22 +73693,25 @@ function HomeContent(): React.JSX.Element {
   );
   useEffect(() => {
     if (coffeeTurnRhythmState !== "userTableTyping") return;
-    const message = coffeeLivePlayerActionMessageRef.current;
     const conversationId =
       coffeeConversationRef.current?.id ?? coffeeConversation?.id ?? null;
-    if (!message || !conversationId) return;
-    playCoffeeActionSfxOnce(
-      "live",
-      conversationId,
-      message,
-      coffeeTypewriterLength,
-    );
-  }, [
-    coffeeConversation?.id,
-    coffeeTurnRhythmState,
-    coffeeTypewriterLength,
-    playCoffeeActionSfxOnce,
-  ]);
+    if (!conversationId) return;
+    // Reveal progress arrives on the channel instead of as a render, so the
+    // cue rides a subscription. `playCoffeeActionSfxOnce` is keyed and
+    // idempotent, so re-entry on every character is safe.
+    const cueAtVisibleLength = (): void => {
+      const message = coffeeLivePlayerActionMessageRef.current;
+      if (!message) return;
+      playCoffeeActionSfxOnce(
+        "live",
+        conversationId,
+        message,
+        coffeeRevealVisibleLength(),
+      );
+    };
+    cueAtVisibleLength();
+    return subscribeCoffeeRevealProgress(cueAtVisibleLength);
+  }, [coffeeConversation?.id, coffeeTurnRhythmState, playCoffeeActionSfxOnce]);
   const presentCoffeeAuthoredActionReactionOnce = useCallback(
     (
       source: "live" | "replay",
@@ -73363,24 +73766,26 @@ function HomeContent(): React.JSX.Element {
     if (!conversation || !message || message.role !== "assistant") return;
     prefetchCoffeeActionSfxForMessage(message);
     if (coffeeTurnRhythmState !== "tableTyping") return;
-    presentCoffeeAuthoredActionReactionOnce(
-      "live",
-      conversation.id,
-      message,
-      message.botId ?? coffeePendingSpeakerBotId,
-      coffeeTypewriterLength,
-    );
-    playCoffeeActionSfxOnce(
-      "live",
-      conversation.id,
-      message,
-      coffeeTypewriterLength,
-    );
+    // Same shape as the player cue above: subscribe to the reveal channel so a
+    // stage direction lands on the exact character it was authored for without
+    // reconciling the table. Both callees are fired-key guarded.
+    const cueAtVisibleLength = (): void => {
+      const visibleLength = coffeeRevealVisibleLength();
+      presentCoffeeAuthoredActionReactionOnce(
+        "live",
+        conversation.id,
+        message,
+        message.botId ?? coffeePendingSpeakerBotId,
+        visibleLength,
+      );
+      playCoffeeActionSfxOnce("live", conversation.id, message, visibleLength);
+    };
+    cueAtVisibleLength();
+    return subscribeCoffeeRevealProgress(cueAtVisibleLength);
   }, [
     coffeePendingSpeakerBotId,
     coffeePendingRevealConversation,
     coffeeTurnRhythmState,
-    coffeeTypewriterLength,
     playCoffeeActionSfxOnce,
     prefetchCoffeeActionSfxForMessage,
     presentCoffeeAuthoredActionReactionOnce,
@@ -80564,7 +80969,7 @@ function HomeContent(): React.JSX.Element {
     setCoffeeSessionPhase("selecting");
     setCoffeeTurnRhythmState("idle");
     coffeeTurnRhythmStateRef.current = "idle";
-    setCoffeeTypewriterLength(0);
+    assignCoffeeTypewriterLength(0);
     setCoffeePendingSpeakerBotId(null);
     setCoffeePendingRevealConversation(null);
     coffeeMessageFirstVisibleAtMsRef.current.clear();
@@ -88435,6 +88840,11 @@ function HomeContent(): React.JSX.Element {
     if (pendingCoffeeDraftSyncTimerRef.current !== null) {
       window.clearTimeout(pendingCoffeeDraftSyncTimerRef.current);
     }
+    // Each flush is a full-surface render, so keystrokes ride
+    // `coffeeDraftRef` and only settle into state on this fixed debounce.
+    // Deliberately not frame-rate gated: an interval that widens as frames
+    // collapse and narrows as they recover oscillates instead of settling,
+    // the same flaw that retired the avatar load sheds.
     pendingCoffeeDraftSyncTimerRef.current = window.setTimeout(
       flushDeferredCoffeeDraftState,
       COFFEE_COMPOSER_PARENT_DRAFT_SYNC_MS,
@@ -127149,6 +127559,15 @@ function HomeContent(): React.JSX.Element {
     if (coffeeCooldownTimerRef.current) {
       clearTimeout(coffeeCooldownTimerRef.current);
       coffeeCooldownTimerRef.current = null;
+      // `cooldown` is a bridge to that timer and nothing else: cancelling the
+      // timer without releasing the state strands the table in a rhythm the
+      // reconciliation effect deliberately refuses to reset, with the composer
+      // disabled behind it. Callers that re-arm immediately (queueCoffeeReveal
+      // clears then sets in the same batch) land on their own state anyway.
+      if (coffeeTurnRhythmStateRef.current === "cooldown") {
+        coffeeTurnRhythmStateRef.current = "idle";
+        setCoffeeTurnRhythmState("idle");
+      }
     }
     if (coffeeRevealTimerRef.current) {
       clearTimeout(coffeeRevealTimerRef.current);
@@ -127205,7 +127624,7 @@ function HomeContent(): React.JSX.Element {
     setCoffeeAuthoredActionReaction(null);
     resolveCoffeeUserRevealSettledWaiters();
     resolveCoffeeRevealSettledWaiters();
-    setCoffeeTypewriterLength(0);
+    assignCoffeeTypewriterLength(0);
     setCoffeePendingSpeakerBotId(null);
     setCoffeePendingRevealConversation(null);
     coffeeMessageFirstVisibleAtMsRef.current.clear();
@@ -127584,7 +128003,9 @@ function HomeContent(): React.JSX.Element {
             cutOffMessageId: coffeeCutOffRevealMessageIdRef.current,
           });
           if (ownsReveal) {
-            setCoffeeTypewriterLength(getBotMentionDisplayLength(displayText));
+            assignCoffeeTypewriterLength(
+              getBotMentionDisplayLength(displayText),
+            );
             setCoffeeTypewriterHolding(false);
           }
           releaseCoffeeVoicePlayback();
@@ -127917,7 +128338,9 @@ function HomeContent(): React.JSX.Element {
               timing.startMs;
           }
           if (coffeeActivePlayerVoiceTextRef.current === spokenText) {
-            setCoffeeTypewriterLength(getBotMentionDisplayLength(spokenText));
+            assignCoffeeTypewriterLength(
+              getBotMentionDisplayLength(spokenText),
+            );
             coffeeActivePlayerVoiceTextRef.current = null;
           }
         },
@@ -128063,6 +128486,45 @@ function HomeContent(): React.JSX.Element {
       pendingMessages.length > 0
         ? pendingMessages[pendingMessages.length - 1]
         : null;
+    // A reveal superseding a mid-mutter stew aside trails the mutter off at
+    // exactly what the table heard ("While Bot A stew—"); the fragment stays
+    // in history as unfinished business the room can come back to.
+    const activeStewAside = coffeeStewAsideActiveRevealRef.current;
+    if (activeStewAside && activeStewAside.messageId !== pendingMessage?.id) {
+      coffeeStewAsideActiveRevealRef.current = null;
+      const stewConversationId = coffeeConversationRef.current?.id;
+      const stewDisplayText = getBotMentionDisplayText(
+        extractStageDirections(clampCoffeeTableText(activeStewAside.content))
+          .mainText,
+      );
+      const stewVisibleTokens = tokenizeMessageReveal(
+        Array.from(stewDisplayText)
+          .slice(0, coffeeRevealVisibleLength())
+          .join(""),
+      );
+      const stewTotalTokens = tokenizeMessageReveal(stewDisplayText);
+      if (
+        stewConversationId &&
+        stewVisibleTokens.length < stewTotalTokens.length
+      ) {
+        coffeeCutOffRevealMessageIdRef.current = activeStewAside.messageId;
+        void api(
+          `/api/coffee/sessions/${encodeURIComponent(stewConversationId)}/interruption-pause`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              interruptedBotId: activeStewAside.botId,
+              interruptedMessageId: activeStewAside.messageId,
+              visibleTokenCount: Math.max(1, stewVisibleTokens.length),
+              targetPhase: "speaking",
+              trailOff: true,
+            }),
+          },
+        ).catch(() => {
+          // The trail-off is cosmetic bookkeeping; never block the reveal.
+        });
+      }
+    }
     const pendingMessageMoodKey =
       pendingMessage?.role === "assistant"
         ? coffeeRevealMoodKeyForSpeaker(
@@ -128190,15 +128652,33 @@ function HomeContent(): React.JSX.Element {
       return revealDelayMs;
     };
     const beginSpeakingAndScheduleReveal = () => {
-      void beginSpeaking().then((durationMs) => {
-        if (durationMs === null || !revealDeliveryIsCurrent()) return;
-        const voiced =
-          coffeeVoiceRevealClockRef.current?.messageId === pendingMessage?.id;
-        coffeeRevealTimerRef.current = setTimeout(
-          applyReveal,
-          coffeeVoiceRevealFallbackDelayMs(durationMs, voiced),
-        );
-      });
+      // Releasing a hand-off we still own. A stale epoch means someone else
+      // took the floor and set their own state, so leave that case alone —
+      // resetting there would stomp the turn that superseded this one.
+      const releaseStalledHandoff = () => {
+        if (!revealDeliveryIsCurrent()) return;
+        if (coffeeTurnRhythmStateRef.current !== "cooldown") return;
+        coffeeTurnRhythmStateRef.current = "idle";
+        setCoffeeTurnRhythmState("idle");
+      };
+      void beginSpeaking()
+        .then((durationMs) => {
+          if (durationMs === null) {
+            releaseStalledHandoff();
+            return;
+          }
+          if (!revealDeliveryIsCurrent()) return;
+          const voiced =
+            coffeeVoiceRevealClockRef.current?.messageId === pendingMessage?.id;
+          coffeeRevealTimerRef.current = setTimeout(
+            applyReveal,
+            coffeeVoiceRevealFallbackDelayMs(durationMs, voiced),
+          );
+        })
+        .catch(() => {
+          // Voice preparation throwing must not leave the table wedged.
+          releaseStalledHandoff();
+        });
     };
     let revealApplied = false;
     const applyReveal = () => {
@@ -128304,6 +128784,10 @@ function HomeContent(): React.JSX.Element {
     // Generated replies reveal immediately even while the player is typing —
     // typing never holds the table (Signal-style live flow).
     if (args.includeCooldown) {
+      // Ref alongside state, as everywhere else here: `clearCoffeeRhythmTimers`
+      // above may have just released a previous cooldown, and the ref must not
+      // read `idle` until the next render catches up.
+      coffeeTurnRhythmStateRef.current = "cooldown";
       setCoffeeTurnRhythmState("cooldown");
       coffeeCooldownTimerRef.current = setTimeout(() => {
         beginSpeakingAndScheduleReveal();
@@ -129361,18 +129845,30 @@ function HomeContent(): React.JSX.Element {
     // navigation/early-exit path has authority to persist playerDeparture.
     clearCoffeeArrivalTimer();
     clearCoffeeLoopTimer();
-    resetCoffeeRhythm();
     abortCoffeeRequests();
-    clearCoffeeListenerReaction(true);
     setCoffeeBusy(false);
     setCoffeeAutoBusy(true);
-    setCoffeePendingSpeakerBotId(null);
-    setCoffeePendingRevealConversation(null);
-    setCoffeeUserRevealText("");
-    setCoffeeTurnRhythmState("idle");
 
     void (async () => {
       try {
+        // Let an actively revealing closing line (and its voice) land before
+        // the synopsis takes the table — review 9c2a7b79: the exit line was
+        // heard AFTER the summary appeared because finish tore the reveal
+        // down first. The settle waiter is internally bounded, and an idle
+        // table skips the wait entirely.
+        const rhythmAtFinish = coffeeTurnRhythmStateRef.current;
+        if (
+          rhythmAtFinish === "tableTyping" ||
+          rhythmAtFinish === "userTableTyping"
+        ) {
+          await waitForCoffeeRevealToSettle();
+        }
+        resetCoffeeRhythm();
+        clearCoffeeListenerReaction(true);
+        setCoffeePendingSpeakerBotId(null);
+        setCoffeePendingRevealConversation(null);
+        setCoffeeUserRevealText("");
+        setCoffeeTurnRhythmState("idle");
         if (
           coffeeConversationHasMeaningfulTableDialogue(
             activeConversation.messages,
@@ -132166,6 +132662,119 @@ function HomeContent(): React.JSX.Element {
     }
   };
   continueCoffeeSessionRef.current = continueCoffeeSession;
+  /**
+   * Stew aside: while one bot's answer is still generating, another bot
+   * mutters over the wait — "While A stews on that…" — via its own turn job
+   * that deliberately coexists with the thinker's. The thinker's in-flight
+   * turn ignores the mutter (thinking-aside staleness rules), so the answer
+   * still lands afterwards, addressed to the original question.
+   */
+  const runCoffeeStewAside = async (args: {
+    conversationId: string;
+    thinkerBotId: string;
+    commentatorBotId: string;
+  }): Promise<void> => {
+    const thinker = coffeeBotsById.get(args.thinkerBotId);
+    const commentator = coffeeBotsById.get(args.commentatorBotId);
+    if (!thinker || !commentator) return;
+    const focus = [
+      `${thinker.name} is still working out their answer to the last message.`,
+      "In ONE short line (under 20 words), do exactly one of: give your own",
+      "quick take on what was just asked, gently tease the wait, or toss the",
+      `same question to another seated bot by name. Do not answer for ${thinker.name}`,
+      "and do not greet the table.",
+    ].join(" ");
+    const controller = new AbortController();
+    try {
+      const started = await api<{ ok: true; job: CoffeeTurnJobStatus }>(
+        "/api/coffee/turn-jobs",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            kind: "autonomous",
+            conversationId: args.conversationId,
+            theme: resolvedTheme,
+            preferredProvider: coffeeSessionProvider,
+            responseMode: coffeeResponseModeForSend,
+            directedSpeakerBotId: args.commentatorBotId,
+            autonomousFocus: focus,
+            thinkingAsideAboutBotId: args.thinkerBotId,
+            sessionRemainingMs: currentCoffeeSessionRemainingMs(),
+            ...(coffeeSessionModelOverride
+              ? { modelOverride: coffeeSessionModelOverride }
+              : {}),
+          }),
+          signal: controller.signal,
+        },
+      );
+      // Lean poller: never touches the shared job refs or busy states — the
+      // thinker's job stays the table's active job throughout.
+      let job = started.job;
+      const deadlineMs = Date.now() + 25_000;
+      while (!job.response) {
+        if (job.phase === "failed" || job.phase === "interrupted") return;
+        if (Date.now() > deadlineMs) {
+          controller.abort();
+          return;
+        }
+        await waitForCoffeeJobPoll(controller.signal);
+        job = (
+          await api<{ ok: true; job: CoffeeTurnJobStatus }>(
+            `/api/coffee/turn-jobs/${encodeURIComponent(job.id)}`,
+            { signal: controller.signal },
+          )
+        ).job;
+      }
+      const response = {
+        ok: true as const,
+        ...(job.response as Omit<CoffeeTurnClientResponse, "ok">),
+      };
+      if (
+        response.stale === true ||
+        !response.speakerBotId ||
+        coffeeConversationRef.current?.id !== args.conversationId ||
+        coffeeSessionPhaseRef.current !== "live"
+      ) {
+        return;
+      }
+      // If the thinker's answer already landed, drop the mutter's reveal —
+      // its line still reaches the table via the answer's conversation sync.
+      const thinkerStillGenerating =
+        coffeeTurnAbortRef.current !== null ||
+        coffeeContinueAbortRef.current !== null;
+      if (
+        !thinkerStillGenerating ||
+        coffeeTurnRhythmStateRef.current !== "botThinking"
+      ) {
+        return;
+      }
+      const asideMessage = response.conversation.messages.at(-1);
+      if (asideMessage?.role === "assistant") {
+        coffeeStewAsideActiveRevealRef.current = {
+          messageId: asideMessage.id,
+          botId: response.speakerBotId,
+          content: asideMessage.content,
+        };
+      }
+      queueCoffeeRevealFnRef.current({
+        conversation: response.conversation,
+        speakerBotId: response.speakerBotId,
+        includeCooldown: false,
+        prepareNextTurn: false,
+        onReveal: () => {
+          if (
+            coffeeStewAsideActiveRevealRef.current?.messageId ===
+            asideMessage?.id
+          ) {
+            coffeeStewAsideActiveRevealRef.current = null;
+          }
+        },
+      });
+    } catch {
+      // A lost mutter never disturbs the table.
+    }
+  };
+  coffeeRunStewAsideRef.current = runCoffeeStewAside;
   const recallPreviousCoffeeDraft = (): string | null => {
     const remembered = coffeeLastSubmittedDraftRef.current;
     if (typeof remembered === "string" && remembered.trim().length > 0) {
@@ -132425,9 +133034,10 @@ function HomeContent(): React.JSX.Element {
         1,
         getBotMentionDisplayLength(interruptedMainText),
       );
+      const heardVisibleChars = coffeeRevealVisibleLength();
       const visibleProgress = clampUnitInterval(
-        coffeeTypewriterLength > 0
-          ? coffeeTypewriterLength / totalVisibleChars
+        heardVisibleChars > 0
+          ? heardVisibleChars / totalVisibleChars
           : COFFEE_INTERRUPTION_FALLBACK_VISIBLE_PROGRESS,
       );
       const visibleTokenCount = Math.max(
@@ -132577,7 +133187,7 @@ function HomeContent(): React.JSX.Element {
     if (draftTableText.length > 0) {
       coffeePlayerVoiceRevealReadyRef.current = false;
       coffeeUserTableTypingSettledRef.current = false;
-      setCoffeeTypewriterLength(0);
+      assignCoffeeTypewriterLength(0);
       setCoffeeUserRevealText(trimmed);
       setCoffeeTurnRhythmState("userTableTyping");
       // Signal parity: compact the player's voice-preparation gap out of the
@@ -132875,7 +133485,7 @@ function HomeContent(): React.JSX.Element {
                 ).mainText,
               ),
             )
-              .slice(0, coffeeTypewriterLength)
+              .slice(0, coffeeRevealVisibleLength())
               .join("")
           : "";
       const visibleTokenCount = Math.max(
@@ -136923,10 +137533,17 @@ function HomeContent(): React.JSX.Element {
                               className={styles.coffeeTypewriter}
                               aria-hidden="true"
                             >
-                              {revealPlainTextWithBotMentions(
-                                tableTypingAssistantDisplayText,
-                                activeTypewriterLength,
-                                {
+                              <CoffeeRevealTypewriterLine
+                                text={tableTypingAssistantDisplayText}
+                                totalDisplayLength={getBotMentionDisplayLength(
+                                  tableTypingAssistantDisplayText,
+                                )}
+                                fixedLength={
+                                  replayMessageInProgress
+                                    ? coffeeReplayTypewriterLength
+                                    : null
+                                }
+                                renderOptions={{
                                   keyPrefix:
                                     replayMessageInProgress && replayMessage
                                       ? `replay-bot-typing-${replayMessage.id}`
@@ -136935,26 +137552,11 @@ function HomeContent(): React.JSX.Element {
                                   resolvedTheme,
                                   normalizeAccentForTheme,
                                   speakerBotId: visibleTableTypingBot.id,
-                                },
-                              )}
-                              {activeTypewriterLength <
-                              getBotMentionDisplayLength(
-                                tableTypingAssistantDisplayText,
-                              ) ? (
-                                <span
-                                  className={styles.coffeeTypewriterCaret}
-                                  aria-hidden="true"
-                                >
-                                  <span
-                                    data-coffee-caret-holding={
-                                      coffeeTypewriterHolding
-                                        ? "true"
-                                        : undefined
-                                    }
-                                  />
-                                  │
-                                </span>
-                              ) : null}
+                                }}
+                                caretClassName={styles.coffeeTypewriterCaret}
+                                caretHolding={coffeeTypewriterHolding}
+                                onRevealed={followCoffeeCenterFeedReveal}
+                              />
                             </span>
                             <span
                               className={styles.srOnly}
@@ -136984,10 +137586,18 @@ function HomeContent(): React.JSX.Element {
                               className={styles.coffeeTypewriter}
                               aria-hidden="true"
                             >
-                              {revealPlainTextWithBotMentions(
-                                userTypingDisplayText,
-                                activeTypewriterLength,
-                                {
+                              <CoffeeRevealTypewriterLine
+                                text={userTypingDisplayText}
+                                totalDisplayLength={getBotMentionDisplayLength(
+                                  extractStageDirections(userTypingDisplayText)
+                                    .mainText,
+                                )}
+                                fixedLength={
+                                  replayMessageInProgress
+                                    ? coffeeReplayTypewriterLength
+                                    : null
+                                }
+                                renderOptions={{
                                   keyPrefix:
                                     replayMessageInProgress && replayMessage
                                       ? `replay-user-typing-${replayMessage.id}`
@@ -136995,20 +137605,10 @@ function HomeContent(): React.JSX.Element {
                                   botsById: chatEnabledBotMentionMap,
                                   resolvedTheme,
                                   normalizeAccentForTheme,
-                                },
-                              )}
-                              {activeTypewriterLength <
-                              getBotMentionDisplayLength(
-                                extractStageDirections(userTypingDisplayText)
-                                  .mainText,
-                              ) ? (
-                                <span
-                                  className={styles.coffeeTypewriterCaret}
-                                  aria-hidden="true"
-                                >
-                                  │
-                                </span>
-                              ) : null}
+                                }}
+                                caretClassName={styles.coffeeTypewriterCaret}
+                                onRevealed={followCoffeeCenterFeedReveal}
+                              />
                             </span>
                             <span className={styles.srOnly}>
                               You are speaking.
@@ -137334,8 +137934,10 @@ function HomeContent(): React.JSX.Element {
                     <span
                       className={styles.coffeeCup}
                       data-cup-frame={2}
-                      data-cup-side="right"
-                      data-cup-mirrored="true"
+                      // Review f2647f86: the mug sits opposite the player's
+                      // nameplate glyph (right), matching the split every bot
+                      // seat gets from coffeeCupSideForSeat.
+                      data-cup-side="left"
                       data-cup-sipping={
                         coffeePlayerCupSipping ? "true" : undefined
                       }

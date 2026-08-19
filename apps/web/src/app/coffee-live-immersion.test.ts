@@ -109,22 +109,72 @@ describe("Coffee live immersion", () => {
     );
   });
 
-  it("budgets full-surface renders when the table is missing frames", () => {
-    // Review f2647f86: per-character typewriter commits + composer draft
-    // syncs each reconcile the entire Coffee surface; at 5 seats that pinned
-    // the table at 1 FPS and made typing "incredibly difficult".
-    const throttledCommits = pageSource.match(
-      /const commitBudgetMs = coffeeTypewriterCommitBudgetMs\(\s*currentPrismFrameRate\(\)\?\.fps \?\? null,\s*\);/gu,
+  it("can always recover a wedged table, whatever is holding the clock", () => {
+    // Session 2253b3903a sat 100 minutes at 66 FPS with busy 0ms/s and Send
+    // greyed. The watchdog existed; it just could not fire. Two reasons, both
+    // pinned here.
+    // 1. It measured elapsed time on `coffeeSessionClockMs`, which model warmup
+    //    deliberately freezes — a recovery path must not share a clock with the
+    //    thing it recovers from.
+    assert.match(
+      pageSource,
+      /const nowMs = Date\.now\(\);\s*const stuckSinceMs = coffeeStuckThinkingSinceMsRef\.current \?\? nowMs;[\s\S]{0,200}nowMs - stuckSinceMs >= COFFEE_STUCK_THINKING_WATCHDOG_MS/u,
     );
-    assert.equal(
-      throttledCommits?.length,
-      2,
-      "both the player and bot typewriter loops budget their commits",
+    // 2. Its only regular driver was that same clock, so a frozen clock also
+    //    stopped it re-evaluating. It now has a tick of its own.
+    assert.match(pageSource, /COFFEE_STALL_RECOVERY_TICK_MS = 5_000;/u);
+    assert.match(
+      pageSource,
+      /setCoffeeStallRecoveryTickMs\(Date\.now\(\)\);\s*\}, COFFEE_STALL_RECOVERY_TICK_MS\)/u,
+    );
+    assert.match(pageSource, /coffeeStallRecoveryTickMs,/u);
+    // 3. What froze the clock: `releaseCoffeeModelWarmup` returns early on the
+    //    `failed` phase, so a failed warmup is terminal until a retry — and
+    //    holding the clock for it stopped the countdown indefinitely.
+    assert.match(
+      pageSource,
+      /const modelWarmupActive =\s*coffeeModelWarmupRef\.current !== null &&\s*coffeeModelWarmupRef\.current\.phase !== "failed";/u,
+    );
+    // No recovery decision may read a clock the table can hold.
+    assert.match(pageSource, /\(endsAt === null \|\| nowMs < endsAt\)/u);
+    // Prevention: `cooldown` is a bridge to a timer, so cancelling the timer
+    // must release the state rather than park the table behind a disabled
+    // composer, and a hand-off that dies must not die silently.
+    assert.match(
+      pageSource,
+      /coffeeCooldownTimerRef\.current = null;[\s\S]{0,420}coffeeTurnRhythmStateRef\.current === "cooldown"[\s\S]{0,120}setCoffeeTurnRhythmState\("idle"\)/u,
     );
     assert.match(
       pageSource,
-      /coffeeComposerDraftSyncDelayMs\(currentPrismFrameRate\(\)\?\.fps \?\? null\)/u,
+      /const releaseStalledHandoff = \(\) => \{[\s\S]{0,320}revealDeliveryIsCurrent\(\)[\s\S]{0,320}setCoffeeTurnRhythmState\("idle"\)/u,
     );
+    assert.match(pageSource, /\.catch\(\(\) => \{[\s\S]{0,160}releaseStalledHandoff\(\);/u);
+  });
+
+  it("keeps reveal progress out of full-surface renders", () => {
+    // Review 47d7aa3d: per-character typewriter commits reconciled the entire
+    // Coffee surface; at 5 seats that pinned the table at 1 FPS with
+    // busy 3519ms/s and made typing "incredibly difficult". The exact
+    // character now rides `coffeeRevealProgressChannel`; only a coarse
+    // mouth-cadence mirror reaches React state.
+    const revealAdvances = pageSource.match(
+      /advanceCoffeeTypewriterLength\(\{/gu,
+    );
+    assert.equal(
+      revealAdvances?.length,
+      2,
+      "both the player and bot typewriter loops publish to the channel",
+    );
+    assert.match(
+      pageSource,
+      /const revealedLength = fixedLength \?\? channelLength;/u,
+    );
+    // Frame-rate-gated commit intervals are feedback loops, not fixes: they
+    // widen as frames collapse and narrow as they recover, so they oscillate
+    // exactly like the avatar load sheds that were removed for the same flaw.
+    assert.doesNotMatch(pageSource, /coffeeTypewriterCommitBudgetMs/u);
+    assert.doesNotMatch(pageSource, /coffeeComposerDraftSyncDelayMs/u);
+    assert.match(pageSource, /COFFEE_COMPOSER_PARENT_DRAFT_SYNC_MS = 240;/u);
     // Coffee seats are HD, always: review 47d7aa3d ran at 1 FPS with
     // busy 3519ms/s, so the bottleneck is the main thread, not avatar
     // materials, and no frame-rate shed may take the bodies away.
@@ -175,14 +225,16 @@ describe("Coffee live immersion", () => {
     // A botThinking seat with no in-flight work self-recovers and hands the
     // floor back to the stalled speaker (Plankton's 138s dangling question).
     // The same watchdog covers a pending reveal that never started (session
-    // 6d6f1239's seven-minute dead table) and an idle-with-pending-speaker.
+    // 6d6f1239's seven-minute dead table), an idle-with-pending-speaker, and a
+    // stranded cooldown (session 2253b3903a). The shapes themselves live in
+    // `coffeeTableStallShapeV1` and are unit-tested there.
     assert.match(
       pageSource,
-      /const deadPendingReveal =\s*coffeePendingRevealConversation !== null &&/u,
+      /const stuckThinkingShape = coffeeTableStallShapeV1\(\{[\s\S]{0,420}cooldownTimerArmed: coffeeCooldownTimerRef\.current !== null,/u,
     );
     assert.match(
       pageSource,
-      /const stuckThinkingShape =[\s\S]{0,700}COFFEE_STUCK_THINKING_WATCHDOG_MS/u,
+      /if \(!stuckThinkingShape\) \{\s*coffeeStuckThinkingSinceMsRef\.current = null;/u,
     );
     assert.match(
       pageSource,

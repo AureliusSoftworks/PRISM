@@ -27,6 +27,10 @@ describe("Coffee player response UI wiring", () => {
       handlerSource,
       /function updateCoffeeDraftFromComposer\(next: string\): void \{[\s\S]*?coffeeDraftRef\.current = next;[\s\S]*?nextHasDraft !== previousHasDraft[\s\S]*?setCoffeeComposerHasDraft\(nextHasDraft\);[\s\S]*?scheduleDeferredCoffeeDraftState\(next\);/,
     );
+    // The parent draft sync settles on a fixed debounce. It must not back off
+    // by measured frame rate: an interval that widens as frames collapse and
+    // narrows as they recover oscillates instead of settling, and it degrades
+    // most on exactly the tables that can least afford it.
     assert.match(
       pageSource,
       /COFFEE_COMPOSER_PARENT_DRAFT_SYNC_MS = 240/,
@@ -108,9 +112,18 @@ describe("Coffee player response UI wiring", () => {
       pageSource,
       /const beginSpeaking = async[\s\S]*?await startCoffeeVoiceForReveal\([\s\S]*?if \(!revealDeliveryIsCurrent\(\)\) return null;[\s\S]*?setCoffeeTurnRhythmState\("tableTyping"\)/,
     );
+    // Both guards still stand between a dead preparation and the reveal timer.
+    // They are two statements rather than one `||` so a hand-off that dies
+    // while we still own the floor can release the rhythm instead of parking
+    // the table in `cooldown` forever (session 2253b3903a) — but releasing is
+    // itself epoch-guarded, so a superseded turn still reclaims nothing.
     assert.match(
       pageSource,
-      /const beginSpeakingAndScheduleReveal[\s\S]*?durationMs === null \|\| !revealDeliveryIsCurrent\(\)[\s\S]*?coffeeVoiceRevealFallbackDelayMs\(durationMs, voiced\)/,
+      /const beginSpeakingAndScheduleReveal[\s\S]*?if \(durationMs === null\) \{\s*releaseStalledHandoff\(\);\s*return;\s*\}\s*if \(!revealDeliveryIsCurrent\(\)\) return;[\s\S]*?coffeeVoiceRevealFallbackDelayMs\(durationMs, voiced\)/,
+    );
+    assert.match(
+      pageSource,
+      /const releaseStalledHandoff = \(\) => \{\s*if \(!revealDeliveryIsCurrent\(\)\) return;/,
     );
     assert.match(
       pageSource,
@@ -201,11 +214,11 @@ describe("Coffee player response UI wiring", () => {
   it("hands a finished player line to botThinking before a queued bot reveal", () => {
     assert.match(
       pageSource,
-      /resolveCoffeeUserRevealSettledWaiters\(\);[\s\S]*?setCoffeeTypewriterLength\(charCount\);[\s\S]*?setCoffeeTurnRhythmState\("botThinking"\);[\s\S]*?if \(queued\) \{[\s\S]*?queueCoffeeRevealFnRef\.current\(queued\);/,
+      /resolveCoffeeUserRevealSettledWaiters\(\);[\s\S]*?assignCoffeeTypewriterLength\(charCount\);[\s\S]*?setCoffeeTurnRhythmState\("botThinking"\);[\s\S]*?if \(queued\) \{[\s\S]*?queueCoffeeRevealFnRef\.current\(queued\);/,
     );
     assert.match(
       pageSource,
-      /coffeeUserTableTypingShouldRestart\(\{[\s\S]*?settled:\s*coffeeUserTableTypingSettledRef\.current,[\s\S]*?visibleLength:\s*coffeeTypewriterLengthRef\.current,[\s\S]*?fullDisplayLength:\s*charCount/,
+      /coffeeUserTableTypingShouldRestart\(\{[\s\S]*?settled:\s*coffeeUserTableTypingSettledRef\.current,[\s\S]*?visibleLength:\s*coffeeRevealVisibleLength\(\),[\s\S]*?fullDisplayLength:\s*charCount/,
     );
   });
 
@@ -229,6 +242,28 @@ describe("Coffee player response UI wiring", () => {
     assert.match(
       pageSource,
       /function mergeCoffeeTranscriptMessageSources[\s\S]*?\{\s*\.\.\.historyMessage,\s*\.\.\.liveMessage\s*\}/,
+    );
+  });
+
+  it("always refetches the full transcript for a review export", () => {
+    // A Table talk cache captured earlier in the session can be short at the
+    // head, which silently shipped exports missing their opening turns. The
+    // export path is a one-off action, so it always asks the server first.
+    assert.match(
+      pageSource,
+      /const loadCoffeeTranscriptMessagesForClipboard[\s\S]{0,1400}sessions\/\$\{encodeURIComponent\(conversation\.id\)\}\/transcript/u,
+    );
+    const loaderStart = pageSource.indexOf(
+      "const loadCoffeeTranscriptMessagesForClipboard",
+    );
+    const loaderEnd =
+      pageSource.indexOf("const api", loaderStart) > loaderStart
+        ? pageSource.indexOf("const api", loaderStart)
+        : loaderStart + 2400;
+    const loader = pageSource.slice(loaderStart, loaderEnd);
+    assert.doesNotMatch(
+      loader,
+      /if \(cached\) \{\s*return mergeCoffeeTranscriptMessageSources/u,
     );
   });
 

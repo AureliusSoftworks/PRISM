@@ -1,6 +1,8 @@
 export interface PrismFrameRateSnapshot {
   fps: number;
   sampledAt: string;
+  /** Main-thread long-task time in the sampling window, normalized to ms/s. */
+  longTaskMsPerSecond?: number;
 }
 
 type PrismFrameRateListener = (snapshot: PrismFrameRateSnapshot | null) => void;
@@ -16,10 +18,18 @@ export function normalizePrismFrameRate(value: number): number | null {
 export function publishPrismFrameRate(
   fps: number,
   sampledAt = new Date().toISOString(),
+  longTaskMsPerSecond?: number,
 ): PrismFrameRateSnapshot | null {
   const normalized = normalizePrismFrameRate(fps);
   if (normalized === null) return null;
-  latestSnapshot = { fps: normalized, sampledAt };
+  latestSnapshot = {
+    fps: normalized,
+    sampledAt,
+    ...(longTaskMsPerSecond !== undefined &&
+    Number.isFinite(longTaskMsPerSecond)
+      ? { longTaskMsPerSecond: Math.max(0, Math.round(longTaskMsPerSecond)) }
+      : {}),
+  };
   listeners.forEach((listener) => listener(latestSnapshot));
   return latestSnapshot;
 }
