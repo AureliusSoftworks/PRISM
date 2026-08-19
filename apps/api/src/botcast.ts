@@ -335,6 +335,7 @@ import {
   resolveIdentityShapeshiftCandidatesV1,
 } from "./bot-identity-shapeshift.ts";
 import { resolveBotFalseNameStateV1 } from "./bot-false-name.ts";
+import type { PreparedDatabaseTable } from "./prepared-db-changeset.ts";
 import {
   deleteMemoriesAcquiredDuringAppletSessions,
   persistBotPairNarrativeMemory,
@@ -1159,10 +1160,30 @@ export function botcastPreparedTurnCursor(
     guestDeparted:
       botcastEpisodeDepartureOutcome(episode.events) === "guest_departed",
   });
+  // Session-clock bookkeeping records how long the audience waited; it never
+  // changes what the next turn says. Counting it here would let the hold
+  // measured for the turn now being spoken invalidate the turn already
+  // prepared for the one after it, putting the episode back on the foreground
+  // path that produced the hold in the first place.
+  const durableEvents = episode.events.filter(
+    (event) => event.kind !== "session_clock_hold",
+  );
+  const durableEpisode = {
+    ...episode,
+    updatedAt: null,
+    events: durableEvents,
+    modelWarmupHoldDurationMs: 0,
+    modelWarmupHoldStartedAt: null,
+    sessionClockHoldDurationMs: 0,
+    sessionClockHoldStartedAt: null,
+  };
   return {
-    revision: episode.updatedAt,
+    revision:
+      durableEvents.at(-1)?.occurredAt ??
+      episode.messages.at(-1)?.createdAt ??
+      episode.createdAt,
     lastMessageId: episode.messages.at(-1)?.id ?? null,
-    lastEventId: episode.events.at(-1)?.id ?? null,
+    lastEventId: durableEvents.at(-1)?.id ?? null,
     floorOwnerId:
       nextRole === "host"
         ? episode.hostBotId
@@ -1178,7 +1199,7 @@ export function botcastPreparedTurnCursor(
         [],
     }),
     promptStateHash: preparedTurnHash({
-      episode,
+      episode: durableEpisode,
       show,
       pairHistoryState,
       effortStateHash: allModelReasoningEffortCursorHash(db, userId),
@@ -1191,6 +1212,32 @@ export function botcastEpisodeCanPrepareAdvance(
 ): boolean {
   return episode.status === "live" && episode.guestKind === "bot";
 }
+
+/**
+ * Every table a speculative Signal turn reads or writes inside its private
+ * database copy. A table missing here throws "no such table" mid-generation,
+ * which silently demotes the lookahead back to a foreground turn the audience
+ * waits through, so `signal-turn-preparation.test.ts` runs a real prepared
+ * advance to keep this list honest.
+ *
+ * The show audio tables are schema-only: a turn resolves them through
+ * `getBotcastShow` but never reads the megabytes of rendered audio they hold.
+ */
+export const SIGNAL_PREPARATION_TABLES: readonly PreparedDatabaseTable[] = [
+  "model_reasoning_effort_preferences",
+  "model_turbo_preferences",
+  "bots",
+  "botcast_shows",
+  "botcast_episodes",
+  "botcast_episode_segments",
+  "botcast_messages",
+  "botcast_events",
+  "botcast_host_recovery_candidates",
+  { name: "botcast_show_intro_audio", copyRows: false },
+  { name: "botcast_show_atmosphere_audio", copyRows: false },
+  "memories",
+  "bot_relationships",
+];
 
 const SIGNAL_CROSSTALK_RECLAIM_BASE_CHANCE = 0.34;
 const SIGNAL_CROSSTALK_RECLAIM_MIN_CHANCE = 0.12;
@@ -12853,13 +12900,15 @@ function closeActiveBotcastModelWarmupHold(
     Number.isFinite(startedAtMs) && Number.isFinite(nowMs)
       ? Math.max(0, nowMs - startedAtMs)
       : 0;
+  // Hold accounting deliberately leaves updated_at alone: it measures the wait
+  // rather than changing the episode, and a bump here would collide with the
+  // turn being prepared in parallel for the moment this hold ends.
   db.prepare(
     `UPDATE botcast_episodes
         SET model_warmup_hold_duration_ms = model_warmup_hold_duration_ms + ?,
-            model_warmup_hold_started_at = NULL,
-            updated_at = ?
+            model_warmup_hold_started_at = NULL
       WHERE id = ? AND user_id = ?`,
-  ).run(elapsedMs, now, episodeId, userId);
+  ).run(elapsedMs, episodeId, userId);
 }
 
 export function setBotcastModelWarmupHold(
@@ -12874,10 +12923,9 @@ export function setBotcastModelWarmupHold(
   if (active) {
     db.prepare(
       `UPDATE botcast_episodes
-          SET model_warmup_hold_started_at = COALESCE(model_warmup_hold_started_at, ?),
-              updated_at = ?
+          SET model_warmup_hold_started_at = COALESCE(model_warmup_hold_started_at, ?)
         WHERE id = ? AND user_id = ?`,
-    ).run(now, now, episodeId, userId);
+    ).run(now, episodeId, userId);
   } else {
     closeActiveBotcastModelWarmupHold(db, userId, episodeId, now);
   }
@@ -12917,10 +12965,9 @@ export function recordBotcastSessionClockHold(
   const now = new Date().toISOString();
   db.prepare(
     `UPDATE botcast_episodes
-        SET model_warmup_hold_duration_ms = model_warmup_hold_duration_ms + ?,
-            updated_at = ?
+        SET model_warmup_hold_duration_ms = model_warmup_hold_duration_ms + ?
       WHERE id = ? AND user_id = ?`,
-  ).run(durationMs, now, episodeId, userId);
+  ).run(durationMs, episodeId, userId);
   recordEvent(
     db,
     userId,

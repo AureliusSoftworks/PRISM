@@ -310,6 +310,7 @@ import {
   inspectDebateSourceUrl,
 } from "./debate-source-inspection.ts";
 import {
+  SIGNAL_PREPARATION_TABLES,
   SignalOnlineTurnError,
   advanceBotcastEpisode,
   backfillMissingCompletedBotcastPairHistory,
@@ -2947,19 +2948,6 @@ function invalidateTurnPreparation(
 ): void {
   turnPreparationRegistry.discardSession(userId, surface, sessionId, reason);
 }
-
-const SIGNAL_PREPARATION_TABLES = [
-  "model_reasoning_effort_preferences",
-  "model_turbo_preferences",
-  "bots",
-  "botcast_shows",
-  "botcast_episodes",
-  "botcast_episode_segments",
-  "botcast_messages",
-  "botcast_events",
-  "memories",
-  "bot_relationships",
-] as const;
 
 interface PreparedSignalTurnPayload extends PreparedDatabaseChangeset {
   messageId: string | null;
