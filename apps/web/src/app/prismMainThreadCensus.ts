@@ -27,6 +27,13 @@
  *   not the compositor does the drawing, so a growing count here explains
  *   high `busy` with no JS loop growth.
  * - `heap` — `performance.memory` where the engine offers it (Chromium only).
+ * - `rend` — React renders per second for the surfaces that call
+ *   {@link notePrismRender}. Added after the counters above proved
+ *   *insufficient*: the Coffee lobby pegs the main thread at 100% (86 long
+ *   tasks, 14,992ms of a 15,000ms window) while animation-frame callbacks cost
+ *   1ms and timer callbacks 2ms. Neither is where the work is. React schedules
+ *   commits on a MessageChannel, so nothing that instruments rAF or timers can
+ *   see it — but a render *rate* can, and a runaway one is unmistakable.
  *
  * The counters come from transparent wrappers installed once. They forward
  * every argument and return value untouched; the only work added per call is
@@ -46,6 +53,38 @@ export interface PrismMainThreadCensus {
   animationsRunning: number | null;
   /** Used JS heap in MB, or null where unsupported. */
   heapMb: number | null;
+  /** Renders per second, by surface, since the previous census sample. */
+  renderRates: readonly { name: string; perSecond: number }[];
+}
+
+const renderCounts = new Map<string, number>();
+let lastRenderSampleCounts = new Map<string, number>();
+let lastRenderSampleAtMs: number | null = null;
+
+/**
+ * Count one render of a named surface. Called from a component body, so React
+ * strict mode's double-invoke inflates it — the number is for spotting a
+ * runaway, not for accounting.
+ */
+export function notePrismRender(name: string): void {
+  renderCounts.set(name, (renderCounts.get(name) ?? 0) + 1);
+}
+
+function sampleRenderRates(): { name: string; perSecond: number }[] {
+  const nowMs = typeof performance === "undefined" ? Date.now() : performance.now();
+  const previousAtMs = lastRenderSampleAtMs;
+  const previousCounts = lastRenderSampleCounts;
+  lastRenderSampleAtMs = nowMs;
+  lastRenderSampleCounts = new Map(renderCounts);
+  if (previousAtMs === null) return [];
+  const elapsedSeconds = Math.max(0.001, (nowMs - previousAtMs) / 1000);
+  const rates: { name: string; perSecond: number }[] = [];
+  for (const [name, total] of renderCounts) {
+    const delta = total - (previousCounts.get(name) ?? 0);
+    if (delta <= 0) continue;
+    rates.push({ name, perSecond: Math.round(delta / elapsedSeconds) });
+  }
+  return rates.sort((left, right) => right.perSecond - left.perSecond);
 }
 
 let rafPending = 0;
@@ -163,6 +202,7 @@ export function prismMainThreadCensus(): PrismMainThreadCensus {
         : document.getElementsByTagName("*").length,
     animationsRunning: readRunningAnimations(),
     heapMb: readHeapMb(),
+    renderRates: sampleRenderRates(),
   };
 }
 
@@ -189,10 +229,16 @@ export function formatPrismMainThreadCensus(
     parts.push(`anim ${census.animationsRunning}`);
   }
   if (census.heapMb !== null) parts.push(`heap ${census.heapMb}MB`);
+  for (const rate of census.renderRates.slice(0, 2)) {
+    parts.push(`${rate.name} ${rate.perSecond}/s`);
+  }
   return parts.join(" · ");
 }
 
 export function resetPrismMainThreadCensusCountersForTests(): void {
+  renderCounts.clear();
+  lastRenderSampleCounts = new Map();
+  lastRenderSampleAtMs = null;
   rafPending = 0;
   intervalsLive = 0;
   timeoutsPending = 0;

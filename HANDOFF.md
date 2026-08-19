@@ -1,4 +1,39 @@
-# Handoff: Coffee Mode freeze — glyph rasterization
+# Handoff: Coffee Mode lag — a render loop in the Coffee lobby
+
+## WHERE THIS ACTUALLY STANDS (2026-08-18, measured with a *visible* window)
+
+**Minimal repro, no session required:** open Coffee and sit on the lobby /
+table-setup screen. ~300–500 DOM nodes, nothing animating, no table running —
+and the main thread is 100% saturated. **86 long tasks totalling 14,992ms in a
+15,000ms window**, 3 FPS.
+
+**It is React commit work, and nothing else.** In that same window,
+animation-frame callbacks cost **1ms** and timer callbacks cost **2ms**. React
+schedules commits on a MessageChannel, which is why no rAF or timer
+instrumentation can see it. This is consistent with the
+`Maximum update depth exceeded` error that intermittently trips the
+"Prism needs a quick refresh" boundary in `<HomeContent>`.
+
+**Bisected: not ours.** The same saturation reproduces on `371fda86`, the
+commit *before* the Coffee freeze work — 53 long tasks / 15,307ms / 3 FPS. The
+freeze #1 channel, the freeze #2 recovery, and the census badge are all
+exonerated, as is the earlier suspicion about `releaseStalledHandoff`.
+
+**The glyph-rasterization section below is superseded as *the cause*.** That
+defect is real — `PhosphorPixelSvgGlyph` keys its effect on `[children]`, a
+fresh identity every parent render — but it cannot explain a lobby screen with
+no avatars on it, and rAF cost of 1ms says it is not the bottleneck. A fix for
+it sits unverified in `stash@{0}`; treat it as a separate, smaller win.
+
+**Next step:** the badge now reports `home N/s` — renders per second of the
+whole app surface (`notePrismRender("home")` in `HomeContent`). Open Coffee
+with the pane visible and read it. A runaway number confirms the loop and
+quantifies it; then find the effect in `HomeContent` that sets state with an
+unstable dependency on the lobby path. Everything needed is a fifteen-second
+observation away.
+
+# Handoff: Coffee Mode lag — superseded sections below
+
 
 ## CORRECTION TO THE SECTION BELOW — read this first
 

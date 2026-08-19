@@ -131,6 +131,7 @@ import { subscribePrismFrameRate } from "./prismFrameRate";
 import {
   formatPrismMainThreadCensus,
   installPrismMainThreadCensus,
+  notePrismRender,
   prismMainThreadCensus,
   type PrismMainThreadCensus,
 } from "./prismMainThreadCensus";
@@ -48992,6 +48993,11 @@ function waitForRelationshipDepthBeat(delayMs: number): Promise<void> {
 }
 
 function HomeContent(): React.JSX.Element {
+  // Counts commits of the whole app surface. The Coffee lobby saturates the
+  // main thread with no session open, no animation-frame cost and no timer
+  // cost — a render loop is the only remaining explanation, and this is the
+  // number that proves or disproves it in fifteen seconds.
+  notePrismRender("home");
   const searchParams = useSearchParams();
   const router = useRouter();
   const { openMenu } = usePrismMenu();

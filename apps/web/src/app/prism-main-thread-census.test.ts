@@ -140,8 +140,9 @@ describe("prism main-thread census", () => {
         domElements: 4231,
         animationsRunning: 47,
         heapMb: 180,
+        renderRates: [{ name: "home", perSecond: 214 }],
       }),
-      "raf 3 · int 6 · tmo 12 · dom 4.2k · anim 47 · heap 180MB",
+      "raf 3 · int 6 · tmo 12 · dom 4.2k · anim 47 · heap 180MB · home 214/s",
     );
     assert.equal(
       formatPrismMainThreadCensus({
@@ -151,6 +152,7 @@ describe("prism main-thread census", () => {
         domElements: 900,
         animationsRunning: null,
         heapMb: null,
+        renderRates: [],
       }),
       "raf 1 · int 0 · tmo 0 · dom 900",
     );
