@@ -2474,7 +2474,7 @@ export function BotcastExperience({
       controller: AbortController,
       runId: number,
       prepareFollowingTurn?: boolean,
-      onPlaybackStart?: () => void,
+      onPlaybackStart?: () => void | Promise<void>,
     ) => Promise<void>
   >(async () => undefined);
 
@@ -7162,7 +7162,7 @@ export function BotcastExperience({
       controller: AbortController,
       runId: number,
       prepareFollowingTurn = true,
-      onPlaybackStart?: () => void,
+      onPlaybackStart?: () => void | Promise<void>,
     ): Promise<void> => {
       const bot =
         currentEpisode.guestKind === "producer" &&
@@ -7228,17 +7228,24 @@ export function BotcastExperience({
       };
       const prepareNextTurn = (): void => {
         if (!prepareFollowingTurn || followingTurnPrepared) return;
+        if (!episodeOperationIsCurrent(controller, runId)) return;
         followingTurnPrepared = true;
         prepareGuestResponseRef.current(currentEpisode, message);
       };
       const notifyPlaybackStart = (): void => {
         if (playbackStartNotified) return;
         playbackStartNotified = true;
-        prepareNextTurn();
         if (producerGuestActionSfxPlan?.revealAtDisplayLength === 0) {
           playProducerGuestActionSfxAt(0, 1);
         }
-        onPlaybackStart?.();
+        // Close the books on the wait this turn cost before preparing the next
+        // one. The hold is written into the episode's event stream, so a
+        // preparation snapshot taken first would claim the same sequence and
+        // lose the whole head start when it tried to commit.
+        void Promise.resolve(onPlaybackStart?.()).then(
+          prepareNextTurn,
+          prepareNextTurn,
+        );
       };
       let armedVoiceCompletionDurationMs = 0;
       const armVoiceCompletionWatchdog = (
@@ -7953,12 +7960,9 @@ export function BotcastExperience({
             return false;
           }
         }
-        const response = readyPreparation
-            ? await request<BotcastEpisodeAdvanceResponse>(
-                `/api/turn-preparations/${encodeURIComponent(readyPreparation.id)}/commit`,
-                { method: "POST", signal: controller.signal },
-              )
-          : await request<BotcastEpisodeAdvanceResponse>(
+        const requestForegroundAdvance =
+          (): Promise<BotcastEpisodeAdvanceResponse> =>
+            request<BotcastEpisodeAdvanceResponse>(
             `/api/botcast/episodes/${encodeURIComponent(episode.id)}/advance`,
             {
               method: "POST",
@@ -7981,6 +7985,17 @@ export function BotcastExperience({
               }),
             },
             );
+        const response = readyPreparation
+            ? await request<BotcastEpisodeAdvanceResponse>(
+                `/api/turn-preparations/${encodeURIComponent(readyPreparation.id)}/commit`,
+                { method: "POST", signal: controller.signal },
+              ).catch((commitError: unknown) => {
+                // A prepared turn the live episode has moved past is a missed
+                // head start, not a broken episode: generate on air instead.
+                if (controller.signal.aborted) throw commitError;
+                return requestForegroundAdvance();
+              })
+          : await requestForegroundAdvance();
         await finishResponseCue?.();
         if (interruptionBridgePlayback) {
           await interruptionBridgePlayback;
@@ -8025,9 +8040,7 @@ export function BotcastExperience({
             controller,
             runId,
             false,
-            () => {
-              void completeForegroundGenerationHold();
-            },
+            () => completeForegroundGenerationHold(),
           );
           if (!episodeOperationIsCurrent(controller, runId)) return false;
         }
@@ -8047,9 +8060,7 @@ export function BotcastExperience({
               controller,
               runId,
               true,
-              () => {
-                void completeForegroundGenerationHold();
-              },
+              () => completeForegroundGenerationHold(),
             );
           } else {
             void completeForegroundGenerationHold();
@@ -8396,6 +8407,12 @@ export function BotcastExperience({
       segment: episode.segment,
       guestDeparted: guestHasDeparted(episode),
     });
+    if (nextRole === "host") {
+      // The host's next turn now carries the cue, so a turn prepared without
+      // it can never air. Release it now instead of leaving it to finish and
+      // hold the model while the cued turn waits behind it.
+      discardPreparedAdvance("A Producer cue redirects the host's next turn.");
+    }
     if (!busy && speakingMessageId === null && nextRole === "host") {
       onPrepareUtterance?.();
       void advanceEpisode(cue);

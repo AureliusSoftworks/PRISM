@@ -9,6 +9,23 @@ export interface PreparedDatabaseChangeset {
   changeset: Uint8Array;
 }
 
+/**
+ * A table a prepared turn may touch. Naming the table alone copies the user's
+ * rows; `copyRows: false` recreates the empty table so read queries resolve
+ * without paying to clone contents the turn never reads (large audio blobs).
+ */
+export type PreparedDatabaseTable =
+  | string
+  | { name: string; copyRows: false };
+
+function preparedTableName(table: PreparedDatabaseTable): string {
+  return typeof table === "string" ? table : table.name;
+}
+
+function preparedTableCopiesRows(table: PreparedDatabaseTable): boolean {
+  return typeof table === "string" || table.copyRows !== false;
+}
+
 function quoteIdentifier(identifier: string): string {
   return `"${identifier.replaceAll('"', '""')}"`;
 }
@@ -21,11 +38,17 @@ function quoteIdentifier(identifier: string): string {
 export function createUserScopedPreparedDatabase(
   source: DatabaseSync,
   userId: string,
-  tableNames: readonly string[],
+  tables: readonly PreparedDatabaseTable[],
 ): { db: DatabaseSync; session: Session } {
-  const db = new DatabaseSync(":memory:");
+  // The copy holds a slice of the schema, so foreign keys have no targets to
+  // resolve against: leaving them on fails every insert into a user-scoped
+  // table, which reads downstream as a preparation that silently never runs.
+  const db = new DatabaseSync(":memory:", {
+    enableForeignKeyConstraints: false,
+  });
   try {
-    for (const tableName of tableNames) {
+    for (const spec of tables) {
+      const tableName = preparedTableName(spec);
       const schema = source
         .prepare(
           "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
@@ -48,7 +71,7 @@ export function createUserScopedPreparedDatabase(
           `Prepared-turn table ${tableName} must be scoped by user_id.`,
         );
       }
-      if (columnNames.length === 0) continue;
+      if (columnNames.length === 0 || !preparedTableCopiesRows(spec)) continue;
 
       const quotedColumns = columnNames.map(quoteIdentifier).join(", ");
       const placeholders = columnNames.map(() => "?").join(", ");
