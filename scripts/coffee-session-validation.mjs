@@ -10,6 +10,14 @@
 //   VALIDATION_PROVIDER=openai        speaker via OpenAI (default: local)
 //   VALIDATION_SPEAKER_MODEL=...      default llama3.2:latest / gpt-3.5-turbo
 //   OPENAI_API_KEY                    required when VALIDATION_PROVIDER=openai
+//   VALIDATION_MINUTES=30             table length, 3-30 (default 5)
+//   VALIDATION_PLAYER=none            run unattended, with no player lines at
+//                                     all (default: two scripted interjections)
+//
+// Scope note: this drives the orchestrator directly. It does not exercise the
+// turn-job registry or the HTTP autonomous gate, so it proves that a table
+// keeps producing content and resolves on its own — not that the live client
+// never stalls waiting on a job.
 //
 // The router/auxiliary lane always stays on local llama3.2, matching product
 // architecture; needs a running Ollama with llama3.2 pulled either way.
@@ -121,6 +129,19 @@ for (const bot of CAST) {
   );
 }
 
+// Coffee itself only accepts whole minutes from 3 to 30, so the harness
+// clamps to the same range: 30 is a full-length table, not an extrapolation.
+const SESSION_MINUTES = Math.max(
+  3,
+  Math.min(30, Math.round(Number(process.env.VALIDATION_MINUTES ?? 5))),
+);
+const SESSION_MS = SESSION_MINUTES * 60_000;
+const PER_TURN_MS = 11_500;
+/** One spare turn so the loop can reach the closing beats, never fewer than the
+ * original 26 for a five-minute table. */
+const TURN_BUDGET = Math.ceil(SESSION_MS / PER_TURN_MS) + 1;
+const UNATTENDED = (process.env.VALIDATION_PLAYER ?? "").toLowerCase() === "none";
+
 const group = createCoffeeGroup(db, userId, {
   name: "The Night Shift",
   ethos:
@@ -134,11 +155,14 @@ const created = await createCoffeeConversationFromGroup(
   db,
   userId,
   group.id,
-  { durationMinutes: 5, forceAttendance: true, deferTopicSelection: true },
+  { durationMinutes: SESSION_MINUTES, forceAttendance: true, deferTopicSelection: true },
   llm,
 );
 const conversationId = created.conversation.id;
-console.log(`\nSESSION ${conversationId} duration=5m`);
+console.log(
+  `\nSESSION ${conversationId} duration=${SESSION_MINUTES}m turns=${TURN_BUDGET}` +
+    `${UNATTENDED ? " unattended" : ""}`,
+);
 console.log("TOPIC CHIPS:");
 for (const chip of created.coffeeStarterTopics ?? []) {
   console.log(
@@ -151,7 +175,7 @@ const plans = CAST.map((bot) => ({
   ...coffeeBotPlannedDepartureV1({
     conversationId,
     botId: bot.id,
-    durationMinutes: 5,
+    durationMinutes: SESSION_MINUTES,
   }),
 }));
 console.log("\nPLANNED DEPARTURES:");
@@ -219,13 +243,25 @@ function printNewMessages(remainingMs) {
   }
 }
 
-let remainingMs = 300_000;
-const PLAYER_LINES = new Map([
-  [4, "Alright, honest answers only: what do you all still owe somebody?"],
-  [13, "Momo, that dodge was smooth, but I saw it. What's the debt you never paid back?"],
-]);
+let remainingMs = SESSION_MS;
+const PLAYER_LINES = UNATTENDED
+  ? new Map()
+  : new Map([
+      [4, "Alright, honest answers only: what do you all still owe somebody?"],
+      [13, "Momo, that dodge was smooth, but I saw it. What's the debt you never paid back?"],
+    ]);
 
-for (let turn = 0; turn < 26 && remainingMs > 8_000; turn += 1) {
+// A table that stops producing content is the failure this harness exists to
+// catch: the session is supposed to carry itself for its whole length without
+// anyone typing. Track the worst run of consecutive silent turns rather than
+// only the total, so a long dead stretch cannot hide behind a healthy average.
+let silentTurns = 0;
+let longestSilentRun = 0;
+let turnsTaken = 0;
+
+for (let turn = 0; turn < TURN_BUDGET && remainingMs > 8_000; turn += 1) {
+  turnsTaken += 1;
+  const messagesBefore = printedMessageIds.size;
   const playerLine = PLAYER_LINES.get(turn);
   try {
     if (playerLine) {
@@ -249,7 +285,13 @@ for (let turn = 0; turn < 26 && remainingMs > 8_000; turn += 1) {
     console.log(`  [turn ${turn} failed: ${error?.message ?? error}]`);
   }
   printNewMessages(remainingMs);
-  remainingMs -= 11_500;
+  if (printedMessageIds.size === messagesBefore) {
+    silentTurns += 1;
+    longestSilentRun = Math.max(longestSilentRun, silentTurns);
+  } else {
+    silentTurns = 0;
+  }
+  remainingMs -= PER_TURN_MS;
 }
 
 const finalRow = db
@@ -261,13 +303,23 @@ const finalSeats = JSON.parse(finalRow.bot_group_ids ?? "[]");
 const stillSeated = finalSeats.filter((id) => typeof id === "string");
 
 console.log("\n--- VALIDATION SUMMARY ---");
-console.log(`turns attempted: 26, failures: ${failures}`);
+console.log(
+  `session: ${SESSION_MINUTES}m${UNATTENDED ? " unattended" : ""}, ` +
+    `turns attempted: ${turnsTaken}, failures: ${failures}`,
+);
+console.log(
+  `silent turns: ${longestSilentRun} longest consecutive run` +
+    `${longestSilentRun >= 3 ? "  [!STALLED]" : ""}`,
+);
 console.log(`distinct speakers: ${[...seenSpeakers].join(", ") || "none"}`);
 console.log(`asides: ${asideCount}, short beats (<=9 words): ${quickCount}`);
 console.log(
   `departures observed: ${departuresSeen.map((d) => `${d.name}@${Math.round(d.remainingMs / 1000)}s`).join(", ") || "none"}`,
 );
-console.log(`still seated at end: ${stillSeated.length} of ${CAST.length}`);
+console.log(
+  `still seated at end: ${stillSeated.length} of ${CAST.length}` +
+    `${stillSeated.length === 0 ? "  [resolved organically]" : ""}`,
+);
 const cannedChips = (created.coffeeStarterTopics ?? []).filter((chip) =>
   coffeeStarterTopicLabelIsCanned(chip),
 );
