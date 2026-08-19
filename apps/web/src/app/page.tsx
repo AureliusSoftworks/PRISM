@@ -540,10 +540,7 @@ import {
   coffeeLiveSeatThinkingBotId,
   coffeeSeatAvatarViewModelKey,
 } from "./coffee-seat-avatar-view-model";
-import {
-  coffeeSeatShouldDropRenderedSize,
-  coffeeSeatShouldSkipEmptyCupVisual,
-} from "./coffee-seat-load-shed";
+import { coffeeSeatShouldSkipEmptyCupVisual } from "./coffee-seat-load-shed";
 import { coffeePollTurnUpdateFromResponse } from "./coffee-poll-turn-response";
 import {
   coffeeGroupAttendanceCanStart,
@@ -65404,22 +65401,6 @@ function HomeContent(): React.JSX.Element {
   const [coffeeDeadAirAside, setCoffeeDeadAirAside] =
     useState<DeadAirAsidePlanV1 | null>(null);
   const coffeeLiveSeatCountRef = useRef(0);
-  const [coffeeSeatLoadShedding, setCoffeeSeatLoadShedding] = useState(false);
-  useEffect(() => {
-    if (coffeeSessionPhase !== "live" && coffeeSessionPhase !== "arriving") {
-      setCoffeeSeatLoadShedding(false);
-      return;
-    }
-    return subscribePrismFrameRate((snapshot) => {
-      setCoffeeSeatLoadShedding((current) =>
-        coffeeSeatShouldDropRenderedSize({
-          fps: snapshot?.fps ?? null,
-          seatedCount: coffeeLiveSeatCountRef.current,
-          currentlyShedding: current,
-        }),
-      );
-    });
-  }, [coffeeSessionPhase]);
   const playCoffeeDeadAirAsideRef = useRef<
     (plan: DeadAirAsidePlanV1) => Promise<boolean>
   >(async () => false);
@@ -136115,13 +136096,15 @@ function HomeContent(): React.JSX.Element {
     const coffeeSeatAvatarPresentation = coffeeAvatarPresentation();
     const coffeeSessionBotVisualQuality = "full";
     coffeeLiveSeatCountRef.current = visibleCoffeeSeats.length;
-    const coffeeLiveMinimumRenderedSizeTier = coffeeSeatLoadShedding
-      ? "compact"
-      : "full";
+    // Coffee seats are HD, always. The rendered-size shed assumed a GPU
+    // bottleneck; review 47d7aa3d ran at 1 FPS with busy 3519ms/s — the main
+    // thread saturated three times over — so downgrading avatar materials
+    // bought nothing and cost the bodies their bodies.
+    const coffeeLiveMinimumRenderedSizeTier = "full" as const;
     const coffeeSkipEmptyCupVisual = coffeeSeatShouldSkipEmptyCupVisual({
       seatedCount: visibleCoffeeSeats.length,
       pileup: coffeeConversation?.coffeeSettings?.crossTalk === "pileup",
-      loadShedding: coffeeSeatLoadShedding,
+      loadShedding: false,
     });
     const coffeeTeamsState = coffeeConversation?.coffeeTeams ?? null;
     const coffeeTeamRankByBotId = new Map<string, number>();
@@ -138302,7 +138285,7 @@ function HomeContent(): React.JSX.Element {
                 avatarSfxState: seatAvatarSfxState,
                 sipMouth: seatSipMouthTreatmentActive,
                 emptyCupFrown: emptyCupAttemptFrowning,
-                loadShed: coffeeSeatLoadShedding,
+                loadShed: false,
                 mouthShape: mouthShapeWhileTyping,
                 mood: prismSeatMood,
                 plateFace: seatPlateGlyph,
@@ -138564,8 +138547,7 @@ function HomeContent(): React.JSX.Element {
                               seatMouthActive ||
                               seatSipMouthTreatmentActive ||
                               emptyCupAttemptFrowning,
-                            blinkWhileTalking:
-                              !coffeeSeatLoadShedding || seatMouthActive,
+                            blinkWhileTalking: true,
                             mouthShape: mouthShapeWhileTyping,
                             moodHint:
                               coffeeSeatZenMoodHintFromPrism(prismSeatMood),
