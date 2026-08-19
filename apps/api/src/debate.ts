@@ -6395,37 +6395,6 @@ async function generateSpeech(
     typeof normalizeDebateVoicePerformanceCue
   > = null;
   let didCapabilityRepair = false;
-  const speechDebugStartedAt = Date.now();
-  // #region agent log
-  fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Debug-Session-Id": "296f82",
-    },
-    body: JSON.stringify({
-      sessionId: "296f82",
-      runId: "pre-fix",
-      hypothesisId: "A",
-      location: "debate.ts:generateSpeech:enter",
-      message: "generateSpeech enter",
-      data: {
-        stepKey: session.stepKey,
-        role: snapshot.role,
-        botId: snapshot.id,
-        verbatimCopy,
-        copiesAddressedSpeech,
-        copySourceLen:
-          typeof addressedSpeech === "string" ? addressedSpeech.length : 0,
-        copyPreview:
-          typeof addressedSpeech === "string"
-            ? addressedSpeech.slice(0, 72)
-            : null,
-      },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
   if (verbatimCopy) {
     intended = applyBotPowerAddressedCopyResponseV1(addressedSpeech);
   } else {
@@ -6527,34 +6496,6 @@ async function generateSpeech(
         throw error;
       }
     }
-    // #region agent log
-    fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "296f82",
-      },
-      body: JSON.stringify({
-        sessionId: "296f82",
-        runId: "pre-fix",
-        hypothesisId: "A",
-        location: "debate.ts:generateSpeech:afterJson",
-        message: "generateSpeech after JSON/copy",
-        data: {
-          stepKey: session.stepKey,
-          role: snapshot.role,
-          botId: snapshot.id,
-          verbatimCopy,
-          hasGeneration: Boolean(deliveryGeneration),
-          provider: deliveryGeneration?.provider ?? null,
-          model: deliveryGeneration?.model ?? null,
-          intendedLen: intended.length,
-          elapsedMs: Date.now() - speechDebugStartedAt,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
   }
   if (debateSpeechLooksLikePromptLeak(intended)) {
     intended = copiesAddressedSpeech
@@ -6712,32 +6653,6 @@ async function generateSpeech(
     silent: botPowerResponseIsSilentV1(named),
     repaired: didCapabilityRepair,
   });
-  // #region agent log
-  fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Debug-Session-Id": "296f82",
-    },
-    body: JSON.stringify({
-      sessionId: "296f82",
-      runId: "pre-fix",
-      hypothesisId: "D",
-      location: "debate.ts:generateSpeech:exit",
-      message: "generateSpeech exit",
-      data: {
-        stepKey: session.stepKey,
-        role: snapshot.role,
-        botId: snapshot.id,
-        silent: botPowerResponseIsSilentV1(named),
-        namedLen: named.length,
-        hasAudienceReaction: Boolean(audienceReaction),
-        elapsedMs: Date.now() - speechDebugStartedAt,
-      },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
   return {
     content: named,
     sourceIds: sanitized.sourceIds,
@@ -13065,32 +12980,6 @@ export async function prepareDebateAdvance(
     stepKey: session.stepKey,
     eventCount: transitioned.events.length,
   });
-  // #region agent log
-  fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Debug-Session-Id": "296f82",
-    },
-    body: JSON.stringify({
-      sessionId: "296f82",
-      runId: "pre-fix",
-      hypothesisId: "D",
-      location: "debate.ts:prepareDebateAdvance:afterStep",
-      message: "advance step produced events; jury/surprise still pending",
-      data: {
-        stepKey: session.stepKey,
-        nextStepKey: transitioned.session.stepKey,
-        eventKinds: transitioned.events.map((event) => event.kind),
-        eventStepKeys: transitioned.events.map((event) => event.stepKey),
-        juryWillRun: Boolean(
-          jurySidebarTrigger(transitioned.session, transitioned.events),
-        ),
-      },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
   // Overlap atmospheric surprise + jury sidebar so the floor waits once.
   const surprisePromise = withPersonaSurpriseReaction(
     session,

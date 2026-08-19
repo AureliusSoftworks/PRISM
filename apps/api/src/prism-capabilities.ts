@@ -427,9 +427,6 @@ export class PrismCapabilityRegistry {
       } catch {
         // The failing handler may have rejected before the transaction began.
       }
-      // #region agent log
-      fetch('http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'aec877'},body:JSON.stringify({sessionId:'aec877',runId:'pre-fix',hypothesisId:'A',location:'prism-capabilities.ts:execute catch',message:'capability execute threw',data:{capabilityId: proposal.capabilityId, errorName: error instanceof Error ? error.name : typeof error, errorMessage: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? (error.stack ?? '').split('\n').slice(0, 12) : []},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       return failPrismActionRun(
         args.context.db,
         args.context.userId,

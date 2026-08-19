@@ -253,32 +253,6 @@ export async function bakeDebateSpectatorSession(args: {
       // Append-only: only advance when the floor still needs baker steps.
       // Re-resolve each step so Auto can switch as the proceeding grows.
       const runtime = await args.resolveRuntime();
-      const bakeAdvanceStartedAt = Date.now();
-      // #region agent log
-      fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Debug-Session-Id": "296f82",
-        },
-        body: JSON.stringify({
-          sessionId: "296f82",
-          runId: "pre-fix",
-          hypothesisId: "B",
-          location: "live-bake.ts:bakeAdvance:before",
-          message: "spectator bake about to advance",
-          data: {
-            debateSessionId: sessionId,
-            step,
-            stepKey: session.stepKey,
-            status: session.status,
-            revision: session.revision,
-            bakeStatus: session.liveBake?.status ?? null,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       try {
         session = await advanceDebateSession(
           db,
@@ -290,59 +264,7 @@ export async function bakeDebateSpectatorSession(args: {
           },
           runtime,
         );
-        // #region agent log
-        fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Debug-Session-Id": "296f82",
-          },
-          body: JSON.stringify({
-            sessionId: "296f82",
-            runId: "pre-fix",
-            hypothesisId: "B",
-            location: "live-bake.ts:bakeAdvance:after",
-            message: "spectator bake advance returned",
-            data: {
-              debateSessionId: sessionId,
-              step,
-              stepKey: session.stepKey,
-              status: session.status,
-              revision: session.revision,
-              eventCount: session.events.length,
-              elapsedMs: Date.now() - bakeAdvanceStartedAt,
-              sessionError: session.error,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
       } catch (error) {
-        // #region agent log
-        fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Debug-Session-Id": "296f82",
-          },
-          body: JSON.stringify({
-            sessionId: "296f82",
-            runId: "pre-fix",
-            hypothesisId: "B",
-            location: "live-bake.ts:bakeAdvance:catch",
-            message: "spectator bake advance threw",
-            data: {
-              debateSessionId: sessionId,
-              step,
-              elapsedMs: Date.now() - bakeAdvanceStartedAt,
-              errorName: error instanceof Error ? error.name : typeof error,
-              errorMessage:
-                error instanceof Error ? error.message.slice(0, 240) : String(error),
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         const latest = getDebateSession(db, userId, sessionId);
         if (latest.status === "paused") {
           artifact = mergeDebateArtifact(
