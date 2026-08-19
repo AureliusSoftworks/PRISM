@@ -249,6 +249,7 @@ export {
   botPowerChromaticBiasEffectsFromEffectsV1,
   botPowerChromaticBiasEffectsFromIntentV1,
   botPowerChromaticBiasResolvedHueV1,
+  botPowerChromaticBiasSubjectMatchV1,
   botPowerHueLabelV1,
   BOT_POWER_CHROMATIC_BIAS_MATCH_BAND_DEG_V1,
   botPowerAddressedInsultPrimaryCueV1,

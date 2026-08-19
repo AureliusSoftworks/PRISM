@@ -5485,6 +5485,58 @@ export function botPowerChromaticBiasEffectsFromIntentV1(
   return effects.slice(0, 4);
 }
 
+/**
+ * Words that make a subject about bots rather than about anything else that
+ * happens to be coloured. Hue prejudice is a bot-to-bot Power, so "Blue Bots
+ * Suck" is in scope and "Why the sky is blue" is not — and when the gate is
+ * unsure it declines, because the reworded no-match clause already keeps the
+ * bias live in the abstract.
+ */
+const BOT_POWER_CHROMATIC_BIAS_SUBJECT_BOT_RE_V1 =
+  /\b(?:bots?|robots?|droids?|androids?|machines?|units?|models?|synths?|automatons?|ai)\b/iu;
+
+/**
+ * Colour named by the subject under discussion that falls inside this bias
+ * band, or null.
+ *
+ * Review 12d3d47e ran an episode titled "Blue Bots Suck" with a host and
+ * guest whose own phosphor hues were nowhere near blue, so the cue told the
+ * bigot "None of the present bots match that band" and he spent the interview
+ * recanting his premise. The bias has a subject as well as a room.
+ */
+export function botPowerChromaticBiasSubjectMatchV1(args: {
+  subject: unknown;
+  hue: number;
+  matchBandDeg?: number;
+}): string | null {
+  const subject = compactText(args.subject, 300);
+  if (!subject || !Number.isFinite(args.hue)) return null;
+  if (!BOT_POWER_CHROMATIC_BIAS_SUBJECT_BOT_RE_V1.test(subject)) return null;
+  const band = Number.isFinite(args.matchBandDeg)
+    ? (args.matchBandDeg as number)
+    : BOT_POWER_CHROMATIC_BIAS_MATCH_BAND_DEG_V1;
+  // A fresh matcher rather than the shared alias pattern: that one carries the
+  // `g` flag and a `lastIndex` its own caller resets by hand, so borrowing it
+  // here would interleave state and drop matches nondeterministically.
+  const aliases = subject
+    .toLowerCase()
+    .replace(/[’]/gu, "'")
+    .matchAll(
+      new RegExp(
+        `\\b(?:${BOT_POWER_CHROMATIC_BIAS_NAMED_HUES_V1.flatMap(
+          (entry) => entry.aliases,
+        ).join("|")})\\b`,
+        "giu",
+      ),
+    );
+  for (const alias of aliases) {
+    const named = namedHueFromAliasV1(alias[0] ?? "");
+    if (!named) continue;
+    if (circularHueDistanceDeg(args.hue, named.hue) <= band) return named.label;
+  }
+  return null;
+}
+
 function chromaticBiasPressureWordV1(
   polarity: BotPowerChromaticBiasPolarityV1,
   strength: BotPowerStrength,
@@ -5514,6 +5566,8 @@ export function botPowerChromaticBiasCueFromEffectsV1(args: {
   holderBotId?: string | null;
   modeLabel?: string;
   currentAddresseeName?: string | null;
+  /** Topic under discussion, when the lane has one. */
+  subject?: unknown;
 }): string | null {
   const effects = botPowerChromaticBiasEffectsFromEffectsV1(args.effects);
   if (effects.length === 0) return null;
@@ -5553,10 +5607,23 @@ export function botPowerChromaticBiasCueFromEffectsV1(args: {
       names.some((name) => name.toLocaleLowerCase() === addressee.toLocaleLowerCase())
         ? ` The current addressee, ${addressee}, is in this band.`
         : "";
+    const subjectLabel = botPowerChromaticBiasSubjectMatchV1({
+      subject: args.subject,
+      hue,
+      matchBandDeg: effect.matchBandDeg,
+    });
+    const subjectNote = subjectLabel
+      ? ` The subject under discussion is about ${subjectLabel} bots, which is your band.`
+      : "";
     clauses.push(
       names.length > 0
-        ? `${pressure} bots near ${origin}. Present matches: ${names.join(", ")}.${addresseeNote}`
-        : `${pressure} bots near ${origin}. None of the present bots match that band.`,
+        ? `${pressure} bots near ${origin}. Present matches: ${names.join(", ")}.${addresseeNote}${subjectNote}`
+        // Never report the bias as dormant for want of a match in the room.
+        // "None of the present bots match that band" is true, and a weaker
+        // model reads it as "your bias is irrelevant here" — review 12d3d47e
+        // watched a hue bigot abandon his own premise mid-interview because
+        // no one at the table happened to be blue.
+        : `${pressure} bots near ${origin}. No one present is in that band, so it shapes how you speak about ${origin} bots rather than how you treat anyone in the room.${subjectNote}`,
     );
   }
   if (!anyResolved && clauses.length === 0) return null;
@@ -5570,6 +5637,7 @@ export function botPowerChromaticBiasCueV1(args: {
   holderBotId?: string | null;
   modeLabel?: string;
   currentAddresseeName?: string | null;
+  subject?: unknown;
 }): string | null {
   return botPowerChromaticBiasCueFromEffectsV1({
     effects: activeBotPowerEffectsV1(args.powers),
@@ -5578,6 +5646,7 @@ export function botPowerChromaticBiasCueV1(args: {
     holderBotId: args.holderBotId,
     modeLabel: args.modeLabel,
     currentAddresseeName: args.currentAddresseeName,
+    subject: args.subject,
   });
 }
 

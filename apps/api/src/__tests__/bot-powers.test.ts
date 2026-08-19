@@ -3,6 +3,8 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import {
   applyBotPowerCursedTongueResponseV1,
+  botPowerChromaticBiasCueFromEffectsV1,
+  botPowerChromaticBiasSubjectMatchV1,
   botPowerSourceHashForPowerV1,
   botPowerSourceHashV1,
   type CoffeePowerPlanV1,
@@ -3287,6 +3289,141 @@ test("Coffee names matching hue-prejudice peers without targeting the player", (
   assert.match(prompt, /Cyan Carl/u);
   assert.doesNotMatch(prompt, /Ruby Rue/u);
   assert.match(prompt, /never people or the player/iu);
+});
+
+/** Racist Randy's exact compiled effect from Signal review 12d3d47e. */
+const HUE_BIGOT_EFFECT = {
+  type: "chromatic_bias" as const,
+  polarity: "hate" as const,
+  color: { kind: "named" as const, hue: 240, label: "blue" },
+  strength: "medium" as const,
+  matchBandDeg: 30,
+};
+
+const SAFETY_TAIL =
+  /Soft only: judge bot phosphor color, never people or the player; no slurs or puppeting\.$/u;
+
+test("hue prejudice with no match in the room is not reported as dormant", () => {
+  // Review 12d3d47e: the topic was "Blue Bots Suck" and neither bot on stage
+  // was blue, so the cue said "None of the present bots match that band" and
+  // the bigot spent the interview recanting his own premise.
+  const cue = botPowerChromaticBiasCueFromEffectsV1({
+    effects: [HUE_BIGOT_EFFECT],
+    holderColor: "#ff3300",
+    holderBotId: "randy",
+    peers: [{ botId: "tina", name: "Tiny Tina", color: "#ff9900" }],
+    modeLabel: "Signal",
+  });
+
+  assert.ok(cue);
+  assert.doesNotMatch(cue, /None of the present bots match/iu);
+  assert.match(cue, /shapes how you speak about blue bots/iu);
+  assert.match(cue, SAFETY_TAIL);
+});
+
+test("hue prejudice engages the booked subject when no one present matches", () => {
+  const cue = botPowerChromaticBiasCueFromEffectsV1({
+    effects: [HUE_BIGOT_EFFECT],
+    holderColor: "#ff3300",
+    holderBotId: "randy",
+    peers: [{ botId: "tina", name: "Tiny Tina", color: "#ff9900" }],
+    modeLabel: "Signal",
+    subject: "Blue Bots Suck",
+  });
+
+  assert.ok(cue);
+  assert.match(cue, /subject under discussion is about blue bots/iu);
+  assert.match(cue, SAFETY_TAIL);
+});
+
+test("a present match keeps its name and still carries the safety tail", () => {
+  const cue = botPowerChromaticBiasCueFromEffectsV1({
+    effects: [HUE_BIGOT_EFFECT],
+    holderColor: "#ff3300",
+    holderBotId: "randy",
+    peers: [{ botId: "sky", name: "Sky Blue Sam", color: "#2040ff" }],
+    modeLabel: "Signal",
+    subject: "Blue Bots Suck",
+  });
+
+  assert.ok(cue);
+  assert.match(cue, /Present matches: Sky Blue Sam/u);
+  assert.match(cue, SAFETY_TAIL);
+});
+
+test("an unresolved hue stays dormant rather than borrowing the new wording", () => {
+  // A complementary bias with no holder colour genuinely has no hue. That
+  // branch was correct and must not pick up the "speak about" rewording.
+  const cue = botPowerChromaticBiasCueFromEffectsV1({
+    effects: [{
+      type: "chromatic_bias" as const,
+      polarity: "hate" as const,
+      color: { kind: "complementary_of_holder" as const },
+      strength: "medium" as const,
+      matchBandDeg: 30,
+    }],
+    holderBotId: "randy",
+    peers: [],
+    modeLabel: "Signal",
+    subject: "Blue Bots Suck",
+  });
+
+  assert.ok(cue);
+  assert.match(cue, /dormant until you have a chromatic identity color/iu);
+  assert.match(cue, SAFETY_TAIL);
+});
+
+test("a love-polarity bias reads naturally on both branches", () => {
+  const love = { ...HUE_BIGOT_EFFECT, polarity: "love" as const };
+  const empty = botPowerChromaticBiasCueFromEffectsV1({
+    effects: [love],
+    holderColor: "#ff3300",
+    peers: [],
+    modeLabel: "Signal",
+  });
+  const withSubject = botPowerChromaticBiasCueFromEffectsV1({
+    effects: [love],
+    holderColor: "#ff3300",
+    peers: [],
+    modeLabel: "Signal",
+    subject: "Blue Bots Rule",
+  });
+
+  assert.match(empty ?? "", /clearly favor bots near blue/iu);
+  assert.match(empty ?? "", /shapes how you speak about blue bots/iu);
+  assert.doesNotMatch(empty ?? "", /snub/iu);
+  assert.match(withSubject ?? "", /subject under discussion is about blue bots/iu);
+  assert.match(withSubject ?? "", SAFETY_TAIL);
+});
+
+test("the subject gate needs a colour in band and a bot to apply it to", () => {
+  const match = (subject: string, hue = 240) =>
+    botPowerChromaticBiasSubjectMatchV1({ subject, hue, matchBandDeg: 30 });
+
+  assert.equal(match("Blue Bots Suck"), "blue");
+  // A neighbouring label inside the band still counts: indigo is 260 degrees.
+  assert.equal(match("are indigo androids overrated?"), "indigo");
+  // Colour, but nothing bot-shaped to be prejudiced about.
+  assert.equal(match("Why the sky is blue"), null);
+  assert.equal(match("The Blue Danube"), null);
+  // Bot-shaped, but no colour named.
+  assert.equal(match("Do bots dream?"), null);
+  // Colours named well outside the band, including a near miss: cyan is 180
+  // degrees and blue is 240, so a 30 degree band must not reach it.
+  assert.equal(match("Red Bots Suck"), null);
+  assert.equal(match("are cyan androids overrated?"), null);
+  assert.equal(match(""), null);
+
+  // A hex-compiled bias still meets a plainly named topic colour: #3a6fd8 is
+  // about 217 degrees, which sits inside a 30 degree band around blue.
+  assert.equal(
+    botPowerChromaticBiasSubjectMatchV1({
+      subject: "Blue Bots Suck",
+      hue: 217,
+      matchBandDeg: 30,
+    }),
+    "blue",
+  );
 });
 
 test("Coffee hue prejudice drains matching addressed peers and skips silent turns", () => {

@@ -10226,6 +10226,11 @@ export function buildBotcastSpeakerPrompt(
       : [{ botId: peer.id, name: peer.name, color: peer.color }],
     modeLabel: "Signal",
     currentAddresseeName: peerTotallyAbsent ? null : peerAddressName,
+    // The booked topic is as much a target of hue prejudice as the other
+    // chair. Review 12d3d47e booked "Blue Bots Suck" between two bots whose
+    // own phosphor was nowhere near blue, and the cue's "none of the present
+    // bots match" read as "drop it" — which the guest promptly did.
+    subject: args.episode.topic,
   });
   const themeMoodCue = botPowerThemeMoodCueV1(speaker.powers, args.theme);
   const genericSpeakerCuePowers = activeBotPowersV1(speaker.powers).filter(
