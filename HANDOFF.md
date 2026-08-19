@@ -1,3 +1,54 @@
+# Handoff: Coffee Mode lag — render loop found and fixed
+
+## RESULT (2026-08-18, measured with `visibilityState === "visible"` asserted)
+
+**Fixed:** `dc9fcf96`. The Coffee lobby's permanent saturation was a React
+render loop, not rendering cost and not the glyph rasterizer. The bot-library
+group maintenance effect ([page.tsx:60963](apps/web/src/app/page.tsx)) fed
+`setBotLibraryGroups` a value that was never `Object.is` equal to the previous
+one — `prune` reallocates the outer array, `normalize` rebuilds every object —
+so React could never bail out and `HomeContent`, the whole app surface,
+committed ~7 times a second forever with nothing to prune.
+
+Found by walking React's fibers: filtering to hooks that own a `queue` (state
+hooks, not effect/memo records) cut 2163 hooks to 654, and exactly one changed
+between commits — always `array[1]` → `array[1]`, identical contents. Dumping
+it gave `[{ id: "builtin:favorites", … }]`.
+
+Fresh-load trajectory after the fix, pane visible throughout:
+
+```
+t=2s    11 FPS · busy 973 · home 7/s
+t=4s     7 FPS · busy 989 · home 7/s
+t=6s     7 FPS · busy 985 · home 7/s
+t=8s   120 FPS · busy   0 · home 2/s
+t=10s+ 120 FPS · busy   0 · home 0/s   ← steady, indefinitely
+```
+
+Independently confirmed by counting frames by hand: 361 frames in 3.00s,
+median gap 8ms, max 9ms.
+
+**There is no steady-state rendering cost.** That question is answered.
+
+**Still open:** the first ~7 seconds of a fresh load still run at 7–11 FPS with
+`busy` ~980ms/s and `home 7/s`. Smaller and self-clearing, but real, and the
+same class of bug — a second stray `array[0]` → `array[0]` update was seen on
+hook 269. Also unverified: whether a *live table* now stays smooth for a full
+session, which is the original complaint and the real acceptance test.
+
+## MEASUREMENT DISCIPLINE — this cost hours
+
+The Browser pane silently flips between visible and hidden, and the app
+*correctly* self-suspends when hidden: `data-prism-visual-lifecycle="suspended"`
+on `<html>`, rAF served on an exact 2001ms cadence, main thread idle. In that
+state **every duration metric is fiction** — FPS, `busy ms/s`, long-animation-
+frame durations (25,855ms in a 10s window), and pending-rAF counts all lie.
+Three separate wrong conclusions in this investigation came from trusting them.
+
+Assert `document.visibilityState === "visible"` *inside* the same script that
+takes the measurement, and discard anything else. Counts (renders, state
+churn, fiber lanes) stay valid either way; durations do not.
+
 # Handoff: Coffee Mode lag — a render loop in the Coffee lobby
 
 ## WHERE THIS ACTUALLY STANDS (2026-08-18, measured with a *visible* window)
