@@ -24,11 +24,27 @@ export type SessionReviewRecordingEvidence =
       timelineDurationMs: number | null;
       direction: ReplayDirectionEventV2[];
       warningPresent: boolean;
+      warningDetail: string | null;
       errorPresent: boolean;
+      errorDetail: string | null;
     };
 
 const PRIVATE_REVIEW_KEY =
   /(?:apiKey|providerKey|encryptionKey|url|uri|path|prompt|secret|credential|token|diagnostics|audioBytes|encodedChunks)$/iu;
+
+/** One-line, length-capped rendering of a recording warning or error. */
+function reviewSafeText(value: unknown): string | null {
+  if (typeof value === "string") {
+    const collapsed = value.replace(/\s+/gu, " ").trim();
+    return collapsed ? collapsed.slice(0, 300) : null;
+  }
+  if (value === null || value === undefined) return null;
+  if (typeof value === "object") {
+    const message = (value as { message?: unknown }).message;
+    if (typeof message === "string") return reviewSafeText(message);
+  }
+  return null;
+}
 
 function safeReviewValue(
   value: unknown,
@@ -114,7 +130,12 @@ export function sessionReviewRecordingEvidenceFromRecording(
           )
         : [],
     warningPresent: Boolean(recording.warning),
+    // A bare "yes" cannot be diagnosed. Review 2253b390 froze the session and
+    // degraded its recording, and the only evidence naming the cause was the
+    // text this export was throwing away. Scrubbed like every other value here.
+    warningDetail: reviewSafeText(recording.warning),
     errorPresent: Boolean(recording.error),
+    errorDetail: reviewSafeText(recording.error),
   };
 }
 
@@ -174,8 +195,53 @@ export function sessionReviewRecordingSummaryLines(
     `- Compiled timeline duration: ${formatSessionReviewDuration(evidence.timelineDurationMs)}`,
     `- Recording duration alignment: ${durationAlignment}`,
     `- Private direction events: ${evidence.direction.length}`,
-    `- Recording warning present: ${evidence.warningPresent ? "yes (details withheld)" : "no"}`,
-    `- Recording error present: ${evidence.errorPresent ? "yes (details withheld)" : "no"}`,
+    `- Recording warning present: ${evidence.warningPresent ? (evidence.warningDetail ?? "yes (no detail recorded)") : "no"}`,
+    `- Recording error present: ${evidence.errorPresent ? (evidence.errorDetail ?? "yes (no detail recorded)") : "no"}`,
+  ];
+}
+
+/**
+ * Cross-checks the human-readable transcript against the recording's own
+ * direction log. A review export is only trustworthy if it can say what it is
+ * missing: a Coffee export once shipped with five opening turns present in the
+ * recording and absent from every visible section, and nothing in the artifact
+ * disclosed it. Any message the recording directed but the transcript never
+ * printed is named here.
+ */
+export function sessionReviewTranscriptCoverageLines(args: {
+  evidence: SessionReviewRecordingEvidence | undefined;
+  presentMessageIds: ReadonlySet<string>;
+}): string[] {
+  const { evidence } = args;
+  if (
+    !evidence ||
+    evidence.state !== "recorded" ||
+    evidence.manifestVersion !== 2
+  ) {
+    return ["Transcript coverage: no V2 direction log to reconcile against."];
+  }
+  const directedMessageIds: string[] = [];
+  for (const event of evidence.direction) {
+    const sourceMessageId = event.sourceMessageId?.trim();
+    if (!sourceMessageId) continue;
+    if (directedMessageIds.includes(sourceMessageId)) continue;
+    directedMessageIds.push(sourceMessageId);
+  }
+  if (directedMessageIds.length === 0) {
+    return ["Transcript coverage: the direction log names no source messages."];
+  }
+  const missing = directedMessageIds.filter(
+    (messageId) => !args.presentMessageIds.has(messageId),
+  );
+  if (missing.length === 0) {
+    return [
+      `Transcript coverage: complete — all ${directedMessageIds.length} directed messages appear in the transcript.`,
+    ];
+  }
+  return [
+    `Transcript coverage: INCOMPLETE — ${missing.length} of ${directedMessageIds.length} directed messages are missing from the transcript below.`,
+    "These turns were recorded and directed but never printed; treat the transcript as partial.",
+    ...missing.map((messageId) => `- Missing message: ${messageId}`),
   ];
 }
 

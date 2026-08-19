@@ -1,96 +1,41 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { readFileSync } from "node:fs";
 import {
   coffeeSeatShouldDropRenderedSize,
   coffeeSeatShouldSkipEmptyCupVisual,
-  stageShouldDropRenderedSize,
 } from "./coffee-seat-load-shed.ts";
 
 describe("Coffee seat load shed", () => {
-  it("drops Full HD materials only on a crowded table below 24 FPS", () => {
+  it("drops Full HD materials on any live table below 24 FPS", () => {
     assert.equal(
-      coffeeSeatShouldDropRenderedSize({
-        fps: 18,
-        seatedCount: 5,
-        currentlyShedding: false,
-      }),
+      coffeeSeatShouldDropRenderedSize({ fps: 18, currentlyShedding: false }),
       true,
     );
+    // Sparse tables shed too: review 8e012a9d ran a two-bot table at 2-5 FPS
+    // with no mitigation reachable behind the old crowd gate.
     assert.equal(
-      coffeeSeatShouldDropRenderedSize({
-        fps: 18,
-        seatedCount: 2,
-        currentlyShedding: false,
-      }),
+      coffeeSeatShouldDropRenderedSize({ fps: 48, currentlyShedding: false }),
       false,
     );
     assert.equal(
-      coffeeSeatShouldDropRenderedSize({
-        fps: 48,
-        seatedCount: 5,
-        currentlyShedding: false,
-      }),
+      coffeeSeatShouldDropRenderedSize({ fps: null, currentlyShedding: false }),
       false,
     );
   });
 
-  it("keeps a crowded table shed even when the shed itself recovers FPS", () => {
+  it("stays shed for the session so the seats cannot oscillate", () => {
+    // Review 2253b390: three seated bots, frame rate bouncing across both
+    // thresholds during arrivals, avatars flickering. Recovered frames are the
+    // shed's own effect, so re-promoting restarts the loop at any seat count.
+    for (const fps of [30, 45, 60]) {
+      assert.equal(
+        coffeeSeatShouldDropRenderedSize({ fps, currentlyShedding: true }),
+        true,
+      );
+    }
     assert.equal(
-      coffeeSeatShouldDropRenderedSize({
-        fps: 30,
-        seatedCount: 5,
-        currentlyShedding: true,
-      }),
-      true,
-    );
-    // Recovered frames while still crowded are the shed's own effect;
-    // re-promoting here restarts the HD↔Mini swap loop.
-    assert.equal(
-      coffeeSeatShouldDropRenderedSize({
-        fps: 45,
-        seatedCount: 5,
-        currentlyShedding: true,
-      }),
-      true,
-    );
-  });
-
-  it("returns to Full HD once the crowd is gone and frames are smooth", () => {
-    assert.equal(
-      coffeeSeatShouldDropRenderedSize({
-        fps: 45,
-        seatedCount: 3,
-        currentlyShedding: true,
-      }),
-      false,
-    );
-    assert.equal(
-      coffeeSeatShouldDropRenderedSize({
-        fps: 30,
-        seatedCount: 3,
-        currentlyShedding: true,
-      }),
-      true,
-    );
-  });
-
-  it("sheds Signal and Debate stages below 24 FPS and stays shed all session", () => {
-    assert.equal(
-      stageShouldDropRenderedSize({ fps: 18, currentlyShedding: false }),
-      true,
-    );
-    assert.equal(
-      stageShouldDropRenderedSize({ fps: 48, currentlyShedding: false }),
-      false,
-    );
-    assert.equal(
-      stageShouldDropRenderedSize({ fps: null, currentlyShedding: false }),
-      false,
-    );
-    // A stage has no crowd to thin, so once shed it never re-promotes
-    // mid-session — not even at a recovered 60 FPS.
-    assert.equal(
-      stageShouldDropRenderedSize({ fps: 60, currentlyShedding: true }),
+      coffeeSeatShouldDropRenderedSize({ fps: null, currentlyShedding: true }),
       true,
     );
   });
