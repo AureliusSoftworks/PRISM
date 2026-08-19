@@ -47,4 +47,47 @@ describe("rich composer focus stability", () => {
     );
     assert.doesNotMatch(applySource, /\[resolveShortcutPickToText\]/);
   });
+
+  it("never recreates the editor for a placeholder change, and reseeds from the live draft", () => {
+    const desktopStart = pageSource.indexOf(
+      "const DesktopMarkdownComposer = forwardRef<",
+    );
+    const desktopEnd = pageSource.indexOf(
+      "const ComposerInput = forwardRef<",
+      desktopStart,
+    );
+    assert.ok(desktopStart >= 0 && desktopEnd > desktopStart);
+    const desktopSource = pageSource.slice(desktopStart, desktopEnd);
+
+    // Coffee flips coffeeComposerPlaceholder mid-session (waiting for a seat,
+    // then joined). If placeholder sits in the useEditor deps, TipTap destroys
+    // the editor and remounts it with the parent's debounced value, dropping
+    // every keystroke typed inside the sync window.
+    assert.match(
+      desktopSource,
+      /const placeholderRef = useRef\(placeholder\);/,
+    );
+    assert.match(desktopSource, /placeholderRef\.current = placeholder;/);
+    assert.match(
+      desktopSource,
+      /Placeholder\.configure\(\{ placeholder: \(\) => placeholderRef\.current \}\)/,
+    );
+
+    const editorStart = desktopSource.indexOf("const editor = useEditor(");
+    const editorEnd = desktopSource.indexOf(
+      "const mentionBotsByIdForTipTap = useMemo(",
+      editorStart,
+    );
+    assert.ok(editorStart >= 0 && editorEnd > editorStart);
+    const editorSource = desktopSource.slice(editorStart, editorEnd);
+    assert.doesNotMatch(editorSource, /^\s*placeholder,\s*$/m);
+
+    // Any other dep can still change mid-typing, so recreation must seed from
+    // the newest markdown this composer holds rather than the lagging prop.
+    assert.match(
+      editorSource,
+      /content: pendingValueRef\.current \?\? lastEmittedRef\.current,/,
+    );
+    assert.doesNotMatch(editorSource, /content: value,/);
+  });
 });

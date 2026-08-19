@@ -35690,6 +35690,10 @@ const DesktopMarkdownComposer = forwardRef<
   const onFocusRef = useRef(onFocus);
   const writingAssistEnabledRef = useRef(writingAssistEnabled);
   const sentenceCapitalizeEnabledRef = useRef(sentenceCapitalizeEnabled);
+  // Lane placeholders change mid-session (Coffee flips one when the first bot
+  // sits down). Reading through a ref keeps `placeholder` out of the useEditor
+  // deps, so a copy change can never destroy the editor mid-keystroke.
+  const placeholderRef = useRef(placeholder);
   // TipTap recreates the editor when useEditor deps change by identity. Parent
   // helpers like resolveShortcutPickToText are often inline and would remount
   // the rich surface (and steal focus) on every draft sync — keep them in refs.
@@ -35772,6 +35776,16 @@ const DesktopMarkdownComposer = forwardRef<
       // The editor can be mid-teardown while settings are changing.
     }
   }, [writingAssistEnabled, sentenceCapitalizeEnabled]);
+  useLayoutEffect(() => {
+    placeholderRef.current = placeholder;
+    const ed = editorRef.current;
+    if (!ed || ed.isDestroyed) return;
+    try {
+      ed.view.dispatch(ed.state.tr.setMeta("composerPlaceholder", Date.now()));
+    } catch {
+      // The editor can be mid-teardown while the lane phase is changing.
+    }
+  }, [placeholder]);
   useLayoutEffect(() => {
     mentionUiRef.current = mentionUi;
   }, [mentionUi]);
@@ -36243,7 +36257,7 @@ const DesktopMarkdownComposer = forwardRef<
           enabled: () => writingAssistEnabledRef.current,
           lexicon: COMPOSER_GHOST_LEXICON,
         }),
-        Placeholder.configure({ placeholder }),
+        Placeholder.configure({ placeholder: () => placeholderRef.current }),
         Markdown.configure({
           markedOptions: {
             gfm: true,
@@ -36251,7 +36265,10 @@ const DesktopMarkdownComposer = forwardRef<
           },
         }),
       ],
-      content: value,
+      // A dep change recreates the editor. The parent's `value` lags the live
+      // draft by a debounce, so seed from the newest markdown this composer
+      // knows about instead — otherwise recent keystrokes are silently lost.
+      content: pendingValueRef.current ?? lastEmittedRef.current,
       contentType: "markdown",
       editorProps: {
         attributes: {
@@ -36868,7 +36885,6 @@ const DesktopMarkdownComposer = forwardRef<
       },
     },
     [
-      placeholder,
       syncComposerPopovers,
       applyComposerCommandPickInEditor,
       resolveEditorComposerChipActivation,
@@ -36945,6 +36961,7 @@ const DesktopMarkdownComposer = forwardRef<
       sentenceCapitalizeEnabled ? "sentences" : "none",
     );
     root.setAttribute("data-placeholder", placeholder);
+    root.setAttribute("aria-label", placeholder);
   }, [editor, placeholder, writingAssistEnabled, sentenceCapitalizeEnabled]);
 
   useEffect(() => {
