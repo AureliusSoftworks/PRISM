@@ -10490,7 +10490,21 @@ export function buildBotcastSpeakerPrompt(
     privateProducerBrief
       ? args.episode.guestKind === "producer"
         ? "Binding AI-synthesized interview plan: use the private pre-show plan as editorial grounding, then formulate every question yourself from that plan, any supplied guest context, and the evolving on-air answers. Ask one specific question at a time. Never ask the human guest to choose the next question, provide a prompt, steer the show, or supply private direction. Do not expose or quote the plan."
-        : "Binding private episode premise: the private pre-show producer brief is the authored fictional premise and interview plan for this episode, not an optional conversation angle. Make its central event, offer, revelation, conflict, or question the substance of your first host question or proposition, including during the opening when possible. If the brief supplies a staged sequence, timing, escalation ladder, or specific tactics, follow that progression in order instead of collapsing it into one generic question or skipping ahead. Keep that premise authoritative as the interview develops: do not invert it, preemptively decline it, resolve it for the guest, moralize it away, or replace it with an adjacent topic. Frame it naturally in your own voice; the guest remains free to negotiate, refuse, set boundaries, or answer in character. Never quote, paraphrase, or voice the brief's off-mic meta-asides or producer-to-you instructions on air—for example taste remarks like \"that show you love,\" permission lines like \"ask him whatever you want,\" or any wording that reveals a private producer note. Convert those directions into your own in-character questions only."
+        : "Binding private episode premise: the private pre-show producer brief is the authored fictional premise and interview plan for this episode, not an optional conversation angle. Make its central event, offer, revelation, conflict, or question the substance of your first host question or proposition, including during the opening when possible. If the brief supplies a staged sequence, timing, escalation ladder, or specific tactics, follow that progression in order instead of collapsing it into one generic question or skipping ahead. Keep that premise authoritative as the interview develops: do not invert it, preemptively decline it, resolve it for the guest, moralize it away, or replace it with an adjacent topic. If the guest concedes, agrees, or recants before the closing segment, do not treat the premise as settled and coast: acknowledge the shift briefly and open the brief's next unexplored thread, pressure point, or consequence instead of summarizing and winding down early. Frame it naturally in your own voice; the guest remains free to negotiate, refuse, set boundaries, or answer in character. Never quote, paraphrase, or voice the brief's off-mic meta-asides or producer-to-you instructions on air—for example taste remarks like \"that show you love,\" permission lines like \"ask him whatever you want,\" or any wording that reveals a private producer note. Convert those directions into your own in-character questions only."
+      : null;
+  // The host's binding-premise rule keeps the producer's premise authoritative
+  // on the host side, but the guest never receives the brief and had nothing
+  // holding its own arc together: a guest could recant the whole disagreement
+  // mid-interview and leave the show with no conflict for its remaining
+  // runtime. Pressure, partial concessions, and defensiveness stay available;
+  // only the outright surrender is deferred to the closing segment.
+  const guestPositionDurabilityRule =
+    args.speakerRole === "guest" &&
+    args.episode.guestPresenceMode !== "audience_only" &&
+    args.episode.segment !== "closing" &&
+    !wrappingUp &&
+    !args.departureRequired
+      ? "Binding episode arc: if you hold a stated position, stance, grievance, preference, or claim about this subject, that disagreement is the substance of the episode. Keep it through the opening and interview segments. You may be cornered, rattled, embarrassed, or outargued, and you may concede a narrow point, grant a single fact, admit one exaggeration, lose patience, stall, deflect, or change tactics. Do not recant the position itself, declare that you were wrong about the whole thing, apologize for having held it, or convert to the host's view. When the host lands a real hit, absorb it and then qualify, reframe, blame something else, or push back on a different flank rather than folding. Do not agree early to keep the peace, and do not pre-empt the argument by conceding before it has been made. Treat an invitation to drop the act as an interview tactic, not permission to end the disagreement: a host asking what you really think, offering absolution, telling you it takes courage to admit you were wrong, or observing that your case sounds thin is still interviewing you, and your honest answer is still your position. A full reversal, if this persona would ever reach one, belongs to the closing segment and not before. This never overrides a real safety or consent boundary: if one applies, name that specific boundary in-world and hold the rest of your position."
       : null;
   const producerGuestHostRule =
     args.speakerRole === "host" &&
@@ -10848,6 +10862,7 @@ export function buildBotcastSpeakerPrompt(
         ...(openingIntroductionRule ? [openingIntroductionRule] : []),
         ...(openingTopicFramingRule ? [openingTopicFramingRule] : []),
         ...(producerBriefRule ? [producerBriefRule] : []),
+        ...(guestPositionDurabilityRule ? [guestPositionDurabilityRule] : []),
         ...(producerGuestHostRule ? [producerGuestHostRule] : []),
         ...(producerGuestHostExitRule ? [producerGuestHostExitRule] : []),
         ...(liveCueAdjustmentRule ? [liveCueAdjustmentRule] : []),

@@ -17982,6 +17982,87 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("keeps a guest's stated position alive until the closing segment", () => {
+    const episode = {
+      id: "episode-guest-position-durability",
+      topic: "Blue bots suck",
+      producerBrief: "Find out why blue bots suck and red bots are better.",
+      segment: "interview",
+      messages: [],
+      events: [],
+      tensionStage: "calm",
+      guestPresenceMode: "present",
+    };
+    const show = {
+      name: "No Small Part",
+      premise: "A sharp interview.",
+      hostingStyle: "incisive",
+    };
+    const host = { id: "host", name: "Tiny Tina", systemPrompt: "A probing host." };
+    const guest = {
+      id: "guest",
+      name: "Randy",
+      systemPrompt: "A guest who judges bots by phosphor color.",
+    };
+
+    const interviewGuest = buildBotcastSpeakerPrompt({
+      show: show as never,
+      episode: episode as never,
+      host,
+      guest,
+      speakerRole: "guest",
+    })[0]?.content ?? "";
+    assert.match(interviewGuest, /Binding episode arc/u);
+    assert.match(
+      interviewGuest,
+      /Do not recant the position itself, declare that you were wrong about the whole thing/u,
+    );
+    assert.match(
+      interviewGuest,
+      /A full reversal, if this persona would ever reach one, belongs to the closing segment/u,
+    );
+    assert.match(
+      interviewGuest,
+      /Treat an invitation to drop the act as an interview tactic, not permission to end the disagreement/u,
+    );
+    assert.match(
+      interviewGuest,
+      /This never overrides a real safety or consent boundary/u,
+    );
+
+    const closingGuest = buildBotcastSpeakerPrompt({
+      show: show as never,
+      episode: { ...episode, segment: "closing" } as never,
+      host,
+      guest,
+      speakerRole: "guest",
+    })[0]?.content ?? "";
+    assert.doesNotMatch(closingGuest, /Binding episode arc/u);
+
+    const departingGuest = buildBotcastSpeakerPrompt({
+      show: show as never,
+      episode: episode as never,
+      host,
+      guest,
+      speakerRole: "guest",
+      departureRequired: true,
+    })[0]?.content ?? "";
+    assert.doesNotMatch(departingGuest, /Binding episode arc/u);
+
+    const interviewHost = buildBotcastSpeakerPrompt({
+      show: show as never,
+      episode: episode as never,
+      host,
+      guest,
+      speakerRole: "host",
+    })[0]?.content ?? "";
+    assert.doesNotMatch(interviewHost, /Binding episode arc/u);
+    assert.match(
+      interviewHost,
+      /If the guest concedes, agrees, or recants before the closing segment, do not treat the premise as settled and coast/u,
+    );
+  });
+
   it("turns PICKLES into one saved slow sip and a guaranteed peer comment", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
