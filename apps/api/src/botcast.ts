@@ -11748,6 +11748,12 @@ function validateBotcastAutoSpeakerUtterance(input: {
   hostClosingGuestName?: string;
   rejectPeerIdentityClaim?: boolean;
   requireFreshContact?: boolean;
+  /**
+   * A second name that satisfies fresh contact, used only by that clause.
+   * Deliberately separate from `speakerName`, which also drives peer-label
+   * stripping and speaker-identity-swap detection.
+   */
+  freshContactName?: string;
   rejectGibberishDraft?: boolean;
   groundedPriorHistory?: boolean;
   preserveProducerAttribution?: boolean;
@@ -11808,10 +11814,25 @@ function validateBotcastAutoSpeakerUtterance(input: {
                       input.hostClosingGuestName,
                     )))
               ? "host_closing"
+              // Fresh contact asks only whether the speaker introduced
+              // themself at all; the `false_name` clause above is the sole
+              // authority on which name is the wrong one. Reviewing 5a9f687a
+              // found the two clauses each encoding a name requirement, in
+              // opposite directions: a holder of both Short-Term Amnesia and
+              // a false name was prompted "never claim the Library name as
+              // yours" and then rejected here for not claiming it. Every Auto
+              // candidate burned on every host turn of that episode.
               : input.requireFreshContact &&
                   !botPowerResponseIsFirstIntroductionV1(
                     spokenContent,
                     input.speakerName,
+                  ) &&
+                  !(
+                    input.freshContactName !== undefined &&
+                    botPowerResponseIsFirstIntroductionV1(
+                      spokenContent,
+                      input.freshContactName,
+                    )
                   )
                 ? "fresh_contact"
                 : BOTCAST_NON_ANSWERING_DEFERRAL_PATTERNS.some((pattern) =>
@@ -14899,6 +14920,9 @@ export async function advanceBotcastEpisode(
                     : {}),
                   rejectPeerIdentityClaim: speakerEternallyIntroduces,
                   requireFreshContact: speakerEternallyIntroduces,
+                  ...(activeFalseNameState
+                    ? { freshContactName: activeFalseNameState.believedName }
+                    : {}),
                   rejectGibberishDraft: speakerMumblesSpeech,
                   groundedPriorHistory: Boolean(priorPairHistory),
                   preserveProducerAttribution: Boolean(
@@ -15019,6 +15043,9 @@ export async function advanceBotcastEpisode(
                   : {}),
                 rejectPeerIdentityClaim: speakerEternallyIntroduces,
                 requireFreshContact: speakerEternallyIntroduces,
+                ...(activeFalseNameState
+                  ? { freshContactName: activeFalseNameState.believedName }
+                  : {}),
                 rejectGibberishDraft: speakerMumblesSpeech,
                 groundedPriorHistory: Boolean(priorPairHistory),
                 preserveProducerAttribution: Boolean(
@@ -15161,6 +15188,9 @@ export async function advanceBotcastEpisode(
               hostClosing: hostClosingTurn,
               rejectPeerIdentityClaim: speakerEternallyIntroduces,
               requireFreshContact: speakerEternallyIntroduces,
+              ...(activeFalseNameState
+                ? { freshContactName: activeFalseNameState.believedName }
+                : {}),
               rejectGibberishDraft: speakerMumblesSpeech,
               groundedPriorHistory: Boolean(priorPairHistory),
               preserveProducerAttribution: Boolean(
@@ -15563,9 +15593,19 @@ export async function advanceBotcastEpisode(
   const eternalIntroductionAdjustedContent = speakerEternallyIntroduces
     ? applyBotPowerEternalIntroductionResponseV1(
         cleanGeneratedContent,
-        speaker.name,
+        // The runtime guarantee introduces the holder under the name they
+        // believe is theirs; a Library-label prefix would only be rewritten
+        // into the believed name a few steps later anyway. Recognition still
+        // accepts either, so a draft that already opened with the Library
+        // label does not collect a second introduction on top of it.
+        activeFalseNameState?.believedName ?? speaker.name,
         episode.messages.at(-1)?.content ?? "",
-        { hasPreviousOnAirTurn: speakerHasSpoken },
+        {
+          hasPreviousOnAirTurn: speakerHasSpoken,
+          ...(activeFalseNameState
+            ? { alsoRecognizesName: speaker.name }
+            : {}),
+        },
       )
     : cleanGeneratedContent;
   const freshContactRepairApplied =

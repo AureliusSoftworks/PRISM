@@ -2754,3 +2754,58 @@ test("credulity and anti-truth helpers normalize and describe soft contracts", (
     strength: "small",
   });
 });
+
+test("a false-name holder's own introduction counts as fresh contact", () => {
+  // Reviewing Signal episode 5a9f687a: the host held Short-Term Amnesia and a
+  // false name at once. The prompt told him "your name is Remy, not
+  // Scatterbrained Steven; never claim the Library name as yours", and then the
+  // fresh-contact clause rejected every draft that obeyed it. Recognition has
+  // to span both names, or the runtime prepends a second introduction to a
+  // line that already opened with one.
+  const library = "Scatterbrained Steven";
+  const believed = "Remy";
+  const introduced =
+    "This is Second First, and I am Remy; Friedrich Nietzsche is with me. Where would you begin rebuilding?";
+  assert.equal(
+    botPowerResponseIsFirstIntroductionV1(introduced, believed),
+    true,
+  );
+  assert.equal(
+    botPowerResponseIsFirstIntroductionV1(introduced, library),
+    false,
+  );
+  assert.equal(
+    applyBotPowerEternalIntroductionResponseV1(
+      introduced,
+      believed,
+      "Tell me about forgetting.",
+      { hasPreviousOnAirTurn: true, alsoRecognizesName: library },
+    ),
+    introduced,
+  );
+  // A draft that introduced itself under the Library label is left alone too:
+  // the false-name rewrite converts that name downstream, and a prefix here
+  // would leave the holder introducing himself twice under two names.
+  const libraryIntroduced =
+    "Hello, I am Scatterbrained Steven. What does forgetting cost you?";
+  assert.equal(
+    applyBotPowerEternalIntroductionResponseV1(
+      libraryIntroduced,
+      believed,
+      "Tell me about forgetting.",
+      { hasPreviousOnAirTurn: true, alsoRecognizesName: library },
+    ),
+    libraryIntroduced,
+  );
+  // A draft with no introduction at all still gets one, under the believed
+  // name rather than the label the holder must never claim.
+  assert.match(
+    applyBotPowerEternalIntroductionResponseV1(
+      "What does forgetting cost you?",
+      believed,
+      "Tell me about forgetting.",
+      { hasPreviousOnAirTurn: true, alsoRecognizesName: library },
+    ),
+    /^[^.]*\bRemy\b[^.]*\. What does forgetting cost you\?$/u,
+  );
+});

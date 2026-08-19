@@ -4133,13 +4133,27 @@ export function applyBotPowerEternalIntroductionResponseV1(
   value: unknown,
   botName?: unknown,
   currentInput?: unknown,
-  options?: { hasPreviousOnAirTurn?: boolean },
+  options?: {
+    hasPreviousOnAirTurn?: boolean;
+    /**
+     * A second name that still counts as having introduced oneself. A holder
+     * who also believes a false name is prompted under one name and rewritten
+     * into the other downstream, so recognising only `botName` would prepend a
+     * second introduction to a draft that already opened with one.
+     */
+    alsoRecognizesName?: unknown;
+  },
 ): string {
   const source = typeof value === "string" ? value.trim() : "";
   if (
     !source ||
     botPowerResponseIsSilentV1(source) ||
-    botPowerResponseIsFirstIntroductionV1(source, botName)
+    botPowerResponseIsFirstIntroductionV1(source, botName) ||
+    (options?.alsoRecognizesName !== undefined &&
+      botPowerResponseIsFirstIntroductionV1(
+        source,
+        options.alsoRecognizesName,
+      ))
   ) {
     return source;
   }
