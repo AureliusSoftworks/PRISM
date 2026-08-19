@@ -225,7 +225,27 @@ export function voicePerformanceTextFromActionCues(
     },
   );
   if (!foundActionCue) return null;
-  return performanceText.replace(/\s+/gu, " ").trim() || null;
+  return collapseRemovedCueWhitespace(performanceText) || null;
+}
+
+/**
+ * Collapse whitespace left behind when a cue is lifted out of a line, and close
+ * the gap in front of the punctuation that followed it.
+ *
+ * Every removed direction is substituted with a space, so a mid-sentence cue
+ * leaves the sentence's own punctuation stranded: review 70226da8 published
+ * "doesn't flicker like it's lying to your face ." to both the transcript and
+ * the voice line. Squeezing runs of whitespace never fixed that, because one
+ * space before a period is not a run.
+ *
+ * Only whitespace *before* punctuation is closed. An apostrophe is deliberately
+ * not treated as an opening mark — "fixin' to" must survive intact.
+ */
+export function collapseRemovedCueWhitespace(value: string): string {
+  return value
+    .replace(/\s+/gu, " ")
+    .replace(/\s+([,.;:!?…])/gu, "$1")
+    .trim();
 }
 
 /** @deprecated Use `voicePerformanceTextFromActionCues`. */

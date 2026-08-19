@@ -509,12 +509,16 @@ function overlapStartRatioForMessage(
   sourceMessageId: string,
 ): number | null {
   for (const event of manifest.events) {
-    if (
-      event.kind !== "perceptionOverlap" &&
-      event.kind !== "perception_overlap"
-    ) {
-      continue;
-    }
+    // Coffee files the overlap as its own event kind; Signal files it as a
+    // `power_effect` whose payload names the effect. Matching only on `kind`
+    // meant no Signal overlap ever reached this compiler — review 70226da8
+    // planned three and compiled all three as sequential primary speech.
+    const isOverlapEvent =
+      event.kind === "perceptionOverlap" ||
+      event.kind === "perception_overlap" ||
+      (event.kind === "power_effect" &&
+        event.payload.effect === "perception_overlap");
+    if (!isOverlapEvent) continue;
     if (event.payload.overlappingMessageId !== sourceMessageId) continue;
     const ratio = Number(event.payload.startRatio);
     if (Number.isFinite(ratio)) return Math.max(0.58, Math.min(0.72, ratio));
@@ -649,7 +653,16 @@ export function compileReplayTimelineV1(
       speakerId: utterance.speakerId,
       speakerName: participant?.name ?? utterance.speakerRole,
       text: utterance.text,
-      channel: overlapRatio !== null ? "crosstalk" : "primary",
+      // Label the channel from the timing that was actually compiled, not from
+      // the planned ratio. A faithful recording's captured timing wins over the
+      // ratio above, so a beat can carry an overlap plan and still play
+      // sequentially — calling that crosstalk would mis-describe the mix.
+      channel:
+        overlapRatio !== null &&
+        previousUtteranceBeat !== null &&
+        startMs < previousUtteranceBeat.endMs
+          ? "crosstalk"
+          : "primary",
     };
     beats.push(beat);
     previousUtteranceBeat = beat;

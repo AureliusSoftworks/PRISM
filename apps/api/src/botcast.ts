@@ -313,6 +313,7 @@ import {
   autoFallbackResolvedChain,
   normalizeAutoFallbackModelRef,
   normalizeAutoRouteDecisionV1,
+  collapseRemovedCueWhitespace,
   voicePerformanceTextFromActionCues,
   voiceSpokenText,
   planStageActionV1,
@@ -730,13 +731,25 @@ const SIGNAL_AUTO_VALIDATION_FAILURE_REASONS = new Set([
   "invalid_output",
 ]);
 
-/** True when every configured Auto candidate answered but failed content validation. */
+/** True when every reachable Auto candidate answered but failed content validation. */
 export function signalAutoFallbackExhaustionIsValidationOnly(
   error: AutoFallbackExhaustedError,
 ): boolean {
+  // The chain reserves a trailing local attempt as a last-resort safety net.
+  // With Ollama down that attempt fails `provider_error`, and an `every` over
+  // the raw list let one unreachable safety net relabel the whole exhaustion:
+  // review 70226da8 filed a closing beat as `provider_availability` when all
+  // eight online models had answered and failed the contract, pointing the
+  // next reader at the providers instead of at the clause that rejected them.
+  // Judge the verdict on the lane that was actually asked to produce the turn.
+  const onlineAttempts = error.attempts.filter(
+    (attempt) => attempt.provider !== "local",
+  );
+  const considered =
+    onlineAttempts.length > 0 ? onlineAttempts : error.attempts;
   return (
-    error.attempts.length > 0 &&
-    error.attempts.every((attempt) =>
+    considered.length > 0 &&
+    considered.every((attempt) =>
       SIGNAL_AUTO_VALIDATION_FAILURE_REASONS.has(attempt.reason ?? ""),
     )
   );
@@ -11000,6 +11013,16 @@ const BOTCAST_ESTABLISHED_RELATIONSHIP_HISTORY_PATTERNS = [
 ] as const;
 const BOTCAST_LEADING_STAGE_ACTION_PATTERN =
   /^((?:\s*\[[^\]\n]{1,48}\]\s*)*)\*(?:lean(?:s|ing)?|sit(?:s|ting)?|stand(?:s|ing)?|nod(?:s|ding)?|shak(?:es|ing)|tilt(?:s|ing)?|turn(?:s|ing)?|glanc(?:es|ing)|look(?:s|ing)?|smil(?:es|ing)|frown(?:s|ing)?|rais(?:es|ing)|lower(?:s|ing)?|fold(?:s|ing)?|tap(?:s|ping)?|adjust(?:s|ing)?|paus(?:es|ing)|shrug(?:s|ging)?|recoil(?:s|ing)?|winc(?:es|ing)|grin(?:s|ning)?|laugh(?:s|ing)?|sigh(?:s|ing)?|breath(?:es|ing)|twitch(?:es|ing)?)\b[^*\n]{0,160}\*\s*/iu;
+// A leading asterisk phrase at the head of a turn is stagecraft whatever verb
+// it opens with. The allowlist above cannot enumerate a cast's whole physical
+// vocabulary: review 70226da8 published "*perches on the desk lamp's rim*" into
+// the host's spoken line and transcript because "perch" was not one of its
+// twenty-five verbs, while that same episode's cast also produced "jabs",
+// "scratches" and "flickers". Requiring two or more words inside the asterisks
+// leaves single-word emphasis ("*That* is the point") untouched.
+const BOTCAST_LEADING_ASTERISK_STAGE_PHRASE_PATTERN =
+  /^((?:\s*\[[^\]\n]{1,48}\]\s*)*)\*(?![*\s])[^*\n]{0,160}?\s+[^*\n]{1,160}?\*\s*/u;
+
 // Parenthetical body-language directions like "(leaning back in his chair)"
 // are stagecraft, not speech — Signal schedules performance separately.
 const BOTCAST_PARENTHETICAL_STAGE_DIRECTION_PATTERN =
@@ -11015,12 +11038,13 @@ function extractBotcastVoicePerformance(
     BOTCAST_PARENTHETICAL_STAGE_DIRECTION_PATTERN,
     " ",
   );
-  const content = directionSafeValue
-    .replace(BOTCAST_BRACKETED_DIRECTION_PATTERN, " ")
-    .trimStart()
-    .replace(BOTCAST_LEADING_STAGE_ACTION_PATTERN, " ")
-    .replace(/\s+/gu, " ")
-    .trim();
+  const content = collapseRemovedCueWhitespace(
+    directionSafeValue
+      .replace(BOTCAST_BRACKETED_DIRECTION_PATTERN, " ")
+      .trimStart()
+      .replace(BOTCAST_LEADING_STAGE_ACTION_PATTERN, " ")
+      .replace(BOTCAST_LEADING_ASTERISK_STAGE_PHRASE_PATTERN, " "),
+  );
   const rawPerformanceText = enabled
     ? voicePerformanceTextFromActionCues(directionSafeValue)
     : null;
@@ -11628,11 +11652,19 @@ export function botcastHostClosingHasFormalThanks(
       "iu",
     ).test(spoken);
   });
+  // A host performs their pinned vernacular in the close like anywhere else,
+  // so the audience thanks must be matched in the register the persona speaks,
+  // not in standard orthography alone. Review 70226da8 lost an entire closing
+  // beat to this: Tiny Tina is a deep-Southern voice, every Auto candidate
+  // wrote "thank y'all for watchin'", and all eight were rejected in a row —
+  // the harder a model performed the accent, the more certainly it failed.
+  // Accept the dropped g and the vernacular pronoun, and let a natural
+  // intensifier sit between the thanks and "for".
   const thanksAudience =
-    /\bthank(?:s| you)?(?:\s+all)?\s+for\s+(?:joining\s+us|watching|listening|tuning\s+in)\b/iu.test(
+    /\bthank(?:s|\s+you|\s+y[’']?all|\s+ya)?(?:\s+(?:all|so\s+much|very\s+much|kindly|again))?\s+for\s+(?:join(?:ing|in[’'])\s+us|watch(?:ing|in[’'])|listen(?:ing|in[’'])|tun(?:ing|in[’'])\s+in)(?![\p{L}\p{N}])/iu.test(
       spoken,
     ) ||
-    /\bto\s+(?:everyone|those of you|the audience|our audience)\s+(?:watching|listening)[^.!?]{0,40}\bthank(?:s| you)?\b/iu.test(
+    /\bto\s+(?:everyone|those of you|the audience|our audience)\s+(?:watch(?:ing|in[’'])|listen(?:ing|in[’']))[^.!?]{0,40}\bthank(?:s| you)?\b/iu.test(
       spoken,
     );
   return thanksGuest && thanksAudience;
@@ -16407,7 +16439,12 @@ export async function advanceBotcastEpisode(
   const quietHearingEffect = botPowerIntermittentAudibilityEffectV1(
     speaker.powers,
   );
-  const hasQuietHearingRoll = Boolean(quietHearingEffect);
+  // A social silence carries no words, so there is nothing for a listener to
+  // fail to make out. Review 70226da8 rolled audibility on a "..." beat and
+  // logged a miss whose ask-to-repeat could never be performed — the roll was
+  // spent, and the fairness valve below then gave the next line away free.
+  const hasQuietHearingRoll =
+    Boolean(quietHearingEffect) && !botPowerResponseIsSilentV1(content);
   // Fairness valve: a miss instructs the listener to ask for a repeat, so the
   // repeat itself always lands. Without this, back-to-back fifty-fifty misses
   // can eat a whole exchange — and at the end of an episode, its payoff.
