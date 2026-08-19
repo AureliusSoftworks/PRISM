@@ -1,5 +1,41 @@
 # Handoff: Coffee Mode freeze — glyph rasterization
 
+## CORRECTION TO THE SECTION BELOW — read this first
+
+Two claims below are over-stated, and one urgent item is not in it at all.
+
+1. **"`raf` climbing is the leak" is wrong as written.** The measurement ran in
+   a Browser pane that never became `visible`. A hidden tab *schedules*
+   animation frames but never *executes* them, so pending frames pile up to
+   roughly the number of live components regardless of any defect. That growth
+   was an artifact. What survives is the **schedule rate** by stack, which is
+   visibility-independent and still damning.
+2. **The cost figures were never measured.** Profiling callback duration
+   returned empty — the callbacks never ran, being hidden. So the *defect* is
+   established by code reading plus schedule counts; the *FPS benefit of the
+   fix is unverified*. Someone with a visible window has to confirm it.
+3. **URGENT, possibly self-inflicted and already pushed.** During testing the
+   app repeatedly hit `Maximum update depth exceeded` inside `<HomeContent>`,
+   surfacing the "Prism needs a quick refresh" boundary once a Coffee table
+   went live. It was NOT attributed. The prime suspect is the freeze #2
+   prevention hunk in commit `102674a8` (**pushed to origin/dev**):
+   `releaseStalledHandoff` ([page.tsx:128688](apps/web/src/app/page.tsx)) flips
+   `cooldown → idle`, and if the turn scheduler immediately re-arms a cooldown
+   the two alternate — alternating values are exactly what defeats React's
+   same-value bail-out and produces this error. A first table ran four minutes
+   clean; later tables errored, which fits a re-queue path rather than a cold
+   start. **Reproduce with a visible window before anything else, and if it
+   confirms, revert that hunk first** — the recovery half of freeze #2 (the
+   wall-clock threshold, the tick, `coffeeTableStallShapeV1`) is independent
+   and can stay.
+
+Uncommitted in the working tree: a fix for the glyph defect below
+([PhosphorPixelGlyph.tsx](apps/web/src/app/PhosphorPixelGlyph.tsx)) that
+short-circuits the rasterizer when the SVG markup and host box are both
+unchanged. It typechecks and is deliberately **not** a MutationObserver — that
+version was written, tested, and reverted because setting `rasterUrl`
+re-renders `children` inside the observed subtree and feeds itself.
+
 ## THE CAUSE IS FOUND (measured 2026-08-18, live 5-bot table)
 
 Not the reveal path. Not the GPU. **`PhosphorPixelGlyph` re-rasterizes bot face
