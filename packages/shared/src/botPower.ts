@@ -1326,7 +1326,13 @@ function upgradeLegacyAvatarPresentationV1(
   if (describedScale === "microscopic") {
     upgraded = {
       ...upgraded,
-      selfCue: "You are microscopic and impossible to see. Your voice is faint; each bot listener has only a fifty-fifty chance to hear a line — on a miss they should ask you to repeat.",
+      // "they should ask you to repeat" is the listener's half of the Power.
+      // Read by the holder as their own instruction, it inverts: Signal review
+      // 12d3d47e has the microscopic host asking her guest to repeat, twice,
+      // while he heard her fine and answered by restating his previous line.
+      // This cue overrides whatever the compiler produced, so it is the one
+      // that has to name who does the asking.
+      selfCue: "You are microscopic and impossible to see. Your voice is faint; each bot listener has only a fifty-fifty chance to hear a line, and the listener who misses you is the one who asks for a repeat.",
       observerCue: "The Power holder is microscopic and unseen. Their faint words may be inaudible; peers may need to ask them to repeat.",
       effects: ([
         ...upgraded.effects.filter((effect) =>
@@ -2146,6 +2152,31 @@ export function botPowerInaudibleMissCueV1(missEvent: unknown): string {
   return "*[Their voice is too faint to make out.]*";
 }
 
+/**
+ * Directional guard for a holder whose own voice is intermittently inaudible.
+ *
+ * Such a Power cannot describe itself without describing what listeners do on
+ * a miss, and a weaker model reading that clause in its own prompt performs
+ * the listener's half instead: Signal review 12d3d47e has the microscopic
+ * host asking her guest to repeat himself, twice, while the guest heard her
+ * perfectly and answered by restating his previous line almost verbatim. The
+ * miss runs one way, so say so where the holder reads it.
+ */
+export function botPowerIntermittentAudibilityHolderRuleFromEffectsV1(
+  value: unknown,
+): string | null {
+  if (!botPowerIntermittentAudibilityEffectFromEffectsV1(value)) return null;
+  return "Audibility direction: this runs one way. Listeners may miss your line; your own hearing is normal and you always receive theirs in full. Never ask anyone to repeat themselves, never say you misheard or could not make out what they said, and never perform the miss yourself — only they can.";
+}
+
+export function botPowerIntermittentAudibilityHolderRuleV1(
+  value: unknown,
+): string | null {
+  return botPowerIntermittentAudibilityHolderRuleFromEffectsV1(
+    activeBotPowerEffectsV1(value),
+  );
+}
+
 /** True when this holder experiences every other bot as if it had no Power. */
 export function botPowerIgnoresOtherPowersFromEffectsV1(value: unknown): boolean {
   return botPowerPiercesDeliveryFiltersFromEffectsV1(value);
@@ -2663,21 +2694,32 @@ export function botPowerIntermittentAudibilityEffectFromEffectsV1(
 ): Extract<BotPowerEffectV1, { type: "intermittent_audibility" }> | null {
   if (!Array.isArray(value)) return null;
   const sizeMode = botPowerAvatarScaleModeFromEffectsV1(value);
-  if (sizeMode === "microscopic") {
-    return {
-      type: "intermittent_audibility",
-      chance: "half",
-      listeners: "bots",
-      missEvent: "too_faint_to_make_out",
-    };
-  }
+  // Loud bots are never intermittently inaudible, whatever else they carry.
   if (sizeMode === "colossal") return null;
-  return value
+  const declared = value
     .map(normalizeBotPowerEffectV1)
     .find(
       (effect): effect is Extract<BotPowerEffectV1, { type: "intermittent_audibility" }> =>
         effect?.type === "intermittent_audibility",
     ) ?? null;
+  // A declared effect outranks the size-mode default. The microscopic branch
+  // used to short-circuit ahead of this lookup and hand back a synthesized
+  // effect, so every microscopic holder reported `too_faint_to_make_out` even
+  // when their compiled Power declared `inaudible_ask_repeat` — which is how
+  // review 12d3d47e's host had the ask-to-repeat half of her Power silently
+  // dropped while her own cue told her the miss existed.
+  if (declared) return declared;
+  // Legacy microscopic snapshots predate the compound effect list. Synthesize
+  // the same effect the compiler emits for that size today.
+  if (sizeMode === "microscopic") {
+    return {
+      type: "intermittent_audibility",
+      chance: "half",
+      listeners: "bots",
+      missEvent: "inaudible_ask_repeat",
+    };
+  }
+  return null;
 }
 
 export function botPowerIntermittentAudibilityEffectV1(
@@ -3399,6 +3441,61 @@ const BOT_POWER_ADDRESSED_INSULT_METAPHOR_RE =
 const BOT_POWER_PERSONAL_ATTACK_STRUCTURE_RE =
   /\b(?:you(?:'re| are| sound| look| remain| keep| couldn't| cannot| can't)|your\s+(?:brain|mind|ego|judgment|competence|credibility|intellect|reasoning|thinking|argument|performance|personality)|what kind of\s+(?:idiot|moron|fool)|the\s+(?:idiot|moron|fool|clown|fraud|hack)\s+(?:talking|speaking|asking|arguing))\b/iu;
 
+/**
+ * Finite verbs and auxiliaries that turn "you …" into an ordinary clause
+ * ("so you painted an angle", "you know?") rather than a vocative address.
+ */
+const BOT_POWER_VOCATIVE_STOP_WORDS_V1 =
+  "know|see|think|thought|said|say|says|mean|meant|might|must|should|could|would|will|shall|have|has|had|are|were|was|is|am|want|wanted|need|needed|call|called|get|got|make|made|do|did|does|don|can|cannot|ain|aren|weren|didn|couldn|wouldn|shouldn|haven|hadn|won|re|ve|ll|d|s";
+
+/**
+ * A tailored jab is usually a vocative noun phrase, not a listed slur: "you
+ * peacock in a lab coat", "you magnificent self-portrait with legs". Without
+ * this shape the fixed insult vocabulary misses nearly every composed insult
+ * and the deterministic tail fires on a line that already carried one.
+ */
+const BOT_POWER_ADDRESSED_INSULT_VOCATIVE_RE = new RegExp(
+  `(?:^|[,;:—–-]\\s*)you\\s+(?!(?:${BOT_POWER_VOCATIVE_STOP_WORDS_V1})\\b)[\\p{L}'’-]+(?:\\s+[\\p{L}'’-]+){1,6}\\s*(?=[.!?,;:—–]|$)`,
+  "iu",
+);
+
+/**
+ * Word-boundary source for a name that may contain letters outside ASCII.
+ * `\b` is defined against `[A-Za-z0-9_]`, so `\bDalí\b` can never match: the
+ * closing boundary needs a word character before it and "í" is not one.
+ * Unicode lookarounds keep "Dalí," and "Dalí’s" matching while still refusing
+ * to fire inside a longer word.
+ */
+export function botNameBoundaryPatternV1(name: unknown): string {
+  const trimmed = typeof name === "string" ? name.trim() : "";
+  if (!trimmed) return "";
+  const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  return `(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`;
+}
+
+/**
+ * How a speaker may naturally address someone: the full name, plus the
+ * distinctive final word of a multi-word name. Never the leading word, so a
+ * descriptor like "Bigoted" in "Bigoted Benny" cannot stand in for the name.
+ */
+export function botAddressFormsV1(name: unknown): string[] {
+  const trimmed = typeof name === "string" ? name.trim() : "";
+  if (!trimmed) return [];
+  const words = trimmed.split(/\s+/u);
+  const shortAddress = words.length > 1 ? (words.at(-1) ?? "") : "";
+  return shortAddress.length >= 3 ? [trimmed, shortAddress] : [trimmed];
+}
+
+/** True when the text addresses this bot by any natural address form. */
+export function botTextNamesBotV1(content: unknown, name: unknown): boolean {
+  const source = typeof content === "string" ? content : "";
+  if (!source) return false;
+  return botAddressFormsV1(name).some((form) => {
+    const pattern = botNameBoundaryPatternV1(form);
+    return pattern.length > 0 && new RegExp(pattern, "iu").test(source);
+  });
+}
+
 /** True when a ready Power requires a personal jab in every ordinary spoken reply. */
 export function botPowerRequiresAddressedInsultV1(value: unknown): boolean {
   return botPowerRequiresAddressedInsultFromEffectsV1(
@@ -3446,11 +3543,14 @@ export function botPowerResponseHasAddressedInsultV1(
   const namesTarget =
     target.length > 0 &&
     target.toLocaleLowerCase() !== "you" &&
-    source.toLocaleLowerCase().includes(target.toLocaleLowerCase());
+    botTextNamesBotV1(source, target);
   return (
-    (BOT_POWER_ADDRESSED_INSULT_RE.test(source) ||
+    // A composed vocative jab stands on its own: it needs neither a listed
+    // insult word nor the addressee's name to be an addressed insult.
+    BOT_POWER_ADDRESSED_INSULT_VOCATIVE_RE.test(source) ||
+    ((BOT_POWER_ADDRESSED_INSULT_RE.test(source) ||
       BOT_POWER_ADDRESSED_INSULT_METAPHOR_RE.test(source)) &&
-    (namesTarget || BOT_POWER_PERSONAL_ATTACK_STRUCTURE_RE.test(source))
+      (namesTarget || BOT_POWER_PERSONAL_ATTACK_STRUCTURE_RE.test(source)))
   );
 }
 
@@ -4698,7 +4798,16 @@ export function botPowerSelfCueLinesV1(value: unknown): string[] {
     const fallback =
       power.compiled?.ruleLabels.find((label) => label.trim()) ||
       power.intent.trim();
-    const instruction = cue || fallback;
+    // Runtime upgrade for every stored intermittent-audibility snapshot. Their
+    // cues describe the listener's half of the Power inside the holder's own
+    // prompt, which weaker models act out; the guard is appended here so no
+    // database migration or recompile is needed to correct existing bots.
+    const audibilityRule = botPowerIntermittentAudibilityHolderRuleFromEffectsV1(
+      power.compiled?.effects ?? [],
+    );
+    const instruction = [cue || fallback, audibilityRule]
+      .filter((part): part is string => Boolean(part))
+      .join(" ");
     return instruction ? [`${power.name || "Power"}: ${instruction}`] : [];
   });
 }

@@ -1606,7 +1606,11 @@ function deterministicAvatarScalePower(
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
     selfCue: mode === "microscopic"
-      ? "You are microscopic and impossible to see. Your faint voice reaches exempt listeners; each other bot has a fifty-fifty chance to miss you and should ask you to repeat."
+      // "should ask you to repeat" is the listener's half. Stated this way in
+      // the holder's own prompt it reads as an instruction to them, and review
+      // 12d3d47e had the host acting it out against her guest. Keep the miss
+      // pointed at the listener; the shared holder rule reinforces it.
+      ? "You are microscopic and impossible to see. Your faint voice reaches exempt listeners; each other bot has a fifty-fifty chance to miss you entirely, and the one who misses you is the one who asks for a repeat."
       : mode === "colossal"
         ? "You are colossal and too large to fit within the stage. Your booming voice may mildly annoy one audible bot peer."
         : `Your physical form is ${mode}, with the canonical ${label.toLowerCase()} presentation.`,
