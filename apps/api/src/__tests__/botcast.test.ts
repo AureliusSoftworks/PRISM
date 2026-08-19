@@ -2149,7 +2149,19 @@ describe("Botcast persistence and isolation", () => {
 
       const performance = advanced.message?.mutePerformance;
       assert.ok(performance);
-      assert.ok(performance.durationMs >= 12_000);
+      // The duration is seeded from the random episode id and lands within a
+      // couple of seconds either side of 12s, so a >= 12_000 threshold failed
+      // whenever the seed rolled low. Assert the floor the implementation
+      // actually guarantees a reaction beat above, then pin the invariant that
+      // matters: the audience-visible second count describes this performance.
+      assert.ok(performance.durationMs >= 6_000, String(performance.durationMs));
+      assert.match(
+        advanced.message?.content ?? "",
+        new RegExp(
+          `\\*${Math.ceil(performance.durationMs / 1_000)} seconds pass without an audible word\\.\\*$`,
+          "u",
+        ),
+      );
       assert.ok(performance.reactionBeats.length >= 1);
 
       const reactionEvents = advanced.episode.events.filter(
@@ -8970,9 +8982,22 @@ describe("Botcast persistence and isolation", () => {
 
       assert.equal(closing.episode.status, "completed");
       assert.equal(closing.episode.segment, "closing");
-      assert.equal(
+      // Both halves vary: the Eternal Introduction picks one of four greetings,
+      // and the closing is hashed from the random episode id. Assert each half
+      // precisely instead of pinning one of the sixteen combinations.
+      assert.match(
+        closing.message?.content ?? "",
+        /^(?:Hello—I'm Mara Vale\.|Pleased to meet you—I'm Mara Vale\.|I'm Mara Vale; I don't believe we've met\.|Forgive me, I should introduce myself: I'm Mara Vale\.) /u,
+      );
+      assert.ok(
+        closing.message?.content.endsWith(
+          botcastDeterministicHostClosingV1({
+            episodeId: episode.id,
+            guestName: "Ivo Stone",
+            audienceOnly: false,
+          }),
+        ),
         closing.message?.content,
-        "Pleased to meet you—I'm Mara Vale. That is where we will leave it. Ivo Stone, thank you for joining me, and thank you for watching.",
       );
       assert.doesNotMatch(closing.message?.content ?? "", /\?/u);
       const closingUtterance = closing.episode.events.findLast(
@@ -16639,7 +16664,9 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(closing.message?.speakerRole, "host");
       assert.match(closing.message?.content ?? "", /Forgetful Forrest/u);
       assert.match(closing.message?.content ?? "", /Jared, thank you for joining me/iu);
-      assert.match(closing.message?.content ?? "", /thank you for watching/iu);
+      // Two of the four hashed closing variants read "thank you all for
+      // watching"; matching only the bare form failed on those runs.
+      assert.match(closing.message?.content ?? "", /thank you (?:all )?for watching/iu);
       assert.doesNotMatch(closing.message?.content ?? "", /\?/u);
       assert.equal(closing.episode.messages.length, 5);
       assert.deepEqual(attempts.slice(0, 5), [
@@ -17394,9 +17421,17 @@ describe("Botcast persistence and isolation", () => {
       );
 
       assert.equal(cut.message?.speakerRole, "host");
+      // The deterministic closing is hashed from the episode id, so pinning one
+      // of its four variants makes this test depend on the random id. Its
+      // variety and thanks contract are pinned separately; here the point is
+      // only that the emergency path used that closing for this guest.
       assert.equal(
         cut.message?.content,
-        "That is where we will leave it. Ivo Stone, thank you for joining me, and thank you for watching.",
+        botcastDeterministicHostClosingV1({
+          episodeId: episode.id,
+          guestName: "Ivo Stone",
+          audienceOnly: false,
+        }),
       );
       assert.equal(cut.episode.status, "completed");
       assert.equal(cut.episode.messages.at(-1)?.speakerRole, "host");
@@ -17451,9 +17486,16 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(cut.episode.messages.length, 2);
       assert.equal(cut.message?.speakerRole, "host");
       assert.notEqual(cut.message?.id, opening.message?.id);
-      assert.doesNotMatch(
-        cut.message?.content ?? "",
-        /That is where we will leave it/iu,
+      // Checking one of the four hashed variants let a regression to the
+      // ordinary closing pass three times out of four. Compare against the
+      // closing this episode id would actually have produced.
+      assert.notEqual(
+        cut.message?.content,
+        botcastDeterministicHostClosingV1({
+          episodeId: episode.id,
+          guestName: "Ivo Stone",
+          audienceOnly: false,
+        }),
       );
       const emergencyUtterance = cut.episode.events.findLast(
         (event) =>
@@ -19097,9 +19139,16 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.equal(closed.episode.status, "completed");
       assert.equal(closed.episode.segment, "closing");
+      // Derived, not pinned: the closing variant is hashed from the random
+      // episode id. What this test owns is that the incomplete sign-off was
+      // repaired into that deterministic closing.
       assert.equal(
         closed.message?.content,
-        "That is where we will leave it. Ivo Stone, thank you for joining me, and thank you for watching.",
+        botcastDeterministicHostClosingV1({
+          episodeId: created.id,
+          guestName: "Ivo Stone",
+          audienceOnly: false,
+        }),
       );
       assert.equal(
         closed.episode.events.findLast(
