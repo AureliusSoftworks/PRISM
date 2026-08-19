@@ -738,6 +738,7 @@ import {
   filterBotsByLibraryGroup,
   filterBotsByLibrarySearch,
   filterUngroupedBotsByLibraryGroups,
+  botLibraryGroupListsMatch,
   pruneBotLibraryGroupsForExistingBots,
   pruneBotLibraryGroupsWithFewBots,
   upsertBotLibraryGroup,
@@ -60964,11 +60965,21 @@ function HomeContent(): React.JSX.Element {
     if (!botLibraryGroupsCanPruneRef.current) return;
     if (!user || botLibraryGroupsHydratedUserId !== user.id) return;
     const existingBotIds = new Set(bots.map((bot) => bot.id));
-    setBotLibraryGroups((current) =>
-      normalizeBotLibraryGroups(
-        pruneBotLibraryGroupsForExistingBots(current, existingBotIds),
-      ),
-    );
+    setBotLibraryGroups((current) => {
+      // Bail out before normalizing. `prune` hands back each untouched group by
+      // reference but always allocates a new outer array, and `normalize`
+      // rebuilds every object — so returning that unconditionally gave React a
+      // value that was never `Object.is` equal to the last one, and this effect
+      // re-rendered the whole app surface forever. A fresh load of Coffee sat
+      // at 4 FPS, `HomeContent` committing ~7×/s, `busy` ~2000ms/s, on an idle
+      // screen. Nothing to prune must mean nothing to commit.
+      const pruned = pruneBotLibraryGroupsForExistingBots(
+        current,
+        existingBotIds,
+      );
+      if (botLibraryGroupListsMatch(current, pruned)) return current;
+      return normalizeBotLibraryGroups(pruned);
+    });
   }, [bots, botLibraryGroupsHydratedUserId, user]);
 
   useEffect(() => {

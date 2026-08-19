@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   addBotToLibraryGroup,
+  botLibraryGroupListsMatch,
   filterBotsByLibrarySearch,
   filterUngroupedBotsByLibraryGroups,
   filterBotsByLibraryGroup,
@@ -258,5 +259,31 @@ describe("bot library group filtering", () => {
     assert.deepEqual(mergedGroups[0]?.botIds, ["tesla", "curie"]);
     assert.equal(mergedGroups[0]?.marketplaceThemeId, "science-invention");
     assert.equal(mergedGroups[0]?.updatedAt, "2026-07-04T02:00:00.000Z");
+  });
+});
+
+describe("bot library group maintenance bail-out", () => {
+  it("reports a match when every group came back by reference", () => {
+    // `pruneBotLibraryGroupsForExistingBots` returns each untouched group by
+    // reference but always allocates a new outer array. Comparing element-wise
+    // is what lets the maintenance effect return the previous state unchanged.
+    const favorites = { id: "builtin:favorites", botIds: ["bot-a"] };
+    const duo = { id: "group:duo", botIds: ["bot-b"] };
+    assert.equal(botLibraryGroupListsMatch([favorites, duo], [favorites, duo]), true);
+    assert.equal(botLibraryGroupListsMatch([favorites], [favorites]), true);
+    assert.equal(botLibraryGroupListsMatch([], []), true);
+  });
+
+  it("reports a difference when a group was rebuilt or dropped", () => {
+    const favorites = { id: "builtin:favorites", botIds: ["bot-a"] };
+    const rebuilt = { ...favorites };
+    assert.equal(botLibraryGroupListsMatch([favorites], [rebuilt]), false);
+    assert.equal(botLibraryGroupListsMatch([favorites], []), false);
+    assert.equal(botLibraryGroupListsMatch([], [favorites]), false);
+  });
+
+  it("treats the same array as a match without walking it", () => {
+    const groups = [{ id: "builtin:favorites", botIds: [] }];
+    assert.equal(botLibraryGroupListsMatch(groups, groups), true);
   });
 });
