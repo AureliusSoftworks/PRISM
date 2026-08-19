@@ -17481,9 +17481,17 @@ export async function createCoffeeConversation(
     socialByBotId: relationshipSeededSocialByBotId,
   });
   const rawSessionSettings = normalizeCoffeeSessionSettings(input.coffeeSettings);
+  // Join and Serve carry opposite duration invariants — Join is always
+  // open-ended, Serve is always timed — so an unresolved mode is recoverable
+  // from the duration rather than being left unset. Leaving it unset persisted
+  // a session that was timed like Serve but read as Join everywhere
+  // downstream, which is how a table ran hospitality with no coffee pot on it.
   const experienceMode = isCoffeeExperienceMode(input.experienceMode)
     ? input.experienceMode
-    : rawSessionSettings.experienceMode;
+    : (rawSessionSettings.experienceMode ??
+      (input.durationMinutes === undefined || input.durationMinutes === null
+        ? "join"
+        : "serve"));
   const reusableSessionSettings = coffeeReusableSessionSettings(rawSessionSettings);
   // Custom service is retired. Keep the legacy schema readable, but do not
   // activate it for new or restarted Coffee sessions.

@@ -137132,11 +137132,16 @@ function HomeContent(): React.JSX.Element {
     };
     const coffeeLiveExperienceModeRaw =
       coffeeConversation?.coffeeSettings?.experienceMode;
+    // Sessions created before the mode was resolved at creation have none
+    // stored. Assuming Join hid the pot from tables that were plainly Serve —
+    // Join is always open-ended, so a timed session cannot be one.
     const coffeeLiveExperienceMode = isCoffeeExperienceMode(
       coffeeLiveExperienceModeRaw,
     )
       ? coffeeLiveExperienceModeRaw
-      : "join";
+      : typeof coffeeConversation?.coffeeSessionDurationMinutes === "number"
+        ? "serve"
+        : "join";
     const coffeeExperienceAllowsPot = coffeeLiveExperienceMode === "serve";
     const coffeePotVisible =
       conversationActive &&
