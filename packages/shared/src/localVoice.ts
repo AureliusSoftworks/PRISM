@@ -8,7 +8,7 @@ import {
   type LocalVoiceSpeechprintInfluence,
   type LocalVoiceSpeechprintStrength,
   type LocalVoiceEnginePreference,
-} from "./audioVoice.js";
+} from "./audioVoice.ts";
 
 export type ResolvedLocalVoiceEngine = "voice-plus" | "instant";
 
