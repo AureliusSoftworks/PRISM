@@ -362,6 +362,32 @@ it("requires the final Signal beat to thank both guest and audience", () => {
     ),
     false,
   );
+  // A guest name ending outside ASCII must still match. `\bDalí\b` cannot
+  // match anything — the closing word boundary needs a word character before
+  // it and "í" is not one — so this check silently rejected all nine models
+  // in the episode "The Argument for Surreal Precision" and forced the
+  // deterministic close.
+  assert.equal(
+    botcastHostClosingHasFormalThanks(
+      "That is where we will leave it. Salvador Dalí, thank you for joining me, and thank you for watching.",
+      "Salvador Dalí",
+    ),
+    true,
+  );
+  assert.equal(
+    botcastHostClosingHasFormalThanks(
+      "Dalí, thank you for the hour. And thank you all for watching.",
+      "Salvador Dalí",
+    ),
+    true,
+  );
+  assert.equal(
+    botcastHostClosingHasFormalThanks(
+      "Björk, thank you for coming in, and thank you for tuning in.",
+      "Björk",
+    ),
+    true,
+  );
   // The established short address counts: after twenty turns of "Benny", a
   // close thanking "Benny" must not be rejected for omitting the full name —
   // that rejection cascaded through every model and forced the deterministic
@@ -7463,6 +7489,113 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("strips the speaker's own label from behind a leading stage action", async () => {
+    // Signal review 12d3d47e aired "Tiny Tina: Well, now, Randy, ...". Signal
+    // sanitizes with allowLeadingStageAction so the physical beat survives for
+    // resolveFinalStageActionV1, which pushed the label off the `^` anchor
+    // every label pattern uses. The online validator strips the action first,
+    // so it saw a clean line and recorded no repair.
+    const db = fixture();
+    const provider = recordingProvider(
+      [
+        "A quick opening.",
+        "The design failed because I trusted the wrong constraint.",
+        "*leans in closer* Mara Vale: What consequence matters most, and who has to live with it?",
+      ],
+      [],
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Who pays for a failed design",
+      });
+      for (let turn = 0; turn < 2; turn += 1) {
+        await advanceBotcastEpisode(
+          db,
+          "user-1",
+          episode.id,
+          {},
+          generation(provider),
+        );
+      }
+      const hostTurn = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+
+      assert.equal(hostTurn.message?.speakerRole, "host");
+      assert.doesNotMatch(hostTurn.message?.content ?? "", /Mara Vale\s*:/iu);
+      assert.match(
+        hostTurn.message?.content ?? "",
+        /What consequence matters most/u,
+      );
+      assert.equal(
+        hostTurn.episode.events.findLast(
+          (event) => event.kind === "utterance",
+        )?.payload.utteranceRepair,
+        undefined,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("still rejects a peer label hiding behind a leading stage action", async () => {
+    // Paired rejection for the case above: moving the label search past the
+    // stage action must not turn peer_label into a silent strip.
+    const db = fixture();
+    const provider = recordingProvider(
+      [
+        "A quick opening.",
+        "The design failed because I trusted the wrong constraint.",
+        "*leans in closer* Ivo Stone: The constraint was fine and I have decided the cost was worth paying.",
+      ],
+      [],
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Who pays for a failed design",
+      });
+      for (let turn = 0; turn < 2; turn += 1) {
+        await advanceBotcastEpisode(
+          db,
+          "user-1",
+          episode.id,
+          {},
+          generation(provider),
+        );
+      }
+      const hostTurn = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+
+      assert.equal(hostTurn.message?.speakerRole, "host");
+      assert.doesNotMatch(hostTurn.message?.content ?? "", /Ivo Stone\s*:/iu);
+      assert.doesNotMatch(
+        hostTurn.message?.content ?? "",
+        /the cost was worth paying/iu,
+      );
+      const repairEvent = hostTurn.episode.events.find(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.messageId === hostTurn.message?.id,
+      );
+      assert.equal(repairEvent?.payload.utteranceRepair?.reason, "peer_label");
+    } finally {
+      db.close();
+    }
+  });
+
   it("replaces labeled Action / Spoken Line screenplay with a host follow-up", async () => {
     const db = fixture();
     const provider = recordingProvider(
@@ -10040,6 +10173,63 @@ describe("Botcast persistence and isolation", () => {
         guestName,
         audienceOnly: false,
       }),
+    );
+  });
+
+  it("drops a redirect continuation that re-reads the audience-heard prefix", () => {
+    const source = readFileSync(
+      new URL("../botcast.ts", import.meta.url),
+      "utf8",
+    );
+    // Review 12d3d47e: the prompt anchor from 28276dcc was present and the
+    // host still opened the continuation with "Well, now, ain't that a twist?"
+    // — the exact prefix the audience had just heard. A prompt anchor is a
+    // request; the bridge helper already strips this class of re-read
+    // deterministically, so the redirect prefix goes through it too.
+    assert.match(source, /function removeRepeatedBotcastAudienceHeardPrefix\(/u);
+    const call = source.slice(
+      source.indexOf("const sanitizedGeneratedUtterance ="),
+    );
+    assert.match(
+      call.slice(0, 600),
+      /cueDelivery === "redirect_host" \? hostRedirect\?\.spokenContent/u,
+    );
+  });
+
+  it("reports and delivers the miss the audibility Power declares", () => {
+    const source = readFileSync(
+      new URL("../botcast.ts", import.meta.url),
+      "utf8",
+    );
+    // Review 12d3d47e: Tiny Tina's Power declares `inaudible_ask_repeat`, but
+    // Signal hardcoded both the listener's transcript marker and the recorded
+    // missEvent to the passive kind. The listener was never told to ask, and
+    // the review record could not show the divergence.
+    assert.doesNotMatch(source, /"\[Their voice was too faint to make out\.\]"/u);
+    assert.match(
+      source,
+      /botPowerInaudibleMissCueV1\(\s*botPowerIntermittentAudibilityEffectV1\(peer\.powers\)\?\.missEvent,/u,
+    );
+    assert.match(
+      source,
+      /quietHearingEffect\?\.missEvent \?\? "too_faint_to_make_out"/u,
+    );
+  });
+
+  it("retries a re-aired line before spending the turn on the fallback", () => {
+    const source = readFileSync(
+      new URL("../botcast.ts", import.meta.url),
+      "utf8",
+    );
+    // Review 12d3d47e turn 11: the host's repeat was caught only at the final
+    // sanitize, which swaps in the canned follow-up and takes the turn away.
+    // The same contract belongs in the generation validator, with a retry
+    // instruction naming the lines that are already on air.
+    assert.match(source, /\? "repeated"\s*\n\s*: null;/u);
+    assert.match(source, /recentSpeakerContents\?: readonly string\[\];/u);
+    assert.match(
+      source,
+      /You already said the following on this broadcast/u,
     );
   });
 

@@ -1286,6 +1286,55 @@ describe("coffee cup sprites", () => {
     assert.ok(gated <= rawProgress);
   });
 
+  it("holds the level clock through a window no sip can render in", () => {
+    // Signal review 12d3d47e: "Randy's coffee drained without him drinking
+    // it." The sip sprite honours ambientSipAllowed and the level gate did
+    // not, so the level tracked live through windows the viewer saw no sip in.
+    const seed = "signal:episode-1:bot-randy:guest";
+    const durationMinutes = 10;
+    const sessionStartedAtMs = 0;
+    const sessionEndsAtMs = durationMinutes * 60 * 1000;
+    let sipWindowMs: number | null = null;
+    for (let nowMs = 1_000; nowMs <= 180_000; nowMs += 100) {
+      if (coffeeCupSippingActive({ seed, nowMs, progress: 0.5 })) {
+        sipWindowMs = nowMs;
+        break;
+      }
+    }
+    assert.notEqual(sipWindowMs, null);
+
+    const gateArgs = {
+      seed,
+      nowMs: sipWindowMs!,
+      progress: 1 - (sessionEndsAtMs - sipWindowMs!) / sessionEndsAtMs,
+      sessionStartedAtMs,
+      sessionEndsAtMs,
+      durationMinutes,
+    };
+    const allowed = coffeeCupSipGatedTimedProgress({
+      ...gateArgs,
+      ambientSipAllowed: true,
+    });
+    const suppressed = coffeeCupSipGatedTimedProgress({
+      ...gateArgs,
+      ambientSipAllowed: false,
+    });
+
+    assert.ok(
+      suppressed < allowed,
+      `suppressed ${suppressed} should trail allowed ${allowed}`,
+    );
+    assert.equal(
+      coffeeCupSippingActive({
+        seed,
+        nowMs: sipWindowMs!,
+        progress: 0.5,
+        ambientSipAllowed: false,
+      }),
+      false,
+    );
+  });
+
   it("makes cold coffee less likely to show ambient sip art", () => {
     assert.ok(
       coffeeCupSipLikelihoodForProgress(0.92) <

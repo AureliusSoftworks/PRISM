@@ -10225,9 +10225,13 @@ export function BotcastExperience({
           args.currentEpisode.durationMinutes ??
           DEFAULT_COFFEE_SESSION_DURATION_MINUTES,
         powerRateMultiplier,
-        ambientSipAllowed:
-          !producerGuestRole &&
-          roleIsSpeaking(role === "host" ? "guest" : "host"),
+        // The level clock steps whether or not a sip renders, so a window this
+        // role could never sip in is a silent drain. Signal only opened the
+        // window while the *other* chair was actively speaking, which shuts it
+        // for every warmup hold, generation gap, and silence beat — review
+        // 12d3d47e spent 01:05 of warmup hold alone. Match Coffee: a sip is
+        // allowed unless this role is the one speaking or thinking.
+        ambientSipAllowed: !producerGuestRole && !roleIsSpeaking(role),
         speaking: roleIsSpeaking(role),
         thinking: roleIsThinking(role),
         ...(role === "guest" && manualProducerGuestSip

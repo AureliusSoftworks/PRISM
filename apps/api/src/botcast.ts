@@ -197,6 +197,8 @@ import {
   normalizeBotPowerMutePerformanceV1,
   anthropicModelSupportsReasoningEffort,
   activeBotPowersV1,
+  botAddressFormsV1,
+  botNameBoundaryPatternV1,
   botPowerAddressedFandomCueV1,
   botPowerAddressedInsultPrimaryCueV1,
   botPowerChromaticBiasCueV1,
@@ -210,6 +212,7 @@ import {
   botPowerEternallyIntroducesV1,
   botPowerIntermittentMuteTurnIsIgnoredV1,
   botPowerIntermittentAudibilityEffectV1,
+  botPowerInaudibleMissCueV1,
   botPowerIgnoresOtherPowersV1,
   botPowerIneptitudeFinalRoleCueV1,
   botPowerIneptitudeRoleCueV1,
@@ -387,7 +390,7 @@ const BOTCAST_DASHBOARD_BLURB_MIN = 12;
 const BOTCAST_DASHBOARD_BLURB_MAX_LENGTH = 140;
 const BOTCAST_SPEAKER_MAX_TOKENS = 160;
 const BOTCAST_CONVERSATIONAL_MAX_TOKENS = 112;
-const BOTCAST_OPENAI_REASONING_MIN_COMPLETION_TOKENS = 384;
+const BOTCAST_REASONING_MIN_COMPLETION_TOKENS = 384;
 const BOTCAST_REASONING_BOOKING_COMPLETION_TOKENS = 768;
 const BOTCAST_SHOW_IDENTITY_COMPLETION_TOKENS = 2_400;
 const BOTCAST_SHOW_HOST_CHAT_HISTORY_LIMIT = 3;
@@ -485,6 +488,8 @@ export interface SignalOnlineTurnAttemptV1 {
     | "empty"
     | "refusal"
     | "invalid_output";
+  /** Slug naming the validation clause that rejected the draft. */
+  clause?: string;
   httpStatus?: number;
 }
 
@@ -572,7 +577,11 @@ export async function runSignalOnlineTurn(args: {
     candidate: string,
   ) =>
     | { ok: true; value: string }
-    | { ok: false; reason: "empty" | "refusal" | "invalid_output" };
+    | {
+        ok: false;
+        reason: "empty" | "refusal" | "invalid_output";
+        clause?: string;
+      };
   validationRetryInstruction?: string;
   attemptTimeoutMs?: number;
   totalTimeoutMs?: number;
@@ -644,6 +653,7 @@ export async function runSignalOnlineTurn(args: {
           durationMs: Math.max(0, Math.round(now() - attemptStartedAt)),
           outcome: "rejected",
           reason: validation.reason,
+          ...(validation.clause ? { clause: validation.clause } : {}),
         });
         if (attempt + 1 >= maxAttempts) {
           return {
@@ -10636,7 +10646,13 @@ export function buildBotcastSpeakerPrompt(
         message.id,
       );
       const spokenClaim = quietHearing === false
-        ? "[Their voice was too faint to make out.]"
+        // A holder whose Power declares `inaudible_ask_repeat` is asking the
+        // listener to say "what was that?". Signal hardcoded the passive
+        // marker, so that half of the Power never reached the listener at all
+        // and the holder was left to enact the miss from her own side cue.
+        ? botPowerInaudibleMissCueV1(
+            botPowerIntermittentAudibilityEffectV1(peer.powers)?.missEvent,
+          )
         : silentResponse
           ? audible && message.mutePerformance
             ? botPowerMuteObserverHistoryV1(
@@ -11102,15 +11118,24 @@ function botcastUtteranceAppearsIncomplete(value: string): boolean {
   return true;
 }
 
-function removeRepeatedBotcastInterruptionBridge(
+/**
+ * Drops a leading re-read of something the audience already heard — an
+ * interruption bridge the host just cut in with, or the prefix a producer
+ * redirect truncated their line to. Both are prompt-anchored, and a prompt
+ * anchor is a request: review 12d3d47e heard "Well, now, ain't that a twist?"
+ * aired once as the truncated prefix and again as the opening of the
+ * continuation. Exact leading match only; a paraphrased re-read still gets
+ * through and is the model's to avoid.
+ */
+function removeRepeatedBotcastAudienceHeardPrefix(
   raw: string,
-  bridgeLine: string | undefined,
+  heardPrefix: string | undefined,
 ): string {
-  const bridge = bridgeLine?.trim();
-  if (!bridge) return raw;
+  const prefix = heardPrefix?.trim();
+  if (!prefix) return raw;
   const candidate = raw.trimStart();
-  return candidate.toLocaleLowerCase().startsWith(bridge.toLocaleLowerCase())
-    ? candidate.slice(bridge.length).trimStart()
+  return candidate.toLocaleLowerCase().startsWith(prefix.toLocaleLowerCase())
+    ? candidate.slice(prefix.length).trimStart()
     : raw;
 }
 
@@ -11431,8 +11456,22 @@ function sanitizeUtteranceWithRepair(
     `^\\s*(?:\\[[^\\]\\n]{1,48}\\]\\s*)*[\"“]?\\s*(?:${peerRole}${peerLabelOptions ? `|${peerLabelOptions}` : ""})\\s*:\\s*`,
     "iu",
   );
-  if (peerLabelPattern.test(narrationSafeRaw)) {
-    const withoutPeerLabel = narrationSafeRaw
+  // Every label pattern below is anchored at `^`. When the caller keeps a
+  // leading `*action*` for resolveFinalStageActionV1 to pull out afterwards,
+  // that anchor lands on the action instead of the label, so
+  // `*leans in closer* Tiny Tina: …` matched nothing and aired the label once
+  // the action was removed. The online validator never saw it, because it
+  // sanitizes with allowLeadingStageAction=false. Hold the action aside,
+  // match labels against the speech, and restore it at the end.
+  const leadingStageAction = allowLeadingStageAction
+    ? (BOTCAST_LEADING_STAGE_ACTION_PATTERN.exec(narrationSafeRaw)?.[0] ?? "")
+    : "";
+  let labelSearchBase = leadingStageAction
+    ? narrationSafeRaw.slice(leadingStageAction.length)
+    : narrationSafeRaw;
+  const labelSearchOriginal = labelSearchBase;
+  if (peerLabelPattern.test(labelSearchBase)) {
+    const withoutPeerLabel = labelSearchBase
       .replace(peerLabelPattern, "")
       .trimStart();
     // Small local models sometimes format a direct host question as
@@ -11442,7 +11481,7 @@ function sanitizeUtteranceWithRepair(
       speakerRole === "host" &&
       botcastPeerLabeledHostQuestionIsSafe(withoutPeerLabel)
     ) {
-      narrationSafeRaw = withoutPeerLabel;
+      labelSearchBase = withoutPeerLabel;
     } else {
       return repaired("peer_label");
     }
@@ -11452,7 +11491,7 @@ function sanitizeUtteranceWithRepair(
   // bracket. Keep bot-name labels colon-gated below so "Ivo, wait—" stays.
   const roleFramingPattern =
     /^\s*["“]?\s*(?:assistant|speaker|bot|system)(?=$|\s|[:：\-–—[\]{})])/iu;
-  let withoutRoleFraming = narrationSafeRaw;
+  let withoutRoleFraming = labelSearchBase;
   for (let pass = 0; pass < 2; pass += 1) {
     const before = withoutRoleFraming;
     withoutRoleFraming = withoutRoleFraming
@@ -11480,8 +11519,8 @@ function sanitizeUtteranceWithRepair(
       return repaired("peer_label");
     }
   }
-  const cleaned = peerLabelSafeContent
-    .replace(withoutLabel === narrationSafeRaw ? /$^/u : /["”]\s*$/u, "")
+  const cleaned = `${leadingStageAction}${peerLabelSafeContent}`
+    .replace(withoutLabel === labelSearchOriginal ? /$^/u : /["”]\s*$/u, "")
     .replace(
       preserveProducerAttribution
         ? /$^/u
@@ -11571,21 +11610,16 @@ export function botcastHostClosingHasFormalThanks(
   // the full name or the distinctive final word of a multi-word name, so this
   // check cannot reject every model's natural address in a row and force the
   // deterministic fallback line onto an otherwise healthy closing beat.
-  const trimmedGuestName = guestName.trim();
-  const guestNameWords = trimmedGuestName.split(/\s+/u);
-  const shortAddress =
-    guestNameWords.length > 1 ? (guestNameWords.at(-1) ?? "") : "";
-  const guestAddressForms = [
-    trimmedGuestName,
-    ...(shortAddress.length >= 3 ? [shortAddress] : []),
-  ];
-  const thanksGuest = guestAddressForms.some((addressForm) => {
-    const escapedAddressForm = addressForm.replace(
-      /[.*+?^${}()|[\]\\]/gu,
-      "\\$&",
-    );
+  //
+  // The name is matched with Unicode boundaries, never `\b`: `\bDalí\b` cannot
+  // match anything, because the closing boundary needs a word character before
+  // it and "í" is not one. That silently rejected every model's correct close
+  // for any guest whose name ends outside ASCII.
+  const thanksGuest = botAddressFormsV1(guestName).some((addressForm) => {
+    const boundedAddressForm = botNameBoundaryPatternV1(addressForm);
+    if (!boundedAddressForm) return false;
     return new RegExp(
-      `(?:\\bthank(?:s| you)?\\b[^.!?]{0,56}\\b${escapedAddressForm}\\b|\\b${escapedAddressForm}\\b[^.!?]{0,56}\\bthank(?:s| you)?\\b)`,
+      `(?:\\bthank(?:s| you)?\\b[^.!?]{0,56}${boundedAddressForm}|${boundedAddressForm}[^.!?]{0,56}\\bthank(?:s| you)?\\b)`,
       "iu",
     ).test(spoken);
   });
@@ -11681,9 +11715,14 @@ function validateBotcastAutoSpeakerUtterance(input: {
   groundedPriorHistory?: boolean;
   preserveProducerAttribution?: boolean;
   requiredDirectQuote?: string;
+  recentSpeakerContents?: readonly string[];
 }):
   | { ok: true; value: string }
-  | { ok: false; reason: "empty" | "refusal" | "invalid_output" } {
+  | {
+      ok: false;
+      reason: "empty" | "refusal" | "invalid_output";
+      clause?: string;
+    } {
   const textValidation = validateAutoFallbackText(input.raw);
   const requiredQuote = input.requiredDirectQuote?.trim() ?? "";
   if (!textValidation.ok) {
@@ -11742,9 +11781,21 @@ function validateBotcastAutoSpeakerUtterance(input: {
                     pattern.test(spokenContent),
                   )
                   ? "deferral"
-                  : null;
+                  // A re-aired line was only ever caught at the final
+                  // sanitize, where it costs the speaker their turn outright:
+                  // review 12d3d47e replaced a repeated host line with the
+                  // canned follow-up instead of asking the model again. Same
+                  // contract, one clause earlier, so a retry comes first.
+                  : botcastUtteranceIsNearDuplicate(
+                        spokenContent,
+                        input.recentSpeakerContents ?? [],
+                      )
+                    ? "repeated"
+                    : null;
   if (failClause) {
-    return { ok: false, reason: "invalid_output" };
+    // Carry the clause into the attempt trace: a session review that sees ten
+    // `invalid_output` retries needs to know which contract rejected them.
+    return { ok: false, reason: "invalid_output", clause: failClause };
   }
   return { ok: true, value: textValidation.value };
 }
@@ -12248,13 +12299,12 @@ export async function ensureBotcastEpisodePersonaReview(
       ...(selected.model ? { model: selected.model } : {}),
       generationOptions: {
         temperature: 0.65,
-        maxTokens:
-          selected.providerName === "openai" &&
-          openAiModelUsesMaxCompletionTokens(
-            selected.model ?? defaultModelIdForProvider(selected.providerName),
-          )
-            ? BOTCAST_OPENAI_REASONING_MIN_COMPLETION_TOKENS
-            : 160,
+        maxTokens: botcastModelUsesNativeReasoning(
+          selected.providerName,
+          selected.model ?? defaultModelIdForProvider(selected.providerName),
+        )
+          ? BOTCAST_REASONING_MIN_COMPLETION_TOKENS
+          : 160,
         reasoningEffort: "minimal",
         jsonMode: true,
         usagePurpose: "botcast_review",
@@ -12288,6 +12338,20 @@ export async function ensureBotcastEpisodePersonaReview(
   }
 }
 
+/**
+ * Whether this model spends the completion budget on a chain of thought before
+ * it writes the visible line.
+ */
+function botcastModelUsesNativeReasoning(
+  providerName: ProviderName,
+  model: string,
+): boolean {
+  return (
+    (providerName === "openai" && openAiModelUsesMaxCompletionTokens(model)) ||
+    (providerName === "anthropic" && anthropicModelSupportsReasoningEffort(model))
+  );
+}
+
 function botcastSpeakerMaxTokensForModel(
   speakerMaxTokens: number,
   providerName: ProviderName,
@@ -12298,8 +12362,14 @@ function botcastSpeakerMaxTokensForModel(
     turnMaxTokens > speakerMaxTokens
       ? turnMaxTokens
       : Math.min(turnMaxTokens, Math.max(96, speakerMaxTokens));
-  return providerName === "openai" && openAiModelUsesMaxCompletionTokens(model)
-    ? Math.max(visibleReplyCap, BOTCAST_OPENAI_REASONING_MIN_COMPLETION_TOKENS)
+  // Reasoning burns this same budget before the reply starts, so an on-air cap
+  // sized for spoken words alone leaves a thinking model nothing to speak
+  // with: it returns an empty or mid-word-truncated line, the turn validator
+  // rejects it, and the episode walks the entire fallback chain to reach a
+  // model that happened to have headroom. Every reasoning lane gets the floor,
+  // not just OpenAI's.
+  return botcastModelUsesNativeReasoning(providerName, model)
+    ? Math.max(visibleReplyCap, BOTCAST_REASONING_MIN_COMPLETION_TOKENS)
     : visibleReplyCap;
 }
 
@@ -12356,10 +12426,10 @@ function botcastBookingGenerationOptions(
   model: string,
   visibleReplyCap = 320,
 ): Pick<GenerateOptions, "maxTokens" | "reasoningEffort"> {
-  const usesNativeReasoning =
-    (providerName === "openai" && openAiModelUsesMaxCompletionTokens(model)) ||
-    (providerName === "anthropic" &&
-      anthropicModelSupportsReasoningEffort(model));
+  const usesNativeReasoning = botcastModelUsesNativeReasoning(
+    providerName,
+    model,
+  );
   return usesNativeReasoning
     ? {
         maxTokens: Math.max(
@@ -14264,6 +14334,21 @@ export async function advanceBotcastEpisode(
     socialSilencePlan.decision === "social_silence"
       ? socialSilencePlan.marker
       : null;
+  // Declared before generation so the online/AUTO validators can reject a
+  // re-aired line and ask for another draft, rather than only the final
+  // sanitize catching it and spending the turn on the canned fallback.
+  const recentSpeakerContents =
+    speakerEchoesForTurn ||
+    speakerRepeatsForHearingPower ||
+    speakerReadsProducerQuote ||
+    speakerIsMutedForTurn ||
+    Boolean(socialSilenceMarker)
+      ? []
+      : episode.messages
+          .filter((message) => message.botId === speaker.id)
+          .map((message) => message.content)
+          .filter((content) => content.replace(/\s+/gu, " ").trim().length > 0)
+          .slice(-4);
   const stageActionExclusions: StageActionExclusionV1[] = [];
   const producerCueStageActionContract =
     speakerRole === "host" &&
@@ -14496,6 +14581,21 @@ export async function advanceBotcastEpisode(
         ]
       : []),
     "If the persona refuses the fictional premise, make that refusal specific, in character, and substantive instead of using generic policy language.",
+    // A `repeated` rejection with no corrective signal just burns the retry.
+    ...(recentSpeakerContents.length > 0
+      ? [
+          `You already said the following on this broadcast; a redraft that restates any of them in new words will be rejected again. Advance with a claim, example, cost, or concession not present in any of them: ${recentSpeakerContents
+            .map((content) =>
+              JSON.stringify(
+                extractBotcastVoicePerformance(content, false).content
+                  .replace(/\s+/gu, " ")
+                  .trim()
+                  .slice(0, 240),
+              ),
+            )
+            .join(" ")}`,
+        ]
+      : []),
     producerCueStageActionEligible
       ? "If the live cue explicitly requests a visible physical act, put only that act in one leading 2-8 word third-person `*action*`; otherwise do not add a stage direction. Never narrate the act in speech."
       : "Do not add speaker labels, production notes, stage directions, or private instructions.",
@@ -14768,6 +14868,7 @@ export async function advanceBotcastEpisode(
                     requestedCue?.directQuote?.trim(),
                   ),
                   requiredDirectQuote: requestedCue?.directQuote?.trim(),
+                  recentSpeakerContents,
                 }),
             }),
       });
@@ -14887,6 +14988,7 @@ export async function advanceBotcastEpisode(
                   requestedCue?.directQuote?.trim(),
                 ),
                 requiredDirectQuote: requestedCue?.directQuote?.trim(),
+                recentSpeakerContents,
               }),
             validationRetryInstruction,
           });
@@ -15286,22 +15388,13 @@ export async function advanceBotcastEpisode(
           ? `The final point I would leave with your listeners is this: ${topicWithPunctuation} Judge it by the choice it demands and the consequence that follows.`
           : silentGuestFallback ??
             guestRecoveryFallback);
-  const recentSpeakerContents =
-    speakerEchoesForTurn ||
-    speakerRepeatsForHearingPower ||
-    speakerReadsProducerQuote ||
-    speakerIsMutedForTurn ||
-    Boolean(socialSilenceMarker)
-      ? []
-      : episode.messages
-          .filter((message) => message.botId === speaker.id)
-          .map((message) => message.content)
-          .filter((content) => content.replace(/\s+/gu, " ").trim().length > 0)
-          .slice(-4);
   const sanitizedGeneratedUtterance = sanitizeUtteranceWithRepair(
-    removeRepeatedBotcastInterruptionBridge(
-      raw,
-      guestInterruption?.bridgeLine,
+    removeRepeatedBotcastAudienceHeardPrefix(
+      removeRepeatedBotcastAudienceHeardPrefix(
+        raw,
+        guestInterruption?.bridgeLine,
+      ),
+      cueDelivery === "redirect_host" ? hostRedirect?.spokenContent : undefined,
     ),
     fallback,
     speaker.name,
@@ -16306,9 +16399,10 @@ export async function advanceBotcastEpisode(
       );
       return priorPlan?.spokenCue ? [priorPlan.spokenCue] : [];
     });
-  const hasQuietHearingRoll = Boolean(
-    botPowerIntermittentAudibilityEffectV1(speaker.powers),
+  const quietHearingEffect = botPowerIntermittentAudibilityEffectV1(
+    speaker.powers,
   );
+  const hasQuietHearingRoll = Boolean(quietHearingEffect);
   // Fairness valve: a miss instructs the listener to ask for a repeat, so the
   // repeat itself always lands. Without this, back-to-back fifty-fifty misses
   // can eat a whole exchange — and at the end of an episode, its payoff.
@@ -16340,7 +16434,12 @@ export async function advanceBotcastEpisode(
         sourceMessageId: messageId,
         listenerBotId: listener.id,
         heard: listenerHeardLine,
-        missEvent: listenerHeardLine ? null : "too_faint_to_make_out",
+        // Report the miss the Power actually declares. Hardcoding one kind
+        // made every review record read "too_faint_to_make_out" even for an
+        // `inaudible_ask_repeat` holder, hiding the divergence above.
+        missEvent: listenerHeardLine
+          ? null
+          : (quietHearingEffect?.missEvent ?? "too_faint_to_make_out"),
       },
       now,
     );
@@ -16812,6 +16911,7 @@ export async function advanceBotcastEpisode(
           introductionAtMs,
         );
         if (guestFocusAtMs > recordedSuggestion.atMs) {
+          const introductionHoldMs = 1_800;
           recordedIntroduction = true;
           recordEvent(
             db,
@@ -16824,11 +16924,36 @@ export async function advanceBotcastEpisode(
               speakerRole: "guest",
               introductionTarget: "guest",
               atMs: guestFocusAtMs,
-              minimumHoldMs: 1_800,
+              minimumHoldMs: introductionHoldMs,
               messageId,
             },
             now,
           );
+          // Naming the guest is a visit, not a hand-off — the host is still
+          // mid-sentence. Recording the introduction skips the coverage block
+          // below, so the cut back to the host has to be placed here or the
+          // camera sits on a silent guest for the rest of the opening.
+          const introductionReturnAtMs = guestFocusAtMs + introductionHoldMs;
+          if (
+            introductionReturnAtMs + BOTCAST_DIRECTOR_MIN_SHOT_MS <=
+            messageStartMs + utteranceDurationMs
+          ) {
+            recordEvent(
+              db,
+              userId,
+              episode.id,
+              "camera_suggestion",
+              {
+                shot: recordedSuggestion.shot,
+                reason: "speaker",
+                speakerRole,
+                atMs: introductionReturnAtMs,
+                minimumHoldMs: BOTCAST_DIRECTOR_MIN_SHOT_MS,
+                messageId,
+              },
+              now,
+            );
+          }
         }
       }
     }

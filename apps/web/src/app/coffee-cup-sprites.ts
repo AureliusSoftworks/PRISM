@@ -397,6 +397,7 @@ function coffeeCupSipGateTimes(args: {
   nowMs: number;
   progress: number;
   durationMinutes?: number | null;
+  ambientSipAllowed?: boolean | null;
   speaking?: boolean | null;
   thinking?: boolean | null;
   sessionStartedAtMs?: number | null;
@@ -416,7 +417,11 @@ function coffeeCupSipGateTimes(args: {
   const offsetMs = Math.round(stableUnitValue(`${args.seed}:offset`) * cycleMs);
   const cyclePositionMs = positiveModulo(args.nowMs + offsetMs, cycleMs);
   const currentCycleStartMs = args.nowMs - cyclePositionMs;
+  // Must agree with coffeeCupSippingActive. Any condition that suppresses the
+  // sip sprite but not this gate makes the level track live through a window
+  // the viewer never sees a sip in — the cup drains without anyone drinking.
   const currentSipVisible =
+    args.ambientSipAllowed !== false &&
     args.speaking !== true &&
     args.thinking !== true &&
     cyclePositionMs < sipWindowMs;
@@ -453,6 +458,7 @@ export function coffeeCupSipGatedTimedProgress(args: {
   sessionStartedAtMs?: number | null;
   sessionEndsAtMs?: number | null;
   durationMinutes?: number | null;
+  ambientSipAllowed?: boolean | null;
   speaking?: boolean | null;
   thinking?: boolean | null;
 }): number {
@@ -468,6 +474,7 @@ export function coffeeCupSipGatedTimedProgress(args: {
     nowMs: args.nowMs,
     progress: progressForSip,
     durationMinutes: args.durationMinutes,
+    ambientSipAllowed: args.ambientSipAllowed,
     speaking: args.speaking,
     thinking: args.thinking,
     sessionStartedAtMs: args.sessionStartedAtMs,
@@ -798,6 +805,7 @@ export function buildCoffeeCupVisualState(args: {
           sessionStartedAtMs: args.sessionStartedAtMs,
           sessionEndsAtMs: args.sessionEndsAtMs,
           durationMinutes: args.durationMinutes,
+          ambientSipAllowed: args.ambientSipAllowed,
           speaking: args.speaking,
           thinking: args.thinking,
         })
@@ -810,6 +818,7 @@ export function buildCoffeeCupVisualState(args: {
             nowMs: args.nowMs,
             progress: rawPacedProgress,
             durationMinutes: args.durationMinutes,
+            ambientSipAllowed: args.ambientSipAllowed,
             speaking: args.speaking,
             thinking: args.thinking,
             sessionStartedAtMs: args.sessionStartedAtMs,
