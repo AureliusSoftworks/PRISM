@@ -156,6 +156,58 @@ describe("Coffee turn jobs", () => {
     interruptCoffeeTurnJob("u-autoplay", autonomousTurn.id);
   });
 
+  it("frees the table when a reveal the client never finished is abandoned", async () => {
+    // An interrupted Signal-style cut-off leaves the speaker's job in
+    // `voicing`: the line exists, but the client never reveals it to the end
+    // and so never posts `completed`. The table must still take its next turn
+    // instead of generating nothing until the job's TTL expires.
+    const abandoned = startCoffeeTurnJob({
+      userId: "u-abandoned",
+      conversationId: "c-abandoned",
+      run: async ({ setPhase }) => {
+        setPhase("thinking", "jefferson");
+        return {
+          speakerBotId: "jefferson",
+          stale: false,
+        } as unknown as Awaited<ReturnType<Parameters<typeof startCoffeeTurnJob>[0]["run"]>>;
+      },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(getCoffeeTurnJob("u-abandoned", abandoned.id)?.phase, "voicing");
+    assert.equal(
+      getActiveCoffeeTurnJobForConversation("u-abandoned", "c-abandoned"),
+      null,
+      "an unfinished reveal still held the floor",
+    );
+
+    setCoffeeTurnJobPhase("u-abandoned", abandoned.id, "speaking");
+    assert.equal(
+      getActiveCoffeeTurnJobForConversation("u-abandoned", "c-abandoned"),
+      null,
+      "playback still held the floor",
+    );
+    interruptCoffeeTurnJob("u-abandoned", abandoned.id);
+  });
+
+  it("still holds the table while a bot is choosing or thinking", async () => {
+    const thinking = startCoffeeTurnJob({
+      userId: "u-floor",
+      conversationId: "c-floor",
+      run: async ({ setPhase }) => {
+        setPhase("thinking", "washington");
+        return await new Promise(() => {});
+      },
+    });
+    await Promise.resolve();
+    assert.equal(
+      getActiveCoffeeTurnJobForConversation("u-floor", "c-floor")?.id,
+      thinking.id,
+    );
+    interruptCoffeeTurnJob("u-floor", thinking.id);
+  });
+
   it("expires abandoned in-memory jobs and aborts their work", async () => {
     let aborted = false;
     const started = startCoffeeTurnJob({

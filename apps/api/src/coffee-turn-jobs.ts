@@ -23,6 +23,17 @@ function isTerminalCoffeeTurnPhase(phase: CoffeeTurnJobPhase): boolean {
   return phase === "completed" || phase === "interrupted" || phase === "stale" || phase === "failed";
 }
 
+/**
+ * Whether a bot is still choosing or holding the floor. Only these phases may
+ * hold the table: by `voicing` the response already exists and everything left
+ * is client-owned playback. Counting playback here turns any reveal the client
+ * never finishes — an interrupted line, a stalled tab, a dropped callback —
+ * into a table that generates nothing until the job's full TTL elapses.
+ */
+function coffeeTurnJobHoldsFloor(phase: CoffeeTurnJobPhase): boolean {
+  return phase === "routing" || phase === "thinking";
+}
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -152,7 +163,7 @@ export function getActiveCoffeeTurnJobForConversation(
     if (
       job.userId === userId &&
       job.conversationId === conversationId &&
-      !isTerminalCoffeeTurnPhase(job.phase)
+      coffeeTurnJobHoldsFloor(job.phase)
     ) {
       return publicStatus(job);
     }
