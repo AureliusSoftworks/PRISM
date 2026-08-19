@@ -8273,9 +8273,6 @@ export function createBotcastEpisode(
   showId: string,
   input: BotcastEpisodeCreateRequest,
 ): BotcastEpisode {
-  // #region agent log
-  fetch('http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'aec877'},body:JSON.stringify({sessionId:'aec877',runId:'pre-fix',hypothesisId:'A',location:'botcast.ts:createBotcastEpisode',message:'createBotcastEpisode entered',data:{guestKind: input.guestKind === 'producer' ? 'producer' : 'bot',topicHasBrace: typeof input.topic === 'string' && input.topic.includes('{'),briefHasBrace: typeof input.producerBrief === 'string' && input.producerBrief.includes('{')},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
   const show = getBotcastShow(db, userId, showId);
   const host = loadBotProfile(db, userId, show.hostBotId);
   const guestKind: BotcastGuestKind =
@@ -8473,9 +8470,6 @@ export function createBotcastEpisode(
     ).run(now, guestKind, show.id, userId);
     db.exec("COMMIT");
   } catch (error) {
-    // #region agent log
-    fetch('http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'aec877'},body:JSON.stringify({sessionId:'aec877',runId:'pre-fix',hypothesisId:'A',location:'botcast.ts:createBotcastEpisode catch',message:'createBotcastEpisode threw',data:{errorName: error instanceof Error ? error.name : typeof error, errorMessage: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? (error.stack ?? '').split('\n').slice(0, 12) : []},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     db.exec("ROLLBACK");
     throw error;
   }

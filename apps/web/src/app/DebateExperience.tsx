@@ -11524,31 +11524,6 @@ export function DebateExperience(
     );
     const fresh = debatePresentationEvents(previous, session, false);
     if (fresh.length === 0) return;
-    // #region agent log
-    fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "296f82",
-      },
-      body: JSON.stringify({
-        sessionId: "296f82",
-        runId: "post-fix",
-        hypothesisId: "H",
-        location: "DebateExperience.tsx:presentUnheardSpectatorTail",
-        message: "spectator unheard tail",
-        data: {
-          freshCount: fresh.length,
-          playheadEventId: presentationPlaybackEventIdRef.current,
-          bakerStepKey: session.stepKey,
-          bakeStatus: session.liveBake?.status ?? null,
-          status: session.status,
-          firstFreshStepKey: fresh[0]?.stepKey ?? null,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     await adoptSession(previous, session);
   }, [adoptSession, busy, presentationSuspended, presenting]);
 
@@ -11627,31 +11602,6 @@ export function DebateExperience(
         }
       }
       spectatorBakeRestartAtMsRef.current = Date.now();
-      // #region agent log
-      fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Debug-Session-Id": "296f82",
-        },
-        body: JSON.stringify({
-          sessionId: "296f82",
-          runId: "post-fix",
-          hypothesisId: "F",
-          location: "DebateExperience.tsx:restartSpectatorBakeIfNeeded",
-          message: "restart spectator bake after pause or stale heartbeat",
-          data: {
-            reason,
-            debateSessionId: session.id,
-            stepKey: session.stepKey,
-            revision: session.revision,
-            bakeStatus: session.liveBake?.status ?? null,
-            phaseLabel: session.liveBake?.progress?.phaseLabel ?? null,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       void request(`/api/debates/${encodeURIComponent(session.id)}/bake`, {
         ...requestBody({}),
       }).catch(() => undefined);
@@ -13311,7 +13261,6 @@ export function DebateExperience(
     const sessionId = activeSession.id;
     let cancelled = false;
     let pollInFlight = false;
-    let lastBakeDebugLogAt = 0;
     const tick = async (): Promise<void> => {
       if (pollInFlight) return;
       pollInFlight = true;
@@ -13322,55 +13271,6 @@ export function DebateExperience(
         );
         if (cancelled || !mountedRef.current) return;
         if (activeSessionIdRef.current !== sessionId) return;
-        // #region agent log
-        {
-          const heartbeatAt = polled.session.liveBake?.progress?.heartbeatAt;
-          const heartbeatAgeMs = heartbeatAt
-            ? Date.now() - new Date(heartbeatAt).getTime()
-            : null;
-          if (Date.now() - lastBakeDebugLogAt >= 8000) {
-            lastBakeDebugLogAt = Date.now();
-            fetch(
-              "http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2",
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "X-Debug-Session-Id": "296f82",
-                },
-                body: JSON.stringify({
-                  sessionId: "296f82",
-                    runId: "post-fix",
-                  hypothesisId: "C",
-                  location: "DebateExperience.tsx:bakePoll",
-                  message: "spectator bake poll",
-                  data: {
-                    status: polled.session.status,
-                    stepKey: polled.session.stepKey,
-                    revision: polled.session.revision,
-                    bakeStatus: polled.session.liveBake?.status ?? null,
-                    phaseLabel:
-                      polled.session.liveBake?.progress?.phaseLabel ?? null,
-                    heartbeatAgeMs,
-                    presenting,
-                    spectatorBakeLiveFallback,
-                    blocksAutoAdvance: false,
-                    unheardRunwayCount: debatePresentationEvents(
-                      debateSessionThroughPlayhead(
-                        activeSession,
-                        presentationPlaybackEventIdRef.current,
-                      ),
-                      polled.session,
-                      false,
-                    ).length,
-                  },
-                  timestamp: Date.now(),
-                }),
-              },
-            ).catch(() => {});
-          }
-        }
-        // #endregion
         if (polled.session.status === "live") {
           restartSpectatorBakeIfNeeded(polled.session, "stale-poll");
         }
@@ -14789,33 +14689,6 @@ export function DebateExperience(
           titleCardPlayheadEventId ??
           result.session.pausedPresentationEventId ??
           replayEventId;
-        // #region agent log
-        fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Debug-Session-Id": "296f82",
-          },
-          body: JSON.stringify({
-            sessionId: "296f82",
-            runId: "post-fix",
-            hypothesisId: "G",
-            location: "DebateExperience.tsx:pauseOrResume.heldEventId",
-            message: "debate resume held event",
-            data: {
-              heldEventId,
-              titleCardPlayheadEventId,
-              pausedPresentationEventId:
-                result.session.pausedPresentationEventId ?? null,
-              heldStepKey:
-                result.session.events.find((event) => event.id === heldEventId)
-                  ?.stepKey ?? null,
-              bakerStepKey: result.session.stepKey,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         const pausedPresentationEvent = heldEventId
           ? result.session.events.find((event) => event.id === heldEventId)
           : undefined;
@@ -24936,33 +24809,6 @@ export function DebateExperience(
                       checkpoints: turnCheckpoints,
                       selectedId: selectedTurnCheckpoint?.id ?? null,
                       onSelect: (eventId) => {
-                        // #region agent log
-                        fetch(
-                          "http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2",
-                          {
-                            method: "POST",
-                            headers: {
-                              "Content-Type": "application/json",
-                              "X-Debug-Session-Id": "296f82",
-                            },
-                            body: JSON.stringify({
-                              sessionId: "296f82",
-                              runId: "post-fix",
-                              hypothesisId: "G",
-                              location:
-                                "DebateExperience.tsx:holdCheckpoints.onSelect",
-                              message: "debate turn checkpoint selected",
-                              data: {
-                                eventId,
-                                stepKey:
-                                  debateTurnCheckpointEvent(session, eventId)
-                                    ?.stepKey ?? null,
-                              },
-                              timestamp: Date.now(),
-                            }),
-                          },
-                        ).catch(() => {});
-                        // #endregion
                         setCheckpointPlayheadEventId(eventId);
                         setPresentationEventId(eventId);
                       },

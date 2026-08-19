@@ -357,7 +357,6 @@ import {
   resolveBotcastProducerGuestName,
   setBotcastEpisodeCameraMode,
   setBotcastModelWarmupHold,
-  signalAutoFallbackExhaustionIsValidationOnly,
   signalAutoFallbackHttpStatus,
   signalAutoFallbackPublicMessage,
   signalOnlineTurnHttpStatus,
@@ -20140,9 +20139,6 @@ function buildRoutes(): RouteDefinition[] {
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       const body = ctx.body as Record<string, unknown>;
-      // #region agent log
-      fetch('http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'aec877'},body:JSON.stringify({sessionId:'aec877',runId:'pre-fix',hypothesisId:'B',location:'server.ts:POST /episodes',message:'episode create entered',data:{guestKind: body.guestKind === 'producer' ? 'producer' : 'bot',topicHasBrace: typeof body.topic === 'string' && body.topic.includes('{'),briefHasBrace: typeof body.producerBrief === 'string' && body.producerBrief.includes('{'),topicHasSlash: typeof body.topic === 'string' && body.topic.includes('/'),briefHasBang: typeof body.producerBrief === 'string' && body.producerBrief.includes('!')},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       const explicitModelOverride = readCoffeeSessionSpeakerModel(
         body.modelOverride,
       );
@@ -20260,9 +20256,6 @@ function buildRoutes(): RouteDefinition[] {
         },
         });
       } catch (error) {
-        // #region agent log
-        fetch('http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'aec877'},body:JSON.stringify({sessionId:'aec877',runId:'pre-fix',hypothesisId:'C',location:'server.ts:createProposal',message:'createProposal threw',data:{errorName: error instanceof Error ? error.name : typeof error, errorMessage: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? (error.stack ?? '').split('\n').slice(0, 12) : []},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         throw error;
       }
       const run = await prismCapabilityRegistry.executeProposal({
@@ -20275,9 +20268,6 @@ function buildRoutes(): RouteDefinition[] {
             ? body.prismIdempotencyKey.trim().slice(0, 240)
             : `ui:signal:create:${randomId()}`,
       });
-      // #region agent log
-      fetch('http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'aec877'},body:JSON.stringify({sessionId:'aec877',runId:'pre-fix',hypothesisId:'A',location:'server.ts:executeProposal',message:'episode capability finished',data:{status: run.status, error: run.error ?? null, hasEpisodeId: Boolean(run.result && typeof run.result === 'object' && !Array.isArray(run.result) && typeof run.result.episodeId === 'string')},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       if (
         run.status !== "committed" ||
         !run.result ||
@@ -20982,31 +20972,6 @@ function buildRoutes(): RouteDefinition[] {
         if (signalAdvanceAbort.signal.aborted) return;
         if (error instanceof AutoFallbackExhaustedError) {
           const httpStatus = signalAutoFallbackHttpStatus(error);
-          const validationOnly =
-            signalAutoFallbackExhaustionIsValidationOnly(error);
-          // #region agent log
-          fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Debug-Session-Id": "ad2b15",
-            },
-            body: JSON.stringify({
-              sessionId: "ad2b15",
-              runId: "pre-fix",
-              hypothesisId: "A",
-              location: "server.ts:botcast advance AutoFallbackExhaustedError",
-              message: "signal advance mapped auto exhaustion",
-              data: {
-                httpStatus,
-                validationOnly,
-                publicMessage: signalAutoFallbackPublicMessage(error),
-                reasons: error.attempts.map((attempt) => attempt.reason ?? null),
-              },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-          // #endregion
           throw new HttpError(
             httpStatus,
             signalAutoFallbackPublicMessage(error),

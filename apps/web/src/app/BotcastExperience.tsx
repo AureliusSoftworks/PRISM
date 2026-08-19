@@ -6386,9 +6386,6 @@ export function BotcastExperience({
         runId,
       );
     } catch (startError) {
-      // #region agent log
-      fetch('http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'aec877'},body:JSON.stringify({sessionId:'aec877',runId:'pre-fix',hypothesisId:'E',location:'BotcastExperience.tsx:startEpisode catch',message:'startEpisode threw',data:{errorName: startError instanceof Error ? startError.name : typeof startError, errorMessage: startError instanceof Error ? startError.message : String(startError), unstartedEpisodeId: Boolean(unstartedEpisodeId)},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       if (episodeOperationIsCurrent(controller, runId)) {
         preRollGateResolveRef.current?.();
         preRollGateResolveRef.current = null;
