@@ -1,4 +1,56 @@
-# Handoff: Coffee Mode freeze — typewriter reconciliation
+# Handoff: Coffee Mode freeze — glyph rasterization
+
+## THE CAUSE IS FOUND (measured 2026-08-18, live 5-bot table)
+
+Not the reveal path. Not the GPU. **`PhosphorPixelGlyph` re-rasterizes bot face
+glyphs on the main thread as their content changes.**
+
+Measured in the running app with the new badge census, on a live Bikini Bottom
+table. Every accumulation counter plateaued except one:
+
+```
+t=0    raf 2    int 8    dom 301   anim 2     heap 369   audio 0
+t=47   raf 5    int 18   dom 672   anim 84    heap 563   audio 6
+t=87   raf 19   int 17   dom 692   anim 121   heap 470   audio 6
+t=134  raf 20   int 17   dom 712   anim 112   heap 442   audio 6
+t=247  raf 21   int 17   dom 743   anim 118   heap 587   audio 6
+```
+
+`int`, `dom`, `anim`, `audio`, `heap` all settle. `raf` climbs 2 → ~21 — a
+growing backlog of pending glyph rasterizations. Profiling rAF by creation
+stack over 25s (in a *throttled* tab, so these are floor numbers):
+
+```
+155  PhosphorPixelSvgGlyph.useLayoutEffect.render   PhosphorPixelGlyph.tsx:377
+ 70  CrtPixelTextGlyph.useLayoutEffect.render       PhosphorPixelGlyph.tsx:202
+ 30  CoffeeSeatPlateEmoji.useLayoutEffect           CoffeeSeatPlateEmoji.tsx:237/405
+ 16  PrismAdaptiveDomQualityGovernor.tick           (one healthy loop)
+ 16  pixi.js Ticker._tick                           (one healthy loop)
+```
+
+`rasterizeTextMask` ([PhosphorPixelGlyph.tsx:147](apps/web/src/app/PhosphorPixelGlyph.tsx))
+per call does `getComputedStyle` → border-box measurement → `measureText` →
+`fillText` → **`getImageData`** (GPU→CPU readback) → a per-pixel JS loop
+(`samplePhosphorAlphaCells`) → `putImageData` → **`toDataURL("image/png")`**, a
+synchronous PNG encode. There is a mask cache checked at :227 *before* the
+canvas work, so identical content is cheap — but the cache-key computation
+itself reads computed style and layout for every glyph on every scheduled
+frame, and any new mouth shape / rasterKey is a full miss.
+
+Coffee changes glyph content constantly (mouth shapes across five seats, plate
+emoji, nameplates), so this runs several times a second and cannot keep up —
+which is exactly why the decay is monotonic and does not recover through a
+silent table. It also explains why seating the 4th bot dropped session
+c2f6eff5 from 60 to 10 FPS *before any model call*.
+
+**Next step is the fix, not more diagnosis.** Do not start by touching avatar
+fidelity — the sheds are dead and must stay dead. Attack the cost instead:
+skip the whole path when `content` and the node's box are unchanged since the
+last raster; hoist the layout/style reads out of the per-frame path; and
+consider moving the encode off `toDataURL` (an `ImageBitmap`/blob URL, or
+canvas reuse) so a miss costs less.
+
+
 
 Generated: 2026-08-19 (updated) · Branch: dev · Status: freeze #1 mitigated, freeze #2's identified vetoes all closed. Unstaged, unflown.
 
