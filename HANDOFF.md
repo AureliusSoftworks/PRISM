@@ -1,3 +1,65 @@
+# Handoff: Coffee lag — render cost, measured on a live table
+
+## LIVE-TABLE RESULT (2026-08-18, 221s, `visible` asserted on every sample)
+
+A real 5-bot table (Bikini Bottom, OpenAI, 10 messages). Every sample below was
+taken with `visibilityState === "visible"` **and**
+`data-prism-visual-lifecycle === "foreground"` verified in the same script.
+
+```
+s=0    120 FPS · home 0/s     ← before the topic is picked
+s=5      2 FPS · home 10/s
+s=10     4 FPS · home 9/s
+s=31    14 FPS · home 5/s
+s=95     1 FPS · home 4/s
+s=221    1 FPS · home 4/s     ← 10 messages in
+```
+
+**It does not decay — it collapses within five seconds of the table opening and
+stays pinned for the whole session.** `HomeContent` renders a steady 4–6 times
+a second throughout.
+
+Main-thread blocking, measured by timer drift (independent of the `busy`
+metric, which is normalized and routinely reads >1000ms/s — do not trust it):
+
+```
+blocked 10,982ms of 11,182ms = 98%
+median gap between 16ms ticks: 1303ms
+largest single block: 2588ms
+```
+
+**Each `HomeContent` render blocks the main thread for roughly a second.**
+
+### Ruled out, with evidence
+
+- **Paint / CSS.** With `filter`, `backdrop-filter`, `box-shadow`,
+  `text-shadow`, `mix-blend-mode`, masks, animations and transitions all forced
+  off: still **98% blocked**, median gap 970ms vs 1303ms. Paint is at most ~25%.
+- **A render loop.** Fiber state-churn during the live table is spread across
+  many hooks and is legitimate (session clock, rhythm state, speech progress).
+  The pointless-update loop was real and is fixed (`dc9fcf96`); this is not it.
+- **Leaks.** `int`, `dom`, `anim`, `audio`, `heap` all plateau.
+- **rAF / timers.** 1ms and 2ms respectively across a 15s window.
+
+### So the remaining bug is render *cost*, and it scales with seats
+
+This reconciles Jared's original export: 60 FPS with the first bots seated,
+10 FPS at the fourth arrival, 1 FPS thereafter. It read as gradual decay
+because arrivals are staggered; it is really per-seat cost accumulating until
+the table is full.
+
+`HomeContent` is one ~149k-line component with no reconciliation boundary, so
+every Coffee state change re-evaluates the entire app surface including the
+five-seat map (~700 lines of computation per seat upstream of
+`coffeeSeatAvatarRenderKey`). `CoffeeSeatAvatarRenderer` is already `memo`'d on
+`renderKey` alone, so the avatar subtree is protected — the expense is
+everything computed *before* the key.
+
+**Next step is the memoization boundary, and it is a big rock.** Do not start it
+as a side quest. The cheap probe first: measure which slice of the render costs
+the second — bisect the seat map by short-circuiting parts of it and re-running
+the timer-drift measurement above (that harness is the reliable one).
+
 # Handoff: Coffee Mode lag — render loop found and fixed
 
 ## RESULT (2026-08-18, measured with `visibilityState === "visible"` asserted)
