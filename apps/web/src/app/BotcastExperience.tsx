@@ -302,6 +302,7 @@ import {
   signalCupSipTargetFromMouth,
   signalStageLocalPointFromViewport,
 } from "./signalCupSipGeometry";
+import { signalCupSipScheduleV1 } from "./signalCupSipSchedule";
 import { buildSignalReviewTranscript } from "./signalReviewTranscript";
 import {
   signalVoicePerformanceActionPresentationAtProgress,
@@ -8905,6 +8906,31 @@ export function BotcastExperience({
         );
   const replayActiveMessage =
     replayEpisode?.messages[replayMessageIndex] ?? null;
+  // Cup level is anchored to turns, so it needs the last turn that has aired,
+  // not just the one on mic: between turns `replayMessageIndex` is -1, and a
+  // level that read that as "nothing yet" would snap full in every gap.
+  const replayPresentedMessageIndex =
+    replayMessageIndex >= 0
+      ? replayMessageIndex
+      : replayFaithful
+        ? (replayActiveTimeline?.beats.reduce((latest, beat) => {
+            if (
+              beat.kind !== "utterance" ||
+              !beat.sourceMessageId ||
+              beat.startMs > replayInterviewFootageElapsedMs
+            ) {
+              return latest;
+            }
+            const index =
+              replayEpisode?.messages.findIndex(
+                (message) => message.id === beat.sourceMessageId,
+              ) ?? -1;
+            return index > latest ? index : latest;
+          }, -1) ?? -1)
+        : botcastReplayMessageIndexAt(
+            replayTimeline.messageStartMs,
+            replayElapsedMs,
+          );
   const replayFaithfulCamera = useMemo(
     () =>
       replayEpisode && replayFaithful && replayActiveTimeline
@@ -10200,6 +10226,23 @@ export function BotcastExperience({
         identityShapeshiftState,
       };
     };
+    // The turn the viewer is watching. Live, everything saved has already
+    // aired; on replay the playhead decides, and both hold the last aired turn
+    // through the gaps between them so the cup level never jumps backwards.
+    const presentedTurnIndex = (() => {
+      const turns = args.currentEpisode.messages;
+      if (turns.length === 0) return null;
+      if (args.activeMessage) {
+        const index = turns.findIndex(
+          (message) => message.id === args.activeMessage?.id,
+        );
+        if (index >= 0) return index;
+      }
+      if (!args.replay) return turns.length - 1;
+      return replayPresentedMessageIndex >= 0
+        ? replayPresentedMessageIndex
+        : null;
+    })();
     const cupVisual = (
       bot: BotcastBotSummary,
       role: "host" | "guest",
@@ -10215,28 +10258,40 @@ export function BotcastExperience({
       if (powerRateMultiplier <= 0) return null;
       const producerGuestRole =
         role === "guest" && args.currentEpisode.guestKind === "producer";
+      const sipAllowed =
+        !producerGuestRole && !roleIsSpeaking(role) && !roleIsThinking(role);
+      // Level and sprite both come off this one counter, so the cup cannot
+      // lose coffee through a beat the viewer never saw anyone drink in —
+      // which is what review 12d3d47e reported. The count is a function of
+      // the saved turn list, so it is identical live and on replay and it
+      // survives a seek.
+      const sipSchedule = signalCupSipScheduleV1({
+        episodeId: args.currentEpisode.id,
+        role,
+        turns: args.currentEpisode.messages,
+        presentedIndex: presentedTurnIndex,
+        powerRateMultiplier,
+        sipAllowed,
+      });
       return buildCoffeeCupVisualState({
         seed: `signal:${args.currentEpisode.id}:${bot.id}:${role}`,
         botColor: bot.color,
         theme: stageTheme,
         nowMs: cupNowMs,
+        // Session timing still drives how the coffee cools; only the fill is
+        // sip-anchored now.
         sessionStartedAtMs: episodeStartedAtMs,
         durationMinutes:
           args.currentEpisode.durationMinutes ??
           DEFAULT_COFFEE_SESSION_DURATION_MINUTES,
         powerRateMultiplier,
-        // The level clock steps whether or not a sip renders, so a window this
-        // role could never sip in is a silent drain. Signal only opened the
-        // window while the *other* chair was actively speaking, which shuts it
-        // for every warmup hold, generation gap, and silence beat — review
-        // 12d3d47e spent 01:05 of warmup hold alone. Match Coffee: a sip is
-        // allowed unless this role is the one speaking or thinking.
-        ambientSipAllowed: !producerGuestRole && !roleIsSpeaking(role),
+        sipCount: sipSchedule.sipCount,
         speaking: roleIsSpeaking(role),
         thinking: roleIsThinking(role),
-        ...(role === "guest" && manualProducerGuestSip
-          ? { sippingOverride: true }
-          : {}),
+        sippingOverride:
+          role === "guest" && manualProducerGuestSip
+            ? true
+            : sipSchedule.sippingNow,
       });
     };
     const hostCupVisual = args.host ? cupVisual(args.host, "host") : null;
