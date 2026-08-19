@@ -2,7 +2,7 @@ import type { ListenerReactionPlanV1 } from "./listenerReaction.js";
 import {
   normalizeBotSpeechRegisterId,
   type BotSpeechRegisterId,
-} from "./botSpeechRegister.js";
+} from "./botSpeechRegister.ts";
 import {
   botIdentityHueDeg,
   circularHueDistanceDeg,
