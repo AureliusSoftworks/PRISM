@@ -38,10 +38,16 @@ export interface AppletSessionNoteContext {
   sessionId: string;
 }
 
+import type { AppletMainThreadCensusSummary } from "./appletMainThreadCensusReport.ts";
+import type { PrismCensusReading } from "./prismMainThreadCensusRecorder.ts";
+
 export interface AppletSessionNoteResponse {
   ok: true;
   note: AppletSessionNoteV1 | null;
   frameSamples?: AppletTranscriptFrameSampleV1[];
+  /** What accumulated on the main thread while the session ran. */
+  mainThreadCensus?: PrismCensusReading[];
+  mainThreadCensusSummary?: AppletMainThreadCensusSummary | null;
 }
 
 const APPLET_SESSION_NOTE_SAVED_EVENT = "prism:applet-session-note-saved";

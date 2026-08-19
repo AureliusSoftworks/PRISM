@@ -17,6 +17,8 @@ export interface AppletMainThreadCensusSampleV1 {
   elapsedMs: number;
   capturedAt: string;
   fps: number | null;
+  /** Long-task milliseconds per second: ~1000 means the main thread is pinned. */
+  busyMsPerSecond: number | null;
   rafPending: number;
   intervalsLive: number;
   timeoutsPending: number;
@@ -30,6 +32,7 @@ interface AppletMainThreadCensusSampleRow {
   elapsed_ms: number;
   captured_at: string;
   fps: number | null;
+  busy_ms_per_second: number | null;
   raf_pending: number;
   intervals_live: number;
   timeouts_pending: number;
@@ -96,6 +99,7 @@ export function readAppletMainThreadCensusSample(
       ? new Date(capturedAtMs).toISOString()
       : new Date().toISOString(),
     fps,
+    busyMsPerSecond: readOptionalCount(record.busyMsPerSecond),
     rafPending: readCount(record.rafPending),
     intervalsLive: readCount(record.intervalsLive),
     timeoutsPending: readCount(record.timeoutsPending),
@@ -123,9 +127,9 @@ export function recordAppletMainThreadCensusSamples(
   const insert = db.prepare(
     `INSERT INTO applet_main_thread_census_samples
        (user_id, surface, session_id, elapsed_ms, captured_at, fps,
-        raf_pending, intervals_live, timeouts_pending, dom_elements,
-        animations_running, heap_mb, render_rates_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        busy_ms_per_second, raf_pending, intervals_live, timeouts_pending,
+        dom_elements, animations_running, heap_mb, render_rates_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(user_id, surface, session_id, elapsed_ms) DO NOTHING`,
   );
   let written = 0;
@@ -137,6 +141,7 @@ export function recordAppletMainThreadCensusSamples(
       sample.elapsedMs,
       sample.capturedAt,
       sample.fps,
+      sample.busyMsPerSecond,
       sample.rafPending,
       sample.intervalsLive,
       sample.timeoutsPending,
@@ -159,7 +164,7 @@ export function listAppletMainThreadCensusSamples(
   return (
     db
       .prepare(
-        `SELECT elapsed_ms, captured_at, fps, raf_pending, intervals_live,
+        `SELECT elapsed_ms, captured_at, fps, busy_ms_per_second, raf_pending, intervals_live,
                 timeouts_pending, dom_elements, animations_running, heap_mb,
                 render_rates_json
            FROM applet_main_thread_census_samples
@@ -182,6 +187,7 @@ export function listAppletMainThreadCensusSamples(
       elapsedMs: row.elapsed_ms,
       capturedAt: row.captured_at,
       fps: row.fps,
+      busyMsPerSecond: row.busy_ms_per_second,
       rafPending: row.raf_pending,
       intervalsLive: row.intervals_live,
       timeoutsPending: row.timeouts_pending,
@@ -216,6 +222,10 @@ export function summarizeAppletMainThreadCensus(
     .map((sample) => sample.fps)
     .filter((fps): fps is number => fps !== null);
   const counters = [
+    [
+      "busyMsPerSecond",
+      (s: AppletMainThreadCensusSampleV1) => s.busyMsPerSecond ?? 0,
+    ],
     ["rafPending", (s: AppletMainThreadCensusSampleV1) => s.rafPending],
     ["intervalsLive", (s: AppletMainThreadCensusSampleV1) => s.intervalsLive],
     ["timeoutsPending", (s: AppletMainThreadCensusSampleV1) => s.timeoutsPending],

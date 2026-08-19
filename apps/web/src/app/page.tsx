@@ -587,6 +587,10 @@ import {
   type AppletSessionNoteV1,
 } from "./appletSessionNotes";
 import {
+  appendPrismMainThreadCensusToTranscript,
+  useAppletMainThreadCensus,
+} from "./appletMainThreadCensusReport.ts";
+import {
   annotateAppletTranscriptFrameRates,
   subscribeAppletTranscriptFrameSample,
   useAppletTranscriptFrameRate,
@@ -64592,6 +64596,9 @@ function HomeContent(): React.JSX.Element {
     coffeeConversation?.id,
     coffeeConversation?.messages ?? [],
   );
+  // Frame samples say a table got slow; the census says what grew while it did,
+  // which is the only way an unattended thirty-minute session explains itself.
+  useAppletMainThreadCensus("coffee", coffeeConversation?.id);
   const [coffeePowerPlan, setCoffeePowerPlan] =
     useState<CoffeePowerPlanV1 | null>(null);
   const [coffeePowerWarnings, setCoffeePowerWarnings] = useState<string[]>([]);
@@ -110431,15 +110438,25 @@ function HomeContent(): React.JSX.Element {
               sessionId: coffeeConversation.id,
             }),
           )
-            .catch(() => ({ ok: true as const, note: null, frameSamples: [] }));
+            .catch(() => ({
+              ok: true as const,
+              note: null,
+              frameSamples: [],
+              mainThreadCensus: [],
+              mainThreadCensusSummary: null,
+            }));
           const blob = new Blob(
             [
-              annotateAppletTranscriptFrameRates(
-                appendAppletSessionNoteToTranscript(
-                  transcript,
-                  sessionMetadata.note,
+              appendPrismMainThreadCensusToTranscript(
+                annotateAppletTranscriptFrameRates(
+                  appendAppletSessionNoteToTranscript(
+                    transcript,
+                    sessionMetadata.note,
+                  ),
+                  sessionMetadata.frameSamples,
                 ),
-                sessionMetadata.frameSamples,
+                sessionMetadata.mainThreadCensus,
+                sessionMetadata.mainThreadCensusSummary,
               ),
             ],
             {

@@ -787,6 +787,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       elapsed_ms INTEGER NOT NULL CHECK(elapsed_ms >= 0),
       captured_at TEXT NOT NULL,
       fps INTEGER CHECK(fps IS NULL OR (fps >= 0 AND fps <= 240)),
+      busy_ms_per_second INTEGER,
       raf_pending INTEGER NOT NULL DEFAULT 0,
       intervals_live INTEGER NOT NULL DEFAULT 0,
       timeouts_pending INTEGER NOT NULL DEFAULT 0,
@@ -2507,6 +2508,22 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
        WHERE user_id = OLD.user_id AND id = OLD.group_id;
     END;
   `);
+  // The census table shipped without this column for a few minutes; a database
+  // created in that window still needs it.
+  const censusColumns = new Set(
+    (
+      db.prepare("PRAGMA table_info(applet_main_thread_census_samples)").all() as Array<{
+        name?: unknown;
+      }>
+    )
+      .map((column) => column.name)
+      .filter((name): name is string => typeof name === "string"),
+  );
+  if (censusColumns.size > 0 && !censusColumns.has("busy_ms_per_second")) {
+    db.exec(
+      "ALTER TABLE applet_main_thread_census_samples ADD COLUMN busy_ms_per_second INTEGER;",
+    );
+  }
   const addReplayRecordingColumn = (
     name: string,
     definition: string,
