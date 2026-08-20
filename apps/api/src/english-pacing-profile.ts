@@ -192,6 +192,7 @@ export async function calibrateEnglishPacingProfile(args: {
     model: args.voiceModel ?? "eleven_v3",
     text: ENGLISH_PACING_CALIBRATE_SCRIPT,
     profile,
+    respellAccent: false,
     seed: elevenLabsVoiceIsolationSeed(`english-pacing:${ownerId}`),
     signal: args.signal,
     fetchImpl: args.fetchImpl,

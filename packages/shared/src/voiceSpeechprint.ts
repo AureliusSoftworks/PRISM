@@ -35,6 +35,9 @@ export interface VoiceAccentDefinitionV1 {
   id: VoiceAccentDefinitionId;
   premiumAccentedEnglishLabel: string;
   premiumNativeAccentAliases: readonly string[];
+  /** Provider-actionable name for the Premium direction, when the atlas label
+   * is a region no speech model has a concept of. Display never uses it. */
+  premiumDirectionLabel?: string;
   localSpeechprintFallback: LocalVoiceSpeechprintInfluence;
   localPronunciationBaseFallback?: "en-US" | "en-GB";
 }
@@ -464,6 +467,37 @@ const AMERICAN_PRONUNCIATION_BASE_INFLUENCES = new Set<
   "miami-english",
 ]);
 
+/**
+ * The direction tag is the entire Premium accent mechanism: Premium sends the
+ * written line through untouched. A tag naming a region the provider has no
+ * concept of therefore produces no accent at all, which is strictly worse than
+ * naming its nearest well-known neighbour — most of the same phonology reaches
+ * the listener, and PRISM decides the substitution rather than leaving it to
+ * whatever the provider makes of a place name. The Accent Map keeps showing
+ * the precise place; only the private cue changes.
+ *
+ * These are the points whose atlas label is a dialectologist's name rather
+ * than an accent anyone would ask a performer for. Every other definition
+ * already names something a performer could act on directly.
+ */
+const PREMIUM_ACCENT_DIRECTION_LABELS: Partial<
+  Record<Exclude<LocalVoiceSpeechprintInfluence, "none">, string>
+> = {
+  "southern-us-english": "Southern American",
+  "north-florida-english": "Southern American",
+  "southern-california-english": "Californian",
+  "bay-area-english": "Northern Californian",
+  "inland-north-english": "Midwestern American",
+  "eastern-new-england-english": "Boston",
+  "texas-english": "Texan",
+  "appalachian-english": "Appalachian American",
+  "modern-rp-english": "Received Pronunciation",
+  "estuary-english": "Estuary English",
+  "parisian-french-influenced-english": "Parisian French",
+  "nordic-influenced-english": "Scandinavian",
+  "singapore-english": "Singaporean",
+};
+
 export const VOICE_ACCENT_DEFINITIONS: readonly VoiceAccentDefinitionV1[] = [
   {
     id: "american-english",
@@ -500,6 +534,9 @@ export const VOICE_ACCENT_DEFINITIONS: readonly VoiceAccentDefinitionV1[] = [
       capability.id,
       capability.label,
     ),
+    ...(PREMIUM_ACCENT_DIRECTION_LABELS[capability.id]
+      ? { premiumDirectionLabel: PREMIUM_ACCENT_DIRECTION_LABELS[capability.id] }
+      : {}),
     localSpeechprintFallback: capability.id,
     ...(AMERICAN_PRONUNCIATION_BASE_INFLUENCES.has(capability.id)
       ? { localPronunciationBaseFallback: "en-US" as const }
@@ -864,11 +901,17 @@ export function resolvePremiumAccentDirection(args: {
       : strength === "strong"
         ? "strong "
         : "";
-  const providerAccentLabel = target.premiumAccentedEnglishLabel.replace(
-    /-accented English$/u,
-    " accent",
-  );
-  return `${intensity}${providerAccentLabel}`;
+  const providerAccentLabel =
+    target.premiumDirectionLabel ??
+    target.premiumAccentedEnglishLabel
+      // A slash-joined label names one accent twice. The tag is now the whole
+      // Premium accent mechanism, so it has to stay inside the direction
+      // character cap: a clipped tag loses the word "accent" and stops reading
+      // as a direction at all.
+      .split(" / ")[0]!
+      .replace(/-accented English$/u, "")
+      .replace(/-accented$/u, "");
+  return `${intensity}${providerAccentLabel} accent`;
 }
 
 type SpeechprintRuleTier = "light" | "balanced" | "strong";

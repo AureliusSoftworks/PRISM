@@ -3731,6 +3731,8 @@ export * from "./voiceAlignmentTrace.js";
 export * from "./voicePerformance.js";
 export * from "./localVoice.js";
 export * from "./voiceSpeechprint.js";
+export * from "./protectedSpeech.js";
+export * from "./premiumRespelling.js";
 export * from "./listenerReaction.js";
 export * from "./responseCue.js";
 export * from "./turnPreparation.js";

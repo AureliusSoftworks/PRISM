@@ -93,8 +93,37 @@ selects Instant when either is active; a forced Voice+ or installed
 operating-system voice preserves its genuine pronunciation and reports the
 phoneme control as suspended. Speechprints apply after the resolved American
 or British pronunciation base. Premium, Babble, Bottish, and cached vocal
-actions do not apply either control. Voice Source and Current previews compare
-the same line.
+actions do not apply either control. Premium instead expresses the saved Accent
+Map as an ElevenLabs v3 direction tag — `[Irish accent]`, `[strong French
+accent]` — and sends the written line through unchanged. ElevenLabs has no
+phoneme control, so notation placed in the request text is read aloud as
+notation rather than pronounced. Where the atlas label is a dialectologist's
+name rather than an accent anyone would ask a performer for, PRISM substitutes
+its own nearest actionable name in the private cue — Bay Area becomes Northern
+Californian, Inland North becomes Midwestern American, Eastern New England
+becomes Boston — because a region the provider has no concept of yields no
+accent at all. The Accent Map keeps showing the precise place.
+
+Where the accent also moves consonants, Premium respells the words it changes
+rather than sending phonemes: an accent that stops θ requests "I tink dis",
+one that fronts it requests "I fink". The word lists are curated per accent
+and descend from that accent's own Speechprint rules, so the word side and the
+phoneme side stay traceable to each other; orthographic `th` is ambiguous, so
+they are never expressed as patterns. Vowels stay with the direction — vowel
+respelling produces non-words the model has to guess at. Light is direction
+only; Balanced adds the highest-frequency words where the accent's own rule
+fires below Strong, and Strong widens the list. An accent whose Local rule is
+Strong-only — Essex and Estuary th-fronting — respells nothing until Strong.
+Calibration scripts and sound-effect prompt seeds opt out entirely.
+Respelling is skipped entirely when the voice already carries the accent and
+no direction is issued. Protected spans — authored name pronunciations,
+self-referrals, initialisms, code-like tokens, and anything carrying a digit —
+are never respelled, and provider timing is projected back onto the words as
+written, so the alignment this route returns matches the original line
+character for character. As with Local phonemes, only the private request
+changes: visible dialogue, captions, prompts, memories, summaries, boards,
+ballots, and transcript exports retain the original text. Voice Source and Current previews compare the
+same line.
 
 Instant phonemizes each speech segment locally from its genuine American or
 British base, applies deterministic word-boundary-aware sound rules, then a

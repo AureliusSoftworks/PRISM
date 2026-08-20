@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  ELEVENLABS_VOICE_DIRECTION_MAX_CHARACTERS,
   LOCAL_VOICE_SPEECHPRINT_CAPABILITIES,
   LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256,
   VOICE_ACCENT_DEFINITIONS,
   VOICE_ACCENT_MAP_ANCHORS,
+  normalizeElevenLabsVoiceDirection,
   applyLocalVoiceSpeechprintMelodyToIpa,
   applyLocalVoiceSpeechprintToIpa,
   applyVoiceAccentFieldToIpa,
@@ -339,6 +341,93 @@ describe("local voice Speechprints", () => {
         nativeAccentHint: null,
       }),
       "British accent",
+    );
+  });
+
+  it("keeps every Premium accent cue inside the direction character cap", () => {
+    // The bracketed direction is the entire Premium accent mechanism: Premium
+    // never rewrites the spoken line. A cue clipped by the shared normalizer
+    // loses the trailing "accent" and stops reading as an accent direction.
+    for (const definition of VOICE_ACCENT_DEFINITIONS) {
+      for (const speechprintStrength of ["light", "balanced", "strong"]) {
+        const cue = resolvePremiumAccentDirection({
+          accentDefinitionId: definition.id,
+          pronunciationBase: "en-US",
+          speechprintInfluence: "none",
+          speechprintStrength,
+          nativeAccentHint: null,
+        });
+        assert.ok(cue, `${definition.id} ${speechprintStrength} has no cue`);
+        assert.ok(
+          cue.length <= ELEVENLABS_VOICE_DIRECTION_MAX_CHARACTERS,
+          `${cue} exceeds ${ELEVENLABS_VOICE_DIRECTION_MAX_CHARACTERS}`,
+        );
+        assert.match(cue, / accent$/u);
+        assert.equal(normalizeElevenLabsVoiceDirection(cue), cue);
+      }
+    }
+  });
+
+  it("gives dialectologist place names a cue a performer could act on", () => {
+    // A tag naming a region the provider has no concept of produces no accent
+    // at all. PRISM picks the nearest well-known neighbour itself rather than
+    // leaving a place name to the provider's guess.
+    const cue = (accentDefinitionId: string) =>
+      resolvePremiumAccentDirection({
+        accentDefinitionId,
+        pronunciationBase: "en-US",
+        speechprintInfluence: "none",
+        speechprintStrength: "balanced",
+        nativeAccentHint: null,
+      });
+    assert.equal(cue("bay-area-english"), "Northern Californian accent");
+    assert.equal(cue("inland-north-english"), "Midwestern American accent");
+    assert.equal(cue("north-florida-english"), "Southern American accent");
+    assert.equal(cue("eastern-new-england-english"), "Boston accent");
+    assert.equal(
+      cue("parisian-french-influenced-english"),
+      "Parisian French accent",
+    );
+    assert.equal(cue("modern-rp-english"), "Received Pronunciation accent");
+  });
+
+  it("keeps the Accent Map display label out of the Premium substitution", () => {
+    // The atlas still shows the precise place; only the private cue changes.
+    for (const definition of VOICE_ACCENT_DEFINITIONS) {
+      if (!definition.premiumDirectionLabel) continue;
+      assert.match(
+        definition.premiumAccentedEnglishLabel,
+        /-accented English$/u,
+      );
+      assert.notEqual(
+        definition.premiumAccentedEnglishLabel,
+        `${definition.premiumDirectionLabel}-accented English`,
+      );
+    }
+  });
+
+  it("never carries an alias slash into a Premium cue", () => {
+    // A slash-joined atlas label names one accent twice. Left intact it both
+    // overruns the direction cap and reads as two conflicting directions.
+    for (const definition of VOICE_ACCENT_DEFINITIONS) {
+      const cue = resolvePremiumAccentDirection({
+        accentDefinitionId: definition.id,
+        pronunciationBase: "en-GB",
+        speechprintInfluence: "none",
+        speechprintStrength: "strong",
+        nativeAccentHint: null,
+      });
+      assert.doesNotMatch(cue ?? "", /\//u);
+    }
+    assert.equal(
+      resolvePremiumAccentDirection({
+        accentDefinitionId: "modern-rp-english",
+        pronunciationBase: "en-GB",
+        speechprintInfluence: "none",
+        speechprintStrength: "strong",
+        nativeAccentHint: null,
+      }),
+      "strong Received Pronunciation accent",
     );
   });
 

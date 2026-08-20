@@ -457,7 +457,7 @@ describe("voice Phase 1 boundary", () => {
     assert.equal(requestBody?.model_id, "eleven_v3");
     assert.equal(
       requestBody?.text,
-      "[German accent] [hushed] [measured] \"/zə dˈɔːɹ ɪz ɔːlɹˌɛdi ˈoʊpən/\".",
+      "[German accent] [hushed] [measured] The door is already open.",
     );
     assert.equal(request.text, text);
     assert.doesNotMatch(requestBody?.text as string, /warmly/u);
@@ -470,15 +470,13 @@ describe("voice Phase 1 boundary", () => {
         voiceId: "british-premium-voice",
         nativeAccent: "British",
         accentDefinitionId: "american-english",
-        expectedText:
-          "[American accent] \"/pˈiːɾəɹ pˈaɪpəɹ pˈɪkt ɐ pˈɛk ʌv pˈɪkəld pˈɛpəɹz/\".",
+        expectedText: `[American accent] ${sourceText}`,
       },
       {
         voiceId: "american-premium-voice",
         nativeAccent: "American",
         accentDefinitionId: "british-english",
-        expectedText:
-          "[British accent] \"/pˈiːtə pˈaɪpə pˈɪkt ɐ pˈɛk ɒv pˈɪkəld pˈɛpəz/\".",
+        expectedText: `[British accent] ${sourceText}`,
       },
     ] as const;
     const providerTexts: string[] = [];
@@ -519,13 +517,14 @@ describe("voice Phase 1 boundary", () => {
     assert.notEqual(providerTexts[0], providerTexts[1]);
   });
 
-  it("keeps Strong Paris-region French phonology on the shared Premium path", async () => {
+  it("carries Accent Map strength in the Premium direction, never in the line", async () => {
     let requestBody: Record<string, unknown> | null = null;
+    const text = "They think this hard river is home late.";
     await requestElevenLabsSpeech({
       apiKey: "secret-key",
       voiceId: "american-premium-voice",
       model: "eleven_flash_v2_5",
-      text: "They think this hard river is home late.",
+      text,
       profile: {
         ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
         elevenLabsNativeAccentHint: "American",
@@ -540,23 +539,19 @@ describe("voice Phase 1 boundary", () => {
     });
 
     assert.equal(requestBody?.model_id, "eleven_v3");
-    assert.match(
-      String(requestBody?.text),
-      /^\[strong Paris-region French accent\] "\//u,
+    assert.equal(
+      requestBody?.text,
+      `[strong Parisian French accent] ${text}`,
     );
-    assert.match(String(requestBody?.text), /ʁ/u);
-    assert.match(String(requestBody?.text), /lˈet/u);
-    assert.match(String(requestBody?.text), /ˌom/u);
   });
 
-  it("keeps protected pronunciations out of the Accent Map transformations", async () => {
+  it("never respells names or words on the Premium Accent Map path", async () => {
     let requestBody: Record<string, unknown> | null = null;
     await requestElevenLabsSpeech({
       apiKey: "secret-key",
       voiceId: "voice-id",
       model: "eleven_flash_v2_5",
       text: "Walter waits.",
-      protectedPhrases: ["Walter"],
       profile: {
         ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
         accentDefinitionId: "german-influenced-english",
@@ -568,10 +563,10 @@ describe("voice Phase 1 boundary", () => {
       }) as typeof fetch,
     });
 
-    assert.equal(
-      requestBody?.text,
-      "[German accent] \"/wˈɔltəɹ vˈeɪts/\".",
-    );
+    // Phoneme notation in the request text is read aloud as notation. The
+    // accent is a direction; the line stays exactly as the bot wrote it.
+    assert.equal(requestBody?.text, "[German accent] Walter waits.");
+    assert.equal(requestBody?.pronunciation_dictionary_locators, undefined);
   });
 
   it("turns non-neutral delivery moods into sparse Eleven v3 directions", async () => {
@@ -845,7 +840,7 @@ describe("voice Phase 1 boundary", () => {
     assert.equal(speech.alignment?.characters.join(""), "Hi there.");
   });
 
-  it("projects timestamped inline IPA back onto the original tagged transcript", async () => {
+  it("maps timestamped alignment back onto the original tagged transcript", async () => {
     const spokenText = "Peter Piper picked a peck of pickled peppers.";
     const sourceText = `[sighs] ${spokenText} [laughs]`;
     let providerText = "";
@@ -888,16 +883,112 @@ describe("voice Phase 1 boundary", () => {
     const speech = await requestElevenLabsSpeechWithTimestamps(request);
 
     assert.match(requestedUrl, /british-premium-voice\/with-timestamps/u);
-    assert.equal(
-      providerText,
-      "[American accent] [hushed] [sighs] \"/pˈiːɾəɹ pˈaɪpəɹ pˈɪkt ɐ pˈɛk ʌv pˈɪkəld pˈɛpəɹz/\". [laughs]",
-    );
+    assert.equal(providerText, `[American accent] [hushed] ${sourceText}`);
     assert.equal(speech.alignment?.characters.join(""), spokenText);
     assert.doesNotMatch(speech.alignment?.characters.join("") ?? "", /[\/\[\]ˈɾɚɹ]/u);
     assert.equal(request.text, sourceText);
   });
 
-  it("rejects incomplete timestamped inline IPA before returning partial speech", async () => {
+  it("hands respelled provider timing back to the words as written", async () => {
+    const spokenText = "I think this brother said thanks.";
+    const sourceText = `[sighs] ${spokenText} [laughs]`;
+    let providerText = "";
+    const request = {
+      apiKey: "secret-key",
+      voiceId: "american-premium-voice",
+      model: "eleven_flash_v2_5",
+      text: sourceText,
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        elevenLabsNativeAccentHint: "American",
+        accentDefinitionId: "cockney-english",
+        speechprintStrength: "strong" as const,
+      },
+      fetchImpl: (async (_url, init) => {
+        const body = JSON.parse(String(init?.body)) as { text: string };
+        providerText = body.text;
+        const characters = Array.from(body.text);
+        return new Response(JSON.stringify({
+          audio_base64: "AQID",
+          alignment: {
+            characters,
+            character_start_times_seconds: characters.map((_, i) => i * 0.01),
+            character_end_times_seconds: characters.map((_, i) => (i + 1) * 0.01),
+          },
+        }), { status: 200 });
+      }) as typeof fetch,
+    };
+
+    const speech = await requestElevenLabsSpeechWithTimestamps(request);
+
+    // Consonants move in the request; audio tags and spacing do not.
+    assert.equal(
+      providerText,
+      "[strong Cockney accent] [sighs] I fink this bruvver said fanks. [laughs]",
+    );
+    // Timing comes back attached to the line the bot actually wrote.
+    assert.equal(speech.alignment?.characters.join(""), spokenText);
+    const starts = speech.alignment?.characterStartTimesSeconds ?? [];
+    for (let index = 1; index < starts.length; index += 1) {
+      assert.ok(
+        starts[index]! >= starts[index - 1]!,
+        "projected timings must not run backwards",
+      );
+    }
+    assert.equal(request.text, sourceText);
+  });
+
+  it("leaves the written line untouched when the voice already has the accent", async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    const text = "I think this brother said thanks.";
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      voiceId: "cockney-premium-voice",
+      model: "eleven_flash_v2_5",
+      text,
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        elevenLabsNativeAccentHint: "Cockney",
+        accentDefinitionId: "cockney-english",
+      },
+      fetchImpl: (async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+
+    // No direction means the voice already speaks it; respelling on top
+    // would double the accent.
+    assert.equal(requestBody?.text, text);
+  });
+
+  it("never respells an authored name pronunciation", async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      voiceId: "american-premium-voice",
+      model: "eleven_flash_v2_5",
+      text: "Thanks, Thistle. I think DATA is three things.",
+      protectedPhrases: ["Thistle"],
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        elevenLabsNativeAccentHint: "American",
+        accentDefinitionId: "irish-english",
+        speechprintStrength: "strong" as const,
+      },
+      fetchImpl: (async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+
+    assert.equal(
+      requestBody?.text,
+      "[strong Irish accent] Tanks, Thistle. I tink DATA is tree tings.",
+    );
+  });
+
+  it("rejects incomplete timestamped speech before returning partial audio", async () => {
     await assert.rejects(
       requestElevenLabsSpeechWithTimestamps({
         apiKey: "secret-key",

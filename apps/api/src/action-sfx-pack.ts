@@ -346,6 +346,7 @@ export async function generateActionSfxPack(args: {
         model: args.voiceModel ?? "eleven_v3",
         text: promptSeed,
         profile,
+        respellAccent: false,
         seed,
         signal: args.signal,
         fetchImpl: args.fetchImpl,

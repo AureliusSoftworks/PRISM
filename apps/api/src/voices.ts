@@ -1,14 +1,14 @@
 import {
+  applyPremiumRespelling,
   applyVoiceDeliveryMoodToProfile,
   elevenLabsVoiceDirectionForMood,
+  resolveLocalAccentFallback,
   resolvePremiumAccentDirection,
   normalizeBotAudioVoiceProfileV1,
   normalizeEnglishVoiceEngine,
   normalizeElevenLabsVoiceDirection,
   normalizeVoiceMode,
   normalizeVoiceDeliveryMood,
-  voiceAccentDefinitionForId,
-  voiceAccentDefinitionForLegacyProfile,
   voicePerformanceTextFromActionCues,
   voiceSpokenText,
   ELEVENLABS_VOICE_STABILITY_DEFAULT,
@@ -145,6 +145,10 @@ type ElevenLabsSpeechArgs = {
   profile: BotAudioVoiceProfileV1;
   deliveryMood?: VoiceDeliveryMood;
   protectedPhrases?: readonly string[];
+  /** Off for utterances that are not dialogue — a fixed calibration script or
+   * a sound-effect prompt seed, where respelling would corrupt the payload
+   * rather than accent it. Dialogue leaves this on. */
+  respellAccent?: boolean;
   seed?: number;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
@@ -195,201 +199,66 @@ function normalizeElevenLabsTaggedText(
 
 type ElevenLabsTextProjectionSegment = {
   providerText: string;
-  sourceText: string | null;
+  sourceText: string;
 };
-
-type ElevenLabsAccentProjection = {
-  text: string;
-  segments: ElevenLabsTextProjectionSegment[];
-  hasInlineIpa: boolean;
-};
-
-type PrepareAccentMapTargetIpa =
-  typeof import("./builtin-tts-runtime.ts").prepareAccentMapTargetIpa;
-
-const ELEVENLABS_IPA_WORD_SOURCE =
-  String.raw`[\p{L}\p{M}\p{N}]+(?:[’'][\p{L}\p{M}\p{N}]+)*(?:-[\p{L}\p{M}\p{N}]+(?:[’'][\p{L}\p{M}\p{N}]+)*)*`;
-const ELEVENLABS_IPA_WORD_PATTERN = new RegExp(
-  ELEVENLABS_IPA_WORD_SOURCE,
-  "gu",
-);
-const ELEVENLABS_IPA_RUN_PATTERN = new RegExp(
-  `${ELEVENLABS_IPA_WORD_SOURCE}(?:[ \t]+${ELEVENLABS_IPA_WORD_SOURCE})*`,
-  "gu",
-);
-
-function identityProjection(value: string): ElevenLabsTextProjectionSegment {
-  return { providerText: value, sourceText: value };
-}
-
-function inlineIpaProjection(
-  sourceText: string,
-  targetIpa: string,
-): ElevenLabsTextProjectionSegment[] | null {
-  const ipa = targetIpa
-    .replace(/[\r\n"/]+/gu, " ")
-    .replace(/\s+/gu, " ")
-    .trim();
-  if (!ipa) return null;
-  const sourceWords = [...sourceText.matchAll(ELEVENLABS_IPA_WORD_PATTERN)];
-  const ipaWords = ipa.split(/\s+/gu);
-  const segments: ElevenLabsTextProjectionSegment[] = [
-    { providerText: "\"/", sourceText: null },
-  ];
-  if (sourceWords.length > 0 && sourceWords.length === ipaWords.length) {
-    let sourceCursor = 0;
-    for (let index = 0; index < sourceWords.length; index += 1) {
-      const sourceWord = sourceWords[index]!;
-      const sourceStart = sourceWord.index ?? sourceCursor;
-      if (sourceStart > sourceCursor) {
-        segments.push({
-          providerText: " ",
-          sourceText: sourceText.slice(sourceCursor, sourceStart),
-        });
-      }
-      segments.push({
-        providerText: ipaWords[index]!,
-        sourceText: sourceWord[0],
-      });
-      sourceCursor = sourceStart + sourceWord[0].length;
-    }
-    if (sourceCursor < sourceText.length) {
-      segments.push({
-        providerText: " ",
-        sourceText: sourceText.slice(sourceCursor),
-      });
-    }
-  } else {
-    segments.push({ providerText: ipa, sourceText });
-  }
-  segments.push({ providerText: "/\"", sourceText: null });
-  return segments;
-}
-
-async function accentProjectionForPlainText(args: {
-  text: string;
-  profile: BotAudioVoiceProfileV1;
-  protectedPhrases?: readonly string[];
-  prepareTargetIpa: PrepareAccentMapTargetIpa;
-}): Promise<ElevenLabsAccentProjection> {
-  const runs = [...args.text.matchAll(ELEVENLABS_IPA_RUN_PATTERN)];
-  if (runs.length === 0) {
-    return {
-      text: args.text,
-      segments: args.text ? [identityProjection(args.text)] : [],
-      hasInlineIpa: false,
-    };
-  }
-  const plans = await Promise.all(
-    runs.map((run) =>
-      args.prepareTargetIpa({
-        text: run[0],
-        profile: args.profile,
-        protectedPhrases: args.protectedPhrases,
-      }),
-    ),
-  );
-  const segments: ElevenLabsTextProjectionSegment[] = [];
-  let cursor = 0;
-  let hasInlineIpa = false;
-  for (let index = 0; index < runs.length; index += 1) {
-    const run = runs[index]!;
-    const start = run.index ?? cursor;
-    if (start > cursor) {
-      segments.push(identityProjection(args.text.slice(cursor, start)));
-    }
-    const sourceText = run[0];
-    const projection = plans[index]?.targetIpa
-      ? inlineIpaProjection(sourceText, plans[index]!.targetIpa!)
-      : null;
-    if (projection) {
-      segments.push(...projection);
-      hasInlineIpa = true;
-    } else {
-      segments.push(identityProjection(sourceText));
-    }
-    cursor = start + sourceText.length;
-  }
-  if (cursor < args.text.length) {
-    segments.push(identityProjection(args.text.slice(cursor)));
-  }
-  return {
-    text: segments.map((segment) => segment.providerText).join(""),
-    segments,
-    hasInlineIpa,
-  };
-}
-
-async function elevenLabsAccentProjection(
-  args: ElevenLabsSpeechArgs,
-  normalizedProfile: ReturnType<typeof normalizeBotAudioVoiceProfileV1>,
-): Promise<ElevenLabsAccentProjection> {
-  const target =
-    voiceAccentDefinitionForId(normalizedProfile.accentDefinitionId) ??
-    voiceAccentDefinitionForLegacyProfile({
-      pronunciationBase: normalizedProfile.pronunciationBase,
-      speechprintInfluence: normalizedProfile.speechprintInfluence,
-    });
-  if (!target) {
-    return {
-      text: args.text,
-      segments: [identityProjection(args.text)],
-      hasInlineIpa: false,
-    };
-  }
-  // Keep the Emscripten phonemizer out of API startup and ordinary Premium
-  // requests. It loads locally only when a saved Accent Map needs target IPA.
-  const { prepareAccentMapTargetIpa } = await import(
-    "./builtin-tts-runtime.ts"
-  );
-  const segments: ElevenLabsTextProjectionSegment[] = [];
-  let cursor = 0;
-  let hasInlineIpa = false;
-  const tags = [...args.text.matchAll(ELEVENLABS_AUDIO_TAG_PATTERN)];
-  for (const tag of tags) {
-    const start = tag.index ?? cursor;
-    if (start > cursor) {
-      const projection = await accentProjectionForPlainText({
-        text: args.text.slice(cursor, start),
-        profile: normalizedProfile,
-        protectedPhrases: args.protectedPhrases,
-        prepareTargetIpa: prepareAccentMapTargetIpa,
-      });
-      segments.push(...projection.segments);
-      hasInlineIpa ||= projection.hasInlineIpa;
-    }
-    segments.push({ providerText: tag[0], sourceText: null });
-    cursor = start + tag[0].length;
-  }
-  if (cursor < args.text.length) {
-    const projection = await accentProjectionForPlainText({
-      text: args.text.slice(cursor),
-      profile: normalizedProfile,
-      protectedPhrases: args.protectedPhrases,
-      prepareTargetIpa: prepareAccentMapTargetIpa,
-    });
-    segments.push(...projection.segments);
-    hasInlineIpa ||= projection.hasInlineIpa;
-  }
-  return {
-    text: segments.map((segment) => segment.providerText).join(""),
-    segments,
-    hasInlineIpa,
-  };
-}
 
 type ElevenLabsSpeechInput = {
   text: string;
   model: ElevenLabsTtsModel;
   directionPrefix: string;
   sourceText: string;
-  projectionSegments: ElevenLabsTextProjectionSegment[];
-  hasInlineIpa: boolean;
+  /** Provider body paired with the written line it stands for. Identity when
+   * nothing was respelled. */
+  projectionSegments: readonly ElevenLabsTextProjectionSegment[];
+  respelled: boolean;
 };
 
-async function elevenLabsSpeechInput(
+/**
+ * Respell the words this accent spells differently, leaving audio tags and
+ * the spacing around them exactly as written. Tags map to themselves rather
+ * than to nothing, so the projected alignment reconstructs the tagged source
+ * line and the ordinary tag-stripping pass still runs against it.
+ */
+function elevenLabsRespelling(
   args: ElevenLabsSpeechArgs,
-): Promise<ElevenLabsSpeechInput> {
+  normalizedProfile: ReturnType<typeof normalizeBotAudioVoiceProfileV1>,
+): { text: string; segments: ElevenLabsTextProjectionSegment[]; respelled: boolean } {
+  const accent = resolveLocalAccentFallback({
+    accentDefinitionId: normalizedProfile.accentDefinitionId,
+    pronunciationBase: normalizedProfile.pronunciationBase,
+    speechprintInfluence: normalizedProfile.speechprintInfluence,
+  });
+  const segments: ElevenLabsTextProjectionSegment[] = [];
+  let respelled = false;
+  const pushPlain = (value: string) => {
+    if (!value) return;
+    const projection = applyPremiumRespelling({
+      text: value,
+      influence: accent.speechprintInfluence,
+      strength: normalizedProfile.speechprintStrength,
+      protectedPhrases: args.protectedPhrases,
+    });
+    segments.push(...projection.segments);
+    respelled ||= projection.changed;
+  };
+  let cursor = 0;
+  for (const tag of args.text.matchAll(ELEVENLABS_AUDIO_TAG_PATTERN)) {
+    const start = tag.index ?? cursor;
+    if (start > cursor) pushPlain(args.text.slice(cursor, start));
+    segments.push({ providerText: tag[0], sourceText: tag[0] });
+    cursor = start + tag[0].length;
+  }
+  if (cursor < args.text.length) pushPlain(args.text.slice(cursor));
+  return {
+    text: segments.map((segment) => segment.providerText).join(""),
+    segments,
+    respelled,
+  };
+}
+
+function elevenLabsSpeechInput(
+  args: ElevenLabsSpeechArgs,
+): ElevenLabsSpeechInput {
   const normalizedProfile = normalizeBotAudioVoiceProfileV1(args.profile);
   const authoredDirection = normalizeElevenLabsVoiceDirection(
     normalizedProfile.elevenLabsDirection,
@@ -417,11 +286,7 @@ async function elevenLabsSpeechInput(
       .filter(Boolean)
       .join(", ") || null,
   );
-  const accentProjection = await elevenLabsAccentProjection(
-    args,
-    normalizedProfile,
-  );
-  const model = direction || hasAudioTags || accentProjection.hasInlineIpa
+  const model = direction || hasAudioTags
     ? "eleven_v3"
     : normalizeElevenLabsTtsModel(args.model);
   const directionPrefix = direction
@@ -430,18 +295,26 @@ async function elevenLabsSpeechInput(
         .map((entry) => `[${entry.trim().replace(/[\[\]]/gu, "")}]`)
         .join(" ")} `
     : "";
+  // The direction carries vowel space and prosody; respelling carries the
+  // consonants a direction alone will not produce. Both are private to the
+  // request. IPA is deliberately not an option here: ElevenLabs has no
+  // phoneme control, so notation in the text is read aloud as notation.
+  //
+  // No accent direction means the voice already speaks this accent, and
+  // respelling on top of it would double the effect.
+  const respelling = accentDirection && args.respellAccent !== false
+    ? elevenLabsRespelling(args, normalizedProfile)
+    : null;
+  const body = respelling?.text ?? args.text;
   return {
-    text: `${directionPrefix}${accentProjection.text}`,
+    text: `${directionPrefix}${body}`,
     model,
     directionPrefix,
     sourceText: args.text,
-    projectionSegments: [
-      ...(directionPrefix
-        ? [{ providerText: directionPrefix, sourceText: null }]
-        : []),
-      ...accentProjection.segments,
-    ],
-    hasInlineIpa: accentProjection.hasInlineIpa,
+    projectionSegments:
+      respelling?.segments ??
+      (args.text ? [{ providerText: args.text, sourceText: args.text }] : []),
+    respelled: respelling?.respelled === true,
   };
 }
 
@@ -544,34 +417,20 @@ function withoutEmbeddedAudioTagAlignment(
   };
 }
 
-function trimVoiceCharacterAlignment(
-  alignment: VoiceCharacterAlignment,
-): VoiceCharacterAlignment | null {
-  let start = 0;
-  let end = alignment.characters.length;
-  while (start < end && alignment.characters[start]!.trim() === "") start += 1;
-  while (end > start && alignment.characters[end - 1]!.trim() === "") end -= 1;
-  if (start === end) return null;
-  return {
-    characters: alignment.characters.slice(start, end),
-    characterStartTimesSeconds:
-      alignment.characterStartTimesSeconds.slice(start, end),
-    characterEndTimesSeconds:
-      alignment.characterEndTimesSeconds.slice(start, end),
-  };
-}
-
 /**
- * ElevenLabs aligns against the provider request, which now contains inline
- * IPA rather than the saved transcript. Project each IPA timing window back
- * onto its original word and omit private direction/audio-tag markup.
+ * Provider timing is measured against the respelled body. Hand each word's
+ * window back to the word as written, so the alignment this route returns
+ * reconstructs the source line character for character and the ordinary
+ * tag-stripping pass can run against it unchanged.
  */
-function projectInlineIpaAlignmentToSource(
+function projectRespellingAlignmentToSource(
   alignment: VoiceCharacterAlignment | null,
-  input: ElevenLabsSpeechInput,
+  segments: readonly ElevenLabsTextProjectionSegment[],
 ): VoiceCharacterAlignment | null {
   if (!alignment) return null;
-  const providerCharacters = Array.from(input.text);
+  const providerCharacters = Array.from(
+    segments.map((segment) => segment.providerText).join(""),
+  );
   if (
     alignment.characters.length !== providerCharacters.length ||
     alignment.characters.join("") !== providerCharacters.join("")
@@ -583,52 +442,36 @@ function projectInlineIpaAlignmentToSource(
     characterStartTimesSeconds: [],
     characterEndTimesSeconds: [],
   };
-  let providerCursor = 0;
-  for (const segment of input.projectionSegments) {
-    const segmentCharacters = Array.from(segment.providerText);
-    const segmentEnd = providerCursor + segmentCharacters.length;
-    if (
-      providerCharacters.slice(providerCursor, segmentEnd).join("") !==
-      segmentCharacters.join("")
-    ) {
-      return null;
-    }
-    if (segment.sourceText !== null) {
-      const sourceCharacters = Array.from(segment.sourceText);
-      const starts = alignment.characterStartTimesSeconds.slice(
-        providerCursor,
-        segmentEnd,
-      );
-      const ends = alignment.characterEndTimesSeconds.slice(
-        providerCursor,
-        segmentEnd,
-      );
-      if (
-        sourceCharacters.join("") === segmentCharacters.join("") &&
-        sourceCharacters.length === segmentCharacters.length
-      ) {
-        projected.characters.push(...sourceCharacters);
-        projected.characterStartTimesSeconds.push(...starts);
-        projected.characterEndTimesSeconds.push(...ends);
-      } else if (sourceCharacters.length > 0 && starts.length > 0) {
-        const windowStart = Math.min(...starts);
-        const windowEnd = Math.max(...ends);
-        const duration = Math.max(0, windowEnd - windowStart);
-        for (let index = 0; index < sourceCharacters.length; index += 1) {
-          projected.characters.push(sourceCharacters[index]!);
-          projected.characterStartTimesSeconds.push(
-            windowStart + duration * (index / sourceCharacters.length),
-          );
-          projected.characterEndTimesSeconds.push(
-            windowStart + duration * ((index + 1) / sourceCharacters.length),
-          );
-        }
+  let cursor = 0;
+  for (const segment of segments) {
+    const providerLength = Array.from(segment.providerText).length;
+    const end = cursor + providerLength;
+    const sourceCharacters = Array.from(segment.sourceText);
+    const starts = alignment.characterStartTimesSeconds.slice(cursor, end);
+    const ends = alignment.characterEndTimesSeconds.slice(cursor, end);
+    if (sourceCharacters.length === providerLength) {
+      projected.characters.push(...sourceCharacters);
+      projected.characterStartTimesSeconds.push(...starts);
+      projected.characterEndTimesSeconds.push(...ends);
+    } else if (sourceCharacters.length > 0 && starts.length > 0) {
+      // A respelled word is one timing window: spread it evenly across the
+      // written letters rather than guessing a letter-to-letter mapping.
+      const windowStart = Math.min(...starts);
+      const windowEnd = Math.max(...ends);
+      const duration = Math.max(0, windowEnd - windowStart);
+      for (let index = 0; index < sourceCharacters.length; index += 1) {
+        projected.characters.push(sourceCharacters[index]!);
+        projected.characterStartTimesSeconds.push(
+          windowStart + duration * (index / sourceCharacters.length),
+        );
+        projected.characterEndTimesSeconds.push(
+          windowStart + duration * ((index + 1) / sourceCharacters.length),
+        );
       }
     }
-    providerCursor = segmentEnd;
+    cursor = end;
   }
-  if (providerCursor !== providerCharacters.length) return null;
-  return trimVoiceCharacterAlignment(projected);
+  return projected;
 }
 
 /**
@@ -664,11 +507,15 @@ export async function requestElevenLabsSpeech(args: {
   profile: BotAudioVoiceProfileV1;
   deliveryMood?: VoiceDeliveryMood;
   protectedPhrases?: readonly string[];
+  /** Off for utterances that are not dialogue — a fixed calibration script or
+   * a sound-effect prompt seed, where respelling would corrupt the payload
+   * rather than accent it. Dialogue leaves this on. */
+  respellAccent?: boolean;
   seed?: number;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
 }): Promise<Response> {
-  const input = await elevenLabsSpeechInput(args);
+  const input = elevenLabsSpeechInput(args);
   const fetchImpl = args.fetchImpl ?? fetch;
   const response = await fetchImpl(
     `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(args.voiceId)}/stream?output_format=mp3_44100_128`,
@@ -692,7 +539,7 @@ export async function requestElevenLabsSpeech(args: {
 export async function requestElevenLabsSpeechWithTimestamps(
   args: ElevenLabsSpeechArgs
 ): Promise<ElevenLabsTimestampedSpeech> {
-  const input = await elevenLabsSpeechInput(args);
+  const input = elevenLabsSpeechInput(args);
   const fetchImpl = args.fetchImpl ?? fetch;
   const response = await fetchImpl(
     `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(args.voiceId)}/with-timestamps?output_format=mp3_44100_128`,
@@ -734,27 +581,28 @@ export async function requestElevenLabsSpeechWithTimestamps(
       "ElevenLabs returned speech that ended before the requested line.",
     );
   }
-  const alignment = input.hasInlineIpa
-    ? projectInlineIpaAlignmentToSource(providerAlignment, input)
-    : withoutDirectionPrefixAlignment(
-        providerAlignment,
-        input.directionPrefix,
-      );
-  const normalizedAlignment = input.hasInlineIpa
-    ? projectInlineIpaAlignmentToSource(providerNormalizedAlignment, input)
-    : withoutDirectionPrefixAlignment(
-        providerNormalizedAlignment,
-        input.directionPrefix,
-      );
-  const spokenAlignment = input.hasInlineIpa
-    ? alignment
-    : withoutEmbeddedAudioTagAlignment(alignment, input.sourceText);
-  const spokenNormalizedAlignment = input.hasInlineIpa
-    ? normalizedAlignment
-    : withoutEmbeddedAudioTagAlignment(
-        normalizedAlignment,
-        input.sourceText,
-      );
+  const asWritten = (value: VoiceCharacterAlignment | null) => {
+    const withoutPrefix = withoutDirectionPrefixAlignment(
+      value,
+      input.directionPrefix,
+    );
+    return input.respelled
+      ? projectRespellingAlignmentToSource(
+          withoutPrefix,
+          input.projectionSegments,
+        )
+      : withoutPrefix;
+  };
+  const alignment = asWritten(providerAlignment);
+  const normalizedAlignment = asWritten(providerNormalizedAlignment);
+  const spokenAlignment = withoutEmbeddedAudioTagAlignment(
+    alignment,
+    input.sourceText,
+  );
+  const spokenNormalizedAlignment = withoutEmbeddedAudioTagAlignment(
+    normalizedAlignment,
+    input.sourceText,
+  );
   if (
     voiceCharacterAlignmentIsIncomplete(
       spokenAlignment ?? spokenNormalizedAlignment,
