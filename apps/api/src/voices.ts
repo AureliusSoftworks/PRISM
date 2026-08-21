@@ -630,6 +630,64 @@ export interface ElevenLabsVoiceCatalogEntry {
   description: string | null;
   previewUrl: string | null;
   labels: Record<string, string>;
+  /** Present for community voices copied from the public Voice Library. */
+  originalVoiceId?: string;
+  /** Public owner paired with originalVoiceId by ElevenLabs sharing metadata. */
+  publicOwnerId?: string;
+}
+
+export interface ElevenLabsSharedVoiceCandidate {
+  publicOwnerId: string;
+  voiceId: string;
+  name: string;
+  category: "professional" | "high_quality";
+  description: string | null;
+  previewUrl: string | null;
+  labels: Record<string, string>;
+}
+
+export function selectElevenLabsSharedVoiceCandidate(
+  candidates: readonly ElevenLabsSharedVoiceCandidate[],
+  excludedVoiceIds: ReadonlySet<string>,
+  random: () => number = Math.random,
+  direction = "",
+): ElevenLabsSharedVoiceCandidate | null {
+  const eligible = candidates.filter(
+    (candidate, index) =>
+      Boolean(candidate.previewUrl) &&
+      !excludedVoiceIds.has(candidate.voiceId) &&
+      candidates.findIndex((other) => other.voiceId === candidate.voiceId) === index,
+  );
+  if (eligible.length === 0) return null;
+  const directionTerms = Array.from(
+    new Set(direction.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []),
+  ).filter((term) => term.length > 1);
+  const scored = eligible.map((candidate) => {
+    const searchable = [
+      candidate.name,
+      candidate.category,
+      candidate.description ?? "",
+      ...Object.entries(candidate.labels).flat(),
+    ]
+      .join(" ")
+      .toLowerCase();
+    return {
+      candidate,
+      score: directionTerms.reduce(
+        (total, term) => total + (searchable.includes(term) ? 1 : 0),
+        0,
+      ),
+    };
+  });
+  const bestScore = Math.max(...scored.map((entry) => entry.score));
+  const pool =
+    bestScore > 0
+      ? scored
+          .filter((entry) => entry.score === bestScore)
+          .map((entry) => entry.candidate)
+      : eligible;
+  const randomValue = Math.min(0.999999999, Math.max(0, random()));
+  return pool[Math.floor(randomValue * pool.length)] ?? null;
 }
 
 export interface ElevenLabsVoiceIdentity {
@@ -720,13 +778,111 @@ export async function requestElevenLabsVoiceCatalog(args: {
   fetchImpl?: typeof fetch;
 }): Promise<ElevenLabsVoiceCatalogEntry[]> {
   const fetchImpl = args.fetchImpl ?? fetch;
-  const url = new URL("https://api.elevenlabs.io/v2/voices");
-  url.searchParams.set("page_size", "100");
-  url.searchParams.set("sort", "name");
-  url.searchParams.set("sort_direction", "asc");
-  url.searchParams.set("include_total_count", "false");
   const collectionId = args.collectionId?.trim();
-  if (collectionId) url.searchParams.set("collection_id", collectionId);
+  const voices = new Map<string, ElevenLabsVoiceCatalogEntry>();
+  let nextPageToken: string | null = null;
+
+  for (let page = 0; page < 25; page += 1) {
+    const url = new URL("https://api.elevenlabs.io/v2/voices");
+    url.searchParams.set("page_size", "100");
+    url.searchParams.set("sort", "name");
+    url.searchParams.set("sort_direction", "asc");
+    url.searchParams.set("include_total_count", "false");
+    if (collectionId) url.searchParams.set("collection_id", collectionId);
+    if (nextPageToken) url.searchParams.set("next_page_token", nextPageToken);
+    const response = await fetchImpl(url, {
+      headers: { "xi-api-key": args.apiKey },
+      signal: args.signal,
+    });
+    if (!response.ok) {
+      const detail = (await response.text()).trim();
+      throw new ElevenLabsVoiceError(
+        response.status,
+        detail || `ElevenLabs voice catalog failed (${response.status}).`,
+      );
+    }
+    const payload = await response.json() as {
+      voices?: unknown[];
+      has_more?: unknown;
+      next_page_token?: unknown;
+    };
+    for (const value of Array.isArray(payload.voices) ? payload.voices : []) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+      const record = value as Record<string, unknown>;
+      const voiceId = typeof record.voice_id === "string" ? record.voice_id.trim() : "";
+      const name = typeof record.name === "string" ? record.name.trim() : "";
+      if (!voiceId || !name) continue;
+      const labels = record.labels && typeof record.labels === "object" && !Array.isArray(record.labels)
+        ? Object.fromEntries(
+            Object.entries(record.labels as Record<string, unknown>)
+              .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+          )
+        : {};
+      const sharing = record.sharing && typeof record.sharing === "object" && !Array.isArray(record.sharing)
+        ? record.sharing as Record<string, unknown>
+        : null;
+      const originalVoiceId =
+        typeof sharing?.original_voice_id === "string"
+          ? sharing.original_voice_id.trim()
+          : "";
+      const publicOwnerId =
+        typeof sharing?.public_owner_id === "string"
+          ? sharing.public_owner_id.trim()
+          : "";
+      const previewUrl =
+        typeof record.preview_url === "string" &&
+        /^https:\/\//iu.test(record.preview_url.trim())
+          ? record.preview_url.trim()
+          : null;
+      voices.set(voiceId, {
+        voiceId,
+        name,
+        category: typeof record.category === "string" ? record.category : null,
+        description: typeof record.description === "string" ? record.description : null,
+        previewUrl,
+        labels,
+        ...(originalVoiceId ? { originalVoiceId } : {}),
+        ...(publicOwnerId ? { publicOwnerId } : {}),
+      });
+    }
+    const candidateNextPageToken =
+      typeof payload.next_page_token === "string"
+        ? payload.next_page_token.trim()
+        : "";
+    if (
+      payload.has_more !== true ||
+      !candidateNextPageToken ||
+      candidateNextPageToken === nextPageToken
+    ) {
+      break;
+    }
+    nextPageToken = candidateNextPageToken;
+  }
+
+  return Array.from(voices.values());
+}
+
+/**
+ * Returns only public, English, professional-quality library voices that can
+ * be imported into an account. The provider query does most of this work;
+ * the local checks make an unexpected provider payload safe by default.
+ */
+export async function requestElevenLabsSharedVoiceCandidates(args: {
+  apiKey: string;
+  page?: number;
+  category?: "professional" | "high_quality";
+  signal?: AbortSignal;
+  fetchImpl?: typeof fetch;
+}): Promise<ElevenLabsSharedVoiceCandidate[]> {
+  const fetchImpl = args.fetchImpl ?? fetch;
+  const url = new URL("https://api.elevenlabs.io/v1/shared-voices");
+  url.searchParams.set("page_size", "100");
+  url.searchParams.set("page", String(Math.max(0, Math.floor(args.page ?? 0))));
+  const requestedCategory = args.category ?? "professional";
+  url.searchParams.set("category", requestedCategory);
+  url.searchParams.set("language", "en");
+  url.searchParams.set("include_custom_rates", "false");
+  url.searchParams.set("include_live_moderated", "false");
   const response = await fetchImpl(url, {
     headers: { "xi-api-key": args.apiKey },
     signal: args.signal,
@@ -735,31 +891,127 @@ export async function requestElevenLabsVoiceCatalog(args: {
     const detail = (await response.text()).trim();
     throw new ElevenLabsVoiceError(
       response.status,
-      detail || `ElevenLabs voice catalog failed (${response.status}).`
+      detail || `ElevenLabs Voice Library failed (${response.status}).`,
     );
   }
-  const payload = await response.json() as { voices?: unknown[] };
-  return (Array.isArray(payload.voices) ? payload.voices : []).flatMap((value) => {
+  let rawPayload: unknown;
+  try {
+    rawPayload = await response.json();
+  } catch {
+    throw new ElevenLabsVoiceError(502, "ElevenLabs returned an invalid Voice Library response.");
+  }
+  const values =
+    rawPayload && typeof rawPayload === "object" && !Array.isArray(rawPayload)
+      ? (rawPayload as { voices?: unknown }).voices
+      : null;
+  if (!Array.isArray(values)) return [];
+  return values.flatMap((value) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return [];
     const record = value as Record<string, unknown>;
+    const publicOwnerId = typeof record.public_owner_id === "string" ? record.public_owner_id.trim() : "";
     const voiceId = typeof record.voice_id === "string" ? record.voice_id.trim() : "";
     const name = typeof record.name === "string" ? record.name.trim() : "";
-    if (!voiceId || !name) return [];
-    const labels = record.labels && typeof record.labels === "object" && !Array.isArray(record.labels)
-      ? Object.fromEntries(
-          Object.entries(record.labels as Record<string, unknown>)
-            .filter((entry): entry is [string, string] => typeof entry[1] === "string")
-        )
-      : {};
+    const labels = {
+      ...(record.labels && typeof record.labels === "object" && !Array.isArray(record.labels)
+        ? Object.fromEntries(Object.entries(record.labels as Record<string, unknown>)
+            .filter((entry): entry is [string, string] => typeof entry[1] === "string"))
+        : {}),
+      ...Object.fromEntries(
+        ["language", "accent", "gender", "age", "descriptive", "use_case"]
+          .flatMap((key): Array<[string, string]> =>
+            typeof record[key] === "string" && record[key].trim()
+              ? [[key, record[key].trim()]]
+              : [],
+          ),
+      ),
+    };
+    const language = [record.language, labels.language, labels.locale]
+      .filter((item): item is string => typeof item === "string")
+      .join(" ").toLowerCase();
+    const category = [record.category, labels.category, labels.quality]
+      .filter((item): item is string => typeof item === "string")
+      .join(" ").toLowerCase().replace(/[\s-]+/gu, "_");
+    const liveModerated =
+      record.live_moderation_enabled === true ||
+      record.live_moderated === true ||
+      record.is_live_moderated === true;
+    const customRates = record.custom_rates === true || record.has_custom_rates === true ||
+      (typeof record.rate === "number" && record.rate > 1) ||
+      (record.rate && typeof record.rate === "object" && !Array.isArray(record.rate) &&
+        ((record.rate as Record<string, unknown>).custom === true ||
+          (record.rate as Record<string, unknown>).is_custom === true));
+    if (!publicOwnerId || !voiceId || !name ||
+        (language && !(language.includes("en") || language.includes("english"))) ||
+        (category && !(category.includes("professional") || category.includes("high_quality"))) ||
+        liveModerated || customRates) return [];
+    const previewUrl =
+      typeof record.preview_url === "string" &&
+      /^https:\/\//iu.test(record.preview_url.trim())
+        ? record.preview_url.trim()
+        : null;
     return [{
+      publicOwnerId,
       voiceId,
       name,
-      category: typeof record.category === "string" ? record.category : null,
-      description: typeof record.description === "string" ? record.description : null,
-      previewUrl: typeof record.preview_url === "string" ? record.preview_url : null,
+      category:
+        category.includes("high_quality") || requestedCategory === "high_quality"
+          ? "high_quality"
+          : "professional",
+      description:
+        typeof record.description === "string" && record.description.trim()
+          ? record.description.trim()
+          : null,
+      previewUrl,
       labels,
     }];
   });
+}
+
+export async function importElevenLabsSharedVoice(args: {
+  apiKey: string;
+  publicOwnerId: string;
+  voiceId: string;
+  name: string;
+  signal?: AbortSignal;
+  fetchImpl?: typeof fetch;
+}): Promise<string> {
+  const publicOwnerId = args.publicOwnerId.trim();
+  const voiceId = args.voiceId.trim();
+  const name = args.name.trim().slice(0, 120);
+  if (!publicOwnerId || !voiceId || !name) {
+    throw new ElevenLabsVoiceError(400, "ElevenLabs returned an incomplete shared voice.");
+  }
+  const fetchImpl = args.fetchImpl ?? fetch;
+  const response = await fetchImpl(
+    `https://api.elevenlabs.io/v1/voices/add/${encodeURIComponent(publicOwnerId)}/${encodeURIComponent(voiceId)}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json", "xi-api-key": args.apiKey },
+      body: JSON.stringify({ new_name: name, bookmarked: true }),
+      signal: args.signal,
+    },
+  );
+  if (!response.ok) {
+    const detail = (await response.text()).trim();
+    throw new ElevenLabsVoiceError(
+      response.status,
+      detail || `ElevenLabs could not import this voice (${response.status}).`,
+    );
+  }
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new ElevenLabsVoiceError(502, "ElevenLabs returned an invalid imported voice.");
+  }
+  const importedVoiceId = payload && typeof payload === "object" && !Array.isArray(payload) &&
+    typeof (payload as Record<string, unknown>).voice_id === "string"
+      ? ((payload as Record<string, unknown>).voice_id as string).trim()
+      : "";
+  if (!importedVoiceId) {
+    throw new ElevenLabsVoiceError(502, "ElevenLabs did not return the imported voice ID.");
+  }
+  return importedVoiceId;
 }
 
 export async function requestElevenLabsVoiceCollections(args: {

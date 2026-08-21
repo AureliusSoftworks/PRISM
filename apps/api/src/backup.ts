@@ -153,6 +153,11 @@ import {
   restoreEnglishPacingProfilesFromBackup,
 } from "./english-pacing-profile.ts";
 import {
+  listPremiumVoiceLibrary,
+  restorePremiumVoiceLibrary,
+  type PremiumVoiceLibraryEntry,
+} from "./premium-voice-library.ts";
+import {
   listLibraryGroups,
   replaceLibraryGroups,
   type LibraryGroupV1,
@@ -706,6 +711,8 @@ export interface BackupSnapshot {
     calibratedAt: string;
     source: "elevenlabs-timestamps";
   }>;
+  /** PRISM-managed ElevenLabs shared-voice bookmarks. Older snapshots omit it. */
+  premiumVoiceLibrary?: PremiumVoiceLibraryEntry[];
 }
 
 function backupJsonObject(value: unknown): Record<string, unknown> {
@@ -3185,6 +3192,7 @@ export function exportUserSnapshot(
     },
     actionSfxPacks: listActionSfxPackClipsForBackup(db, userId),
     englishPacingProfiles: listEnglishPacingProfilesForBackup(db, userId),
+    premiumVoiceLibrary: listPremiumVoiceLibrary(db, userId),
     memories: memories.map((memory) => ({
       id: memory.id,
       conversationId: memory.conversation_id ?? undefined,
@@ -4953,6 +4961,10 @@ function importUserSnapshotWithinTransaction(
       userId,
       snapshot.englishPacingProfiles,
     );
+  }
+
+  if (Array.isArray(snapshot.premiumVoiceLibrary)) {
+    restorePremiumVoiceLibrary(db, userId, snapshot.premiumVoiceLibrary);
   }
 
   for (const memory of snapshot.memories) {

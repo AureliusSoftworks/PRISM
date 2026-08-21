@@ -15,6 +15,20 @@ import {
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 
 describe("first-run onboarding", () => {
+  it("presents Premium voice as available through a PRISM-managed connection", () => {
+    const voiceStep = FIRST_RUN_SETUP_STEPS.find(
+      (step) => step.id === "elevenlabs",
+    );
+    assert.equal(voiceStep?.title, "Premium voice & music");
+    assert.match(
+      pageSource,
+      /activeKeyProvider === "elevenlabs"[\s\S]*settings\?\.elevenLabsApiKeySource === "server"/u,
+    );
+    assert.match(
+      pageSource,
+      /Continue without an ElevenLabs account, or add your own key later in Settings\./u,
+    );
+  });
   it("keeps setup choices one step at a time", () => {
     assert.deepEqual(
       FIRST_RUN_SETUP_STEPS.map((step) => step.id),

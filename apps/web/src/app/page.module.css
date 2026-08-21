@@ -85894,6 +85894,88 @@ a.settingsCreditItem:focus-visible {
   min-width: 0;
 }
 
+.botVoiceLibraryImport {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 32%, var(--line));
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 7%, var(--panel));
+}
+
+.botVoiceLibraryImport > div:not(.botVoiceLibraryAudition) {
+  display: grid;
+  gap: 2px;
+}
+
+.botVoiceLibraryImport strong { font-size: 12px; }
+
+.botVoiceLibraryImport small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.botVoiceLibraryImport > small {
+  grid-column: 1 / -1;
+}
+
+.botVoiceLibraryImport > small[data-state="error"] { color: var(--danger, #e67b7b); }
+
+.botVoiceLibraryAudition {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 240px) auto;
+  align-items: center;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.botVoiceLibraryAudition > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.botVoiceLibraryAudition audio {
+  width: 100%;
+  height: 30px;
+}
+
+.botVoiceSavedLibraryPicker {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 5px 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.botVoiceSavedLibraryPicker > span {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.botVoiceSavedLibraryPicker select {
+  min-width: 0;
+}
+
+.botVoiceSavedLibraryPicker small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+@media (max-width: 720px) {
+  .botVoiceLibraryAudition {
+    grid-template-columns: 1fr;
+  }
+}
+
 .botVoiceFeelStage .botVoiceCharacterEditor {
   padding: 10px 12px 12px;
   border-color: color-mix(

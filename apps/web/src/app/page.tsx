@@ -10630,6 +10630,31 @@ interface ElevenLabsVoiceCatalogEntry {
   description: string | null;
   previewUrl: string | null;
   labels: Record<string, string>;
+  nativeAccentHint?: string | null;
+}
+
+interface ElevenLabsSharedVoiceAudition {
+  sourceVoiceId: string;
+  publicOwnerId: string;
+  name: string;
+  category: "professional" | "high_quality";
+  description: string | null;
+  previewUrl: string;
+  labels: Record<string, string>;
+  nativeAccentHint: string | null;
+}
+
+interface PremiumVoiceLibraryEntry {
+  sourceVoiceId: string;
+  providerVoiceId: string;
+  publicOwnerId: string;
+  name: string;
+  category: "professional" | "high_quality";
+  description: string | null;
+  previewUrl: string | null;
+  labels: Record<string, string>;
+  nativeAccentHint: string | null;
+  savedAt: string;
 }
 
 interface ElevenLabsVoiceCollectionCatalogEntry {
@@ -39535,6 +39560,15 @@ interface BotAvatarCustomizerModalProps {
   voiceBusGain: number;
   englishVoiceEngine: EnglishVoiceEngine;
   voiceIdentityCatalog: BotVoiceIdentityCatalog;
+  savedPremiumVoices: PremiumVoiceLibraryEntry[];
+  premiumVoiceKeySource: ApiKeySource;
+  onDiscoverPremiumVoice: (
+    excludeVoiceIds: readonly string[],
+    direction?: string,
+  ) => Promise<ElevenLabsSharedVoiceAudition>;
+  onSavePremiumVoice: (
+    audition: ElevenLabsSharedVoiceAudition,
+  ) => Promise<PremiumVoiceLibraryEntry>;
   profile: BotProfileFields;
   profileDetailsUnlocked: boolean;
   profileAdvancedMode: boolean;
@@ -41605,7 +41639,7 @@ function BotAvatarRefractRandomizer({
   children,
 }: {
   label: string;
-  onRandomize: () => void | Promise<void>;
+  onRandomize: (direction?: string) => void | Promise<void>;
   disabled?: boolean;
   children: (binding: PrismRefractBinding) => ReactNode;
 }): ReactNode {
@@ -41625,7 +41659,7 @@ function BotAvatarRefractRandomizer({
         kind: "magic",
         label,
         disabled: () => disabledRef.current,
-        run: () => randomizeRef.current(),
+        run: (direction) => randomizeRef.current(direction),
       }}
     >
       {children}
@@ -42296,6 +42330,10 @@ function BotVoicePremiumStage({
   onPreviewLineChange,
   resolvePreviewText,
   onPreview,
+  savedPremiumVoices,
+  premiumVoiceKeySource,
+  onDiscoverPremiumVoice,
+  onSavePremiumVoice,
   onRandomizeDirection,
   onRandomizePreviewLine,
 }: {
@@ -42314,6 +42352,15 @@ function BotVoicePremiumStage({
     previewText?: string,
     options?: VoicePreviewPlaybackOptions,
   ) => Promise<void>;
+  savedPremiumVoices: PremiumVoiceLibraryEntry[];
+  premiumVoiceKeySource: ApiKeySource;
+  onDiscoverPremiumVoice: (
+    excludeVoiceIds: readonly string[],
+    direction?: string,
+  ) => Promise<ElevenLabsSharedVoiceAudition>;
+  onSavePremiumVoice: (
+    audition: ElevenLabsSharedVoiceAudition,
+  ) => Promise<PremiumVoiceLibraryEntry>;
   onRandomizeDirection?: (
     current: string,
     apply: (value: string) => void,
@@ -42323,12 +42370,156 @@ function BotVoicePremiumStage({
     apply: (value: string) => void,
   ) => void | Promise<void>;
 }): React.JSX.Element {
+  const [audition, setAudition] = useState<ElevenLabsSharedVoiceAudition | null>(null);
+  const recentAuditionIdsRef = useRef<string[]>([]);
+  const [auditionState, setAuditionState] = useState<
+    { kind: "idle" | "busy" | "success" | "error"; message: string }
+  >({ kind: "idle", message: "" });
+  const [saveState, setSaveState] = useState<
+    { kind: "idle" | "busy" | "success" | "error"; message: string }
+  >({ kind: "idle", message: "" });
+  const assignSavedVoice = (voice: PremiumVoiceLibraryEntry): void => {
+    onChange({
+      ...normalizeBotAudioVoiceProfileV1(profile),
+      elevenLabsVoiceId: voice.providerVoiceId,
+      elevenLabsVoiceIdOverride: null,
+      elevenLabsVoiceInitialized: true,
+      elevenLabsNativeAccentHint:
+        voice.nativeAccentHint ??
+        premiumVoiceNativeAccentHintFromLabels(voice.labels),
+    });
+  };
+  const discoverPremiumVoice = async (direction = ""): Promise<void> => {
+    if (auditionState.kind === "busy") return;
+    const exclusions = [
+      ...(audition ? [audition.sourceVoiceId] : []),
+      ...recentAuditionIdsRef.current,
+    ];
+    setAudition(null);
+    setSaveState({ kind: "idle", message: "" });
+    setAuditionState({ kind: "busy", message: "Finding a different Voice Library audition…" });
+    try {
+      const voice = await onDiscoverPremiumVoice(
+        exclusions.slice(0, 24),
+        direction,
+      );
+      recentAuditionIdsRef.current = [
+        voice.sourceVoiceId,
+        ...recentAuditionIdsRef.current.filter((id) => id !== voice.sourceVoiceId),
+      ].slice(0, 12);
+      setAudition(voice);
+      setAuditionState({ kind: "success", message: `${voice.name} is ready to audition. Nothing has been saved.` });
+    } catch (error) {
+      setAuditionState({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Could not discover a Voice Library audition.",
+      });
+    }
+  };
+  const saveAudition = async (): Promise<void> => {
+    if (!audition || saveState.kind === "busy") return;
+    setSaveState({ kind: "busy", message: "Saving to your PRISM voice library…" });
+    try {
+      const saved = await onSavePremiumVoice(audition);
+      assignSavedVoice(saved);
+      setSaveState({
+        kind: "success",
+        message: `${saved.name} is saved and assigned to this bot draft.`,
+      });
+    } catch (error) {
+      setSaveState({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Could not save this voice.",
+      });
+    }
+  };
   return (
     <div
       className={styles.botVoiceFeelStage}
       data-bot-voice-premium-stage="true"
       aria-label="Premium voice"
     >
+      <section
+        className={styles.botVoiceLibraryImport}
+        aria-label="Discover a Premium Voice Library voice"
+      >
+        <div>
+          <strong>Voice Library</strong>
+          <small>
+            {premiumVoiceKeySource === "server"
+              ? "Audition shared voices through the PRISM connection. Rerolls are temporary and do not import anything."
+              : premiumVoiceKeySource === "saved"
+                ? "Audition shared voices through your ElevenLabs account. Rerolls are temporary and do not import anything."
+                : "Connect ElevenLabs in Settings to audition shared voices."}
+          </small>
+        </div>
+        <BotAvatarRefractRandomizer
+          label="Premium Voice Library audition"
+          disabled={auditionState.kind === "busy"}
+          onRandomize={(direction) => discoverPremiumVoice(direction)}
+        >
+          {(binding) => (
+            <button
+              {...binding}
+              type="button"
+              data-primary="true"
+              disabled={auditionState.kind === "busy"}
+              onClick={() => void discoverPremiumVoice()}
+            >
+              <Shuffle size={13} strokeWidth={2.3} aria-hidden="true" />
+              {auditionState.kind === "busy" ? "Casting…" : "Surprise me"}
+            </button>
+          )}
+        </BotAvatarRefractRandomizer>
+        {audition ? (
+          <div className={styles.botVoiceLibraryAudition} data-premium-voice-audition={audition.sourceVoiceId}>
+            <span>
+              <strong>{audition.name}</strong>
+              <small>{audition.description ?? "ElevenLabs shared voice preview"}</small>
+            </span>
+            <audio key={audition.sourceVoiceId} controls preload="none" src={audition.previewUrl} aria-label={`Audition ${audition.name}`} />
+            <button type="button" data-primary="true" disabled={saveState.kind === "busy"} onClick={() => void saveAudition()}>
+              {saveState.kind === "busy" ? "Saving…" : "Save to Library"}
+            </button>
+          </div>
+        ) : null}
+        {auditionState.message ? (
+          <small role={auditionState.kind === "error" ? "alert" : "status"} aria-live="polite" data-state={auditionState.kind}>
+            {auditionState.message}
+          </small>
+        ) : null}
+        {saveState.message ? (
+          <small role={saveState.kind === "error" ? "alert" : "status"} aria-live="polite" data-state={saveState.kind}>
+            {saveState.message}
+          </small>
+        ) : null}
+      </section>
+      {savedPremiumVoices.length > 0 ? (
+        <label className={styles.botVoiceSavedLibraryPicker}>
+          <span>Saved in PRISM</span>
+          <select
+            value={
+              savedPremiumVoices.some(
+                (voice) => voice.providerVoiceId === normalizeBotAudioVoiceProfileV1(profile).elevenLabsVoiceId,
+              )
+                ? normalizeBotAudioVoiceProfileV1(profile).elevenLabsVoiceId ?? ""
+                : ""
+            }
+            onChange={(event) => {
+              const saved = savedPremiumVoices.find(
+                (voice) => voice.providerVoiceId === event.currentTarget.value,
+              );
+              if (saved) assignSavedVoice(saved);
+            }}
+          >
+            <option value="">Choose a saved voice</option>
+            {savedPremiumVoices.map((voice) => (
+              <option key={voice.sourceVoiceId} value={voice.providerVoiceId}>{voice.name}</option>
+            ))}
+          </select>
+          <small>These bookmarks are private to your PRISM account. ElevenLabs may change or revoke shared voices.</small>
+        </label>
+      ) : null}
       <BotVoiceEditor
         variant="premium"
         profile={profile}
@@ -45254,6 +45445,10 @@ function BotAvatarCustomizerModal({
   voiceBusGain,
   englishVoiceEngine,
   voiceIdentityCatalog,
+  savedPremiumVoices,
+  premiumVoiceKeySource,
+  onDiscoverPremiumVoice,
+  onSavePremiumVoice,
   profile,
   profileDetailsUnlocked,
   profileAdvancedMode,
@@ -46107,6 +46302,10 @@ function BotAvatarCustomizerModal({
           onPreviewLineChange={onVoicePreviewLineChange}
           resolvePreviewText={resolveVoicePreviewText}
           onPreview={playAvatarVoicePreview}
+          savedPremiumVoices={savedPremiumVoices}
+          premiumVoiceKeySource={premiumVoiceKeySource}
+          onDiscoverPremiumVoice={onDiscoverPremiumVoice}
+          onSavePremiumVoice={onSavePremiumVoice}
           onRandomizeDirection={(current, apply) =>
             onRandomizeSemanticField?.(
               "voice.direction",
@@ -50126,6 +50325,10 @@ function HomeContent(): React.JSX.Element {
   const [elevenLabsVoiceCatalogError, setElevenLabsVoiceCatalogError] =
     useState<string | null>(null);
   const elevenLabsVoiceCatalogAttemptKeyRef = useRef<string | null>(null);
+  const [premiumVoiceLibrary, setPremiumVoiceLibrary] = useState<
+    PremiumVoiceLibraryEntry[]
+  >([]);
+  const premiumVoiceLibraryAttemptUserRef = useRef<string | null>(null);
   const [elevenLabsVoiceCollections, setElevenLabsVoiceCollections] = useState<
     ElevenLabsVoiceCollectionCatalogEntry[]
   >([]);
@@ -54081,6 +54284,12 @@ function HomeContent(): React.JSX.Element {
     useState<string | null>(null);
   const [colorWheelOpen, setColorWheelOpen] = useState(false);
   const [botAvatarCustomizerOpen, setBotAvatarCustomizerOpen] = useState(false);
+  useEffect(() => {
+    if (!botAvatarCustomizerOpen || !user) return;
+    if (premiumVoiceLibraryAttemptUserRef.current === user.id) return;
+    premiumVoiceLibraryAttemptUserRef.current = user.id;
+    void loadPremiumVoiceLibrary();
+  }, [botAvatarCustomizerOpen, user]);
   useEffect(() => {
     const playerVoiceSettingsOpen =
       panel === "settings" && settingsScope === "chat";
@@ -91047,7 +91256,16 @@ function HomeContent(): React.JSX.Element {
           assignedDefaultPrism: boolean;
         };
       }>("/api/voices/elevenlabs");
-      setElevenLabsVoiceCatalog(response.voices);
+      setElevenLabsVoiceCatalog((current) => {
+        const saved = current.filter((voice) =>
+          voice.category?.startsWith("PRISM Library ·"),
+        );
+        const savedIds = new Set(saved.map((voice) => voice.voiceId));
+        return [
+          ...saved,
+          ...response.voices.filter((voice) => !savedIds.has(voice.voiceId)),
+        ];
+      });
       if (
         response.initialization?.assignedDefaultPrism ||
         (response.initialization?.assignedBotIds.length ?? 0) > 0
@@ -91070,6 +91288,35 @@ function HomeContent(): React.JSX.Element {
       if (!quiet) setPanelError(message);
     } finally {
       setElevenLabsVoiceCatalogLoading(false);
+    }
+  }
+
+  async function loadPremiumVoiceLibrary(): Promise<void> {
+    try {
+      const response = await api<{ voices: PremiumVoiceLibraryEntry[] }>(
+        "/api/voices/elevenlabs/library",
+      );
+      setPremiumVoiceLibrary(response.voices);
+      setElevenLabsVoiceCatalog((current) => {
+        const saved = response.voices.map((voice) => ({
+          voiceId: voice.providerVoiceId,
+          name: voice.name,
+          category: `PRISM Library · ${voice.category}`,
+          description: voice.description,
+          previewUrl: voice.previewUrl,
+          labels: voice.labels,
+          nativeAccentHint: voice.nativeAccentHint,
+        }));
+        const savedIds = new Set(saved.map((voice) => voice.voiceId));
+        return [...saved, ...current.filter((voice) => !savedIds.has(voice.voiceId))];
+      });
+    } catch (error) {
+      premiumVoiceLibraryAttemptUserRef.current = null;
+      setPanelError(
+        error instanceof Error
+          ? error.message
+          : "Could not load your PRISM voice library.",
+      );
     }
   }
 
@@ -91099,6 +91346,56 @@ function HomeContent(): React.JSX.Element {
         );
       }
     }
+  }
+
+  async function discoverPremiumVoiceForAvatarDraft(
+    excludeVoiceIds: readonly string[],
+    direction = "",
+  ): Promise<ElevenLabsSharedVoiceAudition> {
+    const response = await api<{ voice: ElevenLabsSharedVoiceAudition }>(
+      "/api/voices/elevenlabs/shared/discover",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          excludeVoiceIds,
+          ...(direction.trim()
+            ? { direction: direction.trim().slice(0, 240) }
+            : {}),
+        }),
+      },
+    );
+    const voice = response.voice;
+    if (!voice?.sourceVoiceId || !voice.publicOwnerId || !voice.name || !voice.previewUrl) {
+      throw new Error("ElevenLabs did not return a playable shared-voice audition.");
+    }
+    return voice;
+  }
+
+  async function savePremiumVoiceForAvatarDraft(
+    audition: ElevenLabsSharedVoiceAudition,
+  ): Promise<PremiumVoiceLibraryEntry> {
+    const response = await api<{ voice: PremiumVoiceLibraryEntry }>(
+      "/api/voices/elevenlabs/library",
+      { method: "POST", body: JSON.stringify(audition) },
+    );
+    const voice = response.voice;
+    if (!voice?.sourceVoiceId || !voice.providerVoiceId || !voice.name) {
+      throw new Error("PRISM could not confirm the saved voice.");
+    }
+    setPremiumVoiceLibrary((current) => [
+      voice,
+      ...current.filter((candidate) => candidate.sourceVoiceId !== voice.sourceVoiceId),
+    ].sort((left, right) => left.name.localeCompare(right.name)));
+    setElevenLabsVoiceCatalog((current) => [{
+      voiceId: voice.providerVoiceId,
+      name: voice.name,
+      category: `PRISM Library · ${voice.category}`,
+      description: voice.description,
+      previewUrl: voice.previewUrl,
+      labels: voice.labels,
+      nativeAccentHint: voice.nativeAccentHint,
+    }, ...current.filter((candidate) => candidate.voiceId !== voice.providerVoiceId)]);
+    return voice;
   }
 
   async function loadElevenLabsVoiceCollections(quiet = false): Promise<void> {
@@ -106272,6 +106569,10 @@ function HomeContent(): React.JSX.Element {
             ? settings?.elevenLabsApiKeySource !== "none"
             : false,
     );
+    const activeKeyIsServerManaged = Boolean(
+      activeKeyProvider === "elevenlabs" &&
+        settings?.elevenLabsApiKeySource === "server",
+    );
     const primaryActionLabel =
       activeStep.id === "ready"
         ? "Enter Prism"
@@ -106509,7 +106810,9 @@ function HomeContent(): React.JSX.Element {
                     value={activeKeyValue}
                     autoComplete="off"
                     placeholder={
-                      activeKeyIsAlreadySaved
+                      activeKeyIsServerManaged
+                        ? "PRISM connection is available"
+                        : activeKeyIsAlreadySaved
                         ? "A key is already connected"
                         : "Paste a key, or skip for now"
                     }
@@ -106519,7 +106822,9 @@ function HomeContent(): React.JSX.Element {
                   />
                 </label>
                 <p>
-                  {activeKeyIsAlreadySaved
+                  {activeKeyIsServerManaged
+                    ? "PRISM's managed ElevenLabs connection is ready. Continue without an ElevenLabs account, or add your own key later in Settings."
+                    : activeKeyIsAlreadySaved
                     ? "Already connected. Leave this blank to keep the saved key."
                     : activeKeyProvider === "elevenlabs"
                       ? "Prism verifies and encrypts this key. It unlocks ElevenLabs image models, Premium voice, and your voice catalog. English remains local and uses no ElevenLabs credits. In Avatar Studio, one Accent Map pin shapes both Local and Premium voice while keeping the spoken language English. Prism assigns stable Premium defaults from the collection you choose in Voice Settings."
@@ -124283,6 +124588,14 @@ function HomeContent(): React.JSX.Element {
                                 : elevenLabsVoiceCatalogError,
                           },
                         }}
+                        savedPremiumVoices={premiumVoiceLibrary}
+                        premiumVoiceKeySource={
+                          settings?.elevenLabsApiKeySource ?? "none"
+                        }
+                        onDiscoverPremiumVoice={
+                          discoverPremiumVoiceForAvatarDraft
+                        }
+                        onSavePremiumVoice={savePremiumVoiceForAvatarDraft}
                         profile={botProfile}
                         profileDetailsUnlocked={profileDetailsAreUnlocked}
                         profileAdvancedMode={botEditorAdvancedMode}

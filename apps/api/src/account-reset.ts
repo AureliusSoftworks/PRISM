@@ -18,6 +18,7 @@ import {
 } from "./settings.ts";
 
 export const FACTORY_RESET_USER_DATA_TABLES = [
+  "premium_voice_library",
   "model_reasoning_effort_preferences",
   "model_turbo_preferences",
   "pairing_codes",

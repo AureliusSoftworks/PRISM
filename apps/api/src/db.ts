@@ -5009,6 +5009,27 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_english_pacing_owner ON english_pacing_profiles (user_id, owner_kind, owner_id);",
   );
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS premium_voice_library (
+      user_id TEXT NOT NULL,
+      source_voice_id TEXT NOT NULL,
+      provider_voice_id TEXT NOT NULL,
+      public_owner_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL CHECK (category IN ('professional', 'high_quality')),
+      description TEXT,
+      preview_url TEXT,
+      labels_json TEXT NOT NULL DEFAULT '{}',
+      native_accent_hint TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, source_voice_id),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+  `);
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_premium_voice_library_user_name ON premium_voice_library (user_id, name COLLATE NOCASE);",
+  );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_developer_transcript_events_conversation_created ON developer_transcript_events (user_id, conversation_id, created_at);",
   );

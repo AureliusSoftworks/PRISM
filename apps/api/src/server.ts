@@ -1107,6 +1107,7 @@ import {
   isActionSfxPackKind,
   normalizeActionSfxPackOwnerKind,
   parseStoredTextModelDisplayNames,
+  premiumVoiceNativeAccentHintFromLabels,
   resolveBotAudioVoiceProfileV1,
   resolveBotPronunciationMapPointV1,
   stripBotProfileMetaSuffix,
@@ -1244,12 +1245,21 @@ import {
   requestElevenLabsVoiceCatalog,
   requestElevenLabsVoiceCollections,
   requestElevenLabsVoiceIdentity,
+  requestElevenLabsSharedVoiceCandidates,
+  selectElevenLabsSharedVoiceCandidate,
+  importElevenLabsSharedVoice,
   cleanSpeakableAssistantProse,
   resolveFrozenReplayVoiceEngine,
   resolveVoiceSynthesisExplicitOnlineContext,
   resolveVoiceSynthesisBoundary,
   validateVoiceSynthesisRequest,
 } from "./voices.ts";
+import {
+  findPremiumVoiceLibraryEntry,
+  listPremiumVoiceLibrary,
+  savePremiumVoiceLibraryEntry,
+  type PremiumVoiceLibraryEntry,
+} from "./premium-voice-library.ts";
 import {
   builtinEnglishAvailable,
   getSystemVoiceCapabilities,
@@ -9156,6 +9166,95 @@ function queueCoffeeGroupSoundtrack(
   });
   coffeeGroupSoundtrackFlights.set(flightKey, flight);
   return flight;
+}
+
+const ELEVENLABS_SHARED_VOICE_EXCLUSION_LIMIT = 24;
+const elevenLabsSharedVoiceSaveFlights = new Map<
+  string,
+  Promise<{ entry: PremiumVoiceLibraryEntry; created: boolean }>
+>();
+
+function boundedSharedVoiceText(value: unknown, maxLength = 240): string {
+  return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
+}
+
+function sharedVoiceExclusions(value: unknown): Set<string> {
+  if (!Array.isArray(value)) return new Set();
+  return new Set(
+    value
+      .slice(0, ELEVENLABS_SHARED_VOICE_EXCLUSION_LIMIT)
+      .map((item) => boundedSharedVoiceText(item))
+      .filter(Boolean),
+  );
+}
+
+function sharedVoiceSaveInput(value: unknown): {
+  sourceVoiceId: string;
+  publicOwnerId: string;
+  name: string;
+  category: "professional" | "high_quality";
+  description: string | null;
+  previewUrl: string | null;
+  labels: Record<string, string>;
+} {
+  const body = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const sourceVoiceId = boundedSharedVoiceText(body.sourceVoiceId);
+  const publicOwnerId = boundedSharedVoiceText(body.publicOwnerId);
+  const name = boundedSharedVoiceText(body.name, 120);
+  const category = body.category === "high_quality" ? "high_quality" : "professional";
+  const previewUrl = boundedSharedVoiceText(body.previewUrl, 2048);
+  if (
+    !sourceVoiceId ||
+    !publicOwnerId ||
+    !name ||
+    !previewUrl ||
+    !/^https:\/\//iu.test(previewUrl)
+  ) {
+    throw new HttpError(400, "Choose a valid Voice Library audition before saving.");
+  }
+  const labels = body.labels && typeof body.labels === "object" && !Array.isArray(body.labels)
+    ? Object.fromEntries(
+        Object.entries(body.labels as Record<string, unknown>)
+          .slice(0, 32)
+          .flatMap((entry): Array<[string, string]> => {
+            const key = boundedSharedVoiceText(entry[0], 80);
+            const label = boundedSharedVoiceText(entry[1], 160);
+            return key && label ? [[key, label]] : [];
+          }),
+      )
+    : {};
+  const description = boundedSharedVoiceText(body.description, 1000);
+  return {
+    sourceVoiceId,
+    publicOwnerId,
+    name,
+    category,
+    description: description || null,
+    previewUrl,
+    labels,
+  };
+}
+
+function elevenLabsLibraryCredentialError(): HttpError {
+  return new HttpError(
+    409,
+    "Connect an ElevenLabs key in Settings or ask the PRISM server owner to configure ELEVENLABS_API_KEY.",
+  );
+}
+
+function mapElevenLabsLibraryError(error: ElevenLabsVoiceError): HttpError {
+  const status =
+    error.status === 400 ||
+    error.status === 401 ||
+    error.status === 403 ||
+    error.status === 404 ||
+    error.status === 409 ||
+    error.status === 422
+      ? error.status
+      : 502;
+  return new HttpError(status, error.message);
 }
 
 function buildRoutes(): RouteDefinition[] {
@@ -23992,6 +24091,141 @@ function buildRoutes(): RouteDefinition[] {
         });
       } finally {
         ctx.req.off("close", onClose);
+      }
+    }),
+    route("GET", "/api/voices/elevenlabs/library", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        voices: listPremiumVoiceLibrary(db, userId),
+      });
+    }),
+    route("POST", "/api/voices/elevenlabs/shared/discover", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const userKey = decryptUserKey(userId);
+      const apiKey =
+        getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
+      if (!apiKey) throw elevenLabsLibraryCredentialError();
+      const body = ctx.body && typeof ctx.body === "object" && !Array.isArray(ctx.body)
+        ? ctx.body as { excludeVoiceIds?: unknown; direction?: unknown }
+        : {};
+      const excludedVoiceIds = sharedVoiceExclusions(body.excludeVoiceIds);
+      const direction = boundedSharedVoiceText(body.direction);
+      for (const voice of listPremiumVoiceLibrary(db, userId)) {
+        excludedVoiceIds.add(voice.sourceVoiceId);
+      }
+      const controller = new AbortController();
+      const onClose = () => controller.abort();
+      ctx.req.once("close", onClose);
+      try {
+        const [professionalVoices, highQualityVoices] = await Promise.all([
+          requestElevenLabsSharedVoiceCandidates({
+            apiKey,
+            category: "professional",
+            signal: controller.signal,
+          }),
+          requestElevenLabsSharedVoiceCandidates({
+            apiKey,
+            category: "high_quality",
+            signal: controller.signal,
+          }),
+        ]);
+        const selected = selectElevenLabsSharedVoiceCandidate(
+          [...professionalVoices, ...highQualityVoices],
+          excludedVoiceIds,
+          Math.random,
+          direction,
+        );
+        if (!selected) {
+          throw new HttpError(
+            409,
+            "No different English Voice Library audition is available right now.",
+          );
+        }
+        json(ctx.res, 200, {
+          ok: true,
+          voice: {
+            sourceVoiceId: selected.voiceId,
+            publicOwnerId: selected.publicOwnerId,
+            name: selected.name,
+            category: selected.category,
+            description: selected.description,
+            previewUrl: selected.previewUrl,
+            labels: selected.labels,
+            nativeAccentHint: premiumVoiceNativeAccentHintFromLabels(selected.labels),
+          },
+        });
+      } catch (error) {
+        if (error instanceof HttpError) throw error;
+        if (error instanceof ElevenLabsVoiceError) {
+          throw mapElevenLabsLibraryError(error);
+        }
+        throw error;
+      } finally {
+        ctx.req.off("close", onClose);
+      }
+    }),
+    route("POST", "/api/voices/elevenlabs/library", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const input = sharedVoiceSaveInput(ctx.body);
+      const existing = findPremiumVoiceLibraryEntry(db, userId, input.sourceVoiceId);
+      if (existing) {
+        json(ctx.res, 200, { ok: true, voice: existing, created: false });
+        return;
+      }
+      const flightKey = `${userId}:${input.sourceVoiceId}`;
+      const existingFlight = elevenLabsSharedVoiceSaveFlights.get(flightKey);
+      if (existingFlight) {
+        const result = await existingFlight;
+        json(ctx.res, 200, { ok: true, voice: result.entry, created: false });
+        return;
+      }
+      const flight = (async () => {
+        const userKey = decryptUserKey(userId);
+        const apiKey =
+          getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
+        if (!apiKey) throw elevenLabsLibraryCredentialError();
+        const catalog = await requestElevenLabsVoiceCatalog({
+          apiKey,
+        });
+        const existingProviderVoice = catalog.find(
+          (voice) =>
+            voice.voiceId === input.sourceVoiceId ||
+            (voice.originalVoiceId === input.sourceVoiceId &&
+              (!voice.publicOwnerId || voice.publicOwnerId === input.publicOwnerId)),
+        );
+        const providerVoiceId = existingProviderVoice
+          ? existingProviderVoice.voiceId
+          : await importElevenLabsSharedVoice({
+              apiKey,
+              publicOwnerId: input.publicOwnerId,
+              voiceId: input.sourceVoiceId,
+              name: input.name,
+            });
+        return savePremiumVoiceLibraryEntry(db, userId, {
+          ...input,
+          providerVoiceId,
+          nativeAccentHint: premiumVoiceNativeAccentHintFromLabels(input.labels),
+        });
+      })();
+      elevenLabsSharedVoiceSaveFlights.set(flightKey, flight);
+      try {
+        const result = await flight;
+        json(ctx.res, result.created ? 201 : 200, {
+          ok: true,
+          voice: result.entry,
+          created: result.created,
+        });
+      } catch (error) {
+        if (error instanceof HttpError) throw error;
+        if (error instanceof ElevenLabsVoiceError) {
+          throw mapElevenLabsLibraryError(error);
+        }
+        throw error;
+      } finally {
+        if (elevenLabsSharedVoiceSaveFlights.get(flightKey) === flight) {
+          elevenLabsSharedVoiceSaveFlights.delete(flightKey);
+        }
       }
     }),
     route("GET", "/api/voices/elevenlabs", async (ctx) => {

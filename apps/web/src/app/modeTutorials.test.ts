@@ -128,6 +128,10 @@ describe("mode tutorials", () => {
     assert.match(step?.body ?? "", /at 1px it becomes one literal identity-color pixel/u);
     assert.match(step?.body ?? "", /Mini avatars stay fixed/u);
     assert.match(step?.body ?? "", /same Chassis scale remains selected/u);
+    assert.match(step?.body ?? "", /Surprise me auditions a different shared ElevenLabs preview/u);
+    assert.match(step?.body ?? "", /Wield Prism onto the Voice Library card/u);
+    assert.match(step?.body ?? "", /Only Save to Library bookmarks the result/u);
+    assert.match(step?.body ?? "", /private PRISM account library/u);
   });
 
   it("explains the canonical hue-only identity color", () => {

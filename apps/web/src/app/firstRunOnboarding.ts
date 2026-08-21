@@ -50,7 +50,7 @@ export const FIRST_RUN_SETUP_STEPS: readonly FirstRunSetupStep[] = [
   { id: "anthropic", title: "Connect Anthropic", shortTitle: "Anthropic", optional: true },
   {
     id: "elevenlabs",
-    title: "Connect ElevenLabs for voice and music",
+    title: "Premium voice & music",
     shortTitle: "Voice & music",
     optional: true,
   },

@@ -402,6 +402,45 @@ describe("voice settings preview", () => {
     );
   });
 
+  it("auditions distinct shared voices transiently and saves only on explicit action", () => {
+    const premiumStageSource = pageSource.slice(
+      pageSource.indexOf("function BotVoicePremiumStage({"),
+      pageSource.indexOf("function BotVoiceCharacterEditor({"),
+    );
+    assert.match(premiumStageSource, /Discover a Premium Voice Library voice/);
+    assert.match(premiumStageSource, /Surprise me/);
+    assert.match(premiumStageSource, /Rerolls are temporary and do not import anything/);
+    assert.match(premiumStageSource, /setAudition\(null\)/);
+    assert.match(premiumStageSource, /recentAuditionIdsRef/);
+    assert.match(premiumStageSource, /BotAvatarRefractRandomizer/);
+    assert.match(premiumStageSource, /label="Premium Voice Library audition"/);
+    assert.match(
+      premiumStageSource,
+      /onRandomize=\{\(direction\) => discoverPremiumVoice\(direction\)\}/,
+    );
+    assert.match(
+      premiumStageSource,
+      /onDiscoverPremiumVoice\([\s\S]*exclusions\.slice\(0, 24\),[\s\S]*direction/,
+    );
+    assert.match(premiumStageSource, /audio[\s\S]*src=\{audition\.previewUrl\}/);
+    assert.match(premiumStageSource, /Save to Library/);
+    assert.match(premiumStageSource, /onSavePremiumVoice\(audition\)/);
+    assert.match(premiumStageSource, /elevenLabsVoiceId: voice\.providerVoiceId/);
+    assert.match(premiumStageSource, /elevenLabsVoiceIdOverride: null/);
+    assert.match(premiumStageSource, /voice\.nativeAccentHint \?\?\s+premiumVoiceNativeAccentHintFromLabels\(voice\.labels\)/);
+    assert.match(premiumStageSource, /Saved in PRISM/);
+    assert.match(premiumStageSource, /private to your PRISM account/);
+    assert.match(pageSource, /\/api\/voices\/elevenlabs\/shared\/discover/);
+    assert.match(
+      pageSource,
+      /direction: direction\.trim\(\)\.slice\(0, 240\)/,
+    );
+    assert.match(pageSource, /\/api\/voices\/elevenlabs\/library/);
+    assert.doesNotMatch(pageSource, /\/api\/voices\/elevenlabs\/shared\/import-random/);
+    assert.match(pageSource, /premiumVoiceKeySource === "server"/);
+    assert.match(pageSource, /PRISM connection/);
+  });
+
   it("lets Voice Settings pick an authenticated ElevenLabs collection", () => {
     const catalogEffectSource = pageSource.slice(
       pageSource.indexOf(

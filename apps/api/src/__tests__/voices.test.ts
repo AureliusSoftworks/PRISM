@@ -14,6 +14,9 @@ import {
   requestElevenLabsVoiceCatalog,
   requestElevenLabsVoiceCollections,
   requestElevenLabsVoiceIdentity,
+  requestElevenLabsSharedVoiceCandidates,
+  selectElevenLabsSharedVoiceCandidate,
+  importElevenLabsSharedVoice,
   resolveElevenLabsVoiceId,
   resolveFrozenReplayVoiceEngine,
   resolveVoiceSynthesisExplicitOnlineContext,
@@ -1189,6 +1192,175 @@ describe("voice Phase 1 boundary", () => {
     }]);
   });
 
+  it("paginates saved voices and preserves their original shared identity", async () => {
+    const requestedUrls: string[] = [];
+    const voices = await requestElevenLabsVoiceCatalog({
+      apiKey: "secret-key",
+      fetchImpl: (async (input) => {
+        const url = new URL(String(input));
+        requestedUrls.push(url.toString());
+        if (!url.searchParams.has("next_page_token")) {
+          return new Response(JSON.stringify({
+            voices: [{
+              voice_id: "provider-copy-a",
+              name: "Avery",
+              category: "professional",
+              sharing: {
+                original_voice_id: "source-a",
+                public_owner_id: "owner-a",
+              },
+            }],
+            has_more: true,
+            next_page_token: "page-two",
+          }), { status: 200 });
+        }
+        return new Response(JSON.stringify({
+          voices: [{ voice_id: "voice-b", name: "Blair" }],
+          has_more: false,
+        }), { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.equal(requestedUrls.length, 2);
+    assert.equal(
+      new URL(requestedUrls[1]!).searchParams.get("next_page_token"),
+      "page-two",
+    );
+    assert.deepEqual(voices[0], {
+      voiceId: "provider-copy-a",
+      name: "Avery",
+      category: "professional",
+      description: null,
+      previewUrl: null,
+      labels: {},
+      originalVoiceId: "source-a",
+      publicOwnerId: "owner-a",
+    });
+    assert.equal(voices[1]?.voiceId, "voice-b");
+  });
+
+  it("filters importable English professional Voice Library entries and uses the official query", async () => {
+    let requestedUrl = "";
+    const voices = await requestElevenLabsSharedVoiceCandidates({
+      apiKey: "secret-key",
+      page: 3,
+      fetchImpl: (async (input) => {
+        requestedUrl = String(input);
+        return new Response(JSON.stringify({
+          voices: [
+            {
+              public_owner_id: "owner-a",
+              voice_id: "voice-a",
+              name: "Avery",
+              language: "en",
+              accent: "American",
+              category: "professional",
+              description: "Warm character voice",
+              rate: 1,
+            },
+            { public_owner_id: "owner-b", voice_id: "voice-b", name: "French", language: "fr", category: "professional" },
+            { public_owner_id: "owner-c", voice_id: "voice-c", name: "Moderated", language: "en", category: "professional", live_moderation_enabled: true },
+            { public_owner_id: "owner-d", voice_id: "voice-d", name: "Custom", language: "en", category: "professional", rate: 2 },
+          ],
+        }), { status: 200 });
+      }) as typeof fetch,
+    });
+    const url = new URL(requestedUrl);
+    assert.equal(url.pathname, "/v1/shared-voices");
+    assert.equal(url.searchParams.get("page_size"), "100");
+    assert.equal(url.searchParams.get("page"), "3");
+    assert.equal(url.searchParams.get("category"), "professional");
+    assert.equal(url.searchParams.get("language"), "en");
+    assert.equal(url.searchParams.get("include_custom_rates"), "false");
+    assert.equal(url.searchParams.get("include_live_moderated"), "false");
+    assert.deepEqual(voices, [{
+      publicOwnerId: "owner-a",
+      voiceId: "voice-a",
+      name: "Avery",
+      category: "professional",
+      description: "Warm character voice",
+      previewUrl: null,
+      labels: { language: "en", accent: "American" },
+    }]);
+  });
+
+  it("imports a shared voice under its owner and preserves the bookmarked name", async () => {
+    let requestedUrl = "";
+    let init: RequestInit | undefined;
+    const voiceId = await importElevenLabsSharedVoice({
+      apiKey: "secret-key",
+      publicOwnerId: "public/user",
+      voiceId: "voice/a",
+      name: "Avery",
+      fetchImpl: (async (input, requestInit) => {
+        requestedUrl = String(input);
+        init = requestInit;
+        return new Response(JSON.stringify({ voice_id: "imported-a" }), { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.equal(requestedUrl, "https://api.elevenlabs.io/v1/voices/add/public%2Fuser/voice%2Fa");
+    assert.equal(init?.method, "POST");
+    assert.equal(new Headers(init?.headers).get("xi-api-key"), "secret-key");
+    assert.deepEqual(JSON.parse(String(init?.body)), { new_name: "Avery", bookmarked: true });
+    assert.equal(voiceId, "imported-a");
+  });
+
+  it("selects a playable shared audition while honoring recent exclusions", () => {
+    const candidates = [
+      {
+        publicOwnerId: "owner-a",
+        voiceId: "voice-a",
+        name: "Avery",
+        category: "professional" as const,
+        description: null,
+        previewUrl: "https://example.test/a.mp3",
+        labels: {},
+      },
+      {
+        publicOwnerId: "owner-b",
+        voiceId: "voice-b",
+        name: "Blair",
+        category: "high_quality" as const,
+        description: null,
+        previewUrl: "https://example.test/b.mp3",
+        labels: {},
+      },
+      {
+        publicOwnerId: "owner-c",
+        voiceId: "voice-c",
+        name: "Casey",
+        category: "professional" as const,
+        description: null,
+        previewUrl: null,
+        labels: {},
+      },
+    ];
+    assert.equal(
+      selectElevenLabsSharedVoiceCandidate(candidates, new Set(["voice-a"]), () => 0)
+        ?.voiceId,
+      "voice-b",
+    );
+    assert.equal(
+      selectElevenLabsSharedVoiceCandidate(
+        candidates,
+        new Set(["voice-a", "voice-b"]),
+      ),
+      null,
+    );
+    assert.equal(
+      selectElevenLabsSharedVoiceCandidate(
+        candidates.map((candidate) =>
+          candidate.voiceId === "voice-b"
+            ? { ...candidate, description: "Warm British narrator" }
+            : { ...candidate, description: "Bright American character" },
+        ),
+        new Set(),
+        () => 0,
+        "British narrator",
+      )?.voiceId,
+      "voice-b",
+    );
+  });
+
   it("resolves an authenticated ElevenLabs voice ID to its display name", async () => {
     let requestedUrl = "";
     let requestedKey = "";
@@ -1311,5 +1483,31 @@ describe("voice Phase 1 boundary", () => {
     );
     assert.doesNotMatch(catalogRoute, /preferred_provider|Switch to Online/u);
     assert.match(serverSource, /resolveVoiceSynthesisExplicitOnlineContext\(\{/u);
+  });
+
+  it("keeps discovery non-importing with bounded exclusions and saves idempotently", () => {
+    const serverSource = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
+    const discoverRoute = serverSource.slice(
+      serverSource.indexOf('route("POST", "/api/voices/elevenlabs/shared/discover"'),
+      serverSource.indexOf('route("POST", "/api/voices/elevenlabs/library"'),
+    );
+    const saveRoute = serverSource.slice(
+      serverSource.indexOf('route("POST", "/api/voices/elevenlabs/library"'),
+      serverSource.indexOf('route("GET", "/api/voices/elevenlabs"'),
+    );
+    assert.match(discoverRoute, /getElevenLabsApiKeyForUser\(userId, userKey\) \?\? config\.elevenLabsApiKey/u);
+    assert.match(discoverRoute, /sharedVoiceExclusions\(body\.excludeVoiceIds\)/u);
+    assert.match(discoverRoute, /boundedSharedVoiceText\(body\.direction\)/u);
+    assert.match(discoverRoute, /listPremiumVoiceLibrary\(db, userId\)/u);
+    assert.match(discoverRoute, /selectElevenLabsSharedVoiceCandidate\(/u);
+    assert.doesNotMatch(discoverRoute, /importElevenLabsSharedVoice|\/v1\/voices\/add|DELETE/u);
+    assert.match(saveRoute, /findPremiumVoiceLibraryEntry\(db, userId, input\.sourceVoiceId\)/u);
+    assert.match(saveRoute, /getElevenLabsApiKeyForUser\(userId, userKey\) \?\? config\.elevenLabsApiKey/u);
+    assert.match(saveRoute, /requestElevenLabsVoiceCatalog\(/u);
+    assert.match(saveRoute, /voice\.originalVoiceId === input\.sourceVoiceId/u);
+    assert.match(saveRoute, /importElevenLabsSharedVoice\(/u);
+    assert.match(saveRoute, /savePremiumVoiceLibraryEntry\(db, userId/u);
+    assert.match(saveRoute, /elevenLabsSharedVoiceSaveFlights/u);
+    assert.doesNotMatch(saveRoute, /DELETE/u);
   });
 });
