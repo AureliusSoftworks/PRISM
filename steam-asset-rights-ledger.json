@@ -333,6 +333,12 @@
       "provenanceProfile": "aurelius-production"
     },
     {
+      "path": "audio/coffee/ambience/coffee-shop-foley-forest-loop.mp3",
+      "kind": "audio",
+      "sha256": "966f2bcd64cdf97501e874bd17181656294b88290e187d369553ee5252cd82b5",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
       "path": "audio/coffee/jazz/dreamy-steam.mp3",
       "kind": "audio",
       "sha256": "a33ff81f4c3e7d49350d8804063a5266d7c4f10c7910680bedf4893fb6122d7d",
@@ -750,6 +756,12 @@
       "path": "audio/ui-asmr/bot-select-04.mp3",
       "kind": "audio",
       "sha256": "c0b1765e0cbdbee3761934b030337c78690a065b5dd4e986ef71ff1a93cd6393",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "audio/ui-asmr/max-electrical-zap-02.mp3",
+      "kind": "audio",
+      "sha256": "9a70e5092657eae02ff6a04beaacbcfbf3942f9db3ddff32fde86b2965295bee",
       "provenanceProfile": "aurelius-production"
     },
     {
@@ -1689,6 +1701,114 @@
       "provenanceProfile": "aurelius-production"
     },
     {
+      "path": "debate/mystery/rooms/arboretum.webp",
+      "kind": "image",
+      "sha256": "81290fcd54631d9094e37a1a185be33b3097c6120a46b727797526da01c88fd4",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/rooms/ballroom.webp",
+      "kind": "image",
+      "sha256": "fa9ac06d777858417f3dbe7f4e185d7ea0919d11c84ce4195927420eb0f49446",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/rooms/basement.webp",
+      "kind": "image",
+      "sha256": "770b3052de98616ac4b838784e2aa866bb67e5034ff3ae59e474b64e91d6f572",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/rooms/bathroom.webp",
+      "kind": "image",
+      "sha256": "5c283a91c5baf353b06ebdc2d13cdcbdc80a08a8b4ee57d36de1a204685eaf1d",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/rooms/bedroom.webp",
+      "kind": "image",
+      "sha256": "9eae6ef01d0f1f3ed51406dce068578d851a30d6d419ca6c47e79efafec296cd",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/rooms/dining-room.webp",
+      "kind": "image",
+      "sha256": "fe0068110470a88862bb9a20454b1e81b5ddd15c26c71a5a52e9650a2bb7fed3",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/rooms/foyer.webp",
+      "kind": "image",
+      "sha256": "36a2f03e97e4eae7207932c0025455ec3e5bd77b13489856433db31e522d6b48",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/rooms/garage.webp",
+      "kind": "image",
+      "sha256": "23afd4f9fa680b98a96ca8912085b9514f3e9195f5e63290012541142e8ef21c",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/rooms/kitchen.webp",
+      "kind": "image",
+      "sha256": "c39ea20e1678a2c0242c8400854b1600ff99713314dddae30750419174ec1be4",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/rooms/library.webp",
+      "kind": "image",
+      "sha256": "dd2a687d9b199d908347e91d08bcedba052a40f82dc658e881a8a6a69304009b",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/rooms/living-room.webp",
+      "kind": "image",
+      "sha256": "41488deeba5366bb6f7f70071160c422e6ee2cc59f2308e7e33455c0b044e222",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/rooms/lounge.webp",
+      "kind": "image",
+      "sha256": "3656f7c4a919a2fa6487af6964e5d58abf2545d2ee08b6f5937b1a4afc8339a9",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/rooms/office.webp",
+      "kind": "image",
+      "sha256": "c1b53136ebf8af0a3cc376f9e78b27ea64bebf5081885a359485f43d0c028577",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/rooms/pool.webp",
+      "kind": "image",
+      "sha256": "d5d78fe5f4af7f5643c423b8c57c3176fb3028f77757c194d810523292f98a91",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/rooms/rooftop-lounge.webp",
+      "kind": "image",
+      "sha256": "367cc6f2f0c2909c96080ba540c25176335f679e85b486e95279472fce76b5da",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/rooms/theater.webp",
+      "kind": "image",
+      "sha256": "0c1ccef65b758df07f70cb8ca09c3eaf01559c6e064faa37888dd98737f3216e",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/overview-table-dark.png",
+      "kind": "image",
+      "sha256": "5805e98f398d3e8546b33b2dcc514e1b8c5a9b63f70278cb0acc59a908869e96",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/overview-table-light.png",
+      "kind": "image",
+      "sha256": "e5aa680d6c9868e74b23774a6e5e144b2401fbef23c5af493ef85e7837703225",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
       "path": "icon-192.png",
       "kind": "image",
       "sha256": "af3a3fcf098633e33b03a595acb054d25ac23ba1f274a1b3c3f599b832c38ffd",
@@ -1761,6 +1881,12 @@
       "provenanceProfile": "aurelius-production"
     },
     {
+      "path": "reasoning-effort/auto.svg",
+      "kind": "vector-art",
+      "sha256": "1f4915bf35aff3be6c03edc4e9a4352d1b1730f32d7f4e7bcd46150066a40cdc",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
       "path": "reasoning-effort/default.svg",
       "kind": "vector-art",
       "sha256": "c77fb311d26eaeb380767ee9d82e0dc2964cc9402d4a51372214a462ad43d0c0",
@@ -1793,7 +1919,7 @@
     {
       "path": "reasoning-effort/minimal.svg",
       "kind": "vector-art",
-      "sha256": "10205edd8e166e58bfc8fa00a599b4ec5f9afdd15d85a82f0676f32ccbead01e",
+      "sha256": "42a83e2fa29154bce056ce8e291261d8d1e2dd5ad03a10c8058bb4a403119b89",
       "provenanceProfile": "aurelius-production"
     },
     {
@@ -1899,6 +2025,24 @@
       "provenanceProfile": "aurelius-production"
     },
     {
+      "path": "ui/max-electric-loop.gif",
+      "kind": "image",
+      "sha256": "570d685a20ea7a8815b75c661026916bc9cae7014d495bce6b5e0fe2cea33e34",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "ui/max-electric-loop.webp",
+      "kind": "image",
+      "sha256": "a1b9dda7ee75a7c884509e30c299495a805152dc24dddc43d91f1c8789e3c0c2",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "ui/max-electric-still.png",
+      "kind": "image",
+      "sha256": "98ae9bbcf6b0bf66e31c44a643507f3ac38294fc3e933b07c7e07edefb879a44",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
       "path": "ui/turbo-fire-loop.gif",
       "kind": "image",
       "sha256": "c9f824d1d1b880003ffb1e60a3a8d89a6b3149d8d9c74cb6fdf00a2d95111378",
@@ -1914,6 +2058,12 @@
       "path": "ui/turbo-fire-still.png",
       "kind": "image",
       "sha256": "c7e42c1f3b327cc61db3ebf0d673ab498f77a32c09cb031c83daf2474492060a",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "voice/pronunciation-atlas-borders-equirectangular-v1.svg",
+      "kind": "vector-art",
+      "sha256": "edfa36eed5a6ec844f4ee8aacc8cdc42bef4bbc68198494a090b5dbc8e808b78",
       "provenanceProfile": "aurelius-production"
     },
     {
