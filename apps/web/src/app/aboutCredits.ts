@@ -319,6 +319,13 @@ export const ABOUT_CREDIT_GROUPS: readonly AboutCreditGroup[] = [
           "Selected imagery, voices, music, foley, and UI earcons generated through PRISM's connected OpenAI and ElevenLabs tools, then reviewed and integrated in-house.",
       },
       {
+        id: "the-midnight-clue",
+        name: "The Midnight Clue",
+        description:
+          "Bundled instrumental music bed for Whodunnit mansion investigation, supplied and curated for PRISM.",
+        license: "PRISM production asset",
+      },
+      {
         id: "subtlex",
         name: "SUBTLEX-US word frequencies",
         description:

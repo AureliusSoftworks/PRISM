@@ -44,6 +44,14 @@ import {
 } from "@localai/shared";
 import styles from "./debateMystery.module.css";
 import { BotAvatarMicro } from "./BotAvatarMicro";
+import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
+import {
+  WHODUNNIT_INVESTIGATION_MUSIC_FADE_MS,
+  WHODUNNIT_INVESTIGATION_MUSIC_TRANSITION_MS,
+  WHODUNNIT_INVESTIGATION_MUSIC_URL,
+  mysteryInvestigationMusicMix,
+  mysteryInvestigationMusicSessionActive,
+} from "./debateMysteryMusic";
 import { mysteryRoomArtworkSrc } from "./debateMysteryRoomArt";
 import { mysteryRoomSuspectWalkProfile } from "./debateMysteryRoomWalk";
 import { findAtMentionTokenPlain } from "./botMention";
@@ -77,6 +85,8 @@ interface MysteryRoutingProps {
 interface MysterySharedProps extends MysteryRoutingProps {
   bots: MysteryBotSummary[];
   theme: "light" | "dark";
+  audioEnabled: boolean;
+  audioVolume: number;
   request: <T>(path: string, options?: RequestInit) => Promise<T>;
   renderBotGlyph: BotPickerGlyphRenderer;
   /** Full/mini identity renderer supplied by the Debate surface. */
@@ -1724,6 +1734,9 @@ export function DebateMysteryPlay(
   const activePage = notebook?.pages.find((page) => page.id === activePageId) ?? notebook?.pages[0];
   const noteCount = notebook ? debateMysteryNotebookCharacterCount(notebook) : 0;
   const theoryMode = theoryBoardOpen;
+  const investigationMusicMix = mysteryInvestigationMusicMix({
+    theoryBoardOpen,
+  });
   const theoryChecklist = [
     { label: "Accused", complete: Boolean(theory.culpritSeatId) },
     { label: "Method", complete: Boolean(theory.method.trim()) },
@@ -1874,6 +1887,21 @@ export function DebateMysteryPlay(
 
   return (
     <main className={styles.play} data-theme="dark" data-phase={state.playPhase}>
+      <SessionAtmosphereLayer
+        active={Boolean(
+          props.audioEnabled &&
+          props.audioVolume > 0 &&
+          mysteryInvestigationMusicSessionActive(state.playPhase)
+        )}
+        sessionKey={`whodunnit-investigation:${sessionId}`}
+        volume={props.audioVolume}
+        backgroundUrl={WHODUNNIT_INVESTIGATION_MUSIC_URL}
+        backgroundRecordable={false}
+        mix={investigationMusicMix}
+        mixTransitionMs={WHODUNNIT_INVESTIGATION_MUSIC_TRANSITION_MS}
+        lifecycleTransitionMs={WHODUNNIT_INVESTIGATION_MUSIC_FADE_MS}
+        ambientFoley={false}
+      />
       <header className={styles.playHeader}>
         <button type="button" className={styles.exitButton} onClick={props.onExit}>← Archive</button>
         <div className={styles.caseIdentity}>

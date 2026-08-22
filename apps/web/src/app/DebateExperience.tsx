@@ -26745,6 +26745,8 @@ export function DebateExperience(
   const mysterySharedProps = {
     bots,
     theme: props.theme,
+    audioEnabled: props.audioEnabled,
+    audioVolume: props.audioVolume,
     request,
     renderBotGlyph: props.renderBotGlyph,
     renderMysteryBotAvatar: (

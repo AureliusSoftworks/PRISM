@@ -90,6 +90,10 @@ describe("About credits", () => {
       credits.find((credit) => credit.id === "natural-earth")?.license,
       "Public domain",
     );
+    assert.equal(
+      credits.find((credit) => credit.id === "the-midnight-clue")?.name,
+      "The Midnight Clue",
+    );
     for (const group of ABOUT_CREDIT_GROUPS) {
       assert.ok(group.description.trim());
       assert.ok(group.credits.length > 0);
