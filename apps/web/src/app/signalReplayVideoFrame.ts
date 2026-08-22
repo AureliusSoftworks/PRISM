@@ -572,6 +572,19 @@ export function signalFaithfulReplayCameraState(args: {
         replayParticipantIdForRole(args.episode, activeMessage.speakerRole)
       ]
     : null;
+  const hostParticipant = args.scene?.participants[args.episode.hostBotId];
+  const guestParticipant =
+    args.scene?.participants[
+      replayParticipantIdForRole(args.episode, "guest")
+    ];
+  // Match live direction: only simultaneous active audible playback is
+  // crosstalk. Plans and inactive scene state cannot manufacture a Wide.
+  const audibleVoiceOverlap = Boolean(
+    hostParticipant?.speaking === true &&
+      hostParticipant.audible !== false &&
+      guestParticipant?.speaking === true &&
+      guestParticipant.audible !== false,
+  );
   const speakingShot =
     activeMessage &&
     speakerParticipant?.speaking === true &&
@@ -593,6 +606,7 @@ export function signalFaithfulReplayCameraState(args: {
     eventElapsedMs,
     shot: signalLiveAutoCameraShot({
       baseShot,
+      audibleVoiceOverlap,
       speakingShot,
       coverageShot: speakingShot
         ? botcastAutoCoverageShotAt({

@@ -1414,6 +1414,70 @@ const HIDING_PATTERNS = [
   "mixed into the dust immediately below the {anchor}", "wedged between the {anchor} and the wall",
 ] as const;
 
+const EMPTY_REGION_TEXTURES = {
+  glass: [
+    "Oblique light turns {anchor} into a map of wiped arcs and pale mineral bloom; the pattern stays broad and directionless.",
+    "A breath of condensation clouds {anchor}, briefly revealing the uneven polish left by ordinary cleaning.",
+    "The lens catches a faint double reflection in {anchor}; shifting a few inches resolves it into the room behind you.",
+    "Along {anchor}, one wavering line looks like a scratch until the viewing angle reveals it as trapped light.",
+  ],
+  textile: [
+    "The fibers of {anchor} change shade when brushed against the nap, then settle back without exposing a snag or seam.",
+    "Close inspection of {anchor} finds dust held evenly through the weave and one harmless thread curled like a question mark.",
+    "A slow pass over {anchor} releases the dry scent of fabric and cedar; the pile remains even beneath the lens.",
+    "The edge of {anchor} lifts with a soft rasp, revealing the same faded backing from end to end.",
+  ],
+  wood: [
+    "Raking light exposes a shallow swell in the grain of {anchor}, an old moisture mark that disappears when viewed head-on.",
+    "A careful press along {anchor} produces a sequence of firm little creaks, each answered by solid joinery.",
+    "The wax on {anchor} has pooled in the carved recesses, making the ornament look deeper than it is.",
+    "One dark line across {anchor} resembles a gap until the lens resolves it into grain running beneath the finish.",
+  ],
+  metal: [
+    "The metal around {anchor} holds a cold, dull shine and a crescent of limescale at its lowest edge.",
+    "A light tap on {anchor} answers with a short, clean ring; nothing inside shifts or rattles.",
+    "Fine polishing lines sweep across {anchor} in overlapping circles, catching the lens one band at a time.",
+    "At close range, {anchor} reflects the room as a warped ribbon of light with no sharp mark interrupting it.",
+  ],
+  stone: [
+    "One seam in {anchor} sits a fraction proud of the rest; pressure confirms that it is solid rather than loose.",
+    "The surface of {anchor} cools the lens-side hand while tiny mica flecks wink and vanish under changing light.",
+    "A hairline variation crosses {anchor}, but its softened edges show it belongs to the material rather than a fresh break.",
+    "Knuckles draw a flat, dense note from {anchor}; the sound stays constant across the entire section.",
+  ],
+  paper: [
+    "The edges along {anchor} form an uneven skyline of use and age, with settled dust continuing behind them.",
+    "A dry paper-and-leather scent gathers around {anchor}; nothing in the visible sequence breaks its long-set rhythm.",
+    "The lens follows a pale abrasion across {anchor} until it resolves into repeated contact from ordinary handling.",
+    "A slight draft stirs the lightest edge of {anchor}, exposing only the shadowed surface immediately behind it.",
+  ],
+  general: [
+    "A close pass over {anchor} catches a shift in texture that resolves into an old, carefully blended repair.",
+    "From inches away, {anchor} gives up a quiet mixture of polish, cool air, and the room's settled stillness.",
+    "The lens finds a tiny asymmetry in {anchor}; viewed from the other side, it becomes part of the original construction.",
+    "A soft settling tick comes from {anchor} as the room cools, then the material falls silent again.",
+  ],
+} as const;
+
+function emptyRegionTextureFamily(region: DebateMysteryRegionV1): keyof typeof EMPTY_REGION_TEXTURES {
+  const material = `${region.label} ${region.physicalAnchor} ${region.keywords.join(" ")}`.toLocaleLowerCase();
+  if (/\b(?:glass|mirror|window|shower)\b/u.test(material)) return "glass";
+  if (/\b(?:rug|carpet|curtain|drape|linen|towel|bed|sofa|chair|cushion|upholster)\w*\b/u.test(material)) return "textile";
+  if (/\b(?:book|paper|letter|ledger|magazine|shelf|spine)\w*\b/u.test(material)) return "paper";
+  if (/\b(?:wood|cabinet|desk|table|door|panel|drawer|bookcase|sideboard|console)\w*\b/u.test(material)) return "wood";
+  if (/\b(?:metal|faucet|handle|oven|range|sconce|rail|fixture|pipe)\w*\b/u.test(material)) return "metal";
+  if (/\b(?:stone|floor|wall|tile|counter|bath|tub|hearth|fireplace|step|terrace)\w*\b/u.test(material)) return "stone";
+  return "general";
+}
+
+function emptyRegionInspectionResponse(
+  region: DebateMysteryRegionV1,
+  random: () => number,
+): string {
+  const texture = choose(EMPTY_REGION_TEXTURES[emptyRegionTextureFamily(region)], random);
+  return texture.replace("{anchor}", region.physicalAnchor.replace(/^the\s+/iu, "the "));
+}
+
 /** Boundary-stable for seed replay and direct probability tests. */
 export function resolveDebateMysteryWeaponCategory(roll: number): DebateMysteryWeaponCategoryV1 {
   if (roll < 0.25) return "poison";
@@ -1629,7 +1693,7 @@ export function compileDeterministicDebateMystery(args: {
         ? `There is something here: ${evidence.find((item) => item.id === evidenceId)?.title.toLowerCase() ?? `a ${object.adjective} ${object.object}`}, ${hidingMechanism}.`
         : kind === "subplot"
           ? choose(AUTHORED_SUBPLOTS, random)
-          : `The ${region.label.toLowerCase()} bears inspection, but it is only what it appears to be.`,
+          : emptyRegionInspectionResponse(region, random),
       evidenceId,
       inventoryItemId: null,
       subplotResolution: kind === "subplot" ? choose(AUTHORED_SUBPLOTS, random) : null,
@@ -1651,7 +1715,7 @@ export function compileDeterministicDebateMystery(args: {
         inspectionResponse:
           contextualKind === "subplot"
             ? choose(AUTHORED_SUBPLOTS, random)
-            : `The ${contextualRegion.label.toLowerCase()} is worth a closer look: old dust and ordinary wear, undisturbed for weeks.`,
+            : emptyRegionInspectionResponse(contextualRegion, random),
         evidenceId: null,
         inventoryItemId: null,
         subplotResolution:

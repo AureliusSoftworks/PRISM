@@ -8,6 +8,7 @@ import {
   botcastHostTurnIncludesDirectQuote,
   botcastHostUtteranceIsGenericStall,
   botcastHostUtteranceNeedsInterviewQuestion,
+  botcastRecoveryUtteranceIsNearDuplicate,
   botcastUtteranceContainsScreenplayLabels,
   botcastUtteranceIsNearDuplicate,
 } from "../botcast-utterance-quality.ts";
@@ -73,6 +74,45 @@ describe("botcast utterance quality", () => {
       false,
     );
     assert.equal(botcastUtteranceIsNearDuplicate("Yes I am.", [POE_LOOP]), false);
+  });
+
+  it("rejects a repeated recovery question behind a reshuffled first-contact alias", () => {
+    assert.equal(
+      botcastRecoveryUtteranceIsNearDuplicate(
+        "Hello—I'm Drew. At what point does that stop being a claim and become a choice with a cost?",
+        [
+          "Hello—I'm Nyx Emberveil. At what point does that stop being a claim and become a choice with a cost?",
+        ],
+      ),
+      true,
+    );
+  });
+
+  it("accepts a fresh recovery question after a reshuffled first-contact alias", () => {
+    assert.equal(
+      botcastRecoveryUtteranceIsNearDuplicate(
+        "Hello—I'm Drew. Which consequence is easiest to ignore, and who benefits from ignoring it?",
+        [
+          "Hello—I'm Nyx Emberveil. At what point does that stop being a claim and become a choice with a cost?",
+        ],
+      ),
+      false,
+    );
+  });
+
+  it("rejects the observed Signal abstract-answer loop while preserving a concrete advance", () => {
+    const earlier =
+      "Ah, your words dance like colors in a storm, swirling and shifting with unknown meaning. Let us anchor ourselves in the clarity of choice, toll, and consequence, for therein lies the truth we seek amidst the chaos.";
+    const repeated =
+      "Ah, amidst the swirling storm of your words, let us return to the heart of clarity: the choices we make, the toll they take, and the consequences we carry forward. In these reflections lies the truth we seek, even in the midst of chaos.";
+    const concreteAdvance =
+      "A wheat field gives me a usable rule: bend every yellow stroke in the worker's direction, so the labor remains visible without making hardship decorative.";
+
+    assert.equal(botcastUtteranceIsNearDuplicate(repeated, [earlier]), true);
+    assert.equal(
+      botcastUtteranceIsNearDuplicate(concreteAdvance, [earlier]),
+      false,
+    );
   });
 
   it("rejects a generic host stall question", () => {

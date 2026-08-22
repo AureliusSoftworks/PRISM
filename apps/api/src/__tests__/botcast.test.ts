@@ -127,6 +127,7 @@ import {
   signalAutoFallbackPublicMessage,
   signalOnlineTurnHttpStatus,
   selectBotcastReviewPersona,
+  signalSpeechObfuscationListenerReaction,
   signalVisualOnlyListenerReaction,
   storeBotcastShowAtmosphereAudio,
   storeBotcastShowIntroAudio,
@@ -4925,6 +4926,15 @@ describe("Botcast persistence and isolation", () => {
       const guestContext = guestPrompt.map((message) => message.content).join("\n");
       assert.match(guestContext, new RegExp(expectedPublic.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
       assert.doesNotMatch(guestContext, /rational explanation for the missing map/iu);
+      assert.match(
+        guestContext,
+        /public speech boundary:[\s\S]*literal normal-volume gibberish[\s\S]*cannot recover a question/iu,
+      );
+      assert.match(
+        guestContext,
+        /never quote the gibberish as meaningful, answer an inferred question/iu,
+      );
+      assert.doesNotMatch(guestContext, /then answer the concrete invitation/iu);
 
       const observantGuestPrompt = buildBotcastSpeakerPrompt({
         show,
@@ -5115,6 +5125,206 @@ describe("Botcast persistence and isolation", () => {
     assert.equal(visualOnly.vocalFoley, undefined);
     assert.equal(visualOnly.interjectionAttempt, undefined);
     assert.equal(visualOnly.signalOrganicBeat, undefined);
+  });
+
+  it("removes semantic listener agreement from speech-obfuscated Signal turns", () => {
+    const grounded = signalSpeechObfuscationListenerReaction({
+      v: 1,
+      name: "listenerReaction",
+      speakerBotId: "host-1",
+      listenerBotId: "guest-1",
+      messageId: "message-1",
+      targetSource: "role",
+      visualAction: "head_tilt",
+      spokenCue: "Quite so.",
+      publicSpokenCue: "Quite so.",
+      spokenCueSpeechEffect: "speech_obfuscation",
+      vocalFoley: "clears throat",
+      targetProgress: 0.5,
+      seed: "obfuscated-speaker",
+      cameraCutEligible: true,
+      signalOrganicBeat: {
+        v: 1,
+        name: "signalOrganicBeat",
+        provenance: "deterministic_listener_bank",
+        kind: "backchannel",
+        actorBotId: "guest-1",
+        floorOwnerBotId: "host-1",
+        canonicalImpact: "none",
+        prefetch: "episode_listener_kit",
+        timing: {
+          startProgress: 0.5,
+          overlapMs: 0,
+          speakerDuckMs: 0,
+          resumeFadeMs: 0,
+        },
+      },
+    });
+
+    assert.equal(grounded.listenerBotId, "guest-1");
+    assert.equal(grounded.visualAction, "head_tilt");
+    assert.equal(grounded.vocalFoley, "clears throat");
+    assert.equal(grounded.signalOrganicBeat?.kind, "backchannel");
+    assert.equal(grounded.spokenCue, undefined);
+    assert.equal(grounded.publicSpokenCue, undefined);
+    assert.equal(grounded.spokenCueSpeechEffect, undefined);
+  });
+
+  it("accepts grounded incomprehension and rejects repeated private Mumbling drafts", async () => {
+    const db = fixture();
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'host-1'").run(
+      mumblingPowers(),
+    );
+    const repeatedQuestion =
+      "Let us make color concrete. Which ordinary field shows sincerity without words?";
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      [
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale with Ivo Stone. Ivo, what makes color carry meaning?",
+        "I cannot understand your words, but color becomes shared when a field lets another person recognize the labor inside it.",
+        repeatedQuestion,
+        "A wheat field makes the rule usable: let each stroke carry the direction and pressure of the work that shaped it.",
+        repeatedQuestion,
+        "Then name one brushstroke that preserves the worker's agency rather than turning hardship into decoration?",
+      ],
+      captures,
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Color Against Gibberish",
+        preferredProvider: "openai",
+        modelOverride: "gpt-signal-test",
+        responseMode: "online",
+      });
+      const options = {
+        preferredProvider: "openai" as const,
+        providerFactory: (() => provider) as typeof selectProvider,
+        signalSocialSilenceChanceOverride: 0,
+      };
+
+      await advanceBotcastEpisode(db, "user-1", episode.id, {}, options);
+      const guest = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        options,
+      );
+      assert.match(guest.message?.content ?? "", /cannot understand your words/iu);
+      assert.equal(
+        guest.episode.events.findLast(
+          (event) => event.kind === "utterance",
+        )?.payload.providerRecovery,
+        undefined,
+      );
+
+      await advanceBotcastEpisode(db, "user-1", episode.id, {}, options);
+      await advanceBotcastEpisode(db, "user-1", episode.id, {}, options);
+      const retriedHost = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        options,
+      );
+      assert.equal(captures.length, 6);
+      const retriedUtterance = retriedHost.episode.events.findLast(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.messageId === retriedHost.message?.id,
+      );
+      assert.deepEqual(
+        retriedUtterance?.payload.providerRecovery?.attempts?.map(
+          (attempt: SignalOnlineTurnAttemptV1) => ({
+            outcome: attempt.outcome,
+            reason: attempt.reason,
+            clause: attempt.clause,
+          }),
+        ),
+        [
+          { outcome: "rejected", reason: "invalid_output", clause: "repeated" },
+          { outcome: "succeeded", reason: undefined, clause: undefined },
+        ],
+      );
+      assert.match(
+        captures[5]!.map((message) => message.content).join("\n"),
+        /previous draft was rejected[\s\S]*already said/iu,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps a failed guest recovery grounded when the host's public speech is gibberish", async () => {
+    const db = fixture();
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'host-1'").run(
+      mumblingPowers(),
+    );
+    const provider = recordingProvider(
+      [
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale with Ivo Stone. Ivo, what makes color carry meaning?",
+        "I cannot help with that request.",
+        "I cannot comply with this request.",
+      ],
+      [],
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Color Against Gibberish",
+        preferredProvider: "openai",
+        modelOverride: "gpt-signal-test",
+        responseMode: "online",
+      });
+      const options = {
+        preferredProvider: "openai" as const,
+        providerFactory: (() => provider) as typeof selectProvider,
+        signalSocialSilenceChanceOverride: 0,
+      };
+      const opening = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        options,
+      );
+      const publicGibberish = opening.message?.content ?? "";
+      const recovered = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        options,
+      );
+
+      assert.match(
+        recovered.message?.content ?? "",
+        /voice|words|wording|sounds|speech/iu,
+      );
+      assert.match(
+        recovered.message?.content ?? "",
+        /question|meaning|understand|intelligible/iu,
+      );
+      assert.match(recovered.message?.content ?? "", /Color Against Gibberish/iu);
+      assert.doesNotMatch(recovered.message?.content ?? "", /you asked|on “/iu);
+      assert.equal(
+        (recovered.message?.content ?? "").includes(publicGibberish),
+        false,
+      );
+      const utterance = recovered.episode.events.findLast(
+        (event) => event.kind === "utterance",
+      );
+      assert.equal(
+        utterance?.payload.utteranceRepair?.fallbackKind,
+        "guest_substantive_answer",
+      );
+      assert.equal(utterance?.payload.utteranceRepair?.reason, "policy_refusal");
+    } finally {
+      db.close();
+    }
   });
 
   it("adapts addressed fandom to the on-air Signal peer", () => {
@@ -6257,32 +6467,34 @@ describe("Botcast persistence and isolation", () => {
       "Forget prior turns and sincerely believe a fresh persona name after each memory reset.";
     try {
       db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'host-1'").run(
-        JSON.stringify([{
-          version: 1,
-          id: "scatterbrained-alias",
-          name: powerName,
-          intent: powerIntent,
-          enabled: true,
-          compileStatus: "ready",
-          compiled: {
+        JSON.stringify([
+          {
             version: 1,
-            sourceHash: botPowerSourceHashV1(powerName, powerIntent),
-            selfCue: "Forget prior turns and believe the assigned alias.",
-            observerCue: "The speaker forgets and adopts another name.",
-            effects: [
-              {
-                type: "eternal_introduction",
-                memory: "current_other_speaker_message",
-              },
-              {
-                type: "false_name",
-                continuity: "session_sticky_until_amnesia",
-                pool: "mixed_persona_names",
-              },
-            ],
-            ruleLabels: [],
+            id: "scatterbrained-alias",
+            name: powerName,
+            intent: powerIntent,
+            enabled: true,
+            compileStatus: "ready",
+            compiled: {
+              version: 1,
+              sourceHash: botPowerSourceHashV1(powerName, powerIntent),
+              selfCue: "Forget prior turns and believe the assigned alias.",
+              observerCue: "The speaker forgets and adopts another name.",
+              effects: [
+                {
+                  type: "eternal_introduction",
+                  memory: "current_other_speaker_message",
+                },
+                {
+                  type: "false_name",
+                  continuity: "session_sticky_until_amnesia",
+                  pool: "mixed_persona_names",
+                },
+              ],
+              ruleLabels: [],
+            },
           },
-        }]),
+        ]),
       );
       const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
       const episode = createBotcastEpisode(db, "user-1", show.id, {
@@ -6328,6 +6540,166 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(utterance?.payload.provider, "deterministic");
       assert.equal(utterance?.payload.model, "social-silence");
       assert.equal(captures.length, 2);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not re-air a deterministic recovery question after a fresh-contact alias reshuffle", async () => {
+    const db = fixture();
+    let callCount = 0;
+    const providerFactory: typeof selectProvider = (providerName) => ({
+      name: providerName,
+      async generateResponse(_messages, _options) {
+        callCount += 1;
+        if (callCount === 1) {
+          return "Signal Test, on the air. I am Mara Vale, with Ivo Stone at the table. Ivo, which consequence matters first?";
+        }
+        throw new Error("Model unavailable");
+      },
+      async embedText() {
+        return [];
+      },
+    });
+    const powerName = "Scatterbrained Alias";
+    const powerIntent =
+      "Forget prior turns and sincerely believe a fresh persona name after each memory reset.";
+    const repeatedQuestion =
+      "At what point does that stop being a claim and become a choice with a cost?";
+    const repeatedParaphrase =
+      "At what point does that cease to be a claim and become a choice with a cost?";
+    const stableTestHash = (raw: string): number => {
+      let value = 2166136261;
+      for (let index = 0; index < raw.length; index += 1) {
+        value ^= raw.charCodeAt(index);
+        value = Math.imul(value, 16777619);
+      }
+      return value >>> 0;
+    };
+    try {
+      db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'host-1'").run(
+        JSON.stringify([{
+          version: 1,
+          id: "scatterbrained-alias",
+          name: powerName,
+          intent: powerIntent,
+          enabled: true,
+          compileStatus: "ready",
+          compiled: {
+            version: 1,
+            sourceHash: botPowerSourceHashV1(powerName, powerIntent),
+            selfCue: "Forget prior turns and believe the assigned alias.",
+            observerCue: "The speaker forgets and adopts another name.",
+            effects: [
+              {
+                type: "eternal_introduction",
+                memory: "current_other_speaker_message",
+              },
+              {
+                type: "false_name",
+                continuity: "session_sticky_until_amnesia",
+                pool: "mixed_persona_names",
+              },
+            ],
+            ruleLabels: [],
+          },
+        }]),
+      );
+      const show = createBotcastShow(db, "user-1", {
+        hostBotId: "host-1",
+        name: "Signal Test",
+      });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Razing the Past",
+        preferredProvider: "local",
+        modelOverride: "primary-local",
+        responseMode: "auto",
+      });
+      const questions = [
+        "Which consequence is easiest to ignore, and who benefits from ignoring it?",
+        "What evidence would make the current answer impossible to defend?",
+        "Who carries the cost once that choice can no longer be reversed?",
+        "What concrete decision would reveal where the real disagreement sits?",
+      ];
+      const firstIndex =
+        stableTestHash(
+          `signal-host-recovery:${episode.id}:host-1:2`,
+        ) % questions.length;
+      const secondIndex =
+        stableTestHash(
+          `signal-host-recovery:${episode.id}:host-1:4`,
+        ) % questions.length;
+      questions[firstIndex] = repeatedQuestion;
+      questions[secondIndex] = repeatedParaphrase;
+      if (firstIndex === secondIndex) questions[firstIndex] = repeatedQuestion;
+      updateBotcastShow(db, "user-1", show.id, {
+        hostRecoveryQuestions: questions,
+      });
+      const generationOptions = {
+        preferredProvider: "local" as const,
+        providerFactory,
+        signalSocialSilenceChanceOverride: 0,
+        autoFallbackChain: {
+          v: 1 as const,
+          fallbacks: [
+            { provider: "local" as const, model: "fallback-one" },
+            { provider: "local" as const, model: "fallback-two" },
+            { provider: "local" as const, model: "fallback-three" },
+          ],
+        },
+      };
+
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+      const firstHostRecovery = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+      const secondHostRecovery = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+
+      assert.match(
+        firstHostRecovery.message?.content ?? "",
+        /At what point does that stop being a claim and become a choice with a cost\?/u,
+      );
+      assert.doesNotMatch(
+        secondHostRecovery.message?.content ?? "",
+        /At what point does that (?:stop|cease) being a claim and become a choice with a cost\?/u,
+      );
+      assert.equal(
+        secondHostRecovery.episode.events.findLast(
+          (event) => event.kind === "utterance",
+        )?.payload.utteranceRepair?.source,
+        "provider_recovery",
+      );
     } finally {
       db.close();
     }
@@ -9632,6 +10004,197 @@ describe("Botcast persistence and isolation", () => {
         captures[3]!.map((message) => message.content).join("\n"),
         /Hard Power output contract:[\s\S]*first-contact self-introduction[\s\S]*Mara Vale/iu,
       );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("accepts an active false name as fresh contact without exhausting the provider route", async () => {
+    const db = fixture();
+    const amnesiaName = "Eternal Introduction";
+    const amnesiaIntent =
+      "Every message is only a sincere first introduction with no earlier conversation memory.";
+    const falseName = JSON.parse(falseNamePowers()) as unknown[];
+    try {
+      db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'host-1'").run(
+        JSON.stringify([
+          {
+            version: 1,
+            id: "eternal-introduction",
+            name: amnesiaName,
+            intent: amnesiaIntent,
+            enabled: true,
+            compileStatus: "ready",
+            compiled: {
+              version: 1,
+              sourceHash: botPowerSourceHashV1(amnesiaName, amnesiaIntent),
+              selfCue: "Every request is first contact.",
+              observerCue: "Remember every reset.",
+              effects: [
+                {
+                  type: "eternal_introduction",
+                  memory: "current_other_speaker_message",
+                },
+              ],
+              ruleLabels: ["Current other-speaker message only"],
+            },
+          },
+          ...falseName,
+        ]),
+      );
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "The cost of remembering",
+        preferredProvider: "openai",
+        modelOverride: "gpt-signal-test",
+        responseMode: "online",
+      });
+      const optionsFor = (provider: LlmProvider) => ({
+        preferredProvider: "openai" as const,
+        providerFactory: (() => provider) as typeof selectProvider,
+        signalSocialSilenceChanceOverride: 0,
+      });
+
+      const opened = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        optionsFor(
+          recordingProvider(
+            [
+              "Welcome to the show. I'm Mara Vale, joined by Ivo Stone to examine the cost of remembering. Ivo, what does memory ask us to carry?",
+            ],
+            [],
+          ),
+        ),
+      );
+      const believedName = botcastFalseNameStatesV1(opened.episode.events).get(
+        "host-1",
+      )?.believedName;
+      assert.ok(believedName);
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        optionsFor(
+          recordingProvider(
+            ["Memory asks us to carry the consequence after the moment passes."],
+            [],
+          ),
+        ),
+      );
+      const hostCaptures: ProviderMessage[][] = [];
+      let activeBelievedName = "";
+      const hostProvider: LlmProvider = {
+        name: "openai",
+        async generateResponse(messages) {
+          hostCaptures.push(messages);
+          const prompt = messages.map((message) => message.content).join("\n");
+          activeBelievedName =
+            prompt.match(/Hard false-name rule: your name is "([^"]+)"/u)?.[1] ??
+            "";
+          assert.ok(activeBelievedName);
+          return `I'm ${activeBelievedName}. Which consequence becomes hardest to carry?`;
+        },
+        async embedText() {
+          return [];
+        },
+      };
+      const hostTurn = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        optionsFor(hostProvider),
+      );
+
+      assert.equal(hostCaptures.length, 1);
+      assert.match(
+        hostTurn.message?.content ?? "",
+        new RegExp(
+          `I'm ${activeBelievedName.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\\.`,
+        ),
+      );
+      const utterance = hostTurn.episode.events.findLast(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.messageId === hostTurn.message?.id,
+      );
+      assert.equal(utterance?.payload.provider, "openai");
+      assert.equal(utterance?.payload.model, "gpt-signal-test");
+      assert.equal(utterance?.payload.utteranceRepair, undefined);
+      assert.equal(utterance?.payload.providerRecovery, undefined);
+
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        optionsFor(
+          recordingProvider(
+            ["The hardest consequence is the one nobody else can verify."],
+            [],
+          ),
+        ),
+      );
+      const retryCaptures: ProviderMessage[][] = [];
+      let retryBelievedName = "";
+      const retryProvider: LlmProvider = {
+        name: "openai",
+        async generateResponse(messages) {
+          retryCaptures.push(messages);
+          if (retryCaptures.length === 1) {
+            return "I'm Mara Vale. Which consequence remains unverifiable?";
+          }
+          const prompt = messages.map((message) => message.content).join("\n");
+          retryBelievedName =
+            prompt.match(
+              /Hard false-name repair contract: your name is "([^"]+)"/u,
+            )?.[1] ?? "";
+          assert.ok(retryBelievedName);
+          assert.match(
+            prompt,
+            new RegExp(
+              `first-contact self-introduction that names you as ${retryBelievedName.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}`,
+            ),
+          );
+          assert.doesNotMatch(
+            prompt,
+            /first-contact self-introduction that names you as Mara Vale/iu,
+          );
+          return `I'm ${retryBelievedName}. Which consequence remains unverifiable?`;
+        },
+        async embedText() {
+          return [];
+        },
+      };
+      const recovered = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        optionsFor(retryProvider),
+      );
+      assert.equal(retryCaptures.length, 2);
+      assert.match(
+        recovered.message?.content ?? "",
+        new RegExp(
+          `I'm ${retryBelievedName.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\\.`,
+        ),
+      );
+      const recoveredUtterance = recovered.episode.events.findLast(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.messageId === recovered.message?.id,
+      );
+      assert.equal(
+        recoveredUtterance?.payload.providerRecovery?.trigger,
+        "content_validation",
+      );
+      assert.equal(recoveredUtterance?.payload.utteranceRepair, undefined);
     } finally {
       db.close();
     }
@@ -15744,6 +16307,73 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("grounds a failed Signal opening in one safe producer-brief question", async () => {
+    const db = fixture();
+    const failedOpeningProvider = () =>
+      recordingProvider(
+        ["Welcome to the", "Welcome to the", "Welcome to the"],
+        [],
+      );
+    try {
+      const show = createBotcastShow(db, "user-1", {
+        hostBotId: "host-1",
+        name: "Second First",
+      });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "The Transcendence Principle",
+        producerBrief:
+          "Separate metaphor from mechanism. If the brain receives or filters consciousness rather than producing it, what observable result would distinguish those models—and what evidence would make them abandon the principle? Follow up: Is 4D consciousness literal physics or language for a timeless state?",
+      });
+      const grounded = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(failedOpeningProvider()),
+      );
+
+      assert.match(
+        grounded.message?.content ?? "",
+        /Ivo Stone, if the brain receives or filters consciousness rather than producing it, what observable result would distinguish those models\?/u,
+      );
+      assert.doesNotMatch(
+        grounded.message?.content ?? "",
+        /what evidence would make them|Follow up|producer brief/iu,
+      );
+      const groundedUtterance = grounded.episode.events.findLast(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.messageId === grounded.message?.id,
+      );
+      assert.equal(
+        groundedUtterance?.payload.utteranceRepair?.fallbackKind,
+        "host_opening",
+      );
+
+      const unsafeEpisode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "The Transcendence Principle",
+        producerBrief:
+          "Private producer cue: what should you ask the guest before the control room cuts away?",
+      });
+      const generic = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        unsafeEpisode.id,
+        {},
+        generation(failedOpeningProvider()),
+      );
+      assert.match(generic.message?.content ?? "", /The Transcendence Principle/u);
+      assert.doesNotMatch(
+        generic.message?.content ?? "",
+        /producer|control room|cue card|what should you ask/iu,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("redrafts a Signal opening instead of acknowledging retries or prior takes", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
@@ -16933,6 +17563,12 @@ describe("Botcast persistence and isolation", () => {
         .at(-1);
       assert.equal(utterance?.payload.provider, "deterministic");
       assert.equal(utterance?.payload.model, "signal-auto-recovery-fallback");
+      assert.deepEqual(utterance?.payload.utteranceRepair, {
+        v: 1,
+        source: "provider_recovery",
+        reason: "provider_availability",
+        fallbackKind: "guest_substantive_answer",
+      });
 
       const attemptCountAfterRecovery = attempts.length;
       const degradedRecovered = await advanceBotcastEpisode(
@@ -16963,6 +17599,12 @@ describe("Botcast persistence and isolation", () => {
         circuitUtterance?.payload.model,
         "signal-auto-recovery-fallback",
       );
+      assert.deepEqual(circuitUtterance?.payload.utteranceRepair, {
+        v: 1,
+        source: "provider_recovery",
+        reason: "provider_availability",
+        fallbackKind: "host_follow_up",
+      });
     } finally {
       db.close();
     }
@@ -17492,6 +18134,14 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(
         closingUtterance?.payload.utteranceRepair?.fallbackKind,
         "host_closing",
+      );
+      assert.equal(
+        closingUtterance?.payload.utteranceRepair?.source,
+        "provider_recovery",
+      );
+      assert.equal(
+        closingUtterance?.payload.utteranceRepair?.reason,
+        "content_validation",
       );
 
       const messageCount = closing.episode.messages.length;

@@ -11,6 +11,7 @@ import {
   botcastHostTurnIncludesDirectQuote,
   botcastHostUtteranceIsGenericStall,
   botcastHostUtteranceNeedsInterviewQuestion,
+  botcastRecoveryUtteranceIsNearDuplicate,
   botcastUtteranceContainsScreenplayLabels,
   botcastUtteranceIsNearDuplicate,
 } from "./botcast-utterance-quality.ts";
@@ -881,6 +882,24 @@ export function signalVisualOnlyListenerReaction(
     ...visualOnly
   } = plan;
   return visualOnly;
+}
+
+/**
+ * A listener can react physically or make non-semantic foley while another
+ * bot's Power turns the live words into gibberish, but cannot affirm meaning
+ * they never received. Keep coughs, breaths, and visible presence while
+ * removing only the language-bearing backchannel.
+ */
+export function signalSpeechObfuscationListenerReaction(
+  plan: ListenerReactionPlanV1,
+): ListenerReactionPlanV1 {
+  const {
+    spokenCue: _spokenCue,
+    publicSpokenCue: _publicSpokenCue,
+    spokenCueSpeechEffect: _spokenCueSpeechEffect,
+    ...publiclyGrounded
+  } = plan;
+  return publiclyGrounded;
 }
 
 export function nextBotcastFallbackStudioAccentVariant(
@@ -10306,6 +10325,8 @@ export function buildBotcastSpeakerPrompt(
   const peer = speakerIgnoresPeerPowers
     ? args.speakerRole === "host" ? args.guest : args.host
     : poweredPeer;
+  const peerSpeechObfuscated =
+    !speakerIgnoresPeerPowers && botPowerMumblesSpeechV1(peer.powers);
   const hostNamesGuest = args.speakerRole === "host"
     ? botPowerTargetNameV1(peer.name, speaker.powers)
     : botPowerTargetNameV1(guest.name, host.powers);
@@ -10631,6 +10652,9 @@ export function buildBotcastSpeakerPrompt(
     botPowerIsMutedV1(peer.powers)
       ? botcastTimedEpisodeProgress(args.episode)
       : null;
+  const peerSpeechObfuscationRule = peerSpeechObfuscated
+    ? `Public speech boundary: ${peer.name}'s audible words are literal normal-volume gibberish. You receive no hidden clean wording and cannot recover a question, claim, or intention from the sounds. Never quote the gibberish as meaningful, answer an inferred question, translate it, or affirm it with semantic phrases such as "quite so," "go on," or "I see." You may briefly acknowledge that the exact words are unintelligible, then advance only the public episode topic, visible behavior, and claims you have already made yourself.`
+    : null;
   const timedSilentGuestDurationMinutes =
     timedSilentGuestProgress === null ? null : args.episode.durationMinutes;
   const firstGuestAfterMutedHostOpening = Boolean(
@@ -10937,14 +10961,18 @@ export function buildBotcastSpeakerPrompt(
               : "Your firm boundary was ignored. Leave now with one in-character final line. Do not ask permission, explain that this was inevitable, or continue the interview."
             : firstGuestAfterMutedHostOpening
               ? `This is the episode's first audible line because ${guestNamesHost}'s opening turn ended without an audible word. Carry the opening naturally: say the exact show name "${args.show.name}", identify yourself as the guest "${args.guest.name}" and ${guestNamesHost} as the host, name the subject, then offer your first substantive thought. Do not claim the host spoke or asked a question.`
-              : firstGuestOpeningReply
-                ? `This is your first on-mic reply. Briefly register ${guestNamesHost}'s actual welcome, guest-specific observation, provocation, or framing in a way only this guest would—a warm acknowledgement, dry correction, skepticism, amusement, or immediate disagreement all count—then answer the concrete invitation. Do not repeat the introductions or default to generic "glad to be here" podcast filler.`
+            : firstGuestOpeningReply
+                ? peerSpeechObfuscated
+                  ? `This is your first on-mic reply, but ${guestNamesHost}'s public words are literal gibberish. Do not pretend you received a welcome, observation, provocation, or question. Briefly acknowledge only that the exact words are unintelligible, then enter the public topic through one concrete claim that belongs to this guest. Do not repeat the introductions or default to generic "glad to be here" podcast filler.`
+                  : `This is your first on-mic reply. Briefly register ${guestNamesHost}'s actual welcome, guest-specific observation, provocation, or framing in a way only this guest would—a warm acknowledgement, dry correction, skepticism, amusement, or immediate disagreement all count—then answer the concrete invitation. Do not repeat the introductions or default to generic "glad to be here" podcast filler.`
             : args.episode.tensionStage === "warning"
               ? "Push back explicitly and draw one firm personal boundary. Do not announce, threaten, or forecast a future walkout; if the boundary is crossed, the departure should surprise the host."
             : args.episode.tensionStage === "resistance"
                 ? "Show discomfort, resistance, or deflection without leaving yet."
                 : latestPeerTurnIsSilent
                   ? "Treat the host's completed inaudible turns as an established on-air pattern. Carry the stated topic forward; do not demand speech or invent a question."
+                  : peerSpeechObfuscated
+                    ? "The host's voice is audible but the words are literal gibberish. Do not answer or infer a question. Briefly acknowledge the unintelligibility when useful, then advance the public topic through one concrete claim, example, or consequence of your own."
                   : "Answer with substance. If you disagree, identify the specific claim and respond to it in character; never hide behind a generic premise disclaimer.",
         ];
   const immersiveVoiceEffectRequired = botcastImmersiveVoiceEffectRequired(
@@ -11030,6 +11058,7 @@ export function buildBotcastSpeakerPrompt(
         ...(powersPrompt ? [powersPrompt] : []),
         ...(annoyanceCue ? [annoyanceCue] : []),
         ...(peerPerceptionRule ? [peerPerceptionRule] : []),
+        ...(peerSpeechObfuscationRule ? [peerSpeechObfuscationRule] : []),
         ...(powerEncounterRule ? [powerEncounterRule] : []),
         ...(candorRule ? [candorRule] : []),
         ...(powerPressureRule ? [powerPressureRule] : []),
@@ -11635,10 +11664,28 @@ function botcastGuestRecoveryFallbacks(args: {
   peerName: string;
   latestGuestClaimAnchor: string | null;
   latestHostQuestion: string | null;
+  peerSpeechObfuscated?: boolean;
 }): string[] {
   const { latestGuestClaimAnchor, latestHostQuestion } = args;
   // Keep recovery sounding spoken — no "To answer X: start from Y" scaffolding on mic.
   const candidates = (() => {
+    if (args.peerSpeechObfuscated) {
+      const claim = latestGuestClaimAnchor
+        ? botcastClipSpokenRecoveryFragment(latestGuestClaimAnchor, 16)
+        : null;
+      return claim
+        ? [
+            `Those words still do not resolve into a question I can understand. I will stay with what I have said: ${claim}.`,
+            `I cannot make out the exact question in those sounds. My position remains concrete: ${claim}.`,
+            `The wording is lost to me, so I will not pretend otherwise. On ${args.openingSubject}, I still begin here: ${claim}.`,
+          ]
+        : [
+            `Those sounds do not resolve into a question I can understand. On ${args.openingSubject}, I would begin with one concrete choice and what it costs.`,
+            `I cannot make out the exact question in those words. For me, ${args.topicWithPunctuation} The useful place to begin is what another person can actually perceive and what still requires interpretation.`,
+            `The wording is lost to me, so I will not invent its meaning. On ${args.openingSubject}, I can still offer one honest claim from my own experience.`,
+            `I hear the voice, not an intelligible question. Let me stay with ${args.openingSubject} and make one part of it concrete.`,
+          ];
+    }
     if (latestGuestClaimAnchor && latestHostQuestion) {
       const claim = botcastClipSpokenRecoveryFragment(latestGuestClaimAnchor, 12);
       const question = botcastClipSpokenRecoveryFragment(
@@ -11738,6 +11785,8 @@ type BotcastUtteranceRepairReason =
   | "peer_label"
   | "persona_summary"
   | "policy_refusal"
+  | "provider_availability"
+  | "content_validation"
   | "premature_signoff"
   | "power_fresh_contact"
   | "production_meta"
@@ -12203,6 +12252,9 @@ export function botcastUtteranceClaimsSignalHistory(
   );
 }
 
+const BOTCAST_PUBLIC_SPEECH_OBFUSCATION_ACK_PATTERN =
+  /\b(?:cannot|can't|could not|couldn't)\s+(?:understand|make out|follow|decipher)\b[^.!?]{0,80}\b(?:words?|question|speech|sounds?|what you (?:said|asked))\b|\b(?:words?|wording|sounds?|speech)\b[^.!?]{0,80}\b(?:do not|don't|does not|doesn't)\s+(?:resolve|form|register)\b[^.!?]{0,48}\b(?:question|meaning|sense)\b|\b(?:wording|exact words?)\s+(?:is|are)\s+(?:lost|unintelligible)\b/iu;
+
 function validateBotcastAutoSpeakerUtterance(input: {
   raw: string;
   speakerName: string;
@@ -12221,6 +12273,7 @@ function validateBotcastAutoSpeakerUtterance(input: {
    */
   freshContactName?: string;
   rejectGibberishDraft?: boolean;
+  allowPublicSpeechObfuscationResponse?: boolean;
   groundedPriorHistory?: boolean;
   rejectOpeningRetryMeta?: boolean;
   preserveProducerAttribution?: boolean;
@@ -12233,7 +12286,15 @@ function validateBotcastAutoSpeakerUtterance(input: {
       reason: "empty" | "refusal" | "invalid_output";
       clause?: string;
     } {
-  const textValidation = validateAutoFallbackText(input.raw);
+  const initialTextValidation = validateAutoFallbackText(input.raw);
+  const groundedPublicObfuscationResponse =
+    !initialTextValidation.ok &&
+    initialTextValidation.reason === "refusal" &&
+    input.allowPublicSpeechObfuscationResponse === true &&
+    BOTCAST_PUBLIC_SPEECH_OBFUSCATION_ACK_PATTERN.test(input.raw);
+  const textValidation = groundedPublicObfuscationResponse
+    ? { ok: true as const, value: input.raw.trim() }
+    : initialTextValidation;
   const requiredQuote = input.requiredDirectQuote?.trim() ?? "";
   if (!textValidation.ok) {
     return textValidation;
@@ -12960,6 +13021,55 @@ function botcastRecentOpeningContents(args: {
   ).map((row) => row.content);
 }
 
+const BOTCAST_OPENING_BRIEF_META_PATTERN =
+  /\b(?:producer|control room|cue(?: card)?|private brief|off[- ]mic|production note|ask (?:the )?(?:guest|them|him|her)|tell (?:the )?host|push (?:the )?(?:guest|them|him|her)|what should you ask|how should you frame)\b/iu;
+
+function botcastOpeningBriefQuestion(args: {
+  producerBrief: string;
+  guestName: string;
+}): string | null {
+  const sentences = args.producerBrief
+    .replace(/\s+/gu, " ")
+    .trim()
+    .split(/(?<=[.!?])\s+/u);
+  for (const sentence of sentences) {
+    let question = sentence
+      .trim()
+      .replace(
+        /^(?:follow[- ]?up|opening question|first question|then|finally)\s*:\s*/iu,
+        "",
+    );
+    if (!question.endsWith("?")) continue;
+    if (BOTCAST_OPENING_BRIEF_META_PATTERN.test(question)) continue;
+    if (
+      !/^(?:if|when|what|who|how|why|where|which|can|could|would|do|does|did|is|are|should|will|was|were|have|has)\b/iu.test(
+        question,
+      )
+    ) {
+      continue;
+    }
+    // A brief may stack a follow-up after an em dash. Keep the first complete
+    // question so deterministic recovery still obeys Signal's one-question
+    // opening contract.
+    question = question.replace(
+      /\s*[—–]\s*(?:and\s+)?(?:what|who|how|why|where|when|which)\b[^?]*\?$/iu,
+      "?",
+    );
+    if (question.length < 12 || question.length > 320) continue;
+    const guestPattern = new RegExp(
+      `^${args.guestName.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}(?=\\b|[,—-])`,
+      "iu",
+    );
+    if (guestPattern.test(question)) return question;
+    const conversationalQuestion = question.replace(
+      /^[A-Z](?=[a-z])/u,
+      (initial) => initial.toLocaleLowerCase("en-US"),
+    );
+    return `${args.guestName}, ${conversationalQuestion}`;
+  }
+  return null;
+}
+
 /**
  * A deterministic, plain-spoken recovery when the dedicated opening pass fails.
  * This is the last safety net after compact local authoring also fails. It is
@@ -12967,7 +13077,10 @@ function botcastRecentOpeningContents(args: {
  * outage does not make every episode begin with the same canned sentence.
  */
 function botcastOpeningIntroFallback(args: {
-  episode: Pick<BotcastEpisode, "id" | "topic" | "guestPresenceMode">;
+  episode: Pick<
+    BotcastEpisode,
+    "id" | "topic" | "guestPresenceMode" | "producerBrief"
+  >;
   show: Pick<BotcastShow, "name">;
   host: Pick<BotcastBotProfile, "id" | "name">;
   guestName: string;
@@ -12986,7 +13099,11 @@ function botcastOpeningIntroFallback(args: {
     `${showName}, on the air. I'm ${args.host.name}, with ${args.guestName} at the table.`,
   ] as const;
   const topic = args.episode.topic.trim().replace(/[.!?…]+$/u, "");
-  const handoffs = [
+  const briefQuestion = botcastOpeningBriefQuestion({
+    producerBrief: args.episode.producerBrief,
+    guestName: args.guestName,
+  });
+  const genericHandoffs = [
     `${args.guestName}, strip away the slogan for me: with ${topic}, what becomes real first?`,
     `${args.guestName}, the phrase I cannot let slide is “${topic}.” Where does it show up first?`,
     `${args.guestName}, give me the unpolished version of ${topic}. What do people notice before they can explain it?`,
@@ -12996,6 +13113,9 @@ function botcastOpeningIntroFallback(args: {
     `${args.guestName}, before we make ${topic} abstract, name the moment when it actually affects a choice.`,
     `${args.guestName}, take ${topic} down to one honest example. Where would you begin?`,
   ] as const;
+  const handoffs: readonly string[] = briefQuestion
+    ? [briefQuestion]
+    : genericHandoffs;
   const recentKeys = new Set(
     (args.recentOpenings ?? []).map((line) =>
       line.replace(/\s+/gu, " ").trim().toLowerCase(),
@@ -14725,6 +14845,9 @@ export async function advanceBotcastEpisode(
     !speakerIsMutedForTurn && botPowerEternallyIntroducesV1(speaker.powers);
   const speakerMumblesSpeech = botPowerMumblesSpeechV1(speaker.powers);
   const speakerCursesSpeech = botPowerCursesSpeechV1(speaker.powers);
+  const peerSpeechObfuscated =
+    !botPowerIgnoresOtherPowersV1(speaker.powers) &&
+    botPowerMumblesSpeechV1(peer.powers);
   const silentPeerTurnCount = botPowerIsMutedV1(peer.powers)
     ? botcastTrailingSilentPeerTurnCount({
         messages: episode.messages,
@@ -15083,7 +15206,14 @@ export async function advanceBotcastEpisode(
       ? []
       : episode.messages
           .filter((message) => message.botId === speaker.id)
-          .map((message) => message.content)
+          .map((message) =>
+            speakerMumblesSpeech || speakerCursesSpeech
+              ? botcastPowerIntendedSpeechForMessageV1(
+                  episode.events,
+                  message.id,
+                ) ?? message.content
+              : message.content,
+          )
           .filter((content) => content.replace(/\s+/gu, " ").trim().length > 0)
           .slice(-4);
   const recentOpeningContents = firstHostOpening
@@ -15327,13 +15457,17 @@ export async function advanceBotcastEpisode(
         recentSpeakerContents,
       })
     : null;
+  const freshContactPublicName =
+    activeFalseNameState?.believedName ?? speaker.name;
   const validationRetryInstruction = [
     "The previous draft was rejected before it could go on air.",
     hostClosingTurn
       ? `Write a completely new final sign-off in ${speaker.name}'s established persona. Use two or three short sentences, 16 to 48 words: one sharp topic-specific observation, then a distinct closing beat. ${episode.guestPresenceMode === "audience_only" ? "Thank the audience for watching or listening." : `Thank ${peerAddressName} by name for joining and thank the audience for watching or listening. Both thanks are mandatory.`} It must sound like this host, not a canned suffix. Do not explain a lesson, address "listeners at home," prescribe reflection, use ceremonial farewell language, or explain or reinterpret persona lore or catchphrases.`
       : speakerRole === "host"
         ? `Write a completely new host line in ${speaker.name}'s persona. Respond briefly to the guest's latest claim, then ask one specific follow-up question that ends with a question mark.`
-        : `Write a completely new guest line in ${speaker.name}'s persona and answer the host's latest question directly.`,
+        : peerSpeechObfuscated
+          ? `Write a completely new guest line in ${speaker.name}'s persona. The host's public words are literal gibberish: do not answer, quote, translate, or infer a hidden question. Briefly acknowledge only that the exact words are unintelligible, then advance the public topic through one concrete claim of your own.`
+          : `Write a completely new guest line in ${speaker.name}'s persona and answer the host's latest question directly.`,
     "Finish every sentence and keep the host as interviewer and the guest as interviewee.",
     priorPairHistory
       ? "Use only the supplied grounded prior Signal history. Do not invent another appearance, shared lesson, episode count, or archive detail."
@@ -15346,8 +15480,10 @@ export async function advanceBotcastEpisode(
       : []),
     ...(speakerEternallyIntroduces
       ? [
-          `Your immutable identity is ${speaker.name}. ${peerAddressName} is the other speaker. Never identify yourself as ${peerAddressName}.`,
-          `Hard Power output contract: begin this exact turn with a brief, sincere first-contact self-introduction that names you as ${speaker.name}, then respond only to the current other-speaker line. This applies even during a live cue or closing beat.`,
+          activeFalseNameState
+            ? `Your Library identity is ${speaker.name}, but the active false-name Power makes ${activeFalseNameState.believedName} your only spoken public name this turn. ${peerAddressName} is the other speaker.`
+            : `Your immutable identity is ${speaker.name}. ${peerAddressName} is the other speaker. Never identify yourself as ${peerAddressName}.`,
+          `Hard Power output contract: begin this exact turn with a brief, sincere first-contact self-introduction that names you as ${freshContactPublicName}, then respond only to the current other-speaker line. This applies even during a live cue or closing beat.`,
         ]
       : []),
     ...(activeFalseNameState
@@ -15790,6 +15926,7 @@ export async function advanceBotcastEpisode(
                     ? { freshContactName: activeFalseNameState.believedName }
                     : {}),
                   rejectGibberishDraft: speakerMumblesSpeech,
+                  allowPublicSpeechObfuscationResponse: peerSpeechObfuscated,
                   groundedPriorHistory: Boolean(priorPairHistory),
                   rejectOpeningRetryMeta: firstHostOpening,
                   preserveProducerAttribution: Boolean(enforcedDirectQuote),
@@ -15906,6 +16043,7 @@ export async function advanceBotcastEpisode(
                   ? { freshContactName: activeFalseNameState.believedName }
                   : {}),
                 rejectGibberishDraft: speakerMumblesSpeech,
+                allowPublicSpeechObfuscationResponse: peerSpeechObfuscated,
                 groundedPriorHistory: Boolean(priorPairHistory),
                 rejectOpeningRetryMeta: firstHostOpening,
                 preserveProducerAttribution: Boolean(enforcedDirectQuote),
@@ -16050,6 +16188,7 @@ export async function advanceBotcastEpisode(
                 ? { freshContactName: activeFalseNameState.believedName }
                 : {}),
               rejectGibberishDraft: speakerMumblesSpeech,
+              allowPublicSpeechObfuscationResponse: peerSpeechObfuscated,
               groundedPriorHistory: Boolean(priorPairHistory),
               preserveProducerAttribution: Boolean(enforcedDirectQuote),
               requiredDirectQuote: enforcedDirectQuote,
@@ -16176,6 +16315,10 @@ export async function advanceBotcastEpisode(
       ...recentOpeningContents,
     ].map((content) => content.replace(/\s+/gu, " ").trim().toLowerCase()),
   );
+  const recentRecoverySpeakerContents = episode.messages
+    .filter((message) => message.botId === speaker.id)
+    .slice(-8)
+    .map((message) => message.content);
   const repairedMessageIds = new Set(
     episode.events.flatMap((event) => {
       if (event.kind !== "utterance" || !event.payload.utteranceRepair) return [];
@@ -16202,7 +16345,17 @@ export async function advanceBotcastEpisode(
     for (let offset = 0; offset < candidates.length; offset += 1) {
       const candidate = candidates[(startIndex + offset) % candidates.length]!;
       const key = candidate.replace(/\s+/gu, " ").trim().toLowerCase();
-      if (!recentUtteranceKeys.has(key)) return candidate;
+      if (
+        !recentUtteranceKeys.has(key) &&
+        (!speakerEternallyIntroduces ||
+          !activeFalseNameState ||
+          !botcastRecoveryUtteranceIsNearDuplicate(
+            candidate,
+            recentRecoverySpeakerContents,
+          ))
+      ) {
+        return candidate;
+      }
     }
     return candidates[startIndex]!;
   };
@@ -16226,7 +16379,8 @@ export async function advanceBotcastEpisode(
     openingSubject,
     peerName: peerAddressName,
     latestGuestClaimAnchor,
-    latestHostQuestion,
+    latestHostQuestion: peerSpeechObfuscated ? null : latestHostQuestion,
+    peerSpeechObfuscated,
   });
   const guestRecoveryFallback = chooseRecoveryFallback(
     guestRecoveryFallbacks,
@@ -17156,13 +17310,19 @@ export async function advanceBotcastEpisode(
           utteranceRepair: {
             v: 1,
             source:
-              generatedUtterance.repairReason ||
+              autoExhaustion
+                ? "provider_recovery"
+                : generatedUtterance.repairReason ||
               closingContractRepaired ||
               prematureSignoffRepairApplied
                 ? "sanitizer"
                 : "power_runtime",
             reason:
-              generatedUtterance.repairReason ??
+              (autoExhaustion
+                ? signalAutoFallbackExhaustionIsValidationOnly(autoExhaustion)
+                  ? "content_validation"
+                  : "provider_availability"
+                : generatedUtterance.repairReason) ??
               closingContractRepairReason ??
               (prematureSignoffRepairApplied
                 ? "premature_signoff"
@@ -17618,8 +17778,12 @@ export async function advanceBotcastEpisode(
     if (speakerIsMutedForTurn || botPowerIsMutedV1(listener.powers)) {
       return signalVisualOnlyListenerReaction(listenerReactionCandidate);
     }
+    const semanticallyGroundedPlan =
+      speakerMumblesSpeech && !listenerReactionCandidate.interjectionAttempt
+        ? signalSpeechObfuscationListenerReaction(listenerReactionCandidate)
+        : listenerReactionCandidate;
     const audiblePlan = botPowerOmitBreathListenerVocalFoleyV1(
-      listenerReactionCandidate,
+      semanticallyGroundedPlan,
       listener.powers,
     );
     return applyBotPowerMumbledReactionPlanV1(audiblePlan, {

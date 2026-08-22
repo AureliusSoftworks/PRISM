@@ -130,6 +130,20 @@ test("locks weapon category and opening-reveal probability boundaries determinis
     .inspectedRegionIds.includes(canonicalWeapon.regionId));
 });
 
+test("gives outcome-neutral regions varied deterministic sensory texture", () => {
+  const config = resolveDebateMysteryConfig(createConfig("compact", "classic", "room-texture"));
+  const first = compileDeterministicDebateMystery({ config, suspects: suspects(4) });
+  const second = compileDeterministicDebateMystery({ config, suspects: suspects(4) });
+  const emptyResponses = first.activeRegions
+    .filter((outcome) => outcome.kind === "empty")
+    .map((outcome) => outcome.inspectionResponse);
+  assert.deepEqual(first.activeRegions, second.activeRegions);
+  assert.ok(emptyResponses.length > 20);
+  assert.ok(new Set(emptyResponses).size > 16);
+  assert.ok(emptyResponses.every((response) =>
+    !/worth a closer look|old dust and ordinary wear|only what it appears to be/iu.test(response)));
+});
+
 test("maintains several public leads from discovered facts without projecting their private recipes", () => {
   const config = resolveDebateMysteryConfig(createConfig("compact", "classic", "public-leads"));
   const bible = compileDeterministicDebateMystery({ config, suspects: suspects(4) });

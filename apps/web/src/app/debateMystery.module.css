@@ -861,6 +861,11 @@
   border-color: rgba(102, 229, 234, 0.32);
 }
 
+.mapRoom[data-searched="true"] {
+  border-color: color-mix(in srgb, var(--mystery-cyan) 74%, #fff);
+  box-shadow: inset 0 0 0 1px rgba(102, 229, 234, 0.12);
+}
+
 .mapRoom:not([data-discovered="true"]) {
   color: transparent !important;
   border-color: rgba(102, 229, 234, 0.16);
@@ -916,6 +921,24 @@
   min-height: 2.5rem;
   font-style: normal;
   color: var(--mystery-cyan);
+}
+
+.mapRoomCompleteMark {
+  position: absolute;
+  top: 0.22rem;
+  right: 0.3rem;
+  display: grid;
+  width: 1.15rem;
+  height: 1.15rem;
+  place-items: center;
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 800;
+  color: #061318;
+  border: 1px solid color-mix(in srgb, var(--mystery-cyan) 68%, #fff);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--mystery-cyan) 82%, #fff);
+  box-shadow: 0 0 0.7rem rgba(102, 229, 234, 0.32);
 }
 
 .mapOccupant :global([data-avatar-render-tier="micro"]) {
@@ -1160,6 +1183,10 @@
   outline-style: solid;
 }
 
+.hotspot[data-inspected="true"] {
+  cursor: default;
+}
+
 .hotspot span {
   position: absolute;
   width: 1px;
@@ -1193,25 +1220,55 @@
 .roomSuspectPresence {
   position: absolute;
   z-index: 9;
-  left: clamp(1.25rem, 9%, 6rem);
-  bottom: 3.4rem;
+  left: var(--suspect-walk-start, 26%);
+  bottom: 4.25rem;
   display: grid;
   justify-items: center;
-  width: min(30%, 14rem);
-  min-width: 7.5rem;
+  width: clamp(12rem, 36%, 20rem);
   padding: 0;
   color: #fff;
   border: 0;
   background: transparent;
   cursor: pointer;
-  animation: mysterySuspectTenseFloat 3.8s ease-in-out infinite;
+  will-change: left, transform;
+  animation: mysterySuspectRoomWalk var(--suspect-walk-duration, 19s) ease-in-out var(--suspect-walk-delay, 0s) infinite alternate;
 }
 
-@keyframes mysterySuspectTenseFloat {
-  0%, 100% { transform: translate(0, 0); }
-  25% { transform: translate(4px, -3px); }
-  50% { transform: translate(8px, -5px); }
-  75% { transform: translate(3px, -2px); }
+.roomSuspectPresence:hover,
+.roomSuspectPresence:focus-visible {
+  animation-play-state: paused;
+}
+
+.roomSuspectWalker {
+  display: grid;
+  width: 100%;
+  justify-items: center;
+  animation: mysterySuspectWalkingStep 720ms ease-in-out infinite alternate;
+}
+
+.roomSuspectPresence:hover .roomSuspectWalker,
+.roomSuspectPresence:focus-visible .roomSuspectWalker {
+  animation-play-state: paused;
+}
+
+@keyframes mysterySuspectRoomWalk {
+  0%, 12% {
+    left: var(--suspect-walk-start, 26%);
+    transform: translateX(-50%);
+  }
+  45%, 55% {
+    left: var(--suspect-walk-waypoint, 48%);
+    transform: translateX(-50%);
+  }
+  88%, 100% {
+    left: var(--suspect-walk-end, 68%);
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes mysterySuspectWalkingStep {
+  from { transform: translateY(0) rotate(-0.45deg); }
+  to { transform: translateY(-3px) rotate(0.45deg); }
 }
 
 .roomSuspectPresence :global([data-debate-avatar-quality="hd"]),
@@ -1221,8 +1278,8 @@
 }
 
 .roomSuspectPresence :global([data-debate-avatar-quality="mini"]) {
-  width: min(13rem, 100%);
-  max-height: 14rem;
+  width: min(18rem, 100%);
+  max-height: 20rem;
 }
 
 .roomSuspectName {
@@ -1525,6 +1582,16 @@
 .roomModeControls button:focus-visible {
   transform: translateY(-1px);
   filter: brightness(1.14);
+}
+
+.roomModeControls button:disabled {
+  color: color-mix(in srgb, var(--mystery-cyan) 72%, var(--mystery-muted));
+  border-color: rgba(102, 229, 234, 0.28);
+  background: rgba(8, 25, 31, 0.72);
+  box-shadow: none;
+  cursor: default;
+  transform: none;
+  filter: none;
 }
 
 .stagePartnerProse,
@@ -3047,6 +3114,7 @@
   .interviewStage { grid-template-columns: minmax(10rem, 36%) minmax(0, 64%); }
   .suspectAvatar { width: min(27vw, 13rem); min-height: min(27vw, 13rem); }
   .suspectPresence strong { font-size: 1.05rem; }
+  .roomSuspectPresence { width: clamp(10rem, 34%, 16rem); }
 }
 
 @media (max-width: 560px) {
@@ -3086,6 +3154,7 @@
   .investigationLens,
   .interviewStage,
   .roomSuspectPresence,
+  .roomSuspectWalker,
   .suspectAvatar,
   .partnerMini,
   .caseRail,

@@ -561,7 +561,9 @@ async function authorCaseProse(
     timeline: bible.timeline,
     ensemble,
     rooms: bible.rooms.map((room) => ({ id: room.id, templateId: room.templateId, kind: room.kind, suspectSeatId: room.assignedSuspectSeatId })),
-    activeRegions: bible.activeRegions.map((outcome) => ({ roomId: outcome.roomId, regionId: outcome.regionId, kind: outcome.kind, hidingMechanism: outcome.hidingMechanism })),
+    activeRegions: bible.activeRegions
+      .filter((outcome) => outcome.kind !== "empty")
+      .map((outcome) => ({ roomId: outcome.roomId, regionId: outcome.regionId, kind: outcome.kind, hidingMechanism: outcome.hidingMechanism })),
     evidence: bible.evidence.map((item) => ({
       id: item.id,
       adjective: item.adjective,
@@ -704,6 +706,114 @@ async function authorCaseProse(
   }
 }
 
+const MYSTERY_ROOM_TEXTURE_BATCH_SIZE = 4;
+const MYSTERY_ROOM_TEXTURE_BANNED_FACTS =
+  /\b(?:alibi|blood|clue|culprit|evidence|fingerprints?|footprints?|guilt|killer|murderer|poison|suspect|victim|weapon)\b/iu;
+
+function safeMysteryRoomTexture(value: unknown): string {
+  const observation = compact(value, 320);
+  if (observation.length < 24 || MYSTERY_ROOM_TEXTURE_BANNED_FACTS.test(observation)) return "";
+  return observation;
+}
+
+/**
+ * Give outcome-neutral room clicks their own authoring budget during the
+ * existing loader. This pass never receives culprit, evidence, testimony, or
+ * proof data, so it can add sensory specificity without inventing case facts.
+ */
+async function authorMysteryRoomTexture(
+  bible: DebateMysteryCaseBibleV1,
+  runtime: DebateAiRuntime,
+): Promise<DebateMysteryCaseBibleV1> {
+  const emptyOutcomes = bible.activeRegions.filter((outcome) => outcome.kind === "empty");
+  if (emptyOutcomes.length === 0) return bible;
+  const lane = mysteryLane(runtime);
+  const roomIds = bible.rooms
+    .filter((room) => emptyOutcomes.some((outcome) => outcome.roomId === room.id))
+    .map((room) => room.id);
+  const authoredByKey = new Map<string, string>();
+  const usedObservations = new Set<string>();
+
+  for (let offset = 0; offset < roomIds.length; offset += MYSTERY_ROOM_TEXTURE_BATCH_SIZE) {
+    const batchRoomIds = new Set(roomIds.slice(offset, offset + MYSTERY_ROOM_TEXTURE_BATCH_SIZE));
+    const regions = emptyOutcomes.flatMap((outcome) => {
+      if (!batchRoomIds.has(outcome.roomId)) return [];
+      const room = bible.rooms.find((candidate) => candidate.id === outcome.roomId);
+      const template = DEBATE_MYSTERY_ROOM_TEMPLATES.find((candidate) => candidate.id === room?.templateId);
+      const region = template?.regions.find((candidate) => candidate.id === outcome.regionId);
+      if (!room || !template || !region) return [];
+      return [{
+        roomId: room.id,
+        roomName: template.name,
+        regionId: region.id,
+        label: region.label,
+        physicalAnchor: region.physicalAnchor,
+      }];
+    });
+    if (regions.length === 0) continue;
+    try {
+      const response = await lane.provider.generateResponse([
+        {
+          role: "system",
+          content: [
+            "You are PRISM's Murder Mystery room-observation stylist.",
+            "The supplied regions are deliberately outcome-neutral: none contains a clue, access item, subplot, or hidden case fact.",
+            "Write one vivid inspection observation per exact roomId/regionId pair, grounded only in that physical anchor.",
+            "Use 12-32 words and one or two sentences. Vary the dominant sense and physical action across the batch: light, texture, temperature, sound, scent, reflection, pressure, or material behavior.",
+            "Make ordinary spaces rewarding to inspect without implying importance. Never introduce a person, named object, timestamp, crime fact, secret compartment, or actionable lead.",
+            "Avoid stock conclusions such as 'worth a closer look', 'nothing out of the ordinary', 'only what it appears to be', and 'old dust and ordinary wear'.",
+            "Return JSON only as {\"observations\":[{\"roomId\":string,\"regionId\":string,\"observation\":string}]}. Preserve every supplied ID exactly and return each pair once.",
+          ].join("\n"),
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            caseTitle: bible.title,
+            regions,
+          }),
+        },
+      ], {
+        model: lane.model,
+        reasoningEffort: lane.reasoningEffort,
+        turbo: lane.turbo,
+        maxTokens: Math.min(4_800, 800 + regions.length * 42),
+        temperature: 0.92,
+        jsonMode: true,
+        usagePurpose: "debate_generation",
+        allowFinalLocalFallback: lane.providerName === "local",
+      });
+      const authored = parseJsonObject(response);
+      const allowedKeys = new Set(regions.map((region) => `${region.roomId}/${region.regionId}`));
+      const rows = Array.isArray(authored.observations) ? authored.observations : [];
+      for (const value of rows) {
+        if (!value || typeof value !== "object") continue;
+        const row = value as Record<string, unknown>;
+        const roomId = compact(row.roomId, 120);
+        const regionId = compact(row.regionId, 200);
+        const key = `${roomId}/${regionId}`;
+        const observation = safeMysteryRoomTexture(row.observation);
+        const normalizedObservation = observation.toLocaleLowerCase();
+        if (!allowedKeys.has(key) || !observation || usedObservations.has(normalizedObservation)) continue;
+        authoredByKey.set(key, observation);
+        usedObservations.add(normalizedObservation);
+      }
+    } catch {
+      // The deterministic material-aware prose remains playable when a model
+      // cannot produce a complete, safe batch.
+    }
+  }
+
+  if (authoredByKey.size === 0) return bible;
+  return {
+    ...bible,
+    activeRegions: bible.activeRegions.map((outcome) => {
+      if (outcome.kind !== "empty") return outcome;
+      const observation = authoredByKey.get(`${outcome.roomId}/${outcome.regionId}`);
+      return observation ? { ...outcome, inspectionResponse: observation } : outcome;
+    }),
+  };
+}
+
 function createInitialNotebook(db: DatabaseSync, userId: string, sessionId: string): DebateMysteryNotebookV1 {
   const now = new Date().toISOString();
   const notebook: DebateMysteryNotebookV1 = {
@@ -802,9 +912,10 @@ export async function createDebateMysterySession(
       mysteryExhibitLibrary(db, userId),
     );
     session = setCompileStage(db, userId, session, "testing_theories");
+    session = setCompileStage(db, userId, session, "preparing_rooms");
+    bible = await authorMysteryRoomTexture(bible, runtime);
     storeCaseBible(db, userId, session.id, bible);
     createInitialNotebook(db, userId, session.id);
-    session = setCompileStage(db, userId, session, "preparing_rooms");
     const publicState = projectDebateMysteryCase(bible, config);
     appendAutomaticNotebookReferences(
       db,
@@ -1298,6 +1409,9 @@ export async function applyDebateMysteryAction(
     if (!room?.discovered) throw new HttpError(409, "Discover this room first.");
     if (nextState.currentRoomId !== room.id) throw new HttpError(409, "Enter this room before inspecting it.");
     if (!room.activeRegionIds.includes(request.regionId)) throw new HttpError(404, "That area is not active in this case.");
+    if (room.inspectedRegionIds.includes(request.regionId)) {
+      throw new HttpError(409, "That area has already been investigated.");
+    }
     const outcome = bible.activeRegions.find((entry) => entry.roomId === room.id && entry.regionId === request.regionId)!;
     const resolvedLock = bible.accessLocks.find((lock) => {
       if (!nextState.accessHistory.some((entry) => entry.id === lock.id && entry.success)) return false;
@@ -1308,31 +1422,29 @@ export async function applyDebateMysteryAction(
     });
     const inspectionResponse = resolvedLock?.unlockObservation ?? outcome.inspectionResponse;
     room.inspectionCounts ??= {};
-    room.inspectionCounts[request.regionId] = (room.inspectionCounts[request.regionId] ?? 0) + 1;
-    if (!room.inspectedRegionIds.includes(request.regionId)) {
-      room.inspectedRegionIds.push(request.regionId);
-      room.searched = room.activeRegionIds.every((regionId) => room.inspectedRegionIds.includes(regionId));
-      room.publicObservation = inspectionResponse;
-      room.outcomeKind = outcome.kind;
-      if (outcome.evidenceId) {
-        const item = bible.evidence.find((candidate) => candidate.id === outcome.evidenceId)!;
-        if (!nextState.discoveredEvidence.some((candidate) => candidate.id === item.id)) {
-          nextState.discoveredEvidence.push(publicMysteryEvidence(item));
-          automaticNotebookReferences.push({ kind: "evidence", id: item.id, label: `${item.title}: ${item.observation}` });
-        }
+    room.inspectionCounts[request.regionId] = 1;
+    room.inspectedRegionIds.push(request.regionId);
+    room.searched = room.activeRegionIds.every((regionId) => room.inspectedRegionIds.includes(regionId));
+    room.publicObservation = inspectionResponse;
+    room.outcomeKind = outcome.kind;
+    if (outcome.evidenceId) {
+      const item = bible.evidence.find((candidate) => candidate.id === outcome.evidenceId)!;
+      if (!nextState.discoveredEvidence.some((candidate) => candidate.id === item.id)) {
+        nextState.discoveredEvidence.push(publicMysteryEvidence(item));
+        automaticNotebookReferences.push({ kind: "evidence", id: item.id, label: `${item.title}: ${item.observation}` });
       }
-      if (outcome.inventoryItemId) revealInventoryItem(outcome.inventoryItemId);
-      const template = DEBATE_MYSTERY_ROOM_TEMPLATES.find((entry) => entry.id === room.templateId);
-      room.observations.push({
-        regionId: outcome.regionId,
-        label: template?.regions.find((region) => region.id === outcome.regionId)?.label ?? "Inspected area",
-        observation: inspectionResponse,
-        outcomeKind: outcome.kind,
-        evidenceId: outcome.evidenceId,
-      });
-      nextState.partnerJournal.push(inspectionResponse);
     }
-    publicPayload = { roomId: room.id, regionId: outcome.regionId, observation: inspectionResponse, outcomeKind: outcome.kind, evidenceId: outcome.evidenceId, inventoryItemId: outcome.inventoryItemId, inspectionCount: room.inspectionCounts[request.regionId], repeated: room.inspectionCounts[request.regionId] > 1 };
+    if (outcome.inventoryItemId) revealInventoryItem(outcome.inventoryItemId);
+    const template = DEBATE_MYSTERY_ROOM_TEMPLATES.find((entry) => entry.id === room.templateId);
+    room.observations.push({
+      regionId: outcome.regionId,
+      label: template?.regions.find((region) => region.id === outcome.regionId)?.label ?? "Inspected area",
+      observation: inspectionResponse,
+      outcomeKind: outcome.kind,
+      evidenceId: outcome.evidenceId,
+    });
+    nextState.partnerJournal.push(inspectionResponse);
+    publicPayload = { roomId: room.id, regionId: outcome.regionId, observation: inspectionResponse, outcomeKind: outcome.kind, evidenceId: outcome.evidenceId, inventoryItemId: outcome.inventoryItemId, inspectionCount: 1, repeated: false, roomComplete: room.searched };
   } else if (request.action === "use_access_item") {
     if (nextState.playPhase !== "investigation" && nextState.playPhase !== "continuance") throw new HttpError(409, "Access items are unavailable during trial.");
     const accessItem = nextState.inventoryItems.find((item) => item.id === request.accessItemId && item.usable);

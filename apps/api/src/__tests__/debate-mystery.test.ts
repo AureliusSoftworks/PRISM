@@ -37,6 +37,7 @@ class MysteryProviderStub implements LlmProvider {
   public readonly diagnosticModel = "mystery-test";
   public cleanupCalls = 0;
   public actorCalls = 0;
+  public textureCalls = 0;
   public actorPrompts: string[] = [];
   public actorOptions: GenerateOptions[] = [];
   public actorReply = "I remember the corridor clock, but I will not pretend I saw more than that.";
@@ -61,6 +62,21 @@ class MysteryProviderStub implements LlmProvider {
         motive: "To conceal a forged inheritance codicil.",
         method: "A measured dose hidden in a restorative cordial.",
         publicOpening: "Rain seals the estate as the investigation begins.",
+      });
+    }
+    if (prompt.includes("room-observation stylist")) {
+      this.textureCalls += 1;
+      const input = JSON.parse(messages.at(-1)!.content) as {
+        regions: Array<{ roomId: string; regionId: string; physicalAnchor: string }>;
+      };
+      return JSON.stringify({
+        observations: input.regions.map((region, index) => ({
+          roomId: region.roomId,
+          regionId: region.regionId,
+          observation: index === 0
+            ? "Blood on this surface proves which culprit handled the weapon."
+            : `Warm light slides across ${region.physicalAnchor}, revealing a quiet material gradient unique to this angle.`,
+        })),
       });
     }
     return "I can only reason from the public record and your fallible notes.";
@@ -198,6 +214,11 @@ describe("Debate Whodunnit private/public boundary", () => {
     let session = await createDebateMysterySession(db, "user-1", setup(db), "mystery-free-interview", runtime(provider));
     const bible = getDebateMysteryCaseBible(db, "user-1", session.id);
     assert.equal(bible.activeRegions.length, bible.rooms.length * 16);
+    assert.ok(provider.textureCalls > 0);
+    const emptyRegions = bible.activeRegions.filter((region) => region.kind === "empty");
+    assert.ok(emptyRegions.some((region) => region.inspectionResponse.startsWith("Warm light slides across ")));
+    assert.ok(emptyRegions.some((region) => !region.inspectionResponse.startsWith("Warm light slides across ")));
+    assert.ok(emptyRegions.every((region) => !/blood|culprit|weapon/iu.test(region.inspectionResponse)));
     const suspect = bible.suspects[0]!;
     const suspectRoom = bible.rooms.find((room) => room.id === suspect.roomId)!;
     const beforeTravel = session.formatState.actionsRemaining;
@@ -224,14 +245,17 @@ describe("Debate Whodunnit private/public boundary", () => {
     }
     assert.equal(session.formatState.rooms.find((room) => room.id === suspectRoom.id)?.searched, true);
     const observationCount = session.formatState.rooms.find((room) => room.id === suspectRoom.id)!.observations.length;
-    session = await applyDebateMysteryAction(db, "user-1", session.id, {
-      expectedRevision: session.revision,
-      idempotencyKey: "suspect-room-inspect-repeat",
-      action: "inspect",
-      roomId: suspectRoom.id,
-      regionId: suspectRegionId,
-    }, runtime(provider));
-    assert.equal(session.formatState.rooms.find((room) => room.id === suspectRoom.id)?.inspectionCounts[suspectRegionId], 2);
+    await assert.rejects(
+      applyDebateMysteryAction(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "suspect-room-inspect-repeat",
+        action: "inspect",
+        roomId: suspectRoom.id,
+        regionId: suspectRegionId,
+      }, runtime(provider)),
+      (error: unknown) => error instanceof HttpError && error.statusCode === 409 && error.message.includes("already been investigated"),
+    );
+    assert.equal(session.formatState.rooms.find((room) => room.id === suspectRoom.id)?.inspectionCounts[suspectRegionId], 1);
     assert.equal(session.formatState.rooms.find((room) => room.id === suspectRoom.id)?.observations.length, observationCount);
     session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "free-question-one", action: "interview", suspectSeatId: suspect.seatId, question: "State your alibi." }, runtime(provider));
     session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "free-question-two", action: "interview", suspectSeatId: suspect.seatId, question: "Please state that alibi again." }, runtime(provider));

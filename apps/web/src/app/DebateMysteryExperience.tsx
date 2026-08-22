@@ -45,6 +45,7 @@ import {
 import styles from "./debateMystery.module.css";
 import { BotAvatarMicro } from "./BotAvatarMicro";
 import { mysteryRoomArtworkSrc } from "./debateMysteryRoomArt";
+import { mysteryRoomSuspectWalkProfile } from "./debateMysteryRoomWalk";
 import { findAtMentionTokenPlain } from "./botMention";
 import type { BotPickerGlyphRenderer } from "./BotPicker";
 import type { VoicePlaybackCharacterAlignment } from "./voiceEffects";
@@ -1123,9 +1124,19 @@ export function DebateMysteryPlay(
   const activeRegions = template.regions.filter(
     (region) => currentRoom.activeRegionIds.includes(region.id),
   );
+  const remainingInvestigationRegions = activeRegions.filter(
+    (region) => !currentRoom.inspectedRegionIds.includes(region.id),
+  );
+  const targetableInvestigationRegions = armedAccessItemId
+    ? activeRegions
+    : remainingInvestigationRegions;
+  const firstInspectableRegionId = remainingInvestigationRegions[0]?.id ?? null;
   const currentSuspect = state.suspects.find(
     (suspect) => suspect.roomId === currentRoom.id,
   );
+  const currentSuspectWalk = currentSuspect
+    ? mysteryRoomSuspectWalkProfile(sessionId, currentRoom.id, currentSuspect.seatId)
+    : null;
   const suggestedLeads = currentSuspect
     ? state.config.difficulty === "mastermind"
       ? [
@@ -1470,7 +1481,9 @@ export function DebateMysteryPlay(
           ? `Entered ${next.rooms.find((room) => room.id === action.roomId)?.name}.`
           : "Room selected."
         : action.action === "inspect"
-          ? "Area inspected. You can inspect it again at any time."
+          ? next.rooms.find((room) => room.id === action.roomId)?.searched
+            ? "Room investigation complete."
+            : "Area investigated."
           : action.action === "use_access_item"
             ? next.accessHistory.at(-1)?.observation ?? "Access attempt recorded."
           : action.action === "interview"
@@ -1839,7 +1852,7 @@ export function DebateMysteryPlay(
       ? "Go to room"
       : "Discover room · 1 action";
   const nearestInvestigationRegion = (x: number, y: number): { regionId: string | null; distance: number } =>
-    activeRegions.reduce<{ regionId: string | null; distance: number }>((result, region) => {
+    targetableInvestigationRegions.reduce<{ regionId: string | null; distance: number }>((result, region) => {
       const center = region.polygon.reduce(
         (total, point) => ({ x: total.x + point.x / region.polygon.length, y: total.y + point.y / region.polygon.length }),
         { x: 0, y: 0 },
@@ -1851,8 +1864,12 @@ export function DebateMysteryPlay(
     const bounds = event.currentTarget.getBoundingClientRect();
     const x = ((event.clientX - bounds.left) / Math.max(1, bounds.width)) * 100;
     const y = ((event.clientY - bounds.top) / Math.max(1, bounds.height)) * 100;
+    if (!armedAccessItemId && (event.target as Element).closest('[data-mystery-region-id][data-inspected="true"]')) {
+      setLens({ x, y, proximity: 0, visible: false, regionId: null });
+      return;
+    }
     const nearest = nearestInvestigationRegion(x, y);
-    setLens({ x, y, proximity: Number.isFinite(nearest.distance) ? Math.max(0, 1 - nearest.distance / 26) : 0, visible: true, regionId: nearest.regionId });
+    setLens({ x, y, proximity: Number.isFinite(nearest.distance) ? Math.max(0, 1 - nearest.distance / 26) : 0, visible: nearest.regionId !== null, regionId: nearest.regionId });
   };
 
   return (
@@ -2025,10 +2042,11 @@ export function DebateMysteryPlay(
                     data-current={room.id === currentRoom.id ? "true" : undefined}
                     data-selected={room.id === selectedRoom.id ? "true" : undefined}
                     data-visited={room.discovered ? "true" : undefined}
+                    data-searched={room.searched ? "true" : undefined}
                     data-locked={room.locked || (!room.discovered && state.actionsRemaining === 0) ? "true" : undefined}
                     data-access-ready={armedAccessItemId ? "true" : undefined}
                     aria-pressed={room.id === selectedRoom.id}
-                    aria-label={`${room.discovered ? room.name ?? "Room" : "Undiscovered room"}${room.locked ? ", locked" : ""}${armedAccessItemId ? ", use selected access item" : ""}`}
+                    aria-label={`${room.discovered ? room.name ?? "Room" : "Undiscovered room"}${room.searched ? ", investigation complete" : ""}${room.locked ? ", locked" : ""}${armedAccessItemId ? ", use selected access item" : ""}`}
                     disabled={busy}
                     onDragOver={(event) => event.preventDefault()}
                     onDrop={(event) => dropAccessItem(event, "room", room.id)}
@@ -2048,13 +2066,14 @@ export function DebateMysteryPlay(
                       const bot = mysteryBotForSuspect(suspect);
                       return <i className={styles.mapOccupant} key={suspect.seatId} aria-label={`${suspect.name} is known to be here`} data-tutorial-target="whodunnit-micro-avatar"><BotAvatarMicro color={bot.color} moodKey="neutral" glyph={props.renderBotGlyph(bot.glyph, { size: 15, strokeWidth: 1.3 })} renderSizePx={40} scheduleKey={`mystery-map-${sessionId}-${suspect.seatId}`} /></i>;
                     })}
+                    {room.searched ? <i className={styles.mapRoomCompleteMark} aria-hidden="true">✓</i> : null}
                     {room.neighborIds.some((id) => state.rooms.find((candidate) => candidate.id === id)?.floor !== room.floor) ? <small>Stairs</small> : null}</> : null}
                   </button>
                 ))}
               </div>
             </div>
             <section className={styles.mapDetails} aria-live="polite" data-locked={selectedRoomLocked ? "true" : undefined}>
-              <div><small>Selected room</small><strong>{selectedRoomIsKnown ? selectedRoom.name ?? "Unnamed room" : "Undiscovered room"}</strong><span>{selectedRoomIsKnown ? `${floorDisplayName(selectedRoom.floor)} · ${selectedRoom.locked ? "Locked · try an access item" : "Visited"}` : selectedRoomLocked ? "Locked · no actions" : "Discover to reveal"}</span></div>
+              <div><small>Selected room</small><strong>{selectedRoomIsKnown ? selectedRoom.name ?? "Unnamed room" : "Undiscovered room"}</strong><span>{selectedRoomIsKnown ? `${floorDisplayName(selectedRoom.floor)} · ${selectedRoom.locked ? "Locked · try an access item" : selectedRoom.searched ? "Investigation complete" : "Visited"}` : selectedRoomLocked ? "Locked · no actions" : "Discover to reveal"}</span></div>
               {selectedRoomIsKnown ? <dl><div><dt>Known occupant</dt><dd>{selectedRoomOccupant ? selectedRoomOccupant.name : "Unknown"}</dd></div><div><dt>Known clues</dt><dd>{selectedRoomClueCount}</dd></div></dl> : null}
               <button type="button" disabled={busy || selectedRoomLocked || selectedRoom.id === currentRoom.id} onClick={() => void enterSelectedRoom()}>{selectedRoomActionLabel}</button>
             </section>
@@ -2110,15 +2129,17 @@ export function DebateMysteryPlay(
                   </div>
                 </>
               )}
-              {suspectRoomFocus === "search" ? activeRegions.map((region, index) => (
+              {suspectRoomFocus === "search" ? activeRegions.map((region) => (
                 <button
                   type="button"
                   key={region.id}
                   className={styles.hotspot}
                   style={{ clipPath: regionClip(region), zIndex: lens.regionId === region.id ? 5 : 4 }}
-                  aria-label={`${currentRoom.inspectionCounts?.[region.id] ? "Inspect again" : "Inspect"} the ${region.label}${armedAccessItemId ? " with selected access item" : ""}`}
-                  title={`${currentRoom.inspectionCounts?.[region.id] ? "Inspect again" : "Inspect"} ${region.label}`}
-                  data-inspected={currentRoom.inspectionCounts?.[region.id] ? "true" : undefined}
+                  aria-label={`${currentRoom.inspectedRegionIds.includes(region.id) ? "Investigation complete for" : "Inspect"} the ${region.label}${armedAccessItemId ? " with selected access item" : ""}`}
+                  aria-disabled={currentRoom.inspectedRegionIds.includes(region.id) && !armedAccessItemId}
+                  title={`${currentRoom.inspectedRegionIds.includes(region.id) ? "Investigation complete" : "Inspect"}: ${region.label}`}
+                  tabIndex={currentRoom.inspectedRegionIds.includes(region.id) && !armedAccessItemId ? -1 : 0}
+                  data-inspected={currentRoom.inspectedRegionIds.includes(region.id) ? "true" : undefined}
                   data-access-ready={armedAccessItemId ? "true" : undefined}
                   data-mystery-region-id={region.id}
                   onDragOver={(event) => event.preventDefault()}
@@ -2128,9 +2149,10 @@ export function DebateMysteryPlay(
                       void applyAccessItem(armedAccessItemId, "region", `${currentRoom.id}:${region.id}`);
                       return;
                     }
+                    if (currentRoom.inspectedRegionIds.includes(region.id)) return;
                     void perform({ action: "inspect", roomId: currentRoom.id, regionId: region.id });
                   }}
-                  data-tutorial-target={index === 0 ? "whodunnit-hotspot" : undefined}
+                  data-tutorial-target={region.id === firstInspectableRegionId ? "whodunnit-hotspot" : undefined}
                 ><span>Inspect {region.label}</span></button>
               )) : null}
               {suspectRoomFocus === "search" ? <i
@@ -2144,11 +2166,20 @@ export function DebateMysteryPlay(
                   type="button"
                   className={styles.roomSuspectPresence}
                   data-tutorial-target="whodunnit-room-suspect"
-                  style={{ "--suspect-color": currentSuspect.color ?? "#9c7cff" } as CSSProperties}
+                  style={{
+                    "--suspect-color": currentSuspect.color ?? "#9c7cff",
+                    "--suspect-walk-start": `${currentSuspectWalk?.startPct ?? 26}%`,
+                    "--suspect-walk-waypoint": `${currentSuspectWalk?.waypointPct ?? 48}%`,
+                    "--suspect-walk-end": `${currentSuspectWalk?.endPct ?? 68}%`,
+                    "--suspect-walk-duration": `${currentSuspectWalk?.durationMs ?? 19_000}ms`,
+                    "--suspect-walk-delay": `${currentSuspectWalk?.delayMs ?? 0}ms`,
+                  } as CSSProperties}
                   onClick={() => { setSuspectRoomFocus("interview"); announceAction(`Interviewing ${currentSuspect.name}.`); }}
                   aria-label={`Talk to ${currentSuspect.name}`}
                 >
-                  {props.renderMysteryBotAvatar(mysteryBotForSuspect(currentSuspect), "mini", { demeanor: "suspect" })}
+                  <span className={styles.roomSuspectWalker}>
+                    {props.renderMysteryBotAvatar(mysteryBotForSuspect(currentSuspect), "mini", { demeanor: "suspect" })}
+                  </span>
                   <span className={styles.roomSuspectName}>{currentSuspect.name}</span>
                 </button>
               ) : null}
@@ -2180,9 +2211,9 @@ export function DebateMysteryPlay(
               {stageNarration ? <div className={styles.stagePartnerProse}><small>{stageNarration.label}</small><MysteryPublicMarkdown source={stageNarration.text} suspects={state.suspects} /></div> : null}
               {suspectRoomFocus === "observe" ? <div className={styles.roomModeControls} data-mystery-interview-interactive>
                 {currentSuspect ? <button type="button" onClick={() => { setSuspectRoomFocus("interview"); announceAction(`Interviewing ${currentSuspect.name}.`); }}>Talk to {currentSuspect.name}</button> : null}
-                <button type="button" onClick={() => { setSuspectRoomFocus("search"); announceAction(`Investigating ${currentRoom.name ?? "the room"}.`); }}>Investigate room</button>
+                <button type="button" disabled={currentRoom.searched} onClick={() => { setSuspectRoomFocus("search"); announceAction(`Investigating ${currentRoom.name ?? "the room"}.`); }}>{currentRoom.searched ? "✓ Investigation complete" : "Investigate room"}</button>
               </div> : null}
-              <p className={styles.stageActionLine} role="status">{actionFeedback ?? (suspectRoomFocus === "search" ? "Move the lens around the room; it never predicts what an inspection will reveal." : currentSuspect ? "Choose whether to question the suspect or investigate the room." : "Enter investigation view when you are ready to search this room.")}</p>
+              <p className={styles.stageActionLine} role="status">{actionFeedback ?? (suspectRoomFocus === "search" ? currentRoom.searched ? "Room investigation complete. Every area has been checked." : "Move the lens around the room; it never predicts what an inspection will reveal." : currentSuspect ? "Choose whether to question the suspect or investigate the room." : currentRoom.searched ? "This room's investigation is complete." : "Enter investigation view when you are ready to search this room.")}</p>
               </div> : null}
             </div>
             {evidenceExhibitId ? (() => { const exhibit = state.discoveredEvidence.find((item) => item.id === evidenceExhibitId); return exhibit ? <section className={styles.evidenceExhibit} role="dialog" aria-label={`Evidence acquired: ${mysteryEvidenceTitle(exhibit.title)}`}><button type="button" aria-label="Close evidence preview" onClick={() => setEvidenceExhibitId(null)}>×</button>{exhibit.imageId ? <img src={`/api/images/${encodeURIComponent(exhibit.imageId)}/file`} alt="" /> : <span aria-hidden="true">{mysteryEvidenceEmoji(exhibit)}</span>}<div><small>Evidence acquired</small><h3>{mysteryEvidenceTitle(exhibit.title)}</h3><p>{mysteryEvidenceObservation(exhibit.observation)}</p><button type="button" onClick={() => void addNotebookReference("evidence", exhibit.id, `${mysteryEvidenceTitle(exhibit.title)}: ${mysteryEvidenceObservation(exhibit.observation)}`)}>Add to notebook</button></div></section> : null; })() : null}

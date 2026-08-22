@@ -8,6 +8,31 @@ import {
 
 describe("Signal automatic camera direction", () => {
 
+  it("holds Wide for true audible crosstalk before reactions or coverage", () => {
+    assert.equal(
+      signalLiveAutoCameraShot({
+        baseShot: "left",
+        audibleVoiceOverlap: true,
+        listenerReactionShot: "right",
+        coverageShot: "right",
+        speakingShot: "left",
+        botThinking: false,
+        producerGuestThinking: false,
+      }),
+      "wide",
+    );
+    assert.equal(
+      signalLiveAutoCameraShot({
+        baseShot: "left",
+        audibleVoiceOverlap: false,
+        speakingShot: "right",
+        botThinking: false,
+        producerGuestThinking: false,
+      }),
+      "right",
+    );
+  });
+
   it("holds the Producer guest, then uses Wide whenever a bot is thinking", () => {
     assert.equal(
       signalLiveAutoCameraShot({

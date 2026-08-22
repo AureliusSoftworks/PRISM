@@ -34,6 +34,8 @@ const BOTCAST_DUPLICATE_PREFIX_MIN_WORDS = 12;
 const BOTCAST_DUPLICATE_PREFIX_RATIO = 0.55;
 const BOTCAST_DUPLICATE_JACCARD_MIN_WORDS = 12;
 const BOTCAST_DUPLICATE_JACCARD_RATIO = 0.88;
+const BOTCAST_DUPLICATE_CONTENT_MIN_SHARED_WORDS = 8;
+const BOTCAST_DUPLICATE_CONTENT_CONTAINMENT_RATIO = 0.55;
 
 const BOTCAST_CUE_STOPWORDS = new Set([
   "about",
@@ -82,6 +84,37 @@ const BOTCAST_CUE_STOPWORDS = new Set([
   "yours",
 ]);
 
+const BOTCAST_DUPLICATE_CONTENT_STOPWORDS = new Set([
+  ...BOTCAST_CUE_STOPWORDS,
+  "also",
+  "and",
+  "any",
+  "are",
+  "but",
+  "can",
+  "did",
+  "even",
+  "for",
+  "had",
+  "has",
+  "here",
+  "how",
+  "however",
+  "its",
+  "let",
+  "not",
+  "our",
+  "ourselves",
+  "she",
+  "the",
+  "through",
+  "upon",
+  "was",
+  "who",
+  "will",
+  "you",
+]);
+
 const BOTCAST_CUE_SYNONYM_GROUPS: readonly (readonly string[])[] = [
   [
     "repeat",
@@ -123,6 +156,7 @@ function stemCueWord(word: string): string {
     .replace(/ing$/u, "")
     .replace(/ed$/u, "")
     .replace(/ies$/u, "y")
+    .replace(/ces$/u, "ce")
     .replace(/es$/u, "")
     .replace(/s$/u, "");
 }
@@ -155,6 +189,35 @@ function jaccard(left: readonly string[], right: readonly string[]): number {
   }
   const union = new Set([...leftSet, ...rightSet]).size;
   return union === 0 ? 0 : overlap / union;
+}
+
+function duplicateContentWords(value: string): string[] {
+  return words(normalizeForDuplicate(value))
+    .filter(
+      (word) =>
+        word.length >= 3 && !BOTCAST_DUPLICATE_CONTENT_STOPWORDS.has(word),
+    )
+    .map(stemCueWord);
+}
+
+function hasRepeatedContentCore(left: string, right: string): boolean {
+  const leftWords = new Set(duplicateContentWords(left));
+  const rightWords = new Set(duplicateContentWords(right));
+  if (
+    leftWords.size < BOTCAST_DUPLICATE_JACCARD_MIN_WORDS ||
+    rightWords.size < BOTCAST_DUPLICATE_JACCARD_MIN_WORDS
+  ) {
+    return false;
+  }
+  let shared = 0;
+  for (const word of leftWords) {
+    if (rightWords.has(word)) shared += 1;
+  }
+  return (
+    shared >= BOTCAST_DUPLICATE_CONTENT_MIN_SHARED_WORDS &&
+    shared / Math.min(leftWords.size, rightWords.size) >=
+      BOTCAST_DUPLICATE_CONTENT_CONTAINMENT_RATIO
+  );
 }
 
 function isPrefixNearDuplicate(left: string, right: string): boolean {
@@ -213,6 +276,7 @@ export function botcastUtteranceIsNearDuplicate(
     if (previousWords.length < BOTCAST_DUPLICATE_MIN_WORDS) continue;
     if (current === previous) return true;
     if (isPrefixNearDuplicate(current, previous)) return true;
+    if (hasRepeatedContentCore(current, previous)) return true;
     if (
       currentWords.length >= BOTCAST_DUPLICATE_JACCARD_MIN_WORDS &&
       previousWords.length >= BOTCAST_DUPLICATE_JACCARD_MIN_WORDS &&
@@ -222,6 +286,34 @@ export function botcastUtteranceIsNearDuplicate(
     }
   }
   return false;
+}
+
+function stripFirstContactIdentityLead(value: string): string {
+  const spoken = value.trim();
+  const firstSentence = /^[\s\S]*?[.!?](?=\s|$)/u.exec(spoken)?.[0] ?? "";
+  if (
+    !firstSentence ||
+    !/\b(?:i\s+am|i['’]m|my\s+name\s+is)\b/iu.test(firstSentence)
+  ) {
+    return spoken;
+  }
+  const remainder = spoken.slice(firstSentence.length).trim();
+  return remainder || spoken;
+}
+
+/**
+ * Recovery banks are selected before Power runtime prepends a fresh-contact
+ * identity. Compare the actual question/answer beneath that lead so a new
+ * false name cannot make the same canned recovery line look fresh.
+ */
+export function botcastRecoveryUtteranceIsNearDuplicate(
+  content: string,
+  recentSpeakerContents: readonly string[],
+): boolean {
+  return botcastUtteranceIsNearDuplicate(
+    stripFirstContactIdentityLead(content),
+    recentSpeakerContents.map(stripFirstContactIdentityLead),
+  );
 }
 
 function normalizeDirectQuote(value: string): string {

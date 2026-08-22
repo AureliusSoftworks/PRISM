@@ -10574,7 +10574,12 @@ export function BotcastExperience({
       const producerGuestRole =
         role === "guest" && args.currentEpisode.guestKind === "producer";
       const sipAllowed =
-        !producerGuestRole && !roleIsSpeaking(role) && !roleIsThinking(role);
+        !producerGuestRole && !roleIsSpeaking(role);
+      // Signal prepares the listener's next turn while the current speaker is
+      // still on mic. Treating that internal preparation as a sip blocker
+      // eliminates the only window the turn-anchored schedule can use, so the
+      // cup remains on the table for the whole episode. The active speaker is
+      // still blocked; a listening bot may visibly sip while preparing.
       // Level and sprite both come off this one counter, so the cup cannot
       // lose coffee through a beat the viewer never saw anyone drink in —
       // which is what review 12d3d47e reported. The count is a function of
@@ -13530,6 +13535,25 @@ export function BotcastExperience({
         ? "left"
         : "right"
       : null;
+  // Only playback that has actually started belongs in crosstalk direction.
+  // Preparation and pre-speech presence deliberately do not widen the camera.
+  const liveAudiblySpeakingBotIds = new Set(signalEphemeralSpeakingBotIds);
+  if (
+    episode &&
+    liveActiveMessage &&
+    liveSpeech?.messageId === liveActiveMessage.id &&
+    liveSpeech.audible === true &&
+    liveSpeech.reveal.phase === "playing" &&
+    botcastMessageIsAudibleToAudienceV1(liveActiveMessage) &&
+    !botPowerResponseIsSilentV1(liveActiveMessage.content)
+  ) {
+    liveAudiblySpeakingBotIds.add(
+      liveActiveMessage.speakerRole === "host"
+        ? episode.hostBotId
+        : episode.guestBotId,
+    );
+  }
+  const liveAudibleVoiceOverlap = liveAudiblySpeakingBotIds.size >= 2;
   const liveSpeakingShot =
     liveCameraMode === "auto" &&
     liveActiveMessage &&
@@ -13548,6 +13572,8 @@ export function BotcastExperience({
       ? "wide"
       : signalLiveAutoCameraShot({
           baseShot: liveBaseShot,
+          audibleVoiceOverlap:
+            liveCameraMode === "auto" && liveAudibleVoiceOverlap,
           // Sustained reaction/crosstalk audio can own an editorial cut.
           // Brief interjections stay audible without creating a 1→2→1 camera
           // twitch. Fixed manual cameras never yield, and prepared text never

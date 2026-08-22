@@ -724,6 +724,45 @@ describe("Signal replay video frames", () => {
     assert.equal(producerThinking.shot, "right");
   });
 
+  it("frames two audible replay performers in Wide while keeping fixed cameras authoritative", () => {
+    const automaticEpisode = episodeWithCameraEvents([
+      {
+        kind: "camera_suggestion",
+        payload: { atMs: 0, shot: "left", reason: "opening" },
+      },
+    ]);
+    const crosstalk = signalFaithfulReplayCameraState({
+      episode: automaticEpisode,
+      timeline,
+      replayElapsedMs: 7_000,
+      scene: replayScene({
+        "host-1": participantScene({ speaking: true, audible: true }),
+        "guest-1": participantScene({ speaking: true, audible: true }),
+      }),
+      activeMessage: automaticEpisode.messages[1] ?? null,
+    });
+    assert.equal(crosstalk.shot, "wide");
+    for (const shot of ["left", "right", "wide"] as const) {
+      const fixedEpisode = episodeWithCameraEvents([
+        {
+          kind: "camera_mode",
+          payload: { atMs: 0, mode: shot, shot },
+        },
+      ]);
+      const fixed = signalFaithfulReplayCameraState({
+        episode: fixedEpisode,
+        timeline,
+        replayElapsedMs: 7_000,
+        scene: replayScene({
+          "host-1": participantScene({ speaking: true, audible: true }),
+          "guest-1": participantScene({ speaking: true, audible: true }),
+        }),
+        activeMessage: fixedEpisode.messages[1] ?? null,
+      });
+      assert.equal(fixed.shot, shot);
+    }
+  });
+
   it("prefers the camera shot captured from the live Signal stage", () => {
     const capturedScene = {
       ...replayScene({

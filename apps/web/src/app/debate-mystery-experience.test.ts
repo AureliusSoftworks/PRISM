@@ -9,6 +9,7 @@ import {
   distinctWhodunnitCastBotIds,
 } from "./debateMysteryCast.ts";
 import { mysteryRoomArtworkSrc } from "./debateMysteryRoomArt.ts";
+import { mysteryRoomSuspectWalkProfile } from "./debateMysteryRoomWalk.ts";
 import { DEBATE_MYSTERY_ROOM_TEMPLATES } from "@localai/shared";
 
 const source = readFileSync(
@@ -51,8 +52,8 @@ describe("Debate Whodunnit experience", () => {
   });
 
   it("keeps hotspot affordance outcome-neutral and accessible", () => {
-    assert.match(source, /activeRegions\.map\(\(region, index\)/u);
-    assert.match(source, /Inspect again/u);
+    assert.match(source, /activeRegions\.map\(\(region\)/u);
+    assert.doesNotMatch(source, /Inspect again/u);
     assert.match(source, /action: "inspect"/u);
     assert.match(css, /\.investigationLens/u);
     assert.match(css, /border-radius: 50%/u);
@@ -104,10 +105,31 @@ describe("Debate Whodunnit experience", () => {
     assert.match(css, /\[data-debate-avatar-quality="mini"\]/u);
   });
 
+  it("gives larger room suspects stable, varied lateral walking", () => {
+    const profile = mysteryRoomSuspectWalkProfile("case-1", "dining-room", "suspect-1");
+    assert.deepEqual(
+      mysteryRoomSuspectWalkProfile("case-1", "dining-room", "suspect-1"),
+      profile,
+    );
+    assert.notDeepEqual(
+      mysteryRoomSuspectWalkProfile("case-1", "dining-room", "suspect-2"),
+      profile,
+    );
+    assert.ok(Math.min(profile.startPct, profile.endPct) >= 24);
+    assert.ok(Math.max(profile.startPct, profile.endPct) <= 72);
+    assert.ok(profile.durationMs >= 16_000 && profile.durationMs <= 22_000);
+    assert.match(source, /mysteryRoomSuspectWalkProfile\(sessionId, currentRoom\.id, currentSuspect\.seatId\)/u);
+    assert.match(source, /className=\{styles\.roomSuspectWalker\}/u);
+    assert.match(css, /\.roomSuspectPresence[\s\S]*width: clamp\(12rem, 36%, 20rem\)/u);
+    assert.match(css, /@keyframes mysterySuspectRoomWalk[\s\S]*--suspect-walk-waypoint/u);
+    assert.match(css, /\.roomSuspectPresence:hover[\s\S]*animation-play-state: paused/u);
+    assert.match(css, /prefers-reduced-motion[\s\S]*\.roomSuspectWalker/u);
+  });
+
   it("keeps suspect-room talking and searching explicit, with free @ evidence confrontation", () => {
     assert.match(source, /useState<"observe" \| "interview" \| "search">\("observe"\)/u);
     assert.match(source, /Talk to \{currentSuspect\.name\}/u);
-    assert.match(source, />Investigate room<\/button>/u);
+    assert.match(source, /"Investigate room"/u);
     assert.match(source, /data-focus=\{suspectRoomFocus\}/u);
     assert.match(css, /\.roomPanel\[data-focus="search"\][\s\S]*position: fixed/u);
     assert.match(css, /\.roomScene\[data-observing="true"\][\s\S]*blur\(2px\)/u);
@@ -133,6 +155,19 @@ describe("Debate Whodunnit experience", () => {
     assert.doesNotMatch(source, /\}, \[mysteryBotForSuspect, props, sessionId, state\.interviewLog, state\.suspects\]\);/u);
   });
 
+  it("makes inspected areas one-shot and marks fully searched rooms", () => {
+    assert.match(source, /remainingInvestigationRegions/u);
+    assert.match(source, /targetableInvestigationRegions/u);
+    assert.match(source, /aria-disabled=\{currentRoom\.inspectedRegionIds\.includes\(region\.id\) && !armedAccessItemId\}/u);
+    assert.match(source, /if \(currentRoom\.inspectedRegionIds\.includes\(region\.id\)\) return;/u);
+    assert.match(source, /data-searched=\{room\.searched \? "true" : undefined\}/u);
+    assert.match(source, /className=\{styles\.mapRoomCompleteMark\}/u);
+    assert.match(source, /disabled=\{currentRoom\.searched\}/u);
+    assert.match(css, /\.mapRoom\[data-searched="true"\]/u);
+    assert.match(css, /\.mapRoomCompleteMark/u);
+    assert.match(css, /\.roomModeControls button:disabled/u);
+  });
+
   it("keeps forensics and all public-record mentions on the investigation surface", () => {
     assert.match(source, /action: "forensic"/u);
     assert.match(source, /Forensics · 3 actions/u);
@@ -152,7 +187,7 @@ describe("Debate Whodunnit experience", () => {
     assert.match(css, /\.stagePartnerProse/u);
     assert.match(css, /\.partnerMini[\s\S]*overflow: visible/u);
     assert.match(css, /\.partnerSuspectName/u);
-    assert.match(css, /mysterySuspectTenseFloat/u);
+    assert.match(css, /mysteryPartnerPresence/u);
   });
 
   it("uses a compact scene-first HUD with one case-file surface", () => {

@@ -363,7 +363,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /const sipAllowed =[\s\S]{0,100}!producerGuestRole && !roleIsSpeaking\(role\) && !roleIsThinking\(role\)/u,
+      /const sipAllowed =\s*!producerGuestRole && !roleIsSpeaking\(role\);/u,
     );
     assert.match(source, /aria-label="Sip coffee on air"/u);
     assert.match(
@@ -1970,6 +1970,17 @@ describe("Signal experience shell", () => {
     assert.match(
       pageSource,
       /signalPreferredVoiceClipReady\(clip, args\.engine\)/u,
+    );
+  });
+
+  it("derives Auto crosstalk framing from active audible playback only", () => {
+    assert.match(
+      source,
+      /const liveAudiblySpeakingBotIds = new Set\(signalEphemeralSpeakingBotIds\)[\s\S]{0,500}liveSpeech\.audible === true[\s\S]{0,160}liveSpeech\.reveal\.phase === "playing"[\s\S]{0,520}const liveAudibleVoiceOverlap = liveAudiblySpeakingBotIds\.size >= 2/u,
+    );
+    assert.match(
+      source,
+      /audibleVoiceOverlap:\s*liveCameraMode === "auto" && liveAudibleVoiceOverlap/u,
     );
   });
 
