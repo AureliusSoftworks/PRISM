@@ -1,3 +1,301 @@
+# Handoff: Coffee lag — one canvas call costs 200–590ms, and it is not JavaScript-shaped
+
+Jared confirmed the force-quits happened **in the desktop app** — Tauri
+WKWebView running the staged production build. Measured against a real,
+production, GPU-backed browser, the freeze reproduces and has two causes.
+
+## RESULT (2026-08-19, production build, live 5-bot table, headed browsers)
+
+Group "Dreamscapes & Doubt", llama3.2, 5 seats, bots talking, 1400x948 @dpr2,
+driven through Playwright with a **visible, focused** window in both engines.
+
+### 1. `canvas.getImageData` — a single call blocks 141–587 ms
+
+```
+                     calls/8s   worst call    cost
+WebKit   (headed)       3–4        587 ms     134 ms/s
+Chromium (headed)       1–4        271 ms     102 ms/s
+Chromium (headless)       4        0.4 ms       —      ← the trap
+```
+
+That is `PhosphorPixelGlyph`'s `rasterizeTextMask` (`getImageData` → per-pixel
+JS → `putImageData` → `toDataURL`). **One call drops 8–35 frames.** It fires
+when glyph content changes, which in Coffee is every mouth shape, on five seats.
+
+**This is the finding the previous session had and threw away.** It measured the
+rasterizer as ~1ms and retired it — in a throttled, hidden, headless Chromium,
+where the GPU→CPU readback is free. On real hardware it is not. The defect it
+described was right; only the cost measurement was wrong.
+
+### 2. Concurrent CSS animations — 2 before the table opens, 45–86 during
+
+Frames degrade with animation count even in windows with **zero** `getImageData`
+calls (headed Chromium, window 1: 71 animations, no readback, frame p50 75 ms).
+
+```
+coffeeCupSteamRise           18      opacity/transform
+botVoiceLight{Bulb,Aura,Core,Emitter}Breath   6 each
+crtElectronicBreath / …Counter                6 each
+zenLiveBotCrtFaceFlicker      6
+crtStaticSnowJitter           6      background-position ← never composited
+botAmbientUnderglowBreathe    5
+botAmbientHoverDrift          5
+zenLivePrism*HueRotate        2      filter ← main-thread every frame
+```
+
+Disabling **only** `animation`/`transition` recovers the table:
+
+```
+baseline           p95 frame gap 175 ms · 56.5 fps
+animation:none     p95 frame gap  34 ms · 58.8 fps
+everything off     p95 frame gap  20 ms · 58.8 fps
+```
+
+Killing `backdrop-filter` alone, or blend/mask alone, did **not** help. The cost
+is animations ticking, not the glass.
+
+### 3. React render cost is not the problem in production
+
+```
+production, Zen                 2.8 ms/render
+production, Coffee 5 seats      4.7 ms/render
+production, live table         5–18 ms/render
+JS attributed, live table    17–263 ms/s   (2–26% of the main thread)
+```
+
+## Why four sessions of measurement missed both
+
+Every instrument used so far watched **JavaScript**: rAF cost, timer cost,
+render counts, `busy ms/s`, fiber churn. Cause #2 is style/paint/composite and
+is invisible to all of them. Cause #1 *is* JavaScript, but only shows its true
+cost when the page is composited on a real GPU — headless and hidden windows
+both make the readback free, and both earlier sessions measured it that way.
+
+**It is not an engine difference.** An earlier draft of this handoff blamed
+WebKit; a headed Chromium control disproved that. Both engines collapse. WebKit
+is merely worse (587 ms vs 271 ms worst call), and the desktop app is where
+Jared plays, which is why he sees it there.
+
+## Where to attack, in order
+
+1. **Get `getImageData`/`toDataURL` off the mouth-shape path.** Highest cost per
+   call by far, and the previous session already wrote a fix for the underlying
+   defect (`PhosphorPixelGlyph` keys its effect on `[children]`, a fresh identity
+   every parent render) that short-circuits when markup and host box are
+   unchanged. It sits unverified in a stash. Verify it against the numbers above
+   — the acceptance test is worst-call, not average.
+2. **Cut concurrently running animations at a live table.** 18 steam loops and
+   ~30 per-seat breath/flicker loops are the bulk. Run decorative loops only for
+   the speaking seat, cap steam wisps, or drive them from one shared timeline.
+3. **`crtStaticSnowJitter` animates `background-position`; the hue-rotates
+   animate `filter`.** Neither can ever be composited — they are main-thread
+   every frame in every engine. Convert or drop them first among the animations.
+
+## Measurement discipline — the rule that would have saved four sessions
+
+**Never measure rendering cost in a hidden, headless, or unfocused window.**
+Hidden tabs suspend rAF and throttle timers; headless browsers skip the GPU
+readback entirely. Both make the two real causes here read as zero. Durations of
+*executed JavaScript* survive (that is why the forced-render technique below
+works anywhere), but anything touching paint, compositing, or canvas readback
+must be measured headed, visible, and focused.
+
+## How to re-run any of this
+
+Harnesses are in the scratchpad worktree (`prism-prod/`), all taking
+`ENGINE=webkit|chromium`, `HEADED=1`, and `GROUP=`:
+
+- `main-thread.mjs` — wraps every rAF/timer/MessageChannel callback plus the
+  canvas calls, reports ms/s per bucket against wall clock, with frame p50/p95.
+  **This is the one that found both causes.**
+- `live-table.mjs` — opens a live table and samples a timeline.
+- `live-ab.mjs` — A/B of CSS effect variants (the animation result above).
+- `anim-inventory.mjs` — what is animating, by name and by animated property.
+- `anim-ab.mjs` — pauses animation groups by name through the Web Animations
+  API. **This one did not work**: animations are recreated continuously, so by
+  probe time new unpaused instances existed (`paused 0` in nearly every row) and
+  it mostly measured nothing. It is why per-group ranking is still open. The CSS
+  variant A/B in `live-ab.mjs` is the load-bearing evidence.
+- `scripts/perf/desktop-render-probe.js` — paste-in probe for the real desktop
+  app's Web Inspector, to confirm any of this on WKWebView proper.
+
+They log in as `admin` / `password`. Group model pins matter: "Bikini Bottom" is
+pinned to a model that is not installed, and **"Auto" resolves to
+`gemma3:latest`, which is also not installed**, so a table opened on Auto dies at
+the first turn with "the local model couldn't get ready". The harnesses pin
+Llama 3.2 through the header picker (`aria-label="Model for local replies"`)
+first. That Auto-resolution is a separate real bug, recorded and not fixed.
+
+## Still open
+
+- Per-animation-group ranking (see `anim-ab.mjs` above).
+- Nothing has been fixed. This session measured; it did not change app code.
+- The forced-render / dev-server findings below remain true and useful, but they
+  describe the **dev server**, which is not what Jared plays in.
+
+---
+
+
+# Handoff: Coffee lag — it is the dev server, measured 107×
+
+## RESULT (2026-08-19): 97% of render cost is React's *development* JSX runtime
+
+One `HomeContent` render, same app, same screen, same forced render:
+
+```
+dev  (next dev --webpack, :18788)     300 ms
+prod (next build + standalone, :3999)   2.8 ms      ← 107× cheaper
+```
+
+Coffee, five seats, table setup screen: dev **451 ms** vs prod **4.7 ms**.
+Coffee, table open, awaiting topic: prod **2.1 ms**. Coffee with the error
+overlay up (582 DOM nodes): prod **3.7 ms**.
+
+**HomeContent creates ~1,100 React elements per render — not 100,000.** The DOM
+is 280–580 nodes. There is no element explosion and there is no pathological
+app-side computation. In dev each of those ~1,100 `jsxDEV` calls costs
+**~250–400 µs**, which is 100× what a `jsx()` call costs anywhere else.
+
+### The bisect that proves it
+
+Replacing `react/jsx-dev-runtime`'s `jsxDEV` with a minimal element factory, at
+runtime, in the running dev app, then adding React's dev work back one piece at
+a time (ms per `HomeContent` render, Zen screen, ~1,100 elements each):
+
+```
+bare factory                     15.1 ms
+  + Error("react-stack-top-frame")  294.7 ms   ← the entire cost
+  + 3× Object.defineProperty         8.9 ms
+  + Object.freeze(props/element)     12.0 ms
+  + all three                      303.6 ms
+real dev jsxDEV                    299.1 ms
+```
+
+`console.createTask` is not involved (re-instantiating the runtime module with
+`console.createTask` deleted changed nothing: 302.9 → 305.3 ms). Neither is
+`Object.freeze` or `defineProperty`. It is the per-element `Error()` that React
+19's dev build constructs to attach an owner stack.
+
+**Hypothesis, not established:** the same `Error()` costs 0.5 µs from a small
+function and ~250 µs from inside `HomeContent`'s stack, and the first capture at
+a given call site is far worse than repeats (582 µs → 13 µs → 4.5 µs). That is
+consistent with V8 paying per-call-site source-position work inside a single
+enormous function — `HomeContent` is ~90k lines of one function. It does not
+fully reconcile (render #2 would then be cheap, and it is not). Treat the
+mechanism as open; the bisect table above is the durable result.
+
+### Two confounds, both closed
+
+- **The prod build is HEAD; the working tree has modified `packages/shared/*`**
+  (`listenerReaction.ts`, `botVernacular.ts`, `autoFallback.ts`). That is a real
+  difference between the two builds — and it cannot explain the gap, because the
+  in-place swap (`bare 15.1` vs `real dev jsxDEV 299.1`, same app, same tree,
+  same instant) puts 97% of the dev cost *inside* `jsxDEV`. `page.tsx` itself is
+  identical to HEAD.
+- **Strict mode double-invokes the render body in dev.** `~1,100` is therefore
+  `jsxDEV` calls *as counted*, likely ~550 elements evaluated twice, so read
+  250–400 µs as per-call, not per-element. It moves nothing: the bisect is a
+  within-dev comparison at a fixed call count.
+
+### What this retires
+
+- **"Each `HomeContent` render blocks the main thread for roughly a second."**
+  True in dev, and only in dev. In production it is 2–5 ms.
+- **"The seat map needs its own memo boundary — a big rock."** Not on this
+  evidence. The seat map is ~1,100 elements' worth of the same cheap work; at
+  prod cost, five seats re-rendering six times a second is ~3% of a core.
+- **The 98%-blocked / 1 FPS live-table numbers.** Real, but they were taken on
+  the dev server, so they measure dev's per-element `Error()` capture.
+
+### The one thing that decides whether the mission is closed
+
+**Which build freezes?** The desktop app is production, and its runtime is
+current: `apps/desktop/src-tauri/tauri.conf.json` has **no `devUrl`** — it ships
+`frontendDist: "../webview"` and bundles `runtime/` as a resource, and
+`desktop:stage-runtime:dev` copies the Next standalone output
+(`scripts/stage-desktop-runtime.mjs:748`). Both `runtime/` and
+`apps/web/.next/standalone` are dated **Aug 18 22:05**, so the desktop app has
+been running a fresh production build, not the dev server.
+
+So the question is only: were the force-quits in the **desktop app** or in a
+**browser on :18788**? If :18788, this finding is the whole answer. If the
+desktop app, Coffee's freeze is still unexplained and this is a (large) DX win
+only. **Ask Jared before optimizing anything else.**
+
+### If the dev server is the answer — the fix worth building
+
+An env-gated shim, `PRISM_DEV_FAST_JSX=1`, aliasing `react/jsx-dev-runtime` to a
+local module whose `jsxDEV` skips the owner-stack `Error()`. Measured effect:
+300 ms → ~15 ms per render, 20×. Cost: React's error overlay loses owner stacks,
+and a hand-rolled factory suppresses key warnings unless it reproduces `_store`
+faithfully. Aliasing to `react/jsx-runtime` will **not** work — in dev that
+resolves to `react-jsx-runtime.development.js`, which captures the same stack
+(`grep -c 'react-stack-top-frame'` → 3).
+
+## HOW TO MEASURE THIS AGAIN — visibility no longer required
+
+The previous handoff's warning still holds for FPS, `busy ms/s` and frame gaps.
+It does **not** hold for this technique, which is why it worked in a hidden
+pane: a render either happens or it does not, and when it happens its duration
+is real. React commits on a MessageChannel, which hidden tabs do not throttle.
+
+1. Find the app fiber without relying on names (production is minified): walk
+   from `document.body[Object.keys(document.body).find(k => k.startsWith("__reactFiber$"))]`
+   up to the root, then down, and take the function component with the most
+   hooks — `HomeContent` has exactly **2163**, of which 649 own a queue.
+2. Force renders with no semantic change: hook index **16** is a `useState([])`
+   whose value is an empty array. `hook.queue.dispatch([])` is a fresh identity
+   with identical contents, so React cannot bail out and nothing else changes.
+3. Yield between dispatches with a `MessageChannel` round-trip, never
+   `setTimeout` — hidden tabs throttle timers to ~1 Hz and a 40×25 ms loop
+   becomes 40 s.
+4. Count elements by patching the webpack module cache: push a fake chunk onto
+   `window.webpackChunk_N_E` to capture `__webpack_require__`, then swap
+   `require.c['(app-pages-browser)/../../node_modules/next/dist/compiled/react/jsx-dev-runtime.js'].exports.jsxDEV`
+   for a counting wrapper. It is a live property read at every call site, so the
+   swap takes effect immediately and restores cleanly.
+5. Chrome's JS Self-Profiling API is available in dev now — `next.config.ts`
+   sets `Document-Policy: js-profiling` when `NODE_ENV === "development"`.
+   `new Profiler({sampleInterval: 2})` → `stop()` → aggregate `samples`/`stacks`/
+   `frames`. It named `jsxDEV` in one run. **This header edit is uncommitted and
+   is Jared's call to keep.**
+
+## Reproducing the production comparison
+
+```bash
+git worktree add --detach <tmp> HEAD
+ln -s <repo>/node_modules <tmp>/node_modules
+ln -s <repo>/apps/web/node_modules <tmp>/apps/web/node_modules
+cp <repo>/.env <tmp>/.env
+cd <tmp>/apps/web && npm run build
+cp -R .next/static .next/standalone/apps/web/.next/static
+cp -R public .next/standalone/apps/web/public
+cd .next/standalone/apps/web && PORT=3999 LOCALAI_API_ORIGIN=http://127.0.0.1:18787 node server.js
+```
+
+Standalone output ships neither `.next/static` nor `public/` — without those two
+copies the page loads HTML with no JS and every number is meaningless. Session
+cookies ignore ports, so :3999 is already logged in if :18788 is.
+
+## State of the machine as this was written
+
+- Jared's `npm run dev` (API **and** web) went down mid-session. The most
+  likely trigger is the `next.config.ts` edit below: Next dev restarts on a
+  config change and `scripts/dev.mjs` supervises both children. Not confirmed —
+  the app served requests fine for a while after the edit — but do not treat it
+  as an exonerated bystander. **The API was restarted from this session**
+  (`npm run dev:api`, backgrounded), so **port 18787 is held by that process**
+  and `npm run dev` will fail on a port conflict until it is killed. The dev
+  **web** server on :18788 is *not* running; the production build on :3999 is.
+- `apps/web/next.config.ts` is modified (the dev-only `Document-Policy` header)
+  and uncommitted. Stage it by explicit path; the tree also carries a parallel
+  session's work.
+- Two Coffee sessions were created in the Bikini Bottom group while testing. The
+  production one failed at first turn: the group is pinned to `gemma3:latest`,
+  which is not installed in Ollama.
+- A live conversing table was never flown. That acceptance test needs a visible,
+  focused window and is Jared's to run.
+
 # Handoff: Coffee lag — render cost, measured on a live table
 
 ## LIVE-TABLE RESULT (2026-08-18, 221s, `visible` asserted on every sample)
