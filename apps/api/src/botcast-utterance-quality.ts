@@ -19,6 +19,14 @@ const BOTCAST_GENERIC_HOST_STALL_PATTERNS = [
   /^what do you (?:want to|wanna) (?:talk about|discuss|explore)(?: next)?\??$/iu,
   /^where (?:should|do) we go from here\??$/iu,
   /^what should we (?:talk about|discuss|explore) next\??$/iu,
+  /^(?:the signal is clear(?: that)?\s+)?we need to (?:move|go) forward[.!?]?$/iu,
+  /^(?:let(?:'s| us)|time to) (?:move|go) (?:this |the conversation )?forward[.!?]?$/iu,
+  /^this is (?:hopeful|interesting|important|the end|enough|clear|good|bad|true|false|complicated|difficult)[.!?]?$/iu,
+] as const;
+
+const BOTCAST_GENERIC_GUEST_STALL_PATTERNS = [
+  /^(?:that|this|it) (?:is|feels|seems) [^.!?…]{1,48}[.!?…]?$/iu,
+  /^I mean,? (?:it(?:['’]s| is)|this is|that is) (?:over|done|finished|the end)[.!?…]?$/iu,
 ] as const;
 
 const BOTCAST_DUPLICATE_MIN_WORDS = 8;
@@ -168,6 +176,22 @@ export function botcastUtteranceContainsScreenplayLabels(value: string): boolean
 export function botcastHostUtteranceIsGenericStall(value: string): boolean {
   const spoken = spokenForQualityCheck(value).replace(/["'”’]+$/u, "");
   return BOTCAST_GENERIC_HOST_STALL_PATTERNS.some((pattern) =>
+    pattern.test(spoken),
+  );
+}
+
+/** True when an ordinary host turn fails to return the floor with a question. */
+export function botcastHostUtteranceNeedsInterviewQuestion(
+  value: string,
+): boolean {
+  const spoken = spokenForQualityCheck(value);
+  return Boolean(spoken) && !/\?\s*["”'’)]*$/u.test(spoken);
+}
+
+/** True when a primary guest turn is only a vague reaction or sign-off. */
+export function botcastGuestUtteranceIsGenericStall(value: string): boolean {
+  const spoken = spokenForQualityCheck(value).replace(/["'”’]+$/u, "");
+  return BOTCAST_GENERIC_GUEST_STALL_PATTERNS.some((pattern) =>
     pattern.test(spoken),
   );
 }

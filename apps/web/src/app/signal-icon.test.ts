@@ -22,7 +22,7 @@ describe("Signal applet icon", () => {
     }
     assert.match(
       pageSource,
-      /appletId === "botcast"\) return <GlyphSignal size=\{18\} \/>/u
+      /appletId === "botcast"\) return <GlyphSignal size=\{size\} \/>/u
     );
     assert.match(
       pageSource,

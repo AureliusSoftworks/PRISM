@@ -322,17 +322,57 @@ test("hands Story, Slate, and Image actions back to their normal product surface
 });
 
 test("keeps the newest two replies readable while older messages recede", () => {
+  // The cloud renders a bounded window, which is also what retires a spent
+  // turn: a bubble faded to zero opacity in place would keep reserving its
+  // grid row, opening a growing void between the composer and the live
+  // conversation.
+  assert.match(component, /const PRISM_COMPANION_CLOUD_MESSAGES = 4;/u);
+  assert.match(component, /const PRISM_COMPANION_LIT_MESSAGES = 2;/u);
   assert.match(
     component,
-    /index >= Math\.max\(0, messages\.length - 2\)/u,
+    /const cloudMessages = messages\.slice\(-PRISM_COMPANION_CLOUD_MESSAGES\);/u,
+  );
+  assert.match(component, /\{cloudMessages\.map\(\(message, index\) => \{/u);
+  assert.match(
+    component,
+    /index >=\s*Math\.max\(0, cloudMessages\.length - PRISM_COMPANION_LIT_MESSAGES\)/u,
   );
   assert.match(component, /data-recent=/u);
   assert.match(
     companionCss,
     /\.bubble\[data-recent="true"\] \{ animation: bubbleArrive 240ms/u,
   );
-  assert.match(companionCss, /\.bubble:not\(\[data-recent="true"\]\).*bubbleLife 34s/u);
-  assert.match(companionCss, /filter: blur\(3px\)/u);
+  // Older turns recede in depth and restore on hover. Nothing is on a timer,
+  // so a long answer cannot dim out from under someone mid-sentence.
+  assert.match(
+    companionCss,
+    /\.bubble:not\(\[data-recent="true"\]\) \{[\s\S]*?opacity: \.56;/u,
+  );
+  assert.match(
+    companionCss,
+    /\.bubble:not\(\[data-recent="true"\]\):hover,[\s\S]*?opacity: 1;/u,
+  );
+  assert.doesNotMatch(companionCss, /bubbleLife|bubbleReducedLife/u);
+});
+
+test("gives both docks one reading order and both themes a legible bubble", () => {
+  // Oldest to newest, downward, in both docks — the composer stays pinned
+  // beside the orb rather than the transcript being flipped under it.
+  assert.match(
+    companionCss,
+    /\.anchor\[data-vertical="below"\] \.conversation \{ top: 80px; flex-direction: column-reverse; \}/u,
+  );
+  // Speaker labels and surfaces come from tokens, so the companion is
+  // readable on Coffee's light table as well as a dark lane.
+  assert.match(
+    companionCss,
+    /\.bubbleHeader > span, \.thinking > span \{[^}]*color: var\(--companion-bubble-eyebrow\)/u,
+  );
+  assert.match(
+    companionCss,
+    /:global\(\[data-theme="light"\]\) \.anchor,[\s\S]*?--companion-bubble-eyebrow:/u,
+  );
+  assert.doesNotMatch(companionCss, /color: #8bdfffb8|color: #ee9ce0b8/u);
 });
 
 test("copies a full companion bubble without hijacking links or text selection", () => {
@@ -686,6 +726,18 @@ test("switches the floating Prism panel among Synthesis, Chat, and Notes", () =>
   assert.match(
     companionCss,
     /\.refractModelPicker\s*>\s*:global\(\[data-provider\]\)[\s\S]*?height:\s*32px/u,
+  );
+  assert.match(
+    companionCss,
+    /\.refractModelPicker\s*\{[\s\S]*?width:\s*100%/u,
+  );
+  assert.match(component, /Refract model/u);
+  assert.match(component, /<span>App mode<\/span>/u);
+  assert.match(component, /className=\{styles\.synthesisRefractGuidance\}/u);
+  assert.match(component, /Your chat and bot[\s\S]*model settings stay unchanged/u);
+  assert.match(
+    companionCss,
+    /:global\(\[data-theme="light"\]\)[\s\S]*?\.synthesisRefractPrivacy\[data-lane="local"\][\s\S]*?color:\s*#0b5f6d/u,
   );
   assert.doesNotMatch(companionCss, /\.synthesisRefractCard\s*\{/u);
   assert.match(component, /className=\{styles\.refractLaneBadge\}/u);

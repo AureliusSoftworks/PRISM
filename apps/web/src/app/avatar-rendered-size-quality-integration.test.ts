@@ -40,7 +40,20 @@ test("compact rendered widths use the authored Mini chassis", () => {
   assert.match(pageSource, /<ChatMiniBotAvatar/u);
 });
 
-test("Signal stage avatars retain the full animated face", () => {
+test("the Mini fallback clears authored Ink while the thinking mark presents", () => {
+  // Full HD swaps its whole content rig for the thinking screen, so Ink goes
+  // with it. Mini draws the mark inside the face rig, and its above-face Ink
+  // layer outranks that rig, so without this guard the art paints over the
+  // mark instead of yielding to it.
+  const fallback = pageSource.slice(
+    pageSource.indexOf("function FullAvatarCompactFallback"),
+    pageSource.indexOf("<ChatMiniBotAvatar", pageSource.indexOf("function FullAvatarCompactFallback")),
+  );
+  assert.match(fallback, /hasAvatarArt && !showThinkingSpinner \? \(/u);
+  assert.match(fallback, /showThinkingSpinner/u);
+});
+
+test("Signal keeps authored full mannequins live while shedding only runtime effects", () => {
   const signalExperienceStart = pageSource.indexOf("<BotcastExperience");
   const signalAvatarStart = pageSource.indexOf(
     "renderAvatar={(botSummary, avatarState) => {",
@@ -58,22 +71,44 @@ test("Signal stage avatars retain the full animated face", () => {
     ...signalAvatarRenderer.matchAll(/<ZenLiveBotMannequin[\s\S]*?\/>/gu),
   ];
 
+  assert.match(
+    signalAvatarRenderer,
+    /const signalLivePerformanceAvatar =[\s\S]{0,180}avatarState\.surface === "stage"[\s\S]{0,180}signalLiveSessionId !== null[\s\S]{0,180}avatarState\.replayAudioMaster !== true/u,
+  );
+  assert.doesNotMatch(signalAvatarRenderer, /signalLiveCompactAvatar/u);
+  assert.doesNotMatch(signalAvatarRenderer, /data-signal-live-compact-avatar/u);
   assert.equal(signalStageMannequins.length, 2);
   for (const [mannequin] of signalStageMannequins) {
-    // Signal stage bots are HD, always. The static "full" pin keeps them out
-    // of the rendered-size governor entirely — no load shed, no measurement,
-    // no HD↔Mini swaps under camera-shot transitions.
+    // Signal spends its two-bot budget on the authored full CRT, static CSS
+    // phosphor bloom, and faithful mouth state. Live disables autonomous
+    // effects and synchronous canvas readback around that identity.
     assert.match(mannequin, /minimumRenderedSizeTier="full"/u);
+    assert.match(mannequin, /detailLevel="full"/u);
+    assert.match(
+      mannequin,
+      /pixelRasterizationEnabled=\{!signalLivePerformanceAvatar\}/u,
+    );
+    assert.match(
+      mannequin,
+      /runtimeEffectsEnabled=\{!signalLivePerformanceAvatar\}/u,
+    );
     assert.match(mannequin, /isTalking=\{avatarState\.talking\}/u);
     assert.match(mannequin, /mouthShape=\{avatarState\.mouthShape\}/u);
   }
+  assert.match(pageSource, /data-prism-priority-phosphor="true"/u);
+  assert.match(
+    signalCss,
+    /data-live-episode="true"[\s\S]{0,180}data-prism-priority-phosphor="true"[\s\S]{0,180}data-crt-glyph-layer="true"\]\)::before/u,
+  );
 });
 
-test("runtime pressure has no CSS path that degrades session avatars", () => {
+test("live load shedding never substitutes a generic avatar token", () => {
   assert.doesNotMatch(pageCss, /data-prism-adaptive-quality/u);
   assert.doesNotMatch(signalCss, /data-prism-adaptive-quality/u);
+  assert.doesNotMatch(pageCss, /\.signalLiveCompactAvatar/u);
+  assert.doesNotMatch(pageCss, /\.coffeeLiveSeatAvatar/u);
   assert.match(signalSource, /mouthShape:\s*ZenLiveBotMouthShape/u);
   assert.match(signalSource, /mouthShape,/u);
-  assert.match(pageSource, /isTalking=\{avatarState\.talking\}/u);
-  assert.match(pageSource, /mouthShape=\{avatarState\.mouthShape\}/u);
+  assert.match(pageSource, /runtimeEffectsEnabled=\{!signalLivePerformanceAvatar\}/u);
+  assert.match(pageSource, /runtimeEffectsEnabled: coffeeReplayActive/u);
 });

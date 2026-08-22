@@ -184,7 +184,7 @@ describe("model effort preferences", () => {
     assert.equal(listModelReasoningEffortPreferences(db, "user-2").length, 1);
   });
 
-  it("degrades a stale unsupported GPT-5.6 Minimal preference to provider default", () => {
+  it("keeps a supported GPT-5.6 Minimal preference", () => {
     const db = createTestDatabase();
     setModelReasoningEffortPreference(db, {
       userId: "user-1",
@@ -208,7 +208,7 @@ describe("model effort preferences", () => {
         provider: "openai",
         modelId: "gpt-5.6-sol",
       }),
-      undefined,
+      "minimal",
     );
   });
 

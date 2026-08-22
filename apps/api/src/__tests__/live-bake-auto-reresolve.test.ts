@@ -13,10 +13,14 @@ describe("live bake Auto re-resolve", () => {
       source,
       /resolveRuntime:\s*\(\)\s*=>\s*Promise<DebateAiRuntime>/u,
     );
-    assert.match(
-      source,
-      /const runtime = await args\.resolveRuntime\(\);\s*session = await advanceDebateSession/u,
+    const runtimeResolveAt = source.indexOf(
+      "const runtime = await args.resolveRuntime();",
     );
+    const advanceAt = source.indexOf(
+      "session = await advanceDebateSession(",
+      runtimeResolveAt,
+    );
+    assert.ok(runtimeResolveAt >= 0 && advanceAt > runtimeResolveAt);
   });
 
   it("re-resolves Signal generation before each bake advance", () => {

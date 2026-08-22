@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { createDatabase } from "../db.ts";
 import {
   exportUserSnapshot,
@@ -31,6 +32,59 @@ import {
   readGlobalBotMood,
   setGlobalBotMood,
 } from "../bot-global-mood.ts";
+
+describe("backup Whodunnit private state", () => {
+  it("round-trips the Case Bible, replay actions, notebook, and revisions", () => {
+    withBackupDatabase((db, userKey) => {
+      const now = "2026-08-20T20:00:00.000Z";
+      db.prepare(
+        `INSERT INTO debate_sessions
+          (id, user_id, revision, status, phase, step_key, player_role,
+           create_idempotency_key, motion, session_json, created_at, updated_at)
+         VALUES ('mystery-session', 'user-1', 3, 'waiting_for_player',
+                 'challenge', 'mystery_investigation', 'judge',
+                 'mystery-backup-key', 'Whodunnit?', '{}', ?, ?)`,
+      ).run(now, now);
+      const privateJson = JSON.stringify({ version: 1, culpritSeatId: "suspect-2" });
+      const contentHash = createHash("sha256").update(privateJson).digest("hex");
+      db.prepare(
+        `INSERT INTO debate_mystery_cases
+          (session_id, user_id, schema_version, generator_version, private_json,
+           content_hash, created_at, updated_at)
+         VALUES ('mystery-session', 'user-1', 1, 1, ?, ?, ?, ?)`,
+      ).run(privateJson, contentHash, now, now);
+      db.prepare(
+        `INSERT INTO debate_mystery_actions
+          (id, user_id, session_id, sequence, action_kind, public_payload_json, occurred_at)
+         VALUES ('mystery-action', 'user-1', 'mystery-session', 1,
+                 'travel', '{"roomId":"room-2"}', ?)`,
+      ).run(now);
+      const notebookJson = JSON.stringify({ version: 1, sessionId: "mystery-session", revision: 1, pages: [{ id: "page-1", title: "Case Notes", blocks: [{ id: "block-1", kind: "paragraph", text: "Private theory" }], createdAt: now, updatedAt: now }], createdAt: now, updatedAt: now });
+      db.prepare(
+        `INSERT INTO debate_mystery_notebooks
+          (session_id, user_id, revision, document_json, created_at, updated_at)
+         VALUES ('mystery-session', 'user-1', 1, ?, ?, ?)`,
+      ).run(notebookJson, now, now);
+      db.prepare(
+        `INSERT INTO debate_mystery_notebook_revisions
+          (id, user_id, session_id, revision, document_json, reason,
+           idempotency_key, created_at)
+         VALUES ('mystery-note-revision', 'user-1', 'mystery-session', 1,
+                 ?, 'import', 'mystery-note-initial', ?)`,
+      ).run(notebookJson, now);
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(snapshot.debates?.mysteryCases?.length, 1);
+      assert.equal(snapshot.debates?.mysteryNotebooks?.[0]?.documentJson.includes("Private theory"), true);
+      db.prepare("DELETE FROM debate_sessions WHERE id = 'mystery-session'").run();
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      assert.equal((db.prepare("SELECT COUNT(*) AS count FROM debate_mystery_cases WHERE session_id = 'mystery-session'").get() as { count: number }).count, 1);
+      assert.equal((db.prepare("SELECT COUNT(*) AS count FROM debate_mystery_actions WHERE session_id = 'mystery-session'").get() as { count: number }).count, 1);
+      assert.equal((db.prepare("SELECT document_json FROM debate_mystery_notebooks WHERE session_id = 'mystery-session'").get() as { document_json: string }).document_json.includes("Private theory"), true);
+      assert.equal((db.prepare("SELECT COUNT(*) AS count FROM debate_mystery_notebook_revisions WHERE session_id = 'mystery-session'").get() as { count: number }).count, 1);
+    });
+  });
+});
 
 describe("backup global bot mood", () => {
   it("round-trips account-owned mood state with the bot snapshot", () => {

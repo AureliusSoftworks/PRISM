@@ -68,8 +68,8 @@ describe("Coffee shell policy", () => {
   it("locks Debate chrome until the player returns to the lobby", () => {
     const policy = liveSessionChromePolicy("Debate");
     assert.match(policy.lockMessage, /Return to the Debate lobby/u);
-    assert.match(policy.lockMessage, /model, Effort/u);
-    assert.match(policy.lockMessage, /Auto still picks model and Effort/u);
+    assert.match(policy.lockMessage, /model, Effort or Max/u);
+    assert.match(policy.lockMessage, /Turbo setting/u);
     assert.match(
       policy.disabledNavbarActionTooltips.voice ?? "",
       /frozen for this Duel/u,

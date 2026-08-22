@@ -81,13 +81,21 @@ import {
 } from "./botcast.ts";
 
 describe("Signal producer direct quotes", () => {
-  it("gives a short story enough room to air in one host turn", () => {
-    const story = "Gerald the potato rolled forty feet. ".repeat(40).trim();
-    assert.ok(story.length > 400);
-    assert.ok(story.length < BOTCAST_PRODUCER_DIRECT_QUOTE_MAX);
-    const tokens = botcastDirectQuoteTurnMaxTokens(story);
-    assert.ok(tokens > 160);
-    assert.ok(tokens >= Math.ceil(story.split(/\s+/u).length * 1.6));
+  it("gives a queued line enough room to air in one host turn", () => {
+    const line = "Gerald the potato rolled forty feet. ".repeat(6).trim();
+    assert.ok(line.length > 200);
+    assert.ok(line.length <= BOTCAST_PRODUCER_DIRECT_QUOTE_MAX);
+    const tokens = botcastDirectQuoteTurnMaxTokens(line);
+    // At the lowered cap the 160-token floor is what a full-length line gets,
+    // and it still clears the words themselves with lead-in room to spare.
+    assert.ok(tokens >= 160);
+    assert.ok(tokens >= Math.ceil(line.split(/\s+/u).length * 1.6));
+  });
+
+  it("keeps the spoken ceiling near a line, not a monologue", () => {
+    // Review 2fcad998: ~2,600 characters of queued lyrics took 46 seconds of
+    // air and had to be cut short by a second producer cue.
+    assert.ok(BOTCAST_PRODUCER_DIRECT_QUOTE_MAX <= 320);
   });
 
   it("frames the queued words as a Producer note without rewriting them", () => {
@@ -401,6 +409,22 @@ describe("Signal fallback studio accents", () => {
             targetProgress: 0.55,
             seed: "signal-listener-v1:foley",
             cameraCutEligible: false,
+            signalOrganicBeat: {
+              v: 1,
+              name: "signalOrganicBeat",
+              provenance: "deterministic_listener_bank",
+              kind: "vocal_foley",
+              actorBotId: "guest",
+              floorOwnerBotId: "host",
+              canonicalImpact: "none",
+              prefetch: "episode_listener_kit",
+              timing: {
+                startProgress: 0.55,
+                overlapMs: 0,
+                speakerDuckMs: 0,
+                resumeFadeMs: 0,
+              },
+            },
           },
         },
       },
@@ -423,6 +447,12 @@ describe("Signal fallback studio accents", () => {
     assert.equal(
       botcastListenerReactionForMessage(events, "message-2")?.vocalFoley,
       "clears throat",
+    );
+    assert.deepEqual(
+      botcastListenerReactionForMessage(events, "message-2")
+        ?.signalOrganicBeat,
+      events[1]!.payload.plan &&
+        (events[1]!.payload.plan as Record<string, unknown>).signalOrganicBeat,
     );
   });
 

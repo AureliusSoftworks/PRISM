@@ -83,7 +83,7 @@ describe("living-shell first run", () => {
     );
     assert.match(
       pageSource,
-      /activeTutorialMode === "zen"[\s\S]*safeStepIndex === 1[\s\S]*BOT_LIBRARY_GROUP_FILTER_UNGROUPED/u,
+      /activeTutorialMode === "zen"[\s\S]*groupTutorialStartIndex[\s\S]*groupTutorialEndIndex[\s\S]*livingGroupAvailable[\s\S]*advanceLivingTutorialToStep\("zen", groupTutorialEndIndex \+ 1\)/u,
     );
     assert.match(pageSource, /PRISM_LIVING_TUTORIAL_CAPTION_ID/u);
     assert.match(

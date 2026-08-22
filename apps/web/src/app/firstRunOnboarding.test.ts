@@ -91,8 +91,9 @@ describe("first-run onboarding", () => {
     assert.match(pageSource, /Auto is the default text model/u);
     assert.match(pageSource, /fastest\s*suitable model and Effort/u);
     assert.match(pageSource, /hollow\s*triangle/u);
-    assert.match(pageSource, /LOCAL and ONLINE have separate optional fallback chains/u);
-    assert.match(pageSource, /fallback uses no thinking/u);
+    assert.match(pageSource, /separate optional Auto routing\s*priorities/u);
+    assert.match(pageSource, /Auto appends every other eligible\s*model/u);
+    assert.match(pageSource, /Recovery uses no thinking/u);
     assert.match(pageSource, /LOCAL never evaluates or calls an online model/u);
   });
 

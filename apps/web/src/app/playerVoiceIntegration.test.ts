@@ -63,7 +63,7 @@ test("immersive Zen still reveals player text on the quiet reveal clock", () => 
   );
   assert.match(
     source,
-    /for \(const temporalKey of chatSpeechRevealByKeyRef\.current\.keys\(\)\) \{[\s\S]*?if \(temporalKey\.startsWith\("zen-player:"\)\) continue;/u,
+    /for \(const temporalKey of chatSpeechRevealByKeyRef\.current\.keys\(\)\) \{[\s\S]{0,180}?if \(temporalKey\.startsWith\("zen-player:"\)\) continue;/u,
   );
   assert.match(
     source,

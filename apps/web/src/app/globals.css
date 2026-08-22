@@ -255,6 +255,10 @@ body[data-prism-theme="light"] [data-navbar-picker-surface="true"] {
 html[data-prism-graphics-quality="medium"]
   [data-prism-expensive-effect="true"],
 html[data-prism-graphics-quality="low"]
+  [data-prism-expensive-effect="true"],
+html[data-prism-runtime-quality="balanced"]
+  [data-prism-expensive-effect="true"],
+html[data-prism-runtime-quality="minimal"]
   [data-prism-expensive-effect="true"] {
   contain: paint;
 }
@@ -274,9 +278,39 @@ html[data-prism-graphics-quality="low"]
   animation: none !important;
 }
 
+/* Runtime pressure may freeze peripheral decorative motion, but the authored
+   CRT remains a priority semantic surface at every runtime tier. */
+html[data-prism-runtime-quality="minimal"]
+  [data-prism-decorative-motion="true"]:not(
+    [data-crt-phosphor="bot"] [data-prism-decorative-motion="true"]
+  ),
+html[data-prism-runtime-quality="minimal"]
+  [data-prism-decorative-motion="true"]:not(
+    [data-crt-phosphor="bot"] [data-prism-decorative-motion="true"]
+  )::before,
+html[data-prism-runtime-quality="minimal"]
+  [data-prism-decorative-motion="true"]:not(
+    [data-crt-phosphor="bot"] [data-prism-decorative-motion="true"]
+  )::after {
+  animation: none !important;
+  transition: none !important;
+  will-change: auto !important;
+}
+
 html[data-prism-graphics-quality="low"]
   [data-prism-expensive-effect="true"]::before,
 html[data-prism-graphics-quality="low"]
+  [data-prism-expensive-effect="true"]::after {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  filter: none !important;
+}
+
+html[data-prism-runtime-quality="minimal"]
+  [data-prism-expensive-effect="true"],
+html[data-prism-runtime-quality="minimal"]
+  [data-prism-expensive-effect="true"]::before,
+html[data-prism-runtime-quality="minimal"]
   [data-prism-expensive-effect="true"]::after {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;

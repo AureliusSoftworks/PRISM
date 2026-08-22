@@ -5,6 +5,24 @@
   --companion-i: #b7e63a;
   --companion-s: #2fd3e3;
   --companion-m: #7b5cff;
+  /* Bubble surface. Dark is the base; the light overrides near the other
+     theme rules keep the same spectral identity on a bright canvas, so the
+     speaker labels never wash out the way flat cyan-on-white did. */
+  --companion-spectrum-p: var(--companion-p);
+  --companion-spectrum-r: var(--companion-r);
+  --companion-spectrum-i: var(--companion-i);
+  --companion-spectrum-s: var(--companion-s);
+  --companion-spectrum-m: var(--companion-m);
+  --companion-bubble-surface:
+    color-mix(in srgb, var(--bg-surface, #151311) 90%, transparent);
+  --companion-bubble-ink: var(--fg, #edf3f8);
+  --companion-bubble-edge: color-mix(in srgb, var(--companion-s) 25%, #ffffff16);
+  --companion-bubble-shadow:
+    0 18px 48px -24px #000d,
+    0 0 26px color-mix(in srgb, var(--companion-i) 8%, transparent),
+    inset 0 1px 0 #ffffff10;
+  --companion-bubble-eyebrow: color-mix(in srgb, var(--companion-s) 72%, #ffffff);
+  --companion-bubble-eyebrow-user: color-mix(in srgb, var(--companion-p) 70%, #ffffff);
   --prism-companion-anchor-z-index: 170;
   --prism-companion-open-z-index: 855;
   --prism-companion-wielding-z-index: 2147483200;
@@ -684,7 +702,11 @@
   left: calc(34px - var(--prism-refract-target-half-width, 0px));
 }
 
-.bubbleCloud { width: 100%; display: grid; gap: 9px; pointer-events: none; }
+/* The cloud always reads oldest to newest downward, in both docks. Age is
+   marked by depth rather than by a timer, so a long answer can never dim out
+   from under someone mid-sentence, and the render cap in PrismCompanion.tsx —
+   not an opacity fade — is what retires a spent turn. */
+.bubbleCloud { width: 100%; display: grid; gap: 10px; pointer-events: none; }
 
 .bubble,
 .thinking {
@@ -693,10 +715,9 @@
   max-height: min(44dvh, 430px);
   overflow: auto;
   padding: 12px 15px 13px;
-  border: 1px solid color-mix(in srgb, var(--companion-s) 25%, #ffffff16);
-  color: var(--fg, #edf3f8);
-  background: radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--companion-i) 7%, transparent), transparent 48%), color-mix(in srgb, var(--bg-surface, #151311) 90%, transparent);
-  box-shadow: 0 18px 48px -24px #000d, 0 0 26px color-mix(in srgb, var(--companion-i) 8%, transparent), inset 0 1px 0 #ffffff10;
+  border: 1px solid var(--companion-bubble-edge);
+  color: var(--companion-bubble-ink);
+  box-shadow: var(--companion-bubble-shadow);
   backdrop-filter: blur(18px) saturate(1.12);
   -webkit-backdrop-filter: blur(18px) saturate(1.12);
   pointer-events: auto;
@@ -713,17 +734,64 @@
 }
 
 .bubble[data-recent="true"] { animation: bubbleArrive 240ms ease-out both; }
-.bubble:not([data-recent="true"]) { animation: bubbleLife 34s cubic-bezier(.2,.72,.22,1) both; }
-.bubble[data-role="user"]:not([data-recent="true"]) { animation-duration: 18s; }
+/* The previous exchange steps back rather than expiring: still readable, and
+   fully restored the moment it is hovered or focused. Both roles recede
+   together, so an answer can never outlive the question that earned it. */
+.bubble:not([data-recent="true"]) {
+  opacity: .56;
+  filter: saturate(.7);
+  transform: scale(.985);
+  transition: opacity 260ms ease, filter 260ms ease, transform 260ms ease;
+}
+.bubble:not([data-recent="true"]):hover,
+.bubble:not([data-recent="true"]):focus-within {
+  opacity: 1;
+  filter: none;
+  transform: scale(1);
+}
 .thinking { animation: bubbleArrive 240ms ease-out both; }
 
-.bubble[data-role="assistant"], .thinking { justify-self: start; border-radius: 22px 22px 22px 7px; }
-.bubble[data-role="user"] { justify-self: end; border-radius: 22px 22px 7px 22px; border-color: #e978d740; }
+/* Refraction signature: one light in on the leading edge, the spectrum out.
+   The rail rides a background layer so it stays put while a tall answer
+   scrolls inside its own bubble. */
+.bubble[data-role="assistant"], .thinking {
+  justify-self: start;
+  border-radius: 22px 22px 22px 7px;
+  padding-left: 18px;
+  background:
+    linear-gradient(
+      180deg,
+      var(--companion-spectrum-p), var(--companion-spectrum-r),
+      var(--companion-spectrum-i), var(--companion-spectrum-s),
+      var(--companion-spectrum-m)
+    ) left center / 2px calc(100% - 26px) no-repeat,
+    radial-gradient(
+      circle at 12% 0%,
+      color-mix(in srgb, var(--companion-s) 9%, transparent),
+      transparent 52%
+    ),
+    var(--companion-bubble-surface);
+}
+.bubble[data-role="user"] {
+  justify-self: end;
+  border-radius: 22px 22px 7px 22px;
+  padding-right: 18px;
+  border-color: color-mix(in srgb, var(--companion-p) 32%, var(--companion-bubble-edge));
+  background:
+    linear-gradient(180deg, var(--companion-spectrum-m), var(--companion-spectrum-p))
+      right center / 2px calc(100% - 26px) no-repeat,
+    radial-gradient(
+      circle at 88% 0%,
+      color-mix(in srgb, var(--companion-p) 10%, transparent),
+      transparent 52%
+    ),
+    var(--companion-bubble-surface);
+}
 .bubbleHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 5px; }
-.bubbleHeader > span, .thinking > span { display: block; color: #8bdfffb8; font: 780 0.56rem/1.2 system-ui, sans-serif; letter-spacing: .09em; text-transform: uppercase; }
+.bubbleHeader > span, .thinking > span { display: block; color: var(--companion-bubble-eyebrow); font: 780 0.56rem/1.2 system-ui, sans-serif; letter-spacing: .09em; text-transform: uppercase; }
 .thinking > span { margin-bottom: 5px; }
 .bubble[data-role="user"] .bubbleHeader { flex-direction: row-reverse; }
-.bubble[data-role="user"] .bubbleHeader > span { color: #ee9ce0b8; text-align: right; }
+.bubble[data-role="user"] .bubbleHeader > span { color: var(--companion-bubble-eyebrow-user); text-align: right; }
 .copyButton {
   padding: 2px 6px;
   border: 1px solid #ffffff1c;
@@ -754,7 +822,25 @@
   outline: 2px solid white;
   outline-offset: 2px;
 }
-.thinking p { margin: 0; color: var(--fg-muted, #aaa4a0); font: italic .78rem/1.4 Georgia, serif; }
+.thinking p {
+  margin: 0;
+  font: italic .78rem/1.4 Georgia, serif;
+  color: var(--fg-muted, #aaa4a0);
+  background:
+    linear-gradient(
+      90deg,
+      var(--companion-spectrum-p), var(--companion-spectrum-r),
+      var(--companion-spectrum-i), var(--companion-spectrum-s),
+      var(--companion-spectrum-m), var(--companion-spectrum-p)
+    ) 0 0 / 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: refractShimmer 3.4s linear infinite;
+}
+/* Only surrender the solid colour where the clip is actually supported. */
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .thinking p { color: transparent; }
+}
 
 .markdown { overflow-wrap: anywhere; font: .8rem/1.55 Georgia, "Times New Roman", serif; }
 .markdown :where(p, ul, ol, blockquote, pre, table) { margin: 0 0 .7em; }
@@ -1140,18 +1226,18 @@
 .composer footer { display: flex; align-items: center; gap: 8px; }
 .synthesisRefractRow {
   width: 100%;
-  min-height: 34px;
+  display: grid;
+  gap: 8px;
+  padding: 2px 0 3px;
+  color: var(--fg, #edf3f8);
+}
+.synthesisRefractHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 2px 0;
-  color: var(--fg, #edf3f8);
+  gap: 10px;
 }
 .synthesisRefractIdentity {
-  display: flex;
-  align-items: center;
-  gap: 7px;
   min-width: 0;
   color: #9ceaff;
   font: 780 .56rem/1.25 system-ui, sans-serif;
@@ -1159,7 +1245,7 @@
   text-transform: uppercase;
 }
 .refractModelPicker {
-  flex: 0 1 144px;
+  width: 100%;
   min-width: 0;
 }
 .refractModelPicker > :global([data-provider]) {
@@ -1178,6 +1264,32 @@
   color: var(--fg);
   background: transparent;
   font: inherit;
+}
+.refractModelPicker :global([data-prism-model-picker-trigger="true"]) > :first-child {
+  display: none;
+}
+.refractModelPicker :global([data-prism-model-picker-trigger="true"]) > :nth-child(2) {
+  flex: 1 1 auto;
+  max-width: none;
+  text-align: left;
+}
+.synthesisRefractGuidance {
+  display: grid;
+  gap: 3px;
+}
+.synthesisRefractGuidance p {
+  margin: 0;
+  color: var(--fg-muted, #aaa4a0);
+  font: .55rem/1.4 system-ui, sans-serif;
+}
+.synthesisRefractGuidance .synthesisRefractPrivacy {
+  color: var(--fg-subtle, #77716d);
+}
+.synthesisRefractGuidance .synthesisRefractPrivacy[data-lane="local"] {
+  color: #86dbe9;
+}
+.synthesisRefractGuidance .synthesisRefractPrivacy[data-lane="online"] {
+  color: #d9b873;
 }
 .synthesisRecentRail {
   display: grid;
@@ -1226,6 +1338,10 @@
   font: .58rem/1.3 system-ui, sans-serif;
 }
 .refractLaneBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
   border: 1px solid #ffffff35;
   border-radius: 999px;
   padding: 3px 8px;
@@ -1234,6 +1350,10 @@
   font: 700 .5rem/1.2 system-ui, sans-serif;
   letter-spacing: .11em;
   text-transform: uppercase;
+}
+.refractLaneBadge strong {
+  color: inherit;
+  font: inherit;
 }
 .refractLaneBadge[data-lane="local"] {
   border-color: #4fd0e733;
@@ -1316,21 +1436,23 @@
 @keyframes bubbleArrive { from { opacity: 0; transform: translateY(7px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes speechPrepare { 50% { background-position: 100% 0; opacity: .6; } }
 @keyframes speechCursor { 50% { opacity: .3; } }
-@keyframes bubbleLife {
-  0% { opacity: 0; transform: translateY(7px) scale(.98); }
-  2%, 86% { opacity: 1; transform: translateY(0) scale(1); }
-  100% { opacity: 0; transform: translateY(-5px) scale(.99); filter: blur(3px); }
-}
-@keyframes bubbleReducedLife {
-  0%, 86% { opacity: 1; }
-  100% { opacity: 0; }
-}
+@keyframes refractShimmer { to { background-position: 220% 0; } }
 
 @media (prefers-reduced-motion: reduce) {
   .avatar::before, .orb, .bubble[data-recent="true"], .thinking, .composer,
+  .thinking p,
   .bubble[data-speech-preparing="true"] .markdown::after,
   .bubble[data-speaking="true"] .markdown::after { animation: none; }
-  .bubble:not([data-recent="true"]) { animation-name: bubbleReducedLife; }
+  /* The receded step stays, it just stops easing. */
+  .bubble:not([data-recent="true"]) { transition: none; }
+  /* Without the sweep the clip would freeze on one arbitrary slice of the
+     spectrum, so hand the label back its solid colour. */
+  .thinking p {
+    background: none;
+    -webkit-background-clip: border-box;
+    background-clip: border-box;
+    color: var(--companion-bubble-eyebrow);
+  }
   .anchor, .backdrop, .focusOrb, .orb { transition-duration: 1ms; }
   .anchor[data-refracting] .avatar { transition-duration: 1ms; }
   .anchor[data-chat-home-orb-returning="true"] {
@@ -1360,6 +1482,28 @@
 /* Light companion material: glass and caustics, never a dark modal wash.
    These selectors are deliberately theme-qualified so the dark presentation
    above remains the unchanged reference state. */
+/* The companion floats over light lanes too (Coffee, Home). Same spectrum,
+   inverted ground: without this the cyan and rose speaker labels sat at
+   near-zero contrast on a white table. */
+:global([data-theme="light"]) .anchor,
+:global(html[data-theme="light"]) .anchor {
+  --companion-spectrum-p: color-mix(in srgb, var(--companion-p) 62%, #2b0c1c);
+  --companion-spectrum-r: color-mix(in srgb, var(--companion-r) 48%, #3a2405);
+  --companion-spectrum-i: color-mix(in srgb, var(--companion-i) 42%, #1b2a05);
+  --companion-spectrum-s: color-mix(in srgb, var(--companion-s) 56%, #04303c);
+  --companion-spectrum-m: color-mix(in srgb, var(--companion-m) 74%, #150a3a);
+  --companion-bubble-surface:
+    color-mix(in srgb, #ffffff 93%, var(--companion-s) 7%);
+  --companion-bubble-ink: var(--fg, #16222e);
+  --companion-bubble-edge: color-mix(in srgb, var(--companion-s) 34%, #0b21351a);
+  --companion-bubble-shadow:
+    0 16px 40px -26px #0b213559,
+    0 0 22px color-mix(in srgb, var(--companion-s) 8%, transparent),
+    inset 0 1px 0 #ffffffd9;
+  --companion-bubble-eyebrow: color-mix(in srgb, var(--companion-s) 46%, #063441);
+  --companion-bubble-eyebrow-user: color-mix(in srgb, var(--companion-p) 44%, #3d1026);
+}
+
 :global([data-theme="light"]) .focusOrb {
   background: radial-gradient(
     circle,
@@ -1528,6 +1672,18 @@
   border-color: #8b6c21;
   color: #5b4b17;
   background: #ffe7ad77;
+}
+
+:global([data-theme="light"])
+  .synthesisRefractGuidance
+  .synthesisRefractPrivacy[data-lane="local"] {
+  color: #0b5f6d;
+}
+
+:global([data-theme="light"])
+  .synthesisRefractGuidance
+  .synthesisRefractPrivacy[data-lane="online"] {
+  color: #6b5318;
 }
 
 :global([data-theme="light"]) .markdown a,

@@ -26,6 +26,32 @@ import {
   samplePhosphorAlphaCells,
   thresholdPhosphorPixelAlpha,
 } from "./phosphorPixelRaster";
+import { PhosphorRasterSchedule } from "./phosphorRasterSchedule";
+
+/**
+ * Every canvas in this module exists only to be read back — as `getImageData`,
+ * or as a `toDataURL` mask. None of them is ever composited, so none of them
+ * gains anything from living in GPU memory, and living there costs a great
+ * deal: `getImageData` on a GPU-backed canvas has to flush the pipeline and
+ * pull the pixels back across the bus.
+ *
+ * Measured on a live five-seat Coffee table (production build, headed,
+ * 1400x948 @dpr2), where a mouth shape rasterizes several times a second:
+ *
+ *   Chromium   141–271 ms   per `getImageData` call
+ *   WebKit     201–587 ms   per call
+ *
+ * A single call at that cost drops 8–35 frames. `willReadFrequently` keeps the
+ * bitmap in CPU memory, which is what this code actually wants.
+ *
+ * Note this is why the same path measured as ~1 ms in earlier investigations:
+ * headless and background windows skip the readback entirely, so the stall is
+ * invisible unless the window is visible, focused, and GPU-composited.
+ */
+const PHOSPHOR_RASTER_CONTEXT_OPTIONS: CanvasRenderingContext2DSettings = {
+  alpha: true,
+  willReadFrequently: true,
+};
 
 const phosphorPixelMaskCache = new Map<string, string>();
 const PHOSPHOR_PIXEL_MASK_CACHE_LIMIT = 256;
@@ -44,7 +70,7 @@ function upscalePhosphorPixelCanvas(
   height: number,
   binaryAlpha = true,
 ): string | null {
-  const sourceContext = source.getContext("2d", { alpha: true });
+  const sourceContext = source.getContext("2d", PHOSPHOR_RASTER_CONTEXT_OPTIONS);
   if (!sourceContext) return null;
   if (binaryAlpha) {
     const sourceImage = sourceContext.getImageData(
@@ -60,7 +86,7 @@ function upscalePhosphorPixelCanvas(
   const output = document.createElement("canvas");
   output.width = width;
   output.height = height;
-  const outputContext = output.getContext("2d", { alpha: true });
+  const outputContext = output.getContext("2d", PHOSPHOR_RASTER_CONTEXT_OPTIONS);
   if (!outputContext) return null;
   outputContext.imageSmoothingEnabled = false;
   outputContext.clearRect(0, 0, width, height);
@@ -230,7 +256,7 @@ function rasterizeTextMask(
   const sourceCanvas = document.createElement("canvas");
   sourceCanvas.width = sourceWidth;
   sourceCanvas.height = sourceHeight;
-  const context = sourceCanvas.getContext("2d", { alpha: true });
+  const context = sourceCanvas.getContext("2d", PHOSPHOR_RASTER_CONTEXT_OPTIONS);
   if (!context) return null;
   context.clearRect(0, 0, sourceWidth, sourceHeight);
   context.fillStyle = "#ffffff";
@@ -267,7 +293,7 @@ function rasterizeTextMask(
   const outputCanvas = document.createElement("canvas");
   outputCanvas.width = canvasWidth;
   outputCanvas.height = canvasHeight;
-  const outputContext = outputCanvas.getContext("2d", { alpha: true });
+  const outputContext = outputCanvas.getContext("2d", PHOSPHOR_RASTER_CONTEXT_OPTIONS);
   if (!outputContext) return null;
   const outputImage = outputContext.createImageData(canvasWidth, canvasHeight);
   outputImage.data.set(
@@ -484,7 +510,7 @@ async function rasterizeSvgMask(
     const sourceCanvas = document.createElement("canvas");
     sourceCanvas.width = sourceWidth;
     sourceCanvas.height = sourceHeight;
-    const sourceContext = sourceCanvas.getContext("2d", { alpha: true });
+    const sourceContext = sourceCanvas.getContext("2d", PHOSPHOR_RASTER_CONTEXT_OPTIONS);
     if (!sourceContext) return null;
     sourceContext.imageSmoothingEnabled = true;
     sourceContext.drawImage(image, 0, 0, sourceWidth, sourceHeight);
@@ -506,7 +532,7 @@ async function rasterizeSvgMask(
     const logicalCanvas = document.createElement("canvas");
     logicalCanvas.width = logicalWidth;
     logicalCanvas.height = logicalHeight;
-    const logicalContext = logicalCanvas.getContext("2d", { alpha: true });
+    const logicalContext = logicalCanvas.getContext("2d", PHOSPHOR_RASTER_CONTEXT_OPTIONS);
     if (!logicalContext) return null;
     const logicalImage = logicalContext.createImageData(
       logicalWidth,
@@ -530,18 +556,48 @@ async function rasterizeSvgMask(
 export function PhosphorPixelSvgGlyph({
   children,
   className,
+  enabled = true,
 }: {
   children: ReactNode;
   className?: string;
+  /**
+   * Live multi-bot surfaces disable main-thread SVG-to-canvas readback. The
+   * authored SVG remains visible, so this trades only phosphor quantization
+   * for guaranteed interaction headroom.
+   */
+  enabled?: boolean;
 }): React.JSX.Element {
   const hostRef = useRef<HTMLSpanElement | null>(null);
   const [rasterUrl, setRasterUrl] = useState<string | null>(null);
+  // `children` is a ReactNode: a fresh identity on every render of whatever
+  // owns this glyph, so this effect re-runs constantly even when the drawing
+  // is byte-identical. Each run used to reach a deep `cloneNode` and a full
+  // `XMLSerializer` pass before the mask cache could be consulted, because the
+  // serialized markup *is* the cache key. On a five-seat Coffee table that was
+  // the single largest source of main-thread work — 155 of 271 scheduled
+  // frames in 25 seconds, each one forcing layout and re-serializing an SVG
+  // that had not changed.
+  //
+  // The scheduler below is deliberately not a MutationObserver: setting
+  // `rasterUrl` re-renders `children` inside the observed subtree, so watching
+  // for mutations feeds itself and React tears the tree down with "maximum
+  // update depth exceeded". Comparing the source's own markup has no such
+  // loop — reading `innerHTML` neither writes to the DOM nor schedules work.
+  const rasterScheduleRef = useRef<PhosphorRasterSchedule | null>(null);
+  if (rasterScheduleRef.current == null) {
+    rasterScheduleRef.current = new PhosphorRasterSchedule();
+  }
   useLayoutEffect(() => {
     const host = hostRef.current;
+    if (!enabled) {
+      queueMicrotask(() => setRasterUrl(null));
+      return;
+    }
     const svg = host?.querySelector("svg");
     if (!host || !svg) return;
     let cancelled = false;
     let frameId: number | null = null;
+    let cancelRasterSubscription: (() => void) | null = null;
     const render = (): void => {
       if (frameId !== null) cancelAnimationFrame(frameId);
       frameId = requestAnimationFrame(() => {
@@ -557,17 +613,30 @@ export function PhosphorPixelSvgGlyph({
             computedBorderBoxDimension(computed, "height", host.offsetHeight),
           ),
         );
+        // Cheapest sufficient identity for "would rasterizing produce the
+        // same mask?": the drawing itself plus the box it renders into.
+        const markup = svg.innerHTML;
         const presentationScale =
           canonicalPhosphorPresentationScaleForNode(host);
-        void rasterizeSvgMask(svg, width, height, presentationScale)
-          .then((nextRaster) => {
+        const rasterKey = [
+          markup,
+          width,
+          height,
+          presentationScale,
+        ].join(":");
+        cancelRasterSubscription?.();
+        cancelRasterSubscription = rasterScheduleRef.current?.request({
+          key: rasterKey,
+          rasterize: () =>
+            rasterizeSvgMask(svg, width, height, presentationScale),
+          commit: (nextRaster) => {
             if (!cancelled) {
               setRasterUrl((current) =>
                 current === nextRaster ? current : nextRaster,
               );
             }
-          })
-          .catch(() => {});
+          },
+        }) ?? null;
       });
     };
     render();
@@ -575,10 +644,11 @@ export function PhosphorPixelSvgGlyph({
     observer.observe(host);
     return () => {
       cancelled = true;
+      cancelRasterSubscription?.();
       observer.disconnect();
       if (frameId !== null) cancelAnimationFrame(frameId);
     };
-  }, [children]);
+  }, [children, enabled]);
 
   return (
     <span

@@ -12,7 +12,7 @@ describe("Coffee seat talking blink behavior", () => {
     assert.match(rendererSource, /blinkWhileTalking = true/);
     assert.match(
       rendererSource,
-      /const talkingPausesBlink = isTalking && !blinkWhileTalking;/,
+      /const talkingPausesBlink = effectiveTalking && !blinkWhileTalking;/,
     );
     assert.match(
       rendererSource,

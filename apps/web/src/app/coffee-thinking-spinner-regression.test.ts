@@ -90,6 +90,7 @@ test("Coffee thinking replaces the face with its authored spinner only", () => {
     pageSource,
     /const thinkingBotId = coffeeLiveSeatThinkingBotId\(\{/u,
   );
+  assert.match(pageSource, /playbackRecording:\s*coffeeReplayActive/u);
   assert.doesNotMatch(
     pageSource,
     /const showThinkingIndicator =[\s\S]{0,180}!userLineTyping/u,

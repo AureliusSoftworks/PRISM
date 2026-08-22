@@ -5,6 +5,7 @@ import { DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1, botVoiceTextureForPreset } from "@l
 import {
   VOICE_COMPLETED_OVERLAP_TAIL_MS,
   VOICE_LILT_DEPTH_CENTS,
+  PRISM_LIVE_VOICE_PROGRESS_INTERVAL_MS,
   beginVoicePlaybackProgress,
   buildVoiceDamageSchedule,
   estimateVoiceOutputLatencyMs,
@@ -72,6 +73,100 @@ describe("engine-agnostic voice effects", () => {
       1,
     );
     assert.equal(signalListenerReactionVoiceGain({}), 1);
+  });
+
+  it("ducks an active primary voice on the audio clock without stopping it", () => {
+    const source = readFileSync(new URL("./voiceEffects.ts", import.meta.url), "utf8");
+    const start = source.indexOf("export function scheduleRealtimeVoiceDuck");
+    const end = source.indexOf("export function stopReactionVoiceAudio", start);
+    const duck = source.slice(start, end);
+
+    assert.ok(start >= 0 && end > start);
+    assert.match(duck, /activeVoiceChannels\[args\.channel \?\? "primary"\]/u);
+    assert.match(duck, /holdMs = Math\.max\(0, Math\.min\(1_200/u);
+    assert.match(duck, /resumeFadeMs = Math\.max\([\s\S]{0,80}Math\.min\(320/u);
+    assert.match(duck, /linearRampToValueAtTime\(nominalGain \* duckGain/u);
+    assert.match(duck, /linearRampToValueAtTime\(nominalGain, resumeEndAt\)/u);
+    assert.doesNotMatch(duck, /stopRealtimeVoiceAudio|source\.stop|pause\(/u);
+  });
+
+  it("uses zero-copy worker PCM with media fallback and a 10 Hz lifecycle on live performance surfaces", () => {
+    const source = readFileSync(new URL("./voiceEffects.ts", import.meta.url), "utf8");
+    const workletStart = source.indexOf(
+      "async function playWorkletLivePerformanceVoice",
+    );
+    const mediaStart = source.indexOf(
+      "async function playLivePerformanceVoice",
+      workletStart,
+    );
+    const realtimeStart = source.indexOf(
+      "export async function playRealtimeVoiceBytes",
+      mediaStart,
+    );
+    const worklet = source.slice(workletStart, mediaStart);
+    const media = source.slice(mediaStart, realtimeStart);
+    const processor = readFileSync(
+      new URL(
+        "../../public/worklets/prism-live-voice-playback.js",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    assert.equal(PRISM_LIVE_VOICE_PROGRESS_INTERVAL_MS, 100);
+    assert.match(
+      source,
+      /document\.body\?\.dataset\.prismLivePerformanceActive === "true"/u,
+    );
+    assert.match(
+      source,
+      /livePerformanceTimer = window\.setInterval\([\s\S]{0,120}PRISM_LIVE_VOICE_PROGRESS_INTERVAL_MS/u,
+    );
+    assert.match(
+      source,
+      /if \(livePerformanceBudget\) \{[\s\S]{0,180}liveVoicePlaybackWorkletAvailable/u,
+    );
+    assert.match(source, /decodeLiveVoicePcmOwned\(args\.bytes\)/u);
+    assert.match(worklet, /new AudioWorkletNode\(/u);
+    assert.match(worklet, /node\.port\.postMessage\([\s\S]{0,500}channelBuffers/u);
+    assert.doesNotMatch(
+      worklet,
+      /new Blob|createMediaElementSource|context\.createBuffer\(/u,
+    );
+    assert.match(media, /new Blob\(\[args\.bytes\]/u);
+    assert.match(media, /context\.createMediaElementSource\(audio\)/u);
+    assert.match(media, /context\.createGain\(\)/u);
+    assert.match(media, /context\.createStereoPanner\(\)/u);
+    assert.doesNotMatch(
+      media,
+      /audio\.load\(\)/u,
+      "live voice cleanup must not force synchronous decoder teardown",
+    );
+    assert.doesNotMatch(
+      worklet,
+      /formantCorrection|analyzePrismPitchCorrection|connectRoomAcoustics|createVoiceLightMeter/u,
+    );
+    assert.match(
+      processor,
+      /registerProcessor\("prism-live-voice-playback"/u,
+    );
+    assert.match(processor, /this\.channels = message\.channels\.map/u);
+    assert.match(processor, /this\.sourcePosition \+= this\.sourceStep/u);
+    const ownedDecodeAt = source.indexOf(
+      "await decodeLiveVoicePcmOwned(args.bytes)",
+      realtimeStart,
+    );
+    const workletPlaybackAt = source.indexOf(
+      "await playWorkletLivePerformanceVoice",
+      ownedDecodeAt,
+    );
+    const liveMediaAt = source.indexOf(
+      "await playLivePerformanceVoice",
+      workletPlaybackAt,
+    );
+    assert.ok(ownedDecodeAt > realtimeStart);
+    assert.ok(workletPlaybackAt > ownedDecodeAt);
+    assert.ok(liveMediaAt > workletPlaybackAt);
   });
 
   it("uses the portable profile effect when a playback lane does not override it", () => {

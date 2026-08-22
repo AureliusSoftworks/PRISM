@@ -10,6 +10,7 @@ import {
 } from "./signalPersonaTemperament.ts";
 
 export const LISTENER_REACTION_PLAN_VERSION = 1 as const;
+export const SIGNAL_ORGANIC_BEAT_PLAN_VERSION = 1 as const;
 export const CROSSTALK_RECLAIM_PLAN_VERSION = 1 as const;
 export const SOCIAL_SILENCE_MARKER_VERSION = 1 as const;
 export const SOCIAL_SILENCE_CONTENT = "..." as const;
@@ -115,7 +116,12 @@ export type ListenerReactionSpokenCue =
   | "That's amazing."
   | "Yes."
   | "...The hell?"
-  | "What the fuck?";
+  | "What the fuck?"
+  | "Yeah, but— sorry, go ahead."
+  | "No, please— go on."
+  | "Okay, okay, I was— you first."
+  | "Wait, so— no, finish."
+  | "And— sorry. Go on.";
 export const BOT_CROSSTALK_INTERRUPTER_CUES = [
   "Wait a second.",
   "Hold on.",
@@ -123,6 +129,29 @@ export const BOT_CROSSTALK_INTERRUPTER_CUES = [
   "One second.",
   "No, hold on.",
 ] as const satisfies readonly ListenerReactionSpokenCue[];
+/**
+ * Deferential cut-ins: the interrupter starts an eager thought, catches
+ * themself, and hands the floor straight back. The interrupted speaker then
+ * reclaims and finishes the line ("as I was saying…") with no irritation
+ * charged on either side — the apology already paid for it.
+ */
+export const BOT_CROSSTALK_DEFERENTIAL_INTERRUPTER_CUES = [
+  "Yeah, but— sorry, go ahead.",
+  "No, please— go on.",
+  "Okay, okay, I was— you first.",
+  "Wait, so— no, finish.",
+  "And— sorry. Go on.",
+] as const satisfies readonly ListenerReactionSpokenCue[];
+/** Incomplete, non-committal cut-ins that cannot add or endorse a claim. */
+export const SIGNAL_ORGANIC_CUT_IN_CUES = [
+  "Yeah, but— sorry, go ahead.",
+  "No, please— go on.",
+  "Okay, okay, I was— you first.",
+  "Wait, so— no, finish.",
+  "And— sorry. Go on.",
+] as const satisfies readonly ListenerReactionSpokenCue[];
+/** Seeded share of bot cut-ins that yield the floor straight back. */
+export const BOT_CROSSTALK_INTERRUPTER_YIELD_CHANCE = 0.3;
 export const BOT_CROSSTALK_INTERRUPTED_SPEAKER_CUES = [
   "... okay, never mind, I guess.",
   "... right. Apparently we're moving on.",
@@ -148,6 +177,45 @@ export const LISTENER_REACTION_VOCAL_FOLEYS = [
 ] as const;
 export type ListenerReactionVocalFoley =
   (typeof LISTENER_REACTION_VOCAL_FOLEYS)[number];
+
+export type SignalOrganicBeatKind =
+  | "backchannel"
+  | "laughter"
+  | "vocal_foley"
+  | "cut_in_retreat";
+
+/**
+ * Public, replay-safe direction for one audible Signal listener beat. The
+ * listener reaction remains separate from the canonical transcript, and the
+ * current speaker always keeps the floor.
+ */
+export interface SignalOrganicBeatPlanV1 {
+  v: typeof SIGNAL_ORGANIC_BEAT_PLAN_VERSION;
+  name: "signalOrganicBeat";
+  provenance: "deterministic_listener_bank";
+  kind: SignalOrganicBeatKind;
+  actorBotId: string;
+  floorOwnerBotId: string;
+  canonicalImpact: "none";
+  prefetch: "episode_listener_kit";
+  timing: {
+    /** Mirrors the parent reaction target so alignment resolution is stable. */
+    startProgress: number;
+    /** Time both voices may remain audible before the primary voice ducks. */
+    overlapMs: number;
+    /** Bounded primary-voice duck. Zero means the primary voice continues. */
+    speakerDuckMs: number;
+    /** Short gain ramp when the primary voice returns. */
+    resumeFadeMs: number;
+  };
+}
+
+export interface ResolvedSignalOrganicBeatTimingV1 {
+  atMs: number;
+  speakerDuckAtMs: number | null;
+  speakerResumeAtMs: number | null;
+  resumeFadeMs: number;
+}
 
 export interface ListenerReactionPlanV1 {
   v: typeof LISTENER_REACTION_PLAN_VERSION;
@@ -180,6 +248,8 @@ export interface ListenerReactionPlanV1 {
   seed: string;
   /** Signal may temporarily favor the listener only while Auto camera is active. */
   cameraCutEligible: boolean;
+  /** Public system-authored rhythm metadata; never model or Producer direction. */
+  signalOrganicBeat?: SignalOrganicBeatPlanV1;
 }
 
 export interface ListenerReactionCharacterAlignment {
@@ -234,6 +304,11 @@ const SPOKEN_CUES = new Set<ListenerReactionSpokenCue>([
   "Yes.",
   "...The hell?",
   "What the fuck?",
+  "Yeah, but— sorry, go ahead.",
+  "No, please— go on.",
+  "Okay, okay, I was— you first.",
+  "Wait, so— no, finish.",
+  "And— sorry. Go on.",
 ]);
 
 export function normalizePowerProjectedReactionCueV1(
@@ -271,6 +346,78 @@ export function normalizeListenerReactionSpokenCue(
   return SPOKEN_CUES.has(value as ListenerReactionSpokenCue)
     ? value as ListenerReactionSpokenCue
     : null;
+}
+
+const SIGNAL_ORGANIC_BEAT_KINDS = new Set<SignalOrganicBeatKind>([
+  "backchannel",
+  "laughter",
+  "vocal_foley",
+  "cut_in_retreat",
+]);
+
+export function normalizeSignalOrganicBeatPlanV1(
+  value: unknown,
+): SignalOrganicBeatPlanV1 | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const timing = row.timing &&
+      typeof row.timing === "object" &&
+      !Array.isArray(row.timing)
+    ? row.timing as Record<string, unknown>
+    : null;
+  const actorBotId = boundedId(row.actorBotId);
+  const floorOwnerBotId = boundedId(row.floorOwnerBotId);
+  const kind = SIGNAL_ORGANIC_BEAT_KINDS.has(row.kind as SignalOrganicBeatKind)
+    ? row.kind as SignalOrganicBeatKind
+    : null;
+  const startProgress = Number(timing?.startProgress);
+  const overlapMs = Number(timing?.overlapMs);
+  const speakerDuckMs = Number(timing?.speakerDuckMs);
+  const resumeFadeMs = Number(timing?.resumeFadeMs);
+  if (
+    row.v !== SIGNAL_ORGANIC_BEAT_PLAN_VERSION ||
+    row.name !== "signalOrganicBeat" ||
+    row.provenance !== "deterministic_listener_bank" ||
+    !kind ||
+    !actorBotId ||
+    !floorOwnerBotId ||
+    actorBotId === floorOwnerBotId ||
+    row.canonicalImpact !== "none" ||
+    row.prefetch !== "episode_listener_kit" ||
+    !timing ||
+    !Number.isFinite(startProgress) ||
+    startProgress < 0.3 ||
+    startProgress > 0.9 ||
+    !Number.isFinite(overlapMs) ||
+    overlapMs < 0 ||
+    overlapMs > 400 ||
+    !Number.isFinite(speakerDuckMs) ||
+    speakerDuckMs < 0 ||
+    speakerDuckMs > 900 ||
+    !Number.isFinite(resumeFadeMs) ||
+    resumeFadeMs < 0 ||
+    resumeFadeMs > 240 ||
+    (kind === "cut_in_retreat" && speakerDuckMs === 0) ||
+    (kind !== "cut_in_retreat" && speakerDuckMs !== 0)
+  ) {
+    return null;
+  }
+  return {
+    v: SIGNAL_ORGANIC_BEAT_PLAN_VERSION,
+    name: "signalOrganicBeat",
+    provenance: "deterministic_listener_bank",
+    kind,
+    actorBotId,
+    floorOwnerBotId,
+    canonicalImpact: "none",
+    prefetch: "episode_listener_kit",
+    timing: {
+      startProgress: Number(startProgress.toFixed(3)),
+      overlapMs: Math.round(overlapMs),
+      speakerDuckMs: Math.round(speakerDuckMs),
+      resumeFadeMs: Math.round(resumeFadeMs),
+    },
+  };
 }
 
 /**
@@ -603,6 +750,10 @@ export function normalizeListenerReactionPlanV1(
       Number.isFinite(row.targetProgress)
     ? Math.max(0.3, Math.min(0.9, row.targetProgress))
     : null;
+  const savedSignalOrganicBeat = row.signalOrganicBeat !== undefined;
+  const signalOrganicBeat = normalizeSignalOrganicBeatPlanV1(
+    row.signalOrganicBeat,
+  );
   if (
     !speakerBotId ||
     !listenerBotId ||
@@ -612,7 +763,22 @@ export function normalizeListenerReactionPlanV1(
     !targetSource ||
     !visualAction ||
     targetProgress === null ||
-    typeof row.cameraCutEligible !== "boolean"
+    typeof row.cameraCutEligible !== "boolean" ||
+    (savedSignalOrganicBeat && !signalOrganicBeat) ||
+    (signalOrganicBeat &&
+      (signalOrganicBeat.actorBotId !== listenerBotId ||
+        signalOrganicBeat.floorOwnerBotId !== speakerBotId ||
+        Math.abs(signalOrganicBeat.timing.startProgress - targetProgress) >
+          0.001 ||
+        (signalOrganicBeat.kind === "cut_in_retreat"
+          ? !interjectionAttempt || floorOutcome !== "hold" ||
+            (!publicSpokenCue && !spokenCue)
+          : interjectionAttempt ||
+            (signalOrganicBeat.kind === "backchannel"
+              ? !publicSpokenCue && !spokenCue
+              : signalOrganicBeat.kind === "laughter"
+                ? vocalFoley !== "chuckles"
+                : vocalFoley === undefined || vocalFoley === "chuckles"))))
   ) {
     return null;
   }
@@ -652,6 +818,7 @@ export function normalizeListenerReactionPlanV1(
     targetProgress: Number(targetProgress.toFixed(3)),
     seed,
     cameraCutEligible: row.cameraCutEligible,
+    ...(signalOrganicBeat ? { signalOrganicBeat } : {}),
   };
 }
 
@@ -663,6 +830,27 @@ export function botCrosstalkInterrupterCueForSeed(
   seed: string,
 ): ListenerReactionSpokenCue {
   return choose(`${seed}:interrupter`, BOT_CROSSTALK_INTERRUPTER_CUES);
+}
+
+/**
+ * Whether this cut-in is a deferential one (fragment + apology + floor handed
+ * back). Pure seed math so the client's live cue and the server's persisted
+ * interruption metadata always agree.
+ */
+export function botCrosstalkInterrupterYieldsForSeed(seed: string): boolean {
+  return (
+    stableUnit(`${seed}:interrupter-yield`) <
+    BOT_CROSSTALK_INTERRUPTER_YIELD_CHANCE
+  );
+}
+
+export function botCrosstalkDeferentialInterrupterCueForSeed(
+  seed: string,
+): ListenerReactionSpokenCue {
+  return choose(
+    `${seed}:interrupter-deferential`,
+    BOT_CROSSTALK_DEFERENTIAL_INTERRUPTER_CUES,
+  );
 }
 
 export function botCrosstalkInterruptedSpeakerCueForSeed(
@@ -746,8 +934,16 @@ export function buildBotCrosstalkListenerReactionPlanV1(args: {
   interruptedSpeakerCue?: BotCrosstalkInterruptedSpeakerCue;
   interruptedSpeakerCuePlayback?: BotCrosstalkInterruptedSpeakerPlayback;
   includeInterruptedSpeakerCue?: boolean;
+  /** Coffee-only: allow the seeded deferential cut-in (fragment + apology,
+   * floor handed back to the interrupted speaker, no snark either way). */
+  allowInterrupterYield?: boolean;
 }): ListenerReactionPlanV1 {
-  const floorOutcome = args.floorOutcome ?? "yield";
+  const interrupterYields =
+    args.allowInterrupterYield === true &&
+    botCrosstalkInterrupterYieldsForSeed(args.seed);
+  const floorOutcome = interrupterYields
+    ? "reclaim"
+    : (args.floorOutcome ?? "yield");
   return {
     v: LISTENER_REACTION_PLAN_VERSION,
     name: "listenerReaction",
@@ -755,9 +951,10 @@ export function buildBotCrosstalkListenerReactionPlanV1(args: {
     listenerBotId: args.interrupterBotId,
     messageId: args.messageId,
     targetSource: "role",
-    visualAction: "lean_in",
-    spokenCue:
-      args.interrupterCue ?? botCrosstalkInterrupterCueForSeed(args.seed),
+    visualAction: interrupterYields ? "soft_smile" : "lean_in",
+    spokenCue: interrupterYields
+      ? botCrosstalkDeferentialInterrupterCueForSeed(args.seed)
+      : (args.interrupterCue ?? botCrosstalkInterrupterCueForSeed(args.seed)),
     interjectionAttempt: true,
     floorOutcome,
     ...(floorOutcome === "yield" && args.includeInterruptedSpeakerCue !== false
@@ -785,36 +982,57 @@ function signalVisualAction(
   seed: string,
   mood: VoiceDeliveryMood,
   tensionLevel: number,
+  recentActions: readonly ListenerReactionVisualAction[] = [],
 ): ListenerReactionVisualAction {
+  const fresh = (values: readonly ListenerReactionVisualAction[]) => {
+    const recent = new Set(recentActions.slice(-2));
+    const candidates = values.filter((value) => !recent.has(value));
+    return candidates.length > 0 ? candidates : values;
+  };
   if (tensionLevel >= 2 || mood === "strained") {
-    return choose(`${seed}:visual:guarded`, ["head_tilt", "thoughtful_hmm"] as const);
+    return choose(
+      `${seed}:visual:guarded`,
+      fresh(["head_tilt", "thoughtful_hmm"] as const),
+    );
   }
   if (mood === "warm" || mood === "joyful") {
-    return choose(`${seed}:visual:warm`, ["nod", "soft_smile", "lean_in"] as const);
+    return choose(
+      `${seed}:visual:warm`,
+      fresh(["nod", "soft_smile", "lean_in"] as const),
+    );
   }
-  return choose(`${seed}:visual`, ["nod", "lean_in", "head_tilt"] as const);
+  return choose(
+    `${seed}:visual`,
+    fresh(["nod", "lean_in", "head_tilt"] as const),
+  );
 }
 
 function signalVocalFoley(
   seed: string,
   mood: VoiceDeliveryMood,
   tensionLevel: number,
+  recentFoleys: readonly ListenerReactionVocalFoley[] = [],
 ): ListenerReactionVocalFoley {
+  const fresh = (values: readonly ListenerReactionVocalFoley[]) => {
+    const recent = new Set(recentFoleys.slice(-2));
+    const candidates = values.filter((value) => !recent.has(value));
+    return candidates.length > 0 ? candidates : values;
+  };
   if (tensionLevel >= 2 || mood === "strained") {
     return choose(
       `${seed}:foley:strained`,
-      ["exhales", "clears throat", "coughs"] as const,
+      fresh(["exhales", "clears throat", "coughs"] as const),
     );
   }
   if (mood === "warm" || mood === "joyful") {
     return choose(
       `${seed}:foley:warm`,
-      ["chuckles", "sighs", "exhales"] as const,
+      fresh(["chuckles", "sighs", "exhales"] as const),
     );
   }
   return choose(
     `${seed}:foley`,
-    ["clears throat", "coughs", "sighs", "exhales"] as const,
+    fresh(["clears throat", "coughs", "sighs", "exhales"] as const),
   );
 }
 
@@ -948,7 +1166,18 @@ export function signalListenerReactionPlanForPlaybackV1(args: {
     context?.segment ?? "interview",
   );
   const { vocalFoley: _omit, ...rest } = args.plan;
-  return { ...rest, spokenCue };
+  return {
+    ...rest,
+    spokenCue,
+    ...(rest.signalOrganicBeat
+      ? {
+          signalOrganicBeat: {
+            ...rest.signalOrganicBeat,
+            kind: "backchannel" as const,
+          },
+        }
+      : {}),
+  };
 }
 
 export function signalListenerSpokenBankFor(args: {
@@ -1027,7 +1256,13 @@ export function buildSignalListenerReactionSpokenKitV1(args: {
     tensionLevel: 2,
     segment: "interview",
   });
-  return [...new Set([...calm, ...tense])];
+  // Cut-ins are selected after the primary line exists, but their audio can be
+  // prepared at episode load because the public cue bank is finite.
+  return [...new Set([
+    ...calm,
+    ...tense,
+    ...SIGNAL_ORGANIC_CUT_IN_CUES,
+  ])];
 }
 
 export interface SignalListenerReactionKitV1 {
@@ -1103,6 +1338,63 @@ export function signalListenerBackchannelStyleFor(
     : temperament;
 }
 
+function signalCutInCue(
+  seed: string,
+  listenerPersona: string | null | undefined,
+  recentSpokenCues: readonly ListenerReactionSpokenCue[],
+): ListenerReactionSpokenCue {
+  const style = signalListenerBackchannelStyleFor(listenerPersona);
+  const bank: readonly ListenerReactionSpokenCue[] =
+    style === "commanding" || style === "analytical" || style === "edgy"
+      ? [
+          "Yeah, but— sorry, go ahead.",
+          "Wait, so— no, finish.",
+          "And— sorry. Go on.",
+        ]
+      : style === "warm" || style === "contemplative" || style === "literary"
+        ? [
+            "No, please— go on.",
+            "Okay, okay, I was— you first.",
+            "Wait, so— no, finish.",
+          ]
+        : SIGNAL_ORGANIC_CUT_IN_CUES;
+  const recent = new Set(recentSpokenCues.slice(-3));
+  const fresh = bank.filter((cue) => !recent.has(cue));
+  return choose(`${seed}:organic-cut-in`, fresh.length > 0 ? fresh : bank);
+}
+
+function signalOrganicBeatPlan(args: {
+  seed: string;
+  kind: SignalOrganicBeatKind;
+  speakerBotId: string;
+  listenerBotId: string;
+  targetProgress: number;
+}): SignalOrganicBeatPlanV1 {
+  const cutIn = args.kind === "cut_in_retreat";
+  return {
+    v: SIGNAL_ORGANIC_BEAT_PLAN_VERSION,
+    name: "signalOrganicBeat",
+    provenance: "deterministic_listener_bank",
+    kind: args.kind,
+    actorBotId: args.listenerBotId,
+    floorOwnerBotId: args.speakerBotId,
+    canonicalImpact: "none",
+    prefetch: "episode_listener_kit",
+    timing: {
+      startProgress: Number(args.targetProgress.toFixed(3)),
+      overlapMs: cutIn
+        ? 140 + Math.round(stableUnit(`${args.seed}:overlap`) * 120)
+        : 0,
+      speakerDuckMs: cutIn
+        ? 420 + Math.round(stableUnit(`${args.seed}:duck`) * 300)
+        : 0,
+      resumeFadeMs: cutIn
+        ? 120 + Math.round(stableUnit(`${args.seed}:resume`) * 80)
+        : 0,
+    },
+  };
+}
+
 export function buildSignalListenerReactionPlanV1(args: {
   episodeId: string;
   messageId: string;
@@ -1116,10 +1408,17 @@ export function buildSignalListenerReactionPlanV1(args: {
   minimumTargetProgress?: number;
   /** Recent saved cues keep conversational acknowledgements from looping. */
   recentSpokenCues?: readonly ListenerReactionSpokenCue[];
+  /** Recent saved plans rotate gesture, modality, Foley, and cut-in cadence. */
+  recentPlans?: readonly ListenerReactionPlanV1[];
   /** Authored listener identity used only to select a bounded cue bank. */
   listenerPersona?: string | null;
 }): ListenerReactionPlanV1 | null {
-  if (!args.messageId || !args.speakerBotId || !args.listenerBotId) return null;
+  if (
+    !args.messageId ||
+    !args.speakerBotId ||
+    !args.listenerBotId ||
+    args.speakerBotId === args.listenerBotId
+  ) return null;
   const seed = [
     "signal-listener-v1",
     args.episodeId,
@@ -1143,26 +1442,67 @@ export function buildSignalListenerReactionPlanV1(args: {
   const audible =
     args.segment !== "closing" &&
     stableUnit(`${seed}:audio-roll`) < audioChance;
-  const spokenCue =
-    audible && stableUnit(`${seed}:spoken-roll`) < SIGNAL_SPOKEN_BACKCHANNEL_CHANCE
-      ? signalSpokenBackchannel(
+  const recentPlans = args.recentPlans ?? [];
+  const recentSpokenCues = [
+    ...(args.recentSpokenCues ?? []),
+    ...recentPlans.flatMap((plan) => plan.spokenCue ? [plan.spokenCue] : []),
+  ];
+  const recentFoleys = recentPlans.flatMap((plan) =>
+    plan.vocalFoley ? [plan.vocalFoley] : []
+  );
+  const recentVisualActions = recentPlans.map((plan) => plan.visualAction);
+  const previousAudible = [...recentPlans].reverse().find((plan) =>
+    Boolean(listenerReactionSpokenTextV1(plan) || plan.vocalFoley)
+  );
+  const cutInChance = tensionLevel >= 2
+    ? 0.16
+    : args.listenerRole === "guest"
+      ? 0.12
+      : 0.09;
+  const cutIn = audible &&
+    args.segment === "interview" &&
+    !recentPlans.slice(-3).some((plan) => plan.interjectionAttempt) &&
+    stableUnit(`${seed}:cut-in-roll`) < cutInChance;
+  const shouldSpeak = audible &&
+    (cutIn ||
+      (previousAudible?.spokenCue || previousAudible?.publicSpokenCue
+        ? false
+        : previousAudible?.vocalFoley
+          ? true
+          : stableUnit(`${seed}:spoken-roll`) <
+            SIGNAL_SPOKEN_BACKCHANNEL_CHANCE));
+  const spokenCue = shouldSpeak
+    ? cutIn
+      ? signalCutInCue(seed, args.listenerPersona, recentSpokenCues)
+      : signalSpokenBackchannel(
           seed,
           args.mood,
           tensionLevel,
-          args.recentSpokenCues ?? [],
+          recentSpokenCues,
           args.listenerPersona,
           args.segment,
         )
-      : undefined;
-  const vocalFoley =
-    audible && !spokenCue
-      ? signalVocalFoley(seed, args.mood, tensionLevel)
-      : undefined;
+    : undefined;
+  const vocalFoley = audible && !spokenCue
+    ? signalVocalFoley(seed, args.mood, tensionLevel, recentFoleys)
+    : undefined;
   const minimumTargetProgress =
     typeof args.minimumTargetProgress === "number" &&
     Number.isFinite(args.minimumTargetProgress)
       ? Math.max(0.3, Math.min(0.9, args.minimumTargetProgress))
       : 0.3;
+  const plannedTargetProgress = Number(
+    Math.max(targetProgress(seed), minimumTargetProgress).toFixed(3),
+  );
+  const organicBeatKind: SignalOrganicBeatKind | null = cutIn
+    ? "cut_in_retreat"
+    : spokenCue
+      ? "backchannel"
+      : vocalFoley === "chuckles"
+        ? "laughter"
+        : vocalFoley
+          ? "vocal_foley"
+          : null;
   return {
     v: LISTENER_REACTION_PLAN_VERSION,
     name: "listenerReaction",
@@ -1170,13 +1510,32 @@ export function buildSignalListenerReactionPlanV1(args: {
     listenerBotId: args.listenerBotId,
     messageId: args.messageId,
     targetSource: "role",
-    visualAction: signalVisualAction(seed, args.mood, args.tensionLevel),
+    visualAction: signalVisualAction(
+      seed,
+      args.mood,
+      args.tensionLevel,
+      recentVisualActions,
+    ),
     ...(spokenCue ? { spokenCue } : {}),
     ...(vocalFoley ? { vocalFoley } : {}),
-    targetProgress: Math.max(targetProgress(seed), minimumTargetProgress),
+    ...(cutIn
+      ? { interjectionAttempt: true as const, floorOutcome: "hold" as const }
+      : {}),
+    targetProgress: plannedTargetProgress,
     seed,
     cameraCutEligible:
       stableUnit(`${seed}:camera-roll`) < 0.12,
+    ...(organicBeatKind
+      ? {
+          signalOrganicBeat: signalOrganicBeatPlan({
+            seed,
+            kind: organicBeatKind,
+            speakerBotId: args.speakerBotId,
+            listenerBotId: args.listenerBotId,
+            targetProgress: plannedTargetProgress,
+          }),
+        }
+      : {}),
   };
 }
 
@@ -1406,6 +1765,45 @@ export function resolveListenerReactionAtMs(args: {
     return atMs >= minimumMs && atMs <= maximumMs ? [atMs] : [];
   });
   return Math.round(nearestCandidate(punctuationCandidates, targetMs) ?? targetMs);
+}
+
+/** Resolve saved relative Signal direction against the final TTS clock. */
+export function resolveSignalOrganicBeatTimingV1(args: {
+  plan: SignalOrganicBeatPlanV1;
+  text: string;
+  durationMs: number;
+  alignment?: ListenerReactionCharacterAlignment | null;
+}): ResolvedSignalOrganicBeatTimingV1 | null {
+  const plan = normalizeSignalOrganicBeatPlanV1(args.plan);
+  if (!plan) return null;
+  const durationMs = Math.max(1, Math.round(args.durationMs));
+  const atMs = resolveListenerReactionAtMs({
+    text: args.text,
+    durationMs,
+    targetProgress: plan.timing.startProgress,
+    alignment: args.alignment,
+  });
+  if (plan.kind !== "cut_in_retreat") {
+    return {
+      atMs,
+      speakerDuckAtMs: null,
+      speakerResumeAtMs: null,
+      resumeFadeMs: 0,
+    };
+  }
+  const speakerDuckAtMs = Math.min(
+    durationMs,
+    atMs + plan.timing.overlapMs,
+  );
+  return {
+    atMs,
+    speakerDuckAtMs,
+    speakerResumeAtMs: Math.min(
+      durationMs,
+      speakerDuckAtMs + plan.timing.speakerDuckMs,
+    ),
+    resumeFadeMs: plan.timing.resumeFadeMs,
+  };
 }
 
 export function listenerReactionActionLabel(

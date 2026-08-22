@@ -26,11 +26,13 @@ const GRANDFATHERED_NATIVE_DIALOGS: ReadonlyArray<{
   // Reversible today: story.session.delete is undo:"quarantine". Becomes
   // `undo` on migration.
   { file: "page.tsx", copy: "${session.title}", count: 1 },
-  // Reversible today: the generation snapshot ref already exists.
+  // Reversible today: the generation snapshot ref already exists. The close
+  // control and locked wordmark navigation are two entry points to the same
+  // cancellation operation and intentionally share this copy.
   {
     file: "page.tsx",
     copy: "Cancel this in-flight bot draft and retu",
-    count: 1,
+    count: 2,
   },
   {
     file: "page.tsx",

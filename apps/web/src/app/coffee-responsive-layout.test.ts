@@ -26,6 +26,43 @@ test("first-person Coffee fills the stage with a bottom-anchored table and narro
   assert.match(css, /--coffee-canvas-y:\s*clamp\(-70px,\s*-6vh,\s*-42px\)/);
 });
 
+test("desktop topic Coffee keeps the setup surface inside the seating envelope", () => {
+  assert.match(
+    css,
+    /\.coffeeStage\[data-phase="topic"\] \.coffeeTableGlow\s*\{[\s\S]*?width:\s*min\(76%,\s*520px\);/,
+  );
+  assert.match(
+    css,
+    /\.coffeeStage\[data-phase="topic"\] \.coffeeTableDisk\s*\{[\s\S]*?width:\s*min\(56vw,\s*500px\);[\s\S]*?max-width:\s*calc\(100% - 64px\);/,
+  );
+  assert.match(
+    css,
+    /\.coffeeStage\[data-phase="topic"\] \.coffeeTableFocalColumn\s*\{[\s\S]*?width:\s*min\(56vw,\s*500px\);[\s\S]*?max-width:\s*calc\(100% - 64px\);/,
+  );
+});
+
+test("topic selection keeps invited participants offstage until arrival", () => {
+  assert.match(
+    pageSource,
+    /conversationActive &&\s*!coffeeReplayActive &&\s*coffeeSessionPhase === "topic"\s*\) \{\s*return false;/,
+  );
+  assert.match(
+    pageSource,
+    /coffeeSessionPhase === "topic"\s*\? `\$\{coffeeSelectedBotIds\.length \|\| coffeeActiveBotIds\.length\} invited`/,
+  );
+});
+
+test("topic suggestions stay centered when wider than the focal column", () => {
+  assert.match(
+    css,
+    /\.coffeeTopicPickerWrap\s*\{[\s\S]*?align-items:\s*center;[\s\S]*?align-self:\s*center;[\s\S]*?width:\s*min\(560px,\s*86vw\);[\s\S]*?margin:\s*0;/,
+  );
+  assert.doesNotMatch(
+    css,
+    /\.coffeeTopicPickerWrap\s*\{[^}]*margin:\s*0 auto;/,
+  );
+});
+
 test("three-seat first-person Coffee keeps its head avatar below the stage edge", () => {
   assert.match(
     css,
@@ -35,6 +72,13 @@ test("three-seat first-person Coffee keeps its head avatar below the stage edge"
     css,
     /\[data-seat-count="5"\]\[data-layout-seat="0"\]\s*\{\s*left:\s*50%;\s*top:\s*calc\(45% - var\(--coffee-experimental-seat-lift\)\);/,
     "the established five-seat head position should remain unchanged",
+  );
+});
+
+test("three-seat third-person Coffee keeps its upper nameplate clear of live copy", () => {
+  assert.match(
+    css,
+    /\.coffeeStage\[data-phase="arriving"\]\[data-autoplay-dock="true"\][\s\S]*?:is\([\s\S]*?\.coffeeSeat,[\s\S]*?\.coffeeSeatActionAnchor[\s\S]*?\)\[data-seat-count="3"\]\[data-layout-seat="0"\][\s\S]*?--coffee-seat-offset-y:\s*-22px\s*!important;/u,
   );
 });
 
@@ -86,7 +130,11 @@ test("Coffee locks live sessions to the available workspace instead of scrolling
   );
   assert.match(
     pageSource,
-    /useLayoutEffect\(\(\) => \{[\s\S]*?const workspace = coffeeWorkspaceRef\.current;[\s\S]*?workspace\.scrollTop = 0;[\s\S]*?window\.requestAnimationFrame\(resetWorkspaceScroll\);[\s\S]*?\}, \[coffeeConversation\?\.id, coffeeReplayActive, coffeeSessionPhase\]\);/,
+    /useEffect\(\(\) => \{[\s\S]*?const workspace = coffeeWorkspaceRef\.current;[\s\S]*?workspace\.scrollTop = 0;[\s\S]*?window\.requestAnimationFrame\(resetWorkspaceScroll\);[\s\S]*?\}, \[coffeeConversation\?\.id, coffeeReplayActive, coffeeSessionPhase\]\);/,
+  );
+  assert.match(
+    pageSource,
+    /The picker does not need transcript auto-follow[\s\S]*?if \(!coffeeConversation\) return;[\s\S]*?coffeeCenterMessageScrollRef\.current/,
   );
   assert.match(
     pageSource,

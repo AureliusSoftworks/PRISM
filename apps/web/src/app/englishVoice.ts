@@ -26,6 +26,7 @@ import {
   playPreSpeechBreath,
   playRealtimeVoiceBytes,
   prepareRealtimeVoiceAudio,
+  prismLiveVoicePerformanceBudgetActive,
   releaseRealtimeVoiceAudio,
   stopRealtimeVoiceAudio,
   voiceReleaseGainAt,
@@ -153,6 +154,22 @@ export function readEnglishVoiceResolvedSpeechprint(
 }
 
 function decodedBase64Bytes(value: string): ArrayBuffer {
+  // Current Chromium/WebKit can decode directly in native code. Signal's
+  // streamed WAV chunks are large enough that the legacy atob + per-byte JS
+  // loop can stall the renderer (and therefore native producer input) exactly
+  // when a prepared voice response arrives.
+  const nativeFromBase64 = (
+    Uint8Array as typeof Uint8Array & {
+      fromBase64?: (encoded: string) => Uint8Array;
+    }
+  ).fromBase64;
+  if (typeof nativeFromBase64 === "function") {
+    const bytes = nativeFromBase64(value);
+    return bytes.buffer.slice(
+      bytes.byteOffset,
+      bytes.byteOffset + bytes.byteLength,
+    ) as ArrayBuffer;
+  }
   if (typeof atob === "function") {
     const binary = atob(value);
     const bytes = new Uint8Array(binary.length);
@@ -169,15 +186,18 @@ function decodedBase64Bytes(value: string): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 }
 
-export function parseEnglishVoiceWaveStreamChunk(
-  line: string,
+function parseEnglishVoiceWaveStreamChunkPayload(
+  payload: Record<string, unknown>,
+  binaryAudio?: ArrayBuffer,
 ): EnglishVoiceWaveStreamChunk {
-  const payload = JSON.parse(line) as Record<string, unknown>;
   const index = Number(payload.index);
   const characterCount = Number(payload.characterCount);
   const vocalAction = payload.kind === "vocal-action";
   const audioBase64 =
     typeof payload.audioBase64 === "string" ? payload.audioBase64.trim() : "";
+  const bytes =
+    binaryAudio ??
+    (audioBase64 ? decodedBase64Bytes(audioBase64) : new ArrayBuffer(0));
   const action =
     vocalAction &&
     typeof payload.action === "string" &&
@@ -189,7 +209,7 @@ export function parseEnglishVoiceWaveStreamChunk(
     index < 0 ||
     !Number.isFinite(characterCount) ||
     characterCount < 0 ||
-    (vocalAction ? !action : characterCount <= 0 || !audioBase64)
+    (vocalAction ? !action : characterCount <= 0 || bytes.byteLength === 0)
   ) {
     throw new Error("Local voice stream returned an invalid audio chunk.");
   }
@@ -197,7 +217,7 @@ export function parseEnglishVoiceWaveStreamChunk(
     index,
     characterCount,
     text: typeof payload.text === "string" ? payload.text : null,
-    bytes: audioBase64 ? decodedBase64Bytes(audioBase64) : new ArrayBuffer(0),
+    bytes,
     kind: vocalAction ? "vocal-action" : "speech",
     action,
     modifiers: Array.isArray(payload.modifiers)
@@ -214,6 +234,14 @@ export function parseEnglishVoiceWaveStreamChunk(
     sourceEnd:
       Number.isInteger(payload.sourceEnd) ? Number(payload.sourceEnd) : null,
   };
+}
+
+export function parseEnglishVoiceWaveStreamChunk(
+  line: string,
+): EnglishVoiceWaveStreamChunk {
+  return parseEnglishVoiceWaveStreamChunkPayload(
+    JSON.parse(line) as Record<string, unknown>,
+  );
 }
 
 function normalizedAlignment(value: unknown): EnglishVoiceCharacterAlignment | null {
@@ -441,6 +469,16 @@ let generation = 0;
 let queue: Promise<void> = Promise.resolve();
 
 export async function prepareEnglishVoice(): Promise<void> {
+  // Coffee and Signal always use the worker-decoded Web Audio path. Avoid
+  // creating and playing a silent HTMLMediaElement on every send: even silent
+  // media lifecycle work can stall Chromium's compositor on a live stage.
+  if (
+    prismLiveVoicePerformanceBudgetActive() &&
+    (await prepareRealtimeVoiceAudio({ loadRealtimeProcessing: false }))
+  ) {
+    releasePreparedMedia();
+    return;
+  }
   // Keep the media element authorized by the send gesture when a later
   // render prepares playback outside that gesture (notably Safari PWAs).
   if (preparedMedia) {
@@ -736,15 +774,19 @@ export function englishVoiceResponseSupportsChunkedStreaming(
   response: Pick<Response, "body" | "headers">,
 ): boolean {
   const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  const streamVersion = response.headers.get("x-prism-voice-stream");
   return (
     response.body !== null &&
-    contentType.includes("application/x-ndjson") &&
-    (response.headers.get("x-prism-voice-stream") === "wav-chunks-v1" ||
-      response.headers.get("x-prism-voice-stream") === "wav-chunks-v2")
+    ((contentType.includes("application/x-ndjson") &&
+      (streamVersion === "wav-chunks-v1" ||
+        streamVersion === "wav-chunks-v2")) ||
+      (contentType.includes("application/x-prism-voice-chunks") &&
+        (streamVersion === "wav-chunks-binary-v1" ||
+          streamVersion === "wav-chunks-binary-v2")))
   );
 }
 
-export async function* readEnglishVoiceWaveStream(
+async function* readEnglishVoiceWaveNdjsonStream(
   response: Response,
 ): AsyncGenerator<EnglishVoiceWaveStreamChunk> {
   const reader = response.body?.getReader();
@@ -770,6 +812,134 @@ export async function* readEnglishVoiceWaveStream(
   } finally {
     reader.releaseLock();
   }
+}
+
+const ENGLISH_VOICE_BINARY_METADATA_MAX_BYTES = 64 * 1024;
+const ENGLISH_VOICE_BINARY_AUDIO_MAX_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Read Signal's compact framed stream without converting WAV bytes to base64
+ * or asking JSON.parse to materialize a multi-hundred-kilobyte string on the
+ * renderer thread. Network chunks may split any frame boundary.
+ */
+async function* readEnglishVoiceWaveBinaryStream(
+  response: Response,
+): AsyncGenerator<EnglishVoiceWaveStreamChunk> {
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("Local voice stream returned no audio.");
+  const decoder = new TextDecoder();
+  const queued: Uint8Array[] = [];
+  let queuedOffset = 0;
+  let queuedBytes = 0;
+  let frameLengths: { metadata: number; audio: number } | null = null;
+  let frameMetadata: Record<string, unknown> | null = null;
+
+  const push = (bytes: Uint8Array): void => {
+    if (bytes.byteLength === 0) return;
+    queued.push(bytes);
+    queuedBytes += bytes.byteLength;
+  };
+  const readExact = (length: number): Uint8Array | null => {
+    if (length === 0) return new Uint8Array(0);
+    if (queuedBytes < length) return null;
+    const first = queued[0]!;
+    const firstAvailable = first.byteLength - queuedOffset;
+    // The API deliberately writes header, metadata, and WAV as separate
+    // chunks. Preserve the browser-owned WAV buffer when that boundary reaches
+    // the stream intact; copying an entire voice clause here blocks input and
+    // animation at the exact moment audio is ready to begin.
+    if (
+      queuedOffset === 0 &&
+      firstAvailable === length &&
+      first.byteOffset === 0 &&
+      first.byteLength === first.buffer.byteLength
+    ) {
+      queued.shift();
+      queuedBytes -= length;
+      return first;
+    }
+    const output = new Uint8Array(length);
+    let written = 0;
+    while (written < length) {
+      const current = queued[0]!;
+      const available = current.byteLength - queuedOffset;
+      const count = Math.min(available, length - written);
+      output.set(
+        current.subarray(queuedOffset, queuedOffset + count),
+        written,
+      );
+      written += count;
+      queuedOffset += count;
+      queuedBytes -= count;
+      if (queuedOffset === current.byteLength) {
+        queued.shift();
+        queuedOffset = 0;
+      }
+    }
+    return output;
+  };
+
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      push(next.value);
+      while (true) {
+        if (!frameLengths) {
+          const header = readExact(8);
+          if (!header) break;
+          const view = new DataView(
+            header.buffer,
+            header.byteOffset,
+            header.byteLength,
+          );
+          const metadata = view.getUint32(0, false);
+          const audio = view.getUint32(4, false);
+          if (
+            metadata <= 0 ||
+            metadata > ENGLISH_VOICE_BINARY_METADATA_MAX_BYTES ||
+            audio > ENGLISH_VOICE_BINARY_AUDIO_MAX_BYTES
+          ) {
+            throw new Error("Local voice stream returned an invalid frame.");
+          }
+          frameLengths = { metadata, audio };
+        }
+        if (!frameMetadata) {
+          const metadataBytes = readExact(frameLengths.metadata);
+          if (!metadataBytes) break;
+          const parsed = JSON.parse(decoder.decode(metadataBytes)) as unknown;
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            throw new Error("Local voice stream returned invalid metadata.");
+          }
+          frameMetadata = parsed as Record<string, unknown>;
+        }
+        const audioBytes = readExact(frameLengths.audio);
+        if (!audioBytes) break;
+        yield parseEnglishVoiceWaveStreamChunkPayload(
+          frameMetadata,
+          audioBytes.buffer as ArrayBuffer,
+        );
+        frameLengths = null;
+        frameMetadata = null;
+      }
+    }
+    if (queuedBytes > 0 || frameLengths || frameMetadata) {
+      throw new Error("Local voice stream ended inside an audio frame.");
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+export async function* readEnglishVoiceWaveStream(
+  response: Response,
+): AsyncGenerator<EnglishVoiceWaveStreamChunk> {
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  if (contentType.includes("application/x-prism-voice-chunks")) {
+    yield* readEnglishVoiceWaveBinaryStream(response);
+    return;
+  }
+  yield* readEnglishVoiceWaveNdjsonStream(response);
 }
 
 async function appendEnglishStreamChunk(

@@ -5,6 +5,7 @@ import {
   signalCompactThinkingNoticeAt,
   signalGenerationThinkingRole,
   signalPresentedThinkingRole,
+  signalStageThinkingRole,
   signalThinkingPresentationEndReason,
 } from "./signalThinkingPresentation.ts";
 
@@ -148,6 +149,25 @@ describe("Signal thinking presentation", () => {
       signalPresentedThinkingRole({
         ...base,
         producerGuestSipActive: true,
+      }),
+      null,
+    );
+  });
+
+  it("keeps the live face thinking while its generated line is synthesizing", () => {
+    assert.equal(
+      signalStageThinkingRole({
+        presentedThinkingRole: null,
+        voicePreparationPending: true,
+        voicePreparationRole: "host",
+      }),
+      "host",
+    );
+    assert.equal(
+      signalStageThinkingRole({
+        presentedThinkingRole: null,
+        voicePreparationPending: false,
+        voicePreparationRole: "host",
       }),
       null,
     );

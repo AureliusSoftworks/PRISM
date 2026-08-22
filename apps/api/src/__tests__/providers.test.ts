@@ -1655,7 +1655,7 @@ describe("OpenAiProvider request shape", () => {
     assert.equal("service_tier" in (bodies[2] ?? {}), false);
   });
 
-  it("omits reasoning_effort for auto and unsupported models", async () => {
+  it("omits reasoning_effort for auto and unsupported models but sends GPT-5.6 Minimal", async () => {
     const bodies: Array<Record<string, unknown>> = [];
     globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
       bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
@@ -1685,7 +1685,7 @@ describe("OpenAiProvider request shape", () => {
 
     assert.equal("reasoning_effort" in (bodies[0] ?? {}), false);
     assert.equal("reasoning_effort" in (bodies[1] ?? {}), false);
-    assert.equal("reasoning_effort" in (bodies[2] ?? {}), false);
+    assert.equal(bodies[2]?.reasoning_effort, "minimal");
     assert.equal(bodies[3]?.reasoning_effort, "low");
   });
 

@@ -179,7 +179,7 @@ describe("bot group canvas filtering", () => {
     );
     assert.match(
       pageSource,
-      /const visibleMembers = \[[\s\S]*?\.\.\.selectedMembers,[\s\S]*?\.\.\.filteredCandidates,[\s\S]*?\];[\s\S]*?className=\{styles\.botLibraryGroupMemberGrid\}[\s\S]*?toggleBotLibraryGroupDialogMember/,
+      /const visibleMembers = \[\.\.\.selectedMembers, \.\.\.filteredCandidates\];[\s\S]*?className=\{styles\.botLibraryGroupMemberGrid\}[\s\S]*?visibleMembers\.map[\s\S]*?toggleBotLibraryGroupDialogMember/,
     );
     assert.match(
       cssSource,
@@ -213,7 +213,7 @@ describe("bot group canvas filtering", () => {
     );
     assert.match(
       pageSource,
-      /\{ungroupedPanelBots\.length > 0 \? \([\s\S]*?value=\{BOT_LIBRARY_GROUP_FILTER_UNGROUPED\}/,
+      /options=\{botLibraryGroupFilterOptions\}/,
     );
     assert.match(
       pageSource,

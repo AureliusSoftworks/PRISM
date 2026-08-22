@@ -266,7 +266,7 @@ describe("Signal review transcript", () => {
       guest: { id: "guest-1", name: "Grace" },
     });
 
-    assert.match(transcript, /- Episode model: Provider default/u);
+    assert.match(transcript, /- Episode model: Auto/u);
     assert.match(transcript, /- Segment: unknown/u);
     assert.match(
       transcript,
@@ -437,7 +437,9 @@ describe("Signal review transcript", () => {
         audioDurationMs: 38_300,
         timelineDurationMs: 38_300,
         warningPresent: false,
+        warningDetail: null,
         errorPresent: false,
+        errorDetail: null,
         direction: [
           {
             sequence: 1,

@@ -79,6 +79,23 @@ describe("bot vernacular catalog", () => {
       BOT_VERNACULAR_SHARED_RULES_V1,
       /accent carries the sound/u,
     );
+    // Transcripts showed Scots and Southern pins saturating replies with
+    // g-dropped ordinary words (somethin', makin', hollerin'). The abstract
+    // "never respell" rule did not land, so the ban is now concrete, and no
+    // authored example may model the pattern it forbids.
+    assert.match(
+      BOT_VERNACULAR_SHARED_RULES_V1,
+      /never clip the g from ordinary -ing words/u,
+    );
+    assert.match(
+      BOT_VERNACULAR_SHARED_RULES_V1,
+      /never stack more than two markers in one sentence/u,
+    );
+    const gDroppedOrdinaryWord =
+      /\b(?:somethin|makin|helpin|hollerin|sittin|standin|goin|talkin|waitin|guessin|writin)'/iu;
+    for (const definition of BOT_VERNACULAR_DEFINITIONS) {
+      assert.doesNotMatch(definition.example, gDroppedOrdinaryWord, definition.id);
+    }
   });
 
   it("subordinates the dialect to character, care, and harder speech effects", () => {

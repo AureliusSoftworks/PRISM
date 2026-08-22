@@ -5569,6 +5569,9 @@ function chromaticBiasPressureWordV1(
       : "clearly snub";
 }
 
+const BOT_POWER_CHROMATIC_BIAS_SAFETY_TAIL_V1 =
+  "Soft only: judge bot phosphor color, never people or the player; no slurs or puppeting.";
+
 /**
  * Runtime cue naming the resolved hue and any present matching bots.
  * Never treats the player as a chromatic target.
@@ -5608,7 +5611,7 @@ export function botPowerChromaticBiasCueFromEffectsV1(args: {
       ? effect.color.label
       : botPowerHueLabelV1(hue);
     const origin = effect.color.kind === "complementary_of_holder"
-      ? `${label} (opposite your own phosphor hue)`
+      ? `${label} (opposite your hue)`
       : label;
     const matches = peers.filter((peer) =>
       botPowerChromaticBiasColorMatchesV1(hue, peer.color, effect.matchBandDeg),
@@ -5637,11 +5640,11 @@ export function botPowerChromaticBiasCueFromEffectsV1(args: {
         // model reads it as "your bias is irrelevant here" — review 12d3d47e
         // watched a hue bigot abandon his own premise mid-interview because
         // no one at the table happened to be blue.
-        : `${pressure} bots near ${origin}. No one present is in that band, so it shapes how you speak about ${origin} bots rather than how you treat anyone in the room.${subjectNote}`,
+        : `${pressure} bots near ${origin}. No present bot matches; this still shapes how you speak about ${label} bots.${subjectNote}`,
     );
   }
   if (!anyResolved && clauses.length === 0) return null;
-  return `${mode} hue prejudice: ${clauses.join(" ")} Soft only: judge bot phosphor color, never people or the player; no slurs or puppeting.`;
+  return `${mode} hue prejudice: ${clauses.join(" ")} ${BOT_POWER_CHROMATIC_BIAS_SAFETY_TAIL_V1}`;
 }
 
 export function botPowerChromaticBiasCueV1(args: {
@@ -5889,16 +5892,51 @@ export function botPowerAntiTruthInvertPromptV1(
   ].join("\n");
 }
 
+function compactBotPowerPromptLineV1(line: string): string {
+  const normalized = compactText(line, line.length);
+  if (/^HARD Ad Hominem rule\b/u.test(normalized)) {
+    return compactText(normalized, 610);
+  }
+  if (
+    normalized.length <= 280 ||
+    !normalized.endsWith(BOT_POWER_CHROMATIC_BIAS_SAFETY_TAIL_V1)
+  ) {
+    return compactText(normalized, 280);
+  }
+  const prefixLimit =
+    280 - BOT_POWER_CHROMATIC_BIAS_SAFETY_TAIL_V1.length - 1;
+  const fullPrefix = normalized
+    .slice(0, -BOT_POWER_CHROMATIC_BIAS_SAFETY_TAIL_V1.length)
+    .trimEnd();
+  let prefix = compactText(fullPrefix, prefixLimit);
+  if (fullPrefix.length > prefixLimit) {
+    const sentenceBoundary = Math.max(
+      prefix.lastIndexOf(". "),
+      prefix.lastIndexOf("! "),
+      prefix.lastIndexOf("? "),
+    );
+    if (sentenceBoundary >= Math.floor(prefixLimit * 0.4)) {
+      prefix = prefix.slice(0, sentenceBoundary + 1);
+    } else {
+      const wordBoundary = prefix.lastIndexOf(" ");
+      if (wordBoundary >= Math.floor(prefixLimit * 0.75)) {
+        prefix = prefix.slice(0, wordBoundary);
+      }
+    }
+    prefix = prefix.replace(/[,:;]+$/u, "").trimEnd();
+  }
+  return prefix
+    ? `${prefix} ${BOT_POWER_CHROMATIC_BIAS_SAFETY_TAIL_V1}`
+    : BOT_POWER_CHROMATIC_BIAS_SAFETY_TAIL_V1;
+}
+
 export function buildBotPowersPromptBlock(
   lines: readonly string[],
   maxChars = BOT_POWER_PROMPT_MAX_CHARS,
   maxTokens = BOT_POWER_PROMPT_MAX_TOKENS
 ): string {
   const deduped = Array.from(
-    new Set(lines.map((line) => compactText(
-      line,
-      /^HARD Ad Hominem rule\b/u.test(line.trim()) ? 610 : 280,
-    )).filter(Boolean))
+    new Set(lines.map(compactBotPowerPromptLineV1).filter(Boolean))
   );
   if (deduped.length === 0) return "";
   const prefix = "Active Powers:\n";
@@ -5982,10 +6020,7 @@ export function buildCoffeePowersPromptBlock(
   maxTokens = COFFEE_POWER_PROMPT_MAX_TOKENS
 ): string {
   const deduped = Array.from(
-    new Set(lines.map((line) => compactText(
-      line,
-      /^HARD Ad Hominem rule\b/u.test(line.trim()) ? 610 : 280,
-    )).filter(Boolean))
+    new Set(lines.map(compactBotPowerPromptLineV1).filter(Boolean))
   );
   if (deduped.length === 0) return "";
   const prefix = "Coffee Powers:\n";

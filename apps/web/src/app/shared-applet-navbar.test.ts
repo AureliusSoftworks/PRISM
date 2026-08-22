@@ -99,7 +99,7 @@ test("every active applet consumes the Debate PRISM navbar contract", () => {
   );
   assert.match(
     pageSource,
-    /renderSharedAppletNavbar\("Chat tools", \{[\s\S]*brandAppletId: sidebarOpen \? undefined : "zen"[\s\S]*headerRef: chatHeaderRef[\s\S]*controlRail: renderHeaderModelPicker\(\)/u,
+    /renderSharedAppletNavbar\("Chat tools", \{[\s\S]*brandAppletId: sidebarOpen \? undefined : "zen"[\s\S]*headerRef: chatHeaderRef[\s\S]*controlRail: renderHeaderModelPicker\(\{[\s\S]{0,100}disabled: botFoundryGenerationLocked/u,
   );
   assert.doesNotMatch(pageSource, /data-zen-header-hidden=/u);
   assert.match(pageSource, /armAppNavbarAutoHide\(\)/u);
@@ -146,7 +146,7 @@ test("contextual Signal entry preserves the chosen cast", () => {
   assert.match(signalSource, /initialCastBotIds\?: string\[\]/u);
   assert.match(
     pageSource,
-    /setSignalInitialCastBotIds\(botIds\.slice\(0, 2\)\)[\s\S]*navigateToView\("botcast"\)/u,
+    /setSignalInitialCastBotIds\(\[bot\.id\]\)[\s\S]*closePanel\(\)[\s\S]*navigateToView\("botcast"\)/u,
   );
   assert.match(
     pageSource,

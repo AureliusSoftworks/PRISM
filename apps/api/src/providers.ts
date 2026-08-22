@@ -212,13 +212,24 @@ export interface ResolvedLocalOllamaTarget {
 type LocalOllamaResponseObserver = (
   target: ResolvedLocalOllamaTarget,
 ) => void;
+type LocalOllamaActivityObserver = (
+  target: ResolvedLocalOllamaTarget,
+  active: boolean,
+) => void;
 
 let localOllamaResponseObserver: LocalOllamaResponseObserver | null = null;
+let localOllamaActivityObserver: LocalOllamaActivityObserver | null = null;
 
 export function setLocalOllamaResponseObserver(
   observer: LocalOllamaResponseObserver | null,
 ): void {
   localOllamaResponseObserver = observer;
+}
+
+export function setLocalOllamaActivityObserver(
+  observer: LocalOllamaActivityObserver | null,
+): void {
+  localOllamaActivityObserver = observer;
 }
 
 const config = getAppConfig();
@@ -1620,6 +1631,7 @@ export class LocalOllamaProvider implements LlmProvider {
     const startedAt = Date.now();
     let response: Response;
     try {
+      localOllamaActivityObserver?.(target, true);
       response = await fetch(`${ollamaHost}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -1649,6 +1661,8 @@ export class LocalOllamaProvider implements LlmProvider {
         durationMs: Date.now() - startedAt,
       });
       throw new LocalModelRequestError("service_unavailable");
+    } finally {
+      localOllamaActivityObserver?.(target, false);
     }
     if (!response.ok) {
       const failureKind = await classifyLocalModelHttpFailure(response);

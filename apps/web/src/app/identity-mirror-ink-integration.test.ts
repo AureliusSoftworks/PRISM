@@ -16,7 +16,7 @@ describe("Identity Crisis avatar ink integration", () => {
     );
     const coffeeResolverIndex = pageSource.indexOf("const seatAvatarDetails =");
     const coffeeRenderIndex = pageSource.indexOf(
-      "avatarDetails={seatAvatarDetails}",
+      "avatarDetails: seatAvatarDetails",
       coffeeResolverIndex,
     );
     assert.ok(coffeeResolverIndex >= 0 && coffeeRenderIndex > coffeeResolverIndex);

@@ -39,11 +39,11 @@ describe("avatar visibility Power visual contract", () => {
     );
     assert.match(
       pageCss,
-      /\.coffeeSeat\[data-power-avatar-visibility="hidden"\]:not\(\[data-roster-preview="true"\]\)[\s\S]{0,140}opacity:\s*0;/u,
+      /\.coffeeSeat\[data-power-avatar-visibility="hidden"\]:not\([\s\S]{0,80}\[data-roster-preview="true"\][\s\S]{0,160}> \.botAmbientPresenceRig\s*\{[^}]*opacity:\s*0;/u,
     );
     assert.match(
       pageCss,
-      /\.coffeeSeat\[data-power-avatar-visibility="translucent"\]:not\(\[data-roster-preview="true"\]\)[\s\S]{0,140}opacity:\s*0\.5;/u,
+      /\.coffeeSeat\[data-power-avatar-visibility="translucent"\]:not\([\s\S]{0,80}\[data-roster-preview="true"\][\s\S]{0,160}> \.botAmbientPresenceRig\s*\{[^}]*opacity:\s*0\.5;/u,
     );
   });
 

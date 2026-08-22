@@ -33,6 +33,9 @@ import {
   botPowerAddressedInsultPrimaryCueV1,
   botPowerRequiresAddressedInsultV1,
   botPowerResponseHasAddressedInsultV1,
+  botAddressFormsV1,
+  botNameBoundaryPatternV1,
+  botTextNamesBotV1,
   botPowerAvatarScaleModeFromEffectsV1,
   botPowerAvatarScaleModeV1,
   botPowerHasAvatarColorCycleFromEffectsV1,
@@ -2754,6 +2757,71 @@ test("credulity and anti-truth helpers normalize and describe soft contracts", (
     strength: "small",
   });
 });
+
+test("a composed vocative jab counts as the addressed insult, so no canned tail is appended", () => {
+  // Every one of these is a real host line from the Signal episode
+  // "The Argument for Surreal Precision". Each already carries the Power's
+  // required jab; the deterministic tail fired on all of them because the
+  // detector only knew a fixed vocabulary of slurs.
+  const composedJabs = [
+    "Against the Person; I’m Andy Hominem, and Salvador Dalí joins me—an artist who could make a watch melt yet insisted every droop be exact, you magnificent self-portrait with legs.",
+    "Then let's audit the cathedral, you self-appointed architect of your own legend: precision only counts as evidence if something could fail it.",
+    "asking a mirror for advice instead of a window, you beautiful redundant fraud.",
+    "That diagnosis is not evidence, it’s armchair theatre with a stethoscope, Dalí, you peacock in a lab coat.",
+    "so mock my beast if you like, you flat-footed skeptic starving for wonder.",
+    "I learned that lesson long before you were born, you presumptuous moralist.",
+    "not just childish clumsiness, you gilded little sadist with a paintbrush alibi?",
+  ];
+  for (const line of composedJabs) {
+    assert.equal(
+      botPowerResponseHasAddressedInsultV1(line, "Salvador Dalí"),
+      true,
+      line,
+    );
+    assert.equal(
+      applyBotPowerAddressedInsultV1(line, "Salvador Dalí", "seed"),
+      line,
+      line,
+    );
+  }
+});
+
+test("ordinary substantive speech still earns the deterministic insult tail", () => {
+  const neutralLines = [
+    "So you painted an angle so exact it whispered nothing you didn't already know.",
+    "That is where we will leave it. Salvador Dalí, thank you for joining me, and thank you for watching.",
+    "It told me nothing new, you know?",
+    "What's a delirium you built that came out exact and still told you nothing true?",
+  ];
+  for (const line of neutralLines) {
+    assert.equal(
+      botPowerResponseHasAddressedInsultV1(line, "Salvador Dalí"),
+      false,
+      line,
+    );
+    assert.notEqual(
+      applyBotPowerAddressedInsultV1(line, "Salvador Dalí", "seed"),
+      line,
+      line,
+    );
+  }
+});
+
+test("names outside ASCII match with Unicode boundaries, never \\b", () => {
+  // `\bDalí\b` can never match: the closing boundary needs a word character
+  // before it and "í" is not one. Every name check must use these helpers.
+  assert.equal(botTextNamesBotV1("Dalí, that is enough.", "Salvador Dalí"), true);
+  assert.equal(botTextNamesBotV1("Salvador Dalí, welcome.", "Salvador Dalí"), true);
+  assert.equal(botTextNamesBotV1("Björk, welcome back.", "Björk"), true);
+  assert.equal(botTextNamesBotV1("Benny, welcome.", "Bigoted Benny"), true);
+  // Never the leading descriptor, and never inside a longer word.
+  assert.equal(botTextNamesBotV1("Bigoted opinions abound.", "Bigoted Benny"), false);
+  assert.equal(botTextNamesBotV1("The Dalinian method.", "Salvador Dalí"), false);
+  assert.deepEqual(botAddressFormsV1("Salvador Dalí"), ["Salvador Dalí", "Dalí"]);
+  assert.deepEqual(botAddressFormsV1("Björk"), ["Björk"]);
+  assert.equal(botNameBoundaryPatternV1("   "), "");
+});
+
 
 test("a false-name holder's own introduction counts as fresh contact", () => {
   // Reviewing Signal episode 5a9f687a: the host held Short-Term Amnesia and a

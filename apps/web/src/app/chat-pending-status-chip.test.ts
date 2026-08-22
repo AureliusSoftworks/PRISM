@@ -39,8 +39,9 @@ test("Zen uses the full-screen wait only for the first Home-to-room handoff", ()
   );
   assert.match(
     pageSource,
-    /showThinkingSpinner=\{zenPendingReplyPlaceholderVisible\}/,
+    /showThinkingSpinner=\{zenLiveBotWorkThinkingVisible\}/,
   );
+  assert.match(pageSource, /zenVoiceSynthesisThinkingVisible/u);
 });
 
 test("non-Zen pending replies retain the ordinary floating status chip", () => {

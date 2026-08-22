@@ -7,7 +7,7 @@ const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 test("active Coffee centrally locks configuration while preserving End Session", () => {
   assert.match(
     pageSource,
-    /const coffeeConfigurationLocked =\s*coffeeChromePolicy\.liveSessionActive \|\| coffeeIntroPlaying/u,
+    /const coffeeConfigurationLocked =\s*coffeeChromePolicy\.liveSessionActive \|\|\s*coffeeIntroPlaying \|\|\s*coffeeGuestRevealConcealed/u,
   );
   assert.match(
     pageSource,

@@ -29,7 +29,7 @@ describe("Chat / Prism atmosphere integration", () => {
     assert.match(pageSource, /activeStep\.id === "atmosphere"/u);
     assert.match(pageSource, /data-atmosphere-style-selector="true"/u);
     assert.equal(pageSource.match(/HUB_ATMOSPHERE_STYLES\.map/gu)?.length, 2);
-    assert.match(pageSource, /Atmosphere & graphics/u);
+    assert.match(pageSource, /<strong>Home wallpaper<\/strong>/u);
     assert.match(pageSource, /data-home-atmosphere-settings="true"/u);
     assert.match(pageSource, /Home atmosphere/u);
     assert.match(pageSource, /Home wallpaper model/u);

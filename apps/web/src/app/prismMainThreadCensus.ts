@@ -143,7 +143,6 @@ export function installPrismMainThreadCensus(): void {
   const nativeClearTimeout = window.clearTimeout;
   const pendingTimeoutIds = new Set<unknown>();
   window.setTimeout = ((handler: unknown, timeout?: unknown, ...rest: unknown[]) => {
-    let id: unknown;
     const wrapped =
       typeof handler === "function"
         ? (...callbackArgs: unknown[]) => {
@@ -151,7 +150,7 @@ export function installPrismMainThreadCensus(): void {
             return (handler as (...a: unknown[]) => unknown)(...callbackArgs);
           }
         : handler;
-    id = (nativeSetTimeout as (...a: unknown[]) => unknown).apply(window, [
+    const id = (nativeSetTimeout as (...a: unknown[]) => unknown).apply(window, [
       wrapped,
       timeout,
       ...rest,

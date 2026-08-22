@@ -33,6 +33,7 @@ import {
   createBotIdentityMirrorStateV1,
   createBotFalseNameStateV1,
   crosstalkInterruptionIsMeaningfulV1,
+  directionalIrritationCutoffDelta,
   directionalIrritationEdgeKey,
   planStageActionV1,
   readDirectionalIrritationIntensity,
@@ -47,7 +48,9 @@ import {
   advanceBotcastEpisode,
   backfillMissingCompletedBotcastPairHistory,
   buildBotcastAudienceReviewArtifactV1,
+  buildBotcastCompactLocalSpeakerPrompt,
   buildBotcastSpeakerPrompt,
+  botcastCompactLocalPromptEligible,
   botcastFalseNameStatesV1,
   botcastIdentityMirrorCanTriggerV1,
   botcastIdentityMirrorStatesV1,
@@ -66,6 +69,7 @@ import {
   botcastPowerInterruptionPlanV1,
   botcastPowerInterruptedContentV1,
   botcastSocialSilenceChanceV1,
+  botcastSpokenTurnWithinBudgetV1,
   botcastUtteranceClaimsSignalHistory,
   cancelBotcastEpisode,
   chatWithBotcastShowHost,
@@ -108,9 +112,17 @@ import {
   resolveBotcastProducerGuestName,
   runSignalLocalTurn,
   runSignalOnlineTurn,
+  SIGNAL_AUTO_MAX_ATTEMPTS,
+  SIGNAL_AUTO_DEGRADED_ATTEMPT_MAX_MS,
+  SIGNAL_AUTO_DEGRADED_MAX_ATTEMPTS,
+  SIGNAL_AUTO_DEGRADED_TOTAL_BUDGET_MS,
+  SIGNAL_AUTO_PRIMARY_ATTEMPT_MAX_MS,
+  SIGNAL_AUTO_RECOVERY_ATTEMPT_MAX_MS,
+  SIGNAL_AUTO_TOTAL_BUDGET_MS,
   setBotcastEpisodeCameraMode,
   setBotcastModelWarmupHold,
   recordBotcastSessionClockHold,
+  signalAutoFallbackAttemptBudgetMs,
   signalAutoFallbackHttpStatus,
   signalAutoFallbackPublicMessage,
   signalOnlineTurnHttpStatus,
@@ -118,6 +130,7 @@ import {
   signalVisualOnlyListenerReaction,
   storeBotcastShowAtmosphereAudio,
   storeBotcastShowIntroAudio,
+  synthesizeBotcastShowName,
   type SignalOnlineTurnAttemptV1,
   undoBotcastShowAudioPackage,
   updateBotcastShow,
@@ -182,6 +195,23 @@ function fixture(): DatabaseSync {
     "2026-01-01T00:00:00.000Z",
   );
   return db;
+}
+
+function interruptionIrritationAfterCutoff(
+  content: string,
+  plan: ReturnType<typeof botcastPowerInterruptionPlanV1>,
+): number {
+  if (!plan) return 0;
+  const cutoff = botcastPowerInterruptedContentV1(
+    content,
+    plan.targetProgress,
+    plan.certainty,
+  );
+  return cutoff
+    ? directionalIrritationCutoffDelta({
+        heardRatio: cutoff.heardWordCount / cutoff.originalWordCount,
+      })
+    : 0;
 }
 
 function recordingProvider(
@@ -1163,6 +1193,30 @@ describe("Botcast persistence and isolation", () => {
     assert.equal(floorOutcomes.includes("yield"), true);
     assert.equal(floorOutcomes.includes("reclaim"), true);
     assert.equal(floorOutcomes.includes("hold"), true);
+    const authoredFloorSpeaker = {
+      id: "guest-1",
+      authoredSystemPrompt: "A guarded inventor.",
+    };
+    assert.equal(
+      botcastCrosstalkFloorOutcomeV1({
+        seed: "stable-authored-floor",
+        speaker: {
+          ...authoredFloorSpeaker,
+          systemPrompt: "A guarded inventor. Runtime mood: warm.",
+        },
+        tension: { level: 1 },
+        canReclaim: true,
+      }),
+      botcastCrosstalkFloorOutcomeV1({
+        seed: "stable-authored-floor",
+        speaker: {
+          ...authoredFloorSpeaker,
+          systemPrompt: "A guarded inventor. Runtime mood: strained.",
+        },
+        tension: { level: 1 },
+        canReclaim: true,
+      }),
+    );
     assert.equal(
       botcastCrosstalkFloorOutcomeV1({
         seed: "irritated-copycat-holds-floor",
@@ -2215,6 +2269,60 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("persists deterministic organic beats after a minimal model draft without rewriting it", async () => {
+    const db = fixture();
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      let saved:
+        | Awaited<ReturnType<typeof advanceBotcastEpisode>>
+        | null = null;
+      let savedPlan: Record<string, unknown> | null = null;
+      for (let attempt = 0; attempt < 12 && !savedPlan; attempt += 1) {
+        const episode = createBotcastEpisode(db, "user-1", show.id, {
+          guestBotId: "guest-1",
+          topic: `A small-model rhythm baseline ${attempt}`,
+        });
+        const advanced = await advanceBotcastEpisode(
+          db,
+          "user-1",
+          episode.id,
+          {},
+          generation(recordingProvider(["A quick opening."], [])),
+        );
+        const event = advanced.episode.events.find((candidate) =>
+          candidate.kind === "listener_reaction" &&
+          (candidate.payload.plan as Record<string, unknown> | undefined)
+              ?.messageId === advanced.message?.id &&
+          Boolean(
+            (candidate.payload.plan as Record<string, unknown> | undefined)
+              ?.signalOrganicBeat,
+          )
+        );
+        if (event) {
+          saved = advanced;
+          savedPlan = event.payload.plan as Record<string, unknown>;
+        }
+      }
+      assert.ok(saved?.message);
+      assert.ok(savedPlan);
+      const beat = savedPlan.signalOrganicBeat as Record<string, unknown>;
+      assert.equal(savedPlan.speakerBotId, saved.message.botId);
+      assert.equal(beat.floorOwnerBotId, saved.message.botId);
+      assert.equal(beat.actorBotId, "guest-1");
+      assert.equal(beat.provenance, "deterministic_listener_bank");
+      assert.equal(beat.canonicalImpact, "none");
+      assert.equal(beat.prefetch, "episode_listener_kit");
+      assert.equal(
+        saved.episode.messages.find((message) => message.id === saved.message?.id)
+          ?.content,
+        saved.message.content,
+      );
+      assert.doesNotMatch(JSON.stringify(beat), /producer|prompt|direction/iu);
+    } finally {
+      db.close();
+    }
+  });
+
   it("makes a nine-second muted guest visibly awkward in live and replay projection", async () => {
     const db = fixture();
     try {
@@ -2883,6 +2991,77 @@ describe("Botcast persistence and isolation", () => {
     } finally {
       db.close();
     }
+  });
+
+  it("gives ordinary local Signal turns a compact no-scratchpad authoring contract", () => {
+    const args = {
+      show: {
+        name: "The Responsiveness Desk",
+        premise: "Small interactions reveal whether a system respects people.",
+        hostingStyle: "warm, precise, and curious",
+      } as never,
+      episode: {
+        id: "compact-episode",
+        topic: "Why response time changes trust",
+        producerBrief: "Keep it natural and concrete.",
+        segment: "opening" as const,
+        messages: [],
+        events: [],
+        tensionStage: "calm" as const,
+        guestPresenceMode: "present" as const,
+        guestKind: "bot" as const,
+        guestContext: "",
+      },
+      host: {
+        id: "host-1",
+        name: "Mara Vale",
+        authoredSystemPrompt:
+          "A forensic cultural critic who asks precise questions and dislikes canned answers.",
+        systemPrompt:
+          "A forensic cultural critic.\n\nGlobal bot mood: runtime-only noise.",
+        cloneFamilyId: null,
+        powers: [],
+        color: "#a355e8",
+      },
+      guest: {
+        id: "guest-1",
+        name: "Ivo Stone",
+        authoredSystemPrompt:
+          "An energetic maker who answers with practical examples.",
+        systemPrompt: "An energetic maker.",
+        cloneFamilyId: null,
+        powers: [],
+        color: "#55a3e8",
+      },
+      speakerRole: "host" as const,
+    };
+
+    assert.equal(botcastCompactLocalPromptEligible(args), true);
+    const prompt = buildBotcastCompactLocalSpeakerPrompt(args, {
+      recentSpeakerContents: [
+        "This is The Responsiveness Desk. I'm Mara Vale, joined by Ivo Stone.",
+      ],
+    });
+    const text = prompt.map((message) => message.content).join("\n");
+    assert.ok(text.length < 4_000);
+    assert.match(text, /forensic cultural critic/u);
+    assert.match(text, /exact show, you as host, and Ivo Stone/u);
+    assert.match(text, /Never use any version of “This is \[show\]/u);
+    assert.match(text, /Do not repeat or closely paraphrase/u);
+    assert.doesNotMatch(text, /Global bot mood/u);
+    assert.doesNotMatch(text, /scratchpad|analysis step/iu);
+
+    assert.equal(
+      botcastCompactLocalPromptEligible({
+        ...args,
+        host: {
+          ...args.host,
+          powers: [{ id: "complex-power" }] as never,
+        },
+      }),
+      false,
+      "Power-bearing turns keep the full production contract",
+    );
   });
 
   it("gives Signal clone family speakers their asymmetric identity invariant", () => {
@@ -4169,9 +4348,9 @@ describe("Botcast persistence and isolation", () => {
       );
 
       assert.equal(options[0]?.reasoningEffort, undefined);
-      assert.equal(options[0]?.maxTokens, 160);
+      assert.equal(options[0]?.maxTokens, 128);
       assert.equal(options[1]?.reasoningEffort, undefined);
-      assert.equal(options[1]?.maxTokens, 112);
+      assert.equal(options[1]?.maxTokens, 72);
       assert.match(
         captures[0]!.map((message) => message.content).join("\n"),
         /two to four concise sentences, usually 35 to 90 spoken words/u,
@@ -4183,6 +4362,38 @@ describe("Botcast persistence and isolation", () => {
     } finally {
       db.close();
     }
+  });
+
+  it("edits overlong weak-model turns at complete sentence boundaries", () => {
+    const firstSentence = `${Array.from(
+      { length: 30 },
+      (_, index) => `first${index}`,
+    ).join(" ")}.`;
+    const secondSentence = `${Array.from(
+      { length: 30 },
+      (_, index) => `second${index}`,
+    ).join(" ")}.`;
+    assert.equal(
+      botcastSpokenTurnWithinBudgetV1(
+        `${firstSentence} ${secondSentence}`,
+        45,
+        3,
+      ),
+      firstSentence,
+    );
+
+    const oneLongSentence = `${Array.from(
+      { length: 60 },
+      (_, index) => `word${index}`,
+    ).join(" ")}.`;
+    const clipped = botcastSpokenTurnWithinBudgetV1(
+      oneLongSentence,
+      45,
+      3,
+    );
+    assert.equal(clipped.split(/\s+/u).length, 45);
+    assert.match(clipped, /…$/u);
+    assert.doesNotMatch(clipped, /word45/u);
   });
 
   it("engine-bounds hard minimal Signal replies after required show beats", async () => {
@@ -4880,6 +5091,22 @@ describe("Botcast persistence and isolation", () => {
       targetProgress: 0.5,
       seed: "muted-listener",
       cameraCutEligible: true,
+      signalOrganicBeat: {
+        v: 1,
+        name: "signalOrganicBeat",
+        provenance: "deterministic_listener_bank",
+        kind: "backchannel",
+        actorBotId: "host-1",
+        floorOwnerBotId: "guest-1",
+        canonicalImpact: "none",
+        prefetch: "episode_listener_kit",
+        timing: {
+          startProgress: 0.5,
+          overlapMs: 0,
+          speakerDuckMs: 0,
+          resumeFadeMs: 0,
+        },
+      },
     });
 
     assert.equal(visualOnly.listenerBotId, "host-1");
@@ -4887,6 +5114,7 @@ describe("Botcast persistence and isolation", () => {
     assert.equal(visualOnly.spokenCue, undefined);
     assert.equal(visualOnly.vocalFoley, undefined);
     assert.equal(visualOnly.interjectionAttempt, undefined);
+    assert.equal(visualOnly.signalOrganicBeat, undefined);
   });
 
   it("adapts addressed fandom to the on-air Signal peer", () => {
@@ -7665,6 +7893,188 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("replaces weak-model persona summaries with a short in-world reply", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const provider = recordingProvider(
+        [
+          `Welcome to ${show.name}. I'm Mara Vale, joined by Ivo Stone to ask why responsiveness matters more than spectacle. Ivo Stone, where does that tradeoff become real?`,
+          'In the fictional episode "Signal," you are known as Ivo Stone, an energetic creative technologist. The episode explores why responsive moments matter more than visual spectacle.',
+        ],
+        captures,
+      );
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Why responsiveness matters more than spectacle",
+      });
+      const generationOptions = {
+        ...generation(provider),
+        signalSocialSilenceChanceOverride: 0,
+      };
+
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+      const guestTurn = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+
+      assert.equal(guestTurn.message?.speakerRole, "guest");
+      assert.doesNotMatch(
+        guestTurn.message?.content ?? "",
+        /fictional episode|you are known as|the episode explores/iu,
+      );
+      assert.match(
+        guestTurn.message?.content ?? "",
+        /^(?:Yeah—but|Okay, okay|No, listen)/u,
+      );
+      assert.equal(
+        guestTurn.episode.events.findLast(
+          (event) => event.kind === "utterance",
+        )?.payload.utteranceRepair?.reason,
+        "persona_summary",
+      );
+      const guestPrompt = captures[1]!
+        .map((message) => message.content)
+        .join("\n");
+      assert.match(guestPrompt, /private acting direction/iu);
+      assert.match(guestPrompt, /live exchange, not an essay or profile/iu);
+      assert.match(guestPrompt, /Yeah—but…/u);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("repairs third-person recaps and question deferrals from small Signal models", async () => {
+    const db = fixture();
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const provider = recordingProvider(
+        [
+          `Welcome to ${show.name}. I'm Mara Vale, joined by Ivo Stone to ask why responsiveness matters more than spectacle. Ivo Stone, where does that tradeoff become real?`,
+          'In the opening segment of the episode, both Ivo Stone and Mara Vale discuss the importance of subtle technical changes.',
+          "The signal is clear we need to move forward",
+          "Ivo Stone continued the discussion, emphasizing that subtle changes are crucial for engagement.",
+          "Mara Vale and Ivo Stone discuss how responsiveness matters more than flashy visuals.",
+          "I’m ready for the next question",
+        ],
+        [],
+      );
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Why responsiveness matters more than spectacle",
+      });
+      const generationOptions = {
+        ...generation(provider),
+        signalSocialSilenceChanceOverride: 0,
+      };
+      const repairReasons: Array<string | undefined> = [];
+
+      for (let turn = 0; turn < 6; turn += 1) {
+        const advanced = await advanceBotcastEpisode(
+          db,
+          "user-1",
+          episode.id,
+          {},
+          generationOptions,
+        );
+        if (turn > 0) {
+          repairReasons.push(
+            advanced.episode.events.find(
+              (event) =>
+                event.kind === "utterance" &&
+                event.payload.messageId === advanced.message?.id,
+            )?.payload.utteranceRepair?.reason,
+          );
+          assert.doesNotMatch(
+            advanced.message?.content ?? "",
+            /opening segment|continued the discussion|discuss how|ready for the next question|need to move forward/iu,
+          );
+        }
+      }
+
+      assert.deepEqual(repairReasons, [
+        "persona_summary",
+        "generic_follow_up",
+        "persona_summary",
+        "persona_summary",
+        "non_answering_deferral",
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("repairs prompt echoes, embedded speaker labels, vague host stalls, and confusion-only answers", async () => {
+    const db = fixture();
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const provider = recordingProvider(
+        [
+          `Welcome to ${show.name}. I'm Mara Vale, joined by Ivo Stone to ask why responsiveness matters more than spectacle. Ivo Stone, where does that tradeoff become real?`,
+          '(whispering) "Why responsiveness matters more...". Mara Vale: "A conversational exchange about humane technology.',
+          "I love your energy right now.",
+          "That is optimistic.",
+          "I saw your hand and I know you're not ready.",
+          "I mean it's over",
+        ],
+        [],
+      );
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Why responsiveness matters more than spectacle",
+      });
+      const generationOptions = {
+        ...generation(provider),
+        signalSocialSilenceChanceOverride: 0,
+      };
+      const repairReasons: Array<string | undefined> = [];
+
+      for (let turn = 0; turn < 6; turn += 1) {
+        const advanced = await advanceBotcastEpisode(
+          db,
+          "user-1",
+          episode.id,
+          {},
+          generationOptions,
+        );
+        if (turn > 0) {
+          repairReasons.push(
+            advanced.episode.events.find(
+              (event) =>
+                event.kind === "utterance" &&
+                event.payload.messageId === advanced.message?.id,
+            )?.payload.utteranceRepair?.reason,
+          );
+          assert.doesNotMatch(
+            advanced.message?.content ?? "",
+            /Mara Vale:|I love your energy right now|That is optimistic|I saw your hand|I mean it's over/iu,
+          );
+        }
+      }
+
+      assert.deepEqual(repairReasons, [
+        "peer_label",
+        "generic_follow_up",
+        "non_answering_deferral",
+        "generic_follow_up",
+        "non_answering_deferral",
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("replaces a generic host stall with a follow-up question", async () => {
     const db = fixture();
     const provider = recordingProvider(
@@ -8613,7 +9023,7 @@ describe("Botcast persistence and isolation", () => {
         .map((event) => event.payload);
       assert.deepEqual(
         openingShots.map((shot) => shot.shot),
-        ["left", "right"],
+        ["left", "right", "left"],
       );
       assert.equal(openingShots[0]?.reason, "opening");
       assert.equal(openingShots[0]?.minimumHoldMs, 1_800);
@@ -8621,6 +9031,11 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(openingShots[1]?.speakerRole, "guest");
       assert.ok(
         Number(openingShots[1]?.atMs) > Number(openingShots[0]?.atMs),
+      );
+      assert.equal(openingShots[2]?.reason, "speaker");
+      assert.equal(openingShots[2]?.speakerRole, "host");
+      assert.ok(
+        Number(openingShots[2]?.atMs) > Number(openingShots[1]?.atMs),
       );
 
       await advanceBotcastEpisode(
@@ -10948,7 +11363,7 @@ describe("Botcast persistence and isolation", () => {
     try {
       const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
       assert.equal(show.hostBotId, "host-1");
-      assert.match(show.name, /Mara Vale/u);
+      assert.equal(show.name, "Mara Vale in the Margins");
       assert.equal(show.accentColor, "#a355e8");
       assert.ok(
         BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS.includes(
@@ -11178,6 +11593,35 @@ describe("Botcast persistence and isolation", () => {
     } finally {
       db.close();
     }
+  });
+
+  it("seeds a default show name from authored identity instead of runtime mood", () => {
+    const authoredSystemPrompt =
+      "A forensic cultural critic who asks precise questions and dislikes canned answers.";
+    const expected = synthesizeBotcastShowName({
+      id: "host-1",
+      name: "Mara Vale",
+      systemPrompt: authoredSystemPrompt,
+    });
+    assert.equal(expected, "Mara Vale in the Margins");
+    assert.equal(
+      synthesizeBotcastShowName({
+        id: "host-1",
+        name: "Mara Vale",
+        authoredSystemPrompt,
+        systemPrompt: `${authoredSystemPrompt}\n\nGlobal bot mood: strained.`,
+      }),
+      expected,
+    );
+    assert.equal(
+      synthesizeBotcastShowName({
+        id: "host-1",
+        name: "Mara Vale",
+        authoredSystemPrompt,
+        systemPrompt: `${authoredSystemPrompt}\n\nGlobal bot mood: warm.`,
+      }),
+      expected,
+    );
   });
 
   it("keeps named-character lore out of image-provider logo prompts", () => {
@@ -15274,6 +15718,79 @@ describe("Botcast persistence and isolation", () => {
       );
       // Topic airs as speech, not as a JSON-quoted string.
       assert.doesNotMatch(content, /"Favorite burger joint in the multiverse"/u);
+      assert.doesNotMatch(
+        content,
+        /This is .*I'm .*joined by|microphones are open|let's get right into/iu,
+      );
+
+      const nextEpisode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Favorite burger joint in the multiverse",
+      });
+      const nextOpening = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        nextEpisode.id,
+        {},
+        generation(provider),
+      );
+      assert.notEqual(
+        nextOpening.message?.content,
+        content,
+        "a provider outage must not replay the previous episode's opening",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("redrafts a Signal opening instead of acknowledging retries or prior takes", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      [
+        "Since we've already done this before, let me start fresh. The Responsiveness Desk is live. I'm Mara Vale, and Ivo Stone is here.",
+        "The Responsiveness Desk starts now. I'm Mara Vale, with Ivo Stone. Ivo, when does a fast response become a form of respect?",
+      ],
+      captures,
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", {
+        hostBotId: "host-1",
+        name: "The Responsiveness Desk",
+      });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Why response time changes trust",
+        preferredProvider: "local",
+        modelOverride: "llama-signal-test",
+        responseMode: "auto",
+      });
+      const opening = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        {
+          ...generation(provider),
+          autoFallbackChain: {
+            v: 1,
+            fallbacks: [
+              { provider: "local", model: "llama-signal-fallback" },
+            ],
+          },
+        },
+      );
+
+      assert.ok(captures.length >= 2, "retry meta should consume a redraft");
+      assert.equal(
+        opening.message?.content,
+        "The Responsiveness Desk starts now. I'm Mara Vale, with Ivo Stone. Ivo, when does a fast response become a form of respect?",
+      );
+      assert.doesNotMatch(
+        opening.message?.content ?? "",
+        /done this before|start fresh|retry|restart|another take/iu,
+      );
     } finally {
       db.close();
     }
@@ -16311,6 +16828,275 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("lands an exhausted AUTO turn after three bounded attempts instead of pausing Signal", async () => {
+    const db = fixture();
+    const attempts: Array<{ provider: string; model: string | undefined }> = [];
+    const promptCaptures: string[] = [];
+    const effortCaptures: Array<GenerateOptions["reasoningEffort"]> = [];
+    let callCount = 0;
+    const providerFactory: typeof selectProvider = (providerName) => ({
+      name: providerName,
+      async generateResponse(messages, options) {
+        callCount += 1;
+        attempts.push({ provider: providerName, model: options.model });
+        promptCaptures.push(messages.map((message) => message.content).join("\n"));
+        effortCaptures.push(options.reasoningEffort);
+        if (callCount === 1) {
+          return "Welcome to Signal Test. I'm Mara Vale, joined by Ivo Stone to examine bounded recovery. Ivo, where should we begin?";
+        }
+        throw new Error("Model unavailable");
+      },
+      async embedText() {
+        return [];
+      },
+    });
+    try {
+      assert.equal(SIGNAL_AUTO_MAX_ATTEMPTS, 3);
+      assert.equal(SIGNAL_AUTO_TOTAL_BUDGET_MS, 20_000);
+      assert.equal(SIGNAL_AUTO_DEGRADED_MAX_ATTEMPTS, 2);
+      assert.equal(SIGNAL_AUTO_DEGRADED_TOTAL_BUDGET_MS, 8_000);
+      assert.equal(SIGNAL_AUTO_DEGRADED_ATTEMPT_MAX_MS, 4_000);
+      assert.equal(
+        signalAutoFallbackAttemptBudgetMs(60_000, 0),
+        SIGNAL_AUTO_PRIMARY_ATTEMPT_MAX_MS,
+      );
+      assert.equal(
+        signalAutoFallbackAttemptBudgetMs(60_000, 1),
+        SIGNAL_AUTO_RECOVERY_ATTEMPT_MAX_MS,
+      );
+
+      const show = createBotcastShow(db, "user-1", {
+        hostBotId: "host-1",
+        name: "Signal Test",
+      });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Bounded recovery",
+        preferredProvider: "local",
+        modelOverride: "primary-local",
+        responseMode: "auto",
+      });
+      const generationOptions = {
+        preferredProvider: "local" as const,
+        providerFactory,
+        signalSocialSilenceChanceOverride: 0,
+        autoFallbackChain: {
+          v: 1 as const,
+          fallbacks: [
+            { provider: "local" as const, model: "fallback-one" },
+            { provider: "local" as const, model: "fallback-two" },
+            { provider: "local" as const, model: "must-not-run-three" },
+            { provider: "local" as const, model: "must-not-run-four" },
+          ],
+        },
+      };
+
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+      assert.match(promptCaptures[0] ?? "", /compact|Write exactly one live spoken Signal turn/iu);
+      assert.equal(effortCaptures[0], "none");
+      const recovered = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+
+      assert.deepEqual(attempts.slice(1), [
+        { provider: "local", model: "primary-local" },
+        { provider: "local", model: "fallback-one" },
+        { provider: "local", model: "fallback-two" },
+      ]);
+      assert.equal(recovered.message?.speakerRole, "guest");
+      assert.ok(recovered.message?.content.trim());
+      const generationEvent = recovered.episode.events
+        .filter((event) => event.kind === "provider_generation")
+        .at(-1);
+      assert.equal(generationEvent?.payload.outcome, "failed");
+      assert.equal(generationEvent?.payload.exhaustionKind, "provider_availability");
+      assert.deepEqual(generationEvent?.payload.recovery, {
+        v: 1,
+        strategy: "deterministic_signal_turn",
+      });
+      assert.equal(
+        (generationEvent?.payload.attempts as unknown[] | undefined)?.length,
+        SIGNAL_AUTO_MAX_ATTEMPTS,
+      );
+      const utterance = recovered.episode.events
+        .filter((event) => event.kind === "utterance")
+        .at(-1);
+      assert.equal(utterance?.payload.provider, "deterministic");
+      assert.equal(utterance?.payload.model, "signal-auto-recovery-fallback");
+
+      const attemptCountAfterRecovery = attempts.length;
+      const degradedRecovered = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+      assert.equal(
+        attempts.length,
+        attemptCountAfterRecovery + SIGNAL_AUTO_DEGRADED_MAX_ATTEMPTS,
+      );
+      assert.deepEqual(attempts.slice(-2), [
+        { provider: "local", model: "must-not-run-three" },
+        { provider: "local", model: "must-not-run-four" },
+      ]);
+      assert.ok(
+        effortCaptures.slice(-2).every((effort) => effort === "none"),
+      );
+      assert.equal(degradedRecovered.message?.speakerRole, "host");
+      assert.ok(degradedRecovered.message?.content.trim());
+      const circuitUtterance = degradedRecovered.episode.events
+        .filter((event) => event.kind === "utterance")
+        .at(-1);
+      assert.equal(circuitUtterance?.payload.provider, "deterministic");
+      assert.equal(
+        circuitUtterance?.payload.model,
+        "signal-auto-recovery-fallback",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("quarantines unavailable AUTO candidates within an episode but retries the primary in a fresh recording", async () => {
+    const db = fixture();
+    const attempts: Array<{ provider: string; model: string | undefined }> = [];
+    const providerFactory: typeof selectProvider = (providerName) => ({
+      name: providerName,
+      async generateResponse(_messages, options) {
+        attempts.push({ provider: providerName, model: options.model });
+        if (options.model === "broken-primary") {
+          throw new Error("Model is unavailable");
+        }
+        if (attempts.length <= 2) {
+          return "Welcome to Signal Test. I'm Mara Vale, joined by Ivo Stone to examine responsive interfaces. Ivo, where does latency first break trust?";
+        }
+        return "It breaks trust at the first input that visibly arrives late, because the person can no longer predict whether the interface heard them.";
+      },
+      async embedText() {
+        return [];
+      },
+    });
+    try {
+      const show = createBotcastShow(db, "user-1", {
+        hostBotId: "host-1",
+        name: "Signal Test",
+      });
+      const created = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Responsive interfaces",
+        preferredProvider: "local",
+        modelOverride: "broken-primary",
+        responseMode: "auto",
+      });
+      const episode = recordBotcastRoutingSnapshot(
+        db,
+        "user-1",
+        created.id,
+        {
+          v: 1,
+          lane: "local",
+          modelSelectionKind: "auto",
+          candidateAllowlist: [
+            { provider: "local", model: "broken-primary" },
+            { provider: "local", model: "healthy-primary" },
+            { provider: "local", model: "healthy-reserve" },
+          ],
+          fallbackChain: [
+            { provider: "local", model: "healthy-primary" },
+            { provider: "local", model: "healthy-reserve" },
+          ],
+          policyVersion: 1,
+        },
+      );
+      const generationOptions = {
+        preferredProvider: "local" as const,
+        providerFactory,
+        autoFallbackChain: {
+          v: 1 as const,
+          fallbacks: [
+            { provider: "local" as const, model: "healthy-primary" },
+            { provider: "local" as const, model: "healthy-reserve" },
+          ],
+        },
+      };
+
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+
+      assert.deepEqual(attempts, [
+        { provider: "local", model: "broken-primary" },
+        { provider: "local", model: "healthy-primary" },
+        { provider: "local", model: "healthy-primary" },
+      ]);
+
+      attempts.length = 0;
+      const nextCreated = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Responsive interfaces, one episode later",
+        preferredProvider: "local",
+        modelOverride: "broken-primary",
+        responseMode: "auto",
+      });
+      const nextEpisode = recordBotcastRoutingSnapshot(
+        db,
+        "user-1",
+        nextCreated.id,
+        {
+          v: 1,
+          lane: "local",
+          modelSelectionKind: "auto",
+          candidateAllowlist: [
+            { provider: "local", model: "broken-primary" },
+            { provider: "local", model: "healthy-primary" },
+            { provider: "local", model: "healthy-reserve" },
+          ],
+          fallbackChain: [
+            { provider: "local", model: "healthy-primary" },
+            { provider: "local", model: "healthy-reserve" },
+          ],
+          policyVersion: 1,
+        },
+      );
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        nextEpisode.id,
+        {},
+        generationOptions,
+      );
+
+      assert.deepEqual(attempts, [
+        { provider: "local", model: "broken-primary" },
+        { provider: "local", model: "healthy-primary" },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("keeps advancing AUTO when a fallback answer would be rejected from the Signal transcript", async () => {
     const db = fixture();
     const attempts: Array<{ provider: string; model: string | undefined }> = [];
@@ -16358,12 +17144,12 @@ describe("Botcast persistence and isolation", () => {
           fallbacks: [
             { provider: "openai" as const, model: "gpt-signal-fallback" },
             {
-              provider: "anthropic" as const,
-              model: "claude-signal-fallback",
-            },
-            {
               provider: "openai" as const,
               model: "gpt-signal-recovery",
+            },
+            {
+              provider: "anthropic" as const,
+              model: "claude-signal-fallback",
             },
           ],
         },
@@ -16391,7 +17177,6 @@ describe("Botcast persistence and isolation", () => {
       assert.deepEqual(attempts.slice(1), [
         { provider: "openai", model: "gpt-signal-primary" },
         { provider: "openai", model: "gpt-signal-fallback" },
-        { provider: "anthropic", model: "claude-signal-fallback" },
         { provider: "openai", model: "gpt-signal-recovery" },
       ]);
       const utterance = result.episode.events
@@ -16412,11 +17197,6 @@ describe("Botcast persistence and isolation", () => {
         [
           { provider: "openai", outcome: "failed", reason: "refusal" },
           { provider: "openai", outcome: "failed", reason: "refusal" },
-          {
-            provider: "anthropic",
-            outcome: "failed",
-            reason: "invalid_output",
-          },
           { provider: "openai", outcome: "succeeded", reason: undefined },
         ],
       );
@@ -16663,18 +17443,23 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(closing.episode.segment, "closing");
       assert.equal(closing.message?.speakerRole, "host");
       assert.match(closing.message?.content ?? "", /Forgetful Forrest/u);
-      assert.match(closing.message?.content ?? "", /Jared, thank you for joining me/iu);
+      assert.equal(
+        botcastHostClosingHasFormalThanks(
+          closing.message?.content ?? "",
+          "Jared",
+        ),
+        true,
+      );
       // Two of the four hashed closing variants read "thank you all for
       // watching"; matching only the bare form failed on those runs.
       assert.match(closing.message?.content ?? "", /thank you (?:all )?for watching/iu);
       assert.doesNotMatch(closing.message?.content ?? "", /\?/u);
       assert.equal(closing.episode.messages.length, 5);
-      assert.deepEqual(attempts.slice(0, 5), [
+      // A formal close has a deterministic persona-safe fallback, so it gets
+      // the selected model plus one alternate instead of a whole-catalog wait.
+      assert.deepEqual(attempts.slice(0, 2), [
         { provider: "openai", model: "gpt-5.6-terra" },
         { provider: "openai", model: "gpt-5.6-sol" },
-        { provider: "anthropic", model: "claude-fable-5" },
-        { provider: "openai", model: "gpt-4o-mini" },
-        { provider: "openai", model: "gpt-5.6-luna" },
       ]);
       const failedGeneration = closing.episode.events.findLast(
         (event) => event.kind === "provider_generation",
@@ -16694,9 +17479,6 @@ describe("Botcast persistence and isolation", () => {
         [
           { model: "gpt-5.6-terra", reason: "invalid_output" },
           { model: "gpt-5.6-sol", reason: "invalid_output" },
-          { model: "claude-fable-5", reason: "invalid_output" },
-          { model: "gpt-4o-mini", reason: "invalid_output" },
-          { model: "gpt-5.6-luna", reason: "invalid_output" },
         ],
       );
       const closingUtterance = closing.episode.events.findLast(
@@ -19387,10 +20169,12 @@ describe("Botcast persistence and isolation", () => {
     const captures: ProviderMessage[][] = [];
     const longGuestLine =
       "The first practical consequence appears when the copied design reaches a real workshop, because materials, tolerances, judgment, repair history, and the operator's choices all change what the invention can actually do safely.";
+    const firstGuestLine =
+      "The copied object is only the beginning of the problem.";
     const provider = recordingProvider(
       [
         "A generic opening that will use the safe introduction fallback.",
-        "The copied object is only the beginning of the problem.",
+        firstGuestLine,
         "Then let us test what the copy loses in practice.",
         longGuestLine,
         "That is exactly the gap I wanted to expose: the artifact is not the practiced judgment behind it.",
@@ -19428,6 +20212,16 @@ describe("Botcast persistence and isolation", () => {
         topic: "The cost of copied invention",
       });
       for (let attempt = 0; attempt < 100; attempt += 1) {
+        const firstPlan = botcastPowerInterruptionPlanV1({
+          episodeId: created.id,
+          targetTurnOrdinal: 0,
+          powerId: "interrupting-tom",
+          powerName: name,
+          frequency: "frequent",
+          strength: "large",
+          certainty: "always",
+          targetTurnsSinceLastInterruption: null,
+        });
         const plan = botcastPowerInterruptionPlanV1({
           episodeId: created.id,
           targetTurnOrdinal: 1,
@@ -19435,6 +20229,7 @@ describe("Botcast persistence and isolation", () => {
           powerName: name,
           frequency: "frequent",
           strength: "large",
+          certainty: "always",
           targetTurnsSinceLastInterruption: null,
         });
         const floorOutcomes = [0, 1].map((ordinal) =>
@@ -19453,6 +20248,10 @@ describe("Botcast persistence and isolation", () => {
             },
             tension: { level: 0 },
             canReclaim: true,
+            irritationTowardInterrupter:
+              ordinal === 0
+                ? 0
+                : interruptionIrritationAfterCutoff(firstGuestLine, firstPlan),
           }),
         );
         if (
@@ -19467,15 +20266,18 @@ describe("Botcast persistence and isolation", () => {
           topic: `The cost of copied invention ${attempt + 1}`,
         });
       }
-      assert.ok(botcastPowerInterruptionPlanV1({
+      const plannedCutoff = botcastPowerInterruptionPlanV1({
         episodeId: created.id,
         targetTurnOrdinal: 1,
         powerId: "interrupting-tom",
         powerName: name,
         frequency: "frequent",
         strength: "large",
+        certainty: "always",
         targetTurnsSinceLastInterruption: null,
-      }));
+      });
+      assert.ok(plannedCutoff);
+      assert.ok(plannedCutoff.targetProgress < 0.85);
       assert.equal(
         botcastCrosstalkFloorOutcomeV1({
           seed: [
@@ -19492,6 +20294,19 @@ describe("Botcast persistence and isolation", () => {
           },
           tension: { level: 0 },
           canReclaim: true,
+          irritationTowardInterrupter: interruptionIrritationAfterCutoff(
+            firstGuestLine,
+            botcastPowerInterruptionPlanV1({
+              episodeId: created.id,
+              targetTurnOrdinal: 0,
+              powerId: "interrupting-tom",
+              powerName: name,
+              frequency: "frequent",
+              strength: "large",
+              certainty: "always",
+              targetTurnsSinceLastInterruption: null,
+            }),
+          ),
         }),
         "yield",
       );
@@ -19637,6 +20452,16 @@ describe("Botcast persistence and isolation", () => {
         topic: "Private speech boundaries",
       });
       for (let attempt = 0; attempt < 100; attempt += 1) {
+        const plan = botcastPowerInterruptionPlanV1({
+          episodeId: created.id,
+          targetTurnOrdinal: 0,
+          powerId: "power-interrupting",
+          powerName: name,
+          frequency: "frequent",
+          strength: "large",
+          certainty: "always",
+          targetTurnsSinceLastInterruption: null,
+        });
         const floorOutcome = botcastCrosstalkFloorOutcomeV1({
           seed: [
             "signal-power-crosstalk-floor-v1",
@@ -19653,7 +20478,11 @@ describe("Botcast persistence and isolation", () => {
           tension: { level: 0 },
           canReclaim: true,
         });
-        if (floorOutcome === "yield") break;
+        if (
+          plan &&
+          plan.targetProgress < 0.85 &&
+          floorOutcome === "yield"
+        ) break;
         created = createBotcastEpisode(db, "user-1", show.id, {
           guestBotId: "guest-1",
           topic: `Private speech boundaries ${attempt + 1}`,
@@ -19727,12 +20556,14 @@ describe("Botcast persistence and isolation", () => {
     const hiddenSuffix = "the hidden suffix must never reach the reclaim prompt";
     const longGuestLine =
       `The first practical consequence appears when the copied design reaches a real workshop, because materials, tolerances, judgment, repair history, and ${hiddenSuffix}.`;
+    const firstGuestLine =
+      "The copied object loses tacit repair judgment at the workshop bench.";
     const reclaimLine =
       "No. I was saying that the workshop reveals which judgment the copy could never carry.";
     const provider = recordingProvider(
       [
         "A generic opening that will use the safe introduction fallback.",
-        "The copied object loses tacit repair judgment at the workshop bench.",
+        firstGuestLine,
         "Then let us test what the copy loses in practice.",
         longGuestLine,
         reclaimLine,
@@ -19783,6 +20614,26 @@ describe("Botcast persistence and isolation", () => {
         topic: "The cost of copied invention",
       });
       for (let attempt = 0; attempt < 100; attempt += 1) {
+        const firstGuestPlan = botcastPowerInterruptionPlanV1({
+          episodeId: created.id,
+          targetTurnOrdinal: 0,
+          powerId: "interrupting-tom",
+          powerName: name,
+          frequency: "frequent",
+          strength: "large",
+          certainty: "always",
+          targetTurnsSinceLastInterruption: null,
+        });
+        const intendedGuestPlan = botcastPowerInterruptionPlanV1({
+          episodeId: created.id,
+          targetTurnOrdinal: 1,
+          powerId: "interrupting-tom",
+          powerName: name,
+          frequency: "frequent",
+          strength: "large",
+          certainty: "always",
+          targetTurnsSinceLastInterruption: null,
+        });
         const firstGuestFloorOutcome = botcastCrosstalkFloorOutcomeV1({
           seed: [
             "signal-power-crosstalk-floor-v1",
@@ -19814,8 +20665,14 @@ describe("Botcast persistence and isolation", () => {
           },
           tension: { level: 0 },
           canReclaim: true,
+          irritationTowardInterrupter: interruptionIrritationAfterCutoff(
+            firstGuestLine,
+            firstGuestPlan,
+          ),
         });
         if (
+          intendedGuestPlan &&
+          intendedGuestPlan.targetProgress < 0.85 &&
           firstGuestFloorOutcome === "yield" &&
           intendedGuestFloorOutcome === "reclaim"
         ) break;
@@ -19998,6 +20855,7 @@ describe("Botcast persistence and isolation", () => {
           powerName: hostPowerName,
           frequency: "frequent",
           strength: "large",
+          certainty: "always",
           targetTurnsSinceLastInterruption: null,
         });
         const floorOutcome = botcastCrosstalkFloorOutcomeV1({
@@ -20016,6 +20874,9 @@ describe("Botcast persistence and isolation", () => {
           tension: { level: 0 },
           canReclaim: false,
           canHold: true,
+          irritationTowardInterrupter: directionalIrritationCutoffDelta({
+            heardRatio: 0,
+          }),
         });
         if (plan && plan.targetProgress < 0.85 && floorOutcome === "yield") break;
         created = createBotcastEpisode(db, "user-1", show.id, {
@@ -20030,6 +20891,7 @@ describe("Botcast persistence and isolation", () => {
         powerName: hostPowerName,
         frequency: "frequent",
         strength: "large",
+        certainty: "always",
         targetTurnsSinceLastInterruption: null,
       });
       assert.ok(selectedPlan);
@@ -20051,6 +20913,9 @@ describe("Botcast persistence and isolation", () => {
           tension: { level: 0 },
           canReclaim: false,
           canHold: true,
+          irritationTowardInterrupter: directionalIrritationCutoffDelta({
+            heardRatio: 0,
+          }),
         }),
         "yield",
       );
@@ -20901,7 +21766,11 @@ describe("Botcast persistence and isolation", () => {
           tension: { level: 0 },
           canReclaim: true,
         });
-        if (plan && openingFloorOutcome === "yield") break;
+        if (
+          plan &&
+          plan.targetProgress < 0.85 &&
+          openingFloorOutcome === "yield"
+        ) break;
         created = createBotcastEpisode(db, "user-1", show.id, {
           guestBotId: "guest-1",
           topic: `Who owns a cut-off sentence ${attempt + 1}`,

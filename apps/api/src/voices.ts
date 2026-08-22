@@ -18,6 +18,7 @@ import {
   type VoiceMode,
   type VoiceDeliveryMood,
 } from "@localai/shared";
+import { prepareAccentMapTargetIpa } from "./builtin-tts-runtime.ts";
 
 export function resolveElevenLabsVoiceId(
   profile: BotAudioVoiceProfileV1
@@ -152,6 +153,9 @@ type ElevenLabsSpeechArgs = {
   seed?: number;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
+  /** Test seam for deterministic request-contract coverage. Production uses
+   * the same provider-neutral Accent Map IPA resolver as Local synthesis. */
+  accentIpaResolver?: typeof prepareAccentMapTargetIpa;
 };
 
 /**
@@ -210,7 +214,7 @@ type ElevenLabsSpeechInput = {
   /** Provider body paired with the written line it stands for. Identity when
    * nothing was respelled. */
   projectionSegments: readonly ElevenLabsTextProjectionSegment[];
-  respelled: boolean;
+  alignmentProjected: boolean;
 };
 
 /**
@@ -256,9 +260,78 @@ function elevenLabsRespelling(
   };
 }
 
-function elevenLabsSpeechInput(
+const ELEVENLABS_AUTHORITATIVE_IPA_ACCENTS = new Set([
+  "american-english",
+  "british-english",
+  "scottish-english",
+]);
+
+/**
+ * Eleven v3 accepts IPA wrapped in forward slashes directly in request text.
+ * For the three national Accent Map targets whose identity depends heavily on
+ * vowel space and rhoticity, project PRISM's provider-neutral target IPA into
+ * the private provider body while retaining the selected voice ID as timbre.
+ */
+async function elevenLabsAccentIpaProjection(
   args: ElevenLabsSpeechArgs,
-): ElevenLabsSpeechInput {
+  normalizedProfile: ReturnType<typeof normalizeBotAudioVoiceProfileV1>,
+): Promise<ElevenLabsTextProjectionSegment[] | null> {
+  if (
+    !ELEVENLABS_AUTHORITATIVE_IPA_ACCENTS.has(
+      normalizedProfile.accentDefinitionId ?? "",
+    )
+  ) {
+    return null;
+  }
+  const resolveIpa = args.accentIpaResolver ?? prepareAccentMapTargetIpa;
+  const segments: ElevenLabsTextProjectionSegment[] = [];
+  const pushPlain = async (value: string): Promise<void> => {
+    if (!value) return;
+    const leadingWhitespace = value.match(/^\s*/u)?.[0] ?? "";
+    const trailingWhitespace = value.match(/\s*$/u)?.[0] ?? "";
+    const spoken = value.slice(
+      leadingWhitespace.length,
+      value.length - trailingWhitespace.length,
+    );
+    if (!/[\p{L}\p{N}]/u.test(spoken)) {
+      segments.push({ providerText: value, sourceText: value });
+      return;
+    }
+    const plan = await resolveIpa({
+      text: spoken,
+      profile: normalizedProfile,
+      protectedPhrases: args.protectedPhrases,
+    });
+    const ipa = plan.targetIpa?.replaceAll("/", "").trim() ?? "";
+    segments.push({
+      providerText: ipa
+        ? `${leadingWhitespace}/${ipa}/${trailingWhitespace}`
+        : value,
+      sourceText: value,
+    });
+  };
+  try {
+    let cursor = 0;
+    for (const tag of args.text.matchAll(ELEVENLABS_AUDIO_TAG_PATTERN)) {
+      const start = tag.index ?? cursor;
+      if (start > cursor) await pushPlain(args.text.slice(cursor, start));
+      segments.push({ providerText: tag[0], sourceText: tag[0] });
+      cursor = start + tag[0].length;
+    }
+    if (cursor < args.text.length) await pushPlain(args.text.slice(cursor));
+  } catch {
+    return null;
+  }
+  return segments.some(
+    (segment) => segment.providerText !== segment.sourceText,
+  )
+    ? segments
+    : null;
+}
+
+async function elevenLabsSpeechInput(
+  args: ElevenLabsSpeechArgs,
+): Promise<ElevenLabsSpeechInput> {
   const normalizedProfile = normalizeBotAudioVoiceProfileV1(args.profile);
   const authoredDirection = normalizeElevenLabsVoiceDirection(
     normalizedProfile.elevenLabsDirection,
@@ -295,26 +368,35 @@ function elevenLabsSpeechInput(
         .map((entry) => `[${entry.trim().replace(/[\[\]]/gu, "")}]`)
         .join(" ")} `
     : "";
-  // The direction carries vowel space and prosody; respelling carries the
-  // consonants a direction alone will not produce. Both are private to the
-  // request. IPA is deliberately not an option here: ElevenLabs has no
-  // phoneme control, so notation in the text is read aloud as notation.
+  // The direction carries prosody. On Eleven v3, authoritative IPA supplies
+  // American/British/Scottish target phonology; other maps retain the lighter
+  // existing respelling projection. Both remain private to the request.
   //
   // No accent direction means the voice already speaks this accent, and
   // respelling on top of it would double the effect.
-  const respelling = accentDirection && args.respellAccent !== false
-    ? elevenLabsRespelling(args, normalizedProfile)
-    : null;
-  const body = respelling?.text ?? args.text;
+  const ipaProjection =
+    accentDirection && args.respellAccent !== false
+      ? await elevenLabsAccentIpaProjection(args, normalizedProfile)
+      : null;
+  const respelling =
+    !ipaProjection && accentDirection && args.respellAccent !== false
+      ? elevenLabsRespelling(args, normalizedProfile)
+      : null;
+  const projectionSegments =
+    ipaProjection ??
+    respelling?.segments ??
+    (args.text ? [{ providerText: args.text, sourceText: args.text }] : []);
+  const body = projectionSegments
+    .map((segment) => segment.providerText)
+    .join("");
   return {
     text: `${directionPrefix}${body}`,
     model,
     directionPrefix,
     sourceText: args.text,
-    projectionSegments:
-      respelling?.segments ??
-      (args.text ? [{ providerText: args.text, sourceText: args.text }] : []),
-    respelled: respelling?.respelled === true,
+    projectionSegments,
+    alignmentProjected:
+      Boolean(ipaProjection) || respelling?.respelled === true,
   };
 }
 
@@ -499,23 +581,10 @@ export function voiceCharacterAlignmentIsIncomplete(
   );
 }
 
-export async function requestElevenLabsSpeech(args: {
-  apiKey: string;
-  voiceId: string;
-  model: unknown;
-  text: string;
-  profile: BotAudioVoiceProfileV1;
-  deliveryMood?: VoiceDeliveryMood;
-  protectedPhrases?: readonly string[];
-  /** Off for utterances that are not dialogue — a fixed calibration script or
-   * a sound-effect prompt seed, where respelling would corrupt the payload
-   * rather than accent it. Dialogue leaves this on. */
-  respellAccent?: boolean;
-  seed?: number;
-  signal?: AbortSignal;
-  fetchImpl?: typeof fetch;
-}): Promise<Response> {
-  const input = elevenLabsSpeechInput(args);
+export async function requestElevenLabsSpeech(
+  args: ElevenLabsSpeechArgs,
+): Promise<Response> {
+  const input = await elevenLabsSpeechInput(args);
   const fetchImpl = args.fetchImpl ?? fetch;
   const response = await fetchImpl(
     `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(args.voiceId)}/stream?output_format=mp3_44100_128`,
@@ -539,7 +608,7 @@ export async function requestElevenLabsSpeech(args: {
 export async function requestElevenLabsSpeechWithTimestamps(
   args: ElevenLabsSpeechArgs
 ): Promise<ElevenLabsTimestampedSpeech> {
-  const input = elevenLabsSpeechInput(args);
+  const input = await elevenLabsSpeechInput(args);
   const fetchImpl = args.fetchImpl ?? fetch;
   const response = await fetchImpl(
     `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(args.voiceId)}/with-timestamps?output_format=mp3_44100_128`,
@@ -586,7 +655,7 @@ export async function requestElevenLabsSpeechWithTimestamps(
       value,
       input.directionPrefix,
     );
-    return input.respelled
+    return input.alignmentProjected
       ? projectRespellingAlignmentToSource(
           withoutPrefix,
           input.projectionSegments,
@@ -646,6 +715,75 @@ export interface ElevenLabsSharedVoiceCandidate {
   labels: Record<string, string>;
 }
 
+type SharedVoiceGenderConstraint = "female" | "male";
+
+type SharedVoiceHardConstraints = {
+  accentTerms: readonly (readonly string[])[];
+  gender: SharedVoiceGenderConstraint | null;
+};
+
+const SHARED_VOICE_ACCENT_CONSTRAINTS: Readonly<
+  Record<string, readonly string[]>
+> = {
+  american: ["american", "us"],
+  australian: ["australian", "aussie"],
+  british: ["british", "english", "uk"],
+  canadian: ["canadian"],
+  indian: ["indian"],
+  irish: ["irish"],
+  "new zealand": ["new", "zealand", "kiwi"],
+  scottish: ["scottish", "scots"],
+  "south african": ["south", "african"],
+};
+
+function sharedVoiceDirectionTokens(value: string): Set<string> {
+  return new Set(value.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []);
+}
+
+/**
+ * Refract remains a soft creative direction in general, but a player who
+ * explicitly names an accent or gender is making a casting constraint. Only
+ * trust provider-returned metadata for that constraint; a missing label is
+ * not permission to substitute an incompatible performer.
+ */
+function sharedVoiceHardConstraints(direction: string): SharedVoiceHardConstraints {
+  const tokens = sharedVoiceDirectionTokens(direction);
+  const accentTerms = Object.entries(SHARED_VOICE_ACCENT_CONSTRAINTS)
+    .filter(([phrase]) => phrase.split(" ").every((term) => tokens.has(term)))
+    .map(([, terms]) => terms);
+  const gender =
+    ["female", "woman", "women", "girl"].some((term) => tokens.has(term))
+      ? "female"
+      : ["male", "man", "men", "boy"].some((term) => tokens.has(term))
+        ? "male"
+        : null;
+  return { accentTerms, gender };
+}
+
+function sharedVoiceCandidateMetadataTokens(
+  candidate: ElevenLabsSharedVoiceCandidate,
+): Set<string> {
+  return sharedVoiceDirectionTokens(
+    [
+      candidate.name,
+      candidate.category,
+      candidate.description ?? "",
+      ...Object.entries(candidate.labels).flat(),
+    ].join(" "),
+  );
+}
+
+function sharedVoiceSatisfiesHardConstraints(
+  candidate: ElevenLabsSharedVoiceCandidate,
+  constraints: SharedVoiceHardConstraints,
+): boolean {
+  const metadata = sharedVoiceCandidateMetadataTokens(candidate);
+  return (
+    constraints.accentTerms.every((terms) => terms.some((term) => metadata.has(term))) &&
+    (!constraints.gender || metadata.has(constraints.gender))
+  );
+}
+
 export function selectElevenLabsSharedVoiceCandidate(
   candidates: readonly ElevenLabsSharedVoiceCandidate[],
   excludedVoiceIds: ReadonlySet<string>,
@@ -659,10 +797,18 @@ export function selectElevenLabsSharedVoiceCandidate(
       candidates.findIndex((other) => other.voiceId === candidate.voiceId) === index,
   );
   if (eligible.length === 0) return null;
+  const constraints = sharedVoiceHardConstraints(direction);
+  const constrained =
+    constraints.accentTerms.length > 0 || constraints.gender
+      ? eligible.filter((candidate) =>
+          sharedVoiceSatisfiesHardConstraints(candidate, constraints),
+        )
+      : eligible;
+  if (constrained.length === 0) return null;
   const directionTerms = Array.from(
     new Set(direction.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []),
   ).filter((term) => term.length > 1);
-  const scored = eligible.map((candidate) => {
+  const scored = constrained.map((candidate) => {
     const searchable = [
       candidate.name,
       candidate.category,
@@ -685,7 +831,7 @@ export function selectElevenLabsSharedVoiceCandidate(
       ? scored
           .filter((entry) => entry.score === bestScore)
           .map((entry) => entry.candidate)
-      : eligible;
+      : constrained;
   const randomValue = Math.min(0.999999999, Math.max(0, random()));
   return pool[Math.floor(randomValue * pool.length)] ?? null;
 }

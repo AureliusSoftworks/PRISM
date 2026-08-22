@@ -5,6 +5,7 @@ import type {
 import {
   LocalModelRequestError,
   resolveLocalOllamaTarget,
+  setLocalOllamaActivityObserver,
   setLocalOllamaResponseObserver,
   type DualOllamaWorkloadOptions,
   type ResolvedLocalOllamaTarget,
@@ -15,6 +16,7 @@ const MODEL_PREPARATION_TIMEOUT_MS = 10 * 60_000;
 const MODEL_READINESS_PROBE_TIMEOUT_MS = 4_000;
 const MODEL_PREPARATION_RETRY_AFTER_MS = 1_000;
 const AUXILIARY_MODEL_KEEP_ALIVE = -1;
+const LIVE_MODEL_LANE_SWEEP_INTERVAL_MS = 30_000;
 
 type StoredReadiness =
   | {
@@ -43,6 +45,11 @@ interface OllamaRunningModel {
   expires_at?: unknown;
 }
 
+interface LiveModelLaneLease {
+  target: ResolvedLocalOllamaTarget;
+  sweptAtMs: number;
+}
+
 const readinessByTarget = new Map<string, StoredReadiness>();
 const inspectionByTarget = new Map<
   string,
@@ -52,6 +59,22 @@ const persistentWarmupByTarget = new Map<
   string,
   Promise<ModelPreparationResponse>
 >();
+const persistentWarmupControllerByTarget = new Map<string, AbortController>();
+const liveModelLaneLeaseByOwner = new Map<string, LiveModelLaneLease>();
+const liveModelLaneSweepByHost = new Map<string, Promise<void>>();
+const activeLocalModelRequestCountByTarget = new Map<string, number>();
+
+function notApplicableResponse(model: string): ModelPreparationResponse {
+  return {
+    ok: true,
+    state: "not_applicable",
+    model,
+    startedAt: null,
+    expiresAt: null,
+    retryAfterMs: null,
+    failure: null,
+  };
+}
 
 function normalizedModelId(value: string): string {
   const normalized = value.trim().toLowerCase();
@@ -70,16 +93,28 @@ function safeIso(value: unknown): string | null {
   return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
 }
 
-async function runningModel(
-  target: ResolvedLocalOllamaTarget,
-): Promise<{ digest: string; expiresAt: string | null } | null> {
-  const response = await fetch(`${target.host}/api/ps`, {
+function runningModelName(row: OllamaRunningModel): string {
+  return typeof row.model === "string" && row.model.trim()
+    ? row.model.trim()
+    : typeof row.name === "string"
+      ? row.name.trim()
+      : "";
+}
+
+async function runningModels(host: string): Promise<OllamaRunningModel[]> {
+  const response = await fetch(`${host}/api/ps`, {
     signal: AbortSignal.timeout(MODEL_READINESS_PROBE_TIMEOUT_MS),
   });
   if (!response.ok) throw new Error("Ollama readiness probe failed.");
   const payload = (await response.json()) as { models?: OllamaRunningModel[] };
+  return payload.models ?? [];
+}
+
+async function runningModel(
+  target: ResolvedLocalOllamaTarget,
+): Promise<{ digest: string; expiresAt: string | null } | null> {
   const desired = normalizedModelId(target.model);
-  const row = (payload.models ?? []).find((candidate) => {
+  const row = (await runningModels(target.host)).find((candidate) => {
     const name = typeof candidate.name === "string" ? candidate.name : "";
     const model = typeof candidate.model === "string" ? candidate.model : "";
     return normalizedModelId(name) === desired || normalizedModelId(model) === desired;
@@ -91,6 +126,157 @@ async function runningModel(
     digest: typeof row.digest === "string" ? row.digest : "",
     expiresAt,
   };
+}
+
+async function unloadLocalModel(
+  host: string,
+  model: string,
+): Promise<void> {
+  const response = await fetch(`${host}/api/generate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model, prompt: "", stream: false, keep_alive: 0 }),
+    signal: AbortSignal.timeout(MODEL_READINESS_PROBE_TIMEOUT_MS),
+  });
+  if (!response.ok) throw new Error("Ollama model release failed.");
+  readinessByTarget.delete(`${host}\u0000${normalizedModelId(model)}`);
+}
+
+/**
+ * Give a latency-critical Coffee or Signal session one local-model residency
+ * lane. Other live sessions remain protected; stale chat, prior-session, and
+ * auxiliary runners on the same Ollama host are released before generation.
+ * Failure is deliberately best-effort so a remote/self-managed Ollama host can
+ * still serve the turn even when it does not support residency inspection.
+ */
+export async function claimLiveLocalModelLane(args: {
+  owner: string;
+  model: string;
+  options?: DualOllamaWorkloadOptions;
+  /** Wait for non-live local work to clear before exposing a live scene. */
+  quiesceOtherModels?: boolean;
+}): Promise<boolean> {
+  const owner = args.owner.trim();
+  if (!owner) return false;
+  let target: ResolvedLocalOllamaTarget;
+  try {
+    target = await resolveLocalOllamaTarget(args.model, args.options);
+  } catch {
+    return false;
+  }
+
+  const nowMs = Date.now();
+  const existing = liveModelLaneLeaseByOwner.get(owner);
+  liveModelLaneLeaseByOwner.set(owner, {
+    target,
+    sweptAtMs: existing?.sweptAtMs ?? 0,
+  });
+  // A keep-warm request may have started just before the browser published its
+  // live-performance marker. Abort and await it before sweeping so it cannot
+  // resurrect an auxiliary runner immediately after the lane is cleaned.
+  const interruptedWarmups: Promise<ModelPreparationResponse>[] = [];
+  for (const [key, controller] of persistentWarmupControllerByTarget) {
+    if (!key.startsWith(`${target.host}\u0000`)) continue;
+    controller.abort();
+    const warmup = persistentWarmupByTarget.get(key);
+    if (warmup) interruptedWarmups.push(warmup);
+  }
+  if (interruptedWarmups.length > 0) {
+    await Promise.allSettled(interruptedWarmups);
+  }
+  if (args.quiesceOtherModels) {
+    const deadlineMs = Date.now() + 20_000;
+    while (Date.now() < deadlineMs) {
+      const protectedTargets = new Set(
+        Array.from(liveModelLaneLeaseByOwner.values())
+          .filter((lease) => lease.target.host === target.host)
+          .map((lease) => targetKey(lease.target)),
+      );
+      const otherRequestActive = Array.from(
+        activeLocalModelRequestCountByTarget.entries(),
+      ).some(
+        ([key, count]) =>
+          count > 0 &&
+          key.startsWith(`${target.host}\u0000`) &&
+          !protectedTargets.has(key),
+      );
+      if (!otherRequestActive) break;
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    }
+  }
+  if (
+    !args.quiesceOtherModels &&
+    existing?.target.host === target.host &&
+    normalizedModelId(existing.target.model) === normalizedModelId(target.model) &&
+    nowMs - existing.sweptAtMs < LIVE_MODEL_LANE_SWEEP_INTERVAL_MS
+  ) {
+    return true;
+  }
+
+  const activeSweep = liveModelLaneSweepByHost.get(target.host);
+  if (activeSweep) {
+    await activeSweep;
+    return true;
+  }
+  const sweep = (async () => {
+    try {
+      const rows = await runningModels(target.host);
+      for (const row of rows) {
+        const model = runningModelName(row);
+        if (!model) continue;
+        const normalized = normalizedModelId(model);
+        const protectedByLiveSession = Array.from(
+          liveModelLaneLeaseByOwner.values(),
+        ).some(
+          (lease) =>
+            lease.target.host === target.host &&
+            normalizedModelId(lease.target.model) === normalized,
+        );
+        const activeRequestCount =
+          activeLocalModelRequestCountByTarget.get(
+            `${target.host}\u0000${normalized}`,
+          ) ?? 0;
+        if (protectedByLiveSession || activeRequestCount > 0) continue;
+        await unloadLocalModel(target.host, model).catch(() => undefined);
+      }
+    } catch {
+      // Residency is a QoL optimization, never an availability gate.
+    }
+  })();
+  liveModelLaneSweepByHost.set(target.host, sweep);
+  try {
+    await sweep;
+    const current = liveModelLaneLeaseByOwner.get(owner);
+    if (current) current.sweptAtMs = Date.now();
+    return true;
+  } finally {
+    if (liveModelLaneSweepByHost.get(target.host) === sweep) {
+      liveModelLaneSweepByHost.delete(target.host);
+    }
+  }
+}
+
+/** Release only the exact model owned by a finished live session. */
+export async function releaseLiveLocalModelLane(owner: string): Promise<void> {
+  const lease = liveModelLaneLeaseByOwner.get(owner);
+  if (!lease) return;
+  liveModelLaneLeaseByOwner.delete(owner);
+  const stillProtected = Array.from(liveModelLaneLeaseByOwner.values()).some(
+    (candidate) =>
+      candidate.target.host === lease.target.host &&
+      normalizedModelId(candidate.target.model) ===
+        normalizedModelId(lease.target.model),
+  );
+  if (stillProtected) return;
+  if (
+    (activeLocalModelRequestCountByTarget.get(targetKey(lease.target)) ?? 0) >
+    0
+  ) {
+    return;
+  }
+  await unloadLocalModel(lease.target.host, lease.target.model).catch(
+    () => undefined,
+  );
 }
 
 function responseFor(entry: StoredReadiness): ModelPreparationResponse {
@@ -209,7 +395,52 @@ export async function prepareLocalModel(args: {
     readinessByTarget.delete(key);
     existing = undefined;
   }
-  if (existing?.state === "warming" || existing?.state === "unavailable") {
+  if (existing?.state === "warming") {
+    // The empty warmup request can sit behind a real Coffee/Signal generation
+    // in Ollama's queue. That real request may load the model first, at which
+    // point residency—not completion of the redundant empty request—is the
+    // readiness contract. Re-probe on each browser poll so every applet can
+    // leave its intermission as soon as the requested model is actually live.
+    try {
+      const resident = await runningModel(target);
+      if (resident) {
+        const ready: StoredReadiness = {
+          state: "ready",
+          target,
+          digest: resident.digest,
+          expiresAt: resident.expiresAt,
+        };
+        readinessByTarget.set(key, ready);
+        return responseFor(ready);
+      }
+    } catch {
+      // The original preparation still owns failure reporting and timeout.
+      // A transient inspection failure must not replace it prematurely.
+    }
+    return responseFor(existing);
+  }
+  if (existing?.state === "unavailable") {
+    // A failed empty warmup is not authoritative once Ollama reports the
+    // requested model as resident. This can happen when the warmup request
+    // times out behind a real Signal/Coffee generation that successfully
+    // loads the same model. Reconcile the cached failure before showing a
+    // blocking intermission so a healthy live runner always wins.
+    try {
+      const resident = await runningModel(target);
+      if (resident) {
+        const ready: StoredReadiness = {
+          state: "ready",
+          target,
+          digest: resident.digest,
+          expiresAt: resident.expiresAt,
+        };
+        readinessByTarget.set(key, ready);
+        return responseFor(ready);
+      }
+    } catch {
+      // Preserve the original bounded failure. Retry remains explicit when
+      // residency itself cannot be inspected.
+    }
     return responseFor(existing);
   }
 
@@ -293,12 +524,20 @@ export async function keepAuxiliaryLocalModelWarm(args: {
   }
 
   const key = targetKey(target);
+  if (
+    Array.from(liveModelLaneLeaseByOwner.values()).some(
+      (lease) => lease.target.host === target.host,
+    )
+  ) {
+    return notApplicableResponse(target.model);
+  }
   const active = persistentWarmupByTarget.get(key);
   if (active) return active;
 
   const startedAt = new Date().toISOString();
   const warmup = (async (): Promise<ModelPreparationResponse> => {
     const controller = new AbortController();
+    persistentWarmupControllerByTarget.set(key, controller);
     const timer = setTimeout(
       () => controller.abort(),
       args.timeoutMs ?? MODEL_PREPARATION_TIMEOUT_MS,
@@ -348,6 +587,9 @@ export async function keepAuxiliaryLocalModelWarm(args: {
       return responseFor(unavailable);
     } finally {
       clearTimeout(timer);
+      if (persistentWarmupControllerByTarget.get(key) === controller) {
+        persistentWarmupControllerByTarget.delete(key);
+      }
     }
   })();
   persistentWarmupByTarget.set(key, warmup);
@@ -385,8 +627,25 @@ setLocalOllamaResponseObserver((target) => {
   void refreshReadinessAfterLocalResponse(target);
 });
 
+setLocalOllamaActivityObserver((target, active) => {
+  const key = targetKey(target);
+  const next = Math.max(
+    0,
+    (activeLocalModelRequestCountByTarget.get(key) ?? 0) + (active ? 1 : -1),
+  );
+  if (next === 0) activeLocalModelRequestCountByTarget.delete(key);
+  else activeLocalModelRequestCountByTarget.set(key, next);
+});
+
 export function resetModelReadinessForTests(): void {
   readinessByTarget.clear();
   inspectionByTarget.clear();
   persistentWarmupByTarget.clear();
+  for (const controller of persistentWarmupControllerByTarget.values()) {
+    controller.abort();
+  }
+  persistentWarmupControllerByTarget.clear();
+  liveModelLaneLeaseByOwner.clear();
+  liveModelLaneSweepByHost.clear();
+  activeLocalModelRequestCountByTarget.clear();
 }

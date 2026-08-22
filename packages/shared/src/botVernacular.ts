@@ -58,7 +58,7 @@ export const BOT_VERNACULAR_DEFINITIONS: readonly BotVernacularDefinitionV1[] = 
     id: "scots",
     label: "Scots",
     description: "Scots vocabulary and turns of phrase.",
-    example: "Away wi' ye — that's a braw wee plan, so it is.",
+    example: "Away ye go — that's a braw wee plan, so it is.",
     guidance:
       "You phrase things with a natural Scots voice. Weave in wee, aye, ken, " +
       "dinnae, cannae, bonnie, braw, bairn, crabbit, and scunnered where they " +
@@ -273,13 +273,18 @@ export function botVernacularIdFromStoredVoiceProfile(
  * to harder speech effects from Powers.
  */
 export const BOT_VERNACULAR_SHARED_RULES_V1 =
-  "Vernacular rules: write established vernacular words as themselves, but " +
-  "keep standard English spelling for ordinary words — never respell words " +
-  "phonetically to imitate pronunciation; your voice's accent carries the " +
-  "sound. Let the flavor surface a few times per reply rather than in every " +
-  "sentence. Your character, knowledge, and care for the person you are " +
-  "speaking with always come before the dialect, and any conflicting speech " +
-  "instruction from your Powers takes precedence over this voice.";
+  "Vernacular rules: write established vernacular words as themselves — " +
+  "y'all, fixin' to, dinnae, cannae, wee, wicked and toque are lexicon, not " +
+  "spellings — but keep standard English spelling for every ordinary word, " +
+  "and never respell words phonetically to imitate pronunciation; your " +
+  "voice's accent carries the sound. In particular never clip the g from " +
+  "ordinary -ing words: write talking, something, going and waiting, never " +
+  "talkin', somethin', goin' or waitin'. Let the flavor surface a few times " +
+  "per reply rather than in every sentence, and never stack more than two " +
+  "markers in one sentence. Your character, knowledge, and care for the " +
+  "person you are speaking with always come before the dialect, and any " +
+  "conflicting speech instruction from your Powers takes precedence over " +
+  "this voice.";
 
 /** Prompt-time authoring cue; empty when the bot has no vernacular. */
 export function botVernacularAuthoringCueV1(value: unknown): string {

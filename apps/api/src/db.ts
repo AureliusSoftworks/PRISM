@@ -2243,6 +2243,61 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       ON debate_sessions(user_id, create_idempotency_key);
     CREATE INDEX IF NOT EXISTS idx_debate_sessions_user_updated
       ON debate_sessions(user_id, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS debate_mystery_cases (
+      session_id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      schema_version INTEGER NOT NULL CHECK(schema_version >= 1),
+      generator_version INTEGER NOT NULL CHECK(generator_version >= 1),
+      private_json TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(session_id) REFERENCES debate_sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_debate_mystery_cases_user_updated
+      ON debate_mystery_cases(user_id, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS debate_mystery_actions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      sequence INTEGER NOT NULL CHECK(sequence >= 1),
+      action_kind TEXT NOT NULL,
+      public_payload_json TEXT NOT NULL DEFAULT '{}',
+      occurred_at TEXT NOT NULL,
+      UNIQUE(user_id, session_id, sequence),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(session_id) REFERENCES debate_sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_debate_mystery_actions_user_session
+      ON debate_mystery_actions(user_id, session_id, sequence);
+    CREATE TABLE IF NOT EXISTS debate_mystery_notebooks (
+      session_id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+      document_json TEXT NOT NULL,
+      pending_proposal_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(session_id) REFERENCES debate_sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_debate_mystery_notebooks_user_updated
+      ON debate_mystery_notebooks(user_id, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS debate_mystery_notebook_revisions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      revision INTEGER NOT NULL CHECK(revision >= 1),
+      document_json TEXT NOT NULL,
+      reason TEXT NOT NULL CHECK(reason IN ('edit', 'cleanup', 'undo', 'import')),
+      idempotency_key TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(user_id, session_id, revision),
+      UNIQUE(user_id, session_id, idempotency_key),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(session_id) REFERENCES debate_sessions(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS debate_events (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,

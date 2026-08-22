@@ -66,7 +66,7 @@ describe("zenLiveBotFreeRoam", () => {
     assertClose(destination.y, 552);
   });
 
-  it("does not model prose or chrome collision geometry", () => {
+  it("keeps DOM geometry outside the motion helper while accepting optional avoidance rectangles", () => {
     const destination = planZenLiveBotFreeRoamDestination({
       current: { x: 390, y: 200 },
       bounds,
@@ -74,7 +74,8 @@ describe("zenLiveBotFreeRoam", () => {
     });
     assert.ok(destination.x >= bounds.left && destination.x <= bounds.right);
     assert.ok(destination.y >= bounds.top && destination.y <= bounds.bottom);
-    assert.doesNotMatch(helperSource, /avoidRects|overlaps\(|rectAt\(/);
+    assert.match(helperSource, /avoidRects/u);
+    assert.doesNotMatch(helperSource, /document\.|querySelector/u);
   });
 
   it("converts Zen top-left pixels to normalized Prism companion coordinates", () => {
@@ -237,6 +238,19 @@ describe("zenLiveBotFreeRoam", () => {
     assert.ok(next.x > 100);
     assert.equal(next.y, 100);
     assert.ok(next.velocityX > 0);
+  });
+
+  it("plans autonomous destinations outside inflated prose and chrome rectangles", () => {
+    const rolls = [0, 0, 0, 0, 0, 1, 1, 1];
+    const target = planZenLiveBotFreeRoamDestination({
+      current: { x: 450, y: 300 },
+      bounds,
+      avatarWidth: 100,
+      avatarHeight: 100,
+      avoidRects: [{ left: 0, top: 0, right: 200, bottom: 200 }],
+      random: () => rolls.shift() ?? 0.5,
+    });
+    assert.ok(target.x >= 200 || target.y >= 200);
   });
 
   it("finishes user throw inertia before autonomous travel resumes", () => {

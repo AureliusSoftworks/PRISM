@@ -51,7 +51,7 @@ function paintedBounds(
 }
 
 describe("Peter Griffin avatar registration", () => {
-  it("lowers the authored glasses and pupils without moving the chin", () => {
+  it("keeps the authored glasses, pupils, and chin registration stable", () => {
     const archive = parsePrismBotArchive(readFileSync(bundlePath));
     const bot = archive.botJson.bot;
     const paintColorMapBase64 =
@@ -62,8 +62,8 @@ describe("Peter Griffin avatar registration", () => {
 
     assert.ok(colorMap);
     // The face is rendered at 90 degrees, so authored X controls screen Y.
-    assert.equal(bot.faceEyeOffsetX, -0.1);
-    assert.equal(bot.faceEyeOffsetY, 0.12);
+    assert.equal(bot.faceEyeOffsetX, -0.04);
+    assert.equal(bot.faceEyeOffsetY, -0.12);
     assert.equal(
       createHash("sha256").update(paintColorMapBase64 ?? "").digest("hex"),
       "546bf82cb7b7ba64b547a962cb53ad7de147fe471aaed763a5aa383e18e1def3",

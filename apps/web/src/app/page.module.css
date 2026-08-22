@@ -13504,8 +13504,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .deleteAllModalBackdrop,
-  .deleteAllModalPanel,
-  .devToolsFloatingPanel {
+  .deleteAllModalPanel {
     animation-duration: 120ms;
   }
   .deleteAllModalConfirm:hover,
@@ -70340,6 +70339,7 @@ a.settingsCreditItem:focus-visible {
   border-left: 1px solid rgba(255, 255, 255, 0.1);
   max-height: min(344px, 42vh);
   overflow-y: auto;
+  contain: layout paint style;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
   scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
@@ -70377,6 +70377,8 @@ a.settingsCreditItem:focus-visible {
  */
 .coffeeGroupSessionRow {
   position: relative;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 34px;
 }
 
 .coffeeGroupSessionButton {
@@ -70898,8 +70900,18 @@ a.settingsCreditItem:focus-visible {
 /* Frame-shedding tables pause decorative motion: steam, ambient drifts, and
  * other purely cosmetic animations stop paying style/paint tax while the
  * main thread is already missing frames. Speech, reveals, and input stay live. */
-.coffeeStage[data-motion-shed="true"] [data-prism-decorative-motion="true"],
-.coffeeStage[data-motion-shed="true"] [data-prism-decorative-motion="true"] * {
+.coffeeStage[data-motion-shed="true"]
+  [data-prism-decorative-motion="true"]:not(
+    [data-crt-phosphor="bot"] [data-prism-decorative-motion="true"]
+  ),
+.coffeeStage[data-motion-shed="true"]
+  [data-prism-decorative-motion="true"]:not(
+    [data-crt-phosphor="bot"] [data-prism-decorative-motion="true"]
+  )::before,
+.coffeeStage[data-motion-shed="true"]
+  [data-prism-decorative-motion="true"]:not(
+    [data-crt-phosphor="bot"] [data-prism-decorative-motion="true"]
+  )::after {
   animation-play-state: paused !important;
   transition: none !important;
 }
@@ -72063,23 +72075,6 @@ a.settingsCreditItem:focus-visible {
   opacity: 0.2;
 }
 
-.coffeeContextSparkCue {
-  position: absolute;
-  left: 50%;
-  top: 8%;
-  margin: 0;
-  padding: 7px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--bg-surface, #0a0a0a) 88%, transparent);
-  color: var(--text-muted, rgba(255, 255, 255, 0.66));
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.24);
-  backdrop-filter: blur(14px);
-  transform: translateX(-50%);
-  font-size: 0.68rem;
-  pointer-events: none;
-}
-
 .coffeeContextSpark {
   position: absolute;
   width: clamp(190px, 20vw, 290px);
@@ -72226,6 +72221,48 @@ a.settingsCreditItem:focus-visible {
 .coffeeContextSparkDismiss:focus-visible {
   outline: 2px solid var(--coffee-context-spark-color);
   outline-offset: -3px;
+}
+
+/* Conversation sparks float over an intentionally washed-out Light Mode
+ * backdrop, so their text and controls need an opaque, dark-ink surface. */
+.themeLight.coffeeShell .coffeeContextSpark {
+  border-color: color-mix(
+    in srgb,
+    var(--coffee-context-spark-color) 58%,
+    #526071 42%
+  );
+  background:
+    radial-gradient(
+      circle at 12% 10%,
+      color-mix(in srgb, var(--coffee-context-spark-color) 18%, transparent),
+      transparent 58%
+    ),
+    rgba(251, 253, 255, 0.96);
+  box-shadow:
+    0 18px 36px rgba(49, 61, 76, 0.18),
+    0 0 24px -16px var(--coffee-context-spark-color);
+}
+
+.themeLight.coffeeShell .coffeeContextSparkMain,
+.themeLight.coffeeShell .coffeeContextSparkCopy strong {
+  color: #172235;
+}
+
+.themeLight.coffeeShell .coffeeContextSparkCopy small,
+.themeLight.coffeeShell .coffeeContextSparkDismiss {
+  color: #526174;
+}
+
+.themeLight.coffeeShell .coffeeContextSparkDismiss {
+  border-left-color: rgba(44, 58, 74, 0.16);
+}
+
+.themeLight.coffeeShell .coffeeContextSparkApplet {
+  color: color-mix(
+    in srgb,
+    var(--coffee-context-spark-color) 68%,
+    #172235 32%
+  );
 }
 
 @keyframes coffee-context-spark-arrive {
@@ -72485,6 +72522,16 @@ a.settingsCreditItem:focus-visible {
   animation: coffeeSeatWalkIn var(--coffee-arrival-walk-duration, 3200ms)
     var(--coffee-arrival-walk-easing, cubic-bezier(0.16, 0.84, 0.26, 1)) both;
   will-change: opacity, transform;
+}
+
+/* The portal curtain mounts after the Coffee stage commit. Conceal every guest
+ * in that handoff frame, and keep them concealed while arrival state is armed,
+ * so the invited roster can never flash before the first walk-in. */
+.coffeeStage[data-coffee-intro-playing="true"] .coffeeSeat,
+.coffeeStage[data-coffee-intro-playing="true"] .coffeeAbsentNote {
+  visibility: hidden;
+  opacity: 0 !important;
+  animation: none !important;
 }
 
 .coffeeStage[data-phase="arriving"]
@@ -73087,6 +73134,32 @@ a.settingsCreditItem:focus-visible {
   gap: 4px;
 }
 
+/* A live table is a stage, not a second transcript. Keep only the current
+   utterance inside the table and leave complete history in the side panel. */
+.coffeeStage:is([data-phase="arriving"], [data-phase="live"])
+  .coffeeCenterMessageScroll {
+  max-height: min(7em, 112px);
+  overflow: hidden;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.coffeeStage:is([data-phase="arriving"], [data-phase="live"])
+  .coffeeCenterFeed {
+  min-height: 0;
+  padding: 0;
+  align-content: center;
+}
+
+.coffeeStage:is([data-phase="arriving"], [data-phase="live"])
+  .coffeeCenterFeedLine {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+}
+
 .coffeeCenterMessage[data-live-transcript="true"] {
   gap: 0;
   padding-top: 8px;
@@ -73219,8 +73292,10 @@ a.settingsCreditItem:focus-visible {
   :is(
     .coffeeSeat,
     .coffeeSeatActionAnchor
-  )[data-seat-count="3"][data-layout-seat="0"] {
-  top: 15%;
+)[data-seat-count="3"][data-layout-seat="0"] {
+  /* Keep the upper nameplate clear of the live center transcript. */
+  top: 12%;
+  --coffee-seat-offset-y: -22px !important;
 }
 
 .coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
@@ -73318,13 +73393,13 @@ a.settingsCreditItem:focus-visible {
 }
 
 .coffeeStage[data-phase="topic"] .coffeeTableGlow {
-  width: min(92%, 780px);
+  width: min(76%, 520px);
   transform: translate(-50%, calc(-50% + clamp(16px, 2.2vmin, 40px)));
 }
 
 .coffeeStage[data-phase="topic"] .coffeeTableDisk {
-  width: min(72vw, 640px);
-  max-width: calc(100% - 40px);
+  width: min(56vw, 500px);
+  max-width: calc(100% - 64px);
   transform: translate(-50%, calc(-50% + clamp(16px, 2.2vmin, 40px)));
 }
 
@@ -73340,8 +73415,8 @@ a.settingsCreditItem:focus-visible {
 }
 
 .coffeeStage[data-phase="topic"] .coffeeTableFocalColumn {
-  width: min(72vw, 640px);
-  max-width: calc(100% - 40px);
+  width: min(56vw, 500px);
+  max-width: calc(100% - 64px);
   transform: translateY(clamp(16px, 2.2vmin, 40px));
 }
 
@@ -73551,6 +73626,15 @@ a.settingsCreditItem:focus-visible {
     inset 0 0 34px rgba(255, 255, 255, 0.05),
     inset 0 -38px 80px rgba(0, 0, 0, 0.72),
     0 26px 72px rgba(0, 0, 0, 0.62);
+}
+
+/* Before a topic is chosen there is no occupied table yet. Keep the setup
+   surface on the room itself instead of exposing the circular fallback disk,
+   whose rim reads as a dark-mode rendering artifact. */
+.coffeeStage[data-phase="topic"] .coffeeTableGlow,
+.coffeeStage[data-phase="topic"] .coffeeTableDisk {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .coffeeStage[data-coffee-perspective="first-person"][data-phase="live"]
@@ -73835,6 +73919,10 @@ a.settingsCreditItem:focus-visible {
 
 .coffeeCenterMessage[data-empty="true"] .coffeeCenterFeedLine {
   color: rgba(255, 255, 255, 0.65);
+}
+
+.coffeeCenterMessage[data-empty="true"] .coffeeCenterFeed {
+  align-content: center;
 }
 
 .coffeeCenterMessage .coffeeTableStartButton,
@@ -74738,6 +74826,7 @@ a.settingsCreditItem:focus-visible {
 .coffeeSeatGlowPill {
   --coffee-seat-name-plate-width: clamp(204px, 17cqw, 232px);
   --coffee-seat-name-plate-y: clamp(-42px, -3.65cqw, -26px);
+  --coffee-seat-name-plate-shift-x: clamp(-13px, -0.82vw, -8px);
   --coffee-seat-glyph-slot-width: 30px;
   --coffee-seat-cup-slot-width: clamp(52px, 4.6cqw, 60px);
   --coffee-seat-name-glyph-size: clamp(
@@ -74752,7 +74841,10 @@ a.settingsCreditItem:focus-visible {
   top: 100%;
   bottom: auto;
   margin-top: clamp(-3px, -0.35vw, 1px);
-  transform: translateX(-50%) translateY(var(--coffee-seat-name-plate-y));
+  transform: translateX(
+      calc(-50% + var(--coffee-seat-name-plate-shift-x))
+    )
+    translateY(var(--coffee-seat-name-plate-y));
   z-index: 3;
   box-sizing: border-box;
   width: var(--coffee-seat-name-plate-width);
@@ -74797,7 +74889,9 @@ a.settingsCreditItem:focus-visible {
 
 .coffeeSeat[data-nameplate-pending="true"] .coffeeSeatGlowPill {
   opacity: 0;
-  transform: translateX(-50%)
+  transform: translateX(
+      calc(-50% + var(--coffee-seat-name-plate-shift-x))
+    )
     translateY(calc(var(--coffee-seat-name-plate-y) + 6px)) scale(0.96);
 }
 
@@ -74822,6 +74916,7 @@ a.settingsCreditItem:focus-visible {
 }
 
 .coffeeSeat[data-cup-side="left"] .coffeeSeatGlowPill {
+  --coffee-seat-name-plate-shift-x: clamp(8px, 0.82vw, 13px);
   grid-template-columns: var(--coffee-seat-cup-slot-width) minmax(0, 1fr) var(
       --coffee-seat-glyph-slot-width
     );
@@ -74899,6 +74994,7 @@ a.settingsCreditItem:focus-visible {
 }
 
 .coffeeSeat[data-roster-preview="true"] .coffeeSeatGlowPill {
+  --coffee-seat-name-plate-shift-x: 0px;
   --coffee-seat-glyph-slot-width: 0px;
   grid-template-columns: minmax(0, 1fr);
 }
@@ -78599,6 +78695,27 @@ a.settingsCreditItem:focus-visible {
   animation: coffeeSeatActionQuoteGhostLifecycle 9000ms ease both;
 }
 
+/* The global live-performance floor suppresses animation. Preserve the
+   current semantic action as stable copy and drop its decorative ghost so
+   action labels can never stack over one another. */
+.coffeeStage:is([data-phase="arriving"], [data-phase="live"])
+  .coffeeSeatActionBadgeCurrent {
+  opacity: 1;
+  transform: none;
+  filter: none;
+  animation: none;
+}
+
+.coffeeStage:is([data-phase="arriving"], [data-phase="live"])
+  .coffeeSeatActionBadgeGhost {
+  display: none;
+}
+
+.coffeeStage:is([data-phase="arriving"], [data-phase="live"])
+  .coffeeSeatActionBadgeText {
+  animation: none;
+}
+
 @keyframes coffeeSeatActionQuoteLifecycle {
   0% {
     opacity: 0;
@@ -79851,9 +79968,13 @@ a.settingsCreditItem:focus-visible {
   display: flex;
   flex-direction: column;
   align-items: center;
+  align-self: center;
   gap: 10px;
   width: min(560px, 86vw);
-  margin: 0 auto;
+  /* This can be wider than the focal column. Auto margins pin an overflowing
+   * flex child to the column's left edge; explicit centering keeps its chips
+   * on the table centerline at every stage width. */
+  margin: 0;
   padding: 0 12px 14px;
   box-sizing: border-box;
   overflow: visible;
@@ -83259,19 +83380,21 @@ a.settingsCreditItem:focus-visible {
   line-height: 1.35;
 }
 
-.coffeeUserActionPullQuote {
-  display: flex;
-  justify-content: flex-end;
-  justify-self: center;
-  width: min(100%, var(--coffee-stage-max-width));
+.coffeePlayerActionPullQuote {
+  position: absolute;
+  right: calc(100% + 18px);
+  top: 42%;
+  z-index: 8;
+  width: min(360px, 28cqw);
+  transform: translateY(-50%);
   pointer-events: none;
 }
 
-.coffeeUserActionPullQuote span {
-  max-width: min(430px, calc(100vw - 32px));
-  padding: 8px 12px 8px 14px;
-  border-right: 2px solid rgba(64, 214, 226, 0.62);
-  border-radius: 8px 0 0 8px;
+.coffeePlayerActionPullQuote span {
+  display: block;
+  width: 100%;
+  padding: 6px 0 7px 14px;
+  border-left: 3px solid color-mix(in srgb, var(--accent) 72%, white 18%);
   background: rgba(5, 12, 14, 0.68);
   color: rgba(232, 253, 255, 0.88);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
@@ -83279,8 +83402,18 @@ a.settingsCreditItem:focus-visible {
   font-style: italic;
   line-height: 1.35;
   overflow-wrap: anywhere;
-  text-align: right;
+  text-align: left;
   text-transform: uppercase;
+}
+
+@container (max-width: 760px) {
+  .coffeePlayerActionPullQuote {
+    right: auto;
+    top: -12px;
+    left: 50%;
+    width: min(320px, 72cqw);
+    transform: translate(-50%, -100%);
+  }
 }
 
 /* Composer — bottom of the shell. */
@@ -83973,7 +84106,7 @@ a.settingsCreditItem:focus-visible {
     display: none;
   }
 
-  .coffeeUserActionPullQuote span {
+  .coffeePlayerActionPullQuote span {
     max-width: 100%;
   }
 
@@ -84551,6 +84684,12 @@ a.settingsCreditItem:focus-visible {
 .themeLight.coffeeShell
   :where(.coffeeCenterFeedLineFallback, .coffeeCenterFeedSpeaker) {
   color: var(--fg-muted);
+}
+
+.themeLight.coffeeShell
+  .coffeeCenterMessage[data-empty="true"]
+  .coffeeCenterFeedLineFallback {
+  color: color-mix(in srgb, var(--fg) 72%, transparent);
 }
 
 .themeLight.coffeeShell .coffeeTableTypingLine .typingDots {
@@ -85485,8 +85624,8 @@ a.settingsCreditItem:focus-visible {
   box-shadow: none;
 }
 
-.themeLight.coffeeShell .coffeeUserActionPullQuote span {
-  border-right-color: color-mix(in srgb, #0b7fa8 48%, var(--line));
+.themeLight.coffeeShell .coffeePlayerActionPullQuote span {
+  border-left-color: color-mix(in srgb, #0b7fa8 48%, var(--line));
   background: rgba(255, 255, 255, 0.86);
   color: #0b3144;
   box-shadow: 0 12px 28px rgba(39, 31, 23, 0.12);

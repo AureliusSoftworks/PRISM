@@ -247,7 +247,7 @@ describe("faithful replay API", () => {
     );
 
     db.prepare(
-      "UPDATE users SET auto_switch_model = 1 WHERE id = ?",
+      "UPDATE users SET preferred_provider = 'openai' WHERE id = ?",
     ).run(ownerId);
     upsertReplayVoiceTake(db, ownerId, "signal", "episode-api", {
       v: 1,

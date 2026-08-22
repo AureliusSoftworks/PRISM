@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  LOCAL_MODE_ONLINE_MODEL_DISABLED_REASON,
-  ONLINE_MODE_LOCAL_MODEL_DISABLED_REASON,
   modeAwareModelOptions,
   type ModeAwareModelOption,
 } from "./modeAwareModelOptions.ts";
@@ -16,39 +14,28 @@ const online: TestModelOption[] = [
 ];
 
 describe("mode-aware model options", () => {
-  it("shows every model in LOCAL while disabling online choices", () => {
+  it("shows only runnable local models in LOCAL", () => {
     const options = modeAwareModelOptions({
       local,
       online,
       responseMode: "local",
     });
-    assert.deepEqual(
-      options.map((option) => option.id),
-      ["gemma", "gpt", "claude"],
-    );
+    assert.deepEqual(options.map((option) => option.id), ["gemma"]);
     assert.equal(options[0]?.disabledReason, undefined);
-    assert.equal(
-      options[1]?.disabledReason,
-      LOCAL_MODE_ONLINE_MODEL_DISABLED_REASON,
-    );
-    assert.equal(
-      options[2]?.disabledReason,
-      LOCAL_MODE_ONLINE_MODEL_DISABLED_REASON,
-    );
   });
 
-  it("shows every model in ONLINE while disabling local choices", () => {
+  it("shows only runnable online models in ONLINE", () => {
     const options = modeAwareModelOptions({
       local,
       online,
       responseMode: "online",
     });
-    assert.equal(
-      options[0]?.disabledReason,
-      ONLINE_MODE_LOCAL_MODEL_DISABLED_REASON,
+    assert.deepEqual(
+      options.map((option) => option.id),
+      ["gpt", "claude"],
     );
+    assert.equal(options[0]?.disabledReason, undefined);
     assert.equal(options[1]?.disabledReason, undefined);
-    assert.equal(options[2]?.disabledReason, undefined);
   });
 
   it("enables every otherwise-runnable model in AUTO", () => {

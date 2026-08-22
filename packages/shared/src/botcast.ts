@@ -1122,7 +1122,18 @@ export interface BotcastProducerCue {
   directQuote?: string;
 }
 
-export const BOTCAST_PRODUCER_DIRECT_QUOTE_MAX = 4_000;
+/**
+ * A "Say this" line is read on air verbatim, so its ceiling is a performance
+ * budget, not a text budget. Review 2fcad998 queued ~2,600 characters of song
+ * lyrics against the old 4,000 ceiling: the host spent 46 seconds reading and
+ * the producer had to fire a second cue to escape it, because nothing in the
+ * composer suggested the queued words were minutes long. Keep this near a
+ * spoken line — roughly fifteen seconds of speech — so an over-long paste is
+ * refused at the keyboard instead of on air.
+ */
+export const BOTCAST_PRODUCER_DIRECT_QUOTE_MAX = 240;
+/** Direction, never spoken aloud. Mirrors the server-side `cleanText` ceiling. */
+export const BOTCAST_PRODUCER_CUE_DETAIL_MAX = 280;
 /** Extra completion tokens so the host can ease into a required quote. */
 export const BOTCAST_PRODUCER_DIRECT_QUOTE_LEAD_IN_TOKENS = 80;
 export const BOTCAST_PRODUCER_DIRECT_QUOTE_TURN_TOKENS_MAX = 2_048;
@@ -1141,15 +1152,51 @@ export function botcastDirectQuoteTurnMaxTokens(directQuote: string): number {
 }
 
 /**
+ * Spoken framing when a producer note lands *while the host is already
+ * talking*. The flat "The Producer sent this in." reads as a fresh beat, which
+ * is wrong twice over: the audience just heard the host stop mid-sentence, and
+ * the host is meant to sound like someone taking live direction in an earpiece.
+ *
+ * Review 2fcad998 cut the host off mid-lyric and opened the very next turn with
+ * the standard lead-in, so the seam was audible with nothing to explain it.
+ */
+export const BOTCAST_PRODUCER_DIRECT_QUOTE_UPDATE_LEAD_INS = [
+  "Oh, hang on — now they're saying:",
+  "Wait, scratch that, the Producer's got something else:",
+  "Hold on, they're back in my ear:",
+  "…and now they're telling me:",
+  "One second — new note from the Producer:",
+  "Okay, they've changed it, now it's:",
+  "Sorry, they're saying something else now:",
+  "Hang on, the booth's cutting in again:",
+] as const;
+
+/**
+ * Rotates the update framing so a producer who fires several cues in one
+ * episode never hears the same bridge twice in a row.
+ */
+export function botcastProducerDirectQuoteUpdateLeadInAt(
+  ordinal: number,
+): string {
+  const safeOrdinal = Number.isFinite(ordinal) ? Math.max(0, ordinal) : 0;
+  return BOTCAST_PRODUCER_DIRECT_QUOTE_UPDATE_LEAD_INS[
+    Math.floor(safeOrdinal) %
+      BOTCAST_PRODUCER_DIRECT_QUOTE_UPDATE_LEAD_INS.length
+  ]!;
+}
+
+/**
  * Hosts read producer "Say this" lines exactly. The lead-in is the only
  * extra flavor; the queued words are not rewritten by a model.
  */
 export function composeBotcastProducerDirectQuoteUtterance(
   directQuote: string,
+  leadIn: string = BOTCAST_PRODUCER_DIRECT_QUOTE_LEAD_IN,
 ): string {
   const quote = directQuote.trim();
   if (!quote) return "";
-  return `${BOTCAST_PRODUCER_DIRECT_QUOTE_LEAD_IN} ${quote}`;
+  const framing = leadIn.trim() || BOTCAST_PRODUCER_DIRECT_QUOTE_LEAD_IN;
+  return `${framing} ${quote}`;
 }
 
 export const BOTCAST_SOUNDBOARD_CUE_KINDS = [

@@ -114,7 +114,8 @@ test("audience materials throttle without removing semantic reactions", () => {
   assert.match(debateSource, /usePrismAppAwayFromUser/u);
   assert.match(debateSource, /waitWhilePrismPresentationSuspended/u);
   assert.match(debateSource, /acquirePrismLivingSession\("debate"/u);
-  assert.match(debateSource, /spectatorWatchPresentationCompleteRef/u);
+  assert.match(debateSource, /const presentUnheardSpectatorTail = useCallback/u);
+  assert.match(debateSource, /presentationPlaybackEventIdRef\.current/u);
   assert.match(
     debateSource,
     /bypassCooldown:\s*true/u,

@@ -23,7 +23,7 @@ const signalExperience = readFileSync(
 test("keeps Models focused on background work, recovery, and advanced visibility", () => {
   assert.match(page, /Background &amp; Recovery/u);
   assert.match(page, /<span>Background model<\/span>/u);
-  assert.match(page, /<span>Auto recovery<\/span>/u);
+  assert.match(page, /<span>Auto routing priorities<\/span>/u);
   assert.match(page, /<span>Manage model list<\/span>/u);
   assert.doesNotMatch(page, /Image-request LLM/u);
   assert.doesNotMatch(page, /Saved effort profiles/u);

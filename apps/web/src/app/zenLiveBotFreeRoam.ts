@@ -17,6 +17,12 @@ export type ZenLiveBotMotionBounds = {
   right: number;
   bottom: number;
 };
+export type ZenLiveBotAvoidanceRect = {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+};
 
 /** Inclusive legal top-left coordinates for the avatar. */
 export type ZenLiveBotDragVelocitySample = PrismCompanionDragVelocitySample;
@@ -246,6 +252,9 @@ export function stepZenLiveBotAutonomousTravel(input: {
 export function planZenLiveBotFreeRoamDestination(input: {
   current: ZenLiveBotPoint;
   bounds: ZenLiveBotMotionBounds;
+  avoidRects?: readonly ZenLiveBotAvoidanceRect[];
+  avatarWidth?: number;
+  avatarHeight?: number;
   random?: () => number;
 }): ZenLiveBotPoint {
   const random = input.random ?? Math.random;
@@ -268,7 +277,21 @@ export function planZenLiveBotFreeRoamDestination(input: {
       y: minY + (maxY - minY) * (0.08 + random() * 0.84),
     });
   }
-  return candidates[0] ?? input.current;
+  const avatarWidth = Math.max(1, input.avatarWidth ?? 1);
+  const avatarHeight = Math.max(1, input.avatarHeight ?? 1);
+  return (
+    candidates.find((candidate) =>
+      (input.avoidRects ?? []).every(
+        (rect) =>
+          candidate.x + avatarWidth <= rect.left ||
+          candidate.x >= rect.right ||
+          candidate.y + avatarHeight <= rect.top ||
+          candidate.y >= rect.bottom,
+      ),
+    ) ??
+    candidates[0] ??
+    input.current
+  );
 }
 
 /**
@@ -282,6 +305,9 @@ export function advanceZenLiveBotFreeRoamMotion(input: {
   bounds: ZenLiveBotMotionBounds;
   viewportWidth: number;
   viewportHeight: number;
+  avoidRects?: readonly ZenLiveBotAvoidanceRect[];
+  avatarWidth?: number;
+  avatarHeight?: number;
   random?: () => number;
 }): ZenLiveBotFreeRoamMotionState {
   const random = input.random ?? Math.random;
@@ -314,6 +340,9 @@ export function advanceZenLiveBotFreeRoamMotion(input: {
     const plannedTarget = planZenLiveBotFreeRoamDestination({
       current: motion.physics,
       bounds: input.bounds,
+      avoidRects: input.avoidRects,
+      avatarWidth: input.avatarWidth,
+      avatarHeight: input.avatarHeight,
       random,
     });
     motion.target = plannedTarget;

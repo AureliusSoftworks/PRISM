@@ -47,9 +47,13 @@ describe("avatar color-cycle Power visual contract", () => {
   });
 
   it("adapts the same spectrum cycle to Story's active bot sprite", () => {
+    const storySprite = pageSource.slice(
+      pageSource.indexOf("className={styles.storySpriteWrap}"),
+      pageSource.indexOf("className={styles.storySprite}", pageSource.indexOf("className={styles.storySpriteWrap}")),
+    );
     assert.match(
-      pageSource,
-      /className=\{styles\.storySpriteWrap\}[\s\S]{0,720}data-power-avatar-color-cycle=\{[\s\S]{0,140}botPowerHasAvatarColorCycleV1\(npcActor\.bot\.powers\)/u,
+      storySprite,
+      /data-power-avatar-color-cycle=\{[\s\S]*botPowerHasAvatarColorCycleV1\(npcActor\.bot\.powers\)/u,
     );
     assert.match(
       pageCss,

@@ -57,6 +57,12 @@ export interface AutoFallbackAttemptTraceV1 extends AutoFallbackModelRef {
   durationMs: number;
   outcome: "failed" | "succeeded";
   reason?: AutoFallbackFailureReason;
+  /**
+   * Which validation clause rejected the draft. `reason: "invalid_output"`
+   * alone cannot be acted on when a whole episode retries; the clause slug
+   * names the contract that failed so a session review can go straight to it.
+   */
+  clause?: string;
 }
 
 export interface AutoRecoveryTraceV1 {
@@ -280,7 +286,18 @@ export function normalizeAutoRecoveryTrace(
       const durationMs = typeof attempt.durationMs === "number" && Number.isFinite(attempt.durationMs)
         ? Math.max(0, Math.round(attempt.durationMs))
         : 0;
-      return { ...ref, durationMs, outcome, ...(reason ? { reason } : {}) };
+      const clause =
+        typeof attempt.clause === "string" &&
+        /^[a-z][a-z0-9_]{0,31}$/u.test(attempt.clause)
+          ? attempt.clause
+          : undefined;
+      return {
+        ...ref,
+        durationMs,
+        outcome,
+        ...(reason ? { reason } : {}),
+        ...(clause ? { clause } : {}),
+      };
     })
     .filter((attempt): attempt is AutoFallbackAttemptTraceV1 => attempt !== null);
   if (attempts.length === 0 || attempts.at(-1)?.outcome !== "succeeded") return undefined;

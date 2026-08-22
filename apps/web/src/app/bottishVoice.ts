@@ -12,6 +12,7 @@ import {
   playPreSpeechBreath,
   playRealtimeVoiceBytes,
   prepareRealtimeVoiceAudio,
+  prismLiveVoicePerformanceBudgetActive,
   releaseRealtimeVoiceAudio,
   stopRealtimeVoiceAudio,
   voiceReleaseGainAt,
@@ -520,6 +521,16 @@ let generation = 0;
 let queue: Promise<void> = Promise.resolve();
 
 export async function prepareBottishVoice(): Promise<void> {
+  // Live Coffee/Signal speech is worker-decoded into Web Audio. A silent
+  // HTMLMediaElement unlock still wakes Chromium's native media pipeline and
+  // can delay rendering, so keep it out of the latency-critical stage.
+  if (
+    prismLiveVoicePerformanceBudgetActive() &&
+    (await prepareRealtimeVoiceAudio({ loadRealtimeProcessing: false }))
+  ) {
+    releasePreparedMedia();
+    return;
+  }
   // A send gesture may already have authorized the fallback media element.
   // Re-preparing after the model reply arrives must reuse that element: Safari
   // will not grant a second autoplay authorization from a passive effect.

@@ -83,15 +83,27 @@ describe("Coffee Context Sparks UI", () => {
     assert.match(cssSource, /\.coffeeContextSpark\[data-position="2"\]/u);
   });
 
-  it("keeps the cue and contextual tutorial reset path in sync", () => {
-    assert.match(layerSource, /Past sessions can return as conversation sparks\./u);
+  it("uses opaque dark-ink conversation cards in Light Mode", () => {
+    assert.match(
+      cssSource,
+      /\.themeLight\.coffeeShell \.coffeeContextSpark \{[\s\S]*?rgba\(251, 253, 255, 0\.96\);/u,
+    );
+    assert.match(
+      cssSource,
+      /\.themeLight\.coffeeShell \.coffeeContextSparkMain,[\s\S]*?\.coffeeContextSparkCopy strong \{\s*color: #172235;/u,
+    );
+    assert.match(
+      cssSource,
+      /\.themeLight\.coffeeShell \.coffeeContextSparkCopy small,[\s\S]*?\.coffeeContextSparkDismiss \{\s*color: #526174;/u,
+    );
+  });
+
+  it("keeps tutorial guidance without placing a stray cue over the table", () => {
+    assert.doesNotMatch(layerSource, /Past sessions can return as conversation sparks\./u);
+    assert.doesNotMatch(cssSource, /\.coffeeContextSparkCue/u);
     assert.match(tutorialSource, /COFFEE_CONTEXT_SPARKS_TUTORIAL_SUFFIX/u);
     assert.match(tutorialSource, /nothing sends until you choose Send/u);
     assert.match(tutorialSource, /all spark chips leave the table when the session begins/u);
-    assert.match(pageSource, /COFFEE_CONTEXT_SPARK_CUE_DISMISSED_SESSION_KEY/u);
-    assert.match(
-      pageSource,
-      /if \(mode === "coffee"\) \{[\s\S]*?setCoffeeContextSparkCueVisible\(true\)/u,
-    );
+    assert.doesNotMatch(pageSource, /COFFEE_CONTEXT_SPARK_CUE_DISMISSED_SESSION_KEY/u);
   });
 });

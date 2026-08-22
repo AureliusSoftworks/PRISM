@@ -250,6 +250,11 @@ describe("bot avatar face style", () => {
       customRestingMouth.mouthSpeechPoses,
       DEFAULT_BOT_FACE_CUSTOM_SPEECH_POSES,
     );
+    assert.equal(
+      resolveBotFaceStyle({ faceMouthSpeechPoses: null }).mouthSpeechPoses,
+      null,
+      "an explicit disabled value must not acquire the default Custom Speech poses",
+    );
   });
 
   it("clamps and steps face font weight", () => {

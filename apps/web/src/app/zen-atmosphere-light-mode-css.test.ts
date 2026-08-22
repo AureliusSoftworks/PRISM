@@ -58,7 +58,7 @@ describe("light-mode zen atmosphere wallpaper visibility", () => {
     );
     assert.match(
       css,
-      /var\(--bot-chat-persona-fill,\s*0\)\s*\*\s*22%/,
+      /data-zen-atmosphere-active="true"\][\s\S]{0,260}\.messagesFrame\s*\{\s*background:\s*transparent;/,
     );
   });
 });

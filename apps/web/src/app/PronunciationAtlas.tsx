@@ -8,7 +8,7 @@ import {
   type LocalVoiceSpeechprintInfluence,
   type LocalVoiceSpeechprintStrength,
 } from "@localai/shared";
-import { useId, useMemo, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import type { CSSProperties, ReactElement } from "react";
 
 import { AdjustmentPad } from "./AdjustmentPad";
@@ -164,50 +164,44 @@ export function PronunciationAtlas({
   const padValue: PronunciationAtlasPadValue =
     draftValue ?? padValueForSelection(normalizedSelection, lens);
 
-  const adapter = useMemo<AdjustmentPadAdapter<PronunciationAtlasPadValue>>(
-    () => ({
-      toPoint: (value) => value.point,
-      fromPoint: (point, current) => {
-        const globalPoint = pronunciationAtlasPointFromLensProjection(
-          point,
-          lens,
-        );
-        // The world view is navigation-only: every click resolves to a
-        // region (nearest, for open-ocean clicks). Zoomed views drill only
-        // when the click lands inside a deeper footprint.
-        const drill =
-          lens.size >= 1
-            ? pronunciationAtlasDrillLensAtPoint(globalPoint, lens) ??
-              pronunciationAtlasNearestDrillLens(globalPoint, lens)
-            : pronunciationAtlasDrillLensAtPoint(globalPoint, lens);
-        if (drill) {
-          pendingDrillRef.current = drill.id;
-          return current;
-        }
-        pendingDrillRef.current = null;
-        return {
-          point,
-          selection: pronunciationAtlasSelectionAtPoint(
-            globalPoint,
-            current.selection,
-          ),
-        };
-      },
-      nudge: (value, direction, multiplier) => {
-        // Keyboard travel stays global and precise; it never drills.
-        pendingDrillRef.current = null;
-        const nextSelection = nudgePronunciationAtlasSelectionInLens(
-          value.selection,
-          direction,
-          multiplier,
-          lens,
-        );
-        return padValueForSelection(nextSelection, lens);
-      },
-      valueText: (value) => pronunciationAtlasValueText(value.selection),
-    }),
-    [lens],
-  );
+  const adapter: AdjustmentPadAdapter<PronunciationAtlasPadValue> = {
+    toPoint: (value) => value.point,
+    fromPoint: (point, current) => {
+      const globalPoint = pronunciationAtlasPointFromLensProjection(point, lens);
+      // The world view is navigation-only: every click resolves to a
+      // region (nearest, for open-ocean clicks). Zoomed views drill only
+      // when the click lands inside a deeper footprint.
+      const drill =
+        lens.size >= 1
+          ? pronunciationAtlasDrillLensAtPoint(globalPoint, lens) ??
+            pronunciationAtlasNearestDrillLens(globalPoint, lens)
+          : pronunciationAtlasDrillLensAtPoint(globalPoint, lens);
+      if (drill) {
+        pendingDrillRef.current = drill.id;
+        return current;
+      }
+      pendingDrillRef.current = null;
+      return {
+        point,
+        selection: pronunciationAtlasSelectionAtPoint(
+          globalPoint,
+          current.selection,
+        ),
+      };
+    },
+    nudge: (value, direction, multiplier) => {
+      // Keyboard travel stays global and precise; it never drills.
+      pendingDrillRef.current = null;
+      const nextSelection = nudgePronunciationAtlasSelectionInLens(
+        value.selection,
+        direction,
+        multiplier,
+        lens,
+      );
+      return padValueForSelection(nextSelection, lens);
+    },
+    valueText: (value) => pronunciationAtlasValueText(value.selection),
+  };
   const restoreValue = padValueForSelection(
     pronunciationAtlasNaturalSelection(normalizedSelection.sourceLocale),
     lens,

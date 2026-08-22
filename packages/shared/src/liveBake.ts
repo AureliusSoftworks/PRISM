@@ -66,6 +66,21 @@ export interface LiveBakeUtteranceV1 {
   metadata?: Record<string, unknown>;
 }
 
+/**
+ * Readiness-only timing intent for future just-in-time voice synthesis.
+ * This never proves that a take was synthesized; completed-audio provenance
+ * remains exclusively on each utterance's `voiceEngine`, `isPremium`, and
+ * `audioUrl` fields.
+ */
+export interface LiveBakePlannedSynthesisTimingV1 {
+  /** Provider configured for future just-in-time playback synthesis. */
+  engine: LiveBakeVoiceEngineV1;
+  /** Conservative expected wall-clock latency for one future take. */
+  estimatedLatencyMsPerTake: number;
+  /** Fixed rolling-lookahead take count; it does not grow with the artifact. */
+  runwayTakeCount: number;
+}
+
 export interface LiveBakeEventV1 {
   id: string;
   kind: string;
@@ -89,6 +104,11 @@ export interface LiveBakeArtifactV1 {
   utterances: LiveBakeUtteranceV1[];
   events: LiveBakeEventV1[];
   /**
+   * Optional for backward compatibility. Missing metadata means no additional
+   * synthesis runway; it is not inferred from completed-audio provenance.
+   */
+  plannedSynthesisTiming?: LiveBakePlannedSynthesisTimingV1;
+  /**
    * Surface-specific frozen session/episode snapshot after bake.
    * Presenter must not call the LLM while status === "ready".
    */
@@ -100,10 +120,31 @@ export const LIVE_BAKE_MAX_STEPS_SIGNAL = 120;
 export const LIVE_BAKE_DEFAULT_TIMEOUT_MS = 12 * 60_000;
 /** Debate keeps a long runway because its procedural floor can fan out. */
 export const LIVE_BAKE_UNLOCK_BUFFER_MS = 150_000;
-/** Signal's branded intro lets its linear bake continue after one opening line. */
-export const LIVE_BAKE_UNLOCK_BUFFER_MS_SIGNAL = 0;
+/**
+ * Signal used to unlock on a single opening line with zero lead, which put the
+ * viewer directly on the baker's heels: the first slow beat starved playback and
+ * the fullscreen bake loader reopened mid-show. Calibrated against episode
+ * e620c078523ad691ae82d431, whose worst generation gap was 18.9s (the closing's
+ * four-model auto-fallback ladder) with 15.1s for the opening line. Buffered ms
+ * are `estimateSpokenDurationMs` estimates, not measured audio, so this is a
+ * generous-looking number that buys roughly 30-40s of real lead. Re-tune it
+ * against the generation gaps in the next Watch review rather than by feel.
+ */
+export const LIVE_BAKE_UNLOCK_BUFFER_MS_SIGNAL = 60_000;
 export const LIVE_BAKE_UNLOCK_MIN_STEPS_DEBATE = 6;
-export const LIVE_BAKE_UNLOCK_MIN_STEPS_SIGNAL = 1;
+/** Two settled exchanges, so one long line cannot satisfy the lead on its own. */
+export const LIVE_BAKE_UNLOCK_MIN_STEPS_SIGNAL = 3;
+/** Conservative expected wall-clock latency for one future ElevenLabs take. */
+export const LIVE_BAKE_PREMIUM_SYNTHESIS_LATENCY_MS_PER_TAKE = 12_000;
+/**
+ * Reserve a fixed three-take lookahead, not one latency charge per baked line.
+ * The 36s maximum represents a rolling just-in-time generation runway and
+ * therefore stays reachable as additional short dialogue is buffered.
+ */
+export const LIVE_BAKE_PREMIUM_SYNTHESIS_RUNWAY_TAKES = 3;
+export const LIVE_BAKE_PREMIUM_SYNTHESIS_MAX_RUNWAY_MS =
+  LIVE_BAKE_PREMIUM_SYNTHESIS_LATENCY_MS_PER_TAKE *
+  LIVE_BAKE_PREMIUM_SYNTHESIS_RUNWAY_TAKES;
 /** Treat in-flight bake heartbeats older than this as stale and resumable. */
 export const LIVE_BAKE_STALE_HEARTBEAT_MS = 45_000;
 /** ~150 wpm speaking rate for duration estimates when audio length is unknown. */
@@ -133,6 +174,21 @@ export function liveBakeVoiceIsPremium(
   if (explicit === true) return true;
   if (explicit === false) return false;
   return engine === "elevenlabs";
+}
+
+export function createLiveBakePlannedSynthesisTiming(
+  engine: LiveBakeVoiceEngineV1,
+): LiveBakePlannedSynthesisTimingV1 {
+  const premiumPlanned = engine === "elevenlabs";
+  return {
+    engine,
+    estimatedLatencyMsPerTake: premiumPlanned
+      ? LIVE_BAKE_PREMIUM_SYNTHESIS_LATENCY_MS_PER_TAKE
+      : 0,
+    runwayTakeCount: premiumPlanned
+      ? LIVE_BAKE_PREMIUM_SYNTHESIS_RUNWAY_TAKES
+      : 0,
+  };
 }
 
 export function createEmptyLiveBakeArtifact(args: {
@@ -213,10 +269,56 @@ export function liveBakeUtteranceDurationMs(
 export function liveBakeBufferedPlaybackMs(
   artifact: LiveBakeArtifactV1 | null | undefined,
 ): number {
-  if (!artifact?.utterances.length) return 0;
+  // Artifacts arrive over the wire; a missing array must read as "nothing
+  // buffered", not throw inside an unlock gate.
+  if (!Array.isArray(artifact?.utterances) || artifact.utterances.length === 0) {
+    return 0;
+  }
   return artifact.utterances.reduce(
     (sum, utterance) => sum + liveBakeUtteranceDurationMs(utterance),
     0,
+  );
+}
+
+/**
+ * Bounded readiness runway for configured future Premium synthesis.
+ * Waiting does not synthesize audio: this only asks for enough buffered
+ * dialogue to cover a fixed just-in-time lookahead once playback begins.
+ */
+export function liveBakePlannedSynthesisRunwayMs(
+  artifact: LiveBakeArtifactV1 | null | undefined,
+): number {
+  const timing = artifact?.plannedSynthesisTiming;
+  if (!timing || timing.engine !== "elevenlabs") return 0;
+  const latencyMs =
+    typeof timing.estimatedLatencyMsPerTake === "number" &&
+    Number.isFinite(timing.estimatedLatencyMsPerTake)
+      ? Math.min(
+          LIVE_BAKE_PREMIUM_SYNTHESIS_LATENCY_MS_PER_TAKE,
+          Math.max(0, Math.round(timing.estimatedLatencyMsPerTake)),
+        )
+      : 0;
+  const runwayTakes =
+    typeof timing.runwayTakeCount === "number" &&
+    Number.isFinite(timing.runwayTakeCount)
+      ? Math.min(
+          LIVE_BAKE_PREMIUM_SYNTHESIS_RUNWAY_TAKES,
+          Math.max(0, Math.trunc(timing.runwayTakeCount)),
+        )
+      : 0;
+  return Math.min(
+    LIVE_BAKE_PREMIUM_SYNTHESIS_MAX_RUNWAY_MS,
+    latencyMs * runwayTakes,
+  );
+}
+
+/** Playback lead plus bounded planned synthesis runway. */
+export function liveBakeRequiredBufferMs(
+  artifact: LiveBakeArtifactV1 | null | undefined,
+): number {
+  return (
+    liveBakeUnlockBufferMs(artifact?.surface) +
+    liveBakePlannedSynthesisRunwayMs(artifact)
   );
 }
 
@@ -237,6 +339,33 @@ export function liveBakeUnlockBufferMs(
 }
 
 /**
+ * Progress toward the early-entry gate, for the loader shown before playback.
+ * `totalStepsEstimate` stays null for the whole bake (it is only written when a
+ * bake finishes), so step count cannot drive a bar during the hold — and the
+ * hold is exactly when the viewer needs to see motion. The buffer and the step
+ * floor are both measurable, both must be met, so the lower of the two is the
+ * honest number.
+ */
+export function liveBakeUnlockProgressRatio(
+  artifact: LiveBakeArtifactV1 | null | undefined,
+): number | null {
+  if (!artifact) return null;
+  if (artifact.status === "ready") return 1;
+  const bufferTargetMs = liveBakeRequiredBufferMs(artifact);
+  const stepTarget = liveBakeUnlockMinSteps(artifact.surface);
+  const utteranceCount = Array.isArray(artifact.utterances)
+    ? artifact.utterances.length
+    : 0;
+  const steps = artifact.progress?.completedSteps ?? utteranceCount;
+  const stepRatio = stepTarget > 0 ? steps / stepTarget : 1;
+  const bufferRatio =
+    bufferTargetMs > 0
+      ? liveBakeBufferedPlaybackMs(artifact) / bufferTargetMs
+      : 1;
+  return Math.min(1, Math.max(0, Math.min(stepRatio, bufferRatio)));
+}
+
+/**
  * Early-entry gate: require both a time buffer ahead of the viewer and a
  * minimum number of settled baker steps (avoids unlocking on tiny steps alone).
  */
@@ -254,7 +383,7 @@ export function liveBakeMayStartWatch(
   const minSteps = liveBakeUnlockMinSteps(artifact.surface);
   const steps = artifact.progress?.completedSteps ?? artifact.utterances.length;
   return (
-    aheadMs >= liveBakeUnlockBufferMs(artifact.surface) && steps >= minSteps
+    aheadMs >= liveBakeRequiredBufferMs(artifact) && steps >= minSteps
   );
 }
 

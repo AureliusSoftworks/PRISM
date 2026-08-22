@@ -156,7 +156,7 @@ describe("composer shortcut language is Zen-only", () => {
     assert.doesNotMatch(debateSource, /resolvePicksToPlainText/u);
     assert.match(
       debateSource,
-      /await expandDebateSeedDraft\(topic\)/u,
+      /await expandDebateSeedDraft\(topicOverride \?\? topic\)/u,
     );
     assert.match(
       pageSource,

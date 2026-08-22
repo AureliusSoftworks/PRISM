@@ -222,6 +222,21 @@ describe("Auto fallback runner", () => {
     );
   });
 
+  it("enforces the timeout when a provider ignores AbortSignal", async () => {
+    const result = await runAutoFallbackChain({
+      attempts: [
+        attempt("local", "uncooperative", async () =>
+          new Promise<string>(() => undefined)),
+        attempt("local", "fallback", async () => "recovered"),
+      ],
+      perAttemptTimeoutMs: 5,
+      totalTimeoutMs: 50,
+    });
+
+    assert.equal(result.value, "recovered");
+    assert.equal(result.attempts[0]?.reason, "timeout");
+  });
+
   it("uses the concrete model's attempt budget within one total ceiling", async () => {
     const budgets: Array<{ model: string; index: number }> = [];
     const result = await runAutoFallbackChain({

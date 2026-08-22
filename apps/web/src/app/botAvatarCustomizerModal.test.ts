@@ -1882,7 +1882,7 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
 });
 
 test("bot creation, customization, and settings open directly in Avatar Studio", () => {
-  const createStart = pageSource.indexOf("function openNewBotCreator(): void");
+  const createStart = pageSource.indexOf("function openNewBotCreator(");
   const createEnd = pageSource.indexOf(
     "function openFreshBotCustomizer",
     createStart,
@@ -2022,7 +2022,10 @@ test("avatar preview uses the canonical full-scale identity contract", () => {
     pageSource,
     /function botAvatarFullScaleIdentityStyle\(\s*rawHex: string\s*,\s*resolvedTheme: "light" \| "dark"\s*,\s*options: BotAvatarFullScaleIdentityOptions = \{\}\s*,?\s*\): CSSProperties/,
   );
-  assert.match(pageSource, /if \(options\.prismPersona\) return accentStyle;/);
+  assert.match(
+    pageSource,
+    /if \(options\.prismPersona\) return prismDefaultAccentStyle\(resolvedTheme\);/,
+  );
   assert.match(
     pageSource,
     /botAccentStyle\(rawHex, resolvedTheme, options\.privateMode\) \?\? \{\}/,
@@ -2296,7 +2299,14 @@ test("avatar foundry locks the product preview and reserves camera navigation fo
     pageSource,
     /const foundryCameraEditable =\s*spatialControls && foundryCameraMode === "ink";/,
   );
-  assert.match(pageSource, /onWheel=\{\(event\) =>/);
+  assert.match(
+    pageSource,
+    /stage\.addEventListener\("wheel", handleCapturedWheel, \{[\s\S]*?capture:\s*true,[\s\S]*?passive:\s*false/,
+  );
+  assert.match(
+    pageSource,
+    /stage\.removeEventListener\("wheel", handleCapturedWheel, true\)/,
+  );
   assert.match(pageSource, /requestAnimationFrame\(\(\) =>/);
   assert.match(pageSource, /stage\.style\.setProperty\("--foundry-pan-x"/);
   assert.match(
@@ -2364,7 +2374,7 @@ test("avatar foundry marks populated modules and shares the breathing voice mete
   assert.match(cssSource, /@keyframes botVoiceLightBulbBreath/);
   assert.match(
     cssSource,
-    /\.zenLiveBotPresenceBody\[data-avatar-light-mode="alive"\][\s\S]*?\.botAvatarFoundryFrameModuleLamp\[data-populated="true"\]\s*\{[\s\S]*?opacity:\s*calc\(0\.34 \+ var\(--bot-voice-light-level\)/,
+    /\.zenLiveBotPresenceBody\[data-avatar-light-mode="alive"\][\s\S]*?\.botAvatarFoundryFrameModuleLamp\[data-populated="true"\]\s*\{[\s\S]*?opacity:\s*calc\(0\.52 \+ var\(--bot-voice-light-level\) \* var\(--bot-voice-light-emitter-lift\)\)/,
   );
   assert.match(
     cssSource,

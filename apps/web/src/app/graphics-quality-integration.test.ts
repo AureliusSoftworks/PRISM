@@ -55,11 +55,14 @@ describe("graphics quality integration", () => {
     assert.match(crtFocusSource, /--prism-crt-focus-radius-scale/u);
   });
 
-  it("applies the persisted value to the document and Coffee scene ceiling", () => {
+  it("applies the persisted value outside live Coffee and omits the live scene", () => {
     assert.match(pageSource, /applyGraphicsQualityToDocument\(document, graphicsQuality\)/u);
     assert.match(pageSource, /const graphicsQuality = committedGraphicsQuality/u);
     assert.match(pageSource, /setCommittedGraphicsQuality\(savedGraphicsQuality\)/u);
-    assert.match(pageSource, /<CoffeeAtmosphereScene[\s\S]*graphicsQuality=\{graphicsQuality\}/u);
+    assert.match(
+      pageSource,
+      /!conversationActive\s*&&\s*!coffeeAtmosphereRetiredAfterLiveRef\.current\s*\? \([\s\S]*<CoffeeAtmosphereScene[\s\S]*graphicsQuality=\{graphicsQuality\}/u,
+    );
     assert.match(coffeeSource, /qualityCeiling: prismSceneQualityCeilingForGraphicsQuality/u);
     assert.match(coffeeSource, /setQualityCeiling/u);
     assert.match(hostSource, /new PrismAdaptiveQualityController\([\s\S]*options\.qualityCeiling/u);

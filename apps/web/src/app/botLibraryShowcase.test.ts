@@ -16,7 +16,7 @@ describe("selected bot library showcase", () => {
       pageSource,
       /className=\{styles\.botPanelHubShowcase\}[\s\S]*?data-prism-panel-layer="true"/
     );
-    assert.match(pageSource, /node\.dataset\.prismPanelLayer !== "true"/);
+    assert.match(pageSource, /if \(event\.target !== event\.currentTarget\) return;/);
     assert.match(pageSource, /className=\{`\$\{styles\.zenLiveBotPresencePlate\} \$\{styles\.botPanelHubAvatarPlate\}`\}/);
     for (const mode of ["english", "premium", "babble", "bottish"]) {
       assert.match(
@@ -47,16 +47,20 @@ describe("selected bot library showcase", () => {
       pageSource.indexOf("const renderBotHubShowcase"),
       pageSource.indexOf("const renderSharedPanels"),
     );
+    const showcasePlateSource = pageSource.slice(
+      pageSource.indexOf("function BotHubVoicePreviewAvatarPlate"),
+      pageSource.indexOf("function ZenLiveBotPresencePlate"),
+    );
     assert.match(
       showcaseSource,
       /const showcaseVoicePreset = coffeeSeatVoicePreset\(bot\);[\s\S]*?botAvatarFullScaleIdentityStyle\([\s\S]*?voicePreset: showcaseVoicePreset/,
     );
     assert.match(
-      showcaseSource,
+      showcasePlateSource,
       /<ZenLiveBotMannequin[\s\S]*?voicePreset=\{showcaseVoicePreset\}/,
     );
     assert.match(
-      showcaseSource,
+      showcasePlateSource,
       /metalAlloyEnabled=\{!isDefaultPrism\}/,
     );
   });
@@ -70,10 +74,15 @@ describe("selected bot library showcase", () => {
       pageSource.indexOf("const renderBotHubShowcase"),
       pageSource.indexOf("const renderSharedPanels"),
     );
+    const showcasePlateSource = pageSource.slice(
+      pageSource.indexOf("function BotHubVoicePreviewAvatarPlate"),
+      pageSource.indexOf("function ZenLiveBotPresencePlate"),
+    );
     assert.match(
-      showcaseSource,
+      showcasePlateSource,
       /glyph=\{[\s\S]*?bot[\s\S]*?\? resolveCustomBotGlyph\(bot\.glyph\)[\s\S]*?: DEFAULT_PRISM_BOT_GLYPH[\s\S]*?\}/,
     );
+    assert.match(showcaseSource, /<BotHubVoicePreviewAvatarPlate/);
     assert.match(
       pageSource,
       /const seededGlyph: BotGlyphName = resolveCustomBotGlyph\(bot\.glyph\);/,
@@ -289,7 +298,7 @@ describe("selected bot library showcase", () => {
   it("awaits persona copy and plays the first English sample", () => {
     const previewHandlerSource = pageSource.slice(
       pageSource.indexOf("async function playBotHubVoicePreview"),
-      pageSource.indexOf("async function previewSelectedBotVoice")
+      pageSource.indexOf("async function playZenHeroVoicePreview")
     );
     assert.match(
       previewHandlerSource,
@@ -477,7 +486,7 @@ describe("selected bot library showcase", () => {
     assert.doesNotMatch(
       pageSource.slice(
         pageSource.indexOf("async function playBotHubVoicePreview"),
-        pageSource.indexOf("async function loadElevenLabsVoiceCatalog")
+        pageSource.indexOf("async function playZenHeroVoicePreview")
       ),
       /settings\.voiceMode/
     );
@@ -496,9 +505,12 @@ describe("selected bot library showcase", () => {
     assert.match(pageSource, /onClick=\{\(\) => selectBotPanelShowcase\(null\)\}/);
     assert.match(
       pageSource,
-      /onClick=\{\(\) => selectBotPanelShowcase\(b\)\}/
+      /onClick=\{\(\) =>\s*selectBotPanelShowcase\(b\)\s*\}/
     );
-    assert.match(pageSource, /onDoubleClick=\{\(event\) => \{[\s\S]*?openBotPanelHub\(b\);/);
+    assert.match(
+      pageSource,
+      /onDoubleClick=\{\(event\) => \{[\s\S]*?openBotPanelHub\(b,\s*\{[\s\S]*?origin: "library"/,
+    );
     assert.match(pageSource, /double-click to manage/);
     assert.match(cssSource, /\.botCard\[data-preview-selected="true"\]/);
   });
@@ -573,9 +585,14 @@ describe("selected bot library showcase", () => {
     assert.match(pageSource, /function resolveVoicePreviewProfile\(/);
     assert.doesNotMatch(pageSource, /defaultSystemVoiceName/);
     assert.doesNotMatch(pageSource, /defaultElevenLabsVoiceId/);
-    assert.match(
-      pageSource,
-      /const profile = resolveVoicePreviewProfile\(authoredProfile\);[\s\S]*?JSON\.stringify\(profile\)/
+    assert.match(pageSource, /avatarVoicePlaybackCacheProfile\(profile\)/);
+    const cacheProfileSource = pageSource.slice(
+      pageSource.indexOf("function avatarVoicePlaybackCacheProfile"),
+      pageSource.indexOf("function BotAvatarSfxEditor"),
     );
+    assert.match(cacheProfileSource, /normalizeBotAudioVoiceProfileV1\(profile\)/);
+    assert.match(cacheProfileSource, /return JSON\.stringify\(\{[\s\S]*voiceProfile,[\s\S]*speechprintRuleset:/);
+    assert.match(cacheProfileSource, /avatarSfx:\s*_avatarSfx/);
+    assert.match(cacheProfileSource, /avatarSfxMuted:\s*_avatarSfxMuted/);
   });
 });

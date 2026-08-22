@@ -97,11 +97,9 @@ describe("relationship-depth page integration", () => {
   });
 
   it("exposes one shared identity-anchor contract across Library, room, and Home", () => {
-    for (const surface of ["library", "group-room", "home"] as const) {
-      assert.match(
-        pageSource,
-        new RegExp(`data-relationship-depth-anchor="${surface}"`),
-      );
+    assert.match(pageSource, /"data-relationship-depth-anchor": "library"/);
+    for (const surface of ["group-room", "home"] as const) {
+      assert.match(pageSource, new RegExp(`data-relationship-depth-anchor="${surface}"`));
     }
     assert.match(pageSource, /data-relationship-depth-identity=/);
     assert.match(

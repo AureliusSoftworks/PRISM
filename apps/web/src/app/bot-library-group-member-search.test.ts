@@ -12,15 +12,15 @@ describe("bot group member search", () => {
   it("adds case-insensitive filtering and pinned selected-members ordering", () => {
     assert.match(
       pageSource,
-      /const normalizedMemberQuery = memberQuery\.toLowerCase\(\);[\s\S]*?toLowerCase\(\)\.includes\(normalizedMemberQuery\)/,
+      /const normalizedMemberQuery = memberQuery\.toLowerCase\(\);[\s\S]*?toLowerCase\(\)\s*\.includes\(normalizedMemberQuery\)/,
     );
     assert.match(
       pageSource,
-      /const selectedMembers = uniqueMemberIds\.map\(/,
+      /const selectedMembers = sortedPanelBots\.filter\(/,
     );
     assert.match(
       pageSource,
-      /const visibleMembers = \[[\s\S]*?\.\.\.selectedMembers,[\s\S]*?\.\.\.filteredCandidates,[\s\S]*?\];/,
+      /const visibleMembers = \[\.\.\.selectedMembers, \.\.\.filteredCandidates\];/,
     );
   });
 

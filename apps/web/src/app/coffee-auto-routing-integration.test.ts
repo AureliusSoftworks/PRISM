@@ -13,7 +13,7 @@ describe("Coffee contextual Auto request routing", () => {
     assert.equal(
       pageSource.match(/responseMode: coffeeResponseModeForSend(?!Ref)/gu)
         ?.length,
-      4,
+      6,
     );
     assert.equal(
       pageSource.match(/responseMode: coffeeResponseModeForSendRef\.current/gu)

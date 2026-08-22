@@ -92,9 +92,9 @@ describe("avatar scale Power visual contract", () => {
     );
     assert.match(pageCss, /\.storySpriteWrap\[data-power-avatar-scale="tiny"\]\s*\{\s*scale: 0\.5;\s*\}/u);
     assert.match(pageCss, /\.storySpriteWrap\[data-power-avatar-scale="small"\]\s*\{\s*scale: 0\.75;\s*\}/u);
-    assert.match(pageCss, /data-power-avatar-scale="large"[^}]*scale: 1\.25; translate: -6% 0/u);
-    assert.match(pageCss, /data-power-avatar-scale="giant"[^}]*scale: 1\.5; translate: -16% 0/u);
-    assert.match(pageCss, /data-power-avatar-scale="colossal"[^}]*scale: 3; translate: -58% 0/u);
+    assert.match(pageCss, /data-power-avatar-scale="large"[^}]*scale: 1\.25;\s*translate: -6% 0/u);
+    assert.match(pageCss, /data-power-avatar-scale="giant"[^}]*scale: 1\.5;\s*translate: -16% 0/u);
+    assert.match(pageCss, /data-power-avatar-scale="colossal"[^}]*scale: 3;\s*translate: -58% 0/u);
   });
 
   it("switches unreadable full avatars to the shared Ink-aware micro form", () => {
@@ -112,8 +112,9 @@ describe("avatar scale Power visual contract", () => {
     );
     assert.match(
       pageSource,
-      /minimumRenderedSizeTier: "compact"/u,
+      /minimumRenderedSizeTier = "micro"/u,
     );
+    assert.match(pageSource, /minimumRenderedSizeTier=\{liveMannequinMinimumRenderedSizeTier\}/u);
     assert.match(
       pageCss,
       /:has\(\.zenLiveBotPresenceBody\[data-render-detail="micro"\]\)\s*\{[^}]*scale:\s*1;/u,

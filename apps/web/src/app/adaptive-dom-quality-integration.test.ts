@@ -15,6 +15,10 @@ const governor = readFileSync(
   new URL("./PrismAdaptiveDomQualityGovernor.tsx", import.meta.url),
   "utf8",
 );
+const nativeTooltipGuard = readFileSync(
+  new URL("./DisableNativeTooltips.tsx", import.meta.url),
+  "utf8",
+);
 const sceneHost = readFileSync(
   new URL("./PrismSceneHost.ts", import.meta.url),
   "utf8",
@@ -38,11 +42,12 @@ describe("adaptive DOM quality integration", () => {
     assert.match(page, /<FpsCounter \/>/u);
   });
 
-  it("keeps the automatic governor observe-only while publishing FPS telemetry", () => {
+  it("publishes FPS telemetry and applies a separate runtime quality floor", () => {
     assert.match(governor, /controller\.recordFrame/u);
     assert.match(governor, /publishPrismFrameRate/u);
-    assert.doesNotMatch(governor, /dataset\.prismAdaptiveQuality/u);
-    assert.doesNotMatch(governor, /setAttribute\([^)]*prism-adaptive-quality/u);
+    assert.match(governor, /dataset\.prismRuntimeQuality/u);
+    assert.match(governor, /recordInteractionDelay/u);
+    assert.match(governor, /addEventListener\("beforeinput"/u);
   });
 
   it("detects longtask support from the registry, not from a thrown error", () => {
@@ -97,12 +102,67 @@ describe("adaptive DOM quality integration", () => {
     assert.doesNotMatch(debatePerformance, /setQualityState|qualityChanged/u);
   });
 
-  it("has no automatic quality CSS gate, including Signal effects", () => {
-    for (const source of [globalStyles, pageStyles, signalStyles]) {
-      assert.doesNotMatch(source, /data-prism-adaptive-quality/u);
-    }
-    assert.doesNotMatch(page, /data-prism-adaptive-surface/u);
-    assert.match(page, /data-prism-expensive-effect="true"/u);
+  it("keeps live Coffee and Signal phosphor outside adaptive load shedding", () => {
+    assert.match(globalStyles, /data-prism-runtime-quality="minimal"/u);
     assert.match(globalStyles, /data-prism-graphics-quality="low"/u);
+    assert.match(signalStyles, /data-live-episode="true"/u);
+    assert.doesNotMatch(page, /data-prism-live-performance-surface/u);
+    assert.doesNotMatch(page, /data-prism-live-phosphor-budget/u);
+    assert.doesNotMatch(page, /<PrismLivePerformanceBodyMarker/u);
+    assert.doesNotMatch(
+      globalStyles,
+      /body\[data-prism-live-performance-active="true"\]/u,
+    );
+    assert.doesNotMatch(globalStyles, /data-prism-live-phosphor-budget/u);
+    assert.doesNotMatch(
+      signalStyles,
+      /\.shell\[data-live-episode="true"\] \.stageViewport::after,[\s\S]{0,220}\.studioGlow,[\s\S]{0,160}\.signalFloorGlowLayer[\s\S]{0,160}display: none;/u,
+    );
+    assert.match(
+      globalStyles,
+      /data-prism-runtime-quality="minimal"[\s\S]{0,220}:not\([\s\S]{0,120}data-crt-phosphor="bot"/u,
+    );
+    assert.match(page, /data-prism-priority-phosphor="true"/u);
+  });
+
+  it("chunks post-session native-tooltip cleanup across animation frames", () => {
+    assert.match(nativeTooltipGuard, /TITLE_SWEEP_CHUNK_SIZE = 4/u);
+    assert.match(
+      nativeTooltipGuard,
+      /processed >= TITLE_SWEEP_CHUNK_SIZE/u,
+    );
+    assert.match(nativeTooltipGuard, /requestAnimationFrame/u);
+    assert.match(
+      page,
+      /Restoring the setup canvas is non-urgent[\s\S]{0,180}startTransition/u,
+    );
+    assert.match(
+      pageStyles,
+      /\.coffeeGroupSessionListViewport \{[\s\S]{0,260}contain: layout paint style;/u,
+    );
+    assert.match(
+      pageStyles,
+      /\.coffeeGroupSessionRow \{[\s\S]{0,100}content-visibility: auto;[\s\S]{0,80}contain-intrinsic-size: auto 34px;/u,
+    );
+    assert.match(
+      page,
+      /coffeeSetupRestoreStage[\s\S]{0,900}coffeeSetupRestoreSessionLimit/u,
+    );
+    assert.match(
+      page,
+      /assignCoffeeSetupRestoreStage\("overview"\)[\s\S]{0,180}assignCoffeeSetupRestoreStage\("sidebar"\)[\s\S]{0,420}revealedSessions \+ 3/u,
+    );
+    assert.match(
+      page,
+      /schedule\(\(\) => \{[\s\S]{0,80}startTransition\(\(\) => \{[\s\S]{0,100}assignCoffeeSetupRestoreStage\("overview"\)/u,
+    );
+    assert.match(
+      page,
+      /revealedSessions = Math\.min[\s\S]{0,180}startTransition\(\(\) => \{[\s\S]{0,100}setCoffeeSetupRestoreSessionLimit\(revealedSessions\)/u,
+    );
+    assert.match(
+      page,
+      /groupSessions[\s\S]{0,120}slice\(0, coffeeSetupRestoreSessionLimit\)/u,
+    );
   });
 });

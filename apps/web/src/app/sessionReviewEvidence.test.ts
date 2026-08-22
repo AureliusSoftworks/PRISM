@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import type { ReplayRecordingV1 } from "@localai/shared";
 import {
   sessionReviewDirectionLines,
+  sessionReviewTranscriptCoverageLines,
   sessionReviewRecordingEvidenceFromRecording,
   sessionReviewRecordingSummaryLines,
   sessionReviewStableJson,
@@ -147,5 +148,39 @@ describe("session review evidence", () => {
     assert.match(text, /"model":"gemma"/u);
     assert.match(text, /"moodKey":"warm"/u);
     assert.doesNotMatch(text, /secret|private|hidden|apiKey|filePath|prompt/u);
+  });
+});
+
+
+describe("session review transcript coverage", () => {
+  const evidence = {
+    state: "recorded" as const,
+    manifestVersion: 2,
+    direction: [
+      { sequence: 1, atMs: 0, endMs: null, kind: "speech", sourceMessageId: "a", payload: {} },
+      { sequence: 2, atMs: 10, endMs: null, kind: "mood", sourceMessageId: "b", payload: {} },
+      { sequence: 3, atMs: 20, endMs: null, kind: "camera", sourceMessageId: null, payload: {} },
+    ],
+  } as unknown as Parameters<typeof sessionReviewTranscriptCoverageLines>[0]["evidence"];
+
+  it("declares completeness when every directed message is printed", () => {
+    const lines = sessionReviewTranscriptCoverageLines({
+      evidence,
+      presentMessageIds: new Set(["a", "b"]),
+    });
+    assert.match(lines.join("\n"), /coverage: complete/u);
+  });
+
+  it("names the messages a lossy transcript dropped", () => {
+    // The Coffee export once shipped five opening turns that existed in the
+    // recording and in no visible section, with nothing disclosing the gap.
+    const lines = sessionReviewTranscriptCoverageLines({
+      evidence,
+      presentMessageIds: new Set(["b"]),
+    });
+    const text = lines.join("\n");
+    assert.match(text, /coverage: INCOMPLETE — 1 of 2/u);
+    assert.match(text, /- Missing message: a/u);
+    assert.doesNotMatch(text, /Missing message: b/u);
   });
 });

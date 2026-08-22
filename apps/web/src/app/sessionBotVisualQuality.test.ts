@@ -33,14 +33,23 @@ test("removes the cast-count quality stepper from production", () => {
   }
 });
 
-test("Coffee, Signal, and Debate pin runtime session tiers to full presentation", () => {
+test("Coffee and Signal preserve authored live avatars while shedding peripheral work", () => {
   assert.match(pageSource, /data-session-bot-visual-quality/u);
-  assert.match(pageSource, /const coffeeSessionBotVisualQuality = "full"/u);
+  assert.match(
+    pageSource,
+    /const coffeeSessionBotVisualQuality = coffeeSeatAvatarPresentation/u,
+  );
   assert.match(signalSource, /data-session-bot-visual-quality/u);
   assert.match(signalSource, /signalStageVisibleBotCount/u);
   assert.match(
     signalSource,
-    /const signalStageBotVisualQuality = signalAvatarPresentation\(\)/u,
+    /const signalStageBotVisualQuality = signalAvatarPresentation\(\{[\s\S]{0,100}live: !args\.replay/u,
+  );
+  assert.doesNotMatch(pageSource, /data-signal-live-compact-avatar/u);
+  assert.doesNotMatch(pageSource, /data-coffee-live-seat-avatar/u);
+  assert.match(
+    pageSource,
+    /runtimeEffectsEnabled=\{!signalLivePerformanceAvatar\}/u,
   );
   assert.match(debateSource, /data-session-bot-visual-quality/u);
   assert.match(

@@ -1,0 +1,458 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  DEBATE_MYSTERY_MANSION_GRID,
+  DEBATE_MYSTERY_ROOM_FOOTPRINTS,
+  DEBATE_MYSTERY_ROOM_TEMPLATES,
+  compileDeterministicDebateMystery,
+  debateMysteryRoomsShareEdge,
+  debateMysteryNotebookCharacterCount,
+  gradeDebateMysteryTheory,
+  projectDebateMysteryCase,
+  resolveDebateMysteryConfig,
+  resolveDebateMysteryWeaponCategory,
+  shouldRevealDebateMysteryWeaponAtOpening,
+  updateDebateMysteryPublicLeads,
+  validateDebateMysteryCaseBible,
+  validateDebateMysteryNotebookCleanupProposal,
+  type DebateMysteryNotebookCleanupProposalV1,
+  type DebateMysteryNotebookV1,
+  type DebateWhodunnitCreateConfigV1,
+} from "./debateMystery.ts";
+
+function createConfig(
+  preset: "compact" | "standard" | "grand",
+  difficulty: "casual" | "classic" | "mastermind",
+  nonce: string,
+): DebateWhodunnitCreateConfigV1 {
+  const suspectCount = preset === "compact" ? 4 : preset === "standard" ? 6 : 8;
+  return {
+    version: 1,
+    preset,
+    difficulty,
+    artMode: "bundled",
+    inspiration: "",
+    nonce,
+    suspectBotIds: Array.from({ length: suspectCount }, (_, index) => `bot-${index + 1}`),
+    prosecutorPartnerBotId: "prosecutor",
+    rivalDefenseBotId: "defense",
+  };
+}
+
+function suspects(count: number) {
+  return Array.from({ length: count }, (_, index) => ({
+    botId: `bot-${index + 1}`,
+    exportHash: `hash-${index + 1}`,
+    name: `Suspect ${index + 1}`,
+    color: null,
+    glyph: null,
+  }));
+}
+
+test("bundles at least fifteen original semantic room templates with accessible regions", () => {
+  assert.ok(DEBATE_MYSTERY_ROOM_TEMPLATES.length >= 15);
+  for (const template of DEBATE_MYSTERY_ROOM_TEMPLATES) {
+    const broadRegions = template.regions.filter((region) => !region.id.includes(":detail-"));
+    const detailRegions = template.regions.filter((region) => region.id.includes(":detail-"));
+    assert.ok(broadRegions.length >= 6 && broadRegions.length <= 10);
+    assert.equal(detailRegions.length, broadRegions.length * 3);
+    assert.equal(new Set(template.regions.map((region) => region.id)).size, template.regions.length);
+    assert.equal(
+      new Set(template.regions.map((region) => JSON.stringify(region.polygon))).size,
+      template.regions.length,
+    );
+    for (const region of template.regions) {
+      assert.ok(region.polygon.length >= 4);
+      for (const point of region.polygon) {
+        assert.ok(point.x >= 0 && point.x <= 100);
+        assert.ok(point.y >= 0 && point.y <= 100);
+      }
+    }
+  }
+});
+
+test("keeps sparse generator-v1 Case Bibles valid while generator-v2 cases require dense searches", () => {
+  const config = resolveDebateMysteryConfig(createConfig("compact", "classic", "legacy-density"));
+  const current = compileDeterministicDebateMystery({ config, suspects: suspects(4) });
+  const requiredRegionTargets = new Set(
+    current.accessLocks
+      .filter((lock) => lock.targetKind === "region")
+      .map((lock) => lock.targetId),
+  );
+  const legacy = {
+    ...current,
+    generatorVersion: 1,
+    activeRegions: current.rooms.flatMap((room) => {
+      const roomOutcomes = current.activeRegions.filter((outcome) => outcome.roomId === room.id);
+      return roomOutcomes.filter((outcome, index) => (
+        index < 2
+        || Boolean(outcome.evidenceId)
+        || Boolean(outcome.inventoryItemId)
+        || requiredRegionTargets.has(`${outcome.roomId}:${outcome.regionId}`)
+      ));
+    }),
+  };
+  assert.equal(validateDebateMysteryCaseBible(legacy, config.actionBudget).valid, true);
+  assert.equal(
+    validateDebateMysteryCaseBible({ ...legacy, generatorVersion: 2 }, config.actionBudget).valid,
+    false,
+  );
+});
+
+test("locks weapon category and opening-reveal probability boundaries deterministically", () => {
+  assert.equal(resolveDebateMysteryWeaponCategory(0), "poison");
+  assert.equal(resolveDebateMysteryWeaponCategory(0.249999), "poison");
+  assert.equal(resolveDebateMysteryWeaponCategory(0.25), "ordinary_object");
+  assert.equal(resolveDebateMysteryWeaponCategory(0.749999), "ordinary_object");
+  assert.equal(resolveDebateMysteryWeaponCategory(0.75), "recognizable_weapon");
+  assert.equal(shouldRevealDebateMysteryWeaponAtOpening(0.499999), true);
+  assert.equal(shouldRevealDebateMysteryWeaponAtOpening(0.5), false);
+  const resolvedConfig = resolveDebateMysteryConfig(createConfig("compact", "classic", "weapon-boundary"));
+  const bible = compileDeterministicDebateMystery({ config: resolvedConfig, suspects: suspects(4) });
+  assert.equal(bible.evidence.filter((item) => item.isCanonicalWeapon).length, 1);
+  assert.equal(bible.evidence.find((item) => item.isCanonicalWeapon)?.object, bible.weapon.descriptor);
+  assert.ok(bible.evidence.some((item) => item.relation === "related"));
+  assert.ok(bible.evidence.some((item) => item.relation === "unrelated"));
+
+  const openingBible = structuredClone(bible);
+  openingBible.weapon.revealedAtOpening = true;
+  const openingState = projectDebateMysteryCase(openingBible, resolvedConfig);
+  const canonicalWeapon = openingBible.evidence.find((item) => item.isCanonicalWeapon)!;
+  const crimeScene = openingState.rooms.find((room) => room.id === openingBible.crimeSceneRoomId)!;
+  assert.deepEqual(openingState.discoveredEvidence.map((item) => item.id), [canonicalWeapon.id]);
+  assert.ok(crimeScene.inspectedRegionIds.includes(canonicalWeapon.regionId));
+
+  const hiddenBible = structuredClone(bible);
+  hiddenBible.weapon.revealedAtOpening = false;
+  const hiddenState = projectDebateMysteryCase(hiddenBible, resolvedConfig);
+  assert.equal(hiddenState.discoveredEvidence.length, 0);
+  assert.ok(!hiddenState.rooms.find((room) => room.id === hiddenBible.crimeSceneRoomId)!
+    .inspectedRegionIds.includes(canonicalWeapon.regionId));
+});
+
+test("maintains several public leads from discovered facts without projecting their private recipes", () => {
+  const config = resolveDebateMysteryConfig(createConfig("compact", "classic", "public-leads"));
+  const bible = compileDeterministicDebateMystery({ config, suspects: suspects(4) });
+  const opening = projectDebateMysteryCase(bible, config);
+
+  assert.equal(bible.leadDefinitions.length, 5);
+  assert.ok(opening.leads.length >= 2);
+  assert.ok(opening.leads.every((lead) => lead.revision >= 1));
+  const openingJson = JSON.stringify(opening);
+  assert.doesNotMatch(openingJson, /leadDefinitions|requiredForensicEvidenceIds|requiredObservationKeys|"kind":"proof"/u);
+
+  const fullyDiscovered = structuredClone(opening);
+  fullyDiscovered.discoveredEvidence = bible.evidence.map((item) => {
+    const { factTags: _factTags, relation: _relation, isCanonicalWeapon: _isCanonicalWeapon, ...publicItem } = item;
+    return publicItem;
+  });
+  fullyDiscovered.forensicFindings = bible.evidence.map((item) => ({
+    evidenceId: item.id,
+    usedInMurder: item.isCanonicalWeapon,
+    contextualRelevance: item.isCanonicalWeapon ? "used" as const : item.relation === "unrelated" ? "no_matching_trace" as const : "contextual" as const,
+    summary: "Frozen public forensic result.",
+    completedAt: "2026-08-21T12:00:00.000Z",
+  }));
+  fullyDiscovered.testimony = bible.testimony.map(({ factTags: _factTags, ...item }) => ({ ...item, discovered: true }));
+  fullyDiscovered.rooms = fullyDiscovered.rooms.map((room) => ({
+    ...room,
+    discovered: true,
+    observations: bible.activeRegions.filter((outcome) => outcome.roomId === room.id).map((outcome) => ({
+      regionId: outcome.regionId,
+      label: outcome.mechanism,
+      observation: outcome.response,
+      outcomeKind: outcome.kind,
+      evidenceId: outcome.evidenceId,
+    })),
+  }));
+  fullyDiscovered.leads = updateDebateMysteryPublicLeads(bible, fullyDiscovered, "2026-08-21T12:00:00.000Z");
+
+  assert.equal(fullyDiscovered.leads.length, 5);
+  assert.equal(fullyDiscovered.leads.find((lead) => lead.id === "lead-final-hour")?.status, "unresolved");
+  assert.equal(fullyDiscovered.leads.find((lead) => lead.id === "lead-method")?.status, "reconciled");
+  assert.equal(fullyDiscovered.leads.find((lead) => lead.id === "lead-misplaced-object")?.status, "stalled");
+  assert.ok(fullyDiscovered.leads.some((lead) => lead.revision > 1));
+  assert.ok(fullyDiscovered.leads.every((lead) => lead.linkedEvidenceIds.every((id) => fullyDiscovered.discoveredEvidence.some((item) => item.id === id))));
+  assert.ok(fullyDiscovered.leads.every((lead) => lead.linkedTestimonyIds.every((id) => fullyDiscovered.testimony.some((item) => item.id === id))));
+});
+
+test("maps the sixteen bundled production scenes to stable templates and public names", () => {
+  const expected = new Map([
+    ["foyer", ["Foyer", "/debate/mystery/rooms/foyer.webp"]],
+    ["kitchen", ["Kitchen", "/debate/mystery/rooms/kitchen.webp"]],
+    ["ballroom", ["Ballroom", "/debate/mystery/rooms/ballroom.webp"]],
+    ["dining-room", ["Dining Room", "/debate/mystery/rooms/dining-room.webp"]],
+    ["parlor", ["Living Room", "/debate/mystery/rooms/living-room.webp"]],
+    ["utility", ["Garage", "/debate/mystery/rooms/garage.webp"]],
+    ["cellar", ["Basement", "/debate/mystery/rooms/basement.webp"]],
+    ["library", ["Library", "/debate/mystery/rooms/library.webp"]],
+    ["study", ["Office", "/debate/mystery/rooms/office.webp"]],
+    ["conservatory", ["Arboretum", "/debate/mystery/rooms/arboretum.webp"]],
+    ["primary-bedroom", ["Bedroom", "/debate/mystery/rooms/bedroom.webp"]],
+    ["wine-room", ["Lounge", "/debate/mystery/rooms/lounge.webp"]],
+    ["theater", ["Theater", "/debate/mystery/rooms/theater.webp"]],
+    ["pool", ["Pool", "/debate/mystery/rooms/pool.webp"]],
+    ["bathroom", ["Bathroom", "/debate/mystery/rooms/bathroom.webp"]],
+    ["rooftop-lounge", ["Rooftop Lounge", "/debate/mystery/rooms/rooftop-lounge.webp"]],
+  ]);
+  const bundled = DEBATE_MYSTERY_ROOM_TEMPLATES.filter((template) => template.bundledAssetPath);
+  assert.equal(bundled.length, expected.size);
+  for (const template of bundled) {
+    const expectedTemplate = expected.get(template.id);
+    assert.ok(expectedTemplate, `unexpected bundled template ${template.id}`);
+    assert.equal(template.name, expectedTemplate[0]);
+    assert.equal(template.bundledAssetPath, expectedTemplate[1]);
+    assert.equal(template.nativeWidth, 1600);
+    assert.equal(template.nativeHeight, 900);
+    const broadRegions = template.regions.filter((region) => !region.id.includes(":detail-"));
+    assert.ok(broadRegions.length >= 6 && broadRegions.length <= 10);
+    assert.equal(template.regions.length, broadRegions.length * 4);
+  }
+});
+
+test("seeded mansion layouts are stable for a seed and vary across seeds", () => {
+  const signatures = new Set<string>();
+
+  for (let index = 0; index < 36; index += 1) {
+    const config = resolveDebateMysteryConfig(createConfig("grand", "classic", `lineup-${index}`));
+    const first = compileDeterministicDebateMystery({ config, suspects: suspects(8) });
+    const second = compileDeterministicDebateMystery({ config, suspects: suspects(8) });
+    const layout = first.rooms.map((room) => [room.templateId, room.floor, room.x, room.y, room.width, room.height]);
+
+    assert.deepEqual(second.rooms.map((room) => [room.templateId, room.floor, room.x, room.y, room.width, room.height]), layout);
+    signatures.add(JSON.stringify(layout));
+  }
+
+  assert.ok(signatures.size > 20);
+});
+
+test("room types keep their stable normalized footprints while instances stay in bounds", () => {
+  assert.deepEqual(Object.fromEntries(DEBATE_MYSTERY_ROOM_FOOTPRINTS.map((entry) => [entry.roomTypeId, [entry.width, entry.height]])), {
+    bathroom: [2, 2], foyer: [3, 2], study: [3, 2], "dining-room": [4, 2], kitchen: [4, 2], conservatory: [4, 2],
+    library: [3, 3], parlor: [4, 3], "primary-bedroom": [4, 3], "guest-bedroom": [4, 3], cellar: [4, 3], theater: [4, 3], "wine-room": [4, 3],
+    ballroom: [5, 3], utility: [5, 3], pool: [5, 3], "rooftop-lounge": [10, 6],
+  });
+  const request: DebateWhodunnitCreateConfigV1 = {
+    ...createConfig("grand", "classic", "largest-custom-lineup"),
+    preset: "custom",
+    floors: 3,
+    totalRooms: 18,
+  };
+  const config = resolveDebateMysteryConfig(request);
+  const bible = compileDeterministicDebateMystery({ config, suspects: suspects(8) });
+  assert.equal(bible.rooms.length, 18);
+  for (const room of bible.rooms) {
+    assert.ok(room.x >= 0 && room.y >= 0);
+    assert.ok(room.x + room.width <= DEBATE_MYSTERY_MANSION_GRID.width);
+    assert.ok(room.y + room.height <= DEBATE_MYSTERY_MANSION_GRID.height);
+  }
+});
+
+test("mansion rooms do not overlap, share doors on edges, and retain the architectural circulation promises", () => {
+  for (let index = 0; index < 80; index += 1) {
+    const config = resolveDebateMysteryConfig(createConfig("grand", "classic", `architecture-${index}`));
+    const bible = compileDeterministicDebateMystery({ config, suspects: suspects(8) });
+    const foyer = bible.rooms.find((room) => room.templateId === "foyer")!;
+    assert.equal(foyer.floor, 1);
+    assert.ok(foyer.x === 0 || foyer.y === 0, "the foyer should touch an exterior edge");
+    for (const room of bible.rooms) {
+      for (const neighborId of room.neighborIds) {
+        const neighbor = bible.rooms.find((candidate) => candidate.id === neighborId)!;
+        if (neighbor.floor === room.floor) assert.equal(debateMysteryRoomsShareEdge(room, neighbor), true);
+      }
+      for (const other of bible.rooms.filter((candidate) => candidate.floor === room.floor && candidate.id > room.id)) {
+        assert.equal(room.x < other.x + other.width && room.x + room.width > other.x && room.y < other.y + other.height && room.y + room.height > other.y, false);
+      }
+    }
+    const adjacent = (leftType: string, rightType: string): boolean => {
+      const left = bible.rooms.find((room) => room.templateId === leftType);
+      const right = bible.rooms.find((room) => room.templateId === rightType);
+      return !left || !right || left.neighborIds.includes(right.id);
+    };
+    assert.equal(adjacent("kitchen", "dining-room"), true);
+    assert.equal(adjacent("bathroom", "primary-bedroom"), true);
+    assert.equal(adjacent("ballroom", "foyer"), true);
+    assert.equal(adjacent("utility", "kitchen"), true);
+    const rooftop = bible.rooms.find((room) => room.templateId === "rooftop-lounge")!;
+    assert.equal(rooftop.floor, config.floors);
+    assert.ok(rooftop.neighborIds.some((id) => bible.rooms.find((room) => room.id === id)?.floor < rooftop.floor || bible.rooms.find((room) => room.id === id)?.floor === rooftop.floor));
+  }
+});
+
+test("three hundred seeded preset cases stay connected, solvable, and exactly three-route", () => {
+  const presets = ["compact", "standard", "grand"] as const;
+  const difficulties = ["casual", "classic", "mastermind"] as const;
+  let sawEvidenceInSuspectRoom = false;
+  for (let index = 0; index < 300; index += 1) {
+    const request = createConfig(presets[index % presets.length]!, difficulties[index % difficulties.length]!, `property-${index}`);
+    const config = resolveDebateMysteryConfig(request);
+    const bible = compileDeterministicDebateMystery({ config, suspects: suspects(config.suspectBotIds.length) });
+    const result = validateDebateMysteryCaseBible(bible, config.actionBudget);
+    assert.deepEqual(result.errors, [], `seed ${index}: ${result.errors.join("; ")}`);
+    assert.equal(bible.proofBundles.length, 3);
+    assert.equal(bible.rooms.length, config.totalRooms);
+    const expectedRegionsPerRoom = config.difficulty === "casual"
+      ? 12
+      : config.difficulty === "mastermind"
+        ? 20
+        : 16;
+    assert.equal(bible.activeRegions.length, bible.rooms.length * expectedRegionsPerRoom);
+    const suspectRoomIds = new Set(bible.suspects.map((suspect) => suspect.roomId));
+    if (bible.evidence.some((item) => suspectRoomIds.has(item.roomId))) {
+      sawEvidenceInSuspectRoom = true;
+    }
+    for (const room of bible.rooms) {
+      const regionCount = bible.activeRegions.filter((outcome) => outcome.roomId === room.id).length;
+      assert.equal(
+        regionCount,
+        expectedRegionsPerRoom,
+        `seed ${index}: ${room.id} must expose the difficulty-scaled inspectable regions`,
+      );
+    }
+    for (let floor = 1; floor <= config.floors; floor += 1) {
+      const floorRooms = bible.rooms.filter((room) => room.floor === floor);
+      if (floorRooms.length < 3) continue;
+      // A floor with enough rooms must read as a compact building, not a
+      // horizontal procession of cards. Both axes are occupied, and at least
+      // one room participates in genuinely branching same-floor connections.
+      assert.ok(new Set(floorRooms.map((room) => room.x)).size > 1, `seed ${index}, floor ${floor}: expected multiple columns`);
+      assert.ok(new Set(floorRooms.map((room) => room.y)).size > 1, `seed ${index}, floor ${floor}: expected multiple rows`);
+      const minimumBranchDegree = floorRooms.length >= 4 ? 3 : 2;
+      assert.ok(
+        floorRooms.some((room) => room.neighborIds.filter((neighborId) =>
+          bible.rooms.find((candidate) => candidate.id === neighborId)?.floor === floor,
+        ).length >= minimumBranchDegree),
+        `seed ${index}, floor ${floor}: expected a room with multiple same-floor doors`,
+      );
+    }
+  }
+  assert.equal(sawEvidenceInSuspectRoom, true, "at least one seeded case should place evidence in a suspect room");
+});
+
+test("access items resolve item, room, and region locks without cycles or public relevance labels", () => {
+  const config = resolveDebateMysteryConfig(createConfig("standard", "classic", "access-locks"));
+  const bible = compileDeterministicDebateMystery({ config, suspects: suspects(6) });
+  assert.deepEqual(new Set(bible.accessLocks.map((lock) => lock.targetKind)), new Set(["item", "room", "region"]));
+  assert.ok(bible.inventoryItems.some((item) => item.usable && !bible.accessLocks.some((lock) => lock.requiredAccessItemId === item.id)));
+  assert.equal(bible.accessLocks.find((lock) => lock.id === "lock-jewelry-box")?.proofCritical, true);
+  assert.equal(bible.evidence.find((item) => item.id === "evidence-locked-jewelry-box")?.relation, "unrelated");
+  const projected = projectDebateMysteryCase(bible, config);
+  const lockedRoomId = bible.accessLocks.find((lock) => lock.targetKind === "room")!.targetId;
+  assert.equal(projected.rooms.find((room) => room.id === lockedRoomId)?.locked, true);
+  assert.deepEqual(projected.inventoryItems, []);
+  assert.deepEqual(validateDebateMysteryCaseBible(bible, config.actionBudget).errors, []);
+
+  const cyclic = structuredClone(bible);
+  const jewelryLock = cyclic.accessLocks.find((lock) => lock.id === "lock-jewelry-box")!;
+  const safeLock = cyclic.accessLocks.find((lock) => lock.id === "lock-hidden-safe")!;
+  jewelryLock.requiredAccessItemId = "artifact-private-ledger";
+  safeLock.requiredAccessItemId = "artifact-heirloom-jewels";
+  cyclic.inventoryItems.find((item) => item.id === "artifact-private-ledger")!.usable = true;
+  cyclic.inventoryItems.find((item) => item.id === "artifact-heirloom-jewels")!.usable = true;
+  assert.ok(validateDebateMysteryCaseBible(cyclic, config.actionBudget).errors.some((error) => error.includes("dependency cycle")));
+});
+
+test("custom floor counts keep architectural room groups intact", () => {
+  for (let totalRooms = 5; totalRooms <= 18; totalRooms += 1) {
+    for (let floors = 1; floors <= 3; floors += 1) {
+      for (let seed = 0; seed < 4; seed += 1) {
+        const suspectCount = Math.min(8, totalRooms - 1);
+        const request: DebateWhodunnitCreateConfigV1 = {
+          ...createConfig("grand", "classic", `custom-${totalRooms}-${floors}-${seed}`),
+          preset: "custom",
+          floors,
+          totalRooms,
+          suspectBotIds: Array.from({ length: suspectCount }, (_, index) => `bot-${index + 1}`),
+        };
+        const config = resolveDebateMysteryConfig(request);
+        const bible = compileDeterministicDebateMystery({ config, suspects: suspects(suspectCount) });
+        const result = validateDebateMysteryCaseBible(bible, config.actionBudget);
+        assert.deepEqual(result.errors, [], `${totalRooms} rooms / ${floors} floors / seed ${seed}: ${result.errors.join("; ")}`);
+        assert.equal(new Set(bible.rooms.map((room) => room.floor)).size, floors);
+      }
+    }
+  }
+});
+
+test("same room polygon can resolve with different outcomes and hiding origins", () => {
+  const observations = new Map<string, Set<string>>();
+  const mechanisms = new Map<string, Set<string>>();
+  for (let index = 0; index < 250; index += 1) {
+    const config = resolveDebateMysteryConfig(createConfig("grand", "classic", `regions-${index}`));
+    const bible = compileDeterministicDebateMystery({ config, suspects: suspects(8) });
+    for (const outcome of bible.activeRegions) {
+      const room = bible.rooms.find((candidate) => candidate.id === outcome.roomId)!;
+      const key = `${room.templateId}/${outcome.regionId}`;
+      if (!observations.has(key)) observations.set(key, new Set());
+      if (!mechanisms.has(key)) mechanisms.set(key, new Set());
+      observations.get(key)!.add(outcome.kind);
+      mechanisms.get(key)!.add(outcome.hidingMechanism);
+    }
+  }
+  assert.ok([...observations.values()].some((values) => values.size > 1));
+  assert.ok([...mechanisms.values()].some((values) => values.size > 1));
+});
+
+test("wrong culprits and false accomplices cannot pass while supersets select the strongest bundle", () => {
+  const config = resolveDebateMysteryConfig(createConfig("grand", "classic", "verdict"));
+  let bible = compileDeterministicDebateMystery({ config, suspects: suspects(8) });
+  // Make accomplice behavior deterministic for this verdict boundary test.
+  bible = { ...bible, accompliceSeatId: bible.suspects.find((seat) => seat.seatId !== bible.culpritSeatId)!.seatId };
+  const allEvidence = bible.evidence.map((item) => item.id);
+  const allTestimony = bible.testimony.map((item) => item.id);
+  const correct = gradeDebateMysteryTheory({ bible, theory: { culpritSeatId: bible.culpritSeatId, accompliceSeatId: bible.accompliceSeatId, method: bible.method, motive: bible.motive, opportunity: "complete", evidenceIds: allEvidence, testimonyIds: allTestimony }, sustainedTestimonyIds: allTestimony, credibilityRemaining: 2, deliveredAt: "now" });
+  assert.equal(correct.grade, "smoking_gun");
+  assert.equal(correct.matchedBundleId, "smoking-gun");
+  const strongBundle = bible.proofBundles.find((bundle) => bundle.grade === "strong_case")!;
+  const omittedAccomplice = gradeDebateMysteryTheory({ bible, theory: { culpritSeatId: bible.culpritSeatId, accompliceSeatId: null, method: bible.method, motive: "", opportunity: "coherent", evidenceIds: strongBundle.requiredEvidenceIds, testimonyIds: strongBundle.requiredTestimonyIds }, sustainedTestimonyIds: [], credibilityRemaining: 3, deliveredAt: "now" });
+  assert.equal(omittedAccomplice.grade, "strong_case");
+  assert.equal(omittedAccomplice.matchedBundleId, "strong-case");
+  const wrong = gradeDebateMysteryTheory({ bible, theory: { culpritSeatId: bible.suspects.find((seat) => seat.seatId !== bible.culpritSeatId)!.seatId, accompliceSeatId: null, method: "", motive: "", opportunity: "", evidenceIds: allEvidence, testimonyIds: allTestimony }, sustainedTestimonyIds: allTestimony, credibilityRemaining: 2, deliveredAt: "now" });
+  assert.equal(wrong.grade, "incorrect");
+  const falseAccomplice = gradeDebateMysteryTheory({ bible, theory: { culpritSeatId: bible.culpritSeatId, accompliceSeatId: bible.suspects.find((seat) => seat.seatId !== bible.culpritSeatId && seat.seatId !== bible.accompliceSeatId)!.seatId, method: bible.method, motive: bible.motive, opportunity: "complete", evidenceIds: allEvidence, testimonyIds: allTestimony }, sustainedTestimonyIds: allTestimony, credibilityRemaining: 2, deliveredAt: "now" });
+  assert.equal(falseAccomplice.grade, "incorrect");
+});
+
+test("notebook cleanup requires complete provenance and immutable protected tokens", () => {
+  const notebook: DebateMysteryNotebookV1 = {
+    version: 1,
+    sessionId: "case-1",
+    revision: 4,
+    createdAt: "now",
+    updatedAt: "now",
+    pages: [{ id: "page-1", title: "Case Notes", createdAt: "now", updatedAt: "now", blocks: [
+      { id: "b1", kind: "paragraph", text: "Maybe Rowan did not enter the study." },
+      { id: "b2", kind: "quote", text: "“I never touched it.”" },
+      { id: "b3", kind: "reference", text: "[[evidence:evidence-1]]", referenceId: "evidence-1", referenceKind: "evidence" },
+    ] }],
+  };
+  assert.ok(debateMysteryNotebookCharacterCount(notebook) > 0);
+  const proposal: DebateMysteryNotebookCleanupProposalV1 = {
+    version: 1,
+    id: "proposal-1",
+    sessionId: "case-1",
+    sourceRevision: 4,
+    scopePageIds: ["page-1"],
+    status: "pending",
+    createdAt: "now",
+    resolvedAt: null,
+    pages: [{ pageId: "page-1", proposedTitle: "Case Notes", proposedBlocks: [
+      { id: "p1", kind: "paragraph", text: "Maybe Rowan did not enter the study.", sourceBlockIds: ["b1"] },
+      { id: "p2", kind: "quote", text: "“I never touched it.”", sourceBlockIds: ["b2"] },
+      { id: "p3", kind: "reference", text: "[[evidence:evidence-1]]", referenceId: "evidence-1", referenceKind: "evidence", sourceBlockIds: ["b3"] },
+    ] }],
+  };
+  assert.equal(validateDebateMysteryNotebookCleanupProposal(notebook, proposal).valid, true);
+  const strengthened = structuredClone(proposal);
+  strengthened.pages[0]!.proposedBlocks[0]!.text = "Rowan entered the study.";
+  assert.equal(validateDebateMysteryNotebookCleanupProposal(notebook, strengthened).valid, false);
+  const changedQuote = structuredClone(proposal);
+  changedQuote.pages[0]!.proposedBlocks[1]!.text = "“I touched it.”";
+  assert.equal(validateDebateMysteryNotebookCleanupProposal(notebook, changedQuote).valid, false);
+  const invented = structuredClone(proposal);
+  invented.pages[0]!.proposedBlocks[0]!.text = "Maybe Rowan did not enter the study at 10:30 PM; therefore Rowan is the murderer.";
+  assert.equal(validateDebateMysteryNotebookCleanupProposal(notebook, invented).valid, false);
+  const missing = structuredClone(proposal);
+  missing.pages[0]!.proposedBlocks.pop();
+  assert.equal(validateDebateMysteryNotebookCleanupProposal(notebook, missing).valid, false);
+});

@@ -486,7 +486,10 @@ describe("Coffee speaker gaze wiring", () => {
       pageSource,
       /coffeeVisibleDirectedMentionBotIds\([\s\S]*?resolveCoffeeSpeakerGazeTarget\([\s\S]*?explicitMentionBotIds:/,
     );
-    assert.doesNotMatch(pageSource, /replayPlayerGazeDirection/u);
+    assert.match(
+      pageSource,
+      /const replayPlayerGazeDirection =\s*coffeeSpeakerGazeParticipant\?\.kind === "player"/u,
+    );
     assert.match(
       pageSource,
       /coffeeSpeakerGazeParticipant\?\.kind === "bot"[\s\S]*?coffeePlateFaceScaleYFromGazeDirection/,
@@ -504,7 +507,7 @@ describe("Coffee speaker gaze wiring", () => {
   it("turns and resets the body subtly with a reduced-motion fallback", () => {
     assert.match(
       cssSource,
-      /\.coffeeSeat\s*\{[\s\S]*?--coffee-speaker-gaze-body-shift-x:\s*0px;[\s\S]*?--coffee-speaker-gaze-body-rotation:\s*0deg/,
+      /\.coffeeSeat,\s*\.coffeeReplayPlayerAvatar\s*\{[\s\S]*?--coffee-speaker-gaze-body-shift-x:\s*0px;[\s\S]*?--coffee-speaker-gaze-body-rotation:\s*0deg/,
     );
     assert.match(
       cssSource,
@@ -516,7 +519,7 @@ describe("Coffee speaker gaze wiring", () => {
     );
     assert.match(
       cssSource,
-      /\.coffeeSeat \.zenLiveBotPresenceBody\s*\{[\s\S]*?transition:\s*transform 380ms/,
+      /\.coffeeSeat \.zenLiveBotPresenceBody,\s*\.coffeeReplayPlayerAvatar \.zenLiveBotPresenceBody\s*\{[\s\S]*?transition:\s*transform 380ms/,
     );
     assert.match(
       cssSource,

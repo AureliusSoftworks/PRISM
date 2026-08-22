@@ -466,20 +466,32 @@ describe("voice Phase 1 boundary", () => {
     assert.doesNotMatch(requestBody?.text as string, /warmly/u);
   });
 
-  it("forces American and British Accent Maps across conflicting Premium voices", async () => {
+  it("forces American, British, and Scottish Accent Map phonology across conflicting Premium voices", async () => {
     const sourceText = "Peter Piper picked a peck of pickled peppers.";
     const cases = [
       {
         voiceId: "british-premium-voice",
         nativeAccent: "British",
         accentDefinitionId: "american-english",
-        expectedText: `[American accent] ${sourceText}`,
+        targetIpa: "ˈpiːtɚ ˈpaɪpɚ pɪkt ə pɛk əv ˈpɪkəld ˈpɛpɚz",
+        expectedText:
+          "[American accent] /ˈpiːtɚ ˈpaɪpɚ pɪkt ə pɛk əv ˈpɪkəld ˈpɛpɚz/",
       },
       {
         voiceId: "american-premium-voice",
         nativeAccent: "American",
         accentDefinitionId: "british-english",
-        expectedText: `[British accent] ${sourceText}`,
+        targetIpa: "ˈpiːtə ˈpaɪpə pɪkt ə pɛk əv ˈpɪkəld ˈpɛpəz",
+        expectedText:
+          "[British accent] /ˈpiːtə ˈpaɪpə pɪkt ə pɛk əv ˈpɪkəld ˈpɛpəz/",
+      },
+      {
+        voiceId: "american-premium-voice",
+        nativeAccent: "American",
+        accentDefinitionId: "scottish-english",
+        targetIpa: "ˈpitər ˈpaɪpər pɪkt ə pɛk əv ˈpɪkəld ˈpɛpərz",
+        expectedText:
+          "[Scottish accent] /ˈpitər ˈpaɪpər pɪkt ə pɛk əv ˈpɪkəld ˈpɛpərz/",
       },
     ] as const;
     const providerTexts: string[] = [];
@@ -497,6 +509,11 @@ describe("voice Phase 1 boundary", () => {
           elevenLabsNativeAccentHint: testCase.nativeAccent,
           accentDefinitionId: testCase.accentDefinitionId,
         },
+        accentIpaResolver: async (args: { text: string }) => ({
+          sourceText: args.text,
+          targetLocale: "en-US",
+          targetIpa: testCase.targetIpa,
+        }),
         fetchImpl: (async (url, init) => {
           requestedUrl = String(url);
           requestBody = JSON.parse(String(init?.body));
@@ -517,7 +534,7 @@ describe("voice Phase 1 boundary", () => {
       providerTexts.push(String(requestBody?.text));
     }
 
-    assert.notEqual(providerTexts[0], providerTexts[1]);
+    assert.equal(new Set(providerTexts).size, 3);
   });
 
   it("carries Accent Map strength in the Premium direction, never in the line", async () => {
@@ -859,6 +876,11 @@ describe("voice Phase 1 boundary", () => {
         elevenLabsDirection: "hushed",
         accentDefinitionId: "american-english",
       },
+      accentIpaResolver: async () => ({
+        sourceText: spokenText,
+        targetLocale: "en-US",
+        targetIpa: "ˈpiːtɚ ˈpaɪpɚ pɪkt ə pɛk əv ˈpɪkəld ˈpɛpɚz",
+      }),
       fetchImpl: (async (url, init) => {
         requestedUrl = String(url);
         const body = JSON.parse(String(init?.body)) as {
@@ -886,7 +908,10 @@ describe("voice Phase 1 boundary", () => {
     const speech = await requestElevenLabsSpeechWithTimestamps(request);
 
     assert.match(requestedUrl, /british-premium-voice\/with-timestamps/u);
-    assert.equal(providerText, `[American accent] [hushed] ${sourceText}`);
+    assert.equal(
+      providerText,
+      "[American accent] [hushed] [sighs] /ˈpiːtɚ ˈpaɪpɚ pɪkt ə pɛk əv ˈpɪkəld ˈpɛpɚz/ [laughs]",
+    );
     assert.equal(speech.alignment?.characters.join(""), spokenText);
     assert.doesNotMatch(speech.alignment?.characters.join("") ?? "", /[\/\[\]ˈɾɚɹ]/u);
     assert.equal(request.text, sourceText);
@@ -1361,6 +1386,56 @@ describe("voice Phase 1 boundary", () => {
     );
   });
 
+  it("treats explicit Refract accent and gender words as provider-metadata constraints", () => {
+    const candidates = [
+      {
+        publicOwnerId: "owner-a",
+        voiceId: "australian-male",
+        name: "Lachlan",
+        category: "professional" as const,
+        description: "Warm narrator",
+        previewUrl: "https://example.test/lachlan.mp3",
+        labels: { accent: "Australian", gender: "male" },
+      },
+      {
+        publicOwnerId: "owner-b",
+        voiceId: "indian-female",
+        name: "Priya",
+        category: "professional" as const,
+        description: "Warm narrator",
+        previewUrl: "https://example.test/priya.mp3",
+        labels: { accent: "Indian", gender: "female" },
+      },
+    ];
+    assert.equal(
+      selectElevenLabsSharedVoiceCandidate(
+        candidates,
+        new Set(),
+        () => 0.99,
+        "australian man",
+      )?.voiceId,
+      "australian-male",
+    );
+    assert.equal(
+      selectElevenLabsSharedVoiceCandidate(
+        candidates.filter((candidate) => candidate.voiceId !== "australian-male"),
+        new Set(),
+        () => 0,
+        "australian man",
+      ),
+      null,
+    );
+    assert.equal(
+      selectElevenLabsSharedVoiceCandidate(
+        candidates,
+        new Set(),
+        () => 0.99,
+        "man",
+      )?.voiceId,
+      "australian-male",
+    );
+  });
+
   it("resolves an authenticated ElevenLabs voice ID to its display name", async () => {
     let requestedUrl = "";
     let requestedKey = "";
@@ -1489,11 +1564,15 @@ describe("voice Phase 1 boundary", () => {
     const serverSource = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
     const discoverRoute = serverSource.slice(
       serverSource.indexOf('route("POST", "/api/voices/elevenlabs/shared/discover"'),
-      serverSource.indexOf('route("POST", "/api/voices/elevenlabs/library"'),
+      serverSource.indexOf('route("POST", "/api/voices/elevenlabs/shared/use"'),
     );
     const saveRoute = serverSource.slice(
       serverSource.indexOf('route("POST", "/api/voices/elevenlabs/library"'),
       serverSource.indexOf('route("GET", "/api/voices/elevenlabs"'),
+    );
+    const useRoute = serverSource.slice(
+      serverSource.indexOf('route("POST", "/api/voices/elevenlabs/shared/use"'),
+      serverSource.indexOf('route("POST", "/api/voices/elevenlabs/library"'),
     );
     assert.match(discoverRoute, /getElevenLabsApiKeyForUser\(userId, userKey\) \?\? config\.elevenLabsApiKey/u);
     assert.match(discoverRoute, /sharedVoiceExclusions\(body\.excludeVoiceIds\)/u);
@@ -1501,6 +1580,9 @@ describe("voice Phase 1 boundary", () => {
     assert.match(discoverRoute, /listPremiumVoiceLibrary\(db, userId\)/u);
     assert.match(discoverRoute, /selectElevenLabsSharedVoiceCandidate\(/u);
     assert.doesNotMatch(discoverRoute, /importElevenLabsSharedVoice|\/v1\/voices\/add|DELETE/u);
+    assert.match(useRoute, /requestElevenLabsVoiceCatalog\(/u);
+    assert.match(useRoute, /importElevenLabsSharedVoice\(/u);
+    assert.doesNotMatch(useRoute, /savePremiumVoiceLibraryEntry|premium_voice_library/u);
     assert.match(saveRoute, /findPremiumVoiceLibraryEntry\(db, userId, input\.sourceVoiceId\)/u);
     assert.match(saveRoute, /getElevenLabsApiKeyForUser\(userId, userKey\) \?\? config\.elevenLabsApiKey/u);
     assert.match(saveRoute, /requestElevenLabsVoiceCatalog\(/u);

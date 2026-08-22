@@ -1,3 +1,5 @@
+import type { ListenerReactionPlanV1 } from "./listenerReaction.ts";
+
 export const PREPARED_TURN_VERSION = 1 as const;
 /** Long enough for a complete ten-minute AUTO recovery plus commit handoff. */
 export const PREPARED_TURN_TTL_MS = 12 * 60_000;
@@ -27,6 +29,8 @@ export interface PreparedTurnUtteranceV1 {
   id: string;
   speakerBotId: string;
   text: string;
+  /** Exact public Signal beat authored beside this speculative utterance. */
+  signalListenerReactionPlan?: ListenerReactionPlanV1;
 }
 
 export interface PreparedTurnCommitResultV1 {

@@ -1,7 +1,12 @@
 export const PRISM_DOM_FRAME_FLOOR_FPS = 30;
 export const PRISM_DOM_SAMPLE_WINDOW_SIZE = 12;
 export const PRISM_DOM_SAMPLE_WARMUP_MS = 500;
-export const PRISM_DOM_SLEEP_DELTA_MS = 250;
+export const PRISM_DOM_SUSPENSION_DELTA_MS = 10_000;
+export const PRISM_DOM_BALANCED_FRAME_INTERVAL_MS = 1_000 / 30;
+export const PRISM_DOM_MINIMAL_FRAME_INTERVAL_MS = 50;
+export const PRISM_DOM_RECOVERY_WINDOWS_PER_STEP = 20;
+
+export type PrismDomRuntimeQuality = "full" | "balanced" | "minimal";
 
 export interface PrismDomFrameWindow {
   observedFps: number;
@@ -18,8 +23,15 @@ export interface PrismDomFrameSample {
 
 export interface PrismDomFrameSampleResult {
   accepted: boolean;
-  ignoredReason?: "inactive" | "warmup" | "sleep-delta";
+  ignoredReason?: "inactive" | "warmup" | "suspension-delta";
   window?: PrismDomFrameWindow;
+  quality: PrismDomRuntimeQuality;
+  qualityChanged: boolean;
+}
+
+export interface PrismDomInteractionSampleResult {
+  quality: PrismDomRuntimeQuality;
+  qualityChanged: boolean;
 }
 
 function percentile(sorted: readonly number[], fraction: number): number {
@@ -59,14 +71,14 @@ export function prismDomFrameWindow(
   };
 }
 
-/**
- * Observes DOM/CSS frame pressure without changing presentation quality.
- * Rendering diagnostics retain the cadence windows while explicit player
- * graphics settings remain the only quality control.
- */
+/** Performance-first quality governor. Player graphics settings remain the
+ * authored ceiling; this runtime floor only sheds optional presentation work
+ * when a frame or interaction misses the 30 FPS budget. */
 export class PrismDomAdaptiveQualityController {
   private ignoredUntilMs: number;
   private samples: number[] = [];
+  private quality: PrismDomRuntimeQuality = "full";
+  private recoveryWindows = 0;
 
   constructor(nowMs = 0) {
     this.ignoredUntilMs = nowMs + PRISM_DOM_SAMPLE_WARMUP_MS;
@@ -74,32 +86,107 @@ export class PrismDomAdaptiveQualityController {
 
   noteDiscontinuity(nowMs: number): void {
     this.samples = [];
+    this.recoveryWindows = 0;
     this.ignoredUntilMs = nowMs + PRISM_DOM_SAMPLE_WARMUP_MS;
+  }
+
+  currentQuality(): PrismDomRuntimeQuality {
+    return this.quality;
+  }
+
+  recordInteractionDelay(
+    delayMs: number,
+  ): PrismDomInteractionSampleResult {
+    return this.applyImmediatePressure(delayMs);
+  }
+
+  private setQuality(next: PrismDomRuntimeQuality): boolean {
+    if (this.quality === next) return false;
+    this.quality = next;
+    this.recoveryWindows = 0;
+    return true;
+  }
+
+  private applyImmediatePressure(
+    intervalMs: number,
+  ): PrismDomInteractionSampleResult {
+    if (intervalMs >= PRISM_DOM_MINIMAL_FRAME_INTERVAL_MS) {
+      return {
+        quality: "minimal",
+        qualityChanged: this.setQuality("minimal"),
+      };
+    }
+    if (
+      intervalMs > PRISM_DOM_BALANCED_FRAME_INTERVAL_MS &&
+      this.quality === "full"
+    ) {
+      return {
+        quality: "balanced",
+        qualityChanged: this.setQuality("balanced"),
+      };
+    }
+    return { quality: this.quality, qualityChanged: false };
+  }
+
+  private recoverOneStep(): boolean {
+    if (this.quality === "minimal") return this.setQuality("balanced");
+    if (this.quality === "balanced") return this.setQuality("full");
+    this.recoveryWindows = 0;
+    return false;
   }
 
   recordFrame(sample: PrismDomFrameSample): PrismDomFrameSampleResult {
     if (!sample.foreground) {
       this.noteDiscontinuity(sample.nowMs);
-      return { accepted: false, ignoredReason: "inactive" };
+      return {
+        accepted: false,
+        ignoredReason: "inactive",
+        quality: this.quality,
+        qualityChanged: false,
+      };
     }
-    if (sample.deltaMs > PRISM_DOM_SLEEP_DELTA_MS) {
+    if (sample.deltaMs > PRISM_DOM_SUSPENSION_DELTA_MS) {
       this.noteDiscontinuity(sample.nowMs);
-      return { accepted: false, ignoredReason: "sleep-delta" };
+      return {
+        accepted: false,
+        ignoredReason: "suspension-delta",
+        quality: this.quality,
+        qualityChanged: false,
+      };
     }
+    const immediatePressure = this.applyImmediatePressure(sample.deltaMs);
     if (sample.nowMs < this.ignoredUntilMs) {
-      return { accepted: false, ignoredReason: "warmup" };
+      return {
+        accepted: false,
+        ignoredReason: "warmup",
+        ...immediatePressure,
+      };
     }
 
     this.samples.push(Math.max(0, sample.deltaMs));
     if (this.samples.length < PRISM_DOM_SAMPLE_WINDOW_SIZE) {
-      return { accepted: true };
+      return { accepted: true, ...immediatePressure };
     }
 
     const window = prismDomFrameWindow(this.samples);
     this.samples = [];
+    let qualityChanged = immediatePressure.qualityChanged;
+    if (window.belowFloor) {
+      this.recoveryWindows = 0;
+      qualityChanged = this.setQuality("minimal") || qualityChanged;
+    } else if (window.recoveryHeadroom && this.quality !== "full") {
+      this.recoveryWindows += 1;
+      if (this.recoveryWindows >= PRISM_DOM_RECOVERY_WINDOWS_PER_STEP) {
+        qualityChanged = this.recoverOneStep() || qualityChanged;
+      }
+    } else {
+      this.recoveryWindows = 0;
+    }
     return {
       accepted: true,
       window,
+      quality: this.quality,
+      qualityChanged,
     };
   }
 }

@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import {
+  claimLiveLocalModelLane,
   keepAuxiliaryLocalModelWarm,
   prepareLocalModel,
+  releaseLiveLocalModelLane,
   resetModelReadinessForTests,
 } from "../model-readiness.ts";
 import { SECONDARY_OLLAMA_MODEL_PREFIX } from "../providers.ts";
@@ -91,6 +93,88 @@ describe("local model readiness", () => {
     await eventuallyReady("llama3.2");
   });
 
+  it("leaves warming as soon as a concurrent real request makes the model resident", async () => {
+    let resident = false;
+    let chatCalls = 0;
+    let releaseChat!: () => void;
+    const chatGate = new Promise<void>((resolve) => {
+      releaseChat = resolve;
+    });
+    globalThis.fetch = (async (
+      input: string | URL | Request,
+    ) => {
+      const url = String(input);
+      if (url.endsWith("/api/ps")) {
+        return Response.json({
+          models: resident
+            ? [
+                {
+                  model: "llama3.2",
+                  digest: "sha256:loaded-by-real-turn",
+                  expires_at: new Date(Date.now() + 60_000).toISOString(),
+                },
+              ]
+            : [],
+        });
+      }
+      assert.equal(url.endsWith("/api/chat"), true);
+      chatCalls += 1;
+      await chatGate;
+      return Response.json({ done: true });
+    }) as typeof fetch;
+
+    const warming = await prepareLocalModel({ model: "llama3.2" });
+    assert.equal(warming.state, "warming");
+    assert.equal(chatCalls, 1);
+
+    resident = true;
+    const ready = await prepareLocalModel({ model: "llama3.2" });
+    assert.equal(ready.state, "ready");
+    assert.equal(ready.expiresAt !== null, true);
+    assert.equal(chatCalls, 1);
+
+    releaseChat();
+    await eventuallyReady("llama3.2");
+  });
+
+  it("recovers a cached warmup failure when a real request made the model resident", async () => {
+    let resident = false;
+    let chatCalls = 0;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/api/ps")) {
+        return Response.json({
+          models: resident
+            ? [
+                {
+                  model: "llama3.2:latest",
+                  digest: "sha256:loaded-after-warmup-failure",
+                  expires_at: new Date(Date.now() + 60_000).toISOString(),
+                },
+              ]
+            : [],
+        });
+      }
+      assert.equal(url.endsWith("/api/chat"), true);
+      chatCalls += 1;
+      return new Response("warmup failed", { status: 500 });
+    }) as typeof fetch;
+
+    const warming = await prepareLocalModel({ model: "llama3.2" });
+    assert.equal(warming.state, "warming");
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    const failed = await prepareLocalModel({ model: "llama3.2" });
+    assert.equal(failed.state, "unavailable");
+    assert.equal(failed.failure, "request_failed");
+
+    resident = true;
+    const ready = await prepareLocalModel({ model: "llama3.2" });
+    assert.equal(ready.state, "ready");
+    assert.equal(ready.expiresAt !== null, true);
+    assert.equal(chatCalls, 1);
+  });
+
   it("coalesces persistent auxiliary warms and uses indefinite residency", async () => {
     let resident = false;
     let chatCalls = 0;
@@ -128,6 +212,169 @@ describe("local model readiness", () => {
     const [firstReady, secondReady] = await Promise.all([first, second]);
     assert.equal(firstReady.state, "ready");
     assert.equal(secondReady.state, "ready");
+  });
+
+  it("gives live sessions one residency lane without evicting another live owner", async () => {
+    let running = ["coffee-model", "auxiliary-model", "stale-model"];
+    const unloaded: string[] = [];
+    globalThis.fetch = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const url = String(input);
+      if (url.endsWith("/api/ps")) {
+        return Response.json({
+          models: running.map((model) => ({ model, digest: `sha256:${model}` })),
+        });
+      }
+      assert.equal(url.endsWith("/api/generate"), true);
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<
+        string,
+        unknown
+      >;
+      assert.equal(body.keep_alive, 0);
+      assert.equal(body.prompt, "");
+      unloaded.push(String(body.model));
+      running = running.filter((model) => model !== body.model);
+      return Response.json({ done: true });
+    }) as typeof fetch;
+
+    assert.equal(
+      await claimLiveLocalModelLane({
+        owner: "coffee:user:session",
+        model: "coffee-model",
+      }),
+      true,
+    );
+    assert.deepEqual(unloaded, ["auxiliary-model", "stale-model"]);
+
+    running.push("signal-model", "new-stale-model");
+    assert.equal(
+      await claimLiveLocalModelLane({
+        owner: "signal:user:episode",
+        model: "signal-model",
+      }),
+      true,
+    );
+    assert.deepEqual(unloaded, [
+      "auxiliary-model",
+      "stale-model",
+      "new-stale-model",
+    ]);
+  });
+
+  it("suppresses auxiliary residency while a live session owns that host", async () => {
+    let chatCalls = 0;
+    globalThis.fetch = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const url = String(input);
+      if (url.endsWith("/api/ps")) {
+        return Response.json({
+          models: [{ model: "coffee-model", digest: "sha256:coffee" }],
+        });
+      }
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<
+        string,
+        unknown
+      >;
+      if (url.endsWith("/api/chat")) chatCalls += 1;
+      return Response.json({ model: body.model, done: true });
+    }) as typeof fetch;
+
+    await claimLiveLocalModelLane({
+      owner: "coffee:user:session",
+      model: "coffee-model",
+    });
+    const status = await keepAuxiliaryLocalModelWarm({
+      model: "auxiliary-model",
+    });
+
+    assert.equal(status.state, "not_applicable");
+    assert.equal(chatCalls, 0);
+  });
+
+  it("cancels an in-flight auxiliary warmup before sweeping the live lane", async () => {
+    let warmupAborted = false;
+    let auxResident = false;
+    const unloaded: string[] = [];
+    globalThis.fetch = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const url = String(input);
+      if (url.endsWith("/api/ps")) {
+        return Response.json({
+          models: [
+            { model: "coffee-model", digest: "sha256:coffee" },
+            ...(auxResident
+              ? [{ model: "auxiliary-model", digest: "sha256:aux" }]
+              : []),
+          ],
+        });
+      }
+      if (url.endsWith("/api/chat")) {
+        return await new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () => {
+              warmupAborted = true;
+              auxResident = true;
+              reject(new DOMException("Aborted", "AbortError"));
+            },
+            { once: true },
+          );
+        });
+      }
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<
+        string,
+        unknown
+      >;
+      unloaded.push(String(body.model));
+      auxResident = false;
+      return Response.json({ done: true });
+    }) as typeof fetch;
+
+    const warmup = keepAuxiliaryLocalModelWarm({ model: "auxiliary-model" });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await claimLiveLocalModelLane({
+      owner: "coffee:user:session",
+      model: "coffee-model",
+      quiesceOtherModels: true,
+    });
+    await warmup;
+
+    assert.equal(warmupAborted, true);
+    assert.deepEqual(unloaded, ["auxiliary-model"]);
+  });
+
+  it("releases a finished live model only after its final owner exits", async () => {
+    const unloaded: string[] = [];
+    globalThis.fetch = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const url = String(input);
+      if (url.endsWith("/api/ps")) {
+        return Response.json({
+          models: [{ model: "shared-live-model", digest: "sha256:shared" }],
+        });
+      }
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<
+        string,
+        unknown
+      >;
+      unloaded.push(String(body.model));
+      return Response.json({ done: true });
+    }) as typeof fetch;
+
+    await claimLiveLocalModelLane({ owner: "coffee:a", model: "shared-live-model" });
+    await claimLiveLocalModelLane({ owner: "signal:b", model: "shared-live-model" });
+    await releaseLiveLocalModelLane("coffee:a");
+    assert.deepEqual(unloaded, []);
+    await releaseLiveLocalModelLane("signal:b");
+    assert.deepEqual(unloaded, ["shared-live-model"]);
   });
 
   it("treats expired residency as cold", async () => {

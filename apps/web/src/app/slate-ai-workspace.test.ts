@@ -22,7 +22,8 @@ const page = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 
 describe("Slate AI workspace controls", () => {
   it("keeps prose routing project-scoped with an explicit model picker", () => {
-    assert.match(workspace, /\["offline", "auto", "online"\]/u);
+    assert.match(workspace, /\["offline", "online"\]/u);
+    assert.match(workspace, /<option value=\{SLATE_AUTO_MODEL_VALUE\}>/u);
     assert.match(workspace, /data-tutorial-target="slate-ai-controls"/u);
     assert.match(workspace, /saveProseModel/u);
     assert.match(workspace, /Every generated prose artifact keeps its provider and\s+model receipt/u);
@@ -58,7 +59,8 @@ describe("Slate AI workspace controls", () => {
     assert.match(globalCompanion, /data-tutorial-target="prism-companion"/u);
     assert.match(globalCompanion, /onPointerDown=\{beginDrag\}/u);
     assert.match(globalCompanion, /<ReactMarkdown remarkPlugins=\{\[remarkGfm\]\}>/u);
-    assert.match(globalCompanion, /latest 3 recover on this surface/u);
+    assert.match(globalCompanion, /recoveryMessages: priorMessages/u);
+    assert.match(globalCompanion, /contextTokenIds: contextTokenIdsRef\.current/u);
     assert.match(
       globalCompanion,
       /className=\{styles\.composer\}[\s\S]{0,3000}shouldSubmitComposerOnEnter/u,

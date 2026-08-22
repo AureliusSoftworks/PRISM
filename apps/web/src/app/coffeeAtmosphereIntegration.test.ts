@@ -20,6 +20,10 @@ describe("Coffee atmosphere integration", () => {
   it("mounts first under the DOM table with no pointer or accessibility surface", () => {
     assert.match(
       pageSource,
+      /!conversationActive &&[\s\S]{0,100}!coffeeAtmosphereRetiredAfterLiveRef\.current \? \([\s\S]*<CoffeeAtmosphereScene/u,
+    );
+    assert.match(
+      pageSource,
       /<CoffeeAtmosphereScene[\s\S]*?<div className=\{styles\.coffeeTableGlow\}/,
     );
     assert.match(sceneSource, /data-coffee-atmosphere="true"/);
@@ -29,6 +33,17 @@ describe("Coffee atmosphere integration", () => {
       /\.coffeeAtmosphereScene \{[\s\S]*z-index: 0;[\s\S]*pointer-events: none;/,
     );
     assert.match(css, /\.coffeeTableDisk \{[\s\S]*z-index: 1;/);
+  });
+
+  it("does not remount the setup renderer during live-session exit", () => {
+    assert.match(
+      pageSource,
+      /const coffeeAtmosphereRetiredAfterLiveRef = useRef\(false\)/u,
+    );
+    assert.match(
+      pageSource,
+      /coffeeSessionPhase !== "selecting" &&[\s\S]{0,100}coffeeSessionPhase !== "preview"[\s\S]{0,180}coffeeAtmosphereRetiredAfterLiveRef\.current = true/u,
+    );
   });
 
   it("keeps the CSS glow until WebGL is ready and restores it on loss/failure", () => {
@@ -42,7 +57,7 @@ describe("Coffee atmosphere integration", () => {
     assert.doesNotMatch(sceneSource, /role="alert"|aria-live/);
   });
 
-  it("routes only semantic atmosphere inputs and normalized speaker color", () => {
+  it("routes only semantic atmosphere inputs while the setup scene is mounted", () => {
     assert.match(
       sceneSource,
       /interface CoffeeAtmosphereSceneProps \{[\s\S]*phase:[\s\S]*theme:[\s\S]*seed:[\s\S]*activeSpeakerColor:[\s\S]*replayActive:/,

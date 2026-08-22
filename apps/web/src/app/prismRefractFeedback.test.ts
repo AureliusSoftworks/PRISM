@@ -26,11 +26,11 @@ test("Refract holds its in-field feedback without opening model preparation", ()
   );
   assert.match(
     companionSource,
-    /await nextPrismRefractPaint\(controller\.signal\)[\s\S]*const rawValue = await target\.generate/u,
+    /await nextPrismRefractPaint\(controller\.signal\)[\s\S]*const rawValue = await runPrismRefractGenerationWithTimeout[\s\S]*target\.generate/u,
   );
   assert.doesNotMatch(
     companionSource.match(
-      /await nextPrismRefractPaint\(controller\.signal\)[\s\S]*?const rawValue = await target\.generate/u,
+      /await nextPrismRefractPaint\(controller\.signal\)[\s\S]*?const rawValue = await runPrismRefractGenerationWithTimeout[\s\S]*?target\.generate/u,
     )?.[0] ?? "",
     /prepareLocalModel/u,
   );
@@ -51,7 +51,7 @@ test("Refract holds its in-field feedback without opening model preparation", ()
 test("Refract owns one universal animated sheen and a static reduced-motion state", () => {
   assert.match(
     globalStyles,
-    /data-prism-refract-sheen="true"\]\[data-prism-refract-state="generating"[\s\S]*var\(--bg-surface, var\(--baseline-bg\)\)[\s\S]*outline: 2px solid[\s\S]*animation: prismRefractSheenFlow 1\.7s linear infinite/u,
+    /data-prism-refract-sheen="true"\]\[data-prism-refract-state="generating"[\s\S]*var\(--bg-surface, var\(--baseline-bg\)\)[\s\S]*outline: 2px solid[\s\S]*animation:\s*prismRefractSheenFlow 1\.7s linear infinite/u,
   );
   assert.match(
     globalStyles,

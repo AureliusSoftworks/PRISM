@@ -46,7 +46,7 @@ describe("backend connection recovery", () => {
   it("keeps the authenticated auxiliary lane warm without surfacing background failures", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     const heartbeatStart = pageSource.indexOf(
-      "if (!user?.id || !settings || backendUnavailable) return;",
+      "if (!user?.id || backendUnavailable) return;",
     );
     const heartbeatEnd = pageSource.indexOf(
       "if (!backendUnavailable) {",

@@ -37,8 +37,14 @@ test("debate archive list items carry routing and frozen cast visuals", () => {
     sharedDebate,
     /advocateVisuals\?: DebateSessionAdvocateVisualV1\[\]/u,
   );
-  assert.match(sharedDebate, /reasoningEffort\?: ModelReasoningEffortPreference/u);
-  assert.match(sharedDebate, /lastReasoningEffort\?: ModelReasoningEffortPreference/u);
+  assert.match(
+    sharedDebate,
+    /reasoningEffort\?: Exclude<ProviderReasoningEffort, "auto"> \| null/u,
+  );
+  assert.match(
+    sharedDebate,
+    /lastReasoningEffort\?: Exclude<ProviderReasoningEffort, "auto"> \| null/u,
+  );
   assert.match(sharedDebate, /lastTurbo\?: boolean/u);
   assert.match(apiDebate, /castColors = debateSessionListCastColors\(parsed\)/u);
   assert.match(

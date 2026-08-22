@@ -2745,7 +2745,6 @@ export interface CoffeeGroup {
 
 export {
   COFFEE_HISTORY_WINDOW_HARD_CAP,
-  COFFEE_AUTO_HARD_CAP_MS,
   COFFEE_BAR_ORDER_MAX_LENGTH,
   COFFEE_SPEAKER_REPLY_MAX_OUTPUT_TOKENS_HARD,
   COFFEE_TABLE_MOOD_PRESETS,
@@ -2867,8 +2866,9 @@ export interface Conversation {
   /** Stable History ownership/navigation metadata. Older clients may ignore it. */
   history?: ConversationHistoryEntry;
   /**
-   * Coffee-only — ordered list of 2-5 bot ids that participate in this
-   * live session. Captured once when the Coffee thread is created and
+   * Coffee-only — ordered list of bot ids that participate in this live
+   * session. New sessions seat at most 3; legacy snapshots may contain 2-5.
+   * Captured once when the Coffee thread is created and
    * frozen for the conversation. The router LLM picks which one of these
    * speaks next on each turn.
    * Always undefined for `chat` and `sandbox` mode rows.
@@ -3141,7 +3141,8 @@ export interface MemoryValidationEvent {
  * - `"sandbox"`: the full command-center. Cross-session memory is disabled
  *   entirely here — the rolling message window IS the thread's memory. The
  *   `incognito` flag is ignored for Sandbox requests.
- * - `"coffee"`: timed live conversation for 2-5 reactive bots. User turns and
+ * - `"coffee"`: timed live conversation for up to 3 reactive bots drawn from
+ *   a saved group. User turns and
  *   autonomous timed turns trigger a router LLM pick (which bot speaks next
  *   based on personality + context), then that bot replies through the Coffee
  *   pipeline. Memory is thread-scoped only in the first pass.
@@ -3436,7 +3437,7 @@ export type CoffeeArrivalScenario =
 
 /** Request body for `POST /api/coffee/sessions`. */
 export interface CoffeeSessionCreateRequest {
-  /** Fixed five-seat table layout; null entries are empty chairs. */
+  /** Fixed five-seat layout with exactly three occupied seats for a new table. */
   groupBotIds: Array<string | null>;
   /** Optional session tuning; omitted rows use server defaults. */
   coffeeSettings?: unknown;
@@ -3576,8 +3577,8 @@ export interface CoffeeTurnRequest {
   /** Existing Coffee conversation id, or omitted for legacy first-turn creation. */
   conversationId?: string;
   /**
-   * Ordered list of 2-5 bot ids, or a fixed five-seat layout with null empty
-   * seats. Required only for legacy first-turn creation; ignored on subsequent
+   * Ordered list of exactly 3 bot ids, or a fixed five-seat layout with two
+   * null empty seats. Required only for legacy first-turn creation; ignored on subsequent
    * turns (server uses the group stored on the conversation row). New clients
    * should create a Coffee session first via `POST /api/coffee/sessions`.
    */
@@ -3720,6 +3721,7 @@ export interface CoffeePollPlayerVoteResponse {
 }
 export * from "./autoCameraDirector.js";
 export * from "./botcast.js";
+export * from "./producerQuoteReception.js";
 export * from "./actionSfxPack.js";
 export * from "./englishPacingProfile.js";
 export * from "./corporalityFoley.js";
@@ -3753,6 +3755,7 @@ export * from "./imageAssets.js";
 export * from "./softAssetJobs.js";
 export * from "./slateHandoff.js";
 export * from "./debate.js";
+export * from "./debateMystery.js";
 export * from "./debateParticipation.js";
 export * from "./debateChairFavorability.js";
 export * from "./coffeeGroupSetup.js";

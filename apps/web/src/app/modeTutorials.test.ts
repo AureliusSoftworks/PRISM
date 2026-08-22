@@ -11,6 +11,52 @@ function signalPowersTutorialBody(): string {
 }
 
 describe("mode tutorials", () => {
+  it("covers the complete Whodunnit investigation and trial loop", () => {
+    const step = MODE_TUTORIALS.debate.steps.find(
+      (candidate) => candidate.heading === "Investigate a Whodunnit",
+    );
+    assert.ok(step);
+    assert.equal(step.targetSelector, '[data-tutorial-target="debate-format"]');
+    assert.match(step.body, /Recipe Seed/u);
+    assert.match(step.body, /Surprise me/u);
+    assert.match(step.body, /compact dark HUD/u);
+    assert.match(step.body, /names your mission/u);
+    assert.match(step.body, /Actions, Case file, and Theory/u);
+    assert.match(step.body, /current room stage, compact mansion map, and persistent Case Notes stay visible together/u);
+    assert.match(step.body, /Co-counsel’s latest reading appears at the lower edge of the stage/u);
+    assert.doesNotMatch(step.body, /co-counsel Mini and name are always visible/u);
+    assert.match(step.body, /Case file keeps their consultation composer/u);
+    assert.match(step.body, /compact mansion map fits beside the Debate stage/u);
+    assert.match(step.body, /adjacent room boxes/u);
+    assert.match(step.body, /Micro avatar/u);
+    assert.match(step.body, /every undiscovered room conceals its name/u);
+    assert.match(step.body, /wandering Mini avatar/u);
+    assert.match(step.body, /Suggested questions only fill the composer/u);
+    assert.match(step.body, /Only populated authored blocks are added/u);
+    assert.match(step.body, /one canonical weapon/u);
+    assert.match(step.body, /Forensics for exactly three investigation actions/u);
+    assert.match(step.body, /committed testimony/u);
+    assert.match(step.body, /Talking is free/u);
+    assert.match(step.body, /circular investigation lens/u);
+    assert.match(step.body, /Type @ in the interview composer/u);
+    assert.match(step.body, /Selecting a room never travels you/u);
+    assert.match(step.body, /choose Investigate room to travel and update the existing room stage/u);
+    assert.match(step.body, /many seeded areas/u);
+    assert.match(step.body, /Every area remains re-clickable/u);
+    assert.match(step.body, /Drag a usable item onto a locked inventory object, mansion room, or room area/u);
+    assert.match(step.body, /harder cases may contain convincing keys with no matching lock/u);
+    assert.match(step.body, /Case Notes stay inline beneath the compact map/u);
+    assert.match(step.body, /private notebook references/u);
+    assert.match(step.body, /one-window reference revisions/u);
+    assert.match(step.body, /partner composer can also @ a lead at its current revision/u);
+    assert.match(step.body, /meaning-preserving diff/u);
+    assert.match(step.body, /Theory Board/u);
+    assert.match(step.body, /Press, Present Evidence, or Pass/u);
+    assert.match(step.body, /one continuance/u);
+    assert.match(step.body, /Reveal spoilers/u);
+    assert.match(step.body, /blank notebook and fresh visuals/u);
+  });
+
   it("teaches quiet pre-session alignment through each applet's native room", () => {
     const coffee = MODE_TUTORIALS.coffee.steps.find(
       (step) => step.heading === "Set the table",
@@ -57,6 +103,10 @@ describe("mode tutorials", () => {
     assert.match(copy, /own model picker in the Prism companion's Synthesis tab/u);
     assert.match(copy, /LOCAL only offers local models and ONLINE only offers online models/u);
     assert.match(copy, /each lane remembers its model or Auto choice/u);
+    assert.match(copy, /Refract model is separate from chat and bot models/u);
+    assert.match(copy, /APP MODE badge mirrors the global privacy toggle/u);
+    assert.match(copy, /LOCAL keeps refraction offline/u);
+    assert.match(copy, /ONLINE may send the item being refracted to an online provider/u);
   });
 
   it("explains transient native Max without changing the ordinary ladder", () => {
@@ -130,7 +180,8 @@ describe("mode tutorials", () => {
     assert.match(step?.body ?? "", /same Chassis scale remains selected/u);
     assert.match(step?.body ?? "", /Surprise me auditions a different shared ElevenLabs preview/u);
     assert.match(step?.body ?? "", /Wield Prism onto the Voice Library card/u);
-    assert.match(step?.body ?? "", /Only Save to Library bookmarks the result/u);
+    assert.match(step?.body ?? "", /Use for this bot assigns an audition only to the current draft/u);
+    assert.match(step?.body ?? "", /Save to Library separately bookmarks it/u);
     assert.match(step?.body ?? "", /private PRISM account library/u);
   });
 
@@ -180,7 +231,10 @@ describe("mode tutorials", () => {
     assert.match(step.body, /Neutralize mood/u);
     assert.match(step.body, /soft global mood can carry across compatible modes/u);
     assert.match(step.body, /Overview keeps the bot, Talk to me, groups, and suggestions close/u);
-    assert.match(step.body, /Customize holds Avatar Studio; Library holds connected resources and assets/u);
+    assert.match(
+      step.body,
+      /Customize holds Avatar Studio, memories, and Neutralize mood; Library holds connected resources and assets/u,
+    );
     assert.match(step.body, /Avatar Studio opens as a deeper editing layer/u);
     assert.match(step.body, /exact same room bot and keyboard focus/u);
   });
@@ -328,7 +382,10 @@ describe("mode tutorials", () => {
       assert.ok(tutorial.steps.length > 0);
       for (const step of tutorial.steps) {
         assert.ok(step.clickLabel.trim().length > 0);
-        assert.match(step.targetSelector, /^\[data-tutorial-target=/);
+        assert.match(
+          step.targetSelector,
+          /^\[(?:data-tutorial-target|data-zen-live-bot-presence-plate)=/,
+        );
       }
     }
   });
@@ -493,9 +550,9 @@ describe("mode tutorials", () => {
     assert.ok(step);
     assert.match(step.body, /Accent, Local, and Premium stages/u);
     assert.match(step.body, /full-width map/u);
-    assert.match(step.body, /anywhere in the world/u);
-    assert.match(step.body, /pin stays exactly where you leave it/u);
-    assert.match(step.body, /nearby regional features blend gradually/u);
+    assert.match(step.body, /world map is a navigator/u);
+    assert.match(step.body, /click a region to zoom in/u);
+    assert.match(step.body, /place the pin exactly where you want it/u);
     assert.match(step.body, /required Accent pin/u);
     assert.match(step.body, /Local voice and Feel/u);
     assert.match(step.body, /Premium voice and Feel/u);
@@ -587,6 +644,7 @@ describe("mode tutorials", () => {
         '[data-tutorial-target="debate-jury-chamber"]',
         '[data-tutorial-target="debate-camera"]',
         '[data-tutorial-target="debate-copy-all-review-data"]',
+        '[data-tutorial-target="debate-format"]',
       ],
     );
     const copy = tutorial.steps.map((step) => step.body).join(" ");
@@ -893,9 +951,14 @@ describe("mode tutorials", () => {
     );
     assert.match(
       copy,
-      /If a public advocate line is unintelligible—mumbled, garbled, or otherwise not a recognizable argument—the bot chair cuts in after that line lands/u,
+      /If a public advocate line is clearly unintelligible—mumbled, garbled, or otherwise not a recognizable argument—the room reacts only after the line lands/u,
     );
-    assert.match(copy, /When you are the Judge, PRISM never takes that call from you/u);
+    assert.match(copy, /repeated unintelligible advocacy raises gallery pressure/u);
+    assert.match(copy, /ordinary eccentric speech does not trigger it/u);
+    assert.match(
+      copy,
+      /When you are the Judge, PRISM never takes a procedural call from you/u,
+    );
     assert.match(copy, /shorter than Judge intervention cooling/u);
     assert.match(
       copy,
@@ -1546,17 +1609,17 @@ describe("mode tutorials", () => {
     );
   });
 
-  it("teaches the Prism house sound and its character alternatives", () => {
-    const voiceCopy = MODE_TUTORIALS.zen.steps[3]?.body ?? "";
+  it("teaches the shared voice behavior beside routing", () => {
+    const voiceCopy =
+      MODE_TUTORIALS.zen.steps.find(
+        (step) => step.heading === "Choose how replies recover",
+      )?.body ?? "";
     assert.match(
       voiceCopy,
-      /subtle Prism effect is the default house sound, gently tuning voiced speech/u,
+      /Voice remains independent from text routing/u,
     );
-    assert.match(voiceCopy, /Clean for untouched playback/u);
-    assert.match(
-      voiceCopy,
-      /Resonance for a darker, weightier mechanical double/u,
-    );
+    assert.match(voiceCopy, /With Voice Effects on/u);
+    assert.match(voiceCopy, /mic-ready breath/u);
   });
 
   it("teaches Zen that action drafts and action-only exchanges stay private", () => {
@@ -1790,8 +1853,12 @@ describe("mode tutorials", () => {
     );
     assert.match(setup?.body ?? "", /saved Auto routing priorities run first/);
     assert.match(setup?.body ?? "", /every other eligible model in that lane/);
-    assert.match(setup?.body ?? "", /Auto has no visible countdown/);
+    // The Auto/Timed length control is gone: every table is open-ended and the
+    // player ends it. The copy must promise that without any hidden ceiling.
+    assert.match(setup?.body ?? "", /Every table is open-ended/);
+    assert.match(setup?.body ?? "", /no countdown and no hidden ceiling/);
     assert.doesNotMatch(setup?.body ?? "", /hidden 30-minute ceiling/);
+    assert.doesNotMatch(setup?.body ?? "", /switch to Timed/);
     assert.match(
       routing?.body ?? "",
       /Leave Model on Auto/,
@@ -2043,6 +2110,10 @@ describe("mode tutorials", () => {
     );
     assert.match(
       controlRoom,
+      /quick false start.*Yeah, but—.*No, please—.*Okay, okay, I was—.*actually becomes audible briefly lowers the primary voice before restoring it/u,
+    );
+    assert.match(
+      controlRoom,
       /formal closing beat[\s\S]*thank the guest and the audience/u,
     );
   });
@@ -2064,10 +2135,14 @@ describe("mode tutorials", () => {
   });
 
   it("explains shared mic-ready breaths without adding a setup gate", () => {
-    assert.match(MODE_TUTORIALS.zen.steps[3]?.body ?? "", /Voice Effects on/u);
-    assert.match(MODE_TUTORIALS.zen.steps[3]?.body ?? "", /mic-ready breath/u);
+    const zenRoutingCopy =
+      MODE_TUTORIALS.zen.steps.find(
+        (step) => step.heading === "Choose how replies recover",
+      )?.body ?? "";
+    assert.match(zenRoutingCopy, /Voice Effects on/u);
+    assert.match(zenRoutingCopy, /mic-ready breath/u);
     assert.match(
-      MODE_TUTORIALS.zen.steps[3]?.body ?? "",
+      zenRoutingCopy,
       /punctuation pauses stay quiet/u,
     );
     assert.match(
@@ -2076,10 +2151,11 @@ describe("mode tutorials", () => {
         .join(" "),
       /punctuation pauses stay quiet/u,
     );
-    assert.match(
-      MODE_TUTORIALS.botcast.steps[4]?.body ?? "",
-      /saved episodes choose them deterministically on replay/u,
-    );
+    const signalVoiceCopy =
+      MODE_TUTORIALS.botcast.steps.find(
+        (step) => step.heading === "Choose how the bots speak",
+      )?.body ?? "";
+    assert.match(signalVoiceCopy, /saved episodes choose them deterministically on replay/u);
   });
 
   it("explains relative avatar-size Powers across live bot modes", () => {
@@ -2298,6 +2374,22 @@ describe("mode tutorials", () => {
     const signalCopy = MODE_TUTORIALS.botcast.steps
       .map((step) => step.body)
       .join(" ");
+    const signalLiveCutStep = MODE_TUTORIALS.botcast.steps.find(
+      (step) => step.heading === "Direct the live cut",
+    );
+    const signalControlRoomStep = MODE_TUTORIALS.botcast.steps.find(
+      (step) => step.heading === "Produce from the control room",
+    );
+    const signalHostChatStep = MODE_TUTORIALS.botcast.steps.find(
+      (step) => step.heading === "Talk with the host off-air",
+    );
+    const signalReplayStep = MODE_TUTORIALS.botcast.steps.find(
+      (step) => step.heading === "Watch the saved cut",
+    );
+    assert.ok(signalLiveCutStep);
+    assert.ok(signalControlRoomStep);
+    assert.ok(signalHostChatStep);
+    assert.ok(signalReplayStep);
     assert.match(
       signalCopy,
       /Cut show stops the current line[^.]*discards the episode[^.]*under ten seconds[^.]*no host sign-off or saved archive/u,
@@ -2444,29 +2536,29 @@ describe("mode tutorials", () => {
       signalPowersTutorialBody(),
       /default stage places both bots/u,
     );
-    assert.equal(
-      MODE_TUTORIALS.botcast.steps[4]?.heading,
-      "Choose how the bots speak",
+    const signalVoiceStep = MODE_TUTORIALS.botcast.steps.find(
+      (step) => step.heading === "Choose how the bots speak",
     );
+    assert.ok(signalVoiceStep);
     assert.equal(
-      MODE_TUTORIALS.botcast.steps[4]?.targetSelector,
+      signalVoiceStep.targetSelector,
       '[data-tutorial-target="botcast-voice-mode"]',
     );
-    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /matches Zen/u);
+    assert.match(signalVoiceStep.body, /matches Zen/u);
     assert.match(
-      MODE_TUTORIALS.botcast.steps[4]?.body ?? "",
+      signalVoiceStep.body,
       /both host and guest/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[4]?.body ?? "",
+      signalVoiceStep.body,
       /Choose Voice before recording/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[4]?.body ?? "",
+      signalVoiceStep.body,
       /freezes that speaking type and English or Premium engine/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[4]?.body ?? "",
+      signalVoiceStep.body,
       /bakes the rendered mouth performance/u,
     );
     assert.match(
@@ -2475,7 +2567,11 @@ describe("mode tutorials", () => {
     );
     assert.match(
       signalPowersTutorialBody(),
-      /saved Auto routing priorities run first/u,
+      /compact live-performance prompt/u,
+    );
+    assert.match(
+      signalPowersTutorialBody(),
+      /each later turn may try at most two short, fresh recovery candidates/u,
     );
     assert.match(
       signalPowersTutorialBody(),
@@ -2516,7 +2612,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       signalPowersTutorialBody(),
-      /hold Option.*Wield Prism.*active field locks.*queue it once.*unique inputs in click order.*repeat clicks.*Escape restores the active field.*Command \+ Option.*opens the assistant menu at the orb/u,
+      /hold Option.*Wield Prism.*field stays read-only.*queue it once.*unique inputs in click order.*Escape restores a settled draft.*Command \+ Option.*opens the assistant menu at the orb/u,
     );
     assert.doesNotMatch(
       signalPowersTutorialBody(),
@@ -2647,31 +2743,27 @@ describe("mode tutorials", () => {
     );
     assert.match(
       signalPowersTutorialBody(),
-      /dedicated fullscreen placement workspace/u,
+      /fullscreen, stage-first workspace/u,
     );
     assert.match(
       signalPowersTutorialBody(),
-      /show-scoped room mix stay live there/u,
+      /room mix only when needed/u,
     );
     assert.match(
       signalPowersTutorialBody(),
-      /Host and Guest voice sliders to balance the cast/u,
+      /voice soundcheck/u,
     );
     assert.match(
       signalPowersTutorialBody(),
-      /remembers each bot’s level for this show/u,
+      /cast balance/u,
     );
     assert.match(
       signalPowersTutorialBody(),
-      /Test voices runs a random two-line soundcheck/u,
-    );
-    assert.match(
-      signalPowersTutorialBody(),
-      /never creates an episode or transcript/u,
+      /Signal autosaves as you work/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[0]?.body ?? "",
-      /optionally add a premise inspiration/u,
+      /Optionally add a premise inspiration/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
@@ -2686,91 +2778,91 @@ describe("mode tutorials", () => {
       /microphone foreground/u,
     );
     assert.equal(
-      MODE_TUTORIALS.botcast.steps[6]?.heading,
+      signalLiveCutStep.heading,
       "Direct the live cut",
     );
     assert.equal(
-      MODE_TUTORIALS.botcast.steps[6]?.targetSelector,
+      signalLiveCutStep.targetSelector,
       '[data-tutorial-target="botcast-live-camera"]',
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+      signalLiveCutStep.body,
       /Left, Right, and Wide hold a fixed studio shot/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+      signalLiveCutStep.body,
       /opens on the full studio/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+      signalLiveCutStep.body,
       /uses editorial hard cuts exactly as audible host and guest speech begins/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+      signalLiveCutStep.body,
       /If Auto has been on one person for a while, it cuts Wide to see the studio/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+      signalLiveCutStep.body,
       /sometimes glances at the other person for a few seconds even when they are not reacting/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+      signalLiveCutStep.body,
       /genuinely thinking, loading a voice, or visibly waiting/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+      signalLiveCutStep.body,
       /push begins only with the audible pre-speech presence/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+      signalLiveCutStep.body,
       /ready handoff never flashes Wide or glides late/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+      signalLiveCutStep.body,
       /Sustained audible interruptions cut directly to the interrupter/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+      signalLiveCutStep.body,
       /Arrow keys cut live too: Left, Right, Down for Wide, and Up for Auto/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+      signalLiveCutStep.body,
       /Prepared text alone never changes the camera/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+      signalLiveCutStep.body,
       /whether the visible cut was instant or the brief thinking push was animated/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+      signalLiveCutStep.body,
       /Wide remains the underlying conversation shot/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+      signalLiveCutStep.body,
       /interruption clips under 2\.5 seconds stay off-camera[\s\S]*listener cut/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+      signalLiveCutStep.body,
       /choosing Auto again hands direction back/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+      signalLiveCutStep.body,
       /bakes every camera shot, its timestamp/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+      signalLiveCutStep.body,
       /whether the visible cut was instant or the brief thinking push was animated/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /transcript ownership with one primary speaker while allowing bot audio to overlap/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /studio performance own the live screen/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /brief contextual comment in that character’s own voice/u,
     );
     assert.match(
@@ -2780,15 +2872,15 @@ describe("mode tutorials", () => {
       /synthesize them during the opening wait/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /Ordinary listener comments never take transcript ownership or interrupt the primary turn/u,
+      signalControlRoomStep.body,
+      /Ordinary spoken listener comments.*never take transcript ownership or interrupt the primary turn/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+      signalLiveCutStep.body,
       /interruption clips under 2\.5 seconds stay off-camera/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+      signalLiveCutStep.body,
       /social-silence beat belongs to the silent bot on camera/u,
     );
     assert.match(
@@ -2798,223 +2890,223 @@ describe("mode tutorials", () => {
       /follow that listener’s own era and temperament rather than a shared shock phrase/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /formal closing beat[\s\S]*thank the guest and the audience/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /interruptive cast member’s Power[\s\S]*short hold-on[\s\S]*annoyed, abandoned ending/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /at least 85 percent[\s\S]*does not add an annoyed ending or reclaim the floor/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /reject the cut-in and reclaim the next turn/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /only its audience-heard fragment/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /protects that single reclaim from another immediate interruption/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /Repeated cutoffs build episode-local irritation/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /short verbal snark/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /visible \.\.\. as an intentional silent beat/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /without voice, mouth movement, or a speaker camera cut/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /up to four ordinary turns/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /requires a substantive on-air payoff/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /every cue is private to the host/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /guest only hears what the host says on mic/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /Tab moves between Ask about… and Say this…[\s\S]*Enter sends whatever is filled[\s\S]*Enter again runs Interrupt guest now/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /host reads on air as a message from the Producer[\s\S]*without sending that line through a model/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /arrives early in the host’s own line[\s\S]*break off and redirect on mic[\s\S]*pivot lands a little awkwardly/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /Once most of the point is already out[\s\S]*stays queued for the host’s next turn/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /Interrupt guest now plays one of that host’s saved short interjections immediately[\s\S]*An echo-bound host instead cuts in by repeating the last audience-heard on-air phrase[\s\S]*at least 85 percent of the guest’s line has been heard[\s\S]*omits that annoyed follow-on[\s\S]*unheard remainder of the guest’s line is discarded/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /on-air clock measures active presentation/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /Background lookahead under an audible line still counts/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /foreground model readiness, reasoning, generation, or blocking voice preparation pauses the clock/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /Wrap it up privately asks the host/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /clear in-character guest goodbye ends their turns/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /Freeform producer pressure or Press harder/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /shared navbar fully hides[\s\S]*Cut on stage ends the sit[\s\S]*through the closing card until you Return to show[\s\S]*quiet model · effort chip stays in the live topline/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /[Rr]outing, model, Effort, Voice[\s\S]*stay locked through the closing card/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /completed, cancelled, or discarded closing card keeps Copy for Signal Review available/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /camera grammar is fixed: ready dialogue and live interruptions cut/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /restores the full chrome/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /stage fades to black or white[\s\S]*closing card appears/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /immersive reactions still belong to the performing bot/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /asterisks in the saved transcript/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /full transcript stays out of the initial play and returns with playback/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /active line appears as a live caption in step with the voice and clears as soon as that line ends/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      signalControlRoomStep.body,
       /large bottom cue dock/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[8]?.body ?? "",
-      /grounded in that show and its recent episodes/u,
+      signalHostChatStep.body,
+      /grounded in that show, recent episodes/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[8]?.body ?? "",
+      signalHostChatStep.body,
       /outside your Library/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[8]?.body ?? "",
+      signalHostChatStep.body,
       /does not add or book anyone/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[8]?.body ?? "",
+      signalHostChatStep.body,
       /answer this off-air chat only with ‘\.\.\.’/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[8]?.body ?? "",
+      signalHostChatStep.body,
       /another episode with that host and a bot guest/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[8]?.body ?? "",
+      signalHostChatStep.body,
       /global response toggle at the top of Signal/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[8]?.body ?? "",
+      signalHostChatStep.body,
       /Settings → Signal/u,
     );
     assert.equal(
-      MODE_TUTORIALS.botcast.steps[8]?.targetSelector,
+      signalHostChatStep.targetSelector,
       '[data-tutorial-target="botcast-host-chat"]',
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
+      signalReplayStep.body,
       /no post-episode camera controls/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
+      signalReplayStep.body,
       /restores the full transcript beside the saved camera cut/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
+      signalReplayStep.body,
       /play, pause, scrub/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
+      signalReplayStep.body,
       /measured Signal intro row[\s\S]*calibrated duration[\s\S]*seeks back to the beginning/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
+      signalReplayStep.body,
       /omit only the intervals where a bot is visibly and audibly thinking/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
+      signalReplayStep.body,
       /Natural room silence, listener acknowledgements, interruptions, crosstalk, retorts/u,
     );
     assert.doesNotMatch(
-      MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
+      signalReplayStep.body,
       /intro-length slider/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
+      signalReplayStep.body,
       /automatic intro is calibrated to 8\.75 seconds[\s\S]*translates the baked transcript and mouth performance[\s\S]*camera timestamp and transition stays locked to the untouched audio master clock/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
+      signalReplayStep.body,
       /Recorded replay replaces routing, model, and Voice controls/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
+      signalReplayStep.body,
       /Copy for Signal Review/u,
     );
     assert.match(
-      MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
+      signalReplayStep.body,
       /per-turn model routing/u,
     );
   });
@@ -3068,7 +3160,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.coffee.steps.map((step) => step.body).join("\n"),
-      /Copycat keeps its copied cutoff.*follow-on reaction is only \.\.\./u,
+      /Copycat keeps its copied cutoff.*follow-on silence never invents a protest/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps.map((step) => step.body).join("\n"),

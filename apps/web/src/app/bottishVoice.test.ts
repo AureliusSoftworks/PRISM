@@ -261,6 +261,10 @@ describe("Bottish speech plan", () => {
       source,
       /export async function prepareBottishVoice\(\)[\s\S]*?if \(preparedMedia\)[\s\S]*?return;[\s\S]*?beginMediaUnlock\(\);/
     );
+    assert.match(
+      source,
+      /prismLiveVoicePerformanceBudgetActive\(\)[\s\S]*?prepareRealtimeVoiceAudio\(\{ loadRealtimeProcessing: false \}\)[\s\S]*?releasePreparedMedia\(\);[\s\S]*?return;/u,
+    );
     assert.match(source, /const audio = preparedMedia \?\? new Audio\(\)/);
     assert.match(source, /releaseActiveMedia\(!error\)/);
   });

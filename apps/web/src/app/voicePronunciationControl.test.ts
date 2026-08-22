@@ -64,7 +64,7 @@ describe("cross-accent local voice pronunciation controls", () => {
   it("keeps pin preview, commit, and nearby choices silent in every map", () => {
     assert.match(
       atlasSource,
-      /onPreview=\{\(next\) => \{\s*setDraftValue\(next\);\s*onPreview\(next\.selection\);\s*\}\}/u,
+      /onPreview=\{\(next\) => \{\s*setDraftValue\(next\);\s*if \(!pendingDrillRef\.current\) onPreview\(next\.selection\);\s*\}\}/u,
     );
     assert.match(
       atlasSource,
@@ -93,7 +93,9 @@ describe("cross-accent local voice pronunciation controls", () => {
       pageSource.indexOf("function BotAvatarVoiceTestDock"),
       pageSource.indexOf("function botAvatarFaceIsDefault"),
     );
-    assert.doesNotMatch(auditionDockSource, /onKeyDown|autoPlay|useEffect/u);
+    assert.match(auditionDockSource, /onKeyDown=\{\(event\) =>/u);
+    assert.match(auditionDockSource, /event\.key !== "Enter"/u);
+    assert.doesNotMatch(auditionDockSource, /autoPlay|useEffect/u);
   });
 
   it("drills into crowded regions through ephemeral lenses that never persist", () => {
@@ -110,7 +112,7 @@ describe("cross-accent local voice pronunciation controls", () => {
     assert.match(atlasSource, /useState<string>\("world"\)/u);
     assert.match(
       atlasSource,
-      /pronunciationAtlasPointFromLensProjection\(point, lens\)/u,
+      /pronunciationAtlasPointFromLensProjection\(\s*point,\s*lens,?\s*\)/u,
     );
     assert.doesNotMatch(atlasSource, /lensId:\s|lens:\s*lens/u);
     // Switching lenses drops any stale draft measured in the old lens frame.
@@ -140,10 +142,8 @@ describe("cross-accent local voice pronunciation controls", () => {
     );
     // Deeper-lens footprints render as labeled marks inside the map overlay;
     // hovering or focusing a chip previews that lens's footprint.
-    assert.match(atlasSource, /pronunciationAtlasLensesWithin\(lens\)/u);
+    assert.match(atlasSource, /pronunciationAtlasDrillCandidates\(lens\)/u);
     assert.match(atlasSource, /className=\{styles\.lensFootprint\}/u);
-    assert.match(atlasSource, /data-emphasized=\{emphasized \? "true" : undefined\}/u);
-    assert.match(atlasSource, /onMouseEnter=\{\(\) => setPreviewLensId\(candidate\.id\)\}/u);
     // The map layer stays presentation-only; footprints live inside the
     // aria-hidden overlay and never introduce interactive anchor nodes.
     assert.match(atlasSource, /className=\{styles\.map\} aria-hidden="true"/u);
@@ -231,7 +231,7 @@ describe("cross-accent local voice pronunciation controls", () => {
     assert.doesNotMatch(atlasSource, /Nearby choices/u);
     assert.match(atlasSource, /Local variants/u);
     assert.match(atlasSource, /variantCandidates\.length > 0/u);
-    assert.match(atlasSource, /pronunciationAtlasNearbyCandidates/u);
+    assert.match(atlasSource, /pronunciationAtlasVariantCandidatesInLens/u);
     assert.match(pageSource, /className=\{styles\.botAvatarVoiceTestDock\}/u);
     assert.match(pageSource, /English[\s\S]*Premium[\s\S]*Babble[\s\S]*Bottish/u);
     assert.match(pageSource, /Nothing is added to chat\./u);

@@ -20,6 +20,14 @@ import type { LlmProviderName } from "./index.js";
 import type { AutoRouteDecisionV1 } from "./modelRouting.js";
 import type { LiveBakeArtifactV1 } from "./liveBake.js";
 import {
+  defaultDebateMysteryFormatStateV1,
+  normalizeDebateMysteryFormatStateV1,
+  type DebateMysteryPlayPhase,
+  type DebateMysteryRouteGrade,
+  type DebateWhodunnitCreateConfigV1,
+  type DebateWhodunnitFormatStateV1,
+} from "./debateMystery.ts";
+import {
   normalizeReasoningEffort,
   normalizeProviderReasoningEffort,
   type ProviderReasoningEffort,
@@ -72,9 +80,9 @@ export const DEBATE_JURY_EARLY_DISCUSSION_TURNS = 3;
 export const DEBATE_FORUM_MIN_REBUTTAL_ROUNDS = 1;
 export const DEBATE_FORUM_MAX_REBUTTAL_ROUNDS = 3;
 
-export type DebateFormatId = "forum" | "turnabout";
+export type DebateFormatId = "forum" | "turnabout" | "whodunnit";
 export type DebateFormatCatalogId = DebateFormatId | "flyting" | "cypher";
-export type DebatePlayerRole = "judge" | "participant" | "spectator";
+export type DebatePlayerRole = "judge" | "participant" | "spectator" | "investigator";
 /** Versioned now so future assisted-play levels can migrate without ambiguity. */
 export type DebateParticipantDifficulty = "coach" | "standard" | "immersive";
 export type DebateParticipantWindowKind =
@@ -279,7 +287,7 @@ export interface DebateFormatDescriptorV1 {
   productionName: string;
   summary: string;
   cadence: string;
-  availability: "available";
+  availability: "available" | "disabled";
 }
 
 export interface DebateFormatPreviewDescriptorV1 {
@@ -311,6 +319,15 @@ export const DEBATE_FORMAT_CATALOG: readonly DebateFormatCatalogEntryV1[] = [
     summary:
       "An original theatrical courtroom examination built around pressable testimony and frozen-evidence objections.",
     cadence: "Testimony · Press · Object · Ruling",
+    availability: "available",
+  },
+  {
+    id: "whodunnit",
+    name: "Whodunnit?",
+    productionName: "A Murder Mystery",
+    summary:
+      "Investigate a seeded mansion mystery, assemble a theory, and prove it in a mandatory trial.",
+    cadence: "Investigate · Connect · Accuse · Prove",
     availability: "available",
   },
   {
@@ -460,7 +477,9 @@ export interface DebateTurnaboutFormatStateV1 {
 }
 
 export type DebateFormatStateV1 =
-  DebateForumFormatStateV1 | DebateTurnaboutFormatStateV1;
+  | DebateForumFormatStateV1
+  | DebateTurnaboutFormatStateV1
+  | DebateWhodunnitFormatStateV1;
 
 export interface DebateMotionSideV1 {
   label: string;
@@ -1539,6 +1558,7 @@ export function resolveDebateForumRoundPlan(args: {
 
 export interface DebateSessionCreateRequest {
   format?: DebateFormatId;
+  whodunnit?: DebateWhodunnitCreateConfigV1;
   formality?: DebateFormalityId;
   presetId?: DebateSetupPresetId | "custom";
   jury?: {
@@ -1797,6 +1817,11 @@ export interface DebateSessionListItemV1 {
   advocateVisuals?: DebateSessionAdvocateVisualV1[];
   /** Frozen object exhibits available for Archive Assets polish. */
   exhibitCount: number;
+  /** Whodunnit Archive metadata; absent for Forum and Turnabout. */
+  mysteryProgress?: DebateMysteryPlayPhase;
+  mysteryRouteGrade?: DebateMysteryRouteGrade | null;
+  mysteryFictionLabel?: "Fictional, non-canonical case";
+  mysterySpoilersRevealed?: boolean;
 }
 
 export interface DebateDebriefChatMessageV1 {
@@ -2828,7 +2853,13 @@ export function debateFloorSpeechWarrantsUnintelligibleCutoff(args: {
   if (args.speakerKind !== "advocate" && args.speakerKind !== "player") {
     return false;
   }
-  if (args.kind !== "speech" && args.kind !== "player_turn") return false;
+  if (
+    args.kind !== "speech" &&
+    args.kind !== "player_turn" &&
+    args.kind !== "testimony"
+  ) {
+    return false;
+  }
   if (!args.content.trim() || botPowerResponseIsSilentV1(args.content)) {
     return false;
   }
@@ -3121,7 +3152,7 @@ export function debateActivePresentationDurationMs(
 }
 
 export function isDebatePlayerRole(value: unknown): value is DebatePlayerRole {
-  return value === "judge" || value === "participant" || value === "spectator";
+  return value === "judge" || value === "participant" || value === "spectator" || value === "investigator";
 }
 
 export function isDebateSideId(value: unknown): value is DebateSideId {
@@ -3207,11 +3238,11 @@ export function coerceDebateBallotSideId(
 }
 
 export function isDebateFormatId(value: unknown): value is DebateFormatId {
-  return value === "forum" || value === "turnabout";
+  return value === "forum" || value === "turnabout" || value === "whodunnit";
 }
 
 export function normalizeDebateFormatId(value: unknown): DebateFormatId {
-  return value === "turnabout" ? "turnabout" : "forum";
+  return value === "turnabout" || value === "whodunnit" ? value : "forum";
 }
 
 export function isDebateSetupPresetId(
@@ -3438,6 +3469,7 @@ export function normalizeDebateJuryStateV1(value: unknown): DebateJuryStateV1 {
 export function defaultDebateFormatStateV1(
   format: DebateFormatId,
 ): DebateFormatStateV1 {
+  if (format === "whodunnit") return defaultDebateMysteryFormatStateV1();
   return format === "turnabout"
     ? {
         version: DEBATE_FORMAT_SCHEMA_VERSION,
@@ -3470,6 +3502,9 @@ export function normalizeDebateFormatStateV1(
   const format = isDebateFormatId(requestedFormat)
     ? requestedFormat
     : normalizeDebateFormatId(source.format);
+  if (format === "whodunnit") {
+    return normalizeDebateMysteryFormatStateV1(value);
+  }
   if (format === "forum") {
     const target =
       typeof source.rebuttalRoundTarget === "number" &&

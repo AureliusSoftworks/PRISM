@@ -241,7 +241,7 @@ test("Participation HUD, recess intent, and review data remain role-safe", () =>
   assert.match(source, /liveParticipationDifficulty === "coach"/u);
   assert.match(source, /liveParticipationDifficulty === "standard"/u);
   assert.match(source, /juryLeaningPips=\{participation\?\.juryLeaningPips\}/u);
-  assert.match(source, /Five anonymous provisional Jury leanings/u);
+  assert.match(source, /Four anonymous provisional Jury leanings/u);
   assert.match(source, /bias ×/u);
   assert.match(source, /recessIntent: "recovery"/u);
   assert.match(source, /recessIntent: "deliberate"/u);

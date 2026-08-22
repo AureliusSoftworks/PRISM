@@ -208,8 +208,11 @@ describe("Avatar Details Studio integration", () => {
       editorSource,
       /Uses its own animation below; Default hides while talking or sipping\./,
     );
-    assert.match(editorSource, /role="radiogroup"/);
-    assert.match(editorSource, /role="radio"/);
+    assert.match(
+      editorSource,
+      /role=\{paintMode === "move" \? "group" : "radiogroup"\}/,
+    );
+    assert.match(editorSource, /role=\{paintMode === "move" \? undefined : "radio"\}/);
     assert.match(
       editorSource,
       /option\.role === "erase"[\s\S]*\? "#ffffff"[\s\S]*AVATAR_DETAILS_INK_ROLE_COLORS\[option\.role\]/,
@@ -815,15 +818,31 @@ describe("Avatar Details shared mannequin rendering", () => {
       /data-zen-live-bot-screen-content-rig="true"[\s\S]{0,900}depth="behind-face"[\s\S]*data-zen-live-bot-face-rig="true"[\s\S]*depth="above-face"/,
     );
     assert.match(pageSource, /faceScaleY\?:\s*string \| number/);
+    const compactFallbackSource = pageSource.slice(
+      pageSource.indexOf("function FullAvatarCompactFallback"),
+      pageSource.indexOf("function ZenLiveBotMannequin"),
+    );
     assert.match(
-      pageSource,
-      /faceScaleY = BOT_AVATAR_CANONICAL_FACE_SCALE_Y,[\s\S]*const resolvedFacing = facing \?\? botAvatarFacingFromFaceScaleY\(faceScaleY\);[\s\S]{0,260}\.\.\.botAvatarFaceFacingStyle\(resolvedFacing\)/,
+      compactFallbackSource,
+      /faceScaleY = BOT_AVATAR_CANONICAL_FACE_SCALE_Y,[\s\S]*const resolvedFacing = facing \?\? botAvatarFacingFromFaceScaleY\(faceScaleY\);/,
+    );
+    assert.match(compactFallbackSource, /facing=\{resolvedFacing\}/);
+    const mannequinSource = pageSource.slice(
+      pageSource.indexOf("function ZenLiveBotMannequin"),
+      pageSource.indexOf("function BotHubVoicePreviewAvatarPlate"),
+    );
+    assert.match(
+      mannequinSource,
+      /faceScaleY = BOT_AVATAR_CANONICAL_FACE_SCALE_Y,[\s\S]*const resolvedFacing = facing \?\? botAvatarFacingFromFaceScaleY\(faceScaleY\);[\s\S]*\.\.\.botAvatarFaceFacingStyle\(resolvedFacing\)/,
     );
     const mannequinCalls = [
       ...pageSource.matchAll(/<ZenLiveBotMannequin\b[\s\S]*?\/>/gu),
     ];
     assert.ok(mannequinCalls.length > 0);
     for (const [mannequinCall] of mannequinCalls) {
+      if (/\.\.\.[A-Za-z0-9]*mannequinProps/i.test(mannequinCall)) {
+        continue;
+      }
       assert.match(
         mannequinCall,
         /\b(?:facing|faceScaleY)=\{/,
@@ -863,7 +882,7 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       editorSource,
-      /resamplePhosphorRgbaCoverage\([\s\S]{0,260}?PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX/,
+      /resamplePhosphorRgbaForPresentation\([\s\S]{0,260}?PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX/,
     );
     assert.doesNotMatch(maskCss, /--coffee-plate-emoji-face-scale-y/);
     assert.match(
@@ -886,7 +905,7 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       pageSource,
-      /className=\{styles\.zenLiveBotPresenceBody\}[\s\S]{0,320}data-avatar-face-coordinate-source="studio"[\s\S]{0,80}style=\{presenceBodyStyle\}/,
+      /data-avatar-face-coordinate-source="studio"[\s\S]{0,240}style=\{presenceBodyStyle\}/,
     );
     assert.match(
       pageSource,
@@ -1007,7 +1026,7 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       pageSource,
-      /inkTalking=\{avatarState\.talking \|\| sipMouthTreatmentActive\}/,
+      /inkTalking:\s*signalMannequinTalking\s*\|\|\s*signalMannequinSipMouthTreatmentActive/,
     );
   });
 });

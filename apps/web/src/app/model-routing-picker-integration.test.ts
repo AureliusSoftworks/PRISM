@@ -83,7 +83,7 @@ function pngCanvasSize(source: Buffer): [number, number] {
 function effortGlyphColors(level: string): string[] {
   const block = cssSource.match(
     new RegExp(
-      `\\.modelEffortIcon\\[data-effort-level="${level}"\\] \\{([^}]+)\\}`,
+      `(?:^|\\n)\\.modelEffortIcon\\[data-effort-level="${level}"\\] \\{([^}]+)\\}`,
       "u",
     ),
   )?.[1];
@@ -158,7 +158,6 @@ describe("shared routing model picker integration", () => {
     assert.match(pageSource, /isDisabledModelChoice\(value\)[\s\S]{0,80}autoOptionValue/u);
     assert.match(pageSource, /if \(isDisabledModelChoice\(nextValue\)\) return/u);
     assert.doesNotMatch(pageSource, /showDisabledOption|disabledOptionLabel/u);
-    assert.doesNotMatch(pageSource, /Account default/u);
   });
 
   it("uses the upright triangle for Auto Turbo actions", () => {
@@ -537,7 +536,7 @@ describe("shared routing model picker integration", () => {
     );
     assert.equal(
       pageSource.match(/renderTheme=\{resolvedTheme\}/gu)?.length,
-      6,
+      7,
       "every text-model picker with an Effort control should receive the active theme",
     );
     assert.match(
@@ -598,14 +597,14 @@ describe("shared routing model picker integration", () => {
       /simulated Effort/iu,
     );
     assert.ok(
-      (pageSource.match(/Deep simulated thinking \(experimental\)/gu) ?? [])
+      (pageSource.match(/Deep LOCAL simulated thinking \(experimental\)/gu) ?? [])
         .length >= 2,
       "expected both Settings presentations to describe deep simulated thinking",
     );
     assert.match(pageSource, /heavier private workshop/u);
     assert.match(pageSource, /onSimulatedEffortEducate/u);
     assert.match(pageSource, /simulated thinking/u);
-    assert.match(pageSource, /selected provider/u);
+    assert.match(pageSource, /configured Ollama provider/u);
   });
 
   it("uses None instead of Default for simulated non-thinking models", () => {
@@ -615,7 +614,7 @@ describe("shared routing model picker integration", () => {
     );
     assert.match(
       pageSource,
-      /capability\.mode === "simulated"[\s\S]{0,80}\? "none"[\s\S]{0,80}: "default"/u,
+      /capability\.mode === "simulated"[\s\S]{0,80}\? "none"[\s\S]{0,120}capability\.mode === "native-thinking"[\s\S]{0,80}\? "minimal"[\s\S]{0,80}: "default"/u,
     );
     assert.match(
       tutorialSource,

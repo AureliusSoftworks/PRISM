@@ -32,6 +32,8 @@ export interface SessionAtmosphereLayerProps {
   foleyRoomAcoustics?: RoomAcousticsSend;
   backgroundRoomAcoustics?: RoomAcousticsSend;
   allowMixBoost?: boolean;
+  /** Prioritize uninterrupted input/rendering over HTML media compatibility. */
+  latencyCritical?: boolean;
   mixTransitionMs?: number;
   /** Crossfade loop beds when this layer mounts, changes, or unmounts. */
   lifecycleTransitionMs?: number;
@@ -67,6 +69,7 @@ export function SessionAtmosphereLayer({
   foleyRoomAcoustics,
   backgroundRoomAcoustics,
   allowMixBoost = false,
+  latencyCritical = false,
   mixTransitionMs = 0,
   lifecycleTransitionMs = 0,
   ambientFoley = true,
@@ -136,6 +139,7 @@ export function SessionAtmosphereLayer({
       foleyRoomAcoustics,
       backgroundRoomAcoustics,
       allowMixBoost,
+      latencyCritical,
       ambientFoley,
       ambientFoleyUrls,
       shouldDeferFoley: () => deferFoleyRef.current,
@@ -183,6 +187,7 @@ export function SessionAtmosphereLayer({
     controllerHandleRef,
     foleyRoomAcoustics,
     grainUrl,
+    latencyCritical,
     lifecycleTransitionMs,
     preloadFoleyUrls,
     sessionKey,

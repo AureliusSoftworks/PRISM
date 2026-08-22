@@ -32,6 +32,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
     try {
       const db = createDatabase();
       seedResetFixture(db);
+      seedMysteryResetFixture(db);
 
       restoreFactoryDefaultsInDatabase(
         db,
@@ -40,6 +41,14 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       );
 
       for (const tableName of FACTORY_RESET_USER_DATA_TABLES) {
+        assert.equal(countRows(db, tableName), 0, `${tableName} should be empty`);
+      }
+      for (const tableName of [
+        "debate_mystery_cases",
+        "debate_mystery_actions",
+        "debate_mystery_notebooks",
+        "debate_mystery_notebook_revisions",
+      ]) {
         assert.equal(countRows(db, tableName), 0, `${tableName} should be empty`);
       }
 
@@ -650,6 +659,42 @@ function countRows(db: DatabaseSync, tableName: string): number {
     .prepare(`SELECT COUNT(*) AS count FROM ${tableName} WHERE user_id = ?`)
     .get("user-1") as { count: number } | undefined;
   return row?.count ?? 0;
+}
+
+function seedMysteryResetFixture(db: DatabaseSync): void {
+  const now = "2026-08-20T20:00:00.000Z";
+  db.prepare(
+    `INSERT INTO debate_sessions
+      (id, user_id, revision, status, phase, step_key, player_role,
+       create_idempotency_key, motion, session_json, created_at, updated_at)
+     VALUES ('reset-mystery', 'user-1', 1, 'waiting_for_player', 'challenge',
+             'mystery_investigation', 'judge', 'reset-mystery-key',
+             'Whodunnit?', '{}', ?, ?)`,
+  ).run(now, now);
+  db.prepare(
+    `INSERT INTO debate_mystery_cases
+      (session_id, user_id, schema_version, generator_version, private_json,
+       content_hash, created_at, updated_at)
+     VALUES ('reset-mystery', 'user-1', 1, 1, '{}',
+             'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', ?, ?)`,
+  ).run(now, now);
+  db.prepare(
+    `INSERT INTO debate_mystery_actions
+      (id, user_id, session_id, sequence, action_kind, occurred_at)
+     VALUES ('reset-mystery-action', 'user-1', 'reset-mystery', 1, 'travel', ?)`,
+  ).run(now);
+  db.prepare(
+    `INSERT INTO debate_mystery_notebooks
+      (session_id, user_id, revision, document_json, created_at, updated_at)
+     VALUES ('reset-mystery', 'user-1', 1, '{}', ?, ?)`,
+  ).run(now, now);
+  db.prepare(
+    `INSERT INTO debate_mystery_notebook_revisions
+      (id, user_id, session_id, revision, document_json, reason,
+       idempotency_key, created_at)
+     VALUES ('reset-mystery-note', 'user-1', 'reset-mystery', 1, '{}',
+             'import', 'reset-mystery-note-key', ?)`,
+  ).run(now);
 }
 
 function restoreEnv(name: string, value: string | undefined): void {

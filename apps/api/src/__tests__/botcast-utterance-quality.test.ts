@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  botcastGuestUtteranceIsGenericStall,
   botcastHostTurnAddressesAskAboutCue,
   botcastHostTurnAddressesProducerCue,
   botcastHostTurnIncludesDirectQuote,
   botcastHostUtteranceIsGenericStall,
+  botcastHostUtteranceNeedsInterviewQuestion,
   botcastUtteranceContainsScreenplayLabels,
   botcastUtteranceIsNearDuplicate,
 } from "../botcast-utterance-quality.ts";
@@ -78,12 +80,50 @@ describe("botcast utterance quality", () => {
       botcastHostUtteranceIsGenericStall("What would you like to explore next?"),
       true,
     );
+    assert.equal(
+      botcastHostUtteranceIsGenericStall(
+        "The signal is clear we need to move forward",
+      ),
+      true,
+    );
   });
 
   it("accepts a specific host follow-up", () => {
     assert.equal(
       botcastHostUtteranceIsGenericStall(
         "What mechanisms underlie our ability to make decisions in real-time, even when we appear rational?",
+      ),
+      false,
+    );
+  });
+
+  it("requires an ordinary host turn to return the floor with a question", () => {
+    assert.equal(
+      botcastHostUtteranceNeedsInterviewQuestion(
+        "I love your energy right now.",
+      ),
+      true,
+    );
+    assert.equal(
+      botcastHostUtteranceNeedsInterviewQuestion(
+        "That is a sharp distinction. Who pays for it?",
+      ),
+      false,
+    );
+    assert.equal(
+      botcastHostUtteranceNeedsInterviewQuestion(
+        "That keeps the energy up, doesn't it? But the tradeoff is still vague.",
+      ),
+      true,
+    );
+  });
+
+  it("rejects vague guest reactions as primary answers", () => {
+    assert.equal(botcastGuestUtteranceIsGenericStall("That is optimistic."), true);
+    assert.equal(botcastGuestUtteranceIsGenericStall("I mean it's over"), true);
+    assert.equal(
+      botcastGuestUtteranceIsGenericStall(
+        "Responsiveness preserves agency when someone must act quickly.",
       ),
       false,
     );

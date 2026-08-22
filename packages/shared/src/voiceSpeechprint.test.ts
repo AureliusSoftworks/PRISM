@@ -183,7 +183,7 @@ describe("local voice Speechprints", () => {
       speechprint: {
         influence: "indian-english",
         strength: "balanced",
-        variationSeed: "melody-pin",
+        variationSeed: "south-asian-rhythm-0",
       },
     });
     assert.ok(

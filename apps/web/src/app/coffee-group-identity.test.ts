@@ -122,7 +122,7 @@ test("Coffee Group identity polling and retry routes stay quiet and item-scoped"
   );
   assert.match(
     pageSource,
-    /coffeeGroups\.some\(coffeeGroupHasInFlightSynthesis\)/,
+    /coffeeGroups\.some\([\s\S]*coffeeGroupHasInFlightSynthesis/,
   );
   assert.match(pageSource, /refreshCoffeeGroups\(\{ quiet: true \}\)/);
   assert.match(
@@ -132,7 +132,7 @@ test("Coffee Group identity polling and retry routes stay quiet and item-scoped"
   assert.doesNotMatch(pageSource, /Brewing topics/u);
   assert.match(
     pageSource,
-    /Saving the table\. Identity continues in the background\./u,
+    /Saving the\s+table\. Identity continues in the\s+background\./u,
   );
 });
 

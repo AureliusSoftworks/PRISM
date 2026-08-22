@@ -162,8 +162,14 @@ describe("group-room wallpaper image generation route", () => {
     assert.equal(payload.image.origin, "bot_group_room");
     assert.match(payload.composedPrompt, /widescreen 16:9/u);
     assert.match(payload.composedPrompt, /Group: Night Shift/u);
-    assert.match(payload.composedPrompt, /Ada; accent #abcdef/u);
-    assert.match(payload.composedPrompt, /Bram; accent #123456/u);
+    assert.match(
+      payload.composedPrompt,
+      /Ada; primary color #abcdef; atmosphere cues:/u,
+    );
+    assert.match(
+      payload.composedPrompt,
+      /Bram; primary color #123456; atmosphere cues:/u,
+    );
     assert.match(payload.composedPrompt, /Painterly fog, soft grain/u);
     assert.doesNotMatch(payload.composedPrompt, /Untrusted Fake Name/u);
 
@@ -357,7 +363,12 @@ describe("group-room wallpaper image generation route", () => {
     assert.equal(uploaded.status, 201, JSON.stringify(uploadedPayload));
     assert.equal(uploadedPayload.asset.kind, "home_atmosphere");
     assert.equal(uploadedPayload.asset.source, "uploaded");
-    assert.equal(fetchRecorder.calls.length, uploadCallStart);
+    const uploadProviderCalls = fetchRecorder.calls.slice(uploadCallStart);
+    assert.equal(uploadProviderCalls.length, 1);
+    assert.equal(
+      uploadProviderCalls[0]?.input,
+      "http://localhost:11434/api/chat",
+    );
     const reused = await client.request(
       `/api/home/atmosphere/assets/${encodeURIComponent(String(uploadedPayload.asset.id))}/reuse`,
       jsonInit({ atmosphereStyle: "dreamscape" }),
@@ -489,7 +500,10 @@ describe("group-room wallpaper image generation route", () => {
       })
     );
     assert.equal(response.status, 400);
-    assert.match((await json(response)).error, /Local image generation is disabled/u);
+    assert.match(
+      (await json(response)).error,
+      /Pick a local image model in the Images panel header/u,
+    );
     assert.equal(fetchRecorder.calls.length, callStart);
   });
 

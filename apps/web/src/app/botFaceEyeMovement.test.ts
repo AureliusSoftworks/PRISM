@@ -229,7 +229,10 @@ describe("bot eye movement modes", () => {
       /\[data-coffee-plate-emoji-blink-glyph="true"\][\s\S]{0,420}--bot-face-gaze-x:\s*0px;[\s\S]{0,120}--bot-face-gaze-y:\s*0px;/,
     );
     assert.match(renderer, /if \(displayBlinkPhase === "closed"\)[\s\S]*return;/);
-    assert.match(renderer, /setDisplayGaze\(resolvedGaze\)/);
+    assert.match(
+      renderer,
+      /setDisplayGaze\(\{\s*xPx:\s*resolvedGazeXPx,\s*yPx:\s*resolvedGazeYPx,\s*transitionMs:\s*resolvedGazeTransitionMs,?\s*\}\)/,
+    );
     assert.match(renderer, /data-face-eye-gaze-snap=\{gazeSnapsOpen/);
     assert.match(renderer, /botFaceEyeMovementIsActive\(normalizedEyeMovement\)/);
     assert.match(
@@ -241,13 +244,13 @@ describe("bot eye movement modes", () => {
     assert.match(page, /blinkWhileTalking = true/);
     assert.match(
       page,
-      /detailLevel === "debate" \? faceStyle\.eyeAnimation : "still"/,
+      /renderDetailLevel === "debate"\s*\? faceStyle\.eyeAnimation\s*:\s*"still"/,
     );
-    assert.doesNotMatch(
+    assert.match(
       page,
-      /faceEyeCharacter=\{faceStyle\.eyeCharacter\}\s*faceEyeMovement="still"/,
+      /renderDetailLevel === "full"\s*\? faceStyle\.eyeAnimation\s*:\s*"still"/,
     );
-    assert.match(page, /eyeTargetDirection=\{seatEyeTargetDirection\}/);
+    assert.match(page, /eyeTargetDirection:\s*seatEyeTargetDirection/);
     assert.match(page, /avatarState\.role === "host" \? 1 : -1/);
     assert.match(page, /nervous:\s*"Nervous"/);
     assert.match(page, /frantic:\s*"Frantic"/);

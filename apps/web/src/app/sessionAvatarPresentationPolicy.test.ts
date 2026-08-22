@@ -28,9 +28,11 @@ describe("session avatar presentation policy", () => {
     assert.equal(debateForumModeratorUsesMini("jury"), false);
   });
 
-  it("pins Signal and Coffee to full presentation", () => {
-    assert.equal(signalAvatarPresentation(), "full");
-    assert.equal(coffeeAvatarPresentation(), "full");
+  it("keeps authored Coffee and Signal mannequins live and in replay", () => {
+    assert.equal(signalAvatarPresentation({ live: true }), "full");
+    assert.equal(signalAvatarPresentation({ live: false }), "full");
+    assert.equal(coffeeAvatarPresentation({ live: true }), "full");
+    assert.equal(coffeeAvatarPresentation({ live: false }), "full");
   });
 
   it("uses the mini Moderator in wide, left, and right, and keeps the close-up full", () => {
@@ -89,31 +91,38 @@ describe("session avatar presentation policy", () => {
     );
   });
 
-  it("wires full-size floors without Coffee mini or micro seat renderers", () => {
-    assert.match(signalSource, /signalAvatarPresentation\(\)/u);
-    assert.match(pageSource, /coffeeAvatarPresentation\(\)/u);
+  it("keeps authored Coffee and Signal bodies and full live phosphor effects", () => {
+    assert.match(
+      signalSource,
+      /signalAvatarPresentation\(\{[\s\S]{0,100}live: !args\.replay/u,
+    );
     assert.match(
       pageSource,
-      /function CoffeeSeatAvatarRenderer[\s\S]{0,500}<ZenLiveBotMannequin/u,
+      /coffeeAvatarPresentation\(\{[\s\S]{0,100}live: conversationActive && !coffeeReplayActive/u,
     );
+    assert.doesNotMatch(pageSource, /data-signal-live-compact-avatar/u);
     const coffeeRenderer = pageSource.slice(
       pageSource.indexOf("function CoffeeSeatAvatarRenderer"),
       pageSource.indexOf("function FullAvatarCompactFallback"),
     );
-    assert.doesNotMatch(coffeeRenderer, /ChatMiniBotAvatar|BotAvatarMicroRenderer/u);
-    // The live player stand-in follows the table shed tier (uniform mini on
-    // crowded low-FPS tables); only replay pins the stand-in to full.
+    assert.match(
+      coffeeRenderer,
+      /return \(\s*<BotAmbientPresenceRig[\s\S]*?<ZenLiveBotMannequin/u,
+    );
+    assert.doesNotMatch(coffeeRenderer, /compactLiveAvatar|coffeeLiveSeatAvatar/u);
     assert.match(
       pageSource,
-      /coffee-replay-player-[\s\S]{0,900}minimumRenderedSizeTier=\{\s*coffeeReplayActive\s*\?\s*"full"\s*:\s*coffeeLiveMinimumRenderedSizeTier\s*\}/u,
+      /const coffeeLiveMinimumRenderedSizeTier = "full" as const/u,
+    );
+    assert.doesNotMatch(pageSource, /signalLivePerformanceAvatar/u);
+    assert.doesNotMatch(pageSource, /runtimeEffectsEnabled:\s*coffeeReplayActive/u);
+    assert.match(
+      pageSource,
+      /coffee-live-\$\{bot\.id\}[\s\S]{0,1200}showThinkingSpinner:\s*seatThinkingVisualActive[\s\S]{0,300}detailLevel:\s*"full"/u,
     );
     assert.match(
       pageSource,
-      /coffee-live-\$\{bot\.id\}[\s\S]{0,800}minimumRenderedSizeTier: coffeeLiveMinimumRenderedSizeTier/u,
-    );
-    assert.match(
-      pageSource,
-      /if \(minimumRenderedSizeTier === "full"\) \{[\s\S]{0,400}setRenderedSizeTier\("full"\);\s*return;[\s\S]{0,600}getBoundingClientRect/u,
+      /botcast-producer-prism[\s\S]{0,600}showThinkingSpinner:\s*signalPrismThinking[\s\S]{0,300}detailLevel:\s*"full"/u,
     );
   });
 

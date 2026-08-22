@@ -23,6 +23,10 @@ const signalCss = readFileSync(
 describe("local model warmup intermission integration", () => {
   it("gates Coffee generation and restores the room before reveal", () => {
     assert.match(pageSource, /beginCoffeeModelPreparation\(true\)/u);
+    assert.match(
+      pageSource,
+      /coffeeSessionUsesAutoModel[\s\S]{0,140}Promise\.resolve\(autoModelPreparationNotApplicable\(\)\)[\s\S]{0,80}: waitForModelPreparation/u,
+    );
     assert.equal((pageSource.match(/ensureCoffeeModelReady\(initialWarmup\)/gu) ?? []).length, 2);
     assert.equal((pageSource.match(/await releaseCoffeeModelWarmup\(\);/gu) ?? []).length >= 4, true);
     assert.match(pageSource, /coffeeSessionClockHoldReasons\([\s\S]*modelWarmup:/u);
@@ -48,6 +52,18 @@ describe("local model warmup intermission integration", () => {
       /prepareGuestResponseRef\.current\(currentEpisode, message\)/u,
     );
     assert.match(signalSource, /modelWarmupHoldDurationMs/u);
+    const preparationSource = signalSource.slice(
+      signalSource.indexOf("const preparation = selectedModelOption"),
+      signalSource.indexOf(
+        "const preRoll:",
+        signalSource.indexOf("const preparation = selectedModelOption") + 1,
+      ),
+    );
+    assert.match(preparationSource, /\? waitForModelPreparation/u);
+    assert.match(
+      preparationSource,
+      /: Promise\.resolve\(autoModelPreparationNotApplicable\(\)\)/u,
+    );
   });
 
   it("uses polite, non-speculative status with accessible recovery actions", () => {
@@ -55,8 +71,11 @@ describe("local model warmup intermission integration", () => {
     assert.match(overlaySource, /aria-live=\{failed \? "assertive" : "polite"\}/u);
     assert.match(overlaySource, /PRISM is preparing the local model/u);
     assert.match(overlaySource, /elapsed/u);
-    assert.doesNotMatch(overlaySource, /percent|estimated|ETA/iu);
-    assert.match(overlaySource, /<button type="button" onClick=\{props\.onRetry\}>Try again<\/button>/u);
+    assert.doesNotMatch(overlaySource, /\b(?:percent|estimated|ETA)\b/iu);
+    assert.match(
+      overlaySource,
+      /<button type="button" onClick=\{props\.onRetry\}>\s*Try again\s*<\/button>/u,
+    );
   });
 
   it("desaturates both scenes and honors reduced motion", () => {

@@ -11,6 +11,7 @@ import {
   coffeeDirectedMentionBotIds,
   coffeeEmptyTurnAutoplayRetryDelayMs,
   coffeeLoopTimerOwnsAutoplayTurn,
+  coffeeMessagesWithHeardCutoffs,
   coffeeMonotonicDeadlineRemainingMs,
   coffeePendingSubmittedUserLineVisible,
   coffeePersistedUserLineOwnsPendingReveal,
@@ -38,13 +39,20 @@ import {
 } from "./coffeeRevealProgressChannel.ts";
 
 describe("coffee user reveal flow", () => {
-  it("keeps only the Coffee table composer rich by default", () => {
+  it("keeps live Coffee and Signal composers native regardless of Markdown preference", () => {
     assert.equal(
       coffeeComposerUsesRichInput({
         variant: "coffee-table",
         markdownEditorEnabled: false,
       }),
-      true,
+      false,
+    );
+    assert.equal(
+      coffeeComposerUsesRichInput({
+        variant: "coffee-table",
+        markdownEditorEnabled: true,
+      }),
+      false,
     );
     assert.equal(
       coffeeComposerUsesRichInput({
@@ -72,7 +80,7 @@ describe("coffee user reveal flow", () => {
         variant: "signal",
         markdownEditorEnabled: true,
       }),
-      true,
+      false,
     );
   });
 
@@ -149,6 +157,34 @@ describe("coffee user reveal flow", () => {
         cutOffMessageId: null,
       }),
       false,
+    );
+  });
+
+  it("projects one audience-heard cutoff across committed and pending message sources", () => {
+    const interrupted = {
+      id: "line-1",
+      role: "assistant",
+      content: "This full sentence was never heard.",
+      botId: "bot-1",
+    };
+    const cutoff = {
+      sourceMessage: interrupted,
+      heardContent: "This full sen—",
+    };
+
+    assert.deepEqual(
+      coffeeMessagesWithHeardCutoffs({
+        messages: [interrupted],
+        cutoffs: [cutoff],
+      }),
+      [{ ...interrupted, content: "This full sen—" }],
+    );
+    assert.deepEqual(
+      coffeeMessagesWithHeardCutoffs({
+        messages: [],
+        cutoffs: [cutoff],
+      }),
+      [{ ...interrupted, content: "This full sen—" }],
     );
   });
 

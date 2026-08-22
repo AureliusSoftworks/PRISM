@@ -45,7 +45,14 @@ describe("Coffee empty-cup behavior", () => {
     );
     assert.match(
       pageSource,
-      /\/api\/coffee\/sessions\/\$\{encodeURIComponent\(sessionId\)\}\/depart/u,
+      /\/api\/coffee\/sessions\/\$\{encodeURIComponent\(sessionId\)\}\/synopsis/u,
     );
+    const finishStart = pageSource.indexOf("const finishCoffeeSession =");
+    const finishEnd = pageSource.indexOf(
+      "finishCoffeeSessionRef.current = finishCoffeeSession",
+      finishStart,
+    );
+    assert.ok(finishStart >= 0 && finishEnd > finishStart);
+    assert.doesNotMatch(pageSource.slice(finishStart, finishEnd), /\/depart/u);
   });
 });

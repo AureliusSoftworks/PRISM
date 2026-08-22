@@ -615,6 +615,11 @@ import {
 import type { PrismSceneQuality } from "./prismSceneRuntime";
 import IdentityPresentationBlackout from "./IdentityPresentationBlackout";
 import {
+  DebateMysteryCompilationResume,
+  DebateMysteryPlay,
+  DebateMysterySetup,
+} from "./DebateMysteryExperience";
+import {
   debateIdentityAppearanceBotV1,
   debateIdentityPresentationChangeV1,
   type DebateIdentityPresentationChangeV1,
@@ -816,8 +821,18 @@ export interface DebateJudgeComposerRenderProps {
   onBack: () => void;
 }
 
-type DebateView = "dashboard" | "live" | "baking";
+type DebateView = "dashboard" | "live" | "baking" | "mystery";
 type DebateStudioPanel = "motion" | "cast" | "evidence" | "archive";
+type DebatePresentationPlayerRole = Exclude<
+  DebatePlayerRole,
+  "investigator"
+>;
+
+function debatePresentationPlayerRole(
+  role: DebatePlayerRole,
+): DebatePresentationPlayerRole {
+  return role === "investigator" ? "judge" : role;
+}
 const DEBATE_STAGE_LAYOUT_AUTHORING_ENABLED = prismDeveloperAuthoringEnabled({
   NODE_ENV: process.env.NODE_ENV,
   NEXT_PUBLIC_PRISM_BRANCH: process.env.NEXT_PUBLIC_PRISM_BRANCH,
@@ -1483,6 +1498,10 @@ const DebateLiveAudienceGallery = memo(
 );
 
 const DEBATE_LIVE_SPEECH_RENDER_INTERVAL_MS = 50;
+/** Let the completed output graph release its final phoneme before Auto arms
+ * the next speaker. Explicit interruption paths keep their authored overlap. */
+const DEBATE_AUTOMATIC_INTER_TURN_GAP_MS = 460;
+const DEBATE_AUTOMATIC_PRIMARY_RELEASE_MS = 320;
 const DEBATE_FOLEY_MIX = {
   background: 0,
   grain: 0,
@@ -2696,6 +2715,17 @@ function debateResolvedRoutingLabel(session: DebateSessionV1): string {
 function debateArchiveMetaChips(
   session: DebateSessionListItemV1,
 ): string[] {
+  if (session.format === "whodunnit") {
+    return [
+      "Whodunnit?",
+      "A Murder Mystery",
+      session.mysteryFictionLabel ?? "Fictional, non-canonical case",
+      session.mysteryRouteGrade
+        ? gradeLabelForMysteryArchive(session.mysteryRouteGrade)
+        : (session.mysteryProgress ?? "investigation").replace("_", " "),
+      "Investigator",
+    ];
+  }
   const chips = [
     session.format === "turnabout" ? "Turnabout" : "Forum",
     debateProductionName(session.format, session.formality),
@@ -2712,6 +2742,13 @@ function debateArchiveMetaChips(
     chips.push(debateActiveDurationLabel(session.activeDurationMs));
   }
   return chips;
+}
+
+function gradeLabelForMysteryArchive(grade: string): string {
+  if (grade === "smoking_gun") return "Smoking Gun";
+  if (grade === "strong_case") return "Strong Case";
+  if (grade === "lucky_break") return "Lucky Break";
+  return "Incorrect";
 }
 
 function debateSessionNeedsReturnPause(session: DebateSessionV1): boolean {
@@ -4317,6 +4354,7 @@ export function DebateExperience(
     "live" | "replay"
   >("live");
   const [studioPanel, setStudioPanel] = useState<DebateStudioPanel>("motion");
+  const [mysterySetupOpen, setMysterySetupOpen] = useState(false);
   const [roomTuningOpen, setRoomTuningOpen] = useState(false);
   const [motionTuningOpen, setMotionTuningOpen] = useState(false);
   const [castTuningOpen, setCastTuningOpen] = useState(false);
@@ -6220,7 +6258,8 @@ export function DebateExperience(
   // scramble an in-progress bakery or frozen floor. Auto still re-routes
   // model/effort per generation when the picker stays on Auto.
   const liveSessionActive =
-    view === "baking" || (view === "live" && activeSession !== null);
+    view === "baking" ||
+    ((view === "live" || view === "mystery") && activeSession !== null);
   useEffect(() => {
     onLiveSessionActiveChange?.(
       liveSessionActive,
@@ -6415,6 +6454,10 @@ export function DebateExperience(
       nowMs: Date.now(),
       wideHoldStartedAtMs: introCameraStateRef.current.wideHoldStartedAtMs,
       focusedSide: introCameraStateRef.current.focusedSide,
+      // Introducee wide-cuts belong to the actual introduction. Challenge
+      // prompts and phase bridges name the advocates too; they hold the
+      // moderator with breath cues instead of re-running intro cinematics.
+      introducees: debateEventIsModeratorIntro(event),
     });
     introCameraStateRef.current = {
       eventId: event.id,
@@ -10855,6 +10898,7 @@ export function DebateExperience(
         replaceLiveReveal({ eventId: event.id, visibleContent: "" });
         let playbackProgressSeen = false;
         let playbackCancelled = false;
+        let playbackEnded = false;
         let playbackAlignment: VoicePlaybackCharacterAlignment | null = null;
         let playbackCompletionContent = "";
         let lastVoiceProgressAtMs = 0;
@@ -10864,7 +10908,7 @@ export function DebateExperience(
         );
         let lastSpeechRenderAt = 0;
         let lastSemanticKey = "";
-        const played = await settleDebatePresentationCallback(onUtterance?.({
+        const playback = onUtterance?.({
           ...utterance,
           lifecycle: {
             onStart: (durationMs, alignment) => {
@@ -10938,6 +10982,7 @@ export function DebateExperience(
             },
             onEnd: () => {
               if (presentationRunRef.current !== runId) return;
+              playbackEnded = true;
               playbackCompletionContent = debateVisibleContentAtSpeechTime({
                 content: event.content,
                 spokenText,
@@ -10967,7 +11012,8 @@ export function DebateExperience(
               );
             },
           },
-        }),
+        });
+        const played = await settleDebatePresentationCallback(playback,
         {
           stallMs: DEBATE_PRESENTATION_FIRST_VOICE_STALL_MS,
           maxMs: DEBATE_PRESENTATION_CALLBACK_MAX_MS,
@@ -10976,6 +11022,24 @@ export function DebateExperience(
         );
         if (presentationRunRef.current !== runId) return;
         if (playbackCancelled) return;
+        if (playbackProgressSeen && !playbackEnded) {
+          if (onReleaseUtterance) {
+            onReleaseUtterance(DEBATE_AUTOMATIC_PRIMARY_RELEASE_MS);
+            await new Promise((resolve) =>
+              window.setTimeout(
+                resolve,
+                DEBATE_AUTOMATIC_PRIMARY_RELEASE_MS,
+              ),
+            );
+          } else if (playback) {
+            await playback.catch(() => false);
+          }
+          if (presentationRunRef.current !== runId) return;
+          await new Promise((resolve) =>
+            window.setTimeout(resolve, DEBATE_AUTOMATIC_INTER_TURN_GAP_MS),
+          );
+          if (presentationRunRef.current !== runId) return;
+        }
         if (!played && playbackProgressSeen) {
           updateLiveReveal((current) =>
             current?.eventId === event.id
@@ -11034,6 +11098,12 @@ export function DebateExperience(
           );
         } else if (audienceReaction) {
           playDebateAudienceReaction(audienceReaction, event.id);
+        }
+        if (played && playbackEnded) {
+          await new Promise((resolve) =>
+            window.setTimeout(resolve, DEBATE_AUTOMATIC_INTER_TURN_GAP_MS),
+          );
+          if (presentationRunRef.current !== runId) return;
         }
         if (
           event.stepKey === "participant_objection_performance" ||
@@ -11732,6 +11802,17 @@ export function DebateExperience(
       );
       if (!openingIsCurrent()) return;
       let session = result.session;
+      if (
+        session.format === "whodunnit" &&
+        session.formatState.format === "whodunnit"
+      ) {
+        activeSessionIdRef.current = session.id;
+        activeSessionRef.current = session;
+        setActiveSession(session);
+        setObserverPerspective("live");
+        setView("mystery");
+        return;
+      }
       const deferredStartAtOpen = debateSessionAwaitingDeferredStart(session);
       const exhaustedMarker = debateExhaustedRecessRecoveryMarker(session);
       if (
@@ -13640,7 +13721,7 @@ export function DebateExperience(
     const previous = activeSession;
     const guidedKind = previous
       ? debateJudgeGuidedStepKind({
-          playerRole: previous.playerRole,
+          playerRole: debatePresentationPlayerRole(previous.playerRole),
           status: previous.status,
           stepKey: previous.stepKey,
           judgeGavelStatus: previous.judgeGavel?.status,
@@ -16249,7 +16330,11 @@ export function DebateExperience(
       session.status === "waiting_for_player";
     const archiveDetailsId = `debate-archive-details-${session.id}`;
     const proceedingActionLabel =
-      session.status === "completed"
+      session.format === "whodunnit"
+        ? session.status === "completed"
+          ? "Open case Archive"
+          : "Return to investigation"
+        : session.status === "completed"
         ? "Watch replay"
         : session.awaitingDeferredStart
           ? "Start debate"
@@ -16257,7 +16342,9 @@ export function DebateExperience(
             ? "Resume debate"
             : "Return to debate";
     const proceedingStatusLabel =
-      session.status === "completed"
+      session.format === "whodunnit" && session.mysteryRouteGrade
+        ? gradeLabelForMysteryArchive(session.mysteryRouteGrade)
+        : session.status === "completed"
         ? "Completed"
         : session.awaitingDeferredStart
           ? "Ready to start"
@@ -16437,7 +16524,8 @@ export function DebateExperience(
                   {session.turbo ? <span aria-hidden="true">🔥</span> : null}
                   <span>{DEBATE_ARCHIVE_EFFORT_LABELS[effortLevel]}</span>
                 </span>
-                {session.status !== "completed" &&
+                {session.format !== "whodunnit" &&
+                session.status !== "completed" &&
                 session.status !== "cancelled" ? (
                   <button
                     type="button"
@@ -16467,19 +16555,21 @@ export function DebateExperience(
               </div>
             ) : null}
             <div className={styles.archiveActions}>
-              <button
-                type="button"
-                className={styles.archiveReuseButton}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void copyArchiveVerboseTranscript(session);
-                }}
-                disabled={archiveTranscriptCopyState === "copying"}
-                aria-busy={archiveTranscriptCopyState === "copying"}
-                aria-label={`${archiveTranscriptCopyLabel} for ${session.title}`}
-              >
-                {archiveTranscriptCopyLabel}
-              </button>
+              {session.format !== "whodunnit" ? (
+                <button
+                  type="button"
+                  className={styles.archiveReuseButton}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void copyArchiveVerboseTranscript(session);
+                  }}
+                  disabled={archiveTranscriptCopyState === "copying"}
+                  aria-busy={archiveTranscriptCopyState === "copying"}
+                  aria-label={`${archiveTranscriptCopyLabel} for ${session.title}`}
+                >
+                  {archiveTranscriptCopyLabel}
+                </button>
+              ) : null}
               <button
                 type="button"
                 className={styles.archiveOpenButton}
@@ -16488,48 +16578,52 @@ export function DebateExperience(
               >
                 {proceedingActionLabel}
               </button>
-              <button
-                type="button"
-                className={styles.archiveReuseButton}
-                onClick={() => void reuseSessionSetup(session)}
-                disabled={busy}
-                aria-label={`Use setup from ${session.title}`}
-              >
-                {setupRestoreLoadingId === session.id
-                  ? "Loading…"
-                  : "Use setup"}
-              </button>
-              <button
-                type="button"
-                className={styles.archiveReuseButton}
-                onClick={() => setArchiveAssetsSession(session)}
-                disabled={busy || (session.exhibitCount ?? 0) < 1}
-                data-tutorial-target="debate-archive-assets-open"
-                aria-label={
-                  (session.exhibitCount ?? 0) < 1
-                    ? `Assets unavailable for ${session.title} — no exhibits`
-                    : `Open exhibit assets for ${session.title}`
-                }
-                title={
-                  (session.exhibitCount ?? 0) < 1
-                    ? "Add exhibits before opening Assets"
-                    : "Show exhibits, soft re-synthesize, and magenta cleanup"
-                }
-              >
-                Assets
-              </button>
-              {canRestartArchivedProceeding ? (
-                <button
-                  type="button"
-                  className={styles.archiveReuseButton}
-                  onClick={() => void restartArchivedProceeding(session)}
-                  disabled={busy}
-                  data-tutorial-target="debate-archive-restart"
-                  aria-label={`Restart ${session.title} from the beginning`}
-                  title="Restart with this proceeding's sealed model, effort, cast, rules, and evidence."
-                >
-                  Restart
-                </button>
+              {session.format !== "whodunnit" ? (
+                <>
+                  <button
+                    type="button"
+                    className={styles.archiveReuseButton}
+                    onClick={() => void reuseSessionSetup(session)}
+                    disabled={busy}
+                    aria-label={`Use setup from ${session.title}`}
+                  >
+                    {setupRestoreLoadingId === session.id
+                      ? "Loading…"
+                      : "Use setup"}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.archiveReuseButton}
+                    onClick={() => setArchiveAssetsSession(session)}
+                    disabled={busy || (session.exhibitCount ?? 0) < 1}
+                    data-tutorial-target="debate-archive-assets-open"
+                    aria-label={
+                      (session.exhibitCount ?? 0) < 1
+                        ? `Assets unavailable for ${session.title} — no exhibits`
+                        : `Open exhibit assets for ${session.title}`
+                    }
+                    title={
+                      (session.exhibitCount ?? 0) < 1
+                        ? "Add exhibits before opening Assets"
+                        : "Show exhibits, soft re-synthesize, and magenta cleanup"
+                    }
+                  >
+                    Assets
+                  </button>
+                  {canRestartArchivedProceeding ? (
+                    <button
+                      type="button"
+                      className={styles.archiveReuseButton}
+                      onClick={() => void restartArchivedProceeding(session)}
+                      disabled={busy}
+                      data-tutorial-target="debate-archive-restart"
+                      aria-label={`Restart ${session.title} from the beginning`}
+                      title="Restart with this proceeding's sealed model, effort, cast, rules, and evidence."
+                    >
+                      Restart
+                    </button>
+                  ) : null}
+                </>
               ) : null}
               <button
                 type="button"
@@ -17191,6 +17285,14 @@ export function DebateExperience(
                     disabled={disabled}
                     onChange={() => {
                       if (disabled) return;
+                      if (option.id === "whodunnit") {
+                        setMysterySetupOpen(true);
+                        setRoleChecks([]);
+                        return;
+                      }
+                      if (option.id !== "forum" && option.id !== "turnabout") {
+                        return;
+                      }
                       setFormat(option.id);
                       setRoleChecks([]);
                     }}
@@ -20821,7 +20923,7 @@ export function DebateExperience(
     const juryTranscriptCopyable = debateArchivedJuryRecordIsCopyable({
       status: session.status,
       juryEnabled: session.jury.enabled,
-      playerRole: session.playerRole,
+      playerRole: debatePresentationPlayerRole(session.playerRole),
     });
     const visibleTranscriptEvents = session.events.filter(
       (event) =>
@@ -23659,7 +23761,7 @@ export function DebateExperience(
           observerPerspective,
         });
     const judgeGuidedStep = debateJudgeGuidedStepKind({
-      playerRole: session.playerRole,
+      playerRole: debatePresentationPlayerRole(session.playerRole),
       status: session.status,
       stepKey: session.stepKey,
       judgeGavelStatus: session.judgeGavel?.status,
@@ -26640,12 +26742,166 @@ export function DebateExperience(
     );
   };
 
-  const experience =
-    view === "live" || (view === "baking" && activeSession)
-      ? renderLive()
-      : view === "baking"
-        ? renderLobby()
-        : renderLobby();
+  const mysterySharedProps = {
+    bots,
+    theme: props.theme,
+    request,
+    renderBotGlyph: props.renderBotGlyph,
+    renderMysteryBotAvatar: (
+      bot: DebateBotSummary,
+      presentation: "full" | "mini",
+      performance?: {
+        demeanor: "suspect" | "partner";
+        talking?: boolean;
+        thinking?: boolean;
+        speechTiming?: DebateSpeechTiming | null;
+      },
+    ) =>
+      props.renderBotAvatar?.(
+        bot as unknown as DebateBotSnapshotV1,
+        {
+          role: "audience",
+          lookAtRole: null,
+          consumer: "gallery",
+          presentation,
+          talking: performance?.talking === true,
+          thinking: performance?.thinking === true,
+          voiceLevel: 1,
+          colorCycle: false,
+          speechTiming: performance?.speechTiming ?? null,
+          foleyMouthShape: null,
+          // A suspect is always framed as guarded or tense in Whodunnit. The
+          // partner remains attentive; neither inherits a cheerful gallery
+          // portrait merely because the general Debate audience can.
+          listenerReaction: performance?.demeanor === "suspect" ? "divided" : "attentive",
+        },
+      ) ?? props.renderBotGlyph(bot.glyph, { size: presentation === "full" ? 132 : 36, strokeWidth: 1.2 }),
+    playMysteryVoice: async (
+      sessionId: string,
+      bot: DebateBotSummary,
+      text: string,
+      messageId: string,
+      lifecycle: DebateUtterance["lifecycle"],
+    ) => {
+      if (!props.onUtterance || !props.audioEnabled || props.audioVolume <= 0 || bot.hardMuted) return false;
+      const createdAt = new Date().toISOString();
+      return props.onUtterance({
+        event: {
+          version: DEBATE_SCHEMA_VERSION,
+          id: messageId,
+          sequence: 0,
+          phase: "opening",
+          stepKey: "mystery_interview",
+          kind: "speech",
+          speakerKind: "advocate",
+          speakerBotId: bot.id,
+          sideId: null,
+          content: text,
+          sourceIds: [],
+          createdAt,
+        },
+        format: "whodunnit",
+        sessionId,
+        speaker: bot,
+        player: false,
+        playerVoice: false,
+        spokenText: text,
+        voiceSourceBotId: bot.id,
+        lifecycle,
+      });
+    },
+    playMysteryPlayerVoice: async (
+      sessionId: string,
+      text: string,
+      messageId: string,
+      lifecycle: DebateUtterance["lifecycle"],
+    ) => {
+      if (!props.onUtterance || !props.audioEnabled || props.audioVolume <= 0) return false;
+      return props.onUtterance({
+        event: {
+          version: DEBATE_SCHEMA_VERSION,
+          id: messageId,
+          sequence: 0,
+          phase: "opening",
+          stepKey: "mystery_player_interview",
+          kind: "speech",
+          speakerKind: "player",
+          speakerBotId: null,
+          sideId: null,
+          content: text,
+          sourceIds: [],
+          createdAt: new Date().toISOString(),
+        },
+        format: "whodunnit",
+        sessionId,
+        speaker: null,
+        player: true,
+        playerVoice: true,
+        spokenText: text,
+        voiceSourceBotId: null,
+        lifecycle,
+      });
+    },
+    preferredProvider: props.preferredProvider,
+    responseMode: props.responseMode,
+    reasoningEffort: props.reasoningEffort,
+    turbo: props.turbo,
+    modelOverride: props.modelOverride,
+  } as const;
+  const experience = mysterySetupOpen ? (
+    <DebateMysterySetup
+      {...mysterySharedProps}
+      onCancel={() => setMysterySetupOpen(false)}
+      onCreated={(session) => {
+        activeSessionIdRef.current = session.id;
+        activeSessionRef.current = session;
+        setActiveSession(session);
+        setMysterySetupOpen(false);
+        setView("mystery");
+        void loadSessions();
+      }}
+    />
+  ) : view === "mystery" &&
+    activeSession?.format === "whodunnit" &&
+    activeSession.formatState.format === "whodunnit" ? (
+    activeSession.formatState.playPhase === "compiling" ? <DebateMysteryCompilationResume
+      {...mysterySharedProps}
+      session={activeSession}
+      onSessionChange={(session) => {
+        activeSessionRef.current = session;
+        setActiveSession(session);
+        void loadSessions();
+      }}
+      onExit={() => {
+        activeSessionIdRef.current = null;
+        activeSessionRef.current = null;
+        setActiveSession(null);
+        setView("dashboard");
+        setStudioPanel("archive");
+        void loadSessions();
+      }}
+    /> : <DebateMysteryPlay
+      {...mysterySharedProps}
+      session={activeSession}
+      onSessionChange={(session) => {
+        activeSessionRef.current = session;
+        setActiveSession(session);
+        if (session.status === "completed") void loadSessions();
+      }}
+      onExit={() => {
+        activeSessionIdRef.current = null;
+        activeSessionRef.current = null;
+        setActiveSession(null);
+        setView("dashboard");
+        setStudioPanel("archive");
+        void loadSessions();
+      }}
+    />
+  ) : view === "live" || (view === "baking" && activeSession) ? (
+    renderLive()
+  ) : (
+    renderLobby()
+  );
   return (
     <>
       {liveSessionActive && activeSession ? (
@@ -26655,7 +26911,10 @@ export function DebateExperience(
           sessionId={activeSession.id}
         />
       ) : null}
-      {liveSessionActive && activeSession && leaveDebatePortalTarget
+      {liveSessionActive &&
+      view !== "mystery" &&
+      activeSession &&
+      leaveDebatePortalTarget
         ? createPortal(
             <div
               className={styles.persistentLeaveDock}

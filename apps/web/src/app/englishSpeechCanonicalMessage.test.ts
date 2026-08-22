@@ -38,7 +38,7 @@ describe("English speech canonical message ownership", () => {
     );
     assert.match(
       effectSource,
-      /await enqueueEnglishVoice\([\s\S]*?message\.id,[\s\S]*?speechLifecycle\?\.\(clip\.alignment\)/,
+      /await enqueueEnglishVoice\([\s\S]*?message\.id,[\s\S]*?speechLifecycle\(clip\.alignment\)/,
     );
     assert.doesNotMatch(effectSource, /buildSpeechRevealPhrases/);
     assert.doesNotMatch(effectSource, /\bsetDetail\(/);

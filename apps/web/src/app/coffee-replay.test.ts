@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { readFileSync } from "node:fs";
 import {
   COFFEE_SIP_ACTION_MIN_MESSAGE_GAP,
   clampCoffeeReplayMessageIndex,
@@ -1087,7 +1088,9 @@ describe("coffee replay helpers", () => {
           audioDurationMs: 9_000,
           timelineDurationMs: 9_000,
           warningPresent: false,
+          warningDetail: null,
           errorPresent: false,
+          errorDetail: null,
           direction: [
             {
               sequence: 1,
@@ -1435,5 +1438,25 @@ describe("coffee replay helpers", () => {
     assert.ok(longGap > defaultGap);
     assert.equal(coffeeActionPassesSipCadence("sips coffee", 10 + longGap - 1, 10, longGap), false);
     assert.equal(coffeeActionPassesSipCadence("sips coffee", 10 + longGap, 10, longGap), true);
+  });
+});
+
+
+describe("coffee review export fidelity", () => {
+  it("emits a transcript coverage section before the turns", () => {
+    const source = readFileSync(
+      new URL("./coffee-replay.ts", import.meta.url),
+      "utf8",
+    );
+    // The export must be able to say what it is missing: five opening turns
+    // once existed in the recording and in no visible section of the export.
+    assert.match(source, /"## Transcript Coverage"/u);
+    assert.match(
+      source,
+      /sessionReviewTranscriptCoverageLines\(\{[\s\S]{0,120}presentMessageIds,/u,
+    );
+    const coverageAt = source.indexOf('"## Transcript Coverage"');
+    const turnsAt = source.indexOf('"## Detailed Turns"');
+    assert.ok(coverageAt > 0 && turnsAt > coverageAt);
   });
 });

@@ -22,7 +22,7 @@ const governor = readFileSync(
 
 describe("applet transcript frame-rate capture integration", () => {
   it("samples every live transcript lane from one always-on FPS governor", () => {
-    assert.match(governor, /publishPrismFrameRate\(1_000 \/ deltaMs\)/u);
+    assert.match(governor, /publishPrismFrameRate\(\s*windowFps,/u);
     assert.match(governor, /fpsWindowFrameCount \* 1_000/u);
     assert.match(
       page,

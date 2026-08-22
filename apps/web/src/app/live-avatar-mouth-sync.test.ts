@@ -15,6 +15,10 @@ const englishVoiceSource = readFileSync(
   new URL("./englishVoice.ts", import.meta.url),
   "utf8",
 );
+const faceSource = readFileSync(
+  new URL("./CoffeeSeatPlateEmoji.tsx", import.meta.url),
+  "utf8",
+);
 
 describe("live avatar mouth synchronization", () => {
   it("uses the media element clock for English playback progress", () => {
@@ -54,12 +58,22 @@ describe("live avatar mouth synchronization", () => {
     );
     assert.match(
       avatar,
-      /signalLivePrimaryAvatarSpeech\(\{[\s\S]{0,140}liveSpeech:[\s\S]{0,100}role,[\s\S]{0,120}elapsedMs: projectedLiveSpeechElapsedMs[\s\S]{0,40}\}\)\.mouthShape/u,
+      /signalLivePrimaryAvatarSpeech\(\{[\s\S]{0,140}liveSpeech:[\s\S]{0,100}role,[\s\S]{0,120}elapsedMs: signalLiveSpeechProjectedElapsedMs\([\s\S]{0,180}nowMs,[\s\S]{0,60}\}\),[\s\S]{0,40}\}\)\.mouthShape/u,
     );
     assert.match(
       signalSource,
-      /signalLiveSpeechProjectedElapsedMs\(\{[\s\S]{0,180}signalLiveSpeechPlaybackClockRef\.current[\s\S]{0,100}signalLiveMouthVisualNowMs/u,
+      /signalLiveSpeechProjectedElapsedMs\(\{[\s\S]{0,180}signalLiveSpeechPlaybackClockRef\.current[\s\S]{0,100}nowMs,/u,
       "Signal must keep producing visual mouth frames between sparse audio callbacks",
+    );
+    assert.match(
+      signalSource,
+      /function SignalLiveVisualSampler[\s\S]{0,900}startTransition\(\(\) =>[\s\S]{0,120}setSample/u,
+      "Signal's visual speech clock must stay below producer input priority",
+    );
+    assert.doesNotMatch(
+      signalSource,
+      /const \[signalLiveMouthVisualNowMs, setSignalLiveMouthVisualNowMs\]/u,
+      "Signal must not reconcile the full experience for every mouth frame",
     );
     assert.match(
       signalSource,
@@ -68,8 +82,29 @@ describe("live avatar mouth synchronization", () => {
     assert.match(avatar, /crtSpeechMouthShapeAtAlignedElapsedMs\(\{/u);
     assert.match(
       avatar,
-      /const mouthShape = rawMouthShape/u,
+      /<SignalLiveVisualSampler[\s\S]{0,300}const mouthShape = liveMouthShapeAt\(nowMs\)[\s\S]{0,180}render=\{renderMouthFrame\}/u,
       "Signal must preserve literal closed pause shapes from the aligned viseme clock",
+    );
+    assert.doesNotMatch(
+      avatar,
+      /return SignalLiveVisualSampler\(/u,
+      "Signal must mount the sampler as a component so episode state cannot change the parent's hook order",
+    );
+    assert.match(
+      signalSource,
+      /SIGNAL_LIVE_SPEECH_RENDER_INTERVAL_MS = 50/u,
+    );
+    assert.match(
+      signalSource,
+      /function SignalLiveVisualSampler[\s\S]{0,1000}current\.key === next\.key/u,
+      "Signal should commit only changed discrete mouth frames",
+    );
+    assert.doesNotMatch(signalSource, /SignalLiveMouthDomDriver/u);
+    assert.doesNotMatch(signalSource, /target\.textContent = glyph/u);
+    assert.doesNotMatch(
+      faceSource,
+      /botFaceDefaultSpeechGlyphForMouthShape/u,
+      "disabled Custom Speech must preserve the ordinary built-in mouth vocabulary",
     );
     assert.doesNotMatch(
       avatar,
@@ -87,6 +122,26 @@ describe("live avatar mouth synchronization", () => {
     assert.match(
       signalSource,
       /setLiveSpeech\(\{[\s\S]{0,100}messageId: message\.id,[\s\S]{0,80}message,[\s\S]{0,80}audible: true/u,
+    );
+    const primaryVoiceLifecycle = signalSource.slice(
+      signalSource.indexOf("const lifecycle: VoicePlaybackLifecycle"),
+      signalSource.indexOf(
+        "const played =",
+        signalSource.indexOf("const lifecycle: VoicePlaybackLifecycle"),
+      ),
+    );
+    const primaryProgress = primaryVoiceLifecycle.slice(
+      primaryVoiceLifecycle.indexOf("onProgress: (elapsedMs, durationMs) =>"),
+      primaryVoiceLifecycle.indexOf("onEnd: () =>"),
+    );
+    assert.match(
+      primaryProgress,
+      /signalLiveSpeechPlaybackClockRef\.current = \{/u,
+    );
+    assert.doesNotMatch(
+      primaryProgress,
+      /setLiveSpeech/u,
+      "audio heartbeats must not rerender the complete Signal owner",
     );
   });
 
@@ -214,10 +269,18 @@ describe("live avatar mouth synchronization", () => {
     );
     assert.match(playback, /onProgress: \(elapsedMs: number, durationMs: number\)/u);
     assert.match(playback, /setCoffeeLiveAvatarSpeech/u);
+    const coffeeProgress = playback.slice(
+      playback.indexOf("onProgress: (elapsedMs: number, durationMs: number) =>"),
+      playback.indexOf(
+        "onEnd: () =>",
+        playback.indexOf("onProgress: (elapsedMs: number, durationMs: number) =>"),
+      ),
+    );
+    assert.match(coffeeProgress, /setCoffeeLiveAvatarSpeech\(\(current\) =>/u);
     assert.match(
-      playback,
+      coffeeProgress,
       /coffeeLiveAvatarSpeechProgressShouldCommit\(\{/u,
-      "Coffee mouth progress must not setState on every animation frame",
+      "Coffee audio heartbeats should commit only when the aligned mouth frame changes",
     );
     assert.match(
       playback,
@@ -244,6 +307,21 @@ describe("live avatar mouth synchronization", () => {
     assert.match(
       seatMouth,
       /liveSeatAlignedMouthShape !== "closed"/u,
+    );
+    assert.doesNotMatch(pageSource, /CoffeeLiveMouthDomDriver/u);
+    assert.doesNotMatch(
+      faceSource,
+      /botFaceDefaultSpeechGlyphForMouthShape\(streamedMouthShape\)/u,
+      "bots without Custom Speech must not be forced through the default four-pose set",
+    );
+    const fullMannequin = pageSource.slice(
+      pageSource.indexOf("function ZenLiveBotMannequin"),
+      pageSource.indexOf("function BotHubVoicePreviewAvatarPlate"),
+    );
+    assert.doesNotMatch(
+      fullMannequin,
+      /data-prism-mouth-sync-target/u,
+      "audio-rate visemes must not invalidate the complete CRT emission mask",
     );
   });
 

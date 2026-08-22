@@ -70,9 +70,9 @@ describe("prism main-thread census", () => {
     let running = true;
     const step = (): void => {
       if (!running) return;
-      (globalThis as { window: typeof harness.win }).window.requestAnimationFrame(step);
+      (globalThis as unknown as { window: typeof harness.win }).window.requestAnimationFrame(step);
     };
-    (globalThis as { window: typeof harness.win }).window.requestAnimationFrame(step);
+    (globalThis as unknown as { window: typeof harness.win }).window.requestAnimationFrame(step);
     assert.equal(prismMainThreadCensus().rafPending, 1);
     for (let frame = 0; frame < 20; frame += 1) {
       harness.flushRaf();
@@ -83,8 +83,8 @@ describe("prism main-thread census", () => {
     assert.equal(prismMainThreadCensus().rafPending, 0);
 
     // Two loops read as two. A leak is exactly this, repeated.
-    (globalThis as { window: typeof harness.win }).window.requestAnimationFrame(() => undefined);
-    (globalThis as { window: typeof harness.win }).window.requestAnimationFrame(() => undefined);
+    (globalThis as unknown as { window: typeof harness.win }).window.requestAnimationFrame(() => undefined);
+    (globalThis as unknown as { window: typeof harness.win }).window.requestAnimationFrame(() => undefined);
     assert.equal(prismMainThreadCensus().rafPending, 2);
     harness.flushRaf();
     assert.equal(prismMainThreadCensus().rafPending, 0);
@@ -96,7 +96,7 @@ describe("prism main-thread census", () => {
     (globalThis as { window?: unknown }).window = harness.win;
     resetPrismMainThreadCensusCountersForTests();
     installPrismMainThreadCensus();
-    const win = (globalThis as { window: typeof harness.win }).window;
+    const win = (globalThis as unknown as { window: typeof harness.win }).window;
 
     const frame = win.requestAnimationFrame(() => undefined);
     win.cancelAnimationFrame(frame);
@@ -121,7 +121,7 @@ describe("prism main-thread census", () => {
     (globalThis as { window?: unknown }).window = harness.win;
     resetPrismMainThreadCensusCountersForTests();
     installPrismMainThreadCensus();
-    const win = (globalThis as { window: typeof harness.win }).window;
+    const win = (globalThis as unknown as { window: typeof harness.win }).window;
 
     win.setTimeout(() => undefined);
     win.setTimeout(() => undefined);

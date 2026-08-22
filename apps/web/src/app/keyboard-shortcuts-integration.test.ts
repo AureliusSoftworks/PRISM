@@ -110,9 +110,9 @@ test("lets Model, Effort, and Speech Type select values from the wheel", () => {
   );
   assert.match(
     pageSource,
-    /if \(!navbarPicker\) \{\s*document\.addEventListener\("keydown", handleQuickArrows/u,
+    /document\.addEventListener\("keydown", handleQuickArrows, true\)/u,
   );
-  assert.match(pageSource, /if \(navbarPicker\) return;/u);
+  assert.doesNotMatch(pageSource, /if \(navbarPicker\) return;/u);
   assert.doesNotMatch(pageSource, /returnToPointerBrowsing/u);
   assert.match(pageSource, /data-highlighted=\{/u);
   assert.doesNotMatch(

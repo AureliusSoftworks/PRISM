@@ -50,7 +50,7 @@ describe("Prompt Studio live preview", () => {
     assert.doesNotMatch(pageSource, /resolves to \$\{preview\.value\}/u);
     assert.match(
       cssSource,
-      /\.promptCenterPromptWildcardTooltip\s*\{[\s\S]{0,320}background:\s*var\(--bg-surface\)/u,
+      /\.promptCenterPromptWildcardTooltip\s*\{[\s\S]{0,320}background:\s*var\(--prism-tooltip-bg\)/u,
     );
     assert.doesNotMatch(pageSource, /PromptCenterWildcardSampleChip/u);
     assert.doesNotMatch(

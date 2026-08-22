@@ -66,13 +66,13 @@ test("submerges passive Prism chrome while keeping panel fields Wieldable", () =
   );
   assert.match(
     page,
-    /const companionSubmergedByMainPanel =\s*prismCompanionDisabledByMainPanel\(panel, botAvatarCustomizerOpen\)/u,
+    /const companionSubmergedByMainPanel =\s*prismCompanionDisabledByMainPanel\(\s*panel,\s*botAvatarCustomizerOpen \|\| botGeneratorOpen,\s*\)/u,
   );
   assert.match(page, /submerged=\{companionSubmergedByMainPanel\}/u);
   assert.match(companion, /data-submerged=\{submerged \? "true" : undefined\}/u);
   assert.match(
     companion,
-    /if \(companionSuppressed \|\| sessionNoteContext\) return;\s*return installPrismUniversalInputTargets/u,
+    /if \(sessionNoteContext\) return;\s*return installPrismUniversalInputTargets/u,
   );
 });
 
@@ -106,7 +106,7 @@ test("turns the floating assistant into a session-note plus during live Signal, 
   assert.match(companion, /data-session-note="true"/u);
   assert.match(
     companion,
-    /const onKeyDown = \(event: KeyboardEvent\): void => \{\s*if \(companionSuppressed\) return;/u,
+    /const onKeyDown = \(event: KeyboardEvent\): void => \{\s*if \(companionSuppressed\) \{[\s\S]{0,700}playPrismHotkeyInaccessibleSfx\(\);[\s\S]{0,100}return;\s*\}/u,
   );
   assert.match(
     companion,

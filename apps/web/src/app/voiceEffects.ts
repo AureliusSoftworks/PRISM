@@ -36,6 +36,11 @@ import {
   publishBotVoiceLightLevel,
   type VoiceLightMeter,
 } from "./voiceLightEnvelope.ts";
+import {
+  decodeLiveVoicePcm,
+  decodeLiveVoicePcmOwned,
+  type LiveVoicePcm,
+} from "./liveVoiceDecode.ts";
 
 export interface VoiceEffectPlan {
   highpassHz: number;
@@ -396,6 +401,15 @@ export function voicePlaybackPresentationDurationMs(
   );
 }
 
+export const PRISM_LIVE_VOICE_PROGRESS_INTERVAL_MS = 100;
+
+export function prismLiveVoicePerformanceBudgetActive(): boolean {
+  return (
+    typeof document !== "undefined" &&
+    document.body?.dataset.prismLivePerformanceActive === "true"
+  );
+}
+
 export function beginVoicePlaybackProgress(
   lifecycle: VoicePlaybackLifecycle | undefined,
   durationMs: number,
@@ -405,7 +419,9 @@ export function beginVoicePlaybackProgress(
 ): VoicePlaybackProgressController {
   const normalizedDurationMs = Math.max(1, Math.round(durationMs));
   const startDelayMs = Math.max(0, Math.round(options.startDelayMs ?? 0));
+  const livePerformanceBudget = prismLiveVoicePerformanceBudgetActive();
   let frame: number | null = null;
+  let livePerformanceTimer: number | null = null;
   let startTimer: number | null = null;
   let active = true;
   let started = false;
@@ -422,7 +438,9 @@ export function beginVoicePlaybackProgress(
   const tick = () => {
     if (!active || !started) return;
     report(currentElapsedMs() - startDelayMs);
-    frame = window.requestAnimationFrame(tick);
+    if (!livePerformanceBudget) {
+      frame = window.requestAnimationFrame(tick);
+    }
   };
   const start = () => {
     if (!active || started) return;
@@ -430,7 +448,16 @@ export function beginVoicePlaybackProgress(
     startTimer = null;
     lifecycle?.onStart?.(normalizedDurationMs, alignment);
     report(0);
-    if (lifecycle?.onProgress) frame = window.requestAnimationFrame(tick);
+    if (lifecycle?.onProgress) {
+      if (livePerformanceBudget) {
+        livePerformanceTimer = window.setInterval(
+          tick,
+          PRISM_LIVE_VOICE_PROGRESS_INTERVAL_MS,
+        );
+      } else {
+        frame = window.requestAnimationFrame(tick);
+      }
+    }
   };
   if (startDelayMs > 0 && lifecycle) {
     startTimer = window.setTimeout(start, startDelayMs);
@@ -444,6 +471,10 @@ export function beginVoicePlaybackProgress(
     startTimer = null;
     if (frame !== null) window.cancelAnimationFrame(frame);
     frame = null;
+    if (livePerformanceTimer !== null) {
+      window.clearInterval(livePerformanceTimer);
+      livePerformanceTimer = null;
+    }
   };
   return {
     cancel,
@@ -557,6 +588,30 @@ let formantCorrectionRegistration: Promise<
   (new (options: { context: BaseAudioContext; outputChannelCount?: 1 | 2 }) => FormantCorrectionNodeLike) | null
 > | null = null;
 let formantCorrectionContext: BaseAudioContext | null = null;
+
+const PRISM_LIVE_VOICE_PLAYBACK_PROCESSOR = "prism-live-voice-playback";
+const PRISM_LIVE_VOICE_PLAYBACK_WORKLET_URL =
+  "/worklets/prism-live-voice-playback.js";
+const liveVoicePlaybackWorkletRegistrations = new WeakMap<
+  AudioContext,
+  Promise<boolean>
+>();
+
+async function liveVoicePlaybackWorkletAvailable(
+  context: AudioContext,
+): Promise<boolean> {
+  if (!context.audioWorklet || typeof AudioWorkletNode !== "function") {
+    return false;
+  }
+  const existing = liveVoicePlaybackWorkletRegistrations.get(context);
+  if (existing) return existing;
+  const registration = context.audioWorklet
+    .addModule(PRISM_LIVE_VOICE_PLAYBACK_WORKLET_URL)
+    .then(() => true)
+    .catch(() => false);
+  liveVoicePlaybackWorkletRegistrations.set(context, registration);
+  return registration;
+}
 
 /** The copied MPL processor is deliberately a public asset: AudioWorklet
  * modules are fetched by the browser rather than bundled into Next's normal
@@ -842,6 +897,10 @@ export async function renderOfflineVoiceTake(args: {
 
 interface ActiveVoiceChannelState {
   nodes: AudioNode[];
+  media: HTMLAudioElement | null;
+  mediaUrl: string | null;
+  mediaStartTimer: number | null;
+  mediaEndTimer: number | null;
   resolve: (() => void) | null;
   progress: VoicePlaybackProgressController | null;
   roomConnection: RoomAcousticsConnection | null;
@@ -856,6 +915,10 @@ const activeVoiceChannels: Record<
 > = {
   primary: {
     nodes: [],
+    media: null,
+    mediaUrl: null,
+    mediaStartTimer: null,
+    mediaEndTimer: null,
     resolve: null,
     progress: null,
     roomConnection: null,
@@ -865,6 +928,10 @@ const activeVoiceChannels: Record<
   },
   presence: {
     nodes: [],
+    media: null,
+    mediaUrl: null,
+    mediaStartTimer: null,
+    mediaEndTimer: null,
     resolve: null,
     progress: null,
     roomConnection: null,
@@ -874,6 +941,10 @@ const activeVoiceChannels: Record<
   },
   reaction: {
     nodes: [],
+    media: null,
+    mediaUrl: null,
+    mediaStartTimer: null,
+    mediaEndTimer: null,
     resolve: null,
     progress: null,
     roomConnection: null,
@@ -883,6 +954,10 @@ const activeVoiceChannels: Record<
   },
   crosstalk: {
     nodes: [],
+    media: null,
+    mediaUrl: null,
+    mediaStartTimer: null,
+    mediaEndTimer: null,
     resolve: null,
     progress: null,
     roomConnection: null,
@@ -910,7 +985,9 @@ function contextForPlayback(): AudioContext | null {
   return audioContext;
 }
 
-export async function prepareRealtimeVoiceAudio(): Promise<boolean> {
+export async function prepareRealtimeVoiceAudio(
+  options: { loadRealtimeProcessing?: boolean } = {},
+): Promise<boolean> {
   const context = contextForPlayback();
   if (!context) return false;
   if (context.state !== "running") {
@@ -927,7 +1004,13 @@ export async function prepareRealtimeVoiceAudio(): Promise<boolean> {
     }
   }
   if (context.state === "running") {
-    await formantCorrectionNodeConstructor(context);
+    if (options.loadRealtimeProcessing !== false) {
+      await formantCorrectionNodeConstructor(context);
+    } else if (prismLiveVoicePerformanceBudgetActive()) {
+      // Compile the zero-copy live playback lane before decoded speech reaches
+      // the stage. Failure is harmless because media remains the fallback.
+      await liveVoicePlaybackWorkletAvailable(context);
+    }
   }
   return context.state === "running";
 }
@@ -1064,8 +1147,31 @@ export function stopRealtimeVoiceAudio(
     window.clearTimeout(active.releaseTimer);
     active.releaseTimer = null;
   }
+  if (active.mediaStartTimer !== null) {
+    window.clearTimeout(active.mediaStartTimer);
+    active.mediaStartTimer = null;
+  }
+  if (active.mediaEndTimer !== null) {
+    window.clearTimeout(active.mediaEndTimer);
+    active.mediaEndTimer = null;
+  }
   active.progress?.cancel();
   active.progress = null;
+  const media = active.media;
+  active.media = null;
+  if (media) {
+    media.pause();
+    media.removeAttribute("src");
+    // `load()` forces synchronous media-resource selection and decoder
+    // teardown. On Coffee/Signal this showed up as an input-blocking frame at
+    // utterance boundaries, so let the detached blob URL release naturally.
+    // Non-live surfaces retain the eager cleanup behavior.
+    if (!prismLiveVoicePerformanceBudgetActive()) media.load();
+  }
+  if (active.mediaUrl) {
+    URL.revokeObjectURL(active.mediaUrl);
+    active.mediaUrl = null;
+  }
   for (const node of active.nodes) {
     try {
       if ("stop" in node && typeof node.stop === "function") node.stop();
@@ -1136,9 +1242,567 @@ export function releaseRealtimeVoiceAudio(
   }, durationMs);
 }
 
+/**
+ * Schedule a short, bounded gain dip without pausing or reallocating the
+ * active voice source. Signal uses this for deterministic cut-in/retreat
+ * beats: both speakers overlap briefly, the floor owner yields a little room,
+ * then returns on the same audio clock. The canonical line and playback
+ * lifecycle remain untouched.
+ */
+export function scheduleRealtimeVoiceDuck(args: {
+  channel?: VoicePlaybackChannel;
+  delayMs?: number;
+  attackMs?: number;
+  holdMs: number;
+  resumeFadeMs: number;
+  duckGain?: number;
+}): boolean {
+  const active = activeVoiceChannels[args.channel ?? "primary"];
+  const outputGain = active.outputGain;
+  if (!outputGain || active.nodes.length === 0) return false;
+
+  const parameter = outputGain.gain;
+  const nominalGain = Math.max(0, parameter.value);
+  if (nominalGain === 0) return false;
+  const delayMs = Math.max(0, Math.round(args.delayMs ?? 0));
+  const attackMs = Math.max(8, Math.min(90, Math.round(args.attackMs ?? 36)));
+  const holdMs = Math.max(0, Math.min(1_200, Math.round(args.holdMs)));
+  const resumeFadeMs = Math.max(
+    16,
+    Math.min(320, Math.round(args.resumeFadeMs)),
+  );
+  const duckGain = Math.max(0.12, Math.min(0.62, args.duckGain ?? 0.28));
+  const startAt = outputGain.context.currentTime + delayMs / 1_000;
+  const attackEndAt = startAt + attackMs / 1_000;
+  const resumeAt = attackEndAt + holdMs / 1_000;
+  const resumeEndAt = resumeAt + resumeFadeMs / 1_000;
+
+  parameter.cancelScheduledValues(startAt);
+  parameter.setValueAtTime(nominalGain, startAt);
+  parameter.linearRampToValueAtTime(nominalGain * duckGain, attackEndAt);
+  parameter.setValueAtTime(nominalGain * duckGain, resumeAt);
+  parameter.linearRampToValueAtTime(nominalGain, resumeEndAt);
+  return true;
+}
+
 export function stopReactionVoiceAudio(): void {
   stopRealtimeVoiceAudio("reaction");
   stopRealtimeVoiceAudio("crosstalk");
+}
+
+/**
+ * Feed worker-decoded PCM straight to the audio render thread. No AudioBuffer,
+ * Blob, media decoder, or per-clause renderer copy is created on a live stage.
+ */
+async function playWorkletLivePerformanceVoice(args: {
+  context: AudioContext;
+  pcm: LiveVoicePcm;
+  profile: BotAudioVoiceProfileV1;
+  channel: VoicePlaybackChannel;
+  lifecycle?: VoicePlaybackLifecycle;
+  alignment?: VoicePlaybackCharacterAlignment | null;
+  stereoPan?: number;
+  maxDurationMs?: number;
+  scheduledStartAtPerformanceMs?: number;
+  compensateLifecycleForOutputLatency?: boolean;
+}): Promise<boolean> {
+  const { context, pcm, channel, lifecycle, alignment } = args;
+  if (
+    pcm.channels.length === 0 ||
+    pcm.frameCount <= 0 ||
+    pcm.sampleRate <= 0 ||
+    !(await liveVoicePlaybackWorkletAvailable(context))
+  ) {
+    return false;
+  }
+
+  const profile = normalizeBotAudioVoiceProfileV1(args.profile);
+  const playbackRateRatio = resolveVoicePlaybackTransform(profile).tempo;
+  const naturalDurationSeconds =
+    pcm.frameCount / pcm.sampleRate / playbackRateRatio;
+  const playbackDurationSeconds = Math.min(
+    naturalDurationSeconds,
+    args.maxDurationMs && args.maxDurationMs > 0
+      ? args.maxDurationMs / 1_000
+      : Number.POSITIVE_INFINITY,
+  );
+  const scheduledStartDelayMs =
+    typeof args.scheduledStartAtPerformanceMs === "number" &&
+    Number.isFinite(args.scheduledStartAtPerformanceMs)
+      ? Math.max(0, args.scheduledStartAtPerformanceMs - performance.now())
+      : 0;
+  const startedAt = context.currentTime + scheduledStartDelayMs / 1_000;
+  const outputLatencyMs =
+    args.compensateLifecycleForOutputLatency && lifecycle
+      ? estimateVoiceOutputLatencyMs(context)
+      : 0;
+  const articulationDurationMs = voicePlaybackPresentationDurationMs(
+    Math.min(
+      expectedVoicePlaybackDurationMs(
+        (pcm.frameCount / pcm.sampleRate) * 1_000,
+        profile,
+      ),
+      args.maxDurationMs && args.maxDurationMs > 0
+        ? args.maxDurationMs
+        : Number.POSITIVE_INFINITY,
+    ),
+  );
+
+  let node: AudioWorkletNode;
+  let outputGain: GainNode;
+  try {
+    node = new AudioWorkletNode(
+      context,
+      PRISM_LIVE_VOICE_PLAYBACK_PROCESSOR,
+      {
+        numberOfInputs: 0,
+        numberOfOutputs: 1,
+        outputChannelCount: [Math.min(2, pcm.channels.length)],
+      },
+    );
+    outputGain = context.createGain();
+  } catch {
+    return false;
+  }
+
+  const active = activeVoiceChannels[channel];
+  stopRealtimeVoiceAudio(channel, { preserveCompletedTails: true });
+  outputGain.gain.value =
+    Math.min(1.25, profile.volume) * (channel === "primary" ? 0.88 : 0.62);
+  node.connect(outputGain);
+  const scheduled: AudioNode[] = [node, outputGain];
+  if (typeof context.createStereoPanner === "function") {
+    const panner = context.createStereoPanner();
+    panner.pan.value = Math.max(-1, Math.min(1, args.stereoPan ?? 0));
+    outputGain.connect(panner).connect(prismAudioOutputNode(context));
+    scheduled.push(panner);
+  } else {
+    outputGain.connect(prismAudioOutputNode(context));
+  }
+  active.nodes = scheduled;
+  active.outputGain = outputGain;
+  active.roomConnection = null;
+  active.lightMeter = null;
+
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    let accepted = false;
+    let progress: VoicePlaybackProgressController | null = null;
+    const finish = (completed: boolean): void => {
+      if (settled) return;
+      settled = true;
+      if (active.mediaEndTimer !== null) {
+        window.clearTimeout(active.mediaEndTimer);
+        active.mediaEndTimer = null;
+      }
+      if (completed) progress?.finish();
+      else progress?.cancel();
+      if (active.progress === progress) active.progress = null;
+      if (active.resolve === cancel) active.resolve = null;
+      if (active.nodes === scheduled) active.nodes = [];
+      if (active.outputGain === outputGain) active.outputGain = null;
+      for (const scheduledNode of scheduled) {
+        try {
+          scheduledNode.disconnect();
+        } catch {
+          // Cancellation may already have disconnected this compact graph.
+        }
+      }
+      try {
+        node.port.postMessage({ type: "cancel" });
+        node.port.close();
+      } catch {
+        // A completed processor may already have closed its message port.
+      }
+      if (accepted) {
+        if (completed) lifecycle?.onEnd?.();
+        else lifecycle?.onCancel?.();
+      }
+      resolve(accepted);
+    };
+    const cancel = () => finish(false);
+    active.resolve = cancel;
+    node.port.onmessage = (event: MessageEvent<{ type?: string }>) => {
+      if (event.data?.type !== "ended" || settled) return;
+      if (active.mediaEndTimer !== null) {
+        window.clearTimeout(active.mediaEndTimer);
+        active.mediaEndTimer = null;
+      }
+      if (outputLatencyMs > 0) {
+        active.mediaEndTimer = window.setTimeout(() => {
+          active.mediaEndTimer = null;
+          finish(true);
+        }, outputLatencyMs);
+      } else {
+        finish(true);
+      }
+    };
+    node.addEventListener("processorerror", () => finish(false), {
+      once: true,
+    });
+    progress = beginVoicePlaybackProgress(
+      lifecycle,
+      articulationDurationMs,
+      () => (context.currentTime - startedAt) * 1_000,
+      alignment,
+      {
+        startDelayMs: scheduledStartDelayMs + outputLatencyMs,
+        holdAtEndUntilFinish: true,
+      },
+    );
+    active.progress = progress;
+    active.mediaEndTimer = window.setTimeout(
+      () => {
+        active.mediaEndTimer = null;
+        finish(false);
+      },
+      Math.max(
+        2_000,
+        Math.round(
+          scheduledStartDelayMs +
+            playbackDurationSeconds * 1_000 +
+            outputLatencyMs +
+            2_000,
+        ),
+      ),
+    );
+    const channelBuffers = pcm.channels.slice(0, 2);
+    try {
+      node.port.postMessage(
+        {
+          type: "load",
+          channels: channelBuffers,
+          frameCount: pcm.frameCount,
+          sourceSampleRate: pcm.sampleRate,
+          playbackRate: playbackRateRatio,
+          startFrame: Math.ceil(startedAt * context.sampleRate),
+          maximumOutputFrames: Math.ceil(
+            playbackDurationSeconds * context.sampleRate,
+          ),
+        },
+        channelBuffers,
+      );
+      accepted = true;
+    } catch {
+      finish(false);
+    }
+  });
+}
+
+/**
+ * Coffee and Signal favor an uninterrupted composer over decorative audio
+ * processing while their live stages are mounted. Keep the voice, pan, gain,
+ * lifecycle, and ducking surface, but skip worklets, pitch analysis, room
+ * convolution, parallel voices, and metering for this latency-critical lane.
+ */
+async function playLivePerformanceVoice(args: {
+  context: AudioContext;
+  bytes: ArrayBuffer;
+  profile: BotAudioVoiceProfileV1;
+  channel: VoicePlaybackChannel;
+  lifecycle?: VoicePlaybackLifecycle;
+  alignment?: VoicePlaybackCharacterAlignment | null;
+  stereoPan?: number;
+  maxDurationMs?: number;
+  scheduledStartAtPerformanceMs?: number;
+  compensateLifecycleForOutputLatency?: boolean;
+  isCurrent?: () => boolean;
+}): Promise<boolean> {
+  if (
+    typeof Audio !== "function" ||
+    typeof URL.createObjectURL !== "function" ||
+    typeof args.context.createMediaElementSource !== "function"
+  ) {
+    return false;
+  }
+  const { context, channel } = args;
+  const profile = normalizeBotAudioVoiceProfileV1(args.profile);
+  const active = activeVoiceChannels[channel];
+  stopRealtimeVoiceAudio(channel, { preserveCompletedTails: true });
+
+  let url: string;
+  let audio: HTMLAudioElement;
+  let source: MediaElementAudioSourceNode;
+  let outputGain: GainNode;
+  try {
+    const header = new Uint8Array(
+      args.bytes,
+      0,
+      Math.min(4, args.bytes.byteLength),
+    );
+    const isWave = String.fromCharCode(...header) === "RIFF";
+    url = URL.createObjectURL(
+      new Blob([args.bytes], { type: isWave ? "audio/wav" : "audio/mpeg" }),
+    );
+    audio = new Audio();
+    audio.preload = "auto";
+    audio.preservesPitch = true;
+    audio.src = url;
+    source = context.createMediaElementSource(audio);
+    outputGain = context.createGain();
+  } catch {
+    return false;
+  }
+
+  const playbackRateRatio = resolveVoicePlaybackTransform(profile).tempo;
+  audio.playbackRate = playbackRateRatio;
+  audio.volume = 1;
+  outputGain.gain.value =
+    Math.min(1.25, profile.volume) * (channel === "primary" ? 0.88 : 0.62);
+  source.connect(outputGain);
+  const scheduled: AudioNode[] = [source, outputGain];
+  if (typeof context.createStereoPanner === "function") {
+    const panner = context.createStereoPanner();
+    panner.pan.value = Math.max(-1, Math.min(1, args.stereoPan ?? 0));
+    outputGain.connect(panner).connect(prismAudioOutputNode(context));
+    scheduled.push(panner);
+  } else {
+    outputGain.connect(prismAudioOutputNode(context));
+  }
+  active.nodes = scheduled;
+  active.media = audio;
+  active.mediaUrl = url;
+  active.outputGain = outputGain;
+  active.roomConnection = null;
+  active.lightMeter = null;
+
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    let started = false;
+    let progress: VoicePlaybackProgressController | null = null;
+    const finish = (
+      outcome: "completed" | "cancelled" | "failed",
+    ): void => {
+      if (settled) return;
+      settled = true;
+      if (active.mediaStartTimer !== null) {
+        window.clearTimeout(active.mediaStartTimer);
+        active.mediaStartTimer = null;
+      }
+      if (active.mediaEndTimer !== null) {
+        window.clearTimeout(active.mediaEndTimer);
+        active.mediaEndTimer = null;
+      }
+      if (outcome === "completed") progress?.finish();
+      else progress?.cancel();
+      if (active.progress === progress) active.progress = null;
+      if (active.resolve === cancel) active.resolve = null;
+      if (active.nodes === scheduled) active.nodes = [];
+      if (active.outputGain === outputGain) active.outputGain = null;
+      if (active.media === audio) {
+        active.media = null;
+        audio.pause();
+        audio.removeAttribute("src");
+      }
+      if (active.mediaUrl === url) {
+        active.mediaUrl = null;
+        URL.revokeObjectURL(url);
+      }
+      for (const node of scheduled) {
+        try {
+          node.disconnect();
+        } catch {
+          // An interruption may already have released this compact graph.
+        }
+      }
+      if (started) {
+        if (outcome === "completed") args.lifecycle?.onEnd?.();
+        else args.lifecycle?.onCancel?.();
+      }
+      // A media failure before audible playback may use the decoded fallback.
+      // Once sound started, never replay the same clause from the beginning.
+      resolve(outcome !== "failed" || started);
+    };
+    const cancel = () => finish("cancelled");
+    active.resolve = cancel;
+    audio.addEventListener("ended", () => finish("completed"), { once: true });
+    audio.addEventListener("error", () => finish("failed"), { once: true });
+    audio.addEventListener(
+      "playing",
+      () => {
+        if (started) return;
+        started = true;
+        const sourceDurationMs =
+          Number.isFinite(audio.duration) && audio.duration > 0
+            ? audio.duration * 1_000
+            : Math.max(1, args.maxDurationMs ?? 1);
+        const articulationDurationMs = voicePlaybackPresentationDurationMs(
+          Math.min(
+            expectedVoicePlaybackDurationMs(sourceDurationMs, profile),
+            args.maxDurationMs && args.maxDurationMs > 0
+              ? args.maxDurationMs
+              : Number.POSITIVE_INFINITY,
+          ),
+        );
+        const outputLatencyMs =
+          args.compensateLifecycleForOutputLatency && args.lifecycle
+            ? estimateVoiceOutputLatencyMs(context)
+            : 0;
+        progress = beginVoicePlaybackProgress(
+          args.lifecycle,
+          articulationDurationMs,
+          () => (audio.currentTime * 1_000) / playbackRateRatio,
+          args.alignment,
+          {
+            startDelayMs: outputLatencyMs,
+            holdAtEndUntilFinish: true,
+          },
+        );
+        active.progress = progress;
+        if (
+          args.maxDurationMs &&
+          args.maxDurationMs > 0 &&
+          articulationDurationMs >= args.maxDurationMs
+        ) {
+          active.mediaEndTimer = window.setTimeout(() => {
+            active.mediaEndTimer = null;
+            finish("completed");
+          }, args.maxDurationMs);
+        }
+      },
+      { once: true },
+    );
+
+    const beginPlayback = (): void => {
+      active.mediaStartTimer = null;
+      if (args.isCurrent && !args.isCurrent()) {
+        finish("cancelled");
+        return;
+      }
+      void audio.play().catch(() => finish("failed"));
+    };
+    const scheduledStartDelayMs =
+      typeof args.scheduledStartAtPerformanceMs === "number" &&
+      Number.isFinite(args.scheduledStartAtPerformanceMs)
+        ? Math.max(0, args.scheduledStartAtPerformanceMs - performance.now())
+        : 0;
+    if (scheduledStartDelayMs > 0) {
+      active.mediaStartTimer = window.setTimeout(
+        beginPlayback,
+        scheduledStartDelayMs,
+      );
+    } else {
+      beginPlayback();
+    }
+  });
+}
+
+/** Audio-buffer fallback for live stages whose browser media lane cannot start
+ * the clip. Browser-managed media is preferred because duplicating every full
+ * line into worker PCM and an AudioBuffer creates major-GC spikes mid-session. */
+async function playDecodedLivePerformanceVoice(args: {
+  context: AudioContext;
+  decoded: AudioBuffer;
+  profile: BotAudioVoiceProfileV1;
+  channel: VoicePlaybackChannel;
+  lifecycle?: VoicePlaybackLifecycle;
+  alignment?: VoicePlaybackCharacterAlignment | null;
+  stereoPan?: number;
+  maxDurationMs?: number;
+  scheduledStartAtPerformanceMs?: number;
+  compensateLifecycleForOutputLatency?: boolean;
+}): Promise<boolean> {
+  const { context, decoded, channel } = args;
+  const profile = normalizeBotAudioVoiceProfileV1(args.profile);
+  const active = activeVoiceChannels[channel];
+  stopRealtimeVoiceAudio(channel, { preserveCompletedTails: true });
+
+  const source = context.createBufferSource();
+  const outputGain = context.createGain();
+  const playbackRateRatio = resolveVoicePlaybackTransform(profile).tempo;
+  const naturalDurationSeconds = decoded.duration / playbackRateRatio;
+  const playbackDurationSeconds = Math.min(
+    naturalDurationSeconds,
+    args.maxDurationMs && args.maxDurationMs > 0
+      ? args.maxDurationMs / 1_000
+      : Number.POSITIVE_INFINITY,
+  );
+  const scheduledStartDelayMs =
+    typeof args.scheduledStartAtPerformanceMs === "number" &&
+    Number.isFinite(args.scheduledStartAtPerformanceMs)
+      ? Math.max(0, args.scheduledStartAtPerformanceMs - performance.now())
+      : 0;
+  const startedAt = context.currentTime + scheduledStartDelayMs / 1_000;
+  const outputLatencyMs =
+    args.compensateLifecycleForOutputLatency && args.lifecycle
+      ? estimateVoiceOutputLatencyMs(context)
+      : 0;
+  const articulationDurationMs = voicePlaybackPresentationDurationMs(
+    Math.min(
+      expectedVoicePlaybackDurationMs(decoded.duration * 1_000, profile),
+      args.maxDurationMs && args.maxDurationMs > 0
+        ? args.maxDurationMs
+        : Number.POSITIVE_INFINITY,
+    ),
+  );
+
+  source.buffer = decoded;
+  source.playbackRate.setValueAtTime(playbackRateRatio, startedAt);
+  outputGain.gain.value =
+    Math.min(1.25, profile.volume) * (channel === "primary" ? 0.88 : 0.62);
+  source.connect(outputGain);
+
+  const scheduled: AudioNode[] = [source, outputGain];
+  if (typeof context.createStereoPanner === "function") {
+    const panner = context.createStereoPanner();
+    panner.pan.value = Math.max(-1, Math.min(1, args.stereoPan ?? 0));
+    outputGain.connect(panner).connect(prismAudioOutputNode(context));
+    scheduled.push(panner);
+  } else {
+    outputGain.connect(prismAudioOutputNode(context));
+  }
+  active.nodes = scheduled;
+  active.outputGain = outputGain;
+  active.roomConnection = null;
+  active.lightMeter = null;
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    let progress: VoicePlaybackProgressController | null = null;
+    const finish = (completed: boolean) => {
+      if (settled) return;
+      settled = true;
+      if (completed) progress?.finish();
+      else progress?.cancel();
+      if (active.progress === progress) active.progress = null;
+      if (active.resolve === cancel) active.resolve = null;
+      if (active.nodes === scheduled) active.nodes = [];
+      if (active.outputGain === outputGain) active.outputGain = null;
+      for (const node of scheduled) {
+        try {
+          node.disconnect();
+        } catch {
+          // An interruption may already have released this small graph.
+        }
+      }
+      if (completed) args.lifecycle?.onEnd?.();
+      else args.lifecycle?.onCancel?.();
+      resolve();
+    };
+    const cancel = () => finish(false);
+    active.resolve = cancel;
+    source.addEventListener("ended", () => finish(true), { once: true });
+    progress = beginVoicePlaybackProgress(
+      args.lifecycle,
+      articulationDurationMs,
+      () => (context.currentTime - startedAt) * 1_000,
+      args.alignment,
+      {
+        startDelayMs: scheduledStartDelayMs + outputLatencyMs,
+        holdAtEndUntilFinish: true,
+      },
+    );
+    active.progress = progress;
+    try {
+      source.start(startedAt);
+      if (playbackDurationSeconds + 0.0001 < naturalDurationSeconds) {
+        source.stop(startedAt + playbackDurationSeconds);
+      }
+    } catch {
+      finish(false);
+    }
+  });
+  return true;
 }
 
 export async function playRealtimeVoiceBytes(args: {
@@ -1174,15 +1838,157 @@ export async function playRealtimeVoiceBytes(args: {
    */
   scheduledStartAtPerformanceMs?: number;
 }): Promise<boolean> {
+  const livePerformanceBudget = prismLiveVoicePerformanceBudgetActive();
   const context = contextForPlayback();
-  if (!context || !await prepareRealtimeVoiceAudio()) return false;
+  if (
+    !context ||
+    !(await prepareRealtimeVoiceAudio({
+      loadRealtimeProcessing: !livePerformanceBudget,
+    }))
+  )
+    return false;
   if (args.isCurrent && !args.isCurrent()) return true;
   const profile = normalizeBotAudioVoiceProfileV1(args.profile);
   const localToneEnabled = args.localToneEnabled !== false;
   if (!profile.enabled || profile.volume <= 0) return true;
+  const channel = args.channel ?? "primary";
+  if (livePerformanceBudget) {
+    if (await liveVoicePlaybackWorkletAvailable(context)) {
+      const decodedResult = await decodeLiveVoicePcmOwned(args.bytes);
+      if (args.isCurrent && !args.isCurrent()) return true;
+      if (decodedResult.pcm) {
+        const workletPlayed = await playWorkletLivePerformanceVoice({
+          context,
+          pcm: decodedResult.pcm,
+          profile,
+          channel,
+          lifecycle: args.lifecycle,
+          alignment: args.alignment,
+          stereoPan: args.stereoPan,
+          maxDurationMs: args.maxDurationMs,
+          scheduledStartAtPerformanceMs: args.scheduledStartAtPerformanceMs,
+          compensateLifecycleForOutputLatency:
+            args.compensateLifecycleForOutputLatency,
+        });
+        if (workletPlayed) return true;
+        if (
+          decodedResult.pcm.channels.every(
+            (channelBytes) => channelBytes.byteLength > 0,
+          )
+        ) {
+          const decoded = context.createBuffer(
+            decodedResult.pcm.channels.length,
+            decodedResult.pcm.frameCount,
+            decodedResult.pcm.sampleRate,
+          );
+          for (
+            let channelIndex = 0;
+            channelIndex < decodedResult.pcm.channels.length;
+            channelIndex += 1
+          ) {
+            decoded.copyToChannel(
+              new Float32Array(decodedResult.pcm.channels[channelIndex]!),
+              channelIndex,
+            );
+          }
+          return playDecodedLivePerformanceVoice({
+            context,
+            decoded,
+            profile,
+            channel,
+            lifecycle: args.lifecycle,
+            alignment: args.alignment,
+            stereoPan: args.stereoPan,
+            maxDurationMs: args.maxDurationMs,
+            scheduledStartAtPerformanceMs:
+              args.scheduledStartAtPerformanceMs,
+            compensateLifecycleForOutputLatency:
+              args.compensateLifecycleForOutputLatency,
+          });
+        }
+      }
+      if (decodedResult.fallbackBytes) {
+        const mediaPlayed = await playLivePerformanceVoice({
+          context,
+          bytes: decodedResult.fallbackBytes,
+          profile,
+          channel,
+          lifecycle: args.lifecycle,
+          alignment: args.alignment,
+          stereoPan: args.stereoPan,
+          maxDurationMs: args.maxDurationMs,
+          scheduledStartAtPerformanceMs: args.scheduledStartAtPerformanceMs,
+          compensateLifecycleForOutputLatency:
+            args.compensateLifecycleForOutputLatency,
+          isCurrent: args.isCurrent,
+        });
+        if (mediaPlayed) return true;
+      }
+      return false;
+    }
+    const mediaPlayed = await playLivePerformanceVoice({
+      context,
+      bytes: args.bytes,
+      profile,
+      channel,
+      lifecycle: args.lifecycle,
+      alignment: args.alignment,
+      stereoPan: args.stereoPan,
+      maxDurationMs: args.maxDurationMs,
+      scheduledStartAtPerformanceMs: args.scheduledStartAtPerformanceMs,
+      compensateLifecycleForOutputLatency:
+        args.compensateLifecycleForOutputLatency,
+      isCurrent: args.isCurrent,
+    });
+    if (mediaPlayed) return true;
+    if (args.isCurrent && !args.isCurrent()) return true;
+    const pcm = await decodeLiveVoicePcm(args.bytes);
+    if (pcm) {
+      if (args.isCurrent && !args.isCurrent()) return true;
+      const decoded = context.createBuffer(
+        pcm.channels.length,
+        pcm.frameCount,
+        pcm.sampleRate,
+      );
+      for (let channelIndex = 0; channelIndex < pcm.channels.length; channelIndex += 1) {
+        decoded.copyToChannel(
+          new Float32Array(pcm.channels[channelIndex]!),
+          channelIndex,
+        );
+      }
+      return playDecodedLivePerformanceVoice({
+        context,
+        decoded,
+        profile,
+        channel,
+        lifecycle: args.lifecycle,
+        alignment: args.alignment,
+        stereoPan: args.stereoPan,
+        maxDurationMs: args.maxDurationMs,
+        scheduledStartAtPerformanceMs: args.scheduledStartAtPerformanceMs,
+        compensateLifecycleForOutputLatency:
+          args.compensateLifecycleForOutputLatency,
+      });
+    }
+    return false;
+  }
   const decoded = await context.decodeAudioData(args.bytes.slice(0));
   if (args.isCurrent && !args.isCurrent()) return true;
-  const channel = args.channel ?? "primary";
+  if (livePerformanceBudget) {
+    return playDecodedLivePerformanceVoice({
+      context,
+      decoded,
+      profile,
+      channel,
+      lifecycle: args.lifecycle,
+      alignment: args.alignment,
+      stereoPan: args.stereoPan,
+      maxDurationMs: args.maxDurationMs,
+      scheduledStartAtPerformanceMs: args.scheduledStartAtPerformanceMs,
+      compensateLifecycleForOutputLatency:
+        args.compensateLifecycleForOutputLatency,
+    });
+  }
   const active = activeVoiceChannels[channel];
   // A new natural utterance owns the live channel, but a source that already
   // completed may keep draining its final rendered phoneme underneath it.

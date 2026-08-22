@@ -213,14 +213,14 @@
 .episodePreRoll { grid-column: 2; grid-row: 2; position: relative; z-index: 120; min-width: 0; min-height: 0; display: grid; place-items: center; overflow: hidden; isolation: isolate; color: #fff; background: radial-gradient(circle at 50% 44%, color-mix(in srgb, var(--botcast-accent) 22%, transparent), transparent 31%), radial-gradient(circle at 50% 50%, #171724 0%, #080910 58%, #020307 100%); opacity: 1; transition: opacity var(--signal-replay-intro-landing-ms, 460ms) ease, filter var(--signal-replay-intro-landing-ms, 460ms) ease; }
 .episodePreRoll[data-phase="landing"] { opacity: 0; filter: brightness(1.22); pointer-events: none; }
 .episodePreRoll::before { position: absolute; inset: 0; z-index: -1; content: ""; opacity: .32; background: repeating-linear-gradient(0deg, rgba(255,255,255,.025) 0 1px, transparent 1px 4px); mask-image: radial-gradient(circle at center, #000, transparent 78%); }
-.episodePreRoll[data-kind="intro"]::after { position: absolute; inset: 0; z-index: 10; content: ""; background: var(--botcast-curtain); pointer-events: none; animation: signalIntroCurtainOut 720ms cubic-bezier(.4,0,.2,1) both; }
+.episodePreRoll[data-kind="intro"]::after { position: absolute; inset: 0; z-index: 0; content: ""; background: var(--botcast-curtain); pointer-events: none; animation: signalIntroCurtainOut 720ms cubic-bezier(.4,0,.2,1) both; }
 .episodePreRoll.replayBookend[data-kind="intro"][data-reveal="open"]::after { animation-delay: calc(-1 * var(--signal-replay-intro-head-start, 0ms)); }
-.episodePreRoll > button { position: absolute; top: 24px; right: 28px; border: 1px solid rgba(255,255,255,.19); border-radius: 999px; padding: 8px 12px; color: rgba(255,255,255,.72); background: rgba(255,255,255,.055); font: 700 .68rem/1 system-ui; cursor: pointer; backdrop-filter: blur(12px); }
+.episodePreRoll > button { position: absolute; top: 24px; right: 28px; z-index: 2; border: 1px solid rgba(255,255,255,.19); border-radius: 999px; padding: 8px 12px; color: rgba(255,255,255,.72); background: rgba(255,255,255,.055); font: 700 .68rem/1 system-ui; cursor: pointer; backdrop-filter: blur(12px); }
 .episodePreRoll > button:hover { color: #fff; border-color: rgba(255,255,255,.38); background: rgba(255,255,255,.1); }
 .preRollSignalField { position: absolute; width: min(72vw, 780px); aspect-ratio: 1; z-index: -1; opacity: .54; }
 .preRollSignalField i { position: absolute; inset: 50%; border: 1px solid color-mix(in srgb, var(--botcast-accent) 32%, transparent); border-radius: 50%; transform: translate(-50%, -50%) scale(.18); animation: signalPreRollRing 3s cubic-bezier(.2,.65,.22,1) infinite; }
 .preRollSignalField i:nth-child(2) { animation-delay: 560ms; }.preRollSignalField i:nth-child(3) { animation-delay: 1.12s; }.preRollSignalField i:nth-child(4) { animation-delay: 1.68s; }.preRollSignalField i:nth-child(5) { animation-delay: 2.24s; }
-.preRollLockup { display: grid; justify-items: center; width: min(760px, calc(100vw - 56px)); text-align: center; transform: translateY(0) scale(1); transition: transform var(--signal-replay-intro-landing-ms, 460ms) cubic-bezier(.2,.72,.18,1), opacity var(--signal-replay-intro-landing-ms, 460ms) ease; }
+.preRollLockup { position: relative; z-index: 1; display: grid; justify-items: center; width: min(760px, calc(100vw - 56px)); text-align: center; transform: translateY(0) scale(1); transition: transform var(--signal-replay-intro-landing-ms, 460ms) cubic-bezier(.2,.72,.18,1), opacity var(--signal-replay-intro-landing-ms, 460ms) ease; }
 .episodePreRoll[data-phase="landing"] .preRollLockup { transform: translateY(-8px) scale(1.055); opacity: 0; }
 .preRollEyebrow { margin-bottom: 20px; color: rgba(255,255,255,.62); font: 760 .68rem/1 system-ui; letter-spacing: .34em; text-transform: uppercase; animation: signalPreRollReveal 760ms ease both; }
 .preRollLogo { position: relative; display: grid; place-items: center; width: 150px; height: 150px; animation: signalPreRollLogoIn 920ms cubic-bezier(.18,.82,.16,1) both; }
@@ -983,7 +983,7 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
   border: 1px solid
     color-mix(
       in srgb,
-      var(--botcast-studio-accent) 24%,
+      var(--botcast-caption-accent, var(--botcast-studio-accent)) 24%,
       rgba(255, 255, 255, 0.13)
     );
   border-radius: 12px;
@@ -991,7 +991,7 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
   background:
     linear-gradient(
       110deg,
-      color-mix(in srgb, var(--botcast-studio-accent) 8%, transparent),
+      color-mix(in srgb, var(--botcast-caption-accent, var(--botcast-studio-accent)) 8%, transparent),
       transparent 48%
     ),
     rgba(6, 7, 12, 0.82);
@@ -1008,22 +1008,26 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .captionControls button { min-width: 42px; border: 1px solid rgba(255,255,255,.14); border-radius: 7px; padding: 6px 9px; color: rgba(255,255,255,.72); background: rgba(255,255,255,.06); font: 760 .66rem/1 system-ui; letter-spacing: .08em; cursor: pointer; }
 .captionControls button[data-selected="true"] { border-color: transparent; color: #fff; background: linear-gradient(120deg, color-mix(in srgb, var(--botcast-host-accent) 76%, var(--prism-p)), var(--prism-m)); box-shadow: 0 6px 18px color-mix(in srgb, var(--botcast-host-accent) 18%, transparent); }
 .replayCompactThinkingNotice { position: absolute; top: 14px; right: 14px; z-index: 20; max-width: min(46%, 300px); border: 1px solid rgba(255,255,255,.16); border-radius: 999px; padding: 6px 10px; color: rgba(255,255,255,.82); background: rgba(4,6,11,.72); backdrop-filter: blur(9px) saturate(1.08); box-shadow: 0 8px 22px rgba(0,0,0,.28); font: 720 clamp(.54rem, .9vw, .68rem)/1.1 system-ui; letter-spacing: .035em; text-align: right; pointer-events: none; }
+.watchIntermissionNotice { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 21; display: inline-flex; align-items: center; gap: 7px; max-width: min(72%, 380px); border: 1px solid rgba(255,255,255,.16); border-radius: 999px; padding: 6px 13px; color: rgba(255,255,255,.84); background: rgba(4,6,11,.72); backdrop-filter: blur(9px) saturate(1.08); box-shadow: 0 8px 22px rgba(0,0,0,.28); font: 720 clamp(.54rem, .9vw, .68rem)/1.1 system-ui; letter-spacing: .035em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.watchIntermissionNotice > span { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; background: var(--botcast-host-accent, #8f7bff); box-shadow: 0 0 10px var(--botcast-host-accent, #8f7bff); animation: watchIntermissionPulse 1.6s ease-in-out infinite; }
+@keyframes watchIntermissionPulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .watchIntermissionNotice > span { animation: none; opacity: .8; } }
 .liveCaption > i {
   display: block;
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--botcast-studio-accent) 76%, white),
-    color-mix(in srgb, var(--botcast-studio-accent) 76%, transparent)
+    color-mix(in srgb, var(--botcast-caption-accent, var(--botcast-studio-accent)) 76%, white),
+    color-mix(in srgb, var(--botcast-caption-accent, var(--botcast-studio-accent)) 76%, transparent)
   );
   box-shadow: 0 0 16px
-    color-mix(in srgb, var(--botcast-studio-accent) 48%, transparent);
+    color-mix(in srgb, var(--botcast-caption-accent, var(--botcast-studio-accent)) 48%, transparent);
 }
 .liveCaption > div { min-width: 0; padding: 11px 16px 13px; }
 .liveCaption strong {
   display: flex;
   align-items: center;
   gap: 7px;
-  color: color-mix(in srgb, var(--botcast-studio-accent) 56%, white);
+  color: color-mix(in srgb, var(--botcast-caption-accent, var(--botcast-studio-accent)) 56%, white);
   font-size: clamp(8px, 0.76vw, 10px);
   font-weight: 760;
   line-height: 1;
@@ -1054,14 +1058,14 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .live[data-theme="light"] .liveCaption {
   border-color: color-mix(
     in srgb,
-    var(--botcast-studio-accent) 26%,
+    var(--botcast-caption-accent, var(--botcast-studio-accent)) 26%,
     rgba(36, 27, 43, 0.15)
   );
   color: #18131c;
   background:
     linear-gradient(
       110deg,
-      color-mix(in srgb, var(--botcast-studio-accent) 9%, transparent),
+      color-mix(in srgb, var(--botcast-caption-accent, var(--botcast-studio-accent)) 9%, transparent),
       transparent 48%
     ),
     rgba(250, 248, 252, 0.9);
@@ -1070,7 +1074,7 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
     0 14px 38px rgba(38, 24, 46, 0.2);
 }
 .live[data-theme="light"] .liveCaption strong {
-  color: color-mix(in srgb, var(--botcast-studio-accent) 70%, #251b2b);
+  color: color-mix(in srgb, var(--botcast-caption-accent, var(--botcast-studio-accent)) 70%, #251b2b);
 }
 .live[data-theme="light"] .liveCaption span {
   color: rgba(24, 19, 28, 0.92);
@@ -1182,9 +1186,10 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .producerGuestPresence[data-talking="true"] { box-shadow: inset 0 0 34px rgba(255,255,255,.1), 0 14px 36px rgba(0,0,0,.34), 0 0 42px color-mix(in srgb, var(--botcast-host-accent) 38%, transparent); }
 .nameplate { position: absolute; z-index: 8; bottom: 1.5%; min-width: 112px; display: grid; gap: 3px; border: 1px solid rgba(255,255,255,.13); border-radius: 999px; padding: 6px 14px 7px; text-align: center; color: rgba(255,255,255,.94); background: rgba(7,8,12,.72); backdrop-filter: blur(10px) saturate(1.08); font-size: clamp(.62rem, 1.1vw, .82rem); line-height: 1.05; box-shadow: 0 7px 20px rgba(0,0,0,.38); }
 .nameplate span { color: rgba(255,255,255,.48); font: 760 .48rem/1 system-ui; letter-spacing: .14em; text-transform: uppercase; }
-.stageMug { position: absolute; z-index: 9; width: max(6.2%, 58px); aspect-ratio: 8 / 9; display: grid; place-items: end center; transform: translate(-50%, -50%); pointer-events: none; will-change: left, top; }
+.stageMug { position: absolute; z-index: 9; width: max(6.2%, 58px); aspect-ratio: 8 / 9; display: grid; place-items: end center; transform: translate(-50%, -50%); pointer-events: none; will-change: transform; }
 .stageMug[data-sipping="true"] { animation: signalStageMugSip var(--signal-cup-sip-duration-ms, 1400ms) ease-in-out 1 both; }
 .stageMug[data-returning="true"] { animation: signalStageMugInterruptedReturn 320ms cubic-bezier(.22,.72,.2,1) 1 both; }
+
 .stageLayoutHandle { position: absolute; z-index: 12; display: grid; place-items: center; transform: translate(-50%, -50%); border-radius: 20px; outline: 1px dashed color-mix(in srgb, var(--prism-s) 72%, white); outline-offset: 7px; cursor: grab; touch-action: none; user-select: none; }
 .stageLayoutHandle[data-kind="bot"] { width: 25%; aspect-ratio: 1; }
 .stageLayoutHandle[data-kind="cup"] { width: max(6.2%, 58px); aspect-ratio: 8 / 9; border-radius: 12px; }
@@ -1230,14 +1235,14 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 }
 
 @keyframes signalStageMugSip {
-  0%, 6% { left: var(--signal-cup-rest-x); top: var(--signal-cup-rest-y); }
-  18%, 76% { left: var(--signal-cup-mouth-x, var(--signal-cup-rest-x)); top: var(--signal-cup-mouth-y, var(--signal-cup-rest-y)); }
-  96%, 100% { left: var(--signal-cup-rest-x); top: var(--signal-cup-rest-y); }
+  0%, 6% { transform: translate(-50%, -50%) translate3d(0, 0, 0); }
+  18%, 76% { transform: translate(-50%, -50%) translate3d(var(--signal-cup-travel-x, 0), var(--signal-cup-travel-y, 0), 0); }
+  96%, 100% { transform: translate(-50%, -50%) translate3d(0, 0, 0); }
 }
 
 @keyframes signalStageMugInterruptedReturn {
-  from { left: var(--signal-cup-return-x, var(--signal-cup-rest-x)); top: var(--signal-cup-return-y, var(--signal-cup-rest-y)); }
-  to { left: var(--signal-cup-rest-x); top: var(--signal-cup-rest-y); }
+  from { transform: translate(-50%, -50%) translate3d(var(--signal-cup-return-delta-x, 0), var(--signal-cup-return-delta-y, 0), 0); }
+  to { transform: translate(-50%, -50%) translate3d(0, 0, 0); }
 }
 .producerControls { display: grid; grid-template-columns: minmax(250px, .9fr) minmax(520px, 2fr); grid-template-areas: "composer cues"; gap: 10px 16px; align-items: stretch; padding: 12px; }
 .producerCueComposer { grid-area: composer; display: grid; align-content: start; gap: 5px; min-width: 0; }
@@ -1249,6 +1254,9 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .producerControls input { min-height: 38px; font: 650 .78rem/1.2 system-ui; }
 .producerControls textarea { min-height: 64px; max-height: 110px; resize: vertical; font: 650 .78rem/1.35 system-ui; }
 .producerQuoteCount { justify-self: end; color: #797b81; font: 650 .58rem/1 system-ui; }
+.producerCueClear { border: 1px solid var(--botcast-line); border-radius: 8px; padding: 6px 11px; color: var(--botcast-muted); background: transparent; font: 700 .66rem/1 system-ui; white-space: nowrap; cursor: pointer; transition: color 140ms ease, border-color 140ms ease, background 140ms ease; }
+.producerCueClear:hover:not(:disabled) { color: var(--botcast-ink); border-color: color-mix(in srgb, var(--botcast-accent) 42%, var(--botcast-line)); background: color-mix(in srgb, var(--botcast-accent) 7%, transparent); }
+.producerCueClear:disabled { opacity: .38; cursor: default; }
 .producerControls button { border: 1px solid rgba(255,255,255,.13); border-radius: 13px; color: inherit; background: rgba(255,255,255,.055); padding: 11px 13px; font: 780 .74rem/1.1 system-ui; cursor: pointer; box-shadow: inset 0 1px rgba(255,255,255,.045); transition: transform 150ms ease, border-color 150ms ease, background 150ms ease, box-shadow 150ms ease; }
 .producerControls button:hover:not(:disabled) { transform: translateY(-2px); border-color: color-mix(in srgb, var(--botcast-accent) 42%, rgba(255,255,255,.18)); background: color-mix(in srgb, var(--botcast-accent) 10%, rgba(255,255,255,.07)); box-shadow: 0 9px 22px color-mix(in srgb, var(--botcast-accent) 12%, transparent), inset 0 1px rgba(255,255,255,.08); }
 .producerControls button:active:not(:disabled) { transform: translateY(1px) scale(.985); }
@@ -1256,7 +1264,7 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .producerControls button[data-queued="true"] { border-color: color-mix(in srgb, var(--botcast-accent) 72%, white); background: color-mix(in srgb, var(--botcast-accent) 20%, rgba(255,255,255,.06)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--botcast-accent) 24%, transparent), 0 10px 26px color-mix(in srgb, var(--botcast-accent) 18%, transparent), inset 0 1px rgba(255,255,255,.1); animation: signalCueQueued 720ms cubic-bezier(.2,.72,.18,1) both; }
 .cueGrid { grid-area: cues; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 9px; }
 .cueGrid button { min-height: 68px; }
-.queuedCueStatus { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; margin: 0; border: 1px solid color-mix(in srgb, var(--botcast-accent) 28%, var(--botcast-line)); border-radius: 10px; padding: 7px 8px; color: color-mix(in srgb, var(--botcast-accent) 72%, white); background: color-mix(in srgb, var(--botcast-accent) 8%, transparent); font-size: .7rem; line-height: 1.35; }
+.queuedCueStatus { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; margin: 0; border: 1px solid color-mix(in srgb, var(--botcast-accent) 28%, var(--botcast-line)); border-radius: 10px; padding: 7px 8px; color: color-mix(in srgb, var(--botcast-accent) 72%, white); background: color-mix(in srgb, var(--botcast-accent) 8%, transparent); font-size: .7rem; line-height: 1.35; }
 .queuedCueStatus p { margin: 0; }
 .queuedCueStatus button { white-space: nowrap; font-size: .66rem; }
 .producerCueComposer small { display: block; margin: 0; color: #797b81; font-size: .64rem; line-height: 1.35; }
@@ -1397,7 +1405,7 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 
 .shell[data-theme="light"] .showBrandPreview {
   border-color: color-mix(in srgb, var(--botcast-accent) 18%, var(--botcast-line));
-  background: radial-gradient(circle at 14% 18%, color-mix(in srgb, var(--botcast-accent) 15%, transparent), transparent 42%), linear-gradient(135deg, #fbfaff 0%, #f2f5fc 52%, #edf5f8 100%);
+  background: radial-gradient(circle at 14% 18%, color-mix(in srgb, var(--botcast-accent) 15%, transparent), transparent 42%), linear-gradient(135deg, #fbfdff 0%, #e5f1fa 66%, #ccdeec 100%);
   box-shadow: 0 28px 70px color-mix(in srgb, var(--botcast-accent) 10%, transparent), inset 0 1px 0 rgba(255,255,255,.92);
 }
 .shell[data-theme="light"] .showBrandAtmosphere {

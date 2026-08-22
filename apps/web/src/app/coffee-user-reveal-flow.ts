@@ -20,14 +20,13 @@ export function coffeeComposerUsesRichInput(args: {
   variant: "chat" | "coffee-global" | "coffee-table" | "signal" | "debate";
   markdownEditorEnabled: boolean;
 }): boolean {
-  return (
-    args.markdownEditorEnabled ||
-    // Coffee's live table needs rich mention-chip rendering. Signal's producer
-    // answer field is intentionally plain unless the writer opts into Markdown:
-    // its controlled rich-editor update can replace the focused editing surface
-    // while the live stage rerenders.
-    args.variant === "coffee-table"
-  );
+  // Live stages always use the browser's native editing path. Mention chips
+  // and Markdown are useful in setup/global composers, but TipTap reconciliation
+  // must never compete with Coffee/Signal animation or audio for a keystroke.
+  if (args.variant === "coffee-table" || args.variant === "signal") {
+    return false;
+  }
+  return args.markdownEditorEnabled;
 }
 
 export function coffeeShouldQueueAssistantRevealAfterUserTyping(
@@ -72,6 +71,42 @@ export function coffeeRevealVoiceEndSealsTableLineV1(args: {
   if (!messageId) return false;
   if (coffeeRevealLineIsCutOffV1(messageId, args.cutOffMessageId)) return false;
   return args.activeMessageId?.trim() === messageId;
+}
+
+export interface CoffeeHeardCutoff<T extends { id: string; content: string }> {
+  sourceMessage: T;
+  heardContent: string;
+}
+
+/**
+ * Apply the audience-heard cutoff to every live Coffee text surface. A pending
+ * line may not exist in the committed conversation yet, so missing source rows
+ * are appended from the captured message until the server returns its saved
+ * projection.
+ */
+export function coffeeMessagesWithHeardCutoffs<
+  T extends { id: string; content: string },
+>(args: {
+  messages: readonly T[];
+  cutoffs: readonly CoffeeHeardCutoff<T>[];
+}): T[] {
+  if (args.cutoffs.length === 0) return [...args.messages];
+  const cutoffByMessageId = new Map(
+    args.cutoffs.map((cutoff) => [cutoff.sourceMessage.id, cutoff] as const),
+  );
+  const presentMessageIds = new Set(args.messages.map((message) => message.id));
+  return [
+    ...args.messages.map((message) => {
+      const cutoff = cutoffByMessageId.get(message.id);
+      return cutoff ? { ...message, content: cutoff.heardContent } : message;
+    }),
+    ...args.cutoffs
+      .filter((cutoff) => !presentMessageIds.has(cutoff.sourceMessage.id))
+      .map((cutoff) => ({
+        ...cutoff.sourceMessage,
+        content: cutoff.heardContent,
+      })),
+  ];
 }
 
 export function coffeeArrivalAutoplayCanScheduleNow(

@@ -52,7 +52,7 @@ describe("Chat shell header layout", () => {
     );
     assert.match(
       pageSource,
-      /className=\{`\$\{styles\.hubWordmark\} \$\{styles\.sidebarWordmarkButton\} \$\{styles\.wordmarkHomeButton\}`\}[\s\S]*?onClick=\{openLivingShellHome\}[\s\S]*?aria-label="Open All Bots Home"/,
+      /className=\{`\$\{styles\.hubWordmark\} \$\{styles\.sidebarWordmarkButton\} \$\{styles\.wordmarkHomeButton\}`\}[\s\S]{0,180}onClick=\{handleBotGeneratorWordmarkNavigation\}[\s\S]{0,260}"Open All Bots Home"/,
     );
     const openHomeStart = pageSource.indexOf("const openLivingShellHome =");
     const openHomeEnd = pageSource.indexOf(
@@ -73,13 +73,13 @@ describe("Chat shell header layout", () => {
     );
     assert.match(
       pageSource,
-      /controlRail: renderHeaderModelPicker\(\)/,
+      /controlRail: renderHeaderModelPicker\(\{[\s\S]{0,100}disabled: botFoundryGenerationLocked/,
     );
     assert.doesNotMatch(pageSource, /zenHeaderModelPickerActive/u);
     assert.doesNotMatch(pageSource, /zenFirstReplyPending/u);
     assert.match(
       pageSource,
-      /const renderHeaderModelPicker =[\s\S]*renderProviderModeToggle\(styles\.chatHeaderModeToggle\)[\s\S]*<ComposerModelPicker/u,
+      /const renderHeaderModelPicker =[\s\S]*renderProviderModeToggle\(\s*styles\.chatHeaderModeToggle,[\s\S]{0,100}disabled \? disabledReason : null[\s\S]*<ComposerModelPicker/u,
     );
     assert.doesNotMatch(pageSource, /data-zen-header-hidden=/u);
     assert.doesNotMatch(pageSource, /zenHeaderBotPickerActive/);
@@ -103,8 +103,14 @@ describe("Chat shell header layout", () => {
 
     assert.doesNotMatch(pickerSource, /prismHomeUsesDedicatedLocalModel/u);
     assert.doesNotMatch(pickerSource, /ariaLabel="Prism local model; change it in Settings"/u);
-    assert.match(pickerSource, /renderProviderModeToggle\(styles\.chatHeaderModeToggle\)/u);
-    assert.match(pickerSource, /effortControl=\{effortControlForTarget\(effortTarget\)\}/u);
+    assert.match(
+      pickerSource,
+      /renderProviderModeToggle\(\s*styles\.chatHeaderModeToggle,[\s\S]{0,100}disabled \? disabledReason : null/u,
+    );
+    assert.match(
+      pickerSource,
+      /effortControl=\{effortControlForTarget\(effortTarget, \{[\s\S]{0,100}autoSelected:/u,
+    );
   });
 
   it("lists saved default PRISM chats beside persona conversation groups", () => {
@@ -155,6 +161,12 @@ describe("Chat shell header layout", () => {
   });
 
   it("makes contextual Auto the model default inside a binary privacy lane", () => {
+    const pickerStart = pageSource.indexOf("const renderHeaderModelPicker =");
+    const pickerEnd = pageSource.indexOf(
+      "const renderImagesPanelModelPicker =",
+      pickerStart,
+    );
+    const pickerSource = pageSource.slice(pickerStart, pickerEnd);
     assert.match(pageSource, /const autoLabelShown = "Auto";/u);
     assert.match(pageSource, /function AutoEffortIcon/u);
     assert.match(
@@ -162,7 +174,7 @@ describe("Chat shell header layout", () => {
       /function AutoEffortIcon\(\): React\.JSX\.Element \{[\s\S]{0,420}d="M9 2\.75 15\.25 14H2\.75L9 2\.75Z"/u,
     );
     assert.match(pageSource, /Effort chosen automatically/u);
-    assert.doesNotMatch(pageSource, /Account default/u);
+    assert.doesNotMatch(pickerSource, /Account default/u);
     assert.match(pageSource, /\(\["local", "online"\] as const\)\.map/u);
   });
 

@@ -117,6 +117,7 @@ interface TestImageRecord {
   purpose: string;
   model?: string | null;
   provider?: string;
+  assetKind?: string;
 }
 
 function testGroupImages(
@@ -176,6 +177,23 @@ const testConversation: TestConversation = {
 
 async function activateNavigationControl(locator: Locator): Promise<void> {
   await locator.evaluate((element) => (element as HTMLElement).click());
+}
+
+async function openSavedZenConversation(
+  page: Page,
+  groupName: string,
+  conversationTitle: string,
+): Promise<void> {
+  await page.getByRole("button", { name: "Open conversation panel" }).click();
+  await page
+    .getByRole("button", {
+      name: `Focus ${groupName}'s Home and expand conversations`,
+    })
+    .click();
+  await page
+    .getByRole("button", { name: conversationTitle, exact: true })
+    .click();
+  await page.getByRole("button", { name: "Close conversation panel" }).click();
 }
 
 async function selectBotGroupFilter(page: Page, name: string): Promise<void> {
@@ -248,6 +266,9 @@ async function installAuthenticatedApi(
   const fixtureBots = options.bots ?? testBots;
   const fixtureConversation = options.conversation ?? testConversation;
   const fixtureImages = options.images ?? [];
+  let fixtureBotLibraryGroups = structuredClone(
+    options.botLibraryGroups ?? [],
+  );
   let fixtureHubAtmosphereEnabled = options.hubAtmosphereEnabled !== false;
   let fixtureHubAtmosphereStyle = options.hubAtmosphereStyle ?? "prismatic";
   await page.addInitScript(
@@ -395,6 +416,26 @@ async function installAuthenticatedApi(
         },
       });
     }
+    if (pathname === "/api/library/groups/import-legacy") {
+      const body = route.request().postDataJSON() as {
+        groups?: TestBotLibraryGroup[];
+      };
+      if (Array.isArray(body.groups)) {
+        fixtureBotLibraryGroups = structuredClone(body.groups);
+      }
+      return json({ groups: fixtureBotLibraryGroups });
+    }
+    if (pathname === "/api/library/groups") {
+      if (route.request().method() === "PUT") {
+        const body = route.request().postDataJSON() as {
+          groups?: TestBotLibraryGroup[];
+        };
+        if (Array.isArray(body.groups)) {
+          fixtureBotLibraryGroups = structuredClone(body.groups);
+        }
+      }
+      return json({ groups: fixtureBotLibraryGroups });
+    }
     if (pathname === "/api/conversations") {
       return json({
         conversations: [
@@ -443,6 +484,7 @@ async function installAuthenticatedApi(
       return json({ conversation: fixtureConversation });
     }
     if (pathname === "/api/memories") return json({ memories: [] });
+    if (pathname === "/api/soft-asset-jobs") return json({ jobs: [] });
     if (pathname === "/api/bots") return json({ bots: fixtureBots });
     if (/^\/api\/bots\/[^/]+\/memory-panel$/.test(pathname)) {
       const botId = decodeURIComponent(pathname.split("/")[3] ?? "");
@@ -497,6 +539,53 @@ async function installAuthenticatedApi(
           ? fixtureImages.filter((image) => image.botId === botId)
           : fixtureImages;
       return json({ images: filtered });
+    }
+    if (pathname === "/api/assets") {
+      const requestedKind = new URL(route.request().url()).searchParams.get(
+        "kind",
+      );
+      const assets = fixtureImages
+        .filter(
+          (image) =>
+            image.hasLocalFile &&
+            (image.assetKind ?? "general_image") === requestedKind,
+        )
+        .map((image) => ({
+          id: `e2e-asset-${image.id}`,
+          kind: requestedKind,
+          status: "ready",
+          title: image.prompt,
+          source: "generated",
+          sourceContext: {},
+          automaticTags: [],
+          playerTags: [],
+          storageTier: "hot",
+          accessCount: 0,
+          lastAccessedAt: null,
+          reuseScore: 0,
+          compressUndoAvailable: false,
+          createdAt: image.createdAt,
+          updatedAt: image.createdAt,
+          usageCount: 0,
+          usage: [],
+          members: [
+            {
+              imageId: image.id,
+              role: "primary",
+              url: image.displayUrl,
+              thumbnailUrl: image.displayUrl,
+              prompt: image.prompt,
+              revisedPrompt: null,
+              provider: image.provider ?? "local",
+              model: image.model ?? "e2e-image-model",
+              size: "1536x1024",
+              createdAt: image.createdAt,
+            },
+          ],
+          magentaPassCount: 0,
+          magentaUndoAvailable: false,
+        }));
+      return json({ ok: true, assets, nextCursor: null });
     }
     if (pathname === "/api/models") {
       const zenWallpaperLocalImageModel =
@@ -617,7 +706,10 @@ interface StatefulZenFixture {
 
 async function installStatefulZenApi(page: Page): Promise<StatefulZenFixture> {
   const state: StatefulZenFixture = {
-    persistentConversation: structuredClone(testConversation),
+    persistentConversation: {
+      ...structuredClone(testConversation),
+      botId: testBots[0]!.id,
+    },
     requests: [],
   };
   let turnIndex = 0;
@@ -639,6 +731,7 @@ async function installStatefulZenApi(page: Page): Promise<StatefulZenFixture> {
     const conversation: TestConversation = {
       ...testConversation,
       id: incognito ? `e2e-private-${turnIndex}` : testConversation.id,
+      botId: state.persistentConversation.botId,
       incognito,
       messages: [
         ...priorMessages,
@@ -678,8 +771,10 @@ async function installStatefulZenApi(page: Page): Promise<StatefulZenFixture> {
         conversations: [
           {
             ...conversation,
-            lastBotId: null,
-            lastBotColor: null,
+            lastBotId: conversation.botId,
+            lastBotColor:
+              testBots.find((bot) => bot.id === conversation.botId)?.color ??
+              null,
             hasAssistantReply: conversation.messages.some(
               (message) => message.role === "assistant",
             ),
@@ -1109,9 +1204,13 @@ test.describe("PRISM desktop smoke", () => {
     const variantTile = picker.getByRole("option", {
       name: "Coffee Seat 2",
     });
+    const modelPicker = page.getByRole("button", {
+      name: "Coffee session model for local replies",
+    });
     await expect(
       page.getByRole("button", { name: "AUTO", exact: true }),
-    ).toBeDisabled();
+    ).toHaveCount(0);
+    await expect(modelPicker).toContainText("Auto");
     for (const mode of ["ONLINE", "LOCAL"] as const) {
       const modeButton = page.getByRole("button", { name: mode, exact: true });
       await expect(modeButton).toBeEnabled();
@@ -1123,9 +1222,6 @@ test.describe("PRISM desktop smoke", () => {
       await expect(variantTile).toHaveAttribute("aria-selected", "false");
     }
 
-    const modelPicker = page.getByRole("button", {
-      name: "Coffee session model for local replies",
-    });
     await modelPicker.click();
     await page.getByRole("option", { name: /Qwen 3 8B/u }).click();
     await expect(modelPicker).toContainText("Qwen 3 8B");
@@ -1234,6 +1330,11 @@ test.describe("PRISM desktop smoke", () => {
     await installAuthenticatedApi(page);
     const state = await installStatefulZenApi(page);
     await page.goto("/?view=chat");
+    await openSavedZenConversation(
+      page,
+      "Test Bot 1",
+      state.persistentConversation.title,
+    );
 
     const responseMode = page
       .locator('[data-tutorial-target="auto-response-mode"]')
@@ -1251,6 +1352,11 @@ test.describe("PRISM desktop smoke", () => {
     expect(state.requests[0]?.incognito).not.toBe(true);
 
     await page.reload();
+    await openSavedZenConversation(
+      page,
+      "Test Bot 1",
+      state.persistentConversation.title,
+    );
     await expect(page.getByText("This reply is saved locally.")).toBeVisible();
 
     await page.getByRole("button", { name: "Open conversation panel" }).click();
@@ -1268,6 +1374,11 @@ test.describe("PRISM desktop smoke", () => {
     expect(state.requests[1]?.incognito).toBe(true);
 
     await page.reload();
+    await openSavedZenConversation(
+      page,
+      "Test Bot 1",
+      state.persistentConversation.title,
+    );
     await expect(page.getByText("This reply is saved locally.")).toBeVisible();
     await expect(
       page.getByText("This reply is intentionally ephemeral."),
@@ -1364,10 +1475,9 @@ test.describe("PRISM desktop smoke", () => {
     await expect(
       page.locator('[data-relationship-depth-input-shield="true"]'),
     ).toHaveCount(0);
-    await expect(page.locator('main[data-zen-surface="true"]')).toHaveAttribute(
-      "data-relationship-depth-motion",
-      "crossfade",
-    );
+    await expect(
+      page.locator('main[data-zen-surface="true"]'),
+    ).not.toHaveAttribute("inert", "");
     await expect(
       page.locator('[data-home-affordance="wordmark"]'),
     ).toHaveAttribute("aria-label", "Open All Bots Home");
@@ -1422,10 +1532,7 @@ test.describe("PRISM desktop smoke", () => {
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.goto("/?view=chat");
 
-      await page
-        .getByRole("button", { name: "Bot group filter: All bots" })
-        .click();
-      await page.getByRole("option", { name: groupName }).click();
+      await selectBotGroupFilter(page, groupName);
       const groupTrigger = page.getByRole("button", {
         name: `Bot group filter: ${groupName}`,
       });
@@ -1617,6 +1724,7 @@ test.describe("PRISM desktop smoke", () => {
     }
 
     await page.goto("/?view=chat");
+    await openSavedZenConversation(page, "Prism", prismHome.title);
     await expect(page.getByText("Welcome to Prism Home.")).toBeVisible();
     zenOpenBodies.length = 0;
     const homePicker = page.getByRole("button", { name: "Zen Home" });
@@ -1681,7 +1789,7 @@ test.describe("PRISM desktop smoke", () => {
     await page.getByRole("button", { name: "Open conversation panel" }).click();
     await page
       .getByRole("button", {
-        name: "Select and expand Test Bot 1 conversations",
+        name: "Focus Test Bot 1's Home and expand conversations",
       })
       .click();
     await page
@@ -1768,6 +1876,11 @@ test.describe("PRISM desktop smoke", () => {
 
     try {
       await page.goto("/?view=chat");
+      await openSavedZenConversation(
+        page,
+        "Test Bot 1",
+        establishedConversation.title,
+      );
       await expect(page.getByText("An earlier answer.")).toBeVisible();
       const shell = page.locator('[data-zen-surface="true"]').first();
       await expect(shell).toBeVisible();
@@ -2039,12 +2152,16 @@ test.describe("PRISM desktop smoke", () => {
         id: "e2e-room-atmosphere-existing",
         prompt: "A quiet violet observatory",
         botId: null,
+        purpose: "group-room-wallpaper",
+        assetKind: "group_room_atmosphere",
       };
       const remoteOnlyImage: TestImageRecord = {
         ...testGroupImages(["e2e-bot-b"], 1)[0]!,
         id: "e2e-room-atmosphere-remote",
         prompt: "Remote-only room",
         botId: null,
+        purpose: "group-room-wallpaper",
+        assetKind: "group_room_atmosphere",
         hasLocalFile: false,
         displayUrl: "https://remote.invalid/room.png",
       };
@@ -2134,18 +2251,16 @@ test.describe("PRISM desktop smoke", () => {
         path: ".codex/output/group-room-atmosphere-dialog-dark-1280x720.png",
         fullPage: false,
       });
-      await expect(
-        dialog.getByRole("button", {
-          name: `Use saved image ${reusableImage.prompt} for ${groupName}`,
-        }),
-      ).toBeVisible();
-      await expect(dialog.getByText(remoteOnlyImage.prompt)).toHaveCount(0);
+      const atmosphereRail = dialog.getByRole("region", {
+        name: "Group-room Atmospheres",
+      });
+      const reusableAsset = atmosphereRail.getByTitle(reusableImage.prompt);
+      await expect(reusableAsset).toBeVisible();
+      await expect(atmosphereRail.getByTitle(remoteOnlyImage.prompt)).toHaveCount(
+        0,
+      );
       expect(externalImageRequests).toEqual([]);
-      await dialog
-        .getByRole("button", {
-          name: `Use saved image ${reusableImage.prompt} for ${groupName}`,
-        })
-        .click();
+      await reusableAsset.click();
 
       const atmosphere = page.locator(
         '[data-room-atmosphere-image-id="e2e-room-atmosphere-existing"]',
@@ -2180,7 +2295,14 @@ test.describe("PRISM desktop smoke", () => {
           name: `Replace or clear ${groupName}'s room atmosphere`,
         })
         .click();
-      await dialog.getByRole("button", { name: "Generate room" }).click();
+      await dialog
+        .getByRole("button", { name: "Synthesize Group-room Atmospheres" })
+        .click();
+      const refractDirection = page.getByLabel(
+        "How should Prism shape this pass?",
+      );
+      await refractDirection.fill("Make the observatory quieter and more luminous.");
+      await refractDirection.press("Enter");
       await expect.poll(() => generationBody).not.toBeNull();
       expect(generationBody).toMatchObject({
         purpose: "group-room-wallpaper",
@@ -2293,12 +2415,16 @@ test.describe("PRISM desktop smoke", () => {
         id: "e2e-light-room-first",
         prompt: "A luminous shared studio",
         botId: null,
+        purpose: "group-room-wallpaper",
+        assetKind: "group_room_atmosphere",
       };
       const secondImage: TestImageRecord = {
         ...testGroupImages(["e2e-waiting-bot-2"], 1)[0]!,
         id: "e2e-light-room-second",
         prompt: "A warm glass conservatory",
         botId: null,
+        purpose: "group-room-wallpaper",
+        assetKind: "group_room_atmosphere",
       };
       await installAuthenticatedApi(page, {
         theme: "light",
@@ -2338,11 +2464,7 @@ test.describe("PRISM desktop smoke", () => {
       const dialog = page.getByRole("dialog", {
         name: `${groupName} atmosphere`,
       });
-      await dialog
-        .getByRole("button", {
-          name: `Use saved image ${secondImage.prompt} for ${groupName}`,
-        })
-        .click();
+      await dialog.getByTitle(secondImage.prompt).click();
       await expect(
         page.locator(`[data-room-atmosphere-image-id="${secondImage.id}"]`),
       ).toBeVisible();

@@ -8,7 +8,6 @@ export interface CoffeeContextSparkLayerProps {
   sparks: readonly CoffeeContextSpark[];
   armedSparkId: string | null;
   receded: boolean;
-  showCue?: boolean;
   disabled?: boolean;
   onArm: (spark: CoffeeContextSpark) => void;
   onDismiss: (spark: CoffeeContextSpark) => void;
@@ -24,7 +23,6 @@ export function CoffeeContextSparkLayer({
   sparks,
   armedSparkId,
   receded,
-  showCue = false,
   disabled = false,
   onArm,
   onDismiss,
@@ -38,11 +36,6 @@ export function CoffeeContextSparkLayer({
       aria-label="Conversation sparks from earlier sessions"
       aria-live="polite"
     >
-      {showCue ? (
-        <p className={styles.coffeeContextSparkCue} role="status">
-          Past sessions can return as conversation sparks.
-        </p>
-      ) : null}
       {sparks.map((spark, index) => {
         const armed = spark.id === armedSparkId || spark.state === "armed";
         return (

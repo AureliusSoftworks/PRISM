@@ -200,7 +200,6 @@ describe("preferred Jury seat helpers", () => {
       null,
       null,
       null,
-      null,
     ]);
   });
 
@@ -219,7 +218,7 @@ describe("preferred Jury seat helpers", () => {
     } as unknown as DebateSessionV1;
     assert.deepEqual(
       preferredJurorBotIdsFromSession(session, ["juror-a", "juror-b", "juror-c"]),
-      ["juror-a", null, "juror-b", null, "juror-c"],
+      ["juror-a", null, "juror-b", null],
     );
   });
 });

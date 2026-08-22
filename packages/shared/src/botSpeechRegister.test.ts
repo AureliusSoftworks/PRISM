@@ -5,6 +5,7 @@ import {
   BOT_SPEECH_REGISTER_IDS,
   BOT_SPEECH_REGISTER_SHARED_RULES_V1,
   botPowerSpeechRegistersV1,
+  botPowerSourceHashForPowerV1,
   botSpeechRegisterAuthoringCueV1,
   normalizeBotSpeechRegisterId,
   normalizeBotVernacularId,
@@ -39,17 +40,19 @@ describe("bot speech registers", () => {
   });
 
   it("detects granted registers on active compiled powers", () => {
+    const name = "Noir Narrator";
+    const intent = "Narrates like a detective.";
     const powers = [
       {
         version: 1,
         id: "noir-cloak",
-        name: "Noir Narrator",
-        intent: "Narrates like a detective.",
+        name,
+        intent,
         enabled: true,
         compileStatus: "ready",
         compiled: {
           version: 1,
-          sourceHash: "0".repeat(64),
+          sourceHash: botPowerSourceHashForPowerV1({ name, intent }),
           selfCue: botSpeechRegisterAuthoringCueV1("noir"),
           observerCue: "Speaks in noir narration.",
           effects: [{ type: "speech_register", register: "noir" }],

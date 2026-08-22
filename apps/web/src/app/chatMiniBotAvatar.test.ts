@@ -290,7 +290,7 @@ describe("chatMiniBotAvatar", () => {
       ),
     ];
     assert.equal(miniFaceCalls.length, 3);
-    for (const [miniFaceCall] of miniFaceCalls) {
+    for (const [index, [miniFaceCall]] of miniFaceCalls.entries()) {
       assert.match(
         miniFaceCall,
         /faceEyeMovement="still"/,
@@ -308,7 +308,11 @@ describe("chatMiniBotAvatar", () => {
       );
       assert.match(miniFaceCall, /\bhardPixels\b/);
       assert.match(miniFaceCall, /motionMode="mini-led"/);
-      assert.doesNotMatch(miniFaceCall, /showThinkingSpinner|showQuestionMark/);
+      if (index < 2) {
+        assert.doesNotMatch(miniFaceCall, /showThinkingSpinner|showQuestionMark/);
+      } else {
+        assert.match(miniFaceCall, /showThinkingSpinner/);
+      }
       assert.doesNotMatch(miniFaceCall, /zenLiveBotPresenceFaceGlyph/);
     }
     assert.doesNotMatch(pageSource, /miniAvatarBinaryMouthShape/);

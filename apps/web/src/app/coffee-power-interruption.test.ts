@@ -391,7 +391,7 @@ test("Copycat ellipsis follow-ons remain visible but never request reaction voic
 
   assert.match(
     signalPlayback,
-    /listenerReactionInterruptedSpeakerHasAudioV1\(sanitizedPlan\)/u,
+    /listenerReactionInterruptedSpeakerHasAudioV1\(playbackPlan\)/u,
   );
   assert.match(
     coffeePlayback,

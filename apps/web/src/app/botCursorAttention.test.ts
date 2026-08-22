@@ -130,10 +130,19 @@ describe("full-size bot cursor attention", () => {
       page,
       /avatarRenderMode === "mini"[\s\S]*?<ZenLiveBotMannequin[\s\S]*?cursorAttention/u,
     );
-    assert.match(
-      page,
-      /data-bot-hub-showcase-backdrop="true"[\s\S]*?<ZenLiveBotMannequin[\s\S]*?cursorAttention=\{!isMarketplacePreview\}/u,
+    const showcasePlate = page.slice(
+      page.indexOf("function BotHubVoicePreviewAvatarPlate"),
+      page.indexOf("function ZenLiveBotPresencePlate"),
     );
+    assert.match(
+      showcasePlate,
+      /<ZenLiveBotMannequin[\s\S]*?cursorAttention=\{!isMarketplacePreview\}/u,
+    );
+    const showcase = page.slice(
+      page.indexOf("const renderBotHubShowcase"),
+      page.indexOf("const renderSharedPanels"),
+    );
+    assert.match(showcase, /<BotHubVoicePreviewAvatarPlate/u);
     assert.doesNotMatch(
       page,
       /data-avatar-customizer-preview="true"[\s\S]{0,3000}cursorAttention/u,

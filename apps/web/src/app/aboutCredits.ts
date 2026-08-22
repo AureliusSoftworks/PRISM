@@ -143,6 +143,14 @@ export const ABOUT_CREDIT_GROUPS: readonly AboutCreditGroup[] = [
         packageNames: ["kokoro-js"],
       },
       {
+        id: "phonemizer",
+        name: "phonemizer.js & eSpeak NG",
+        description: "Text-to-phoneme conversion for portable speech synthesis.",
+        href: "https://github.com/xenova/phonemizer.js",
+        license: "Apache-2.0",
+        packageNames: ["phonemizer"],
+      },
+      {
         id: "soundtouch",
         name: "SoundTouchJS formant worklet",
         description: "Pitch shifting with formant-preserving voice correction.",
@@ -192,11 +200,19 @@ export const ABOUT_CREDIT_GROUPS: readonly AboutCreditGroup[] = [
       },
       {
         id: "rust-foundations",
-        name: "Serde, url & objc2",
-        description: "Serialization, URL handling, and native macOS bindings for Tauri.",
+        name: "Serde, url, libc & objc2",
+        description:
+          "Serialization, URL handling, and native operating-system bindings for Tauri.",
         href: "https://www.rust-lang.org/",
         license: "Apache-2.0 / MIT",
-        cargoPackageNames: ["serde", "serde_json", "url", "objc2", "objc2-app-kit"],
+        cargoPackageNames: [
+          "serde",
+          "serde_json",
+          "url",
+          "libc",
+          "objc2",
+          "objc2-app-kit",
+        ],
       },
     ],
   },

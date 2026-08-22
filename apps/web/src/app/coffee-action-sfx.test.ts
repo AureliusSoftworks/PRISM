@@ -274,7 +274,11 @@ describe("Coffee action sound effects", () => {
     assert.ok(bufferedFollowupDispatch > bufferedFollowupPlayback);
     assert.match(
       pageSource,
-      /!options\.zenFollowupDispatch\s*\) \{\s*if \(!\(\s*!chatVoiceForcedMuted[\s\S]{0,180}playChatPlayerActionSfx\(displayTrimmed\);/u,
+      /!options\.zenFollowupDispatch\s*\) \{\s*playChatPlayerActionSfx\(displayTrimmed\);/u,
+    );
+    assert.match(
+      pageSource,
+      /const playChatPlayerActionSfx = useCallback\([\s\S]{0,520}bundledActionSfxIsEligible\(\{[\s\S]{0,180}voiceMode: voicePlaybackSelectionRef\.current\.voiceMode/u,
     );
     assert.match(pageSource, /playCoffeeActionSfxOnce\(/u);
     assert.match(pageSource, /playSignalProducerGuestActionSfx/u);

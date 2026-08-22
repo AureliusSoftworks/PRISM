@@ -35,6 +35,7 @@ import {
   SESSION_REVIEW_FORMAT_VERSION,
   sessionReviewDirectionLines,
   sessionReviewRecordingSummaryLines,
+  sessionReviewTranscriptCoverageLines,
   sessionReviewStableJson,
   type SessionReviewRecordingEvidence,
 } from "./sessionReviewEvidence.ts";
@@ -1267,6 +1268,25 @@ export function formatCoffeeReviewClipboardText(args: {
     ];
   });
 
+  // Every message id the export actually carries, in any section — the
+  // reconciliation set for the coverage check below.
+  const presentMessageIds = new Set<string>();
+  for (const message of messages) {
+    if (typeof message.id === "string" && message.id.trim()) {
+      presentMessageIds.add(message.id.trim());
+    }
+    // Interruption rows are projections of a real message; credit the source
+    // so a split turn never reads as a missing one.
+    const segment = message.transcriptInterruptionSegment;
+    const sourceId =
+      segment && typeof segment === "object" && "sourceMessageId" in segment
+        ? (segment as { sourceMessageId?: unknown }).sourceMessageId
+        : undefined;
+    if (typeof sourceId === "string" && sourceId.trim()) {
+      presentMessageIds.add(sourceId.trim());
+    }
+  }
+
   const contextLines = [
     coffeeReviewValue("Title", context?.title),
     coffeeReviewValue("Topic", context?.topic),
@@ -1298,6 +1318,13 @@ export function formatCoffeeReviewClipboardText(args: {
     "## Faithful Recording Evidence",
     "",
     ...sessionReviewRecordingSummaryLines(context?.recordingEvidence),
+    "",
+    "## Transcript Coverage",
+    "",
+    ...sessionReviewTranscriptCoverageLines({
+      evidence: context?.recordingEvidence,
+      presentMessageIds,
+    }),
     "",
     "## Detailed Turns",
     "",

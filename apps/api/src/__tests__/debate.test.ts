@@ -9,12 +9,18 @@ import {
   DEBATE_PLAYER_PARTICIPANT_BOT_ID,
   DEBATE_SCHEMA_VERSION,
   DEBATE_UNINTELLIGIBLE_FLOOR_STEP_KEY,
+  LIVE_BAKE_PREMIUM_SYNTHESIS_LATENCY_MS_PER_TAKE,
+  LIVE_BAKE_PREMIUM_SYNTHESIS_MAX_RUNWAY_MS,
+  LIVE_BAKE_PREMIUM_SYNTHESIS_RUNWAY_TAKES,
+  LIVE_BAKE_UNLOCK_BUFFER_MS,
   applyBotPowerCursedTongueResponseV1,
   applyBotPowerMumbledResponseV1,
   botPowerResponseIsSilentV1,
   debateParticipantGambitGradesV1,
   debateParticipantGambitOfferV1,
   botPowerSourceHashV1,
+  liveBakePlannedSynthesisRunwayMs,
+  liveBakeRequiredBufferMs,
   serializeBotAudioVoiceProfileV1,
   serializeBotPowersV1,
   type BotPowerEffectV1,
@@ -25,7 +31,11 @@ import {
   type DebateMotionSlateV1,
 } from "@localai/shared";
 import { initializeDatabase } from "../db.ts";
-import { bakeDebateSpectatorSession } from "../live-bake.ts";
+import {
+  bakeDebateSpectatorSession,
+  persistDebateLiveBake,
+  syncDebateLiveBakeFromSession,
+} from "../live-bake.ts";
 import { exportUserSnapshot, importUserSnapshot } from "../backup.ts";
 import { restoreFactoryDefaultsInDatabase } from "../account-reset.ts";
 import {
@@ -943,6 +953,73 @@ class TurnaboutProvider extends DebateProviderStub {
   }
 }
 
+class MumblingHueTurnaboutProvider extends TurnaboutProvider {
+  public readonly ballotPrompts = new Map<string, string>();
+  public readonly againstSpeechPrompts: string[] = [];
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("Vote independently")) {
+      const voter = text.match(/You are (Mira|Avery|Basil)\./u)?.[1] ?? "unknown";
+      this.ballotPrompts.set(voter, text);
+      return JSON.stringify({
+        sideId: voter === "Mira" ? "against" : "for",
+        recordScore: 40,
+        reason:
+          voter === "Avery"
+            ? "I spoke gibberish throughout, so I cannot reward my own case."
+            : "The For side sounded more polished on the public record.",
+        deliveryCue: null,
+      });
+    }
+    if (text.includes("sustained, clearly unintelligible public advocacy")) {
+      return JSON.stringify({
+        content: "Make one recognizable claim, Avery; the room cannot answer static.",
+      });
+    }
+    if (text.includes("public Turnabout statement was clearly unintelligible")) {
+      const publicNoise = text.match(/Avery: ([^\n]{20,120})/u)?.[1];
+      if (publicNoise) {
+        return JSON.stringify({
+          content: `Avery, what did you mean when you said ${publicNoise}?`,
+        });
+      }
+      return JSON.stringify({
+        content: "Avery, I caught the confidence but misplaced the claim. What did you mean?",
+      });
+    }
+    if (text.includes("attempted clarification was still clearly unintelligible")) {
+      return JSON.stringify({
+        content: "Avery clarified the mystery, not the claim; the room heard no usable answer.",
+      });
+    }
+    if (text.includes("public gallery has stayed rowdy")) {
+      return JSON.stringify({ content: "Easy, gallery. Let the strange little storm pass." });
+    }
+    if (text.includes("Fire pressable shot")) {
+      if (text.includes("for Resist Red directly")) {
+        this.againstSpeechPrompts.push(text);
+      }
+      return JSON.stringify({
+        content: text.includes("for Resist Red directly")
+          ? "I back blue bots because they are built right; red robots mistake bright paint for merit."
+          : "Red robots are the finest combat machines in the arena, built to win cleanly.",
+      });
+    }
+    if (text.includes("Your earlier claim, as you sincerely remember saying it")) {
+      return JSON.stringify({
+        content: text.includes("finest combat machines")
+          ? "I mean red robots win because their design is direct and dependable."
+          : "I mean red paint proves nothing about combat merit.",
+      });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
 class SunriseTurnaboutProvider extends TurnaboutProvider {
   public override async generateResponse(
     messages: ProviderMessage[],
@@ -1797,18 +1874,25 @@ async function createTurnaboutForRole(
   db: DatabaseSync,
   role: "judge" | "participant" | "spectator",
   debateRuntime: DebateAiRuntime = runtimeWith(new TurnaboutProvider()),
-  options: { formality?: "free_for_all" | "plainspoken" } = {},
+  options: {
+    formality?: "free_for_all" | "plainspoken";
+    motion?: DebateMotionSlateV1;
+    moderatorPowers?: BotPowerV1[];
+    forPowers?: BotPowerV1[];
+    againstPowers?: BotPowerV1[];
+  } = {},
 ) {
-  seedBot(db, "moderator", "Mira");
-  seedBot(db, "for", "Avery");
-  seedBot(db, "against", "Basil");
+  const motion = options.motion ?? MOTION;
+  seedBot(db, "moderator", "Mira", options.moderatorPowers ?? []);
+  seedBot(db, "for", "Avery", options.forPowers ?? []);
+  seedBot(db, "against", "Basil", options.againstPowers ?? []);
   const checks = await checkDebateAdvocacyRoles(
     db,
     "user-1",
     {
       format: "turnabout",
       formality: options.formality,
-      motion: MOTION,
+      motion,
       forAdvocateBotId: "for",
       againstAdvocateBotId: "against",
     },
@@ -1820,7 +1904,7 @@ async function createTurnaboutForRole(
     {
       format: "turnabout",
       formality: options.formality,
-      motion: MOTION,
+      motion,
       evidence: {
         version: 1,
         notes: "Rail-adjacent land is scarce.",
@@ -2151,6 +2235,76 @@ describe("Debate engine", () => {
       assert.equal(baked.session.status, "paused");
       assert.equal(baked.artifact.status, "baking");
       assert.equal(getDebateSession(db, "user-1", session.id).status, "paused");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("persists planned Premium Debate runway without synthesized provenance", async () => {
+    const db = createTestDb();
+    try {
+      const created = await createDebateForRole(db, "spectator");
+      const started = await advanceDebateSession(
+        db,
+        "user-1",
+        created.id,
+        {
+          expectedRevision: created.revision,
+          idempotencyKey: "premium-live-bake:start",
+        },
+        runtime(),
+      );
+      persistDebateLiveBake(db, "user-1", {
+        ...started,
+        responseMode: "online",
+      });
+
+      for (const status of ["baking", "cancelled", "failed", "ready"] as const) {
+        const produced = syncDebateLiveBakeFromSession(
+          db,
+          "user-1",
+          created.id,
+          status,
+          status === "ready" ? "Ready" : "Preparing the gallery",
+          "elevenlabs",
+        );
+        // The GET /api/debates/:id route returns this exact public projection.
+        const polled = debateSessionForPlayer(
+          getDebateSession(db, "user-1", created.id),
+        ).liveBake;
+
+        assert.ok(produced.utterances.length > 0);
+        assert.ok(polled);
+        assert.equal(polled.status, produced.status);
+        assert.deepEqual(polled.utterances, produced.utterances);
+        assert.deepEqual(
+          polled.plannedSynthesisTiming,
+          produced.plannedSynthesisTiming,
+        );
+        assert.ok(
+          polled.utterances.every(
+            (utterance) =>
+              utterance.audioUrl === null &&
+              utterance.voiceEngine === "unknown" &&
+              !utterance.isPremium,
+          ),
+        );
+        assert.deepEqual(polled.plannedSynthesisTiming, {
+          engine: "elevenlabs",
+          estimatedLatencyMsPerTake:
+            LIVE_BAKE_PREMIUM_SYNTHESIS_LATENCY_MS_PER_TAKE,
+          runwayTakeCount: LIVE_BAKE_PREMIUM_SYNTHESIS_RUNWAY_TAKES,
+        });
+        assert.equal(
+          liveBakePlannedSynthesisRunwayMs(polled),
+          LIVE_BAKE_PREMIUM_SYNTHESIS_MAX_RUNWAY_MS,
+        );
+        assert.equal(
+          liveBakeRequiredBufferMs(polled),
+          LIVE_BAKE_UNLOCK_BUFFER_MS +
+            LIVE_BAKE_PREMIUM_SYNTHESIS_MAX_RUNWAY_MS,
+        );
+      }
     } finally {
       db.close();
     }
@@ -4765,7 +4919,7 @@ describe("Debate engine", () => {
       const created = await createJuryDebateForRole(
         db,
         "spectator",
-        5,
+        4,
         "forum",
         provider,
         "plainspoken",
@@ -8828,6 +8982,274 @@ describe("Debate engine", () => {
     }
   });
 
+  it("keeps Mumbling holder-unaware while Turnabout escalates public gibberish, records clear opposing claims, and binds directly matched Hue ballots", async () => {
+    const db = createTestDb();
+    const provider = new MumblingHueTurnaboutProvider();
+    const debateRuntime = runtimeWith(provider);
+    const redHate = readyPower(
+      "red-hate",
+      "Hue Prejudice",
+      "Treat red bots with intense distrust.",
+      [
+        {
+          type: "chromatic_bias",
+          polarity: "hate",
+          color: { kind: "named", hue: 0, label: "red" },
+          strength: "large",
+          matchBandDeg: 28,
+        },
+      ],
+    );
+    const blueHate = readyPower(
+      "blue-hate",
+      "Hue Prejudice",
+      "Never support blue bots.",
+      [
+        {
+          type: "chromatic_bias",
+          polarity: "hate",
+          color: { kind: "named", hue: 240, label: "blue" },
+          strength: "large",
+          matchBandDeg: 28,
+        },
+      ],
+    );
+    try {
+      let session = await createTurnaboutForRole(
+        db,
+        "spectator",
+        debateRuntime,
+        {
+          formality: "free_for_all",
+          motion: {
+            version: DEBATE_SCHEMA_VERSION,
+            id: "red-robot-motion",
+            motion: "Red bots are the best combat robots in the arena.",
+            forSide: {
+              label: "Back Red",
+              brief: "Argue that red bots deserve the arena's top rank.",
+            },
+            againstSide: {
+              label: "Resist Red",
+              brief: "Reject red bots as the arena's top machines.",
+            },
+          },
+          moderatorPowers: [blueHate],
+          forPowers: [
+            readyPower(
+              "mumbling",
+              "Mumbling",
+              "Every public utterance is audible gibberish.",
+              [{ type: "speech_obfuscation", mode: "gibberish" }],
+            ),
+          ],
+          againstPowers: [redHate, ...observantPowers()],
+        },
+      );
+      let mutation = 0;
+      while (session.status !== "completed") {
+        mutation += 1;
+        assert.ok(mutation < 32, "Turnabout should complete in bounded steps.");
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `mumbling-hue-turnabout:${mutation}`,
+          },
+          debateRuntime,
+        );
+      }
+
+      const forTestimony = session.events.filter(
+        (event) => event.kind === "testimony" && event.sideId === "for",
+      );
+      const againstTestimony = session.events.filter(
+        (event) => event.kind === "testimony" && event.sideId === "against",
+      );
+      assert.equal(forTestimony.length, 2);
+      assert.equal(againstTestimony.length, 2);
+      assert.ok(forTestimony.every((event) => event.powerIntendedContent));
+      assert.ok(
+        forTestimony.every(
+          (event) => event.content !== event.powerIntendedContent,
+        ),
+      );
+      assert.ok(provider.againstSpeechPrompts.length > 0);
+      assert.ok(
+        forTestimony.every((event) =>
+          provider.againstSpeechPrompts[0]?.includes(event.content),
+        ),
+      );
+      assert.ok(
+        forTestimony.every(
+          (event) =>
+            !provider.againstSpeechPrompts[0]?.includes(
+              event.powerIntendedContent ?? "",
+            ),
+        ),
+      );
+      assert.deepEqual(
+        forTestimony.map((event) => event.audienceReaction?.intensity),
+        [2, 3],
+      );
+      assert.ok(
+        session.events.some(
+          (event) =>
+            event.stepKey === "turnabout_unintelligible_challenge" &&
+            event.parentEventId === forTestimony[1]?.id &&
+            event.speakerBotId === session.againstAdvocate.id,
+        ),
+      );
+      assert.ok(
+        session.events.some(
+          (event) =>
+            event.stepKey === "audience_order" &&
+            event.parentEventId === forTestimony[1]?.id &&
+            event.speakerBotId === session.moderator.id,
+        ),
+      );
+
+      const mumbledIds = new Set(forTestimony.map((event) => event.id));
+      assert.ok(session.caseBoard.length > 0);
+      assert.ok(
+        session.caseBoard.every(
+          (card) =>
+            !mumbledIds.has(card.createdEventId) &&
+            againstTestimony.some((event) => event.id === card.createdEventId),
+        ),
+      );
+      assert.match(
+        session.caseBoard.map((card) => card.summary).join(" "),
+        /red robots|red paint/iu,
+      );
+
+      const mumbledPresses = session.events.filter(
+        (event) =>
+          event.kind === "press" &&
+          event.parentEventId !== null &&
+          forTestimony.some((speech) => speech.id === event.parentEventId),
+      );
+      assert.equal(mumbledPresses.length, 2);
+      assert.ok(
+        mumbledPresses.every((event) =>
+          /claim|mean|caught|words|static|understand/iu.test(event.content),
+        ),
+      );
+      assert.ok(
+        mumbledPresses.every((event) =>
+          forTestimony.every(
+            (speech) => !event.content.includes(speech.content.slice(0, 24)),
+          ),
+        ),
+      );
+      const mumbledRulings = session.events.filter(
+        (event) =>
+          event.kind === "moderator_ruling" &&
+          event.statementId !== null &&
+          mumbledPresses.some((press) => press.statementId === event.statementId),
+      );
+      assert.equal(mumbledRulings.length, 2);
+      assert.ok(
+        mumbledRulings.every(
+          (event) =>
+            !/answered\. That claim is still fair game/iu.test(event.content),
+        ),
+      );
+
+      assert.equal(
+        session.ballots.find((ballot) => ballot.voterBotId === session.moderator.id)
+          ?.sideId,
+        "for",
+      );
+      assert.equal(
+        session.ballots.find(
+          (ballot) => ballot.voterBotId === session.againstAdvocate.id,
+        )?.sideId,
+        "against",
+      );
+      const holderBallot = session.ballots.find(
+        (ballot) => ballot.voterBotId === session.forAdvocate.id,
+      );
+      assert.ok(holderBallot);
+      assert.doesNotMatch(
+        holderBallot.reason ?? "",
+        /gibberish|mumbling|noise|static|unintelligible|hidden transform/iu,
+      );
+      assert.match(
+        provider.ballotPrompts.get("Avery") ?? "",
+        /red robots are the finest combat machines/iu,
+      );
+      assert.ok(
+        forTestimony.every(
+          (event) =>
+            !(provider.ballotPrompts.get("Avery") ?? "").includes(event.content),
+        ),
+      );
+      const publicSession = debateSessionForPlayer(session);
+      assert.ok(
+        publicSession.events.every(
+          (event) => event.powerIntendedContent === undefined,
+        ),
+      );
+      assert.doesNotMatch(
+        session.events
+          .filter((event) => event.kind === "ballot")
+          .map((event) => event.content)
+          .join(" "),
+        /Power|modifier|constraint|hidden instruction/iu,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not force a Hue Prejudice ballot on an unrelated motion", async () => {
+    const db = createTestDb();
+    const debateRuntime = runtimeWith(new TurnaboutProvider());
+    const redHate = readyPower(
+      "unrelated-red-hate",
+      "Hue Prejudice",
+      "Treat red bots with intense distrust.",
+      [
+        {
+          type: "chromatic_bias",
+          polarity: "hate",
+          color: { kind: "named", hue: 0, label: "red" },
+          strength: "large",
+          matchBandDeg: 28,
+        },
+      ],
+    );
+    try {
+      let session = await createTurnaboutForRole(
+        db,
+        "spectator",
+        debateRuntime,
+        { moderatorPowers: [redHate], againstPowers: [redHate] },
+      );
+      let mutation = 0;
+      while (session.status !== "completed") {
+        mutation += 1;
+        assert.ok(mutation < 32);
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `unrelated-hue-turnabout:${mutation}`,
+          },
+          debateRuntime,
+        );
+      }
+      assert.ok(session.ballots.every((ballot) => ballot.sideId === "for"));
+    } finally {
+      db.close();
+    }
+  });
+
   it("runs a complete Judge Duel whose final ruling does not launch bot ballots", async () => {
     const db = createTestDb();
     try {
@@ -12064,7 +12486,7 @@ describe("Debate engine", () => {
       ));
       assert.match(
         JSON.stringify(selectedPrompts),
-        /HARD Ad Hominem primary-generation rule/u,
+        /HARD Ad Hominem rule for this Debate floor/u,
       );
       assert.match(JSON.stringify(selectedPrompts), /current named Debate addressee/u);
       assert.notEqual(

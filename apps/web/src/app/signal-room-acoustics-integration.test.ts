@@ -24,11 +24,15 @@ describe("Signal room acoustics integration", () => {
     );
     assert.match(
       pageSource,
-      /enqueueRobotVoiceMode\(\{[\s\S]{0,1200}roomAcoustics: SIGNAL_STUDIO_VOICE_ROOM_SEND/u,
+      /const voiceRoomAcoustics =[\s\S]{0,260}: SIGNAL_STUDIO_VOICE_ROOM_SEND/u,
     );
     assert.match(
       pageSource,
-      /enqueueEnglishVoice\([\s\S]{0,1400}SIGNAL_STUDIO_VOICE_ROOM_SEND/u,
+      /enqueueRobotVoiceMode\(\{[\s\S]{0,1200}roomAcoustics: voiceRoomAcoustics/u,
+    );
+    assert.match(
+      pageSource,
+      /enqueueEnglishVoice\([\s\S]{0,1400}voiceRoomAcoustics/u,
     );
     assert.match(voiceSource, /connectRoomAcoustics\(\{/u);
     assert.match(voiceSource, /roomConnection\.release\(\)/u);
@@ -56,7 +60,7 @@ describe("Signal room acoustics integration", () => {
     );
     assert.match(
       atmosphereSource,
-      /send: bus === "foley" \? foleyRoomAcoustics : null/u,
+      /send: bus === "foley" \? roomAcoustics : null/u,
     );
     assert.match(
       atmosphereSource,
@@ -79,11 +83,11 @@ describe("Signal room acoustics integration", () => {
     );
     assert.match(
       pageSource,
-      /enqueueRobotVoiceMode\(\{[\s\S]{0,900}roomAcoustics: SIGNAL_STUDIO_VOICE_ROOM_SEND,[\s\S]{0,120}stereoPan/u,
+      /enqueueRobotVoiceMode\(\{[\s\S]{0,900}roomAcoustics: voiceRoomAcoustics,[\s\S]{0,120}stereoPan/u,
     );
     assert.match(
       pageSource,
-      /enqueueEnglishVoice\([\s\S]{0,1200}SIGNAL_STUDIO_VOICE_ROOM_SEND,[\s\S]{0,120}stereoPan/u,
+      /enqueueEnglishVoice\([\s\S]{0,1200}voiceRoomAcoustics,[\s\S]{0,120}stereoPan/u,
     );
     assert.match(
       voiceSource,

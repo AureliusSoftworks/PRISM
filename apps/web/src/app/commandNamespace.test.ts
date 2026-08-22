@@ -28,7 +28,7 @@ test("system operations use stable prefix-independent IDs", () => {
 
 test("system execution recognizes dollar commands and leaves slash names to prompts", () => {
   const start = page.indexOf("function isBuiltInOperationalSlashCommand");
-  const end = page.indexOf("function isPrismDevComposerCommand", start);
+  const end = page.indexOf("function isLocalOnlyComposerCommand", start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   const source = page.slice(start, end);
@@ -58,8 +58,6 @@ test("every public system alias is discoverable in the dollar namespace", () => 
     /BUILT_IN_ATMOSPHERE_COMMAND_ALIASES = \["wallpaper", "wall", "background"\]/u,
   );
   assert.match(page, /BUILT_IN_UNDO_COMMAND_ALIASES = \["undo-turn"\]/u);
-  assert.match(page, /normalizedCommand === "\$forget"/u);
-  assert.match(page, /normalizedCommand === "\$forget-all"/u);
   assert.match(nvmCommand, /"\$nvm does not take extra text/u);
 });
 

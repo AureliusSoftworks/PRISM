@@ -423,6 +423,8 @@ describe("voice settings preview", () => {
       /onDiscoverPremiumVoice\([\s\S]*exclusions\.slice\(0, 24\),[\s\S]*direction/,
     );
     assert.match(premiumStageSource, /audio[\s\S]*src=\{audition\.previewUrl\}/);
+    assert.match(premiumStageSource, /Use for this bot/);
+    assert.match(premiumStageSource, /onUsePremiumVoice\(audition\)/);
     assert.match(premiumStageSource, /Save to Library/);
     assert.match(premiumStageSource, /onSavePremiumVoice\(audition\)/);
     assert.match(premiumStageSource, /elevenLabsVoiceId: voice\.providerVoiceId/);
@@ -436,6 +438,7 @@ describe("voice settings preview", () => {
       /direction: direction\.trim\(\)\.slice\(0, 240\)/,
     );
     assert.match(pageSource, /\/api\/voices\/elevenlabs\/library/);
+    assert.match(pageSource, /\/api\/voices\/elevenlabs\/shared\/use/);
     assert.doesNotMatch(pageSource, /\/api\/voices\/elevenlabs\/shared\/import-random/);
     assert.match(pageSource, /premiumVoiceKeySource === "server"/);
     assert.match(pageSource, /PRISM connection/);
@@ -771,14 +774,14 @@ describe("voice settings preview", () => {
     assert.match(pageStyles, /\.botVoiceNameGrid/);
   });
 
-  it("clears stale Premium provider hints when voices change", () => {
+  it("refreshes Premium provider hints when voices change", () => {
     assert.match(
       pageSource,
-      /elevenLabsVoiceIdOverride: value,[\s\S]*?elevenLabsNativeAccentHint: null/,
+      /const overrideAccentHint = value[\s\S]*?elevenLabsVoiceIdOverride: value,[\s\S]*?elevenLabsNativeAccentHint: value[\s\S]*?overrideAccentHint/,
     );
     assert.match(
       pageSource,
-      /const nextVoiceId = nextProfile\.elevenLabsVoiceId;[\s\S]*?elevenLabsNativeAccentHint: nextVoiceId/,
+      /elevenLabsVoiceId: value,[\s\S]*?elevenLabsVoiceIdOverride: null,[\s\S]*?elevenLabsNativeAccentHint: value[\s\S]*?identityCatalog\.elevenLabs\.options\.find/,
     );
   });
 });

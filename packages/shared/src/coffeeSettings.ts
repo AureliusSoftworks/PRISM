@@ -241,7 +241,6 @@ const TABLE_ENERGY_SET = new Set<CoffeeTableEnergy>([
 
 const CROSS_TALK_SET = new Set<CoffeeCrossTalkLevel>(["rare", "normal", "chatty", "pileup"]);
 
-export const COFFEE_AUTO_HARD_CAP_MS = 30 * 60 * 1000;
 export const COFFEE_BAR_ORDER_MAX_LENGTH = 240;
 
 function compactText(value: unknown, maxLength: number): string {

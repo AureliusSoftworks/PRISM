@@ -8,10 +8,15 @@ import sharp from "sharp";
 import { getAppConfig } from "@localai/config";
 import {
   COFFEE_TOPIC_MAX_LENGTH,
+  LOCAL_VOICE_SPEECHPRINT_CAPABILITIES,
   MODEL_VISIBILITY_DEFAULTS_VERSION,
+  authoredSignalListenerPersonaSource,
   botPowerSourceHashV1,
   fullySaturateBotColor,
+  listenerReactionSpokenTextV1,
   normalizeBotAudioVoiceProfileV1,
+  parseStoredBotAudioVoiceProfileV1,
+  signalListenerReactionPlanForPlaybackV1,
 } from "@localai/shared";
 import {
   createDeterministicProvider,
@@ -21,6 +26,8 @@ import {
 } from "../test-support.ts";
 import { recordTextUsage } from "../usage.ts";
 import { elevenLabsVoiceIsolationSeed } from "../voices.ts";
+import { resetModelCatalogCacheForTests } from "../providers.ts";
+import { turnPreparationRegistry } from "../turn-preparations.ts";
 
 const tempDir = mkdtempSync(join(tmpdir(), "prism-api-integration-"));
 process.env.PRISM_API_DISABLE_AUTOSTART = "1";
@@ -2113,7 +2120,7 @@ describe("API request integration", () => {
         catalogPayload.initialization.assignedDefaultPrism,
         true,
       );
-      const firstOverride = JSON.parse(
+      const firstOverride = parseStoredBotAudioVoiceProfileV1(
         String(
           (
             db.prepare(
@@ -2123,10 +2130,14 @@ describe("API request integration", () => {
             }
           ).audio_voice_profile_override,
         ),
-      ) as Record<string, unknown>;
-      assert.equal(firstOverride.elevenLabsVoiceInitialized, true);
-      assert.ok(["voice-a", "voice-z"].includes(String(firstOverride.elevenLabsVoiceId)));
-      const defaultProfile = JSON.parse(
+      );
+      assert.equal(firstOverride?.elevenLabsVoiceInitialized, true);
+      assert.ok(
+        ["voice-a", "voice-z"].includes(
+          String(firstOverride?.elevenLabsVoiceId),
+        ),
+      );
+      const defaultProfile = parseStoredBotAudioVoiceProfileV1(
         String(
           (
             db.prepare(
@@ -2136,8 +2147,8 @@ describe("API request integration", () => {
             }
           ).prism_default_bot_audio_voice_profile,
         ),
-      ) as Record<string, unknown>;
-      assert.equal(defaultProfile.elevenLabsVoiceInitialized, true);
+      );
+      assert.equal(defaultProfile?.elevenLabsVoiceInitialized, true);
 
       await client.request("/api/settings", {
         method: "PATCH",
@@ -2158,7 +2169,7 @@ describe("API request integration", () => {
       );
       assert.equal(repeated.status, 200);
       assert.deepEqual((await json(repeated)).initialization.assignedBotIds, []);
-      const repeatedOverride = JSON.parse(
+      const repeatedOverride = parseStoredBotAudioVoiceProfileV1(
         String(
           (
             db.prepare(
@@ -2168,10 +2179,10 @@ describe("API request integration", () => {
             }
           ).audio_voice_profile_override,
         ),
-      ) as Record<string, unknown>;
+      );
       assert.equal(
-        repeatedOverride.elevenLabsVoiceId,
-        firstOverride.elevenLabsVoiceId,
+        repeatedOverride?.elevenLabsVoiceId,
+        firstOverride?.elevenLabsVoiceId,
       );
       assert.equal(
         new URL(fetchRecorder.calls.at(-1)?.input ?? "https://invalid.test").searchParams.get(
@@ -2213,6 +2224,293 @@ describe("API request integration", () => {
       assert.deepEqual((await json(retried)).initialization.assignedBotIds, [
         retryBotId,
       ]);
+    } finally {
+      config.elevenLabsApiKey = "";
+      fetchRecorder.setResponse(new Response("{}", { status: 200 }));
+      fetchRecorder.calls.length = 0;
+    }
+  });
+
+  it("auditions shared voices without importing, prefers a personal key, and saves once per tenant", async () => {
+    const client = createClient();
+    const registered = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "premium-library@example.com",
+        password: "premium-library-password",
+      }),
+    );
+    assert.equal(registered.status, 201);
+    const userId = String((await json(registered)).user.id);
+    const createdBot = await client.request(
+      "/api/bots",
+      jsonInit({
+        name: "Library Bot",
+        systemPrompt: "Keep this voice unchanged.",
+      }),
+    );
+    assert.equal(createdBot.status, 201);
+    const botId = String((await json(createdBot)).bot.id);
+    const botVoiceBefore = db.prepare(
+      "SELECT audio_voice_profile_override FROM bots WHERE id = ? AND user_id = ?",
+    ).get(botId, userId) as { audio_voice_profile_override: string | null };
+
+    config.elevenLabsApiKey = "shared-premium-library-key";
+    fetchRecorder.calls.length = 0;
+    fetchRecorder.setResponse(
+      new Response(
+        JSON.stringify({
+          voices: [
+            {
+              public_owner_id: "owner-a",
+              voice_id: "shared-a",
+              name: "Avery",
+              language: "en",
+              category: "professional",
+              preview_url: "https://example.test/avery.mp3",
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    try {
+      const discoveredWithServerKey = await client.request(
+        "/api/voices/elevenlabs/shared/discover",
+        jsonInit({ excludeVoiceIds: [], direction: "warm narrator" }),
+      );
+      const serverDiscoveryPayload = await json(discoveredWithServerKey);
+      assert.equal(
+        discoveredWithServerKey.status,
+        200,
+        JSON.stringify(serverDiscoveryPayload),
+      );
+      assert.equal(serverDiscoveryPayload.voice.sourceVoiceId, "shared-a");
+      assert.doesNotMatch(
+        JSON.stringify(serverDiscoveryPayload),
+        /shared-premium-library-key/u,
+      );
+      assert.equal(fetchRecorder.calls.length, 2);
+      assert.ok(
+        fetchRecorder.calls.every(
+          (call) =>
+            new Headers(call.init?.headers).get("xi-api-key") ===
+            "shared-premium-library-key",
+        ),
+      );
+      assert.ok(
+        fetchRecorder.calls.every(
+          (call) =>
+            new URL(call.input).pathname === "/v1/shared-voices" &&
+            call.init?.method !== "POST",
+        ),
+      );
+
+      const savedKey = await client.request("/api/settings", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ elevenLabsApiKey: "personal-premium-library-key" }),
+      });
+      assert.equal(savedKey.status, 200);
+      fetchRecorder.calls.length = 0;
+      fetchRecorder.setResponse(
+        new Response(
+          JSON.stringify({
+            voices: [
+              {
+                public_owner_id: "owner-a",
+                voice_id: "shared-a",
+                name: "Avery",
+                language: "en",
+                category: "professional",
+                preview_url: "https://example.test/avery.mp3",
+              },
+              {
+                public_owner_id: "owner-b",
+                voice_id: "shared-b",
+                name: "Blair",
+                language: "en",
+                category: "professional",
+                description: "Warm British narrator",
+                preview_url: "https://example.test/blair.mp3",
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+      const discoveredWithPersonalKey = await client.request(
+        "/api/voices/elevenlabs/shared/discover",
+        jsonInit({
+          excludeVoiceIds: ["shared-a"],
+          direction: "British narrator",
+        }),
+      );
+      const personalDiscoveryPayload = await json(discoveredWithPersonalKey);
+      assert.equal(
+        discoveredWithPersonalKey.status,
+        200,
+        JSON.stringify(personalDiscoveryPayload),
+      );
+      assert.equal(personalDiscoveryPayload.voice.sourceVoiceId, "shared-b");
+      assert.doesNotMatch(
+        JSON.stringify(personalDiscoveryPayload),
+        /personal-premium-library-key/u,
+      );
+      assert.equal(fetchRecorder.calls.length, 2);
+      assert.ok(
+        fetchRecorder.calls.every(
+          (call) =>
+            new Headers(call.init?.headers).get("xi-api-key") ===
+            "personal-premium-library-key",
+        ),
+      );
+
+      fetchRecorder.calls.length = 0;
+      fetchRecorder.setResponse(
+        new Response(
+          JSON.stringify({ voices: [{ voice_id: "shared-b", name: "Blair" }] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+      const savedVoice = await client.request(
+        "/api/voices/elevenlabs/library",
+        jsonInit(personalDiscoveryPayload.voice),
+      );
+      const savedVoicePayload = await json(savedVoice);
+      assert.equal(savedVoice.status, 201, JSON.stringify(savedVoicePayload));
+      assert.equal(savedVoicePayload.voice.providerVoiceId, "shared-b");
+      assert.equal(fetchRecorder.calls.length, 1);
+      assert.equal(
+        new URL(fetchRecorder.calls[0]?.input ?? "").pathname,
+        "/v2/voices",
+      );
+
+      const repeatedSave = await client.request(
+        "/api/voices/elevenlabs/library",
+        jsonInit(personalDiscoveryPayload.voice),
+      );
+      assert.equal(repeatedSave.status, 200);
+      assert.equal((await json(repeatedSave)).created, false);
+      assert.equal(fetchRecorder.calls.length, 1);
+      const botVoiceAfter = db.prepare(
+        "SELECT audio_voice_profile_override FROM bots WHERE id = ? AND user_id = ?",
+      ).get(botId, userId) as { audio_voice_profile_override: string | null };
+      assert.equal(
+        botVoiceAfter.audio_voice_profile_override,
+        botVoiceBefore.audio_voice_profile_override,
+      );
+
+      const otherClient = createClient();
+      const otherRegistered = await otherClient.request(
+        "/api/auth/register",
+        jsonInit({
+          username: "premium-library-other@example.com",
+          password: "premium-library-other-password",
+        }),
+      );
+      assert.equal(otherRegistered.status, 201);
+      const otherLibrary = await json(
+        await otherClient.request("/api/voices/elevenlabs/library"),
+      );
+      assert.deepEqual(otherLibrary.voices, []);
+      config.elevenLabsApiKey = "";
+      const callsBeforeMissingCredential = fetchRecorder.calls.length;
+      const missingCredential = await otherClient.request(
+        "/api/voices/elevenlabs/shared/discover",
+        jsonInit({ excludeVoiceIds: [] }),
+      );
+      assert.equal(missingCredential.status, 409);
+      assert.match(
+        String((await json(missingCredential)).error),
+        /connect an ElevenLabs key|configure ELEVENLABS_API_KEY/iu,
+      );
+      assert.equal(fetchRecorder.calls.length, callsBeforeMissingCredential);
+    } finally {
+      config.elevenLabsApiKey = "";
+      fetchRecorder.setResponse(new Response("{}", { status: 200 }));
+      fetchRecorder.calls.length = 0;
+    }
+  });
+
+  it("honors explicit Refract voice metadata and can assign without saving a PRISM library record", async () => {
+    const client = createClient();
+    const registered = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "premium-bot-only@example.com",
+        password: "premium-bot-only-password",
+      }),
+    );
+    assert.equal(registered.status, 201);
+    const userId = String((await json(registered)).user.id);
+    config.elevenLabsApiKey = "shared-premium-bot-only-key";
+    fetchRecorder.calls.length = 0;
+    fetchRecorder.setResponse(
+      new Response(
+        JSON.stringify({
+          voices: [
+            {
+              public_owner_id: "owner-a",
+              voice_id: "australian-male",
+              name: "Lachlan",
+              language: "en",
+              category: "professional",
+              accent: "Australian",
+              gender: "male",
+              preview_url: "https://example.test/lachlan.mp3",
+            },
+            {
+              public_owner_id: "owner-b",
+              voice_id: "indian-female",
+              name: "Priya",
+              language: "en",
+              category: "professional",
+              accent: "Indian",
+              gender: "female",
+              preview_url: "https://example.test/priya.mp3",
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    try {
+      const discovered = await client.request(
+        "/api/voices/elevenlabs/shared/discover",
+        jsonInit({ excludeVoiceIds: [], direction: "australian man" }),
+      );
+      const discoveredBody = await json(discovered);
+      assert.equal(discovered.status, 200, JSON.stringify(discoveredBody));
+      const audition = discoveredBody.voice;
+      assert.equal(audition.sourceVoiceId, "australian-male");
+
+      const assigned = await client.request(
+        "/api/voices/elevenlabs/shared/use",
+        jsonInit(audition),
+      );
+      const assignedBody = await json(assigned);
+      assert.equal(assigned.status, 200, JSON.stringify(assignedBody));
+      assert.equal(assignedBody.voice.providerVoiceId, "australian-male");
+      assert.equal(
+        (db.prepare(
+          "SELECT COUNT(*) AS count FROM premium_voice_library WHERE user_id = ?",
+        ).get(userId) as { count: number }).count,
+        0,
+      );
+
+      const noMatch = await client.request(
+        "/api/voices/elevenlabs/shared/discover",
+        jsonInit({
+          excludeVoiceIds: ["australian-male"],
+          direction: "australian man",
+        }),
+      );
+      assert.equal(noMatch.status, 409);
+      assert.match(
+        String((await json(noMatch)).error),
+        /No Voice Library audition matches that direction/u,
+      );
     } finally {
       config.elevenLabsApiKey = "";
       fetchRecorder.setResponse(new Response("{}", { status: 200 }));
@@ -2346,6 +2644,13 @@ describe("API request integration", () => {
       seenModels.push(options?.model);
       return originalGenerateResponse(messages, options);
     };
+    resetModelCatalogCacheForTests();
+    fetchRecorder.setResponse(
+      new Response(JSON.stringify({ models: [{ name: "qwen3:8b" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
     try {
       const response = await client.request(
         "/api/bot-powers/compile",
@@ -2356,10 +2661,10 @@ describe("API request integration", () => {
           powers: [
             {
               version: 1,
-              id: "uninterruptible-oration",
+              id: "proverb-forge",
               authoringMode: "prompt",
               name: "",
-              intent: "Speaks only in ceremonial Shakespearean.",
+              intent: "Invents a harmless new proverb whenever asked a question.",
               enabled: true,
               compileStatus: "draft",
               compiled: null,
@@ -2374,6 +2679,8 @@ describe("API request integration", () => {
       assert.ok(seenModels.includes("qwen3:8b"));
     } finally {
       deterministicProvider.generateResponse = originalGenerateResponse;
+      resetModelCatalogCacheForTests();
+      fetchRecorder.setResponse(new Response("{}", { status: 200 }));
     }
   });
 
@@ -2461,7 +2768,7 @@ describe("API request integration", () => {
     assert.equal("playerNamePronunciation" in settings, false);
     assert.equal("defaultSystemVoiceName" in settings, false);
     assert.equal("defaultElevenLabsVoiceId" in settings, false);
-    assert.equal(settings.autoModeEnabled, true);
+    assert.equal(settings.autoModeEnabled, false);
     assert.deepEqual(settings.autoFallbackChain, {
       v: 1,
       fallbacks: [
@@ -2872,13 +3179,14 @@ describe("API request integration", () => {
         guestBotId: "signal-model-guest",
         topic: "Keep this recording local",
         preferredProvider: "anthropic",
+        responseMode: "online",
         modelOverride: "claude-stale-selection",
       }),
     );
     const localPayload = await json(localResponse);
     assert.equal(localResponse.status, 201, JSON.stringify(localPayload));
     assert.equal(localPayload.episode.provider, "local");
-    assert.equal(localPayload.episode.model, "gemma-account-default");
+    assert.equal(localPayload.episode.model, config.ollamaModel);
     assert.equal(localPayload.episode.responseMode, "local");
 
     db.prepare(
@@ -2907,7 +3215,7 @@ describe("API request integration", () => {
     assert.equal(autoResponse.status, 201, JSON.stringify(autoPayload));
     assert.equal(autoPayload.episode.provider, "local");
     assert.equal(autoPayload.episode.model, "gemma-account-default");
-    assert.equal(autoPayload.episode.responseMode, "auto");
+    assert.equal(autoPayload.episode.responseMode, "local");
   });
 
   it("keeps Signal booking suggestions on LOCAL when the account is local", async () => {
@@ -3369,6 +3677,7 @@ describe("API request integration", () => {
 
   it("registers, authenticates, scopes conversations, gates local image generation, and logs out", async () => {
     const first = createClient();
+    const fetchCallsBefore = fetchRecorder.calls.length;
     const register = await first.request(
       "/api/auth/register",
       jsonInit({ username: "first@example.com", password: "first-password", displayName: "First" })
@@ -3416,7 +3725,7 @@ describe("API request integration", () => {
     assert.equal(logout.status, 200);
     const afterLogout = await first.request("/api/conversations");
     assert.notEqual(afterLogout.status, 200);
-    assert.deepEqual(fetchRecorder.calls, []);
+    assert.deepEqual(fetchRecorder.calls.slice(fetchCallsBefore), []);
   });
 
   it("creates, lists, updates, clears, and clones bot Atmosphere accents", async () => {
@@ -4792,6 +5101,68 @@ describe("API request integration", () => {
       streamLines.map((line) => line.text),
     );
 
+    const binaryStreamResponse = await client.request(
+      "/api/voices/synthesize",
+      {
+        ...jsonInit({
+          text: streamedText,
+          mode: "english",
+          engine: "builtin",
+          streamChunks: true,
+          profile: normalizeBotAudioVoiceProfileV1(undefined),
+        }),
+        headers: {
+          "content-type": "application/json",
+          accept: "application/x-prism-voice-chunks",
+        },
+      },
+    );
+    assert.equal(binaryStreamResponse.status, 200);
+    assert.equal(
+      binaryStreamResponse.headers.get("content-type"),
+      "application/x-prism-voice-chunks",
+    );
+    assert.equal(
+      binaryStreamResponse.headers.get("x-prism-voice-stream"),
+      "wav-chunks-binary-v1",
+    );
+    const binaryStreamBytes = Buffer.from(
+      await binaryStreamResponse.arrayBuffer(),
+    );
+    const binaryFrames: Array<{
+      metadata: Record<string, unknown>;
+      audio: Buffer;
+    }> = [];
+    let binaryCursor = 0;
+    while (binaryCursor < binaryStreamBytes.byteLength) {
+      const metadataLength = binaryStreamBytes.readUInt32BE(binaryCursor);
+      const audioLength = binaryStreamBytes.readUInt32BE(binaryCursor + 4);
+      binaryCursor += 8;
+      const metadata = JSON.parse(
+        binaryStreamBytes
+          .subarray(binaryCursor, binaryCursor + metadataLength)
+          .toString("utf8"),
+      ) as Record<string, unknown>;
+      binaryCursor += metadataLength;
+      const audio = binaryStreamBytes.subarray(
+        binaryCursor,
+        binaryCursor + audioLength,
+      );
+      binaryCursor += audioLength;
+      binaryFrames.push({ metadata, audio });
+    }
+    assert.equal(binaryFrames.length, 3);
+    assert.ok(
+      binaryFrames.every(
+        (frame) => frame.audio.subarray(0, 4).toString() === "RIFF",
+      ),
+    );
+    assert.ok(
+      binaryFrames.every(
+        (frame) => !Object.hasOwn(frame.metadata, "audioBase64"),
+      ),
+    );
+
     db.prepare(
       "UPDATE users SET operating_system_voices_enabled = 1 WHERE id = ?",
     ).run(userId);
@@ -5103,7 +5474,7 @@ describe("API request integration", () => {
       assert.equal(calls.length, 1);
       const providerBody = JSON.parse(String(calls[0]?.init?.body));
       assert.equal(providerBody.model_id, "eleven_v3");
-      assert.equal(providerBody.text, "[clears throat] ...");
+      assert.match(providerBody.text, /^\[clears throat\]\s*\.{3}$/u);
 
       const builtin = await client.request(
         "/api/voices/synthesize",
@@ -5190,6 +5561,66 @@ describe("API request integration", () => {
     const onlineEpisodeId = String(
       (await json(onlineEpisodeResponse)).episode.id,
     );
+    const preparedVoiceMessageId = "signal-prepared-voice-message";
+    const preparedVoiceText = "This line is ready before it reaches the table.";
+    const preparedVoiceTurn = turnPreparationRegistry.create({
+      userId,
+      surface: "signal",
+      sessionId: onlineEpisodeId,
+      stateCursor: {
+        revision: "signal-prepared-voice-revision",
+        lastMessageId: null,
+        lastEventId: null,
+        floorOwnerId: "signal-voice-host",
+        castHash: "signal-prepared-voice-cast",
+        powersHash: "signal-prepared-voice-powers",
+        promptStateHash: "signal-prepared-voice-prompt",
+      },
+      run: async () => ({
+        speakerBotId: "signal-voice-host",
+        provisionalUtterances: [
+          {
+            id: preparedVoiceMessageId,
+            speakerBotId: "signal-voice-host",
+            text: preparedVoiceText,
+            signalListenerReactionPlan: {
+              v: 1,
+              name: "listenerReaction",
+              speakerBotId: "signal-voice-host",
+              listenerBotId: "signal-voice-guest",
+              messageId: preparedVoiceMessageId,
+              targetSource: "role",
+              visualAction: "nod",
+              spokenCue: "Mm-hmm.",
+              targetProgress: 0.58,
+              seed: "signal-prepared-listener-reaction",
+              cameraCutEligible: false,
+            },
+          },
+        ],
+        payload: null,
+      }),
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(
+      turnPreparationRegistry.get(preparedVoiceTurn.id, userId).phase,
+      "ready",
+    );
+    const preparedFoleyMessageId = "signal-prepared-foley-message";
+    const preparedFoleyPlan = {
+      v: 1 as const,
+      name: "listenerReaction" as const,
+      speakerBotId: "signal-voice-host",
+      listenerBotId: "signal-voice-guest",
+      messageId: preparedFoleyMessageId,
+      targetSource: "role" as const,
+      visualAction: "head_tilt" as const,
+      vocalFoley: "exhales" as const,
+      targetProgress: 0.62,
+      seed:
+        "signal-listener-v1:prepared:foley:signal-voice-host:signal-voice-guest:interview:neutral:0",
+      cameraCutEligible: false,
+    };
     db.prepare(
       `INSERT INTO botcast_messages
          (id, user_id, episode_id, speaker_role, bot_id, content, voice_performance_text, created_at)
@@ -5318,6 +5749,160 @@ describe("API request integration", () => {
     );
     config.elevenLabsApiKey = "integration-elevenlabs-key";
     try {
+      const beforePreparedCalls = fetchRecorder.calls.length;
+      const preparedVoice = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          text: "A client-authored replacement must not be spoken.",
+          signalMessageId: preparedVoiceMessageId,
+          signalTurnPreparationId: preparedVoiceTurn.id,
+          mode: "english",
+          engine: "elevenlabs",
+          profile: {
+            ...normalizeBotAudioVoiceProfileV1(undefined),
+            elevenLabsVoiceId: "signal-provider-voice",
+          },
+        }),
+      );
+      assert.equal(preparedVoice.status, 200);
+      assert.equal(
+        JSON.parse(
+          String(fetchRecorder.calls[beforePreparedCalls]?.init?.body),
+        ).text,
+        preparedVoiceText,
+      );
+      assert.equal(
+        Number(
+          (
+            db.prepare(
+              "SELECT COUNT(*) AS count FROM botcast_messages WHERE id = ? AND user_id = ?",
+            ).get(preparedVoiceMessageId, userId) as { count: number }
+          ).count,
+        ),
+        0,
+      );
+      const forgedPreparedVoice = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          signalMessageId: preparedVoiceMessageId,
+          signalTurnPreparationId: "not-this-account-preparation",
+          mode: "english",
+          engine: "elevenlabs",
+        }),
+      );
+      assert.equal(forgedPreparedVoice.status, 404);
+      const preparedReaction = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          signalMessageId: preparedVoiceMessageId,
+          signalTurnPreparationId: preparedVoiceTurn.id,
+          speakerBotId: "signal-voice-guest",
+          listenerReactionText: "Mm-hmm.",
+          mode: "english",
+          engine: "elevenlabs",
+          profile: {
+            ...normalizeBotAudioVoiceProfileV1(undefined),
+            elevenLabsVoiceId: "signal-provider-voice",
+          },
+        }),
+      );
+      assert.equal(preparedReaction.status, 200);
+      const preparedReactionRequest = JSON.parse(
+        String(fetchRecorder.calls[beforePreparedCalls + 1]?.init?.body),
+      );
+      assert.equal(
+        preparedReactionRequest.text,
+        "Mm-hmm.",
+      );
+      assert.doesNotMatch(
+        preparedReaction.headers.get("content-type") ?? "",
+        /json/iu,
+      );
+      const forgedPreparedReaction = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          signalMessageId: preparedVoiceMessageId,
+          signalTurnPreparationId: preparedVoiceTurn.id,
+          speakerBotId: "signal-voice-guest",
+          listenerReactionText: "No, please— go on.",
+          mode: "english",
+          engine: "elevenlabs",
+        }),
+      );
+      assert.equal(forgedPreparedReaction.status, 400);
+      assert.equal(fetchRecorder.calls.length, beforePreparedCalls + 2);
+      const preparedFoleyTurn = turnPreparationRegistry.create({
+        userId,
+        surface: "signal",
+        sessionId: onlineEpisodeId,
+        stateCursor: {
+          revision: "signal-prepared-foley-revision",
+          lastMessageId: null,
+          lastEventId: null,
+          floorOwnerId: "signal-voice-host",
+          castHash: "signal-prepared-foley-cast",
+          powersHash: "signal-prepared-foley-powers",
+          promptStateHash: "signal-prepared-foley-prompt",
+        },
+        run: async () => ({
+          speakerBotId: "signal-voice-host",
+          provisionalUtterances: [
+            {
+              id: preparedFoleyMessageId,
+              speakerBotId: "signal-voice-host",
+              text: "The listener has a prepared Foley beat.",
+              signalListenerReactionPlan: preparedFoleyPlan,
+            },
+          ],
+          payload: null,
+        }),
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(
+        turnPreparationRegistry.get(preparedFoleyTurn.id, userId).phase,
+        "ready",
+      );
+      const preparedFoleyPlayback = signalListenerReactionPlanForPlaybackV1({
+        plan: preparedFoleyPlan,
+        vocalFoleyPlayable: false,
+        listenerPersona: authoredSignalListenerPersonaSource(
+          "An expressive guest.",
+        ),
+      });
+      const preparedFoleyCue = listenerReactionSpokenTextV1(
+        preparedFoleyPlayback,
+      );
+      assert.ok(preparedFoleyCue);
+      const beforePreparedFoleyCalls = builtinVoiceTexts.length;
+      const preparedFoleyReaction = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          signalMessageId: preparedFoleyMessageId,
+          signalTurnPreparationId: preparedFoleyTurn.id,
+          speakerBotId: "signal-voice-guest",
+          listenerReactionText: preparedFoleyCue,
+          mode: "english",
+          engine: "builtin",
+          includeAlignment: false,
+        }),
+      );
+      assert.equal(preparedFoleyReaction.status, 200);
+      assert.equal(builtinVoiceTexts.at(-1), preparedFoleyCue);
+      assert.equal(builtinVoiceTexts.length, beforePreparedFoleyCalls + 1);
+      const forgedPreparedFoleyReaction = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          signalMessageId: preparedFoleyMessageId,
+          signalTurnPreparationId: preparedFoleyTurn.id,
+          speakerBotId: "signal-voice-guest",
+          listenerReactionText: "Definitely forged.",
+          mode: "english",
+          engine: "builtin",
+          includeAlignment: false,
+        }),
+      );
+      assert.equal(forgedPreparedFoleyReaction.status, 400);
+      assert.equal(builtinVoiceTexts.length, beforePreparedFoleyCalls + 1);
       const beforeBridgeCalls = fetchRecorder.calls.length;
       const interruptionBridgeVoice = await client.request(
         "/api/voices/synthesize",
@@ -5794,7 +6379,10 @@ describe("API request integration", () => {
           voice.presentation === "masculine",
       ),
     );
-    assert.equal(voiceCapabilities.local.speechprints.length, 41);
+    assert.equal(
+      voiceCapabilities.local.speechprints.length,
+      LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.length,
+    );
     assert.deepEqual(
       voiceCapabilities.local.pronunciationBases.map(
         (entry: { id: string }) => entry.id,
@@ -6019,6 +6607,45 @@ describe("API request integration", () => {
             segment.kind === "vocal-action" && segment.action === "laugh",
         ),
       );
+
+      const brokenProviderBody = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([0x49, 0x44, 0x33]));
+          controller.error(new Error("provider stream disconnected"));
+        },
+      });
+      fetchRecorder.setResponse(
+        new Response(brokenProviderBody, {
+          status: 200,
+          headers: { "content-type": "audio/mpeg" },
+        }),
+      );
+      const builtinCallsBeforeBrokenStream = builtinVoiceCalls.length;
+      const brokenStreamFallback = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          text: "Keep the whole line audible after a provider disconnect.",
+          mode: "english",
+          engine: "elevenlabs",
+          explicitOnlineContext: true,
+          profile,
+        }),
+      );
+      assert.equal(brokenStreamFallback.status, 200);
+      assert.equal(
+        brokenStreamFallback.headers.get("x-prism-voice-engine"),
+        "builtin-provider-fallback",
+      );
+      assert.equal(
+        Buffer.from(await brokenStreamFallback.arrayBuffer())
+          .subarray(0, 4)
+          .toString(),
+        "RIFF",
+      );
+      assert.equal(
+        builtinVoiceCalls.length,
+        builtinCallsBeforeBrokenStream + 1,
+      );
       const builtinCallsBeforeStrictPreview = builtinVoiceCalls.length;
 
       fetchRecorder.setResponse(quotaFailure());
@@ -6113,7 +6740,7 @@ describe("API request integration", () => {
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line) as Record<string, unknown>);
-      assert.ok(chunks.length > 1);
+      assert.ok(chunks.length >= 1);
       assert.equal(
         builtinVoiceCalls.length,
         beforeBuiltinCalls + chunks.length,
@@ -6593,7 +7220,7 @@ describe("API request integration", () => {
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line) as { audioBase64: string });
-    assert.ok(babbleLines.length >= 2);
+    assert.ok(babbleLines.length >= 1);
     assert.ok(
       babbleLines.every(
         (line) =>

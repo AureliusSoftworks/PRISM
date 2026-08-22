@@ -28,12 +28,20 @@ describe("conversational presence surfaces", () => {
     );
     assert.match(page, /prepareCoffeeLookaheadRef\.current\(args\.conversation, pendingMessage\)/u);
     assert.match(page, /discardCoffeePreparedTurn\("The player changed the Coffee table state\."\)/u);
+    assert.match(
+      page,
+      /discardCoffeePreparedTurn\("A newer Coffee handoff superseded this one\."\);[\s\S]{0,320}if \(coffeeSessionProvider === "local"\) \{\s*return;/u,
+    );
   });
 
   it("prepares Signal handoffs only after playback begins and invalidates on direction", () => {
     assert.match(
       signal,
-      /notifyPlaybackStart[\s\S]{0,180}prepareNextTurn\(\)/u,
+      /void Promise\.resolve\(onPlaybackStart\?\.\(\)\)\.then\(\s*prepareNextTurn,\s*prepareNextTurn,\s*\)/u,
+    );
+    assert.match(
+      signal,
+      /discardPreparedAdvance\("A newer Signal preparation superseded this one\."\);[\s\S]{0,800}currentEpisode\.provider === "local"/u,
     );
     assert.match(
       signal,
@@ -61,7 +69,7 @@ describe("conversational presence surfaces", () => {
     );
     assert.match(
       debate,
-      /setTranscriptVisibleThroughSequence\([\s\S]{0,180}previous\?\.events\.at\(-1\)\?\.sequence/u,
+      /setTranscriptVisibleThroughSequence\([\s\S]{0,180}debateAdoptProceedingsCursor\(previous, next\)/u,
     );
   });
 
@@ -75,13 +83,13 @@ describe("conversational presence surfaces", () => {
     assert.match(page, /responseCueBot &&\s*view !== "chat"/u);
     assert.match(
       page,
-      /const showThinkingIndicator =\s*!activeCoffeeResponseCue/u,
+      /coffeeLiveSeatThinkingBotId\(\{[\s\S]{0,240}responseCuePlaying:\s*activeCoffeeResponseCue !== null/u,
     );
     assert.doesNotMatch(page, /Response cue ·/u);
     assert.doesNotMatch(signal, /Response cue ·|data-response-cue/u);
     assert.match(signal, /<strong>\{presenceBeat\.speaker\.name\}<\/strong>/u);
     assert.doesNotMatch(debate, /Response cue ·|data-response-cue/u);
-    assert.match(debate, /<strong>\{beat\.speaker\.name\}<\/strong>/u);
+    assert.match(debate, /<strong>\{props\.beat\.speaker\.name\}<\/strong>/u);
     assert.match(debate, /heardBotPresenceBeatTextV1\(beat\)/u);
     assert.match(
       tutorials,

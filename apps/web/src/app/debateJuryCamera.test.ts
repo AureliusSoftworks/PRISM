@@ -68,7 +68,7 @@ describe("Debate Jury camera handoff", () => {
           stepKey: "jury_aftermath_for",
         }),
       ),
-      true,
+      false,
     );
     assert.equal(
       debateEventUsesJuryCamera(
@@ -79,7 +79,7 @@ describe("Debate Jury camera handoff", () => {
           stepKey: "jury_moderator_ballot",
         }),
       ),
-      true,
+      false,
     );
   });
 
@@ -244,7 +244,7 @@ describe("Debate Jury camera handoff", () => {
     assert.equal(debateJuryChamberStepActive(session("jury_final_1")), true);
     assert.equal(
       debateJuryChamberStepActive(session("jury_moderator_ballot")),
-      true,
+      false,
     );
     assert.equal(
       debateJuryChamberStepActive(session("jury_aftermath_for")),
@@ -312,7 +312,7 @@ describe("Debate Jury camera handoff", () => {
     );
   });
 
-  it("keeps the Moderator's last ballot inside the Jury chamber", () => {
+  it("returns the Moderator's deciding ballot to the Forum", () => {
     const moderatorBallot = event({
       kind: "ballot",
       speakerKind: "moderator",
@@ -325,7 +325,7 @@ describe("Debate Jury camera handoff", () => {
         event: moderatorBallot,
         preparingSpeakerBotId: null,
       }),
-      false,
+      true,
     );
     assert.equal(
       debateJuryPresentationUsesChamber(session("jury_moderator_ballot"), {
@@ -333,7 +333,7 @@ describe("Debate Jury camera handoff", () => {
         event: moderatorBallot,
         preparingSpeakerBotId: null,
       }),
-      true,
+      false,
     );
   });
 

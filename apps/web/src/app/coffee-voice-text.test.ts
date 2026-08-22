@@ -45,7 +45,7 @@ describe("Coffee voice text", () => {
 
   it("keeps the canonical mute ellipsis visible without giving it a voice", () => {
     assert.deepEqual(normalizeCoffeeMessageDelivery(" … "), {
-      displayText: "",
+      displayText: "…",
       spokenText: "",
       hasDialogue: false,
     });
@@ -126,7 +126,7 @@ describe("Coffee voice text", () => {
     );
     assert.match(
       pageSource,
-      /const clip = await readEnglishVoiceSynthesisClip\(response\); if \(cancelStaleRevealVoice\(\)\) return;[\s\S]*?void enqueueEnglishVoice/u,
+      /if \(cancelStaleRevealVoice\(\)\) return; if \(clip\.kind === "stream"\) \{[\s\S]*?void enqueueChunkedEnglishVoice[\s\S]*?const resolvedClip = clip\.clip;[\s\S]*?void enqueueEnglishVoice/u,
     );
     assert.doesNotMatch(liveVoice, /\}, 1800\);/u);
     assert.match(
@@ -165,7 +165,12 @@ describe("Coffee voice text", () => {
     );
     assert.match(
       pageSource,
-      /const seatMouthActive =\s*isTableTypingThisSeat \|\| seatAmbientVocalizationActive[\s\S]*?isTalking=\{seatMouthActive\}[\s\S]{0,620}seatSipMouthTreatmentActive/u,
+      /const seatMouthActive = bakedReplayMouthShape !== null \? bakedReplayMouthShape !== "closed" : \(liveSeatSpeech[\s\S]{0,280}: isTableTypingThisSeat\) \|\| seatAmbientVocalizationActive \|\| seatListenerReactionSpeaking \|\| seatFoleyOhMouth/u,
+    );
+    assert.match(pageSource, /isTalking: seatMouthActive/u);
+    assert.match(
+      pageSource,
+      /const seatSipMouthTreatmentActive = coffeeSeatSipMouthTreatmentActive/u,
     );
     assert.match(
       pageSource,

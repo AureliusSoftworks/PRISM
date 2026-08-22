@@ -22,11 +22,11 @@ describe("default Prism Zen facing", () => {
       pageSource,
       /defaultPrismPresence\s*\?\s*zenLiveBotCanvasSideWithHysteresis\(/,
     );
-    assert.match(pageSource, /nextPosition\.x \+ bodySize \/ 2/);
+    assert.match(pageSource, /presented\.x \+ bodySize \/ 2/);
     assert.match(pageSource, /clamped\.x \+ rootWidth \/ 2/);
     assert.match(
       pageSource,
-      /const avatarFacing = zenLiveBotFacingForCanvasSide\(avatarCanvasSide\)/,
+      /const \[avatarFacing, setAvatarFacing\] = useState<ZenLiveAvatarFacing>\(\s*zenLiveBotFacingForCanvasSide\(avatarCanvasSide\),\s*\)/,
     );
   });
 });

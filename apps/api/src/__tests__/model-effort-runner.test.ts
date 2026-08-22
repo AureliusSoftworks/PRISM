@@ -12,6 +12,15 @@ import type {
   ProviderMessage,
 } from "../providers.ts";
 
+/**
+ * Private guidance is inserted before the final user turn (appending a system
+ * turn after it returns an empty completion on llama3.2), so tests locate it
+ * by role rather than by position.
+ */
+const guidanceOf = (messages: readonly ProviderMessage[]): string =>
+  [...messages].reverse().find((message) => message.role === "system")
+    ?.content ?? "";
+
 describe("simulated model effort runner", () => {
   it("uses one abort signal for a complete direct reasoning attempt", async () => {
     const controller = new AbortController();
@@ -145,7 +154,7 @@ describe("simulated model effort runner", () => {
     });
     assert.equal(calls.length, 1);
     assert.equal(calls[0]?.options?.maxTokens, 96);
-    assert.match(calls[0]?.messages.at(-1)?.content ?? "", /under ~60 words/u);
+    assert.match(guidanceOf(calls[0]?.messages ?? []), /under ~60 words/u);
 
     calls.length = 0;
     const preparedHigh = await prepareMessagesWithSimulatedEffort({
@@ -157,7 +166,7 @@ describe("simulated model effort runner", () => {
     });
     assert.equal(calls.length, 3);
     assert.ok(calls.every((call) => call.options?.maxTokens === 220));
-    const note = preparedHigh.at(-1)?.content ?? "";
+    const note = guidanceOf(preparedHigh);
     assert.ok(note.length <= 1_400 + 160);
 
     calls.length = 0;
@@ -199,7 +208,9 @@ describe("simulated model effort runner", () => {
     assert.equal(calls.length, 4);
     assert.deepEqual(canonical, [{ role: "user", content: "Argue it." }]);
     assert.equal(prepared.length, 2);
-    assert.match(prepared[1]?.content ?? "", /private note 4/u);
+    assert.match(guidanceOf(prepared), /private note 4/u);
+    // Guidance sits before the final user turn, never after it.
+    assert.deepEqual(prepared.map((message) => message.role), ["system", "user"]);
     assert.ok(calls.every((call) => call.options?.usagePurpose === "psychic_planning"));
   });
 
@@ -239,6 +250,88 @@ describe("simulated model effort runner", () => {
     assert.equal(calls, 0);
   });
 
+  it("carries every completed pass into the visible turn", async () => {
+    // The chain used to overwrite: each pass saw only the one before it and the
+    // visible turn saw only the last, so High effort shipped a bare correction
+    // list with the plan and draft it referenced already thrown away.
+    const seen: string[] = [];
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse(messages) {
+        seen.push(guidanceOf(messages));
+        if (seen.length === 1) return "- intent: settle the bet";
+        if (seen.length === 2) return "- draft: name the wager, then the odds";
+        return "- fix: drop the second hedge";
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    const prepared = await prepareMessagesWithSimulatedEffort({
+      provider,
+      messages: [{ role: "user", content: "Settle it." }],
+      options: { model: "qwen3:9b" },
+      effort: "high",
+      surface: "coffee",
+    });
+    const brief = guidanceOf(prepared);
+    assert.match(brief, /Plan: - intent: settle the bet/u);
+    assert.match(brief, /Draft: - draft: name the wager/u);
+    assert.match(brief, /Corrections: - fix: drop the second hedge/u);
+    // Later passes see the whole record, not just their predecessor.
+    assert.match(seen[2] ?? "", /Plan: - intent: settle the bet/u);
+    assert.match(seen[2] ?? "", /Draft: - draft: name the wager/u);
+    // The brief stays inside the effort's note budget.
+    assert.ok(brief.length <= 1_400 + 400, `brief was ${brief.length}`);
+  });
+
+  it("keeps authored bullet structure instead of flattening it", async () => {
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse() {
+        return "- Must: keep the label\n- Must: stay under 40 words";
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    const prepared = await prepareMessagesWithSimulatedEffort({
+      provider,
+      messages: [{ role: "user", content: "Go." }],
+      options: { model: "qwen3:9b" },
+      effort: "low",
+      surface: "signal",
+    });
+    const brief = guidanceOf(prepared);
+    // Every pass prompt asks for bullets; collapsing them to one line threw
+    // away the structure the pass was told to produce.
+    assert.match(brief, /- Must: keep the label\n- Must: stay under 40 words/u);
+  });
+
+  it("samples the alternatives pass with real diversity", async () => {
+    const temperatures: Array<number | undefined> = [];
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse(_messages, options) {
+        temperatures.push(options?.temperature);
+        return "note";
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    await prepareMessagesWithSimulatedEffort({
+      provider,
+      messages: [{ role: "user", content: "Go." }],
+      options: { model: "qwen3:9b" },
+      effort: "minimal",
+      surface: "coffee",
+      ladderProfile: "deep",
+    });
+    // deep/minimal is plan -> alternatives -> draft.
+    assert.deepEqual(temperatures, [0, 0.6, 0.35]);
+  });
+
   it("falls back to the latest safe notes when a later private pass fails", async () => {
     let calls = 0;
     const provider: LlmProvider = {
@@ -260,6 +353,8 @@ describe("simulated model effort runner", () => {
       surface: "story",
     });
     assert.equal(calls, 3);
-    assert.match(prepared.at(-1)?.content ?? "", /safe note 2/u);
+    assert.match(guidanceOf(prepared), /safe note 2/u);
+    // llama3.2 returns an empty completion when a system turn is last.
+    assert.equal(prepared.at(-1)?.role, "user");
   });
 });

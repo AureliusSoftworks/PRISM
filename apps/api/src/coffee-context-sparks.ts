@@ -634,6 +634,8 @@ export async function ensureCoffeeContextSparks(args: {
   db: DatabaseSync;
   userId: string;
   conversationId: string;
+  /** Live tables use grounded deterministic copy to avoid loading a second LLM. */
+  generatePrompts?: boolean;
   prismDefaultLlmModel?: string | null;
   secondaryOllamaHost?: string | null;
   experimentalDualOllamaEnabled?: boolean;
@@ -657,18 +659,26 @@ export async function ensureCoffeeContextSparks(args: {
             | { name: string; ethos: string }
             | undefined)
         : undefined;
-      const provider =
-        args.provider ??
-        getAuxiliaryProvider(args.prismDefaultLlmModel, {
-          secondaryOllamaHost: args.secondaryOllamaHost,
-          experimentalDualOllama: args.experimentalDualOllamaEnabled === true,
-        });
-      const prompts = await synthesizeCoffeeContextSparkPrompts({
-        candidates: selected,
-        provider,
-        groupName: group?.name,
-        groupEthos: group?.ethos,
-      });
+      const prompts =
+        args.generatePrompts === false
+          ? new Map(
+              selected.map((candidate) => [
+                candidate.id,
+                fallbackCoffeeContextSparkPrompt(candidate),
+              ]),
+            )
+          : await synthesizeCoffeeContextSparkPrompts({
+              candidates: selected,
+              provider:
+                args.provider ??
+                getAuxiliaryProvider(args.prismDefaultLlmModel, {
+                  secondaryOllamaHost: args.secondaryOllamaHost,
+                  experimentalDualOllama:
+                    args.experimentalDualOllamaEnabled === true,
+                }),
+              groupName: group?.name,
+              groupEthos: group?.ethos,
+            });
       const now = new Date().toISOString();
       const insert = args.db.prepare(
         `INSERT OR IGNORE INTO coffee_context_sparks

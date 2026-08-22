@@ -7,6 +7,7 @@ import { randomBytes } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
   createEmptyLiveBakeArtifact,
+  createLiveBakePlannedSynthesisTiming,
   estimateSpokenDurationMs,
   humanizeLiveBakePhaseLabel,
   LIVE_BAKE_MAX_STEPS_DEBATE,
@@ -16,6 +17,7 @@ import {
   type LiveBakeArtifactV1,
   type LiveBakeStatusV1,
   type LiveBakeUtteranceV1,
+  type LiveBakeVoiceEngineV1,
 } from "@localai/shared";
 import {
   advanceDebateSession,
@@ -38,6 +40,7 @@ function bakeIdempotencyKey(prefix: string, step: number): string {
 function debateEventToUtterance(
   event: DebateSessionV1["events"][number],
   index: number,
+  unsynthesizedVoiceEngine: "local" | "unknown",
 ): LiveBakeUtteranceV1 | null {
   const text = typeof event.content === "string" ? event.content.trim() : "";
   if (!text) return null;
@@ -55,16 +58,22 @@ function debateEventToUtterance(
     speakerRole: event.speakerKind ?? "speaker",
     text,
     spokenText: text,
-    voiceEngine: "unknown",
+    voiceEngine: unsynthesizedVoiceEngine,
     isPremium: false,
     audioUrl: null,
     durationMs: estimateSpokenDurationMs(text),
   };
 }
 
-function utterancesFromDebateSession(session: DebateSessionV1): LiveBakeUtteranceV1[] {
+function utterancesFromDebateSession(
+  session: DebateSessionV1,
+): LiveBakeUtteranceV1[] {
+  const unsynthesizedVoiceEngine =
+    session.responseMode === "local" ? "local" : "unknown";
   return session.events
-    .map((event, index) => debateEventToUtterance(event, index))
+    .map((event, index) =>
+      debateEventToUtterance(event, index, unsynthesizedVoiceEngine),
+    )
     .filter((row): row is LiveBakeUtteranceV1 => row !== null);
 }
 
@@ -83,6 +92,7 @@ function mergeDebateArtifact(
   session: DebateSessionV1,
   status: LiveBakeStatusV1,
   phaseLabel: string,
+  plannedSynthesisEngine: LiveBakeVoiceEngineV1,
   error: string | null = null,
 ): LiveBakeArtifactV1 {
   const base =
@@ -95,6 +105,8 @@ function mergeDebateArtifact(
           privacyMode: session.responseMode === "local" ? "local" : "online",
           createdAt: previous?.createdAt,
         });
+  const effectivePlannedSynthesisEngine =
+    session.responseMode === "local" ? "local" : plannedSynthesisEngine;
   const utterances = utterancesFromDebateSession(session);
   const ready = status === "ready";
   return {
@@ -111,6 +123,9 @@ function mergeDebateArtifact(
       ? new Date().toISOString()
       : null,
     error,
+    plannedSynthesisTiming: createLiveBakePlannedSynthesisTiming(
+      effectivePlannedSynthesisEngine,
+    ),
     utterances,
     events: eventsFromDebateSession(session),
     sessionSnapshot: ready
@@ -143,6 +158,7 @@ export function syncDebateLiveBakeFromSession(
   sessionId: string,
   status: LiveBakeStatusV1 = "baking",
   phaseLabel = "Preparing the gallery",
+  plannedSynthesisEngine: LiveBakeVoiceEngineV1 = "unknown",
 ): LiveBakeArtifactV1 {
   const session = getDebateSession(db, userId, sessionId);
   const artifact = mergeDebateArtifact(
@@ -150,6 +166,7 @@ export function syncDebateLiveBakeFromSession(
     session,
     status,
     phaseLabel,
+    plannedSynthesisEngine,
     status === "failed" ? session.liveBake?.error ?? null : null,
   );
   persistDebateLiveBake(db, userId, {
@@ -172,18 +189,36 @@ export async function bakeDebateSpectatorSession(args: {
    * the latest transcript context. Fixed picks stay pinned via the same helper.
    */
   resolveRuntime: () => Promise<DebateAiRuntime>;
+  /** Planned JIT synthesis path; LOCAL sessions override this to local. */
+  plannedSynthesisEngine?: LiveBakeVoiceEngineV1;
   signal?: AbortSignal;
   maxSteps?: number;
   onProgress?: (artifact: LiveBakeArtifactV1) => void;
 }): Promise<{ session: DebateSessionV1; artifact: LiveBakeArtifactV1 }> {
   const { db, userId, sessionId } = args;
+  const plannedSynthesisEngine = args.plannedSynthesisEngine ?? "unknown";
   const maxSteps = args.maxSteps ?? LIVE_BAKE_MAX_STEPS_DEBATE;
   let session = getDebateSession(db, userId, sessionId);
   if (session.playerRole !== "spectator") {
     throw new HttpError(409, "Full bake is only available for Spectator Debates.");
   }
   if (session.liveBake?.status === "ready" && debateSessionFloorIsSettled(session)) {
-    return { session, artifact: session.liveBake };
+    const artifact = mergeDebateArtifact(
+      session.liveBake,
+      session,
+      "ready",
+      "Ready",
+      plannedSynthesisEngine,
+    );
+    persistDebateLiveBake(db, userId, {
+      ...session,
+      liveBake: artifact,
+      updatedAt: new Date().toISOString(),
+    });
+    return {
+      session: getDebateSession(db, userId, sessionId),
+      artifact,
+    };
   }
 
   let artifact = mergeDebateArtifact(
@@ -194,6 +229,7 @@ export async function bakeDebateSpectatorSession(args: {
       session.stepKey,
       "Preparing the gallery",
     ),
+    plannedSynthesisEngine,
   );
   persistDebateLiveBake(db, userId, {
     ...session,
@@ -211,6 +247,7 @@ export async function bakeDebateSpectatorSession(args: {
           session,
           "cancelled",
           "Bake cancelled",
+          plannedSynthesisEngine,
           "Bake cancelled.",
         );
         persistDebateLiveBake(db, userId, {
@@ -233,6 +270,7 @@ export async function bakeDebateSpectatorSession(args: {
           session,
           "baking",
           humanizeLiveBakePhaseLabel(session.stepKey, "Gallery holding"),
+          plannedSynthesisEngine,
         );
         persistDebateLiveBake(db, userId, {
           ...session,
@@ -272,6 +310,7 @@ export async function bakeDebateSpectatorSession(args: {
             latest,
             "baking",
             humanizeLiveBakePhaseLabel(latest.stepKey, "Gallery holding"),
+            plannedSynthesisEngine,
           );
           persistDebateLiveBake(db, userId, {
             ...latest,
@@ -293,6 +332,7 @@ export async function bakeDebateSpectatorSession(args: {
         session,
         "baking",
         humanizeLiveBakePhaseLabel(session.stepKey, "Preparing the gallery"),
+        plannedSynthesisEngine,
       );
       persistDebateLiveBake(db, userId, {
         ...session,
@@ -310,7 +350,13 @@ export async function bakeDebateSpectatorSession(args: {
       );
     }
 
-    artifact = mergeDebateArtifact(session.liveBake, session, "ready", "Ready");
+    artifact = mergeDebateArtifact(
+      session.liveBake,
+      session,
+      "ready",
+      "Ready",
+      plannedSynthesisEngine,
+    );
     persistDebateLiveBake(db, userId, {
       ...session,
       liveBake: artifact,
@@ -325,6 +371,7 @@ export async function bakeDebateSpectatorSession(args: {
         session,
         "cancelled",
         "Bake cancelled",
+        plannedSynthesisEngine,
         "Bake cancelled.",
       );
       persistDebateLiveBake(db, userId, {
@@ -347,6 +394,7 @@ export async function bakeDebateSpectatorSession(args: {
         current,
         "baking",
         humanizeLiveBakePhaseLabel(current.stepKey, "Gallery holding"),
+        plannedSynthesisEngine,
       );
       persistDebateLiveBake(db, userId, {
         ...current,
@@ -364,6 +412,7 @@ export async function bakeDebateSpectatorSession(args: {
         failed,
         "failed",
         "Bake failed",
+        plannedSynthesisEngine,
         message,
       );
       persistDebateLiveBake(db, userId, {
@@ -381,11 +430,19 @@ export async function bakeDebateSpectatorSession(args: {
 export function buildSignalLiveBakeArtifactFromEpisode(
   episode: ReturnType<typeof getBotcastEpisode>,
   options: {
+    /** Planned JIT synthesis path; LOCAL episodes override this to local. */
+    plannedSynthesisEngine: LiveBakeVoiceEngineV1;
     status?: LiveBakeStatusV1;
     baking?: boolean;
     error?: string | null;
-  } = {},
+  },
 ): LiveBakeArtifactV1 {
+  const plannedSynthesisEngine =
+    episode.responseMode === "local"
+      ? "local"
+      : options.plannedSynthesisEngine;
+  const unsynthesizedVoiceEngine =
+    episode.responseMode === "local" ? "local" : "unknown";
   const utterances: LiveBakeUtteranceV1[] = episode.messages
     .filter(
       (message) =>
@@ -400,7 +457,7 @@ export function buildSignalLiveBakeArtifactFromEpisode(
         speakerRole: message.speakerRole ?? "speaker",
         text,
         spokenText: text,
-        voiceEngine: "unknown",
+        voiceEngine: unsynthesizedVoiceEngine,
         isPremium: false,
         audioUrl: null,
         durationMs: estimateSpokenDurationMs(text),
@@ -445,6 +502,9 @@ export function buildSignalLiveBakeArtifactFromEpisode(
         ? new Date().toISOString()
         : null,
     error: options.error ?? null,
+    plannedSynthesisTiming: createLiveBakePlannedSynthesisTiming(
+      plannedSynthesisEngine,
+    ),
     utterances,
     events: episode.events.map((event, index) => ({
       id: event.id ?? `event-${index}`,
@@ -473,6 +533,8 @@ export async function bakeBotcastWatchEpisode(args: {
    * the latest episode context. Fixed picks stay pinned via the same helper.
    */
   resolveGeneration: () => Promise<BotcastGenerationOptions>;
+  /** Planned JIT synthesis path; LOCAL episodes override this to local. */
+  plannedSynthesisEngine?: LiveBakeVoiceEngineV1;
   signal?: AbortSignal;
   maxSteps?: number;
   onProgress?: (artifact: LiveBakeArtifactV1) => void;
@@ -481,6 +543,7 @@ export async function bakeBotcastWatchEpisode(args: {
   artifact: LiveBakeArtifactV1;
 }> {
   const { db, userId, episodeId } = args;
+  const plannedSynthesisEngine = args.plannedSynthesisEngine ?? "unknown";
   const maxSteps = args.maxSteps ?? LIVE_BAKE_MAX_STEPS_SIGNAL;
   let episode = getBotcastEpisode(db, userId, episodeId);
   if (episode.playbackMode !== "watch") {
@@ -493,12 +556,14 @@ export async function bakeBotcastWatchEpisode(args: {
     const artifact = buildSignalLiveBakeArtifactFromEpisode(episode, {
       status: "cancelled",
       error: "Bake cancelled.",
+      plannedSynthesisEngine,
     });
     return { episode, artifact };
   }
   if (episode.status === "completed") {
     const artifact = buildSignalLiveBakeArtifactFromEpisode(episode, {
       status: "ready",
+      plannedSynthesisEngine,
     });
     return { episode, artifact };
   }
@@ -506,6 +571,7 @@ export async function bakeBotcastWatchEpisode(args: {
   let artifact = buildSignalLiveBakeArtifactFromEpisode(episode, {
     status: "baking",
     baking: true,
+    plannedSynthesisEngine,
   });
   args.onProgress?.(artifact);
 
@@ -516,6 +582,7 @@ export async function bakeBotcastWatchEpisode(args: {
         artifact = buildSignalLiveBakeArtifactFromEpisode(episode, {
           status: "cancelled",
           error: "Bake cancelled.",
+          plannedSynthesisEngine,
         });
         return { episode, artifact };
       }
@@ -540,6 +607,7 @@ export async function bakeBotcastWatchEpisode(args: {
       artifact = buildSignalLiveBakeArtifactFromEpisode(episode, {
         status: "baking",
         baking: true,
+        plannedSynthesisEngine,
       });
       args.onProgress?.(artifact);
     }
@@ -554,6 +622,7 @@ export async function bakeBotcastWatchEpisode(args: {
 
     artifact = buildSignalLiveBakeArtifactFromEpisode(episode, {
       status: "ready",
+      plannedSynthesisEngine,
     });
     return { episode, artifact };
   } catch (error) {
@@ -562,6 +631,7 @@ export async function bakeBotcastWatchEpisode(args: {
       artifact = buildSignalLiveBakeArtifactFromEpisode(episode, {
         status: "cancelled",
         error: "Bake cancelled.",
+        plannedSynthesisEngine,
       });
       return { episode, artifact };
     }
@@ -569,6 +639,7 @@ export async function bakeBotcastWatchEpisode(args: {
     artifact = buildSignalLiveBakeArtifactFromEpisode(episode, {
       status: "failed",
       error: error instanceof Error ? error.message : "Signal bake failed.",
+      plannedSynthesisEngine,
     });
     throw error;
   }

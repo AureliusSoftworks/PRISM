@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   coffeeLiveSeatThinkingBotId,
+  coffeePlayerAvatarShouldThink,
   coffeeSeatAvatarViewModelKey,
   type CoffeeSeatAvatarViewModel,
 } from "./coffee-seat-avatar-view-model.ts";
@@ -36,6 +37,48 @@ const idleSeat: CoffeeSeatAvatarViewModel = {
 };
 
 describe("Coffee seat avatar view model", () => {
+  it("shows Prism thinking while the live player composes, but not while speaking", () => {
+    assert.equal(
+      coffeePlayerAvatarShouldThink({
+        replayActive: false,
+        replayThinking: false,
+        composerHasText: true,
+        speaking: false,
+      }),
+      true,
+    );
+    assert.equal(
+      coffeePlayerAvatarShouldThink({
+        replayActive: false,
+        replayThinking: false,
+        composerHasText: true,
+        speaking: true,
+      }),
+      false,
+    );
+  });
+
+  it("keeps replay thinking authoritative over the live composer", () => {
+    assert.equal(
+      coffeePlayerAvatarShouldThink({
+        replayActive: true,
+        replayThinking: false,
+        composerHasText: true,
+        speaking: false,
+      }),
+      false,
+    );
+    assert.equal(
+      coffeePlayerAvatarShouldThink({
+        replayActive: true,
+        replayThinking: true,
+        composerHasText: false,
+        speaking: false,
+      }),
+      true,
+    );
+  });
+
   it("keeps the selected live seat thinking through player-line reveal", () => {
     assert.equal(
       coffeeLiveSeatThinkingBotId({
@@ -48,6 +91,21 @@ describe("Coffee seat avatar view model", () => {
         responseCuePlaying: false,
       }),
       "rowan",
+    );
+  });
+
+  it("keeps that ownership with the selected bot, never the off-camera player", () => {
+    assert.equal(
+      coffeeLiveSeatThinkingBotId({
+        rhythmState: "userTableTyping",
+        pendingSpeakerBotId: "mira",
+        activeTurnJob: {
+          phase: "thinking",
+          speakerBotId: "mira",
+        },
+        responseCuePlaying: false,
+      }),
+      "mira",
     );
   });
 
@@ -87,6 +145,13 @@ describe("Coffee seat avatar view model", () => {
       coffeeLiveSeatThinkingBotId({
         ...thinkingState,
         responseCuePlaying: true,
+      }),
+      null,
+    );
+    assert.equal(
+      coffeeLiveSeatThinkingBotId({
+        ...thinkingState,
+        playbackRecording: true,
       }),
       null,
     );

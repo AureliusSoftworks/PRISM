@@ -13,6 +13,10 @@ import {
   prismLocalOnlyAudioOutputNode,
   replayAudioMasterCaptureActive,
 } from "./replayAudioMasterCapture.ts";
+import {
+  decodeLiveVoicePcm,
+  type LiveVoicePcm,
+} from "./liveVoiceDecode.ts";
 
 export const DEFAULT_STUDIO_ATMOSPHERE_URL =
   "/audio/session-atmosphere/default-studio-room-loop.mp3";
@@ -291,7 +295,35 @@ interface SessionAtmosphereActiveLoop extends SessionAtmosphereActiveSource {
   leveler: SessionAtmosphereSourceLeveler;
 }
 
+interface SessionAtmosphereActiveBufferSource
+  extends SessionAtmosphereActiveSource {
+  source: AudioBufferSourceNode;
+  leveler: SessionAtmosphereSourceLeveler;
+  released: boolean;
+}
+
 let sessionAtmosphereAudioContext: AudioContext | null = null;
+const livePerformanceAudioPcmCache = new Map<
+  string,
+  Promise<LiveVoicePcm | null>
+>();
+
+function livePerformanceAudioPcm(url: string): Promise<LiveVoicePcm | null> {
+  const normalizedUrl = url.trim();
+  const cached = livePerformanceAudioPcmCache.get(normalizedUrl);
+  if (cached) return cached;
+  const pending =
+    typeof fetch === "function"
+      ? fetch(normalizedUrl, { cache: "force-cache", credentials: "include" })
+          .then((response) =>
+            response.ok ? response.arrayBuffer() : Promise.resolve(null),
+          )
+          .then((bytes) => (bytes ? decodeLiveVoicePcm(bytes) : null))
+          .catch(() => null)
+      : Promise.resolve(null);
+  livePerformanceAudioPcmCache.set(normalizedUrl, pending);
+  return pending;
+}
 
 function sessionAtmosphereContext(): AudioContext | null {
   if (
@@ -643,6 +675,8 @@ export function startSessionAtmosphere(args: {
   foleyRoomAcoustics?: RoomAcousticsSend;
   backgroundRoomAcoustics?: RoomAcousticsSend;
   allowMixBoost?: boolean;
+  /** Keep live Coffee/Signal clips off HTMLMediaElement and renderer decode. */
+  latencyCritical?: boolean;
   shouldDeferFoley?: () => boolean;
   shouldDeferBotVocalization?: () => boolean;
   ambientFoley?: boolean;
@@ -667,9 +701,15 @@ export function startSessionAtmosphere(args: {
     SessionAtmosphereActiveSource
   >();
   const activeLoops = new Set<SessionAtmosphereActiveLoop>();
+  const activeBufferAudio = new Set<SessionAtmosphereActiveBufferSource>();
   const pendingLoopLoads = new Set<AbortController>();
   const preloadedFoley = new Map<string, HTMLAudioElement[]>();
   const htmlVolumeRampTimers = new Map<HTMLAudioElement, number>();
+  const foleyTagVersions = new Map<string, number>();
+  const latencyCritical =
+    args.latencyCritical === true ||
+    (typeof document !== "undefined" &&
+      document.body?.dataset.prismLivePerformanceActive === "true");
   let stopped = false;
   let timer: number | null = null;
   let botVocalizationTimer: number | null = null;
@@ -680,6 +720,27 @@ export function startSessionAtmosphere(args: {
       applySourceVolume(audio, source, transitionMs);
     }
     for (const source of activeLoops) {
+      const gain = source.leveler.busGain.gain;
+      const context = source.source.context;
+      const target = sessionAtmosphereBusGain({
+        volume,
+        mix,
+        bus: source.bus,
+        trim: source.trim,
+      });
+      const transitionSeconds = Math.max(0, transitionMs) / 1_000;
+      gain.cancelScheduledValues(context.currentTime);
+      gain.setValueAtTime(gain.value, context.currentTime);
+      if (transitionSeconds > 0) {
+        gain.linearRampToValueAtTime(
+          target,
+          context.currentTime + transitionSeconds,
+        );
+      } else {
+        gain.value = target;
+      }
+    }
+    for (const source of activeBufferAudio) {
       const gain = source.leveler.busGain.gain;
       const context = source.source.context;
       const target = sessionAtmosphereBusGain({
@@ -722,6 +783,15 @@ export function startSessionAtmosphere(args: {
     const source = activeAudio.get(audio);
     source?.leveler?.disconnect(preserveRoomTail);
     activeAudio.delete(audio);
+  };
+  const releaseBufferAudio = (
+    source: SessionAtmosphereActiveBufferSource,
+    preserveRoomTail = false,
+  ): void => {
+    if (source.released) return;
+    source.released = true;
+    activeBufferAudio.delete(source);
+    source.leveler.disconnect(preserveRoomTail);
   };
 
   const applySourceVolume = (
@@ -787,9 +857,12 @@ export function startSessionAtmosphere(args: {
 
   const primeFoley = (url: string): void => {
     const normalizedUrl = url.trim();
+    if (stopped || !normalizedUrl) return;
+    if (latencyCritical) {
+      void livePerformanceAudioPcm(normalizedUrl);
+      return;
+    }
     if (
-      stopped ||
-      !normalizedUrl ||
       typeof Audio === "undefined" ||
       (preloadedFoley.get(normalizedUrl)?.length ?? 0) > 0
     ) {
@@ -801,12 +874,113 @@ export function startSessionAtmosphere(args: {
     preloadedFoley.set(normalizedUrl, [audio]);
   };
 
+  const playLivePerformanceFoley = (
+    url: string,
+    bus: SessionAtmosphereBus,
+    options: SessionAtmosphereFoleyPlaybackOptions,
+  ): boolean => {
+    const context = sessionAtmosphereContext();
+    if (
+      !context ||
+      typeof context.createBuffer !== "function" ||
+      typeof context.createBufferSource !== "function"
+    ) {
+      return false;
+    }
+    const trim = Math.max(0, options.trim ?? 1);
+    const tag = options.tag?.trim() || undefined;
+    const tagVersion = tag ? (foleyTagVersions.get(tag) ?? 0) : 0;
+    void livePerformanceAudioPcm(url).then((pcm) => {
+      if (
+        stopped ||
+        !pcm ||
+        (tag && (foleyTagVersions.get(tag) ?? 0) !== tagVersion)
+      ) {
+        return;
+      }
+      let activeSource: SessionAtmosphereActiveBufferSource | null = null;
+      try {
+        const decoded = context.createBuffer(
+          pcm.channels.length,
+          pcm.frameCount,
+          pcm.sampleRate,
+        );
+        for (
+          let channelIndex = 0;
+          channelIndex < pcm.channels.length;
+          channelIndex += 1
+        ) {
+          decoded.copyToChannel(
+            new Float32Array(pcm.channels[channelIndex]!),
+            channelIndex,
+          );
+        }
+        const source = context.createBufferSource();
+        source.buffer = decoded;
+        source.playbackRate.value = Math.max(
+          0.85,
+          Math.min(1.15, options.playbackRate ?? 1),
+        );
+        const leveler = levelSessionAtmosphereNode(
+          context,
+          source,
+          false,
+          bus,
+          args.backgroundTone ?? "neutral",
+          args.foleyRoomAcoustics,
+          options,
+          sessionAtmosphereOutputDestination(
+            context,
+            bus,
+            backgroundRecordable,
+            grainRecordable,
+          ),
+        );
+        activeSource = {
+          source,
+          bus,
+          trim,
+          leveler,
+          released: false,
+          ...(tag ? { tag } : {}),
+        };
+        leveler.busGain.gain.value = sessionAtmosphereBusGain({
+          volume,
+          mix,
+          bus,
+          trim,
+        });
+        activeBufferAudio.add(activeSource);
+        source.addEventListener(
+          "ended",
+          () => {
+            if (!activeSource) return;
+            releaseBufferAudio(activeSource, true);
+            activeSource = null;
+          },
+          { once: true },
+        );
+        source.start();
+      } catch (error) {
+        if (activeSource) {
+          releaseBufferAudio(activeSource);
+        }
+        args.onPlaybackError?.(error);
+      }
+    });
+    return true;
+  };
+
   const play = (
     url: string,
     bus: SessionAtmosphereBus,
     options: SessionAtmosphereFoleyPlaybackOptions & { loop?: boolean } = {},
-  ): HTMLAudioElement | null => {
-    if (stopped || typeof Audio === "undefined") return null;
+  ): boolean => {
+    if (stopped) return false;
+    if (latencyCritical && options.loop !== true) {
+      return playLivePerformanceFoley(url, bus, options);
+    }
+    if (typeof Audio === "undefined") return false;
     const trim = Math.max(0, options.trim ?? 1);
     const loop = options.loop === true;
     const queued = preloadedFoley.get(url);
@@ -849,7 +1023,7 @@ export function startSessionAtmosphere(args: {
       replayAudioMasterCaptureActive() &&
       loopRecordable
     ) {
-      return null;
+      return false;
     }
     activeAudio.set(audio, source);
     applySourceVolume(
@@ -867,7 +1041,7 @@ export function startSessionAtmosphere(args: {
       releaseAudio(audio);
       args.onPlaybackError?.(error);
     });
-    return audio;
+    return true;
   };
 
   const playLoop = (
@@ -1052,11 +1226,15 @@ export function startSessionAtmosphere(args: {
     },
     playFoley(url, options = {}) {
       if (presentationSuspended) return false;
-      return play(url, "foley", options) !== null;
+      return play(url, "foley", options);
     },
     stopFoley(tag, fadeMs = 180) {
       const normalizedTag = tag.trim();
       if (!normalizedTag) return;
+      foleyTagVersions.set(
+        normalizedTag,
+        (foleyTagVersions.get(normalizedTag) ?? 0) + 1,
+      );
       for (const [audio, source] of [...activeAudio]) {
         if (source.tag !== normalizedTag) continue;
         const initialLevel = source.leveler
@@ -1078,6 +1256,29 @@ export function startSessionAtmosphere(args: {
           audio.pause();
           releaseAudio(audio, true);
         }, 20);
+      }
+      for (const source of [...activeBufferAudio]) {
+        if (source.tag !== normalizedTag) continue;
+        const context = source.source.context;
+        const gain = source.leveler.busGain.gain;
+        gain.cancelScheduledValues(context.currentTime);
+        gain.setValueAtTime(gain.value, context.currentTime);
+        if (fadeMs > 0) {
+          const endTime = context.currentTime + fadeMs / 1_000;
+          gain.linearRampToValueAtTime(0, endTime);
+          try {
+            source.source.stop(endTime);
+          } catch {
+            releaseBufferAudio(source, true);
+          }
+        } else {
+          try {
+            source.source.stop();
+          } catch {
+            // The source already ended between the snapshot and this call.
+          }
+          releaseBufferAudio(source, true);
+        }
       }
     },
     setMix(next) {
@@ -1139,6 +1340,14 @@ export function startSessionAtmosphere(args: {
           source.leveler?.disconnect();
         }
         activeLoops.clear();
+        for (const source of activeBufferAudio) {
+          try {
+            source.source.stop();
+          } catch {
+            // A one-shot that already ended is already silent.
+          }
+          releaseBufferAudio(source);
+        }
         for (const audio of [...activeAudio.keys()]) {
           audio.pause();
           audio.removeAttribute("src");
@@ -1150,7 +1359,9 @@ export function startSessionAtmosphere(args: {
       if (
         fadeDuration > 0 &&
         typeof window !== "undefined" &&
-        (activeLoops.size > 0 || activeAudio.size > 0)
+        (activeLoops.size > 0 ||
+          activeBufferAudio.size > 0 ||
+          activeAudio.size > 0)
       ) {
         volume = 0;
         applyLiveMix(fadeDuration);

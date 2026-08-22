@@ -108,7 +108,10 @@ describe("Psychic Chat surface wiring", () => {
     assert.match(metadataSource, /contextFocusedMessageId !== msg\.id/u);
     assert.match(metadataSource, /assistantGenerationMetadata/u);
     assert.match(metadataSource, /<ModelEffortIcon/u);
-    assert.match(metadataSource, /REASONING_EFFORT_LABELS\[metadata\.effort\]/u);
+    assert.match(
+      metadataSource,
+      /providerReasoningEffortLabel\(metadata\.effort\)/u,
+    );
   });
 
   it("resolves Psychic source messages only on transcript Chat presentation", () => {

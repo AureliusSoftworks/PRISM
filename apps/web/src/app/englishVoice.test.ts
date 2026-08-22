@@ -10,6 +10,7 @@ import {
   enqueueEnglishVoice,
   elevenLabsEffectForEngine,
   readEnglishVoiceSynthesisClip,
+  readEnglishVoiceWaveStream,
   parseEnglishVoiceWaveStreamChunk,
   reportedChunkedVoiceDurationMs,
   resolveEnglishVoicePlaybackDetuneCents,
@@ -74,6 +75,10 @@ describe("English voice post processing", () => {
     assert.match(
       source,
       /export async function prepareEnglishVoice\(\)[\s\S]*?if \(preparedMedia\)[\s\S]*?return;[\s\S]*?beginMediaUnlock\(\);/
+    );
+    assert.match(
+      source,
+      /prismLiveVoicePerformanceBudgetActive\(\)[\s\S]*?prepareRealtimeVoiceAudio\(\{ loadRealtimeProcessing: false \}\)[\s\S]*?releasePreparedMedia\(\);[\s\S]*?return;/u,
     );
     assert.match(
       source,
@@ -186,18 +191,19 @@ describe("English voice post processing", () => {
     );
   });
 
-  it("applies the same pitch transform to Local and Premium", () => {
+  it("applies each Feel lane's authored pitch transform", () => {
     const profile = {
       v: 1 as const,
       baseVoiceId: "voice-1" as const,
       pitch: -0.75,
+      premiumPitch: 0.25,
       warmth: 0,
       pace: 0.333,
       lilt: 0,
     };
     assert.equal(
       resolveEnglishVoicePlaybackDetuneCents(profile, "elevenlabs"),
-      -487,
+      163,
     );
     assert.equal(resolveEnglishVoicePlaybackDetuneCents(profile, "builtin"), -487);
   });
@@ -655,6 +661,108 @@ describe("English voice post processing", () => {
 });
 
 describe("English voice synthesis responses", () => {
+  it("reads compact binary WAV frames across arbitrary network boundaries", async () => {
+    const frame = (
+      metadata: Record<string, unknown>,
+      audio: Uint8Array,
+    ): Buffer => {
+      const encodedMetadata = Buffer.from(JSON.stringify(metadata));
+      const header = Buffer.alloc(8);
+      header.writeUInt32BE(encodedMetadata.byteLength, 0);
+      header.writeUInt32BE(audio.byteLength, 4);
+      return Buffer.concat([header, encodedMetadata, Buffer.from(audio)]);
+    };
+    const bytes = Buffer.concat([
+      frame(
+        {
+          index: 0,
+          characterCount: 6,
+          text: "Hello.",
+          sourceStart: 0,
+          sourceEnd: 6,
+        },
+        Uint8Array.from([82, 73, 70, 70, 1, 2, 3]),
+      ),
+      frame(
+        {
+          index: 1,
+          kind: "vocal-action",
+          characterCount: 0,
+          action: "laugh",
+          modifiers: ["soft"],
+          authoredText: "laughs softly",
+          sourceStart: 7,
+          sourceEnd: 20,
+        },
+        new Uint8Array(0),
+      ),
+    ]);
+    const splitPoints = [3, 11, 29, 83, bytes.byteLength];
+    let previous = 0;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const point of splitPoints) {
+          controller.enqueue(bytes.subarray(previous, point));
+          previous = point;
+        }
+        controller.close();
+      },
+    });
+    const response = new Response(body, {
+      headers: {
+        "content-type": "application/x-prism-voice-chunks",
+        "x-prism-voice-stream": "wav-chunks-binary-v2",
+      },
+    });
+    assert.equal(englishVoiceResponseSupportsChunkedStreaming(response), true);
+    const chunks = [];
+    for await (const chunk of readEnglishVoiceWaveStream(response)) {
+      chunks.push(chunk);
+    }
+    assert.equal(chunks.length, 2);
+    assert.deepEqual([...new Uint8Array(chunks[0]!.bytes)], [82, 73, 70, 70, 1, 2, 3]);
+    assert.equal(chunks[0]!.text, "Hello.");
+    assert.equal(chunks[1]!.kind, "vocal-action");
+    assert.equal(chunks[1]!.action, "laugh");
+    assert.equal(chunks[1]!.bytes.byteLength, 0);
+  });
+
+  it("preserves an isolated binary WAV buffer without a renderer copy", async () => {
+    const metadata = Buffer.from(JSON.stringify({
+      index: 0,
+      characterCount: 6,
+      text: "Hello.",
+      sourceStart: 0,
+      sourceEnd: 6,
+    }));
+    const header = Buffer.alloc(8);
+    const audio = Uint8Array.from([82, 73, 70, 70, 7, 8, 9]);
+    header.writeUInt32BE(metadata.byteLength, 0);
+    header.writeUInt32BE(audio.byteLength, 4);
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(header));
+        controller.enqueue(new Uint8Array(metadata));
+        controller.enqueue(audio);
+        controller.close();
+      },
+    });
+    const response = new Response(body, {
+      headers: {
+        "content-type": "application/x-prism-voice-chunks",
+        "x-prism-voice-stream": "wav-chunks-binary-v1",
+      },
+    });
+
+    const chunks = [];
+    for await (const chunk of readEnglishVoiceWaveStream(response)) {
+      chunks.push(chunk);
+    }
+
+    assert.equal(chunks.length, 1);
+    assert.equal(chunks[0]!.bytes, audio.buffer);
+  });
+
   it("recognizes and validates streamed local WAV chunks", () => {
     const response = new Response("", {
       headers: {
@@ -677,6 +785,29 @@ describe("English voice synthesis responses", () => {
       () => parseEnglishVoiceWaveStreamChunk('{"index":0}'),
       /invalid audio chunk/,
     );
+  });
+
+  it("keeps streamed voice base64 decoding off the JavaScript byte loop when native decoding exists", () => {
+    const uint8ArrayWithBase64 = Uint8Array as typeof Uint8Array & {
+      fromBase64?: (encoded: string) => Uint8Array;
+    };
+    if (typeof uint8ArrayWithBase64.fromBase64 !== "function") return;
+    const originalAtob = globalThis.atob;
+    globalThis.atob = () => {
+      throw new Error("legacy renderer-thread decoder was used");
+    };
+    try {
+      const chunk = parseEnglishVoiceWaveStreamChunk(
+        JSON.stringify({
+          index: 0,
+          characterCount: 3,
+          audioBase64: Buffer.from([7, 8, 9]).toString("base64"),
+        }),
+      );
+      assert.deepEqual([...new Uint8Array(chunk.bytes)], [7, 8, 9]);
+    } finally {
+      globalThis.atob = originalAtob;
+    }
   });
 
   it("recognizes Voice+ v2 vocal-action segments without network audio", () => {

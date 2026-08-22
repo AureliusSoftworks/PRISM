@@ -4,11 +4,8 @@ import { expect, test, type Page } from "@playwright/test";
 
 const WIELD_TARGET_NAME = "Signal premise · registered Refract target";
 
-async function platformModifier(page: Page): Promise<"Alt" | "Control"> {
-  const shortcut = await page
-    .getByRole("textbox", { name: WIELD_TARGET_NAME, exact: true })
-    .getAttribute("aria-keyshortcuts");
-  return shortcut === "Alt+Space" ? "Alt" : "Control";
+function wieldModifier(): "Alt" {
+  return "Alt";
 }
 
 async function openFixture(
@@ -39,7 +36,7 @@ async function armOverRegisteredTarget(page: Page): Promise<{
     y: Math.round(box.y + box.height / 2),
   };
   await page.mouse.move(pointer.x - 80, pointer.y);
-  const modifier = await platformModifier(page);
+  const modifier = wieldModifier();
   await page.keyboard.down(modifier);
   await page.waitForTimeout(175);
   await page.mouse.move(pointer.x, pointer.y);
@@ -162,7 +159,7 @@ test("Wield preserves noneligible native clicks and focused shortcut precedence"
   const nativeControl = page.getByTestId("qa-prism-native-control");
   const nativeBox = await nativeControl.boundingBox();
   if (!nativeBox) throw new Error("Native control has no layout box.");
-  const modifier = await platformModifier(page);
+  const modifier = wieldModifier();
   await page.mouse.move(nativeBox.x + nativeBox.width / 2 - 10, nativeBox.y);
   await page.keyboard.down(modifier);
   await page.waitForTimeout(175);
@@ -178,16 +175,17 @@ test("Wield preserves noneligible native clicks and focused shortcut precedence"
     exact: true,
   });
   await target.focus();
-  await page.keyboard.down(modifier);
-  await page.keyboard.press("Space");
-  await page.keyboard.up(modifier);
+  await page.keyboard.down("Meta");
+  await page.keyboard.press("Alt");
+  await page.keyboard.up("Meta");
   await expect(page.locator("html")).not.toHaveAttribute(
     "data-prism-wielding",
     "true",
   );
-  await expect(target).toHaveAttribute("data-prism-refract-state");
-  await page.keyboard.press("Escape");
   await expect(target).not.toHaveAttribute("data-prism-refract-state");
+  await expect(
+    page.getByRole("textbox", { name: "Message Prism", exact: true }),
+  ).toBeVisible();
 });
 
 test("Wield capture suppresses one eligible native click and modifier release keeps Refract active", async ({
@@ -207,7 +205,8 @@ test("Wield capture suppresses one eligible native click and modifier release ke
     "true",
   );
   await expect(target).not.toHaveAttribute("data-native-clicks");
-  await expect(target).toHaveAttribute("data-prism-refract-state");
+  await expect(target).toHaveAttribute("data-prism-refract-state", "ready");
+  await target.focus();
   await page.keyboard.press("Escape");
   await expect(target).not.toHaveAttribute("data-prism-refract-state");
 

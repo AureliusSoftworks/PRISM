@@ -46,7 +46,7 @@ describe("retired Coffee service", () => {
     assert.match(resumeSource, /startCoffeeArrivalSequence\(/u);
   });
 
-  it("preloads the model before Serve arrivals and keeps retry actionable", () => {
+  it("shows the intro before ordinary arrivals and warms only Serve handoffs", () => {
     const handoffStart = pageSource.indexOf(
       "const prepareCoffeeServeHandoff = async",
     );
@@ -55,13 +55,38 @@ describe("retired Coffee service", () => {
       handoffStart,
     );
     const handoffSource = pageSource.slice(handoffStart, handoffEnd);
-    assert.match(handoffSource, /coffeeSettings\?\.experienceMode !== "serve"/u);
+    assert.match(
+      handoffSource,
+      /experienceMode !== "serve"\) return true/u,
+    );
     assert.match(handoffSource, /coffeeModelWarmupRetryActionRef\.current/u);
     assert.match(handoffSource, /ensureCoffeeModelReady\(true\)/u);
     assert.match(handoffSource, /releaseCoffeeModelWarmup\(\)/u);
     assert.match(
       pageSource,
-      /beginCoffeeLiveWithIntro[\s\S]*prepareCoffeeServeHandoff\(/u,
+      /beginCoffeeLiveWithIntro[\s\S]{0,500}prepareCoffeeServeHandoff\([\s\S]{0,300}playCoffeeIntroCurtain\(\)[\s\S]{0,260}startCoffeeArrivalSequence\(/u,
+    );
+    const introStart = pageSource.indexOf("const beginCoffeeLiveWithIntro =");
+    const introEnd = pageSource.indexOf(
+      "const refreshCoffeeStarterTopics =",
+      introStart,
+    );
+    const introSource = pageSource.slice(introStart, introEnd);
+    assert.ok(
+      introSource.indexOf("setCoffeeGuestRevealConcealed(true)") <
+        introSource.indexOf("prepareCoffeeServeHandoff"),
+    );
+    assert.ok(
+      introSource.indexOf("startCoffeeArrivalSequence") <
+        introSource.indexOf("setCoffeeIntroPlaying(false)"),
+    );
+    assert.match(
+      pageSource,
+      /data-coffee-intro-playing=\{[\s\S]{0,100}coffeeIntroPlaying \|\| coffeeGuestRevealConcealed/,
+    );
+    assert.match(
+      pageCss,
+      /\.coffeeStage\[data-coffee-intro-playing="true"\] \.coffeeSeat[\s\S]{0,180}visibility:\s*hidden/u,
     );
   });
 

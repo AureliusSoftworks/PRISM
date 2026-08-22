@@ -24,10 +24,10 @@ function sourceBetween(start: string, end: string): string {
   return pageSource.slice(startIndex, endIndex);
 }
 
-test("navbar dropdown pickers disable arrow-key list selection", () => {
+test("navbar model pickers support arrows while ordinary menus stay pointer/wheel driven", () => {
   assert.match(
     pageSource,
-    /Navbar pickers stay pointer\/wheel driven[\s\S]{0,160}if \(navbarPicker\) return;/u,
+    /document\.addEventListener\("keydown", handleQuickArrows, true\)/u,
   );
   assert.match(
     prismMenuSource,

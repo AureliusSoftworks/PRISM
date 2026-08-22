@@ -148,10 +148,7 @@ describe("applet session notes", () => {
     assert.match(companion, /onPointerDown=\{beginDrag\}/u);
     assert.match(companion, /onPointerMove=\{moveDrag\}/u);
     assert.match(companion, /onPointerUp=\{endDrag\}/u);
-    assert.match(
-      companion,
-      /const dropTargetId = drag\.moved && !sessionNoteContextRef\.current/u,
-    );
+    assert.doesNotMatch(companion, /const dropTargetId =/u);
     assert.match(
       companionStyles,
       /\.anchor\[data-session-note="true"\]\[data-wielding="true"\] \.sessionNotePlus \{[\s\S]*width: 30px/u,

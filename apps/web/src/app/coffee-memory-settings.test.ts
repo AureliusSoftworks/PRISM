@@ -14,7 +14,8 @@ describe("Coffee memory settings", () => {
     assert.doesNotMatch(pageSource, /Memory callbacks/u);
     assert.match(
       tutorialSource,
-      /automatically carries bounded summary-level memory from its recent non-private Coffee sessions/u
+      /shares bounded summary-level memories of its own previous sessions/u
     );
+    assert.match(tutorialSource, /one-off tables and Private sessions never feed that recall/u);
   });
 });

@@ -216,7 +216,7 @@ describe("Coffee player voice", () => {
     assert.match(source, /Prism represents you at the Coffee table/);
     assert.match(
       source,
-      /live\s+messages and session[\s\S]*?replays use this voice/
+      /live\s+messages\s+and session\s+replays use this voice/
     );
     assert.doesNotMatch(source, /Your table voice|Name pronunciation/);
     assert.doesNotMatch(source, /playerNamePronunciation/);

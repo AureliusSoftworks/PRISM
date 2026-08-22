@@ -33,7 +33,7 @@ describe("scene audio lifecycle wiring", () => {
     assert.match(lifecycleSource, /stopSignalIntroAudio/u);
     assert.match(
       atmosphereLayerSource,
-      /return \(\) => \{[\s\S]*controller\.stop\(\)/u,
+      /return \(\) => \{[\s\S]*controller\.stop\(lifecycleTransitionMs\)/u,
     );
     assert.match(
       atmosphereLayerSource,

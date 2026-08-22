@@ -200,7 +200,7 @@ describe("Slate workspace integration", () => {
       /if \(shouldGenerateCover\) \{[\s\S]*?synthesizeProjectCover\(response\.project\.id\)/,
     );
     assert.match(source, /kind="slate_cover"/);
-    assert.match(source, /onSynthesize=\{\(direction\) =>/);
+    assert.match(source, /onSynthesize=\{\(direction, selection\) =>/);
     assert.match(source, /\/api\/slate\/projects\/\$\{encodeURIComponent\(projectId\)\}\/cover/);
     assert.match(source, /setEntryMode\("desk"\)[\s\S]*?setReturnSession\(null\)/);
     assert.match(

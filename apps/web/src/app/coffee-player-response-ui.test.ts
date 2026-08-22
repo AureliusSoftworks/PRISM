@@ -5,19 +5,53 @@ import { readFileSync } from "node:fs";
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 
 describe("Coffee player response UI wiring", () => {
-  it("renders the table composer through the rich mention-capable input", () => {
+  it("routes table composition through the shared latency-critical input", () => {
     assert.match(
       pageSource,
       /enabled=\{coffeeComposerUsesRichInput\(\{[\s\S]*?variant,[\s\S]*?markdownEditorEnabled:\s*composerMarkdownEditorEnabled,[\s\S]*?\}\)\}/,
     );
+    assert.match(
+      pageSource,
+      /latencyCritical=\{variant === "coffee-table" \|\| variant === "signal"\}/u,
+    );
   });
 
-  it("defers full Coffee table rerenders while the player keeps typing", () => {
+  it("keeps latency-critical editing uncontrolled and exits before React UI work", () => {
+    const composerStart = pageSource.indexOf("const ComposerInput = forwardRef<");
+    const composerEnd = pageSource.indexOf(
+      'ComposerInput.displayName = "ComposerInput"',
+      composerStart,
+    );
+    const composer = pageSource.slice(composerStart, composerEnd);
+    assert.ok(composerStart >= 0 && composerEnd > composerStart);
+    assert.match(
+      composer,
+      /const enabled = requestedRichInputEnabled && !latencyCritical/u,
+    );
+    assert.match(
+      composer,
+      /value=\{latencyCritical \? undefined : textareaDisplayValue\}[\s\S]{0,100}defaultValue=\{latencyCritical \? visibleValue : undefined\}/u,
+    );
+    assert.match(
+      composer,
+      /onValueChange\(nextValue\);\s*resizeTextareaToContent\(el\);\s*if \(latencyCritical\) return;\s*textareaChipActivationRef/u,
+    );
+    assert.match(
+      composer,
+      /if \(latencyCritical\) \{[\s\S]{0,700}onEmptyBackspaceRef\.current\?\.\(\) === true[\s\S]{0,180}return;\s*\}/u,
+    );
+    assert.match(
+      composer,
+      /if \(latencyCritical\) return;\s*const interval = window\.setInterval/u,
+    );
+  });
+
+  it("keeps Coffee keystrokes entirely out of parent React state", () => {
     const handlerStart = pageSource.indexOf(
       "function updateCoffeeDraftFromComposer(next: string): void",
     );
     const handlerEnd = pageSource.indexOf(
-      "type ShellComposerVariant",
+      "async function setCoffeeContextSparkState",
       handlerStart,
     );
     const handlerSource = pageSource.slice(handlerStart, handlerEnd);
@@ -25,19 +59,107 @@ describe("Coffee player response UI wiring", () => {
     assert.ok(handlerStart >= 0 && handlerEnd > handlerStart);
     assert.match(
       handlerSource,
-      /function updateCoffeeDraftFromComposer\(next: string\): void \{[\s\S]*?coffeeDraftRef\.current = next;[\s\S]*?nextHasDraft !== previousHasDraft[\s\S]*?setCoffeeComposerHasDraft\(nextHasDraft\);[\s\S]*?scheduleDeferredCoffeeDraftState\(next\);/,
+      /function updateCoffeeDraftFromComposer\(next: string\): void \{\s*preemptCoffeeAutonomyForPlayerInput\(\);\s*coffeeDraftRef\.current = next;\s*if \(next\.trim\(\)\.length === 0\) \{\s*scheduleCoffeeComposerInputPriorityRelease\(\);\s*\}\s*\}/,
     );
-    // The parent draft sync settles on a fixed debounce. It must not back off
-    // by measured frame rate: an interval that widens as frames collapse and
-    // narrows as they recover oscillates instead of settling, and it degrades
-    // most on exactly the tables that can least afford it.
+    assert.doesNotMatch(handlerSource, /setCoffeeDraft|setCoffeeComposerHasDraft/);
+    assert.doesNotMatch(pageSource, /pendingCoffeeDraftSync/);
+    assert.doesNotMatch(pageSource, /COFFEE_COMPOSER_PARENT_DRAFT_SYNC_MS/);
+  });
+
+  it("lets Enter paint before live-table send orchestration", () => {
+    const schedulerStart = pageSource.indexOf(
+      "const scheduleCoffeeTurnAfterInputPaint",
+    );
+    const handlerStart = pageSource.indexOf(
+      "const handleCoffeeComposerKeyDown",
+      schedulerStart,
+    );
+    const scheduler = pageSource.slice(schedulerStart, handlerStart);
+    assert.ok(schedulerStart >= 0 && handlerStart > schedulerStart);
+    assert.match(
+      scheduler,
+      /window\.requestAnimationFrame\([\s\S]*?window\.setTimeout\([\s\S]*?void sendCoffeeTurn\(\)/u,
+    );
     assert.match(
       pageSource,
-      /COFFEE_COMPOSER_PARENT_DRAFT_SYNC_MS = 240/,
+      /if \(event\.key === "Enter"\) \{[\s\S]{0,180}?scheduleCoffeeTurnAfterInputPaint\(\)/u,
     );
-    assert.ok(
-      handlerSource.indexOf("setCoffeeDraft(next)") >
-        handlerSource.indexOf("if (nextHasDraft !== previousHasDraft)"),
+    assert.match(
+      pageSource,
+      /onSubmit: \(event\) => \{[\s\S]{0,220}?scheduleCoffeeTurnAfterInputPaint\(\)/u,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /if \(event\.key === "Enter"\) \{[\s\S]{0,180}?void sendCoffeeTurn\(\)/u,
+    );
+  });
+
+  it("projects the live interruption and player reveal as transitions", () => {
+    const captureStart = pageSource.indexOf(
+      "const captureCoffeePlayerInterruption =",
+    );
+    const sendStart = pageSource.indexOf("const sendCoffeeTurn = async");
+    const sendEnd = pageSource.indexOf(
+      "const interruptCoffeeWithTechnique",
+      sendStart,
+    );
+    const send = pageSource.slice(sendStart, sendEnd);
+    const capture = pageSource.slice(captureStart, sendStart);
+    assert.ok(captureStart >= 0 && sendStart > captureStart);
+    assert.ok(sendStart >= 0 && sendEnd > sendStart);
+    assert.match(
+      capture,
+      /coffeeTurnRhythmStateRef\.current = "playerComposing";\s*startTransition\(\(\) => \{[\s\S]{0,700}?setCoffeeTurnRhythmState\("playerComposing"\)/u,
+    );
+    assert.match(
+      send,
+      /coffeeTurnRhythmStateRef\.current = "userTableTyping";\s*startTransition\(\(\) => \{[\s\S]{0,260}?setCoffeeUserRevealText\(trimmed\);[\s\S]{0,100}?setCoffeeTurnRhythmState\("userTableTyping"\)/u,
+    );
+    assert.match(
+      capture,
+      /clearCoffeeRhythmTimers\(\);/u,
+    );
+    assert.match(send, /captureCoffeePlayerInterruption\(/u);
+  });
+
+  it("gives the native composer immediate priority over local autonomous inference", () => {
+    assert.match(
+      pageSource,
+      /target\.closest\('\[data-coffee-table-compose="true"\]'\)[\s\S]{0,100}coffeePlayerInputPreemptRef\.current\(\)/u,
+    );
+    assert.match(
+      pageSource,
+      /const preemptCoffeeAutonomyForPlayerInput = \(\): void => \{\s*coffeeComposerInputPriorityRef\.current = true;[\s\S]{0,220}const controller = coffeeContinueAbortRef\.current;[\s\S]{0,120}controller\.abort\(\)/u,
+    );
+    assert.match(
+      pageSource,
+      /if \(coffeeComposerInputPriorityRef\.current\) \{\s*scheduleCoffeeLoopTimer\(startAutonomousTurn, 240\);\s*return;/u,
+    );
+    assert.match(
+      pageSource,
+      /controller\.abort\(\);[\s\S]{0,420}window\.requestAnimationFrame\(\(\) => \{\s*startTransition/u,
+    );
+  });
+
+  it("lets active user input outrank polling and generated presentation commits", () => {
+    const gateStart = pageSource.indexOf("const waitForCoffeeUserInputIdle");
+    const gateEnd = pageSource.indexOf(
+      "const runCoffeeTurnJobOnce",
+      gateStart,
+    );
+    const gate = pageSource.slice(gateStart, gateEnd);
+    assert.ok(gateStart >= 0 && gateEnd > gateStart);
+    assert.match(pageSource, /COFFEE_TURN_JOB_POLL_INTERVAL_MS = 600/u);
+    assert.match(pageSource, /COFFEE_USER_INPUT_QUIET_WINDOW_MS = 160/u);
+    assert.match(gate, /scheduling\?\.isInputPending/u);
+    assert.match(gate, /window\.requestAnimationFrame/u);
+    assert.match(
+      pageSource,
+      /window\.addEventListener\("pointerdown", noteCoffeeUserInput, true\)[\s\S]{0,180}window\.addEventListener\("keydown", noteCoffeeUserInput, true\)[\s\S]{0,180}window\.addEventListener\("beforeinput", noteCoffeeUserInput, true\)/u,
+    );
+    assert.match(
+      pageSource,
+      /job\.response \|\|[\s\S]{0,120}presentationKeyForJob\(job\) !== presentedJobKey[\s\S]{0,120}await waitForCoffeeUserInputIdle\(signal\);[\s\S]{0,80}publishPresentedJob\(job\)/u,
     );
   });
 
@@ -66,10 +188,10 @@ describe("Coffee player response UI wiring", () => {
       pageSource,
       /const beginSpeaking = async[\s\S]*?await startCoffeeVoiceForReveal\([\s\S]*?setCoffeeTurnRhythmState\("tableTyping"\)/,
     );
-    // Thinking owns the rhythm even while the player is composing.
+    // Thinking owns the rhythm even while the leaf composer has local input.
     assert.match(
       pageSource,
-      /if \(coffeeBusy \|\| coffeeAutoBusy\) \{\s*setCoffeeTurnRhythmState\("botThinking"\);\s*return;\s*\}\s*if \(coffeeComposerHasDraft\) \{\s*setCoffeeTurnRhythmState\("playerComposing"\);/,
+      /if \(coffeeBusy \|\| coffeeAutoBusy\) \{\s*setCoffeeTurnRhythmState\("botThinking"\);\s*return;\s*\}\s*if \(coffeeTurnRhythmState !== "idle"\)/,
     );
     assert.doesNotMatch(
       pageSource,
@@ -77,16 +199,21 @@ describe("Coffee player response UI wiring", () => {
     );
   });
 
-  it("never lets typing pause the table and keeps thinking bots intact while the player speaks", () => {
-    // No typing-grace deferral machinery remains anywhere in the Coffee flow.
+  it("keeps visible speech intact while player input preempts unfinished generation", () => {
+    // No delayed typing-grace machinery may let inference race the keystroke.
     assert.doesNotMatch(pageSource, /coffeeTableTalkAutoplayDeferralMs/);
     assert.doesNotMatch(pageSource, /coffeeGeneratedReplyRevealDeferralMs/);
     assert.doesNotMatch(pageSource, /COFFEE_TABLE_TALK_TYPING_GRACE_MS/);
     assert.doesNotMatch(pageSource, /paused while you type/);
-    // Sending while a bot thinks prints/speaks immediately without aborting synthesis.
+    // A line that was already audible can finish because playback does not own
+    // the autonomous request controller. Sending still prints/speaks at once.
     assert.match(
       pageSource,
-      /const sendParallelDuringThinkingBot =\s*!draftIsActionOnly &&\s*coffeeTurnRhythmState === "botThinking" &&\s*\(coffeeAutoBusy \|\|\s*coffeeContinueAbortRef\.current !== null \|\|\s*coffeePendingSpeakerBotId !== null\);/,
+      /const canQueueAlongsideThinkingBot =\s*coffeeTurnRhythmState === "botThinking" &&\s*\(coffeeAutoBusy \|\|\s*coffeeContinueAbortRef\.current !== null \|\|\s*coffeePendingSpeakerBotId !== null\);/,
+    );
+    assert.match(
+      pageSource,
+      /const sendParallelDuringThinkingBot =\s*!draftIsActionOnly && canQueueAlongsideThinkingBot;/,
     );
     assert.match(
       pageSource,
@@ -165,6 +292,11 @@ describe("Coffee player response UI wiring", () => {
       botVoice,
       /setCoffeeLiveAvatarSpeech\(\{[\s\S]*?durationMs: resolvedDurationMs,[\s\S]*?\}\);[\s\S]*?settle\(resolvedDurationMs\)/,
     );
+    assert.match(
+      pageSource,
+      /coffeeTurnRhythmStateRef\.current = "tableTyping";\s*startTransition\(\(\) => \{\s*setCoffeeTurnRhythmState\("tableTyping"\);[\s\S]{0,360}setCoffeeSipTalkGateEpochByBotId/,
+      "player input must be able to preempt the bot voice-to-face handoff",
+    );
     assert.doesNotMatch(
       botVoice,
       /revealVoiceToken\.valid = false|\}, 1800\);/,
@@ -225,7 +357,7 @@ describe("Coffee player response UI wiring", () => {
   it("drops whole settled lines into Table talk and never streams the panel", () => {
     assert.match(
       pageSource,
-      /const liveTranscriptMessages =\s*coffeePendingRevealConversation\?\.id === coffeeConversation\.id[\s\S]*?coffeePendingRevealConversation\.messages[\s\S]*?coffeeConversation\.messages/,
+      /const liveTranscriptMessagesRaw =\s*coffeePendingRevealConversation\?\.id === coffeeConversation\.id[\s\S]*?coffeePendingRevealConversation\.messages[\s\S]*?coffeeConversation\.messages[\s\S]*?const liveTranscriptMessages = coffeeMessagesWithHeardCutoffs/,
     );
     assert.match(
       pageSource,
@@ -242,6 +374,21 @@ describe("Coffee player response UI wiring", () => {
     assert.match(
       pageSource,
       /function mergeCoffeeTranscriptMessageSources[\s\S]*?\{\s*\.\.\.historyMessage,\s*\.\.\.liveMessage\s*\}/,
+    );
+  });
+
+  it("freezes Shh at the heard fragment and shares it with table and Table talk", () => {
+    assert.match(
+      pageSource,
+      /const captureCoffeePlayerInterruption =[\s\S]*?clearCoffeeRhythmTimers\(\);[\s\S]*?rememberCoffeeHeardCutoff\(conversationId, pendingMessage, snippet\)[\s\S]*?setCoffeePendingRevealConversation\(null\)/,
+    );
+    assert.match(
+      pageSource,
+      /const capturedPlayerInterruption =[\s\S]*?captureCoffeePlayerInterruption\([\s\S]*?sendCoffeeTurn\(text, capturedPlayerInterruption\)/,
+    );
+    assert.match(
+      pageSource,
+      /const messages = coffeeMessagesWithHeardCutoffs\([\s\S]*?const pendingMessages = coffeeMessagesWithHeardCutoffs\(/,
     );
   });
 

@@ -58,14 +58,14 @@ test("desaturates the whole screen during local model warmup", () => {
 test("Companion field Refract bypasses warmup while magic can still use the gate", () => {
   assert.match(companion, /usePrismRefractionGate/u);
   assert.doesNotMatch(companion, /prepareLocalModel/u);
-  assert.match(companion, /runLocalRefraction/u);
+  assert.match(companion, /refractionGate\.withRefractionLoader/u);
   assert.match(companion, /!target\.ownsPresentation/u);
   assert.match(refract, /ownsPresentation\?:/u);
   assert.match(debate, /ownsPresentation:\s*true/u);
-  // Field generate calls target.generate directly (rainbow-only wait).
+  // Field generation uses only its timeout wrapper and rainbow field wait.
   assert.match(
     companion,
-    /const rawValue = await target\.generate\(\{/u,
+    /const rawValue = await runPrismRefractGenerationWithTimeout\(\{[\s\S]{0,300}target\.generate\(\{/u,
   );
   assert.doesNotMatch(
     companion,
@@ -78,7 +78,7 @@ test("Companion field Refract bypasses warmup while magic can still use the gate
   // Magic still uses the shared fullscreen gate when it does not own presentation.
   assert.match(
     companion,
-    /!target\.ownsPresentation[\s\S]*?runLocalRefraction\(/u,
+    /!target\.ownsPresentation[\s\S]*?refractionGate\.withRefractionLoader\(/u,
   );
 });
 
@@ -90,7 +90,7 @@ test("Companion suppress keeps in-flight field Refract alive", () => {
   );
   assert.match(
     companion,
-    /session\.phase === "traveling"[\s\S]*session\.phase === "generating"[\s\S]*session\.phase === "ready"[\s\S]*session\.phase === "error"/u,
+    /session\.phase === "generating"[\s\S]*session\.phase === "ready"[\s\S]*session\.phase === "error"/u,
   );
   assert.match(
     companion,

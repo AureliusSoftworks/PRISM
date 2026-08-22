@@ -493,7 +493,7 @@ test("normalizes the canonical four jurors plus moderator final ballot", () => {
 test("separates executable Debate formats from visible future productions", () => {
   assert.deepEqual(
     DEBATE_FORMATS.map((format) => format.id),
-    ["forum", "turnabout"],
+    ["forum", "turnabout", "whodunnit"],
   );
   assert.deepEqual(
     DEBATE_FORMAT_CATALOG.map(({ id, productionName, availability }) => ({
@@ -510,6 +510,11 @@ test("separates executable Debate formats from visible future productions", () =
       {
         id: "turnabout",
         productionName: "Court of Record",
+        availability: "available",
+      },
+      {
+        id: "whodunnit",
+        productionName: "A Murder Mystery",
         availability: "available",
       },
       {
@@ -1493,6 +1498,25 @@ test("treats mumbled public floor as unintelligible and mute as not", () => {
       kind: "speech",
       content: mumbled,
       speakerKind: "moderator",
+    }),
+    false,
+  );
+  assert.equal(
+    debateFloorSpeechWarrantsUnintelligibleCutoff({
+      kind: "testimony",
+      content: mumbled,
+      speakerKind: "advocate",
+      speakerEffects: [{ type: "speech_obfuscation", mode: "gibberish" }],
+    }),
+    true,
+  );
+  assert.equal(
+    debateFloorSpeechWarrantsUnintelligibleCutoff({
+      kind: "testimony",
+      content:
+        "My moon-shaped calculator says red is loud, but the warranty argument is still clear.",
+      speakerKind: "advocate",
+      speakerEffects: [],
     }),
     false,
   );

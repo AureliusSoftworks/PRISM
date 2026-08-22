@@ -197,7 +197,10 @@ describe("typed local asset library", () => {
       assetStyles,
       /data-asset-preview-kind="debate_exhibit"[\s\S]*object-fit: contain/u,
     );
-    assert.match(assetStyles, /\.detailActions[\s\S]*position: sticky/u);
+    assert.match(
+      assetStyles,
+      /\.detailActions[\s\S]*margin-top: 0\.75rem[\s\S]*border-top:/u,
+    );
     assert.match(assetStyles, /\.magentaPass[\s\S]*display: grid/u);
   });
 
@@ -318,8 +321,8 @@ describe("typed local asset library", () => {
     assert.match(storageSource, /\/api\/assets\/storage/u);
     assert.match(storageSource, /Recovery trash/u);
     assert.match(storageSource, /Generated/u);
-    assert.match(storageSource, /Uploaded/u);
-    assert.match(storageSource, /Audit unused assets/u);
+    assert.match(storageSource, /synthesized or uploaded clips/u);
+    assert.match(storageSource, /Audit unused/u);
     assert.match(storageSource, /includeIncomplete/u);
     assert.match(storageSource, /allowDelete/u);
     assert.match(serverSource, /route\("POST", "\/api\/assets\/upload"/u);

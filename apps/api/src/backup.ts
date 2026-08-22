@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { createHash } from "node:crypto";
 import {
   decryptJson,
   decryptText,
@@ -613,6 +614,41 @@ export interface BackupSnapshot {
       sessionId: string;
       sourceRevision: number;
       snapshotJson: string;
+      createdAt: string;
+    }>;
+    /** Server-private Whodunnit truth. Included only in the encrypted account backup. */
+    mysteryCases?: Array<{
+      sessionId: string;
+      schemaVersion: number;
+      generatorVersion: number;
+      privateJson: string;
+      contentHash: string;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+    mysteryActions?: Array<{
+      id: string;
+      sessionId: string;
+      sequence: number;
+      actionKind: string;
+      publicPayloadJson: string;
+      occurredAt: string;
+    }>;
+    mysteryNotebooks?: Array<{
+      sessionId: string;
+      revision: number;
+      documentJson: string;
+      pendingProposalJson: string | null;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+    mysteryNotebookRevisions?: Array<{
+      id: string;
+      sessionId: string;
+      revision: number;
+      documentJson: string;
+      reason: string;
+      idempotencyKey: string;
       createdAt: string;
     }>;
   };
@@ -2757,6 +2793,49 @@ export function exportUserSnapshot(
         ORDER BY checkpoint.created_at`,
     )
     .all(userId) as Array<Record<string, string | number | null>>;
+  const debateMysteryCases = db
+    .prepare(
+      `SELECT mystery.session_id, mystery.schema_version,
+              mystery.generator_version, mystery.private_json,
+              mystery.content_hash, mystery.created_at, mystery.updated_at
+         FROM debate_mystery_cases AS mystery
+         JOIN debate_sessions AS session ON session.id = mystery.session_id
+        WHERE mystery.user_id = ? AND session.status != 'cancelled'
+        ORDER BY mystery.created_at`,
+    )
+    .all(userId) as Array<Record<string, string | number | null>>;
+  const debateMysteryActions = db
+    .prepare(
+      `SELECT action.id, action.session_id, action.sequence,
+              action.action_kind, action.public_payload_json, action.occurred_at
+         FROM debate_mystery_actions AS action
+         JOIN debate_sessions AS session ON session.id = action.session_id
+        WHERE action.user_id = ? AND session.status != 'cancelled'
+        ORDER BY action.session_id, action.sequence`,
+    )
+    .all(userId) as Array<Record<string, string | number | null>>;
+  const debateMysteryNotebooks = db
+    .prepare(
+      `SELECT notebook.session_id, notebook.revision, notebook.document_json,
+              notebook.pending_proposal_json, notebook.created_at,
+              notebook.updated_at
+         FROM debate_mystery_notebooks AS notebook
+         JOIN debate_sessions AS session ON session.id = notebook.session_id
+        WHERE notebook.user_id = ? AND session.status != 'cancelled'
+        ORDER BY notebook.created_at`,
+    )
+    .all(userId) as Array<Record<string, string | number | null>>;
+  const debateMysteryNotebookRevisions = db
+    .prepare(
+      `SELECT revision.id, revision.session_id, revision.revision,
+              revision.document_json, revision.reason,
+              revision.idempotency_key, revision.created_at
+         FROM debate_mystery_notebook_revisions AS revision
+         JOIN debate_sessions AS session ON session.id = revision.session_id
+        WHERE revision.user_id = ? AND session.status != 'cancelled'
+        ORDER BY revision.session_id, revision.revision`,
+    )
+    .all(userId) as Array<Record<string, string | number | null>>;
 
   return {
     version: 1,
@@ -3107,6 +3186,43 @@ export function exportUserSnapshot(
         snapshotJson: String(row.snapshot_json),
         createdAt: String(row.created_at),
       })),
+      mysteryCases: debateMysteryCases.map((row) => ({
+        sessionId: String(row.session_id),
+        schemaVersion: Number(row.schema_version ?? 1),
+        generatorVersion: Number(row.generator_version ?? 1),
+        privateJson: String(row.private_json),
+        contentHash: String(row.content_hash),
+        createdAt: String(row.created_at),
+        updatedAt: String(row.updated_at),
+      })),
+      mysteryActions: debateMysteryActions.map((row) => ({
+        id: String(row.id),
+        sessionId: String(row.session_id),
+        sequence: Number(row.sequence ?? 1),
+        actionKind: String(row.action_kind),
+        publicPayloadJson: String(row.public_payload_json ?? "{}"),
+        occurredAt: String(row.occurred_at),
+      })),
+      mysteryNotebooks: debateMysteryNotebooks.map((row) => ({
+        sessionId: String(row.session_id),
+        revision: Number(row.revision ?? 1),
+        documentJson: String(row.document_json),
+        pendingProposalJson:
+          typeof row.pending_proposal_json === "string"
+            ? row.pending_proposal_json
+            : null,
+        createdAt: String(row.created_at),
+        updatedAt: String(row.updated_at),
+      })),
+      mysteryNotebookRevisions: debateMysteryNotebookRevisions.map((row) => ({
+        id: String(row.id),
+        sessionId: String(row.session_id),
+        revision: Number(row.revision ?? 1),
+        documentJson: String(row.document_json),
+        reason: String(row.reason),
+        idempotencyKey: String(row.idempotency_key),
+        createdAt: String(row.created_at),
+      })),
     },
     sessionNotes: sessionNotes.map((row) => ({
       surface: String(row.surface) as NonNullable<
@@ -3259,6 +3375,10 @@ function assertSnapshotIdsStayWithinTenant(
       | "debate_sessions"
       | "debate_events"
       | "debate_recess_checkpoints"
+      | "debate_mystery_cases"
+      | "debate_mystery_actions"
+      | "debate_mystery_notebooks"
+      | "debate_mystery_notebook_revisions"
       | "replay_recordings"
       | "replay_voice_takes"
       | SlateBackupTable,
@@ -3407,6 +3527,24 @@ function assertSnapshotIdsStayWithinTenant(
         (item) => item.sessionId,
       ),
       "session_id",
+    );
+    assertIds(
+      "debate_mystery_cases",
+      (snapshot.debates.mysteryCases ?? []).map((item) => item.sessionId),
+      "session_id",
+    );
+    assertIds(
+      "debate_mystery_actions",
+      (snapshot.debates.mysteryActions ?? []).map((item) => item.id),
+    );
+    assertIds(
+      "debate_mystery_notebooks",
+      (snapshot.debates.mysteryNotebooks ?? []).map((item) => item.sessionId),
+      "session_id",
+    );
+    assertIds(
+      "debate_mystery_notebook_revisions",
+      (snapshot.debates.mysteryNotebookRevisions ?? []).map((item) => item.id),
     );
   }
   if (snapshot.presenceBeats) {
@@ -4751,6 +4889,83 @@ function importUserSnapshotWithinTransaction(
         checkpoint.snapshotJson,
         checkpoint.createdAt,
       );
+    }
+    const insertMysteryCase = db.prepare(
+      `INSERT OR REPLACE INTO debate_mystery_cases
+         (session_id, user_id, schema_version, generator_version, private_json,
+          content_hash, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const mystery of snapshot.debates.mysteryCases ?? []) {
+      if (
+        !sessionIds.has(mystery.sessionId) ||
+        !Number.isInteger(mystery.schemaVersion) ||
+        mystery.schemaVersion < 1 ||
+        !Number.isInteger(mystery.generatorVersion) ||
+        mystery.generatorVersion < 1
+      ) {
+        throw new Error("Account backup contains an invalid private Mystery case.");
+      }
+      try { JSON.parse(mystery.privateJson); }
+      catch { throw new Error("Account backup contains invalid private Mystery JSON."); }
+      if (createHash("sha256").update(mystery.privateJson).digest("hex") !== mystery.contentHash) {
+        throw new Error("Account backup contains a corrupted private Mystery case.");
+      }
+      insertMysteryCase.run(
+        mystery.sessionId,
+        userId,
+        mystery.schemaVersion,
+        mystery.generatorVersion,
+        mystery.privateJson,
+        mystery.contentHash,
+        mystery.createdAt,
+        mystery.updatedAt,
+      );
+    }
+    const insertMysteryAction = db.prepare(
+      `INSERT OR REPLACE INTO debate_mystery_actions
+         (id, user_id, session_id, sequence, action_kind,
+          public_payload_json, occurred_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const action of snapshot.debates.mysteryActions ?? []) {
+      if (!action.id?.trim() || !sessionIds.has(action.sessionId) || !Number.isInteger(action.sequence) || action.sequence < 1 || !action.actionKind?.trim()) {
+        throw new Error("Account backup contains an invalid Mystery replay action.");
+      }
+      try { JSON.parse(action.publicPayloadJson); }
+      catch { throw new Error("Account backup contains invalid Mystery replay JSON."); }
+      insertMysteryAction.run(action.id, userId, action.sessionId, action.sequence, action.actionKind, action.publicPayloadJson, action.occurredAt);
+    }
+    const insertMysteryNotebook = db.prepare(
+      `INSERT OR REPLACE INTO debate_mystery_notebooks
+         (session_id, user_id, revision, document_json,
+          pending_proposal_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const notebook of snapshot.debates.mysteryNotebooks ?? []) {
+      if (!sessionIds.has(notebook.sessionId) || !Number.isInteger(notebook.revision) || notebook.revision < 1) {
+        throw new Error("Account backup contains an invalid Mystery notebook.");
+      }
+      try {
+        JSON.parse(notebook.documentJson);
+        if (notebook.pendingProposalJson) JSON.parse(notebook.pendingProposalJson);
+      } catch { throw new Error("Account backup contains invalid Mystery notebook JSON."); }
+      insertMysteryNotebook.run(notebook.sessionId, userId, notebook.revision, notebook.documentJson, notebook.pendingProposalJson, notebook.createdAt, notebook.updatedAt);
+    }
+    const notebookReasons = new Set(["edit", "cleanup", "undo", "import"]);
+    const insertMysteryNotebookRevision = db.prepare(
+      `INSERT OR REPLACE INTO debate_mystery_notebook_revisions
+         (id, user_id, session_id, revision, document_json, reason,
+          idempotency_key, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const revision of snapshot.debates.mysteryNotebookRevisions ?? []) {
+      if (!revision.id?.trim() || !sessionIds.has(revision.sessionId) || !Number.isInteger(revision.revision) || revision.revision < 1 || !notebookReasons.has(revision.reason) || !revision.idempotencyKey?.trim()) {
+        throw new Error("Account backup contains an invalid Mystery notebook revision.");
+      }
+      try { JSON.parse(revision.documentJson); }
+      catch { throw new Error("Account backup contains invalid Mystery notebook revision JSON."); }
+      insertMysteryNotebookRevision.run(revision.id, userId, revision.sessionId, revision.revision, revision.documentJson, revision.reason, revision.idempotencyKey, revision.createdAt);
     }
   }
 

@@ -40,6 +40,25 @@ describe("Signal turn lookahead", () => {
     );
   });
 
+  it("waits on the server instead of polling speculative turns on the UI thread", () => {
+    assert.match(
+      signalSource,
+      /\?waitMs=\$\{SIGNAL_PREPARATION_WAIT_MS\}/u,
+    );
+    assert.doesNotMatch(signalSource, /SIGNAL_PREPARATION_POLL_MS/u);
+  });
+
+  it("authorizes voice prefetch against the exact prepared turn", () => {
+    assert.match(
+      signalSource,
+      /onPrefetchUtterance\?\.\([\s\S]{0,900}?signalTurnPreparationId: preparation\.id/u,
+    );
+    assert.match(
+      signalSource,
+      /utterance\.signalListenerReactionPlan[\s\S]{0,900}?onPrefetchListenerReaction\?\.\([\s\S]{0,900}?signalTurnPreparationId: preparation\.id/u,
+    );
+  });
+
   it("releases a prepared turn a Producer cue has overtaken", () => {
     assert.match(
       signalSource,

@@ -158,11 +158,171 @@ function simulatedStepInstruction(args: {
   ].join("\n");
 }
 
+/** Cuts at a line or sentence boundary so a note never ends mid-word. */
+function truncatePreparationAtBoundary(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  const clipped = text.slice(0, maxChars);
+  const boundary = Math.max(
+    clipped.lastIndexOf("\n"),
+    clipped.lastIndexOf(". "),
+    clipped.lastIndexOf("; "),
+  );
+  return (
+    boundary > Math.floor(maxChars / 2) ? clipped.slice(0, boundary) : clipped
+  ).trim();
+}
+
+/**
+ * Every pass prompt asks for short bullets, so horizontal whitespace collapses
+ * but newlines survive: flattening a checklist into one run-on line was
+ * throwing away the structure the pass was told to produce.
+ */
 function cleanPrivatePreparation(raw: string, effort: ReasoningEffort): string {
-  return raw
-    .replace(/\s+/gu, " ")
-    .trim()
-    .slice(0, simulatedSurfacePreparationNoteMaxChars(effort));
+  const structured = raw
+    .replace(/\r\n?/gu, "\n")
+    .replace(/```[^\n]*\n?/gu, "")
+    .replace(/[^\S\n]+/gu, " ")
+    .replace(/[ \t]*\n[ \t]*/gu, "\n")
+    .replace(/\n{3,}/gu, "\n\n")
+    .trim();
+  return truncatePreparationAtBoundary(
+    structured,
+    simulatedSurfacePreparationNoteMaxChars(effort),
+  );
+}
+
+/**
+ * Appending a system turn *after* the final user turn breaks some Ollama chat
+ * templates: llama3.2 — the design baseline — returns an empty completion
+ * outright. Private guidance is therefore inserted before the last user turn,
+ * matching the Chat Psychic path. Without this every simulated pass on the
+ * baseline model returned "", no notes were ever produced, and the whole
+ * ladder was a silent no-op that still charged four extra model calls.
+ */
+function withPrivateGuidanceMessage(
+  messages: readonly ProviderMessage[],
+  content: string,
+  /**
+   * Restated on the final user turn. Small locals attend far more to the last
+   * user message than to system guidance, and the observed failures are
+   * output-shape misses rather than reasoning misses.
+   */
+  reinforcement?: string,
+): ProviderMessage[] {
+  const guidance: ProviderMessage = { role: "system", content };
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === "user") {
+      const finalUser: ProviderMessage = reinforcement
+        ? { ...message, content: `${message.content}\n\n${reinforcement}` }
+        : message;
+      return [
+        ...messages.slice(0, index),
+        guidance,
+        finalUser,
+        ...messages.slice(index + 1),
+      ];
+    }
+  }
+  return [...messages, guidance];
+}
+
+interface SimulatedEffortNote {
+  step: SimulatedEffortPassName;
+  text: string;
+}
+
+const SIMULATED_EFFORT_PASS_LABELS: Record<SimulatedEffortPassName, string> = {
+  plan: "Plan",
+  alternatives: "Chosen approach",
+  draft: "Draft",
+  audit: "Corrections",
+  red_team: "Risks and guards",
+  constraint_lock: "Must keep",
+  revise_draft: "Revised draft",
+  compliance_sweep: "Enforce",
+  synthesis: "Final blueprint",
+  revision: "Final blueprint",
+};
+
+/**
+ * Share of the effort's note budget each pass may occupy. Proportional caps
+ * mean every completed pass reaches the visible turn: a first-come budget let
+ * one long pass crowd out the rest.
+ */
+const SIMULATED_EFFORT_BRIEF_SHARE: Record<SimulatedEffortPassName, number> = {
+  plan: 0.24,
+  alternatives: 0.1,
+  draft: 0.2,
+  revise_draft: 0.2,
+  audit: 0.16,
+  red_team: 0.12,
+  constraint_lock: 0.16,
+  compliance_sweep: 0.12,
+  synthesis: 0.3,
+  revision: 0.3,
+};
+
+/** Hard requirements and the distillation land last, where models weight them most. */
+const SIMULATED_EFFORT_BRIEF_ORDER: readonly SimulatedEffortPassName[] = [
+  "plan",
+  "alternatives",
+  "draft",
+  "revise_draft",
+  "audit",
+  "red_team",
+  "compliance_sweep",
+  "constraint_lock",
+  "synthesis",
+  "revision",
+];
+
+function simulatedEffortNoteSections(
+  notes: readonly SimulatedEffortNote[],
+  effort: ReasoningEffort,
+): string[] {
+  const byStep = new Map<SimulatedEffortPassName, string>();
+  for (const note of notes) byStep.set(note.step, note.text);
+  // A revision supersedes the draft it replaced; keeping both wastes budget
+  // and invites the model to merge two candidate answers.
+  if (byStep.has("revise_draft")) byStep.delete("draft");
+  if (byStep.has("synthesis")) byStep.delete("revision");
+  const budget = simulatedSurfacePreparationNoteMaxChars(effort);
+  return SIMULATED_EFFORT_BRIEF_ORDER.flatMap((step) => {
+    const text = byStep.get(step);
+    if (!text) return [];
+    const share = Math.max(
+      80,
+      Math.round(budget * SIMULATED_EFFORT_BRIEF_SHARE[step]),
+    );
+    const clamped = truncatePreparationAtBoundary(text, share);
+    return clamped
+      ? [`${SIMULATED_EFFORT_PASS_LABELS[step]}: ${clamped}`]
+      : [];
+  });
+}
+
+/**
+ * Notes handed to the next pass. The newest passes matter most to the step
+ * about to run, so the oldest are dropped first when the budget is tight.
+ */
+function renderSimulatedEffortPriorNotes(
+  notes: readonly SimulatedEffortNote[],
+  effort: ReasoningEffort,
+): string {
+  if (notes.length === 0) return "";
+  const budget = simulatedSurfacePreparationNoteMaxChars(effort);
+  const blocks: string[] = [];
+  let used = 0;
+  for (let index = notes.length - 1; index >= 0; index -= 1) {
+    const note = notes[index];
+    if (!note) continue;
+    const block = `${SIMULATED_EFFORT_PASS_LABELS[note.step]}: ${note.text}`;
+    if (used + block.length > budget && blocks.length > 0) break;
+    blocks.unshift(block);
+    used += block.length;
+  }
+  return blocks.join("\n");
 }
 
 export function shouldPrepareMessagesWithSimulatedEffort(args: {
@@ -206,29 +366,35 @@ export async function prepareMessagesWithSimulatedEffort(args: {
     args.ladderProfile,
   );
   const steps = simulatedEffortLadderPasses(args.effort, ladderProfile);
-  let priorNotes = "";
+  // Notes accumulate. Overwriting them meant each pass saw only the one before
+  // it, and the visible turn saw only the last — so High effort shipped a bare
+  // correction list with the plan and draft it referred to already discarded.
+  const notes: SimulatedEffortNote[] = [];
   for (const step of steps) {
     if (args.options.signal?.aborted) throw args.options.signal.reason;
     let raw: string;
     try {
       raw = await args.provider.generateResponse(
-        [
-          ...args.messages,
-          {
-            role: "system",
-            content: simulatedStepInstruction({
-              surface: args.surface,
-              step,
-              priorNotes,
-              effort: args.effort,
-              outputContract: args.outputContract,
-            }),
-          },
-        ],
+        withPrivateGuidanceMessage(
+          args.messages,
+          simulatedStepInstruction({
+            surface: args.surface,
+            step,
+            priorNotes: renderSimulatedEffortPriorNotes(notes, args.effort),
+            effort: args.effort,
+            outputContract: args.outputContract,
+          }),
+        ),
         {
           model: args.options.model,
+          // Alternatives only earns its pass if the options genuinely differ,
+          // which a deterministic sample cannot produce.
           temperature:
-            step === "draft" || step === "revise_draft" ? 0.35 : 0,
+            step === "alternatives"
+              ? 0.6
+              : step === "draft" || step === "revise_draft"
+                ? 0.35
+                : 0,
           maxTokens: simulatedSurfacePreparationMaxTokens(args.effort),
           topP: args.options.topP,
           topK: args.options.topK,
@@ -245,18 +411,19 @@ export async function prepareMessagesWithSimulatedEffort(args: {
       break;
     }
     const cleaned = cleanPrivatePreparation(raw, args.effort);
-    if (cleaned) priorNotes = cleaned;
+    if (cleaned) notes.push({ step, text: cleaned });
   }
-  if (!priorNotes) return args.messages;
-  return [
-    ...args.messages,
-    {
-      role: "system",
-      content: [
-        "Private PRISM preparation notes follow. Use them silently and never mention them.",
-        priorNotes,
-        "Now produce only the requested visible output, following every original schema, persona, and procedural constraint.",
-      ].join("\n"),
-    },
-  ];
+  const sections = simulatedEffortNoteSections(notes, args.effort);
+  if (sections.length === 0) return args.messages;
+  // Restating the output contract on the final user turn was measured on the
+  // local eval and made things slightly worse (it cost letter-count-sort and
+  // gained nothing), so the contract stays in the pass prompts only.
+  return withPrivateGuidanceMessage(
+    args.messages,
+    [
+      "Private PRISM preparation notes follow. Use them silently: never quote them, never mention planning, never describe your process.",
+      sections.join("\n"),
+      "The original request, persona, and output contract outrank these notes wherever they disagree. Produce only the requested visible output, with no preamble.",
+    ].join("\n\n"),
+  );
 }

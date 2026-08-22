@@ -35,8 +35,7 @@ test("full-avatar quality cuts never target the phosphor screen", () => {
 
   for (const rules of [
     cssSection("Session bot visual quality", "Rendered-size quality"),
-    cssSection("Rendered-size quality", "Runtime pressure may simplify"),
-    cssSection("Runtime pressure may simplify", "@keyframes botAmbientHoverDrift"),
+    cssSection("Rendered-size quality", "@keyframes botAmbientHoverDrift"),
   ]) {
     assert.doesNotMatch(
       rules,
@@ -51,10 +50,17 @@ test("full-avatar quality cuts never target the phosphor screen", () => {
   );
 });
 
-test("Signal uses the shared full-avatar renderer guarded above", () => {
+test("Signal keeps the shared authored renderer on its live stage", () => {
   assert.match(signalSource, /renderAvatar\?:/u);
   assert.match(
     pageSource,
-    /renderAvatar=\{\(botSummary, avatarState\) => \{[\s\S]*<ZenLiveBotMannequin/u,
+    /renderAvatar=\{\(botSummary, avatarState\) => \{[\s\S]*signalLivePerformanceAvatar[\s\S]*<ZenLiveBotMannequin/u,
   );
+  assert.doesNotMatch(pageSource, /data-signal-live-compact-avatar/u);
+  assert.match(
+    pageSource,
+    /const signalMannequinProps:[\s\S]*?detailLevel:\s*"full"[\s\S]{0,160}pixelRasterizationEnabled:\s*!signalLivePerformanceAvatar[\s\S]{0,160}runtimeEffectsEnabled:\s*!signalLivePerformanceAvatar[\s\S]{0,160}minimumRenderedSizeTier:\s*"full"/u,
+  );
+  assert.match(pageSource, /data-prism-priority-phosphor="true"/u);
+  assert.match(pageSource, /minimumRenderedSizeTier="full"/u);
 });

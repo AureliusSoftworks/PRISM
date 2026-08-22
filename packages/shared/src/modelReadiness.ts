@@ -20,6 +20,13 @@ export interface ModelPreparationRequest {
   provider: "local" | "openai" | "anthropic";
   model?: string | null;
   experience: ModelPreparationExperience;
+  /**
+   * A latency-critical live session may ask the server to resolve Auto,
+   * reserve its Ollama residency lane, and warm the exact first-turn model
+   * before the interactive scene is revealed.
+   */
+  liveSessionId?: string;
+  responseMode?: "local" | "online";
   retry?: boolean;
 }
 

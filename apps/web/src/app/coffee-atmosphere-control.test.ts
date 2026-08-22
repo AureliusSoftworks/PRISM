@@ -24,15 +24,12 @@ const layerSource = readFileSync(
   "utf8",
 );
 
-test("Coffee Jazz is a wired local-only atmosphere control with stations", () => {
+test("Coffee atmosphere offers bundled fallback and custom group audio", () => {
   assert.match(source, /Atmosphere audio/u);
-  assert.match(source, /className=\{styles\.coffeeJazzButton\}/u);
-  assert.match(source, /aria-pressed=\{coffeeJazzAtmosphere\.enabled\}/u);
-  assert.match(source, /aria-label="Jazz station"/u);
-  assert.doesNotMatch(
-    source,
-    /className=\{styles\.coffeeJazzButton\}[\s\S]{0,120}disabled[\s\S]{0,80}>\s*Jazz/u,
-  );
+  assert.match(source, /role="radiogroup"\s*aria-label="Coffee atmosphere audio source"/u);
+  assert.match(source, /role="radio"\s*aria-checked=\{coffeeJazzAtmosphere\.source === "fallback"\}/u);
+  assert.match(source, /role="radio"\s*aria-checked=\{coffeeJazzAtmosphere\.source === "custom"\}/u);
+  assert.match(source, /aria-label="Fallback Coffee song"/u);
   assert.match(jazzSource, /prism_coffee_jazz_atmosphere_v1/u);
   assert.match(jazzSource, /rainy-morning/u);
   assert.match(jazzSource, /late-night-lounge/u);
@@ -46,7 +43,7 @@ test("Coffee Jazz is a wired local-only atmosphere control with stations", () =>
 });
 
 test("Coffee thinking keeps only its authored screen spinner", () => {
-  assert.match(source, /showThinkingSpinner=\{seatThinkingVisualActive\}/u);
+  assert.match(source, /showThinkingSpinner: seatThinkingVisualActive/u);
   assert.doesNotMatch(source, /coffeeSeatThinkingIndicator/u);
   assert.doesNotMatch(cssSource, /coffeeSeatThinkingIndicator/u);
   assert.doesNotMatch(
@@ -76,7 +73,7 @@ test("Coffee Jazz preference stays outside CoffeeSessionSettings persistence", (
   );
   assert.match(
     source,
-    /Soft café jazz for the live table and while watching replays[\s\S]*stays out of faithful audio recordings/u,
+    /Choose a bundled café song or the group’s own cast-derived bed\.[\s\S]*Table music stays out of faithful audio recordings/u,
   );
 });
 
@@ -179,7 +176,11 @@ test("Coffee Jazz and its environmental loop route locally outside the master", 
   );
 });
 
-test("Coffee master replay keeps jazz overlay while silencing recordable atmosphere", () => {
+test("Coffee master replay silences the live atmosphere layer", () => {
+  assert.match(
+    source,
+    /active=\{Boolean\([\s\S]{0,320}!\(coffeeReplayActive && coffeeReplayUsesAudioMaster\)/u,
+  );
   assert.match(
     source,
     /ambientFoley=\{\s*!\(coffeeReplayActive && coffeeReplayUsesAudioMaster\) &&\s*settings\?\.voiceMode !== "mute"\s*\}/u,
@@ -191,9 +192,5 @@ test("Coffee master replay keeps jazz overlay while silencing recordable atmosph
   assert.match(
     source,
     /coffeeReplayActive && coffeeReplayUsesAudioMaster\s*\?\s*undefined\s*:\s*settings\?\.voiceMode === "mute"\s*\?\s*undefined\s*:\s*coffeeWorkspaceRef/u,
-  );
-  assert.match(
-    source,
-    /coffeeJazzAtmosphere\.enabled \|\|\s*\(!\(coffeeReplayActive && coffeeReplayUsesAudioMaster\) &&\s*settings\.voiceMode !== "mute"\)/u,
   );
 });

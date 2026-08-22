@@ -12,17 +12,18 @@ const pageSource = readFileSync(
 describe("bot picker selection", () => {
   it("keeps mouse and keyboard bot-card activation as direct selection", () => {
     assert.equal(
-      pageSource.match(
-        /const clickShouldSelectDirectly =\s*e\.detail === 0 \|\| lastBotPickerPointerTypeRef\.current !== "touch";/g
-      )?.length,
-      2
+      pageSource.match(/const isDesktopMousePixelClick/g)?.length,
+      2,
     );
     assert.equal(
       pageSource.match(
-        /const shouldRelocateHue =\s*!clickShouldSelectDirectly &&\s*!emptyStateSearchActive &&\s*botHasFilterableColor\(b\) &&\s*!hueFilterActive &&\s*pickerUsesHueNavigation\(geom, viewportWidth\);/g
+        /if \(isDesktopMousePixelClick\) \{[\s\S]{0,100}focusHueLensOnBot\(b\);[\s\S]{0,80}\}\s*commitEmptyStateBotSelection\(b\.id(?:,\s*e\.currentTarget)?\);/g,
       )?.length,
-      2
+      2,
     );
-    assert.doesNotMatch(pageSource, /const isDesktopMousePixelClick/);
+    assert.equal(
+      pageSource.match(/setCanvasSelectedBotIds\(\s*canvasBotSelectionAfterPlainActivation\(\),?\s*\);/g)?.length,
+      2,
+    );
   });
 });

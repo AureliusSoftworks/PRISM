@@ -134,9 +134,9 @@ describe("Prism Refract integration", () => {
   });
 
   it("keeps universal prose targets available inside Bot Foundry", () => {
-    assert.doesNotMatch(
+    assert.match(
       pageSource,
-      /PrismCompanionPresenceBoundary reason="bot-creation"/u,
+      /\{botGeneratorBusy \? \(\s*<PrismCompanionPresenceBoundary reason="bot-creation" \/>\s*\) : null\}/u,
     );
     assert.match(
       pageSource,
@@ -522,12 +522,25 @@ describe("Prism Refract integration", () => {
       chatPanelBranch,
       /refractModelPicker|styles\.refractModelPicker/u,
     );
-    assert.match(companionSource, /aria-label=\{`Refract lane /u);
+    assert.match(companionSource, /Refract model/u);
+    assert.match(companionSource, /aria-label=\{`App mode /u);
     assert.match(companionSource, /className=\{styles\.refractLaneBadge\}/u);
     assert.match(companionSource, /data-lane=\{refractModelResponseMode\}/u);
     assert.match(
       companionSource,
-      /title="Follows the global LOCAL\/ONLINE toggle"/u,
+      /title="Controlled by the global LOCAL\/ONLINE privacy toggle"/u,
+    );
+    assert.match(
+      companionSource,
+      /This choice is used only by Refract\. Your chat and bot[\s\S]*model settings stay unchanged\./u,
+    );
+    assert.match(
+      companionSource,
+      /ONLINE may send the item being refracted to an online provider\./u,
+    );
+    assert.match(
+      companionSource,
+      /LOCAL keeps the item being refracted offline\./u,
     );
     const magicSubmission =
       companionSource.match(

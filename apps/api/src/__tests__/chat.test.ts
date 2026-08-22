@@ -153,6 +153,7 @@ function createChatTestDb(): DatabaseSync {
       conversation_mode TEXT NOT NULL DEFAULT 'sandbox',
       bot_id TEXT,
       bot_group_ids TEXT,
+      coffee_group_id TEXT,
       parent_id TEXT,
       fork_message_id TEXT,
       coffee_topic TEXT,
@@ -895,8 +896,8 @@ describe("bot-locked Chat lane", () => {
     const prompt = ordinaryTurnCalls[0]?.messages ?? [];
     const fullPrompt = prompt.map((message) => message.content).join("\n");
     assert.equal(prompt.at(-1)?.content, userMessage);
-    assert.match(fullPrompt, /answer as one fresh direct insult to Jared/iu);
-    assert.match(fullPrompt, /no generic jab or debate unless asked/iu);
+    assert.match(fullPrompt, /one fresh direct insult to Jared must carry the answer/iu);
+    assert.match(fullPrompt, /never prepend a generic jab/iu);
     assert.doesNotMatch(fullPrompt, /public profanity|public mutation/iu);
     assert.match(result.conversation.messages.at(-1)?.content ?? "", /Jared,/u);
     assert.match(

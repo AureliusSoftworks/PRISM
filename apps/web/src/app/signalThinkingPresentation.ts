@@ -4,6 +4,7 @@ import type {
   ReplayDirectionEventV2,
   ReplayThinkingDirectionPayloadV2,
 } from "@localai/shared";
+import { liveAvatarShouldShowThinking } from "./liveAvatarWorkPresentation.ts";
 
 export const SIGNAL_COMPACT_THINKING_NOTICE_MIN_MS = 450;
 export const SIGNAL_COMPACT_THINKING_NOTICE_MAX_MS = 1_400;
@@ -113,6 +114,41 @@ export function signalPresentedThinkingRole(args: {
   return args.generationThinkingRunMatches
     ? args.generationThinkingRole
     : args.nextSpeakerRole;
+}
+
+/**
+ * The role the *stage* should show as thinking, which is not the same thing as
+ * the role written into the replay direction log.
+ *
+ * `signalPresentedThinkingRole` stays bound to model generation on purpose: a
+ * compacted audio wait must never become a second recorded thinking interval.
+ * But the audience does not care which subsystem is busy. Review 2fcad998 sat
+ * through 188s of foreground holds inside a 254s episode — a single one of them
+ * 46s long — and the producer typed "Pausing to think is fine, but we need to
+ * show the thinking animation while producing."
+ *
+ * Voice preparation was the blank half. The camera already held a waiting shot
+ * through it (`liveAutoWaitingForPresence`), so the stage framed a bot that was
+ * visibly doing nothing. Producing audio is producing; show it.
+ */
+export function signalStageThinkingRole(args: {
+  presentedThinkingRole: BotcastSpeakerRole | null;
+  voicePreparationPending: boolean;
+  voicePreparationRole: BotcastSpeakerRole | null;
+}): BotcastSpeakerRole | null {
+  const role =
+    args.presentedThinkingRole ??
+    (args.voicePreparationPending ? args.voicePreparationRole : null);
+  if (role === null) return null;
+  return liveAvatarShouldShowThinking({
+    generating: args.presentedThinkingRole !== null,
+    synthesizing:
+      args.voicePreparationPending && args.voicePreparationRole !== null,
+    speaking: false,
+    playbackRecording: false,
+  })
+    ? role
+    : null;
 }
 
 export function signalThinkingPresentationEndReason(args: {

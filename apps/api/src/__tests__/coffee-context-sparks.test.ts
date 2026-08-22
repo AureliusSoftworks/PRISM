@@ -312,6 +312,23 @@ describe("Coffee Context Sparks", () => {
     assert.equal(prompts.get(source.id), fallbackCoffeeContextSparkPrompt(source));
   });
 
+  it("keeps live Context Sparks off the second local-model lane", async () => {
+    const db = fixture();
+    const provider = new SparkProvider();
+    const sparks = await ensureCoffeeContextSparks({
+      db,
+      userId: "user-1",
+      conversationId: "coffee-current",
+      provider,
+      generatePrompts: false,
+    });
+
+    assert.equal(provider.calls, 0);
+    assert.equal(sparks.length, 3);
+    assert.ok(sparks.every((spark) => /^Ask\s/u.test(spark.prompt)));
+    db.close();
+  });
+
   it("generates once, persists stable sparks, and consumes only after an explicit success", async () => {
     const db = fixture();
     const provider = new SparkProvider();

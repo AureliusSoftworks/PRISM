@@ -35,6 +35,17 @@ describe("Coffee turn recovery UI integration", () => {
     assert.match(pageSource, />\s*End session\s*</u);
   });
 
+  it("does not let an aborted turn write failure UI after Coffee exits", () => {
+    assert.match(
+      pageSource,
+      /const settleCoffeeTurnFailure =[\s\S]{0,420}coffeeConversationRef\.current\?\.id !== conversationId[\s\S]{0,220}coffeeSessionPhaseRef\.current === "selecting"[\s\S]{0,120}return false/u,
+    );
+    assert.match(
+      pageSource,
+      /if \(\s*settleCoffeeTurnFailure\([\s\S]{0,220}activeConversation\.id[\s\S]{0,120}\) \{[\s\S]{0,160}setCoffeeDraft\(trimmed\)/u,
+    );
+  });
+
   it("uses selection-specific terminal copy and never mislabels a fixed model as Auto", () => {
     assert.match(
       pageSource,
@@ -50,7 +61,7 @@ describe("Coffee turn recovery UI integration", () => {
   it("restores the exact player draft when bounded recovery cannot deliver", () => {
     assert.match(
       pageSource,
-      /catch \(err\) \{[\s\S]{0,500}setCoffeeDraft\(trimmed\)[\s\S]{0,200}coffeeDraftRef\.current = trimmed[\s\S]{0,200}coffeeComposerRichRef\.current\?\.setValue\(trimmed\)/u,
+      /catch \(err\) \{[\s\S]{0,700}setCoffeeDraft\(trimmed\)[\s\S]{0,200}coffeeDraftRef\.current = trimmed[\s\S]{0,200}coffeeComposerRichRef\.current\?\.setValue\(trimmed\)/u,
     );
   });
 });

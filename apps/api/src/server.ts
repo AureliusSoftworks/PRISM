@@ -10,6 +10,7 @@ import { randomInt } from "node:crypto";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import sharp from "sharp";
 import { getAppConfig, type AppConfig } from "@localai/config";
 import {
   createDatabase,
@@ -146,6 +147,7 @@ import {
   buildCoffeePollExportLines,
   coffeeMessagesVisibleInExport,
   assertCoffeeInviteBotCount,
+  assertCoffeeSessionAttendeeCount,
   coffeeConversationHasPlayerDeparture,
   coffeePreparedTurnCursor,
   buildCoffeeTeamExportLines,
@@ -272,6 +274,20 @@ import {
   type DebateAdvancePreparation,
 } from "./debate.ts";
 import {
+  applyDebateMysteryAction,
+  attachDebateMysteryGeneratedAssets,
+  createDebateMysterySession,
+  debateMysteryCaseCodeForSession,
+  getDebateMysteryCaseBible,
+  getDebateMysteryNotebook,
+  importDebateMysteryCase,
+  inspectDebateMysteryCaseCode,
+  listDebateMysteryActions,
+  patchDebateMysteryNotebook,
+  proposeDebateMysteryNotebookCleanup,
+  resumeDebateMysteryCompilation,
+} from "./debate-mystery.ts";
+import {
   buildSignalLiveBakeArtifactFromEpisode,
 } from "./live-bake.ts";
 import { generatePrismInputRefractDraft } from "./prism-input-refract.ts";
@@ -349,6 +365,7 @@ import {
   getBotcastShow,
   listBotcastEpisodes,
   listBotcastShows,
+  persistCompletedBotcastPairHistory,
   projectBotcastAdvanceResponseForAudienceV1,
   projectBotcastEpisodeForAudienceV1,
   projectBotcastEpisodeForObserverV2,
@@ -470,6 +487,7 @@ import type {
   ReplayRecordingStatusV1,
   ReplaySurfaceV1,
   ReplayVoiceTakeV1,
+  LiveBakeVoiceEngineV1,
   ResolvedLocalVoicePronunciationV1,
   ResolvedLocalVoiceSpeechprintV1,
   ProviderReasoningEffort,
@@ -820,8 +838,10 @@ import type {
   ProviderName,
 } from "./providers.ts";
 import {
+  claimLiveLocalModelLane,
   keepAuxiliaryLocalModelWarm,
   prepareLocalModel,
+  releaseLiveLocalModelLane,
 } from "./model-readiness.ts";
 import { cleanupResolvedPromptWithModel } from "./composer-cleanup.ts";
 import {
@@ -913,6 +933,7 @@ import {
   DEFAULT_BOT_FACE_THINKING_OFFSET_Y,
   DEFAULT_BOT_FACE_THINKING_SCALE,
   DEFAULT_OPENAI_IMAGE_MODEL_ID,
+  DEBATE_MYSTERY_ROOM_TEMPLATES,
   isAllowedOpenAiImageModelId,
   PRISM_ACTION_UNDO_RETENTION_MS,
   PRISM_ORCHESTRATION_VERSION,
@@ -995,7 +1016,9 @@ import {
   normalizeCrtFocus,
   normalizePrismTypographyScale,
   normalizeListenerReactionVocalFoley,
+  authoredSignalListenerPersonaSource,
   listenerReactionInterruptedSpeakerTextV1,
+  signalListenerReactionPlanForPlaybackV1,
   listenerReactionSpokenTextV1,
   listenerReactionTextIsAuthorizedV1,
   normalizeBotCrosstalkInterruptedSpeakerCue,
@@ -2377,6 +2400,8 @@ async function sendLocalVoiceWaveStream(args: {
   performancePlan?: VoicePerformancePlanV1 | null;
   /** Enables restrained punctuation orchestration for Kokoro, never system TTS. */
   punctuationPacing?: boolean;
+  /** Signal opts into raw framed WAV bytes to keep base64/JSON off its UI thread. */
+  binaryFrames?: boolean;
 }): Promise<void> {
   type LocalVoiceStreamItem =
     | {
@@ -2446,11 +2471,19 @@ async function sendLocalVoiceWaveStream(args: {
   args.response.setHeader("cache-control", "no-store");
   args.response.setHeader(
     "content-type",
-    "application/x-ndjson; charset=utf-8",
+    args.binaryFrames
+      ? "application/x-prism-voice-chunks"
+      : "application/x-ndjson; charset=utf-8",
   );
   args.response.setHeader(
     "x-prism-voice-stream",
-    hasVocalActions ? "wav-chunks-v2" : "wav-chunks-v1",
+    args.binaryFrames
+      ? hasVocalActions
+        ? "wav-chunks-binary-v2"
+        : "wav-chunks-binary-v1"
+      : hasVocalActions
+        ? "wav-chunks-v2"
+        : "wav-chunks-v1",
   );
   args.response.setHeader("x-prism-voice-engine", args.engineUsed);
   args.response.setHeader("x-prism-voice-characters", String(args.text.length));
@@ -2485,37 +2518,55 @@ async function sendLocalVoiceWaveStream(args: {
       String(streamItems.length),
     );
   }
+  const writeFrame = (
+    metadata: Record<string, unknown>,
+    wave: Buffer = Buffer.alloc(0),
+  ): void => {
+    if (!args.binaryFrames) {
+      args.response.write(
+        `${JSON.stringify({
+          ...metadata,
+          ...(wave.byteLength > 0
+            ? { audioBase64: wave.toString("base64") }
+            : {}),
+        })}\n`,
+      );
+      return;
+    }
+    const encodedMetadata = Buffer.from(JSON.stringify(metadata), "utf8");
+    const header = Buffer.allocUnsafe(8);
+    header.writeUInt32BE(encodedMetadata.byteLength, 0);
+    header.writeUInt32BE(wave.byteLength, 4);
+    args.response.write(header);
+    args.response.write(encodedMetadata);
+    if (wave.byteLength > 0) args.response.write(wave);
+  };
   const writeSpeechChunk = (wave: Buffer, item: Extract<(typeof streamItems)[number], { kind: "speech" }>, index: number) => {
-    args.response.write(
-      `${JSON.stringify({
-        index,
-        ...(hasVocalActions ? { kind: "speech" } : {}),
-        characterCount: item.text.length + (index > 0 ? 1 : 0),
-        text: item.text,
-        // Always include source spans so the client can lock mouth/text to each
-        // Kokoro clause instead of inventing a full-utterance weight clock.
-        sourceStart: item.sourceStart,
-        sourceEnd: item.sourceEnd,
-        audioBase64: wave.toString("base64"),
-      })}\n`,
-    );
+    writeFrame({
+      index,
+      ...(hasVocalActions ? { kind: "speech" } : {}),
+      characterCount: item.text.length + (index > 0 ? 1 : 0),
+      text: item.text,
+      // Always include source spans so the client can lock mouth/text to each
+      // Kokoro clause instead of inventing a full-utterance weight clock.
+      sourceStart: item.sourceStart,
+      sourceEnd: item.sourceEnd,
+    }, wave);
   };
   const writeActionChunk = (
     item: Extract<(typeof streamItems)[number], { kind: "vocal-action" }>,
     index: number,
   ) => {
-    args.response.write(
-      `${JSON.stringify({
-        index,
-        kind: "vocal-action",
-        characterCount: 0,
-        action: item.action,
-        modifiers: item.modifiers,
-        authoredText: item.authoredText,
-        sourceStart: item.sourceStart,
-        sourceEnd: item.sourceEnd,
-      })}\n`,
-    );
+    writeFrame({
+      index,
+      kind: "vocal-action",
+      characterCount: 0,
+      action: item.action,
+      modifiers: item.modifiers,
+      authoredText: item.authoredText,
+      sourceStart: item.sourceStart,
+      sourceEnd: item.sourceEnd,
+    });
   };
 
   const nextSpeechItemIndex = (from: number): number => {
@@ -3215,6 +3266,17 @@ function userBlocksOnlineCapabilities(
   return user.preferred_provider === "local";
 }
 
+function liveBakePlannedSynthesisEngineForUser(
+  user: UserDbRow,
+): LiveBakeVoiceEngineV1 {
+  if (user.preferred_provider === "local") return "local";
+  return user.voice_mode === "english" &&
+    user.english_voice_engine === "elevenlabs" &&
+    user.voice_volume > 0
+    ? "elevenlabs"
+    : "unknown";
+}
+
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
@@ -3224,6 +3286,11 @@ function getUserRow(userId: string): UserDbRow {
   if (!row) {
     throw new Error("User not found.");
   }
+  const textModelDisplayNames = db
+    .prepare("SELECT text_model_display_names FROM users WHERE id = ?")
+    .get(userId) as { text_model_display_names: string | null } | undefined;
+  row.text_model_display_names =
+    textModelDisplayNames?.text_model_display_names ?? null;
   const graphicsQuality = db
     .prepare("SELECT graphics_quality FROM users WHERE id = ?")
     .get(userId) as { graphics_quality: string | null } | undefined;
@@ -6461,17 +6528,18 @@ async function contextualTextRuntimeForUser<
   routingContext: AutoRoutingContextV1;
 }) {
   const requestedProvider = readProvider(args.requestedProvider);
+  const accountRequiresLocal = userBlocksOnlineCapabilities(args.user);
   const legacyDefaultLane =
-    requestedProvider === "local" ||
-    (!requestedProvider && args.user.preferred_provider === "local")
-      ? "local"
-      : "online";
+    accountRequiresLocal || requestedProvider === "local" ? "local" : "online";
   const normalizedMode = normalizeResponseMode(
     args.requestedResponseMode,
     legacyDefaultLane,
   );
-  const responseMode =
-    normalizedMode === "auto" ? legacyDefaultLane : normalizedMode;
+  const responseMode = accountRequiresLocal
+    ? "local"
+    : normalizedMode === "auto"
+      ? legacyDefaultLane
+      : normalizedMode;
   const primaryProvider: ProviderName =
     responseMode === "local"
       ? "local"
@@ -8564,6 +8632,7 @@ async function generateAndPersistSignalArtworkAsset(args: {
 async function generateAndPersistStandaloneImageAsset(args: {
   userId: string;
   prompt: string;
+  sourceImageBytes?: Buffer;
   /** Canonical catalog prompt when ephemeral Refract direction shaped generation. */
   persistencePrompt?: string;
   preferredProvider: ImageProviderName;
@@ -8695,12 +8764,19 @@ async function generateAndPersistStandaloneImageAsset(args: {
       const attempted = await runImagePromptAttempts({
         attempts: onlineAttempts,
         generate: (attempt) =>
-          generateImage(attempt.prompt, apiKey, {
-            model: resolvedOpenAiImageModel,
-            size,
-            quality,
-            signal: args.signal,
-          }),
+          args.sourceImageBytes
+            ? editImage(attempt.prompt, args.sourceImageBytes, apiKey, {
+                model: resolvedOpenAiImageModel,
+                size,
+                quality,
+                signal: args.signal,
+              })
+            : generateImage(attempt.prompt, apiKey, {
+                model: resolvedOpenAiImageModel,
+                size,
+                quality,
+                signal: args.signal,
+              }),
       });
       const result = attempted.value;
       const downloadStartedAt = Date.now();
@@ -8795,6 +8871,175 @@ async function generateAndPersistStandaloneImageAsset(args: {
     imageUrl: displayUrl,
     timings: { downloadMs, localPersistenceMs },
   };
+}
+
+async function debateMysteryRoomTemplatePng(templateId: string): Promise<Buffer> {
+  const template = DEBATE_MYSTERY_ROOM_TEMPLATES.find((entry) => entry.id === templateId);
+  if (!template) throw new Error("Mystery room template is unavailable.");
+  const polygon = (points: readonly { x: number; y: number }[]) =>
+    points.map((point) => `${(point.x / 100) * 1536},${(point.y / 100) * 1024}`).join(" ");
+  const objects = template.regions.map((region, index) =>
+    `<polygon points="${polygon(region.polygon)}" fill="${index % 2 ? template.palette[1] : template.palette[2]}" fill-opacity="0.72" stroke="#d9f8ff" stroke-opacity="0.28" stroke-width="3"/>`,
+  ).join("");
+  const svg = Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1024" viewBox="0 0 1536 1024"><defs><linearGradient id="wall" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${template.palette[0]}"/><stop offset="1" stop-color="${template.palette[1]}"/></linearGradient></defs><rect width="1536" height="1024" fill="url(#wall)"/><path d="M0 720 L1536 650 L1536 1024 L0 1024 Z" fill="${template.palette[2]}" fill-opacity="0.58"/><rect x="80" y="80" width="1376" height="760" rx="24" fill="none" stroke="#ecfbff" stroke-opacity="0.18" stroke-width="8"/>${objects}</svg>`,
+    "utf8",
+  );
+  return sharp(svg).png().toBuffer();
+}
+
+async function normalizeDebateMysteryRoomReskin(imageBytes: Buffer): Promise<Buffer> {
+  const image = sharp(imageBytes, { failOn: "error" });
+  const metadata = await image.metadata();
+  if (metadata.width !== 1536 || metadata.height !== 1024) {
+    throw new Error("Generated mystery room did not preserve the annotated template dimensions.");
+  }
+  const stats = await image.stats();
+  if (stats.channels.every((channel) => channel.stdev < 2)) {
+    throw new Error("Generated mystery room failed the structural detail check.");
+  }
+  return image.png().toBuffer();
+}
+
+async function generateDebateMysteryAssetWithSlot(args: {
+  userId: string;
+  sessionId: string;
+  title: string;
+  prompt: string;
+  preferredProvider: ImageProviderName;
+  requestedImageModel?: string;
+  offlineOnly: boolean;
+  size: "1536x1024" | "1024x1024";
+  purpose: string;
+  sourceImageBytes?: Buffer;
+  relatedBotIds: string[];
+  signal: AbortSignal;
+  normalizeImageBytes?: (imageBytes: Buffer) => Promise<Buffer>;
+}): Promise<string> {
+  const requestId = randomId(16);
+  const controller = new AbortController();
+  const abort = (): void => controller.abort();
+  args.signal.addEventListener("abort", abort, { once: true });
+  let ownedJobId: string | null = null;
+  try {
+    const acquired = await waitForImageSlot({
+      userId: args.userId,
+      conversationId: null,
+      botId: null,
+      mode: "sandbox",
+      incognito: false,
+      captionPrompt: args.title,
+      userMessage: `[Whodunnit art] ${args.title}`,
+      source: "debate_exhibit",
+      requestedSize: args.size,
+      clientRequestId: requestId,
+      abortController: controller,
+      signal: controller.signal,
+    });
+    ownedJobId = acquired.id;
+    const asset = await generateAndPersistStandaloneImageAsset({
+      userId: args.userId,
+      prompt: args.prompt,
+      sourceImageBytes: args.sourceImageBytes,
+      preferredProvider: args.preferredProvider,
+      requestedImageModel: args.requestedImageModel,
+      offlineOnly: args.offlineOnly,
+      signal: acquired.abortController.signal,
+      size: args.size,
+      origin: "debate",
+      purpose: args.purpose,
+      featureLabel: args.title,
+      relatedBotIds: args.relatedBotIds,
+      normalizeImageBytes: args.normalizeImageBytes,
+    });
+    return asset.imageId;
+  } finally {
+    args.signal.removeEventListener("abort", abort);
+    if (ownedJobId) await releaseImageSlotIfOwned(args.userId, ownedJobId);
+  }
+}
+
+async function prepareDebateMysteryGeneratedAssets(args: {
+  userId: string;
+  sessionId: string;
+  signal: AbortSignal;
+}): Promise<ReturnType<typeof getDebateSession>> {
+  const session = getDebateSession(db, args.userId, args.sessionId);
+  if (session.formatState.format !== "whodunnit" || session.formatState.config.artMode !== "generated") return session;
+  const bible = getDebateMysteryCaseBible(db, args.userId, args.sessionId);
+  const user = getUserRow(args.userId);
+  const selection = resolveTypedAssetGenerationSelection(args.userId, "debate_exhibit", {});
+  const offlineOnly = session.responseMode === "local" || userBlocksOnlineCapabilities(user);
+  const preferredProvider: ImageProviderName = offlineOnly ? "local" : selection.provider;
+  const relatedBotIds = bible.suspects.map((suspect) => suspect.botId);
+  const roomImageByTemplateId: Record<string, string> = {};
+  const evidenceImageById: Record<string, string> = {};
+
+  // Room art uses source-image editing only. LOCAL and providers without an
+  // edit lane retain the aligned bundled template without an outbound call.
+  if (preferredProvider === "openai") {
+    for (const templateId of [...new Set(bible.rooms.map((room) => room.templateId))]) {
+      try {
+        const template = DEBATE_MYSTERY_ROOM_TEMPLATES.find((entry) => entry.id === templateId)!;
+        const sourceImageBytes = await debateMysteryRoomTemplatePng(templateId);
+        roomImageByTemplateId[templateId] = await generateDebateMysteryAssetWithSlot({
+          userId: args.userId,
+          sessionId: args.sessionId,
+          title: `${template.name} mystery room`,
+          prompt: [
+            `Reskin this exact annotated ${template.name.toLowerCase()} composition as an original PRISM murder-mystery room.`,
+            "Preserve the exact camera, dimensions, floor line, object silhouettes, and position of every broad physical region so all existing hit polygons remain aligned.",
+            "Premium illustrated adventure-game background, tactile materials, moody refraction light, restrained cinematic detail, no people, no evidence clue, no blood, no text, no symbols, no UI, and no changed or added furniture.",
+          ].join(" "),
+          preferredProvider,
+          requestedImageModel: selection.model,
+          offlineOnly,
+          size: "1536x1024",
+          purpose: "debate_mystery_room",
+          sourceImageBytes,
+          relatedBotIds,
+          signal: args.signal,
+          normalizeImageBytes: normalizeDebateMysteryRoomReskin,
+        });
+      } catch (error) {
+        console.warn("[debate-mystery] room reskin fell back to bundled template", {
+          sessionId: args.sessionId,
+          templateId,
+          reason: error instanceof Error ? error.message : "generation failed",
+        });
+      }
+    }
+  }
+
+  for (const evidence of bible.evidence.filter((item) => !item.imageId)) {
+    try {
+      evidenceImageById[evidence.id] = await generateDebateMysteryAssetWithSlot({
+        userId: args.userId,
+        sessionId: args.sessionId,
+        title: evidence.title,
+        prompt: buildDebateExhibitSpritePrompt(evidence),
+        preferredProvider,
+        requestedImageModel: selection.model,
+        offlineOnly,
+        size: "1024x1024",
+        purpose: DEBATE_EXHIBIT_IMAGE_PURPOSE,
+        relatedBotIds,
+        signal: args.signal,
+        normalizeImageBytes: async (imageBytes) =>
+          (await normalizeGeneratedDebateExhibitImage(imageBytes)).pngBytes,
+      });
+    } catch (error) {
+      console.warn("[debate-mystery] evidence art fell back to emoji", {
+        sessionId: args.sessionId,
+        evidenceId: evidence.id,
+        reason: error instanceof Error ? error.message : "generation failed",
+      });
+    }
+  }
+  return attachDebateMysteryGeneratedAssets(db, args.userId, args.sessionId, {
+    roomImageByTemplateId,
+    evidenceImageById,
+  });
 }
 
 async function persistUploadedDebateExhibitImageAsset(args: {
@@ -16826,15 +17071,244 @@ function buildRoutes(): RouteDefinition[] {
             : {}),
         },
       );
-      const session = await createDebateSessionWithParticipantPredispositions(
-        db,
+      const session = body.format === "whodunnit"
+        ? await runWithUsageSession(
+            {
+              db,
+              userId,
+              privacyScope: "private",
+              mode: "debate",
+              surface: "debate",
+            },
+            () => createDebateMysterySession(
+              db,
+              userId,
+              body.whodunnit as Parameters<typeof createDebateMysterySession>[2],
+              body.idempotencyKey,
+              runtime,
+            ),
+          )
+        : await createDebateSessionWithParticipantPredispositions(
+            db,
+            userId,
+            body as unknown as Parameters<typeof createDebateSession>[2],
+            runtime,
+          );
+      json(ctx.res, 201, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+      });
+    }),
+    route("POST", "/api/debates/:id/mystery-assets/prepare", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const controller = new AbortController();
+      const onAborted = (): void => controller.abort();
+      ctx.req.once("aborted", onAborted);
+      try {
+        const session = await prepareDebateMysteryGeneratedAssets({
+          userId,
+          sessionId: ctx.params.id,
+          signal: controller.signal,
+        });
+        json(ctx.res, 200, {
+          ok: true,
+          session: debateSessionForPlayer(session),
+        });
+      } finally {
+        ctx.req.off("aborted", onAborted);
+      }
+    }),
+    route("POST", "/api/debates/mystery-seed/inspect", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      const manifest = inspectDebateMysteryCaseCode(body.caseCode);
+      const exportHashes = manifest.seats
+        .map((seat) => seat.exportHash)
+        .filter((value): value is string => Boolean(value));
+      const matchingRows = exportHashes.length > 0
+        ? (db.prepare(
+            `SELECT id, export_hash FROM bots
+              WHERE user_id = ? AND export_hash IN (${exportHashes.map(() => "?").join(", ")})`,
+          ).all(userId, ...exportHashes) as unknown as Array<{
+            id: string;
+            export_hash: string;
+          }>)
+        : [];
+      const botIdByHash = new Map(
+        matchingRows.map((row) => [row.export_hash, row.id]),
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        manifest: {
+          ...manifest,
+          seats: manifest.seats.map((seat) => ({
+            ...seat,
+            suggestedBotId: seat.exportHash
+              ? (botIdByHash.get(seat.exportHash) ?? null)
+              : null,
+          })),
+        },
+      });
+    }),
+    route("POST", "/api/debates/mystery-seed/import", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      const runtime = await debateAiRuntimeForUser(
         userId,
-        body as unknown as Parameters<typeof createDebateSession>[2],
-        runtime,
+        body.preferredProvider,
+        body.modelOverride,
+        body.responseMode,
+        undefined,
+        undefined,
+        {
+          surface: "debate",
+          frozenReasoningEffort: normalizeProviderReasoningEffort(
+            body.reasoningEffort,
+          ),
+          ...(typeof body.turbo === "boolean"
+            ? { frozenTurbo: body.turbo }
+            : {}),
+        },
+      );
+      const session = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "private",
+          mode: "debate",
+          surface: "debate",
+        },
+        () => importDebateMysteryCase(db, userId, body, runtime),
       );
       json(ctx.res, 201, {
         ok: true,
         session: debateSessionForPlayer(session),
+      });
+    }),
+    route("POST", "/api/debates/:id/mystery-action", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      const frozen = getDebateSession(db, userId, ctx.params.id);
+      const runtime = await debateAiRuntimeForUser(
+        userId,
+        frozen.provider,
+        frozenDebateModelOverride(frozen),
+        frozen.responseMode,
+        frozen.generationChain,
+        frozen.autoCandidateAllowlist,
+        debateAutoRoutingContext(frozen),
+      );
+      const session = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "private",
+          mode: "debate",
+          surface: "debate",
+        },
+        () => applyDebateMysteryAction(
+          db,
+          userId,
+          ctx.params.id,
+          body as unknown as Parameters<typeof applyDebateMysteryAction>[3],
+          runtime,
+        ),
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+      });
+    }),
+    route("POST", "/api/debates/:id/mystery-resume-compilation", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const frozen = getDebateSession(db, userId, ctx.params.id);
+      const runtime = await debateAiRuntimeForUser(
+        userId,
+        frozen.provider,
+        frozenDebateModelOverride(frozen),
+        frozen.responseMode,
+        frozen.generationChain,
+        frozen.autoCandidateAllowlist,
+        debateAutoRoutingContext(frozen),
+      );
+      const session = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "private",
+          mode: "debate",
+          surface: "debate",
+        },
+        () => resumeDebateMysteryCompilation(db, userId, ctx.params.id, runtime),
+      );
+      json(ctx.res, 200, { ok: true, session: debateSessionForPlayer(session) });
+    }),
+    route("GET", "/api/debates/:id/notebook", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        ...getDebateMysteryNotebook(db, userId, ctx.params.id),
+      });
+    }),
+    route("PATCH", "/api/debates/:id/notebook", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        ...patchDebateMysteryNotebook(
+          db,
+          userId,
+          ctx.params.id,
+          (ctx.body ?? {}) as Record<string, unknown>,
+        ),
+      });
+    }),
+    route("POST", "/api/debates/:id/notebook/cleanup", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      const frozen = getDebateSession(db, userId, ctx.params.id);
+      const runtime = await debateAiRuntimeForUser(
+        userId,
+        frozen.provider,
+        frozenDebateModelOverride(frozen),
+        frozen.responseMode,
+        frozen.generationChain,
+        frozen.autoCandidateAllowlist,
+        debateAutoRoutingContext(frozen),
+      );
+      const proposal = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "private",
+          mode: "debate",
+          surface: "debate",
+        },
+        () => proposeDebateMysteryNotebookCleanup(
+          db,
+          userId,
+          ctx.params.id,
+          body,
+          runtime,
+        ),
+      );
+      json(ctx.res, 200, { ok: true, proposal });
+    }),
+    route("GET", "/api/debates/:id/mystery-seed", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        caseCode: debateMysteryCaseCodeForSession(
+          db,
+          userId,
+          ctx.params.id,
+        ),
+      });
+    }),
+    route("GET", "/api/debates/:id/mystery-actions", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        actions: listDebateMysteryActions(db, userId, ctx.params.id),
       });
     }),
     route("GET", "/api/debates", async (ctx) => {
@@ -17042,9 +17516,18 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/turn-preparations/:id", async (ctx) => {
       const userId = requireAuth(ctx);
       try {
+        const requestedWaitMs = Number(ctx.query.get("waitMs") ?? 0);
+        const preparation =
+          Number.isFinite(requestedWaitMs) && requestedWaitMs > 0
+            ? await turnPreparationRegistry.wait(
+                ctx.params.id,
+                userId,
+                requestedWaitMs,
+              )
+            : turnPreparationRegistry.get(ctx.params.id, userId);
         json(ctx.res, 200, {
           ok: true,
-          preparation: turnPreparationRegistry.get(ctx.params.id, userId),
+          preparation,
         });
       } catch (error) {
         asTurnPreparationHttpError(error);
@@ -17406,6 +17889,24 @@ function buildRoutes(): RouteDefinition[] {
               };
             },
           });
+          if (
+            result.value.episode.status === "completed" &&
+            result.value.episode.guestKind === "bot"
+          ) {
+            try {
+              persistCompletedBotcastPairHistory({
+                db,
+                userId,
+                episodeId: result.value.episode.id,
+                userKey: decryptUserKey(userId),
+              });
+            } catch (error) {
+              console.warn(
+                `[botcast] prepared Signal pair-history persistence failed episode=${result.value.episode.id}`,
+                error,
+              );
+            }
+          }
           json(ctx.res, 200, {
             ok: true,
             preparation: result.preparation,
@@ -17485,6 +17986,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/debates/:id/bake", async (ctx) => {
       const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
       invalidateTurnPreparation(
         userId,
         "debate",
@@ -17511,6 +18013,8 @@ function buildRoutes(): RouteDefinition[] {
             db,
             userId,
             sessionId: ctx.params.id,
+            plannedSynthesisEngine:
+              liveBakePlannedSynthesisEngineForUser(user),
             // Rebuild provider clients as needed, but keep the archived model,
             // effort, Turbo/service tier, candidates, and fallback chain sealed.
             resolveRuntime: async () => {
@@ -20501,6 +21005,9 @@ function buildRoutes(): RouteDefinition[] {
           run.error ?? "Signal episode was not deleted.",
         );
       }
+      await releaseLiveLocalModelLane(
+        `signal:${userId}:${targetEpisode.id}`,
+      );
       json(ctx.res, 200, {
         ok: true,
         discarded: targetEpisode.status !== "completed",
@@ -20533,6 +21040,9 @@ function buildRoutes(): RouteDefinition[] {
         return cancelledEpisode;
       };
       if (currentEpisode.status === "cancelled") {
+        await releaseLiveLocalModelLane(
+          `signal:${userId}:${currentEpisode.id}`,
+        );
         json(ctx.res, 200, {
           ok: true,
           episode: projectBotcastEpisodeForAudienceV1(currentEpisode),
@@ -20550,6 +21060,9 @@ function buildRoutes(): RouteDefinition[] {
               event.payload.reason === "producer_cut",
           );
         if (completedProducerCut) {
+          await releaseLiveLocalModelLane(
+            `signal:${userId}:${currentEpisode.id}`,
+          );
           json(ctx.res, 200, {
             ok: true,
             episode: projectBotcastEpisodeForAudienceV1(
@@ -20599,6 +21112,9 @@ function buildRoutes(): RouteDefinition[] {
           ),
       );
       const cancelledEpisode = discardProducerCutEpisode();
+      await releaseLiveLocalModelLane(
+        `signal:${userId}:${currentEpisode.id}`,
+      );
       json(ctx.res, 200, {
         ok: true,
         episode: projectBotcastEpisodeForAudienceV1(cancelledEpisode),
@@ -20823,6 +21339,12 @@ function buildRoutes(): RouteDefinition[] {
           episode: frozen,
         });
         const signalUserKey = decryptUserKey(userId);
+        backfillMissingCompletedBotcastPairHistory({
+          db,
+          userId,
+          userKey: signalUserKey,
+          pairBotIds: [frozen.hostBotId, frozen.guestBotId],
+        });
         const powerTheme = readResolvedPowerTheme(body.theme);
         const stateCursor = botcastPreparedTurnCursor(
           db,
@@ -20875,6 +21397,7 @@ function buildRoutes(): RouteDefinition[] {
                       providerFactory: providerFactoryOverride,
                       auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
                     },
+                    { deferPairHistoryMaintenance: true },
                   ),
               );
               if (signal.aborted) throw new Error("Signal preparation was cancelled.");
@@ -20882,6 +21405,12 @@ function buildRoutes(): RouteDefinition[] {
                 isolated.db,
                 isolated.session,
               );
+              const signalListenerReactionPlan = result.message
+                ? botcastListenerReactionForMessage(
+                    result.episode.events,
+                    result.message.id,
+                  )
+                : null;
               captured = true;
               return {
                 speakerBotId: result.message?.botId ?? null,
@@ -20891,6 +21420,9 @@ function buildRoutes(): RouteDefinition[] {
                         id: result.message.id,
                         speakerBotId: result.message.botId,
                         text: result.message.content,
+                        ...(signalListenerReactionPlan
+                          ? { signalListenerReactionPlan }
+                          : {}),
                       },
                     ]
                   : [],
@@ -21055,6 +21587,15 @@ function buildRoutes(): RouteDefinition[] {
         user,
         episode: frozenEpisode,
       });
+      if (runtime.provider === "local") {
+        await claimLiveLocalModelLane({
+          owner: `signal:${userId}:${ctx.params.id}`,
+          model: runtime.model,
+          options: {
+            secondaryOllamaHost: user.secondary_ollama_host,
+          },
+        });
+      }
       const signalUserKey = decryptUserKey(userId);
       const signalAdvanceAbort = new AbortController();
       const onSignalAdvanceClientClose = () => {
@@ -21133,6 +21674,9 @@ function buildRoutes(): RouteDefinition[] {
         ctx.res.off("close", onSignalAdvanceClientClose);
       }
       if (signalAdvanceAbort.signal.aborted) return;
+      if (result.episode.status !== "live") {
+        await releaseLiveLocalModelLane(`signal:${userId}:${ctx.params.id}`);
+      }
       json(ctx.res, 200, {
         ok: true,
         ...projectBotcastAdvanceResponseForAudienceV1(result),
@@ -21159,6 +21703,8 @@ function buildRoutes(): RouteDefinition[] {
           db,
           userId,
           episodeId: ctx.params.id,
+          plannedSynthesisEngine:
+            liveBakePlannedSynthesisEngineForUser(user),
           // Re-resolve each bake step so Auto can switch from latest context;
           // fixed model stays pinned via contextualSignalRuntimeForEpisode.
           resolveGeneration: async () => {
@@ -21202,6 +21748,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/botcast/episodes/:id/bake/cancel", async (ctx) => {
       const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
       const episode = getBotcastEpisode(db, userId, ctx.params.id);
       if (episode.playbackMode !== "watch") {
         throw new HttpError(
@@ -21226,6 +21773,8 @@ function buildRoutes(): RouteDefinition[] {
               : "cancelled",
           error:
             latest.status === "completed" ? null : "Bake cancelled.",
+          plannedSynthesisEngine:
+            liveBakePlannedSynthesisEngineForUser(user),
         }),
         baking: false,
       });
@@ -21518,7 +22067,19 @@ function buildRoutes(): RouteDefinition[] {
       const userKey = decryptUserKey(userId);
       const body = ctx.body as Record<string, unknown>;
       const inviteGroup = getCoffeeGroup(db, userId, ctx.params.id);
-      if (inviteGroup) assertCoffeeInviteBotCount(inviteGroup.botGroupIds);
+      if (inviteGroup) {
+        const excludedIds = new Set(
+          (Array.isArray(body.excludedBotIds) ? body.excludedBotIds : [])
+            .filter(
+              (botId): botId is string =>
+                typeof botId === "string" && botId.trim().length > 0,
+            )
+            .map((botId) => botId.trim()),
+        );
+        assertCoffeeInviteBotCount(
+          inviteGroup.botGroupIds.filter((botId) => !excludedIds.has(botId)),
+        );
+      }
       const initialPoll =
         body.initialPoll &&
         typeof body.initialPoll === "object" &&
@@ -21581,7 +22142,7 @@ function buildRoutes(): RouteDefinition[] {
       const groupBotIds = Array.isArray(body.groupBotIds)
         ? body.groupBotIds
         : undefined;
-      assertCoffeeInviteBotCount(groupBotIds);
+      assertCoffeeSessionAttendeeCount(groupBotIds);
       const initialPoll =
         body.initialPoll &&
         typeof body.initialPoll === "object" &&
@@ -21915,8 +22476,11 @@ function buildRoutes(): RouteDefinition[] {
               error,
             );
           }
-        })().finally(() => {
+        })().finally(async () => {
           activeCoffeeDepartureEpilogues.delete(jobKey);
+          await releaseLiveLocalModelLane(
+            `coffee:${userId}:${conversationId}`,
+          );
         });
         activeCoffeeDepartureEpilogues.set(jobKey, epilogueJob);
       }
@@ -21927,6 +22491,11 @@ function buildRoutes(): RouteDefinition[] {
       const completedDeparture = awaitEpilogue
         ? recordCoffeePlayerDeparture(db, userId, conversationId)
         : departure;
+      if (!epilogueJob) {
+        await releaseLiveLocalModelLane(
+          `coffee:${userId}:${conversationId}`,
+        );
+      }
       json(ctx.res, 202, {
         ok: true,
         departureRecorded: departure.recorded,
@@ -22284,6 +22853,17 @@ function buildRoutes(): RouteDefinition[] {
           outputTokens: 900,
         },
       });
+      if (autonomousRuntime.provider === "local") {
+        await claimLiveLocalModelLane({
+          owner: `coffee:${userId}:${ctx.params.id}`,
+          model: autonomousRuntime.model,
+          options: {
+            secondaryOllamaHost: user.secondary_ollama_host,
+            experimentalDualOllama:
+              user.experimental_dual_ollama_enabled === 1,
+          },
+        });
+      }
       const result = await runWithUsageSession(
         {
           db,
@@ -22388,6 +22968,7 @@ function buildRoutes(): RouteDefinition[] {
             providerFactory: providerFactoryOverride,
           }),
       );
+      await releaseLiveLocalModelLane(`coffee:${userId}:${ctx.params.id}`);
       json(ctx.res, 200, {
         ok: true,
         conversation,
@@ -22400,6 +22981,7 @@ function buildRoutes(): RouteDefinition[] {
         db,
         userId,
         conversationId: ctx.params.id,
+        generatePrompts: false,
         prismDefaultLlmModel: user.prism_default_llm_model,
         secondaryOllamaHost: user.secondary_ollama_host,
         experimentalDualOllamaEnabled:
@@ -22439,7 +23021,7 @@ function buildRoutes(): RouteDefinition[] {
       const groupBotIds = Array.isArray(body.groupBotIds)
         ? body.groupBotIds
         : undefined;
-      if (!conversationId) assertCoffeeInviteBotCount(groupBotIds);
+      if (!conversationId) assertCoffeeSessionAttendeeCount(groupBotIds);
       const interruptionInput =
         body.playerInterruption && typeof body.playerInterruption === "object"
           ? (body.playerInterruption as Record<string, unknown>)
@@ -22508,6 +23090,17 @@ function buildRoutes(): RouteDefinition[] {
           outputTokens: 900,
         },
       });
+      if (conversationId && runtime.provider === "local") {
+        await claimLiveLocalModelLane({
+          owner: `coffee:${userId}:${conversationId}`,
+          model: runtime.model,
+          options: {
+            secondaryOllamaHost: user.secondary_ollama_host,
+            experimentalDualOllama:
+              user.experimental_dual_ollama_enabled === 1,
+          },
+        });
+      }
       const result = await runWithUsageSession(
         {
           db,
@@ -22781,6 +23374,10 @@ function buildRoutes(): RouteDefinition[] {
         typeof body.autonomousFocus === "string"
           ? body.autonomousFocus
           : undefined;
+      const thinkingAsideAboutBotId =
+        kind === "autonomous" && typeof body.thinkingAsideAboutBotId === "string"
+          ? body.thinkingAsideAboutBotId.trim() || undefined
+          : undefined;
       const retryOfJobId =
         typeof body.retryOfJobId === "string" ? body.retryOfJobId.trim() : "";
       const expectedLatestMessageCursor =
@@ -22862,7 +23459,9 @@ function buildRoutes(): RouteDefinition[] {
       ) {
         throw new HttpError(400, "Coffee retry metadata requires retryOfJobId.");
       }
-      if (kind === "autonomous") {
+      if (kind === "autonomous" && !thinkingAsideAboutBotId) {
+        // Stew asides deliberately coexist with the thinker's active job;
+        // every other autonomous request reuses the job already in flight.
         const activeJob = getActiveCoffeeTurnJobForConversation(
           userId,
           conversationId,
@@ -22893,6 +23492,17 @@ function buildRoutes(): RouteDefinition[] {
       }
       if (excludedSpeakerBotId && runtime.modelSelectionKind !== "auto") {
         throw new HttpError(400, "Fixed-model Coffee cannot substitute another speaker route.");
+      }
+      if (runtime.provider === "local") {
+        await claimLiveLocalModelLane({
+          owner: `coffee:${userId}:${conversationId}`,
+          model: runtime.model,
+          options: {
+            secondaryOllamaHost: user.secondary_ollama_host,
+            experimentalDualOllama:
+              user.experimental_dual_ollama_enabled === 1,
+          },
+        });
       }
       const retry = priorJob
         ? {
@@ -22999,6 +23609,7 @@ function buildRoutes(): RouteDefinition[] {
                 undefined,
                 autonomousFocus,
                 excludedSpeakerBotId || undefined,
+                thinkingAsideAboutBotId,
               );
             },
           ),
@@ -23064,6 +23675,7 @@ function buildRoutes(): RouteDefinition[] {
           ...(body.targetPhase === "thinking" || body.targetPhase === "speaking"
             ? { targetPhase: body.targetPhase }
             : {}),
+          ...(body.trailOff === true ? { trailOff: true } : {}),
         });
         json(ctx.res, 200, { ok: true, ...interruptionPause });
       },
@@ -24139,7 +24751,9 @@ function buildRoutes(): RouteDefinition[] {
         if (!selected) {
           throw new HttpError(
             409,
-            "No different English Voice Library audition is available right now.",
+            direction
+              ? "No Voice Library audition matches that direction right now. Try a different direction."
+              : "No different English Voice Library audition is available right now.",
           );
         }
         json(ctx.res, 200, {
@@ -24163,6 +24777,47 @@ function buildRoutes(): RouteDefinition[] {
         throw error;
       } finally {
         ctx.req.off("close", onClose);
+      }
+    }),
+    route("POST", "/api/voices/elevenlabs/shared/use", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const input = sharedVoiceSaveInput(ctx.body);
+      const userKey = decryptUserKey(userId);
+      const apiKey =
+        getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
+      if (!apiKey) throw elevenLabsLibraryCredentialError();
+      try {
+        const catalog = await requestElevenLabsVoiceCatalog({ apiKey });
+        const existingProviderVoice = catalog.find(
+          (voice) =>
+            voice.voiceId === input.sourceVoiceId ||
+            (voice.originalVoiceId === input.sourceVoiceId &&
+              (!voice.publicOwnerId || voice.publicOwnerId === input.publicOwnerId)),
+        );
+        const providerVoiceId = existingProviderVoice
+          ? existingProviderVoice.voiceId
+          : await importElevenLabsSharedVoice({
+              apiKey,
+              publicOwnerId: input.publicOwnerId,
+              voiceId: input.sourceVoiceId,
+              name: input.name,
+            });
+        // This only gives the current bot draft an ElevenLabs-capable ID. The
+        // reusable PRISM library remains an explicit, separate save action.
+        json(ctx.res, 200, {
+          ok: true,
+          voice: {
+            ...input,
+            providerVoiceId,
+            nativeAccentHint: premiumVoiceNativeAccentHintFromLabels(input.labels),
+          },
+        });
+      } catch (error) {
+        if (error instanceof HttpError) throw error;
+        if (error instanceof ElevenLabsVoiceError) {
+          throw mapElevenLabsLibraryError(error);
+        }
+        throw error;
       }
     }),
     route("POST", "/api/voices/elevenlabs/library", async (ctx) => {
@@ -25663,6 +26318,13 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/voices/synthesize", async (ctx) => {
       const userId = requireAuth(ctx);
       const raw = ctx.body as Record<string, unknown>;
+      const acceptedVoiceMedia = Array.isArray(ctx.req.headers.accept)
+        ? ctx.req.headers.accept.join(",")
+        : (ctx.req.headers.accept ?? "");
+      const binaryVoiceChunkStreamRequested =
+        acceptedVoiceMedia
+          .toLowerCase()
+          .includes("application/x-prism-voice-chunks");
       const user = getUserRow(userId);
       let persistedMessageProvider: string | null = null;
       let sourceBotMuted = false;
@@ -25700,6 +26362,11 @@ function buildRoutes(): RouteDefinition[] {
         typeof raw.signalEpisodeId === "string" && raw.signalEpisodeId.trim()
           ? raw.signalEpisodeId.trim().slice(0, 160)
           : null;
+      const signalTurnPreparationId =
+        typeof raw.signalTurnPreparationId === "string" &&
+        raw.signalTurnPreparationId.trim()
+          ? raw.signalTurnPreparationId.trim().slice(0, 160)
+          : null;
       const ordinaryMessageId =
         typeof raw.messageId === "string" && raw.messageId.trim()
           ? raw.messageId.trim()
@@ -25734,6 +26401,12 @@ function buildRoutes(): RouteDefinition[] {
         ].filter(Boolean).length > 1
       ) {
         throw new HttpError(400, "Choose one voice message source.");
+      }
+      if (signalTurnPreparationId && !signalMessageId) {
+        throw new HttpError(
+          400,
+          "A Signal turn preparation requires its provisional message.",
+        );
       }
       if (zenProgressiveVoiceSegmentId) {
         const segment = readZenProgressiveVoiceSegment(
@@ -25916,13 +26589,32 @@ function buildRoutes(): RouteDefinition[] {
           sourceBotId = message?.bot_id ?? requestedSpeakerBotId;
         }
       }
+      let preparedSignalReaction: ReturnType<
+        typeof botcastListenerReactionForMessage
+      > = null;
+      let preparedSignalPlaybackReaction: ReturnType<
+        typeof botcastListenerReactionForMessage
+      > = null;
+      let signalVoiceFromPreparation = false;
       if (signalMessageId) {
-        const signalMessage = db
+        type SignalVoiceMessageSource = {
+          content: string;
+          voice_performance_text: string | null;
+          provider: string;
+          response_mode: string;
+          powers_json: string | null;
+          listener_powers_json: string | null;
+          listener_system_prompt: string | null;
+          speaker_role: "host" | "guest";
+          episode_id: string;
+        };
+        let signalMessage = db
           .prepare(
             `SELECT message.content,
                   message.voice_performance_text,
                   bot.powers_json,
                   listener_bot.powers_json AS listener_powers_json,
+                  listener_bot.system_prompt AS listener_system_prompt,
                   message.speaker_role,
                   episode.id AS episode_id,
                   episode.provider,
@@ -25941,17 +26633,92 @@ function buildRoutes(): RouteDefinition[] {
               AND message.user_id = ?`,
           )
           .get(signalMessageId, userId) as
-          | {
-              content: string;
-              voice_performance_text: string | null;
-              provider: string;
-              response_mode: string;
-              powers_json: string | null;
-              listener_powers_json: string | null;
-              speaker_role: "host" | "guest";
-              episode_id: string;
-            }
+          | SignalVoiceMessageSource
           | undefined;
+        if (!signalMessage && signalTurnPreparationId) {
+          let preparation: ReturnType<typeof turnPreparationRegistry.get>;
+          try {
+            preparation = turnPreparationRegistry.get(
+              signalTurnPreparationId,
+              userId,
+            );
+          } catch {
+            throw new HttpError(404, "Signal message not found.");
+          }
+          const provisional = preparation.provisionalUtterances.find(
+            (utterance) => utterance.id === signalMessageId,
+          );
+          if (
+            preparation.surface !== "signal" ||
+            preparation.phase !== "ready" ||
+            !provisional
+          ) {
+            throw new HttpError(404, "Signal message not found.");
+          }
+          preparedSignalReaction =
+            provisional.signalListenerReactionPlan ?? null;
+          const preparedEpisode = db
+            .prepare(
+              `SELECT id, provider, response_mode, host_bot_id, guest_bot_id
+                 FROM botcast_episodes
+                WHERE id = ? AND user_id = ?`,
+            )
+            .get(preparation.sessionId, userId) as
+            | {
+                id: string;
+                provider: string;
+                response_mode: string;
+                host_bot_id: string;
+                guest_bot_id: string;
+              }
+            | undefined;
+          const speakerRole =
+            provisional.speakerBotId === preparedEpisode?.host_bot_id
+              ? "host"
+              : provisional.speakerBotId === preparedEpisode?.guest_bot_id
+                ? "guest"
+                : null;
+          if (!preparedEpisode || !speakerRole) {
+            throw new HttpError(404, "Signal message not found.");
+          }
+          const speakerPowers = db
+            .prepare(
+              "SELECT powers_json FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
+            )
+            .get(provisional.speakerBotId, userId) as
+            { powers_json: string | null } | undefined;
+          const listenerBotId =
+            speakerRole === "host"
+              ? preparedEpisode.guest_bot_id
+              : preparedEpisode.host_bot_id;
+          if (
+            preparedSignalReaction &&
+            (preparedSignalReaction.messageId !== provisional.id ||
+              preparedSignalReaction.speakerBotId !==
+                provisional.speakerBotId ||
+              preparedSignalReaction.listenerBotId !== listenerBotId)
+          ) {
+            throw new HttpError(404, "Signal message not found.");
+          }
+          const listenerPowers = db
+            .prepare(
+              "SELECT powers_json, system_prompt FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
+            )
+            .get(listenerBotId, userId) as
+            { powers_json: string | null; system_prompt: string | null } | undefined;
+          signalMessage = {
+            content: provisional.text,
+            voice_performance_text: null,
+            provider: preparedEpisode.provider,
+            response_mode: preparedEpisode.response_mode,
+            powers_json: speakerPowers?.powers_json ?? null,
+            listener_powers_json: listenerPowers?.powers_json ?? null,
+            listener_system_prompt: listenerPowers?.system_prompt ?? null,
+            speaker_role: speakerRole,
+            episode_id: preparedEpisode.id,
+          };
+          signalVoiceFromPreparation = true;
+        }
         if (!signalMessage) {
           throw new HttpError(404, "Signal message not found.");
         }
@@ -25982,14 +26749,28 @@ function buildRoutes(): RouteDefinition[] {
               (beat.kind === "audible_quip" || beat.kind === "interrupt"),
           )
           .flatMap((beat) => beat.quip ? [beat.quip] : []);
-        const savedSignalReaction = botcastListenerReactionForMessage(
-          signalEpisode.events,
-          signalMessageId,
-        );
+        const savedSignalReaction =
+          preparedSignalReaction ??
+          botcastListenerReactionForMessage(
+            signalEpisode.events,
+            signalMessageId,
+          );
+        const signalPlaybackReaction = savedSignalReaction
+          ? signalListenerReactionPlanForPlaybackV1({
+              plan: savedSignalReaction,
+              vocalFoleyPlayable: raw.engine === "elevenlabs",
+              listenerPersona: authoredSignalListenerPersonaSource(
+                signalMessage.listener_system_prompt,
+              ),
+            })
+          : null;
+        if (signalVoiceFromPreparation) {
+          preparedSignalPlaybackReaction = signalPlaybackReaction;
+        }
         if (
-          savedSignalReaction?.listenerBotId === requestedSpeakerBotId
+          signalPlaybackReaction?.listenerBotId === requestedSpeakerBotId
         ) {
-          const cue = listenerReactionSpokenTextV1(savedSignalReaction);
+          const cue = listenerReactionSpokenTextV1(signalPlaybackReaction);
           if (cue) authorizedMuteReactionTexts.push(cue);
         }
         if (
@@ -26002,10 +26783,7 @@ function buildRoutes(): RouteDefinition[] {
         }
         sourceText = botCrosstalkPrimarySpeakerContent(
           signalMessage.content,
-          botcastListenerReactionForMessage(
-            signalEpisode.events,
-            signalMessageId,
-          ),
+          savedSignalReaction,
         );
         const voiceRole = listenerReactionRequested
           ? signalMessage.speaker_role === "host"
@@ -26083,7 +26861,13 @@ function buildRoutes(): RouteDefinition[] {
           const vocalFoley = normalizeListenerReactionVocalFoley(
             raw.listenerReactionFoley,
           );
-          if (!vocalFoley) {
+          if (
+            !vocalFoley ||
+            (signalVoiceFromPreparation &&
+              (preparedSignalPlaybackReaction?.listenerBotId !==
+                requestedSpeakerBotId ||
+                preparedSignalPlaybackReaction.vocalFoley !== vocalFoley))
+          ) {
             throw new HttpError(400, "Unsupported listener vocal Foley.");
           }
           // Keep the authenticated provider request speakable without adding a
@@ -26097,6 +26881,14 @@ function buildRoutes(): RouteDefinition[] {
               ? raw.listenerReactionText.replace(/\s+/gu, " ").trim()
               : "";
           if (
+            (signalVoiceFromPreparation &&
+              (preparedSignalPlaybackReaction?.listenerBotId !==
+                requestedSpeakerBotId ||
+                (preparedSignalPlaybackReaction
+                  ? listenerReactionSpokenTextV1(
+                      preparedSignalPlaybackReaction,
+                    )
+                  : null) !== listenerReactionText)) ||
             !listenerReactionTextIsAuthorizedV1(
               listenerReactionText,
               authorizedMuteReactionTexts,
@@ -26133,7 +26925,16 @@ function buildRoutes(): RouteDefinition[] {
           authorizedInterruptedSpeakerReactionTexts.find(
             (cue) => cue === requestedInterruptedSpeakerReaction,
           );
-        if (!interruptedSpeakerReaction) {
+        if (
+          !interruptedSpeakerReaction ||
+          (signalVoiceFromPreparation &&
+            (preparedSignalReaction?.speakerBotId !== requestedSpeakerBotId ||
+              (preparedSignalReaction
+                ? listenerReactionInterruptedSpeakerTextV1(
+                    preparedSignalReaction,
+                  )
+                : null) !== requestedInterruptedSpeakerReaction))
+        ) {
           throw new HttpError(400, "Unsupported interrupted-speaker reaction.");
         }
         sourceText = interruptedSpeakerReaction;
@@ -26259,6 +27060,20 @@ function buildRoutes(): RouteDefinition[] {
       const allowOperatingSystemVoices =
         user.operating_system_voices_enabled !== 0 ||
         Boolean(profile.systemVoiceName);
+      if (listenerReactionFoleyRequested) {
+        if (raw.engine !== "elevenlabs") {
+          throw new HttpError(
+            409,
+            "Listener vocal Foley requires an ElevenLabs voice.",
+          );
+        }
+        if (!resolveElevenLabsVoiceId(profile)) {
+          throw new HttpError(
+            400,
+            "Listener vocal Foley requires a selected ElevenLabs voice.",
+          );
+        }
+      }
       // Conversation synthesis observes the saved Premium choice. Avatar
       // Studio previews remain explicit provider truth checks.
       const elevenLabsConversationEnabled =
@@ -26331,6 +27146,7 @@ function buildRoutes(): RouteDefinition[] {
               allowOperatingSystemVoices,
               signal: controller.signal,
               performancePlan: babblePerformancePlan,
+              binaryFrames: binaryVoiceChunkStreamRequested,
             });
             return;
           }
@@ -26395,6 +27211,7 @@ function buildRoutes(): RouteDefinition[] {
               punctuationPacing:
                 localDelivery.localEngine.resolved === "instant" &&
                 !localDelivery.usingSystemVoice,
+              binaryFrames: binaryVoiceChunkStreamRequested,
             });
             return;
           }
@@ -26488,6 +27305,7 @@ function buildRoutes(): RouteDefinition[] {
               punctuationPacing:
                 localDelivery.localEngine.resolved === "instant" &&
                 !localDelivery.usingSystemVoice,
+              binaryFrames: binaryVoiceChunkStreamRequested,
             });
             return;
           }
@@ -26590,6 +27408,18 @@ function buildRoutes(): RouteDefinition[] {
           seed: providerVoiceSeed,
           signal: controller.signal,
         });
+        // Validate the complete provider body before exposing a successful
+        // Premium response. Once headers or a partial MPEG frame reach an
+        // applet, the server can no longer substitute the built-in voice if
+        // ElevenLabs disconnects mid-line. Ordinary conversation playback is
+        // short and bounded, so buffering here buys one global, all-applet
+        // guarantee: callers receive either the complete Premium take or the
+        // complete local fallback, never a clipped line that sounded healthy
+        // at request start.
+        const providerAudio = Buffer.from(await providerResponse.arrayBuffer());
+        if (providerAudio.byteLength === 0) {
+          throw new Error("ElevenLabs returned an empty speech response.");
+        }
         ctx.res.statusCode = 200;
         ctx.res.setHeader(
           "content-type",
@@ -26601,13 +27431,11 @@ function buildRoutes(): RouteDefinition[] {
           "x-prism-voice-characters",
           String(boundary.text.length),
         );
+        ctx.res.setHeader("content-length", String(providerAudio.byteLength));
         const requestId = providerResponse.headers.get("request-id");
         if (requestId)
           ctx.res.setHeader("x-prism-provider-request-id", requestId);
-        const nodeReadable = Readable.fromWeb(
-          providerResponse.body as import("stream/web").ReadableStream,
-        );
-        await pipeline(nodeReadable, ctx.res);
+        ctx.res.end(providerAudio);
         void checkPrismCreditMonitorForUser(userId, true);
       } catch (error) {
         if (ctx.res.headersSent) {
@@ -26676,6 +27504,7 @@ function buildRoutes(): RouteDefinition[] {
                 punctuationPacing:
                   localDelivery.localEngine.resolved === "instant" &&
                   !localDelivery.usingSystemVoice,
+                binaryFrames: binaryVoiceChunkStreamRequested,
               });
               return;
             }
@@ -27623,10 +28452,45 @@ function buildRoutes(): RouteDefinition[] {
         });
         return;
       }
-      const requestedModel =
+      const liveSessionId =
+        typeof body.liveSessionId === "string"
+          ? body.liveSessionId.trim()
+          : "";
+      let requestedModel =
         (typeof body.model === "string" ? body.model.trim() : "") ||
         user.preferred_local_model?.trim() ||
         defaultModelIdForProvider("local");
+      if (experience === "coffee" && liveSessionId) {
+        // Ownership validation also prevents arbitrary clients from reserving
+        // a lane under another account's session id.
+        getCoffeeConversationTranscript(db, userId, liveSessionId);
+        const runtime = await contextualTextRuntimeForUser({
+          userId,
+          user,
+          requestedProvider: provider,
+          requestedResponseMode: body.responseMode,
+          modelOverride: body.model,
+          // This exactly matches the first autonomous Coffee turn-job route.
+          routingContext: {
+            surface: "coffee",
+            inputText: "\n",
+            outputTokens: 900,
+          },
+        });
+        if (runtime.provider === "local") {
+          requestedModel = runtime.model;
+          await claimLiveLocalModelLane({
+            owner: `coffee:${userId}:${liveSessionId}`,
+            model: requestedModel,
+            quiesceOtherModels: true,
+            options: {
+              secondaryOllamaHost: user.secondary_ollama_host,
+              experimentalDualOllama:
+                user.experimental_dual_ollama_enabled === 1,
+            },
+          });
+        }
+      }
       const readiness = await prepareLocalModel({
         model: requestedModel,
         options: {

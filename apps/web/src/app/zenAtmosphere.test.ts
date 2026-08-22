@@ -68,7 +68,7 @@ describe("zenAtmosphereGrayscaleAmount", () => {
     );
     assert.match(
       pageSource,
-      /zenPersonaAtmosphereAccentStyle = zenPersonaBot[\s\S]*?botAccentStyle\([\s\S]*?zenPersonaBot\.color/,
+      /zenPersonaAtmosphereAccentStyle =\s*zenPersonaBot[\s\S]*?botAccentStyle\([\s\S]*?zenPersonaBot\.color/,
     );
     assert.match(pageSource, /data-persona-color=\{zenPersonaBot \? "true" : undefined\}/);
   });

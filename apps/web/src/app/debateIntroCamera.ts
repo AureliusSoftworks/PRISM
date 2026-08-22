@@ -210,9 +210,20 @@ export function debateModeratorCameraCues(args: {
   content: string;
   forName: string;
   againstName: string;
+  /**
+   * The introducee wide-cut sequence is intro cinematography. Later moderator
+   * monologues mention the advocates constantly — challenge prompts, phase
+   * bridges, rulings — and re-running "introducing the debaters" cuts on each
+   * one reads as the camera thrashing Wide ↔ Moderator mid-session. Pass
+   * false for any beat that is not the actual introduction; those get calm
+   * breath cues only.
+   */
+  introducees?: boolean;
 }): DebateModeratorCameraCue[] {
-  const nameCues = debateIntroAdvocateCues(args);
-  if (nameCues.length > 0) return nameCues;
+  if (args.introducees !== false) {
+    const nameCues = debateIntroAdvocateCues(args);
+    if (nameCues.length > 0) return nameCues;
+  }
   return debateModeratorBreathCues(args.content);
 }
 
@@ -307,6 +318,8 @@ export function resolveDebateModeratorCameraView(args: {
   wideHoldMs?: number;
   breathWideMs?: number;
   returnModeratorRemainingRatio?: number;
+  /** See debateModeratorCameraCues — false for non-intro monologues. */
+  introducees?: boolean;
 }): {
   view: DebateModeratorCameraView;
   wideHoldStartedAtMs: number | null;
@@ -317,6 +330,7 @@ export function resolveDebateModeratorCameraView(args: {
     content,
     forName: args.forName,
     againstName: args.againstName,
+    introducees: args.introducees,
   });
   if (!content || cues.length === 0) {
     return {

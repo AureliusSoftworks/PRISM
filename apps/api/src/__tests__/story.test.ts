@@ -1234,7 +1234,7 @@ describe("Story API helpers", () => {
     assert.equal(primaryProvider.calls.length, 1);
     assert.match(
       JSON.stringify(primaryProvider.calls[0]?.messages),
-      /HARD Ad Hominem primary-generation rule/u,
+      /HARD Ad Hominem rule for each Story scene spoken by this bot/u,
     );
     assert.match(JSON.stringify(primaryProvider.calls[0]?.messages), /scene cast: Ada/u);
   });

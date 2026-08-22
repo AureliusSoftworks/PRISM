@@ -13,6 +13,11 @@ const PRISM_FRAME_RATE_SUSPENSION_GAP_MS = 10_000;
 export function PrismAdaptiveDomQualityGovernor(): null {
   useEffect(() => {
     const controller = new PrismDomAdaptiveQualityController(performance.now());
+    const qualityTarget = document.documentElement;
+    const applyRuntimeQuality = (): void => {
+      qualityTarget.dataset.prismRuntimeQuality = controller.currentQuality();
+    };
+    applyRuntimeQuality();
     let frameId = 0;
     let previousFrameTime = performance.now();
     let fpsWindowStartedAt = previousFrameTime;
@@ -59,14 +64,48 @@ export function PrismAdaptiveDomQualityGovernor(): null {
       if (overageMs > 8) loopLagMsInWindow += overageMs;
     }, LAG_PROBE_INTERVAL_MS);
 
+    // Measure the delay from real user input to the next paint. Live Coffee
+    // and Signal already start at the minimum cosmetic workload; this catches
+    // unexpected pressure elsewhere without doing React work in the handler.
+    let inputPaintFrameId = 0;
+    let earliestPendingInputAtMs: number | null = null;
+    const noteUserInput = (event: Event): void => {
+      const nowMs = performance.now();
+      const eventTimeMs =
+        Number.isFinite(event.timeStamp) &&
+        event.timeStamp > 0 &&
+        Math.abs(nowMs - event.timeStamp) < 60_000
+          ? event.timeStamp
+          : nowMs;
+      earliestPendingInputAtMs = Math.min(
+        earliestPendingInputAtMs ?? eventTimeMs,
+        eventTimeMs,
+      );
+      if (inputPaintFrameId !== 0) return;
+      inputPaintFrameId = window.requestAnimationFrame((paintedAtMs) => {
+        inputPaintFrameId = 0;
+        const startedAtMs = earliestPendingInputAtMs;
+        earliestPendingInputAtMs = null;
+        if (startedAtMs === null) return;
+        const result = controller.recordInteractionDelay(
+          Math.max(0, paintedAtMs - startedAtMs),
+        );
+        if (result.qualityChanged) applyRuntimeQuality();
+      });
+    };
+    window.addEventListener("pointerdown", noteUserInput, true);
+    window.addEventListener("keydown", noteUserInput, true);
+    window.addEventListener("beforeinput", noteUserInput, true);
+
     const tick = (nowMs: number): void => {
       const deltaMs = Math.max(0, nowMs - previousFrameTime);
       const foreground = document.visibilityState === "visible";
-      controller.recordFrame({
+      const qualityResult = controller.recordFrame({
         nowMs,
         deltaMs,
         foreground,
       });
+      if (qualityResult.qualityChanged) applyRuntimeQuality();
       previousFrameTime = nowMs;
       // Long frames are real frames: a 300ms main-thread stall is exactly the
       // signal this meter exists to report, so it counts with its full
@@ -109,8 +148,15 @@ export function PrismAdaptiveDomQualityGovernor(): null {
 
     return () => {
       window.cancelAnimationFrame(frameId);
+      if (inputPaintFrameId !== 0) {
+        window.cancelAnimationFrame(inputPaintFrameId);
+      }
       longTaskObserver?.disconnect();
       window.clearInterval(lagProbeId);
+      window.removeEventListener("pointerdown", noteUserInput, true);
+      window.removeEventListener("keydown", noteUserInput, true);
+      window.removeEventListener("beforeinput", noteUserInput, true);
+      delete qualityTarget.dataset.prismRuntimeQuality;
     };
   }, []);
 

@@ -49,14 +49,12 @@ test("Signal navbar opens its contextual settings and preserves the tutorial", (
 test("Signal keeps provider tags scoped while local actions use structured streaming", () => {
   assert.match(
     pageSource,
-    /signalOnlineVoiceEnabled && message\.voicePerformanceText[\s\S]{0,180}elevenLabsText: message\.voicePerformanceText/u,
+    /signalOnlineVoiceEnabled && strippedElevenLabsText[\s\S]{0,180}elevenLabsText: strippedElevenLabsText/u,
   );
   assert.match(pageSource, /signalMessageId: message\.id/u);
   assert.match(pageSource, /text: voiceSpokenText\(message\.content\)/u);
-  assert.match(
-    pageSource,
-    /const performanceText = message\.voicePerformanceText \?\? message\.content/u,
-  );
+  assert.match(pageSource, /const rawPerformanceText =[\s\S]{0,80}message\.voicePerformanceText \?\? message\.content/u);
+  assert.match(pageSource, /const performanceText = botPowerIsBreathlessV1/u);
   assert.match(
     pageSource,
     /const useLocalPerformanceStream =[\s\S]{0,260}segment\.kind === "vocal-action"/u,

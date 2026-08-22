@@ -17,6 +17,7 @@ describe("native Max effort overdrive", () => {
     assert.deepEqual(modelEffortSliderLevels(maxCapability), [
       "auto",
       "none",
+      "minimal",
       "low",
       "medium",
       "high",

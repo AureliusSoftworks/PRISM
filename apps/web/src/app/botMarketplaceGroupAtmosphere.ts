@@ -43,6 +43,10 @@ const BOT_MARKETPLACE_GROUP_ATMOSPHERES: Readonly<
     label: "Ocean haze",
     src: "/zen-fallback-wallpapers/ocean-haze.webp",
   },
+  "public-domain-fiction": {
+    label: "Archive paper wash",
+    src: "/zen-fallback-wallpapers/paper-grain-wash.webp",
+  },
   "power-collection": {
     label: "Mineral aurora",
     src: "/zen-fallback-wallpapers/mineral-aurora.webp",

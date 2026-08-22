@@ -26,7 +26,8 @@ describe("Slate Creative Studios desk", () => {
 
   it("treats generated images as studies before pin or rejection", () => {
     assert.match(component, /Every image begins as a study/u);
-    assert.match(component, /Generate study/u);
+    assert.match(component, /label="Visual studies"/u);
+    assert.match(component, /onSynthesize=\{createVisualStudy\}/u);
     assert.match(component, /\/visual-references\/\$\{encodeURIComponent\(visual\.id\)\}\/pin/u);
     assert.match(component, /\/visual-references\/\$\{encodeURIComponent\(visual\.id\)\}\/reject/u);
   });

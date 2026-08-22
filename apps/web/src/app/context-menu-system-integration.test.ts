@@ -39,7 +39,7 @@ test("menu interaction contract includes keyboard, submenu, and focus restoratio
   assert.match(menuSource, /event\.key === "Tab"[\s\S]*?restoreFocus: false/u);
   assert.match(
     menuSource,
-    /event\.key === "ArrowRight" && activeEntry\?\.kind === "submenu"/u,
+    /!navbarPicker &&\s*event\.key === "ArrowRight" &&\s*activeEntry\?\.kind === "submenu"/u,
   );
   assert.match(menuSource, /preferredPlacement: "right-start"/u);
   assert.match(menuSource, /claimSurface/u);

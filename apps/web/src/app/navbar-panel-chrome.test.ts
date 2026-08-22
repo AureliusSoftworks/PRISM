@@ -34,8 +34,8 @@ test("model picker outside-dismiss keeps portaled fallback menus selectable", ()
     /target\.closest\(\s*[\s\S]*?data-compose-model-menu="true"[\s\S]*?data-compose-model-effort-menu="true"/u,
   );
   assert.ok(
-    pageSource.includes("key={`${lane}:${index}`}"),
-    "fallback picker rows should use a stable lane:index key",
+    pageSource.includes("key={encodeAutoFallbackPickerValue(fallback)}"),
+    "fallback picker rows should use a stable provider:model key",
   );
   assert.match(pageSource, /available:\s*autoFallbackRefs/u);
 });

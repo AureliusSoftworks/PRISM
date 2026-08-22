@@ -9,6 +9,7 @@ import {
   createBotcastEpisode,
   createBotcastShow,
   getBotcastEpisode,
+  persistCompletedBotcastPairHistory,
   recordBotcastSessionClockHold,
 } from "../botcast.ts";
 import { initializeDatabase } from "../db.ts";
@@ -173,6 +174,140 @@ describe("Signal turn preparation", () => {
         ),
         true,
         "session-clock bookkeeping invalidated the turn it was measuring",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("ignores relationship maintenance timestamps but rejects semantic changes", async () => {
+    const db = fixture();
+    try {
+      const episodeId = liveEpisode(db);
+      await advanceBotcastEpisode(db, "user-1", episodeId, {}, generation());
+      db.prepare(
+        `INSERT INTO bot_relationships (
+          user_id, source_bot_id, target_bot_id, score, band, mood_key,
+          trend, last_reason, recent_reasons, updated_at
+        ) VALUES (
+          'user-1', 'host-1', 'guest-1', 50, 'neutral', 'neutral',
+          'steady', 'No durable shift.', '[]', '2026-01-01T00:00:00.000Z'
+        )`,
+      ).run();
+      const frozen = botcastPreparedTurnCursor(db, "user-1", episodeId);
+
+      db.prepare(
+        `UPDATE bot_relationships
+            SET updated_at = '2026-01-02T00:00:00.000Z'
+          WHERE user_id = 'user-1'
+            AND source_bot_id = 'host-1'
+            AND target_bot_id = 'guest-1'`,
+      ).run();
+      assert.equal(
+        preparedTurnCursorMatchesV1(
+          frozen,
+          botcastPreparedTurnCursor(db, "user-1", episodeId),
+        ),
+        true,
+        "timestamp-only memory maintenance invalidated prepared speech",
+      );
+
+      db.prepare(
+        `UPDATE bot_relationships
+            SET score = 51
+          WHERE user_id = 'user-1'
+            AND source_bot_id = 'host-1'
+            AND target_bot_id = 'guest-1'`,
+      ).run();
+      assert.equal(
+        preparedTurnCursorMatchesV1(
+          frozen,
+          botcastPreparedTurnCursor(db, "user-1", episodeId),
+        ),
+        false,
+        "a relationship meaning change did not invalidate prepared speech",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("commits a prepared closing turn across background relationship maintenance", async () => {
+    const db = fixture();
+    try {
+      const episodeId = liveEpisode(db);
+      await advanceBotcastEpisode(db, "user-1", episodeId, {}, generation());
+      await advanceBotcastEpisode(db, "user-1", episodeId, {}, generation());
+      db.prepare(
+        `UPDATE botcast_episodes
+            SET segment = 'closing'
+          WHERE id = ? AND user_id = 'user-1'`,
+      ).run(episodeId);
+      db.prepare(
+        `INSERT INTO bot_relationships (
+          user_id, source_bot_id, target_bot_id, score, band, mood_key,
+          trend, last_reason, recent_reasons, updated_at
+        ) VALUES (
+          'user-1', 'host-1', 'guest-1', 50, 'neutral', 'neutral',
+          'steady', 'No durable shift.', '[]', '2026-01-01T00:00:00.000Z'
+        )`,
+      ).run();
+
+      const isolated = createUserScopedPreparedDatabase(
+        db,
+        "user-1",
+        SIGNAL_PREPARATION_TABLES,
+      );
+      let prepared;
+      try {
+        prepared = await advanceBotcastEpisode(
+          isolated.db,
+          "user-1",
+          episodeId,
+          {},
+          { ...generation(), userKey: Buffer.alloc(32, 7) },
+          { deferPairHistoryMaintenance: true },
+        );
+      } catch (error) {
+        isolated.session.close();
+        isolated.db.close();
+        throw error;
+      }
+      const changeset = capturePreparedDatabaseChangeset(
+        isolated.db,
+        isolated.session,
+      );
+      assert.equal(prepared.episode.status, "completed");
+
+      db.prepare(
+        `UPDATE bot_relationships
+            SET updated_at = '2026-01-02T00:00:00.000Z'
+          WHERE user_id = 'user-1'
+            AND source_bot_id = 'host-1'
+            AND target_bot_id = 'guest-1'`,
+      ).run();
+      assert.doesNotThrow(() => applyPreparedDatabaseChangeset(db, changeset));
+      assert.equal(
+        getBotcastEpisode(db, "user-1", episodeId).status,
+        "completed",
+      );
+
+      db.prepare(
+        "UPDATE users SET memory_learn_about_bots = 1 WHERE id = 'user-1'",
+      ).run();
+      persistCompletedBotcastPairHistory({
+        db,
+        userId: "user-1",
+        episodeId,
+        userKey: Buffer.alloc(32, 7),
+      });
+      assert.ok(
+        (
+          db.prepare(
+            "SELECT pair_history_persisted_at AS persistedAt FROM botcast_episodes WHERE id = ?",
+          ).get(episodeId) as { persistedAt: string | null }
+        ).persistedAt,
+        "authoritative completion did not persist pair history",
       );
     } finally {
       db.close();

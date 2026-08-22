@@ -52,10 +52,6 @@ test("character brief is a populated universal refract target in the generator",
   assert.match(pageSource, /Character brief/gu);
   assert.match(pageSource, /disabled=\{botGeneratorBusy\}/u);
   assert.match(pageSource, /autoFocus/u);
-  assert.match(
-    pageSource,
-    /\{botGeneratorBusy \? \(\s*<PrismCompanionPresenceBoundary reason="bot-creation" \/>\s*\) : null\}/u,
-  );
   assert.doesNotMatch(
     pageSource,
     /<textarea[\s\S]{0,500}data-prism-refract-ignore/u,
@@ -78,11 +74,7 @@ test("only a blank new-bot draft has extinguished identity lamps", () => {
   );
   assert.equal(
     pageSource.match(/avatarLightMode=\{avatarStudioLightMode\}/gu)?.length,
-    1,
-  );
-  assert.match(
-    pageSource,
-    /botFoundryPhase === "generation" \|\|[\s\S]{0,100}botFoundryPhase === "awakening"[\s\S]{0,120}\? "alive"[\s\S]{0,80}: avatarStudioLightMode/u,
+    2,
   );
   assert.match(cssSource, /botVoiceLightBulbIgnite 600ms ease-out/u);
   assert.match(
@@ -331,14 +323,16 @@ test("the creation ritual makes the real dormant bot tactile before synthesis", 
   assert.match(pageSource, /foundryRitual/u);
   assert.match(pageSource, /botAvatarFoundryScreenMode\(\s*botFoundryPhase/u);
   assert.match(pageSource, /runtimeEffectsEnabled=\{screenMode === "live"\}/u);
-  assert.match(pageSource, /previewState\.faceCandidate\.eyes/u);
-  assert.match(pageSource, /previewState\.faceCandidate\.mouth/u);
-  assert.match(pageSource, /previewState\.buckleGlyph/u);
-  assert.match(pageSource, /previewState\.screenFinalizing/u);
+  assert.match(ritualSource, /faceCandidate:/u);
+  assert.match(ritualSource, /buckleGlyph: populationFrame\.glyph/u);
+  assert.match(pageSource, /screenOverlay=\{ritualState\.screenOverlay\}/u);
+  assert.match(pageSource, /screenOverlayVisible=\{ritualState\.screenOverlayVisible\}/u);
+  assert.match(pageSource, /screenFinalizing=\{ritualState\.screenFinalizing\}/u);
+  assert.match(pageSource, /screenCrest=\{ritualState\.screenCrest\}/u);
+  assert.match(pageSource, /buckleFill=\{ritualState\.buckleFill\}/u);
   assert.match(pageSource, /BOT_AVATAR_FOUNDRY_TIMING\.finalizationMs/u);
-  assert.match(pageSource, /modulePopulation=\{previewState\.modulePopulation\}/u);
-  assert.match(pageSource, /voiceLightLevel=\{previewState\.lightLevel\}/u);
-  assert.match(pageSource, /frameWearSeed=\{previewState\.frameWearSeed\}/u);
+  assert.match(pageSource, /modulePopulation=\{ritualState\.modulePopulation\}/u);
+  assert.match(pageSource, /frameMaterialSeed=\{ritualState\.frameWearSeed\}/u);
   assert.match(pageSource, /botFrameMetalMaterialStyle\(\s*frameMaterialSeed[^;]+frameWearSeed/u);
   assert.match(ritualCssSource, /\.prismRadialLight\s*\{/u);
   assert.match(ritualCssSource, /\.prismAnchor\s*\{/u);
@@ -389,7 +383,7 @@ test("Foundry synthesis stays beneath authored glass and separates both liquid s
     "className={styles.botAvatarFoundryBuckleFill}",
   );
   const buckleGlyphIndex = pageSource.indexOf(
-    "<PhosphorPixelSvgGlyph className={styles.zenLiveBotPresenceBotGlyph}>",
+    "className={styles.zenLiveBotPresenceBotGlyph}",
     buckleFillIndex,
   );
   const buckleGlassIndex = pageSource.indexOf(

@@ -10,6 +10,7 @@ import {
 } from "@localai/shared";
 
 export const MAX_PREPARED_TURNS_PER_USER = 8;
+export const MAX_PREPARED_TURN_WAIT_MS = 20_000;
 
 export class TurnPreparationError extends Error {
   readonly code:
@@ -237,6 +238,39 @@ export class TurnPreparationRegistry {
 
   get(preparationId: string, userId: string): PreparedTurnV1 {
     return clonePreparation(this.#entry(preparationId, userId).public);
+  }
+
+  /** Hold one status request until generation settles instead of making the
+   * live browser poll and parse JSON several times per second. */
+  async wait(
+    preparationId: string,
+    userId: string,
+    timeoutMs = MAX_PREPARED_TURN_WAIT_MS,
+  ): Promise<PreparedTurnV1> {
+    const entry = this.#entry(preparationId, userId);
+    if (entry.public.phase !== "preparing") {
+      return clonePreparation(entry.public);
+    }
+    const finiteTimeoutMs = Number.isFinite(timeoutMs)
+      ? timeoutMs
+      : MAX_PREPARED_TURN_WAIT_MS;
+    const boundedTimeoutMs = Math.max(
+      0,
+      Math.min(MAX_PREPARED_TURN_WAIT_MS, Math.floor(finiteTimeoutMs)),
+    );
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      await Promise.race([
+        entry.generation,
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, boundedTimeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer !== null) clearTimeout(timer);
+    }
+    this.#cleanupExpired();
+    return clonePreparation(entry.public);
   }
 
   discard(preparationId: string, userId: string, reason = "Discarded by the client."): PreparedTurnV1 {

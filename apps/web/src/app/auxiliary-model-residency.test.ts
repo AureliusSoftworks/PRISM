@@ -46,4 +46,11 @@ describe("auxiliary model residency", () => {
       /window\.addEventListener\("online", refreshKeepWarm\)/u,
     );
   });
+
+  it("defers the residency heartbeat while Coffee or Signal owns the live frame budget", () => {
+    assert.match(
+      pageSource,
+      /document\.body\.dataset\.prismLivePerformanceActive === "true"[\s\S]{0,360}scheduleKeepWarm\(AUXILIARY_MODEL_KEEP_WARM_INTERVAL_MS\)[\s\S]{0,80}return;/u,
+    );
+  });
 });

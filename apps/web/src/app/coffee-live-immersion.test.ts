@@ -174,7 +174,13 @@ describe("Coffee live immersion", () => {
     // exactly like the avatar load sheds that were removed for the same flaw.
     assert.doesNotMatch(pageSource, /coffeeTypewriterCommitBudgetMs/u);
     assert.doesNotMatch(pageSource, /coffeeComposerDraftSyncDelayMs/u);
-    assert.match(pageSource, /COFFEE_COMPOSER_PARENT_DRAFT_SYNC_MS = 240;/u);
+    // Audible phoneme/viseme transitions are committed discretely through
+    // React; no imperative DOM driver may rotate or replace authored glyphs.
+    assert.match(pageSource, /coffeeLiveAvatarSpeechProgressShouldCommit/u);
+    assert.doesNotMatch(pageSource, /CoffeeLiveMouthDomDriver/u);
+    // The live composer is native and ref-backed. A delayed parent draft sync
+    // still creates periodic reconciliation work while the person is typing.
+    assert.doesNotMatch(pageSource, /COFFEE_COMPOSER_PARENT_DRAFT_SYNC_MS/u);
     // Coffee seats are HD, always: review 47d7aa3d ran at 1 FPS with
     // busy 3519ms/s, so the bottleneck is the main thread, not avatar
     // materials, and no frame-rate shed may take the bodies away.
@@ -184,20 +190,25 @@ describe("Coffee live immersion", () => {
     // full-canvas filtered repaints under the grayscale pause.
     assert.match(
       cssSource,
-      /\.coffeeStage\[data-model-warmup="held"\] \.coffeeTableCanvas \*[\s\S]{0,140}animation-play-state: paused !important/u,
+      /\.coffeeStage\[data-model-warmup="held"\] \.coffeeTableCanvas \*[\s\S]{0,360}animation-play-state: paused !important/u,
     );
     assert.match(
       cssSource,
-      /\.coffeeStage\[data-motion-shed="true"\] \[data-prism-decorative-motion="true"\][\s\S]{0,200}animation-play-state: paused !important/u,
+      /\.coffeeStage\[data-motion-shed="true"\][\s\S]{0,520}\[data-prism-decorative-motion="true"\][\s\S]{0,220}animation-play-state: paused !important/u,
     );
   });
 
   it("mutters stew asides over long thinking windows", () => {
     // While one bot's answer generates, another bot may take advantage of the
-    // wait ("While A stews on that…") via a coexisting turn job.
+    // wait ("While A stews on that…") via a coexisting turn job. LOCAL keeps
+    // one inference lane so the mutter cannot steal renderer time.
     assert.match(
       pageSource,
       /const stewShape =[\s\S]{0,900}COFFEE_STEW_ASIDE_DELAY_MS/u,
+    );
+    assert.match(
+      pageSource,
+      /COFFEE_STEW_ASIDE_DELAY_MS &&\s*coffeeSessionProviderRef\.current !== "local"/u,
     );
     assert.match(pageSource, /const runCoffeeStewAside = async/u);
     assert.match(pageSource, /thinkingAsideAboutBotId: args\.thinkerBotId,/u);

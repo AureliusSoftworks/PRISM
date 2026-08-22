@@ -62,6 +62,60 @@ describe("turn preparation registry", () => {
     assert.equal(second.preparation.phase, "committed");
   });
 
+  it("exposes only the authenticated provisional utterance metadata", async () => {
+    const registry = new TurnPreparationRegistry();
+    const preparation = createReady(registry, "signal-voice-prefetch");
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const ready = registry.get(preparation.id, "user-1");
+    assert.equal(ready.phase, "ready");
+    assert.deepEqual(ready.provisionalUtterances, [
+      { id: "utterance-1", speakerBotId: "bot-2", text: "Prepared." },
+    ]);
+    assert.throws(
+      () => registry.get(preparation.id, "user-2"),
+      (error: unknown) =>
+        error instanceof TurnPreparationError && error.code === "not_found",
+    );
+  });
+
+  it("holds one status request until speculative generation settles", async () => {
+    const registry = new TurnPreparationRegistry();
+    let releaseGeneration!: () => void;
+    const preparation = registry.create({
+      userId: "user-1",
+      surface: "signal",
+      sessionId: "long-poll",
+      stateCursor: cursor,
+      run: async () => {
+        await new Promise<void>((resolve) => {
+          releaseGeneration = resolve;
+        });
+        return {
+          speakerBotId: "bot-2",
+          provisionalUtterances: [
+            { id: "utterance-2", speakerBotId: "bot-2", text: "Ready." },
+          ],
+          payload: null,
+        };
+      },
+    });
+    let settled = false;
+    const waiting = registry
+      .wait(preparation.id, "user-1", 5_000)
+      .then((value) => {
+        settled = true;
+        return value;
+      });
+
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(settled, false);
+    releaseGeneration();
+    const ready = await waiting;
+    assert.equal(ready.phase, "ready");
+    assert.equal(ready.provisionalUtterances[0]?.text, "Ready.");
+  });
+
   it("coalesces simultaneous commits into one domain mutation", async () => {
     const registry = new TurnPreparationRegistry();
     const preparation = createReady(registry, "simultaneous");

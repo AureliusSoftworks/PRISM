@@ -68,6 +68,37 @@ describe("model preparation polling", () => {
     );
   });
 
+  it("sends the live Coffee lane identity without replacing Auto visibly", async () => {
+    let body: Record<string, unknown> | null = null;
+    await waitForModelPreparation({
+      request: async <T>(_path: string, init?: RequestInit): Promise<T> => {
+        body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return {
+          ok: true,
+          state: "ready",
+          model: "nemotron-mini",
+          startedAt: null,
+          expiresAt: null,
+          retryAfterMs: null,
+          failure: null,
+        } as T;
+      },
+      provider: "local",
+      model: null,
+      experience: "coffee",
+      liveSessionId: "coffee-session-1",
+      responseMode: "local",
+    });
+
+    assert.deepEqual(body, {
+      provider: "local",
+      model: null,
+      experience: "coffee",
+      liveSessionId: "coffee-session-1",
+      responseMode: "local",
+    });
+  });
+
   it("aborts a pending poll without issuing another request", async () => {
     const controller = new AbortController();
     let requestCount = 0;

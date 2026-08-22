@@ -10,7 +10,7 @@ const css = readFileSync(
 
 test("Coffee uses a brief mood-aware aside without cancelling the slow turn", () => {
   const start = source.indexOf("const coffeeDeadAirAsideConsideredRef");
-  const end = source.indexOf("const [coffeeProvider", start);
+  const end = source.indexOf("const coffeeProvider =", start);
   const thinkingDelaySlice = source.slice(start, end);
 
   assert.ok(start >= 0 && end > start);

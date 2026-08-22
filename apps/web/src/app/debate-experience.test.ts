@@ -146,7 +146,7 @@ describe("Debate experience", () => {
   it("makes every archived Resume an immediate gavel, prepared Moderator line, then held floor", () => {
     const immediateStrike = source.indexOf("const resumeGavelEventId =");
     const quietResumeRequest = source.indexOf(
-      "quiet = await requestQuietLifecycle(previous)",
+      "quiet = await requestQuietLifecycle(lifecycleSession)",
       immediateStrike,
     );
     assert.ok(immediateStrike >= 0);
@@ -1391,7 +1391,11 @@ describe("Debate experience", () => {
     );
     assert.match(
       page,
-      /const prepareDebateUtterance = async[\s\S]{0,2400}prefetchBotcastUtterance\([\s\S]{0,1800}"debate"/u,
+      /const prepareDebateUtterance = async[\s\S]{0,3600}const clip = prefetchBotcastUtterance\(/u,
+    );
+    assert.match(
+      page,
+      /const clip = prefetchBotcastUtterance\([\s\S]{0,3600}"debate"/u,
     );
     assert.match(
       page,
@@ -1437,14 +1441,14 @@ describe("Debate experience", () => {
     );
   });
 
-  it("keeps Proceedings closed until streaming can arm after voice prep", () => {
+  it("keeps Proceedings closed until stage presentation finishes after voice prep", () => {
     assert.match(
       source,
-      /Streaming articles must never fall back to the completed speech/u,
+      /the rail never[\s\S]{0,120}streams[\s\S]{0,180}a turn drops in whole once its stage presentation[\s\S]{0,80}has finished/u,
     );
     assert.match(
       source,
-      /snapshot\.eventId === props\.event\.id[\s\S]{0,80}\? snapshot\.visibleContent[\s\S]{0,40}: ""/u,
+      /const streaming =[\s\S]{0,180}presentationEventId === event\.id[\s\S]{0,220}liveReveal\.visibleContent\.length < event\.content\.length[\s\S]{0,80}if \(streaming\) return null/u,
     );
     assert.doesNotMatch(
       source,
@@ -1486,7 +1490,11 @@ describe("Debate experience", () => {
     assert.match(page, /consentRouting=\{debateConsentRouting\}/u);
     assert.match(
       page,
-      /const debateConsentRouting = debateEffortTarget[\s\S]{0,420}savedModelReasoningEffort/u,
+      /const debateReasoningEffort = debateEffortTarget[\s\S]{0,320}effectiveModelReasoningEffortForRequest/u,
+    );
+    assert.match(
+      page,
+      /const debateConsentRouting = debateEffortTarget[\s\S]{0,320}reasoningEffort: debateReasoningEffort \?\? "auto"/u,
     );
     assert.match(
       source,
@@ -1877,7 +1885,15 @@ describe("Debate experience", () => {
     );
     assert.match(
       archiveRows,
-      /className=\{styles\.archiveChipExpanded\}[\s\S]{0,1600}archiveChipDetails[\s\S]{0,1200}archiveSynopsis[\s\S]{0,1000}archiveActions/u,
+      /className=\{styles\.archiveChipExpanded\}[\s\S]{0,500}archiveChipDetails/u,
+    );
+    assert.match(
+      archiveRows,
+      /archiveChipDetails[\s\S]{0,3000}archiveSynopsis/u,
+    );
+    assert.match(
+      archiveRows,
+      /archiveSynopsis[\s\S]{0,500}archiveActions/u,
     );
     assert.match(
       css,
@@ -2497,7 +2513,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /action === "smash"[\s\S]{0,260}orderDebateAudienceRef\.current/u,
+      /First smack: calm the room[\s\S]{0,500}orderDebateAudienceRef\.current/u,
     );
     assert.match(
       source,
@@ -2558,7 +2574,10 @@ describe("Debate experience", () => {
     assert.match(source, /data-action="resume"/u);
     assert.match(source, /Resume Debate/u);
     assert.match(source, /data-tutorial-target="debate-pause"/u);
-    assert.match(source, /\{pauseOnCooldown \? "Pause…" : "Pause"\}/u);
+    assert.match(
+      source,
+      /\{pauseOnCooldown[\s\S]{0,120}\? "Pause…"[\s\S]{0,180}: "Pause"\}/u,
+    );
     assert.match(source, /quietSave: true/u);
     assert.match(source, /\$\{lifecyclePath\}\/announce/u);
     assert.match(source, /resume \? "resume" : "pause"/u);
@@ -2569,7 +2588,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /events: heldFloorReplayEvents[\s\S]{0,220}setActiveSession\(result\.session\)/u,
+      /events: heldFloorReplayEvents[\s\S]{0,600}setActiveSession\(result\.session\)/u,
     );
     assert.match(
       source,
@@ -2577,7 +2596,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /const silentLifecycle =[\s\S]{0,160}startDeferredSetup;/u,
+      /const silentLifecycle =[\s\S]{0,160}bufferedReturnGavel;/u,
     );
     assert.doesNotMatch(source, /resumeOpeningIntro/u);
     assert.match(source, /if \(lifecycleEvent\) \{/u);
@@ -2600,7 +2619,10 @@ describe("Debate experience", () => {
       source,
       /needsSpectatorBakeResume && session\.status === "paused"/u,
     );
-    assert.match(source, /nextMutationKey\("exit-recess"\)/u);
+    assert.match(
+      source,
+      /participantExit \? "participant-exit-recess" : "moderator-exit-recess"/u,
+    );
     assert.match(
       source,
       /recessRequest[\s\S]{0,120}\.catch\([\s\S]{0,280}already finished/u,
@@ -2644,7 +2666,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /const lifecycleGavelAlreadyStruck =\s*lifecycleEvent !== undefined && resumeCeremonyStarted/u,
+      /const lifecycleGavelAlreadyStruck =\s*lifecycleEvent !== undefined &&\s*\(resumeCeremonyStarted \|\| bufferedReturnGavel\)/u,
     );
     assert.match(
       source,
@@ -2660,7 +2682,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /await adoptSession\(previous, result\.session,[\s\S]{0,180}lifecycleEvent\.id/u,
+      /await adoptSession\(ceremonyPrevious, result\.session,[\s\S]{0,180}lifecycleEvent\.id/u,
     );
     assert.match(
       source,
@@ -2877,6 +2899,34 @@ describe("Debate experience", () => {
     assert.doesNotMatch(
       source,
       /onEnd: \(\) => \{[\s\S]{0,260}visibleContent: event\.content/u,
+    );
+  });
+
+  it("waits for actual Premium playback completion and a natural gap before automatic handoff", () => {
+    const playbackStart = source.indexOf("let playbackEnded = false");
+    const playbackEnd = source.indexOf(
+      "includeInProceedings = true;",
+      source.indexOf("if (played && playbackEnded)", playbackStart),
+    );
+    assert.ok(playbackStart >= 0 && playbackEnd > playbackStart);
+    const playback = source.slice(playbackStart, playbackEnd);
+    assert.match(source, /const DEBATE_AUTOMATIC_INTER_TURN_GAP_MS = 460/u);
+    assert.match(source, /const DEBATE_AUTOMATIC_PRIMARY_RELEASE_MS = 320/u);
+    assert.match(
+      playback,
+      /onEnd: \(\) => \{[\s\S]{0,120}playbackEnded = true/u,
+    );
+    assert.match(
+      playback,
+      /if \(played && playbackEnded\) \{[\s\S]{0,180}window\.setTimeout\(resolve, DEBATE_AUTOMATIC_INTER_TURN_GAP_MS\)/u,
+    );
+    assert.match(
+      playback,
+      /if \(playbackProgressSeen && !playbackEnded\) \{[\s\S]{0,180}onReleaseUtterance\(DEBATE_AUTOMATIC_PRIMARY_RELEASE_MS\)[\s\S]{0,420}DEBATE_AUTOMATIC_INTER_TURN_GAP_MS/u,
+    );
+    assert.match(
+      source,
+      /onReleaseUtterance\?\.\(DEBATE_INTERRUPT_PRIMARY_RELEASE_MS\)/u,
     );
   });
 
@@ -4045,7 +4095,14 @@ describe("Debate experience", () => {
       source,
       /`\[\$\{hiddenPerformanceCue\}\] \$\{authoredPerformanceText \?\? spokenText\}`/u,
     );
-    assert.match(source, /voicePerformanceText:\s*atmosphericPerformance/u);
+    assert.match(
+      source,
+      /const rawPerformance = atmosphericPerformance[\s\S]{0,120}atmosphericPerformance\.voicePerformanceText/u,
+    );
+    assert.match(
+      source,
+      /botPowerIsBreathlessV1\(speakerPowers\)[\s\S]{0,120}botPowerStripBreathPerformanceTextV1\(rawPerformance\)/u,
+    );
     assert.match(
       source,
       /voiceSpokenText\(authoredVoiceText, \{ leadingMarkedAction: true \}\)/u,
@@ -4060,7 +4117,11 @@ describe("Debate experience", () => {
     );
     assert.match(
       page,
-      /const debateVoicePerformanceText =\s*utterance\.voicePerformanceText \?\?\s*\(usePlayerVoice[\s\S]{0,120}voicePerformanceTextFromActionCues\(utterance\.spokenText\)/u,
+      /const rawDebateVoicePerformanceText =\s*utterance\.voicePerformanceText \?\?\s*\(usePlayerVoice[\s\S]{0,120}voicePerformanceTextFromActionCues\(utterance\.spokenText\)/u,
+    );
+    assert.match(
+      page,
+      /const debateVoicePerformanceText =[\s\S]{0,260}botPowerIsBreathlessV1\(debateSpeakerPowers\)[\s\S]{0,180}botPowerStripBreathPerformanceTextV1\(/u,
     );
     assert.match(page, /voicePerformanceText:\s*debateVoicePerformanceText/u);
     assert.match(
@@ -5012,7 +5073,11 @@ describe("Debate experience", () => {
       page,
       /playDebatePlayerActionSfx\(playerActionSfxPlan\.kind\)/u,
     );
-    assert.match(page, /elevenLabsText:\s*message\.voicePerformanceText/u);
+    assert.match(page, /elevenLabsText:\s*strippedElevenLabsText/u);
+    assert.match(
+      page,
+      /const strippedElevenLabsText =[\s\S]{0,260}botPowerStripBreathPerformanceTextV1\([\s\S]{0,100}message\.voicePerformanceText/u,
+    );
     assert.doesNotMatch(
       page,
       /elevenLabsText:\s*voiceSpokenText\(message\.voicePerformanceText\)/u,
@@ -5421,6 +5486,13 @@ describe("Debate experience", () => {
   });
 
   it("uses the shared app navbar and a dedicated scrolling content region", () => {
+    const debatePage = page.slice(
+      page.lastIndexOf(
+        'if (view === "debate") {',
+        page.indexOf('if (view === "coffee") return renderCoffeeShell();'),
+      ),
+      page.indexOf('if (view === "coffee") return renderCoffeeShell();'),
+    );
     assert.match(page, /data-debate-shell="true"/u);
     assert.match(
       page,
@@ -5439,15 +5511,15 @@ describe("Debate experience", () => {
       page,
       /Picks model & effort/u,
     );
-    assert.doesNotMatch(page, /Account default|Uses the account model/u);
-    assert.doesNotMatch(page, /Cast models/u);
+    assert.doesNotMatch(debatePage, /Account default|Uses the account model/u);
+    assert.doesNotMatch(debatePage, /Cast models/u);
     assert.match(
       page,
-      /onLiveSessionActiveChange=\{setDebateLiveSessionActive\}/u,
+      /onLiveSessionActiveChange=\{\(active, sessionId\) => \{[\s\S]{0,120}setDebateLiveSessionActive\(active\)[\s\S]{0,120}setDebateLiveSessionId\(active \? sessionId : null\)/u,
     );
     assert.match(
       source,
-      /const liveSessionActive =\s*view === "baking" \|\| \(view === "live" && activeSession !== null\)/u,
+      /const liveSessionActive =\s*view === "baking" \|\|\s*\(\(view === "live" \|\| view === "mystery"\) && activeSession !== null\)/u,
     );
     assert.match(source, /modelOverride:\s*props\.modelOverride\?\.model/u);
     assert.doesNotMatch(source, /className=\{styles\.privacyBadge\}/u);

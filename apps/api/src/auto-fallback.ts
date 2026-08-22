@@ -13,7 +13,12 @@ import {
 
 export type AutoFallbackValidationResult<T> =
   | { ok: true; value: T }
-  | { ok: false; reason: Extract<AutoFallbackFailureReason, "empty" | "refusal" | "invalid_output"> };
+  | {
+      ok: false;
+      reason: Extract<AutoFallbackFailureReason, "empty" | "refusal" | "invalid_output">;
+      /** Slug naming the contract clause that rejected the draft. */
+      clause?: string;
+    };
 
 export interface AutoFallbackAttempt extends AutoFallbackModelRef {
   available?: boolean;
@@ -181,9 +186,31 @@ export async function runAutoFallbackChain<T = string>(args: {
     const signal = args.signal
       ? AbortSignal.any([args.signal, controller.signal])
       : controller.signal;
+    let removeAbortListener = (): void => undefined;
+    const abortPromise = new Promise<never>((_, reject) => {
+      const rejectForAbort = () => {
+        reject(
+          signal.reason instanceof Error
+            ? signal.reason
+            : abortError("Auto model attempt cancelled."),
+        );
+      };
+      if (signal.aborted) {
+        rejectForAbort();
+        return;
+      }
+      signal.addEventListener("abort", rejectForAbort, { once: true });
+      removeAbortListener = () =>
+        signal.removeEventListener("abort", rejectForAbort);
+    });
 
     try {
-      const raw = await attempt.run(signal);
+      // Providers should honor AbortSignal, but a third-party client that does
+      // not must never turn a configured timeout into an infinite wait.
+      const raw = await Promise.race([
+        Promise.resolve().then(() => attempt.run(signal)),
+        abortPromise,
+      ]);
       rethrowOuterCancellation(args.signal);
       const validated = validate(raw, attempt);
       const durationMs = Math.max(0, Math.round(now() - attemptStartedAt));
@@ -194,6 +221,7 @@ export async function runAutoFallbackChain<T = string>(args: {
           durationMs,
           outcome: "failed",
           reason: validated.reason,
+          ...(validated.clause ? { clause: validated.clause } : {}),
         });
         continue;
       }
@@ -236,6 +264,7 @@ export async function runAutoFallbackChain<T = string>(args: {
       void error;
     } finally {
       clearTimeout(timeout);
+      removeAbortListener();
     }
   }
 

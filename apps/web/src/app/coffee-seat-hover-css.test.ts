@@ -12,8 +12,15 @@ describe("Coffee seat hover treatment", () => {
   it("uses the shared rig while keeping the moving mannequin grounded above the light", () => {
     assert.match(
       pageSource,
-      /<BotAmbientPresenceRig[\s\S]*motionActive=\{coffeeSeatHoverActive\}[\s\S]*phaseOffsetSeconds=\{layoutIndex \* 1\.8\}[\s\S]*<ZenLiveBotMannequin[\s\S]*<\/BotAmbientPresenceRig>[\s\S]*coffeeSeatTeamBadge[\s\S]*coffeeCup[\s\S]*coffeeSeatGlowPill/
+      /<CoffeeSeatAvatarRenderer[\s\S]{0,1200}ambientProps=\{\{[\s\S]{0,300}motionActive:[\s\S]{0,120}coffeeSeatHoverActive,[\s\S]{0,120}phaseOffsetSeconds: layoutIndex \* 1\.8,[\s\S]{0,180}mannequinProps=\{\{/,
     );
+    const rendererAt = pageSource.indexOf("<CoffeeSeatAvatarRenderer", pageSource.indexOf("const coffeeSeatHoverActive"));
+    const badgeAt = pageSource.indexOf("className={styles.coffeeSeatTeamBadge}", rendererAt);
+    const cupAt = pageSource.indexOf("className={styles.coffeeCup}", rendererAt);
+    const nameplateAt = pageSource.indexOf("className={styles.coffeeSeatGlowPill}", rendererAt);
+    assert.ok(rendererAt >= 0 && badgeAt > rendererAt);
+    assert.ok(cupAt > rendererAt);
+    assert.ok(nameplateAt > rendererAt);
     assert.match(pageSource, /data-hover-active=\{coffeeSeatHoverActive \? "true" : undefined\}/);
   });
 
@@ -29,7 +36,7 @@ describe("Coffee seat hover treatment", () => {
   it("uses a subtle staggered nine-second drift with compact restraint", () => {
     assert.match(css, /\.coffeeSeat\s*\{[\s\S]*--bot-ambient-hover-amplitude:\s*2px\s*;/);
     assert.match(css, /\.botAmbientPresenceRig\s*\{[\s\S]*--bot-ambient-hover-duration:\s*9s\s*;/);
-    assert.match(pageSource, /phaseOffsetSeconds=\{layoutIndex \* 1\.8\}/);
+    assert.match(pageSource, /phaseOffsetSeconds: layoutIndex \* 1\.8/);
     assert.match(css, /data-compact="true"[\s\S]*\.coffeeSeat[\s\S]*--bot-ambient-hover-amplitude:\s*1px\s*;/);
     assert.match(css, /@keyframes botAmbientHoverDrift[\s\S]*translateY\(calc\(-1 \* var\(--bot-ambient-hover-amplitude\)\)\)/);
   });

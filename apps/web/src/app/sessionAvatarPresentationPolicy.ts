@@ -9,13 +9,25 @@ export type DebateAvatarCameraView =
   | "jury";
 export type DebateAvatarRole = "moderator" | "for" | "against";
 
-/** Signal's stage presentation is never a runtime quality budget. */
-export function signalAvatarPresentation(): SessionAvatarPresentation {
+/**
+ * Authored bot identity is never a live-performance budget. Signal may shed
+ * motion, rasterization, lighting, and compositing, but not the mannequin.
+ */
+export function signalAvatarPresentation(args: {
+  live: boolean;
+}): SessionAvatarPresentation {
+  void args.live;
   return "full";
 }
 
-/** Coffee keeps the complete authored chassis for every live and replay seat. */
-export function coffeeAvatarPresentation(): SessionAvatarPresentation {
+/**
+ * Coffee keeps the complete authored body live and in replay. Performance
+ * shedding is limited to peripheral rendering work around that identity.
+ */
+export function coffeeAvatarPresentation(args: {
+  live: boolean;
+}): SessionAvatarPresentation {
+  void args.live;
   return "full";
 }
 

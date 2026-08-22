@@ -43,6 +43,9 @@ import {
   botPowerBotNamingCueFromEffectsV1,
   botPowerAddressedInsultPrimaryCueV1,
   botPowerChromaticBiasCueFromEffectsV1,
+  botPowerChromaticBiasEffectsFromEffectsV1,
+  botPowerChromaticBiasResolvedHueV1,
+  botPowerChromaticBiasSubjectMatchV1,
   botPowerRequiresAddressedInsultFromEffectsV1,
   botPowerEternallyIntroducesFromEffectsV1,
   botPowerIntermittentMuteTurnIsIgnoredFromEffectsV1,
@@ -113,6 +116,7 @@ import {
   normalizeDebateFormalityId,
   normalizeDebateIdempotencyKey,
   normalizeDebateJuryStateV1,
+  normalizeDebateMysteryFormatStateV1,
   normalizeDebateModeratorTitle,
   normalizeDebateParticipantDifficulty,
   normalizeDebateParticipantFloorBreakStateV1,
@@ -2393,8 +2397,9 @@ export async function checkDebateAdvocacyRoles(
   const motion = normalizeDebateMotionSlateV1(request.motion);
   if (!completeMotion(motion))
     throw new HttpError(400, "Complete the motion and both side briefs.");
-  const format: DebateFormatId =
-    request.format === "turnabout" ? "turnabout" : "forum";
+  const format: DebateFormatId = isDebateFormatId(request.format)
+    ? request.format
+    : "forum";
   const formality = normalizeDebateFormalityId(request.formality);
   const participantSideId =
     request.playerRole === "participant" && isDebateSideId(request.playerSideId)
@@ -2513,6 +2518,17 @@ function debatePowerPlan(
     theme,
     bots,
   };
+}
+
+/** Whodunnit keeps suspects outside the three top-level Debate snapshots, but
+ * they still need the same frozen Power resolution as every other cast bot. */
+export function debatePowerPlanForBots(
+  db: DatabaseSync,
+  userId: string,
+  botIds: readonly string[],
+  theme: "light" | "dark",
+): DebatePowerPlanV1 {
+  return debatePowerPlan(db, userId, botIds, theme);
 }
 
 function snapshotBot(
@@ -3731,6 +3747,12 @@ export function listDebateSessions(
     let exhibitCount = 0;
     let participantDifficulty: DebateSessionListItemV1["participantDifficulty"];
     let rhetoricalGambitsEnabled: boolean | undefined;
+    let playerRole: DebateSessionListItemV1["playerRole"] = row.player_role;
+    let mysteryProgress: DebateSessionListItemV1["mysteryProgress"];
+    let mysteryRouteGrade: DebateSessionListItemV1["mysteryRouteGrade"];
+    let mysteryFictionLabel: DebateSessionListItemV1["mysteryFictionLabel"];
+    let mysterySpoilersRevealed: boolean | undefined;
+    let mysterySuspectColors: string[] = [];
     try {
       const parsed = JSON.parse(row.session_json) as {
         format?: unknown;
@@ -3766,8 +3788,10 @@ export function listDebateSessions(
           difficulty?: unknown;
           rhetoricalGambitsEnabled?: unknown;
         } | null;
+        formatState?: unknown;
       };
       if (isDebateFormatId(parsed.format)) format = parsed.format;
+      if (isDebatePlayerRole(parsed.playerRole)) playerRole = parsed.playerRole;
       formality = normalizeDebateFormalityId(parsed.formality);
       const parsedMotion = normalizeDebateMotionSlateV1(parsed.motion);
       title = debateTitleForMotion(
@@ -3776,6 +3800,17 @@ export function listDebateSessions(
           : normalizeDebateMotionSlateV1({ motion: row.motion }),
         formality,
       );
+      if (format === "whodunnit") {
+        const mystery = normalizeDebateMysteryFormatStateV1(parsed.formatState);
+        if (mystery.caseTitle.trim()) title = mystery.caseTitle;
+        mysteryProgress = mystery.playPhase;
+        mysteryRouteGrade = mystery.verdict?.grade ?? null;
+        mysteryFictionLabel = mystery.fictionLabel;
+        mysterySpoilersRevealed = mystery.spoilersRevealed;
+        mysterySuspectColors = mystery.suspects
+          .map((suspect) => suspect.color?.trim() ?? "")
+          .filter((color) => Boolean(color));
+      }
       moderatorTitle = normalizeDebateModeratorTitle(parsed.moderatorTitle);
       const jury = normalizeDebateJuryStateV1(parsed.jury);
       juryEnabled = jury.enabled;
@@ -3785,12 +3820,7 @@ export function listDebateSessions(
         requested: parsed.setupPresetId,
         format,
         formality,
-        playerRole:
-          parsed.playerRole === "judge" ||
-          parsed.playerRole === "participant" ||
-          parsed.playerRole === "spectator"
-            ? parsed.playerRole
-            : row.player_role,
+        playerRole,
         juryEnabled,
       });
       const archiveStartGate = {
@@ -3842,6 +3872,9 @@ export function listDebateSessions(
       }
       turbo = parsed.lastTurbo === true;
       castColors = debateSessionListCastColors(parsed);
+      for (const color of mysterySuspectColors) {
+        if (!castColors.includes(color)) castColors.push(color);
+      }
       advocateVisuals = debateSessionListAdvocateVisuals(parsed);
       exhibitCount = Array.isArray(parsed.evidence?.exhibits)
         ? parsed.evidence.exhibits.length
@@ -3883,7 +3916,7 @@ export function listDebateSessions(
       moderatorTitle,
       setupPresetId,
       juryEnabled,
-      playerRole: row.player_role,
+      playerRole,
       ...(participantDifficulty
         ? {
             participationDifficulty: participantDifficulty,
@@ -3907,6 +3940,12 @@ export function listDebateSessions(
       castColors,
       ...(advocateVisuals.length === 2 ? { advocateVisuals } : {}),
       exhibitCount,
+      ...(mysteryProgress ? { mysteryProgress } : {}),
+      ...(mysteryRouteGrade !== undefined ? { mysteryRouteGrade } : {}),
+      ...(mysteryFictionLabel ? { mysteryFictionLabel } : {}),
+      ...(typeof mysterySpoilersRevealed === "boolean"
+        ? { mysterySpoilersRevealed }
+        : {}),
     };
   });
 }
@@ -3989,8 +4028,9 @@ export function createDebateSession(
   const motion = normalizeDebateMotionSlateV1(request.motion);
   if (!completeMotion(motion))
     throw new HttpError(400, "Complete the motion and both side briefs.");
-  const format: DebateFormatId =
-    request.format === "turnabout" ? "turnabout" : "forum";
+  const format: DebateFormatId = isDebateFormatId(request.format)
+    ? request.format
+    : "forum";
   const formality = normalizeDebateFormalityId(request.formality);
   const moderatorTitle = normalizeDebateModeratorTitle(request.moderatorTitle);
   if (!isDebatePlayerRole(request.playerRole)) {
@@ -4009,8 +4049,12 @@ export function createDebateSession(
       "Participant mode currently supports Forum only. Turnabout requires bot-authored testimony and cannot represent the human through Prism safely.",
     );
   }
+  if (format === "whodunnit" && request.playerRole !== "investigator") {
+    throw new HttpError(400, "Whodunnit requires the investigator player role.");
+  }
   const playerJudgeUsesPrism =
-    request.playerRole === "judge" && request.playerJudgeUsesPrism === true;
+    format === "whodunnit" ||
+    (request.playerRole === "judge" && request.playerJudgeUsesPrism === true);
   const moderatorBotId = playerJudgeUsesPrism
     ? DEBATE_PLAYER_JUDGE_BOT_ID
     : compactText(request.moderatorBotId, 200);
@@ -4075,14 +4119,16 @@ export function createDebateSession(
   const responseMode: ResponseMode =
     runtime.responseMode ??
     (lane.providerName === "local" ? "local" : "online");
-  const advocacyConsent = validateConsents(
-    request.advocacyConsent,
-    motion,
-    consentAdvocates,
-    format,
-    formality,
-    runtime,
-  );
+  const advocacyConsent = format === "whodunnit"
+    ? []
+    : validateConsents(
+        request.advocacyConsent,
+        motion,
+        consentAdvocates,
+        format,
+        formality,
+        runtime,
+      );
   const now = new Date().toISOString();
   const juryEnabled = request.jury?.enabled === true;
   const ignoredParticipantSideBotId =
@@ -4154,7 +4200,12 @@ export function createDebateSession(
     revision: 1,
     status: deferStart ? "paused" : "live",
     phase: "opening",
-    stepKey: format === "turnabout" ? "turnabout_intro" : "intro",
+    stepKey:
+      format === "whodunnit"
+        ? "mystery_compiling"
+        : format === "turnabout"
+          ? "turnabout_intro"
+          : "intro",
     provider: lane.providerName,
     model: lane.model,
     modelSelectionKind: runtime.modelSelectionKind ?? "fixed",
@@ -4268,7 +4319,7 @@ export function createDebateSession(
     session.status,
     session.phase,
     session.stepKey,
-    session.playerRole,
+    session.playerRole === "investigator" ? "judge" : session.playerRole,
     session.playerSideId,
     idempotencyKey,
     session.motion.motion,
@@ -4994,6 +5045,15 @@ function debateSpeakerCursesSpeech(
 ): boolean {
   return botPowerCursesSpeechFromEffectsV1(
     session.powerPlan.bots[botId]?.effects.map(({ effect }) => effect) ?? [],
+  );
+}
+
+function debateSpeakerObfuscatesSpeech(
+  session: DebateSessionV1,
+  botId: string,
+): boolean {
+  return debateBotPowerEffects(session, botId).some(
+    (effect) => effect.type === "speech_obfuscation",
   );
 }
 
@@ -5731,11 +5791,16 @@ function publicTranscript(
         session,
         event.speakerBotId,
       );
+      const sourceObfuscatesSpeech = debateSpeakerObfuscatesSpeech(
+        session,
+        event.speakerBotId,
+      );
       const content =
         ownSpeech && event.powerIntendedContent
           ? event.powerIntendedContent
         : observerBotId &&
         !sourceCursesSpeech &&
+        !sourceObfuscatesSpeech &&
         botPowerIgnoresOtherPowersFromEffectsV1(
           session.powerPlan.bots[observerBotId]?.effects.map(
             ({ effect }) => effect,
@@ -5958,6 +6023,14 @@ function debateMuteReactionCandidates(
             candidate.sideId !== speaker.sideId,
         ),
         muted: session.powerPlan.bots[candidate.id]?.hardMuted === true,
+        // A speech-copy bot originates nothing, so it cannot supply an
+        // audible quip over someone else's silence — the same omission
+        // Signal review 20f500b2 caught, where an echo-bound host invented
+        // "Cat got your tongue?" twice. Suppressed reactors get a silent
+        // visual beat instead.
+        hardSpeechSuppressed: effects.some(
+          (effect) => effect.type === "speech_copy",
+        ),
         breathless: botPowerIsBreathlessFromEffectsV1(effects),
         cursedTongue: botPowerCursesSpeechFromEffectsV1(effects),
         mumbling: effects.some(
@@ -6199,6 +6272,22 @@ export function debatePowerPromptForBotV1(
       color: bot.color,
     })),
     modeLabel: "Debate",
+    subject: [
+      ...session.events
+        .filter(
+          (event) =>
+            event.sideId !== null &&
+            (event.kind === "speech" || event.kind === "testimony"),
+        )
+        .slice(-2)
+        .reverse()
+        .map((event) => event.content),
+      session.motion.motion,
+      session.motion.forSide.label,
+      session.motion.forSide.brief,
+      session.motion.againstSide.label,
+      session.motion.againstSide.brief,
+    ].join("\n"),
   });
   if (chromaticCue) lines.push(`- Hue prejudice (adapted): ${chromaticCue}`);
   if (lines.length === 0) return "";
@@ -7478,6 +7567,7 @@ function updateCaseBoard(
 ): DebateCaseCardV1[] {
   if (
     (event.kind !== "speech" &&
+      event.kind !== "testimony" &&
       !(
         event.kind === "player_turn" &&
         event.stepKey !== "challenge_judge_question"
@@ -7766,7 +7856,9 @@ function queueCaseBoardRefinement(
   if (!provider) return;
   const sourceEvent = events.find(
     (event) =>
-      (event.kind === "speech" || event.kind === "player_turn") &&
+      (event.kind === "speech" ||
+        event.kind === "testimony" ||
+        event.kind === "player_turn") &&
       session.caseBoard.some((card) => card.createdEventId === event.id),
   );
   if (!sourceEvent) return;
@@ -9686,6 +9778,169 @@ async function moderatorPhaseTransition(
   };
 }
 
+type DebateChromaticBallotConstraint = {
+  sideId: DebateSideId;
+  targetLabel: string;
+  polarity: "love" | "hate";
+};
+
+type DebateColorSideStance = "favors_color" | "fights_color";
+
+function debateColorPattern(label: string): string {
+  return (label.toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])
+    .map((term) => term.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"))
+    .join("[\\s-]+");
+}
+
+function debateSideColorStance(
+  session: DebateSessionV1,
+  sideId: DebateSideId,
+  targetLabel: string,
+): DebateColorSideStance | null {
+  const side =
+    sideId === "for" ? session.motion.forSide : session.motion.againstSide;
+  const color = debateColorPattern(targetLabel);
+  if (!color) return null;
+  const label = side.label.toLocaleLowerCase();
+  if (
+    new RegExp(`\\b(?:anti|against|resist|reject)[\\s-]+${color}\\b`, "iu").test(
+      label,
+    )
+  ) {
+    return "fights_color";
+  }
+  if (
+    new RegExp(`\\b(?:back|team|pro)[\\s-]+${color}\\b`, "iu").test(label) ||
+    new RegExp(`\\b${color}[\\s-]+(?:team|crew|coalition)\\b`, "iu").test(
+      label,
+    )
+  ) {
+    return "favors_color";
+  }
+  const publicSideRecord = session.events
+    .filter(
+      (event) =>
+        event.sideId === sideId &&
+        (event.kind === "speech" || event.kind === "testimony"),
+    )
+    .map((event) => event.content)
+    .join(" ");
+  const corpus = `${side.brief} ${publicSideRecord}`.toLocaleLowerCase();
+  const favors = new RegExp(
+    `\\b(?:back(?:ing)?|support(?:ing)?|prefer(?:ring)?|love|defend(?:ing)?)\\s+(?:the\\s+)?${color}\\b|\\b${color}[\\s-]+(?:bots?|robots?)\\b[^.!?]{0,90}\\b(?:best|better|superior|stronger|faster|win|dominate|deserve|built right|still standing)\\b`,
+    "iu",
+  ).test(corpus);
+  const fights = new RegExp(
+    `\\b(?:anti|against|resist(?:ing)?|reject(?:ing)?|oppose|opposing|hate|distrust)\\s*-?\\s*(?:the\\s+)?${color}\\b|\\b${color}[\\s-]+(?:bots?|robots?)\\b[^.!?]{0,90}\\b(?:hype|noise|nothing|marketing|strip|snap|lose|worse|inferior|weak|fail|scrap|lying in bits)\\b`,
+    "iu",
+  ).test(corpus);
+  if (favors !== fights) return favors ? "favors_color" : "fights_color";
+  return null;
+}
+
+function debateMotionColorStance(
+  session: DebateSessionV1,
+  targetLabel: string,
+): DebateColorSideStance | null {
+  const color = debateColorPattern(targetLabel);
+  if (
+    !color ||
+    !new RegExp(`\\b${color}\\b`, "iu").test(session.motion.motion)
+  ) {
+    return null;
+  }
+  if (
+    /\b(?:best|better|superior|stronger|faster|wins?|dominates?|should be preferred|deserves? support)\b/iu.test(
+      session.motion.motion,
+    )
+  ) {
+    return "favors_color";
+  }
+  if (
+    /\b(?:worst|worse|inferior|weak(?:er)?|sucks?|fails?|loses?|should be rejected|does not deserve support)\b/iu.test(
+      session.motion.motion,
+    )
+  ) {
+    return "fights_color";
+  }
+  return null;
+}
+
+/**
+ * Resolve Hue Prejudice only when the motion or heard advocacy identifies a
+ * side as favoring or fighting the affected bot color. Ambiguous or unrelated
+ * motions remain ordinary independent ballots.
+ */
+function debateChromaticBallotConstraint(
+  session: DebateSessionV1,
+  voter: DebateBotSnapshotV1,
+): DebateChromaticBallotConstraint | null {
+  const constraints: DebateChromaticBallotConstraint[] = [];
+  for (const effect of botPowerChromaticBiasEffectsFromEffectsV1(
+    debateBotPowerEffects(session, voter.id),
+  )) {
+    const hue = botPowerChromaticBiasResolvedHueV1(effect, voter.color);
+    if (hue === null) continue;
+    const targetLabel = [
+      ...session.events
+        .filter(
+          (event) =>
+            event.sideId !== null &&
+            (event.kind === "speech" || event.kind === "testimony"),
+        )
+        .reverse()
+        .map((event) => event.content),
+      session.motion.motion,
+      session.motion.forSide.label,
+      session.motion.forSide.brief,
+      session.motion.againstSide.label,
+      session.motion.againstSide.brief,
+    ]
+      .map((subject) =>
+        botPowerChromaticBiasSubjectMatchV1({
+          subject,
+          hue,
+          matchBandDeg: effect.matchBandDeg,
+        }),
+      )
+      .find((label): label is string => Boolean(label));
+    if (!targetLabel) continue;
+    const forStance = debateSideColorStance(session, "for", targetLabel);
+    const againstStance = debateSideColorStance(
+      session,
+      "against",
+      targetLabel,
+    );
+    const motionStance = debateMotionColorStance(session, targetLabel);
+    const colorFavoringSide: DebateSideId | null =
+      forStance === "favors_color" || againstStance === "fights_color"
+        ? "for"
+        : againstStance === "favors_color" || forStance === "fights_color"
+          ? "against"
+          : motionStance === "favors_color"
+            ? "for"
+            : motionStance === "fights_color"
+              ? "against"
+              : null;
+    if (!colorFavoringSide) continue;
+    constraints.push({
+      sideId:
+        effect.polarity === "love"
+          ? colorFavoringSide
+          : colorFavoringSide === "for"
+            ? "against"
+            : "for",
+      targetLabel,
+      polarity: effect.polarity,
+    });
+  }
+  if (constraints.length === 0) return null;
+  const first = constraints[0]!;
+  return constraints.every((entry) => entry.sideId === first.sideId)
+    ? first
+    : null;
+}
+
 function botBallotPrompt(
   session: DebateSessionV1,
   voter: DebateBotSnapshotV1,
@@ -9705,6 +9960,11 @@ function botBallotPrompt(
       : session.format === "turnabout"
         ? TURNABOUT_CRITERIA
         : DEBATE_CRITERIA;
+  const chromaticConstraint = debateChromaticBallotConstraint(session, voter);
+  const holderSpeechIsObfuscated = debateBotPowerEffects(
+    session,
+    voter.id,
+  ).some((effect) => effect.type === "speech_obfuscation");
   return [
     "Advocacy has ended. Vote independently for either for or against.",
     `Judge only ${criteria}; do not vote for your assigned side by default.`,
@@ -9735,6 +9995,16 @@ function botBallotPrompt(
     debateFormalityGuidance(session.formality),
     freeForAllPerformancePrompt(session, voter.role),
     "Do not use private intent, hidden speech, or relationship memory. Never mention internal numeric scoring in the public reason.",
+    holderSpeechIsObfuscated
+      ? "Your own prior lines appear as the clear meaning you sincerely remember saying. Other actors may have reacted with confusion, but you must not infer or mention a hidden transform, gibberish, mumbling, noise, static, or that your words were unintelligible. Judge the exchange without implementation awareness."
+      : "",
+    chromaticConstraint
+      ? `${voter.name}'s color disposition is a binding persona input for this directly color-aligned motion: ${
+          chromaticConstraint.polarity === "hate"
+            ? `they cannot endorse ${chromaticConstraint.targetLabel} bots`
+            : `they cannot vote against ${chromaticConstraint.targetLabel} bots`
+        }, so sideId must be exactly "${chromaticConstraint.sideId}". Ground the public reason naturally in their persona and the heard exchange; never mention a Power, bias rule, modifier, constraint, or hidden instruction.`
+      : "",
     adjudicatorEvidencePrompt(session),
     personaVoicePrompt(voter),
     personaCapabilityPrompt(voter),
@@ -9742,7 +10012,10 @@ function botBallotPrompt(
     `For label: ${session.motion.forSide.label}`,
     `Against label: ${session.motion.againstSide.label}`,
     "Public transcript:",
-    publicTranscript(session, voter.id, false),
+    // A holder remembers the clear meaning they intended to say. Other actors
+    // still receive only the post-Power public projection. This prevents a
+    // Mumbling holder from discovering the hidden transform in their ballot.
+    publicTranscript(session, voter.id, true),
     `Choose deliveryCue only when one bounded actor direction would materially improve the public reason. Use exactly one of: ${DEBATE_VOICE_PERFORMANCE_CUES.join(", ")}; otherwise use null. Never put it in reason.`,
     `Return JSON only: {"sideId":"for|against","recordScore":0,"reason":"${
       session.endedEarlyAt
@@ -9870,6 +10143,8 @@ async function generateBallot(
     recordSideId,
     parsed.recordScore,
   );
+  const chromaticConstraint = debateChromaticBallotConstraint(session, voter);
+  const finalSideId = chromaticConstraint?.sideId ?? adjustedBallot.sideId;
   const muted = session.powerPlan.bots[voter.id]?.hardMuted === true;
   let reason = compactText(parsed.reason, 600);
   let capabilityRejected = false;
@@ -9896,17 +10171,34 @@ async function generateBallot(
   const sanitizedReason = reason
     ? sanitizeDebateStatementSources(reason, session.evidence).content
     : "";
+  const holderSpeechIsObfuscated = debateBotPowerEffects(
+    session,
+    voter.id,
+  ).some((effect) => effect.type === "speech_obfuscation");
+  const holderAwareReason =
+    holderSpeechIsObfuscated &&
+    /\b(?:gibberish|mumbl(?:e|ed|ing)|noise|static|unintelligible|couldn['’]?t understand|no one could understand)\b/iu.test(
+      sanitizedReason,
+    )
+      ? "I stand by the substance I put forward, and I am voting for the side that answered the motion most directly."
+      : sanitizedReason;
+  const personaGroundedReason =
+    chromaticConstraint && recordSideId !== chromaticConstraint.sideId
+      ? chromaticConstraint.polarity === "hate"
+        ? `I will not back the ${chromaticConstraint.targetLabel}-bot case; ${sideLabel(session, finalSideId)} made the argument I can live with.`
+        : `I am backing the ${chromaticConstraint.targetLabel}-bot case; ${sideLabel(session, finalSideId)} made the argument I can live with.`
+      : holderAwareReason;
   return {
     version: DEBATE_SCHEMA_VERSION,
     voterBotId: voter.id,
-    sideId: adjustedBallot.sideId,
+    sideId: finalSideId,
     ...(adjustedBallot.participantInfluence
       ? { participantInfluence: adjustedBallot.participantInfluence }
       : {}),
     reason:
       muted || capabilityRejected
         ? null
-        : sanitizedReason || "That side made the clearer case.",
+        : personaGroundedReason || "That side made the clearer case.",
     privateReason: muted || capabilityRejected,
     provider: deliveryGeneration.provider,
     model: deliveryGeneration.model,
@@ -9957,11 +10249,15 @@ function juryDiscussionTranscript(
       const sourceCursesSpeech = event.speakerBotId
         ? debateSpeakerCursesSpeech(session, event.speakerBotId)
         : false;
+      const sourceObfuscatesSpeech = event.speakerBotId
+        ? debateSpeakerObfuscatesSpeech(session, event.speakerBotId)
+        : false;
       const content =
         observerBotId === event.speakerBotId && event.powerIntendedContent
           ? event.powerIntendedContent
         : observerBotId &&
         !sourceCursesSpeech &&
+        !sourceObfuscatesSpeech &&
         botPowerIgnoresOtherPowersFromEffectsV1(
           debateFrozenPowerEffects(session, observerBotId),
         )
@@ -11125,6 +11421,163 @@ function turnaboutStatementPublicReference(
   return `${noun}${includeSpeaker ? ` from ${speaker.name}` : ""}: “${audibleExcerpt}${terminalPunctuation}”`;
 }
 
+function turnaboutStatementIsUnintelligible(
+  session: DebateSessionV1,
+  statement: DebateTurnaboutStatementV1,
+): boolean {
+  return debateFloorSpeechWarrantsUnintelligibleCutoff({
+    kind: "testimony",
+    content: statement.content,
+    speakerKind: "advocate",
+    speakerEffects: debateBotPowerEffects(session, statement.speakerBotId),
+  });
+}
+
+function turnaboutUnintelligiblePressFallback(
+  session: DebateSessionV1,
+  speakerName: string,
+  statementId: string,
+): string {
+  const variants = debateUsesFreeForAllPerformance(session)
+    ? [
+        `${speakerName}, I heard a lot of syllables and not one claim. What were you trying to say?`,
+        `${speakerName}, that landed like radio static. Try the point again in actual words.`,
+        `${speakerName}, I cannot Press a noise. What was the claim?`,
+      ]
+    : [
+        `${speakerName}, that was not intelligible. What claim were you making?`,
+        `${speakerName}, the point did not come through. State the claim plainly.`,
+      ];
+  const index =
+    parseInt(
+      createHash("sha256")
+        .update(`${session.id}:${statementId}:unintelligible-press`)
+        .digest("hex")
+        .slice(0, 8),
+      16,
+    ) % variants.length;
+  return variants[index]!;
+}
+
+function turnaboutUnintelligibleModeratorCopyIsValid(
+  content: string,
+  publicSpeech: string,
+): boolean {
+  const spoken = debateSpokenText(content).replace(/\s+/gu, " ").trim();
+  const publicTokens =
+    debateSpokenText(publicSpeech)
+      .toLocaleLowerCase()
+      .match(/[\p{L}\p{N}'’-]+/gu) ?? [];
+  const recitesPublicNoise = publicTokens
+    .slice(0, -2)
+    .some((_, index) =>
+      spoken.toLocaleLowerCase().includes(
+        publicTokens.slice(index, index + 3).join(" "),
+      ),
+    );
+  return (
+    spoken.length >= 12 &&
+    spoken.length <= 260 &&
+    !recitesPublicNoise &&
+    /\b(?:claim|point|say|said|words?|static|syllables?|intelligible|understand|come through|trying)\b/iu.test(
+      spoken,
+    )
+  );
+}
+
+async function turnaboutUnintelligibleModeratorDelivery(
+  session: DebateSessionV1,
+  speakerName: string,
+  statementId: string,
+  stage: "press" | "ruling",
+  runtime: DebateAiRuntime,
+): Promise<Awaited<ReturnType<typeof generateSpeech>>> {
+  const publicSpeech =
+    session.events.find((event) => event.statementId === statementId)?.content ??
+    "";
+  const fallback =
+    stage === "press"
+      ? turnaboutUnintelligiblePressFallback(session, speakerName, statementId)
+      : debateUsesFreeForAllPerformance(session)
+        ? `${speakerName}, that clarified absolutely nothing. The room can judge the noise for itself.`
+        : `${speakerName}'s clarification was not intelligible. No recognizable claim was added.`;
+  try {
+    const speech = await generateSpeech(
+      session,
+      session.moderator,
+      stage === "press"
+        ? [
+            `${speakerName}'s public Turnabout statement was clearly unintelligible.`,
+            "Ask one concise, persona-shaped clarification question. React to the semantic uncertainty; do not quote, imitate, decode, or recite any of the sounds.",
+            "A small funny beat is welcome in an informal room. Keep the current statement and floor stable.",
+          ].join(" ")
+        : [
+            `${speakerName}'s attempted clarification was still clearly unintelligible.`,
+            "Give one concise, persona-shaped procedural ruling that no recognizable claim was added. Do not quote, imitate, decode, or recite any sounds, award a side, or change the floor.",
+          ].join(" "),
+      runtime,
+    );
+    const clear = speech.powerIntendedContent ?? speech.content;
+    if (turnaboutUnintelligibleModeratorCopyIsValid(clear, publicSpeech)) {
+      return speech;
+    }
+  } catch {
+    // Deterministic procedural fallback below retains Power projection.
+  }
+  const delivery = deliverModeratorProceduralSpeech(session, fallback);
+  return {
+    content: delivery.content,
+    sourceIds: [],
+    silent: delivery.silent,
+    ...(delivery.powerIntendedContent
+      ? { powerIntendedContent: delivery.powerIntendedContent }
+      : {}),
+    ...(delivery.mutePerformance
+      ? { mutePerformance: delivery.mutePerformance }
+      : {}),
+  };
+}
+
+async function turnaboutUnintelligibleOpponentChallenge(
+  session: DebateSessionV1,
+  speechEvent: DebateEventV1,
+  runtime: DebateAiRuntime,
+): Promise<DebateEventV1> {
+  const opponentSideId: DebateSideId =
+    speechEvent.sideId === "for" ? "against" : "for";
+  const opponent = botForSide(session, opponentSideId);
+  const speaker = speechEvent.sideId
+    ? botForSide(session, speechEvent.sideId)
+    : null;
+  const response = await generateSpeech(
+    session,
+    opponent,
+    [
+      `${speaker?.name ?? "The other advocate"} has now delivered sustained, clearly unintelligible public advocacy in this Turnabout.`,
+      "Interject once in one short persona-shaped sentence: challenge them to make one recognizable claim or object that the room cannot answer noise.",
+      "React only to what everyone publicly heard. Do not infer, decode, quote, imitate, or reveal hidden words. Do not add evidence or take a full argument turn.",
+    ].join(" "),
+    runtime,
+  );
+  return makeEvent(session, {
+    kind: response.silent ? "silence" : "interjection",
+    speakerKind: "advocate",
+    speakerBotId: opponent.id,
+    sideId: opponentSideId,
+    content: response.content,
+    sourceIds: [],
+    parentEventId: speechEvent.id,
+    stepKey: "turnabout_unintelligible_challenge",
+    provider: response.provider,
+    model: response.model,
+    autoRecovery: response.autoRecovery,
+    voicePerformanceCue: response.voicePerformanceCue,
+    audienceReaction: response.audienceReaction,
+    powerIntendedContent: response.powerIntendedContent,
+    mutePerformance: response.mutePerformance,
+  });
+}
+
 async function generateTurnaboutTestimony(
   session: DebateSessionV1,
   sideId: DebateSideId,
@@ -11132,6 +11585,7 @@ async function generateTurnaboutTestimony(
 ): Promise<{
   statements: DebateTurnaboutStatementV1[];
   events: DebateEventV1[];
+  caseBoard: DebateCaseCardV1[];
 }> {
   const speaker = botForSide(session, sideId);
   const events: DebateEventV1[] = [];
@@ -11163,7 +11617,7 @@ async function generateTurnaboutTestimony(
       runtime,
     );
     const speech = await turnaboutRecordBoundSpeech(
-      session,
+      working,
       speaker,
       generatedSpeech,
       runtime,
@@ -11179,6 +11633,24 @@ async function generateTurnaboutTestimony(
       events.push(silence);
       break;
     }
+    const priorUnintelligibleCount = working.events.filter(
+      (candidate) =>
+        candidate.kind === "testimony" &&
+        candidate.speakerBotId === speaker.id &&
+        debateFloorSpeechWarrantsUnintelligibleCutoff({
+          kind: candidate.kind,
+          content: candidate.content,
+          speakerKind: candidate.speakerKind,
+          interrupted: candidate.interrupted,
+          speakerEffects: debateBotPowerEffects(working, speaker.id),
+        }),
+    ).length;
+    const unintelligible = debateFloorSpeechWarrantsUnintelligibleCutoff({
+      kind: "testimony",
+      content: speech.content,
+      speakerKind: "advocate",
+      speakerEffects: debateBotPowerEffects(working, speaker.id),
+    });
     const statementId = randomUUID();
     const event = makeEvent(working, {
       kind: "testimony",
@@ -11191,7 +11663,13 @@ async function generateTurnaboutTestimony(
       model: speech.model,
       autoRecovery: speech.autoRecovery,
       voicePerformanceCue: speech.voicePerformanceCue,
-      audienceReaction: speech.audienceReaction,
+      audienceReaction: unintelligible
+        ? {
+            kind: "laugh",
+            intensity: priorUnintelligibleCount > 0 ? 3 : 2,
+            source: "fallback",
+          }
+        : speech.audienceReaction,
       powerIntendedContent: speech.powerIntendedContent,
       statementId,
     });
@@ -11206,18 +11684,42 @@ async function generateTurnaboutTestimony(
     };
     events.push(event);
     statements.push(statement);
-    working = { ...working, events: [...working.events, event] };
-    const audienceOrder = await automaticAudienceOrderAfter(
-      working,
-      event,
-      runtime,
-    );
+    const caseBoard = updateCaseBoard(working, event);
+    const boardEvent =
+      caseBoard !== working.caseBoard
+        ? caseBoardEvent({ ...working, caseBoard }, caseBoard, event)
+        : null;
+    if (boardEvent) events.push(boardEvent);
+    working = {
+      ...working,
+      caseBoard,
+      events: [...working.events, event, ...(boardEvent ? [boardEvent] : [])],
+    };
+    if (unintelligible && priorUnintelligibleCount > 0) {
+      const challenge = await turnaboutUnintelligibleOpponentChallenge(
+        working,
+        event,
+        runtime,
+      );
+      events.push(challenge);
+      working = { ...working, events: [...working.events, challenge] };
+    }
+    const audienceOrder =
+      unintelligible && priorUnintelligibleCount > 0
+        ? await moderatorAudienceOrderCorrection(
+            working,
+            event,
+            "sustained",
+            false,
+            runtime,
+          )
+        : await automaticAudienceOrderAfter(working, event, runtime);
     if (audienceOrder) {
       events.push(audienceOrder);
       working = { ...working, events: [...working.events, audienceOrder] };
     }
   }
-  return { statements, events };
+  return { statements, events, caseBoard: working.caseBoard };
 }
 
 async function pressTurnaboutStatement(
@@ -11248,29 +11750,65 @@ async function pressTurnaboutStatement(
       events: [silence],
     };
   }
+  const pressDelivery =
+    actor === "moderator"
+      ? turnaboutStatementIsUnintelligible(session, statement)
+        ? await turnaboutUnintelligibleModeratorDelivery(
+            session,
+            speaker.name,
+            statement.id,
+            "press",
+            runtime,
+          )
+        : {
+            ...deliverModeratorProceduralSpeech(
+              session,
+              turnaboutModeratorClarificationQuestion(session, statement),
+            ),
+            sourceIds: [] as string[],
+            provider: undefined,
+            model: undefined,
+            autoRecovery: undefined,
+            voicePerformanceCue: undefined,
+          }
+      : null;
   const press = makeEvent(session, {
-    kind: "press",
+    kind: pressDelivery?.silent ? "silence" : "press",
     speakerKind: actor,
     speakerBotId: actor === "moderator" ? session.moderator.id : null,
     sideId: actor === "player" ? session.playerSideId : null,
     content:
       actor === "moderator"
-        ? turnaboutModeratorClarificationQuestion(session, statement)
+        ? pressDelivery!.content
         : debateUsesFreeForAllPerformance(session)
           ? `${speaker.name}, back up this ${turnaboutStatementPublicReference(session, statement, false)} What exactly makes it true?`
           : `Pressing the ${turnaboutStatementPublicReference(session, statement)} Explain what it rests on.`,
     statementId: statement.id,
     parentEventId: statement.createdEventId,
+    provider: pressDelivery?.provider,
+    model: pressDelivery?.model,
+    autoRecovery: pressDelivery?.autoRecovery,
+    voicePerformanceCue: pressDelivery?.voicePerformanceCue,
+    powerIntendedContent: pressDelivery?.powerIntendedContent,
+    mutePerformance: pressDelivery?.mutePerformance,
   });
   const withPress: DebateSessionV1 = {
     ...session,
     events: [...session.events, press],
   };
+  const statementSourceEvent = session.events.find(
+    (event) => event.id === statement.createdEventId,
+  );
+  const holderRememberedClaim =
+    statementSourceEvent?.speakerBotId === speaker.id &&
+    statementSourceEvent.powerIntendedContent
+      ? statementSourceEvent.powerIntendedContent
+      : statement.content;
   const generatedClarification = await generateSpeech(
     withPress,
     speaker,
     [
-      `Your earlier claim was: ${statement.content}`,
+      `Your earlier claim, as you sincerely remember saying it: ${holderRememberedClaim}`,
       debateUsesInstitutionalRegister(session.formality)
         ? `${moderatorAuthorityTitle(session)} has pressed it.`
         : debateUsesFreeForAllPerformance(session)
@@ -11319,25 +11857,54 @@ async function pressTurnaboutStatement(
         events: [...withClarification.events, audienceOrder],
       }
     : withClarification;
+  const clarificationUnintelligible =
+    turnaboutStatementIsUnintelligible(session, statement) ||
+    debateFloorSpeechWarrantsUnintelligibleCutoff({
+      kind: clarificationEvent.kind,
+      content: clarificationEvent.content,
+      speakerKind: clarificationEvent.speakerKind,
+      speakerEffects: debateBotPowerEffects(session, speaker.id),
+    });
+  const defaultRuling = clarification.silent
+    ? debateUsesInstitutionalRegister(session.formality)
+      ? `${moderatorSelfReferenceClause(session, "record", "records")} canonical silence. The original statement remains on the public record.`
+      : debateUsesFreeForAllPerformance(session)
+        ? `${speaker.name} has nothing. The claim still stands, and the room can come for it.`
+        : "No answer was audible. The original claim still stands."
+    : debateUsesInstitutionalRegister(session.formality)
+      ? "Entered. The original statement remains subject to a frozen-evidence objection."
+      : debateUsesFreeForAllPerformance(session)
+        ? `${speaker.name} answered. That claim is still fair game—bring frozen evidence if you think it falls apart.`
+        : "Noted. The original claim can still be challenged with frozen evidence.";
+  const rulingDelivery = clarificationUnintelligible
+    ? await turnaboutUnintelligibleModeratorDelivery(
+        rulingContext,
+        speaker.name,
+        statement.id,
+        "ruling",
+        runtime,
+      )
+    : {
+        ...deliverModeratorProceduralSpeech(rulingContext, defaultRuling),
+        sourceIds: [] as string[],
+        provider: undefined,
+        model: undefined,
+        autoRecovery: undefined,
+        voicePerformanceCue: undefined,
+      };
   const ruling = makeEvent(rulingContext, {
-    kind: moderatorIsHardMuted(session) ? "silence" : "moderator_ruling",
+    kind: rulingDelivery.silent ? "silence" : "moderator_ruling",
     speakerKind: "moderator",
     speakerBotId: session.moderator.id,
-    content: moderatorIsHardMuted(session)
-      ? BOT_POWER_CANONICAL_SILENCE_V1
-      : clarification.silent
-        ? debateUsesInstitutionalRegister(session.formality)
-          ? `${moderatorSelfReferenceClause(session, "record", "records")} canonical silence. The original statement remains on the public record.`
-          : debateUsesFreeForAllPerformance(session)
-            ? `${speaker.name} has nothing. The claim still stands, and the room can come for it.`
-            : "No answer was audible. The original claim still stands."
-        : debateUsesInstitutionalRegister(session.formality)
-          ? "Entered. The original statement remains subject to a frozen-evidence objection."
-          : debateUsesFreeForAllPerformance(session)
-            ? `${speaker.name} answered. That claim is still fair game—bring frozen evidence if you think it falls apart.`
-            : "Noted. The original claim can still be challenged with frozen evidence.",
+    content: rulingDelivery.content,
     parentEventId: clarificationEvent.id,
     statementId: statement.id,
+    provider: rulingDelivery.provider,
+    model: rulingDelivery.model,
+    autoRecovery: rulingDelivery.autoRecovery,
+    voicePerformanceCue: rulingDelivery.voicePerformanceCue,
+    powerIntendedContent: rulingDelivery.powerIntendedContent,
+    mutePerformance: rulingDelivery.mutePerformance,
   });
   return {
     state: replaceTurnaboutStatement(state, statement.id, (current) => ({
@@ -11846,14 +12413,21 @@ async function advanceTurnaboutStep(
       if (sideId === "for") {
         return {
           session: withTurnaboutState(
-            { ...session, stepKey: "turnabout_testimony_against" },
+            {
+              ...session,
+              caseBoard: testimony.caseBoard,
+              stepKey: "turnabout_testimony_against",
+            },
             nextState,
           ),
           events: testimony.events,
         };
       }
       return {
-        session: turnaboutNextStatement(session, nextState),
+        session: turnaboutNextStatement(
+          { ...session, caseBoard: testimony.caseBoard },
+          nextState,
+        ),
         events: testimony.events,
       };
     }

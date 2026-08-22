@@ -1,4 +1,5 @@
 import type { BotFaceGazeDirection } from "./botFaceEyeMovement.ts";
+import { liveAvatarShouldShowThinking } from "./liveAvatarWorkPresentation.ts";
 
 export interface CoffeeSeatAvatarViewModel {
   identityKey: string;
@@ -42,6 +43,28 @@ export interface CoffeeLiveSeatThinkingState {
     speakerBotId: string | null;
   } | null;
   responseCuePlaying: boolean;
+  playbackRecording?: boolean;
+}
+
+export interface CoffeePlayerAvatarThinkingState {
+  replayActive: boolean;
+  replayThinking: boolean;
+  composerHasText: boolean;
+  speaking: boolean;
+}
+
+/** Prism represents the player at the live table and thinks while they compose. */
+export function coffeePlayerAvatarShouldThink(
+  state: CoffeePlayerAvatarThinkingState,
+): boolean {
+  return liveAvatarShouldShowThinking({
+    generating: state.replayActive
+      ? state.replayThinking
+      : state.composerHasText,
+    synthesizing: false,
+    speaking: state.speaking,
+    playbackRecording: false,
+  });
 }
 
 /**
@@ -56,10 +79,20 @@ export interface CoffeeLiveSeatThinkingState {
 export function coffeeLiveSeatThinkingBotId(
   state: CoffeeLiveSeatThinkingState,
 ): string | null {
-  const thinkingPresentationActive =
-    state.rhythmState === "botThinking" ||
-    state.rhythmState === "userTableTyping";
-  if (!thinkingPresentationActive || state.responseCuePlaying) {
+  const thinkingPresentationActive = liveAvatarShouldShowThinking({
+    generating:
+      state.rhythmState === "botThinking" ||
+      state.rhythmState === "userTableTyping",
+    // Coffee deliberately retains botThinking until prepared voice playback
+    // starts, so this state includes the synthesis handoff without another
+    // top-level render clock.
+    synthesizing:
+      state.rhythmState === "botThinking" &&
+      Boolean(state.pendingSpeakerBotId ?? state.activeTurnJob?.speakerBotId),
+    speaking: state.responseCuePlaying,
+    playbackRecording: state.playbackRecording === true,
+  });
+  if (!thinkingPresentationActive) {
     return null;
   }
   const pendingSpeakerBotId = state.pendingSpeakerBotId?.trim();

@@ -76,7 +76,7 @@ describe("Signal Premium audio contract", () => {
     assert.match(page, /profile: playbackProfile/u);
     assert.match(
       page,
-      /storeCapturedReplayVoiceAudio\(\{[\s\S]{0,180}resolvedEngine: clip\.engineUsed/u,
+      /storeCapturedReplayVoiceAudio\(\{[\s\S]{0,220}resolvedEngine: resolvedClip\.engineUsed/u,
     );
     assert.match(
       page,

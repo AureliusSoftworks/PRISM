@@ -44,8 +44,25 @@ test("Coffee keeps bot nameplates inside a responsive prose-safe envelope", () =
     nameplate,
     /--coffee-seat-name-plate-y: clamp\(-42px, -3\.65cqw, -26px\)/,
   );
+  assert.match(
+    nameplate,
+    /--coffee-seat-name-plate-shift-x: clamp\(-13px, -0\.82vw, -8px\)/,
+  );
   assert.match(nameplate, /width: var\(--coffee-seat-name-plate-width\)/);
+  assert.match(
+    nameplate,
+    /translateX\( calc\(-50% \+ var\(--coffee-seat-name-plate-shift-x\)\) \)/,
+  );
   assert.doesNotMatch(nameplate, /clamp\(284px, 23vw, 304px\)/);
+
+  assert.match(
+    ruleFor('.coffeeSeat[data-cup-side="left"] .coffeeSeatGlowPill'),
+    /--coffee-seat-name-plate-shift-x: clamp\(8px, 0\.82vw, 13px\)/,
+  );
+  assert.match(
+    ruleFor('.coffeeSeat[data-roster-preview="true"] .coffeeSeatGlowPill'),
+    /--coffee-seat-name-plate-shift-x: 0px/,
+  );
 
   const compact = ruleFor(
     '.coffeeStage[data-compact="true"] .coffeeSeatGlowPill',
@@ -126,7 +143,10 @@ test("review seats Default Prism for replay and restores bot seats", () => {
   );
 });
 
-test("Coffee has no player mug or sip path", () => {
-  assert.doesNotMatch(cssSource, /\.coffeePlayerCup/u);
-  assert.doesNotMatch(pageSource, /coffeePlayerSip|player-cup\/sip/u);
+test("Coffee gives the joined player one explicit mug and sip path", () => {
+  assert.match(cssSource, /\.coffeePlayerCupButton\s*\{/u);
+  assert.match(pageSource, /coffeePlayerCupSipping/u);
+  assert.match(pageSource, /const sipCoffeePlayerCup = \(\): void =>/u);
+  assert.match(pageSource, /\/join-cup\/sip/u);
+  assert.match(pageSource, /aria-label="Sip from your mug"/u);
 });

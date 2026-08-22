@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  PRISM_DOM_MINIMAL_FRAME_INTERVAL_MS,
+  PRISM_DOM_RECOVERY_WINDOWS_PER_STEP,
   PRISM_DOM_SAMPLE_WARMUP_MS,
   PRISM_DOM_SAMPLE_WINDOW_SIZE,
+  PRISM_DOM_SUSPENSION_DELTA_MS,
   PrismDomAdaptiveQualityController,
   prismDomFrameWindow,
 } from "./prismDomAdaptiveQuality.ts";
@@ -21,11 +24,10 @@ describe("adaptive DOM rendering quality", () => {
     assert.equal(fast.recoveryHeadroom, true);
   });
 
-  it("reports sustained frame pressure without proposing a quality change", () => {
+  it("drops quality on the first over-budget frame and reaches minimal under sustained pressure", () => {
     const controller = new PrismDomAdaptiveQualityController(0);
     let nowMs = PRISM_DOM_SAMPLE_WARMUP_MS;
-    let pressureDetected = false;
-    let proposedQualityChange = false;
+    let finalQuality = controller.currentQuality();
     for (let index = 0; index < PRISM_DOM_SAMPLE_WINDOW_SIZE; index += 1) {
       nowMs += 1_000 / 24;
       const result = controller.recordFrame({
@@ -33,14 +35,12 @@ describe("adaptive DOM rendering quality", () => {
         deltaMs: 1_000 / 24,
         foreground: true,
       });
-      pressureDetected ||= result.window?.belowFloor === true;
-      proposedQualityChange ||= "qualityChanged" in result;
+      finalQuality = result.quality;
     }
-    assert.equal(pressureDetected, true);
-    assert.equal(proposedQualityChange, false);
+    assert.equal(finalQuality, "minimal");
   });
 
-  it("ignores hidden-tab and long-stall deltas", () => {
+  it("treats a visible stall as pressure and ignores only actual suspension", () => {
     const controller = new PrismDomAdaptiveQualityController(0);
     const hidden = controller.recordFrame({
       nowMs: 1_000,
@@ -53,6 +53,43 @@ describe("adaptive DOM rendering quality", () => {
       deltaMs: 800,
       foreground: true,
     });
-    assert.equal(stalled.ignoredReason, "sleep-delta");
+    assert.equal(stalled.quality, "minimal");
+    assert.equal(stalled.ignoredReason, undefined);
+    const suspended = controller.recordFrame({
+      nowMs: PRISM_DOM_SUSPENSION_DELTA_MS + 3_000,
+      deltaMs: PRISM_DOM_SUSPENSION_DELTA_MS + 1,
+      foreground: true,
+    });
+    assert.equal(suspended.ignoredReason, "suspension-delta");
+  });
+
+  it("protects input-to-paint immediately and recovers with long hysteresis", () => {
+    const controller = new PrismDomAdaptiveQualityController(0);
+    const input = controller.recordInteractionDelay(
+      PRISM_DOM_MINIMAL_FRAME_INTERVAL_MS,
+    );
+    assert.equal(input.quality, "minimal");
+    assert.equal(input.qualityChanged, true);
+
+    let nowMs = PRISM_DOM_SAMPLE_WARMUP_MS + 1;
+    for (
+      let windowIndex = 0;
+      windowIndex < PRISM_DOM_RECOVERY_WINDOWS_PER_STEP;
+      windowIndex += 1
+    ) {
+      for (
+        let frameIndex = 0;
+        frameIndex < PRISM_DOM_SAMPLE_WINDOW_SIZE;
+        frameIndex += 1
+      ) {
+        nowMs += 1_000 / 60;
+        controller.recordFrame({
+          nowMs,
+          deltaMs: 1_000 / 60,
+          foreground: true,
+        });
+      }
+    }
+    assert.equal(controller.currentQuality(), "balanced");
   });
 });

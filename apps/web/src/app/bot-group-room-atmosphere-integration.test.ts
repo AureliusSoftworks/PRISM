@@ -99,7 +99,7 @@ describe("saved group room atmosphere integration", () => {
     );
     assert.match(
       pageSource,
-      /onSynthesize=\{\(direction\) =>[\s\S]*?generateBotGroupRoomAtmosphere\(group\.id, direction\)/u,
+      /onSynthesize=\{\(direction, selection\) =>[\s\S]*?generateBotGroupRoomAtmosphere\(group\.id, direction, selection\)/u,
     );
     assert.match(pageSource, /onSelect=\{\(asset\) =>[\s\S]*?applyBotGroupRoomAtmosphereAsset/u);
     assert.doesNotMatch(pageSource, /selectedAtmosphere[\s\S]{0,220}?"Refresh"/u);
@@ -110,10 +110,12 @@ describe("saved group room atmosphere integration", () => {
       /purpose: "group-room-wallpaper",[\s\S]*?groupName: target\.name,[\s\S]*?groupDescription: target\.description,[\s\S]*?memberBotIds/u,
     );
     assert.match(pageSource, /variationSeed:[\s\S]*?crypto\.randomUUID/u);
-    assert.match(pageSource, /resolveZenWallpaperImageModels\(\)/u);
+    assert.match(pageSource, /assetGenerationPreferences\.group_room_atmosphere/u);
+    assert.match(pageSource, /resolveImageProviderName\(\{/u);
+    assert.match(pageSource, /zenWallpaperImageGenerationAvailable\(groupImageProvider\)/u);
     assert.match(
       pageSource,
-      /LOCAL stays on[\s\S]*?your network; ONLINE sends member cues/u,
+      /LOCAL stays on[\s\S]*?your network; ONLINE sends member\s+cues/u,
     );
   });
 
@@ -291,7 +293,8 @@ describe("saved group room atmosphere integration", () => {
     );
     assert.match(tutorialSource, /Shape a saved group's room/u);
     assert.match(tutorialSource, /chat-group-atmosphere/u);
-    assert.match(tutorialSource, /familiar hero and standard bot grid/u);
+    assert.match(tutorialSource, /without replacing its bot grid/u);
+    assert.match(tutorialSource, /grid remains the fixed, fully interactive center/u);
     assert.match(
       tutorialSource,
       /Generate atmosphere hands the job to Prism as soft synthesis/u,

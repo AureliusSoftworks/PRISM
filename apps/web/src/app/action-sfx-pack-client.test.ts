@@ -59,7 +59,10 @@ describe("action sfx pack playback wiring", () => {
     assert.match(page, /EnglishPacingCalibrateMagicButton/u);
     assert.match(page, /peekEnglishPacingProfile/u);
     assert.match(page, /pacingOwnerId=\{actionSfxPackBotId\}/u);
-    assert.match(page, /ownerKind="player"/u);
+    assert.match(
+      page,
+      /packOwnerKind=\{isDefaultPrismBot \? "player" : "bot"\}/u,
+    );
     assert.match(page, /ownerKind: "player"/u);
     assert.match(page, /packOwnerId=\{actionSfxPackBotId\}/u);
     assert.doesNotMatch(page, /packOwnerId=\{scheduleKey\}/u);

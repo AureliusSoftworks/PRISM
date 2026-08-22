@@ -307,7 +307,7 @@ describe("botArchive", () => {
     const power = parsePrismBotArchive(archive).botJson.bot.powers?.[0];
     assert.equal(power?.compileStatus, "ready");
     assert.equal(power?.compiled?.sourceHash, sourceHash);
-    assert.equal(botPowerAvatarVisibilityModeV1(power ? [power] : []), "translucent");
+    assert.equal(botPowerAvatarVisibilityModeV1(power ? [power] : []), "hidden");
   });
 
   it("can be embedded as zipped .bot entries inside a .bots collection", () => {

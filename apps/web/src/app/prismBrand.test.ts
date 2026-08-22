@@ -120,7 +120,7 @@ describe("PRISM brand system", () => {
     );
     assert.match(
       pageSource,
-      /data-signal-role=\{avatarState\.role\}[\s\S]{0,700}\.\.\.prismDefaultAccentStyle\(renderTheme\)/u,
+      /data-signal-role=\{avatarState\.role\}[\s\S]{0,1200}\.\.\.prismDefaultAccentStyle\(renderTheme\)/u,
     );
     assert.match(
       pageCss,

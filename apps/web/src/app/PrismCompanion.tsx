@@ -179,6 +179,16 @@ import { AssetLibraryModal } from "./AssetLibrary";
 import styles from "./prismCompanion.module.css";
 
 const PRISM_COMPANION_SYSTEM_PAUSE_REASON = "prism-companion";
+/**
+ * The cloud is an ambient companion, not a transcript: it carries the live
+ * exchange plus the one before it, and the full log stays in focused chat.
+ * Capping what renders is also what keeps spent bubbles from holding empty
+ * grid cells between the composer and the live conversation — a bubble that
+ * merely faded to zero opacity would still reserve its row forever.
+ */
+const PRISM_COMPANION_CLOUD_MESSAGES = 4;
+/** Bubbles in the newest exchange stay fully lit; older ones recede. */
+const PRISM_COMPANION_LIT_MESSAGES = 2;
 const PRISM_SYSTEM_PAUSE_EXEMPT_SELECTOR =
   '[data-prism-system-pause-exempt="true"]';
 const PRISM_REFRACT_CURSOR_ATTRIBUTE = "data-prism-refract-cursor-hidden";
@@ -659,7 +669,13 @@ export default function PrismCompanion({
   const [personalNoteBody, setPersonalNoteBody] = useState("");
   const [personalNoteDeleteConfirm, setPersonalNoteDeleteConfirm] =
     useState(false);
-  const [sessionNoteDraft, setSessionNoteDraft] = useState("");
+  // The note pad is uncontrolled: a keystroke must not re-render the whole
+  // companion overlay (mannequin, cloud, effects) floating above a live
+  // stage — per-keystroke reconciliation here is the "typing a comment tanks
+  // the FPS" report from Coffee sessions f2647f86/6d6f1239. React state only
+  // tracks the empty↔nonempty transition for the submit button.
+  const sessionNoteDraftRef = useRef("");
+  const [sessionNoteHasDraft, setSessionNoteHasDraft] = useState(false);
   const [sessionNoteSaving, setSessionNoteSaving] = useState(false);
   const [sessionNoteStatus, setSessionNoteStatus] = useState("");
   const [busy, setBusy] = useState(false);
@@ -678,6 +694,7 @@ export default function PrismCompanion({
   const [sessionRecord, setSessionRecord] =
     useState<PrismCompanionSessionRecord | null>(null);
   const messages = privateMode ? privateMessages : savedMessages;
+  const cloudMessages = messages.slice(-PRISM_COMPANION_CLOUD_MESSAGES);
   const interactionLocked = busy || conversationLoading;
   const [actions, setActions] = useState<PrismCompanionActionIntent[]>([]);
   const [cards, setCards] = useState<PrismCompanionCardV1[]>([]);
@@ -760,6 +777,18 @@ export default function PrismCompanion({
   const backdropRef = useRef<HTMLDivElement | null>(null);
   const avatarRef = useRef<HTMLButtonElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const clearSessionNoteDraft = useCallback((): void => {
+    sessionNoteDraftRef.current = "";
+    setSessionNoteHasDraft(false);
+    // composerRef is shared by the chat, personal-note, and session-note
+    // textareas (one mounted at a time); only the uncontrolled session-note
+    // pad needs its DOM value cleared by hand.
+    if (
+      composerRef.current?.getAttribute("aria-label") === "Session note"
+    ) {
+      composerRef.current.value = "";
+    }
+  }, []);
   const personalNoteTitleRef = useRef<HTMLInputElement | null>(null);
   const refractPromptRef = useRef<HTMLInputElement | null>(null);
   const sessionNoteContextRef = useRef(sessionNoteContext);
@@ -1930,10 +1959,10 @@ export default function PrismCompanion({
 
   useEffect(() => {
     setOpen(false);
-    setSessionNoteDraft("");
+    clearSessionNoteDraft();
     setSessionNoteStatus("");
     setSessionNoteSaving(false);
-  }, [sessionNoteContext]);
+  }, [clearSessionNoteDraft, sessionNoteContext]);
 
   const inheritChatHomeDockPosition = useCallback((): void => {
     const dockPosition = chatHomeDockPositionRef.current;
@@ -1998,14 +2027,14 @@ export default function PrismCompanion({
     clearIdleDim();
     sessionNoteTypingStartedAtRef.current = null;
     sessionNoteTypingStartedFpsRef.current = null;
-    setSessionNoteDraft("");
+    clearSessionNoteDraft();
     setOpen(true);
     setSessionNoteStatus("");
     window.requestAnimationFrame(() => composerRef.current?.focus());
-  }, [clearIdleDim]);
+  }, [clearIdleDim, clearSessionNoteDraft]);
 
   const saveSessionNote = useCallback(async (): Promise<void> => {
-    const entry = sessionNoteDraft.trim();
+    const entry = sessionNoteDraftRef.current.trim();
     if (
       !sessionNoteContext ||
       !entry ||
@@ -2048,7 +2077,7 @@ export default function PrismCompanion({
         if (payload.note) publishAppletSessionNoteSaved(payload.note);
         sessionNoteTypingStartedAtRef.current = null;
         sessionNoteTypingStartedFpsRef.current = null;
-        setSessionNoteDraft("");
+        clearSessionNoteDraft();
         setSessionNoteStatus("Note added to transcript");
         setOpen(false);
       }
@@ -2063,7 +2092,7 @@ export default function PrismCompanion({
       sessionNoteSavingRef.current = false;
       setSessionNoteSaving(false);
     }
-  }, [onError, sessionNoteContext, sessionNoteDraft, sessionNoteSaving]);
+  }, [clearSessionNoteDraft, onError, sessionNoteContext, sessionNoteSaving]);
 
   const activatePrismConversation = useCallback(
     (): void => {
@@ -4985,7 +5014,7 @@ export default function PrismCompanion({
                 </div>
                 <textarea
                   ref={composerRef}
-                  value={sessionNoteDraft}
+                  defaultValue=""
                   rows={3}
                   maxLength={APPLET_SESSION_NOTE_ENTRY_MAX_CHARACTERS}
                   aria-label="Session note"
@@ -5003,7 +5032,11 @@ export default function PrismCompanion({
                       sessionNoteTypingStartedFpsRef.current =
                         currentPrismFrameRate()?.fps ?? null;
                     }
-                    setSessionNoteDraft(nextDraft);
+                    sessionNoteDraftRef.current = nextDraft;
+                    const nextHasDraft = nextDraft.trim().length > 0;
+                    setSessionNoteHasDraft((current) =>
+                      current === nextHasDraft ? current : nextHasDraft,
+                    );
                   }}
                   onKeyDown={(event) => {
                     if (event.key === "Escape") {
@@ -5017,7 +5050,7 @@ export default function PrismCompanion({
                       })
                     ) {
                       event.preventDefault();
-                      if (!sessionNoteSaving && sessionNoteDraft.trim()) {
+                      if (!sessionNoteSaving && sessionNoteDraftRef.current.trim()) {
                         event.currentTarget.form?.requestSubmit();
                       }
                     }
@@ -5031,7 +5064,7 @@ export default function PrismCompanion({
                   <button
                     type="submit"
                     className={styles.sendButton}
-                    disabled={sessionNoteSaving || !sessionNoteDraft.trim()}
+                    disabled={sessionNoteSaving || !sessionNoteHasDraft}
                   >
                     {sessionNoteSaving ? "Adding…" : "Add note"}
                   </button>
@@ -5380,7 +5413,7 @@ export default function PrismCompanion({
                   : "Saved conversation with Prism"
               }
             >
-              {messages.map((message, index) => {
+              {cloudMessages.map((message, index) => {
                 const revealing =
                   message.role === "assistant" &&
                   speechReveal?.messageId === message.id
@@ -5405,7 +5438,8 @@ export default function PrismCompanion({
                     data-role={message.role}
                     data-copied={copied ? "true" : undefined}
                     data-recent={
-                      index >= Math.max(0, messages.length - 2)
+                      index >=
+                      Math.max(0, cloudMessages.length - PRISM_COMPANION_LIT_MESSAGES)
                         ? "true"
                         : undefined
                     }
@@ -5878,21 +5912,41 @@ export default function PrismCompanion({
             >
               {refractModelPicker ? (
                 <div className={styles.synthesisRefractRow}>
-                  <div className={styles.synthesisRefractIdentity}>
-                    <span>Refract</span>
+                  <header className={styles.synthesisRefractHeader}>
+                    <span className={styles.synthesisRefractIdentity}>
+                      Refract model
+                    </span>
                     <span
                       className={styles.refractLaneBadge}
                       data-lane={refractModelResponseMode}
-                      title="Follows the global LOCAL/ONLINE toggle"
-                      aria-label={`Refract lane ${(
+                      title="Controlled by the global LOCAL/ONLINE privacy toggle"
+                      aria-label={`App mode ${(
                         refractModelResponseMode ?? "local"
-                      ).toUpperCase()}`}
+                      ).toUpperCase()}. Controlled by the global LOCAL/ONLINE privacy toggle.`}
                     >
-                      {(refractModelResponseMode ?? "local").toUpperCase()}
+                      <span>App mode</span>
+                      <span aria-hidden="true">·</span>
+                      <strong>
+                        {(refractModelResponseMode ?? "local").toUpperCase()}
+                      </strong>
                     </span>
-                  </div>
+                  </header>
                   <div className={styles.refractModelPicker}>
                     {refractModelPicker}
+                  </div>
+                  <div className={styles.synthesisRefractGuidance}>
+                    <p>
+                      This choice is used only by Refract. Your chat and bot
+                      model settings stay unchanged.
+                    </p>
+                    <p
+                      className={styles.synthesisRefractPrivacy}
+                      data-lane={refractModelResponseMode}
+                    >
+                      {refractModelResponseMode === "online"
+                        ? "ONLINE may send the item being refracted to an online provider."
+                        : "LOCAL keeps the item being refracted offline."}
+                    </p>
                   </div>
                 </div>
               ) : null}

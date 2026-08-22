@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import test from "node:test";
 import {
   DEFAULT_SESSION_ATMOSPHERE_MIX,
@@ -487,6 +487,25 @@ test("preloaded Foley starts from the prepared element without cue-time loading"
       Reflect.deleteProperty(globalThis, "Audio");
     }
   }
+});
+
+test("latency-critical atmosphere preloads and plays Foley through worker-decoded Web Audio", () => {
+  const source = readFileSync(
+    new URL("./session-atmosphere-audio.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /if \(latencyCritical\) \{\s*void livePerformanceAudioPcm\(normalizedUrl\);\s*return;/u,
+  );
+  assert.match(
+    source,
+    /if \(latencyCritical && options\.loop !== true\) \{\s*return playLivePerformanceFoley\(url, bus, options\);\s*\}/u,
+  );
+  assert.match(
+    source,
+    /decodeLiveVoicePcm\(bytes\)[\s\S]*?context\.createBuffer\([\s\S]*?context\.createBufferSource\(\)/u,
+  );
 });
 
 test("session atmosphere exposes bundled studio and cup-synced foley assets", () => {

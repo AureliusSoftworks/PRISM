@@ -36,7 +36,7 @@ class DebateApiProvider implements LlmProvider {
     const text = messages.map((message) => message.content).join("\n");
     this.generationCalls.push({
       model: options?.model?.trim() || null,
-      auxiliary: text.includes("Distill a scoreless public debate case board"),
+      auxiliary: options?.model?.trim() === this.diagnosticModel,
     });
     if (text.includes("Create exactly three genuinely distinct")) {
       return JSON.stringify({
@@ -244,6 +244,9 @@ describe("Debate API", () => {
     ] as const) {
       insertBot(userId, id, name);
     }
+    for (let index = 1; index <= 6; index += 1) {
+      insertBot(userId, `mystery-${index}`, `Mystery Actor ${index}`);
+    }
 
     const callsBeforeResearch = fetchRecorder.calls.length;
     const blockedResearch = await owner.request(
@@ -319,18 +322,19 @@ describe("Debate API", () => {
         WHERE id = ?`,
     ).run(userId);
 
-    const accountDefaultSynthesis = await owner.request(
+    const accountAutoSynthesis = await owner.request(
       "/api/debates/synthesize",
       jsonInit({
         topic: "account default routing",
         preferredProvider: "local",
       }),
     );
-    assert.equal(accountDefaultSynthesis.status, 200);
+    assert.equal(accountAutoSynthesis.status, 200);
     assert.equal(
       provider.generationCalls.at(-1)?.model,
-      "debate-account-default",
+      "llama3.2",
     );
+    const fetchCallsAfterLocalCatalog = fetchRecorder.calls.length;
     const explicitGenerationStart = provider.generationCalls.length;
 
     const synthesis = await owner.request(
@@ -476,7 +480,7 @@ describe("Debate API", () => {
         .every((call) => call.model === "debate-navbar-override"),
       "Every setup, cast, and ballot generation should use the Debate-wide model.",
     );
-    assert.equal(fetchRecorder.calls.length, callsBeforeResearch);
+    assert.equal(fetchRecorder.calls.length, fetchCallsAfterLocalCatalog);
 
     db.prepare(
       `INSERT INTO memories
@@ -714,11 +718,23 @@ describe("Debate API", () => {
               )?.content,
               "Objection!",
             );
+            const activatedResponse = await owner.request(
+              `/api/debates/${roleSession.id}/participant-floor-break/activate`,
+              jsonInit({
+                expectedRevision: persistedRaise.revision,
+                idempotencyKey: "api:participant:objection:activate",
+                callEventId: persistedRaise.participantFloorBreak?.callEventId,
+              }),
+            );
+            assert.equal(activatedResponse.status, 200);
+            const activated = (await payload(activatedResponse))
+              .session as DebateSessionV1;
+            assert.ok(activated.participantFloorBreak?.activatedAt);
 
             const resolvedResponse = await owner.request(
               `/api/debates/${roleSession.id}/participant-objection/resolve`,
               jsonInit({
-                expectedRevision: persistedRaise.revision,
+                expectedRevision: activated.revision,
                 idempotencyKey: "api:participant:objection:resolve",
                 content:
                   "The heard claim treats the proposal itself as proof of the promised result.",
@@ -912,6 +928,18 @@ describe("Debate API", () => {
     assert.equal(juryEarly.status, 200);
     juryParticipant = (await payload(juryEarly)).session as DebateSessionV1;
     let juryTurn = 0;
+    assert.equal(juryParticipant.stepKey, "moderator_to_jury");
+    const juryHandoff = await owner.request(
+      `/api/debates/${juryParticipant.id}/advance`,
+      jsonInit({
+        expectedRevision: juryParticipant.revision,
+        idempotencyKey: "api:jury-participant:moderator-handoff",
+      }),
+    );
+    assert.equal(juryHandoff.status, 200);
+    juryParticipant = (await payload(juryHandoff))
+      .session as DebateSessionV1;
+    assert.equal(juryParticipant.stepKey, "jury_initial_0");
     while (juryParticipant.jury.phase === "initial_ballots") {
       juryTurn += 1;
       assert.ok(juryTurn < 24);
@@ -936,16 +964,27 @@ describe("Debate API", () => {
       );
     }
     assert.equal(juryParticipant.stepKey, "jury_deliberation_0");
-    const skipDeliberation = await owner.request(
-      `/api/debates/${juryParticipant.id}/jury/skip-deliberation`,
-      jsonInit({
-        expectedRevision: juryParticipant.revision,
-        idempotencyKey: "api:jury-participant:skip-deliberation",
-      }),
-    );
-    assert.equal(skipDeliberation.status, 200);
-    juryParticipant = (await payload(skipDeliberation))
-      .session as DebateSessionV1;
+    while (juryParticipant.jury.phase === "deliberating") {
+      juryTurn += 1;
+      assert.ok(juryTurn < 24);
+      const response = await owner.request(
+        `/api/debates/${juryParticipant.id}/advance`,
+        jsonInit({
+          expectedRevision: juryParticipant.revision,
+          idempotencyKey: `api:jury-participant:deliberation:${juryTurn}`,
+        }),
+      );
+      assert.equal(response.status, 200);
+      juryParticipant = (await payload(response)).session as DebateSessionV1;
+      assert.deepEqual(juryParticipant.jury.initialBallots, []);
+      assert.deepEqual(juryParticipant.jury.finalBallots, []);
+      assert.equal(
+        juryParticipant.events.some(
+          (event) => event.kind === "jury_deliberation",
+        ),
+        false,
+      );
+    }
     assert.equal(juryParticipant.stepKey, "jury_final_0");
     assert.equal(juryParticipant.jury.phase, "final_ballots");
     assert.deepEqual(juryParticipant.jury.initialBallots, []);
@@ -1083,7 +1122,7 @@ describe("Debate API", () => {
           event.speakerBotId === "moderator",
       ),
     );
-    assert.equal(fetchRecorder.calls.length, callsBeforeResearch);
+    assert.equal(fetchRecorder.calls.length, fetchCallsAfterLocalCatalog);
 
     db.prepare(
       `UPDATE users
@@ -1098,6 +1137,19 @@ describe("Debate API", () => {
       }),
       userId,
     );
+    const autoRoleChecksResponse = await owner.request(
+      "/api/debates/role-checks",
+      jsonInit({
+        motion,
+        forAdvocateBotId: "for",
+        againstAdvocateBotId: "against",
+        preferredProvider: "local",
+        modelOverride: "debate-auto-primary",
+        responseMode: "auto",
+      }),
+    );
+    assert.equal(autoRoleChecksResponse.status, 200);
+    const autoChecks = (await payload(autoRoleChecksResponse)).checks;
     const autoCreatedResponse = await owner.request(
       "/api/debates",
       jsonInit({
@@ -1112,7 +1164,7 @@ describe("Debate API", () => {
         forAdvocateBotId: "for",
         againstAdvocateBotId: "against",
         playerRole: "spectator",
-        advocacyConsent: checks,
+        advocacyConsent: autoChecks,
         preferredProvider: "local",
         modelOverride: "debate-auto-primary",
         responseMode: "auto",
@@ -1123,12 +1175,24 @@ describe("Debate API", () => {
     assert.equal(autoCreatedResponse.status, 201);
     const autoSession = (await payload(autoCreatedResponse))
       .session as DebateSessionV1;
-    assert.equal(autoSession.responseMode, "auto");
+    assert.equal(autoSession.responseMode, "local");
     assert.deepEqual(autoSession.generationChain, [
       { provider: "local", model: "debate-auto-primary" },
-      { provider: "openai", model: "debate-online-fallback" },
     ]);
 
+    const deferredRoleChecksResponse = await owner.request(
+      "/api/debates/role-checks",
+      jsonInit({
+        motion,
+        forAdvocateBotId: "for",
+        againstAdvocateBotId: "against",
+        preferredProvider: "local",
+        modelOverride: "debate-saved-setup-model",
+        responseMode: "local",
+      }),
+    );
+    assert.equal(deferredRoleChecksResponse.status, 200);
+    const deferredChecks = (await payload(deferredRoleChecksResponse)).checks;
     const deferredResponse = await owner.request(
       "/api/debates",
       jsonInit({
@@ -1143,7 +1207,7 @@ describe("Debate API", () => {
         forAdvocateBotId: "for",
         againstAdvocateBotId: "against",
         playerRole: "spectator",
-        advocacyConsent: checks,
+        advocacyConsent: deferredChecks,
         preferredProvider: "local",
         modelOverride: "debate-saved-setup-model",
         responseMode: "local",
@@ -1173,9 +1237,9 @@ describe("Debate API", () => {
     let deferredStarted = (await payload(deferredStartedResponse))
       .session as DebateSessionV1;
     assert.equal(deferredStarted.status, "live");
-    assert.equal(deferredStarted.model, "debate-current-at-start");
+    assert.equal(deferredStarted.model, "debate-saved-setup-model");
     assert.equal(deferredStarted.modelSelectionKind, "fixed");
-    assert.equal(deferredStarted.moderator.model, "debate-current-at-start");
+    assert.equal(deferredStarted.moderator.model, "debate-saved-setup-model");
 
     const deferredAdvancedResponse = await owner.request(
       `/api/debates/${deferred.id}/advance`,
@@ -1187,13 +1251,73 @@ describe("Debate API", () => {
     assert.equal(deferredAdvancedResponse.status, 200);
     deferredStarted = (await payload(deferredAdvancedResponse))
       .session as DebateSessionV1;
-    assert.equal(deferredStarted.events.at(-1)?.model, "debate-current-at-start");
+    assert.equal(
+      deferredStarted.events.at(-1)?.model,
+      "debate-saved-setup-model",
+    );
     assert.equal(
       provider.generationCalls.filter((call) => !call.auxiliary).at(-1)?.model,
-      "debate-current-at-start",
+      "debate-saved-setup-model",
     );
 
-    assert.equal(fetchRecorder.calls.length, callsBeforeResearch);
+    const mysteryCreatedResponse = await owner.request(
+      "/api/debates",
+      jsonInit({
+        format: "whodunnit",
+        whodunnit: {
+          version: 1,
+          preset: "compact",
+          difficulty: "classic",
+          artMode: "bundled",
+          inspiration: "Surprise me",
+          nonce: "api-whodunnit",
+          suspectBotIds: ["mystery-1", "mystery-2", "mystery-3", "mystery-4"],
+          prosecutorPartnerBotId: "mystery-5",
+          rivalDefenseBotId: "mystery-6",
+        },
+        preferredProvider: "local",
+        responseMode: "local",
+        modelOverride: "debate-api-model",
+        idempotencyKey: "api:whodunnit:create:0001",
+      }),
+    );
+    assert.equal(mysteryCreatedResponse.status, 201);
+    let mystery = (await payload(mysteryCreatedResponse)).session as DebateSessionV1;
+    assert.equal(mystery.format, "whodunnit");
+    assert.equal(mystery.formatState.format, "whodunnit");
+    assert.equal(JSON.stringify(mystery).includes("culpritSeatId"), false);
+    const notebookResponse = await owner.request(`/api/debates/${mystery.id}/notebook`);
+    assert.equal(notebookResponse.status, 200);
+    assert.equal((await payload(notebookResponse)).notebook.pages[0].title, "Case Notes");
+    const crimeScene = mystery.formatState.format === "whodunnit"
+      ? mystery.formatState.rooms.find((room) => room.id === mystery.formatState.crimeSceneRoomId)!
+      : null;
+    assert.ok(crimeScene?.activeRegionId);
+    const inspectedResponse = await owner.request(
+      `/api/debates/${mystery.id}/mystery-action`,
+      jsonInit({
+        expectedRevision: mystery.revision,
+        idempotencyKey: "api:whodunnit:inspect:0001",
+        action: "inspect",
+        roomId: crimeScene.id,
+        regionId: crimeScene.activeRegionId,
+      }),
+    );
+    assert.equal(inspectedResponse.status, 200);
+    mystery = (await payload(inspectedResponse)).session as DebateSessionV1;
+    assert.equal(mystery.formatState.format === "whodunnit" ? mystery.formatState.discoveredEvidence.length : 0, 1);
+    const caseSeedResponse = await owner.request(`/api/debates/${mystery.id}/mystery-seed`);
+    assert.equal(caseSeedResponse.status, 200);
+    const caseCode = (await payload(caseSeedResponse)).caseCode;
+    assert.equal(typeof caseCode.payload, "string");
+    const seedInspectionResponse = await owner.request(
+      "/api/debates/mystery-seed/inspect",
+      jsonInit({ caseCode }),
+    );
+    assert.equal(seedInspectionResponse.status, 200);
+    assert.equal(JSON.stringify(await payload(seedInspectionResponse)).includes("culpritSeatId"), false);
+
+    assert.equal(fetchRecorder.calls.length, fetchCallsAfterLocalCatalog);
 
     const stranger = createClient();
     assert.equal(
@@ -1212,6 +1336,10 @@ describe("Debate API", () => {
     assert.deepEqual((await payload(strangerList)).sessions, []);
     assert.equal(
       (await stranger.request(`/api/debates/${session.id}`)).status,
+      404,
+    );
+    assert.equal(
+      (await stranger.request(`/api/debates/${mystery.id}/notebook`)).status,
       404,
     );
   });

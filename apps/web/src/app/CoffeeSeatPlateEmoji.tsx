@@ -3,7 +3,6 @@
 import {
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -78,6 +77,10 @@ import { CrtPixelTextGlyph } from "./PhosphorPixelGlyph";
 
 function randomBetween(lo: number, hi: number): number {
   return lo + Math.random() * (hi - lo);
+}
+
+function coffeeSeatEyeTimelineNowMs(): number {
+  return performance.now();
 }
 
 function scheduleKeyDigest(key: string): number {
@@ -222,8 +225,11 @@ export type CoffeeSeatPlateEmojiProps = {
   pixelated?: boolean;
   /** Uses binary cell alpha for a hard-edged authoring guide. */
   hardPixels?: boolean;
-  /** Mini keeps semantic mouth motion; static is reserved for micro avatars. */
-  motionMode?: "full" | "mini-led" | "static";
+  /**
+   * Speech keeps aligned visemes while stopping autonomous eyes/blinks.
+   * Mini keeps its LED motion; static is reserved for frozen faces.
+   */
+  motionMode?: "full" | "mini-led" | "speech" | "static";
   /** Active speaking state for speech-driven mouth sync and blink eligibility. */
   isTalking: boolean;
   /** Full streamed-text viseme used to animate authored custom mouth glyphs. */
@@ -373,7 +379,8 @@ export function CoffeeSeatPlateEmoji({
   const fullMotion = motionMode === "full";
   const staticFace = motionMode === "static";
   const mouthMotionEnabled = !staticFace;
-  const blinkEnabled = enabled && !staticFace;
+  const blinkEnabled =
+    enabled && (motionMode === "full" || motionMode === "mini-led");
   const effectiveTalking = staticFace ? false : isTalking;
   const normalizedThinkingFrames =
     normalizeBotFaceThinkingFrames(faceThinkingFrames) ??
@@ -496,11 +503,11 @@ export function CoffeeSeatPlateEmoji({
       setLiveEyeTimelineMs(0);
       return;
     }
-    const startedAt = performance.now();
+    const startedAt = coffeeSeatEyeTimelineNowMs();
     setLiveEyeTimelineMs(0);
     const intervalMs = botFaceEyeMovementLiveIntervalMs(normalizedEyeMovement);
     const id = window.setInterval(() => {
-      setLiveEyeTimelineMs(performance.now() - startedAt);
+      setLiveEyeTimelineMs(coffeeSeatEyeTimelineNowMs() - startedAt);
     }, intervalMs);
     return () => window.clearInterval(id);
   }, [
@@ -649,41 +656,26 @@ export function CoffeeSeatPlateEmoji({
     typeof eyeTimelineMs === "number" && Number.isFinite(eyeTimelineMs)
       ? Math.max(0, eyeTimelineMs)
       : liveEyeTimelineMs;
-  const resolvedGaze = useMemo(
-    () =>
-      eyeMovementActive &&
-      blinkEnabled &&
-      !thinkingSpinnerActive &&
-      !questionGlyphActive
-        ? (eyeGazeOverride ??
-          resolveBotFaceGazeFrame({
-            seed: scheduleKey,
-            timelineMs: eyeTimeline,
-            stateStartedAtMs:
-              typeof eyeStateStartedAtMs === "number"
-                ? eyeStateStartedAtMs
-                : 0,
-            state: eyeAttentionState,
-            targetDirection: eyeTargetDirection,
-            movement: normalizedEyeMovement,
-            eyeScale: faceEyeScale,
-          }))
-        : { xPx: 0, yPx: 0, transitionMs: 0 },
-    [
-      blinkEnabled,
-      eyeAttentionState,
-      eyeGazeOverride,
-      eyeMovementActive,
-      eyeStateStartedAtMs,
-      eyeTargetDirection,
-      eyeTimeline,
-      faceEyeScale,
-      normalizedEyeMovement,
-      questionGlyphActive,
-      scheduleKey,
-      thinkingSpinnerActive,
-    ],
-  );
+  const resolvedGaze =
+    eyeMovementActive &&
+    blinkEnabled &&
+    !thinkingSpinnerActive &&
+    !questionGlyphActive
+      ? (eyeGazeOverride ??
+        resolveBotFaceGazeFrame({
+          seed: scheduleKey,
+          timelineMs: eyeTimeline,
+          stateStartedAtMs:
+            typeof eyeStateStartedAtMs === "number" ? eyeStateStartedAtMs : 0,
+          state: eyeAttentionState,
+          targetDirection: eyeTargetDirection,
+          movement: normalizedEyeMovement,
+          eyeScale: faceEyeScale,
+        }))
+      : { xPx: 0, yPx: 0, transitionMs: 0 };
+  const resolvedGazeXPx = resolvedGaze.xPx;
+  const resolvedGazeYPx = resolvedGaze.yPx;
+  const resolvedGazeTransitionMs = resolvedGaze.transitionMs;
   useLayoutEffect(() => {
     onBlinkPhaseChange?.(displayBlinkPhase);
   }, [displayBlinkPhase, onBlinkPhaseChange]);
@@ -694,14 +686,23 @@ export function CoffeeSeatPlateEmoji({
     }
     const reopened = previousBlinkPhaseRef.current === "closed";
     previousBlinkPhaseRef.current = "open";
-    setDisplayGaze(resolvedGaze);
+    setDisplayGaze({
+      xPx: resolvedGazeXPx,
+      yPx: resolvedGazeYPx,
+      transitionMs: resolvedGazeTransitionMs,
+    });
     if (!reopened) return;
     setGazeSnapsOpen(true);
     const frameId = window.requestAnimationFrame(() => {
       setGazeSnapsOpen(false);
     });
     return () => window.cancelAnimationFrame(frameId);
-  }, [displayBlinkPhase, resolvedGaze]);
+  }, [
+    displayBlinkPhase,
+    resolvedGazeTransitionMs,
+    resolvedGazeXPx,
+    resolvedGazeYPx,
+  ]);
   const displayText = applyCoffeeSeatBlink(faceText, displayBlinkPhase, {
     eyeCharacter: normalizedFaceEyeCharacter,
     blinkBar: normalizedFaceBlinkBar,
@@ -907,10 +908,15 @@ export function CoffeeSeatPlateEmoji({
       data-face-mouth-animation={
         renderedFaceMouthCharacter ? normalizedFaceMouthAnimation : undefined
       }
+      data-face-mouth-speech-rest={faceMouthSpeechPoses?.[0]}
+      data-face-mouth-speech-closure={faceMouthSpeechPoses?.[1]}
+      data-face-mouth-speech-open={faceMouthSpeechPoses?.[2]}
+      data-face-mouth-speech-round={faceMouthSpeechPoses?.[3]}
       data-talking={effectiveTalking ? "true" : undefined}
       data-face-blink-bar={normalizedFaceBlinkBar}
       data-face-blink-count={normalizedFaceBlinkCount}
       data-coffee-plate-mouth-open={mouthOpen ? "true" : undefined}
+      data-prism-mouth-sync-target="true"
       data-coffee-plate-mouth-shape={
         effectiveTalking ? streamedMouthShape : undefined
       }

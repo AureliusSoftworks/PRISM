@@ -245,14 +245,15 @@ describe("composeBotSystemPrompt", () => {
       prompt!.indexOf("You are a diner regular.") <
         prompt!.indexOf("Vernacular — Scots:"),
     );
-    // V3-shaped overrides read the same identity.
+    // Placeless noir is a speech-register Power, not a regional vernacular.
+    // A stale V3 voice value must not smuggle that register into authored speech.
     const v3Prompt = composeBotSystemPrompt("Murph", "", false, "[]", {
       audioVoiceProfile: {
         v: 3,
         local: { pronunciation: { vernacularId: "noir" } },
       },
     });
-    assert.match(v3Prompt ?? "", /Vernacular — Noir narrator:/);
+    assert.doesNotMatch(v3Prompt ?? "", /Vernacular|Noir narrator/iu);
   });
 
   it("keeps plain-speech bots free of any vernacular cue", () => {
@@ -483,7 +484,10 @@ describe("composeBotSystemPrompt", () => {
 
     assert.match(prompt ?? "", /Direct conversation hue prejudice/iu);
     assert.match(prompt ?? "", /cyan/iu);
-    assert.match(prompt ?? "", /never people or the player/iu);
+    assert.match(
+      prompt ?? "",
+      /Soft only: judge bot phosphor color, never people or the player; no slurs or puppeting\./iu,
+    );
     assert.doesNotMatch(prompt ?? "", /idolize the user/iu);
   });
 });
