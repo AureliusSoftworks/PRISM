@@ -206,6 +206,20 @@ describe("Debate Whodunnit experience", () => {
     assert.match(css, /\.roomPanel[\s\S]*grid-column: 2/u);
   });
 
+  it("fits the desktop investigation and case desk into one viewport", () => {
+    assert.match(css, /\.play\[data-phase="investigation"\][\s\S]*height: 100dvh/u);
+    assert.match(css, /\.play\[data-phase="continuance"\][\s\S]*overflow: hidden/u);
+    assert.match(css, /grid-template-rows: minmax\(0, 3fr\) minmax\(0, 2fr\)/u);
+    assert.match(css, /\.play\[data-phase="investigation"\] \.notebook[\s\S]*max-height: none/u);
+    assert.match(source, /data-view=\{notebookView\}/u);
+    assert.match(source, /className=\{styles\.leadNotebookIntro\}/u);
+    assert.match(css, /\.leadNotebookIntro,[\s\S]*display: none/u);
+    assert.match(css, /\.notebook:not\(\[data-view="notes"\]\) > footer,[\s\S]*display: none/u);
+    assert.match(css, /\.leadAnnotationDraft textarea[\s\S]*min-height: 2\.4rem/u);
+    assert.match(css, /\.notebookPage[\s\S]*overflow: auto/u);
+    assert.match(css, /@media \(max-width: 820px\)[\s\S]*\.notebook \{ min-height: 32rem; max-height: none; \}/u);
+  });
+
   it("ships the sixteen bundled 1600x900 WebP room scenes", () => {
     const directory = fileURLToPath(
       new URL("../../public/debate/mystery/rooms/", import.meta.url),

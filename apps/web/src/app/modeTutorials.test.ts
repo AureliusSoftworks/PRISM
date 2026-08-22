@@ -22,11 +22,14 @@ describe("mode tutorials", () => {
     assert.match(step.body, /compact dark HUD/u);
     assert.match(step.body, /names your mission/u);
     assert.match(step.body, /Actions, Case file, and Theory/u);
-    assert.match(step.body, /current room stage, compact mansion map, and persistent Case Notes stay visible together/u);
+    assert.match(step.body, /fixed-proportion mansion map beside the current room stage/u);
+    assert.match(step.body, /Persistent Case Desk spans the full width below them/u);
+    assert.match(step.body, /desktop investigation fits into one fixed game board/u);
     assert.match(step.body, /Co-counsel’s latest reading appears at the lower edge of the stage/u);
     assert.doesNotMatch(step.body, /co-counsel Mini and name are always visible/u);
     assert.match(step.body, /Case file keeps their consultation composer/u);
-    assert.match(step.body, /compact mansion map fits beside the Debate stage/u);
+    assert.match(step.body, /four-to-three blueprint beside the Debate stage/u);
+    assert.match(step.body, /preserve their seeded footprints without stretching/u);
     assert.match(step.body, /adjacent room boxes/u);
     assert.match(step.body, /Micro avatar/u);
     assert.match(step.body, /every undiscovered room conceals its name/u);
@@ -45,7 +48,9 @@ describe("mode tutorials", () => {
     assert.match(step.body, /Every area remains re-clickable/u);
     assert.match(step.body, /Drag a usable item onto a locked inventory object, mansion room, or room area/u);
     assert.match(step.body, /harder cases may contain convincing keys with no matching lock/u);
-    assert.match(step.body, /Case Notes stay inline beneath the compact map/u);
+    assert.match(step.body, /Persistent Case Desk stays beneath the investigation band/u);
+    assert.match(step.body, /only its active record scroll/u);
+    assert.match(step.body, /Leads, freeform Notes, Evidence, and Testimony/u);
     assert.match(step.body, /private notebook references/u);
     assert.match(step.body, /one-window reference revisions/u);
     assert.match(step.body, /partner composer can also @ a lead at its current revision/u);
