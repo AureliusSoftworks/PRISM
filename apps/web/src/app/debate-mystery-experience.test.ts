@@ -78,7 +78,7 @@ describe("Debate Whodunnit experience", () => {
 
   it("preserves undiscovered-map secrecy and uses Mini search presences before HD interview focus", () => {
     assert.match(source, /<BotAvatarMicro/u);
-    assert.match(source, /renderSizePx=\{58\}/u);
+    assert.match(source, /renderSizePx=\{40\}/u);
     assert.match(source, /className=\{styles\.roomSuspectPresence\}/u);
     assert.match(source, /renderMysteryBotAvatar\(mysteryBotForSuspect\(currentSuspect\), "mini", \{ demeanor: "suspect" \}\)/u);
     assert.match(source, /state\.suspects\.filter\(\(suspect\) => suspect\.roomId === room\.id\)/u);

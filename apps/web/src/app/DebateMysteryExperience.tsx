@@ -2046,7 +2046,7 @@ export function DebateMysteryPlay(
                     <strong>{room.name ?? "Unnamed room"}</strong>
                     {state.suspects.filter((suspect) => suspect.roomId === room.id).map((suspect) => {
                       const bot = mysteryBotForSuspect(suspect);
-                      return <i className={styles.mapOccupant} key={suspect.seatId} aria-label={`${suspect.name} is known to be here`} data-tutorial-target="whodunnit-micro-avatar"><BotAvatarMicro color={bot.color} moodKey="neutral" glyph={props.renderBotGlyph(bot.glyph, { size: 15, strokeWidth: 1.3 })} renderSizePx={58} scheduleKey={`mystery-map-${sessionId}-${suspect.seatId}`} /></i>;
+                      return <i className={styles.mapOccupant} key={suspect.seatId} aria-label={`${suspect.name} is known to be here`} data-tutorial-target="whodunnit-micro-avatar"><BotAvatarMicro color={bot.color} moodKey="neutral" glyph={props.renderBotGlyph(bot.glyph, { size: 15, strokeWidth: 1.3 })} renderSizePx={40} scheduleKey={`mystery-map-${sessionId}-${suspect.seatId}`} /></i>;
                     })}
                     {room.neighborIds.some((id) => state.rooms.find((candidate) => candidate.id === id)?.floor !== room.floor) ? <small>Stairs</small> : null}</> : null}
                   </button>
