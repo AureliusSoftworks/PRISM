@@ -2590,6 +2590,7 @@ export function parseStoredAssistantToolPayload(
       ...(zenStageAction ? { zenStageAction } : {}),
       ...(coffeeUserAction ? { coffeeUserAction } : {}),
       ...(coffeeInterruption ? { coffeeInterruption } : {}),
+      ...(coffeeAside ? { coffeeAside } : {}),
       ...(coffeeReplayEvents.length > 0 ? { coffeeReplayEvents } : {}),
       ...(autoRecovery ? { autoRecovery } : {}),
       ...(autoRoute ? { autoRoute } : {}),

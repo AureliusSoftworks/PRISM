@@ -2303,6 +2303,7 @@ function localLaughProjectedText(
   return projectLocalWrittenLaughterForSynthesis(
     text,
     profile.localLaughSyllable,
+    profile.localLaughDelimiter,
   );
 }
 
@@ -2491,6 +2492,7 @@ async function sendLocalVoiceWaveStream(args: {
           ? projectLocalWrittenLaughterForSynthesis(
               text,
               normalizedProfile.localLaughSyllable,
+              normalizedProfile.localLaughDelimiter,
             )
           : text,
       ),
@@ -2510,6 +2512,7 @@ async function sendLocalVoiceWaveStream(args: {
     (item.action === "laugh" || item.action === "chuckle")
       ? botLocalLaughSynthesisText({
           syllable: normalizedProfile.localLaughSyllable,
+          delimiter: normalizedProfile.localLaughDelimiter,
           intensity: botLocalLaughIntensityForCue(
             item.authoredText,
             item.modifiers,

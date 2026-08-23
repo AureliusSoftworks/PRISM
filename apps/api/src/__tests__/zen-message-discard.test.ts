@@ -18,6 +18,7 @@ function createDiscardTestDb(): DatabaseSync {
       user_id TEXT NOT NULL,
       role TEXT NOT NULL,
       content TEXT NOT NULL,
+      tool_payload TEXT,
       created_at TEXT NOT NULL
     );
     CREATE TABLE memory_summaries (

@@ -454,6 +454,7 @@ export function CoffeeSeatPlateEmoji({
     null;
   const faceBlinkDisabled = coffeeSeatBlinkKeepsFaceStill(
     normalizedFaceBlinkBar,
+    { eyeCharacter: normalizedFaceEyeCharacter },
   );
   const talkingPausesBlink = effectiveTalking && !blinkWhileTalking;
   const blinkKey = `${blinkEnabled ? "enabled" : "disabled"}:${talkingPausesBlink ? "talking" : "idle"}:${faceMode}:${normalizedFaceBlinkBar}:${faceText}:${scheduleKey}`;

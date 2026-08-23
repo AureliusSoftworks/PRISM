@@ -2692,7 +2692,27 @@ export function stripCoffeeSpeakerPrefix(
 ): string {
   let text = stripCoffeeChatRoleFraming(raw);
 
-  const names = [speakerName, ...knownSpeakerNames, "assistant", "bot"]
+  // A peer name is removable only when it is fused to explicit screenplay
+  // role framing. Plain `Peer, ...` and linked peer addresses are dialogue,
+  // and later guards decide whether they are valid or misattributed.
+  for (const peerName of knownSpeakerNames) {
+    const peer = peerName.trim();
+    if (!peer || peer.toLocaleLowerCase() === speakerName?.trim().toLocaleLowerCase()) {
+      continue;
+    }
+    text = text.replace(
+      new RegExp(
+        `^\\s*\\*{0,2}${escapeRegExp(peer)}\\*{0,2}\\s*(?:responds?|replies|said|says)\\s*[:：-]\\s*`,
+        "iu",
+      ),
+      "",
+    );
+  }
+
+  // Only the selected speaker can be stripped as leading role framing.
+  // Peer names must survive long enough for the mention/departure guards to
+  // distinguish a real address from a mislabeled screenplay line.
+  const names = [speakerName, "assistant", "bot"]
     .map((name) => (typeof name === "string" ? name.trim() : ""))
     .filter((name, index, all) => name.length > 0 && all.indexOf(name) === index);
 
@@ -15309,6 +15329,7 @@ function loadMessages(
       const botPowerMutePerformance = storedToolPayload.botPowerMutePerformance;
       const socialSilence = storedToolPayload.socialSilence;
       const crosstalkReclaim = storedToolPayload.crosstalkReclaim;
+      const coffeeAside = storedToolPayload.coffeeAside;
       const botPowerTrollPresentation = storedToolPayload.botPowerTrollPresentation;
       const message: ChatMessage = {
         id: row.id,
@@ -15340,6 +15361,7 @@ function loadMessages(
         ...(botPowerMutePerformance ? { botPowerMutePerformance } : {}),
         ...(socialSilence ? { socialSilence } : {}),
         ...(crosstalkReclaim ? { crosstalkReclaim } : {}),
+        ...(coffeeAside ? { coffeeAside } : {}),
         ...(botPowerTrollPresentation ? { botPowerTrollPresentation } : {}),
       };
       return attachCoffeePrivateIntendedSpeech(message, row.tool_payload);
@@ -15378,6 +15400,7 @@ function loadAllMessages(
       const botPowerMutePerformance = storedToolPayload.botPowerMutePerformance;
       const socialSilence = storedToolPayload.socialSilence;
       const crosstalkReclaim = storedToolPayload.crosstalkReclaim;
+      const coffeeAside = storedToolPayload.coffeeAside;
       const botPowerTrollPresentation = storedToolPayload.botPowerTrollPresentation;
       const message: ChatMessage = {
         id: row.id,
@@ -15409,6 +15432,7 @@ function loadAllMessages(
         ...(botPowerMutePerformance ? { botPowerMutePerformance } : {}),
         ...(socialSilence ? { socialSilence } : {}),
         ...(crosstalkReclaim ? { crosstalkReclaim } : {}),
+        ...(coffeeAside ? { coffeeAside } : {}),
         ...(botPowerTrollPresentation ? { botPowerTrollPresentation } : {}),
       };
       return attachCoffeePrivateIntendedSpeech(message, row.tool_payload);

@@ -22,7 +22,7 @@ describe("applyCoffeeSeatBlink", () => {
     assert.equal(applyCoffeeSeatBlink(":V", false), ":V");
   });
 
-  it("keeps Rowan, Iris, and Sol custom eyes visible with a blank blink", () => {
+  it("gives custom eyes the stock binary closed state for the default blink", () => {
     for (const { name, eye, face } of [
       { name: "Rowan", eye: "⌁", face: "⌁|" },
       { name: "Iris", eye: "◇", face: "◇]" },
@@ -33,7 +33,7 @@ describe("applyCoffeeSeatBlink", () => {
           eyeCharacter: eye,
           blinkBar: " ",
         }),
-        face,
+        `¦${Array.from(face).slice(1).join("")}`,
         name,
       );
     }
@@ -69,7 +69,7 @@ describe("applyCoffeeSeatBlink", () => {
   it("blinks custom leading eye characters when provided", () => {
     assert.equal(
       applyCoffeeSeatBlink("B)", false, { eyeCharacter: "B" }),
-      "B)",
+      "¦)",
     );
     assert.equal(
       applyCoffeeSeatBlink("8D", "closed", { eyeCharacter: "8", blinkBar: "¦" }),
@@ -93,6 +93,14 @@ describe("applyCoffeeSeatBlink", () => {
     assert.equal(coffeeSeatBlinkKeepsFaceStill("|"), false);
     assert.equal(coffeeSeatBlinkKeepsFaceStill("¦"), false);
     assert.equal(coffeeSeatBlinkKeepsFaceStill("═"), false);
+    assert.equal(
+      coffeeSeatBlinkKeepsFaceStill(" ", { eyeCharacter: "◇" }),
+      false,
+    );
+    assert.equal(
+      coffeeSeatBlinkKeepsFaceStill("none", { eyeCharacter: "◇" }),
+      true,
+    );
   });
 
   it("no-ops on empty or unknown first character", () => {

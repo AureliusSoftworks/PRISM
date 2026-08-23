@@ -1823,9 +1823,9 @@ function signalProducerCueLabel(cue: BotcastProducerCue): string {
     case "ask_about": {
       const quote = cue.directQuote?.trim();
       const detail = cue.detail?.trim();
-      if (quote && detail) return `Ask about ${detail}; say ${quote}`;
+      if (quote && detail) return `${detail}; say ${quote}`;
       if (quote) return `Say ${quote}`;
-      return `Ask about ${detail || "that detail"}`;
+      return detail || "Host note";
     }
     case "refocus":
       return "Refocus";
@@ -15112,7 +15112,7 @@ export function BotcastExperience({
                     </div>
                   ) : null}
                   <label>
-                    Ask about…
+                    Host note…
                     <div>
                       <input
                         ref={producerCueInputRef}
@@ -15141,7 +15141,7 @@ export function BotcastExperience({
                             end: event.currentTarget.selectionEnd ?? 0,
                           };
                         }}
-                        placeholder="a specific detail"
+                        placeholder="context, direction, or a question"
                         maxLength={BOTCAST_PRODUCER_CUE_DETAIL_MAX}
                       />
                     </div>
@@ -15237,8 +15237,8 @@ export function BotcastExperience({
                   </div>
                   {queuedProducerCue ? null : (
                     <small>
-                      Private to the host. Ask about steers the topic. Say this
-                      must be spoken exactly, as a message from the Producer —
+                      Private to the host. Use this for context, direction, or a
+                      question. Say this must be spoken exactly, as a message from the Producer —
                       keep it to a line the host can land in one breath. Image
                       context is coming later.
                     </small>

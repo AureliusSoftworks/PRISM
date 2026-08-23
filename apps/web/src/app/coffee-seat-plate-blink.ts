@@ -17,13 +17,20 @@ export interface CoffeeSeatBlinkOptions {
   blinkBar?: BotFaceBlinkBar | null;
 }
 
+/** The closed half of the stock `:` eye's binary open/closed blink. */
+export const COFFEE_SEAT_DEFAULT_CLOSED_EYE_GLYPH = "¦";
+
 export function coffeeSeatBlinkKeepsFaceStill(
   blinkBar: BotFaceBlinkBar | null | undefined,
+  options: Pick<CoffeeSeatBlinkOptions, "eyeCharacter"> = {},
 ): boolean {
   const normalizedBlinkBar =
     normalizeBotFaceBlinkBar(blinkBar) ?? DEFAULT_BOT_FACE_BLINK_BAR;
+  const hasCustomEye =
+    typeof options.eyeCharacter === "string" &&
+    Array.from(options.eyeCharacter.trim()).length === 1;
   return (
-    normalizedBlinkBar === DEFAULT_BOT_FACE_BLINK_BAR ||
+    (normalizedBlinkBar === DEFAULT_BOT_FACE_BLINK_BAR && !hasCustomEye) ||
     normalizedBlinkBar === "none"
   );
 }
@@ -44,7 +51,7 @@ export function applyCoffeeSeatBlink(
   const phase = normalizeCoffeeSeatBlinkPhase(phaseOrEyesOpen);
   const blinkBar =
     normalizeBotFaceBlinkBar(options.blinkBar) ?? DEFAULT_BOT_FACE_BLINK_BAR;
-  if (coffeeSeatBlinkKeepsFaceStill(blinkBar)) return text;
+  if (coffeeSeatBlinkKeepsFaceStill(blinkBar, options)) return text;
   if (phase === "open" || text.length === 0) return text;
   const [eye] = Array.from(text);
   if (!eye) return text;
@@ -60,7 +67,11 @@ export function applyCoffeeSeatBlink(
     (customEye !== undefined && eye === customEye)
   ) {
     const rest = text.slice(eye.length);
-    return `${blinkBar}${rest}`;
+    const closedEyeGlyph =
+      blinkBar === DEFAULT_BOT_FACE_BLINK_BAR
+        ? COFFEE_SEAT_DEFAULT_CLOSED_EYE_GLYPH
+        : blinkBar;
+    return `${closedEyeGlyph}${rest}`;
   }
   return text;
 }

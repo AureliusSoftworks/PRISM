@@ -1413,8 +1413,10 @@ import {
   botVernacularDefinitionForId,
   botVernacularIdFromStoredVoiceProfile,
   normalizeBotAudioVoiceProfileV1,
+  BOT_LOCAL_LAUGH_DELIMITER_MAX_LENGTH,
   BOT_LOCAL_LAUGH_SYLLABLE_MAX_LENGTH,
   botLocalLaughSynthesisText,
+  normalizeBotLocalLaughDelimiter,
   normalizeBotLocalLaughSyllable,
   normalizeBotAudioVoiceControl,
   normalizeBotAvatarSfxV1,
@@ -42488,6 +42490,7 @@ function BotVoiceLocalStage({
 }): React.JSX.Element {
   const normalizedProfile = normalizeBotAudioVoiceProfileV1(profile);
   const laughSyllable = normalizedProfile.localLaughSyllable ?? "";
+  const laughDelimiter = normalizedProfile.localLaughDelimiter ?? "-";
   const laughControlAvailable =
     normalizedProfile.localVoiceSource === "portable" &&
     !normalizedProfile.systemVoiceName &&
@@ -42514,6 +42517,7 @@ function BotVoiceLocalStage({
               systemVoiceName: null,
               localVoiceSource: "portable",
               localLaughSyllable: null,
+              localLaughDelimiter: "-",
               pitch: 0,
               pace: 0,
               lilt: 0,
@@ -42537,64 +42541,112 @@ function BotVoiceLocalStage({
           data-tutorial-target="avatar-local-laugh"
           aria-labelledby="bot-voice-local-laugh-title"
         >
-          <div className={styles.botVoiceLocalLaughField}>
-            <label id="bot-voice-local-laugh-title" htmlFor="bot-voice-local-laugh">
-              Laugh
-            </label>
-            <input
-              id="bot-voice-local-laugh"
-              type="text"
-              value={laughSyllable}
-              placeholder="ha"
-              maxLength={BOT_LOCAL_LAUGH_SYLLABLE_MAX_LENGTH}
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-              aria-label="Local laugh syllable"
-              pattern="[A-Za-z]{1,4}"
-              onChange={(event) => {
-                const next = event.currentTarget.value
-                  .normalize("NFKC")
-                  .replace(/[^\p{L}]/gu, "")
-                  .slice(0, BOT_LOCAL_LAUGH_SYLLABLE_MAX_LENGTH)
-                  .toLocaleLowerCase();
-                onChange({
-                  ...normalizedProfile,
-                  localLaughSyllable: normalizeBotLocalLaughSyllable(next),
-                });
-              }}
-            />
-            <button
-              type="button"
-              aria-label="Preview local laugh"
-              title="Preview this laugh"
-              disabled={!laughSyllable}
-              onClick={() => {
-                const previewText = botLocalLaughSynthesisText({
-                  syllable: laughSyllable,
-                  intensity: "medium",
-                });
-                if (!previewText) return;
-                void onPreview(
-                  {
-                    ...normalizedProfile,
-                    localEnginePreference: "instant",
-                  },
-                  "english",
-                  previewText,
-                  {
-                    englishVoiceEngine: "builtin",
-                    cacheKey: `avatar-local-laugh:${laughSyllable}:${JSON.stringify(
-                      normalizedProfile,
-                    )}`,
-                  },
-                );
-              }}
-            >
-              <Play size={13} strokeWidth={2.3} aria-hidden="true" />
-            </button>
+          <div className={styles.botVoiceLocalLaughHeading}>
+            <span id="bot-voice-local-laugh-title">Laugh</span>
+            <small>Build this bot’s repeated laugh phrase.</small>
           </div>
-          <small>One 1–4 letter sound, used for this bot’s Instant laugh.</small>
+          <div className={styles.botVoiceLocalLaughRecipe}>
+            <label htmlFor="bot-voice-local-laugh-syllable">
+              <span>Sound</span>
+              <input
+                id="bot-voice-local-laugh-syllable"
+                type="text"
+                value={laughSyllable}
+                placeholder="ha"
+                maxLength={BOT_LOCAL_LAUGH_SYLLABLE_MAX_LENGTH}
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                aria-label="Local laugh sound"
+                pattern="[A-Za-z]{1,4}"
+                onChange={(event) => {
+                  const next = event.currentTarget.value
+                    .normalize("NFKC")
+                    .replace(/[^\p{L}]/gu, "")
+                    .slice(0, BOT_LOCAL_LAUGH_SYLLABLE_MAX_LENGTH)
+                    .toLocaleLowerCase();
+                  onChange({
+                    ...normalizedProfile,
+                    localLaughSyllable: normalizeBotLocalLaughSyllable(next),
+                  });
+                }}
+              />
+            </label>
+            <label htmlFor="bot-voice-local-laugh-delimiter">
+              <span>Delimiter</span>
+              <input
+                id="bot-voice-local-laugh-delimiter"
+                type="text"
+                value={laughDelimiter}
+                placeholder="-"
+                maxLength={BOT_LOCAL_LAUGH_DELIMITER_MAX_LENGTH}
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                aria-label="Local laugh delimiter"
+                title="One punctuation mark, a space, or blank"
+                onChange={(event) => {
+                  const next = event.currentTarget.value.normalize("NFKC");
+                  onChange({
+                    ...normalizedProfile,
+                    localLaughDelimiter: normalizeBotLocalLaughDelimiter(
+                      next,
+                      "",
+                    ),
+                  });
+                }}
+              />
+            </label>
+          </div>
+          <div
+            className={styles.botVoiceLocalLaughSamples}
+            aria-label="Laugh samples"
+          >
+            {(
+              [
+                ["soft", "Chuckle"],
+                ["medium", "Laugh"],
+                ["hard", "Hard"],
+              ] as const
+            ).map(([intensity, label]) => (
+              <button
+                key={intensity}
+                type="button"
+                aria-label={`Preview ${label.toLocaleLowerCase()} laugh`}
+                title={`Preview ${label.toLocaleLowerCase()} laugh`}
+                disabled={!laughSyllable}
+                onClick={() => {
+                  const previewText = botLocalLaughSynthesisText({
+                    syllable: laughSyllable,
+                    delimiter: laughDelimiter,
+                    intensity,
+                  });
+                  if (!previewText) return;
+                  void onPreview(
+                    {
+                      ...normalizedProfile,
+                      localEnginePreference: "instant",
+                    },
+                    "english",
+                    previewText,
+                    {
+                      englishVoiceEngine: "builtin",
+                      cacheKey: `avatar-local-laugh:${laughSyllable}:${laughDelimiter}:${intensity}:${JSON.stringify(
+                        normalizedProfile,
+                      )}`,
+                    },
+                  );
+                }}
+              >
+                <Play size={12} strokeWidth={2.3} aria-hidden="true" />
+                {label}
+              </button>
+            ))}
+          </div>
+          <small>
+            Sound accepts 1–4 letters. Delimiter changes how each repetition
+            collides in Local Instant TTS.
+          </small>
         </section>
       ) : null}
       <section

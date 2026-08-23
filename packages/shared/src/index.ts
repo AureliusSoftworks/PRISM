@@ -825,9 +825,11 @@ export {
 } from "./audioVoice.js";
 
 export {
+  BOT_LOCAL_LAUGH_DELIMITER_MAX_LENGTH,
   BOT_LOCAL_LAUGH_SYLLABLE_MAX_LENGTH,
   botLocalLaughIntensityForCue,
   botLocalLaughSynthesisText,
+  normalizeBotLocalLaughDelimiter,
   normalizeBotLocalLaughSyllable,
   projectLocalWrittenLaughterForSynthesis,
   type BotLocalLaughIntensity,

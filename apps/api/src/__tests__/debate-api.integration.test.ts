@@ -1288,11 +1288,26 @@ describe("Debate API", () => {
     assert.equal(JSON.stringify(mystery).includes("culpritSeatId"), false);
     const notebookResponse = await owner.request(`/api/debates/${mystery.id}/notebook`);
     assert.equal(notebookResponse.status, 200);
-    assert.equal((await payload(notebookResponse)).notebook.pages[0].title, "Case Notes");
+    const mysteryNotebook = (await payload(notebookResponse)).notebook;
+    assert.equal(mysteryNotebook.version, 2);
+    assert.deepEqual(mysteryNotebook.leadAnnotations, []);
+    assert.deepEqual(mysteryNotebook.suspectNotes, []);
+    assert.deepEqual(mysteryNotebook.suspectPins, []);
     const crimeScene = mystery.formatState.format === "whodunnit"
       ? mystery.formatState.rooms.find((room) => room.id === mystery.formatState.crimeSceneRoomId)!
       : null;
     assert.ok(crimeScene?.activeRegionId);
+    const investigationResponse = await owner.request(
+      `/api/debates/${mystery.id}/mystery-action`,
+      jsonInit({
+        expectedRevision: mystery.revision,
+        idempotencyKey: "api:whodunnit:begin-investigation:0001",
+        action: "begin_investigation",
+        roomId: crimeScene.id,
+      }),
+    );
+    assert.equal(investigationResponse.status, 200);
+    mystery = (await payload(investigationResponse)).session as DebateSessionV1;
     const inspectedResponse = await owner.request(
       `/api/debates/${mystery.id}/mystery-action`,
       jsonInit({

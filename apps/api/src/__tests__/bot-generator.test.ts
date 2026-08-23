@@ -1003,9 +1003,12 @@ describe("PRISM bot generator", () => {
     assert.equal(capturedOptions[0]?.usagePurpose, "psychic_planning");
     assert.equal(capturedOptions[1]?.usagePurpose, "bot_generation");
     assert.equal(capturedOptions[1]?.reasoningEffort, "low");
-    assert.match(
-      provider.calls[1]?.at(-1)?.content ?? "",
-      /Private PRISM preparation notes follow/u,
+    assert.ok(
+      provider.calls[1]?.some(
+        (message) =>
+          message.role === "system" &&
+          /Private PRISM preparation notes follow/u.test(message.content),
+      ),
     );
   });
 

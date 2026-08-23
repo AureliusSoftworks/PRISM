@@ -149,10 +149,10 @@ test("compact Coffee seats keep authored thinking content instead of falling bac
   );
 });
 
-test("Coffee does not schedule a closed phase for the default blank blink", () => {
+test("Coffee supplies custom-eye identity when resolving the default blink", () => {
   assert.match(
     rendererSource,
-    /const faceBlinkDisabled = coffeeSeatBlinkKeepsFaceStill\(\s*normalizedFaceBlinkBar,\s*\);/u,
+    /const faceBlinkDisabled = coffeeSeatBlinkKeepsFaceStill\(\s*normalizedFaceBlinkBar,\s*\{ eyeCharacter: normalizedFaceEyeCharacter \},\s*\);/u,
   );
   assert.match(
     rendererSource,

@@ -2,7 +2,10 @@ import {
   normalizeBotVernacularId,
   type BotVernacularId,
 } from "./botVernacular.ts";
-import { normalizeBotLocalLaughSyllable } from "./localLaugh.ts";
+import {
+  normalizeBotLocalLaughDelimiter,
+  normalizeBotLocalLaughSyllable,
+} from "./localLaugh.ts";
 
 /** Account-wide voice mode. This is intentionally separate from BotVoicePreset,
  * which controls how a bot writes rather than how it sounds. */
@@ -670,6 +673,8 @@ export interface BotAudioVoiceProfileV2 {
   localReferenceId?: string | null;
   /** Authored one-to-four-letter laugh syllable for the Local Instant lane. */
   localLaughSyllable?: string | null;
+  /** Authored separator between repeated Local laugh syllables. */
+  localLaughDelimiter?: string;
   accentLocale?: string | null;
   accentMode?: LocalVoiceAccentMode;
   pronunciationBase?: LocalVoicePronunciationBase;
@@ -853,6 +858,7 @@ export interface BotLocalVoiceProfileV1 {
   systemVoiceName?: string | null;
   referenceId?: string | null;
   laughSyllable?: string | null;
+  laughDelimiter?: string;
   accent: {
     locale: string;
     mode: LocalVoiceAccentMode;
@@ -1439,6 +1445,7 @@ export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2: Readonly<BotAudioVoiceProfileV2
     resonance: 0,
     localEnginePreference: "inherit",
     localVoiceSource: "portable",
+    localLaughDelimiter: "-",
     accentLocale: "en-US",
     accentMode: "prefer-genuine",
     pronunciationBase: "follow-voice",
@@ -1462,6 +1469,7 @@ export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V3: Readonly<BotAudioVoiceProfileV3
       enginePreference: "inherit",
       source: "portable",
       archetypeId: "voice-1",
+      laughDelimiter: "-",
       accent: { locale: "en-US", mode: "prefer-genuine" },
       pronunciation: { base: "follow-voice" },
       speechprint: {
@@ -1914,6 +1922,7 @@ function flattenBotAudioVoiceProfileV3Record(
     localVoiceSource: local.source,
     localReferenceId: local.referenceId,
     localLaughSyllable: local.laughSyllable,
+    localLaughDelimiter: local.laughDelimiter,
     accentLocale: accent.locale,
     accentMode: accent.mode,
     pronunciationBase: pronunciation.base,
@@ -2011,6 +2020,10 @@ export function normalizeBotAudioVoiceProfileV1(
     record.localLaughSyllable,
     fallbackProfile.localLaughSyllable ?? null,
   );
+  const localLaughDelimiter = normalizeBotLocalLaughDelimiter(
+    record.localLaughDelimiter,
+    fallbackProfile.localLaughDelimiter ?? "-",
+  );
   const speechprintInfluence = normalizeLocalVoiceSpeechprintInfluence(
     record.speechprintInfluence,
     fallbackProfile.speechprintInfluence ?? "none",
@@ -2080,6 +2093,7 @@ export function normalizeBotAudioVoiceProfileV1(
       }
       : {}),
     ...(localLaughSyllable ? { localLaughSyllable } : {}),
+    localLaughDelimiter,
     accentLocale: normalizeLocalVoiceAccentLocale(
       localVoiceSource === "portable" && !systemVoiceName
         ? prismBuiltinEnglishVoice(baseVoiceId).locale
@@ -2314,6 +2328,7 @@ export function normalizeBotAudioVoiceProfileV3(
       ...(profile.localLaughSyllable
         ? { laughSyllable: profile.localLaughSyllable }
         : {}),
+      laughDelimiter: profile.localLaughDelimiter ?? "-",
       accent: {
         locale: normalizeLocalVoiceAccentLocale(
           profile.accentLocale,

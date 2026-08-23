@@ -1446,6 +1446,7 @@ describe("backup bot avatar face style", () => {
             corporality: 0.5,
             localEnginePreference: "inherit",
             localVoiceSource: "portable",
+            localLaughDelimiter: "-",
             openness: 0,
             premiumLilt: 0,
             premiumPace: 0,

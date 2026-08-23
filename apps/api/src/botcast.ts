@@ -12026,7 +12026,7 @@ function sanitizeUtteranceWithRepair(
     "iu",
   );
   const embeddedPeerLabelPattern = new RegExp(
-    `(?:^|[.!?…]["”'’)]*\\s+|["”'’)]\\s*)["“]?\\s*(?:${peerRole}${peerLabelOptions ? `|${peerLabelOptions}` : ""})\\s*:\\s*`,
+    `(?:[.!?…]["”'’)]*\\s+|["”'’)]\\s*)["“]?\\s*(?:${peerRole}${peerLabelOptions ? `|${peerLabelOptions}` : ""})\\s*:\\s*`,
     "iu",
   );
   if (
@@ -13226,10 +13226,18 @@ function botcastOpeningIntroFallback(args: {
   const handoffs: readonly string[] = briefQuestion
     ? [briefQuestion]
     : genericHandoffs;
+  const openingReplayKey = (line: string) =>
+    botcastSpokenTurnWithinBudgetV1(
+      line,
+      BOTCAST_OPENING_MAX_WORDS,
+      4,
+    )
+      .replace(/\s+([,.;:!?])/gu, "$1")
+      .replace(/\s+/gu, " ")
+      .trim()
+      .toLowerCase();
   const recentKeys = new Set(
-    (args.recentOpenings ?? []).map((line) =>
-      line.replace(/\s+/gu, " ").trim().toLowerCase(),
-    ),
+    (args.recentOpenings ?? []).map(openingReplayKey),
   );
   const seed = `signal-opening-fallback:${args.episode.id}:${args.host.id}`;
   const identityStart = stableHash(`${seed}:identity`) % identityOpenings.length;
@@ -13244,7 +13252,7 @@ function botcastOpeningIntroFallback(args: {
         handoffs.length
     ]!;
     const candidate = `${identity} ${handoff}`;
-    if (!recentKeys.has(candidate.replace(/\s+/gu, " ").trim().toLowerCase())) {
+    if (!recentKeys.has(openingReplayKey(candidate))) {
       opening = candidate;
       break;
     }
@@ -16647,25 +16655,27 @@ export async function advanceBotcastEpisode(
           ? `The final point I would leave with your listeners is this: ${topicWithPunctuation} Judge it by the choice it demands and the consequence that follows.`
           : silentGuestFallback ??
             guestRecoveryFallback);
-  const sanitizedGeneratedUtterance = sanitizeUtteranceWithRepair(
-    removeRepeatedBotcastAudienceHeardPrefix(
-      removeRepeatedBotcastAudienceHeardPrefix(
-        raw,
-        guestInterruption?.bridgeLine,
-      ),
-      cueDelivery === "redirect_host" ? hostRedirect?.spokenContent : undefined,
-    ),
-    fallback,
-    speaker.name,
-    peerAddressName,
-    speakerRole,
-    true,
-    speakerEternallyIntroduces,
-    Boolean(priorPairHistory),
-    recentSpeakerContents,
-    Boolean(enforcedDirectQuote),
-    enforcedDirectQuote ?? "",
-  );
+  const sanitizedGeneratedUtterance = picklesBeatKind
+    ? { content: raw, repairReason: null }
+    : sanitizeUtteranceWithRepair(
+        removeRepeatedBotcastAudienceHeardPrefix(
+          removeRepeatedBotcastAudienceHeardPrefix(
+            raw,
+            guestInterruption?.bridgeLine,
+          ),
+          cueDelivery === "redirect_host" ? hostRedirect?.spokenContent : undefined,
+        ),
+        fallback,
+        speaker.name,
+        peerAddressName,
+        speakerRole,
+        true,
+        speakerEternallyIntroduces,
+        Boolean(priorPairHistory),
+        recentSpeakerContents,
+        Boolean(enforcedDirectQuote),
+        enforcedDirectQuote ?? "",
+      );
   const generatedFalseNameRepairReason =
     activeFalseNameState &&
     !firstHostOpening &&
@@ -16696,6 +16706,7 @@ export async function advanceBotcastEpisode(
           : null
       : null;
   const generatedHostQuestionRepairReason =
+    !picklesBeatKind &&
     speakerRole === "host" &&
     episode.segment === "interview" &&
     !wrapUpCue &&
@@ -16711,6 +16722,20 @@ export async function advanceBotcastEpisode(
     !sanitizedGeneratedUtterance.repairReason &&
     !generatedFalseNameRepairReason &&
     !generatedHostClosingRepairReason &&
+    !botcastHostRageQuitIntent({
+      content: sanitizedGeneratedUtterance.content,
+      segment: episode.segment,
+      priorUtteranceCount: episode.messages.length,
+    }) &&
+    !botcastHostSignOffIntent({
+      content: sanitizedGeneratedUtterance.content,
+      segment: episode.segment,
+      priorUtteranceCount: episode.messages.length,
+    }) &&
+    botcastStripPrematureHostSignoff(
+      sanitizedGeneratedUtterance.content,
+      host.name,
+    ) === sanitizedGeneratedUtterance.content &&
     botcastHostUtteranceNeedsInterviewQuestion(
       sanitizedGeneratedUtterance.content,
     )
@@ -16797,7 +16822,12 @@ export async function advanceBotcastEpisode(
     !departureRequired &&
     !guestAlreadyDeparted &&
     !speakerReadsProducerQuote &&
-    silentPeerTurnCount === 0;
+    silentPeerTurnCount === 0 &&
+    !botcastHostSignOffIntent({
+      content: silentGuestAnswerSafeContent,
+      segment: episode.segment,
+      priorUtteranceCount: episode.messages.length,
+    });
   const prematureSignoffStrippedContent = prematureSignoffEligible
     ? botcastStripPrematureHostSignoff(
         silentGuestAnswerSafeContent,

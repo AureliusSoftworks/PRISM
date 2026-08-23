@@ -2997,7 +2997,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       signalControlRoomStep.body,
-      /Tab moves between Ask about… and Say this…[\s\S]*Enter sends whatever is filled[\s\S]*Enter again runs Interrupt guest now/u,
+      /Tab moves between Host note… and Say this…[\s\S]*Enter sends whatever is filled[\s\S]*Enter again runs Interrupt guest now/u,
     );
     assert.match(
       signalControlRoomStep.body,

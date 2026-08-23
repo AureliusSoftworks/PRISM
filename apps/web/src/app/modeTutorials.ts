@@ -1134,21 +1134,37 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> =
                       "Use for this bot assigns an audition only to the current draft. Save to Library separately bookmarks it in the private PRISM account library and also assigns it to the draft.",
                     ).replace(
                       "Voice is a required three-stage casting flow—1 Accent, 2 Feel, 3 Voice.",
-                      "Voice is a required three-stage casting flow—1 Accent, 2 Feel, 3 Voice. In Local, Laugh saves one short authored syllable and its play button auditions a medium Instant laugh without adding anything to chat.",
+                      "Voice is a required three-stage casting flow—1 Accent, 2 Feel, 3 Voice. In Local, Laugh combines a short authored sound with its delimiter; Chuckle, Laugh, and Hard audition the three Instant intensities without adding anything to chat.",
                     ),
                   }
                 : currentStep;
+            const neutralSignalComposerCopy =
+              mode === "botcast" &&
+              compactAvatarSpeechStep.heading === "Produce from the control room"
+                ? {
+                    ...compactAvatarSpeechStep,
+                    body: compactAvatarSpeechStep.body
+                      .replace(
+                        "lets you ask about a detail",
+                        "lets you send a private Host note with context, direction, or a question",
+                      )
+                      .replace(
+                        "Tab moves between Ask about… and Say this…",
+                        "Tab moves between Host note… and Say this…",
+                      ),
+                  }
+                : compactAvatarSpeechStep;
             return !DEBATE_STAGE_LAYOUT_TUTORIAL_ENABLED &&
               mode === "debate" &&
               step.heading === "Enter the Debate Studio"
               ? {
-                  ...compactAvatarSpeechStep,
-                  body: compactAvatarSpeechStep.body.replace(
+                  ...neutralSignalComposerCopy,
+                  body: neutralSignalComposerCopy.body.replace(
                     DEBATE_STAGE_LAYOUT_INTRO_COPY,
                     "",
                   ),
                 }
-              : compactAvatarSpeechStep;
+              : neutralSignalComposerCopy;
           }),
       },
     ]),

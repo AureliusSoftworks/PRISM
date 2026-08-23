@@ -1,4 +1,5 @@
 export const BOT_LOCAL_LAUGH_SYLLABLE_MAX_LENGTH = 4;
+export const BOT_LOCAL_LAUGH_DELIMITER_MAX_LENGTH = 1;
 
 export type BotLocalLaughIntensity = "soft" | "medium" | "hard";
 
@@ -11,6 +12,19 @@ export function normalizeBotLocalLaughSyllable(
   if (typeof value !== "string") return fallback;
   const normalized = value.normalize("NFKC").trim().toLocaleLowerCase();
   return /^\p{L}{1,4}$/u.test(normalized) ? normalized : fallback;
+}
+
+/** Keep authored laugh separators compact and safe for a single TTS phrase. */
+export function normalizeBotLocalLaughDelimiter(
+  value: unknown,
+  fallback = "-",
+): string {
+  if (typeof value !== "string") return fallback;
+  const normalized = value.normalize("NFKC");
+  if (normalized === "") return "";
+  return /^[\x20-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E]$/u.test(normalized)
+    ? normalized
+    : fallback;
 }
 
 export function botLocalLaughIntensityForCue(
@@ -44,14 +58,15 @@ export function botLocalLaughIntensityForCue(
 
 export function botLocalLaughSynthesisText(args: {
   syllable: unknown;
+  delimiter?: unknown;
   intensity: BotLocalLaughIntensity;
 }): string | null {
   const syllable = normalizeBotLocalLaughSyllable(args.syllable);
   if (!syllable) return null;
+  const delimiter = normalizeBotLocalLaughDelimiter(args.delimiter);
   const repetitions =
     args.intensity === "soft" ? 2 : args.intensity === "hard" ? 7 : 4;
-  const punctuation = args.intensity === "soft" ? "." : "!";
-  return `${Array.from({ length: repetitions }, () => syllable).join("-")}${punctuation}`;
+  return Array.from({ length: repetitions }, () => syllable).join(delimiter);
 }
 
 const RAW_WRITTEN_LAUGH_PATTERN =
@@ -64,9 +79,11 @@ const RAW_WRITTEN_LAUGH_PATTERN =
 export function projectLocalWrittenLaughterForSynthesis(
   value: unknown,
   authoredSyllable?: unknown,
+  authoredDelimiter?: unknown,
 ): string {
   if (typeof value !== "string" || !value) return "";
   const authored = normalizeBotLocalLaughSyllable(authoredSyllable);
+  const delimiter = normalizeBotLocalLaughDelimiter(authoredDelimiter);
   return value.replace(
     RAW_WRITTEN_LAUGH_PATTERN,
     (_match, prefix: string, run: string) => {
@@ -86,7 +103,7 @@ export function projectLocalWrittenLaughterForSynthesis(
       );
       const repetitions = Math.min(7, sourceRepetitions);
       const syllable = authored ?? inferred;
-      return `${prefix}${Array.from({ length: repetitions }, () => syllable).join("-")}`;
+      return `${prefix}${Array.from({ length: repetitions }, () => syllable).join(delimiter)}`;
     },
   );
 }

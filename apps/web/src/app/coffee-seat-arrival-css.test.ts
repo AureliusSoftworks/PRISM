@@ -491,7 +491,7 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /const faceBlinkDisabled = coffeeSeatBlinkKeepsFaceStill\(\s*normalizedFaceBlinkBar,?\s*\);/,
+      /const faceBlinkDisabled = coffeeSeatBlinkKeepsFaceStill\(\s*normalizedFaceBlinkBar,\s*\{ eyeCharacter: normalizedFaceEyeCharacter \},\s*\);/,
     );
     assert.match(
       coffeeSeatPlateEmojiSource,

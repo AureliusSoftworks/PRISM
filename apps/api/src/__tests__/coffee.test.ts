@@ -7248,8 +7248,12 @@ describe("Coffee group foundation", () => {
       { chatBodies },
     );
 
-    const messages = (chatBodies[0] as { messages?: Array<{ content?: string }> } | undefined)?.messages ?? [];
-    const prompt = messages.map((message) => message.content ?? "").join("\n");
+    const prompt = chatBodies
+      .flatMap((body) =>
+        (body as { messages?: Array<{ content?: string }> }).messages ?? [],
+      )
+      .map((message) => message.content ?? "")
+      .join("\n");
     assert.equal(turn.speakerBotId, BORIS.id);
     assert.match(prompt, /Candor \(strong\): Alice asks directly/u);
     assert.match(prompt, /This response only/u);
@@ -8117,7 +8121,12 @@ describe("Coffee group foundation", () => {
       { chatBodies },
     );
     assert.equal(asideTurn.speakerBotId, BORIS.id);
-    const asideMessage = asideTurn.conversation.messages.at(-1);
+    const asideMessage = [...asideTurn.conversation.messages]
+      .reverse()
+      .find(
+        (message) =>
+          message.role === "assistant" && message.botId === BORIS.id,
+      );
     assert.ok(asideMessage);
     // The mutter is an aside toward the thinker and carries the marker.
     assert.equal(asideMessage?.coffeeAside?.toBotId, ALICE.id);
@@ -16327,13 +16336,14 @@ describe("coffee social state helpers", () => {
     );
   });
 
-  it("tops off a seated bot cup and nudges social mood", async () => {
+  it("tops off a seated bot cup without inventing a Serve-mode mood boost", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
     seedCoffeeBot(db, userId, ALICE);
     seedCoffeeBot(db, userId, BORIS);
     const created = await createCoffeeConversation(db, userId, {
       groupBotIds: [ALICE.id, BORIS.id],
+      experienceMode: "serve",
     });
     await setCoffeeConversationTopic(db, userId, created.conversation.id, "Refill ritual");
     const socialBefore = created.conversation.coffeeBotSocialById?.[ALICE.id];
@@ -16350,23 +16360,8 @@ describe("coffee social state helpers", () => {
     assert.equal(topOff?.progressBefore, 0.62);
     assert.equal(topOff?.progressAfter, 0.04);
     assert.ok(topOff?.toppedOffAt);
-    const assertSocialValue = (actual: number | undefined, expected: number) => {
-      assert.ok(typeof actual === "number");
-      assert.ok(Math.abs(actual - expected) < 0.000001);
-    };
-    const expectedDisposition = clampCoffeeSocialValue(
-      (socialBefore?.disposition ?? 0.5) + 0.1
-    );
-    const expectedEngagement = clampCoffeeSocialValue(
-      (socialBefore?.engagement ?? 0.65) + 0.12
-    );
-    const expectedLeavePressure = clampCoffeeSocialValue(
-      (socialBefore?.leavePressure ?? 0.1) - 0.08
-    );
     const social = conversation.coffeeBotSocialById?.[ALICE.id];
-    assertSocialValue(social?.disposition, expectedDisposition);
-    assertSocialValue(social?.engagement, expectedEngagement);
-    assertSocialValue(social?.leavePressure, expectedLeavePressure);
+    assert.deepEqual(social, socialBefore);
     assert.ok(
       conversation.messages.some((message) =>
         message.coffeeReplayEvents?.some(
@@ -16381,13 +16376,7 @@ describe("coffee social state helpers", () => {
     const moodReplayEvent = conversation.messages
       .flatMap((message) => message.coffeeReplayEvents ?? [])
       .find((event) => event.kind === "mood" && event.botId === ALICE.id);
-    assert.ok(moodReplayEvent);
-    if (moodReplayEvent.kind !== "mood") {
-      assert.fail("Expected a top-off mood replay event.");
-    }
-    assertSocialValue(moodReplayEvent.social.disposition, expectedDisposition);
-    assertSocialValue(moodReplayEvent.social.engagement, expectedEngagement);
-    assertSocialValue(moodReplayEvent.social.leavePressure, expectedLeavePressure);
+    assert.equal(moodReplayEvent, undefined);
 
     const row = db
       .prepare(
@@ -16409,6 +16398,7 @@ describe("coffee social state helpers", () => {
     seedCoffeeBot(db, userId, BORIS);
     const created = await createCoffeeConversation(db, userId, {
       groupBotIds: [ALICE.id, BORIS.id],
+      experienceMode: "serve",
     });
     await setCoffeeConversationTopic(db, userId, created.conversation.id, "Refill ritual");
 
@@ -16433,6 +16423,7 @@ describe("coffee social state helpers", () => {
     seedCoffeeBot(db, userId, BORIS);
     const created = await createCoffeeConversation(db, userId, {
       groupBotIds: [ALICE.id, BORIS.id],
+      experienceMode: "serve",
     });
     await setCoffeeConversationTopic(db, userId, created.conversation.id, "Refill ritual");
 
@@ -16580,6 +16571,7 @@ describe("coffee social state helpers", () => {
     const created = await createCoffeeConversation(db, userId, {
       groupBotIds: [ALICE.id, BORIS.id],
       initialTopic: "No coffee",
+      experienceMode: "serve",
     });
     db.prepare(
       "UPDATE conversations SET coffee_power_plan_json = ? WHERE id = ? AND user_id = ?",

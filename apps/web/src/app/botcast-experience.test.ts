@@ -1652,7 +1652,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /Image context is coming later/u);
     assert.match(source, /className=\{styles\.producerImageAttach\}/u);
     assert.match(source, /BOTCAST_PRODUCER_DIRECT_QUOTE_MAX/u);
-    assert.match(source, /Private to the host\. Ask about steers the topic/u);
+    assert.match(source, /Private to the host\. Use this for context, direction, or a/u);
     assert.match(css, /\.producerCueActions/u);
     assert.match(css, /\.producerImageAttach/u);
     assert.doesNotMatch(source, /guide\s+both bots/u);
@@ -1739,7 +1739,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /BOTCAST_PRODUCER_DIRECT_QUOTE_MAX/u);
     assert.match(source, /className=\{styles\.producerImageAttach\}/u);
     assert.match(source, /Image context is coming later/u);
-    assert.match(source, /Private to the host\. Ask about steers the topic/u);
+    assert.match(source, /Private to the host\. Use this for context, direction, or a/u);
     assert.match(source, /as a message from the Producer/u);
     assert.match(
       source,
