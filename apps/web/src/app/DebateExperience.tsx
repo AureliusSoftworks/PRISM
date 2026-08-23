@@ -29,6 +29,8 @@ import {
   DEBATE_EVIDENCE_ITEM_MAX_COUNT,
   DEBATE_FORMAT_CATALOG,
   DEBATE_FORMALITY_SPECTRUM,
+  DEBATE_MYSTERY_PRESETS,
+  DEBATE_MYSTERY_SCHEMA_VERSION,
   DEBATE_JURY_SIZE,
   DEBATE_JUDGE_GAVEL_MESSAGE_MAX_LENGTH,
   DEBATE_MODERATOR_TITLE_MAX_LENGTH,
@@ -58,6 +60,7 @@ import {
   debateJurySeatCount,
   debateResolvedEvidenceText,
   debateFormalityDescriptor,
+  debateMysteryRecipeSeed,
   debateTitleForMotion,
   debateSilenceHoldDurationMs,
   debateSpokenText,
@@ -65,6 +68,7 @@ import {
   normalizeDebateVoicePerformanceCue,
   normalizeDebateModeratorTitle,
   resolveDebateForumRoundPlan,
+  resolveDebateMysteryConfig,
   voicePerformanceTextFromActionCues,
   voiceSpokenText,
   debateDebriefEligibleBots,
@@ -90,6 +94,10 @@ import {
   type DebateEvidenceItemV1,
   type DebateEvidenceSourceV1,
   type DebateFormalityId,
+  type DebateMysteryArtMode,
+  type DebateMysteryCaseCodeV1,
+  type DebateMysteryDifficulty,
+  type DebateMysteryPresetId,
   type DebateForumRoundMode,
   type DebateFormatId,
   type DebateMotionSlateV1,
@@ -103,6 +111,7 @@ import {
   type DebateSetupSuggestionV1,
   type DebateSideId,
   type DebateTurnaboutFormatStateV1,
+  type DebateWhodunnitCreateConfigV1,
   type DebateTurnaboutStatementV1,
   type BotPowerAvatarScaleMode,
   type BotPowerMuteReactionBeatV1,
@@ -187,7 +196,9 @@ import {
   loadDebateExhibitMagentaState,
 } from "./DebateExhibitMagentaControls";
 import { DebateEvidenceMentionPopover } from "./DebateEvidenceMentionPopover";
+import { DebateEvidenceDocument } from "./DebateEvidenceDocument";
 import styles from "./DebateExperience.module.css";
+import mysteryStyles from "./debateMystery.module.css";
 import { debateLiveCaptionPage } from "./debateLiveCaption";
 import { debateTranscriptTimelineEntries } from "./debateTranscriptTimeline";
 import type { DebateForumRole } from "./DebateForumScene";
@@ -511,6 +522,12 @@ import {
   type BotPickerGroup,
   type BotPickerGlyphRenderer,
 } from "./BotPicker";
+import {
+  distinctWhodunnitCastBotIds,
+  minimumWhodunnitBotsForCast,
+  randomizeWhodunnitCast,
+  randomizeWhodunnitCastAroundBot,
+} from "./debateMysteryCast";
 import { useAmbientBotVocalization } from "./ambient-bot-vocalization";
 import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
 import {
@@ -620,8 +637,8 @@ import IdentityPresentationBlackout from "./IdentityPresentationBlackout";
 import {
   DebateMysteryCompilationResume,
   DebateMysteryPlay,
-  DebateMysterySetup,
 } from "./DebateMysteryExperience";
+import { debateMysteryCourtEvidenceAssetUrls } from "./debateMysteryAssetLifecycle";
 import {
   debateIdentityAppearanceBotV1,
   debateIdentityPresentationChangeV1,
@@ -717,6 +734,8 @@ export interface DebateExperienceProps {
   bots: DebateBotSummary[];
   botGroups?: readonly BotPickerGroup[];
   initialBotIds?: string[];
+  /** Optional entry format for directed launches and local QA fixtures. */
+  initialFormat?: DebateFormatId;
   playerName: string;
   storageScopeId: string;
   preferredProvider: "local" | "openai" | "anthropic";
@@ -844,8 +863,100 @@ const DEBATE_STAGE_LAYOUT_AUTHORING_ENABLED = prismDeveloperAuthoringEnabled({
   NODE_ENV: process.env.NODE_ENV,
   NEXT_PUBLIC_PRISM_BRANCH: process.env.NEXT_PUBLIC_PRISM_BRANCH,
 });
-const DEBATE_ROWDINESS_SPECTRUM = [...DEBATE_FORMALITY_SPECTRUM].reverse();
 type DebateCastSlot = "moderator" | "forAdvocate" | "againstAdvocate";
+type DebateMysteryCastSeat =
+  | { kind: "suspect"; index: number }
+  | { kind: "prosecutor" }
+  | { kind: "defense" };
+
+interface InspectedMysterySeed {
+  version: number;
+  generatorVersion: number;
+  title: string;
+  floors: number;
+  totalRooms: number;
+  seats: Array<{
+    seatId: string;
+    exportHash: string | null;
+    suggestedBotId: string | null;
+  }>;
+}
+
+let mysteryRecipeNonceSerial = 0;
+
+function nextMysteryRecipeNonce(): string {
+  mysteryRecipeNonceSerial += 1;
+  return `recipe-${Date.now().toString(36)}-${mysteryRecipeNonceSerial.toString(36)}`;
+}
+
+function debateMysteryPresetSuspectCount(preset: DebateMysteryPresetId): number {
+  return DEBATE_MYSTERY_PRESETS.find((candidate) => candidate.id === preset)
+    ?.suspects ?? 4;
+}
+
+function fillDebateMysteryCast(
+  bots: readonly { id: string }[],
+  current: readonly string[],
+  count: number,
+  excluded: readonly string[] = [],
+): string[] {
+  const allowed = new Set(bots.map((bot) => bot.id));
+  const blocked = new Set(excluded);
+  const selected = current.filter(
+    (id, index) =>
+      allowed.has(id) && !blocked.has(id) && current.indexOf(id) === index,
+  );
+  for (const bot of bots) {
+    if (selected.length >= count) break;
+    if (!blocked.has(bot.id) && !selected.includes(bot.id)) selected.push(bot.id);
+  }
+  return selected.slice(0, count);
+}
+
+const DEBATE_ROWDINESS_SPECTRUM = [...DEBATE_FORMALITY_SPECTRUM].reverse();
+
+function DebateCourtFormalityControl(props: {
+  formality: DebateFormalityId;
+  onChange: (value: DebateFormalityId) => void;
+  tutorialTarget?: string;
+}): React.JSX.Element {
+  const descriptor = DEBATE_ROWDINESS_SPECTRUM.find(
+    (level) => level.id === props.formality,
+  )!;
+  const rowdinessIndex = DEBATE_ROWDINESS_SPECTRUM.findIndex(
+    (level) => level.id === props.formality,
+  );
+  const rowdinessProgress =
+    (Math.max(0, rowdinessIndex) /
+      Math.max(1, DEBATE_ROWDINESS_SPECTRUM.length - 1)) *
+    100;
+  return (
+    <div
+      className={styles.rowdinessControl}
+      data-rowdiness={props.formality}
+      data-tutorial-target={props.tutorialTarget}
+      style={{ "--debate-rowdiness-progress": `${rowdinessProgress}%` } as CSSProperties}
+    >
+      <div className={styles.rowdinessReadout}>
+        <span>Atmosphere</span>
+        <strong>{descriptor.title}</strong>
+        <small>{descriptor.summary}</small>
+      </div>
+      <div className={styles.rowdinessInstrument}>
+        <div className={styles.rowdinessEndpoints} aria-hidden="true">
+          <span>University Union</span><span>Daytime Showdown</span>
+        </div>
+        <div className={styles.rowdinessRange}>
+          <div className={styles.rowdinessTrack} aria-hidden="true">
+            <span>{DEBATE_ROWDINESS_SPECTRUM.map((level, index) => <i key={level.id} data-reached={index <= rowdinessIndex ? "true" : undefined} data-current={level.id === props.formality ? "true" : undefined} />)}</span>
+          </div>
+          <input type="range" min="0" max={DEBATE_ROWDINESS_SPECTRUM.length - 1} step="1" value={rowdinessIndex} aria-label="Debate atmosphere" aria-valuetext={`${descriptor.title}: ${descriptor.summary}`} onChange={(event) => { const next = DEBATE_ROWDINESS_SPECTRUM[Number(event.currentTarget.value)]; if (next) props.onChange(next.id); }} />
+        </div>
+        <p>Changes the room’s heat, pacing, cut-ins, and moderator pressure—never the facts or Personas.</p>
+      </div>
+    </div>
+  );
+}
 type DebateBotDirectedSetupAnchor = {
   botId: string;
   botName: string;
@@ -1773,20 +1884,21 @@ const DEBATE_LIVE_FOLEY_PRELOAD_URLS = [
   "/audio/voice-presence/breath-deliberate-02-v2.mp3",
 ];
 
-/**
- * Camera views swap their matte and layered foreground rasters through CSS
- * selectors, and CSS-referenced images are only fetched/decoded on first
- * paint — so the first cut into a view could show the new backdrop while its
- * foreground assets were still decoding. Warm every raster for the active
- * theme once, at mount, so every later cut lands fully dressed.
- */
+/** Camera cuts swap CSS rasters, which browsers otherwise decode only when the
+ * new selector first paints. The gallery walk-in owns this complete visual
+ * runway so no reveal can expose a partially dressed chamber. */
 const DEBATE_SCENE_RASTERS_BY_THEME: Record<"dark" | "light", string[]> = {
   dark: [
     "/debate/forum-dark.webp",
     "/debate/forum-dark-foreground.png",
+    "/debate/forum-light-mask.png",
+    "/debate/forum-light-mask-foreground.png",
     "/debate/moderator-dark.webp",
     "/debate/moderator-dark-foreground.png",
+    "/debate/moderator-light-mask.png",
+    "/debate/moderator-light-mask-foreground.png",
     "/debate/gallery-chamber-dark.webp",
+    "/debate/overview-table-dark.png",
   ],
   light: [
     "/debate/forum-light.webp",
@@ -1798,8 +1910,84 @@ const DEBATE_SCENE_RASTERS_BY_THEME: Record<"dark" | "light", string[]> = {
     "/debate/moderator-light-mask.png",
     "/debate/moderator-light-mask-foreground.png",
     "/debate/gallery-chamber-light.webp",
+    "/debate/overview-table-light.png",
   ],
 };
+
+const debateVisualAssetPreloadCache = new Map<string, Promise<void>>();
+
+function preloadDebateVisualAsset(url: string): Promise<void> {
+  if (typeof Image === "undefined") return Promise.resolve();
+  const cached = debateVisualAssetPreloadCache.get(url);
+  if (cached) return cached;
+  const pending = new Promise<void>((resolve) => {
+    const image = new Image();
+    let settled = false;
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      void image.decode().catch(() => undefined).finally(resolve);
+    };
+    image.decoding = "async";
+    image.onload = finish;
+    image.onerror = finish;
+    image.src = url;
+    if (image.complete) finish();
+  });
+  debateVisualAssetPreloadCache.set(url, pending);
+  return pending;
+}
+
+async function preloadDebateCourtEvidenceAssets(
+  session: DebateSessionV1,
+): Promise<void> {
+  await Promise.all(
+    debateMysteryCourtEvidenceAssetUrls(session).map(preloadDebateVisualAsset),
+  );
+}
+
+async function preloadDebateOpeningSceneAssets(args: {
+  moderatorColor: string | null;
+  theme: "dark" | "light";
+}): Promise<void> {
+  const gavelSources = [
+    `/debate/moderator-gavel-${args.theme}-down.png`,
+    `/debate/moderator-gavel-${args.theme}-up.png`,
+  ];
+  const [tintedGavelUrls] = await Promise.all([
+    Promise.all(
+      gavelSources.map((source) =>
+        magentaTintedRasterUrl(source, args.moderatorColor),
+      ),
+    ),
+    Promise.all(
+      [
+        ...DEBATE_SCENE_RASTERS_BY_THEME[args.theme],
+        ...gavelSources,
+      ].map(preloadDebateVisualAsset),
+    ),
+  ]);
+  await Promise.all(tintedGavelUrls.map(preloadDebateVisualAsset));
+}
+
+async function decodeMountedDebateStageImages(): Promise<void> {
+  if (typeof document === "undefined") return;
+  // Two passes catch authenticated-image fallbacks and the gavel blob URL,
+  // both of which can update one frame after the stage first mounts.
+  for (let pass = 0; pass < 2; pass += 1) {
+    await new Promise<void>((resolve) =>
+      window.requestAnimationFrame(() => resolve()),
+    );
+    const images = Array.from(
+      document.querySelectorAll<HTMLImageElement>(
+        '[data-debate-stage-viewport="live"] img',
+      ),
+    );
+    await Promise.all(
+      images.map((image) => image.decode().catch(() => undefined)),
+    );
+  }
+}
 
 function DebateForumLightMasks(props: {
   depth: "backdrop" | "foreground";
@@ -2738,7 +2926,11 @@ function debateArchiveMetaChips(
       session.mysteryRouteGrade
         ? gradeLabelForMysteryArchive(session.mysteryRouteGrade)
         : (session.mysteryProgress ?? "investigation").replace("_", " "),
-      "Investigator",
+      session.playerRole === "spectator"
+        ? "Spectator"
+        : session.playerRole === "participant"
+          ? "Participant"
+          : "Investigator",
     ];
   }
   const chips = [
@@ -2770,10 +2962,7 @@ function debateSessionIsMysteryTurnabout(
 }
 
 function debateSessionUsesFullBake(session: DebateSessionV1): boolean {
-  return (
-    session.playerRole === "spectator" ||
-    debateSessionIsMysteryTurnabout(session)
-  );
+  return session.playerRole === "spectator";
 }
 
 function debateFullBakeHasOpeningBuffer(session: DebateSessionV1): boolean {
@@ -2873,6 +3062,15 @@ function roleDescription(
   format: DebateFormatId,
   formality: DebateFormalityId,
 ): string {
+  if (format === "whodunnit") {
+    if (role === "judge") {
+      return "Unavailable — PRISM must rule from the sealed Case Bible.";
+    }
+    if (role === "participant") {
+      return "Investigate the mansion, file the theory, and prosecute the frozen public record yourself.";
+    }
+    return "Investigate as an observer, then watch both counsel bots argue the filed record.";
+  }
   if (format === "turnabout") {
     if (role === "judge") {
       return formality === "parliamentary"
@@ -4019,37 +4217,16 @@ function DebateEvidencePedestal({
             className={styles.evidencePedestalSprite}
           />
         ) : (
-          <span
-            className={styles.evidencePedestalDocument}
-            aria-hidden="true"
-            data-debate-evidence-document="true"
-            data-source-kind={evidenceSourcePropKind ?? undefined}
-            data-prop={
-              evidenceSourcePropKind === "url"
-                ? "envelope"
-                : evidenceSourcePropKind === "scholar"
-                  ? "folio"
-                  : "clipping"
-            }
-          >
-            <span
-              className={styles.evidencePedestalDocumentHardware}
-              aria-hidden="true"
+          evidenceSource && evidenceSourcePropKind ? (
+            <DebateEvidenceDocument
+              id={evidenceSource.id}
+              kind={evidenceSourcePropKind}
+              origin={debateEvidenceSourceHost(evidenceSource)}
+              title={evidenceSource.title}
+              snippet={evidenceSource.snippet}
+              rotationDeg={propRotationDeg}
             />
-            {evidenceSource ? (
-              <span className={styles.evidencePedestalDocumentDetails}>
-                <span className={styles.evidencePedestalDocumentOrigin}>
-                  {debateEvidenceSourceHost(evidenceSource)}
-                </span>
-                <strong className={styles.evidencePedestalDocumentTitle}>
-                  {evidenceSource.title}
-                </strong>
-                <span className={styles.evidencePedestalDocumentSnippet}>
-                  {evidenceSource.snippet}
-                </span>
-              </span>
-            ) : null}
-          </span>
+          ) : null
         )}
       </button>
     </section>
@@ -4251,7 +4428,9 @@ function debateBotPresentation(
       ? displayName
       : (identitySource?.name ?? displayName),
     identityLabel: identitySource
-      ? `Appearing as ${identitySource.name}`
+      ? shapeshifting
+        ? `Appearing as ${identitySource.name}`
+        : null
       : falseName
         ? `Believes: ${falseName}`
         : null,
@@ -4392,7 +4571,6 @@ export function DebateExperience(
     "live" | "replay"
   >("live");
   const [studioPanel, setStudioPanel] = useState<DebateStudioPanel>("motion");
-  const [mysterySetupOpen, setMysterySetupOpen] = useState(false);
   const [roomTuningOpen, setRoomTuningOpen] = useState(false);
   const [motionTuningOpen, setMotionTuningOpen] = useState(false);
   const [castTuningOpen, setCastTuningOpen] = useState(false);
@@ -4421,19 +4599,32 @@ export function DebateExperience(
     }, 160);
     return () => window.clearInterval(intervalId);
   }, [activeSession, view]);
+  const preloadOpeningVisualAssets = useCallback(
+    async (
+      session: DebateSessionV1,
+      isCurrent: () => boolean = () => true,
+    ): Promise<void> => {
+      await Promise.all([
+        preloadDebateOpeningSceneAssets({
+          moderatorColor: session.moderator.color,
+          theme: props.theme,
+        }),
+        preloadDebateCourtEvidenceAssets(session),
+      ]);
+      if (!isCurrent()) return;
+      await decodeMountedDebateStageImages();
+    },
+    [props.theme],
+  );
   useEffect(() => {
-    const rasters =
-      DEBATE_SCENE_RASTERS_BY_THEME[
-        props.theme === "light" ? "light" : "dark"
-      ];
-    for (const url of rasters) {
-      const image = new Image();
-      image.src = url;
-      void image.decode().catch(() => {
-        // Best-effort warm-up; a failed decode just falls back to lazy load.
-      });
-    }
-  }, [props.theme]);
+    if (view !== "baking" || !activeSession) return;
+    // Start immediately with the walk-in. Explicit opening flows await this
+    // same cached work before they lift the arrival mask.
+    void preloadDebateOpeningSceneAssets({
+      moderatorColor: activeSession.moderator.color,
+      theme: props.theme,
+    });
+  }, [activeSession, props.theme, view]);
   // Local watch clock for the arrival murmur: survives bake poll re-renders,
   // resets only when the player actually leaves the arrival screen.
   useEffect(() => {
@@ -4574,8 +4765,45 @@ export function DebateExperience(
     return acquirePrismLivingSession("debate", activeSession.id);
   }, [activeSession?.id, activeSession?.status, view]);
   const [topic, setTopic] = useState("");
-  const [format, setFormat] = useState<DebateFormatId>("forum");
+  const [format, setFormat] = useState<DebateFormatId>(
+    props.initialFormat ?? "forum",
+  );
   const [formality, setFormality] = useState<DebateFormalityId>("plainspoken");
+  const [mysteryPreset, setMysteryPreset] =
+    useState<DebateMysteryPresetId>("compact");
+  const [mysteryDifficulty, setMysteryDifficulty] =
+    useState<DebateMysteryDifficulty>("classic");
+  const [mysteryArtMode, setMysteryArtMode] =
+    useState<DebateMysteryArtMode>("bundled");
+  const [mysteryInspiration, setMysteryInspiration] = useState("");
+  const [mysteryNonce, setMysteryNonce] = useState("recipe-initial");
+  const [mysteryFloors, setMysteryFloors] = useState(1);
+  const [mysteryTotalRooms, setMysteryTotalRooms] = useState(5);
+  const [mysteryCustomSuspectCount, setMysteryCustomSuspectCount] = useState(4);
+  const [mysterySuspectSelection, setMysterySuspectSelection] = useState<
+    string[]
+  >(() => fillDebateMysteryCast(bots, [], 4));
+  const [mysteryProsecutorPartnerBotId, setMysteryProsecutorPartnerBotId] =
+    useState(() => bots.find((bot) => !mysterySuspectSelection.includes(bot.id))?.id ?? "");
+  const [mysteryRivalDefenseBotId, setMysteryRivalDefenseBotId] = useState(
+    () =>
+      bots.find(
+        (bot) =>
+          !mysterySuspectSelection.includes(bot.id) &&
+          bot.id !== mysteryProsecutorPartnerBotId,
+      )?.id ?? "",
+  );
+  const [activeMysteryCastSeat, setActiveMysteryCastSeat] =
+    useState<DebateMysteryCastSeat>({ kind: "suspect", index: 0 });
+  useEffect(() => {
+    setMysteryNonce(nextMysteryRecipeNonce());
+  }, []);
+  const [mysteryImportCode, setMysteryImportCode] = useState("");
+  const [inspectedMysterySeed, setInspectedMysterySeed] =
+    useState<InspectedMysterySeed | null>(null);
+  const [mysteryImportAssignments, setMysteryImportAssignments] = useState<
+    Record<string, string>
+  >({});
   const [forumRoundMode, setForumRoundMode] =
     useState<DebateForumRoundMode>("auto");
   const [forumRoundCount, setForumRoundCount] = useState(1);
@@ -4595,7 +4823,9 @@ export function DebateExperience(
   );
   const castPickerGridShellRef = useRef<HTMLDivElement | null>(null);
   const [castPickerGroupId, setCastPickerGroupId] = useState("all");
-  const [playerRole, setPlayerRole] = useState<DebatePlayerRole>("judge");
+  const [playerRole, setPlayerRole] = useState<DebatePlayerRole>(
+    props.initialFormat === "whodunnit" ? "participant" : "judge",
+  );
   const [participationDifficulty, setParticipationDifficulty] =
     useState<DebateParticipationDifficulty>(
       DEBATE_PARTICIPATION_DEFAULT_DIFFICULTY,
@@ -7132,13 +7362,68 @@ export function DebateExperience(
     ...DEBATE_PLAYER_PARTICIPANT_PRISM,
     name: playerName,
   };
+  const mysteryTargetSuspects = inspectedMysterySeed
+    ? inspectedMysterySeed.seats.length
+    : mysteryPreset === "custom"
+      ? mysteryCustomSuspectCount
+      : debateMysteryPresetSuspectCount(mysteryPreset);
+  const mysterySuspectBotIds = fillDebateMysteryCast(
+    bots,
+    mysterySuspectSelection,
+    mysteryTargetSuspects,
+    [mysteryProsecutorPartnerBotId, mysteryRivalDefenseBotId],
+  );
+  const mysteryCreateConfig: DebateWhodunnitCreateConfigV1 = {
+    version: DEBATE_MYSTERY_SCHEMA_VERSION,
+    preset: inspectedMysterySeed ? "custom" : mysteryPreset,
+    difficulty: mysteryDifficulty,
+    artMode: mysteryArtMode,
+    formality,
+    juryEnabled,
+    playerRole: playerRole === "spectator" ? "spectator" : "participant",
+    participationDifficulty:
+      playerRole === "participant" ? participationDifficulty : undefined,
+    inspiration: mysteryInspiration,
+    nonce: mysteryNonce,
+    ...(inspectedMysterySeed || mysteryPreset === "custom"
+      ? {
+          floors: inspectedMysterySeed?.floors ?? mysteryFloors,
+          totalRooms: inspectedMysterySeed?.totalRooms ?? mysteryTotalRooms,
+        }
+      : {}),
+    suspectBotIds: mysterySuspectBotIds,
+    prosecutorPartnerBotId: mysteryProsecutorPartnerBotId,
+    rivalDefenseBotId: mysteryRivalDefenseBotId,
+  };
+  let resolvedMysteryConfig: ReturnType<typeof resolveDebateMysteryConfig> | null = null;
+  let mysterySetupError: string | null = null;
+  try {
+    resolvedMysteryConfig = resolveDebateMysteryConfig(mysteryCreateConfig);
+  } catch (caught) {
+    mysterySetupError =
+      caught instanceof Error ? caught.message : "The mystery cast is incomplete.";
+  }
+  const mysteryCastRequirement = minimumWhodunnitBotsForCast(
+    mysteryTargetSuspects,
+  );
+  if (
+    format === "whodunnit" &&
+    distinctWhodunnitCastBotIds(bots).length < mysteryCastRequirement
+  ) {
+    mysterySetupError = `Whodunnit needs ${mysteryCastRequirement} Library bots for ${mysteryTargetSuspects} suspects, prosecutor partner, and rival defense.`;
+  }
+  const mysteryRecipeSeed = resolvedMysteryConfig
+    ? debateMysteryRecipeSeed(resolvedMysteryConfig)
+    : "Recipe Seed forms when the cast is complete";
   const moderatorBot =
-    playerRole === "judge"
+    format === "whodunnit" || playerRole === "judge"
       ? playerJudgeBot
       : (botById.get(cast.moderator) ?? null);
   const effectiveModeratorTitle = normalizeDebateModeratorTitle(moderatorTitle);
   const visibleModeratorTitle =
-    playerRole === "participant"
+    format === "whodunnit"
+      ? "PRISM · Judge & Casekeeper"
+      : playerRole === "participant"
       ? debateParticipantModeratorTitle(effectiveModeratorTitle)
       : effectiveModeratorTitle;
   const effectiveModeratorBotId = moderatorBot?.id ?? cast.moderator;
@@ -7149,6 +7434,9 @@ export function DebateExperience(
   const participantOpponentBotName =
     botById.get(cast[participantOpponentCastSlot])?.name ?? "Opponent";
   const selectableCastSlots: readonly DebateCastSlot[] =
+    format === "whodunnit"
+      ? []
+      :
     playerRole === "judge"
       ? ["forAdvocate", "againstAdvocate"]
       : playerRole === "participant"
@@ -7156,19 +7444,29 @@ export function DebateExperience(
         : ["moderator", "forAdvocate", "againstAdvocate"];
   const effectiveActiveCastSlot = selectableCastSlots.includes(activeCastSlot)
     ? activeCastSlot
-    : selectableCastSlots[0];
+    : (selectableCastSlots[0] ?? "forAdvocate");
   const castIds =
-    playerRole === "participant"
+    format === "whodunnit"
+      ? [
+          DEBATE_PLAYER_JUDGE_BOT_ID,
+          mysteryProsecutorPartnerBotId,
+          mysteryRivalDefenseBotId,
+          ...mysterySuspectBotIds,
+        ]
+      : playerRole === "participant"
       ? [effectiveModeratorBotId, cast[participantOpponentCastSlot]]
       : [effectiveModeratorBotId, cast.forAdvocate, cast.againstAdvocate];
   const castComplete =
-    castIds.every(Boolean) && new Set(castIds).size === castIds.length;
+    castIds.every(Boolean) &&
+    new Set(castIds).size === castIds.length &&
+    (format !== "whodunnit" || resolvedMysteryConfig !== null);
   const motionComplete = Boolean(
-    motion.motion.trim() &&
+    format === "whodunnit" ||
+    (motion.motion.trim() &&
     motion.forSide.label.trim() &&
     motion.forSide.brief.trim() &&
     motion.againstSide.label.trim() &&
-    motion.againstSide.brief.trim(),
+    motion.againstSide.brief.trim()),
   );
   const motionReveal = debateMotionRevealState(topic, motion);
   const moderatorHardMuted = moderatorBot?.hardMuted === true;
@@ -7193,9 +7491,10 @@ export function DebateExperience(
   const consentNeedsReconfirmation = checksNeedingReconfirmation.length > 0;
   const expectedRoleCheckCount = playerRole === "participant" ? 1 : 2;
   const roleChecksComplete =
-    roleChecks.length === expectedRoleCheckCount &&
+    format === "whodunnit" ||
+    (roleChecks.length === expectedRoleCheckCount &&
     declinedChecks.length === 0 &&
-    !consentNeedsReconfirmation;
+    !consentNeedsReconfirmation);
   // The judge never curates the record, so the Evidence step is not theirs to
   // complete — Prism prepares it out of view instead.
   const judgeOwnsHiddenEvidence = playerRole === "judge";
@@ -7203,21 +7502,14 @@ export function DebateExperience(
     motionComplete &&
     castComplete &&
     roleChecksComplete &&
-    (judgeOwnsHiddenEvidence
+    (format === "whodunnit" || (judgeOwnsHiddenEvidence
       ? !judgeEvidencePreparing
-      : evidenceDecisionMade) &&
-    !(playerRole === "participant" && format !== "forum");
+      : evidenceDecisionMade)) &&
+    !(playerRole === "participant" && format === "turnabout");
   const selectedPreset = DEBATE_SETUP_PRESETS.find(
     (preset) => preset.id === selectedPresetId,
   )!;
   const formalityDescriptor = debateFormalityDescriptor(formality);
-  const rowdinessIndex = DEBATE_ROWDINESS_SPECTRUM.findIndex(
-    (level) => level.id === formality,
-  );
-  const rowdinessProgress =
-    (Math.max(0, rowdinessIndex) /
-      Math.max(1, DEBATE_ROWDINESS_SPECTRUM.length - 1)) *
-    100;
   const effectivePresetId = derivedDebateSetupPresetId({
     selectedPresetId,
     format,
@@ -7227,6 +7519,7 @@ export function DebateExperience(
   });
   useEffect(() => {
     if (
+      format !== "forum" ||
       playerRole !== "participant" ||
       !motionComplete ||
       !castComplete ||
@@ -7273,6 +7566,7 @@ export function DebateExperience(
     cast,
     castComplete,
     effectiveModeratorBotId,
+    format,
     juryEnabled,
     motion,
     motionComplete,
@@ -7299,12 +7593,12 @@ export function DebateExperience(
   const surpriseJurySeatCount = predispositionPreview.filter(
     (entry) => entry.seat === "juror" && entry.status === "surprise",
   ).length;
-  const readinessCount = [
-    motionComplete,
-    castComplete,
-    roleChecksComplete,
-    evidenceDecisionMade,
-  ].filter(Boolean).length;
+  const readinessTarget = format === "whodunnit" ? 2 : 4;
+  const readinessCount = (
+    format === "whodunnit"
+      ? [resolvedMysteryConfig !== null, castComplete]
+      : [motionComplete, castComplete, roleChecksComplete, evidenceDecisionMade]
+  ).filter(Boolean).length;
   const debateCompanionBotIds = useMemo(
     () =>
       (playerRole === "participant"
@@ -7500,6 +7794,30 @@ export function DebateExperience(
     setSynopsisPreparingSessionId(null);
     setTopic("");
     setFormat("forum");
+    setMysteryPreset("compact");
+    setMysteryDifficulty("classic");
+    setMysteryArtMode("bundled");
+    setMysteryInspiration("");
+    setMysteryNonce(nextMysteryRecipeNonce());
+    setMysteryFloors(1);
+    setMysteryTotalRooms(5);
+    setMysteryCustomSuspectCount(4);
+    const initialMysterySuspects = fillDebateMysteryCast(bots, [], 4);
+    const initialMysteryProsecutor =
+      bots.find((bot) => !initialMysterySuspects.includes(bot.id))?.id ?? "";
+    setMysterySuspectSelection(initialMysterySuspects);
+    setMysteryProsecutorPartnerBotId(initialMysteryProsecutor);
+    setMysteryRivalDefenseBotId(
+      bots.find(
+        (bot) =>
+          !initialMysterySuspects.includes(bot.id) &&
+          bot.id !== initialMysteryProsecutor,
+      )?.id ?? "",
+    );
+    setActiveMysteryCastSeat({ kind: "suspect", index: 0 });
+    setMysteryImportCode("");
+    setInspectedMysterySeed(null);
+    setMysteryImportAssignments({});
     setForumRoundMode("auto");
     setForumRoundCount(1);
     setFormality("plainspoken");
@@ -7595,6 +7913,67 @@ export function DebateExperience(
     if (nextIncomplete) setActiveCastSlot(nextIncomplete);
   };
 
+  const mysterySelectedBotId =
+    activeMysteryCastSeat.kind === "suspect"
+      ? (mysterySuspectBotIds[activeMysteryCastSeat.index] ?? "")
+      : activeMysteryCastSeat.kind === "prosecutor"
+        ? mysteryProsecutorPartnerBotId
+        : mysteryRivalDefenseBotId;
+
+  const assignBotToMysterySeat = (botId: string): void => {
+    if (!botById.has(botId)) return;
+    if (preferredJurorBotIds.includes(botId)) return;
+    const reservedIds = new Set([
+      ...mysterySuspectBotIds,
+      mysteryProsecutorPartnerBotId,
+      mysteryRivalDefenseBotId,
+    ]);
+    reservedIds.delete(mysterySelectedBotId);
+    if (reservedIds.has(botId)) return;
+    if (activeMysteryCastSeat.kind === "suspect") {
+      const next = [...mysterySuspectBotIds];
+      next[activeMysteryCastSeat.index] = botId;
+      setMysterySuspectSelection(next);
+      if (inspectedMysterySeed) {
+        const seat = inspectedMysterySeed.seats[activeMysteryCastSeat.index];
+        if (seat) {
+          setMysteryImportAssignments((current) => ({
+            ...current,
+            [seat.seatId]: botId,
+          }));
+        }
+      }
+    } else if (activeMysteryCastSeat.kind === "prosecutor") {
+      setMysteryProsecutorPartnerBotId(botId);
+    } else {
+      setMysteryRivalDefenseBotId(botId);
+    }
+    setMysteryNonce(nextMysteryRecipeNonce());
+  };
+
+  const clearMysterySeat = (seat: DebateMysteryCastSeat): void => {
+    if (seat.kind === "suspect") {
+      const next = [...mysterySuspectBotIds];
+      next[seat.index] = "";
+      setMysterySuspectSelection(next);
+      if (inspectedMysterySeed) {
+        const importedSeat = inspectedMysterySeed.seats[seat.index];
+        if (importedSeat) {
+          setMysteryImportAssignments((current) => ({
+            ...current,
+            [importedSeat.seatId]: "",
+          }));
+        }
+      }
+    } else if (seat.kind === "prosecutor") {
+      setMysteryProsecutorPartnerBotId("");
+    } else {
+      setMysteryRivalDefenseBotId("");
+    }
+    setActiveMysteryCastSeat(seat);
+    setMysteryNonce(nextMysteryRecipeNonce());
+  };
+
   const clearCastSlot = (slot: DebateCastSlot): void => {
     if (!selectableCastSlots.includes(slot)) return;
     const nextCast = { ...cast, [slot]: "" };
@@ -7614,7 +7993,14 @@ export function DebateExperience(
       return;
     }
     const floorIds = new Set(
-      selectableCastSlots.map((slot) => cast[slot]).filter(Boolean),
+      (format === "whodunnit"
+        ? [
+            ...mysterySuspectBotIds,
+            mysteryProsecutorPartnerBotId,
+            mysteryRivalDefenseBotId,
+          ]
+        : selectableCastSlots.map((slot) => cast[slot])
+      ).filter(Boolean),
     );
     if (floorIds.has(botId)) return;
     if (
@@ -7650,6 +8036,29 @@ export function DebateExperience(
   };
 
   const randomizeCast = (): boolean => {
+    if (format === "whodunnit") {
+      const allocation = randomizeWhodunnitCast(
+        distinctWhodunnitCastBotIds(bots).map((id) => ({ id })),
+        mysteryTargetSuspects,
+      );
+      if (!allocation) return false;
+      setMysterySuspectSelection(allocation.suspectBotIds);
+      setMysteryProsecutorPartnerBotId(allocation.prosecutorPartnerBotId);
+      setMysteryRivalDefenseBotId(allocation.rivalDefenseBotId);
+      if (inspectedMysterySeed) {
+        setMysteryImportAssignments(
+          Object.fromEntries(
+            inspectedMysterySeed.seats.map((seat, index) => [
+              seat.seatId,
+              allocation.suspectBotIds[index] ?? "",
+            ]),
+          ),
+        );
+      }
+      setMysteryNonce(nextMysteryRecipeNonce());
+      setActiveMysteryCastSeat({ kind: "suspect", index: 0 });
+      return true;
+    }
     const nextCast =
       playerRole === "spectator"
         ? randomDebateCast(bots.map((bot) => bot.id))
@@ -7685,6 +8094,28 @@ export function DebateExperience(
           : "moderator",
     );
     return true;
+  };
+
+  const randomizeMysteryCastAroundBot = (anchor: {
+    botId: string;
+    botName: string;
+    direction: string;
+  }): void => {
+    const allocation = randomizeWhodunnitCastAroundBot(
+      distinctWhodunnitCastBotIds(bots).map((id) => ({ id })),
+      mysteryTargetSuspects,
+      anchor.botId,
+    );
+    if (!allocation) return;
+    setMysterySuspectSelection(allocation.suspectBotIds);
+    setMysteryProsecutorPartnerBotId(allocation.prosecutorPartnerBotId);
+    setMysteryRivalDefenseBotId(allocation.rivalDefenseBotId);
+    setMysteryInspiration(
+      anchor.direction.trim() ||
+        `A mystery centered on ${anchor.botName}'s world, relationships, and contradictions without assuming their guilt.`,
+    );
+    setMysteryNonce(nextMysteryRecipeNonce());
+    setActiveMysteryCastSeat({ kind: "suspect", index: 0 });
   };
 
   const stopStageAlignmentSoundCheck = (): void => {
@@ -8951,7 +9382,12 @@ export function DebateExperience(
   };
 
   const selectPlayerRole = (role: DebatePlayerRole): void => {
-    if (role === "participant" && format !== "forum") return;
+    if (
+      (role === "participant" && format === "turnabout") ||
+      (role === "judge" && format === "whodunnit")
+    ) {
+      return;
+    }
     setPlayerRole(role);
     setRoleChecks([]);
     if (role === "participant") {
@@ -12000,6 +12436,10 @@ export function DebateExperience(
       setActiveSession(session);
       setObserverPerspective("live");
       setView("baking");
+      const openingVisualAssetsReady = preloadOpeningVisualAssets(
+        session,
+        openingIsCurrent,
+      );
       // Let the live room mount first so local gavel/room Foley begins
       // preloading while the gallery visibly walks in and model/voice
       // preparation continues behind it.
@@ -12299,6 +12739,7 @@ export function DebateExperience(
           spectatorGalleryArrivalCompleteRef.current = true;
         }
       }
+      await openingVisualAssetsReady;
       if (!openingIsCurrent()) return;
       setSpectatorBake(null);
       spectatorBakeArtifactRef.current = null;
@@ -12675,6 +13116,27 @@ export function DebateExperience(
     setGenerateAllExhibitAssetsBeforeDebate(false);
     setTopic(draft.topic);
     setFormat(draft.format);
+    if (
+      session.format === "whodunnit" &&
+      session.formatState.format === "whodunnit"
+    ) {
+      const mystery = session.formatState.config;
+      setMysteryPreset(mystery.preset);
+      setMysteryDifficulty(mystery.difficulty);
+      setMysteryArtMode(mystery.artMode);
+      setMysteryInspiration(mystery.inspiration);
+      setMysteryNonce(mystery.nonce);
+      setMysteryFloors(mystery.floors);
+      setMysteryTotalRooms(mystery.totalRooms);
+      setMysteryCustomSuspectCount(mystery.suspectBotIds.length);
+      setMysterySuspectSelection([...mystery.suspectBotIds]);
+      setMysteryProsecutorPartnerBotId(mystery.prosecutorPartnerBotId);
+      setMysteryRivalDefenseBotId(mystery.rivalDefenseBotId);
+      setActiveMysteryCastSeat({ kind: "suspect", index: 0 });
+      setMysteryImportCode("");
+      setInspectedMysterySeed(null);
+      setMysteryImportAssignments({});
+    }
     setForumRoundMode(draft.forumRoundMode);
     setForumRoundCount(draft.forumRoundCount);
     setFormality(draft.formality);
@@ -12926,6 +13388,149 @@ export function DebateExperience(
     return titledMotion;
   };
 
+  const parsedMysteryImportCode = (): DebateMysteryCaseCodeV1 => {
+    try {
+      return JSON.parse(mysteryImportCode) as DebateMysteryCaseCodeV1;
+    } catch {
+      throw new Error("Paste the complete JSON Case Seed from another Archive.");
+    }
+  };
+
+  const inspectMysterySeed = async (): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await props.request<{ manifest: InspectedMysterySeed }>(
+        "/api/debates/mystery-seed/inspect",
+        requestBody({ caseCode: parsedMysteryImportCode() }),
+      );
+      const used = new Set<string>();
+      const assignments: Record<string, string> = {};
+      for (const seat of result.manifest.seats) {
+        const suggested = seat.suggestedBotId;
+        const fallback = bots.find(
+          (bot) =>
+            !used.has(bot.id) &&
+            bot.id !== mysteryProsecutorPartnerBotId &&
+            bot.id !== mysteryRivalDefenseBotId,
+        )?.id;
+        const botId =
+          suggested && botById.has(suggested) && !used.has(suggested)
+            ? suggested
+            : fallback;
+        if (botId) {
+          assignments[seat.seatId] = botId;
+          used.add(botId);
+        }
+      }
+      setInspectedMysterySeed(result.manifest);
+      setMysteryImportAssignments(assignments);
+      setMysterySuspectSelection(
+        result.manifest.seats
+          .map((seat) => assignments[seat.seatId] ?? "")
+          .filter(Boolean),
+      );
+      setActiveMysteryCastSeat({ kind: "suspect", index: 0 });
+      setStudioPanel("cast");
+    } catch (caught) {
+      setInspectedMysterySeed(null);
+      setMysteryImportAssignments({});
+      setError(
+        caught instanceof Error ? caught.message : "Case Seed inspection failed.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startMystery = async (): Promise<void> => {
+    if (!resolvedMysteryConfig || busy) return;
+    const frozenConfig: DebateWhodunnitCreateConfigV1 = {
+      ...mysteryCreateConfig,
+      suspectBotIds: [...mysteryCreateConfig.suspectBotIds],
+    };
+    setBusy(true);
+    setSetupRestoreNotice(null);
+    setError(null);
+    try {
+      if (!startCreateIdempotencyKeyRef.current) {
+        startCreateIdempotencyKeyRef.current = nextMutationKey(
+          inspectedMysterySeed ? "mystery-import" : "mystery-create",
+        );
+      }
+      const result = inspectedMysterySeed
+        ? await props.request<{ session: DebateSessionV1 }>(
+            "/api/debates/mystery-seed/import",
+            requestBody({
+              caseCode: parsedMysteryImportCode(),
+              seatAssignments: inspectedMysterySeed.seats.map((seat, index) => ({
+                seatId: seat.seatId,
+                botId:
+                  (mysteryImportAssignments[seat.seatId]?.trim() ||
+                    mysterySuspectBotIds[index]) ??
+                  "",
+              })),
+              prosecutorPartnerBotId: frozenConfig.prosecutorPartnerBotId,
+              rivalDefenseBotId: frozenConfig.rivalDefenseBotId,
+              formality: frozenConfig.formality,
+              juryEnabled: frozenConfig.juryEnabled,
+              playerRole: frozenConfig.playerRole,
+              participationDifficulty: frozenConfig.participationDifficulty,
+              preferredProvider:
+                props.modelOverride?.provider ?? props.preferredProvider,
+              modelOverride: props.modelOverride?.model ?? null,
+              responseMode: props.responseMode,
+              reasoningEffort: props.reasoningEffort,
+              turbo: props.turbo === true,
+              idempotencyKey: startCreateIdempotencyKeyRef.current,
+            }),
+          )
+        : await props.request<{ session: DebateSessionV1 }>(
+            "/api/debates",
+            requestBody({
+              format: "whodunnit",
+              whodunnit: frozenConfig,
+              playerRole: frozenConfig.playerRole,
+              participationDifficulty: frozenConfig.participationDifficulty,
+              preferredProvider:
+                props.modelOverride?.provider ?? props.preferredProvider,
+              modelOverride: props.modelOverride?.model ?? null,
+              responseMode: props.responseMode,
+              reasoningEffort: props.reasoningEffort,
+              turbo: props.turbo === true,
+              idempotencyKey: startCreateIdempotencyKeyRef.current,
+            }),
+          );
+      let session = result.session;
+      if (frozenConfig.artMode === "generated") {
+        try {
+          session = (
+            await props.request<{ session: DebateSessionV1 }>(
+              `/api/debates/${encodeURIComponent(session.id)}/mystery-assets/prepare`,
+              requestBody({}),
+            )
+          ).session;
+        } catch {
+          // Generated art is presentation-only; bundled rooms remain playable.
+        }
+      }
+      startCreateIdempotencyKeyRef.current = null;
+      activeSessionIdRef.current = session.id;
+      activeSessionRef.current = session;
+      setActiveSession(session);
+      setView("mystery");
+      void loadSessions();
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "PRISM could not compile the case.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const saveDebate = async (): Promise<void> => {
     if (!debateCanStart) return;
     setBusy(true);
@@ -12971,6 +13576,10 @@ export function DebateExperience(
 
   const startDebate = async (): Promise<void> => {
     if (!debateCanStart) return;
+    if (format === "whodunnit") {
+      await startMystery();
+      return;
+    }
     setBusy(true);
     setSetupRestoreNotice(null);
     setError(null);
@@ -13022,6 +13631,12 @@ export function DebateExperience(
         activeSessionIdRef.current = result.session.id;
         setActiveSession(result.session);
         setView("baking");
+        const openingVisualAssetsReady = preloadOpeningVisualAssets(
+          result.session,
+          () =>
+            mountedRef.current &&
+            activeSessionIdRef.current === result.session.id,
+        );
         setBusy(true);
         const bakePromise = runSpectatorProgressiveBake(result.session.id);
         const bakedSession = await bakePromise;
@@ -13043,6 +13658,11 @@ export function DebateExperience(
           onTick: (now) => setSpectatorGalleryArrivalNowMs(now),
         });
         if (arrival !== "complete") return;
+        await openingVisualAssetsReady;
+        if (
+          !mountedRef.current ||
+          activeSessionIdRef.current !== result.session.id
+        ) return;
         // Hold the gallery paused until the player presses Start.
         // presentationEventId stays null so progressive mid-bake holds still
         // count as awaitingFirstWatch (Start-from-beginning, not Resume delta).
@@ -14907,11 +15527,22 @@ export function DebateExperience(
             setSpectatorBake(result.session.liveBake ?? null);
             setSpectatorBakeStartedAt(new Date().toISOString());
             setView("baking");
+            const openingVisualAssetsReady = preloadOpeningVisualAssets(
+              result.session,
+              () =>
+                mountedRef.current &&
+                activeSessionIdRef.current === result.session.id,
+            );
             setBusy(true);
             const bakedSession = await runSpectatorProgressiveBake(
               result.session.id,
             );
             if (!mountedRef.current || !bakedSession) return;
+            await openingVisualAssetsReady;
+            if (
+              !mountedRef.current ||
+              activeSessionIdRef.current !== result.session.id
+            ) return;
             setSpectatorBake(null);
             setSpectatorBakeStartedAt(null);
             if (mountedRef.current) setBusy(false);
@@ -16883,6 +17514,44 @@ export function DebateExperience(
   };
 
   const renderForumReadout = (): React.JSX.Element => {
+    if (format === "whodunnit") {
+      return (
+        <section
+          className={styles.forumReadout}
+          aria-label="Whodunnit case schematic"
+          data-format="whodunnit"
+          data-ready={debateCanStart ? "true" : undefined}
+        >
+          <header><span>A Murder Mystery</span><strong>Whodunnit?</strong></header>
+          <div className={styles.forumCircuit}>
+            <span className={styles.forumBeam} aria-hidden="true" />
+            {[
+              ["Prosecution", mysteryProsecutorPartnerBotId, "#42d9ff"],
+              ["PRISM · Judge", DEBATE_PLAYER_JUDGE_BOT_ID, "#a995ff"],
+              ["Defense", mysteryRivalDefenseBotId, "#ff5f8f"],
+            ].map(([label, botId, fallback]) => {
+              const bot =
+                botId === DEBATE_PLAYER_JUDGE_BOT_ID
+                  ? playerJudgeBot
+                  : botById.get(botId) ?? null;
+              return (
+                <div
+                  className={styles.forumCircuitSeat}
+                  key={label}
+                  style={{ "--debate-seat-color": bot?.color ?? fallback } as CSSProperties}
+                >
+                  <span aria-hidden="true">{bot ? props.renderBotGlyph(bot.glyph, { size: 22, strokeWidth: 1.45 }) : "◇"}</span>
+                  <small>{label}</small><strong>{bot?.name ?? "Uncast"}</strong>
+                </div>
+              );
+            })}
+            <span className={styles.forumCircuitPrism} aria-hidden="true">◇</span>
+          </div>
+          <p>{mysteryInspiration.trim() || "A case PRISM will author around the frozen ensemble."}</p>
+          <small className={styles.formatReadout}>{mysteryTargetSuspects} suspects · {formalityDescriptor.title} · {mysteryDifficulty} · {juryEnabled ? "Jury on" : "Jury off"}</small>
+        </section>
+      );
+    }
     const seats = [
       {
         id: "for",
@@ -16980,7 +17649,7 @@ export function DebateExperience(
           <p className={styles.eyebrow}>PRISM / Debate</p>
           <h1>Debate Studio</h1>
           <span>
-            {format === "turnabout" ? "Turnabout" : "Forum"} ·{" "}
+            {format === "whodunnit" ? "Whodunnit" : format === "turnabout" ? "Turnabout" : "Forum"} ·{" "}
             {formalityDescriptor.title} · Prism fills the brief
           </span>
         </div>
@@ -17038,10 +17707,15 @@ export function DebateExperience(
               {
                 id: "motion" as const,
                 index: "01",
-                label: "Motion",
-                detail: motionComplete
-                  ? "Debate prepared"
-                  : "Shape the question",
+                label: format === "whodunnit" ? "Court" : "Motion",
+                detail:
+                  format === "whodunnit"
+                    ? resolvedMysteryConfig
+                      ? "Case recipe prepared"
+                      : "Shape the mystery"
+                    : motionComplete
+                      ? "Debate prepared"
+                      : "Shape the question",
                 complete: motionComplete,
                 tutorial: "debate-motion",
                 magic: motionRailMagic,
@@ -17081,7 +17755,9 @@ export function DebateExperience(
                 tutorial: "debate-evidence",
                 magic: evidenceRailMagic,
               },
-            ]
+            ].filter(
+              (panel) => format !== "whodunnit" || panel.id !== "evidence",
+            )
           ).map((panel) => (
             <PrismRefractTarget target={panel.magic} key={panel.id}>
               {(binding) => (
@@ -17159,13 +17835,15 @@ export function DebateExperience(
           >
             <span>Proceeding</span>
             <strong>
-              {debateCanStart ? "Ready" : `${readinessCount} of 4 ready`}
+              {debateCanStart
+                ? "Ready"
+                : `${readinessCount} of ${readinessTarget} ready`}
             </strong>
             <div aria-hidden="true">
               <i
                 style={
                   {
-                    "--debate-readiness": `${readinessCount / 4}`,
+                    "--debate-readiness": `${readinessCount / readinessTarget}`,
                   } as CSSProperties
                 }
               />
@@ -17173,7 +17851,11 @@ export function DebateExperience(
           </div>
         </nav>
         <div className={styles.dashboardDesk} data-studio-panel={studioPanel}>
-          {studioPanel === "motion" ? renderMotionStep() : null}
+          {studioPanel === "motion"
+            ? format === "whodunnit"
+              ? renderMysteryCourtStep()
+              : renderMotionStep()
+            : null}
           {studioPanel === "cast" ? renderCastStep() : null}
           {studioPanel === "evidence" && !judgeOwnsHiddenEvidence
             ? renderEvidenceStep()
@@ -17286,6 +17968,142 @@ export function DebateExperience(
     </main>
   );
 
+  const renderMysteryCourtStep = (): React.JSX.Element => (
+    <section
+      className={`${styles.setupPanel} ${styles.dashboardPanel}`}
+      data-debate-dashboard-section="motion"
+      data-whodunnit-court="true"
+    >
+      <div className={styles.setupCopy}>
+        <p className={styles.eyebrow}>01 / Court &amp; case</p>
+        <h2>Shape the mystery</h2>
+        <p>
+          Set the shared Court of Record, then define the mansion case PRISM
+          will freeze only when you compile.
+        </p>
+      </div>
+      <details
+        className={styles.roomTuning}
+        open={roomTuningOpen}
+        onToggle={(event) => setRoomTuningOpen(event.currentTarget.open)}
+        data-tutorial-target="debate-room"
+      >
+        <summary>
+          <span aria-hidden="true">◇</span>
+          <span>
+            <strong>Tune the court</strong>
+            <small>Whodunnit · {formalityDescriptor.title}</small>
+          </span>
+          <em>{roomTuningOpen ? "Done" : "Tune"}</em>
+        </summary>
+        <div className={styles.roomTuningBody}>
+          <DebateCourtFormalityControl
+            formality={formality}
+            onChange={chooseFormality}
+            tutorialTarget="debate-rowdiness"
+          />
+          <fieldset className={styles.formatPicker} data-tutorial-target="debate-format">
+            <legend>Debate format</legend>
+            {DEBATE_FORMAT_CATALOG.filter(
+              (option) => option.availability === "available",
+            ).map((option) => {
+              const disabled =
+                playerRole === "participant" && option.id === "turnabout";
+              return (
+                <label
+                  key={option.id}
+                  data-selected={format === option.id ? "true" : undefined}
+                  aria-disabled={disabled ? "true" : undefined}
+                >
+                  <input
+                    type="radio"
+                    name="debate-format"
+                    value={option.id}
+                    checked={format === option.id}
+                    disabled={disabled}
+                    onChange={() => {
+                      if (disabled || option.id === "whodunnit") return;
+                      if (option.id === "forum" || option.id === "turnabout") {
+                        setFormat(option.id);
+                        setRoleChecks([]);
+                      }
+                    }}
+                  />
+                  <strong>{option.name}<em>{option.productionName}</em></strong>
+                  <span>{option.summary}</span>
+                  <small>{option.cadence}</small>
+                </label>
+              );
+            })}
+          </fieldset>
+        </div>
+      </details>
+      <div className={mysteryStyles.setupSection} data-tutorial-target="whodunnit-preset">
+        <header>
+          <div><small>Case scale</small><h2>Choose the mansion</h2></div>
+          <span>{resolvedMysteryConfig?.actionBudget ?? "—"} actions</span>
+        </header>
+        <div className={mysteryStyles.presetGrid}>
+          {DEBATE_MYSTERY_PRESETS.map((option) => (
+            <button
+              type="button"
+              key={option.id}
+              data-selected={mysteryPreset === option.id ? "true" : undefined}
+              disabled={Boolean(inspectedMysterySeed)}
+              onClick={() => {
+                setMysteryPreset(option.id);
+                setMysteryFloors(option.floors);
+                setMysteryTotalRooms(option.rooms);
+                setMysteryCustomSuspectCount(option.suspects);
+                setMysteryNonce(nextMysteryRecipeNonce());
+              }}
+            >
+              <strong>{option.id[0]!.toUpperCase() + option.id.slice(1)}</strong>
+              <span>{option.floors} floor{option.floors === 1 ? "" : "s"} · {option.rooms} rooms</span>
+              <small>{option.suspects} suspects</small>
+            </button>
+          ))}
+          <button
+            type="button"
+            data-selected={mysteryPreset === "custom" ? "true" : undefined}
+            disabled={Boolean(inspectedMysterySeed)}
+            onClick={() => {
+              setMysteryPreset("custom");
+              setMysteryNonce(nextMysteryRecipeNonce());
+            }}
+          >
+            <strong>Custom</strong><span>1–3 floors · 5–18 rooms</span><small>4–8 suspects</small>
+          </button>
+        </div>
+        {mysteryPreset === "custom" && !inspectedMysterySeed ? (
+          <div className={mysteryStyles.advancedGrid}>
+            <label>Floors <input type="number" min={1} max={3} value={mysteryFloors} onChange={(event) => { setMysteryFloors(Math.max(1, Math.min(3, Number(event.currentTarget.value) || 1))); setMysteryNonce(nextMysteryRecipeNonce()); }} /></label>
+            <label>Rooms <input type="number" min={Math.max(5, mysteryCustomSuspectCount + 1)} max={18} value={mysteryTotalRooms} onChange={(event) => { setMysteryTotalRooms(Number(event.currentTarget.value)); setMysteryNonce(nextMysteryRecipeNonce()); }} /></label>
+            <label>Suspects <input type="number" min={4} max={8} value={mysteryCustomSuspectCount} onChange={(event) => { setMysteryCustomSuspectCount(Math.max(4, Math.min(8, Number(event.currentTarget.value) || 4))); setMysteryNonce(nextMysteryRecipeNonce()); }} /></label>
+          </div>
+        ) : null}
+      </div>
+      <div className={mysteryStyles.caseDial}>
+        <p className={styles.eyebrow}>Case direction</p>
+        <label>Inspiration <input value={mysteryInspiration} maxLength={240} onChange={(event) => { setMysteryInspiration(event.currentTarget.value); setMysteryNonce(nextMysteryRecipeNonce()); }} placeholder="Surprise me" /></label>
+        <label>Case difficulty <select value={mysteryDifficulty} onChange={(event) => { setMysteryDifficulty(event.currentTarget.value as DebateMysteryDifficulty); setMysteryNonce(nextMysteryRecipeNonce()); }}><option value="casual">Casual</option><option value="classic">Classic</option><option value="mastermind">Mastermind</option></select></label>
+        <label>Room art <select value={mysteryArtMode} onChange={(event) => { setMysteryArtMode(event.currentTarget.value as DebateMysteryArtMode); setMysteryNonce(nextMysteryRecipeNonce()); }}><option value="bundled">Bundled PRISM rooms</option><option value="generated">Generated reskins</option></select></label>
+        <button type="button" className={mysteryStyles.seedButton} onClick={() => setMysteryNonce(nextMysteryRecipeNonce())}><span>Recipe Seed</span><code>{mysteryRecipeSeed}</code><small>Change the recipe</small></button>
+      </div>
+      <details className={mysteryStyles.seedImport} data-tutorial-target="whodunnit-seed-import">
+        <summary>Import a shared Case Seed</summary>
+        <textarea value={mysteryImportCode} onChange={(event) => { setMysteryImportCode(event.currentTarget.value); setInspectedMysterySeed(null); setMysteryImportAssignments({}); }} placeholder="Paste the Case Seed JSON…" />
+        <button type="button" disabled={!mysteryImportCode.trim() || busy} onClick={() => void inspectMysterySeed()}>Inspect and map in Cast</button>
+        {inspectedMysterySeed ? <p><strong>{inspectedMysterySeed.title}</strong> · {inspectedMysterySeed.floors} floor{inspectedMysterySeed.floors === 1 ? "" : "s"} · {inspectedMysterySeed.totalRooms} rooms. Hidden seats are mapped with the shared Cast picker.</p> : null}
+      </details>
+      {mysterySetupError ? <p className={styles.error}>{mysterySetupError}</p> : null}
+      <div className={styles.panelAdvance}>
+        <span>{inspectedMysterySeed ? "Imported recipe inspected; map every seat on Cast." : "The recipe remains editable until Compile."}</span>
+        <button type="button" onClick={() => setStudioPanel("cast")}>Cast the case <span aria-hidden="true">→</span></button>
+      </div>
+    </section>
+  );
+
   const renderMotionStep = (): React.JSX.Element => (
     <section
       className={`${styles.setupPanel} ${styles.dashboardPanel}`}
@@ -17354,66 +18172,11 @@ export function DebateExperience(
               ) : null}
             </div>
           </div>
-          <div
-            className={styles.rowdinessControl}
-            data-rowdiness={formality}
-            data-tutorial-target="debate-rowdiness"
-            style={
-              {
-                "--debate-rowdiness-progress": `${rowdinessProgress}%`,
-              } as CSSProperties
-            }
-          >
-            <div className={styles.rowdinessReadout}>
-              <span>Atmosphere</span>
-              <strong>{formalityDescriptor.title}</strong>
-              <small>{formalityDescriptor.summary}</small>
-            </div>
-            <div className={styles.rowdinessInstrument}>
-              <div className={styles.rowdinessEndpoints} aria-hidden="true">
-                <span>University Union</span>
-                <span>Daytime Showdown</span>
-              </div>
-              <div className={styles.rowdinessRange}>
-                <div className={styles.rowdinessTrack} aria-hidden="true">
-                  <span>
-                    {DEBATE_ROWDINESS_SPECTRUM.map((level, index) => (
-                      <i
-                        key={level.id}
-                        data-reached={
-                          index <= rowdinessIndex ? "true" : undefined
-                        }
-                        data-current={
-                          level.id === formality ? "true" : undefined
-                        }
-                      />
-                    ))}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max={DEBATE_ROWDINESS_SPECTRUM.length - 1}
-                  step="1"
-                  value={rowdinessIndex}
-                  aria-label="Debate atmosphere"
-                  aria-valuetext={`${formalityDescriptor.title}: ${formalityDescriptor.summary}`}
-                  aria-describedby="debate-rowdiness-copy"
-                  onChange={(event) => {
-                    const next =
-                      DEBATE_ROWDINESS_SPECTRUM[
-                        Number(event.currentTarget.value)
-                      ];
-                    if (next) chooseFormality(next.id);
-                  }}
-                />
-              </div>
-              <p id="debate-rowdiness-copy">
-                Changes the room’s heat, pacing, cut-ins, and moderator
-                pressure—never the facts or Personas.
-              </p>
-            </div>
-          </div>
+          <DebateCourtFormalityControl
+            formality={formality}
+            onChange={chooseFormality}
+            tutorialTarget="debate-rowdiness"
+          />
           <fieldset
             className={styles.formatPicker}
             data-tutorial-target="debate-format"
@@ -17446,7 +18209,12 @@ export function DebateExperience(
                     onChange={() => {
                       if (disabled) return;
                       if (option.id === "whodunnit") {
-                        setMysterySetupOpen(true);
+                        setFormat("whodunnit");
+                        if (playerRole === "judge") setPlayerRole("participant");
+                        setFormality((current) =>
+                          current === "plainspoken" ? "structured" : current,
+                        );
+                        setCastTuningOpen(true);
                         setRoleChecks([]);
                         return;
                       }
@@ -17917,11 +18685,13 @@ export function DebateExperience(
       <div className={styles.castStepHeader}>
         <div className={styles.setupCopy}>
           <p className={styles.eyebrow}>
-            02 / {format === "turnabout" ? "Turnabout cast" : "Forum cast"}
+            02 / {format === "whodunnit" ? "Case cast" : format === "turnabout" ? "Turnabout cast" : "Forum cast"}
           </p>
           <h2>Seat every voice</h2>
           <p>
-            {playerRole === "participant"
+            {format === "whodunnit"
+              ? "Choose each suspect and both counsel seats from the same Library used by every Debate."
+              : playerRole === "participant"
               ? "PRISM holds your side. Cast one opposing bot and one Moderator/Judge; every turn on your side belongs to you."
               : playerRole === "spectator"
                 ? "Cast every seat, then watch the proceeding from the Gallery."
@@ -17932,16 +18702,29 @@ export function DebateExperience(
           type="button"
           className={styles.castRandomizeButton}
           onClick={randomizeCast}
-          disabled={bots.length < (playerRole === "spectator" ? 3 : 2)}
+          disabled={
+            bots.length <
+            (format === "whodunnit"
+              ? mysteryCastRequirement
+              : playerRole === "spectator"
+                ? 3
+                : 2)
+          }
           aria-label={
-            playerRole === "judge"
+            format === "whodunnit"
+              ? "Randomly assign all Whodunnit cast roles"
+              : playerRole === "judge"
               ? "Randomly select both advocates"
               : playerRole === "participant"
                 ? "Randomly select a Judge and opposing bot"
                 : "Randomly select all three actors"
           }
           title={
-            bots.length < (playerRole === "spectator" ? 3 : 2)
+            format === "whodunnit"
+              ? bots.length < mysteryCastRequirement
+                ? `At least ${mysteryCastRequirement} Library bots are required`
+                : "Randomly assign all suspects and counsel"
+              : bots.length < (playerRole === "spectator" ? 3 : 2)
               ? playerRole === "spectator"
                 ? "At least three Library bots are required"
                 : "At least two Library bots are required"
@@ -17965,9 +18748,64 @@ export function DebateExperience(
       </div>
       <div
         className={styles.castSlotGrid}
-        data-seat-count={selectableCastSlots.length}
+        data-seat-count={
+          format === "whodunnit"
+            ? mysteryTargetSuspects + 2
+            : selectableCastSlots.length
+        }
       >
-        {(
+        {format === "whodunnit"
+          ? [
+              ...mysterySuspectBotIds.map((botId, index) => ({
+                seat: { kind: "suspect", index } as const,
+                label: `Suspect ${index + 1}`,
+                botId,
+              })),
+              {
+                seat: { kind: "prosecutor" } as const,
+                label: "Prosecutor partner",
+                botId: mysteryProsecutorPartnerBotId,
+              },
+              {
+                seat: { kind: "defense" } as const,
+                label: "Rival defense",
+                botId: mysteryRivalDefenseBotId,
+              },
+            ].map(({ seat, label, botId }) => {
+              const bot = botById.get(botId) ?? null;
+              const active =
+                seat.kind === activeMysteryCastSeat.kind &&
+                (seat.kind !== "suspect" ||
+                  (activeMysteryCastSeat.kind === "suspect" &&
+                    seat.index === activeMysteryCastSeat.index));
+              return (
+                <article
+                  className={styles.castSlot}
+                  key={seat.kind === "suspect" ? `suspect-${seat.index}` : seat.kind}
+                  data-active={active ? "true" : undefined}
+                  data-filled={bot ? "true" : undefined}
+                  style={{ "--debate-cast-color": bot?.color ?? "#8f7cff" } as CSSProperties}
+                >
+                  <button
+                    type="button"
+                    className={styles.castSlotSelect}
+                    aria-pressed={active}
+                    data-bot-id={bot?.id}
+                    onClick={() => {
+                      setActiveJurySeatIndex(null);
+                      setActiveMysteryCastSeat(seat);
+                    }}
+                  >
+                    <span className={styles.castSlotGlyph} aria-hidden="true">
+                      {bot ? props.renderBotGlyph(bot.glyph, { size: 30, strokeWidth: 1.65 }) : "◇"}
+                    </span>
+                    <span><small>{label}</small><strong>{bot?.name ?? "Choose a bot"}</strong></span>
+                  </button>
+                  {bot ? <button type="button" className={styles.castSlotClear} aria-label={`Clear ${label}`} onClick={() => clearMysterySeat(seat)}>×</button> : null}
+                </article>
+              );
+            })
+          : (
           [
             ["moderator", visibleModeratorTitle],
             ["forAdvocate", motion.forSide.label || "For advocate"],
@@ -18051,7 +18889,11 @@ export function DebateExperience(
         <BotPickerToolbar
           searchValue={castPickerSearch}
           onSearchChange={setCastPickerSearch}
-          searchAriaLabel="Search bots for Debate"
+          searchAriaLabel={
+            format === "whodunnit"
+              ? "Search bots for Whodunnit"
+              : "Search bots for Debate"
+          }
           searchPlaceholder="Search the Library…"
           groups={debatePickerGroups}
           groupItems={bots}
@@ -18075,6 +18917,14 @@ export function DebateExperience(
                 ariaLabel={
                   activeJurySeatIndex !== null
                     ? `Bot for Jury seat ${activeJurySeatIndex + 1}`
+                    : format === "whodunnit"
+                    ? `Bot for ${
+                        activeMysteryCastSeat.kind === "suspect"
+                          ? `suspect ${activeMysteryCastSeat.index + 1}`
+                          : activeMysteryCastSeat.kind === "prosecutor"
+                            ? "prosecutor partner"
+                            : "rival defense"
+                      }`
                     : `Bot for ${
                         effectiveActiveCastSlot === "moderator"
                           ? visibleModeratorTitle
@@ -18095,6 +18945,8 @@ export function DebateExperience(
               const selected =
                 activeJurySeatIndex !== null
                   ? preferredJurorBotIds[activeJurySeatIndex] === bot.id
+                  : format === "whodunnit"
+                    ? mysterySelectedBotId === bot.id
                   : cast[effectiveActiveCastSlot] === bot.id;
               const otherFloorSlot = selectableCastSlots.find(
                 (slot) =>
@@ -18114,6 +18966,17 @@ export function DebateExperience(
                 : otherJurySeat
                   ? "Already on Jury"
                   : null;
+              const mysteryReserved =
+                format === "whodunnit" &&
+                !selected &&
+                [
+                  ...mysterySuspectBotIds,
+                  mysteryProsecutorPartnerBotId,
+                  mysteryRivalDefenseBotId,
+                ].includes(bot.id);
+              const effectiveDisabledReason = mysteryReserved
+                ? "Already cast"
+                : disabledReason;
               return (
                 <BotPickerTile
                   key={bot.id}
@@ -18136,15 +18999,24 @@ export function DebateExperience(
                   className={styles.castPickerTile}
                   directedSetupTarget={createBotDirectedSetupRefractTarget({
                     id: `debate-setup-anchor-${bot.id}-${
-                      activeJurySeatIndex ?? effectiveActiveCastSlot
+                      activeJurySeatIndex ??
+                      (format === "whodunnit"
+                        ? activeMysteryCastSeat.kind === "suspect"
+                          ? `suspect-${activeMysteryCastSeat.index}`
+                          : activeMysteryCastSeat.kind
+                        : effectiveActiveCastSlot)
                     }`,
-                    label: `Build a Debate around ${bot.name}`,
+                    label: `Build a ${format === "whodunnit" ? "Whodunnit" : "Debate"} around ${bot.name}`,
                     botId: bot.id,
                     botName: bot.name,
                     ownsPresentation: true,
-                    disabled: () => busy || Boolean(disabledReason),
-                    run: ({ botId, botName, direction }) =>
-                      generateNewDuelFromPrism(direction, {
+                    disabled: () => busy || Boolean(effectiveDisabledReason),
+                    run: ({ botId, botName, direction }) => {
+                      if (format === "whodunnit") {
+                        randomizeMysteryCastAroundBot({ botId, botName, direction });
+                        return;
+                      }
+                      return generateNewDuelFromPrism(direction, {
                         botId,
                         botName,
                         castSlot:
@@ -18154,18 +19026,19 @@ export function DebateExperience(
                         jurySeatIndex: activeJurySeatIndex,
                         playerRole,
                         playerSideId,
-                      }),
+                      });
+                    },
                   })}
                   buttonProps={{
                     role: "radio",
                     "aria-checked": selected,
-                    "aria-disabled": disabledReason ? true : undefined,
-                    "aria-label": disabledReason
-                      ? `${bot.name}, ${disabledReason}`
+                    "aria-disabled": effectiveDisabledReason ? true : undefined,
+                    "aria-label": effectiveDisabledReason
+                      ? `${bot.name}, ${effectiveDisabledReason}`
                       : `${bot.name}${selected ? ", selected" : ""}`,
                     // Keep pointer events so right-click / long-press still open
                     // the Library bot menu on already-cast chips.
-                    title: disabledReason ?? undefined,
+                    title: effectiveDisabledReason ?? undefined,
                     onPointerDown: (event) =>
                       props.onBotContextLongPressStart?.(event, bot.id),
                     onPointerUp: props.onBotContextLongPressEnd,
@@ -18181,9 +19054,13 @@ export function DebateExperience(
                       );
                     },
                     onClick: () => {
-                      if (disabledReason) return;
+                      if (effectiveDisabledReason) return;
                       if (activeJurySeatIndex !== null) {
                         assignBotToJurySeat(activeJurySeatIndex, bot.id);
+                        return;
+                      }
+                      if (format === "whodunnit") {
+                        assignBotToMysterySeat(bot.id);
                         return;
                       }
                       assignBotToCastSlot(effectiveActiveCastSlot, bot.id);
@@ -18266,10 +19143,11 @@ export function DebateExperience(
                 id: "debate-setup-moderator-title",
                 kind: "field",
                 label: "moderator title",
-                read: () => moderatorTitle,
+                read: () =>
+                  format === "whodunnit" ? visibleModeratorTitle : moderatorTitle,
                 preview: setModeratorTitle,
                 accept: setModeratorTitle,
-                disabled: () => busy,
+                disabled: () => busy || format === "whodunnit",
                 generate: ({ currentValue, rejectedValues, signal }) =>
                   generateDebateRefractField(
                     "debate.setup.moderatorTitle",
@@ -18282,17 +19160,31 @@ export function DebateExperience(
               {(binding) => (
                 <input
                   {...binding}
-                  value={moderatorTitle}
+                  value={
+                    format === "whodunnit"
+                      ? visibleModeratorTitle
+                      : moderatorTitle
+                  }
                   maxLength={DEBATE_MODERATOR_TITLE_MAX_LENGTH}
                   onChange={(event) =>
+                    format !== "whodunnit" &&
                     setModeratorTitle(event.currentTarget.value)
                   }
-                  onBlur={() => setModeratorTitle(effectiveModeratorTitle)}
+                  onBlur={() => {
+                    if (format !== "whodunnit") {
+                      setModeratorTitle(effectiveModeratorTitle);
+                    }
+                  }}
                   placeholder="Moderator, The House, The Court…"
+                  disabled={format === "whodunnit"}
                 />
               )}
             </PrismRefractTarget>
-            <small>The exact public title shown on the center seat.</small>
+            <small>
+              {format === "whodunnit"
+                ? "PRISM keeps the Judge seat because only the Casekeeper can read the sealed Case Bible."
+                : "The exact public title shown on the center seat."}
+            </small>
           </label>
           <fieldset className={styles.rolePicker}>
             <legend>Your role</legend>
@@ -18306,7 +19198,10 @@ export function DebateExperience(
                   name="debate-player-role"
                   value={role}
                   checked={playerRole === role}
-                  disabled={role === "participant" && format !== "forum"}
+                  disabled={
+                    (role === "participant" && format === "turnabout") ||
+                    (role === "judge" && format === "whodunnit")
+                  }
                   onChange={() => selectPlayerRole(role)}
                 />
                 <strong>{role.charAt(0).toUpperCase() + role.slice(1)}</strong>
@@ -18362,7 +19257,7 @@ export function DebateExperience(
                 recess rules remain identical.
               </small>
             </fieldset>
-            <label
+            {format !== "whodunnit" ? <label
               className={styles.juryToggle}
               data-enabled={rhetoricalGambitsEnabled ? "true" : undefined}
               data-tutorial-target="debate-rhetorical-gambits"
@@ -18384,7 +19279,7 @@ export function DebateExperience(
                   Custom steering remains available either way.
                 </small>
               </span>
-            </label>
+            </label> : null}
             </>
           ) : null}
           <label
@@ -18410,7 +19305,11 @@ export function DebateExperience(
               <i />
             </span>
             <span>
-              <strong>Four jurors + moderator</strong>
+              <strong>
+                {format === "whodunnit"
+                  ? "Four jurors + PRISM"
+                  : "Four jurors + moderator"}
+              </strong>
               <small>{juryRoleDescription(playerRole)}</small>
             </span>
             <b>{juryEnabled ? "Enabled" : "Off"}</b>
@@ -18473,7 +19372,7 @@ export function DebateExperience(
               </p>
             </div>
           ) : null}
-          {playerRole === "participant" ? (
+          {playerRole === "participant" && format !== "whodunnit" ? (
             <fieldset className={styles.sidePicker}>
               <legend>Your side</legend>
               {(["for", "against"] as const).map((sideId) => (
@@ -18695,7 +19594,12 @@ export function DebateExperience(
         </div>
       ) : null}
       <div className={styles.setupActions}>
-        {playerRole !== "participant" ? (
+        {format === "whodunnit" ? (
+          <span>
+            Judge stays with PRISM. Court, Jury, feedback, and every selected
+            bot freeze only when you compile.
+          </span>
+        ) : playerRole !== "participant" ? (
           <button
             type="button"
             onClick={swapAdvocates}
@@ -18711,8 +19615,9 @@ export function DebateExperience(
         <button
           type="button"
           className={styles.primaryButton}
-          disabled={!castComplete || busy}
+          disabled={format === "whodunnit" || !castComplete || busy}
           onClick={() => {
+            if (format === "whodunnit") return;
             if (roleChecksComplete) {
               // The judge has no Evidence step to advance into; the record is
               // already being prepared out of view.
@@ -18723,7 +19628,11 @@ export function DebateExperience(
           }}
           data-tutorial-target="debate-consent"
         >
-          {busy
+          {format === "whodunnit"
+            ? castComplete
+              ? "Cast ready"
+              : "Seat every role"
+            : busy
             ? consentNeedsReconfirmation
               ? "Reconfirming privately…"
               : "Checking privately…"
@@ -19698,18 +20607,33 @@ export function DebateExperience(
     >
       <div className={styles.setupCopy}>
         <p className={styles.eyebrow}>Proceeding card</p>
-        <h2>{debateCanStart ? "Ready when you are" : "Shape the room"}</h2>
+        <h2>
+          {format === "whodunnit"
+            ? debateCanStart
+              ? "Ready to compile"
+              : "Shape the case"
+            : debateCanStart
+              ? "Ready when you are"
+              : "Shape the room"}
+        </h2>
         <p>
-          One view of what will enter the chamber. Start freezes the room,
-          motion, cast, consent, model, Powers, and evidence.
+          {format === "whodunnit"
+            ? "Court and Cast share one editable Debate Studio draft. Compile freezes its recipe, seats, model, Effort, Turbo, Powers, and court contract."
+            : "One view of what will enter the chamber. Start freezes the room, motion, cast, consent, model, Powers, and evidence."}
         </p>
       </div>
       <div className={styles.reviewGrid}>
         <article data-ready={motionComplete ? "true" : undefined}>
-          <span>Motion</span>
-          <strong>{motion.motion || "Not yet shaped"}</strong>
+          <span>{format === "whodunnit" ? "Case" : "Motion"}</span>
+          <strong>
+            {format === "whodunnit"
+              ? `${mysteryTargetSuspects} suspects · ${mysteryDifficulty}`
+              : motion.motion || "Not yet shaped"}
+          </strong>
           <p>
-            {motionComplete
+            {format === "whodunnit"
+              ? mysteryInspiration.trim() || "Surprise me"
+              : motionComplete
               ? `${motion.forSide.label} ↔ ${motion.againstSide.label}`
               : "Give Prism an idea to prepare."}
           </p>
@@ -19734,11 +20658,13 @@ export function DebateExperience(
         <article data-ready="true">
           <span>Room</span>
           <strong>
-            {format === "turnabout" ? "Turnabout" : "Forum"} ·{" "}
+            {format === "whodunnit" ? "Whodunnit" : format === "turnabout" ? "Turnabout" : "Forum"} ·{" "}
             {formalityDescriptor.title}
           </strong>
           <p>
-            {format === "turnabout"
+            {format === "whodunnit"
+              ? `${mysteryPreset} case · ${mysteryArtMode} art`
+              : format === "turnabout"
               ? "Action-driven"
               : forumRoundMode === "auto"
                 ? `Auto · ${forumRoundPlan.count} ${forumRoundPlan.count === 1 ? "round" : "rounds"}`
@@ -19746,17 +20672,23 @@ export function DebateExperience(
             {debateSetupJuryReadout(juryEnabled, preferredJurorBotIds)}
           </p>
         </article>
-        <article data-ready={evidenceDecisionMade ? "true" : undefined}>
-          <span>Evidence</span>
+        <article data-ready={format === "whodunnit" || evidenceDecisionMade ? "true" : undefined}>
+          <span>{format === "whodunnit" ? "Recipe Seed" : "Evidence"}</span>
           <strong>
-            {evidenceDecisionMade
+            {format === "whodunnit"
+              ? mysteryRecipeSeed
+              : evidenceDecisionMade
               ? debateEvidenceItemCount(evidence) > 0 || evidence.notes.trim()
                 ? `${debateEvidenceItemCount(evidence)} item${debateEvidenceItemCount(evidence) === 1 ? "" : "s"}`
                 : "Empty packet"
               : "Choose or skip"}
           </strong>
           <p>
-            {evidenceDecisionMade
+            {format === "whodunnit"
+              ? inspectedMysterySeed
+                ? "Imported case · mapped through Cast"
+                : "Changes with every setup edit"
+              : evidenceDecisionMade
               ? evidence.notes.trim()
                 ? "Player notes included"
                 : "No player notes"
@@ -19781,7 +20713,9 @@ export function DebateExperience(
       <div className={styles.setupActions}>
         <span className={styles.launchThreshold}>
           {debateCanStart
-            ? `Start freezes the ${debatePublicMaterialName(formality).toLowerCase()}.`
+            ? format === "whodunnit"
+              ? "Compile freezes the complete Debate Studio draft."
+              : `Start freezes the ${debatePublicMaterialName(formality).toLowerCase()}.`
             : !motionComplete
               ? "Shape the motion to continue."
               : !castComplete
@@ -19790,15 +20724,17 @@ export function DebateExperience(
                   ? "Secure advocacy consent."
                   : "Choose evidence or continue without it."}
         </span>
-        <button
-          type="button"
-          className={styles.secondaryButton}
-          disabled={busy || !debateCanStart}
-          onClick={() => void saveDebate()}
-          data-tutorial-target="debate-save"
-        >
-          {busy ? "Saving…" : "Save Debate"}
-        </button>
+        {format !== "whodunnit" ? (
+          <button
+            type="button"
+            className={styles.secondaryButton}
+            disabled={busy || !debateCanStart}
+            onClick={() => void saveDebate()}
+            data-tutorial-target="debate-save"
+          >
+            {busy ? "Saving…" : "Save Debate"}
+          </button>
+        ) : null}
         <button
           type="button"
           className={styles.primaryButton}
@@ -19806,7 +20742,15 @@ export function DebateExperience(
           onClick={() => void startDebate()}
           data-tutorial-target="debate-start"
         >
-          {busy ? "Opening…" : "Start Debate"}
+          {busy
+            ? format === "whodunnit"
+              ? "Compiling…"
+              : "Opening…"
+            : format === "whodunnit"
+              ? inspectedMysterySeed
+                ? "Compile imported case"
+                : "Compile the case"
+              : "Start Debate"}
         </button>
       </div>
     </section>
@@ -26933,6 +27877,46 @@ export function DebateExperience(
       session.formatState.format === "turnabout" &&
       session.formatState.mysteryTrial
     ) {
+      if (session.playerRole === "participant") {
+        const openingVisualAssetsReady = preloadOpeningVisualAssets(
+          session,
+          () =>
+            mountedRef.current && activeSessionIdRef.current === session.id,
+        );
+        clearDebateDebrief();
+        selectDebateCameraMode("auto");
+        setTurnaboutObjecting(false);
+        setTurnaboutEvidenceSourceId("");
+        setObserverPerspective("live");
+        presentationStore.clear();
+        activeSessionIdRef.current = session.id;
+        activeSessionRef.current = session;
+        setActiveSession(session);
+        setView("live");
+        setBusy(false);
+        void (async () => {
+          await new Promise<void>((resolve) =>
+            window.requestAnimationFrame(() => resolve()),
+          );
+          if (!mountedRef.current || activeSessionIdRef.current !== session.id) {
+            return;
+          }
+          await openingVisualAssetsReady;
+          if (!mountedRef.current || activeSessionIdRef.current !== session.id) {
+            return;
+          }
+          await adoptSession(null, session, { playIntro: true });
+          void loadSessions();
+        })().catch((caught) => {
+          if (!mountedRef.current) return;
+          setError(
+            caught instanceof Error
+              ? caught.message
+              : "The Turnabout court could not be opened.",
+          );
+        });
+        return;
+      }
       const filedSession = session;
       setSpectatorBakeLiveFallback(false);
       setSpectatorBake(session.liveBake ?? null);
@@ -26954,6 +27938,11 @@ export function DebateExperience(
       activeSessionRef.current = session;
       setActiveSession(session);
       setView("baking");
+      const openingVisualAssetsReady = preloadOpeningVisualAssets(
+        session,
+        () =>
+          mountedRef.current && activeSessionIdRef.current === session.id,
+      );
       setBusy(true);
       void (async () => {
         try {
@@ -26977,11 +27966,24 @@ export function DebateExperience(
             onTick: (now) => setSpectatorGalleryArrivalNowMs(now),
           });
           if (arrival !== "complete" || !mountedRef.current) return;
+          await openingVisualAssetsReady;
+          if (
+            !mountedRef.current ||
+            activeSessionIdRef.current !== session.id
+          ) return;
           spectatorGalleryArrivalCompleteRef.current = true;
           setSpectatorBakeNeedsBuffering(false);
           setSpectatorBake(null);
           setSpectatorBakeStartedAt(null);
+          setView("live");
           setBusy(false);
+          await new Promise<void>((resolve) =>
+            window.requestAnimationFrame(() => resolve()),
+          );
+          if (
+            !mountedRef.current ||
+            activeSessionIdRef.current !== session.id
+          ) return;
           await adoptSession(filedSession, bakedSession, { playIntro: true });
           void loadSessions();
         } catch (caught) {
@@ -27114,20 +28116,7 @@ export function DebateExperience(
     turbo: props.turbo,
     modelOverride: props.modelOverride,
   } as const;
-  const experience = mysterySetupOpen ? (
-    <DebateMysterySetup
-      {...mysterySharedProps}
-      onCancel={() => setMysterySetupOpen(false)}
-      onCreated={(session) => {
-        activeSessionIdRef.current = session.id;
-        activeSessionRef.current = session;
-        setActiveSession(session);
-        setMysterySetupOpen(false);
-        setView("mystery");
-        void loadSessions();
-      }}
-    />
-  ) : view === "mystery" &&
+  const experience = view === "mystery" &&
     activeSession?.format === "whodunnit" &&
     activeSession.formatState.format === "whodunnit" ? (
     activeSession.formatState.playPhase === "compiling" ? <DebateMysteryCompilationResume

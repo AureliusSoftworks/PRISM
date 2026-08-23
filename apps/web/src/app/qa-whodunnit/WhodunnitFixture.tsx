@@ -1,16 +1,21 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import {
   compileDeterministicDebateMystery,
   projectDebateMysteryCase,
   resolveDebateMysteryConfig,
+  type DebateWhodunnitFormatStateV1,
   type DebateSessionV1,
 } from "@localai/shared";
 import {
   DebateMysteryPlay,
   type MysteryBotSummary,
 } from "../DebateMysteryExperience";
+import {
+  DebateExperience,
+  type DebateBotSummary,
+} from "../DebateExperience";
 
 const BOTS: MysteryBotSummary[] = [
   ["bot-1", "Mara Voss", "#d783ff", "◆"],
@@ -27,7 +32,7 @@ const BOTS: MysteryBotSummary[] = [
   hardMuted: false,
 }));
 
-function fixtureSession(): DebateSessionV1 {
+function fixtureSession(theoryMode = false): DebateSessionV1 {
   const config = resolveDebateMysteryConfig({
     version: 1,
     preset: "compact",
@@ -60,6 +65,17 @@ function fixtureSession(): DebateSessionV1 {
     ...projected,
     caseTitle: "The Prism at Midnight",
     currentRoomId: currentSuspect.roomId!,
+    ...(theoryMode ? {
+      playPhase: "theory" as const,
+      actionsRemaining: 0,
+      metSuspectSeatIds: projected.suspects.slice(0, 2).map((suspect) => suspect.seatId),
+      testimony: [{
+        id: "qa-testimony-clock",
+        speakerSeatId: currentSuspect.seatId,
+        exactQuote: "The hall clock stopped before the storm reached the east windows.",
+        discovered: true,
+      }],
+    } : {}),
     rooms: projected.rooms.map((room) => visibleRoomIds.has(room.id)
       ? { ...room, discovered: true }
       : room),
@@ -108,9 +124,41 @@ function fixtureSession(): DebateSessionV1 {
   };
 }
 
-export function WhodunnitFixture(): React.JSX.Element {
-  const initialSession = useMemo(() => fixtureSession(), []);
-  const [session, setSession] = useState(initialSession);
+export function WhodunnitFixture({
+  setupMode = false,
+  theoryMode = false,
+}: {
+  setupMode?: boolean;
+  theoryMode?: boolean;
+}): React.JSX.Element {
+  const [session, setSession] = useState(() => fixtureSession(theoryMode));
+
+  if (setupMode) {
+    return (
+      <DebateExperience
+        bots={BOTS as DebateBotSummary[]}
+        initialFormat="whodunnit"
+        playerName="QA Investigator"
+        storageScopeId="qa-whodunnit"
+        theme="dark"
+        audioEnabled={false}
+        audioVolume={0}
+        preferredProvider="local"
+        preferredImageProvider="local"
+        responseMode="local"
+        graphicsQuality="medium"
+        onExit={() => undefined}
+        request={async <T,>(path: string): Promise<T> => {
+          if (path === "/api/debates") return { sessions: [] } as T;
+          if (path.startsWith("/api/presence-beats")) return { beats: [] } as T;
+          throw new Error("The visual setup fixture does not compile cases.");
+        }}
+        renderBotGlyph={(glyph, options) => (
+          <span className={options?.className} aria-hidden="true">{glyph ?? "◇"}</span>
+        )}
+      />
+    );
+  }
 
   return (
     <DebateMysteryPlay
@@ -123,7 +171,7 @@ export function WhodunnitFixture(): React.JSX.Element {
       audioVolume={0}
       preferredProvider="local"
       responseMode="local"
-      request={async <T,>(path: string): Promise<T> => {
+      request={async <T,>(path: string, options?: RequestInit): Promise<T> => {
         if (path.endsWith("/notebook")) {
           return {
             notebook: {
@@ -134,6 +182,27 @@ export function WhodunnitFixture(): React.JSX.Element {
               suspectPins: [],
             },
           } as T;
+        }
+        if (path.endsWith("/mystery-action") && typeof options?.body === "string") {
+          const action = JSON.parse(options.body) as { action?: string; roomId?: string };
+          if (action.action === "begin_investigation" && action.roomId) {
+            const formatState = session.formatState as DebateWhodunnitFormatStateV1;
+            return {
+              session: {
+                ...session,
+                revision: session.revision + 1,
+                formatState: {
+                  ...formatState,
+                  activeActivity: {
+                    kind: "investigation",
+                    roomId: action.roomId,
+                    startedAt: new Date().toISOString(),
+                    actionCommitted: false,
+                  },
+                },
+              },
+            } as T;
+          }
         }
         throw new Error("The visual fixture does not perform case mutations.");
       }}

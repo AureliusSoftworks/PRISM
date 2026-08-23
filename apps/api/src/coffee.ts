@@ -21005,6 +21005,7 @@ async function generateCoffeeBotReply(args: {
         replyText,
         originalIdentityMirrorState,
         originalIdentityCorrectionRequired,
+        { believedSelfName: activeFalseNameState?.believedName },
       ),
       replyCaps.tableReplyMaxChars,
     );

@@ -31,6 +31,10 @@ const source = readFileSync(
   fileURLToPath(new URL("./DebateExperience.tsx", import.meta.url)),
   "utf8",
 );
+const evidenceDocumentSource = readFileSync(
+  fileURLToPath(new URL("./DebateEvidenceDocument.tsx", import.meta.url)),
+  "utf8",
+);
 const css = readFileSync(
   fileURLToPath(new URL("./DebateExperience.module.css", import.meta.url)),
   "utf8",
@@ -575,7 +579,7 @@ describe("Debate experience", () => {
     assert.match(source, /deferStart:\s*true/u);
     assert.match(source, /data-tutorial-target="debate-save"/u);
     assert.match(source, /debateSessionAwaitingDeferredStart/u);
-    assert.match(source, /data-tutorial-target="debate-rowdiness"/u);
+    assert.match(source, /tutorialTarget="debate-rowdiness"/u);
     assert.match(source, /aria-label="Debate atmosphere"/u);
     assert.match(source, /data-tutorial-target="debate-rounds"/u);
     assert.match(source, /aria-label="Forum rebuttal rounds"/u);
@@ -1148,8 +1152,8 @@ describe("Debate experience", () => {
     );
   });
 
-  it("keeps Forum default while exposing a real Turnabout format contract", () => {
-    assert.match(source, /useState<DebateFormatId>\("forum"\)/u);
+  it("keeps Forum default while exposing real Turnabout and Whodunnit format contracts", () => {
+    assert.match(source, /props\.initialFormat \?\? "forum"/u);
     assert.match(source, /DEBATE_FORMAT_CATALOG\.filter/u);
     assert.match(source, /data-tutorial-target="debate-format"/u);
     assert.match(source, /option\.productionName/u);
@@ -1161,6 +1165,18 @@ describe("Debate experience", () => {
     assert.match(source, /const disabled =[\s\S]{0,120}participantForumOnly/u);
     assert.doesNotMatch(source, />\s*Coming later\s*</u);
     assert.match(source, /if \(disabled\) return/u);
+    assert.match(
+      source,
+      /if \(option\.id === "whodunnit"\) \{[\s\S]{0,100}setFormat\("whodunnit"\)/u,
+    );
+    assert.doesNotMatch(source, /setMysterySetupOpen\(true\)/u);
+    assert.match(source, /format === "whodunnit" \? "Court" : "Motion"/u);
+    assert.match(source, /<BotPickerToolbar/u);
+    assert.match(source, /mysterySuspectBotIds\.map/u);
+    assert.match(source, /const frozenConfig: DebateWhodunnitCreateConfigV1/u);
+    assert.match(source, /whodunnit: frozenConfig/u);
+    assert.match(source, /session\.formatState\.config/u);
+    assert.match(source, /setMysteryProsecutorPartnerBotId\(mystery\.prosecutorPartnerBotId\)/u);
     assert.match(source, /format: next\.format/u);
     assert.match(source, /\/turnabout-action/u);
     assert.match(source, /submitTurnaboutAction\("press"/u);
@@ -1320,7 +1336,7 @@ describe("Debate experience", () => {
     assert.match(source, /debateAdvocacyConsentMatchesSelection/u);
     assert.match(source, /consentNeedsReconfirmation/u);
     assert.match(source, /props\.responseMode/u);
-    assert.match(source, /data-tutorial-target="debate-rowdiness"/u);
+    assert.match(source, /tutorialTarget="debate-rowdiness"/u);
     assert.match(source, /aria-label="Debate atmosphere"/u);
     assert.match(source, /University Union/u);
     assert.match(source, /Daytime Showdown/u);
@@ -1531,7 +1547,7 @@ describe("Debate experience", () => {
     assert.match(source, /aria-pressed=\{studioPanel === panel\.id\}/u);
     assert.match(
       source,
-      /studioPanel === "motion" \? renderMotionStep\(\) : null/u,
+      /studioPanel === "motion"[\s\S]{0,100}format === "whodunnit"[\s\S]{0,100}renderMysteryCourtStep\(\)[\s\S]{0,100}renderMotionStep\(\)/u,
     );
     assert.match(
       source,
@@ -1571,7 +1587,7 @@ describe("Debate experience", () => {
     assert.match(source, /onClick=\{randomizeCast\}/u);
     assert.match(
       source,
-      /disabled=\{bots\.length < \(playerRole === "spectator" \? 3 : 2\)\}/u,
+      /format === "whodunnit"[\s\S]{0,100}mysteryCastRequirement[\s\S]{0,100}playerRole === "spectator"/u,
     );
     assert.match(
       source,
@@ -2450,7 +2466,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /disabled=\{role === "participant" && format !== "forum"\}/u,
+      /\(role === "participant" && format === "turnabout"\)[\s\S]{0,100}\(role === "judge" && format === "whodunnit"\)/u,
     );
     assert.match(source, /function debateParticipantModeratorTitle/u);
     assert.match(source, /`\$\{normalized\} · Judge`/u);
@@ -2459,7 +2475,6 @@ describe("Debate experience", () => {
       /\.botIdentityPosition\[data-participant-proxy="true"\] \.botIdentityPlate/u,
     );
     assert.doesNotMatch(source, /Pass to partner/u);
-    assert.doesNotMatch(source, /partner/iu);
     assert.doesNotMatch(source, /challenge_participant_partner/u);
     assert.doesNotMatch(source, /rebuttal_(?:against|for)_partner/u);
   });
@@ -4636,18 +4651,19 @@ describe("Debate experience", () => {
       /<DebateEvidencePedestal[\s\S]{0,120}key=\{activeEvidenceItem\.value\.id\}/u,
     );
     assert.match(source, /<DebateEvidencePedestal/u);
-    assert.match(source, /data-debate-evidence-document="true"/u);
+    assert.match(source, /<DebateEvidenceDocument/u);
+    assert.match(evidenceDocumentSource, /data-debate-evidence-document="true"/u);
     assert.match(source, /item\.kind === "source"/u);
     assert.match(source, /debateEvidenceSourceHost\(evidenceSource\)/u);
     assert.match(source, /evidenceSource\.title/u);
     assert.match(source, /evidenceSource\.snippet/u);
     assert.match(source, /debateEvidencePropRotationDeg\(/u);
-    assert.match(source, /--debate-evidence-prop-rotate/);
+    assert.match(evidenceDocumentSource, /--debate-evidence-prop-rotate/);
     assert.match(source, /debateEvidenceSourcePropKind\(evidenceSource\)/u);
-    assert.match(source, /data-source-kind=\{evidenceSourcePropKind/u);
-    assert.match(source, /\? "envelope"[\s\S]*\? "folio"[\s\S]*: "clipping"/u);
+    assert.match(source, /kind=\{evidenceSourcePropKind\}/u);
+    assert.match(evidenceDocumentSource, /\? "envelope"[\s\S]*\? "folio"[\s\S]*: "clipping"/u);
     assert.match(
-      source,
+      evidenceDocumentSource,
       /className=\{styles\.evidencePedestalDocumentHardware\}/u,
     );
     assert.doesNotMatch(source, /evidencePedestalDocumentMark/u);
@@ -5345,11 +5361,11 @@ describe("Debate experience", () => {
     );
     assert.match(
       css,
-      /\.live\[data-theme="dark"\][\s\S]{0,80}\.evidencePedestalDocument\[data-source-kind="url"\]/u,
+      /\.live\[data-theme="dark"\][\s\S]{0,140}\[data-source-kind="url"\]/u,
     );
     assert.match(
       css,
-      /\.live\[data-theme="dark"\][\s\S]{0,80}\.evidencePedestalDocument\[data-source-kind="scholar"\]/u,
+      /\.live\[data-theme="dark"\][\s\S]{0,140}\[data-source-kind="scholar"\]/u,
     );
     assert.match(
       css,
@@ -5565,6 +5581,21 @@ describe("Debate experience", () => {
     assert.match(
       source,
       /restartSpectatorBakeIfNeeded\(polled\.session, "stale-poll"\)/u,
+    );
+    assert.match(source, /async function preloadDebateOpeningSceneAssets/u);
+    assert.match(
+      source,
+      /DEBATE_SCENE_RASTERS_BY_THEME[\s\S]{0,700}forum-light-mask\.png[\s\S]{0,500}overview-table-dark\.png/u,
+      "dark openings preload the CSS masks and later Jury camera table too",
+    );
+    assert.match(
+      source,
+      /querySelectorAll<HTMLImageElement>\([\s\S]{0,120}data-debate-stage-viewport="live"[\s\S]{0,240}image\.decode\(\)/u,
+      "mounted avatar, evidence, and gavel images decode behind the arrival mask",
+    );
+    assert.ok(
+      (source.match(/await openingVisualAssetsReady;/gu) ?? []).length >= 4,
+      "every gallery/bake opening waits for visual assets before revealing the stage",
     );
   });
 

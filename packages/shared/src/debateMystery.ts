@@ -1,3 +1,10 @@
+import {
+  normalizeDebateFormalityId,
+  type DebateFormalityId,
+  type DebateParticipantDifficulty,
+} from "./debate.ts";
+import { normalizeDebateParticipantDifficulty } from "./debateParticipation.ts";
+
 /**
  * Whodunnit is deliberately split into a portable deterministic case model and
  * a public play projection. The server is the only consumer allowed to persist
@@ -28,7 +35,6 @@ export type DebateMysteryPlayPhase =
   | "investigation"
   | "theory"
   | "trial"
-  | "continuance"
   | "verdict";
 export type DebateMysteryRoomKind = "crime_scene" | "suspect" | "search";
 export type DebateMysteryRegionOutcomeKind = "clue" | "subplot" | "empty";
@@ -43,7 +49,7 @@ export type DebateMysteryRouteGrade =
   | "incorrect";
 
 export type DebateMysteryActiveActivityV1 =
-  | { kind: "investigation"; roomId: string; startedAt: string }
+  | { kind: "investigation"; roomId: string; startedAt: string; actionCommitted: boolean }
   | { kind: "interview"; suspectSeatId: string; startedAt: string };
 
 export interface DebateMysteryRecoveredActionTokenV1 {
@@ -81,6 +87,14 @@ export interface DebateWhodunnitCreateConfigV1 {
   preset: DebateMysteryPresetId;
   difficulty: DebateMysteryDifficulty;
   artMode: DebateMysteryArtMode;
+  /** Frozen court register, shared with ordinary Debate and Turnabout. */
+  formality?: DebateFormalityId;
+  /** Frozen court rule, shared with ordinary Debate and Turnabout. */
+  juryEnabled?: boolean;
+  /** Whodunnit reserves Judge for PRISM; this selection is seed-stable. */
+  playerRole?: "participant" | "spectator";
+  /** Participant-only feedback visibility, frozen with the court contract. */
+  participationDifficulty?: DebateParticipantDifficulty;
   inspiration: string;
   nonce: string;
   floors?: number;
@@ -95,6 +109,10 @@ export interface DebateMysteryResolvedConfigV1 {
   preset: DebateMysteryPresetId;
   difficulty: DebateMysteryDifficulty;
   artMode: DebateMysteryArtMode;
+  formality: DebateFormalityId;
+  juryEnabled: boolean;
+  playerRole: "participant" | "spectator";
+  participationDifficulty: DebateParticipantDifficulty | undefined;
   inspiration: string;
   nonce: string;
   floors: number;
@@ -773,7 +791,6 @@ export interface DebateWhodunnitFormatStateV1 {
   theory: DebateMysteryTheoryV1 | null;
   theoryFiledAt: string | null;
   credibilityRemaining: number;
-  continuanceUsed: boolean;
   court: DebateMysteryCourtStateV1 | null;
   verdict: DebateMysteryVerdictV1 | null;
   spoilersRevealed: boolean;
@@ -801,8 +818,8 @@ export function debateMysteryTheoryClaimOptions(
   const leads = state.leads.map((lead) => ({
     id: `lead:${lead.id}`,
     // Lead summaries revise as the public investigation advances. Filing uses
-    // the stable public thread title so a continuance cannot invalidate a
-    // point-and-click selection that the player already made.
+    // the stable public thread title so later lead revisions cannot invalidate
+    // a point-and-click selection that the player already made.
     value: `Lead — ${lead.title}`,
     sourceLabel: lead.title,
   }));
@@ -1182,6 +1199,16 @@ export function resolveDebateMysteryConfig(
     preset: preset?.id ?? "custom",
     difficulty,
     artMode: value.artMode === "generated" ? "generated" : "bundled",
+    // Existing Whodunnit cases used the structured court without a Jury.
+    formality: value.formality === undefined
+      ? "structured"
+      : normalizeDebateFormalityId(value.formality),
+    juryEnabled: value.juryEnabled === true,
+    playerRole: value.playerRole === "spectator" ? "spectator" : "participant",
+    participationDifficulty:
+      value.playerRole === "spectator"
+        ? undefined
+        : normalizeDebateParticipantDifficulty(value.participationDifficulty),
     inspiration: compact(value.inspiration, 240),
     nonce: compact(value.nonce, 160) || "surprise-me",
     floors,
@@ -1258,6 +1285,10 @@ export function debateMysteryRecipeSeed(config: DebateMysteryResolvedConfigV1): 
     preset: config.preset,
     difficulty: config.difficulty,
     artMode: config.artMode,
+    formality: config.formality,
+    juryEnabled: config.juryEnabled,
+    playerRole: config.playerRole,
+    participationDifficulty: config.participationDifficulty,
     inspiration: config.inspiration,
     floors: config.floors,
     totalRooms: config.totalRooms,
@@ -2545,7 +2576,6 @@ export function projectDebateMysteryCase(bible: DebateMysteryCaseBibleV1, config
     theory: null,
     theoryFiledAt: null,
     credibilityRemaining: DEBATE_MYSTERY_CREDIBILITY_STRIKES,
-    continuanceUsed: false,
     court: null,
     verdict: null,
     spoilersRevealed: false,
@@ -2570,6 +2600,10 @@ export function defaultDebateMysteryFormatStateV1(): DebateWhodunnitFormatStateV
       preset: "custom",
       difficulty: "classic",
       artMode: "bundled",
+      formality: "structured",
+      juryEnabled: false,
+      playerRole: "participant",
+      participationDifficulty: "standard",
       inspiration: "",
       nonce: "",
       floors: 1,
@@ -2601,7 +2635,6 @@ export function defaultDebateMysteryFormatStateV1(): DebateWhodunnitFormatStateV
     theory: null,
     theoryFiledAt: null,
     credibilityRemaining: DEBATE_MYSTERY_CREDIBILITY_STRIKES,
-    continuanceUsed: false,
     court: null,
     verdict: null,
     spoilersRevealed: false,
@@ -2627,7 +2660,32 @@ export function normalizeDebateMysteryFormatStateV1(
   ) {
     return defaultDebateMysteryFormatStateV1();
   }
+  const legacyContinuance = (source as { playPhase?: unknown }).playPhase === "continuance";
   const normalized = source as DebateWhodunnitFormatStateV1;
+  normalized.config = {
+    ...normalized.config,
+    // Pre-court-rules cases compiled as structured proceedings without a Jury.
+    formality:
+      normalized.config.formality === undefined
+        ? "structured"
+        : normalizeDebateFormalityId(normalized.config.formality),
+    juryEnabled: normalized.config.juryEnabled === true,
+  };
+  if (legacyContinuance) {
+    normalized.playPhase = "verdict";
+    normalized.actionsRemaining = 0;
+    normalized.activeActivity = null;
+    normalized.court = null;
+    normalized.verdict ??= {
+      grade: "incorrect",
+      culpritCorrect: false,
+      accompliceCorrect: null,
+      matchedBundleId: null,
+      credibilityRemaining: 0,
+      reason: "Court proceedings began. The filed accusation was not proved, and the investigation is permanently closed.",
+      deliveredAt: normalized.theoryFiledAt ?? "1970-01-01T00:00:00.000Z",
+    };
+  }
   normalized.botSpeechProjectionVersion =
     typeof normalized.botSpeechProjectionVersion === "number" &&
     Number.isFinite(normalized.botSpeechProjectionVersion)
@@ -2645,7 +2703,18 @@ export function normalizeDebateMysteryFormatStateV1(
   normalized.accessHistory = Array.isArray(normalized.accessHistory) ? normalized.accessHistory : [];
   const activeActivity = normalized.activeActivity;
   normalized.activeActivity = activeActivity?.kind === "investigation" && typeof activeActivity.roomId === "string"
-    ? activeActivity
+    ? {
+        ...activeActivity,
+        // Legacy saves charged every hotspot. If one is already inspected in
+        // the currently open room, favor the player and treat that pass as paid.
+        actionCommitted:
+          typeof activeActivity.actionCommitted === "boolean"
+            ? activeActivity.actionCommitted
+            : normalized.rooms.some((room) =>
+                room.id === activeActivity.roomId &&
+                Array.isArray(room.inspectedRegionIds) &&
+                room.inspectedRegionIds.length > 0),
+      }
     : activeActivity?.kind === "interview" && typeof activeActivity.suspectSeatId === "string"
       ? activeActivity
       : null;
@@ -2660,7 +2729,7 @@ export function normalizeDebateMysteryFormatStateV1(
   if (
     normalized.actionsRemaining <= 0 &&
     normalized.activeActivity === null &&
-    (normalized.playPhase === "investigation" || normalized.playPhase === "continuance")
+    normalized.playPhase === "investigation"
   ) normalized.playPhase = "theory";
   normalized.rooms = normalized.rooms.map((room) => ({
     ...room,
@@ -2762,6 +2831,9 @@ export function gradeDebateMysteryTheory(args: {
   bible: DebateMysteryCaseBibleV1;
   theory: DebateMysteryTheoryV1;
   sustainedTestimonyIds: string[];
+  /** A courtroom denial may satisfy the required contradiction without
+   * pretending undiscovered scene testimony entered the record. */
+  defendantDenialContradicted?: boolean;
   credibilityRemaining: number;
   deliveredAt: string;
 }): DebateMysteryVerdictV1 {
@@ -2783,7 +2855,9 @@ export function gradeDebateMysteryTheory(args: {
     bundle.requiredEvidenceIds.every((id) => evidence.has(id)) &&
     bundle.requiredTestimonyIds.every((id) => testimony.has(id)) &&
     bundle.requiredFactTags.every((tag) => factTags.has(tag)) &&
-    (!bundle.requiredCourtContradictionId || testimony.has(bundle.requiredCourtContradictionId)) &&
+    (!bundle.requiredCourtContradictionId ||
+      testimony.has(bundle.requiredCourtContradictionId) ||
+      args.defendantDenialContradicted === true) &&
     (!bundle.requiresAccomplice || accompliceCorrect) &&
     (bundle.grade !== "smoking_gun" || (hasMethod && hasMotive && hasOpportunity)) &&
     (bundle.grade !== "strong_case" || (hasMethod && hasOpportunity)),

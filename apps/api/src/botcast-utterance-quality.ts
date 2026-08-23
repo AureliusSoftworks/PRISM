@@ -27,6 +27,10 @@ const BOTCAST_GENERIC_HOST_STALL_PATTERNS = [
 const BOTCAST_GENERIC_GUEST_STALL_PATTERNS = [
   /^(?:that|this|it) (?:is|feels|seems) [^.!?…]{1,48}[.!?…]?$/iu,
   /^I mean,? (?:it(?:['’]s| is)|this is|that is) (?:over|done|finished|the end)[.!?…]?$/iu,
+  /^what (?:subject|topic|question) would you (?:prefer|like|want) to (?:begin|start|discuss|explore|talk about)(?: with)?\??$/iu,
+  /^what would you like to (?:talk about|discuss|explore)(?: first| next| today)?\??$/iu,
+  /^where (?:would you like to|should we) begin\??$/iu,
+  /^(?:let us|let['’]s) continue[.!?]?$/iu,
 ] as const;
 
 const BOTCAST_DUPLICATE_MIN_WORDS = 8;
@@ -253,9 +257,34 @@ export function botcastHostUtteranceNeedsInterviewQuestion(
 
 /** True when a primary guest turn is only a vague reaction or sign-off. */
 export function botcastGuestUtteranceIsGenericStall(value: string): boolean {
-  const spoken = spokenForQualityCheck(value).replace(/["'”’]+$/u, "");
-  return BOTCAST_GENERIC_GUEST_STALL_PATTERNS.some((pattern) =>
-    pattern.test(spoken),
+  let spoken = spokenForQualityCheck(value).replace(/["'”’]+$/u, "");
+  // Fresh-contact and false-name Powers may prepend a greeting and identity
+  // correction. Judge the interview contribution underneath that required
+  // presentation instead of letting the prefix make an empty/reset turn look
+  // substantive.
+  for (let pass = 0; pass < 4; pass += 1) {
+    const before = spoken;
+    spoken = spoken
+      .replace(
+        /^(?:hello|hi|hey|greetings)(?:\s+there)?(?:[,!—-]\s*|\s+)(?:[\p{L}\p{N}'’_-]+(?:\s+(?:of\s+)?[\p{L}\p{N}'’_-]+){0,4})?(?:\s*[,!.—-]\s*|$)/u,
+        "",
+      )
+      .replace(
+        /^(?:i am|i['’]m|my name is|call me)\s+[\p{L}\p{N}'’_-]+(?:\s+(?:of\s+)?[\p{L}\p{N}'’_-]+){0,4}(?:\s*[,;.!—-]\s*|$)/u,
+        "",
+      )
+      .replace(
+        /^(?:i think\s+)?(?:there (?:may|might) be|we (?:have|may have)) some crossed wires[.!?]?\s*/iu,
+        "",
+      )
+      .trim();
+    if (spoken === before) break;
+  }
+  return (
+    !spoken ||
+    BOTCAST_GENERIC_GUEST_STALL_PATTERNS.some((pattern) =>
+      pattern.test(spoken),
+    )
   );
 }
 

@@ -5782,6 +5782,187 @@ describe("Botcast persistence and isolation", () => {
     assert.doesNotMatch(prompt, /Do not copy or claim their Powers/iu);
   });
 
+  it("composes mirrored amnesia aliases once and repairs post-Power guest collapse", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const hostPowerName = "Scatterbrained Alias";
+    const hostPowerIntent =
+      "Forget every prior turn and sincerely adopt a fresh alias.";
+    const identityPowerName = "Identity Crisis";
+    const identityPowerIntent =
+      "Copy the public identity of the latest bot that directly addresses this bot.";
+    db.prepare(
+      `UPDATE bots
+          SET name = 'Scatterbrained Steven',
+              system_prompt = 'A friendly host with no durable short-term memory.',
+              powers_json = ?
+        WHERE id = 'host-1'`,
+    ).run(JSON.stringify([{
+      version: 1,
+      id: "scatterbrained-alias",
+      name: hostPowerName,
+      intent: hostPowerIntent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(hostPowerName, hostPowerIntent),
+        selfCue: "Treat every reply as fresh contact and believe the current alias.",
+        observerCue: "Steven forgets and adopts another name.",
+        effects: [
+          {
+            type: "eternal_introduction",
+            memory: "current_other_speaker_message",
+          },
+          {
+            type: "false_name",
+            continuity: "session_sticky_until_amnesia",
+            pool: "mixed_persona_names",
+          },
+        ],
+        ruleLabels: [],
+      },
+    }]));
+    db.prepare(
+      `UPDATE bots
+          SET name = 'Confusion Collin',
+              system_prompt = 'A brittle identity thief who presses on public trust.',
+              powers_json = ?
+        WHERE id = 'guest-1'`,
+    ).run(JSON.stringify([{
+      version: 1,
+      id: "identity-crisis",
+      name: identityPowerName,
+      intent: identityPowerIntent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(
+          identityPowerName,
+          identityPowerIntent,
+        ),
+        selfCue: "Mirror only the direct bot addresser's public identity.",
+        observerCue: "The copied original recognizes the theft and is irritated.",
+        effects: [{ type: "identity_mirror", trigger: "direct_bot_address" }],
+        ruleLabels: [],
+      },
+    }]));
+
+    let spokenTurn = 0;
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse(messages, options) {
+        if (options.usagePurpose === "psychic_planning") {
+          return "Keep the next line concrete and responsive.";
+        }
+        captures.push(messages);
+        const prompt = messages.map((message) => message.content).join("\n");
+        const alias =
+          /Hard false-name repair contract: your name is "([^"]+)"/iu.exec(
+            prompt,
+          )?.[1] ??
+          /Hard false-name rule: your name is "([^"]+)"/iu.exec(prompt)?.[1] ??
+          "Alex";
+        const response = spokenTurn === 0
+          ? "Welcome to the show. I'm Scatterbrained Steven, joined by Confusion Collin. Confusion Collin, where does an unstable identity first cost trust?"
+          : spokenTurn === 1
+            ? `Hello there — ${alias}, and I don't believe we've met, though the room feels familiar. Trust first breaks when a correction is ignored.`
+            : spokenTurn === 2
+              ? `Hello—I'm ${alias}. Repair starts with using the corrected name; what evidence would rebuild trust?`
+              : `Hello—I'm ${alias}. I take it back, I'm the impostor. Scatterbrained Steven can have the identity back.`;
+        spokenTurn += 1;
+        return response;
+      },
+      async embedText() {
+        return [];
+      },
+    };
+
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Authenticity in the unstable mirror",
+      });
+      const generationOptions = generation(provider);
+      await advanceBotcastEpisode(db, "user-1", episode.id, {}, generationOptions);
+      const firstGuest = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+      const firstGuestAlias = botcastFalseNameStatesV1(
+        firstGuest.episode.events,
+      ).get("guest-1")?.believedName;
+      assert.ok(firstGuestAlias);
+      assert.equal(
+        firstGuest.message?.content.match(
+          new RegExp(
+            firstGuestAlias.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"),
+            "gu",
+          ),
+        )?.length,
+        1,
+      );
+      assert.equal(firstGuest.message?.content.match(/\bimpostor\b/giu)?.length, 1);
+
+      const original = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+      const originalAlias = botcastFalseNameStatesV1(
+        original.episode.events,
+      ).get("host-1")?.believedName;
+      assert.ok(originalAlias);
+      assert.doesNotMatch(original.message?.content ?? "", /Scatterbrained Steven/iu);
+      assert.equal(
+        original.message?.content.match(
+          new RegExp(
+            originalAlias.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"),
+            "gu",
+          ),
+        )?.length,
+        1,
+      );
+
+      const repairedGuest = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+      assert.doesNotMatch(
+        repairedGuest.message?.content ?? "",
+        /can have the identity back/iu,
+      );
+      assert.ok(
+        (repairedGuest.message?.content.split(/\s+/u).length ?? 0) >= 12,
+        repairedGuest.message?.content,
+      );
+      const utterance = repairedGuest.episode.events.findLast(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.messageId === repairedGuest.message?.id,
+      );
+      assert.deepEqual(utterance?.payload.utteranceRepair, {
+        v: 1,
+        source: "power_runtime",
+        reason: "non_answering_deferral",
+        fallbackKind: "guest_substantive_answer",
+      });
+      assert.equal(captures.length, 4);
+    } finally {
+      db.close();
+    }
+  });
+
   it("gates Signal mirroring to a new audible, perceivable bot addresser", () => {
     const identityPower = {
       version: 1,
@@ -21627,6 +21808,7 @@ describe("Botcast persistence and isolation", () => {
         guestBotId: "guest-1",
         topic: "Private speech boundaries",
       });
+      let foundEligibleCutoff = false;
       for (let attempt = 0; attempt < 100; attempt += 1) {
         const plan = botcastPowerInterruptionPlanV1({
           episodeId: created.id,
@@ -21654,16 +21836,29 @@ describe("Botcast persistence and isolation", () => {
           tension: { level: 0 },
           canReclaim: true,
         });
+        const attemptedCutoff = plan
+          ? botcastPowerInterruptedContentV1(
+              privateGuestLine,
+              plan.targetProgress,
+              plan.certainty,
+            )
+          : null;
         if (
           plan &&
           plan.targetProgress < 0.85 &&
+          attemptedCutoff &&
+          crosstalkInterruptionIsMeaningfulV1(attemptedCutoff) &&
           floorOutcome === "yield"
-        ) break;
+        ) {
+          foundEligibleCutoff = true;
+          break;
+        }
         created = createBotcastEpisode(db, "user-1", show.id, {
           guestBotId: "guest-1",
           topic: `Private speech boundaries ${attempt + 1}`,
         });
       }
+      assert.equal(foundEligibleCutoff, true);
 
       await advanceBotcastEpisode(
         db,
@@ -22238,13 +22433,68 @@ describe("Botcast persistence and isolation", () => {
           ? `Welcome to ${show.name}. I'm Mara Vale, joined by Ivo Stone to examine whether repetition can become an original voice. Ivo, what would you say if nobody supplied the words?`
           : `Attempt ${index}: Ivo Stone, choose one thought that belongs only to you, explain why it matters, and finish the answer in your own words without borrowing this sentence.`,
       );
-      const created = createBotcastEpisode(db, "user-1", show.id, {
+      let created = createBotcastEpisode(db, "user-1", show.id, {
         guestBotId: "guest-1",
         topic: "Breaking the silence",
         producerBrief:
           "Keep trying until the guest says something original or leaves.",
       });
       const provider = recordingProvider(hostLines, captures);
+      let foundHeldFloorEpisode = false;
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const plan = botcastPowerInterruptionPlanV1({
+          episodeId: created.id,
+          targetTurnOrdinal: 0,
+          powerId: "power-interrupting",
+          powerName: hostPowerName,
+          frequency: "frequent",
+          strength: "large",
+          certainty: "always",
+          targetTurnsSinceLastInterruption: null,
+        });
+        const floorOutcome = botcastCrosstalkFloorOutcomeV1({
+          seed: [
+            "signal-power-crosstalk-floor-v1",
+            created.id,
+            "guest",
+            0,
+            "host-1",
+          ].join(":"),
+          speaker: {
+            id: "guest-1",
+            systemPrompt:
+              "A guarded inventor who resists personal speculation and warns people before walking away.",
+          },
+          tension: { level: 0 },
+          canReclaim: false,
+          canHold: true,
+          irritationTowardInterrupter: 0.95,
+        });
+        const attemptedCutoff = plan
+          ? botcastPowerInterruptedContentV1(
+              hostLines[0]!,
+              plan.targetProgress,
+              plan.certainty,
+            )
+          : null;
+        if (
+          plan &&
+          plan.targetProgress < 0.85 &&
+          attemptedCutoff &&
+          crosstalkInterruptionIsMeaningfulV1(attemptedCutoff) &&
+          floorOutcome === "hold"
+        ) {
+          foundHeldFloorEpisode = true;
+          break;
+        }
+        created = createBotcastEpisode(db, "user-1", show.id, {
+          guestBotId: "guest-1",
+          topic: `Breaking the silence ${attempt + 1}`,
+          producerBrief:
+            "Keep trying until the guest says something original or leaves.",
+        });
+      }
+      assert.equal(foundHeldFloorEpisode, true);
       const opened = await advanceBotcastEpisode(
         db,
         "user-1",

@@ -212,6 +212,16 @@ test("the Moderator uses the authored mini form in wide, left, and right cameras
     pageCss,
     /\.debateModeratorMiniAvatar\[data-size="room"\][\s\S]{0,120}width:\s*100%[\s\S]{0,80}height:\s*100%/u,
   );
+  assert.match(
+    pageSource,
+    /const moderatorMiniUsesPlateSpeechMouth =\s*moderatorMiniPortrait &&\s*avatarState\.talking &&\s*faceStyle\.mouthSpeechPoses === null/u,
+    "compact Moderator speech falls back to the live plate viseme when no authored speech poses exist",
+  );
+  assert.match(
+    pageSource,
+    /faceMouthCharacter=\{\s*moderatorMiniUsesPlateSpeechMouth\s*\? null\s*:\s*faceStyle\.mouthCharacter/u,
+    "the static rest glyph cannot cover the wide-camera Moderator mouth",
+  );
   assert.doesNotMatch(pageSource, /stageAlignmentPreview/u);
 });
 

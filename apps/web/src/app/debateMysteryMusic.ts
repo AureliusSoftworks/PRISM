@@ -21,7 +21,7 @@ export const WHODUNNIT_INVESTIGATION_MUSIC_SILENT_MIX = {
 export function mysteryInvestigationMusicSessionActive(
   playPhase: DebateMysteryPlayPhase,
 ): boolean {
-  return playPhase === "investigation" || playPhase === "continuance";
+  return playPhase === "investigation";
 }
 
 export function mysteryInvestigationMusicMix(args: {

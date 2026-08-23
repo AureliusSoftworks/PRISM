@@ -18,24 +18,40 @@ describe("Whodunnit interview transcript reveal", () => {
     assert.equal(mysteryInterviewTranscriptVisibleText({ text, elapsedMs: 1_000, durationMs: 1_000, alignment }), text);
   });
 
-  it("refuses estimated or malformed timing so an unheard reply remains withheld", () => {
+  it("streams from audible playback progress when exact timing is unavailable", () => {
     const text = "Do not guess.";
     assert.equal(mysteryInterviewTranscriptVisibleText({
       text,
-      elapsedMs: 1_000,
+      elapsedMs: 0,
       durationMs: 1_000,
       alignment: null,
     }), "");
     assert.equal(mysteryInterviewTranscriptVisibleText({
       text,
+      elapsedMs: 500,
+      durationMs: 1_000,
+      alignment: null,
+    }), "Do not");
+    assert.equal(mysteryInterviewTranscriptVisibleText({
+      text,
       elapsedMs: 1_000,
+      durationMs: 1_000,
+      alignment: null,
+    }), text);
+  });
+
+  it("falls back to playback progress when provider timing is malformed", () => {
+    const text = "Do not guess.";
+    assert.equal(mysteryInterviewTranscriptVisibleText({
+      text,
+      elapsedMs: 500,
       durationMs: 1_000,
       alignment: {
         characters: Array.from(text),
         characterStartTimesSeconds: [0],
         characterEndTimesSeconds: [1],
       },
-    }), "");
+    }), "Do not");
   });
 
   it("uses the decoded audio clock when the provider supplies an offset", () => {

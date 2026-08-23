@@ -2923,6 +2923,7 @@ interface UserDbRow {
   experimental_dual_ollama_enabled: number;
   experimental_all_model_effort_enabled: number;
   coffee_experimental_table_angle_enabled: number;
+  debate_whodunnit_reuse_synthesized_exhibits: number;
   psychic_mode_enabled: number;
   comfyui_host: string | null;
   preferred_local_image_model: string | null;
@@ -3350,7 +3351,7 @@ function liveBakePlannedSynthesisEngineForUser(
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, atmosphere_style, hub_atmosphere_enabled, hub_atmosphere_image_id, hub_atmosphere_image_style, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked, auto_memory, memory_learn_about_player, memory_learn_about_bots, memory_acquisition_sensitivity, memory_short_term_days, memory_long_term_threshold, memory_inferred_min_evidence, memory_inferred_threshold, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, online_auto_provider_bias, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, preferred_home_atmosphere_image_model, preferred_home_atmosphere_image_provider, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_count, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_blink_rotation_deg, prism_default_bot_face_thinking_frames, prism_default_bot_face_thinking_scale, prism_default_bot_face_thinking_offset_x, prism_default_bot_face_thinking_offset_y, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, prism_refract_local_model, prism_refract_online_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, zen_player_voice_enabled, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, atmosphere_style, hub_atmosphere_enabled, hub_atmosphere_image_id, hub_atmosphere_image_style, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked, auto_memory, memory_learn_about_player, memory_learn_about_bots, memory_acquisition_sensitivity, memory_short_term_days, memory_long_term_threshold, memory_inferred_min_evidence, memory_inferred_threshold, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, debate_whodunnit_reuse_synthesized_exhibits, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, online_auto_provider_bias, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, preferred_home_atmosphere_image_model, preferred_home_atmosphere_image_provider, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_count, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_blink_rotation_deg, prism_default_bot_face_thinking_frames, prism_default_bot_face_thinking_scale, prism_default_bot_face_thinking_offset_x, prism_default_bot_face_thinking_offset_y, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, prism_refract_local_model, prism_refract_online_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, zen_player_voice_enabled, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -17172,6 +17173,10 @@ function buildRoutes(): RouteDefinition[] {
               body.whodunnit as Parameters<typeof createDebateMysterySession>[2],
               body.idempotencyKey,
               runtime,
+              {
+                playerRole: body.playerRole,
+                participationDifficulty: body.participationDifficulty,
+              },
             ),
           )
         : await createDebateSessionWithParticipantPredispositions(
@@ -28282,6 +28287,8 @@ function buildRoutes(): RouteDefinition[] {
           modelTurboPreferences: listModelTurboPreferences(db, userId),
           coffeeExperimentalTableAngleEnabled:
             user.coffee_experimental_table_angle_enabled === 1,
+          debateWhodunnitReuseSynthesizedExhibits:
+            user.debate_whodunnit_reuse_synthesized_exhibits === 1,
           psychicModeEnabled: user.psychic_mode_enabled === 1,
           autoModeEnabled: user.auto_switch_model === 1,
           autoFallbackChain: parseStoredAutoFallbackChain(
@@ -29051,6 +29058,8 @@ function buildRoutes(): RouteDefinition[] {
           user.experimental_all_model_effort_enabled,
         coffeeExperimentalTableAngleEnabled:
           user.coffee_experimental_table_angle_enabled,
+        debateWhodunnitReuseSynthesizedExhibits:
+          user.debate_whodunnit_reuse_synthesized_exhibits,
         psychicModeEnabled: user.psychic_mode_enabled,
         autoSwitchModel: user.auto_switch_model,
         autoFallbackChain: user.auto_fallback_chain,
@@ -29181,7 +29190,7 @@ function buildRoutes(): RouteDefinition[] {
         `
         UPDATE users
         SET display_name = ?, theme = ?, graphics_quality = ?, crt_focus = ?, typography_scale = ?, atmosphere_style = ?, hub_atmosphere_enabled = ?, startup_preference = ?, preferred_provider = ?, ephemeral_chat_provider_preferences = ?, preferred_image_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
-            experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, coffee_experimental_table_angle_enabled = ?, psychic_mode_enabled = ?, auto_switch_model = ?, auto_fallback_chain = ?, online_auto_provider_bias = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
+            experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, coffee_experimental_table_angle_enabled = ?, debate_whodunnit_reuse_synthesized_exhibits = ?, psychic_mode_enabled = ?, auto_switch_model = ?, auto_fallback_chain = ?, online_auto_provider_bias = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, preferred_home_atmosphere_image_model = ?, preferred_home_atmosphere_image_provider = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
             zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?, zen_persona_transition_choice = ?,
             comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?, text_model_display_names = ?,
@@ -29214,6 +29223,7 @@ function buildRoutes(): RouteDefinition[] {
         next.experimentalDualOllamaEnabled,
         next.experimentalAllModelEffortEnabled,
         next.coffeeExperimentalTableAngleEnabled,
+        next.debateWhodunnitReuseSynthesizedExhibits,
         next.psychicModeEnabled,
         next.autoSwitchModel,
         next.autoFallbackChain,
@@ -29306,6 +29316,8 @@ function buildRoutes(): RouteDefinition[] {
             next.experimentalAllModelEffortEnabled === 1,
           coffeeExperimentalTableAngleEnabled:
             next.coffeeExperimentalTableAngleEnabled === 1,
+          debateWhodunnitReuseSynthesizedExhibits:
+            next.debateWhodunnitReuseSynthesizedExhibits === 1,
           psychicModeEnabled: next.psychicModeEnabled === 1,
           autoModeEnabled: next.autoSwitchModel === 1,
           autoFallbackChain: parseStoredAutoFallbackChain(

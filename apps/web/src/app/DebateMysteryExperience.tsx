@@ -6,7 +6,6 @@
 import {
   useCallback,
   useEffect,
-  useId,
   useMemo,
   useRef,
   useState,
@@ -18,27 +17,24 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
-  DEBATE_MYSTERY_PRESETS,
   DEBATE_MYSTERY_ROOM_TEMPLATES,
-  DEBATE_MYSTERY_SCHEMA_VERSION,
   debateMysteryTheoryClaimOptions,
-  debateMysteryRecipeSeed,
-  resolveDebateMysteryConfig,
   type DebateMysteryActionRequestV1,
-  type DebateMysteryArtMode,
   type DebateMysteryCaseCodeV1,
-  type DebateMysteryDifficulty,
   type DebateMysteryNotebookV2,
-  type DebateMysteryPresetId,
   type DebateMysteryRegionV1,
   type DebateMysteryTheoryV1,
   type DebateSessionV1,
-  type DebateWhodunnitCreateConfigV1,
   type DebateWhodunnitFormatStateV1,
   type ProviderReasoningEffort,
   type ResponseMode,
 } from "@localai/shared";
 import styles from "./debateMystery.module.css";
+import {
+  DebateEvidenceDocument,
+  type DebateEvidenceDocumentKind,
+} from "./DebateEvidenceDocument";
+import { debateEvidencePropRotationDeg } from "./debateEvidenceProp";
 import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
 import {
   WHODUNNIT_INVESTIGATION_MUSIC_FADE_MS,
@@ -57,6 +53,7 @@ import {
   debateMysteryBundledLockTargetAssetPath,
 } from "./debateMysteryBundledProps";
 import { MysteryPropVisual } from "./MysteryPropVisual";
+import { releaseDebateMysteryInvestigationMedia } from "./debateMysteryAssetLifecycle";
 import {
   mysteryMapOccupantPosition,
   mysteryRoomSuspectFacing,
@@ -71,16 +68,6 @@ import { findAtMentionTokenPlain } from "./botMention";
 import type { BotPickerGlyphRenderer } from "./BotPicker";
 import type { VoicePlaybackCharacterAlignment } from "./voiceEffects";
 import { mysteryInterviewTranscriptVisibleText } from "./mysteryInterviewTranscriptReveal";
-import {
-  minimumWhodunnitBotsForCast,
-  distinctWhodunnitCastBotIds,
-  randomizeWhodunnitCast,
-  randomizeWhodunnitCastAroundBot,
-} from "./debateMysteryCast";
-import {
-  createBotDirectedSetupRefractTarget,
-  PrismRefractTarget,
-} from "./prismRefract";
 
 export interface MysteryBotSummary {
   id: string;
@@ -295,6 +282,7 @@ function MysteryEvidenceVisual({
       bundledAssetPath={debateMysteryBundledEvidenceAssetPath(item)}
       fallbackGlyph={mysteryEvidenceEmoji(item)}
       className={className}
+      assetRetention="evidence"
     />
   );
 }
@@ -440,615 +428,6 @@ function MysteryPublicMarkdown(props: {
   );
 }
 
-function presetSuspectCount(preset: DebateMysteryPresetId): number {
-  return DEBATE_MYSTERY_PRESETS.find((candidate) => candidate.id === preset)
-    ?.suspects ?? 4;
-}
-
-function fillCast(
-  bots: readonly MysteryBotSummary[],
-  current: readonly string[],
-  count: number,
-  excluded: readonly string[] = [],
-): string[] {
-  const allowed = new Set(bots.map((bot) => bot.id));
-  const blocked = new Set(excluded);
-  const selected = current.filter(
-    (id, index) =>
-      allowed.has(id) && !blocked.has(id) && current.indexOf(id) === index,
-  );
-  for (const bot of bots) {
-    if (selected.length >= count) break;
-    if (!blocked.has(bot.id) && !selected.includes(bot.id)) selected.push(bot.id);
-  }
-  return selected.slice(0, count);
-}
-
-const COMPILATION_STAGES = [
-  ["casting", "Checking the ensemble"],
-  ["building_mansion", "Building the mansion"],
-  ["writing_alibis", "Writing alibis"],
-  ["hiding_evidence", "Hiding evidence"],
-  ["testing_theories", "Testing three ways through the case"],
-  ["preparing_rooms", "Preparing the rooms"],
-] as const;
-interface InspectedMysterySeed {
-  version: number;
-  generatorVersion: number;
-  title: string;
-  floors: number;
-  totalRooms: number;
-  seats: Array<{
-    seatId: string;
-    exportHash: string | null;
-    suggestedBotId: string | null;
-  }>;
-}
-
-export function DebateMysterySetup(
-  props: MysterySharedProps & {
-    onCancel: () => void;
-    onCreated: (session: DebateSessionV1) => void;
-  },
-): React.JSX.Element {
-  const stableSetupId = useId();
-  const [preset, setPreset] = useState<DebateMysteryPresetId>("compact");
-  const [difficulty, setDifficulty] =
-    useState<DebateMysteryDifficulty>("classic");
-  const [artMode, setArtMode] = useState<DebateMysteryArtMode>("bundled");
-  const [inspiration, setInspiration] = useState("");
-  const [nonce, setNonce] = useState(`surprise-${stableSetupId}`);
-  const [floors, setFloors] = useState(1);
-  const [totalRooms, setTotalRooms] = useState(5);
-  const [customSuspectCount, setCustomSuspectCount] = useState(4);
-  const initialSuspects = fillCast(props.bots, [], 4);
-  const initialProsecutorBotId = props.bots.find(
-    (bot) => !initialSuspects.includes(bot.id),
-  )?.id ?? "";
-  const suggestedDefenseBotId = props.bots.find(
-    (bot) => !initialSuspects.includes(bot.id) && bot.id !== initialProsecutorBotId,
-  )?.id ?? "";
-  const [suspectSelection, setSuspectSelection] = useState(initialSuspects);
-  const [prosecutorPartnerBotId, setProsecutorPartnerBotId] = useState(
-    initialProsecutorBotId,
-  );
-  const [rivalDefenseBotId, setRivalDefenseBotId] = useState(
-    suggestedDefenseBotId,
-  );
-  const [importCode, setImportCode] = useState("");
-  const [inspectedSeed, setInspectedSeed] =
-    useState<InspectedMysterySeed | null>(null);
-  const [importAssignments, setImportAssignments] = useState<
-    Record<string, string>
-  >({});
-  const [compiling, setCompiling] = useState(false);
-  const [compileStageIndex, setCompileStageIndex] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-
-  const targetSuspects =
-    preset === "custom" ? customSuspectCount : presetSuspectCount(preset);
-  const whodunnitCastCandidates = useMemo(
-    () => distinctWhodunnitCastBotIds(props.bots),
-    [props.bots],
-  );
-  const suspectBotIds = useMemo(
-    () =>
-      fillCast(
-        props.bots,
-        suspectSelection,
-        targetSuspects,
-        [prosecutorPartnerBotId, rivalDefenseBotId],
-      ),
-    [
-      props.bots,
-      prosecutorPartnerBotId,
-      rivalDefenseBotId,
-      suspectSelection,
-      targetSuspects,
-    ],
-  );
-  const whodunnitCastRequirement = minimumWhodunnitBotsForCast(targetSuspects);
-  const canRandomizeCast = whodunnitCastCandidates.length >= whodunnitCastRequirement;
-  const castPoolError =
-    whodunnitCastCandidates.length < whodunnitCastRequirement
-      ? `Whodunnit needs ${whodunnitCastRequirement} Library bots for ${targetSuspects} suspects, prosecutor partner, and rival defense.`
-      : null;
-
-  useEffect(() => {
-    if (!compiling) return;
-    const timer = window.setInterval(() => {
-      setCompileStageIndex((current) =>
-        Math.min(current + 1, COMPILATION_STAGES.length - 1),
-      );
-    }, 2_700);
-    return () => window.clearInterval(timer);
-  }, [compiling]);
-
-  const config = useMemo<DebateWhodunnitCreateConfigV1>(
-    () => ({
-      version: DEBATE_MYSTERY_SCHEMA_VERSION,
-      preset,
-      difficulty,
-      artMode,
-      inspiration,
-      nonce,
-      ...(preset === "custom" ? { floors, totalRooms } : {}),
-      suspectBotIds,
-      prosecutorPartnerBotId,
-      rivalDefenseBotId,
-    }),
-    [
-      artMode,
-      difficulty,
-      floors,
-      inspiration,
-      nonce,
-      preset,
-      prosecutorPartnerBotId,
-      rivalDefenseBotId,
-      suspectBotIds,
-      totalRooms,
-    ],
-  );
-  const resolved = useMemo(() => {
-    try {
-      return { value: resolveDebateMysteryConfig(config), error: null };
-    } catch (caught) {
-      return {
-        value: null,
-        error: caught instanceof Error ? caught.message : "The cast is incomplete.",
-      };
-    }
-  }, [config]);
-  const recipeSeed = resolved.value
-    ? debateMysteryRecipeSeed(resolved.value)
-    : "Recipe seed forms when the cast is complete";
-  const botById = useMemo(
-    () => new Map(props.bots.map((bot) => [bot.id, bot])),
-    [props.bots],
-  );
-  const selectedBots = new Set([
-    ...suspectBotIds,
-    prosecutorPartnerBotId,
-    rivalDefenseBotId,
-  ]);
-
-  const choosePreset = (next: DebateMysteryPresetId): void => {
-    setPreset(next);
-    const descriptor = DEBATE_MYSTERY_PRESETS.find(
-      (candidate) => candidate.id === next,
-    );
-    if (descriptor) {
-      setFloors(descriptor.floors);
-      setTotalRooms(descriptor.rooms);
-      setCustomSuspectCount(descriptor.suspects);
-    }
-    setNonce(mysteryId("recipe"));
-  };
-
-  const randomizeCast = (anchor?: {
-    botId: string;
-    botName: string;
-    direction: string;
-  }): void => {
-    setError(null);
-    const castCandidates = whodunnitCastCandidates.map((botId) => ({
-      id: botId,
-    }));
-    const allocation = anchor
-      ? randomizeWhodunnitCastAroundBot(
-          castCandidates,
-          targetSuspects,
-          anchor.botId,
-        )
-      : randomizeWhodunnitCast(castCandidates, targetSuspects);
-    if (!allocation) {
-      setError(
-        `Whodunnit needs ${whodunnitCastRequirement} Library bots for ${
-          targetSuspects
-        } suspects, prosecutor partner, and rival defense.`,
-      );
-      return;
-    }
-    setSuspectSelection(allocation.suspectBotIds);
-    setProsecutorPartnerBotId(allocation.prosecutorPartnerBotId);
-    setRivalDefenseBotId(allocation.rivalDefenseBotId);
-    if (anchor) {
-      setInspiration(
-        anchor.direction.trim() ||
-          `A mystery centered on ${anchor.botName}'s world, relationships, and contradictions without assuming their guilt.`,
-      );
-    }
-    setNonce(mysteryId("recipe"));
-  };
-
-  const toggleSuspect = (botId: string): void => {
-    if (botId === prosecutorPartnerBotId || botId === rivalDefenseBotId) return;
-    setSuspectSelection((currentSelection) => {
-      const current = fillCast(
-        props.bots,
-        currentSelection,
-        targetSuspects,
-        [prosecutorPartnerBotId, rivalDefenseBotId],
-      );
-      if (current.includes(botId)) return current.filter((id) => id !== botId);
-      if (current.length >= targetSuspects) return [...current.slice(1), botId];
-      return [...current, botId];
-    });
-  };
-
-  const parsedImportCode = (): DebateMysteryCaseCodeV1 => {
-    try {
-      return JSON.parse(importCode) as DebateMysteryCaseCodeV1;
-    } catch {
-      throw new Error("Paste the complete JSON Case Seed from another Archive.");
-    }
-  };
-
-  const inspectSeed = async (): Promise<void> => {
-    setError(null);
-    try {
-      const result = await props.request<{ manifest: InspectedMysterySeed }>(
-        "/api/debates/mystery-seed/inspect",
-        mysteryRequestBody({ caseCode: parsedImportCode() }),
-      );
-      const used = new Set<string>();
-      const assignments: Record<string, string> = {};
-      for (const seat of result.manifest.seats) {
-        const suggested = seat.suggestedBotId;
-        const fallback = props.bots.find(
-          (bot) =>
-            !used.has(bot.id) &&
-            bot.id !== prosecutorPartnerBotId &&
-            bot.id !== rivalDefenseBotId,
-        )?.id;
-        const botId = suggested && !used.has(suggested) ? suggested : fallback;
-        if (botId) {
-          assignments[seat.seatId] = botId;
-          used.add(botId);
-        }
-      }
-      setInspectedSeed(result.manifest);
-      setImportAssignments(assignments);
-    } catch (caught) {
-      setInspectedSeed(null);
-      setError(caught instanceof Error ? caught.message : "Case Seed inspection failed.");
-    }
-  };
-
-  const prepareGeneratedAssets = async (
-    session: DebateSessionV1,
-  ): Promise<DebateSessionV1> => {
-    try {
-      const result = await props.request<{ session: DebateSessionV1 }>(
-        `/api/debates/${encodeURIComponent(session.id)}/mystery-assets/prepare`,
-        mysteryRequestBody({}),
-      );
-      return result.session;
-    } catch {
-      // Art is presentation-only. The server deliberately preserves the
-      // aligned bundled room and keyword emoji when generation cannot finish.
-      return session;
-    }
-  };
-
-  const startCase = async (): Promise<void> => {
-    if (!resolved.value || compiling) return;
-    setCompiling(true);
-    setCompileStageIndex(0);
-    setError(null);
-    try {
-      const result = await props.request<{ session: DebateSessionV1 }>(
-        "/api/debates",
-        mysteryRequestBody({
-          format: "whodunnit",
-          whodunnit: config,
-          preferredProvider: props.preferredProvider,
-          modelOverride: props.modelOverride?.model ?? null,
-          responseMode: props.responseMode,
-          reasoningEffort: props.reasoningEffort,
-          turbo: props.turbo === true,
-          idempotencyKey: mysteryId("mystery-create"),
-        }),
-      );
-      const session = config.artMode === "generated"
-        ? await prepareGeneratedAssets(result.session)
-        : result.session;
-      props.onCreated(session);
-    } catch (caught) {
-      setError(
-        caught instanceof Error ? caught.message : "PRISM could not compile the case.",
-      );
-      setCompiling(false);
-    }
-  };
-
-  const importCase = async (): Promise<void> => {
-    if (!inspectedSeed || compiling) return;
-    const assigned = inspectedSeed.seats.map((seat) => ({
-      seatId: seat.seatId,
-      botId: importAssignments[seat.seatId] ?? "",
-    }));
-    if (
-      assigned.some((entry) => !entry.botId) ||
-      new Set(assigned.map((entry) => entry.botId)).size !== assigned.length
-    ) {
-      setError("Assign one different Library bot to every hidden role seat.");
-      return;
-    }
-    setCompiling(true);
-    setCompileStageIndex(0);
-    setError(null);
-    try {
-      const result = await props.request<{ session: DebateSessionV1 }>(
-        "/api/debates/mystery-seed/import",
-        mysteryRequestBody({
-          caseCode: parsedImportCode(),
-          seatAssignments: assigned,
-          prosecutorPartnerBotId,
-          rivalDefenseBotId,
-          preferredProvider: props.preferredProvider,
-          modelOverride: props.modelOverride?.model ?? null,
-          responseMode: props.responseMode,
-          reasoningEffort: props.reasoningEffort,
-          turbo: props.turbo === true,
-          idempotencyKey: mysteryId("mystery-import"),
-        }),
-      );
-      const session = await prepareGeneratedAssets(result.session);
-      props.onCreated(session);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Case Seed import failed.");
-      setCompiling(false);
-    }
-  };
-
-  if (compiling) {
-    const stage = COMPILATION_STAGES[compileStageIndex]!;
-    return (
-      <main className={styles.compiler} data-theme="dark">
-        <button type="button" onClick={props.onCancel} className={styles.exitButton}>
-          ← Leave compilation
-        </button>
-        <section className={styles.compilerCard} aria-live="polite">
-          <div className={styles.casePrism} aria-hidden="true">◇</div>
-          <p className={styles.eyebrow}>PRISM / Casekeeper</p>
-          <h1>Compiling your murder mystery</h1>
-          <strong>{stage[1]}</strong>
-          <div className={styles.compileRail} aria-label={stage[1]}>
-            {COMPILATION_STAGES.map(([id, label], index) => (
-              <span
-                key={id}
-                data-complete={index < compileStageIndex ? "true" : undefined}
-                data-active={index === compileStageIndex ? "true" : undefined}
-                title={label}
-              />
-            ))}
-          </div>
-          <p className={styles.compilePromise}>Your private notebook will be waiting when the doors open.</p>
-          <small>The mansion, testimony, and three valid proof routes are being checked before play.</small>
-          {error ? <p className={styles.error}>{error}</p> : null}
-        </section>
-      </main>
-    );
-  }
-
-  return (
-    <main className={styles.setup} data-theme="dark">
-      <header className={styles.setupHeader}>
-        <button type="button" onClick={props.onCancel} className={styles.exitButton}>
-          ← Debate Studio
-        </button>
-        <div>
-          <p className={styles.eyebrow}>PRISM / Debate</p>
-          <h1>Whodunnit?</h1>
-          <span>A Murder Mystery</span>
-        </div>
-        <small>Fictional, non-canonical case</small>
-      </header>
-
-      <div className={styles.setupGrid}>
-        <section className={styles.setupMain}>
-          <div className={styles.setupSection} data-tutorial-target="whodunnit-preset">
-            <header>
-              <div><small>01</small><h2>Choose the scale</h2></div>
-              <span>{resolved.value?.actionBudget ?? "—"} actions</span>
-            </header>
-            <div className={styles.presetGrid}>
-              {DEBATE_MYSTERY_PRESETS.map((option) => (
-                <button
-                  type="button"
-                  key={option.id}
-                  data-selected={preset === option.id ? "true" : undefined}
-                  onClick={() => choosePreset(option.id)}
-                >
-                  <strong>{option.id[0]!.toUpperCase() + option.id.slice(1)}</strong>
-                  <span>{option.floors} floor{option.floors === 1 ? "" : "s"} · {option.rooms} rooms</span>
-                  <small>{option.suspects} suspects · {option.classicActions} Classic actions</small>
-                </button>
-              ))}
-              <button
-                type="button"
-                data-selected={preset === "custom" ? "true" : undefined}
-                onClick={() => choosePreset("custom")}
-              >
-                <strong>Custom</strong>
-                <span>1–3 floors · 5–18 rooms</span>
-                <small>4–8 suspects</small>
-              </button>
-            </div>
-            {preset === "custom" ? (
-              <div className={styles.advancedGrid}>
-                <label>Floors <input type="number" min={1} max={3} value={floors} onChange={(event) => { const nextFloors = Math.max(1, Math.min(3, Number(event.currentTarget.value) || 1)); setFloors(nextFloors); setTotalRooms(Math.min(18, Math.max(customSuspectCount + 1, nextFloors * 5))); }} /></label>
-                <label>Rooms <input type="number" min={Math.max(5, customSuspectCount + 1)} max={18} value={totalRooms} onChange={(event) => setTotalRooms(Number(event.currentTarget.value))} /></label>
-                <label>Suspects <input type="number" min={4} max={8} value={customSuspectCount} onChange={(event) => setCustomSuspectCount(Number(event.currentTarget.value))} /></label>
-              </div>
-            ) : null}
-          </div>
-
-          <div className={styles.setupSection} data-tutorial-target="whodunnit-cast">
-            <header>
-              <div><small>02</small><h2>Cast the suspects</h2></div>
-              <div className={styles.mysteryCastHeaderActions}>
-                <span>{suspectBotIds.length} / {targetSuspects}</span>
-                <button
-                  type="button"
-                  onClick={() => void randomizeCast()}
-                  disabled={!canRandomizeCast}
-                  className={styles.castRandomizeButton}
-                  aria-label="Randomly assign all Whodunnit cast roles"
-                  title={canRandomizeCast
-                    ? `Pick ${targetSuspects} suspects plus 2 counsel bots`
-                    : `Need at least ${whodunnitCastRequirement} Library bots`}
-                  data-tutorial-target="whodunnit-random-cast"
-                >
-                  <span aria-hidden="true">
-                    {props.renderBotGlyph("dice", { size: 18, strokeWidth: 1.8 })}
-                  </span>
-                  <strong>Surprise me</strong>
-                  <small>Random cast</small>
-                </button>
-              </div>
-            </header>
-            <p>Every selected bot remains active. PRISM authors the victim, then secretly assigns the murderer.</p>
-            <div className={styles.botGrid}>
-              {props.bots.map((bot) => {
-                const suspect = suspectBotIds.includes(bot.id);
-                const counsel = bot.id === prosecutorPartnerBotId || bot.id === rivalDefenseBotId;
-                const directedSetupTarget =
-                  createBotDirectedSetupRefractTarget({
-                    id: `whodunnit-setup-anchor-${bot.id}`,
-                    label: `Build a Whodunnit around ${bot.name}`,
-                    botId: bot.id,
-                    botName: bot.name,
-                    disabled: () => !canRandomizeCast,
-                    run: randomizeCast,
-                  });
-                return (
-                  <PrismRefractTarget
-                    key={bot.id}
-                    target={directedSetupTarget}
-                  >
-                    {(binding) => (
-                      <button
-                        {...binding}
-                        type="button"
-                        data-selected={suspect ? "true" : undefined}
-                        aria-disabled={counsel}
-                        onClick={() => toggleSuspect(bot.id)}
-                        style={{ "--mystery-bot-color": bot.color ?? "#9c7cff" } as CSSProperties}
-                        aria-pressed={suspect}
-                      >
-                        <span>{props.renderBotGlyph(bot.glyph, { size: 23, strokeWidth: 1.5 })}</span>
-                        <strong>{bot.name}</strong>
-                        <small>{counsel ? "Counsel" : suspect ? "Suspect" : "Available"}</small>
-                      </button>
-                    )}
-                  </PrismRefractTarget>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className={styles.setupSection} data-tutorial-target="whodunnit-counsel">
-            <header><div><small>03</small><h2>Choose counsel</h2></div></header>
-            <div className={styles.counselGrid}>
-              <label>
-                <span>Prosecutor partner</span>
-                <select value={prosecutorPartnerBotId} onChange={(event) => setProsecutorPartnerBotId(event.currentTarget.value)}>
-                  <option value="">Choose your partner</option>
-                  {props.bots.filter((bot) => !suspectBotIds.includes(bot.id) && bot.id !== rivalDefenseBotId).map((bot) => <option key={bot.id} value={bot.id}>{bot.name}</option>)}
-                </select>
-                <small>Reads discovered facts and your fallible notebook during consultation.</small>
-              </label>
-              <label>
-                <span>Rival defense</span>
-                <select value={rivalDefenseBotId} onChange={(event) => setRivalDefenseBotId(event.currentTarget.value)}>
-                  <option value="">Choose defense counsel</option>
-                  {props.bots.filter((bot) => !suspectBotIds.includes(bot.id) && bot.id !== prosecutorPartnerBotId).map((bot) => <option key={bot.id} value={bot.id}>{bot.id === suggestedDefenseBotId ? `PRISM suggests · ${bot.name}` : bot.name}</option>)}
-                </select>
-                <small>Receives only the admissible public record and argues its strongest alternative.</small>
-              </label>
-            </div>
-          </div>
-        </section>
-
-        <aside className={styles.setupAside}>
-          <div className={styles.caseDial}>
-            <p className={styles.eyebrow}>Case direction</p>
-            <label>Inspiration <input value={inspiration} maxLength={240} onChange={(event) => setInspiration(event.currentTarget.value)} placeholder="Surprise Me" /></label>
-            <label>Difficulty <select value={difficulty} onChange={(event) => setDifficulty(event.currentTarget.value as DebateMysteryDifficulty)}><option value="casual">Casual</option><option value="classic">Classic</option><option value="mastermind">Mastermind</option></select></label>
-            <label>Room art <select value={artMode} onChange={(event) => setArtMode(event.currentTarget.value as DebateMysteryArtMode)}><option value="bundled">Bundled PRISM rooms</option><option value="generated">Generated reskins</option></select></label>
-            <button type="button" className={styles.seedButton} onClick={() => setNonce(mysteryId("recipe"))}>
-              <span>Recipe Seed</span><code>{recipeSeed}</code><small>Change the recipe</small>
-            </button>
-          </div>
-          <div className={styles.castSummary}>
-            <strong>The ensemble</strong>
-            {[...selectedBots].filter(Boolean).map((id) => {
-              const bot = botById.get(id);
-              if (!bot) return null;
-              return <span key={id}><i style={{ background: bot.color ?? "#9c7cff" }} />{bot.name}</span>;
-            })}
-          </div>
-          <details className={styles.seedImport} data-tutorial-target="whodunnit-seed-import">
-            <summary>Import a shared Case Seed</summary>
-            <textarea
-              value={importCode}
-              onChange={(event) => {
-                setImportCode(event.currentTarget.value);
-                setInspectedSeed(null);
-              }}
-              placeholder="Paste the Case Seed JSON…"
-            />
-            <button type="button" disabled={!importCode.trim()} onClick={() => void inspectSeed()}>
-              Inspect without spoilers
-            </button>
-            {inspectedSeed ? (
-              <div className={styles.seedMapping}>
-                <strong>{inspectedSeed.title}</strong>
-                <small>{inspectedSeed.floors} floor{inspectedSeed.floors === 1 ? "" : "s"} · {inspectedSeed.totalRooms} rooms · {inspectedSeed.seats.length} hidden seats</small>
-                {inspectedSeed.seats.map((seat, index) => (
-                  <label key={seat.seatId}>
-                    Role seat {index + 1}
-                    <select
-                      value={importAssignments[seat.seatId] ?? ""}
-                      onChange={(event) => {
-                        const value = event.currentTarget.value;
-                        setImportAssignments((current) => ({ ...current, [seat.seatId]: value }));
-                      }}
-                    >
-                      <option value="">Assign a Library bot</option>
-                      {props.bots
-                        .filter((bot) => bot.id !== prosecutorPartnerBotId && bot.id !== rivalDefenseBotId)
-                        .map((bot) => <option key={bot.id} value={bot.id}>{bot.name}</option>)}
-                    </select>
-                  </label>
-                ))}
-                <button type="button" onClick={() => void importCase()}>
-                  Compile imported case
-                </button>
-              </div>
-            ) : null}
-          </details>
-            {error || resolved.error || castPoolError
-              ? <p className={styles.error}>{error ?? resolved.error ?? castPoolError}</p> : null}
-          <button
-            type="button"
-            className={styles.compileButton}
-            disabled={!resolved.value || props.bots.length < whodunnitCastRequirement}
-            onClick={() => void startCase()}
-            data-tutorial-target="whodunnit-compile"
-          >
-            <span aria-hidden="true">◇</span>
-            Compile the case
-            <small>Settings and cast freeze here</small>
-          </button>
-        </aside>
-      </div>
-    </main>
-  );
-}
 
 interface NotebookResponse {
   notebook: DebateMysteryNotebookV2;
@@ -1061,6 +440,9 @@ interface DeskReference {
   kind: DeskReferenceKind;
   id: string;
   label: string;
+  origin: string;
+  detail: string;
+  documentKind: Exclude<DebateEvidenceDocumentKind, "url"> | null;
 }
 
 type MysteryClientAction<T = DebateMysteryActionRequestV1> = T extends unknown
@@ -1181,6 +563,7 @@ export function DebateMysteryPlay(
     useState<MysterySpeechTiming | null>(null);
   const playedInterviewMessageRef = useRef(state.interviewLog.at(-1)?.id ?? null);
   const interviewTranscriptRef = useRef<HTMLDivElement | null>(null);
+  const investigationAssetRootRef = useRef<HTMLElement | null>(null);
   const [partnerQuestion, setPartnerQuestion] = useState("");
   const [notebook, setNotebook] = useState<DebateMysteryNotebookV2 | null>(null);
   const [deskOpen, setDeskOpen] = useState(false);
@@ -1217,6 +600,12 @@ export function DebateMysteryPlay(
 
   const currentRoom =
     state.rooms.find((room) => room.id === state.currentRoomId) ?? state.rooms[0]!;
+  const currentInvestigation =
+    state.activeActivity?.kind === "investigation" && state.activeActivity.roomId === currentRoom.id
+      ? state.activeActivity
+      : null;
+  const canInspectCurrentPass =
+    currentInvestigation?.actionCommitted === true || state.actionsRemaining > 0;
   const selectedRoom =
     state.rooms.find((room) => room.id === selectedRoomId) ?? currentRoom;
   const template = roomTemplate(currentRoom.templateId);
@@ -1595,12 +984,13 @@ export function DebateMysteryPlay(
           idempotencyKey: mysteryId(`mystery-${action.action}`),
         }),
       );
-      onSessionChange(result.session);
       if (
         result.session.format === "turnabout" &&
         result.session.formatState.format === "turnabout" &&
         result.session.formatState.mysteryTrial
       ) {
+        releaseDebateMysteryInvestigationMedia(investigationAssetRootRef.current);
+        onSessionChange(result.session);
         setTheoryBoardOpen(false);
         playMysterySfx("theory");
         announceAction(
@@ -1608,6 +998,7 @@ export function DebateMysteryPlay(
         );
         return true;
       }
+      onSessionChange(result.session);
       const next = result.session.formatState as DebateWhodunnitFormatStateV1;
       if (next.playPhase === "theory") {
         setTheoryBoardOpen(true);
@@ -1676,9 +1067,11 @@ export function DebateMysteryPlay(
                       ? "Actions exhausted. Theory Board opened."
                       : "Returned to the room."
                     : action.action === "inspect"
-                      ? next.rooms.find((room) => room.id === action.roomId)?.searched
-                        ? "All visible areas inspected."
-                        : "Area investigated."
+                      ? `${currentInvestigation?.actionCommitted
+                        ? "Area investigated · included in this search."
+                        : "Search committed · 1 action."}${next.rooms.find((room) => room.id === action.roomId)?.searched
+                        ? " All visible areas inspected."
+                        : ""}`
                       : action.action === "use_access_item"
                         ? next.accessHistory.at(-1)?.observation ?? "Access attempt recorded."
                         : action.action === "interview"
@@ -1921,12 +1314,38 @@ export function DebateMysteryPlay(
   };
 
   const revealedSuspects = state.suspects.filter((suspect) => state.metSuspectSeatIds.includes(suspect.seatId));
+  const theoryAccused = revealedSuspects.find((suspect) => suspect.seatId === theory.culpritSeatId) ?? null;
+  const theoryAccomplice = revealedSuspects.find((suspect) => suspect.seatId === theory.accompliceSeatId) ?? null;
   const selectedDeskSuspect = revealedSuspects.find((suspect) => suspect.seatId === selectedSuspectSeatId) ?? null;
   const selectedDeskNote = selectedDeskSuspect ? notebook?.suspectNotes.find((note) => note.seatId === selectedDeskSuspect.seatId)?.text ?? "" : "";
   const deskReferences: DeskReference[] = [
-    ...state.leads.map((lead) => ({ kind: "lead" as const, id: lead.id, label: lead.title })),
-    ...state.discoveredEvidence.map((item) => ({ kind: "evidence" as const, id: item.id, label: mysteryEvidenceTitle(item.title) })),
-    ...state.testimony.map((item) => ({ kind: "testimony" as const, id: item.id, label: `Testimony · ${mysteryTestimonySpeaker(state, item.speakerSeatId)?.name ?? "Witness"}` })),
+    ...state.leads.map((lead) => ({
+      kind: "lead" as const,
+      id: lead.id,
+      label: lead.title,
+      origin: `Case lead · revision ${lead.revision}`,
+      detail: lead.summary,
+      documentKind: "brave" as const,
+    })),
+    ...state.discoveredEvidence.map((item) => ({
+      kind: "evidence" as const,
+      id: item.id,
+      label: mysteryEvidenceTitle(item.title),
+      origin: "Physical evidence",
+      detail: mysteryEvidenceObservation(item.observation),
+      documentKind: null,
+    })),
+    ...state.testimony.map((item) => {
+      const speaker = mysteryTestimonySpeaker(state, item.speakerSeatId)?.name ?? "Witness";
+      return {
+        kind: "testimony" as const,
+        id: item.id,
+        label: `Testimony · ${speaker}`,
+        origin: `Sworn testimony · ${speaker}`,
+        detail: item.exactQuote,
+        documentKind: "scholar" as const,
+      };
+    }),
   ];
   const selectedDeskRoom = selectedDeskSuspect ? state.rooms.find((room) => room.id === selectedDeskSuspect.roomId) ?? null : null;
   const selectedDeskMessages = selectedDeskSuspect ? state.interviewLog.filter((message) => message.suspectSeatId === selectedDeskSuspect.seatId) : [];
@@ -1944,7 +1363,7 @@ export function DebateMysteryPlay(
     theoryBoardOpen,
   });
   const theoryChecklist = [
-    { label: "Accused", complete: Boolean(theory.culpritSeatId) },
+    { label: "Accused", complete: Boolean(theoryAccused) },
     { label: "Method", complete: Boolean(theory.method.trim()) },
     { label: "Motive", complete: Boolean(theory.motive.trim()) },
     { label: "Opportunity", complete: Boolean(theory.opportunity.trim()) },
@@ -2110,20 +1529,29 @@ export function DebateMysteryPlay(
     const bounds = event.currentTarget.getBoundingClientRect();
     const x = ((event.clientX - bounds.left) / Math.max(1, bounds.width)) * 100;
     const y = ((event.clientY - bounds.top) / Math.max(1, bounds.height)) * 100;
-    if (!armedAccessItemId && (event.target as Element).closest('[data-mystery-region-id][data-inspected="true"]')) {
+    if ((event.target as Element).closest("[data-mystery-lens-chrome]")) {
       setLens({ x, y, proximity: 0, visible: false, regionId: null });
       return;
     }
     const nearest = nearestInvestigationRegion(x, y);
-    if (nearest.inspected) {
-      setLens({ x, y, proximity: 0, visible: false, regionId: nearest.regionId });
-      return;
-    }
-    setLens({ x, y, proximity: Number.isFinite(nearest.distance) ? Math.max(0, 1 - nearest.distance / 26) : 0, visible: nearest.regionId !== null, regionId: nearest.regionId });
+    setLens({
+      x,
+      y,
+      proximity: !nearest.inspected && Number.isFinite(nearest.distance)
+        ? Math.max(0, 1 - nearest.distance / 26)
+        : 0,
+      visible: true,
+      regionId: nearest.regionId,
+    });
   };
 
   const deskReferenceFor = (kind: DeskReferenceKind, id: string): DeskReference | null =>
     deskReferences.find((reference) => reference.kind === kind && reference.id === id) ?? null;
+
+  const placeDeskReference = (kind: DeskReferenceKind, id: string): void => {
+    const reference = deskReferenceFor(kind, id);
+    if (reference) placeOnDesk(reference);
+  };
 
   const selectSuspectFolder = (seatId: string, revealed: boolean): void => {
     if (!revealed) {
@@ -2149,18 +1577,58 @@ export function DebateMysteryPlay(
     announceAction(`${reference.label} added to the filed theory record.`);
   };
 
-  const renderSuspectFolderRack = (surface: "investigation" | "theory"): React.JSX.Element => (
-    <section className={styles.suspectFolderRack} data-surface={surface} aria-label="Suspect folders">
-      <header><p className={styles.eyebrow}>Gallery</p><strong>Suspect folders</strong><small>Full HD interview reveals a folder.</small></header>
-      <div>{state.suspects.map((suspect) => {
+  const renderSuspectFolderRack = (surface: "investigation" | "theory"): React.JSX.Element => {
+    const folderSuspects = surface === "theory" ? revealedSuspects : state.suspects;
+    return <section className={styles.suspectFolderRack} data-surface={surface} aria-label={surface === "theory" ? "Interviewed suspect folders" : "Suspect folders"}>
+      <header><p className={styles.eyebrow}>Gallery</p><strong>{surface === "theory" ? "Interviewed folders" : "Suspect folders"}</strong><small>Full HD interview reveals a folder.</small></header>
+      <div>{folderSuspects.map((suspect) => {
         const revealed = state.metSuspectSeatIds.includes(suspect.seatId);
         return <button key={suspect.seatId} type="button" className={styles.suspectFolder} data-revealed={revealed ? "true" : undefined} aria-pressed={selectedDeskSuspect?.seatId === suspect.seatId} onClick={() => selectSuspectFolder(suspect.seatId, revealed)}>
           {revealed ? <span className={styles.folderAvatar}>{props.renderMysteryBotAvatar(mysteryBotForSuspect(suspect), "mini", { demeanor: "suspect", blinkEnabled: true })}</span> : <span className={styles.folderUnknown} aria-hidden="true"><i /><b>?</b></span>}
           <strong>{revealed ? suspect.name : "Unknown suspect"}</strong><small>{revealed ? state.rooms.find((room) => room.id === suspect.roomId)?.name ?? "Known room" : "Full HD interview required"}</small>
         </button>;
       })}</div>
-    </section>
-  );
+    </section>;
+  };
+
+  const renderDeskReference = (
+    reference: DeskReference,
+    location: "tray" | "comparison",
+  ): React.JSX.Element => {
+    const evidence = reference.kind === "evidence"
+      ? state.discoveredEvidence.find((item) => item.id === reference.id) ?? null
+      : null;
+    const visual = reference.documentKind ? <DebateEvidenceDocument
+        id={reference.id}
+        kind={reference.documentKind}
+        origin={reference.origin}
+        title={reference.label}
+        snippet={reference.detail}
+        rotationDeg={debateEvidencePropRotationDeg(reference.id) / (location === "tray" ? 2 : 3)}
+        presentation="desk"
+        theme="dark"
+      /> : evidence ? <span className={styles.deskEvidenceObject}><MysteryEvidenceVisual item={evidence} className={styles.deskEvidenceAsset} /><strong>{reference.label}</strong></span> : null;
+    const dragReference = (event: ReactDragEvent<HTMLElement>): void => {
+      event.dataTransfer.setData("application/x-prism-desk-reference", `${reference.kind}:${reference.id}`);
+    };
+    return location === "tray" ? <button
+      type="button"
+      className={styles.deskPlaceable}
+      data-kind={reference.kind}
+      data-location={location}
+      draggable
+      onDragStart={dragReference}
+      onClick={() => placeOnDesk(reference)}
+      aria-label={`Place ${reference.label}`}
+    >{visual}</button> : <div
+      className={styles.deskPlaceable}
+      data-kind={reference.kind}
+      data-location={location}
+      draggable
+      onDragStart={dragReference}
+      aria-label={`Compared ${reference.label}`}
+    >{visual}</div>;
+  };
 
   const renderComparisonSlots = (surface: "investigation" | "theory"): React.JSX.Element => (
     <div className={styles.comparisonSlots} aria-label={`${surface === "theory" ? "Theory " : ""}comparison slots`}>
@@ -2170,7 +1638,7 @@ export function DebateMysteryPlay(
         if (reference) placeOnDeskAt(reference, index as 0 | 1);
       }}>
         <small>Comparison {index + 1}</small>
-        {slot ? <><strong>{slot.label}</strong><button type="button" onClick={() => setComparisonSlots((current) => index === 0 ? [null, current[1]] : [current[0], null])}>Remove</button></> : <span>Place a discovered record here</span>}
+        {slot ? <><div className={styles.comparisonPlaceable}>{renderDeskReference(slot, "comparison")}</div><button type="button" className={styles.removeComparison} onClick={() => setComparisonSlots((current) => index === 0 ? [null, current[1]] : [current[0], null])}>Return to tray</button></> : <span>Drag a document or evidence object here</span>}
       </div>)}
     </div>
   );
@@ -2215,7 +1683,16 @@ export function DebateMysteryPlay(
       {deskOpen ? <div className={styles.deskSurface}>
         {renderComparisonSlots(surface)}
         <div className={styles.deskWorkspace}>
-          <nav aria-label="Desk records">{deskReferences.map((reference) => <button key={`${reference.kind}:${reference.id}`} type="button" draggable onDragStart={(event) => event.dataTransfer.setData("application/x-prism-desk-reference", `${reference.kind}:${reference.id}`)} onClick={() => placeOnDesk(reference)}>{reference.label}<small>Place on desk</small></button>)}</nav>
+          <aside className={styles.deskTrays} aria-label="Desk records">
+            <section className={styles.deskDocumentTray} aria-label="Documents">
+              <header><strong>Documents</strong><small>Drag clippings and testimony folios onto the desk.</small></header>
+              <div>{deskReferences.filter((reference) => reference.documentKind).map((reference) => <div key={`${reference.kind}:${reference.id}`}>{renderDeskReference(reference, "tray")}</div>)}</div>
+            </section>
+            <section className={styles.deskEvidenceTray} aria-label="Evidence objects">
+              <header><strong>Evidence</strong><small>Handle the recovered objects directly.</small></header>
+              <div>{deskReferences.filter((reference) => reference.kind === "evidence").map((reference) => <div key={`${reference.kind}:${reference.id}`}>{renderDeskReference(reference, "tray")}</div>)}</div>
+            </section>
+          </aside>
           {renderSelectedSuspectFile(surface)}
         </div>
       </div> : null}
@@ -2225,7 +1702,7 @@ export function DebateMysteryPlay(
   );
 
   return (
-    <main className={styles.play} data-theme="dark" data-phase={state.playPhase}>
+    <main ref={investigationAssetRootRef} className={styles.play} data-theme="dark" data-phase={state.playPhase}>
       <SessionAtmosphereLayer
         active={Boolean(
           props.audioEnabled &&
@@ -2343,7 +1820,7 @@ export function DebateMysteryPlay(
             <article className={styles.testimonyRail}>
               <p className={styles.eyebrow}>Exact testimony / {mysteryTestimonySpeaker(state, activeTestimony.speakerSeatId)?.name ?? "Witness"}</p>
               <blockquote>{activeTestimony.exactQuote}</blockquote>
-              <button type="button" onClick={() => placeOnDesk({ kind: "testimony", id: activeTestimony.id, label: `Testimony · ${mysteryTestimonySpeaker(state, activeTestimony.speakerSeatId)?.name ?? "Witness"}` })}>Place on desk</button>
+              <button type="button" onClick={() => placeDeskReference("testimony", activeTestimony.id)}>Place on desk</button>
               <div className={styles.courtRecord}>
                 {courtBeats.map((entry, index) => <article key={`${entry.speaker}:${index}:${entry.body}`} data-speaker={entry.speaker.toLocaleLowerCase()}><strong>{entry.speaker}</strong><p>{entry.body}</p></article>)}
               </div>
@@ -2363,37 +1840,50 @@ export function DebateMysteryPlay(
       ) : theoryMode ? (
         <section className={styles.theoryBoard} data-tutorial-target="whodunnit-theory-board">
           <header>{state.playPhase !== "theory" ? <button type="button" className={styles.backToMansion} data-ui-sfx="none" onClick={closeTheoryBoard}>← Return to mansion</button> : null}<p className={styles.eyebrow}>Theory Board</p><h2>Build the chain. Then file.</h2><p>{state.playPhase === "theory" ? "Your investigation actions are exhausted. The mansion record is now closed, but your partner remains available while you build the strongest case possible." : "Filing is free, freezes this theory, and begins the mandatory trial—even if the accusation is wrong."}</p><div className={styles.theoryProgress} aria-label={`${theoryReadyCount} of ${theoryChecklist.length} theory sections ready`}>{theoryChecklist.map((item, index) => <span key={item.label} data-complete={item.complete ? "true" : undefined}><i>{item.complete ? "✓" : index + 1}</i>{item.label}</span>)}</div></header>
-          {state.playPhase === "continuance" ? <div className={styles.continuance}>PRISM granted one continuance. The mansion is preserved and {state.actionsRemaining} emergency actions are available.</div> : null}
-          <div className={styles.theoryFields}>
-            <label>Culprit<select value={theory.culpritSeatId ?? ""} onChange={(event) => {
-              const culpritSeatId = event.currentTarget.value || null;
-              setTheory((current) => ({ ...current, culpritSeatId }));
-            }}><option value="">Choose the accused</option>{state.suspects.map((suspect) => <option key={suspect.seatId} value={suspect.seatId}>{suspect.name}</option>)}</select></label>
-            {(["method", "motive", "opportunity"] as const).map((kind, index) => (
-              <fieldset key={kind} className={styles.theoryClaimPicker}>
-                <legend><b>{index + 2}</b> {kind[0]!.toUpperCase() + kind.slice(1)}</legend>
-                <div>{theoryClaimOptions[kind].length ? theoryClaimOptions[kind].map((option) => (
-                  <button key={option.id} type="button" aria-pressed={theory[kind] === option.value} onClick={() => setTheory((current) => ({ ...current, [kind]: option.value }))}>
-                    <strong>{option.sourceLabel}</strong><span>{option.value}</span>
-                  </button>
-                )) : <p>Discover a public record before filing this claim.</p>}</div>
-              </fieldset>
-            ))}
-            <label>Optional accomplice<select value={theory.accompliceSeatId ?? ""} onChange={(event) => {
-              const accompliceSeatId = event.currentTarget.value || null;
-              setTheory((current) => ({ ...current, accompliceSeatId }));
-            }}><option value="">No accomplice alleged</option>{state.suspects.filter((suspect) => suspect.seatId !== theory.culpritSeatId).map((suspect) => <option key={suspect.seatId} value={suspect.seatId}>{suspect.name}</option>)}</select></label>
+          <div className={styles.theoryWorkspace}>
+            <div className={styles.theoryCaseBuilder}>
+              <section className={styles.theoryAccusation} aria-labelledby="theory-accusation-heading">
+                <header><div><p className={styles.eyebrow}>1 · Accusation</p><h3 id="theory-accusation-heading">Name only someone you&apos;ve met.</h3></div><small>{revealedSuspects.length} of {state.suspects.length} interviewed</small></header>
+                {revealedSuspects.length ? <div className={styles.theorySuspectChoices}>{revealedSuspects.map((suspect) => {
+                  const room = state.rooms.find((candidate) => candidate.id === suspect.roomId);
+                  return <button key={suspect.seatId} type="button" data-selected={theoryAccused?.seatId === suspect.seatId ? "true" : undefined} aria-pressed={theoryAccused?.seatId === suspect.seatId} onClick={() => setTheory((current) => ({ ...current, culpritSeatId: current.culpritSeatId === suspect.seatId ? null : suspect.seatId, accompliceSeatId: current.accompliceSeatId === suspect.seatId ? null : current.accompliceSeatId }))}>
+                    <span className={styles.theorySuspectAvatar}>{props.renderMysteryBotAvatar(mysteryBotForSuspect(suspect), "mini", { demeanor: "suspect", blinkEnabled: true })}</span><span><strong>{suspect.name}</strong><small>{room?.name ?? "Interviewed suspect"}</small></span>
+                  </button>;
+                })}</div> : <p className={styles.theoryEmptyState}>No suspect has been interviewed. Return to the mansion and meet someone before filing an accusation.</p>}
+                {revealedSuspects.length > 1 ? <label>Optional accomplice<select value={theoryAccomplice?.seatId ?? ""} onChange={(event) => {
+                  const accompliceSeatId = event.currentTarget.value || null;
+                  setTheory((current) => ({ ...current, accompliceSeatId }));
+                }}><option value="">No accomplice alleged</option>{revealedSuspects.filter((suspect) => suspect.seatId !== theoryAccused?.seatId).map((suspect) => <option key={suspect.seatId} value={suspect.seatId}>{suspect.name}</option>)}</select></label> : null}
+              </section>
+              <section className={styles.theoryClaims} aria-label="Build the theory chain">
+                {(["method", "motive", "opportunity"] as const).map((kind, index) => (
+                  <fieldset key={kind} className={styles.theoryClaimPicker}>
+                    <legend><b>{index + 2}</b> {kind[0]!.toUpperCase() + kind.slice(1)}</legend>
+                    <div>{theoryClaimOptions[kind].length ? theoryClaimOptions[kind].map((option) => (
+                      <button key={option.id} type="button" aria-pressed={theory[kind] === option.value} onClick={() => setTheory((current) => ({ ...current, [kind]: option.value }))}>
+                        <strong>{option.sourceLabel}</strong><span>{option.value}</span>
+                      </button>
+                    )) : <p>Discover a public record before filing this claim.</p>}</div>
+                  </fieldset>
+                ))}
+              </section>
+            </div>
+            <aside className={styles.theoryRecord} aria-label="Filed record">
+              <header><p className={styles.eyebrow}>Filed record</p><strong>{theory.evidenceIds.length + theory.testimonyIds.length} item{theory.evidenceIds.length + theory.testimonyIds.length === 1 ? "" : "s"} selected</strong><small>Choose only from the public record.</small></header>
+              <div className={styles.proofAttach}>
+                <fieldset><legend>Physical evidence</legend>{state.discoveredEvidence.length ? state.discoveredEvidence.map((item) => <label key={item.id}><input type="checkbox" checked={theory.evidenceIds.includes(item.id)} onChange={() => setTheory((current) => ({ ...current, evidenceIds: current.evidenceIds.includes(item.id) ? current.evidenceIds.filter((id) => id !== item.id) : [...current.evidenceIds, item.id] }))} /><MysteryEvidenceVisual item={item} /> {mysteryEvidenceTitle(item.title)}</label>) : <p>Search rooms to add evidence to the record.</p>}</fieldset>
+                <fieldset><legend>Testimony</legend>{state.testimony.length ? state.testimony.map((item) => {
+                  const speaker = mysteryTestimonySpeaker(state, item.speakerSeatId);
+                  return <label key={item.id} className={styles.theoryTestimony}><input type="checkbox" checked={theory.testimonyIds.includes(item.id)} onChange={() => setTheory((current) => ({ ...current, testimonyIds: current.testimonyIds.includes(item.id) ? current.testimonyIds.filter((id) => id !== item.id) : [...current.testimonyIds, item.id] }))} /><span><strong style={{ "--suspect-color": speaker?.color ?? "#a98cff" } as CSSProperties}>{speaker?.name ?? "Witness"}</strong><q>{item.exactQuote}</q></span></label>;
+                }) : <p>Interview suspects to add exact testimony.</p>}</fieldset>
+              </div>
+              {renderPartnerConsultation("theory")}
+            </aside>
           </div>
-          <div className={styles.proofAttach}>
-            <fieldset><legend>Physical evidence</legend>{state.discoveredEvidence.length ? state.discoveredEvidence.map((item) => <label key={item.id}><input type="checkbox" checked={theory.evidenceIds.includes(item.id)} onChange={() => setTheory((current) => ({ ...current, evidenceIds: current.evidenceIds.includes(item.id) ? current.evidenceIds.filter((id) => id !== item.id) : [...current.evidenceIds, item.id] }))} /><MysteryEvidenceVisual item={item} /> {mysteryEvidenceTitle(item.title)}</label>) : <p>Search rooms to add evidence to the record.</p>}</fieldset>
-            <fieldset><legend>Testimony</legend>{state.testimony.length ? state.testimony.map((item) => {
-              const speaker = mysteryTestimonySpeaker(state, item.speakerSeatId);
-              return <label key={item.id} className={styles.theoryTestimony}><input type="checkbox" checked={theory.testimonyIds.includes(item.id)} onChange={() => setTheory((current) => ({ ...current, testimonyIds: current.testimonyIds.includes(item.id) ? current.testimonyIds.filter((id) => id !== item.id) : [...current.testimonyIds, item.id] }))} /><span><strong style={{ "--suspect-color": speaker?.color ?? "#a98cff" } as CSSProperties}>{speaker?.name ?? "Witness"}</strong><q>{item.exactQuote}</q></span></label>;
-            }) : <p>Interview suspects to add exact testimony.</p>}</fieldset>
+          <div className={styles.theoryResearch}>
+            {revealedSuspects.length ? renderSuspectFolderRack("theory") : null}
+            {renderInvestigatorDesk("theory")}
           </div>
-          {renderSuspectFolderRack("theory")}
-          {renderInvestigatorDesk("theory")}
-          {renderPartnerConsultation("theory")}
           <button type="button" className={styles.fileTheoryButton} disabled={busy || theoryReadyCount !== theoryChecklist.length} onClick={() => void perform({ action: "file_theory", theory })}>File accusation and prepare Turnabout</button>
         </section>
       ) : (
@@ -2470,7 +1960,29 @@ export function DebateMysteryPlay(
             <small>Choose where to descend. New rooms cost 1 action; revisits are free.</small>
           </section>
           <section className={styles.roomPanel} data-kind={currentRoom.kind ?? "undiscovered"} data-focus={suspectRoomFocus}>
-            <header><div><p className={styles.eyebrow}>{(currentRoom.kind ?? "room").replace("_", " ")}</p><h2>{currentRoom.name ?? "Undiscovered room"}</h2></div><div className={styles.roomHeaderActions}>{suspectRoomFocus === "search" ? <button type="button" className={styles.leaveInvestigation} data-ui-sfx="none" disabled={busy} onClick={() => void finishActiveActivity()}>← Return to room</button> : suspectRoomFocus === "observe" ? <button type="button" className={styles.backToMansion} data-ui-sfx="none" onClick={showMansion}>← Mansion</button> : null}</div></header>
+            <header>
+              <div><p className={styles.eyebrow}>{(currentRoom.kind ?? "room").replace("_", " ")}</p><h2>{currentRoom.name ?? "Undiscovered room"}</h2></div>
+              <div className={styles.roomHeaderActions}>{suspectRoomFocus === "search" ? <button type="button" className={styles.leaveInvestigation} data-ui-sfx="none" disabled={busy} onClick={() => void finishActiveActivity()}>← Return to room</button> : suspectRoomFocus === "observe" ? <button type="button" className={styles.backToMansion} data-ui-sfx="none" onClick={showMansion}>← Mansion</button> : null}</div>
+              {suspectRoomFocus === "search" ? <aside className={styles.roomCaseKit} data-mystery-room-control data-mystery-lens-chrome data-tutorial-target="whodunnit-room-case-kit" aria-label="Case Kit">
+                <header><strong>Case Kit</strong><span>{usableAccessItems.length}</span></header>
+                {usableAccessItems.length ? <div>{usableAccessItems.map((item) => (
+                  <button
+                    type="button"
+                    key={item.id}
+                    draggable={!busy}
+                    disabled={busy}
+                    aria-pressed={armedAccessItemId === item.id}
+                    title={`${item.title}: ${item.description}`}
+                    onDragStart={(event) => beginAccessItemDrag(event, item.id, item.title)}
+                    onClick={() => toggleAccessItem(item.id, item.title)}
+                  >
+                    <MysteryInventoryVisual item={item} />
+                    <strong>{item.title}</strong>
+                  </button>
+                ))}</div> : <p>No access tools recovered yet.</p>}
+                <small>{armedAccessItemId ? `Selected: ${state.inventoryItems.find((item) => item.id === armedAccessItemId)?.title ?? "access item"}` : discoveredRoomAccessTargets.length ? "Drag a tool to a padlock, or select one first." : "Recovered keys, codes, and remotes appear here."}</small>
+              </aside> : null}
+            </header>
             <div
               className={styles.roomScene}
               data-blurred={currentSuspect && suspectRoomFocus === "interview" ? "true" : undefined}
@@ -2479,7 +1991,7 @@ export function DebateMysteryPlay(
               style={{ "--room-deep": template.palette[0], "--room-mid": template.palette[1], "--room-light": template.palette[2] } as CSSProperties}
               onPointerMove={suspectRoomFocus === "search" ? moveInvestigationLens : undefined}
               onClickCapture={(event) => {
-                if (suspectRoomFocus !== "search" || event.detail === 0 || busy || state.actionsRemaining === 0) return;
+                if (suspectRoomFocus !== "search" || event.detail === 0 || busy || !canInspectCurrentPass) return;
                 // Let a real hotspot own its click. The scene-level fallback is only
                 // for the surrounding image, where we resolve the nearest region.
                 if ((event.target as Element).closest("[data-mystery-region-id], [data-mystery-room-control]")) return;
@@ -2521,14 +2033,14 @@ export function DebateMysteryPlay(
                   className={styles.hotspot}
                   style={{ clipPath: regionClip(region), zIndex: lens.regionId === region.id ? 5 : 4 }}
                   aria-label={`${currentRoom.inspectedRegionIds.includes(region.id) ? "Already inspected" : "Inspect"} the ${region.label}`}
-                  aria-disabled={currentRoom.inspectedRegionIds.includes(region.id) || state.actionsRemaining === 0}
+                  aria-disabled={currentRoom.inspectedRegionIds.includes(region.id) || !canInspectCurrentPass}
                   title={`${currentRoom.inspectedRegionIds.includes(region.id) ? "Already inspected" : "Inspect"}: ${region.label}`}
                   tabIndex={currentRoom.inspectedRegionIds.includes(region.id) ? -1 : 0}
                   data-inspected={currentRoom.inspectedRegionIds.includes(region.id) ? "true" : undefined}
                   data-mystery-region-id={region.id}
-                  disabled={busy || state.actionsRemaining === 0 || currentRoom.inspectedRegionIds.includes(region.id)}
+                  disabled={busy || !canInspectCurrentPass || currentRoom.inspectedRegionIds.includes(region.id)}
                   onClick={() => {
-                    if (state.actionsRemaining === 0 || currentRoom.inspectedRegionIds.includes(region.id)) return;
+                    if (!canInspectCurrentPass || currentRoom.inspectedRegionIds.includes(region.id)) return;
                     void perform({ action: "inspect", roomId: currentRoom.id, regionId: region.id });
                   }}
                   data-tutorial-target={region.id === firstInspectableRegionId ? "whodunnit-hotspot" : undefined}
@@ -2566,25 +2078,6 @@ export function DebateMysteryPlay(
                   <span>{target.targetLabel}</span>
                 </button>
               )) : null}
-              {suspectRoomFocus === "search" ? <aside className={styles.roomCaseKit} data-mystery-room-control data-tutorial-target="whodunnit-room-case-kit" aria-label="Case Kit">
-                <header><strong>Case Kit</strong><span>{usableAccessItems.length}</span></header>
-                {usableAccessItems.length ? <div>{usableAccessItems.map((item) => (
-                  <button
-                    type="button"
-                    key={item.id}
-                    draggable={!busy}
-                    disabled={busy}
-                    aria-pressed={armedAccessItemId === item.id}
-                    title={`${item.title}: ${item.description}`}
-                    onDragStart={(event) => beginAccessItemDrag(event, item.id, item.title)}
-                    onClick={() => toggleAccessItem(item.id, item.title)}
-                  >
-                    <MysteryInventoryVisual item={item} />
-                    <strong>{item.title}</strong>
-                  </button>
-                ))}</div> : <p>No access tools recovered yet.</p>}
-                <small>{armedAccessItemId ? `Selected: ${state.inventoryItems.find((item) => item.id === armedAccessItemId)?.title ?? "access item"}` : discoveredRoomAccessTargets.length ? "Drag a tool to a padlock, or select one first." : "Recovered keys, codes, and remotes appear here."}</small>
-              </aside> : null}
               {suspectRoomFocus === "search" ? <i
                 className={styles.investigationLens}
                 aria-hidden="true"
@@ -2645,10 +2138,10 @@ export function DebateMysteryPlay(
                 {currentSuspect ? <button type="button" disabled={busy} onClick={() => void beginSuspectInterview()}>Talk to {currentSuspect.name} · free</button> : null}
                 <button type="button" disabled={busy || currentRoom.searched} onClick={() => void beginRoomInvestigation()}>{currentRoom.searched ? "✓ Visible areas inspected" : "Investigate room · free"}</button>
               </div> : null}
-              <p className={styles.stageActionLine} role="status">{actionFeedback ?? (suspectRoomFocus === "search" ? currentRoom.searched ? `All visible areas inspected${discoveredRoomAccessTargets.length ? ` · ${discoveredRoomAccessTargets.length} unresolved ${discoveredRoomAccessTargets.length === 1 ? "lock" : "locks"}` : ""}.` : "Move the lens around the room; each inspection costs 1 action and never predicts what it will reveal." : currentSuspect ? "Choose whether to question the suspect or investigate the room." : currentRoom.searched ? "All visible areas in this room have been inspected." : "Open investigation view when you are ready to search this room; opening it is free.")}</p>
+              <p className={styles.stageActionLine} role="status">{actionFeedback ?? (suspectRoomFocus === "search" ? currentRoom.searched ? `All visible areas inspected${discoveredRoomAccessTargets.length ? ` · ${discoveredRoomAccessTargets.length} unresolved ${discoveredRoomAccessTargets.length === 1 ? "lock" : "locks"}` : ""}.` : currentInvestigation?.actionCommitted ? "Keep searching; every remaining hotspot in this pass is free." : "Move the lens around the room; the first hotspot costs 1 action, then every remaining hotspot in this pass is free." : currentSuspect ? "Choose whether to question the suspect or investigate the room." : currentRoom.searched ? "All visible areas in this room have been inspected." : "Open investigation view when you are ready to search this room; opening it is free.")}</p>
               </div> : null}
             </div>
-            {evidenceExhibitId ? (() => { const exhibit = state.discoveredEvidence.find((item) => item.id === evidenceExhibitId); return exhibit ? <section className={styles.evidenceExhibit} role="dialog" aria-label={`Evidence acquired: ${mysteryEvidenceTitle(exhibit.title)}`}><button type="button" aria-label="Close evidence preview" onClick={() => setEvidenceExhibitId(null)}>×</button><MysteryEvidenceVisual item={exhibit} /><div><small>Evidence acquired</small><h3>{mysteryEvidenceTitle(exhibit.title)}</h3><p>{mysteryEvidenceObservation(exhibit.observation)}</p><button type="button" onClick={() => placeOnDesk({ kind: "evidence", id: exhibit.id, label: mysteryEvidenceTitle(exhibit.title) })}>Place on desk</button></div></section> : null; })() : null}
+            {evidenceExhibitId ? (() => { const exhibit = state.discoveredEvidence.find((item) => item.id === evidenceExhibitId); return exhibit ? <section className={styles.evidenceExhibit} role="dialog" aria-label={`Evidence acquired: ${mysteryEvidenceTitle(exhibit.title)}`}><button type="button" aria-label="Close evidence preview" onClick={() => setEvidenceExhibitId(null)}>×</button><MysteryEvidenceVisual item={exhibit} /><div><small>Evidence acquired</small><h3>{mysteryEvidenceTitle(exhibit.title)}</h3><p>{mysteryEvidenceObservation(exhibit.observation)}</p><button type="button" onClick={() => placeDeskReference("evidence", exhibit.id)}>Place on desk</button></div></section> : null; })() : null}
           </section>
 
           <aside className={styles.caseRail} aria-label="Case file" hidden={!caseFileOpen}>
@@ -2663,8 +2156,7 @@ export function DebateMysteryPlay(
               <button type="button" aria-pressed={caseFileTab === "evidence"} onClick={() => setCaseFileTab("evidence")}>Evidence <span>{state.discoveredEvidence.length}</span></button>
               <button type="button" aria-pressed={caseFileTab === "testimony"} onClick={() => setCaseFileTab("testimony")}>Testimony <span>{state.testimony.length}</span></button>
             </nav>
-            {state.actionsRemaining === 0 ? <div className={styles.actionsExhausted}>{state.activeActivity ? "This final paid session remains open. Finish it when ready; leaving will close the mansion and open the Theory Board." : "Investigation actions are exhausted. The mansion is closed; use the Theory Board and consult your partner freely before filing."}</div> : null}
-            {state.continuanceUsed && state.playPhase === "continuance" ? <div className={styles.continuance}>PRISM granted the only continuance. You have {state.actionsRemaining} emergency actions before refiling.</div> : null}
+            {state.actionsRemaining === 0 ? <div className={styles.actionsExhausted}>{currentInvestigation?.actionCommitted ? "This paid search remains open. Inspect every remaining hotspot for free; leaving will close the mansion and open the Theory Board." : state.activeActivity ? "This final paid session remains open. Finish it when ready; leaving will close the mansion and open the Theory Board." : "Investigation actions are exhausted. The mansion is closed; use the Theory Board and consult your partner freely before filing."}</div> : null}
             {caseFileTab === "partner" ? renderPartnerConsultation("case-file") : null}
             {caseFileTab === "leads" ? <section className={styles.leadJournal} data-tutorial-target="whodunnit-lead-journal">
               <header><strong>Active leads</strong><span>{state.leads.length}</span></header>
@@ -2673,7 +2165,7 @@ export function DebateMysteryPlay(
                 return <article key={lead.id} data-status={lead.status}>
                   <div><small>{lead.status.replaceAll("_", " ")} · rev {lead.revision}</small><strong>{lead.title}</strong></div>
                   <p>{lead.summary}</p>
-                  <button type="button" onClick={() => placeOnDesk({ kind: "lead", id: lead.id, label: lead.title })}>Place on desk</button>
+                  <button type="button" onClick={() => placeDeskReference("lead", lead.id)}>Place on desk</button>
                   {annotations.map((annotation) => <div className={styles.leadAnnotation} key={annotation.id}>
                     <textarea aria-label={`Comment on ${lead.title}`} value={annotation.text} onChange={(event) => editLeadAnnotation(annotation.id, event.currentTarget.value)} onBlur={() => playMysterySfx("pencil")} />
                     <button type="button" aria-label={`Remove comment from ${lead.title}`} onClick={() => removeLeadAnnotation(annotation.id)}>×</button>
@@ -2707,8 +2199,8 @@ export function DebateMysteryPlay(
               )) : <p>No access items recovered.</p>}
               <small>During a room search, the Case Kit keeps usable tools close and discovered padlocks mark valid targets. Selecting a tool is free; applying it to a target costs 1 action.</small>
             </section> : null}
-            {caseFileTab === "evidence" ? <section className={styles.inventory}><header><strong>Evidence</strong><span>{state.discoveredEvidence.length}</span></header>{state.discoveredEvidence.length ? state.discoveredEvidence.map((item) => { const finding = state.forensicFindings.find((entry) => entry.evidenceId === item.id); const title = mysteryEvidenceTitle(item.title); const observation = mysteryEvidenceObservation(item.observation); return <article key={item.id}><MysteryEvidenceVisual item={item} /><div><strong>{title}</strong><p>{observation}</p>{finding ? <p className={styles.forensicFinding}>{finding.summary}</p> : item.isPhysical ? <button type="button" disabled={busy || state.actionsRemaining < 3} onClick={() => void perform({ action: "forensic", evidenceId: item.id })}>Forensics · 3 actions</button> : null}<button type="button" onClick={() => placeOnDesk({ kind: "evidence", id: item.id, label: title })}>Place on desk</button></div></article>; }) : <p>No physical evidence acquired.</p>}</section> : null}
-            {caseFileTab === "testimony" ? <section className={styles.testimonyList}><header><strong>Testimony</strong><span>{state.testimony.length}</span></header>{state.testimony.length ? state.testimony.map((item) => { const speaker = mysteryTestimonySpeaker(state, item.speakerSeatId); return <article key={item.id}><strong style={{ "--suspect-color": speaker?.color ?? "#a98cff" } as CSSProperties}>{speaker?.name ?? "Witness"}</strong><blockquote>{item.exactQuote}</blockquote><button type="button" onClick={() => placeOnDesk({ kind: "testimony", id: item.id, label: `Testimony · ${speaker?.name ?? "Witness"}` })}>Place on desk</button></article>; }) : <p>No testimony committed.</p>}</section> : null}
+            {caseFileTab === "evidence" ? <section className={styles.inventory}><header><strong>Evidence</strong><span>{state.discoveredEvidence.length}</span></header>{state.discoveredEvidence.length ? state.discoveredEvidence.map((item) => { const finding = state.forensicFindings.find((entry) => entry.evidenceId === item.id); const title = mysteryEvidenceTitle(item.title); const observation = mysteryEvidenceObservation(item.observation); return <article key={item.id}><MysteryEvidenceVisual item={item} /><div><strong>{title}</strong><p>{observation}</p>{finding ? <p className={styles.forensicFinding}>{finding.summary}</p> : item.isPhysical ? <button type="button" disabled={busy || state.actionsRemaining < 3} onClick={() => void perform({ action: "forensic", evidenceId: item.id })}>Forensics · 3 actions</button> : null}<button type="button" onClick={() => placeDeskReference("evidence", item.id)}>Place on desk</button></div></article>; }) : <p>No physical evidence acquired.</p>}</section> : null}
+            {caseFileTab === "testimony" ? <section className={styles.testimonyList}><header><strong>Testimony</strong><span>{state.testimony.length}</span></header>{state.testimony.length ? state.testimony.map((item) => { const speaker = mysteryTestimonySpeaker(state, item.speakerSeatId); return <article key={item.id}><strong style={{ "--suspect-color": speaker?.color ?? "#a98cff" } as CSSProperties}>{speaker?.name ?? "Witness"}</strong><blockquote>{item.exactQuote}</blockquote><button type="button" onClick={() => placeDeskReference("testimony", item.id)}>Place on desk</button></article>; }) : <p>No testimony committed.</p>}</section> : null}
             <button type="button" className={styles.openTheoryButton} onClick={() => void openTheoryBoard()}>Open Theory Board{state.actionsRemaining === 0 ? " · filing required" : ""}</button>
           </aside>
           {renderInvestigatorDesk("investigation")}

@@ -30,6 +30,7 @@ import {
   parseDebateMysteryEvidenceConfrontation,
   proposeDebateMysteryNotebookCleanup,
   resolveDebateMysteryEvidenceVisuals,
+  reuseDebateMysteryExhibitEvidence,
   resolveDebateMysteryQuestionMentions,
   resumeDebateMysteryCompilation,
 } from "../debate-mystery.ts";
@@ -245,6 +246,103 @@ async function bakeMysteryCourtToPlayerAction(
 }
 
 describe("Debate Whodunnit private/public boundary", () => {
+  it("isolates each suspect's interview history unless the investigator explicitly discloses testimony", async () => {
+    const db = testDb();
+    const provider = new MysteryProviderStub();
+    let session = await createDebateMysterySession(
+      db,
+      "user-1",
+      setup(db),
+      "mystery-private-interviews",
+      runtime(provider),
+    );
+    const [firstSuspect, secondSuspect] = session.formatState.suspects;
+    assert.ok(firstSuspect);
+    assert.ok(secondSuspect);
+
+    session = await applyDebateMysteryAction(db, "user-1", session.id, {
+      expectedRevision: session.revision,
+      idempotencyKey: "private-interview-travel-first",
+      action: "travel",
+      roomId: firstSuspect.roomId,
+    }, runtime(provider));
+    session = await beginInterview(
+      db,
+      provider,
+      session,
+      firstSuspect.seatId,
+      "private-interview-open-first",
+    );
+    provider.actorReply = "I privately remember a silver umbrella beneath the midnight clock.";
+    session = await applyDebateMysteryAction(db, "user-1", session.id, {
+      expectedRevision: session.revision,
+      idempotencyKey: "private-interview-first-answer",
+      action: "interview",
+      suspectSeatId: firstSuspect.seatId,
+      question: "What do you remember?",
+      evidenceId: null,
+    }, runtime(provider));
+    const firstAnswer = session.formatState.interviewLog.at(-1)!.content;
+    provider.actorReply = "That private answer has not changed.";
+    session = await applyDebateMysteryAction(db, "user-1", session.id, {
+      expectedRevision: session.revision,
+      idempotencyKey: "private-interview-first-followup",
+      action: "interview",
+      suspectSeatId: firstSuspect.seatId,
+      question: "Are you certain?",
+      evidenceId: null,
+    }, runtime(provider));
+    assert.ok(provider.actorPrompts.at(-1)?.includes(firstAnswer));
+    const firstFollowupAnswer = session.formatState.interviewLog.at(-1)!.content;
+    const firstTestimony = session.formatState.testimony.find(
+      (entry) => entry.speakerSeatId === firstSuspect.seatId,
+    )!;
+
+    session = await endActivity(
+      db,
+      provider,
+      session,
+      "private-interview-close-first",
+    );
+    session = await applyDebateMysteryAction(db, "user-1", session.id, {
+      expectedRevision: session.revision,
+      idempotencyKey: "private-interview-travel-second",
+      action: "travel",
+      roomId: secondSuspect.roomId,
+    }, runtime(provider));
+    session = await beginInterview(
+      db,
+      provider,
+      session,
+      secondSuspect.seatId,
+      "private-interview-open-second",
+    );
+    provider.actorReply = "I can answer only for myself.";
+    session = await applyDebateMysteryAction(db, "user-1", session.id, {
+      expectedRevision: session.revision,
+      idempotencyKey: "private-interview-second-answer",
+      action: "interview",
+      suspectSeatId: secondSuspect.seatId,
+      question: "What do you know?",
+      evidenceId: null,
+    }, runtime(provider));
+    const isolatedPrompt = provider.actorPrompts.at(-1)!;
+    assert.match(isolatedPrompt, /This suspect interview is private and isolated/u);
+    assert.equal(isolatedPrompt.includes(firstAnswer), false);
+    assert.equal(isolatedPrompt.includes(firstFollowupAnswer), false);
+    assert.equal(isolatedPrompt.includes(firstTestimony.exactQuote), false);
+
+    session = await applyDebateMysteryAction(db, "user-1", session.id, {
+      expectedRevision: session.revision,
+      idempotencyKey: "private-interview-explicit-disclosure",
+      action: "interview",
+      suspectSeatId: secondSuspect.seatId,
+      question: `Respond to [[mystery:testimony:${firstTestimony.id}]].`,
+      evidenceId: null,
+    }, runtime(provider));
+    assert.ok(provider.actorPrompts.at(-1)?.includes(firstTestimony.exactQuote));
+  });
+
   it("persists free suspect encounters and keeps v2 desk pins as validated hypotheses", async () => {
     const db = testDb();
     const provider = new MysteryProviderStub();
@@ -396,7 +494,7 @@ describe("Debate Whodunnit private/public boundary", () => {
     assert.doesNotMatch(JSON.stringify(leadUpdateEvents), /requiredEvidenceIds|requiredTestimonyIds|requiredObservationKeys/u);
   });
 
-  it("charges committed searches and questions while view navigation stays free", async () => {
+  it("charges each committed search pass and question while view navigation stays free", async () => {
     const db = testDb();
     const provider = new MysteryProviderStub();
     let session = await createDebateMysterySession(db, "user-1", setup(db), "mystery-free-interview", runtime(provider));
@@ -424,6 +522,12 @@ describe("Debate Whodunnit private/public boundary", () => {
       afterInvestigationStart - 1 + session.formatState.recoveredActionTokens.filter((token) => token.roomId === suspectRoom.id).reduce((total, token) => total + token.amount, 0),
     );
     assert.equal(session.formatState.rooms.find((room) => room.id === suspectRoom.id)?.searched, false);
+    session = getDebateSession(db, "user-1", session.id);
+    assert.equal(session.formatState.activeActivity?.kind, "investigation");
+    if (session.formatState.activeActivity?.kind === "investigation") {
+      assert.equal(session.formatState.activeActivity.actionCommitted, true);
+    }
+    assert.equal(listDebateMysteryActions(db, "user-1", session.id).at(-1)?.payload.cost, 1);
     assert.ok(session.formatState.rooms.find((room) => room.id === suspectRoom.id)?.publicObservation);
     const observationCount = session.formatState.rooms.find((room) => room.id === suspectRoom.id)!.observations.length;
     await assert.rejects(
@@ -438,6 +542,19 @@ describe("Debate Whodunnit private/public boundary", () => {
     );
     assert.equal(session.formatState.rooms.find((room) => room.id === suspectRoom.id)?.inspectionCounts[suspectRegionId], 1);
     assert.equal(session.formatState.rooms.find((room) => room.id === suspectRoom.id)?.observations.length, observationCount);
+    const includedRegionId = session.formatState.rooms.find((room) => room.id === suspectRoom.id)!.activeRegionIds.find((regionId) =>
+      regionId !== suspectRegionId &&
+      !bible.actionTokens?.some((token) => token.roomId === suspectRoom.id && token.regionId === regionId))!;
+    const beforeIncludedInspection = session.formatState.actionsRemaining;
+    session = await applyDebateMysteryAction(db, "user-1", session.id, {
+      expectedRevision: session.revision,
+      idempotencyKey: "suspect-room-inspect-included",
+      action: "inspect",
+      roomId: suspectRoom.id,
+      regionId: includedRegionId,
+    }, runtime(provider));
+    assert.equal(session.formatState.actionsRemaining, beforeIncludedInspection);
+    assert.equal(listDebateMysteryActions(db, "user-1", session.id).at(-1)?.payload.cost, 0);
     session = await endActivity(db, provider, session, "suspect-room-end");
     const beforeInvestigationReentry = session.formatState.actionsRemaining;
     session = await beginInvestigation(
@@ -451,6 +568,23 @@ describe("Debate Whodunnit private/public boundary", () => {
       session.formatState.actionsRemaining,
       beforeInvestigationReentry,
     );
+    assert.equal(session.formatState.activeActivity?.kind, "investigation");
+    if (session.formatState.activeActivity?.kind === "investigation") {
+      assert.equal(session.formatState.activeActivity.actionCommitted, false);
+    }
+    const reentryRegionId = session.formatState.rooms.find((room) => room.id === suspectRoom.id)!.activeRegionIds.find((regionId) =>
+      regionId !== suspectRegionId &&
+      regionId !== includedRegionId &&
+      !bible.actionTokens?.some((token) => token.roomId === suspectRoom.id && token.regionId === regionId))!;
+    session = await applyDebateMysteryAction(db, "user-1", session.id, {
+      expectedRevision: session.revision,
+      idempotencyKey: "suspect-room-reentry-commit",
+      action: "inspect",
+      roomId: suspectRoom.id,
+      regionId: reentryRegionId,
+    }, runtime(provider));
+    assert.equal(session.formatState.actionsRemaining, beforeInvestigationReentry - 1);
+    assert.equal(listDebateMysteryActions(db, "user-1", session.id).at(-1)?.payload.cost, 1);
     session = await endActivity(
       db,
       provider,
@@ -510,34 +644,40 @@ describe("Debate Whodunnit private/public boundary", () => {
     const provider = new MysteryProviderStub();
     let session = await createDebateMysterySession(db, "user-1", setup(db), "mystery-action-exhaustion", runtime(provider));
     const roomId = session.formatState.currentRoomId;
+    const bible = getDebateMysteryCaseBible(db, "user-1", session.id);
     const exhausted = structuredClone(session);
     exhausted.formatState.actionsRemaining = 1;
     db.prepare("UPDATE debate_sessions SET session_json = ? WHERE id = ? AND user_id = 'user-1'")
       .run(JSON.stringify(exhausted), session.id);
     session = exhausted;
     session = await beginInvestigation(db, provider, session, roomId, "exhaust-begin");
+    const paidRegionId = session.formatState.rooms.find((room) => room.id === roomId)!.activeRegionIds.find((regionId) =>
+      !session.formatState.rooms.find((room) => room.id === roomId)!.inspectedRegionIds.includes(regionId) &&
+      !bible.actionTokens?.some((token) => token.roomId === roomId && token.regionId === regionId))!;
     session = await applyDebateMysteryAction(db, "user-1", session.id, {
       expectedRevision: session.revision,
       idempotencyKey: "exhaust-last-inspection",
       action: "inspect",
       roomId,
-      regionId: session.formatState.rooms.find((room) => room.id === roomId)!.activeRegionId!,
+      regionId: paidRegionId,
     }, runtime(provider));
 
     assert.equal(session.formatState.actionsRemaining, 0);
     assert.equal(session.formatState.activeActivity?.kind, "investigation");
     assert.equal(session.formatState.playPhase, "investigation");
 
-    await assert.rejects(
-      applyDebateMysteryAction(db, "user-1", session.id, {
-        expectedRevision: session.revision,
-        idempotencyKey: "exhaust-extra-inspection",
-        action: "inspect",
-        roomId,
-        regionId: session.formatState.rooms.find((room) => room.id === roomId)!.activeRegionIds[1]!,
-      }, runtime(provider)),
-      (error: unknown) => error instanceof HttpError && error.statusCode === 409 && error.message.includes("No investigation actions remain"),
-    );
+    const includedRegionId = session.formatState.rooms.find((room) => room.id === roomId)!.activeRegionIds.find((regionId) =>
+      !session.formatState.rooms.find((room) => room.id === roomId)!.inspectedRegionIds.includes(regionId) &&
+      !bible.actionTokens?.some((token) => token.roomId === roomId && token.regionId === regionId))!;
+    session = await applyDebateMysteryAction(db, "user-1", session.id, {
+      expectedRevision: session.revision,
+      idempotencyKey: "exhaust-extra-inspection",
+      action: "inspect",
+      roomId,
+      regionId: includedRegionId,
+    }, runtime(provider));
+    assert.equal(session.formatState.actionsRemaining, 0);
+    assert.equal(listDebateMysteryActions(db, "user-1", session.id).at(-1)?.payload.cost, 0);
 
     session = await applyDebateMysteryAction(db, "user-1", session.id, {
       expectedRevision: session.revision,
@@ -644,6 +784,59 @@ describe("Debate Whodunnit private/public boundary", () => {
     assert.deepEqual(first.formatState.recoveredActionTokens.map((entry) => entry.id), [token.id]);
     assert.equal(first.formatState.rooms.find((room) => room.id === token.roomId)?.observations.filter((entry) => entry.regionId === token.regionId).length, 1);
     assert.equal(listDebateMysteryActions(db, "user-1", session.id).length, actionCount + 1);
+  });
+
+  it("charges one search commitment across rapid clicks on different hotspots", async () => {
+    const db = testDb();
+    const provider = new MysteryProviderStub();
+    let session = await createDebateMysterySession(db, "user-1", setup(db), "mystery-search-pass-race", runtime(provider));
+    const bible = getDebateMysteryCaseBible(db, "user-1", session.id);
+    const room = session.formatState.rooms.find((entry) => entry.id === session.formatState.currentRoomId)!;
+    const regionIds = room.activeRegionIds.filter((regionId) =>
+      !room.inspectedRegionIds.includes(regionId) &&
+      !bible.actionTokens?.some((token) => token.roomId === room.id && token.regionId === regionId)).slice(0, 2);
+    assert.equal(regionIds.length, 2);
+    session = await beginInvestigation(db, provider, session, room.id, "search-pass-race-begin");
+    const actionsBefore = session.formatState.actionsRemaining;
+    const requestInspection = (idempotencyKey: string, regionId: string) => applyDebateMysteryAction(
+      db,
+      "user-1",
+      session.id,
+      {
+        expectedRevision: session.revision,
+        idempotencyKey,
+        action: "inspect" as const,
+        roomId: room.id,
+        regionId,
+      },
+      runtime(provider),
+    );
+
+    const results = await Promise.allSettled([
+      requestInspection("search-pass-race-a", regionIds[0]!),
+      requestInspection("search-pass-race-b", regionIds[1]!),
+    ]);
+    const first = results.find((result): result is PromiseFulfilledResult<DebateSessionV1> => result.status === "fulfilled")?.value;
+    const staleIndex = results.findIndex((result) => result.status === "rejected");
+    assert.ok(first);
+    assert.notEqual(staleIndex, -1);
+    assert.equal(session.formatState.actionsRemaining, actionsBefore);
+    const retried = await applyDebateMysteryAction(db, "user-1", first.id, {
+      expectedRevision: first.revision,
+      idempotencyKey: "search-pass-race-retry",
+      action: "inspect",
+      roomId: room.id,
+      regionId: regionIds[staleIndex]!,
+    }, runtime(provider));
+
+    assert.equal(retried.formatState.actionsRemaining, actionsBefore - 1);
+    assert.deepEqual(
+      listDebateMysteryActions(db, "user-1", session.id)
+        .filter((entry) => entry.action === "inspect")
+        .slice(-2)
+        .map((entry) => entry.payload.cost),
+      [1, 0],
+    );
   });
 
   it("charges each committed access-item application without consuming the tool on failed attempts", async () => {
@@ -810,13 +1003,117 @@ describe("Debate Whodunnit private/public boundary", () => {
     assert.equal(resolved.evidence[0]!.factTags.join("|"), evidence.factTags.join("|"));
   });
 
+  it("deterministically recasts synthesized exhibits as supporting evidence without importing their old meaning", async () => {
+    const db = testDb();
+    const provider = new MysteryProviderStub();
+    const session = await createDebateMysterySession(db, "user-1", setup(db), "mystery-create-reused-props", runtime(provider));
+    const bible = getDebateMysteryCaseBible(db, "user-1", session.id);
+    const candidates = [{
+      id: "asset-crimson-ledger",
+      adjective: "crimson",
+      object: "ledger",
+      title: "Crimson ledger",
+      emoji: "📕",
+      imageId: "image-crimson-ledger",
+      keywords: ["paper", "ledger", "debate", "old-argument"],
+    }, {
+      id: "asset-brass-compass",
+      adjective: "brass",
+      object: "compass",
+      title: "Brass compass",
+      emoji: "🧭",
+      imageId: "image-brass-compass",
+      keywords: ["metal", "navigation", "debate"],
+    }];
+    const first = reuseDebateMysteryExhibitEvidence(bible, candidates);
+    const second = reuseDebateMysteryExhibitEvidence(bible, candidates);
+    assert.deepEqual(first, second);
+    assert.equal(first.evidence.find((item) => item.isCanonicalWeapon)?.imageId, null);
+    const reused = first.evidence.filter((item) => item.imageId?.startsWith("image-"));
+    assert.equal(reused.length, 2);
+    for (const item of reused) {
+      const original = bible.evidence.find((candidate) => candidate.id === item.id)!;
+      assert.deepEqual(item.factTags, original.factTags);
+      assert.equal(item.relation, original.relation);
+      assert.equal(item.roomId, original.roomId);
+      assert.equal(item.regionId, original.regionId);
+      assert.notEqual(item.observation, original.observation);
+    }
+  });
+
+  it("keeps synthesized exhibit reuse off by default and draws only after the setting is enabled", async () => {
+    const db = testDb();
+    const provider = new MysteryProviderStub();
+    const config = setup(db);
+    db.prepare(
+      `INSERT INTO images
+         (id, user_id, origin, prompt, url, provider, model, purpose, local_rel_path, created_at)
+       VALUES ('image-reusable-ledger', 'user-1', 'debate', ?, '', 'openai',
+               'gpt-image-1', 'debate_exhibit', ?, ?)`,
+    ).run(
+      'Create one evidence exhibit sprite depicting exactly: "Crimson ledger".',
+      'generated-images/user-1/image-reusable-ledger.png',
+      NOW,
+    );
+    db.prepare(
+      `INSERT INTO debate_sessions
+         (id, user_id, status, phase, step_key, player_role,
+          create_idempotency_key, motion, session_json, created_at, updated_at)
+       VALUES ('debate-prior-exhibit', 'user-1', 'completed', 'verdict',
+               'completed', 'spectator', 'prior-exhibit-key', 'An old motion', ?, ?, ?)`,
+    ).run(JSON.stringify({
+      evidence: {
+        exhibits: [{
+          id: "exhibit-ledger",
+          adjective: "crimson",
+          object: "ledger",
+          title: "Crimson ledger",
+          emoji: "📕",
+          imageId: "image-reusable-ledger",
+          observation: "This old Debate claim must never become a case fact.",
+        }],
+      },
+    }), NOW, NOW);
+
+    const disabled = await createDebateMysterySession(
+      db,
+      "user-1",
+      config,
+      "mystery-reuse-disabled",
+      runtime(provider),
+    );
+    assert.equal(
+      getDebateMysteryCaseBible(db, "user-1", disabled.id).evidence.some((item) => item.imageId),
+      false,
+    );
+
+    db.prepare(
+      "UPDATE users SET debate_whodunnit_reuse_synthesized_exhibits = 1 WHERE id = 'user-1'",
+    ).run();
+    const enabled = await createDebateMysterySession(
+      db,
+      "user-1",
+      config,
+      "mystery-reuse-enabled",
+      runtime(provider),
+    );
+    const enabledBible = getDebateMysteryCaseBible(db, "user-1", enabled.id);
+    const reused = enabledBible.evidence.find((item) => item.imageId === "image-reusable-ledger");
+    assert.ok(reused);
+    assert.equal(reused.title, "Crimson ledger");
+    assert.equal(reused.isCanonicalWeapon, false);
+    assert.doesNotMatch(reused.observation, /old Debate claim/iu);
+  });
+
   it("compiles a Compact LOCAL case without placing hidden truth in session_json", async () => {
     const db = testDb();
     const provider = new MysteryProviderStub();
     const session = await createDebateMysterySession(db, "user-1", setup(db), "mystery-create-0001", runtime(provider));
     const bible = getDebateMysteryCaseBible(db, "user-1", session.id);
     assert.equal(session.format, "whodunnit");
-    assert.equal(session.playerRole, "investigator");
+    assert.equal(session.playerRole, "participant");
+    assert.equal(session.playerSideId, "for");
+    assert.equal(session.participation?.difficulty, "standard");
     assert.equal(session.formatState.format, "whodunnit");
     assert.equal(session.formatState.playPhase, "investigation");
     assert.equal(session.formatState.rooms.length, 5);
@@ -856,10 +1153,214 @@ describe("Debate Whodunnit private/public boundary", () => {
     assert.equal(stillPrivate?.imageId, null);
   });
 
+  it("freezes Participant or Spectator court setup while reserving Judge for PRISM", async () => {
+    const db = testDb();
+    const provider = new MysteryProviderStub();
+    const config = setup(db);
+    const spectator = await createDebateMysterySession(
+      db,
+      "user-1",
+      config,
+      "mystery-spectator-role",
+      runtime(provider),
+      { playerRole: "spectator", participationDifficulty: "immersive" },
+    );
+    assert.equal(spectator.playerRole, "spectator");
+    assert.equal(spectator.playerSideId, null);
+    assert.equal(spectator.participation, null);
+    await assert.rejects(
+      () => createDebateMysterySession(
+        db,
+        "user-1",
+        config,
+        "mystery-judge-role",
+        runtime(provider),
+        { playerRole: "judge" },
+      ),
+      /Participant or Spectator.*Judge seat/iu,
+    );
+  });
+
+  it("freezes shared court formality and Jury rules across create, Case Seed import, and resume", async () => {
+    const db = testDb();
+    const provider = new MysteryProviderStub();
+    const config = {
+      ...setup(db),
+      formality: "heated" as const,
+      juryEnabled: true,
+      playerRole: "participant" as const,
+      participationDifficulty: "coach" as const,
+    };
+    const created = await createDebateMysterySession(
+      db,
+      "user-1",
+      config,
+      "mystery-court-rules-create",
+      runtime(provider),
+    );
+    assert.equal(created.formatState.format, "whodunnit");
+    assert.equal(created.formatState.config.formality, "heated");
+    assert.equal(created.formatState.config.juryEnabled, true);
+    assert.equal(created.formatState.config.playerRole, "participant");
+    assert.equal(created.formatState.config.participationDifficulty, "coach");
+    assert.equal(created.formality, "heated");
+    assert.equal(created.jury.enabled, true);
+    assert.equal(created.participation?.difficulty, "coach");
+    const code = debateMysteryCaseCodeForSession(db, "user-1", created.id);
+    const inspection = inspectDebateMysteryCaseCode(code);
+    const imported = await importDebateMysteryCase(db, "user-1", {
+      caseCode: code,
+      seatAssignments: inspection.seats.map((seat, index) => ({ seatId: seat.seatId, botId: `bot-${index + 1}` })),
+      prosecutorPartnerBotId: "bot-5",
+      rivalDefenseBotId: "bot-6",
+      formality: "parliamentary",
+      juryEnabled: false,
+      idempotencyKey: "mystery-court-rules-import",
+    }, runtime(provider));
+    assert.equal(imported.formality, "parliamentary");
+    assert.equal(imported.jury.enabled, false);
+    assert.equal(imported.formatState.format, "whodunnit");
+    assert.equal(imported.formatState.config.formality, "parliamentary");
+    assert.equal(imported.formatState.config.juryEnabled, false);
+    assert.equal(imported.formatState.config.playerRole, "participant");
+    assert.equal(imported.formatState.config.participationDifficulty, "coach");
+    assert.equal(imported.participation?.difficulty, "coach");
+    db.prepare("DELETE FROM debate_mystery_cases WHERE session_id = ? AND user_id = 'user-1'").run(created.id);
+    const interrupted = {
+      ...created,
+      status: "live" as const,
+      stepKey: "mystery_hiding_evidence",
+      formatState: created.formatState.format === "whodunnit"
+        ? { ...created.formatState, compileStage: "hiding_evidence" as const, playPhase: "compiling" as const, rooms: [], suspects: [] }
+        : created.formatState,
+    };
+    db.prepare("UPDATE debate_sessions SET status = 'live', step_key = ?, session_json = ? WHERE id = ? AND user_id = 'user-1'").run(interrupted.stepKey, JSON.stringify(interrupted), created.id);
+    const resumed = await resumeDebateMysteryCompilation(db, "user-1", created.id, runtime(provider));
+    assert.equal(resumed.formality, "heated");
+    assert.equal(resumed.jury.enabled, true);
+    assert.equal(resumed.formatState.format, "whodunnit");
+    assert.equal(resumed.formatState.config.formality, "heated");
+    assert.equal(resumed.formatState.config.juryEnabled, true);
+    assert.equal(resumed.formatState.config.playerRole, "participant");
+    assert.equal(resumed.formatState.config.participationDifficulty, "coach");
+    assert.equal(resumed.participation?.difficulty, "coach");
+  });
+
+  it("admits no scene testimony without an interview and lets an unanswered defendant denial stand", async () => {
+    const db = testDb();
+    const provider = new MysteryProviderStub();
+    let session = await createDebateMysterySession(
+      db,
+      "user-1",
+      setup(db),
+      "mystery-no-interview-testimony",
+      runtime(provider),
+      { playerRole: "participant", participationDifficulty: "coach" },
+    );
+    assert.equal(session.formatState.format, "whodunnit");
+    const crimeScene = session.formatState.rooms.find(
+      (room) => room.id === session.formatState.crimeSceneRoomId,
+    )!;
+    session = await beginInvestigation(
+      db,
+      provider,
+      session,
+      crimeScene.id,
+      "no-testimony-begin-investigation",
+    );
+    session = await applyDebateMysteryAction(db, "user-1", session.id, {
+      expectedRevision: session.revision,
+      idempotencyKey: "no-testimony-inspect",
+      action: "inspect",
+      roomId: crimeScene.id,
+      regionId: crimeScene.activeRegionId!,
+    }, runtime(provider));
+    session = await endActivity(
+      db,
+      provider,
+      session,
+      "no-testimony-end-investigation",
+    );
+    assert.equal(session.formatState.format, "whodunnit");
+    const bible = getDebateMysteryCaseBible(db, "user-1", session.id);
+    const accused = session.formatState.suspects.find(
+      (suspect) => suspect.seatId === bible.culpritSeatId,
+    )!;
+    session = await applyDebateMysteryAction(db, "user-1", session.id, {
+      expectedRevision: session.revision,
+      idempotencyKey: "no-testimony-travel",
+      action: "travel",
+      roomId: accused.roomId,
+    }, runtime(provider));
+    session = await beginInterview(
+      db,
+      provider,
+      session,
+      accused.seatId,
+      "no-testimony-meet-accused",
+    );
+    session = await endActivity(
+      db,
+      provider,
+      session,
+      "no-testimony-leave-accused",
+    );
+    assert.equal(session.formatState.format, "whodunnit");
+    assert.equal(session.formatState.testimony.length, 0);
+    const claims = debateMysteryTheoryClaimOptions(session.formatState);
+    session = await applyDebateMysteryAction(db, "user-1", session.id, {
+      expectedRevision: session.revision,
+      idempotencyKey: "no-testimony-file",
+      action: "file_theory",
+      theory: {
+        culpritSeatId: accused.seatId,
+        accompliceSeatId: null,
+        method: claims.method[0]!.value,
+        motive: claims.motive[0]!.value,
+        opportunity: claims.opportunity[0]!.value,
+        evidenceIds: [session.formatState.discoveredEvidence[0]!.id],
+        testimonyIds: [],
+      },
+    }, runtime(provider));
+    assert.equal(session.formatState.format, "turnabout");
+    assert.deepEqual(session.formatState.mysteryTrial!.testimonySourceMap, {});
+    assert.equal(session.evidence.sources.length, 0);
+    session = await bakeMysteryCourtToPlayerAction(
+      db,
+      provider,
+      session,
+      "no-testimony-court",
+    );
+    assert.equal(session.formatState.format, "turnabout");
+    const denial = session.formatState.statements.find(
+      (statement) =>
+        statement.recordTestimonyId === "mystery-defendant-denial",
+    );
+    assert.ok(denial);
+    assert.match(denial.content, new RegExp(accused.name, "u"));
+    assert.match(denial.content, new RegExp(bible.victim.name, "u"));
+    while (session.status === "waiting_for_player") {
+      assert.equal(session.formatState.format, "turnabout");
+      session = await submitDebateTurnaboutAction(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: `no-testimony-pass-${session.revision}`,
+        action: "pass",
+        statementId: session.formatState.activeStatementId!,
+      }, runtime(provider));
+    }
+    assert.equal(session.status, "completed");
+    assert.equal(session.winnerSideId, "against");
+    assert.equal(session.formatState.format, "turnabout");
+    assert.match(
+      session.formatState.mysteryTrial?.verdict?.reason ?? "",
+      /defendant's denial stands/iu,
+    );
+  });
+
   it("freezes only the public case record and earns a deterministic Lucky Break in real Turnabout", async () => {
     const db = testDb();
     const provider = new MysteryProviderStub();
-    let session = await createDebateMysterySession(db, "user-1", setup(db), "mystery-create-0002", runtime(provider));
+    let session = await createDebateMysterySession(db, "user-1", { ...setup(db), formality: "plainspoken", juryEnabled: false }, "mystery-create-0002", runtime(provider));
     assert.equal(session.formatState.format, "whodunnit");
     const initialActions = session.formatState.actionsRemaining;
     const crimeScene = session.formatState.rooms.find((room) => room.id === session.formatState.crimeSceneRoomId)!;
@@ -894,15 +1395,35 @@ describe("Debate Whodunnit private/public boundary", () => {
     const method = claimOptions.method[0]!.value;
     const motive = claimOptions.motive[0]!.value;
     const opportunity = claimOptions.opportunity[0]!.value;
+    const unseenSuspect = session.formatState.suspects.find((suspect) => suspect.seatId !== culprit.seatId)!;
+    await assert.rejects(
+      () => applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "mystery-file-unmet-suspect", action: "file_theory", theory: { culpritSeatId: unseenSuspect.seatId, accompliceSeatId: null, method, motive, opportunity, evidenceIds: [evidenceId], testimonyIds: [testimonyId] } }, runtime(provider)),
+      /Interview the accused before filing charges/u,
+    );
     await assert.rejects(
       () => applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "mystery-file-freeform", action: "file_theory", theory: { culpritSeatId: culprit.seatId, accompliceSeatId: null, method: "hand-authored method", motive, opportunity, evidenceIds: [evidenceId], testimonyIds: [testimonyId] } }, runtime(provider)),
       /Choose a method from the discovered record/u,
     );
+    const investigationRoomImageId = "generated-investigation-room";
+    const courtEvidenceImageId = "generated-court-evidence";
+    const assetBearingSession = structuredClone(session);
+    if (assetBearingSession.formatState.format !== "whodunnit") assert.fail("Expected an active Whodunnit investigation.");
+    assetBearingSession.formatState.rooms[0]!.imageId = investigationRoomImageId;
+    assetBearingSession.formatState.discoveredEvidence.find((item) => item.id === evidenceId)!.imageId = courtEvidenceImageId;
+    db.prepare("UPDATE debate_sessions SET session_json = ? WHERE id = ? AND user_id = 'user-1'")
+      .run(JSON.stringify(assetBearingSession), session.id);
+    session = assetBearingSession;
     session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "mystery-file-0001", action: "file_theory", theory: { culpritSeatId: culprit.seatId, accompliceSeatId: null, method, motive, opportunity, evidenceIds: [evidenceId], testimonyIds: [testimonyId] } }, runtime(provider));
     assert.equal(session.format, "turnabout");
+    assert.equal(session.formality, "plainspoken");
+    assert.equal(session.jury.enabled, false);
     assert.equal(session.formatState.format, "turnabout");
     assert.ok(session.formatState.mysteryTrial);
     assert.equal(session.formatState.mysteryTrial.frozenInvestigation.theory?.culpritSeatId, culprit.seatId);
+    assert.equal(session.formatState.mysteryTrial.frozenInvestigation.rooms.every((room) => room.imageId === null), true);
+    assert.equal(session.formatState.mysteryTrial.frozenInvestigation.discoveredEvidence.find((item) => item.id === evidenceId)?.imageId, courtEvidenceImageId);
+    assert.equal(session.evidence.exhibits.find((item) => item.imageId === courtEvidenceImageId)?.imageId, courtEvidenceImageId);
+    assert.equal(JSON.stringify(session.formatState.mysteryTrial.frozenInvestigation).includes(investigationRoomImageId), false);
     assert.equal(session.motion.forSide.brief.includes(method), true);
     assert.equal(session.motion.forSide.brief.includes(motive), true);
     assert.equal(session.motion.forSide.brief.includes(opportunity), true);
@@ -913,13 +1434,18 @@ describe("Debate Whodunnit private/public boundary", () => {
     const reloadedCourt = getDebateSession(db, "user-1", session.id);
     assert.equal(reloadedCourt.formatState.format, "turnabout");
     assert.equal(reloadedCourt.formatState.mysteryTrial?.frozenInvestigation.theory?.culpritSeatId, culprit.seatId);
+    assert.equal(reloadedCourt.formatState.mysteryTrial?.frozenInvestigation.rooms.every((room) => room.imageId === null), true);
+    assert.equal(reloadedCourt.evidence.exhibits.some((item) => item.imageId === courtEvidenceImageId), true);
     session = await bakeMysteryCourtToPlayerAction(db, provider, session, "mystery-court");
     while (session.status === "waiting_for_player" && session.formatState.format === "turnabout") {
       const state = session.formatState;
       const statement = state.statements.find((item) => item.id === state.activeStatementId)!;
       const evidenceSourceId = Object.entries(state.mysteryTrial!.evidenceSourceMap)
         .find(([, canonicalId]) => canonicalId === evidenceId)?.[0];
-      const action = statement.recordTestimonyId === testimonyId && evidenceSourceId
+      const action =
+        (statement.recordTestimonyId === testimonyId ||
+          statement.recordTestimonyId === "mystery-defendant-denial") &&
+        evidenceSourceId
         ? "present_evidence" as const
         : "pass" as const;
       session = await submitDebateTurnaboutAction(
@@ -953,7 +1479,7 @@ describe("Debate Whodunnit private/public boundary", () => {
     );
   });
 
-  it("grounds exact quotes, grants one continuance, and terminates the second credibility collapse", async () => {
+  it("grounds exact quotes and permanently closes the case on the first credibility collapse", async () => {
     const db = testDb();
     const provider = new MysteryProviderStub();
     let session = await createDebateMysterySession(db, "user-1", setup(db), "mystery-create-continuance", runtime(provider));
@@ -968,10 +1494,39 @@ describe("Debate Whodunnit private/public boundary", () => {
     const claimOptions = debateMysteryTheoryClaimOptions(session.formatState);
     const theory = { culpritSeatId: accused.seatId, accompliceSeatId: null, method: claimOptions.method[0]!.value, motive: claimOptions.motive[0]!.value, opportunity: claimOptions.opportunity[0]!.value, evidenceIds: [evidenceId], testimonyIds: [] };
     session = await endActivity(db, provider, session, "continuance-end-investigation");
+    session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "continuance-travel-accused", action: "travel", roomId: accused.roomId }, runtime(provider));
+    session = await beginInterview(db, provider, session, accused.seatId, "continuance-meet-accused");
+    session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "continuance-question-accused", action: "interview", suspectSeatId: accused.seatId, question: "State your alibi for the record." }, runtime(provider));
+    session = await endActivity(db, provider, session, "continuance-end-meeting");
     session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "continuance-file-1", action: "file_theory", theory }, runtime(provider));
-    session = await bakeMysteryCourtToPlayerAction(db, provider, session, "continuance-court-1");
     assert.equal(session.formatState.format, "turnabout");
     const testimonySourceId = Object.keys(session.formatState.mysteryTrial!.testimonySourceMap)[0]!;
+    const testimonyId = session.formatState.mysteryTrial!.testimonySourceMap[testimonySourceId]!;
+    const testimonySource = session.evidence.sources.find((source) => source.id === testimonySourceId)!;
+    const stagedCourt = structuredClone(session);
+    assert.equal(stagedCourt.formatState.format, "turnabout");
+    stagedCourt.status = "waiting_for_player";
+    stagedCourt.phase = "challenge";
+    stagedCourt.stepKey = "turnabout_action";
+    stagedCourt.formatState = {
+      ...stagedCourt.formatState,
+      phase: "examination",
+      activeStatementId: "irreversible-court-statement",
+      floorOwnerBotId: stagedCourt.againstAdvocate.id,
+      statements: [{
+        id: "irreversible-court-statement",
+        sideId: "against",
+        speakerBotId: stagedCourt.againstAdvocate.id,
+        content: testimonySource.snippet,
+        sourceIds: [testimonySourceId],
+        status: "ready",
+        createdEventId: "irreversible-court-event",
+        recordTestimonyId: testimonyId,
+      }],
+    };
+    db.prepare("UPDATE debate_sessions SET status = ?, phase = ?, step_key = ?, session_json = ? WHERE id = ? AND user_id = 'user-1'")
+      .run(stagedCourt.status, stagedCourt.phase, stagedCourt.stepKey, JSON.stringify(stagedCourt), session.id);
+    session = getDebateSession(db, "user-1", session.id);
     for (let index = 0; index < 3; index += 1) {
       assert.equal(session.formatState.format, "turnabout");
       const statementId = session.formatState.activeStatementId!;
@@ -983,27 +1538,53 @@ describe("Debate Whodunnit private/public boundary", () => {
         evidenceSourceId: testimonySourceId,
       }, runtime(provider));
     }
-    assert.equal(session.formatState.format, "whodunnit");
-    assert.equal(session.formatState.playPhase, "continuance");
-    assert.equal(session.formatState.actionsRemaining, 3);
-    session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "continuance-file-2", action: "file_theory", theory }, runtime(provider));
-    session = await bakeMysteryCourtToPlayerAction(db, provider, session, "continuance-court-2");
-    assert.equal(session.formatState.format, "turnabout");
-    const secondTestimonySourceId = Object.keys(session.formatState.mysteryTrial!.testimonySourceMap)[0]!;
-    for (let index = 0; index < 3; index += 1) {
-      assert.equal(session.formatState.format, "turnabout");
-      session = await submitDebateTurnaboutAction(db, "user-1", session.id, {
-        expectedRevision: session.revision,
-        idempotencyKey: `terminal-fail-${index}`,
-        action: "present_evidence",
-        statementId: session.formatState.activeStatementId!,
-        evidenceSourceId: secondTestimonySourceId,
-      }, runtime(provider));
-    }
     assert.equal(session.status, "completed");
     assert.equal(session.formatState.format, "turnabout");
     assert.equal(session.formatState.mysteryTrial?.verdict?.grade, "incorrect");
-    assert.equal(session.formatState.mysteryTrial?.continuanceUsed, true);
+    assert.match(session.formatState.mysteryTrial?.verdict?.reason ?? "", /filed accusation is final/iu);
+    await assert.rejects(
+      () => applyDebateMysteryAction(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "court-cannot-return-to-mansion",
+        action: "travel",
+        roomId: crimeScene.id,
+      }, runtime(provider)),
+      /not a Whodunnit case|already complete/iu,
+    );
+  });
+
+  it("seals a stored legacy continuance before any mansion action can run", async () => {
+    const db = testDb();
+    const provider = new MysteryProviderStub();
+    const created = await createDebateMysterySession(db, "user-1", setup(db), "legacy-continuance-session", runtime(provider));
+    const stored = structuredClone(created);
+    assert.equal(stored.formatState.format, "whodunnit");
+    const legacyState = stored.formatState as unknown as Record<string, unknown>;
+    legacyState.playPhase = "continuance";
+    legacyState.actionsRemaining = 3;
+    stored.status = "waiting_for_player";
+    stored.phase = "challenge";
+    stored.stepKey = "mystery_continuance";
+    db.prepare("UPDATE debate_sessions SET status = ?, phase = ?, step_key = ?, session_json = ? WHERE id = ? AND user_id = 'user-1'")
+      .run(stored.status, stored.phase, stored.stepKey, JSON.stringify(stored), stored.id);
+
+    const sealed = getDebateSession(db, "user-1", stored.id);
+    assert.equal(sealed.status, "completed");
+    assert.equal(sealed.phase, "verdict");
+    assert.equal(sealed.stepKey, "mystery_verdict");
+    assert.equal(sealed.formatState.format, "whodunnit");
+    assert.equal(sealed.formatState.playPhase, "verdict");
+    assert.equal(sealed.formatState.actionsRemaining, 0);
+    assert.equal(sealed.formatState.verdict?.grade, "incorrect");
+    await assert.rejects(
+      () => applyDebateMysteryAction(db, "user-1", stored.id, {
+        expectedRevision: sealed.revision,
+        idempotencyKey: "legacy-continuance-cannot-travel",
+        action: "travel",
+        roomId: sealed.formatState.crimeSceneRoomId,
+      }, runtime(provider)),
+      /already complete/iu,
+    );
   });
 
   it("keeps a hard-muted suspect solvable through the frozen recorded statement", async () => {
@@ -1034,8 +1615,11 @@ describe("Debate Whodunnit private/public boundary", () => {
     let session = await createDebateMysterySession(db, "user-1", setup(db), "mystery-gibberish", runtime(provider));
     const suspect = session.formatState.format === "whodunnit" ? session.formatState.suspects[0]! : null;
     assert.ok(suspect);
+    const prosecutorPartnerBotId = session.formatState.format === "whodunnit"
+      ? session.formatState.config.prosecutorPartnerBotId
+      : "";
     const stored = structuredClone(session);
-    for (const botId of [stored.forAdvocate.id, suspect.botId]) {
+    for (const botId of [prosecutorPartnerBotId, suspect.botId]) {
       stored.powerPlan.bots[botId] = {
         ...(stored.powerPlan.bots[botId] ?? { botId, effects: [], hardMuted: false, visibleToBotIds: null, speechAudienceBotIds: null, warnings: [] }),
         effects: [{ powerId: "gibberish", powerName: "Gibberish", policy: "direct", effect: { type: "speech_obfuscation", mode: "gibberish" } }],

@@ -10473,6 +10473,7 @@ interface UserSettings {
   composerWritingAssist: boolean;
   experimentalDualOllamaEnabled: boolean;
   experimentalAllModelEffortEnabled: boolean;
+  debateWhodunnitReuseSynthesizedExhibits: boolean;
   modelEffortPreferences: ModelReasoningEffortPreferenceV1[];
   modelTurboPreferences: ModelTurboPreferenceV1[];
   psychicModeEnabled: boolean;
@@ -80009,6 +80010,8 @@ function HomeContent(): React.JSX.Element {
         d.settings.experimentalDualOllamaEnabled === true,
       experimentalAllModelEffortEnabled:
         d.settings.experimentalAllModelEffortEnabled === true,
+      debateWhodunnitReuseSynthesizedExhibits:
+        d.settings.debateWhodunnitReuseSynthesizedExhibits === true,
       modelEffortPreferences: Array.isArray(d.settings.modelEffortPreferences)
         ? d.settings.modelEffortPreferences
         : [],
@@ -92524,6 +92527,40 @@ function HomeContent(): React.JSX.Element {
       );
     } finally {
       setEphemeralChatPreferenceSavingMode(null);
+    }
+  }
+
+  async function persistDebateWhodunnitExhibitReuse(enabled: boolean) {
+    if (!settings || busy) return;
+    const previous = settings;
+    setSettings({
+      ...settings,
+      debateWhodunnitReuseSynthesizedExhibits: enabled,
+    });
+    setBusy(true);
+    setPanelError(null);
+    setPanelNotice(null);
+    try {
+      await api("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify({
+          debateWhodunnitReuseSynthesizedExhibits: enabled,
+        }),
+      });
+      setPanelNotice(
+        enabled
+          ? "New Whodunnit cases may now reuse synthesized Debate exhibits."
+          : "New Whodunnit cases will use their own evidence art.",
+      );
+    } catch (err) {
+      setSettings(previous);
+      setPanelError(
+        err instanceof Error
+          ? err.message
+          : "Could not update Whodunnit exhibit reuse.",
+      );
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -120158,6 +120195,62 @@ function HomeContent(): React.JSX.Element {
                       {renderEphemeralChatProviderSetting("debate")}
                       <section
                         className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
+                        data-settings-section="debate-whodunnit"
+                        aria-labelledby="debate-whodunnit-evidence-settings-title"
+                      >
+                        <header className={styles.settingsSectionHeader}>
+                          <div>
+                            <span className={styles.settingsEyebrow}>
+                              Whodunnit
+                            </span>
+                            <h4 id="debate-whodunnit-evidence-settings-title">
+                              Evidence collection
+                            </h4>
+                          </div>
+                          <div className={styles.settingsSectionHeaderAside}>
+                            <small>New cases only</small>
+                            <PanelSectionInfo
+                              id="settings-section-info-debate-whodunnit-evidence"
+                              label="About reused Whodunnit exhibits"
+                            >
+                              Whodunnit may select up to two synthesized
+                              physical props from your Debate exhibit library.
+                              It reuses the object and artwork only, then writes
+                              a completely new case role, observation, and
+                              relevance around it.
+                            </PanelSectionInfo>
+                          </div>
+                        </header>
+                        <label
+                          className={`${styles.checkbox} ${styles.settingsInlineToggle}`}
+                          data-tutorial-target="whodunnit-reused-exhibits-setting"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={
+                              settings.debateWhodunnitReuseSynthesizedExhibits ===
+                              true
+                            }
+                            disabled={busy}
+                            onChange={(event) =>
+                              void persistDebateWhodunnitExhibitReuse(
+                                event.currentTarget.checked,
+                              )
+                            }
+                          />
+                          <span>
+                            <strong>Reuse synthesized exhibits</strong>
+                            <small>
+                              New cases may draw up to two physical props from
+                              your synthesized Debate exhibit library. The
+                              object and artwork return; their previous meaning
+                              does not.
+                            </small>
+                          </span>
+                        </label>
+                      </section>
+                      <section
+                        className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
                         data-settings-section="debate"
                         aria-labelledby="debate-jury-settings-title"
                       >
@@ -144457,6 +144550,14 @@ function HomeContent(): React.JSX.Element {
                       ? (avatarState.foleyMouthShape ??
                         (galleryTalking ? "speech-closed" : "closed"))
                       : "closed";
+                  // A compact Moderator still owns the live viseme stream. If
+                  // their authored resting mouth has no four-pose speech set,
+                  // let the plate mouth render those shapes instead of pinning
+                  // the custom rest glyph over the entire spoken line.
+                  const moderatorMiniUsesPlateSpeechMouth =
+                    moderatorMiniPortrait &&
+                    avatarState.talking &&
+                    faceStyle.mouthSpeechPoses === null;
                   const galleryFace = coffeeSeatPlateGlyph(
                     galleryMood,
                     galleryMouthShape,
@@ -144540,7 +144641,11 @@ function HomeContent(): React.JSX.Element {
                               faceEyeCharacter={faceStyle.eyeCharacter}
                               faceEyeMovement="still"
                               faceMouthFont={faceStyle.mouthFont}
-                              faceMouthCharacter={faceStyle.mouthCharacter}
+                              faceMouthCharacter={
+                                moderatorMiniUsesPlateSpeechMouth
+                                  ? null
+                                  : faceStyle.mouthCharacter
+                              }
                               faceMouthAnimation={faceStyle.mouthAnimation}
                               faceMouthSpeechPoses={faceStyle.mouthSpeechPoses}
                               faceFontWeight={faceStyle.weight}

@@ -182,14 +182,6 @@
   font-weight: 500;
 }
 
-.mysteryCastHeaderActions {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
 .setupSection > p {
   color: var(--mystery-muted);
 }
@@ -201,7 +193,6 @@
 }
 
 .presetGrid button,
-.botGrid button,
 .seedButton,
 .leadGrid button {
   display: grid;
@@ -215,34 +206,25 @@
   cursor: pointer;
 }
 
-.presetGrid button[data-selected="true"],
-.botGrid button[data-selected="true"] {
+.presetGrid button[data-selected="true"] {
   border-color: color-mix(in srgb, var(--mystery-violet) 75%, transparent);
   background: color-mix(in srgb, var(--mystery-violet) 13%, transparent);
   box-shadow: inset 0 0 1.5rem rgba(148, 112, 255, 0.08);
 }
 
 .presetGrid span,
-.presetGrid small,
-.botGrid small,
-.counselGrid small {
+.presetGrid small {
   color: var(--mystery-muted);
 }
 
-.advancedGrid,
-.counselGrid {
+.advancedGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.75rem;
   margin-top: 0.9rem;
 }
 
-.counselGrid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
 .advancedGrid label,
-.counselGrid label,
 .caseDial label {
   display: grid;
   gap: 0.45rem;
@@ -251,7 +233,6 @@
 }
 
 .advancedGrid input,
-.counselGrid select,
 .caseDial input,
 .caseDial select,
 .questionComposer textarea,
@@ -268,37 +249,6 @@
   border-radius: 0.62rem;
   outline: none;
   background: color-mix(in srgb, var(--mystery-panel-strong) 90%, transparent);
-}
-
-.botGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
-  gap: 0.58rem;
-}
-
-.botGrid button {
-  position: relative;
-  min-height: 7.4rem;
-  overflow: hidden;
-}
-
-.botGrid button::after {
-  content: "";
-  position: absolute;
-  inset: auto 0 0;
-  height: 2px;
-  opacity: 0.78;
-  background: var(--mystery-bot-color);
-}
-
-.botGrid button > span {
-  color: var(--mystery-bot-color);
-}
-
-.botGrid button:disabled,
-.botGrid button[aria-disabled="true"] {
-  cursor: not-allowed;
-  opacity: 0.55;
 }
 
 .setupAside {
@@ -1187,7 +1137,7 @@
 }
 
 .hotspot[data-inspected="true"] {
-  cursor: default;
+  cursor: none;
 }
 
 .hotspot span {
@@ -1233,7 +1183,7 @@
   background: transparent;
   filter: drop-shadow(0 0.65rem 0.85rem rgba(0, 0, 0, 0.72));
   transform: translate(-50%, -50%);
-  cursor: pointer;
+  cursor: none;
 }
 
 .roomLockTarget svg {
@@ -2314,6 +2264,170 @@
   border: 1px solid rgba(227, 189, 113, 0.28);
   border-radius: 0.7rem;
   background: rgba(227, 189, 113, 0.06);
+}
+
+.theoryWorkspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(19rem, 0.75fr);
+  gap: 1rem;
+  align-items: start;
+  margin-top: 1.35rem;
+}
+
+.theoryCaseBuilder,
+.theoryRecord,
+.theoryResearch {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.theoryAccusation,
+.theoryRecord {
+  padding: 1rem;
+  border: 1px solid var(--mystery-line);
+  border-radius: 0.9rem;
+  background: linear-gradient(150deg, rgba(169, 140, 255, 0.09), rgba(5, 11, 20, 0.42) 48%);
+}
+
+.theoryAccusation > header,
+.theoryRecord > header {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.theoryAccusation > header {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.theoryAccusation h3,
+.theoryRecord > header strong {
+  margin: 0;
+  color: var(--mystery-text);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.15rem;
+  font-weight: 500;
+}
+
+.theoryAccusation > header > small,
+.theoryRecord > header small {
+  color: var(--mystery-muted);
+  font-size: 0.72rem;
+}
+
+.theoryAccusation > header > small {
+  padding: 0.3rem 0.45rem;
+  border: 1px solid rgba(102, 229, 234, 0.22);
+  border-radius: 999px;
+  color: var(--mystery-cyan);
+}
+
+.theorySuspectChoices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+}
+
+.theorySuspectChoices button {
+  display: grid;
+  grid-template-columns: 2.7rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 4rem;
+  padding: 0.5rem;
+  color: var(--mystery-text);
+  text-align: left;
+  border: 1px solid var(--mystery-line);
+  border-radius: 0.65rem;
+  background: rgba(5, 11, 20, 0.35);
+  cursor: pointer;
+}
+
+.theorySuspectChoices button:hover,
+.theorySuspectChoices button:focus-visible,
+.theorySuspectChoices button[data-selected="true"] {
+  border-color: var(--mystery-cyan);
+  background: rgba(102, 229, 234, 0.1);
+  box-shadow: inset 0.2rem 0 var(--mystery-cyan);
+}
+
+.theorySuspectChoices button > span:last-child {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.theorySuspectChoices button small {
+  overflow: hidden;
+  color: var(--mystery-muted);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.theorySuspectAvatar {
+  display: grid;
+  width: 2.7rem;
+  height: 2.7rem;
+  overflow: hidden;
+  border: 1px solid rgba(102, 229, 234, 0.24);
+  border-radius: 50%;
+  background: rgba(102, 229, 234, 0.06);
+}
+
+.theoryAccusation > label {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.8rem;
+  color: var(--mystery-muted);
+  font-size: 0.75rem;
+}
+
+.theoryAccusation select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.62rem 0.7rem;
+  color: var(--mystery-text);
+  border: 1px solid var(--mystery-line);
+  border-radius: 0.58rem;
+  background: rgba(5, 11, 20, 0.62);
+}
+
+.theoryEmptyState {
+  margin: 0.8rem 0 0;
+  padding: 0.75rem;
+  color: var(--mystery-muted);
+  border: 1px dashed rgba(169, 140, 255, 0.3);
+  border-radius: 0.65rem;
+  background: rgba(5, 11, 20, 0.25);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.theoryClaims {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.theoryRecord > header {
+  padding-bottom: 0.7rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.theoryRecord .proofAttach {
+  grid-template-columns: 1fr;
+  gap: 0.65rem;
+}
+
+.theoryRecord .proofAttach fieldset {
+  max-height: 13rem;
+  overflow: auto;
+}
+
+.theoryResearch {
+  margin-top: 1rem;
 }
 
 .theoryFields {
@@ -3427,7 +3541,6 @@
   .setupHeader > small { display: none; }
   .setupGrid { grid-template-columns: 1fr; width: min(100% - 1rem, 48rem); }
   .setupAside { position: static; }
-  .mysteryCastHeaderActions { justify-content: flex-start; }
   .presetGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .hudControls { grid-column: 1 / -1; grid-row: 2; justify-content: flex-end; }
   .caseRail { top: 7.1rem; bottom: 0.4rem; right: 0.4rem; }
@@ -3451,7 +3564,9 @@
   .deskRecord .testimonyList > header,
   .deskRecord .testimonyList > p { grid-column: 1; }
   .theoryFields,
-  .proofAttach { grid-template-columns: 1fr; }
+  .proofAttach,
+  .theoryWorkspace,
+  .theoryClaims { grid-template-columns: 1fr; }
   .courtRecord,
   .spoilerRoutes { grid-template-columns: 1fr; }
   .questionComposer { grid-template-columns: 1fr; }
@@ -3484,7 +3599,6 @@
   .stagePartnerProse { display: none; }
   .presetGrid,
   .advancedGrid,
-  .counselGrid,
   .leadGrid { grid-template-columns: 1fr; }
   .courtroom > header { grid-template-columns: 1fr; }
   .courtroom > header div { text-align: center !important; }
@@ -3579,16 +3693,32 @@
 .investigatorDesk[data-open="true"] { box-shadow: 0 -.9rem 2.2rem rgba(0,0,0,.24); }
 .deskHandle { display: flex; width: 100%; align-items: center; justify-content: space-between; padding: .6rem 1rem; color: var(--mystery-text); text-align: left; border: 0; background: repeating-linear-gradient(90deg, rgba(230,190,111,.12) 0 1px, transparent 1px 5px), #191621; cursor: grab; }
 .deskHandle span { color: var(--mystery-muted); font-size: .72rem; }
-.deskSurface { display: grid; grid-template-rows: auto minmax(0, 1fr); height: min(42dvh, 32rem); min-height: 18rem; max-height: 42dvh; border-top: 1px solid var(--mystery-line); animation: mysteryDeskOpen 220ms ease both; }
+.deskSurface { display: grid; grid-template-rows: minmax(11rem, auto) minmax(0, 1fr); height: min(58dvh, 42rem); min-height: 28rem; max-height: 58dvh; border-top: 1px solid rgba(230,190,111,.28); background: linear-gradient(105deg, rgba(54,35,24,.96), rgba(31,24,22,.98) 48%, rgba(44,30,22,.96)), repeating-linear-gradient(90deg, rgba(255,255,255,.025) 0 1px, transparent 1px 5rem); animation: mysteryDeskOpen 220ms ease both; }
 @keyframes mysteryDeskOpen { from { opacity: 0; transform: translateY(1.2rem); } to { opacity: 1; transform: translateY(0); } }
-.comparisonSlots { display: grid; grid-template-columns: 1fr 1fr; gap: .55rem; padding: .65rem; background: rgba(0,0,0,.14); }
-.comparisonSlot { display: grid; min-height: 4.5rem; align-content: center; gap: .25rem; padding: .5rem .65rem; border: 1px dashed rgba(230,190,111,.45); border-radius: .45rem; background: rgba(255,255,255,.025); }
+.comparisonSlots { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; padding: .8rem 1rem; background: linear-gradient(rgba(0,0,0,.13), rgba(0,0,0,.05)); }
+.comparisonSlot { position: relative; display: grid; min-height: 10.5rem; place-items: center; gap: .25rem; padding: .55rem; border: 1px dashed rgba(230,190,111,.42); border-radius: .35rem; background: radial-gradient(circle at 50% 42%, rgba(255,255,255,.045), transparent 65%); }
+.comparisonSlot > small { position: absolute; top: .45rem; left: .55rem; font-size: .58rem; letter-spacing: .12em; text-transform: uppercase; }
 .comparisonSlot small, .comparisonSlot span { color: var(--mystery-muted); }
-.comparisonSlot button, .deskWorkspace button { width: fit-content; padding: .28rem .45rem; color: var(--mystery-text); border: 1px solid var(--mystery-line); border-radius: .35rem; background: rgba(125,93,220,.12); cursor: pointer; }
-.deskWorkspace { display: grid; grid-template-columns: minmax(12rem, 28%) minmax(0, 1fr); min-height: 0; }
-.deskWorkspace > nav { display: grid; align-content: start; gap: .35rem; padding: .6rem; overflow: auto; border-right: 1px solid var(--mystery-line); }
-.deskWorkspace > nav button { display: flex; justify-content: space-between; width: 100%; text-align: left; }
-.deskWorkspace > nav small { color: var(--mystery-cyan); }
+.comparisonSlot button, .deskWorkspace button { color: var(--mystery-text); cursor: pointer; }
+.comparisonPlaceable { display: grid; place-items: center; width: 100%; height: 100%; overflow: hidden; }
+.removeComparison { position: absolute; right: .45rem; bottom: .4rem; z-index: 5; width: fit-content; padding: .25rem .45rem; border: 1px solid rgba(255,255,255,.16); border-radius: 99px; background: rgba(9,10,13,.76); font-size: .62rem; }
+.deskWorkspace { display: grid; grid-template-columns: minmax(20rem, 44%) minmax(0, 1fr); min-height: 0; border-top: 1px solid rgba(230,190,111,.2); }
+.deskTrays { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; overflow: hidden; border-right: 1px solid rgba(230,190,111,.22); background: rgba(10,9,10,.22); }
+.deskTrays section { min-height: 0; padding: .6rem .7rem; overflow: hidden; }
+.deskTrays section + section { border-top: 1px solid rgba(230,190,111,.2); }
+.deskTrays header { display: flex; align-items: baseline; gap: .5rem; margin-bottom: .45rem; }
+.deskTrays header strong { color: #eadcb8; font: 700 .75rem Georgia, serif; letter-spacing: .08em; text-transform: uppercase; }
+.deskTrays header small { color: rgba(234,220,184,.58); font-size: .6rem; }
+.deskDocumentTray > div, .deskEvidenceTray > div { display: flex; gap: .8rem; padding: .25rem .4rem .8rem; overflow: auto; }
+.deskDocumentTray > div > div, .deskEvidenceTray > div > div { display: grid; flex: 0 0 auto; place-items: center; padding: .4rem; }
+.deskPlaceable { display: grid; place-items: center; width: fit-content; padding: 0; border: 0; background: transparent; cursor: grab; }
+.deskPlaceable:active { cursor: grabbing; }
+.deskPlaceable:focus-visible { outline: 2px solid var(--mystery-cyan); outline-offset: .35rem; }
+.deskPlaceable[data-location="tray"]:hover { transform: translateY(-.25rem); }
+.deskPlaceable[data-location="comparison"] { transform: scale(.9); }
+.deskEvidenceObject { display: grid; width: 7.5rem; min-height: 7.5rem; place-items: center; align-content: center; gap: .35rem; transform: rotate(-2deg); }
+.deskEvidenceAsset { width: 5.4rem; height: 5.4rem; object-fit: contain; filter: drop-shadow(0 .22rem .12rem rgba(0,0,0,.82)) drop-shadow(.9rem .75rem .8rem rgba(0,0,0,.42)); }
+.deskEvidenceObject strong { max-width: 7.5rem; color: #eee4cb; font: 650 .66rem Georgia, serif; text-align: center; text-shadow: 0 2px 4px #000; }
 .suspectDeskFile { display: grid; align-content: start; gap: .6rem; padding: .8rem; overflow: auto; }
 .suspectDeskFile > header { display: flex; justify-content: space-between; gap: .7rem; }
 .suspectDeskFile h3 { margin: .1rem 0 0; font-family: Georgia, serif; }
@@ -3612,6 +3742,23 @@
 .investigatorDesk > small { display: block; padding: .4rem .75rem; color: var(--mystery-muted); font-size: .72rem; }
 .theoryBoard .suspectFolderRack,
 .theoryBoard .investigatorDesk { grid-column: 1 / -1; grid-row: auto; }
+
+.investigatorDesk[data-surface="theory"] {
+  position: fixed;
+  z-index: 118;
+  right: 50%;
+  bottom: 0;
+  width: min(76rem, calc(100vw - 2rem));
+  max-height: min(78dvh, 48rem);
+  border-radius: .95rem .95rem 0 0;
+  box-shadow: 0 -1.4rem 4rem rgba(0,0,0,.48), 0 0 0 100vmax rgba(2,3,7,.24);
+  transform: translateX(50%);
+}
+
+.investigatorDesk[data-surface="theory"][data-open="true"] .deskSurface {
+  height: min(68dvh, 42rem);
+  max-height: none;
+}
 
 @media (min-width: 1101px) {
   .investigation[data-desk-open="true"] {
@@ -3638,8 +3785,7 @@
   .comparisonSlots { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 88%; overflow-x: auto; scroll-snap-type: x mandatory; }
   .comparisonSlot { scroll-snap-align: center; }
   .deskWorkspace { grid-template-columns: 1fr; }
-  .deskWorkspace > nav { display: flex; border-right: 0; border-bottom: 1px solid var(--mystery-line); overflow-x: auto; }
-  .deskWorkspace > nav button { flex: 0 0 auto; }
+  .deskTrays { border-right: 0; border-bottom: 1px solid var(--mystery-line); }
   .deskFactSummary, .deskFactGroups { grid-template-columns: 1fr; }
 }
 
@@ -3944,6 +4090,13 @@
   pointer-events: auto;
 }
 
+.roomPanel[data-focus="search"] > header .roomCaseKit {
+  top: calc(100% + 0.75rem);
+  left: 0;
+  max-height: min(46dvh, 22rem);
+  pointer-events: auto;
+}
+
 .roomPanel h2 {
   font-size: clamp(1.75rem, 2.8vw, 2.7rem);
   text-shadow: 0 2px 1.2rem rgba(0, 0, 0, 0.8);
@@ -4067,7 +4220,7 @@
   right: 50%;
   bottom: 0;
   width: min(58rem, calc(100vw - 2rem));
-  max-height: min(64dvh, 34rem);
+  max-height: min(78dvh, 48rem);
   border-radius: 0.95rem 0.95rem 0 0;
   box-shadow: 0 -1.4rem 4rem rgba(0, 0, 0, 0.48), 0 0 0 100vmax rgba(2, 3, 7, 0.24);
   transform: translateX(50%);
@@ -4082,7 +4235,7 @@
 }
 
 .investigatorDesk[data-surface="investigation"][data-open="true"] .deskSurface {
-  height: min(50dvh, 29rem);
+  height: min(68dvh, 42rem);
   max-height: none;
 }
 

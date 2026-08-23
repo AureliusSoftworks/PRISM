@@ -19,6 +19,7 @@ import {
   type DebateMysteryNotebookCleanupProposalV1,
   type DebateMysteryNotebookV1,
   type DebateWhodunnitCreateConfigV1,
+  type DebateWhodunnitFormatStateV1,
 } from "./debateMystery.ts";
 
 function createConfig(
@@ -169,6 +170,46 @@ test("backfills met suspects from both saved interview history and an active leg
 
   const normalized = normalizeDebateMysteryFormatStateV1(legacy);
   assert.deepEqual(new Set(normalized.metSuspectSeatIds), new Set([activeSuspect!.seatId, historicalSuspect!.seatId]));
+});
+
+test("treats an already-used legacy room investigation as action-committed", () => {
+  const config = resolveDebateMysteryConfig(createConfig("compact", "classic", "investigation-commit-backfill"));
+  const bible = compileDeterministicDebateMystery({ config, suspects: suspects(4) });
+  const legacy = structuredClone(projectDebateMysteryCase(bible, config)) as unknown as Record<string, unknown>;
+  const rooms = legacy.rooms as DebateWhodunnitFormatStateV1["rooms"];
+  const activeRoom = rooms.find((room) => room.id === bible.crimeSceneRoomId)!;
+  activeRoom.inspectedRegionIds = [activeRoom.activeRegionIds[0]!];
+  legacy.activeActivity = {
+    kind: "investigation",
+    roomId: activeRoom.id,
+    startedAt: "2026-08-22T12:00:00.000Z",
+  };
+
+  const normalized = normalizeDebateMysteryFormatStateV1(legacy);
+  assert.equal(normalized.activeActivity?.kind, "investigation");
+  if (normalized.activeActivity?.kind === "investigation") {
+    assert.equal(normalized.activeActivity.actionCommitted, true);
+  }
+});
+
+test("fails closed when loading a legacy continuance save", () => {
+  const config = resolveDebateMysteryConfig(createConfig("compact", "classic", "legacy-continuance"));
+  const bible = compileDeterministicDebateMystery({ config, suspects: suspects(4) });
+  const legacy = structuredClone(projectDebateMysteryCase(bible, config)) as unknown as Record<string, unknown>;
+  legacy.playPhase = "continuance";
+  legacy.actionsRemaining = 3;
+  legacy.activeActivity = {
+    kind: "investigation",
+    roomId: bible.crimeSceneRoomId,
+    startedAt: "2026-08-22T12:00:00.000Z",
+  };
+
+  const normalized = normalizeDebateMysteryFormatStateV1(legacy);
+  assert.equal(normalized.playPhase, "verdict");
+  assert.equal(normalized.actionsRemaining, 0);
+  assert.equal(normalized.activeActivity, null);
+  assert.equal(normalized.verdict?.grade, "incorrect");
+  assert.match(normalized.verdict?.reason ?? "", /investigation is permanently closed/iu);
 });
 
 test("gives outcome-neutral regions varied deterministic sensory texture", () => {

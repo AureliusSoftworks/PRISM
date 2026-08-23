@@ -7,6 +7,7 @@ interface MysteryPropVisualProps {
   bundledAssetPath: string;
   fallbackGlyph: string;
   className?: string;
+  assetRetention?: "evidence" | "investigation";
 }
 
 export function MysteryPropVisual({
@@ -14,6 +15,7 @@ export function MysteryPropVisual({
   bundledAssetPath,
   fallbackGlyph,
   className,
+  assetRetention = "investigation",
 }: MysteryPropVisualProps) {
   const generatedAssetPath = generatedImageId
     ? `/api/images/${encodeURIComponent(generatedImageId)}/file`
@@ -29,6 +31,7 @@ export function MysteryPropVisual({
       generatedAssetPath={generatedAssetPath}
       fallbackGlyph={fallbackGlyph}
       className={className}
+      assetRetention={assetRetention}
     />
   );
 }
@@ -38,11 +41,13 @@ function MysteryPropVisualSources({
   generatedAssetPath,
   fallbackGlyph,
   className,
+  assetRetention,
 }: {
   sources: string[];
   generatedAssetPath: string | null;
   fallbackGlyph: string;
   className?: string;
+  assetRetention: "evidence" | "investigation";
 }) {
   const [sourceIndex, setSourceIndex] = useState(0);
 
@@ -56,6 +61,7 @@ function MysteryPropVisualSources({
         alt=""
         aria-hidden="true"
         className={className}
+        data-mystery-asset-retention={assetRetention}
         data-mystery-prop-source={source === generatedAssetPath ? "generated" : "bundled"}
         onError={() => setSourceIndex((current) => current + 1)}
       />
@@ -66,6 +72,7 @@ function MysteryPropVisualSources({
     <span
       aria-hidden="true"
       className={className}
+      data-mystery-asset-retention={assetRetention}
       data-mystery-prop-source="emoji"
     >
       {fallbackGlyph}

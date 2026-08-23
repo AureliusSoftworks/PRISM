@@ -27,6 +27,8 @@ const source = readFileSync(
 const shell = readFileSync(new URL("./DebateExperience.tsx", import.meta.url), "utf8");
 const page = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 const css = readFileSync(new URL("./debateMystery.module.css", import.meta.url), "utf8");
+const evidenceDocumentSource = readFileSync(new URL("./DebateEvidenceDocument.tsx", import.meta.url), "utf8");
+const forumCss = readFileSync(new URL("./DebateExperience.module.css", import.meta.url), "utf8");
 
 function deterministicSequence(values: number[]): () => number {
   let index = 0;
@@ -56,8 +58,58 @@ describe("Debate Whodunnit experience", () => {
   it("uses a separate investigation surface and resumes it directly from Archive", () => {
     assert.match(shell, /type DebateView = "dashboard" \| "live" \| "baking" \| "mystery"/u);
     assert.match(shell, /session\.format === "whodunnit"[\s\S]*setView\("mystery"\)/u);
-    assert.match(shell, /<DebateMysterySetup/u);
+    assert.doesNotMatch(shell, /DebateMysterySetup|mysterySetupOpen|setMysterySetupOpen/u);
     assert.match(shell, /<DebateMysteryPlay/u);
+  });
+
+  it("keeps Whodunnit in Debate Studio and keeps PRISM in the Judge seat", () => {
+    assert.match(shell, /setFormat\("whodunnit"\)/u);
+    assert.doesNotMatch(shell, /setMysterySetupOpen\(true\)/u);
+    assert.match(shell, /format === "whodunnit" \? "Court" : "Motion"/u);
+    assert.match(shell, /studioPanel === "cast" \? renderCastStep\(\)/u);
+    assert.match(shell, /\(role === "judge" && format === "whodunnit"\)/u);
+    assert.match(shell, /PRISM must rule from the sealed Case Bible/u);
+    assert.match(shell, /Participation feedback/u);
+    assert.match(shell, /"coach",\s*"Coach"/u);
+    assert.match(shell, /"standard",\s*"Standard"/u);
+    assert.match(shell, /"immersive",\s*"Immersive"/u);
+    assert.match(shell, /format === "whodunnit"[\s\S]{0,80}\? "PRISM · Judge & Casekeeper"/u);
+    assert.match(shell, /useState\("recipe-initial"\)/u);
+    assert.match(shell, /setMysteryNonce\(nextMysteryRecipeNonce\(\)\);\s*\}, \[\]\);/u);
+    assert.doesNotMatch(shell, /useState\(nextMysteryRecipeNonce\)/u);
+  });
+
+  it("uses shared Debate court controls and the existing page-two BotPicker for every Whodunnit seat", () => {
+    assert.match(shell, /<DebateCourtFormalityControl/u);
+    assert.match(shell, /<BotPickerToolbar/u);
+    assert.match(shell, /<BotPickerGrid/u);
+    assert.match(shell, /<BotPickerTile/u);
+    assert.match(shell, /mysterySuspectBotIds\.map/u);
+    assert.match(shell, /mysteryProsecutorPartnerBotId/u);
+    assert.match(shell, /mysteryRivalDefenseBotId/u);
+    assert.match(shell, /\? "Four jurors \+ PRISM"/u);
+    assert.match(shell, /Four jurors \+ moderator/u);
+    assert.doesNotMatch(css, /\.courtRules/u);
+    assert.doesNotMatch(css, /\.courtJuryToggle/u);
+  });
+
+  it("enters the audible live courtroom before the Whodunnit intro gavel", () => {
+    assert.match(
+      shell,
+      /if \(session\.playerRole === "participant"\)[\s\S]{0,700}setView\("live"\)[\s\S]{0,500}adoptSession\(null, session, \{ playIntro: true \}\)/u,
+    );
+    assert.match(
+      shell,
+      /setSpectatorBakeStartedAt\(null\);\s*setView\("live"\);[\s\S]{0,420}adoptSession\(filedSession, bakedSession, \{ playIntro: true \}\)/u,
+    );
+    assert.match(shell, /function debateSessionUsesFullBake[\s\S]{0,100}session\.playerRole === "spectator"/u);
+  });
+
+  it("releases investigation media while carrying evidence into the court preload", () => {
+    assert.match(source, /releaseDebateMysteryInvestigationMedia\(investigationAssetRootRef\.current\)/u);
+    assert.match(source, /assetRetention="evidence"/u);
+    assert.match(shell, /debateMysteryCourtEvidenceAssetUrls\(session\)\.map\(preloadDebateVisualAsset\)/u);
+    assert.match(shell, /await openingVisualAssetsReady;[\s\S]{0,260}adoptSession\(null, session, \{ playIntro: true \}\)/u);
   });
 
   it("keeps hotspot affordance outcome-neutral and accessible", () => {
@@ -71,6 +123,15 @@ describe("Debate Whodunnit experience", () => {
     assert.doesNotMatch(css, /sparkle/iu);
     assert.match(css, /\.hotspot:focus-visible/u);
     assert.match(css, /@media \(prefers-reduced-motion: reduce\)/u);
+  });
+
+  it("keeps the investigation lens active except over explicit room chrome", () => {
+    assert.match(source, /closest\("\[data-mystery-lens-chrome\]"\)/u);
+    assert.match(source, /visible: true/u);
+    assert.match(source, /data-mystery-room-control data-mystery-lens-chrome/u);
+    assert.doesNotMatch(source, /nearest\.inspected\) \{[\s\S]{0,180}visible: false/u);
+    assert.match(css, /\.hotspot\[data-inspected="true"\][\s\S]*cursor: none/u);
+    assert.match(css, /\.roomLockTarget[\s\S]*cursor: none/u);
   });
 
   it("keeps a screen coordinate bound to its physical hotspot after inspection", () => {
@@ -119,6 +180,8 @@ describe("Debate Whodunnit experience", () => {
     assert.doesNotMatch(source, /remainingRegions\.map/u);
     assert.match(css, /\.accessInventory/u);
     assert.match(css, /\.roomCaseKit/u);
+    assert.match(source, /<header>[\s\S]*className=\{styles\.roomCaseKit\}[\s\S]*<div\s+className=\{styles\.roomScene\}/u);
+    assert.match(css, /\.roomPanel\[data-focus="search"\] > header \.roomCaseKit[\s\S]*top: calc\(100% \+ 0\.75rem\)[\s\S]*max-height: min\(46dvh, 22rem\)/u);
     assert.match(css, /\.roomLockTarget/u);
     assert.match(css, /min-width: 3\.5rem/u);
   });
@@ -233,7 +296,7 @@ describe("Debate Whodunnit experience", () => {
     );
   });
 
-  it("opens views for free and charges each submitted interview question or inspection", () => {
+  it("opens views for free and charges only the first inspection in each search pass", () => {
     assert.match(source, /useState<"observe" \| "interview" \| "search">\("observe"\)/u);
     assert.match(source, /Talk to \{currentSuspect\.name\}/u);
     assert.match(source, /Investigate room · free/u);
@@ -241,6 +304,10 @@ describe("Debate Whodunnit experience", () => {
     assert.match(source, /action: "begin_interview"/u);
     assert.match(source, /action: "end_activity"/u);
     assert.match(source, /Opening is free · each submitted question costs 1 action/u);
+    assert.match(source, /the first hotspot costs 1 action, then every remaining hotspot in this pass is free/u);
+    assert.match(source, /currentInvestigation\?\.actionCommitted === true \|\| state\.actionsRemaining > 0/u);
+    assert.match(source, /Search committed · 1 action/u);
+    assert.match(source, /Area investigated · included in this search/u);
     assert.match(source, /data-focus=\{suspectRoomFocus\}/u);
     assert.match(css, /\.roomPanel\[data-focus="search"\][\s\S]*position: fixed/u);
     assert.match(css, /\.roomScene\[data-observing="true"\][\s\S]*blur\(2px\)/u);
@@ -271,9 +338,10 @@ describe("Debate Whodunnit experience", () => {
     assert.match(source, /mysteryClientActionKey\(action\)/u);
     assert.match(source, /remainingInvestigationRegions/u);
     assert.match(source, /mysteryInvestigationTargetAt/u);
-    assert.match(source, /aria-disabled=\{currentRoom\.inspectedRegionIds\.includes\(region\.id\) \|\| state\.actionsRemaining === 0\}/u);
-    assert.match(source, /disabled=\{busy \|\| state\.actionsRemaining === 0 \|\| currentRoom\.inspectedRegionIds\.includes\(region\.id\)\}/u);
-    assert.match(source, /if \(state\.actionsRemaining === 0 \|\| currentRoom\.inspectedRegionIds\.includes\(region\.id\)\) return;/u);
+    assert.match(source, /currentInvestigation\?\.actionCommitted === true \|\| state\.actionsRemaining > 0/u);
+    assert.match(source, /aria-disabled=\{currentRoom\.inspectedRegionIds\.includes\(region\.id\) \|\| !canInspectCurrentPass\}/u);
+    assert.match(source, /disabled=\{busy \|\| !canInspectCurrentPass \|\| currentRoom\.inspectedRegionIds\.includes\(region\.id\)\}/u);
+    assert.match(source, /if \(!canInspectCurrentPass \|\| currentRoom\.inspectedRegionIds\.includes\(region\.id\)\) return;/u);
     assert.match(source, /data-searched=\{room\.searched \? "true" : undefined\}/u);
     assert.match(source, /className=\{styles\.mapRoomCompleteMark\}/u);
     assert.match(source, /disabled=\{busy \|\| currentRoom\.searched\}/u);
@@ -373,7 +441,6 @@ describe("Debate Whodunnit experience", () => {
 
   it("fits one spatial scene plus optional record drawers into the desktop viewport", () => {
     assert.match(css, /\.play\[data-phase="investigation"\][\s\S]*height: 100dvh/u);
-    assert.match(css, /\.play\[data-phase="continuance"\][\s\S]*overflow: hidden/u);
     assert.match(source, /data-desk-open=\{deskOpen \? "true" : undefined\}/u);
     assert.match(css, /\.investigation[\s\S]*height: calc\(100dvh - 5\.45rem\)/u);
     assert.match(css, /\.floorplan,[\s\S]*\.roomPanel[\s\S]*height: 100%/u);
@@ -456,6 +523,15 @@ describe("Debate Whodunnit experience", () => {
     assert.match(source, /caseFileTab === "leads"[\s\S]*notebook\?\.leadAnnotations/u);
     assert.match(source, /comparison slots/u);
     assert.match(source, /onDrop=/u);
+    assert.match(source, /<DebateEvidenceDocument/u);
+    assert.match(source, /documentKind: "brave"/u);
+    assert.match(source, /documentKind: "scholar"/u);
+    assert.match(source, /className=\{styles\.deskEvidenceObject\}/u);
+    assert.match(source, /className=\{styles\.deskDocumentTray\}/u);
+    assert.match(source, /className=\{styles\.deskEvidenceTray\}/u);
+    assert.match(source, /application\/x-prism-desk-reference/u);
+    assert.match(evidenceDocumentSource, /One physical source prop shared by Forum lecterns and the Whodunnit desk/u);
+    assert.match(forumCss, /\.evidencePedestalDocument\[data-presentation="desk"\]/u);
     assert.match(source, /renderInvestigatorDesk\("theory"\)/u);
     assert.match(source, /Add to theory/u);
     assert.match(source, /onPointerDown=\{beginDeskPull\}/u);
@@ -519,6 +595,11 @@ describe("Debate Whodunnit experience", () => {
     assert.match(source, /mansion record is now closed/u);
     assert.match(source, /renderPartnerConsultation\("theory"\)/u);
     assert.match(source, /Consult · free/u);
+    assert.match(source, /Name only someone you&apos;ve met\./u);
+    assert.match(source, /const theoryAccused = revealedSuspects\.find/u);
+    assert.match(source, /const folderSuspects = surface === "theory" \? revealedSuspects : state\.suspects/u);
+    assert.match(source, /theoryAccused\?\.seatId === suspect\.seatId/u);
+    assert.doesNotMatch(source, /<option value="">Choose the accused<\/option>\{state\.suspects\.map/u);
     assert.match(source, /const theoryClaimOptions = debateMysteryTheoryClaimOptions\(state\)/u);
     assert.match(source, /className=\{styles\.theoryClaimPicker\}/u);
     assert.match(source, /aria-pressed=\{theory\[kind\] === option\.value\}/u);
@@ -527,15 +608,16 @@ describe("Debate Whodunnit experience", () => {
     assert.match(source, /disabled=\{busy \|\| theoryReadyCount !== theoryChecklist\.length\}/u);
     assert.match(css, /\.partnerConsultationLog/u);
     assert.match(css, /\.theoryClaimPicker/u);
+    assert.match(css, /\.theorySuspectChoices/u);
+    assert.match(css, /\.theoryWorkspace/u);
   });
 
   it("adds a clearly labeled one-click random cast action and preserves existing cast flow", () => {
-    assert.match(source, /data-tutorial-target="whodunnit-random-cast"/u);
-    assert.match(source, /aria-label="Randomly assign all Whodunnit cast roles"/u);
-    assert.match(source, /className=\{styles\.castRandomizeButton\}/u);
-    assert.match(source, /Surprise me/u);
-    assert.match(source, /Random cast/u);
-    assert.match(source, /disabled=\{!canRandomizeCast\}/u);
+    assert.match(shell, /data-tutorial-target="debate-random-cast"/u);
+    assert.match(shell, /"Randomly assign all Whodunnit cast roles"/u);
+    assert.match(shell, /className=\{styles\.castRandomizeButton\}/u);
+    assert.match(shell, /<strong>Surprise me<\/strong>/u);
+    assert.match(shell, /if \(format === "whodunnit"\) \{[\s\S]{0,180}randomizeWhodunnitCast/u);
   });
 
   it("produces distinct random Whodunnit casts with correct role counts", () => {
@@ -574,11 +656,11 @@ describe("Debate Whodunnit experience", () => {
   });
 
   it("registers every suspect tile as a bot-directed setup target", () => {
-    assert.match(source, /id: `whodunnit-setup-anchor-\$\{bot\.id\}`/u);
-    assert.match(source, /createBotDirectedSetupRefractTarget/u);
-    assert.match(source, /run: randomizeCast/u);
-    assert.match(source, /setInspiration/u);
-    assert.match(source, /aria-disabled=\{counsel\}/u);
+    assert.match(shell, /id: `debate-setup-anchor-\$\{bot\.id\}/u);
+    assert.match(shell, /createBotDirectedSetupRefractTarget/u);
+    assert.match(shell, /randomizeMysteryCastAroundBot/u);
+    assert.match(shell, /setMysteryInspiration/u);
+    assert.match(shell, /effectiveDisabledReason/u);
   });
 
   it("normalizes bot IDs before randomizing", () => {

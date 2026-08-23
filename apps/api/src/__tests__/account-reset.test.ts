@@ -71,6 +71,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
             secondary_ollama_host, experimental_dual_ollama_enabled,
             experimental_all_model_effort_enabled,
             coffee_experimental_table_angle_enabled,
+            debate_whodunnit_reuse_synthesized_exhibits,
             psychic_mode_enabled,
             comfyui_host, comfyui_workflows, preferred_local_image_model,
             preferred_openai_image_model, preferred_zen_wallpaper_local_image_model,
@@ -153,6 +154,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.experimental_dual_ollama_enabled, 0);
       assert.equal(user.experimental_all_model_effort_enabled, 0);
       assert.equal(user.coffee_experimental_table_angle_enabled, 0);
+      assert.equal(user.debate_whodunnit_reuse_synthesized_exhibits, 0);
       assert.equal(user.psychic_mode_enabled, 0);
       assert.equal(user.comfyui_host, null);
       assert.equal(user.comfyui_workflows, "[]");
@@ -297,6 +299,7 @@ function seedResetFixture(db: DatabaseSync): void {
       experimental_dual_ollama_enabled = 1,
       experimental_all_model_effort_enabled = 1,
       coffee_experimental_table_angle_enabled = 1,
+      debate_whodunnit_reuse_synthesized_exhibits = 1,
       psychic_mode_enabled = 1,
       comfyui_host = 'http://192.168.1.8:8188',
       comfyui_workflows = '[{"id":"workflow-a"}]',

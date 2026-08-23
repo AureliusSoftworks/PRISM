@@ -597,7 +597,6 @@ test("defaults legacy Debate records to Forum and normalizes Turnabout state", (
         version: 1,
         frozenInvestigation,
         credibilityRemaining: 2,
-        continuanceUsed: true,
         failedActions: 1,
         sustainedTestimonyIds: ["testimony-1", "testimony-1"],
         evidenceSourceMap: {
@@ -616,7 +615,6 @@ test("defaults legacy Debate records to Forum and normalizes Turnabout state", (
   );
   assert.equal(mysteryCourt.format, "turnabout");
   assert.equal(mysteryCourt.mysteryTrial?.frozenInvestigation.theory?.culpritSeatId, "suspect-2");
-  assert.equal(mysteryCourt.mysteryTrial?.continuanceUsed, true);
   assert.deepEqual(mysteryCourt.mysteryTrial?.sustainedTestimonyIds, ["testimony-1"]);
   assert.deepEqual(mysteryCourt.mysteryTrial?.evidenceSourceMap, {
     "mystery-evidence-1": "evidence-1",

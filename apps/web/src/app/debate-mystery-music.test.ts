@@ -30,7 +30,6 @@ describe("Whodunnit investigation music", () => {
     assert.equal(mysteryInvestigationMusicSessionActive("investigation"), true);
     assert.equal(mysteryInvestigationMusicSessionActive("theory"), false);
     assert.equal(mysteryInvestigationMusicSessionActive("trial"), false);
-    assert.equal(mysteryInvestigationMusicSessionActive("continuance"), true);
     assert.equal(mysteryInvestigationMusicSessionActive("verdict"), false);
   });
 

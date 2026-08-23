@@ -1,10 +1,10 @@
 import type { VoicePlaybackCharacterAlignment } from "./voiceEffects";
 
 /**
- * Returns only reply characters that have completed on the decoded playback
- * clock. A reply without exact provider character timing stays withheld until
- * its playback ends: estimating would risk displaying words the listener has
- * not heard yet.
+ * Returns reply characters that have completed on the decoded playback clock.
+ * Exact provider alignment wins when available. Engines without character
+ * timing fall back to the same audible playback progress so interviews still
+ * reveal continuously instead of dumping the full answer at playback end.
  */
 export function mysteryInterviewTranscriptVisibleText(args: {
   text: string;
@@ -14,6 +14,15 @@ export function mysteryInterviewTranscriptVisibleText(args: {
 }): string {
   const alignment = args.alignment;
   const characters = Array.from(args.text);
+  const durationMs = Math.max(1, args.durationMs);
+  const elapsedMs = Math.max(0, Math.min(durationMs, args.elapsedMs));
+  const estimatedVisibleText = (): string => {
+    const visibleCount = Math.min(
+      characters.length,
+      Math.floor(characters.length * (elapsedMs / durationMs)),
+    );
+    return characters.slice(0, visibleCount).join("");
+  };
   if (
     !alignment ||
     alignment.characters.length !== characters.length ||
@@ -21,7 +30,7 @@ export function mysteryInterviewTranscriptVisibleText(args: {
     alignment.characterStartTimesSeconds.length !== characters.length ||
     alignment.characterEndTimesSeconds.length !== characters.length
   ) {
-    return "";
+    return estimatedVisibleText();
   }
 
   const alignmentDurationSeconds =
@@ -31,10 +40,9 @@ export function mysteryInterviewTranscriptVisibleText(args: {
     !Number.isFinite(alignmentDurationSeconds) ||
     alignmentDurationSeconds <= 0
   ) {
-    return "";
+    return estimatedVisibleText();
   }
 
-  const durationMs = Math.max(1, args.durationMs);
   const audioTimelineOffsetSeconds = alignment.audioTimelineOffsetSeconds;
   const usesDecodedAudioClock =
     typeof audioTimelineOffsetSeconds === "number" &&
@@ -46,7 +54,6 @@ export function mysteryInterviewTranscriptVisibleText(args: {
   const offsetMs = usesDecodedAudioClock
     ? audioTimelineOffsetSeconds * 1_000
     : 0;
-  const elapsedMs = Math.max(0, Math.min(durationMs, args.elapsedMs));
   let visibleCount = 0;
   let previousStart = 0;
   let previousEnd = 0;
@@ -64,7 +71,7 @@ export function mysteryInterviewTranscriptVisibleText(args: {
       start < previousStart ||
       end < previousEnd
     ) {
-      return "";
+      return estimatedVisibleText();
     }
     previousStart = start;
     previousEnd = end;

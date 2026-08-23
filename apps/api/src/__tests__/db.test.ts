@@ -601,6 +601,10 @@ describe("createDatabase bot export hash migration", () => {
         (column) => column.name === "coffee_experimental_table_angle_enabled"
       );
       assert.equal(coffeeExperimentalTableAngleColumn?.dflt_value, "0");
+      const debateWhodunnitReuseSynthesizedExhibitsColumn = userColumns.find(
+        (column) => column.name === "debate_whodunnit_reuse_synthesized_exhibits"
+      );
+      assert.equal(debateWhodunnitReuseSynthesizedExhibitsColumn?.dflt_value, "0");
       const psychicModeColumn = userColumns.find(
         (column) => column.name === "psychic_mode_enabled"
       );
@@ -809,12 +813,13 @@ describe("createDatabase bot export hash migration", () => {
       assert.equal(avatarRow?.profile_picture_image_id, "img-profile");
       const settingsRow = reopened
         .prepare(
-          "SELECT experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, zen_message_font_min_px, zen_message_font_max_px, zen_persona_transition_choice FROM users WHERE id = ?"
+          "SELECT experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, debate_whodunnit_reuse_synthesized_exhibits, psychic_mode_enabled, zen_message_font_min_px, zen_message_font_max_px, zen_persona_transition_choice FROM users WHERE id = ?"
         )
         .get("user-1") as
         | {
             experimental_all_model_effort_enabled: number;
             coffee_experimental_table_angle_enabled: number;
+            debate_whodunnit_reuse_synthesized_exhibits: number;
             psychic_mode_enabled: number;
             zen_message_font_min_px: number;
             zen_message_font_max_px: number;
@@ -823,6 +828,7 @@ describe("createDatabase bot export hash migration", () => {
         | undefined;
       assert.equal(settingsRow?.experimental_all_model_effort_enabled, 0);
       assert.equal(settingsRow?.coffee_experimental_table_angle_enabled, 0);
+      assert.equal(settingsRow?.debate_whodunnit_reuse_synthesized_exhibits, 0);
       assert.equal(settingsRow?.psychic_mode_enabled, 0);
       assert.equal(settingsRow?.zen_message_font_min_px, 15.8);
       assert.equal(settingsRow?.zen_message_font_max_px, 32.8);

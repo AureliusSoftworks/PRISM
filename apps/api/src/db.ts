@@ -75,6 +75,7 @@ export interface DbUserRecord {
   experimentalDualOllamaEnabled: number;
   experimentalAllModelEffortEnabled: number;
   coffeeExperimentalTableAngleEnabled: number;
+  debateWhodunnitReuseSynthesizedExhibits: number;
   psychicModeEnabled: number;
   openAiKeyCiphertext: string | null;
   openAiKeyIv: string | null;
@@ -231,6 +232,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       experimental_dual_ollama_enabled INTEGER NOT NULL DEFAULT 0,
       experimental_all_model_effort_enabled INTEGER NOT NULL DEFAULT 0,
       coffee_experimental_table_angle_enabled INTEGER NOT NULL DEFAULT 0,
+      debate_whodunnit_reuse_synthesized_exhibits INTEGER NOT NULL DEFAULT 0,
       psychic_mode_enabled INTEGER NOT NULL DEFAULT 0,
       comfyui_host TEXT,
       comfyui_workflows TEXT NOT NULL DEFAULT '[]',
@@ -3192,6 +3194,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!hasCoffeeExperimentalTableAngleEnabled) {
     db.exec(
       "ALTER TABLE users ADD COLUMN coffee_experimental_table_angle_enabled INTEGER NOT NULL DEFAULT 0;",
+    );
+  }
+  const hasDebateWhodunnitReuseSynthesizedExhibits = userColumns.some(
+    (column) => column.name === "debate_whodunnit_reuse_synthesized_exhibits",
+  );
+  if (!hasDebateWhodunnitReuseSynthesizedExhibits) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN debate_whodunnit_reuse_synthesized_exhibits INTEGER NOT NULL DEFAULT 0;",
     );
   }
   const hasPsychicModeEnabled = userColumns.some(

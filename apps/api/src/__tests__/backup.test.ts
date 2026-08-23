@@ -1146,7 +1146,7 @@ describe("backup Zen Atmosphere style notes", () => {
   it("exports and restores normalized style notes", () => {
     withBackupDatabase((db, userKey) => {
       db.prepare(
-        "UPDATE users SET zen_wallpaper_style_notes = ?, zen_wallpaper_blurred_edges_enabled = 0, zen_message_font_min_px = 18.4, zen_message_font_max_px = 36.7, experimental_all_model_effort_enabled = 1, coffee_experimental_table_angle_enabled = 1, psychic_mode_enabled = 1, prism_default_bot_face_thinking_frames = ?, prism_default_bot_face_mouth_speech_poses = ? WHERE id = ?"
+        "UPDATE users SET zen_wallpaper_style_notes = ?, zen_wallpaper_blurred_edges_enabled = 0, zen_message_font_min_px = 18.4, zen_message_font_max_px = 36.7, experimental_all_model_effort_enabled = 1, coffee_experimental_table_angle_enabled = 1, debate_whodunnit_reuse_synthesized_exhibits = 1, psychic_mode_enabled = 1, prism_default_bot_face_thinking_frames = ?, prism_default_bot_face_mouth_speech_poses = ? WHERE id = ?"
       ).run(
         "  misty\n glass,   paper grain  ",
         '["?","!","?","…"]',
@@ -1165,6 +1165,7 @@ describe("backup Zen Atmosphere style notes", () => {
       assert.equal(snapshot.settings?.zenMessageFontMaxPx, 36.7);
       assert.equal(snapshot.settings?.experimentalAllModelEffortEnabled, true);
       assert.equal(snapshot.settings?.coffeeExperimentalTableAngleEnabled, true);
+      assert.equal(snapshot.settings?.debateWhodunnitReuseSynthesizedExhibits, true);
       assert.equal(snapshot.settings?.psychicModeEnabled, true);
       assert.deepEqual(snapshot.settings?.prismDefaultBotFaceThinkingFrames, [
         "?",
@@ -1191,6 +1192,7 @@ describe("backup Zen Atmosphere style notes", () => {
             zenMessageFontMaxPx: 19.2,
             experimentalAllModelEffortEnabled: false,
             coffeeExperimentalTableAngleEnabled: false,
+            debateWhodunnitReuseSynthesizedExhibits: false,
             psychicModeEnabled: false,
             prismDefaultBotFaceThinkingFrames: [".", "o", "O", "o"],
             prismDefaultBotFaceMouthSpeechPoses: ["_", "·", "V", "o"],
@@ -1201,7 +1203,7 @@ describe("backup Zen Atmosphere style notes", () => {
 
       const restored = db
         .prepare(
-          "SELECT zen_wallpaper_style_notes, zen_wallpaper_blurred_edges_enabled, zen_message_font_min_px, zen_message_font_max_px, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, prism_default_bot_face_thinking_frames, prism_default_bot_face_mouth_speech_poses FROM users WHERE id = ?"
+          "SELECT zen_wallpaper_style_notes, zen_wallpaper_blurred_edges_enabled, zen_message_font_min_px, zen_message_font_max_px, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, debate_whodunnit_reuse_synthesized_exhibits, psychic_mode_enabled, prism_default_bot_face_thinking_frames, prism_default_bot_face_mouth_speech_poses FROM users WHERE id = ?"
         )
         .get("user-1") as {
         zen_wallpaper_style_notes: string;
@@ -1210,6 +1212,7 @@ describe("backup Zen Atmosphere style notes", () => {
         zen_message_font_max_px: number;
         experimental_all_model_effort_enabled: number;
         coffee_experimental_table_angle_enabled: number;
+        debate_whodunnit_reuse_synthesized_exhibits: number;
         psychic_mode_enabled: number;
         prism_default_bot_face_thinking_frames: string | null;
         prism_default_bot_face_mouth_speech_poses: string | null;
@@ -1224,6 +1227,7 @@ describe("backup Zen Atmosphere style notes", () => {
       assert.equal(restored.zen_message_font_max_px, 22.4);
       assert.equal(restored.experimental_all_model_effort_enabled, 0);
       assert.equal(restored.coffee_experimental_table_angle_enabled, 0);
+      assert.equal(restored.debate_whodunnit_reuse_synthesized_exhibits, 0);
       assert.equal(restored.psychic_mode_enabled, 0);
       assert.equal(restored.prism_default_bot_face_thinking_frames, '[".","o","O","o"]');
       assert.equal(

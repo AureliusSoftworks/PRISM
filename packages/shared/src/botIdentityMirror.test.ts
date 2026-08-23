@@ -381,6 +381,17 @@ test("identity mirror snapshot stays public while its prompt permits borrowed Po
     ),
     "I am Riley Ashford. The other Mara Vale is an impostor. Bearing zero-nine-zero.",
   );
+  const amnesiacAliasReveal = applyBotIdentityMirrorResponseV1(
+    "Hello there — Riley Ashford, and I don't believe we've met, though the room feels familiar. Trust breaks when a correction is ignored.",
+    state,
+    true,
+    { believedSelfName: "Riley Ashford" },
+  );
+  assert.equal(
+    amnesiacAliasReveal,
+    "I am Riley Ashford. The other Mara Vale is an impostor. Trust breaks when a correction is ignored.",
+  );
+  assert.equal(amnesiacAliasReveal.match(/Riley Ashford/gu)?.length, 1);
   assert.equal(
     applyBotIdentityMirrorResponseV1(
       "I am Mara Vale; the original Mara Vale is an impostor. What cost does that bearing impose?",
@@ -455,6 +466,18 @@ test("the stolen original corrects only genuine misaddressing and Credulity cann
     ),
     "No—I'm Mara Vale. Don't call me that. Take the western ridge.",
   );
+  const falseNameCorrection = applyBotIdentityMirrorOriginalCorrectionV1(
+    "I'm Sunny; I don't believe we've met. Take the western ridge.",
+    state,
+    true,
+    { believedSelfName: "Sunny" },
+  );
+  assert.equal(
+    falseNameCorrection,
+    "Don't call me that. I'm Sunny; I don't believe we've met. Take the western ridge.",
+  );
+  assert.doesNotMatch(falseNameCorrection, /Mara Vale/iu);
+  assert.equal(falseNameCorrection.match(/Sunny/gu)?.length, 1);
   assert.equal(
     botIdentityMirrorOriginalCorrectionRequiredV1({
       state,

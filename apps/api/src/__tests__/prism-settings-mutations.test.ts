@@ -44,4 +44,16 @@ describe("prism settings journal allowlist", () => {
     assert.equal(prismSettingsPatchIsJournalable(patch), true);
     assert.deepEqual(validatePrismSettingsPatch(patch), patch);
   });
+
+  it("keeps Whodunnit exhibit reuse on the persisted journal path", () => {
+    const patch = { debateWhodunnitReuseSynthesizedExhibits: true };
+    assert.equal(
+      PRISM_JOURNALED_SETTING_KEYS.has(
+        "debateWhodunnitReuseSynthesizedExhibits",
+      ),
+      true,
+    );
+    assert.equal(prismSettingsPatchIsJournalable(patch), true);
+    assert.deepEqual(validatePrismSettingsPatch(patch), patch);
+  });
 });

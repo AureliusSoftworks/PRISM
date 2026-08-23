@@ -486,7 +486,6 @@ export interface DebateTurnaboutFormatStateV1 {
     version: 1;
     frozenInvestigation: DebateWhodunnitFormatStateV1;
     credibilityRemaining: number;
-    continuanceUsed: boolean;
     failedActions: number;
     sustainedTestimonyIds: string[];
     evidenceSourceMap: Record<string, string>;
@@ -3665,7 +3664,6 @@ export function normalizeDebateFormatStateV1(
                   Math.min(3, Math.floor(mysteryTrialSource.credibilityRemaining)),
                 )
               : 3,
-          continuanceUsed: mysteryTrialSource?.continuanceUsed === true,
           failedActions:
             typeof mysteryTrialSource?.failedActions === "number" &&
             Number.isFinite(mysteryTrialSource.failedActions)

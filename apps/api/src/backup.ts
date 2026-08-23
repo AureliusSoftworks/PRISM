@@ -199,6 +199,7 @@ export interface BackupUserSettings {
   experimentalDualOllamaEnabled: boolean;
   experimentalAllModelEffortEnabled?: boolean;
   coffeeExperimentalTableAngleEnabled?: boolean;
+  debateWhodunnitReuseSynthesizedExhibits?: boolean;
   psychicModeEnabled?: boolean;
   autoModeEnabled?: boolean;
   autoFallbackChain?: AutoFallbackChainV1 | null;
@@ -1869,6 +1870,7 @@ export function exportUserSnapshot(
          experimental_dual_ollama_enabled,
          experimental_all_model_effort_enabled,
          coffee_experimental_table_angle_enabled,
+         debate_whodunnit_reuse_synthesized_exhibits,
          psychic_mode_enabled,
          auto_switch_model,
          auto_fallback_chain,
@@ -1950,6 +1952,7 @@ export function exportUserSnapshot(
         experimental_dual_ollama_enabled: number;
         experimental_all_model_effort_enabled: number;
         coffee_experimental_table_angle_enabled: number;
+        debate_whodunnit_reuse_synthesized_exhibits: number;
         psychic_mode_enabled: number;
         auto_switch_model: number;
         auto_fallback_chain: string | null;
@@ -2051,6 +2054,8 @@ export function exportUserSnapshot(
           user.experimental_all_model_effort_enabled === 1,
         coffeeExperimentalTableAngleEnabled:
           user.coffee_experimental_table_angle_enabled === 1,
+        debateWhodunnitReuseSynthesizedExhibits:
+          user.debate_whodunnit_reuse_synthesized_exhibits === 1,
         psychicModeEnabled: user.psychic_mode_enabled === 1,
         autoModeEnabled: user.auto_switch_model === 1,
         autoFallbackChain: parseStoredAutoFallbackChain(
@@ -3801,6 +3806,7 @@ function importUserSnapshotWithinTransaction(
         experimental_dual_ollama_enabled = ?,
         experimental_all_model_effort_enabled = ?,
         coffee_experimental_table_angle_enabled = ?,
+        debate_whodunnit_reuse_synthesized_exhibits = ?,
         psychic_mode_enabled = ?,
         auto_switch_model = ?,
         auto_fallback_chain = ?,
@@ -3899,6 +3905,7 @@ function importUserSnapshotWithinTransaction(
       settings.experimentalDualOllamaEnabled ? 1 : 0,
       settings.experimentalAllModelEffortEnabled === true ? 1 : 0,
       settings.coffeeExperimentalTableAngleEnabled === true ? 1 : 0,
+      settings.debateWhodunnitReuseSynthesizedExhibits === true ? 1 : 0,
       settings.psychicModeEnabled === true ? 1 : 0,
       settings.autoModeEnabled === true && storedAutoFallbackChain ? 1 : 0,
       storedAutoFallbackChain,

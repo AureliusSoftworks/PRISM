@@ -192,6 +192,7 @@ export interface CurrentSettings {
   experimentalDualOllamaEnabled: number;
   experimentalAllModelEffortEnabled: number;
   coffeeExperimentalTableAngleEnabled: number;
+  debateWhodunnitReuseSynthesizedExhibits: number;
   psychicModeEnabled: number;
   /** @deprecated Import/backup compatibility only; runtime routing ignores it. */
   autoSwitchModel: number;
@@ -275,6 +276,7 @@ export interface NextSettings {
   experimentalDualOllamaEnabled: number;
   experimentalAllModelEffortEnabled: number;
   coffeeExperimentalTableAngleEnabled: number;
+  debateWhodunnitReuseSynthesizedExhibits: number;
   psychicModeEnabled: number;
   autoSwitchModel: number;
   autoFallbackChain: string | null;
@@ -980,6 +982,10 @@ export function resolveNextSettings(
     typeof body.coffeeExperimentalTableAngleEnabled === "boolean"
       ? Number(body.coffeeExperimentalTableAngleEnabled)
       : current.coffeeExperimentalTableAngleEnabled;
+  const debateWhodunnitReuseSynthesizedExhibits =
+    typeof body.debateWhodunnitReuseSynthesizedExhibits === "boolean"
+      ? Number(body.debateWhodunnitReuseSynthesizedExhibits)
+      : current.debateWhodunnitReuseSynthesizedExhibits;
   const psychicModeEnabled =
     typeof body.psychicModeEnabled === "boolean"
       ? Number(body.psychicModeEnabled)
@@ -1373,6 +1379,7 @@ export function resolveNextSettings(
     experimentalDualOllamaEnabled,
     experimentalAllModelEffortEnabled,
     coffeeExperimentalTableAngleEnabled,
+    debateWhodunnitReuseSynthesizedExhibits,
     psychicModeEnabled,
     autoSwitchModel,
     autoFallbackChain,

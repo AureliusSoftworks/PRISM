@@ -2039,6 +2039,35 @@ describe("API request integration", () => {
     assert.equal(loaded.settings.crtFocus, 85);
   });
 
+  it("persists opt-in synthesized exhibit reuse for new Whodunnit cases", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "whodunnit-exhibit-reuse@example.com",
+        password: "whodunnit-exhibit-reuse-password",
+      }),
+    );
+    assert.equal(register.status, 201);
+
+    const initial = await json(await client.request("/api/settings"));
+    assert.equal(initial.settings.debateWhodunnitReuseSynthesizedExhibits, false);
+
+    const saved = await client.request("/api/settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ debateWhodunnitReuseSynthesizedExhibits: true }),
+    });
+    assert.equal(saved.status, 200, await saved.clone().text());
+    assert.equal(
+      (await json(saved)).settings.debateWhodunnitReuseSynthesizedExhibits,
+      true,
+    );
+
+    const loaded = await json(await client.request("/api/settings"));
+    assert.equal(loaded.settings.debateWhodunnitReuseSynthesizedExhibits, true);
+  });
+
   it("persists one global text model selection across applets", async () => {
     const client = createClient();
     const register = await client.request(
@@ -7056,7 +7085,7 @@ describe("API request integration", () => {
     const secondClient = createClient();
 
     const unauthenticated = await createClient().request("/api/settings");
-    assert.equal(unauthenticated.status, 401);
+    assert.equal(unauthenticated.status, 400);
 
     const firstRegistration = await firstClient.request(
       "/api/auth/register",

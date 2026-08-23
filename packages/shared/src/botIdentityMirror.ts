@@ -524,6 +524,30 @@ function stripIdentityMirrorSelfDeclarationV1(
 }
 
 /**
+ * Drops a first-contact greeting that already introduced the effective public
+ * name. Identity Mirror owns the one canonical transition reveal, so a copied
+ * amnesia Power must not leave a second introduction immediately after it.
+ */
+function stripIdentityMirrorFreshContactLeadV1(
+  value: string,
+  selfName: string,
+): string {
+  const source = value.trim();
+  const firstSentence = /^[\s\S]*?[.!?](?=\s|$)/u.exec(source)?.[0] ?? source;
+  const escaped = identityMirrorEscapeRegExpV1(selfName);
+  const greetingNamesSelf =
+    /\b(?:hello|hi|hey|greetings|nice to meet you|pleased to meet you)\b/iu.test(
+      firstSentence,
+    ) &&
+    new RegExp(`\\b${escaped}(?=$|[\\s,.;:!?—])`, "iu").test(firstSentence);
+  // A bare `I'm Name; substantive clause` is handled by the narrower
+  // declaration stripper below so the clause survives. Drop the whole lead
+  // only when it is actually a greeting/reset beat.
+  if (!greetingNamesSelf) return source;
+  return source.slice(firstSentence.length).trim();
+}
+
+/**
  * True only when the latest bot line gives the stolen original a wrong public
  * name or identity. Human/player speech must never be passed to this helper.
  */
@@ -581,10 +605,14 @@ export function applyBotIdentityMirrorOriginalCorrectionV1(
   value: unknown,
   state: BotIdentityMirrorStateV1,
   correctionRequired: boolean,
+  options: { believedSelfName?: string | null } = {},
 ): string {
   const source = typeof value === "string" ? value.trim() : "";
   if (!correctionRequired) return source;
   const targetName = identityMirrorEscapeRegExpV1(state.targetBotName);
+  const correctionName =
+    options.believedSelfName?.trim() || state.targetBotName;
+  const correctionNamePattern = identityMirrorEscapeRegExpV1(correctionName);
   let cleaned = source.replace(
     new RegExp(
       `(?:^|[.!?]\\s+)[^.!?]*(?:i(?:['’]m|\\s+am)\\s+(?:the\\s+)?${IDENTITY_MIRROR_FALSE_LABEL_V1}|i(?:['’]m|\\s+am)\\s+not\\s+(?:really\\s+)?${targetName}|you(?:['’]re|\\s+are)\\s+right[^.!?]{0,80}${IDENTITY_MIRROR_FALSE_LABEL_V1})[^.!?]*(?:[.!?]+\\s*|$)`,
@@ -594,12 +622,12 @@ export function applyBotIdentityMirrorOriginalCorrectionV1(
   );
   cleaned = cleaned.replace(/^[\s,;:—–-]+/u, "").replace(/\s{2,}/gu, " ").trim();
   const alreadyCorrects = new RegExp(
-    `\\b(?:i am|i['’]m|my name is)\\s+${targetName}(?=$|[\\s,.;:!?—])`,
+    `\\b(?:i am|i['’]m|my name is)\\s+${correctionNamePattern}(?=$|[\\s,.;:!?—])`,
     "iu",
   ).test(cleaned);
   const offendedCorrection = alreadyCorrects
     ? "Don't call me that."
-    : `No—I'm ${state.targetBotName}. Don't call me that.`;
+    : `No—I'm ${correctionName}. Don't call me that.`;
   return [offendedCorrection, cleaned]
     .filter(Boolean)
     .join(" ");
@@ -641,7 +669,10 @@ export function applyBotIdentityMirrorResponseV1(
   }
 
   const substantive = stripIdentityMirrorSelfDeclarationV1(
-    withoutForbiddenClaims,
+    stripIdentityMirrorFreshContactLeadV1(
+      withoutForbiddenClaims,
+      requiredSelfName,
+    ),
     requiredSelfName,
   );
   return [

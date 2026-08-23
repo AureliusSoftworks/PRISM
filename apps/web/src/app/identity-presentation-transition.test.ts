@@ -135,6 +135,11 @@ test("Identity Crisis borrows identity while Shapeshifter retains full-form pres
   );
   assert.match(
     debateSource,
+    /identityLabel: identitySource\s*\?\s*shapeshifting\s*\?\s*`Appearing as \$\{identitySource\.name\}`\s*:\s*null\s*:\s*falseName/u,
+    "Identity Crisis must not repeat its borrowed name in an Appearing as label",
+  );
+  assert.match(
+    debateSource,
     /glyph: shapeshifting \? bot\.glyph : \(identitySource\?\.glyph \?\? bot\.glyph\)/u,
     "Shapeshifter nameplates keep the holder's authored glyph",
   );

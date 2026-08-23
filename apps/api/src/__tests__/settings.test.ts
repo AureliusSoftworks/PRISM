@@ -68,6 +68,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     experimentalDualOllamaEnabled: 0,
     experimentalAllModelEffortEnabled: 0,
     coffeeExperimentalTableAngleEnabled: 0,
+    debateWhodunnitReuseSynthesizedExhibits: 0,
     psychicModeEnabled: 0,
     autoSwitchModel: 0,
     autoFallbackChain: null,
@@ -725,6 +726,40 @@ describe("resolveNextSettings — coffeeExperimentalTableAngleEnabled", () => {
         current
       ).coffeeExperimentalTableAngleEnabled,
       1
+    );
+  });
+});
+
+describe("resolveNextSettings — debateWhodunnitReuseSynthesizedExhibits", () => {
+  it("persists boolean values", () => {
+    assert.equal(
+      resolveNextSettings(
+        { debateWhodunnitReuseSynthesizedExhibits: true },
+        baseline({ debateWhodunnitReuseSynthesizedExhibits: 0 }),
+      ).debateWhodunnitReuseSynthesizedExhibits,
+      1,
+    );
+    assert.equal(
+      resolveNextSettings(
+        { debateWhodunnitReuseSynthesizedExhibits: false },
+        baseline({ debateWhodunnitReuseSynthesizedExhibits: 1 }),
+      ).debateWhodunnitReuseSynthesizedExhibits,
+      0,
+    );
+  });
+
+  it("keeps the stored value when the field is missing or invalid", () => {
+    const current = baseline({ debateWhodunnitReuseSynthesizedExhibits: 1 });
+    assert.equal(
+      resolveNextSettings({}, current).debateWhodunnitReuseSynthesizedExhibits,
+      1,
+    );
+    assert.equal(
+      resolveNextSettings(
+        { debateWhodunnitReuseSynthesizedExhibits: "true" as unknown as boolean },
+        current,
+      ).debateWhodunnitReuseSynthesizedExhibits,
+      1,
     );
   });
 });

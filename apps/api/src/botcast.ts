@@ -16966,8 +16966,68 @@ export async function advanceBotcastEpisode(
           falseNameSafeContent,
           originalIdentityMirrorState,
           originalIdentityCorrectionRequired,
+          { believedSelfName: activeFalseNameState?.believedName },
         )
       : falseNameSafeContent;
+  const postPowerGuestRepairApplied = Boolean(
+    speakerRole === "guest" &&
+      episode.segment !== "closing" &&
+      !wrapUpCue &&
+      !departureRequired &&
+      !picklesBeatKind &&
+      !socialSilenceMarker &&
+      !speakerIsMutedForTurn &&
+      !speakerRepeatsForHearingPower &&
+      !speakerReadsProducerQuote &&
+      !speakerEchoesForTurn &&
+      botcastGuestUtteranceIsGenericStall(originalIdentitySafeContent),
+  );
+  const postPowerGuestSafeContent = postPowerGuestRepairApplied
+    ? (() => {
+        const freshContactFallback = speakerEternallyIntroduces
+          ? applyBotPowerEternalIntroductionResponseV1(
+              guestRecoveryFallback,
+              activeFalseNameState?.believedName ?? speaker.name,
+              episode.messages.at(-1)?.content ?? "",
+              {
+                hasPreviousOnAirTurn: speakerHasSpoken,
+                ...(activeFalseNameState
+                  ? { alsoRecognizesName: speaker.name }
+                  : {}),
+              },
+            )
+          : guestRecoveryFallback;
+        const mirrorSafeFallback = activeIdentityMirrorState
+          ? applyBotIdentityMirrorResponseV1(
+              freshContactFallback,
+              activeIdentityMirrorState,
+              identityMirrorJustChanged,
+              { believedSelfName: activeFalseNameState?.believedName },
+            )
+          : freshContactFallback;
+        const falseNameSafeFallback = activeFalseNameState
+          ? rewriteBotFalseNameResponseV1(
+              mirrorSafeFallback,
+              activeFalseNameState,
+              falseNameJustChanged,
+              {
+                replacedSelfNames: activeIdentityMirrorState
+                  ? [activeIdentityMirrorState.targetBotName]
+                  : [],
+                announceIdentityOnChange: false,
+              },
+            )
+          : mirrorSafeFallback;
+        return originalIdentityMirrorState
+          ? applyBotIdentityMirrorOriginalCorrectionV1(
+              falseNameSafeFallback,
+              originalIdentityMirrorState,
+              originalIdentityCorrectionRequired,
+              { believedSelfName: activeFalseNameState?.believedName },
+            )
+          : falseNameSafeFallback;
+      })()
+    : originalIdentitySafeContent;
   const responseBudgetMayUseSecondSentence =
     firstHostOpening ||
     episode.segment === "closing" ||
@@ -16980,16 +17040,16 @@ export async function advanceBotcastEpisode(
     speakerRepeatsForHearingPower ||
     speakerReadsProducerQuote ||
     speakerEchoesForTurn
-      ? originalIdentitySafeContent
+      ? postPowerGuestSafeContent
       : applyBotPowerResponseBudgetV1(
-          originalIdentitySafeContent,
+          postPowerGuestSafeContent,
           speakerHardResponseBudget,
           speakerHardResponseBudget?.mode === "minimal" &&
             !responseBudgetMayUseSecondSentence
             ? 1
             : 2,
         );
-  const responseBudgetAdjusted = baseContent !== originalIdentitySafeContent;
+  const responseBudgetAdjusted = baseContent !== postPowerGuestSafeContent;
   const addressedInsultEligible =
     speakerRequiresAddressedInsult &&
     !picklesBeatKind &&
@@ -17548,7 +17608,8 @@ export async function advanceBotcastEpisode(
     ...((generatedUtterance.repairReason ||
       closingContractRepaired ||
       freshContactRepairApplied ||
-      prematureSignoffRepairApplied) &&
+      prematureSignoffRepairApplied ||
+      postPowerGuestRepairApplied) &&
     !socialSilenceMarker &&
     !speakerIsMutedForTurn &&
     !speakerReadsProducerQuote
@@ -17572,6 +17633,9 @@ export async function advanceBotcastEpisode(
               closingContractRepairReason ??
               (prematureSignoffRepairApplied
                 ? "premature_signoff"
+                : undefined) ??
+              (postPowerGuestRepairApplied
+                ? "non_answering_deferral"
                 : undefined) ??
               "power_fresh_contact",
             fallbackKind:

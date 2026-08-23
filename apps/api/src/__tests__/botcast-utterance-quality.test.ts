@@ -161,9 +161,23 @@ describe("botcast utterance quality", () => {
   it("rejects vague guest reactions as primary answers", () => {
     assert.equal(botcastGuestUtteranceIsGenericStall("That is optimistic."), true);
     assert.equal(botcastGuestUtteranceIsGenericStall("I mean it's over"), true);
+    assert.equal(botcastGuestUtteranceIsGenericStall("Hello, Oz"), true);
+    assert.equal(botcastGuestUtteranceIsGenericStall("Let us continue."), true);
+    assert.equal(
+      botcastGuestUtteranceIsGenericStall(
+        "Hello, Drew. I’m Oz; I think there may be some crossed wires. What subject would you prefer to begin with?",
+      ),
+      true,
+    );
     assert.equal(
       botcastGuestUtteranceIsGenericStall(
         "Responsiveness preserves agency when someone must act quickly.",
+      ),
+      false,
+    );
+    assert.equal(
+      botcastGuestUtteranceIsGenericStall(
+        "Hello, Cookie. I’m Rowan; a proper repair is simple: use the corrected name consistently and let trust rebuild.",
       ),
       false,
     );
