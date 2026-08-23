@@ -116,6 +116,37 @@ describe("adaptive local voice selection", () => {
     assert.equal(speechprint.appliedInfluence, "german-influenced-english");
   });
 
+  it("bypasses Local Accent Map pronunciation and Speechprint when disabled", () => {
+    const engine = resolveLocalVoiceEngine({
+      preference: "instant",
+      calibration: calibration(),
+      runtimeHealthy: true,
+      speechprintActive: true,
+    });
+    const profile = {
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      accentPronunciationEnabled: false,
+      accentDefinitionId: "german-influenced-english",
+      pronunciationBase: "en-GB" as const,
+      speechprintInfluence: "german-influenced-english" as const,
+    };
+    const pronunciation = resolveLocalVoicePronunciation({
+      profile,
+      localEngine: engine,
+      usingSystemVoice: false,
+    });
+    const speechprint = resolveLocalVoiceSpeechprint({
+      profile,
+      localEngine: engine,
+      usingSystemVoice: false,
+      pronunciation,
+    });
+    assert.equal(pronunciation.status, "natural");
+    assert.equal(pronunciation.requestedBase, "follow-voice");
+    assert.equal(speechprint.requestedInfluence, "none");
+    assert.equal(speechprint.status, "natural");
+  });
+
   it("routes a cross-accent pronunciation through Instant before Speechprints", () => {
     const engine = resolveLocalVoiceEngine({
       preference: "auto",

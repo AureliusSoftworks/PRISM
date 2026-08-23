@@ -8,6 +8,19 @@ export interface NormalizedImageAssetUpload {
   height: number;
 }
 
+/**
+ * Detects actual translucent pixels, rather than treating the presence of an
+ * alpha channel as proof that the image uses transparency.
+ */
+export async function imageHasVisibleTransparency(
+  inputBytes: Buffer,
+): Promise<boolean> {
+  const stats = await sharp(inputBytes, { limitInputPixels: 40_000_000 })
+    .ensureAlpha()
+    .stats();
+  return (stats.channels[3]?.min ?? 255) < 255;
+}
+
 export function parseImageAssetDataUrl(value: unknown): Buffer {
   if (typeof value !== "string") {
     throw new Error("Image upload requires a data URL.");

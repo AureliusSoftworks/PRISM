@@ -1,5 +1,6 @@
 export const IMAGE_ASSET_KINDS = [
   "general_image",
+  "item",
   "debate_exhibit",
   "signal_studio",
   "signal_logo",
@@ -15,6 +16,7 @@ export type ImageAssetKind = (typeof IMAGE_ASSET_KINDS)[number];
 /** Focused bot Assets order: Images, Signal, Debate, Atmospheres, then Slate. */
 export const BOT_IMAGE_ASSET_LIBRARY_KIND_ORDER = [
   "general_image",
+  "item",
   "signal_studio",
   "signal_logo",
   "debate_exhibit",
@@ -168,6 +170,7 @@ export function isImageAssetStorageTier(
 
 export const IMAGE_ASSET_KIND_LABELS: Record<ImageAssetKind, string> = {
   general_image: "Images",
+  item: "Items",
   debate_exhibit: "Debate exhibits",
   signal_studio: "Signal studios",
   signal_logo: "Signal logos",
@@ -206,6 +209,7 @@ export function imageAssetKindForImage(
   const purpose = input.purpose?.trim() || "gallery";
 
   if (purpose === "debate_exhibit") return "debate_exhibit";
+  if (purpose === "signal_item") return "item";
   if (purpose === "signal_studio_day" || purpose === "signal_studio_night") {
     return "signal_studio";
   }

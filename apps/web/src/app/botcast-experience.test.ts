@@ -37,6 +37,97 @@ const pageCss = readFileSync(
 );
 
 describe("Signal experience shell", () => {
+  it("gates one ephemeral Producer image and stages items vs pictures", () => {
+    assert.match(source, /supportsImageInput\?: boolean/u);
+    assert.match(
+      source,
+      /activeEpisodeImageCapability\?\.supportsImageInput !== true/u,
+    );
+    assert.match(source, /\/image-capability/u);
+    assert.match(source, /SIGNAL_EPISODE_IMAGE_ACCEPT = "\.png,\.jpg"/u);
+    assert.match(source, /Signal allows one image upload per episode/u);
+    assert.match(source, /className=\{styles\.producerImageAttachWrap\}[\s\S]{0,100}title=\{producerImageTooltip\}/u);
+    assert.match(source, /episodeImage: \{/u);
+    assert.match(source, /dataUrl: episodeImageForTurn\.dataUrl/u);
+    assert.match(
+      source,
+      /descriptor:\s*\{[\s\S]{0,100}kind: resolvedImageContext\.kind[\s\S]{0,100}mimeType: resolvedImageContext\.mimeType/u,
+    );
+    assert.match(source, /sendCue\(\{ kind: "present_image", imageId: upload\.imageId \}\)/u);
+    assert.match(
+      source,
+      /selectedEpisodeModelOption\?\.supportsImageInput === true/u,
+    );
+    assert.match(source, /data-signal-setup-image="true"/u);
+    assert.match(source, /Transparent PNG item · presented as the physical item/u);
+    assert.match(source, /Opaque PNG photo · presented as a framed picture/u);
+    assert.match(source, /JPG photo · presented as a framed picture/u);
+    assert.match(source, /id="signal-setup-image-name"/u);
+    assert.match(source, /id="signal-setup-image-reason"/u);
+    assert.match(source, /Reason <span>optional · private to the host<\/span>/u);
+    assert.match(source, /name: episodeImageForTurn\.descriptor\.name/u);
+    assert.match(source, /replayEmoji: episodeImageForTurn\.replayEmoji/u);
+    assert.match(source, /reason: episodeImageForTurn\.reason/u);
+    assert.match(source, /\/api\/botcast\/episode-image\/emoji/u);
+    assert.match(source, /debateEvidenceEmojiForObject/u);
+    assert.match(
+      source,
+      /if \(setupImageUpload\) \{[\s\S]{0,180}assignQueuedProducerCue\(\{[\s\S]{0,100}kind: "present_image"/u,
+    );
+    assert.match(
+      source,
+      /if \(!hasVisibleTransparency\) descriptor\.kind = "picture"/u,
+    );
+    assert.match(source, /botcastImageContextForMessageV1/u);
+    assert.match(
+      source,
+      /latestStageImageContext\?\.phase === "presented"[\s\S]{0,100}latestStageImageContext\?\.phase === "discussing"/u,
+    );
+    assert.match(source, /className=\{styles\.episodeImageContext\}/u);
+    assert.match(source, /savedAssetId/u);
+    assert.match(source, /className=\{styles\.episodeImageReplayEmoji\}/u);
+    assert.match(source, /data-signal-image-speaker/u);
+    assert.match(
+      source,
+      /<SignalEpisodeImageVisual[\s\S]{0,120}ephemeralDataUrl=\{stageEpisodeImage\?\.dataUrl\}/u,
+    );
+    assert.match(
+      css,
+      /\.episodeImageContext\s*\{[^}]*left:\s*var\(--signal-episode-image-x, 50%\)[^}]*top:\s*var\(--signal-episode-image-y, 75%\)[^}]*width:\s*clamp\(88px, 14%, 180px\)/u,
+    );
+    assert.doesNotMatch(
+      css,
+      /\.episodeImageContext\[data-speaker-role="(?:host|guest)"\]\s*\{[^}]*left:/u,
+    );
+    assert.match(css, /\.episodeImageContext\[data-image-kind="item"\]/u);
+    assert.match(css, /\.episodeImageContext\[data-image-kind="picture"\]/u);
+    assert.match(
+      css,
+      /\.episodeImageContext\[data-image-kind="picture"\] \.episodeImageReplayEmoji/u,
+    );
+    assert.match(css, /--botcast-photo-frame:\s*linear-gradient\(165deg, #5a5164/u);
+    assert.match(
+      css,
+      /\.shell\[data-theme="light"\]\s*\{[^}]*--botcast-photo-frame:\s*linear-gradient\(165deg, #fffdf8/u,
+    );
+    assert.match(
+      css,
+      /\.episodeImageContext\[data-image-kind="picture"\]\s*\{[^}]*background:\s*var\(--botcast-photo-frame\)[^}]*box-shadow:\s*var\(--botcast-photo-shadow\)/u,
+    );
+    assert.match(source, /const \[keepSignalItem, setKeepSignalItem\] = useState\(false\)/u);
+    assert.match(source, /signalEpisodeImage\.descriptor\.kind === "item"/u);
+    assert.match(source, /Keep \{signalEpisodeImage\.descriptor\.name\} in Items/u);
+    assert.match(source, /await request\(`\/api\/assets\/upload`, \{[\s\S]{0,180}kind: "item"/u);
+    assert.match(source, /kind: "item",[\s\S]{0,180}signalEpisodeId: uploadedItem\.episodeId/u);
+    assert.match(source, /It stays session-only unless kept/u);
+    assert.match(
+      source,
+      /saving links[\s\S]{0,80}episodeOutro\.episode\.guestName/u,
+    );
+    assert.match(pageSource, /supportsImageInput: model\.supportsImageInput === true/u);
+    assert.match(css, /\.setupEpisodeImage\s*\{[^}]*grid-column:\s*1 \/ -1/u);
+  });
+
   it("keeps the generated studio raster as a stable image source", () => {
     assert.match(
       source,
@@ -1444,7 +1535,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /presentationEpisode\.status === "completed"[\s\S]{0,320}playEpisodeOutro\(\{[\s\S]{0,120}episode: presentationEpisode/u,
+      /presentationEpisode\.status === "completed"[\s\S]{0,560}playEpisodeOutro\(\{[\s\S]{0,120}episode: presentationEpisode/u,
     );
     assert.match(
       source,
@@ -1649,8 +1740,8 @@ describe("Signal experience shell", () => {
     assert.match(source, /Say this…/u);
     assert.match(source, /exact words on air/u);
     assert.match(source, /directQuote/u);
-    assert.match(source, /Image context is coming later/u);
     assert.match(source, /className=\{styles\.producerImageAttach\}/u);
+    assert.match(source, /vision-capable active model can also discuss an image/u);
     assert.match(source, /BOTCAST_PRODUCER_DIRECT_QUOTE_MAX/u);
     assert.match(source, /Private to the host\. Use this for context, direction, or a/u);
     assert.match(css, /\.producerCueActions/u);
@@ -1730,15 +1821,18 @@ describe("Signal experience shell", () => {
     );
   });
 
-  it("lets the producer send exact on-air words and shows an unwired image attach", () => {
+  it("lets the producer send exact on-air words and attach one gated session image", () => {
     assert.match(source, /Say this…/u);
-    assert.match(source, /exact words on air — a line or a short story/u);
+    assert.match(source, /exact words on air — one line/u);
     assert.match(source, /<textarea/u);
     assert.match(source, /producerQuoteCount/u);
     assert.match(source, /directQuote/u);
     assert.match(source, /BOTCAST_PRODUCER_DIRECT_QUOTE_MAX/u);
     assert.match(source, /className=\{styles\.producerImageAttach\}/u);
-    assert.match(source, /Image context is coming later/u);
+    assert.match(source, /disabled=\{producerImageDisabled\}/u);
+    assert.match(source, /title=\{producerImageTooltip\}/u);
+    assert.match(source, /accept=\{SIGNAL_EPISODE_IMAGE_ACCEPT\}/u);
+    assert.match(source, /vision-capable active model can also discuss an image/u);
     assert.match(source, /Private to the host\. Use this for context, direction, or a/u);
     assert.match(source, /as a message from the Producer/u);
     assert.match(
@@ -2979,13 +3073,36 @@ describe("Signal experience shell", () => {
       source,
       /body: JSON\.stringify\(\{ cameraFraming: draft\.framing \}\)/u,
     );
-    assert.match(
-      source,
-      /replayVisualMetadata\?\.cameraFraming \?\? args\.show\.cameraFraming/u,
-    );
+    assert.match(source, /botcastCameraFramingWithEpisodeImages\(/u);
     assert.match(
       source,
       /BOTCAST_DEFAULT_CAMERA_FRAMING\[[\s\S]{0,100}studioCameraPreviewShot/u,
+    );
+    assert.match(source, /data-signal-episode-image-placement="true"/u);
+    assert.match(source, /Global for your Signal account and reused by every show/u);
+    assert.match(
+      source,
+      /body: JSON\.stringify\(\{ episodeImageFraming: draft\.framing \}\)/u,
+    );
+    assert.match(source, /data-signal-logo-placement="true"/u);
+    assert.match(source, /Saved only for this show/u);
+    assert.match(
+      source,
+      /body: JSON\.stringify\(\{ logoPlacement: draft\.placement \}\)/u,
+    );
+    assert.match(source, /signalEpisodeImageFramingSnapshotRef\.current/u);
+    assert.match(source, /replayVisualMetadata\?\.logoPlacement/u);
+    assert.match(
+      source,
+      /activeCameraFrame\.episodeImage/u,
+    );
+    assert.match(
+      css,
+      /left:\s*var\(--signal-episode-image-x, 50%\)[^}]*top:\s*var\(--signal-episode-image-y, 75%\)[^}]*scale\(var\(--signal-episode-image-scale, 1\)\)/u,
+    );
+    assert.match(
+      css,
+      /\.wordmark\s*\{[^}]*top:\s*var\(--signal-logo-y, 8%\)[^}]*left:\s*var\(--signal-logo-x, 50%\)[^}]*scale\(var\(--signal-logo-scale, 1\)\)/u,
     );
     assert.match(css, /\.stageViewport\s*\{[^}]*aspect-ratio:\s*16 \/ 9/iu);
     assert.doesNotMatch(css, /aspect-ratio:\s*16 \/ 8\.8/iu);

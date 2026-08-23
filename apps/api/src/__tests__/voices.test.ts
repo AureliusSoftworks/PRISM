@@ -466,6 +466,37 @@ describe("voice Phase 1 boundary", () => {
     assert.doesNotMatch(requestBody?.text as string, /warmly/u);
   });
 
+  it("bypasses Accent Map direction and phonology when the bot switch is off", async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    let ipaResolverCalled = false;
+    const text = "Peter Piper picked a peck of pickled peppers.";
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      voiceId: "british-premium-voice",
+      model: "eleven_flash_v2_5",
+      text,
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        accentPronunciationEnabled: false,
+        accentDefinitionId: "american-english",
+        pronunciationMapPoint: { x: 0.28, y: 0.31 },
+        speechprintInfluence: "american-english",
+      },
+      accentIpaResolver: async () => {
+        ipaResolverCalled = true;
+        throw new Error("disabled Accent Map must not resolve IPA");
+      },
+      fetchImpl: (async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+
+    assert.equal(ipaResolverCalled, false);
+    assert.equal(requestBody?.model_id, "eleven_flash_v2_5");
+    assert.equal(requestBody?.text, text);
+  });
+
   it("forces American, British, and Scottish Accent Map phonology across conflicting Premium voices", async () => {
     const sourceText = "Peter Piper picked a peck of pickled peppers.";
     const cases = [

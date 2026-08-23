@@ -6,6 +6,7 @@ import {
   resolveLocalAccentFallback,
   resolvePremiumAccentDirection,
   normalizeBotAudioVoiceProfileV1,
+  normalizeBotAudioVoiceProfileForSynthesisV1,
   normalizeEnglishVoiceEngine,
   normalizeElevenLabsVoiceDirection,
   normalizeVoiceMode,
@@ -344,7 +345,8 @@ async function elevenLabsSpeechInput(
     ...args,
     text: abbreviationProjection.synthesisText,
   };
-  const normalizedProfile = normalizeBotAudioVoiceProfileV1(speechArgs.profile);
+  const normalizedProfile =
+    normalizeBotAudioVoiceProfileForSynthesisV1(speechArgs.profile);
   const authoredDirection = normalizeElevenLabsVoiceDirection(
     normalizedProfile.elevenLabsDirection,
   );
@@ -1365,7 +1367,7 @@ export function validateVoiceSynthesisRequest(body: Record<string, unknown>): Vo
     mode: normalizeVoiceMode(body.mode),
     engine: normalizeEnglishVoiceEngine(body.engine),
     profile: applyVoiceDeliveryMoodToProfile(
-      normalizeBotAudioVoiceProfileV1(body.profile),
+      normalizeBotAudioVoiceProfileForSynthesisV1(body.profile),
       deliveryMood,
     ),
     deliveryMood,

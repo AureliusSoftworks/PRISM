@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import sharp from "sharp";
 import {
+  imageHasVisibleTransparency,
   normalizeImageAssetUpload,
   parseImageAssetDataUrl,
 } from "../image-asset-upload.ts";
@@ -27,5 +28,31 @@ describe("local asset uploads", () => {
 
   it("rejects non-image data", () => {
     assert.throws(() => parseImageAssetDataUrl("data:text/plain;base64,SGk="));
+  });
+
+  it("distinguishes a transparent PNG item from a fully opaque PNG photo", async () => {
+    const transparentPng = await sharp({
+      create: {
+        width: 4,
+        height: 4,
+        channels: 4,
+        background: { r: 36, g: 72, b: 108, alpha: 0.5 },
+      },
+    })
+      .png()
+      .toBuffer();
+    const opaquePng = await sharp({
+      create: {
+        width: 4,
+        height: 4,
+        channels: 4,
+        background: { r: 36, g: 72, b: 108, alpha: 1 },
+      },
+    })
+      .png()
+      .toBuffer();
+
+    assert.equal(await imageHasVisibleTransparency(transparentPng), true);
+    assert.equal(await imageHasVisibleTransparency(opaquePng), false);
   });
 });

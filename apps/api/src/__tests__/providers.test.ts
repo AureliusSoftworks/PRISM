@@ -17,6 +17,8 @@ import {
   openAiModelUsesMaxCompletionTokens,
   openAiModelUsesFixedDefaultTemperature,
   openAiReasoningAwareCompletionTokenLimit,
+  onlineModelSupportsImageInput,
+  providerModelSupportsImageInput,
   readOpenAiErrorMessage,
   resetLocalThinkingCapabilityCacheForTests,
   resetModelCatalogCacheForTests,
@@ -24,6 +26,79 @@ import {
   selectProvider,
   stripLeadingChatRoleMarker,
 } from "../providers.ts";
+
+describe("provider image input", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    resetLocalThinkingCapabilityCacheForTests();
+  });
+
+  it("gates online families conservatively", () => {
+    assert.equal(onlineModelSupportsImageInput("openai", "gpt-5.2"), true);
+    assert.equal(onlineModelSupportsImageInput("openai", "o3"), true);
+    assert.equal(
+      onlineModelSupportsImageInput("anthropic", "claude-sonnet-4-5"),
+      true,
+    );
+    assert.equal(onlineModelSupportsImageInput("openai", "text-only-x"), false);
+  });
+
+  it("probes Ollama vision capability without contacting an online host", async () => {
+    const requestedUrls: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      requestedUrls.push(String(input));
+      return new Response(JSON.stringify({ capabilities: ["vision"] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    assert.equal(await providerModelSupportsImageInput("local", "llava"), true);
+    assert.equal(requestedUrls.length, 1);
+    assert.match(requestedUrls[0]!, /^http:\/\/(?:localhost|127\.0\.0\.1):11434\/api\/show$/u);
+  });
+
+  it("sends OpenAI image content in the provider-native message shape", async () => {
+    let requestBody: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      requestBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: "I can see it." } }] }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const response = await new OpenAiProvider({ apiKey: "sk-test" }).generateResponse(
+      [
+        {
+          role: "user",
+          content: "Discuss this image.",
+          images: [{ mimeType: "image/png", data: "cG5n" }],
+        },
+      ],
+      { model: "gpt-5.2", allowFinalLocalFallback: false },
+    );
+
+    assert.equal(response, "I can see it.");
+    assert.deepEqual(requestBody.messages, [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Discuss this image." },
+          {
+            type: "image_url",
+            image_url: {
+              url: "data:image/png;base64,cG5n",
+              detail: "auto",
+            },
+          },
+        ],
+      },
+    ]);
+  });
+});
 
 /**
  * These tests pin the LOCAL privacy invariant: when a user (or bot, or

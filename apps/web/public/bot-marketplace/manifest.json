@@ -1,7 +1,7 @@
 {
   "schema": "prism-bot-marketplace-v1",
-  "version": 24,
-  "updatedAt": "2026-08-16T06:30:00.000Z",
+  "version": 25,
+  "updatedAt": "2026-08-23T21:20:00.000Z",
   "themes": [
     {
       "id": "originals",

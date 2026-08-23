@@ -46,6 +46,9 @@ export const BOT_AVATAR_SFX_SHORT_LOOP_TRIM_RATIO = 0.12;
 export const BOT_AVATAR_SFX_LOOP_CROSSFADE_SECONDS = 0.22;
 export const BOT_AVATAR_SFX_ATTACK_MS = 120;
 export const BOT_AVATAR_SFX_RELEASE_MS = 240;
+/** Thinking loops sit well behind speech and room sound without rewriting a
+ * bot's authored slider value or its shared voice-bus gain. */
+export const BOT_AVATAR_SFX_THINKING_RUNTIME_GAIN = 0.35;
 
 export type BotAvatarSfxState = "idle" | "blink" | "talking" | "thinking";
 export type BotAvatarSfxPlayback = Pick<
@@ -165,6 +168,15 @@ export function botAvatarSfxOutputGain(
           Math.min(1.25, Number.isFinite(sfx.voiceBusGain) ? sfx.voiceBusGain : 0),
         );
   return clampBotAvatarSfxGain(authoredGain * voiceBusGain);
+}
+
+export function botAvatarSfxOutputGainForState(
+  sfx: Pick<BotAvatarSfxPlayback, "volume" | "voiceBusGain">,
+  state: BotAvatarSfxState,
+): number {
+  const stateGain =
+    state === "thinking" ? BOT_AVATAR_SFX_THINKING_RUNTIME_GAIN : 1;
+  return clampBotAvatarSfxGain(botAvatarSfxOutputGain(sfx) * stateGain);
 }
 
 function clampBotAvatarSfxProgress(value: number): number {
@@ -819,7 +831,7 @@ function syncBrowserBotAvatarSfxAudio(
   const previousDesiredGain = engine.desiredGain;
   engine.desiredPlaying = true;
   engine.desiredSource = sfx.audioDataUrl;
-  engine.desiredGain = botAvatarSfxOutputGain(sfx);
+  engine.desiredGain = botAvatarSfxOutputGainForState(sfx, state);
 
   if (engine.loadedSource !== engine.desiredSource) {
     if (!audio.paused && engine.loadedSource !== null) {
@@ -922,7 +934,7 @@ export function syncBotAvatarSfxAudio(
   // Non-browser test/runtime targets use the same explicit trimmed-loop
   // contract as real media elements.
   audio.loop = false;
-  audio.volume = botAvatarSfxOutputGain(sfx);
+  audio.volume = botAvatarSfxOutputGainForState(sfx, state);
   updateBotAvatarSfxLoopTime(audio);
   if (audio.paused) void audio.play().catch(() => undefined);
   return loadedSource;

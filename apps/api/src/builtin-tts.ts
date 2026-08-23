@@ -8,6 +8,7 @@ import {
   PRISM_BUILTIN_ENGLISH_VOICES,
   expandSpeechAbbreviations,
   normalizeBotAudioVoiceProfileV1,
+  normalizeBotAudioVoiceProfileForSynthesisV1,
   prismBuiltinEnglishVoice,
   type BotAudioVoiceId,
   type BotAudioVoiceProfileV1,
@@ -535,7 +536,8 @@ export async function generateBuiltinEnglishWave(args: {
     ...args,
     text: expandSpeechAbbreviations(args.text),
   };
-  const profile = normalizeBotAudioVoiceProfileV1(speechArgs.profile);
+  const profile =
+    normalizeBotAudioVoiceProfileForSynthesisV1(speechArgs.profile);
   if (speechArgs.allowOperatingSystemVoices && profile.systemVoiceName) {
     try {
       return await generateSystemEnglishWave({ ...speechArgs, profile });

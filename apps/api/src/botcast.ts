@@ -33,6 +33,7 @@ import type {
   BotcastCameraShot,
   BotcastDirectedCameraShot,
   BotcastCameraFraming,
+  BotcastEpisodeImageFraming,
   BotcastCameraSuggestion,
   BotcastEpisode,
   BotcastEpisodeAdvanceRequest,
@@ -61,6 +62,7 @@ import type {
   BotcastSoundboardCueKind,
   BotcastSocialInfluenceEventV1,
   BotcastSegmentRecord,
+  BotcastSignalPreferences,
   BotcastShow,
   BotcastHostRecoveryCandidate,
   BotcastHostRecoveryResponse,
@@ -78,6 +80,7 @@ import type {
   BotcastLogoGlyph,
   BotcastLogoDesignV1,
   BotcastLogoState,
+  BotcastLogoPlacement,
   BotcastSpeakerRole,
   BotcastTensionState,
   AutoFallbackAttemptTraceV1,
@@ -128,6 +131,8 @@ import {
   BOTCAST_PRODUCER_CUE_DETAIL_MAX,
   BOTCAST_PRODUCER_DIRECT_QUOTE_MAX,
   botcastDirectQuoteTurnMaxTokens,
+  botcastEpisodeImageFallbackEmoji,
+  botcastEpisodeImageSpokenReference,
   botcastProducerDirectQuoteUpdateLeadInAt,
   botcastProducerQuoteReceptionV1,
   botcastProducerQuoteStanceDirectiveV1,
@@ -141,6 +146,8 @@ import {
   BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE,
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
   BOTCAST_DEFAULT_CAMERA_FRAMING,
+  BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING,
+  BOTCAST_DEFAULT_LOGO_PLACEMENT,
   BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
   BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
   BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS,
@@ -196,6 +203,10 @@ import {
   normalizeBotcastIdentityMirrorResetV1,
   normalizeBotcastStudioGlowTuning,
   normalizeBotcastCameraFraming,
+  botcastEpisodeImageFramingFromCameraFraming,
+  normalizeBotcastEpisodeImageFraming,
+  normalizeBotcastEpisodeImageReplayEmoji,
+  normalizeBotcastLogoPlacement,
   parseStoredBotAvatarDetailsV1,
   resolveBotAudioVoiceProfileV1,
   resolveBotPronunciationMapPointV1,
@@ -383,6 +394,7 @@ import {
   selectProvider,
   type GenerateOptions,
   type LlmProvider,
+  type ProviderImageInput,
   type ProviderMessage,
   type ProviderName,
 } from "./providers.ts";
@@ -398,7 +410,6 @@ import {
   lowerVoiceMoodForHearingRepeat,
 } from "./bot-power-hearing-repeat.ts";
 import { randomId } from "./security.ts";
-import { readGeneratedImageBytes } from "./image-storage.ts";
 import { runPrismReviewV1, type PrismReviewRubricV1 } from "./reviews.ts";
 import { signalGenerationKeywordPromptLine } from "./signal-generation-keywords.ts";
 
@@ -1135,6 +1146,13 @@ export interface BotcastGenerationOptions {
   direction?: string;
   /** Reports the provider/model that produced an accepted ephemeral draft. */
   onGenerationResolved?: (provider: ProviderName, model: string) => void;
+  /** Raw image input for the active request only. Never written to Signal state. */
+  signalEpisodeImage?: {
+    imageId: string;
+    input: ProviderImageInput;
+    /** Private Producer intent attached to this request only. */
+    presentationReason?: string;
+  };
 }
 
 export type BotcastBookingSuggestionField =
@@ -1372,7 +1390,6 @@ export const SIGNAL_PREPARATION_TABLES: readonly PreparedDatabaseTable[] = [
   "botcast_episode_segments",
   "botcast_messages",
   "botcast_events",
-  "images",
   "botcast_host_recovery_candidates",
   { name: "botcast_show_intro_audio", copyRows: false },
   { name: "botcast_show_atmosphere_audio", copyRows: false },
@@ -2451,6 +2468,7 @@ function logoForHost(
     fallbackGlyph: fallbackGlyphFor(seed),
     design,
     retiredDesigns,
+    placement: normalizeBotcastLogoPlacement(undefined),
   };
 }
 
@@ -2474,6 +2492,7 @@ function logoFallbackForRow(row: BotcastShowRow): BotcastLogoState {
     fallbackGlyph: fallbackGlyphFor(seed),
     design,
     retiredDesigns: [],
+    placement: normalizeBotcastLogoPlacement(undefined),
   };
 }
 
@@ -2692,6 +2711,10 @@ function parseLogo(raw: string, row: BotcastShowRow): BotcastLogoState {
         : fallback.fallbackGlyph,
       design,
       retiredDesigns: normalizeStoredLogoDesigns(parsed.retiredDesigns),
+      placement: normalizeBotcastLogoPlacement(
+        parsed.placement,
+        fallback.placement ?? BOTCAST_DEFAULT_LOGO_PLACEMENT,
+      ),
     };
   } catch {
     return fallback;
@@ -2903,6 +2926,7 @@ function mapShow(row: BotcastShowRow): BotcastShow {
     hostInterruptionLines,
     hostRecoveryQuestions,
     logo,
+    logoPlacement: logo.placement,
     introAudio:
       row.intro_audio_provider === "elevenlabs"
         ? {
@@ -4602,6 +4626,78 @@ export function createBotcastShow(
   return getBotcastShow(db, userId, id);
 }
 
+export function getBotcastSignalPreferences(
+  db: DatabaseSync,
+  userId: string,
+): BotcastSignalPreferences {
+  const stored = db
+    .prepare(
+      `SELECT episode_image_framing_json
+         FROM botcast_signal_preferences
+        WHERE user_id = ?`,
+    )
+    .get(userId) as { episode_image_framing_json: string } | undefined;
+  if (stored) {
+    try {
+      return {
+        episodeImageFraming: normalizeBotcastEpisodeImageFraming(
+          JSON.parse(stored.episode_image_framing_json),
+        ),
+      };
+    } catch {
+      return {
+        episodeImageFraming: normalizeBotcastEpisodeImageFraming(undefined),
+      };
+    }
+  }
+
+  // Carry forward the most recently rehearsed legacy show framing once, then
+  // make that resolved placement the single user-global Signal preference.
+  const latestShow = db
+    .prepare(
+      `SELECT atmosphere_json
+         FROM botcast_shows
+        WHERE user_id = ?
+        ORDER BY updated_at DESC, rowid DESC
+        LIMIT 1`,
+    )
+    .get(userId) as { atmosphere_json: string } | undefined;
+  const episodeImageFraming = latestShow
+    ? botcastEpisodeImageFramingFromCameraFraming(
+        parseAtmospheres(latestShow.atmosphere_json).cameraFraming,
+      )
+    : normalizeBotcastEpisodeImageFraming(
+        BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING,
+      );
+  db.prepare(
+    `INSERT INTO botcast_signal_preferences
+       (user_id, episode_image_framing_json, updated_at)
+     VALUES (?, ?, ?)`,
+  ).run(userId, JSON.stringify(episodeImageFraming), new Date().toISOString());
+  return { episodeImageFraming };
+}
+
+export function updateBotcastSignalPreferences(
+  db: DatabaseSync,
+  userId: string,
+  value: unknown,
+): BotcastSignalPreferences {
+  const current = getBotcastSignalPreferences(db, userId);
+  const episodeImageFraming = normalizeBotcastEpisodeImageFraming(
+    value,
+    current.episodeImageFraming,
+  );
+  db.prepare(
+    `INSERT INTO botcast_signal_preferences
+       (user_id, episode_image_framing_json, updated_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(user_id) DO UPDATE SET
+       episode_image_framing_json = excluded.episode_image_framing_json,
+       updated_at = excluded.updated_at`,
+  ).run(userId, JSON.stringify(episodeImageFraming), new Date().toISOString());
+  return { episodeImageFraming };
+}
+
 export function getBotcastShow(
   db: DatabaseSync,
   userId: string,
@@ -5085,6 +5181,10 @@ export function updateBotcastShow(
   let nightAtmosphere = current.nightAtmosphere;
   let studioLighting = patch.studioLighting ?? current.studioLighting;
   let logo = current.logo;
+  const logoPlacement = normalizeBotcastLogoPlacement(
+    patch.logoPlacement,
+    current.logoPlacement,
+  );
   const studioLayout = normalizeBotcastStudioLayout(
     patch.studioLayout,
     current.studioLayout,
@@ -5370,6 +5470,7 @@ export function updateBotcastShow(
       status: nextImageUrl ? "ready" : "fallback",
     };
   }
+  logo = { ...logo, placement: logoPlacement };
   const now = new Date().toISOString();
   db.prepare(
     `UPDATE botcast_shows
@@ -8352,7 +8453,16 @@ export function queueBotcastEpisodeImageContext(
   db: DatabaseSync,
   userId: string,
   episodeId: string,
-  input: Pick<BotcastImageContextV1, "imageId" | "imageUrl" | "provider" | "model">,
+  input: Pick<
+    BotcastImageContextV1,
+    | "imageId"
+    | "kind"
+    | "name"
+    | "mimeType"
+    | "provider"
+    | "model"
+    | "replayEmoji"
+  >,
 ): BotcastEpisode {
   const episode = getBotcastEpisode(db, userId, episodeId);
   if (episode.status !== "live") {
@@ -8364,22 +8474,65 @@ export function queueBotcastEpisodeImageContext(
     );
   }
   const existing = botcastLatestImageContextV1(episode.events);
-  if (existing && existing.phase !== "dismissed") {
-    throw new Error("Finish discussing the current Signal image first.");
+  if (existing) {
+    throw new Error("Signal accepts one image per episode.");
   }
   const context: BotcastImageContextV1 = {
     v: 1,
     imageId: input.imageId,
-    imageUrl: input.imageUrl,
+    kind: input.kind,
+    name: input.name,
+    mimeType: input.mimeType,
     provider: input.provider,
     model: input.model,
+    replayEmoji: normalizeBotcastEpisodeImageReplayEmoji(
+      input.replayEmoji,
+      botcastEpisodeImageFallbackEmoji(input.kind),
+    ),
+    savedAssetId: null,
     phase: "queued",
     hostIntroductionMessageId: null,
     guestDiscussionMessageId: null,
     hostFollowUpMessageId: null,
   };
   const now = new Date().toISOString();
-  recordEvent(db, userId, episode.id, "image_context", context, now);
+  recordEvent(db, userId, episode.id, "image_context", { ...context }, now);
+  db.prepare(
+    "UPDATE botcast_episodes SET updated_at = ? WHERE id = ? AND user_id = ?",
+  ).run(now, episode.id, userId);
+  return getBotcastEpisode(db, userId, episode.id);
+}
+
+/** Links an explicitly retained Signal item without copying pixels into replay. */
+export function linkBotcastEpisodeImageAsset(
+  db: DatabaseSync,
+  userId: string,
+  episodeId: string,
+  imageId: string,
+): BotcastEpisode {
+  const episode = getBotcastEpisode(db, userId, episodeId);
+  const context = botcastLatestImageContextV1(episode.events);
+  if (!context || context.kind !== "item") {
+    throw new Error("Signal item context was not found for this episode.");
+  }
+  const image = db
+    .prepare(
+      `SELECT id
+         FROM images
+        WHERE id = ? AND user_id = ?
+          AND origin = 'signal_item' AND purpose = 'signal_item'`,
+    )
+    .get(imageId, userId) as { id: string } | undefined;
+  if (!image) throw new Error("Saved Signal item was not found.");
+  const now = new Date().toISOString();
+  recordEvent(
+    db,
+    userId,
+    episode.id,
+    "image_context",
+    { ...context, savedAssetId: image.id },
+    now,
+  );
   db.prepare(
     "UPDATE botcast_episodes SET updated_at = ? WHERE id = ? AND user_id = ?",
   ).run(now, episode.id, userId);
@@ -9336,6 +9489,8 @@ export interface BotcastPromptBuildArgs {
   falseNameJustChanged?: boolean;
   /** Exact directed, audience-grounded history for this speaker and peer. */
   priorPairHistory?: BotcastPairHistoryContext | null;
+  /** Private request-scoped direction for presenting the attached image. */
+  imagePresentationReason?: string;
 }
 
 export interface BotcastPairHistoryContext {
@@ -10782,18 +10937,27 @@ export function buildBotcastSpeakerPrompt(
   const wrappingUp =
     args.cue?.kind === "wrap_up" || guestClosingOpportunity;
   const imageContext = botcastLatestImageContextV1(args.episode.events);
+  const imageReference = imageContext
+    ? botcastEpisodeImageSpokenReference(imageContext)
+    : "this image";
   const imageDiscussionRule =
     args.speakerRole === "host" &&
     args.cue?.kind === "present_image" &&
     imageContext?.phase === "queued"
-      ? "The Producer has supplied the image attached to this turn. Signal is placing it at the center of the table now. Introduce it naturally in your own host voice, invite the guest to look, and ask one concise equivalent of ‘What are your thoughts on this?’ Do not describe upload mechanics, file metadata, vision capability, prompts, or the control room. Do not analyze the image for the guest yet; give them the first response."
+      ? `The Producer has supplied ${imageReference}, attached to this turn. Signal's stage visual places it at the center of the table now. In your own host voice, explicitly refer to it as ${JSON.stringify(imageReference)}, invite the guest to look, and ask one concise equivalent of "What are your thoughts on this?" Do not describe upload mechanics, file metadata, vision capability, prompts, or the control room. Do not analyze it for the guest yet; give them the first response.`
       : args.speakerRole === "guest" && imageContext?.phase === "presented"
-        ? "The host has placed the attached image at the center of the table and invited your reaction. Explicitly acknowledge that you are looking at it, then discuss concrete visible details and what they mean from this guest’s own perspective. Ground every visual claim in the attached image. Do not claim you cannot see it, do not discuss upload mechanics, and do not answer with generic remarks that could fit any image."
+        ? `The host has placed ${imageReference} at the center of the table and invited your reaction. Begin with a brief, natural acknowledgement that you are taking a look, then discuss concrete visible details and what they mean from this guest's own perspective. ${imageContext.kind === "item" ? "Treat it as a physical item being shown to you, not as a photograph of an item." : "Treat it as a picture being shown to you, not as the physical subject itself."} Ground every visual claim in the attachment. Do not claim you cannot see it, do not discuss upload mechanics, and do not answer with generic remarks that could fit any image.`
         : args.speakerRole === "host" && imageContext?.phase === "discussing"
           ? args.cue
-            ? "The attached image remains on the table and the guest’s just-finished comment remains authoritative context. Carry out the queued Producer elaboration or clarification while explicitly connecting it to both one concrete visible feature and the guest’s actual point. Add this host’s own perspective where natural. Do not discard, overwrite, or pretend not to have heard the guest’s comment."
-            : "The attached image remains on the table and the guest has just discussed it. Give this host’s own concise, image-grounded opinion, explicitly respond to the guest’s actual point, then make a natural transition back to the episode’s strongest relevant thread. Do not ask another generic image question; Signal will clear the table after this line."
+            ? `${imageReference} remains on the table and the guest's just-finished comment remains authoritative context. Carry out the queued Producer elaboration or clarification while explicitly connecting it to both one concrete visible feature and the guest's actual point. Add this host's own perspective where natural. Do not discard, overwrite, or pretend not to have heard the guest's comment.`
+            : `${imageReference} remains on the table and the guest has just discussed it. Give this host's own concise, visually grounded opinion, explicitly respond to the guest's actual point, then make a natural transition back to the episode's strongest relevant thread according to this host's biases. Do not ask another generic image question; Signal will clear the table after this line.`
           : null;
+  const privateImagePresentationRule =
+    args.speakerRole === "host" &&
+    imageContext &&
+    args.imagePresentationReason?.trim()
+      ? `Private Producer intent for how you frame ${imageReference}: ${JSON.stringify(args.imagePresentationReason.trim())}. Enact that intent naturally in your own words. Never quote, paraphrase, mention, or expose this direction, a Reason field, prompts, or control-room wording.`
+      : null;
   const producerCut = args.speakerRole === "host" && args.producerCut === true;
   const departureEvent = [...args.episode.events]
     .reverse()
@@ -11242,6 +11406,7 @@ export function buildBotcastSpeakerPrompt(
         ...(producerGuestHostExitRule ? [producerGuestHostExitRule] : []),
         ...(liveCueAdjustmentRule ? [liveCueAdjustmentRule] : []),
         ...(imageDiscussionRule ? [imageDiscussionRule] : []),
+        ...(privateImagePresentationRule ? [privateImagePresentationRule] : []),
         ...(askAboutCueRule ? [askAboutCueRule] : []),
         ...(refocusCueRule ? [refocusCueRule] : []),
         ...(powerInterruptionFollowUpRule ? [powerInterruptionFollowUpRule] : []),
@@ -13281,7 +13446,7 @@ function botcastOpeningIntroFallback(args: {
     `${args.guestName}, start with the concrete moment inside ${topic}. What changes for the person living through it?`,
     `${args.guestName}, I want to test ${topic} against ordinary life. What is the first consequence you would point to?`,
     `${args.guestName}, there is a tension hiding inside ${topic}. Which side of it matters most to you?`,
-    `${args.guestName}, before we make ${topic} abstract, name the moment when it actually affects a choice.`,
+    `${args.guestName}, before we make ${topic} abstract, when does it actually affect a choice?`,
     `${args.guestName}, take ${topic} down to one honest example. Where would you begin?`,
   ] as const;
   const handoffs: readonly string[] = briefQuestion
@@ -15634,6 +15799,14 @@ export async function advanceBotcastEpisode(
     activeFalseNameState,
     falseNameJustChanged,
     priorPairHistory,
+    ...((imageDiscussionTurn === "host_introduction" ||
+      imageDiscussionTurn === "host_follow_up") &&
+    generation.signalEpisodeImage?.presentationReason
+      ? {
+          imagePresentationReason:
+            generation.signalEpisodeImage.presentationReason,
+        }
+      : {}),
   };
   const basePrompt = firstHostOpening
     ? buildBotcastOpeningIntroPrompt(promptArgs)
@@ -15658,7 +15831,7 @@ export async function advanceBotcastEpisode(
     : stageActionPlan.decision === "persona_invite"
       ? stageActionPersonaInvitePromptV1("signal")
       : stageActionSpeechOnlyPromptV1("signal");
-  const prompt: ProviderMessage[] = [
+  let prompt: ProviderMessage[] = [
     ...basePrompt.map((message) =>
       message.role === "system" &&
       (stageActionPlan.decision === "persona_invite" ||
@@ -15730,7 +15903,33 @@ export async function advanceBotcastEpisode(
         ]
       : []),
   ];
-  const compactLocalPrompt = botcastCompactLocalPromptEligible(promptArgs)
+  if (imageDiscussionTurn && imageContextAtTurnStart) {
+    if (
+      !generation.signalEpisodeImage ||
+      generation.signalEpisodeImage.imageId !== imageContextAtTurnStart.imageId
+    ) {
+      throw new Error(
+        "The ephemeral Signal image must remain attached while it is discussed.",
+      );
+    }
+    let lastUserIndex = -1;
+    for (let index = prompt.length - 1; index >= 0; index -= 1) {
+      if (prompt[index]?.role === "user") {
+        lastUserIndex = index;
+        break;
+      }
+    }
+    if (lastUserIndex < 0) {
+      throw new Error("Signal could not attach the image to this turn.");
+    }
+    prompt = prompt.map((message, index) =>
+      index === lastUserIndex
+        ? { ...message, images: [generation.signalEpisodeImage!.input] }
+        : message,
+    );
+  }
+  const compactLocalPrompt = !imageDiscussionTurn &&
+    botcastCompactLocalPromptEligible(promptArgs)
     ? buildBotcastCompactLocalSpeakerPrompt(promptArgs, {
         recentSpeakerContents,
       })
@@ -15828,6 +16027,7 @@ export async function advanceBotcastEpisode(
     // The provider telemetry contract remains a normal Signal turn; the
     // dedicated opening prompt above is the creative boundary.
     usagePurpose: "botcast_turn" as const,
+    ...(imageDiscussionTurn ? { allowFinalLocalFallback: false } : {}),
   };
   const quotedTurnMaxTokens = requestedCue?.directQuote
     ? botcastDirectQuoteTurnMaxTokens(requestedCue.directQuote)
@@ -15955,14 +16155,16 @@ export async function advanceBotcastEpisode(
           "deterministic_signal_turn"
       );
     });
-  const boundedFallbackChain = sessionHealthyFallbackChain?.slice(
-    0,
-    hostClosingTurn
-      ? BOTCAST_HOST_CLOSING_AUTO_MAX_ATTEMPTS
-      : autoRecoveryCircuitOpen
-        ? SIGNAL_AUTO_DEGRADED_MAX_ATTEMPTS
-        : SIGNAL_AUTO_MAX_ATTEMPTS,
-  );
+  const boundedFallbackChain = imageDiscussionTurn
+    ? null
+    : sessionHealthyFallbackChain?.slice(
+        0,
+        hostClosingTurn
+          ? BOTCAST_HOST_CLOSING_AUTO_MAX_ATTEMPTS
+          : autoRecoveryCircuitOpen
+            ? SIGNAL_AUTO_DEGRADED_MAX_ATTEMPTS
+            : SIGNAL_AUTO_MAX_ATTEMPTS,
+      );
   const recordAutoExhaustion = (
     error: AutoFallbackExhaustedError,
     deterministicRecovery:
@@ -16193,7 +16395,8 @@ export async function advanceBotcastEpisode(
                     !speakerIsMutedForTurn &&
                     !speakerEternallyIntroduces &&
                     !speakerRepeatsForHearingPower &&
-                    !speakerEchoesForTurn,
+                    !speakerEchoesForTurn &&
+                    imageDiscussionTurn !== "host_follow_up",
                   ...(hostClosingTurn &&
                   episode.guestPresenceMode !== "audience_only"
                     ? { hostClosingGuestName: peerAddressName }
@@ -16311,6 +16514,18 @@ export async function advanceBotcastEpisode(
                   ? null
                   : activeFalseNameState,
                 hostClosing: hostClosingTurn,
+                requireHostQuestion:
+                  speakerRole === "host" &&
+                  episode.segment === "interview" &&
+                  !wrapUpCue &&
+                  !producerCut &&
+                  !departureRequired &&
+                  !speakerReadsProducerQuote &&
+                  !speakerIsMutedForTurn &&
+                  !speakerEternallyIntroduces &&
+                  !speakerRepeatsForHearingPower &&
+                  !speakerEchoesForTurn &&
+                  imageDiscussionTurn !== "host_follow_up",
                 ...(hostClosingTurn &&
                 episode.guestPresenceMode !== "audience_only"
                   ? { hostClosingGuestName: peerAddressName }
@@ -16710,9 +16925,22 @@ export async function advanceBotcastEpisode(
         recentOpenings: recentOpeningContents,
       })
     : null;
+  const imageDiscussionFallback =
+    imageDiscussionTurn === "host_introduction"
+      ? `I've placed ${imageContextAtTurnStart ? botcastEpisodeImageSpokenReference(imageContextAtTurnStart) : "this image"} at the center of the table. ${hostNamesGuest}, take a look—what are your thoughts?`
+      : imageDiscussionTurn === "guest_discussion"
+        ? imageContextAtTurnStart?.kind === "item"
+          ? `Let me take a look. This ${imageContextAtTurnStart.name} has a physical presence that changes how I read its details and what they suggest.`
+          : `Let me take a look. This picture of ${imageContextAtTurnStart?.name ?? "the subject"} makes its strongest point through what it puts in focus and what it leaves unresolved.`
+        : imageDiscussionTurn === "host_follow_up"
+          ? requestedCue
+            ? `Keeping both ${imageContextAtTurnStart ? botcastEpisodeImageSpokenReference(imageContextAtTurnStart) : "this image"} and your point in view, ${hostNamesGuest}, the clarification sharpens the question; my own read is that the visible emphasis changes how we should weigh your claim.`
+            : `My own read of ${imageContextAtTurnStart ? botcastEpisodeImageSpokenReference(imageContextAtTurnStart) : "this image"} is that its visible emphasis strengthens part of your point, ${hostNamesGuest}, while leaving a useful tension unresolved. Let's carry that tension back into ${openingSubject}.`
+          : null;
   const fallback =
     speakerRole === "host"
-    ? producerCutFallback ??
+    ? imageDiscussionFallback ??
+      producerCutFallback ??
       silentGuestHostFallback ??
       producerQuoteFallback ??
       (firstHostOpening
@@ -16736,15 +16964,16 @@ export async function advanceBotcastEpisode(
               : wrapUpCue
                 ? `${hostNamesGuest}, before we close, what final thought would you leave with our listeners?`
                 : hostRecoveryFallback)
-      : departureRequired
-        ? "I warned you. We are done here."
-        : episode.guestPresenceMode === "audience_only"
-          ? "They still have no idea I am here. This is already more entertaining than the interview would have been."
-        : echoHostGuestCutFallback ??
-          (wrapUpCue
-          ? `The final point I would leave with your listeners is this: ${topicWithPunctuation} Judge it by the choice it demands and the consequence that follows.`
-          : silentGuestFallback ??
-            guestRecoveryFallback);
+      : imageDiscussionFallback ??
+        (departureRequired
+          ? "I warned you. We are done here."
+          : episode.guestPresenceMode === "audience_only"
+            ? "They still have no idea I am here. This is already more entertaining than the interview would have been."
+            : echoHostGuestCutFallback ??
+              (wrapUpCue
+                ? `The final point I would leave with your listeners is this: ${topicWithPunctuation} Judge it by the choice it demands and the consequence that follows.`
+                : silentGuestFallback ??
+                  guestRecoveryFallback));
   const sanitizedGeneratedUtterance = picklesBeatKind
     ? { content: raw, repairReason: null }
     : sanitizeUtteranceWithRepair(
@@ -16809,6 +17038,7 @@ export async function advanceBotcastEpisode(
     !speakerEternallyIntroduces &&
     !speakerRepeatsForHearingPower &&
     !speakerEchoesForTurn &&
+    imageDiscussionTurn !== "host_follow_up" &&
     !sanitizedGeneratedUtterance.repairReason &&
     !generatedFalseNameRepairReason &&
     !generatedHostClosingRepairReason &&
@@ -17429,7 +17659,9 @@ export async function advanceBotcastEpisode(
   const stageActionText =
     participantDepartsThisTurn || hostSignsOffThisTurn
       ? null
-      : resolvedStageAction.action?.action ?? null;
+      : imageDiscussionTurn === "host_introduction" && imageContextAtTurnStart
+        ? `places ${imageContextAtTurnStart.kind === "item" ? `the ${imageContextAtTurnStart.name}` : `the picture of ${imageContextAtTurnStart.name}`} in the center of the table`
+        : resolvedStageAction.action?.action ?? null;
   const voicePerformanceText =
     !picklesBeatKind &&
     !socialSilenceMarker &&
@@ -18329,6 +18561,37 @@ export async function advanceBotcastEpisode(
     botcastReplayTimeline(episode.messages, episode.events).messageStartMs.at(
       -1,
     ) ?? 0;
+  if (imageDiscussionTurn && imageContextAtTurnStart) {
+    const nextImageContext: BotcastImageContextV1 = {
+      ...imageContextAtTurnStart,
+      phase:
+        imageDiscussionTurn === "host_introduction"
+          ? "presented"
+          : imageDiscussionTurn === "guest_discussion"
+            ? "discussing"
+            : "dismissed",
+      hostIntroductionMessageId:
+        imageDiscussionTurn === "host_introduction"
+          ? messageId
+          : imageContextAtTurnStart.hostIntroductionMessageId,
+      guestDiscussionMessageId:
+        imageDiscussionTurn === "guest_discussion"
+          ? messageId
+          : imageContextAtTurnStart.guestDiscussionMessageId,
+      hostFollowUpMessageId:
+        imageDiscussionTurn === "host_follow_up"
+          ? messageId
+          : imageContextAtTurnStart.hostFollowUpMessageId,
+    };
+    recordEvent(
+      db,
+      userId,
+      episode.id,
+      "image_context",
+      { ...nextImageContext },
+      now,
+    );
+  }
   if (picklesBeatKind === "interjection") {
     const sipAtMs = messageStartMs + utteranceDurationMs;
     recordEvent(
@@ -18632,6 +18895,23 @@ export async function advanceBotcastEpisode(
         now,
       );
     }
+  }
+  if (imageDiscussionTurn === "host_follow_up") {
+    recordEvent(
+      db,
+      userId,
+      episode.id,
+      "camera_suggestion",
+      {
+        shot: "wide",
+        reason: "image_complete",
+        speakerRole: "host",
+        atMs: messageStartMs + utteranceDurationMs,
+        minimumHoldMs: 2_400,
+        messageId,
+      },
+      now,
+    );
   }
   const message = mapMessage(
     {

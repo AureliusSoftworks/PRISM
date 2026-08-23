@@ -390,6 +390,7 @@ describe("replay manifests", () => {
         dark: { opacity: 0.78, blendMode: "screen" },
         light: { opacity: 0.52, blendMode: "overlay" },
       },
+      logoPlacement: { x: 46, y: 11, scale: 115 },
       logo: { imageUrl: null },
       dayAtmosphere: { imageUrl: null },
       nightAtmosphere: {
@@ -419,6 +420,11 @@ describe("replay manifests", () => {
       theme: "dark",
       audioEnabled: true,
       audioVolume: 0.72,
+      episodeImageFraming: {
+        left: { x: 16, y: 70, scale: 80 },
+        right: { x: 84, y: 70, scale: 80 },
+        wide: { x: 50, y: 74, scale: 95 },
+      },
       capturedReplayEvents: [
         {
           id: "local-soundboard",
@@ -481,7 +487,16 @@ describe("replay manifests", () => {
       dark: { opacity: 0.78, blendMode: "screen" },
       light: { opacity: 0.52, blendMode: "overlay" },
     });
-    assert.deepEqual(manifest.visual.metadata?.cameraFraming, show.cameraFraming);
+    assert.deepEqual(
+      (manifest.visual.metadata?.cameraFraming as BotcastShow["cameraFraming"])
+        .left.episodeImage,
+      { x: 16, y: 70, scale: 80 },
+    );
+    assert.deepEqual(manifest.visual.metadata?.logoPlacement, {
+      x: 46,
+      y: 11,
+      scale: 115,
+    });
   });
 
   it("keeps captured Signal direction authoritative over server-time semantics", () => {

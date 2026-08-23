@@ -202,6 +202,7 @@ function rawDraft(voiceId: string | null = null): Record<string, unknown> {
     },
     voice: {
       baseVoiceId: "voice-7",
+      accentPronunciationEnabled: false,
       elevenLabsVoiceId: voiceId,
       elevenLabsEffect: "radio",
       elevenLabsDirection: "measured, dry, observant",
@@ -353,6 +354,10 @@ describe("PRISM bot generator", () => {
     assert.match(
       prompts,
       /1-3 comma-separated delivery cues[\s\S]*never end mid-word/u,
+    );
+    assert.match(
+      prompts,
+      /accentPronunciationEnabled true only for a historically or biographically accurate real person[\s\S]*false for every fictional character and original persona/u,
     );
   });
 
@@ -824,6 +829,10 @@ describe("PRISM bot generator", () => {
     assert.match(JSON.stringify(capturedOptions?.jsonSchema), /"resonance"/u);
     assert.match(JSON.stringify(capturedOptions?.jsonSchema), /faceThinkingScale/u);
     assert.match(JSON.stringify(capturedOptions?.jsonSchema), /namePronunciation/u);
+    assert.match(
+      JSON.stringify(capturedOptions?.jsonSchema),
+      /"accentPronunciationEnabled":\{"type":"boolean"\}/u,
+    );
     assert.doesNotMatch(JSON.stringify(capturedOptions?.jsonSchema), /selfReferral/u);
     assert.match(
       JSON.stringify(capturedOptions?.jsonSchema),
@@ -839,7 +848,7 @@ describe("PRISM bot generator", () => {
     assert.match(provider.calls[0]?.[0]?.content ?? "", /named local PRISM Voice Pack timbre/u);
     assert.match(
       provider.calls[0]?.[0]?.content ?? "",
-      /match canonical regional pronunciation when confidently known/u,
+      /false for every fictional character and original persona/u,
     );
     assert.match(provider.calls[0]?.[0]?.content ?? "", /Always set namePronunciation/u);
     assert.match(provider.calls[0]?.[0]?.content ?? "", /response cues/u);

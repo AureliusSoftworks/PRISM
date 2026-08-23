@@ -79,6 +79,7 @@ const STOP_WORDS = new Set([
 
 const KIND_SEED_TAGS: Record<ImageAssetKind, readonly string[]> = {
   general_image: ["gallery", "image", "library"],
+  item: ["item", "object", "library"],
   debate_exhibit: ["debate", "exhibit", "evidence"],
   signal_studio: ["signal", "studio", "set"],
   signal_logo: ["signal", "logo", "brand"],

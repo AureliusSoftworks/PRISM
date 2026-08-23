@@ -18,6 +18,9 @@
   --botcast-curtain: #000;
   --botcast-logo-surface: color-mix(in srgb, var(--botcast-accent) 10%, #0d0f17);
   --botcast-logo-art-shadow: drop-shadow(0 1px 1px rgba(255,255,255,.28)) drop-shadow(0 5px 12px rgba(0,0,0,.44));
+  --botcast-photo-frame: linear-gradient(165deg, #5a5164 0%, #352e3e 55%, #241e2c 100%);
+  --botcast-photo-edge: rgba(255, 255, 255, .2);
+  --botcast-photo-shadow: 0 15px 34px rgba(0,0,0,.58), 0 2px 5px rgba(0,0,0,.48), inset 0 1px 0 rgba(255,255,255,.12);
   --botcast-accent: var(--prism-m);
   --botcast-host-accent: var(--botcast-accent);
   --botcast-show-accent: var(--botcast-accent);
@@ -66,6 +69,9 @@
   --botcast-curtain: #fff;
   --botcast-logo-surface: color-mix(in srgb, var(--botcast-accent) 6%, #f7f8fc);
   --botcast-logo-art-shadow: drop-shadow(0 1px 1px rgba(16,18,31,.24)) drop-shadow(0 5px 12px rgba(66,69,103,.16));
+  --botcast-photo-frame: linear-gradient(165deg, #fffdf8 0%, #f4eee9 60%, #e8deda 100%);
+  --botcast-photo-edge: rgba(69, 56, 75, .22);
+  --botcast-photo-shadow: 0 15px 34px rgba(58,48,72,.24), 0 2px 5px rgba(58,48,72,.2), inset 0 1px 0 rgba(255,255,255,.72);
 }
 
 .library {
@@ -252,6 +258,11 @@
 .episodeOutro .preRollLockup h1 { margin-top: 14px; font-size: clamp(1.8rem, 4vw, 3.6rem); }
 .episodeOutro .preRollLockup small { margin-top: 18px; letter-spacing: .24em; text-transform: uppercase; }
 .episodeOutroActions { position: absolute; top: 24px; right: 28px; display: flex; max-width: calc(100% - 56px); align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.episodeOutroKeepItem { display: flex; align-items: center; gap: 9px; max-width: 310px; padding: 8px 11px; border: 1px solid rgba(255,255,255,.14); border-radius: 12px; color: rgba(255,255,255,.82); background: rgba(8,10,18,.34); backdrop-filter: blur(12px); cursor: pointer; }
+.episodeOutroKeepItem input { flex: 0 0 auto; accent-color: var(--botcast-accent); }
+.episodeOutroKeepItem span { display: grid; gap: 3px; min-width: 0; }
+.episodeOutroKeepItem strong { font: 750 .68rem/1.15 system-ui; }
+.episodeOutroKeepItem small { color: rgba(255,255,255,.56); font: 550 .58rem/1.25 system-ui; }
 .episodeOutroActions > button { border: 1px solid rgba(255,255,255,.19); border-radius: 999px; padding: 8px 12px; color: rgba(255,255,255,.72); background: rgba(255,255,255,.055); font: 700 .68rem/1 system-ui; cursor: pointer; backdrop-filter: blur(12px); }
 .episodeOutroActions > button:hover { color: #fff; border-color: rgba(255,255,255,.38); background: rgba(255,255,255,.1); }
 .episodeOutro[data-phase="complete"] .episodeOutroActions > button { border-color: color-mix(in srgb, var(--botcast-accent) 62%, rgba(255,255,255,.28)); color: #fff; background: color-mix(in srgb, var(--botcast-accent) 18%, rgba(255,255,255,.07)); }
@@ -275,6 +286,8 @@
 .shell[data-theme="light"] .episodePreRoll > button { border-color: rgba(30,34,56,.15); color: rgba(23,23,36,.66); background: rgba(255,255,255,.6); box-shadow: 0 9px 26px rgba(65,69,103,.1), inset 0 1px rgba(255,255,255,.92); }
 .shell[data-theme="light"] .episodePreRoll > button:hover { color: #171724; border-color: color-mix(in srgb, var(--botcast-accent) 36%, rgba(30,34,56,.15)); background: rgba(255,255,255,.88); }
 .shell[data-theme="light"] .episodeOutroActions > button { border-color: rgba(30,34,56,.15); color: rgba(23,23,36,.66); background: rgba(255,255,255,.6); box-shadow: 0 9px 26px rgba(65,69,103,.1), inset 0 1px rgba(255,255,255,.92); }
+.shell[data-theme="light"] .episodeOutroKeepItem { border-color: rgba(30,34,56,.13); color: rgba(23,23,36,.78); background: rgba(255,255,255,.62); }
+.shell[data-theme="light"] .episodeOutroKeepItem small { color: rgba(23,23,36,.5); }
 .shell[data-theme="light"] .episodeOutroActions > button:hover { color: #171724; border-color: color-mix(in srgb, var(--botcast-accent) 36%, rgba(30,34,56,.15)); background: rgba(255,255,255,.88); }
 .shell[data-theme="light"] .preRollSignalField { opacity: .62; }
 .shell[data-theme="light"] .preRollSignalField i { border-color: color-mix(in srgb, var(--botcast-accent) 30%, rgba(53,61,94,.13)); }
@@ -733,6 +746,18 @@
 .producerGuestPickerOption:disabled { opacity: .42; cursor: not-allowed; }
 .producerBrief { grid-column: 1 / -1; }
 .producerBrief span { color: #74767c; }
+.setupEpisodeImage { grid-column: 1 / -1; padding: 14px; border: 1px solid var(--botcast-line); border-radius: 12px; background: color-mix(in srgb, var(--botcast-field) 78%, transparent); }
+.setupEpisodeImageHeading, .setupEpisodeImageFooter { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.setupEpisodeImageHeading > div { display: flex; align-items: baseline; gap: 7px; }
+.setupEpisodeImageHeading strong { color: var(--botcast-text); font-size: .8rem; }
+.setupEpisodeImageHeading button, .setupEpisodeImageFooter button { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.setupEpisodeImageHeading svg { width: 15px; height: 15px; }
+.setupEpisodeImageDraft { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 12px; margin-top: 12px; }
+.setupEpisodeImageDraft > small, .setupEpisodeImageFooter { grid-column: 1 / -1; }
+.setupEpisodeImageDraft > small { color: var(--botcast-text); }
+.setupEpisodeImageDraft > small[data-image-kind="item"] { color: color-mix(in srgb, var(--botcast-host-accent) 78%, var(--botcast-text)); }
+.setupEpisodeImageDraft textarea { min-height: 72px; }
+.setupEpisodeImageFooter small { max-width: 70ch; }
 .producerGuestContext { grid-column: 1 / -1; }
 .producerGuestContext textarea { min-height: 148px; }
 .producerGuestContext small { color: var(--botcast-muted); line-height: 1.5; }
@@ -969,6 +994,20 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .atmosphereMixerSliders input { width: 100%; margin: 0; accent-color: var(--prism-s); }
 .atmosphereMixer > small { grid-column: 1 / -1; margin-top: -6px; color: var(--botcast-muted); font-size: .58rem; }
 .stageScene { position: absolute; inset: 0; transform: translate(var(--botcast-camera-offset-x, 0%), var(--botcast-camera-offset-y, 0%)) scale(var(--botcast-camera-zoom, 1)); transform-origin: center 55%; transition: transform 900ms cubic-bezier(.22,.72,.2,1), filter 900ms ease; }
+.episodeImageContext { position: absolute; left: var(--signal-episode-image-x, 50%); top: var(--signal-episode-image-y, 75%); z-index: 32; width: clamp(88px, 14%, 180px); box-sizing: border-box; margin: 0; transform: translate(-50%, -50%) scale(var(--signal-episode-image-scale, 1)); transform-origin: center; transition: opacity 240ms ease, transform 700ms cubic-bezier(.22,.72,.2,1), left 240ms ease, top 240ms ease; pointer-events: none; }
+.episodeImageContext img { display: block; width: 100%; max-height: 24vh; object-fit: contain; }
+.episodeImageReplayEmoji { display: grid; width: 100%; aspect-ratio: 1; place-items: center; font-size: clamp(54px, 8vw, 112px); line-height: 1; }
+.episodeImageContext[data-image-kind="item"] img { filter: drop-shadow(0 13px 15px rgba(0,0,0,.48)) drop-shadow(0 2px 3px rgba(0,0,0,.5)); }
+.episodeImageContext[data-image-kind="item"] .episodeImageReplayEmoji { filter: drop-shadow(0 13px 15px rgba(0,0,0,.48)) drop-shadow(0 2px 3px rgba(0,0,0,.5)); }
+.episodeImageContext[data-image-kind="picture"] { padding: clamp(6px, .8vw, 10px) clamp(6px, .8vw, 10px) clamp(20px, 2.4vw, 34px); border: 1px solid var(--botcast-photo-edge); transform: translate(-50%, -50%) scale(var(--signal-episode-image-scale, 1)) rotate(-1.25deg); background: var(--botcast-photo-frame); box-shadow: var(--botcast-photo-shadow); }
+.episodeImageContext[data-image-kind="picture"] .episodeImageReplayEmoji { aspect-ratio: 4 / 3; background: color-mix(in srgb, var(--botcast-photo-frame) 82%, #d8d8d8); }
+.episodeImageContext[data-image-kind="picture"][data-speaker-role="guest"] { transform: translate(-50%, -50%) scale(var(--signal-episode-image-scale, 1)) rotate(1.1deg); }
+.episodeImageContext[data-rehearsal-prop="true"] { pointer-events: auto; touch-action: none; user-select: none; cursor: grab; outline: 1px dashed color-mix(in srgb, var(--prism-s) 78%, white); outline-offset: 7px; transition: none; }
+.episodeImageContext[data-rehearsal-prop="true"][data-dragging="true"] { z-index: 34; cursor: grabbing; outline-style: solid; }
+.episodeImageContext[data-rehearsal-prop="true"]:focus-visible { outline: 3px solid var(--prism-s); }
+.episodeImageContext[data-rehearsal-prop="true"] * { pointer-events: none; }
+.episodeImageRehearsalArt { display: grid; aspect-ratio: 4 / 3; place-items: center; overflow: hidden; background: radial-gradient(circle at 54% 42%, rgba(255,255,255,.92) 0 8%, transparent 9%), radial-gradient(ellipse at 50% 62%, #c7cfda 0 20%, transparent 21%), linear-gradient(145deg, #7c8ba3, #253043 62%, #101725); }
+.episodeImageRehearsalArt > span { width: 30%; aspect-ratio: 1; transform: rotate(45deg); border: 2px solid rgba(255,255,255,.72); border-radius: 5px; box-shadow: 18px -12px 0 -7px rgba(255,255,255,.46); }
 .liveCaption {
   position: absolute;
   bottom: clamp(18px, 4.5%, 34px);
@@ -1128,7 +1167,11 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .studioSpotlight { position: absolute; top: -56%; left: 50%; z-index: 5; width: 42%; height: 160%; pointer-events: none; transform: translateX(-50%) rotate(-1.5deg); transform-origin: 50% 0; animation: signalStudioSpotlightSweep 7.2s cubic-bezier(.42,0,.58,1) infinite alternate; will-change: transform; }
 .studioSpotlightBeam { position: absolute; inset: 0; clip-path: polygon(47% 0, 53% 0, 91% 100%, 9% 100%); background: radial-gradient(ellipse at 50% 8%, rgba(255,250,226,.4) 0%, rgba(255,229,169,.15) 32%, transparent 75%); filter: blur(9px); mix-blend-mode: screen; opacity: .58; }
 .studioSpotlightPool { position: absolute; left: 50%; bottom: -1%; width: 98%; height: 12%; transform: translateX(-50%); border-radius: 50%; background: radial-gradient(ellipse, rgba(255,241,198,.22), color-mix(in srgb, var(--botcast-studio-accent) 8%, transparent) 48%, transparent 73%); filter: blur(11px); mix-blend-mode: screen; opacity: .58; }
-.wordmark { position: absolute; top: 8%; left: 50%; z-index: 2; isolation: isolate; display: grid; justify-items: center; gap: 7px; transform: translateX(-50%); color: #f8fbff; text-align: center; text-shadow: 0 3px 18px rgba(0,0,0,.96); }
+.wordmark { position: absolute; top: var(--signal-logo-y, 8%); left: var(--signal-logo-x, 50%); z-index: 2; isolation: isolate; display: grid; justify-items: center; gap: 7px; transform: translateX(-50%) scale(var(--signal-logo-scale, 1)); transform-origin: top center; color: #f8fbff; text-align: center; text-shadow: 0 3px 18px rgba(0,0,0,.96); }
+.wordmark[data-rehearsal-logo="true"] { z-index: 35; padding: 4px 10px 8px; border-radius: 14px; outline: 1px dashed color-mix(in srgb, var(--prism-s) 78%, white); outline-offset: 5px; cursor: grab; touch-action: none; user-select: none; }
+.wordmark[data-rehearsal-logo="true"][data-dragging="true"] { outline-style: solid; cursor: grabbing; }
+.wordmark[data-rehearsal-logo="true"] * { pointer-events: none; }
+.wordmark[data-rehearsal-logo="true"]:focus-visible { outline: 3px solid var(--prism-s); }
 .wordmark::before { position: absolute; inset: -18px -36px -16px; z-index: -1; border-radius: 50%; content: ""; background: radial-gradient(ellipse at center, rgba(2,4,10,.76) 0%, rgba(2,4,10,.52) 46%, rgba(2,4,10,0) 76%); filter: blur(10px); pointer-events: none; }
 .wordmark strong { max-width: 400px; color: #f8fbff; font: 800 clamp(.8rem, 2vw, 1.45rem)/1.05 system-ui; letter-spacing: .04em; text-shadow: 0 2px 3px rgba(0,0,0,.98), 0 0 18px rgba(0,0,0,.9), 0 0 42px rgba(0,0,0,.76); -webkit-text-stroke: .35px rgba(255,255,255,.26); }
 .wordmark .showLogo { width: 68px; border-radius: 20px; box-shadow: 0 10px 28px rgba(0,0,0,.76), 0 0 28px rgba(0,0,0,.78), inset 0 1px rgba(255,255,255,.2); }
@@ -1214,6 +1257,11 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .stageCameraSliders label > span { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: rgba(255,255,255,.7); font: 700 .54rem/1 system-ui; }
 .stageCameraSliders output { color: #fff; font-variant-numeric: tabular-nums; }
 .stageCameraSliders input { width: 100%; margin: 0; accent-color: var(--botcast-host-accent); }
+.stageEpisodeImageTuner { display: grid; gap: 8px; border-top: 1px solid rgba(255,255,255,.13); padding-top: 9px; }
+.stageEpisodeImageTuner > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.stageEpisodeImageTuner > header > div { min-width: 0; display: grid; gap: 3px; }
+.stageEpisodeImageTuner > header strong { font-size: .67rem; }
+.stageEpisodeImageTuner > small { color: rgba(255,255,255,.58); font-size: .55rem; line-height: 1.35; }
 .mugFallback { display: grid; place-items: center; width: 100%; height: 100%; font-size: clamp(1.5rem, 3vw, 2.5rem); filter: drop-shadow(0 7px 8px rgba(0,0,0,.5)); }
 .emptyChairLabel { position: absolute; z-index: 4; top: 47%; max-width: 150px; border: 1px solid rgba(255,255,255,.1); border-radius: 999px; padding: 7px 11px; color: rgba(255,255,255,.58); background: rgba(7,8,12,.52); backdrop-filter: blur(8px); text-align: center; font-size: .64rem; animation: signalEmptyChairReveal 260ms ease-out 640ms both; }
 
@@ -1249,7 +1297,9 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .producerControls label { display: grid; gap: 7px; margin: 0; color: var(--botcast-muted); font-size: .7rem; }
 .producerControls label > div { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .producerCueActions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.producerImageAttach { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; min-width: 0; padding: 6px 10px; font: 720 .66rem/1 system-ui; opacity: .55; cursor: default; }
+.producerImageAttachWrap { display: inline-flex; }
+.producerImageAttach { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; min-width: 0; padding: 6px 10px; font: 720 .66rem/1 system-ui; }
+.producerImageAttach:disabled { opacity: .55; cursor: default; }
 .producerImageAttach svg { width: 14px; height: 14px; }
 .producerControls input { min-height: 38px; font: 650 .78rem/1.2 system-ui; }
 .producerControls textarea { min-height: 64px; max-height: 110px; resize: vertical; font: 650 .78rem/1.35 system-ui; }
@@ -1609,7 +1659,7 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
   .producerControls { grid-template-columns: minmax(0, 1fr); grid-template-areas: "composer" "cues"; }
   .cueGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cueGrid .refocusCue { grid-column: 1 / -1; }
-  .setupGrid { grid-template-columns: 1fr; }.producerBrief { grid-column: auto; }
+  .setupGrid, .setupEpisodeImageDraft { grid-template-columns: 1fr; }.producerBrief, .setupEpisodeImage { grid-column: auto; }
   .episodeLaunchRow { align-items: stretch; flex-direction: column; }
   .episodeLengthControl { min-width: 0; }
   .watchAutoStartControl { min-width: 0; margin-left: 0; }

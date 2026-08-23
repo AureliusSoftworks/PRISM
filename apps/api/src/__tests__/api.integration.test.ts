@@ -1111,8 +1111,9 @@ describe("API request integration", () => {
       jsonInit({ name: "Prompted Table", groupBotIds: botIds })
     );
     const rosterOnlyGroupPayload = await json(rosterOnlyGroup);
-    assert.equal(rosterOnlyGroup.status, 400, JSON.stringify(rosterOnlyGroupPayload));
-    assert.match(rosterOnlyGroupPayload.error, /Library group or Ungrouped/u);
+    assert.equal(rosterOnlyGroup.status, 201, JSON.stringify(rosterOnlyGroupPayload));
+    assert.deepEqual(rosterOnlyGroupPayload.group.botGroupIds, botIds);
+    assert.equal(rosterOnlyGroupPayload.group.coffeeSeatBotIds.length, 5);
 
     const libraryGroupId = "group:coffee-initial-topic";
     const savedLibraryGroup = await client.request(
@@ -1145,7 +1146,7 @@ describe("API request integration", () => {
       400,
       JSON.stringify(selectedRosterGroupPayload),
     );
-    assert.match(selectedRosterGroupPayload.error, /membership comes from its Library group/u);
+    assert.match(selectedRosterGroupPayload.error, /not both/u);
     const createdGroup = await client.request(
       "/api/coffee/groups",
       jsonInit({ name: "Prompted Table", libraryGroupId })
@@ -1161,8 +1162,9 @@ describe("API request integration", () => {
       },
     );
     const rosterUpdatePayload = await json(rosterUpdate);
-    assert.equal(rosterUpdate.status, 400, JSON.stringify(rosterUpdatePayload));
-    assert.match(rosterUpdatePayload.error, /membership comes from its Library group/u);
+    assert.equal(rosterUpdate.status, 200, JSON.stringify(rosterUpdatePayload));
+    assert.deepEqual(rosterUpdatePayload.group.botGroupIds, botIds.slice(0, 2));
+    assert.equal(rosterUpdatePayload.group.libraryGroupId, null);
     assert.equal(createdGroupPayload.group.ethos, "");
     assert.equal(createdGroupPayload.group.atmosphere, null);
     assert.equal(

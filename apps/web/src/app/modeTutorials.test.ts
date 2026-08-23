@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import { MODE_TUTORIALS, modeTutorialStep } from "./modeTutorials.ts";
+import { FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE } from "./firstRunOnboarding.ts";
 
 function signalPowersTutorialBody(): string {
   return MODE_TUTORIALS.botcast.steps.find(
@@ -11,11 +12,11 @@ function signalPowersTutorialBody(): string {
 }
 
 describe("mode tutorials", () => {
-  it("teaches group-linked Coffee setup and bot-directed Wield where supported", () => {
+  it("teaches explicit Coffee roster setup and bot-directed Wield where supported", () => {
     const coffeeBody = MODE_TUTORIALS.coffee.steps[0]?.body ?? "";
-    assert.match(coffeeBody, /custom Library group or Ungrouped/u);
-    assert.match(coffeeBody, /never individual bots/u);
-    assert.match(coffeeBody, /future invitations automatically/u);
+    assert.match(coffeeBody, /each permanent member explicitly/u);
+    assert.match(coffeeBody, /per-bot canvas/u);
+    assert.match(coffeeBody, /all five can sit at the live table/u);
     const bodies = [
       MODE_TUTORIALS.debate.steps.find(
         (step) => step.heading === "Enter the Debate Studio",
@@ -242,6 +243,15 @@ describe("mode tutorials", () => {
     assert.match(step?.body ?? "", /Use for this bot assigns an audition only to the current draft/u);
     assert.match(step?.body ?? "", /Save to Library separately bookmarks it/u);
     assert.match(step?.body ?? "", /private PRISM account library/u);
+    assert.match(step?.body ?? "", /Pronunciation switch/u);
+    assert.match(
+      step?.body ?? "",
+      /fictional and original personas default off/u,
+    );
+    assert.match(
+      step?.body ?? "",
+      /historically accurate real-person castings and curated real-person Marketplace bots default on/u,
+    );
   });
 
   it("explains the canonical hue-only identity color", () => {
@@ -461,6 +471,17 @@ describe("mode tutorials", () => {
     assert.match(liveStep.body, /live ! chip/u);
     assert.match(liveStep.body, /read the exact memory and dismiss the alert/u);
     assert.match(liveStep.body, /clears any unseen Signal alert/u);
+    assert.match(liveStep.body, /exactly one \.png or \.jpg/u);
+    assert.match(liveStep.body, /raw file remains ephemeral/u);
+    assert.match(liveStep.body, /fully opaque PNG is treated as a picture/u);
+    assert.match(liveStep.body, /light or dark Polaroid frame/u);
+    assert.match(liveStep.body, /wide camera places either one at the lower center/u);
+    assert.match(liveStep.body, /left and right cameras keep it on their matching side/u);
+    assert.match(liveStep.body, /only a genuinely transparent PNG item offers an unchecked Keep in Items option/u);
+    assert.match(liveStep.body, /links it to the bot guest it was presented to/u);
+    assert.match(liveStep.body, /Pictures are never retained/u);
+    assert.match(liveStep.body, /unsaved or later-deleted item falls back/u);
+    assert.match(liveStep.body, /emoji inside the same Polaroid frame/u);
     assert.match(dashboardStep.body, /ordinary authored face and persona glyph/u);
     assert.match(dashboardStep.body, /no Power or status badge attached/u);
     assert.match(
@@ -2033,6 +2054,10 @@ describe("mode tutorials", () => {
     );
     assert.match(
       automaticThinkingSfx?.body ?? "",
+      /thinking playback is reduced to 35% of that already-quiet level app-wide/u,
+    );
+    assert.match(
+      automaticThinkingSfx?.body ?? "",
       /ElevenLabs is connected and ONLINE/,
     );
     assert.match(
@@ -3324,7 +3349,19 @@ describe("mode tutorials", () => {
     assert.match(booking?.body ?? "", /cups only for bots who drink coffee/u);
     assert.match(
       booking?.body ?? "",
-      /Drag bots, cups, and floor glow directly into place/u,
+      /Drag bots, cups, floor glow, the center-screen show logo, and the neutral episode-image prop directly into place/u,
+    );
+    assert.match(
+      booking?.body ?? "",
+      /Left, Right, and Wide each keep their own episode-image X, Y, and scale/u,
+    );
+    assert.match(
+      booking?.body ?? "",
+      /one global account preference reused by every Signal show/u,
+    );
+    assert.match(
+      booking?.body ?? "",
+      /center-screen show logo keeps its own X, Y, and scale only for this show/u,
     );
     assert.match(
       booking?.body ?? "",
@@ -3332,7 +3369,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       booking?.body ?? "",
-      /each replay keeps the camera framing captured when it was recorded/u,
+      /resolves global episode-image framing when recording begins[\s\S]*later rehearsal edits never rewrite an earlier episode/u,
     );
     assert.match(
       booking?.body ?? "",
@@ -3343,6 +3380,22 @@ describe("mode tutorials", () => {
       /Topic field remains a single-line title input/u,
     );
     assert.match(booking?.body ?? "", /in ordinary words/u);
+  });
+
+  it("teaches setup-time Signal images while keeping first-run guidance generic", () => {
+    const booking = signalPowersTutorialBody();
+    assert.match(booking, /fixed vision-capable model/u);
+    assert.match(booking, /transparent PNGs as physical items/u);
+    assert.match(booking, /opaque PNGs or JPGs as pictures/u);
+    assert.match(booking, /editable spoken Name from the filename/u);
+    assert.match(booking, /optional Reason private to the host/u);
+    assert.match(booking, /automatically presents the image/u);
+    assert.match(booking, /bytes remain session-only/u);
+    assert.doesNotMatch(
+      FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE,
+      /image|PNG|JPG/u,
+      "first-run onboarding stays focused on the cross-applet bot-directed setup gesture",
+    );
   });
 
   it("teaches automatic ElevenLabs mood delivery in every mood-aware voice lane", () => {

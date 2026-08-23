@@ -903,6 +903,7 @@ function normalizeGeneratedVoice(
     corporality,
     avatarSfx: null,
     avatarSfxPrompt,
+    accentPronunciationEnabled: record.accentPronunciationEnabled === true,
     accentDefinitionId: resolvedAccentDefinitionId,
     pronunciationMapPoint,
     pronunciationBase: localAccent.pronunciationBase,

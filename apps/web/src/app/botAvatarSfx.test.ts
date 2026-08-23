@@ -13,6 +13,7 @@ import {
   BOT_AVATAR_SFX_LOOP_EDGE_TRIM_SECONDS,
   BOT_AVATAR_SFX_SHORT_LOOP_TRIM_RATIO,
   BOT_AVATAR_SFX_RELEASE_MS,
+  BOT_AVATAR_SFX_THINKING_RUNTIME_GAIN,
   GENERATED_BOT_THINKING_SFX_PROMPT,
   PRISM_BOT_THINKING_SFX_FALLBACK_URLS,
   botAudioVoiceProfileWithThinkingSfx,
@@ -20,6 +21,7 @@ import {
   botAvatarSfxLoopBounds,
   botAvatarSfxLoopRestartTime,
   botAvatarSfxOutputGain,
+  botAvatarSfxOutputGainForState,
   botAvatarSfxReleaseGainAt,
   botAvatarSfxShouldPlay,
   botAvatarSfxStereoPanForRect,
@@ -405,6 +407,22 @@ test("Avatar SFX full scale stays quiet and inherits the complete voice gain", (
     botAvatarSfxShouldPlay({ ...sfx, voiceBusGain: 0 }, "thinking"),
     false,
   );
+  assert.equal(BOT_AVATAR_SFX_THINKING_RUNTIME_GAIN, 0.35);
+  assert.ok(
+    Math.abs(
+      botAvatarSfxOutputGainForState(
+        { volume: BOT_AVATAR_SFX_MAX_VOLUME, voiceBusGain: 0.5 },
+        "thinking",
+      ) - 0.035,
+    ) < 1e-10,
+  );
+  assert.equal(
+    botAvatarSfxOutputGainForState(
+      { volume: BOT_AVATAR_SFX_MAX_VOLUME, voiceBusGain: 0.5 },
+      "talking",
+    ),
+    0.1,
+  );
 });
 
 test("automatic and manual avatar loops share the guarded ElevenLabs request", async () => {
@@ -599,6 +617,10 @@ test("avatar SFX keeps one loop running across enabled live states", () => {
     talkingSource,
   );
   assert.equal(thinkingSource, loadedSource);
+  assert.equal(
+    audio.volume,
+    BOT_AVATAR_SFX_MAX_VOLUME * BOT_AVATAR_SFX_THINKING_RUNTIME_GAIN,
+  );
   assert.equal(audio.loadCalls, 1);
   assert.equal(audio.playCalls, 1);
   assert.equal(audio.paused, false);

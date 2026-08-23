@@ -5832,7 +5832,7 @@ export function botPowerChromaticBiasCueV1(args: {
   });
 }
 
-/** Detects a direct question or an explicit invitation to answer honestly. */
+/** Detects a direct question, interview imperative, or invitation to answer honestly. */
 export function botPowerCandorTriggerV1(value: unknown): boolean {
   if (typeof value !== "string") return false;
   const text = compactText(value, 2_000).toLowerCase().replace(/[’]/gu, "'");
@@ -5845,6 +5845,7 @@ export function botPowerCandorTriggerV1(value: unknown): boolean {
     /\b(?:level|be\s+straight)\s+with\s+me\b/u,
     /\bwhat\s+do\s+you\s+really\s+(?:think|believe|want|know|feel)\b/u,
     /\byou\s+can\s+(?:trust|tell)\s+me\b/u,
+    /(?:^|[,:;.!?]\s+)(?:please\s+)?(?:name|describe|explain|share|tell\s+me)\s+(?:a|an|the|one|what|when|where|why|how|your)\b/u,
   ].some((pattern) => pattern.test(text));
 }
 

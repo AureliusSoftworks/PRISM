@@ -36,19 +36,20 @@ describe("Coffee Group setup", () => {
     assert.match(coffeeSource, /export async function suggestCoffeeGroupSetup/u);
   });
 
-  it("opens Library sources from the Coffee Groups + control", () => {
+  it("opens explicit Library bot selection from the Coffee Groups + control", () => {
     assert.match(
       pageSource,
       /data-tutorial-target="coffee-new-group"/u,
     );
-    assert.match(pageSource, /Choose one Library group\. Its current members stay invited/u);
+    assert.match(pageSource, /aria-label="Invite bots to Coffee"/u);
+    assert.match(pageSource, /ariaLabel="Bots available for Coffee"/u);
     assert.doesNotMatch(pageSource, /PrismRefractTarget target=\{newCoffeeGroupMagic\}/u);
   });
 
-  it("creates a table from one linked Library source", () => {
+  it("creates a table from the explicitly selected fixed roster", () => {
     assert.match(
       pageSource,
-      /const createCoffeeGroupFromSelection[\s\S]*?libraryGroupId: source\.id/u,
+      /const createCoffeeGroupFromSelection[\s\S]*?groupBotIds: coffeeSelectedSeatBotIdsForLoadedBots/u,
     );
     assert.match(
       pageSource,
@@ -56,7 +57,7 @@ describe("Coffee Group setup", () => {
     );
   });
 
-  it("rejects bot-roster table creation and editing at the API boundary", () => {
+  it("accepts bot-roster table creation and editing at the API boundary", () => {
     const createStart = serverSource.indexOf(
       'route("POST", "/api/coffee/groups"',
     );
@@ -65,10 +66,9 @@ describe("Coffee Group setup", () => {
       createStart,
     );
     const createSource = serverSource.slice(createStart, createEnd);
-    assert.match(createSource, /if \(!libraryGroupId\)/u);
     assert.match(
       createSource,
-      /Coffee table membership comes from its Library group, not a bot selection/u,
+      /\(libraryGroupId \? \{ libraryGroupId \} : \{ groupBotIds \}\)/u,
     );
 
     const patchStart = serverSource.indexOf(
@@ -78,9 +78,8 @@ describe("Coffee Group setup", () => {
       'route("DELETE", "/api/coffee/groups/:id"',
       patchStart,
     );
-    assert.match(
-      serverSource.slice(patchStart, patchEnd),
-      /Coffee table membership comes from its Library group, not a bot selection/u,
-    );
+    const patchSource = serverSource.slice(patchStart, patchEnd);
+    assert.match(patchSource, /\.\.\.\(groupBotIds !== undefined \? \{ groupBotIds \} : \{\}\)/u);
+    assert.doesNotMatch(patchSource, /membership comes from its Library group/u);
   });
 });

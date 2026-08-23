@@ -5,6 +5,8 @@ import { describe, it } from "node:test";
 import {
   BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
   BOTCAST_DEFAULT_CAMERA_FRAMING,
+  BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING,
+  BOTCAST_DEFAULT_LOGO_PLACEMENT,
   BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
   BOTCAST_DIRECTOR_MIN_SHOT_MS,
@@ -94,9 +96,11 @@ import {
   generateBotcastShowName,
   generateBotcastShowPremise,
   getBotcastEpisode,
+  getBotcastSignalPreferences,
   getBotcastShow,
   listBotcastShows,
   listBotcastEpisodes,
+  linkBotcastEpisodeImageAsset,
   loadBotcastPairHistoryContext,
   nextBotcastFallbackStudioAccentVariant,
   parseBotcastPersonaReviewResponse,
@@ -107,6 +111,7 @@ import {
   readBotcastShowIntroAudio,
   readBotcastShowOutdentAudio,
   recordBotcastAudioCue,
+  queueBotcastEpisodeImageContext,
   recordBotcastRoutingSnapshot,
   recordBotcastSoundboardCue,
   refreshBotcastShowLocalIdent,
@@ -136,6 +141,7 @@ import {
   type SignalOnlineTurnAttemptV1,
   undoBotcastShowAudioPackage,
   updateBotcastShow,
+  updateBotcastSignalPreferences,
 } from "../botcast.ts";
 import { AutoFallbackExhaustedError } from "../auto-fallback.ts";
 import { exportUserSnapshot, importUserSnapshot } from "../backup.ts";
@@ -1148,6 +1154,170 @@ function hardMinimalResponsePowers(): string {
 }
 
 describe("Botcast persistence and isolation", () => {
+  it("queues one metadata-only vision context and keeps bytes in the advance request", () => {
+    const db = fixture();
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "What the image changes",
+        preferredProvider: "local",
+        model: "llava",
+        responseMode: "local",
+      });
+      const queued = queueBotcastEpisodeImageContext(
+        db,
+        "user-1",
+        episode.id,
+        {
+          imageId: "signal-image-1",
+          kind: "item",
+          name: "wax candle",
+          mimeType: "image/png",
+          provider: "local",
+          model: "llava",
+          replayEmoji: "🕯️",
+        },
+      );
+      const imageEvent = queued.events.at(-1);
+      assert.equal(imageEvent?.kind, "image_context");
+      assert.equal(imageEvent?.payload.phase, "queued");
+      assert.equal(imageEvent?.payload.model, "llava");
+      assert.equal(imageEvent?.payload.name, "wax candle");
+      assert.equal(imageEvent?.payload.replayEmoji, "🕯️");
+      assert.equal(imageEvent?.payload.savedAssetId, null);
+      assert.equal("dataUrl" in (imageEvent?.payload ?? {}), false);
+      assert.equal("reason" in (imageEvent?.payload ?? {}), false);
+      assert.equal(
+        Number(
+          (
+            db.prepare("SELECT COUNT(*) AS total FROM images").get() as {
+              total: number | bigint;
+            }
+          ).total,
+        ),
+        0,
+      );
+      assert.throws(
+        () =>
+          queueBotcastEpisodeImageContext(db, "user-1", episode.id, {
+            imageId: "signal-image-2",
+            kind: "picture",
+            name: "second candle",
+            mimeType: "image/jpeg",
+            provider: "local",
+            model: "llava",
+            replayEmoji: "🕯️",
+          }),
+        /one image per episode/u,
+      );
+
+      db.prepare(
+        `INSERT INTO images
+           (id, user_id, origin, purpose, prompt, url, provider, model, created_at)
+         VALUES (?, ?, 'signal_item', 'signal_item', ?, '', 'upload',
+                 'asset-upload', ?)`,
+      ).run(
+        "saved-signal-item",
+        "user-1",
+        "wax candle",
+        "2026-08-23T00:00:00.000Z",
+      );
+      const linked = linkBotcastEpisodeImageAsset(
+        db,
+        "user-1",
+        episode.id,
+        "saved-signal-item",
+      );
+      assert.equal(
+        linked.events.at(-1)?.payload.savedAssetId,
+        "saved-signal-item",
+      );
+      db.prepare("DELETE FROM images WHERE id = ?").run("saved-signal-item");
+      assert.equal(
+        getBotcastEpisode(db, "user-1", episode.id).events.at(-1)?.payload
+          .savedAssetId,
+        "saved-signal-item",
+      );
+
+      const serverSource = readFileSync(
+        new URL("../server.ts", import.meta.url),
+        "utf8",
+      );
+      const botcastSource = readFileSync(
+        new URL("../botcast.ts", import.meta.url),
+        "utf8",
+      );
+      assert.match(
+        serverSource,
+        /normalizeSignalEpisodeImageForTurn[\s\S]{0,3000}Normalization is in-memory only/u,
+      );
+      assert.match(
+        serverSource,
+        /normalizeBotcastEpisodeImageName\(record\.name\)/u,
+      );
+      assert.match(
+        serverSource,
+        /normalizeBotcastEpisodeImageReason\(record\.reason\)/u,
+      );
+      assert.match(
+        serverSource,
+        /imageHasVisibleTransparency\(normalized\.pngBytes\)/u,
+      );
+      assert.match(
+        serverSource,
+        /route\("GET", "\/api\/botcast\/episodes\/:id\/image-capability"/u,
+      );
+      assert.match(
+        serverSource,
+        /route\("POST", "\/api\/botcast\/episode-image\/emoji"/u,
+      );
+      assert.match(serverSource, /linkBotcastEpisodeImageAsset/u);
+      assert.match(serverSource, /cueKind === "present_image"/u);
+      assert.match(serverSource, /Signal accepts one image per episode/u);
+      assert.doesNotMatch(serverSource, /signal_episode_context/u);
+      assert.match(botcastSource, /generation\.signalEpisodeImage/u);
+      assert.match(botcastSource, /images: \[generation\.signalEpisodeImage!\.input\]/u);
+      assert.match(botcastSource, /imageDiscussionTurn === "host_follow_up"/u);
+      assert.match(botcastSource, /: "dismissed",/u);
+      assert.match(botcastSource, /hostFollowUpMessageId:/u);
+      assert.match(botcastSource, /reason: "image_complete"/u);
+
+      const hostPrompt = buildBotcastSpeakerPrompt({
+        show,
+        episode: queued,
+        host: {
+          id: "host-1",
+          name: "Mara",
+          systemPrompt: "A perceptive host.",
+          cloneFamilyId: null,
+          powers: [],
+        },
+        guest: {
+          id: "guest-1",
+          name: "Ivo",
+          systemPrompt: "A candid guest.",
+          cloneFamilyId: null,
+          powers: [],
+        },
+        speakerRole: "host",
+        cue: { kind: "present_image", imageId: "signal-image-1" },
+        imagePresentationReason:
+          "Present the statue as a gift and invite an honest reaction.",
+      } as never)
+        .map((message) => message.content)
+        .join("\n");
+      assert.match(hostPrompt, /this wax candle/u);
+      assert.match(hostPrompt, /Present the statue as a gift/u);
+      assert.match(
+        hostPrompt,
+        /Never quote, paraphrase, mention, or expose this direction/u,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("plans bounded Power interruptions deterministically and keeps only audience-heard words", () => {
     const eligible = Array.from({ length: 100 }, (_, index) =>
       botcastPowerInterruptionPlanV1({
@@ -4195,6 +4365,7 @@ describe("Botcast persistence and isolation", () => {
       const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
       assert.deepEqual(show.studioLayout, BOTCAST_DEFAULT_STUDIO_LAYOUT);
       assert.deepEqual(show.cameraFraming, BOTCAST_DEFAULT_CAMERA_FRAMING);
+      assert.deepEqual(show.logoPlacement, BOTCAST_DEFAULT_LOGO_PLACEMENT);
 
       const updated = updateBotcastShow(db, "user-1", show.id, {
         studioLayout: {
@@ -4210,6 +4381,7 @@ describe("Botcast persistence and isolation", () => {
           right: { zoom: 1.3, panX: 7.5, panY: -2 },
           wide: { zoom: 1.12, panX: 2, panY: 1 },
         },
+        logoPlacement: { x: 43.5, y: 12, scale: 125 },
       });
       assert.deepEqual(updated.studioLayout, {
         hostBot: { x: 10, y: 82 },
@@ -4228,6 +4400,10 @@ describe("Botcast persistence and isolation", () => {
         updated.cameraFraming,
       );
       assert.deepEqual(
+        getBotcastShow(db, "user-1", show.id).logoPlacement,
+        { x: 43.5, y: 12, scale: 125 },
+      );
+      assert.deepEqual(
         updateBotcastShow(db, "user-1", show.id, { name: "Aligned Signal" })
           .cameraFraming,
         updated.cameraFraming,
@@ -4238,6 +4414,106 @@ describe("Botcast persistence and isolation", () => {
           studioLayout: BOTCAST_DEFAULT_STUDIO_LAYOUT,
         }),
         /Signal show not found/u,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("persists episode-image framing once per owner instead of per show", () => {
+    const db = fixture();
+    try {
+      db.prepare(
+        `INSERT INTO users
+          (id, email, display_name, password_hash, password_salt, wrapped_user_key,
+           wrapped_user_key_iv, wrapped_user_key_tag, created_at, last_active_at)
+         VALUES ('user-2', 'other@example.com', 'Other', 'hash', 'salt',
+                 'cipher', 'iv', 'tag', ?, ?)`,
+      ).run("2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
+
+      assert.deepEqual(
+        getBotcastSignalPreferences(db, "user-1").episodeImageFraming,
+        BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING,
+      );
+      const updated = updateBotcastSignalPreferences(db, "user-1", {
+        left: { x: 18, y: 77, scale: 85 },
+        right: { x: 82, y: 73, scale: 90 },
+        wide: { x: 49, y: 70, scale: 95 },
+      });
+      assert.equal(updated.episodeImageFraming.left.x, 18);
+      assert.deepEqual(
+        getBotcastSignalPreferences(db, "user-1"),
+        updated,
+      );
+      assert.deepEqual(
+        getBotcastSignalPreferences(db, "user-2").episodeImageFraming,
+        BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING,
+      );
+      assert.equal(
+        Number(
+          (
+            db
+              .prepare(
+                "SELECT COUNT(*) AS count FROM botcast_signal_preferences",
+              )
+              .get() as { count: number }
+          ).count,
+        ),
+        2,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("migrates legacy show image framing into the account preference only once", () => {
+    const db = fixture();
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const legacyFraming = updateBotcastShow(db, "user-1", show.id, {
+        cameraFraming: {
+          left: {
+            zoom: 1.42,
+            panX: 0,
+            panY: 0,
+            episodeImage: { x: 17, y: 74, scale: 85 },
+          },
+          right: {
+            zoom: 1.42,
+            panX: 0,
+            panY: 0,
+            episodeImage: { x: 83, y: 74, scale: 90 },
+          },
+          wide: {
+            zoom: 1,
+            panX: 0,
+            panY: 0,
+            episodeImage: { x: 51, y: 69, scale: 95 },
+          },
+        },
+      }).cameraFraming;
+
+      assert.deepEqual(
+        getBotcastSignalPreferences(db, "user-1").episodeImageFraming,
+        {
+          left: legacyFraming.left.episodeImage,
+          right: legacyFraming.right.episodeImage,
+          wide: legacyFraming.wide.episodeImage,
+        },
+      );
+
+      updateBotcastShow(db, "user-1", show.id, {
+        cameraFraming: {
+          ...legacyFraming,
+          left: {
+            ...legacyFraming.left,
+            episodeImage: { x: 30, y: 80, scale: 70 },
+          },
+        },
+      });
+      assert.deepEqual(
+        getBotcastSignalPreferences(db, "user-1").episodeImageFraming.left,
+        legacyFraming.left.episodeImage,
       );
     } finally {
       db.close();
@@ -7538,7 +7814,7 @@ describe("Botcast persistence and isolation", () => {
     const captures: ProviderMessage[][] = [];
     const provider = recordingProvider(
       [
-        "Ivo, what did you hide from the board?",
+        "We're live with Mara Vale in the Margins. I'm Mara Vale; Ivo Stone, good to have you here. Ivo Stone, before we make hidden failures abstract, name the moment when it actually affects a choice.",
         "I hid the failed prototype and I am still uncertain why it broke. Mara, will you be honest about why you suspected me?",
         "I suspected you because the dates did not line up. Could I still be wrong?",
       ],
@@ -12436,6 +12712,18 @@ describe("Botcast persistence and isolation", () => {
     assert.match(
       serverSource,
       /body\.cameraFraming !== undefined[\s\S]{0,180}cameraFraming/u,
+    );
+    assert.match(
+      serverSource,
+      /route\("GET", "\/api\/botcast\/preferences"[\s\S]{0,220}getBotcastSignalPreferences\(db, userId\)/u,
+    );
+    assert.match(
+      serverSource,
+      /route\("PATCH", "\/api\/botcast\/preferences"[\s\S]{0,300}updateBotcastSignalPreferences/u,
+    );
+    assert.match(
+      serverSource,
+      /body\.logoPlacement !== undefined[\s\S]{0,180}logoPlacement/u,
     );
     assert.match(
       serverSource,

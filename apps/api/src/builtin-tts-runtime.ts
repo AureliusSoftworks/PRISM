@@ -13,6 +13,7 @@ import {
   type BuiltinAccentRealizationBlendV1,
   localVoiceSpeechprintIsActive,
   normalizeBotAudioVoiceProfileV1,
+  normalizeBotAudioVoiceProfileForSynthesisV1,
   normalizeLocalVoiceSpeechprintV1,
   prismBuiltinEnglishVoice,
   resolveLocalAccentFallback,
@@ -107,7 +108,8 @@ export async function generatePrismVoicePackWaveInProcess(args: {
   // Style dominates phoneme tokens, so both accents and delivery moods are
   // realized as measured directions in style space. The deltas compose: a
   // guarded Texan stays a guarded Texan.
-  const profileForBlends = normalizeBotAudioVoiceProfileV1(args.profile);
+  const profileForBlends =
+    normalizeBotAudioVoiceProfileForSynthesisV1(args.profile);
   const blends = [
     builtinAccentRealizationBlend({
       engineVoiceId: pronunciation.engineVoiceId,
@@ -199,7 +201,7 @@ export async function preparePrismVoicePackPronunciation(args: {
   profile: BotAudioVoiceProfileV1;
   protectedPhrases?: readonly string[];
 }): Promise<PrismVoicePackPronunciationPlan> {
-  const profile = normalizeBotAudioVoiceProfileV1(args.profile);
+  const profile = normalizeBotAudioVoiceProfileForSynthesisV1(args.profile);
   const voice = prismBuiltinEnglishVoice(profile.baseVoiceId);
   const target = await prepareAccentMapTargetIpa({
     ...args,
@@ -225,7 +227,7 @@ export async function prepareAccentMapTargetIpa(args: {
   protectedPhrases?: readonly string[];
   voiceLocale?: string;
 }): Promise<AccentMapTargetIpaPlan> {
-  const profile = normalizeBotAudioVoiceProfileV1(args.profile);
+  const profile = normalizeBotAudioVoiceProfileForSynthesisV1(args.profile);
   const voiceLocale =
     args.voiceLocale ?? prismBuiltinEnglishVoice(profile.baseVoiceId).locale;
   const localAccent = resolveLocalAccentFallback({

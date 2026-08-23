@@ -32,6 +32,7 @@ import {
   type BotVoicePreset,
 } from "@localai/shared";
 import {
+  marketplaceAccentPronunciationDefault,
   marketplaceEntriesForTheme,
   marketplaceVisibleBotEntries,
   marketplaceVisibleThemes,
@@ -71,6 +72,33 @@ function readBotBundle(filePath: string) {
 }
 
 describe("bot marketplace static catalog", () => {
+  it("enables Accent Map pronunciation for curated real people, not fictional personas", () => {
+    const manifest = normalizeBotMarketplaceManifest(
+      readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json")),
+    );
+    const byId = new Map(manifest.bots.map((entry) => [entry.id, entry]));
+    for (const id of ["albert-einstein", "harriet-tubman", "bob-ross"]) {
+      assert.equal(
+        marketplaceAccentPronunciationDefault(byId.get(id)!),
+        true,
+        id,
+      );
+    }
+    for (const id of [
+      "rick-sanchez",
+      "spongebob-squarepants",
+      "plankton",
+      "sherlock-holmes",
+      "pia",
+    ]) {
+      assert.equal(
+        marketplaceAccentPronunciationDefault(byId.get(id)!),
+        false,
+        id,
+      );
+    }
+  });
+
   it("ships vivid, bundle-matched colors for every bot", () => {
     const rawManifest = readJsonFile<{
       bots: Array<{ id: string; color: string; bundlePath: string }>;

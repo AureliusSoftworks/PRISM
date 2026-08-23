@@ -391,6 +391,43 @@ describe("Zen voice reveal fallback", () => {
     );
   });
 
+  it("ends Zen thinking at response reveal and lets speech start on its own clock", () => {
+    const thinkingSource = pageSource.slice(
+      pageSource.indexOf("const zenResponseRevealActive ="),
+      pageSource.indexOf("const zenLiveBotWorkThinkingVisible ="),
+    );
+    assert.match(
+      thinkingSource,
+      /chatAssistantRevealInProgress[\s\S]*?latestAssistantMessage\?\.zenProgressive\?\.inProgress === true/u,
+    );
+    assert.match(
+      thinkingSource,
+      /zenPendingReplyPlaceholderVisible =[\s\S]*?!zenResponseRevealActive/u,
+    );
+    assert.match(
+      thinkingSource,
+      /zenVoiceSynthesisThinkingVisible = Boolean\([\s\S]*?!zenResponseRevealActive/u,
+    );
+
+    const progressiveSource = pageSource.slice(
+      pageSource.indexOf("const startDisplay = (): void =>"),
+      pageSource.indexOf("const finishProgressiveZenStream ="),
+    );
+    const displayStart = progressiveSource.indexOf("startDisplay();");
+    const voiceReady = progressiveSource.indexOf(
+      "const prepared = await preparedVoice;",
+    );
+    assert.ok(displayStart >= 0 && voiceReady > displayStart);
+    assert.match(
+      progressiveSource,
+      /onStart: \(durationMs, playbackAlignment\) => \{[\s\S]*?startAudioTimeline\(/u,
+    );
+    assert.doesNotMatch(
+      progressiveSource.slice(displayStart, voiceReady),
+      /finishChatSpeechReveal|chatCompletedRevealKeysRef/u,
+    );
+  });
+
   it("rejects a raced original envelope before it can restore the hidden suffix", () => {
     const responseStart = pageSource.indexOf(
       "const d =\n        chatBody.progressiveZenVoice",
@@ -427,7 +464,7 @@ describe("Zen voice reveal fallback", () => {
     );
     assert.match(
       progressiveWindow,
-      /onStart: \(durationMs\) => \{[\s\S]*?chatRequestController\.signal\.aborted\) return;/,
+      /onStart: \(durationMs, playbackAlignment\) => \{[\s\S]*?chatRequestController\.signal\.aborted\) return;/,
     );
   });
 
@@ -487,7 +524,7 @@ describe("Zen voice reveal fallback", () => {
     );
     assert.match(
       pageSource,
-      /onStart: \(durationMs\) => \{[\s\S]*?activeSpeechStarted = true;[\s\S]*?startChatSpeechReveal/,
+      /onStart: \(durationMs, playbackAlignment\) => \{[\s\S]*?activeSpeechStarted = true;[\s\S]*?startChatSpeechReveal/,
     );
     assert.match(
       pageSource,

@@ -1439,8 +1439,8 @@ describe("assertCoffeeInviteBotCount", () => {
     );
   });
 
-  it("keeps large groups intact but limits a new one-off table to four", () => {
-    assert.equal(COFFEE_SESSION_ATTENDEE_MAX_SIZE, 4);
+  it("keeps large groups intact and permits all five bots at a new table", () => {
+    assert.equal(COFFEE_SESSION_ATTENDEE_MAX_SIZE, 5);
     assert.doesNotThrow(() =>
       assertCoffeeInviteBotCount([
         "bot-a",
@@ -1451,7 +1451,13 @@ describe("assertCoffeeInviteBotCount", () => {
       ]),
     );
     assert.doesNotThrow(() =>
-      assertCoffeeSessionAttendeeCount(["bot-a", "bot-b", "bot-c", "bot-d"]),
+      assertCoffeeSessionAttendeeCount([
+        "bot-a",
+        "bot-b",
+        "bot-c",
+        "bot-d",
+        "bot-e",
+      ]),
     );
     assert.throws(
       () =>
@@ -1461,8 +1467,9 @@ describe("assertCoffeeInviteBotCount", () => {
           "bot-c",
           "bot-d",
           "bot-e",
+          "bot-f",
         ]),
-      /at most 4/u,
+      /at most 5/u,
     );
   });
 
@@ -4552,6 +4559,41 @@ describe("Coffee group foundation", () => {
     assert.deepEqual(updated.coffeeSeatBotIds, [null, BORIS.id, ALICE.id, null, null]);
   });
 
+  it("keeps a saved session cast frozen when permanent group membership changes", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    for (const bot of [ALICE, BORIS, CARA]) {
+      seedCoffeeBot(db, userId, bot);
+    }
+    const group = createCoffeeGroup(db, userId, {
+      name: "Changing Table",
+      groupBotIds: [ALICE.id, BORIS.id, null, null, null],
+    });
+    const session = await createCoffeeConversationFromGroup(
+      db,
+      userId,
+      group.id,
+      { forceAttendance: true },
+    );
+
+    const updated = updateCoffeeGroup(db, userId, group.id, {
+      groupBotIds: [ALICE.id, CARA.id, null, null, null],
+    });
+    const saved = db.prepare(
+      "SELECT bot_group_ids FROM conversations WHERE id = ? AND user_id = ?",
+    ).get(session.conversation.id, userId) as { bot_group_ids: string };
+
+    assert.deepEqual(updated.botGroupIds, [ALICE.id, CARA.id]);
+    assert.deepEqual(
+      parseStoredCoffeeSeatBotIds(saved.bot_group_ids),
+      session.conversation.coffeeSeatBotIds,
+    );
+    assert.deepEqual(
+      [...(session.conversation.botGroupIds ?? [])].sort(),
+      [ALICE.id, BORIS.id].sort(),
+    );
+  });
+
   it("ignores archived Coffee groups when checking duplicate rosters", () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
@@ -5614,7 +5656,7 @@ describe("Coffee group foundation", () => {
     );
   });
 
-  it("prunes stale saved Coffee group seats before starting a session", async () => {
+  it("keeps stale group members removable while pruning them from new sessions", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
     for (const bot of [ALICE, BORIS, CARA]) {
@@ -5629,7 +5671,13 @@ describe("Coffee group foundation", () => {
 
     const [reread] = listCoffeeGroups(db, userId);
     assert.deepEqual(reread?.botGroupIds, [ALICE.id, BORIS.id]);
-    assert.deepEqual(reread?.coffeeSeatBotIds, [ALICE.id, null, BORIS.id, null, null]);
+    assert.deepEqual(reread?.coffeeSeatBotIds, [
+      ALICE.id,
+      CARA.id,
+      BORIS.id,
+      null,
+      null,
+    ]);
 
     const result = await createCoffeeConversationFromGroup(db, userId, group.id, {});
     assert.deepEqual(
@@ -5642,6 +5690,18 @@ describe("Coffee group foundation", () => {
         .sort(),
       [ALICE.id, BORIS.id].sort()
     );
+
+    const repaired = updateCoffeeGroup(db, userId, group.id, {
+      groupBotIds: [ALICE.id, null, BORIS.id, null, null],
+    });
+    assert.deepEqual(repaired.botGroupIds, [ALICE.id, BORIS.id]);
+    assert.deepEqual(repaired.coffeeSeatBotIds, [
+      ALICE.id,
+      null,
+      BORIS.id,
+      null,
+      null,
+    ]);
   });
 
   it("blocks stale Coffee groups with fewer than two available bots", async () => {
@@ -5856,7 +5916,7 @@ describe("Coffee group foundation", () => {
     );
   });
 
-  it("draws four live attendees from a five-member group without shrinking it", () => {
+  it("keeps all five live attendees from a five-member group", () => {
     const roster = [ALICE.id, BORIS.id, CARA.id, DANTE.id, ELENA.id];
     const result = capCoffeeSessionAttendance({
       seatBotIds: roster,
@@ -5867,14 +5927,11 @@ describe("Coffee group foundation", () => {
     );
 
     assert.equal(attending.length, COFFEE_SESSION_ATTENDEE_MAX_SIZE);
-    assert.equal(result.capacityAbsentBotIds.length, 1);
-    assert.deepEqual(
-      [...attending, ...result.capacityAbsentBotIds].sort(),
-      [...roster].sort(),
-    );
+    assert.deepEqual(attending, roster);
+    assert.deepEqual(result.capacityAbsentBotIds, []);
   });
 
-  it("freezes only four attendees when a five-member Coffee Group opens", async () => {
+  it("freezes all five attendees when a five-member Coffee Group opens", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
     for (const bot of [ALICE, BORIS, CARA, DANTE, ELENA]) {
@@ -5898,16 +5955,16 @@ describe("Coffee group foundation", () => {
       result.conversation.botGroupIds?.length,
       COFFEE_SESSION_ATTENDEE_MAX_SIZE,
     );
-    assert.equal(result.conversation.coffeeAbsentBotIds?.length, 1);
+    assert.equal((result.conversation.coffeeAbsentBotIds ?? []).length, 0);
     const event = db
       .prepare(
         "SELECT payload FROM coffee_group_events WHERE group_id = ? AND event_type = 'session_created'",
       )
       .get(group.id) as { payload: string };
     const payload = JSON.parse(event.payload) as {
-      capacityAbsentBotIds: string[];
+      capacityAbsentBotIds?: string[];
     };
-    assert.equal(payload.capacityAbsentBotIds.length, 1);
+    assert.equal((payload.capacityAbsentBotIds ?? []).length, 0);
   });
 
   it("rests ordinary wrap fatigue between sessions so the cast comes back", () => {

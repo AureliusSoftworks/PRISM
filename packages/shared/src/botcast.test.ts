@@ -11,6 +11,8 @@ import {
   BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT,
   BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
   BOTCAST_DEFAULT_CAMERA_FRAMING,
+  BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING,
+  BOTCAST_DEFAULT_LOGO_PLACEMENT,
   BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
   BOTCAST_DIRECTOR_MIN_SHOT_MS,
@@ -47,8 +49,12 @@ import {
   botcastHostSignOffIntent,
   botcastInterruptedGuestContent,
   botcastInterruptionBridgeMessageId,
+  botcastEpisodeImageDescriptorFromFileName,
+  botcastEpisodeImageSpokenReference,
   botcastMessageIsEphemeralInterruptionBridge,
   botcastListenerReactionForMessage,
+  botcastImageContextForMessageV1,
+  botcastLatestImageContextV1,
   botcastLatestSpeechCopyReactionSourceV1,
   botcastPublicReactionSpeechForMessage,
   botcastProducerGuestThinkingDiscountMs,
@@ -73,9 +79,15 @@ import {
   isBotcastEchoDashboardBlurb,
   normalizeBotcastStudioLayout,
   normalizeBotcastCameraFraming,
+  botcastCameraFramingWithEpisodeImages,
+  normalizeBotcastEpisodeImageFraming,
+  normalizeBotcastLogoPlacement,
   normalizeBotcastStudioAtmosphereMix,
   normalizeBotcastStudioGlowTuning,
   normalizeBotcastHostRecoveryQuestions,
+  normalizeBotcastEpisodeImageName,
+  normalizeBotcastEpisodeImageReason,
+  normalizeBotcastEpisodeImageReplayEmoji,
   normalizeBotcastVoiceLevel,
   normalizeBotcastVoiceLevelsByBotId,
   swapBotcastStudioLayoutSeats,
@@ -83,6 +95,104 @@ import {
 } from "./botcast.ts";
 
 describe("Signal public cadence speech", () => {
+  it("derives the initial PNG item and .jpg picture filename semantics", () => {
+    assert.deepEqual(
+      botcastEpisodeImageDescriptorFromFileName("wax-candle.png", "image/png"),
+      { kind: "item", name: "wax candle", mimeType: "image/png" },
+    );
+    const picture = botcastEpisodeImageDescriptorFromFileName(
+      "wax_candle.jpg",
+      "image/jpeg",
+    );
+    assert.deepEqual(picture, {
+      kind: "picture",
+      name: "wax candle",
+      mimeType: "image/jpeg",
+    });
+    assert.equal(
+      botcastEpisodeImageSpokenReference(picture!),
+      "this picture of wax candle",
+    );
+    assert.equal(
+      botcastEpisodeImageDescriptorFromFileName("wax-candle.jpeg", "image/jpeg"),
+      null,
+    );
+    assert.equal(
+      botcastEpisodeImageDescriptorFromFileName("wax-candle.png", "image/jpeg"),
+      null,
+    );
+    assert.equal(
+      normalizeBotcastEpisodeImageName("  The producer's dream car  "),
+      "The producer's dream car",
+    );
+    assert.equal(normalizeBotcastEpisodeImageName("   "), null);
+    assert.equal(
+      normalizeBotcastEpisodeImageReason(
+        "  This is a new car; invite an honest reaction.  ",
+      ),
+      "This is a new car; invite an honest reaction.",
+    );
+    assert.equal(normalizeBotcastEpisodeImageReason("   "), null);
+    assert.equal(normalizeBotcastEpisodeImageReplayEmoji("🚗", "🖼️"), "🚗");
+    assert.equal(
+      normalizeBotcastEpisodeImageReplayEmoji("orange car", "🖼️"),
+      "🖼️",
+    );
+  });
+
+  it("projects replay-stable image context across host, guest, and follow-up lines", () => {
+    const base = {
+      v: 1,
+      imageId: "image-1",
+      kind: "item",
+      name: "wax candle",
+      mimeType: "image/png",
+      provider: "local",
+      model: "llava",
+      replayEmoji: "🕯️",
+      savedAssetId: null,
+      hostIntroductionMessageId: "host-intro",
+      guestDiscussionMessageId: "guest-view",
+      hostFollowUpMessageId: "host-opinion",
+    } as const;
+    const events: BotcastReplayEvent[] = [
+      {
+        id: "queued",
+        episodeId: "episode-1",
+        sequence: 1,
+        kind: "image_context",
+        payload: {
+          ...base,
+          phase: "queued",
+          hostIntroductionMessageId: null,
+          guestDiscussionMessageId: null,
+          hostFollowUpMessageId: null,
+        },
+        occurredAt: "2026-08-23T00:00:00.000Z",
+      },
+      {
+        id: "dismissed",
+        episodeId: "episode-1",
+        sequence: 2,
+        kind: "image_context",
+        payload: { ...base, phase: "dismissed" },
+        occurredAt: "2026-08-23T00:00:01.000Z",
+      },
+    ];
+
+    assert.equal(botcastLatestImageContextV1(events)?.phase, "dismissed");
+    assert.equal(botcastLatestImageContextV1(events)?.replayEmoji, "🕯️");
+    assert.equal(
+      botcastImageContextForMessageV1(events, "guest-view")?.imageId,
+      "image-1",
+    );
+    assert.equal(
+      botcastImageContextForMessageV1(events, "host-opinion")?.phase,
+      "dismissed",
+    );
+    assert.equal(botcastImageContextForMessageV1(events, "other"), null);
+  });
+
   it("selects the latest other-bot spoken Foley as Signal's Copycat source", () => {
     const events = ["Hmm...", "let me see...", "Nice!"].map(
       (spokenCue, index): BotcastReplayEvent => ({
@@ -193,17 +303,103 @@ describe("Signal producer direct quotes", () => {
 });
 
 describe("Signal show camera framing", () => {
+  it("normalizes global image framing separately from per-show cameras", () => {
+    const globalImages = normalizeBotcastEpisodeImageFraming({
+      left: { x: 12, y: 91, scale: 80 },
+      right: { x: 88, y: 9, scale: 75 },
+      wide: { x: 50, y: 64, scale: 105 },
+    });
+    const cameras = botcastCameraFramingWithEpisodeImages(
+      {
+        left: { zoom: 1.2, panX: 3, panY: -4 },
+        right: { zoom: 1.3, panX: -2, panY: 5 },
+        wide: { zoom: 1, panX: 0, panY: 0 },
+      },
+      globalImages,
+    );
+    assert.equal(cameras.left.zoom, 1.2);
+    assert.deepEqual(cameras.left.episodeImage, globalImages.left);
+    assert.deepEqual(cameras.right.episodeImage, globalImages.right);
+    assert.deepEqual(cameras.wide.episodeImage, globalImages.wide);
+    assert.deepEqual(
+      normalizeBotcastEpisodeImageFraming(undefined),
+      BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING,
+    );
+  });
+
+  it("keeps the per-show logo placement bounded and backward compatible", () => {
+    assert.deepEqual(
+      normalizeBotcastLogoPlacement({ x: -4, y: 104, scale: 999 }),
+      { x: 5, y: 95, scale: 140 },
+    );
+    assert.deepEqual(
+      normalizeBotcastLogoPlacement(undefined),
+      BOTCAST_DEFAULT_LOGO_PLACEMENT,
+    );
+  });
+
+  it("keeps the compact episode prop on the named side of each camera", () => {
+    assert.deepEqual(BOTCAST_DEFAULT_CAMERA_FRAMING.left.episodeImage, {
+      x: 24,
+      y: 72,
+      scale: 50,
+    });
+    assert.deepEqual(BOTCAST_DEFAULT_CAMERA_FRAMING.right.episodeImage, {
+      x: 76,
+      y: 72,
+      scale: 50,
+    });
+    assert.deepEqual(BOTCAST_DEFAULT_CAMERA_FRAMING.wide.episodeImage, {
+      x: 50,
+      y: 75,
+      scale: 50,
+    });
+    assert.deepEqual(
+      normalizeBotcastCameraFraming({
+        left: { episodeImage: { x: 74, y: 62, scale: 70 } },
+        right: { episodeImage: { x: 26, y: 62, scale: 70 } },
+        wide: { episodeImage: { x: 50, y: 66, scale: 72 } },
+      }),
+      BOTCAST_DEFAULT_CAMERA_FRAMING,
+    );
+  });
+
   it("keeps independent bounded framing for left, right, and wide cameras", () => {
     assert.deepEqual(
       normalizeBotcastCameraFraming({
-        left: { zoom: 1.6, panX: -8.25, panY: 4.5 },
+        left: {
+          zoom: 1.6,
+          panX: -8.25,
+          panY: 4.5,
+          episodeImage: { x: 1, y: 100, scale: 999 },
+        },
         right: { zoom: 9, panX: 90, panY: -90 },
-        wide: { zoom: 0.5, panX: 2, panY: 3 },
+        wide: {
+          zoom: 0.5,
+          panX: 2,
+          panY: 3,
+          episodeImage: { x: 48.5, y: 70, scale: 85 },
+        },
       }),
       {
-        left: { zoom: 1.6, panX: -8.25, panY: 4.5 },
-        right: { zoom: 2, panX: 30, panY: -30 },
-        wide: { zoom: 1, panX: 2, panY: 3 },
+        left: {
+          zoom: 1.6,
+          panX: -8.25,
+          panY: 4.5,
+          episodeImage: { x: 5, y: 95, scale: 140 },
+        },
+        right: {
+          zoom: 2,
+          panX: 30,
+          panY: -30,
+          episodeImage: BOTCAST_DEFAULT_CAMERA_FRAMING.right.episodeImage,
+        },
+        wide: {
+          zoom: 1,
+          panX: 2,
+          panY: 3,
+          episodeImage: { x: 48.5, y: 70, scale: 85 },
+        },
       },
     );
     assert.deepEqual(

@@ -28,9 +28,59 @@ describe("cross-accent local voice pronunciation controls", () => {
     assert.match(pageSource, /<PronunciationAtlas/u);
     assert.match(pageSource, /data-adjustment-target=/u);
     assert.match(atlasSource, /label = "Accent map"/u);
+    assert.match(atlasSource, /aria-label="Accent Map pronunciation"/u);
+    assert.match(
+      atlasSource,
+      /data-tutorial-target="avatar-accent-pronunciation-toggle"/u,
+    );
+    assert.match(pageSource, /accentPronunciationEnabled: enabled/u);
+    assert.match(
+      pageSource,
+      /accentPronunciationEnabled:[\s\S]*?activatePronunciation === false[\s\S]*?: true,[\s\S]*?pronunciationBase:/u,
+    );
+    assert.match(
+      pageSource,
+      /onPreview=\{\(selection\)[\s\S]*?activatePronunciation: false/u,
+    );
+    assert.match(
+      pageSource,
+      /onCancel=\{\(selection\)[\s\S]*?activatePronunciation: false/u,
+    );
     assert.doesNotMatch(
       pageSource,
       /activeAdjustmentTarget === "pronunciation" \? null : activeAdjustmentOptions/,
+    );
+  });
+
+  it("applies curated Marketplace pronunciation defaults without losing imported overrides", () => {
+    const defaultStart = pageSource.indexOf(
+      'if (typeof options?.accentPronunciationEnabledDefault === "boolean")',
+    );
+    const defaultEnd = pageSource.indexOf(
+      "if (options?.generateThinkingSfx)",
+      defaultStart,
+    );
+    assert.ok(defaultStart >= 0 && defaultEnd > defaultStart);
+    const defaultSource = pageSource.slice(defaultStart, defaultEnd);
+    assert.match(defaultSource, /authoredAudioVoiceProfile/u);
+    assert.match(defaultSource, /audioVoiceProfileOverride/u);
+    assert.equal(
+      defaultSource.match(
+        /accentPronunciationEnabled:\s*options\.accentPronunciationEnabledDefault/gu,
+      )?.length,
+      2,
+    );
+    assert.match(
+      pageSource,
+      /generateThinkingSfx: true,[\s\S]*?accentPronunciationEnabledDefault:[\s\S]*?marketplaceAccentPronunciationDefault\(bundle\.entry\)/u,
+    );
+    assert.match(
+      pageSource,
+      /botAudioVoiceProfileHasExplicitAccentPronunciationSetting\([\s\S]*?installedOverrideValue[\s\S]*?marketplaceAccentPronunciationDefault\(prepared\.entry\)/u,
+    );
+    assert.match(
+      pageSource,
+      /if \(installedOverride && installedOverrideChanged\)[\s\S]*?marketplacePatch\.audioVoiceProfileOverride = installedOverride/u,
     );
   });
 

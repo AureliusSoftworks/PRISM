@@ -1268,7 +1268,14 @@ test("candor Powers normalize, trigger narrowly, choose the strongest pressure, 
   );
   assert.equal(botPowerCandorTriggerV1("Mara, what do you really believe?"), true);
   assert.equal(botPowerCandorTriggerV1("Be honest with me."), true);
+  assert.equal(
+    botPowerCandorTriggerV1(
+      "Ivo Stone, before we make hidden failures abstract, name the moment when it actually affects a choice.",
+    ),
+    true,
+  );
   assert.equal(botPowerCandorTriggerV1("Mara shared a careful opinion."), false);
+  assert.equal(botPowerCandorTriggerV1("Mara named the moment carefully."), false);
   assert.ok(botPowerCandorResponseRuleV1("large", "x".repeat(100)).length <= 280);
 
   const name = "Open Door";

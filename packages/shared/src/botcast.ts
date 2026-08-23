@@ -326,12 +326,27 @@ export type BotcastTensionStage =
   "calm" | "resistance" | "warning" | "departed";
 export type BotcastCameraShot = "auto" | "left" | "right" | "wide";
 export type BotcastDirectedCameraShot = Exclude<BotcastCameraShot, "auto">;
+export interface BotcastEpisodeImagePlacement {
+  /** Horizontal viewport position in percent. */
+  x: number;
+  /** Vertical viewport position in percent. */
+  y: number;
+  /** Visual size as a percent of Signal's canonical image prop. */
+  scale: number;
+}
+export type BotcastEpisodeImageFraming = Record<
+  BotcastDirectedCameraShot,
+  BotcastEpisodeImagePlacement
+>;
+export type BotcastLogoPlacement = BotcastEpisodeImagePlacement;
 export interface BotcastCameraFrame {
   zoom: number;
   /** Horizontal adjustment layered over Signal's automatic subject framing. */
   panX: number;
   /** Vertical adjustment layered over Signal's automatic subject framing. */
   panY: number;
+  /** Camera-specific placement for the transient episode image prop. */
+  episodeImage: BotcastEpisodeImagePlacement;
 }
 export type BotcastCameraFraming = Record<
   BotcastDirectedCameraShot,
@@ -343,11 +358,53 @@ export const BOTCAST_CAMERA_ZOOM_STEP = 0.01;
 export const BOTCAST_CAMERA_PAN_MIN = -30;
 export const BOTCAST_CAMERA_PAN_MAX = 30;
 export const BOTCAST_CAMERA_PAN_STEP = 0.25;
-export const BOTCAST_DEFAULT_CAMERA_FRAMING: Readonly<BotcastCameraFraming> = {
-  left: { zoom: 1.42, panX: 0, panY: 0 },
-  right: { zoom: 1.42, panX: 0, panY: 0 },
-  wide: { zoom: 1, panX: 0, panY: 0 },
+export const BOTCAST_EPISODE_IMAGE_POSITION_MIN = 5;
+export const BOTCAST_EPISODE_IMAGE_POSITION_MAX = 95;
+export const BOTCAST_EPISODE_IMAGE_POSITION_STEP = 0.5;
+export const BOTCAST_EPISODE_IMAGE_SCALE_MIN = 45;
+export const BOTCAST_EPISODE_IMAGE_SCALE_MAX = 140;
+export const BOTCAST_EPISODE_IMAGE_SCALE_STEP = 5;
+export const BOTCAST_DEFAULT_LOGO_PLACEMENT: Readonly<BotcastLogoPlacement> = {
+  x: 50,
+  y: 8,
+  scale: 100,
 };
+const BOTCAST_LEGACY_EPISODE_IMAGE_PLACEMENT: Readonly<
+  Record<BotcastDirectedCameraShot, BotcastEpisodeImagePlacement>
+> = {
+  left: { x: 74, y: 62, scale: 70 },
+  right: { x: 26, y: 62, scale: 70 },
+  wide: { x: 50, y: 66, scale: 72 },
+};
+export const BOTCAST_DEFAULT_CAMERA_FRAMING: Readonly<BotcastCameraFraming> = {
+  left: {
+    zoom: 1.42,
+    panX: 0,
+    panY: 0,
+    episodeImage: { x: 24, y: 72, scale: 50 },
+  },
+  right: {
+    zoom: 1.42,
+    panX: 0,
+    panY: 0,
+    episodeImage: { x: 76, y: 72, scale: 50 },
+  },
+  wide: {
+    zoom: 1,
+    panX: 0,
+    panY: 0,
+    episodeImage: { x: 50, y: 75, scale: 50 },
+  },
+};
+export const BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING: Readonly<BotcastEpisodeImageFraming> = {
+  left: { ...BOTCAST_DEFAULT_CAMERA_FRAMING.left.episodeImage },
+  right: { ...BOTCAST_DEFAULT_CAMERA_FRAMING.right.episodeImage },
+  wide: { ...BOTCAST_DEFAULT_CAMERA_FRAMING.wide.episodeImage },
+};
+export interface BotcastSignalPreferences {
+  /** User-global placement reused by every Signal show. */
+  episodeImageFraming: BotcastEpisodeImageFraming;
+}
 export const BOTCAST_AUTO_CAMERA_LEAD_IN_MIN_MS = 240;
 export const BOTCAST_AUTO_CAMERA_LEAD_IN_MAX_MS = 420;
 
@@ -397,7 +454,110 @@ function normalizeBotcastCameraFrame(
       BOTCAST_CAMERA_PAN_MIN,
       BOTCAST_CAMERA_PAN_MAX,
     ),
+    episodeImage: normalizeBotcastEpisodeImagePlacement(
+      container.episodeImage,
+      fallback.episodeImage,
+    ),
   };
+}
+
+export function normalizeBotcastEpisodeImagePlacement(
+  value: unknown,
+  fallback: Readonly<BotcastEpisodeImagePlacement>,
+): BotcastEpisodeImagePlacement {
+  const container =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Partial<BotcastEpisodeImagePlacement>)
+      : {};
+  const bounded = (
+    candidate: unknown,
+    fallbackValue: number,
+    minimum: number,
+    maximum: number,
+  ): number => {
+    const parsed =
+      typeof candidate === "number"
+        ? candidate
+        : typeof candidate === "string"
+          ? Number(candidate)
+          : Number.NaN;
+    return Number(
+      Math.max(
+        minimum,
+        Math.min(maximum, Number.isFinite(parsed) ? parsed : fallbackValue),
+      ).toFixed(2),
+    );
+  };
+  return {
+    x: bounded(
+      container.x,
+      fallback.x,
+      BOTCAST_EPISODE_IMAGE_POSITION_MIN,
+      BOTCAST_EPISODE_IMAGE_POSITION_MAX,
+    ),
+    y: bounded(
+      container.y,
+      fallback.y,
+      BOTCAST_EPISODE_IMAGE_POSITION_MIN,
+      BOTCAST_EPISODE_IMAGE_POSITION_MAX,
+    ),
+    scale: bounded(
+      container.scale,
+      fallback.scale,
+      BOTCAST_EPISODE_IMAGE_SCALE_MIN,
+      BOTCAST_EPISODE_IMAGE_SCALE_MAX,
+    ),
+  };
+}
+
+export function normalizeBotcastEpisodeImageFraming(
+  value: unknown,
+  fallback: Readonly<BotcastEpisodeImageFraming> =
+    BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING,
+): BotcastEpisodeImageFraming {
+  const container =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Partial<Record<BotcastDirectedCameraShot, unknown>>)
+      : {};
+  return {
+    left: normalizeBotcastEpisodeImagePlacement(container.left, fallback.left),
+    right: normalizeBotcastEpisodeImagePlacement(
+      container.right,
+      fallback.right,
+    ),
+    wide: normalizeBotcastEpisodeImagePlacement(container.wide, fallback.wide),
+  };
+}
+
+export function botcastEpisodeImageFramingFromCameraFraming(
+  value: unknown,
+): BotcastEpisodeImageFraming {
+  const framing = normalizeBotcastCameraFraming(value);
+  return normalizeBotcastEpisodeImageFraming({
+    left: framing.left.episodeImage,
+    right: framing.right.episodeImage,
+    wide: framing.wide.episodeImage,
+  });
+}
+
+export function botcastCameraFramingWithEpisodeImages(
+  cameraFraming: unknown,
+  episodeImageFraming: unknown,
+): BotcastCameraFraming {
+  const cameras = normalizeBotcastCameraFraming(cameraFraming);
+  const images = normalizeBotcastEpisodeImageFraming(episodeImageFraming);
+  return {
+    left: { ...cameras.left, episodeImage: images.left },
+    right: { ...cameras.right, episodeImage: images.right },
+    wide: { ...cameras.wide, episodeImage: images.wide },
+  };
+}
+
+export function normalizeBotcastLogoPlacement(
+  value: unknown,
+  fallback: Readonly<BotcastLogoPlacement> = BOTCAST_DEFAULT_LOGO_PLACEMENT,
+): BotcastLogoPlacement {
+  return normalizeBotcastEpisodeImagePlacement(value, fallback);
 }
 
 export function normalizeBotcastCameraFraming(
@@ -409,10 +569,24 @@ export function normalizeBotcastCameraFraming(
     value && typeof value === "object" && !Array.isArray(value)
       ? (value as Partial<Record<BotcastDirectedCameraShot, unknown>>)
       : {};
+  const normalizedFrame = (
+    shot: BotcastDirectedCameraShot,
+  ): BotcastCameraFrame => {
+    const frame = normalizeBotcastCameraFrame(container[shot], fallback[shot]);
+    const legacy = BOTCAST_LEGACY_EPISODE_IMAGE_PLACEMENT[shot];
+    if (
+      frame.episodeImage.x === legacy.x &&
+      frame.episodeImage.y === legacy.y &&
+      frame.episodeImage.scale === legacy.scale
+    ) {
+      return { ...frame, episodeImage: { ...fallback[shot].episodeImage } };
+    }
+    return frame;
+  };
   return {
-    left: normalizeBotcastCameraFrame(container.left, fallback.left),
-    right: normalizeBotcastCameraFrame(container.right, fallback.right),
-    wide: normalizeBotcastCameraFrame(container.wide, fallback.wide),
+    left: normalizedFrame("left"),
+    right: normalizedFrame("right"),
+    wide: normalizedFrame("wide"),
   };
 }
 
@@ -921,6 +1095,8 @@ export interface BotcastLogoState {
   design: BotcastLogoDesignV1;
   /** Previous accepted genomes prevent Refresh logo from cycling backward. */
   retiredDesigns: BotcastLogoDesignV1[];
+  /** Per-show stage placement of the center-screen logo/title lockup. */
+  placement?: BotcastLogoPlacement;
 }
 
 export interface BotcastIntroAudioState {
@@ -979,6 +1155,8 @@ export interface BotcastShow {
   studioLighting: BotcastStudioLightingState;
   studioLayout: BotcastStudioLayout;
   cameraFraming: BotcastCameraFraming;
+  /** Per-show placement of the center-screen logo and title lockup. */
+  logoPlacement?: BotcastLogoPlacement;
   studioGlowTuning: BotcastStudioGlowTuning;
   voiceLevelsByBotId: BotcastVoiceLevelsByBotId;
   atmosphereMix: BotcastStudioAtmosphereMix;
@@ -1363,13 +1541,133 @@ export type BotcastImageContextPhase =
   | "discussing"
   | "dismissed";
 
-/** Public, replay-stable lifecycle for one producer-supplied episode image. */
+export type BotcastEpisodeImageKind = "item" | "picture";
+
+export const BOTCAST_EPISODE_IMAGE_NAME_MAX_LENGTH = 120;
+export const BOTCAST_EPISODE_IMAGE_REASON_MAX_LENGTH = 600;
+export const BOTCAST_EPISODE_IMAGE_EMOJI_MAX_LENGTH = 24;
+export const BOTCAST_EPISODE_IMAGE_ITEM_FALLBACK_EMOJI = "📦";
+export const BOTCAST_EPISODE_IMAGE_PICTURE_FALLBACK_EMOJI = "🖼️";
+
+export interface BotcastEpisodeImageDescriptor {
+  kind: BotcastEpisodeImageKind;
+  /** Human-readable subject derived only from the original filename stem. */
+  name: string;
+  mimeType: "image/png" | "image/jpeg";
+}
+
+export function botcastEpisodeImageFallbackEmoji(
+  kind: BotcastEpisodeImageKind,
+): string {
+  return kind === "item"
+    ? BOTCAST_EPISODE_IMAGE_ITEM_FALLBACK_EMOJI
+    : BOTCAST_EPISODE_IMAGE_PICTURE_FALLBACK_EMOJI;
+}
+
+/** One replay-safe emoji grapheme; image pixels remain optional and ephemeral. */
+export function normalizeBotcastEpisodeImageReplayEmoji(
+  value: unknown,
+  fallback = BOTCAST_EPISODE_IMAGE_ITEM_FALLBACK_EMOJI,
+): string {
+  const normalizedFallback =
+    typeof fallback === "string" && fallback.trim()
+      ? fallback.trim().slice(0, BOTCAST_EPISODE_IMAGE_EMOJI_MAX_LENGTH)
+      : BOTCAST_EPISODE_IMAGE_ITEM_FALLBACK_EMOJI;
+  if (typeof value !== "string") return normalizedFallback;
+  const trimmed = value.trim().slice(0, BOTCAST_EPISODE_IMAGE_EMOJI_MAX_LENGTH);
+  if (!trimmed || /\s/u.test(trimmed)) return normalizedFallback;
+  const graphemes =
+    typeof Intl.Segmenter === "function"
+      ? Array.from(
+          new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(
+            trimmed,
+          ),
+          (segment) => segment.segment,
+        )
+      : [trimmed];
+  if (graphemes.length !== 1) return normalizedFallback;
+  return /\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(trimmed)
+    ? trimmed
+    : normalizedFallback;
+}
+
+export function normalizeBotcastEpisodeImageName(
+  value: unknown,
+): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  if (!normalized) return null;
+  return normalized.slice(0, BOTCAST_EPISODE_IMAGE_NAME_MAX_LENGTH);
+}
+
+/** Private, request-scoped Producer intent; never part of replay metadata. */
+export function normalizeBotcastEpisodeImageReason(
+  value: unknown,
+): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  return normalized
+    ? normalized.slice(0, BOTCAST_EPISODE_IMAGE_REASON_MAX_LENGTH)
+    : null;
+}
+
+/**
+ * Signal deliberately accepts only PNG and .jpg files. This filename-only
+ * descriptor is refined by the API after pixel inspection: a fully opaque PNG
+ * becomes a picture, while a PNG with visible transparency remains an item.
+ * Image bytes remain ephemeral unless the producer explicitly saves an item.
+ */
+export function botcastEpisodeImageDescriptorFromFileName(
+  fileName: string,
+  mimeType: string,
+): BotcastEpisodeImageDescriptor | null {
+  const baseName = fileName.trim().replaceAll("\\", "/").split("/").at(-1) ?? "";
+  const extensionMatch = baseName.match(/\.([^.]+)$/u);
+  if (!extensionMatch) return null;
+  const extension = extensionMatch[1]!.toLowerCase();
+  const normalizedMimeType = mimeType.trim().toLowerCase();
+  const kind: BotcastEpisodeImageKind | null =
+    extension === "png" && normalizedMimeType === "image/png"
+      ? "item"
+      : extension === "jpg" && normalizedMimeType === "image/jpeg"
+        ? "picture"
+        : null;
+  if (!kind) return null;
+  const rawStem = baseName.slice(0, -(extension.length + 1));
+  const name = normalizeBotcastEpisodeImageName(
+    rawStem
+      .replace(/[_-]+/gu, " ")
+      .replace(/\s+/gu, " "),
+  );
+  if (!name) return null;
+  return {
+    kind,
+    name,
+    mimeType: kind === "item" ? "image/png" : "image/jpeg",
+  };
+}
+
+export function botcastEpisodeImageSpokenReference(
+  image: Pick<BotcastEpisodeImageDescriptor, "kind" | "name">,
+): string {
+  return image.kind === "item"
+    ? `this ${image.name}`
+    : `this picture of ${image.name}`;
+}
+
+/** Public, replay-stable metadata for one producer-supplied episode image. */
 export interface BotcastImageContextV1 {
   v: 1;
   imageId: string;
-  imageUrl: string;
+  kind: BotcastEpisodeImageKind;
+  name: string;
+  mimeType: "image/png" | "image/jpeg";
   provider: BotcastEpisodeProvider;
   model: string;
+  /** Contextual, pixel-free replay stand-in chosen automatically on upload. */
+  replayEmoji: string;
+  /** Optional retained library image; missing/deleted assets fall back to replayEmoji. */
+  savedAssetId: string | null;
   phase: BotcastImageContextPhase;
   hostIntroductionMessageId: string | null;
   guestDiscussionMessageId: string | null;
@@ -1386,8 +1684,10 @@ export function normalizeBotcastImageContextV1(
     row.v !== 1 ||
     typeof row.imageId !== "string" ||
     !row.imageId.trim() ||
-    typeof row.imageUrl !== "string" ||
-    !row.imageUrl.trim() ||
+    (row.kind !== "item" && row.kind !== "picture") ||
+    typeof row.name !== "string" ||
+    !row.name.trim() ||
+    (row.mimeType !== "image/png" && row.mimeType !== "image/jpeg") ||
     (row.provider !== "local" &&
       row.provider !== "openai" &&
       row.provider !== "anthropic") ||
@@ -1404,12 +1704,20 @@ export function normalizeBotcastImageContextV1(
     typeof candidate === "string" && candidate.trim()
       ? candidate.trim().slice(0, 160)
       : null;
+  const savedAssetId = messageId(row.savedAssetId);
   return {
     v: 1,
     imageId: row.imageId.trim().slice(0, 160),
-    imageUrl: row.imageUrl.trim().slice(0, 2_000),
+    kind: row.kind,
+    name: row.name.trim().slice(0, 120),
+    mimeType: row.mimeType,
     provider: row.provider,
     model: row.model.trim().slice(0, 240),
+    replayEmoji: normalizeBotcastEpisodeImageReplayEmoji(
+      row.replayEmoji,
+      botcastEpisodeImageFallbackEmoji(row.kind),
+    ),
+    savedAssetId,
     phase,
     hostIntroductionMessageId: messageId(row.hostIntroductionMessageId),
     guestDiscussionMessageId: messageId(row.guestDiscussionMessageId),
@@ -1430,7 +1738,7 @@ export function botcastLatestImageContextV1(
   return null;
 }
 
-/** Whether a saved image should be visible for this live/replay utterance. */
+/** Associates ephemeral image lifecycle metadata with its live utterance. */
 export function botcastImageContextForMessageV1(
   events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
   messageId: string | null | undefined,
@@ -2448,6 +2756,7 @@ export interface BotcastShowPatchRequest {
   studioLighting?: BotcastStudioLightingState;
   studioLayout?: BotcastStudioLayout;
   cameraFraming?: BotcastCameraFraming;
+  logoPlacement?: BotcastLogoPlacement;
   studioGlowTuning?: BotcastStudioGlowTuning;
   voiceLevelsByBotId?: BotcastVoiceLevelsByBotId;
   atmosphereMix?: BotcastStudioAtmosphereMix;

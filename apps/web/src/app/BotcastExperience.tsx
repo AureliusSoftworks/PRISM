@@ -22,10 +22,20 @@ import {
   BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
   BOTCAST_DEFAULT_CAMERA_FRAMING,
+  BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING,
+  BOTCAST_DEFAULT_LOGO_PLACEMENT,
   BOTCAST_DIRECTOR_MIN_SHOT_MS,
   BOTCAST_CAMERA_PAN_MAX,
   BOTCAST_CAMERA_PAN_MIN,
   BOTCAST_CAMERA_PAN_STEP,
+  BOTCAST_EPISODE_IMAGE_POSITION_MAX,
+  BOTCAST_EPISODE_IMAGE_POSITION_MIN,
+  BOTCAST_EPISODE_IMAGE_POSITION_STEP,
+  BOTCAST_EPISODE_IMAGE_SCALE_MAX,
+  BOTCAST_EPISODE_IMAGE_SCALE_MIN,
+  BOTCAST_EPISODE_IMAGE_SCALE_STEP,
+  BOTCAST_EPISODE_IMAGE_NAME_MAX_LENGTH,
+  BOTCAST_EPISODE_IMAGE_REASON_MAX_LENGTH,
   BOTCAST_CAMERA_ZOOM_MAX,
   BOTCAST_CAMERA_ZOOM_MIN,
   BOTCAST_CAMERA_ZOOM_STEP,
@@ -77,6 +87,10 @@ import {
   botcastInterruptionBridgeMessageId,
   botcastInterruptedGuestContent,
   botcastListenerReactionForMessage,
+  botcastEpisodeImageDescriptorFromFileName,
+  botcastCameraFramingWithEpisodeImages,
+  botcastImageContextForMessageV1,
+  botcastLatestImageContextV1,
   botcastMessageIsAudibleToAudienceV1,
   botcastNextSpeakerRole,
   botcastPendingCrosstalkReclaimV1,
@@ -97,6 +111,9 @@ import {
   normalizeAccentForTheme,
   normalizeBotcastStudioAtmosphereMix,
   normalizeBotcastCameraFraming,
+  normalizeBotcastEpisodeImageFraming,
+  normalizeBotcastEpisodeImagePlacement,
+  normalizeBotcastLogoPlacement,
   normalizeBotcastStudioGlowTuning,
   normalizeBotcastStudioLayout,
   normalizeBotcastVoiceLevel,
@@ -115,6 +132,8 @@ import {
   replaySceneAtV2,
   type BotcastCameraShot,
   type BotcastEpisode,
+  type BotcastEpisodeImageDescriptor,
+  type BotcastImageContextV1,
   type BotcastEpisodeAdvanceResponse,
   type BotcastEpisodeResponseMode,
   type BotcastEpisodeSummary,
@@ -125,8 +144,12 @@ import {
   type BotcastProducerCueDelivery,
   type BotcastCameraFrame,
   type BotcastCameraFraming,
+  type BotcastEpisodeImagePlacement,
+  type BotcastEpisodeImageFraming,
+  type BotcastLogoPlacement,
   type BotcastDirectedCameraShot,
   type BotcastShow,
+  type BotcastSignalPreferences,
   type BotcastHostRecoveryCandidate,
   type BotcastHostRecoveryResponse,
   type BotcastHostRecoveryScreenResponse,
@@ -270,6 +293,7 @@ import {
   signalVoiceCompletionFallbackDurationMs,
 } from "./signalLiveCaptions";
 import { signalLiveCaptionPage } from "./debateLiveCaption";
+import { debateEvidenceEmojiForObject } from "./debateEvidenceExhibits";
 import { signalVoiceStartTimeoutMs } from "./signalVoiceFallback";
 import {
   signalExtraResponsePauseMs,
@@ -581,6 +605,7 @@ export interface BotcastModelOption {
   id: string;
   label: string;
   provider: "local" | "openai" | "anthropic";
+  supportsImageInput?: boolean;
 }
 
 export interface BotcastApiRequest {
@@ -1308,6 +1333,55 @@ function SignalBotDropdown({
 
 const SIGNAL_ASSET_ACCEPT = "image/png,image/jpeg,image/webp";
 const SIGNAL_ASSET_UPLOAD_MAX_BYTES = 16 * 1024 * 1024;
+const SIGNAL_EPISODE_IMAGE_ACCEPT = ".png,.jpg";
+
+type SignalEpisodeImageUpload = {
+  episodeId: string;
+  imageId: string;
+  fileName: string;
+  dataUrl: string;
+  descriptor: BotcastEpisodeImageDescriptor;
+  /** Automatically chosen, pixel-free visual used when replay cannot resolve the image. */
+  replayEmoji: string;
+  /** Private request-scoped direction; never persisted in Signal events. */
+  reason: string;
+};
+
+type SignalSetupEpisodeImage = Omit<SignalEpisodeImageUpload, "episodeId">;
+
+function SignalEpisodeImageVisual({
+  context,
+  ephemeralDataUrl,
+}: {
+  context: BotcastImageContextV1;
+  ephemeralDataUrl?: string | null;
+}): React.JSX.Element {
+  const [failedSource, setFailedSource] = useState<string | null>(null);
+  const savedSource = context.savedAssetId
+    ? `/api/images/${encodeURIComponent(context.savedAssetId)}/file`
+    : null;
+  const source =
+    ephemeralDataUrl && failedSource !== ephemeralDataUrl
+      ? ephemeralDataUrl
+      : savedSource && failedSource !== savedSource
+        ? savedSource
+        : null;
+  const label =
+    context.kind === "item"
+      ? context.name
+      : `Picture of ${context.name}`;
+  if (source) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- session-only data or authenticated local asset URL.
+      <img src={source} alt={label} onError={() => setFailedSource(source)} />
+    );
+  }
+  return (
+    <span className={styles.episodeImageReplayEmoji} role="img" aria-label={label}>
+      {context.replayEmoji}
+    </span>
+  );
+}
 
 const SIGNAL_STUDIO_LAYOUT_LABELS: Record<BotcastStudioLayoutItem, string> = {
   hostBot: "host bot",
@@ -1341,6 +1415,26 @@ function signalStudioFacingForRole(
   const otherX = layout[role === "host" ? "guestBot" : "hostBot"].x;
   if (ownX === otherX) return role === "host" ? "right" : "left";
   return ownX < otherX ? "right" : "left";
+}
+
+function signalEpisodeImagePlacementStyle(
+  placement: Readonly<BotcastEpisodeImagePlacement>,
+): CSSProperties {
+  return {
+    ["--signal-episode-image-x" as string]: `${placement.x}%`,
+    ["--signal-episode-image-y" as string]: `${placement.y}%`,
+    ["--signal-episode-image-scale" as string]: placement.scale / 100,
+  };
+}
+
+function signalLogoPlacementStyle(
+  placement: Readonly<BotcastLogoPlacement>,
+): CSSProperties {
+  return {
+    ["--signal-logo-x" as string]: `${placement.x}%`,
+    ["--signal-logo-y" as string]: `${placement.y}%`,
+    ["--signal-logo-scale" as string]: placement.scale / 100,
+  };
 }
 
 function signalProducerGuestBotSummary(
@@ -1398,6 +1492,26 @@ type SignalStudioLayoutDrag = {
   latestLayout: BotcastStudioLayout;
 };
 
+type SignalEpisodeImagePlacementDrag = {
+  pointerId: number;
+  shot: BotcastDirectedCameraShot;
+  startClientX: number;
+  startClientY: number;
+  stageWidth: number;
+  stageHeight: number;
+  startPlacement: BotcastEpisodeImagePlacement;
+};
+
+type SignalLogoPlacementDrag = {
+  pointerId: number;
+  show: BotcastShow;
+  startClientX: number;
+  startClientY: number;
+  stageWidth: number;
+  stageHeight: number;
+  startPlacement: BotcastLogoPlacement;
+};
+
 type SignalCupTravelState = {
   mode: "idle" | "sipping" | "returning";
   returnDeltaX: number | null;
@@ -1448,6 +1562,86 @@ function readSignalAssetFile(file: File): Promise<string> {
     };
     reader.readAsDataURL(file);
   });
+}
+
+async function readSignalEpisodeImageFile(
+  file: File,
+): Promise<Pick<SignalEpisodeImageUpload, "fileName" | "dataUrl" | "descriptor">> {
+  const descriptor = botcastEpisodeImageDescriptorFromFileName(
+    file.name,
+    file.type,
+  );
+  if (!descriptor) {
+    throw new Error(
+      "Choose a .png or .jpg file. Signal does not accept .jpeg or other image formats here.",
+    );
+  }
+  const dataUrl = await readSignalAssetFile(file);
+  if (descriptor.kind === "item") {
+    const image = new window.Image();
+    image.decoding = "async";
+    image.src = dataUrl;
+    await image.decode();
+    const scale = Math.min(1, 1536 / Math.max(image.naturalWidth, image.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("Signal could not inspect that PNG.");
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    let hasVisibleTransparency = false;
+    for (let index = 3; index < pixels.length; index += 4) {
+      if (pixels[index] !== 255) {
+        hasVisibleTransparency = true;
+        break;
+      }
+    }
+    if (!hasVisibleTransparency) descriptor.kind = "picture";
+  }
+  return { fileName: file.name, dataUrl, descriptor };
+}
+
+async function acquireSignalEpisodeImageReplayMetadata(
+  request: BotcastApiRequest,
+  imageId: string,
+  fileInput: Pick<
+    SignalEpisodeImageUpload,
+    "fileName" | "dataUrl" | "descriptor"
+  >,
+  runtime: {
+    episodeId?: string;
+    preferredProvider?: "local" | "openai" | "anthropic";
+    responseMode?: BotcastEpisodeResponseMode;
+    modelOverride?: string | null;
+  },
+): Promise<{
+  descriptor: BotcastEpisodeImageDescriptor;
+  replayEmoji: string;
+}> {
+  const fallbackEmoji = debateEvidenceEmojiForObject(
+    fileInput.descriptor.name,
+  );
+  try {
+    const response = await request<{
+      descriptor: BotcastEpisodeImageDescriptor;
+      replayEmoji: string;
+    }>("/api/botcast/episode-image/emoji", {
+      method: "POST",
+      body: JSON.stringify({
+        imageId,
+        fileName: fileInput.fileName,
+        dataUrl: fileInput.dataUrl,
+        name: fileInput.descriptor.name,
+        fallbackEmoji,
+        ...runtime,
+      }),
+    });
+    return response;
+  } catch {
+    // The attachment remains usable with Debate's deterministic object mapping.
+    return { descriptor: fileInput.descriptor, replayEmoji: fallbackEmoji };
+  }
 }
 
 type SignalDeleteTarget =
@@ -1837,6 +2031,8 @@ function signalProducerCueLabel(cue: BotcastProducerCue): string {
       return "Lighten up";
     case "wrap_up":
       return "Wrap it up";
+    case "present_image":
+      return "Image discussion";
   }
 }
 
@@ -2170,6 +2366,12 @@ export function BotcastExperience({
     [modelOptions],
   );
   const [shows, setShows] = useState<BotcastShow[]>([]);
+  const [signalPreferences, setSignalPreferences] =
+    useState<BotcastSignalPreferences>({
+      episodeImageFraming: normalizeBotcastEpisodeImageFraming(
+        BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING,
+      ),
+    });
   const [selectedShowId, setSelectedShowId] = useState<string | null>(null);
   const [episodes, setEpisodes] = useState<BotcastEpisodeSummary[]>([]);
   const [episode, setEpisode] = useState<BotcastEpisode | null>(null);
@@ -2237,6 +2439,9 @@ export function BotcastExperience({
   const signalCaptureSourceIdRef = useRef<string | null>(null);
   const selectedShowRef = useRef<BotcastShow | null>(null);
   const finalizedSignalRecordingIdsRef = useRef(new Set<string>());
+  const signalEpisodeImageFramingSnapshotRef = useRef(
+    new Map<string, BotcastEpisodeImageFraming>(),
+  );
   const [hostDraftId, setHostDraftId] = useState(initialHostBotId);
   const [hostPickerSearch, setHostPickerSearch] = useState("");
   const [showPremiseInspirationDraft, setShowPremiseInspirationDraft] =
@@ -2308,6 +2513,20 @@ export function BotcastExperience({
   }, [guestPickerGroupId, guestPickerSearch, signalGridHueLensCenter]);
   const [queuedProducerCue, setQueuedProducerCue] =
     useState<BotcastProducerCue | null>(null);
+  const [imageUploadBusy, setImageUploadBusy] = useState(false);
+  const [signalEpisodeImage, setSignalEpisodeImage] =
+    useState<SignalEpisodeImageUpload | null>(null);
+  const [setupEpisodeImage, setSetupEpisodeImage] =
+    useState<SignalSetupEpisodeImage | null>(null);
+  const [keepSignalItem, setKeepSignalItem] = useState(false);
+  const [keepSignalItemSaving, setKeepSignalItemSaving] = useState(false);
+  const [signalImageCapability, setSignalImageCapability] = useState<{
+    episodeId: string;
+    provider: "local" | "openai" | "anthropic";
+    model: string;
+    supportsImageInput: boolean;
+    unavailable?: boolean;
+  } | null>(null);
   const [showNameDraft, setShowNameDraft] = useState("");
   const [showPremiseDraft, setShowPremiseDraft] = useState("");
   const [showIdentityControlsShowId, setShowIdentityControlsShowId] = useState<
@@ -2418,12 +2637,20 @@ export function BotcastExperience({
   const [studioLayoutSaving, setStudioLayoutSaving] = useState(false);
   const [studioCameraFramingSaving, setStudioCameraFramingSaving] =
     useState(false);
+  const [studioEpisodeImageFramingSaving, setStudioEpisodeImageFramingSaving] =
+    useState(false);
+  const [studioLogoPlacementSaving, setStudioLogoPlacementSaving] =
+    useState(false);
   const [studioGlowTuningSaving, setStudioGlowTuningSaving] = useState(false);
   const [studioVoiceLevelsSaving, setStudioVoiceLevelsSaving] = useState(false);
   const [studioAtmosphereMixSaving, setStudioAtmosphereMixSaving] =
     useState(false);
   const [studioLayoutDraggingItem, setStudioLayoutDraggingItem] =
     useState<BotcastStudioLayoutItem | null>(null);
+  const [studioEpisodeImageDraggingShot, setStudioEpisodeImageDraggingShot] =
+    useState<BotcastDirectedCameraShot | null>(null);
+  const [studioLogoPlacementDragging, setStudioLogoPlacementDragging] =
+    useState(false);
   const [studioSoundcheckRunning, setStudioSoundcheckRunning] = useState(false);
   const [studioSoundcheckSpeakerBotId, setStudioSoundcheckSpeakerBotId] =
     useState<string | null>(null);
@@ -2446,6 +2673,9 @@ export function BotcastExperience({
   const artworkJobCompletedCountRef = useRef(new Map<string, number>());
   const advanceInFlightRef = useRef(false);
   const queuedProducerCueRef = useRef<BotcastProducerCue | null>(null);
+  const signalEpisodeImageRef = useRef<SignalEpisodeImageUpload | null>(null);
+  const producerImageInputRef = useRef<HTMLInputElement | null>(null);
+  const setupProducerImageInputRef = useRef<HTMLInputElement | null>(null);
   const producerGuestThinkingStartedAtRef = useRef<number | null>(null);
   const producerGuestThinkingEndedAtRef = useRef<number | null>(null);
   const signalAirTimeFreezeAccumulatedMsRef = useRef(0);
@@ -2625,6 +2855,11 @@ export function BotcastExperience({
   const darkStudioUploadRef = useRef<HTMLInputElement | null>(null);
   const logoUploadRef = useRef<HTMLInputElement | null>(null);
   const studioLayoutDragRef = useRef<SignalStudioLayoutDrag | null>(null);
+  const studioEpisodeImagePlacementDragRef =
+    useRef<SignalEpisodeImagePlacementDrag | null>(null);
+  const studioLogoPlacementDragRef = useRef<SignalLogoPlacementDrag | null>(
+    null,
+  );
   const studioLayoutDraftRef = useRef<{
     showId: string;
     layout: BotcastStudioLayout;
@@ -2637,6 +2872,17 @@ export function BotcastExperience({
     revision: number;
   } | null>(null);
   const studioCameraFramingSaveInFlightRef = useRef(false);
+  const studioEpisodeImageFramingDraftRef = useRef<{
+    framing: BotcastEpisodeImageFraming;
+    revision: number;
+  } | null>(null);
+  const studioEpisodeImageFramingSaveInFlightRef = useRef(false);
+  const studioLogoPlacementDraftRef = useRef<{
+    showId: string;
+    placement: BotcastLogoPlacement;
+    revision: number;
+  } | null>(null);
+  const studioLogoPlacementSaveInFlightRef = useRef(false);
   const studioGlowTuningDraftRef = useRef<{
     showId: string;
     tuning: BotcastStudioGlowTuning;
@@ -2739,6 +2985,9 @@ export function BotcastExperience({
   useEffect(() => () => blockingAbortRef.current?.abort(), []);
 
   const activeEpisodeId = episode?.id ?? null;
+  useEffect(() => {
+    signalEpisodeImageRef.current = signalEpisodeImage;
+  }, [signalEpisodeImage]);
   const clearLiveCameraPostSpeechHold = useCallback((): void => {
     if (liveCameraPostSpeechHoldTimerRef.current !== null) {
       window.clearTimeout(liveCameraPostSpeechHoldTimerRef.current);
@@ -3025,6 +3274,11 @@ export function BotcastExperience({
     liveMuteReactionFiredRef.current.clear();
     replayMuteReactionFiredRef.current.clear();
     assignQueuedProducerCue(null);
+    setSignalEpisodeImage((current) =>
+      current?.episodeId === activeEpisodeId ? current : null,
+    );
+    setKeepSignalItem(false);
+    setKeepSignalItemSaving(false);
   }, [
     activeEpisodeId,
     assignQueuedProducerCue,
@@ -3124,6 +3378,10 @@ export function BotcastExperience({
       const manifest = buildSignalReplayManifestV2({
         episode: completedEpisode,
         show,
+        episodeImageFraming:
+          signalEpisodeImageFramingSnapshotRef.current.get(
+            completedEpisode.id,
+          ) ?? signalPreferences.episodeImageFraming,
         bots,
         producerName,
         theme,
@@ -3155,6 +3413,7 @@ export function BotcastExperience({
       introAudioVolume,
       producerName,
       recordingVoiceSelection,
+      signalPreferences.episodeImageFraming,
       theme,
     ],
   );
@@ -3490,6 +3749,12 @@ export function BotcastExperience({
   useEffect(() => {
     setShowPremiseDraft(selectedShow?.premise ?? "");
   }, [selectedShow?.id, selectedShow?.premise]);
+  useEffect(() => {
+    setSetupEpisodeImage(null);
+    if (setupProducerImageInputRef.current) {
+      setupProducerImageInputRef.current.value = "";
+    }
+  }, [selectedShow?.id]);
   const audiencePulseOpen = Boolean(
     selectedShow && audiencePulseShowId === selectedShow.id,
   );
@@ -4311,6 +4576,17 @@ export function BotcastExperience({
     return rankedShows;
   }, [request]);
 
+  const loadSignalPreferences = useCallback(async (): Promise<void> => {
+    const response = await request<{ preferences: BotcastSignalPreferences }>(
+      "/api/botcast/preferences",
+    );
+    setSignalPreferences({
+      episodeImageFraming: normalizeBotcastEpisodeImageFraming(
+        response.preferences.episodeImageFraming,
+      ),
+    });
+  }, [request]);
+
   const refreshArtworkJob = useCallback(async (): Promise<void> => {
     try {
       const response = await request<{ job: SignalArtworkJobSnapshot | null }>(
@@ -4529,7 +4805,10 @@ export function BotcastExperience({
     let active = true;
     void (async () => {
       try {
-        const nextShows = await loadShows();
+        const [nextShows] = await Promise.all([
+          loadShows(),
+          loadSignalPreferences(),
+        ]);
         if (!active) return;
         const first =
           nextShows.find((show) => show.id === orchestrationLaunch?.showId) ??
@@ -4550,7 +4829,13 @@ export function BotcastExperience({
     return () => {
       active = false;
     };
-  }, [initialHostBotId, loadEpisodes, loadShows, orchestrationLaunch?.showId]);
+  }, [
+    initialHostBotId,
+    loadEpisodes,
+    loadShows,
+    loadSignalPreferences,
+    orchestrationLaunch?.showId,
+  ]);
 
   const selectShow = useCallback(
     async (show: BotcastShow): Promise<void> => {
@@ -4573,6 +4858,10 @@ export function BotcastExperience({
       setStudioLayoutEditorOpen(false);
       setStudioLayoutDraggingItem(null);
       studioLayoutDragRef.current = null;
+      setStudioEpisodeImageDraggingShot(null);
+      studioEpisodeImagePlacementDragRef.current = null;
+      setStudioLogoPlacementDragging(false);
+      studioLogoPlacementDragRef.current = null;
       setError(null);
       setLoading(true);
       try {
@@ -4735,6 +5024,303 @@ export function BotcastExperience({
       ),
     );
     void flushStudioCameraFramingSave();
+  };
+
+  const flushStudioEpisodeImageFramingSave = async (): Promise<void> => {
+    if (studioEpisodeImageFramingSaveInFlightRef.current) return;
+    studioEpisodeImageFramingSaveInFlightRef.current = true;
+    setStudioEpisodeImageFramingSaving(true);
+    try {
+      while (studioEpisodeImageFramingDraftRef.current) {
+        const draft = studioEpisodeImageFramingDraftRef.current;
+        const response = await request<{
+          preferences: BotcastSignalPreferences;
+        }>("/api/botcast/preferences", {
+          method: "PATCH",
+          body: JSON.stringify({ episodeImageFraming: draft.framing }),
+        });
+        const latestDraft = studioEpisodeImageFramingDraftRef.current;
+        setSignalPreferences(
+          latestDraft
+            ? { episodeImageFraming: latestDraft.framing }
+            : {
+                episodeImageFraming: normalizeBotcastEpisodeImageFraming(
+                  response.preferences.episodeImageFraming,
+                ),
+              },
+        );
+        if (!latestDraft || latestDraft.revision === draft.revision) {
+          studioEpisodeImageFramingDraftRef.current = null;
+          break;
+        }
+      }
+    } catch (saveError) {
+      studioEpisodeImageFramingDraftRef.current = null;
+      setError(signalErrorToast("Save global episode image framing", saveError));
+    } finally {
+      studioEpisodeImageFramingSaveInFlightRef.current = false;
+      setStudioEpisodeImageFramingSaving(false);
+      if (studioEpisodeImageFramingDraftRef.current) {
+        void flushStudioEpisodeImageFramingSave();
+      }
+    }
+  };
+
+  const updateStudioEpisodeImagePlacement = (
+    shot: BotcastDirectedCameraShot,
+    placement: BotcastEpisodeImagePlacement,
+  ): void => {
+    const previousDraft = studioEpisodeImageFramingDraftRef.current;
+    const previousFraming = normalizeBotcastEpisodeImageFraming(
+      previousDraft?.framing ?? signalPreferences.episodeImageFraming,
+    );
+    const framing = normalizeBotcastEpisodeImageFraming(
+      { ...previousFraming, [shot]: placement },
+      previousFraming,
+    );
+    studioEpisodeImageFramingDraftRef.current = {
+      framing,
+      revision: previousDraft ? previousDraft.revision + 1 : 1,
+    };
+    setSignalPreferences({ episodeImageFraming: framing });
+    void flushStudioEpisodeImageFramingSave();
+  };
+
+  const beginStudioEpisodeImagePlacementDrag = (
+    event: ReactPointerEvent<HTMLElement>,
+    shot: BotcastDirectedCameraShot,
+  ): void => {
+    if (event.button !== 0) return;
+    const stage = event.currentTarget.closest<HTMLElement>(
+      '[data-signal-layout-stage="true"]',
+    );
+    if (!stage) return;
+    const bounds = stage.getBoundingClientRect();
+    if (bounds.width <= 0 || bounds.height <= 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    studioEpisodeImagePlacementDragRef.current = {
+      pointerId: event.pointerId,
+      shot,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      stageWidth: bounds.width,
+      stageHeight: bounds.height,
+      startPlacement: normalizeBotcastEpisodeImageFraming(
+        signalPreferences.episodeImageFraming,
+      )[shot],
+    };
+    setStudioEpisodeImageDraggingShot(shot);
+  };
+
+  const moveStudioEpisodeImagePlacementDrag = (
+    event: ReactPointerEvent<HTMLElement>,
+  ): void => {
+    const drag = studioEpisodeImagePlacementDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    const placement = normalizeBotcastEpisodeImagePlacement(
+      {
+        ...drag.startPlacement,
+        x:
+          drag.startPlacement.x +
+          ((event.clientX - drag.startClientX) / drag.stageWidth) * 100,
+        y:
+          drag.startPlacement.y +
+          ((event.clientY - drag.startClientY) / drag.stageHeight) * 100,
+      },
+      drag.startPlacement,
+    );
+    updateStudioEpisodeImagePlacement(drag.shot, placement);
+  };
+
+  const finishStudioEpisodeImagePlacementDrag = (
+    event: ReactPointerEvent<HTMLElement>,
+  ): void => {
+    const drag = studioEpisodeImagePlacementDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    studioEpisodeImagePlacementDragRef.current = null;
+    setStudioEpisodeImageDraggingShot(null);
+  };
+
+  const nudgeStudioEpisodeImagePlacement = (
+    event: ReactKeyboardEvent<HTMLElement>,
+    shot: BotcastDirectedCameraShot,
+  ): void => {
+    const direction = {
+      ArrowLeft: [-1, 0],
+      ArrowRight: [1, 0],
+      ArrowUp: [0, -1],
+      ArrowDown: [0, 1],
+    }[event.key];
+    if (!direction) return;
+    event.preventDefault();
+    if (event.repeat) return;
+    const step = BOTCAST_EPISODE_IMAGE_POSITION_STEP * (event.shiftKey ? 4 : 1);
+    const placement = normalizeBotcastEpisodeImageFraming(
+      signalPreferences.episodeImageFraming,
+    )[shot];
+    updateStudioEpisodeImagePlacement(
+      shot,
+      normalizeBotcastEpisodeImagePlacement(
+        {
+          ...placement,
+          x: placement.x + direction[0]! * step,
+          y: placement.y + direction[1]! * step,
+        },
+        placement,
+      ),
+    );
+  };
+
+  const flushStudioLogoPlacementSave = async (): Promise<void> => {
+    if (studioLogoPlacementSaveInFlightRef.current) return;
+    studioLogoPlacementSaveInFlightRef.current = true;
+    setStudioLogoPlacementSaving(true);
+    try {
+      while (studioLogoPlacementDraftRef.current) {
+        const draft = studioLogoPlacementDraftRef.current;
+        const response = await request<{ show: BotcastShow }>(
+          `/api/botcast/shows/${encodeURIComponent(draft.showId)}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({ logoPlacement: draft.placement }),
+          },
+        );
+        const latestDraft = studioLogoPlacementDraftRef.current;
+        setShows((current) =>
+          current.map((show) => {
+            if (show.id !== draft.showId) return show;
+            return latestDraft?.showId === draft.showId
+              ? { ...response.show, logoPlacement: latestDraft.placement }
+              : response.show;
+          }),
+        );
+        if (
+          !latestDraft ||
+          latestDraft.showId !== draft.showId ||
+          latestDraft.revision === draft.revision
+        ) {
+          studioLogoPlacementDraftRef.current = null;
+          break;
+        }
+      }
+    } catch (saveError) {
+      studioLogoPlacementDraftRef.current = null;
+      setError(signalErrorToast("Save show logo placement", saveError));
+    } finally {
+      studioLogoPlacementSaveInFlightRef.current = false;
+      setStudioLogoPlacementSaving(false);
+      if (studioLogoPlacementDraftRef.current) {
+        void flushStudioLogoPlacementSave();
+      }
+    }
+  };
+
+  const updateStudioLogoPlacement = (
+    show: BotcastShow,
+    value: unknown,
+  ): void => {
+    const previousDraft = studioLogoPlacementDraftRef.current;
+    const previousPlacement = normalizeBotcastLogoPlacement(
+      previousDraft?.showId === show.id
+        ? previousDraft.placement
+        : show.logoPlacement,
+    );
+    const placement = normalizeBotcastLogoPlacement(value, previousPlacement);
+    studioLogoPlacementDraftRef.current = {
+      showId: show.id,
+      placement,
+      revision:
+        previousDraft?.showId === show.id ? previousDraft.revision + 1 : 1,
+    };
+    setShows((current) =>
+      current.map((candidate) =>
+        candidate.id === show.id
+          ? { ...candidate, logoPlacement: placement }
+          : candidate,
+      ),
+    );
+    void flushStudioLogoPlacementSave();
+  };
+
+  const beginStudioLogoPlacementDrag = (
+    event: ReactPointerEvent<HTMLElement>,
+    show: BotcastShow,
+  ): void => {
+    if (event.button !== 0) return;
+    const stage = event.currentTarget.closest<HTMLElement>(
+      '[data-signal-layout-stage="true"]',
+    );
+    if (!stage) return;
+    const bounds = stage.getBoundingClientRect();
+    if (bounds.width <= 0 || bounds.height <= 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    studioLogoPlacementDragRef.current = {
+      pointerId: event.pointerId,
+      show,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      stageWidth: bounds.width,
+      stageHeight: bounds.height,
+      startPlacement: normalizeBotcastLogoPlacement(show.logoPlacement),
+    };
+    setStudioLogoPlacementDragging(true);
+  };
+
+  const moveStudioLogoPlacementDrag = (
+    event: ReactPointerEvent<HTMLElement>,
+  ): void => {
+    const drag = studioLogoPlacementDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    updateStudioLogoPlacement(drag.show, {
+      ...drag.startPlacement,
+      x:
+        drag.startPlacement.x +
+        ((event.clientX - drag.startClientX) / drag.stageWidth) * 100,
+      y:
+        drag.startPlacement.y +
+        ((event.clientY - drag.startClientY) / drag.stageHeight) * 100,
+    });
+  };
+
+  const finishStudioLogoPlacementDrag = (
+    event: ReactPointerEvent<HTMLElement>,
+  ): void => {
+    const drag = studioLogoPlacementDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    studioLogoPlacementDragRef.current = null;
+    setStudioLogoPlacementDragging(false);
+  };
+
+  const nudgeStudioLogoPlacement = (
+    event: ReactKeyboardEvent<HTMLElement>,
+    show: BotcastShow,
+  ): void => {
+    const direction = {
+      ArrowLeft: [-1, 0],
+      ArrowRight: [1, 0],
+      ArrowUp: [0, -1],
+      ArrowDown: [0, 1],
+    }[event.key];
+    if (!direction) return;
+    event.preventDefault();
+    if (event.repeat) return;
+    const step = BOTCAST_EPISODE_IMAGE_POSITION_STEP * (event.shiftKey ? 4 : 1);
+    const placement = normalizeBotcastLogoPlacement(show.logoPlacement);
+    updateStudioLogoPlacement(show, {
+      ...placement,
+      x: placement.x + direction[0]! * step,
+      y: placement.y + direction[1]! * step,
+    });
   };
 
   const flushStudioGlowTuningSave = async (): Promise<void> => {
@@ -6096,12 +6682,40 @@ export function BotcastExperience({
     )
       return;
     const guest = eligibleBots.find((bot) => bot.id === guestDraftId);
+    const selectedModelOption = episodeModelDraft
+      ? (modelOptions.find((option) => option.id === episodeModelDraft) ?? null)
+      : null;
     if (!producerGuest && !guest) {
       setError(
         signalErrorToast(
           "Start Signal episode",
           "That guest is no longer available. Choose another bot before going live.",
           "guest validation",
+        ),
+      );
+      return;
+    }
+    if (
+      setupEpisodeImage &&
+      (producerGuest ||
+        watchMode ||
+        selectedModelOption?.supportsImageInput !== true)
+    ) {
+      setError(
+        signalErrorToast(
+          "Start Signal episode",
+          "Choose Produce with a fixed vision-capable model for the attached episode image.",
+          "setup image capability",
+        ),
+      );
+      return;
+    }
+    if (setupEpisodeImage && !setupEpisodeImage.descriptor.name.trim()) {
+      setError(
+        signalErrorToast(
+          "Start Signal episode",
+          "Add a Name for the attached episode image.",
+          "setup image name",
         ),
       );
       return;
@@ -6115,9 +6729,6 @@ export function BotcastExperience({
     setWatchPlaybackReady(false);
     watchPlaybackStartResolveRef.current = null;
     const { controller, runId } = beginEpisodeOperation();
-    const selectedModelOption = episodeModelDraft
-      ? (modelOptions.find((option) => option.id === episodeModelDraft) ?? null)
-      : null;
     const episodeProvider = selectedModelOption?.provider ?? preferredProvider;
     let warmupWasNeeded = false;
     let preparationPending = true;
@@ -6261,6 +6872,7 @@ export function BotcastExperience({
     setBusy(true);
     setError(null);
     let unstartedEpisodeId: string | null = null;
+    let setupImageUpload: SignalEpisodeImageUpload | null = null;
     let openingMessageReceived = false;
     let latestCaptureEpisode: BotcastEpisode | null = null;
     try {
@@ -6298,6 +6910,26 @@ export function BotcastExperience({
       if (!episodeOperationIsCurrent(controller, runId)) return;
       unstartedEpisodeId = response.episode.id;
       latestCaptureEpisode = response.episode;
+      signalEpisodeImageFramingSnapshotRef.current.set(
+        response.episode.id,
+        normalizeBotcastEpisodeImageFraming(
+          signalPreferences.episodeImageFraming,
+        ),
+      );
+      if (setupEpisodeImage) {
+        setupImageUpload = {
+          episodeId: response.episode.id,
+          ...setupEpisodeImage,
+          descriptor: {
+            ...setupEpisodeImage.descriptor,
+            name: setupEpisodeImage.descriptor.name.trim(),
+          },
+          reason: setupEpisodeImage.reason.trim(),
+        };
+        signalEpisodeImageRef.current = setupImageUpload;
+        setSignalEpisodeImage(setupImageUpload);
+        setKeepSignalItem(false);
+      }
       if (
         provisionalCaptureId &&
         signalCaptureSourceIdRef.current === provisionalCaptureId &&
@@ -6699,6 +7331,13 @@ export function BotcastExperience({
         runId,
       );
       if (!episodeOperationIsCurrent(controller, runId)) return;
+      if (setupImageUpload) {
+        assignQueuedProducerCue({
+          kind: "present_image",
+          imageId: setupImageUpload.imageId,
+        });
+        setSetupEpisodeImage(null);
+      }
       setAutoRun(true);
     } catch (startError) {
       if (episodeOperationIsCurrent(controller, runId)) {
@@ -7895,7 +8534,13 @@ export function BotcastExperience({
       if (
         currentEpisode.status === "completed" ||
         currentEpisode.guestKind === "producer" ||
-        currentEpisode.provider === "local"
+        currentEpisode.provider === "local" ||
+        (() => {
+          const imageContext = botcastLatestImageContextV1(
+            currentEpisode.events,
+          );
+          return Boolean(imageContext && imageContext.phase !== "dismissed");
+        })()
       )
         return;
       const controller = new AbortController();
@@ -8158,7 +8803,15 @@ export function BotcastExperience({
       };
       try {
         const lastVisibleMessageId = episode.messages.at(-1)?.id ?? null;
+        const imageContextForTurn = botcastLatestImageContextV1(episode.events);
+        const episodeImageForTurn =
+          signalEpisodeImageRef.current?.episodeId === episode.id &&
+          (requestedCue?.kind === "present_image" ||
+            (imageContextForTurn && imageContextForTurn.phase !== "dismissed"))
+            ? signalEpisodeImageRef.current
+            : null;
         const prepared =
+          !episodeImageForTurn &&
           !requestedCue &&
           !producerGuestMessage &&
           !producerGuestHostInterruption &&
@@ -8257,6 +8910,20 @@ export function BotcastExperience({
                 ...(producerGuestHostInterruption
                   ? { producerGuestHostInterruption }
                   : {}),
+                ...(episodeImageForTurn
+                  ? {
+                      episodeImage: {
+                        imageId: episodeImageForTurn.imageId,
+                        fileName: episodeImageForTurn.fileName,
+                        dataUrl: episodeImageForTurn.dataUrl,
+                        name: episodeImageForTurn.descriptor.name,
+                        replayEmoji: episodeImageForTurn.replayEmoji,
+                        ...(episodeImageForTurn.reason
+                          ? { reason: episodeImageForTurn.reason }
+                          : {}),
+                      },
+                    }
+                  : {}),
               }),
             },
             );
@@ -8271,6 +8938,25 @@ export function BotcastExperience({
                 return requestForegroundAdvance();
               })
           : await requestForegroundAdvance();
+        const resolvedImageContext = episodeImageForTurn
+          ? botcastLatestImageContextV1(response.episode.events)
+          : null;
+        if (
+          episodeImageForTurn &&
+          resolvedImageContext?.imageId === episodeImageForTurn.imageId
+        ) {
+          const resolvedUpload: SignalEpisodeImageUpload = {
+            ...episodeImageForTurn,
+            replayEmoji: resolvedImageContext.replayEmoji,
+            descriptor: {
+              kind: resolvedImageContext.kind,
+              name: resolvedImageContext.name,
+              mimeType: resolvedImageContext.mimeType,
+            },
+          };
+          signalEpisodeImageRef.current = resolvedUpload;
+          setSignalEpisodeImage(resolvedUpload);
+        }
         if (requestedCue) {
           await finishResponseCue?.();
           finishResponseCue = null;
@@ -10033,6 +10719,27 @@ export function BotcastExperience({
     guestDeparted?: boolean;
     hostDeparted?: boolean;
   }): React.JSX.Element => {
+    const latestStageImageContext = botcastLatestImageContextV1(
+      args.currentEpisode.events,
+    );
+    const stageImageContext = args.activeMessage
+      ? botcastImageContextForMessageV1(
+          args.currentEpisode.events,
+          args.activeMessage.id,
+        )
+      : latestStageImageContext?.phase === "presented" ||
+          latestStageImageContext?.phase === "discussing"
+        ? latestStageImageContext
+        : null;
+    const stageEpisodeImage =
+      signalEpisodeImage?.episodeId === args.currentEpisode.id &&
+      signalEpisodeImage.imageId === stageImageContext?.imageId
+        ? signalEpisodeImage
+        : null;
+    const stageImageVisible = Boolean(
+      stageImageContext &&
+        (!args.activeMessage || speakingMessageId === args.activeMessage.id),
+    );
     const stageCameraTransitionMode =
       args.replay && replayFaithful
         ? replayCameraTransitionModeV2(replayCameraDirectedScene)
@@ -10132,9 +10839,16 @@ export function BotcastExperience({
     const studioLayout = normalizeBotcastStudioLayout(
       replayVisualMetadata?.studioLayout ?? args.show.studioLayout,
     );
-    const cameraFraming = normalizeBotcastCameraFraming(
-      replayVisualMetadata?.cameraFraming ?? args.show.cameraFraming,
-    );
+    const cameraFraming = args.replay
+      ? normalizeBotcastCameraFraming(
+          replayVisualMetadata?.cameraFraming ?? args.show.cameraFraming,
+        )
+      : botcastCameraFramingWithEpisodeImages(
+          args.show.cameraFraming,
+          signalEpisodeImageFramingSnapshotRef.current.get(
+            args.currentEpisode.id,
+          ) ?? signalPreferences.episodeImageFraming,
+        );
     const activeCameraFrame = cameraFraming[args.shot];
     const stageVisualShow: BotcastShow =
       args.replay && replayPresentationManifestV2
@@ -10150,6 +10864,17 @@ export function BotcastExperience({
               !Array.isArray(replayVisualMetadata.studioLighting)
                 ? (replayVisualMetadata.studioLighting as BotcastShow["studioLighting"])
                 : args.show.studioLighting,
+            logoPlacement: normalizeBotcastLogoPlacement(
+              replayVisualMetadata?.logoPlacement,
+              args.show.logoPlacement,
+            ),
+            logo:
+              typeof replayVisualMetadata?.logoImageUrl === "string"
+                ? {
+                    ...args.show.logo,
+                    imageUrl: replayVisualMetadata.logoImageUrl,
+                  }
+                : args.show.logo,
           }
         : args.show;
     const stageAccentColor =
@@ -10991,6 +11716,10 @@ export function BotcastExperience({
         data-audience-guest-visible={guestVisibleToAudience ? "true" : "false"}
         data-signal-power-pressure={socialPressure?.strength}
         data-signal-power-source={socialPressure?.sourceRole}
+        data-signal-image-context={stageImageVisible ? "visible" : undefined}
+        data-signal-image-speaker={
+          stageImageVisible ? args.activeMessage?.speakerRole : undefined
+        }
         data-model-warmup={
           !args.replay && signalModelWarmup
             ? signalModelWarmup.phase
@@ -11063,8 +11792,13 @@ export function BotcastExperience({
             guestColor={args.guest?.color ?? stageAccentColor}
             theme={stageTheme}
           />
-          <div className={styles.wordmark}>
-            <SignalShowLogo show={args.show} />
+          <div
+            className={styles.wordmark}
+            style={signalLogoPlacementStyle(
+              normalizeBotcastLogoPlacement(stageVisualShow.logoPlacement),
+            )}
+          >
+            <SignalShowLogo show={stageVisualShow} />
             <strong>{args.show.name}</strong>
           </div>
           <div
@@ -11376,6 +12110,23 @@ export function BotcastExperience({
             </strong>
           </div>
         </div>
+        {stageImageVisible && stageImageContext ? (
+          <figure
+            className={styles.episodeImageContext}
+            data-speaker-role={args.activeMessage?.speakerRole}
+            data-image-kind={stageImageContext.kind}
+            data-message-id={args.activeMessage?.id}
+            data-camera-shot={args.shot}
+            style={signalEpisodeImagePlacementStyle(
+              activeCameraFrame.episodeImage,
+            )}
+          >
+            <SignalEpisodeImageVisual
+              context={stageImageContext}
+              ephemeralDataUrl={stageEpisodeImage?.dataUrl}
+            />
+          </figure>
+        ) : null}
         {liveCaptionsEnabled && liveReactionCaption && liveReactionCaptionSpeaker && liveReactionCaptionPage.text ? (
           <div
             className={styles.liveCaption}
@@ -12005,6 +12756,12 @@ export function BotcastExperience({
     const layout = normalizeBotcastStudioLayout(show.studioLayout);
     const cameraFraming = normalizeBotcastCameraFraming(show.cameraFraming);
     const previewCameraFrame = cameraFraming[studioCameraPreviewShot];
+    const previewEpisodeImagePlacement = normalizeBotcastEpisodeImageFraming(
+      signalPreferences.episodeImageFraming,
+    )[studioCameraPreviewShot];
+    const previewLogoPlacement = normalizeBotcastLogoPlacement(
+      show.logoPlacement,
+    );
     const studioGlowTuning = normalizeBotcastStudioGlowTuning(
       show.studioGlowTuning,
     );
@@ -12287,6 +13044,8 @@ export function BotcastExperience({
                   <span aria-live="polite">
                     {studioLayoutSaving ||
                     studioCameraFramingSaving ||
+                    studioEpisodeImageFramingSaving ||
+                    studioLogoPlacementSaving ||
                     studioGlowTuningSaving ||
                     studioVoiceLevelsSaving ||
                     studioAtmosphereMixSaving
@@ -12416,7 +13175,26 @@ export function BotcastExperience({
                       guestColor={guest?.color ?? show.accentColor}
                       theme={previewTheme}
                     />
-                    <div className={styles.wordmark}>
+                    <div
+                      className={styles.wordmark}
+                      data-rehearsal-logo="true"
+                      data-dragging={
+                        studioLogoPlacementDragging ? "true" : undefined
+                      }
+                      style={signalLogoPlacementStyle(previewLogoPlacement)}
+                      role="button"
+                      tabIndex={0}
+                      aria-label="Show logo placement. Drag to move; use arrow keys to nudge."
+                      onPointerDown={(event) =>
+                        beginStudioLogoPlacementDrag(event, show)
+                      }
+                      onPointerMove={moveStudioLogoPlacementDrag}
+                      onPointerUp={finishStudioLogoPlacementDrag}
+                      onPointerCancel={finishStudioLogoPlacementDrag}
+                      onKeyDown={(event) =>
+                        nudgeStudioLogoPlacement(event, show)
+                      }
+                    >
                       <SignalShowLogo show={show} />
                       <strong>{show.name}</strong>
                     </div>
@@ -12463,6 +13241,48 @@ export function BotcastExperience({
                       ? layoutHandle("guestCup", cupPreview(guest, "guest"))
                       : null}
                   </div>
+                  <div
+                    className={styles.episodeImageContext}
+                    data-image-kind="picture"
+                    data-rehearsal-prop="true"
+                    data-camera-shot={studioCameraPreviewShot}
+                    data-dragging={
+                      studioEpisodeImageDraggingShot === studioCameraPreviewShot
+                        ? "true"
+                        : undefined
+                    }
+                    style={signalEpisodeImagePlacementStyle(
+                      previewEpisodeImagePlacement,
+                    )}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`${studioCameraPreviewShot} episode image placement. Drag to move; use arrow keys to nudge.`}
+                    onPointerDown={(event) =>
+                      beginStudioEpisodeImagePlacementDrag(
+                        event,
+                        studioCameraPreviewShot,
+                      )
+                    }
+                    onPointerMove={moveStudioEpisodeImagePlacementDrag}
+                    onPointerUp={finishStudioEpisodeImagePlacementDrag}
+                    onPointerCancel={finishStudioEpisodeImagePlacementDrag}
+                    onKeyDown={(event) =>
+                      nudgeStudioEpisodeImagePlacement(
+                        event,
+                        studioCameraPreviewShot,
+                      )
+                    }
+                  >
+                    <span
+                      className={styles.episodeImageRehearsalArt}
+                      aria-hidden="true"
+                    >
+                      <span />
+                    </span>
+                    <span className={styles.stageLayoutHandleLabel}>
+                      Episode image
+                    </span>
+                  </div>
                 </section>
                 <section
                   id="signal-rehearsal-camera"
@@ -12492,9 +13312,14 @@ export function BotcastExperience({
                         updateStudioCameraFrame(
                           show,
                           studioCameraPreviewShot,
-                          BOTCAST_DEFAULT_CAMERA_FRAMING[
-                            studioCameraPreviewShot
-                          ],
+                          {
+                            zoom:
+                              BOTCAST_DEFAULT_CAMERA_FRAMING[
+                                studioCameraPreviewShot
+                              ].zoom,
+                            panX: 0,
+                            panY: 0,
+                          },
                         )
                       }
                       disabled={
@@ -12559,6 +13384,181 @@ export function BotcastExperience({
                         />
                       </label>
                     ))}
+                  </div>
+                  <div
+                    className={styles.stageEpisodeImageTuner}
+                    data-signal-episode-image-placement="true"
+                  >
+                    <header>
+                      <div>
+                        <span className={styles.eyebrow}>Episode image</span>
+                        <strong>
+                          {studioCameraPreviewShot[0]!.toUpperCase() +
+                            studioCameraPreviewShot.slice(1)}{" "}
+                          placement
+                        </strong>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateStudioEpisodeImagePlacement(
+                            studioCameraPreviewShot,
+                            BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING[
+                              studioCameraPreviewShot
+                            ],
+                          )
+                        }
+                        disabled={
+                          previewEpisodeImagePlacement.x ===
+                            BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING[
+                              studioCameraPreviewShot
+                            ].x &&
+                          previewEpisodeImagePlacement.y ===
+                            BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING[
+                              studioCameraPreviewShot
+                            ].y &&
+                          previewEpisodeImagePlacement.scale ===
+                            BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING[
+                              studioCameraPreviewShot
+                            ].scale
+                        }
+                      >
+                        Reset image
+                      </button>
+                    </header>
+                    <div className={styles.stageCameraSliders}>
+                      {(["scale", "x", "y"] as const).map((control) => {
+                        const scaleControl = control === "scale";
+                        const label = scaleControl
+                          ? "Scale"
+                          : control.toUpperCase();
+                        return (
+                          <label key={control}>
+                            <span>
+                              {label}
+                              <output>
+                                {previewEpisodeImagePlacement[control]}
+                                {scaleControl ? "%" : "%"}
+                              </output>
+                            </span>
+                            <input
+                              type="range"
+                              min={
+                                scaleControl
+                                  ? BOTCAST_EPISODE_IMAGE_SCALE_MIN
+                                  : BOTCAST_EPISODE_IMAGE_POSITION_MIN
+                              }
+                              max={
+                                scaleControl
+                                  ? BOTCAST_EPISODE_IMAGE_SCALE_MAX
+                                  : BOTCAST_EPISODE_IMAGE_POSITION_MAX
+                              }
+                              step={
+                                scaleControl
+                                  ? BOTCAST_EPISODE_IMAGE_SCALE_STEP
+                                  : BOTCAST_EPISODE_IMAGE_POSITION_STEP
+                              }
+                              value={previewEpisodeImagePlacement[control]}
+                              aria-label={`${studioCameraPreviewShot} episode image ${label.toLowerCase()}`}
+                              onChange={(event) =>
+                                updateStudioEpisodeImagePlacement(
+                                  studioCameraPreviewShot,
+                                  {
+                                    ...previewEpisodeImagePlacement,
+                                    [control]: Number(
+                                      event.currentTarget.value,
+                                    ),
+                                  },
+                                )
+                              }
+                            />
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <small>
+                      Global for your Signal account and reused by every show.
+                      Drag the neutral prop on stage; Auto follows the resolved
+                      Left, Right, or Wide placement.
+                    </small>
+                  </div>
+                  <div
+                    className={styles.stageEpisodeImageTuner}
+                    data-signal-logo-placement="true"
+                  >
+                    <header>
+                      <div>
+                        <span className={styles.eyebrow}>Center screen</span>
+                        <strong>Show logo placement</strong>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateStudioLogoPlacement(
+                            show,
+                            BOTCAST_DEFAULT_LOGO_PLACEMENT,
+                          )
+                        }
+                        disabled={
+                          previewLogoPlacement.x ===
+                            BOTCAST_DEFAULT_LOGO_PLACEMENT.x &&
+                          previewLogoPlacement.y ===
+                            BOTCAST_DEFAULT_LOGO_PLACEMENT.y &&
+                          previewLogoPlacement.scale ===
+                            BOTCAST_DEFAULT_LOGO_PLACEMENT.scale
+                        }
+                      >
+                        Reset logo
+                      </button>
+                    </header>
+                    <div className={styles.stageCameraSliders}>
+                      {(["scale", "x", "y"] as const).map((control) => {
+                        const scaleControl = control === "scale";
+                        const label = scaleControl
+                          ? "Scale"
+                          : control.toUpperCase();
+                        return (
+                          <label key={control}>
+                            <span>
+                              {label}
+                              <output>{previewLogoPlacement[control]}%</output>
+                            </span>
+                            <input
+                              type="range"
+                              min={
+                                scaleControl
+                                  ? BOTCAST_EPISODE_IMAGE_SCALE_MIN
+                                  : BOTCAST_EPISODE_IMAGE_POSITION_MIN
+                              }
+                              max={
+                                scaleControl
+                                  ? BOTCAST_EPISODE_IMAGE_SCALE_MAX
+                                  : BOTCAST_EPISODE_IMAGE_POSITION_MAX
+                              }
+                              step={
+                                scaleControl
+                                  ? BOTCAST_EPISODE_IMAGE_SCALE_STEP
+                                  : BOTCAST_EPISODE_IMAGE_POSITION_STEP
+                              }
+                              value={previewLogoPlacement[control]}
+                              aria-label={`show logo ${label.toLowerCase()}`}
+                              onChange={(event) =>
+                                updateStudioLogoPlacement(show, {
+                                  ...previewLogoPlacement,
+                                  [control]: Number(
+                                    event.currentTarget.value,
+                                  ),
+                                })
+                              }
+                            />
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <small>
+                      Saved only for this show. Drag the logo and title together
+                      on stage or tune X, Y, and Scale here.
+                    </small>
                   </div>
                 </section>
               </div>
@@ -12727,6 +13727,52 @@ export function BotcastExperience({
       : null;
     const episodeModelProvider =
       selectedEpisodeModelOption?.provider ?? preferredProvider;
+    const setupImageModeEligible =
+      !producerGuestSelected && playbackModeDraft === "live";
+    const setupImageModelCapable =
+      selectedEpisodeModelOption?.supportsImageInput === true;
+    const setupImageAttachDisabled =
+      !setupImageModeEligible ||
+      !setupImageModelCapable ||
+      busy ||
+      Boolean(bookingSuggestionBusy) ||
+      imageUploadBusy;
+    const selectSetupProducerImage = async (file: File): Promise<void> => {
+      if (setupImageAttachDisabled) return;
+      setImageUploadBusy(true);
+      setError(null);
+      try {
+        const fileInput = await readSignalEpisodeImageFile(file);
+        const imageId = crypto.randomUUID();
+        const replayMetadata = await acquireSignalEpisodeImageReplayMetadata(
+          request,
+          imageId,
+          fileInput,
+          {
+            preferredProvider: episodeModelProvider,
+            responseMode,
+            modelOverride: selectedEpisodeModelOption?.id ?? null,
+          },
+        );
+        setSetupEpisodeImage({
+          imageId,
+          ...fileInput,
+          descriptor: replayMetadata.descriptor,
+          replayEmoji: replayMetadata.replayEmoji,
+          reason: "",
+        });
+        setNotice(
+          `${replayMetadata.descriptor.name} is attached to tonight's setup. Signal will place it automatically during the interview.`,
+        );
+      } catch (caught) {
+        setError(signalErrorToast("Attach setup image", caught));
+      } finally {
+        setImageUploadBusy(false);
+        if (setupProducerImageInputRef.current) {
+          setupProducerImageInputRef.current.value = "";
+        }
+      }
+    };
     const latestEpisodes = Array.from(
       episodes
         .filter(
@@ -13307,6 +14353,107 @@ export function BotcastExperience({
               }
             </PrismRefractTarget>
           </div>
+          {playbackModeDraft === "live" ? (
+            <div
+              className={`${styles.setupField} ${styles.setupEpisodeImage}`}
+              data-signal-setup-image="true"
+            >
+              <div className={styles.setupEpisodeImageHeading}>
+                <div>
+                  <strong>Episode image</strong>
+                  <span>optional · one per episode</span>
+                </div>
+                <button
+                  type="button"
+                  disabled={setupImageAttachDisabled}
+                  onClick={() => setupProducerImageInputRef.current?.click()}
+                >
+                  <ImagePlus aria-hidden="true" />
+                  {imageUploadBusy
+                    ? "Inspecting…"
+                    : setupEpisodeImage
+                      ? "Replace file"
+                      : "Choose file"}
+                </button>
+                <input
+                  ref={setupProducerImageInputRef}
+                  type="file"
+                  accept={SIGNAL_EPISODE_IMAGE_ACCEPT}
+                  hidden
+                  disabled={setupImageAttachDisabled}
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0];
+                    if (file) void selectSetupProducerImage(file);
+                  }}
+                />
+              </div>
+              {setupEpisodeImage ? (
+                <div className={styles.setupEpisodeImageDraft}>
+                  <small data-image-kind={setupEpisodeImage.descriptor.kind}>
+                    {setupEpisodeImage.descriptor.kind === "item"
+                      ? "Transparent PNG item · presented as the physical item; you can optionally keep it in Items after the episode."
+                      : setupEpisodeImage.descriptor.mimeType === "image/png"
+                        ? "Opaque PNG photo · presented as a framed picture and never saved automatically."
+                        : "JPG photo · presented as a framed picture and never saved automatically."}
+                  </small>
+                  <label htmlFor="signal-setup-image-name">
+                    Name <span>spoken title</span>
+                    <input
+                      id="signal-setup-image-name"
+                      value={setupEpisodeImage.descriptor.name}
+                      maxLength={BOTCAST_EPISODE_IMAGE_NAME_MAX_LENGTH}
+                      onChange={(event) => {
+                        const name = event.currentTarget.value;
+                        setSetupEpisodeImage((current) =>
+                          current
+                            ? {
+                                ...current,
+                                descriptor: { ...current.descriptor, name },
+                              }
+                            : current,
+                        );
+                      }}
+                    />
+                  </label>
+                  <label htmlFor="signal-setup-image-reason">
+                    Reason <span>optional · private to the host</span>
+                    <textarea
+                      id="signal-setup-image-reason"
+                      value={setupEpisodeImage.reason}
+                      maxLength={BOTCAST_EPISODE_IMAGE_REASON_MAX_LENGTH}
+                      placeholder="For example: This is my new car—invite an honest reaction."
+                      onChange={(event) => {
+                        const reason = event.currentTarget.value;
+                        setSetupEpisodeImage((current) =>
+                          current ? { ...current, reason } : current,
+                        );
+                      }}
+                    />
+                  </label>
+                  <div className={styles.setupEpisodeImageFooter}>
+                    <small>
+                      Signal uses Reason as off-mic presentation context, then
+                      places the image automatically at a natural interview
+                      beat. The file stays in this session unless you explicitly
+                      keep a transparent item at the end.
+                    </small>
+                    <button
+                      type="button"
+                      onClick={() => setSetupEpisodeImage(null)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <small>
+                  {setupImageModelCapable
+                    ? "Attach a transparent PNG item, opaque PNG photo, or JPG photo. Its filename becomes an editable Name."
+                    : "Choose a fixed vision-capable model in the Signal navbar to attach an image before the episode."}
+                </small>
+              )}
+            </div>
+          ) : null}
           </>
           )}
         </div>
@@ -13411,13 +14558,23 @@ export function BotcastExperience({
             disabled={
               busy ||
               !guestDraftId ||
-              (!producerGuestSelected && !topicDraft.trim())
+              (!producerGuestSelected && !topicDraft.trim()) ||
+              Boolean(
+                setupEpisodeImage &&
+                  (!setupImageModelCapable ||
+                    !setupEpisodeImage.descriptor.name.trim()),
+              )
             }
             aria-label={
               !guestDraftId
                 ? "Book a guest before beginning the episode"
                 : !producerGuestSelected && !topicDraft.trim()
                   ? "Add an episode topic before beginning"
+                  : setupEpisodeImage && !setupImageModelCapable
+                    ? "Choose a vision-capable model for the attached episode image"
+                    : setupEpisodeImage &&
+                        !setupEpisodeImage.descriptor.name.trim()
+                      ? "Add a Name for the attached episode image"
                   : playbackModeDraft === "watch" && !producerGuestSelected
                     ? watchAutoStartDraft
                       ? "Watch show"
@@ -14087,6 +15244,58 @@ export function BotcastExperience({
     producerGuestIsSpeaking ||
     producerGuestSipActive ||
     signalGuestCupTravelMode !== "idle";
+  const signalCapabilityEpisodeId = episode?.id ?? null;
+  const signalCapabilityEpisodeStatus = episode?.status ?? null;
+  const signalCapabilityPlaybackMode = episode?.playbackMode ?? null;
+  const signalCapabilityGuestKind = episode?.guestKind ?? null;
+  const signalCapabilityProvider = episode?.provider ?? null;
+  const signalCapabilityModel = episode?.model ?? null;
+  useEffect(() => {
+    if (
+      !signalCapabilityEpisodeId ||
+      signalCapabilityEpisodeStatus !== "live" ||
+      signalCapabilityPlaybackMode === "watch" ||
+      signalCapabilityGuestKind !== "bot"
+    ) {
+      setSignalImageCapability(null);
+      return;
+    }
+    let cancelled = false;
+    setSignalImageCapability(null);
+    void request<{
+      provider: "local" | "openai" | "anthropic";
+      model: string;
+      supportsImageInput: boolean;
+    }>(`/api/botcast/episodes/${signalCapabilityEpisodeId}/image-capability`)
+      .then((capability) => {
+        if (cancelled) return;
+        setSignalImageCapability({
+          episodeId: signalCapabilityEpisodeId,
+          ...capability,
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSignalImageCapability({
+          episodeId: signalCapabilityEpisodeId,
+          provider: signalCapabilityProvider ?? "local",
+          model: signalCapabilityModel ?? "Auto",
+          supportsImageInput: false,
+          unavailable: true,
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    request,
+    signalCapabilityEpisodeId,
+    signalCapabilityEpisodeStatus,
+    signalCapabilityGuestKind,
+    signalCapabilityModel,
+    signalCapabilityPlaybackMode,
+    signalCapabilityProvider,
+  ]);
   const sipCoffeeAsProducerGuest = (): void => {
     if (!episode || !producerGuestSipAvailable || producerGuestSipDisabled) {
       return;
@@ -14105,6 +15314,44 @@ export function BotcastExperience({
   // is live. A completed episode is finished — its recording is already
   // sealed — and the composer closes with it.
   const producerCueAvailable = episode?.status === "live";
+  const activeEpisodeImageCapability =
+    episode && signalImageCapability?.episodeId === episode.id
+      ? signalImageCapability
+      : null;
+  const activeSignalImageContext = episode
+    ? botcastLatestImageContextV1(episode.events)
+    : null;
+  const signalImageDiscussionActive = Boolean(
+    activeSignalImageContext && activeSignalImageContext.phase !== "dismissed",
+  );
+  const signalImageAlreadyUsed = Boolean(
+    activeSignalImageContext ||
+      (signalEpisodeImage && signalEpisodeImage.episodeId === episode?.id),
+  );
+  const producerImageDisabled =
+    !producerCueAvailable ||
+    episode?.playbackMode === "watch" ||
+    episode?.guestKind !== "bot" ||
+    activeEpisodeImageCapability?.supportsImageInput !== true ||
+    signalImageAlreadyUsed ||
+    imageUploadBusy ||
+    Boolean(queuedProducerCue);
+  const producerImageTooltip =
+    activeEpisodeImageCapability === null
+      ? "Checking whether the active Signal model supports image input…"
+      : activeEpisodeImageCapability.unavailable
+        ? "Signal could not verify image input for the active model, so image upload stays disabled."
+        : activeEpisodeImageCapability.supportsImageInput !== true
+          ? "The active Signal model does not support image input. Choose a vision-capable model for a new episode."
+      : signalImageDiscussionActive
+        ? "This episode's one image is already on the table."
+        : signalImageAlreadyUsed
+          ? "Signal allows one image upload per episode."
+        : queuedProducerCue
+          ? "Let the queued Producer cue air before adding an image."
+          : imageUploadBusy
+            ? "Adding image to the Signal table…"
+            : `Add an image for the host and guest to discuss with ${activeEpisodeImageCapability.model}.`;
   const queuedCueCanInterruptGuest =
     Boolean(queuedProducerCue) &&
     Boolean(nextHostInterruptionBridge) &&
@@ -14186,15 +15433,58 @@ export function BotcastExperience({
    * the air entirely — there is nothing to unsay.
    */
   const producerCuesAreClearable =
-    Boolean(queuedProducerCue) ||
+    Boolean(queuedProducerCue && queuedProducerCue.kind !== "present_image") ||
     producerCueDraftLengthsRef.current.ask > 0 ||
     producerCueDraftLengthsRef.current.quote > 0;
   const clearProducerCues = (): void => {
     if (!producerCuesAreClearable) return;
     clearProducerCueDraftInputs();
-    if (queuedProducerCueRef.current) {
+    if (
+      queuedProducerCueRef.current &&
+      queuedProducerCueRef.current.kind !== "present_image"
+    ) {
       assignQueuedProducerCue(null);
       setNotice("Cue withdrawn. The host never hears it.");
+    }
+  };
+  const uploadProducerImage = async (file: File): Promise<void> => {
+    if (!episode || producerImageDisabled) return;
+    setImageUploadBusy(true);
+    setError(null);
+    try {
+      const fileInput = await readSignalEpisodeImageFile(file);
+      const imageId = crypto.randomUUID();
+      const replayMetadata = await acquireSignalEpisodeImageReplayMetadata(
+        request,
+        imageId,
+        fileInput,
+        { episodeId: episode.id },
+      );
+      const upload: SignalEpisodeImageUpload = {
+        episodeId: episode.id,
+        imageId,
+        ...fileInput,
+        descriptor: replayMetadata.descriptor,
+        replayEmoji: replayMetadata.replayEmoji,
+        reason: "",
+      };
+      signalEpisodeImageRef.current = upload;
+      setSignalEpisodeImage(upload);
+      setKeepSignalItem(false);
+      discardPreparedAdvance(
+        "An ephemeral Producer image replaced the prepared Signal turn.",
+      );
+      setNotice(
+        `${upload.descriptor.name} is ready for the host to place on the table.`,
+      );
+      sendCue({ kind: "present_image", imageId: upload.imageId });
+    } catch (caught) {
+      setError(signalErrorToast("Add image to Signal", caught));
+    } finally {
+      setImageUploadBusy(false);
+      if (producerImageInputRef.current) {
+        producerImageInputRef.current.value = "";
+      }
     }
   };
   useEffect(() => {
@@ -14307,6 +15597,41 @@ export function BotcastExperience({
     episodeOutro !== null ||
     episode?.status === "completed" ||
     episode?.status === "cancelled";
+  const returnFromEpisodeOutro = async (): Promise<void> => {
+    if (!episodeOutro || keepSignalItemSaving) return;
+    const uploadedItem =
+      signalEpisodeImage?.episodeId === episodeOutro.episodeId &&
+      signalEpisodeImage.descriptor.kind === "item"
+        ? signalEpisodeImage
+        : null;
+    if (keepSignalItem && uploadedItem && !episodeOutro.discarded) {
+      setKeepSignalItemSaving(true);
+      setError(null);
+      try {
+        await request(`/api/assets/upload`, {
+          method: "POST",
+          body: JSON.stringify({
+            kind: "item",
+            title: uploadedItem.descriptor.name,
+            dataUrl: uploadedItem.dataUrl,
+            signalEpisodeId: uploadedItem.episodeId,
+          }),
+        });
+        setNotice(
+          `${uploadedItem.descriptor.name} was saved to Items and linked to ${episodeOutro.episode.guestName ?? "the guest"}.`,
+        );
+      } catch (saveError) {
+        setError(signalErrorToast("Save Signal item", saveError));
+        setKeepSignalItemSaving(false);
+        return;
+      }
+    }
+    stopEpisodeOutro();
+    setEpisode(null);
+    if (selectedShowId) {
+      void loadEpisodes(selectedShowId).catch(() => undefined);
+    }
+  };
   useEffect(() => {
     onLiveSessionActiveChange?.(
       liveSessionActive,
@@ -14788,6 +16113,27 @@ export function BotcastExperience({
           </div>
           <div className={styles.episodeOutroActions}>
             {!episodeOutro.discarded &&
+            signalEpisodeImage?.episodeId === episodeOutro.episodeId &&
+            signalEpisodeImage.descriptor.kind === "item" ? (
+              <label className={styles.episodeOutroKeepItem}>
+                <input
+                  type="checkbox"
+                  checked={keepSignalItem}
+                  disabled={keepSignalItemSaving}
+                  onChange={(event) => setKeepSignalItem(event.target.checked)}
+                />
+                <span>
+                  <strong>
+                    Keep {signalEpisodeImage.descriptor.name} in Items
+                  </strong>
+                  <small>
+                    Optional. It stays session-only unless kept; saving links
+                    it to {episodeOutro.episode.guestName ?? "this guest"}.
+                  </small>
+                </span>
+              </label>
+            ) : null}
+            {!episodeOutro.discarded &&
               episodeOutro.episode.status === "completed" &&
               onCreateSlateStory ? (
                 <button
@@ -14816,14 +16162,12 @@ export function BotcastExperience({
             </button>
             <button
               type="button"
-              onClick={() => {
-                stopEpisodeOutro();
-                setEpisode(null);
-                if (selectedShowId)
-                  void loadEpisodes(selectedShowId).catch(() => undefined);
-              }}
+              onClick={() => void returnFromEpisodeOutro()}
+              disabled={keepSignalItemSaving}
             >
-              {episodeOutro.phase === "holding"
+              {keepSignalItemSaving
+                ? "Saving item…"
+                : episodeOutro.phase === "holding"
                 ? "Skip outro"
                 : "Return to show"}
             </button>
@@ -15224,23 +16568,40 @@ export function BotcastExperience({
                     >
                       Clear
                     </button>
-                    <button
-                      type="button"
-                      className={styles.producerImageAttach}
-                      disabled
-                      title="Image context is coming later."
-                      aria-label="Attach image for context. Coming later."
+                    <span
+                      className={styles.producerImageAttachWrap}
+                      title={producerImageTooltip}
                     >
-                      <ImagePlus aria-hidden="true" />
-                      Image
-                    </button>
+                      <button
+                        type="button"
+                        className={styles.producerImageAttach}
+                        disabled={producerImageDisabled}
+                        aria-label={`Attach image for context. ${producerImageTooltip}`}
+                        onClick={() => producerImageInputRef.current?.click()}
+                      >
+                        <ImagePlus aria-hidden="true" />
+                        {imageUploadBusy ? "Adding…" : "Image"}
+                      </button>
+                    </span>
+                    <input
+                      ref={producerImageInputRef}
+                      type="file"
+                      accept={SIGNAL_EPISODE_IMAGE_ACCEPT}
+                      hidden
+                      disabled={producerImageDisabled}
+                      onChange={(event) => {
+                        const file = event.currentTarget.files?.[0];
+                        if (file) void uploadProducerImage(file);
+                      }}
+                    />
                   </div>
                   {queuedProducerCue ? null : (
                     <small>
                       Private to the host. Use this for context, direction, or a
                       question. Say this must be spoken exactly, as a message from the Producer —
-                      keep it to a line the host can land in one breath. Image
-                      context is coming later.
+                      keep it to a line the host can land in one breath. A
+                      vision-capable active model can also discuss an image on
+                      the center table.
                     </small>
                   )}
                 </div>

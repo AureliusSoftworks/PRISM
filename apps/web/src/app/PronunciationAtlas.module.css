@@ -17,6 +17,35 @@
   gap: 12px;
 }
 
+.headingActions {
+  display: grid;
+  justify-items: end;
+  gap: 5px;
+}
+
+.headingActions button {
+  min-height: 26px;
+  border: 1px solid color-mix(in srgb, var(--pronunciation-atlas-color, var(--accent)) 48%, var(--border));
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: color-mix(in srgb, var(--bg) 88%, var(--panel));
+  color: var(--muted);
+  font: inherit;
+  font-size: 9px;
+  font-weight: 780;
+  cursor: pointer;
+}
+
+.headingActions button[data-active="true"] {
+  background: color-mix(in srgb, var(--pronunciation-atlas-color, var(--accent)) 18%, var(--panel));
+  color: var(--fg);
+}
+
+.headingActions button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--pronunciation-atlas-color, var(--accent)) 70%, transparent);
+  outline-offset: 2px;
+}
+
 .heading > span {
   min-width: 0;
   display: grid;

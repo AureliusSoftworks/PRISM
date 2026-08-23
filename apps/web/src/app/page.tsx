@@ -102,6 +102,7 @@ import {
 import {
   FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE,
   FIRST_RUN_BATCH_FOUNDRY_GUIDANCE,
+  FIRST_RUN_COFFEE_GROUP_GUIDANCE,
   FIRST_RUN_SETUP_STEPS,
   clearFirstRunSetupCompletion,
   firstRunSetupProgressPercent,
@@ -571,6 +572,7 @@ import {
   coffeeGroupSessionExcludedBotIds,
   sanitizeCoffeeSeatBotIdsForAvailableBots,
   toggleCoffeeExcludedBotId,
+  toggleCoffeeSeatBotId,
 } from "./coffee-session-attendance";
 import { coffeeSessionRetryDraft } from "./coffeeSessionRetry";
 import {
@@ -723,6 +725,7 @@ import { shouldChoiceChipRailControlViewport } from "./choiceChipRailAnchor";
 import { rewriteWildcardSlotTokenReference } from "./wildcardReferenceBadge";
 import {
   BOT_MARKETPLACE_MANIFEST_PATH,
+  marketplaceAccentPronunciationDefault,
   marketplaceCatalogRevision,
   marketplaceEntriesForTheme,
   marketplaceEntryInstallState,
@@ -1412,6 +1415,7 @@ import {
   expandSpeechAbbreviations,
   botVernacularDefinitionForId,
   botVernacularIdFromStoredVoiceProfile,
+  botAudioVoiceProfileHasExplicitAccentPronunciationSetting,
   normalizeBotAudioVoiceProfileV1,
   BOT_LOCAL_LAUGH_DELIMITER_MAX_LENGTH,
   BOT_LOCAL_LAUGH_SYLLABLE_MAX_LENGTH,
@@ -6556,13 +6560,13 @@ type StoryDialogCursor = {
   beatIndex: number;
 };
 
-// Durable Coffee Group bounds. Live sessions independently cap their drawn
-// attendee subset so group membership never becomes a render-performance cap.
+// Durable Coffee Group bounds. The authored table supports the full saved
+// roster, while Invited/Away may still reduce attendance for one session.
 const COFFEE_GROUP_MIN_SIZE_CLIENT = 2;
 const COFFEE_GROUP_MAX_SIZE_CLIENT = 5;
 const COFFEE_LIBRARY_UNGROUPED_SOURCE_ID = "builtin:ungrouped";
-/** Live authored-avatar ceiling; saved groups may remain larger. */
-const COFFEE_SESSION_ATTENDEE_MAX_SIZE_CLIENT = 4;
+/** Live authored-avatar ceiling; matches the fixed five-seat table. */
+const COFFEE_SESSION_ATTENDEE_MAX_SIZE_CLIENT = 5;
 /** Matches the coffeeCupSip keyframe pacing used by seated bot mugs. */
 const COFFEE_PLAYER_CUP_SIP_DURATION_MS = 3_200;
 const COFFEE_MISSING_BOT_ERROR_MESSAGE =
@@ -7153,6 +7157,34 @@ function coffeeSeatsFromBotIds(
     seats[index] = botIds?.[index] ?? null;
   }
   return seats;
+}
+
+function coffeeGroupRosterSignature(
+  botIds: readonly (string | null | undefined)[],
+): string {
+  const normalized = Array.from(
+    new Set(
+      botIds
+        .map((id) => (typeof id === "string" ? id.trim() : ""))
+        .filter((id) => id.length > 0),
+    ),
+  ).sort();
+  return JSON.stringify(normalized);
+}
+
+function findDuplicateCoffeeGroupByRoster(
+  groups: readonly Pick<CoffeeGroupState, "id" | "name" | "botGroupIds">[],
+  botIds: readonly (string | null | undefined)[],
+  excludeGroupId?: string | null,
+): Pick<CoffeeGroupState, "id" | "name"> | null {
+  const targetSignature = coffeeGroupRosterSignature(botIds);
+  for (const group of groups) {
+    if (excludeGroupId && group.id === excludeGroupId) continue;
+    if (coffeeGroupRosterSignature(group.botGroupIds) === targetSignature) {
+      return group;
+    }
+  }
+  return null;
 }
 
 function coffeeCupSpriteStyle(
@@ -10795,6 +10827,7 @@ function pronunciationAtlasSelectionForProfile(
 function profileWithPronunciationAtlasSelection(
   profile: BotAudioVoiceProfileV1,
   selection: PronunciationAtlasSelection,
+  options?: { activatePronunciation?: boolean },
 ): NormalizedBotAudioVoiceProfileV1 {
   const normalized = normalizeBotAudioVoiceProfileV1(profile);
   const localAccent = resolveLocalAccentFallback({
@@ -10804,6 +10837,10 @@ function profileWithPronunciationAtlasSelection(
   });
   return normalizeBotAudioVoiceProfileV1({
     ...normalized,
+    accentPronunciationEnabled:
+      options?.activatePronunciation === false
+        ? normalized.accentPronunciationEnabled === true
+        : true,
     pronunciationBase: localAccent.pronunciationBase,
     accentLocale: selection.sourceLocale,
     speechprintInfluence: localAccent.speechprintInfluence,
@@ -11239,6 +11276,8 @@ interface ModelCatalogEntry {
   disabledReason?: string;
   /** LOCAL model reports the Ollama native `thinking` capability. */
   thinking?: boolean;
+  /** Model accepts contextual image input for multimodal turns. */
+  supportsImageInput?: boolean;
   /** Present for image-only catalog rows (ComfyUI workflows). */
   imageSource?: "ollama" | "comfyui" | "comfyui-workflow" | "comfyui-remote";
 }
@@ -13099,6 +13138,7 @@ interface ImportBotOptions {
   keepBotsPanelOpen?: boolean;
   openImportedBotInEditor?: boolean;
   generateThinkingSfx?: boolean;
+  accentPronunciationEnabledDefault?: boolean;
   onThinkingSfxError?: (error: Error) => void;
   onProgress?: (event: ImportBotProgressEvent) => void;
 }
@@ -46638,12 +46678,26 @@ function BotAvatarCustomizerModal({
       return (
         <PronunciationAtlas
           selection={avatarPronunciationSelection}
+          pronunciationEnabled={
+            normalizeBotAudioVoiceProfileV1(audioVoiceProfile)
+              .accentPronunciationEnabled === true
+          }
+          onPronunciationEnabledChange={(enabled) =>
+            onAudioVoiceProfileChange(
+              normalizeBotAudioVoiceProfileV1({
+                ...normalizeBotAudioVoiceProfileV1(audioVoiceProfile),
+                accentPronunciationEnabled: enabled,
+              }),
+              { saveImmediately: true },
+            )
+          }
           color={activeFoundryModule.color}
           onPreview={(selection) =>
             onAudioVoiceProfileChange(
               profileWithPronunciationAtlasSelection(
                 audioVoiceProfile,
                 selection,
+                { activatePronunciation: false },
               ),
             )
           }
@@ -46654,6 +46708,15 @@ function BotAvatarCustomizerModal({
             );
             onAudioVoiceProfileChange(nextProfile, { saveImmediately: true });
           }}
+          onCancel={(selection) =>
+            onAudioVoiceProfileChange(
+              profileWithPronunciationAtlasSelection(
+                audioVoiceProfile,
+                selection,
+                { activatePronunciation: false },
+              ),
+            )
+          }
           onContinue={() => setActiveAdjustmentTarget("local")}
         />
       );
@@ -64754,13 +64817,18 @@ function HomeContent(): React.JSX.Element {
     chatAssistantRevealInProgress ||
     zenFollowupActive;
   const replyRunwayActive = chatLikeSurface && replyInFlightSignals;
+  const zenResponseRevealActive = Boolean(
+    chatAssistantRevealInProgress ||
+      latestAssistantMessage?.zenProgressive?.inProgress === true,
+  );
   const zenPendingReplyPlaceholderVisible =
     chatLikeSurface &&
     pendingReplyVisualVisible &&
     !zenPlayerMessageRevealActive &&
-    !chatAssistantRevealInProgress;
+    !zenResponseRevealActive;
   const zenVoiceSynthesisThinkingVisible = Boolean(
     chatLikeSurface &&
+      !zenResponseRevealActive &&
       activeAssistantRevealKey &&
       speechRevealTimelineWaitingForAudio(
         chatSpeechRevealByKeyRef.current.get(activeAssistantRevealKey),
@@ -65437,6 +65505,10 @@ function HomeContent(): React.JSX.Element {
     useState<CoffeeSessionSettings>(() => loadCoffeeSettingsFromBrowser());
   const [coffeeGroupNameDraft, setCoffeeGroupNameDraft] = useState("");
   const [coffeeGroupEthosDraft, setCoffeeGroupEthosDraft] = useState("");
+  const [coffeeGroupRosterDraft, setCoffeeGroupRosterDraft] = useState<
+    Array<string | null>
+  >(() => emptyCoffeeSeatBotIds());
+  const [coffeeGroupBotToAddDraft, setCoffeeGroupBotToAddDraft] = useState("");
   const coffeeGroupNameEditingRef = useRef(false);
   const coffeeGroupEthosEditingRef = useRef(false);
   const [coffeePresetNameDraft, setCoffeePresetNameDraft] = useState("");
@@ -65451,6 +65523,7 @@ function HomeContent(): React.JSX.Element {
     useState<Set<string>>(() => new Set());
   const [coffeeAutoTopicToggleBusy, setCoffeeAutoTopicToggleBusy] =
     useState(false);
+  const [coffeeSearch, setCoffeeSearch] = useState("");
   const [coffeeBotLibraryGroupFilterId, setCoffeeBotLibraryGroupFilterId] =
     useState<string>(BOT_LIBRARY_GROUP_FILTER_ALL);
   const [coffeeDraft, setCoffeeDraft] = useState<string>("");
@@ -74280,29 +74353,158 @@ function HomeContent(): React.JSX.Element {
       filterUngroupedBotsByLibraryGroups(coffeeBotsLibrary, botLibraryGroups),
     [botLibraryGroups, coffeeBotsLibrary],
   );
-  const coffeeTableSources = useMemo(
-    () => [
+  const coffeeBotLibraryGroupFilterOptions = useMemo<
+    BotLibraryGroupPickerOption[]
+  >(() => {
+    const optionForGroup = (
+      group: BotLibraryGroup,
+    ): BotLibraryGroupPickerOption => {
+      const allowedBotIds = new Set(group.botIds);
+      const groupBots = coffeeBotsLibrary.filter((bot) =>
+        allowedBotIds.has(bot.id),
+      );
+      return {
+        id: group.id,
+        name: group.name,
+        count: groupBots.length,
+        cap: group.builtIn ? undefined : BOT_LIBRARY_GROUP_BOT_CAP,
+        bots: groupBots,
+      };
+    };
+    const favoritesGroup =
+      botLibraryGroups.find(
+        (group) => group.id === BOT_LIBRARY_FAVORITES_GROUP_ID,
+      ) ?? createFavoritesBotGroup();
+    return [
       {
-        id: COFFEE_LIBRARY_UNGROUPED_SOURCE_ID,
-        filterId: BOT_LIBRARY_GROUP_FILTER_UNGROUPED,
-        name: "Ungrouped",
-        count: ungroupedCoffeeBots.length,
+        id: BOT_LIBRARY_GROUP_FILTER_ALL,
+        name: "All bots",
+        menuName: "Show all bots",
+        menuCountLabel: "Default view",
+        count: coffeeBotsLibrary.length,
+        bots: coffeeBotsLibrary,
       },
-      ...selectableBotLibraryGroups
-        .filter((group) => !group.builtIn)
-        .map((group) => ({
-          id: group.id,
-          filterId: group.id,
-          name: group.name,
-          count: group.botIds.length,
-        })),
-    ],
-    [selectableBotLibraryGroups, ungroupedCoffeeBots.length],
+      ...(ungroupedCoffeeBots.length > 0
+        ? [
+            {
+              id: BOT_LIBRARY_GROUP_FILTER_UNGROUPED,
+              name: "Ungrouped",
+              menuName: "Ungrouped bots",
+              count: ungroupedCoffeeBots.length,
+              bots: ungroupedCoffeeBots,
+            },
+          ]
+        : []),
+      optionForGroup(favoritesGroup),
+      ...selectableBotLibraryGroups.map(optionForGroup),
+    ];
+  }, [
+    botLibraryGroups,
+    coffeeBotsLibrary,
+    selectableBotLibraryGroups,
+    ungroupedCoffeeBots,
+  ]);
+  useEffect(() => {
+    if (
+      coffeeBotLibraryGroupFilterId !== BOT_LIBRARY_GROUP_FILTER_UNGROUPED ||
+      ungroupedCoffeeBots.length > 0
+    ) {
+      return;
+    }
+    setCoffeeBotLibraryGroupFilterId(BOT_LIBRARY_GROUP_FILTER_ALL);
+  }, [coffeeBotLibraryGroupFilterId, ungroupedCoffeeBots.length]);
+  const coffeeGroupFilteredBots = useMemo(
+    () =>
+      filterBotsByLibraryGroup(
+        coffeeBotsLibrary,
+        botLibraryGroups,
+        coffeeBotLibraryGroupFilterId,
+        BOT_LIBRARY_GROUP_FILTER_ALL,
+        BOT_LIBRARY_GROUP_FILTER_UNGROUPED,
+      ),
+    [botLibraryGroups, coffeeBotLibraryGroupFilterId, coffeeBotsLibrary],
   );
-  const coffeeSelectedTableSource =
-    coffeeTableSources.find(
-      (source) => source.filterId === coffeeBotLibraryGroupFilterId,
-    ) ?? null;
+  const coffeeActiveBotLibraryGroupOption = useMemo(
+    () =>
+      coffeeBotLibraryGroupFilterOptions.find(
+        (option) => option.id === coffeeBotLibraryGroupFilterId,
+      ) ??
+      coffeeBotLibraryGroupFilterOptions.find(
+        (option) => option.id === BOT_LIBRARY_GROUP_FILTER_ALL,
+      ) ??
+      null,
+    [coffeeBotLibraryGroupFilterId, coffeeBotLibraryGroupFilterOptions],
+  );
+  const coffeeSearchTerm = coffeeSearch.trim().toLowerCase();
+  const coffeeFilteredBots = useMemo(
+    () =>
+      coffeeGroupFilteredBots.filter((bot) => {
+        if (!coffeeSearchTerm) return true;
+        return (
+          bot.name.toLowerCase().includes(coffeeSearchTerm) ||
+          bot.system_prompt.toLowerCase().includes(coffeeSearchTerm)
+        );
+      }),
+    [coffeeGroupFilteredBots, coffeeSearchTerm],
+  );
+  const coffeeCanvasBotPickerGeometry = useMemo<PickerGeometry | null>(() => {
+    if (coffeeFilteredBots.length === 0) return null;
+    return pickerGeometry(
+      coffeeFilteredBots.length,
+      viewportWidth,
+      viewportHeight,
+      {
+        balanceOddRows: false,
+      },
+    );
+  }, [coffeeFilteredBots.length, viewportHeight, viewportWidth]);
+  const coffeeCanvasBotGridStyle = useMemo<
+    React.CSSProperties | undefined
+  >(() => {
+    if (!coffeeCanvasBotPickerGeometry) return undefined;
+    const rowWidth =
+      coffeeCanvasBotPickerGeometry.gridCols *
+        coffeeCanvasBotPickerGeometry.tileSize +
+      (coffeeCanvasBotPickerGeometry.gridCols - 1) *
+        coffeeCanvasBotPickerGeometry.tileGap;
+    return {
+      "--tile-size": `${coffeeCanvasBotPickerGeometry.tileSize}px`,
+      "--tile-gap": `${coffeeCanvasBotPickerGeometry.tileGap}px`,
+      "--tile-hover-scale": String(coffeeCanvasBotPickerGeometry.hoverScale),
+      "--grid-cols": coffeeCanvasBotPickerGeometry.gridCols,
+      "--picker-row-width": `${rowWidth}px`,
+    } as React.CSSProperties;
+  }, [coffeeCanvasBotPickerGeometry]);
+  const coffeeCanvasBotGridClassName = [
+    styles.chatBotPicker,
+    styles.coffeeCanvasBotGrid,
+    coffeeCanvasBotPickerGeometry?.crosshairCursor
+      ? styles.chatBotPickerCrosshair
+      : null,
+    coffeeCanvasBotPickerGeometry?.dotCursor
+      ? styles.chatBotPickerDotCursor
+      : null,
+    coffeeCanvasBotPickerGeometry?.solidSwatch
+      ? styles.chatBotPickerSolidSwatch
+      : null,
+    coffeeCanvasBotPickerGeometry?.compactPixelGrid
+      ? styles.chatBotPickerPixelGrid
+      : null,
+    coffeeCanvasBotPickerGeometry?.radialRainbowGradient
+      ? styles.chatBotPickerRainbowGradient
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const coffeePickerFilteredEmptyText =
+    coffeeBotLibraryGroupFilterId !== BOT_LIBRARY_GROUP_FILTER_ALL
+      ? coffeeSearchTerm
+        ? "Nothing in this group matches that search."
+        : coffeeBotLibraryGroupFilterId ===
+            BOT_LIBRARY_GROUP_FILTER_UNGROUPED
+          ? "Every chat-enabled bot is already in a group."
+          : "No chat-enabled bots live in this group yet."
+      : "No bots match that search.";
   const composeMentionBotPicks = useMemo(() => {
     const sorted = [...bots]
       .filter((bot) => bot.chat_enabled === 1)
@@ -94640,6 +94842,30 @@ function HomeContent(): React.JSX.Element {
     const parsed = parsePrismBotArchive(archiveBytes);
     const preparedArchive = prepareBotArchivePayload(parsed);
     let createBody = await compileStaleArchivePowers(preparedArchive.body);
+    if (typeof options?.accentPronunciationEnabledDefault === "boolean") {
+      const importedOverride = normalizeOptionalBotAudioVoiceProfileV1(
+        createBody.audioVoiceProfileOverride,
+      );
+      createBody = {
+        ...createBody,
+        authoredAudioVoiceProfile: normalizeBotAudioVoiceProfileV1({
+          ...normalizeBotAudioVoiceProfileV1(
+            createBody.authoredAudioVoiceProfile,
+          ),
+          accentPronunciationEnabled:
+            options.accentPronunciationEnabledDefault,
+        }),
+        ...(importedOverride
+          ? {
+              audioVoiceProfileOverride: normalizeBotAudioVoiceProfileV1({
+                ...importedOverride,
+                accentPronunciationEnabled:
+                  options.accentPronunciationEnabledDefault,
+              }),
+            }
+          : {}),
+      };
+    }
     if (options?.generateThinkingSfx) {
       try {
         const generatedProfile = await generateBotThinkingSfxProfile(
@@ -95514,9 +95740,36 @@ function HomeContent(): React.JSX.Element {
     // Marketplace bundles may author a new portable voice profile, but the
     // installed bot's account-local override is a user's choice and must win.
     let compiledArchiveBody = await compileStaleArchivePowers(archive.body);
-    const installedOverride = normalizeOptionalBotAudioVoiceProfileV1(
-      bots.find((bot) => bot.id === botId)?.audio_voice_profile_override,
+    compiledArchiveBody = {
+      ...compiledArchiveBody,
+      authoredAudioVoiceProfile: normalizeBotAudioVoiceProfileV1({
+        ...normalizeBotAudioVoiceProfileV1(
+          compiledArchiveBody.authoredAudioVoiceProfile,
+        ),
+        accentPronunciationEnabled:
+          marketplaceAccentPronunciationDefault(prepared.entry),
+      }),
+    };
+    const installedOverrideValue = bots.find(
+      (bot) => bot.id === botId,
+    )?.audio_voice_profile_override;
+    let installedOverride = normalizeOptionalBotAudioVoiceProfileV1(
+      installedOverrideValue,
     );
+    let installedOverrideChanged = false;
+    if (
+      installedOverride &&
+      !botAudioVoiceProfileHasExplicitAccentPronunciationSetting(
+        installedOverrideValue,
+      )
+    ) {
+      installedOverride = normalizeBotAudioVoiceProfileV1({
+        ...installedOverride,
+        accentPronunciationEnabled:
+          marketplaceAccentPronunciationDefault(prepared.entry),
+      });
+      installedOverrideChanged = true;
+    }
     let generatedThinkingSfx: BotAvatarSfxV1 | null = null;
     let thinkingSfxError: string | null = null;
     try {
@@ -95546,11 +95799,14 @@ function HomeContent(): React.JSX.Element {
       !installedOverride.avatarSfx &&
       generatedThinkingSfx
     ) {
-      marketplacePatch.audioVoiceProfileOverride =
-        normalizeBotAudioVoiceProfileV1({
-          ...installedOverride,
-          avatarSfx: generatedThinkingSfx,
-        });
+      installedOverride = normalizeBotAudioVoiceProfileV1({
+        ...installedOverride,
+        avatarSfx: generatedThinkingSfx,
+      });
+      installedOverrideChanged = true;
+    }
+    if (installedOverride && installedOverrideChanged) {
+      marketplacePatch.audioVoiceProfileOverride = installedOverride;
     }
     const updated = await api<{ bot?: { id?: string } }>(
       `/api/bots/${encodeURIComponent(botId)}`,
@@ -95714,6 +95970,8 @@ function HomeContent(): React.JSX.Element {
         deferRefresh: true,
         keepBotsPanelOpen: true,
         generateThinkingSfx: true,
+        accentPronunciationEnabledDefault:
+          marketplaceAccentPronunciationDefault(bundle.entry),
         onThinkingSfxError: (error) => {
           thinkingSfxFailedForBot = true;
           thinkingSfxFailed += 1;
@@ -98812,7 +99070,7 @@ function HomeContent(): React.JSX.Element {
                 </h3>
                 <p>
                   PRISM ranked the bots already in view on this device. Choose
-                  two to four, or swap in anyone else from {focusedGroup.name}.
+                  two to five, or swap in anyone else from {focusedGroup.name}.
                 </p>
               </div>
               <span className={styles.botGroupCoffeeStagingPrivacy}>
@@ -98824,7 +99082,7 @@ function HomeContent(): React.JSX.Element {
             </blockquote>
             <div className={styles.botGroupCoffeeStagingSummary} role="status">
               <strong>{coffeeStagingSelection?.count ?? 0} at the table</strong>
-              <span>Choose 2-4 bots</span>
+              <span>Choose 2-5 bots</span>
               {coffeeStagingTopicTooLong ? (
                 <span data-kind="error">
                   Prompt is {coffeeStagingTopicLength} characters; Coffee allows{" "}
@@ -107600,6 +107858,7 @@ function HomeContent(): React.JSX.Element {
                 </p>
                 <p>{FIRST_RUN_BATCH_FOUNDRY_GUIDANCE}</p>
                 <p>{FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE}</p>
+                <p>{FIRST_RUN_COFFEE_GROUP_GUIDANCE}</p>
                 <div>
                   <span>
                     Chat home base
@@ -128617,7 +128876,15 @@ function HomeContent(): React.JSX.Element {
   // caret `useLayoutEffect`s) live above the `if (!user) return …` gate
   // so hook order is identical on the auth screen and after login.
   // Only plain helpers and JSX live in this tail section.
-  const coffeeSelectionValid = coffeeSelectedTableSource !== null;
+  const coffeeSelectionValid =
+    coffeeSelectedBotIds.length >= COFFEE_GROUP_MIN_SIZE_CLIENT &&
+    coffeeSelectedBotIds.length <= COFFEE_GROUP_MAX_SIZE_CLIENT;
+  const toggleCoffeeBot = (botId: string) => {
+    setCoffeeError(null);
+    setCoffeeSelectedSeatBotIds((current) =>
+      toggleCoffeeSeatBotId(current, botId),
+    );
+  };
   const clearCoffeeLoopTimer = () => {
     if (coffeeLoopTimerRef.current) {
       clearTimeout(coffeeLoopTimerRef.current);
@@ -131110,6 +131377,7 @@ function HomeContent(): React.JSX.Element {
     setCoffeeTableSetupOpen(false);
     setCoffeeExcludedBotIds(new Set());
     setCoffeeSelectedSeatBotIds(emptyCoffeeSeatBotIds());
+    setCoffeeSearch("");
     setCoffeeSelectedExperienceMode("join");
     setCoffeeSelectedDurationMinutes(null);
     setCoffeeDraft("");
@@ -132056,14 +132324,13 @@ function HomeContent(): React.JSX.Element {
   const createCoffeeGroupFromSelection =
     async (): Promise<CoffeeGroupState | null> => {
       if (coffeeBusy || !coffeeSelectionValid) return null;
-      const source = coffeeSelectedTableSource;
-      if (!source) return null;
-      const duplicateGroup = coffeeGroups.find(
-        (group) => group.libraryGroupId === source.id,
+      const duplicateGroup = findDuplicateCoffeeGroupByRoster(
+        coffeeGroups,
+        coffeeSelectedSeatBotIdsForLoadedBots,
       );
       if (duplicateGroup) {
         setCoffeeError(
-          `You already have a Coffee table for ${source.name}: ${duplicateGroup.name}.`,
+          `You already have a Coffee Group with these bots: ${duplicateGroup.name}.`,
         );
         return null;
       }
@@ -132077,14 +132344,20 @@ function HomeContent(): React.JSX.Element {
         progress: null,
       });
       try {
-        const fallbackName = `${source.name} Coffee`;
+        const selectedBots = coffeeSelectedBotIds
+          .map((id) => coffeeBotsById.get(id))
+          .filter((bot): bot is Bot => Boolean(bot));
+        const fallbackName =
+          selectedBots.length > 0
+            ? `Coffee with ${selectedBots.map((bot) => bot.name).join(", ")}`
+            : "Coffee Group";
         const response = await api<{ ok: true; group: CoffeeGroupState }>(
           "/api/coffee/groups",
           {
             method: "POST",
             body: JSON.stringify({
               name: fallbackName,
-              libraryGroupId: source.id,
+              groupBotIds: coffeeSelectedSeatBotIdsForLoadedBots,
               coffeeSettings: coffeeSessionSettings,
               modelChoiceByProvider: normalizeCoffeeModelChoiceByProvider(
                 coffeeModelChoiceByProvider,
@@ -132298,7 +132571,9 @@ function HomeContent(): React.JSX.Element {
       const availableGroups = await refreshCoffeeGroups();
       let linkedGroup =
         availableGroups.find(
-          (group) => group.libraryGroupId === launch.sourceGroupId,
+          (group) =>
+            coffeeGroupRosterSignature(group.botGroupIds) ===
+            coffeeGroupRosterSignature(selectedBotIds),
         ) ?? null;
       if (!linkedGroup) {
         const sourceName =
@@ -132313,7 +132588,7 @@ function HomeContent(): React.JSX.Element {
             method: "POST",
             body: JSON.stringify({
               name: `${sourceName} Coffee`,
-              libraryGroupId: launch.sourceGroupId,
+              groupBotIds: coffeeSeatsFromBotIds(selectedBotIds),
               coffeeSettings: coffeeSessionSettings,
               modelChoiceByProvider: normalizeCoffeeModelChoiceByProvider(
                 coffeeModelChoiceByProvider,
@@ -132584,11 +132859,48 @@ function HomeContent(): React.JSX.Element {
     coffeeGroupEthosEditingRef.current = false;
     setCoffeeGroupNameDraft(group.name);
     setCoffeeGroupEthosDraft(group.ethos ?? "");
+    const rosterSeats = emptyCoffeeSeatBotIds();
+    for (
+      let index = 0;
+      index < Math.min(rosterSeats.length, group.coffeeSeatBotIds.length);
+      index += 1
+    ) {
+      rosterSeats[index] = group.coffeeSeatBotIds[index] ?? null;
+    }
+    setCoffeeGroupRosterDraft(rosterSeats);
+    setCoffeeGroupBotToAddDraft("");
     setCoffeeSettingsDraft(
       normalizeCoffeeSessionSettings(group.coffeeSettings),
     );
     setCoffeePresetNameDraft("");
     setCoffeeSettingsModalOpen(true);
+  };
+  const addCoffeeGroupRosterDraftBot = () => {
+    const botId = coffeeGroupBotToAddDraft.trim();
+    if (!botId || !coffeeBotsById.has(botId)) return;
+    setCoffeeGroupRosterDraft((current) => {
+      if (current.includes(botId)) return current;
+      const next = [...current];
+      const openSeatIndex = next.findIndex((seatBotId) => seatBotId === null);
+      if (openSeatIndex < 0) return current;
+      next[openSeatIndex] = botId;
+      return next;
+    });
+    setCoffeeGroupBotToAddDraft("");
+  };
+  const removeCoffeeGroupRosterDraftBot = (botId: string) => {
+    setCoffeeGroupRosterDraft((current) => {
+      const memberCount = current.filter(
+        (seatBotId): seatBotId is string => typeof seatBotId === "string",
+      ).length;
+      if (memberCount <= COFFEE_GROUP_MIN_SIZE_CLIENT) return current;
+      return current.map((seatBotId) =>
+        seatBotId === botId ? null : seatBotId,
+      );
+    });
+    setCoffeeGroupBotToAddDraft((current) =>
+      current === botId ? "" : current,
+    );
   };
   const applyCoffeeGroupSettings = async () => {
     const group = coffeeSelectedGroup;
@@ -132596,6 +132908,9 @@ function HomeContent(): React.JSX.Element {
     setCoffeeSettingsSaving(true);
     setCoffeeError(null);
     try {
+      const rosterChanged =
+        coffeeGroupRosterSignature(coffeeGroupRosterDraft) !==
+        coffeeGroupRosterSignature(group.coffeeSeatBotIds);
       const response = await api<{ ok: true; group: CoffeeGroupState }>(
         `/api/coffee/groups/${encodeURIComponent(group.id)}`,
         {
@@ -132608,6 +132923,12 @@ function HomeContent(): React.JSX.Element {
               coffeeSelectedPresetId === COFFEE_AUTO_PRESET_ID
                 ? "auto"
                 : "manual",
+            ...(rosterChanged
+              ? {
+                  groupBotIds: coffeeGroupRosterDraft,
+                  starterTopics: group.starterTopics ?? [],
+                }
+              : {}),
           }),
         },
       );
@@ -132624,9 +132945,9 @@ function HomeContent(): React.JSX.Element {
       );
       setCoffeeGroupNameDraft(response.group.name);
       setCoffeeGroupEthosDraft(response.group.ethos ?? "");
-      setCoffeeSelectedSeatBotIds(
-        coffeeSeatsFromBotIds(response.group.botGroupIds.slice(0, COFFEE_SESSION_ATTENDEE_MAX_SIZE_CLIENT)),
-      );
+      setCoffeeGroupRosterDraft([...response.group.coffeeSeatBotIds]);
+      setCoffeeGroupBotToAddDraft("");
+      setCoffeeSelectedSeatBotIds(response.group.coffeeSeatBotIds);
       setCoffeeExcludedBotIds((current) =>
         new Set(
           [...current].filter((botId) =>
@@ -132634,6 +132955,10 @@ function HomeContent(): React.JSX.Element {
           ),
         ),
       );
+      if (rosterChanged) {
+        setCoffeeRestoredSessionSetup(null);
+        resetCoffeeTeamsDraft(response.group.botGroupIds);
+      }
       setCoffeeSettingsModalOpen(false);
       void refreshCoffeeGroups();
     } catch (err) {
@@ -135742,6 +136067,116 @@ function HomeContent(): React.JSX.Element {
   const coffeeSoundtrackRegenerationAvailable =
     coffeeSessionProvider !== "local" &&
     settings?.elevenLabsApiKeySource !== "none";
+  const renderCoffeeBotTile = (bot: Bot): React.JSX.Element => {
+    const selected = coffeeSelectedBotIds.includes(bot.id);
+    const disabled =
+      !selected && coffeeSelectedBotIds.length >= COFFEE_GROUP_MAX_SIZE_CLIENT;
+    const offlineProtected = bot.online_enabled === 0;
+    const geom = coffeeCanvasBotPickerGeometry;
+    const accent = bot.color
+      ? normalizeAccentForTheme(bot.color, resolvedTheme)
+      : "#f5f5f5";
+    const showPixelGridGlyph = geom?.compactPixelGrid === true;
+    const showFeaturedName =
+      !geom?.compactPixelGrid &&
+      (geom?.tileSize ?? PICKER_LOW_COUNT_TILE_SIZE_DESKTOP) >=
+        PICKER_TILE_NAME_MIN_SIZE;
+    const tileGlyphSize = showPixelGridGlyph
+      ? Math.max(
+          PICKER_PIXEL_GLYPH_MIN_SIZE,
+          Math.round(
+            (geom?.tileSize ?? PICKER_LOW_COUNT_TILE_SIZE_DESKTOP) *
+              PICKER_PIXEL_GLYPH_RATIO,
+          ),
+        )
+      : (geom?.glyphSize ?? 28);
+    const tileGlyphStroke = showPixelGridGlyph
+      ? PICKER_PIXEL_GLYPH_STROKE
+      : (geom?.glyphStroke ?? 1.8);
+    const showOfflineProtectedBadge =
+      offlineProtected &&
+      showFeaturedName &&
+      (geom?.tileSize ?? PICKER_LOW_COUNT_TILE_SIZE_DESKTOP) >= 64;
+    const tileStyle = {
+      "--bot-color": accent,
+      "--coffee-bot-color": accent,
+      "--coffee-bot-text": pickReadableText(accent),
+    } as React.CSSProperties;
+    return (
+      <li key={bot.id}>
+        <BotPickerTile
+          item={{
+            id: bot.id,
+            name: bot.name,
+            color: bot.color,
+            glyph: bot.glyph,
+          }}
+          selected={selected}
+          protected={offlineProtected}
+          forceName={showFeaturedName}
+          accentColor={accent}
+          className={styles.coffeeCanvasBotTile}
+          geometry={{
+            tileSize: geom?.tileSize ?? PICKER_LOW_COUNT_TILE_SIZE_DESKTOP,
+            glyphSize: tileGlyphSize,
+            glyphStroke: tileGlyphStroke,
+            compactPixelGrid: geom?.compactPixelGrid,
+            flattenTile: geom?.flattenTile,
+            namedFlatTile: geom?.namedFlatTile,
+            solidSwatch: geom?.solidSwatch,
+            hideGlyphByDefault: geom?.hideGlyphByDefault,
+            selectedDotGlyph: geom?.selectedDotGlyph,
+          }}
+          renderGlyph={(glyph, options) => (
+            <BotGlyph
+              name={glyph}
+              size={options.size}
+              strokeWidth={options.strokeWidth}
+              className={options.className}
+            />
+          )}
+          style={tileStyle}
+          badge={
+            showOfflineProtectedBadge ? (
+              <span
+                className={styles.coffeeCanvasBotTileBadge}
+                aria-hidden="true"
+                title="Protected as offline-only"
+              >
+                Local
+              </span>
+            ) : null
+          }
+          buttonProps={{
+            role: "option",
+            "data-selected": selected ? "true" : undefined,
+            "data-offline-protected": offlineProtected ? "true" : undefined,
+            disabled,
+            "aria-selected": selected,
+            "aria-label": offlineProtected
+              ? `${bot.name} (offline-only, protected)`
+              : bot.name,
+            onPointerDown: (event) => startBotContextLongPress(event, bot),
+            onPointerUp: handleBotContextPointerEnd,
+            onPointerCancel: handleBotContextPointerEnd,
+            onPointerMove: handleBotContextPointerMove,
+            onContextMenu: (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              openBotContextMenu(bot, event.clientX, event.clientY);
+            },
+            onClick: () => {
+              if (botContextSuppressClickRef.current) {
+                botContextSuppressClickRef.current = false;
+                return;
+              }
+              toggleCoffeeBot(bot.id);
+            },
+          }}
+        />
+      </li>
+    );
+  };
   const renderCoffeeSessionSettingsFields = (
     settings = coffeeSessionSettings,
     setSettings = setCoffeeSessionSettings,
@@ -136801,6 +137236,18 @@ function HomeContent(): React.JSX.Element {
   const renderCoffeeGroupSettingsModal = (): React.JSX.Element | null => {
     const group = coffeeSelectedGroup;
     if (!coffeeSettingsModalOpen || !group) return null;
+    const rosterBotIds = coffeeGroupRosterDraft.filter(
+      (botId): botId is string => typeof botId === "string",
+    );
+    const rosterBotIdSet = new Set(rosterBotIds);
+    const rosterBotCount = rosterBotIds.length;
+    const rosterAtMinimum =
+      rosterBotCount <= COFFEE_GROUP_MIN_SIZE_CLIENT;
+    const rosterAtMaximum =
+      rosterBotCount >= COFFEE_GROUP_MAX_SIZE_CLIENT;
+    const rosterAddCandidates = coffeeBotsLibrary.filter(
+      (bot) => !rosterBotIdSet.has(bot.id),
+    );
     return (
       <div className={styles.coffeeSettingsModalBackdrop} role="presentation">
         <section
@@ -136879,12 +137326,91 @@ function HomeContent(): React.JSX.Element {
                 One quiet sentence of context—not a recurring topic.{" "}
                 {coffeeGroupEthosDraft.length}/{COFFEE_GROUP_ETHOS_MAX_LENGTH}
               </p>
-              {group.libraryGroupId ? (
+              <section
+                className={styles.coffeeGroupRosterEditor}
+                aria-labelledby="coffee-group-members-title"
+              >
+                <div className={styles.coffeeGroupRosterHeader}>
+                  <h3 id="coffee-group-members-title">Members</h3>
+                  <span>
+                    {rosterBotCount} / {COFFEE_GROUP_MAX_SIZE_CLIENT}
+                  </span>
+                </div>
                 <p className={styles.coffeeSettingsHint}>
-                  Invites come from this table&apos;s Library group. Manage its
-                  members in Library; each session seats up to four of them.
+                  Keep 2–5 Library bots in the permanent group. Saved sessions
+                  keep their original cast; Invited and Away apply only to the
+                  next session.
                 </p>
-              ) : null}
+                <ul className={styles.coffeeGroupRosterMembers}>
+                  {rosterBotIds.map((botId) => {
+                    const bot = coffeeBotsById.get(botId);
+                    const botName = bot?.name ?? "Unavailable bot";
+                    return (
+                      <li
+                        key={botId}
+                        style={bot ? coffeeBotVisualStyle(bot) : undefined}
+                      >
+                        <span
+                          className={styles.coffeeSessionDot}
+                          aria-hidden="true"
+                        />
+                        <span>{botName}</span>
+                        <button
+                          type="button"
+                          className={styles.coffeeGroupRosterRemove}
+                          disabled={rosterAtMinimum}
+                          onClick={() =>
+                            removeCoffeeGroupRosterDraftBot(botId)
+                          }
+                          aria-label={`Remove ${botName} from this Coffee Group`}
+                          title={
+                            rosterAtMinimum
+                              ? "Coffee Groups need at least two bots"
+                              : `Remove ${botName}`
+                          }
+                        >
+                          Remove
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <div className={styles.coffeeGroupRosterAdd}>
+                  <select
+                    className={styles.coffeeSettingsSelect}
+                    value={coffeeGroupBotToAddDraft}
+                    disabled={
+                      rosterAtMaximum || rosterAddCandidates.length === 0
+                    }
+                    onChange={(event) =>
+                      setCoffeeGroupBotToAddDraft(event.currentTarget.value)
+                    }
+                    aria-label="Choose a bot to add to this Coffee Group"
+                  >
+                    <option value="">
+                      {rosterAtMaximum
+                        ? "All five seats are filled"
+                        : "Choose a Library bot"}
+                    </option>
+                    {rosterAddCandidates.map((bot) => (
+                      <option key={bot.id} value={bot.id}>
+                        {bot.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className={styles.coffeeSend}
+                    disabled={
+                      rosterAtMaximum ||
+                      coffeeGroupBotToAddDraft.trim().length === 0
+                    }
+                    onClick={addCoffeeGroupRosterDraftBot}
+                  >
+                    Add bot
+                  </button>
+                </div>
+              </section>
               <div className={styles.coffeeSettingsIntroRow}>
                 <p className={styles.coffeeSettingsIntro}>
                   Adjust the table feel here, then Apply when it feels right.
@@ -136998,7 +137524,11 @@ function HomeContent(): React.JSX.Element {
             <button
               type="button"
               className={styles.coffeeSend}
-              disabled={coffeeSettingsSaving}
+              disabled={
+                coffeeSettingsSaving ||
+                rosterBotCount < COFFEE_GROUP_MIN_SIZE_CLIENT ||
+                rosterBotCount > COFFEE_GROUP_MAX_SIZE_CLIENT
+              }
               onClick={() => void applyCoffeeGroupSettings()}
             >
               {coffeeSettingsSaving ? "Applying..." : "Apply"}
@@ -140768,17 +141298,67 @@ function HomeContent(): React.JSX.Element {
         {coffeeCanvasPickerVisible ? (
           <section
             className={styles.coffeeCanvasPicker}
-            aria-label="Choose a Library group for Coffee"
+            aria-label="Invite bots to Coffee"
           >
-            <p className={styles.coffeeSettingsHint}>
-              Choose one Library group. Its current members stay invited for
-              future sessions; Coffee seats up to four at a time.
-            </p>
-            {coffeeTableSources.length === 0 ? (
+            {(() => {
+              const protectedNames: string[] = [];
+              for (const id of coffeeSelectedBotIds) {
+                const bot = coffeeBotsById.get(id);
+                if (bot && bot.online_enabled === 0)
+                  protectedNames.push(bot.name);
+              }
+              const message =
+                buildCoffeeOfflineProtectionMessage(protectedNames);
+              if (!message) return null;
+              return (
+                <p
+                  className={styles.coffeeOfflineProtectionNotice}
+                  role="status"
+                  aria-live="polite"
+                >
+                  {message}
+                </p>
+              );
+            })()}
+            {renderCanvasBotBrowserRail({
+              variant: "coffee",
+              searchValue: coffeeSearch,
+              onSearchChange: setCoffeeSearch,
+              searchPlaceholder: "Search or add bots...",
+              searchAriaLabel: "Search bots for Coffee Group",
+              botPicker: (
+                <ComposerBotPicker
+                  value=""
+                  onChange={() => {}}
+                  bots={coffeeBotsLibrary}
+                  resolvedTheme={resolvedTheme}
+                  placement="down"
+                  disabled
+                  title="Coffee messages are scoped to the bots seated at the table."
+                  ariaLabel="Bot for the next message unavailable in Coffee mode"
+                  showName={false}
+                  dismissPopoversSignal={composerPopoverDismissSignal}
+                />
+              ),
+              groupPicker: (
+                <BotLibraryGroupPicker
+                  value={
+                    coffeeActiveBotLibraryGroupOption?.id ??
+                    BOT_LIBRARY_GROUP_FILTER_ALL
+                  }
+                  options={coffeeBotLibraryGroupFilterOptions}
+                  onChange={setCoffeeBotLibraryGroupFilterId}
+                  resolvedTheme={resolvedTheme}
+                  showCounts={false}
+                  dismissPopoversSignal={composerPopoverDismissSignal}
+                />
+              ),
+            })}
+            {coffeeBotsLibrary.length === 0 ? (
               <div className={styles.coffeePickerEmptyState}>
                 <p className={styles.coffeePickerEmpty}>
-                  Create a Library group, or use Ungrouped, to open a Coffee
-                  table. The table can wait for enough members to join.
+                  You don&apos;t have any chat-enabled bots yet. Install the
+                  starter cast or create your own table.
                 </p>
                 <div className={styles.appletEmptyActions}>
                   <button
@@ -140805,43 +141385,20 @@ function HomeContent(): React.JSX.Element {
                   </button>
                 </div>
               </div>
+            ) : coffeeFilteredBots.length === 0 ? (
+              <p className={styles.coffeePickerEmpty}>
+                {coffeePickerFilteredEmptyText}
+              </p>
             ) : (
-              <div className={styles.coffeeGroupActionGrid} role="listbox">
-                {coffeeTableSources.map((source) => {
-                  const selected = source.id === coffeeSelectedTableSource?.id;
-                  const linkedTable = coffeeGroups.find(
-                    (group) => group.libraryGroupId === source.id,
-                  );
-                  return (
-                    <button
-                      key={source.id}
-                      type="button"
-                      role="option"
-                      aria-selected={selected}
-                      className={styles.coffeeGroupToolButton}
-                      onClick={() => {
-                        if (linkedTable) {
-                          openCoffeeGroup(linkedTable);
-                        } else {
-                          setCoffeeBotLibraryGroupFilterId(source.filterId);
-                        }
-                      }}
-                    >
-                      <span className={styles.coffeeGroupToolButtonIcon} aria-hidden="true">
-                        <BotsGlyph />
-                      </span>
-                      <span className={styles.coffeeGroupToolButtonText}>
-                        <span className={styles.coffeeGroupToolButtonTitle}>{source.name}</span>
-                        <span className={styles.coffeeGroupToolButtonSubtitle}>
-                          {linkedTable
-                            ? `Table ready · open ${linkedTable.name}`
-                            : `${source.count} invited · sessions start at ${COFFEE_GROUP_MIN_SIZE_CLIENT}`}
-                        </span>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+              <BotPickerGrid
+                as="ul"
+                className={coffeeCanvasBotGridClassName}
+                role="listbox"
+                ariaLabel="Bots available for Coffee"
+                style={coffeeCanvasBotGridStyle}
+              >
+                {coffeeFilteredBots.map(renderCoffeeBotTile)}
+              </BotPickerGrid>
             )}
           </section>
         ) : null}
@@ -141659,6 +142216,27 @@ function HomeContent(): React.JSX.Element {
                   </span>
                 </span>
               </button>
+              <button
+                type="button"
+                className={styles.coffeeGroupToolButton}
+                aria-label="Configure Coffee Group bots"
+                onClick={() => openCoffeeSettingsModal(group)}
+              >
+                <span
+                  className={styles.coffeeGroupToolButtonIcon}
+                  aria-hidden="true"
+                >
+                  <BotsGlyph />
+                </span>
+                <span className={styles.coffeeGroupToolButtonText}>
+                  <span className={styles.coffeeGroupToolButtonTitle}>
+                    Configure bots
+                  </span>
+                  <span className={styles.coffeeGroupToolButtonSubtitle}>
+                    Add or remove members
+                  </span>
+                </span>
+              </button>
             </div>
           </section>
           <section
@@ -141859,26 +142437,39 @@ function HomeContent(): React.JSX.Element {
       coffeeSelectedGroup === null;
     const coffeeSetupComposerReady =
       coffeeSetupComposerVisible && coffeeSelectionValid;
-    const coffeeSetupBotSummary = coffeeSelectedTableSource
-      ? `${coffeeSelectedTableSource.name} · ${coffeeSelectedTableSource.count} invited · sessions start at ${COFFEE_GROUP_MIN_SIZE_CLIENT}`
-      : "Choose a Library group";
+    const coffeeSetupSelectedCount = coffeeSelectedBotIds.length;
+    const coffeeSetupBotsNeeded = Math.max(
+      0,
+      COFFEE_GROUP_MIN_SIZE_CLIENT - coffeeSetupSelectedCount,
+    );
+    const coffeeSetupBotNames = coffeeSelectedBotIds
+      .map((id) => coffeeBotsById.get(id)?.name)
+      .filter((name): name is string => Boolean(name));
+    const coffeeSetupBotSummary =
+      coffeeSetupBotNames.length > 0
+        ? `${coffeeSetupBotNames.slice(0, 3).join(", ")}${
+            coffeeSetupBotNames.length > 3
+              ? ` + ${coffeeSetupBotNames.length - 3} more`
+              : ""
+          }`
+        : `${coffeeSetupSelectedCount} bot${coffeeSetupSelectedCount === 1 ? "" : "s"} selected`;
     const coffeeSetupComposerTitle = coffeeBusy
       ? "Creating Coffee Group..."
       : coffeeSetupComposerReady
         ? "Create Coffee Group"
-        : "Choose a Library group";
+        : coffeeSetupSelectedCount === 0
+          ? "Select bots to begin"
+          : `Select ${coffeeSetupBotsNeeded} more bot${coffeeSetupBotsNeeded === 1 ? "" : "s"}`;
     const coffeeSetupComposerMeta = coffeeSetupComposerReady
       ? coffeeSetupBotSummary
-      : "Tables follow their Library group and can wait for new members";
+      : `Choose ${COFFEE_GROUP_MIN_SIZE_CLIENT}-${COFFEE_GROUP_MAX_SIZE_CLIENT} Library bots before forming the group`;
     const coffeeSetupComposerStyle: React.CSSProperties | undefined =
-      coffeeSelectedTableSource
+      coffeeSetupSelectedCount > 0
         ? {
             ...(composeStyle ?? {}),
             ...coffeeGroupVisualStyle({
-              id: `draft:${coffeeSelectedTableSource.id}`,
-              botGroupIds: coffeeSelectedTableSource.id === COFFEE_LIBRARY_UNGROUPED_SOURCE_ID
-                ? ungroupedCoffeeBots.map((bot) => bot.id)
-                : botLibraryGroups.find((group) => group.id === coffeeSelectedTableSource.id)?.botIds ?? [],
+              id: `draft:${coffeeSelectedBotIds.join(":")}`,
+              botGroupIds: coffeeSelectedBotIds,
             }),
           }
         : composeStyle;
@@ -141908,7 +142499,7 @@ function HomeContent(): React.JSX.Element {
           disabled={!coffeeSetupComposerReady || coffeeBusy}
           aria-label={
             coffeeSetupComposerReady
-              ? "Create Coffee Group from selected Library group"
+              ? "Create Coffee Group from selected Library bots"
               : coffeeSetupComposerMeta
           }
         >
@@ -141960,7 +142551,7 @@ function HomeContent(): React.JSX.Element {
                 ? "Join the table..."
                 : coffeeSelectionValid
                   ? "Send the first message to start..."
-                  : "Choose a Library group to create its table...";
+                  : `Choose ${COFFEE_GROUP_MIN_SIZE_CLIENT}-${COFFEE_GROUP_MAX_SIZE_CLIENT} Library bots to create the group...`;
     const interruptionCueBotId =
       coffeeLiveInterruptionCue?.interrupterBotId ??
       coffeeLiveInterruptionCue?.interruptedBotId;
@@ -145113,6 +145704,7 @@ function HomeContent(): React.JSX.Element {
             ? `${model.hostLabel ?? providerDisplayLabel(model.provider)} · ${model.label}`
             : model.label,
         provider: model.provider,
+        supportsImageInput: model.supportsImageInput === true,
       }));
     const signalBots = bots.map((bot) => ({
       id: bot.id,

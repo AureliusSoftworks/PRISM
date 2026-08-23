@@ -45,6 +45,7 @@ export const FACTORY_RESET_USER_DATA_TABLES = [
   "botcast_messages",
   "botcast_episode_segments",
   "botcast_episodes",
+  "botcast_signal_preferences",
   "botcast_shows",
   "coffee_poll_votes",
   "coffee_polls",

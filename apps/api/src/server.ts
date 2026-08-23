@@ -363,7 +363,9 @@ import {
   generateBotcastShowName,
   generateBotcastShowPremise,
   getBotcastEpisode,
+  getBotcastSignalPreferences,
   getBotcastShow,
+  linkBotcastEpisodeImageAsset,
   listBotcastEpisodes,
   listBotcastShows,
   persistCompletedBotcastPairHistory,
@@ -376,6 +378,7 @@ import {
   readBotcastShowIntroAudio,
   readBotcastShowOutdentAudio,
   recordBotcastAudioCue,
+  queueBotcastEpisodeImageContext,
   recordBotcastSessionClockHold,
   recordBotcastSoundboardCue,
   resolveBotcastProducerGuestName,
@@ -389,6 +392,7 @@ import {
   refreshBotcastShowLocalIdent,
   undoBotcastShowAudioPackage,
   updateBotcastShow,
+  updateBotcastSignalPreferences,
 } from "./botcast.ts";
 import {
   ElevenLabsMusicError,
@@ -831,10 +835,13 @@ import {
   defaultModelIdForProvider,
   getAuxiliaryProvider,
   resolveAuxiliaryOllamaModel,
+  providerModelSupportsImageInput,
   selectProvider,
 } from "./providers.ts";
 import type {
   GenerateOptions,
+  LlmProvider,
+  ProviderImageInput,
   ProviderMessage,
   ProviderName,
 } from "./providers.ts";
@@ -987,6 +994,7 @@ import {
   serializeBotFaceThinkingFrames,
   serializeBotFaceCustomSpeechPosesForStorage,
   normalizeBotAudioVoiceProfileV1,
+  normalizeBotAudioVoiceProfileForSynthesisV1,
   botLocalLaughIntensityForCue,
   botLocalLaughSynthesisText,
   projectLocalWrittenLaughterForSynthesis,
@@ -1031,6 +1039,12 @@ import {
   coffeeInterruptionTranscriptSegments,
   botCrosstalkPrimarySpeakerContent,
   botcastListenerReactionForMessage,
+  botcastEpisodeImageFallbackEmoji,
+  botcastEpisodeImageDescriptorFromFileName,
+  botcastLatestImageContextV1,
+  normalizeBotcastEpisodeImageName,
+  normalizeBotcastEpisodeImageReason,
+  normalizeBotcastEpisodeImageReplayEmoji,
   normalizeOptionalBotAudioVoiceProfileV1,
   parseStoredBotAudioVoiceProfileV1,
   parseStoredBotPowersV1,
@@ -1145,7 +1159,10 @@ import {
 import { editImage, generateImage } from "./image-provider.ts";
 import { generateLocalImageBytesByModelId } from "./image-local-by-model.ts";
 import { shouldAttemptLenientLocalImageFallback } from "./image-lenient-fallback.ts";
-import { normalizeImageAssetUpload } from "./image-asset-upload.ts";
+import {
+  imageHasVisibleTransparency,
+  normalizeImageAssetUpload,
+} from "./image-asset-upload.ts";
 import {
   buildImagePromptAttempts,
   runImagePromptAttempts,
@@ -1242,6 +1259,7 @@ import {
   tryGenerateThumbAfterPngWrite,
 } from "./image-thumb.ts";
 import {
+  extractJsonObjectPayload,
   inferBotImagePromptSuggestions,
   inferRandomImageSceneLine,
 } from "./image-prompt-suggestions.ts";
@@ -2238,7 +2256,7 @@ function resolveLocalVoiceDelivery(
   speechprint: ResolvedLocalVoiceSpeechprintV1;
   usingSystemVoice: boolean;
 } {
-  const profile = normalizeBotAudioVoiceProfileV1(profileValue);
+  const profile = normalizeBotAudioVoiceProfileForSynthesisV1(profileValue);
   const localAccent = resolveLocalAccentFallback({
     accentDefinitionId: profile.accentDefinitionId,
     pronunciationBase: profile.pronunciationBase,
@@ -6833,7 +6851,7 @@ async function contextualSignalRuntimeForEpisode(args: {
 }) {
   const snapshot = botcastRoutingSnapshot(args.episode);
   const autoSelected = snapshot?.modelSelectionKind === "auto";
-  return contextualTextRuntimeForUser({
+  const runtime = await contextualTextRuntimeForUser({
     userId: args.userId,
     user: args.user,
     requestedProvider: args.episode.provider,
@@ -6857,6 +6875,152 @@ async function contextualSignalRuntimeForEpisode(args: {
       highStakes: true,
     },
   });
+  const imageContext = botcastLatestImageContextV1(args.episode.events);
+  if (!imageContext || imageContext.phase === "dismissed") return runtime;
+  return {
+    ...runtime,
+    responseMode:
+      imageContext.provider === "local"
+        ? "local" as const
+        : "online" as const,
+    provider: imageContext.provider,
+    model: imageContext.model,
+    autoRoute: undefined,
+    autoFallbackChain: null,
+  };
+}
+
+async function normalizeSignalEpisodeImageForTurn(value: unknown): Promise<{
+  imageId: string;
+  descriptor: NonNullable<
+    ReturnType<typeof botcastEpisodeImageDescriptorFromFileName>
+  >;
+  input: { mimeType: "image/png"; data: string };
+  presentationReason: string | null;
+  replayEmoji: string;
+}> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new HttpError(400, "Signal image context is missing from this turn.");
+  }
+  const record = value as Record<string, unknown>;
+  const imageId =
+    typeof record.imageId === "string" ? record.imageId.trim().slice(0, 160) : "";
+  const fileName =
+    typeof record.fileName === "string" ? record.fileName.trim().slice(0, 240) : "";
+  const dataUrl = typeof record.dataUrl === "string" ? record.dataUrl : "";
+  const mimeType =
+    dataUrl.match(/^data:(image\/(?:png|jpeg));base64,/iu)?.[1]?.toLowerCase() ?? "";
+  const fileDescriptor = botcastEpisodeImageDescriptorFromFileName(
+    fileName,
+    mimeType,
+  );
+  if (!imageId || !fileDescriptor) {
+    throw new HttpError(
+      400,
+      "Signal accepts only .png or .jpg files whose file type matches the extension.",
+    );
+  }
+  const requestedName =
+    record.name === undefined
+      ? fileDescriptor.name
+      : normalizeBotcastEpisodeImageName(record.name);
+  if (!requestedName) {
+    throw new HttpError(400, "Signal image Name cannot be blank.");
+  }
+  const presentationReason = normalizeBotcastEpisodeImageReason(record.reason);
+  const normalized = await normalizeImageAssetUpload(dataUrl, {
+    width: 1536,
+    height: 1536,
+    fit: "inside",
+  }).catch((error) => {
+    throw new HttpError(
+      400,
+      error instanceof Error ? error.message : "Signal could not read that image.",
+    );
+  });
+  const classifiedDescriptor =
+    fileDescriptor.kind === "item" &&
+    !(await imageHasVisibleTransparency(normalized.pngBytes))
+      ? { ...fileDescriptor, kind: "picture" as const }
+      : fileDescriptor;
+  const descriptor = { ...classifiedDescriptor, name: requestedName };
+  return {
+    imageId,
+    descriptor,
+    presentationReason,
+    replayEmoji: normalizeBotcastEpisodeImageReplayEmoji(
+      record.replayEmoji,
+      botcastEpisodeImageFallbackEmoji(descriptor.kind),
+    ),
+    // Normalization is in-memory only and bounds provider payload dimensions.
+    input: {
+      mimeType: "image/png",
+      data: normalized.pngBytes.toString("base64"),
+    },
+  };
+}
+
+const SIGNAL_EPISODE_IMAGE_EMOJI_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    emoji: { type: "string", minLength: 1, maxLength: 24 },
+  },
+  required: ["emoji"],
+} as const;
+
+async function inferSignalEpisodeImageReplayEmoji(args: {
+  provider: LlmProvider;
+  model: string;
+  descriptor: NonNullable<
+    ReturnType<typeof botcastEpisodeImageDescriptorFromFileName>
+  >;
+  input: ProviderImageInput;
+  fallbackEmoji: string;
+  signal?: AbortSignal;
+}): Promise<string> {
+  const raw = await args.provider.generateResponse(
+    [
+      {
+        role: "system",
+        content: [
+          "Choose exactly one Unicode emoji that best depicts the central visible subject in the attached image.",
+          "Inspect the pixels; use the supplied name only as context.",
+          "Prefer a concrete object emoji over a mood, symbol, or category label.",
+          "Return JSON only: {\"emoji\":\"…\"}.",
+        ].join(" "),
+      },
+      {
+        role: "user",
+        content: `Signal will replay this as a ${args.descriptor.kind}. The producer currently calls it ${JSON.stringify(args.descriptor.name)}. Choose its single best visual emoji.`,
+        images: [args.input],
+      },
+    ],
+    {
+      model: args.model,
+      temperature: 0,
+      maxTokens: 48,
+      usagePurpose: "botcast_turn",
+      jsonSchema: SIGNAL_EPISODE_IMAGE_EMOJI_SCHEMA,
+      jsonSchemaName: "signal_episode_image_emoji_v1",
+      allowFinalLocalFallback: false,
+      think: false,
+      ...(args.signal ? { signal: args.signal } : {}),
+    },
+  );
+  let candidate: unknown = null;
+  try {
+    const parsed = JSON.parse(extractJsonObjectPayload(raw)) as {
+      emoji?: unknown;
+    };
+    candidate = parsed.emoji;
+  } catch {
+    candidate = raw.trim();
+  }
+  return normalizeBotcastEpisodeImageReplayEmoji(
+    candidate,
+    args.fallbackEmoji,
+  );
 }
 
 function readCoffeeTeamCreateInput(value: unknown):
@@ -19068,6 +19232,25 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       json(ctx.res, 200, { ok: true, shows: listBotcastShows(db, userId) });
     }),
+    route("GET", "/api/botcast/preferences", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        preferences: getBotcastSignalPreferences(db, userId),
+      });
+    }),
+    route("PATCH", "/api/botcast/preferences", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      json(ctx.res, 200, {
+        ok: true,
+        preferences: updateBotcastSignalPreferences(
+          db,
+          userId,
+          body.episodeImageFraming,
+        ),
+      });
+    }),
     route("POST", "/api/botcast/shows", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -20775,6 +20958,12 @@ function buildRoutes(): RouteDefinition[] {
                 body.cameraFraming as BotcastShowPatchRequest["cameraFraming"],
             }
           : {}),
+        ...(body.logoPlacement !== undefined
+          ? {
+              logoPlacement:
+                body.logoPlacement as BotcastShowPatchRequest["logoPlacement"],
+            }
+          : {}),
         ...(body.studioGlowTuning !== undefined
           ? {
               studioGlowTuning:
@@ -21505,6 +21694,102 @@ function buildRoutes(): RouteDefinition[] {
         json(ctx.res, 202, { ok: true, preparation });
       },
     ),
+    route("GET", "/api/botcast/episodes/:id/image-capability", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const episode = getBotcastEpisode(db, userId, ctx.params.id);
+      const runtime = await contextualSignalRuntimeForEpisode({
+        userId,
+        user,
+        episode,
+      });
+      const supportsImageInput = await providerModelSupportsImageInput(
+        runtime.provider,
+        runtime.model,
+        { secondaryOllamaHost: user.secondary_ollama_host },
+      );
+      json(ctx.res, 200, {
+        provider: runtime.provider,
+        model: runtime.model,
+        supportsImageInput,
+      });
+    }),
+    route("POST", "/api/botcast/episode-image/emoji", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const image = await normalizeSignalEpisodeImageForTurn(body);
+      const episodeId =
+        typeof body.episodeId === "string"
+          ? body.episodeId.trim().slice(0, 160)
+          : "";
+      const runtime = episodeId
+        ? await contextualSignalRuntimeForEpisode({
+            userId,
+            user,
+            episode: getBotcastEpisode(db, userId, episodeId),
+          })
+        : await contextualTextRuntimeForUser({
+            userId,
+            user,
+            requestedProvider: body.preferredProvider,
+            requestedResponseMode: body.responseMode,
+            modelOverride: body.modelOverride,
+            routingContext: {
+              surface: "signal",
+              inputText: image.descriptor.name,
+              outputTokens: 48,
+              highStakes: false,
+            },
+          });
+      const supportsImageInput = await providerModelSupportsImageInput(
+        runtime.provider,
+        runtime.model,
+        { secondaryOllamaHost: user.secondary_ollama_host },
+      );
+      if (!supportsImageInput) {
+        throw new HttpError(
+          409,
+          "The selected Signal model does not support image input.",
+        );
+      }
+      const fallbackEmoji = normalizeBotcastEpisodeImageReplayEmoji(
+        body.fallbackEmoji,
+        botcastEpisodeImageFallbackEmoji(image.descriptor.kind),
+      );
+      let replayEmoji = fallbackEmoji;
+      try {
+        replayEmoji = await runWithUsageSession(
+          {
+            db,
+            userId,
+            privacyScope: "normal",
+            mode: "signal",
+            surface: "signal",
+          },
+          () =>
+            inferSignalEpisodeImageReplayEmoji({
+              provider: providerFactoryOverride(
+                runtime.provider,
+                runtime.openAiApiKey,
+                user.secondary_ollama_host,
+                runtime.anthropicApiKey,
+              ),
+              model: runtime.model,
+              descriptor: image.descriptor,
+              input: image.input,
+              fallbackEmoji,
+            }),
+        );
+      } catch {
+        // Attachment still works when optional contextual emoji inference fails.
+      }
+      json(ctx.res, 200, {
+        ok: true,
+        descriptor: image.descriptor,
+        replayEmoji,
+      });
+    }),
     route("POST", "/api/botcast/episodes/:id/advance", async (ctx) => {
       const userId = requireAuth(ctx);
       invalidateTurnPreparation(
@@ -21567,6 +21852,7 @@ function buildRoutes(): RouteDefinition[] {
           : undefined;
       const cue: BotcastProducerCue | undefined =
         cueKind === "ask_about" ||
+        cueKind === "present_image" ||
         cueKind === "refocus" ||
         cueKind === "press_harder" ||
         cueKind === "move_on" ||
@@ -21579,6 +21865,10 @@ function buildRoutes(): RouteDefinition[] {
                 : {}),
               ...(typeof cueRecord?.directQuote === "string"
                 ? { directQuote: cueRecord.directQuote }
+                : {}),
+              ...(cueKind === "present_image" &&
+              typeof cueRecord?.imageId === "string"
+                ? { imageId: cueRecord.imageId }
                 : {}),
             }
           : undefined;
@@ -21638,18 +21928,103 @@ function buildRoutes(): RouteDefinition[] {
           "Signal guest thinking time requires a Producer guest answer.",
         );
       }
-      const frozenEpisode = getBotcastEpisode(db, userId, ctx.params.id);
+      let frozenEpisode = getBotcastEpisode(db, userId, ctx.params.id);
       if (frozenEpisode.playbackMode === "watch") {
         throw new HttpError(
           409,
           "Watch a show advances through its background bake, not producer controls.",
         );
       }
-      const runtime = await contextualSignalRuntimeForEpisode({
+      const signalEpisodeImage =
+        body.episodeImage === undefined
+          ? null
+          : await normalizeSignalEpisodeImageForTurn(body.episodeImage);
+      let runtime = await contextualSignalRuntimeForEpisode({
         userId,
         user,
         episode: frozenEpisode,
       });
+      const existingImageContext = botcastLatestImageContextV1(
+        frozenEpisode.events,
+      );
+      if (cue?.kind === "present_image") {
+        if (
+          !signalEpisodeImage ||
+          !cue.imageId ||
+          signalEpisodeImage.imageId !== cue.imageId
+        ) {
+          throw new HttpError(
+            400,
+            "Presenting a Signal image requires the active ephemeral upload.",
+          );
+        }
+        const retryingSameQueuedImage = Boolean(
+          existingImageContext?.phase === "queued" &&
+            existingImageContext.imageId === signalEpisodeImage.imageId &&
+            existingImageContext.kind === signalEpisodeImage.descriptor.kind &&
+            existingImageContext.name === signalEpisodeImage.descriptor.name &&
+            existingImageContext.mimeType ===
+              signalEpisodeImage.descriptor.mimeType,
+        );
+        if (existingImageContext && !retryingSameQueuedImage) {
+          throw new HttpError(409, "Signal accepts one image per episode.");
+        }
+        const supportsImageInput = await providerModelSupportsImageInput(
+          runtime.provider,
+          runtime.model,
+          { secondaryOllamaHost: user.secondary_ollama_host },
+        );
+        if (!supportsImageInput) {
+          throw new HttpError(
+            409,
+            "The active Signal model does not support image input. Choose a vision-capable model for a new episode.",
+          );
+        }
+        if (!retryingSameQueuedImage) {
+          frozenEpisode = queueBotcastEpisodeImageContext(
+            db,
+            userId,
+            frozenEpisode.id,
+            {
+              imageId: signalEpisodeImage.imageId,
+              ...signalEpisodeImage.descriptor,
+              provider: runtime.provider,
+              model: runtime.model,
+              replayEmoji: signalEpisodeImage.replayEmoji,
+            },
+          );
+        }
+      } else if (
+        existingImageContext &&
+        existingImageContext.phase !== "dismissed"
+      ) {
+        if (
+          !signalEpisodeImage ||
+          signalEpisodeImage.imageId !== existingImageContext?.imageId ||
+          signalEpisodeImage.descriptor.kind !== existingImageContext.kind ||
+          signalEpisodeImage.descriptor.name !== existingImageContext.name ||
+          signalEpisodeImage.descriptor.mimeType !== existingImageContext.mimeType
+        ) {
+          throw new HttpError(
+            409,
+            "The original ephemeral Signal image must remain attached until the discussion ends.",
+          );
+        }
+      } else if (signalEpisodeImage) {
+        throw new HttpError(
+          409,
+          "That Signal image discussion has already ended.",
+        );
+      }
+      if (existingImageContext || cue?.kind === "present_image") {
+        // Re-resolve after the queue event so every image turn stays pinned to
+        // the same capable provider/model chosen for the introduction.
+        runtime = await contextualSignalRuntimeForEpisode({
+          userId,
+          user,
+          episode: frozenEpisode,
+        });
+      }
       if (runtime.provider === "local") {
         await claimLiveLocalModelLane({
           owner: `signal:${userId}:${ctx.params.id}`,
@@ -21715,6 +22090,20 @@ function buildRoutes(): RouteDefinition[] {
                 ...(powerTheme ? { theme: powerTheme } : {}),
                 providerFactory: providerFactoryOverride,
                 auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
+                ...(signalEpisodeImage
+                  ? {
+                      signalEpisodeImage: {
+                        imageId: signalEpisodeImage.imageId,
+                        input: signalEpisodeImage.input,
+                        ...(signalEpisodeImage.presentationReason
+                          ? {
+                              presentationReason:
+                                signalEpisodeImage.presentationReason,
+                            }
+                          : {}),
+                      },
+                    }
+                  : {}),
               },
             ),
         );
@@ -21899,11 +22288,19 @@ function buildRoutes(): RouteDefinition[] {
       const groupBotIds = Array.isArray(body.groupBotIds)
         ? body.groupBotIds
         : undefined;
+      const creationProfiles = loadCoffeeGroupProfiles(
+        db,
+        userId,
+        (groupBotIds ?? []).filter(
+          (botId): botId is string =>
+            typeof botId === "string" && botId.trim().length > 0,
+        ),
+      );
       const pendingSynthesisItems: CoffeeGroupSynthesisItem[] = [];
       if (
         shouldGenerateCoffeeGroupNameFromInput(
           typeof body.name === "string" ? body.name : null,
-          [],
+          creationProfiles,
         )
       ) {
         pendingSynthesisItems.push("name");
@@ -21914,22 +22311,19 @@ function buildRoutes(): RouteDefinition[] {
       // Atmosphere stays "pending" but is never auto-run: media assets are
       // synthesized on demand from the group's own controls (Debate parity).
       pendingSynthesisItems.push("atmosphere");
-      if (!libraryGroupId) {
-        throw new HttpError(
-          400,
-          "Choose one Library group or Ungrouped for this Coffee table.",
-        );
+      if (!libraryGroupId && groupBotIds === undefined) {
+        throw new HttpError(400, "Choose 2–5 Library bots for this Coffee Group.");
       }
-      if (groupBotIds !== undefined) {
+      if (libraryGroupId && groupBotIds !== undefined) {
         throw new HttpError(
           400,
-          "Coffee table membership comes from its Library group, not a bot selection.",
+          "Choose explicit Coffee Group bots or a legacy Library source, not both.",
         );
       }
       const group = createCoffeeGroup(db, userId, {
         name: body.name,
         ethos: body.ethos,
-        libraryGroupId,
+        ...(libraryGroupId ? { libraryGroupId } : { groupBotIds }),
         coffeeSettings: body.coffeeSettings,
         synthesisPending: pendingSynthesisItems,
         ...(body.modelChoiceByProvider !== undefined
@@ -22016,12 +22410,6 @@ function buildRoutes(): RouteDefinition[] {
       const groupBotIds = Array.isArray(body.groupBotIds)
         ? body.groupBotIds
         : undefined;
-      if (groupBotIds !== undefined) {
-        throw new HttpError(
-          400,
-          "Coffee table membership comes from its Library group, not a bot selection.",
-        );
-      }
       const user = getUserRow(userId);
       const group = await updateCoffeeGroupWithGeneratedTopics(
         db,
@@ -27151,13 +27539,15 @@ function buildRoutes(): RouteDefinition[] {
       // pipeline. The account-level legacy system-voice default must not
       // silently replace it: operating-system voices have no style surface,
       // so the authored accent would vanish entirely.
+      const synthesisProfile =
+        normalizeBotAudioVoiceProfileForSynthesisV1(requestedProfile);
       const authoredLocalAccentIdentity =
-        Boolean(requestedProfile.accentDefinitionId) ||
-        (requestedProfile.speechprintInfluence !== undefined &&
-          requestedProfile.speechprintInfluence !== "none") ||
-        Boolean(requestedProfile.pronunciationMapPoint);
+        Boolean(synthesisProfile.accentDefinitionId) ||
+        (synthesisProfile.speechprintInfluence !== undefined &&
+          synthesisProfile.speechprintInfluence !== "none") ||
+        Boolean(synthesisProfile.pronunciationMapPoint);
       const profile = normalizeBotAudioVoiceProfileV1({
-        ...requestedProfile,
+        ...synthesisProfile,
         elevenLabsVoiceId: resolvedElevenLabsVoiceId,
         systemVoiceName:
           requestedProfile.systemVoiceName ??
@@ -28996,6 +29386,8 @@ function buildRoutes(): RouteDefinition[] {
             ...savedSettings,
             hubAtmosphereEnabled:
               committedUser.hub_atmosphere_enabled !== 0,
+            debateWhodunnitReuseSynthesizedExhibits:
+              committedUser.debate_whodunnit_reuse_synthesized_exhibits === 1,
             hasOpenAiApiKey: Boolean(committedUser.openai_key_ciphertext),
             hasAnthropicApiKey: Boolean(committedUser.anthropic_key_ciphertext),
             hasElevenLabsApiKey: Boolean(
@@ -30420,6 +30812,44 @@ function buildRoutes(): RouteDefinition[] {
         );
       }
       const kind = body.kind;
+      // Signal only persists an episode image after the player explicitly keeps
+      // it on the outro. Derive the participant from that tenant-owned episode;
+      // never accept a client-supplied bot ID or turn an item into an owner image.
+      const signalEpisodeId =
+        kind === "item" && typeof body.signalEpisodeId === "string"
+          ? body.signalEpisodeId.trim().slice(0, 160)
+          : null;
+      if (kind === "item" && body.signalEpisodeId !== undefined && !signalEpisodeId) {
+        throw new HttpError(400, "Signal item save requires a valid episode.");
+      }
+      const signalGuest = signalEpisodeId
+        ? (db
+            .prepare(
+              `SELECT episode.guest_bot_id
+                 FROM botcast_episodes AS episode
+                 JOIN bots AS guest
+                   ON guest.id = episode.guest_bot_id
+                  AND guest.user_id = episode.user_id
+                WHERE episode.id = ?
+                  AND episode.user_id = ?
+                  AND episode.guest_kind = 'bot'`,
+            )
+            .get(signalEpisodeId, userId) as { guest_bot_id: string } | undefined)
+        : undefined;
+      if (signalEpisodeId && !signalGuest) {
+        throw new HttpError(
+          400,
+          "Signal item save requires an episode with an owned bot guest.",
+        );
+      }
+      if (signalEpisodeId) {
+        if (
+          typeof body.dataUrl !== "string" ||
+          !/^data:image\/png;base64,/iu.test(body.dataUrl)
+        ) {
+          throw new HttpError(400, "Only transparent PNG Signal items can be kept.");
+        }
+      }
       const normalized = await normalizeImageAssetUpload(body.dataUrl, {
         ...(kind === "slate_cover"
           ? { width: 1536, height: 2048, fit: "cover" as const }
@@ -30434,8 +30864,12 @@ function buildRoutes(): RouteDefinition[] {
           error instanceof Error ? error.message : "The image could not be normalized.",
         );
       });
+      if (signalEpisodeId && !(await imageHasVisibleTransparency(normalized.pngBytes))) {
+        throw new HttpError(400, "Only transparent PNG Signal items can be kept.");
+      }
       const provenanceByKind = {
         general_image: { origin: "images_panel", purpose: "gallery" },
+        item: { origin: "signal_item", purpose: "signal_item" },
         debate_exhibit: {
           origin: "debate_exhibit",
           purpose: DEBATE_EXHIBIT_IMAGE_PURPOSE,
@@ -30462,6 +30896,9 @@ function buildRoutes(): RouteDefinition[] {
           ? body.title.trim().slice(0, 240)
           : `Uploaded ${kind.replaceAll("_", " ")}`;
       const imageId = randomId(12);
+      const relatedBotIds = signalGuest
+        ? serializeImageRelatedBotIds([signalGuest.guest_bot_id])
+        : "[]";
       const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
       const createdAt = new Date().toISOString();
       try {
@@ -30471,11 +30908,12 @@ function buildRoutes(): RouteDefinition[] {
           `INSERT INTO images
              (id, user_id, related_bot_ids, origin, prompt, revised_prompt, url,
               size, quality, provider, model, local_rel_path, purpose, created_at)
-           VALUES (?, ?, '[]', ?, ?, NULL, '', ?, 'standard', 'upload',
+           VALUES (?, ?, ?, ?, ?, NULL, '', ?, 'standard', 'upload',
                    'asset-upload', ?, ?, ?)`,
         ).run(
           imageId,
           userId,
+          relatedBotIds,
           provenance.origin,
           title,
           `${normalized.width}x${normalized.height}`,
@@ -30490,6 +30928,23 @@ function buildRoutes(): RouteDefinition[] {
       const asset = getImageAssetSetForImage(db, userId, imageId);
       if (!asset) {
         throw new Error("The uploaded image could not be registered in the local asset library.");
+      }
+      if (signalEpisodeId) {
+        try {
+          linkBotcastEpisodeImageAsset(
+            db,
+            userId,
+            signalEpisodeId,
+            imageId,
+          );
+        } catch (error) {
+          db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
+            imageId,
+            userId,
+          );
+          tryUnlinkGeneratedImageFile(localRelPath);
+          throw error;
+        }
       }
       try {
         const { generateSmartAutomaticTags, applyAutomaticTagsToSet } =

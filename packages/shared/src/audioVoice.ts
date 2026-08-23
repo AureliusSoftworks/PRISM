@@ -681,6 +681,8 @@ export interface BotAudioVoiceProfileV2 {
   /** Provider-neutral Accent Map identity. Legacy profiles resolve from the
    * Speechprint influence and pronunciation foundation instead. */
   accentDefinitionId?: VoiceAccentDefinitionId | null;
+  /** Whether the saved Accent Map is allowed to shape synthesized speech. */
+  accentPronunciationEnabled?: boolean;
   /** Word-side twin of the Accent pin: shapes what the bot writes, never how
    * text is pronounced. Authored identity; absent means plain speech. */
   vernacularId?: BotVernacularId | null;
@@ -865,6 +867,7 @@ export interface BotLocalVoiceProfileV1 {
   };
   pronunciation?: {
     base: LocalVoicePronunciationBase;
+    accentPronunciationEnabled?: boolean;
     accentDefinitionId?: VoiceAccentDefinitionId | null;
     vernacularId?: BotVernacularId | null;
     mapPoint?: LocalVoicePronunciationMapPoint;
@@ -1926,6 +1929,7 @@ function flattenBotAudioVoiceProfileV3Record(
     accentLocale: accent.locale,
     accentMode: accent.mode,
     pronunciationBase: pronunciation.base,
+    accentPronunciationEnabled: pronunciation.accentPronunciationEnabled,
     accentDefinitionId:
       pronunciation.accentDefinitionId ?? value.accentDefinitionId,
     vernacularId: pronunciation.vernacularId ?? value.vernacularId,
@@ -2040,6 +2044,18 @@ export function normalizeBotAudioVoiceProfileV1(
     record.vernacularId,
     fallbackProfile.vernacularId ?? null,
   );
+  const accentPronunciationEnabled =
+    typeof record.accentPronunciationEnabled === "boolean"
+      ? record.accentPronunciationEnabled
+      : Boolean(
+          accentDefinitionId ||
+            pronunciationMapPoint ||
+            speechprintInfluence !== "none" ||
+            normalizeLocalVoicePronunciationBase(
+              record.pronunciationBase,
+              fallbackProfile.pronunciationBase ?? "follow-voice",
+            ) !== "follow-voice",
+        );
   return {
     v: 2,
     enabled: legacy ? true : record.enabled !== false,
@@ -2108,6 +2124,10 @@ export function normalizeBotAudioVoiceProfileV1(
       record.pronunciationBase,
       fallbackProfile.pronunciationBase ?? "follow-voice",
     ),
+    ...(typeof record.accentPronunciationEnabled === "boolean" ||
+    accentPronunciationEnabled
+      ? { accentPronunciationEnabled }
+      : {}),
     ...(accentDefinitionId ? { accentDefinitionId } : {}),
     ...(vernacularId ? { vernacularId } : {}),
     ...(pronunciationMapPoint ? { pronunciationMapPoint } : {}),
@@ -2338,6 +2358,11 @@ export function normalizeBotAudioVoiceProfileV3(
       },
       pronunciation: {
         base: normalizeLocalVoicePronunciationBase(profile.pronunciationBase),
+        ...(profile.accentPronunciationEnabled !== undefined
+          ? {
+              accentPronunciationEnabled: profile.accentPronunciationEnabled,
+            }
+          : {}),
         ...(profile.accentDefinitionId
           ? { accentDefinitionId: profile.accentDefinitionId }
           : {}),
@@ -2398,6 +2423,25 @@ export function normalizeBotAudioVoiceProfileV3(
     ...(avatarSfx ? { avatarSfx } : {}),
     ...(avatarSfxPrompt ? { avatarSfxPrompt } : {}),
     ...(profile.avatarSfxMuted ? { avatarSfxMuted: true } : {}),
+  };
+}
+
+/** Keep a saved Accent Map editable while bypassing every pronunciation and
+ * Speechprint transform at synthesis when its per-bot switch is off. */
+export function normalizeBotAudioVoiceProfileForSynthesisV1(
+  value: unknown,
+): BotAudioVoiceProfileV2 {
+  const profile = normalizeBotAudioVoiceProfileV1(value);
+  if (profile.accentPronunciationEnabled) return profile;
+  const {
+    accentDefinitionId: _accentDefinitionId,
+    pronunciationMapPoint: _pronunciationMapPoint,
+    ...withoutAccentMap
+  } = profile;
+  return {
+    ...withoutAccentMap,
+    pronunciationBase: "follow-voice",
+    speechprintInfluence: "none",
   };
 }
 
@@ -2517,6 +2561,26 @@ export function normalizeElevenLabsNativeAccentHint(
     .toLocaleLowerCase()
     .slice(0, 96);
   return normalized || null;
+}
+
+/** Distinguish a user-authored/new-schema Accent Map switch from legacy
+ * profiles whose enabled state had to be inferred from their saved pin. */
+export function botAudioVoiceProfileHasExplicitAccentPronunciationSetting(
+  value: unknown,
+): boolean {
+  let candidate = value;
+  if (typeof candidate === "string") {
+    try {
+      candidate = JSON.parse(candidate);
+    } catch {
+      return false;
+    }
+  }
+  const record = voiceProfileObject(candidate);
+  if (typeof record.accentPronunciationEnabled === "boolean") return true;
+  const local = voiceProfileObject(record.local);
+  const pronunciation = voiceProfileObject(local.pronunciation);
+  return typeof pronunciation.accentPronunciationEnabled === "boolean";
 }
 
 /** Null is a deliberate absence for per-user overrides; malformed values are ignored. */

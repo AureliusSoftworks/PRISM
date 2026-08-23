@@ -43,6 +43,49 @@ export function marketplaceBotEyeCharacterIsSideways(value: unknown): boolean {
 export type BotMarketplaceEntryInstallState = "available" | "installed";
 export type BotMarketplaceThemeInstallState = "available" | "partial" | "installed";
 
+const ACCENT_PRONUNCIATION_DEFAULT_THEME_IDS = new Set([
+  "founders-nation-builders",
+  "classical-wisdom",
+  "visionary-artists",
+  "power-strategy",
+  "modern-minds",
+  "science-invention",
+  "justice-reform",
+  "story-literature",
+]);
+
+/** Curated real-person entries on mixed or ungrouped Marketplace shelves.
+ * Fictional and original Marketplace personas intentionally stay out. */
+const ACCENT_PRONUNCIATION_DEFAULT_ENTRY_IDS = new Set([
+  "abraham-lincoln",
+  "adolf-hitler",
+  "barack-obama",
+  "bernie-sanders",
+  "bob-ross",
+  "dante-alighieri",
+  "donald-trump",
+  "elon-musk",
+  "eratosthenes",
+  "gavin-newsom",
+  "guru-nanak",
+  "jesus-christ",
+  "jordan-peterson",
+  "joseph-smith-jr",
+  "joseph-stalin",
+  "khloe-kardashian",
+  "kim-kardashian",
+  "kourtney-kardashian-barker",
+  "kris-jenner",
+  "laozi",
+  "marie-antoinette",
+  "maximilien-robespierre",
+  "mr-rogers",
+  "richard-dawkins",
+  "rumi",
+  "sam-harris",
+  "the-buddha",
+]);
+
 export interface BotMarketplaceTheme {
   id: string;
   name: string;
@@ -72,6 +115,19 @@ export interface BotMarketplaceEntry {
   powers?: BotPowerV1[];
   /** When set, this bot is hidden unless the build branch matches exactly. */
   branchLock?: PrismMarketplaceBranchLock | null;
+}
+
+/** Marketplace curation, not a name heuristic, decides which portrayals begin
+ * with Accent Map pronunciation active. The player can still override it. */
+export function marketplaceAccentPronunciationDefault(
+  entry: Pick<BotMarketplaceEntry, "id" | "themeIds">,
+): boolean {
+  return (
+    ACCENT_PRONUNCIATION_DEFAULT_ENTRY_IDS.has(entry.id) ||
+    entry.themeIds.some((themeId) =>
+      ACCENT_PRONUNCIATION_DEFAULT_THEME_IDS.has(themeId),
+    )
+  );
 }
 
 export interface BotMarketplaceManifest {

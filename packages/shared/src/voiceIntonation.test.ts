@@ -102,6 +102,15 @@ describe("dialect intonation contours", () => {
       voiceIntonationPlanForProfile({ accentDefinitionId: "american-english" }),
       null,
     );
+    assert.equal(
+      voiceIntonationPlanForProfile({
+        accentPronunciationEnabled: false,
+        accentDefinitionId: "indian-english",
+        speechprintInfluence: "indian-english",
+        speechprintStrength: "strong",
+      }),
+      null,
+    );
   });
 
   it("samples deterministically, lands terminal keyframes, and damps short phrases", () => {

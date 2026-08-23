@@ -53,12 +53,17 @@ const STORAGE_APPLETS: Record<StorageAppletId, StorageAppletDef> = {
     id: "general",
     label: "General",
     color: "#7ec8b8",
-    kinds: ["general_image"],
+    kinds: ["general_image", "item"],
     children: [
       {
         id: "general_image",
         kind: "general_image",
         label: "Generated images",
+      },
+      {
+        id: "item",
+        kind: "item",
+        label: "Items",
       },
     ],
     showWhenEmpty: true,

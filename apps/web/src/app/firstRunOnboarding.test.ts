@@ -7,6 +7,7 @@ import {
   FIRST_RUN_SETUP_STEPS,
   FIRST_RUN_BATCH_FOUNDRY_GUIDANCE,
   FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE,
+  FIRST_RUN_COFFEE_GROUP_GUIDANCE,
   clampFirstRunSetupStepIndex,
   clearFirstRunSetupCompletion,
   firstRunSetupProgressPercent,
@@ -130,6 +131,14 @@ describe("first-run onboarding", () => {
     assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /stays fixed/u);
     assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /nothing begins/u);
     assert.match(pageSource, /FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE/u);
+  });
+
+  it("teaches permanent Coffee Group membership separately from attendance", () => {
+    assert.match(FIRST_RUN_COFFEE_GROUP_GUIDANCE, /2–5 Library bots/u);
+    assert.match(FIRST_RUN_COFFEE_GROUP_GUIDANCE, /permanent members/u);
+    assert.match(FIRST_RUN_COFFEE_GROUP_GUIDANCE, /Invited and Away/u);
+    assert.match(FIRST_RUN_COFFEE_GROUP_GUIDANCE, /original cast/u);
+    assert.match(pageSource, /FIRST_RUN_COFFEE_GROUP_GUIDANCE/u);
   });
 
   it("names chat routing separately from image and voice routing", () => {

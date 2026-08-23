@@ -4,6 +4,7 @@ import {
   LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION,
   localVoicePronunciationOverrideIsActive,
   normalizeBotAudioVoiceProfileV1,
+  normalizeBotAudioVoiceProfileForSynthesisV1,
   normalizeLocalVoiceEnginePreference,
   normalizeLocalVoicePronunciationBase,
   normalizeLocalVoiceSpeechprintInfluence,
@@ -215,7 +216,7 @@ export function resolveLocalVoicePronunciation(args: {
   localEngine: LocalVoiceEngineDecisionV1;
   usingSystemVoice: boolean;
 }): ResolvedLocalVoicePronunciationV1 {
-  const profile = normalizeBotAudioVoiceProfileV1(args.profile);
+  const profile = normalizeBotAudioVoiceProfileForSynthesisV1(args.profile);
   const localAccent = resolveLocalAccentFallback({
     accentDefinitionId: profile.accentDefinitionId,
     pronunciationBase: profile.pronunciationBase,
@@ -259,7 +260,7 @@ export function resolveLocalVoiceSpeechprint(args: {
   usingSystemVoice: boolean;
   pronunciation?: ResolvedLocalVoicePronunciationV1;
 }): ResolvedLocalVoiceSpeechprintV1 {
-  const profile = normalizeBotAudioVoiceProfileV1(args.profile);
+  const profile = normalizeBotAudioVoiceProfileForSynthesisV1(args.profile);
   const localAccent = resolveLocalAccentFallback({
     accentDefinitionId: profile.accentDefinitionId,
     pronunciationBase: profile.pronunciationBase,

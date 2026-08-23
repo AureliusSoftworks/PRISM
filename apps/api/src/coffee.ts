@@ -1,10 +1,10 @@
 /**
- * Coffee mode — timed live sessions for up to 3 reactive bots drawn from a
+ * Coffee mode — timed live sessions for up to 5 reactive bots drawn from a
  * larger saved group.
  *
  * v0 architecture (per the Hub Modes Roadmap, Phase 1):
- *   1. The user invites a group and Coffee seats at most 4 of them for the
- *      live session. Legacy 2-5 bot sessions remain loadable and replayable.
+ *   1. The user chooses a 2-5 bot group and Coffee seats up to all 5 for the
+ *      live session. Saved sessions retain their original frozen cast.
  *   2. Each user or timed autonomous turn triggers a small router LLM call
  *      that picks ONE bot from the group based on personality + recent
  *      conversation context. The router runs on the local auxiliary model
@@ -372,8 +372,8 @@ export const COFFEE_GROUP_MAX_SIZE = 5;
 export const COFFEE_LIBRARY_UNGROUPED_SOURCE_ID = "builtin:ungrouped";
 /** Mandatory floor for newly invited tables and sessions. */
 export const COFFEE_GROUP_INVITE_MIN_SIZE = 2;
-/** Hard live-performance ceiling for newly created Coffee sessions. */
-export const COFFEE_SESSION_ATTENDEE_MAX_SIZE = 4;
+/** The authored five-seat table is the live-session ceiling. */
+export const COFFEE_SESSION_ATTENDEE_MAX_SIZE = 5;
 
 /** Route-boundary invite guard; stored sessions never pass through this. */
 export function assertCoffeeInviteBotCount(rawBotIds: unknown): void {
@@ -392,7 +392,7 @@ export function assertCoffeeInviteBotCount(rawBotIds: unknown): void {
   }
 }
 
-/** New one-off sessions must resolve 2-4 seats before the live table opens. */
+/** New one-off sessions must resolve 2-5 seats before the live table opens. */
 export function assertCoffeeSessionAttendeeCount(rawBotIds: unknown): void {
   assertCoffeeInviteBotCount(rawBotIds);
   const occupied = new Set(
@@ -8556,9 +8556,11 @@ function mapCoffeeGroupRow(
   const resolvedProfiles = resolveCoffeeGroupProfiles(db, row.user_id, inviteBotIds);
   const availableBotIds = new Set(resolvedProfiles.profiles.map((profile) => profile.id));
   const coffeeSeatBotIds = resolvedSource && !resolvedSource.unavailable
-    ? resolvedSource.botIds.filter((id) => availableBotIds.has(id))
-    : storedSeatBotIds.map((id) => id && availableBotIds.has(id) ? id : null);
-  const botGroupIds = coffeeSeatBotIds.filter((id): id is string => typeof id === "string");
+    ? resolvedSource.botIds
+    : storedSeatBotIds;
+  const botGroupIds = coffeeSeatBotIds.filter(
+    (id): id is string => typeof id === "string" && availableBotIds.has(id),
+  );
   const moodSummary = parseCoffeeMoodSummary(row.mood_summary);
   const starterTopics = parseStoredCanonicalCoffeeGroupStarterTopics(
     row.starter_topics,
@@ -9027,9 +9029,6 @@ export function updateCoffeeGroup(
 ): CoffeeGroup {
   const row = loadCoffeeGroupRow(db, userId, groupId);
   if (!row) throw new Error("Coffee group not found.");
-  if (row.library_group_id && input.groupBotIds !== undefined) {
-    throw new Error("Coffee table membership is managed from its Library group.");
-  }
   const now = new Date().toISOString();
   const updates: string[] = [];
   const values: SQLInputValue[] = [];
@@ -9149,6 +9148,11 @@ export function updateCoffeeGroup(
     );
     updates.push("starter_topics = ?");
     values.push(serializeCanonicalCoffeeGroupStarterTopics(starterTopics));
+    if (row.library_group_id) {
+      // Explicit Coffee-side roster editing restores the fixed five-seat
+      // contract for older Library-linked tables without rewriting sessions.
+      updates.push("library_group_id = NULL");
+    }
     upsertCoffeeGroupSeats(db, userId, groupId, seatBotIds, now);
     insertCoffeeGroupEvent(
       db,
@@ -18665,8 +18669,14 @@ export async function createCoffeeConversationFromGroup(
     input.deferTopicSelection === true
       ? false
       : group.topicSelectionMode === "auto";
+  const availableGroupBotIds = new Set(group.botGroupIds);
+  const availableSeatBotIds = group.coffeeSeatBotIds.map((botId) =>
+    typeof botId === "string" && availableGroupBotIds.has(botId)
+      ? botId
+      : null,
+  );
   const exclusionAttendance = applyCoffeeGroupSessionExclusions(
-    group.coffeeSeatBotIds,
+    availableSeatBotIds,
     input.excludedBotIds
   );
   const experienceMode = isCoffeeExperienceMode(input.experienceMode)
@@ -18679,7 +18689,7 @@ export async function createCoffeeConversationFromGroup(
         moodAbsentBotIds: [],
       }
     : applyCoffeeMoodSessionNoShows({
-        seatBotIds: group.coffeeSeatBotIds,
+        seatBotIds: availableSeatBotIds,
         existingAbsentBotIds: exclusionAttendance.absentBotIds,
         socialByBotId: loadRecentCoffeeGroupSocialState(db, userId, group.id, group.botGroupIds),
         random: llm?.attendanceRandom,
@@ -18692,7 +18702,7 @@ export async function createCoffeeConversationFromGroup(
     ...moodAttendance.absentBotIds,
     ...capacityAttendance.capacityAbsentBotIds,
   ]);
-  const absentBotIds = group.coffeeSeatBotIds.filter(
+  const absentBotIds = availableSeatBotIds.filter(
     (botId): botId is string =>
       typeof botId === "string" && combinedAbsentSet.has(botId),
   );

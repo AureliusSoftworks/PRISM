@@ -6,6 +6,7 @@ import {
   createCoffeeConversationFromGroup,
   createCoffeeGroup,
   getCoffeeGroup,
+  updateCoffeeGroup,
 } from "../coffee.ts";
 import { replaceLibraryGroups } from "../library-groups.ts";
 import { closeTestDatabase, createTestDatabase } from "../test-support.ts";
@@ -65,6 +66,53 @@ describe("Coffee Library table sources", () => {
         groups: [{ id: "group:salon", name: "Salon", botIds: ["bot-1", "bot-3", "bot-4"] }],
       });
       assert.deepEqual(getCoffeeGroup(db, "u1", table.id)?.botGroupIds, ["bot-1", "bot-3", "bot-4"]);
+    } finally {
+      closeTestDatabase(db);
+    }
+  });
+
+  it("turns a legacy Library-linked table into a fixed five-seat roster when explicitly edited", () => {
+    const db = fixture();
+    try {
+      replaceLibraryGroups({
+        db,
+        userId: "u1",
+        groups: [{
+          id: "group:salon",
+          name: "Salon",
+          botIds: ["bot-1", "bot-2", "bot-3"],
+        }],
+      });
+      const table = createCoffeeGroup(db, "u1", {
+        libraryGroupId: "group:salon",
+      });
+      const updated = updateCoffeeGroup(db, "u1", table.id, {
+        groupBotIds: ["bot-1", null, "bot-4", null, null],
+        starterTopics: table.starterTopics,
+      });
+      assert.equal(updated.libraryGroupId, null);
+      assert.deepEqual(updated.botGroupIds, ["bot-1", "bot-4"]);
+      assert.deepEqual(updated.coffeeSeatBotIds, [
+        "bot-1",
+        null,
+        "bot-4",
+        null,
+        null,
+      ]);
+
+      replaceLibraryGroups({
+        db,
+        userId: "u1",
+        groups: [{
+          id: "group:salon",
+          name: "Salon",
+          botIds: ["bot-2", "bot-3", "bot-5"],
+        }],
+      });
+      assert.deepEqual(getCoffeeGroup(db, "u1", table.id)?.botGroupIds, [
+        "bot-1",
+        "bot-4",
+      ]);
     } finally {
       closeTestDatabase(db);
     }

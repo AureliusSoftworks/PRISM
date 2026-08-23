@@ -2073,6 +2073,12 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       UNIQUE(user_id, host_bot_id),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS botcast_signal_preferences (
+      user_id TEXT PRIMARY KEY,
+      episode_image_framing_json TEXT NOT NULL DEFAULT '{}',
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS botcast_host_recovery_candidates (
       user_id TEXT NOT NULL,
       show_id TEXT NOT NULL,
