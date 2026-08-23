@@ -66,6 +66,7 @@ import {
   botcastCrosstalkFloorOutcomeV1,
   botcastPlanDirectionalIrritationForMeaningfulCutoffV1,
   botcastPreparedTurnCursor,
+  botcastPowerInterruptionCanTargetV1,
   botcastPowerInterruptionPlanV1,
   botcastPowerInterruptedContentV1,
   botcastSocialSilenceChanceV1,
@@ -941,6 +942,36 @@ function observantPowers(): string {
         awareness: "unnoticed",
       }],
       ruleLabels: ["Other bots are unpowered"],
+    },
+  }]);
+}
+
+function enlightenedPowers(): string {
+  const name = "Enlightened";
+  const intent =
+    "Receive a curated stage brief and pierce delivery filters while soft Powers still apply.";
+  return JSON.stringify([{
+    version: 1,
+    id: "enlightened",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1(name, intent),
+      selfCue: "Use a curated stage brief without exposing private direction.",
+      observerCue: "",
+      effects: [
+        { type: "stage_awareness" },
+        {
+          type: "power_immunity",
+          scope: "holder",
+          targets: "other_bots",
+          awareness: "unnoticed",
+        },
+      ],
+      ruleLabels: ["Stage awareness", "Pierces delivery filters"],
     },
   }]);
 }
@@ -5213,6 +5244,17 @@ describe("Botcast persistence and isolation", () => {
     assert.match(prompt, /Mara says the receipt still matters/u);
     assert.doesNotMatch(prompt, /PRIVATE PRODUCER SECRET|RAW ENLIGHTENED PROMPT/u);
     assert.doesNotMatch(prompt, /blarg zorp/u);
+    assert.equal(
+      botcastPowerInterruptionCanTargetV1(mufflingPressure, enlightened),
+      true,
+    );
+    assert.equal(
+      botcastPowerInterruptionCanTargetV1(
+        mufflingPressure,
+        JSON.parse(observantPowers()),
+      ),
+      false,
+    );
   });
 
   it("keeps muted Signal listener reactions strictly visual", () => {
@@ -6325,7 +6367,7 @@ describe("Botcast persistence and isolation", () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
     const payoff =
-      "The pause makes the contradiction clearer: the copied tool still cannot copy practiced judgment.";
+      "The pause makes the contradiction clearer: the copied tool still cannot copy practiced judgment. What consequence would prove that failure?";
     const provider = recordingProvider(
       [
         "Welcome to the show. I am Mara Vale, and Ivo Stone joins me to examine what silence reveals.",
@@ -11058,7 +11100,7 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("makes session-start intimidation a bounded, replayable Signal pressure", async () => {
+  it("makes session-start intimidation a bounded, replayable Signal pressure for Enlightened", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
     const provider = recordingProvider(
@@ -11070,6 +11112,9 @@ describe("Botcast persistence and isolation", () => {
       captures,
     );
     try {
+      db.prepare(
+        "UPDATE bots SET powers_json = ? WHERE id = 'host-1'",
+      ).run(enlightenedPowers());
       db.prepare(
         "UPDATE bots SET name = 'Darth Vader', powers_json = ? WHERE id = 'guest-1'",
       ).run(intimidatingGuestPowers());

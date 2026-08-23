@@ -1,6 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import {
+  TEXT_ENTRY_PARAGRAPH_MAX_LENGTH,
+  TEXT_ENTRY_TITLE_MAX_LENGTH,
+} from "@localai/shared";
 import type {
   SlateCharacterArc,
   SlateCharacterProfile,
@@ -206,9 +210,10 @@ function CharacterCard({
               </label>
               <label>
                 {selected.label}
-                <textarea
-                  rows={selected.list ? 4 : 3}
-                  value={draft}
+            <textarea
+              rows={selected.list ? 4 : 3}
+              value={draft}
+              maxLength={TEXT_ENTRY_PARAGRAPH_MAX_LENGTH}
                   placeholder={
                     selected.list
                       ? "One detail per line"
@@ -349,8 +354,9 @@ function ArcCard({
             <div className={styles.curateForm}>
               <label>
                 Starting state
-                <input
-                  value={startState}
+              <input
+                value={startState}
+                maxLength={TEXT_ENTRY_TITLE_MAX_LENGTH}
                   onChange={(event) =>
                     setStartState(event.currentTarget.value)
                   }
@@ -358,8 +364,9 @@ function ArcCard({
               </label>
               <label>
                 Intended destination
-                <input
-                  value={destinationState}
+              <input
+                value={destinationState}
+                maxLength={TEXT_ENTRY_TITLE_MAX_LENGTH}
                   onChange={(event) =>
                     setDestinationState(event.currentTarget.value)
                   }

@@ -1,6 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  BOT_PERSON_NAME_MAX_LENGTH,
+  TEXT_ENTRY_LONG_FORM_MAX_LENGTH,
+  TEXT_ENTRY_PARAGRAPH_MAX_LENGTH,
+  TEXT_ENTRY_SHORT_MAX_LENGTH,
+  TEXT_ENTRY_TITLE_MAX_LENGTH,
+} from "@localai/shared";
 import Image from "next/image";
 import type {
   SlateReviewCircleSession,
@@ -320,6 +327,7 @@ export function SlateCreativeStudiosDesk({
             <div className={styles.inlineFields}>
               <input
                 value={sourceTitle}
+                maxLength={TEXT_ENTRY_TITLE_MAX_LENGTH}
                 onChange={(event) => setSourceTitle(event.target.value)}
                 placeholder="Source title"
                 aria-label="Source title"
@@ -336,8 +344,9 @@ export function SlateCreativeStudiosDesk({
                 <option value="research">Research</option>
               </select>
             </div>
-            <textarea
-              value={sourceContent}
+              <textarea
+                value={sourceContent}
+                maxLength={TEXT_ENTRY_LONG_FORM_MAX_LENGTH}
               onChange={(event) => setSourceContent(event.target.value)}
               placeholder="Paste a reference, capture an idea, or leave yourself a trail."
               rows={4}
@@ -363,15 +372,17 @@ export function SlateCreativeStudiosDesk({
                   </header>
                   {editingSourceId === source.id ? (
                     <div className={styles.sourceEditor}>
-                      <input
-                        value={editingSourceTitle}
+              <input
+                value={editingSourceTitle}
+                maxLength={TEXT_ENTRY_TITLE_MAX_LENGTH}
                         onChange={(event) =>
                           setEditingSourceTitle(event.target.value)
                         }
                         aria-label="Edit source title"
                       />
-                      <textarea
-                        value={editingSourceContent}
+              <textarea
+                value={editingSourceContent}
+                maxLength={TEXT_ENTRY_LONG_FORM_MAX_LENGTH}
                         onChange={(event) =>
                           setEditingSourceContent(event.target.value)
                         }
@@ -523,6 +534,7 @@ export function SlateCreativeStudiosDesk({
             </div>
             <textarea
               value={visualPrompt}
+              maxLength={TEXT_ENTRY_PARAGRAPH_MAX_LENGTH}
               onChange={(event) => setVisualPrompt(event.target.value)}
               placeholder="Describe the visual study in natural language…"
               rows={3}
@@ -685,14 +697,16 @@ export function SlateCreativeStudiosDesk({
             </div>
             {guestEnabled ? (
               <div className={styles.guestFields}>
-                <input
-                  value={guestName}
+              <input
+                value={guestName}
+                maxLength={BOT_PERSON_NAME_MAX_LENGTH}
                   onChange={(event) => setGuestName(event.target.value)}
                   placeholder="Guest name"
                   required
                 />
-                <input
-                  value={guestBrief}
+              <input
+                value={guestBrief}
+                maxLength={TEXT_ENTRY_SHORT_MAX_LENGTH}
                   onChange={(event) => setGuestBrief(event.target.value)}
                   placeholder="What should this guest read for?"
                   required

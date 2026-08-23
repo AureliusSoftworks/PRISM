@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
+  BOT_PERSON_NAME_MAX_LENGTH,
   DEFAULT_BOT_FACE_BLINK_BAR,
   normalizeBotFaceBlinkBar,
   normalizeBotFaceBlinkOffsetX,
@@ -246,7 +247,10 @@ function normalizedColumns(
 
   if (own(patch, "name")) {
     if (typeof patch.name !== "string") throw new Error("name must be a string.");
-    next.name = patch.name.slice(0, 160);
+    if (patch.name.length > BOT_PERSON_NAME_MAX_LENGTH) {
+      throw new Error(`name must be at most ${BOT_PERSON_NAME_MAX_LENGTH} characters.`);
+    }
+    next.name = patch.name;
   }
   if (own(patch, "systemPrompt")) {
     if (typeof patch.systemPrompt !== "string") {

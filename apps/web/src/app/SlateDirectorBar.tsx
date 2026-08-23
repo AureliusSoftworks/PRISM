@@ -1,6 +1,7 @@
 "use client";
 
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import { TEXT_ENTRY_PARAGRAPH_MAX_LENGTH } from "@localai/shared";
 import type { SlateDirectorScope } from "./slateManuscriptDocument";
 import { slateDirectorWordTarget } from "./slateManuscriptDocument";
 import styles from "./slateDirectorBar.module.css";
@@ -65,6 +66,7 @@ export function SlateDirectorBar({
         </span>
         <textarea
           value={direction}
+          maxLength={TEXT_ENTRY_PARAGRAPH_MAX_LENGTH}
           rows={2}
           placeholder="Tell Slate what should happen, change, or feel different…"
           onChange={(event) => onDirectionChange(event.target.value)}

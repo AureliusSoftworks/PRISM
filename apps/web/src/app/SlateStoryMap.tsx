@@ -1,6 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import {
+  TEXT_ENTRY_PARAGRAPH_MAX_LENGTH,
+  TEXT_ENTRY_TITLE_MAX_LENGTH,
+} from "@localai/shared";
 import type {
   SlateProjectSummary,
   SlateSectionSummary,
@@ -309,6 +313,7 @@ export function SlateStoryMap({
           </div>
           <input
             value={selected.title}
+            maxLength={TEXT_ENTRY_TITLE_MAX_LENGTH}
             aria-label="Structure item title"
             onChange={(event) =>
               onMutate(selected.id, { title: event.target.value })
@@ -317,6 +322,7 @@ export function SlateStoryMap({
           />
           <textarea
             value={selected.summary}
+            maxLength={TEXT_ENTRY_PARAGRAPH_MAX_LENGTH}
             aria-label={`${selected.title} summary`}
             rows={3}
             onChange={(event) =>
@@ -326,6 +332,7 @@ export function SlateStoryMap({
           />
           <textarea
             value={selected.direction}
+            maxLength={TEXT_ENTRY_PARAGRAPH_MAX_LENGTH}
             aria-label={`${selected.title} direction`}
             placeholder="Direction for this section"
             rows={2}

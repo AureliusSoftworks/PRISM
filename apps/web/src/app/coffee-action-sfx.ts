@@ -331,6 +331,24 @@ export function isPackPlayableActionSfxKind(
   return isActionSfxPackKind(kind) || isBundledCoffeeActionSfxKind(kind);
 }
 
+export function authoredLocalLaughOwnsActionSfx(args: {
+  kind: CoffeeActionSfxKind;
+  voiceProfile?: BotAudioVoiceProfileV1 | null;
+  voiceEngineUsed?: string | null;
+}): boolean {
+  if (args.kind !== "laugh" || !args.voiceProfile) return false;
+  const profile = normalizeBotAudioVoiceProfileV1(args.voiceProfile);
+  return (
+    Boolean(profile.localLaughSyllable) &&
+    profile.localVoiceSource === "portable" &&
+    !profile.systemVoiceName &&
+    profile.localEnginePreference !== "voice-plus" &&
+    typeof args.voiceEngineUsed === "string" &&
+    /^builtin(?:-|$)/u.test(args.voiceEngineUsed) &&
+    args.voiceEngineUsed !== "builtin-babble"
+  );
+}
+
 export function coffeeActionSfxKindForAction(
   action: string,
 ): CoffeeActionSfxKind | null {
@@ -573,8 +591,11 @@ export async function playPreparedCoffeeActionSfx(args: {
   corporality?: number | null;
   /** Voice profile used to color bodily Foley through the vocal FX bus. */
   voiceProfile?: BotAudioVoiceProfileV1 | null;
+  /** Resolved speech engine; authored Instant laugh owns eligible laugh cues. */
+  voiceEngineUsed?: string | null;
   voiceEffectsEnabled?: boolean;
 }): Promise<boolean> {
+  if (authoredLocalLaughOwnsActionSfx(args)) return false;
   if (
     botPowerIsBreathActionSfxKindV1(args.kind) &&
     botPowerIsBreathlessV1(args.powers)

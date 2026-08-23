@@ -75,6 +75,11 @@ const MODIFIER_ALIASES = new Map<string, VoiceVocalActionModifier>([
   ["quickly", "brief"],
   ["loud", "loud"],
   ["loudly", "loud"],
+  ["hard", "loud"],
+  ["uncontrollably", "loud"],
+  ["uproariously", "loud"],
+  ["hysterically", "loud"],
+  ["heartily", "loud"],
   ["restrained", "restrained"],
   ["restrainedly", "restrained"],
   ["relieved", "relieved"],
@@ -82,10 +87,13 @@ const MODIFIER_ALIASES = new Map<string, VoiceVocalActionModifier>([
 ]);
 
 const ACTION_ALIASES: readonly (readonly [RegExp, VoiceVocalAction])[] = [
-  [/^(?:lol|laugh|laughs|laughing|laughter)$/u, "laugh"],
+  [/^(?:(?:burst|bursts|bursting) out )?(?:lol|laugh|laughs|laughing|laughter)$/u, "laugh"],
   [/^(?:chuckle|chuckles|chuckling|giggle|giggles|giggling|snicker|snickers|snickering)$/u, "chuckle"],
   [/^(?:sigh|sighs|sighing)$/u, "sigh"],
-  [/^(?:exhale|exhales|exhaling|breathes? out)$/u, "exhale"],
+  [
+    /^(?:exhale|exhales|exhaling|breath|breaths|breathe|breathes|breathing|breathes? out|takes? (?:a )?breath)$/u,
+    "exhale",
+  ],
   [/^(?:gasp|gasps|gasping)$/u, "gasp"],
   [/^(?:cough|coughs|coughing|hack|hacks|hacking)$/u, "cough"],
   [/^(?:ahem|ahems|clears? (?:the |his |her |their |its )?throat|clearing (?:the |his |her |their |its )?throat)$/u, "throat-clear"],

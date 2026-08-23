@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { TEXT_ENTRY_SEARCH_MAX_LENGTH } from "@localai/shared";
 import {
   AUDIO_LIBRARY_BIN_LABELS,
   filterAudioLibraryClips,
@@ -154,6 +155,7 @@ export function AudioLibraryModal({
           <input
             ref={searchRef}
             type="search"
+            maxLength={TEXT_ENTRY_SEARCH_MAX_LENGTH}
             value={query}
             onChange={(event) => setQuery(event.currentTarget.value)}
             placeholder={`Search ${AUDIO_LIBRARY_BIN_LABELS[bin].toLowerCase()}…`}

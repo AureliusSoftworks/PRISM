@@ -9,6 +9,7 @@ import type {
 } from "react";
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { TEXT_ENTRY_SEARCH_MAX_LENGTH } from "@localai/shared";
 import { buildBotLibraryGroupVisualVariables } from "./botLibraryGroupVisual";
 import { placeBotPickerGroupMenu } from "./botPickerGroupMenu";
 import {
@@ -406,6 +407,7 @@ export function BotPickerToolbar({
         <span className={sharedStyles.srOnly}>{searchAriaLabel}</span>
         <input
           type="search"
+          maxLength={TEXT_ENTRY_SEARCH_MAX_LENGTH}
           value={searchValue}
           onChange={(event) => onSearchChange(event.currentTarget.value)}
           placeholder={searchPlaceholder}

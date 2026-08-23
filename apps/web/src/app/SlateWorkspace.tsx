@@ -50,6 +50,9 @@ import type {
   SlateTitleSuggestionResponse,
 } from "@localai/shared";
 import {
+  TEXT_ENTRY_DOCUMENT_MAX_LENGTH,
+  TEXT_ENTRY_PARAGRAPH_MAX_LENGTH,
+  TEXT_ENTRY_TITLE_MAX_LENGTH,
   slateImportedSectionRequiresPassageScope,
   transformSlateLockedRangesForTextEdit,
 } from "@localai/shared";
@@ -3628,6 +3631,7 @@ export default function SlateWorkspace({
                     <textarea
                       ref={sparkTextareaRef}
                       value={spark}
+                      maxLength={TEXT_ENTRY_PARAGRAPH_MAX_LENGTH}
                       onChange={(event) => {
                         const nextSpark = event.target.value;
                         setSpark(nextSpark);
@@ -3678,6 +3682,7 @@ export default function SlateWorkspace({
                     Existing material <span>kept exactly as pasted</span>
                     <textarea
                       value={existingMaterial}
+                      maxLength={TEXT_ENTRY_DOCUMENT_MAX_LENGTH}
                       onChange={(event) => setExistingMaterial(event.target.value)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
@@ -4170,12 +4175,14 @@ export default function SlateWorkspace({
                   </div>
                   <input
                     value={item.title}
+                    maxLength={TEXT_ENTRY_TITLE_MAX_LENGTH}
                     aria-label="Structure item title"
                     onChange={(event) => mutateStructureItem(item.id, { title: event.target.value })}
                     onBlur={() => void saveStructure(projectRef.current?.structure ?? project.structure)}
                   />
                   <textarea
                     value={item.summary}
+                    maxLength={TEXT_ENTRY_PARAGRAPH_MAX_LENGTH}
                     aria-label={`${item.title} summary`}
                     rows={3}
                     onChange={(event) => mutateStructureItem(item.id, { summary: event.target.value })}
@@ -4185,6 +4192,7 @@ export default function SlateWorkspace({
                     <textarea
                       className={styles.sceneDirection}
                       value={item.direction}
+                      maxLength={TEXT_ENTRY_PARAGRAPH_MAX_LENGTH}
                       aria-label={`${item.title} direction`}
                       placeholder="Direction for this section"
                       rows={2}
@@ -5213,6 +5221,7 @@ export default function SlateWorkspace({
                   <span>{continuityConcern.directionPrompt}</span>
                   <textarea
                     value={continuityDirection}
+                    maxLength={TEXT_ENTRY_PARAGRAPH_MAX_LENGTH}
                     onChange={(event) => setContinuityDirection(event.target.value)}
                     placeholder="For example: this is a rumor, the north gate is canon, or revise the passage…"
                     rows={4}
@@ -5253,6 +5262,7 @@ export default function SlateWorkspace({
                 </p>
                 <textarea
                   value={draftDirection}
+                  maxLength={TEXT_ENTRY_PARAGRAPH_MAX_LENGTH}
                   onChange={(event) => setDraftDirection(event.target.value)}
                   placeholder="One concise instruction for the next draft…"
                   rows={5}
@@ -5285,6 +5295,7 @@ export default function SlateWorkspace({
                   </div>
                   <textarea
                     value={revisionDirection}
+                    maxLength={TEXT_ENTRY_PARAGRAPH_MAX_LENGTH}
                     onChange={(event) => setRevisionDirection(event.target.value)}
                     placeholder="Tell Slate what should change…"
                     rows={3}
@@ -5811,6 +5822,7 @@ export default function SlateWorkspace({
                 <span>Creative question</span>
                 <textarea
                   value={deliberationPrompt}
+                  maxLength={TEXT_ENTRY_PARAGRAPH_MAX_LENGTH}
                   disabled={deliberationRunning}
                   rows={2}
                   placeholder="What choice should this story make next?"

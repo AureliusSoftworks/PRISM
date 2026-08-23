@@ -2,6 +2,7 @@ import {
   normalizeBotVernacularId,
   type BotVernacularId,
 } from "./botVernacular.ts";
+import { normalizeBotLocalLaughSyllable } from "./localLaugh.ts";
 
 /** Account-wide voice mode. This is intentionally separate from BotVoicePreset,
  * which controls how a bot writes rather than how it sounds. */
@@ -667,6 +668,8 @@ export interface BotAudioVoiceProfileV2 {
   localEnginePreference?: LocalVoiceEnginePreference;
   localVoiceSource?: LocalVoiceSource;
   localReferenceId?: string | null;
+  /** Authored one-to-four-letter laugh syllable for the Local Instant lane. */
+  localLaughSyllable?: string | null;
   accentLocale?: string | null;
   accentMode?: LocalVoiceAccentMode;
   pronunciationBase?: LocalVoicePronunciationBase;
@@ -849,6 +852,7 @@ export interface BotLocalVoiceProfileV1 {
   archetypeId: BotAudioVoiceId;
   systemVoiceName?: string | null;
   referenceId?: string | null;
+  laughSyllable?: string | null;
   accent: {
     locale: string;
     mode: LocalVoiceAccentMode;
@@ -1909,6 +1913,7 @@ function flattenBotAudioVoiceProfileV3Record(
     localEnginePreference: local.enginePreference,
     localVoiceSource: local.source,
     localReferenceId: local.referenceId,
+    localLaughSyllable: local.laughSyllable,
     accentLocale: accent.locale,
     accentMode: accent.mode,
     pronunciationBase: pronunciation.base,
@@ -2002,6 +2007,10 @@ export function normalizeBotAudioVoiceProfileV1(
     record.localVoiceSource,
     fallbackProfile.localVoiceSource ?? "portable",
   );
+  const localLaughSyllable = normalizeBotLocalLaughSyllable(
+    record.localLaughSyllable,
+    fallbackProfile.localLaughSyllable ?? null,
+  );
   const speechprintInfluence = normalizeLocalVoiceSpeechprintInfluence(
     record.speechprintInfluence,
     fallbackProfile.speechprintInfluence ?? "none",
@@ -2068,8 +2077,9 @@ export function normalizeBotAudioVoiceProfileV1(
             record.localReferenceId,
             fallbackProfile.localReferenceId ?? null,
           ),
-        }
+      }
       : {}),
+    ...(localLaughSyllable ? { localLaughSyllable } : {}),
     accentLocale: normalizeLocalVoiceAccentLocale(
       localVoiceSource === "portable" && !systemVoiceName
         ? prismBuiltinEnglishVoice(baseVoiceId).locale
@@ -2301,6 +2311,9 @@ export function normalizeBotAudioVoiceProfileV3(
       archetypeId: profile.baseVoiceId,
       ...(systemVoiceName ? { systemVoiceName } : {}),
       ...(referenceId ? { referenceId } : {}),
+      ...(profile.localLaughSyllable
+        ? { laughSyllable: profile.localLaughSyllable }
+        : {}),
       accent: {
         locale: normalizeLocalVoiceAccentLocale(
           profile.accentLocale,

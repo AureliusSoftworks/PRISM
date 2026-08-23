@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { TEXT_ENTRY_PARAGRAPH_MAX_LENGTH } from "@localai/shared";
 import styles from "./slateDirectionQuestion.module.css";
 
 export interface SlateDirectionChoice {
@@ -92,6 +93,7 @@ export function SlateDirectionQuestion({
             <span>Your direction</span>
             <textarea
               value={vibe}
+              maxLength={TEXT_ENTRY_PARAGRAPH_MAX_LENGTH}
               autoFocus
               rows={3}
               placeholder="Quietly devastating, like both people know this is goodbye…"

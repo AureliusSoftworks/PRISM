@@ -997,6 +997,8 @@ export function CoffeeSeatPlateEmoji({
                     baseGlyph: glyph,
                     customSpeechGlyph,
                     renderedFaceMouthCharacter,
+                    effectiveTalking,
+                    mouthShape: streamedMouthShape,
                   })
                 : glyph;
             const renderCustomEyePair =

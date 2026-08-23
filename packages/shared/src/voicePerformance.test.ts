@@ -43,6 +43,8 @@ test("all core vocal actions and marked lol resolve", () => {
     ["giggles dryly", "chuckle"],
     ["sighs", "sigh"],
     ["exhales", "exhale"],
+    ["breath", "exhale"],
+    ["breaths", "exhale"],
     ["gasps", "gasp"],
     ["coughs", "cough"],
     ["clears her throat", "throat-clear"],
@@ -54,6 +56,29 @@ test("all core vocal actions and marked lol resolve", () => {
   for (const [authored, expected] of examples) {
     assert.equal(voiceVocalActionFromMarkedText(authored)?.action, expected);
   }
+});
+
+test("phonetic names can place a breath Foley cue between spoken fragments", () => {
+  const source =
+    "Trololololololololololololololo *breath* lololololololololololololololololololololololololololin' Terry";
+  const plan = voicePerformancePlanFromText(source);
+
+  assert.deepEqual(
+    plan.segments.map((segment) =>
+      segment.kind === "speech"
+        ? [segment.kind, segment.text]
+        : [segment.kind, segment.action],
+    ),
+    [
+      ["speech", "Trololololololololololololololo"],
+      ["vocal-action", "exhale"],
+      [
+        "speech",
+        "lololololololololololololololololololololololololololin' Terry",
+      ],
+    ],
+  );
+  assert.equal(plan.spokenText.includes("breath"), false);
 });
 
 test("ordinary prose, emphasis, and unsupported stagecraft do not become actions", () => {

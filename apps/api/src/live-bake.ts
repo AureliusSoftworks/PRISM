@@ -37,6 +37,26 @@ function bakeIdempotencyKey(prefix: string, step: number): string {
   return `${prefix}-bake-${step}-${randomBytes(4).toString("hex")}`;
 }
 
+export function debateSessionSupportsFullBake(session: DebateSessionV1): boolean {
+  return (
+    session.playerRole === "spectator" ||
+    (session.format === "turnabout" &&
+      session.formatState.format === "turnabout" &&
+      Boolean(session.formatState.mysteryTrial))
+  );
+}
+
+function debateBakeTargetReached(session: DebateSessionV1): boolean {
+  return (
+    debateSessionFloorIsSettled(session) ||
+    (session.format === "turnabout" &&
+      session.formatState.format === "turnabout" &&
+      Boolean(session.formatState.mysteryTrial) &&
+      session.status === "waiting_for_player" &&
+      session.stepKey === "turnabout_action")
+  );
+}
+
 function debateEventToUtterance(
   event: DebateSessionV1["events"][number],
   index: number,
@@ -178,7 +198,8 @@ export function syncDebateLiveBakeFromSession(
 }
 
 /**
- * Advance a spectator Debate append-only from the true tip and persist checkpoints.
+ * Advance a full-bake Debate append-only from the true tip. Spectator sessions
+ * bake to completion; filed mystery courts bake to their first player action.
  */
 export async function bakeDebateSpectatorSession(args: {
   db: DatabaseSync;
@@ -199,10 +220,10 @@ export async function bakeDebateSpectatorSession(args: {
   const plannedSynthesisEngine = args.plannedSynthesisEngine ?? "unknown";
   const maxSteps = args.maxSteps ?? LIVE_BAKE_MAX_STEPS_DEBATE;
   let session = getDebateSession(db, userId, sessionId);
-  if (session.playerRole !== "spectator") {
-    throw new HttpError(409, "Full bake is only available for Spectator Debates.");
+  if (!debateSessionSupportsFullBake(session)) {
+    throw new HttpError(409, "Full bake is unavailable for this Debate.");
   }
-  if (session.liveBake?.status === "ready" && debateSessionFloorIsSettled(session)) {
+  if (session.liveBake?.status === "ready" && debateBakeTargetReached(session)) {
     const artifact = mergeDebateArtifact(
       session.liveBake,
       session,
@@ -261,7 +282,7 @@ export async function bakeDebateSpectatorSession(args: {
         };
       }
       session = getDebateSession(db, userId, sessionId);
-      if (debateSessionFloorIsSettled(session)) {
+      if (debateBakeTargetReached(session)) {
         break;
       }
       if (session.status === "paused") {
@@ -343,7 +364,7 @@ export async function bakeDebateSpectatorSession(args: {
     }
 
     session = getDebateSession(db, userId, sessionId);
-    if (!debateSessionFloorIsSettled(session)) {
+    if (!debateBakeTargetReached(session)) {
       throw new HttpError(
         504,
         "Debate bake hit the step limit before the proceeding finished.",

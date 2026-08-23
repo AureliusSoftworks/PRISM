@@ -11,6 +11,7 @@ import {
   bakeBotcastWatchEpisode,
   bakeDebateSpectatorSession,
   buildSignalLiveBakeArtifactFromEpisode,
+  debateSessionSupportsFullBake,
   syncDebateLiveBakeFromSession,
 } from "./live-bake.ts";
 import type { DebateAiRuntime } from "./debate.ts";
@@ -89,8 +90,8 @@ export class LiveBakeJobManager {
     }
 
     const session = getDebateSession(args.db, args.userId, args.sessionId);
-    if (session.playerRole !== "spectator") {
-      throw new HttpError(409, "Full bake is only available for Spectator Debates.");
+    if (!debateSessionSupportsFullBake(session)) {
+      throw new HttpError(409, "Full bake is unavailable for this Debate.");
     }
     if (session.liveBake?.status === "ready") {
       const liveBake = syncDebateLiveBakeFromSession(

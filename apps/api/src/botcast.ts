@@ -1605,7 +1605,10 @@ export function botcastPowerInterruptionCanTargetV1(
   interrupterPowers: unknown,
   targetPowers: unknown,
 ): boolean {
-  return !botPowerIgnoresOtherPowersV1(targetPowers) ||
+  // Enlightened pierces delivery filters; it is not blanket immunity from
+  // soft/non-delivery Power pressure such as an interruption attempt.
+  return botPowerHasStageAwarenessV1(targetPowers) ||
+    !botPowerIgnoresOtherPowersV1(targetPowers) ||
     botPowerTrollsV1(interrupterPowers);
 }
 
@@ -3997,7 +4000,8 @@ function botcastMoodBoostEventForPair(args: {
   theme?: BotPowerResolvedThemeV1;
 }): BotcastMoodBoostEventV1 | null {
   if (
-    botPowerIgnoresOtherPowersV1(args.target.powers) ||
+    (botPowerIgnoresOtherPowersV1(args.target.powers) &&
+      !botPowerHasStageAwarenessV1(args.target.powers)) ||
     botPowerResponseIsSilentV1(args.sourceContent) ||
     botcastPowerRestriction(args.source, args.target, "awareness") ||
     botcastPowerRestriction(args.source, args.target, "speech_audience") ||
@@ -4075,7 +4079,8 @@ function botcastMoodDrainEventForPair(args: {
   theme?: BotPowerResolvedThemeV1;
 }): BotcastMoodDrainEventV1 | null {
   if (
-    botPowerIgnoresOtherPowersV1(args.addresser.powers) ||
+    (botPowerIgnoresOtherPowersV1(args.addresser.powers) &&
+      !botPowerHasStageAwarenessV1(args.addresser.powers)) ||
     botPowerResponseIsSilentV1(args.sourceContent) ||
     botcastPowerRestriction(args.addresser, args.holder, "awareness") ||
     botcastPowerRestriction(args.addresser, args.holder, "speech_audience") ||
@@ -9979,7 +9984,12 @@ function botcastNegativeInfluenceForTurn(
   episode: Pick<BotcastEpisode, "events" | "messages">,
   speaker: Pick<BotcastBotProfile, "id" | "powers">,
 ): BotcastSocialInfluenceEventV1 | null {
-  if (botPowerIgnoresOtherPowersV1(speaker.powers)) return null;
+  if (
+    botPowerIgnoresOtherPowersV1(speaker.powers) &&
+    !botPowerHasStageAwarenessV1(speaker.powers)
+  ) {
+    return null;
+  }
   const hasPriorSpeakerTurn = episode.messages.some(
     (message) => message.botId === speaker.id,
   );

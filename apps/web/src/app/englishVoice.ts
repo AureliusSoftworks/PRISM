@@ -1379,11 +1379,13 @@ async function playChunkedEnglishResponse(
         consumedCharacters,
       );
       await playAudio(
-        localVocalActionWave({
-          segment: actionSegment,
-          profile,
-          seed: `${seed}:action:${chunk.index}`,
-        }),
+        chunk.bytes.byteLength > 0
+          ? chunk.bytes
+          : localVocalActionWave({
+              segment: actionSegment,
+              profile,
+              seed: `${seed}:action:${chunk.index}`,
+            }),
         profile,
         expectedGeneration,
         `${seed}:action:${chunk.index}`,

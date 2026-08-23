@@ -102,6 +102,14 @@ describe("voice spoken text", () => {
       "[laughs] That was funny.",
     );
     assert.equal(
+      voicePerformanceTextFromActionCues("Trololo *breath* lololin' Terry"),
+      "Trololo [exhales] lololin' Terry",
+    );
+    assert.equal(
+      voiceSpokenText("Trololo *breaths* lololin' Terry"),
+      "Trololo lololin' Terry",
+    );
+    assert.equal(
       voiceSpokenText("Look *gasp* at *scream* me! *dance*"),
       "Look at me!",
     );

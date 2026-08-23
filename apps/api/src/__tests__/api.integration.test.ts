@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import sharp from "sharp";
 import { getAppConfig } from "@localai/config";
 import {
+  BOT_PERSON_NAME_MAX_LENGTH,
   COFFEE_TOPIC_MAX_LENGTH,
   LOCAL_VOICE_SPEECHPRINT_CAPABILITIES,
   MODEL_VISIBILITY_DEFAULTS_VERSION,
@@ -210,6 +211,37 @@ after(() => {
 });
 
 describe("API request integration", () => {
+  it("rejects bot names above the shared persisted-name limit", async () => {
+    const client = createClient();
+    const registered = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "bot-name-limit@example.com",
+        password: "bot-name-limit-password",
+      }),
+    );
+    assert.equal(registered.status, 201);
+
+    const overlongName = "N".repeat(BOT_PERSON_NAME_MAX_LENGTH + 1);
+    const rejectedCreate = await client.request(
+      "/api/bots",
+      jsonInit({ name: overlongName }),
+    );
+    assert.equal(rejectedCreate.status, 400);
+
+    const created = await client.request(
+      "/api/bots",
+      jsonInit({ name: "Bounded bot" }),
+    );
+    assert.equal(created.status, 201);
+    const botId = String((await json(created)).bot.id);
+    const rejectedPatch = await client.request(`/api/bots/${botId}`, {
+      ...jsonInit({ name: overlongName }),
+      method: "PATCH",
+    });
+    assert.equal(rejectedPatch.status, 400);
+  });
+
   it("suggests only eligible library groups through the local auxiliary lane", async () => {
     const client = createClient();
     const registered = await client.request(

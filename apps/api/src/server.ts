@@ -289,6 +289,7 @@ import {
 } from "./debate-mystery.ts";
 import {
   buildSignalLiveBakeArtifactFromEpisode,
+  debateSessionSupportsFullBake,
 } from "./live-bake.ts";
 import { generatePrismInputRefractDraft } from "./prism-input-refract.ts";
 import { liveBakeJobs } from "./live-bake-jobs.ts";
@@ -986,6 +987,9 @@ import {
   serializeBotFaceThinkingFrames,
   serializeBotFaceCustomSpeechPosesForStorage,
   normalizeBotAudioVoiceProfileV1,
+  botLocalLaughIntensityForCue,
+  botLocalLaughSynthesisText,
+  projectLocalWrittenLaughterForSynthesis,
   localVoicePronunciationOverrideIsActive,
   normalizeLocalVoiceSpeechprintV1,
   localVoiceSpeechprintIsActive,
@@ -1094,6 +1098,7 @@ import {
   type BotAudioVoiceProfileV1,
   type VoicePerformancePlanV1,
   type VoicePerformanceVocalActionSegmentV1,
+  BOT_PERSON_NAME_MAX_LENGTH,
   BOTCAST_ELEVENLABS_INTRO_DURATION_MS,
   BOTCAST_ELEVENLABS_OUTDENT_DURATION_MS,
   buildSignalMusicProfile,
@@ -2276,6 +2281,31 @@ function resolveLocalVoiceDelivery(
   };
 }
 
+function localLaughProjectionIsEligible(
+  profileValue: BotAudioVoiceProfileV1,
+  delivery: ReturnType<typeof resolveLocalVoiceDelivery>,
+): boolean {
+  const profile = normalizeBotAudioVoiceProfileV1(profileValue);
+  return (
+    delivery.localEngine.resolved === "instant" &&
+    !delivery.usingSystemVoice &&
+    profile.localVoiceSource === "portable"
+  );
+}
+
+function localLaughProjectedText(
+  text: string,
+  profileValue: BotAudioVoiceProfileV1,
+  delivery: ReturnType<typeof resolveLocalVoiceDelivery>,
+): string {
+  if (!localLaughProjectionIsEligible(profileValue, delivery)) return text;
+  const profile = normalizeBotAudioVoiceProfileV1(profileValue);
+  return projectLocalWrittenLaughterForSynthesis(
+    text,
+    profile.localLaughSyllable,
+  );
+}
+
 function setVoicePronunciationHeaders(
   response: ServerResponse,
   pronunciation: ResolvedLocalVoicePronunciationV1 | undefined,
@@ -2399,6 +2429,8 @@ async function sendLocalVoiceWaveStream(args: {
   protectedPhrases?: readonly string[];
   deliveryMood?: string;
   performancePlan?: VoicePerformancePlanV1 | null;
+  /** Instant owns authored laugh phonemes and written-laughter projection. */
+  localLaughProjectionEnabled?: boolean;
   /** Enables restrained punctuation orchestration for Kokoro, never system TTS. */
   punctuationPacing?: boolean;
   /** Signal opts into raw framed WAV bytes to keep base64/JSON off its UI thread. */
@@ -2451,9 +2483,17 @@ async function sendLocalVoiceWaveStream(args: {
   );
   const firstSpeechItemIndex = speechItemIndexes[0] ?? -1;
   const lastSpeechItemIndex = speechItemIndexes.at(-1) ?? -1;
+  const normalizedProfile = normalizeBotAudioVoiceProfileV1(args.profile);
   const generate = (text: string) =>
     builtinVoiceWaveGeneratorOverride({
-      text: expandSpeechAbbreviations(text),
+      text: expandSpeechAbbreviations(
+        args.localLaughProjectionEnabled
+          ? projectLocalWrittenLaughterForSynthesis(
+              text,
+              normalizedProfile.localLaughSyllable,
+            )
+          : text,
+      ),
       profile: args.profile,
       allowOperatingSystemVoices: args.allowOperatingSystemVoices,
       signal: args.signal,
@@ -2463,9 +2503,27 @@ async function sendLocalVoiceWaveStream(args: {
   // Prepare the first phrase before committing a 200 response so startup
   // failures still retain the route's normal actionable 503 behavior.
   const firstItem = streamItems[0]!;
-  const firstWave = firstItem.kind === "speech"
-    ? await generate(firstItem.text)
-    : null;
+  const laughTextForAction = (
+    item: VoicePerformanceVocalActionSegmentV1,
+  ): string | null =>
+    args.localLaughProjectionEnabled &&
+    (item.action === "laugh" || item.action === "chuckle")
+      ? botLocalLaughSynthesisText({
+          syllable: normalizedProfile.localLaughSyllable,
+          intensity: botLocalLaughIntensityForCue(
+            item.authoredText,
+            item.modifiers,
+          ),
+        })
+      : null;
+  const firstActionLaughText =
+    firstItem.kind === "vocal-action" ? laughTextForAction(firstItem) : null;
+  const firstWave =
+    firstItem.kind === "speech"
+      ? await generate(firstItem.text)
+      : firstActionLaughText
+        ? await generate(firstActionLaughText)
+        : null;
   if (args.signal.aborted) throw new DOMException("Aborted", "AbortError");
 
   args.response.statusCode = 200;
@@ -2557,6 +2615,7 @@ async function sendLocalVoiceWaveStream(args: {
   const writeActionChunk = (
     item: Extract<(typeof streamItems)[number], { kind: "vocal-action" }>,
     index: number,
+    wave: Buffer = Buffer.alloc(0),
   ) => {
     writeFrame({
       index,
@@ -2567,7 +2626,7 @@ async function sendLocalVoiceWaveStream(args: {
       authoredText: item.authoredText,
       sourceStart: item.sourceStart,
       sourceEnd: item.sourceEnd,
-    });
+    }, wave);
   };
 
   const nextSpeechItemIndex = (from: number): number => {
@@ -2593,7 +2652,13 @@ async function sendLocalVoiceWaveStream(args: {
     if (args.signal.aborted || args.response.destroyed) return;
     const item = streamItems[index]!;
     if (item.kind === "vocal-action") {
-      writeActionChunk(item, index);
+      const laughText = laughTextForAction(item);
+      const actionWave = laughText
+        ? index === 0 && firstWave
+          ? firstWave
+          : await generate(laughText)
+        : Buffer.alloc(0);
+      writeActionChunk(item, index, actionWave);
       continue;
     }
     const generatedWave = await pendingSpeech;
@@ -6341,11 +6406,19 @@ function sanitizeApiKeyForProvider(
   return sanitizeOpenAiKeyInput(value);
 }
 
-function readString(value: unknown, fieldName: string): string {
+function readString(
+  value: unknown,
+  fieldName: string,
+  maxLength?: number,
+): string {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error(`${fieldName} is required.`);
   }
-  return value.trim();
+  const trimmed = value.trim();
+  if (maxLength !== undefined && trimmed.length > maxLength) {
+    throw new Error(`${fieldName} must be at most ${maxLength} characters.`);
+  }
+  return trimmed;
 }
 
 function readOptionalString(value: unknown): string | null {
@@ -17968,10 +18041,10 @@ function buildRoutes(): RouteDefinition[] {
         "Spectator bake replaced the prepared turn.",
       );
       const frozen = getDebateSession(db, userId, ctx.params.id);
-      if (frozen.playerRole !== "spectator") {
+      if (!debateSessionSupportsFullBake(frozen)) {
         throw new HttpError(
           409,
-          "Full bake is only available for Spectator Debates.",
+          "Full bake is unavailable for this Debate.",
         );
       }
       const result = await runWithUsageSession(
@@ -18015,10 +18088,10 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/debates/:id/bake/cancel", async (ctx) => {
       const userId = requireAuth(ctx);
       const frozen = getDebateSession(db, userId, ctx.params.id);
-      if (frozen.playerRole !== "spectator") {
+      if (!debateSessionSupportsFullBake(frozen)) {
         throw new HttpError(
           409,
-          "Full bake is only available for Spectator Debates.",
+          "Full bake is unavailable for this Debate.",
         );
       }
       liveBakeJobs.cancelDebateBake(userId, ctx.params.id);
@@ -26979,8 +27052,13 @@ function buildRoutes(): RouteDefinition[] {
         botNamePronunciations,
         sourceBotId,
       );
-      const authoredPerformancePlan = voicePerformancePlanFromText(
+      const pronouncedPerformanceText = applyBotNamePronunciations(
         sourcePerformanceText,
+        botNamePronunciations,
+        sourceBotId,
+      );
+      const authoredPerformancePlan = voicePerformancePlanFromText(
+        pronouncedPerformanceText,
       );
       const normalizedPerformanceSegments: VoicePerformancePlanV1["segments"] = [];
       for (const segment of authoredPerformancePlan.segments) {
@@ -26988,13 +27066,7 @@ function buildRoutes(): RouteDefinition[] {
           normalizedPerformanceSegments.push(segment);
           continue;
         }
-        const text = cleanSpeakableAssistantProse(
-          applyBotNamePronunciations(
-            segment.text,
-            botNamePronunciations,
-            sourceBotId,
-          ),
-        );
+        const text = cleanSpeakableAssistantProse(segment.text);
         if (text) normalizedPerformanceSegments.push({ ...segment, text });
       }
       const localPerformancePlan: VoicePerformancePlanV1 | null =
@@ -27007,7 +27079,7 @@ function buildRoutes(): RouteDefinition[] {
               segments: normalizedPerformanceSegments,
             }
           : null;
-      const spokenElevenLabsText =
+      const nameProjectedElevenLabsText =
         typeof sourceElevenLabsText === "string"
           ? sourceElevenLabsText
               .split(/(\[[^\]\r\n]{1,64}\]|<[^>\r\n]{1,64}>)/gu)
@@ -27022,6 +27094,9 @@ function buildRoutes(): RouteDefinition[] {
               )
               .join("")
           : sourceElevenLabsText;
+      const spokenElevenLabsText =
+        voicePerformanceTextFromActionCues(nameProjectedElevenLabsText) ??
+        nameProjectedElevenLabsText;
       const explicitOnlineContext = resolveVoiceSynthesisExplicitOnlineContext({
         persistedMessageProvider,
         preferredProvider: user.preferred_provider,
@@ -27096,7 +27171,9 @@ function buildRoutes(): RouteDefinition[] {
           : "builtin";
       const request = validateVoiceSynthesisRequest({
         ...raw,
-        text: spokenSourceText,
+        text:
+          spokenSourceText ||
+          (requestedEngine === "builtin" && localPerformancePlan ? "." : ""),
         elevenLabsText: spokenElevenLabsText,
         engine: requestedEngine,
         explicitOnlineContext,
@@ -27217,6 +27294,10 @@ function buildRoutes(): RouteDefinition[] {
               protectedPhrases: speechprintProtectedPhrases,
               deliveryMood: request.deliveryMood,
               performancePlan: localPerformancePlan,
+              localLaughProjectionEnabled: localLaughProjectionIsEligible(
+                boundary.profile,
+                localDelivery,
+              ),
               punctuationPacing:
                 localDelivery.localEngine.resolved === "instant" &&
                 !localDelivery.usingSystemVoice,
@@ -27225,7 +27306,13 @@ function buildRoutes(): RouteDefinition[] {
             return;
           }
           const wave = await builtinVoiceWaveGeneratorOverride({
-            text: expandSpeechAbbreviations(boundary.text),
+            text: expandSpeechAbbreviations(
+              localLaughProjectedText(
+                boundary.text,
+                boundary.profile,
+                localDelivery,
+              ),
+            ),
             profile: boundary.profile,
             allowOperatingSystemVoices,
             protectedPhrases: speechprintProtectedPhrases,
@@ -27311,6 +27398,10 @@ function buildRoutes(): RouteDefinition[] {
               protectedPhrases: speechprintProtectedPhrases,
               deliveryMood: request.deliveryMood,
               performancePlan: localPerformancePlan,
+              localLaughProjectionEnabled: localLaughProjectionIsEligible(
+                boundary.profile,
+                localDelivery,
+              ),
               punctuationPacing:
                 localDelivery.localEngine.resolved === "instant" &&
                 !localDelivery.usingSystemVoice,
@@ -27319,7 +27410,13 @@ function buildRoutes(): RouteDefinition[] {
             return;
           }
           const wave = await builtinVoiceWaveGeneratorOverride({
-            text: expandSpeechAbbreviations(boundary.text),
+            text: expandSpeechAbbreviations(
+              localLaughProjectedText(
+                boundary.text,
+                boundary.profile,
+                localDelivery,
+              ),
+            ),
             profile: boundary.profile,
             allowOperatingSystemVoices,
             protectedPhrases: speechprintProtectedPhrases,
@@ -27510,6 +27607,10 @@ function buildRoutes(): RouteDefinition[] {
                 protectedPhrases: speechprintProtectedPhrases,
                 deliveryMood: request.deliveryMood,
                 performancePlan: localPerformancePlan,
+                localLaughProjectionEnabled: localLaughProjectionIsEligible(
+                  boundary.profile,
+                  localDelivery,
+                ),
                 punctuationPacing:
                   localDelivery.localEngine.resolved === "instant" &&
                   !localDelivery.usingSystemVoice,
@@ -27518,7 +27619,13 @@ function buildRoutes(): RouteDefinition[] {
               return;
             }
             const wave = await builtinVoiceWaveGeneratorOverride({
-              text: expandSpeechAbbreviations(boundary.text),
+              text: expandSpeechAbbreviations(
+                localLaughProjectedText(
+                  boundary.text,
+                  boundary.profile,
+                  localDelivery,
+                ),
+              ),
               profile: boundary.profile,
               allowOperatingSystemVoices,
               protectedPhrases: speechprintProtectedPhrases,
@@ -31810,7 +31917,7 @@ function buildRoutes(): RouteDefinition[] {
         // family marker. Cloning a clone preserves the already-resolved root.
         cloneFamilyId = source.clone_family_id?.trim() || source.id;
       }
-      const name = readString(body.name, "name");
+      const name = readString(body.name, "name", BOT_PERSON_NAME_MAX_LENGTH);
       const systemPrompt =
         typeof body.systemPrompt === "string" ? body.systemPrompt : "";
       // Legacy model columns remain in the schema for import/backup compatibility,
@@ -32408,7 +32515,7 @@ function buildRoutes(): RouteDefinition[] {
       let shouldDeletePreviousProfilePicture = false;
       if (typeof body.name === "string") {
         fields.push("name = ?");
-        values.push(body.name);
+        values.push(readString(body.name, "name", BOT_PERSON_NAME_MAX_LENGTH));
         shouldRefreshFacets = true;
       }
       if (typeof body.systemPrompt === "string") {

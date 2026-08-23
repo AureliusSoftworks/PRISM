@@ -7,6 +7,10 @@ import {
   useRef,
   useState,
 } from "react";
+import {
+  TEXT_ENTRY_PARAGRAPH_MAX_LENGTH,
+  TEXT_ENTRY_SEARCH_MAX_LENGTH,
+} from "@localai/shared";
 import { Extension, type JSONContent } from "@tiptap/core";
 import Placeholder from "@tiptap/extension-placeholder";
 import {
@@ -428,6 +432,7 @@ export function SlateManuscriptCanvas({
             <span>Find</span>
             <input
               value={findText}
+              maxLength={TEXT_ENTRY_SEARCH_MAX_LENGTH}
               autoFocus
               onChange={(event) => {
                 setFindText(event.target.value);
@@ -446,6 +451,7 @@ export function SlateManuscriptCanvas({
             <span>Replace</span>
             <input
               value={replaceText}
+              maxLength={TEXT_ENTRY_SEARCH_MAX_LENGTH}
               onChange={(event) => setReplaceText(event.target.value)}
             />
           </label>
@@ -510,6 +516,7 @@ export function SlateManuscriptCanvas({
             <span>Personal note</span>
             <input
               value={noteDraft}
+              maxLength={TEXT_ENTRY_PARAGRAPH_MAX_LENGTH}
               autoFocus
               placeholder="What do you want to remember here?"
               onChange={(event) => setNoteDraft(event.target.value)}

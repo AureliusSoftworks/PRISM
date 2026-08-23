@@ -2730,10 +2730,10 @@ function debateResolvedRoutingLabel(session: DebateSessionV1): string {
 function debateArchiveMetaChips(
   session: DebateSessionListItemV1,
 ): string[] {
-  if (session.format === "whodunnit") {
+  if (session.format === "whodunnit" || session.mysteryFictionLabel) {
     return [
       "Whodunnit?",
-      "A Murder Mystery",
+      session.format === "turnabout" ? "Turnabout Court" : "A Murder Mystery",
       session.mysteryFictionLabel ?? "Fictional, non-canonical case",
       session.mysteryRouteGrade
         ? gradeLabelForMysteryArchive(session.mysteryRouteGrade)
@@ -2757,6 +2757,29 @@ function debateArchiveMetaChips(
     chips.push(debateActiveDurationLabel(session.activeDurationMs));
   }
   return chips;
+}
+
+function debateSessionIsMysteryTurnabout(
+  session: Pick<DebateSessionV1, "format" | "formatState">,
+): boolean {
+  return (
+    session.format === "turnabout" &&
+    session.formatState.format === "turnabout" &&
+    Boolean(session.formatState.mysteryTrial)
+  );
+}
+
+function debateSessionUsesFullBake(session: DebateSessionV1): boolean {
+  return (
+    session.playerRole === "spectator" ||
+    debateSessionIsMysteryTurnabout(session)
+  );
+}
+
+function debateFullBakeHasOpeningBuffer(session: DebateSessionV1): boolean {
+  return debateSessionIsMysteryTurnabout(session)
+    ? session.liveBake?.status === "ready"
+    : liveBakeMayStartWatch(session.liveBake, 0);
 }
 
 function gradeLabelForMysteryArchive(grade: string): string {
@@ -11711,6 +11734,7 @@ export function DebateExperience(
 
   const runSpectatorProgressiveBake = async (
     sessionId: string,
+    options: { waitUntilReady?: boolean } = {},
   ): Promise<DebateSessionV1 | null> => {
     spectatorBakeAbortRef.current?.abort();
     const controller = new AbortController();
@@ -11734,7 +11758,9 @@ export function DebateExperience(
     while (
       mountedRef.current &&
       !controller.signal.aborted &&
-      !liveBakeMayStartWatch(artifact, 0) &&
+      (options.waitUntilReady
+        ? artifact.status !== "ready"
+        : !liveBakeMayStartWatch(artifact, 0)) &&
       artifact.status !== "ready" &&
       artifact.status !== "failed"
     ) {
@@ -11770,7 +11796,7 @@ export function DebateExperience(
    */
   const restartSpectatorBakeIfNeeded = useCallback(
     (session: DebateSessionV1, reason: "resume" | "stale-poll"): void => {
-      if (session.playerRole !== "spectator") return;
+      if (!debateSessionUsesFullBake(session)) return;
       if (session.status !== "live") return;
       if (session.liveBake?.status === "ready") return;
       if (reason === "stale-poll") {
@@ -11943,8 +11969,9 @@ export function DebateExperience(
       }
       // Unfinished Spectator galleries must bake while live. Return-recess pause
       // waits until after that lift, or we restore the same hold when done.
+      const sessionUsesFullBake = debateSessionUsesFullBake(session);
       const needsSpectatorBakeResume =
-        session.playerRole === "spectator" &&
+        sessionUsesFullBake &&
         session.status !== "completed" &&
         session.status !== "cancelled" &&
         session.status !== "failed" &&
@@ -12058,7 +12085,7 @@ export function DebateExperience(
         error: unknown | null;
       }> | null = null;
       if (
-        session.playerRole !== "spectator" &&
+        !sessionUsesFullBake &&
         session.status === "paused" &&
         session.completedAt == null
       ) {
@@ -12111,7 +12138,7 @@ export function DebateExperience(
           (error: unknown) => ({ result: null, error }),
         );
       } else if (
-        session.playerRole === "spectator" &&
+        sessionUsesFullBake &&
         session.status !== "completed" &&
         session.status !== "cancelled" &&
         session.status !== "failed"
@@ -12139,7 +12166,7 @@ export function DebateExperience(
         // Decide once, at open: when the buffer is already met there is no
         // wait to dramatize, so the house does not gather.
         setSpectatorBakeNeedsBuffering(
-          !liveBakeMayStartWatch(session.liveBake, 0),
+          !debateFullBakeHasOpeningBuffer(session),
         );
         setSpectatorGalleryBakeUnlocked(false);
         setSpectatorGalleryArrivalUnlockedAt(null);
@@ -12153,9 +12180,11 @@ export function DebateExperience(
         setBusy(true);
         if (
           !skipBakeRestartOnBookmark &&
-          !liveBakeMayStartWatch(session.liveBake, 0)
+          !debateFullBakeHasOpeningBuffer(session)
         ) {
-          const unlocked = await runSpectatorProgressiveBake(session.id);
+          const unlocked = await runSpectatorProgressiveBake(session.id, {
+            waitUntilReady: debateSessionIsMysteryTurnabout(session),
+          });
           if (!mountedRef.current || !unlocked) return;
           session = unlocked;
         } else if (!skipBakeRestartOnBookmark) {
@@ -12204,7 +12233,11 @@ export function DebateExperience(
       setTurnaboutObjecting(false);
       setTurnaboutEvidenceSourceId("");
       setObserverPerspective(
-        session.liveBake?.status === "ready" ? "replay" : perspective,
+        debateSessionIsMysteryTurnabout(session)
+          ? "live"
+          : session.liveBake?.status === "ready"
+            ? "replay"
+            : perspective,
       );
       presentationStore.clear();
       clearProceedingsRevealTimers();
@@ -12290,7 +12323,7 @@ export function DebateExperience(
       if (!openingIsCurrent()) return;
       const minimumPhase: DebateArchiveReturnBufferPhaseV1 =
         minimumBufferResult?.phase ??
-        (session.playerRole === "spectator"
+        (sessionUsesFullBake
           ? session.liveBake?.status === "ready"
             ? "fully_buffered"
             : "ready_buffering"
@@ -12337,7 +12370,7 @@ export function DebateExperience(
       if (
         minimumBufferResult?.phase === "ready_buffering" &&
         !minimumBufferResult.bufferingFailed &&
-        session.playerRole !== "spectator"
+        !sessionUsesFullBake
       ) {
         const lookaheadController = new AbortController();
         const previousLookaheadController =
@@ -13953,6 +13986,21 @@ export function DebateExperience(
         }),
       );
       if (mountedRef.current) setBusy(false);
+      if (
+        result.session.format === "whodunnit" &&
+        result.session.formatState.format === "whodunnit"
+      ) {
+        presentationRunRef.current += 1;
+        props.onStopUtterance?.();
+        presentationStore.clear();
+        activeSessionIdRef.current = result.session.id;
+        activeSessionRef.current = result.session;
+        setActiveSession(result.session);
+        setPresenting(false);
+        setView("mystery");
+        void loadSessions();
+        return;
+      }
       await adoptSession(previous, result.session);
     } catch (caught) {
       setError(
@@ -24509,7 +24557,9 @@ export function DebateExperience(
           stepLabel: liveBakeStatusCopy(spectatorBake),
           title: liveBakeSurfaceTitle("debate"),
           detail:
-            "Prism is preparing the opening stretch. You can leave anytime — progress is saved.",
+            session.format === "turnabout"
+              ? "Prism is preparing the frozen court record and opening Turnabout stretch. You can leave anytime — progress is saved."
+              : "Prism is preparing the opening stretch. You can leave anytime — progress is saved.",
           onCancel: () => {
             void cancelSpectatorBake();
           },
@@ -25059,11 +25109,12 @@ export function DebateExperience(
               role="status"
               aria-live="polite"
             >
-              <p className={styles.galleryArrivalKicker}>The Forum</p>
+              <p className={styles.galleryArrivalKicker}>
+                {session.format === "turnabout" ? "Turnabout Court" : "The Forum"}
+              </p>
               <strong>The gallery is arriving</strong>
               <p>
-                Guests are finding their seats while the opening is prepared.
-                Progress is saved if you leave.
+                Guests are finding their seats while the {session.format === "turnabout" ? "frozen court record and opening" : "opening"} is prepared. Progress is saved if you leave.
               </p>
             </div>
           ) : null}
@@ -26876,6 +26927,81 @@ export function DebateExperience(
     );
   };
 
+  const adoptMysterySessionChange = (session: DebateSessionV1): void => {
+    if (
+      session.format === "turnabout" &&
+      session.formatState.format === "turnabout" &&
+      session.formatState.mysteryTrial
+    ) {
+      const filedSession = session;
+      setSpectatorBakeLiveFallback(false);
+      setSpectatorBake(session.liveBake ?? null);
+      spectatorBakeArtifactRef.current = session.liveBake ?? null;
+      const bakeStartedIso = new Date().toISOString();
+      setSpectatorBakeStartedAt(bakeStartedIso);
+      setSpectatorBakeNeedsBuffering(true);
+      setSpectatorGalleryBakeUnlocked(false);
+      setSpectatorGalleryArrivalUnlockedAt(null);
+      spectatorGalleryArrivalCompleteRef.current = false;
+      galleryOpeningMurmurStartedAtRef.current = null;
+      clearDebateDebrief();
+      selectDebateCameraMode("auto");
+      setTurnaboutObjecting(false);
+      setTurnaboutEvidenceSourceId("");
+      setObserverPerspective("live");
+      presentationStore.clear();
+      activeSessionIdRef.current = session.id;
+      activeSessionRef.current = session;
+      setActiveSession(session);
+      setView("baking");
+      setBusy(true);
+      void (async () => {
+        try {
+          const bakedSession = await runSpectatorProgressiveBake(session.id, {
+            waitUntilReady: true,
+          });
+          if (!mountedRef.current || !bakedSession) return;
+          const audienceCount = debateAudienceBotCount(props.graphicsQuality);
+          const nonPlayerCount = Math.max(0, audienceCount - 1);
+          const bakeStartedMs = Date.parse(bakeStartedIso) || Date.now();
+          const unlockAt = Date.now();
+          setSpectatorGalleryBakeUnlocked(true);
+          setSpectatorGalleryArrivalUnlockedAt(unlockAt);
+          const arrival = await waitForDebateGalleryArrival({
+            isCurrent: () => mountedRef.current,
+            nonPlayerCount,
+            progressRatio: () =>
+              liveBakeProgressRatio(spectatorBakeArtifactRef.current),
+            startedAt: bakeStartedMs,
+            unlockAt,
+            onTick: (now) => setSpectatorGalleryArrivalNowMs(now),
+          });
+          if (arrival !== "complete" || !mountedRef.current) return;
+          spectatorGalleryArrivalCompleteRef.current = true;
+          setSpectatorBakeNeedsBuffering(false);
+          setSpectatorBake(null);
+          setSpectatorBakeStartedAt(null);
+          setBusy(false);
+          await adoptSession(filedSession, bakedSession, { playIntro: true });
+          void loadSessions();
+        } catch (caught) {
+          if (!mountedRef.current) return;
+          setBusy(false);
+          setError(
+            caught instanceof Error
+              ? caught.message
+              : "The Turnabout court could not be prepared.",
+          );
+        }
+      })();
+      return;
+    }
+    activeSessionRef.current = session;
+    setActiveSession(session);
+    if (session.format === "whodunnit") setView("mystery");
+    if (session.status === "completed") void loadSessions();
+  };
+
   const mysterySharedProps = {
     bots,
     theme: props.theme,
@@ -27023,11 +27149,7 @@ export function DebateExperience(
     /> : <DebateMysteryPlay
       {...mysterySharedProps}
       session={activeSession}
-      onSessionChange={(session) => {
-        activeSessionRef.current = session;
-        setActiveSession(session);
-        if (session.status === "completed") void loadSessions();
-      }}
+      onSessionChange={adoptMysterySessionChange}
       onExit={() => {
         activeSessionIdRef.current = null;
         activeSessionRef.current = null;

@@ -49,7 +49,10 @@ const ASTERISK_VOCAL_CUE_TAGS = [
   [/^(?:hic|hiccup)\b/iu, "hiccups"],
   [/^(?:mwah|muah)\b/iu, "kisses"],
   [/^(?:tsk|tut)\b/iu, "clicks tongue"],
-  [/^(?:exhales?|exhaling|breathes?\s+out)\b/iu, "exhales"],
+  [
+    /^(?:exhales?|exhaling|breath|breaths|breathe|breathes|breathing|breathes?\s+out)\b/iu,
+    "exhales",
+  ],
   [/^(?:inhales?|inhaling|breathes?\s+in|takes?\s+(?:a\s+)?breath)\b/iu, "breathes deeply"],
 ] as const satisfies readonly (readonly [RegExp, string])[];
 

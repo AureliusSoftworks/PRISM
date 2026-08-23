@@ -21,6 +21,7 @@ import {
   DEBATE_MYSTERY_PRESETS,
   DEBATE_MYSTERY_ROOM_TEMPLATES,
   DEBATE_MYSTERY_SCHEMA_VERSION,
+  debateMysteryTheoryClaimOptions,
   debateMysteryRecipeSeed,
   resolveDebateMysteryConfig,
   type DebateMysteryActionRequestV1,
@@ -1583,6 +1584,18 @@ export function DebateMysteryPlay(
         }),
       );
       onSessionChange(result.session);
+      if (
+        result.session.format === "turnabout" &&
+        result.session.formatState.format === "turnabout" &&
+        result.session.formatState.mysteryTrial
+      ) {
+        setTheoryBoardOpen(false);
+        playMysterySfx("theory");
+        announceAction(
+          "Charges filed. The public gallery is assembling while Turnabout prepares the frozen court record.",
+        );
+        return true;
+      }
       const next = result.session.formatState as DebateWhodunnitFormatStateV1;
       if (next.playPhase === "theory") {
         setTheoryBoardOpen(true);
@@ -1901,6 +1914,7 @@ export function DebateMysteryPlay(
     || lead.linkedTestimonyIds.some((id) => selectedDeskTestimony.some((item) => item.id === id))) : [];
   const selectedDeskPins = selectedDeskSuspect ? notebook?.suspectPins.filter((pin) => pin.seatId === selectedDeskSuspect.seatId) ?? [] : [];
   const theoryMode = theoryBoardOpen || state.playPhase === "theory";
+  const theoryClaimOptions = debateMysteryTheoryClaimOptions(state);
   const investigationMusicMix = mysteryInvestigationMusicMix({
     theoryBoardOpen,
   });
@@ -2127,7 +2141,7 @@ export function DebateMysteryPlay(
   );
 
   const renderSelectedSuspectFile = (surface: "investigation" | "theory"): React.JSX.Element => {
-    if (!selectedDeskSuspect) return <p className={styles.deskEmpty}>Open a revealed suspect folder to write a note or pin a compared record.</p>;
+    if (!selectedDeskSuspect) return <p className={styles.deskEmpty}>Open a revealed suspect folder to {surface === "theory" ? "review notes or pin a compared record" : "write a note or pin a compared record"}.</p>;
     const pinnedReferences = selectedDeskPins.flatMap((pin) => {
       const reference = deskReferenceFor(pin.referenceKind, pin.referenceId);
       return reference ? [{ pin, reference }] : [];
@@ -2146,7 +2160,9 @@ export function DebateMysteryPlay(
         <section><strong>Evidence you confronted them with</strong>{selectedDeskConfrontedEvidence.length ? <ul>{selectedDeskConfrontedEvidence.map((item) => <li key={item.id}>{mysteryEvidenceTitle(item.title)}</li>)}</ul> : <p>No explicit evidence confrontation recorded.</p>}</section>
         <section><strong>Linked public leads</strong>{selectedDeskLinkedLeads.length ? <ul>{selectedDeskLinkedLeads.map((lead) => <li key={lead.id}>{lead.title}</li>)}</ul> : <p>No discovered lead currently links here.</p>}</section>
       </div>
-      <label className={styles.suspectNotePad}><strong>Private notes</strong><textarea value={selectedDeskNote} onChange={(event) => setSuspectNote(selectedDeskSuspect.seatId, event.currentTarget.value)} onBlur={() => playMysterySfx("pencil")} placeholder="Your plain-text notes — a fallible hypothesis, never evidence." /></label>
+      <section className={styles.suspectNotePad}><strong>Private notes</strong>{surface === "theory"
+        ? <p className={styles.readOnlyDeskNote}>{selectedDeskNote || "No private notes recorded. Return to the investigation desk to write notes."}</p>
+        : <textarea value={selectedDeskNote} onChange={(event) => setSuspectNote(selectedDeskSuspect.seatId, event.currentTarget.value)} onBlur={() => playMysterySfx("pencil")} placeholder="Your plain-text notes — a fallible hypothesis, never evidence." />}</section>
       <section className={styles.comparisonPaperclips}><strong>Paperclip a compared record</strong>{comparedReferences.length ? comparedReferences.map((reference) => {
         const pinned = selectedDeskPins.some((pin) => pin.referenceKind === reference.kind && pin.referenceId === reference.id);
         return <button key={`${reference.kind}:${reference.id}`} type="button" aria-pressed={pinned} onClick={() => togglePin(reference)}>{pinned ? "Unpin" : "Paperclip pin"} · {reference.label}</button>;
@@ -2308,18 +2324,16 @@ export function DebateMysteryPlay(
               const culpritSeatId = event.currentTarget.value || null;
               setTheory((current) => ({ ...current, culpritSeatId }));
             }}><option value="">Choose the accused</option>{state.suspects.map((suspect) => <option key={suspect.seatId} value={suspect.seatId}>{suspect.name}</option>)}</select></label>
-            <label><span><b>2</b> Method</span><textarea placeholder="How was the victim killed?" value={theory.method} onChange={(event) => {
-              const method = event.currentTarget.value;
-              setTheory((current) => ({ ...current, method }));
-            }} /></label>
-            <label><span><b>3</b> Motive</span><textarea placeholder="Why would the accused do it?" value={theory.motive} onChange={(event) => {
-              const motive = event.currentTarget.value;
-              setTheory((current) => ({ ...current, motive }));
-            }} /></label>
-            <label><span><b>4</b> Opportunity</span><textarea placeholder="When and how could they act?" value={theory.opportunity} onChange={(event) => {
-              const opportunity = event.currentTarget.value;
-              setTheory((current) => ({ ...current, opportunity }));
-            }} /></label>
+            {(["method", "motive", "opportunity"] as const).map((kind, index) => (
+              <fieldset key={kind} className={styles.theoryClaimPicker}>
+                <legend><b>{index + 2}</b> {kind[0]!.toUpperCase() + kind.slice(1)}</legend>
+                <div>{theoryClaimOptions[kind].length ? theoryClaimOptions[kind].map((option) => (
+                  <button key={option.id} type="button" aria-pressed={theory[kind] === option.value} onClick={() => setTheory((current) => ({ ...current, [kind]: option.value }))}>
+                    <strong>{option.sourceLabel}</strong><span>{option.value}</span>
+                  </button>
+                )) : <p>Discover a public record before filing this claim.</p>}</div>
+              </fieldset>
+            ))}
             <label>Optional accomplice<select value={theory.accompliceSeatId ?? ""} onChange={(event) => {
               const accompliceSeatId = event.currentTarget.value || null;
               setTheory((current) => ({ ...current, accompliceSeatId }));
@@ -2335,7 +2349,7 @@ export function DebateMysteryPlay(
           {renderSuspectFolderRack("theory")}
           {renderInvestigatorDesk("theory")}
           {renderPartnerConsultation("theory")}
-          <button type="button" className={styles.fileTheoryButton} disabled={busy || !theory.culpritSeatId} onClick={() => void perform({ action: "file_theory", theory })}>File charges and enter court</button>
+          <button type="button" className={styles.fileTheoryButton} disabled={busy || theoryReadyCount !== theoryChecklist.length} onClick={() => void perform({ action: "file_theory", theory })}>File accusation and prepare Turnabout</button>
         </section>
       ) : (
         <div className={styles.investigation} data-desk-open={deskOpen ? "true" : undefined}>

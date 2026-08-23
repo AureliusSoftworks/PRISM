@@ -67,6 +67,7 @@ import {
   type DebateEventV1,
   type DebateAdvocacyConsent,
 } from "./debate.ts";
+import { defaultDebateMysteryFormatStateV1 } from "./debateMystery.ts";
 
 test("binds affirmative Debate consent to model and Effort but not Turbo", () => {
   const consent: DebateAdvocacyConsent = {
@@ -575,6 +576,51 @@ test("defaults legacy Debate records to Forum and normalizes Turnabout state", (
       .format,
     "turnabout",
   );
+
+  const frozenInvestigation = {
+    ...defaultDebateMysteryFormatStateV1(),
+    theory: {
+      culpritSeatId: "suspect-2",
+      accompliceSeatId: null,
+      method: "A measured dose",
+      motive: "A concealed inheritance",
+      opportunity: "The corridor blackout",
+      evidenceIds: ["evidence-1"],
+      testimonyIds: ["testimony-1"],
+    },
+    theoryFiledAt: "2026-08-22T12:00:00.000Z",
+  };
+  const mysteryCourt = normalizeDebateFormatStateV1(
+    {
+      format: "turnabout",
+      mysteryTrial: {
+        version: 1,
+        frozenInvestigation,
+        credibilityRemaining: 2,
+        continuanceUsed: true,
+        failedActions: 1,
+        sustainedTestimonyIds: ["testimony-1", "testimony-1"],
+        evidenceSourceMap: {
+          "mystery-evidence-1": "evidence-1",
+          "bad marker": "private-evidence",
+        },
+        testimonySourceMap: {
+          "mystery-testimony-1": "testimony-1",
+        },
+        verdict: null,
+      },
+      statements: [],
+      contradictions: [],
+    },
+    "turnabout",
+  );
+  assert.equal(mysteryCourt.format, "turnabout");
+  assert.equal(mysteryCourt.mysteryTrial?.frozenInvestigation.theory?.culpritSeatId, "suspect-2");
+  assert.equal(mysteryCourt.mysteryTrial?.continuanceUsed, true);
+  assert.deepEqual(mysteryCourt.mysteryTrial?.sustainedTestimonyIds, ["testimony-1"]);
+  assert.deepEqual(mysteryCourt.mysteryTrial?.evidenceSourceMap, {
+    "mystery-evidence-1": "evidence-1",
+  });
 });
 
 test("normalizes motion slates and applies stable side-label fallbacks", () => {

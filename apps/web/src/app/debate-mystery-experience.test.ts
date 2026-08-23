@@ -492,11 +492,21 @@ describe("Debate Whodunnit experience", () => {
     assert.match(css, /\.evidenceExhibit/u);
   });
 
-  it("connects the Theory Board to the deterministic courtroom actions", () => {
+  it("hands a filed Theory Board accusation to the real Turnabout bake", () => {
     assert.match(source, /action: "file_theory"/u);
-    assert.match(source, /action: "court_press"/u);
-    assert.match(source, /action: "court_present"/u);
-    assert.match(source, /action: "court_pass"/u);
+    assert.match(source, /File accusation and prepare Turnabout/u);
+    assert.match(source, /result\.session\.format === "turnabout"/u);
+    assert.match(source, /public gallery is assembling while Turnabout prepares/u);
+    assert.match(shell, /session\.formatState\.mysteryTrial/u);
+    assert.match(shell, /function debateSessionUsesFullBake/u);
+    assert.match(shell, /sessionUsesFullBake &&[\s\S]*liveBakeShouldResumeOnOpen/u);
+    assert.match(shell, /waitUntilReady: debateSessionIsMysteryTurnabout\(session\)/u);
+    assert.match(shell, /setView\("baking"\)/u);
+    assert.match(shell, /runSpectatorProgressiveBake\(session\.id, \{[\s\S]*waitUntilReady: true/u);
+    assert.match(shell, /waitForDebateGalleryArrival/u);
+    assert.match(shell, /session\.format === "turnabout" \? "Turnabout Court" : "The Forum"/u);
+    assert.match(shell, /frozen court record and opening/u);
+    assert.match(shell, /adoptSession\(filedSession, bakedSession, \{ playIntro: true \}\)/u);
     assert.match(source, /Smoking Gun/u);
     assert.match(source, /Copy Case Seed/u);
     assert.match(source, /Reveal complete case spoilers/u);
@@ -504,7 +514,14 @@ describe("Debate Whodunnit experience", () => {
     assert.match(source, /mansion record is now closed/u);
     assert.match(source, /renderPartnerConsultation\("theory"\)/u);
     assert.match(source, /Consult · free/u);
+    assert.match(source, /const theoryClaimOptions = debateMysteryTheoryClaimOptions\(state\)/u);
+    assert.match(source, /className=\{styles\.theoryClaimPicker\}/u);
+    assert.match(source, /aria-pressed=\{theory\[kind\] === option\.value\}/u);
+    assert.match(source, /surface === "theory"[\s\S]*readOnlyDeskNote/u);
+    assert.doesNotMatch(source, /placeholder="How was the victim killed\?"|placeholder="Why would the accused do it\?"|placeholder="When and how could they act\?"/u);
+    assert.match(source, /disabled=\{busy \|\| theoryReadyCount !== theoryChecklist\.length\}/u);
     assert.match(css, /\.partnerConsultationLog/u);
+    assert.match(css, /\.theoryClaimPicker/u);
   });
 
   it("adds a clearly labeled one-click random cast action and preserves existing cast flow", () => {

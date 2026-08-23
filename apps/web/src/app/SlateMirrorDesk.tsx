@@ -1,6 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  BOT_PERSON_NAME_MAX_LENGTH,
+  TEXT_ENTRY_LONG_FORM_MAX_LENGTH,
+  TEXT_ENTRY_PARAGRAPH_MAX_LENGTH,
+  TEXT_ENTRY_TITLE_MAX_LENGTH,
+} from "@localai/shared";
 import type {
   SlateMirrorBinding,
   SlateMirrorProfile,
@@ -487,9 +493,10 @@ export function SlateMirrorDesk({
                 </header>
                 <label>
                   <span>For this project</span>
-                  <textarea
-                    rows={3}
-                    value={projectOverlay}
+          <textarea
+            rows={3}
+            value={projectOverlay}
+            maxLength={TEXT_ENTRY_PARAGRAPH_MAX_LENGTH}
                     placeholder="Keep the restraint, but let machinery and drought shape the imagery…"
                     onChange={(event) => setProjectOverlay(event.target.value)}
                   />
@@ -499,8 +506,9 @@ export function SlateMirrorDesk({
                   <div className={styles.povFields}>
                     <label>
                       <span>Character id</span>
-                      <input
-                        value={povCharacterId}
+          <input
+            value={povCharacterId}
+            maxLength={TEXT_ENTRY_TITLE_MAX_LENGTH}
                         placeholder="mara-vale"
                         onChange={(event) =>
                           setPovCharacterId(event.target.value)
@@ -509,17 +517,19 @@ export function SlateMirrorDesk({
                     </label>
                     <label>
                       <span>POV label</span>
-                      <input
-                        value={povLabel}
+          <input
+            value={povLabel}
+            maxLength={BOT_PERSON_NAME_MAX_LENGTH}
                         placeholder="Mara"
                         onChange={(event) => setPovLabel(event.target.value)}
                       />
                     </label>
                     <label>
                       <span>What shifts in this POV?</span>
-                      <textarea
-                        rows={2}
-                        value={povOverlay}
+          <textarea
+            rows={2}
+            value={povOverlay}
+            maxLength={TEXT_ENTRY_PARAGRAPH_MAX_LENGTH}
                         placeholder="She notices weight, pressure, and what hands conceal…"
                         onChange={(event) => setPovOverlay(event.target.value)}
                       />
@@ -572,16 +582,18 @@ export function SlateMirrorDesk({
               <div className={styles.identity}>
                 <label>
                   <span>Voice name</span>
-                  <input
-                    value={profileName}
+          <input
+            value={profileName}
+            maxLength={TEXT_ENTRY_TITLE_MAX_LENGTH}
                     placeholder="Lyrical restraint"
                     onChange={(event) => setProfileName(event.target.value)}
                   />
                 </label>
                 <label>
                   <span>Pen name · optional</span>
-                  <input
-                    value={penName}
+          <input
+            value={penName}
+            maxLength={BOT_PERSON_NAME_MAX_LENGTH}
                     placeholder="M. Vale"
                     onChange={(event) => setPenName(event.target.value)}
                   />
@@ -594,9 +606,10 @@ export function SlateMirrorDesk({
                     A piece of your writing
                   </span>
                   <small>Something you own that sounds unmistakably like you.</small>
-                  <textarea
-                    rows={5}
-                    value={exercises.sample}
+          <textarea
+            rows={5}
+            value={exercises.sample}
+            maxLength={TEXT_ENTRY_LONG_FORM_MAX_LENGTH}
                     placeholder="Paste a compact passage…"
                     onChange={(event) =>
                       setExercises((current) => ({
@@ -612,9 +625,10 @@ export function SlateMirrorDesk({
                     Description
                   </span>
                   <small>Describe a place just after someone has left it.</small>
-                  <textarea
-                    rows={5}
-                    value={exercises.description}
+          <textarea
+            rows={5}
+            value={exercises.description}
+            maxLength={TEXT_ENTRY_LONG_FORM_MAX_LENGTH}
                     placeholder="The cup was still warm…"
                     onChange={(event) =>
                       setExercises((current) => ({
@@ -632,9 +646,10 @@ export function SlateMirrorDesk({
                   <small>
                     Two people want the same thing but cannot name it.
                   </small>
-                  <textarea
-                    rows={5}
-                    value={exercises.dialogue}
+          <textarea
+            rows={5}
+            value={exercises.dialogue}
+            maxLength={TEXT_ENTRY_LONG_FORM_MAX_LENGTH}
                     placeholder="Write the exchange…"
                     onChange={(event) =>
                       setExercises((current) => ({
@@ -652,9 +667,10 @@ export function SlateMirrorDesk({
                   <small>
                     A character performs a simple task while avoiding a thought.
                   </small>
-                  <textarea
-                    rows={5}
-                    value={exercises.interiorityAction}
+          <textarea
+            rows={5}
+            value={exercises.interiorityAction}
+            maxLength={TEXT_ENTRY_LONG_FORM_MAX_LENGTH}
                     placeholder="Let the action carry the thought…"
                     onChange={(event) =>
                       setExercises((current) => ({

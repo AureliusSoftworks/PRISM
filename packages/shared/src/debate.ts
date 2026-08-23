@@ -25,6 +25,7 @@ import {
   normalizeDebateMysteryFormatStateV1,
   type DebateMysteryPlayPhase,
   type DebateMysteryRouteGrade,
+  type DebateMysteryVerdictV1,
   type DebateWhodunnitCreateConfigV1,
   type DebateWhodunnitFormatStateV1,
 } from "./debateMystery.ts";
@@ -452,6 +453,8 @@ export interface DebateTurnaboutStatementV1 {
   sourceIds: string[];
   status: DebateTurnaboutStatementStatus;
   createdEventId: string;
+  /** Public Whodunnit testimony projected into this statement, when present. */
+  recordTestimonyId?: string | null;
 }
 
 export interface DebateTurnaboutContradictionV1 {
@@ -475,6 +478,21 @@ export interface DebateTurnaboutFormatStateV1 {
   floorOwnerBotId: string | null;
   statements: DebateTurnaboutStatementV1[];
   contradictions: DebateTurnaboutContradictionV1[];
+  /**
+   * Public-only bridge for a filed Whodunnit accusation. The sealed Case Bible
+   * remains in server-private mystery storage under the same session ID.
+   */
+  mysteryTrial?: {
+    version: 1;
+    frozenInvestigation: DebateWhodunnitFormatStateV1;
+    credibilityRemaining: number;
+    continuanceUsed: boolean;
+    failedActions: number;
+    sustainedTestimonyIds: string[];
+    evidenceSourceMap: Record<string, string>;
+    testimonySourceMap: Record<string, string>;
+    verdict: DebateMysteryVerdictV1 | null;
+  } | null;
 }
 
 export type DebateFormatStateV1 =
@@ -3576,6 +3594,11 @@ export function normalizeDebateFormatStateV1(
               : [],
             status,
             createdEventId: normalizedText(row.createdEventId, 120),
+            recordTestimonyId:
+              typeof row.recordTestimonyId === "string" &&
+              row.recordTestimonyId.trim()
+                ? row.recordTestimonyId.trim().slice(0, 120)
+                : null,
           },
         ];
       })
@@ -3618,6 +3641,100 @@ export function normalizeDebateFormatStateV1(
     source.phase === "resolution"
       ? source.phase
       : "testimony";
+  const mysteryTrialSource =
+    source.mysteryTrial && typeof source.mysteryTrial === "object"
+      ? (source.mysteryTrial as Record<string, unknown>)
+      : null;
+  const frozenInvestigation = mysteryTrialSource
+    ? normalizeDebateMysteryFormatStateV1(
+        mysteryTrialSource.frozenInvestigation,
+      )
+    : null;
+  const mysteryTrial =
+    frozenInvestigation &&
+    frozenInvestigation.theory &&
+    frozenInvestigation.theoryFiledAt
+      ? {
+          version: 1 as const,
+          frozenInvestigation,
+          credibilityRemaining:
+            typeof mysteryTrialSource?.credibilityRemaining === "number" &&
+            Number.isFinite(mysteryTrialSource.credibilityRemaining)
+              ? Math.max(
+                  0,
+                  Math.min(3, Math.floor(mysteryTrialSource.credibilityRemaining)),
+                )
+              : 3,
+          continuanceUsed: mysteryTrialSource?.continuanceUsed === true,
+          failedActions:
+            typeof mysteryTrialSource?.failedActions === "number" &&
+            Number.isFinite(mysteryTrialSource.failedActions)
+              ? Math.max(0, Math.floor(mysteryTrialSource.failedActions))
+              : 0,
+          sustainedTestimonyIds: Array.isArray(
+            mysteryTrialSource?.sustainedTestimonyIds,
+          )
+            ? [
+                ...new Set(
+                  mysteryTrialSource.sustainedTestimonyIds
+                    .map((value) => normalizedText(value, 120))
+                    .filter(Boolean),
+                ),
+              ]
+            : [],
+          evidenceSourceMap:
+            mysteryTrialSource?.evidenceSourceMap &&
+            typeof mysteryTrialSource.evidenceSourceMap === "object"
+              ? Object.fromEntries(
+                  Object.entries(
+                    mysteryTrialSource.evidenceSourceMap as Record<
+                      string,
+                      unknown
+                    >,
+                  ).flatMap(([sourceId, evidenceId]) => {
+                    const normalizedSourceId = normalizedText(sourceId, 48)
+                      .toLowerCase();
+                    const normalizedEvidenceId = normalizedText(
+                      evidenceId,
+                      120,
+                    );
+                    return isValidDebateSourceId(normalizedSourceId) &&
+                      normalizedEvidenceId
+                      ? [[normalizedSourceId, normalizedEvidenceId] as const]
+                      : [];
+                  }),
+                )
+              : {},
+          testimonySourceMap:
+            mysteryTrialSource?.testimonySourceMap &&
+            typeof mysteryTrialSource.testimonySourceMap === "object"
+              ? Object.fromEntries(
+                  Object.entries(
+                    mysteryTrialSource.testimonySourceMap as Record<
+                      string,
+                      unknown
+                    >,
+                  ).flatMap(([sourceId, testimonyId]) => {
+                    const normalizedSourceId = normalizedText(sourceId, 48)
+                      .toLowerCase();
+                    const normalizedTestimonyId = normalizedText(
+                      testimonyId,
+                      120,
+                    );
+                    return isValidDebateSourceId(normalizedSourceId) &&
+                      normalizedTestimonyId
+                      ? [[normalizedSourceId, normalizedTestimonyId] as const]
+                      : [];
+                  }),
+                )
+              : {},
+          verdict:
+            mysteryTrialSource?.verdict &&
+            typeof mysteryTrialSource.verdict === "object"
+              ? (mysteryTrialSource.verdict as DebateMysteryVerdictV1)
+              : null,
+        }
+      : null;
   return {
     version: DEBATE_FORMAT_SCHEMA_VERSION,
     format: "turnabout",
@@ -3640,6 +3757,7 @@ export function normalizeDebateFormatStateV1(
         : null,
     statements,
     contradictions,
+    mysteryTrial,
   };
 }
 

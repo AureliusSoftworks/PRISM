@@ -668,6 +668,16 @@ export interface DebateMysteryTheoryV1 {
   testimonyIds: string[];
 }
 
+export type DebateMysteryTheoryClaimKindV1 = "method" | "motive" | "opportunity";
+
+/** A filing claim assembled from the player's public record. The value is
+ * intentionally canonical so the API can reject hand-authored theory prose. */
+export interface DebateMysteryTheoryClaimOptionV1 {
+  id: string;
+  value: string;
+  sourceLabel: string;
+}
+
 export interface DebateMysteryVerdictV1 {
   grade: DebateMysteryRouteGrade;
   culpritCorrect: boolean;
@@ -733,6 +743,12 @@ export interface DebateWhodunnitFormatStateV1 {
   fictionLabel: "Fictional, non-canonical case";
   recipeSeed: string;
   caseSeedAvailable: boolean;
+  /**
+   * Version of the shared bot-Power projection already applied to every
+   * bot-attributed string in this public state. Zero marks legacy saves that
+   * still need a one-time transport-safe upgrade by the Debate runtime.
+   */
+  botSpeechProjectionVersion: number;
   config: DebateMysteryResolvedConfigV1;
   victim: { id: string; name: string };
   suspects: DebateMysteryPublicSuspectSnapshotV1[];
@@ -761,6 +777,55 @@ export interface DebateWhodunnitFormatStateV1 {
   court: DebateMysteryCourtStateV1 | null;
   verdict: DebateMysteryVerdictV1 | null;
   spoilersRevealed: boolean;
+}
+
+export function debateMysteryTheoryClaimOptions(
+  state: Pick<
+    DebateWhodunnitFormatStateV1,
+    "discoveredEvidence" | "forensicFindings" | "leads" | "rooms" | "suspects" | "testimony"
+  >,
+): Record<DebateMysteryTheoryClaimKindV1, DebateMysteryTheoryClaimOptionV1[]> {
+  const evidence = state.discoveredEvidence.map((item) => ({
+    id: `evidence:${item.id}`,
+    value: `Evidence — ${item.title}: ${item.observation}`,
+    sourceLabel: item.title,
+  }));
+  const forensics = state.forensicFindings.flatMap((finding) => {
+    const item = state.discoveredEvidence.find((candidate) => candidate.id === finding.evidenceId);
+    return item ? [{
+      id: `forensics:${finding.evidenceId}`,
+      value: `Forensics — ${item.title}: ${finding.summary}`,
+      sourceLabel: `Forensics · ${item.title}`,
+    }] : [];
+  });
+  const leads = state.leads.map((lead) => ({
+    id: `lead:${lead.id}`,
+    // Lead summaries revise as the public investigation advances. Filing uses
+    // the stable public thread title so a continuance cannot invalidate a
+    // point-and-click selection that the player already made.
+    value: `Lead — ${lead.title}`,
+    sourceLabel: lead.title,
+  }));
+  const testimony = state.testimony.map((item) => {
+    const speaker = state.suspects.find((suspect) => suspect.seatId === item.speakerSeatId);
+    const speakerName = speaker?.name ?? "Witness";
+    return {
+      id: `testimony:${item.id}`,
+      value: `Testimony — ${speakerName}: “${item.exactQuote}”`,
+      sourceLabel: `Testimony · ${speakerName}`,
+    };
+  });
+  const observations = state.rooms.flatMap((room) => room.observations.map((observation) => ({
+    id: `observation:${room.id}:${observation.regionId}`,
+    value: `Room observation — ${room.name ?? "Discovered room"}: ${observation.observation}`,
+    sourceLabel: `${room.name ?? "Discovered room"} · ${observation.label}`,
+  })));
+
+  return {
+    method: [...forensics, ...evidence, ...leads],
+    motive: [...leads, ...testimony, ...evidence],
+    opportunity: [...testimony, ...observations, ...leads],
+  };
 }
 
 export type DebateMysteryActionRequestV1 =
@@ -2419,6 +2484,7 @@ export function projectDebateMysteryCase(bible: DebateMysteryCaseBibleV1, config
     fictionLabel: "Fictional, non-canonical case",
     recipeSeed: bible.recipeSeed,
     caseSeedAvailable: true,
+    botSpeechProjectionVersion: 0,
     config,
     victim: { id: bible.victim.id, name: bible.victim.name },
     // Suspect placement is public navigation state: the overhead board uses
@@ -2498,6 +2564,7 @@ export function defaultDebateMysteryFormatStateV1(): DebateWhodunnitFormatStateV
     fictionLabel: "Fictional, non-canonical case",
     recipeSeed: "",
     caseSeedAvailable: false,
+    botSpeechProjectionVersion: 0,
     config: {
       version: DEBATE_MYSTERY_SCHEMA_VERSION,
       preset: "custom",
@@ -2561,6 +2628,11 @@ export function normalizeDebateMysteryFormatStateV1(
     return defaultDebateMysteryFormatStateV1();
   }
   const normalized = source as DebateWhodunnitFormatStateV1;
+  normalized.botSpeechProjectionVersion =
+    typeof normalized.botSpeechProjectionVersion === "number" &&
+    Number.isFinite(normalized.botSpeechProjectionVersion)
+      ? Math.max(0, Math.floor(normalized.botSpeechProjectionVersion))
+      : 0;
   normalized.victim = normalized.victim && typeof normalized.victim.name === "string"
     ? normalized.victim
     : { id: "victim", name: "The victim" };

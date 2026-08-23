@@ -7,8 +7,10 @@ import {
   DEBATE_MYSTERY_NOTEBOOK_CHARACTER_LIMIT,
   DEBATE_MYSTERY_ROOM_TEMPLATES,
   DEBATE_MYSTERY_SCHEMA_VERSION,
+  DEBATE_FORMAT_SCHEMA_VERSION,
   DEBATE_SCHEMA_VERSION,
   compileDeterministicDebateMystery,
+  debateMysteryTheoryClaimOptions,
   debateMysteryRecipeSeed,
   debateMysteryNotebookCharacterCount,
   gradeDebateMysteryTheory,
@@ -32,13 +34,17 @@ import {
   type DebateMysterySuspectSnapshotV1,
   type DebateSessionCreateRequest,
   type DebateSessionV1,
+  type DebateTurnaboutFormatStateV1,
   type DebateWhodunnitCreateConfigV1,
   type DebateWhodunnitFormatStateV1,
 } from "@localai/shared";
 import {
   createDebateSession,
+  debatePowerPromptForBotV1,
   debatePowerPlanForBots,
   getDebateSession,
+  projectDebateBotPublicUtteranceV1,
+  upgradeLegacyMysteryBotSpeechV1,
   type DebateAiRuntime,
   type DebateGenerationLane,
 } from "./debate.ts";
@@ -63,6 +69,8 @@ interface MysteryNotebookRow {
   document_json: string;
   pending_proposal_json: string | null;
 }
+
+const MYSTERY_BOT_SPEECH_PROJECTION_VERSION = 1;
 
 export interface MysteryExhibitVisual {
   id: string;
@@ -199,9 +207,27 @@ function frozenForensicFinding(item: DebateMysteryCaseBibleV1["evidence"][number
 
 function publicMysteryTestimony(
   item: DebateMysteryCaseBibleV1["testimony"][number],
+  session: DebateSessionV1,
 ): DebateWhodunnitFormatStateV1["testimony"][number] {
   const { factTags: _factTags, ...publicItem } = item;
-  return { ...publicItem, discovered: true };
+  const suspect = session.formatState.format === "whodunnit"
+    ? session.formatState.suspects.find(
+        (candidate) => candidate.seatId === item.speakerSeatId,
+      )
+    : null;
+  return {
+    ...publicItem,
+    exactQuote: suspect
+      ? projectDebateBotPublicUtteranceV1({
+          session,
+          botId: suspect.botId,
+          botName: suspect.name,
+          clearContent: item.exactQuote,
+          stableTurnKey: `${session.id}:whodunnit:testimony:${item.id}`,
+        })
+      : publicItem.exactQuote,
+    discovered: true,
+  };
 }
 
 function mysteryKeywords(value: string): Set<string> {
@@ -920,7 +946,10 @@ export async function createDebateMysterySession(
     bible = await authorMysteryRoomTexture(bible, runtime);
     storeCaseBible(db, userId, session.id, bible);
     createInitialNotebook(db, userId, session.id);
-    const publicState = projectDebateMysteryCase(bible, config);
+    const publicState = {
+      ...projectDebateMysteryCase(bible, config),
+      botSpeechProjectionVersion: MYSTERY_BOT_SPEECH_PROJECTION_VERSION,
+    };
     appendAutomaticNotebookReferences(
       db,
       userId,
@@ -1010,14 +1039,29 @@ function appendMysteryAction(
     `INSERT INTO debate_mystery_actions
        (id, user_id, session_id, sequence, action_kind, public_payload_json, occurred_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(randomUUID(), userId, sessionId, next.sequence, actionKind, JSON.stringify(publicPayload), new Date().toISOString());
+  ).run(
+    randomUUID(),
+    userId,
+    sessionId,
+    next.sequence,
+    actionKind,
+    JSON.stringify({
+      ...publicPayload,
+      botSpeechProjectionVersion: MYSTERY_BOT_SPEECH_PROJECTION_VERSION,
+    }),
+    new Date().toISOString(),
+  );
 }
 
 function replayMysteryMutation(db: DatabaseSync, userId: string, sessionId: string, key: string): DebateSessionV1 | null {
   const row = db.prepare(
     `SELECT response_json FROM debate_mutations WHERE user_id = ? AND session_id = ? AND idempotency_key = ?`,
   ).get(userId, sessionId, key) as { response_json?: string } | undefined;
-  return row?.response_json ? JSON.parse(row.response_json) as DebateSessionV1 : null;
+  return row?.response_json
+    ? upgradeLegacyMysteryBotSpeechV1(
+        JSON.parse(row.response_json) as DebateSessionV1,
+      )
+    : null;
 }
 
 function mysterySpatialActionKey(request: DebateMysteryActionRequestV1): string | null {
@@ -1106,52 +1150,76 @@ function recordMysteryMutation(
 }
 
 async function projectedActorReply(args: {
+  session: DebateSessionV1;
   bible: DebateMysteryCaseBibleV1;
   state: DebateWhodunnitFormatStateV1;
   seatId: string;
   question: string;
   confrontedEvidence?: DebateWhodunnitFormatStateV1["discoveredEvidence"][number] | null;
   runtime: DebateAiRuntime;
-  powerPlan: DebateSessionV1["powerPlan"]["bots"][string] | undefined;
+  stableTurnKey: string;
 }): Promise<string> {
   const suspect = args.bible.suspects.find((seat) => seat.seatId === args.seatId)!;
   const knowledge = args.bible.actorKnowledge.find((entry) => entry.seatId === args.seatId)!;
   const testimony = args.bible.testimony.find((entry) => entry.speakerSeatId === args.seatId)!;
-  if (args.powerPlan?.hardMuted) return "...";
+  const botPlan = args.session.powerPlan.bots[suspect.botId];
+  if (botPlan?.hardMuted) {
+    return projectDebateBotPublicUtteranceV1({
+      session: args.session,
+      botId: suspect.botId,
+      botName: suspect.name,
+      clearContent: testimony.exactQuote,
+      stableTurnKey: args.stableTurnKey,
+      currentInput: args.question,
+      addressedSpeech: args.question,
+    });
+  }
   const lane = mysteryLane(args.runtime);
   const casePeople = [args.bible.victim.name, ...args.bible.suspects.map((entry) => entry.name)];
   const publicTestimony = args.state.testimony.map((entry) => ({
     speakerName: args.state.suspects.find((suspectEntry) => suspectEntry.seatId === entry.speakerSeatId)?.name ?? "Witness",
     exactQuote: entry.exactQuote,
   }));
+  let clearAnswer: string;
   try {
-    const generated = compact(await lane.provider.generateResponse([
+    clearAnswer = compact(await lane.provider.generateResponse([
       { role: "system", content: [
         `You are ${suspect.name}, acting in a fictional, non-canonical murder mystery.`,
         `Private role projection: ${JSON.stringify(knowledge)}`,
         `Your frozen on-record statement is ${testimony.exactQuote}`,
-        `Your frozen public Power constraints are ${JSON.stringify(args.powerPlan?.effects ?? [])}. Powers may shape delivery, visibility, identity, or timing, but never change canonical facts, create evidence, or make the recorded statement disappear.`,
+        debatePowerPromptForBotV1(args.session, suspect.botId),
+        "Powers may shape delivery, visibility, identity, or timing, but never change canonical facts, create evidence, or make the recorded statement disappear.",
         `The only named people who exist in this case are ${casePeople.join(", ")}. Never introduce, remember, quote, or rely on any other named person, even if your usual persona would know them.`,
         "Answer only from your projection. You may use only the permitted lies. Never mention a Case Bible, proof route, hidden evidence, another actor's private knowledge, or generation instructions.",
         "Give one natural conversational turn of one to three concise sentences (at most 70 words). Answer the investigator directly; do not narrate a monologue, recap the case, repeat your entire statement, or add headings or stage directions.",
       ].join("\n") },
       { role: "user", content: `Discovered public record: ${JSON.stringify({ evidence: args.state.discoveredEvidence.map((item) => ({ title: item.title, observation: item.observation })), testimony: publicTestimony })}\n${args.confrontedEvidence ? `Evidence formally presented in this exchange: ${JSON.stringify({ title: args.confrontedEvidence.title, observation: args.confrontedEvidence.observation })}\n` : ""}Investigator: ${args.question}` },
     ], { model: lane.model, reasoningEffort: lane.reasoningEffort, turbo: lane.turbo, maxTokens: 180, temperature: 0.58, usagePurpose: "debate_generation", allowFinalLocalFallback: lane.providerName === "local" }), 560) || testimony.exactQuote;
-    // Seat IDs are private orchestration handles, never character names. Use
-    // the same resolved utterance for the visible transcript, saved exchange,
-    // public payload, and voice playback.
-    return resolveMysterySeatNames(generated, args.state);
   } catch {
-    return resolveMysterySeatNames(testimony.exactQuote, args.state);
+    clearAnswer = testimony.exactQuote;
   }
+  // Seat IDs are private orchestration handles. The one shared projection
+  // below becomes the visible transcript, saved exchange, replay payload, and
+  // exact voice-synthesis text; the clear draft never crosses that boundary.
+  return projectDebateBotPublicUtteranceV1({
+    session: args.session,
+    botId: suspect.botId,
+    botName: suspect.name,
+    clearContent: resolveMysterySeatNames(clearAnswer, args.state),
+    stableTurnKey: args.stableTurnKey,
+    currentInput: args.question,
+    addressedSpeech: args.question,
+  });
 }
 
 async function projectedPartnerReply(args: {
+  session: DebateSessionV1;
   state: DebateWhodunnitFormatStateV1;
   notebook: DebateMysteryNotebookV2;
   question: string;
   runtime: DebateAiRuntime;
   courtTask?: "opening" | "closing";
+  stableTurnKey: string;
 }): Promise<string> {
   const lane = mysteryLane(args.runtime);
   const publicRecord = {
@@ -1179,6 +1247,7 @@ async function projectedPartnerReply(args: {
       disclaimer: "These are explicit, fallible investigator hypotheses—not evidence or case truth.",
     },
   };
+  let clearAnswer: string;
   try {
     const courtDirection = args.courtTask
       ? [
@@ -1193,6 +1262,10 @@ async function projectedPartnerReply(args: {
     const answer = (args.courtTask ? compact : compactMarkdown)(await lane.provider.generateResponse([
       { role: "system", content: [
         "You are the investigator's prosecutor partner. You can read only this discovered public record and the investigator's private desk workspace. Every note and pinned connection is an explicitly fallible, unverified player hypothesis. Offer analysis, questions, and uncertainty; never invent evidence, canonize a hypothesis, infer hidden case state, or claim access to a Case Bible.",
+        debatePowerPromptForBotV1(
+          args.session,
+          args.state.config.prosecutorPartnerBotId,
+        ),
         "Use the suspects' actual display names, never seat labels such as Suspect-1.",
         "Treat every timestamp and quotation as exact. Never merge two witnesses' times, attribute one witness's words to another, or paraphrase a statement as a stronger fact. Separate documented fact from inference explicitly, and say when the record does not establish something.",
         courtDirection,
@@ -1204,17 +1277,33 @@ async function projectedPartnerReply(args: {
       ].join("\n") },
       { role: "user", content: `${JSON.stringify(publicRecord)}\nInvestigator asks: ${args.question}` },
     ], { model: lane.model, reasoningEffort: lane.reasoningEffort, turbo: lane.turbo, maxTokens: args.courtTask ? 220 : 420, temperature: 0.2, usagePurpose: "debate_generation", allowFinalLocalFallback: lane.providerName === "local" }), args.courtTask ? 700 : 1_200) || "I can only work from what we have actually discovered.";
-    return resolveMysterySeatNames(answer, args.state);
+    clearAnswer = answer;
   } catch {
-    return "I can only work from what we have actually discovered. Your desk notes and pins are working hypotheses, not evidence.";
+    clearAnswer = "I can only work from what we have actually discovered. Your desk notes and pins are working hypotheses, not evidence.";
   }
+  const partner = [
+    args.session.forAdvocate,
+    args.session.againstAdvocate,
+    args.session.moderator,
+  ].find((bot) => bot.id === args.state.config.prosecutorPartnerBotId);
+  return projectDebateBotPublicUtteranceV1({
+    session: args.session,
+    botId: args.state.config.prosecutorPartnerBotId,
+    botName: partner?.name ?? "Co-counsel",
+    clearContent: resolveMysterySeatNames(clearAnswer, args.state),
+    stableTurnKey: args.stableTurnKey,
+    currentInput: args.question,
+    addressedSpeech: args.question,
+  });
 }
 
 async function projectedDefenseReply(args: {
+  session: DebateSessionV1;
   state: DebateWhodunnitFormatStateV1;
   theory: DebateWhodunnitFormatStateV1["theory"];
   task: "opening" | "closing";
   runtime: DebateAiRuntime;
+  stableTurnKey: string;
 }): Promise<string> {
   const lane = mysteryLane(args.runtime);
   const admissibleRecord = {
@@ -1230,14 +1319,19 @@ async function projectedDefenseReply(args: {
     testimony: args.state.testimony,
     sustainedTestimonyIds: args.state.court?.sustainedTestimonyIds ?? [],
   };
+  let clearReply: string;
   try {
-    return compact(
+    clearReply = compact(
       await lane.provider.generateResponse(
         [
           {
             role: "system",
             content: [
               "You are rival defense counsel in a fictional, non-canonical murder trial. You receive only the admissible public record. Give the strongest supported alternative or reasonable-doubt argument without inventing facts, evidence, witnesses, hidden case state, or notebook content. Never claim access to the Case Bible.",
+              debatePowerPromptForBotV1(
+                args.session,
+                args.state.config.rivalDefenseBotId,
+              ),
               `Deliver this ${args.task} as one spoken paragraph of 50 to 90 words. Address PRISM as Judge. There is no jury: never say 'ladies and gentlemen,' mention jurors, or appeal to a jury.`,
               "Use no Markdown, headings, bullets, stage directions, or legal-analysis preamble. Be sharp, theatrical, and grounded only in the record.",
             ].join("\n"),
@@ -1260,14 +1354,26 @@ async function projectedDefenseReply(args: {
       800,
     ) || "The defense asks PRISM to judge only what this admissible record actually proves.";
   } catch {
-    return "The defense asks PRISM to judge only what this admissible record actually proves.";
+    clearReply = "The defense asks PRISM to judge only what this admissible record actually proves.";
   }
+  const defense = [
+    args.session.forAdvocate,
+    args.session.againstAdvocate,
+    args.session.moderator,
+  ].find((bot) => bot.id === args.state.config.rivalDefenseBotId);
+  return projectDebateBotPublicUtteranceV1({
+    session: args.session,
+    botId: args.state.config.rivalDefenseBotId,
+    botName: defense?.name ?? "Defense counsel",
+    clearContent: clearReply,
+    stableTurnKey: args.stableTurnKey,
+  });
 }
 
 async function appendMysteryCourtCounselBeat(args: {
   db: DatabaseSync;
   userId: string;
-  sessionId: string;
+  session: DebateSessionV1;
   state: DebateWhodunnitFormatStateV1;
   task: "opening" | "closing";
   runtime: DebateAiRuntime;
@@ -1275,9 +1381,10 @@ async function appendMysteryCourtCounselBeat(args: {
   const notebook = getDebateMysteryNotebookV2(
     args.db,
     args.userId,
-    args.sessionId,
+    args.session.id,
   ).notebook;
   const partner = await projectedPartnerReply({
+    session: args.session,
     state: args.state,
     notebook,
     question:
@@ -1286,12 +1393,15 @@ async function appendMysteryCourtCounselBeat(args: {
         : "Deliver a concise prosecution closing from the filed theory, discovered record, and sustained courtroom contradictions. Do not claim facts that were not admitted.",
     runtime: args.runtime,
     courtTask: args.task,
+    stableTurnKey: `${args.session.id}:whodunnit:legacy-court:${args.task}:prosecution:${args.state.partnerJournal.length}`,
   });
   const defense = await projectedDefenseReply({
+    session: args.session,
     state: args.state,
     theory: args.state.theory,
     task: args.task,
     runtime: args.runtime,
+    stableTurnKey: `${args.session.id}:whodunnit:legacy-court:${args.task}:defense:${args.state.partnerJournal.length}`,
   });
   args.state.partnerJournal.push(`Prosecution: ${partner}`);
   args.state.partnerJournal.push(`Defense: ${defense}`);
@@ -1373,6 +1483,172 @@ function completeMysteryTrial(
     stepKey: "mystery_verdict",
     completedAt: verdict.deliveredAt,
     formatState: { ...state, playPhase: "verdict", verdict, court: state.court ? { ...state.court, activeTestimonyId: null } : null },
+  };
+}
+
+function mysteryTurnaboutSourceId(kind: "evidence" | "testimony", index: number): string {
+  return `mystery-${kind}-${index + 1}`;
+}
+
+/**
+ * Freeze the public investigation into the existing Turnabout contract. The
+ * Case Bible stays in debate_mystery_cases under this same session ID and is
+ * never copied into the Debate session, events, prompts, or replay record.
+ */
+function enterMysteryTurnabout(
+  session: DebateSessionV1,
+  state: DebateWhodunnitFormatStateV1,
+): DebateSessionV1 {
+  if (!state.theory || !state.theoryFiledAt) {
+    throw new HttpError(409, "File a complete theory before preparing court.");
+  }
+  const theory = state.theory;
+  const accused = state.suspects.find(
+    (suspect) => suspect.seatId === theory.culpritSeatId,
+  );
+  if (!accused) throw new HttpError(409, "The accused is no longer in this case.");
+
+  const prioritizedEvidence = [
+    ...theory.evidenceIds.flatMap((id) =>
+      state.discoveredEvidence.find((item) => item.id === id) ?? [],
+    ),
+    ...state.discoveredEvidence.filter(
+      (item) => !theory.evidenceIds.includes(item.id),
+    ),
+  ];
+  const prioritizedTestimony = [
+    ...theory.testimonyIds.flatMap((id) =>
+      state.testimony.find((item) => item.id === id) ?? [],
+    ),
+    ...state.testimony.filter(
+      (item) => !theory.testimonyIds.includes(item.id),
+    ),
+  ];
+  const evidenceLimit = Math.min(6, prioritizedEvidence.length);
+  const testimonyLimit = Math.min(
+    12 - evidenceLimit,
+    prioritizedTestimony.length,
+  );
+  const admittedEvidence = prioritizedEvidence.slice(0, evidenceLimit);
+  const admittedTestimony = prioritizedTestimony.slice(0, testimonyLimit);
+  const evidenceSourceMap = Object.fromEntries(
+    admittedEvidence.map((item, index) => [
+      mysteryTurnaboutSourceId("evidence", index),
+      item.id,
+    ]),
+  );
+  const testimonySourceMap = Object.fromEntries(
+    admittedTestimony.map((item, index) => [
+      mysteryTurnaboutSourceId("testimony", index),
+      item.id,
+    ]),
+  );
+  const frozenAt = new Date().toISOString();
+  const exhibits = admittedEvidence.map((item, index) => ({
+    id: mysteryTurnaboutSourceId("evidence", index),
+    adjective: item.adjective,
+    object: item.object,
+    title: item.title,
+    observation: item.observation,
+    emoji: item.emoji,
+    visualKind: item.imageId ? ("synthesized" as const) : ("emoji" as const),
+    imageId: item.imageId,
+    createdBy: "prism" as const,
+  }));
+  const sources = admittedTestimony.map((item, index) => {
+    const speaker = state.suspects.find(
+      (suspect) => suspect.seatId === item.speakerSeatId,
+    );
+    return {
+      id: mysteryTurnaboutSourceId("testimony", index),
+      title: `${speaker?.name ?? "Witness"} testimony`,
+      url: `prism://whodunnit/${encodeURIComponent(session.id)}/testimony/${encodeURIComponent(item.id)}`,
+      snippet: item.exactQuote,
+      publishedAt: state.theoryFiledAt,
+      excerptSource: "player" as const,
+      excerptSelection: "player" as const,
+    };
+  });
+  const method = compact(theory.method, 480) || "the alleged method";
+  const motive = compact(theory.motive, 480) || "the alleged motive";
+  const opportunity = compact(theory.opportunity, 480) || "the alleged opportunity";
+  const motionText = compact(
+    `Whether ${accused.name} committed the murder by ${method}, motivated by ${motive}, with the opportunity described as ${opportunity}.`,
+    320,
+  );
+  const turnaboutState: DebateTurnaboutFormatStateV1 = {
+    version: DEBATE_FORMAT_SCHEMA_VERSION,
+    format: "turnabout",
+    phase: "testimony",
+    round: 1,
+    activeStatementId: null,
+    floorOwnerBotId: null,
+    statements: [],
+    contradictions: [],
+    mysteryTrial: {
+      version: 1,
+      frozenInvestigation: structuredClone(state),
+      credibilityRemaining: DEBATE_MYSTERY_CREDIBILITY_STRIKES,
+      continuanceUsed: state.continuanceUsed,
+      failedActions: 0,
+      sustainedTestimonyIds: [],
+      evidenceSourceMap,
+      testimonySourceMap,
+      verdict: null,
+    },
+  };
+  return {
+    ...session,
+    format: "turnabout",
+    formatVersion: DEBATE_FORMAT_SCHEMA_VERSION,
+    formatState: turnaboutState,
+    status: "live",
+    phase: "opening",
+    stepKey: "turnabout_intro",
+    motion: {
+      version: DEBATE_SCHEMA_VERSION,
+      id: `mystery-court-${session.id}`,
+      title: `${state.caseTitle} · Court`,
+      motion: motionText,
+      forSide: {
+        label: "Prosecution",
+        brief: compact(
+          `Prove the frozen accusation against ${accused.name}. Method: ${method}. Motive: ${motive}. Opportunity: ${opportunity}. Use only the admitted discovered record.`,
+          1_200,
+        ),
+      },
+      againstSide: {
+        label: "Defense",
+        brief: compact(
+          `Test the accusation against ${accused.name} for gaps and reasonable doubt using only the admitted discovered record. Do not invent an alternate truth.`,
+          1_200,
+        ),
+      },
+    },
+    evidence: {
+      version: DEBATE_SCHEMA_VERSION,
+      notes: compact(
+        `Fictional, non-canonical proceeding. Filed accusation: ${accused.name}. The player alleges ${method}; motive: ${motive}; opportunity: ${opportunity}. Every item below was discovered before filing.`,
+        8_000,
+      ),
+      sources,
+      exhibits,
+      frozenAt,
+    },
+    caseBoard: [],
+    ballots: [],
+    playerVerdict: null,
+    winnerSideId: null,
+    judgeGavel: null,
+    objectionRuling: null,
+    events: session.events,
+    error: null,
+    liveBake: null,
+    pausedAt: null,
+    pausedPresentationEventId: null,
+    preparedResumeEventId: null,
+    archiveReturnBuffer: null,
+    completedAt: null,
   };
 }
 
@@ -1737,9 +2013,18 @@ export async function applyDebateMysteryAction(
     const confrontedEvidence = parsedEvidenceId
       ? nextState.discoveredEvidence.find((item) => item.id === parsedEvidenceId)!
       : null;
-    const answer = await projectedActorReply({ bible, state: nextState, seatId: suspect.seatId, question: resolveDebateMysteryQuestionMentions(question, nextState, bible), confrontedEvidence, runtime, powerPlan: session.powerPlan.bots[suspect.botId] });
+    const answer = await projectedActorReply({
+      session: nextSession,
+      bible,
+      state: nextState,
+      seatId: suspect.seatId,
+      question: resolveDebateMysteryQuestionMentions(question, nextState, bible),
+      confrontedEvidence,
+      runtime,
+      stableTurnKey: `${session.id}:whodunnit:interview:${suspect.seatId}:${Math.floor(nextState.interviewLog.length / 2) + 1}`,
+    });
     const testimony = bible.testimony.find((entry) => entry.speakerSeatId === suspect.seatId)!;
-    const publicTestimony = publicMysteryTestimony(testimony);
+    const publicTestimony = publicMysteryTestimony(testimony, nextSession);
     if (!nextState.testimony.some((entry) => entry.id === testimony.id)) {
       nextState.testimony.push(publicTestimony);
       automaticNotebookReferences.push({ kind: "testimony", id: testimony.id, label: `${suspect.name}: “${publicTestimony.exactQuote}”` });
@@ -1769,7 +2054,14 @@ export async function applyDebateMysteryAction(
     const question = compact(request.question, 2_000);
     if (!question) throw new HttpError(400, "Ask your partner a question.");
     const notebook = getDebateMysteryNotebookV2(db, userId, sessionId).notebook;
-    const answer = await projectedPartnerReply({ state: nextState, notebook, question: resolveDebateMysteryQuestionMentions(question, nextState, bible), runtime });
+    const answer = await projectedPartnerReply({
+      session: nextSession,
+      state: nextState,
+      notebook,
+      question: resolveDebateMysteryQuestionMentions(question, nextState, bible),
+      runtime,
+      stableTurnKey: `${session.id}:whodunnit:consultation:${nextState.partnerConsultations.length + 1}`,
+    });
     const createdAt = new Date().toISOString();
     nextState.partnerConsultations.push({
       id: `partner-consultation-${nextState.partnerConsultations.length + 1}`,
@@ -1788,12 +2080,19 @@ export async function applyDebateMysteryAction(
     const testimonyIds = [...new Set(request.theory.testimonyIds.map((id) => compact(id, 120)).filter(Boolean))];
     if (evidenceIds.some((id) => !nextState.discoveredEvidence.some((item) => item.id === id))) throw new HttpError(400, "A filed evidence item is not in the discovered record.");
     if (testimonyIds.some((id) => !nextState.testimony.some((item) => item.id === id))) throw new HttpError(400, "A filed testimony excerpt is not in the discovered record.");
+    const claimOptions = debateMysteryTheoryClaimOptions(nextState);
+    const method = compact(request.theory.method, 2_000);
+    const motive = compact(request.theory.motive, 2_000);
+    const opportunity = compact(request.theory.opportunity, 2_000);
+    if (!claimOptions.method.some((option) => compact(option.value, 2_000) === method)) throw new HttpError(400, "Choose a method from the discovered record.");
+    if (!claimOptions.motive.some((option) => compact(option.value, 2_000) === motive)) throw new HttpError(400, "Choose a motive from the discovered record.");
+    if (!claimOptions.opportunity.some((option) => compact(option.value, 2_000) === opportunity)) throw new HttpError(400, "Choose an opportunity from the discovered record.");
     nextState.theory = {
       culpritSeatId: request.theory.culpritSeatId,
       accompliceSeatId: request.theory.accompliceSeatId ?? null,
-      method: compact(request.theory.method, 2_000),
-      motive: compact(request.theory.motive, 2_000),
-      opportunity: compact(request.theory.opportunity, 2_000),
+      method,
+      motive,
+      opportunity,
       evidenceIds,
       testimonyIds,
     };
@@ -1812,18 +2111,26 @@ export async function applyDebateMysteryAction(
     for (const testimonyId of witnessTestimonyIds) {
       const statement = bible.testimony.find((entry) => entry.id === testimonyId);
       if (statement && !nextState.testimony.some((entry) => entry.id === statement.id)) {
-        const publicStatement = publicMysteryTestimony(statement);
+        const publicStatement = publicMysteryTestimony(statement, nextSession);
         nextState.testimony.push(publicStatement);
         const speakerName = nextState.suspects.find((suspect) => suspect.seatId === statement.speakerSeatId)?.name ?? "Witness";
         automaticNotebookReferences.push({ kind: "testimony", id: statement.id, label: `${speakerName}: “${publicStatement.exactQuote}”` });
       }
     }
-    nextState.court = { witnessTestimonyIds, activeTestimonyId: witnessTestimonyIds[0] ?? null, examinedTestimonyIds: [], sustainedTestimonyIds: [], failedActions: 0 };
+    // Legacy saves may still contain the bespoke court state, but every new
+    // filing moves into the shared Turnabout runtime below.
+    nextState.court = null;
     nextState.playPhase = "trial";
     nextState.credibilityRemaining = DEBATE_MYSTERY_CREDIBILITY_STRIKES;
-    await appendMysteryCourtCounselBeat({ db, userId, sessionId, state: nextState, task: "opening", runtime });
-    nextSession = { ...nextSession, phase: "closing", stepKey: "mystery_trial", status: "waiting_for_player" };
-    publicPayload = { theory: nextState.theory, witnessTestimonyIds };
+    nextState.leads = updateDebateMysteryPublicLeads(bible, nextState);
+    nextSession = enterMysteryTurnabout(nextSession, nextState);
+    publicPayload = {
+      theory: nextState.theory,
+      witnessTestimonyIds,
+      turnabout: true,
+      publicEvidenceIds: nextState.discoveredEvidence.map((item) => item.id),
+      publicTestimonyIds: nextState.testimony.map((item) => item.id),
+    };
   } else if (request.action === "court_speak") {
     if (nextState.playPhase !== "trial" || !nextState.court || !nextState.theory) throw new HttpError(409, "File a theory before addressing the court.");
     const content = compact(request.content, 600);
@@ -1836,8 +2143,11 @@ export async function applyDebateMysteryAction(
     if (request.action === "court_press") {
       if (!nextState.court.examinedTestimonyIds.includes(request.testimonyId)) nextState.court.examinedTestimonyIds.push(request.testimonyId);
       const testimony = bible.testimony.find((entry) => entry.id === request.testimonyId)!;
-      nextState.partnerJournal.push(`PRISM: The witness must clarify ${testimony.exactQuote}`);
-      publicPayload = { testimonyId: request.testimonyId, exactQuote: testimony.exactQuote, pressed: true };
+      const publicQuote = nextState.testimony.find(
+        (entry) => entry.id === testimony.id,
+      )?.exactQuote ?? "The admitted statement is unavailable.";
+      nextState.partnerJournal.push(`PRISM: The witness must clarify ${publicQuote}`);
+      publicPayload = { testimonyId: request.testimonyId, exactQuote: publicQuote, pressed: true };
     } else if (request.action === "court_present") {
       const evidence = nextState.discoveredEvidence.find((item) => item.id === request.evidenceId);
       const canonicalEvidence = bible.evidence.find((item) => item.id === request.evidenceId);
@@ -1851,9 +2161,16 @@ export async function applyDebateMysteryAction(
         nextState.credibilityRemaining = Math.max(0, nextState.credibilityRemaining - 1);
       }
       const lockedRuling = sustained ? "sustained" : "overruled";
+      const publicTestimony = nextState.testimony.find(
+        (entry) => entry.id === testimony.id,
+      );
       const rulingProse = await projectedJudgeRuling({
         ruling: lockedRuling,
-        testimony,
+        testimony: {
+          id: testimony.id,
+          exactQuote:
+            publicTestimony?.exactQuote ?? "The admitted statement is unavailable.",
+        },
         evidence,
         runtime,
       });
@@ -1879,7 +2196,7 @@ export async function applyDebateMysteryAction(
         const nextId = nextCourtTestimony(nextState, request.testimonyId);
         nextState.court.activeTestimonyId = nextId;
         if (!nextId) {
-          await appendMysteryCourtCounselBeat({ db, userId, sessionId, state: nextState, task: "closing", runtime });
+          await appendMysteryCourtCounselBeat({ db, userId, session: nextSession, state: nextState, task: "closing", runtime });
           nextSession = completeMysteryTrial(nextSession, nextState, bible);
         }
       }
@@ -1889,7 +2206,7 @@ export async function applyDebateMysteryAction(
       nextState.partnerJournal.push("PRISM: The prosecution passes this statement.");
       publicPayload = { testimonyId: request.testimonyId, passed: true };
       if (!nextId) {
-        await appendMysteryCourtCounselBeat({ db, userId, sessionId, state: nextState, task: "closing", runtime });
+        await appendMysteryCourtCounselBeat({ db, userId, session: nextSession, state: nextState, task: "closing", runtime });
         nextSession = completeMysteryTrial(nextSession, nextState, bible);
       }
     }
@@ -1897,6 +2214,20 @@ export async function applyDebateMysteryAction(
     if (!nextState.verdict) throw new HttpError(409, "Finish the case before revealing spoilers.");
     nextState.spoilersRevealed = true;
     publicPayload = { spoilersRevealed: true, timeline: bible.timeline, culpritSeatId: bible.culpritSeatId, accompliceSeatId: bible.accompliceSeatId, unseenEvidence: bible.evidence.filter((item) => !nextState.discoveredEvidence.some((known) => known.id === item.id)), proofBundles: bible.proofBundles };
+  }
+  if (nextSession.format === "turnabout") {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      appendAutomaticNotebookReferences(db, userId, sessionId, automaticNotebookReferences);
+      const persisted = persistMysterySession(db, userId, nextSession, session.revision);
+      appendMysteryAction(db, userId, sessionId, request.action, publicPayload);
+      recordMysteryMutation(db, userId, session, persisted, key);
+      db.exec("COMMIT");
+      return persisted;
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
   }
   settleInvestigationExhaustion();
   if (nextSession.formatState === state) nextSession = { ...nextSession, formatState: nextState };
@@ -2423,7 +2754,10 @@ export async function importDebateMysteryCase(
   );
   storeCaseBible(db, userId, session.id, bible);
   createInitialNotebook(db, userId, session.id);
-  const importedPublicState = projectDebateMysteryCase(bible, config);
+  const importedPublicState = {
+    ...projectDebateMysteryCase(bible, config),
+    botSpeechProjectionVersion: MYSTERY_BOT_SPEECH_PROJECTION_VERSION,
+  };
   appendAutomaticNotebookReferences(
     db,
     userId,

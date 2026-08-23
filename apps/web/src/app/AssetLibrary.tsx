@@ -13,6 +13,8 @@ import Link from "next/link";
 import {
   BOT_IMAGE_ASSET_LIBRARY_KIND_ORDER,
   IMAGE_ASSET_KIND_LABELS,
+  TEXT_ENTRY_SEARCH_MAX_LENGTH,
+  TEXT_ENTRY_TAG_MAX_LENGTH,
   type BotImageAssetLibraryIndex,
   type ImageAssetCatalogPage,
   type ImageAssetKind,
@@ -1207,6 +1209,7 @@ export function AssetLibraryModal({
           <input
             ref={searchRef}
             type="search"
+            maxLength={TEXT_ENTRY_SEARCH_MAX_LENGTH}
             value={query}
             onChange={(event) => setQuery(event.currentTarget.value)}
             placeholder={`Search ${IMAGE_ASSET_KIND_LABELS[kind].toLowerCase()}…`}
@@ -1429,6 +1432,7 @@ export function AssetLibraryModal({
                   <span>Your tags</span>
                   <input
                     value={tagDraft}
+                    maxLength={TEXT_ENTRY_TAG_MAX_LENGTH}
                     onChange={(event) => setTagDraft(event.currentTarget.value)}
                     placeholder="character, project, mood"
                   />

@@ -113,6 +113,10 @@ describe("live mouth animation attributes", () => {
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
+      /coffeeSeatRenderedMouthGlyph\(\{[\s\S]{0,240}effectiveTalking,[\s\S]{0,80}mouthShape: streamedMouthShape/,
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
       /data-coffee-plate-emoji-glyph=\{renderedGlyph\}/,
     );
     assert.match(

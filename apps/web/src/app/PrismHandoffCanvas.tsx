@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { SlateHandoffPreview } from "@localai/shared";
+import { TEXT_ENTRY_TITLE_MAX_LENGTH } from "@localai/shared";
 import styles from "./prismHandoffCanvas.module.css";
 
 interface SlateProjectChoice {
@@ -140,7 +141,7 @@ export default function PrismHandoffCanvas({
           {target === "new_project" ? (
             <label className={styles.field}>
               <span>Project title</span>
-              <input value={title} maxLength={160} onChange={(event) => setTitle(event.target.value)} autoFocus />
+              <input value={title} maxLength={TEXT_ENTRY_TITLE_MAX_LENGTH} onChange={(event) => setTitle(event.target.value)} autoFocus />
             </label>
           ) : (
             <label className={styles.field}>

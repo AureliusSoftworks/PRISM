@@ -86,6 +86,10 @@ describe("mode tutorials", () => {
     assert.match(step.body, /lead comments, suspect notes, comparisons, and paperclip pins are free/u);
     assert.doesNotMatch(step.body, /note polishing|Review page polish|custom page|\+ New page/u);
     assert.match(step.body, /Theory Board/u);
+    assert.match(step.body, /visibly gathers the gallery/u);
+    assert.match(step.body, /real Turnabout on the existing court stage/u);
+    assert.match(step.body, /sealed Case Bible never enters the public session, bot prompts, replay, or client/u);
+    assert.match(step.body, /Archive and Resume use the same Turnabout proceeding/u);
     assert.match(step.body, /Press, Present Evidence, or Pass/u);
     assert.match(step.body, /one continuance/u);
     assert.match(step.body, /Reveal spoilers/u);

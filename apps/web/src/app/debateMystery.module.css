@@ -2332,8 +2332,50 @@
   grid-column: 1 / -1;
 }
 
-.theoryFields textarea {
-  min-height: 5rem;
+.theoryClaimPicker {
+  min-width: 0;
+  padding: 0.7rem;
+  border: 1px solid var(--mystery-line);
+  border-radius: 0.75rem;
+}
+
+.theoryClaimPicker legend {
+  padding: 0 0.3rem;
+  color: var(--mystery-muted);
+}
+
+.theoryClaimPicker > div {
+  display: grid;
+  gap: 0.45rem;
+  max-height: 14rem;
+  overflow: auto;
+}
+
+.theoryClaimPicker button {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.65rem;
+  color: var(--mystery-text);
+  text-align: left;
+  border: 1px solid var(--mystery-line);
+  border-radius: 0.55rem;
+  background: rgba(255, 255, 255, 0.025);
+  cursor: pointer;
+}
+
+.theoryClaimPicker button[aria-pressed="true"] {
+  border-color: var(--mystery-cyan);
+  background: rgba(102, 229, 234, 0.09);
+  box-shadow: inset 0.22rem 0 var(--mystery-cyan);
+}
+
+.theoryClaimPicker button span,
+.theoryClaimPicker p,
+.readOnlyDeskNote {
+  margin: 0;
+  color: var(--mystery-muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
 }
 
 .proofAttach {

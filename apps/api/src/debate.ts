@@ -96,6 +96,7 @@ import {
   debateEvidenceItemCount,
   debateEvidenceItems,
   debateEvidenceItemRecord,
+  gradeDebateMysteryTheory,
   debateFormalityGuidance,
   debateTitleForMotion,
   debateActivePresentationDurationMs,
@@ -178,6 +179,7 @@ import {
   type DebateForumFormatStateV1,
   type DebateFormatId,
   type DebateInterjectionRequest,
+  type DebateMysteryCaseBibleV1,
   type DebateJudgeAudienceOrderRequest,
   type DebateJudgeGavelDemeanor,
   type DebateJudgeGavelMessageRequest,
@@ -237,6 +239,7 @@ import {
   type DebateTurnTimingV1,
   type DebateVoicePerformanceCue,
   type DebateVerdictRequest,
+  type DebateWhodunnitFormatStateV1,
   type DebateDebriefChatMessageV1,
   type DebateDebriefEligibleBotV1,
   type PrismRefractDebateTextTarget,
@@ -3250,6 +3253,168 @@ function normalizeDeprecatedParticipantDelegationStep(
   return session;
 }
 
+const DEBATE_MYSTERY_BOT_SPEECH_PROJECTION_VERSION = 1;
+
+function projectLegacyMysteryBotSpeechStateV1(
+  session: DebateSessionV1,
+  state: DebateWhodunnitFormatStateV1,
+): DebateWhodunnitFormatStateV1 {
+  if (
+    state.botSpeechProjectionVersion >=
+    DEBATE_MYSTERY_BOT_SPEECH_PROJECTION_VERSION
+  ) {
+    return state;
+  }
+  const suspectBySeat = new Map(
+    state.suspects.map((suspect) => [suspect.seatId, suspect] as const),
+  );
+  const project = (
+    botId: string,
+    botName: string,
+    clearContent: string,
+    stableKey: string,
+    addressedSpeech?: string | null,
+  ): string =>
+    projectDebateBotPublicUtteranceV1({
+      session,
+      botId,
+      botName,
+      clearContent,
+      stableTurnKey: `${session.id}:whodunnit-legacy:${stableKey}`,
+      currentInput: addressedSpeech ?? undefined,
+      addressedSpeech,
+    });
+
+  const projectedConsultationByAnswer = new Map<string, string>();
+  const partner = debateBots(session).find(
+    (bot) => bot.id === state.config.prosecutorPartnerBotId,
+  );
+  const partnerConsultations = state.partnerConsultations.map(
+    (consultation) => {
+      const answer = project(
+        state.config.prosecutorPartnerBotId,
+        partner?.name ?? "Co-counsel",
+        consultation.answer,
+        `consultation:${consultation.id}`,
+        consultation.question,
+      );
+      projectedConsultationByAnswer.set(consultation.answer, answer);
+      return { ...consultation, answer };
+    },
+  );
+  const interviewLog = state.interviewLog.map((message, index, messages) => {
+    if (message.role !== "suspect") return message;
+    const suspect = suspectBySeat.get(message.suspectSeatId);
+    if (!suspect) return message;
+    const preceding = messages[index - 1];
+    return {
+      ...message,
+      content: project(
+        suspect.botId,
+        suspect.name,
+        message.content,
+        `interview:${message.id}`,
+        preceding?.role === "investigator" ? preceding.content : null,
+      ),
+    };
+  });
+  const testimony = state.testimony.map((item) => {
+    const suspect = suspectBySeat.get(item.speakerSeatId);
+    return suspect
+      ? {
+          ...item,
+          exactQuote: project(
+            suspect.botId,
+            suspect.name,
+            item.exactQuote,
+            `testimony:${item.id}`,
+          ),
+        }
+      : item;
+  });
+  const defense = debateBots(session).find(
+    (bot) => bot.id === state.config.rivalDefenseBotId,
+  );
+  const partnerJournal = state.partnerJournal.map((entry, index) => {
+    const consultation = projectedConsultationByAnswer.get(entry);
+    if (consultation) return consultation;
+    const counsel = entry.match(/^(Prosecution|Defense):\s*([\s\S]+)$/u);
+    if (!counsel) return entry;
+    const isProsecution = counsel[1] === "Prosecution";
+    const botId = isProsecution
+      ? state.config.prosecutorPartnerBotId
+      : state.config.rivalDefenseBotId;
+    const botName = isProsecution
+      ? partner?.name ?? "Co-counsel"
+      : defense?.name ?? "Defense counsel";
+    return `${counsel[1]}: ${project(
+      botId,
+      botName,
+      counsel[2]!,
+      `court-journal:${index}`,
+    )}`;
+  });
+  return {
+    ...state,
+    botSpeechProjectionVersion:
+      DEBATE_MYSTERY_BOT_SPEECH_PROJECTION_VERSION,
+    testimony,
+    partnerConsultations,
+    partnerJournal,
+    interviewLog,
+  };
+}
+
+export function upgradeLegacyMysteryBotSpeechV1(
+  session: DebateSessionV1,
+): DebateSessionV1 {
+  if (session.formatState.format === "whodunnit") {
+    return {
+      ...session,
+      formatState: projectLegacyMysteryBotSpeechStateV1(
+        session,
+        session.formatState,
+      ),
+    };
+  }
+  if (
+    session.formatState.format !== "turnabout" ||
+    !session.formatState.mysteryTrial
+  ) {
+    return session;
+  }
+  const prior = session.formatState.mysteryTrial.frozenInvestigation;
+  const frozenInvestigation = projectLegacyMysteryBotSpeechStateV1(
+    session,
+    prior,
+  );
+  if (frozenInvestigation === prior) return session;
+  const publicQuoteById = new Map(
+    frozenInvestigation.testimony.map((item) => [item.id, item.exactQuote]),
+  );
+  const testimonyIdBySource =
+    session.formatState.mysteryTrial.testimonySourceMap;
+  return {
+    ...session,
+    evidence: {
+      ...session.evidence,
+      sources: session.evidence.sources.map((source) => {
+        const testimonyId = testimonyIdBySource[source.id];
+        return testimonyId
+          ? { ...source, snippet: publicQuoteById.get(testimonyId) ?? source.snippet }
+          : source;
+      }),
+    },
+    formatState: {
+      ...session.formatState,
+      mysteryTrial: {
+        ...session.formatState.mysteryTrial,
+        frozenInvestigation,
+      },
+    },
+  };
+}
+
 function parseSessionRow(
   db: DatabaseSync,
   userId: string,
@@ -3394,7 +3559,9 @@ function parseSessionRow(
     events,
   };
   return synchronizeDebateParticipationState(
-    normalizeDeprecatedParticipantDelegationStep(session),
+    upgradeLegacyMysteryBotSpeechV1(
+      normalizeDeprecatedParticipantDelegationStep(session),
+    ),
     row.updated_at,
   );
 }
@@ -3815,6 +3982,22 @@ export function listDebateSessions(
         mysterySuspectColors = mystery.suspects
           .map((suspect) => suspect.color?.trim() ?? "")
           .filter((color) => Boolean(color));
+      } else if (format === "turnabout") {
+        const turnabout = normalizeDebateFormatStateV1(
+          parsed.formatState,
+          "turnabout",
+        );
+        if (turnabout.format === "turnabout" && turnabout.mysteryTrial) {
+          const mystery = turnabout.mysteryTrial.frozenInvestigation;
+          if (mystery.caseTitle.trim()) title = `${mystery.caseTitle} · Court`;
+          mysteryProgress = turnabout.mysteryTrial.verdict ? "verdict" : "trial";
+          mysteryRouteGrade = turnabout.mysteryTrial.verdict?.grade ?? null;
+          mysteryFictionLabel = mystery.fictionLabel;
+          mysterySpoilersRevealed = mystery.spoilersRevealed;
+          mysterySuspectColors = mystery.suspects
+            .map((suspect) => suspect.color?.trim() ?? "")
+            .filter((color) => Boolean(color));
+        }
       }
       moderatorTitle = normalizeDebateModeratorTitle(parsed.moderatorTitle);
       const jury = normalizeDebateJuryStateV1(parsed.jury);
@@ -4456,7 +4639,9 @@ function mutationReplay(
     endedEarlyAt:
       typeof parsed.endedEarlyAt === "string" ? parsed.endedEarlyAt : null,
   };
-  return normalizeDeprecatedParticipantDelegationStep(session);
+  return upgradeLegacyMysteryBotSpeechV1(
+    normalizeDeprecatedParticipantDelegationStep(session),
+  );
 }
 
 function assertMutation(
@@ -6372,6 +6557,103 @@ export function debatePowerPromptForBotV1(
     ...lines,
     "Assigned role and scheduled floor remain bound to your stable bot ID. Interruptions may only appear as one brief between-turn reaction.",
   ].join("\n");
+}
+
+/**
+ * Project one clear holder-private utterance through Debate's frozen hard
+ * Power adapters. Callers persist and transport only the returned value.
+ * Canonical records and private authoring intent must never be passed back as
+ * public history after this boundary.
+ */
+export function projectDebateBotPublicUtteranceV1(args: {
+  session: DebateSessionV1;
+  botId: string;
+  botName?: string;
+  clearContent: string;
+  stableTurnKey: string;
+  currentInput?: string;
+  addressedSpeech?: string | null;
+  addressedTargetName?: string;
+}): string {
+  const plan = args.session.powerPlan.bots[args.botId];
+  const effects = plan?.effects.map((entry) => entry.effect) ?? [];
+  const playerProjection = botPowerObserverProjectionFromEffectsV1(
+    effects,
+    "live",
+    () => false,
+    { holderSpeaking: true },
+  );
+  if (!playerProjection.audible || plan?.hardMuted) {
+    return applyBotPowerMuteResponseV1(
+      args.clearContent.trim() || BOT_POWER_CANONICAL_SILENCE_V1,
+    );
+  }
+  if (
+    botPowerIntermittentMuteTurnIsIgnoredFromEffectsV1(
+      effects,
+      args.stableTurnKey,
+    )
+  ) {
+    return BOT_POWER_CANONICAL_SILENCE_V1;
+  }
+  const addressedSpeech = args.addressedSpeech?.trim() ?? "";
+  const copiesAddressedSpeech = effects.some(
+    (effect) => effect.type === "speech_copy",
+  );
+  const verbatimCopy = copiesAddressedSpeech && Boolean(addressedSpeech);
+  let semanticIntended = verbatimCopy
+    ? applyBotPowerAddressedCopyResponseV1(addressedSpeech)
+    : args.clearContent.trim() || BOT_POWER_CANONICAL_SILENCE_V1;
+
+  if (!verbatimCopy) {
+    const responseBudget = strongestBotPowerResponseBudgetEffectV1(effects);
+    semanticIntended = applyBotPowerResponseBudgetV1(
+      semanticIntended,
+      responseBudget,
+      responseBudget?.mode === "minimal" ? 1 : 2,
+    );
+    if (botPowerEternallyIntroducesFromEffectsV1(effects)) {
+      semanticIntended = applyBotPowerEternalIntroductionResponseV1(
+        semanticIntended,
+        args.botName ?? args.botId,
+        args.currentInput,
+        { hasPreviousOnAirTurn: true },
+      );
+    }
+    if (botPowerRequiresAddressedInsultFromEffectsV1(effects)) {
+      semanticIntended = applyBotPowerAddressedInsultV1(
+        semanticIntended,
+        args.addressedTargetName ?? "the investigator",
+        args.stableTurnKey,
+      );
+    }
+  }
+
+  let publicContent = semanticIntended;
+  if (
+    !verbatimCopy &&
+    effects.some((effect) => effect.type === "speech_obfuscation")
+  ) {
+    publicContent = applyBotPowerMumbledResponseV1(
+      semanticIntended,
+      debateMumbleProjectionOptions(
+        args.session,
+        args.botId,
+        args.stableTurnKey,
+      ),
+    );
+  }
+  if (
+    !verbatimCopy &&
+    botPowerCursesSpeechFromEffectsV1(effects) &&
+    !botPowerResponseIsSilentV1(semanticIntended)
+  ) {
+    publicContent = applyBotPowerCursedTongueResponseV1(
+      publicContent,
+      args.stableTurnKey,
+    );
+  }
+  return publicContent;
 }
 
 function devilAdvocateNames(session: DebateSessionV1): string[] {
@@ -11678,6 +11960,21 @@ async function generateTurnaboutTestimony(
     index < DEBATE_TURNABOUT_STATEMENTS_PER_SIDE;
     index += 1
   ) {
+    const mysteryTrial = turnaboutState(working).mysteryTrial ?? null;
+    const mysteryTestimonyEntries = mysteryTrial
+      ? Object.entries(mysteryTrial.testimonySourceMap)
+      : [];
+    const mysteryTestimonyEntry = mysteryTestimonyEntries.length > 0
+      ? mysteryTestimonyEntries[
+          ((sideId === "for" ? 0 : DEBATE_TURNABOUT_STATEMENTS_PER_SIDE) + index) %
+            mysteryTestimonyEntries.length
+        ] ?? null
+      : null;
+    const mysteryTestimonySource = mysteryTestimonyEntry
+      ? session.evidence.sources.find(
+          (source) => source.id === mysteryTestimonyEntry[0],
+        ) ?? null
+      : null;
     const generatedSpeech = await generateSpeech(
       working,
       speaker,
@@ -11694,6 +11991,12 @@ async function generateTurnaboutTestimony(
         index === 0
           ? "Give their own most natural reason for this side."
           : "Add a different natural reason if this persona can think of one; do not force a sophisticated second line of argument.",
+        mysteryTestimonySource
+          ? [
+              `This proceeding comes from a filed Whodunnit accusation. Build this pressable statement around the following already-public exact testimony: ${mysteryTestimonySource.snippet}`,
+              `Cite it with [[source:${mysteryTestimonySource.id}]]. You may test or contextualize the quote, but do not change who said it, strengthen it, or add facts beyond the frozen record.`,
+            ].join(" ")
+          : "",
         `Keep it to 1-3 sentences. Use only the frozen evidence packet and ${debatePublicMaterialDescription(session.formality)}, and cite frozen sources or exhibits with valid markers.`,
       ].join(" "),
       runtime,
@@ -11740,7 +12043,9 @@ async function generateTurnaboutTestimony(
       speakerBotId: speaker.id,
       sideId,
       content: speech.content,
-      sourceIds: speech.sourceIds,
+      sourceIds: mysteryTestimonySource
+        ? [...new Set([...speech.sourceIds, mysteryTestimonySource.id])]
+        : speech.sourceIds,
       provider: speech.provider,
       model: speech.model,
       autoRecovery: speech.autoRecovery,
@@ -11763,6 +12068,7 @@ async function generateTurnaboutTestimony(
       sourceIds: event.sourceIds,
       status: "ready",
       createdEventId: event.id,
+      recordTestimonyId: mysteryTestimonyEntry?.[1] ?? null,
     };
     events.push(event);
     statements.push(statement);
@@ -12011,7 +12317,29 @@ function exactGroundedQuote(
   return source.slice(index, index + quote.length);
 }
 
+function mysteryCaseBibleForTurnabout(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+): DebateMysteryCaseBibleV1 {
+  const row = db.prepare(
+    `SELECT private_json, content_hash
+       FROM debate_mystery_cases
+      WHERE session_id = ? AND user_id = ?`,
+  ).get(sessionId, userId) as
+    | { private_json: string; content_hash: string }
+    | undefined;
+  if (!row) throw new HttpError(409, "The sealed mystery record is unavailable.");
+  const actualHash = createHash("sha256").update(row.private_json).digest("hex");
+  if (actualHash !== row.content_hash) {
+    throw new HttpError(409, "The sealed mystery record failed its integrity check.");
+  }
+  return JSON.parse(row.private_json) as DebateMysteryCaseBibleV1;
+}
+
 async function assessTurnaboutContradiction(
+  db: DatabaseSync,
+  userId: string,
   session: DebateSessionV1,
   statement: DebateTurnaboutStatementV1,
   evidenceSourceId: string,
@@ -12028,6 +12356,47 @@ async function assessTurnaboutContradiction(
       400,
       "Only an evidence item frozen before Start may be presented.",
     );
+  }
+  const mysteryTrial = turnaboutState(session).mysteryTrial ?? null;
+  if (mysteryTrial) {
+    const bible = mysteryCaseBibleForTurnabout(db, userId, session.id);
+    const canonicalEvidenceId =
+      mysteryTrial.evidenceSourceMap[evidenceSourceId] ?? null;
+    const canonicalEvidence = canonicalEvidenceId
+      ? bible.evidence.find((item) => item.id === canonicalEvidenceId) ?? null
+      : null;
+    const canonicalTestimony = statement.recordTestimonyId
+      ? bible.testimony.find(
+          (item) => item.id === statement.recordTestimonyId,
+        ) ?? null
+      : null;
+    const grounded = Boolean(canonicalEvidence && canonicalTestimony);
+    const sustained = Boolean(
+      canonicalEvidence?.factTags.includes("contradiction") &&
+      canonicalTestimony?.factTags.includes("contradiction"),
+    );
+    return {
+      contradiction: {
+        id: randomUUID(),
+        statementId: statement.id,
+        evidenceSourceId,
+        statementQuote: canonicalTestimony?.exactQuote ?? "",
+        evidenceQuote:
+          evidence.kind === "source"
+            ? evidence.value.snippet
+            : evidence.value.observation,
+        reason: sustained
+          ? "The exact admitted testimony conflicts with the canonical observation in the discovered record."
+          : grounded
+            ? "These admitted public records do not establish the case-locked contradiction."
+            : "The challenge does not pair admitted physical evidence with the testimony on the floor.",
+        grounded,
+        ruling: sustained ? "sustained" : "overruled",
+        createdAt: new Date().toISOString(),
+      },
+      provider: session.provider,
+      model: session.model,
+    };
   }
   const statementRecord = debateSpokenText(statement.content);
   const evidenceRecord = debateEvidenceItemRecord(evidence);
@@ -14095,6 +14464,131 @@ export async function advanceDebateSession(
   }
 }
 
+function mysteryContinuanceFromTurnabout(
+  session: DebateSessionV1,
+  state: DebateTurnaboutFormatStateV1,
+): DebateSessionV1 {
+  const trial = state.mysteryTrial;
+  if (!trial) throw new HttpError(409, "This is not a mystery court record.");
+  const restored = structuredClone(trial.frozenInvestigation);
+  restored.playPhase = "continuance";
+  restored.actionsRemaining = Math.ceil(restored.config.totalRooms / 5) + 2;
+  restored.theory = null;
+  restored.theoryFiledAt = null;
+  restored.credibilityRemaining = 3;
+  restored.continuanceUsed = true;
+  restored.court = null;
+  restored.verdict = null;
+  restored.spoilersRevealed = false;
+  return {
+    ...session,
+    format: "whodunnit",
+    formatState: restored,
+    phase: "challenge",
+    stepKey: "mystery_continuance",
+    status: "waiting_for_player",
+    motion: {
+      version: DEBATE_SCHEMA_VERSION,
+      id: `mystery-${session.id}`,
+      title: restored.caseTitle,
+      motion: "Determine who murdered the victim and prove the filed theory in court.",
+      forSide: {
+        label: "Prosecution",
+        brief: "Investigate the mansion, file a theory, and prove it from the discovered record.",
+      },
+      againstSide: {
+        label: "Defense",
+        brief: "Test the filed theory against the strongest supported alternative in the admissible record.",
+      },
+    },
+    liveBake: null,
+    winnerSideId: null,
+    completedAt: null,
+    error: null,
+  };
+}
+
+async function completeMysteryTurnabout(
+  db: DatabaseSync,
+  userId: string,
+  session: DebateSessionV1,
+  state: DebateTurnaboutFormatStateV1,
+  precedingEvents: readonly DebateEventV1[],
+  runtime: DebateAiRuntime,
+  forceCredibilityFailure = false,
+): Promise<{ session: DebateSessionV1; events: DebateEventV1[] }> {
+  const trial = state.mysteryTrial;
+  const theory = trial?.frozenInvestigation.theory ?? null;
+  if (!trial || !theory) {
+    throw new HttpError(409, "The filed mystery theory is unavailable.");
+  }
+  const deliveredAt = new Date().toISOString();
+  const graded = forceCredibilityFailure
+    ? {
+        grade: "incorrect" as const,
+        culpritCorrect: false,
+        accompliceCorrect: null,
+        matchedBundleId: null,
+        credibilityRemaining: 0,
+        reason: "The prosecution exhausted its credibility after the continuance.",
+        deliveredAt,
+      }
+    : gradeDebateMysteryTheory({
+        bible: mysteryCaseBibleForTurnabout(db, userId, session.id),
+        theory,
+        sustainedTestimonyIds: trial.sustainedTestimonyIds,
+        credibilityRemaining: trial.credibilityRemaining,
+        deliveredAt,
+      });
+  const winnerSideId: DebateSideId =
+    graded.grade === "incorrect" ? "against" : "for";
+  const label =
+    graded.grade === "smoking_gun"
+      ? "Smoking Gun"
+      : graded.grade === "strong_case"
+        ? "Strong Case"
+        : graded.grade === "lucky_break"
+          ? "Lucky Break"
+          : "Incorrect";
+  const resolvedState: DebateTurnaboutFormatStateV1 = {
+    ...state,
+    phase: "resolution",
+    activeStatementId: null,
+    floorOwnerBotId: null,
+    mysteryTrial: { ...trial, verdict: graded },
+  };
+  const verdictEvent = makeEvent(
+    { ...session, events: [...session.events, ...precedingEvents] },
+    {
+      kind: "verdict",
+      speakerKind: "system",
+      sideId: winnerSideId,
+      stepKey: "mystery_turnabout_verdict",
+      content:
+        winnerSideId === "for"
+          ? `${label}. The filed accusation is proved from the frozen public case record.`
+          : `${label}. The filed accusation is not proved from the frozen public case record.`,
+    },
+  );
+  const closingEvent = await moderatorResolutionClosingEvent(
+    { ...session, formatState: resolvedState },
+    winnerSideId,
+    [...precedingEvents, verdictEvent],
+    runtime,
+  );
+  return {
+    session: withDebateFloorSettled(
+      withTurnaboutState(session, resolvedState),
+      { winnerSideId },
+    ),
+    events: [...precedingEvents, verdictEvent, closingEvent],
+  };
+}
+
+function mysteryTurnaboutNeedsResolution(session: DebateSessionV1): boolean {
+  return session.stepKey === "turnabout_ballot_moderator";
+}
+
 export async function submitDebateTurnaboutAction(
   db: DatabaseSync,
   userId: string,
@@ -14174,11 +14668,30 @@ export async function submitDebateTurnaboutAction(
       statement.id,
       (current) => ({ ...current, status: "resolved" }),
     );
+    const next = turnaboutNextStatement(session, resolved);
+    if (resolved.mysteryTrial && mysteryTurnaboutNeedsResolution(next)) {
+      const completed = await completeMysteryTurnabout(
+        db,
+        userId,
+        session,
+        resolved,
+        [pass],
+        runtime,
+      );
+      return commitMutation(
+        db,
+        userId,
+        session,
+        completed.session,
+        checked.idempotencyKey,
+        completed.events,
+      );
+    }
     return commitMutation(
       db,
       userId,
       session,
-      turnaboutNextStatement(session, resolved),
+      next,
       checked.idempotencyKey,
       [pass],
     );
@@ -14199,6 +14712,8 @@ export async function submitDebateTurnaboutAction(
     );
   }
   const assessment = await assessTurnaboutContradiction(
+    db,
+    userId,
     session,
     statement,
     evidenceSourceId,
@@ -14275,8 +14790,75 @@ export async function submitDebateTurnaboutAction(
         ? session.moderator.id
         : statement.speakerBotId,
   };
+  if (nextState.mysteryTrial) {
+    const sustainedTestimonyIds =
+      contradiction.ruling === "sustained" && statement.recordTestimonyId
+        ? [
+            ...new Set([
+              ...nextState.mysteryTrial.sustainedTestimonyIds,
+              statement.recordTestimonyId,
+            ]),
+          ]
+        : nextState.mysteryTrial.sustainedTestimonyIds;
+    nextState = {
+      ...nextState,
+      mysteryTrial: {
+        ...nextState.mysteryTrial,
+        sustainedTestimonyIds,
+        failedActions:
+          nextState.mysteryTrial.failedActions +
+          (contradiction.ruling === "overruled" ? 1 : 0),
+        credibilityRemaining:
+          contradiction.ruling === "overruled"
+            ? Math.max(0, nextState.mysteryTrial.credibilityRemaining - 1)
+            : nextState.mysteryTrial.credibilityRemaining,
+      },
+    };
+  }
   const newEvents: DebateEventV1[] = [objection, evidenceEvent, rulingEvent];
   if (contradiction.ruling === "overruled") {
+    if (
+      nextState.mysteryTrial &&
+      nextState.mysteryTrial.credibilityRemaining === 0
+    ) {
+      if (!nextState.mysteryTrial.continuanceUsed) {
+        const continuanceEvent = makeEvent(
+          { ...session, events: [...session.events, ...newEvents] },
+          {
+            kind: "phase",
+            speakerKind: "system",
+            stepKey: "mystery_continuance",
+            content:
+              "PRISM grants one continuance. The frozen investigation reopens with emergency actions; the filed accusation remains part of the public record.",
+          },
+        );
+        return commitMutation(
+          db,
+          userId,
+          session,
+          mysteryContinuanceFromTurnabout(session, nextState),
+          checked.idempotencyKey,
+          [...newEvents, continuanceEvent],
+        );
+      }
+      const completed = await completeMysteryTurnabout(
+        db,
+        userId,
+        session,
+        nextState,
+        newEvents,
+        runtime,
+        true,
+      );
+      return commitMutation(
+        db,
+        userId,
+        session,
+        completed.session,
+        checked.idempotencyKey,
+        completed.events,
+      );
+    }
     const next = withTurnaboutState(
       { ...session, status: "waiting_for_player" },
       {
@@ -14358,6 +14940,24 @@ export async function submitDebateTurnaboutAction(
   });
   newEvents.push(revelationEvent);
   const next = turnaboutNextStatement(session, nextState);
+  if (nextState.mysteryTrial && mysteryTurnaboutNeedsResolution(next)) {
+    const completed = await completeMysteryTurnabout(
+      db,
+      userId,
+      session,
+      nextState,
+      newEvents,
+      runtime,
+    );
+    return commitMutation(
+      db,
+      userId,
+      session,
+      completed.session,
+      checked.idempotencyKey,
+      completed.events,
+    );
+  }
   const events = await withPersonaSurpriseReaction(
     session,
     next,

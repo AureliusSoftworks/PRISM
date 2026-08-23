@@ -1043,12 +1043,26 @@ import type {
 } from "@localai/shared";
 import {
   BOT_FACT_KEY_LABELS,
+  BOT_PERSON_NAME_MAX_LENGTH,
   BOT_FOUNDRY_BATCH_MAX_COUNT,
   BOT_FOUNDRY_BATCH_MIN_COUNT,
   BOT_FOUNDRY_LEAN_BATCH_MIN_COUNT,
   BOT_FOUNDRY_INSPIRATION_MAX_SOURCES,
   BOT_LIBRARY_GROUP_MEMBER_MAX,
   BOT_GENERATION_PROMPT_MAX_LENGTH,
+  TEXT_ENTRY_PARAGRAPH_MAX_LENGTH,
+  TEXT_ENTRY_DECK_DESCRIPTION_MAX_LENGTH,
+  TEXT_ENTRY_FACT_LABEL_MAX_LENGTH,
+  TEXT_ENTRY_FACT_VALUE_MAX_LENGTH,
+  TEXT_ENTRY_GLYPH_MAX_LENGTH,
+  TEXT_ENTRY_PASSWORD_MAX_LENGTH,
+  TEXT_ENTRY_SEARCH_MAX_LENGTH,
+  TEXT_ENTRY_SECRET_MAX_LENGTH,
+  TEXT_ENTRY_SHORT_MAX_LENGTH,
+  TEXT_ENTRY_PROFILE_FIELD_MAX_LENGTH,
+  TEXT_ENTRY_SYSTEM_PROMPT_MAX_LENGTH,
+  TEXT_ENTRY_TITLE_MAX_LENGTH,
+  TEXT_ENTRY_URL_MAX_LENGTH,
   resolveBotFoundryGenerationContextForBriefV1,
   uniqueBotFoundryBatchGroupName,
   BOT_PROFILE_PURPOSE_STATEMENT_MAX_LENGTH,
@@ -1399,6 +1413,9 @@ import {
   botVernacularDefinitionForId,
   botVernacularIdFromStoredVoiceProfile,
   normalizeBotAudioVoiceProfileV1,
+  BOT_LOCAL_LAUGH_SYLLABLE_MAX_LENGTH,
+  botLocalLaughSynthesisText,
+  normalizeBotLocalLaughSyllable,
   normalizeBotAudioVoiceControl,
   normalizeBotAvatarSfxV1,
   normalizeBotcastVoiceLevel,
@@ -22374,6 +22391,7 @@ const FocusedBotPanelComposer = memo(function FocusedBotPanelComposer({
       <div>
         <textarea
           id="bot-hub-message-draft"
+          maxLength={TEXT_ENTRY_PARAGRAPH_MAX_LENGTH}
           rows={2}
           value={draft}
           placeholder={`Say something to ${botName}…`}
@@ -23607,9 +23625,10 @@ function ComposerBotPicker({
             {showFilterControls && (
               <div className={styles.composeBotFilters}>
                 <div className={styles.composeBotSearchRow}>
-                  <input
-                    type="search"
-                    value={botNameFilter}
+        <input
+          type="search"
+          maxLength={TEXT_ENTRY_SEARCH_MAX_LENGTH}
+          value={botNameFilter}
                     onChange={(event) =>
                       setBotNameFilter(event.currentTarget.value)
                     }
@@ -28427,6 +28446,7 @@ function WildcardDeckValuesInput({
         <input
           ref={inputRef}
           type="text"
+          maxLength={TEXT_ENTRY_SHORT_MAX_LENGTH}
           value={draftValue}
           onChange={handleInputChange}
           onKeyDown={handleInputKeyDown}
@@ -40013,10 +40033,11 @@ function BotAvatarCustomGlyphCapture({
       data-capturing={capturing ? "true" : undefined}
     >
       {capturing ? (
-        <input
-          ref={inputRef}
-          className={styles.botAvatarCustomGlyphCaptureInput}
-          type="text"
+          <input
+            ref={inputRef}
+            className={styles.botAvatarCustomGlyphCaptureInput}
+            type="text"
+            maxLength={TEXT_ENTRY_GLYPH_MAX_LENGTH}
           aria-label={ariaLabel}
           autoCapitalize="off"
           autoCorrect="off"
@@ -41965,6 +41986,7 @@ function BotAvatarIdentityControls({
           <input
             id={fullNameInputId}
             type="text"
+            maxLength={BOT_PERSON_NAME_MAX_LENGTH}
             value={name}
             placeholder="Name this bot"
             autoCapitalize="words"
@@ -42023,8 +42045,8 @@ function BotAvatarIdentityControls({
               </button>
             </div>
             <small className={styles.botAvatarIdentityHelper}>
-              Only needed when speech gets the name wrong. Leave blank unless
-              you type a phonetic spelling.
+              Only needed when speech gets the name wrong. A phonetic spelling
+              may include *breath* or *sigh* for a timed vocal sound.
             </small>
           </div>
         </div>
@@ -42464,6 +42486,12 @@ function BotVoiceLocalStage({
   ) => void | Promise<void>;
   onContinue?: () => void;
 }): React.JSX.Element {
+  const normalizedProfile = normalizeBotAudioVoiceProfileV1(profile);
+  const laughSyllable = normalizedProfile.localLaughSyllable ?? "";
+  const laughControlAvailable =
+    normalizedProfile.localVoiceSource === "portable" &&
+    !normalizedProfile.systemVoiceName &&
+    normalizedProfile.localEnginePreference !== "voice-plus";
   return (
     <div
       className={styles.botVoiceFeelStage}
@@ -42485,6 +42513,7 @@ function BotVoiceLocalStage({
               baseVoiceId: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1.baseVoiceId,
               systemVoiceName: null,
               localVoiceSource: "portable",
+              localLaughSyllable: null,
               pitch: 0,
               pace: 0,
               lilt: 0,
@@ -42502,6 +42531,72 @@ function BotVoiceLocalStage({
         onPreview={onPreview}
         onRandomizePreviewLine={onRandomizePreviewLine}
       />
+      {laughControlAvailable ? (
+        <section
+          className={styles.botVoiceLocalLaugh}
+          data-tutorial-target="avatar-local-laugh"
+          aria-labelledby="bot-voice-local-laugh-title"
+        >
+          <div className={styles.botVoiceLocalLaughField}>
+            <label id="bot-voice-local-laugh-title" htmlFor="bot-voice-local-laugh">
+              Laugh
+            </label>
+            <input
+              id="bot-voice-local-laugh"
+              type="text"
+              value={laughSyllable}
+              placeholder="ha"
+              maxLength={BOT_LOCAL_LAUGH_SYLLABLE_MAX_LENGTH}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              aria-label="Local laugh syllable"
+              pattern="[A-Za-z]{1,4}"
+              onChange={(event) => {
+                const next = event.currentTarget.value
+                  .normalize("NFKC")
+                  .replace(/[^\p{L}]/gu, "")
+                  .slice(0, BOT_LOCAL_LAUGH_SYLLABLE_MAX_LENGTH)
+                  .toLocaleLowerCase();
+                onChange({
+                  ...normalizedProfile,
+                  localLaughSyllable: normalizeBotLocalLaughSyllable(next),
+                });
+              }}
+            />
+            <button
+              type="button"
+              aria-label="Preview local laugh"
+              title="Preview this laugh"
+              disabled={!laughSyllable}
+              onClick={() => {
+                const previewText = botLocalLaughSynthesisText({
+                  syllable: laughSyllable,
+                  intensity: "medium",
+                });
+                if (!previewText) return;
+                void onPreview(
+                  {
+                    ...normalizedProfile,
+                    localEnginePreference: "instant",
+                  },
+                  "english",
+                  previewText,
+                  {
+                    englishVoiceEngine: "builtin",
+                    cacheKey: `avatar-local-laugh:${laughSyllable}:${JSON.stringify(
+                      normalizedProfile,
+                    )}`,
+                  },
+                );
+              }}
+            >
+              <Play size={13} strokeWidth={2.3} aria-hidden="true" />
+            </button>
+          </div>
+          <small>One 1–4 letter sound, used for this bot’s Instant laugh.</small>
+        </section>
+      ) : null}
       <section
         className={styles.botVoiceFeelSupporting}
         aria-labelledby="bot-voice-local-feel-title"
@@ -44862,9 +44957,10 @@ function BotAvatarFaceControls({
                     {customBlinkActive ? (
                       <label className={styles.botAvatarSingleGlyphInput}>
                         <span>Custom blink bar</span>
-                        <input
-                          type="text"
-                          value={botAvatarBlinkBarInputValue(faceBlinkBar)}
+          <input
+            type="text"
+            value={botAvatarBlinkBarInputValue(faceBlinkBar)}
+            maxLength={TEXT_ENTRY_GLYPH_MAX_LENGTH}
                           placeholder={BOT_AVATAR_CUSTOM_BLINK_START}
                           inputMode="text"
                           autoCapitalize="off"
@@ -47761,6 +47857,7 @@ function BotAiParameterCustomizer({
             ) : (
               <textarea
                 spellCheck={false}
+                maxLength={TEXT_ENTRY_SYSTEM_PROMPT_MAX_LENGTH}
                 placeholder="You are..."
                 value={systemPrompt}
                 onChange={(event) =>
@@ -48422,6 +48519,7 @@ function BotProfileBuilder({
                   <span>{label}</span>
                   <textarea
                     value={responseCueProfile[category].join("\n")}
+                    maxLength={TEXT_ENTRY_PARAGRAPH_MAX_LENGTH}
                     placeholder="One phrase per line; blank uses style-based defaults"
                     onChange={(event) =>
                       updateResponseCueProfile({
@@ -48438,6 +48536,7 @@ function BotProfileBuilder({
                 <span>Never use</span>
                 <textarea
                   value={responseCueProfile.blockedDefaults.join("\n")}
+                  maxLength={TEXT_ENTRY_PARAGRAPH_MAX_LENGTH}
                   placeholder="One default phrase per line"
                   onChange={(event) =>
                     updateResponseCueProfile({
@@ -48647,6 +48746,7 @@ function BotProfileBuilder({
                     </span>
                     <input
                       value={profile.core.interests}
+                      maxLength={TEXT_ENTRY_PROFILE_FIELD_MAX_LENGTH}
                       onChange={(event) =>
                         updateCore("interests", event.currentTarget.value)
                       }
@@ -48665,6 +48765,7 @@ function BotProfileBuilder({
                     </span>
                     <input
                       value={profile.core.boundaries}
+                      maxLength={TEXT_ENTRY_PROFILE_FIELD_MAX_LENGTH}
                       onChange={(event) =>
                         updateCore("boundaries", event.currentTarget.value)
                       }
@@ -48683,6 +48784,7 @@ function BotProfileBuilder({
                     </span>
                     <input
                       value={profile.core.quirks}
+                      maxLength={TEXT_ENTRY_PROFILE_FIELD_MAX_LENGTH}
                       onChange={(event) =>
                         updateCore("quirks", event.currentTarget.value)
                       }
@@ -49171,6 +49273,7 @@ function BotProfileBuilder({
                           <input
                             type="text"
                             className={styles.botProfileFactLabel}
+                            maxLength={TEXT_ENTRY_FACT_LABEL_MAX_LENGTH}
                             value={fact.label}
                             onChange={(event) =>
                               updateCustomFact(
@@ -49194,6 +49297,7 @@ function BotProfileBuilder({
                           <input
                             type="text"
                             className={styles.botProfileFactValue}
+                            maxLength={TEXT_ENTRY_FACT_VALUE_MAX_LENGTH}
                             value={fact.value}
                             onChange={(event) =>
                               updateCustomFact(
@@ -63192,6 +63296,11 @@ function HomeContent(): React.JSX.Element {
       ownerId: messageBot?.id ?? null,
       powers: messageBot?.powers,
       voiceProfile: profile,
+      voiceEngineUsed:
+        voicePlaybackSelectionRef.current.voiceMode === "english" &&
+        voicePlaybackSelectionRef.current.englishVoiceEngine === "builtin"
+          ? "builtin"
+          : null,
       corporality: normalizeBotAudioVoiceProfileV1(profile).corporality,
       voiceEffectsEnabled: settings.voiceEffectsEnabled !== false,
     });
@@ -71205,6 +71314,13 @@ function HomeContent(): React.JSX.Element {
         ownerId: bot.id,
         powers: bot.powers,
         voiceProfile: profile,
+        voiceEngineUsed:
+          voiceSelection.voiceMode === "english" &&
+          (storyEffectiveProvider === "local" ||
+            bot.online_enabled === 0 ||
+            voiceSelection.englishVoiceEngine === "builtin")
+            ? "builtin"
+            : null,
         corporality: normalizeBotAudioVoiceProfileV1(profile).corporality,
         voiceEffectsEnabled: settings.voiceEffectsEnabled !== false,
       });
@@ -72957,6 +73073,7 @@ function HomeContent(): React.JSX.Element {
         ? null
         : buildBundledActionSfxPlan(message.content);
       let botActionSfxPlayed = false;
+      let resolvedActionVoiceEngineUsed: string | null = null;
       const playBotActionSfx = (): void => {
         if (botActionSfxPlayed || !botActionSfxPlan) return;
         botActionSfxPlayed = true;
@@ -72968,6 +73085,7 @@ function HomeContent(): React.JSX.Element {
           ownerId: botSummary.id,
           powers: bot?.powers,
           voiceProfile: playbackProfile,
+          voiceEngineUsed: resolvedActionVoiceEngineUsed,
           corporality: playbackProfile.corporality,
           voiceEffectsEnabled: settings.voiceEffectsEnabled !== false,
         });
@@ -73285,6 +73403,7 @@ function HomeContent(): React.JSX.Element {
           debateLastVoiceClipRef.current = null;
         }
         if (clip.kind === "stream") {
+          resolvedActionVoiceEngineUsed = clip.engineUsed;
           if (clip.notice) setVoicePlaybackNotice(clip.notice);
           void updateCapturedReplayVoiceTake(replayVoiceTakePromise, {
             resolvedEngine: clip.engineUsed,
@@ -73310,6 +73429,7 @@ function HomeContent(): React.JSX.Element {
           return playbackStarted && !controller.signal.aborted;
         }
         const resolvedClip = clip.clip;
+        resolvedActionVoiceEngineUsed = resolvedClip.engineUsed;
         void storeCapturedReplayVoiceAudio({
           takePromise: replayVoiceTakePromise,
           bytes: resolvedClip.bytes,
@@ -74341,6 +74461,14 @@ function HomeContent(): React.JSX.Element {
         kind: plan.kind,
         voiceVolume: settings?.voiceVolume ?? 0,
         voiceProfile: foleyVoiceProfile ?? null,
+        voiceEngineUsed:
+          message.role !== "user" &&
+          voicePlaybackSelectionRef.current.voiceMode === "english" &&
+          (coffeeSessionProviderRef.current === "local" ||
+            packOwnerBot?.online_enabled === 0 ||
+            voicePlaybackSelectionRef.current.englishVoiceEngine === "builtin")
+            ? "builtin"
+            : null,
         corporality: foleyVoiceProfile
           ? normalizeBotAudioVoiceProfileV1(foleyVoiceProfile).corporality
           : undefined,
@@ -98153,6 +98281,7 @@ function HomeContent(): React.JSX.Element {
             <input
               ref={emptyStateSpotlightInputRef}
               type="search"
+              maxLength={TEXT_ENTRY_SEARCH_MAX_LENGTH}
               value={emptyStateBotNameFilter}
               onChange={(event) =>
                 setEmptyStateBotNameFilter(event.currentTarget.value)
@@ -98235,6 +98364,7 @@ function HomeContent(): React.JSX.Element {
           <input
             ref={searchInputRef}
             type="search"
+            maxLength={TEXT_ENTRY_SEARCH_MAX_LENGTH}
             value={searchValue}
             onChange={(event) => onSearchChange(event.currentTarget.value)}
             onKeyDown={onSearchKeyDown}
@@ -107288,9 +107418,10 @@ function HomeContent(): React.JSX.Element {
                         ? "Anthropic API key"
                         : "ElevenLabs API key"}
                   </span>
-                  <input
-                    type="password"
-                    value={activeKeyValue}
+            <input
+              type="password"
+              value={activeKeyValue}
+              maxLength={TEXT_ENTRY_SECRET_MAX_LENGTH}
                     autoComplete="off"
                     placeholder={
                       activeKeyIsServerManaged
@@ -108123,6 +108254,7 @@ function HomeContent(): React.JSX.Element {
           <form onSubmit={submitAuth} className={styles.form}>
             <input
               required
+              maxLength={BOT_PERSON_NAME_MAX_LENGTH}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               placeholder="Username"
@@ -108132,6 +108264,7 @@ function HomeContent(): React.JSX.Element {
             <input
               required
               type="password"
+              maxLength={TEXT_ENTRY_PASSWORD_MAX_LENGTH}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Password"
@@ -108144,6 +108277,7 @@ function HomeContent(): React.JSX.Element {
               <input
                 required
                 type="password"
+                maxLength={TEXT_ENTRY_PASSWORD_MAX_LENGTH}
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="Confirm password"
@@ -109092,6 +109226,7 @@ function HomeContent(): React.JSX.Element {
                   <span>Name</span>
                   <input
                     name="bot-library-group-name"
+                    maxLength={BOT_PERSON_NAME_MAX_LENGTH}
                     aria-label="Bot group name"
                     aria-describedby="bot-library-group-dialog-summary"
                     value={dialog.name}
@@ -109109,6 +109244,7 @@ function HomeContent(): React.JSX.Element {
                   <span>Description</span>
                   <textarea
                     name="bot-library-group-description"
+                    maxLength={TEXT_ENTRY_PARAGRAPH_MAX_LENGTH}
                     aria-label="Bot group description"
                     aria-describedby="bot-library-group-dialog-summary"
                     value={dialog.description}
@@ -109144,9 +109280,10 @@ function HomeContent(): React.JSX.Element {
                       </label>
                       <div className={styles.botLibraryGroupMemberSearch}>
                         <Search size={14} aria-hidden="true" />
-                        <input
-                          id="bot-library-group-member-search"
-                          type="search"
+                  <input
+                    id="bot-library-group-member-search"
+                    type="search"
+                    maxLength={TEXT_ENTRY_SEARCH_MAX_LENGTH}
                           value={botLibraryGroupMemberSearchQuery}
                           onChange={(event) =>
                             setBotLibraryGroupMemberSearchQuery(
@@ -116883,9 +117020,10 @@ function HomeContent(): React.JSX.Element {
                   {selectedPromptUsesVar ? (
                     <label className={styles.promptCenterPreviewSampleInput}>
                       <span>Sample input</span>
-                      <input
-                        type="text"
-                        value={commandCenterPreviewSampleInput}
+                  <input
+                    type="text"
+                    value={commandCenterPreviewSampleInput}
+                    maxLength={TEXT_ENTRY_SHORT_MAX_LENGTH}
                         onChange={(event) => {
                           setCommandCenterPreviewSampleInput(
                             event.currentTarget.value,
@@ -118135,10 +118273,11 @@ function HomeContent(): React.JSX.Element {
                         </label>
                         <label className={styles.promptCenterField}>
                           <span>Description</span>
-                          <input
-                            type="text"
-                            data-field-kind="description"
-                            value={selectedWildcardDeckDescription}
+                  <input
+                    type="text"
+                    data-field-kind="description"
+                    value={selectedWildcardDeckDescription}
+                    maxLength={TEXT_ENTRY_DECK_DESCRIPTION_MAX_LENGTH}
                             onChange={(event) => {
                               const description =
                                 event.currentTarget.value.slice(0, 220);
@@ -120917,9 +121056,10 @@ function HomeContent(): React.JSX.Element {
                                   className={styles.settingsHostInputWrap}
                                   data-status={secondaryOllamaUiStatus}
                                 >
-                                  <input
-                                    type="text"
-                                    placeholder="192.168.1.50:11434"
+                        <input
+                          type="text"
+                          placeholder="192.168.1.50:11434"
+                          maxLength={TEXT_ENTRY_URL_MAX_LENGTH}
                                     value={settings.secondaryOllamaHost ?? ""}
                                     onChange={(e) =>
                                       setSettings((p) =>
@@ -120988,9 +121128,10 @@ function HomeContent(): React.JSX.Element {
                                   className={styles.settingsHostInputWrap}
                                   data-status={comfyUiUiStatus}
                                 >
-                                  <input
-                                    type="text"
-                                    placeholder="127.0.0.1:8188"
+                        <input
+                          type="text"
+                          placeholder="127.0.0.1:8188"
+                          maxLength={TEXT_ENTRY_URL_MAX_LENGTH}
                                     value={settings.comfyUiHost ?? ""}
                                     onChange={(e) =>
                                       setSettings((p) =>
@@ -122368,9 +122509,10 @@ function HomeContent(): React.JSX.Element {
                             className={styles.settingsHostInputWrap}
                             data-status={secondaryOllamaUiStatus}
                           >
-                            <input
-                              type="text"
-                              placeholder="192.168.1.50:11434"
+                        <input
+                          type="text"
+                          placeholder="192.168.1.50:11434"
+                          maxLength={TEXT_ENTRY_URL_MAX_LENGTH}
                               value={settings.secondaryOllamaHost ?? ""}
                               onChange={(e) =>
                                 setSettings((p) =>
@@ -122437,9 +122579,10 @@ function HomeContent(): React.JSX.Element {
                             className={styles.settingsHostInputWrap}
                             data-status={comfyUiUiStatus}
                           >
-                            <input
-                              type="text"
-                              placeholder="127.0.0.1:8188"
+                        <input
+                          type="text"
+                          placeholder="127.0.0.1:8188"
+                          maxLength={TEXT_ENTRY_URL_MAX_LENGTH}
                               value={settings.comfyUiHost ?? ""}
                               onChange={(e) =>
                                 setSettings((p) =>
@@ -122763,6 +122906,7 @@ function HomeContent(): React.JSX.Element {
                         <input
                           type="password"
                           autoComplete="new-password"
+                          maxLength={TEXT_ENTRY_PASSWORD_MAX_LENGTH}
                           value={changePasswordNew}
                           onChange={(event) =>
                             setChangePasswordNew(event.target.value)
@@ -122774,6 +122918,7 @@ function HomeContent(): React.JSX.Element {
                         <input
                           type="password"
                           autoComplete="new-password"
+                          maxLength={TEXT_ENTRY_PASSWORD_MAX_LENGTH}
                           value={changePasswordConfirm}
                           onChange={(event) =>
                             setChangePasswordConfirm(event.target.value)
@@ -124640,6 +124785,7 @@ function HomeContent(): React.JSX.Element {
                               <input
                                 ref={botNameInputRef}
                                 required
+                                maxLength={BOT_PERSON_NAME_MAX_LENGTH}
                                 placeholder="Name this bot"
                                 value={newBotName}
                                 onChange={(e) => setNewBotName(e.target.value)}
@@ -126787,9 +126933,10 @@ function HomeContent(): React.JSX.Element {
                                   showCounts={false}
                                   dismissPopoversSignal={composerPopoverDismissSignal}
                                 />
-                                <input
-                                  type="search"
-                                  value={botFoundryInspirationSearch}
+                          <input
+                            type="search"
+                            value={botFoundryInspirationSearch}
+                            maxLength={TEXT_ENTRY_SEARCH_MAX_LENGTH}
                                   placeholder="Search your bots…"
                                   aria-label="Search inspiration bots"
                                   onChange={(event) =>
@@ -127506,9 +127653,10 @@ function HomeContent(): React.JSX.Element {
                     <div
                       className={`${styles.botNameRow} ${styles.imagePromptRow}`}
                     >
-                      <textarea
-                        required
-                        rows={4}
+              <textarea
+                required
+                rows={4}
+                maxLength={BOT_GENERATION_PROMPT_MAX_LENGTH}
                         placeholder="Describe an image..."
                         value={imagePrompt}
                         onChange={(e) => {
@@ -128110,9 +128258,10 @@ function HomeContent(): React.JSX.Element {
                               {IMAGE_GENERATION_QUEUE_LIMIT_PER_SCOPE} queued
                             </span>
                           </label>
-                          <textarea
-                            id="queued-image-prompt"
-                            rows={2}
+            <textarea
+              id="queued-image-prompt"
+              rows={2}
+              maxLength={BOT_GENERATION_PROMPT_MAX_LENGTH}
                             placeholder="Describe the next image…"
                             value={imagePrompt}
                             disabled={!canQueueImageInActiveScope}
@@ -136497,6 +136646,7 @@ function HomeContent(): React.JSX.Element {
               <input
                 id="coffee-group-name"
                 className={styles.input}
+                maxLength={BOT_PERSON_NAME_MAX_LENGTH}
                 value={coffeeGroupNameDraft}
                 onChange={(event) =>
                   setCoffeeGroupNameDraft(event.target.value)
@@ -136622,6 +136772,7 @@ function HomeContent(): React.JSX.Element {
               <div className={styles.coffeePresetSaveRow}>
                 <input
                   className={styles.input}
+                  maxLength={TEXT_ENTRY_TITLE_MAX_LENGTH}
                   value={coffeePresetNameDraft}
                   onChange={(event) =>
                     setCoffeePresetNameDraft(event.target.value)
@@ -142804,8 +142955,9 @@ function HomeContent(): React.JSX.Element {
         </div>
         <label className={styles.storySearchBar}>
           <span aria-hidden="true">⌕</span>
-          <input
-            value={storySearch}
+        <input
+          value={storySearch}
+          maxLength={TEXT_ENTRY_SEARCH_MAX_LENGTH}
             onChange={(event) => setStorySearch(event.target.value)}
             placeholder="Search bots..."
             aria-label="Search bots for Story Mode"

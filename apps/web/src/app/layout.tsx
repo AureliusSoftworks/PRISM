@@ -19,6 +19,7 @@ import { PrismMenuProvider } from "./PrismMenu";
 import { PrismRefractionGateProvider } from "./prismRefractionGate";
 import { RenderPlatformAttribute } from "./RenderPlatformAttribute";
 import { ReplayRenderCoordinator } from "./ReplayRenderCoordinator";
+import { TextEntryLengthDefaults } from "./TextEntryLengthDefaults";
 import { TextFieldContextMenu } from "./TextFieldContextMenu";
 import "./globals.css";
 
@@ -119,6 +120,7 @@ export default function RootLayout({
             <PrismRefractionGateProvider>
               <RenderPlatformAttribute />
               <TextFieldContextMenu />
+              <TextEntryLengthDefaults />
               <BlockBrowserInspection />
               <DisableNativeTooltips />
               <ReplayRenderCoordinator />
