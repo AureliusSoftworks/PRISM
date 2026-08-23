@@ -1393,7 +1393,8 @@
   position: absolute;
   z-index: 9;
   left: var(--suspect-walk-start, 26%);
-  bottom: clamp(4rem, 20%, 15rem);
+  top: 51%;
+  bottom: auto;
   display: grid;
   justify-items: center;
   width: min(28rem, 38%, 52vh);
@@ -1426,15 +1427,15 @@
 @keyframes mysterySuspectRoomWalk {
   0%, 12% {
     left: var(--suspect-walk-start, 26%);
-    transform: translateX(-50%);
+    transform: translate(-50%, -50%);
   }
   45%, 55% {
     left: var(--suspect-walk-waypoint, 48%);
-    transform: translateX(-50%);
+    transform: translate(-50%, -50%);
   }
   88%, 100% {
     left: var(--suspect-walk-end, 68%);
-    transform: translateX(-50%);
+    transform: translate(-50%, -50%);
   }
 }
 
@@ -3458,7 +3459,8 @@
   .suspectAvatar { width: min(27vw, 13rem); min-height: min(27vw, 13rem); }
   .suspectPresence strong { font-size: 1.05rem; }
   .roomSuspectPresence {
-    bottom: clamp(3.5rem, 16%, 6rem);
+    top: 51%;
+    bottom: auto;
     width: clamp(10rem, 32%, 14rem);
   }
 
@@ -3643,4 +3645,458 @@
 
 @media (prefers-reduced-motion: reduce) {
   .roomPanel, .deskSurface, .investigatorDesk, .deskHandle, .suspectFolder, .comparisonSlot { transition: none; animation: none; }
+}
+
+/* Spatial investigation v3 -------------------------------------------------
+   Mansion, room, and records are deliberately separate views. The room and
+   case-management surfaces must never collapse back into a dashboard. */
+.play:is([data-phase="investigation"], [data-phase="continuance"]) {
+  height: 100dvh;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 50% 16%, rgba(64, 81, 116, 0.2), transparent 42%),
+    linear-gradient(180deg, #080a11 0%, #05060a 100%);
+}
+
+.investigation {
+  position: relative;
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  width: min(92rem, calc(100% - 2rem));
+  height: calc(100dvh - 5.45rem);
+  margin: 0.75rem auto 0;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.play:is([data-phase="investigation"], [data-phase="continuance"]) .investigation {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  align-self: auto;
+  align-items: stretch;
+  height: calc(100dvh - 5.45rem);
+  overflow: hidden;
+}
+
+.play:is([data-phase="investigation"], [data-phase="continuance"]) .investigation[data-view="mansion"] .roomPanel,
+.play:is([data-phase="investigation"], [data-phase="continuance"]) .investigation[data-view="room"] .floorplan {
+  display: none;
+}
+
+.floorplan,
+.roomPanel {
+  grid-area: 1 / 1;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  min-height: 0;
+  box-sizing: border-box;
+  animation: mysterySpatialArrival 360ms cubic-bezier(.2, .78, .2, 1) both;
+}
+
+.play:is([data-phase="investigation"], [data-phase="continuance"]) .floorplan,
+.play:is([data-phase="investigation"], [data-phase="continuance"]) .roomPanel {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: stretch;
+  height: 100%;
+}
+
+@keyframes mysterySpatialArrival {
+  from { opacity: 0; transform: translateY(10px) scale(.992); }
+  to { opacity: 1; transform: none; }
+}
+
+.floorplan {
+  position: relative;
+  display: grid;
+  grid-template: auto minmax(0, 1fr) auto / minmax(0, 1fr);
+  align-self: stretch;
+  padding: clamp(1rem, 1.8vw, 1.55rem);
+  overflow: hidden;
+  border: 1px solid rgba(229, 192, 116, 0.3);
+  border-radius: 1.4rem;
+  background:
+    radial-gradient(ellipse at 50% 12%, rgba(102, 229, 234, 0.09), transparent 38%),
+    linear-gradient(145deg, rgba(18, 20, 31, 0.98), rgba(7, 9, 15, 0.98));
+  box-shadow: 0 2.4rem 7rem rgba(0, 0, 0, 0.46), inset 0 0 5rem rgba(99, 77, 155, 0.07);
+}
+
+.floorplan::before {
+  position: absolute;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  opacity: 0.32;
+  background:
+    linear-gradient(90deg, transparent 49.8%, rgba(229, 192, 116, 0.12) 50%, transparent 50.2%),
+    radial-gradient(circle at 50% 118%, rgba(229, 192, 116, 0.16), transparent 42%);
+  mix-blend-mode: screen;
+}
+
+.floorplan > header {
+  position: relative;
+  z-index: 4;
+  align-items: end;
+  margin: 0 0 0.85rem;
+}
+
+.floorplan > header strong {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: clamp(1.55rem, 2vw, 2.15rem);
+  font-weight: 500;
+}
+
+.floorplan > header button {
+  width: 2.35rem;
+  height: 2.35rem;
+  border-color: rgba(229, 192, 116, 0.24);
+  border-radius: 999px;
+  background: rgba(8, 10, 17, 0.7);
+}
+
+.floorplan > header button[data-selected="true"] {
+  color: #17110a;
+  border-color: #f4d494;
+  background: #e9c77e;
+  box-shadow: 0 0 1.2rem rgba(233, 199, 126, 0.28);
+}
+
+.mapViewport {
+  align-self: center;
+  width: min(68rem, 100%);
+  max-height: 100%;
+  margin: auto;
+  overflow: visible;
+  border: 0;
+  border-radius: 1.25rem;
+  background:
+    radial-gradient(ellipse at 50% 70%, rgba(7, 9, 13, 0.15), rgba(3, 4, 8, 0.88) 74%),
+    linear-gradient(180deg, rgba(31, 36, 49, 0.64), rgba(4, 6, 10, 0.9));
+  box-shadow: 0 2rem 4rem rgba(0, 0, 0, 0.42), inset 0 0 0 1px rgba(229, 192, 116, 0.12);
+  perspective: 1100px;
+}
+
+.mapCanvas {
+  inset: 3%;
+  width: 94%;
+  height: 94%;
+  overflow: visible;
+  border-radius: 1rem;
+  background:
+    linear-gradient(rgba(229, 192, 116, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(229, 192, 116, 0.035) 1px, transparent 1px),
+    radial-gradient(ellipse at 50% 40%, rgba(72, 69, 104, 0.22), transparent 62%);
+  background-size: 28px 28px, 28px 28px, auto;
+  transform: rotateX(3deg) rotateZ(-0.55deg) scale(.965);
+  transform-style: preserve-3d;
+}
+
+.mapRoom {
+  overflow: visible;
+  padding: 0.5rem;
+  border: 1px solid rgba(216, 197, 166, 0.36);
+  border-radius: 0.34rem;
+  background:
+    linear-gradient(150deg, rgba(47, 49, 59, 0.96), rgba(20, 24, 31, 0.98));
+  box-shadow:
+    inset 0 0 1.7rem rgba(255, 232, 183, 0.035),
+    0.35rem 0.42rem 0 rgba(4, 5, 9, 0.76),
+    0.6rem 0.8rem 1.25rem rgba(0, 0, 0, 0.34);
+}
+
+.mapRoom::before {
+  position: absolute;
+  inset: -1px;
+  content: "";
+  pointer-events: none;
+  border-top: 4px solid rgba(238, 217, 179, 0.38);
+  border-left: 4px solid rgba(182, 167, 149, 0.2);
+  border-radius: inherit;
+}
+
+.mapRoom::after {
+  position: absolute;
+  right: -0.42rem;
+  bottom: -0.42rem;
+  width: 0.42rem;
+  height: calc(100% - 0.2rem);
+  content: "";
+  pointer-events: none;
+  opacity: 0.7;
+  background: linear-gradient(180deg, #1b1820, #090b10);
+  clip-path: polygon(0 0, 100% 8%, 100% 100%, 0 94%);
+}
+
+.mapRoom:not([data-discovered="true"]) {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: linear-gradient(145deg, rgba(13, 15, 20, 0.94), rgba(5, 6, 9, 0.98));
+}
+
+.mapRoom[data-current="true"] {
+  outline: 1px solid rgba(169, 140, 255, 0.78);
+  outline-offset: 3px;
+}
+
+.mapRoom[data-selected="true"] {
+  z-index: 5;
+  border-color: rgba(241, 209, 143, 0.82);
+  background: linear-gradient(145deg, rgba(59, 52, 67, 0.98), rgba(23, 30, 38, 0.98));
+  box-shadow: 0 0 0 1px rgba(241, 209, 143, 0.14), 0.55rem 0.72rem 1.8rem rgba(0, 0, 0, 0.48), 0 0 2rem rgba(102, 229, 234, 0.09);
+  transform: translateY(-3px);
+}
+
+.mapRoom strong {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(0.66rem, 0.76vw, 0.86rem);
+  font-weight: 500;
+  text-shadow: 0 1px 0.5rem #000;
+}
+
+.mapRoom .mapOccupant {
+  width: 2rem;
+  height: 2rem;
+  border-color: color-mix(in srgb, currentColor 75%, #fff);
+  background: rgba(5, 7, 12, 0.94);
+  box-shadow: 0 0 0 3px rgba(5, 7, 12, 0.7), 0 0 1rem color-mix(in srgb, currentColor 36%, transparent);
+}
+
+.mapDoor {
+  z-index: 6;
+  background: #f0ce8a;
+  box-shadow: 0 0 0.75rem rgba(240, 206, 138, 0.5);
+}
+
+.mapDetails {
+  position: relative;
+  z-index: 4;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  width: min(68rem, 100%);
+  box-sizing: border-box;
+  margin: 0.85rem auto 0;
+  padding: 0.7rem 0.85rem;
+  border-color: rgba(229, 192, 116, 0.22);
+  background: rgba(7, 9, 15, 0.78);
+  backdrop-filter: blur(16px);
+}
+
+.mapDetails dl {
+  grid-column: 2;
+  grid-row: 1;
+  margin: 0;
+}
+
+.mapDetails button {
+  grid-column: 3;
+  grid-row: 1;
+  min-width: 8.5rem;
+  min-height: 2.6rem;
+  padding: 0.6rem 0.85rem;
+  color: #17110a;
+  font-weight: 760;
+  border: 1px solid #f0d091;
+  border-radius: 0.65rem;
+  background: linear-gradient(180deg, #f0d091, #c89c50);
+  box-shadow: 0 0.7rem 1.8rem rgba(0, 0, 0, 0.28);
+  cursor: pointer;
+}
+
+.floorplan > small {
+  position: absolute;
+  right: 1.55rem;
+  bottom: 0.45rem;
+  margin: 0;
+  opacity: 0.66;
+}
+
+.roomPanel {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 1.35rem;
+  background: transparent;
+  box-shadow: none;
+}
+
+.roomPanel > header {
+  position: absolute;
+  z-index: 18;
+  top: 0.85rem;
+  right: 0.85rem;
+  left: 0.85rem;
+  align-items: start;
+  padding: 0.8rem 0.95rem;
+  pointer-events: none;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 0.8rem;
+  background: linear-gradient(180deg, rgba(5, 8, 14, 0.8), rgba(5, 8, 14, 0.34));
+  box-shadow: 0 0.8rem 2rem rgba(0, 0, 0, 0.16);
+  backdrop-filter: blur(12px);
+}
+
+.roomPanel > header > div,
+.roomPanel > header button {
+  pointer-events: auto;
+}
+
+.roomPanel h2 {
+  font-size: clamp(1.75rem, 2.8vw, 2.7rem);
+  text-shadow: 0 2px 1.2rem rgba(0, 0, 0, 0.8);
+}
+
+.roomPanel > header .backToMansion,
+.roomPanel > header .leaveInvestigation {
+  min-height: 2.45rem;
+  padding: 0.55rem 0.8rem;
+  color: var(--mystery-text) !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  border-radius: 999px;
+  background: rgba(7, 10, 17, 0.68) !important;
+  box-shadow: 0 0.55rem 1.2rem rgba(0, 0, 0, 0.22);
+}
+
+.roomScene,
+.roomPanel[data-focus="search"] .roomScene {
+  grid-row: 1 / -1;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  aspect-ratio: auto;
+  border-radius: 1.35rem;
+  box-shadow: inset 0 -8rem 12rem rgba(0, 0, 0, 0.28), 0 2.5rem 7rem rgba(0, 0, 0, 0.4);
+}
+
+.play:is([data-phase="investigation"], [data-phase="continuance"]) .roomPanel:not([data-focus="search"]) .roomScene {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  aspect-ratio: auto;
+}
+
+.roomPanel[data-focus="search"] {
+  position: relative;
+  z-index: auto;
+  inset: auto;
+  display: grid;
+  padding: 0;
+  border: 0;
+  border-radius: 1.35rem;
+  background: transparent;
+  box-shadow: none;
+}
+
+.roomPanel[data-focus="search"] > header {
+  position: absolute;
+}
+
+.roomSuspectPresence {
+  top: 51%;
+  bottom: auto;
+  width: min(24rem, 32%, 46vh);
+}
+
+.interviewStage {
+  grid-template-columns: minmax(18rem, 43%) minmax(0, 57%);
+  padding: clamp(5.5rem, 9vh, 7.5rem) clamp(1rem, 2vw, 2rem) clamp(1rem, 2.4vh, 1.5rem);
+  background: linear-gradient(90deg, rgba(3, 5, 9, 0.2), rgba(3, 5, 9, 0.72) 48%, rgba(3, 5, 9, 0.9));
+}
+
+.suspectAvatar {
+  width: min(31vw, 26rem);
+  min-height: min(31vw, 26rem);
+}
+
+.interviewViewport {
+  border: 1px solid rgba(102, 229, 234, 0.16);
+  border-radius: 0.9rem;
+  background: rgba(6, 10, 18, 0.82);
+  box-shadow: 0 1.4rem 3.4rem rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(18px);
+}
+
+.caseRail {
+  position: fixed;
+  z-index: 120;
+  top: 5.15rem;
+  right: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  width: min(27rem, calc(100vw - 1.7rem));
+  height: calc(100dvh - 6rem);
+  max-height: none;
+  gap: 0.7rem;
+  padding: 0.9rem;
+  overflow: hidden;
+  border: 1px solid rgba(169, 140, 255, 0.34);
+  border-radius: 1rem;
+  background: rgba(9, 11, 21, 0.96);
+  box-shadow: -1.5rem 0 4rem rgba(0, 0, 0, 0.52), 0 0 0 100vmax rgba(2, 3, 7, 0.32);
+  backdrop-filter: blur(22px);
+  animation: mysteryCaseFileIn 220ms ease-out both;
+}
+
+.caseRail[hidden] {
+  display: none;
+}
+
+@keyframes mysteryCaseFileIn {
+  from { opacity: 0; transform: translateX(1.2rem); }
+  to { opacity: 1; transform: none; }
+}
+
+.caseRail > :is(.partnerCard, .leadJournal, .accessInventory, .inventory, .testimonyList) {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.caseRail > .openTheoryButton {
+  flex: 0 0 auto;
+}
+
+.investigatorDesk[data-surface="investigation"] {
+  position: fixed;
+  z-index: 118;
+  right: 50%;
+  bottom: 0;
+  width: min(58rem, calc(100vw - 2rem));
+  max-height: min(64dvh, 34rem);
+  border-radius: 0.95rem 0.95rem 0 0;
+  box-shadow: 0 -1.4rem 4rem rgba(0, 0, 0, 0.48), 0 0 0 100vmax rgba(2, 3, 7, 0.24);
+  transform: translateX(50%);
+}
+
+.investigatorDesk[data-surface="investigation"]:not([data-open="true"]) {
+  display: none;
+}
+
+.investigatorDesk[data-surface="investigation"]:not([data-open="true"]) > small {
+  display: none;
+}
+
+.investigatorDesk[data-surface="investigation"][data-open="true"] .deskSurface {
+  height: min(50dvh, 29rem);
+  max-height: none;
+}
+
+@media (max-width: 1380px) {
+  .investigation { width: calc(100% - 1rem); }
+  .floorplan { padding: 0.9rem 1rem 1.25rem; }
+  .mapViewport, .mapDetails { width: min(61rem, 96%); }
+  .roomPanel > header { top: 0.55rem; right: 0.55rem; left: 0.55rem; }
+  .roomSuspectPresence { width: min(19rem, 30%, 42vh); }
+  .stagePartnerProse { max-height: 5.8rem; overflow: auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .floorplan,
+  .roomPanel,
+  .caseRail { animation: none; }
 }

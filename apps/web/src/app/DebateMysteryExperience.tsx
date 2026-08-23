@@ -1184,6 +1184,10 @@ export function DebateMysteryPlay(
   const [partnerQuestion, setPartnerQuestion] = useState("");
   const [notebook, setNotebook] = useState<DebateMysteryNotebookV2 | null>(null);
   const [deskOpen, setDeskOpen] = useState(false);
+  const [caseFileOpen, setCaseFileOpen] = useState(false);
+  const [spatialView, setSpatialView] = useState<"mansion" | "room">(
+    state.activeActivity ? "room" : "mansion",
+  );
   const [selectedSuspectSeatId, setSelectedSuspectSeatId] = useState<string | null>(null);
   const [comparisonSlots, setComparisonSlots] = useState<[DeskReference | null, DeskReference | null]>([null, null]);
   const [leadNoteDrafts, setLeadNoteDrafts] = useState<Record<string, string>>({});
@@ -1380,13 +1384,15 @@ export function DebateMysteryPlay(
     mysterySessionResetIdRef.current = sessionId;
     setFloor(state.rooms.find((room) => room.id === state.currentRoomId)?.floor ?? 1);
     setSelectedRoomId(state.currentRoomId);
+    setSpatialView(state.activeActivity ? "room" : "mansion");
+    setCaseFileOpen(false);
     setDeskOpen(state.playPhase === "theory");
     setSelectedSuspectSeatId(null);
     setComparisonSlots([null, null]);
     notebookReadyRef.current = false;
     savedDeskRef.current = "";
     setNotebook(null);
-  }, [sessionId, state.currentRoomId, state.playPhase, state.rooms]);
+  }, [sessionId, state.activeActivity, state.currentRoomId, state.playPhase, state.rooms]);
 
   useEffect(() => {
     if (armedAccessItemId && !state.inventoryItems.some((item) => item.id === armedAccessItemId && item.usable)) {
@@ -1405,7 +1411,13 @@ export function DebateMysteryPlay(
 
   useEffect(() => {
     const closeDeskOnEscape = (event: KeyboardEvent): void => {
-      if (event.key === "Escape" && deskOpen) {
+      if (event.key !== "Escape") return;
+      if (caseFileOpen) {
+        setCaseFileOpen(false);
+        playMysterySfx("folder");
+        return;
+      }
+      if (deskOpen) {
         setComparisonSlots([null, null]);
         setDeskOpen(false);
         playMysterySfx("folder");
@@ -1413,7 +1425,7 @@ export function DebateMysteryPlay(
     };
     window.addEventListener("keydown", closeDeskOnEscape);
     return () => window.removeEventListener("keydown", closeDeskOnEscape);
-  }, [deskOpen, playMysterySfx]);
+  }, [caseFileOpen, deskOpen, playMysterySfx]);
 
   const latestInterviewMessage = state.interviewLog.at(-1);
 
@@ -1691,6 +1703,7 @@ export function DebateMysteryPlay(
 
   const beginRoomInvestigation = async (): Promise<void> => {
     if (await perform({ action: "begin_investigation", roomId: currentRoom.id })) {
+      setSpatialView("room");
       setSuspectRoomFocus("search");
     }
   };
@@ -1698,6 +1711,7 @@ export function DebateMysteryPlay(
   const beginSuspectInterview = async (): Promise<void> => {
     if (!currentSuspect) return;
     if (await perform({ action: "begin_interview", suspectSeatId: currentSuspect.seatId })) {
+      setSpatialView("room");
       setSuspectRoomFocus("interview");
     }
   };
@@ -1725,6 +1739,7 @@ export function DebateMysteryPlay(
     const hadActiveActivity = Boolean(state.activeActivity);
     if (hadActiveActivity && !(await finishActiveActivity(true))) return;
     setTheoryBoardOpen(true);
+    setCaseFileOpen(false);
     setDeskOpen(true);
     playMysterySfx("theory");
     if (!hadActiveActivity) announceAction("Theory Board opened.");
@@ -1733,6 +1748,16 @@ export function DebateMysteryPlay(
   const closeTheoryBoard = (): void => {
     if (state.playPhase === "theory") return;
     setTheoryBoardOpen(false);
+    playMysterySfx("return");
+    announceAction("Returned to the mansion.");
+  };
+
+  const showMansion = (): void => {
+    setSpatialView("mansion");
+    setCaseFileOpen(false);
+    setDeskOpen(false);
+    setFloor(currentRoom.floor);
+    setSelectedRoomId(currentRoom.id);
     playMysterySfx("return");
     announceAction("Returned to the mansion.");
   };
@@ -2057,10 +2082,20 @@ export function DebateMysteryPlay(
       : `${itemTitle} returned to the Case Kit.`);
   };
   const enterSelectedRoom = async (): Promise<void> => {
-    await perform({ action: "travel", roomId: selectedRoom.id });
+    if (selectedRoom.id === currentRoom.id) {
+      setSpatialView("room");
+      playMysterySfx("return");
+      announceAction(`Entered ${currentRoom.name ?? "the room"}.`);
+      return;
+    }
+    if (await perform({ action: "travel", roomId: selectedRoom.id })) {
+      setSpatialView("room");
+      setCaseFileOpen(false);
+      setDeskOpen(false);
+    }
   };
   const selectedRoomActionLabel = selectedRoom.id === currentRoom.id
-    ? "Current room"
+    ? "Enter room"
     : selectedRoom.discovered
       ? "Go to room"
       : "Discover room · 1 action";
@@ -2222,6 +2257,16 @@ export function DebateMysteryPlay(
               : <><small>Actions</small><strong>{state.actionsRemaining}</strong></>}
         </div>
         <div className={styles.hudControls} data-tutorial-target="whodunnit-hud-controls">
+          {!inTrial && !atVerdict ? <button type="button" aria-pressed={caseFileOpen} onClick={() => {
+            setCaseFileOpen((open) => !open);
+            setDeskOpen(false);
+            playMysterySfx("folder");
+          }}>Case file</button> : null}
+          {!inTrial && !atVerdict ? <button type="button" aria-pressed={deskOpen} onClick={() => {
+            setDeskOpen((open) => !open);
+            setCaseFileOpen(false);
+            playMysterySfx("paper");
+          }}>Desk</button> : null}
           <button type="button" onClick={() => void openTheoryBoard()} data-tutorial-target="whodunnit-theory-control">Theory</button>
         </div>
       </header>
@@ -2352,10 +2397,15 @@ export function DebateMysteryPlay(
           <button type="button" className={styles.fileTheoryButton} disabled={busy || theoryReadyCount !== theoryChecklist.length} onClick={() => void perform({ action: "file_theory", theory })}>File accusation and prepare Turnabout</button>
         </section>
       ) : (
-        <div className={styles.investigation} data-desk-open={deskOpen ? "true" : undefined}>
+        <div
+          className={styles.investigation}
+          data-view={spatialView}
+          data-desk-open={deskOpen ? "true" : undefined}
+          data-case-file-open={caseFileOpen ? "true" : undefined}
+        >
           <section className={styles.floorplan} data-tutorial-target="whodunnit-floorplan">
             <header>
-              <div><p className={styles.eyebrow}>Mansion blueprint</p><strong>{floorDisplayName(floor)}</strong></div>
+              <div><p className={styles.eyebrow}>The mansion</p><strong>{floorDisplayName(floor)}</strong></div>
               <div>{Array.from({ length: state.config.floors }, (_, index) => {
                 const floorNumber = index + 1;
                 const label = floorDisplayName(floorNumber);
@@ -2415,12 +2465,12 @@ export function DebateMysteryPlay(
             <section className={styles.mapDetails} aria-live="polite" data-locked={selectedRoomLocked ? "true" : undefined}>
               <div><small>Selected room</small><strong>{selectedRoomIsKnown ? selectedRoom.name ?? "Unnamed room" : "Undiscovered room"}</strong><span>{selectedRoomIsKnown ? `${floorDisplayName(selectedRoom.floor)} · ${selectedRoom.locked ? "Locked · try an access item" : selectedRoom.searched ? "All visible areas inspected" : "Visited"}` : selectedRoomLocked ? "Locked · no actions" : "Discover to reveal"}</span></div>
               {selectedRoomIsKnown ? <dl><div><dt>Known occupant</dt><dd>{selectedRoomOccupant ? selectedRoomOccupant.name : "Unknown"}</dd></div><div><dt>Known clues</dt><dd>{selectedRoomClueCount}</dd></div></dl> : null}
-              <button type="button" disabled={busy || Boolean(state.activeActivity) || selectedRoomLocked || selectedRoom.id === currentRoom.id} onClick={() => void enterSelectedRoom()}>{selectedRoomActionLabel}</button>
+              <button type="button" disabled={busy || Boolean(state.activeActivity) || selectedRoomLocked} onClick={() => void enterSelectedRoom()}>{selectedRoomActionLabel}</button>
             </section>
-            <small>Select a room, then travel. New rooms cost 1 action; revisits are free.</small>
+            <small>Choose where to descend. New rooms cost 1 action; revisits are free.</small>
           </section>
           <section className={styles.roomPanel} data-kind={currentRoom.kind ?? "undiscovered"} data-focus={suspectRoomFocus}>
-            <header><div><p className={styles.eyebrow}>{(currentRoom.kind ?? "room").replace("_", " ")}</p><h2>{currentRoom.name ?? "Undiscovered room"}</h2></div><div className={styles.roomHeaderActions}>{suspectRoomFocus === "search" ? <button type="button" className={styles.leaveInvestigation} data-ui-sfx="none" disabled={busy} onClick={() => void finishActiveActivity()}>← Return to room</button> : null}</div></header>
+            <header><div><p className={styles.eyebrow}>{(currentRoom.kind ?? "room").replace("_", " ")}</p><h2>{currentRoom.name ?? "Undiscovered room"}</h2></div><div className={styles.roomHeaderActions}>{suspectRoomFocus === "search" ? <button type="button" className={styles.leaveInvestigation} data-ui-sfx="none" disabled={busy} onClick={() => void finishActiveActivity()}>← Return to room</button> : suspectRoomFocus === "observe" ? <button type="button" className={styles.backToMansion} data-ui-sfx="none" onClick={showMansion}>← Mansion</button> : null}</div></header>
             <div
               className={styles.roomScene}
               data-blurred={currentSuspect && suspectRoomFocus === "interview" ? "true" : undefined}
@@ -2601,9 +2651,10 @@ export function DebateMysteryPlay(
             {evidenceExhibitId ? (() => { const exhibit = state.discoveredEvidence.find((item) => item.id === evidenceExhibitId); return exhibit ? <section className={styles.evidenceExhibit} role="dialog" aria-label={`Evidence acquired: ${mysteryEvidenceTitle(exhibit.title)}`}><button type="button" aria-label="Close evidence preview" onClick={() => setEvidenceExhibitId(null)}>×</button><MysteryEvidenceVisual item={exhibit} /><div><small>Evidence acquired</small><h3>{mysteryEvidenceTitle(exhibit.title)}</h3><p>{mysteryEvidenceObservation(exhibit.observation)}</p><button type="button" onClick={() => placeOnDesk({ kind: "evidence", id: exhibit.id, label: mysteryEvidenceTitle(exhibit.title) })}>Place on desk</button></div></section> : null; })() : null}
           </section>
 
-          <aside className={styles.caseRail} aria-label="Case file">
+          <aside className={styles.caseRail} aria-label="Case file" hidden={!caseFileOpen}>
             <header className={styles.caseFileHeader}>
               <div><p className={styles.eyebrow}>Case file</p><strong>Public record & tools</strong></div>
+              <button type="button" aria-label="Close case file" onClick={() => setCaseFileOpen(false)}>×</button>
             </header>
             <nav className={styles.caseFileTabs} aria-label="Case file sections">
               <button type="button" aria-pressed={caseFileTab === "partner"} onClick={() => setCaseFileTab("partner")}>Counsel</button>
@@ -2660,7 +2711,6 @@ export function DebateMysteryPlay(
             {caseFileTab === "testimony" ? <section className={styles.testimonyList}><header><strong>Testimony</strong><span>{state.testimony.length}</span></header>{state.testimony.length ? state.testimony.map((item) => { const speaker = mysteryTestimonySpeaker(state, item.speakerSeatId); return <article key={item.id}><strong style={{ "--suspect-color": speaker?.color ?? "#a98cff" } as CSSProperties}>{speaker?.name ?? "Witness"}</strong><blockquote>{item.exactQuote}</blockquote><button type="button" onClick={() => placeOnDesk({ kind: "testimony", id: item.id, label: `Testimony · ${speaker?.name ?? "Witness"}` })}>Place on desk</button></article>; }) : <p>No testimony committed.</p>}</section> : null}
             <button type="button" className={styles.openTheoryButton} onClick={() => void openTheoryBoard()}>Open Theory Board{state.actionsRemaining === 0 ? " · filing required" : ""}</button>
           </aside>
-          {renderSuspectFolderRack("investigation")}
           {renderInvestigatorDesk("investigation")}
         </div>
       )}

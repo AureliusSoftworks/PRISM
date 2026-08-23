@@ -999,6 +999,7 @@ import {
   normalizeBotGenerationPrompt,
   normalizeEnglishVoiceEngine,
   applyBotNamePronunciations,
+  applyPlayerNamePronunciation,
   expandSpeechAbbreviations,
   voicePerformanceTextFromActionCues,
   voicePerformancePlanFromText,
@@ -3972,6 +3973,9 @@ function toUserProfile(row: UserDbRow): Record<string, unknown> {
     username: row.email,
     email: row.email,
     displayName: row.display_name,
+    playerNamePronunciation: normalizeBotNamePronunciation(
+      row.player_name_pronunciation,
+    ),
     role: "user",
     createdAt: row.created_at,
     theme: row.theme,
@@ -9776,6 +9780,7 @@ function buildRoutes(): RouteDefinition[] {
           username,
           email: username,
           displayName,
+          playerNamePronunciation: "",
           role: "user",
           createdAt,
           theme: requestedTheme,
@@ -27050,16 +27055,20 @@ function buildRoutes(): RouteDefinition[] {
         ]),
         normalizeBotNamePronunciation(user.player_name_pronunciation),
       ].filter((value): value is string => Boolean(value));
-      const spokenSourceText = applyBotNamePronunciations(
-        sourceText,
-        botNamePronunciations,
-        sourceBotId,
-      );
-      const pronouncedPerformanceText = applyBotNamePronunciations(
-        sourcePerformanceText,
-        botNamePronunciations,
-        sourceBotId,
-      );
+      const spokenSourceText = applyPlayerNamePronunciation(
+        applyBotNamePronunciations(sourceText, botNamePronunciations, sourceBotId),
+        user.display_name,
+        user.player_name_pronunciation,
+      ) as string;
+      const pronouncedPerformanceText = applyPlayerNamePronunciation(
+        applyBotNamePronunciations(
+          sourcePerformanceText,
+          botNamePronunciations,
+          sourceBotId,
+        ),
+        user.display_name,
+        user.player_name_pronunciation,
+      ) as string;
       const authoredPerformancePlan = voicePerformancePlanFromText(
         pronouncedPerformanceText,
       );
@@ -27089,10 +27098,14 @@ function buildRoutes(): RouteDefinition[] {
               .map((segment, index) =>
                 index % 2 === 1
                   ? segment
-                  : applyBotNamePronunciations(
-                      segment,
-                      botNamePronunciations,
-                      sourceBotId,
+                  : applyPlayerNamePronunciation(
+                      applyBotNamePronunciations(
+                        segment,
+                        botNamePronunciations,
+                        sourceBotId,
+                      ),
+                      user.display_name,
+                      user.player_name_pronunciation,
                     ),
               )
               .join("")
@@ -28326,6 +28339,9 @@ function buildRoutes(): RouteDefinition[] {
             parseStoredBotAudioVoiceProfileV1(
               user.player_audio_voice_profile,
             ) ?? normalizeBotAudioVoiceProfileV1(undefined),
+          playerNamePronunciation: normalizeBotNamePronunciation(
+            user.player_name_pronunciation,
+          ),
           openAiApiKeySource: apiKeySource(
             user.openai_key_ciphertext,
             config.openAiApiKey,
@@ -29091,6 +29107,7 @@ function buildRoutes(): RouteDefinition[] {
         elevenLabsVoiceCollectionId: user.elevenlabs_voice_collection_id,
         zenPlayerVoiceEnabled: user.zen_player_voice_enabled,
         playerAudioVoiceProfile: user.player_audio_voice_profile,
+        playerNamePronunciation: user.player_name_pronunciation,
         primaryOllamaHost: config.ollamaHost,
       });
 
@@ -29168,7 +29185,7 @@ function buildRoutes(): RouteDefinition[] {
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, preferred_home_atmosphere_image_model = ?, preferred_home_atmosphere_image_provider = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
             zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?, zen_persona_transition_choice = ?,
             comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?, text_model_display_names = ?,
-            voice_mode = ?, voice_effects_enabled = ?, voice_volume = ?, operating_system_voices_enabled = ?, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, elevenlabs_voice_collection_id = ?, zen_player_voice_enabled = ?, player_audio_voice_profile = ?,
+            voice_mode = ?, voice_effects_enabled = ?, voice_volume = ?, operating_system_voices_enabled = ?, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, elevenlabs_voice_collection_id = ?, zen_player_voice_enabled = ?, player_audio_voice_profile = ?, player_name_pronunciation = ?,
             dev_memories_enabled = ?, dev_memories_text = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?,
             anthropic_key_ciphertext = ?, anthropic_key_iv = ?, anthropic_key_tag = ?,
@@ -29245,6 +29262,7 @@ function buildRoutes(): RouteDefinition[] {
         next.elevenLabsVoiceCollectionId,
         next.zenPlayerVoiceEnabled ? 1 : 0,
         serializeBotAudioVoiceProfileV1(next.playerAudioVoiceProfile),
+        next.playerNamePronunciation,
         devMemoriesEnabled,
         devMemoriesText,
         openAiCipher,
@@ -29306,6 +29324,7 @@ function buildRoutes(): RouteDefinition[] {
           elevenLabsVoiceCollectionId: next.elevenLabsVoiceCollectionId ?? "",
           zenPlayerVoiceEnabled: next.zenPlayerVoiceEnabled,
           playerAudioVoiceProfile: next.playerAudioVoiceProfile,
+          playerNamePronunciation: next.playerNamePronunciation,
           hasOpenAiApiKey: Boolean(openAiCipher),
           hasAnthropicApiKey: Boolean(anthropicCipher),
           hasElevenLabsApiKey: Boolean(elevenLabsCipher),

@@ -119,6 +119,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     elevenLabsVoiceCollectionId: null,
     zenPlayerVoiceEnabled: 0,
     playerAudioVoiceProfile: null,
+    playerNamePronunciation: "",
     primaryOllamaHost: "http://localhost:11434",
     ...overrides,
   };
@@ -489,6 +490,24 @@ describe("resolveNextSettings — displayName", () => {
     const veryLong = `${"a".repeat(100)}`;
     const next = resolveNextSettings({ displayName: veryLong }, baseline());
     assert.equal(next.displayName.length, 80);
+  });
+});
+
+describe("resolveNextSettings — playerNamePronunciation", () => {
+  it("normalizes a supplied pronunciation and permits an explicit blank fallback", () => {
+    const current = baseline({ playerNamePronunciation: "Old phonetic name" });
+    assert.equal(
+      resolveNextSettings(
+        { playerNamePronunciation: "  Jair-id   Lee  " },
+        current,
+      ).playerNamePronunciation,
+      "Jair-id Lee",
+    );
+    assert.equal(
+      resolveNextSettings({ playerNamePronunciation: "   " }, current)
+        .playerNamePronunciation,
+      "",
+    );
   });
 });
 

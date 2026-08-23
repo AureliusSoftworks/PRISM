@@ -22,7 +22,7 @@ describe("applyCoffeeSeatBlink", () => {
     assert.equal(applyCoffeeSeatBlink(":V", false), ":V");
   });
 
-  it("gives custom eyes the stock binary closed state for the default blink", () => {
+  it("hides custom eyes during the stock default blink", () => {
     for (const { name, eye, face } of [
       { name: "Rowan", eye: "⌁", face: "⌁|" },
       { name: "Iris", eye: "◇", face: "◇]" },
@@ -33,7 +33,7 @@ describe("applyCoffeeSeatBlink", () => {
           eyeCharacter: eye,
           blinkBar: " ",
         }),
-        `¦${Array.from(face).slice(1).join("")}`,
+        ` ${Array.from(face).slice(1).join("")}`,
         name,
       );
     }
@@ -69,7 +69,7 @@ describe("applyCoffeeSeatBlink", () => {
   it("blinks custom leading eye characters when provided", () => {
     assert.equal(
       applyCoffeeSeatBlink("B)", false, { eyeCharacter: "B" }),
-      "¦)",
+      " )",
     );
     assert.equal(
       applyCoffeeSeatBlink("8D", "closed", { eyeCharacter: "8", blinkBar: "¦" }),

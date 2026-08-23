@@ -1855,7 +1855,7 @@ describe("backup audio voice settings", () => {
       assert.equal(snapshot.settings?.elevenLabsVoiceBank?.["voice-1"], "eleven-a");
       assert.equal(snapshot.settings?.zenPlayerVoiceEnabled, true);
       assert.equal(snapshot.settings?.playerAudioVoiceProfile?.baseVoiceId, "voice-3");
-      assert.equal("playerNamePronunciation" in (snapshot.settings ?? {}), false);
+      assert.equal(snapshot.settings?.playerNamePronunciation, "Jair-id");
 
       db.prepare(
         "UPDATE users SET voice_mode = 'mute', voice_effects_enabled = 1, voice_volume = 1, operating_system_voices_enabled = 0, english_voice_engine = 'builtin', default_system_voice_name = NULL, default_elevenlabs_voice_id = NULL, elevenlabs_voice_bank = '{}', elevenlabs_voice_model = NULL, elevenlabs_voice_collection_id = NULL, zen_player_voice_enabled = 0, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = NULL WHERE id = ?"
@@ -1884,7 +1884,7 @@ describe("backup audio voice settings", () => {
       assert.equal(JSON.parse(restoredUser.elevenlabs_voice_bank ?? "{}")["voice-1"], "eleven-a");
       assert.equal(restoredUser.zen_player_voice_enabled, 1);
       assert.equal(JSON.parse(restoredUser.player_audio_voice_profile ?? "{}").local.archetypeId, "voice-3");
-      assert.equal(restoredUser.player_name_pronunciation, "Keep me");
+      assert.equal(restoredUser.player_name_pronunciation, "Jair-id");
 
       const restoredBot = db.prepare(
         "SELECT authored_audio_voice_profile, audio_voice_profile_override FROM bots WHERE id = ?"

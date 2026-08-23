@@ -248,6 +248,8 @@ export interface BackupUserSettings {
   operatingSystemVoicesEnabled?: boolean;
   zenPlayerVoiceEnabled?: boolean;
   playerAudioVoiceProfile?: BotAudioVoiceProfileV1;
+  /** Private account context used only for speech synthesis. */
+  playerNamePronunciation?: string;
   prismDefaultBotAudioVoiceProfile?: BotAudioVoiceProfileV1;
   englishVoiceEngine?: EnglishVoiceEngine;
   defaultSystemVoiceName?: string | null;
@@ -1918,6 +1920,7 @@ export function exportUserSnapshot(
          default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank,
          elevenlabs_voice_model, elevenlabs_voice_collection_id,
          zen_player_voice_enabled, player_audio_voice_profile,
+         player_name_pronunciation,
          prism_default_bot_audio_voice_profile
        FROM users
        WHERE id = ?`,
@@ -2004,6 +2007,7 @@ export function exportUserSnapshot(
         elevenlabs_voice_collection_id: string | null;
         zen_player_voice_enabled: number | null;
         player_audio_voice_profile: string | null;
+        player_name_pronunciation: string | null;
         prism_default_bot_audio_voice_profile: string | null;
       }
     | undefined;
@@ -2127,6 +2131,9 @@ export function exportUserSnapshot(
           parseStoredBotAudioVoiceProfileV1(
             user.player_audio_voice_profile,
           ) ?? normalizeBotAudioVoiceProfileV1(undefined),
+        playerNamePronunciation: normalizeBotNamePronunciation(
+          user.player_name_pronunciation,
+        ),
         prismDefaultBotAudioVoiceProfile:
           parseStoredBotAudioVoiceProfileV1(
             user.prism_default_bot_audio_voice_profile,
@@ -3851,6 +3858,7 @@ function importUserSnapshotWithinTransaction(
         elevenlabs_voice_collection_id = ?,
         zen_player_voice_enabled = ?,
         player_audio_voice_profile = ?,
+        player_name_pronunciation = ?,
         prism_default_bot_audio_voice_profile = ?
       WHERE id = ?
     `,
@@ -3994,6 +4002,7 @@ function importUserSnapshotWithinTransaction(
       ),
       settings.zenPlayerVoiceEnabled === true ? 1 : 0,
       serializeBotAudioVoiceProfileV1(settings.playerAudioVoiceProfile),
+      normalizeBotNamePronunciation(settings.playerNamePronunciation),
       serializeBotAudioVoiceProfileV1(
         settings.prismDefaultBotAudioVoiceProfile,
       ),

@@ -285,6 +285,7 @@ describe("audio voice normalization", () => {
       resonance: 0,
       localEnginePreference: "inherit",
       localVoiceSource: "portable",
+      localLaughDelimiter: "-",
       accentLocale: "en-GB",
       pronunciationBase: "follow-voice",
       accentMode: "prefer-genuine",

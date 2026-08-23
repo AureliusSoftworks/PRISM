@@ -197,13 +197,13 @@ describe("Debate Whodunnit experience", () => {
     assert.match(source, /facing: currentSuspectFacing/u);
     assert.match(source, /data-avatar-facing=\{currentSuspectFacing\}/u);
     assert.match(source, /className=\{styles\.roomSuspectWalker\}/u);
-    assert.match(css, /\.roomSuspectPresence[\s\S]*bottom: clamp\(4rem, 20%, 15rem\)/u);
+    assert.match(css, /\.roomSuspectPresence[\s\S]*top: 51%[\s\S]*bottom: auto/u);
     assert.match(css, /\.roomSuspectPresence[\s\S]*width: min\(28rem, 38%, 52vh\)/u);
     assert.match(css, /\[data-debate-avatar-quality="mini"\][\s\S]*--zen-live-bot-mini-size: min\(24rem, 100%\)[\s\S]*width: min\(24rem, 100%\)/u);
     assert.match(css, /\[data-chat-mini-bot-avatar="true"\]\[data-size="room"\][\s\S]*--chat-mini-bot-render-size: min\(18rem, 25vh\)/u);
     assert.doesNotMatch(source, /className=\{styles\.roomSuspectName\}/u);
     assert.doesNotMatch(css, /\.roomSuspectName/u);
-    assert.match(css, /@keyframes mysterySuspectRoomWalk[\s\S]*--suspect-walk-waypoint/u);
+    assert.match(css, /@keyframes mysterySuspectRoomWalk[\s\S]*transform: translate\(-50%, -50%\)[\s\S]*--suspect-walk-waypoint/u);
     assert.match(css, /\.roomSuspectPresence:hover[\s\S]*animation-play-state: paused/u);
     assert.match(css, /prefers-reduced-motion[\s\S]*\.roomSuspectWalker/u);
   });
@@ -304,7 +304,7 @@ describe("Debate Whodunnit experience", () => {
     assert.match(css, /mysteryPartnerPresence/u);
   });
 
-  it("uses a compact scene-first HUD with a fixed Case File rail", () => {
+  it("uses a compact scene-first HUD with an optional Case File drawer", () => {
     assert.match(source, /data-tutorial-target="whodunnit-hud-controls"/u);
     assert.match(source, /data-tutorial-target="whodunnit-mission"/u);
     assert.match(source, /Determine who killed \{state\.victim\.name\}, then prove it in court/u);
@@ -318,12 +318,13 @@ describe("Debate Whodunnit experience", () => {
     assert.doesNotMatch(source, /data-tutorial-target="whodunnit-co-counsel-mini"/u);
     assert.doesNotMatch(css, /\.hudPartnerMini/u);
     assert.match(css, /\.caseFileTabs/u);
-    assert.match(css, /\.caseRail[\s\S]*grid-column: 3/u);
-    assert.match(css, /\.caseRail[\s\S]*position: sticky/u);
-    assert.match(css, /\.investigation[\s\S]*width: min\(116rem/u);
+    assert.match(source, /hidden=\{!caseFileOpen\}/u);
+    assert.match(source, /aria-label="Close case file"/u);
+    assert.match(css, /\.caseRail[\s\S]*position: fixed/u);
+    assert.match(css, /@keyframes mysteryCaseFileIn/u);
   });
 
-  it("keeps a compact blueprint beside the room stage, with explicit select-then-investigate travel", () => {
+  it("preserves explicit travel while separating the mansion and room views", () => {
     assert.match(source, /const \[selectedRoomId, setSelectedRoomId\] = useState\(state\.currentRoomId\)/u);
     assert.match(source, /const mysterySessionResetIdRef = useRef\(sessionId\);/u);
     assert.match(source, /if \(mysterySessionResetIdRef\.current === sessionId\) return;/u);
@@ -338,17 +339,21 @@ describe("Debate Whodunnit experience", () => {
     assert.doesNotMatch(source, /DEBATE_MYSTERY_MANSION_GRID/u);
     assert.match(source, /selectedRoomIsKnown \? selectedRoom\.name/u);
     assert.match(source, /Discover room · 1 action|Go to room/u);
-    assert.match(source, /await perform\(\{ action: "travel", roomId: selectedRoom\.id \}\);/u);
+    assert.match(source, /if \(await perform\(\{ action: "travel", roomId: selectedRoom\.id \}\)\)/u);
     assert.doesNotMatch(source, /onClick=\{\(\) => void perform\(\{ action: "travel", roomId: room\.id \}\)\}/u);
     assert.doesNotMatch(source, /mansionMapOpen|notebookBackdrop/u);
     assert.match(source, /className=\{styles\.floorplan\}[\s\S]*className=\{styles\.roomPanel\}/u);
+    assert.match(source, /data-view=\{spatialView\}/u);
+    assert.match(source, /setSpatialView\("room"\)/u);
+    assert.match(source, /const showMansion = \(\): void =>/u);
     assert.match(css, /\.mapRoom\[data-selected="true"\]/u);
     assert.match(css, /\.mapDetails/u);
     assert.match(css, /\.mapViewport/u);
     assert.match(css, /\.mapViewport[\s\S]*aspect-ratio: 4 \/ 3/u);
-    assert.match(css, /grid-template-columns: clamp\(18rem, 25vw, 22rem\) minmax\(32rem, 1fr\)/u);
+    assert.match(css, /\.investigation\[data-view="mansion"\] \.roomPanel/u);
+    assert.match(css, /\.investigation\[data-view="room"\] \.floorplan/u);
     assert.match(css, /\.mapDoor/u);
-    assert.match(css, /\.roomPanel[\s\S]*grid-column: 2/u);
+    assert.match(css, /@keyframes mysterySpatialArrival/u);
   });
 
   it("plays globally gated navigation cues and chimes only for newly acquired evidence", () => {
@@ -366,23 +371,23 @@ describe("Debate Whodunnit experience", () => {
     assert.match(source, /data-ui-sfx="none"[\s\S]{0,180}Return to room/u);
   });
 
-  it("fits the desktop investigation, static Case File, and sliding desk into one viewport", () => {
+  it("fits one spatial scene plus optional record drawers into the desktop viewport", () => {
     assert.match(css, /\.play\[data-phase="investigation"\][\s\S]*height: 100dvh/u);
     assert.match(css, /\.play\[data-phase="continuance"\][\s\S]*overflow: hidden/u);
     assert.match(source, /data-desk-open=\{deskOpen \? "true" : undefined\}/u);
-    assert.match(css, /grid-template-rows: minmax\(0, 58fr\) auto minmax\(0, 42fr\)/u);
-    assert.match(css, /\.investigation\[data-desk-open="true"\] \.roomPanel \{ height: 100%; max-height: 100%; \}/u);
-    assert.match(css, /\.deskSurface[\s\S]*height: min\(42dvh, 32rem\)/u);
-    assert.match(css, /\.caseRail[\s\S]*height: calc\(100dvh - 6\.55rem\)[\s\S]*overflow: hidden/u);
+    assert.match(css, /\.investigation[\s\S]*height: calc\(100dvh - 5\.45rem\)/u);
+    assert.match(css, /\.floorplan,[\s\S]*\.roomPanel[\s\S]*height: 100%/u);
+    assert.match(css, /\.investigatorDesk\[data-surface="investigation"\][\s\S]*position: fixed/u);
+    assert.match(css, /\.caseRail[\s\S]*height: calc\(100dvh - 6rem\)[\s\S]*overflow: hidden/u);
     assert.match(css, /\.caseRail > :is\([\s\S]*overflow: auto/u);
     assert.match(css, /@media \(max-width: 820px\)[\s\S]*\.deskWorkspace \{ grid-template-columns: 1fr; \}/u);
   });
 
-  it("uses the wide desktop gutters for a larger stage and vertical case desk", () => {
+  it("gives the mansion and room the wide canvas while keeping records layered", () => {
     assert.match(css, /@media \(min-width: 1600px\)/u);
-    assert.match(css, /width: min\(116rem, calc\(100% - 1\.5rem\)\)/u);
-    assert.match(css, /grid-template-columns: clamp\(15rem, 16vw, 19rem\) minmax\(42rem, 1fr\) clamp\(20rem, 20vw, 24rem\)/u);
-    assert.match(css, /\.caseRail[\s\S]*grid-column: 3;[\s\S]*grid-row: 1 \/ span 3;/u);
+    assert.match(css, /width: min\(92rem, calc\(100% - 2rem\)\)/u);
+    assert.match(css, /\.floorplan[\s\S]*grid-template: auto minmax\(0, 1fr\) auto/u);
+    assert.match(css, /\.caseRail[\s\S]*right: 0\.85rem/u);
     assert.match(css, /\.play\[data-phase="investigation"\] \.roomPanel:not\(\[data-focus="search"\]\) \.roomScene,[\s\S]*aspect-ratio: 16 \/ 9;/u);
     assert.match(css, /\.roomPanel\[data-focus="search"\] \.roomScene[\s\S]*aspect-ratio: auto;/u);
     assert.match(css, /\.play\[data-phase="investigation"\] \.notebookBody > nav,[\s\S]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/u);

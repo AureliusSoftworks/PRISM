@@ -2864,7 +2864,7 @@ describe("API request integration", () => {
       settings.playerAudioVoiceProfile.speechprintVariationSeed,
       "zen-player-seed",
     );
-    assert.equal("playerNamePronunciation" in settings, false);
+    assert.equal(settings.playerNamePronunciation, "Jair-id");
     assert.equal("defaultSystemVoiceName" in settings, false);
     assert.equal("defaultElevenLabsVoiceId" in settings, false);
     assert.equal(settings.autoModeEnabled, false);
@@ -7049,6 +7049,79 @@ describe("API request integration", () => {
     );
     assert.equal(blankSelfVoice.status, 200);
     assert.equal(builtinVoiceTexts.at(-1), "Light Yagami will answer.");
+  });
+
+  it("keeps profile pronunciation private to its account while projecting it only for speech", async () => {
+    const firstClient = createClient();
+    const secondClient = createClient();
+
+    const unauthenticated = await createClient().request("/api/settings");
+    assert.equal(unauthenticated.status, 401);
+
+    const firstRegistration = await firstClient.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "profile-pronunciation-first@example.com",
+        password: "profile-pronunciation-password",
+        displayName: "Jared",
+      }),
+    );
+    assert.equal(firstRegistration.status, 201);
+    const firstUser = (await json(firstRegistration)).user;
+    const secondRegistration = await secondClient.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "profile-pronunciation-second@example.com",
+        password: "profile-pronunciation-password",
+        displayName: "Avery",
+      }),
+    );
+    assert.equal(secondRegistration.status, 201);
+
+    const updated = await firstClient.request("/api/settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        displayName: "Jared",
+        playerNamePronunciation: "  Jair-id  ",
+      }),
+    });
+    assert.equal(updated.status, 200);
+    assert.equal((await json(updated)).settings.playerNamePronunciation, "Jair-id");
+
+    const firstAccount = await firstClient.request("/api/auth/me");
+    assert.equal(firstAccount.status, 200);
+    assert.deepEqual((await json(firstAccount)).user, {
+      id: String(firstUser.id),
+      username: "profile-pronunciation-first@example.com",
+      email: "profile-pronunciation-first@example.com",
+      displayName: "Jared",
+      playerNamePronunciation: "Jair-id",
+      role: "user",
+      createdAt: firstUser.createdAt,
+      theme: "system",
+      preferredProvider: "local",
+    });
+
+    const secondSettings = await secondClient.request("/api/settings");
+    assert.equal(secondSettings.status, 200);
+    assert.equal(
+      (await json(secondSettings)).settings.playerNamePronunciation,
+      "",
+    );
+
+    const beforeVoiceCount = builtinVoiceTexts.length;
+    const synthesis = await firstClient.request(
+      "/api/voices/synthesize",
+      jsonInit({
+        text: "Jared, your turn.",
+        mode: "english",
+        engine: "builtin",
+      }),
+    );
+    assert.equal(synthesis.status, 200);
+    assert.equal(builtinVoiceTexts.length, beforeVoiceCount + 1);
+    assert.equal(builtinVoiceTexts.at(-1), "Jair-id, your turn.");
   });
 
   it("preserves legacy ElevenLabs slot and account mappings during synthesis", async () => {

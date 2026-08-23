@@ -15,6 +15,7 @@ import {
   validateComfyUiWorkflowsPayload,
   normalizeBotVoiceVolume,
   normalizeBotAudioVoiceProfileV1,
+  normalizeBotNamePronunciation,
   normalizeEnglishVoiceEngine,
   normalizeVoiceMode,
   parseStoredAutoFallbackChain,
@@ -252,6 +253,7 @@ export interface CurrentSettings {
   elevenLabsVoiceCollectionId: string | null;
   zenPlayerVoiceEnabled?: number;
   playerAudioVoiceProfile?: string | null;
+  playerNamePronunciation?: string | null;
 }
 
 /** Shape of the next-settings result, with OpenAI key intent captured separately. */
@@ -325,6 +327,7 @@ export interface NextSettings {
   elevenLabsVoiceCollectionId: string | null;
   zenPlayerVoiceEnabled: boolean;
   playerAudioVoiceProfile: BotAudioVoiceProfileV1;
+  playerNamePronunciation: string;
   /**
    * Intent for the OpenAI API key:
    *   - "replace": caller sent a non-empty string; encrypt it
@@ -904,6 +907,12 @@ export function resolveNextSettings(
   current: CurrentSettings
 ): NextSettings {
   const displayName = readDisplayName(body.displayName, current.displayName);
+  const playerNamePronunciation = Object.prototype.hasOwnProperty.call(
+    body,
+    "playerNamePronunciation",
+  )
+    ? normalizeBotNamePronunciation(body.playerNamePronunciation)
+    : normalizeBotNamePronunciation(current.playerNamePronunciation);
   const theme: Theme = isTheme(body.theme) ? body.theme : current.theme;
   const graphicsQuality = normalizeGraphicsQuality(
     body.graphicsQuality,
@@ -1347,6 +1356,7 @@ export function resolveNextSettings(
 
   return {
     displayName,
+    playerNamePronunciation,
     theme,
     graphicsQuality,
     crtFocus,

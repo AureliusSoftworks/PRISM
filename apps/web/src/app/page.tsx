@@ -7809,6 +7809,7 @@ interface SessionUser {
   username?: string;
   email?: string;
   displayName: string;
+  playerNamePronunciation: string;
   theme: Theme;
   preferredProvider: Provider;
 }
@@ -10449,6 +10450,7 @@ interface ElevenLabsCreditsResponse {
 
 interface UserSettings {
   displayName: string;
+  playerNamePronunciation: string;
   theme: Theme;
   graphicsQuality: GraphicsQuality;
   crtFocus: number;
@@ -54783,6 +54785,8 @@ function HomeContent(): React.JSX.Element {
   const [factoryResetArmed, setFactoryResetArmed] = useState(false);
   const [deleteAccountArmed, setDeleteAccountArmed] = useState(false);
   const [profileNameDraft, setProfileNameDraft] = useState("");
+  const [profileNamePronunciationDraft, setProfileNamePronunciationDraft] =
+    useState("");
   const [changePasswordNew, setChangePasswordNew] = useState("");
   const [changePasswordConfirm, setChangePasswordConfirm] = useState("");
   const [botProfileActivePage, setBotProfileActivePage] =
@@ -56070,6 +56074,7 @@ function HomeContent(): React.JSX.Element {
     setSettingsScope("connections");
     setProfileNameModalOpen(false);
     setProfileNameDraft("");
+    setProfileNamePronunciationDraft("");
     setOpenAiKey("");
     setAnthropicKey("");
     setElevenLabsKey("");
@@ -81947,11 +81952,17 @@ function HomeContent(): React.JSX.Element {
     setProfileNameDraft(
       settings?.displayName?.trim() || user?.displayName?.trim() || "",
     );
+    setProfileNamePronunciationDraft(
+      settings?.playerNamePronunciation ??
+        user?.playerNamePronunciation ??
+        "",
+    );
     setProfileNameModalOpen(true);
   }
 
   async function submitProfileNameChange() {
     const nextDisplayName = profileNameDraft.trim();
+    const nextPlayerNamePronunciation = profileNamePronunciationDraft.trim();
     setPanelError(null);
     setPanelNotice(null);
     if (nextDisplayName.length === 0) {
@@ -81965,21 +81976,41 @@ function HomeContent(): React.JSX.Element {
         settings?: Partial<UserSettings>;
       }>("/api/settings", {
         method: "PATCH",
-        body: JSON.stringify({ displayName: nextDisplayName }),
+        body: JSON.stringify({
+          displayName: nextDisplayName,
+          playerNamePronunciation: nextPlayerNamePronunciation,
+        }),
       });
       const savedDisplayName =
         typeof response.settings?.displayName === "string" &&
         response.settings.displayName.trim().length > 0
           ? response.settings.displayName
           : nextDisplayName.slice(0, 80);
+      const savedPlayerNamePronunciation =
+        typeof response.settings?.playerNamePronunciation === "string"
+          ? response.settings.playerNamePronunciation
+          : nextPlayerNamePronunciation.slice(0, 120);
       setSettings((previous) =>
-        previous ? { ...previous, displayName: savedDisplayName } : previous,
+        previous
+          ? {
+              ...previous,
+              displayName: savedDisplayName,
+              playerNamePronunciation: savedPlayerNamePronunciation,
+            }
+          : previous,
       );
       setUser((previous) =>
-        previous ? { ...previous, displayName: savedDisplayName } : previous,
+        previous
+          ? {
+              ...previous,
+              displayName: savedDisplayName,
+              playerNamePronunciation: savedPlayerNamePronunciation,
+            }
+          : previous,
       );
       setProfileNameModalOpen(false);
       setProfileNameDraft("");
+      setProfileNamePronunciationDraft("");
       setPanelNotice("Profile name updated.");
       await refreshSettings();
     } catch (err) {
@@ -122893,6 +122924,23 @@ function HomeContent(): React.JSX.Element {
                             setProfileNameDraft(event.target.value)
                           }
                         />
+                      </label>
+                      <label>
+                        Pronunciation <small>(optional)</small>
+                        <input
+                          type="text"
+                          maxLength={120}
+                          value={profileNamePronunciationDraft}
+                          onChange={(event) =>
+                            setProfileNamePronunciationDraft(event.target.value)
+                          }
+                          placeholder="How Prism should say your name"
+                          aria-label="Profile name pronunciation"
+                        />
+                        <small>
+                          Optional. Used only when Prism says your name; leave
+                          blank to use your profile name normally.
+                        </small>
                       </label>
                       {panelError && (
                         <p className={styles.error} role="alert">

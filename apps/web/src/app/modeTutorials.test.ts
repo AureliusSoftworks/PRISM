@@ -40,14 +40,14 @@ describe("mode tutorials", () => {
     assert.match(step.body, /compact dark HUD/u);
     assert.match(step.body, /names your mission/u);
     assert.match(step.body, /Actions, Case file, and Theory/u);
-    assert.match(step.body, /three-part cockpit/u);
-    assert.match(step.body, /larger current-room stage owns the center/u);
-    assert.match(step.body, /static full-height Case File is a working rail on the right/u);
-    assert.match(step.body, /Gallery-like rack of suspect folders/u);
+    assert.match(step.body, /opens on the mansion itself/u);
+    assert.match(step.body, /descend into a full room scene/u);
+    assert.match(step.body, /Case file and Desk stay in the compact HUD as deliberate drawers/u);
+    assert.match(step.body, /records never compete with the mansion or room/u);
     assert.match(step.body, /Co-counsel’s latest reading appears at the lower edge of the stage/u);
     assert.doesNotMatch(step.body, /co-counsel Mini and name are always visible/u);
     assert.match(step.body, /Case file keeps their consultation composer/u);
-    assert.match(step.body, /four-to-three blueprint beside the Debate stage/u);
+    assert.match(step.body, /four-to-three shallow-isometric dollhouse/u);
     assert.match(step.body, /preserve their seeded footprints without stretching/u);
     assert.match(step.body, /adjacent room boxes/u);
     assert.match(step.body, /bot glyph at a stable case-seeded position/u);
@@ -496,7 +496,7 @@ describe("mode tutorials", () => {
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /display stays fixed/u);
     assert.match(
       MODE_TUTORIALS.avatar.steps[1]!.body,
-      /default broken-bar blink starts 25% smaller and follows Eyes/u,
+      /Default Blink makes custom eyes simply vanish and reappear on the stock blink timing/u,
     );
     assert.match(
       MODE_TUTORIALS.avatar.steps[1]!.body,

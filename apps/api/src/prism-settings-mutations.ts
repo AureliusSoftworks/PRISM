@@ -88,6 +88,7 @@ export const PRISM_JOURNALED_SETTING_KEYS = new Set([
   "elevenLabsVoiceCollectionId",
   "zenPlayerVoiceEnabled",
   "playerAudioVoiceProfile",
+  "playerNamePronunciation",
 ]);
 
 const PERSISTED_SETTING_COLUMNS = [
@@ -159,6 +160,7 @@ const PERSISTED_SETTING_COLUMNS = [
   "elevenlabs_voice_collection_id",
   "zen_player_voice_enabled",
   "player_audio_voice_profile",
+  "player_name_pronunciation",
 ] as const;
 
 type PersistedSettingColumn = (typeof PERSISTED_SETTING_COLUMNS)[number];
@@ -354,6 +356,7 @@ function currentSettings(
     ),
     zenPlayerVoiceEnabled: Number(row.zen_player_voice_enabled),
     playerAudioVoiceProfile: nullableString(row.player_audio_voice_profile),
+    playerNamePronunciation: nullableString(row.player_name_pronunciation),
   };
 }
 
@@ -449,6 +452,7 @@ function persistedValues(
     player_audio_voice_profile: serializeBotAudioVoiceProfileV1(
       next.playerAudioVoiceProfile,
     ),
+    player_name_pronunciation: next.playerNamePronunciation,
   };
 }
 

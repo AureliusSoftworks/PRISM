@@ -28,6 +28,7 @@ import {
   createPrismTutorialProgress,
   directionalIrritationEdgeKey,
   fullySaturateBotColor,
+  normalizeBotNamePronunciation,
   normalizeBotFaceCustomSpeechPoses,
   normalizeDirectionalIrritationIntensity,
   sanitizePrismMoodState,
@@ -46,6 +47,7 @@ export interface DbUserRecord {
   id: string;
   email: string;
   displayName: string;
+  playerNamePronunciation?: string | null;
   passwordHash: string;
   passwordSalt: string;
   wrappedUserKey: string;
@@ -5332,6 +5334,9 @@ export function mapUserProfile(row: DbUserRecord): UserProfile {
     id: row.id,
     email: row.email,
     displayName: row.displayName,
+    playerNamePronunciation: normalizeBotNamePronunciation(
+      row.playerNamePronunciation,
+    ),
     role: "user",
     createdAt: row.createdAt,
     theme: row.theme,

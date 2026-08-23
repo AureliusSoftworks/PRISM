@@ -1722,6 +1722,8 @@ export interface UserProfile {
   id: string;
   email: string;
   displayName: string;
+  /** Private phonetic form for synthesis; never a visible label. */
+  playerNamePronunciation: string;
   role: UserRole;
   createdAt: string;
   theme: "light" | "dark" | "system";

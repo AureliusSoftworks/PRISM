@@ -17,9 +17,6 @@ export interface CoffeeSeatBlinkOptions {
   blinkBar?: BotFaceBlinkBar | null;
 }
 
-/** The closed half of the stock `:` eye's binary open/closed blink. */
-export const COFFEE_SEAT_DEFAULT_CLOSED_EYE_GLYPH = "¦";
-
 export function coffeeSeatBlinkKeepsFaceStill(
   blinkBar: BotFaceBlinkBar | null | undefined,
   options: Pick<CoffeeSeatBlinkOptions, "eyeCharacter"> = {},
@@ -67,11 +64,7 @@ export function applyCoffeeSeatBlink(
     (customEye !== undefined && eye === customEye)
   ) {
     const rest = text.slice(eye.length);
-    const closedEyeGlyph =
-      blinkBar === DEFAULT_BOT_FACE_BLINK_BAR
-        ? COFFEE_SEAT_DEFAULT_CLOSED_EYE_GLYPH
-        : blinkBar;
-    return `${closedEyeGlyph}${rest}`;
+    return `${blinkBar}${rest}`;
   }
   return text;
 }
