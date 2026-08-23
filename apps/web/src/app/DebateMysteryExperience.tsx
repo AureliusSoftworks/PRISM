@@ -62,12 +62,24 @@ import {
 import {
   debateMysterySfxCueForAction,
   playDebateMysterySfx,
+  playDebateMysteryDeskItemSfx,
+  type DebateMysteryDeskItemSfxMoment,
   type DebateMysterySfxCue,
 } from "./debateMysterySfx";
 import { findAtMentionTokenPlain } from "./botMention";
 import type { BotPickerGlyphRenderer } from "./BotPicker";
 import type { VoicePlaybackCharacterAlignment } from "./voiceEffects";
 import { mysteryInterviewTranscriptVisibleText } from "./mysteryInterviewTranscriptReveal";
+import {
+  DEBATE_MYSTERY_DESK_DRAG_MIME,
+  debateMysteryDeskPositionFromClient,
+  decodeDebateMysteryDeskDragPayload,
+  encodeDebateMysteryDeskDragPayload,
+  placeDebateMysteryDeskReference,
+  type DebateMysteryDeskPlacement,
+  type DebateMysteryDeskPosition,
+  type DebateMysteryDeskReferenceKind,
+} from "./debateMysteryDeskDnD";
 
 export interface MysteryBotSummary {
   id: string;
@@ -434,7 +446,7 @@ interface NotebookResponse {
   cleanupProposal: null;
 }
 
-type DeskReferenceKind = "lead" | "evidence" | "testimony";
+type DeskReferenceKind = DebateMysteryDeskReferenceKind;
 
 interface DeskReference {
   kind: DeskReferenceKind;
@@ -444,6 +456,8 @@ interface DeskReference {
   detail: string;
   documentKind: Exclude<DebateEvidenceDocumentKind, "url"> | null;
 }
+
+type DeskPlacement = DebateMysteryDeskPlacement<DeskReference>;
 
 type MysteryClientAction<T = DebateMysteryActionRequestV1> = T extends unknown
   ? Omit<T, "expectedRevision" | "idempotencyKey">
@@ -572,7 +586,8 @@ export function DebateMysteryPlay(
     state.activeActivity ? "room" : "mansion",
   );
   const [selectedSuspectSeatId, setSelectedSuspectSeatId] = useState<string | null>(null);
-  const [comparisonSlots, setComparisonSlots] = useState<[DeskReference | null, DeskReference | null]>([null, null]);
+  const [deskPlacements, setDeskPlacements] = useState<DeskPlacement[]>([]);
+  const [deskDragActive, setDeskDragActive] = useState(false);
   const [leadNoteDrafts, setLeadNoteDrafts] = useState<Record<string, string>>({});
   const [notebookSaving, setNotebookSaving] = useState(false);
   const [notebookError, setNotebookError] = useState<string | null>(null);
@@ -628,12 +643,16 @@ export function DebateMysteryPlay(
       }),
       { x: 0, y: 0 },
     );
-    return (observation.accessTargets ?? []).map((target) => ({
-      ...target,
-      regionId: observation.regionId,
-      x: Math.min(92, Math.max(8, center.x)),
-      y: Math.min(72, Math.max(12, center.y)),
-    }));
+    return (observation.accessTargets ?? [])
+      // Hide legacy item-target projections too: portable containers own their
+      // locked interaction in Case inventory, never on the room stage.
+      .filter((target) => target.targetKind === "region")
+      .map((target) => ({
+        ...target,
+        regionId: observation.regionId,
+        x: Math.min(92, Math.max(8, center.x)),
+        y: Math.min(72, Math.max(12, center.y)),
+      }));
   });
   const currentSuspect = state.suspects.find(
     (suspect) => suspect.roomId === currentRoom.id,
@@ -717,6 +736,21 @@ export function DebateMysteryPlay(
     });
   }, [props.audioEnabled, props.audioVolume]);
 
+  const playDeskItemSfx = useCallback((
+    reference: DeskReference,
+    moment: DebateMysteryDeskItemSfxMoment,
+  ): void => {
+    if (reference.kind !== "evidence") return;
+    const item = state.discoveredEvidence.find((entry) => entry.id === reference.id);
+    if (!item) return;
+    void playDebateMysteryDeskItemSfx({
+      item,
+      moment,
+      enabled: props.audioEnabled,
+      volume: props.audioVolume,
+    });
+  }, [props.audioEnabled, props.audioVolume, state.discoveredEvidence]);
+
   useEffect(() => () => {
     if (feedbackTimerRef.current !== null) window.clearTimeout(feedbackTimerRef.current);
   }, []);
@@ -775,9 +809,10 @@ export function DebateMysteryPlay(
     setSelectedRoomId(state.currentRoomId);
     setSpatialView(state.activeActivity ? "room" : "mansion");
     setCaseFileOpen(false);
-    setDeskOpen(state.playPhase === "theory");
+    setDeskOpen(false);
     setSelectedSuspectSeatId(null);
-    setComparisonSlots([null, null]);
+    setDeskPlacements([]);
+    setDeskDragActive(false);
     notebookReadyRef.current = false;
     savedDeskRef.current = "";
     setNotebook(null);
@@ -795,10 +830,6 @@ export function DebateMysteryPlay(
   }, [selectedSuspectSeatId, state.metSuspectSeatIds]);
 
   useEffect(() => {
-    if (state.playPhase === "theory") setDeskOpen(true);
-  }, [state.playPhase]);
-
-  useEffect(() => {
     const closeDeskOnEscape = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return;
       if (caseFileOpen) {
@@ -807,7 +838,8 @@ export function DebateMysteryPlay(
         return;
       }
       if (deskOpen) {
-        setComparisonSlots([null, null]);
+        setDeskPlacements([]);
+        setDeskDragActive(false);
         setDeskOpen(false);
         playMysterySfx("folder");
       }
@@ -1133,7 +1165,7 @@ export function DebateMysteryPlay(
     if (hadActiveActivity && !(await finishActiveActivity(true))) return;
     setTheoryBoardOpen(true);
     setCaseFileOpen(false);
-    setDeskOpen(true);
+    setDeskOpen(false);
     playMysterySfx("theory");
     if (!hadActiveActivity) announceAction("Theory Board opened.");
   };
@@ -1201,23 +1233,24 @@ export function DebateMysteryPlay(
     });
   };
 
-  const placeOnDeskAt = (reference: DeskReference, index: 0 | 1): void => {
-    setComparisonSlots((current) => {
-      if (current.some((slot) => slot?.kind === reference.kind && slot.id === reference.id)) return current;
-      return index === 0 ? [reference, current[1]] : [current[0], reference];
-    });
+  const placeOnDeskAt = (
+    reference: DeskReference,
+    position: DebateMysteryDeskPosition | null,
+  ): void => {
+    setDeskPlacements((current) => placeDebateMysteryDeskReference(current, reference, position));
     setDeskOpen(true);
-    playMysterySfx("paper");
+    if (reference.kind === "evidence") playDeskItemSfx(reference, "place");
+    else playMysterySfx("paper-place");
     announceAction(`${reference.label} placed on the desk.`);
   };
 
   const placeOnDesk = (reference: DeskReference): void => {
-    const openIndex: 0 | 1 = comparisonSlots[0] ? 1 : 0;
-    placeOnDeskAt(reference, openIndex);
+    placeOnDeskAt(reference, null);
   };
 
   const clearDesk = (close = true): void => {
-    setComparisonSlots([null, null]);
+    setDeskPlacements([]);
+    setDeskDragActive(false);
     if (close) setDeskOpen(false);
     playMysterySfx("folder");
   };
@@ -1491,13 +1524,13 @@ export function DebateMysteryPlay(
   ): void => {
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("application/x-prism-access-item", itemId);
-    announceAction(`Carrying ${itemTitle}. Drop it on a discovered padlock or locked room.`);
+    announceAction(`Carrying ${itemTitle}. Drop it on a locked inventory item, discovered room padlock, or locked room.`);
   };
   const toggleAccessItem = (itemId: string, itemTitle: string): void => {
     const arming = armedAccessItemId !== itemId;
     setArmedAccessItemId(arming ? itemId : null);
     announceAction(arming
-      ? `Using ${itemTitle}. Select a discovered padlock or locked room.`
+      ? `Using ${itemTitle}. Select a locked inventory item, discovered room padlock, or locked room.`
       : `${itemTitle} returned to the Case Kit.`);
   };
   const enterSelectedRoom = async (): Promise<void> => {
@@ -1553,6 +1586,34 @@ export function DebateMysteryPlay(
     if (reference) placeOnDesk(reference);
   };
 
+  const dropDeskReference = (event: ReactDragEvent<HTMLDivElement>): void => {
+    event.preventDefault();
+    setDeskDragActive(false);
+    const raw = event.dataTransfer.getData(DEBATE_MYSTERY_DESK_DRAG_MIME)
+      || event.dataTransfer.getData("text/plain");
+    const payload = decodeDebateMysteryDeskDragPayload(raw);
+    if (!payload) return;
+    const reference = deskReferenceFor(payload.kind, payload.id);
+    if (!reference) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    placeOnDeskAt(reference, debateMysteryDeskPositionFromClient({
+      clientX: event.clientX,
+      clientY: event.clientY,
+      left: bounds.left,
+      top: bounds.top,
+      width: bounds.width,
+      height: bounds.height,
+    }));
+  };
+
+  const removeDeskPlacement = (reference: DeskReference): void => {
+    setDeskPlacements((current) => current.filter((placement) =>
+      placement.reference.kind !== reference.kind || placement.reference.id !== reference.id));
+    if (reference.kind === "evidence") playDeskItemSfx(reference, "pickup");
+    else playMysterySfx("paper-pickup");
+    announceAction(`${reference.label} returned to its tray.`);
+  };
+
   const selectSuspectFolder = (seatId: string, revealed: boolean): void => {
     if (!revealed) {
       announceAction("Interview this suspect to reveal their folder.");
@@ -1593,7 +1654,7 @@ export function DebateMysteryPlay(
 
   const renderDeskReference = (
     reference: DeskReference,
-    location: "tray" | "comparison",
+    location: "tray" | "desk",
   ): React.JSX.Element => {
     const evidence = reference.kind === "evidence"
       ? state.discoveredEvidence.find((item) => item.id === reference.id) ?? null
@@ -1609,7 +1670,12 @@ export function DebateMysteryPlay(
         theme="dark"
       /> : evidence ? <span className={styles.deskEvidenceObject}><MysteryEvidenceVisual item={evidence} className={styles.deskEvidenceAsset} /><strong>{reference.label}</strong></span> : null;
     const dragReference = (event: ReactDragEvent<HTMLElement>): void => {
-      event.dataTransfer.setData("application/x-prism-desk-reference", `${reference.kind}:${reference.id}`);
+      const payload = encodeDebateMysteryDeskDragPayload({ kind: reference.kind, id: reference.id });
+      event.dataTransfer.setData(DEBATE_MYSTERY_DESK_DRAG_MIME, payload);
+      event.dataTransfer.setData("text/plain", payload);
+      event.dataTransfer.effectAllowed = location === "desk" ? "move" : "copyMove";
+      if (reference.documentKind) playMysterySfx("paper-pickup");
+      else if (reference.kind === "evidence") playDeskItemSfx(reference, "pickup");
     };
     return location === "tray" ? <button
       type="button"
@@ -1618,6 +1684,7 @@ export function DebateMysteryPlay(
       data-location={location}
       draggable
       onDragStart={dragReference}
+      onDragEnd={() => setDeskDragActive(false)}
       onClick={() => placeOnDesk(reference)}
       aria-label={`Place ${reference.label}`}
     >{visual}</button> : <div
@@ -1626,19 +1693,49 @@ export function DebateMysteryPlay(
       data-location={location}
       draggable
       onDragStart={dragReference}
-      aria-label={`Compared ${reference.label}`}
+      onDragEnd={() => setDeskDragActive(false)}
+      aria-label={`Move ${reference.label}`}
     >{visual}</div>;
   };
 
-  const renderComparisonSlots = (surface: "investigation" | "theory"): React.JSX.Element => (
-    <div className={styles.comparisonSlots} aria-label={`${surface === "theory" ? "Theory " : ""}comparison slots`}>
-      {comparisonSlots.map((slot, index) => <div key={index} className={styles.comparisonSlot} onDragOver={(event) => event.preventDefault()} onDrop={(event) => {
-        const raw = event.dataTransfer.getData("application/x-prism-desk-reference");
-        const reference = deskReferences.find((entry) => `${entry.kind}:${entry.id}` === raw);
-        if (reference) placeOnDeskAt(reference, index as 0 | 1);
-      }}>
-        <small>Comparison {index + 1}</small>
-        {slot ? <><div className={styles.comparisonPlaceable}>{renderDeskReference(slot, "comparison")}</div><button type="button" className={styles.removeComparison} onClick={() => setComparisonSlots((current) => index === 0 ? [null, current[1]] : [current[0], null])}>Return to tray</button></> : <span>Drag a document or evidence object here</span>}
+  const renderDeskCanvas = (surface: "investigation" | "theory"): React.JSX.Element => (
+    <div
+      className={styles.deskCanvas}
+      data-drag-active={deskDragActive ? "true" : undefined}
+      aria-label={`${surface === "theory" ? "Theory " : ""}physical desk surface`}
+      onDragEnter={(event) => {
+        event.preventDefault();
+        setDeskDragActive(true);
+      }}
+      onDragOver={(event) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        if (!deskDragActive) setDeskDragActive(true);
+      }}
+      onDragLeave={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+          setDeskDragActive(false);
+        }
+      }}
+      onDrop={dropDeskReference}
+    >
+      <span className={styles.deskCanvasHint}>{deskPlacements.length
+        ? "Drag any item to rearrange the case."
+        : "Drag documents or evidence anywhere onto the table."}</span>
+      {deskPlacements.map((placement) => <div
+        key={`${placement.reference.kind}:${placement.reference.id}`}
+        className={styles.deskPlacement}
+        data-kind={placement.reference.kind}
+        style={{ left: `${placement.x}%`, top: `${placement.y}%`, zIndex: placement.z } as CSSProperties}
+      >
+        {renderDeskReference(placement.reference, "desk")}
+        <button
+          type="button"
+          className={styles.removeDeskPlacement}
+          aria-label={`Return ${placement.reference.label} to its tray`}
+          onClick={() => removeDeskPlacement(placement.reference)}
+        >×</button>
       </div>)}
     </div>
   );
@@ -1649,7 +1746,7 @@ export function DebateMysteryPlay(
       const reference = deskReferenceFor(pin.referenceKind, pin.referenceId);
       return reference ? [{ pin, reference }] : [];
     });
-    const comparedReferences = comparisonSlots.filter((reference): reference is DeskReference => reference !== null);
+    const comparedReferences = deskPlacements.map((placement) => placement.reference);
     return <article className={styles.suspectDeskFile}>
       <header><div><small>Revealed folder · public facts only</small><h3>{selectedDeskSuspect.name}</h3></div><button type="button" onClick={() => setSelectedSuspectSeatId(null)}>Close folder</button></header>
       <div className={styles.deskFactSummary}>
@@ -1666,10 +1763,10 @@ export function DebateMysteryPlay(
       <section className={styles.suspectNotePad}><strong>Private notes</strong>{surface === "theory"
         ? <p className={styles.readOnlyDeskNote}>{selectedDeskNote || "No private notes recorded. Return to the investigation desk to write notes."}</p>
         : <textarea value={selectedDeskNote} onChange={(event) => setSuspectNote(selectedDeskSuspect.seatId, event.currentTarget.value)} onBlur={() => playMysterySfx("pencil")} placeholder="Your plain-text notes — a fallible hypothesis, never evidence." />}</section>
-      <section className={styles.comparisonPaperclips}><strong>Paperclip a compared record</strong>{comparedReferences.length ? comparedReferences.map((reference) => {
+      <section className={styles.comparisonPaperclips}><strong>Paperclip a record on the desk</strong>{comparedReferences.length ? comparedReferences.map((reference) => {
         const pinned = selectedDeskPins.some((pin) => pin.referenceKind === reference.kind && pin.referenceId === reference.id);
         return <button key={`${reference.kind}:${reference.id}`} type="button" aria-pressed={pinned} onClick={() => togglePin(reference)}>{pinned ? "Unpin" : "Paperclip pin"} · {reference.label}</button>;
-      }) : <p>Place a record into either comparison slot first.</p>}</section>
+      }) : <p>Place a record on the desk first.</p>}</section>
       <section className={styles.playerHypotheses}><strong>Your unverified pinned connections</strong>{pinnedReferences.length ? pinnedReferences.map(({ pin, reference }) => {
         const attached = reference.kind === "evidence" ? theory.evidenceIds.includes(reference.id) : reference.kind === "testimony" ? theory.testimonyIds.includes(reference.id) : false;
         return <div key={pin.id}><span>📎 {reference.label}</span><button type="button" onClick={() => togglePin(reference)}>Unpin</button>{surface === "theory" && reference.kind !== "lead" ? <button type="button" disabled={attached} onClick={() => addPinnedRecordToTheory(reference)}>{attached ? "Added to theory" : "Add to theory"}</button> : null}</div>;
@@ -1681,7 +1778,7 @@ export function DebateMysteryPlay(
     <section className={styles.investigatorDesk} data-open={deskOpen ? "true" : undefined} data-surface={surface} data-tutorial-target="whodunnit-investigator-desk" aria-label={`Investigator's desk${surface === "theory" ? " on Theory Board" : ""}`}>
       <button type="button" className={styles.deskHandle} aria-expanded={deskOpen} onPointerDown={beginDeskPull} onPointerUp={finishDeskPull} onClick={toggleDesk}>Investigator&apos;s Desk <span>{deskOpen ? "Pull down or press to close" : "Pull up or press to open"}</span></button>
       {deskOpen ? <div className={styles.deskSurface}>
-        {renderComparisonSlots(surface)}
+        {renderDeskCanvas(surface)}
         <div className={styles.deskWorkspace}>
           <aside className={styles.deskTrays} aria-label="Desk records">
             <section className={styles.deskDocumentTray} aria-label="Documents">
@@ -1871,7 +1968,7 @@ export function DebateMysteryPlay(
             <aside className={styles.theoryRecord} aria-label="Filed record">
               <header><p className={styles.eyebrow}>Filed record</p><strong>{theory.evidenceIds.length + theory.testimonyIds.length} item{theory.evidenceIds.length + theory.testimonyIds.length === 1 ? "" : "s"} selected</strong><small>Choose only from the public record.</small></header>
               <div className={styles.proofAttach}>
-                <fieldset><legend>Physical evidence</legend>{state.discoveredEvidence.length ? state.discoveredEvidence.map((item) => <label key={item.id}><input type="checkbox" checked={theory.evidenceIds.includes(item.id)} onChange={() => setTheory((current) => ({ ...current, evidenceIds: current.evidenceIds.includes(item.id) ? current.evidenceIds.filter((id) => id !== item.id) : [...current.evidenceIds, item.id] }))} /><MysteryEvidenceVisual item={item} /> {mysteryEvidenceTitle(item.title)}</label>) : <p>Search rooms to add evidence to the record.</p>}</fieldset>
+                <fieldset><legend>Physical evidence</legend>{state.discoveredEvidence.length ? state.discoveredEvidence.map((item) => <label key={item.id} className={styles.theoryEvidence}><input type="checkbox" checked={theory.evidenceIds.includes(item.id)} onChange={() => setTheory((current) => ({ ...current, evidenceIds: current.evidenceIds.includes(item.id) ? current.evidenceIds.filter((id) => id !== item.id) : [...current.evidenceIds, item.id] }))} /><MysteryEvidenceVisual item={item} className={styles.theoryEvidenceVisual} /><span className={styles.theoryEvidenceTitle}>{mysteryEvidenceTitle(item.title)}</span></label>) : <p>Search rooms to add evidence to the record.</p>}</fieldset>
                 <fieldset><legend>Testimony</legend>{state.testimony.length ? state.testimony.map((item) => {
                   const speaker = mysteryTestimonySpeaker(state, item.speakerSeatId);
                   return <label key={item.id} className={styles.theoryTestimony}><input type="checkbox" checked={theory.testimonyIds.includes(item.id)} onChange={() => setTheory((current) => ({ ...current, testimonyIds: current.testimonyIds.includes(item.id) ? current.testimonyIds.filter((id) => id !== item.id) : [...current.testimonyIds, item.id] }))} /><span><strong style={{ "--suspect-color": speaker?.color ?? "#a98cff" } as CSSProperties}>{speaker?.name ?? "Witness"}</strong><q>{item.exactQuote}</q></span></label>;
@@ -2179,7 +2276,7 @@ export function DebateMysteryPlay(
             </section> : null}
             {caseFileTab === "access" ? <section className={styles.accessInventory} data-tutorial-target="whodunnit-access-inventory">
               <header><strong>Case inventory</strong><span>{state.inventoryItems.length}</span></header>
-              {armedAccessItemId ? <p className={styles.accessArmed}>Using <strong>{state.inventoryItems.find((item) => item.id === armedAccessItemId)?.title}</strong>. Select a locked room, locked item, or discovered padlock. <button type="button" onClick={() => setArmedAccessItemId(null)}>Cancel</button></p> : null}
+              {armedAccessItemId ? <p className={styles.accessArmed}>Using <strong>{state.inventoryItems.find((item) => item.id === armedAccessItemId)?.title}</strong>. Select a locked Case Kit item, a locked room, or a discovered room padlock. <button type="button" onClick={() => setArmedAccessItemId(null)}>Cancel</button></p> : null}
               {state.inventoryItems.length ? state.inventoryItems.map((item) => (
                 <article
                   key={item.id}
@@ -2197,7 +2294,7 @@ export function DebateMysteryPlay(
                   <div><strong>{item.title}</strong><p>{item.description}</p><div className={styles.accessActions}>{item.usable ? <button type="button" disabled={busy} onClick={() => toggleAccessItem(item.id, item.title)}>{armedAccessItemId === item.id ? "Cancel use" : "Use"}</button> : null}{item.locked && armedAccessItemId ? <button type="button" disabled={busy || state.actionsRemaining === 0} onClick={() => void applyAccessItem(armedAccessItemId, "item", item.id)}>Try selected item · 1 action</button> : null}</div></div>
                 </article>
               )) : <p>No access items recovered.</p>}
-              <small>During a room search, the Case Kit keeps usable tools close and discovered padlocks mark valid targets. Selecting a tool is free; applying it to a target costs 1 action.</small>
+              <small>Portable locked containers stay in Case inventory. Fixed safes and other room fixtures keep their padlock on the stage. Selecting a tool is free; applying it to a target costs 1 action.</small>
             </section> : null}
             {caseFileTab === "evidence" ? <section className={styles.inventory}><header><strong>Evidence</strong><span>{state.discoveredEvidence.length}</span></header>{state.discoveredEvidence.length ? state.discoveredEvidence.map((item) => { const finding = state.forensicFindings.find((entry) => entry.evidenceId === item.id); const title = mysteryEvidenceTitle(item.title); const observation = mysteryEvidenceObservation(item.observation); return <article key={item.id}><MysteryEvidenceVisual item={item} /><div><strong>{title}</strong><p>{observation}</p>{finding ? <p className={styles.forensicFinding}>{finding.summary}</p> : item.isPhysical ? <button type="button" disabled={busy || state.actionsRemaining < 3} onClick={() => void perform({ action: "forensic", evidenceId: item.id })}>Forensics · 3 actions</button> : null}<button type="button" onClick={() => placeDeskReference("evidence", item.id)}>Place on desk</button></div></article>; }) : <p>No physical evidence acquired.</p>}</section> : null}
             {caseFileTab === "testimony" ? <section className={styles.testimonyList}><header><strong>Testimony</strong><span>{state.testimony.length}</span></header>{state.testimony.length ? state.testimony.map((item) => { const speaker = mysteryTestimonySpeaker(state, item.speakerSeatId); return <article key={item.id}><strong style={{ "--suspect-color": speaker?.color ?? "#a98cff" } as CSSProperties}>{speaker?.name ?? "Witness"}</strong><blockquote>{item.exactQuote}</blockquote><button type="button" onClick={() => placeDeskReference("testimony", item.id)}>Place on desk</button></article>; }) : <p>No testimony committed.</p>}</section> : null}

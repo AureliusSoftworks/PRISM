@@ -2183,9 +2183,20 @@
   padding: clamp(1.2rem, 3vw, 2.4rem);
 }
 
+.theoryBoard {
+  width: min(90rem, calc(100% - 2rem));
+}
+
 .theoryBoard > header,
 .verdict {
   text-align: center;
+}
+
+.theoryBoard > header > p:not(.eyebrow) {
+  max-width: 64rem;
+  margin-right: auto;
+  margin-left: auto;
+  line-height: 1.5;
 }
 
 .backToMansion {
@@ -2268,8 +2279,8 @@
 
 .theoryWorkspace {
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(19rem, 0.75fr);
-  gap: 1rem;
+  grid-template-columns: minmax(0, 1.6fr) minmax(22rem, 0.8fr);
+  gap: 1.15rem;
   align-items: start;
   margin-top: 1.35rem;
 }
@@ -2279,6 +2290,7 @@
 .theoryResearch {
   display: grid;
   gap: 0.9rem;
+  min-width: 0;
 }
 
 .theoryAccusation,
@@ -2422,8 +2434,9 @@
 }
 
 .theoryRecord .proofAttach fieldset {
-  max-height: 13rem;
+  max-height: 16rem;
   overflow: auto;
+  scrollbar-gutter: stable;
 }
 
 .theoryResearch {
@@ -2462,8 +2475,9 @@
 .theoryClaimPicker > div {
   display: grid;
   gap: 0.45rem;
-  max-height: 14rem;
+  max-height: 18rem;
   overflow: auto;
+  scrollbar-gutter: stable;
 }
 
 .theoryClaimPicker button {
@@ -2514,20 +2528,29 @@
   color: var(--mystery-muted);
 }
 
-.proofAttach label > img,
-.proofAttach label > span {
+.theoryEvidenceVisual {
   flex: 0 0 auto;
   width: 1.65rem;
   height: 1.65rem;
   object-fit: contain;
 }
 
+.theoryEvidenceTitle {
+  min-width: 0;
+  line-height: 1.35;
+}
+
 .theoryTestimony > span {
   display: grid;
+  flex: 1 1 auto;
   gap: 0.2rem;
+  min-width: 0;
+  width: auto;
+  height: auto;
 }
 
 .theoryTestimony q {
+  display: block;
   color: var(--mystery-text);
   font-family: Georgia, "Times New Roman", serif;
   line-height: 1.45;
@@ -3693,15 +3716,16 @@
 .investigatorDesk[data-open="true"] { box-shadow: 0 -.9rem 2.2rem rgba(0,0,0,.24); }
 .deskHandle { display: flex; width: 100%; align-items: center; justify-content: space-between; padding: .6rem 1rem; color: var(--mystery-text); text-align: left; border: 0; background: repeating-linear-gradient(90deg, rgba(230,190,111,.12) 0 1px, transparent 1px 5px), #191621; cursor: grab; }
 .deskHandle span { color: var(--mystery-muted); font-size: .72rem; }
-.deskSurface { display: grid; grid-template-rows: minmax(11rem, auto) minmax(0, 1fr); height: min(58dvh, 42rem); min-height: 28rem; max-height: 58dvh; border-top: 1px solid rgba(230,190,111,.28); background: linear-gradient(105deg, rgba(54,35,24,.96), rgba(31,24,22,.98) 48%, rgba(44,30,22,.96)), repeating-linear-gradient(90deg, rgba(255,255,255,.025) 0 1px, transparent 1px 5rem); animation: mysteryDeskOpen 220ms ease both; }
+.deskSurface { display: grid; grid-template-rows: minmax(16rem, 1.15fr) minmax(0, .85fr); height: min(68dvh, 42rem); min-height: 32rem; max-height: 68dvh; border-top: 1px solid rgba(230,190,111,.28); background: linear-gradient(105deg, rgba(54,35,24,.96), rgba(31,24,22,.98) 48%, rgba(44,30,22,.96)), repeating-linear-gradient(90deg, rgba(255,255,255,.025) 0 1px, transparent 1px 5rem); animation: mysteryDeskOpen 220ms ease both; }
 @keyframes mysteryDeskOpen { from { opacity: 0; transform: translateY(1.2rem); } to { opacity: 1; transform: translateY(0); } }
-.comparisonSlots { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; padding: .8rem 1rem; background: linear-gradient(rgba(0,0,0,.13), rgba(0,0,0,.05)); }
-.comparisonSlot { position: relative; display: grid; min-height: 10.5rem; place-items: center; gap: .25rem; padding: .55rem; border: 1px dashed rgba(230,190,111,.42); border-radius: .35rem; background: radial-gradient(circle at 50% 42%, rgba(255,255,255,.045), transparent 65%); }
-.comparisonSlot > small { position: absolute; top: .45rem; left: .55rem; font-size: .58rem; letter-spacing: .12em; text-transform: uppercase; }
-.comparisonSlot small, .comparisonSlot span { color: var(--mystery-muted); }
-.comparisonSlot button, .deskWorkspace button { color: var(--mystery-text); cursor: pointer; }
-.comparisonPlaceable { display: grid; place-items: center; width: 100%; height: 100%; overflow: hidden; }
-.removeComparison { position: absolute; right: .45rem; bottom: .4rem; z-index: 5; width: fit-content; padding: .25rem .45rem; border: 1px solid rgba(255,255,255,.16); border-radius: 99px; background: rgba(9,10,13,.76); font-size: .62rem; }
+.deskCanvas { position: relative; min-height: 0; overflow: hidden; isolation: isolate; background: radial-gradient(ellipse at 50% 45%, rgba(255,255,255,.045), transparent 68%), repeating-linear-gradient(98deg, rgba(255,255,255,.018) 0 1px, transparent 1px 4.5rem); box-shadow: inset 0 -1px rgba(230,190,111,.18); transition: box-shadow 140ms ease, filter 140ms ease; }
+.deskCanvas[data-drag-active="true"] { box-shadow: inset 0 0 0 2px var(--mystery-cyan), inset 0 0 3rem rgba(102,229,234,.12); filter: brightness(1.08); }
+.deskCanvasHint { position: absolute; top: .65rem; left: 50%; z-index: 0; padding: .3rem .65rem; color: rgba(234,220,184,.54); font-size: .62rem; letter-spacing: .06em; border: 1px solid rgba(230,190,111,.18); border-radius: 99px; background: rgba(11,9,10,.28); transform: translateX(-50%); pointer-events: none; white-space: nowrap; }
+.deskPlacement { position: absolute; display: grid; place-items: center; transform: translate(-50%, -50%); filter: drop-shadow(.8rem .75rem .7rem rgba(0,0,0,.4)); }
+.deskPlacement:hover, .deskPlacement:focus-within { filter: drop-shadow(1rem .9rem .9rem rgba(0,0,0,.52)); }
+.removeDeskPlacement { position: absolute; top: -.35rem; right: -.35rem; z-index: 6; display: grid; width: 1.55rem; height: 1.55rem; place-items: center; padding: 0; color: #f4ead2; border: 1px solid rgba(255,255,255,.22); border-radius: 50%; background: rgba(9,10,13,.86); box-shadow: 0 .2rem .5rem rgba(0,0,0,.4); cursor: pointer; opacity: .25; transition: opacity 120ms ease, border-color 120ms ease; }
+.deskPlacement:hover .removeDeskPlacement, .removeDeskPlacement:focus-visible { border-color: var(--mystery-cyan); opacity: 1; }
+.deskCanvas button, .deskWorkspace button { color: var(--mystery-text); cursor: pointer; }
 .deskWorkspace { display: grid; grid-template-columns: minmax(20rem, 44%) minmax(0, 1fr); min-height: 0; border-top: 1px solid rgba(230,190,111,.2); }
 .deskTrays { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; overflow: hidden; border-right: 1px solid rgba(230,190,111,.22); background: rgba(10,9,10,.22); }
 .deskTrays section { min-height: 0; padding: .6rem .7rem; overflow: hidden; }
@@ -3712,10 +3736,11 @@
 .deskDocumentTray > div, .deskEvidenceTray > div { display: flex; gap: .8rem; padding: .25rem .4rem .8rem; overflow: auto; }
 .deskDocumentTray > div > div, .deskEvidenceTray > div > div { display: grid; flex: 0 0 auto; place-items: center; padding: .4rem; }
 .deskPlaceable { display: grid; place-items: center; width: fit-content; padding: 0; border: 0; background: transparent; cursor: grab; }
+.deskPlaceable > * { pointer-events: none; user-select: none; -webkit-user-drag: none; }
 .deskPlaceable:active { cursor: grabbing; }
 .deskPlaceable:focus-visible { outline: 2px solid var(--mystery-cyan); outline-offset: .35rem; }
 .deskPlaceable[data-location="tray"]:hover { transform: translateY(-.25rem); }
-.deskPlaceable[data-location="comparison"] { transform: scale(.9); }
+.deskPlaceable[data-location="desk"] { transform: scale(.9); }
 .deskEvidenceObject { display: grid; width: 7.5rem; min-height: 7.5rem; place-items: center; align-content: center; gap: .35rem; transform: rotate(-2deg); }
 .deskEvidenceAsset { width: 5.4rem; height: 5.4rem; object-fit: contain; filter: drop-shadow(0 .22rem .12rem rgba(0,0,0,.82)) drop-shadow(.9rem .75rem .8rem rgba(0,0,0,.42)); }
 .deskEvidenceObject strong { max-width: 7.5rem; color: #eee4cb; font: 650 .66rem Georgia, serif; text-align: center; text-shadow: 0 2px 4px #000; }
@@ -3782,15 +3807,14 @@
 @media (max-width: 820px) {
   .caseRail, .suspectFolderRack, .investigatorDesk { grid-column: 1; grid-row: auto; }
   .deskSurface { min-height: 58dvh; max-height: none; }
-  .comparisonSlots { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 88%; overflow-x: auto; scroll-snap-type: x mandatory; }
-  .comparisonSlot { scroll-snap-align: center; }
+  .deskCanvas { min-height: 18rem; }
   .deskWorkspace { grid-template-columns: 1fr; }
   .deskTrays { border-right: 0; border-bottom: 1px solid var(--mystery-line); }
   .deskFactSummary, .deskFactGroups { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .roomPanel, .deskSurface, .investigatorDesk, .deskHandle, .suspectFolder, .comparisonSlot { transition: none; animation: none; }
+  .roomPanel, .deskSurface, .investigatorDesk, .deskHandle, .suspectFolder, .deskCanvas, .removeDeskPlacement { transition: none; animation: none; }
 }
 
 /* Spatial investigation v3 -------------------------------------------------

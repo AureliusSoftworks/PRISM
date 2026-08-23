@@ -17176,6 +17176,9 @@ function buildRoutes(): RouteDefinition[] {
               {
                 playerRole: body.playerRole,
                 participationDifficulty: body.participationDifficulty,
+                moderatorName: body.moderatorName,
+                forTeamName: body.forTeamName,
+                againstTeamName: body.againstTeamName,
               },
             ),
           )

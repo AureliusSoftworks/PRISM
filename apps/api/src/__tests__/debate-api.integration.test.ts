@@ -1278,6 +1278,9 @@ describe("Debate API", () => {
         preferredProvider: "local",
         responseMode: "local",
         modelOverride: "debate-api-model",
+        moderatorName: "Justice Aurora",
+        forTeamName: "The Lanterns",
+        againstTeamName: "The Mirrors",
         idempotencyKey: "api:whodunnit:create:0001",
       }),
     );
@@ -1285,6 +1288,9 @@ describe("Debate API", () => {
     let mystery = (await payload(mysteryCreatedResponse)).session as DebateSessionV1;
     assert.equal(mystery.format, "whodunnit");
     assert.equal(mystery.formatState.format, "whodunnit");
+    assert.equal(mystery.moderatorName, "Justice Aurora");
+    assert.equal(mystery.motion.forSide.label, "The Lanterns");
+    assert.equal(mystery.motion.againstSide.label, "The Mirrors");
     assert.equal(JSON.stringify(mystery).includes("culpritSeatId"), false);
     const notebookResponse = await owner.request(`/api/debates/${mystery.id}/notebook`);
     assert.equal(notebookResponse.status, 200);

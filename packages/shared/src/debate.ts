@@ -47,6 +47,8 @@ export const DEBATE_PAUSE_COOLDOWN_MS = 2_500;
 export const DEBATE_JUDGE_GAVEL_MESSAGE_MAX_LENGTH = 600;
 export const DEBATE_OBJECTION_RULING_TIMEOUT_MS = 8_000;
 export const DEBATE_MODERATOR_TITLE_MAX_LENGTH = 72;
+/** Public display name for the presiding seat; never changes bot identity. */
+export const DEBATE_MODERATOR_NAME_MAX_LENGTH = 72;
 export const DEBATE_TITLE_MAX_LENGTH = 120;
 export const DEBATE_MOTION_MAX_LENGTH = 320;
 export const DEBATE_SIDE_LABEL_MAX_LENGTH = 32;
@@ -455,6 +457,48 @@ export interface DebateTurnaboutStatementV1 {
   createdEventId: string;
   /** Public Whodunnit testimony projected into this statement, when present. */
   recordTestimonyId?: string | null;
+  /**
+   * Public, source-bound witness identity for a filed Whodunnit trial. This is
+   * presentation metadata only; it never carries Case Bible facts or creates a
+   * new interactive Debate seat.
+   */
+  mysteryWitness?: DebateTurnaboutMysteryWitnessV1 | null;
+}
+
+export interface DebateTurnaboutCourtFigureV1 {
+  version: 1;
+  id: string;
+  name: string;
+  color: string | null;
+  glyph: string | null;
+  avatarDetails: DebateBotSnapshotV1["avatarDetails"];
+  voiceProfile: DebateBotSnapshotV1["voiceProfile"];
+  replayVisualSnapshot?: DebateBotSnapshotV1["replayVisualSnapshot"];
+  revision: string;
+}
+
+export interface DebateTurnaboutMysteryWitnessV1 {
+  version: 1;
+  kind: "submitted_interview" | "defendant_denial";
+  seatId: string;
+  botId: string;
+  name: string;
+  /** Frozen Turnabout source id. The courtroom denial has no source item. */
+  sourceId: string | null;
+  /** One-based position within the player-paced testimony chain. */
+  ordinal: number;
+  statementCount: number;
+}
+
+export interface DebateTurnaboutMysteryCourtroomCompositionV1 {
+  version: 1;
+  prosecutionCoCounsel: DebateTurnaboutCourtFigureV1;
+  defenseClient: DebateTurnaboutCourtFigureV1;
+  /** Only witnesses whose submitted interview testimony entered the packet. */
+  eligibleWitnesses: Array<{
+    seatId: string;
+    figure: DebateTurnaboutCourtFigureV1;
+  }>;
 }
 
 export interface DebateTurnaboutContradictionV1 {
@@ -488,8 +532,10 @@ export interface DebateTurnaboutFormatStateV1 {
     credibilityRemaining: number;
     failedActions: number;
     sustainedTestimonyIds: string[];
+    sustainedEvidenceIds: string[];
     evidenceSourceMap: Record<string, string>;
     testimonySourceMap: Record<string, string>;
+    courtroomComposition: DebateTurnaboutMysteryCourtroomCompositionV1;
     verdict: DebateMysteryVerdictV1 | null;
   } | null;
 }
@@ -1371,6 +1417,8 @@ export interface DebateSessionV1 {
   evidence: DebateEvidencePacketV1;
   /** Frozen public authority label; the moderator bot ID remains canonical. */
   moderatorTitle: string;
+  /** Frozen public name displayed for the presiding seat. */
+  moderatorName: string;
   moderator: DebateBotSnapshotV1;
   forAdvocate: DebateBotSnapshotV1;
   againstAdvocate: DebateBotSnapshotV1;
@@ -1597,6 +1645,7 @@ export interface DebateSessionCreateRequest {
   motion: DebateMotionSlateV1;
   evidence: DebateEvidencePacketV1;
   moderatorTitle?: string;
+  moderatorName?: string;
   moderatorBotId: string;
   playerJudgeUsesPrism?: boolean;
   /** Optional on the human-owned side in Participant mode. */
@@ -1779,7 +1828,11 @@ export interface DebateObjectionRulingRequest extends DebateMutationRequest {
   ruling: DebateTurnaboutRuling;
 }
 
-export type DebateTurnaboutAction = "press" | "present_evidence" | "pass";
+export type DebateTurnaboutAction =
+  | "focus_statement"
+  | "press"
+  | "present_evidence"
+  | "pass";
 
 export interface DebateTurnaboutActionRequest extends DebateMutationRequest {
   action: DebateTurnaboutAction;
@@ -1802,6 +1855,11 @@ export interface DebateSessionListItemV1 {
   title: string;
   motion: string;
   moderatorTitle: string;
+  /** Public display name frozen for the presiding seat. */
+  moderatorName?: string;
+  /** Frozen public side labels used by Archive status and matchup copy. */
+  forTeamName?: string;
+  againstTeamName?: string;
   setupPresetId: DebateSetupPresetId | "custom";
   formality: DebateFormalityId;
   juryEnabled: boolean;
@@ -1927,10 +1985,149 @@ function normalizedMultilineText(value: unknown, maxLength: number): string {
     : "";
 }
 
+function normalizeDebateTurnaboutCourtFigureV1(
+  value: unknown,
+): DebateTurnaboutCourtFigureV1 | null {
+  const source =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  if (!source) return null;
+  const id = normalizedText(source.id, 200);
+  const name = normalizedText(source.name, 160);
+  if (!id || !name) return null;
+  const replayVisualSnapshot =
+    source.replayVisualSnapshot &&
+    typeof source.replayVisualSnapshot === "object" &&
+    !Array.isArray(source.replayVisualSnapshot)
+      ? (source.replayVisualSnapshot as DebateBotSnapshotV1["replayVisualSnapshot"])
+      : undefined;
+  return {
+    version: 1,
+    id,
+    name,
+    color:
+      typeof source.color === "string"
+        ? normalizedText(source.color, 80) || null
+        : null,
+    glyph:
+      typeof source.glyph === "string"
+        ? normalizedText(source.glyph, 160) || null
+        : null,
+    avatarDetails:
+      source.avatarDetails &&
+      typeof source.avatarDetails === "object" &&
+      !Array.isArray(source.avatarDetails)
+        ? (source.avatarDetails as DebateBotSnapshotV1["avatarDetails"])
+        : null,
+    voiceProfile:
+      source.voiceProfile &&
+      typeof source.voiceProfile === "object" &&
+      !Array.isArray(source.voiceProfile)
+        ? (source.voiceProfile as DebateBotSnapshotV1["voiceProfile"])
+        : null,
+    ...(replayVisualSnapshot ? { replayVisualSnapshot } : {}),
+    revision: normalizedText(source.revision, 200) || `court:${id}`,
+  };
+}
+
+function normalizeDebateTurnaboutMysteryWitnessV1(
+  value: unknown,
+): DebateTurnaboutMysteryWitnessV1 | null {
+  const source =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  if (!source) return null;
+  const kind =
+    source.kind === "defendant_denial"
+      ? "defendant_denial"
+      : source.kind === "submitted_interview"
+        ? "submitted_interview"
+        : null;
+  const seatId = normalizedText(source.seatId, 120);
+  const botId = normalizedText(source.botId, 200);
+  const name = normalizedText(source.name, 160);
+  const sourceId =
+    typeof source.sourceId === "string"
+      ? normalizedText(source.sourceId, 48).toLowerCase()
+      : "";
+  if (
+    !kind ||
+    !seatId ||
+    !botId ||
+    !name ||
+    (kind === "submitted_interview" && !isValidDebateSourceId(sourceId))
+  ) {
+    return null;
+  }
+  const statementCount =
+    typeof source.statementCount === "number" &&
+    Number.isInteger(source.statementCount)
+      ? Math.max(1, Math.min(64, source.statementCount))
+      : 1;
+  const ordinal =
+    typeof source.ordinal === "number" && Number.isInteger(source.ordinal)
+      ? Math.max(1, Math.min(statementCount, source.ordinal))
+      : 1;
+  return {
+    version: 1,
+    kind,
+    seatId,
+    botId,
+    name,
+    sourceId: kind === "submitted_interview" ? sourceId : null,
+    ordinal,
+    statementCount,
+  };
+}
+
+function normalizeDebateTurnaboutMysteryCourtroomCompositionV1(
+  value: unknown,
+): DebateTurnaboutMysteryCourtroomCompositionV1 | null {
+  const source =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  if (!source) return null;
+  const prosecutionCoCounsel = normalizeDebateTurnaboutCourtFigureV1(
+    source.prosecutionCoCounsel,
+  );
+  const defenseClient = normalizeDebateTurnaboutCourtFigureV1(
+    source.defenseClient,
+  );
+  if (!prosecutionCoCounsel || !defenseClient) return null;
+  const eligibleWitnesses = Array.isArray(source.eligibleWitnesses)
+    ? source.eligibleWitnesses.flatMap((value) => {
+        const witness =
+          value && typeof value === "object" && !Array.isArray(value)
+            ? (value as Record<string, unknown>)
+            : null;
+        const seatId = normalizedText(witness?.seatId, 120);
+        const figure = normalizeDebateTurnaboutCourtFigureV1(witness?.figure);
+        return seatId && figure ? [{ seatId, figure }] : [];
+      })
+    : [];
+  return {
+    version: 1,
+    prosecutionCoCounsel,
+    defenseClient,
+    eligibleWitnesses: [
+      ...new Map(
+        eligibleWitnesses.map((witness) => [witness.seatId, witness]),
+      ).values(),
+    ],
+  };
+}
+
 export function normalizeDebateModeratorTitle(value: unknown): string {
   return (
     normalizedText(value, DEBATE_MODERATOR_TITLE_MAX_LENGTH) || "Moderator"
   );
+}
+
+export function normalizeDebateModeratorName(value: unknown, fallback = "PRISM"): string {
+  return normalizedText(value, DEBATE_MODERATOR_NAME_MAX_LENGTH) || fallback;
 }
 
 export function normalizeDebateSideLabel(
@@ -3578,6 +3775,9 @@ export function normalizeDebateFormatStateV1(
           row.status === "resolved"
             ? row.status
             : "ready";
+        const mysteryWitness = normalizeDebateTurnaboutMysteryWitnessV1(
+          row.mysteryWitness,
+        );
         return [
           {
             id,
@@ -3598,6 +3798,7 @@ export function normalizeDebateFormatStateV1(
               row.recordTestimonyId.trim()
                 ? row.recordTestimonyId.trim().slice(0, 120)
                 : null,
+            ...(mysteryWitness ? { mysteryWitness } : {}),
           },
         ];
       })
@@ -3680,6 +3881,17 @@ export function normalizeDebateFormatStateV1(
                 ),
               ]
             : [],
+          sustainedEvidenceIds: Array.isArray(
+            mysteryTrialSource?.sustainedEvidenceIds,
+          )
+            ? [
+                ...new Set(
+                  mysteryTrialSource.sustainedEvidenceIds
+                    .map((value) => normalizedText(value, 120))
+                    .filter(Boolean),
+                ),
+              ]
+            : [],
           evidenceSourceMap:
             mysteryTrialSource?.evidenceSourceMap &&
             typeof mysteryTrialSource.evidenceSourceMap === "object"
@@ -3726,6 +3938,49 @@ export function normalizeDebateFormatStateV1(
                   }),
                 )
               : {},
+          courtroomComposition:
+            normalizeDebateTurnaboutMysteryCourtroomCompositionV1(
+              mysteryTrialSource?.courtroomComposition,
+            ) ?? {
+              version: 1 as const,
+              prosecutionCoCounsel: {
+                version: 1 as const,
+                id: frozenInvestigation.config.prosecutorPartnerBotId,
+                name: "Co-counsel",
+                color: null,
+                glyph: null,
+                avatarDetails: null,
+                voiceProfile: null,
+                revision: `legacy:${frozenInvestigation.config.prosecutorPartnerBotId}`,
+              },
+              defenseClient: {
+                version: 1 as const,
+                id:
+                  frozenInvestigation.suspects.find(
+                    (suspect) =>
+                      suspect.seatId === frozenInvestigation.theory?.culpritSeatId,
+                  )?.botId ?? "mystery:defendant",
+                name:
+                  frozenInvestigation.suspects.find(
+                    (suspect) =>
+                      suspect.seatId === frozenInvestigation.theory?.culpritSeatId,
+                  )?.name ?? "Defendant",
+                color:
+                  frozenInvestigation.suspects.find(
+                    (suspect) =>
+                      suspect.seatId === frozenInvestigation.theory?.culpritSeatId,
+                  )?.color ?? null,
+                glyph:
+                  frozenInvestigation.suspects.find(
+                    (suspect) =>
+                      suspect.seatId === frozenInvestigation.theory?.culpritSeatId,
+                  )?.glyph ?? null,
+                avatarDetails: null,
+                voiceProfile: null,
+                revision: "legacy:mystery:defendant",
+              },
+              eligibleWitnesses: [],
+            },
           verdict:
             mysteryTrialSource?.verdict &&
             typeof mysteryTrialSource.verdict === "object"

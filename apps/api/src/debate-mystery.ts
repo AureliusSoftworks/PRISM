@@ -45,6 +45,7 @@ import {
   createDebateSession,
   debatePowerPromptForBotV1,
   debatePowerPlanForBots,
+  debateTurnaboutCourtFigureForBot,
   getDebateSession,
   projectDebateBotPublicUtteranceV1,
   upgradeLegacyMysteryBotSpeechV1,
@@ -84,6 +85,9 @@ type DebateMysteryCourtPlayerRole = Extract<
 interface DebateMysteryCourtSetup {
   playerRole?: unknown;
   participationDifficulty?: unknown;
+  moderatorName?: unknown;
+  forTeamName?: unknown;
+  againstTeamName?: unknown;
 }
 
 function mysteryCourtPlayerRole(value: unknown): DebateMysteryCourtPlayerRole {
@@ -587,11 +591,15 @@ function mysterySessionRequest(
       id: randomUUID(),
       title: "Whodunnit?",
       motion: "Determine who murdered the victim and prove the filed theory in court.",
-      forSide: { label: "Prosecution", brief: "Investigate the mansion, file a theory, and prove it from the discovered record." },
-      againstSide: { label: "Defense", brief: "Test the filed theory against the strongest supported alternative in the admissible record." },
+      forSide: { label: typeof courtSetup.forTeamName === "string" && courtSetup.forTeamName.trim() ? courtSetup.forTeamName : "Prosecution", brief: "Investigate the mansion, file a theory, and prove it from the discovered record." },
+      againstSide: { label: typeof courtSetup.againstTeamName === "string" && courtSetup.againstTeamName.trim() ? courtSetup.againstTeamName : "Defense", brief: "Test the filed theory against the strongest supported alternative in the admissible record." },
     },
     evidence: { version: DEBATE_SCHEMA_VERSION, notes: "", sources: [], exhibits: [], frozenAt: null },
     moderatorTitle: "PRISM · Judge & Casekeeper",
+    moderatorName:
+      typeof courtSetup.moderatorName === "string"
+        ? courtSetup.moderatorName
+        : undefined,
     moderatorBotId: "prism:player-judge",
     playerJudgeUsesPrism: true,
     forAdvocateBotId: config.prosecutorPartnerBotId,
@@ -1233,6 +1241,9 @@ export async function resumeDebateMysteryCompilation(
         session.playerRole === "spectator" ? "spectator" : "participant",
       participationDifficulty:
         session.participation?.difficulty ?? "standard",
+      moderatorName: session.moderatorName,
+      forTeamName: session.motion.forSide.label,
+      againstTeamName: session.motion.againstSide.label,
     },
   );
 }
@@ -1728,8 +1739,11 @@ export function freezeDebateMysteryInvestigationForCourt(
  * never copied into the Debate session, events, prompts, or replay record.
  */
 function enterMysteryTurnabout(
+  db: DatabaseSync,
+  userId: string,
   session: DebateSessionV1,
   state: DebateWhodunnitFormatStateV1,
+  runtime: DebateAiRuntime,
 ): DebateSessionV1 {
   if (!state.theory || !state.theoryFiledAt) {
     throw new HttpError(409, "File a complete theory before preparing court.");
@@ -1806,6 +1820,39 @@ function enterMysteryTurnabout(
       excerptSelection: "player" as const,
     };
   });
+  const lane = mysteryLane(runtime);
+  const courtroomFigures = new Map(
+    [
+      state.config.prosecutorPartnerBotId,
+      accused.botId,
+      ...admittedTestimony.flatMap((item) =>
+        state.suspects
+          .filter((suspect) => suspect.seatId === item.speakerSeatId)
+          .map((suspect) => suspect.botId),
+      ),
+    ].map((botId) => [
+      botId,
+      debateTurnaboutCourtFigureForBot(db, userId, botId, lane),
+    ]),
+  );
+  const coCounsel = courtroomFigures.get(state.config.prosecutorPartnerBotId);
+  const defenseClient = courtroomFigures.get(accused.botId);
+  if (!coCounsel || !defenseClient) {
+    throw new HttpError(409, "The courtroom cast is incomplete.");
+  }
+  const eligibleWitnesses = [
+    ...new Map(
+      admittedTestimony.flatMap((item) => {
+        const suspect = state.suspects.find(
+          (candidate) => candidate.seatId === item.speakerSeatId,
+        );
+        const figure = suspect ? courtroomFigures.get(suspect.botId) : null;
+        return suspect && figure
+          ? [[suspect.seatId, { seatId: suspect.seatId, figure }] as const]
+          : [];
+      }),
+    ).values(),
+  ];
   const method = compact(theory.method, 480) || "the alleged method";
   const motive = compact(theory.motive, 480) || "the alleged motive";
   const opportunity = compact(theory.opportunity, 480) || "the alleged opportunity";
@@ -1828,8 +1875,15 @@ function enterMysteryTurnabout(
       credibilityRemaining: DEBATE_MYSTERY_CREDIBILITY_STRIKES,
       failedActions: 0,
       sustainedTestimonyIds: [],
+      sustainedEvidenceIds: [],
       evidenceSourceMap,
       testimonySourceMap,
+      courtroomComposition: {
+        version: 1,
+        prosecutionCoCounsel: coCounsel,
+        defenseClient,
+        eligibleWitnesses,
+      },
       verdict: null,
     },
   };
@@ -1850,14 +1904,14 @@ function enterMysteryTurnabout(
       title: `${state.caseTitle} · Court`,
       motion: motionText,
       forSide: {
-        label: "Prosecution",
+        label: session.motion.forSide.label || "Prosecution",
         brief: compact(
           `Prove the frozen accusation against ${accused.name}. Method: ${method}. Motive: ${motive}. Opportunity: ${opportunity}. Use only the admitted discovered record.`,
           1_200,
         ),
       },
       againstSide: {
-        label: "Defense",
+        label: session.motion.againstSide.label || "Defense",
         brief: compact(
           `Test the accusation against ${accused.name} for gaps and reasonable doubt using only the admitted discovered record. Do not invent an alternate truth.`,
           1_200,
@@ -2050,13 +2104,10 @@ export async function applyDebateMysteryAction(
       return target?.sourceRoomId === room.id && target.sourceRegionId === request.regionId;
     });
     const discoveredAccessTargets = bible.accessLocks.flatMap((lock) => {
-      if (lock.targetKind === "room" || nextState.accessHistory.some((entry) => entry.id === lock.id && entry.success)) return [];
-      const sourceMatches = lock.targetKind === "region"
-        ? lock.targetId === `${room.id}:${request.regionId}`
-        : (() => {
-            const target = bible.inventoryItems.find((item) => item.id === lock.targetId);
-            return target?.sourceRoomId === room.id && target.sourceRegionId === request.regionId;
-          })();
+      // Only fixed room architecture receives a stage padlock. Portable locked
+      // containers travel into inventory and expose their lock there instead.
+      if (lock.targetKind !== "region" || nextState.accessHistory.some((entry) => entry.id === lock.id && entry.success)) return [];
+      const sourceMatches = lock.targetId === `${room.id}:${request.regionId}`;
       return sourceMatches ? [{
         targetKind: lock.targetKind,
         targetId: lock.targetId,
@@ -2360,7 +2411,13 @@ export async function applyDebateMysteryAction(
     nextState.playPhase = "trial";
     nextState.credibilityRemaining = DEBATE_MYSTERY_CREDIBILITY_STRIKES;
     nextState.leads = updateDebateMysteryPublicLeads(bible, nextState);
-    nextSession = enterMysteryTurnabout(nextSession, nextState);
+    nextSession = enterMysteryTurnabout(
+      db,
+      userId,
+      nextSession,
+      nextState,
+      runtime,
+    );
     publicPayload = {
       theory: nextState.theory,
       witnessTestimonyIds,

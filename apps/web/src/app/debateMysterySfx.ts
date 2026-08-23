@@ -1,4 +1,9 @@
 import { routeAudioElementToPrismOutput } from "./replayAudioMasterCapture.ts";
+import {
+  debateExhibitImpactForExhibit,
+  playDebateExhibitImpactSfx,
+  type DebateExhibitImpactMaterial,
+} from "./debateExhibitImpactSfx.ts";
 
 export type DebateMysterySfxCue =
   | "map"
@@ -8,6 +13,8 @@ export type DebateMysterySfxCue =
   | "theory"
   | "evidence"
   | "paper"
+  | "paper-pickup"
+  | "paper-place"
   | "folder"
   | "clip"
   | "pencil";
@@ -17,6 +24,53 @@ export interface DebateMysterySfxVoice {
   gain: number;
   playbackRate: number;
   url: string;
+}
+
+export type DebateMysteryDeskItemSfxMoment = "pickup" | "place";
+
+export const DEBATE_MYSTERY_DESK_ITEM_PICKUP_VOLUME_RATIO = 0.5;
+
+interface DebateMysteryDeskImpactItem {
+  adjective?: string | null;
+  object?: string | null;
+  title?: string | null;
+}
+
+export function debateMysteryDeskItemSfxPlan(args: {
+  item: DebateMysteryDeskImpactItem;
+  moment: DebateMysteryDeskItemSfxMoment;
+  volume: number;
+}): {
+  material: DebateExhibitImpactMaterial;
+  url: string;
+  trim: number;
+  volume: number;
+} {
+  const impact = debateExhibitImpactForExhibit(args.item, "table_place");
+  const volume = Math.max(0, Math.min(1, args.volume));
+  return {
+    material: impact.material,
+    url: impact.url,
+    trim: impact.trim,
+    volume: volume * (args.moment === "pickup"
+      ? DEBATE_MYSTERY_DESK_ITEM_PICKUP_VOLUME_RATIO
+      : 1),
+  };
+}
+
+export async function playDebateMysteryDeskItemSfx(args: {
+  item: DebateMysteryDeskImpactItem;
+  moment: DebateMysteryDeskItemSfxMoment;
+  enabled: boolean;
+  volume: number;
+}): Promise<boolean> {
+  const plan = debateMysteryDeskItemSfxPlan(args);
+  return playDebateExhibitImpactSfx({
+    exhibit: args.item,
+    moment: "table_place",
+    enabled: args.enabled,
+    volume: plan.volume,
+  });
 }
 
 const SINGLE_VOICE_CUES = {
@@ -51,6 +105,8 @@ const SINGLE_VOICE_CUES = {
     url: "/audio/prism-companion/glass-tap-03.mp3",
   },
   paper: { delayMs: 0, gain: 0.12, playbackRate: 0.82, url: "/audio/ui-asmr/panel-open-03.mp3" },
+  "paper-pickup": { delayMs: 0, gain: 0.34, playbackRate: 1.02, url: "/audio/debate/desk-paper-pickup-01.mp3" },
+  "paper-place": { delayMs: 0, gain: 0.38, playbackRate: 0.98, url: "/audio/debate/desk-paper-place-01.mp3" },
   folder: { delayMs: 0, gain: 0.18, playbackRate: 0.68, url: "/audio/ui-asmr/panel-close-02.mp3" },
   clip: { delayMs: 0, gain: 0.14, playbackRate: 1.16, url: "/audio/prism-companion/glass-tap-03.mp3" },
   pencil: { delayMs: 0, gain: 0.09, playbackRate: 1.34, url: "/audio/ui-asmr/bot-hover-02.mp3" },
@@ -94,6 +150,8 @@ export const DEBATE_MYSTERY_SFX_COOLDOWN_MS = {
   theory: 180,
   evidence: 700,
   paper: 80,
+  "paper-pickup": 80,
+  "paper-place": 80,
   folder: 110,
   clip: 90,
   pencil: 70,

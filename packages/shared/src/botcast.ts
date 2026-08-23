@@ -316,6 +316,7 @@ export function botcastFallbackStudioAccentVariantForSeed(
 
 export type BotcastProducerCueKind =
   | "ask_about"
+  | "present_image"
   | "refocus"
   | "press_harder"
   | "move_on"
@@ -1183,6 +1184,8 @@ export interface BotcastProducerCue {
   detail?: string;
   /** Exact words the host must speak on air. Direction stays in `detail`. */
   directQuote?: string;
+  /** Server-owned reference for a queued Signal episode image. */
+  imageId?: string;
 }
 
 /**
@@ -1310,6 +1313,7 @@ export type BotcastReplayEventKind =
   | "guest_presence"
   | "power_effect"
   | "producer_cue"
+  | "image_context"
   | "provider_generation"
   | "utterance"
   | "tension"
@@ -1351,6 +1355,94 @@ export interface BotcastReplayEvent {
   kind: BotcastReplayEventKind;
   payload: Record<string, unknown>;
   occurredAt: string;
+}
+
+export type BotcastImageContextPhase =
+  | "queued"
+  | "presented"
+  | "discussing"
+  | "dismissed";
+
+/** Public, replay-stable lifecycle for one producer-supplied episode image. */
+export interface BotcastImageContextV1 {
+  v: 1;
+  imageId: string;
+  imageUrl: string;
+  provider: BotcastEpisodeProvider;
+  model: string;
+  phase: BotcastImageContextPhase;
+  hostIntroductionMessageId: string | null;
+  guestDiscussionMessageId: string | null;
+  hostFollowUpMessageId: string | null;
+}
+
+export function normalizeBotcastImageContextV1(
+  value: unknown,
+): BotcastImageContextV1 | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const phase = row.phase;
+  if (
+    row.v !== 1 ||
+    typeof row.imageId !== "string" ||
+    !row.imageId.trim() ||
+    typeof row.imageUrl !== "string" ||
+    !row.imageUrl.trim() ||
+    (row.provider !== "local" &&
+      row.provider !== "openai" &&
+      row.provider !== "anthropic") ||
+    typeof row.model !== "string" ||
+    !row.model.trim() ||
+    (phase !== "queued" &&
+      phase !== "presented" &&
+      phase !== "discussing" &&
+      phase !== "dismissed")
+  ) {
+    return null;
+  }
+  const messageId = (candidate: unknown): string | null =>
+    typeof candidate === "string" && candidate.trim()
+      ? candidate.trim().slice(0, 160)
+      : null;
+  return {
+    v: 1,
+    imageId: row.imageId.trim().slice(0, 160),
+    imageUrl: row.imageUrl.trim().slice(0, 2_000),
+    provider: row.provider,
+    model: row.model.trim().slice(0, 240),
+    phase,
+    hostIntroductionMessageId: messageId(row.hostIntroductionMessageId),
+    guestDiscussionMessageId: messageId(row.guestDiscussionMessageId),
+    hostFollowUpMessageId: messageId(row.hostFollowUpMessageId),
+  };
+}
+
+/** Latest image lifecycle record for the episode, including dismissed replay state. */
+export function botcastLatestImageContextV1(
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
+): BotcastImageContextV1 | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.kind !== "image_context") continue;
+    const context = normalizeBotcastImageContextV1(event.payload);
+    if (context) return context;
+  }
+  return null;
+}
+
+/** Whether a saved image should be visible for this live/replay utterance. */
+export function botcastImageContextForMessageV1(
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
+  messageId: string | null | undefined,
+): BotcastImageContextV1 | null {
+  if (!messageId) return null;
+  const context = botcastLatestImageContextV1(events);
+  if (!context || context.phase === "queued") return null;
+  return messageId === context.hostIntroductionMessageId ||
+    messageId === context.guestDiscussionMessageId ||
+    messageId === context.hostFollowUpMessageId
+    ? context
+    : null;
 }
 
 export interface BotcastPerceptionOverlapV1 {

@@ -22,9 +22,98 @@ import { isPrivateNetworkHttpUrl } from "./local-network-host.ts";
  */
 const REMOTE_TAGS_PROBE_TIMEOUT_MS = 15_000;
 
+export interface ProviderImageInput {
+  /** MIME type is kept explicit so online providers receive a valid data source. */
+  mimeType: "image/png" | "image/jpeg" | "image/webp";
+  /** Raw base64 only; provider adapters own their wire format. */
+  data: string;
+}
+
 export interface ProviderMessage {
   role: "user" | "assistant" | "system";
   content: string;
+  /** Optional contextual image input. Never persisted in developer transcripts. */
+  images?: ProviderImageInput[];
+}
+
+function ollamaProviderMessages(messages: ProviderMessage[]): Array<
+  Record<string, unknown>
+> {
+  return messages.map((message) => ({
+    role: message.role,
+    content: message.content,
+    ...(message.images?.length
+      ? { images: message.images.map((image) => image.data) }
+      : {}),
+  }));
+}
+
+function openAiProviderMessages(messages: ProviderMessage[]): Array<
+  Record<string, unknown>
+> {
+  return messages.map((message) =>
+    message.images?.length
+      ? {
+          role: message.role,
+          content: [
+            { type: "text", text: message.content },
+            ...message.images.map((image) => ({
+              type: "image_url",
+              image_url: {
+                url: `data:${image.mimeType};base64,${image.data}`,
+                detail: "auto",
+              },
+            })),
+          ],
+        }
+      : { role: message.role, content: message.content },
+  );
+}
+
+function anthropicProviderConversationMessages(
+  messages: ProviderMessage[],
+): Array<Record<string, unknown>> {
+  return messages
+    .filter((message) => message.role !== "system")
+    .map((message) => ({
+      role: message.role as "user" | "assistant",
+      content: message.images?.length
+        ? [
+            { type: "text", text: message.content },
+            ...message.images.map((image) => ({
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: image.mimeType,
+                data: image.data,
+              },
+            })),
+          ]
+        : message.content,
+    }));
+}
+
+/** Keep raw image bytes out of development transcripts and usage diagnostics. */
+function redactProviderImageData(value: unknown, key = ""): unknown {
+  if (Array.isArray(value)) {
+    if (key === "images") return value.map(() => "<image omitted>");
+    return value.map((item) => redactProviderImageData(item));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([childKey, child]) => [
+        childKey,
+        redactProviderImageData(child, childKey),
+      ]),
+    );
+  }
+  if (
+    typeof value === "string" &&
+    (value.startsWith("data:image/") || (key === "data" && value.length > 128))
+  ) {
+    return "<image omitted>";
+  }
+  return value;
 }
 
 /** Optional per-call generation overrides, typically supplied by a Bot's configuration. */
@@ -95,6 +184,8 @@ export interface ModelCatalogEntry {
   hostLabel?: string;
   /** LOCAL model reports the Ollama native `thinking` capability. */
   thinking?: boolean;
+  /** Model accepts image inputs in ordinary conversational requests. */
+  supportsImageInput?: boolean;
   /** When set, this entry is only for the Images panel (not chat text models). */
   imageSource?: "ollama" | "comfyui" | "comfyui-workflow" | "comfyui-remote";
 }
@@ -762,6 +853,7 @@ function toCatalogEntry(
     localHost?: "primary" | "secondary";
     hostLabel?: string;
     thinking?: boolean;
+    supportsImageInput?: boolean;
   } = {}
 ): ModelCatalogEntry {
   return {
@@ -772,7 +864,21 @@ function toCatalogEntry(
     ...(options.localHost ? { localHost: options.localHost } : {}),
     ...(options.hostLabel ? { hostLabel: options.hostLabel } : {}),
     ...(options.thinking ? { thinking: true } : {}),
+    ...(options.supportsImageInput ? { supportsImageInput: true } : {}),
   };
+}
+
+/** Conservative model-family capability map for provider catalogs. */
+export function onlineModelSupportsImageInput(
+  provider: Extract<ProviderName, "openai" | "anthropic">,
+  modelId: string,
+): boolean {
+  const id = modelId.trim().toLowerCase();
+  if (!id) return false;
+  if (provider === "anthropic") {
+    return /^(?:claude-3|claude-(?:sonnet|opus|haiku)-[4-9])/u.test(id);
+  }
+  return /^(?:gpt-4(?:o|\.1|\.5)|gpt-5|chatgpt-4o|o[134](?:-|$))/u.test(id);
 }
 
 function isAllowedOpenAiChatModel(id: string): boolean {
@@ -1095,9 +1201,14 @@ const localThinkingCapabilityCache = new Map<
   string,
   { value: boolean; expiresAt: number }
 >();
+const localImageInputCapabilityCache = new Map<
+  string,
+  { value: boolean; expiresAt: number }
+>();
 
 export function resetLocalThinkingCapabilityCacheForTests(): void {
   localThinkingCapabilityCache.clear();
+  localImageInputCapabilityCache.clear();
 }
 
 /** Whether this Ollama model reports the native `thinking` capability. */
@@ -1135,6 +1246,58 @@ async function ollamaModelSupportsThinking(
     expiresAt: Date.now() + ttlMs,
   });
   return value;
+}
+
+/** Whether this Ollama model reports the native `vision` capability. */
+async function ollamaModelSupportsImageInput(
+  host: string,
+  model: string,
+): Promise<boolean> {
+  const cacheKey = `${host}::${model}`;
+  const cached = localImageInputCapabilityCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  let value = false;
+  let ttlMs = LOCAL_THINKING_CAPABILITY_TTL_MS;
+  try {
+    const response = await fetch(`${host}/api/show`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model }),
+      signal: AbortSignal.timeout(LOCAL_THINKING_PROBE_TIMEOUT_MS),
+    });
+    if (response.ok) {
+      const payload = (await response.json()) as { capabilities?: unknown };
+      value =
+        Array.isArray(payload.capabilities) &&
+        payload.capabilities.includes("vision");
+    } else {
+      ttlMs = LOCAL_THINKING_CAPABILITY_ERROR_TTL_MS;
+    }
+  } catch {
+    ttlMs = LOCAL_THINKING_CAPABILITY_ERROR_TTL_MS;
+  }
+  localImageInputCapabilityCache.set(cacheKey, {
+    value,
+    expiresAt: Date.now() + ttlMs,
+  });
+  return value;
+}
+
+/** Server-authoritative image-input gate for the resolved provider/model. */
+export async function providerModelSupportsImageInput(
+  provider: ProviderName,
+  modelId: string,
+  options: DualOllamaWorkloadOptions = {},
+): Promise<boolean> {
+  if (provider !== "local") {
+    return onlineModelSupportsImageInput(provider, modelId);
+  }
+  try {
+    const target = await resolveLocalOllamaTarget(modelId, options);
+    return await ollamaModelSupportsImageInput(target.host, target.model);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -1421,9 +1584,26 @@ async function buildUncachedModelCatalog(
     );
     return new Set(ids.filter((_, index) => flags[index]));
   };
-  const [primaryThinkingIds, secondaryThinkingIds] = await Promise.all([
+  const probeImageInputIds = async (
+    host: string | null,
+    ids: string[],
+  ): Promise<Set<string>> => {
+    if (!host || ids.length === 0) return new Set();
+    const flags = await Promise.all(
+      ids.map((id) => ollamaModelSupportsImageInput(host, id)),
+    );
+    return new Set(ids.filter((_, index) => flags[index]));
+  };
+  const [
+    primaryThinkingIds,
+    secondaryThinkingIds,
+    primaryImageInputIds,
+    secondaryImageInputIds,
+  ] = await Promise.all([
     probeThinkingIds(config.ollamaHost, localIds),
     probeThinkingIds(privateSecondaryHost, secondaryLocalIds),
+    probeImageInputIds(config.ollamaHost, localIds),
+    probeImageInputIds(privateSecondaryHost, secondaryLocalIds),
   ]);
   const onlineIds = openAiApiKey
     ? preferOpenAiChatVariants(
@@ -1448,6 +1628,7 @@ async function buildUncachedModelCatalog(
           localHost: "primary",
           hostLabel: "Primary host",
           thinking: primaryThinkingIds.has(id),
+          supportsImageInput: primaryImageInputIds.has(id),
         })
       ),
       ...secondaryLocalIds.map((id) =>
@@ -1456,12 +1637,21 @@ async function buildUncachedModelCatalog(
           localHost: "secondary",
           hostLabel: "Paired host",
           thinking: secondaryThinkingIds.has(id),
+          supportsImageInput: secondaryImageInputIds.has(id),
         })
       ),
     ],
     online: [
-      ...onlineIds.map((id) => toCatalogEntry(id, "openai", OPENAI_DEFAULT_MODEL)),
-      ...anthropicIds.map((id) => toCatalogEntry(id, "anthropic", ANTHROPIC_DEFAULT_MODEL)),
+      ...onlineIds.map((id) =>
+        toCatalogEntry(id, "openai", OPENAI_DEFAULT_MODEL, {
+          supportsImageInput: onlineModelSupportsImageInput("openai", id),
+        }),
+      ),
+      ...anthropicIds.map((id) =>
+        toCatalogEntry(id, "anthropic", ANTHROPIC_DEFAULT_MODEL, {
+          supportsImageInput: onlineModelSupportsImageInput("anthropic", id),
+        }),
+      ),
     ],
     defaults: {
       local: config.ollamaModel,
@@ -1615,7 +1805,7 @@ export class LocalOllamaProvider implements LlmProvider {
     const requestBody: Record<string, unknown> = {
       model,
       stream: false,
-      messages: outboundMessages,
+      messages: ollamaProviderMessages(outboundMessages),
       keep_alive: options?.ollamaKeepAlive ?? "10m",
       think,
     };
@@ -1645,7 +1835,7 @@ export class LocalOllamaProvider implements LlmProvider {
           purpose: usagePurpose(options?.usagePurpose),
           provider: "local",
           model,
-          request: requestBody,
+          request: redactProviderImageData(requestBody),
           error: "Local model request was aborted by the caller.",
           durationMs: Date.now() - startedAt,
         });
@@ -1656,7 +1846,7 @@ export class LocalOllamaProvider implements LlmProvider {
         purpose: usagePurpose(options?.usagePurpose),
         provider: "local",
         model,
-        request: requestBody,
+        request: redactProviderImageData(requestBody),
         error: "Local model service was unavailable.",
         durationMs: Date.now() - startedAt,
       });
@@ -1671,7 +1861,7 @@ export class LocalOllamaProvider implements LlmProvider {
         purpose: usagePurpose(options?.usagePurpose),
         provider: "local",
         model,
-        request: requestBody,
+        request: redactProviderImageData(requestBody),
         error: LOCAL_MODEL_REQUEST_ERROR_MESSAGES[failureKind],
         durationMs: Date.now() - startedAt,
       });
@@ -1728,7 +1918,7 @@ export class LocalOllamaProvider implements LlmProvider {
           purpose: usagePurpose(options?.usagePurpose),
           provider: "local",
           model,
-          request: requestBody,
+          request: redactProviderImageData(requestBody),
           rawOutput: payload,
           stopReason: payload.done_reason ?? null,
           error: "Local model returned tool calls instead of assistant text.",
@@ -1743,7 +1933,7 @@ export class LocalOllamaProvider implements LlmProvider {
         purpose: usagePurpose(options?.usagePurpose),
         provider: "local",
         model,
-        request: requestBody,
+        request: redactProviderImageData(requestBody),
         rawOutput: payload,
         stopReason: payload.done_reason ?? null,
         error: "Local model returned no assistant text.",
@@ -1784,7 +1974,7 @@ export class LocalOllamaProvider implements LlmProvider {
       completionDurationMs:
         typeof payload.eval_duration === "number" ? payload.eval_duration / 1_000_000 : null,
       developer: {
-        request: requestBody,
+        request: redactProviderImageData(requestBody),
         rawOutput: payload,
         parsedOutput: text,
         stopReason: payload.done_reason ?? null,
@@ -1877,7 +2067,7 @@ export class OpenAiProvider implements LlmProvider {
     const modelId = options?.model?.trim() || OPENAI_DEFAULT_MODEL;
     const requestBody: Record<string, unknown> = {
       model: modelId,
-      messages
+      messages: openAiProviderMessages(messages),
     };
     if (options?.jsonSchema) {
       requestBody.response_format = {
@@ -1947,7 +2137,7 @@ export class OpenAiProvider implements LlmProvider {
         purpose: usagePurpose(options?.usagePurpose),
         provider: "openai",
         model: modelId,
-        request: requestBody,
+        request: redactProviderImageData(requestBody),
         error: isAbortFailure(error, options?.signal)
           ? "OpenAI request was aborted by the caller."
           : "OpenAI request could not reach the provider.",
@@ -1972,7 +2162,7 @@ export class OpenAiProvider implements LlmProvider {
           purpose: usagePurpose(options?.usagePurpose),
           provider: "openai",
           model: modelId,
-          request: requestBody,
+          request: redactProviderImageData(requestBody),
           error: "OpenAI rejected the selected reasoning effort.",
           durationMs: Date.now() - startedAt,
         });
@@ -1995,7 +2185,7 @@ export class OpenAiProvider implements LlmProvider {
           purpose: usagePurpose(options?.usagePurpose),
           provider: "openai",
           model: modelId,
-          request: requestBody,
+          request: redactProviderImageData(requestBody),
           error: `OpenAI request failed with HTTP ${response.status}.`,
           durationMs: Date.now() - startedAt,
         });
@@ -2035,7 +2225,7 @@ export class OpenAiProvider implements LlmProvider {
       tokenCountSource: payload.usage ? "provider_reported" : "unavailable",
       durationMs,
       developer: {
-        request: requestBody,
+        request: redactProviderImageData(requestBody),
         rawOutput: payload,
         parsedOutput,
         stopReason: finishReason ?? null,
@@ -2095,12 +2285,7 @@ export class AnthropicProvider implements LlmProvider {
       .filter((message) => message.role === "system")
       .map((message) => message.content.trim())
       .filter(Boolean);
-    const conversationMessages = messages
-      .filter((message) => message.role !== "system")
-      .map((message) => ({
-        role: message.role as "user" | "assistant",
-        content: message.content,
-      }));
+    const conversationMessages = anthropicProviderConversationMessages(messages);
     const requestBody: Record<string, unknown> = {
       model: modelId,
       max_tokens: options?.maxTokens ?? 2048,
@@ -2145,7 +2330,10 @@ export class AnthropicProvider implements LlmProvider {
           : jsonInstruction;
     }
 
-    const diagnosticRequest = { messages, providerRequest: requestBody };
+    const diagnosticRequest = redactProviderImageData({
+      messages,
+      providerRequest: requestBody,
+    });
     const startedAt = Date.now();
     let response: Response;
     try {

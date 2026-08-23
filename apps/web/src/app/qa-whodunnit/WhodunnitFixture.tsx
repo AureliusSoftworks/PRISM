@@ -105,6 +105,7 @@ function fixtureSession(theoryMode = false): DebateSessionV1 {
     motion: {} as DebateSessionV1["motion"],
     evidence: {} as DebateSessionV1["evidence"],
     moderatorTitle: "PRISM · Judge & Casekeeper",
+    moderatorName: "PRISM",
     moderator: { id: "prism", name: "PRISM" } as DebateSessionV1["moderator"],
     forAdvocate: { id: BOTS[4]!.id, name: BOTS[4]!.name } as DebateSessionV1["forAdvocate"],
     againstAdvocate: { id: BOTS[5]!.id, name: BOTS[5]!.name } as DebateSessionV1["againstAdvocate"],

@@ -607,7 +607,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /normalizeDebateModeratorTitle\(session\.moderatorTitle\), session\.moderator/u,
+      /session\.moderatorName.*normalizeDebateModeratorTitle\(session\.moderatorTitle\)/u,
     );
     assert.match(
       source,
@@ -618,6 +618,17 @@ describe("Debate experience", () => {
       /debateArchiveMetaChips\(session\)/u,
     );
     assert.match(source, /session\.moderatorTitle/u);
+    assert.match(source, /data-tutorial-target="debate-team-names"/u);
+    assert.match(source, /data-tutorial-target="debate-moderator-name"/u);
+    assert.match(source, /forTeamNameAuthoredRef/u);
+    assert.match(source, /againstTeamNameAuthoredRef/u);
+    assert.match(source, /moderatorNameAuthoredRef/u);
+    assert.match(source, /emptyDebateSlateForFormat/u);
+    assert.match(source, /format === "whodunnit" \? "Prosecution" : "Pro"/u);
+    assert.match(source, /format === "whodunnit" \? "Defense" : "Con"/u);
+    assert.match(source, /forTeamName: motion\.forSide\.label/u);
+    assert.match(source, /againstTeamName: motion\.againstSide\.label/u);
+    assert.match(source, /session\.moderatorName/u);
     assert.match(source, /sessionStatusLabel\(session\)/u);
     assert.match(css, /\.moderatorTitleField\s*\{/u);
   });
@@ -1180,9 +1191,30 @@ describe("Debate experience", () => {
     assert.match(source, /format: next\.format/u);
     assert.match(source, /\/turnabout-action/u);
     assert.match(source, /submitTurnaboutAction\("press"/u);
+    assert.match(source, /submitTurnaboutAction\(\s*"focus_statement"/u);
     assert.match(source, /setTurnaboutObjecting/u);
     assert.match(source, /submitTurnaboutAction\(\s*"present_evidence"/u);
     assert.match(source, /submitTurnaboutAction\("pass"/u);
+    assert.match(source, /mysteryCourtPassiveFigures/u);
+    assert.match(source, /data-court-role=/u);
+    assert.match(
+      source,
+      /aria-hidden="true"[\s\S]{0,80}inert=\{true\}[\s\S]{0,80}tabIndex=\{-1\}/u,
+    );
+    assert.match(source, /presentation: "mini"/u);
+    assert.match(source, /mysteryCourtActiveWitnessBot/u);
+    assert.match(source, /className=\{styles\.mysteryCourtWitnessFigure\}/u);
+    assert.match(source, /aria-label=\{`Witness stand:/u);
+    assert.match(source, /mysteryCourtTalkingBotId === figure\.id/u);
+    assert.match(
+      source,
+      /Record paused until you choose · Press has no penalty/u,
+    );
+    assert.match(source, /Present a frozen contradiction/u);
+    assert.match(
+      source,
+      /Credibility \{mysteryTrial\?\.credibilityRemaining/u,
+    );
     assert.match(source, /Statement-bound · frozen evidence only/u);
     assert.match(source, /session\.formatState\.floorOwnerBotId/u);
     assert.match(source, /Return to a proceeding/u);
@@ -1218,6 +1250,12 @@ describe("Debate experience", () => {
     );
     assert.match(css, /\.turnaboutRecord/u);
     assert.match(css, /\.turnaboutActions/u);
+    assert.match(css, /\.mysteryCourtPassiveFigure/u);
+    assert.match(css, /\.mysteryCourtPassiveLabel/u);
+    assert.match(
+      css,
+      /\.mysteryCourtPassiveFigure\s*\{[^}]*pointer-events: none/u,
+    );
     assert.match(
       css,
       /\.turnaboutActions > div:first-child[\s\S]{0,260}grid-template-columns/u,

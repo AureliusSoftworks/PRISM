@@ -33,6 +33,7 @@ import {
   DEBATE_MYSTERY_SCHEMA_VERSION,
   DEBATE_JURY_SIZE,
   DEBATE_JUDGE_GAVEL_MESSAGE_MAX_LENGTH,
+  DEBATE_MODERATOR_NAME_MAX_LENGTH,
   DEBATE_MODERATOR_TITLE_MAX_LENGTH,
   DEBATE_OBJECTION_RULING_TIMEOUT_MS,
   DEBATE_PAUSE_COOLDOWN_MS,
@@ -40,6 +41,7 @@ import {
   DEBATE_PLAYER_PARTICIPANT_BOT_ID,
   DEBATE_PLAYER_TURN_MAX_LENGTH,
   DEBATE_SCHEMA_VERSION,
+  DEBATE_SIDE_LABEL_MAX_LENGTH,
   DEBATE_SETUP_PRESETS,
   BOT_IDENTITY_PRESENTATION_TRANSITION_MS,
   botPowerIsBreathlessV1,
@@ -67,6 +69,7 @@ import {
   heardBotPresenceBeatTextV1,
   normalizeDebateVoicePerformanceCue,
   normalizeDebateModeratorTitle,
+  normalizeDebateModeratorName,
   resolveDebateForumRoundPlan,
   resolveDebateMysteryConfig,
   voicePerformanceTextFromActionCues,
@@ -110,6 +113,7 @@ import {
   type DebateSessionV1,
   type DebateSetupSuggestionV1,
   type DebateSideId,
+  type DebateTurnaboutCourtFigureV1,
   type DebateTurnaboutFormatStateV1,
   type DebateWhodunnitCreateConfigV1,
   type DebateTurnaboutStatementV1,
@@ -1725,6 +1729,15 @@ function debateEventFloorRole(
   if (event.speakerBotId === session.moderator.id) return "moderator";
   if (event.speakerBotId === session.forAdvocate.id) return "for";
   if (event.speakerBotId === session.againstAdvocate.id) return "against";
+  if (
+    session.formatState.format === "turnabout" &&
+    event.statementId
+  ) {
+    const statement = session.formatState.statements.find(
+      (candidate) => candidate.id === event.statementId,
+    );
+    if (statement) return statement.sideId;
+  }
   return null;
 }
 
@@ -1751,6 +1764,32 @@ function debateParticipantPrismAvatar(
     provider: session.provider,
     model: session.model,
     revision: `${session.id}:participant-prism-v1`,
+  };
+}
+
+function debateTurnaboutCourtFigureSnapshot(
+  session: DebateSessionV1,
+  figure: DebateTurnaboutCourtFigureV1,
+  sideId: DebateSideId,
+): DebateBotSnapshotV1 {
+  return {
+    version: DEBATE_SCHEMA_VERSION,
+    id: figure.id,
+    name: figure.name,
+    systemPrompt: "",
+    role: "advocate",
+    sideId,
+    color: figure.color,
+    glyph: figure.glyph,
+    avatarDetails: figure.avatarDetails,
+    voiceProfile: figure.voiceProfile,
+    ...(figure.replayVisualSnapshot
+      ? { replayVisualSnapshot: figure.replayVisualSnapshot }
+      : {}),
+    powers: [],
+    provider: session.provider,
+    model: session.model,
+    revision: figure.revision,
   };
 }
 
@@ -2723,6 +2762,22 @@ const EMPTY_SLATE: DebateMotionSlateV1 = {
   againstSide: { label: "", brief: "" },
 };
 
+function emptyDebateSlateForFormat(
+  format: DebateFormatId,
+): DebateMotionSlateV1 {
+  return {
+    ...EMPTY_SLATE,
+    forSide: {
+      ...EMPTY_SLATE.forSide,
+      label: format === "whodunnit" ? "Prosecution" : "Pro",
+    },
+    againstSide: {
+      ...EMPTY_SLATE.againstSide,
+      label: format === "whodunnit" ? "Defense" : "Con",
+    },
+  };
+}
+
 const EMPTY_EVIDENCE: DebateEvidencePacketV1 = {
   version: DEBATE_SCHEMA_VERSION,
   notes: "",
@@ -2830,7 +2885,11 @@ function mutationKey(label: string, counter: number): string {
 function sessionStatusLabel(session: DebateSessionListItemV1): string {
   if (session.status === "completed") {
     return session.winnerSideId
-      ? `${session.winnerSideId === "for" ? "For" : "Against"} prevailed`
+      ? `${session.winnerSideId === "for"
+          ? session.forTeamName?.trim() ||
+            (session.format === "whodunnit" ? "Prosecution" : "Pro")
+          : session.againstTeamName?.trim() ||
+            (session.format === "whodunnit" ? "Defense" : "Con")} prevailed`
       : "Completed";
   }
   if (session.status === "waiting_for_player") return "Your turn";
@@ -2922,6 +2981,8 @@ function debateArchiveMetaChips(
     return [
       "Whodunnit?",
       session.format === "turnabout" ? "Turnabout Court" : "A Murder Mystery",
+      `${session.forTeamName?.trim() || "Prosecution"} / ${session.againstTeamName?.trim() || "Defense"}`,
+      `${session.moderatorName?.trim() || "PRISM"} · ${session.moderatorTitle}`,
       session.mysteryFictionLabel ?? "Fictional, non-canonical case",
       session.mysteryRouteGrade
         ? gradeLabelForMysteryArchive(session.mysteryRouteGrade)
@@ -2937,7 +2998,7 @@ function debateArchiveMetaChips(
     session.format === "turnabout" ? "Turnabout" : "Forum",
     debateProductionName(session.format, session.formality),
     debateFormalityDescriptor(session.formality).title,
-    session.moderatorTitle,
+    `${session.moderatorName?.trim() || "PRISM"} · ${session.moderatorTitle}`,
     sessionStatusLabel(session),
     session.playerRole === "spectator"
       ? "Spectator"
@@ -3344,9 +3405,7 @@ function visibleEventName(
     return "Debate floor";
   }
   if (event.speakerBotId === session.moderator.id) {
-    return session.moderator.id === DEBATE_PLAYER_JUDGE_BOT_ID
-      ? playerName
-      : session.moderator.name;
+    return session.moderatorName;
   }
   if (event.speakerBotId === session.forAdvocate.id) {
     return session.forAdvocate.id === DEBATE_PLAYER_PARTICIPANT_BOT_ID
@@ -3362,6 +3421,8 @@ function visibleEventName(
     (candidate) => candidate.id === event.speakerBotId,
   );
   if (juror) return juror.name;
+  const courtroomFigure = debateBotSnapshot(session, event.speakerBotId);
+  if (courtroomFigure) return courtroomFigure.name;
   if (session.format !== "turnabout") return "Forum";
   if (session.formality === "parliamentary") return "Public record";
   if (session.formality === "structured") return "Documented exchange";
@@ -3390,7 +3451,7 @@ export function formatDebateVerboseTranscript(
       ballot,
       label:
         ballot.voterBotId === session.moderator.id
-          ? session.moderator.name
+          ? session.moderatorName
           : ballot.voterBotId === session.forAdvocate.id
             ? session.forAdvocate.name
             : session.againstAdvocate.name,
@@ -3413,13 +3474,13 @@ export function formatDebateVerboseTranscript(
       ? [
           {
             ballot: session.jury.moderatorBallot,
-            label: `${session.moderator.name} · Moderator final ballot`,
+            label: `${session.moderatorName} · Moderator final ballot`,
           },
         ]
       : []),
   ].filter(({ ballot }) => ballot.participantInfluence);
   const cast = [
-    [normalizeDebateModeratorTitle(session.moderatorTitle), session.moderator],
+    [`${session.moderatorName} · ${normalizeDebateModeratorTitle(session.moderatorTitle)}`, session.moderator],
     [`For — ${session.motion.forSide.label}`, session.forAdvocate],
     [`Against — ${session.motion.againstSide.label}`, session.againstAdvocate],
   ] as const;
@@ -3674,7 +3735,7 @@ export function formatDebateVerboseTranscript(
                 );
                 const label =
                   entry.voterBotId === session.moderator.id
-                    ? session.moderator.name
+                    ? session.moderatorName
                     : entry.voterBotId === session.forAdvocate.id
                       ? session.forAdvocate.name
                       : entry.voterBotId === session.againstAdvocate.id
@@ -3727,7 +3788,7 @@ export function formatDebateVerboseTranscript(
           }),
           ...(!participantSession && session.jury.moderatorBallot
             ? [
-                `- ${session.moderator.name} · Moderator final ballot: ${debateSideLabel(session, session.jury.moderatorBallot.sideId)} — ${session.jury.moderatorBallot.reason ? debateResolvedEvidenceText(session.jury.moderatorBallot.reason, session.evidence) : "Private ballot; no public reason."}`,
+                `- ${session.moderatorName} · Moderator final ballot: ${debateSideLabel(session, session.jury.moderatorBallot.sideId)} — ${session.jury.moderatorBallot.reason ? debateResolvedEvidenceText(session.jury.moderatorBallot.reason, session.evidence) : "Private ballot; no public reason."}`,
               ]
             : []),
         ]
@@ -4333,6 +4394,31 @@ function debateBotSnapshot(
   if (botId === session.againstAdvocate.id) return session.againstAdvocate;
   const juror = session.jury.jurors.find((candidate) => candidate.id === botId);
   if (juror) return juror;
+  if (
+    botId &&
+    session.formatState.format === "turnabout" &&
+    session.formatState.mysteryTrial
+  ) {
+    const composition = session.formatState.mysteryTrial.courtroomComposition;
+    const figure = [
+      composition.prosecutionCoCounsel,
+      composition.defenseClient,
+      ...composition.eligibleWitnesses.map((witness) => witness.figure),
+    ].find((candidate) => candidate.id === botId);
+    if (figure) {
+      const witnessSide = session.formatState.statements.find(
+        (statement) => statement.speakerBotId === botId,
+      )?.sideId;
+      return debateTurnaboutCourtFigureSnapshot(
+        session,
+        figure,
+        witnessSide ??
+          (figure.id === composition.prosecutionCoCounsel.id
+            ? "for"
+            : "against"),
+      );
+    }
+  }
   return null;
 }
 
@@ -4808,10 +4894,17 @@ export function DebateExperience(
     useState<DebateForumRoundMode>("auto");
   const [forumRoundCount, setForumRoundCount] = useState(1);
   const [moderatorTitle, setModeratorTitle] = useState("Moderator");
+  const [moderatorName, setModeratorName] = useState("PRISM");
+  const moderatorNameAuthoredRef = useRef(false);
+  const forTeamNameAuthoredRef = useRef(false);
+  const againstTeamNameAuthoredRef = useRef(false);
+  const priorFormatRef = useRef<DebateFormatId | null>(null);
   const [selectedPresetId, setSelectedPresetId] =
     useState<DebateSetupPresetId>("public-forum");
   const [slates, setSlates] = useState<DebateMotionSlateV1[]>([]);
-  const [motion, setMotion] = useState<DebateMotionSlateV1>(EMPTY_SLATE);
+  const [motion, setMotion] = useState<DebateMotionSlateV1>(() =>
+    emptyDebateSlateForFormat(props.initialFormat ?? "forum"),
+  );
   const [cast, setCast] = useState(() =>
     debatePlayerJudgePrefilledCast(props.initialBotIds),
   );
@@ -7419,6 +7512,44 @@ export function DebateExperience(
     format === "whodunnit" || playerRole === "judge"
       ? playerJudgeBot
       : (botById.get(cast.moderator) ?? null);
+  const defaultModeratorName =
+    format === "whodunnit" || playerRole === "judge"
+      ? "PRISM"
+      : (moderatorBot?.name ?? "PRISM");
+  useEffect(() => {
+    if (!moderatorNameAuthoredRef.current) setModeratorName(defaultModeratorName);
+  }, [defaultModeratorName]);
+  useEffect(() => {
+    const previous = priorFormatRef.current;
+    priorFormatRef.current = format;
+    const oldDefaults = previous === "whodunnit"
+      ? ["Prosecution", "Defense"]
+      : ["For", "Against", "Pro", "Con"];
+    const nextDefaults = format === "whodunnit"
+      ? ["Prosecution", "Defense"]
+      : ["Pro", "Con"];
+    setMotion((current) => ({
+      ...current,
+      forSide: {
+        ...current.forSide,
+        label:
+          !forTeamNameAuthoredRef.current &&
+          (!current.forSide.label.trim() ||
+            oldDefaults.includes(current.forSide.label))
+            ? nextDefaults[0]
+            : current.forSide.label,
+      },
+      againstSide: {
+        ...current.againstSide,
+        label:
+          !againstTeamNameAuthoredRef.current &&
+          (!current.againstSide.label.trim() ||
+            oldDefaults.includes(current.againstSide.label))
+            ? nextDefaults[1]
+            : current.againstSide.label,
+      },
+    }));
+  }, [format]);
   const effectiveModeratorTitle = normalizeDebateModeratorTitle(moderatorTitle);
   const visibleModeratorTitle =
     format === "whodunnit"
@@ -7822,9 +7953,13 @@ export function DebateExperience(
     setForumRoundCount(1);
     setFormality("plainspoken");
     setModeratorTitle("Moderator");
+    moderatorNameAuthoredRef.current = false;
+    setModeratorName("PRISM");
+    forTeamNameAuthoredRef.current = false;
+    againstTeamNameAuthoredRef.current = false;
     setSelectedPresetId("public-forum");
     setSlates([]);
-    setMotion(EMPTY_SLATE);
+    setMotion(emptyDebateSlateForFormat("forum"));
     setCast(debatePlayerJudgePrefilledCast(props.initialBotIds));
     setActiveCastSlot("forAdvocate");
     setCastPickerSearch("");
@@ -8653,7 +8788,7 @@ export function DebateExperience(
           },
         );
         setSlates(result.slates);
-        setMotion(result.slates[0] ?? EMPTY_SLATE);
+        setMotion(result.slates[0] ?? emptyDebateSlateForFormat(format));
         const usedModel =
           typeof preparation.model === "string" && preparation.model.trim()
             ? preparation.model.trim()
@@ -8696,6 +8831,7 @@ export function DebateExperience(
       props.request,
       props.responseMode,
       request,
+      format,
       formality,
       topic,
     ],
@@ -13141,6 +13277,10 @@ export function DebateExperience(
     setForumRoundCount(draft.forumRoundCount);
     setFormality(draft.formality);
     setModeratorTitle(draft.moderatorTitle);
+    setModeratorName(session.moderatorName);
+    moderatorNameAuthoredRef.current = true;
+    forTeamNameAuthoredRef.current = true;
+    againstTeamNameAuthoredRef.current = true;
     setSelectedPresetId(draft.selectedPresetId);
     setSlates([]);
     setMotion(draft.motion);
@@ -13314,6 +13454,7 @@ export function DebateExperience(
     motion: titledMotion,
     evidence: options.evidenceOverride ?? evidence,
     moderatorTitle: normalizeDebateModeratorTitle(moderatorTitle),
+    moderatorName: normalizeDebateModeratorName(moderatorName, defaultModeratorName),
     moderatorBotId: effectiveModeratorBotId,
     playerJudgeUsesPrism: playerRole === "judge",
     forAdvocateBotId:
@@ -13476,6 +13617,9 @@ export function DebateExperience(
               juryEnabled: frozenConfig.juryEnabled,
               playerRole: frozenConfig.playerRole,
               participationDifficulty: frozenConfig.participationDifficulty,
+              moderatorName: normalizeDebateModeratorName(moderatorName, defaultModeratorName),
+              forTeamName: motion.forSide.label,
+              againstTeamName: motion.againstSide.label,
               preferredProvider:
                 props.modelOverride?.provider ?? props.preferredProvider,
               modelOverride: props.modelOverride?.model ?? null,
@@ -13492,6 +13636,9 @@ export function DebateExperience(
               whodunnit: frozenConfig,
               playerRole: frozenConfig.playerRole,
               participationDifficulty: frozenConfig.participationDifficulty,
+              moderatorName: normalizeDebateModeratorName(moderatorName, defaultModeratorName),
+              forTeamName: motion.forSide.label,
+              againstTeamName: motion.againstSide.label,
               preferredProvider:
                 props.modelOverride?.provider ?? props.preferredProvider,
               modelOverride: props.modelOverride?.model ?? null,
@@ -14584,7 +14731,7 @@ export function DebateExperience(
   };
 
   const submitTurnaboutAction = async (
-    action: "press" | "present_evidence" | "pass",
+    action: "focus_statement" | "press" | "present_evidence" | "pass",
     statementId: string,
   ): Promise<void> => {
     const previous = activeSession;
@@ -14620,6 +14767,9 @@ export function DebateExperience(
         setView("mystery");
         void loadSessions();
         return;
+      }
+      if (action === "focus_statement") {
+        setTurnaboutObjecting(false);
       }
       await adoptSession(previous, result.session);
     } catch (caught) {
@@ -17526,10 +17676,31 @@ export function DebateExperience(
           <div className={styles.forumCircuit}>
             <span className={styles.forumBeam} aria-hidden="true" />
             {[
-              ["Prosecution", mysteryProsecutorPartnerBotId, "#42d9ff"],
-              ["PRISM · Judge", DEBATE_PLAYER_JUDGE_BOT_ID, "#a995ff"],
-              ["Defense", mysteryRivalDefenseBotId, "#ff5f8f"],
-            ].map(([label, botId, fallback]) => {
+              {
+                id: "for",
+                label: motion.forSide.label || "Prosecution",
+                botId: mysteryProsecutorPartnerBotId,
+                fallback: "#42d9ff",
+                publicName: null,
+              },
+              {
+                id: "moderator",
+                label: visibleModeratorTitle,
+                botId: DEBATE_PLAYER_JUDGE_BOT_ID,
+                fallback: "#a995ff",
+                publicName: normalizeDebateModeratorName(
+                  moderatorName,
+                  defaultModeratorName,
+                ),
+              },
+              {
+                id: "against",
+                label: motion.againstSide.label || "Defense",
+                botId: mysteryRivalDefenseBotId,
+                fallback: "#ff5f8f",
+                publicName: null,
+              },
+            ].map(({ id, label, botId, fallback, publicName }) => {
               const bot =
                 botId === DEBATE_PLAYER_JUDGE_BOT_ID
                   ? playerJudgeBot
@@ -17537,11 +17708,12 @@ export function DebateExperience(
               return (
                 <div
                   className={styles.forumCircuitSeat}
-                  key={label}
+                  key={id}
                   style={{ "--debate-seat-color": bot?.color ?? fallback } as CSSProperties}
                 >
                   <span aria-hidden="true">{bot ? props.renderBotGlyph(bot.glyph, { size: 22, strokeWidth: 1.45 }) : "◇"}</span>
-                  <small>{label}</small><strong>{bot?.name ?? "Uncast"}</strong>
+                  <small>{label}</small>
+                  <strong>{publicName ?? bot?.name ?? "Uncast"}</strong>
                 </div>
               );
             })}
@@ -17560,12 +17732,17 @@ export function DebateExperience(
           playerRole === "participant" && playerSideId === "for"
             ? playerParticipantBot
             : (botById.get(cast.forAdvocate) ?? null),
+        publicName: null,
         fallback: "#42d9ff",
       },
       {
         id: "moderator",
         label: visibleModeratorTitle,
         bot: moderatorBot,
+        publicName: normalizeDebateModeratorName(
+          moderatorName,
+          defaultModeratorName,
+        ),
         fallback: "#a995ff",
       },
       {
@@ -17575,6 +17752,7 @@ export function DebateExperience(
           playerRole === "participant" && playerSideId === "against"
             ? playerParticipantBot
             : (botById.get(cast.againstAdvocate) ?? null),
+        publicName: null,
         fallback: "#ff5f8f",
       },
     ] as const;
@@ -17609,7 +17787,7 @@ export function DebateExperience(
                     : "◇"}
                 </span>
                 <small>{seat.label}</small>
-                <strong>{seat.bot?.name ?? "Uncast"}</strong>
+                <strong>{seat.publicName ?? seat.bot?.name ?? "Uncast"}</strong>
               </div>
             );
           })}
@@ -19133,6 +19311,78 @@ export function DebateExperience(
           <em>{castTuningOpen ? "Done" : "Change"}</em>
         </summary>
         <div className={styles.castTuningBody}>
+          <label className={styles.field} data-tutorial-target="debate-team-names">
+            <span>Public team names</span>
+            <input
+              value={motion.forSide.label}
+              aria-label="For team public name"
+              maxLength={DEBATE_SIDE_LABEL_MAX_LENGTH}
+              onChange={(event) => {
+                forTeamNameAuthoredRef.current = true;
+                const label = event.currentTarget.value;
+                setMotion((current) => ({
+                  ...current,
+                  forSide: { ...current.forSide, label },
+                }));
+              }}
+              onBlur={() => setMotion((current) => {
+                const label = current.forSide.label.trim();
+                if (!label) forTeamNameAuthoredRef.current = false;
+                return {
+                  ...current,
+                  forSide: {
+                    ...current.forSide,
+                    label:
+                      label ||
+                      (format === "whodunnit" ? "Prosecution" : "Pro"),
+                  },
+                };
+              })}
+              placeholder={format === "whodunnit" ? "Prosecution" : "Pro"}
+            />
+            <input
+              value={motion.againstSide.label}
+              aria-label="Against team public name"
+              maxLength={DEBATE_SIDE_LABEL_MAX_LENGTH}
+              onChange={(event) => {
+                againstTeamNameAuthoredRef.current = true;
+                const label = event.currentTarget.value;
+                setMotion((current) => ({
+                  ...current,
+                  againstSide: { ...current.againstSide, label },
+                }));
+              }}
+              onBlur={() => setMotion((current) => {
+                const label = current.againstSide.label.trim();
+                if (!label) againstTeamNameAuthoredRef.current = false;
+                return {
+                  ...current,
+                  againstSide: {
+                    ...current.againstSide,
+                    label:
+                      label ||
+                      (format === "whodunnit" ? "Defense" : "Con"),
+                  },
+                };
+              })}
+              placeholder={format === "whodunnit" ? "Defense" : "Con"}
+            />
+            <small>These public labels freeze into the court; the bots keep their private identities.</small>
+          </label>
+          <label className={styles.field} data-tutorial-target="debate-moderator-name">
+            <span>Public moderator name</span>
+            <input
+              value={moderatorName}
+              maxLength={DEBATE_MODERATOR_NAME_MAX_LENGTH}
+              onChange={(event) => { moderatorNameAuthoredRef.current = true; setModeratorName(event.currentTarget.value); }}
+              onBlur={() => setModeratorName((current) => {
+                if (!current.trim()) moderatorNameAuthoredRef.current = false;
+                return normalizeDebateModeratorName(current, defaultModeratorName);
+              })}
+              placeholder={defaultModeratorName}
+            />
+            <small>Shown publicly; it does not rename the presiding bot or change its title.</small>
+          </label>
           <label
             className={`${styles.field} ${styles.moderatorTitleField}`}
             data-tutorial-target="debate-moderator-title"
@@ -20880,7 +21130,11 @@ export function DebateExperience(
                 : "Claim-bound · frozen evidence only"}
             </span>
           </div>
-          <strong>Reversal {state ? Math.max(0, state.round - 1) : 0}</strong>
+          <strong>
+            {state?.mysteryTrial
+              ? `Credibility ${state.mysteryTrial.credibilityRemaining}`
+              : `Reversal ${state ? Math.max(0, state.round - 1) : 0}`}
+          </strong>
         </header>
         <ul className={styles.caseThread} role="list">
           {statements.length === 0 ? (
@@ -20899,12 +21153,17 @@ export function DebateExperience(
               >
                 <span className={styles.caseThreadMeta}>
                   <strong>
-                    {statement.sideId === "for"
-                      ? session.motion.forSide.label
-                      : session.motion.againstSide.label}
+                    {statement.mysteryWitness?.name ??
+                      (statement.sideId === "for"
+                        ? session.motion.forSide.label
+                        : session.motion.againstSide.label)}
                   </strong>
                   <em>
-                    Statement {index + 1} · {statement.status}
+                    Statement {statement.mysteryWitness?.ordinal ?? index + 1}
+                    {statement.mysteryWitness
+                      ? ` of ${statement.mysteryWitness.statementCount}`
+                      : ""}{" "}
+                    · {statement.status}
                   </em>
                 </span>
                 <p>{debateSpokenText(statement.content)}</p>
@@ -21730,6 +21989,43 @@ export function DebateExperience(
         statement.speakerBotId === session.forAdvocate.id
           ? session.forAdvocate
           : session.againstAdvocate;
+      const mysteryTrial = state.mysteryTrial;
+      const witness = statement.mysteryWitness ?? null;
+      const openMysteryStatements = mysteryTrial
+        ? state.statements
+            .filter(
+              (candidate) =>
+                candidate.mysteryWitness &&
+                (candidate.status === "ready" ||
+                  candidate.status === "pressed"),
+            )
+            .sort(
+              (left, right) =>
+                (left.mysteryWitness?.ordinal ?? 0) -
+                (right.mysteryWitness?.ordinal ?? 0),
+            )
+        : [];
+      const currentMysteryIndex = openMysteryStatements.findIndex(
+        (candidate) => candidate.id === statement.id,
+      );
+      const previousMysteryStatement =
+        currentMysteryIndex >= 0 && openMysteryStatements.length > 1
+          ? openMysteryStatements[
+              (currentMysteryIndex - 1 + openMysteryStatements.length) %
+                openMysteryStatements.length
+            ]
+          : null;
+      const nextMysteryStatement =
+        currentMysteryIndex >= 0 && openMysteryStatements.length > 1
+          ? openMysteryStatements[
+              (currentMysteryIndex + 1) % openMysteryStatements.length
+            ]
+          : null;
+      const witnessSource = witness?.sourceId
+        ? session.evidence.sources.find(
+            (source) => source.id === witness.sourceId,
+          ) ?? null
+        : null;
       return (
         <section
           className={`${styles.playerWindow} ${styles.turnaboutActions}`}
@@ -21738,16 +22034,42 @@ export function DebateExperience(
         >
           <div>
             <p className={styles.eyebrow}>
-              {session.formality === "parliamentary"
+              {witness
+                ? `Witness statement ${witness.ordinal} of ${witness.statementCount}`
+                : session.formality === "parliamentary"
                 ? "Statement on the record"
                 : "Active claim"}
             </p>
-            <h2>Examine {speaker.name}</h2>
+            <h2>Examine {witness?.name ?? speaker.name}</h2>
             <blockquote>{debateSpokenText(statement.content)}</blockquote>
+            {witness ? (
+              <div className={styles.turnaboutStatementStatus} role="status">
+                <span>
+                  Record paused until you choose · Press has no penalty
+                </span>
+                <strong>
+                  Credibility {mysteryTrial?.credibilityRemaining ?? 0}
+                </strong>
+                {witnessSource ? (
+                  <button
+                    type="button"
+                    onClick={() => setSourceDrawerId(witnessSource.id)}
+                  >
+                    Open submitted source
+                  </button>
+                ) : (
+                  <em>Filed defendant denial</em>
+                )}
+              </div>
+            ) : null}
           </div>
           {turnaboutObjecting ? (
             <fieldset className={styles.turnaboutEvidencePicker}>
-              <legend>Object with frozen evidence</legend>
+              <legend>
+                {witness
+                  ? "Present a frozen contradiction"
+                  : "Object with frozen evidence"}
+              </legend>
               {debateEvidenceItemCount(session.evidence) > 0 ? (
                 debateEvidenceItems(session.evidence).map((item) => (
                   <label
@@ -21794,6 +22116,40 @@ export function DebateExperience(
             </fieldset>
           ) : null}
           <div className={styles.turnaboutActionRow}>
+            {witness ? (
+              <>
+                <button
+                  type="button"
+                  aria-label="Previous testimony statement"
+                  onClick={() =>
+                    previousMysteryStatement
+                      ? void submitTurnaboutAction(
+                          "focus_statement",
+                          previousMysteryStatement.id,
+                        )
+                      : undefined
+                  }
+                  disabled={busy || !previousMysteryStatement}
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  aria-label="Next testimony statement"
+                  onClick={() =>
+                    nextMysteryStatement
+                      ? void submitTurnaboutAction(
+                          "focus_statement",
+                          nextMysteryStatement.id,
+                        )
+                      : undefined
+                  }
+                  disabled={busy || !nextMysteryStatement}
+                >
+                  Next
+                </button>
+              </>
+            ) : null}
             <button
               type="button"
               onClick={() => void submitTurnaboutAction("press", statement.id)}
@@ -21807,7 +22163,7 @@ export function DebateExperience(
               onClick={() => setTurnaboutObjecting((current) => !current)}
               disabled={busy || debateEvidenceItemCount(session.evidence) === 0}
             >
-              Object
+              {witness ? "Present" : "Object"}
             </button>
             {turnaboutObjecting ? (
               <button
@@ -21818,7 +22174,7 @@ export function DebateExperience(
                 }
                 disabled={busy || !turnaboutEvidenceSourceId}
               >
-                Present Evidence
+                {witness ? "Present Contradiction" : "Present Evidence"}
               </button>
             ) : null}
             <button
@@ -25353,6 +25709,12 @@ export function DebateExperience(
               presenting,
               presentationSpeakerBotId: activeSpeakerId,
             })));
+    const turnaboutOwnerSide =
+      session.formatState.format === "turnabout" && turnOwnerBotId
+        ? session.formatState.statements.find(
+            (statement) => statement.speakerBotId === turnOwnerBotId,
+          )?.sideId ?? null
+        : null;
     const turnOwnerRole: DebateForumRole | null =
       turnOwnerBotId === session.moderator.id
         ? "moderator"
@@ -25360,7 +25722,70 @@ export function DebateExperience(
           ? "for"
           : turnOwnerBotId === session.againstAdvocate.id
             ? "against"
-            : null;
+            : turnaboutOwnerSide;
+    const mysteryCourtPassiveFigures =
+      session.playerRole === "participant" &&
+      session.playerSideId === "for" &&
+      session.formatState.format === "turnabout" &&
+      session.formatState.mysteryTrial
+        ? [
+            {
+              side: "for" as const,
+              label: "Co-counsel",
+              figure:
+                session.formatState.mysteryTrial.courtroomComposition
+                  .prosecutionCoCounsel,
+            },
+            {
+              side: "against" as const,
+              label: "Client · Accused",
+              figure:
+                session.formatState.mysteryTrial.courtroomComposition
+                  .defenseClient,
+            },
+          ]
+        : [];
+    const mysteryTurnaboutState =
+      session.formatState.format === "turnabout"
+        ? session.formatState
+        : null;
+    const mysteryCourtStageStatement =
+      mysteryTurnaboutState?.mysteryTrial
+        ? mysteryTurnaboutState.statements.find(
+            (statement) =>
+              statement.id ===
+              (activeEvent?.statementId ??
+                mysteryTurnaboutState.activeStatementId),
+          ) ?? null
+        : null;
+    const mysteryCourtActiveWitness =
+      session.formatState.format === "turnabout" &&
+      session.formatState.mysteryTrial &&
+      mysteryCourtStageStatement?.mysteryWitness?.kind ===
+        "submitted_interview"
+        ? session.formatState.mysteryTrial.courtroomComposition.eligibleWitnesses.find(
+            (witness) =>
+              witness.seatId ===
+              mysteryCourtStageStatement.mysteryWitness?.seatId,
+          ) ?? null
+        : null;
+    const mysteryCourtTalkingBotId =
+      presenting &&
+      speakerHandoff === null &&
+      activeSpeakerId &&
+      activeEvent &&
+      !debateEventIsCanonicalSilence(activeEvent) &&
+      activeSpeechTiming !== null &&
+      !speechMouthResting
+        ? activeSpeakerId
+        : null;
+    const mysteryCourtActiveWitnessBot = mysteryCourtActiveWitness
+      ? debateTurnaboutCourtFigureSnapshot(
+          session,
+          mysteryCourtActiveWitness.figure,
+          "against",
+        )
+      : null;
     const stageCast = [
       {
         role: "for" as const,
@@ -26419,6 +26844,121 @@ export function DebateExperience(
                         );
                       },
                     )}
+                    {mysteryCourtPassiveFigures.map(
+                      ({ side, label, figure }) => {
+                        const bot = debateTurnaboutCourtFigureSnapshot(
+                          session,
+                          figure,
+                          side,
+                        );
+                        const talking =
+                          mysteryCourtTalkingBotId === figure.id;
+                        return (
+                          <div
+                            className={styles.mysteryCourtPassiveFigure}
+                            data-side={side}
+                            data-court-role={
+                              side === "for" ? "co-counsel" : "client"
+                            }
+                            key={`mystery-passive:${side}:${figure.id}`}
+                            aria-hidden="true"
+                            inert={true}
+                            tabIndex={-1}
+                          >
+                            <div
+                              className={styles.mysteryCourtPassiveAvatar}
+                            >
+                              {props.renderBotAvatar ? (
+                                props.renderBotAvatar(bot, {
+                                  role: side,
+                                  lookAtRole: null,
+                                  consumer: "forum",
+                                  presentation: "mini",
+                                  talking,
+                                  thinking: false,
+                                  voiceLevel: talking ? 1 : 0,
+                                  colorCycle: false,
+                                  speechTiming: talking
+                                    ? activeSpeechTiming
+                                    : null,
+                                  foleyMouthShape: null,
+                                  listenerReaction: null,
+                                })
+                              ) : (
+                                <span className={styles.botGlyphFallback}>
+                                  {props.renderBotGlyph(bot.glyph, {
+                                    size: 28,
+                                    strokeWidth: 1.25,
+                                  })}
+                                </span>
+                              )}
+                            </div>
+                            <span className={styles.mysteryCourtPassiveLabel}>
+                              <strong>{figure.name}</strong>
+                              <small>{label}</small>
+                            </span>
+                          </div>
+                        );
+                      },
+                    )}
+                    {mysteryCourtActiveWitnessBot &&
+                    mysteryCourtStageStatement?.mysteryWitness ? (
+                      <div
+                        className={styles.mysteryCourtWitnessFigure}
+                        data-talking={
+                          mysteryCourtTalkingBotId ===
+                          mysteryCourtActiveWitnessBot.id
+                            ? "true"
+                            : undefined
+                        }
+                        role="img"
+                        aria-label={`Witness stand: ${mysteryCourtStageStatement.mysteryWitness.name}`}
+                      >
+                        <div className={styles.mysteryCourtWitnessAvatar}>
+                          {props.renderBotAvatar ? (
+                            props.renderBotAvatar(
+                              mysteryCourtActiveWitnessBot,
+                              {
+                                role: "against",
+                                lookAtRole: "for",
+                                consumer: "forum",
+                                presentation: "mini",
+                                talking:
+                                  mysteryCourtTalkingBotId ===
+                                  mysteryCourtActiveWitnessBot.id,
+                                thinking: false,
+                                voiceLevel:
+                                  mysteryCourtTalkingBotId ===
+                                  mysteryCourtActiveWitnessBot.id
+                                    ? 1
+                                    : 0,
+                                colorCycle: false,
+                                speechTiming:
+                                  mysteryCourtTalkingBotId ===
+                                  mysteryCourtActiveWitnessBot.id
+                                    ? activeSpeechTiming
+                                    : null,
+                                foleyMouthShape: null,
+                                listenerReaction: null,
+                              },
+                            )
+                          ) : (
+                            <span className={styles.botGlyphFallback}>
+                              {props.renderBotGlyph(
+                                mysteryCourtActiveWitnessBot.glyph,
+                                { size: 34, strokeWidth: 1.3 },
+                              )}
+                            </span>
+                          )}
+                        </div>
+                        <span className={styles.mysteryCourtWitnessLabel}>
+                          <strong>
+                            {mysteryCourtStageStatement.mysteryWitness.name}
+                          </strong>
+                          <small>Witness</small>
+                        </span>
+                      </div>
+                    ) : null}
                     <div
                       className={styles.podiumForeground}
                       aria-hidden="true"
@@ -27230,7 +27770,7 @@ export function DebateExperience(
                             })}
                             {session.jury.moderatorBallot ? (
                               <li key="jury-moderator-ballot">
-                                <strong>{session.moderator.name} · Final ballot</strong>
+                                <strong>{session.moderatorName} · Final ballot</strong>
                                 <span>
                                   {session.jury.moderatorBallot.sideId === "for"
                                     ? session.motion.forSide.label

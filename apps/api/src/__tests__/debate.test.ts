@@ -8518,6 +8518,24 @@ describe("Debate engine", () => {
       );
       assert.ok(first);
       assert.equal(session.formatState.floorOwnerBotId, first.speakerBotId);
+      await assert.rejects(
+        submitDebateTurnaboutAction(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: "turnabout-focus-non-mystery:0001",
+            action: "focus_statement",
+            statementId: first.id,
+          },
+          debateRuntime,
+        ),
+        (error: unknown) =>
+          error instanceof HttpError &&
+          error.statusCode === 409 &&
+          /only for a filed mystery trial/iu.test(error.message),
+      );
 
       session = pauseDebateSession(db, "user-1", session.id, {
         expectedRevision: session.revision,

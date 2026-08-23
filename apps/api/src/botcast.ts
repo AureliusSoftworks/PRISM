@@ -49,6 +49,7 @@ import type {
   BotcastGuestPresenceMode,
   BotcastGuestInterruptionContext,
   BotcastHostRedirectContext,
+  BotcastImageContextV1,
   BotcastMessage,
   BotcastMoodBoostEventV1,
   BotcastMoodDrainEventV1,
@@ -147,6 +148,7 @@ import {
   SIGNAL_PICKLES_SLOW_SIP_DURATION_MS,
   BOT_POWER_CANONICAL_SILENCE_V1,
   normalizeAutoRecoveryTrace,
+  botcastLatestImageContextV1,
   applyDirectionalIrritationCleanTurnDecay,
   applyDirectionalIrritationCutoff,
   applyDirectionalIrritationRebuff,
@@ -396,6 +398,7 @@ import {
   lowerVoiceMoodForHearingRepeat,
 } from "./bot-power-hearing-repeat.ts";
 import { randomId } from "./security.ts";
+import { readGeneratedImageBytes } from "./image-storage.ts";
 import { runPrismReviewV1, type PrismReviewRubricV1 } from "./reviews.ts";
 import { signalGenerationKeywordPromptLine } from "./signal-generation-keywords.ts";
 
@@ -1369,6 +1372,7 @@ export const SIGNAL_PREPARATION_TABLES: readonly PreparedDatabaseTable[] = [
   "botcast_episode_segments",
   "botcast_messages",
   "botcast_events",
+  "images",
   "botcast_host_recovery_candidates",
   { name: "botcast_show_intro_audio", copyRows: false },
   { name: "botcast_show_atmosphere_audio", copyRows: false },
@@ -8343,6 +8347,45 @@ export function recordBotcastAudioCue(
   return getBotcastEpisode(db, userId, episode.id);
 }
 
+/** Queue one owned image for the host to introduce on the next eligible turn. */
+export function queueBotcastEpisodeImageContext(
+  db: DatabaseSync,
+  userId: string,
+  episodeId: string,
+  input: Pick<BotcastImageContextV1, "imageId" | "imageUrl" | "provider" | "model">,
+): BotcastEpisode {
+  const episode = getBotcastEpisode(db, userId, episodeId);
+  if (episode.status !== "live") {
+    throw new Error("Signal image context is locked after the episode ends.");
+  }
+  if (episode.playbackMode === "watch" || episode.guestKind !== "bot") {
+    throw new Error(
+      "Signal image context is available only while producing a live bot interview.",
+    );
+  }
+  const existing = botcastLatestImageContextV1(episode.events);
+  if (existing && existing.phase !== "dismissed") {
+    throw new Error("Finish discussing the current Signal image first.");
+  }
+  const context: BotcastImageContextV1 = {
+    v: 1,
+    imageId: input.imageId,
+    imageUrl: input.imageUrl,
+    provider: input.provider,
+    model: input.model,
+    phase: "queued",
+    hostIntroductionMessageId: null,
+    guestDiscussionMessageId: null,
+    hostFollowUpMessageId: null,
+  };
+  const now = new Date().toISOString();
+  recordEvent(db, userId, episode.id, "image_context", context, now);
+  db.prepare(
+    "UPDATE botcast_episodes SET updated_at = ? WHERE id = ? AND user_id = ?",
+  ).run(now, episode.id, userId);
+  return getBotcastEpisode(db, userId, episode.id);
+}
+
 function recordEvent(
   db: DatabaseSync,
   userId: string,
@@ -8724,6 +8767,9 @@ function normalizeBotcastProducerCue(
   const directQuote = cue.directQuote
     ? cleanText(cue.directQuote, "", BOTCAST_PRODUCER_DIRECT_QUOTE_MAX)
     : "";
+  const imageId = cue.imageId
+    ? cleanText(cue.imageId, "", 160)
+    : "";
   if (cue.kind === "ask_about" && botcastCueRequestsWrapUp(detail) && !directQuote) {
     return { kind: "wrap_up" };
   }
@@ -8731,6 +8777,7 @@ function normalizeBotcastProducerCue(
     kind: cue.kind,
     ...(detail ? { detail } : {}),
     ...(directQuote ? { directQuote } : {}),
+    ...(cue.kind === "present_image" && imageId ? { imageId } : {}),
   };
 }
 
@@ -10734,6 +10781,19 @@ export function buildBotcastSpeakerPrompt(
     activeBotcastWrapUpCue(args.episode)?.utterancesSinceCue === 1;
   const wrappingUp =
     args.cue?.kind === "wrap_up" || guestClosingOpportunity;
+  const imageContext = botcastLatestImageContextV1(args.episode.events);
+  const imageDiscussionRule =
+    args.speakerRole === "host" &&
+    args.cue?.kind === "present_image" &&
+    imageContext?.phase === "queued"
+      ? "The Producer has supplied the image attached to this turn. Signal is placing it at the center of the table now. Introduce it naturally in your own host voice, invite the guest to look, and ask one concise equivalent of ‘What are your thoughts on this?’ Do not describe upload mechanics, file metadata, vision capability, prompts, or the control room. Do not analyze the image for the guest yet; give them the first response."
+      : args.speakerRole === "guest" && imageContext?.phase === "presented"
+        ? "The host has placed the attached image at the center of the table and invited your reaction. Explicitly acknowledge that you are looking at it, then discuss concrete visible details and what they mean from this guest’s own perspective. Ground every visual claim in the attached image. Do not claim you cannot see it, do not discuss upload mechanics, and do not answer with generic remarks that could fit any image."
+        : args.speakerRole === "host" && imageContext?.phase === "discussing"
+          ? args.cue
+            ? "The attached image remains on the table and the guest’s just-finished comment remains authoritative context. Carry out the queued Producer elaboration or clarification while explicitly connecting it to both one concrete visible feature and the guest’s actual point. Add this host’s own perspective where natural. Do not discard, overwrite, or pretend not to have heard the guest’s comment."
+            : "The attached image remains on the table and the guest has just discussed it. Give this host’s own concise, image-grounded opinion, explicitly respond to the guest’s actual point, then make a natural transition back to the episode’s strongest relevant thread. Do not ask another generic image question; Signal will clear the table after this line."
+          : null;
   const producerCut = args.speakerRole === "host" && args.producerCut === true;
   const departureEvent = [...args.episode.events]
     .reverse()
@@ -11181,6 +11241,7 @@ export function buildBotcastSpeakerPrompt(
         ...(producerGuestHostRule ? [producerGuestHostRule] : []),
         ...(producerGuestHostExitRule ? [producerGuestHostExitRule] : []),
         ...(liveCueAdjustmentRule ? [liveCueAdjustmentRule] : []),
+        ...(imageDiscussionRule ? [imageDiscussionRule] : []),
         ...(askAboutCueRule ? [askAboutCueRule] : []),
         ...(refocusCueRule ? [refocusCueRule] : []),
         ...(powerInterruptionFollowUpRule ? [powerInterruptionFollowUpRule] : []),
@@ -14443,6 +14504,19 @@ export async function advanceBotcastEpisode(
   let requestedCue = input.cue
     ? normalizeBotcastProducerCue(input.cue)
     : undefined;
+  const queuedImageContextAtRequest = botcastLatestImageContextV1(
+    episode.events,
+  );
+  if (requestedCue?.kind === "present_image") {
+    if (
+      !requestedCue.imageId ||
+      !queuedImageContextAtRequest ||
+      queuedImageContextAtRequest.phase !== "queued" ||
+      queuedImageContextAtRequest.imageId !== requestedCue.imageId
+    ) {
+      throw new Error("That Signal image is no longer queued for this episode.");
+    }
+  }
   const cueDelivery = input.cueDelivery ?? "next_host_turn";
   let hostRedirect = input.hostRedirect;
   let guestInterruption = input.guestInterruption;
@@ -14738,7 +14812,12 @@ export async function advanceBotcastEpisode(
     episode.guestKind === "bot" &&
     !guestAlreadyDeparted &&
     botcastGuestDepartureEligible(tension);
+  const imageDiscussionPending = Boolean(
+    botcastLatestImageContextV1(episode.events)?.phase !== "dismissed" &&
+      botcastLatestImageContextV1(episode.events) !== null,
+  );
   const sessionShouldClose =
+    !imageDiscussionPending &&
     !pendingCrosstalkReclaim &&
     episode.segment === "interview" &&
     botcastSessionShouldClose({
@@ -14935,6 +15014,17 @@ export async function advanceBotcastEpisode(
           (cueDelivery === "interrupt_guest" || cueDelivery === "redirect_host")
         ? "host"
         : scheduledSpeakerRole;
+  const imageContextAtTurnStart = botcastLatestImageContextV1(episode.events);
+  const imageDiscussionTurn =
+    requestedCue?.kind === "present_image" && speakerRole === "host"
+      ? "host_introduction" as const
+      : imageContextAtTurnStart?.phase === "presented" &&
+          speakerRole === "guest"
+        ? "guest_discussion" as const
+        : imageContextAtTurnStart?.phase === "discussing" &&
+            speakerRole === "host"
+          ? "host_follow_up" as const
+          : null;
   if (episode.guestKind === "producer" && speakerRole === "guest") {
     return { episode, message: null };
   }

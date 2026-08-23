@@ -37,6 +37,7 @@ import {
   normalizeDebateFormatStateV1,
   normalizeDebateIdempotencyKey,
   normalizeDebateJuryStateV1,
+  normalizeDebateModeratorName,
   normalizeDebateModeratorTitle,
   normalizeDebateMotionSlateV1,
   normalizeDebateSetupSuggestionV1,
@@ -392,6 +393,14 @@ test("normalizes a frozen moderator title with a safe legacy default", () => {
   );
 });
 
+test("normalizes a public moderator name without changing its fallback identity", () => {
+  assert.equal(
+    normalizeDebateModeratorName("  Justice Aurora  "),
+    "Justice Aurora",
+  );
+  assert.equal(normalizeDebateModeratorName("", "Ada Finch"), "Ada Finch");
+});
+
 test("keeps legacy five-juror records readable while capping malformed extra seats", () => {
   const jurors = Array.from({ length: 7 }, (_, index) => ({
     role: "juror",
@@ -599,6 +608,7 @@ test("defaults legacy Debate records to Forum and normalizes Turnabout state", (
         credibilityRemaining: 2,
         failedActions: 1,
         sustainedTestimonyIds: ["testimony-1", "testimony-1"],
+        sustainedEvidenceIds: ["evidence-1", "evidence-1"],
         evidenceSourceMap: {
           "mystery-evidence-1": "evidence-1",
           "bad marker": "private-evidence",
@@ -606,9 +616,68 @@ test("defaults legacy Debate records to Forum and normalizes Turnabout state", (
         testimonySourceMap: {
           "mystery-testimony-1": "testimony-1",
         },
+        courtroomComposition: {
+          version: 1,
+          prosecutionCoCounsel: {
+            version: 1,
+            id: "partner-1",
+            name: "Partner",
+            color: "#123456",
+            glyph: "◆",
+            avatarDetails: null,
+            voiceProfile: null,
+            revision: "partner-revision",
+          },
+          defenseClient: {
+            version: 1,
+            id: "accused-1",
+            name: "Accused",
+            color: null,
+            glyph: "●",
+            avatarDetails: null,
+            voiceProfile: null,
+            revision: "accused-revision",
+          },
+          eligibleWitnesses: [
+            {
+              seatId: "suspect-2",
+              figure: {
+                version: 1,
+                id: "witness-1",
+                name: "Witness",
+                color: null,
+                glyph: "▲",
+                avatarDetails: null,
+                voiceProfile: null,
+                revision: "witness-revision",
+              },
+            },
+          ],
+        },
         verdict: null,
       },
-      statements: [],
+      statements: [
+        {
+          id: "mystery-statement-1",
+          sideId: "against",
+          speakerBotId: "witness-1",
+          content: "An exact submitted statement.",
+          sourceIds: ["mystery-testimony-1"],
+          status: "ready",
+          createdEventId: "mystery-event-1",
+          recordTestimonyId: "testimony-1",
+          mysteryWitness: {
+            version: 1,
+            kind: "submitted_interview",
+            seatId: "suspect-2",
+            botId: "witness-1",
+            name: "Witness",
+            sourceId: "mystery-testimony-1",
+            ordinal: 2,
+            statementCount: 3,
+          },
+        },
+      ],
       contradictions: [],
     },
     "turnabout",
@@ -616,6 +685,18 @@ test("defaults legacy Debate records to Forum and normalizes Turnabout state", (
   assert.equal(mysteryCourt.format, "turnabout");
   assert.equal(mysteryCourt.mysteryTrial?.frozenInvestigation.theory?.culpritSeatId, "suspect-2");
   assert.deepEqual(mysteryCourt.mysteryTrial?.sustainedTestimonyIds, ["testimony-1"]);
+  assert.deepEqual(mysteryCourt.mysteryTrial?.sustainedEvidenceIds, ["evidence-1"]);
+  assert.equal(
+    mysteryCourt.mysteryTrial?.courtroomComposition.prosecutionCoCounsel.name,
+    "Partner",
+  );
+  assert.deepEqual(
+    mysteryCourt.mysteryTrial?.courtroomComposition.eligibleWitnesses.map(
+      (witness) => witness.seatId,
+    ),
+    ["suspect-2"],
+  );
+  assert.equal(mysteryCourt.statements[0]?.mysteryWitness?.ordinal, 2);
   assert.deepEqual(mysteryCourt.mysteryTrial?.evidenceSourceMap, {
     "mystery-evidence-1": "evidence-1",
   });

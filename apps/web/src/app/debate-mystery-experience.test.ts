@@ -18,6 +18,13 @@ import {
   mysteryRoomSuspectFacing,
   mysteryRoomSuspectWalkProfile,
 } from "./debateMysteryRoomWalk.ts";
+import {
+  debateMysteryDeskFallbackPosition,
+  debateMysteryDeskPositionFromClient,
+  decodeDebateMysteryDeskDragPayload,
+  encodeDebateMysteryDeskDragPayload,
+  placeDebateMysteryDeskReference,
+} from "./debateMysteryDeskDnD.ts";
 import { DEBATE_MYSTERY_ROOM_TEMPLATES } from "@localai/shared";
 
 const source = readFileSync(
@@ -53,6 +60,49 @@ function webpDimensions(file: Buffer): { width: number; height: number } {
   }
   throw new Error("Expected a lossy VP8 WebP frame");
 }
+
+describe("Whodunnit Desk drag and drop", () => {
+  it("round-trips a typed Desk reference without breaking ids that contain colons", () => {
+    const encoded = encodeDebateMysteryDeskDragPayload({ kind: "evidence", id: "room:object:7" });
+    assert.deepEqual(decodeDebateMysteryDeskDragPayload(encoded), {
+      kind: "evidence",
+      id: "room:object:7",
+    });
+    assert.equal(decodeDebateMysteryDeskDragPayload("not-a-desk-item"), null);
+  });
+
+  it("places drops at the pointer while keeping the physical item on the table", () => {
+    assert.deepEqual(debateMysteryDeskPositionFromClient({
+      clientX: 300,
+      clientY: 250,
+      left: 100,
+      top: 100,
+      width: 400,
+      height: 300,
+    }), { x: 50, y: 50 });
+    assert.deepEqual(debateMysteryDeskPositionFromClient({
+      clientX: -100,
+      clientY: 900,
+      left: 100,
+      top: 100,
+      width: 400,
+      height: 300,
+    }), { x: 18, y: 78.67 });
+  });
+
+  it("gives click and keyboard placement a physical stagger instead of fixed slots", () => {
+    assert.notDeepEqual(debateMysteryDeskFallbackPosition(0), debateMysteryDeskFallbackPosition(1));
+    assert.notDeepEqual(debateMysteryDeskFallbackPosition(1), debateMysteryDeskFallbackPosition(7));
+  });
+
+  it("moves an existing reference instead of duplicating it", () => {
+    const reference = { kind: "lead" as const, id: "lead-1", label: "Timeline" };
+    const first = placeDebateMysteryDeskReference([], reference, { x: 20, y: 30 });
+    const moved = placeDebateMysteryDeskReference(first, reference, { x: 72, y: 64 });
+    assert.equal(moved.length, 1);
+    assert.deepEqual(moved[0], { reference, x: 72, y: 64, z: 2 });
+  });
+});
 
 describe("Debate Whodunnit experience", () => {
   it("uses a separate investigation surface and resumes it directly from Archive", () => {
@@ -174,6 +224,8 @@ describe("Debate Whodunnit experience", () => {
     assert.match(source, /data-tutorial-target="whodunnit-room-case-kit"/u);
     assert.match(source, /data-tutorial-target="whodunnit-room-lock"/u);
     assert.match(source, /Choose or drag a Case Kit item/u);
+    assert.match(source, /filter\(\(target\) => target\.targetKind === "region"\)/u);
+    assert.match(source, /Portable locked containers stay in Case inventory/u);
     assert.match(source, /All visible areas inspected/u);
     assert.doesNotMatch(source, /Room investigation complete/u);
     assert.match(source, /data-access-ready/u);
@@ -184,6 +236,15 @@ describe("Debate Whodunnit experience", () => {
     assert.match(css, /\.roomPanel\[data-focus="search"\] > header \.roomCaseKit[\s\S]*top: calc\(100% \+ 0\.75rem\)[\s\S]*max-height: min\(46dvh, 22rem\)/u);
     assert.match(css, /\.roomLockTarget/u);
     assert.match(css, /min-width: 3\.5rem/u);
+  });
+
+  it("keeps the Theory Board record readable instead of constraining testimony to prop dimensions", () => {
+    assert.match(source, /className=\{styles\.theoryEvidenceVisual\}/u);
+    assert.match(css, /\.theoryEvidenceVisual[\s\S]*width: 1\.65rem[\s\S]*height: 1\.65rem/u);
+    assert.match(css, /\.theoryTestimony > span[\s\S]*flex: 1 1 auto[\s\S]*width: auto[\s\S]*height: auto/u);
+    assert.doesNotMatch(css, /\.proofAttach label > span[\s\S]*width: 1\.65rem/u);
+    assert.doesNotMatch(source, /setDeskOpen\(state\.playPhase === "theory"\)/u);
+    assert.doesNotMatch(source, /if \(state\.playPhase === "theory"\) setDeskOpen\(true\)/u);
   });
 
   it("preserves undiscovered-map secrecy and uses Mini search presences before HD interview focus", () => {
@@ -521,15 +582,24 @@ describe("Debate Whodunnit experience", () => {
     assert.match(source, /const editLeadAnnotation/u);
     assert.match(source, /Save comment/u);
     assert.match(source, /caseFileTab === "leads"[\s\S]*notebook\?\.leadAnnotations/u);
-    assert.match(source, /comparison slots/u);
+    assert.match(source, /physical desk surface/u);
     assert.match(source, /onDrop=/u);
+    assert.match(source, /const \[deskPlacements, setDeskPlacements\]/u);
+    assert.match(source, /decodeDebateMysteryDeskDragPayload/u);
+    assert.match(source, /debateMysteryDeskPositionFromClient/u);
+    assert.match(source, /renderDeskReference\(placement\.reference, "desk"\)/u);
+    assert.match(source, /Return \$\{placement\.reference\.label\} to its tray/u);
     assert.match(source, /<DebateEvidenceDocument/u);
     assert.match(source, /documentKind: "brave"/u);
     assert.match(source, /documentKind: "scholar"/u);
     assert.match(source, /className=\{styles\.deskEvidenceObject\}/u);
     assert.match(source, /className=\{styles\.deskDocumentTray\}/u);
     assert.match(source, /className=\{styles\.deskEvidenceTray\}/u);
-    assert.match(source, /application\/x-prism-desk-reference/u);
+    assert.match(source, /DEBATE_MYSTERY_DESK_DRAG_MIME/u);
+    assert.match(source, /if \(reference\.documentKind\) playMysterySfx\("paper-pickup"\)/u);
+    assert.match(source, /reference\.kind === "evidence"\) playDeskItemSfx\(reference, "pickup"\)/u);
+    assert.match(source, /reference\.kind === "evidence"\) playDeskItemSfx\(reference, "place"\)/u);
+    assert.match(source, /playDebateMysteryDeskItemSfx/u);
     assert.match(evidenceDocumentSource, /One physical source prop shared by Forum lecterns and the Whodunnit desk/u);
     assert.match(forumCss, /\.evidencePedestalDocument\[data-presentation="desk"\]/u);
     assert.match(source, /renderInvestigatorDesk\("theory"\)/u);
@@ -539,7 +609,8 @@ describe("Debate Whodunnit experience", () => {
     assert.doesNotMatch(source, /Retired v1 notebook|\+ New page|Review page polish/u);
     assert.match(css, /\.investigatorDesk/u);
     assert.match(css, /\.investigatorDesk \{ grid-column: 2;/u);
-    assert.match(css, /\.comparisonSlots/u);
+    assert.match(css, /\.deskCanvas/u);
+    assert.match(css, /\.deskPlacement/u);
     assert.match(css, /\.suspectFolderRack/u);
   });
 
