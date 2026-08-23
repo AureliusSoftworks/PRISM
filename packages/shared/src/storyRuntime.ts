@@ -6,6 +6,10 @@ import {
   normalizeBotPowerMutePerformanceV1,
   type BotPowerMutePerformanceV1,
 } from "./botPower.ts";
+import {
+  normalizeBotPowerTrollPresentationV1,
+  type BotPowerTrollPresentationV1,
+} from "./trollPower.ts";
 
 export type StorySessionStatus = "generating" | "playing" | "complete" | "failed";
 export type StoryProgressStatus = "playing" | "complete";
@@ -80,6 +84,8 @@ export interface StoryScene {
   annoyanceTargetBotId?: string;
   /** Public replay-stable timed Mute presentation; contains no intended speech. */
   mutePerformance?: BotPowerMutePerformanceV1;
+  /** Public Troll delivery state frozen into the scene for replay. */
+  botPowerTrollPresentation?: BotPowerTrollPresentationV1;
   speakerName?: string;
   spritePose?: StorySpritePose;
   backgroundAssetId?: string;
@@ -342,6 +348,10 @@ function parseScenes(raw: unknown): StoryScene[] {
     const annoyanceTargetBotId = readOptionalString(row.annoyanceTargetBotId);
     const mutePerformance =
       normalizeBotPowerMutePerformanceV1(row.mutePerformance) ?? undefined;
+    const botPowerTrollPresentation =
+      normalizeBotPowerTrollPresentationV1(
+        row.botPowerTrollPresentation,
+      ) ?? undefined;
     if (spritePose && !STORY_SPRITE_POSE_SET.has(spritePose)) {
       throw new Error(`Unknown story sprite pose "${spritePose}".`);
     }
@@ -357,6 +367,7 @@ function parseScenes(raw: unknown): StoryScene[] {
       ...(audienceBotIds ? { audienceBotIds } : {}),
       ...(annoyanceTargetBotId ? { annoyanceTargetBotId } : {}),
       ...(mutePerformance ? { mutePerformance } : {}),
+      ...(botPowerTrollPresentation ? { botPowerTrollPresentation } : {}),
       ...(readOptionalString(row.speakerName) ? { speakerName: readOptionalString(row.speakerName) } : {}),
       ...(spritePose ? { spritePose: spritePose as StorySpritePose } : {}),
       ...(readOptionalString(row.backgroundAssetId)

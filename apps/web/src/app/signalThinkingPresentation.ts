@@ -96,6 +96,8 @@ export function signalPresentedThinkingRole(args: {
   producerGuestThinking: boolean;
   producerGuestSipActive: boolean;
   generationBusy: boolean;
+  voicePreparationPending: boolean;
+  hasPreparedMessage: boolean;
   hasSpeakingMessage: boolean;
   nextSpeakerRole: BotcastSpeakerRole | null;
   generationThinkingRole: BotcastSpeakerRole | null;
@@ -105,15 +107,37 @@ export function signalPresentedThinkingRole(args: {
   if (args.producerGuestThinking) {
     return args.producerGuestSipActive ? null : "guest";
   }
-  // Voice preparation has a message on deck but no visible thinking state.
-  // Do not turn that compacted audio wait into a second thinking interval.
-  if (!args.generationBusy || args.hasSpeakingMessage) return null;
+  // A prepared message can lead its React speech state by one commit. `busy`
+  // also remains true through voice preparation. Neither handoff belongs to
+  // the next scheduled speaker's thinking interval.
+  if (
+    args.hasPreparedMessage ||
+    args.voicePreparationPending ||
+    !args.generationBusy ||
+    args.hasSpeakingMessage
+  ) {
+    return null;
+  }
   if (args.producerGuestSipActive && args.nextSpeakerRole === "guest") {
     return null;
   }
   return args.generationThinkingRunMatches
     ? args.generationThinkingRole
     : args.nextSpeakerRole;
+}
+
+/** Keeps a completed thinking interval linked through React's prepared-state handoff. */
+export function signalThinkingFollowingMessageId(args: {
+  liveSpeechMessageId: string | null;
+  speakingMessageId: string | null;
+  preparedMessageId: string | null;
+}): string | null {
+  return (
+    args.liveSpeechMessageId?.trim() ||
+    args.speakingMessageId?.trim() ||
+    args.preparedMessageId?.trim() ||
+    null
+  );
 }
 
 /**

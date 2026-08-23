@@ -419,6 +419,31 @@ export interface DebateSetupSuggestionAppliedState {
   sourcesSkippedNotice: string | null;
 }
 
+export function anchorDebateSetupCast(input: {
+  cast: DebateCastSelection;
+  anchorBotId: string;
+  anchorSlot: keyof DebateCastSelection;
+  selectableSlots: readonly (keyof DebateCastSelection)[];
+  availableBotIds: readonly string[];
+}): DebateCastSelection {
+  const next = { ...input.cast };
+  for (const slot of input.selectableSlots) {
+    if (slot !== input.anchorSlot && next[slot] === input.anchorBotId) {
+      next[slot] = "";
+    }
+  }
+  next[input.anchorSlot] = input.anchorBotId;
+  const used = new Set(Object.values(next).filter(Boolean));
+  for (const slot of input.selectableSlots) {
+    if (next[slot]) continue;
+    const replacement = input.availableBotIds.find((botId) => !used.has(botId));
+    if (!replacement) continue;
+    next[slot] = replacement;
+    used.add(replacement);
+  }
+  return next;
+}
+
 /**
  * Map a setup-suggestion payload into Debate Studio setters without auto-start.
  * Preserves Prism's chosen seat (Judge / Spectate / Crossfire), Jury flag,

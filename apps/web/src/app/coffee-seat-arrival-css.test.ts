@@ -405,26 +405,22 @@ describe("Coffee seat arrival CSS", () => {
     );
   });
 
-  it("keeps live bot blinks running during speech with a calmer cadence", () => {
+  it("keeps live bot blinks running during speech with the normal cadence", () => {
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /const COFFEE_SEAT_TALKING_BLINK_GAP_MULTIPLIER = 1\.35;/,
+      /function coffeeSeatBlinkGapMs\(\): number \{\s+return randomBetween\(1500, 4000\);/,
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /function coffeeSeatBlinkGapMs\(talking = false\): number \{\s+const gapMs = randomBetween\(1500, 4000\);\s+return talking\s+\? gapMs \* COFFEE_SEAT_TALKING_BLINK_GAP_MULTIPLIER\s+: gapMs;/,
+      /function coffeeSeatExtraBlinkCount\(\): number \{\s+const roll = Math\.random\(\);\s+if \(roll < 0\.05\) return 2;\s+if \(roll < 0\.22\) return 1;/,
+    );
+    assert.doesNotMatch(
+      coffeeSeatPlateEmojiSource,
+      /TALKING_BLINK_GAP_MULTIPLIER|isTalkingRef/,
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /if \(talking\) \{\s+if \(roll < 0\.03\) return 2;\s+if \(roll < 0\.14\) return 1;/,
-    );
-    assert.match(
-      coffeeSeatPlateEmojiSource,
-      /const isTalkingRef = useRef\(effectiveTalking\);\s+const blinkPhase[\s\S]*?useEffect\(\(\) => \{\s+isTalkingRef\.current = effectiveTalking;\s+\}, \[effectiveTalking\]\);/,
-    );
-    assert.match(
-      coffeeSeatPlateEmojiSource,
-      /const talking = blinkWhileTalking && isTalkingRef\.current;\s+armBlink\(\s+coffeeSeatBlinkGapMs\(talking\),\s+coffeeSeatExtraBlinkCount\(talking\),/,
+      /const armNextBlink = \(\) => \{\s+armBlink\(coffeeSeatBlinkGapMs\(\), coffeeSeatExtraBlinkCount\(\)\);/,
     );
     assert.match(
       coffeeSeatPlateEmojiSource,

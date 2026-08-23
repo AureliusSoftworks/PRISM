@@ -641,6 +641,7 @@ async function playBytesWithMedia(
   expectedGeneration: number,
   lifecycle?: VoicePlaybackLifecycle,
   isPlaybackStillValid?: () => boolean,
+  alignment?: EnglishVoiceCharacterAlignment | null,
 ): Promise<void> {
   const playbackStillValid = (): boolean =>
     expectedGeneration === generation && (isPlaybackStillValid?.() ?? true);
@@ -685,7 +686,7 @@ async function playBytesWithMedia(
           lifecycle,
           durationMs,
           () => englishVoiceMediaElapsedMs(audio.currentTime, playbackTempo),
-          null,
+          alignment,
           { startDelayMs: englishMediaOutputLatencyMs() },
         );
       } else {
@@ -1161,6 +1162,7 @@ async function playAudio(
   stereoPan?: number,
   isPlaybackStillValid?: () => boolean,
   channel: VoicePlaybackChannel = "primary",
+  alignment?: EnglishVoiceCharacterAlignment | null,
 ): Promise<void> {
   const playbackStillValid = (): boolean =>
     expectedGeneration === generation && (isPlaybackStillValid?.() ?? true);
@@ -1195,6 +1197,8 @@ async function playAudio(
       stereoPan,
       channel,
       lifecycle,
+      alignment,
+      alignMouthToDecodedSpeech: engineUsed === "elevenlabs",
       compensateLifecycleForOutputLatency: true,
       isCurrent: playbackStillValid,
     });
@@ -1214,6 +1218,7 @@ async function playAudio(
       expectedGeneration,
       lifecycle,
       isPlaybackStillValid,
+      alignment,
     );
     return;
   }
@@ -1610,6 +1615,7 @@ export function enqueueEnglishVoice(
   stereoPan = 0,
   isPlaybackStillValid?: () => boolean,
   channel: VoicePlaybackChannel = "primary",
+  sourceAlignment?: EnglishVoiceCharacterAlignment | null,
 ): Promise<void> {
   const expectedGeneration = generation;
   const feelProfile = botAudioVoiceProfileForFeelLane(
@@ -1620,6 +1626,10 @@ export function enqueueEnglishVoice(
     ...applyVoiceDeliveryMoodToProfile(feelProfile, deliveryMood),
     volume: normalizeBotVoiceVolume(globalVolume),
   };
+  const playbackAlignment = scaleEnglishVoiceAlignmentForPlayback(
+    sourceAlignment ?? lifecycle?.sourceAlignment ?? null,
+    playbackProfile,
+  );
   const run = () =>
     playAudio(
       bytes,
@@ -1634,6 +1644,7 @@ export function enqueueEnglishVoice(
       stereoPan,
       isPlaybackStillValid,
       channel,
+      playbackAlignment,
     );
   // Crosstalk / reaction must not wait behind the primary English queue or the
   // interrupt shout cannot overlap the cut-off line.

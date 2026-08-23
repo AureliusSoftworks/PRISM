@@ -37,6 +37,14 @@ const pageCss = readFileSync(
 );
 
 describe("Signal experience shell", () => {
+  it("keeps the generated studio raster as a stable image source", () => {
+    assert.match(
+      source,
+      /<img[\s\S]{0,180}className=\{styles\.atmosphere\}[\s\S]{0,180}src=\{stageAtmosphere\.imageUrl\}/u,
+    );
+    assert.doesNotMatch(source, /\["--botcast-atmosphere" as string\]/u);
+    assert.match(css, /\.stageScene > img\.atmosphere/u);
+  });
   it("resolves transient session receipts once when a Signal episode ends", () => {
     assert.match(source, /onSessionEnded\?: \(sessionId: string\) => void/u);
     assert.match(
@@ -335,9 +343,13 @@ describe("Signal experience shell", () => {
     assert.doesNotMatch(pageSource, /onDeadAirAside=\{playDeadAirAside\}/u);
   });
 
-  it("attaches Signal cups to the shared sip and return foley lifecycle", () => {
+  it("plays the Signal sip immediately and owns the return clank at animation end", () => {
     assert.match(source, /coffeeCupRootRef=\{signalStageRef\}/u);
     assert.match(pageSource, /data-cup-sipping=/u);
+    assert.equal(
+      source.match(/data-cup-placement-foley="animation-end"/gu)?.length,
+      2,
+    );
   });
 
   it("lets a Producer guest sip coffee without submitting a transcript turn", () => {
@@ -554,6 +566,10 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /signalCupSipTargetFromMouth\(\{/u);
     assert.match(source, /mouthBounds: mouth\.getBoundingClientRect\(\)/u);
+    assert.match(
+      source,
+      /const syncSignalCupTravel = useCallback[\s\S]{0,520}syncSignalSipMouthTargets\(\);[\s\S]{0,80}setSignalCupTravelByRole/u,
+    );
     assert.match(source, /setProperty\("--signal-cup-mouth-x"/u);
     assert.doesNotMatch(
       source,
@@ -1543,7 +1559,10 @@ describe("Signal experience shell", () => {
       source,
       /candidateGuestIds: guestOptions\.map\(\(bot\) => bot\.id\)/u,
     );
-    assert.match(source, /const resolvedGuestId = response\.guestBotId \?\? guestId/u);
+    assert.match(
+      source,
+      /const resolvedGuestId = resolvedSignalBookingGuestId\(\{[\s\S]*anchoredGuestId,[\s\S]*suggestedGuestId: response\.guestBotId,[\s\S]*requestedGuestId: guestId/u,
+    );
     assert.match(source, /setGuestDraftId\(resolvedGuestId\)/u);
     assert.match(source, /field: "booking"/u);
     assert.match(source, /setTopicDraft\(topic\)/u);
@@ -1836,6 +1855,36 @@ describe("Signal experience shell", () => {
     assert.match(pageSource, /onInterrupt: composer\.onShh/u);
   });
 
+  it("keeps prepared-line handoff out of the next speaker's thinking interval", () => {
+    assert.match(
+      source,
+      /signalPresentedThinkingRole\(\{[\s\S]{0,420}hasPreparedMessage:\s*activeSpeechMessageIdRef\.current\s*!==\s*null/u,
+    );
+    assert.match(
+      source,
+      /signalStageThinkingRole\(\{[\s\S]{0,240}voicePreparationPending:\s*liveBotVoicePreparationPending/u,
+    );
+    assert.match(
+      source,
+      /signalThinkingFollowingMessageId\(\{[\s\S]{0,220}preparedMessageId:\s*activeSpeechMessageIdRef\.current/u,
+    );
+  });
+
+  it("uses server-owned host availability and blocks recovery screening while live", () => {
+    const recoveryStart = source.indexOf("const showHasVacantHost");
+    const recoveryEnd = source.indexOf("const askReplacementHost", recoveryStart);
+    const recoverySource = source.slice(recoveryStart, recoveryEnd);
+    assert.match(
+      recoverySource,
+      /!selectedShow\.hasActiveHost/u,
+    );
+    assert.match(
+      recoverySource,
+      /signalShouldScreenHostRecovery\(\{[\s\S]{0,180}episodeStatus:\s*episode\?\.status\s*\?\?\s*null/u,
+    );
+    assert.doesNotMatch(recoverySource, /!hostBot|botsById/u);
+  });
+
   it("lets two echo-bound bots reach Signal's server-owned opening fallback", () => {
     assert.doesNotMatch(
       source,
@@ -1895,8 +1944,10 @@ describe("Signal experience shell", () => {
       source,
       /Brief interjections stay audible without creating a 1→2→1 camera/u,
     );
-    assert.match(source, /data-interjection-attempt=\{/u);
-    assert.match(
+    assert.match(source, /data-signal-reaction-caption="true"/u);
+    assert.match(source, /data-signal-transcript-speech="true"/u);
+    assert.doesNotMatch(source, /data-interjection-attempt=\{/u);
+    assert.doesNotMatch(
       css,
       /\.listenerReactionText\[data-interjection-attempt="true"\]/u,
     );
@@ -3007,9 +3058,10 @@ describe("Signal experience shell", () => {
     );
     assert.match(css, /mask-position:\s*var\(--signal-studio-art-position\)/u);
     assert.match(css, /\.showBrandAtmosphere\s*\{[^}]*opacity:\s*1/iu);
-    assert.match(
+    assert.match(css, /\.stageScene > img\.atmosphere/u);
+    assert.doesNotMatch(
       css,
-      /data-studio-source="image"[^}]*background-image:\s*var\(--botcast-atmosphere\)/iu,
+      /data-studio-source="image"[^}]*background-image/iu,
     );
     assert.doesNotMatch(source, /styles\.(?:chair|boomMic|studioDesk)/u);
     assert.doesNotMatch(css, /\.(?:chair|boomMic|studioDesk)\s*\{/u);

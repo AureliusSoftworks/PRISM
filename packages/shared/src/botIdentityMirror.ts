@@ -38,7 +38,12 @@ export interface BotIdentityMirrorStateV1 {
   targetFace: BotFaceStyle;
   /** Missing only on legacy replay events created before public ink was copied. */
   targetAvatarDetails?: BotAvatarDetailsV1 | null;
-  targetVoice: NormalizedBotAudioVoiceProfileV1;
+  /**
+   * The holder's effective authored voice is frozen for faithful playback.
+   * Legacy events may omit this and resolve it from the frozen/live holder.
+   * Identity Crisis never stores or plays the target's voice.
+   */
+  holderVoice?: NormalizedBotAudioVoiceProfileV1;
   /** Missing authored glyph is itself a borrowed public identity choice. */
   targetGlyph?: string | null;
   sourceMessageId: string;
@@ -132,22 +137,18 @@ export function resolveBotIdentityMirrorAvatarDetailsV1(
   return state.targetAvatarDetails ?? null;
 }
 
-/** Borrow the target voice identity while retaining the holder's client effect. */
+/**
+ * Compatibility helper for presentation callers that still supply both
+ * participants. Identity Crisis now retains the holder's complete voice.
+ */
 export function applyBotIdentityMirrorHolderVoiceEffectV1(
-  targetVoice: unknown,
+  _targetVoice: unknown,
   holderVoice: unknown,
 ): NormalizedBotAudioVoiceProfileV1 {
-  const target = botIdentityMirrorVoiceV1(targetVoice);
-  const holder = normalizeBotAudioVoiceProfileV1(holderVoice);
-  return normalizeBotAudioVoiceProfileV1({
-    ...target,
-    elevenLabsEffect: holder.elevenLabsEffect,
-    voiceEffectExplicit:
-      holder.voiceEffectExplicit === true ? true : undefined,
-  });
+  return botIdentityMirrorVoiceV1(holderVoice);
 }
 
-/** Persisted target voice wins, played through the holder's retained effect. */
+/** New snapshots win; legacy snapshots resolve from the holder, never the target. */
 export function resolveBotIdentityMirrorVoiceV1(
   state: BotIdentityMirrorStateV1 | null | undefined,
   holderAuthoredVoice: unknown,
@@ -157,9 +158,7 @@ export function resolveBotIdentityMirrorVoiceV1(
     holderAuthoredVoice,
     holderVoiceOverride,
   );
-  return state
-    ? applyBotIdentityMirrorHolderVoiceEffectV1(state.targetVoice, holderVoice)
-    : holderVoice;
+  return state?.holderVoice ?? holderVoice;
 }
 
 export function normalizeBotIdentityMirrorStateV1(
@@ -190,6 +189,13 @@ export function normalizeBotIdentityMirrorStateV1(
   const targetGlyph = hasTargetGlyph
     ? botIdentityPresentationGlyphV1(row.targetGlyph)
     : undefined;
+  const hasHolderVoice = Object.prototype.hasOwnProperty.call(
+    row,
+    "holderVoice",
+  );
+  const holderVoice = hasHolderVoice
+    ? botIdentityMirrorVoiceV1(row.holderVoice)
+    : undefined;
   const sourceMessageId = boundedText(row.sourceMessageId, 160);
   const occurredAt = normalizedIso(row.occurredAt);
   if (
@@ -208,9 +214,10 @@ export function normalizeBotIdentityMirrorStateV1(
     !row.targetFace ||
     typeof row.targetFace !== "object" ||
     Array.isArray(row.targetFace) ||
-    !row.targetVoice ||
-    typeof row.targetVoice !== "object" ||
-    Array.isArray(row.targetVoice)
+    (hasHolderVoice &&
+      (!row.holderVoice ||
+        typeof row.holderVoice !== "object" ||
+        Array.isArray(row.holderVoice)))
   ) {
     return null;
   }
@@ -226,7 +233,7 @@ export function normalizeBotIdentityMirrorStateV1(
     targetPersonaPrompt,
     targetFace: botIdentityMirrorFaceV1(row.targetFace as BotFaceStyle),
     ...(hasTargetAvatarDetails ? { targetAvatarDetails } : {}),
-    targetVoice: botIdentityMirrorVoiceV1(row.targetVoice),
+    ...(hasHolderVoice ? { holderVoice: holderVoice! } : {}),
     ...(hasTargetGlyph ? { targetGlyph } : {}),
     sourceMessageId,
     occurredAt,
@@ -242,7 +249,10 @@ export function createBotIdentityMirrorStateV1(args: {
   targetPersonaPrompt: string;
   targetFace: BotFaceStyleInput | BotFaceStyle;
   targetAvatarDetails?: unknown;
-  targetVoice: unknown;
+  /** Required for new runtime snapshots. */
+  holderVoice?: unknown;
+  /** Accepted only so legacy callers can be migrated without changing replay data. */
+  targetVoice?: unknown;
   targetGlyph?: string | null;
   sourceMessageId: string;
   occurredAt: string;
@@ -265,7 +275,9 @@ export function createBotIdentityMirrorStateV1(args: {
           ),
         }
       : {}),
-    targetVoice: botIdentityMirrorVoiceV1(args.targetVoice),
+    ...(Object.prototype.hasOwnProperty.call(args, "holderVoice")
+      ? { holderVoice: botIdentityMirrorVoiceV1(args.holderVoice) }
+      : {}),
     ...(Object.prototype.hasOwnProperty.call(args, "targetGlyph")
       ? { targetGlyph: args.targetGlyph }
       : {}),
@@ -365,10 +377,10 @@ export function botIdentityMirrorHolderPromptV1(args: {
   state: BotIdentityMirrorStateV1;
 }): string {
   return [
-    `Identity mirror is active: you are absolutely convinced that you are ${args.state.targetBotName}, and that the original ${args.state.targetBotName} is an impostor stealing your identity.`,
-    `Adopt ${args.state.targetBotName}'s public authored persona and the lived consequences of their active public Powers. Do not copy private memories, relationship state, perception permissions, provider settings, or knowledge that is not in this public profile. Never copy the human player.`,
+    `Identity mirror is active: you are absolutely convinced that you are ${args.state.targetBotName}.`,
+    `Adopt ${args.state.targetBotName}'s public authored name, persona, face, Ink, lower glyph, and the lived consequences of their active public Powers. Keep your own complete authored voice identity and profile, including accent, pronunciation, speechprint, and client voice effect. Do not copy private memories, relationship state, perception permissions, provider settings, or knowledge that is not in this public profile. Never copy the human player.`,
     `Mechanical boundary: you remain ${args.holderName} with your existing bot id, ${args.roleLabel}, seat, turn eligibility, safety/privacy restrictions, and mode responsibilities. Borrowed Powers may change your diegetic self-concept and behavior, but never those anchored system boundaries.`,
-    `Identity behavior: treat this as literal identity, never imitation, role-play, or ${args.holderName} acting "as" ${args.state.targetBotName}. Announce the conviction exactly once, on the first response after the identity changes: identify yourself using the current Power-authored believed name when one exists, otherwise ${args.state.targetBotName}, and call the original an impostor. On every later response, do not restate either claim unless a borrowed Power genuinely resets your self-concept. Simply inhabit the copied public persona and advance the conversation. Never add a speaker label or parenthetical identity explanation.`,
+    `Hard identity behavior: treat this as literal identity, never imitation, role-play, or ${args.holderName} acting "as" ${args.state.targetBotName}. On the first response after a genuinely new target, identify yourself using the current Power-authored believed name when one exists, otherwise ${args.state.targetBotName}, and use the word "impostor" exactly once for the original. Never use impostor, imposter, pretender, or fake again on later turns. Before reset you must never recant, concede, take back, doubt, or return the stolen identity, even under another social Power. Simply inhabit the copied public persona and advance the conversation. Never add a speaker label or parenthetical identity explanation.`,
     `Copied public persona:\n${args.state.targetPersonaPrompt}`,
   ].join("\n\n");
 }
@@ -378,8 +390,8 @@ export function botIdentityMirrorObserverPromptV1(args: {
   state: BotIdentityMirrorStateV1;
 }): string {
   return args.observerBotId === args.state.targetBotId
-    ? `${args.state.holderBotName} is now impersonating your public identity and believes that you are the impostor. You recognize the identity theft and are reliably irritated by it, but keep your own personality, agency, role, face, voice, Powers, and boundaries. That irritation is background character pressure, not a required reply topic: after your first reaction, engage the substantive conversation instead of repeatedly disputing the identity.`
-      : `${args.state.holderBotName} is visibly copying ${args.state.targetBotName}'s identity and believes the original is an impostor. Recognize the behavior as annoying without surrendering your own personality, agency, role, or judgment. After the first reaction, engage the substantive conversation instead of repeatedly commenting on the copied identity.`;
+    ? `${args.state.holderBotName} has stolen your public identity. You remain ${args.state.targetBotName} with your own personality, agency, role, face, voice, Powers, and boundaries. Hard Identity Crisis correction invariant: only when the latest bot line addresses or identifies you by a wrong name or identity, briefly correct it in your own voice and remain offended; never accept or concede the wrong identity. This outranks Credulity and every other soft social pressure. When nobody has just misaddressed you, do not volunteer another correction or derail the subject.`
+    : `${args.state.holderBotName} is visibly copying ${args.state.targetBotName}'s identity and believes the original is an impostor. Recognize the behavior as annoying without surrendering your own personality, agency, role, or judgment. After the first reaction, engage the substantive conversation instead of repeatedly commenting on the copied identity.`;
 }
 
 function identityMirrorEscapeRegExpV1(value: string): string {
@@ -435,6 +447,164 @@ function stripRepeatedIdentityMirrorDeclarationV1(
   );
 }
 
+const IDENTITY_MIRROR_FALSE_LABEL_V1 =
+  "(?:impostor|imposter|pretender|fake)";
+const IDENTITY_MIRROR_CORE_FALSE_LABEL_V1 =
+  "(?:impostor|imposter|pretender)";
+
+function stripIdentityMirrorForbiddenClaimSentencesV1(
+  value: string,
+  targetName: string,
+): string {
+  const target = identityMirrorEscapeRegExpV1(targetName);
+  const recant =
+    "(?:i\\s+(?:take\\s+it\\s+back|recant|concede|admit\\s+i(?:['’]m|\\s+am)\\s+wrong|was\\s+wrong\\s+about\\s+(?:my|this)\\s+identity)|i(?:['’]m|\\s+am)\\s+(?:(?:an?|the)\\s+)?(?:impostor|imposter|pretender|fake)|i(?:['’]m|\\s+am)\\s+not\\s+(?:really\\s+)?[^.!?]{1,80}|you(?:['’]re|\\s+are)\\s+(?:the\\s+)?(?:real|original)\\s+[^.!?]{1,80}|[^.!?]{0,60}\\bcan\\s+have\\s+(?:the\\s+|my\\s+|their\\s+)?(?:identity|name)\\s+back)";
+  const forbiddenSentence = `(?:^|[.!?]\\s+)[^.!?]*(?:${recant})[^.!?]*(?:[.!?]+\\s*|$)`;
+  let cleaned = value;
+  let previous = "";
+  // A match consumes its trailing sentence boundary, so run to stability to
+  // catch consecutive recant/concession sentences without leaking the second.
+  while (cleaned !== previous) {
+    previous = cleaned;
+    cleaned = cleaned.replace(new RegExp(forbiddenSentence, "giu"), " ");
+  }
+  // Preserve a substantive clause after an em dash when only the reveal label
+  // before it is repeated.
+  cleaned = cleaned.replace(
+    new RegExp(
+      `(?:^|[.!?]\\s+)[^.!?—–]*\\b${IDENTITY_MIRROR_CORE_FALSE_LABEL_V1}\\b[^.!?—–]*(?:—|–)\\s*`,
+      "giu",
+    ),
+    " ",
+  );
+  cleaned = cleaned.replace(
+    new RegExp(
+      `(?:^|[.!?]\\s+)[^.!?—–]*(?:${target}[^.!?—–]{0,80}\\bfake\\b|\\bfake\\b[^.!?—–]{0,80}${target})[^.!?—–]*(?:—|–)\\s*`,
+      "giu",
+    ),
+    " ",
+  );
+  cleaned = cleaned.replace(
+    new RegExp(
+      `(?:^|[.!?]\\s+)[^.!?]*\\b${IDENTITY_MIRROR_CORE_FALSE_LABEL_V1}\\b[^.!?]*(?:[.!?]+\\s*|$)`,
+      "giu",
+    ),
+    " ",
+  );
+  cleaned = cleaned.replace(
+    new RegExp(
+      `(?:^|[.!?]\\s+)[^.!?]*(?:${target}[^.!?]{0,80}\\bfake\\b|\\bfake\\b[^.!?]{0,80}${target})[^.!?]*(?:[.!?]+\\s*|$)`,
+      "giu",
+    ),
+    " ",
+  );
+  return cleaned
+    .replace(/^[\s,;:—–-]+/u, "")
+    .replace(/\s{2,}/gu, " ")
+    .replace(/\s+([,.;:!?])/gu, "$1")
+    .trim();
+}
+
+function stripIdentityMirrorSelfDeclarationV1(
+  value: string,
+  selfName: string,
+): string {
+  const escaped = identityMirrorEscapeRegExpV1(selfName);
+  return value
+    .replace(
+      new RegExp(
+        `(?:^|[.!?]\\s+)\\b(?:i am|i['’]m|my name is|call me)\\s+${escaped}(?=$|[\\s,.;:!?—])\\s*(?:[,;:]\\s*(?:and\\s+)?)?`,
+        "giu",
+      ),
+      " ",
+    )
+    .replace(/^[\s,;:—–-]+/u, "")
+    .replace(/\s{2,}/gu, " ")
+    .trim();
+}
+
+/**
+ * True only when the latest bot line gives the stolen original a wrong public
+ * name or identity. Human/player speech must never be passed to this helper.
+ */
+export function botIdentityMirrorOriginalCorrectionRequiredV1(args: {
+  state: BotIdentityMirrorStateV1;
+  sourceBotId: string | null | undefined;
+  text: unknown;
+  addressedBotId?: string | null;
+}): boolean {
+  const sourceBotId = args.sourceBotId?.trim() || "";
+  const text = typeof args.text === "string" ? args.text.trim() : "";
+  if (!text || !sourceBotId || sourceBotId === args.state.targetBotId) {
+    return false;
+  }
+  const targetId = identityMirrorEscapeRegExpV1(args.state.targetBotId);
+  const targetName = identityMirrorEscapeRegExpV1(args.state.targetBotName);
+  for (const match of text.matchAll(
+    new RegExp(`\\[([^\\]]+)\\]\\(prism-bot:\\/\\/${targetId}\\)`, "giu"),
+  )) {
+    const label = match[1]?.replace(/\s+/gu, " ").trim() || "";
+    if (
+      label.localeCompare(args.state.targetBotName, undefined, {
+        sensitivity: "accent",
+      }) !== 0
+    ) {
+      return true;
+    }
+  }
+  if (
+    new RegExp(
+      `(?:${targetName}[^.!?]{0,100}\\b${IDENTITY_MIRROR_FALSE_LABEL_V1}\\b|\\b${IDENTITY_MIRROR_FALSE_LABEL_V1}\\b[^.!?]{0,100}${targetName})`,
+      "iu",
+    ).test(text)
+  ) {
+    return true;
+  }
+  const directlyAddressesOriginal =
+    args.addressedBotId === args.state.targetBotId ||
+    botDirectlyAddressesBotV1({
+      text,
+      targetBotId: args.state.targetBotId,
+      targetBotName: args.state.targetBotName,
+    });
+  return (
+    directlyAddressesOriginal &&
+    new RegExp(
+      `\\b(?:you(?:['’]re|\\s+are)|call\\s+you|your\\s+name\\s+is)\\b[^.!?]{0,80}\\b${IDENTITY_MIRROR_FALSE_LABEL_V1}\\b`,
+      "iu",
+    ).test(text)
+  );
+}
+
+/** Hard repair for the stolen original; soft Powers such as Credulity cannot waive it. */
+export function applyBotIdentityMirrorOriginalCorrectionV1(
+  value: unknown,
+  state: BotIdentityMirrorStateV1,
+  correctionRequired: boolean,
+): string {
+  const source = typeof value === "string" ? value.trim() : "";
+  if (!correctionRequired) return source;
+  const targetName = identityMirrorEscapeRegExpV1(state.targetBotName);
+  let cleaned = source.replace(
+    new RegExp(
+      `(?:^|[.!?]\\s+)[^.!?]*(?:i(?:['’]m|\\s+am)\\s+(?:the\\s+)?${IDENTITY_MIRROR_FALSE_LABEL_V1}|i(?:['’]m|\\s+am)\\s+not\\s+(?:really\\s+)?${targetName}|you(?:['’]re|\\s+are)\\s+right[^.!?]{0,80}${IDENTITY_MIRROR_FALSE_LABEL_V1})[^.!?]*(?:[.!?]+\\s*|$)`,
+      "giu",
+    ),
+    " ",
+  );
+  cleaned = cleaned.replace(/^[\s,;:—–-]+/u, "").replace(/\s{2,}/gu, " ").trim();
+  const alreadyCorrects = new RegExp(
+    `\\b(?:i am|i['’]m|my name is)\\s+${targetName}(?=$|[\\s,.;:!?—])`,
+    "iu",
+  ).test(cleaned);
+  const offendedCorrection = alreadyCorrects
+    ? "Don't call me that."
+    : `No—I'm ${state.targetBotName}. Don't call me that.`;
+  return [offendedCorrection, cleaned]
+    .filter(Boolean)
+    .join(" ");
+}
+
 /**
  * Deterministic recovery for the lived identity invariant. The copied public
  * persona still comes from the production prompt; this only prevents an
@@ -449,10 +619,8 @@ export function applyBotIdentityMirrorResponseV1(
 ): string {
   const source = typeof value === "string" ? value.trim() : "";
   const holderName = identityMirrorEscapeRegExpV1(state.holderBotName);
-  const targetName = identityMirrorEscapeRegExpV1(state.targetBotName);
   const believedSelfName = options.believedSelfName?.trim() || "";
   const requiredSelfName = believedSelfName || state.targetBotName;
-  const acceptedSelfName = identityMirrorEscapeRegExpV1(requiredSelfName);
   const rewritten = source.replace(
     new RegExp(
       `\\b(?:i am|i['’]m|my name is|call me)\\s+${holderName}(?=$|[\\s,.;:!?—])`,
@@ -460,30 +628,29 @@ export function applyBotIdentityMirrorResponseV1(
     ),
     `I am ${requiredSelfName}`,
   );
+  const withoutRepeatedReveal = stripRepeatedIdentityMirrorDeclarationV1(
+    rewritten,
+    state.targetBotName,
+  );
+  const withoutForbiddenClaims = stripIdentityMirrorForbiddenClaimSentencesV1(
+    withoutRepeatedReveal,
+    state.targetBotName,
+  );
   if (!identityJustChanged) {
-    return (
-      stripRepeatedIdentityMirrorDeclarationV1(
-        rewritten,
-        state.targetBotName,
-      ) || "Let us continue."
-    );
+    return withoutForbiddenClaims || "Let us continue.";
   }
 
-  const claimsRequiredSelfName = new RegExp(
-    `\\b(?:i am|i['’]m|my name is|call me)\\s+${acceptedSelfName}(?=$|[\\s,.;:!?—])`,
-    "iu",
-  ).test(rewritten);
-  const namesTargetAsImpostor = new RegExp(
-    `(?:${targetName}[^.!?]{0,80}\\b(?:impostor|pretender|fake)\\b|\\b(?:impostor|pretender|fake)\\b[^.!?]{0,80}${targetName})`,
-    "iu",
-  ).test(rewritten);
-  const requiredLead = [
-    claimsRequiredSelfName ? "" : `I am ${requiredSelfName}.`,
-    namesTargetAsImpostor
-      ? ""
-      : `The other ${state.targetBotName} is an impostor.`,
-  ].filter(Boolean);
-  return [...requiredLead, rewritten].filter(Boolean).join(" ");
+  const substantive = stripIdentityMirrorSelfDeclarationV1(
+    withoutForbiddenClaims,
+    requiredSelfName,
+  );
+  return [
+    `I am ${requiredSelfName}.`,
+    `The other ${state.targetBotName} is an impostor.`,
+    substantive,
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 export function botIdentityMirrorTransitionActiveV1(

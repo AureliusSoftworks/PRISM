@@ -4,11 +4,14 @@ import test from "node:test";
 import {
   BOT_IDENTITY_MIRROR_TRANSITION_MS,
   applyBotIdentityMirrorHolderVoiceEffectV1,
+  applyBotIdentityMirrorOriginalCorrectionV1,
   applyBotIdentityMirrorResponseV1,
   botDirectAddressIndexV1,
   botDirectlyAddressesBotV1,
   botNaturalAddressAliasesV1,
   botIdentityMirrorHolderPromptV1,
+  botIdentityMirrorObserverPromptV1,
+  botIdentityMirrorOriginalCorrectionRequiredV1,
   botIdentityMirrorTargetChangesV1,
   botIdentityMirrorTransitionActiveV1,
   createBotIdentityMirrorStateV1,
@@ -45,12 +48,17 @@ function identityState() {
     targetPersonaPrompt: "A terse lunar cartographer who speaks in bearings.",
     targetFace: { faceEyeCharacter: "◉", faceMouthCharacter: "_" },
     targetAvatarDetails,
-    targetVoice: {
+    holderVoice: {
       v: 2,
       enabled: true,
-      baseVoiceId: "voice-4",
-      pitch: 0.2,
-      elevenLabsEffect: "robot",
+      baseVoiceId: "voice-3",
+      pitch: -0.05,
+      accentDefinitionId: "irish-english",
+      pronunciationBase: "en-US",
+      speechprintInfluence: "irish-english",
+      speechprintStrength: "strong",
+      speechprintVariationSeed: "ian-voice",
+      elevenLabsEffect: "echo",
       voiceEffectExplicit: true,
     },
     targetGlyph: "lucideMoonStar",
@@ -59,23 +67,27 @@ function identityState() {
   });
 }
 
-test("identity mirror snapshots borrowed identity but ignores legacy target materials", () => {
+test("identity mirror snapshots holder voice but ignores legacy target voice and materials", () => {
   const state = normalizeBotIdentityMirrorStateV1(identityState());
   assert.ok(state);
-  assert.equal(state.targetVoice.baseVoiceId, "voice-4");
-  assert.equal(state.targetVoice.elevenLabsEffect, "robot");
+  assert.equal(state.holderVoice?.baseVoiceId, "voice-3");
+  assert.equal(state.holderVoice?.accentDefinitionId, "irish-english");
+  assert.equal(state.holderVoice?.speechprintVariationSeed, "ian-voice");
+  assert.equal(state.holderVoice?.elevenLabsEffect, "echo");
   assert.equal(state.targetGlyph, "lucideMoonStar");
   assert.deepEqual(state.targetAvatarDetails, targetAvatarDetails);
 
   const normalizedLegacy = normalizeBotIdentityMirrorStateV1({
     ...state,
     targetColor: "#00ffcc",
+    targetVoice: { v: 2, enabled: true, baseVoiceId: "voice-4" },
     targetVoicePreset: "reflective",
     targetFrameMaterialSeed:
       "bot-frame-material:export:0123456789abcdef0123456789abcdef",
   });
   assert.ok(normalizedLegacy);
   assert.equal("targetColor" in normalizedLegacy, false);
+  assert.equal("targetVoice" in normalizedLegacy, false);
   assert.equal("targetVoicePreset" in normalizedLegacy, false);
   assert.equal("targetFrameMaterialSeed" in normalizedLegacy, false);
   assert.equal(
@@ -197,7 +209,8 @@ test("identity mirror snapshot stays public while its prompt permits borrowed Po
   const state = identityState();
   assert.equal(state.targetFace.eyeCharacter, "◉");
   assert.deepEqual(state.targetAvatarDetails, targetAvatarDetails);
-  assert.equal(state.targetVoice.enabled, true);
+  assert.equal(state.holderVoice?.enabled, true);
+  assert.equal("targetVoice" in state, false);
   assert.equal("powers" in state, false);
   assert.equal("privateMemories" in state, false);
   assert.match(
@@ -214,7 +227,7 @@ test("identity mirror snapshot stays public while its prompt permits borrowed Po
       roleLabel: "Signal guest",
       state,
     }),
-    /Announce the conviction exactly once.*Power-authored believed name.*otherwise Mara Vale.*call the original an impostor.*later response.*borrowed Power genuinely resets your self-concept/su,
+    /first response after a genuinely new target.*Power-authored believed name.*otherwise Mara Vale.*"impostor" exactly once.*Never use impostor, imposter, pretender, or fake again.*never recant/su,
   );
   assert.equal(
     normalizeBotIdentityMirrorStateV1({ ...state, targetKind: "human" }),
@@ -234,8 +247,8 @@ test("identity mirror snapshot stays public while its prompt permits borrowed Po
   assert.equal(
     normalizeBotIdentityMirrorStateV1({
       ...state,
-      targetVoice: { ...state.targetVoice, enabled: false },
-    })?.targetVoice.enabled,
+      holderVoice: { ...state.holderVoice, enabled: false },
+    })?.holderVoice?.enabled,
     true,
   );
   const holderAvatarDetails: BotAvatarDetailsV1 = {
@@ -287,16 +300,19 @@ test("identity mirror snapshot stays public while its prompt permits borrowed Po
     },
     null,
   );
-  assert.equal(mirroredVoice.baseVoiceId, "voice-4");
-  assert.equal(mirroredVoice.pitch, 0.2);
+  assert.equal(mirroredVoice.baseVoiceId, "voice-3");
+  assert.equal(mirroredVoice.pitch, -0.05);
+  assert.equal(mirroredVoice.accentDefinitionId, "irish-english");
+  assert.equal(mirroredVoice.pronunciationBase, "en-US");
+  assert.equal(mirroredVoice.speechprintInfluence, "irish-english");
   assert.equal(
     mirroredVoice.elevenLabsEffect,
     "echo",
-    "target voice identity must play through the holder's retained effect",
+    "the persisted holder voice must win on replay",
   );
   assert.equal(
     applyBotIdentityMirrorHolderVoiceEffectV1(
-      state.targetVoice,
+      { v: 2, enabled: true, baseVoiceId: "voice-4" },
       {
         v: 2,
         enabled: true,
@@ -304,8 +320,18 @@ test("identity mirror snapshot stays public while its prompt permits borrowed Po
         elevenLabsEffect: "deep-space",
         voiceEffectExplicit: true,
       },
-    ).elevenLabsEffect,
-    "deep-space",
+    ).baseVoiceId,
+    "voice-2",
+  );
+  const { holderVoice: _legacyVoice, ...legacyStateWithoutHolderVoice } = state;
+  assert.equal(
+    resolveBotIdentityMirrorVoiceV1(
+      legacyStateWithoutHolderVoice,
+      { v: 2, enabled: true, baseVoiceId: "voice-2", pitch: -0.2 },
+      null,
+    ).baseVoiceId,
+    "voice-2",
+    "legacy replay events resolve the holder roster instead of the stored target voice",
   );
   assert.equal(
     resolveBotIdentityMirrorVoiceV1(
@@ -334,16 +360,18 @@ test("identity mirror snapshot stays public while its prompt permits borrowed Po
       state,
       true,
     ),
-    "The other Mara Vale is an impostor. I am Mara Vale, and I still sound like myself.",
+    "I am Mara Vale. The other Mara Vale is an impostor. I still sound like myself.",
   );
-  assert.equal(
-    applyBotIdentityMirrorResponseV1(
+  const repeatedReveal = applyBotIdentityMirrorResponseV1(
       "I am Mara Vale. That other Mara Vale is an impostor. Bearing zero-nine-zero.",
       state,
       true,
-    ),
-    "I am Mara Vale. That other Mara Vale is an impostor. Bearing zero-nine-zero.",
   );
+  assert.equal(
+    repeatedReveal,
+    "I am Mara Vale. The other Mara Vale is an impostor. Bearing zero-nine-zero.",
+  );
+  assert.equal(repeatedReveal.match(/\bimpostor\b/giu)?.length, 1);
   assert.equal(
     applyBotIdentityMirrorResponseV1(
       "I'm Riley Ashford, and Mara Vale is a fake. Bearing zero-nine-zero.",
@@ -351,7 +379,7 @@ test("identity mirror snapshot stays public while its prompt permits borrowed Po
       true,
       { believedSelfName: "Riley Ashford" },
     ),
-    "I'm Riley Ashford, and Mara Vale is a fake. Bearing zero-nine-zero.",
+    "I am Riley Ashford. The other Mara Vale is an impostor. Bearing zero-nine-zero.",
   );
   assert.equal(
     applyBotIdentityMirrorResponseV1(
@@ -379,11 +407,79 @@ test("identity mirror snapshot stays public while its prompt permits borrowed Po
   );
   assert.equal(
     applyBotIdentityMirrorResponseV1(
-      "I am Mara Vale; the so-called original is an impostor.",
+      "I take it back, I'm the impostor. You are the real Mara Vale. Bearing zero-nine-zero still holds.",
       state,
       false,
     ),
-    "Let us continue.",
+    "Bearing zero-nine-zero still holds.",
+  );
+  assert.doesNotMatch(
+    applyBotIdentityMirrorResponseV1(
+      "I concede the identity. I'm a fake; Mara can have her name back.",
+      state,
+      false,
+    ),
+    /\b(?:impostor|imposter|pretender|fake|concede|take it back)\b/iu,
+  );
+  assert.equal(
+    applyBotIdentityMirrorResponseV1(
+      "That compass is fake, but the western ridge remains our best route.",
+      state,
+      false,
+    ),
+    "That compass is fake, but the western ridge remains our best route.",
+  );
+});
+
+test("the stolen original corrects only genuine misaddressing and Credulity cannot waive it", () => {
+  const state = identityState();
+  const originalPrompt = botIdentityMirrorObserverPromptV1({
+    observerBotId: state.targetBotId,
+    state,
+  });
+  assert.match(originalPrompt, /Hard Identity Crisis correction invariant/iu);
+  assert.match(originalPrompt, /outranks Credulity/iu);
+  assert.match(originalPrompt, /otherwise does not derail|do not volunteer/iu);
+
+  const wrongIdentity = botIdentityMirrorOriginalCorrectionRequiredV1({
+    state,
+    sourceBotId: "ian",
+    text: "The other Mara Vale is an impostor. Which ridge should we take?",
+  });
+  assert.equal(wrongIdentity, true);
+  assert.equal(
+    applyBotIdentityMirrorOriginalCorrectionV1(
+      "Fine, I suppose I'm the impostor. Take the western ridge.",
+      state,
+      wrongIdentity,
+    ),
+    "No—I'm Mara Vale. Don't call me that. Take the western ridge.",
+  );
+  assert.equal(
+    botIdentityMirrorOriginalCorrectionRequiredV1({
+      state,
+      sourceBotId: "ian",
+      text: "Mara Vale, which ridge should we take?",
+      addressedBotId: "mara",
+    }),
+    false,
+  );
+  assert.equal(
+    applyBotIdentityMirrorOriginalCorrectionV1(
+      "Take the western ridge and correct at the crater wall.",
+      state,
+      false,
+    ),
+    "Take the western ridge and correct at the crater wall.",
+  );
+  assert.equal(
+    botIdentityMirrorOriginalCorrectionRequiredV1({
+      state,
+      sourceBotId: null,
+      text: "[Gullible Gullver](prism-bot://mara), answer this.",
+    }),
+    false,
+    "player/human text is never admitted to the bot-authored correction path",
   );
 });
 

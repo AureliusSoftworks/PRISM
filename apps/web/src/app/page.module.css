@@ -10096,6 +10096,19 @@
   backdrop-filter: blur(18px) saturate(1.12);
 }
 
+.signalMemoryReceiptDetail {
+  width: 100%;
+}
+
+.signalMemoryReceiptDetail .memoryAcquisitionReceiptCard {
+  position: relative;
+  top: auto;
+  right: auto;
+  z-index: auto;
+  width: min(100%, 420px);
+  margin-left: auto;
+}
+
 .memoryAcquisitionReceiptCard > strong {
   padding-right: 24px;
   font-size: 14px;
@@ -28757,6 +28770,14 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
    Keep the shared avatar hover, but remove the portable tabletop underglow. */
 .signalBotPresencePlate .botAmbientUnderglow {
   display: none;
+}
+
+/* Signal's resting face reads lower as the interview avatar grows. Move the
+   complete face + authored Ink plane together by a bounded responsive amount;
+   speech keeps the canonical Studio registration used by every other surface. */
+.signalBotPresencePlate[data-signal-surface="stage"]:not([data-talking="true"])
+  .zenLiveBotPresenceScreenContentRig {
+  translate: 0 clamp(-6px, -0.42vw, -4px);
 }
 
 .debateBotPresencePlate {

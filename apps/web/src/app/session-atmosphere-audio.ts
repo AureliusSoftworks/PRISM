@@ -1376,8 +1376,10 @@ export function startSessionAtmosphere(args: {
 export function coffeeCupFoleyCueForTransition(
   previous: boolean | undefined,
   sipping: boolean,
+  placementCueMode: "transition" | "animation-end" = "transition",
 ): SessionAtmosphereCue | null {
   if (previous === undefined || previous === sipping) return null;
+  if (!sipping && placementCueMode === "animation-end") return null;
   return sipping ? "coffeeSip" : "coffeeCupPlace";
 }
 
@@ -1388,13 +1390,26 @@ export function attachCoffeeCupFoley(
 ): () => void {
   const sippingByCup = new WeakMap<HTMLElement, boolean>();
   const cupSelector = "[data-cup-frame]";
+  const animationOwnedPlacementSelector =
+    '[data-cup-placement-foley="animation-end"]';
+
+  const placementCueModeForCup = (
+    cup: HTMLElement,
+  ): "transition" | "animation-end" =>
+    cup.closest(animationOwnedPlacementSelector)
+      ? "animation-end"
+      : "transition";
 
   const inspectCup = (cup: HTMLElement, announce: boolean): void => {
     const sipping = cup.dataset.cupSipping === "true";
     const previous = sippingByCup.get(cup);
     sippingByCup.set(cup, sipping);
     if (!announce) return;
-    const cue = coffeeCupFoleyCueForTransition(previous, sipping);
+    const cue = coffeeCupFoleyCueForTransition(
+      previous,
+      sipping,
+      placementCueModeForCup(cup),
+    );
     if (cue) {
       controller.playCue(cue);
       onCue?.(cue, cup);
@@ -1403,17 +1418,44 @@ export function attachCoffeeCupFoley(
   const inspectRemovedCup = (cup: HTMLElement): void => {
     const previous = sippingByCup.get(cup);
     sippingByCup.set(cup, false);
-    const cue = coffeeCupFoleyCueForTransition(previous, false);
+    const cue = coffeeCupFoleyCueForTransition(
+      previous,
+      false,
+      placementCueModeForCup(cup),
+    );
     if (cue) {
       controller.playCue(cue);
       onCue?.(cue, cup);
     }
   };
 
+  const announceAnimatedCupPlacement = (event: AnimationEvent): void => {
+    if (!(event.target instanceof HTMLElement)) return;
+    const mug = event.target;
+    if (
+      !mug.matches(animationOwnedPlacementSelector) ||
+      mug.dataset.sipping !== "true"
+    ) {
+      return;
+    }
+    const cup = mug.querySelector<HTMLElement>(cupSelector);
+    if (!cup) return;
+    controller.playCue("coffeeCupPlace");
+    onCue?.("coffeeCupPlace", cup);
+  };
+
   root
     .querySelectorAll<HTMLElement>(cupSelector)
     .forEach((cup) => inspectCup(cup, false));
-  if (typeof MutationObserver === "undefined") return () => undefined;
+  root.addEventListener("animationend", announceAnimatedCupPlacement, true);
+  if (typeof MutationObserver === "undefined") {
+    return () =>
+      root.removeEventListener(
+        "animationend",
+        announceAnimatedCupPlacement,
+        true,
+      );
+  }
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
       if (
@@ -1445,5 +1487,12 @@ export function attachCoffeeCupFoley(
     attributes: true,
     attributeFilter: ["data-cup-sipping"],
   });
-  return () => observer.disconnect();
+  return () => {
+    observer.disconnect();
+    root.removeEventListener(
+      "animationend",
+      announceAnimatedCupPlacement,
+      true,
+    );
+  };
 }

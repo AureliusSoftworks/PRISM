@@ -19,6 +19,7 @@ import type {
   BotPowerMutePerformanceV1,
   BotPowerObserverProjectionV1,
 } from "./botPower.js";
+import type { BotPowerTrollPresentationV1 } from "./trollPower.js";
 import type { BotIdentityShapeshiftStateV1 } from "./botIdentityShapeshift.js";
 import type { BotFalseNameStateV1 } from "./botFalseName.js";
 import type {
@@ -280,6 +281,9 @@ export {
   botPowerAntiTruthInvertPromptV1,
   botPowerDefinitionIsExplicitInterruptionV1,
   botPowerDefinitionIsUnconditionalInterruptionV1,
+  botPowerDefinitionIsTrollV1,
+  botPowerTrollAuthoringCueV1,
+  botPowerTrollsV1,
   applyBotPowerBotNamesV1,
   botPowerBotNamingCueFromEffectsV1,
   botPowerBotNamingCueV1,
@@ -464,6 +468,8 @@ export {
   type ResolvedCoffeePowerBotV1,
 } from "./botPower.js";
 
+export * from "./trollPower.js";
+
 export {
   applyPrismMoodExpiredIgnoreCooldown,
   applyPrismMoodForgivenessSuccess,
@@ -574,6 +580,7 @@ export {
   BOT_IDENTITY_MIRROR_TRANSITION_MS,
   BOT_IDENTITY_MIRROR_VERSION,
   applyBotIdentityMirrorHolderVoiceEffectV1,
+  applyBotIdentityMirrorOriginalCorrectionV1,
   applyBotIdentityMirrorResponseV1,
   botDirectAddressIndexV1,
   botDirectlyAddressesBotV1,
@@ -583,6 +590,7 @@ export {
   botIdentityMirrorVoiceV1,
   botIdentityMirrorHolderPromptV1,
   botIdentityMirrorObserverPromptV1,
+  botIdentityMirrorOriginalCorrectionRequiredV1,
   botIdentityMirrorTransitionActiveV1,
   botIdentityMirrorTargetChangesV1,
   createBotIdentityMirrorStateV1,
@@ -769,6 +777,11 @@ export {
   BOT_AVATAR_SFX_PROMPT_MAX_LENGTH,
   BOT_AVATAR_SFX_FILE_NAME_MAX_LENGTH,
   applyBotNamePronunciations,
+  SPEECH_TITLE_ABBREVIATIONS,
+  expandSpeechAbbreviations,
+  projectSpeechAbbreviations,
+  type SpeechAbbreviationProjection,
+  type SpeechAbbreviationProjectionSegment,
   applyPlayerNamePronunciation,
   normalizeBotNamePronunciation,
   normalizeBotSelfReferral,
@@ -1768,6 +1781,8 @@ export interface ChatMessage {
   socialSilence?: SocialSilenceMarkerV1;
   /** Links a protected floor-reclaim turn to its interrupted heard fragment. */
   crosstalkReclaim?: CrosstalkReclaimPlanV1;
+  /** Public replay-stable Troll delivery and ordinary-interruption projection. */
+  botPowerTrollPresentation?: BotPowerTrollPresentationV1;
   /** User-entered Prompt Center shortcut that resolved into this message content. */
   promptShortcut?: PromptShortcutMetadata;
   /** User-entered wildcard decks/options that resolved into this message content. */
@@ -2725,6 +2740,10 @@ export interface CoffeeGroup {
   soundtrack: CoffeeGroupSoundtrack | null;
   /** Independent completion and retry state for generated identity items. */
   synthesis: CoffeeGroupSynthesisState;
+  /** Library group that owns this table's live invite pool; null for legacy tables. */
+  libraryGroupId: string | null;
+  /** The selected source was later removed from Library; saved legacy seats remain readable. */
+  libraryGroupUnavailable?: boolean;
   botGroupIds: string[];
   coffeeSeatBotIds: Array<string | null>;
   coffeeSettings: CoffeeSessionSettings;
@@ -2867,7 +2886,7 @@ export interface Conversation {
   history?: ConversationHistoryEntry;
   /**
    * Coffee-only — ordered list of bot ids that participate in this live
-   * session. New sessions seat at most 3; legacy snapshots may contain 2-5.
+   * session. New sessions seat at most 4; legacy snapshots may contain 2-5.
    * Captured once when the Coffee thread is created and
    * frozen for the conversation. The router LLM picks which one of these
    * speaks next on each turn.
@@ -3437,7 +3456,7 @@ export type CoffeeArrivalScenario =
 
 /** Request body for `POST /api/coffee/sessions`. */
 export interface CoffeeSessionCreateRequest {
-  /** Fixed five-seat layout with exactly three occupied seats for a new table. */
+  /** Fixed five-seat layout with two to four occupied seats for a new table. */
   groupBotIds: Array<string | null>;
   /** Optional session tuning; omitted rows use server defaults. */
   coffeeSettings?: unknown;
@@ -3577,8 +3596,8 @@ export interface CoffeeTurnRequest {
   /** Existing Coffee conversation id, or omitted for legacy first-turn creation. */
   conversationId?: string;
   /**
-   * Ordered list of exactly 3 bot ids, or a fixed five-seat layout with two
-   * null empty seats. Required only for legacy first-turn creation; ignored on subsequent
+   * Ordered list of 2-4 bot ids, or a fixed five-seat layout with null empty
+   * seats. Required only for legacy first-turn creation; ignored on subsequent
    * turns (server uses the group stored on the conversation row). New clients
    * should create a Coffee session first via `POST /api/coffee/sessions`.
    */

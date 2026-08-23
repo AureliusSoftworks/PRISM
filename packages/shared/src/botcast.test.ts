@@ -49,6 +49,8 @@ import {
   botcastInterruptionBridgeMessageId,
   botcastMessageIsEphemeralInterruptionBridge,
   botcastListenerReactionForMessage,
+  botcastLatestSpeechCopyReactionSourceV1,
+  botcastPublicReactionSpeechForMessage,
   botcastProducerGuestThinkingDiscountMs,
   botcastReplayMessageIndexAt,
   botcastReplayTimeline,
@@ -79,6 +81,88 @@ import {
   swapBotcastStudioLayoutSeats,
   type BotcastReplayEvent,
 } from "./botcast.ts";
+
+describe("Signal public cadence speech", () => {
+  it("selects the latest other-bot spoken Foley as Signal's Copycat source", () => {
+    const events = ["Hmm...", "let me see...", "Nice!"].map(
+      (spokenCue, index): BotcastReplayEvent => ({
+        id: `event-${index + 1}`,
+        episodeId: "episode-1",
+        sequence: index + 1,
+        kind: "listener_reaction",
+        occurredAt: `2026-08-22T19:00:0${index}.000Z`,
+        payload: {
+          plan: {
+            v: 1,
+            name: "listenerReaction",
+            speakerBotId: "copycat",
+            listenerBotId: "guest",
+            messageId: "message-1",
+            targetSource: "role",
+            visualAction: "thoughtful_hmm",
+            spokenCue,
+            targetProgress: 0.7,
+            seed: `seed-${index}`,
+            cameraCutEligible: true,
+          },
+        },
+      }),
+    );
+
+    assert.equal(
+      botcastLatestSpeechCopyReactionSourceV1(
+        events,
+        "message-1",
+        "copycat",
+      ),
+      "Nice!",
+    );
+    assert.equal(
+      botcastLatestSpeechCopyReactionSourceV1(
+        events,
+        "message-1",
+        "guest",
+      ),
+      null,
+    );
+  });
+
+  it("projects persisted interruption words into the public transcript", () => {
+    const events = [
+      {
+        id: "event-2",
+        episodeId: "episode-1",
+        sequence: 2,
+        kind: "listener_reaction" as const,
+        occurredAt: "2026-08-22T19:00:01.000Z",
+        payload: {
+          plan: {
+            v: 1,
+            name: "listenerReaction",
+            speakerBotId: "guest-1",
+            listenerBotId: "host-1",
+            messageId: "message-1",
+            targetSource: "role",
+            visualAction: "lean_in",
+            spokenCue: "Hold on.",
+            interjectionAttempt: true,
+            floorOutcome: "yield",
+            interruptedSpeakerCue: "Let me finish.",
+            interruptedSpeakerCuePlayback: "crosstalk",
+            targetProgress: 0.5,
+            seed: "seed-2",
+            cameraCutEligible: true,
+          },
+        },
+      },
+    ] satisfies BotcastReplayEvent[];
+
+    assert.deepEqual(botcastPublicReactionSpeechForMessage(events, "message-1"), [
+      { messageId: "message-1", botId: "host-1", text: "Hold on.", kind: "interruption" },
+      { messageId: "message-1", botId: "guest-1", text: "Let me finish.", kind: "interruption" },
+    ]);
+  });
+});
 
 describe("Signal producer direct quotes", () => {
   it("gives a queued line enough room to air in one host turn", () => {

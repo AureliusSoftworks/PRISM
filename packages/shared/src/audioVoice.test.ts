@@ -10,6 +10,8 @@ import {
   VOICE_DELIVERY_RATE_BY_MOOD,
   applyVoiceDeliveryMoodToProfile,
   applyBotNamePronunciations,
+  expandSpeechAbbreviations,
+  projectSpeechAbbreviations,
   builtinAccentRealizationBlend,
   builtinMelodicityRealizationBlend,
   builtinMoodRealizationBlend,
@@ -99,6 +101,54 @@ describe("audio voice normalization", () => {
         ],
       ),
       "Light Yah-gah-mee asked Lite for help; Yagamilight stays written.",
+    );
+  });
+
+  it("expands common name-led titles only in the speech projection", () => {
+    const source =
+      'Mr. Hale, Mrs Hale, Ms. Rivera, Mx Quinn, Dr. Patel, Prof Ng, Rev. Jones, Gov Lee, Sen. Cruz, Rep Adams, Amb. Okafor, Atty Chen, Det. Benson, Insp Morse, Supt. Chalmers, Fr Brown, Adm. Nimitz, Gen Leia, Lt. Uhura, Maj Kira, Capt. O\'Brien, Cmdr Data, Cdr. Sisko, Col Mustard, Brig. Organa, Sgt Pepper, Cpl. Hicks, Pvt Ryan, Ofc. Diaz, Dep Garcia, Dir. Vance, Pres Snow, Hon. Judy, Asst Prof. Kim, and Assoc. Prof van Helsing.';
+    assert.equal(
+      expandSpeechAbbreviations(source),
+      'Mister Hale, Missus Hale, Miss Rivera, Mix Quinn, Doctor Patel, Professor Ng, Reverend Jones, Governor Lee, Senator Cruz, Representative Adams, Ambassador Okafor, Attorney Chen, Detective Benson, Inspector Morse, Superintendent Chalmers, Father Brown, Admiral Nimitz, General Leia, Lieutenant Uhura, Major Kira, Captain O\'Brien, Commander Data, Commander Sisko, Colonel Mustard, Brigadier Organa, Sergeant Pepper, Corporal Hicks, Private Ryan, Officer Diaz, Deputy Garcia, Director Vance, President Snow, Honorable Judy, Assistant Professor Kim, and Associate Professor van Helsing.',
+    );
+    assert.match(source, /Ms\. Rivera/u);
+  });
+
+  it("keeps case variants, embedded words, and ambiguous abbreviations written", () => {
+    assert.equal(
+      expandSpeechAbbreviations(
+        "MS. Rivera logged 20 ms. in St. Louis; caption and Capt. 7 remain.",
+      ),
+      "MS. Rivera logged 20 ms. in St. Louis; caption and Capt. 7 remain.",
+    );
+  });
+
+  it("layers title expansion after bot-name pronunciations for every speech caller", () => {
+    const named = applyBotNamePronunciations(
+      "Ms. Icarus spoke with Capt. Chen.",
+      [{ name: "Icarus", namePronunciation: "Eye-car-us" }],
+    );
+    assert.equal(
+      expandSpeechAbbreviations(named),
+      "Miss Eye-car-us spoke with Captain Chen.",
+    );
+  });
+
+  it("keeps source-to-synthesis segments for Premium alignment projection", () => {
+    const projection = projectSpeechAbbreviations(
+      "Ms. Rivera called Capt Chen.",
+    );
+    assert.equal(projection.sourceText, "Ms. Rivera called Capt Chen.");
+    assert.equal(projection.synthesisText, "Miss Rivera called Captain Chen.");
+    assert.equal(projection.changed, true);
+    assert.deepEqual(
+      projection.segments.filter(
+        (segment) => segment.synthesisText !== segment.sourceText,
+      ),
+      [
+        { synthesisText: "Miss", sourceText: "Ms." },
+        { synthesisText: "Captain", sourceText: "Capt" },
+      ],
     );
   });
 

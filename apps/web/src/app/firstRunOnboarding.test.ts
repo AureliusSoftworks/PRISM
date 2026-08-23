@@ -6,6 +6,7 @@ import {
   FIRST_RUN_SETUP_STORAGE_KEY,
   FIRST_RUN_SETUP_STEPS,
   FIRST_RUN_BATCH_FOUNDRY_GUIDANCE,
+  FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE,
   clampFirstRunSetupStepIndex,
   clearFirstRunSetupCompletion,
   firstRunSetupProgressPercent,
@@ -122,6 +123,13 @@ describe("first-run onboarding", () => {
     assert.match(FIRST_RUN_BATCH_FOUNDRY_GUIDANCE, /mini-avatar slot/u);
     assert.match(FIRST_RUN_BATCH_FOUNDRY_GUIDANCE, /micro faces inside each generated color-and-glyph orb/u);
     assert.match(pageSource, /FIRST_RUN_BATCH_FOUNDRY_GUIDANCE/u);
+  });
+
+  it("teaches bot-directed Wield setup without implying auto-start", () => {
+    assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /hold Option/u);
+    assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /stays fixed/u);
+    assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /nothing begins/u);
+    assert.match(pageSource, /FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE/u);
   });
 
   it("names chat routing separately from image and voice routing", () => {

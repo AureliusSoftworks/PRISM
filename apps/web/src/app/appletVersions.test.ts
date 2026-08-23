@@ -22,6 +22,7 @@ import {
   BOT_POWER_INTERMITTENT_MUTE_MODE_POLICY,
   BOT_POWER_INTERMITTENT_AUDIBILITY_MODE_POLICY,
   BOT_POWER_INTERRUPTION_MODE_POLICY,
+  BOT_POWER_TROLL_MODE_POLICY,
   BOT_POWER_GHOST_MODE_POLICY,
   BOT_POWER_BREATHLESS_MODE_POLICY,
   BOT_POWER_MUTE_MODE_POLICY,
@@ -30,6 +31,7 @@ import {
   BOT_POWER_THEME_COMPOUND_MODE_POLICY,
   BOT_POWER_RESPONSE_BUDGET_MODE_POLICY,
   BOT_POWER_SPEECH_OBFUSCATION_MODE_POLICY,
+  BOT_POWER_SPEECH_COPY_MODE_POLICY,
   BOT_POWER_CURSED_TONGUE_MODE_POLICY,
   BOT_POWER_SPECTRAL_PERCEPTION_MODE_POLICY,
   BOT_POWER_VOICE_PRESENCE_MODE_POLICY,
@@ -40,6 +42,25 @@ import {
 } from "./appletVersions.ts";
 
 describe("applet version helpers", () => {
+  it("declares bounded Troll delivery for every current and planned applet", () => {
+    assert.deepEqual(Object.keys(BOT_POWER_TROLL_MODE_POLICY), Object.keys(PRISM_APPLETS));
+    assert.deepEqual(BOT_POWER_TROLL_MODE_POLICY, {
+      chat: "cue",
+      zen: "adapted",
+      debate: "direct",
+      polling: "deferred",
+      coffee: "direct",
+      botcast: "direct",
+      feed: "deferred",
+      games: "deferred",
+      story: "adapted",
+      gym: "deferred",
+      slate: "irrelevant",
+      pseudo: "deferred",
+      surf: "deferred",
+    });
+  });
+
   it("keeps the app switcher focused on usable top-level applets", () => {
     assert.deepEqual(
       prismTopLevelSwitcherApplets().map((applet) => applet.id),
@@ -70,24 +91,46 @@ describe("applet version helpers", () => {
   });
 
   it("tracks the current visual applet versions for release provenance", () => {
-    assert.equal(PRISM_APPLETS.chat.version, "1.46");
-    assert.equal(PRISM_APPLETS.zen.version, "1.45");
-    assert.equal(PRISM_APPLETS.coffee.version, "2.61");
-    assert.equal(PRISM_APPLETS.debate.version, "0.42");
+    assert.equal(PRISM_APPLETS.chat.version, "1.48");
+    assert.equal(PRISM_APPLETS.zen.version, "1.47");
+    assert.equal(PRISM_APPLETS.coffee.version, "2.67");
+    assert.equal(PRISM_APPLETS.debate.version, "0.47");
     assert.equal(PRISM_APPLETS.debate.status, "preview");
-    assert.equal(PRISM_APPLETS.botcast.version, "1.77");
+    assert.equal(PRISM_APPLETS.botcast.version, "1.84");
     assert.equal(PRISM_APPLETS.botcast.name, "Signal");
-    assert.equal(PRISM_APPLETS.story.version, "0.38");
+    assert.equal(PRISM_APPLETS.story.version, "0.41");
     assert.equal(PRISM_APPLETS.story.status, "planned");
     assert.equal(PRISM_APPLETS.slate.version, "0.9");
     assert.equal(PRISM_APPLETS.slate.status, "preview");
-    assert.equal(prismAppletVersionLabel("chat"), "v1.46");
-    assert.equal(prismAppletVersionLabel("zen"), "v1.45");
-    assert.equal(prismAppletVersionLabel("coffee"), "v2.61");
-    assert.equal(prismAppletVersionLabel("debate"), "v0.42");
-    assert.equal(prismAppletVersionLabel("botcast"), "v1.77");
-    assert.equal(prismAppletVersionLabel("story"), "v0.38");
+    assert.equal(prismAppletVersionLabel("chat"), "v1.48");
+    assert.equal(prismAppletVersionLabel("zen"), "v1.47");
+    assert.equal(prismAppletVersionLabel("coffee"), "v2.67");
+    assert.equal(prismAppletVersionLabel("debate"), "v0.47");
+    assert.equal(prismAppletVersionLabel("botcast"), "v1.84");
+    assert.equal(prismAppletVersionLabel("story"), "v0.41");
     assert.equal(prismAppletVersionLabel("slate"), "v0.9");
+  });
+
+  it("requires exact short-speech Copycat capture in every bot-speaking applet", () => {
+    assert.deepEqual(
+      Object.keys(BOT_POWER_SPEECH_COPY_MODE_POLICY),
+      Object.keys(PRISM_APPLETS),
+    );
+    assert.deepEqual(BOT_POWER_SPEECH_COPY_MODE_POLICY, {
+      chat: "direct",
+      zen: "direct",
+      debate: "adapted",
+      polling: "required_before_activation",
+      coffee: "adapted",
+      botcast: "adapted",
+      feed: "required_before_activation",
+      games: "required_before_activation",
+      story: "adapted",
+      gym: "required_before_activation",
+      slate: "not_applicable",
+      pseudo: "required_before_activation",
+      surf: "required_before_activation",
+    });
   });
 
   it("declares holder-scoped bot-naming support for every applet", () => {

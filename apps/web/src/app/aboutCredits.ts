@@ -326,6 +326,14 @@ export const ABOUT_CREDIT_GROUPS: readonly AboutCreditGroup[] = [
         license: "PRISM production asset",
       },
       {
+        id: "troll-rickroll",
+        name: "Never Gonna Give You Up — Rick Astley",
+        description:
+          "A short lyrical hook and canonical music-video link power Troll's rare Rickroll gag; the full lyrics and recording are not bundled.",
+        href: "https://youtu.be/dQw4w9WgXcQ",
+        license: "Copyright retained by the respective rights holders",
+      },
+      {
         id: "subtlex",
         name: "SUBTLEX-US word frequencies",
         description:

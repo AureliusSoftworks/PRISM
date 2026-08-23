@@ -3763,7 +3763,11 @@ describe("Debate experience", () => {
     );
     assert.match(
       page,
-      /const staticAudiencePortrait =\s*avatarState\.presentation === "mini";[\s\S]{0,180}const debateAvatarDetailLevel = staticAudiencePortrait/u,
+      /const staticAudiencePortrait =\s*avatarState\.presentation === "mini";[\s\S]{0,260}const authoredMiniPortrait =\s*staticAudiencePortrait &&[\s\S]{0,160}avatarState\.blinkEnabled === true\);/u,
+    );
+    assert.match(
+      page,
+      /const debateAvatarDetailLevel = staticAudiencePortrait/u,
     );
     assert.match(page, /detailLevel=\{debateAvatarDetailLevel\}/u);
     assert.match(

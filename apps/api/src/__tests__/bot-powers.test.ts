@@ -22,6 +22,7 @@ import {
   coffeePowerMessageAudienceForTurn,
   coffeePowerCandorPromptForTurn,
   coffeePowerEchoSourceForTurn,
+  coffeePowerLatestSpeechCopyReactionSourceForTurn,
   coffeePowerBotAudibleTo,
   coffeePowerBotVisibleTo,
   coffeePowerHistoryForSpeaker,
@@ -781,18 +782,25 @@ test("Identity Crisis Ian deterministically compiles bounded bot-only identity m
   ]);
   assert.match(
     result.powers[0]?.compiled?.selfCue ?? "",
-    /public diegetic name.*persona.*face.*authored ink.*spoken voice identity.*lower glyph.*active public Powers/iu,
+    /public diegetic name.*persona.*face.*authored ink.*lower glyph.*active public Powers/iu,
   );
   assert.match(
     result.powers[0]?.compiled?.selfCue ?? "",
-    /Keep your own saturated color.*client-side voice effect.*communication-style chassis.*frame finish/iu,
+    /Keep your own complete authored voice identity and profile.*accent.*pronunciation.*speechprint.*client voice effect.*saturated color.*communication-style chassis.*frame finish/iu,
+  );
+  assert.match(
+    result.powers[0]?.compiled?.selfCue ?? "",
+    /first response after a genuinely new target.*impostor exactly once.*never use impostor, imposter, pretender, or fake on later turns.*never recant/iu,
   );
   assert.match(
     result.powers[0]?.compiled?.selfCue ?? "",
     /diegetic name.*never (?:change )?your bot ID.*role.*seat/iu,
   );
   assert.match(result.powers[0]?.compiled?.selfCue ?? "", /player.*never/iu);
-  assert.match(result.powers[0]?.compiled?.observerCue ?? "", /irritated/iu);
+  assert.match(
+    result.powers[0]?.compiled?.observerCue ?? "",
+    /original must briefly correct.*even under Credulity.*otherwise does not derail/iu,
+  );
 });
 
 test("Shapeshifter deterministically compiles sticky Library/Marketplace identity forms", async () => {
@@ -2097,7 +2105,46 @@ test("Coffee power plans resolve exact addressed-speech echo sources", () => {
     tableFocus: "",
     priorAddressedBotId: null,
     latestAssistantContent: "A general table remark.",
+    latestReactionSpeech: "Nice!",
+  }), "Nice!");
+  assert.equal(coffeePowerEchoSourceForTurn({
+    turnKind: "autonomous",
+    speakerBotId: "echo",
+    userActionOnly: false,
+    tableFocus: "",
+    priorAddressedBotId: null,
+    latestAssistantContent: "A general table remark.",
   }), null);
+});
+
+test("Coffee selects exact short spoken Foley from another bot for Copycat", () => {
+  for (const cue of ["Hmm...", "let me see...", "Nice!"] as const) {
+    assert.equal(
+      coffeePowerLatestSpeechCopyReactionSourceForTurn([
+        {
+          v: 1,
+          name: "coffeeReplayEvent",
+          kind: "listenerReaction",
+          botId: "peer",
+          occurredAt: "2026-08-22T19:00:00.000Z",
+          plan: {
+            v: 1,
+            name: "listenerReaction",
+            speakerBotId: "echo",
+            listenerBotId: "peer",
+            messageId: "message-1",
+            targetSource: "role",
+            visualAction: "thoughtful_hmm",
+            spokenCue: cue,
+            targetProgress: 0.7,
+            seed: cue,
+            cameraCutEligible: true,
+          },
+        },
+      ], "echo"),
+      cue,
+    );
+  }
 });
 
 test("compiler recovers trustworthy truth-elicitation as bounded candor without a model", async () => {

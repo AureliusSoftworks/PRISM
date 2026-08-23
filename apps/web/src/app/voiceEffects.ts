@@ -20,7 +20,10 @@ import {
   type RoomAcousticsConnection,
   type RoomAcousticsSend,
 } from "./roomAcoustics.ts";
-import type { PreSpeechBreathPlan } from "./preSpeechBreath.ts";
+import {
+  preSpeechBreathPlaybackTiming,
+  type PreSpeechBreathPlan,
+} from "./preSpeechBreath.ts";
 import {
   PRISM_VOICE_PITCH_CORRECTION,
   analyzePrismPitchCorrection,
@@ -257,6 +260,12 @@ export interface VoicePlaybackCharacterAlignment {
   characters: string[];
   characterStartTimesSeconds: number[];
   characterEndTimesSeconds: number[];
+  /**
+   * Rigid offset from provider character time to decoded playback time.
+   * Presence (including zero) means timestamps already live on the decoded
+   * audio clock and must not be stretched to the clip duration.
+   */
+  audioTimelineOffsetSeconds?: number;
 }
 
 export interface VoicePlaybackSynthesizedSpeechSegment {
@@ -273,6 +282,10 @@ export interface VoicePlaybackSynthesizedSpeechSegment {
 }
 
 export interface VoicePlaybackLifecycle {
+  /** Buffered provider timing supplied before decoded playback starts. */
+  sourceAlignment?: VoicePlaybackCharacterAlignment | null;
+  /** Equalize provider/source loudness before applying authored interview gain. */
+  loudnessNormalization?: "interview";
   /** Temporary per-utterance delivery changes. V1 accepts the neutral envelope only. */
   deliveryEnvelope?: CoffeeVoiceDeliveryEnvelope;
   /** Performance-scoped full-avatar light binding for this audible voice. */
@@ -308,6 +321,39 @@ export interface VoicePlaybackLifecycle {
   onEnd?: () => void;
   /** Clears presentation state when playback is superseded before completion. */
   onCancel?: () => void;
+}
+
+export const LIVE_INTERVIEW_VOICE_LEVELER = {
+  thresholdDb: -30,
+  kneeDb: 18,
+  ratio: 4.5,
+  attackSeconds: 0.008,
+  releaseSeconds: 0.18,
+  makeupGain: 1.6,
+  limiterThresholdDb: -2,
+  limiterRatio: 20,
+} as const;
+
+function connectLiveInterviewVoiceLeveler(
+  context: AudioContext,
+  input: AudioNode,
+): { output: AudioNode; nodes: AudioNode[] } {
+  const compressor = context.createDynamicsCompressor();
+  const makeup = context.createGain();
+  const limiter = context.createDynamicsCompressor();
+  compressor.threshold.value = LIVE_INTERVIEW_VOICE_LEVELER.thresholdDb;
+  compressor.knee.value = LIVE_INTERVIEW_VOICE_LEVELER.kneeDb;
+  compressor.ratio.value = LIVE_INTERVIEW_VOICE_LEVELER.ratio;
+  compressor.attack.value = LIVE_INTERVIEW_VOICE_LEVELER.attackSeconds;
+  compressor.release.value = LIVE_INTERVIEW_VOICE_LEVELER.releaseSeconds;
+  makeup.gain.value = LIVE_INTERVIEW_VOICE_LEVELER.makeupGain;
+  limiter.threshold.value = LIVE_INTERVIEW_VOICE_LEVELER.limiterThresholdDb;
+  limiter.knee.value = 0;
+  limiter.ratio.value = LIVE_INTERVIEW_VOICE_LEVELER.limiterRatio;
+  limiter.attack.value = 0.002;
+  limiter.release.value = 0.08;
+  input.connect(compressor).connect(makeup).connect(limiter);
+  return { output: limiter, nodes: [compressor, makeup, limiter] };
 }
 
 export interface VoicePlaybackProgressController {
@@ -399,6 +445,107 @@ export function voicePlaybackPresentationDurationMs(
       Number.isFinite(articulationDurationMs) ? articulationDurationMs : 0,
     ),
   );
+}
+
+const VOICE_SPEECH_ACTIVITY_WINDOW_MS = 10;
+const VOICE_SPEECH_ACTIVITY_ABSOLUTE_FLOOR = 0.003;
+const VOICE_SPEECH_ACTIVITY_PEAK_RATIO = 0.08;
+
+/** Locate the first sustained audible activity in decoded voice PCM. */
+export function decodedVoiceSpeechActivityStartMs(args: {
+  channels: readonly Float32Array[];
+  sampleRate: number;
+}): number | null {
+  if (
+    args.channels.length === 0 ||
+    !Number.isFinite(args.sampleRate) ||
+    args.sampleRate <= 0
+  ) {
+    return null;
+  }
+  const frameCount = Math.min(...args.channels.map((channel) => channel.length));
+  if (frameCount <= 0) return null;
+  const windowFrames = Math.max(
+    1,
+    Math.round((args.sampleRate * VOICE_SPEECH_ACTIVITY_WINDOW_MS) / 1_000),
+  );
+  const levels: number[] = [];
+  let peakLevel = 0;
+  for (let start = 0; start < frameCount; start += windowFrames) {
+    const end = Math.min(frameCount, start + windowFrames);
+    let sumSquares = 0;
+    let sampleCount = 0;
+    for (const channel of args.channels) {
+      for (let frame = start; frame < end; frame += 1) {
+        const sample = channel[frame] ?? 0;
+        sumSquares += sample * sample;
+        sampleCount += 1;
+      }
+    }
+    const level = sampleCount > 0 ? Math.sqrt(sumSquares / sampleCount) : 0;
+    levels.push(level);
+    peakLevel = Math.max(peakLevel, level);
+  }
+  if (peakLevel < VOICE_SPEECH_ACTIVITY_ABSOLUTE_FLOOR) return null;
+  const threshold = Math.max(
+    VOICE_SPEECH_ACTIVITY_ABSOLUTE_FLOOR,
+    peakLevel * VOICE_SPEECH_ACTIVITY_PEAK_RATIO,
+  );
+  for (let index = 0; index < levels.length; index += 1) {
+    if ((levels[index] ?? 0) < threshold) continue;
+    const sustained = [index, index + 1, index + 2].filter(
+      (candidate) => (levels[candidate] ?? 0) >= threshold,
+    ).length;
+    if (sustained < 2) continue;
+    const windowStart = index * windowFrames;
+    const windowEnd = Math.min(frameCount, windowStart + windowFrames);
+    for (let frame = windowStart; frame < windowEnd; frame += 1) {
+      if (
+        args.channels.some(
+          (channel) => Math.abs(channel[frame] ?? 0) >= threshold,
+        )
+      ) {
+        return (frame / args.sampleRate) * 1_000;
+      }
+    }
+    return (windowStart / args.sampleRate) * 1_000;
+  }
+  return null;
+}
+
+/**
+ * Anchor provider timing to decoded speech onset without scaling its internal
+ * character/phoneme spacing. This compensates only leading encoded silence.
+ */
+export function voicePlaybackAlignmentWithDecodedSpeechStart(
+  alignment: VoicePlaybackCharacterAlignment | null | undefined,
+  decodedSpeechStartMs: number | null,
+): VoicePlaybackCharacterAlignment | null {
+  if (!alignment) return null;
+  if (decodedSpeechStartMs == null || !Number.isFinite(decodedSpeechStartMs)) {
+    return alignment;
+  }
+  const firstSpeechIndex = alignment.characters.findIndex((character) =>
+    /[\p{L}\p{N}]/u.test(character),
+  );
+  const firstProviderSpeechStart =
+    firstSpeechIndex >= 0
+      ? alignment.characterStartTimesSeconds[firstSpeechIndex]
+      : null;
+  if (
+    typeof firstProviderSpeechStart !== "number" ||
+    !Number.isFinite(firstProviderSpeechStart) ||
+    firstProviderSpeechStart < 0
+  ) {
+    return alignment;
+  }
+  return {
+    ...alignment,
+    audioTimelineOffsetSeconds: Math.max(
+      0,
+      decodedSpeechStartMs / 1_000 - firstProviderSpeechStart,
+    ),
+  };
 }
 
 export const PRISM_LIVE_VOICE_PROGRESS_INTERVAL_MS = 100;
@@ -978,6 +1125,7 @@ const completedVoiceTailStops: Record<
 };
 
 const preSpeechBreathBufferCache = new Map<string, Promise<AudioBuffer | null>>();
+const PRE_SPEECH_BREATH_LOAD_BUDGET_MS = 120;
 
 function contextForPlayback(): AudioContext | null {
   if (audioContext?.state === "closed") audioContext = null;
@@ -1047,8 +1195,21 @@ export async function playPreSpeechBreath(args: {
   if (args.isCurrent && !args.isCurrent()) return true;
   const profile = normalizeBotAudioVoiceProfileV1(args.profile);
   if (!profile.enabled || profile.volume <= 0) return false;
-  const decoded = await loadPreSpeechBreathBuffer(context, args.plan.url);
+  let loadTimer: number | null = null;
+  const decoded = await Promise.race([
+    loadPreSpeechBreathBuffer(context, args.plan.url),
+    new Promise<null>((resolve) => {
+      loadTimer = window.setTimeout(resolve, PRE_SPEECH_BREATH_LOAD_BUDGET_MS);
+    }),
+  ]);
+  if (loadTimer !== null) window.clearTimeout(loadTimer);
   if (!decoded || (args.isCurrent && !args.isCurrent())) return Boolean(decoded);
+
+  const timing = preSpeechBreathPlaybackTiming(
+    args.plan,
+    decoded.duration * 1_000,
+  );
+  if (timing.playbackDurationMs <= 0) return false;
 
   const active = activeVoiceChannels.presence;
   stopRealtimeVoiceAudio("presence");
@@ -1064,12 +1225,14 @@ export async function playPreSpeechBreath(args: {
   lowpass.frequency.value = 7_000;
   const breathGain = Math.min(1.25, profile.volume) * args.plan.gain;
   const startedAt = context.currentTime;
-  const attackSeconds = Math.min(0.07, decoded.duration * 0.18);
-  const overlapSeconds = Math.min(
-    decoded.duration * 0.35,
-    Math.max(0, args.plan.voiceOverlapMs) / 1_000,
+  const playbackDurationSeconds = timing.playbackDurationMs / 1_000;
+  const voiceStartsAt = startedAt + timing.voiceStartOffsetMs / 1_000;
+  const releaseStartsAt = Math.max(
+    voiceStartsAt,
+    startedAt + (timing.playbackDurationMs - timing.releaseFadeMs) / 1_000,
   );
-  const voiceStartsAt = Math.max(startedAt, startedAt + decoded.duration - overlapSeconds);
+  const endsAt = startedAt + playbackDurationSeconds;
+  const attackSeconds = Math.min(0.07, playbackDurationSeconds * 0.18);
   gain.gain.setValueAtTime(0.0001, startedAt);
   gain.gain.exponentialRampToValueAtTime(
     Math.max(0.0001, breathGain),
@@ -1077,9 +1240,9 @@ export async function playPreSpeechBreath(args: {
   );
   gain.gain.setValueAtTime(
     Math.max(0.0001, breathGain),
-    Math.max(startedAt + attackSeconds, voiceStartsAt),
+    Math.max(startedAt + attackSeconds, releaseStartsAt),
   );
-  gain.gain.exponentialRampToValueAtTime(0.0001, startedAt + decoded.duration);
+  gain.gain.exponentialRampToValueAtTime(0.0001, endsAt);
   source.connect(highpass).connect(lowpass).connect(gain);
   active.roomConnection = connectRoomAcoustics({
     context,
@@ -1126,7 +1289,7 @@ export async function playPreSpeechBreath(args: {
     }, { once: true });
     try {
       args.onStart?.();
-      source.start(startedAt);
+      source.start(startedAt, 0, playbackDurationSeconds);
       voiceStartTimer = window.setTimeout(
         releaseVoice,
         Math.max(0, Math.round((voiceStartsAt - startedAt) * 1_000)),
@@ -1305,6 +1468,7 @@ async function playWorkletLivePerformanceVoice(args: {
   maxDurationMs?: number;
   scheduledStartAtPerformanceMs?: number;
   compensateLifecycleForOutputLatency?: boolean;
+  alignMouthToDecodedSpeech?: boolean;
 }): Promise<boolean> {
   const { context, pcm, channel, lifecycle, alignment } = args;
   if (
@@ -1347,6 +1511,22 @@ async function playWorkletLivePerformanceVoice(args: {
         : Number.POSITIVE_INFINITY,
     ),
   );
+  const playbackAlignment = args.alignMouthToDecodedSpeech
+    ? voicePlaybackAlignmentWithDecodedSpeechStart(
+        alignment,
+        (() => {
+          const sourceStartMs = decodedVoiceSpeechActivityStartMs({
+            channels: pcm.channels.map((channelBytes) =>
+              new Float32Array(channelBytes),
+            ),
+            sampleRate: pcm.sampleRate,
+          });
+          return sourceStartMs == null
+            ? null
+            : sourceStartMs / playbackRateRatio;
+        })(),
+      )
+    : alignment ?? null;
 
   let node: AudioWorkletNode;
   let outputGain: GainNode;
@@ -1369,8 +1549,16 @@ async function playWorkletLivePerformanceVoice(args: {
   stopRealtimeVoiceAudio(channel, { preserveCompletedTails: true });
   outputGain.gain.value =
     Math.min(1.25, profile.volume) * (channel === "primary" ? 0.88 : 0.62);
-  node.connect(outputGain);
-  const scheduled: AudioNode[] = [node, outputGain];
+  const leveler =
+    lifecycle?.loudnessNormalization === "interview"
+      ? connectLiveInterviewVoiceLeveler(context, node)
+      : null;
+  (leveler?.output ?? node).connect(outputGain);
+  const scheduled: AudioNode[] = [
+    node,
+    ...(leveler?.nodes ?? []),
+    outputGain,
+  ];
   if (typeof context.createStereoPanner === "function") {
     const panner = context.createStereoPanner();
     panner.pan.value = Math.max(-1, Math.min(1, args.stereoPan ?? 0));
@@ -1444,7 +1632,7 @@ async function playWorkletLivePerformanceVoice(args: {
       lifecycle,
       articulationDurationMs,
       () => (context.currentTime - startedAt) * 1_000,
-      alignment,
+      playbackAlignment,
       {
         startDelayMs: scheduledStartDelayMs + outputLatencyMs,
         holdAtEndUntilFinish: true,
@@ -1549,8 +1737,16 @@ async function playLivePerformanceVoice(args: {
   audio.volume = 1;
   outputGain.gain.value =
     Math.min(1.25, profile.volume) * (channel === "primary" ? 0.88 : 0.62);
-  source.connect(outputGain);
-  const scheduled: AudioNode[] = [source, outputGain];
+  const leveler =
+    args.lifecycle?.loudnessNormalization === "interview"
+      ? connectLiveInterviewVoiceLeveler(context, source)
+      : null;
+  (leveler?.output ?? source).connect(outputGain);
+  const scheduled: AudioNode[] = [
+    source,
+    ...(leveler?.nodes ?? []),
+    outputGain,
+  ];
   if (typeof context.createStereoPanner === "function") {
     const panner = context.createStereoPanner();
     panner.pan.value = Math.max(-1, Math.min(1, args.stereoPan ?? 0));
@@ -1701,6 +1897,7 @@ async function playDecodedLivePerformanceVoice(args: {
   maxDurationMs?: number;
   scheduledStartAtPerformanceMs?: number;
   compensateLifecycleForOutputLatency?: boolean;
+  alignMouthToDecodedSpeech?: boolean;
 }): Promise<boolean> {
   const { context, decoded, channel } = args;
   const profile = normalizeBotAudioVoiceProfileV1(args.profile);
@@ -1735,14 +1932,39 @@ async function playDecodedLivePerformanceVoice(args: {
         : Number.POSITIVE_INFINITY,
     ),
   );
+  const playbackAlignment = args.alignMouthToDecodedSpeech
+    ? voicePlaybackAlignmentWithDecodedSpeechStart(
+        args.alignment,
+        (() => {
+          const sourceStartMs = decodedVoiceSpeechActivityStartMs({
+            channels: Array.from(
+              { length: decoded.numberOfChannels },
+              (_, index) => decoded.getChannelData(index),
+            ),
+            sampleRate: decoded.sampleRate,
+          });
+          return sourceStartMs == null
+            ? null
+            : sourceStartMs / playbackRateRatio;
+        })(),
+      )
+    : args.alignment ?? null;
 
   source.buffer = decoded;
   source.playbackRate.setValueAtTime(playbackRateRatio, startedAt);
   outputGain.gain.value =
     Math.min(1.25, profile.volume) * (channel === "primary" ? 0.88 : 0.62);
-  source.connect(outputGain);
+  const leveler =
+    args.lifecycle?.loudnessNormalization === "interview"
+      ? connectLiveInterviewVoiceLeveler(context, source)
+      : null;
+  (leveler?.output ?? source).connect(outputGain);
 
-  const scheduled: AudioNode[] = [source, outputGain];
+  const scheduled: AudioNode[] = [
+    source,
+    ...(leveler?.nodes ?? []),
+    outputGain,
+  ];
   if (typeof context.createStereoPanner === "function") {
     const panner = context.createStereoPanner();
     panner.pan.value = Math.max(-1, Math.min(1, args.stereoPan ?? 0));
@@ -1786,7 +2008,7 @@ async function playDecodedLivePerformanceVoice(args: {
       args.lifecycle,
       articulationDurationMs,
       () => (context.currentTime - startedAt) * 1_000,
-      args.alignment,
+      playbackAlignment,
       {
         startDelayMs: scheduledStartDelayMs + outputLatencyMs,
         holdAtEndUntilFinish: true,
@@ -1837,6 +2059,8 @@ export async function playRealtimeVoiceBytes(args: {
    * graph preparation happen immediately, then the source waits on this clock.
    */
   scheduledStartAtPerformanceMs?: number;
+  /** Premium buffered speech uses decoded onset to anchor provider timestamps. */
+  alignMouthToDecodedSpeech?: boolean;
 }): Promise<boolean> {
   const livePerformanceBudget = prismLiveVoicePerformanceBudgetActive();
   const context = contextForPlayback();
@@ -1869,6 +2093,7 @@ export async function playRealtimeVoiceBytes(args: {
           scheduledStartAtPerformanceMs: args.scheduledStartAtPerformanceMs,
           compensateLifecycleForOutputLatency:
             args.compensateLifecycleForOutputLatency,
+          alignMouthToDecodedSpeech: args.alignMouthToDecodedSpeech,
         });
         if (workletPlayed) return true;
         if (
@@ -1904,6 +2129,7 @@ export async function playRealtimeVoiceBytes(args: {
               args.scheduledStartAtPerformanceMs,
             compensateLifecycleForOutputLatency:
               args.compensateLifecycleForOutputLatency,
+            alignMouthToDecodedSpeech: args.alignMouthToDecodedSpeech,
           });
         }
       }
@@ -1968,6 +2194,7 @@ export async function playRealtimeVoiceBytes(args: {
         scheduledStartAtPerformanceMs: args.scheduledStartAtPerformanceMs,
         compensateLifecycleForOutputLatency:
           args.compensateLifecycleForOutputLatency,
+        alignMouthToDecodedSpeech: args.alignMouthToDecodedSpeech,
       });
     }
     return false;
@@ -1987,6 +2214,7 @@ export async function playRealtimeVoiceBytes(args: {
       scheduledStartAtPerformanceMs: args.scheduledStartAtPerformanceMs,
       compensateLifecycleForOutputLatency:
         args.compensateLifecycleForOutputLatency,
+      alignMouthToDecodedSpeech: args.alignMouthToDecodedSpeech,
     });
   }
   const active = activeVoiceChannels[channel];
@@ -2055,6 +2283,23 @@ export async function playRealtimeVoiceBytes(args: {
   // hold only; folding it into this duration stretches every viseme.
   const lifecycleArticulationDurationMs =
     voicePlaybackPresentationDurationMs(articulationDurationMs);
+  const playbackAlignment = args.alignMouthToDecodedSpeech
+    ? voicePlaybackAlignmentWithDecodedSpeechStart(
+        args.alignment,
+        (() => {
+          const sourceStartMs = decodedVoiceSpeechActivityStartMs({
+            channels: Array.from(
+              { length: decoded.numberOfChannels },
+              (_, index) => decoded.getChannelData(index),
+            ),
+            sampleRate: decoded.sampleRate,
+          });
+          return sourceStartMs == null
+            ? null
+            : sourceStartMs / playbackRateRatio;
+        })(),
+      )
+    : args.alignment ?? null;
   const createPitchTransform = (
     startAt: number,
     effectDetuneCents = 0,
@@ -2510,7 +2755,7 @@ export async function playRealtimeVoiceBytes(args: {
       args.lifecycle,
       lifecycleArticulationDurationMs,
       () => (context.currentTime - playbackClockStartedAt) * 1000,
-      args.alignment,
+      playbackAlignment,
       {
         startDelayMs: scheduledStartDelayMs + lifecycleOutputLatencyMs,
         holdAtEndUntilFinish: true,

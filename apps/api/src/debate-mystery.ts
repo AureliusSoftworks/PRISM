@@ -26,6 +26,7 @@ import {
   type DebateMysteryNotebookCleanupProposalV1,
   type DebateMysteryNotebookPageV1,
   type DebateMysteryNotebookV1,
+  type DebateMysteryNotebookV2,
   type DebateMysteryPortableManifestV1,
   type DebateMysteryResolvedConfigV1,
   type DebateMysterySuspectSnapshotV1,
@@ -444,6 +445,7 @@ export function getDebateMysteryCaseBible(
   const parsed = JSON.parse(row.private_json) as DebateMysteryCaseBibleV1;
   return {
     ...parsed,
+    actionTokens: Array.isArray(parsed.actionTokens) ? parsed.actionTokens : [],
     inventoryItems: Array.isArray(parsed.inventoryItems) ? parsed.inventoryItems : [],
     accessLocks: Array.isArray(parsed.accessLocks) ? parsed.accessLocks : [],
     activeRegions: parsed.activeRegions.map((outcome) => ({
@@ -814,13 +816,15 @@ async function authorMysteryRoomTexture(
   };
 }
 
-function createInitialNotebook(db: DatabaseSync, userId: string, sessionId: string): DebateMysteryNotebookV1 {
+function createInitialNotebook(db: DatabaseSync, userId: string, sessionId: string): DebateMysteryNotebookV2 {
   const now = new Date().toISOString();
-  const notebook: DebateMysteryNotebookV1 = {
-    version: 1,
+  const notebook: DebateMysteryNotebookV2 = {
+    version: 2,
     sessionId,
     revision: 1,
-    pages: [{ id: randomUUID(), title: "Case Notes", blocks: [], createdAt: now, updatedAt: now }],
+    leadAnnotations: [],
+    suspectNotes: [],
+    suspectPins: [],
     createdAt: now,
     updatedAt: now,
   };
@@ -835,7 +839,7 @@ function createInitialNotebook(db: DatabaseSync, userId: string, sessionId: stri
        (id, user_id, session_id, revision, document_json, reason, idempotency_key, created_at)
      VALUES (?, ?, ?, 1, ?, 'import', ?, ?)`,
   ).run(randomUUID(), userId, sessionId, documentJson, `initial:${sessionId}`, now);
-  return getDebateMysteryNotebook(db, userId, sessionId).notebook;
+  return notebook;
 }
 
 export async function createDebateMysterySession(
@@ -1016,47 +1020,75 @@ function replayMysteryMutation(db: DatabaseSync, userId: string, sessionId: stri
   return row?.response_json ? JSON.parse(row.response_json) as DebateSessionV1 : null;
 }
 
-/** Server-owned discovery writes durable notebook chips once. The references
- * are intentionally the only payload: private relevance and model prose stay
- * outside the notebook until the investigator authors them. */
+function mysterySpatialActionKey(request: DebateMysteryActionRequestV1): string | null {
+  if (request.action === "inspect") return `inspect:${request.roomId}:${request.regionId}`;
+  if (request.action === "use_access_item") {
+    return `access:${request.accessItemId}:${request.targetKind}:${request.targetId}`;
+  }
+  return null;
+}
+
+/**
+ * A target reservation makes the physical board the authority for rapid,
+ * duplicate gestures. Revision checks still protect every mutation, while this
+ * durable key coalesces fresh client request IDs for the same hotspot/padlock.
+ */
+function reserveMysterySpatialAction(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  actionKey: string,
+  idempotencyKey: string,
+): { replay: DebateSessionV1 | null; reserved: boolean } {
+  const inserted = db.prepare(
+    `INSERT OR IGNORE INTO debate_mystery_spatial_action_reservations
+       (user_id, session_id, action_key, idempotency_key, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  ).run(userId, sessionId, actionKey, idempotencyKey, new Date().toISOString());
+  if (Number(inserted.changes) === 1) return { replay: null, reserved: true };
+  const existing = db.prepare(
+    `SELECT idempotency_key FROM debate_mystery_spatial_action_reservations
+      WHERE user_id = ? AND session_id = ? AND action_key = ?`,
+  ).get(userId, sessionId, actionKey) as { idempotency_key?: string } | undefined;
+  const replay = existing?.idempotency_key
+    ? replayMysteryMutation(db, userId, sessionId, existing.idempotency_key)
+    : null;
+  if (existing?.idempotency_key === idempotencyKey && replay) {
+    return { replay, reserved: false };
+  }
+  if (replay) {
+    throw new HttpError(
+      409,
+      actionKey.startsWith("inspect:")
+        ? "That area has already been investigated."
+        : "This lock has already been resolved.",
+    );
+  }
+  throw new HttpError(409, "That hotspot or lock is already resolving. Please wait a moment.");
+}
+
+function releaseMysterySpatialActionReservation(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  actionKey: string,
+  idempotencyKey: string,
+): void {
+  db.prepare(
+    `DELETE FROM debate_mystery_spatial_action_reservations
+      WHERE user_id = ? AND session_id = ? AND action_key = ? AND idempotency_key = ?`,
+  ).run(userId, sessionId, actionKey, idempotencyKey);
+}
+
+/** Discovery is already a public case record. The v2 desk only stores
+ * explicit investigator hypotheses, never server-authored reference chips. */
 function appendAutomaticNotebookReferences(
   db: DatabaseSync,
   userId: string,
   sessionId: string,
   references: Array<{ kind: "evidence" | "testimony"; id: string; label: string }>,
 ): void {
-  if (references.length === 0) return;
-  const record = getDebateMysteryNotebook(db, userId, sessionId).notebook;
-  const existing = new Set(record.pages.flatMap((page) => page.blocks
-    .filter((block) => block.kind === "reference")
-    .map((block) => `${block.referenceKind}:${block.referenceId}`)));
-  const additions = references.filter((reference) => !existing.has(`${reference.kind}:${reference.id}`));
-  if (additions.length === 0) return;
-  const now = new Date().toISOString();
-  const page = record.pages[0];
-  if (!page) return;
-  const pages = record.pages.map((candidate) => candidate.id === page.id ? {
-    ...candidate,
-    updatedAt: now,
-    blocks: [...candidate.blocks, ...additions.map((reference) => ({
-      id: randomUUID(),
-      kind: "reference" as const,
-      text: `[[${reference.kind}:${reference.id}]] ${reference.label}`,
-      referenceKind: reference.kind,
-      referenceId: reference.id,
-    }))],
-  } : candidate);
-  const next = { ...record, revision: record.revision + 1, pages, updatedAt: now };
-  db.prepare(
-    `UPDATE debate_mystery_notebooks
-        SET revision = ?, document_json = ?, pending_proposal_json = NULL, updated_at = ?
-      WHERE session_id = ? AND user_id = ? AND revision = ?`,
-  ).run(next.revision, JSON.stringify(next), now, sessionId, userId, record.revision);
-  db.prepare(
-    `INSERT INTO debate_mystery_notebook_revisions
-       (id, user_id, session_id, revision, document_json, reason, idempotency_key, created_at)
-     VALUES (?, ?, ?, ?, ?, 'import', ?, ?)`,
-  ).run(randomUUID(), userId, sessionId, next.revision, JSON.stringify(next), `automatic:${sessionId}:${next.revision}`, now);
+  void db; void userId; void sessionId; void references;
 }
 
 function recordMysteryMutation(
@@ -1116,7 +1148,7 @@ async function projectedActorReply(args: {
 
 async function projectedPartnerReply(args: {
   state: DebateWhodunnitFormatStateV1;
-  notebook: DebateMysteryNotebookV1;
+  notebook: DebateMysteryNotebookV2;
   question: string;
   runtime: DebateAiRuntime;
   courtTask?: "opening" | "closing";
@@ -1140,7 +1172,12 @@ async function projectedPartnerReply(args: {
       linkedEvidenceIds: lead.linkedEvidenceIds,
       linkedTestimonyIds: lead.linkedTestimonyIds,
     })),
-    notebook: args.notebook.pages,
+    notebook: {
+      leadAnnotations: args.notebook.leadAnnotations,
+      suspectNotes: args.notebook.suspectNotes,
+      suspectPins: args.notebook.suspectPins,
+      disclaimer: "These are explicit, fallible investigator hypotheses—not evidence or case truth.",
+    },
   };
   try {
     const courtDirection = args.courtTask
@@ -1155,7 +1192,7 @@ async function projectedPartnerReply(args: {
         ].join("\n");
     const answer = (args.courtTask ? compact : compactMarkdown)(await lane.provider.generateResponse([
       { role: "system", content: [
-        "You are the investigator's prosecutor partner. You can read only this discovered public record and the investigator's fallible notebook. Offer analysis, questions, and uncertainty; never invent evidence, canonize notes, infer hidden case state, or claim access to a Case Bible.",
+        "You are the investigator's prosecutor partner. You can read only this discovered public record and the investigator's private desk workspace. Every note and pinned connection is an explicitly fallible, unverified player hypothesis. Offer analysis, questions, and uncertainty; never invent evidence, canonize a hypothesis, infer hidden case state, or claim access to a Case Bible.",
         "Use the suspects' actual display names, never seat labels such as Suspect-1.",
         "Treat every timestamp and quotation as exact. Never merge two witnesses' times, attribute one witness's words to another, or paraphrase a statement as a stronger fact. Separate documented fact from inference explicitly, and say when the record does not establish something.",
         courtDirection,
@@ -1169,7 +1206,7 @@ async function projectedPartnerReply(args: {
     ], { model: lane.model, reasoningEffort: lane.reasoningEffort, turbo: lane.turbo, maxTokens: args.courtTask ? 220 : 420, temperature: 0.2, usagePurpose: "debate_generation", allowFinalLocalFallback: lane.providerName === "local" }), args.courtTask ? 700 : 1_200) || "I can only work from what we have actually discovered.";
     return resolveMysterySeatNames(answer, args.state);
   } catch {
-    return "I can only work from what we have actually discovered. The notebook is our working theory, not evidence.";
+    return "I can only work from what we have actually discovered. Your desk notes and pins are working hypotheses, not evidence.";
   }
 }
 
@@ -1235,7 +1272,7 @@ async function appendMysteryCourtCounselBeat(args: {
   task: "opening" | "closing";
   runtime: DebateAiRuntime;
 }): Promise<void> {
-  const notebook = getDebateMysteryNotebook(
+  const notebook = getDebateMysteryNotebookV2(
     args.db,
     args.userId,
     args.sessionId,
@@ -1245,7 +1282,7 @@ async function appendMysteryCourtCounselBeat(args: {
     notebook,
     question:
       args.task === "opening"
-        ? "Deliver a concise prosecution opening from the filed theory and discovered record. Treat notebook claims as fallible and identify what the court must test."
+        ? "Deliver a concise prosecution opening from the filed theory and discovered record. Treat desk notes and pins as fallible, unverified player hypotheses and identify what the court must test."
         : "Deliver a concise prosecution closing from the filed theory, discovered record, and sustained courtroom contradictions. Do not claim facts that were not admitted.",
     runtime: args.runtime,
     courtTask: args.task,
@@ -1350,6 +1387,12 @@ export async function applyDebateMysteryAction(
   if (!key) throw new HttpError(400, "A stable idempotency key is required.");
   const replay = replayMysteryMutation(db, userId, sessionId, key);
   if (replay) return replay;
+  const spatialActionKey = mysterySpatialActionKey(request);
+  const reservation = spatialActionKey
+    ? reserveMysterySpatialAction(db, userId, sessionId, spatialActionKey, key)
+    : { replay: null, reserved: false };
+  if (reservation.replay) return reservation.replay;
+  try {
   const session = getDebateSession(db, userId, sessionId);
   if (request.expectedRevision !== session.revision) throw new HttpError(409, "This case changed in another window. Refresh and try again.");
   const state = requireMysteryState(session);
@@ -1377,8 +1420,34 @@ export async function applyDebateMysteryAction(
     if (nextState.actionsRemaining <= 0) throw new HttpError(409, "No investigation actions remain. File a theory to continue.");
     nextState.actionsRemaining -= 1;
   };
+  const requireInvestigationPhase = (label: string): void => {
+    if (nextState.playPhase !== "investigation" && nextState.playPhase !== "continuance") {
+      throw new HttpError(409, `${label} is unavailable after the investigation closes.`);
+    }
+  };
+  const requireNoActiveActivity = (): void => {
+    if (nextState.activeActivity) {
+      throw new HttpError(409, "Finish the current investigation or interview before choosing another action.");
+    }
+  };
+  const settleInvestigationExhaustion = (): void => {
+    if (
+      nextState.actionsRemaining > 0 ||
+      nextState.activeActivity ||
+      (nextState.playPhase !== "investigation" && nextState.playPhase !== "continuance")
+    ) return;
+    nextState.playPhase = "theory";
+    nextSession = {
+      ...nextSession,
+      phase: "closing",
+      stepKey: "mystery_theory",
+      status: "waiting_for_player",
+    };
+    publicPayload = { ...publicPayload, investigationExhausted: true };
+  };
   if (request.action === "travel") {
-    if (nextState.playPhase !== "investigation" && nextState.playPhase !== "continuance") throw new HttpError(409, "Travel is unavailable during trial.");
+    requireInvestigationPhase("Travel");
+    requireNoActiveActivity();
     const room = nextState.rooms.find((candidate) => candidate.id === request.roomId);
     if (!room) throw new HttpError(404, "Room not found.");
     if (room.locked) throw new HttpError(409, "This room is locked. Use an access item on it from the mansion map.");
@@ -1404,14 +1473,54 @@ export async function applyDebateMysteryAction(
     nextState.currentRoomId = room.id;
     nextState.playPhase = "investigation";
     publicPayload = { roomId: room.id, name: room.name, discovered: true };
+  } else if (request.action === "begin_investigation") {
+    requireInvestigationPhase("Room investigation");
+    requireNoActiveActivity();
+    const room = nextState.rooms.find((candidate) => candidate.id === request.roomId);
+    if (!room?.discovered) throw new HttpError(409, "Discover this room before investigating it.");
+    if (nextState.currentRoomId !== room.id) throw new HttpError(409, "Enter this room before investigating it.");
+    nextState.activeActivity = {
+      kind: "investigation",
+      roomId: room.id,
+      startedAt: new Date().toISOString(),
+    };
+    publicPayload = { roomId: room.id, cost: 0 };
+  } else if (request.action === "begin_interview") {
+    requireInvestigationPhase("Suspect interviews");
+    requireNoActiveActivity();
+    const suspect = nextState.suspects.find((candidate) => candidate.seatId === request.suspectSeatId);
+    if (!suspect) throw new HttpError(404, "Suspect not found.");
+    const room = nextState.rooms.find((candidate) => candidate.id === suspect.roomId);
+    if (!room?.discovered) throw new HttpError(409, "Discover the suspect's room before interviewing them.");
+    if (nextState.currentRoomId !== room.id) throw new HttpError(409, "Enter the suspect's room before interviewing them.");
+    if (!nextState.metSuspectSeatIds.includes(suspect.seatId)) {
+      nextState.metSuspectSeatIds.push(suspect.seatId);
+    }
+    nextState.activeActivity = {
+      kind: "interview",
+      suspectSeatId: suspect.seatId,
+      startedAt: new Date().toISOString(),
+    };
+    publicPayload = { suspectSeatId: suspect.seatId, cost: 0 };
+  } else if (request.action === "end_activity") {
+    requireInvestigationPhase("This activity");
+    if (!nextState.activeActivity) throw new HttpError(409, "No room investigation or interview is active.");
+    const completedActivity = nextState.activeActivity;
+    nextState.activeActivity = null;
+    publicPayload = { completedActivity };
   } else if (request.action === "inspect") {
+    requireInvestigationPhase("Room investigation");
     const room = nextState.rooms.find((candidate) => candidate.id === request.roomId);
     if (!room?.discovered) throw new HttpError(409, "Discover this room first.");
     if (nextState.currentRoomId !== room.id) throw new HttpError(409, "Enter this room before inspecting it.");
+    if (nextState.activeActivity?.kind !== "investigation" || nextState.activeActivity.roomId !== room.id) {
+      throw new HttpError(409, "Begin a room investigation before inspecting its areas.");
+    }
     if (!room.activeRegionIds.includes(request.regionId)) throw new HttpError(404, "That area is not active in this case.");
     if (room.inspectedRegionIds.includes(request.regionId)) {
       throw new HttpError(409, "That area has already been investigated.");
     }
+    spendAction();
     const outcome = bible.activeRegions.find((entry) => entry.roomId === room.id && entry.regionId === request.regionId)!;
     const resolvedLock = bible.accessLocks.find((lock) => {
       if (!nextState.accessHistory.some((entry) => entry.id === lock.id && entry.success)) return false;
@@ -1419,6 +1528,20 @@ export async function applyDebateMysteryAction(
       if (lock.targetKind !== "item") return false;
       const target = bible.inventoryItems.find((item) => item.id === lock.targetId);
       return target?.sourceRoomId === room.id && target.sourceRegionId === request.regionId;
+    });
+    const discoveredAccessTargets = bible.accessLocks.flatMap((lock) => {
+      if (lock.targetKind === "room" || nextState.accessHistory.some((entry) => entry.id === lock.id && entry.success)) return [];
+      const sourceMatches = lock.targetKind === "region"
+        ? lock.targetId === `${room.id}:${request.regionId}`
+        : (() => {
+            const target = bible.inventoryItems.find((item) => item.id === lock.targetId);
+            return target?.sourceRoomId === room.id && target.sourceRegionId === request.regionId;
+          })();
+      return sourceMatches ? [{
+        targetKind: lock.targetKind,
+        targetId: lock.targetId,
+        targetLabel: lock.targetLabel,
+      }] : [];
     });
     const inspectionResponse = resolvedLock?.unlockObservation ?? outcome.inspectionResponse;
     room.inspectionCounts ??= {};
@@ -1442,9 +1565,18 @@ export async function applyDebateMysteryAction(
       observation: inspectionResponse,
       outcomeKind: outcome.kind,
       evidenceId: outcome.evidenceId,
+      accessTargets: discoveredAccessTargets,
     });
+    const actionToken = (bible.actionTokens ?? []).find((token) =>
+      token.roomId === room.id && token.regionId === outcome.regionId);
+    let recoveredActionToken: DebateWhodunnitFormatStateV1["recoveredActionTokens"][number] | null = null;
+    if (actionToken && !nextState.recoveredActionTokens.some((token) => token.id === actionToken.id)) {
+      recoveredActionToken = { ...actionToken, recoveredAt: new Date().toISOString() };
+      nextState.recoveredActionTokens.push(recoveredActionToken);
+      nextState.actionsRemaining += actionToken.amount;
+    }
     nextState.partnerJournal.push(inspectionResponse);
-    publicPayload = { roomId: room.id, regionId: outcome.regionId, observation: inspectionResponse, outcomeKind: outcome.kind, evidenceId: outcome.evidenceId, inventoryItemId: outcome.inventoryItemId, inspectionCount: 1, repeated: false, roomComplete: room.searched };
+    publicPayload = { roomId: room.id, regionId: outcome.regionId, observation: inspectionResponse, outcomeKind: outcome.kind, evidenceId: outcome.evidenceId, inventoryItemId: outcome.inventoryItemId, inspectionCount: 1, repeated: false, roomComplete: room.searched, actionToken: recoveredActionToken };
   } else if (request.action === "use_access_item") {
     if (nextState.playPhase !== "investigation" && nextState.playPhase !== "continuance") throw new HttpError(409, "Access items are unavailable during trial.");
     const accessItem = nextState.inventoryItems.find((item) => item.id === request.accessItemId && item.usable);
@@ -1465,6 +1597,13 @@ export async function applyDebateMysteryAction(
       if (!targetRoom?.discovered || targetRoom.id !== nextState.currentRoomId || !targetRoom.activeRegionIds.includes(targetRegionId)) {
         throw new HttpError(404, "That room area is not available from here.");
       }
+      const discoveredTarget = targetRoom.observations.some((observation) =>
+        observation.accessTargets.some((target) =>
+          target.targetKind === "region" && target.targetId === request.targetId));
+      if (!discoveredTarget) throw new HttpError(404, "No discovered lock is available in that room area.");
+      if (nextState.activeActivity?.kind !== "investigation" || nextState.activeActivity.roomId !== targetRoom.id) {
+        throw new HttpError(409, "Begin a room investigation before using an item on one of its areas.");
+      }
       const template = DEBATE_MYSTERY_ROOM_TEMPLATES.find((entry) => entry.id === targetRoom.templateId);
       targetLabel = template?.regions.find((region) => region.id === targetRegionId)?.label ?? "room area";
     }
@@ -1473,6 +1612,9 @@ export async function applyDebateMysteryAction(
       candidate.targetId === request.targetId &&
       candidate.requiredAccessItemId === request.accessItemId,
     );
+    // Applying a Case Kit item is a committed interaction, including a wrong
+    // pairing. Selecting or carrying it remains free client-side navigation.
+    spendAction();
     const resolvedAt = new Date().toISOString();
     if (!lock) {
       const failedResponses = [
@@ -1541,6 +1683,10 @@ export async function applyDebateMysteryAction(
               observation: lock.unlockObservation,
               outcomeKind: "clue",
               evidenceId: results.find((item) => item.evidenceId)?.evidenceId ?? null,
+              accessTargets: sourceRoom.observations
+                .find((observation) => observation.regionId === resolvedSource.regionId)
+                ?.accessTargets.filter((target) =>
+                  target.targetKind !== lock.targetKind || target.targetId !== lock.targetId) ?? [],
             },
           ];
         }
@@ -1572,13 +1718,18 @@ export async function applyDebateMysteryAction(
     nextState.partnerJournal.push(`Forensics: ${finding.summary}`);
     publicPayload = { evidenceId: evidence.id, finding };
   } else if (request.action === "interview") {
+    requireInvestigationPhase("Suspect interviews");
     const suspect = nextState.suspects.find((candidate) => candidate.seatId === request.suspectSeatId);
     if (!suspect) throw new HttpError(404, "Suspect not found.");
     const room = nextState.rooms.find((candidate) => candidate.id === suspect.roomId);
     if (!room?.discovered) throw new HttpError(409, "Discover the suspect's room before interviewing them.");
     if (nextState.currentRoomId !== room.id) throw new HttpError(409, "Enter the suspect's room before interviewing them.");
+    if (nextState.activeActivity?.kind !== "interview" || nextState.activeActivity.suspectSeatId !== suspect.seatId) {
+      throw new HttpError(409, "Begin an interview before asking this suspect a question.");
+    }
     const question = compact(request.question, 2_000);
     if (!question) throw new HttpError(400, "Ask a question or choose a suggested lead.");
+    spendAction();
     const parsedEvidenceId = parseDebateMysteryEvidenceConfrontation(question, nextState.discoveredEvidence);
     if ((request.evidenceId ?? null) !== parsedEvidenceId) {
       throw new HttpError(400, "Evidence confrontations must use a selected @ evidence reference.");
@@ -1617,10 +1768,17 @@ export async function applyDebateMysteryAction(
   } else if (request.action === "consult_partner") {
     const question = compact(request.question, 2_000);
     if (!question) throw new HttpError(400, "Ask your partner a question.");
-    const notebook = getDebateMysteryNotebook(db, userId, sessionId).notebook;
+    const notebook = getDebateMysteryNotebookV2(db, userId, sessionId).notebook;
     const answer = await projectedPartnerReply({ state: nextState, notebook, question: resolveDebateMysteryQuestionMentions(question, nextState, bible), runtime });
+    const createdAt = new Date().toISOString();
+    nextState.partnerConsultations.push({
+      id: `partner-consultation-${nextState.partnerConsultations.length + 1}`,
+      question,
+      answer,
+      createdAt,
+    });
     nextState.partnerJournal.push(answer);
-    publicPayload = { question, answer };
+    publicPayload = { question, answer, createdAt, cost: 0 };
   } else if (request.action === "file_theory") {
     if (!request.theory.culpritSeatId) throw new HttpError(400, "Choose a culprit before filing charges.");
     if (request.theory.accompliceSeatId && request.theory.accompliceSeatId === request.theory.culpritSeatId) throw new HttpError(400, "The culprit cannot also be filed as their own accomplice.");
@@ -1640,6 +1798,7 @@ export async function applyDebateMysteryAction(
       testimonyIds,
     };
     nextState.theoryFiledAt = new Date().toISOString();
+    nextState.activeActivity = null;
     const accusedStatement = bible.testimony.find((entry) => entry.speakerSeatId === request.theory.culpritSeatId);
     const witnessCount = Math.min(3, Math.max(1, Math.ceil(nextState.config.totalRooms / 5)));
     const otherStatements = bible.testimony
@@ -1739,6 +1898,7 @@ export async function applyDebateMysteryAction(
     nextState.spoilersRevealed = true;
     publicPayload = { spoilersRevealed: true, timeline: bible.timeline, culpritSeatId: bible.culpritSeatId, accompliceSeatId: bible.accompliceSeatId, unseenEvidence: bible.evidence.filter((item) => !nextState.discoveredEvidence.some((known) => known.id === item.id)), proofBundles: bible.proofBundles };
   }
+  settleInvestigationExhaustion();
   if (nextSession.formatState === state) nextSession = { ...nextSession, formatState: nextState };
   else if (nextSession.formatState.format === "whodunnit") nextState = nextSession.formatState;
   const priorLeads = new Map(state.leads.map((lead) => [lead.id, lead]));
@@ -1766,6 +1926,115 @@ export async function applyDebateMysteryAction(
     db.exec("ROLLBACK");
     throw error;
   }
+  } catch (error) {
+    if (spatialActionKey && reservation.reserved) {
+      releaseMysterySpatialActionReservation(db, userId, sessionId, spatialActionKey, key);
+    }
+    throw error;
+  }
+}
+
+function migrateNotebookV2(document: unknown, sessionId: string, revision: number): DebateMysteryNotebookV2 {
+  const source = document && typeof document === "object" ? document as Record<string, unknown> : {};
+  const now = new Date().toISOString();
+  if (source.version === 2) {
+    return {
+      version: 2,
+      sessionId,
+      revision,
+      leadAnnotations: Array.isArray(source.leadAnnotations) ? source.leadAnnotations.filter((entry): entry is DebateMysteryNotebookV2["leadAnnotations"][number] => Boolean(entry && typeof entry === "object" && typeof (entry as Record<string, unknown>).leadId === "string" && typeof (entry as Record<string, unknown>).leadRevision === "number" && typeof (entry as Record<string, unknown>).text === "string")) : [],
+      suspectNotes: Array.isArray(source.suspectNotes) ? source.suspectNotes.filter((entry): entry is DebateMysteryNotebookV2["suspectNotes"][number] => Boolean(entry && typeof entry === "object" && typeof (entry as Record<string, unknown>).seatId === "string" && typeof (entry as Record<string, unknown>).text === "string")) : [],
+      suspectPins: Array.isArray(source.suspectPins) ? source.suspectPins.filter((entry): entry is DebateMysteryNotebookV2["suspectPins"][number] => Boolean(entry && typeof entry === "object" && ["lead", "evidence", "testimony"].includes(String((entry as Record<string, unknown>).referenceKind)) && typeof (entry as Record<string, unknown>).referenceId === "string" && typeof (entry as Record<string, unknown>).seatId === "string")) : [],
+      createdAt: compact(source.createdAt, 64) || now,
+      updatedAt: compact(source.updatedAt, 64) || now,
+    };
+  }
+  const pages = Array.isArray(source.pages) ? source.pages : [];
+  const leadAnnotations = pages.flatMap((page) => {
+    const blocks = page && typeof page === "object" && Array.isArray((page as Record<string, unknown>).blocks) ? (page as Record<string, unknown>).blocks : [];
+    return (blocks as unknown[]).flatMap((block) => {
+      const value = block && typeof block === "object" ? block as Record<string, unknown> : {};
+      const leadId = compact(value.leadId, 160);
+      const text = typeof value.text === "string" ? value.text.trim().slice(0, 8_000) : "";
+      const leadRevision = typeof value.leadRevision === "number" && Number.isInteger(value.leadRevision) && value.leadRevision > 0 ? value.leadRevision : 0;
+      return leadId && text && leadRevision ? [{ id: compact(value.id, 120) || randomUUID(), leadId, leadRevision, text, createdAt: now, updatedAt: now }] : [];
+    });
+  });
+  return { version: 2, sessionId, revision, leadAnnotations, suspectNotes: [], suspectPins: [], createdAt: compact(source.createdAt, 64) || now, updatedAt: now };
+}
+
+export function getDebateMysteryNotebookV2(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+): { notebook: DebateMysteryNotebookV2; cleanupProposal: null } {
+  const state = requireMysteryState(getDebateSession(db, userId, sessionId));
+  const row = db.prepare(`SELECT revision, document_json FROM debate_mystery_notebooks WHERE session_id = ? AND user_id = ?`).get(sessionId, userId) as MysteryNotebookRow | undefined;
+  if (!row) throw new HttpError(404, "Investigator's desk not found.");
+  const original = JSON.parse(row.document_json) as unknown;
+  const migrated = migrateNotebookV2(original, sessionId, row.revision);
+  // A legacy page can mention an erased lead or an unrevealed seat. Keep only
+  // v2 entries still authorized by this player's current public record.
+  const legacy = (original as { version?: unknown })?.version !== 2;
+  const notebook = { ...migrated, ...validateMysteryDeskWorkspace(state, migrated as unknown as Record<string, unknown>) };
+  if (legacy) {
+    db.prepare(`UPDATE debate_mystery_notebooks SET document_json = ?, pending_proposal_json = NULL, updated_at = ? WHERE session_id = ? AND user_id = ? AND revision = ?`).run(JSON.stringify(notebook), notebook.updatedAt, sessionId, userId, row.revision);
+  }
+  return { notebook, cleanupProposal: null };
+}
+
+function validateMysteryDeskWorkspace(state: DebateWhodunnitFormatStateV1, body: Record<string, unknown>): Pick<DebateMysteryNotebookV2, "leadAnnotations" | "suspectNotes" | "suspectPins"> {
+  const annotations = Array.isArray(body.leadAnnotations) ? body.leadAnnotations : [];
+  const leadAnnotations = annotations.flatMap((entry) => {
+    const value = entry && typeof entry === "object" ? entry as Record<string, unknown> : {};
+    const leadId = compact(value.leadId, 160); const text = typeof value.text === "string" ? value.text.trim().slice(0, 8_000) : "";
+    const lead = state.leads.find((candidate) => candidate.id === leadId);
+    const now = new Date().toISOString();
+    return lead && text ? [{ id: compact(value.id, 120) || randomUUID(), leadId, leadRevision: lead.revision, text, createdAt: compact(value.createdAt, 64) || now, updatedAt: compact(value.updatedAt, 64) || now }] : [];
+  });
+  const seenNotes = new Set<string>();
+  const suspectNotes = (Array.isArray(body.suspectNotes) ? body.suspectNotes : []).flatMap((entry) => {
+    const value = entry && typeof entry === "object" ? entry as Record<string, unknown> : {};
+    const seatId = compact(value.seatId, 120); const text = typeof value.text === "string" ? value.text.slice(0, 8_000) : "";
+    if (!state.metSuspectSeatIds.includes(seatId) || !text.trim() || seenNotes.has(seatId)) return [];
+    seenNotes.add(seatId);
+    return [{ seatId, text, updatedAt: compact(value.updatedAt, 64) || new Date().toISOString() }];
+  });
+  const seen = new Set<string>();
+  const suspectPins = (Array.isArray(body.suspectPins) ? body.suspectPins : []).flatMap((entry) => {
+    const value = entry && typeof entry === "object" ? entry as Record<string, unknown> : {};
+    const referenceKind: DebateMysteryNotebookV2["suspectPins"][number]["referenceKind"] | null = value.referenceKind === "lead" || value.referenceKind === "evidence" || value.referenceKind === "testimony" ? value.referenceKind : null;
+    const referenceId = compact(value.referenceId, 160); const seatId = compact(value.seatId, 120);
+    const eligible = referenceKind === "lead" ? state.leads.some((item) => item.id === referenceId) : referenceKind === "evidence" ? state.discoveredEvidence.some((item) => item.id === referenceId) : state.testimony.some((item) => item.id === referenceId);
+    const key = `${seatId}:${referenceKind}:${referenceId}`;
+    return referenceKind && eligible && state.metSuspectSeatIds.includes(seatId) && !seen.has(key) ? (seen.add(key), [{ id: compact(value.id, 120) || randomUUID(), referenceKind, referenceId, seatId, createdAt: compact(value.createdAt, 64) || new Date().toISOString() }]) : [];
+  });
+  const characterCount = leadAnnotations.reduce((total, annotation) => total + annotation.text.length, 0)
+    + suspectNotes.reduce((total, note) => total + note.text.length, 0);
+  if (characterCount > DEBATE_MYSTERY_NOTEBOOK_CHARACTER_LIMIT) throw new HttpError(413, `Desk workspace exceeds the ${DEBATE_MYSTERY_NOTEBOOK_CHARACTER_LIMIT.toLocaleString()}-character limit.`);
+  if (leadAnnotations.length > 120 || suspectNotes.length > state.metSuspectSeatIds.length || suspectPins.length > 240) throw new HttpError(413, "Keep the desk workspace compact.");
+  return { leadAnnotations, suspectNotes, suspectPins };
+}
+
+export function patchDebateMysteryNotebookV2(db: DatabaseSync, userId: string, sessionId: string, body: Record<string, unknown>): { notebook: DebateMysteryNotebookV2; cleanupProposal: null } {
+  const key = normalizeDebateIdempotencyKey(body.idempotencyKey); if (!key) throw new HttpError(400, "A stable idempotency key is required.");
+  const replay = db.prepare(`SELECT document_json FROM debate_mystery_notebook_revisions WHERE user_id = ? AND session_id = ? AND idempotency_key = ?`).get(userId, sessionId, key) as { document_json?: string } | undefined;
+  if (replay?.document_json) {
+    const document = JSON.parse(replay.document_json) as { revision?: unknown };
+    return { notebook: migrateNotebookV2(document, sessionId, typeof document.revision === "number" ? document.revision : 0), cleanupProposal: null };
+  }
+  const current = getDebateMysteryNotebookV2(db, userId, sessionId).notebook;
+  if (body.expectedRevision !== current.revision) throw new HttpError(409, "The desk changed in another window. Refresh and try again.");
+  const state = requireMysteryState(getDebateSession(db, userId, sessionId));
+  const fields = validateMysteryDeskWorkspace(state, body);
+  const now = new Date().toISOString(); const next: DebateMysteryNotebookV2 = { ...current, ...fields, revision: current.revision + 1, updatedAt: now };
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = db.prepare(`UPDATE debate_mystery_notebooks SET revision = ?, document_json = ?, pending_proposal_json = NULL, updated_at = ? WHERE session_id = ? AND user_id = ? AND revision = ?`).run(next.revision, JSON.stringify(next), now, sessionId, userId, current.revision);
+    if (Number(result.changes) !== 1) throw new HttpError(409, "The desk changed in another window. Refresh and try again.");
+    db.prepare(`INSERT INTO debate_mystery_notebook_revisions (id, user_id, session_id, revision, document_json, reason, idempotency_key, created_at) VALUES (?, ?, ?, ?, ?, 'edit', ?, ?)`).run(randomUUID(), userId, sessionId, next.revision, JSON.stringify(next), key, now);
+    db.exec("COMMIT"); return { notebook: next, cleanupProposal: null };
+  } catch (error) { db.exec("ROLLBACK"); throw error; }
 }
 
 export function getDebateMysteryNotebook(
@@ -1779,7 +2048,19 @@ export function getDebateMysteryNotebook(
        FROM debate_mystery_notebooks WHERE session_id = ? AND user_id = ?`,
   ).get(sessionId, userId) as MysteryNotebookRow | undefined;
   if (!row) throw new HttpError(404, "Investigator's Notebook not found.");
-  const notebook = JSON.parse(row.document_json) as DebateMysteryNotebookV1;
+  const document = JSON.parse(row.document_json) as DebateMysteryNotebookV1 | DebateMysteryNotebookV2;
+  // Deprecated server-only compatibility for historical callers/exports. The
+  // public route uses getDebateMysteryNotebookV2 and never exposes pages.
+  const notebook: DebateMysteryNotebookV1 = document.version === 2
+    ? {
+      version: 1,
+      sessionId,
+      revision: row.revision,
+      pages: [{ id: "legacy-case-notes", title: "Case Notes", blocks: [], createdAt: document.createdAt, updatedAt: document.updatedAt }],
+      createdAt: document.createdAt,
+      updatedAt: document.updatedAt,
+    }
+    : document;
   return { notebook: { ...notebook, revision: row.revision }, cleanupProposal: row.pending_proposal_json ? JSON.parse(row.pending_proposal_json) as DebateMysteryNotebookCleanupProposalV1 : null };
 }
 
@@ -2126,6 +2407,7 @@ export async function importDebateMysteryCase(
     caseSeed: `case-v${manifest.generatorVersion}-${sha256(JSON.stringify(manifest)).slice(0, 12)}`,
     rooms: manifest.case.rooms.map((room) => ({ ...room, imageId: null })),
     evidence: manifest.case.evidence.map((item) => ({ ...item, imageId: null })),
+    actionTokens: Array.isArray(manifest.case.actionTokens) ? manifest.case.actionTokens : [],
     inventoryItems: Array.isArray(manifest.case.inventoryItems) ? manifest.case.inventoryItems : [],
     accessLocks: Array.isArray(manifest.case.accessLocks) ? manifest.case.accessLocks : [],
     activeRegions: manifest.case.activeRegions.map((outcome) => ({

@@ -1,4 +1,5 @@
 import type { VoiceDeliveryMood } from "./audioVoice.js";
+import type { BotPowerTrollPresentationV1 } from "./trollPower.ts";
 import type { SignalMusicProfile } from "./signalMusicProfile.js";
 import {
   normalizeBotIdentityMirrorStateV1,
@@ -24,6 +25,9 @@ import {
   type DirectionalIrritationTransitionV1,
 } from "./directionalIrritation.ts";
 import {
+  listenerReactionInterruptedSpeakerTextV1,
+  listenerReactionSpeechCopySourceV1,
+  listenerReactionSpokenTextV1,
   normalizeCrosstalkReclaimPlanV1,
   normalizeBotCrosstalkInterruptedSpeakerCue,
   normalizeListenerReactionPlanV1,
@@ -950,6 +954,8 @@ export interface BotcastMusicIdentity {
 export interface BotcastShow {
   id: string;
   hostBotId: string;
+  /** True only when the referenced host is still an enabled bot owned by this account. */
+  hasActiveHost: boolean;
   name: string;
   premise: string;
   hostingStyle: string;
@@ -999,6 +1005,18 @@ export interface BotcastHostRecoveryResponse {
   identityHash: string;
   candidates: BotcastHostRecoveryCandidate[];
 }
+
+/** Idempotent result of asking Signal to screen a show's replacement hosts. */
+export type BotcastHostRecoveryScreenResponse =
+  | {
+      status: "screened";
+      recovery: BotcastHostRecoveryResponse;
+    }
+  | {
+      status: "not_needed";
+      recovery: null;
+      show: BotcastShow;
+    };
 
 export interface BotcastHostRecoveryCastResponse {
   status: "accepted" | "declined";
@@ -1058,7 +1076,52 @@ export interface BotcastMessage {
    * Missing on legacy episodes; folded from utterance/listener_reaction payloads.
    */
   directionalIrritationDelivery?: DirectionalIrritationDeliveryPlanV1;
+  /** Public Troll delivery state, persisted on the ordinary utterance event. */
+  botPowerTrollPresentation?: BotPowerTrollPresentationV1;
   createdAt: string;
+}
+
+/** Public speech that accompanies a persisted turn without becoming a stage action. */
+export interface BotcastPublicReactionSpeechV1 {
+  messageId: string;
+  botId: string;
+  text: string;
+  kind: "interruption";
+}
+
+/**
+ * Projects only saved public cue text for captions and the ordinary transcript.
+ * Physical reaction metadata stays out of this speech-only projection.
+ */
+export function botcastPublicReactionSpeechForMessage(
+  events: readonly BotcastReplayEvent[],
+  messageId: string,
+): BotcastPublicReactionSpeechV1[] {
+  const result: BotcastPublicReactionSpeechV1[] = [];
+  for (const event of events) {
+    if (event.kind !== "listener_reaction") continue;
+    const plan = normalizeSavedBotcastListenerReactionPlan(event.payload.plan);
+    if (!plan?.interjectionAttempt || plan.messageId !== messageId) continue;
+    const interrupterText = listenerReactionSpokenTextV1(plan);
+    if (interrupterText) {
+      result.push({
+        messageId,
+        botId: plan.listenerBotId,
+        text: interrupterText,
+        kind: "interruption",
+      });
+    }
+    const interruptedText = listenerReactionInterruptedSpeakerTextV1(plan);
+    if (interruptedText) {
+      result.push({
+        messageId,
+        botId: plan.speakerBotId,
+        text: interruptedText,
+        kind: "interruption",
+      });
+    }
+  }
+  return result;
 }
 
 export interface BotcastMessageAudienceDeliveryV1 {
@@ -1869,6 +1932,23 @@ export function botcastListenerReactionForMessage(
   return null;
 }
 
+/** Latest exact public reaction speech Copycat heard during a saved message. */
+export function botcastLatestSpeechCopyReactionSourceV1(
+  events: readonly BotcastReplayEvent[],
+  messageId: string,
+  holderBotId: string,
+): string | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.kind !== "listener_reaction") continue;
+    const plan = normalizeSavedBotcastListenerReactionPlan(event.payload.plan);
+    if (plan?.messageId !== messageId) continue;
+    const source = listenerReactionSpeechCopySourceV1(plan, holderBotId);
+    if (source) return source;
+  }
+  return null;
+}
+
 function normalizeBotcastSocialInfluenceEvent(
   value: unknown,
 ): BotcastSocialInfluenceEventV1 | null {
@@ -2571,6 +2651,40 @@ export function botcastConsecutiveSocialSilenceTurns(
     count += 1;
   }
   return count;
+}
+
+/**
+ * A social-silence beat belongs to its scheduled speaker. Before that speaker
+ * can receive another one, they must contribute two real on-air turns; other
+ * participants' turns neither spend nor reset this cooldown.
+ */
+export function botcastSpeakerSubstantiveTurnsSinceSocialSilence(
+  messages: readonly Pick<BotcastMessage, "botId" | "content" | "socialSilence">[],
+  speakerBotId: string,
+): number {
+  const normalizedSpeakerId = speakerBotId.trim();
+  if (!normalizedSpeakerId) return Number.POSITIVE_INFINITY;
+  let substantiveTurns = 0;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message || message.botId !== normalizedSpeakerId) continue;
+    if (
+      socialSilenceMessageIsMarkedV1({
+        content: message.content,
+        marker: message.socialSilence,
+        mode: "signal",
+      })
+    ) {
+      return substantiveTurns;
+    }
+    if (
+      !botPowerResponseIsSilentV1(message.content) &&
+      botcastSpokenWordCount(message.content) >= 3
+    ) {
+      substantiveTurns += 1;
+    }
+  }
+  return Number.POSITIVE_INFINITY;
 }
 
 /** The latest interrupted utterance may reclaim exactly the next bot turn. */

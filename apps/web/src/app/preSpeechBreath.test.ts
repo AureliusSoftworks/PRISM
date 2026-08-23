@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   PRE_SPEECH_BREATH_URLS,
   hasAuthoredBreathDirection,
+  preSpeechBreathPlaybackTiming,
   resolvePreSpeechBreathPlan,
 } from "./preSpeechBreath.ts";
 
@@ -35,6 +36,38 @@ describe("pre-speech breath planning", () => {
     for (const url of Object.values(PRE_SPEECH_BREATH_URLS).flat()) {
       const asset = new URL(`../../public/${url.slice(1)}`, import.meta.url);
       assert.ok(statSync(asset).size > 8_000, url);
+    }
+  });
+
+  it("uses deterministic short pre-rolls with a protected speech onset", () => {
+    const plan = {
+      url: PRE_SPEECH_BREATH_URLS.natural[0]!,
+      intensity: "natural" as const,
+      gain: 0.66,
+      voiceOverlapMs: 140,
+    };
+    const timing = preSpeechBreathPlaybackTiming(plan, 758);
+    assert.deepEqual(timing, {
+      playbackDurationMs: 480,
+      voiceStartOffsetMs: 340,
+      releaseFadeMs: 90,
+    });
+    assert.deepEqual(timing, preSpeechBreathPlaybackTiming(plan, 758));
+
+    const shortAssetTiming = preSpeechBreathPlaybackTiming(plan, 120);
+    assert.deepEqual(shortAssetTiming, {
+      playbackDurationMs: 120,
+      voiceStartOffsetMs: 0,
+      releaseFadeMs: 90,
+    });
+
+    for (const intensity of ["micro", "natural", "deliberate"] as const) {
+      const bounded = preSpeechBreathPlaybackTiming(
+        { ...plan, intensity },
+        1_000,
+      );
+      assert.ok(bounded.voiceStartOffsetMs < 500, intensity);
+      assert.ok(bounded.voiceStartOffsetMs < bounded.playbackDurationMs, intensity);
     }
   });
 
@@ -163,11 +196,22 @@ describe("pre-speech breath integration", () => {
     assert.match(effectsSource, /fetch\(url, \{ cache: "force-cache" \}\)/u);
     assert.match(effectsSource, /\.catch\(\(\) => null\)/u);
     assert.match(effectsSource, /activeVoiceChannels\.presence/u);
+    assert.match(effectsSource, /PRE_SPEECH_BREATH_LOAD_BUDGET_MS = 120/u);
+    assert.match(effectsSource, /preSpeechBreathPlaybackTiming\(/u);
+    assert.match(effectsSource, /source\.start\(startedAt, 0, playbackDurationSeconds\)/u);
     assert.match(effectsSource, /voiceStartsAt/u);
     assert.match(effectsSource, /attackSeconds/u);
     assert.match(effectsSource, /highpass\.frequency\.value = 140/u);
     assert.match(effectsSource, /lowpass\.frequency\.value = 7_000/u);
     assert.doesNotMatch(effectsSource, /postGapMs/u);
+    const signalSource = readFileSync(
+      new URL("./signalStudioCutAudio.ts", import.meta.url),
+      "utf8",
+    );
+    assert.match(signalSource, /preSpeechBreathPlaybackTiming\(/u);
+    assert.match(signalSource, /cursorMs - breathTiming\.voiceStartOffsetMs/u);
+    assert.match(signalSource, /sourceDurationSeconds: breathTiming\.playbackDurationMs \/ 1_000/u);
+    assert.match(signalSource, /fadeOutMs: breathTiming\.releaseFadeMs/u);
     assert.ok(
       englishSource.indexOf("await playPreSpeechBreath") <
         englishSource.indexOf("played = await playRealtimeVoiceBytes"),

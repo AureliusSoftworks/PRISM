@@ -7,9 +7,33 @@ import {
 } from "@localai/shared";
 import {
   applyDebateSetupSuggestion,
+  anchorDebateSetupCast,
   emptyPreferredJurorBotIds,
   preferredJurorBotIdsFromSession,
 } from "./debateExperienceState.ts";
+
+describe("anchorDebateSetupCast", () => {
+  it("keeps the captured bot in its seat and repairs a generated duplicate", () => {
+    assert.deepEqual(
+      anchorDebateSetupCast({
+        cast: {
+          moderator: "moderator",
+          forAdvocate: "anchor",
+          againstAdvocate: "other",
+        },
+        anchorBotId: "anchor",
+        anchorSlot: "againstAdvocate",
+        selectableSlots: ["moderator", "forAdvocate", "againstAdvocate"],
+        availableBotIds: ["anchor", "moderator", "other", "replacement"],
+      }),
+      {
+        moderator: "moderator",
+        forAdvocate: "other",
+        againstAdvocate: "anchor",
+      },
+    );
+  });
+});
 
 function baseExhibits(): DebateSetupSuggestionV1["exhibits"] {
   return [

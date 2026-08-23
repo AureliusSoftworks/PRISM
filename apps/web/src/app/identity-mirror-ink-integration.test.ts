@@ -37,13 +37,21 @@ describe("Identity Crisis avatar ink integration", () => {
   it("describes the saved ink handoff in current mode guidance", () => {
     assert.match(
       tutorialSource,
-      /borrows the latest direct bot addresser's public diegetic identity/u,
+      /borrows the latest direct bot addresser's public diegetic name, persona, CRT face, authored Avatar Details ink, lower glyph/u,
     );
     assert.match(
       tutorialSource,
-      /keeps its own saturated color, client-side voice effect, communication-style chassis, and frame finish/u,
+      /always keeps its own complete authored voice identity and profile.*accent, pronunciation, speechprint, and client voice effect/u,
     );
-    assert.match(tutorialSource, /saved handoff and its timing replay exactly/u);
+    assert.match(
+      tutorialSource,
+      /first reveal uses impostor once[\s\S]*without repeating the label or ever recanting/u,
+    );
+    assert.match(tutorialSource, /original briefly corrects.*even under Credulity.*otherwise advances/iu);
+    assert.match(
+      tutorialSource,
+      /saved handoff, retained voice, and timing replay exactly/u,
+    );
     assert.match(
       tutorialSource,
       /authored default identity returns before the closing sign-off/u,

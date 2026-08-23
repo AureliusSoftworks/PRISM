@@ -294,29 +294,20 @@ type CoffeeSeatPlateBlinkState = {
 
 const COFFEE_SEAT_THINKING_SPINNER_FRAME_MS = 142;
 const COFFEE_SEAT_SIP_MOUTH_GLYPHS = new Set(["*", "⁎"]);
-const COFFEE_SEAT_TALKING_BLINK_GAP_MULTIPLIER = 1.35;
 function coffeeSeatClosedBlinkHoldMs(): number {
   return randomBetween(112, 178);
 }
 
-function coffeeSeatBlinkGapMs(talking = false): number {
-  const gapMs = randomBetween(1500, 4000);
-  return talking
-    ? gapMs * COFFEE_SEAT_TALKING_BLINK_GAP_MULTIPLIER
-    : gapMs;
+function coffeeSeatBlinkGapMs(): number {
+  return randomBetween(1500, 4000);
 }
 
 function coffeeSeatExtraBlinkGapMs(): number {
   return randomBetween(118, 260);
 }
 
-function coffeeSeatExtraBlinkCount(talking = false): number {
+function coffeeSeatExtraBlinkCount(): number {
   const roll = Math.random();
-  if (talking) {
-    if (roll < 0.03) return 2;
-    if (roll < 0.14) return 1;
-    return 0;
-  }
   if (roll < 0.05) return 2;
   if (roll < 0.22) return 1;
   return 0;
@@ -480,12 +471,7 @@ export function CoffeeSeatPlateEmoji({
   const [gazeSnapsOpen, setGazeSnapsOpen] = useState(false);
   const customMouthGlyphRef = useRef<HTMLSpanElement | null>(null);
   const previousBlinkPhaseRef = useRef<CoffeeSeatBlinkPhase>("open");
-  const isTalkingRef = useRef(effectiveTalking);
   const blinkPhase = blinkState.key === blinkKey ? blinkState.phase : "open";
-
-  useEffect(() => {
-    isTalkingRef.current = effectiveTalking;
-  }, [effectiveTalking]);
 
   const normalizedEyeMovement =
     fullMotion
@@ -602,11 +588,7 @@ export function CoffeeSeatPlateEmoji({
     };
 
     const armNextBlink = () => {
-      const talking = blinkWhileTalking && isTalkingRef.current;
-      armBlink(
-        coffeeSeatBlinkGapMs(talking),
-        coffeeSeatExtraBlinkCount(talking),
-      );
+      armBlink(coffeeSeatBlinkGapMs(), coffeeSeatExtraBlinkCount());
     };
 
     arm(armNextBlink, startJitter);

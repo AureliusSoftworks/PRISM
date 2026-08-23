@@ -1928,7 +1928,7 @@ export function playVoiceSyncLabClip(
             args.clip.seed,
             args.effectsEnabled !== false,
             volume,
-            lifecycle,
+            { ...lifecycle, sourceAlignment: args.clip.alignment },
             args.clip.engineUsed,
           );
         }

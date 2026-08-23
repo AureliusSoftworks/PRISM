@@ -9,8 +9,8 @@ const pageSource = readFileSync(join(appDir, "page.tsx"), "utf8");
 const pageCss = readFileSync(join(appDir, "page.module.css"), "utf8");
 const tutorialSource = readFileSync(join(appDir, "modeTutorials.ts"), "utf8");
 
-describe("retired Coffee service", () => {
-  it("removes retired service and player-cup presentation from Coffee", () => {
+describe("Coffee Join and Serve presentation", () => {
+  it("removes the retired waiter and bar-service presentation from Coffee", () => {
     assert.doesNotMatch(pageSource, /coffeeSettings\?\.barRitual/u);
     assert.doesNotMatch(pageSource, /coffeeBarScene|coffeeWaiterVisit/u);
     assert.doesNotMatch(pageSource, /player-cup\/sip/u);
@@ -90,7 +90,7 @@ describe("retired Coffee service", () => {
     );
   });
 
-  it("gives every live off-camera player the pot without legacy ritual state", () => {
+  it("gives Serve players the pot without legacy ritual state", () => {
     assert.match(
       pageSource,
       /const coffeePotComposerDockVisible =\s*conversationActive &&\s*\(coffeeSessionPhase === "arriving" \|\|\s*coffeeSessionPhase === "live"\) &&\s*!coffeeReplayActive &&\s*coffeeExperienceAllowsPot;/u,
@@ -110,6 +110,21 @@ describe("retired Coffee service", () => {
     assert.doesNotMatch(
       pageSource,
       /const coffeePotVisible =[\s\S]{0,220}barRitual/u,
+    );
+  });
+
+  it("keeps Join seated with a mug and Serve off camera with the pot", () => {
+    assert.match(
+      pageSource,
+      /const coffeeReplayPlayerAvatarVisible =[\s\S]{0,360}coffeeLiveExperienceMode === "join"[\s\S]{0,180}coffeeSessionPhase === "arriving" \|\| coffeeSessionPhase === "live"/u,
+    );
+    assert.match(
+      pageSource,
+      /!coffeeReplayActive &&\s*coffeeLiveExperienceMode === "join" &&\s*[\s\S]{0,360}className=\{styles\.coffeePlayerCupButton\}/u,
+    );
+    assert.match(
+      pageSource,
+      /const coffeeExperienceAllowsPot = coffeeLiveExperienceMode === "serve"/u,
     );
   });
 

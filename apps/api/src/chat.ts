@@ -101,6 +101,7 @@ import type {
   BotPowerFalseNamePoolV1,
   BotIdentityShapeshiftStateV1,
   BotPowerResponseBudgetEffectV1,
+  BotPowerTrollPresentationV1,
   ImageProviderName,
   ResponseMode,
   StageActionExclusionV1,
@@ -135,6 +136,9 @@ import {
   applyBotPowerMuteResponseV1,
   createBotPowerMutePerformanceV1,
   applyBotPowerResponseBudgetV1,
+  applyBotPowerTrollTurnV1,
+  botPowerTrollFixedMoodV1,
+  lockBotPowerTrollPrismMoodV1,
   botPowerIsAddressedQuestionV1,
   strongestBotPowerAntiTruthEffectV1,
   applyBotPowerAntiTruthTrueNameLeakV1,
@@ -7020,6 +7024,9 @@ function hydrateMessages(
         ? { identityShapeshift: assembled.identityShapeshift }
         : {}),
       ...(assembled.falseName ? { falseName: assembled.falseName } : {}),
+      ...(assembled.botPowerTrollPresentation
+        ? { botPowerTrollPresentation: assembled.botPowerTrollPresentation }
+        : {}),
     };
   });
 }
@@ -9884,12 +9891,16 @@ export async function processChatMessage(
   );
   let prismMood = loadPrismMoodState(db, userId, activeConversationId, mode) ??
     createDefaultPrismMoodState(mode, now);
+  const trollMoodLocked =
+    botPowerTrollFixedMoodV1(settings.botPowers, null) === "warm";
   let prismMoodIgnoreTurn = false;
   let prismMoodPauseTurn = false;
   let prismMoodCooldownExpiredThisTurn = false;
   let skipMemoryForMoodCooldownTurn = false;
   let prismMoodForgivenessSystemHint: string | null = null;
-  if (isStarterPrompt || assistantOnlyCompanionTurn || commandCenterPromptTurn) {
+  if (trollMoodLocked) {
+    prismMood = lockBotPowerTrollPrismMoodV1(settings.botPowers, prismMood, now);
+  } else if (isStarterPrompt || assistantOnlyCompanionTurn || commandCenterPromptTurn) {
     prismMood = sanitizePrismMoodState(prismMood, mode, now);
   } else if (isZenMode(mode) && isPrismMoodIgnoring(prismMood, now)) {
     skipMemoryForMoodCooldownTurn = true;
@@ -9967,7 +9978,7 @@ export async function processChatMessage(
       }
     }
   }
-  if (botPowerQuietIgnoredTurn && !commandCenterPromptTurn) {
+  if (botPowerQuietIgnoredTurn && !commandCenterPromptTurn && !trollMoodLocked) {
     prismMood = applyPrismMoodPowerIgnoredTurn(prismMood, now);
   }
   if (!commandCenterPromptTurn) {
@@ -10906,7 +10917,7 @@ export async function processChatMessage(
       mentionedBotNames,
     );
   }
-	  const assistantMood = botPowerQuietIgnoredTurn || prismMoodPauseTurn
+	  const evaluatedAssistantMood = botPowerQuietIgnoredTurn || prismMoodPauseTurn
 	    ? {
 	        key: prismMood.moodKey,
 	        confidence: prismMood.confidence,
@@ -10918,8 +10929,14 @@ export async function processChatMessage(
         toneDelta: turnEvaluation?.delta,
         sessionOpinion: existingSessionOpinion,
         botOpinion: existingBotOpinion,
-	        repairSignal,
+        repairSignal,
 	      });
+  const assistantMood = botPowerTrollFixedMoodV1(
+    settings.botPowers,
+    evaluatedAssistantMood.key,
+  ) === "warm"
+    ? { key: "warm" as const, confidence: 1 }
+    : evaluatedAssistantMood;
   const zenStageAction: ZenStageActionPayload | undefined = zenStageActionPlan
     ? (() => {
         const resolved = resolveFinalStageActionV1({
@@ -11088,6 +11105,26 @@ export async function processChatMessage(
       `${activeConversationId}:${assistantBotId ?? "prism"}:${history.length + 1}`,
     );
   }
+  const priorTrollPresentations = history
+    .map((entry) => entry.botPowerTrollPresentation)
+    .filter(
+      (entry): entry is BotPowerTrollPresentationV1 => entry !== undefined,
+    );
+  const trollTurn = applyBotPowerTrollTurnV1({
+    powers: settings.botPowers,
+    response: assistantDisplay,
+    stableTurnKey: `${activeConversationId}:${assistantBotId ?? "prism"}:${
+      history.filter((entry) => entry.role === "assistant").length + 1
+    }`,
+    assistantTurnOrdinal:
+      history.filter((entry) => entry.role === "assistant").length + 1,
+    priorPresentations: priorTrollPresentations,
+    exactCopy: botPowerEchoEnforcedTurn,
+    muted: botPowerMutedTurn || botPowerQuietIgnoredTurn,
+    protectedPayload:
+      assistantOnlyCompanionTurn || personaTransitionTurn || zenAutonomyTurn,
+  });
+  assistantDisplay = trollTurn.content;
   const persistedToolCallEvents = assistantOnlyCompanionTurn
     ? []
     : buildAssistantToolCallEvents({
@@ -11174,6 +11211,7 @@ export async function processChatMessage(
               ? "speech_obfuscation"
               : undefined,
         botPowerMutePerformance: botPowerMutePerformanceForTurn,
+        botPowerTrollPresentation: trollTurn.presentation,
         ...(persistedIdentityShapeshift
           ? { identityShapeshift: persistedIdentityShapeshift }
           : {}),

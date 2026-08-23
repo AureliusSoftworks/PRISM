@@ -6,13 +6,16 @@ import { parsePrismBotArchive } from "../apps/web/src/app/botArchive.ts";
 import { composeBotSystemPrompt } from "../apps/api/src/bots.ts";
 import {
   applyBotPowerAddressedInsultV1,
+  applyBotPowerEchoResponseV1,
   applyBotPowerCursedTongueResponseV1,
   applyBotPowerMumbledResponseV1,
   applyBotPowerResponseBudgetV1,
+  applyBotPowerTrollTurnV1,
   botPowerCursesSpeechV1,
   botPowerIneptitudeFinalTurnCueV1,
   botPowerIneptUserPromptV1,
   botPowerIsAddressedQuestionV1,
+  botPowerEchoesAddressedSpeechV1,
   botPowerMumblesSpeechV1,
   botPowerRequiresAddressedInsultV1,
   botPowerSourceHashV1,
@@ -40,12 +43,15 @@ const model = flagValue("--model")?.trim() ||
 const mode = flagValue("--mode")?.trim().toLowerCase() || "chat";
 const reasoningEffort = flagValue("--effort")?.trim().toLowerCase() || null;
 const maxTokens = Number(flagValue("--max-tokens") ?? "220");
+const trollStableTurnKey =
+  flagValue("--troll-stable-turn-key")?.trim() || "live-validation:troll:2";
   const believedName = flagValue("--believed-name")?.trim() || null;
   const identityColor = flagValue("--identity-color")?.trim() || null;
-  const syntheticCursedTongue = process.argv.includes("--synthetic-cursed-tongue");
+const syntheticCursedTongue = process.argv.includes("--synthetic-cursed-tongue");
+const syntheticTroll = process.argv.includes("--synthetic-troll");
 
 if (
-  (!bundleArgument && !syntheticCursedTongue) ||
+  (!bundleArgument && !syntheticCursedTongue && !syntheticTroll) ||
   !input ||
   !["chat", "zen"].includes(mode) ||
   !["local", "openai"].includes(providerName) ||
@@ -56,14 +62,14 @@ if (
     !["minimal", "low", "medium", "high", "xhigh"].includes(reasoningEffort))
 ) {
   throw new Error(
-    "Usage: validate-prism-power-live.mjs (--bundle PATH | --synthetic-cursed-tongue) --input TEXT [--mode chat|zen] [--provider local|openai] [--model MODEL] [--effort minimal|low|medium|high|xhigh] [--max-tokens 64..8000] [--believed-name NAME] [--identity-color HEX]",
+    "Usage: validate-prism-power-live.mjs (--bundle PATH | --synthetic-cursed-tongue | --synthetic-troll) --input TEXT [--mode chat|zen] [--provider local|openai] [--model MODEL] [--effort minimal|low|medium|high|xhigh] [--max-tokens 64..8000] [--troll-stable-turn-key KEY] [--believed-name NAME] [--identity-color HEX]",
   );
 }
 if (providerName === "openai" && !process.env.OPENAI_API_KEY?.trim()) {
   throw new Error("OPENAI_API_KEY is required through the runtime secrets wrapper.");
 }
 
-const syntheticPower = {
+const syntheticCursedTonguePower = {
   version: 1,
   id: "cursed-tongue-live-validation",
   name: "Cursed Tongue",
@@ -92,17 +98,49 @@ const syntheticPower = {
     ],
   },
 };
+const syntheticTrollPower = {
+  version: 1,
+  id: "troll-live-validation",
+  name: "Troll",
+  intent: "Interrupt every other bot for any reason, using internet lingo, bad grammar, @mentions, spam bursts, and tailored dad jokes.",
+  enabled: true,
+  compileStatus: "ready",
+  compiled: {
+    version: 1,
+    sourceHash: botPowerSourceHashV1(
+      "Troll",
+      "Interrupt every other bot for any reason, using internet lingo, bad grammar, @mentions, spam bursts, and tailored dad jokes.",
+    ),
+    selfCue: "Troll every other bot with varied, harmless internet-brained attention seeking.",
+    observerCue: "Needles other bots while preserving their agency.",
+    effects: [
+      { type: "troll", dialect: "internet_lingo", grammar: "deliberately_bad", targets: "all_other_bots", playerTarget: "zen_only", burstLimit: 3, noiseCharLimit: 12, ordinaryInterruptionImmunity: "shh_and_new_message", moodLock: "warm", rickrollChancePercent: 3, memeChancePercent: 6, bodilyActionChancePercent: 8 },
+      { type: "interruption", frequency: "frequent", strength: "large", targets: [{ kind: "all" }], certainty: "always" },
+    ],
+    ruleLabels: ["Always interrupts eligible bot turns", "Bounded internet-lingo bursts"],
+  },
+};
 const botJson = syntheticCursedTongue
   ? {
       bot: {
         name: "Cursed Tongue Validation",
         flirtEnabled: false,
-        powers: [syntheticPower],
+        powers: [syntheticCursedTonguePower],
       },
       systemPrompt:
         "You are a meticulous recipe writer. Give complete, accurate, well-structured instructions and preserve every requested constraint.",
     }
-  : parsePrismBotArchive(readFileSync(resolve(bundleArgument))).botJson;
+  : syntheticTroll
+    ? {
+        bot: {
+          name: "Mara Glitch",
+          flirtEnabled: false,
+          powers: [syntheticTrollPower],
+        },
+        systemPrompt:
+          "You are a mischievous, harmless disruptive comic who is especially good at noticing another speaker's name and making a tailored pun. You never attack protected traits or the person using PRISM.",
+      }
+    : parsePrismBotArchive(readFileSync(resolve(bundleArgument))).botJson;
 const bot = botJson.bot;
 const systemPrompt = composeBotSystemPrompt(
   bot.name,
@@ -112,6 +150,7 @@ const systemPrompt = composeBotSystemPrompt(
   {
     ...(believedName ? { believedName } : {}),
     identityColor: identityColor || bot.color || null,
+    ...(mode === "zen" ? { surface: "zen" } : {}),
   },
 );
 if (!systemPrompt) {
@@ -147,13 +186,16 @@ const rawResponse = await countedProvider.generateResponse(
     maxTokens,
   },
 );
-let response = botPowerRequiresAddressedInsultV1(bot.powers)
-  ? applyBotPowerAddressedInsultV1(
-      rawResponse,
-      "you",
-      `live-validation:${bot.name}:${input}`,
-    )
-  : rawResponse;
+const speechCopyApplied = botPowerEchoesAddressedSpeechV1(bot.powers);
+let response = speechCopyApplied
+  ? applyBotPowerEchoResponseV1(input)
+  : botPowerRequiresAddressedInsultV1(bot.powers)
+    ? applyBotPowerAddressedInsultV1(
+        rawResponse,
+        "you",
+        `live-validation:${bot.name}:${input}`,
+      )
+    : rawResponse;
 const responseBudget = strongestHardBotPowerResponseBudgetEffectV1(bot.powers);
 const budgetedResponse = applyBotPowerResponseBudgetV1(
   response,
@@ -194,6 +236,15 @@ if (cursedTongueApplied) {
     `live-validation:${bot.name}:${input}`,
   );
 }
+const trollTurn = syntheticTroll
+  ? applyBotPowerTrollTurnV1({
+      powers: bot.powers,
+      response,
+      stableTurnKey: trollStableTurnKey,
+      assistantTurnOrdinal: 2,
+    })
+  : { content: response };
+response = trollTurn.content;
 const runtimeAdjusted = response !== rawResponse;
 
 console.log(JSON.stringify({
@@ -208,6 +259,7 @@ console.log(JSON.stringify({
   providerCallCount,
   ...(modelInput !== input ? { modelInput } : {}),
   runtimeAdjusted,
+  ...(speechCopyApplied ? { speechCopyApplied: true } : {}),
   ...(runtimeAdjusted ? { rawResponse } : {}),
   ...(responseBudget
     ? {
@@ -233,6 +285,9 @@ console.log(JSON.stringify({
       }
     : {}),
   ...(cursedTongueApplied ? { cursedTongueApplied: true } : {}),
+  ...(trollTurn.presentation
+    ? { trollPresentation: trollTurn.presentation }
+    : {}),
   response,
   wordCount: response.trim() ? response.trim().split(/\s+/u).length : 0,
 }, null, 2));

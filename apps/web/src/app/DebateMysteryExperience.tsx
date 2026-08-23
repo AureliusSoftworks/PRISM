@@ -18,21 +18,16 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
-  DEBATE_MYSTERY_NOTEBOOK_CHARACTER_LIMIT,
   DEBATE_MYSTERY_PRESETS,
   DEBATE_MYSTERY_ROOM_TEMPLATES,
   DEBATE_MYSTERY_SCHEMA_VERSION,
-  debateMysteryNotebookCharacterCount,
   debateMysteryRecipeSeed,
   resolveDebateMysteryConfig,
   type DebateMysteryActionRequestV1,
   type DebateMysteryArtMode,
   type DebateMysteryCaseCodeV1,
   type DebateMysteryDifficulty,
-  type DebateMysteryNotebookBlockV1,
-  type DebateMysteryNotebookCleanupProposalV1,
-  type DebateMysteryNotebookPageV1,
-  type DebateMysteryNotebookV1,
+  type DebateMysteryNotebookV2,
   type DebateMysteryPresetId,
   type DebateMysteryRegionV1,
   type DebateMysteryTheoryV1,
@@ -43,7 +38,6 @@ import {
   type ResponseMode,
 } from "@localai/shared";
 import styles from "./debateMystery.module.css";
-import { BotAvatarMicro } from "./BotAvatarMicro";
 import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
 import {
   WHODUNNIT_INVESTIGATION_MUSIC_FADE_MS,
@@ -52,16 +46,40 @@ import {
   mysteryInvestigationMusicMix,
   mysteryInvestigationMusicSessionActive,
 } from "./debateMysteryMusic";
-import { mysteryRoomArtworkSrc } from "./debateMysteryRoomArt";
-import { mysteryRoomSuspectWalkProfile } from "./debateMysteryRoomWalk";
+import {
+  mysteryInvestigationTargetAt,
+  mysteryRoomArtworkSrc,
+} from "./debateMysteryRoomArt";
+import {
+  debateMysteryBundledEvidenceAssetPath,
+  debateMysteryBundledInventoryAssetPath,
+  debateMysteryBundledLockTargetAssetPath,
+} from "./debateMysteryBundledProps";
+import { MysteryPropVisual } from "./MysteryPropVisual";
+import {
+  mysteryMapOccupantPosition,
+  mysteryRoomSuspectFacing,
+  mysteryRoomSuspectWalkProfile,
+} from "./debateMysteryRoomWalk";
+import {
+  debateMysterySfxCueForAction,
+  playDebateMysterySfx,
+  type DebateMysterySfxCue,
+} from "./debateMysterySfx";
 import { findAtMentionTokenPlain } from "./botMention";
 import type { BotPickerGlyphRenderer } from "./BotPicker";
 import type { VoicePlaybackCharacterAlignment } from "./voiceEffects";
+import { mysteryInterviewTranscriptVisibleText } from "./mysteryInterviewTranscriptReveal";
 import {
   minimumWhodunnitBotsForCast,
   distinctWhodunnitCastBotIds,
   randomizeWhodunnitCast,
+  randomizeWhodunnitCastAroundBot,
 } from "./debateMysteryCast";
+import {
+  createBotDirectedSetupRefractTarget,
+  PrismRefractTarget,
+} from "./prismRefract";
 
 export interface MysteryBotSummary {
   id: string;
@@ -98,6 +116,8 @@ interface MysterySharedProps extends MysteryRoutingProps {
       talking?: boolean;
       thinking?: boolean;
       speechTiming?: MysterySpeechTiming | null;
+      blinkEnabled?: boolean;
+      facing?: "left" | "right";
     },
   ) => ReactNode;
   playMysteryVoice?: (
@@ -235,10 +255,6 @@ function gradeLabel(grade: string): string {
   return "Incorrect";
 }
 
-function notebookReferenceLabel(text: string): string {
-  return text.replace(/^\[\[(?:room|evidence|testimony|lead):[^\]]+\]\]\s*/u, "").trim();
-}
-
 function mysteryEvidenceTitle(title: string): string {
   const cleaned = title.replace(/^recovered\s+(?:a|an|the)\s+/iu, "").trim();
   return cleaned ? `${cleaned[0]!.toLocaleUpperCase()}${cleaned.slice(1)}` : title;
@@ -255,6 +271,47 @@ function mysteryEvidenceEmoji(item: { title: string; object: string; emoji: stri
   if (/\b(?:knife|dagger|blade)\b/u.test(label)) return "🔪";
   if (/\b(?:poison|toxin|venom|chemical)\b/u.test(label)) return "🧪";
   return item.emoji;
+}
+
+interface MysteryEvidenceVisualItem {
+  id: string;
+  title: string;
+  object: string;
+  emoji: string;
+  imageId?: string | null;
+}
+
+function MysteryEvidenceVisual({
+  item,
+  className,
+}: {
+  item: MysteryEvidenceVisualItem;
+  className?: string;
+}) {
+  return (
+    <MysteryPropVisual
+      generatedImageId={item.imageId}
+      bundledAssetPath={debateMysteryBundledEvidenceAssetPath(item)}
+      fallbackGlyph={mysteryEvidenceEmoji(item)}
+      className={className}
+    />
+  );
+}
+
+function MysteryInventoryVisual({
+  item,
+  className,
+}: {
+  item: { id: string; title: string; emoji: string };
+  className?: string;
+}) {
+  return (
+    <MysteryPropVisual
+      bundledAssetPath={debateMysteryBundledInventoryAssetPath(item)}
+      fallbackGlyph={item.emoji}
+      className={className}
+    />
+  );
 }
 
 interface MysterySpoilerEvidence {
@@ -338,27 +395,6 @@ function mysteryTestimonySpeaker(
   speakerSeatId: string,
 ): DebateWhodunnitFormatStateV1["suspects"][number] | null {
   return state.suspects.find((suspect) => suspect.seatId === speakerSeatId) ?? null;
-}
-
-function mysteryNotebookReferenceLabel(
-  block: DebateMysteryNotebookBlockV1,
-  state: DebateWhodunnitFormatStateV1,
-): string {
-  const label = notebookReferenceLabel(block.text);
-  if (block.referenceKind === "testimony" && block.referenceId) {
-    const testimony = state.testimony.find((item) => item.id === block.referenceId);
-    const speaker = testimony ? mysteryTestimonySpeaker(state, testimony.speakerSeatId) : null;
-    return speaker && !label.toLocaleLowerCase().startsWith(`${speaker.name.toLocaleLowerCase()}:`)
-      ? `${speaker.name}: ${label}`
-      : label;
-  }
-  if (block.referenceKind === "evidence") {
-    const cleaned = label
-      .replace(/^Recovered\s+(?:a|an|the)\s+/iu, "")
-      .replace(/:\s*The recovered\s+(?:a|an|the)\s+/iu, ": The ");
-    return mysteryEvidenceObservation(cleaned);
-  }
-  return label;
 }
 
 function partnerMarkdownWithColoredSuspects(
@@ -589,12 +625,22 @@ export function DebateMysterySetup(
     setNonce(mysteryId("recipe"));
   };
 
-  const randomizeCast = (): void => {
+  const randomizeCast = (anchor?: {
+    botId: string;
+    botName: string;
+    direction: string;
+  }): void => {
     setError(null);
-    const allocation = randomizeWhodunnitCast(
-      whodunnitCastCandidates.map((botId) => ({ id: botId })),
-      targetSuspects,
-    );
+    const castCandidates = whodunnitCastCandidates.map((botId) => ({
+      id: botId,
+    }));
+    const allocation = anchor
+      ? randomizeWhodunnitCastAroundBot(
+          castCandidates,
+          targetSuspects,
+          anchor.botId,
+        )
+      : randomizeWhodunnitCast(castCandidates, targetSuspects);
     if (!allocation) {
       setError(
         `Whodunnit needs ${whodunnitCastRequirement} Library bots for ${
@@ -606,6 +652,12 @@ export function DebateMysterySetup(
     setSuspectSelection(allocation.suspectBotIds);
     setProsecutorPartnerBotId(allocation.prosecutorPartnerBotId);
     setRivalDefenseBotId(allocation.rivalDefenseBotId);
+    if (anchor) {
+      setInspiration(
+        anchor.direction.trim() ||
+          `A mystery centered on ${anchor.botName}'s world, relationships, and contradictions without assuming their guilt.`,
+      );
+    }
     setNonce(mysteryId("recipe"));
   };
 
@@ -862,20 +914,36 @@ export function DebateMysterySetup(
               {props.bots.map((bot) => {
                 const suspect = suspectBotIds.includes(bot.id);
                 const counsel = bot.id === prosecutorPartnerBotId || bot.id === rivalDefenseBotId;
+                const directedSetupTarget =
+                  createBotDirectedSetupRefractTarget({
+                    id: `whodunnit-setup-anchor-${bot.id}`,
+                    label: `Build a Whodunnit around ${bot.name}`,
+                    botId: bot.id,
+                    botName: bot.name,
+                    disabled: () => !canRandomizeCast,
+                    run: randomizeCast,
+                  });
                 return (
-                  <button
-                    type="button"
+                  <PrismRefractTarget
                     key={bot.id}
-                    data-selected={suspect ? "true" : undefined}
-                    disabled={counsel}
-                    onClick={() => toggleSuspect(bot.id)}
-                    style={{ "--mystery-bot-color": bot.color ?? "#9c7cff" } as CSSProperties}
-                    aria-pressed={suspect}
+                    target={directedSetupTarget}
                   >
-                    <span>{props.renderBotGlyph(bot.glyph, { size: 23, strokeWidth: 1.5 })}</span>
-                    <strong>{bot.name}</strong>
-                    <small>{counsel ? "Counsel" : suspect ? "Suspect" : "Available"}</small>
-                  </button>
+                    {(binding) => (
+                      <button
+                        {...binding}
+                        type="button"
+                        data-selected={suspect ? "true" : undefined}
+                        aria-disabled={counsel}
+                        onClick={() => toggleSuspect(bot.id)}
+                        style={{ "--mystery-bot-color": bot.color ?? "#9c7cff" } as CSSProperties}
+                        aria-pressed={suspect}
+                      >
+                        <span>{props.renderBotGlyph(bot.glyph, { size: 23, strokeWidth: 1.5 })}</span>
+                        <strong>{bot.name}</strong>
+                        <small>{counsel ? "Counsel" : suspect ? "Suspect" : "Available"}</small>
+                      </button>
+                    )}
+                  </PrismRefractTarget>
                 );
               })}
             </div>
@@ -982,13 +1050,29 @@ export function DebateMysterySetup(
 }
 
 interface NotebookResponse {
-  notebook: DebateMysteryNotebookV1;
-  cleanupProposal: DebateMysteryNotebookCleanupProposalV1 | null;
+  notebook: DebateMysteryNotebookV2;
+  cleanupProposal: null;
+}
+
+type DeskReferenceKind = "lead" | "evidence" | "testimony";
+
+interface DeskReference {
+  kind: DeskReferenceKind;
+  id: string;
+  label: string;
 }
 
 type MysteryClientAction<T = DebateMysteryActionRequestV1> = T extends unknown
   ? Omit<T, "expectedRevision" | "idempotencyKey">
   : never;
+
+function mysteryClientActionKey(action: MysteryClientAction): string {
+  if (action.action === "inspect") return `inspect:${action.roomId}:${action.regionId}`;
+  if (action.action === "use_access_item") {
+    return `access:${action.accessItemId}:${action.targetKind}:${action.targetId}`;
+  }
+  return action.action;
+}
 
 function roomTemplate(templateId: string | null) {
   return (
@@ -1072,10 +1156,12 @@ export function DebateMysteryPlay(
   );
   const [selectedRoomId, setSelectedRoomId] = useState(state.currentRoomId);
   const [busy, setBusy] = useState(false);
+  const inFlightMysteryActionKeysRef = useRef(new Set<string>());
   const [error, setError] = useState<string | null>(null);
   const [question, setQuestion] = useState("");
   const [questionCaret, setQuestionCaret] = useState(0);
   const [suspectRoomFocus, setSuspectRoomFocus] = useState<"observe" | "interview" | "search">("observe");
+  const [suspectWalkIteration, setSuspectWalkIteration] = useState(0);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
   const [stageNarration, setStageNarration] = useState<{ label: string; text: string } | null>(() => {
     const opening = state.partnerJournal.length === 1 ? state.partnerJournal[0] : null;
@@ -1095,22 +1181,21 @@ export function DebateMysteryPlay(
   const playedInterviewMessageRef = useRef(state.interviewLog.at(-1)?.id ?? null);
   const interviewTranscriptRef = useRef<HTMLDivElement | null>(null);
   const [partnerQuestion, setPartnerQuestion] = useState("");
-  const [notebook, setNotebook] = useState<DebateMysteryNotebookV1 | null>(null);
-  const [cleanupProposal, setCleanupProposal] =
-    useState<DebateMysteryNotebookCleanupProposalV1 | null>(null);
-  const [activePageId, setActivePageId] = useState<string | null>(null);
-  const [notebookView, setNotebookView] = useState<"leads" | "notes" | "evidence" | "testimony">("leads");
+  const [notebook, setNotebook] = useState<DebateMysteryNotebookV2 | null>(null);
+  const [deskOpen, setDeskOpen] = useState(false);
+  const [selectedSuspectSeatId, setSelectedSuspectSeatId] = useState<string | null>(null);
+  const [comparisonSlots, setComparisonSlots] = useState<[DeskReference | null, DeskReference | null]>([null, null]);
   const [leadNoteDrafts, setLeadNoteDrafts] = useState<Record<string, string>>({});
   const [notebookSaving, setNotebookSaving] = useState(false);
   const [notebookError, setNotebookError] = useState<string | null>(null);
-  const [pendingAutoPolish, setPendingAutoPolish] = useState<{ pageId: string; blockId: string } | null>(null);
-  const savedPagesRef = useRef("");
+  const savedDeskRef = useRef("");
   const notebookReadyRef = useRef(false);
+  const deskPullStartYRef = useRef<number | null>(null);
+  const deskPullHandledRef = useRef(false);
   const [theory, setTheory] = useState<DebateMysteryTheoryV1>(
     state.theory ?? blankTheory(),
   );
   const [theoryBoardOpen, setTheoryBoardOpen] = useState(false);
-  const [caseFileOpen, setCaseFileOpen] = useState(false);
   const [caseFileTab, setCaseFileTab] = useState<
     "partner" | "leads" | "access" | "evidence" | "testimony"
   >("partner");
@@ -1137,16 +1222,34 @@ export function DebateMysteryPlay(
   const remainingInvestigationRegions = activeRegions.filter(
     (region) => !currentRoom.inspectedRegionIds.includes(region.id),
   );
-  const targetableInvestigationRegions = armedAccessItemId
-    ? activeRegions
-    : remainingInvestigationRegions;
   const firstInspectableRegionId = remainingInvestigationRegions[0]?.id ?? null;
+  const usableAccessItems = state.inventoryItems.filter((item) => item.usable);
+  const discoveredRoomAccessTargets = currentRoom.observations.flatMap((observation) => {
+    const region = template.regions.find((candidate) => candidate.id === observation.regionId);
+    if (!region) return [];
+    const center = region.polygon.reduce(
+      (total, point) => ({
+        x: total.x + point.x / region.polygon.length,
+        y: total.y + point.y / region.polygon.length,
+      }),
+      { x: 0, y: 0 },
+    );
+    return (observation.accessTargets ?? []).map((target) => ({
+      ...target,
+      regionId: observation.regionId,
+      x: Math.min(92, Math.max(8, center.x)),
+      y: Math.min(72, Math.max(12, center.y)),
+    }));
+  });
   const currentSuspect = state.suspects.find(
     (suspect) => suspect.roomId === currentRoom.id,
   );
   const currentSuspectWalk = currentSuspect
     ? mysteryRoomSuspectWalkProfile(sessionId, currentRoom.id, currentSuspect.seatId)
     : null;
+  const currentSuspectFacing = currentSuspectWalk
+    ? mysteryRoomSuspectFacing(currentSuspectWalk, suspectWalkIteration)
+    : "right";
   const suggestedLeads = currentSuspect
     ? state.config.difficulty === "mastermind"
       ? [
@@ -1212,20 +1315,30 @@ export function DebateMysteryPlay(
     }, 2_200);
   }, []);
 
+  const playMysterySfx = useCallback((cue: DebateMysterySfxCue): void => {
+    void playDebateMysterySfx({
+      cue,
+      enabled: props.audioEnabled,
+      volume: props.audioVolume,
+    });
+  }, [props.audioEnabled, props.audioVolume]);
+
   useEffect(() => () => {
     if (feedbackTimerRef.current !== null) window.clearTimeout(feedbackTimerRef.current);
   }, []);
 
-  const refreshNotebook = useCallback(async (): Promise<DebateMysteryNotebookV1 | null> => {
+  const refreshNotebook = useCallback(async (): Promise<DebateMysteryNotebookV2 | null> => {
     try {
       const result = await request<NotebookResponse>(
         `/api/debates/${encodeURIComponent(sessionId)}/notebook`,
       );
-      savedPagesRef.current = JSON.stringify(result.notebook.pages);
+      savedDeskRef.current = JSON.stringify({
+        leadAnnotations: result.notebook.leadAnnotations,
+        suspectNotes: result.notebook.suspectNotes,
+        suspectPins: result.notebook.suspectPins,
+      });
       notebookReadyRef.current = true;
       setNotebook(result.notebook);
-      setCleanupProposal(result.cleanupProposal);
-      setActivePageId((current) => current ?? result.notebook.pages[0]?.id ?? null);
       setNotebookError(null);
       return result.notebook;
     } catch (caught) {
@@ -1240,22 +1353,66 @@ export function DebateMysteryPlay(
 
   useEffect(() => {
     setSuspectRoomFocus("observe");
+    setSuspectWalkIteration(0);
     setQuestion("");
     setQuestionCaret(0);
   }, [state.currentRoomId]);
+
+  useEffect(() => {
+    const activity = state.activeActivity;
+    if (activity?.kind === "investigation" && activity.roomId === state.currentRoomId) {
+      setSuspectRoomFocus("search");
+      return;
+    }
+    if (
+      activity?.kind === "interview" &&
+      currentSuspect?.seatId === activity.suspectSeatId
+    ) {
+      setSuspectRoomFocus("interview");
+      return;
+    }
+    setSuspectRoomFocus("observe");
+  }, [currentSuspect?.seatId, state.activeActivity, state.currentRoomId]);
 
   useEffect(() => {
     if (mysterySessionResetIdRef.current === sessionId) return;
     mysterySessionResetIdRef.current = sessionId;
     setFloor(state.rooms.find((room) => room.id === state.currentRoomId)?.floor ?? 1);
     setSelectedRoomId(state.currentRoomId);
-  }, [sessionId, state.currentRoomId, state.rooms]);
+    setDeskOpen(state.playPhase === "theory");
+    setSelectedSuspectSeatId(null);
+    setComparisonSlots([null, null]);
+    notebookReadyRef.current = false;
+    savedDeskRef.current = "";
+    setNotebook(null);
+  }, [sessionId, state.currentRoomId, state.playPhase, state.rooms]);
 
   useEffect(() => {
     if (armedAccessItemId && !state.inventoryItems.some((item) => item.id === armedAccessItemId && item.usable)) {
       setArmedAccessItemId(null);
     }
   }, [armedAccessItemId, state.inventoryItems]);
+
+  useEffect(() => {
+    if (!selectedSuspectSeatId || state.metSuspectSeatIds.includes(selectedSuspectSeatId)) return;
+    setSelectedSuspectSeatId(null);
+  }, [selectedSuspectSeatId, state.metSuspectSeatIds]);
+
+  useEffect(() => {
+    if (state.playPhase === "theory") setDeskOpen(true);
+  }, [state.playPhase]);
+
+  useEffect(() => {
+    const closeDeskOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === "Escape" && deskOpen) {
+        setComparisonSlots([null, null]);
+        setDeskOpen(false);
+        playMysterySfx("folder");
+      }
+    };
+    window.addEventListener("keydown", closeDeskOnEscape);
+    return () => window.removeEventListener("keydown", closeDeskOnEscape);
+  }, [deskOpen, playMysterySfx]);
 
   const latestInterviewMessage = state.interviewLog.at(-1);
 
@@ -1281,33 +1438,44 @@ export function DebateMysteryPlay(
     playedInterviewMessageRef.current = latest.id;
     setStreamingMessageId(latest.id);
     setStreamedReply("");
-    let revealed = 0;
-    const timer = window.setInterval(() => {
-      revealed = Math.min(latest.content.length, revealed + Math.max(2, Math.ceil(latest.content.length / 90)));
-      setStreamedReply(latest.content.slice(0, revealed));
-      if (revealed >= latest.content.length) {
-        window.clearInterval(timer);
-        setStreamedReply(latest.content);
-        setStreamingMessageId((current) => current === latest.id ? null : current);
-      }
-    }, 22);
+    let cancelled = false;
+    let playbackStarted = false;
+    let playbackAlignment: VoicePlaybackCharacterAlignment | null = null;
+    const revealCompletedReply = (): void => {
+      if (cancelled) return;
+      setStreamedReply(latest.content);
+      setStreamingMessageId((current) => current === latest.id ? null : current);
+    };
     const suspect = mysterySuspectsRef.current.find((entry) => entry.seatId === latest.suspectSeatId);
-    if (suspect) {
-      void playMysteryVoiceRef.current?.(
+    const playMysteryVoice = playMysteryVoiceRef.current;
+    if (!suspect || !playMysteryVoice) {
+      revealCompletedReply();
+    } else {
+      void playMysteryVoice(
         sessionId,
         mysteryBotForSuspectRef.current(suspect),
         latest.content,
         latest.id,
         {
           onStart: (durationMs, alignment) => {
+            if (cancelled) return;
+            playbackStarted = true;
+            playbackAlignment = alignment ?? null;
             setInterviewSpeechTiming({
               text: latest.content,
               elapsedMs: 0,
               durationMs: Math.max(1, durationMs ?? latest.content.length * 42),
-              alignment: alignment ?? null,
+              alignment: playbackAlignment,
             });
           },
           onProgress: (elapsedMs, durationMs) => {
+            if (cancelled) return;
+            setStreamedReply(mysteryInterviewTranscriptVisibleText({
+              text: latest.content,
+              elapsedMs,
+              durationMs,
+              alignment: playbackAlignment,
+            }));
             setInterviewSpeechTiming((current) =>
               current?.text === latest.content
                 ? {
@@ -1318,18 +1486,29 @@ export function DebateMysteryPlay(
                 : current,
             );
           },
-          onEnd: () => setInterviewSpeechTiming((current) => current?.text === latest.content ? null : current),
-          onCancel: () => setInterviewSpeechTiming((current) => current?.text === latest.content ? null : current),
+          onEnd: () => {
+            if (cancelled) return;
+            setInterviewSpeechTiming((current) => current?.text === latest.content ? null : current);
+            revealCompletedReply();
+          },
+          onCancel: () => {
+            if (cancelled) return;
+            setInterviewSpeechTiming((current) => current?.text === latest.content ? null : current);
+            revealCompletedReply();
+          },
         },
-      );
+      ).then((played) => {
+        if (!played) revealCompletedReply();
+      }).catch(revealCompletedReply);
     }
     return () => {
-      window.clearInterval(timer);
-      // React development replay and a rapid session refresh can dispose this
-      // effect after speech has already started. Never leave the visible
-      // transcript stranded at a partial word while the voice continues.
-      setStreamedReply(latest.content);
-      setStreamingMessageId((current) => current === latest.id ? null : current);
+      cancelled = true;
+      // Development effect replay can dispose an utterance before it has
+      // become audible. Permit the replayed effect to start it rather than
+      // leaving this completed reply hidden indefinitely.
+      if (!playbackStarted && playedInterviewMessageRef.current === latest.id) {
+        playedInterviewMessageRef.current = null;
+      }
     };
   }, [
     latestInterviewContent,
@@ -1354,85 +1533,44 @@ export function DebateMysteryPlay(
 
   useEffect(() => {
     if (!notebook || !notebookReadyRef.current) return;
-    const serialized = JSON.stringify(notebook.pages);
-    if (serialized === savedPagesRef.current) return;
+    const serialized = JSON.stringify({
+      leadAnnotations: notebook.leadAnnotations,
+      suspectNotes: notebook.suspectNotes,
+      suspectPins: notebook.suspectPins,
+    });
+    if (serialized === savedDeskRef.current) return;
     const timer = window.setTimeout(async () => {
       setNotebookSaving(true);
       setNotebookError(null);
       try {
         const result = await request<NotebookResponse>(
           `/api/debates/${encodeURIComponent(sessionId)}/notebook`,
-          {
-            method: "PATCH",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              operation: "replace",
-              expectedRevision: notebook.revision,
-              idempotencyKey: mysteryId("notebook-save"),
-              pages: notebook.pages,
-            }),
-          },
+          { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({
+            expectedRevision: notebook.revision,
+            idempotencyKey: mysteryId("desk-save"),
+            leadAnnotations: notebook.leadAnnotations,
+            suspectNotes: notebook.suspectNotes,
+            suspectPins: notebook.suspectPins,
+          }) },
         );
-        savedPagesRef.current = JSON.stringify(result.notebook.pages);
-        setNotebook((current) =>
-          current && JSON.stringify(current.pages) !== serialized
-            ? { ...current, revision: result.notebook.revision }
-            : result.notebook,
-        );
-        setCleanupProposal(result.cleanupProposal);
+        savedDeskRef.current = JSON.stringify({ leadAnnotations: result.notebook.leadAnnotations, suspectNotes: result.notebook.suspectNotes, suspectPins: result.notebook.suspectPins });
+        setNotebook(result.notebook);
       } catch (caught) {
-        const message = caught instanceof Error ? caught.message : "Notebook autosave failed.";
-        // A mystery action can add an automatic, private reference while this
-        // window is autosaving. That is not a competing editor: retain local
-        // writing, fold in server-only reference blocks, and retry at the new
-        // revision. A genuine second-window edit still remains visible.
-        if (/notebook changed in another window/iu.test(message)) {
-          try {
-            const result = await request<NotebookResponse>(
-              `/api/debates/${encodeURIComponent(sessionId)}/notebook`,
-            );
-            const latest = result.notebook;
-            savedPagesRef.current = JSON.stringify(latest.pages);
-            setCleanupProposal(result.cleanupProposal);
-            setNotebook((current) => {
-              const localNotebook = current ?? notebook;
-              const localPages = new Map(localNotebook.pages.map((page) => [page.id, page]));
-              const mergedPages = latest.pages.map((serverPage) => {
-                const localPage = localPages.get(serverPage.id);
-                if (!localPage) return serverPage;
-                const localBlockIds = new Set(localPage.blocks.map((block) => block.id));
-                return {
-                  ...localPage,
-                  blocks: [
-                    ...localPage.blocks,
-                    ...serverPage.blocks.filter((block) => !localBlockIds.has(block.id)),
-                  ],
-                };
-              });
-              for (const localPage of localNotebook.pages) {
-                if (!latest.pages.some((page) => page.id === localPage.id)) mergedPages.push(localPage);
-              }
-              return { ...localNotebook, revision: latest.revision, pages: mergedPages };
-            });
-            setNotebookError(null);
-            return;
-          } catch {
-            // Fall through to the original conflict below when the fresh
-            // server document cannot be read and safely rebased.
-          }
-        }
+        const message = caught instanceof Error ? caught.message : "Desk autosave failed.";
+        if (/desk changed in another window/iu.test(message)) void refreshNotebook();
         setNotebookError(message);
-      } finally {
-        setNotebookSaving(false);
-      }
-    }, 700);
+      } finally { setNotebookSaving(false); }
+    }, 500);
     return () => window.clearTimeout(timer);
   }, [notebook, refreshNotebook, request, sessionId]);
 
   const perform = async (
     action: MysteryClientAction,
+    options: { suppressNavigationSfx?: boolean } = {},
   ): Promise<boolean> => {
-    if (busy) return false;
+    const actionKey = mysteryClientActionKey(action);
+    if (busy || inFlightMysteryActionKeysRef.current.has(actionKey)) return false;
+    inFlightMysteryActionKeysRef.current.add(actionKey);
     setBusy(true);
     setError(null);
     try {
@@ -1446,7 +1584,9 @@ export function DebateMysteryPlay(
       );
       onSessionChange(result.session);
       const next = result.session.formatState as DebateWhodunnitFormatStateV1;
-      if (next.playPhase === "trial" || next.playPhase === "verdict") {
+      if (next.playPhase === "theory") {
+        setTheoryBoardOpen(true);
+      } else if (next.playPhase === "trial" || next.playPhase === "verdict") {
         setTheoryBoardOpen(false);
       }
       const nextRoom = next.rooms.find((room) => room.id === next.currentRoomId);
@@ -1458,6 +1598,14 @@ export function DebateMysteryPlay(
         (item) => !state.discoveredEvidence.some((known) => known.id === item.id),
       );
       if (acquiredEvidence) setEvidenceExhibitId(acquiredEvidence.id);
+      const sfxCue = debateMysterySfxCueForAction({
+        action: action.action,
+        acquiredEvidence: Boolean(acquiredEvidence),
+        nextPlayPhase: next.playPhase,
+      });
+      if (sfxCue && (sfxCue === "evidence" || !options.suppressNavigationSfx)) {
+        playMysterySfx(sfxCue);
+      }
       const latestJournal = next.partnerJournal.at(-1);
       const journalChanged = latestJournal && latestJournal !== state.partnerJournal.at(-1);
       if (action.action === "travel") {
@@ -1477,59 +1625,126 @@ export function DebateMysteryPlay(
       }
       const changedLeads = next.leads.filter((lead) =>
         state.leads.find((current) => current.id === lead.id)?.revision !== lead.revision);
+      const recoveredActionToken = next.recoveredActionTokens.find((token) =>
+        !state.recoveredActionTokens.some((current) => current.id === token.id));
       const changedLeadWasKnown = changedLeads.length === 1
         ? state.leads.some((lead) => lead.id === changedLeads[0]!.id)
         : false;
-      const feedback = changedLeads.length === 1
-        ? changedLeadWasKnown
-          ? `Lead updated · ${changedLeads[0]!.title}`
-          : `New lead · ${changedLeads[0]!.title}`
-        : changedLeads.length > 1
-          ? `${changedLeads.length} leads updated in your notebook.`
-          : action.action === "travel"
-        ? next.rooms.find((room) => room.id === action.roomId)?.name
-          ? `Entered ${next.rooms.find((room) => room.id === action.roomId)?.name}.`
-          : "Room selected."
-        : action.action === "inspect"
-          ? next.rooms.find((room) => room.id === action.roomId)?.searched
-            ? "Room investigation complete."
-            : "Area investigated."
-          : action.action === "use_access_item"
-            ? next.accessHistory.at(-1)?.observation ?? "Access attempt recorded."
-          : action.action === "interview"
-            ? "Question answered."
-            : action.action === "consult_partner"
-              ? "Co-counsel added an analysis."
-              : action.action === "file_theory"
-                ? "Charges filed. Court is now in session."
-                : action.action.startsWith("court_")
-                  ? "Court record updated."
-                  : "Case updated.";
+      const feedback = recoveredActionToken
+        ? `Action token recovered · +${recoveredActionToken.amount} action`
+        : changedLeads.length === 1
+          ? changedLeadWasKnown
+            ? `Lead updated · ${changedLeads[0]!.title}`
+            : `New lead · ${changedLeads[0]!.title}`
+          : changedLeads.length > 1
+            ? `${changedLeads.length} leads updated in your notebook.`
+            : action.action === "travel"
+              ? next.rooms.find((room) => room.id === action.roomId)?.name
+                ? `Entered ${next.rooms.find((room) => room.id === action.roomId)?.name}.`
+                : "Room selected."
+              : action.action === "begin_investigation"
+                ? "Room investigation opened · free."
+                : action.action === "begin_interview"
+                  ? "Suspect interview opened · free."
+                  : action.action === "end_activity"
+                    ? next.playPhase === "theory"
+                      ? "Actions exhausted. Theory Board opened."
+                      : "Returned to the room."
+                    : action.action === "inspect"
+                      ? next.rooms.find((room) => room.id === action.roomId)?.searched
+                        ? "All visible areas inspected."
+                        : "Area investigated."
+                      : action.action === "use_access_item"
+                        ? next.accessHistory.at(-1)?.observation ?? "Access attempt recorded."
+                        : action.action === "interview"
+                          ? "Question answered."
+                          : action.action === "consult_partner"
+                            ? "Co-counsel added an analysis."
+                            : action.action === "file_theory"
+                              ? "Charges filed. Court is now in session."
+                              : action.action.startsWith("court_")
+                                ? "Court record updated."
+                                : "Case updated.";
       announceAction(feedback);
       return true;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "That action was unavailable.");
       return false;
     } finally {
+      inFlightMysteryActionKeysRef.current.delete(actionKey);
       setBusy(false);
     }
   };
 
-  const updatePage = (
-    pageId: string,
-    change: (page: DebateMysteryNotebookPageV1) => DebateMysteryNotebookPageV1,
-  ): void => {
-    setNotebook((current) =>
-      current
-        ? {
-            ...current,
-            pages: current.pages.map((page) =>
-              page.id === pageId ? change(page) : page,
-            ),
-          }
-        : current,
-    );
+  const beginRoomInvestigation = async (): Promise<void> => {
+    if (await perform({ action: "begin_investigation", roomId: currentRoom.id })) {
+      setSuspectRoomFocus("search");
+    }
   };
+
+  const beginSuspectInterview = async (): Promise<void> => {
+    if (!currentSuspect) return;
+    if (await perform({ action: "begin_interview", suspectSeatId: currentSuspect.seatId })) {
+      setSuspectRoomFocus("interview");
+    }
+  };
+
+  const finishActiveActivity = async (
+    suppressNavigationSfx = false,
+  ): Promise<boolean> => {
+    if (!state.activeActivity) {
+      setSuspectRoomFocus("observe");
+      setLens((current) => ({ ...current, visible: false }));
+      return true;
+    }
+    const finished = await perform(
+      { action: "end_activity" },
+      { suppressNavigationSfx },
+    );
+    if (finished) {
+      setSuspectRoomFocus("observe");
+      setLens((current) => ({ ...current, visible: false }));
+    }
+    return finished;
+  };
+
+  const openTheoryBoard = async (): Promise<void> => {
+    const hadActiveActivity = Boolean(state.activeActivity);
+    if (hadActiveActivity && !(await finishActiveActivity(true))) return;
+    setTheoryBoardOpen(true);
+    setDeskOpen(true);
+    playMysterySfx("theory");
+    if (!hadActiveActivity) announceAction("Theory Board opened.");
+  };
+
+  const closeTheoryBoard = (): void => {
+    if (state.playPhase === "theory") return;
+    setTheoryBoardOpen(false);
+    playMysterySfx("return");
+    announceAction("Returned to the mansion.");
+  };
+
+  const renderPartnerConsultation = (surface: "case-file" | "theory"): React.JSX.Element => (
+    <section className={`${styles.partnerCard} ${surface === "theory" ? styles.theoryPartnerCard : ""}`}>
+      <header>
+        <div><small>Co-counsel · studies only your record</small><strong>{partner?.name ?? props.session.forAdvocate.name}</strong></div>
+        <span className={styles.partnerMini}>{props.renderMysteryBotAvatar(partner ?? { id: props.session.forAdvocate.id, name: props.session.forAdvocate.name, color: null, glyph: null, hardMuted: false }, "mini", { demeanor: "partner", talking: busy, blinkEnabled: true })}</span>
+      </header>
+      {state.partnerConsultations.length ? (
+        <div className={styles.partnerConsultationLog} aria-live="polite">
+          {state.partnerConsultations.slice(-6).map((consultation) => (
+            <article key={consultation.id}>
+              <p><strong>You</strong>{consultation.question}</p>
+              <div><strong>{partner?.name ?? "Co-counsel"}</strong><MysteryPublicMarkdown source={consultation.answer} suspects={state.suspects} /></div>
+            </article>
+          ))}
+        </div>
+      ) : <p className={styles.partnerStageHint}>Ask for help connecting only the rooms, evidence, testimony, leads, and notes you have uncovered.</p>}
+      <textarea value={partnerQuestion} onChange={(event) => setPartnerQuestion(event.currentTarget.value)} placeholder="Ask your partner freely — type @ to reference evidence, testimony, people, or leads…" />
+      {partnerMentionPicks.length ? <div className={styles.evidenceMentionMenu} role="listbox" aria-label="Partner case mentions"><small>Reference the public record</small>{partnerMentionPicks.map((pick) => <button type="button" key={`${pick.kind}:${pick.id}`} data-kind={pick.kind} style={{ "--mention-color": pick.color ?? undefined } as CSSProperties} onClick={() => { const action = commitMysteryMentionAtCaret(partnerQuestion, partnerQuestion.length, pick); if (action) setPartnerQuestion(action.replacement); }}>{pick.glyph} {pick.title}</button>)}</div> : null}
+      <button type="button" disabled={busy || !partnerQuestion.trim()} onClick={() => { const asked = partnerQuestion.trim(); setPartnerQuestion(""); void perform({ action: "consult_partner", question: asked }); }}>Consult · free</button>
+    </section>
+  );
 
   const streamPlayerQuestion = (text: string, messageId: string): void => {
     setStreamingPlayerMessageId(messageId);
@@ -1555,162 +1770,98 @@ export function DebateMysteryPlay(
     });
   };
 
-  const addNotebookReference = async (
-    referenceKind: "room" | "evidence" | "testimony",
-    referenceId: string,
-    label: string,
-  ): Promise<void> => {
-    const availableNotebook = notebook ?? await refreshNotebook();
-    if (!availableNotebook) return;
-    const pageId = activePageId ?? availableNotebook.pages[0]?.id;
-    if (!pageId) return;
-    setNotebook((current) => {
-      const source = current ?? availableNotebook;
-      return {
-        ...source,
-        pages: source.pages.map((page) => page.id === pageId ? {
-          ...page,
-          blocks: [...page.blocks, {
-            id: mysteryId("block"),
-            kind: "reference",
-            text: `[[${referenceKind}:${referenceId}]] ${label}`,
-            referenceKind,
-            referenceId,
-          }],
-        } : page),
-      };
+  const placeOnDeskAt = (reference: DeskReference, index: 0 | 1): void => {
+    setComparisonSlots((current) => {
+      if (current.some((slot) => slot?.kind === reference.kind && slot.id === reference.id)) return current;
+      return index === 0 ? [reference, current[1]] : [current[0], reference];
     });
-    setNotebookView("notes");
-    announceAction("Added to Case Notes.");
+    setDeskOpen(true);
+    playMysterySfx("paper");
+    announceAction(`${reference.label} placed on the desk.`);
   };
 
-  const [draftBlockText, setDraftBlockText] = useState("");
-
-  const addAuthoredBlock = (): void => {
-    if (!activePageId || !draftBlockText.trim()) return;
-    const text = draftBlockText.trim();
-    updatePage(activePageId, (page) => ({
-      ...page,
-      blocks: [
-        ...page.blocks,
-        {
-          id: mysteryId("block"),
-          kind: "paragraph",
-          text,
-        },
-      ],
-    }));
-    setDraftBlockText("");
+  const placeOnDesk = (reference: DeskReference): void => {
+    const openIndex: 0 | 1 = comparisonSlots[0] ? 1 : 0;
+    placeOnDeskAt(reference, openIndex);
   };
 
-  const addLeadAnnotation = (leadId: string, leadRevision: number): void => {
+  const clearDesk = (close = true): void => {
+    setComparisonSlots([null, null]);
+    if (close) setDeskOpen(false);
+    playMysterySfx("folder");
+  };
+
+  const toggleDesk = (): void => {
+    if (deskPullHandledRef.current) {
+      deskPullHandledRef.current = false;
+      return;
+    }
+    if (deskOpen) clearDesk();
+    else {
+      setDeskOpen(true);
+      playMysterySfx("folder");
+    }
+  };
+
+  const beginDeskPull = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    deskPullStartYRef.current = event.clientY;
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const finishDeskPull = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    const startY = deskPullStartYRef.current;
+    deskPullStartYRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    if (startY === null) return;
+    const deltaY = event.clientY - startY;
+    if (!deskOpen && deltaY < -28) {
+      deskPullHandledRef.current = true;
+      setDeskOpen(true);
+      playMysterySfx("folder");
+    } else if (deskOpen && deltaY > 28) {
+      deskPullHandledRef.current = true;
+      clearDesk();
+    }
+  };
+
+  const updateDesk = (change: (current: DebateMysteryNotebookV2) => DebateMysteryNotebookV2): void => {
+    setNotebook((current) => current ? change(current) : current);
+  };
+
+  const addLeadAnnotation = (leadId: string): void => {
     const text = leadNoteDrafts[leadId]?.trim();
-    const pageId = activePageId ?? notebook?.pages[0]?.id;
-    if (!text || !pageId) return;
-    updatePage(pageId, (page) => ({
-      ...page,
-      blocks: [...page.blocks, {
-        id: mysteryId("block"),
-        kind: "paragraph",
-        text,
-        leadId,
-        leadRevision,
-      }],
-    }));
+    const lead = state.leads.find((entry) => entry.id === leadId);
+    if (!text || !lead) return;
+    updateDesk((current) => ({ ...current, leadAnnotations: [...current.leadAnnotations, { id: mysteryId("lead-note"), leadId, leadRevision: lead.revision, text, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }] }));
     setLeadNoteDrafts((current) => ({ ...current, [leadId]: "" }));
-    announceAction("Note added to lead.");
+    playMysterySfx("pencil");
   };
 
-  const applyCleanupProposal = async (
-    sourceNotebook: DebateMysteryNotebookV1,
-    proposal: DebateMysteryNotebookCleanupProposalV1,
-    announce = false,
-  ): Promise<void> => {
-    const changesNotebook = proposal.pages.some((page) => {
-      const sourcePage = sourceNotebook.pages.find((entry) => entry.id === page.pageId);
-      if (!sourcePage) return false;
-      const proposedBlocks = page.proposedBlocks.map(({ sourceBlockIds, ...block }) => {
-        void sourceBlockIds;
-        return block;
-      });
-      return page.proposedTitle !== sourcePage.title || JSON.stringify(proposedBlocks) !== JSON.stringify(sourcePage.blocks);
-    });
-    const result = await request<NotebookResponse>(
-      `/api/debates/${encodeURIComponent(sessionId)}/notebook`,
-      {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          operation: changesNotebook ? "accept_cleanup" : "reject_cleanup",
-          expectedRevision: sourceNotebook.revision,
-          proposalId: proposal.id,
-          idempotencyKey: mysteryId(changesNotebook ? "notebook-accept_cleanup" : "notebook-already-polished"),
-        }),
-      },
-    );
-    savedPagesRef.current = JSON.stringify(result.notebook.pages);
-    setNotebook(result.notebook);
-    setCleanupProposal(result.cleanupProposal);
-    if (announce) announceAction(changesNotebook ? "Notes polished. Undo is available." : "These notes are already polished.");
+  const editLeadAnnotation = (annotationId: string, text: string): void => {
+    updateDesk((current) => ({
+      ...current,
+      leadAnnotations: current.leadAnnotations.map((annotation) => annotation.id === annotationId
+        ? { ...annotation, text, updatedAt: new Date().toISOString() }
+        : annotation),
+    }));
   };
 
-  const proposeCleanup = async (
-    pageIds?: string[],
-    blockIds?: string[],
-    autoAccept = false,
-  ): Promise<void> => {
-    if (!notebook || notebookSaving || JSON.stringify(notebook.pages) !== savedPagesRef.current) return;
-    setNotebookError(null);
-    try {
-      const result = await request<{ proposal: DebateMysteryNotebookCleanupProposalV1 }>(
-        `/api/debates/${encodeURIComponent(sessionId)}/notebook/cleanup`,
-        mysteryRequestBody({ expectedRevision: notebook.revision, pageIds, blockIds }),
-      );
-      if (autoAccept) await applyCleanupProposal(notebook, result.proposal, true);
-      else setCleanupProposal(result.proposal);
-    } catch (caught) {
-      setNotebookError(caught instanceof Error ? caught.message : "Cleanup was unavailable.");
-    }
-  };
-  const proposeCleanupRef = useRef(proposeCleanup);
-  proposeCleanupRef.current = proposeCleanup;
-
-  const resolveCleanup = async (
-    operation: "accept_cleanup" | "reject_cleanup" | "undo",
-  ): Promise<void> => {
-    if (!notebook) return;
-    setNotebookError(null);
-    try {
-      const result = await request<NotebookResponse>(
-        `/api/debates/${encodeURIComponent(sessionId)}/notebook`,
-        {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            operation,
-            expectedRevision: notebook.revision,
-            proposalId: cleanupProposal?.id,
-            idempotencyKey: mysteryId(`notebook-${operation}`),
-          }),
-        },
-      );
-      savedPagesRef.current = JSON.stringify(result.notebook.pages);
-      setNotebook(result.notebook);
-      setCleanupProposal(result.cleanupProposal);
-    } catch (caught) {
-      setNotebookError(caught instanceof Error ? caught.message : "Notebook revision failed.");
-    }
+  const removeLeadAnnotation = (annotationId: string): void => {
+    updateDesk((current) => ({ ...current, leadAnnotations: current.leadAnnotations.filter((annotation) => annotation.id !== annotationId) }));
+    playMysterySfx("paper");
   };
 
-  useEffect(() => {
-    if (!pendingAutoPolish || !notebook || notebookSaving) return;
-    if (JSON.stringify(notebook.pages) !== savedPagesRef.current) return;
-    const page = notebook.pages.find((entry) => entry.id === pendingAutoPolish.pageId);
-    const block = page?.blocks.find((entry) => entry.id === pendingAutoPolish.blockId);
-    setPendingAutoPolish(null);
-    if (!block?.text.trim()) return;
-    void proposeCleanupRef.current([pendingAutoPolish.pageId], [pendingAutoPolish.blockId], true);
-  }, [notebook, notebookSaving, pendingAutoPolish]);
+  const setSuspectNote = (seatId: string, text: string): void => {
+    updateDesk((current) => ({ ...current, suspectNotes: [...current.suspectNotes.filter((entry) => entry.seatId !== seatId), ...(text.trim() ? [{ seatId, text, updatedAt: new Date().toISOString() }] : [])] }));
+  };
+
+  const togglePin = (reference: DeskReference): void => {
+    if (!selectedSuspectSeatId || !notebook) return;
+    const existing = notebook.suspectPins.find((pin) => pin.seatId === selectedSuspectSeatId && pin.referenceKind === reference.kind && pin.referenceId === reference.id);
+    updateDesk((current) => ({ ...current, suspectPins: existing ? current.suspectPins.filter((pin) => pin.id !== existing.id) : [...current.suspectPins, { id: mysteryId("desk-pin"), referenceKind: reference.kind, referenceId: reference.id, seatId: selectedSuspectSeatId, createdAt: new Date().toISOString() }] }));
+    playMysterySfx(existing ? "paper" : "clip");
+    announceAction(existing ? "Hypothesis unpinned." : "Pinned as your hypothesis — not evidence.");
+  };
 
   const requestCaseCode = async (): Promise<void> => {
     const result = await request<{ caseCode: DebateMysteryCaseCodeV1 }>(
@@ -1731,9 +1882,25 @@ export function DebateMysteryPlay(
     setSpoilerRecord(reveal?.payload ?? null);
   };
 
-  const activePage = notebook?.pages.find((page) => page.id === activePageId) ?? notebook?.pages[0];
-  const noteCount = notebook ? debateMysteryNotebookCharacterCount(notebook) : 0;
-  const theoryMode = theoryBoardOpen;
+  const revealedSuspects = state.suspects.filter((suspect) => state.metSuspectSeatIds.includes(suspect.seatId));
+  const selectedDeskSuspect = revealedSuspects.find((suspect) => suspect.seatId === selectedSuspectSeatId) ?? null;
+  const selectedDeskNote = selectedDeskSuspect ? notebook?.suspectNotes.find((note) => note.seatId === selectedDeskSuspect.seatId)?.text ?? "" : "";
+  const deskReferences: DeskReference[] = [
+    ...state.leads.map((lead) => ({ kind: "lead" as const, id: lead.id, label: lead.title })),
+    ...state.discoveredEvidence.map((item) => ({ kind: "evidence" as const, id: item.id, label: mysteryEvidenceTitle(item.title) })),
+    ...state.testimony.map((item) => ({ kind: "testimony" as const, id: item.id, label: `Testimony · ${mysteryTestimonySpeaker(state, item.speakerSeatId)?.name ?? "Witness"}` })),
+  ];
+  const selectedDeskRoom = selectedDeskSuspect ? state.rooms.find((room) => room.id === selectedDeskSuspect.roomId) ?? null : null;
+  const selectedDeskMessages = selectedDeskSuspect ? state.interviewLog.filter((message) => message.suspectSeatId === selectedDeskSuspect.seatId) : [];
+  const selectedDeskTestimony = selectedDeskSuspect ? state.testimony.filter((item) => item.speakerSeatId === selectedDeskSuspect.seatId) : [];
+  const selectedDeskRoomEvidence = selectedDeskRoom ? state.discoveredEvidence.filter((item) => item.roomId === selectedDeskRoom.id) : [];
+  const selectedDeskConfrontedEvidence = [...new Set(selectedDeskMessages.flatMap((message) => message.evidenceId ? [message.evidenceId] : []))]
+    .flatMap((id) => state.discoveredEvidence.find((item) => item.id === id) ?? []);
+  const selectedDeskLinkedLeads = selectedDeskRoom ? state.leads.filter((lead) =>
+    lead.linkedRoomIds.includes(selectedDeskRoom.id)
+    || lead.linkedTestimonyIds.some((id) => selectedDeskTestimony.some((item) => item.id === id))) : [];
+  const selectedDeskPins = selectedDeskSuspect ? notebook?.suspectPins.filter((pin) => pin.seatId === selectedDeskSuspect.seatId) ?? [] : [];
+  const theoryMode = theoryBoardOpen || state.playPhase === "theory";
   const investigationMusicMix = mysteryInvestigationMusicMix({
     theoryBoardOpen,
   });
@@ -1793,6 +1960,7 @@ export function DebateMysteryPlay(
     return "Upper floor";
   };
   const selectFloor = (nextFloor: number): void => {
+    if (nextFloor !== floor) playMysterySfx("map");
     setFloor(nextFloor);
     const currentOnFloor = state.rooms.find(
       (room) => room.id === state.currentRoomId && room.floor === nextFloor,
@@ -1841,6 +2009,7 @@ export function DebateMysteryPlay(
     targetKind: "item" | "room" | "region",
     targetId: string,
   ): Promise<void> => {
+    if (state.actionsRemaining === 0) return;
     await perform({ action: "use_access_item", accessItemId, targetKind, targetId });
   };
   const accessItemFromDrag = (event: ReactDragEvent<HTMLElement>): string | null => {
@@ -1853,8 +2022,25 @@ export function DebateMysteryPlay(
     targetId: string,
   ): void => {
     event.preventDefault();
+    if (state.actionsRemaining === 0) return;
     const itemId = accessItemFromDrag(event);
     if (itemId) void applyAccessItem(itemId, targetKind, targetId);
+  };
+  const beginAccessItemDrag = (
+    event: ReactDragEvent<HTMLElement>,
+    itemId: string,
+    itemTitle: string,
+  ): void => {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("application/x-prism-access-item", itemId);
+    announceAction(`Carrying ${itemTitle}. Drop it on a discovered padlock or locked room.`);
+  };
+  const toggleAccessItem = (itemId: string, itemTitle: string): void => {
+    const arming = armedAccessItemId !== itemId;
+    setArmedAccessItemId(arming ? itemId : null);
+    announceAction(arming
+      ? `Using ${itemTitle}. Select a discovered padlock or locked room.`
+      : `${itemTitle} returned to the Case Kit.`);
   };
   const enterSelectedRoom = async (): Promise<void> => {
     await perform({ action: "travel", roomId: selectedRoom.id });
@@ -1864,15 +2050,13 @@ export function DebateMysteryPlay(
     : selectedRoom.discovered
       ? "Go to room"
       : "Discover room · 1 action";
-  const nearestInvestigationRegion = (x: number, y: number): { regionId: string | null; distance: number } =>
-    targetableInvestigationRegions.reduce<{ regionId: string | null; distance: number }>((result, region) => {
-      const center = region.polygon.reduce(
-        (total, point) => ({ x: total.x + point.x / region.polygon.length, y: total.y + point.y / region.polygon.length }),
-        { x: 0, y: 0 },
-      );
-      const distance = Math.hypot(center.x - x, center.y - y);
-      return distance < result.distance ? { regionId: region.id, distance } : result;
-    }, { regionId: null, distance: Number.POSITIVE_INFINITY });
+  const nearestInvestigationRegion = (x: number, y: number) =>
+    mysteryInvestigationTargetAt(
+      activeRegions,
+      currentRoom.inspectedRegionIds,
+      x,
+      y,
+    );
   const moveInvestigationLens = (event: ReactPointerEvent<HTMLDivElement>): void => {
     const bounds = event.currentTarget.getBoundingClientRect();
     const x = ((event.clientX - bounds.left) / Math.max(1, bounds.width)) * 100;
@@ -1882,8 +2066,112 @@ export function DebateMysteryPlay(
       return;
     }
     const nearest = nearestInvestigationRegion(x, y);
+    if (nearest.inspected) {
+      setLens({ x, y, proximity: 0, visible: false, regionId: nearest.regionId });
+      return;
+    }
     setLens({ x, y, proximity: Number.isFinite(nearest.distance) ? Math.max(0, 1 - nearest.distance / 26) : 0, visible: nearest.regionId !== null, regionId: nearest.regionId });
   };
+
+  const deskReferenceFor = (kind: DeskReferenceKind, id: string): DeskReference | null =>
+    deskReferences.find((reference) => reference.kind === kind && reference.id === id) ?? null;
+
+  const selectSuspectFolder = (seatId: string, revealed: boolean): void => {
+    if (!revealed) {
+      announceAction("Interview this suspect to reveal their folder.");
+      return;
+    }
+    setSelectedSuspectSeatId(seatId);
+    setDeskOpen(true);
+    playMysterySfx("folder");
+  };
+
+  const addPinnedRecordToTheory = (reference: DeskReference): void => {
+    if (reference.kind === "evidence") {
+      setTheory((current) => current.evidenceIds.includes(reference.id)
+        ? current
+        : { ...current, evidenceIds: [...current.evidenceIds, reference.id] });
+    } else if (reference.kind === "testimony") {
+      setTheory((current) => current.testimonyIds.includes(reference.id)
+        ? current
+        : { ...current, testimonyIds: [...current.testimonyIds, reference.id] });
+    } else return;
+    playMysterySfx("clip");
+    announceAction(`${reference.label} added to the filed theory record.`);
+  };
+
+  const renderSuspectFolderRack = (surface: "investigation" | "theory"): React.JSX.Element => (
+    <section className={styles.suspectFolderRack} data-surface={surface} aria-label="Suspect folders">
+      <header><p className={styles.eyebrow}>Gallery</p><strong>Suspect folders</strong><small>Full HD interview reveals a folder.</small></header>
+      <div>{state.suspects.map((suspect) => {
+        const revealed = state.metSuspectSeatIds.includes(suspect.seatId);
+        return <button key={suspect.seatId} type="button" className={styles.suspectFolder} data-revealed={revealed ? "true" : undefined} aria-pressed={selectedDeskSuspect?.seatId === suspect.seatId} onClick={() => selectSuspectFolder(suspect.seatId, revealed)}>
+          {revealed ? <span className={styles.folderAvatar}>{props.renderMysteryBotAvatar(mysteryBotForSuspect(suspect), "mini", { demeanor: "suspect", blinkEnabled: true })}</span> : <span className={styles.folderUnknown} aria-hidden="true"><i /><b>?</b></span>}
+          <strong>{revealed ? suspect.name : "Unknown suspect"}</strong><small>{revealed ? state.rooms.find((room) => room.id === suspect.roomId)?.name ?? "Known room" : "Full HD interview required"}</small>
+        </button>;
+      })}</div>
+    </section>
+  );
+
+  const renderComparisonSlots = (surface: "investigation" | "theory"): React.JSX.Element => (
+    <div className={styles.comparisonSlots} aria-label={`${surface === "theory" ? "Theory " : ""}comparison slots`}>
+      {comparisonSlots.map((slot, index) => <div key={index} className={styles.comparisonSlot} onDragOver={(event) => event.preventDefault()} onDrop={(event) => {
+        const raw = event.dataTransfer.getData("application/x-prism-desk-reference");
+        const reference = deskReferences.find((entry) => `${entry.kind}:${entry.id}` === raw);
+        if (reference) placeOnDeskAt(reference, index as 0 | 1);
+      }}>
+        <small>Comparison {index + 1}</small>
+        {slot ? <><strong>{slot.label}</strong><button type="button" onClick={() => setComparisonSlots((current) => index === 0 ? [null, current[1]] : [current[0], null])}>Remove</button></> : <span>Place a discovered record here</span>}
+      </div>)}
+    </div>
+  );
+
+  const renderSelectedSuspectFile = (surface: "investigation" | "theory"): React.JSX.Element => {
+    if (!selectedDeskSuspect) return <p className={styles.deskEmpty}>Open a revealed suspect folder to write a note or pin a compared record.</p>;
+    const pinnedReferences = selectedDeskPins.flatMap((pin) => {
+      const reference = deskReferenceFor(pin.referenceKind, pin.referenceId);
+      return reference ? [{ pin, reference }] : [];
+    });
+    const comparedReferences = comparisonSlots.filter((reference): reference is DeskReference => reference !== null);
+    return <article className={styles.suspectDeskFile}>
+      <header><div><small>Revealed folder · public facts only</small><h3>{selectedDeskSuspect.name}</h3></div><button type="button" onClick={() => setSelectedSuspectSeatId(null)}>Close folder</button></header>
+      <div className={styles.deskFactSummary}>
+        <section><small>Known room</small><strong>{selectedDeskRoom?.name ?? "No room recorded"}</strong></section>
+        <section><small>Interview record</small><strong>{selectedDeskMessages.filter((message) => message.role === "suspect").length} exchange{selectedDeskMessages.filter((message) => message.role === "suspect").length === 1 ? "" : "s"}</strong></section>
+        <section><small>Room evidence</small><strong>{selectedDeskRoomEvidence.length}</strong></section>
+      </div>
+      <div className={styles.deskFactGroups}>
+        <section><strong>Committed testimony</strong>{selectedDeskTestimony.length ? selectedDeskTestimony.map((item) => <blockquote key={item.id}>{item.exactQuote}</blockquote>) : <p>No exact testimony committed yet.</p>}</section>
+        <section><strong>Evidence found in their room</strong>{selectedDeskRoomEvidence.length ? <ul>{selectedDeskRoomEvidence.map((item) => <li key={item.id}>{mysteryEvidenceTitle(item.title)}</li>)}</ul> : <p>No room evidence discovered.</p>}</section>
+        <section><strong>Evidence you confronted them with</strong>{selectedDeskConfrontedEvidence.length ? <ul>{selectedDeskConfrontedEvidence.map((item) => <li key={item.id}>{mysteryEvidenceTitle(item.title)}</li>)}</ul> : <p>No explicit evidence confrontation recorded.</p>}</section>
+        <section><strong>Linked public leads</strong>{selectedDeskLinkedLeads.length ? <ul>{selectedDeskLinkedLeads.map((lead) => <li key={lead.id}>{lead.title}</li>)}</ul> : <p>No discovered lead currently links here.</p>}</section>
+      </div>
+      <label className={styles.suspectNotePad}><strong>Private notes</strong><textarea value={selectedDeskNote} onChange={(event) => setSuspectNote(selectedDeskSuspect.seatId, event.currentTarget.value)} onBlur={() => playMysterySfx("pencil")} placeholder="Your plain-text notes — a fallible hypothesis, never evidence." /></label>
+      <section className={styles.comparisonPaperclips}><strong>Paperclip a compared record</strong>{comparedReferences.length ? comparedReferences.map((reference) => {
+        const pinned = selectedDeskPins.some((pin) => pin.referenceKind === reference.kind && pin.referenceId === reference.id);
+        return <button key={`${reference.kind}:${reference.id}`} type="button" aria-pressed={pinned} onClick={() => togglePin(reference)}>{pinned ? "Unpin" : "Paperclip pin"} · {reference.label}</button>;
+      }) : <p>Place a record into either comparison slot first.</p>}</section>
+      <section className={styles.playerHypotheses}><strong>Your unverified pinned connections</strong>{pinnedReferences.length ? pinnedReferences.map(({ pin, reference }) => {
+        const attached = reference.kind === "evidence" ? theory.evidenceIds.includes(reference.id) : reference.kind === "testimony" ? theory.testimonyIds.includes(reference.id) : false;
+        return <div key={pin.id}><span>📎 {reference.label}</span><button type="button" onClick={() => togglePin(reference)}>Unpin</button>{surface === "theory" && reference.kind !== "lead" ? <button type="button" disabled={attached} onClick={() => addPinnedRecordToTheory(reference)}>{attached ? "Added to theory" : "Add to theory"}</button> : null}</div>;
+      }) : <p>No player-authored connections pinned.</p>}</section>
+    </article>;
+  };
+
+  const renderInvestigatorDesk = (surface: "investigation" | "theory"): React.JSX.Element => (
+    <section className={styles.investigatorDesk} data-open={deskOpen ? "true" : undefined} data-surface={surface} data-tutorial-target="whodunnit-investigator-desk" aria-label={`Investigator's desk${surface === "theory" ? " on Theory Board" : ""}`}>
+      <button type="button" className={styles.deskHandle} aria-expanded={deskOpen} onPointerDown={beginDeskPull} onPointerUp={finishDeskPull} onClick={toggleDesk}>Investigator&apos;s Desk <span>{deskOpen ? "Pull down or press to close" : "Pull up or press to open"}</span></button>
+      {deskOpen ? <div className={styles.deskSurface}>
+        {renderComparisonSlots(surface)}
+        <div className={styles.deskWorkspace}>
+          <nav aria-label="Desk records">{deskReferences.map((reference) => <button key={`${reference.kind}:${reference.id}`} type="button" draggable onDragStart={(event) => event.dataTransfer.setData("application/x-prism-desk-reference", `${reference.kind}:${reference.id}`)} onClick={() => placeOnDesk(reference)}>{reference.label}<small>Place on desk</small></button>)}</nav>
+          {renderSelectedSuspectFile(surface)}
+        </div>
+      </div> : null}
+      {notebookError ? <p className={styles.error}>{notebookError}</p> : null}
+      <small>{notebookSaving ? "Saving desk…" : "Pins are your hypotheses. They never become evidence or satisfy a theory."}</small>
+    </section>
+  );
 
   return (
     <main className={styles.play} data-theme="dark" data-phase={state.playPhase}>
@@ -1918,8 +2206,7 @@ export function DebateMysteryPlay(
               : <><small>Actions</small><strong>{state.actionsRemaining}</strong></>}
         </div>
         <div className={styles.hudControls} data-tutorial-target="whodunnit-hud-controls">
-          <button type="button" aria-pressed={caseFileOpen} onClick={() => { setCaseFileOpen((current) => !current); announceAction(caseFileOpen ? "Case file closed." : "Case file opened."); }} data-tutorial-target="whodunnit-case-file">Case file</button>
-          <button type="button" onClick={() => { setTheoryBoardOpen(true); announceAction("Theory Board opened."); }} data-tutorial-target="whodunnit-theory-control">Theory</button>
+          <button type="button" onClick={() => void openTheoryBoard()} data-tutorial-target="whodunnit-theory-control">Theory</button>
         </div>
       </header>
 
@@ -1954,7 +2241,7 @@ export function DebateMysteryPlay(
               {spoilerEvidence.length ? (
                 <section className={styles.spoilerSection}>
                   <h4>Clues left behind</h4>
-                  <div className={styles.spoilerEvidenceGrid}>{spoilerEvidence.map((item) => <article key={item.id}><span aria-hidden="true">{mysteryEvidenceEmoji(item)}</span><div><strong>{mysteryEvidenceTitle(item.title)}</strong><p>{mysteryEvidenceObservation(item.observation)}</p></div></article>)}</div>
+                  <div className={styles.spoilerEvidenceGrid}>{spoilerEvidence.map((item) => <article key={item.id}><MysteryEvidenceVisual item={item} /><div><strong>{mysteryEvidenceTitle(item.title)}</strong><p>{mysteryEvidenceObservation(item.observation)}</p></div></article>)}</div>
                 </section>
               ) : null}
               {spoilerProofBundles.length ? (
@@ -1995,7 +2282,7 @@ export function DebateMysteryPlay(
             <article className={styles.testimonyRail}>
               <p className={styles.eyebrow}>Exact testimony / {mysteryTestimonySpeaker(state, activeTestimony.speakerSeatId)?.name ?? "Witness"}</p>
               <blockquote>{activeTestimony.exactQuote}</blockquote>
-              <button type="button" onClick={() => void addNotebookReference("testimony", activeTestimony.id, activeTestimony.exactQuote)}>Add to notebook</button>
+              <button type="button" onClick={() => placeOnDesk({ kind: "testimony", id: activeTestimony.id, label: `Testimony · ${mysteryTestimonySpeaker(state, activeTestimony.speakerSeatId)?.name ?? "Witness"}` })}>Place on desk</button>
               <div className={styles.courtRecord}>
                 {courtBeats.map((entry, index) => <article key={`${entry.speaker}:${index}:${entry.body}`} data-speaker={entry.speaker.toLocaleLowerCase()}><strong>{entry.speaker}</strong><p>{entry.body}</p></article>)}
               </div>
@@ -2014,7 +2301,7 @@ export function DebateMysteryPlay(
         </section>
       ) : theoryMode ? (
         <section className={styles.theoryBoard} data-tutorial-target="whodunnit-theory-board">
-          <header><button type="button" className={styles.backToMansion} onClick={() => setTheoryBoardOpen(false)}>← Return to mansion</button><p className={styles.eyebrow}>Theory Board</p><h2>Build the chain. Then file.</h2><p>Filing is free, freezes this theory, and begins the mandatory trial—even if the accusation is wrong.</p><div className={styles.theoryProgress} aria-label={`${theoryReadyCount} of ${theoryChecklist.length} theory sections ready`}>{theoryChecklist.map((item, index) => <span key={item.label} data-complete={item.complete ? "true" : undefined}><i>{item.complete ? "✓" : index + 1}</i>{item.label}</span>)}</div></header>
+          <header>{state.playPhase !== "theory" ? <button type="button" className={styles.backToMansion} data-ui-sfx="none" onClick={closeTheoryBoard}>← Return to mansion</button> : null}<p className={styles.eyebrow}>Theory Board</p><h2>Build the chain. Then file.</h2><p>{state.playPhase === "theory" ? "Your investigation actions are exhausted. The mansion record is now closed, but your partner remains available while you build the strongest case possible." : "Filing is free, freezes this theory, and begins the mandatory trial—even if the accusation is wrong."}</p><div className={styles.theoryProgress} aria-label={`${theoryReadyCount} of ${theoryChecklist.length} theory sections ready`}>{theoryChecklist.map((item, index) => <span key={item.label} data-complete={item.complete ? "true" : undefined}><i>{item.complete ? "✓" : index + 1}</i>{item.label}</span>)}</div></header>
           {state.playPhase === "continuance" ? <div className={styles.continuance}>PRISM granted one continuance. The mansion is preserved and {state.actionsRemaining} emergency actions are available.</div> : null}
           <div className={styles.theoryFields}>
             <label>Culprit<select value={theory.culpritSeatId ?? ""} onChange={(event) => {
@@ -2039,16 +2326,19 @@ export function DebateMysteryPlay(
             }}><option value="">No accomplice alleged</option>{state.suspects.filter((suspect) => suspect.seatId !== theory.culpritSeatId).map((suspect) => <option key={suspect.seatId} value={suspect.seatId}>{suspect.name}</option>)}</select></label>
           </div>
           <div className={styles.proofAttach}>
-            <fieldset><legend>Physical evidence</legend>{state.discoveredEvidence.length ? state.discoveredEvidence.map((item) => <label key={item.id}><input type="checkbox" checked={theory.evidenceIds.includes(item.id)} onChange={() => setTheory((current) => ({ ...current, evidenceIds: current.evidenceIds.includes(item.id) ? current.evidenceIds.filter((id) => id !== item.id) : [...current.evidenceIds, item.id] }))} /><span aria-hidden="true">{mysteryEvidenceEmoji(item)}</span> {mysteryEvidenceTitle(item.title)}</label>) : <p>Search rooms to add evidence to the record.</p>}</fieldset>
+            <fieldset><legend>Physical evidence</legend>{state.discoveredEvidence.length ? state.discoveredEvidence.map((item) => <label key={item.id}><input type="checkbox" checked={theory.evidenceIds.includes(item.id)} onChange={() => setTheory((current) => ({ ...current, evidenceIds: current.evidenceIds.includes(item.id) ? current.evidenceIds.filter((id) => id !== item.id) : [...current.evidenceIds, item.id] }))} /><MysteryEvidenceVisual item={item} /> {mysteryEvidenceTitle(item.title)}</label>) : <p>Search rooms to add evidence to the record.</p>}</fieldset>
             <fieldset><legend>Testimony</legend>{state.testimony.length ? state.testimony.map((item) => {
               const speaker = mysteryTestimonySpeaker(state, item.speakerSeatId);
               return <label key={item.id} className={styles.theoryTestimony}><input type="checkbox" checked={theory.testimonyIds.includes(item.id)} onChange={() => setTheory((current) => ({ ...current, testimonyIds: current.testimonyIds.includes(item.id) ? current.testimonyIds.filter((id) => id !== item.id) : [...current.testimonyIds, item.id] }))} /><span><strong style={{ "--suspect-color": speaker?.color ?? "#a98cff" } as CSSProperties}>{speaker?.name ?? "Witness"}</strong><q>{item.exactQuote}</q></span></label>;
             }) : <p>Interview suspects to add exact testimony.</p>}</fieldset>
           </div>
+          {renderSuspectFolderRack("theory")}
+          {renderInvestigatorDesk("theory")}
+          {renderPartnerConsultation("theory")}
           <button type="button" className={styles.fileTheoryButton} disabled={busy || !theory.culpritSeatId} onClick={() => void perform({ action: "file_theory", theory })}>File charges and enter court</button>
         </section>
       ) : (
-        <div className={styles.investigation} data-case-file-open={caseFileOpen ? "true" : undefined}>
+        <div className={styles.investigation} data-desk-open={deskOpen ? "true" : undefined}>
           <section className={styles.floorplan} data-tutorial-target="whodunnit-floorplan">
             <header>
               <div><p className={styles.eyebrow}>Mansion blueprint</p><strong>{floorDisplayName(floor)}</strong></div>
@@ -2072,27 +2362,35 @@ export function DebateMysteryPlay(
                     data-visited={room.discovered ? "true" : undefined}
                     data-searched={room.searched ? "true" : undefined}
                     data-locked={room.locked || (!room.discovered && state.actionsRemaining === 0) ? "true" : undefined}
-                    data-access-ready={armedAccessItemId ? "true" : undefined}
+                    data-access-ready={armedAccessItemId && room.locked ? "true" : undefined}
                     aria-pressed={room.id === selectedRoom.id}
-                    aria-label={`${room.discovered ? room.name ?? "Room" : "Undiscovered room"}${room.searched ? ", investigation complete" : ""}${room.locked ? ", locked" : ""}${armedAccessItemId ? ", use selected access item" : ""}`}
-                    disabled={busy}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={(event) => dropAccessItem(event, "room", room.id)}
+                    aria-label={`${room.discovered ? room.name ?? "Room" : "Undiscovered room"}${room.searched ? ", all visible areas inspected" : ""}${room.locked ? ", locked" : ""}${armedAccessItemId && room.locked ? ", use selected access item" : ""}`}
+                    disabled={busy || Boolean(armedAccessItemId && room.locked && state.actionsRemaining === 0)}
+                    onDragOver={room.locked ? (event) => event.preventDefault() : undefined}
+                    onDrop={room.locked ? (event) => dropAccessItem(event, "room", room.id) : undefined}
                     onClick={() => {
-                      if (armedAccessItemId) {
+                      if (armedAccessItemId && room.locked) {
                         void applyAccessItem(armedAccessItemId, "room", room.id);
                         return;
                       }
                       setSelectedRoomId(room.id);
+                      if (room.id !== selectedRoom.id) playMysterySfx("map");
                       announceAction(room.discovered ? `${room.name ?? "Room"} selected.` : "Undiscovered room selected.");
                     }}
                     style={{ left: `${mapX(room.x)}%`, top: `${mapY(room.y)}%`, width: `${roomWidthPercent(room.width)}%`, height: `${roomHeightPercent(room.height)}%` }}
                   >
-                    {room.discovered ? <><span>{roomTemplate(room.templateId).emoji}</span>
-                    <strong>{room.name ?? "Unnamed room"}</strong>
+                    {room.discovered ? <><strong>{room.name ?? "Unnamed room"}</strong>
                     {state.suspects.filter((suspect) => suspect.roomId === room.id).map((suspect) => {
                       const bot = mysteryBotForSuspect(suspect);
-                      return <i className={styles.mapOccupant} key={suspect.seatId} aria-label={`${suspect.name} is known to be here`} data-tutorial-target="whodunnit-micro-avatar"><BotAvatarMicro color={bot.color} moodKey="neutral" glyph={props.renderBotGlyph(bot.glyph, { size: 15, strokeWidth: 1.3 })} renderSizePx={40} scheduleKey={`mystery-map-${sessionId}-${suspect.seatId}`} /></i>;
+                      const position = mysteryMapOccupantPosition(sessionId, room.id, suspect.seatId);
+                      return <i
+                        className={styles.mapOccupant}
+                        key={suspect.seatId}
+                        role="img"
+                        aria-label={`${suspect.name} is known to be here`}
+                        data-tutorial-target="whodunnit-micro-avatar"
+                        style={{ left: `${position.xPct}%`, top: `${position.yPct}%`, color: bot.color ?? "#9c7cff" }}
+                      >{props.renderBotGlyph(bot.glyph, { size: 18, strokeWidth: 1.5, className: styles.mapOccupantGlyph })}</i>;
                     })}
                     {room.searched ? <i className={styles.mapRoomCompleteMark} aria-hidden="true">✓</i> : null}
                     {room.neighborIds.some((id) => state.rooms.find((candidate) => candidate.id === id)?.floor !== room.floor) ? <small>Stairs</small> : null}</> : null}
@@ -2101,14 +2399,14 @@ export function DebateMysteryPlay(
               </div>
             </div>
             <section className={styles.mapDetails} aria-live="polite" data-locked={selectedRoomLocked ? "true" : undefined}>
-              <div><small>Selected room</small><strong>{selectedRoomIsKnown ? selectedRoom.name ?? "Unnamed room" : "Undiscovered room"}</strong><span>{selectedRoomIsKnown ? `${floorDisplayName(selectedRoom.floor)} · ${selectedRoom.locked ? "Locked · try an access item" : selectedRoom.searched ? "Investigation complete" : "Visited"}` : selectedRoomLocked ? "Locked · no actions" : "Discover to reveal"}</span></div>
+              <div><small>Selected room</small><strong>{selectedRoomIsKnown ? selectedRoom.name ?? "Unnamed room" : "Undiscovered room"}</strong><span>{selectedRoomIsKnown ? `${floorDisplayName(selectedRoom.floor)} · ${selectedRoom.locked ? "Locked · try an access item" : selectedRoom.searched ? "All visible areas inspected" : "Visited"}` : selectedRoomLocked ? "Locked · no actions" : "Discover to reveal"}</span></div>
               {selectedRoomIsKnown ? <dl><div><dt>Known occupant</dt><dd>{selectedRoomOccupant ? selectedRoomOccupant.name : "Unknown"}</dd></div><div><dt>Known clues</dt><dd>{selectedRoomClueCount}</dd></div></dl> : null}
-              <button type="button" disabled={busy || selectedRoomLocked || selectedRoom.id === currentRoom.id} onClick={() => void enterSelectedRoom()}>{selectedRoomActionLabel}</button>
+              <button type="button" disabled={busy || Boolean(state.activeActivity) || selectedRoomLocked || selectedRoom.id === currentRoom.id} onClick={() => void enterSelectedRoom()}>{selectedRoomActionLabel}</button>
             </section>
             <small>Select a room, then travel. New rooms cost 1 action; revisits are free.</small>
           </section>
           <section className={styles.roomPanel} data-kind={currentRoom.kind ?? "undiscovered"} data-focus={suspectRoomFocus}>
-            <header><div><p className={styles.eyebrow}>{(currentRoom.kind ?? "room").replace("_", " ")}</p><h2>{currentRoom.name ?? "Undiscovered room"}</h2></div><div className={styles.roomHeaderActions}>{suspectRoomFocus === "search" ? <button type="button" className={styles.leaveInvestigation} onClick={() => { setSuspectRoomFocus("observe"); setLens((current) => ({ ...current, visible: false })); announceAction("Returned to the room."); }}>← Return to room</button> : null}<button type="button" onClick={() => void addNotebookReference("room", currentRoom.id, currentRoom.name ?? currentRoom.id)}>Add room to notebook</button></div></header>
+            <header><div><p className={styles.eyebrow}>{(currentRoom.kind ?? "room").replace("_", " ")}</p><h2>{currentRoom.name ?? "Undiscovered room"}</h2></div><div className={styles.roomHeaderActions}>{suspectRoomFocus === "search" ? <button type="button" className={styles.leaveInvestigation} data-ui-sfx="none" disabled={busy} onClick={() => void finishActiveActivity()}>← Return to room</button> : null}</div></header>
             <div
               className={styles.roomScene}
               data-blurred={currentSuspect && suspectRoomFocus === "interview" ? "true" : undefined}
@@ -2117,21 +2415,17 @@ export function DebateMysteryPlay(
               style={{ "--room-deep": template.palette[0], "--room-mid": template.palette[1], "--room-light": template.palette[2] } as CSSProperties}
               onPointerMove={suspectRoomFocus === "search" ? moveInvestigationLens : undefined}
               onClickCapture={(event) => {
-                if (suspectRoomFocus !== "search" || event.detail === 0 || busy) return;
+                if (suspectRoomFocus !== "search" || event.detail === 0 || busy || state.actionsRemaining === 0) return;
                 // Let a real hotspot own its click. The scene-level fallback is only
                 // for the surrounding image, where we resolve the nearest region.
-                if ((event.target as Element).closest("[data-mystery-region-id]")) return;
+                if ((event.target as Element).closest("[data-mystery-region-id], [data-mystery-room-control]")) return;
                 const bounds = event.currentTarget.getBoundingClientRect();
                 const x = ((event.clientX - bounds.left) / Math.max(1, bounds.width)) * 100;
                 const y = ((event.clientY - bounds.top) / Math.max(1, bounds.height)) * 100;
                 const nearest = nearestInvestigationRegion(x, y);
-                if (!nearest.regionId) return;
+                if (!nearest.regionId || nearest.inspected) return;
                 event.preventDefault();
                 event.stopPropagation();
-                if (armedAccessItemId) {
-                  void applyAccessItem(armedAccessItemId, "region", `${currentRoom.id}:${nearest.regionId}`);
-                  return;
-                }
                 void perform({ action: "inspect", roomId: currentRoom.id, regionId: nearest.regionId });
               }}
               onPointerDown={(event) => {
@@ -2139,8 +2433,7 @@ export function DebateMysteryPlay(
                   suspectRoomFocus === "interview" &&
                   !(event.target as Element).closest("[data-mystery-interview-interactive]")
                 ) {
-                  setSuspectRoomFocus("observe");
-                  announceAction("Returned to the room.");
+                  void finishActiveActivity();
                 }
               }}
               onPointerLeave={() => setLens((current) => ({ ...current, visible: false }))}
@@ -2163,26 +2456,71 @@ export function DebateMysteryPlay(
                   key={region.id}
                   className={styles.hotspot}
                   style={{ clipPath: regionClip(region), zIndex: lens.regionId === region.id ? 5 : 4 }}
-                  aria-label={`${currentRoom.inspectedRegionIds.includes(region.id) ? "Investigation complete for" : "Inspect"} the ${region.label}${armedAccessItemId ? " with selected access item" : ""}`}
-                  aria-disabled={currentRoom.inspectedRegionIds.includes(region.id) && !armedAccessItemId}
-                  title={`${currentRoom.inspectedRegionIds.includes(region.id) ? "Investigation complete" : "Inspect"}: ${region.label}`}
-                  tabIndex={currentRoom.inspectedRegionIds.includes(region.id) && !armedAccessItemId ? -1 : 0}
+                  aria-label={`${currentRoom.inspectedRegionIds.includes(region.id) ? "Already inspected" : "Inspect"} the ${region.label}`}
+                  aria-disabled={currentRoom.inspectedRegionIds.includes(region.id) || state.actionsRemaining === 0}
+                  title={`${currentRoom.inspectedRegionIds.includes(region.id) ? "Already inspected" : "Inspect"}: ${region.label}`}
+                  tabIndex={currentRoom.inspectedRegionIds.includes(region.id) ? -1 : 0}
                   data-inspected={currentRoom.inspectedRegionIds.includes(region.id) ? "true" : undefined}
-                  data-access-ready={armedAccessItemId ? "true" : undefined}
                   data-mystery-region-id={region.id}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={(event) => dropAccessItem(event, "region", `${currentRoom.id}:${region.id}`)}
+                  disabled={busy || state.actionsRemaining === 0 || currentRoom.inspectedRegionIds.includes(region.id)}
                   onClick={() => {
-                    if (armedAccessItemId) {
-                      void applyAccessItem(armedAccessItemId, "region", `${currentRoom.id}:${region.id}`);
-                      return;
-                    }
-                    if (currentRoom.inspectedRegionIds.includes(region.id)) return;
+                    if (state.actionsRemaining === 0 || currentRoom.inspectedRegionIds.includes(region.id)) return;
                     void perform({ action: "inspect", roomId: currentRoom.id, regionId: region.id });
                   }}
                   data-tutorial-target={region.id === firstInspectableRegionId ? "whodunnit-hotspot" : undefined}
                 ><span>Inspect {region.label}</span></button>
               )) : null}
+              {suspectRoomFocus === "search" ? discoveredRoomAccessTargets.map((target) => (
+                <button
+                  type="button"
+                  key={`${target.targetKind}:${target.targetId}`}
+                  className={styles.roomLockTarget}
+                  data-mystery-room-control
+                  data-access-ready={armedAccessItemId ? "true" : undefined}
+                  data-tutorial-target="whodunnit-room-lock"
+                  style={{ left: `${target.x}%`, top: `${target.y}%` }}
+                  aria-label={`${target.targetLabel}, locked${armedAccessItemId ? ". Try selected Case Kit item" : ". Choose an item from the Case Kit"}`}
+                  title={armedAccessItemId ? `Try selected item on ${target.targetLabel}` : `${target.targetLabel} · locked`}
+                  disabled={busy || state.actionsRemaining === 0}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => dropAccessItem(event, target.targetKind, target.targetId)}
+                  onClick={() => {
+                    if (armedAccessItemId) {
+                      void applyAccessItem(armedAccessItemId, target.targetKind, target.targetId);
+                      return;
+                    }
+                    announceAction(`Choose or drag a Case Kit item to ${target.targetLabel}.`);
+                  }}
+                >
+                  {debateMysteryBundledLockTargetAssetPath(target.targetLabel)
+                    ? <img src={debateMysteryBundledLockTargetAssetPath(target.targetLabel)!} alt="" aria-hidden="true" />
+                    : <svg viewBox="0 0 32 36" aria-hidden="true" focusable="false">
+                      <path d="M8 16v-5a8 8 0 0 1 16 0v5" />
+                      <rect x="4" y="15" width="24" height="18" rx="5" />
+                      <circle cx="16" cy="24" r="2.2" />
+                    </svg>}
+                  <span>{target.targetLabel}</span>
+                </button>
+              )) : null}
+              {suspectRoomFocus === "search" ? <aside className={styles.roomCaseKit} data-mystery-room-control data-tutorial-target="whodunnit-room-case-kit" aria-label="Case Kit">
+                <header><strong>Case Kit</strong><span>{usableAccessItems.length}</span></header>
+                {usableAccessItems.length ? <div>{usableAccessItems.map((item) => (
+                  <button
+                    type="button"
+                    key={item.id}
+                    draggable={!busy}
+                    disabled={busy}
+                    aria-pressed={armedAccessItemId === item.id}
+                    title={`${item.title}: ${item.description}`}
+                    onDragStart={(event) => beginAccessItemDrag(event, item.id, item.title)}
+                    onClick={() => toggleAccessItem(item.id, item.title)}
+                  >
+                    <MysteryInventoryVisual item={item} />
+                    <strong>{item.title}</strong>
+                  </button>
+                ))}</div> : <p>No access tools recovered yet.</p>}
+                <small>{armedAccessItemId ? `Selected: ${state.inventoryItems.find((item) => item.id === armedAccessItemId)?.title ?? "access item"}` : discoveredRoomAccessTargets.length ? "Drag a tool to a padlock, or select one first." : "Recovered keys, codes, and remotes appear here."}</small>
+              </aside> : null}
               {suspectRoomFocus === "search" ? <i
                 className={styles.investigationLens}
                 aria-hidden="true"
@@ -2195,62 +2533,63 @@ export function DebateMysteryPlay(
                   className={styles.roomSuspectPresence}
                   data-tutorial-target="whodunnit-room-suspect"
                   style={{
-                    "--suspect-color": currentSuspect.color ?? "#9c7cff",
                     "--suspect-walk-start": `${currentSuspectWalk?.startPct ?? 26}%`,
                     "--suspect-walk-waypoint": `${currentSuspectWalk?.waypointPct ?? 48}%`,
                     "--suspect-walk-end": `${currentSuspectWalk?.endPct ?? 68}%`,
                     "--suspect-walk-duration": `${currentSuspectWalk?.durationMs ?? 19_000}ms`,
                     "--suspect-walk-delay": `${currentSuspectWalk?.delayMs ?? 0}ms`,
                   } as CSSProperties}
-                  onClick={() => { setSuspectRoomFocus("interview"); announceAction(`Interviewing ${currentSuspect.name}.`); }}
+                  data-avatar-facing={currentSuspectFacing}
+                  onAnimationIteration={(event) => {
+                    if (event.target !== event.currentTarget) return;
+                    setSuspectWalkIteration((iteration) => iteration + 1);
+                  }}
+                  onClick={() => void beginSuspectInterview()}
                   aria-label={`Talk to ${currentSuspect.name}`}
                 >
                   <span className={styles.roomSuspectWalker}>
-                    {props.renderMysteryBotAvatar(mysteryBotForSuspect(currentSuspect), "mini", { demeanor: "suspect" })}
+                    {props.renderMysteryBotAvatar(mysteryBotForSuspect(currentSuspect), "mini", { demeanor: "suspect", blinkEnabled: true, facing: currentSuspectFacing })}
                   </span>
-                  <span className={styles.roomSuspectName}>{currentSuspect.name}</span>
                 </button>
               ) : null}
               {currentSuspect && suspectRoomFocus === "interview" ? (
                 <div className={styles.interviewStage}>
                   <div className={styles.suspectPresence} data-mystery-interview-interactive style={{ "--suspect-color": currentSuspect.color ?? "#9c7cff" } as CSSProperties}>
-                    <span className={styles.suspectAvatar} data-tutorial-target="whodunnit-hd-interview">{props.renderMysteryBotAvatar(mysteryBotForSuspect(currentSuspect), "full", { demeanor: "suspect", thinking: interviewGenerating, talking: interviewSpeechTiming !== null, speechTiming: interviewSpeechTiming })}</span>
-                    <strong>{currentSuspect.name}</strong><small>Interview · free questioning</small>
+                    <span className={styles.suspectAvatar} data-tutorial-target="whodunnit-hd-interview">{props.renderMysteryBotAvatar(mysteryBotForSuspect(currentSuspect), "full", { demeanor: "suspect", thinking: interviewGenerating, talking: interviewSpeechTiming !== null, speechTiming: interviewSpeechTiming, blinkEnabled: true })}</span>
+                    <strong>{currentSuspect.name}</strong><small>Opening is free · each submitted question costs 1 action</small>
                   </div>
                   <section className={styles.interviewViewport} data-mystery-interview-interactive aria-label={`Interview with ${currentSuspect.name}`} onKeyDown={(event) => {
                     if (event.key === "Escape") {
                       event.preventDefault();
-                      setSuspectRoomFocus("observe");
-                      announceAction("Returned to the room.");
+                      void finishActiveActivity();
                     }
                   }}>
-                    <header><div><small>In the room</small><strong>{currentSuspect.name}</strong></div><button type="button" onClick={() => { setSuspectRoomFocus("observe"); announceAction("Returned to the room."); }}>Return to room</button></header>
+                    <header><div><small>In the room</small><strong>{currentSuspect.name}</strong></div><button type="button" data-ui-sfx="none" disabled={busy} onClick={() => void finishActiveActivity()}>Return to room</button></header>
                     <div ref={interviewTranscriptRef} className={styles.interviewTranscript} aria-live="polite">
                       {interviewGenerating && streamingPlayerMessageId ? <p data-speaker="investigator" data-streaming="true"><strong>You · {playerSpeechTiming ? "voice" : "writing"}</strong><span>{streamedPlayerQuestion || "…"}</span></p> : null}
-                      {currentInterview.length ? currentInterview.map((message) => <p key={message.id} data-speaker={message.role} data-streaming={message.id === streamingMessageId ? "true" : undefined}><strong>{message.role === "investigator" ? "You" : currentSuspect.name}{message.id === streamingMessageId && interviewSpeechTiming ? " · voice" : ""}</strong><span>{message.id === streamingMessageId ? mysteryPublicText(streamedReply || "…", state) : mysteryPublicText(message.content, state)}</span></p>) : <p className={styles.interviewPrompt}>Ask about the timeline, their relationship with the victim, or confront them with discovered evidence using @.</p>}
+                      {currentInterview.length ? currentInterview.map((message) => message.id === streamingMessageId && !streamedReply ? null : <p key={message.id} data-speaker={message.role} data-streaming={message.id === streamingMessageId ? "true" : undefined}><strong>{message.role === "investigator" ? "You" : currentSuspect.name}{message.id === streamingMessageId && interviewSpeechTiming ? " · voice" : ""}</strong><span>{message.id === streamingMessageId ? mysteryPublicText(streamedReply, state) : mysteryPublicText(message.content, state)}</span></p>) : <p className={styles.interviewPrompt}>Ask about the timeline, their relationship with the victim, or confront them with discovered evidence using @.</p>}
                       {interviewGenerating ? <p className={styles.interviewTurnState} role="status">{currentSuspect.name} is thinking…</p> : null}
                     </div>
                     <div className={styles.leadGrid}>{suggestedLeads.map((lead) => <button type="button" key={lead} disabled={busy} onClick={() => { setQuestion(lead); setQuestionCaret(lead.length); }}>{lead}</button>)}</div>
-                    <div className={styles.questionComposer} data-tutorial-target="whodunnit-evidence-mention"><textarea value={question} maxLength={2_000} onChange={(event) => { setQuestion(event.currentTarget.value); setQuestionCaret(event.currentTarget.selectionStart ?? event.currentTarget.value.length); }} onSelect={(event) => setQuestionCaret(event.currentTarget.selectionStart ?? 0)} placeholder="Ask freely — type @ to mention evidence, testimony, suspects, or the victim…" />{evidenceMentionPicks.length ? <div className={styles.evidenceMentionMenu} role="listbox" aria-label="Case mentions"><small>Reference the public record</small>{evidenceMentionPicks.map((pick) => <button type="button" key={`${pick.kind}:${pick.id}`} data-kind={pick.kind} style={{ "--mention-color": pick.color ?? undefined } as CSSProperties} onClick={() => { const action = commitMysteryMentionAtCaret(question, questionCaret, pick); if (action) { setQuestion(action.replacement); setQuestionCaret(action.caret); } }}>{pick.glyph} {pick.title}</button>)}</div> : null}<button type="button" disabled={busy || !question.trim()} onClick={() => { const asked = question.trim(); const evidenceId = parseMysteryInterviewEvidenceMention(asked, state.discoveredEvidence); if (/\[\[exhibit:/u.test(asked) && !evidenceId) { setError("Choose a discovered evidence item from the @ menu."); return; } const messageId = mysteryId("player-interview"); setQuestion(""); streamPlayerQuestion(mysteryPublicText(asked, state), messageId); setInterviewGenerating(true); void perform({ action: "interview", suspectSeatId: currentSuspect.seatId, question: asked, evidenceId }).finally(() => setInterviewGenerating(false)); }}>Ask</button></div>
+                    <div className={styles.questionComposer} data-tutorial-target="whodunnit-evidence-mention"><textarea value={question} maxLength={2_000} onChange={(event) => { setQuestion(event.currentTarget.value); setQuestionCaret(event.currentTarget.selectionStart ?? event.currentTarget.value.length); }} onSelect={(event) => setQuestionCaret(event.currentTarget.selectionStart ?? 0)} placeholder="Ask freely — type @ to mention evidence, testimony, suspects, or the victim…" />{evidenceMentionPicks.length ? <div className={styles.evidenceMentionMenu} role="listbox" aria-label="Case mentions"><small>Reference the public record</small>{evidenceMentionPicks.map((pick) => <button type="button" key={`${pick.kind}:${pick.id}`} data-kind={pick.kind} style={{ "--mention-color": pick.color ?? undefined } as CSSProperties} onClick={() => { const action = commitMysteryMentionAtCaret(question, questionCaret, pick); if (action) { setQuestion(action.replacement); setQuestionCaret(action.caret); } }}>{pick.glyph} {pick.title}</button>)}</div> : null}<button type="button" disabled={busy || state.actionsRemaining === 0 || !question.trim()} onClick={() => { const asked = question.trim(); const evidenceId = parseMysteryInterviewEvidenceMention(asked, state.discoveredEvidence); if (/\[\[exhibit:/u.test(asked) && !evidenceId) { setError("Choose a discovered evidence item from the @ menu."); return; } const messageId = mysteryId("player-interview"); setQuestion(""); streamPlayerQuestion(mysteryPublicText(asked, state), messageId); setInterviewGenerating(true); void perform({ action: "interview", suspectSeatId: currentSuspect.seatId, question: asked, evidenceId }).finally(() => setInterviewGenerating(false)); }}>Ask · 1 action</button></div>
                   </section>
                 </div>
               ) : null}
               {suspectRoomFocus !== "interview" ? <div className={styles.stageLowerChrome} aria-live="polite">
               {stageNarration ? <div className={styles.stagePartnerProse}><small>{stageNarration.label}</small><MysteryPublicMarkdown source={stageNarration.text} suspects={state.suspects} /></div> : null}
               {suspectRoomFocus === "observe" ? <div className={styles.roomModeControls} data-mystery-interview-interactive>
-                {currentSuspect ? <button type="button" onClick={() => { setSuspectRoomFocus("interview"); announceAction(`Interviewing ${currentSuspect.name}.`); }}>Talk to {currentSuspect.name}</button> : null}
-                <button type="button" disabled={currentRoom.searched} onClick={() => { setSuspectRoomFocus("search"); announceAction(`Investigating ${currentRoom.name ?? "the room"}.`); }}>{currentRoom.searched ? "✓ Investigation complete" : "Investigate room"}</button>
+                {currentSuspect ? <button type="button" disabled={busy} onClick={() => void beginSuspectInterview()}>Talk to {currentSuspect.name} · free</button> : null}
+                <button type="button" disabled={busy || currentRoom.searched} onClick={() => void beginRoomInvestigation()}>{currentRoom.searched ? "✓ Visible areas inspected" : "Investigate room · free"}</button>
               </div> : null}
-              <p className={styles.stageActionLine} role="status">{actionFeedback ?? (suspectRoomFocus === "search" ? currentRoom.searched ? "Room investigation complete. Every area has been checked." : "Move the lens around the room; it never predicts what an inspection will reveal." : currentSuspect ? "Choose whether to question the suspect or investigate the room." : currentRoom.searched ? "This room's investigation is complete." : "Enter investigation view when you are ready to search this room.")}</p>
+              <p className={styles.stageActionLine} role="status">{actionFeedback ?? (suspectRoomFocus === "search" ? currentRoom.searched ? `All visible areas inspected${discoveredRoomAccessTargets.length ? ` · ${discoveredRoomAccessTargets.length} unresolved ${discoveredRoomAccessTargets.length === 1 ? "lock" : "locks"}` : ""}.` : "Move the lens around the room; each inspection costs 1 action and never predicts what it will reveal." : currentSuspect ? "Choose whether to question the suspect or investigate the room." : currentRoom.searched ? "All visible areas in this room have been inspected." : "Open investigation view when you are ready to search this room; opening it is free.")}</p>
               </div> : null}
             </div>
-            {evidenceExhibitId ? (() => { const exhibit = state.discoveredEvidence.find((item) => item.id === evidenceExhibitId); return exhibit ? <section className={styles.evidenceExhibit} role="dialog" aria-label={`Evidence acquired: ${mysteryEvidenceTitle(exhibit.title)}`}><button type="button" aria-label="Close evidence preview" onClick={() => setEvidenceExhibitId(null)}>×</button>{exhibit.imageId ? <img src={`/api/images/${encodeURIComponent(exhibit.imageId)}/file`} alt="" /> : <span aria-hidden="true">{mysteryEvidenceEmoji(exhibit)}</span>}<div><small>Evidence acquired</small><h3>{mysteryEvidenceTitle(exhibit.title)}</h3><p>{mysteryEvidenceObservation(exhibit.observation)}</p><button type="button" onClick={() => void addNotebookReference("evidence", exhibit.id, `${mysteryEvidenceTitle(exhibit.title)}: ${mysteryEvidenceObservation(exhibit.observation)}`)}>Add to notebook</button></div></section> : null; })() : null}
+            {evidenceExhibitId ? (() => { const exhibit = state.discoveredEvidence.find((item) => item.id === evidenceExhibitId); return exhibit ? <section className={styles.evidenceExhibit} role="dialog" aria-label={`Evidence acquired: ${mysteryEvidenceTitle(exhibit.title)}`}><button type="button" aria-label="Close evidence preview" onClick={() => setEvidenceExhibitId(null)}>×</button><MysteryEvidenceVisual item={exhibit} /><div><small>Evidence acquired</small><h3>{mysteryEvidenceTitle(exhibit.title)}</h3><p>{mysteryEvidenceObservation(exhibit.observation)}</p><button type="button" onClick={() => placeOnDesk({ kind: "evidence", id: exhibit.id, label: mysteryEvidenceTitle(exhibit.title) })}>Place on desk</button></div></section> : null; })() : null}
           </section>
 
-          <aside className={styles.caseRail} data-open={caseFileOpen ? "true" : undefined} aria-label="Case file" inert={!caseFileOpen}>
+          <aside className={styles.caseRail} aria-label="Case file">
             <header className={styles.caseFileHeader}>
               <div><p className={styles.eyebrow}>Case file</p><strong>Public record & tools</strong></div>
-              <button type="button" onClick={() => { setCaseFileOpen(false); announceAction("Case file closed."); }} aria-label="Close Case file">×</button>
             </header>
             <nav className={styles.caseFileTabs} aria-label="Case file sections">
               <button type="button" aria-pressed={caseFileTab === "partner"} onClick={() => setCaseFileTab("partner")}>Counsel</button>
@@ -2259,13 +2598,31 @@ export function DebateMysteryPlay(
               <button type="button" aria-pressed={caseFileTab === "evidence"} onClick={() => setCaseFileTab("evidence")}>Evidence <span>{state.discoveredEvidence.length}</span></button>
               <button type="button" aria-pressed={caseFileTab === "testimony"} onClick={() => setCaseFileTab("testimony")}>Testimony <span>{state.testimony.length}</span></button>
             </nav>
-            {state.actionsRemaining === 0 ? <div className={styles.actionsExhausted}>Discovery actions are exhausted. Travel, room searches, suspect interviews, and the notebook remain free; file a theory when you are ready for court.</div> : null}
+            {state.actionsRemaining === 0 ? <div className={styles.actionsExhausted}>{state.activeActivity ? "This final paid session remains open. Finish it when ready; leaving will close the mansion and open the Theory Board." : "Investigation actions are exhausted. The mansion is closed; use the Theory Board and consult your partner freely before filing."}</div> : null}
             {state.continuanceUsed && state.playPhase === "continuance" ? <div className={styles.continuance}>PRISM granted the only continuance. You have {state.actionsRemaining} emergency actions before refiling.</div> : null}
-            {caseFileTab === "partner" ? <section className={styles.partnerCard}><header><div><small>Co-counsel · studies the record</small><strong>{partner?.name ?? props.session.forAdvocate.name}</strong></div><span className={styles.partnerMini}>{props.renderMysteryBotAvatar(partner ?? { id: props.session.forAdvocate.id, name: props.session.forAdvocate.name, color: null, glyph: null, hardMuted: false }, "mini", { demeanor: "partner", talking: busy })}</span></header><p className={styles.partnerStageHint}>Their latest reading stays at the lower edge of the stage.</p><textarea value={partnerQuestion} onChange={(event) => setPartnerQuestion(event.currentTarget.value)} placeholder="Ask your partner freely — type @ to reference evidence, testimony, people, or leads…" />{partnerMentionPicks.length ? <div className={styles.evidenceMentionMenu} role="listbox" aria-label="Partner case mentions"><small>Reference the public record</small>{partnerMentionPicks.map((pick) => <button type="button" key={`${pick.kind}:${pick.id}`} data-kind={pick.kind} style={{ "--mention-color": pick.color ?? undefined } as CSSProperties} onClick={() => { const action = commitMysteryMentionAtCaret(partnerQuestion, partnerQuestion.length, pick); if (action) setPartnerQuestion(action.replacement); }}>{pick.glyph} {pick.title}</button>)}</div> : null}<button type="button" disabled={busy || !partnerQuestion.trim()} onClick={() => { const asked = partnerQuestion.trim(); setPartnerQuestion(""); void perform({ action: "consult_partner", question: asked }); }}>Consult · free</button></section> : null}
-            {caseFileTab === "leads" ? <section className={styles.leadJournal} data-tutorial-target="whodunnit-lead-journal"><header><strong>Active leads</strong><span>{state.leads.length}</span></header>{state.leads.map((lead) => <article key={lead.id} data-status={lead.status}><div><small>{lead.status.replaceAll("_", " ")} · rev {lead.revision}</small><strong>{lead.title}</strong></div><p>{lead.summary}</p></article>)}<button type="button" onClick={() => setNotebookView("leads")}>Show in Case Notes</button></section> : null}
+            {caseFileTab === "partner" ? renderPartnerConsultation("case-file") : null}
+            {caseFileTab === "leads" ? <section className={styles.leadJournal} data-tutorial-target="whodunnit-lead-journal">
+              <header><strong>Active leads</strong><span>{state.leads.length}</span></header>
+              {state.leads.map((lead) => {
+                const annotations = notebook?.leadAnnotations.filter((annotation) => annotation.leadId === lead.id) ?? [];
+                return <article key={lead.id} data-status={lead.status}>
+                  <div><small>{lead.status.replaceAll("_", " ")} · rev {lead.revision}</small><strong>{lead.title}</strong></div>
+                  <p>{lead.summary}</p>
+                  <button type="button" onClick={() => placeOnDesk({ kind: "lead", id: lead.id, label: lead.title })}>Place on desk</button>
+                  {annotations.map((annotation) => <div className={styles.leadAnnotation} key={annotation.id}>
+                    <textarea aria-label={`Comment on ${lead.title}`} value={annotation.text} onChange={(event) => editLeadAnnotation(annotation.id, event.currentTarget.value)} onBlur={() => playMysterySfx("pencil")} />
+                    <button type="button" aria-label={`Remove comment from ${lead.title}`} onClick={() => removeLeadAnnotation(annotation.id)}>×</button>
+                  </div>)}
+                  <div className={styles.leadAnnotationDraft}>
+                    <textarea value={leadNoteDrafts[lead.id] ?? ""} onChange={(event) => setLeadNoteDrafts((current) => ({ ...current, [lead.id]: event.currentTarget.value }))} placeholder="Comment on this lead…" />
+                    <button type="button" disabled={!leadNoteDrafts[lead.id]?.trim()} onClick={() => addLeadAnnotation(lead.id)}>Save comment</button>
+                  </div>
+                </article>;
+              })}
+            </section> : null}
             {caseFileTab === "access" ? <section className={styles.accessInventory} data-tutorial-target="whodunnit-access-inventory">
               <header><strong>Case inventory</strong><span>{state.inventoryItems.length}</span></header>
-              {armedAccessItemId ? <p className={styles.accessArmed}>Using <strong>{state.inventoryItems.find((item) => item.id === armedAccessItemId)?.title}</strong>. Select a room, locked item, or room area. <button type="button" onClick={() => setArmedAccessItemId(null)}>Cancel</button></p> : null}
+              {armedAccessItemId ? <p className={styles.accessArmed}>Using <strong>{state.inventoryItems.find((item) => item.id === armedAccessItemId)?.title}</strong>. Select a locked room, locked item, or discovered padlock. <button type="button" onClick={() => setArmedAccessItemId(null)}>Cancel</button></p> : null}
               {state.inventoryItems.length ? state.inventoryItems.map((item) => (
                 <article
                   key={item.id}
@@ -2274,99 +2631,23 @@ export function DebateMysteryPlay(
                   data-locked={item.locked ? "true" : undefined}
                   data-access-ready={armedAccessItemId && item.locked ? "true" : undefined}
                   onDragStart={(event) => {
-                    event.dataTransfer.effectAllowed = "move";
-                    event.dataTransfer.setData("application/x-prism-access-item", item.id);
-                    announceAction(`Carrying ${item.title}. Drop it on a room, item, or room area.`);
+                    beginAccessItemDrag(event, item.id, item.title);
                   }}
                   onDragOver={item.locked ? (event) => event.preventDefault() : undefined}
                   onDrop={item.locked ? (event) => dropAccessItem(event, "item", item.id) : undefined}
                 >
-                  <span aria-hidden="true">{item.emoji}</span>
-                  <div><strong>{item.title}</strong><p>{item.description}</p><div className={styles.accessActions}>{item.usable ? <button type="button" disabled={busy} onClick={() => setArmedAccessItemId((current) => current === item.id ? null : item.id)}>{armedAccessItemId === item.id ? "Cancel use" : "Use"}</button> : null}{item.locked && armedAccessItemId ? <button type="button" disabled={busy} onClick={() => void applyAccessItem(armedAccessItemId, "item", item.id)}>Try selected item</button> : null}</div></div>
+                  <MysteryInventoryVisual item={item} />
+                  <div><strong>{item.title}</strong><p>{item.description}</p><div className={styles.accessActions}>{item.usable ? <button type="button" disabled={busy} onClick={() => toggleAccessItem(item.id, item.title)}>{armedAccessItemId === item.id ? "Cancel use" : "Use"}</button> : null}{item.locked && armedAccessItemId ? <button type="button" disabled={busy || state.actionsRemaining === 0} onClick={() => void applyAccessItem(armedAccessItemId, "item", item.id)}>Try selected item · 1 action</button> : null}</div></div>
                 </article>
               )) : <p>No access items recovered.</p>}
-              <small>Drag a usable item onto a locked object, mansion room, or room area. Or choose Use, then select a target.</small>
+              <small>During a room search, the Case Kit keeps usable tools close and discovered padlocks mark valid targets. Selecting a tool is free; applying it to a target costs 1 action.</small>
             </section> : null}
-            {caseFileTab === "evidence" ? <section className={styles.inventory}><header><strong>Evidence</strong><span>{state.discoveredEvidence.length}</span></header>{state.discoveredEvidence.length ? state.discoveredEvidence.map((item) => { const finding = state.forensicFindings.find((entry) => entry.evidenceId === item.id); const title = mysteryEvidenceTitle(item.title); const observation = mysteryEvidenceObservation(item.observation); return <article key={item.id}>{item.imageId ? <img src={`/api/images/${encodeURIComponent(item.imageId)}/file`} alt="" /> : <span>{mysteryEvidenceEmoji(item)}</span>}<div><strong>{title}</strong><p>{observation}</p>{finding ? <p className={styles.forensicFinding}>{finding.summary}</p> : item.isPhysical ? <button type="button" disabled={busy || state.actionsRemaining < 3} onClick={() => void perform({ action: "forensic", evidenceId: item.id })}>Forensics · 3 actions</button> : null}<button type="button" onClick={() => void addNotebookReference("evidence", item.id, `${title}: ${observation}`)}>Add to notebook</button></div></article>; }) : <p>No physical evidence acquired.</p>}</section> : null}
-            {caseFileTab === "testimony" ? <section className={styles.testimonyList}><header><strong>Testimony</strong><span>{state.testimony.length}</span></header>{state.testimony.length ? state.testimony.map((item) => { const speaker = mysteryTestimonySpeaker(state, item.speakerSeatId); return <article key={item.id}><strong style={{ "--suspect-color": speaker?.color ?? "#a98cff" } as CSSProperties}>{speaker?.name ?? "Witness"}</strong><blockquote>{item.exactQuote}</blockquote><button type="button" onClick={() => void addNotebookReference("testimony", item.id, item.exactQuote)}>Add to notebook</button></article>; }) : <p>No testimony committed.</p>}</section> : null}
-            <button type="button" className={styles.openTheoryButton} onClick={() => setTheoryBoardOpen(true)}>Open Theory Board{state.actionsRemaining === 0 ? " · filing required" : ""}</button>
+            {caseFileTab === "evidence" ? <section className={styles.inventory}><header><strong>Evidence</strong><span>{state.discoveredEvidence.length}</span></header>{state.discoveredEvidence.length ? state.discoveredEvidence.map((item) => { const finding = state.forensicFindings.find((entry) => entry.evidenceId === item.id); const title = mysteryEvidenceTitle(item.title); const observation = mysteryEvidenceObservation(item.observation); return <article key={item.id}><MysteryEvidenceVisual item={item} /><div><strong>{title}</strong><p>{observation}</p>{finding ? <p className={styles.forensicFinding}>{finding.summary}</p> : item.isPhysical ? <button type="button" disabled={busy || state.actionsRemaining < 3} onClick={() => void perform({ action: "forensic", evidenceId: item.id })}>Forensics · 3 actions</button> : null}<button type="button" onClick={() => placeOnDesk({ kind: "evidence", id: item.id, label: title })}>Place on desk</button></div></article>; }) : <p>No physical evidence acquired.</p>}</section> : null}
+            {caseFileTab === "testimony" ? <section className={styles.testimonyList}><header><strong>Testimony</strong><span>{state.testimony.length}</span></header>{state.testimony.length ? state.testimony.map((item) => { const speaker = mysteryTestimonySpeaker(state, item.speakerSeatId); return <article key={item.id}><strong style={{ "--suspect-color": speaker?.color ?? "#a98cff" } as CSSProperties}>{speaker?.name ?? "Witness"}</strong><blockquote>{item.exactQuote}</blockquote><button type="button" onClick={() => placeOnDesk({ kind: "testimony", id: item.id, label: `Testimony · ${speaker?.name ?? "Witness"}` })}>Place on desk</button></article>; }) : <p>No testimony committed.</p>}</section> : null}
+            <button type="button" className={styles.openTheoryButton} onClick={() => void openTheoryBoard()}>Open Theory Board{state.actionsRemaining === 0 ? " · filing required" : ""}</button>
           </aside>
-          <section className={styles.notebook} role="complementary" aria-label="Investigator's Notebook" data-tutorial-target="whodunnit-notebook-editor" data-view={notebookView}>
-            <header><div><p className={styles.eyebrow}>Persistent case desk</p><h2>{notebookSaving ? "Saving…" : "Your working record"}</h2></div><div><span>{noteCount.toLocaleString()} / {DEBATE_MYSTERY_NOTEBOOK_CHARACTER_LIMIT.toLocaleString()}</span></div></header>
-            {notebookError ? <p className={styles.error}>{notebookError}</p> : null}
-            <div className={styles.notebookBody}>
-              <nav>
-                <div data-active={notebookView === "leads" ? "true" : undefined}>
-                  <button type="button" onClick={() => setNotebookView("leads")}>Leads <small>{state.leads.length}</small></button>
-                </div>
-                <div data-active={notebookView === "evidence" ? "true" : undefined}>
-                  <button type="button" onClick={() => setNotebookView("evidence")}>Evidence <small>{state.discoveredEvidence.length}</small></button>
-                </div>
-                <div data-active={notebookView === "testimony" ? "true" : undefined}>
-                  <button type="button" onClick={() => setNotebookView("testimony")}>Testimony <small>{state.testimony.length}</small></button>
-                </div>
-                {notebook?.pages.map((page, index) => (
-                  <div key={page.id} data-active={notebookView === "notes" && page.id === activePage?.id ? "true" : undefined}>
-                    <button type="button" onClick={() => { setNotebookView("notes"); setActivePageId(page.id); }}>{page.title}</button>
-                    <span>
-                      <button
-                        type="button"
-                        disabled={index === 0}
-                        aria-label={`Move ${page.title} up`}
-                        onClick={() => setNotebook((current) => {
-                          if (!current || index === 0) return current;
-                          const pages = [...current.pages];
-                          [pages[index - 1], pages[index]] = [pages[index]!, pages[index - 1]!];
-                          return { ...current, pages };
-                        })}
-                      >↑</button>
-                      <button
-                        type="button"
-                        disabled={(notebook?.pages.length ?? 0) <= 1}
-                        aria-label={`Delete ${page.title}`}
-                        onClick={() => {
-                          const nextPageId = notebook?.pages[index - 1]?.id ?? notebook?.pages[index + 1]?.id ?? null;
-                          setNotebook((current) => current ? { ...current, pages: current.pages.filter((entry) => entry.id !== page.id) } : current);
-                          if (activePageId === page.id) setActivePageId(nextPageId);
-                        }}
-                      >×</button>
-                    </span>
-                  </div>
-                ))}
-                <button type="button" onClick={() => { const now = new Date().toISOString(); const page = { id: mysteryId("page"), title: "New Page", blocks: [], createdAt: now, updatedAt: now }; setNotebook((current) => current ? { ...current, pages: [...current.pages, page] } : current); setNotebookView("notes"); setActivePageId(page.id); }}>+ New page</button>
-              </nav>
-              <div className={styles.notebookPage}>
-                {notebookView === "leads" ? <div className={styles.leadNotebook} data-tutorial-target="whodunnit-lead-notebook"><header className={styles.leadNotebookIntro}><div><p className={styles.eyebrow}>Automatically updated</p><h3>Leads</h3></div><p>PRISM advances these threads only from facts you have discovered. A stalled or unresolved lead may never close.</p></header>{state.leads.map((lead) => { const annotations = notebook?.pages.flatMap((page) => page.blocks.filter((block) => block.leadId === lead.id).map((block) => ({ page, block }))) ?? []; const linkedLabels = [...lead.linkedRoomIds.map((id) => state.rooms.find((room) => room.id === id)?.name ?? id), ...lead.linkedEvidenceIds.map((id) => state.discoveredEvidence.find((item) => item.id === id)?.title ?? id), ...lead.linkedTestimonyIds.map((id) => `Testimony · ${state.suspects.find((suspect) => suspect.seatId === state.testimony.find((item) => item.id === id)?.speakerSeatId)?.name ?? "Witness"}`)]; return <article key={lead.id} data-status={lead.status}><header><div><small>{lead.status.replaceAll("_", " ")} · revision {lead.revision}</small><h4>{lead.title}</h4></div><span>◇</span></header><p>{lead.summary}</p>{linkedLabels.length ? <div className={styles.leadLinks}>{linkedLabels.map((label) => <span key={label}>{label}</span>)}</div> : null}{annotations.map(({ page, block }) => <div className={styles.leadAnnotation} key={`${page.id}:${block.id}`}><textarea value={block.text} onChange={(event) => {
-                  const text = event.currentTarget.value;
-                  updatePage(page.id, (candidate) => ({ ...candidate, blocks: candidate.blocks.map((entry) => entry.id === block.id ? { ...entry, text } : entry) }));
-                }} onBlur={() => setPendingAutoPolish({ pageId: page.id, blockId: block.id })} /><button type="button" aria-label={`Remove note from ${lead.title}`} onClick={() => updatePage(page.id, (candidate) => ({ ...candidate, blocks: candidate.blocks.filter((entry) => entry.id !== block.id) }))}>×</button></div>)}<div className={styles.leadAnnotationDraft}><textarea value={leadNoteDrafts[lead.id] ?? ""} onChange={(event) => {
-                  const value = event.currentTarget.value;
-                  setLeadNoteDrafts((current) => ({ ...current, [lead.id]: value }));
-                }} placeholder="Add your own thought to this lead…" /><button type="button" disabled={!leadNoteDrafts[lead.id]?.trim()} onClick={() => addLeadAnnotation(lead.id, lead.revision)}>Add note</button></div></article>; })}</div>
-                : notebookView === "evidence" ? <div className={styles.deskRecord}><section className={styles.inventory}><header><strong>Evidence</strong><span>{state.discoveredEvidence.length}</span></header>{state.discoveredEvidence.length ? state.discoveredEvidence.map((item) => { const finding = state.forensicFindings.find((entry) => entry.evidenceId === item.id); const title = mysteryEvidenceTitle(item.title); const observation = mysteryEvidenceObservation(item.observation); return <article key={item.id}>{item.imageId ? <img src={`/api/images/${encodeURIComponent(item.imageId)}/file`} alt="" /> : <span>{mysteryEvidenceEmoji(item)}</span>}<div><strong>{title}</strong><p>{observation}</p>{finding ? <p className={styles.forensicFinding}>{finding.summary}</p> : item.isPhysical ? <button type="button" disabled={busy || state.actionsRemaining < 3} onClick={() => void perform({ action: "forensic", evidenceId: item.id })}>Forensics · 3 actions</button> : null}<button type="button" onClick={() => void addNotebookReference("evidence", item.id, `${title}: ${observation}`)}>Add to notes</button></div></article>; }) : <p>No physical evidence acquired.</p>}</section></div>
-                : notebookView === "testimony" ? <div className={styles.deskRecord}><section className={styles.testimonyList}><header><strong>Testimony</strong><span>{state.testimony.length}</span></header>{state.testimony.length ? state.testimony.map((item) => { const speaker = mysteryTestimonySpeaker(state, item.speakerSeatId); return <article key={item.id}><strong style={{ "--suspect-color": speaker?.color ?? "#a98cff" } as CSSProperties}>{speaker?.name ?? "Witness"}</strong><blockquote>{item.exactQuote}</blockquote><button type="button" onClick={() => void addNotebookReference("testimony", item.id, item.exactQuote)}>Add to notes</button></article>; }) : <p>No testimony committed.</p>}</section></div>
-                : activePage ? <><input className={styles.pageTitle} value={activePage.title} onChange={(event) => {
-                  const title = event.currentTarget.value;
-                  updatePage(activePage.id, (page) => ({ ...page, title }));
-                }} />
-                  <div className={styles.authoredBlockDraft}><textarea value={draftBlockText} onChange={(event) => setDraftBlockText(event.currentTarget.value)} placeholder="Write a note in plain language or Markdown…" /><div><button type="button" disabled={!draftBlockText.trim()} onClick={addAuthoredBlock}>Add note</button></div></div>
-                  <div className={styles.notebookBlocks}>{activePage.blocks.map((block) => <div key={block.id} data-kind={block.kind}>
-                    {block.kind === "checkbox" ? <input type="checkbox" checked={block.checked === true} onChange={(event) => {
-                      const checked = event.currentTarget.checked;
-                      updatePage(activePage.id, (page) => ({ ...page, blocks: page.blocks.map((entry) => entry.id === block.id ? { ...entry, checked } : entry) }));
-                    }} /> : null}
-                    {block.kind === "reference" || block.kind === "quote" ? <div className={styles.notebookReference}><small>{block.referenceKind ?? "testimony"}</small><span>{mysteryNotebookReferenceLabel(block, state)}</span></div> : <textarea value={block.text} placeholder={block.kind === "heading" ? "Heading" : "Write Markdown notes…"} onChange={(event) => {
-                      const text = event.currentTarget.value;
-                      updatePage(activePage.id, (page) => ({ ...page, blocks: page.blocks.map((entry) => entry.id === block.id ? { ...entry, text } : entry) }));
-                    }} onBlur={() => setPendingAutoPolish({ pageId: activePage.id, blockId: block.id })} />}
-                    <span className={styles.blockActions}>{block.kind !== "reference" && block.kind !== "quote" ? <button type="button" disabled={!notebook || notebookSaving || JSON.stringify(notebook.pages) !== savedPagesRef.current} onClick={() => void proposeCleanup([activePage.id], [block.id])}>Polish</button> : null}<button type="button" aria-label="Remove block" onClick={() => updatePage(activePage.id, (page) => ({ ...page, blocks: page.blocks.filter((entry) => entry.id !== block.id) }))}>×</button></span>
-                  </div>)}</div>
-                </> : <p>Loading Case Notes…</p>}
-              </div>
-            </div>
-            <footer><span>{notebookView === "leads" ? "Lead statuses update automatically from the public facts you uncover. Your annotations remain your own." : notebookView === "evidence" ? "Recovered evidence stays available here while you investigate and build your theory." : notebookView === "testimony" ? "Exact testimony remains part of the public record and can be cited during interviews or in court." : "Plain language and Markdown are both welcome. PRISM safely polishes authored notes after you leave a field."}</span>{notebookView === "notes" ? <button type="button" disabled={!notebook || notebookSaving || JSON.stringify(notebook.pages) !== savedPagesRef.current} onClick={() => void proposeCleanup(activePage ? [activePage.id] : undefined)}>Review page polish</button> : null}<button type="button" disabled={!notebook || notebook.revision <= 1} onClick={() => void resolveCleanup("undo")}>Undo revision</button></footer>
-            {cleanupProposal ? <div className={styles.cleanupPreview}><header><div><p className={styles.eyebrow}>Notes polish</p><h3>Review the proposed wording</h3></div><button type="button" onClick={() => void resolveCleanup("reject_cleanup")}>Close</button></header>{cleanupProposal.pages.map((page) => { const source = notebook?.pages.find((entry) => entry.id === page.pageId); return <article key={page.pageId}><strong>{source?.title} → {page.proposedTitle}</strong><div><pre>{source?.blocks.map((block) => notebookReferenceLabel(block.text)).join("\n\n")}</pre><span aria-hidden="true">→</span><pre>{page.proposedBlocks.map((block) => notebookReferenceLabel(block.text)).join("\n\n")}</pre></div></article>; })}<footer><button type="button" onClick={() => void resolveCleanup("reject_cleanup")}>Keep original</button><button type="button" onClick={() => void resolveCleanup("accept_cleanup")}>Apply polish</button></footer></div> : null}
-          </section>
+          {renderSuspectFolderRack("investigation")}
+          {renderInvestigatorDesk("investigation")}
         </div>
       )}
     </main>

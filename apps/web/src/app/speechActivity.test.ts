@@ -75,6 +75,21 @@ describe("speech activity windows", () => {
     assert.equal(speechActivityAtMs(windows, 130), true);
   });
 
+  it("uses decoded Premium onset without stretching provider activity", () => {
+    const windows = buildSpeechActivityWindows(
+      {
+        characters: ["m", "a"],
+        characterStartTimesSeconds: [0, 0.2],
+        characterEndTimesSeconds: [0.2, 0.5],
+        audioTimelineOffsetSeconds: 0.3,
+      },
+      1_200,
+    );
+    assert.equal(windows?.[0]?.startMs, 300);
+    assert.equal(speechActivityAtMs(windows, 299), false);
+    assert.equal(speechActivityAtMs(windows, 300), true);
+  });
+
   it("does not attack across a provider pause into remaining silence", () => {
     const windows = buildSpeechActivityWindows(phraseAlignment, 1_000);
     assert.ok(windows);

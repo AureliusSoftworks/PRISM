@@ -29,15 +29,15 @@ ship as `0.5.2` while Coffee is `v0.7`.
 
 | Applet  | Version | Status             | Notes                                                                                                                                                                                                                                                                                                       |
 | ------- | ------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Chat    | v1.46   | Active             | Full playground with independent saved conversations, timed unaware Mute delivery, Accent Map-keyed Mumbling dialects, six-tier size presentation, complete session-sticky Shapeshifter embodiment, Surname Drift last names, and phosphor-hue prejudice inside each PRISM or persona Home.                                                                                         |
-| Zen     | v1.45   | Active             | Calm one-to-one continuity with timed unaware Mute delivery, Accent Map-keyed Mumbling dialects, draggable six-tier embodiment, direct human access, complete session-sticky Shapeshifter embodiment, Surname Drift last names, and phosphor-hue prejudice.                                                                                                                          |
-| Coffee  | v2.61   | Active             | Two-to-five-bot tables with cast-aware avatar effects, Power-projected reaction speech, timed Mute reactions and floor breaks, complete borrowed audiovisual identities, session last names, replay-safe form changes, phosphor-hue prejudice among seated bots, local-only café Jazz beds, and faithful replay that seats Default Prism for the player.                   |
-| Signal  | v1.77   | Active             | Interview studio with ready-but-paused spectator buffering, audible-clock mouth animation, a paint-contained live stage, concrete host-shaped show logos, performance-colored audience ratings, quiet replay-provenanced listener backchannels, private-safe Mumbling interruptions and reaction speech, visibly elapsed timed Mute performances with guaranteed awkward-duration reactions and hard cuts, complete borrowed audiovisual identities, session last names, replay-safe form changes, exact on-air producer quotes, Power-permissive encounters, and phosphor-hue prejudice between host and guest. |
-| Debate  | v0.42   | Preview            | Power-permissive Forum and Turnabout proceedings with cast-aware avatar effects, Accent Map-keyed Mumbling speech and reaction quips, timed Mute floor timing, frozen public sources, replay-safe complete borrowed audiovisual identities, session last names, screen-off form changes, phosphor-hue prejudice among advocates, explicit advocacy consent, organic cast reactions, durable verdicts, returning title-card start-from-turn checkpoints, and a Spectator live For/Against favor bar from the heard record. After completion: sibling Jury commentary with header copy, Coffee-style session synopsis, and ephemeral pick-a-bot inquiry into frozen reasoning. Object exhibits use an approved `{ADJECTIVE} {OBJECT}` record plus emoji, uploaded art, or a consistent synthesized stage sprite. Territory / Your idea accepts Prompt Center prompts and wildcard decks. |
+| Chat    | v1.48   | Active             | Full playground with independent saved conversations, Troll persona cues, timed unaware Mute delivery, Accent Map-keyed Mumbling dialects, six-tier size presentation, complete session-sticky Shapeshifter embodiment, Surname Drift last names, and phosphor-hue prejudice inside each PRISM or persona Home.                                                                                         |
+| Zen     | v1.47   | Active             | Calm one-to-one continuity with bounded player-facing Troll pestering, timed unaware Mute delivery, Accent Map-keyed Mumbling dialects, draggable six-tier embodiment, direct human access, complete session-sticky Shapeshifter embodiment, Surname Drift last names, and phosphor-hue prejudice.                                                                                                        |
+| Coffee  | v2.67   | Active             | Two-to-five-bot tables with bounded Troll interruptions and public bait, cast-aware avatar effects, Power-projected reaction speech, timed Mute reactions and floor breaks, replay-safe Identity Crisis theft with holder-stable voice/accent and hard original corrections, full-form Shapeshifter copying, session last names, replay-safe form changes, phosphor-hue prejudice among seated bots, local-only café Jazz beds, and faithful replay that seats Default Prism for the player.                   |
+| Signal  | v1.84   | Active             | Interview studio with bounded Troll interruptions and public bait, ready-but-paused spectator buffering, audible-clock mouth animation, a paint-contained live stage, concrete host-shaped show logos, performance-colored audience ratings, quiet replay-provenanced listener backchannels, private-safe Mumbling interruptions and reaction speech, visibly elapsed timed Mute performances with guaranteed awkward-duration reactions and hard cuts, replay-safe Identity Crisis theft with holder-stable voice/accent and hard original corrections, full-form Shapeshifter copying, session last names, replay-safe form changes, exact on-air producer quotes, Power-permissive encounters, and phosphor-hue prejudice between host and guest. |
+| Debate  | v0.47   | Preview            | Power-permissive Forum and Turnabout proceedings with direct bounded Troll floor cuts, cast-aware avatar effects, Accent Map-keyed Mumbling speech and reaction quips, timed Mute floor timing, frozen public sources, holder-voiced Identity Crisis presentation and full-form Shapeshifter voice copying, session last names, screen-off form changes, phosphor-hue prejudice among advocates, explicit advocacy consent, organic cast reactions, durable verdicts, returning title-card start-from-turn checkpoints, and a Spectator live For/Against favor bar from the heard record. After completion: sibling Jury commentary with header copy, Coffee-style session synopsis, and ephemeral pick-a-bot inquiry into frozen reasoning. Object exhibits use an approved `{ADJECTIVE} {OBJECT}` record plus emoji, uploaded art, or a consistent synthesized stage sprite. Whodunnit ships bundled room scenes and a compact 24-prop evidence/access pack; generated case art overrides the matching bundled visual without changing evidence facts. Territory / Your idea accepts Prompt Center prompts and wildcard decks. |
 | Polling | v0.0    | Planned            | AI-powered polling across bot groups.                                                                                                                                                                                                                                                                       |
 | Feed    | v0.0    | Planned            | BotBook-style social feed.                                                                                                                                                                                                                                                                                  |
 | Games   | v0.0    | Planned            | Boardgame-like bot matches.                                                                                                                                                                                                                                                                                 |
-| Story   | v0.38   | Planned (disabled) | Early implementation retained with private-intention/public-timed-silence Mute and Accent Map-keyed Mumbling contracts, plus phosphor-hue prejudice among cast colors, but excluded from release navigation and session restoration.                                                                                                                         |
+| Story   | v0.41   | Planned (disabled) | Early implementation retains an adapted bounded Troll interruption seam alongside private-intention/public-timed-silence Mute and Accent Map-keyed Mumbling contracts, plus phosphor-hue prejudice among cast colors, but remains excluded from release navigation and session restoration.                                                                                                                         |
 | Gym     | v0.0    | Planned            | Bot training and memory-development surface.                                                                                                                                                                                                                                                                |
 | Slate   | v0.9    | Preview            | Manuscript-first Writer's Cockpit with rich focused editing, durable AI proposals, in-canvas Continuity clarification, a curated Story Bible, safe section review exports, and private recovery.                                                                                                            |
 | Pseudo  | v0.0    | Planned            | Sketch/system space for almost-code.                                                                                                                                                                                                                                                                        |
@@ -209,7 +209,131 @@ stages do not block the standalone preview.
   using the existing mood events. Slate is irrelevant. Planned applets remain
   deferred until they own a participant surface.
 
+## Identity Crisis Power policy
+
+- Coffee and Signal apply the direct runtime contract; Debate applies the same
+  holder-owned voice/presentation split through its frozen participant
+  snapshots. Story retains the cue seam while disabled. Chat and Zen have no
+  bot-to-bot addresser, Slate has no participant identity-theft surface, and
+  every other planned applet is deferred in the exhaustive mode policy.
+- A genuinely new bot addresser replaces the target. The holder borrows public
+  name, persona, face, Ink, lower glyph, and active public Power consequences,
+  but new events freeze the holder's effective voice profile: identity,
+  accent, pronunciation, speechprint, and client effect. Shapeshifter remains
+  the full-form mechanic and still copies voice.
+- The first holder reveal uses `impostor` exactly once. Later turns remove all
+  impostor/imposter/pretender/fake boilerplate and repair recanting before the
+  line is published. The stolen original briefly corrects only a genuine wrong
+  name/identity address; that hard correction outranks Credulity and other soft
+  pressure without replacing the original's persona or repeatedly derailing
+  the subject. Player identity, mechanical role/seat, safety, privacy,
+  provider, perception, and attribution boundaries never move.
+
+## Troll Power policy
+
+- A Ready Troll may attempt every eligible interruption of another bot,
+  irrespective of topic, composure, enlightenment, resistance, or relevance.
+  The player is never an interruption target. Zen adapts the soft nuisance
+  style to the player inside the current reply; every other mode keeps the
+  player outside the social target set. Existing runtime scheduling,
+  moderation, privacy, tenancy, LOCAL mode, and completion limits remain
+  authoritative.
+- Troll output is intentionally irritating but bounded: internet lingo,
+  lowercase `i`, occasional misspellings/l33tspeak, literal @mentions, and
+  target-aware puns or dad jokes. Coffee and Signal use their existing public
+  interruption/pause/replay lanes for short multi-beat presentation; no hidden
+  private prompt or unbounded spam is persisted. Other bots keep full agency
+  to ignore, object, respond, or retaliate.
+- Every enabled Troll is mood-locked to a warm presentation. Global, session,
+  pairwise, annoyance, and mode mood updates can still affect other bots, but
+  never move the Troll away from that fixed warm baseline.
+- From the second assistant turn onward, a shared deterministic turn key may
+  select one replay-persisted surprise: a three-percent, at-most-once
+  in-fiction lyric ambush; a small local text/emoji meme card; or one exact
+  `*fart*`/`*burp*` action. Meme cards never fetch, generate, or spend. Bodily
+  actions use the existing corporality Foley path. Exact-copy, muted/silent,
+  producer-quote, and protected-record lanes are never decorated. The lyric
+  source remains a single bounded payload populated only from user-supplied
+  text and is release-blocked pending rights review.
+- Ordinary Shh and ordinary new-message sends cannot truncate a Troll's
+  current bounded delivery. Chat queues the message, Coffee waits for the
+  visible turn, and a human Signal guest keeps their answer drafted. Explicit
+  Stop/Escape, audio mute, disabling the Power, leaving/changing mode, app
+  shutdown, moderation, and mode-owned safety/lifecycle controls still end or
+  suspend presentation.
+- Chat composes the bot-oriented lived persona cue without inventing a target.
+  Zen adapts it into bounded direct attention grabs, fake-outs, puns, and up to
+  three newline-separated beats inside one player-addressed reply; it cannot
+  emit autonomous messages or trap the player. Coffee, Signal, and Debate use
+  direct bounded interruption mechanics; Story adapts the interruption to its
+  scene cuts. Slate is irrelevant. Polling, Feed, Games, Gym, Pseudo, and Surf
+  are deferred and the exhaustive applet policy must be updated before any one
+  activates.
+
 ## Changelog
+
+### 2026-08-22
+
+- Advanced `Chat` to `v1.48`, `Zen` to `v1.47`, `Coffee` to `v2.67`,
+  `Signal` to `v1.84`, `Debate` to `v0.47`, and `Story` to `v0.41`. Troll now
+  has a shared warm mood lock, ordinary Shh/new-message floor immunity,
+  persisted deterministic lyric/meme ambush selection, and sparse exact
+  bodily-action cues using bundled corporality Foley. The lyric payload is an
+  intentionally empty parent-population seam until the exact user-supplied
+  text and release rights review are available.
+
+- Advanced `Coffee` to `v2.66`, `Signal` to `v1.83`, and `Debate` to `v0.46`.
+  Identity Crisis now freezes and retains the holder's complete voice profile
+  while borrowing the addresser's public identity; Shapeshifter still copies
+  voice. The holder uses `impostor` once on the first reveal, cannot recant
+  before reset, and the original hard-corrects genuine misaddressing even under
+  Credulity without turning every later line into another identity dispute.
+
+- Advanced `Signal` to `v1.81`. When a Copycat host opens the closing by
+  reflecting the guest's unanswered question, Signal now keeps the episode
+  live for one substantive guest response before the host reflects that answer
+  as the final deterministic beat. Producer cuts remain immediate, mutually
+  echo-bound casts remain bounded, and faithful replay preserves the complete
+  recovered sequence.
+
+- Advanced `Chat` to `v1.47`, `Zen` to `v1.46`, `Coffee` to `v2.64`, `Signal`
+  to `v1.80`, `Debate` to `v0.45`, and `Story` to `v0.40`. A Ready `Troll`
+  Power freezes a bounded internet-lingo performance style and an unconditional
+  all-other-bot interruption contract. Coffee, Signal, and Debate use their
+  existing public interruption records; Story adapts the cut without allowing
+  Power immunity to suppress it. Zen separately adapts the nuisance style to
+  the player without treating them as an interruption target.
+
+- Advanced `Coffee` to `v2.63`, `Signal` to `v1.79`, and `Debate` to `v0.44`.
+  Copycat now treats another bot's brief, attributed public spoken Foley—such
+  as `Hmm...`, `let me see...`, or `Nice!`—as a heard line eligible for its next
+  verbatim repeat. Signal and Coffee read their saved public reaction plans;
+  Debate reads attributed persona-reaction events. Nonverbal coughs, physical
+  stage direction, private clean speech, and transcript housekeeping remain
+  ineligible. Chat and Zen already preserve the player's short addressed text;
+  Story already preserves short bot-authored scene speech. Every future
+  bot-speaking applet now carries the same requirement before activation.
+
+- Advanced `Coffee` to `v2.62`, `Debate` to `v0.43`, and `Story` to `v0.39`.
+  Wielding Prism onto a concrete setup bot now keeps that character fixed while
+  the active applet populates the remaining editable setup. Signal includes the
+  same bot-directed booking behavior in `v1.78`, and Whodunnit fills every cast
+  role plus an editable case direction without compiling the case.
+
+- Added a 24-piece bundled Whodunnit prop pack for authored evidence, access
+  items, canonical weapons, closed/open jewelry-box and safe states, and a
+  neutral unknown-object fallback. Generated case art retains priority; bundled
+  and generated visuals remain presentation-only, with system emoji as the
+  final failure path. The optimized alpha WebPs add under 0.6 MB to the desktop
+  runtime.
+
+- Advanced `Signal` to `v1.78`. A generated line waiting for its voice no
+  longer records the next scheduled bot as a second condensed thinking beat,
+  including the brief commit handoff before voice preparation appears. The real
+  thinking interval stays linked to its generated line, while the live face can
+  still think through voice preparation without falsifying replay provenance.
+  Off-mic bots with authored Avatar Details Ink now keep their eyes registered
+  to that Ink, while speaking restores their chosen eye movement.
 
 ### 2026-08-16
 

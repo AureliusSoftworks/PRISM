@@ -1099,7 +1099,7 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .stageViewport[data-model-warmup] .stageScene *::before,
 .stageViewport[data-model-warmup] .stageScene *::after { animation-play-state: paused !important; }
 .atmosphere { position: absolute; inset: -5%; overflow: hidden; background-color: #11121a; background-size: cover; background-position: center; filter: saturate(1.08) contrast(1.04); }
-.stageViewport[data-studio-source="image"] .atmosphere { background-image: var(--botcast-atmosphere); }
+.stageScene > img.atmosphere { width: 110%; height: 110%; object-fit: cover; pointer-events: none; }
 .signalMicrophoneTintLayer { position: absolute; inset: -5%; z-index: 1; isolation: isolate; pointer-events: none; }
 .signalMicrophoneTintLayer[data-surface="dashboard"] { inset: 0; z-index: -1; transform: scale(1.035); }
 .signalMicrophoneTintLayer > span { position: absolute; inset: 0; background: var(--signal-microphone-left-color); opacity: 1; mix-blend-mode: normal; filter: drop-shadow(0 0 5px color-mix(in srgb, var(--signal-microphone-left-color) 44%, transparent)); -webkit-mask-image: var(--signal-microphone-tint-mask); mask-image: var(--signal-microphone-tint-mask); -webkit-mask-position: center; mask-position: center; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-size: cover; mask-size: cover; clip-path: inset(0 50% 0 0); }
@@ -1178,7 +1178,6 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .avatarRig > .voiceActionText[data-phase="entering"] { transform: translateX(-50%) translateY(3px); }
 .avatarRig > .voiceActionText[data-phase="exiting"] { transform: translateX(-50%) translateY(-4px); }
 .avatarRig > .listenerReactionText { position: absolute; left: 50%; top: -3%; z-index: 13; width: max-content; max-width: 132%; max-height: none; transform: translateX(-50%); border: 1px solid rgba(255,255,255,.14); border-radius: 999px; padding: 4px 8px; color: rgba(255,255,255,.88); background: rgba(7,9,14,.66); backdrop-filter: blur(7px); font: 720 clamp(.52rem, .95vw, .7rem)/1 system-ui; letter-spacing: .03em; text-shadow: 0 2px 7px rgba(0,0,0,.9); animation: signalVoiceActionIn 160ms ease-out both; pointer-events: none; }
-.avatarRig > .listenerReactionText[data-interjection-attempt="true"] { top: -5%; border-color: color-mix(in srgb, #ff604f 58%, rgba(255,255,255,.2)); padding: 5px 10px; color: #fff4f1; background: rgba(92,21,21,.82); box-shadow: 0 0 18px rgba(255,96,79,.2); font-weight: 820; }
 .avatarFallback { width: 132px; aspect-ratio: 1; display: grid; place-items: center; border: 8px solid #454a53; border-radius: 40% 40% 46% 46%; background: #101216; box-shadow: inset 0 0 30px color-mix(in srgb, var(--botcast-accent) 30%, transparent), 0 0 24px color-mix(in srgb, var(--botcast-accent) 22%, transparent); font-size: 2rem; }
 .producerGuestPresence { width: min(76%, 168px); aspect-ratio: 1; display: grid; place-content: center; justify-items: center; gap: 8px; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 56%, rgba(255,255,255,.22)); border-radius: 50%; color: #fff; background: radial-gradient(circle at 35% 24%, rgba(255,255,255,.18), transparent 28%), linear-gradient(145deg, color-mix(in srgb, var(--botcast-host-accent) 72%, #1a1826), #10121a); box-shadow: inset 0 0 34px rgba(255,255,255,.06), 0 14px 36px rgba(0,0,0,.34), 0 0 26px color-mix(in srgb, var(--botcast-host-accent) 22%, transparent); text-align: center; }
 .producerGuestPresence > span { font: 850 clamp(.9rem, 2.4vw, 1.6rem)/1 system-ui; letter-spacing: .16em; }
@@ -1220,6 +1219,7 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 
 .controlRoom { max-width: 1180px; margin: 12px auto 0; }
 .liveLayout .controlRoom { max-width: 1320px; }
+.signalMemoryReceiptDetail { max-width: 1320px; margin: 12px auto 0; }
 .producerControls, .replayTranscript { border: 1px solid var(--botcast-line); border-radius: 15px; background: var(--botcast-panel); box-shadow: 0 18px 44px var(--botcast-shadow); }
 .replayTranscript button[data-power-voice-presence="loud"] { --power-message-font-scale: 1.12; }
 .replayTranscript button[data-power-voice-presence="quiet"] { --power-message-font-scale: .88; }
@@ -1488,7 +1488,6 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
   background-color: #e8edf4;
   filter: saturate(.9) contrast(.94) brightness(1.04);
 }
-.shell[data-theme="light"] .stageViewport[data-studio-source="image"] .atmosphere { background-image: var(--botcast-atmosphere); }
 .shell[data-theme="light"] .stageViewport .studioGlow:not([data-generated-lighting="true"]) { opacity: .24; mix-blend-mode: normal; }
 .shell[data-theme="light"] .stageViewport .studioGlow[data-generated-lighting="true"] { opacity: var(--signal-studio-glow-opacity, .44); mix-blend-mode: var(--signal-studio-glow-blend-mode, hard-light); }
 .shell[data-theme="light"] .signalFloorGlow::before, .shell[data-theme="light"] .signalFloorGlow::after, .stageLayoutModalBackdrop[data-preview-theme="light"] .signalFloorGlow::before, .stageLayoutModalBackdrop[data-preview-theme="light"] .signalFloorGlow::after { mix-blend-mode: multiply; opacity: .4; }

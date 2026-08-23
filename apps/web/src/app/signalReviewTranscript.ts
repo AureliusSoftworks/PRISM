@@ -2,6 +2,7 @@ import {
   BOTCAST_PRODUCER_GUEST_ID,
   botPowerMutePublicResponseAtElapsedV1,
   botPowerResponseIsSilentV1,
+  botcastPublicReactionSpeechForMessage,
   botcastReplayTimeline,
   heardBotPresenceBeatTextV1,
   type BotPresenceBeatV1,
@@ -192,6 +193,18 @@ export function buildSignalReviewTranscript(
             message.mutePerformance.durationMs,
           )
         : message.content;
+      const publicReactionSpeech = botcastPublicReactionSpeechForMessage(
+        events,
+        message.id,
+      );
+      const publicReactionSpeechLines = publicReactionSpeech.map((speech) => {
+        const speaker = speech.botId === host.id
+          ? host.name
+          : speech.botId === guest.id
+            ? guest.name
+            : speech.botId;
+        return `    ${speaker}: ${speech.text}`;
+      });
       lines.push(
         `### Turn ${String(index + 1).padStart(2, "0")} | ${formatDuration(timeline.messageStartMs[index] ?? 0)} | ${participant.name} (${message.speakerRole})`,
         "",
@@ -227,6 +240,10 @@ export function buildSignalReviewTranscript(
         indentBlock(message.stageActionText),
         "- Visible transcript:",
         indentBlock(visibleTranscript),
+        "- Public reaction speech:",
+        ...(publicReactionSpeechLines.length > 0
+          ? publicReactionSpeechLines
+          : ["    [none]"]),
         "- Voice performance text:",
         indentBlock(message.voicePerformanceText),
         "",

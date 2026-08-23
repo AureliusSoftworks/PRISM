@@ -279,6 +279,29 @@ test("aligned preview visemes close for lead-in silence and real timing gaps", (
   assert.equal(at(900), "closed");
 });
 
+test("decoded Premium onset rests first, then keeps provider visemes on one audio clock", () => {
+  const alignment = {
+    characters: ["m", "a"],
+    characterStartTimesSeconds: [0, 0.2],
+    characterEndTimesSeconds: [0.2, 0.5],
+    audioTimelineOffsetSeconds: 0.3,
+  };
+  const at = (elapsedMs: number) =>
+    crtSpeechMouthShapeAtAlignedElapsedMs({
+      text: "ma",
+      elapsedMs,
+      durationMs: 1_200,
+      alignment,
+    });
+
+  assert.equal(at(299), "closed");
+  assert.equal(at(300), "speech-closed");
+  assert.equal(at(499), "speech-closed");
+  assert.equal(at(500), "open-wide");
+  assert.equal(at(1_199), "open-wide");
+  assert.equal(at(1_200), "closed");
+});
+
 test("aligned preview holds the final phoneme shape through the audio tail", () => {
   const alignment = {
     characters: ["n", "o"],

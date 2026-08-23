@@ -5440,6 +5440,84 @@ describe("Debate engine", () => {
     }
   });
 
+  it("repeats the opposing side's latest attributed vocal Foley", async () => {
+    const db = createTestDb();
+    try {
+      const provider = new CopycatFloorProvider();
+      const debateRuntime = runtimeWith(provider);
+      let session = await createDebateForRole(db, "spectator", {
+        debateRuntime,
+        forPowers: [
+          readyPower(
+            "copycat",
+            "Copycat",
+            "Repeat the other side's latest heard public floor line.",
+            [{ type: "speech_copy", trigger: "direct_address" }],
+          ),
+        ],
+      });
+      const advance = async (key: string) => {
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `debate.advance:copycat-foley:${key}`,
+          },
+          debateRuntime,
+        );
+      };
+      await advance("intro");
+      await advance("opening-for");
+      await advance("opening-against");
+      const basilOpening = session.events.find(
+        (event) => event.speakerBotId === "against" && event.kind === "speech",
+      );
+      assert.ok(basilOpening);
+      const vocalFoley = {
+        ...basilOpening,
+        id: "copycat-foley:nice",
+        sequence: session.events.length + 1,
+        stepKey: `persona_reaction_${basilOpening.sequence}`,
+        kind: "reaction" as const,
+        content: "Nice!",
+        sourceIds: [],
+        parentEventId: basilOpening.id,
+        interrupted: false,
+        interruptedBy: null,
+      };
+      db.prepare(
+        `INSERT INTO debate_events
+           (id, user_id, session_id, sequence, phase, step_key, kind,
+            event_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        vocalFoley.id,
+        "user-1",
+        session.id,
+        vocalFoley.sequence,
+        vocalFoley.phase,
+        vocalFoley.stepKey,
+        vocalFoley.kind,
+        JSON.stringify(vocalFoley),
+        vocalFoley.createdAt,
+      );
+      session = getDebateSession(db, "user-1", session.id);
+
+      await advance("challenge-for-prompt");
+      await advance("challenge-for-answer");
+      const averyFloors = session.events.filter(
+        (event) =>
+          event.speakerBotId === "for" &&
+          (event.kind === "speech" || event.kind === "silence"),
+      );
+      assert.equal(averyFloors.at(-1)?.content, "Nice!");
+    } finally {
+      db.close();
+    }
+  });
+
   it("copies the For opening on a Copycat's first Against floor", async () => {
     const db = createTestDb();
     try {

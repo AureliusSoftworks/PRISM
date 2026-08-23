@@ -31,6 +31,7 @@ import {
   applyBotPowerAddressedInsultV1,
   applyBotPowerEternalIntroductionResponseV1,
   applyBotPowerCursedTongueResponseV1,
+  applyBotPowerTrollTurnV1,
   applyBotPowerMumbledResponseV1,
   applyBotPowerMuteResponseV1,
   createBotPowerMutePerformanceV1,
@@ -68,6 +69,7 @@ import {
   type BotPowerEffectV1,
   type BotPowerMutePerformanceV1,
   type BotPowerMuteReactionCandidateV1,
+  type BotPowerTrollPresentationV1,
   debateAudiencePressureScore,
   debateJurySeatCount,
   appendDebateParticipantFavorability,
@@ -3534,9 +3536,12 @@ export function debateSessionForPlayer(
                       };
                     }
                     if (
-                      "targets" in effect &&
-                      effect.type !== "power_immunity" &&
-                      Array.isArray(effect.targets)
+                      effect.type === "social_influence" ||
+                      effect.type === "candor" ||
+                      effect.type === "interruption" ||
+                      effect.type === "response_bond" ||
+                      effect.type === "selective_memory" ||
+                      effect.type === "insight"
                     ) {
                       return {
                         ...plannedEffect,
@@ -4661,6 +4666,63 @@ function insertEvents(
   return sequenced;
 }
 
+function applyDebateTrollPresentationsV1(
+  session: DebateSessionV1,
+  events: readonly DebateEventV1[],
+): DebateEventV1[] {
+  const priorPresentations = session.events
+    .map((event) => event.botPowerTrollPresentation)
+    .filter(
+      (value): value is BotPowerTrollPresentationV1 => value !== undefined,
+    );
+  let assistantTurnOrdinal = session.events.filter(
+    (event) =>
+      event.speakerBotId !== null && debateEventIsCommonlyAudible(session, event),
+  ).length;
+  return events.map((event) => {
+    if (!event.speakerBotId || !debateEventIsCommonlyAudible(session, event)) {
+      return event;
+    }
+    assistantTurnOrdinal += 1;
+    const botPlan = session.powerPlan.bots[event.speakerBotId];
+    const trollActive =
+      botPlan?.effects.some((effect) => effect.effect.type === "troll") === true;
+    if (!trollActive) return event;
+    const result = applyBotPowerTrollTurnV1({
+      powers: [],
+      active: true,
+      response: event.content,
+      stableTurnKey: `${session.id}:${event.speakerBotId}:${assistantTurnOrdinal}`,
+      assistantTurnOrdinal,
+      priorPresentations,
+      exactCopy:
+        botPlan.effects.some(
+          (effect) => effect.effect.type === "speech_copy",
+        ),
+      muted:
+        botPlan.hardMuted ||
+        Boolean(event.mutePerformance) ||
+        event.kind === "silence",
+      protectedPayload:
+        event.kind === "evidence" ||
+        event.kind === "ballot" ||
+        event.kind === "verdict" ||
+        event.kind === "jury_verdict" ||
+        event.kind === "player_turn" ||
+        debateEventIsTranscriptHousekeeping(event),
+    });
+    if (!result.presentation) return event;
+    priorPresentations.push(result.presentation);
+    return {
+      ...event,
+      content: result.content,
+      botPowerTrollPresentation: result.presentation,
+      // Troll's delivery stays warm even when the room is heated.
+      voicePerformanceCue: undefined,
+    };
+  });
+}
+
 function commitMutation(
   db: DatabaseSync,
   userId: string,
@@ -4687,7 +4749,12 @@ function commitMutation(
     }
     // Assign sequences from the live DB max inside the write lock so delayed
     // case-board refinements and parallel atmospheric events cannot collide.
-    insertEvents(db, userId, previous.id, newEvents);
+    insertEvents(
+      db,
+      userId,
+      previous.id,
+      applyDebateTrollPresentationsV1(previous, newEvents),
+    );
     const next = synchronizeDebateParticipationState(
       {
         ...nextInput,
@@ -6067,6 +6134,15 @@ function debateFrozenPowerEffects(
   return (session.powerPlan.bots[botId]?.effects ?? []).map(
     (entry) => entry.effect,
   );
+}
+
+/** Troll alone keeps floor eligibility against an immunity-held speaker. */
+export function debatePowerInterruptionCanTargetV1(
+  interrupterEffects: readonly BotPowerEffectV1[],
+  targetEffects: readonly BotPowerEffectV1[],
+): boolean {
+  return !botPowerIgnoresOtherPowersFromEffectsV1(targetEffects) ||
+    interrupterEffects.some((effect) => effect.type === "troll");
 }
 
 /**
@@ -8486,13 +8562,7 @@ function interruptionCandidate(
   speaker: DebateBotSnapshotV1,
   speechEvent?: DebateEventV1,
 ): DebateBotSnapshotV1 | null {
-  if (
-    botPowerIgnoresOtherPowersFromEffectsV1(
-      debateFrozenPowerEffects(session, speaker.id),
-    )
-  ) {
-    return null;
-  }
+  const speakerEffects = debateFrozenPowerEffects(session, speaker.id);
   const strengthRank = { small: 1, medium: 2, large: 3 } as const;
   const powerInterrupter =
     debateBots(session)
@@ -8503,6 +8573,18 @@ function interruptionCandidate(
           candidate.sideId !== null,
       )
       .flatMap((candidate) => {
+        const candidateEffects = debateFrozenPowerEffects(
+          session,
+          candidate.id,
+        );
+        if (
+          !debatePowerInterruptionCanTargetV1(
+            candidateEffects,
+            speakerEffects,
+          )
+        ) {
+          return [];
+        }
         const plan = session.powerPlan.bots[candidate.id];
         if (
           plan?.hardMuted ||

@@ -1,6 +1,7 @@
 import {
   applyPremiumRespelling,
   applyVoiceDeliveryMoodToProfile,
+  projectSpeechAbbreviations,
   elevenLabsVoiceDirectionForMood,
   resolveLocalAccentFallback,
   resolvePremiumAccentDirection,
@@ -215,6 +216,9 @@ type ElevenLabsSpeechInput = {
    * nothing was respelled. */
   projectionSegments: readonly ElevenLabsTextProjectionSegment[];
   alignmentProjected: boolean;
+  /** Second projection from expanded speech back to authored spelling. */
+  sourceProjectionSegments: readonly ElevenLabsTextProjectionSegment[];
+  sourceAlignmentProjected: boolean;
 };
 
 /**
@@ -332,7 +336,15 @@ async function elevenLabsAccentIpaProjection(
 async function elevenLabsSpeechInput(
   args: ElevenLabsSpeechArgs,
 ): Promise<ElevenLabsSpeechInput> {
-  const normalizedProfile = normalizeBotAudioVoiceProfileV1(args.profile);
+  // Premium previews, replays, and Action SFX bypass the conversation route.
+  // Normalize here as the shared provider boundary so every request speaks
+  // titles naturally without altering its persisted source text.
+  const abbreviationProjection = projectSpeechAbbreviations(args.text);
+  const speechArgs = {
+    ...args,
+    text: abbreviationProjection.synthesisText,
+  };
+  const normalizedProfile = normalizeBotAudioVoiceProfileV1(speechArgs.profile);
   const authoredDirection = normalizeElevenLabsVoiceDirection(
     normalizedProfile.elevenLabsDirection,
   );
@@ -343,7 +355,7 @@ async function elevenLabsSpeechInput(
     speechprintStrength: normalizedProfile.speechprintStrength,
     nativeAccentHint: normalizedProfile.elevenLabsNativeAccentHint,
   });
-  const hasAudioTags = [...args.text.matchAll(ELEVENLABS_AUDIO_TAG_PATTERN)]
+  const hasAudioTags = [...speechArgs.text.matchAll(ELEVENLABS_AUDIO_TAG_PATTERN)]
     .length > 0;
   // Explicit vocal reactions are more specific than the broad mood state.
   // The saved bot identity keeps the existing three direction slots. A mood
@@ -351,7 +363,7 @@ async function elevenLabsSpeechInput(
   // saved voice profile or displaces one of its defining performance cues.
   const moodDirection = hasAudioTags
     ? null
-    : elevenLabsVoiceDirectionForMood(args.deliveryMood);
+    : elevenLabsVoiceDirectionForMood(speechArgs.deliveryMood);
   // Accent is a saved character definition and must retain a direction slot.
   // The shared normalizer caps the combined request at Eleven v3's three tags.
   const direction = normalizeElevenLabsVoiceDirection(
@@ -361,7 +373,7 @@ async function elevenLabsSpeechInput(
   );
   const model = direction || hasAudioTags
     ? "eleven_v3"
-    : normalizeElevenLabsTtsModel(args.model);
+    : normalizeElevenLabsTtsModel(speechArgs.model);
   const directionPrefix = direction
     ? `${direction
         .split(",")
@@ -375,17 +387,19 @@ async function elevenLabsSpeechInput(
   // No accent direction means the voice already speaks this accent, and
   // respelling on top of it would double the effect.
   const ipaProjection =
-    accentDirection && args.respellAccent !== false
-      ? await elevenLabsAccentIpaProjection(args, normalizedProfile)
+    accentDirection && speechArgs.respellAccent !== false
+      ? await elevenLabsAccentIpaProjection(speechArgs, normalizedProfile)
       : null;
   const respelling =
-    !ipaProjection && accentDirection && args.respellAccent !== false
-      ? elevenLabsRespelling(args, normalizedProfile)
+    !ipaProjection && accentDirection && speechArgs.respellAccent !== false
+      ? elevenLabsRespelling(speechArgs, normalizedProfile)
       : null;
   const projectionSegments =
     ipaProjection ??
     respelling?.segments ??
-    (args.text ? [{ providerText: args.text, sourceText: args.text }] : []);
+    (speechArgs.text
+      ? [{ providerText: speechArgs.text, sourceText: speechArgs.text }]
+      : []);
   const body = projectionSegments
     .map((segment) => segment.providerText)
     .join("");
@@ -397,6 +411,13 @@ async function elevenLabsSpeechInput(
     projectionSegments,
     alignmentProjected:
       Boolean(ipaProjection) || respelling?.respelled === true,
+    sourceProjectionSegments: abbreviationProjection.segments.map(
+      (segment) => ({
+        providerText: segment.synthesisText,
+        sourceText: segment.sourceText,
+      }),
+    ),
+    sourceAlignmentProjected: abbreviationProjection.changed,
   };
 }
 
@@ -655,12 +676,18 @@ export async function requestElevenLabsSpeechWithTimestamps(
       value,
       input.directionPrefix,
     );
-    return input.alignmentProjected
+    const expandedAlignment = input.alignmentProjected
       ? projectRespellingAlignmentToSource(
           withoutPrefix,
           input.projectionSegments,
         )
       : withoutPrefix;
+    return input.sourceAlignmentProjected
+      ? projectRespellingAlignmentToSource(
+          expandedAlignment,
+          input.sourceProjectionSegments,
+        )
+      : expandedAlignment;
   };
   const alignment = asWritten(providerAlignment);
   const normalizedAlignment = asWritten(providerNormalizedAlignment);

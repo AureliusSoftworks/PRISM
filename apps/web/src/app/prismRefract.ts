@@ -53,6 +53,46 @@ export interface PrismRefractMagicTarget extends PrismRefractTargetBase {
   run: (direction: string) => void | Promise<void>;
 }
 
+export interface PrismRefractBotDirectedSetupTarget
+  extends PrismRefractMagicTarget {
+  purpose: "bot-directed-setup";
+  anchor: {
+    botId: string;
+    botName: string;
+  };
+}
+
+/**
+ * Shared contract for Wielding a concrete bot inside an editable applet setup.
+ * The applet owns what "build around this bot" means; the shared target keeps
+ * the captured identity explicit all the way through invocation.
+ */
+export function createBotDirectedSetupRefractTarget(input: {
+  id: string;
+  label: string;
+  botId: string;
+  botName: string;
+  disabled?: () => boolean;
+  ownsPresentation?: boolean;
+  run: (input: {
+    botId: string;
+    botName: string;
+    direction: string;
+  }) => void | Promise<void>;
+}): PrismRefractBotDirectedSetupTarget {
+  const anchor = { botId: input.botId, botName: input.botName };
+  return {
+    id: input.id,
+    label: input.label,
+    kind: "magic",
+    purpose: "bot-directed-setup",
+    anchor,
+    disabled: input.disabled,
+    ownsPresentation: input.ownsPresentation,
+    run: (direction) => input.run({ ...anchor, direction }),
+  };
+}
+
 export type PrismRefractTarget =
   | PrismRefractFieldTarget
   | PrismRefractChoiceTarget

@@ -11,6 +11,10 @@ import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { buildBotLibraryGroupVisualVariables } from "./botLibraryGroupVisual";
 import { placeBotPickerGroupMenu } from "./botPickerGroupMenu";
+import {
+  registerPrismRefractTarget,
+  type PrismRefractBotDirectedSetupTarget,
+} from "./prismRefract";
 import sharedStyles from "./BotPicker.module.css";
 import pickerStyles from "./page.module.css";
 
@@ -140,6 +144,7 @@ interface BotPickerTileProps {
   className?: string;
   style?: CSSProperties;
   badge?: ReactNode;
+  directedSetupTarget?: PrismRefractBotDirectedSetupTarget;
   buttonProps?: Omit<
     ButtonHTMLAttributes<HTMLButtonElement>,
     "children" | "className" | "style"
@@ -162,8 +167,22 @@ export function BotPickerTile({
   className,
   style,
   badge,
+  directedSetupTarget,
   buttonProps,
 }: BotPickerTileProps): React.JSX.Element {
+  const directedSetupTargetRef = useRef(directedSetupTarget);
+  const directedSetupElementRef = useRef<HTMLButtonElement | null>(null);
+  const directedSetupTargetId = directedSetupTarget?.id;
+  useEffect(() => {
+    directedSetupTargetRef.current = directedSetupTarget;
+  }, [directedSetupTarget]);
+  useEffect(() => {
+    if (!directedSetupTargetId) return;
+    return registerPrismRefractTarget(directedSetupTargetId, {
+      descriptor: () => directedSetupTargetRef.current!,
+      element: () => directedSetupElementRef.current,
+    });
+  }, [directedSetupTargetId]);
   const showPixelGridGlyph = geometry.compactPixelGrid === true;
   const showSelectedDotGlyph =
     geometry.selectedDotGlyph === true && selected;
@@ -207,7 +226,9 @@ export function BotPickerTile({
 
   return (
     <button
+      ref={directedSetupTarget ? directedSetupElementRef : undefined}
       {...buttonProps}
+      data-prism-refract-id={directedSetupTarget?.id}
       type="button"
       className={tileClassName}
       data-bot-id={item.id}

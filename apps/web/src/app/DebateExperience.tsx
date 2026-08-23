@@ -144,6 +144,7 @@ import {
   type LiveSessionRoutingChipLabels,
 } from "./liveSessionChrome";
 import {
+  createBotDirectedSetupRefractTarget,
   PrismRefractTarget,
   type PrismRefractMagicTarget,
 } from "./prismRefract";
@@ -190,10 +191,12 @@ import styles from "./DebateExperience.module.css";
 import { debateLiveCaptionPage } from "./debateLiveCaption";
 import { debateTranscriptTimelineEntries } from "./debateTranscriptTimeline";
 import type { DebateForumRole } from "./DebateForumScene";
+import type { BotAvatarFacing } from "./bot-avatar-render-geometry";
 import {
   copyDebateMotionSlate,
   applyDebateSetupPreset,
   applyDebateSetupSuggestion,
+  anchorDebateSetupCast,
   debateAlignmentPreviewCast,
   debateEvidenceSourcePropKind,
   debateMotionRevealState,
@@ -686,6 +689,10 @@ export interface DebateBotAvatarState {
   foleyMouthShape: ZenLiveBotMouthShape | null;
   listenerReaction:
     "attentive" | "divided" | "evidence" | "question" | "concession" | null;
+  /** Opts a normally static presentation into its authored blink scheduler. */
+  blinkEnabled?: boolean;
+  /** Visible screen direction; face and authored Ink turn as one plane. */
+  facing?: BotAvatarFacing;
 }
 
 interface DebateArchiveReturnBufferResponse {
@@ -839,6 +846,14 @@ const DEBATE_STAGE_LAYOUT_AUTHORING_ENABLED = prismDeveloperAuthoringEnabled({
 });
 const DEBATE_ROWDINESS_SPECTRUM = [...DEBATE_FORMALITY_SPECTRUM].reverse();
 type DebateCastSlot = "moderator" | "forAdvocate" | "againstAdvocate";
+type DebateBotDirectedSetupAnchor = {
+  botId: string;
+  botName: string;
+  castSlot: DebateCastSlot | null;
+  jurySeatIndex: number | null;
+  playerRole: DebatePlayerRole;
+  playerSideId: DebateSideId;
+};
 
 function stickyDeclinedConsentForCast(
   checks: readonly DebateAdvocacyConsent[],
@@ -5346,6 +5361,8 @@ export function DebateExperience(
   } | null>(null);
   const inventWarmupAbortRef = useRef<AbortController | null>(null);
   const inventRequestAbortRef = useRef<AbortController | null>(null);
+  const pendingBotDirectedSetupAnchorRef =
+    useRef<DebateBotDirectedSetupAnchor | null>(null);
   const [inventLoaderStartedAt, setInventLoaderStartedAt] = useState<
     string | null
   >(null);
@@ -8243,11 +8260,55 @@ export function DebateExperience(
   );
 
   const generateNewDuelFromPrism = useCallback(
-    async (direction: string): Promise<void> => {
+    async (
+      direction: string,
+      anchor?: DebateBotDirectedSetupAnchor,
+    ): Promise<void> => {
       if (props.bots.length < 2) {
         setError("Create at least two Library bots to start a Debate.");
         return;
       }
+      pendingBotDirectedSetupAnchorRef.current = anchor ?? null;
+      const applyAnchorToCurrentSetup = (): void => {
+        if (!anchor) return;
+        setPlayerRole(anchor.playerRole);
+        setPlayerSideId(anchor.playerSideId);
+        const anchorCastSlot = anchor.castSlot;
+        if (anchorCastSlot) {
+          const anchorSelectableSlots: readonly DebateCastSlot[] =
+            anchor.playerRole === "judge"
+              ? ["forAdvocate", "againstAdvocate"]
+              : anchor.playerRole === "participant"
+                ? [
+                    "moderator",
+                    anchor.playerSideId === "against"
+                      ? "forAdvocate"
+                      : "againstAdvocate",
+                  ]
+                : ["moderator", "forAdvocate", "againstAdvocate"];
+          setCast((current) =>
+            anchorDebateSetupCast({
+              cast: current,
+              anchorBotId: anchor.botId,
+              anchorSlot: anchorCastSlot,
+              selectableSlots: anchorSelectableSlots,
+              availableBotIds: props.bots.map((bot) => bot.id),
+            }),
+          );
+          setActiveCastSlot(anchorCastSlot);
+          return;
+        }
+        const anchorJurySeatIndex = anchor.jurySeatIndex;
+        if (anchorJurySeatIndex === null) return;
+        setJuryEnabled(true);
+        setPreferredJurorBotIds((current) => {
+          const next = [...current];
+          next[anchorJurySeatIndex] = anchor.botId;
+          return next;
+        });
+        setActiveJurySeatIndex(anchorJurySeatIndex);
+      };
+      applyAnchorToCurrentSetup();
       inventWarmupAbortRef.current?.abort();
       const warmupController = new AbortController();
       inventWarmupAbortRef.current = warmupController;
@@ -8301,11 +8362,22 @@ export function DebateExperience(
         }
         setInventWarmup(null);
         startNewDebate();
+        applyAnchorToCurrentSetup();
         setNewDuelGenerateBusy(true);
         setInventLoaderStartedAt(new Date().toISOString());
         inventRequestAbortRef.current?.abort();
         const requestController = new AbortController();
         inventRequestAbortRef.current = requestController;
+        const anchorDirection = anchor
+          ? [
+              direction.trim(),
+              `Keep ${anchor.botName} as the fixed creative anchor${
+                anchor.castSlot ? ` in the ${anchor.castSlot} seat` : " on the Jury"
+              }, and build the rest of the editable duel around them.`,
+            ]
+              .filter(Boolean)
+              .join(" ")
+          : direction;
         const result = await props.request<{
           suggestion: DebateSetupSuggestionV1;
           provider?: string;
@@ -8314,7 +8386,7 @@ export function DebateExperience(
           "/api/debates/setup-suggestion",
           {
             ...requestBody({
-              direction,
+              direction: anchorDirection,
               roster: props.bots.map((bot) => ({
                 id: bot.id,
                 name: bot.name,
@@ -8328,6 +8400,30 @@ export function DebateExperience(
           },
         );
         const applied = applyDebateSetupSuggestion(result.suggestion);
+        const resolvedPlayerRole = anchor?.playerRole ?? applied.playerRole;
+        const resolvedPlayerSideId =
+          anchor?.playerSideId ?? applied.playerSideId;
+        const resolvedSelectableCastSlots: readonly DebateCastSlot[] =
+          resolvedPlayerRole === "judge"
+            ? ["forAdvocate", "againstAdvocate"]
+            : resolvedPlayerRole === "participant"
+              ? [
+                  "moderator",
+                  resolvedPlayerSideId === "against"
+                    ? "forAdvocate"
+                    : "againstAdvocate",
+                ]
+              : ["moderator", "forAdvocate", "againstAdvocate"];
+        const resolvedCast =
+          anchor?.castSlot
+            ? anchorDebateSetupCast({
+                cast: applied.cast,
+                anchorBotId: anchor.botId,
+                anchorSlot: anchor.castSlot,
+                selectableSlots: resolvedSelectableCastSlots,
+                availableBotIds: props.bots.map((bot) => bot.id),
+              })
+            : applied.cast;
         setTopic(applied.topic);
         setFormat(applied.format);
         setForumRoundMode(applied.forumRoundMode);
@@ -8336,24 +8432,36 @@ export function DebateExperience(
         setSelectedPresetId(applied.selectedPresetId);
         setSlates([]);
         setMotion(applied.motion);
-        setCast(applied.cast);
-        setPlayerRole(applied.playerRole);
+        setCast(resolvedCast);
+        setPlayerRole(resolvedPlayerRole);
         setRhetoricalGambitsEnabled(
           result.suggestion.rhetoricalGambitsEnabled !== false,
         );
-        setJuryEnabled(applied.juryEnabled);
-        setPreferredJurorBotIds(emptyPreferredJurorBotIds());
+        setJuryEnabled(
+          anchor?.jurySeatIndex !== null && anchor?.jurySeatIndex !== undefined
+            ? true
+            : applied.juryEnabled,
+        );
+        const anchoredJurors = emptyPreferredJurorBotIds();
+        if (
+          anchor?.jurySeatIndex !== null &&
+          anchor?.jurySeatIndex !== undefined
+        ) {
+          anchoredJurors[anchor.jurySeatIndex] = anchor.botId;
+        }
+        setPreferredJurorBotIds(anchoredJurors);
         setActiveJurySeatIndex(null);
-        setPlayerSideId(applied.playerSideId);
+        setPlayerSideId(resolvedPlayerSideId);
         setModeratorTitle(applied.moderatorTitle);
         setActiveCastSlot(
-          applied.playerRole === "judge"
+          anchor?.castSlot ??
+            (resolvedPlayerRole === "judge"
             ? "forAdvocate"
-            : applied.playerRole === "participant"
-              ? applied.playerSideId === "against"
+            : resolvedPlayerRole === "participant"
+              ? resolvedPlayerSideId === "against"
                 ? "forAdvocate"
                 : "againstAdvocate"
-              : "moderator",
+              : "moderator"),
         );
         setEvidence(applied.evidence);
         setResearchQuery(applied.researchQuery);
@@ -8361,7 +8469,10 @@ export function DebateExperience(
         setEvidenceDecisionMade(true);
         setStudioPanel("motion");
         setCastTuningOpen(
-          applied.playerRole !== "judge" || applied.juryEnabled,
+          resolvedPlayerRole !== "judge" ||
+            applied.juryEnabled ||
+            (anchor?.jurySeatIndex !== null &&
+              anchor?.jurySeatIndex !== undefined),
         );
         if (applied.sourcesSkippedNotice) {
           setSetupRestoreNotice(applied.sourcesSkippedNotice);
@@ -8375,18 +8486,19 @@ export function DebateExperience(
           title: "Refraction complete",
           detail: `Used ${usedModel}.`,
         });
+        pendingBotDirectedSetupAnchorRef.current = null;
         const roleChecksReady =
-          applied.playerRole === "participant"
+          resolvedPlayerRole === "participant"
             ? Boolean(
-                applied.cast.moderator &&
-                  (applied.playerSideId === "for"
-                    ? applied.cast.againstAdvocate
-                    : applied.cast.forAdvocate),
+                resolvedCast.moderator &&
+                  (resolvedPlayerSideId === "for"
+                    ? resolvedCast.againstAdvocate
+                    : resolvedCast.forAdvocate),
               )
             : Boolean(
-                applied.cast.forAdvocate &&
-                  applied.cast.againstAdvocate &&
-                  (applied.playerRole === "judge" || applied.cast.moderator),
+                resolvedCast.forAdvocate &&
+                  resolvedCast.againstAdvocate &&
+                  (resolvedPlayerRole === "judge" || resolvedCast.moderator),
               );
         if (!roleChecksReady) {
           setRoleChecks([]);
@@ -8400,21 +8512,21 @@ export function DebateExperience(
             format: applied.format,
             formality: applied.formality,
             motion: applied.motion,
-            playerRole: applied.playerRole,
+            playerRole: resolvedPlayerRole,
             playerSideId:
-              applied.playerRole === "participant"
-                ? applied.playerSideId
+              resolvedPlayerRole === "participant"
+                ? resolvedPlayerSideId
                 : null,
             forAdvocateBotId:
-              applied.playerRole === "participant" &&
-              applied.playerSideId === "for"
+              resolvedPlayerRole === "participant" &&
+              resolvedPlayerSideId === "for"
                 ? undefined
-                : applied.cast.forAdvocate,
+                : resolvedCast.forAdvocate,
             againstAdvocateBotId:
-              applied.playerRole === "participant" &&
-              applied.playerSideId === "against"
+              resolvedPlayerRole === "participant" &&
+              resolvedPlayerSideId === "against"
                 ? undefined
-                : applied.cast.againstAdvocate,
+                : resolvedCast.againstAdvocate,
             preferredProvider,
             modelOverride: props.modelOverride?.model,
             responseMode: props.responseMode,
@@ -17974,6 +18086,28 @@ export function DebateExperience(
                   }}
                   renderGlyph={props.renderBotGlyph}
                   className={styles.castPickerTile}
+                  directedSetupTarget={createBotDirectedSetupRefractTarget({
+                    id: `debate-setup-anchor-${bot.id}-${
+                      activeJurySeatIndex ?? effectiveActiveCastSlot
+                    }`,
+                    label: `Build a Debate around ${bot.name}`,
+                    botId: bot.id,
+                    botName: bot.name,
+                    ownsPresentation: true,
+                    disabled: () => busy || Boolean(disabledReason),
+                    run: ({ botId, botName, direction }) =>
+                      generateNewDuelFromPrism(direction, {
+                        botId,
+                        botName,
+                        castSlot:
+                          activeJurySeatIndex === null
+                            ? effectiveActiveCastSlot
+                            : null,
+                        jurySeatIndex: activeJurySeatIndex,
+                        playerRole,
+                        playerSideId,
+                      }),
+                  })}
                   buttonProps={{
                     role: "radio",
                     "aria-checked": selected,
@@ -26757,6 +26891,8 @@ export function DebateExperience(
         talking?: boolean;
         thinking?: boolean;
         speechTiming?: DebateSpeechTiming | null;
+        blinkEnabled?: boolean;
+        facing?: BotAvatarFacing;
       },
     ) =>
       props.renderBotAvatar?.(
@@ -26776,6 +26912,8 @@ export function DebateExperience(
           // partner remains attentive; neither inherits a cheerful gallery
           // portrait merely because the general Debate audience can.
           listenerReaction: performance?.demeanor === "suspect" ? "divided" : "attentive",
+          blinkEnabled: performance?.blinkEnabled === true,
+          facing: performance?.facing,
         },
       ) ?? props.renderBotGlyph(bot.glyph, { size: presentation === "full" ? 132 : 36, strokeWidth: 1.2 }),
     playMysteryVoice: async (
@@ -26970,6 +27108,7 @@ export function DebateExperience(
             inventWarmupAbortRef.current = null;
             inventRequestAbortRef.current?.abort();
             inventRequestAbortRef.current = null;
+            pendingBotDirectedSetupAnchorRef.current = null;
             setInventWarmup(null);
             setBusy(false);
             setNewDuelGenerateBusy(false);
@@ -26984,7 +27123,10 @@ export function DebateExperience(
                   if (context === "refract") {
                     void synthesize("");
                   } else {
-                    void generateNewDuelFromPrism("");
+                    void generateNewDuelFromPrism(
+                      "",
+                      pendingBotDirectedSetupAnchorRef.current ?? undefined,
+                    );
                   }
                 }
               : undefined

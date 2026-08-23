@@ -145,6 +145,8 @@ export function composeBotSystemPrompt(
     believedName?: string | null;
     /** Saved identity color so complementary hue bias can name the opposite. */
     identityColor?: string | null;
+    /** Zen alone lets Troll direct its bounded nuisance style at the player. */
+    surface?: "zen";
     /**
      * The bot's effective audio voice profile (override ?? authored) as the
      * stored JSON string or a parsed record. Only the vernacular identity is
@@ -210,7 +212,9 @@ export function composeBotSystemPrompt(
       ? [botPowerSpeechObfuscationAuthoringCueV1()]
       : []),
     ...(directInsultCue ? [directInsultCue] : []),
-    ...botPowerSelfCueLinesV1(genericSelfCuePowers).filter((line) => {
+    ...botPowerSelfCueLinesV1(genericSelfCuePowers, {
+      trollAudience: options?.surface === "zen" ? "zen_player" : "other_bots",
+    }).filter((line) => {
       // Prefer the concrete believed-name cue over the generic compiled selfCue.
       if (!believedName) return true;
       return !/\bfalse[- ]name\b|\brandom persona name\b|\bjohn(?:\/| |-)jane doe\b/iu.test(

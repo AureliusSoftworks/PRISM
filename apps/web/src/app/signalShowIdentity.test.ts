@@ -8,6 +8,7 @@ function show(overrides: Partial<BotcastShow> = {}): BotcastShow {
   return {
     id: "show-1",
     hostBotId: "host-1",
+    hasActiveHost: true,
     name: "Signal Test",
     premise: "A test show.",
     hostingStyle: "curious",

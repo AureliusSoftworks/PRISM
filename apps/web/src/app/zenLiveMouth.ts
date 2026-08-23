@@ -1227,6 +1227,7 @@ export function coffeeLiveAvatarSpeechProgressShouldCommit(args: {
     characters: readonly string[];
     characterStartTimesSeconds: readonly number[];
     characterEndTimesSeconds: readonly number[];
+    audioTimelineOffsetSeconds?: number;
   } | null;
 }): boolean {
   if (args.previousDurationMs !== args.nextDurationMs) return true;
@@ -1262,6 +1263,7 @@ export function crtSpeechMouthShapeAtAlignedElapsedMs({
     characters: readonly string[];
     characterStartTimesSeconds: readonly number[];
     characterEndTimesSeconds: readonly number[];
+    audioTimelineOffsetSeconds?: number;
   } | null;
 }): ZenLiveBotMouthShape {
   const fallback = () =>
@@ -1325,9 +1327,20 @@ export function crtSpeechMouthShapeAtAlignedElapsedMs({
     0,
     Number.isFinite(elapsedMs) ? elapsedMs : 0,
   );
-  const providerElapsedSeconds =
-    (Math.min(durationMs, safeElapsedMs) / durationMs) *
-    alignmentEndSeconds;
+  const audioTimelineOffsetSeconds = alignment.audioTimelineOffsetSeconds;
+  const usesDecodedAudioClock =
+    typeof audioTimelineOffsetSeconds === "number" &&
+    Number.isFinite(audioTimelineOffsetSeconds) &&
+    audioTimelineOffsetSeconds >= 0;
+  if (
+    usesDecodedAudioClock &&
+    safeElapsedMs < audioTimelineOffsetSeconds * 1_000
+  ) {
+    return "closed";
+  }
+  const providerElapsedSeconds = usesDecodedAudioClock
+    ? Math.max(0, safeElapsedMs / 1_000 - audioTimelineOffsetSeconds)
+    : (Math.min(durationMs, safeElapsedMs) / durationMs) * alignmentEndSeconds;
   if (
     providerElapsedSeconds <
     (characterStartTimesSeconds[0] ?? Number.POSITIVE_INFINITY)

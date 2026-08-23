@@ -45,7 +45,8 @@ export type SocialSilenceExclusionV1 =
   | "reclaim"
   | "producer_control"
   | "power_interruption"
-  | "power_silence";
+  | "power_silence"
+  | "participant_cooldown";
 
 export interface SocialSilenceMarkerV1 {
   v: typeof SOCIAL_SILENCE_MARKER_VERSION;
@@ -98,9 +99,12 @@ export type ListenerReactionSpokenCue =
   | "Right."
   | "I see."
   | "Hmm."
+  | "Hmm..."
+  | "let me see..."
   | "Oh."
   | "Go on."
   | "Nice."
+  | "Nice!"
   | "Oh, really?"
   | "Really?"
   | "Seriously?"
@@ -285,9 +289,12 @@ const SPOKEN_CUES = new Set<ListenerReactionSpokenCue>([
   "Right.",
   "I see.",
   "Hmm.",
+  "Hmm...",
+  "let me see...",
   "Oh.",
   "Go on.",
   "Nice.",
+  "Nice!",
   "Oh, really?",
   "Really?",
   "Seriously?",
@@ -490,6 +497,36 @@ export function listenerReactionInterruptedSpeakerHasAudioV1(
 ): boolean {
   const cue = listenerReactionInterruptedSpeakerTextV1(plan);
   return Boolean(cue && cue !== BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE);
+}
+
+/**
+ * Latest language-bearing public reaction heard from someone other than the
+ * Copycat holder. Crosstalk follow-ons happen after the listener's cut-in, so
+ * they win when the interrupted speaker is the eligible source. Nonverbal
+ * vocal Foley has no exact text to repeat and deliberately stays ineligible.
+ */
+export function listenerReactionSpeechCopySourceV1(
+  plan: Pick<
+    ListenerReactionPlanV1,
+    | "speakerBotId"
+    | "listenerBotId"
+    | "spokenCue"
+    | "publicSpokenCue"
+    | "interruptedSpeakerCue"
+    | "publicInterruptedSpeakerCue"
+  >,
+  holderBotId: string,
+): string | null {
+  if (
+    plan.speakerBotId !== holderBotId &&
+    listenerReactionInterruptedSpeakerHasAudioV1(plan)
+  ) {
+    return listenerReactionInterruptedSpeakerTextV1(plan);
+  }
+  if (plan.listenerBotId !== holderBotId) {
+    return listenerReactionSpokenTextV1(plan);
+  }
+  return null;
 }
 
 export function listenerReactionHasCrosstalkAudio(

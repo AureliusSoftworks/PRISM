@@ -531,6 +531,12 @@
       "provenanceProfile": "aurelius-production"
     },
     {
+      "path": "audio/debate/whodunnit/the-midnight-clue.mp3",
+      "kind": "audio",
+      "sha256": "9e84cf339fa48ef79e9e80257f5aef75c7538c6324bcb67ec3baae30578a3e7f",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
       "path": "audio/prism-companion/glass-tap-01.mp3",
       "kind": "audio",
       "sha256": "cc9562c505a916561e4cf9e3fe3bd09bf2f77ca59010e9dfb0cbb2af3a6d727f",
@@ -1698,6 +1704,150 @@
       "path": "debate/moderator-light.webp",
       "kind": "image",
       "sha256": "02e31f3ba2b1ee35c4bca6567c2a4d353e7d0a09859a520bc68f33f5d9b530de",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/evidence/brass-letter-opener.webp",
+      "kind": "image",
+      "sha256": "f411401dce2c91d4fe7dbe311feea875f036815e7f7476772738885daec73bc0",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/evidence/ceremonial-dagger.webp",
+      "kind": "image",
+      "sha256": "d2792366e12dd992d0e8cad88539dd73502533029f49ec7be8f335aced5eaf77",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/evidence/concealed-safe-closed.webp",
+      "kind": "image",
+      "sha256": "1a597264270ae1aca20b5d8a0fa9bccfdd2cb01747b76d6dccc0136953393ef9",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/evidence/concealed-safe-open.webp",
+      "kind": "image",
+      "sha256": "d5cac311536cb4eb0352b1d2175aa4ed3b42364a80095143df15212c6c14a06b",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/evidence/creased-receipt.webp",
+      "kind": "image",
+      "sha256": "46d830329247bb7520064d8605a92c3010c7afe614649c326761944342f1149e",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/evidence/delicate-gold-key.webp",
+      "kind": "image",
+      "sha256": "408ac73fdc68da362154cd55f6308f648db6434e73919b9fe833e6bc4f6e0f11",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/evidence/fireplace-poker.webp",
+      "kind": "image",
+      "sha256": "e66169c4c79674606a448b55a9e717328bde0570e69cd5f9858df52b135ce180",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/evidence/frayed-thread.webp",
+      "kind": "image",
+      "sha256": "7c5db73b78eb7e54c2d12f413f2cd3962572f07f96737f45da07bcc25e1ab8c7",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/evidence/garage-remote.webp",
+      "kind": "image",
+      "sha256": "9597a3fc46988df8db8fe43ecaaf2137638447d401d47b5f07dce35ad3124cd8",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/evidence/heavy-decanter.webp",
+      "kind": "image",
+      "sha256": "fbaf117b733d6ae41224367bc1025d53bbac6fc8a24f7128eac38c6710ba82bb",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/evidence/hunting-knife.webp",
+      "kind": "image",
+      "sha256": "e7acf066d558d28c260e7f8a8ee561894a217db1d2571caeddc3676e16e0bc51",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/evidence/lead-pipe.webp",
+      "kind": "image",
+      "sha256": "5ff88bbb13cd1f8f4dcfe63b9b7c2ed034847abca3be5785f92bc06c890568dd",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/evidence/locked-jewelry-box.webp",
+      "kind": "image",
+      "sha256": "0f305a6eab87d139b6f440ded27ca294d32551f7fbeb44e91401263cf68bd284",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/evidence/marble-paperweight.webp",
+      "kind": "image",
+      "sha256": "f4cb5ba0bd2555673c4f4d9281b9a66c74fe531ee86e9cedc9815835030af2fe",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/evidence/opened-jewelry-box-heirlooms.webp",
+      "kind": "image",
+      "sha256": "f79db989a784e5ed5e1045d38639bb5e5d653429655a1827fa506e22b81af829",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/evidence/private-ledger.webp",
+      "kind": "image",
+      "sha256": "61865b65debaaf51eb2484bdbfc655721246302e4009501211c9dc4f9f7e01c2",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/evidence/revolver.webp",
+      "kind": "image",
+      "sha256": "764e21769b5004f6ded3a27cc71eb705d4099dc3af9fd785b5ceeede99ba9028",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/evidence/safe-code.webp",
+      "kind": "image",
+      "sha256": "b3940df634d066acd3ed94be7759c1370028589b71e1e97db20aff9b86ceeded",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/evidence/scorched-letter.webp",
+      "kind": "image",
+      "sha256": "5778cac5bf5a4b04b38046e0937b02df6e67247b3318f20ceb9d9b324f16775d",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/evidence/silver-key.webp",
+      "kind": "image",
+      "sha256": "eb63050c2b1488892cbf76ec584457277c3ec8b20f3d3e1052f20481fd35d58e",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/evidence/stained-glass.webp",
+      "kind": "image",
+      "sha256": "8c80c85be51a8d268b78d916471774ce9c48e4adcc8dd203fa341b85a57f03f3",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/evidence/stopped-pocket-watch.webp",
+      "kind": "image",
+      "sha256": "3d5ae6caa9c844f69e080ece16639b6adea095c4b1f0eaaa4148351b6d4c5389",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/evidence/unidentified-evidence.webp",
+      "kind": "image",
+      "sha256": "d5fab330d0327bee63a699335cf8885d33d2aeac3d149cce01afdc1c890d4b78",
+      "provenanceProfile": "aurelius-production"
+    },
+    {
+      "path": "debate/mystery/evidence/unknown-poison.webp",
+      "kind": "image",
+      "sha256": "9fc79704680a3f6e9fd145e7b2437e3f297fe97608c92c53948784bb255f03f6",
       "provenanceProfile": "aurelius-production"
     },
     {

@@ -40,6 +40,7 @@ import {
   botPowerPairwiseSizeCueFromEffectsV1,
   botPowerAvatarScaleModeFromDescriptionV1,
   buildCoffeePowersPromptBlock,
+  listenerReactionSpeechCopySourceV1,
   COFFEE_HISTORY_WINDOW_HARD_CAP,
   coffeePowerCupRateMultiplierV1,
   coffeePowerStayRateMultiplierV1,
@@ -53,6 +54,7 @@ import {
   type BotPowerTargetV1,
   type CoffeeBotSocialSnapshot,
   type CoffeePowerPlanV1,
+  type CoffeeReplayEventPayload,
   type CoffeeReplayPowerMoodBoostEventPayload,
   type CoffeeReplayPowerMoodDrainEventPayload,
   type CoffeeReplayPowerAnnoyanceEventPayload,
@@ -911,6 +913,21 @@ export function coffeePowerBotEchoesAddressedSpeech(
   ) === true;
 }
 
+/** Latest exact public reaction speech heard from a different Coffee bot. */
+export function coffeePowerLatestSpeechCopyReactionSourceForTurn(
+  events: readonly CoffeeReplayEventPayload[] | null | undefined,
+  holderBotId: string,
+): string | null {
+  if (!events) return null;
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.kind !== "listenerReaction") continue;
+    const source = listenerReactionSpeechCopySourceV1(event.plan, holderBotId);
+    if (source) return source;
+  }
+  return null;
+}
+
 export function coffeePowerEchoSourceForTurn(args: {
   turnKind: "user" | "autonomous";
   speakerBotId: string;
@@ -920,6 +937,7 @@ export function coffeePowerEchoSourceForTurn(args: {
   currentUserAddressedBotId?: string | null;
   priorAddressedBotId?: string | null;
   latestAssistantContent?: string | null;
+  latestReactionSpeech?: string | null;
 }): string | null {
   if (
     args.turnKind === "user" &&
@@ -928,6 +946,13 @@ export function coffeePowerEchoSourceForTurn(args: {
       args.currentUserAddressedBotId === args.speakerBotId)
   ) {
     return args.tableFocus;
+  }
+  if (
+    args.turnKind === "autonomous" &&
+    typeof args.latestReactionSpeech === "string" &&
+    args.latestReactionSpeech.length > 0
+  ) {
+    return args.latestReactionSpeech;
   }
   if (
     args.turnKind === "autonomous" &&

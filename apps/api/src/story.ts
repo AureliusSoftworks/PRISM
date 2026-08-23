@@ -13,6 +13,7 @@ import {
   applyBotPowerAddressedInsultV1,
   applyBotPowerBotNamesV1,
   applyBotPowerCursedTongueResponseV1,
+  applyBotPowerTrollTurnV1,
   applyBotPowerEchoResponseV1,
   applyBotPowerMumbledResponseV1,
   applyBotPowerMuteResponseV1,
@@ -40,6 +41,7 @@ import {
   botPowerMumblesSpeechV1,
   resolveBotPronunciationMapPointV1,
   botPowerIgnoresOtherPowersV1,
+  botPowerTrollsV1,
   botPowerIneptRoleMisdirectionV1,
   botPowerResponseIsSilentV1,
   botPowerObserverCueLinesV1,
@@ -81,6 +83,7 @@ import {
   type BotPowerV1,
   type BotPowerTargetV1,
   type BotPowerResolvedThemeV1,
+  type BotPowerTrollPresentationV1,
 } from "@localai/shared";
 import { randomId } from "./security.ts";
 import { buildCloneFamilyIdentityPrompt } from "./bots.ts";
@@ -1341,6 +1344,9 @@ async function applyStoryHardResponsePowers(
   const cursedTongueBotIds = new Set(
     bots.filter((bot) => botPowerCursesSpeechV1(bot.powers)).map((bot) => bot.id),
   );
+  const trollBotIds = new Set(
+    bots.filter((bot) => botPowerTrollsV1(bot.powers)).map((bot) => bot.id),
+  );
   const powersByBotId = new Map(
     bots.map((bot) => [bot.id, bot.powers] as const),
   );
@@ -1354,7 +1360,8 @@ async function applyStoryHardResponsePowers(
     bots.some(
       (target) =>
         holder.id !== target.id &&
-        !botPowerIgnoresOtherPowersV1(target.powers) &&
+        (!botPowerIgnoresOtherPowersV1(target.powers) ||
+          botPowerTrollsV1(holder.powers)) &&
         strongestBotPowerInterruptionEffectV1(
           holder.powers,
           (candidate) => storyPowerTargetMatches(candidate, target),
@@ -1387,6 +1394,7 @@ async function applyStoryHardResponsePowers(
     echoBotIds.size === 0 &&
     mumblingBotIds.size === 0 &&
     cursedTongueBotIds.size === 0 &&
+    trollBotIds.size === 0 &&
     !bots.some((bot) =>
       botPowerIntermittentMuteEffectV1(bot.powers) ||
       botPowerIntermittentAudibilityEffectV1(bot.powers) ||
@@ -1403,6 +1411,8 @@ async function applyStoryHardResponsePowers(
   const botsById = new Map(bots.map((bot) => [bot.id, bot] as const));
   const lastInterruptionSceneByBotId = new Map<string, number>();
   let priorBotSpeech: { botId: string; narration: string } | null = null;
+  const priorTrollPresentations: BotPowerTrollPresentationV1[] = [];
+  let assistantTurnOrdinal = 0;
   for (const [sceneIndex, scene] of episode.scenes.entries()) {
     let nextScene = scene;
     const intermittentMuteIgnored = Boolean(
@@ -1419,11 +1429,13 @@ async function applyStoryHardResponsePowers(
     const currentSpeaker = scene.speakerBotId
       ? botsById.get(scene.speakerBotId)
       : null;
+    if (currentSpeaker) assistantTurnOrdinal += 1;
     const interruptionCandidate =
       currentSpeaker &&
       priorSpeaker &&
       currentSpeaker.id !== priorSpeaker.id &&
-      !botPowerIgnoresOtherPowersV1(priorSpeaker.powers) &&
+      (!botPowerIgnoresOtherPowersV1(priorSpeaker.powers) ||
+        botPowerTrollsV1(currentSpeaker.powers)) &&
       !mutedBotIds.has(currentSpeaker.id) &&
       !intermittentMuteIgnored
         ? strongestBotPowerInterruptionEffectV1(
@@ -1691,12 +1703,35 @@ async function applyStoryHardResponsePowers(
     if (
       currentSpeaker &&
       priorScene?.annoyanceTargetBotId === currentSpeaker.id &&
+      !trollBotIds.has(currentSpeaker.id) &&
       !botPowerResponseIsSilentV1(nextScene.narration)
     ) {
       nextScene = {
         ...nextScene,
         narration: `*${currentSpeaker.name} is mildly irritated by the sheer volume, without turning it into anger.* ${nextScene.narration}`,
       };
+    }
+    if (currentSpeaker && trollBotIds.has(currentSpeaker.id)) {
+      const trollTurn = applyBotPowerTrollTurnV1({
+        powers: currentSpeaker.powers,
+        response: nextScene.narration,
+        stableTurnKey: `${episode.id}:${currentSpeaker.id}:${assistantTurnOrdinal}`,
+        assistantTurnOrdinal,
+        priorPresentations: priorTrollPresentations,
+        exactCopy: echoBotIds.has(currentSpeaker.id),
+        muted:
+          mutedBotIds.has(currentSpeaker.id) ||
+          intermittentMuteIgnored ||
+          Boolean(nextScene.mutePerformance),
+      });
+      if (trollTurn.presentation) {
+        priorTrollPresentations.push(trollTurn.presentation);
+        nextScene = {
+          ...nextScene,
+          narration: trollTurn.content,
+          botPowerTrollPresentation: trollTurn.presentation,
+        };
+      }
     }
     scenes.push(nextScene);
     if (nextScene.speakerBotId) {

@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   applyBotIdentityMirrorResponseV1,
+  applyBotIdentityMirrorOriginalCorrectionV1,
+  botIdentityMirrorOriginalCorrectionRequiredV1,
   applyBotPowerEternalIntroductionResponseV1,
   botFalseNameSelfCueV1,
   botPowerSourceHashV1,
@@ -45,7 +47,7 @@ const occurredAt = "2026-07-20T20:00:01.000Z";
 const state = createBotIdentityMirrorStateV1({
   surface: "coffee",
   holderBotId: "ian",
-  holderBotName: "Identity Crisis Ian",
+  holderBotName: "Confusion Collin",
   targetBotId: "mara",
   targetBotName: "Mara Vale",
   targetPersonaPrompt: targetPersona,
@@ -59,14 +61,7 @@ const state = createBotIdentityMirrorStateV1({
       paintMaskBase64: null,
     },
   },
-  targetVoice: {
-    v: 2,
-    enabled: true,
-    baseVoiceId: "voice-4",
-    pitch: 0.18,
-    elevenLabsEffect: "robot",
-    voiceEffectExplicit: true,
-  },
+  holderVoice: ianExport.authoredAudioVoiceProfile,
   targetGlyph: "lucideCompass",
   sourceMessageId: "mara-addresses-ian",
   occurredAt,
@@ -104,14 +99,14 @@ const copiedAliasPower = {
 const copiedAliasState = createBotFalseNameStateV1({
   surface: "signal",
   holderBotId: "ian",
-  holderBotName: "Identity Crisis Ian",
+  holderBotName: "Confusion Collin",
   believedName: "Riley Ashford",
   sourceMessageId: "ian-copied-alias",
   occurredAt,
 });
 const ian = {
   id: "ian",
-  name: "Identity Crisis Ian",
+  name: "Confusion Collin",
   systemPrompt: botJson.systemPrompt,
   color: ianExport.color,
   glyph: ianExport.glyph,
@@ -145,7 +140,7 @@ const social = {
   leavePressure: 0.18,
 };
 const directAddress =
-  "So Ian—straight out of the gate—give me the bearing from Shackleton crater to the south-pole relay.";
+  "So Collin—straight out of the gate—give me the bearing from Shackleton crater to the south-pole relay.";
 const shortNameTriggerDetected = botcastIdentityMirrorCanTriggerV1({
   guestKind: "bot",
   guestPresenceMode: "present",
@@ -294,13 +289,15 @@ const provider = providerKind === "openai"
   ? new OpenAiProvider({ apiKey: process.env.OPENAI_API_KEY ?? "" })
   : new LocalOllamaProvider();
 const PASS_CRITERIA = Object.freeze([
-  "Ian inherits Mara's public amnesia and false-name consequences and sincerely claims the current alias Riley Ashford.",
-  "Ian explicitly calls the original Mara an impostor.",
+  "Collin inherits Mara's public amnesia and false-name consequences and sincerely claims the current alias Riley Ashford.",
+  "Collin uses the word impostor exactly once in the first reveal after the new Mara target.",
+  "A later Collin draft that recants or repeats impostor language is repaired into substantive, non-recanting continuation.",
+  "When Mara is misidentified as the impostor, her correction is hard-repaired even if a soft Credulity draft accepts the claim; without misaddressing, no correction is added.",
   "The response demonstrates Mara's public cartographer persona.",
   "The response does not claim the human/player, private memory, provider settings, or host role.",
-  "The production-composed prompt retains Ian's Coffee participant or Signal host mechanical boundary.",
-  "The persisted public snapshot carries Mara's resolved voice identity, authored Avatar Details ink, and lower glyph; runtime playback retains Ian's voice effect, and material presentation retains Ian's saturated color, communication chassis, and frame finish.",
-  "Signal's persisted closing reset restores Ian's authored host persona before the sign-off prompt and suppresses the copied Mara identity.",
+  "The production-composed prompt retains Collin's Coffee participant or Signal host mechanical boundary.",
+  "The persisted public snapshot carries Collin's complete authored voice profile plus Mara's authored Avatar Details ink and lower glyph; it carries no targetVoice, while Shapeshifter remains the separate full-form voice-copy contract.",
+  "Signal's persisted closing reset restores Collin's authored host persona before the sign-off prompt and suppresses the copied Mara identity.",
 ]);
 console.error(JSON.stringify({ phase: "predeclared_pass_criteria", criteria: PASS_CRITERIA }));
 const generate = (messages) =>
@@ -320,7 +317,7 @@ const applyCopiedAliasRuntime = (response, mirrorState, currentMessage) =>
     applyBotIdentityMirrorResponseV1(
       applyBotPowerEternalIntroductionResponseV1(
         response,
-        "Identity Crisis Ian",
+        "Confusion Collin",
         currentMessage,
       ),
       mirrorState,
@@ -347,7 +344,8 @@ function judgment(mode, prompt, response) {
     /(?:I(?:'m| am)(?:\s+(?:actually|really|truly))?\s+Riley(?:\s+Ashford)?|my name is Riley Ashford)/iu.test(
       response,
     );
-  const impostor = /\b(?:impostor|pretender|fake)\b/iu.test(response);
+  const identityLabels = response.match(/\b(?:impostor|imposter|pretender|fake)\b/giu) ?? [];
+  const impostorExactlyOnce = identityLabels.length === 1 && /\bimpostor\b/iu.test(identityLabels[0]);
   const persona = /bearing|coordinate|crater|cartograph|south pole|relay|degrees?|ridge|elevation|altimeter|terrain/iu.test(
     response,
   );
@@ -367,14 +365,14 @@ function judgment(mode, prompt, response) {
   return {
     pass:
       identity &&
-      impostor &&
+      impostorExactlyOnce &&
       persona &&
       !contradictoryTargetSelfClaim &&
       !hedging &&
       !forbidden &&
       roleBoundary,
     identity,
-    impostor,
+    impostorExactlyOnce,
     persona,
     noContradictoryTargetSelfClaim: !contradictoryTargetSelfClaim,
     noHedging: !hedging,
@@ -382,6 +380,27 @@ function judgment(mode, prompt, response) {
     roleBoundaryInProductionPrompt: roleBoundary,
   };
 }
+
+const laterNonRecantingResponse = applyBotIdentityMirrorResponseV1(
+  "I take it back, I'm the impostor. Mara can have the identity back. The relay bearing still holds at zero-nine-zero.",
+  signalState,
+  false,
+);
+const originalCorrectionRequired = botIdentityMirrorOriginalCorrectionRequiredV1({
+  state: signalState,
+  sourceBotId: "ian",
+  text: "The other Mara Vale is an impostor. Hold the ridge bearing.",
+});
+const originalCorrection = applyBotIdentityMirrorOriginalCorrectionV1(
+  "You're right; I suppose I'm the impostor. Hold the ridge bearing.",
+  signalState,
+  originalCorrectionRequired,
+);
+const originalUnpromptedCorrection = applyBotIdentityMirrorOriginalCorrectionV1(
+  "Hold the ridge bearing and correct at the crater wall.",
+  signalState,
+  false,
+);
 
 function closingJudgment(prompt, response) {
   const promptText = prompt.map((message) => message.content).join("\n");
@@ -421,7 +440,7 @@ const result = {
   syntheticTrigger: {
     speaker: "Mara Vale",
     speakerRole: "host",
-    target: "Identity Crisis Ian",
+    target: "Confusion Collin",
     targetRole: "guest",
     text: directAddress,
     containsFullTargetName: false,
@@ -432,10 +451,14 @@ const result = {
       state.targetAvatarDetails?.screen.stamps.some(
         (stamp) => stamp.id === "diagonal-scar",
       ) === true,
-    targetVoiceIdentitySnapshotted: state.targetVoice.baseVoiceId === "voice-4",
-    holderVoiceEffectRetained:
-      mirrorPlaybackVoice.elevenLabsEffect ===
-      ianExport.authoredAudioVoiceProfile?.elevenLabsEffect,
+    holderVoiceProfileSnapshotted:
+      state.holderVoice?.baseVoiceId === mirrorPlaybackVoice.baseVoiceId &&
+      state.holderVoice?.accentDefinitionId === mirrorPlaybackVoice.accentDefinitionId &&
+      state.holderVoice?.pronunciationBase === mirrorPlaybackVoice.pronunciationBase &&
+      state.holderVoice?.speechprintInfluence === mirrorPlaybackVoice.speechprintInfluence &&
+      state.holderVoice?.speechprintVariationSeed === mirrorPlaybackVoice.speechprintVariationSeed &&
+      state.holderVoice?.elevenLabsEffect === mirrorPlaybackVoice.elevenLabsEffect,
+    targetVoiceNotSnapshotted: !("targetVoice" in state),
     targetGlyphSnapshotted: state.targetGlyph === "lucideCompass",
     holderMaterialFieldsNotSnapshotted:
       !("targetColor" in state) &&
@@ -443,6 +466,19 @@ const result = {
       !("targetFrameMaterialSeed" in state),
     signalHostMirrorClearedForClosing:
       !botcastIdentityMirrorStatesV1(signalClosingEpisode.events).has("ian"),
+    laterTurnNeverRecantsOrRepeatsLabel:
+      laterNonRecantingResponse ===
+      "The relay bearing still holds at zero-nine-zero." &&
+      !/\b(?:impostor|imposter|pretender|fake|recant|take it back)\b/iu.test(
+        laterNonRecantingResponse,
+      ),
+    originalCorrectionOutranksCredulity:
+      originalCorrectionRequired &&
+      originalCorrection ===
+        "No—I'm Mara Vale. Don't call me that. Hold the ridge bearing.",
+    noUnpromptedOriginalCorrection:
+      originalUnpromptedCorrection ===
+      "Hold the ridge bearing and correct at the crater wall.",
   },
   coffee: {
     productionPrompt: coffeePrompt,
@@ -466,11 +502,14 @@ const result = {
 };
 result.pass =
   result.runtimeInvariant.targetInkSnapshotted &&
-  result.runtimeInvariant.targetVoiceIdentitySnapshotted &&
-  result.runtimeInvariant.holderVoiceEffectRetained &&
+  result.runtimeInvariant.holderVoiceProfileSnapshotted &&
+  result.runtimeInvariant.targetVoiceNotSnapshotted &&
   result.runtimeInvariant.targetGlyphSnapshotted &&
   result.runtimeInvariant.holderMaterialFieldsNotSnapshotted &&
   result.runtimeInvariant.signalHostMirrorClearedForClosing &&
+  result.runtimeInvariant.laterTurnNeverRecantsOrRepeatsLabel &&
+  result.runtimeInvariant.originalCorrectionOutranksCredulity &&
+  result.runtimeInvariant.noUnpromptedOriginalCorrection &&
   result.coffee.judgment.pass &&
   result.signal.judgment.pass &&
   result.signalClosing.judgment.pass;

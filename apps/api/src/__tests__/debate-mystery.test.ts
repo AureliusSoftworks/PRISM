@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { deflateRawSync, inflateRawSync } from "node:zlib";
 import type {
+  DebateSessionV1,
   DebateMysteryNotebookPageV1,
   DebateWhodunnitCreateConfigV1,
 } from "@localai/shared";
@@ -16,10 +17,12 @@ import {
   debateMysteryCaseCodeForSession,
   getDebateMysteryCaseBible,
   getDebateMysteryNotebook,
+  getDebateMysteryNotebookV2,
   inspectDebateMysteryCaseCode,
   importDebateMysteryCase,
   listDebateMysteryActions,
   patchDebateMysteryNotebook,
+  patchDebateMysteryNotebookV2,
   parseDebateMysteryEvidenceConfrontation,
   proposeDebateMysteryNotebookCleanup,
   resolveDebateMysteryEvidenceVisuals,
@@ -38,12 +41,14 @@ class MysteryProviderStub implements LlmProvider {
   public cleanupCalls = 0;
   public actorCalls = 0;
   public textureCalls = 0;
+  public prompts: string[] = [];
   public actorPrompts: string[] = [];
   public actorOptions: GenerateOptions[] = [];
   public actorReply = "I remember the corridor clock, but I will not pretend I saw more than that.";
 
   public async generateResponse(messages: ProviderMessage[], options?: GenerateOptions): Promise<string> {
     const prompt = messages.map((message) => message.content).join("\n");
+    this.prompts.push(prompt);
     if (prompt.includes("Clean up the investigator's selected notebook")) {
       this.cleanupCalls += 1;
       throw new Error("Use the safety-preserving exact proposal in this test.");
@@ -142,12 +147,139 @@ function setup(db: DatabaseSync): DebateWhodunnitCreateConfigV1 {
   };
 }
 
+async function beginInvestigation(
+  db: DatabaseSync,
+  provider: MysteryProviderStub,
+  session: DebateSessionV1,
+  roomId: string,
+  idempotencyKey: string,
+): Promise<DebateSessionV1> {
+  return applyDebateMysteryAction(db, "user-1", session.id, {
+    expectedRevision: session.revision,
+    idempotencyKey,
+    action: "begin_investigation",
+    roomId,
+  }, runtime(provider));
+}
+
+async function beginInterview(
+  db: DatabaseSync,
+  provider: MysteryProviderStub,
+  session: DebateSessionV1,
+  suspectSeatId: string,
+  idempotencyKey: string,
+): Promise<DebateSessionV1> {
+  return applyDebateMysteryAction(db, "user-1", session.id, {
+    expectedRevision: session.revision,
+    idempotencyKey,
+    action: "begin_interview",
+    suspectSeatId,
+  }, runtime(provider));
+}
+
+async function endActivity(
+  db: DatabaseSync,
+  provider: MysteryProviderStub,
+  session: DebateSessionV1,
+  idempotencyKey: string,
+): Promise<DebateSessionV1> {
+  return applyDebateMysteryAction(db, "user-1", session.id, {
+    expectedRevision: session.revision,
+    idempotencyKey,
+    action: "end_activity",
+  }, runtime(provider));
+}
+
 describe("Debate Whodunnit private/public boundary", () => {
-  it("charges exactly three actions for frozen forensics and writes automatic references once", async () => {
+  it("persists free suspect encounters and keeps v2 desk pins as validated hypotheses", async () => {
+    const db = testDb();
+    const provider = new MysteryProviderStub();
+    let session = await createDebateMysterySession(db, "user-1", setup(db), "mystery-desk-v2", runtime(provider));
+    const suspect = session.formatState.suspects[0]!;
+    session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "desk-v2-travel", action: "travel", roomId: suspect.roomId }, runtime(provider));
+    const before = session.formatState.actionsRemaining;
+    session = await beginInterview(db, provider, session, suspect.seatId, "desk-v2-open");
+    assert.equal(session.formatState.actionsRemaining, before);
+    assert.deepEqual(session.formatState.metSuspectSeatIds, [suspect.seatId]);
+    session = await endActivity(db, provider, session, "desk-v2-close");
+    session = await beginInterview(db, provider, session, suspect.seatId, "desk-v2-reopen");
+    assert.equal(session.formatState.actionsRemaining, before);
+    const desk = getDebateMysteryNotebookV2(db, "user-1", session.id).notebook;
+    const saved = patchDebateMysteryNotebookV2(db, "user-1", session.id, {
+      expectedRevision: desk.revision,
+      idempotencyKey: "desk-v2-save",
+      leadAnnotations: [{ leadId: session.formatState.leads[0]!.id, text: "This may be related." }],
+      suspectNotes: [{ seatId: suspect.seatId, text: "Ask about the timeline." }],
+      suspectPins: [{ referenceKind: "lead", referenceId: session.formatState.leads[0]!.id, seatId: suspect.seatId }],
+    }).notebook;
+    assert.equal(saved.version, 2);
+    assert.equal(saved.suspectPins.length, 1);
+    assert.equal(JSON.stringify(session.formatState).includes("Ask about the timeline"), false);
+    const replay = patchDebateMysteryNotebookV2(db, "user-1", session.id, { expectedRevision: desk.revision, idempotencyKey: "desk-v2-save" });
+    assert.equal(replay.notebook.revision, saved.revision);
+    assert.throws(
+      () => patchDebateMysteryNotebookV2(db, "user-1", session.id, { expectedRevision: desk.revision, idempotencyKey: "desk-v2-stale", leadAnnotations: saved.leadAnnotations, suspectNotes: saved.suspectNotes, suspectPins: saved.suspectPins }),
+      (error: unknown) => error instanceof HttpError && error.statusCode === 409,
+    );
+    const unmetSeatId = session.formatState.suspects.find((candidate) => candidate.seatId !== suspect.seatId)!.seatId;
+    const tampered = { ...saved, suspectNotes: [...saved.suspectNotes, { seatId: unmetSeatId, text: "Private data for an unmet suspect.", updatedAt: NOW }], suspectPins: [...saved.suspectPins, { id: "invalid-pin", referenceKind: "lead", referenceId: session.formatState.leads[0]!.id, seatId: unmetSeatId, createdAt: NOW }] };
+    db.prepare("UPDATE debate_mystery_notebooks SET document_json = ? WHERE session_id = ? AND user_id = ?").run(JSON.stringify(tampered), session.id, "user-1");
+    const sanitized = getDebateMysteryNotebookV2(db, "user-1", session.id).notebook;
+    assert.equal(sanitized.suspectNotes.some((note) => note.seatId === unmetSeatId), false);
+    assert.equal(sanitized.suspectPins.some((pin) => pin.seatId === unmetSeatId), false);
+  });
+  it("migrates v1 pages into valid lead annotations only", async () => {
+    const db = testDb();
+    const provider = new MysteryProviderStub();
+    const session = await createDebateMysterySession(db, "user-1", setup(db), "mystery-desk-migration", runtime(provider));
+    const lead = session.formatState.leads[0]!;
+    const legacy = {
+      version: 1,
+      sessionId: session.id,
+      revision: 1,
+      pages: [{ id: "legacy", title: "Old page", createdAt: NOW, updatedAt: NOW, blocks: [
+        { id: "valid-lead", kind: "paragraph", text: "Keep this lead note.", leadId: lead.id, leadRevision: lead.revision },
+        { id: "discard-reference", kind: "reference", text: "[[evidence:unknown]]", referenceKind: "evidence", referenceId: "unknown" },
+        { id: "discard-note", kind: "paragraph", text: "This generic page content must not migrate." },
+      ] }],
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    db.prepare("UPDATE debate_mystery_notebooks SET document_json = ? WHERE session_id = ? AND user_id = ?").run(JSON.stringify(legacy), session.id, "user-1");
+    const desk = getDebateMysteryNotebookV2(db, "user-1", session.id).notebook;
+    assert.equal(desk.version, 2);
+    assert.equal(Object.hasOwn(desk, "pages"), false);
+    assert.deepEqual(desk.leadAnnotations.map((annotation) => annotation.text), ["Keep this lead note."]);
+    assert.equal(JSON.stringify(desk).includes("generic page content"), false);
+  });
+  it("enforces one private suspect note per met seat and the combined desk character limit", async () => {
+    const db = testDb();
+    const provider = new MysteryProviderStub();
+    let session = await createDebateMysterySession(db, "user-1", setup(db), "mystery-desk-limits", runtime(provider));
+    const suspects = session.formatState.suspects.slice(0, 3);
+    for (const [index, suspect] of suspects.entries()) {
+      session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: `desk-limit-travel-${index}`, action: "travel", roomId: suspect.roomId }, runtime(provider));
+      session = await beginInterview(db, provider, session, suspect.seatId, `desk-limit-meet-${index}`);
+      session = await endActivity(db, provider, session, `desk-limit-leave-${index}`);
+    }
+    const desk = getDebateMysteryNotebookV2(db, "user-1", session.id).notebook;
+    assert.throws(
+      () => patchDebateMysteryNotebookV2(db, "user-1", session.id, {
+        expectedRevision: desk.revision,
+        idempotencyKey: "desk-limit-save",
+        leadAnnotations: [],
+        suspectNotes: suspects.map((suspect) => ({ seatId: suspect.seatId, text: "x".repeat(8_000) })),
+        suspectPins: [],
+      }),
+      (error: unknown) => error instanceof HttpError && error.statusCode === 413,
+    );
+  });
+  it("charges exactly three actions for frozen forensics without auto-filing desk references", async () => {
     const db = testDb();
     const provider = new MysteryProviderStub();
     let session = await createDebateMysterySession(db, "user-1", setup(db), "mystery-forensics", runtime(provider));
     const crimeScene = session.formatState.rooms.find((room) => room.id === session.formatState.crimeSceneRoomId)!;
+    session = await beginInvestigation(db, provider, session, crimeScene.id, "forensics-begin-investigation");
     session = await applyDebateMysteryAction(db, "user-1", session.id, {
       expectedRevision: session.revision, idempotencyKey: "forensics-discover", action: "inspect", roomId: crimeScene.id, regionId: crimeScene.activeRegionId!,
     }, runtime(provider));
@@ -169,18 +301,20 @@ describe("Debate Whodunnit private/public boundary", () => {
     }, runtime(provider));
     assert.equal(replay.revision, afterForensics);
     const notebookAfterEvidence = getDebateMysteryNotebook(db, "user-1", session.id).notebook;
-    assert.equal(notebookAfterEvidence.pages.flatMap((page) => page.blocks).filter((block) => block.referenceKind === "evidence" && block.referenceId === evidence.id).length, 1);
+    assert.equal(notebookAfterEvidence.pages.flatMap((page) => page.blocks).filter((block) => block.referenceKind === "evidence" && block.referenceId === evidence.id).length, 0);
     const suspect = session.formatState.suspects[0]!;
     provider.actorReply = "Suspect-2 was near the corridor; that is all I saw.";
     const suspectRoom = session.formatState.rooms.find((room) => room.id === suspect.roomId)!;
+    session = await endActivity(db, provider, session, "forensics-end-investigation");
     session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "forensics-travel", action: "travel", roomId: suspectRoom.id }, runtime(provider));
+    session = await beginInterview(db, provider, session, suspect.seatId, "forensics-begin-interview");
     session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "forensics-interview", action: "interview", suspectSeatId: suspect.seatId, question: "State your alibi.", evidenceId: null }, runtime(provider));
     const actorAnswer = session.formatState.interviewLog.at(-1)!.content;
     assert.match(actorAnswer, new RegExp(session.formatState.suspects[1]!.name));
     assert.doesNotMatch(actorAnswer, /suspect-2/iu);
     const testimonyId = session.formatState.testimony.find((entry) => entry.speakerSeatId === suspect.seatId)!.id;
     const notebook = getDebateMysteryNotebook(db, "user-1", session.id).notebook;
-    assert.equal(notebook.pages.flatMap((page) => page.blocks).filter((block) => block.referenceKind === "testimony" && block.referenceId === testimonyId).length, 1);
+    assert.equal(notebook.pages.flatMap((page) => page.blocks).filter((block) => block.referenceKind === "testimony" && block.referenceId === testimonyId).length, 0);
     const resolved = resolveDebateMysteryQuestionMentions(`Ask [[mystery:suspect:${suspect.seatId}]] about [[mystery:testimony:${testimonyId}]] and [[mystery:victim:victim]].`, session.formatState, getDebateMysteryCaseBible(db, "user-1", session.id));
     assert.match(resolved, new RegExp(suspect.name));
     assert.match(resolved, new RegExp(session.formatState.victim.name));
@@ -208,7 +342,7 @@ describe("Debate Whodunnit private/public boundary", () => {
     assert.doesNotMatch(JSON.stringify(leadUpdateEvents), /requiredEvidenceIds|requiredTestimonyIds|requiredObservationKeys/u);
   });
 
-  it("keeps suspect searches active, interviews free, and confrontations bound to discovered @ markers", async () => {
+  it("charges committed searches and questions while view navigation stays free", async () => {
     const db = testDb();
     const provider = new MysteryProviderStub();
     let session = await createDebateMysterySession(db, "user-1", setup(db), "mystery-free-interview", runtime(provider));
@@ -227,23 +361,16 @@ describe("Debate Whodunnit private/public boundary", () => {
     const suspectRegionId = bible.activeRegions.find((item) => item.roomId === suspectRoom.id)!.regionId;
     assert.equal(session.formatState.rooms.find((room) => room.id === suspectRoom.id)?.activeRegionId, suspectRegionId);
     const afterTravel = session.formatState.actionsRemaining;
-    session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "suspect-room-inspect", action: "inspect", roomId: suspectRoom.id, regionId: suspectRegionId }, runtime(provider));
+    session = await beginInvestigation(db, provider, session, suspectRoom.id, "suspect-room-begin");
     assert.equal(session.formatState.actionsRemaining, afterTravel);
+    const afterInvestigationStart = session.formatState.actionsRemaining;
+    session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "suspect-room-inspect", action: "inspect", roomId: suspectRoom.id, regionId: suspectRegionId }, runtime(provider));
+    assert.equal(
+      session.formatState.actionsRemaining,
+      afterInvestigationStart - 1 + session.formatState.recoveredActionTokens.filter((token) => token.roomId === suspectRoom.id).reduce((total, token) => total + token.amount, 0),
+    );
     assert.equal(session.formatState.rooms.find((room) => room.id === suspectRoom.id)?.searched, false);
     assert.ok(session.formatState.rooms.find((room) => room.id === suspectRoom.id)?.publicObservation);
-    const remainingSuspectRegions = bible.activeRegions.filter(
-      (item) => item.roomId === suspectRoom.id && item.regionId !== suspectRegionId,
-    );
-    for (const [index, region] of remainingSuspectRegions.entries()) {
-      session = await applyDebateMysteryAction(db, "user-1", session.id, {
-        expectedRevision: session.revision,
-        idempotencyKey: `suspect-room-inspect-${index + 2}`,
-        action: "inspect",
-        roomId: suspectRoom.id,
-        regionId: region.regionId,
-      }, runtime(provider));
-    }
-    assert.equal(session.formatState.rooms.find((room) => room.id === suspectRoom.id)?.searched, true);
     const observationCount = session.formatState.rooms.find((room) => room.id === suspectRoom.id)!.observations.length;
     await assert.rejects(
       applyDebateMysteryAction(db, "user-1", session.id, {
@@ -257,9 +384,32 @@ describe("Debate Whodunnit private/public boundary", () => {
     );
     assert.equal(session.formatState.rooms.find((room) => room.id === suspectRoom.id)?.inspectionCounts[suspectRegionId], 1);
     assert.equal(session.formatState.rooms.find((room) => room.id === suspectRoom.id)?.observations.length, observationCount);
+    session = await endActivity(db, provider, session, "suspect-room-end");
+    const beforeInvestigationReentry = session.formatState.actionsRemaining;
+    session = await beginInvestigation(
+      db,
+      provider,
+      session,
+      suspectRoom.id,
+      "suspect-room-reenter",
+    );
+    assert.equal(
+      session.formatState.actionsRemaining,
+      beforeInvestigationReentry,
+    );
+    session = await endActivity(
+      db,
+      provider,
+      session,
+      "suspect-room-reenter-end",
+    );
+    const beforeInterview = session.formatState.actionsRemaining;
+    session = await beginInterview(db, provider, session, suspect.seatId, "suspect-interview-begin");
+    assert.equal(session.formatState.actionsRemaining, beforeInterview);
+    const afterInterviewStart = session.formatState.actionsRemaining;
     session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "free-question-one", action: "interview", suspectSeatId: suspect.seatId, question: "State your alibi." }, runtime(provider));
     session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "free-question-two", action: "interview", suspectSeatId: suspect.seatId, question: "Please state that alibi again." }, runtime(provider));
-    assert.equal(session.formatState.actionsRemaining, afterTravel);
+    assert.equal(session.formatState.actionsRemaining, afterInterviewStart - 2);
     assert.equal(provider.actorCalls, 2);
     assert.equal(provider.actorPrompts.every((prompt) => !prompt.includes("proofBundles") && !prompt.includes("culpritSeatId")), true);
     assert.equal(provider.actorPrompts.every((prompt) => prompt.includes("one to three concise sentences") && prompt.includes("at most 70 words")), true);
@@ -270,10 +420,29 @@ describe("Debate Whodunnit private/public boundary", () => {
       (error: unknown) => error instanceof HttpError && error.statusCode === 404,
     );
     const crimeScene = session.formatState.rooms.find((room) => room.id === session.formatState.crimeSceneRoomId)!;
+    session = await endActivity(db, provider, session, "marker-end-first-interview");
+    const beforeInterviewReentry = session.formatState.actionsRemaining;
+    session = await beginInterview(
+      db,
+      provider,
+      session,
+      suspect.seatId,
+      "marker-reenter-first-interview",
+    );
+    assert.equal(session.formatState.actionsRemaining, beforeInterviewReentry);
+    session = await endActivity(
+      db,
+      provider,
+      session,
+      "marker-end-reentered-interview",
+    );
     session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "marker-crime-scene", action: "travel", roomId: crimeScene.id }, runtime(provider));
+    session = await beginInvestigation(db, provider, session, crimeScene.id, "marker-begin-investigation");
     session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "marker-inspect", action: "inspect", roomId: crimeScene.id, regionId: crimeScene.activeRegionId! }, runtime(provider));
     const evidenceId = session.formatState.discoveredEvidence[0]!.id;
+    session = await endActivity(db, provider, session, "marker-end-investigation");
     session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "marker-return", action: "travel", roomId: suspectRoom.id }, runtime(provider));
+    session = await beginInterview(db, provider, session, suspect.seatId, "marker-begin-second-interview");
     await assert.rejects(
       applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "plain-name-not-confrontation", action: "interview", suspectSeatId: suspect.seatId, question: `What about the ${session.formatState.discoveredEvidence[0]!.title}?`, evidenceId }, runtime(provider)),
       (error: unknown) => error instanceof HttpError && error.statusCode === 400,
@@ -282,7 +451,148 @@ describe("Debate Whodunnit private/public boundary", () => {
     assert.equal(listDebateMysteryActions(db, "user-1", session.id).at(-1)?.payload.evidenceId, evidenceId);
   });
 
-  it("applies access items to inventory, rooms, and hidden room regions without consuming failed attempts", async () => {
+  it("keeps partner consultation free and force-locks an exhausted investigation to Theory", async () => {
+    const db = testDb();
+    const provider = new MysteryProviderStub();
+    let session = await createDebateMysterySession(db, "user-1", setup(db), "mystery-action-exhaustion", runtime(provider));
+    const roomId = session.formatState.currentRoomId;
+    const exhausted = structuredClone(session);
+    exhausted.formatState.actionsRemaining = 1;
+    db.prepare("UPDATE debate_sessions SET session_json = ? WHERE id = ? AND user_id = 'user-1'")
+      .run(JSON.stringify(exhausted), session.id);
+    session = exhausted;
+    session = await beginInvestigation(db, provider, session, roomId, "exhaust-begin");
+    session = await applyDebateMysteryAction(db, "user-1", session.id, {
+      expectedRevision: session.revision,
+      idempotencyKey: "exhaust-last-inspection",
+      action: "inspect",
+      roomId,
+      regionId: session.formatState.rooms.find((room) => room.id === roomId)!.activeRegionId!,
+    }, runtime(provider));
+
+    assert.equal(session.formatState.actionsRemaining, 0);
+    assert.equal(session.formatState.activeActivity?.kind, "investigation");
+    assert.equal(session.formatState.playPhase, "investigation");
+
+    await assert.rejects(
+      applyDebateMysteryAction(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "exhaust-extra-inspection",
+        action: "inspect",
+        roomId,
+        regionId: session.formatState.rooms.find((room) => room.id === roomId)!.activeRegionIds[1]!,
+      }, runtime(provider)),
+      (error: unknown) => error instanceof HttpError && error.statusCode === 409 && error.message.includes("No investigation actions remain"),
+    );
+
+    session = await applyDebateMysteryAction(db, "user-1", session.id, {
+      expectedRevision: session.revision,
+      idempotencyKey: "exhaust-partner-active",
+      action: "consult_partner",
+      question: "What can the record support so far?",
+    }, runtime(provider));
+    assert.equal(session.formatState.actionsRemaining, 0);
+    assert.equal(session.formatState.partnerConsultations.length, 1);
+
+    session = await endActivity(db, provider, session, "exhaust-final-session");
+    assert.equal(session.formatState.playPhase, "theory");
+    assert.equal(session.formatState.activeActivity, null);
+    assert.equal(session.stepKey, "mystery_theory");
+
+    session = await applyDebateMysteryAction(db, "user-1", session.id, {
+      expectedRevision: session.revision,
+      idempotencyKey: "exhaust-partner-theory",
+      action: "consult_partner",
+      question: "Help me build the strongest available theory.",
+    }, runtime(provider));
+    assert.equal(session.formatState.actionsRemaining, 0);
+    assert.equal(session.formatState.partnerConsultations.length, 2);
+    assert.equal(listDebateMysteryActions(db, "user-1", session.id).at(-1)?.payload.cost, 0);
+    assert.ok(provider.prompts.some((prompt) => prompt.includes("fallible, unverified player hypothesis")));
+
+    await assert.rejects(
+      beginInvestigation(db, provider, session, roomId, "exhaust-reenter"),
+      (error: unknown) => error instanceof HttpError && error.statusCode === 409 && error.message.includes("unavailable after the investigation closes"),
+    );
+  });
+
+  it("recovers each frozen room token exactly once without exposing its placement beforehand", async () => {
+    const db = testDb();
+    const provider = new MysteryProviderStub();
+    let session = await createDebateMysterySession(db, "user-1", setup(db), "mystery-action-token", runtime(provider));
+    const token = getDebateMysteryCaseBible(db, "user-1", session.id).actionTokens![0]!;
+
+    assert.equal(JSON.stringify(session.formatState).includes(token.id), false);
+    if (session.formatState.currentRoomId !== token.roomId) {
+      session = await applyDebateMysteryAction(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "token-travel",
+        action: "travel",
+        roomId: token.roomId,
+      }, runtime(provider));
+    }
+    session = await beginInvestigation(db, provider, session, token.roomId, "token-begin-investigation");
+    const beforeRecovery = session.formatState.actionsRemaining;
+    session = await applyDebateMysteryAction(db, "user-1", session.id, {
+      expectedRevision: session.revision,
+      idempotencyKey: "token-inspect",
+      action: "inspect",
+      roomId: token.roomId,
+      regionId: token.regionId,
+    }, runtime(provider));
+
+    assert.equal(session.formatState.actionsRemaining, beforeRecovery - 1 + token.amount);
+    assert.deepEqual(session.formatState.recoveredActionTokens.map((item) => item.id), [token.id]);
+    const actionTokenPayload = listDebateMysteryActions(db, "user-1", session.id).at(-1)?.payload.actionToken as { id?: string } | undefined;
+    assert.equal(actionTokenPayload?.id, token.id);
+    await assert.rejects(
+      applyDebateMysteryAction(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "token-inspect-repeat",
+        action: "inspect",
+        roomId: token.roomId,
+        regionId: token.regionId,
+      }, runtime(provider)),
+      (error: unknown) => error instanceof HttpError && error.statusCode === 409 && error.message.includes("already been investigated"),
+    );
+    assert.equal(session.formatState.actionsRemaining, beforeRecovery - 1 + token.amount);
+  });
+
+  it("rejects concurrent fresh requests for one hotspot after its single reward", async () => {
+    const db = testDb();
+    const provider = new MysteryProviderStub();
+    let session = await createDebateMysterySession(db, "user-1", setup(db), "mystery-hotspot-race", runtime(provider));
+    const token = getDebateMysteryCaseBible(db, "user-1", session.id).actionTokens![0]!;
+    if (session.formatState.currentRoomId !== token.roomId) {
+      session = await applyDebateMysteryAction(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "hotspot-race-travel",
+        action: "travel",
+        roomId: token.roomId,
+      }, runtime(provider));
+    }
+    session = await beginInvestigation(db, provider, session, token.roomId, "hotspot-race-begin");
+    const actionCount = listDebateMysteryActions(db, "user-1", session.id).length;
+    const request = (idempotencyKey: string) => applyDebateMysteryAction(db, "user-1", session.id, {
+      expectedRevision: session.revision,
+      idempotencyKey,
+      action: "inspect" as const,
+      roomId: token.roomId,
+      regionId: token.regionId,
+    }, runtime(provider));
+
+    const results = await Promise.allSettled([request("hotspot-race-a"), request("hotspot-race-b")]);
+    const first = results.find((result): result is PromiseFulfilledResult<DebateSessionV1> => result.status === "fulfilled")?.value;
+    const duplicate = results.find((result): result is PromiseRejectedResult => result.status === "rejected")?.reason;
+
+    assert.ok(first);
+    assert.ok(duplicate instanceof HttpError && duplicate.statusCode === 409);
+    assert.deepEqual(first.formatState.recoveredActionTokens.map((entry) => entry.id), [token.id]);
+    assert.equal(first.formatState.rooms.find((room) => room.id === token.roomId)?.observations.filter((entry) => entry.regionId === token.regionId).length, 1);
+    assert.equal(listDebateMysteryActions(db, "user-1", session.id).length, actionCount + 1);
+  });
+
+  it("charges each committed access-item application without consuming the tool on failed attempts", async () => {
     const db = testDb();
     const provider = new MysteryProviderStub();
     const config = setup(db);
@@ -295,6 +605,7 @@ describe("Debate Whodunnit private/public boundary", () => {
     let session = await createDebateMysterySession(db, "user-1", config, "mystery-access-items", runtime(provider));
     const bible = getDebateMysteryCaseBible(db, "user-1", session.id);
     const crimeScene = session.formatState.rooms.find((room) => room.id === session.formatState.crimeSceneRoomId)!;
+    session = await beginInvestigation(db, provider, session, crimeScene.id, "access-begin-crime-scene");
     const sourceRegions = bible.activeRegions.filter((outcome) => outcome.roomId === crimeScene.id && outcome.inventoryItemId);
     for (const [index, outcome] of sourceRegions.entries()) {
       session = await applyDebateMysteryAction(db, "user-1", session.id, {
@@ -310,6 +621,13 @@ describe("Debate Whodunnit private/public boundary", () => {
     const safeCode = session.formatState.inventoryItems.find((item) => item.id === "access-safe-code")!;
     const jewelryBox = session.formatState.inventoryItems.find((item) => item.id === "container-locked-jewelry-box")!;
     assert.ok(goldKey && safeCode && jewelryBox);
+    const discoveredBox = session.formatState.rooms.find((room) => room.id === jewelryBox.sourceRoomId)!
+      .observations.find((observation) => observation.regionId === jewelryBox.sourceRegionId)!;
+    assert.deepEqual(discoveredBox.accessTargets, [{
+      targetKind: "item",
+      targetId: jewelryBox.id,
+      targetLabel: jewelryBox.title,
+    }]);
 
     session = await applyDebateMysteryAction(db, "user-1", session.id, {
       expectedRevision: session.revision,
@@ -321,16 +639,32 @@ describe("Debate Whodunnit private/public boundary", () => {
     }, runtime(provider));
     assert.equal(session.formatState.accessHistory.at(-1)?.success, false);
     assert.ok(session.formatState.inventoryItems.some((item) => item.id === safeCode.id));
-    assert.equal(session.formatState.actionsRemaining, beforeAttempts);
+    assert.equal(session.formatState.actionsRemaining, beforeAttempts - 1);
 
-    session = await applyDebateMysteryAction(db, "user-1", session.id, {
+    const accessActionCount = listDebateMysteryActions(db, "user-1", session.id).length;
+    const duplicateAccessRequest = (idempotencyKey: string) => applyDebateMysteryAction(db, "user-1", session.id, {
       expectedRevision: session.revision,
-      idempotencyKey: "access-open-box",
-      action: "use_access_item",
+      idempotencyKey,
+      action: "use_access_item" as const,
       accessItemId: goldKey.id,
-      targetKind: "item",
+      targetKind: "item" as const,
       targetId: jewelryBox.id,
     }, runtime(provider));
+    const duplicateAccessResults = await Promise.allSettled([
+      duplicateAccessRequest("access-open-box-a"),
+      duplicateAccessRequest("access-open-box-b"),
+    ]);
+    const openedBox = duplicateAccessResults.find(
+      (result): result is PromiseFulfilledResult<DebateSessionV1> => result.status === "fulfilled",
+    )?.value;
+    const duplicateOpenedBox = duplicateAccessResults.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    )?.reason;
+    assert.ok(openedBox);
+    assert.ok(duplicateOpenedBox instanceof HttpError && duplicateOpenedBox.statusCode === 409);
+    session = openedBox;
+    assert.equal(listDebateMysteryActions(db, "user-1", session.id).length, accessActionCount + 1);
+    assert.equal(session.formatState.accessHistory.filter((entry) => entry.id === "lock-jewelry-box").length, 1);
     assert.equal(session.formatState.inventoryItems.some((item) => item.id === goldKey.id || item.id === jewelryBox.id), false);
     assert.ok(session.formatState.inventoryItems.some((item) => item.id === "artifact-heirloom-jewels"));
     assert.ok(session.formatState.discoveredEvidence.some((item) => item.id === "evidence-heirloom-jewels"));
@@ -352,12 +686,41 @@ describe("Debate Whodunnit private/public boundary", () => {
 
     const regionLock = bible.accessLocks.find((lock) => lock.targetKind === "region")!;
     const [safeRoomId] = regionLock.targetId.split(":");
+    session = await endActivity(db, provider, session, "access-end-crime-scene");
     session = await applyDebateMysteryAction(db, "user-1", session.id, {
       expectedRevision: session.revision,
       idempotencyKey: "access-travel-safe-room",
       action: "travel",
       roomId: safeRoomId!,
     }, runtime(provider));
+    session = await beginInvestigation(db, provider, session, safeRoomId!, "access-begin-safe-room");
+    await assert.rejects(
+      applyDebateMysteryAction(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "access-open-safe-before-discovery",
+        action: "use_access_item",
+        accessItemId: safeCode.id,
+        targetKind: "region",
+        targetId: regionLock.targetId,
+      }, runtime(provider)),
+      (error: unknown) => error instanceof HttpError && error.statusCode === 404 && error.message.includes("No discovered lock"),
+    );
+    const safeRegionId = regionLock.targetId.split(":").slice(1).join(":");
+    session = await applyDebateMysteryAction(db, "user-1", session.id, {
+      expectedRevision: session.revision,
+      idempotencyKey: "access-discover-safe",
+      action: "inspect",
+      roomId: safeRoomId!,
+      regionId: safeRegionId,
+    }, runtime(provider));
+    const discoveredSafe = session.formatState.rooms.find((room) => room.id === safeRoomId)!
+      .observations.find((observation) => observation.regionId === safeRegionId)!;
+    assert.deepEqual(discoveredSafe.accessTargets, [{
+      targetKind: "region",
+      targetId: regionLock.targetId,
+      targetLabel: regionLock.targetLabel,
+    }]);
+    assert.equal(JSON.stringify(discoveredSafe.accessTargets).includes("requiredAccessItemId"), false);
     session = await applyDebateMysteryAction(db, "user-1", session.id, {
       expectedRevision: session.revision,
       idempotencyKey: "access-open-safe",
@@ -367,7 +730,9 @@ describe("Debate Whodunnit private/public boundary", () => {
       targetId: regionLock.targetId,
     }, runtime(provider));
     assert.ok(session.formatState.inventoryItems.some((item) => item.id === "artifact-private-ledger"));
-    assert.match(session.formatState.rooms.find((room) => room.id === safeRoomId)!.observations.find((observation) => observation.regionId === regionLock.targetId.split(":").slice(1).join(":"))!.observation, /hidden safe opens/u);
+    const openedSafe = session.formatState.rooms.find((room) => room.id === safeRoomId)!.observations.find((observation) => observation.regionId === safeRegionId)!;
+    assert.match(openedSafe.observation, /hidden safe opens/u);
+    assert.deepEqual(openedSafe.accessTargets, []);
     assert.equal(session.formatState.accessHistory.filter((entry) => entry.success).length, 3);
     assert.equal(JSON.stringify(session.formatState.accessHistory).includes("unrelated"), false);
   });
@@ -437,26 +802,29 @@ describe("Debate Whodunnit private/public boundary", () => {
     assert.equal(stillPrivate?.imageId, null);
   });
 
-  it("investigates, preserves free inspection, and earns a deterministic Lucky Break at trial", async () => {
+  it("investigates with a paid inspection and earns a deterministic Lucky Break at trial", async () => {
     const db = testDb();
     const provider = new MysteryProviderStub();
     let session = await createDebateMysterySession(db, "user-1", setup(db), "mystery-create-0002", runtime(provider));
     assert.equal(session.formatState.format, "whodunnit");
     const initialActions = session.formatState.actionsRemaining;
     const crimeScene = session.formatState.rooms.find((room) => room.id === session.formatState.crimeSceneRoomId)!;
+    session = await beginInvestigation(db, provider, session, crimeScene.id, "mystery-begin-investigation-0001");
     const inspectRequest = { expectedRevision: session.revision, idempotencyKey: "mystery-inspect-0001", action: "inspect" as const, roomId: crimeScene.id, regionId: crimeScene.activeRegionId! };
     session = await applyDebateMysteryAction(db, "user-1", session.id, inspectRequest, runtime(provider));
     assert.equal(session.formatState.format, "whodunnit");
-    assert.equal(session.formatState.actionsRemaining, initialActions);
+    assert.equal(session.formatState.actionsRemaining, initialActions - 1 + session.formatState.recoveredActionTokens.length);
     assert.equal(session.formatState.discoveredEvidence.length, 1);
     assert.equal(JSON.stringify(session.formatState).includes("factTags"), false);
     const inspectReplay = await applyDebateMysteryAction(db, "user-1", session.id, inspectRequest, runtime(provider));
     assert.equal(inspectReplay.revision, session.revision);
-    assert.equal(listDebateMysteryActions(db, "user-1", session.id).length, 1);
+    assert.equal(listDebateMysteryActions(db, "user-1", session.id).length, 2);
     const bible = getDebateMysteryCaseBible(db, "user-1", session.id);
     const culprit = session.formatState.suspects.find((seat) => seat.seatId === bible.culpritSeatId)!;
     const culpritRoomId = bible.suspects.find((seat) => seat.seatId === culprit.seatId)!.roomId;
+    session = await endActivity(db, provider, session, "mystery-end-investigation-0001");
     session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "mystery-travel-0001", action: "travel", roomId: culpritRoomId }, runtime(provider));
+    session = await beginInterview(db, provider, session, culprit.seatId, "mystery-begin-interview-0001");
     session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "mystery-interview-0001", action: "interview", suspectSeatId: culprit.seatId, question: "Where were you when the corridor clock chimed?" }, runtime(provider));
     assert.equal(provider.actorCalls, 1);
     assert.equal(provider.actorPrompts[0]!.includes("proofBundles"), false);
@@ -465,6 +833,7 @@ describe("Debate Whodunnit private/public boundary", () => {
     assert.equal(session.formatState.format, "whodunnit");
     const evidenceId = session.formatState.discoveredEvidence[0]!.id;
     const testimonyId = session.formatState.testimony.find((entry) => entry.speakerSeatId === culprit.seatId)!.id;
+    session = await endActivity(db, provider, session, "mystery-end-interview-0001");
     session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "mystery-file-0001", action: "file_theory", theory: { culpritSeatId: culprit.seatId, accompliceSeatId: null, method: "The cordial", motive: "A secret", opportunity: "The corridor", evidenceIds: [evidenceId], testimonyIds: [testimonyId] } }, runtime(provider));
     session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "mystery-court-0001", action: "court_present", testimonyId, evidenceId }, runtime(provider));
     if (session.formatState.format === "whodunnit" && session.formatState.court?.activeTestimonyId) {
@@ -474,7 +843,7 @@ describe("Debate Whodunnit private/public boundary", () => {
     assert.equal(session.formatState.format, "whodunnit");
     assert.equal(session.formatState.verdict?.grade, "lucky_break");
     const actions = listDebateMysteryActions(db, "user-1", session.id);
-    assert.deepEqual(actions.map((entry) => entry.action), ["inspect", "travel", "interview", "file_theory", "court_present", "court_pass"]);
+    assert.deepEqual(actions.map((entry) => entry.action), ["begin_investigation", "inspect", "end_activity", "travel", "begin_interview", "interview", "end_activity", "file_theory", "court_present", "court_pass"]);
     assert.equal(JSON.stringify(actions).includes("culpritSeatId"), true); // The filed accusation is public.
     assert.equal(JSON.stringify(actions).includes("proofBundles"), false);
     assert.equal(JSON.stringify(actions).includes("factTags"), false);
@@ -486,11 +855,13 @@ describe("Debate Whodunnit private/public boundary", () => {
     let session = await createDebateMysterySession(db, "user-1", setup(db), "mystery-create-continuance", runtime(provider));
     assert.equal(session.formatState.format, "whodunnit");
     const crimeScene = session.formatState.rooms.find((room) => room.id === session.formatState.crimeSceneRoomId)!;
+    session = await beginInvestigation(db, provider, session, crimeScene.id, "continuance-begin-investigation");
     session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "continuance-inspect", action: "inspect", roomId: crimeScene.id, regionId: crimeScene.activeRegionId! }, runtime(provider));
     const bible = getDebateMysteryCaseBible(db, "user-1", session.id);
     const accused = bible.suspects.find((suspect) => suspect.seatId !== bible.culpritSeatId)!;
     const evidenceId = session.formatState.format === "whodunnit" ? session.formatState.discoveredEvidence[0]!.id : "";
     const theory = { culpritSeatId: accused.seatId, accompliceSeatId: null, method: "", motive: "", opportunity: "", evidenceIds: [evidenceId], testimonyIds: [] };
+    session = await endActivity(db, provider, session, "continuance-end-investigation");
     session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "continuance-file-1", action: "file_theory", theory }, runtime(provider));
     assert.equal(session.formatState.format, "whodunnit");
     const testimonyId = session.formatState.court!.activeTestimonyId!;
@@ -528,6 +899,7 @@ describe("Debate Whodunnit private/public boundary", () => {
     };
     db.prepare("UPDATE debate_sessions SET session_json = ? WHERE id = ? AND user_id = 'user-1'").run(JSON.stringify(stored), session.id);
     session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "muted-travel", action: "travel", roomId: culprit.roomId }, runtime(provider));
+    session = await beginInterview(db, provider, session, culprit.seatId, "muted-begin-interview");
     session = await applyDebateMysteryAction(db, "user-1", session.id, { expectedRevision: session.revision, idempotencyKey: "muted-interview", action: "interview", suspectSeatId: culprit.seatId, question: "State your alibi." }, runtime(provider));
     assert.equal(session.formatState.format, "whodunnit");
     assert.equal(session.formatState.testimony.some((item) => item.speakerSeatId === culprit.seatId), true);

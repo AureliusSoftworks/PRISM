@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 
 import type { BotFaceEyeMovement } from "@localai/shared";
 import {
+  botFaceEyeMovementPreservingInkRegistration,
   botFaceEyeMovementLiveIntervalMs,
   botFaceGazeTravel,
   resolveBotFaceGazeFrame,
@@ -28,6 +29,33 @@ const ENVELOPES: Record<
 };
 
 describe("bot eye movement modes", () => {
+  it("keeps authored Ink registered while off-mic", () => {
+    assert.equal(
+      botFaceEyeMovementPreservingInkRegistration({
+        movement: "paranoid",
+        hasVisibleInk: true,
+        talking: false,
+      }),
+      "still",
+    );
+    assert.equal(
+      botFaceEyeMovementPreservingInkRegistration({
+        movement: "paranoid",
+        hasVisibleInk: true,
+        talking: true,
+      }),
+      "paranoid",
+    );
+    assert.equal(
+      botFaceEyeMovementPreservingInkRegistration({
+        movement: "natural",
+        hasVisibleInk: false,
+        talking: false,
+      }),
+      "natural",
+    );
+  });
+
   it("is deterministic at a replay timestamp and after seeking", () => {
     for (const movement of ACTIVE_MOVEMENTS) {
       const args = {
@@ -244,14 +272,18 @@ describe("bot eye movement modes", () => {
     assert.match(page, /blinkWhileTalking = true/);
     assert.match(
       page,
-      /renderDetailLevel === "debate"\s*\? faceStyle\.eyeAnimation\s*:\s*"still"/,
+      /renderDetailLevel === "debate"\s*\? registeredFaceEyeMovement\s*:\s*"still"/,
     );
     assert.match(
       page,
-      /renderDetailLevel === "full"\s*\? faceStyle\.eyeAnimation\s*:\s*"still"/,
+      /renderDetailLevel === "full"\s*\? registeredFaceEyeMovement\s*:\s*"still"/,
     );
     assert.match(page, /eyeTargetDirection:\s*seatEyeTargetDirection/);
     assert.match(page, /avatarState\.role === "host" \? 1 : -1/);
+    assert.match(
+      page,
+      /eyeAnimation:\s*botFaceEyeMovementPreservingInkRegistration\(\{[\s\S]{0,220}hasVisibleInk:\s*avatarDetailsHasVisuals\(\s*signalMannequinAvatarDetails,?\s*\)[\s\S]{0,120}talking:\s*signalMannequinTalking/,
+    );
     assert.match(page, /nervous:\s*"Nervous"/);
     assert.match(page, /frantic:\s*"Frantic"/);
     assert.match(page, /paranoid:\s*"Paranoid"/);

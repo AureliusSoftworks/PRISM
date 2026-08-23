@@ -5,6 +5,7 @@ import {
   castBotcastShowRecoveryHost,
   createBotcastShow,
   getBotcastShow,
+  listBotcastShows,
   screenBotcastShowHostRecovery,
 } from "../botcast.ts";
 import { initializeDatabase } from "../db.ts";
@@ -44,6 +45,30 @@ function fixture(): DatabaseSync {
 const localFactory = (provider: LlmProvider) => (() => provider) as never;
 
 describe("Signal vacant host recovery", () => {
+  it("reports active host availability from get and list mappings", () => {
+    const db = fixture();
+    const show = createBotcastShow(db, "user-1", { hostBotId: "old-host" });
+    assert.equal(getBotcastShow(db, "user-1", show.id).hasActiveHost, true);
+    assert.equal(listBotcastShows(db, "user-1")[0]?.hasActiveHost, true);
+
+    db.prepare("UPDATE bots SET chat_enabled = 0 WHERE id = 'old-host' AND user_id = 'user-1'").run();
+    assert.equal(getBotcastShow(db, "user-1", show.id).hasActiveHost, false);
+    assert.equal(listBotcastShows(db, "user-1")[0]?.hasActiveHost, false);
+  });
+
+  it("treats screening an active host as an idempotent no-op", async () => {
+    const db = fixture();
+    const show = createBotcastShow(db, "user-1", { hostBotId: "old-host" });
+    const provider = new RecoveryProvider([]);
+    const result = await screenBotcastShowHostRecovery(db, "user-1", show.id, {
+      auxiliaryProviderFactory: localFactory(provider),
+    });
+    assert.equal(result.status, "not_needed");
+    assert.equal(result.recovery, null);
+    assert.equal(result.status === "not_needed" && result.show.hasActiveHost, true);
+    assert.equal(provider.calls, 0);
+  });
+
   it("uses the local auxiliary provider, reassigns only the show, and leaves episode host history intact", async () => {
     const db = fixture();
     const show = createBotcastShow(db, "user-1", { hostBotId: "old-host", name: "The Signal", premise: "Patient interviews", hostingStyle: "gentle, precise" });
@@ -56,7 +81,10 @@ describe("Signal vacant host recovery", () => {
       '{"status":"accept","reason":"I consent to hold this chair."}',
     ]);
 
-    const recovery = await screenBotcastShowHostRecovery(db, "user-1", show.id, { auxiliaryProviderFactory: localFactory(provider) });
+    const screening = await screenBotcastShowHostRecovery(db, "user-1", show.id, { auxiliaryProviderFactory: localFactory(provider) });
+    assert.equal(screening.status, "screened");
+    if (screening.status !== "screened") throw new Error("Expected vacant-host screening.");
+    const recovery = screening.recovery;
     assert.equal(provider.name, "local");
     assert.equal(provider.calls, 1);
     assert.equal(recovery.candidates[0]?.status, "compatible");
@@ -74,12 +102,14 @@ describe("Signal vacant host recovery", () => {
       '{"status":"compatible","reason":"A clear fit."}',
       '{"status":"decline","reason":"This chair is not mine."}',
     ]);
-    await screenBotcastShowHostRecovery(db, "user-1", show.id, { auxiliaryProviderFactory: localFactory(provider) });
+    const screening = await screenBotcastShowHostRecovery(db, "user-1", show.id, { auxiliaryProviderFactory: localFactory(provider) });
+    assert.equal(screening.status, "screened");
     const result = await castBotcastShowRecoveryHost(db, "user-1", show.id, "candidate", { auxiliaryProviderFactory: localFactory(provider) });
     assert.equal(result.status, "declined");
     db.prepare("UPDATE botcast_shows SET premise = 'A materially different premise' WHERE id = ?").run(show.id);
     const rescreened = await screenBotcastShowHostRecovery(db, "user-1", show.id, { auxiliaryProviderFactory: localFactory(provider) });
-    assert.equal(rescreened.candidates[0]?.status, "refused");
+    assert.equal(rescreened.status, "screened");
+    assert.equal(rescreened.status === "screened" && rescreened.recovery.candidates[0]?.status, "refused");
     assert.equal(provider.calls, 2);
   });
 });

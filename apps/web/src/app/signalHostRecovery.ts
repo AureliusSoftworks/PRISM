@@ -1,5 +1,12 @@
 import type { BotcastHostRecoveryCandidate } from "@localai/shared";
 
+export function signalShouldScreenHostRecovery(args: {
+  hasActiveHost: boolean;
+  episodeStatus: "live" | "completed" | "cancelled" | null;
+}): boolean {
+  return !args.hasActiveHost && args.episodeStatus !== "live";
+}
+
 export function signalHostRecoveryCandidateEnabled(
   candidate: Pick<BotcastHostRecoveryCandidate, "status">,
 ): boolean {

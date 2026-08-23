@@ -22,6 +22,11 @@ export type BotPowerMuteModePolicy =
   | "not_applicable"
   | "required_before_activation";
 export type BotPowerBreathlessModePolicy = BotPowerMuteModePolicy;
+export type BotPowerSpeechCopyModePolicy =
+  | "direct"
+  | "adapted"
+  | "not_applicable"
+  | "required_before_activation";
 export type BotPowerCandorModePolicy =
   | "direct"
   | "cue"
@@ -56,6 +61,7 @@ export type BotPowerIntermittentAudibilityModePolicy = BotPowerGhostModePolicy;
 export type BotPowerAnnoyanceModePolicy = BotPowerGhostModePolicy;
 export type BotPowerResponseBudgetModePolicy = BotPowerGhostModePolicy;
 export type BotPowerInterruptionModePolicy = BotPowerGhostModePolicy;
+export type BotPowerTrollModePolicy = BotPowerGhostModePolicy;
 export type BotPowerIdentityMirrorModePolicy = BotPowerGhostModePolicy;
 export type BotPowerIdentityShapeshiftModePolicy = BotPowerGhostModePolicy;
 export type BotPowerFalseNameModePolicy = BotPowerGhostModePolicy;
@@ -79,19 +85,19 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   chat: {
     id: "chat",
     name: "Chat",
-    version: "1.46",
+    version: "1.48",
     status: "active",
   },
   zen: {
     id: "zen",
     name: "Zen",
-    version: "1.45",
+    version: "1.47",
     status: "active",
   },
   debate: {
     id: "debate",
     name: "Debate",
-    version: "0.42",
+    version: "0.47",
     status: "preview",
   },
   polling: {
@@ -103,13 +109,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "2.61",
+    version: "2.67",
     status: "active",
   },
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "1.77",
+    version: "1.84",
     status: "active",
   },
   feed: {
@@ -127,7 +133,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   story: {
     id: "story",
     name: "Story",
-    version: "0.38",
+    version: "0.41",
     status: "planned",
   },
   gym: {
@@ -154,6 +160,49 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
     version: "0.0",
     status: "planned",
   },
+};
+
+/** Troll uses bounded public bait; only real multi-bot runtimes cut the floor. */
+export const BOT_POWER_TROLL_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerTrollModePolicy
+> = {
+  chat: "cue",
+  zen: "adapted",
+  debate: "direct",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/**
+ * Every bot-speaking applet must preserve exact short public speech, including
+ * language-bearing Foley, as a Copycat source before it can activate.
+ */
+export const BOT_POWER_SPEECH_COPY_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerSpeechCopyModePolicy
+> = {
+  chat: "direct",
+  zen: "direct",
+  debate: "adapted",
+  polling: "required_before_activation",
+  coffee: "adapted",
+  botcast: "adapted",
+  feed: "required_before_activation",
+  games: "required_before_activation",
+  story: "adapted",
+  gym: "required_before_activation",
+  slate: "not_applicable",
+  pseudo: "required_before_activation",
+  surf: "required_before_activation",
 };
 
 /** The holder changes other bot names; hearers may take one soft social reaction beat. */
@@ -256,7 +305,11 @@ export const BOT_POWER_AVATAR_COLOR_CYCLE_MODE_POLICY: Record<
   surf: "deferred",
 };
 
-/** Direct-address identity theft exists only where bots can address bots at runtime. */
+/**
+ * Direct-address identity theft exists only where bots can address bots at
+ * runtime. Direct modes retain the holder voice, enforce one reveal label and
+ * non-recanting, and hard-correct only genuine misaddressing of the original.
+ */
 export const BOT_POWER_IDENTITY_MIRROR_MODE_POLICY: Record<
   PrismAppletId,
   BotPowerIdentityMirrorModePolicy

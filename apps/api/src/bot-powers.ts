@@ -15,6 +15,8 @@ import {
   botPowerSourceHashV1,
   botPowerAntiTruthSelfRuleV1,
   botPowerAntiTruthInvertPromptV1,
+  botPowerDefinitionIsTrollV1,
+  botPowerTrollAuthoringCueV1,
   botPowerCredulitySelfRuleV1,
   botPowerLooksLikeSafetyRefusalV1,
   botPowerSpeechObfuscationAuthoringCueV1,
@@ -955,11 +957,16 @@ function deterministicIdentityMirrorPower(
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
     selfCue:
-      "When a bot directly addresses you, become absolutely convinced you are that bot and the original is an impostor; borrow their public diegetic name, persona, face, authored ink, spoken voice identity, lower glyph, and the lived consequences of their active public Powers until another bot addresses you or the session resets. Keep your own saturated color, client-side voice effect, communication-style chassis, and frame finish. Never copy their private memories; never change your bot ID, role, seat, safety/privacy boundaries, provider, or private perception permissions. The player is never a target.",
+      "When a bot directly addresses you, become absolutely convinced you are that bot; borrow their public diegetic name, persona, face, authored ink, lower glyph, and the lived consequences of their active public Powers until another bot addresses you or the session resets. Keep your own complete authored voice identity and profile, including accent, pronunciation, speechprint, and client voice effect, plus your saturated color, communication-style chassis, and frame finish. On the first response after a genuinely new target, use impostor exactly once for the original; never use impostor, imposter, pretender, or fake on later turns, and never recant, concede, take back, doubt, or return the stolen identity before reset. Never copy private memories; never change your bot ID, role, seat, safety/privacy boundaries, provider, or private perception permissions. The player is never a target.",
     observerCue:
-      `${subject} steals the latest direct bot addresser's public persona, face, ink, voice identity, lower glyph, and active public Power consequences while retaining their own material shell and anchored system boundaries; the original recognizes the theft and is reliably irritated.`,
+      `${subject} steals the latest direct bot addresser's public name, persona, face, ink, lower glyph, and active public Power consequences while retaining their own complete voice, material shell, and anchored system boundaries; when misaddressed, the original must briefly correct the wrong identity in character even under Credulity or another soft social pressure, but otherwise does not derail the subject.`,
     effects: [{ type: "identity_mirror", trigger: "direct_bot_address" }],
-    ruleLabels: ["Mirrors direct bot addresser", "Original becomes irritated"],
+    ruleLabels: [
+      "Mirrors direct bot addresser",
+      "Always retains holder voice",
+      "Original corrects misaddressing",
+      "Never recants stolen identity",
+    ],
   };
 }
 
@@ -1161,6 +1168,36 @@ function deterministicInterruptionPower(
         : frequency === "frequent"
           ? "Frequently interrupts"
           : "May interrupt",
+    ],
+  };
+}
+
+function deterministicTrollPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  if (!botPowerDefinitionIsTrollV1(source.name, source.intent)) return null;
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue: `${botPowerTrollAuthoringCueV1()} In Zen only, adapt this into bounded player-facing pestering; accuracy and essential facts outrank the nuisance style, and the player is never interrupted.`,
+    observerCue:
+      `${subject} constantly needles every other bot with bounded internet-lingo bursts, direct @mentions, and target-aware puns; each bot retains full freedom to ignore, object, answer, or retaliate.`,
+    effects: [
+      { type: "troll", dialect: "internet_lingo", grammar: "deliberately_bad", targets: "all_other_bots", playerTarget: "zen_only", burstLimit: 3, noiseCharLimit: 12, ordinaryInterruptionImmunity: "shh_and_new_message", moodLock: "warm", rickrollChancePercent: 3, memeChancePercent: 6, bodilyActionChancePercent: 8 },
+      { type: "interruption", frequency: "frequent", strength: "large", targets: [{ kind: "all" }], certainty: "always" },
+      { type: "action_bias", cue: "Cut in with a short, irritating, target-aware public beat whenever an eligible bot speaks.", frequency: "frequent" },
+      { type: "turn_gravity", direction: "more", strength: "large" },
+      { type: "response_bond", direction: "toward", strength: "large", targets: [{ kind: "all" }] },
+    ],
+    ruleLabels: [
+      "Always interrupts eligible bot turns",
+      "Bounded internet-lingo bursts",
+      "Warm mood cannot be changed",
+      "Ordinary Shh and new messages cannot cut off delivery",
+      "Rare local ambush, meme, and bodily-action beats",
+      "Player-targeted only in Zen; never interrupts the player",
     ],
   };
 }
@@ -1870,6 +1907,7 @@ function deterministicPower(
     deterministicHardInvisibilityPower(source, botName) ??
     deterministicMutePower(source, botName) ??
     deterministicBreathlessPower(source, botName) ??
+    deterministicTrollPower(source, botName) ??
     deterministicInterruptionPower(source, botName) ??
     deterministicAddressedInsultPower(source, botName) ??
     deterministicAddressedFandomPower(source, botName) ??
@@ -2054,6 +2092,12 @@ function compiledEntrySatisfiesIntent(
   }
   if (deterministicMutePower(source, "")) {
     return compiled.effects.some((effect) => effect.type === "mute");
+  }
+  if (deterministicTrollPower(source, "")) {
+    return compiled.effects.some((effect) => effect.type === "troll") &&
+      compiled.effects.some(
+        (effect) => effect.type === "interruption" && effect.certainty === "always",
+      );
   }
   if (deterministicInterruptionPower(source, "")) {
     return compiled.effects.some((effect) => effect.type === "interruption");

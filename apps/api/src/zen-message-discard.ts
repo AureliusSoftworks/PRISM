@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { parseStoredAssistantToolPayload } from "@localai/shared";
 import { deleteMemoriesLinkedToMessages } from "./memory.ts";
 
 export type DiscardLatestZenAssistantMessageResult = {
@@ -14,7 +15,7 @@ export function discardLatestZenAssistantMessage(
   nowIso = new Date().toISOString()
 ): DiscardLatestZenAssistantMessageResult {
   const message = db.prepare(`
-    SELECT m.id, m.conversation_id, m.role, m.created_at,
+    SELECT m.id, m.conversation_id, m.role, m.tool_payload, m.created_at,
            c.conversation_mode
     FROM messages m
     JOIN conversations c ON c.id = m.conversation_id AND c.user_id = m.user_id
@@ -24,6 +25,7 @@ export function discardLatestZenAssistantMessage(
       id: string;
       conversation_id: string;
       role: string;
+      tool_payload: string | null;
       created_at: string;
       conversation_mode: string | null;
     }
@@ -40,6 +42,14 @@ export function discardLatestZenAssistantMessage(
     message.conversation_mode !== "chat"
   ) {
     throw new Error("Only Chat or Zen assistant messages can be discarded.");
+  }
+  if (
+    parseStoredAssistantToolPayload(message.tool_payload)
+      .botPowerTrollPresentation?.ordinaryInterruptionImmune === true
+  ) {
+    throw new Error(
+      "This in-fiction Troll ambush ignores ordinary Shh; use Stop, Escape, mute, disable the Power, or leave the mode.",
+    );
   }
 
   const latestMessage = db.prepare(

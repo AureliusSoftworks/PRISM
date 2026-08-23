@@ -29,6 +29,7 @@ import {
   signalListenerReactionPlanForPlaybackV1,
   listenerReactionHasCrosstalkAudio,
   listenerReactionInterruptedSpeakerTextV1,
+  listenerReactionSpeechCopySourceV1,
   listenerReactionSpokenTextV1,
   listenerReactionTextIsAuthorizedV1,
   socialSilenceMessageIsMarkedV1,
@@ -36,6 +37,48 @@ import {
 import { DIRECTIONAL_IRRITATION_SNARK_CUES } from "./directionalIrritation.ts";
 
 describe("listener reaction planning", () => {
+  it("exposes exact short public reaction speech to Copycat across social modes", () => {
+    for (const cue of ["Hmm...", "let me see...", "Nice!"] as const) {
+      assert.equal(
+        listenerReactionSpeechCopySourceV1({
+          speakerBotId: "speaker",
+          listenerBotId: "listener",
+          spokenCue: cue,
+        }, "speaker"),
+        cue,
+      );
+    }
+  });
+
+  it("uses the latest other-bot crosstalk speech without copying silence or itself", () => {
+    assert.equal(
+      listenerReactionSpeechCopySourceV1({
+        speakerBotId: "speaker",
+        listenerBotId: "listener",
+        spokenCue: "Hold on.",
+        interruptedSpeakerCue: "Let me finish.",
+      }, "third-bot"),
+      "Let me finish.",
+    );
+    assert.equal(
+      listenerReactionSpeechCopySourceV1({
+        speakerBotId: "copycat",
+        listenerBotId: "listener",
+        spokenCue: "Nice!",
+        interruptedSpeakerCue: BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE,
+      }, "copycat"),
+      "Nice!",
+    );
+    assert.equal(
+      listenerReactionSpeechCopySourceV1({
+        speakerBotId: "speaker",
+        listenerBotId: "copycat",
+        spokenCue: "Hmm...",
+      }, "copycat"),
+      null,
+    );
+  });
+
   it("normalizes Power-projected spoken cues as the only public reaction text", () => {
     const normalized = normalizeListenerReactionPlanV1({
       v: 1,

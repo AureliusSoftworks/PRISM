@@ -108,6 +108,26 @@ describe("Settings memory controls", () => {
       /memory-receipts\/sessions\/\$\{encodeURIComponent\(normalizedSessionId\)\}\/read/u,
     );
     assert.match(pageSource, /receipt\.kind !== "bot_relation"/u);
+    assert.match(
+      pageSource,
+      /receipt\.conversationId !== coffeeConversation\?\.id/u,
+      "Coffee must ignore delayed receipts from another applet session",
+    );
+    assert.match(
+      pageSource,
+      /!activeConversationId \|\|\s*receipt\.conversationId !== activeConversationId/u,
+      "receipt detail must stay inside the active applet conversation",
+    );
+    assert.match(
+      pageSource,
+      /typeof options\?\.sessionId === "string" &&\s*candidate\.conversationId === options\.sessionId/u,
+      "live receipt chips require an explicit active session",
+    );
+    assert.match(
+      pageSource,
+      /typeof detail\?\.id === "string" &&\s*receipt\.conversationId === detail\.id/u,
+      "Chat and Zen must not borrow an unread receipt from another applet",
+    );
     assert.match(pageSource, /unreadMemoryReceiptBotIds/u);
     assert.match(pageSource, /renderLiveBotMemoryReceiptChip/u);
     assert.match(
@@ -126,7 +146,7 @@ describe("Settings memory controls", () => {
     assert.match(pageSource, /data-transient=\{props\.transient \? "true" : undefined\}/u);
     assert.match(
       pageSource,
-      /renderLiveBotMemoryReceiptChip\(\s*liveBot\.id,\s*liveBot\.name,\s*\{ transient: true \},/u,
+      /renderLiveBotMemoryReceiptChip\(\s*liveBot\.id,\s*liveBot\.name,\s*\{[\s\S]{0,140}transient: true,[\s\S]{0,140}sessionId: debateLiveSessionId \?\? undefined,/u,
     );
     assert.match(pageSource, /aria-live="polite"/u);
     assert.match(pageSource, /View in Memories/u);

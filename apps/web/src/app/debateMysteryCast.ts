@@ -47,3 +47,37 @@ export function randomizeWhodunnitCast(
     rivalDefenseBotId: remaining[targetSuspects + 1] ?? "",
   };
 }
+
+/**
+ * Populate every Whodunnit role while guaranteeing that a bot captured from
+ * the suspect grid remains one of the suspects.
+ */
+export function randomizeWhodunnitCastAroundBot(
+  bots: readonly WhodunnitCastBot[],
+  suspectCount: number,
+  anchorBotId: string,
+  random: () => number = Math.random,
+): WhodunnitCastAllocation | null {
+  const normalizedAnchorBotId = anchorBotId.trim();
+  const candidates = distinctWhodunnitCastBotIds(bots);
+  if (!normalizedAnchorBotId || !candidates.includes(normalizedAnchorBotId)) {
+    return null;
+  }
+  const targetSuspects = Math.max(0, Math.min(8, Math.round(suspectCount)));
+  if (targetSuspects < 1) return null;
+  const remainingAllocation = randomizeWhodunnitCast(
+    candidates
+      .filter((botId) => botId !== normalizedAnchorBotId)
+      .map((id) => ({ id })),
+    targetSuspects - 1,
+    random,
+  );
+  if (!remainingAllocation) return null;
+  return {
+    ...remainingAllocation,
+    suspectBotIds: [
+      normalizedAnchorBotId,
+      ...remainingAllocation.suspectBotIds,
+    ],
+  };
+}

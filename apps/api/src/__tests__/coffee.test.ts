@@ -212,6 +212,7 @@ import {
   directionalIrritationEdgeKey,
   parseStoredAssistantToolPayload,
   serializeAssistantToolPayload,
+  serializeBotAudioVoiceProfileV1,
   serializeStoredBotPrompt,
   normalizeCoffeeSessionSettings,
   planSocialSilenceV1,
@@ -1427,19 +1428,19 @@ describe("normalizeCoffeeGroupBotIds", () => {
 });
 
 describe("assertCoffeeInviteBotCount", () => {
-  it("keeps two-guest tables in Signal by requiring three invited bots", () => {
-    assert.throws(() => assertCoffeeInviteBotCount(["bot-a", "bot-b"]), /Signal/u);
+  it("requires at least two invited bots", () => {
+    assert.throws(() => assertCoffeeInviteBotCount(["bot-a"]), /at least 2/u);
     assert.throws(
-      () => assertCoffeeInviteBotCount(["bot-a", "bot-a", "bot-b", null]),
+      () => assertCoffeeInviteBotCount(["bot-a", "bot-a", null]),
       new RegExp(`at least ${COFFEE_GROUP_INVITE_MIN_SIZE}`)
     );
     assert.doesNotThrow(() =>
-      assertCoffeeInviteBotCount(["bot-a", "bot-b", "bot-c"])
+      assertCoffeeInviteBotCount(["bot-a", "bot-b"])
     );
   });
 
-  it("keeps large groups intact but limits a new one-off table to three", () => {
-    assert.equal(COFFEE_SESSION_ATTENDEE_MAX_SIZE, 3);
+  it("keeps large groups intact but limits a new one-off table to four", () => {
+    assert.equal(COFFEE_SESSION_ATTENDEE_MAX_SIZE, 4);
     assert.doesNotThrow(() =>
       assertCoffeeInviteBotCount([
         "bot-a",
@@ -1450,7 +1451,7 @@ describe("assertCoffeeInviteBotCount", () => {
       ]),
     );
     assert.doesNotThrow(() =>
-      assertCoffeeSessionAttendeeCount(["bot-a", "bot-b", "bot-c"]),
+      assertCoffeeSessionAttendeeCount(["bot-a", "bot-b", "bot-c", "bot-d"]),
     );
     assert.throws(
       () =>
@@ -1459,14 +1460,15 @@ describe("assertCoffeeInviteBotCount", () => {
           "bot-b",
           "bot-c",
           "bot-d",
+          "bot-e",
         ]),
-      /at most 3/u,
+      /at most 4/u,
     );
   });
 
   it("leaves stored 2-bot sessions loadable through the structural floor", () => {
     assert.equal(COFFEE_GROUP_MIN_SIZE, 2);
-    assert.equal(COFFEE_GROUP_INVITE_MIN_SIZE, 3);
+    assert.equal(COFFEE_GROUP_INVITE_MIN_SIZE, 2);
     assert.deepEqual(normalizeCoffeeGroupBotIds(["bot-a", "bot-b"]), [
       "bot-a",
       "bot-b",
@@ -2054,6 +2056,7 @@ function createCoffeeTestDb(): DatabaseSync {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       name TEXT NOT NULL,
+      library_group_id TEXT,
       ethos TEXT NOT NULL DEFAULT '',
       atmosphere_json TEXT NOT NULL DEFAULT '{}',
       synthesis_json TEXT NOT NULL DEFAULT '{}',
@@ -5853,7 +5856,7 @@ describe("Coffee group foundation", () => {
     );
   });
 
-  it("draws three live attendees from a five-member group without shrinking it", () => {
+  it("draws four live attendees from a five-member group without shrinking it", () => {
     const roster = [ALICE.id, BORIS.id, CARA.id, DANTE.id, ELENA.id];
     const result = capCoffeeSessionAttendance({
       seatBotIds: roster,
@@ -5864,14 +5867,14 @@ describe("Coffee group foundation", () => {
     );
 
     assert.equal(attending.length, COFFEE_SESSION_ATTENDEE_MAX_SIZE);
-    assert.equal(result.capacityAbsentBotIds.length, 2);
+    assert.equal(result.capacityAbsentBotIds.length, 1);
     assert.deepEqual(
       [...attending, ...result.capacityAbsentBotIds].sort(),
       [...roster].sort(),
     );
   });
 
-  it("freezes only three attendees when a five-member Coffee Group opens", async () => {
+  it("freezes only four attendees when a five-member Coffee Group opens", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
     for (const bot of [ALICE, BORIS, CARA, DANTE, ELENA]) {
@@ -5895,7 +5898,7 @@ describe("Coffee group foundation", () => {
       result.conversation.botGroupIds?.length,
       COFFEE_SESSION_ATTENDEE_MAX_SIZE,
     );
-    assert.equal(result.conversation.coffeeAbsentBotIds?.length, 2);
+    assert.equal(result.conversation.coffeeAbsentBotIds?.length, 1);
     const event = db
       .prepare(
         "SELECT payload FROM coffee_group_events WHERE group_id = ? AND event_type = 'session_created'",
@@ -5904,7 +5907,7 @@ describe("Coffee group foundation", () => {
     const payload = JSON.parse(event.payload) as {
       capacityAbsentBotIds: string[];
     };
-    assert.equal(payload.capacityAbsentBotIds.length, 2);
+    assert.equal(payload.capacityAbsentBotIds.length, 1);
   });
 
   it("rests ordinary wrap fatigue between sessions so the cast comes back", () => {
@@ -6224,6 +6227,94 @@ describe("Coffee group foundation", () => {
     assert.equal(assistant?.content, addressed);
   });
 
+  it("hard-echoes another bot's latest public Coffee Foley", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-power-echo-foley";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const name = "Echo";
+    const intent = "Echo whatever is addressed to this bot and say nothing else.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = ?").run(
+      JSON.stringify([{
+        version: 1,
+        id: "echo-foley",
+        name,
+        intent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(name, intent),
+          selfCue: "Repeat addressed speech exactly.",
+          observerCue: "The sender may react with confusion.",
+          effects: [{ type: "speech_copy", trigger: "direct_address" }],
+          ruleLabels: ["Echoes addressed speech"],
+        },
+      }]),
+      ALICE.id,
+    );
+    await createCoffeeConversationWithId(db, userId, conversationId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      durationMinutes: 10,
+      initialTopic: "The texture of a reaction",
+    });
+    const reactionPayload = serializeAssistantToolPayload({
+      coffeeReplayEvents: [{
+        v: 1,
+        name: "coffeeReplayEvent",
+        kind: "listenerReaction",
+        botId: BORIS.id,
+        occurredAt: "2026-08-22T19:00:00.000Z",
+        plan: {
+          v: 1,
+          name: "listenerReaction",
+          speakerBotId: ALICE.id,
+          listenerBotId: BORIS.id,
+          messageId: "alice-before-foley",
+          targetSource: "role",
+          visualAction: "soft_smile",
+          spokenCue: "Nice!",
+          targetProgress: 0.7,
+          seed: "copycat-coffee-foley",
+          cameraCutEligible: true,
+        },
+      }],
+    });
+    db.prepare(
+      `INSERT INTO messages
+         (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
+       VALUES (?, ?, ?, 'assistant', ?, 'local', NULL, ?, ?, ?)`,
+    ).run(
+      "alice-before-foley",
+      conversationId,
+      userId,
+      "The surrounding Coffee line should not be copied.",
+      ALICE.id,
+      reactionPayload,
+      "2026-08-22T19:00:00.000Z",
+    );
+
+    const turn = await withMockedCoffeeFetch(
+      "This generated line must not appear.",
+      () => processCoffeeAutonomousTurn(
+        db,
+        userId,
+        conversationId,
+        { preferredProvider: "local", sessionRemainingMs: 120_000 },
+        false,
+        ALICE.id,
+      ),
+    );
+
+    assert.equal(turn.speakerBotId, ALICE.id);
+    assert.equal(turn.conversation.messages.at(-1)?.content, "Nice!");
+    assert.equal(
+      turn.conversation.messages.at(-1)?.botPowerExactResponse,
+      "speech_copy",
+    );
+  });
+
   it("gives Forgetful Freddie only the current Coffee message and answers it naturally", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
@@ -6403,6 +6494,7 @@ describe("Coffee group foundation", () => {
     const conversationId = "conv-power-identity-mirror";
     db.exec("ALTER TABLE bots ADD COLUMN face_eye_character TEXT;");
     db.exec("ALTER TABLE bots ADD COLUMN avatar_details_json TEXT;");
+    db.exec("ALTER TABLE bots ADD COLUMN authored_audio_voice_profile TEXT;");
     const ian: CoffeeBotProfile = {
       ...BORIS,
       id: "identity-crisis-ian",
@@ -6426,6 +6518,30 @@ describe("Coffee group foundation", () => {
     db.prepare(
       "UPDATE bots SET face_eye_character = '◉', avatar_details_json = ? WHERE id = ?",
     ).run(JSON.stringify(aliceAvatarDetails), ALICE.id);
+    db.prepare(
+      "UPDATE bots SET authored_audio_voice_profile = ? WHERE id = ?",
+    ).run(
+      serializeBotAudioVoiceProfileV1({
+        v: 2,
+        enabled: true,
+        baseVoiceId: "voice-4",
+        accentDefinitionId: "indian-english",
+      }),
+      ALICE.id,
+    );
+    db.prepare(
+      "UPDATE bots SET authored_audio_voice_profile = ? WHERE id = ?",
+    ).run(
+      serializeBotAudioVoiceProfileV1({
+        v: 2,
+        enabled: true,
+        baseVoiceId: "voice-3",
+        accentDefinitionId: "irish-english",
+        speechprintInfluence: "irish-english",
+        speechprintVariationSeed: "identity-crisis-ian",
+      }),
+      ian.id,
+    );
     const name = "Identity Crisis";
     const intent = "Copy the public identity of the latest bot that directly addresses this bot.";
     db.prepare("UPDATE bots SET powers_json = ? WHERE id = ?").run(
@@ -6503,7 +6619,17 @@ describe("Coffee group foundation", () => {
       firstEvent.state.targetAvatarDetails,
       aliceAvatarDetails,
     );
-    assert.equal(firstEvent.state.targetVoice.enabled, true);
+    assert.equal(firstEvent.state.holderVoice?.enabled, true);
+    assert.equal(firstEvent.state.holderVoice?.baseVoiceId, "voice-3");
+    assert.equal(
+      firstEvent.state.holderVoice?.accentDefinitionId,
+      "irish-english",
+    );
+    assert.equal(
+      firstEvent.state.holderVoice?.speechprintVariationSeed,
+      "identity-crisis-ian",
+    );
+    assert.equal("targetVoice" in firstEvent.state, false);
     assert.equal(firstEvent.state.targetGlyph, ALICE.glyph);
     assert.equal("powers" in firstEvent.state, false);
     assert.equal("color" in firstEvent.state, false);
@@ -6541,7 +6667,7 @@ describe("Coffee group foundation", () => {
     ).replace(/\[([^\]]+)\]\(prism-bot:[^)]+\)/gu, "$1");
     assert.match(
       mirroredHolderContent,
-      /^The other Alice is an impostor\. I am Alice,/iu,
+      /^I am Alice\. The other Alice is an impostor\./iu,
     );
 
     const repeat = await withMockedCoffeeFetch(
@@ -11666,7 +11792,7 @@ describe("buildSpeakerPrompt", () => {
       targetBotName: "Mara Vale",
       targetPersonaPrompt: "A terse lunar cartographer who speaks in bearings.",
       targetFace: { faceEyeCharacter: "◉" },
-      targetVoice: { version: 1, enabled: true, preset: "warm" },
+      holderVoice: { version: 1, enabled: true, preset: "warm" },
       sourceMessageId: "mara-addresses-ian",
       occurredAt: "2026-07-20T20:00:00.000Z",
     });
@@ -11685,7 +11811,7 @@ describe("buildSpeakerPrompt", () => {
       speaker: { id: "ian", name: "Identity Crisis Ian" },
     });
     assert.match(holderPrompt, /absolutely convinced that you are Mara Vale/iu);
-    assert.match(holderPrompt, /original Mara Vale is an impostor/iu);
+    assert.match(holderPrompt, /use the word "impostor" exactly once/iu);
     assert.match(
       holderPrompt,
       /remain Identity Crisis Ian.*Coffee participant.*Borrowed Powers.*anchored system boundaries/su,
@@ -11696,8 +11822,9 @@ describe("buildSpeakerPrompt", () => {
       history,
       speaker: { id: "mara", name: "Mara Vale" },
     });
-    assert.match(originalPrompt, /recognize.*identity theft.*reliably irritated/su);
-    assert.match(originalPrompt, /keep your own personality.*face.*voice.*Powers/su);
+    assert.match(originalPrompt, /Hard Identity Crisis correction invariant/iu);
+    assert.match(originalPrompt, /remain Mara Vale.*personality.*face.*voice.*Powers/su);
+    assert.match(originalPrompt, /outranks Credulity/iu);
 
     const reloaded = coffeeIdentityMirrorStatesFromHistory(
       JSON.parse(JSON.stringify(history)),
@@ -11711,7 +11838,7 @@ describe("buildSpeakerPrompt", () => {
       targetBotName: "Jo Reed",
       targetPersonaPrompt: "A dry public-radio host who asks spare questions.",
       targetFace: { faceEyeCharacter: "•" },
-      targetVoice: { version: 1, enabled: true, preset: "formal" },
+      holderVoice: { version: 1, enabled: true, preset: "formal" },
       sourceMessageId: "jo-addresses-ian",
       occurredAt: "2026-07-20T20:01:00.000Z",
     });
@@ -11748,7 +11875,7 @@ describe("buildSpeakerPrompt", () => {
       targetBotName: "Scatterbrained Steven",
       targetPersonaPrompt: "A friendly man with no durable short-term memory.",
       targetFace: {},
-      targetVoice: { version: 1, enabled: true, preset: "warm" },
+      holderVoice: { version: 1, enabled: true, preset: "warm" },
       sourceMessageId: "steven-addresses-ian",
       occurredAt: "2026-07-20T20:00:00.000Z",
     });
@@ -16410,6 +16537,35 @@ describe("coffee social state helpers", () => {
       ),
     );
 
+    assert.throws(
+      () => sipCoffeeJoinPlayerCup(db, userId, created.conversation.id),
+      /serve mode has no player mug/i,
+    );
+  });
+
+  it("restores pot behavior for legacy timed Serve sessions without a saved mode", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const created = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      durationMinutes: 12,
+      experienceMode: "serve",
+    });
+    await setCoffeeConversationTopic(db, userId, created.conversation.id, "Legacy Serve");
+    db.prepare(
+      "UPDATE conversations SET coffee_settings = json_remove(coffee_settings, '$.experienceMode') WHERE id = ? AND user_id = ?",
+    ).run(created.conversation.id, userId);
+
+    const toppedOff = topOffCoffeeCupForBot(
+      db,
+      userId,
+      created.conversation.id,
+      ALICE.id,
+      0.62,
+    );
+    assert.equal(toppedOff.coffeeSettings?.experienceMode, "serve");
     assert.throws(
       () => sipCoffeeJoinPlayerCup(db, userId, created.conversation.id),
       /serve mode has no player mug/i,

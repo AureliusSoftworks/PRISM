@@ -181,6 +181,7 @@ import {
   recordCoffeeUserAction,
   recordCoffeeReplayEvents,
   recordCoffeeInterruptionPause,
+  coffeeSessionBotIsTrollV1,
   refreshCoffeeConversationStarterTopics,
   restartCoffeeConversationFromSession,
   resolveCoffeeTeamTiebreaker,
@@ -279,12 +280,11 @@ import {
   createDebateMysterySession,
   debateMysteryCaseCodeForSession,
   getDebateMysteryCaseBible,
-  getDebateMysteryNotebook,
+  getDebateMysteryNotebookV2,
   importDebateMysteryCase,
   inspectDebateMysteryCaseCode,
   listDebateMysteryActions,
-  patchDebateMysteryNotebook,
-  proposeDebateMysteryNotebookCleanup,
+  patchDebateMysteryNotebookV2,
   resumeDebateMysteryCompilation,
 } from "./debate-mystery.ts";
 import {
@@ -995,6 +995,7 @@ import {
   normalizeBotGenerationPrompt,
   normalizeEnglishVoiceEngine,
   applyBotNamePronunciations,
+  expandSpeechAbbreviations,
   voicePerformanceTextFromActionCues,
   voicePerformancePlanFromText,
   VOICE_VOCAL_ACTIONS,
@@ -2452,7 +2453,7 @@ async function sendLocalVoiceWaveStream(args: {
   const lastSpeechItemIndex = speechItemIndexes.at(-1) ?? -1;
   const generate = (text: string) =>
     builtinVoiceWaveGeneratorOverride({
-      text,
+      text: expandSpeechAbbreviations(text),
       profile: args.profile,
       allowOperatingSystemVoices: args.allowOperatingSystemVoices,
       signal: args.signal,
@@ -12620,6 +12621,9 @@ function buildRoutes(): RouteDefinition[] {
           ...(assembled.coffeeAmbientAction
             ? { coffeeAmbientAction: assembled.coffeeAmbientAction }
             : {}),
+          ...(assembled.botPowerTrollPresentation
+            ? { botPowerTrollPresentation: assembled.botPowerTrollPresentation }
+            : {}),
         };
       });
       const hubMetadata = getConversationHubMetadata(
@@ -15425,6 +15429,7 @@ function buildRoutes(): RouteDefinition[] {
             {
               identityColor: bot.color ?? null,
               audioVoiceProfile: botAudioVoiceProfile,
+              ...(mode === "zen" ? { surface: "zen" as const } : {}),
             },
           );
           const themeMoodCue = botPowerThemeMoodCueV1(
@@ -17247,51 +17252,20 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       json(ctx.res, 200, {
         ok: true,
-        ...getDebateMysteryNotebook(db, userId, ctx.params.id),
+        ...getDebateMysteryNotebookV2(db, userId, ctx.params.id),
       });
     }),
     route("PATCH", "/api/debates/:id/notebook", async (ctx) => {
       const userId = requireAuth(ctx);
       json(ctx.res, 200, {
         ok: true,
-        ...patchDebateMysteryNotebook(
+        ...patchDebateMysteryNotebookV2(
           db,
           userId,
           ctx.params.id,
           (ctx.body ?? {}) as Record<string, unknown>,
         ),
       });
-    }),
-    route("POST", "/api/debates/:id/notebook/cleanup", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const body = (ctx.body ?? {}) as Record<string, unknown>;
-      const frozen = getDebateSession(db, userId, ctx.params.id);
-      const runtime = await debateAiRuntimeForUser(
-        userId,
-        frozen.provider,
-        frozenDebateModelOverride(frozen),
-        frozen.responseMode,
-        frozen.generationChain,
-        frozen.autoCandidateAllowlist,
-        debateAutoRoutingContext(frozen),
-      );
-      const proposal = await runWithUsageSession(
-        {
-          db,
-          userId,
-          privacyScope: "private",
-          mode: "debate",
-          surface: "debate",
-        },
-        () => proposeDebateMysteryNotebookCleanup(
-          db,
-          userId,
-          ctx.params.id,
-          body,
-          runtime,
-        ),
-      );
-      json(ctx.res, 200, { ok: true, proposal });
     }),
     route("GET", "/api/debates/:id/mystery-seed", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -19023,11 +18997,11 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/botcast/shows/:id/host-recovery/screen", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
-      const recovery = await screenBotcastShowHostRecovery(db, userId, ctx.params.id, {
+      const result = await screenBotcastShowHostRecovery(db, userId, ctx.params.id, {
         prismDefaultLlmModel: user.prism_default_llm_model,
         auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
       });
-      json(ctx.res, 200, { ok: true, recovery });
+      json(ctx.res, 200, { ok: true, result });
     }),
     route("POST", "/api/botcast/shows/:id/host-recovery/cast", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -21831,22 +21805,16 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/coffee/groups", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
+      const libraryGroupId =
+        typeof body.libraryGroupId === "string" ? body.libraryGroupId : undefined;
       const groupBotIds = Array.isArray(body.groupBotIds)
         ? body.groupBotIds
         : undefined;
-      const creationProfiles = loadCoffeeGroupProfiles(
-        db,
-        userId,
-        (groupBotIds ?? []).filter(
-          (botId): botId is string =>
-            typeof botId === "string" && botId.trim().length > 0,
-        ),
-      );
       const pendingSynthesisItems: CoffeeGroupSynthesisItem[] = [];
       if (
         shouldGenerateCoffeeGroupNameFromInput(
           typeof body.name === "string" ? body.name : null,
-          creationProfiles,
+          [],
         )
       ) {
         pendingSynthesisItems.push("name");
@@ -21857,11 +21825,22 @@ function buildRoutes(): RouteDefinition[] {
       // Atmosphere stays "pending" but is never auto-run: media assets are
       // synthesized on demand from the group's own controls (Debate parity).
       pendingSynthesisItems.push("atmosphere");
-      assertCoffeeInviteBotCount(groupBotIds);
+      if (!libraryGroupId) {
+        throw new HttpError(
+          400,
+          "Choose one Library group or Ungrouped for this Coffee table.",
+        );
+      }
+      if (groupBotIds !== undefined) {
+        throw new HttpError(
+          400,
+          "Coffee table membership comes from its Library group, not a bot selection.",
+        );
+      }
       const group = createCoffeeGroup(db, userId, {
         name: body.name,
         ethos: body.ethos,
-        groupBotIds,
+        libraryGroupId,
         coffeeSettings: body.coffeeSettings,
         synthesisPending: pendingSynthesisItems,
         ...(body.modelChoiceByProvider !== undefined
@@ -21948,7 +21927,12 @@ function buildRoutes(): RouteDefinition[] {
       const groupBotIds = Array.isArray(body.groupBotIds)
         ? body.groupBotIds
         : undefined;
-      if (groupBotIds !== undefined) assertCoffeeInviteBotCount(groupBotIds);
+      if (groupBotIds !== undefined) {
+        throw new HttpError(
+          400,
+          "Coffee table membership comes from its Library group, not a bot selection.",
+        );
+      }
       const user = getUserRow(userId);
       const group = await updateCoffeeGroupWithGeneratedTopics(
         db,
@@ -23639,6 +23623,22 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/coffee/turn-jobs/:id/interrupt", async (ctx) => {
       const userId = requireAuth(ctx);
+      const current = getCoffeeTurnJob(userId, ctx.params.id);
+      if (
+        current?.conversationId &&
+        current.speakerBotId &&
+        coffeeSessionBotIsTrollV1(
+          db,
+          userId,
+          current.conversationId,
+          current.speakerBotId,
+        )
+      ) {
+        throw new HttpError(
+          409,
+          "This in-fiction Troll delivery ignores ordinary Shh; leave Coffee, mute audio, disable the Power, or end the session.",
+        );
+      }
       const job = interruptCoffeeTurnJob(userId, ctx.params.id);
       if (!job) throw new HttpError(404, "Coffee turn job not found.");
       json(ctx.res, 200, { ok: true, job });
@@ -24358,6 +24358,15 @@ function buildRoutes(): RouteDefinition[] {
         message.conversation_mode !== "chat"
       ) {
         throw new Error("Only Chat or Zen assistant messages can be interrupted.");
+      }
+      if (
+        parseStoredAssistantToolPayload(message.tool_payload)
+          .botPowerTrollPresentation?.ordinaryInterruptionImmune === true
+      ) {
+        throw new HttpError(
+          409,
+          "This in-fiction Troll ambush ignores ordinary Shh; use Stop, Escape, mute, disable the Power, or leave the mode.",
+        );
       }
       const mode = readPrismMoodMode(message.conversation_mode);
       const now = new Date().toISOString();
@@ -27107,7 +27116,7 @@ function buildRoutes(): RouteDefinition[] {
         ctx.req.once("aborted", onClose);
         ctx.res.once("close", onClose);
         const babbleText = buildBabbleSpeechText({
-          text: boundary.text,
+          text: expandSpeechAbbreviations(boundary.text),
           seed: request.seed ?? request.messageId ?? boundary.text,
         });
         const babbleProfile = {
@@ -27216,7 +27225,7 @@ function buildRoutes(): RouteDefinition[] {
             return;
           }
           const wave = await builtinVoiceWaveGeneratorOverride({
-            text: boundary.text,
+            text: expandSpeechAbbreviations(boundary.text),
             profile: boundary.profile,
             allowOperatingSystemVoices,
             protectedPhrases: speechprintProtectedPhrases,
@@ -27310,7 +27319,7 @@ function buildRoutes(): RouteDefinition[] {
             return;
           }
           const wave = await builtinVoiceWaveGeneratorOverride({
-            text: boundary.text,
+            text: expandSpeechAbbreviations(boundary.text),
             profile: boundary.profile,
             allowOperatingSystemVoices,
             protectedPhrases: speechprintProtectedPhrases,
@@ -27509,7 +27518,7 @@ function buildRoutes(): RouteDefinition[] {
               return;
             }
             const wave = await builtinVoiceWaveGeneratorOverride({
-              text: boundary.text,
+              text: expandSpeechAbbreviations(boundary.text),
               profile: boundary.profile,
               allowOperatingSystemVoices,
               protectedPhrases: speechprintProtectedPhrases,

@@ -101,6 +101,34 @@ describe("Coffee group dashboard composer routing", () => {
       pageSource,
       /experienceMode:\s*coffeeSelectedExperienceMode/,
     );
+    assert.doesNotMatch(
+      pageSource,
+      /experienceMode:\s*isCoffeeExperienceMode\(\s*coffeeSessionSettings\.experienceMode/,
+      "stale settings must not override the visible Join or Serve choice",
+    );
+    assert.match(
+      pageSource,
+      /const coffeeExperienceAllowsPot = coffeeLiveExperienceMode === "serve"/,
+    );
+    assert.match(
+      pageSource,
+      /function coffeeExperienceModeForConversation\([\s\S]{0,500}coffeeSessionDurationMinutes === "number"[\s\S]{0,120}\? "serve"[\s\S]{0,80}: "join"/,
+      "legacy timed Serve sessions must resolve identically on the stage and composer dock",
+    );
+    assert.equal(
+      (pageSource.match(/coffeeExperienceModeForConversation\(coffeeConversation\)/g) ?? [])
+        .length,
+      2,
+    );
+    assert.match(
+      pageSource,
+      /const coffeePotComposerDockVisible =[\s\S]{0,260}coffeeExperienceAllowsPot/,
+    );
+    assert.match(
+      pageSource,
+      /!coffeeReplayActive &&\s*coffeeExperienceAllowsPot/,
+      "live Serve owns the pot while faithful replay keeps its separate dock",
+    );
     assert.match(pageSource, /coffeeSelectedExperienceMode === "serve"/);
     assert.match(pageSource, /coffeeSelectedExperienceMode === "join"/);
     assert.match(pageCss, /\.coffeeExperienceModeField \{/);

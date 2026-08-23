@@ -15,6 +15,10 @@ const microComponentSource = readFileSync(
   join(here, "BotAvatarMicro.tsx"),
   "utf8",
 );
+const miniInkComponentSource = readFileSync(
+  join(here, "MiniAvatarDetailsInk.tsx"),
+  "utf8",
+);
 const cssSource = readFileSync(
   join(here, "chatMiniBotAvatar.module.css"),
   "utf8",
@@ -363,8 +367,11 @@ describe("chatMiniBotAvatar", () => {
       pageSource,
       /behindFace=\{renderAvatarDetailsInk\("behind-face"\)\}[\s\S]*?aboveFace=\{renderAvatarDetailsInk\("above-face"\)\}[\s\S]*?<CoffeeSeatPlateEmoji/,
     );
-    assert.match(pageSource, /coreColor="ink"/);
-    assert.match(pageSource, /color=\{normalizedBotColor\}/);
+    assert.match(miniInkComponentSource, /coreColor="ink"/);
+    assert.match(
+      pageSource,
+      /<MiniAvatarDetailsInk[\s\S]{0,260}color=\{normalizedBotColor\}/,
+    );
     assert.match(pageSource, /faceEyeMovement="still"/);
     assert.match(
       pageCssSource,
@@ -384,14 +391,50 @@ describe("chatMiniBotAvatar", () => {
     );
   });
 
-  it("keeps mini Ink static and visible across non-face runtime states", () => {
+  it("keeps Mini Ink semantically synchronized to the displayed face", () => {
     assert.doesNotMatch(componentSource, /thinking: boolean|props\.thinking/);
     assert.match(componentSource, /behindFace\?: ReactNode/);
     assert.match(componentSource, /aboveFace\?: ReactNode/);
     assert.match(componentSource, /\{props\.behindFace\}/);
     assert.match(componentSource, /\{props\.aboveFace\}/);
-    assert.match(pageSource, /talking=\{false\}/);
-    assert.match(pageSource, /speechMotionActive=\{false\}/);
+    assert.match(pageSource, /import \{ MiniAvatarDetailsInk \} from "\.\/MiniAvatarDetailsInk"/);
+    assert.equal(
+      [...pageSource.matchAll(/<MiniAvatarDetailsInk\b/g)].length,
+      4,
+      "every Mini face surface must share the semantic Ink wrapper",
+    );
+    assert.match(
+      miniInkComponentSource,
+      /onBlinkPhaseChange:\s*\(phase: CoffeeSeatBlinkPhase\) => void/,
+      "the face reports its final displayed blink phase to Mini Ink",
+    );
+    assert.match(miniInkComponentSource, /blinkPhase=\{blinkPhase\}/);
+    assert.match(miniInkComponentSource, /talking=\{talking\}/);
+    assert.match(miniInkComponentSource, /speechMotionActive=\{false\}/);
+    assert.match(
+      miniInkComponentSource,
+      /hasAvatarArt && !thinking/,
+      "thinking owns the whole Mini screen and clears both Ink depths",
+    );
+    assert.match(
+      miniInkComponentSource,
+      /detailLevel="audience"[\s\S]*?coreColor="ink"/,
+      "Mini keeps the shared semantic raster but never enters Full HD Ink motion",
+    );
+    assert.equal(
+      [...pageSource.matchAll(/onBlinkPhaseChange=\{onBlinkPhaseChange\}/g)].length,
+      4,
+      "each Mini face must feed its displayed blink phase back to Ink",
+    );
+    assert.match(
+      pageSource,
+      /talking=\{authoredMiniPortrait && galleryTalking\}/,
+      "Debate Speech ink must follow the whole speaking interval, including closed visemes",
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /talking=\{authoredMiniPortrait && debateMouthActive\}/,
+    );
     assert.match(
       pageSource,
       /behindFace=\{renderAvatarDetailsInk\("behind-face"\)\}/,
@@ -400,10 +443,8 @@ describe("chatMiniBotAvatar", () => {
       pageSource,
       /aboveFace=\{renderAvatarDetailsInk\("above-face"\)\}/,
     );
-    assert.match(pageSource, /\{renderMiniAvatarDetailsInk\("behind-face"\)\}/);
-    assert.match(pageSource, /\{renderMiniAvatarDetailsInk\("above-face"\)\}/);
-    assert.match(pageSource, /\{renderGalleryAvatarDetails\("behind-face"\)\}/);
-    assert.match(pageSource, /\{renderGalleryAvatarDetails\("above-face"\)\}/);
+    assert.match(pageSource, /\{renderAvatarDetailsInk\("behind-face"\)\}/);
+    assert.match(pageSource, /\{renderAvatarDetailsInk\("above-face"\)\}/);
   });
 
   it("uses one correctly oriented static micro renderer with flat pixels and Ink", () => {

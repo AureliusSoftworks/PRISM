@@ -549,10 +549,10 @@ describe("bot marketplace static catalog", () => {
           "ink",
           "glyph",
         ]);
-        assert.match(entry.description ?? "", /inside his own vivid shell/iu);
+        assert.match(entry.description ?? "", /inside his own vivid shell.*voice never changes/iu);
         assert.match(
           bundle.botJson.profile?.purpose.statement ?? "",
-          /borrows.*public persona.*face.*Ink.*voice identity.*lower glyph.*active public Power consequences/iu,
+          /borrows.*public name.*persona.*face.*Ink.*lower glyph.*active public Power consequences.*retaining his complete authored voice/iu,
         );
         assert.match(
           bundle.botJson.profile?.appearance.description ?? "",
@@ -560,7 +560,11 @@ describe("bot marketplace static catalog", () => {
         );
         assert.match(
           powers[0]?.intent ?? "",
-          /Retain Ian's own saturated color.*client-side voice effect.*communication-style chassis.*frame finish/iu,
+          /retain Collin's complete authored voice identity\/profile.*accent.*pronunciation.*speechprint.*client voice effect.*saturated color.*communication-style chassis.*frame finish/iu,
+        );
+        assert.match(
+          powers[0]?.intent ?? "",
+          /impostor exactly once.*never repeat the label or recant.*original briefly correct.*even under Credulity/iu,
         );
         assert.doesNotMatch(
           powers[0]?.intent ?? "",

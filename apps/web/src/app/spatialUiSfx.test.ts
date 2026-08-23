@@ -145,6 +145,10 @@ test("classifies high-value controls into restrained semantic cue families", () 
     "max-on",
   );
   assert.equal(
+    spatialUiSfxCueForControl({ explicitCue: "none", label: "Return" }),
+    null,
+  );
+  assert.equal(
     spatialUiSfxCueForControl({ label: "Save bot" }),
     "confirm",
   );

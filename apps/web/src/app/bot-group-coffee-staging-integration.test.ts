@@ -49,31 +49,36 @@ describe("waiting-room Coffee staging integration", () => {
     );
   });
 
-  it("forwards the room topic through exact-group reuse and one-off creation", () => {
+  it("forwards the room topic through linked-table reuse or creation", () => {
+    const runnerStart = pageSource.indexOf(
+      "botGroupCoffeeLaunchRunnerRef.current = async",
+    );
+    const runnerEnd = pageSource.indexOf(
+      "const currentBotGroupCoffeeReturnCheckpoint",
+      runnerStart,
+    );
+    const runnerSource = pageSource.slice(runnerStart, runnerEnd);
     assert.match(
-      pageSource,
-      /availableGroups\.find\([\s\S]*?coffeeGroupRosterSignature\(group\.botGroupIds\)[\s\S]*?selectedSignature/u,
+      runnerSource,
+      /availableGroups\.find\([\s\S]*?group\.libraryGroupId === launch\.sourceGroupId/u,
     );
     assert.match(
-      pageSource,
-      /startCoffeeSessionFromGroup\(exactGroup, \{[\s\S]*?initialTopic: launch\.prompt/u,
+      runnerSource,
+      /libraryGroupId: launch\.sourceGroupId/u,
     );
     assert.match(
-      pageSource,
-      /startCoffeeSessionFromGroup\(exactGroup, \{[\s\S]*?useGroupDefaults: true,[\s\S]*?forceAttendance: true/u,
+      runnerSource,
+      /startCoffeeSessionFromGroup\(linkedGroup, \{[\s\S]*?initialTopic: launch\.prompt/u,
+    );
+    assert.match(
+      runnerSource,
+      /startCoffeeSessionFromGroup\(linkedGroup, \{[\s\S]*?useGroupDefaults: true,[\s\S]*?forceAttendance: true/u,
     );
     assert.match(
       pageSource,
       /!options\.useGroupDefaults && coffeeSelectedPresetId/u,
     );
-    assert.match(
-      pageSource,
-      /createCoffeeSession\(\{[\s\S]*?seatBotIds,[\s\S]*?initialTopic: launch\.prompt/u,
-    );
-    assert.match(
-      pageSource,
-      /body: JSON\.stringify\(\{[\s\S]*?groupBotIds: requestedSeatBotIds,[\s\S]*?initialTopic: options\.initialTopic/u,
-    );
+    assert.doesNotMatch(runnerSource, /createCoffeeSession\(/u);
   });
 
   it("persists a session-keyed return checkpoint and resolves a fresh room or safe Chat fallback", () => {
@@ -108,8 +113,8 @@ describe("waiting-room Coffee staging integration", () => {
     assert.match(pageSource, /Return to Chat/u);
   });
 
-  it("keeps one-off saving available after completion and includes responsive staging styles", () => {
-    assert.match(pageSource, /coffeeSessionPhase === "finished"[\s\S]*?Save as Coffee Group/u);
+  it("removes one-off saving while retaining responsive staging styles", () => {
+    assert.doesNotMatch(pageSource, /Save as Coffee Group/u);
     assert.match(cssSource, /\.botGroupCoffeeStaging\s*\{/u);
     assert.match(cssSource, /\.botGroupCoffeeStagingRoster\s*\{/u);
     assert.match(cssSource, /@media \(max-height: 720px\)/u);

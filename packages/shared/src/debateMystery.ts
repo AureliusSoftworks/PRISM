@@ -5,8 +5,9 @@
  */
 
 export const DEBATE_MYSTERY_SCHEMA_VERSION = 1 as const;
-export const DEBATE_MYSTERY_GENERATOR_VERSION = 2 as const;
-export const DEBATE_MYSTERY_NOTEBOOK_VERSION = 1 as const;
+export const DEBATE_MYSTERY_GENERATOR_VERSION = 3 as const;
+/** The page/block notebook remains readable for old backups only. */
+export const DEBATE_MYSTERY_NOTEBOOK_VERSION = 2 as const;
 export const DEBATE_MYSTERY_NOTEBOOK_CHARACTER_LIMIT = 20_000;
 export const DEBATE_MYSTERY_CREDIBILITY_STRIKES = 3;
 
@@ -40,6 +41,25 @@ export type DebateMysteryRouteGrade =
   | "strong_case"
   | "lucky_break"
   | "incorrect";
+
+export type DebateMysteryActiveActivityV1 =
+  | { kind: "investigation"; roomId: string; startedAt: string }
+  | { kind: "interview"; suspectSeatId: string; startedAt: string };
+
+export interface DebateMysteryRecoveredActionTokenV1 {
+  id: string;
+  roomId: string;
+  regionId: string;
+  amount: 1;
+  recoveredAt: string;
+}
+
+export interface DebateMysteryPartnerConsultationV1 {
+  id: string;
+  question: string;
+  answer: string;
+  createdAt: string;
+}
 
 export interface DebateMysteryPresetV1 {
   id: Exclude<DebateMysteryPresetId, "custom">;
@@ -617,6 +637,14 @@ export interface DebateMysteryAccessResolutionV1 {
   resolvedAt: string;
 }
 
+/** A lock the player has physically found. The required access item remains
+ * private so every recovered key, code, or remote stays a plausible choice. */
+export interface DebateMysteryPublicAccessTargetV1 {
+  targetKind: Extract<DebateMysteryLockTargetKindV1, "item" | "region">;
+  targetId: string;
+  targetLabel: string;
+}
+
 export interface DebateMysteryTestimonyExcerptV1 {
   id: string;
   speakerSeatId: string;
@@ -664,6 +692,7 @@ export interface DebateMysteryPublicObservationV1 {
   observation: string;
   outcomeKind: DebateMysteryRegionOutcomeKind;
   evidenceId: string | null;
+  accessTargets: DebateMysteryPublicAccessTargetV1[];
 }
 
 export interface DebateMysteryInterviewMessageV1 {
@@ -711,6 +740,10 @@ export interface DebateWhodunnitFormatStateV1 {
   crimeSceneRoomId: string;
   currentRoomId: string;
   actionsRemaining: number;
+  /** Public encounter ledger; reopening a met folder never costs an action. */
+  metSuspectSeatIds: string[];
+  activeActivity: DebateMysteryActiveActivityV1 | null;
+  recoveredActionTokens: DebateMysteryRecoveredActionTokenV1[];
   inventoryItems: DebateMysteryInventoryItemV1[];
   accessHistory: DebateMysteryAccessResolutionV1[];
   discoveredEvidence: DebateMysteryPublicEvidenceItemV1[];
@@ -719,6 +752,7 @@ export interface DebateWhodunnitFormatStateV1 {
   /** Public, Casekeeper-authored threads derived only from the discovered record. */
   leads: DebateMysteryPublicLeadV1[];
   partnerJournal: string[];
+  partnerConsultations: DebateMysteryPartnerConsultationV1[];
   interviewLog: DebateMysteryInterviewMessageV1[];
   theory: DebateMysteryTheoryV1 | null;
   theoryFiledAt: string | null;
@@ -731,6 +765,9 @@ export interface DebateWhodunnitFormatStateV1 {
 
 export type DebateMysteryActionRequestV1 =
   | { expectedRevision: number; idempotencyKey: string; action: "travel"; roomId: string }
+  | { expectedRevision: number; idempotencyKey: string; action: "begin_investigation"; roomId: string }
+  | { expectedRevision: number; idempotencyKey: string; action: "begin_interview"; suspectSeatId: string }
+  | { expectedRevision: number; idempotencyKey: string; action: "end_activity" }
   | { expectedRevision: number; idempotencyKey: string; action: "inspect"; roomId: string; regionId: string }
   | { expectedRevision: number; idempotencyKey: string; action: "use_access_item"; accessItemId: string; targetKind: DebateMysteryLockTargetKindV1; targetId: string }
   | { expectedRevision: number; idempotencyKey: string; action: "forensic"; evidenceId: string }
@@ -768,10 +805,45 @@ export interface DebateMysteryNotebookPageV1 {
 }
 
 export interface DebateMysteryNotebookV1 {
-  version: typeof DEBATE_MYSTERY_NOTEBOOK_VERSION;
+  version: 1;
   sessionId: string;
   revision: number;
   pages: DebateMysteryNotebookPageV1[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DebateMysteryLeadAnnotationV2 {
+  id: string;
+  leadId: string;
+  leadRevision: number;
+  text: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DebateMysterySuspectNoteV2 {
+  seatId: string;
+  text: string;
+  updatedAt: string;
+}
+
+/** A player hypothesis. Pins do not become evidence or satisfy a theory. */
+export interface DebateMysterySuspectPinV2 {
+  id: string;
+  referenceKind: "lead" | "evidence" | "testimony";
+  referenceId: string;
+  seatId: string;
+  createdAt: string;
+}
+
+export interface DebateMysteryNotebookV2 {
+  version: typeof DEBATE_MYSTERY_NOTEBOOK_VERSION;
+  sessionId: string;
+  revision: number;
+  leadAnnotations: DebateMysteryLeadAnnotationV2[];
+  suspectNotes: DebateMysterySuspectNoteV2[];
+  suspectPins: DebateMysterySuspectPinV2[];
   createdAt: string;
   updatedAt: string;
 }
@@ -783,7 +855,7 @@ export interface DebateMysteryNotebookCleanupPageV1 {
 }
 
 export interface DebateMysteryNotebookCleanupProposalV1 {
-  version: typeof DEBATE_MYSTERY_NOTEBOOK_VERSION;
+  version: 1 | typeof DEBATE_MYSTERY_NOTEBOOK_VERSION;
   id: string;
   sessionId: string;
   sourceRevision: number;
@@ -825,6 +897,13 @@ export interface DebateMysteryActiveRegionOutcomeV1 {
   evidenceId: string | null;
   inventoryItemId: string | null;
   subplotResolution: string | null;
+}
+
+export interface DebateMysteryActionTokenPlacementV1 {
+  id: string;
+  roomId: string;
+  regionId: string;
+  amount: 1;
 }
 
 export interface DebateMysteryAccessLockV1 {
@@ -927,6 +1006,8 @@ export interface DebateMysteryCaseBibleV1 {
   rooms: DebateMysteryFloorplanRoomV1[];
   crimeSceneRoomId: string;
   activeRegions: DebateMysteryActiveRegionOutcomeV1[];
+  /** Frozen, server-private rewards. Only recovered tokens enter public state. */
+  actionTokens?: DebateMysteryActionTokenPlacementV1[];
   inventoryItems: DebateMysteryInventoryItemV1[];
   accessLocks: DebateMysteryAccessLockV1[];
   evidence: DebateMysteryEvidenceItemV1[];
@@ -1026,7 +1107,9 @@ export function resolveDebateMysteryConfig(
   if (suspectBotIds.includes(prosecutorPartnerBotId) || suspectBotIds.includes(rivalDefenseBotId)) {
     throw new Error("Counsel bots cannot also sit in the suspect ensemble.");
   }
-  const baseActions = preset?.classicActions ?? Math.round(1.6 * totalRooms + 2 * suspectBotIds.length);
+  // Custom cases receive a broad discovery/search/interview baseline while
+  // still requiring choices; preset budgets remain authored independently.
+  const baseActions = preset?.classicActions ?? (2 * totalRooms + suspectBotIds.length + 2);
   const difficulty: DebateMysteryDifficulty = value.difficulty === "casual" || value.difficulty === "mastermind" ? value.difficulty : "classic";
   const actionBudget = difficulty === "casual" ? Math.ceil(baseActions * 1.25) : difficulty === "mastermind" ? Math.max(1, Math.floor(baseActions * 0.8)) : baseActions;
   return {
@@ -1962,6 +2045,26 @@ export function compileDeterministicDebateMystery(args: {
       locked: false,
     }, claimInventoryOutcome(rooms.map((room) => room.id)));
   }
+  const actionTokenRandom = seededRandom(`${recipeSeed}:action-tokens`);
+  const actionTokenCount = Math.max(1, Math.round(rooms.length / 5));
+  const lockedActionTokenRoomIds = new Set(
+    accessLocks.filter((lock) => lock.targetKind === "room").map((lock) => lock.targetId),
+  );
+  const actionTokenRooms = rooms.filter((room) => !lockedActionTokenRoomIds.has(room.id));
+  const actionTokens: DebateMysteryActionTokenPlacementV1[] = shuffled(actionTokenRooms, actionTokenRandom)
+    .slice(0, actionTokenCount)
+    .map((room) => {
+      const roomOutcomes = activeRegions.filter((outcome) => outcome.roomId === room.id);
+      const preferred = roomOutcomes.filter((outcome) =>
+        outcome.kind === "empty" && !outcome.evidenceId && !outcome.inventoryItemId);
+      const outcome = shuffled(preferred.length ? preferred : roomOutcomes, actionTokenRandom)[0]!;
+      return {
+        id: `action-token-${seedNumber(`${recipeSeed}:${room.id}:${outcome.regionId}`).toString(36)}`,
+        roomId: room.id,
+        regionId: outcome.regionId,
+        amount: 1 as const,
+      };
+    });
   const testimony: DebateMysteryTestimonyExcerptV1[] = suspects.map((suspect, index) => ({
     id: `testimony-${index + 1}`,
     speakerSeatId: suspect.seatId,
@@ -2012,7 +2115,7 @@ export function compileDeterministicDebateMystery(args: {
     suspects,
     culpritSeatId: culprit.seatId,
   });
-  const caseSeed = `case-v${DEBATE_MYSTERY_GENERATOR_VERSION}-${seedNumber(JSON.stringify({ recipeSeed, culprit: culprit.seatId, accomplice: accomplice?.seatId, method, motive, regions: activeRegions, accessLocks, leadDefinitions })).toString(36).padStart(7, "0")}`;
+  const caseSeed = `case-v${DEBATE_MYSTERY_GENERATOR_VERSION}-${seedNumber(JSON.stringify({ recipeSeed, culprit: culprit.seatId, accomplice: accomplice?.seatId, method, motive, regions: activeRegions, accessLocks, actionTokens, leadDefinitions })).toString(36).padStart(7, "0")}`;
   const titleNoun = choose(["Glass", "Midnight", "The Last Bell", "Ash", "The Locked Gallery"], random);
   return {
     version: DEBATE_MYSTERY_SCHEMA_VERSION,
@@ -2036,6 +2139,7 @@ export function compileDeterministicDebateMystery(args: {
     rooms,
     crimeSceneRoomId: rooms[0]!.id,
     activeRegions,
+    actionTokens,
     inventoryItems,
     accessLocks,
     evidence,
@@ -2052,6 +2156,7 @@ export interface DebateMysteryValidationResultV1 { valid: boolean; errors: strin
 
 export function validateDebateMysteryCaseBible(bible: DebateMysteryCaseBibleV1, actionBudget: number): DebateMysteryValidationResultV1 {
   const errors: string[] = [];
+  const actionTokens = bible.actionTokens ?? [];
   if (!bible.weapon || bible.weapon.id !== "canonical-weapon" || !bible.weapon.descriptor.trim()) errors.push("Case must contain exactly one canonical murder weapon.");
   if (bible.suspects.filter((suspect) => suspect.seatId === bible.culpritSeatId).length !== 1) errors.push("Case must contain exactly one culprit seat.");
   if (bible.accompliceSeatId === bible.culpritSeatId || (bible.accompliceSeatId && !bible.suspects.some((suspect) => suspect.seatId === bible.accompliceSeatId))) errors.push("Accomplice seat is invalid.");
@@ -2064,6 +2169,18 @@ export function validateDebateMysteryCaseBible(bible: DebateMysteryCaseBibleV1, 
   const evidenceIds = new Set(bible.evidence.map((item) => item.id));
   const testimonyIds = new Set(bible.testimony.map((item) => item.id));
   const observationKeys = new Set(bible.activeRegions.map((item) => `${item.roomId}:${item.regionId}`));
+  const expectedActionTokenCount = Math.max(1, Math.round(bible.rooms.length / 5));
+  if (
+    bible.generatorVersion >= 3 &&
+    (
+      actionTokens.length !== expectedActionTokenCount ||
+      new Set(actionTokens.map((token) => token.id)).size !== actionTokens.length ||
+      new Set(actionTokens.map((token) => token.roomId)).size !== actionTokens.length ||
+      actionTokens.some((token) =>
+        token.amount !== 1 ||
+        !observationKeys.has(`${token.roomId}:${token.regionId}`))
+    )
+  ) errors.push("Action-token caches must be deterministic, bounded, and attached to distinct searchable rooms.");
   for (const lead of bible.leadDefinitions ?? []) {
     if (!lead.title.trim() || lead.stages.length === 0) errors.push(`Lead ${lead.id} is incomplete.`);
     for (const stage of lead.stages) {
@@ -2267,19 +2384,24 @@ export function validateDebateMysteryCaseBible(bible: DebateMysteryCaseBibleV1, 
     const signature = JSON.stringify({ evidence: [...bundle.requiredEvidenceIds].sort(), testimony: [...bundle.requiredTestimonyIds].sort(), facts: [...bundle.requiredFactTags].sort(), accomplice: bundle.requiresAccomplice, contradiction: bundle.requiredCourtContradictionId });
     if (bundleSignatures.has(signature)) errors.push(`${bundle.id} duplicates another proof route.`);
     bundleSignatures.add(signature);
-    const requiredRoomIds = new Set(
+    const requiredInvestigationRoomIds = new Set(
       bundle.requiredEvidenceIds
-        .map((id) => bible.evidence.find((item) => item.id === id)!.roomId)
-        .filter((id) => id !== bible.crimeSceneRoomId),
+        .map((id) => bible.evidence.find((item) => item.id === id)!)
+        .filter((item) => !(item.isCanonicalWeapon && bible.weapon.revealedAtOpening))
+        .map((item) => item.roomId),
     );
     const testimonySeats = new Set(bundle.requiredTestimonyIds.map((id) => bible.testimony.find((item) => item.id === id)!.speakerSeatId));
+    const requiredDiscoveryRoomIds = new Set(
+      [...requiredInvestigationRoomIds].filter((id) => id !== bible.crimeSceneRoomId),
+    );
     for (const seatId of testimonySeats) {
       const roomId = bible.suspects.find((suspect) => suspect.seatId === seatId)!.roomId;
-      if (roomId !== bible.crimeSceneRoomId) requiredRoomIds.add(roomId);
+      if (roomId !== bible.crimeSceneRoomId) requiredDiscoveryRoomIds.add(roomId);
     }
-    // Interviews and inspections are free. A room that supplies both testimony
-    // and physical evidence still costs only its single first discovery.
-    if (requiredRoomIds.size > actionBudget) errors.push(`${bundle.id} is unreachable within the action budget.`);
+    const requiredActionCost = requiredDiscoveryRoomIds.size + requiredInvestigationRoomIds.size + testimonySeats.size;
+    // Bonus caches make repetition possible, but no proof route may depend on
+    // finding one. Validate each route against the starting budget alone.
+    if (requiredActionCost > actionBudget) errors.push(`${bundle.id} is unreachable within the action budget.`);
   }
   return { valid: errors.length === 0, errors };
 }
@@ -2340,6 +2462,9 @@ export function projectDebateMysteryCase(bible: DebateMysteryCaseBibleV1, config
     crimeSceneRoomId: bible.crimeSceneRoomId,
     currentRoomId: bible.crimeSceneRoomId,
     actionsRemaining: config.actionBudget,
+    metSuspectSeatIds: [],
+    activeActivity: null,
+    recoveredActionTokens: [],
     inventoryItems: [],
     accessHistory: [],
     discoveredEvidence: openingWeapon ? [
@@ -2349,6 +2474,7 @@ export function projectDebateMysteryCase(bible: DebateMysteryCaseBibleV1, config
     testimony: [],
     leads: [],
     partnerJournal: [bible.publicOpening],
+    partnerConsultations: [],
     interviewLog: [],
     theory: null,
     theoryFiledAt: null,
@@ -2393,6 +2519,9 @@ export function defaultDebateMysteryFormatStateV1(): DebateWhodunnitFormatStateV
     crimeSceneRoomId: "",
     currentRoomId: "",
     actionsRemaining: 0,
+    metSuspectSeatIds: [],
+    activeActivity: null,
+    recoveredActionTokens: [],
     inventoryItems: [],
     accessHistory: [],
     discoveredEvidence: [],
@@ -2400,6 +2529,7 @@ export function defaultDebateMysteryFormatStateV1(): DebateWhodunnitFormatStateV
     testimony: [],
     leads: [],
     partnerJournal: [],
+    partnerConsultations: [],
     interviewLog: [],
     theory: null,
     theoryFiledAt: null,
@@ -2435,10 +2565,31 @@ export function normalizeDebateMysteryFormatStateV1(
     ? normalized.victim
     : { id: "victim", name: "The victim" };
   normalized.interviewLog = Array.isArray(normalized.interviewLog) ? normalized.interviewLog : [];
+  normalized.partnerConsultations = Array.isArray(normalized.partnerConsultations) ? normalized.partnerConsultations : [];
+  normalized.recoveredActionTokens = Array.isArray(normalized.recoveredActionTokens) ? normalized.recoveredActionTokens : [];
   normalized.leads = Array.isArray(normalized.leads) ? normalized.leads : [];
   normalized.forensicFindings = Array.isArray(normalized.forensicFindings) ? normalized.forensicFindings : [];
   normalized.inventoryItems = Array.isArray(normalized.inventoryItems) ? normalized.inventoryItems : [];
   normalized.accessHistory = Array.isArray(normalized.accessHistory) ? normalized.accessHistory : [];
+  const activeActivity = normalized.activeActivity;
+  normalized.activeActivity = activeActivity?.kind === "investigation" && typeof activeActivity.roomId === "string"
+    ? activeActivity
+    : activeActivity?.kind === "interview" && typeof activeActivity.suspectSeatId === "string"
+      ? activeActivity
+      : null;
+  const encounteredSeatIds = [
+    ...(Array.isArray(normalized.metSuspectSeatIds) ? normalized.metSuspectSeatIds : []),
+    ...normalized.interviewLog.map((message) => message?.suspectSeatId),
+    ...(normalized.activeActivity?.kind === "interview" ? [normalized.activeActivity.suspectSeatId] : []),
+  ];
+  normalized.metSuspectSeatIds = [...new Set(encounteredSeatIds.filter(
+    (seatId): seatId is string => typeof seatId === "string" && normalized.suspects.some((suspect) => suspect.seatId === seatId),
+  ))];
+  if (
+    normalized.actionsRemaining <= 0 &&
+    normalized.activeActivity === null &&
+    (normalized.playPhase === "investigation" || normalized.playPhase === "continuance")
+  ) normalized.playPhase = "theory";
   normalized.rooms = normalized.rooms.map((room) => ({
     ...room,
     activeRegionIds: Array.isArray(room.activeRegionIds)
@@ -2455,7 +2606,12 @@ export function normalizeDebateMysteryFormatStateV1(
       ? room.inspectionCounts
       : Object.fromEntries((Array.isArray(room.inspectedRegionIds) ? room.inspectedRegionIds : []).map((regionId) => [regionId, 1])),
     observations: Array.isArray(room.observations)
-      ? room.observations
+      ? room.observations.map((observation) => ({
+          ...observation,
+          accessTargets: Array.isArray(observation.accessTargets)
+            ? observation.accessTargets
+            : [],
+        }))
       : room.publicObservation && room.activeRegionId && room.outcomeKind
         ? [{
             regionId: room.activeRegionId,
@@ -2463,6 +2619,7 @@ export function normalizeDebateMysteryFormatStateV1(
             observation: room.publicObservation,
             outcomeKind: room.outcomeKind,
             evidenceId: null,
+            accessTargets: [],
           }]
         : [],
     locked: room.locked === true,

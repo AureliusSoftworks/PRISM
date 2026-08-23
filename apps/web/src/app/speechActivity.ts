@@ -4,6 +4,7 @@ export interface SpeechActivityCharacterAlignment {
   characters: string[];
   characterStartTimesSeconds: number[];
   characterEndTimesSeconds: number[];
+  audioTimelineOffsetSeconds?: number;
 }
 
 export interface SpeechActivityWindow {
@@ -185,16 +186,28 @@ export function buildSpeechActivityWindows(
     1,
     Math.round(Number.isFinite(durationMs) ? durationMs : 0),
   );
-  const scale = normalizedDurationMs / (alignmentDuration * 1000);
+  const audioTimelineOffsetSeconds = alignment.audioTimelineOffsetSeconds;
+  const usesDecodedAudioClock =
+    typeof audioTimelineOffsetSeconds === "number" &&
+    Number.isFinite(audioTimelineOffsetSeconds) &&
+    audioTimelineOffsetSeconds >= 0;
+  const scale = usesDecodedAudioClock
+    ? 1
+    : normalizedDurationMs / (alignmentDuration * 1000);
+  const offsetMs = usesDecodedAudioClock
+    ? audioTimelineOffsetSeconds * 1_000
+    : 0;
   const rawSpans: RawSpeechActivitySpan[] = [];
 
   for (let index = 0; index < alignment.characters.length; index += 1) {
     const character = alignment.characters[index] ?? "";
     if (!/[\p{L}\p{N}]/u.test(character)) continue;
     const startMs =
-      (alignment.characterStartTimesSeconds[index] ?? 0) * 1000 * scale;
+      (alignment.characterStartTimesSeconds[index] ?? 0) * 1000 * scale +
+      offsetMs;
     const endMs =
-      (alignment.characterEndTimesSeconds[index] ?? 0) * 1000 * scale;
+      (alignment.characterEndTimesSeconds[index] ?? 0) * 1000 * scale +
+      offsetMs;
     if (endMs <= startMs) continue;
     const previous = rawSpans.at(-1);
     const gap = previous ? startMs - previous.endMs : 0;

@@ -76,9 +76,10 @@ describe("local voice streaming chunks", () => {
   });
 
   it("does not mistake abbreviations or decimals for sentence endings", () => {
-    const text = "Dr. Prism measured 3.14 volts. The U.S. reading stayed stable.";
+    const text =
+      "Dr. Prism asked Capt. Chen and Lt. Col. Rivera to measure 3.14 volts. The U.S. reading stayed stable.";
     assert.deepEqual(splitLocalVoiceStreamText(text), [
-      "Dr. Prism measured 3.14 volts.",
+      "Dr. Prism asked Capt. Chen and Lt. Col. Rivera to measure 3.14 volts.",
       "The U.S. reading stayed stable.",
     ]);
   });

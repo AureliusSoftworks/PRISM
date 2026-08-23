@@ -17,6 +17,7 @@ import {
   type BotPowerV1,
 } from "./botPower.ts";
 import type { LlmProviderName } from "./index.js";
+import type { BotPowerTrollPresentationV1 } from "./trollPower.ts";
 import type { AutoRouteDecisionV1 } from "./modelRouting.js";
 import type { LiveBakeArtifactV1 } from "./liveBake.js";
 import {
@@ -829,6 +830,8 @@ export interface DebateEventV1 {
   powerIntendedContent?: string;
   /** Public replay-stable timed-silence presentation; contains no intended speech. */
   mutePerformance?: BotPowerMutePerformanceV1;
+  /** Public, replay-safe Troll delivery projection. */
+  botPowerTrollPresentation?: BotPowerTrollPresentationV1;
   sourceIds: string[];
   parentEventId?: string | null;
   interrupted?: boolean;
@@ -2776,8 +2779,9 @@ const DEBATE_COPYCAT_SOURCE_KINDS = new Set<string>([
 
 /**
  * Latest heard public floor from the opposing side, including canonical mute
- * silence. Debate Copycat uses this whenever the other side has spoken, so a
- * second-chair Copycat does not invent an opening.
+ * silence and brief attributed vocal Foley. Debate Copycat uses this whenever
+ * the other side has spoken, so a second-chair Copycat does not invent an
+ * opening.
  */
 export function debateLatestCopycatSourceSpeech(
   events: readonly Pick<
@@ -2794,9 +2798,13 @@ export function debateLatestCopycatSourceSpeech(
     if (!event) continue;
     if (event.speakerBotId === holder.id) continue;
     if (event.sideId !== opposingSideId) continue;
-    if (!DEBATE_COPYCAT_SOURCE_KINDS.has(event.kind)) continue;
+    if (
+      !DEBATE_COPYCAT_SOURCE_KINDS.has(event.kind) &&
+      !debateEventIsAtmosphericVocalFoley(event)
+    ) {
+      continue;
+    }
     if (debateEventIsTranscriptHousekeeping(event)) continue;
-    if (debateEventIsAtmosphericVocalFoley(event)) continue;
     if (!event.content) continue;
     if (debateSpeechLooksLikePromptLeak(event.content)) continue;
     if (debateClaimSentenceIsProceduralFloorGrant(event.content)) continue;

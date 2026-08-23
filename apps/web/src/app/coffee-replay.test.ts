@@ -645,7 +645,7 @@ describe("coffee replay helpers", () => {
     assert.equal(coffeeReplayCompletionHoldMs(messages[1], false), 900);
   });
 
-  it("replays persisted mirror targets and hands voice over only after the trigger", () => {
+  it("replays persisted mirror targets while retaining the holder voice", () => {
     const first = createBotIdentityMirrorStateV1({
       surface: "coffee",
       holderBotId: "ian",
@@ -654,12 +654,14 @@ describe("coffee replay helpers", () => {
       targetBotName: "Mara Vale",
       targetPersonaPrompt: "A terse lunar cartographer.",
       targetFace: { faceEyeCharacter: "◉" },
-      targetVoice: {
+      holderVoice: {
         v: 2,
         enabled: true,
-        baseVoiceId: "voice-4",
-        pitch: 0.18,
-        elevenLabsEffect: "robot",
+        baseVoiceId: "voice-9",
+        pitch: -0.12,
+        accentDefinitionId: "irish-english",
+        speechprintInfluence: "irish-english",
+        elevenLabsEffect: "deep-space",
         voiceEffectExplicit: true,
       },
       sourceMessageId: "mara-trigger",
@@ -673,12 +675,14 @@ describe("coffee replay helpers", () => {
       targetBotName: "Jo Reed",
       targetPersonaPrompt: "A dry public-radio host.",
       targetFace: { faceEyeCharacter: "•" },
-      targetVoice: {
+      holderVoice: {
         v: 2,
         enabled: true,
-        baseVoiceId: "voice-2",
-        pitch: -0.18,
-        elevenLabsEffect: "radio",
+        baseVoiceId: "voice-9",
+        pitch: -0.12,
+        accentDefinitionId: "irish-english",
+        speechprintInfluence: "irish-english",
+        elevenLabsEffect: "deep-space",
         voiceEffectExplicit: true,
       },
       sourceMessageId: "jo-trigger",
@@ -725,12 +729,12 @@ describe("coffee replay helpers", () => {
       "jo",
     );
     assert.equal(
-      coffeeIdentityMirrorStateBeforeMessage(messages, 1, "ian")?.targetVoice.baseVoiceId,
-      "voice-4",
+      coffeeIdentityMirrorStateBeforeMessage(messages, 1, "ian")?.holderVoice?.baseVoiceId,
+      "voice-9",
     );
     assert.equal(
-      coffeeIdentityMirrorStateBeforeMessage(messages, 3, "ian")?.targetVoice.baseVoiceId,
-      "voice-2",
+      coffeeIdentityMirrorStateBeforeMessage(messages, 3, "ian")?.holderVoice?.baseVoiceId,
+      "voice-9",
     );
     assert.equal(
       coffeeReplayStateAt(messages, 2).identityMirrorByHolderBotId.ian?.targetBotId,
@@ -749,12 +753,14 @@ describe("coffee replay helpers", () => {
       },
       null,
     );
-    assert.equal(replayVoice.baseVoiceId, "voice-4");
-    assert.equal(replayVoice.pitch, 0.18);
+    assert.equal(replayVoice.baseVoiceId, "voice-9");
+    assert.equal(replayVoice.pitch, -0.12);
+    assert.equal(replayVoice.accentDefinitionId, "irish-english");
+    assert.equal(replayVoice.speechprintInfluence, "irish-english");
     assert.equal(
       replayVoice.elevenLabsEffect,
       "deep-space",
-      "replay borrows the target voice through the holder's retained effect",
+      "replay retains the holder's complete persisted voice profile",
     );
   });
 

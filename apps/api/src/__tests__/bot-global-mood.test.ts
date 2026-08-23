@@ -10,6 +10,7 @@ import {
   setGlobalBotMood,
 } from "../bot-global-mood.ts";
 import { initializeDatabase } from "../db.ts";
+import { botPowerSourceHashV1 } from "@localai/shared";
 
 function fixture(): DatabaseSync {
   const db = initializeDatabase(new DatabaseSync(":memory:"));
@@ -136,6 +137,57 @@ describe("global bot mood", () => {
         source: "signal_feedback",
       });
       assert.doesNotMatch(JSON.stringify(row), /Ivo was much better/u);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps an enabled Troll warm and refuses mutable global mood writes", () => {
+    const db = fixture();
+    try {
+      const intent = "Interrupt every other bot and troll them.";
+      db.prepare(
+        "UPDATE bots SET powers_json = ? WHERE id = ? AND user_id = ?",
+      ).run(
+        JSON.stringify([{
+          version: 1,
+          id: "troll",
+          name: "Troll",
+          intent,
+          enabled: true,
+          compileStatus: "ready",
+          compiled: {
+            version: 1,
+            sourceHash: botPowerSourceHashV1("Troll", intent),
+            selfCue: "",
+            observerCue: "",
+            effects: [{ type: "troll" }],
+            ruleLabels: [],
+          },
+        }]),
+        "bot-1",
+        "user-1",
+      );
+      assert.equal(readGlobalBotMood(db, "user-1", "bot-1").moodKey, "warm");
+      assert.equal(
+        setGlobalBotMood(
+          db,
+          "user-1",
+          "bot-1",
+          "strained",
+          "signal_feedback",
+          "2026-08-22T00:00:00.000Z",
+        ).moodKey,
+        "warm",
+      );
+      assert.equal(
+        (
+          db.prepare(
+            "SELECT COUNT(*) AS count FROM bot_global_moods WHERE user_id = ? AND bot_id = ?",
+          ).get("user-1", "bot-1") as { count: number }
+        ).count,
+        0,
+      );
     } finally {
       db.close();
     }

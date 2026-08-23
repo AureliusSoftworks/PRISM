@@ -134,6 +134,11 @@ test("Debate mirror borrows target identity while retaining holder materials", (
       v: 2,
       enabled: true,
       baseVoiceId: "voice-2",
+      accentDefinitionId: "irish-english",
+      pronunciationBase: "en-US",
+      speechprintInfluence: "irish-english",
+      speechprintStrength: "strong",
+      speechprintVariationSeed: "holder-speechprint",
       elevenLabsEffect: "echo",
       voiceEffectExplicit: true,
     }),
@@ -163,6 +168,10 @@ test("Debate mirror borrows target identity while retaining holder materials", (
       enabled: true,
       baseVoiceId: "voice-4",
       pitch: 0.2,
+      accentDefinitionId: "indian-english",
+      pronunciationBase: "en-GB",
+      speechprintInfluence: "indian-english",
+      speechprintVariationSeed: "target-speechprint",
       elevenLabsEffect: "robot",
       voiceEffectExplicit: true,
     }),
@@ -213,10 +222,14 @@ test("Debate mirror borrows target identity while retaining holder materials", (
     "baseVoiceId" in mirrored.voiceProfile &&
     "elevenLabsEffect" in mirrored.voiceProfile
   ) {
-    assert.equal(mirrored.voiceProfile.baseVoiceId, "voice-4");
+    assert.equal(mirrored.voiceProfile.baseVoiceId, "voice-2");
+    assert.equal(mirrored.voiceProfile.accentDefinitionId, "irish-english");
+    assert.equal(mirrored.voiceProfile.pronunciationBase, "en-US");
+    assert.equal(mirrored.voiceProfile.speechprintInfluence, "irish-english");
+    assert.equal(mirrored.voiceProfile.speechprintVariationSeed, "holder-speechprint");
     assert.equal(mirrored.voiceProfile.elevenLabsEffect, "echo");
   } else {
-    assert.fail("Identity mirror should retain the target's portable voice profile.");
+    assert.fail("Identity mirror should retain the holder's portable voice profile.");
   }
   assert.equal(mirrored.powers[0]?.id, "target-power");
 

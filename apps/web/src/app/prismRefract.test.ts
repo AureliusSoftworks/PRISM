@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  createBotDirectedSetupRefractTarget,
   PrismRefractGenerationTimeoutError,
   nextPrismRefractChoice,
   prismRefractModifierClickDecision,
@@ -8,6 +9,35 @@ import {
 } from "./prismRefract.ts";
 
 describe("Prism Refract helpers", () => {
+  it("carries a captured bot identity through the shared setup target", async () => {
+    const calls: Array<{ botId: string; botName: string; direction: string }> = [];
+    const target = createBotDirectedSetupRefractTarget({
+      id: "signal-anchor-lizzy",
+      label: "Build around Elizabeth Bennet",
+      botId: "lizzy",
+      botName: "Elizabeth Bennet",
+      run: (input) => {
+        calls.push(input);
+      },
+    });
+
+    await target.run("Center the episode on first impressions.");
+
+    assert.equal(target.kind, "magic");
+    assert.equal(target.purpose, "bot-directed-setup");
+    assert.deepEqual(target.anchor, {
+      botId: "lizzy",
+      botName: "Elizabeth Bennet",
+    });
+    assert.deepEqual(calls, [
+      {
+        botId: "lizzy",
+        botName: "Elizabeth Bennet",
+        direction: "Center the episode on first impressions.",
+      },
+    ]);
+  });
+
   it("uses every unrejected valid choice before resetting the shuffle bag", () => {
     const choices = [
       { value: "", label: "Choose…" },

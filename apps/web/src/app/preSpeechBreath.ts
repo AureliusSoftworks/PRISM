@@ -12,6 +12,15 @@ export interface PreSpeechBreathPlan {
   voiceOverlapMs: number;
 }
 
+export interface PreSpeechBreathPlaybackTiming {
+  /** The amount of the source clip allowed into the conversational mix. */
+  playbackDurationMs: number;
+  /** Start-relative speech onset; the remaining tail overlaps the statement. */
+  voiceStartOffsetMs: number;
+  /** A small release at the end of a deliberately shortened Foley clip. */
+  releaseFadeMs: number;
+}
+
 export const PRE_SPEECH_BREATH_URLS = {
   micro: [
     "/audio/voice-presence/breath-micro-01-v2.mp3",
@@ -43,6 +52,18 @@ const MOOD_CHANCE_MULTIPLIER: Readonly<Record<VoiceDeliveryMood, number>> = {
   guarded: 1.08,
   strained: 1.2,
 };
+
+/**
+ * Shared conversational placement for every breath surface. These are shorter
+ * than the source assets on purpose: an inhale establishes presence, then the
+ * adjacent statement arrives while its release falls away. Keeping this table
+ * here makes live playback and rendered Signal masters use the same clock.
+ */
+export const PRE_SPEECH_BREATH_TIMING = {
+  micro: { playbackDurationMs: 350, voiceStartOffsetMs: 260, releaseFadeMs: 70 },
+  natural: { playbackDurationMs: 480, voiceStartOffsetMs: 350, releaseFadeMs: 90 },
+  deliberate: { playbackDurationMs: 640, voiceStartOffsetMs: 470, releaseFadeMs: 110 },
+} as const satisfies Record<PreSpeechBreathIntensity, PreSpeechBreathPlaybackTiming>;
 
 const BREATH_DIRECTION_RE =
   /(?:\[[^\]]*\b(?:breath(?:e[sd]?|ing)?|inhales?|exhales?|sighs?|gasps?)\b[^\]]*\]|\*[^*]*\b(?:breath(?:e[sd]?|ing)?|inhales?|exhales?|sighs?|gasps?)\b[^*]*\*|\brespirat(?:or|ion|ing)\b)/iu;
@@ -98,6 +119,41 @@ export function hasAuthoredBreathDirection(
   value: string | null | undefined,
 ): boolean {
   return typeof value === "string" && BREATH_DIRECTION_RE.test(value);
+}
+
+/**
+ * Resolve the bounded playback window for a decoded clip. The source's tail
+ * may be shortened, never the following speech; short/missing assets fail
+ * down gracefully while retaining a little natural overlap when possible.
+ */
+export function preSpeechBreathPlaybackTiming(
+  plan: PreSpeechBreathPlan,
+  decodedDurationMs: number,
+): PreSpeechBreathPlaybackTiming {
+  const configured = PRE_SPEECH_BREATH_TIMING[plan.intensity];
+  const availableMs = Number.isFinite(decodedDurationMs)
+    ? Math.max(0, Math.round(decodedDurationMs))
+    : 0;
+  const playbackDurationMs = Math.min(
+    availableMs,
+    configured.playbackDurationMs,
+  );
+  const tailOverlapMs = Math.min(
+    Math.max(0, Math.round(plan.voiceOverlapMs)),
+    playbackDurationMs,
+  );
+  const voiceStartOffsetMs = Math.max(
+    0,
+    Math.min(
+      configured.voiceStartOffsetMs,
+      playbackDurationMs - tailOverlapMs,
+    ),
+  );
+  return {
+    playbackDurationMs,
+    voiceStartOffsetMs,
+    releaseFadeMs: Math.min(configured.releaseFadeMs, playbackDurationMs),
+  };
 }
 
 /**

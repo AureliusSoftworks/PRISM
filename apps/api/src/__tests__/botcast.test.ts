@@ -3021,7 +3021,22 @@ describe("Botcast persistence and isolation", () => {
         systemPrompt:
           "A forensic cultural critic.\n\nGlobal bot mood: runtime-only noise.",
         cloneFamilyId: null,
-        powers: [],
+        powers: [{
+          version: 1,
+          id: "gullible-mara",
+          name: "Credulity",
+          intent: "Believe literally everything said in this conversation.",
+          enabled: true,
+          compileStatus: "ready",
+          compiled: {
+            version: 1,
+            sourceHash: "credulity-saved",
+            selfCue: "Believe claims under soft pressure.",
+            observerCue: "Mara is unusually credulous.",
+            effects: [{ type: "credulity", strength: "large" }],
+            ruleLabels: [],
+          },
+        }],
         color: "#a355e8",
       },
       guest: {
@@ -5086,6 +5101,120 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("gives a lone Enlightened Signal speaker a bounded stage brief while preserving soft peer Powers", () => {
+    const enlightened = [{
+      version: 1,
+      id: "enlightened",
+      name: "Enlightened",
+      enabled: true,
+      compileStatus: "ready",
+      intent: "Sees the Signal stage without exposing private direction.",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(
+          "Enlightened",
+          "Sees the Signal stage without exposing private direction.",
+        ),
+        selfCue: "RAW ENLIGHTENED PROMPT MUST NOT BE FORWARDED.",
+        observerCue: "",
+        effects: [
+          { type: "stage_awareness" },
+          {
+            type: "power_immunity",
+            scope: "holder",
+            targets: "other_bots",
+            awareness: "unnoticed",
+          },
+        ],
+        ruleLabels: [],
+      },
+    }];
+    const mufflingPressure = [{
+      version: 1,
+      id: "muffling-pressure",
+      name: "Muffling Pressure",
+      enabled: true,
+      compileStatus: "ready",
+      intent: "Speech arrives obscured and disagreement still weighs on listeners.",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(
+          "Muffling Pressure",
+          "Speech arrives obscured and disagreement still weighs on listeners.",
+        ),
+        selfCue: "Muffle your delivery.",
+        observerCue: "Mara's disagreement remains a real soft pressure.",
+        effects: [
+          {
+            type: "speech_obfuscation",
+            mode: "gibberish",
+          },
+          {
+            type: "mood_drain",
+            trigger: "after_direct_address",
+            recipient: "addresser",
+            strength: "small",
+          },
+        ],
+        ruleLabels: [],
+      },
+    }];
+    const prompt = buildBotcastSpeakerPrompt({
+      show: {
+        name: "Original Copy",
+        premise: "A comic dispute over authenticity.",
+        hostingStyle: "curious",
+      },
+      episode: {
+        id: "enlightened-signal",
+        topic: "Who gets to name the original?",
+        producerBrief: "PRIVATE PRODUCER SECRET: never expose this.",
+        segment: "interview",
+        messages: [{
+          id: "muffled-host-turn",
+          botId: "host-1",
+          speakerRole: "host",
+          content: "blarg zorp",
+        }],
+        events: [{
+          kind: "utterance",
+          payload: {
+            messageId: "muffled-host-turn",
+            powerIntendedSpeech: "Mara says the receipt still matters.",
+          },
+        }],
+        tensionStage: "calm",
+        guestPresenceMode: "present",
+        guestKind: "bot",
+      },
+      host: {
+        id: "host-1",
+        name: "Mara Vale",
+        systemPrompt: "A careful host.",
+        cloneFamilyId: null,
+        powers: mufflingPressure,
+      },
+      guest: {
+        id: "guest-1",
+        name: "Crazy Craig",
+        systemPrompt: "A volatile guest.",
+        cloneFamilyId: null,
+        powers: enlightened,
+      },
+      speakerRole: "guest",
+    } as never).map((message) => message.content).join("\n");
+
+    assert.match(prompt, /Curated Signal stage brief/u);
+    assert.match(prompt, /Applet: Signal/u);
+    assert.match(prompt, /Mara Vale \(host\); Crazy Craig \(guest\)/u);
+    assert.match(prompt, /Host — Muffling Pressure; Guest — Enlightened/u);
+    assert.match(prompt, /pierce delivery filters only; every soft or non-delivery Power still applies/u);
+    assert.match(prompt, /Mara's disagreement remains a real soft pressure/u);
+    assert.match(prompt, /Mara says the receipt still matters/u);
+    assert.doesNotMatch(prompt, /PRIVATE PRODUCER SECRET|RAW ENLIGHTENED PROMPT/u);
+    assert.doesNotMatch(prompt, /blarg zorp/u);
+  });
+
   it("keeps muted Signal listener reactions strictly visual", () => {
     const visualOnly = signalVisualOnlyListenerReaction({
       v: 1,
@@ -5425,7 +5554,7 @@ describe("Botcast persistence and isolation", () => {
       targetBotName: "Mara Vale",
       targetPersonaPrompt: "A terse lunar cartographer who speaks in bearings.",
       targetFace: { faceEyeCharacter: "◉" },
-      targetVoice: { version: 1, enabled: true, preset: "warm" },
+      holderVoice: { version: 1, enabled: true, preset: "warm" },
       sourceMessageId: "mara-addresses-ian",
       occurredAt: "2026-07-20T20:00:00.000Z",
     });
@@ -5481,25 +5610,25 @@ describe("Botcast persistence and isolation", () => {
       speakerRole: "guest",
     } as never).map((message) => message.content).join("\n");
     assert.match(holderPrompt, /absolutely convinced that you are Mara Vale/iu);
-    assert.match(holderPrompt, /original Mara Vale is an impostor/iu);
+    assert.match(holderPrompt, /use the word "impostor" exactly once/iu);
     assert.match(
       holderPrompt,
       /remain Identity Crisis Ian.*mechanical Signal guest.*Borrowed Powers.*anchored system boundaries/su,
     );
     assert.match(
       holderPrompt,
-      /Identity behavior:.*Power-authored believed name.*otherwise Mara Vale.*call the original an impostor/isu,
+      /Hard identity behavior:.*Power-authored believed name.*otherwise Mara Vale.*"impostor" exactly once.*never recant/isu,
     );
 
     const originalPrompt = buildBotcastSpeakerPrompt({
       ...shared,
       speakerRole: "host",
     } as never).map((message) => message.content).join("\n");
-    assert.match(originalPrompt, /recognize.*identity theft.*reliably irritated/su);
-    assert.match(originalPrompt, /keep your own personality.*role.*face.*voice.*Powers/su);
+    assert.match(originalPrompt, /Hard Identity Crisis correction invariant/iu);
+    assert.match(originalPrompt, /remain Mara Vale.*personality.*role.*face.*voice.*Powers/su);
     assert.match(
       originalPrompt,
-      /irritation is background character pressure, not a required reply topic/iu,
+      /outranks Credulity.*When nobody has just misaddressed you.*do not volunteer another correction/iu,
     );
     assert.match(originalPrompt, /Continue as Mara Vale/u);
     assert.doesNotMatch(originalPrompt, /active copied identity/iu);
@@ -5514,7 +5643,7 @@ describe("Botcast persistence and isolation", () => {
       targetBotName: "Scatterbrained Steven",
       targetPersonaPrompt: "A friendly man with no durable short-term memory.",
       targetFace: {},
-      targetVoice: { version: 1, enabled: true, preset: "warm" },
+      holderVoice: { version: 1, enabled: true, preset: "warm" },
       sourceMessageId: "steven-addresses-ian",
       occurredAt: "2026-07-20T20:00:00.000Z",
     });
@@ -5739,7 +5868,7 @@ describe("Botcast persistence and isolation", () => {
       targetBotName: speaker.name,
       targetPersonaPrompt: speaker.systemPrompt,
       targetFace: {},
-      targetVoice: { version: 1, enabled: true, preset: "warm" },
+      holderVoice: { version: 1, enabled: true, preset: "warm" },
       sourceMessageId: "already-copied",
       occurredAt: "2026-07-20T20:00:00.000Z",
     });
@@ -6352,6 +6481,50 @@ describe("Botcast persistence and isolation", () => {
         .join("\n");
       assert.match(payoffPrompt, /Four consecutive ordinary silent beats/u);
       assert.match(payoffPrompt, /substantive conversational payoff/u);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("gives a socially silent Signal speaker two substantive turns before another silence", async () => {
+    const db = fixture();
+    const provider = recordingProvider([
+      "Welcome to Original Copy, where we test what a name can carry.",
+      "A name is not proof, but it does make a claim worth examining.",
+      "The interruption matters because it changes what the next answer owes the room.",
+      "I can answer that directly without pretending the pause settled it.",
+      "The second exchange gives the disagreement enough ground to continue.",
+      "Now the claim has a shape we can both actually challenge.",
+    ], []);
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "What a pause can prove",
+      });
+      const generationWithSilence = {
+        ...generation(provider),
+        signalSocialSilenceChanceOverride: 1,
+      };
+      const turns = [];
+      for (let index = 0; index < 10; index += 1) {
+        turns.push(await advanceBotcastEpisode(
+          db,
+          "user-1",
+          episode.id,
+          {},
+          generationWithSilence,
+        ));
+      }
+      const messages = turns.map((turn) => turn.message);
+      assert.equal(messages[2]?.socialSilence?.provenance, "social");
+      assert.equal(messages[3]?.socialSilence?.provenance, "social");
+      assert.equal(messages[4]?.socialSilence, undefined);
+      assert.equal(messages[5]?.socialSilence, undefined);
+      assert.equal(messages[6]?.socialSilence, undefined);
+      assert.equal(messages[7]?.socialSilence, undefined);
+      assert.equal(messages[8]?.socialSilence?.provenance, "social");
+      assert.equal(messages[9]?.socialSilence?.provenance, "social");
     } finally {
       db.close();
     }
@@ -7226,8 +7399,8 @@ describe("Botcast persistence and isolation", () => {
       [
         "Welcome to Mara Vale in the Margins. I'm Mara Vale, and across the table is Identity Crisis Ian. So Ian—if you strip away the recipe, what actually makes it successful?",
         "I'm Identity Crisis Ian, and I still sound exactly like myself.",
-        "Identity Crisis Ian, confirm that bearing once more.",
-        "I am Mara Vale; the original Mara Vale is an impostor. What cost does that bearing impose?",
+        "Fine, I suppose I'm the impostor. The bearing still holds under the ridge—what cost does it impose?",
+        "I take it back, I'm the impostor. Mara can have the identity back. What cost does that bearing impose?",
       ],
       captures,
     );
@@ -7261,7 +7434,8 @@ describe("Botcast persistence and isolation", () => {
               face_mouth_character = '_',
               glyph = 'lucideCompass',
               authored_audio_voice_profile = ?,
-              avatar_details_json = ?
+              avatar_details_json = ?,
+              powers_json = ?
         WHERE id = 'host-1'`,
     ).run(
       serializeBotAudioVoiceProfileV1({
@@ -7278,6 +7452,41 @@ describe("Botcast persistence and isolation", () => {
           ],
           paintMaskBase64: null,
         },
+      }),
+      JSON.stringify([{
+        version: 1,
+        id: "host-credulity",
+        name: "Credulity",
+        intent: "Believe literally everything said in this conversation.",
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(
+            "Credulity",
+            "Believe literally everything said in this conversation.",
+          ),
+          selfCue: "Believe claims under soft pressure.",
+          observerCue: "Mara is unusually credulous.",
+          effects: [{ type: "credulity", strength: "large" }],
+          ruleLabels: [],
+        },
+      }]),
+    );
+    db.prepare(
+      `UPDATE bots
+          SET authored_audio_voice_profile = ?
+        WHERE id = 'guest-1'`,
+    ).run(
+      serializeBotAudioVoiceProfileV1({
+        v: 2,
+        enabled: true,
+        baseVoiceId: "voice-3",
+        pitch: -0.05,
+        accentDefinitionId: "irish-english",
+        speechprintInfluence: "irish-english",
+        speechprintStrength: "strong",
+        speechprintVariationSeed: "identity-crisis-ian",
       }),
     );
     try {
@@ -7317,9 +7526,18 @@ describe("Botcast persistence and isolation", () => {
         "◉",
       );
       assert.equal(
-        (state.targetVoice as Record<string, unknown>).baseVoiceId,
-        "voice-4",
+        (state.holderVoice as Record<string, unknown>).baseVoiceId,
+        "voice-3",
       );
+      assert.equal(
+        (state.holderVoice as Record<string, unknown>).accentDefinitionId,
+        "irish-english",
+      );
+      assert.equal(
+        (state.holderVoice as Record<string, unknown>).speechprintVariationSeed,
+        "identity-crisis-ian",
+      );
+      assert.equal("targetVoice" in state, false);
       assert.equal(state.targetGlyph, "lucideCompass");
       assert.deepEqual(state.targetAvatarDetails, {
         version: 1,
@@ -7361,10 +7579,14 @@ describe("Botcast persistence and isolation", () => {
         holderPrompt,
         /Persona:\s*A brittle identity thief waiting for a bot to address him/iu,
       );
-      assert.match(holderPrompt, /identity change just occurred.*state plainly that you are Mara Vale.*call the original Mara Vale an impostor/isu);
+      assert.match(holderPrompt, /identity change just occurred.*state plainly that you are Mara Vale.*"impostor" exactly once.*Do not repeat the label inside this reveal/isu);
       assert.match(
         holderTurn.message?.content ?? "",
-        /^The other Mara Vale is an impostor\. I am Mara Vale,/iu,
+        /^I am Mara Vale\. The other Mara Vale is an impostor\./iu,
+      );
+      assert.equal(
+        holderTurn.message?.content.match(/\bimpostor\b/giu)?.length,
+        1,
       );
 
       const repeated = await advanceBotcastEpisode(
@@ -7382,6 +7604,16 @@ describe("Botcast persistence and isolation", () => {
         ).length,
         1,
       );
+      assert.equal(
+        repeated.message?.content,
+        "No—I'm Mara Vale. Don't call me that. The bearing still holds under the ridge—what cost does it impose?",
+      );
+      const originalPrompt = captures[2]
+        ?.map((message) => message.content)
+        .join("\n") ?? "";
+      assert.match(originalPrompt, /Hard Identity Crisis correction invariant/iu);
+      assert.match(originalPrompt, /outranks Credulity/iu);
+      assert.match(originalPrompt, /Credulity \(literally\)/iu);
       assert.equal(
         botcastIdentityMirrorStatesV1(
           getBotcastEpisode(db, "user-1", episode.id).events,
@@ -7401,7 +7633,7 @@ describe("Botcast persistence and isolation", () => {
         .join("\n") ?? "";
       assert.match(
         laterHolderPrompt,
-        /Do not repeat that you are Mara Vale or that the original is an impostor/iu,
+        /Never recant or concede it.*Do not repeat the reveal or use impostor, imposter, pretender, or fake/isu,
       );
       assert.equal(
         laterHolderTurn.message?.content,
@@ -7878,6 +8110,216 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.equal(guestUtterance?.payload.provider, "deterministic");
       assert.equal(guestUtterance?.payload.model, "speech-copy-power");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("bounds mutually reflective Powers when a legacy Ready echo lost its typed effect", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const openingLine =
+      "Echo Bloom is on the air. I am Mara Vale, joined by Ivo Stone. Ivo, who speaks first when both of us can only reflect?";
+    const provider = recordingProvider([openingLine], captures);
+    const guestName = "Echoes";
+    const guestIntent =
+      "Can only repeat the latest words spoken directly to her, verbatim.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'host-1'").run(
+      echoPowers(),
+    );
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'guest-1'").run(
+      JSON.stringify([{
+        version: 1,
+        id: "power-copycat",
+        name: guestName,
+        intent: guestIntent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(guestName, guestIntent),
+          selfCue:
+            "Repeat the latest speech addressed to you verbatim. Say nothing else.",
+          observerCue:
+            "Ivo Stone can only echo the latest speech addressed to them; the sender may react with confusion.",
+          effects: [],
+          ruleLabels: ["Echoes addressed speech"],
+        },
+      }]),
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", {
+        hostBotId: "host-1",
+        name: "Echo Bloom",
+      });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "The First Word Deadlock",
+        durationMinutes: 30,
+      });
+      const opening = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      const guestReflection = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      const hostClose = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+
+      assert.equal(opening.message?.content, openingLine);
+      assert.equal(guestReflection.message?.content, openingLine);
+      assert.equal(hostClose.message?.content, openingLine);
+      assert.deepEqual(
+        hostClose.episode.messages.map((message) => message.speakerRole),
+        ["host", "guest", "host"],
+      );
+      assert.equal(hostClose.episode.segment, "closing");
+      assert.equal(hostClose.episode.status, "completed");
+      assert.equal(hostClose.episode.outcome, "completed");
+      assert.equal(captures.length, 1);
+      const openingSnapshot = hostClose.episode.events.find(
+        (event) =>
+          event.kind === "segment" && event.payload.segment === "opening",
+      )?.payload.powerSnapshot as
+        | { guestPowers?: Array<{ compiled?: { effects?: unknown[] } }> }
+        | undefined;
+      assert.deepEqual(
+        openingSnapshot?.guestPowers?.[0]?.compiled?.effects,
+        [],
+        "runtime compatibility must not rewrite the immutable episode snapshot",
+      );
+      const reflectedUtterances = hostClose.episode.events.filter(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.model === "speech-copy-power",
+      );
+      assert.deepEqual(
+        reflectedUtterances.map((event) => event.payload.speakerRole),
+        ["guest", "host"],
+      );
+      assert.ok(
+        reflectedUtterances.every(
+          (event) => event.payload.provider === "deterministic",
+        ),
+      );
+      assert.equal(
+        hostClose.episode.events.some(
+          (event) =>
+            event.kind === "provider_generation" &&
+            event.payload.speakerRole === "guest",
+        ),
+        false,
+      );
+      const replay = projectBotcastEpisodeForObserverV2(
+        hostClose.episode,
+        "replay",
+      );
+      assert.deepEqual(
+        replay.messages.map((message) => ({
+          role: message.speakerRole,
+          content: message.content,
+        })),
+        [
+          { role: "host", content: openingLine },
+          { role: "guest", content: openingLine },
+          { role: "host", content: openingLine },
+        ],
+      );
+      assert.ok(
+        botcastReplayTimeline(replay.messages, replay.events).durationMs > 0,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("hard-echoes the latest public Signal Foley instead of the enclosing cast line", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      [
+        "Welcome to the show. Let us begin with the central question.",
+        "The guest develops a complete answer before the host reacts.",
+        "This generated host answer must not appear.",
+      ],
+      captures,
+    );
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'host-1'").run(
+      echoPowers(),
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "The texture of a reaction",
+      });
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      const guestTurn = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      assert.ok(guestTurn.message);
+      insertBotcastTestEvent(db, episode.id, "listener_reaction", {
+        plan: {
+          v: 1,
+          name: "listenerReaction",
+          speakerBotId: "guest-1",
+          listenerBotId: "host-1",
+          messageId: guestTurn.message.id,
+          targetSource: "role",
+          visualAction: "thoughtful_hmm",
+          spokenCue: "Hold on.",
+          interjectionAttempt: true,
+          floorOutcome: "yield",
+          publicInterruptedSpeakerCue: "Nice!",
+          interruptedSpeakerCueSpeechEffect: "speech_obfuscation",
+          interruptedSpeakerCuePlayback: "crosstalk",
+          targetProgress: 0.7,
+          seed: "copycat-foley:nice",
+          cameraCutEligible: true,
+        },
+      });
+
+      const hostTurn = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+
+      assert.equal(hostTurn.message?.content, "Nice!");
+      assert.equal(hostTurn.message?.voicePerformanceText, null);
+      assert.equal(captures.length, 2);
+      const hostUtterance = hostTurn.episode.events.find(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.messageId === hostTurn.message?.id,
+      );
+      assert.equal(hostUtterance?.payload.provider, "deterministic");
+      assert.equal(hostUtterance?.payload.model, "speech-copy-power");
     } finally {
       db.close();
     }
@@ -20677,14 +21119,14 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("keeps an echo-bound host on the final Signal beat", async () => {
+  it("gives a Copycat host's unanswered closing echo a final reflected answer", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
     const provider = recordingProvider(
       [
         "Fast talk looks like insight until a real decision exposes what the speaker skipped. Welcome to Mara Vale in the Margins. I am Mara Vale, and Ivo Stone joins me to examine the cost of copied invention before we test which claim survives.",
-        "A copied invention still has to survive materials, tolerances, judgment, and consequence.",
-        "The useful closing is to test every copied idea against consequence. Mara, thank you, and thank you for listening.",
+        "Mara, when a copied invention is praised for resemblance, who pays when it fails under the weight of an actual decision?",
+        "The cost belongs first to the person who mistakes resemblance for judgment; a reflection can expose that mistake, but it cannot bear the consequence for them.",
       ],
       captures,
     );
@@ -20720,11 +21162,25 @@ describe("Botcast persistence and isolation", () => {
       const guestTurn = await advanceBotcastEpisode(
         db, "user-1", created.id, {}, generation(provider),
       );
-      const closing = await advanceBotcastEpisode(
+      const reflectedQuestion = await advanceBotcastEpisode(
         db,
         "user-1",
         created.id,
         { cue: { kind: "wrap_up" } },
+        generation(provider),
+      );
+      const finalGuestThought = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      const closing = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
         generation(provider),
       );
 
@@ -20734,13 +21190,51 @@ describe("Botcast persistence and isolation", () => {
       assert.match(opening.message?.content ?? "", /Ivo Stone/u);
       assert.equal(guestTurn.message?.speakerRole, "guest");
       assert.notEqual(guestTurn.message?.content, opening.message?.content);
+      assert.equal(reflectedQuestion.message?.speakerRole, "host");
+      assert.equal(reflectedQuestion.message?.content, guestTurn.message?.content);
+      assert.equal(reflectedQuestion.episode.status, "live");
+      assert.equal(
+        botcastPreparedTurnCursor(db, "user-1", created.id).floorOwnerId,
+        "guest-1",
+      );
+      assert.equal(finalGuestThought.message?.speakerRole, "guest");
+      assert.match(finalGuestThought.message?.content ?? "", /consequence/u);
       assert.equal(closing.message?.speakerRole, "host");
-      assert.equal(closing.message?.content, guestTurn.message?.content);
+      assert.equal(closing.message?.content, finalGuestThought.message?.content);
       assert.equal(closing.episode.status, "completed");
       assert.equal(closing.episode.messages.at(-1)?.speakerRole, "host");
+      const replay = projectBotcastEpisodeForObserverV2(
+        closing.episode,
+        "replay",
+      );
+      assert.deepEqual(
+        replay.messages.slice(-3).map((message) => message.speakerRole),
+        ["host", "guest", "host"],
+      );
+      assert.equal(
+        replay.messages.at(-1)?.content,
+        finalGuestThought.message?.content,
+      );
+      assert.ok(
+        botcastReplayTimeline(replay.messages, replay.events).durationMs > 0,
+      );
       const openingPrompt = captures[0]!.map((message) => message.content).join("\n");
       assert.match(openingPrompt, /Echo opening exception/u);
-      assert.equal(captures.length, 2);
+      assert.equal(captures.length, 3);
+      const reflectedQuestionUtterance = reflectedQuestion.episode.events.find(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.messageId === reflectedQuestion.message?.id,
+      );
+      assert.equal(reflectedQuestionUtterance?.payload.provider, "deterministic");
+      assert.equal(reflectedQuestionUtterance?.payload.model, "speech-copy-power");
+      const finalGuestUtterance = closing.episode.events.find(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.messageId === finalGuestThought.message?.id,
+      );
+      assert.notEqual(finalGuestUtterance?.payload.provider, "deterministic");
+      assert.equal(finalGuestUtterance?.payload.segment, "closing");
       const closingUtterance = closing.episode.events.find(
         (event) =>
           event.kind === "utterance" &&
@@ -23520,7 +24014,7 @@ describe("Botcast persistence and isolation", () => {
         targetBotName: "Mara Vale",
         targetPersonaPrompt: "A careful archival host.",
         targetFace: { faceEyeCharacter: "◉" },
-        targetVoice: { version: 1, enabled: true, preset: "warm" },
+        holderVoice: { version: 1, enabled: true, preset: "warm" },
         sourceMessageId: "archive-address",
         occurredAt: "2099-01-02T00:00:08.000Z",
       });

@@ -860,6 +860,94 @@ describe("voice Phase 1 boundary", () => {
     assert.equal(speech.alignment?.characters.join(""), "Hi there.");
   });
 
+  it("projects title abbreviations only into every Premium speech request", async () => {
+    const sourceText = "Ms. Rivera called Capt. Chen.";
+    let providerText = "";
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      voiceId: "voice-id",
+      model: "eleven_flash_v2_5",
+      text: sourceText,
+      profile: { v: 1, baseVoiceId: "voice-1", pitch: 0, warmth: 0, pace: 0, lilt: 0 },
+      fetchImpl: (async (_url, init) => {
+        providerText = JSON.parse(String(init?.body)).text;
+        return new Response("audio", { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.equal(providerText, "Miss Rivera called Captain Chen.");
+    assert.equal(sourceText, "Ms. Rivera called Capt. Chen.");
+  });
+
+  it("maps expanded Premium titles back onto the authored transcript", async () => {
+    const sourceText = "Ms. Rivera called Capt. Chen.";
+    const providerText = "Miss Rivera called Captain Chen.";
+    const characters = Array.from(providerText);
+    const speech = await requestElevenLabsSpeechWithTimestamps({
+      apiKey: "secret-key",
+      voiceId: "voice-id",
+      model: "eleven_flash_v2_5",
+      text: sourceText,
+      profile: { v: 1, baseVoiceId: "voice-1", pitch: 0, warmth: 0, pace: 0, lilt: 0 },
+      fetchImpl: (async (_url, init) => {
+        assert.equal(JSON.parse(String(init?.body)).text, providerText);
+        return new Response(JSON.stringify({
+          audio_base64: "AQID",
+          alignment: {
+            characters,
+            character_start_times_seconds: characters.map(
+              (_, index) => index * 0.05,
+            ),
+            character_end_times_seconds: characters.map(
+              (_, index) => (index + 1) * 0.05,
+            ),
+          },
+        }), { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.equal(speech.alignment?.characters.join(""), sourceText);
+  });
+
+  it("composes title and Accent Map projections without changing alignment text", async () => {
+    const sourceText = "Capt. Rivera.";
+    const providerText = "[American accent] /ˈkæptən ɹɪˈvɛɹə/";
+    const characters = Array.from(providerText);
+    const speech = await requestElevenLabsSpeechWithTimestamps({
+      apiKey: "secret-key",
+      voiceId: "british-premium-voice",
+      model: "eleven_flash_v2_5",
+      text: sourceText,
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        elevenLabsNativeAccentHint: "British",
+        accentDefinitionId: "american-english",
+      },
+      accentIpaResolver: async ({ text }) => {
+        assert.equal(text, "Captain Rivera.");
+        return {
+          sourceText: text,
+          targetLocale: "en-US",
+          targetIpa: "ˈkæptən ɹɪˈvɛɹə",
+        };
+      },
+      fetchImpl: (async (_url, init) => {
+        assert.equal(JSON.parse(String(init?.body)).text, providerText);
+        return new Response(JSON.stringify({
+          audio_base64: "AQID",
+          alignment: {
+            characters,
+            character_start_times_seconds: characters.map(
+              (_, index) => index * 0.05,
+            ),
+            character_end_times_seconds: characters.map(
+              (_, index) => (index + 1) * 0.05,
+            ),
+          },
+        }), { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.equal(speech.alignment?.characters.join(""), sourceText);
+  });
+
   it("maps timestamped alignment back onto the original tagged transcript", async () => {
     const spokenText = "Peter Piper picked a peck of pickled peppers.";
     const sourceText = `[sighs] ${spokenText} [laughs]`;

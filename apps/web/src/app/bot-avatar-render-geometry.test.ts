@@ -48,6 +48,14 @@ describe("Avatar Details face registration", () => {
       /const avatarFaceRegistrationStyle = hasAvatarDetailsVisuals\s*\? BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE\s*:\s*BOT_AVATAR_CANONICAL_FACE_REGISTRATION_STYLE;/,
     );
     assert.doesNotMatch(pageSource, /ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT/);
+    assert.match(
+      pageSource,
+      /const registeredFaceEyeMovement =\s*botFaceEyeMovementPreservingInkRegistration\(\{[\s\S]{0,220}movement: faceStyle\.eyeAnimation,[\s\S]{0,120}hasVisibleInk: hasAvatarDetailsVisuals,[\s\S]{0,120}talking: isTalking/,
+    );
+    assert.match(
+      pageSource,
+      /renderDetailLevel === "full"\s*\? registeredFaceEyeMovement\s*:\s*"still"/,
+    );
   });
 
   it("uses the editor calibration for details-bearing live avatars", () => {

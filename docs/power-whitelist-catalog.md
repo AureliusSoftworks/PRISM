@@ -113,7 +113,7 @@ Whitelist matching uses **Library bot id** / `@` targets only.
 ### 11. Confusion Collin (`identity-crisis-ian`)
 - **Codified Power: IDENTITY CRISIS** — `identity_mirror` on bot address
 - **Whitelisted:** Enlightened (implicit)
-- **Effect:** Borrows the addressed bot's public persona, face, authored Ink, resolved voice identity, lower glyph, and active public Power consequences (not player) while retaining the holder's color, client-side voice effect, communication chassis, and frame finish. The CRT powers down while the identity is installed and revealed.
+- **Effect:** Borrows the addressed bot's public persona, face, authored Ink, lower glyph, and active public Power consequences (not player) while retaining the holder's complete authored voice and accent, color, client-side voice effect, communication chassis, and frame finish. The CRT powers down while the identity is installed and revealed.
 - **Axes:** F identity
 - **Cosmetic:** Replay-safe screen-off transition on true target changes.
 

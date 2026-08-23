@@ -378,6 +378,24 @@ export type BotPowerEffectV1 =
       target: "current_addressee";
       style: "fresh_tailored";
     }
+  /**
+   * A bounded public attention-seeking style. Other bots are always eligible
+   * targets; the player is a soft behavioral target only in Zen.
+   */
+  | {
+      type: "troll";
+      dialect: "internet_lingo";
+      grammar: "deliberately_bad";
+      targets: "all_other_bots";
+      playerTarget: "zen_only";
+      burstLimit: 3;
+      noiseCharLimit: 12;
+      ordinaryInterruptionImmunity: "shh_and_new_message";
+      moodLock: "warm";
+      rickrollChancePercent: 3;
+      memeChancePercent: 6;
+      bodilyActionChancePercent: 8;
+    }
   | {
       type: "mood_resistance";
       polarity: "positive" | "negative" | "both";
@@ -1019,6 +1037,22 @@ export function normalizeBotPowerEffectV1(value: unknown): BotPowerEffectV1 | nu
       trigger: "every_spoken_reply",
       target: "current_addressee",
       style: "fresh_tailored",
+    };
+  }
+  if (effect.type === "troll") {
+    return {
+      type: "troll",
+      dialect: "internet_lingo",
+      grammar: "deliberately_bad",
+      targets: "all_other_bots",
+      playerTarget: "zen_only",
+      burstLimit: 3,
+      noiseCharLimit: 12,
+      ordinaryInterruptionImmunity: "shh_and_new_message",
+      moodLock: "warm",
+      rickrollChancePercent: 3,
+      memeChancePercent: 6,
+      bodilyActionChancePercent: 8,
     };
   }
   if (effect.type === "mood_resistance") {
@@ -1668,6 +1702,39 @@ export function botPowerDefinitionIsExplicitMuteV1(
   ].some((pattern) => pattern.test(intent));
 }
 
+/**
+ * Recognizes legacy Ready addressed-speech copy contracts whose compiler cues
+ * survived but whose typed effects array was stored empty.
+ */
+export function botPowerDefinitionIsExplicitAddressedSpeechCopyV1(
+  nameValue: unknown,
+  intentValue: unknown,
+): boolean {
+  const name = compactText(nameValue, BOT_POWER_NAME_MAX_LENGTH)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const intent = compactText(intentValue, BOT_POWER_INTENT_MAX_LENGTH)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const namedCopy =
+    /^(?:copycat(?:\s+calvin)?|echo(?:es)?|parrot(?:ing)?)$/u.test(name);
+  const exclusiveCopy =
+    /\b(?:can|may|must)\s+only\s+(?:copy|echo|repeat|parrot)\b/u.test(intent) ||
+    /\b(?:copy|echo|repeat|parrot)\w*\b[\s\S]{0,100}\b(?:nothing|say\s+nothing)\s+else\b/u.test(
+      intent,
+    );
+  const addressedSpeech = [
+    /\b(?:addressed|said|spoken|asked|told)\s+(?:directly\s+)?(?:to\s+)?(?:this\s+bot|them|her|him|you)\b/u,
+    /\b(?:spoken|said)\s+directly\s+to\b/u,
+    /\bdirect(?:ly)?\s+(?:address|speech|words?)\b/u,
+  ].some((pattern) => pattern.test(intent));
+  const exactCopy =
+    /\b(?:verbatim|exactly|word[ -]for[ -]word|no\s+added\s+words?|nothing\s+else)\b/u.test(
+      intent,
+    );
+  return (namedCopy || exclusiveCopy) && addressedSpeech && exactCopy;
+}
+
 /** Recognizes hard lung-Foley silence without muting speech. */
 export function botPowerDefinitionIsExplicitBreathlessV1(
   nameValue: unknown,
@@ -1746,6 +1813,56 @@ export function botPowerDefinitionIsExplicitInterruptionV1(
     /\b(?:cuts?|jumps?)\s+into\s+(?:live\s+)?(?:openings?|speech|answers?|turns?)\b/u,
     /\b(?:talks?|speaks?)\s+over\s+(?:others?|people|bots?|speakers?|whoever|anyone)\b/u,
   ].some((pattern) => pattern.test(intent));
+}
+
+/** Recognizes the named Troll Power and its deliberately annoying dialect. */
+export function botPowerDefinitionIsTrollV1(
+  nameValue: unknown,
+  intentValue: unknown,
+): boolean {
+  const name = compactText(nameValue, BOT_POWER_NAME_MAX_LENGTH)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const intent = compactText(intentValue, BOT_POWER_INTENT_MAX_LENGTH)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  if (/^troll(?:ing)?$/u.test(name)) return true;
+  return /\b(?:internet\s+)?troll(?:ing|s)?\b/u.test(`${name} ${intent}`) && [
+    /\b(?:lolwut|rofl|l33t|lolol+|hahaha+)\b/u,
+    /\b(?:annoy|spam|bad\s+grammar|misspell|dad\s*joke|pun)\b/u,
+  ].some((pattern) => pattern.test(intent));
+}
+
+export type BotPowerTrollAudienceV1 = "other_bots" | "zen_player";
+
+/**
+ * Two bounded lines survive the shared per-line prompt compactor without
+ * crowding every other Ready Power out of the global prompt budget.
+ */
+export function botPowerTrollAuthoringCueLinesV1(
+  audience: BotPowerTrollAudienceV1 = "other_bots",
+): string[] {
+  if (audience === "zen_player") {
+    return [
+      "Zen Troll: fixed warm—never cold, angry, guarded, strained, or hostile. Accuracy is mandatory; essential facts stay intact; nuisance decorates. Pester the player; they may redirect or leave Zen. Use up to 12 random chars, ROFL/OMG/lolwut, lowercase i, l33tspeak, fake questions, or dad jokes.",
+      "Inside this reply vary: tease; up to 12 random chars; one char; lololol.../hahaha...; or up to 3 newline beats. No background messages, invented names, player control or traps, or Power talk; they may redirect or leave Zen.",
+    ];
+  }
+  return [
+    "Troll style: fixed warm mood—never cold, angry, guarded, strained, or hostile. Annoy every other bot, never the player outside Zen except for rare runtime ambushes. Use literal @Name exactly for targets over time, ROFL/OMG/lolwut, lowercase i, l33tspeak, fake questions, and tailored puns or dad jokes.",
+    "Vary one bounded burst per turn: ordinary reply; up to 12 random characters; one character; lololol.../hahaha...; or one sentence in at most 3 tiny beats. Never force replies or name this Power; bots retain agency.",
+  ];
+}
+
+/** Production-composed soft style for compiler and authoring feedback. */
+export function botPowerTrollAuthoringCueV1(
+  audience: BotPowerTrollAudienceV1 = "other_bots",
+): string {
+  return botPowerTrollAuthoringCueLinesV1(audience).join(" ");
+}
+
+export function botPowerTrollsV1(value: unknown): boolean {
+  return activeBotPowerEffectsV1(value).some((effect) => effect.type === "troll");
 }
 
 /** Recognizes interruption wording that promises every valid opening, not a probability. */
@@ -1888,10 +2005,10 @@ export function strongestBotPowerInterruptionEffectV1(
 /**
  * Returns the effective runtime effects for Ready Powers.
  *
- * A small number of legacy Ready mute Powers were stored with strong authored
- * silence language but an empty compiled effects array. Recover that one hard
- * invariant here so every runtime adapter sees the same absolute mute instead
- * of having to remember a mode-specific compatibility check.
+ * A small number of legacy Ready Powers were stored with strong authored hard
+ * contracts but an empty compiled effects array. Recover those invariants here
+ * so every runtime adapter sees the same behavior instead of needing a
+ * mode-specific compatibility check.
  */
 export function activeBotPowerEffectsV1(value: unknown): BotPowerEffectV1[] {
   return activeBotPowersV1(value).flatMap((power) => {
@@ -1909,6 +2026,47 @@ export function activeBotPowerEffectsV1(value: unknown): BotPowerEffectV1[] {
     ) {
       next = [{ type: "breathless" as const }, ...next];
     }
+    if (
+      botPowerDefinitionIsExplicitAddressedSpeechCopyV1(
+        power.name,
+        power.intent,
+      ) &&
+      !next.some((effect) => effect.type === "speech_copy")
+    ) {
+      next = [
+        { type: "speech_copy" as const, trigger: "direct_address" as const },
+        ...next,
+      ];
+    }
+    if (
+      botPowerDefinitionIsTrollV1(power.name, power.intent) &&
+      !next.some((effect) => effect.type === "troll")
+    ) {
+      next = [
+        {
+          type: "troll" as const,
+          dialect: "internet_lingo" as const,
+          grammar: "deliberately_bad" as const,
+          targets: "all_other_bots" as const,
+          playerTarget: "zen_only" as const,
+          burstLimit: 3 as const,
+          noiseCharLimit: 12 as const,
+          ordinaryInterruptionImmunity: "shh_and_new_message" as const,
+          moodLock: "warm" as const,
+          rickrollChancePercent: 3 as const,
+          memeChancePercent: 6 as const,
+          bodilyActionChancePercent: 8 as const,
+        },
+        {
+          type: "interruption" as const,
+          frequency: "frequent" as const,
+          strength: "large" as const,
+          targets: [{ kind: "all" as const }],
+          certainty: "always" as const,
+        },
+        ...next,
+      ];
+    }
     return next;
   });
 }
@@ -1924,6 +2082,7 @@ export const BOT_POWER_DELIVERY_EFFECT_TYPES_V1 = [
   "avatar_visibility",
   "avatar_opacity",
   "voice_presence",
+  "speech_obfuscation",
 ] as const;
 
 export function botPowerEffectIsDeliveryFilterV1(
@@ -4777,7 +4936,10 @@ export function botPowerResponseIsSilentV1(value: unknown): boolean {
   return botPowerResponseIsSemanticSilenceV1(value);
 }
 
-export function botPowerSelfCueLinesV1(value: unknown): string[] {
+export function botPowerSelfCueLinesV1(
+  value: unknown,
+  options: { trollAudience?: BotPowerTrollAudienceV1 } = {},
+): string[] {
   return activeBotPowersV1(value).flatMap((power) => {
     // Runtime upgrade for legacy Ready Mute snapshots. Their stored cue said
     // "never speak", which would prevent generation of the private intent the
@@ -4792,6 +4954,9 @@ export function botPowerSelfCueLinesV1(value: unknown): string[] {
     // imitate it in the holder-private draft.
     if (botPowerMumblesSpeechV1([power])) {
       return [botPowerSpeechObfuscationAuthoringCueV1()];
+    }
+    if (botPowerDefinitionIsTrollV1(power.name, power.intent)) {
+      return botPowerTrollAuthoringCueLinesV1(options.trollAudience);
     }
     if (
       power.compiled?.effects.some((effect) => effect.type === "designation") ||

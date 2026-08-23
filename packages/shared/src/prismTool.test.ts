@@ -544,6 +544,32 @@ describe("parseAssistantPrismTools", () => {
   });
 });
 
+describe("Troll presentation persistence", () => {
+  it("round-trips only the public replay projection", () => {
+    const botPowerTrollPresentation = {
+      v: 1 as const,
+      name: "trollPresentation" as const,
+      stableTurnKey: "conversation:troll:2",
+      deliveryKind: "meme" as const,
+      ordinaryInterruptionImmune: true as const,
+      fixedMood: "warm" as const,
+      memeCardId: 1,
+    };
+    const stored = serializeAssistantToolPayload({
+      botPowerTrollPresentation,
+    });
+    assert.deepEqual(
+      parseStoredAssistantToolPayload(stored).botPowerTrollPresentation,
+      botPowerTrollPresentation,
+    );
+    assert.deepEqual(
+      hydrateAssistantMessageParts({ content: "visible", toolPayload: stored })
+        .botPowerTrollPresentation,
+      botPowerTrollPresentation,
+    );
+  });
+});
+
 describe("hydrateAssistantMessageParts", () => {
   it("re-parses tool framing from persisted content when tool_payload missing", () => {
     const payload = validAskJson();
@@ -978,7 +1004,7 @@ describe("hydrateAssistantMessageParts", () => {
           targetBotName: "Mara Vale",
           targetPersonaPrompt: "A terse lunar cartographer.",
           targetFace: { faceEyeCharacter: "◉" },
-          targetVoice: { version: 1, enabled: true, preset: "warm" },
+          holderVoice: { version: 1, enabled: true, preset: "warm" },
           sourceMessageId: "message-2",
           occurredAt: "2026-07-02T15:03:20.000Z",
         }),

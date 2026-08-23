@@ -8,6 +8,7 @@ import {
   debateMysteryRoomsShareEdge,
   debateMysteryNotebookCharacterCount,
   gradeDebateMysteryTheory,
+  normalizeDebateMysteryFormatStateV1,
   projectDebateMysteryCase,
   resolveDebateMysteryConfig,
   resolveDebateMysteryWeaponCategory,
@@ -128,6 +129,46 @@ test("locks weapon category and opening-reveal probability boundaries determinis
   assert.equal(hiddenState.discoveredEvidence.length, 0);
   assert.ok(!hiddenState.rooms.find((room) => room.id === hiddenBible.crimeSceneRoomId)!
     .inspectedRegionIds.includes(canonicalWeapon.regionId));
+});
+
+test("uses the classic action budgets and freezes one hidden recovery token per five rooms", () => {
+  const expectations = [
+    { preset: "compact" as const, suspects: 4, rooms: 5, actions: 16, tokens: 1 },
+    { preset: "standard" as const, suspects: 6, rooms: 10, actions: 28, tokens: 2 },
+    { preset: "grand" as const, suspects: 8, rooms: 15, actions: 40, tokens: 3 },
+  ];
+
+  for (const expectation of expectations) {
+    const config = resolveDebateMysteryConfig(createConfig(expectation.preset, "classic", `action-economy-${expectation.preset}`));
+    const first = compileDeterministicDebateMystery({ config, suspects: suspects(expectation.suspects) });
+    const second = compileDeterministicDebateMystery({ config, suspects: suspects(expectation.suspects) });
+    const projected = projectDebateMysteryCase(first, config);
+
+    assert.equal(config.totalRooms, expectation.rooms);
+    assert.equal(config.actionBudget, expectation.actions);
+    assert.equal(first.actionTokens?.length, expectation.tokens);
+    assert.deepEqual(first.actionTokens, second.actionTokens);
+    assert.equal(new Set(first.actionTokens?.map((token) => token.id)).size, expectation.tokens);
+    assert.equal(new Set(first.actionTokens?.map((token) => token.roomId)).size, expectation.tokens);
+    assert.ok(first.actionTokens?.every((token) =>
+      token.amount === 1 && first.activeRegions.some((region) => region.roomId === token.roomId && region.regionId === token.regionId)));
+    assert.deepEqual(projected.recoveredActionTokens, []);
+    assert.ok(first.actionTokens?.every((token) => !JSON.stringify(projected).includes(token.id)));
+  }
+});
+
+test("backfills met suspects from both saved interview history and an active legacy interview", () => {
+  const config = resolveDebateMysteryConfig(createConfig("compact", "classic", "encounter-backfill"));
+  const bible = compileDeterministicDebateMystery({ config, suspects: suspects(4) });
+  const projected = projectDebateMysteryCase(bible, config);
+  const [activeSuspect, historicalSuspect] = projected.suspects;
+  const legacy = structuredClone(projected) as typeof projected & { metSuspectSeatIds?: string[] };
+  legacy.metSuspectSeatIds = [];
+  legacy.activeActivity = { kind: "interview", suspectSeatId: activeSuspect!.seatId, startedAt: "2026-08-22T12:00:00.000Z" };
+  legacy.interviewLog = [{ id: "legacy-answer", suspectSeatId: historicalSuspect!.seatId, role: "suspect", content: "I was there.", evidenceId: null, createdAt: "2026-08-22T12:01:00.000Z" }];
+
+  const normalized = normalizeDebateMysteryFormatStateV1(legacy);
+  assert.deepEqual(new Set(normalized.metSuspectSeatIds), new Set([activeSuspect!.seatId, historicalSuspect!.seatId]));
 });
 
 test("gives outcome-neutral regions varied deterministic sensory texture", () => {

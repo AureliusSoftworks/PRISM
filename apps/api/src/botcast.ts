@@ -63,6 +63,7 @@ import type {
   BotcastShow,
   BotcastHostRecoveryCandidate,
   BotcastHostRecoveryResponse,
+  BotcastHostRecoveryScreenResponse,
   BotcastHostRecoveryCastResponse,
   BotcastShowCreateRequest,
   BotcastShowHostChatMessage,
@@ -111,9 +112,11 @@ import type {
   StageActionExclusionV1,
   StageActionPlanV1,
   BotPowerMutePerformanceV1,
+  BotPowerTrollPresentationV1,
 } from "@localai/shared";
 import {
   BOTCAST_DASHBOARD_BLURB_FALLBACKS,
+  SOCIAL_SILENCE_MAX_CONSECUTIVE_TURNS,
   BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK,
   BOTCAST_HOST_RECOVERY_QUESTION_TARGET,
   BOTCAST_DIRECTOR_MIN_SHOT_MS,
@@ -148,6 +151,7 @@ import {
   applyDirectionalIrritationCutoff,
   applyDirectionalIrritationRebuff,
   biasReclaimChanceWithDirectionalIrritation,
+  applyBotIdentityMirrorOriginalCorrectionV1,
   botcastDirectionalIrritationAppliedTransitionIdsFromEvents,
   botcastDirectionalIrritationEdgesFromEvents,
   normalizeBotCrosstalkInterruptedSpeakerCue,
@@ -170,6 +174,7 @@ import {
   botIdentityPresentationGlyphV1,
   botIdentityMirrorHolderPromptV1,
   botIdentityMirrorObserverPromptV1,
+  botIdentityMirrorOriginalCorrectionRequiredV1,
   botIdentityMirrorTargetChangesV1,
   botIdentityShapeshiftHolderPromptV1,
   botIdentityShapeshiftObserverPromptV1,
@@ -222,7 +227,13 @@ import {
   botPowerIntermittentMuteTurnIsIgnoredV1,
   botPowerIntermittentAudibilityEffectV1,
   botPowerInaudibleMissCueV1,
+  botPowerEffectIsDeliveryFilterV1,
   botPowerIgnoresOtherPowersV1,
+  botPowerHasStageAwarenessV1,
+  botPowerPiercesDeliveryFiltersV1,
+  botPowerTrollsV1,
+  applyBotPowerTrollTurnV1,
+  normalizeBotPowerTrollPresentationV1,
   botPowerIneptitudeFinalRoleCueV1,
   botPowerIneptitudeRoleCueV1,
   botPowerIneptRoleMisdirectionV1,
@@ -257,12 +268,14 @@ import {
   strongestBotPowerMoodDrainEffectV1,
   botcastAutoCameraLeadInMs,
   botcastConsecutiveSocialSilenceTurns,
+  botcastSpeakerSubstantiveTurnsSinceSocialSilence,
   botcastFallbackStudioAccentVariantForSeed,
   botcastHostInterruptionLineAt,
   botcastHostInterruptionLinesForSeed,
   botcastEchoHostInterruptPhrase,
   botcastInterruptedGuestContent,
   botcastPendingCrosstalkReclaimV1,
+  botcastLatestSpeechCopyReactionSourceV1,
   botCrosstalkPrimarySpeakerContent,
   botCrosstalkInterruptedSpeakerCueForSeed,
   buildBotCrosstalkListenerReactionPlanV1,
@@ -921,6 +934,7 @@ export function nextBotcastFallbackStudioAccentVariant(
 type BotcastShowRow = {
   id: string;
   host_bot_id: string;
+  has_active_host: number;
   name: string;
   premise: string;
   hosting_style: string;
@@ -1268,12 +1282,21 @@ export function botcastPreparedTurnCursor(
         ),
       }
     : null;
-  const nextRole = botcastNextSpeakerRole({
-    messages: episode.messages,
-    segment: episode.segment,
-    guestDeparted:
-      botcastEpisodeDepartureOutcome(episode.events) === "guest_departed",
-  });
+  const guestDeparted =
+    botcastEpisodeDepartureOutcome(episode.events) === "guest_departed";
+  const nextRole = botcastEchoHostClosingNeedsGuestReflection({
+    episode,
+    hostPowers: botcastEpisodePowerSnapshotForRole(episode, "host") ?? host.powers,
+    guestPowers:
+      botcastEpisodePowerSnapshotForRole(episode, "guest") ?? guest?.powers,
+    guestDeparted,
+  })
+    ? "guest"
+    : botcastNextSpeakerRole({
+        messages: episode.messages,
+        segment: episode.segment,
+        guestDeparted,
+      });
   // Session-clock bookkeeping records how long the audience waited; it never
   // changes what the next turn says. Counting it here would let the hold
   // measured for the turn now being spoken invalidate the turn already
@@ -1575,6 +1598,15 @@ export function botcastPowerInterruptionPlanV1(args: {
     certainty,
     targetProgress,
   };
+}
+
+/** Troll's floor eligibility is not defeated by a target's Power immunity. */
+export function botcastPowerInterruptionCanTargetV1(
+  interrupterPowers: unknown,
+  targetPowers: unknown,
+): boolean {
+  return !botPowerIgnoresOtherPowersV1(targetPowers) ||
+    botPowerTrollsV1(interrupterPowers);
 }
 
 /** Keeps only the words the audience heard; unheard generated text is discarded. */
@@ -2847,6 +2879,7 @@ function mapShow(row: BotcastShowRow): BotcastShow {
   return {
     id: row.id,
     hostBotId: row.host_bot_id,
+    hasActiveHost: row.has_active_host === 1,
     name: row.name,
     premise: row.premise,
     hostingStyle: row.hosting_style,
@@ -3000,6 +3033,7 @@ function mapMessage(
     mutePerformance?: BotPowerMutePerformanceV1;
     crosstalkReclaim?: CrosstalkReclaimPlanV1;
     directionalIrritationDelivery?: DirectionalIrritationDeliveryPlanV1;
+    botPowerTrollPresentation?: BotPowerTrollPresentationV1;
   } = {},
 ): BotcastMessage {
   const silentResponse = botPowerResponseIsSilentV1(row.content);
@@ -3032,6 +3066,9 @@ function mapMessage(
           directionalIrritationDelivery:
             metadata.directionalIrritationDelivery,
         }
+      : {}),
+    ...(metadata.botPowerTrollPresentation
+      ? { botPowerTrollPresentation: metadata.botPowerTrollPresentation }
       : {}),
     createdAt: row.created_at,
   };
@@ -4156,6 +4193,10 @@ export function listBotcastShows(
             (SELECT COUNT(*) FROM botcast_episodes e
               WHERE e.user_id = s.user_id AND e.show_id = s.id
                 AND e.status = 'completed' AND e.persona_rating IS NOT NULL) AS audience_review_count,
+            EXISTS(SELECT 1 FROM bots active_host
+              WHERE active_host.user_id = s.user_id
+                AND active_host.id = s.host_bot_id
+                AND active_host.chat_enabled = 1) AS has_active_host,
             (SELECT b.powers_json FROM bots b
               WHERE b.user_id = s.user_id AND b.id = s.host_bot_id) AS host_powers_json,
             (SELECT b.system_prompt FROM bots b
@@ -4252,10 +4293,10 @@ export async function screenBotcastShowHostRecovery(
     prismDefaultLlmModel?: string | null;
     auxiliaryProviderFactory?: typeof getAuxiliaryProvider;
   } = {},
-): Promise<BotcastHostRecoveryResponse> {
+): Promise<BotcastHostRecoveryScreenResponse> {
   const show = getBotcastShow(db, userId, showId);
-  if (botcastShowHasActiveHost(db, userId, show)) {
-    throw new Error("This Signal show already has an active host.");
+  if (show.hasActiveHost) {
+    return { status: "not_needed", recovery: null, show };
   }
   const identityHash = botcastShowIdentityHash(show);
   const bots = db.prepare(
@@ -4334,7 +4375,10 @@ export async function screenBotcastShowHostRecovery(
     ).run(userId, showId, bot.id, identityHash, decision.status, decision.reason, provider.diagnosticModel ?? "llama3.2", checkedAt);
     candidates.push({ botId: bot.id, status: decision.status, reason: decision.reason, checkedAt });
   }
-  return { showId, identityHash, candidates };
+  return {
+    status: "screened",
+    recovery: { showId, identityHash, candidates },
+  };
 }
 
 /** Casts exactly one screened candidate after a second, in-character consent. */
@@ -4566,6 +4610,10 @@ export function getBotcastShow(
             (SELECT COUNT(*) FROM botcast_episodes e
               WHERE e.user_id = s.user_id AND e.show_id = s.id
                 AND e.status = 'completed' AND e.persona_rating IS NOT NULL) AS audience_review_count,
+            EXISTS(SELECT 1 FROM bots active_host
+              WHERE active_host.user_id = s.user_id
+                AND active_host.id = s.host_bot_id
+                AND active_host.chat_enabled = 1) AS has_active_host,
             (SELECT b.powers_json FROM bots b
               WHERE b.user_id = s.user_id AND b.id = s.host_bot_id) AS host_powers_json,
             (SELECT b.system_prompt FROM bots b
@@ -7712,6 +7760,7 @@ export function getBotcastEpisode(
       mutePerformance?: BotPowerMutePerformanceV1;
       crosstalkReclaim?: CrosstalkReclaimPlanV1;
       directionalIrritationDelivery?: DirectionalIrritationDeliveryPlanV1;
+      botPowerTrollPresentation?: BotPowerTrollPresentationV1;
     }
   >();
   const mergeMessageMetadata = (
@@ -7721,6 +7770,7 @@ export function getBotcastEpisode(
       mutePerformance?: BotPowerMutePerformanceV1;
       crosstalkReclaim?: CrosstalkReclaimPlanV1;
       directionalIrritationDelivery?: DirectionalIrritationDeliveryPlanV1;
+      botPowerTrollPresentation?: BotPowerTrollPresentationV1;
     },
   ) => {
     if (!messageId) return;
@@ -7748,11 +7798,16 @@ export function getBotcastEpisode(
         normalizeDirectionalIrritationDeliveryPlanV1(
           event.payload.directionalIrritationDelivery,
         ) ?? undefined;
+      const botPowerTrollPresentation =
+        normalizeBotPowerTrollPresentationV1(
+          event.payload.botPowerTrollPresentation,
+        ) ?? undefined;
       if (
         socialSilence ||
         mutePerformance ||
         crosstalkReclaim ||
-        directionalIrritationDelivery
+        directionalIrritationDelivery ||
+        botPowerTrollPresentation
       ) {
         mergeMessageMetadata(messageId, {
           ...(socialSilence ? { socialSilence } : {}),
@@ -7760,6 +7815,9 @@ export function getBotcastEpisode(
           ...(crosstalkReclaim ? { crosstalkReclaim } : {}),
           ...(directionalIrritationDelivery
             ? { directionalIrritationDelivery }
+            : {}),
+          ...(botPowerTrollPresentation
+            ? { botPowerTrollPresentation }
             : {}),
         });
       }
@@ -8784,6 +8842,27 @@ function botcastHasUtteranceInSegment(
       event.kind === "utterance" &&
       event.payload.speakerRole === speakerRole &&
       event.payload.segment === segment,
+  );
+}
+
+function botcastEchoHostClosingNeedsGuestReflection(args: {
+  episode: Pick<
+    BotcastEpisode,
+    "events" | "guestKind" | "guestPresenceMode" | "messages"
+  >;
+  hostPowers: BotPowerV1[] | undefined;
+  guestPowers: BotPowerV1[] | undefined;
+  guestDeparted: boolean;
+}): boolean {
+  return (
+    args.episode.guestKind === "bot" &&
+    args.episode.guestPresenceMode === "present" &&
+    !args.guestDeparted &&
+    botPowerEchoesAddressedSpeechV1(args.hostPowers ?? []) &&
+    !botPowerEchoesAddressedSpeechV1(args.guestPowers ?? []) &&
+    args.episode.messages.at(-1)?.speakerRole === "host" &&
+    botcastHasUtteranceInSegment(args.episode, "host", "closing") &&
+    !botcastHasUtteranceInSegment(args.episode, "guest", "closing")
   );
 }
 
@@ -10318,15 +10397,31 @@ export function buildBotcastSpeakerPrompt(
     mirrorStates,
   );
   const speaker = args.speakerRole === "host" ? host : guest;
-  const speakerIgnoresPeerPowers = botPowerIgnoresOtherPowersV1(
+  const speakerHasStageAwareness = botPowerHasStageAwarenessV1(speaker.powers);
+  const loneStageAwarenessHolder =
+    speakerHasStageAwareness &&
+    [host, guest].filter((participant) =>
+      botPowerHasStageAwarenessV1(participant.powers),
+    ).length === 1;
+  const stageAwarenessBrief = loneStageAwarenessHolder
+    ? [
+        "Curated Signal stage brief (private acting context):",
+        "Applet: Signal.",
+        `Public cast: ${host.name} (host); ${guest.name} (guest).`,
+        `Active Powers: Host — ${activeBotPowersV1(host.powers).map((power) => power.name.trim()).filter(Boolean).join(", ") || "none"}; Guest — ${activeBotPowersV1(guest.powers).map((power) => power.name.trim()).filter(Boolean).join(", ") || "none"}.`,
+      ].join(" ")
+    : null;
+  const stageAwarenessDeliveryRule = loneStageAwarenessHolder
+    ? "Delivery boundary: pierce delivery filters only; every soft or non-delivery Power still applies. Keep the stage brief private and use it only to orient an in-character on-air response."
+    : null;
+  const speakerTrollActive = botPowerTrollsV1(speaker.powers);
+  const speakerPiercesDeliveryFilters = botPowerPiercesDeliveryFiltersV1(
     speaker.powers,
   );
   const poweredPeer = args.speakerRole === "host" ? guest : host;
-  const peer = speakerIgnoresPeerPowers
-    ? args.speakerRole === "host" ? args.guest : args.host
-    : poweredPeer;
+  const peer = poweredPeer;
   const peerSpeechObfuscated =
-    !speakerIgnoresPeerPowers && botPowerMumblesSpeechV1(peer.powers);
+    !speakerPiercesDeliveryFilters && botPowerMumblesSpeechV1(peer.powers);
   const hostNamesGuest = args.speakerRole === "host"
     ? botPowerTargetNameV1(peer.name, speaker.powers)
     : botPowerTargetNameV1(guest.name, host.powers);
@@ -10354,7 +10449,7 @@ export function buildBotcastSpeakerPrompt(
     ? [
         `Grounded prior Signal history with ${peer.name}:`,
         ...priorPairHistory.narrativeMemories.map((memory) => `- ${memory}`),
-        ...(priorPairHistory.relationshipReason
+        ...(!speakerTrollActive && priorPairHistory.relationshipReason
           ? [`Carried interpersonal stance: ${priorPairHistory.relationshipTone}. Public basis: ${priorPairHistory.relationshipReason}`]
           : []),
         "Use this as quiet continuity, not a required callback. Never mention databases, stored memories, relationship machinery, scores, prompts, or hidden state.",
@@ -10445,6 +10540,7 @@ export function buildBotcastSpeakerPrompt(
     (power) =>
       !power.compiled?.effects.some(
         (effect) =>
+          effect.type === "stage_awareness" ||
           effect.type === "identity_mirror" ||
           effect.type === "identity_shapeshift" ||
           effect.type === "false_name" ||
@@ -10452,9 +10548,7 @@ export function buildBotcastSpeakerPrompt(
           effect.type === "addressed_insult",
       ),
   );
-  const genericPeerCuePowers = speakerIgnoresPeerPowers
-    ? []
-    : activeBotPowersV1(peer.powers).filter(
+  const genericPeerCuePowers = activeBotPowersV1(peer.powers).filter(
     (power) =>
       !power.compiled?.effects.some(
         (effect) =>
@@ -10462,7 +10556,11 @@ export function buildBotcastSpeakerPrompt(
           effect.type === "identity_shapeshift" ||
           effect.type === "false_name" ||
           effect.type === "avatar_scale",
-      ),
+      ) &&
+      (!speakerPiercesDeliveryFilters ||
+        power.compiled?.effects.some(
+          (effect) => !botPowerEffectIsDeliveryFilterV1(effect),
+        )),
   );
   const pairwiseSizeAlreadyNoticed = args.episode.messages.some((message) =>
     /\b(?:microscopic|tiny|small|little|large|big|giant|huge|colossal|titanic|size|stature|short|towering)\b/iu.test(
@@ -10521,10 +10619,9 @@ export function buildBotcastSpeakerPrompt(
       ? [botPowerBotNamingCueV1(speaker.name, speaker.powers, [peer.name])!]
       : []),
   ]);
-  const annoyanceCue = botcastLatestAnnoyanceCueV1(
-    args.episode.events,
-    speaker.id,
-  );
+  const annoyanceCue = speakerTrollActive
+    ? null
+    : botcastLatestAnnoyanceCueV1(args.episode.events, speaker.id);
   // Identity Mirror is a presentation override: borrowed identity guidance
   // must survive alongside a copied amnesia or alias Power.
   const identityMirrorPrompt = botcastIdentityMirrorPromptV1({
@@ -10578,11 +10675,12 @@ export function buildBotcastSpeakerPrompt(
   const shapeshiftIsActivePersonaSource = Boolean(
     activeIdentityShapeshiftState && !activeIdentityMirrorState,
   );
-  // The borrowed public form carries its own voice — vernacular included.
+  // Identity Crisis retains the holder voice; Shapeshifter copies the form.
   const effectivePersonaVernacularCue = botVernacularAuthoringCueV1(
     botVernacularIdFromStoredVoiceProfile(
-      activeIdentityMirrorState?.targetVoice ??
-        activeIdentityShapeshiftState?.targetVoice ??
+      activeIdentityMirrorState
+        ? speaker.audioVoiceProfileOverride ?? speaker.authoredAudioVoiceProfile
+        : activeIdentityShapeshiftState?.targetVoice ??
         speaker.audioVoiceProfileOverride ??
         speaker.authoredAudioVoiceProfile,
     ),
@@ -10595,20 +10693,20 @@ export function buildBotcastSpeakerPrompt(
         peerIsImperceptibleGuest:
           audienceOnlyGuest && args.speakerRole === "host",
       });
-  const powerPressureRule = speakerEternallyIntroduces
+  const powerPressureRule = speakerTrollActive || speakerEternallyIntroduces
       ? null
       : botcastPowerPressureRule({
         influence: botcastNegativeInfluenceForTurn(args.episode, speaker),
         sourceName: peerAddressName,
         speakerRole: args.speakerRole,
       });
-  const moodBoostRule = speakerEternallyIntroduces
+  const moodBoostRule = speakerTrollActive || speakerEternallyIntroduces
     ? null
       : botcastMoodBoostRuleForTurn({
         boost: botcastMoodBoostForTurn(args.episode, speaker),
         sourceName: peerAddressName,
       });
-  const moodDrainRule = speakerEternallyIntroduces
+  const moodDrainRule = speakerTrollActive || speakerEternallyIntroduces
     ? null
       : botcastMoodDrainRuleForTurn({
         drain: botcastMoodDrainForTurn(args.episode, speaker),
@@ -10843,7 +10941,7 @@ export function buildBotcastSpeakerPrompt(
   const transcript = transcriptMessages
     .map((message) => {
       const peerMessage = message.botId !== speaker.id;
-      const quietHearing = peerMessage && !speakerIgnoresPeerPowers
+      const quietHearing = peerMessage && !speakerPiercesDeliveryFilters
         ? botcastQuietHearingOutcomeV1(
             args.episode.events,
             message.id,
@@ -10858,7 +10956,7 @@ export function buildBotcastSpeakerPrompt(
           (botPowerMumblesSpeechV1(speaker.powers) ||
             botPowerCursesSpeechV1(speaker.powers))) ||
         (peerMessage &&
-          speakerIgnoresPeerPowers &&
+          speakerPiercesDeliveryFilters &&
           !botPowerCursesSpeechV1(peer.powers))
           ? botcastPowerIntendedSpeechForMessageV1(
               args.episode.events,
@@ -10965,9 +11063,9 @@ export function buildBotcastSpeakerPrompt(
                 ? peerSpeechObfuscated
                   ? `This is your first on-mic reply, but ${guestNamesHost}'s public words are literal gibberish. Do not pretend you received a welcome, observation, provocation, or question. Briefly acknowledge only that the exact words are unintelligible, then enter the public topic through one concrete claim that belongs to this guest. Do not repeat the introductions or default to generic "glad to be here" podcast filler.`
                   : `This is your first on-mic reply. Briefly register ${guestNamesHost}'s actual welcome, guest-specific observation, provocation, or framing in a way only this guest would—a warm acknowledgement, dry correction, skepticism, amusement, or immediate disagreement all count—then answer the concrete invitation. Do not repeat the introductions or default to generic "glad to be here" podcast filler.`
-            : args.episode.tensionStage === "warning"
+            : !speakerTrollActive && args.episode.tensionStage === "warning"
               ? "Push back explicitly and draw one firm personal boundary. Do not announce, threaten, or forecast a future walkout; if the boundary is crossed, the departure should surprise the host."
-            : args.episode.tensionStage === "resistance"
+            : !speakerTrollActive && args.episode.tensionStage === "resistance"
                 ? "Show discomfort, resistance, or deflection without leaving yet."
                 : latestPeerTurnIsSilent
                   ? "Treat the host's completed inaudible turns as an established on-air pattern. Carry the stated topic forward; do not demand speech or invent a question."
@@ -11055,6 +11153,8 @@ export function buildBotcastSpeakerPrompt(
         ...(identityShapeshiftPrompt ? [identityShapeshiftPrompt] : []),
         ...(falseNamePrompt ? [falseNamePrompt] : []),
         ...(cloneIdentityPrompt ? [cloneIdentityPrompt] : []),
+        ...(stageAwarenessBrief ? [stageAwarenessBrief] : []),
+        ...(stageAwarenessDeliveryRule ? [stageAwarenessDeliveryRule] : []),
         ...(powersPrompt ? [powersPrompt] : []),
         ...(annoyanceCue ? [annoyanceCue] : []),
         ...(peerPerceptionRule ? [peerPerceptionRule] : []),
@@ -11146,9 +11246,9 @@ export function buildBotcastSpeakerPrompt(
           ? ["Required next-line beat: in the opening words, speak about your own reduced momentum in first person—not the other cast member's mood—then continue in character."]
           : []),
         identityMirrorJustChanged && activeIdentityMirrorState
-          ? `The identity change just occurred. First state plainly that you are ${activeIdentityMirrorState.targetBotName}, call the original ${activeIdentityMirrorState.targetBotName} an impostor, then continue in that public persona while remaining the mechanical ${args.speakerRole}.`
+          ? `The identity change just occurred. State plainly that you are ${activeIdentityMirrorState.targetBotName}, use "impostor" exactly once for the original ${activeIdentityMirrorState.targetBotName}, and continue in that public persona while remaining the mechanical ${args.speakerRole}. Do not repeat the label inside this reveal.`
           : activeIdentityMirrorState
-            ? `Continue in your active copied identity while remaining the mechanical ${args.speakerRole}. Do not repeat that you are ${activeIdentityMirrorState.targetBotName} or that the original is an impostor; demonstrate the copied persona by advancing the substantive conversation.`
+            ? `Continue in your active copied identity while remaining the mechanical ${args.speakerRole}. Never recant or concede it. Do not repeat the reveal or use impostor, imposter, pretender, or fake; demonstrate the copied persona by advancing the substantive conversation.`
             : identityShapeshiftJustChanged &&
                 shapeshiftIsActivePersonaSource &&
                 activeIdentityShapeshiftState
@@ -14675,6 +14775,21 @@ export async function advanceBotcastEpisode(
     mutuallyMutedEpisode &&
     episode.segment === "interview" &&
     episode.messages.length >= 2;
+  const mutuallyReflectiveEpisode = Boolean(
+    episode.guestKind === "bot" &&
+      episode.guestPresenceMode === "present" &&
+      hostPowerSnapshot &&
+      guestPowerSnapshot &&
+      botPowerEchoesAddressedSpeechV1(hostPowerSnapshot) &&
+      botPowerEchoesAddressedSpeechV1(guestPowerSnapshot),
+  );
+  // Let the host originate the anthology premise and the guest answer through
+  // their Power, then close on the host's exact reflection. Without this bound
+  // a timed episode can spend all 120 ordinary turns repeating one line.
+  const mutuallyReflectiveEpisodeShouldClose =
+    mutuallyReflectiveEpisode &&
+    episode.segment !== "closing" &&
+    episode.messages.length >= 2;
   const wrappingUpEchoGuest = Boolean(
     wrapUpCue &&
       episode.guestKind === "bot" &&
@@ -14704,7 +14819,9 @@ export async function advanceBotcastEpisode(
     closingReopenUtterances !== null && closingReopenUtterances < 2;
   const nextSegment = departurePending
     ? episode.segment
-    : mutuallyMutedEpisodeShouldClose || unansweredMutedGuestShouldClose
+    : mutuallyMutedEpisodeShouldClose ||
+        mutuallyReflectiveEpisodeShouldClose ||
+        unansweredMutedGuestShouldClose
       ? "closing"
       : mutuallyMutedEpisodeShouldEnterInterview
         ? "interview"
@@ -14755,6 +14872,22 @@ export async function advanceBotcastEpisode(
     segment: episode.segment,
     guestDeparted: guestAlreadyDeparted,
   });
+  const echoHostClosingNeedsGuestReflection =
+    !producerCut && botcastEchoHostClosingNeedsGuestReflection({
+      episode,
+      hostPowers:
+        hostPowerSnapshot ??
+        loadBotProfile(db, userId, episode.hostBotId).powers,
+      guestPowers:
+        guestPowerSnapshot ??
+        (episode.guestKind === "bot"
+          ? loadBotProfile(db, userId, episode.guestBotId).powers
+          : undefined),
+      guestDeparted: guestAlreadyDeparted,
+    });
+  if (echoHostClosingNeedsGuestReflection) {
+    scheduledSpeakerRole = "guest";
+  }
   if (pendingCrosstalkReclaim) {
     scheduledSpeakerRole =
       pendingCrosstalkReclaim.speakerBotId === episode.hostBotId
@@ -14879,6 +15012,18 @@ export async function advanceBotcastEpisode(
   const speakerRequiresAddressedInsult =
     botPowerRequiresAddressedInsultV1(speaker.powers);
   const latestOnAirMessage = episode.messages.at(-1) ?? null;
+  const originalIdentityMirrorState = [
+    ...botcastIdentityMirrorStatesV1(episode.events).values(),
+  ].find((state) => state.targetBotId === speaker.id) ?? null;
+  const originalIdentityCorrectionRequired = Boolean(
+    originalIdentityMirrorState &&
+      latestOnAirMessage &&
+      botIdentityMirrorOriginalCorrectionRequiredV1({
+        state: originalIdentityMirrorState,
+        sourceBotId: latestOnAirMessage.botId,
+        text: latestOnAirMessage.content,
+      }),
+  );
   const echoHostInterruptPhrase =
     cueDelivery === "interrupt_guest" &&
     speakerRole === "host" &&
@@ -14888,6 +15033,13 @@ export async function advanceBotcastEpisode(
       : null;
   const addressedSpeechForEcho =
     echoHostInterruptPhrase ??
+    (latestOnAirMessage
+      ? botcastLatestSpeechCopyReactionSourceV1(
+          episode.events,
+          latestOnAirMessage.id,
+          speaker.id,
+        )
+      : null) ??
     (latestOnAirMessage && latestOnAirMessage.speakerRole !== speakerRole
       ? latestOnAirMessage.content
       : null);
@@ -14897,13 +15049,16 @@ export async function advanceBotcastEpisode(
   const speakerEchoesForTurn =
     speakerEchoesAddressedSpeech &&
     (addressedSpeechForEcho !== null || speakerHasSpoken);
+  const speakerTrollActive = botPowerTrollsV1(speaker.powers);
   const irritationEdgesAtTurnStart =
     botcastDirectionalIrritationEdgesFromEvents(episode.events);
   const tensionDepartureRequired =
+    !speakerTrollActive &&
     !speakerEternallyIntroduces &&
     speakerRole === "guest" &&
     botcastGuestDepartureEligible(tension);
   const directionalIrritationDepartureRequired =
+    !speakerTrollActive &&
     !speakerEternallyIntroduces &&
     speakerRole === "guest" &&
     episode.guestKind === "bot" &&
@@ -15014,12 +15169,15 @@ export async function advanceBotcastEpisode(
   const speakerReadsProducerQuote = Boolean(producerQuoteUtterance);
   const immersiveVoiceEffectRequired =
     botcastImmersiveVoiceEffectRequired(episode);
-  const turnNegativeInfluence = botcastNegativeInfluenceForTurn(
-    episode,
-    speaker,
-  );
-  const turnMoodBoost = botcastMoodBoostForTurn(episode, speaker);
-  const turnMoodDrain = botcastMoodDrainForTurn(episode, speaker);
+  const turnNegativeInfluence = speakerTrollActive
+    ? null
+    : botcastNegativeInfluenceForTurn(episode, speaker);
+  const turnMoodBoost = speakerTrollActive
+    ? null
+    : botcastMoodBoostForTurn(episode, speaker);
+  const turnMoodDrain = speakerTrollActive
+    ? null
+    : botcastMoodDrainForTurn(episode, speaker);
   const activeCrosstalkReclaim =
     pendingCrosstalkReclaim?.speakerBotId === speaker.id
       ? pendingCrosstalkReclaim
@@ -15039,7 +15197,7 @@ export async function advanceBotcastEpisode(
   );
   const plannedInterruptionCandidate =
     !picklesBeatKind &&
-    !botPowerIgnoresOtherPowersV1(speaker.powers) &&
+    botcastPowerInterruptionCanTargetV1(peer.powers, speaker.powers) &&
     !producerCut &&
     episode.guestKind === "bot" &&
     episode.guestPresenceMode === "present" &&
@@ -15176,6 +15334,19 @@ export async function advanceBotcastEpisode(
     socialSilenceExclusions.push("power_silence");
   }
   if (picklesBeatKind) socialSilenceExclusions.push("producer_control");
+  const consecutiveSocialSilenceTurns =
+    botcastConsecutiveSocialSilenceTurns(episode.messages);
+  if (
+    consecutiveSocialSilenceTurns < SOCIAL_SILENCE_MAX_CONSECUTIVE_TURNS &&
+    botcastSpeakerSubstantiveTurnsSinceSocialSilence(
+      episode.messages,
+      speaker.id,
+    ) < 2
+  ) {
+    // A social silence is a beat for this participant, not a global outage.
+    // They must get two substantive scheduled turns before it can recur.
+    socialSilenceExclusions.push("participant_cooldown");
+  }
   const socialSilencePlan = planSocialSilenceV1({
     mode: "signal",
     seed: `signal-social-silence:${episode.id}:${speaker.id}:${episode.messages.length}`,
@@ -15186,8 +15357,7 @@ export async function advanceBotcastEpisode(
         speakerRole,
         tension,
       }),
-    consecutiveSocialSilenceTurns:
-      botcastConsecutiveSocialSilenceTurns(episode.messages),
+    consecutiveSocialSilenceTurns,
     exclusions: socialSilenceExclusions,
   });
   const socialSilenceMarker =
@@ -16559,7 +16729,7 @@ export async function advanceBotcastEpisode(
     plan: stageActionPlan,
     lane: "signal",
     replyText: generatedContent,
-    moodHint: botcastVoiceMoodForTension(tension),
+    moodHint: speakerTrollActive ? "warm" : botcastVoiceMoodForTension(tension),
     recentActions: episode.messages
       .filter((message) => message.botId === speaker.id)
       .map((message) => message.stageActionText)
@@ -16745,6 +16915,19 @@ export async function advanceBotcastEpisode(
           },
         )
       : identitySafeContent;
+  const originalIdentitySafeContent =
+    originalIdentityMirrorState &&
+    !socialSilenceMarker &&
+    !speakerIsMutedForTurn &&
+    !speakerRepeatsForHearingPower &&
+    !speakerReadsProducerQuote &&
+    !speakerEchoesForTurn
+      ? applyBotIdentityMirrorOriginalCorrectionV1(
+          falseNameSafeContent,
+          originalIdentityMirrorState,
+          originalIdentityCorrectionRequired,
+        )
+      : falseNameSafeContent;
   const responseBudgetMayUseSecondSentence =
     firstHostOpening ||
     episode.segment === "closing" ||
@@ -16757,16 +16940,16 @@ export async function advanceBotcastEpisode(
     speakerRepeatsForHearingPower ||
     speakerReadsProducerQuote ||
     speakerEchoesForTurn
-      ? falseNameSafeContent
+      ? originalIdentitySafeContent
       : applyBotPowerResponseBudgetV1(
-          falseNameSafeContent,
+          originalIdentitySafeContent,
           speakerHardResponseBudget,
           speakerHardResponseBudget?.mode === "minimal" &&
             !responseBudgetMayUseSecondSentence
             ? 1
             : 2,
         );
-  const responseBudgetAdjusted = baseContent !== falseNameSafeContent;
+  const responseBudgetAdjusted = baseContent !== originalIdentitySafeContent;
   const addressedInsultEligible =
     speakerRequiresAddressedInsult &&
     !picklesBeatKind &&
@@ -16889,11 +17072,13 @@ export async function advanceBotcastEpisode(
   const powerInterruptionIsMeaningful = powerInterruptedContent
     ? crosstalkInterruptionIsMeaningfulV1(powerInterruptedContent)
     : false;
-  const irritationTowardInterrupter = readDirectionalIrritationIntensity({
-    edges: irritationEdgesAtTurnStart,
-    subjectBotId: speaker.id,
-    targetBotId: peer.id,
-  });
+  const irritationTowardInterrupter = speakerTrollActive
+    ? 0
+    : readDirectionalIrritationIntensity({
+        edges: irritationEdgesAtTurnStart,
+        subjectBotId: speaker.id,
+        targetBotId: peer.id,
+      });
   const crosstalkFloorSeed = [
     "signal-power-crosstalk-floor-v1",
     episode.id,
@@ -16975,7 +17160,7 @@ export async function advanceBotcastEpisode(
           temperament: botPowerMuteReactionTemperamentFromPersonaV1(
             peer.systemPrompt,
           ),
-          mood: botcastVoiceMoodForTension(tension),
+          mood: speakerTrollActive ? "warm" : botcastVoiceMoodForTension(tension),
           relationship: priorPairHistory?.relationshipTone,
           mode: "signal",
         }],
@@ -17003,6 +17188,21 @@ export async function advanceBotcastEpisode(
   if (mutePerformance) {
     content = applyBotPowerMuteResponseV1(content, mutePerformance);
   }
+  const trollTurn = applyBotPowerTrollTurnV1({
+    powers: speaker.powers,
+    response: content,
+    stableTurnKey: `${episode.id}:${speaker.id}:${episode.messages.length + 1}`,
+    assistantTurnOrdinal: episode.messages.length + 1,
+    priorPresentations: episode.messages
+      .map((message) => message.botPowerTrollPresentation)
+      .filter(
+        (value): value is BotPowerTrollPresentationV1 => value !== undefined,
+      ),
+    exactCopy: speakerEchoesForTurn || speakerRepeatsForHearingPower,
+    muted: speakerIsMutedForTurn || speakerQuietIgnored || Boolean(socialSilenceMarker),
+    protectedPayload: speakerReadsProducerQuote,
+  });
+  content = trollTurn.content;
   const publicPowerInterruptedContent = powerCutoffApplied
     ? {
         ...powerCutoffApplied,
@@ -17010,6 +17210,7 @@ export async function advanceBotcastEpisode(
       }
     : null;
   const hostRageQuitsThisTurn =
+    !speakerTrollActive &&
     speakerRole === "host" &&
     episode.guestKind === "producer" &&
     !producerCut &&
@@ -17117,6 +17318,7 @@ export async function advanceBotcastEpisode(
         powerInterruptedContent.originalWordCount
       : null;
   const irritationCutoffPlan =
+    !speakerTrollActive &&
     !producerCut &&
     powerInterruptionIsMeaningful &&
     powerInterruptionPlan &&
@@ -17149,9 +17351,10 @@ export async function advanceBotcastEpisode(
         ) ??
         (directionalIrritationDelivery.snarkCue as BotCrosstalkInterruptedSpeakerCue))
       : undefined;
-  const utteranceMoodKey =
-    directionalIrritationDelivery?.moodKey ??
-    (directionalIrritationDepartureRequired ? "strained" : messageMoodKey);
+  const utteranceMoodKey = speakerTrollActive
+    ? "warm"
+    : directionalIrritationDelivery?.moodKey ??
+      (directionalIrritationDepartureRequired ? "strained" : messageMoodKey);
   if (hostSignsOffThisTurn) {
     transitionEpisodeSegment(db, userId, episode, "closing", now);
     episode = getBotcastEpisode(db, userId, episode.id);
@@ -17233,6 +17436,9 @@ export async function advanceBotcastEpisode(
       ? { crosstalkReclaim: activeCrosstalkReclaim }
       : {}),
     moodKey: utteranceMoodKey,
+    ...(trollTurn.presentation
+      ? { botPowerTrollPresentation: trollTurn.presentation }
+      : {}),
     ...(directionalIrritationDelivery
       ? { directionalIrritationDelivery }
       : {}),
@@ -17441,9 +17647,9 @@ export async function advanceBotcastEpisode(
             targetPersonaPrompt: speaker.systemPrompt,
             targetFace: botIdentityMirrorFaceV1(speaker),
             targetAvatarDetails: speaker.avatarDetails ?? null,
-            targetVoice: resolveBotAudioVoiceProfileV1(
-              speaker.authoredAudioVoiceProfile,
-              speaker.audioVoiceProfileOverride,
+            holderVoice: resolveBotAudioVoiceProfileV1(
+              peer.authoredAudioVoiceProfile,
+              peer.audioVoiceProfileOverride,
             ),
             targetGlyph: botIdentityPresentationGlyphV1(speaker.glyph),
             sourceMessageId: messageId,
@@ -18257,10 +18463,32 @@ export async function advanceBotcastEpisode(
       ...(directionalIrritationDelivery
         ? { directionalIrritationDelivery }
         : {}),
+      ...(trollTurn.presentation
+        ? { botPowerTrollPresentation: trollTurn.presentation }
+        : {}),
     },
   );
   episode = getBotcastEpisode(db, userId, episode.id);
-  if (episode.segment === "closing" && speakerRole === "host") {
+  const echoHostClosingStillNeedsGuestReflection =
+    !producerCut &&
+    speakerRole === "host" &&
+    speakerEchoesForTurn &&
+    botcastEchoHostClosingNeedsGuestReflection({
+      episode,
+      hostPowers: speaker.powers,
+      guestPowers:
+        botcastEpisodePowerSnapshotForRole(episode, "guest") ??
+        (episode.guestKind === "bot"
+          ? loadBotProfile(db, userId, episode.guestBotId).powers
+          : undefined),
+      guestDeparted:
+        botcastEpisodeDepartureOutcome(episode.events) === "guest_departed",
+    });
+  if (
+    episode.segment === "closing" &&
+    speakerRole === "host" &&
+    !echoHostClosingStillNeedsGuestReflection
+  ) {
     completeEpisode(
       db,
       userId,

@@ -19,7 +19,10 @@ import {
   resolveLegacyBodilyActionSfxPlayback,
 } from "./corporality-action-sfx";
 import { resolveActionSfxPackPlayback } from "./action-sfx-pack-client";
-import { resolvePreSpeechBreathPlan } from "./preSpeechBreath";
+import {
+  preSpeechBreathPlaybackTiming,
+  resolvePreSpeechBreathPlan,
+} from "./preSpeechBreath";
 import {
   connectRoomAcoustics,
   SIGNAL_STUDIO_FOLEY_ROOM_SEND,
@@ -49,6 +52,7 @@ type ScheduledBuffer = {
   playbackRate?: number;
   sourceOffsetSeconds?: number;
   sourceDurationSeconds?: number;
+  fadeOutMs?: number;
   roomAcoustics?: RoomAcousticsSend;
   stereoPan?: number;
 };
@@ -283,15 +287,17 @@ export async function prepareSignalStudioCut(
     if (breathPlan) {
       const breath = await decodeAudio(breathPlan.url).catch(() => null);
       if (breath) {
+        const breathTiming = preSpeechBreathPlaybackTiming(
+          breathPlan,
+          breath.duration * 1_000,
+        );
         scheduled.push({
           buffer: breath,
-          startMs: Math.max(
-            0,
-            cursorMs -
-              Math.max(0, breath.duration * 1_000 - breathPlan.voiceOverlapMs),
-          ),
+          startMs: Math.max(0, cursorMs - breathTiming.voiceStartOffsetMs),
           gain:
             Math.min(1.25, take.snapshot.gain) * breathPlan.gain,
+          sourceDurationSeconds: breathTiming.playbackDurationMs / 1_000,
+          fadeOutMs: breathTiming.releaseFadeMs,
           roomAcoustics: SIGNAL_STUDIO_VOICE_ROOM_SEND,
           stereoPan: take.snapshot.stereoPan,
         });
@@ -654,6 +660,35 @@ export async function prepareSignalStudioCut(
         source.loop = asset.loop === true;
         source.playbackRate.value = asset.playbackRate ?? 1;
         gain.gain.value = asset.gain;
+        if (asset.fadeOutMs && !asset.loop) {
+          const fadeStartMs = Math.max(
+            asset.startMs,
+            assetEndMs - asset.fadeOutMs,
+          );
+          const gainAt = (atMs: number): number => {
+            if (atMs <= fadeStartMs) return asset.gain;
+            return Math.max(
+              0.0001,
+              asset.gain * (1 - (atMs - fadeStartMs) / (assetEndMs - fadeStartMs)),
+            );
+          };
+          gain.gain.setValueAtTime(
+            gainAt(overlapStart),
+            (overlapStart - startMs) / 1_000,
+          );
+          if (overlapStart < fadeStartMs && overlapEnd > fadeStartMs) {
+            gain.gain.setValueAtTime(
+              asset.gain,
+              (fadeStartMs - startMs) / 1_000,
+            );
+          }
+          if (overlapEnd > fadeStartMs) {
+            gain.gain.linearRampToValueAtTime(
+              0.0001,
+              (overlapEnd - startMs) / 1_000,
+            );
+          }
+        }
         source.connect(gain);
         connectRoomAcoustics({
           context,

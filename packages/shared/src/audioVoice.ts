@@ -1184,6 +1184,120 @@ export function normalizeBotSelfReferral(value: unknown): string {
   );
 }
 
+export const SPEECH_TITLE_ABBREVIATIONS = Object.freeze({
+  Adm: "Admiral",
+  Amb: "Ambassador",
+  Assoc: "Associate",
+  Asst: "Assistant",
+  Atty: "Attorney",
+  Brig: "Brigadier",
+  Capt: "Captain",
+  Cdr: "Commander",
+  Cmdr: "Commander",
+  Col: "Colonel",
+  Cpl: "Corporal",
+  Dep: "Deputy",
+  Det: "Detective",
+  Dir: "Director",
+  Dr: "Doctor",
+  Fr: "Father",
+  Gen: "General",
+  Gov: "Governor",
+  Hon: "Honorable",
+  Insp: "Inspector",
+  Lt: "Lieutenant",
+  Maj: "Major",
+  Mr: "Mister",
+  Mrs: "Missus",
+  Ms: "Miss",
+  Mx: "Mix",
+  Ofc: "Officer",
+  Pres: "President",
+  Prof: "Professor",
+  Pvt: "Private",
+  Rep: "Representative",
+  Rev: "Reverend",
+  Sen: "Senator",
+  Sgt: "Sergeant",
+  Supt: "Superintendent",
+} as const);
+
+const SPEECH_TITLE_ABBREVIATION_PATTERN = new RegExp(
+  `(?<![\\p{L}\\p{N}])(${Object.keys(SPEECH_TITLE_ABBREVIATIONS)
+    .sort((left, right) => right.length - left.length)
+    .join("|")})(?:\\.)?(?=\\s+(?:(?:da|de|del|der|di|du|la|le|van|von)\\s+)?\\p{Lu}[\\p{L}\\p{M}.'’\\-]*)`,
+  "gu",
+);
+
+export interface SpeechAbbreviationProjectionSegment {
+  /** Private text sent to a voice engine. */
+  synthesisText: string;
+  /** Corresponding text as authored and displayed. */
+  sourceText: string;
+}
+
+export interface SpeechAbbreviationProjection {
+  sourceText: string;
+  synthesisText: string;
+  segments: readonly SpeechAbbreviationProjectionSegment[];
+  changed: boolean;
+}
+
+/**
+ * Builds a private, alignment-safe speech projection for common name-led
+ * English titles. Callers retain sourceText for captions, transcripts, and
+ * stored messages while synthesisText is the only form sent to a voice.
+ *
+ * Deliberately avoid broad dictionary substitutions here. In particular,
+ * abbreviations such as St. and in. need surrounding semantic context. Exact
+ * title case plus a following capitalized name keeps MS., ms., and ordinary
+ * prose untouched while covering civilian, professional, civic, and military
+ * titles with or without a period.
+ */
+export function projectSpeechAbbreviations(
+  text: string,
+): SpeechAbbreviationProjection {
+  const segments: SpeechAbbreviationProjectionSegment[] = [];
+  let cursor = 0;
+  for (const match of text.matchAll(SPEECH_TITLE_ABBREVIATION_PATTERN)) {
+    const start = match.index;
+    if (start > cursor) {
+      const sourceText = text.slice(cursor, start);
+      segments.push({ synthesisText: sourceText, sourceText });
+    }
+    const sourceText = match[0];
+    const title = match[1] as keyof typeof SPEECH_TITLE_ABBREVIATIONS;
+    segments.push({
+      synthesisText: SPEECH_TITLE_ABBREVIATIONS[title],
+      sourceText,
+    });
+    cursor = start + sourceText.length;
+  }
+  if (cursor < text.length) {
+    const sourceText = text.slice(cursor);
+    segments.push({ synthesisText: sourceText, sourceText });
+  }
+  if (segments.length === 0) {
+    segments.push({ synthesisText: text, sourceText: text });
+  }
+  const synthesisText = segments
+    .map((segment) => segment.synthesisText)
+    .join("");
+  return {
+    sourceText: text,
+    synthesisText,
+    segments,
+    changed: synthesisText !== text,
+  };
+}
+
+export function expandSpeechAbbreviations(text: string): string;
+export function expandSpeechAbbreviations(text: unknown): unknown;
+export function expandSpeechAbbreviations(text: unknown): unknown {
+  if (typeof text !== "string") return text;
+  return projectSpeechAbbreviations(text).synthesisText;
+}
+
 export function applyBotNamePronunciations(
   text: unknown,
   entries: readonly BotNamePronunciationEntry[],

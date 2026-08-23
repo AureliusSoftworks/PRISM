@@ -4,6 +4,9 @@ export const FIRST_RUN_SETUP_STORAGE_KEY = "prism_desktop_first_run_complete_v4"
 export const FIRST_RUN_BATCH_FOUNDRY_GUIDANCE =
   "Batch Foundry opens its own constellation chamber, not Avatar Studio: it automatically creates and saves 2–10 bots from rich full drafts with optional Powers, revealing each saved bot in its fixed mini-avatar slot before opening one model-authored Library group. At 11–100 bots, it switches visibly to lean personality-first generation with Powers and bespoke avatar, Ink, and SFX customization off; every member still receives a persona-aware voice and Accent Map casting. The same fixed slots use static micro faces inside each generated color-and-glyph orb, and recoverable progress still saves automatically.";
 
+export const FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE =
+  "In an editable Signal, Debate, or Story setup, hold Option to Wield Prism and capture a concrete bot tile. That bot stays fixed while the applet builds the rest of the editable setup around them; nothing begins until you choose the session’s start action.";
+
 export function clearFirstRunSetupCompletion(storage: {
   removeItem(key: string): void;
 }): boolean {

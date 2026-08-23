@@ -1947,6 +1947,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       name TEXT NOT NULL,
+      library_group_id TEXT,
       ethos TEXT NOT NULL DEFAULT '',
       atmosphere_json TEXT NOT NULL DEFAULT '{}',
       synthesis_json TEXT NOT NULL DEFAULT '{}',
@@ -2348,6 +2349,16 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       response_json TEXT NOT NULL,
       created_at TEXT NOT NULL,
       PRIMARY KEY(user_id, session_id, idempotency_key),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(session_id) REFERENCES debate_sessions(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS debate_mystery_spatial_action_reservations (
+      user_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      action_key TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(user_id, session_id, action_key),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(session_id) REFERENCES debate_sessions(id) ON DELETE CASCADE
     );
@@ -3892,6 +3903,12 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   const coffeeGroupColumns = db
     .prepare("PRAGMA table_info(coffee_groups)")
     .all() as Array<{ name: string }>;
+  const hasCoffeeGroupLibrarySourceColumn = coffeeGroupColumns.some(
+    (column) => column.name === "library_group_id",
+  );
+  if (!hasCoffeeGroupLibrarySourceColumn) {
+    db.exec("ALTER TABLE coffee_groups ADD COLUMN library_group_id TEXT;");
+  }
   const hasCoffeeGroupTopicModeColumn = coffeeGroupColumns.some(
     (column) => column.name === "coffee_topic_mode",
   );
@@ -5093,6 +5110,9 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_coffee_group_seats_group ON coffee_group_seats (user_id, group_id, seat_index);",
+  );
+  db.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_coffee_groups_library_source ON coffee_groups (user_id, library_group_id) WHERE library_group_id IS NOT NULL AND archived_at IS NULL;",
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_coffee_group_soundtracks_user ON coffee_group_soundtracks (user_id, updated_at DESC);",

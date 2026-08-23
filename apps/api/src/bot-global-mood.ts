@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { botPowerTrollsV1 } from "@localai/shared";
 
 export const GLOBAL_BOT_MOOD_KEYS = [
   "joyful",
@@ -60,11 +61,31 @@ function ownedBotExists(
   );
 }
 
+function ownedBotHasTrollPower(
+  db: DatabaseSync,
+  userId: string,
+  botId: string,
+): boolean {
+  try {
+    const row = db
+      .prepare("SELECT powers_json FROM bots WHERE id = ? AND user_id = ?")
+      .get(botId, userId) as { powers_json?: string | null } | undefined;
+    return botPowerTrollsV1(
+      row?.powers_json ? JSON.parse(row.powers_json) : [],
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function readGlobalBotMood(
   db: DatabaseSync,
   userId: string,
   botId: string,
 ): GlobalBotMoodSnapshot {
+  if (ownedBotHasTrollPower(db, userId, botId)) {
+    return { botId, moodKey: "warm", updatedAt: null };
+  }
   try {
     const row = db
       .prepare(
@@ -96,6 +117,12 @@ export function setGlobalBotMood(
 ): GlobalBotMoodSnapshot {
   if (!ownedBotExists(db, userId, botId)) {
     throw new Error("Bot not found.");
+  }
+  if (ownedBotHasTrollPower(db, userId, botId)) {
+    db.prepare(
+      "DELETE FROM bot_global_moods WHERE user_id = ? AND bot_id = ?",
+    ).run(userId, botId);
+    return { botId, moodKey: "warm", updatedAt: nowIso };
   }
   const normalized = normalizeGlobalBotMoodKey(moodKey);
   if (normalized === "neutral") {

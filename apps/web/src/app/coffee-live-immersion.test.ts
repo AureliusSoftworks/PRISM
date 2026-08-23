@@ -69,7 +69,7 @@ describe("Coffee live immersion", () => {
     );
   });
 
-  it("keeps the live table to one coffee affordance — the sip mug", () => {
+  it("keeps the decorative replay pot hidden while the Join mug is active", () => {
     // Review 8e012a9d: the decorative replay pot sat beside the interactive
     // mug on a live table and read as a second, dead control.
     assert.match(
@@ -86,11 +86,11 @@ describe("Coffee live immersion", () => {
     );
   });
 
-  it("omits waiter presentation and keeps the live player off camera", () => {
+  it("omits waiter presentation and keeps only Serve players off camera", () => {
     assert.doesNotMatch(pageSource, /coffeeBarScene|coffeeWaiterVisit/u);
     assert.match(
       pageSource,
-      /coffeeReplayActive && \(replayState\?\.playerPresent \?\? true\)[\s\S]*?className=\{styles\.coffeeReplayPlayerSeat\}/u,
+      /const coffeeReplayPlayerAvatarVisible =[\s\S]{0,360}coffeeLiveExperienceMode === "join"[\s\S]*?className=\{styles\.coffeeReplayPlayerSeat\}/u,
     );
     assert.doesNotMatch(pageSource, /coffeeReplayOffCameraPotDock/u);
     assert.doesNotMatch(

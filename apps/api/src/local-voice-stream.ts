@@ -1,8 +1,13 @@
+import { SPEECH_TITLE_ABBREVIATIONS } from "@localai/shared";
+
 const CONTINUATION_MAX_TOKENS = 80;
 const MIN_CLAUSE_LEFT_TOKENS = 4;
 const MIN_CLAUSE_RIGHT_TOKENS = 3;
 
 const COMMON_PERIOD_ABBREVIATIONS = new Set([
+  ...Object.keys(SPEECH_TITLE_ABBREVIATIONS).map(
+    (title) => `${title.toLocaleLowerCase("en-US")}.`,
+  ),
   "co.",
   "dr.",
   "e.g.",

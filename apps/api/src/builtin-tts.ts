@@ -6,6 +6,7 @@ import { join } from "node:path";
 import {
   BOT_AUDIO_VOICE_IDS,
   PRISM_BUILTIN_ENGLISH_VOICES,
+  expandSpeechAbbreviations,
   normalizeBotAudioVoiceProfileV1,
   prismBuiltinEnglishVoice,
   type BotAudioVoiceId,
@@ -528,10 +529,16 @@ export async function generateBuiltinEnglishWave(args: {
   deliveryMood?: string;
   signal?: AbortSignal;
 }): Promise<Buffer> {
-  const profile = normalizeBotAudioVoiceProfileV1(args.profile);
-  if (args.allowOperatingSystemVoices && profile.systemVoiceName) {
+  // Keep operating-system and packaged-local engines on the same private
+  // speech projection, including direct callers outside the HTTP route.
+  const speechArgs = {
+    ...args,
+    text: expandSpeechAbbreviations(args.text),
+  };
+  const profile = normalizeBotAudioVoiceProfileV1(speechArgs.profile);
+  if (speechArgs.allowOperatingSystemVoices && profile.systemVoiceName) {
     try {
-      return await generateSystemEnglishWave({ ...args, profile });
+      return await generateSystemEnglishWave({ ...speechArgs, profile });
     } catch (error) {
       if (isAbortError(error)) throw error;
       // A removed or broken host voice must not silence the bot. The portable
@@ -546,13 +553,13 @@ export async function generateBuiltinEnglishWave(args: {
   }
 
   try {
-    return await generatePrismVoicePackWave({ ...args, profile });
+    return await generatePrismVoicePackWave({ ...speechArgs, profile });
   } catch (error) {
-    if (isAbortError(error) || !args.allowOperatingSystemVoices) throw error;
+    if (isAbortError(error) || !speechArgs.allowOperatingSystemVoices) throw error;
     // If a packaged model is damaged, people who explicitly enabled OS voices
     // still retain a clean device-local recovery path.
     return generateSystemEnglishWave({
-      ...args,
+      ...speechArgs,
       profile: { ...profile, systemVoiceName: null },
     });
   }

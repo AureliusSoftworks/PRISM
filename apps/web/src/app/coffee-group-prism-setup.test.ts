@@ -15,7 +15,7 @@ const coffeeSource = readFileSync(
   "utf8",
 );
 
-describe("Coffee Group Prism setup invent", () => {
+describe("Coffee Group setup", () => {
   it("exposes setup-suggestion beside Coffee group create", () => {
     assert.match(
       serverSource,
@@ -36,40 +36,51 @@ describe("Coffee Group Prism setup invent", () => {
     assert.match(coffeeSource, /export async function suggestCoffeeGroupSetup/u);
   });
 
-  it("wires Wield Prism magic on the Coffee Groups + control", () => {
-    assert.match(pageSource, /id: "coffee:new-group-generate"/u);
-    assert.match(pageSource, /generateCoffeeGroupFromPrism/u);
-    assert.match(
-      pageSource,
-      /PrismRefractTarget target=\{newCoffeeGroupMagic\}/u,
-    );
-    assert.match(
-      pageSource,
-      /\/api\/coffee\/groups\/setup-suggestion/u,
-    );
+  it("opens Library sources from the Coffee Groups + control", () => {
     assert.match(
       pageSource,
       /data-tutorial-target="coffee-new-group"/u,
     );
-    assert.match(
-      pageSource,
-      /ensureCoffeeModelReady\(true\)[\s\S]{0,1200}\/api\/coffee\/groups\/setup-suggestion/u,
-    );
-    assert.match(pageSource, /Refraction complete/u);
-    assert.match(
-      pageSource,
-      /coffeeNewGroupGenerateBusy && coffeeModelWarmup/u,
-    );
+    assert.match(pageSource, /Choose one Library group\. Its current members stay invited/u);
+    assert.doesNotMatch(pageSource, /PrismRefractTarget target=\{newCoffeeGroupMagic\}/u);
   });
 
-  it("creates the invented group with name, ethos, cast, and topics", () => {
+  it("creates a table from one linked Library source", () => {
     assert.match(
       pageSource,
-      /const generateCoffeeGroupFromPrism = async[\s\S]*?\/api\/coffee\/groups\/setup-suggestion[\s\S]*?\/api\/coffee\/groups[\s\S]*?name: suggestion\.name[\s\S]*?ethos: suggestion\.ethos[\s\S]*?groupBotIds: suggestion\.groupBotIds[\s\S]*?starterTopics: suggestion\.starterTopics/u,
+      /const createCoffeeGroupFromSelection[\s\S]*?libraryGroupId: source\.id/u,
     );
     assert.match(
       pageSource,
       /openCoffeeGroup\(response\.group\)/u,
+    );
+  });
+
+  it("rejects bot-roster table creation and editing at the API boundary", () => {
+    const createStart = serverSource.indexOf(
+      'route("POST", "/api/coffee/groups"',
+    );
+    const createEnd = serverSource.indexOf(
+      'route("POST", "/api/coffee/groups/setup-suggestion"',
+      createStart,
+    );
+    const createSource = serverSource.slice(createStart, createEnd);
+    assert.match(createSource, /if \(!libraryGroupId\)/u);
+    assert.match(
+      createSource,
+      /Coffee table membership comes from its Library group, not a bot selection/u,
+    );
+
+    const patchStart = serverSource.indexOf(
+      'route("PATCH", "/api/coffee/groups/:id"',
+    );
+    const patchEnd = serverSource.indexOf(
+      'route("DELETE", "/api/coffee/groups/:id"',
+      patchStart,
+    );
+    assert.match(
+      serverSource.slice(patchStart, patchEnd),
+      /Coffee table membership comes from its Library group, not a bot selection/u,
     );
   });
 });

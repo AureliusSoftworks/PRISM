@@ -34,6 +34,10 @@ describe("voice settings preview", () => {
   it("previews Bottish, Babble, and English with the same resolved phrase", () => {
     assert.match(
       pageSource,
+      /const spokenSourceText = expandSpeechAbbreviations\(\s*applyBotNamePronunciations\(/u,
+    );
+    assert.match(
+      pageSource,
       /mode: "bottish",[\s\S]*?source: \{ text: spokenPreviewText \}[\s\S]*?sourceText: spokenPreviewText/,
     );
     assert.match(
@@ -50,7 +54,7 @@ describe("voice settings preview", () => {
     assert.match(pageSource, /await enqueueEnglishVoice\(/);
     assert.match(
       pageSource,
-      /onStart: \(durationMs\) =>\s*options\.onPlaybackStart\?\.\(durationMs, previewClip\.alignment\),/,
+      /sourceAlignment: previewClip\.alignment,[\s\S]*?onStart: \(durationMs, playbackAlignment\) => \{[\s\S]*?activePreviewAlignment =\s*playbackAlignment \?\? previewClip\.alignment;[\s\S]*?options\.onPlaybackStart\?\.\([\s\S]*?activePreviewAlignment/,
     );
   });
 

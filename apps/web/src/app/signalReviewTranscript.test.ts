@@ -529,4 +529,50 @@ describe("Signal review transcript", () => {
       );
     }
   });
+
+  it("keeps saved interruption words in public transcript speech rather than stage actions", () => {
+    const transcript = buildSignalReviewTranscript({
+      episode: {
+        ...episode,
+        messages: [episode.messages[0]!],
+        events: [
+          {
+            id: "event-interruption",
+            episodeId: episode.id,
+            sequence: 1,
+            kind: "listener_reaction",
+            payload: {
+              plan: {
+                v: 1,
+                name: "listenerReaction",
+                speakerBotId: "host-1",
+                listenerBotId: "guest-1",
+                messageId: "message-1",
+                targetSource: "role",
+                visualAction: "lean_in",
+                spokenCue: "Hold on.",
+                interjectionAttempt: true,
+                floorOutcome: "yield",
+                interruptedSpeakerCue: "One second.",
+                interruptedSpeakerCuePlayback: "crosstalk",
+                targetProgress: 0.5,
+                seed: "interruption-seed",
+                cameraCutEligible: true,
+              },
+            },
+            occurredAt: "2026-07-17T17:00:05.000Z",
+          },
+        ],
+      },
+      show,
+      host: { id: "host-1", name: "Ada" },
+      guest: { id: "guest-1", name: "Grace" },
+    });
+
+    assert.match(
+      transcript,
+      /- Public reaction speech:\n    Grace: Hold on\./u,
+    );
+    assert.match(transcript, /- Stage action \(avatar only\):\n    \[none\]/u);
+  });
 });

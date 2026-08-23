@@ -26,8 +26,8 @@ export interface DebateIdentityPresentationChangeV1 {
 
 /**
  * Build the public avatar passed to Debate rendering. Identity Crisis borrows
- * the target identity while keeping the holder's color, client voice effect,
- * communication chassis, frame, mechanical id, seat, and routing boundary.
+ * the target identity while keeping the holder's complete voice profile,
+ * color, communication chassis, frame, mechanical id, seat, and routing boundary.
  * Shapeshifter takes the target's face, chassis, and voice, but the holder's
  * authored identity anchors — name, color, glyph — always persist so the
  * chamber can still tell who actually holds the floor. The disguise is carried

@@ -1521,7 +1521,48 @@ test("echo Powers normalize and preserve addressed speech exactly", () => {
   });
   assert.equal(botPowerEchoesAddressedSpeechV1(powers), true);
   assert.equal(applyBotPowerEchoResponseV1("  Keep  every\ncharacter?!  "), "  Keep  every\ncharacter?!  ");
+  for (const foley of ["Hmm...", "let me see...", "Nice!"]) {
+    assert.equal(applyBotPowerEchoResponseV1(foley), foley);
+  }
   assert.equal(applyBotPowerEchoResponseV1(""), "...");
+});
+
+test("legacy Ready echo contracts recover a missing typed effect without broad semantic matching", () => {
+  const legacyEcho = [{
+    version: 1,
+    id: "power-copycat",
+    name: "Echoes",
+    intent: "Can only repeat the latest words spoken directly to her, verbatim.",
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1(
+        "Echoes",
+        "Can only repeat the latest words spoken directly to her, verbatim.",
+      ),
+      selfCue: "Repeat the latest speech addressed to you verbatim. Say nothing else.",
+      observerCue: "This bot can only echo the latest speech addressed to them.",
+      effects: [],
+      ruleLabels: ["Echoes addressed speech"],
+    },
+  }];
+  const reflectiveButOriginal = [{
+    ...legacyEcho[0],
+    id: "echo-chamber",
+    name: "Echo Chamber",
+    intent: "Echo themes addressed by others, then add an original perspective.",
+    compiled: {
+      ...legacyEcho[0]!.compiled,
+      sourceHash: botPowerSourceHashV1(
+        "Echo Chamber",
+        "Echo themes addressed by others, then add an original perspective.",
+      ),
+    },
+  }];
+
+  assert.equal(botPowerEchoesAddressedSpeechV1(legacyEcho), true);
+  assert.equal(botPowerEchoesAddressedSpeechV1(reflectiveButOriginal), false);
 });
 
 test("mood boosts normalize to one bounded addressed-recipient contract", () => {

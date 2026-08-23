@@ -37,6 +37,10 @@ import {
   type BotPowerMutePerformanceV1,
 } from "./botPower.ts";
 import {
+  normalizeBotPowerTrollPresentationV1,
+  type BotPowerTrollPresentationV1,
+} from "./trollPower.ts";
+import {
   normalizeBotCrosstalkInterruptedSpeakerCue,
   normalizePowerProjectedReactionCueV1,
   normalizeCrosstalkFloorOutcome,
@@ -586,6 +590,8 @@ export interface StoredAssistantToolEnvelope {
   socialSilence?: SocialSilenceMarkerV1;
   /** Links a protected reclaim turn to its audience-heard source fragment. */
   crosstalkReclaim?: CrosstalkReclaimPlanV1;
+  /** Public Troll runtime projection; never includes private model instructions. */
+  botPowerTrollPresentation?: BotPowerTrollPresentationV1;
 }
 
 /** Narrow storage shape for SQLite `messages.tool_payload` rows. */
@@ -638,6 +644,7 @@ export interface ParsedStoredAssistantToolPayload {
   falseName?: BotFalseNameStateV1;
   socialSilence?: SocialSilenceMarkerV1;
   crosstalkReclaim?: CrosstalkReclaimPlanV1;
+  botPowerTrollPresentation?: BotPowerTrollPresentationV1;
 }
 
 function normalizeStoredFalseNameStateV1(
@@ -2471,6 +2478,9 @@ export function parseStoredAssistantToolPayload(
       const crosstalkReclaim = root
         ? normalizeCrosstalkReclaimPlanV1(root.crosstalkReclaim) ?? undefined
         : undefined;
+      const botPowerTrollPresentation = root
+        ? normalizeBotPowerTrollPresentationV1(root.botPowerTrollPresentation) ?? undefined
+        : undefined;
       return {
         askQuestion: normalizedAsk,
         ...(sent ? { sentGeneratedImage: sent } : {}),
@@ -2496,6 +2506,7 @@ export function parseStoredAssistantToolPayload(
         ...(falseName ? { falseName } : {}),
         ...(socialSilence ? { socialSilence } : {}),
         ...(crosstalkReclaim ? { crosstalkReclaim } : {}),
+        ...(botPowerTrollPresentation ? { botPowerTrollPresentation } : {}),
       };
     }
     if (!parsed || typeof parsed !== "object") return {};
@@ -2542,6 +2553,8 @@ export function parseStoredAssistantToolPayload(
       normalizeSocialSilenceMarkerV1(row.socialSilence) ?? undefined;
     const crosstalkReclaim =
       normalizeCrosstalkReclaimPlanV1(row.crosstalkReclaim) ?? undefined;
+    const botPowerTrollPresentation =
+      normalizeBotPowerTrollPresentationV1(row.botPowerTrollPresentation) ?? undefined;
     const moodRow = row.mood;
     let moodKey: StoredMoodKey | undefined;
     let moodConfidence: number | undefined;
@@ -2588,6 +2601,7 @@ export function parseStoredAssistantToolPayload(
       ...(falseName ? { falseName } : {}),
       ...(socialSilence ? { socialSilence } : {}),
       ...(crosstalkReclaim ? { crosstalkReclaim } : {}),
+      ...(botPowerTrollPresentation ? { botPowerTrollPresentation } : {}),
     };
   } catch {
     return {};
@@ -2624,6 +2638,7 @@ export function hydrateAssistantMessageParts(args: {
   falseName?: BotFalseNameStateV1;
   socialSilence?: SocialSilenceMarkerV1;
   crosstalkReclaim?: CrosstalkReclaimPlanV1;
+  botPowerTrollPresentation?: BotPowerTrollPresentationV1;
 } {
   const stored = parseStoredAssistantToolPayload(args.toolPayload);
   const reparsed = parseAssistantPrismTools(args.content);
@@ -2677,6 +2692,9 @@ export function hydrateAssistantMessageParts(args: {
     ...(stored.crosstalkReclaim
       ? { crosstalkReclaim: stored.crosstalkReclaim }
       : {}),
+    ...(stored.botPowerTrollPresentation
+      ? { botPowerTrollPresentation: stored.botPowerTrollPresentation }
+      : {}),
   };
 }
 
@@ -2712,6 +2730,7 @@ export function serializeAssistantToolPayload(args: {
   falseName?: BotFalseNameStateV1;
   socialSilence?: SocialSilenceMarkerV1;
   crosstalkReclaim?: CrosstalkReclaimPlanV1;
+  botPowerTrollPresentation?: BotPowerTrollPresentationV1;
 }): string | null {
   const hasAsk = args.askQuestion !== undefined;
   const hasStory = args.tellFictionalStory !== undefined;
@@ -2772,6 +2791,9 @@ export function serializeAssistantToolPayload(args: {
   const crosstalkReclaim =
     normalizeCrosstalkReclaimPlanV1(args.crosstalkReclaim) ?? undefined;
   const hasCrosstalkReclaim = crosstalkReclaim !== undefined;
+  const botPowerTrollPresentation =
+    normalizeBotPowerTrollPresentationV1(args.botPowerTrollPresentation) ?? undefined;
+  const hasBotPowerTrollPresentation = botPowerTrollPresentation !== undefined;
   if (
     !hasAsk &&
     !hasStory &&
@@ -2796,7 +2818,8 @@ export function serializeAssistantToolPayload(args: {
     !hasIdentityShapeshift &&
     !hasFalseName &&
     !hasSocialSilence &&
-    !hasCrosstalkReclaim
+    !hasCrosstalkReclaim &&
+    !hasBotPowerTrollPresentation
   ) {
     return null;
   }
@@ -2825,6 +2848,7 @@ export function serializeAssistantToolPayload(args: {
     !hasFalseName &&
     !hasSocialSilence &&
     !hasCrosstalkReclaim &&
+    !hasBotPowerTrollPresentation &&
     hasImage
   ) {
     return JSON.stringify({ v: 1 as const, sentGeneratedImage: args.sentGeneratedImage! });
@@ -2853,7 +2877,8 @@ export function serializeAssistantToolPayload(args: {
     !hasIdentityShapeshift &&
     !hasFalseName &&
     !hasSocialSilence &&
-    !hasCrosstalkReclaim
+    !hasCrosstalkReclaim &&
+    !hasBotPowerTrollPresentation
   ) {
     return serializeAskQuestionTool(args.askQuestion!);
   }
@@ -2894,6 +2919,7 @@ export function serializeAssistantToolPayload(args: {
     ...(hasFalseName ? { falseName } : {}),
     ...(hasSocialSilence ? { socialSilence } : {}),
     ...(hasCrosstalkReclaim ? { crosstalkReclaim } : {}),
+    ...(hasBotPowerTrollPresentation ? { botPowerTrollPresentation } : {}),
   };
   return JSON.stringify(payload);
 }

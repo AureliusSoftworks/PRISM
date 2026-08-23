@@ -3,16 +3,19 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1, botVoiceTextureForPreset } from "@localai/shared";
 import {
+  LIVE_INTERVIEW_VOICE_LEVELER,
   VOICE_COMPLETED_OVERLAP_TAIL_MS,
   VOICE_LILT_DEPTH_CENTS,
   PRISM_LIVE_VOICE_PROGRESS_INTERVAL_MS,
   beginVoicePlaybackProgress,
   buildVoiceDamageSchedule,
+  decodedVoiceSpeechActivityStartMs,
   estimateVoiceOutputLatencyMs,
   resolveElevenLabsVoiceEffectPlan,
   resolveVoiceEffectPlan,
   resolveVoiceTexture,
   voicePlaybackPresentationDurationMs,
+  voicePlaybackAlignmentWithDecodedSpeechStart,
   voiceReleaseGainAt,
   voiceLiltDetuneCents,
 } from "./voiceEffects.ts";
@@ -169,6 +172,51 @@ describe("engine-agnostic voice effects", () => {
     assert.ok(liveMediaAt > workletPlaybackAt);
   });
 
+  it("levels every live Signal playback path before applying authored voice gain", () => {
+    const source = readFileSync(new URL("./voiceEffects.ts", import.meta.url), "utf8");
+    const workletStart = source.indexOf(
+      "async function playWorkletLivePerformanceVoice",
+    );
+    const mediaStart = source.indexOf(
+      "async function playLivePerformanceVoice",
+      workletStart,
+    );
+    const decodedStart = source.indexOf(
+      "async function playDecodedLivePerformanceVoice",
+      mediaStart,
+    );
+    const realtimeStart = source.indexOf(
+      "export async function playRealtimeVoiceBytes",
+      decodedStart,
+    );
+    const livePaths = [
+      source.slice(workletStart, mediaStart),
+      source.slice(mediaStart, decodedStart),
+      source.slice(decodedStart, realtimeStart),
+    ];
+
+    assert.deepEqual(LIVE_INTERVIEW_VOICE_LEVELER, {
+      thresholdDb: -30,
+      kneeDb: 18,
+      ratio: 4.5,
+      attackSeconds: 0.008,
+      releaseSeconds: 0.18,
+      makeupGain: 1.6,
+      limiterThresholdDb: -2,
+      limiterRatio: 20,
+    });
+    assert.ok(workletStart >= 0 && mediaStart > workletStart);
+    assert.ok(decodedStart > mediaStart && realtimeStart > decodedStart);
+    for (const livePath of livePaths) {
+      assert.match(livePath, /loudnessNormalization === "interview"/u);
+      assert.match(livePath, /connectLiveInterviewVoiceLeveler/u);
+      assert.match(
+        livePath,
+        /connectLiveInterviewVoiceLeveler[\s\S]{0,180}\(leveler\?\.output \?\? (?:node|source)\)\.connect\(outputGain\)/u,
+      );
+    }
+  });
+
   it("uses the portable profile effect when a playback lane does not override it", () => {
     const source = readFileSync(new URL("./voiceEffects.ts", import.meta.url), "utf8");
     assert.match(
@@ -306,7 +354,10 @@ describe("engine-agnostic voice effects", () => {
       new URL("./bottishVoice.ts", import.meta.url),
       "utf8",
     );
-    assert.match(source, /args\.onStart\?\.\(\);\s*source\.start\(startedAt\)/u);
+    assert.match(
+      source,
+      /args\.onStart\?\.\(\);\s*source\.start\(startedAt(?:,\s*0,\s*playbackDurationSeconds)?\)/u,
+    );
     assert.match(englishSource, /onStart: lifecycle\?\.onPresenceStart/u);
     assert.match(bottishSource, /onStart: lifecycle\?\.onPresenceStart/u);
   });
@@ -409,6 +460,28 @@ describe("engine-agnostic voice effects", () => {
 });
 
 describe("voice performance", () => {
+  it("derives a rigid Premium mouth zero point from decoded speech activity", () => {
+    const samples = new Float32Array(1_000);
+    samples.fill(0.2, 300);
+    const decodedStartMs = decodedVoiceSpeechActivityStartMs({
+      channels: [samples],
+      sampleRate: 1_000,
+    });
+    assert.equal(decodedStartMs, 300);
+
+    const alignment = voicePlaybackAlignmentWithDecodedSpeechStart(
+      {
+        characters: ["m", "a"],
+        characterStartTimesSeconds: [0, 0.2],
+        characterEndTimesSeconds: [0.2, 0.5],
+      },
+      decodedStartMs,
+    );
+    assert.equal(alignment?.audioTimelineOffsetSeconds, 0.3);
+    assert.deepEqual(alignment?.characterStartTimesSeconds, [0, 0.2]);
+    assert.deepEqual(alignment?.characterEndTimesSeconds, [0.2, 0.5]);
+  });
+
   it("does not stretch the audible articulation clock across graph drain", () => {
     assert.equal(voicePlaybackPresentationDurationMs(1_000, 120), 1_000);
     assert.equal(voicePlaybackPresentationDurationMs(1_000, 0), 1_000);

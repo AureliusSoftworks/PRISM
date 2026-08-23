@@ -1472,6 +1472,58 @@ test("Copycat source is available before the holder has spoken", () => {
   );
 });
 
+test("Copycat source captures the opposing side's latest vocal Foley text", () => {
+  for (const content of ["Hmm...", "let me see...", "Nice!"]) {
+    assert.equal(
+      debateLatestCopycatSourceSpeech(
+        [
+          {
+            kind: "speech",
+            speakerBotId: "basil",
+            sideId: "against",
+            stepKey: "opening_against",
+            content: "Neighborhoods need room to adapt.",
+          },
+          {
+            kind: "reaction",
+            speakerBotId: "nora",
+            sideId: "against",
+            stepKey: "persona_reaction_2",
+            content,
+          },
+        ],
+        { id: "calvin", sideId: "for" },
+      ),
+      content,
+    );
+  }
+});
+
+test("Copycat source does not treat an ordinary reaction event as vocal Foley", () => {
+  assert.equal(
+    debateLatestCopycatSourceSpeech(
+      [
+        {
+          kind: "speech",
+          speakerBotId: "basil",
+          sideId: "against",
+          stepKey: "opening_against",
+          content: "Neighborhoods need room to adapt.",
+        },
+        {
+          kind: "reaction",
+          speakerBotId: "nora",
+          sideId: "against",
+          stepKey: "verdict_reaction",
+          content: "Nice!",
+        },
+      ],
+      { id: "calvin", sideId: "for" },
+    ),
+    "Neighborhoods need room to adapt.",
+  );
+});
+
 test("treats mumbled public floor as unintelligible and mute as not", () => {
   const mumbled = applyBotPowerMumbledResponseV1(
     "Limits keep neighborhoods intact without a citywide rule.",

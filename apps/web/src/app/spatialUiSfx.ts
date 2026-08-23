@@ -150,6 +150,7 @@ export function spatialUiSfxStereoPanForRect(
 export function spatialUiSfxCueForControl(
   control: SpatialUiSfxControlDescription,
 ): SpatialUiSfxCue | null {
+  if (control.explicitCue?.trim().toLowerCase() === "none") return null;
   if (control.isBotCard) return "bot-select";
   if (
     control.explicitCue &&

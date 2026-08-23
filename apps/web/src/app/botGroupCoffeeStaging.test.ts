@@ -108,7 +108,7 @@ describe("waiting-room Coffee staging ranking", () => {
     assert.deepEqual(ranked[0]?.match.matchedTokens, ["cafe", "systems", "ada"]);
   });
 
-  it("preselects the three most relevant visible bots and preserves exact submitted text", () => {
+  it("preselects the four most relevant visible bots and preserves exact submitted text", () => {
     const exact = "  Power, mercy—then systems?\n";
     const model = createBotGroupCoffeeStagingModel({
       prompt: exact,
@@ -157,13 +157,13 @@ describe("waiting-room Coffee staging roster and selection safety", () => {
     ]);
   });
 
-  it("filters, deduplicates, caps, and fills malformed selection state to three", () => {
+  it("filters, deduplicates, caps at four, and fills malformed state to two", () => {
     assert.deepEqual(
       reconcileBotGroupCoffeeStagingSelection({
         selectedBotIds: ["missing", "c", "c", null, "d", "e", "f", "g", "a"],
         rosterBotIds: ["a", "b", "c", "d", "e", "f", "g"],
       }),
-      ["c", "d", "e"],
+      ["c", "d", "e", "f"],
     );
     assert.deepEqual(
       reconcileBotGroupCoffeeStagingSelection({
@@ -171,10 +171,10 @@ describe("waiting-room Coffee staging roster and selection safety", () => {
         rosterBotIds: ["a", "b", "c"],
         preferredBotIds: ["c", "a"],
       }),
-      ["c", "a", "b"],
+      ["c", "a"],
     );
     assert.equal(summarizeBotGroupCoffeeStagingSelection(["a"]).status, "too-few");
-    assert.equal(summarizeBotGroupCoffeeStagingSelection(["a", "b"]).status, "too-few");
+    assert.equal(summarizeBotGroupCoffeeStagingSelection(["a", "b"]).status, "ready");
     assert.equal(
       summarizeBotGroupCoffeeStagingSelection(["a", "b", "c"]).status,
       "ready",
@@ -186,26 +186,26 @@ describe("waiting-room Coffee staging roster and selection safety", () => {
     );
   });
 
-  it("keeps the staged live table at exactly three bots", () => {
+  it("keeps the staged live table between two and four bots", () => {
     const rosterBotIds = ["a", "b", "c", "d", "e", "f"];
     const minimum = toggleBotGroupCoffeeStagingSelection({
-      selectedBotIds: ["a", "b", "c"],
+      selectedBotIds: ["a", "b"],
       botId: "a",
       rosterBotIds,
     });
     assert.equal(minimum.reason, "minimum-reached");
-    assert.deepEqual(minimum.selectedBotIds, ["a", "b", "c"]);
+    assert.deepEqual(minimum.selectedBotIds, ["a", "b"]);
 
     assert.deepEqual(
       reconcileBotGroupCoffeeStagingSelection({
-        selectedBotIds: ["a", "b"],
+        selectedBotIds: ["a"],
         rosterBotIds,
       }),
-      ["a", "b", "c"],
+      ["a", "b"],
     );
 
     const maximum = toggleBotGroupCoffeeStagingSelection({
-      selectedBotIds: ["a", "b", "c"],
+      selectedBotIds: ["a", "b", "c", "d"],
       botId: "f",
       rosterBotIds,
     });
@@ -254,7 +254,7 @@ describe("waiting-room Coffee staging roster and selection safety", () => {
     );
     assert.deepEqual(
       roster.filter(({ selected }) => selected).map(({ id }) => id),
-      ["engineer", "philosopher", "chef"],
+      ["engineer", "chef"],
     );
     assert.equal(roster[0]?.reactionBand, "related");
     assert.equal(roster.at(-1)?.reactionBand, "related");

@@ -11,6 +11,24 @@ function signalPowersTutorialBody(): string {
 }
 
 describe("mode tutorials", () => {
+  it("teaches group-linked Coffee setup and bot-directed Wield where supported", () => {
+    const coffeeBody = MODE_TUTORIALS.coffee.steps[0]?.body ?? "";
+    assert.match(coffeeBody, /custom Library group or Ungrouped/u);
+    assert.match(coffeeBody, /never individual bots/u);
+    assert.match(coffeeBody, /future invitations automatically/u);
+    const bodies = [
+      MODE_TUTORIALS.debate.steps.find(
+        (step) => step.heading === "Enter the Debate Studio",
+      )?.body ?? "",
+      signalPowersTutorialBody(),
+    ];
+    for (const body of bodies) {
+      assert.match(body, /concrete bot tile/u);
+      assert.match(body, /session never starts/u);
+      assert.match(body, /ordinary clicks remain ordinary selection/u);
+    }
+  });
+
   it("covers the complete Whodunnit investigation and trial loop", () => {
     const step = MODE_TUTORIALS.debate.steps.find(
       (candidate) => candidate.heading === "Investigate a Whodunnit",
@@ -22,44 +40,56 @@ describe("mode tutorials", () => {
     assert.match(step.body, /compact dark HUD/u);
     assert.match(step.body, /names your mission/u);
     assert.match(step.body, /Actions, Case file, and Theory/u);
-    assert.match(step.body, /fixed-proportion mansion map beside the current room stage/u);
-    assert.match(step.body, /Persistent Case Desk spans the full width below them/u);
-    assert.match(step.body, /desktop investigation fits into one fixed game board/u);
+    assert.match(step.body, /three-part cockpit/u);
+    assert.match(step.body, /larger current-room stage owns the center/u);
+    assert.match(step.body, /static full-height Case File is a working rail on the right/u);
+    assert.match(step.body, /Gallery-like rack of suspect folders/u);
     assert.match(step.body, /Co-counsel’s latest reading appears at the lower edge of the stage/u);
     assert.doesNotMatch(step.body, /co-counsel Mini and name are always visible/u);
     assert.match(step.body, /Case file keeps their consultation composer/u);
     assert.match(step.body, /four-to-three blueprint beside the Debate stage/u);
     assert.match(step.body, /preserve their seeded footprints without stretching/u);
     assert.match(step.body, /adjacent room boxes/u);
-    assert.match(step.body, /Micro avatar/u);
+    assert.match(step.body, /bot glyph at a stable case-seeded position/u);
     assert.match(step.body, /every undiscovered room conceals its name/u);
     assert.match(step.body, /wandering Mini avatar/u);
     assert.match(step.body, /Suggested questions only fill the composer/u);
-    assert.match(step.body, /Only populated authored blocks are added/u);
+    assert.match(step.body, /paperclip one to a revealed suspect as a fallible hypothesis/u);
     assert.match(step.body, /one canonical weapon/u);
     assert.match(step.body, /Forensics for exactly three investigation actions/u);
     assert.match(step.body, /committed testimony/u);
-    assert.match(step.body, /Talking is free/u);
+    assert.match(step.body, /every submitted question costs one action/u);
+    assert.match(step.body, /Leaving and reopening a room investigation are free/u);
+    assert.match(step.body, /Case Kit applications each cost one action/u);
+    assert.doesNotMatch(step.body, /questions inside that interview session are free/u);
     assert.match(step.body, /circular investigation lens/u);
     assert.match(step.body, /Type @ in the interview composer/u);
     assert.match(step.body, /Selecting a room never travels you/u);
-    assert.match(step.body, /choose Investigate room to travel and update the existing room stage/u);
+    assert.match(step.body, /choose Go to room or Discover room to update the existing room stage/u);
     assert.match(step.body, /many seeded areas/u);
-    assert.match(step.body, /Every area remains re-clickable/u);
-    assert.match(step.body, /Drag a usable item onto a locked inventory object, mansion room, or room area/u);
-    assert.match(step.body, /harder cases may contain convincing keys with no matching lock/u);
-    assert.match(step.body, /Persistent Case Desk stays beneath the investigation band/u);
-    assert.match(step.body, /only its active record scroll/u);
-    assert.match(step.body, /Leads, freeform Notes, Evidence, and Testimony/u);
-    assert.match(step.body, /private notebook references/u);
-    assert.match(step.body, /one-window reference revisions/u);
+    assert.match(step.body, /Each committed frozen area costs one action and resolves once rather than rerolling/u);
+    assert.match(step.body, /hidden action token/u);
+    assert.match(step.body, /Partner consultation is always free/u);
+    assert.match(step.body, /force-locks the mansion and opens the Theory Board/u);
+    assert.match(step.body, /undiscovered evidence stays behind/u);
+    assert.match(step.body, /Drag a Case Kit tool onto the padlock/u);
+    assert.match(step.body, /Harder cases may contain convincing keys with no matching lock/u);
+    assert.match(step.body, /compact Case Kit during a room search/u);
+    assert.match(step.body, /designed padlock on that room area/u);
+    assert.match(step.body, /All visible areas inspected/u);
+    assert.match(step.body, /Investigator’s Desk is closed by default/u);
+    assert.match(step.body, /compare two discovered records side by side/u);
+    assert.match(step.body, /plain-text autosaved note/u);
+    assert.match(step.body, /fallible player hypotheses/u);
     assert.match(step.body, /partner composer can also @ a lead at its current revision/u);
-    assert.match(step.body, /meaning-preserving diff/u);
+    assert.match(step.body, /same desk opens on the Theory Board/u);
+    assert.match(step.body, /lead comments, suspect notes, comparisons, and paperclip pins are free/u);
+    assert.doesNotMatch(step.body, /note polishing|Review page polish|custom page|\+ New page/u);
     assert.match(step.body, /Theory Board/u);
     assert.match(step.body, /Press, Present Evidence, or Pass/u);
     assert.match(step.body, /one continuance/u);
     assert.match(step.body, /Reveal spoilers/u);
-    assert.match(step.body, /blank notebook and fresh visuals/u);
+    assert.match(step.body, /blank private desk and fresh visuals/u);
   });
 
   it("teaches quiet pre-session alignment through each applet's native room", () => {
@@ -952,6 +982,10 @@ describe("mode tutorials", () => {
     );
     assert.match(
       copy,
+      /brief vocal Foley such as Hmm…, let me see…, or Nice!/u,
+    );
+    assert.match(
+      copy,
       /If nobody on the other side has spoken yet, they originate one short first floor/u,
     );
     assert.match(
@@ -1457,6 +1491,13 @@ describe("mode tutorials", () => {
     assert.match(castCopy, /Prism takes the center Judge \/ Moderator seat/u);
     assert.match(castCopy, /automatic neutral introduction/u);
     assert.match(castCopy, /Choose the two advocates/u);
+    const whodunnitCopy =
+      MODE_TUTORIALS.debate.steps.find((step) =>
+        step.body.includes("Choose Whodunnit?"),
+      )?.body ?? "";
+    assert.match(whodunnitCopy, /Wield Prism onto a concrete bot/u);
+    assert.match(whodunnitCopy, /fills every other role/u);
+    assert.match(whodunnitCopy, /compilation still waits for you/u);
     assert.match(
       castCopy,
       /Your seat & the Jury reveals Participant and Spectator roles/u,
@@ -3168,8 +3209,16 @@ describe("mode tutorials", () => {
       /Copycat keeps its copied cutoff.*follow-on silence never invents a protest/u,
     );
     assert.match(
+      MODE_TUTORIALS.coffee.steps.map((step) => step.body).join("\n"),
+      /latest brief public spoken reaction.*Hmm…, let me see…, or Nice!.*next exact repeat/u,
+    );
+    assert.match(
       MODE_TUTORIALS.botcast.steps.map((step) => step.body).join("\n"),
       /Copycat keeps its copied cutoff.*follow-on reaction is only \.\.\./u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps.map((step) => step.body).join("\n"),
+      /latest brief public spoken reaction.*Hmm…, let me see…, or Nice!.*next exact on-air repeat/u,
     );
   });
 

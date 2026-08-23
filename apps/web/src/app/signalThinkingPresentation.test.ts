@@ -6,6 +6,7 @@ import {
   signalGenerationThinkingRole,
   signalPresentedThinkingRole,
   signalStageThinkingRole,
+  signalThinkingFollowingMessageId,
   signalThinkingPresentationEndReason,
 } from "./signalThinkingPresentation.ts";
 
@@ -106,6 +107,8 @@ describe("Signal thinking presentation", () => {
       episodeLive: true,
       producerGuestThinking: false,
       producerGuestSipActive: false,
+      voicePreparationPending: false,
+      hasPreparedMessage: false,
       nextSpeakerRole: "guest" as const,
       generationThinkingRole: "guest" as const,
       generationThinkingRunMatches: true,
@@ -121,10 +124,47 @@ describe("Signal thinking presentation", () => {
     assert.equal(
       signalPresentedThinkingRole({
         ...base,
+        generationBusy: true,
+        hasPreparedMessage: true,
+        hasSpeakingMessage: false,
+      }),
+      null,
+    );
+    assert.equal(
+      signalPresentedThinkingRole({
+        ...base,
+        generationBusy: true,
+        voicePreparationPending: true,
+        hasSpeakingMessage: false,
+      }),
+      null,
+    );
+    assert.equal(
+      signalPresentedThinkingRole({
+        ...base,
         generationBusy: false,
         hasSpeakingMessage: true,
       }),
       null,
+    );
+  });
+
+  it("links completed thinking to a prepared line before speech state commits", () => {
+    assert.equal(
+      signalThinkingFollowingMessageId({
+        liveSpeechMessageId: null,
+        speakingMessageId: null,
+        preparedMessageId: "opening-line",
+      }),
+      "opening-line",
+    );
+    assert.equal(
+      signalThinkingFollowingMessageId({
+        liveSpeechMessageId: "audible-line",
+        speakingMessageId: "speaking-line",
+        preparedMessageId: "prepared-line",
+      }),
+      "audible-line",
     );
   });
 
@@ -133,6 +173,8 @@ describe("Signal thinking presentation", () => {
       episodeLive: true,
       producerGuestThinking: true,
       generationBusy: false,
+      voicePreparationPending: false,
+      hasPreparedMessage: false,
       hasSpeakingMessage: false,
       nextSpeakerRole: "guest" as const,
       generationThinkingRole: null,

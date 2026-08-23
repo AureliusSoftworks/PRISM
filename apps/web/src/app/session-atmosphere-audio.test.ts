@@ -533,6 +533,29 @@ test("cup foley emits exactly once for each sip and return transition", () => {
   assert.equal(coffeeCupFoleyCueForTransition(true, false), "coffeeCupPlace");
 });
 
+test("Signal defers the cup placement cue to the mug animation's table-contact beat", () => {
+  assert.equal(
+    coffeeCupFoleyCueForTransition(false, true, "animation-end"),
+    "coffeeSip",
+  );
+  assert.equal(
+    coffeeCupFoleyCueForTransition(true, false, "animation-end"),
+    null,
+  );
+  const source = readFileSync(
+    new URL("./session-atmosphere-audio.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /addEventListener\("animationend", announceAnimatedCupPlacement, true\)/u,
+  );
+  assert.match(
+    source,
+    /mug\.dataset\.sipping !== "true"[\s\S]{0,220}playCue\("coffeeCupPlace"\)/u,
+  );
+});
+
 test("session atmosphere buses keep their own calibrated and clamped gains", () => {
   assert.equal(
     sessionAtmosphereBusVolume({ volume: 0.5, bus: "background" }),

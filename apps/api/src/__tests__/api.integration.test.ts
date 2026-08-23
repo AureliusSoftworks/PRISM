@@ -1074,13 +1074,63 @@ describe("API request integration", () => {
     assert.equal(oversizedDirect.status, 400, JSON.stringify(oversizedDirectPayload));
     assert.equal(oversizedDirectPayload.error, "Coffee topic is too long.");
 
-    const createdGroup = await client.request(
+    const rosterOnlyGroup = await client.request(
       "/api/coffee/groups",
       jsonInit({ name: "Prompted Table", groupBotIds: botIds })
+    );
+    const rosterOnlyGroupPayload = await json(rosterOnlyGroup);
+    assert.equal(rosterOnlyGroup.status, 400, JSON.stringify(rosterOnlyGroupPayload));
+    assert.match(rosterOnlyGroupPayload.error, /Library group or Ungrouped/u);
+
+    const libraryGroupId = "group:coffee-initial-topic";
+    const savedLibraryGroup = await client.request(
+      "/api/library/groups",
+      {
+        ...jsonInit({
+          groups: [
+            {
+              id: libraryGroupId,
+              name: "Prompted Table",
+              botIds,
+            },
+          ],
+        }),
+        method: "PUT",
+      },
+    );
+    assert.equal(savedLibraryGroup.status, 200, JSON.stringify(await json(savedLibraryGroup)));
+    const selectedRosterGroup = await client.request(
+      "/api/coffee/groups",
+      jsonInit({
+        name: "Prompted Table",
+        libraryGroupId,
+        groupBotIds: botIds,
+      }),
+    );
+    const selectedRosterGroupPayload = await json(selectedRosterGroup);
+    assert.equal(
+      selectedRosterGroup.status,
+      400,
+      JSON.stringify(selectedRosterGroupPayload),
+    );
+    assert.match(selectedRosterGroupPayload.error, /membership comes from its Library group/u);
+    const createdGroup = await client.request(
+      "/api/coffee/groups",
+      jsonInit({ name: "Prompted Table", libraryGroupId })
     );
     const createdGroupPayload = await json(createdGroup);
     assert.equal(createdGroup.status, 201, JSON.stringify(createdGroupPayload));
     const groupId = createdGroupPayload.group.id as string;
+    const rosterUpdate = await client.request(
+      `/api/coffee/groups/${encodeURIComponent(groupId)}`,
+      {
+        ...jsonInit({ groupBotIds: botIds.slice(0, 2) }),
+        method: "PATCH",
+      },
+    );
+    const rosterUpdatePayload = await json(rosterUpdate);
+    assert.equal(rosterUpdate.status, 400, JSON.stringify(rosterUpdatePayload));
+    assert.match(rosterUpdatePayload.error, /membership comes from its Library group/u);
     assert.equal(createdGroupPayload.group.ethos, "");
     assert.equal(createdGroupPayload.group.atmosphere, null);
     assert.equal(
@@ -1577,9 +1627,26 @@ describe("API request integration", () => {
         createdAt
       );
     }
+    const libraryGroupId = "group:coffee-force-attendance";
+    const savedLibraryGroup = await client.request(
+      "/api/library/groups",
+      {
+        ...jsonInit({
+          groups: [
+            {
+              id: libraryGroupId,
+              name: "Exact Attendance",
+              botIds,
+            },
+          ],
+        }),
+        method: "PUT",
+      },
+    );
+    assert.equal(savedLibraryGroup.status, 200, JSON.stringify(await json(savedLibraryGroup)));
     const createdGroup = await client.request(
       "/api/coffee/groups",
-      jsonInit({ name: "Exact Attendance Table", groupBotIds: botIds })
+      jsonInit({ name: "Exact Attendance Table", libraryGroupId })
     );
     const createdGroupPayload = await json(createdGroup);
     assert.equal(createdGroup.status, 201, JSON.stringify(createdGroupPayload));
@@ -4892,6 +4959,26 @@ describe("API request integration", () => {
       now
     );
     const spokenText = "This local reply must stay on the device.";
+
+    const abbreviationText = "Ms. Rivera asked Capt. Chen to wait.";
+    const beforeAbbreviationCalls = builtinVoiceCalls.length;
+    const abbreviationResponse = await client.request(
+      "/api/voices/synthesize",
+      jsonInit({
+        text: abbreviationText,
+        mode: "english",
+        engine: "builtin",
+        profile: normalizeBotAudioVoiceProfileV1(undefined),
+      }),
+    );
+    assert.equal(abbreviationResponse.status, 200);
+    await abbreviationResponse.arrayBuffer();
+    assert.equal(builtinVoiceCalls.length, beforeAbbreviationCalls + 1);
+    assert.equal(
+      builtinVoiceCalls.at(-1)?.text,
+      "Miss Rivera asked Captain Chen to wait.",
+    );
+    assert.equal(abbreviationText, "Ms. Rivera asked Capt. Chen to wait.");
 
     const beforeCalls = fetchRecorder.calls.length;
     const response = await client.request(

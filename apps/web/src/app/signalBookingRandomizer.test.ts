@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { randomSignalEpisodeGuestId } from "./signalBookingRandomizer.ts";
+import {
+  randomSignalEpisodeGuestId,
+  resolvedSignalBookingGuestId,
+} from "./signalBookingRandomizer.ts";
 
 describe("Signal booking randomizer", () => {
   it("chooses a non-host guest and avoids the current guest", () => {
@@ -30,6 +33,24 @@ describe("Signal booking randomizer", () => {
         currentGuestId: "",
       }),
       null,
+    );
+  });
+
+  it("keeps a Wield-captured guest fixed over a conflicting suggestion", () => {
+    assert.equal(
+      resolvedSignalBookingGuestId({
+        anchoredGuestId: "elizabeth-bennett",
+        suggestedGuestId: "mr-darcy",
+        requestedGuestId: "jane-bennett",
+      }),
+      "elizabeth-bennett",
+    );
+    assert.equal(
+      resolvedSignalBookingGuestId({
+        suggestedGuestId: "mr-darcy",
+        requestedGuestId: "jane-bennett",
+      }),
+      "mr-darcy",
     );
   });
 });
