@@ -3588,6 +3588,31 @@ describe("API request integration", () => {
     );
     assert.equal(episodeResponse.status, 201);
     const episodeId = String((await json(episodeResponse)).episode.id);
+    const replayProxyBytes = await sharp(uploadedAssetBytes)
+      .resize(8, 6, { fit: "inside" })
+      .webp({ quality: 40 })
+      .toBuffer();
+    db.prepare(
+      `INSERT INTO botcast_episode_image_proxies
+         (episode_id, user_id, image_id, content_type, width, height, image_bytes, created_at)
+       VALUES (?, ?, ?, 'image/webp', 8, 6, ?, ?)`,
+    ).run(
+      episodeId,
+      ownerId,
+      "signal-route-proxy",
+      replayProxyBytes,
+      createdAt,
+    );
+    const replayProxyResponse = await owner.request(
+      `/api/botcast/episodes/${encodeURIComponent(episodeId)}/image-proxy`,
+    );
+    assert.equal(replayProxyResponse.status, 200);
+    assert.equal(replayProxyResponse.headers.get("content-type"), "image/webp");
+    assert.deepEqual(Buffer.from(await replayProxyResponse.arrayBuffer()), replayProxyBytes);
+    const foreignReplayProxy = await stranger.request(
+      `/api/botcast/episodes/${encodeURIComponent(episodeId)}/image-proxy`,
+    );
+    assert.equal(foreignReplayProxy.status, 404);
 
     const foreignEpisodeDelete = await stranger.request(
       `/api/botcast/episodes/${encodeURIComponent(episodeId)}`,
@@ -3614,6 +3639,12 @@ describe("API request integration", () => {
       ok: true,
       discarded: true,
     });
+    assert.equal(
+      (db.prepare(
+        "SELECT COUNT(*) AS count FROM botcast_episode_image_proxies WHERE episode_id = ?",
+      ).get(episodeId) as { count: number }).count,
+      0,
+    );
     assert.equal(
       (await owner.request(`/api/botcast/episodes/${encodeURIComponent(episodeId)}`, {
         method: "DELETE",

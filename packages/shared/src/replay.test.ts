@@ -5,6 +5,8 @@ import {
   buildReplaySceneCheckpointsV2,
   compileReplayTimelineV1,
   compileReplayTimelineV2,
+  defaultReplaySceneV2,
+  reduceReplaySceneV2,
   replayCameraPresentationAtV2,
   replayManifestToMarkdownV1,
   replayManifestToMarkdownV2,
@@ -528,6 +530,86 @@ test("V2 direction seeks deterministically through speech, overlaps, sips, depar
   assert.equal(departed.participants.guest?.visible, false);
   assert.equal(replaySceneAtV2(manifestV2, 9_000).outroActive, true);
   assert.equal(replaySceneAtV2(manifestV2, 12_500).outroActive, false);
+});
+
+test("compacted thinking preserves explicit replay camera and segment authority", () => {
+  const directed = reduceReplaySceneV2(
+    reduceReplaySceneV2(defaultReplaySceneV2(manifestV2.participants), {
+      sequence: 1,
+      atMs: 100,
+      kind: "camera",
+      sourceMessageId: null,
+      payload: { shot: "host_close" },
+    }),
+    {
+      sequence: 2,
+      atMs: 100,
+      kind: "segment",
+      sourceMessageId: null,
+      payload: { segment: "closing" },
+    },
+  );
+  const compactedThinking = reduceReplaySceneV2(directed, {
+    sequence: 3,
+    atMs: 120,
+    endMs: 121,
+    kind: "thinking",
+    sourceMessageId: "message-1",
+    payload: {
+      participantId: "host",
+      active: true,
+      timelineCompacted: true,
+      camera: "wide",
+      segment: "opening",
+      followingMessageId: "message-1",
+    },
+  });
+
+  assert.equal(compactedThinking.camera, "host_close");
+  assert.equal(compactedThinking.segment, "closing");
+  assert.equal(compactedThinking.participants.host?.thinking, true);
+
+  const replayed = replaySceneAtV2(
+    {
+      ...manifestV2,
+      initialScene: defaultReplaySceneV2(manifestV2.participants),
+      direction: [
+        {
+          sequence: 1,
+          atMs: 100,
+          kind: "camera",
+          sourceMessageId: null,
+          payload: { shot: "host_close" },
+        },
+        {
+          sequence: 2,
+          atMs: 100,
+          kind: "segment",
+          sourceMessageId: null,
+          payload: { segment: "closing" },
+        },
+        {
+          sequence: 3,
+          atMs: 120,
+          endMs: 500,
+          kind: "thinking",
+          sourceMessageId: "message-1",
+          payload: {
+            participantId: "host",
+            active: true,
+            timelineCompacted: true,
+            camera: "wide",
+            segment: "opening",
+            followingMessageId: "message-1",
+          },
+        },
+      ],
+    },
+    130,
+  );
+  assert.equal(replayed.camera, "host_close");
+  assert.equal(replayed.segment, "closing");
+  assert.equal(replayed.participants.host?.thinking, true);
 });
 
 test("V2 seeks exact baked mouths and mode-only camera transitions", () => {

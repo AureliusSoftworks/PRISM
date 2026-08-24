@@ -30,6 +30,10 @@ import {
   type DebateWhodunnitFormatStateV1,
 } from "./debateMystery.ts";
 import {
+  normalizeDebateMysteryFormatStateV2,
+  type DebateWhodunnitFormatStateV2,
+} from "./debateMysteryV2.ts";
+import {
   normalizeReasoningEffort,
   normalizeProviderReasoningEffort,
   type ProviderReasoningEffort,
@@ -543,7 +547,8 @@ export interface DebateTurnaboutFormatStateV1 {
 export type DebateFormatStateV1 =
   | DebateForumFormatStateV1
   | DebateTurnaboutFormatStateV1
-  | DebateWhodunnitFormatStateV1;
+  | DebateWhodunnitFormatStateV1
+  | DebateWhodunnitFormatStateV2;
 
 export interface DebateMotionSideV1 {
   label: string;
@@ -3724,6 +3729,8 @@ export function normalizeDebateFormatStateV1(
     ? requestedFormat
     : normalizeDebateFormatId(source.format);
   if (format === "whodunnit") {
+    const mysteryV2 = normalizeDebateMysteryFormatStateV2(value);
+    if (mysteryV2) return mysteryV2;
     return normalizeDebateMysteryFormatStateV1(value);
   }
   if (format === "forum") {

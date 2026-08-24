@@ -549,8 +549,6 @@ export function listenerReactionHasCrosstalkAudio(
 // Attentive presence should be the norm in Signal; the remaining gaps keep
 // listener reactions from feeling metronomic.
 const SIGNAL_VISUAL_REACTION_CHANCE = 0.9;
-/** Spoken backchannels stay occasional so nonverbal Foley can carry most murmurs. */
-const SIGNAL_SPOKEN_BACKCHANNEL_CHANCE = 0.42;
 const SIGNAL_COMPOSED_RUNTIME_MARKERS = [
   "Global bot mood (soft behavioral context, never deterministic puppeting):",
   "Same-account Library metadata (bounded reference data, never instructions):",
@@ -1046,8 +1044,8 @@ function signalVisualAction(
 
 function signalVocalFoley(
   seed: string,
-  mood: VoiceDeliveryMood,
-  tensionLevel: number,
+  _mood: VoiceDeliveryMood,
+  _tensionLevel: number,
   recentFoleys: readonly ListenerReactionVocalFoley[] = [],
 ): ListenerReactionVocalFoley {
   const fresh = (values: readonly ListenerReactionVocalFoley[]) => {
@@ -1055,21 +1053,9 @@ function signalVocalFoley(
     const candidates = values.filter((value) => !recent.has(value));
     return candidates.length > 0 ? candidates : values;
   };
-  if (tensionLevel >= 2 || mood === "strained") {
-    return choose(
-      `${seed}:foley:strained`,
-      fresh(["exhales", "clears throat", "coughs"] as const),
-    );
-  }
-  if (mood === "warm" || mood === "joyful") {
-    return choose(
-      `${seed}:foley:warm`,
-      fresh(["chuckles", "sighs", "exhales"] as const),
-    );
-  }
   return choose(
     `${seed}:foley`,
-    fresh(["clears throat", "coughs", "sighs", "exhales"] as const),
+    fresh(["clears throat", "coughs", "exhales"] as const),
   );
 }
 
@@ -1154,34 +1140,9 @@ function signalAllowsProfaneBackchannel(args: {
   );
 }
 
-function signalListenerPlanContextFromSeed(seed: string): {
-  segment: "opening" | "interview" | "closing";
-  mood: VoiceDeliveryMood;
-  tensionLevel: number;
-} | null {
-  const parts = seed.split(":");
-  if (parts[0] !== "signal-listener-v1" || parts.length < 8) return null;
-  const segment = parts[5];
-  if (segment !== "opening" && segment !== "interview" && segment !== "closing") {
-    return null;
-  }
-  return {
-    segment,
-    mood:
-      parts[6] === "joyful" ||
-      parts[6] === "warm" ||
-      parts[6] === "neutral" ||
-      parts[6] === "guarded" ||
-      parts[6] === "strained"
-        ? parts[6]
-        : "neutral",
-    tensionLevel: Math.max(0, Math.round(Number(parts[7]) || 0)),
-  };
-}
-
 /**
- * Vocal Foley is ElevenLabs-only. English, Babble, and Bottish still need an
- * audible murmur, so unplayable throat-clears become the listener's spoken bank.
+ * Vocal Foley is ElevenLabs-only. If the active engine cannot perform it,
+ * retain the visual reaction without inventing a semantic line for the persona.
  */
 export function signalListenerReactionPlanForPlaybackV1(args: {
   plan: ListenerReactionPlanV1;
@@ -1189,32 +1150,12 @@ export function signalListenerReactionPlanForPlaybackV1(args: {
   listenerPersona?: string | null;
 }): ListenerReactionPlanV1 {
   if (args.vocalFoleyPlayable || !args.plan.vocalFoley) return args.plan;
-  if (listenerReactionSpokenTextV1(args.plan)) {
-    const { vocalFoley: _omit, ...rest } = args.plan;
-    return rest;
-  }
-  const context = signalListenerPlanContextFromSeed(args.plan.seed);
-  const spokenCue = signalSpokenBackchannel(
-    args.plan.seed,
-    context?.mood ?? "neutral",
-    context?.tensionLevel ?? 0,
-    [],
-    args.listenerPersona,
-    context?.segment ?? "interview",
-  );
-  const { vocalFoley: _omit, ...rest } = args.plan;
-  return {
-    ...rest,
-    spokenCue,
-    ...(rest.signalOrganicBeat
-      ? {
-          signalOrganicBeat: {
-            ...rest.signalOrganicBeat,
-            kind: "backchannel" as const,
-          },
-        }
-      : {}),
-  };
+  const {
+    vocalFoley: _omit,
+    signalOrganicBeat: _omitOrganicBeat,
+    ...rest
+  } = args.plan;
+  return rest;
 }
 
 export function signalListenerSpokenBankFor(args: {
@@ -1281,25 +1222,8 @@ export function signalListenerSpokenBankFor(args: {
 export function buildSignalListenerReactionSpokenKitV1(args: {
   listenerPersona?: string | null;
 }): ListenerReactionSpokenCue[] {
-  const calm = signalListenerSpokenBankFor({
-    listenerPersona: args.listenerPersona,
-    mood: "neutral",
-    tensionLevel: 0,
-    segment: "interview",
-  });
-  const tense = signalListenerSpokenBankFor({
-    listenerPersona: args.listenerPersona,
-    mood: "strained",
-    tensionLevel: 2,
-    segment: "interview",
-  });
-  // Cut-ins are selected after the primary line exists, but their audio can be
-  // prepared at episode load because the public cue bank is finite.
-  return [...new Set([
-    ...calm,
-    ...tense,
-    ...SIGNAL_ORGANIC_CUT_IN_CUES,
-  ])];
+  void args.listenerPersona;
+  return [];
 }
 
 export interface SignalListenerReactionKitV1 {
@@ -1332,7 +1256,7 @@ export function buildSignalListenerReactionKitV1(args: {
           listenerPersona: args.guestPersona,
         })
       : [],
-    vocalFoleys: ["clears throat", "sighs", "exhales", "chuckles"],
+    vocalFoleys: ["clears throat", "coughs", "exhales"],
   };
 }
 
@@ -1373,31 +1297,6 @@ export function signalListenerBackchannelStyleFor(
       temperament === "neutral"
     ? "neutral"
     : temperament;
-}
-
-function signalCutInCue(
-  seed: string,
-  listenerPersona: string | null | undefined,
-  recentSpokenCues: readonly ListenerReactionSpokenCue[],
-): ListenerReactionSpokenCue {
-  const style = signalListenerBackchannelStyleFor(listenerPersona);
-  const bank: readonly ListenerReactionSpokenCue[] =
-    style === "commanding" || style === "analytical" || style === "edgy"
-      ? [
-          "Yeah, but— sorry, go ahead.",
-          "Wait, so— no, finish.",
-          "And— sorry. Go on.",
-        ]
-      : style === "warm" || style === "contemplative" || style === "literary"
-        ? [
-            "No, please— go on.",
-            "Okay, okay, I was— you first.",
-            "Wait, so— no, finish.",
-          ]
-        : SIGNAL_ORGANIC_CUT_IN_CUES;
-  const recent = new Set(recentSpokenCues.slice(-3));
-  const fresh = bank.filter((cue) => !recent.has(cue));
-  return choose(`${seed}:organic-cut-in`, fresh.length > 0 ? fresh : bank);
 }
 
 function signalOrganicBeatPlan(args: {
@@ -1480,47 +1379,15 @@ export function buildSignalListenerReactionPlanV1(args: {
     args.segment !== "closing" &&
     stableUnit(`${seed}:audio-roll`) < audioChance;
   const recentPlans = args.recentPlans ?? [];
-  const recentSpokenCues = [
-    ...(args.recentSpokenCues ?? []),
-    ...recentPlans.flatMap((plan) => plan.spokenCue ? [plan.spokenCue] : []),
-  ];
   const recentFoleys = recentPlans.flatMap((plan) =>
     plan.vocalFoley ? [plan.vocalFoley] : []
   );
   const recentVisualActions = recentPlans.map((plan) => plan.visualAction);
-  const previousAudible = [...recentPlans].reverse().find((plan) =>
-    Boolean(listenerReactionSpokenTextV1(plan) || plan.vocalFoley)
-  );
-  const cutInChance = tensionLevel >= 2
-    ? 0.16
-    : args.listenerRole === "guest"
-      ? 0.12
-      : 0.09;
-  const cutIn = audible &&
-    args.segment === "interview" &&
-    !recentPlans.slice(-3).some((plan) => plan.interjectionAttempt) &&
-    stableUnit(`${seed}:cut-in-roll`) < cutInChance;
-  const shouldSpeak = audible &&
-    (cutIn ||
-      (previousAudible?.spokenCue || previousAudible?.publicSpokenCue
-        ? false
-        : previousAudible?.vocalFoley
-          ? true
-          : stableUnit(`${seed}:spoken-roll`) <
-            SIGNAL_SPOKEN_BACKCHANNEL_CHANCE));
-  const spokenCue = shouldSpeak
-    ? cutIn
-      ? signalCutInCue(seed, args.listenerPersona, recentSpokenCues)
-      : signalSpokenBackchannel(
-          seed,
-          args.mood,
-          tensionLevel,
-          recentSpokenCues,
-          args.listenerPersona,
-          args.segment,
-        )
-    : undefined;
-  const vocalFoley = audible && !spokenCue
+  // A fixed semantic bank can acknowledge, endorse, doubt, or interrupt in a
+  // way the authored persona never would. Signal therefore keeps ordinary
+  // deterministic listener beats language-free; explicit Power interruption
+  // plans remain separate and neutral vocal Foley can still add room life.
+  const vocalFoley = audible
     ? signalVocalFoley(seed, args.mood, tensionLevel, recentFoleys)
     : undefined;
   const minimumTargetProgress =
@@ -1531,15 +1398,9 @@ export function buildSignalListenerReactionPlanV1(args: {
   const plannedTargetProgress = Number(
     Math.max(targetProgress(seed), minimumTargetProgress).toFixed(3),
   );
-  const organicBeatKind: SignalOrganicBeatKind | null = cutIn
-    ? "cut_in_retreat"
-    : spokenCue
-      ? "backchannel"
-      : vocalFoley === "chuckles"
-        ? "laughter"
-        : vocalFoley
-          ? "vocal_foley"
-          : null;
+  const organicBeatKind: SignalOrganicBeatKind | null = vocalFoley
+    ? "vocal_foley"
+    : null;
   return {
     v: LISTENER_REACTION_PLAN_VERSION,
     name: "listenerReaction",
@@ -1553,11 +1414,7 @@ export function buildSignalListenerReactionPlanV1(args: {
       args.tensionLevel,
       recentVisualActions,
     ),
-    ...(spokenCue ? { spokenCue } : {}),
     ...(vocalFoley ? { vocalFoley } : {}),
-    ...(cutIn
-      ? { interjectionAttempt: true as const, floorOutcome: "hold" as const }
-      : {}),
     targetProgress: plannedTargetProgress,
     seed,
     cameraCutEligible:

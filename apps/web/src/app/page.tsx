@@ -16271,6 +16271,29 @@ function resolvedAutoPrimaryForComposer(
   });
 }
 
+function latestConversationAutoRoute(
+  messages: readonly Pick<
+    CoffeeConversationMessage,
+    "role" | "provider" | "model"
+  >[],
+): AutoFallbackModelRef | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== "assistant") continue;
+    const provider = message.provider;
+    const model = message.model?.trim() ?? "";
+    if (
+      (provider === "local" ||
+        provider === "openai" ||
+        provider === "anthropic") &&
+      model
+    ) {
+      return { provider, model };
+    }
+  }
+  return null;
+}
+
 function savedModelReasoningEffort(
   settings: UserSettings | null,
   provider: Provider,
@@ -142462,6 +142485,10 @@ function HomeContent(): React.JSX.Element {
       (coffeeTurnRhythmState === "botThinking" ||
         coffeeTurnRhythmState === "tableTyping") &&
       Boolean(coffeeActiveTurnJob?.speakerBotId ?? coffeePendingSpeakerBotId);
+    const coffeeLatestAutoRoute =
+      coffeeSessionResolvedChoice.modelChoice === AUTO_MODEL_CHOICE
+        ? latestConversationAutoRoute(coffeeConversation?.messages ?? [])
+        : null;
     const coffeeLiveRoutingChip =
       coffeeChromePolicy.liveSessionActive && settings
         ? buildLiveSessionRoutingChip({
@@ -142479,12 +142506,14 @@ function HomeContent(): React.JSX.Element {
               coffeeSessionResolvedChoice.modelChoice,
               coffeeSessionResolvedChoice.provider,
             ),
-            primaryForAuto: resolvedAutoPrimaryForComposer(
-              modelCatalog,
-              settings,
-              coffeeSessionResolvedChoice.provider,
-              coffeeSessionResolvedChoice.modelChoice,
-            ),
+            primaryForAuto:
+              coffeeLatestAutoRoute ??
+              resolvedAutoPrimaryForComposer(
+                modelCatalog,
+                settings,
+                coffeeSessionResolvedChoice.provider,
+                coffeeSessionResolvedChoice.modelChoice,
+              ),
             settings,
           })
         : null;
@@ -145834,17 +145863,23 @@ function HomeContent(): React.JSX.Element {
             void resolveSignalSessionMemoryReceipts(sessionId);
           }}
           signalMemoryReceiptDetail={renderSignalMemoryAcquisitionReceiptCard()}
-          resolveLockedRoutingChip={({ modelChoice, modelProvider }) =>
+          resolveLockedRoutingChip={({
+            modelChoice,
+            modelProvider,
+            activeAutoRoute,
+          }) =>
             buildLiveSessionRoutingChip({
               modelChoice,
               modelProvider,
               modelOptions: signalNavbarModelOptions,
-              primaryForAuto: resolvedAutoPrimaryForComposer(
-                modelCatalog,
-                settings,
-                modelProvider,
-                modelChoice,
-              ),
+              primaryForAuto:
+                activeAutoRoute ??
+                resolvedAutoPrimaryForComposer(
+                  modelCatalog,
+                  settings,
+                  modelProvider,
+                  modelChoice,
+                ),
               settings,
             })
           }

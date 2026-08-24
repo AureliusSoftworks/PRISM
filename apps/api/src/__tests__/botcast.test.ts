@@ -61,6 +61,7 @@ import {
   botcastGuestClaimsSilentHostSpoke,
   botcastHostClaimsSilentGuestAnswered,
   botcastHostClosingHasFormalThanks,
+  botcastRepairHostClosingFormalThanksV1,
   botcastLatestQuietHearingHeardV1,
   botcastClosingReopenUtterancesV1,
   botcastDeterministicHostClosingV1,
@@ -454,6 +455,24 @@ it("requires the final Signal beat to thank both guest and audience", () => {
       "Bigoted Benny",
     ),
     false,
+  );
+});
+
+it("repairs only safe missing-thanks closings while preserving their thematic beat", () => {
+  assert.equal(
+    botcastRepairHostClosingFormalThanksV1({
+      content:
+        "The cost of certainty is the evidence it teaches us to ignore. Ivo Stone, thank you for joining me.",
+      guestName: "Ivo Stone",
+    }),
+    "The cost of certainty is the evidence it teaches us to ignore. Ivo Stone, thank you for joining me. Thank you for watching.",
+  );
+  assert.equal(
+    botcastRepairHostClosingFormalThanksV1({
+      content: "Ivo Stone, should we keep going?",
+      guestName: "Ivo Stone",
+    }),
+    null,
   );
 });
 
@@ -1270,7 +1289,24 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.match(
         serverSource,
-        /route\("POST", "\/api\/botcast\/episode-image\/emoji"/u,
+        /requiresImageInput: true,[\s\S]{0,800}supportsImageInput/u,
+      );
+      assert.match(
+        serverSource,
+        /entry\.supportsImageInput === true/u,
+      );
+      assert.match(
+        serverSource,
+        /const runtimeAutoPriorities = args\.requiresImageInput[\s\S]{0,500}imageCapableCandidateKeys/u,
+      );
+      assert.match(
+        serverSource,
+        /route\("GET", "\/api\/botcast\/episodes\/:id\/image-proxy"/u,
+      );
+      assert.doesNotMatch(serverSource, /episode-image\/emoji/u);
+      assert.match(
+        serverSource,
+        /requiresImageInput: cue\?\.kind === "present_image"/u,
       );
       assert.match(serverSource, /linkBotcastEpisodeImageAsset/u);
       assert.match(serverSource, /cueKind === "present_image"/u);
@@ -1312,6 +1348,177 @@ describe("Botcast persistence and isolation", () => {
       assert.match(
         hostPrompt,
         /Never quote, paraphrase, mention, or expose this direction/u,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("stores one episode-owned replay proxy and cascades it on deletion", () => {
+    const db = fixture();
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Replay proxy storage",
+        preferredProvider: "local",
+        model: "llava",
+        responseMode: "local",
+      });
+      const queued = queueBotcastEpisodeImageContext(
+        db,
+        "user-1",
+        episode.id,
+        {
+          imageId: "signal-image-proxy",
+          kind: "picture",
+          name: "paper boat",
+          mimeType: "image/jpeg",
+          provider: "local",
+          model: "llava",
+          replayEmoji: "🖼️",
+          replayProxy: {
+            id: "proxy-1",
+            bytes: Buffer.from("webp-proxy"),
+            width: 128,
+            height: 96,
+          },
+        },
+      );
+      assert.equal(
+        botcastLatestImageContextV1(queued.events)?.replayProxyId,
+        "proxy-1",
+      );
+      const row = db
+        .prepare(
+          `SELECT user_id, image_id, content_type, width, height, image_bytes
+             FROM botcast_episode_image_proxies
+            WHERE episode_id = ?`,
+        )
+        .get(episode.id) as {
+        user_id: string;
+        image_id: string;
+        content_type: string;
+        width: number;
+        height: number;
+        image_bytes: Buffer;
+      };
+      assert.equal(row.user_id, "user-1");
+      assert.equal(row.image_id, "signal-image-proxy");
+      assert.equal(row.content_type, "image/webp");
+      assert.equal(row.width, 128);
+      assert.equal(row.height, 96);
+      assert.deepEqual(Buffer.from(row.image_bytes), Buffer.from("webp-proxy"));
+      assert.throws(
+        () =>
+          queueBotcastEpisodeImageContext(db, "user-1", episode.id, {
+            imageId: "signal-image-proxy",
+            kind: "picture",
+            name: "paper boat",
+            mimeType: "image/jpeg",
+            provider: "local",
+            model: "llava",
+            replayEmoji: "🖼️",
+            replayProxy: {
+              id: "proxy-duplicate",
+              bytes: Buffer.from("webp-proxy-duplicate"),
+              width: 64,
+              height: 48,
+            },
+          }),
+        /one image per episode/u,
+      );
+      assert.equal(
+        Number(
+          (
+            db
+              .prepare(
+                "SELECT COUNT(*) AS total FROM botcast_episode_image_proxies WHERE episode_id = ?",
+              )
+              .get(episode.id) as { total: number | bigint }
+          ).total,
+        ),
+        1,
+      );
+      assert.equal(deleteBotcastEpisode(db, "user-1", episode.id), true);
+      assert.equal(
+        Number(
+          (
+            db
+              .prepare(
+                "SELECT COUNT(*) AS total FROM botcast_episode_image_proxies",
+              )
+              .get() as { total: number | bigint }
+          ).total,
+        ),
+        0,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rolls back a proxy when the first image event cannot be recorded", () => {
+    const db = fixture();
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Atomic replay proxy creation",
+        preferredProvider: "local",
+        model: "llava",
+        responseMode: "local",
+      });
+      db.exec(`
+        CREATE TEMP TRIGGER fail_signal_image_event
+        BEFORE INSERT ON botcast_events
+        WHEN NEW.kind = 'image_context'
+        BEGIN
+          SELECT RAISE(ABORT, 'forced image event failure');
+        END;
+      `);
+      assert.throws(
+        () =>
+          queueBotcastEpisodeImageContext(db, "user-1", episode.id, {
+            imageId: "signal-image-atomic",
+            kind: "picture",
+            name: "paper boat",
+            mimeType: "image/jpeg",
+            provider: "local",
+            model: "llava",
+            replayEmoji: "🖼️",
+            replayProxy: {
+              id: "proxy-atomic",
+              bytes: Buffer.from("webp-proxy"),
+              width: 128,
+              height: 96,
+            },
+          }),
+        /forced image event failure/u,
+      );
+      assert.equal(
+        Number(
+          (
+            db
+              .prepare(
+                "SELECT COUNT(*) AS total FROM botcast_episode_image_proxies WHERE episode_id = ?",
+              )
+              .get(episode.id) as { total: number | bigint }
+          ).total,
+        ),
+        0,
+      );
+      assert.equal(
+        Number(
+          (
+            db
+              .prepare(
+                "SELECT COUNT(*) AS total FROM botcast_events WHERE episode_id = ? AND kind = 'image_context'",
+              )
+              .get(episode.id) as { total: number | bigint }
+          ).total,
+        ),
+        0,
       );
     } finally {
       db.close();
@@ -13181,15 +13388,15 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(show.logo.status, "fallback");
       assert.doesNotMatch(
         show.logo.prompt,
-        /Mara Vale|forensic cultural critic/iu,
+        /forensic cultural critic/iu,
       );
       assert.match(
         show.logo.prompt,
-        /wholly original professional logo mark/iu,
+        /wholly original premium editorial show identity/iu,
       );
       assert.match(
         show.logo.prompt,
-        /logo-system deliverable, not an illustration/iu,
+        /compact emblematic lockup.*not a generic app glyph/iu,
       );
       assert.match(
         show.logo.prompt,
@@ -13202,13 +13409,13 @@ describe("Botcast persistence and isolation", () => {
       assert.match(show.logo.prompt, /analytical precision, discovery/iu);
       assert.match(
         show.logo.prompt,
-        /visually independent from existing entertainment properties/iu,
+        /never reproduce an existing logo.*exact costume or character design one-for-one/iu,
       );
       assert.match(show.logo.prompt, /At 32 pixels.*crisp.*recognizable/iu);
       assert.match(show.logo.prompt, /full-frame opaque square image/iu);
       assert.match(show.logo.prompt, /exact flat magenta color key #FF00FF/iu);
       assert.match(show.logo.prompt, /Never use black as the background/iu);
-      assert.match(show.logo.prompt, /do not draw an app-icon tile/iu);
+      assert.match(show.logo.prompt, /not a generic app glyph/iu);
       assert.match(show.logo.prompt, /both near-black and near-white/iu);
       assert.match(show.logo.prompt, /Logo morphology/iu);
       assert.ok(show.logo.prompt.includes(show.logo.design.lineLanguage));
@@ -13217,21 +13424,24 @@ describe("Botcast persistence and isolation", () => {
       assert.ok(!show.logo.prompt.includes(show.logo.design.fusionMechanic));
       assert.ok(show.logo.prompt.includes(show.logo.design.silhouette));
       assert.ok(show.logo.prompt.includes(show.logo.design.negativeSpace));
-      assert.match(show.logo.prompt, /two to four bold flat shapes/iu);
-      assert.match(show.logo.prompt, /semi-abstract geometry is encouraged/iu);
-      assert.match(show.logo.prompt, /do not render a literal scene/iu);
-      assert.match(show.logo.prompt, /No gradients, texture, lighting/iu);
+      assert.match(show.logo.prompt, /premium editorial show identity/iu);
+      assert.match(show.logo.prompt, /Show-name context.*Mara Vale in the Margins/iu);
+      assert.match(show.logo.prompt, /Show-premise context/iu);
+      assert.match(show.logo.prompt, /clear recognition hierarchy/iu);
+      assert.match(show.logo.prompt, /host\/persona shorthand.*premise-specific visual anchor/iu);
+      assert.match(show.logo.prompt, /Visual density budget.*one dominant host or premise anchor/iu);
+      assert.match(show.logo.prompt, /restrained dimensional, gradient, shading, or texture treatment is allowed/iu);
       assert.match(
         show.logo.prompt,
         /Broadcast cues are optional/iu,
       );
-      assert.match(show.logo.prompt, /no detached radiating arcs/iu);
+      assert.match(show.logo.prompt, /detached radiating arcs/iu);
       assert.match(
         show.logo.design.personaMotif,
         /evidence card|brass caliper|specimen slides|magnifying glass|annotation bracket|pocket watch/iu,
       );
-      assert.match(show.logo.prompt, /standalone microphone, headphones, waveform/iu);
-      assert.match(show.logo.prompt, /never podcast clip art/iu);
+      assert.match(show.logo.prompt, /microphone, waveform, or signal mark may appear only when integrated/iu);
+      assert.match(show.logo.prompt, /never as generic clip art/iu);
       assert.match(show.logo.design.signature, /^signal-logo-v1:analytical:/u);
       assert.equal(show.logo.design.version, 1);
       assert.deepEqual(show.logo.retiredDesigns, []);
@@ -13326,7 +13536,7 @@ describe("Botcast persistence and isolation", () => {
     );
   });
 
-  it("keeps named-character lore out of image-provider logo prompts", () => {
+  it("uses only show-title context and synthesized shorthand for named-character logo prompts", () => {
     const db = fixture();
     try {
       db.prepare(
@@ -13348,23 +13558,27 @@ describe("Botcast persistence and isolation", () => {
 
       assert.doesNotMatch(
         show.logo.prompt,
-        /Darth|Vader|Sith|helmet|lightsaber|Galactic Empire/iu,
+        /Sith|helmet|lightsaber|Galactic Empire/iu,
       );
+      assert.match(show.logo.prompt, /Show-name context.*Darth Vader/iu);
       assert.match(show.logo.prompt, /disciplined gravity, restraint/iu);
       assert.match(
         show.logo.prompt,
         /disciplined authority and controlled pressure/iu,
       );
       assert.match(show.logo.prompt, /#d21f3c/u);
-      assert.match(show.logo.prompt, /wholly original professional logo mark/iu);
-      assert.match(show.logo.prompt, /not an illustration/iu);
+      assert.match(
+        show.logo.prompt,
+        /wholly original premium editorial show identity/iu,
+      );
+      assert.match(show.logo.prompt, /never reproduce an existing logo/iu);
 
       const refreshed = updateBotcastShow(db, "user-1", show.id, {
         regenerateLogo: true,
       });
       assert.doesNotMatch(
         refreshed.logo.prompt,
-        /Darth|Vader|Sith|helmet|lightsaber|Galactic Empire/iu,
+        /Sith|helmet|lightsaber|Galactic Empire/iu,
       );
       assert.equal(refreshed.logo.revision, 2);
       assert.notEqual(refreshed.logo.seed, show.logo.seed);
@@ -13400,9 +13614,10 @@ describe("Botcast persistence and isolation", () => {
       ).run(JSON.stringify(visuals), show.id, "user-1");
 
       const upgraded = getBotcastShow(db, "user-1", show.id);
-      assert.match(upgraded.logo.prompt, /professional logo mark/iu);
-      assert.match(upgraded.logo.prompt, /not an illustration/iu);
-      assert.match(upgraded.logo.prompt, /two to four bold flat shapes/iu);
+      assert.match(upgraded.logo.prompt, /premium editorial show identity/iu);
+      assert.match(upgraded.logo.prompt, /Show-name context/iu);
+      assert.match(upgraded.logo.prompt, /Show-premise context/iu);
+      assert.match(upgraded.logo.prompt, /clear recognition hierarchy/iu);
       assert.doesNotMatch(upgraded.logo.prompt, /Paint a cinematic scene/iu);
       assert.equal(
         upgraded.logo.design.signature,
@@ -14283,19 +14498,18 @@ describe("Botcast persistence and isolation", () => {
         /identifiable as.*without.*name.*logo/iu,
       );
       assert.equal(result.show.logo.revision, 2);
-      assert.doesNotMatch(
-        result.show.logo.prompt,
-        /The Vale Index|Mara Vale|forensic cultural critic/iu,
-      );
+      assert.match(result.show.logo.prompt, /Show-name context.*The Vale Index/iu);
+      assert.match(result.show.logo.prompt, /Show-premise context.*stories culture tells itself/iu);
+      assert.doesNotMatch(result.show.logo.prompt, /Mara Vale|forensic cultural critic/iu);
       assert.match(
         result.show.logo.prompt,
-        /wholly original professional logo mark/iu,
+        /wholly original premium editorial show identity/iu,
       );
       assert.match(
         result.show.logo.prompt,
         /Concept source/iu,
       );
-      assert.match(result.show.logo.prompt, /morphology control the final mark/iu);
+      assert.match(result.show.logo.prompt, /semantically loaded motifs.*fused as one memorable outer contour/iu);
       assert.ok(
         result.show.logo.prompt.includes(
           result.show.logo.design.personaMotif,
@@ -14336,10 +14550,10 @@ describe("Botcast persistence and isolation", () => {
         result.show.logo.prompt,
         /forensic cultural skepticism.*severe editorial standards.*two flat charcoal and violet shapes/iu,
       );
-      assert.match(result.show.logo.prompt, /one compact, freestanding symbol/iu);
+      assert.match(result.show.logo.prompt, /clear recognition hierarchy/iu);
       assert.match(
         result.show.logo.prompt,
-        /Do not render a literal scene/iu,
+        /Do not render a full scene/iu,
       );
       assert.match(result.show.logo.prompt, /At 32 pixels.*crisp.*recognizable/iu);
       assert.match(
@@ -14373,7 +14587,7 @@ describe("Botcast persistence and isolation", () => {
       assert.match(captures[0]?.[0]?.content ?? "", /logoThesis/iu);
       assert.match(
         captures[0]?.[0]?.content ?? "",
-        /one compact symbol.*silhouette, counterform, or negative-space relationship/iu,
+        /compact recognition hierarchy.*host\/persona shorthand.*premise-specific anchor/iu,
       );
       assert.match(
         captures[0]?.[0]?.content ?? "",
@@ -14916,7 +15130,7 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.doesNotMatch(
         result.show.logo.prompt,
-        /Mara Vale|microphone waveform|podcast badge/iu,
+        /Mara Vale's microphone waveform inside a circular podcast badge/iu,
       );
     } finally {
       db.close();
@@ -15313,7 +15527,7 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("regenerates only the clever show name without touching its brand assets", async () => {
+  it("regenerates only the clever show name without replacing installed brand assets", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
     const provider = recordingProvider(
@@ -15346,7 +15560,11 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(result.show.studioIdentity, branded.studioIdentity);
       assert.deepEqual(result.show.dayAtmosphere, branded.dayAtmosphere);
       assert.deepEqual(result.show.nightAtmosphere, branded.nightAtmosphere);
-      assert.deepEqual(result.show.logo, branded.logo);
+      const { prompt: brandedLogoPrompt, ...brandedLogoAsset } = branded.logo;
+      const { prompt: resultLogoPrompt, ...resultLogoAsset } = result.show.logo;
+      assert.deepEqual(resultLogoAsset, brandedLogoAsset);
+      assert.notEqual(resultLogoPrompt, brandedLogoPrompt);
+      assert.match(resultLogoPrompt, /Show-name context.*The Unsaid Index/iu);
       assert.match(
         captures[0]?.[0]?.content ?? "",
         /exactly one string: name/iu,
@@ -15506,29 +15724,37 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.match(
         captures[0]?.[0]?.content ?? "",
-        /actual compact logo mark/iu,
+        /compact emblematic lockup/iu,
       );
       assert.match(
         captures[0]?.[0]?.content ?? "",
-        /never add detached radiating arcs/iu,
+        /host\/persona shorthand.*premise-specific anchor/iu,
       );
       assert.match(
         captures[0]?.[0]?.content ?? "",
-        /abstract or semi-abstract geometry/iu,
+        /Broadcast cues may be integrated/iu,
+      );
+      assert.match(
+        captures[0]?.[0]?.content ?? "",
+        /one dominant anchor.*no full character pose.*enclosing disk/iu,
+      );
+      assert.match(
+        captures[0]?.[1]?.content ?? "",
+        /Show name: Mara Vale in the Margins/iu,
       );
     } finally {
       db.close();
     }
   });
 
-  it("accepts logo geometry and rejects illustrative or malformed Signal logo theses", async () => {
+  it("accepts concrete Signal emblem briefs and rejects abstract, clip-art, scene, or malformed theses", async () => {
     const db = fixture();
     try {
       const show = createBotcastShow(db, "user-1", {
         hostBotId: "host-1",
       });
       const validLogoThesis =
-        "Persona fingerprint: cool analytical distance and disciplined skepticism. Emblem: nested geometric planes merge into one asymmetrical silhouette with a sharp counterform. Art direction: two flat cyan shapes, one surgical notch, hard outer edges, and restrained visual tension.";
+        "Persona fingerprint: exacting cultural skepticism with theatrical patience and a collector's eye for contradictions. Emblem: a round-glasses host silhouette fuses an evidence tag and quiet microphone into one notched quill-shaped lockup, with the lens opening as a waveform counterform. Art direction: restrained violet enamel and charcoal ink, engraved highlights, deliberate shading, and severe editorial restraint.";
       const validProvider = recordingProvider(
         [JSON.stringify({ logoThesis: validLogoThesis })],
         [],
@@ -15543,6 +15769,7 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(validResult.show.logo.design.showThesis, validLogoThesis);
 
       const invalidTheses = [
+        "Persona fingerprint: cool analytical distance and disciplined skepticism. Emblem: nested geometric planes merge into one asymmetrical silhouette with a sharp counterform. Art direction: two flat cyan shapes, one surgical notch, hard outer edges, and restrained visual tension.",
         "Persona fingerprint: cool analytical distance and disciplined skepticism. Emblem: a miniature scene in a forensic room where two objects rest on a desk. Art direction: cinematic lighting, perspective, and editorial restraint.",
         "Persona fingerprint: cool analytical distance and disciplined skepticism. Emblem: a circular app-icon container holding a generic frequency symbol. Art direction: crisp cyan cuts, balanced asymmetry, and editorial restraint.",
         "Persona fingerprint: cool analytical distance and disciplined skepticism. Physical mark: a brass evidence tag catches one curling paper corner. Art direction: crisp cyan cuts, balanced asymmetry, and editorial restraint.",
@@ -15710,7 +15937,14 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(result.show.studioIdentity, branded.studioIdentity);
       assert.deepEqual(result.show.dayAtmosphere, branded.dayAtmosphere);
       assert.deepEqual(result.show.nightAtmosphere, branded.nightAtmosphere);
-      assert.deepEqual(result.show.logo, branded.logo);
+      const { prompt: brandedLogoPrompt, ...brandedLogoAsset } = branded.logo;
+      const { prompt: resultLogoPrompt, ...resultLogoAsset } = result.show.logo;
+      assert.deepEqual(resultLogoAsset, brandedLogoAsset);
+      assert.notEqual(resultLogoPrompt, brandedLogoPrompt);
+      assert.match(
+        resultLogoPrompt,
+        /Show-premise context.*stories public certainty tries to bury/iu,
+      );
       assert.deepEqual(result.show.dashboardBlurbs, freshBlurbs);
       assert.match(captures[0]?.[1]?.content ?? "", new RegExp(inspiration, "u"));
       assert.match(captures[0]?.[0]?.content ?? "", /source material/iu);
@@ -16148,12 +16382,16 @@ describe("Botcast persistence and isolation", () => {
       const fallback = getBotcastShow(db, "user-1", show.id).logo;
       assert.match(fallback.prompt, /podcast|broadcast|recording/iu);
       assert.match(fallback.prompt, /signal|microphone|waveform|dial|sound/iu);
-      assert.doesNotMatch(
+      assert.match(
         fallback.prompt,
-        /Mara Vale|The Mara Vale Frequency/iu,
+        /Show-name context.*Mara Vale in the Margins/iu,
       );
-      assert.match(fallback.prompt, /wholly original professional logo mark/iu);
-      assert.match(fallback.prompt, /not an illustration/iu);
+      assert.doesNotMatch(fallback.prompt, /The Mara Vale Frequency/iu);
+      assert.match(
+        fallback.prompt,
+        /wholly original premium editorial show identity/iu,
+      );
+      assert.match(fallback.prompt, /compact emblematic lockup/iu);
       assert.doesNotMatch(
         fallback.prompt,
         /\bPRISM\b|rainbow|refraction|spectrum ray|five colors/iu,
@@ -21642,6 +21880,85 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("preserves an ONLINE thematic close when every rejection is only missing formal thanks", async () => {
+    const db = fixture();
+    const rejectedClosing =
+      "Certainty becomes dangerous when it stops asking what the evidence can bear. Ivo Stone, thank you for joining me.";
+    const provider = recordingProvider(
+      [
+        "Welcome to Signal Test. I'm Mara Vale, joined by Ivo Stone to examine authority and evidence. Ivo, where should we begin?",
+        "Authority earns trust only when another person can test its evidence.",
+        "Before we close, what final thought would you leave with our listeners?",
+        "My final thought is that certainty should never outrun what evidence can bear.",
+        rejectedClosing,
+        rejectedClosing,
+        rejectedClosing,
+        rejectedClosing,
+      ],
+      [],
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", {
+        hostBotId: "host-1",
+        name: "Signal Test",
+      });
+      const created = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Authority and evidence",
+        preferredProvider: "openai",
+        modelOverride: "gpt-signal",
+        responseMode: "online",
+      });
+      await advanceBotcastEpisode(db, "user-1", created.id, {}, generation(provider));
+      await advanceBotcastEpisode(db, "user-1", created.id, {}, generation(provider));
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        { cue: { kind: "wrap_up" } },
+        generation(provider),
+      );
+      await advanceBotcastEpisode(db, "user-1", created.id, {}, generation(provider));
+      const closed = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+
+      assert.equal(
+        closed.message?.content,
+        `${rejectedClosing} Thank you for watching.`,
+      );
+      assert.equal(closed.episode.status, "completed");
+      const generationEvent = closed.episode.events.findLast(
+        (event) => event.kind === "provider_generation",
+      );
+      assert.equal(generationEvent?.payload.outcome, "rejected");
+      assert.ok(
+        (generationEvent?.payload.attempts as Array<Record<string, unknown>>)
+          .every((attempt) =>
+            String(attempt.clause).startsWith("host_closing_thanks_"),
+          ),
+      );
+      assert.doesNotMatch(JSON.stringify(generationEvent), /Certainty becomes dangerous/u);
+      const utterance = closed.episode.events.findLast(
+        (event) => event.kind === "utterance",
+      );
+      assert.equal(utterance?.payload.provider, "openai");
+      assert.equal(utterance?.payload.model, "gpt-signal");
+      assert.deepEqual(utterance?.payload.utteranceRepair, {
+        v: 1,
+        source: "provider_recovery",
+        reason: "formal_thanks_appended",
+        fallbackKind: "host_closing",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("retries a ceremonial local host closing in the same persona before it airs", async () => {
     const db = fixture();
     db.prepare(
@@ -24049,6 +24366,81 @@ describe("Botcast persistence and isolation", () => {
         "left",
         "interrupt follow-up must leave Auto on the host, not the empty guest chair",
       );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps a completed guest line when it finishes during the interruption handoff", async () => {
+    const db = fixture();
+    const guestLine =
+      "The final qualification lands just before the host interruption bridge.";
+    const provider = recordingProvider(
+      [
+        "A quick opening.",
+        guestLine,
+        "Let us use that completed point and turn directly to the producer's question.",
+      ],
+      [],
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const created = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "End-of-line interruption timing",
+      });
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      const guest = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      const guestMessageId = guest.message!.id;
+
+      const interrupted = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {
+          cue: { kind: "move_on" },
+          cueDelivery: "interrupt_guest",
+          guestInterruption: {
+            messageId: guestMessageId,
+            spokenContent: guestLine,
+            bridgeLine: show.hostInterruptionLines[0]!,
+          },
+        },
+        generation(provider),
+      );
+
+      assert.equal(
+        interrupted.episode.messages.find(
+          (message) => message.id === guestMessageId,
+        )?.content,
+        guestLine,
+      );
+      assert.equal(interrupted.message?.speakerRole, "host");
+      assert.equal(
+        interrupted.episode.messages.some(
+          (message) => message.content === show.hostInterruptionLines[0],
+        ),
+        false,
+      );
+      const producerCue = interrupted.episode.events.find(
+        (event) =>
+          event.kind === "producer_cue" &&
+          event.payload.interruptedMessageId === guestMessageId,
+      );
+      assert.ok(producerCue);
+      assert.equal(producerCue.payload.interruptedSpeakerCue, undefined);
     } finally {
       db.close();
     }

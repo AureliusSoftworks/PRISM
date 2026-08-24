@@ -110,6 +110,26 @@ describe("Signal public cadence speech", () => {
       botcastEpisodeImageSpokenReference(picture!),
       "this picture of wax candle",
     );
+    const genericPicture = botcastEpisodeImageDescriptorFromFileName(
+      "unknown-art-piece.jpg",
+      "image/jpeg",
+    );
+    assert.deepEqual(genericPicture, {
+      kind: "picture",
+      name: "unknown art piece",
+      mimeType: "image/jpeg",
+    });
+    assert.equal(
+      botcastEpisodeImageSpokenReference(genericPicture!),
+      "this picture",
+    );
+    assert.equal(
+      botcastEpisodeImageSpokenReference({
+        kind: "picture",
+        name: "Untitled portrait study",
+      }),
+      "this picture of Untitled portrait study",
+    );
     assert.equal(
       botcastEpisodeImageDescriptorFromFileName("wax-candle.jpeg", "image/jpeg"),
       null,
@@ -179,6 +199,7 @@ describe("Signal public cadence speech", () => {
 
     assert.equal(botcastLatestImageContextV1(events)?.phase, "dismissed");
     assert.equal(botcastLatestImageContextV1(events)?.replayEmoji, "🕯️");
+    assert.equal(botcastLatestImageContextV1(events)?.replayProxyId, null);
     assert.equal(
       botcastImageContextForMessageV1(events, "guest-view")?.imageId,
       "image-1",
@@ -188,6 +209,18 @@ describe("Signal public cadence speech", () => {
       "dismissed",
     );
     assert.equal(botcastImageContextForMessageV1(events, "other"), null);
+
+    const proxied = botcastLatestImageContextV1([
+      {
+        ...events[0],
+        payload: {
+          ...events[0]!.payload,
+          phase: "queued",
+          replayProxyId: "proxy-1",
+        },
+      },
+    ]);
+    assert.equal(proxied?.replayProxyId, "proxy-1");
   });
 
   it("selects the latest other-bot spoken Foley as Signal's Copycat source", () => {

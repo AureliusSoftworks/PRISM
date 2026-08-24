@@ -149,10 +149,14 @@ test("compact Coffee seats keep authored thinking content instead of falling bac
   );
 });
 
-test("Coffee supplies custom-eye identity when resolving the default blink", () => {
+test("Coffee supplies Full HD eye identity when resolving the default blink", () => {
   assert.match(
     rendererSource,
-    /const faceBlinkDisabled = coffeeSeatBlinkKeepsFaceStill\(\s*normalizedFaceBlinkBar,\s*\{ eyeCharacter: normalizedFaceEyeCharacter \},\s*\);/u,
+    /const blinkEyeCharacter =\s*normalizedFaceEyeCharacter \?\?\s*\(fullMotion \? Array\.from\(faceText\)\[0\] \?\? null : null\);/u,
+  );
+  assert.match(
+    rendererSource,
+    /const faceBlinkDisabled = coffeeSeatBlinkKeepsFaceStill\(\s*normalizedFaceBlinkBar,\s*\{ eyeCharacter: blinkEyeCharacter \},\s*\);/u,
   );
   assert.match(
     rendererSource,

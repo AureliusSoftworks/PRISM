@@ -27,6 +27,26 @@ export type SignalLiveSpeechPlaybackClock = {
 };
 
 /**
+ * Primary speech belongs to its audible message, not to speculative generation
+ * for the following turn. Explicit interruption/exit clears the active message;
+ * overlap and handoff channels remain tied to their operation ownership.
+ */
+export function signalLiveSpeechPlaybackIsOwned(args: {
+  messageId: string;
+  activeSpeechMessageId: string | null;
+  operationCurrent: boolean;
+  audibleHandoffMessageId: string | null;
+  voiceChannel: "primary" | "handoff";
+}): boolean {
+  if (args.activeSpeechMessageId !== args.messageId) return false;
+  return (
+    args.voiceChannel === "primary" ||
+    args.operationCurrent ||
+    args.audibleHandoffMessageId === args.messageId
+  );
+}
+
+/**
  * Keep the visible Signal mouth on the audible clock when an engine stops
  * publishing progress frames between playback start and end. The lifecycle's
  * latest elapsed value remains authoritative; wall time only fills the gap

@@ -39,6 +39,16 @@ describe("applyCoffeeSeatBlink", () => {
     }
   });
 
+  it("hides the stock Full HD eye when the renderer supplies its identity", () => {
+    assert.equal(
+      applyCoffeeSeatBlink(":|", "closed", {
+        eyeCharacter: ":",
+        blinkBar: " ",
+      }),
+      " |",
+    );
+  });
+
   it("uses the configured closed-eye glyph without an intermediate frame", () => {
     assert.equal(applyCoffeeSeatBlink(":]", "closed", { blinkBar: "¦" }), "¦]");
     assert.equal(applyCoffeeSeatBlink(":]", "closed", { blinkBar: "❘" }), "❘]");

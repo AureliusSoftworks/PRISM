@@ -814,6 +814,21 @@ describe("replay manifests", () => {
     );
     assert.deepEqual(
       manifest.direction
+        .filter((event) => event.kind === "speech")
+        .map((event) => [
+          event.sourceMessageId,
+          event.payload.speakerId,
+          event.atMs,
+          event.endMs,
+        ]),
+      [
+        ["message-1", "host-1", 1_000, 2_000],
+        ["message-2", "guest-1", 3_200, 4_000],
+      ],
+      "captured message and speaker identity must remain on the audio-master intervals",
+    );
+    assert.deepEqual(
+      manifest.direction
         .filter((event) => event.kind === "action")
         .map((event) => event.atMs),
       [1_500],

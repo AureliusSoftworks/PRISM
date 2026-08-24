@@ -18,6 +18,10 @@ import {
 /** Longest edge for inline chat / gallery tiles (decode cost vs clarity on hi-DPI). */
 export const GENERATED_IMAGE_THUMB_MAX_EDGE_PX = 512;
 
+/** Deliberately small, replay-owned Signal image proxy. */
+export const SIGNAL_REPLAY_IMAGE_PROXY_MAX_EDGE_PX = 128;
+export const SIGNAL_REPLAY_IMAGE_PROXY_QUALITY = 40;
+
 /**
  * Downscale arbitrary raster bytes (typically PNG) to a bounded WebP thumbnail.
  */
@@ -29,6 +33,36 @@ export async function encodeWebpThumbFromRasterBytes(inputBytes: Buffer): Promis
     })
     .webp({ quality: 82 })
     .toBuffer();
+}
+
+/**
+ * Encodes the durable, intentionally degraded image used by new Signal
+ * replays. The source is normalized PNG bytes, so WebP preserves transparency
+ * for physical items while dropping EXIF and other source metadata.
+ */
+export async function encodeSignalReplayImageProxyFromRasterBytes(
+  inputBytes: Buffer,
+): Promise<{ bytes: Buffer; width: number; height: number }> {
+  const encoded = await sharp(inputBytes)
+    .rotate()
+    .resize(
+      SIGNAL_REPLAY_IMAGE_PROXY_MAX_EDGE_PX,
+      SIGNAL_REPLAY_IMAGE_PROXY_MAX_EDGE_PX,
+      {
+        fit: "inside",
+        withoutEnlargement: true,
+      },
+    )
+    .webp({
+      quality: SIGNAL_REPLAY_IMAGE_PROXY_QUALITY,
+      alphaQuality: SIGNAL_REPLAY_IMAGE_PROXY_QUALITY,
+    })
+    .toBuffer({ resolveWithObject: true });
+  return {
+    bytes: encoded.data,
+    width: encoded.info.width,
+    height: encoded.info.height,
+  };
 }
 
 /**

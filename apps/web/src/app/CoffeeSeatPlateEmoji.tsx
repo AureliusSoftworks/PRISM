@@ -440,6 +440,9 @@ export function CoffeeSeatPlateEmoji({
     baseText,
     normalizedFaceEyeCharacter,
   );
+  const blinkEyeCharacter =
+    normalizedFaceEyeCharacter ??
+    (fullMotion ? Array.from(faceText)[0] ?? null : null);
   const baseTextGlyphs = Array.from(baseText);
   const renderedMouthGlyphForMotion =
     renderedFaceMouthCharacter ??
@@ -454,7 +457,7 @@ export function CoffeeSeatPlateEmoji({
     null;
   const faceBlinkDisabled = coffeeSeatBlinkKeepsFaceStill(
     normalizedFaceBlinkBar,
-    { eyeCharacter: normalizedFaceEyeCharacter },
+    { eyeCharacter: blinkEyeCharacter },
   );
   const talkingPausesBlink = effectiveTalking && !blinkWhileTalking;
   const blinkKey = `${blinkEnabled ? "enabled" : "disabled"}:${talkingPausesBlink ? "talking" : "idle"}:${faceMode}:${normalizedFaceBlinkBar}:${faceText}:${scheduleKey}`;
@@ -687,7 +690,7 @@ export function CoffeeSeatPlateEmoji({
     resolvedGazeYPx,
   ]);
   const displayText = applyCoffeeSeatBlink(faceText, displayBlinkPhase, {
-    eyeCharacter: normalizedFaceEyeCharacter,
+    eyeCharacter: blinkEyeCharacter,
     blinkBar: normalizedFaceBlinkBar,
   });
   const glyphParts = Array.from(displayText);

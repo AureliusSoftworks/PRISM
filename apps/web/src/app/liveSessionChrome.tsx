@@ -30,13 +30,21 @@ export function LiveSessionModelChip(props: {
 }): JSX.Element {
   const effortKey = props.effortKey ?? "auto";
   const summary = `${props.modelLabel} · ${props.effortLabel}`;
+  const title = props.automatic
+    ? `Auto route currently: ${summary}${props.turbo ? ", Turbo" : ""}. This may change on a later generation.`
+    : `Locked for this session: ${summary}${props.turbo ? ", Turbo" : ""}`;
   return (
     <p
       className={`${styles.modelChip}${props.className ? ` ${props.className}` : ""}`}
       data-live-session-model-chip="true"
       data-model-selection={props.automatic ? "auto" : "fixed"}
-      title={`Locked for this session: ${summary}${props.turbo ? ", Turbo" : ""}`}
-      aria-label={`Locked model ${props.modelLabel}, effort ${props.effortLabel}${props.turbo ? ", Turbo" : ""}`}
+      title={title}
+      aria-label={
+        props.automatic
+          ? `Auto currently using ${props.modelLabel}, effort ${props.effortLabel}${props.turbo ? ", Turbo" : ""}`
+          : `Locked model ${props.modelLabel}, effort ${props.effortLabel}${props.turbo ? ", Turbo" : ""}`
+      }
+      aria-live={props.automatic ? "polite" : undefined}
     >
       <span className={styles.modelChipLabel}>{props.modelLabel}</span>
       <span className={styles.modelChipSep} aria-hidden="true">

@@ -1255,6 +1255,7 @@ import {
   writeGeneratedImageBytes,
 } from "./image-storage.ts";
 import {
+  encodeSignalReplayImageProxyFromRasterBytes,
   readOrCreateThumbBytes,
   tryGenerateThumbAfterPngWrite,
 } from "./image-thumb.ts";
@@ -6623,6 +6624,8 @@ async function contextualTextRuntimeForUser<
   requestedTurbo?: unknown;
   frozenCandidateAllowlist?: unknown;
   frozenFallbackChain?: unknown;
+  /** Restrict Auto (or validate a fixed choice) to models that can read images. */
+  requiresImageInput?: boolean;
   /** Refract treats stale saved choices as Auto instead of routing them raw. */
   fallbackWhenExplicitModelIsUnavailable?: boolean;
   routingContext: AutoRoutingContextV1;
@@ -6685,6 +6688,17 @@ async function contextualTextRuntimeForUser<
             ),
           ),
         };
+  const capabilityRoutingCatalog = args.requiresImageInput
+    ? {
+        ...routingCatalog,
+        local: routingCatalog.local.filter(
+          (entry) => entry.supportsImageInput === true,
+        ),
+        online: routingCatalog.online.filter(
+          (entry) => entry.supportsImageInput === true,
+        ),
+      }
+    : routingCatalog;
   const hiddenModelIds = parseHiddenBotModelIds(args.user.hidden_bot_model_ids);
   const hiddenModels = new Set(hiddenModelIds);
   const requestedExplicitModelOverride = readCoffeeSessionSpeakerModel(
@@ -6694,23 +6708,53 @@ async function contextualTextRuntimeForUser<
     args.fallbackWhenExplicitModelIsUnavailable &&
     requestedExplicitModelOverride &&
     !(responseMode === "local"
-      ? routingCatalog.local
-      : routingCatalog.online
+      ? capabilityRoutingCatalog.local
+      : capabilityRoutingCatalog.online
     ).some((entry) => entry.id === requestedExplicitModelOverride)
       ? null
       : requestedExplicitModelOverride;
+  if (
+    args.requiresImageInput &&
+    requestedExplicitModelOverride &&
+    explicitModelOverride
+  ) {
+    const selectedModelSupportsImageInput = (
+      responseMode === "local"
+        ? capabilityRoutingCatalog.local
+        : capabilityRoutingCatalog.online
+    ).some((entry) => entry.id === explicitModelOverride);
+    if (!selectedModelSupportsImageInput) {
+      throw new HttpError(
+        409,
+        "The selected Signal model does not support image input.",
+      );
+    }
+  }
   const modelSelectionKind =
     explicitModelOverride === null ? ("auto" as const) : ("fixed" as const);
   const autoTurboEnabled =
     responseMode === "online" &&
     explicitModelOverride === null &&
+    !args.requiresImageInput &&
     resolveUserAutoTurboMode(db, args.userId);
+  if (
+    args.requiresImageInput &&
+    (responseMode === "local"
+      ? capabilityRoutingCatalog.local
+      : capabilityRoutingCatalog.online
+    ).every((entry) => hiddenModels.has(entry.id))
+  ) {
+    throw new HttpError(
+      409,
+      "No image-capable model is available in Signal's current model pool.",
+    );
+  }
   const resolved = resolveAutoModel({
     provider: primaryProvider,
     lane: responseMode,
     explicitModelOverride,
     hiddenModelIds,
-    catalog: routingCatalog,
+    catalog: capabilityRoutingCatalog,
     onlineAutoProviderBias: clampOnlineAutoProviderBias(
       args.user.online_auto_provider_bias,
     ),
@@ -6760,7 +6804,9 @@ async function contextualTextRuntimeForUser<
         storedReasoningEffort
   ) as ContextualResolvedReasoningEffort<TRequested>;
   const candidateAllowlist = (
-    responseMode === "local" ? routingCatalog.local : routingCatalog.online
+    responseMode === "local"
+      ? capabilityRoutingCatalog.local
+      : capabilityRoutingCatalog.online
   )
     .filter(
       (entry) =>
@@ -6801,6 +6847,18 @@ async function contextualTextRuntimeForUser<
           parseStoredAutoFallbackChain(args.user.auto_fallback_chain),
           autoTurboEnabled,
         )?.fallbacks ?? []);
+  const imageCapableCandidateKeys = new Set(
+    candidateAllowlist.map(
+      (entry) => `${entry.provider}:${entry.model.toLowerCase()}`,
+    ),
+  );
+  const runtimeAutoPriorities = args.requiresImageInput
+    ? configuredAutoPriorities.filter((entry) =>
+        imageCapableCandidateKeys.has(
+          `${entry.provider}:${entry.model.toLowerCase()}`,
+        ),
+      )
+    : configuredAutoPriorities;
   const runtimeAutoRoutingChain: AutoFallbackChainV1 | null =
     modelSelectionKind === "auto"
       ? {
@@ -6808,9 +6866,9 @@ async function contextualTextRuntimeForUser<
           // Settings entries are ordering hints. Every other eligible model is
           // appended by the shared resolver, then ONLINE receives one explicit
           // bundled-local recovery attempt.
-          fallbacks: configuredAutoPriorities,
+          fallbacks: runtimeAutoPriorities,
           eligibleCandidates: candidateAllowlist,
-          ...(responseMode === "online"
+          ...(responseMode === "online" && !args.requiresImageInput
             ? {
                 finalLocalRecovery: {
                   provider: "local" as const,
@@ -6848,6 +6906,7 @@ async function contextualSignalRuntimeForEpisode(args: {
   userId: string;
   user: UserDbRow;
   episode: ReturnType<typeof getBotcastEpisode>;
+  requiresImageInput?: boolean;
 }) {
   const snapshot = botcastRoutingSnapshot(args.episode);
   const autoSelected = snapshot?.modelSelectionKind === "auto";
@@ -6864,6 +6923,7 @@ async function contextualSignalRuntimeForEpisode(args: {
     // Legacy sessions had no frozen fallback provenance; keep them to their
     // recorded primary instead of applying today's account configuration.
     frozenFallbackChain: snapshot?.fallbackChain ?? [],
+    requiresImageInput: args.requiresImageInput,
     routingContext: {
       surface: "signal",
       inputText: [
@@ -6896,6 +6956,7 @@ async function normalizeSignalEpisodeImageForTurn(value: unknown): Promise<{
     ReturnType<typeof botcastEpisodeImageDescriptorFromFileName>
   >;
   input: { mimeType: "image/png"; data: string };
+  rasterBytes: Buffer;
   presentationReason: string | null;
   replayEmoji: string;
 }> {
@@ -6957,70 +7018,8 @@ async function normalizeSignalEpisodeImageForTurn(value: unknown): Promise<{
       mimeType: "image/png",
       data: normalized.pngBytes.toString("base64"),
     },
+    rasterBytes: normalized.pngBytes,
   };
-}
-
-const SIGNAL_EPISODE_IMAGE_EMOJI_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    emoji: { type: "string", minLength: 1, maxLength: 24 },
-  },
-  required: ["emoji"],
-} as const;
-
-async function inferSignalEpisodeImageReplayEmoji(args: {
-  provider: LlmProvider;
-  model: string;
-  descriptor: NonNullable<
-    ReturnType<typeof botcastEpisodeImageDescriptorFromFileName>
-  >;
-  input: ProviderImageInput;
-  fallbackEmoji: string;
-  signal?: AbortSignal;
-}): Promise<string> {
-  const raw = await args.provider.generateResponse(
-    [
-      {
-        role: "system",
-        content: [
-          "Choose exactly one Unicode emoji that best depicts the central visible subject in the attached image.",
-          "Inspect the pixels; use the supplied name only as context.",
-          "Prefer a concrete object emoji over a mood, symbol, or category label.",
-          "Return JSON only: {\"emoji\":\"…\"}.",
-        ].join(" "),
-      },
-      {
-        role: "user",
-        content: `Signal will replay this as a ${args.descriptor.kind}. The producer currently calls it ${JSON.stringify(args.descriptor.name)}. Choose its single best visual emoji.`,
-        images: [args.input],
-      },
-    ],
-    {
-      model: args.model,
-      temperature: 0,
-      maxTokens: 48,
-      usagePurpose: "botcast_turn",
-      jsonSchema: SIGNAL_EPISODE_IMAGE_EMOJI_SCHEMA,
-      jsonSchemaName: "signal_episode_image_emoji_v1",
-      allowFinalLocalFallback: false,
-      think: false,
-      ...(args.signal ? { signal: args.signal } : {}),
-    },
-  );
-  let candidate: unknown = null;
-  try {
-    const parsed = JSON.parse(extractJsonObjectPayload(raw)) as {
-      emoji?: unknown;
-    };
-    candidate = parsed.emoji;
-  } catch {
-    candidate = raw.trim();
-  }
-  return normalizeBotcastEpisodeImageReplayEmoji(
-    candidate,
-    args.fallbackEmoji,
-  );
 }
 
 function readCoffeeTeamCreateInput(value: unknown):
@@ -21750,97 +21749,55 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
       const episode = getBotcastEpisode(db, userId, ctx.params.id);
-      const runtime = await contextualSignalRuntimeForEpisode({
+      const activeRuntime = await contextualSignalRuntimeForEpisode({
         userId,
         user,
         episode,
       });
-      const supportsImageInput = await providerModelSupportsImageInput(
-        runtime.provider,
-        runtime.model,
-        { secondaryOllamaHost: user.secondary_ollama_host },
-      );
+      let runtime = activeRuntime;
+      let supportsImageInput = false;
+      try {
+        runtime = await contextualSignalRuntimeForEpisode({
+          userId,
+          user,
+          episode,
+          requiresImageInput: true,
+        });
+        supportsImageInput = await providerModelSupportsImageInput(
+          runtime.provider,
+          runtime.model,
+          { secondaryOllamaHost: user.secondary_ollama_host },
+        );
+      } catch (error) {
+        if (!(error instanceof HttpError) || error.statusCode !== 409) {
+          throw error;
+        }
+      }
       json(ctx.res, 200, {
         provider: runtime.provider,
         model: runtime.model,
+        modelSelectionKind: runtime.modelSelectionKind,
         supportsImageInput,
       });
     }),
-    route("POST", "/api/botcast/episode-image/emoji", async (ctx) => {
+    route("GET", "/api/botcast/episodes/:id/image-proxy", async (ctx) => {
       const userId = requireAuth(ctx);
-      const user = getUserRow(userId);
-      const body = ctx.body as Record<string, unknown>;
-      const image = await normalizeSignalEpisodeImageForTurn(body);
-      const episodeId =
-        typeof body.episodeId === "string"
-          ? body.episodeId.trim().slice(0, 160)
-          : "";
-      const runtime = episodeId
-        ? await contextualSignalRuntimeForEpisode({
-            userId,
-            user,
-            episode: getBotcastEpisode(db, userId, episodeId),
-          })
-        : await contextualTextRuntimeForUser({
-            userId,
-            user,
-            requestedProvider: body.preferredProvider,
-            requestedResponseMode: body.responseMode,
-            modelOverride: body.modelOverride,
-            routingContext: {
-              surface: "signal",
-              inputText: image.descriptor.name,
-              outputTokens: 48,
-              highStakes: false,
-            },
-          });
-      const supportsImageInput = await providerModelSupportsImageInput(
-        runtime.provider,
-        runtime.model,
-        { secondaryOllamaHost: user.secondary_ollama_host },
-      );
-      if (!supportsImageInput) {
-        throw new HttpError(
-          409,
-          "The selected Signal model does not support image input.",
-        );
+      const row = db
+        .prepare(
+          `SELECT content_type, image_bytes
+             FROM botcast_episode_image_proxies
+            WHERE episode_id = ? AND user_id = ?`,
+        )
+        .get(ctx.params.id, userId) as
+        | { content_type: string; image_bytes: Uint8Array }
+        | undefined;
+      if (!row || !(row.image_bytes instanceof Uint8Array)) {
+        throw new HttpError(404, "Signal replay image proxy not found.");
       }
-      const fallbackEmoji = normalizeBotcastEpisodeImageReplayEmoji(
-        body.fallbackEmoji,
-        botcastEpisodeImageFallbackEmoji(image.descriptor.kind),
-      );
-      let replayEmoji = fallbackEmoji;
-      try {
-        replayEmoji = await runWithUsageSession(
-          {
-            db,
-            userId,
-            privacyScope: "normal",
-            mode: "signal",
-            surface: "signal",
-          },
-          () =>
-            inferSignalEpisodeImageReplayEmoji({
-              provider: providerFactoryOverride(
-                runtime.provider,
-                runtime.openAiApiKey,
-                user.secondary_ollama_host,
-                runtime.anthropicApiKey,
-              ),
-              model: runtime.model,
-              descriptor: image.descriptor,
-              input: image.input,
-              fallbackEmoji,
-            }),
-        );
-      } catch {
-        // Attachment still works when optional contextual emoji inference fails.
-      }
-      json(ctx.res, 200, {
-        ok: true,
-        descriptor: image.descriptor,
-        replayEmoji,
-      });
+      ctx.res.statusCode = 200;
+      ctx.res.setHeader("content-type", row.content_type);
+      ctx.res.setHeader("cache-control", "private, max-age=3600");
+      ctx.res.end(Buffer.from(row.image_bytes));
     }),
     route("POST", "/api/botcast/episodes/:id/advance", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -22009,6 +21966,7 @@ function buildRoutes(): RouteDefinition[] {
         userId,
         user,
         episode: frozenEpisode,
+        requiresImageInput: cue?.kind === "present_image",
       });
       const existingImageContext = botcastLatestImageContextV1(
         frozenEpisode.events,
@@ -22047,6 +22005,19 @@ function buildRoutes(): RouteDefinition[] {
           );
         }
         if (!retryingSameQueuedImage) {
+          let replayProxy: Awaited<
+            ReturnType<typeof encodeSignalReplayImageProxyFromRasterBytes>
+          >;
+          try {
+            replayProxy = await encodeSignalReplayImageProxyFromRasterBytes(
+              signalEpisodeImage.rasterBytes,
+            );
+          } catch {
+            throw new HttpError(
+              400,
+              "Signal could not prepare the low-resolution replay image.",
+            );
+          }
           frozenEpisode = queueBotcastEpisodeImageContext(
             db,
             userId,
@@ -22056,7 +22027,13 @@ function buildRoutes(): RouteDefinition[] {
               ...signalEpisodeImage.descriptor,
               provider: runtime.provider,
               model: runtime.model,
-              replayEmoji: signalEpisodeImage.replayEmoji,
+              replayEmoji: botcastEpisodeImageFallbackEmoji(
+                signalEpisodeImage.descriptor.kind,
+              ),
+              replayProxy: {
+                id: randomId(12),
+                ...replayProxy,
+              },
             },
           );
         }

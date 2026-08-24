@@ -18,6 +18,7 @@ import {
   signalLiveActiveMessage,
   signalLivePrimaryAvatarSpeech,
   signalLiveSpeechIsActiveAtElapsedMs,
+  signalLiveSpeechPlaybackIsOwned,
   signalLiveSpeechProjectedElapsedMs,
   type SignalLiveSpeechState,
 } from "./signalLiveAvatarSpeech.ts";
@@ -116,6 +117,41 @@ function chunkedLiveSpeech(
 }
 
 describe("Signal live avatar speech", () => {
+  it("keeps ordinary primary speech owned when only the next turn becomes ready", () => {
+    assert.equal(
+      signalLiveSpeechPlaybackIsOwned({
+        messageId: "current-line",
+        activeSpeechMessageId: "current-line",
+        operationCurrent: false,
+        audibleHandoffMessageId: null,
+        voiceChannel: "primary",
+      }),
+      true,
+    );
+    assert.equal(
+      signalLiveSpeechPlaybackIsOwned({
+        messageId: "current-line",
+        activeSpeechMessageId: null,
+        operationCurrent: false,
+        audibleHandoffMessageId: null,
+        voiceChannel: "primary",
+      }),
+      false,
+      "an explicit stop clears audible ownership",
+    );
+    assert.equal(
+      signalLiveSpeechPlaybackIsOwned({
+        messageId: "incoming-handoff",
+        activeSpeechMessageId: "incoming-handoff",
+        operationCurrent: false,
+        audibleHandoffMessageId: null,
+        voiceChannel: "handoff",
+      }),
+      false,
+      "handoff speech still requires live operation or explicit handoff ownership",
+    );
+  });
+
   it("keeps the exact lifecycle message when the committed episode snapshot lags", () => {
     const prior = message("prior", "The previous line.", "guest");
     const active = message(

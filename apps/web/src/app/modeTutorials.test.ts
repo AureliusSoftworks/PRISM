@@ -473,15 +473,16 @@ describe("mode tutorials", () => {
     assert.match(liveStep.body, /clears any unseen Signal alert/u);
     assert.match(liveStep.body, /exactly one \.png or \.jpg/u);
     assert.match(liveStep.body, /raw file remains ephemeral/u);
+    assert.match(liveStep.body, /tiny, intentionally soft archival proxy for replay/u);
+    assert.match(liveStep.body, /older emoji-only replays retain their recorded fallback/u);
     assert.match(liveStep.body, /fully opaque PNG is treated as a picture/u);
     assert.match(liveStep.body, /light or dark Polaroid frame/u);
     assert.match(liveStep.body, /wide camera places either one at the lower center/u);
     assert.match(liveStep.body, /left and right cameras keep it on their matching side/u);
     assert.match(liveStep.body, /only a genuinely transparent PNG item offers an unchecked Keep in Items option/u);
     assert.match(liveStep.body, /links it to the bot guest it was presented to/u);
-    assert.match(liveStep.body, /Pictures are never retained/u);
-    assert.match(liveStep.body, /unsaved or later-deleted item falls back/u);
-    assert.match(liveStep.body, /emoji inside the same Polaroid frame/u);
+    assert.match(liveStep.body, /New replays use the small archival proxy/u);
+    assert.match(liveStep.body, /original item is kept/u);
     assert.match(dashboardStep.body, /ordinary authored face and persona glyph/u);
     assert.match(dashboardStep.body, /no Power or status badge attached/u);
     assert.match(
@@ -2179,7 +2180,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /Hard LOCAL mode keeps the passive provenance status/u);
   });
 
-  it("teaches persona comments, intentional reaction cuts, and the formal Signal close", () => {
+  it("teaches neutral listener beats, explicit reaction cuts, and the formal Signal close", () => {
     const camera =
       MODE_TUTORIALS.botcast.steps.find((step) => step.heading === "Direct the live cut")
         ?.body ?? "";
@@ -2197,29 +2198,29 @@ describe("mode tutorials", () => {
     );
     assert.match(
       camera,
-      /follow that listener’s own era and temperament rather than a shared shock phrase/u,
+      /Ordinary listener beats stay language-free in the room mix/u,
     );
     assert.match(
       controlRoom,
-      /brief contextual comment in that character’s own voice/u,
+      /low-key nod, expression, or neutral nonverbal Foley/u,
     );
     assert.match(
       controlRoom,
-      /synthesize them during the opening wait/u,
+      /Semantic cut-ins belong only to an explicit Power or Producer interruption/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps.find(
         (step) => step.heading === "Give the studio an atmosphere",
       )?.body ?? "",
-      /never synthesizes a new ident or room loop when an episode begins[\s\S]*listener murmurs can still warm/u,
+      /never synthesizes a new ident or room loop when an episode begins[\s\S]*cached neutral room Foley[\s\S]*never warm new speech/u,
     );
     assert.match(
       controlRoom,
-      /Ordinary spoken listener comments sit at half the primary voice level, never take transcript ownership or interrupt the primary turn/u,
+      /Ordinary deterministic listener beats stay language-free, never take transcript ownership or interrupt the primary turn/u,
     );
     assert.match(
       controlRoom,
-      /quick false start.*Yeah, but—.*No, please—.*Okay, okay, I was—.*actually becomes audible briefly lowers the primary voice before restoring it/u,
+      /Semantic cut-ins belong only to an explicit Power or Producer interruption; only a cut-in that actually becomes audible briefly lowers the primary voice before restoring it/u,
     );
     assert.match(
       controlRoom,
@@ -2979,17 +2980,17 @@ describe("mode tutorials", () => {
     );
     assert.match(
       signalControlRoomStep.body,
-      /brief contextual comment in that character’s own voice/u,
+      /low-key nod, expression, or neutral nonverbal Foley/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps.find(
         (step) => step.heading === "Produce from the control room",
       )?.body ?? "",
-      /synthesize them during the opening wait/u,
+      /Semantic cut-ins belong only to an explicit Power or Producer interruption/u,
     );
     assert.match(
       signalControlRoomStep.body,
-      /Ordinary spoken listener comments.*never take transcript ownership or interrupt the primary turn/u,
+      /Ordinary deterministic listener beats stay language-free.*never take transcript ownership or interrupt the primary turn/u,
     );
     assert.match(
       signalLiveCutStep.body,
@@ -3003,7 +3004,7 @@ describe("mode tutorials", () => {
       MODE_TUTORIALS.botcast.steps.find(
         (step) => step.heading === "Direct the live cut",
       )?.body ?? "",
-      /follow that listener’s own era and temperament rather than a shared shock phrase/u,
+      /Ordinary listener beats stay language-free in the room mix/u,
     );
     assert.match(
       signalControlRoomStep.body,
@@ -3409,7 +3410,9 @@ describe("mode tutorials", () => {
 
   it("teaches setup-time Signal images while keeping first-run guidance generic", () => {
     const booking = signalPowersTutorialBody();
+    assert.match(booking, /Auto’s current model pool contains a vision-capable model/u);
     assert.match(booking, /fixed vision-capable model/u);
+    assert.match(booking, /routes an Auto image turn through that capable pool/u);
     assert.match(booking, /transparent PNGs as physical items/u);
     assert.match(booking, /opaque PNGs or JPGs as pictures/u);
     assert.match(booking, /editable spoken Name from the filename/u);

@@ -922,11 +922,16 @@ export function reduceReplaySceneV2(
       state.segment = boundedText(event.payload.segment, 120) || null;
       return state;
     case "thinking":
-      if (active && (event.payload.camera === null || typeof event.payload.camera === "string")) {
+      if (
+        active &&
+        event.payload.timelineCompacted !== true &&
+        (event.payload.camera === null || typeof event.payload.camera === "string")
+      ) {
         state.camera = event.payload.camera;
       }
       if (
         active &&
+        event.payload.timelineCompacted !== true &&
         (event.payload.segment === null ||
           typeof event.payload.segment === "string")
       ) {

@@ -1532,7 +1532,7 @@ export function botcastEpisodeImageFallbackEmoji(
     : BOTCAST_EPISODE_IMAGE_PICTURE_FALLBACK_EMOJI;
 }
 
-/** One replay-safe emoji grapheme; image pixels remain optional and ephemeral. */
+/** One replay-safe emoji grapheme retained for legacy image replay records. */
 export function normalizeBotcastEpisodeImageReplayEmoji(
   value: unknown,
   fallback = BOTCAST_EPISODE_IMAGE_ITEM_FALLBACK_EMOJI,
@@ -1618,9 +1618,18 @@ export function botcastEpisodeImageDescriptorFromFileName(
 export function botcastEpisodeImageSpokenReference(
   image: Pick<BotcastEpisodeImageDescriptor, "kind" | "name">,
 ): string {
+  const normalizedName = normalizeBotcastEpisodeImageName(image.name);
+  const genericName =
+    !normalizedName ||
+    /^(?:(?:an?\s+|the\s+)?(?:unknown|untitled|generic|unidentified)(?:\s+(?:art(?:work)?|art\s+piece|image|item|object|photo|photograph|picture|subject))?|(?:an?\s+|the\s+)?(?:art(?:work)?|art\s+piece|image|item|object|photo|photograph|picture|screenshot|subject)|(?:img|dsc|image|photo|picture)[\s_-]*\d+)$/iu.test(
+      normalizedName,
+    );
+  if (genericName) {
+    return image.kind === "item" ? "this item" : "this picture";
+  }
   return image.kind === "item"
-    ? `this ${image.name}`
-    : `this picture of ${image.name}`;
+    ? `this ${normalizedName}`
+    : `this picture of ${normalizedName}`;
 }
 
 /** Public, replay-stable metadata for one producer-supplied episode image. */
@@ -1632,9 +1641,11 @@ export interface BotcastImageContextV1 {
   mimeType: "image/png" | "image/jpeg";
   provider: BotcastEpisodeProvider;
   model: string;
-  /** Contextual, pixel-free replay stand-in chosen automatically on upload. */
+  /** Legacy contextual replay stand-in; new records prefer replayProxyId. */
   replayEmoji: string;
-  /** Optional retained library image; missing/deleted assets fall back to replayEmoji. */
+  /** Episode-owned low-resolution replay proxy; never contains original pixels. */
+  replayProxyId?: string | null;
+  /** Optional retained library image used by legacy replays and live fallback. */
   savedAssetId: string | null;
   phase: BotcastImageContextPhase;
   hostIntroductionMessageId: string | null;
@@ -1673,6 +1684,7 @@ export function normalizeBotcastImageContextV1(
       ? candidate.trim().slice(0, 160)
       : null;
   const savedAssetId = messageId(row.savedAssetId);
+  const replayProxyId = messageId(row.replayProxyId);
   return {
     v: 1,
     imageId: row.imageId.trim().slice(0, 160),
@@ -1685,6 +1697,7 @@ export function normalizeBotcastImageContextV1(
       row.replayEmoji,
       botcastEpisodeImageFallbackEmoji(row.kind),
     ),
+    replayProxyId,
     savedAssetId,
     phase,
     hostIntroductionMessageId: messageId(row.hostIntroductionMessageId),

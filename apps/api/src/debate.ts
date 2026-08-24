@@ -3508,7 +3508,7 @@ function projectLegacyMysteryBotSpeechStateV1(
 export function upgradeLegacyMysteryBotSpeechV1(
   session: DebateSessionV1,
 ): DebateSessionV1 {
-  if (session.formatState.format === "whodunnit") {
+  if (session.formatState.format === "whodunnit" && session.formatState.version === 1) {
     return {
       ...session,
       formatState: projectLegacyMysteryBotSpeechStateV1(

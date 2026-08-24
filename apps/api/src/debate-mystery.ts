@@ -758,7 +758,9 @@ function setCompileStage(
   session: DebateSessionV1,
   stage: DebateWhodunnitFormatStateV1["compileStage"],
 ): DebateSessionV1 {
-  const state = session.formatState.format === "whodunnit" ? session.formatState : null;
+  const state = session.formatState.format === "whodunnit" && session.formatState.version === 1
+    ? session.formatState
+    : null;
   if (!state) return session;
   return persistMysterySession(db, userId, {
     ...session,
@@ -1110,7 +1112,7 @@ export async function createDebateMysterySession(
     status: "live",
     stepKey: "mystery_casting",
     error: null,
-    formatState: session.formatState.format === "whodunnit" ? {
+    formatState: session.formatState.format === "whodunnit" && session.formatState.version === 1 ? {
       ...session.formatState,
       compileStage: "casting",
       playPhase: "compiling",
@@ -1197,7 +1199,9 @@ export async function createDebateMysterySession(
       status: "failed" as const,
       stepKey: "mystery_failed",
       error: error instanceof Error ? error.message : "Mystery compilation failed.",
-      formatState: session.formatState.format === "whodunnit" ? { ...session.formatState, compileStage: "failed" as const, playPhase: "compiling" as const } : session.formatState,
+      formatState: session.formatState.format === "whodunnit" && session.formatState.version === 1
+        ? { ...session.formatState, compileStage: "failed" as const, playPhase: "compiling" as const }
+        : session.formatState,
     };
     persistMysterySession(db, userId, failed, session.revision);
     throw error;
@@ -1256,7 +1260,11 @@ export async function resumeDebateMysteryCompilation(
 }
 
 function requireMysteryState(session: DebateSessionV1): DebateWhodunnitFormatStateV1 {
-  if (session.format !== "whodunnit" || session.formatState.format !== "whodunnit") throw new HttpError(409, "This Debate is not a Whodunnit case.");
+  if (
+    session.format !== "whodunnit" ||
+    session.formatState.format !== "whodunnit" ||
+    session.formatState.version !== 1
+  ) throw new HttpError(409, "This Debate is not a legacy Whodunnit case.");
   return normalizeDebateMysteryFormatStateV1(session.formatState);
 }
 
@@ -2674,7 +2682,9 @@ export async function applyDebateMysteryAction(
   }
   settleInvestigationExhaustion();
   if (nextSession.formatState === state) nextSession = { ...nextSession, formatState: nextState };
-  else if (nextSession.formatState.format === "whodunnit") nextState = nextSession.formatState;
+  else if (nextSession.formatState.format === "whodunnit" && nextSession.formatState.version === 1) {
+    nextState = nextSession.formatState;
+  }
   const priorLeads = new Map(state.leads.map((lead) => [lead.id, lead]));
   nextState.leads = updateDebateMysteryPublicLeads(bible, nextState);
   const leadUpdates = nextState.leads

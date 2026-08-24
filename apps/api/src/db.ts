@@ -2220,6 +2220,19 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(episode_id) REFERENCES botcast_episodes(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS botcast_episode_image_proxies (
+      episode_id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      image_id TEXT NOT NULL,
+      content_type TEXT NOT NULL DEFAULT 'image/webp'
+        CHECK (content_type = 'image/webp'),
+      width INTEGER NOT NULL CHECK (width > 0 AND width <= 128),
+      height INTEGER NOT NULL CHECK (height > 0 AND height <= 128),
+      image_bytes BLOB NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(episode_id) REFERENCES botcast_episodes(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS debate_sessions (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -2263,6 +2276,94 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     );
     CREATE INDEX IF NOT EXISTS idx_debate_mystery_cases_user_updated
       ON debate_mystery_cases(user_id, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS debate_mystery_v2_cases (
+      session_id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      schema_version INTEGER NOT NULL DEFAULT 2 CHECK(schema_version = 2),
+      private_case_json TEXT NOT NULL,
+      dialogue_graph_json TEXT NOT NULL,
+      case_hash TEXT NOT NULL,
+      graph_hash TEXT NOT NULL,
+      validation_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(session_id) REFERENCES debate_sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_debate_mystery_v2_cases_user_updated
+      ON debate_mystery_v2_cases(user_id, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS debate_mystery_v2_jobs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      session_id TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL
+        CHECK(status IN ('queued', 'running', 'needs_attention', 'complete', 'cancelled')),
+      stage TEXT NOT NULL
+        CHECK(stage IN (
+          'writing_case', 'testing_contradictions', 'directing_performances',
+          'preparing_local_voices', 'verifying_case_audio', 'complete',
+          'needs_attention', 'cancelled'
+        )),
+      attempt INTEGER NOT NULL DEFAULT 0 CHECK(attempt >= 0),
+      completed_passes INTEGER NOT NULL DEFAULT 0 CHECK(completed_passes >= 0),
+      total_passes INTEGER NOT NULL DEFAULT 5 CHECK(total_passes >= 1),
+      prepared_audio_count INTEGER NOT NULL DEFAULT 0 CHECK(prepared_audio_count >= 0),
+      required_audio_count INTEGER NOT NULL DEFAULT 0 CHECK(required_audio_count >= 0),
+      public_message TEXT NOT NULL,
+      private_error TEXT,
+      input_json TEXT NOT NULL,
+      checkpoint_json TEXT,
+      lease_owner TEXT,
+      leased_until TEXT,
+      cancellation_requested INTEGER NOT NULL DEFAULT 0 CHECK(cancellation_requested IN (0, 1)),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(session_id) REFERENCES debate_sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_debate_mystery_v2_jobs_claim
+      ON debate_mystery_v2_jobs(status, leased_until, updated_at);
+    CREATE TABLE IF NOT EXISTS debate_mystery_audio_manifests (
+      session_id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('preparing', 'complete', 'failed', 'silent')),
+      manifest_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(session_id) REFERENCES debate_sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_debate_mystery_audio_manifests_user_updated
+      ON debate_mystery_audio_manifests(user_id, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS debate_mystery_audio_cache (
+      cache_key TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      clip_path TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      sha256 TEXT NOT NULL,
+      byte_size INTEGER NOT NULL CHECK(byte_size > 0),
+      duration_ms INTEGER NOT NULL CHECK(duration_ms > 0),
+      ref_count INTEGER NOT NULL DEFAULT 0 CHECK(ref_count >= 0),
+      created_at TEXT NOT NULL,
+      last_used_at TEXT NOT NULL,
+      UNIQUE(user_id, clip_path),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_debate_mystery_audio_cache_cleanup
+      ON debate_mystery_audio_cache(user_id, ref_count, last_used_at);
+    CREATE TABLE IF NOT EXISTS debate_mystery_audio_refs (
+      session_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      line_id TEXT NOT NULL,
+      cache_key TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(session_id, line_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(session_id) REFERENCES debate_sessions(id) ON DELETE CASCADE,
+      FOREIGN KEY(cache_key) REFERENCES debate_mystery_audio_cache(cache_key) ON DELETE RESTRICT
+    );
+    CREATE INDEX IF NOT EXISTS idx_debate_mystery_audio_refs_cache
+      ON debate_mystery_audio_refs(cache_key);
     CREATE TABLE IF NOT EXISTS debate_mystery_actions (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,

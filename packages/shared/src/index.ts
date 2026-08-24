@@ -3812,6 +3812,7 @@ export * from "./softAssetJobs.js";
 export * from "./slateHandoff.js";
 export * from "./debate.js";
 export * from "./debateMystery.js";
+export * from "./debateMysteryV2.js";
 export * from "./debateParticipation.js";
 export * from "./debateChairFavorability.js";
 export * from "./coffeeGroupSetup.js";

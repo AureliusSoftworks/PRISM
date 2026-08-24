@@ -56,8 +56,13 @@ describe("Signal experience shell", () => {
     assert.match(source, /sendCue\(\{ kind: "present_image", imageId: upload\.imageId \}\)/u);
     assert.match(
       source,
-      /selectedEpisodeModelOption\?\.supportsImageInput === true/u,
+      /signalEpisodeModelChoiceSupportsImageInput\([\s\S]{0,120}modelOptions,[\s\S]{0,80}episodeModelDraft/u,
     );
+    assert.match(
+      source,
+      /if \(!modelChoice\) \{[\s\S]{0,120}modelOptions\.some\(\(option\) => option\.supportsImageInput === true\)/u,
+    );
+    assert.match(source, /Auto → \$\{activeEpisodeImageCapability\.model\}/u);
     assert.match(source, /data-signal-setup-image="true"/u);
     assert.match(source, /Transparent PNG item · presented as the physical item/u);
     assert.match(source, /Opaque PNG photo · presented as a framed picture/u);
@@ -68,7 +73,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /name: episodeImageForTurn\.descriptor\.name/u);
     assert.match(source, /replayEmoji: episodeImageForTurn\.replayEmoji/u);
     assert.match(source, /reason: episodeImageForTurn\.reason/u);
-    assert.match(source, /\/api\/botcast\/episode-image\/emoji/u);
+    assert.doesNotMatch(source, /\/api\/botcast\/episode-image\/emoji/u);
     assert.match(source, /debateEvidenceEmojiForObject/u);
     assert.match(
       source,
@@ -86,11 +91,12 @@ describe("Signal experience shell", () => {
     assert.match(source, /className=\{styles\.episodeImageContext\}/u);
     assert.match(source, /savedAssetId/u);
     assert.match(source, /className=\{styles\.episodeImageReplayEmoji\}/u);
+    assert.match(source, /replayProxyId/u);
+    assert.match(source, /image-proxy/u);
+    assert.match(source, /className=\{styles\.episodeImageReplayUnavailable\}/u);
     assert.match(source, /data-signal-image-speaker/u);
-    assert.match(
-      source,
-      /<SignalEpisodeImageVisual[\s\S]{0,120}ephemeralDataUrl=\{stageEpisodeImage\?\.dataUrl\}/u,
-    );
+    assert.match(source, /<SignalEpisodeImageVisual/u);
+    assert.match(source, /ephemeralDataUrl=\{stageEpisodeImage\?\.dataUrl\}/u);
     assert.match(source, /signalEpisodeImageIsVisible\(\{[\s\S]{0,180}replay: args\.replay/u);
     assert.match(
       css,
@@ -106,6 +112,7 @@ describe("Signal experience shell", () => {
       css,
       /\.episodeImageContext\[data-image-kind="picture"\] \.episodeImageReplayEmoji/u,
     );
+    assert.match(css, /\.episodeImageReplayUnavailable/u);
     assert.match(css, /--botcast-photo-frame:\s*linear-gradient\(165deg, #5a5164/u);
     assert.match(
       css,
@@ -1292,7 +1299,11 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       startEpisodeSource,
-      /await Promise\.all\(\[introPlayback\.finished, visualMinimum\]\);[\s\S]{0,900}setEpisodePreRoll\(null\);[\s\S]{0,200}playPreparedEpisodeMessage\(/u,
+      /await Promise\.all\(\[introPlayback\.finished, visualMinimum\]\);[\s\S]{0,500}const releaseOpeningCard = \(\): void =>[\s\S]{0,900}playPreparedEpisodeMessage\([\s\S]{0,220}releaseOpeningCard,[\s\S]{0,120}onPresenceStart: releaseOpeningCard/u,
+    );
+    assert.doesNotMatch(
+      startEpisodeSource,
+      /await new Promise<void>\(\(resolve\) =>[\s\S]{0,180}460[\s\S]{0,240}playPreparedEpisodeMessage\(/u,
     );
     assert.doesNotMatch(preparationHoldSource, /setEpisodePreRoll\(null\)/u);
   });
@@ -1314,6 +1325,18 @@ describe("Signal experience shell", () => {
       source,
       /botcastEpisodeModelSelectionKind\(detail\) === "auto"/u,
     );
+    assert.match(
+      source,
+      /function signalActiveAutoRoute\([\s\S]{0,900}event\?\.kind !== "utterance"[\s\S]{0,500}return \{ provider, model \}/u,
+    );
+    assert.match(
+      source,
+      /resolveLockedRoutingChip\?\.\(\{[\s\S]{0,220}activeAutoRoute,/u,
+    );
+    assert.doesNotMatch(
+      source,
+      /requiresImageInput: Boolean\(setupEpisodeImage\)/u,
+    );
   });
 
   it("replays bounded branded bookends and audio-aligned Auto cameras", () => {
@@ -1327,7 +1350,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /signalReplayBookendAt\([\s\S]{0,180}replayInterviewFootageElapsedMs[\s\S]{0,220}introEndMs: replayIntroCardEndMs/u,
+      /signalReplayBookendAt\([\s\S]{0,180}replayCapturedPresentationElapsedMs[\s\S]{0,220}introEndMs: replayIntroCardEndMs/u,
     );
     assert.match(
       source,
@@ -1335,11 +1358,11 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /signalReplayInterviewFootageElapsedMs\(\{[\s\S]{0,180}introCardEndMs: replayIntroCardEndMs/u,
+      /signalReplayCapturedPresentationElapsedMs\(\{[\s\S]{0,120}timeline: replayActiveTimeline,[\s\S]{0,80}replayElapsedMs/u,
     );
-    assert.match(
+    assert.doesNotMatch(
       source,
-      /const replayInterviewFootageOffsetMs =[\s\S]{0,220}signalReplayInterviewFootageOffsetMs\(\{[\s\S]{0,140}introCardEndMs: replayIntroCardEndMs/u,
+      /signalReplayInterviewFootage(?:Elapsed|Offset)Ms/u,
     );
     assert.doesNotMatch(
       source,
@@ -1417,11 +1440,11 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /replayInterviewFootageElapsedMs >= beat\.startMs[\s\S]*replayInterviewFootageElapsedMs < beat\.endMs/u,
+      /replayCapturedPresentationElapsedMs >= beat\.startMs[\s\S]*replayCapturedPresentationElapsedMs < beat\.endMs/u,
     );
     assert.match(
       source,
-      /replaySceneAtV2\([\s\S]{0,120}replayInterviewFootageElapsedMs/u,
+      /replaySceneAtV2\([\s\S]{0,120}replayCapturedPresentationElapsedMs/u,
     );
     assert.match(
       source,
@@ -1503,7 +1526,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /replayMouthShapeAtV2\([\s\S]{0,140}replayInterviewFootageElapsedMs/u,
+      /replayMouthShapeAtV2\([\s\S]{0,140}replayCapturedPresentationElapsedMs/u,
     );
     assert.match(source, /<ReplayMouthPresentationCapture/u);
     assert.match(
@@ -1827,6 +1850,21 @@ describe("Signal experience shell", () => {
     assert.match(
       source,
       /isCueInputTarget\(event\.target\)[\s\S]{0,360}kind: "ask_about"[\s\S]{0,420}queuedCueCanInterruptGuest[\s\S]{0,120}interruptGuestWithQueuedCue\(\)/u,
+    );
+  });
+
+  it("keeps the outgoing clock and guest identity through an audible handoff", () => {
+    assert.match(
+      source,
+      /const audienceCut = botcastInterruptedGuestContent\([\s\S]{0,1200}return \{\s*bridgeLine: nextHostInterruptionBridge\.content,[\s\S]{0,500}messageId: activeGuestMessage\.id,\s*spokenContent: audienceHeard,/u,
+    );
+    assert.doesNotMatch(
+      source,
+      /\.\.\.\(audienceCut\s*\?\s*\{\s*messageId: activeGuestMessage\.id/u,
+    );
+    assert.match(
+      source,
+      /if \(presentationDeferred\) \{[\s\S]{0,300}notifyPlaybackStart\(\);[\s\S]{0,300}signalLiveSpeechPlaybackClockRef\.current = \{\s*messageId: message\.id,[\s\S]{0,500}if \(!presentationDeferred\) notifyPlaybackStart\(\);/u,
     );
   });
 

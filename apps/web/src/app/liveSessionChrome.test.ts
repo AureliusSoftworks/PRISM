@@ -85,6 +85,9 @@ test("live session chrome mounts model chip and theme-aware watermark", () => {
     "utf8",
   );
   assert.match(source, /data-live-session-model-chip="true"/u);
+  assert.match(source, /Auto route currently:/u);
+  assert.match(source, /This may change on a later generation/u);
+  assert.match(source, /aria-live=\{props\.automatic \? "polite" : undefined\}/u);
   assert.match(source, /MODEL_EFFORT_ICON_PATHS\[effortKey\]/u);
   assert.match(source, /modelChipTurbo/u);
   assert.match(source, /turboToggle/u);
@@ -97,7 +100,20 @@ test("live session chrome mounts model chip and theme-aware watermark", () => {
   assert.match(css, /\.watermarkContained\s*\{[^}]*position:\s*absolute/u);
   assert.match(pageSource, /LiveSessionModelChip/u);
   assert.match(pageSource, /LiveSessionPrismWatermark/u);
+  assert.match(
+    pageSource,
+    /function latestConversationAutoRoute\([\s\S]{0,900}message\?\.role !== "assistant"[\s\S]{0,500}return \{ provider, model \}/u,
+  );
+  assert.match(
+    pageSource,
+    /const coffeeLatestAutoRoute =[\s\S]{0,1200}primaryForAuto:[\s\S]{0,160}coffeeLatestAutoRoute \?\?/u,
+  );
   assert.match(debateSource, /lockedRoutingChip/u);
+  assert.match(debateSource, /session\.latestAutoRoute\?\.model \?\? session\.model/u);
+  assert.match(
+    signalSource,
+    /resolveLockedRoutingChip\?\.\(\{[\s\S]{0,220}activeAutoRoute,/u,
+  );
   assert.match(
     debateSource,
     /data-debate-stage-viewport="live"[\s\S]{0,280}LiveSessionPrismWatermark[\s\S]{0,120}contained/u,

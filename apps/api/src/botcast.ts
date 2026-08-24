@@ -2403,23 +2403,29 @@ function logoPromptForDesign(
   design: BotcastLogoDesignV1,
   accentColor: string | null,
   personaFingerprint?: string,
+  showName?: string,
+  premise?: string,
 ): string {
   return [
-    "Create a wholly original professional logo mark for one singular interview show.",
-    "This is a logo-system deliverable, not an illustration, poster, title card, or miniature scene. Express the host's persona without showing their face, body, name, or likeness.",
+    "Create a wholly original premium editorial show identity for one singular interview show: a compact emblematic lockup, not a generic app glyph, podcast badge, poster, title card, or full illustration.",
+    ...(showName
+      ? [`Show-name context (conceptual only; do not typeset it): ${showName}`]
+      : []),
+    ...(premise
+      ? [`Show-premise context (inform the imagery, not a scene): ${premise}`]
+      : []),
+    "Build a clear recognition hierarchy in one cohesive lockup: one host/persona shorthand or premise-specific visual anchor, one show/premise cue, and an optional broadcast cue only when it fuses into that same emblem.",
     ...(personaFingerprint
       ? [`Provider-safe persona fingerprint: ${personaFingerprint}.`]
       : []),
     `Concept source: ${design.showThesis}`,
-    `Persona motif seed: ${design.personaMotif}. Treat this only as conceptual source material. Distill it into a symbol; do not literally draw the described objects or action as a scene.`,
-    `Logo morphology: ${design.silhouette}; ${design.negativeSpace}; ${design.composition}; ${design.lineLanguage}. Let this morphology control the final mark even when the concept source describes materials, props, or narrative action.`,
-    "Build exactly one compact, freestanding symbol from two to four bold flat shapes. Use a contiguous silhouette, deliberate counterform, strong negative space, and unmistakable outer contour. Symbolic or semi-abstract geometry is encouraged when it remains specific to the persona.",
-    `Use a restrained flat palette anchored in ${normalizeAccentColor(accentColor)} with at most two complementary colors. No gradients, texture, lighting, bevels, gloss, shadows, transparency, or material rendering inside the mark.`,
-    "Do not render a literal scene, tableau, environment, room, landscape, horizon, floor, perspective, multiple-object arrangement, mascot, character, portrait, hand, photorealistic object, 3D render, product mockup, poster, or decorative illustration.",
-    "Broadcast cues are optional and must never replace the host-specific idea. Never attach a second signal glyph beside the mark: no detached radiating arcs, wireless marks, frequency rings, or floating audio lines.",
-    "Do not use a standalone microphone, headphones, waveform, play button, RSS arcs, radio tower, speech bubble, vinyl record, or generic frequency ring. Do not draw an app-icon tile, circular badge, shield, crest, monogram, or podcast seal. A viewer must see a singular professional logo symbol, never podcast clip art.",
-    "Keep the identity visually independent from existing entertainment properties, character designs, signature objects, insignia, and existing logos.",
-    "Center the mark with generous empty space around it. No letters, words, numerals, initials, typography, captions, labels, or readable text. At 32 pixels, the silhouette and counterform must remain crisp, recognizable, and distinct from the other Signal show logos.",
+    `Persona motif seed: ${design.personaMotif}. Use it as conceptual source material for a compact host-shaped shorthand, expressive silhouette, signature-style persona object, or premise-specific visual anchor; never expand it into an environment or narrative scene.`,
+    `Logo morphology: ${design.silhouette}; ${design.negativeSpace}; ${design.composition}; ${design.lineLanguage}. Use two to four semantically loaded motifs, fused as one memorable outer contour and counterform rather than detached symbols.`,
+    "Visual density budget: one dominant host or premise anchor, one fused show/format cue, and at most three large secondary accents. No full character pose, enclosing disk, medallion, secondary panel, diagram, instrument grid, costume detail, tiny decoration, or cluster of fine lines; every meaningful shape must survive at 32 pixels.",
+    `Use a restrained palette anchored in ${normalizeAccentColor(accentColor)} with at most two complementary colors. Editorial vector, cel, enamel, engraved, metallic, ink, restrained dimensional, gradient, shading, or texture treatment is allowed when it serves this show's character; keep effects controlled and avoid default glossy AI app-icon styling.`,
+    "A stylized non-photorealistic character shorthand, silhouette, expressive mascot-like cue, signature persona object, or short title monogram may be used when it makes this show recognizable. Broadcast cues are optional and subordinate: a microphone, waveform, or signal mark may appear only when integrated into the central emblem, never as generic clip art, detached radiating arcs, or a second glyph.",
+    "Do not render a full scene, tableau, environment, room, landscape, horizon, floor, perspective, photorealistic portrait, product mockup, poster, title card, or decorative illustration. Recompose any host-recognition cue into a wholly original show emblem; never reproduce an existing logo, branded insignia, franchise mark, or exact costume or character design one-for-one.",
+    "Center the emblem with generous empty space around it. Text is absent by default: if essential, use at most one confidently legible 1-3 character show monogram; never generate the full show title, captions, labels, or other readable copy. At 32 pixels, the host/premise anchor and outer contour must remain crisp, recognizable, and distinct from the other Signal show logos.",
     "Output one full-frame opaque square image with no alpha or transparency. Fill every background pixel with the exact flat magenta color key #FF00FF; keep #FF00FF out of the emblem itself. Never use black as the background or color key. Do not draw a container, card, badge field, border, floor, shadow plate, or glow panel.",
     "The exact same mark and colors must remain legible on both near-black and near-white interface surfaces without inversion or hue rotation; use clean dual-surface edge contrast where needed.",
   ].join(" ");
@@ -2431,6 +2437,8 @@ function logoForHost(
   options: {
     identitySource?: string;
     showThesis?: string;
+    showName?: string;
+    premise?: string;
     reservedDesigns?: readonly BotcastLogoDesignV1[];
     retiredDesigns?: readonly BotcastLogoDesignV1[];
   } = {},
@@ -2453,6 +2461,8 @@ function logoForHost(
       design,
       host.color,
       logoPersonaFingerprint(host),
+      options.showName,
+      options.premise,
     ),
     imageUrl: null,
     imageId: null,
@@ -2477,7 +2487,13 @@ function logoFallbackForRow(row: BotcastShowRow): BotcastLogoState {
   });
   return {
     seed,
-    prompt: logoPromptForDesign(design, row.accent_color),
+    prompt: logoPromptForDesign(
+      design,
+      row.accent_color,
+      logoPersonaFingerprintForPrompt(row.host_system_prompt ?? ""),
+      row.name,
+      row.premise,
+    ),
     imageUrl: null,
     imageId: null,
     previousImageUrl: null,
@@ -2683,6 +2699,8 @@ function parseLogo(raw: string, row: BotcastShowRow): BotcastLogoState {
         design,
         row.accent_color,
         logoPersonaFingerprintForPrompt(row.host_system_prompt ?? ""),
+        row.name,
+        row.premise,
       ),
       imageUrl: typeof parsed.imageUrl === "string" ? parsed.imageUrl : null,
       imageId: typeof parsed.imageId === "string" ? parsed.imageId : null,
@@ -4558,6 +4576,8 @@ export function createBotcastShow(
   );
   const logo = logoForHost(host, 1, {
     identitySource: `${studioIdentity}\n${name}\n${premise}`,
+    showName: name,
+    premise,
     reservedDesigns: logoDesignsForUser(db, userId),
   });
   const musicIdentity = buildBotcastMusicIdentity({
@@ -5361,6 +5381,8 @@ export function updateBotcastShow(
       ...logoForHost(host, current.logo.revision + 1, {
         identitySource: `${studioIdentity}\n${name}\n${premise}\n${logoThesis}`,
         showThesis: logoThesis,
+        showName: name,
+        premise,
         reservedDesigns: logoDesignsForUser(db, userId, showId),
         retiredDesigns,
       }),
@@ -5505,7 +5527,7 @@ function safeGeneratedLogoThesis(
     return "";
   }
   if (
-    /\b(?:microphone logo|headphones?|waveform|play button|rss arcs?|radio tower|vinyl record|speech bubble|podcast badge|podcast seal|app[ -]?icon(?: container| tile)?|logo mockup)\b/iu.test(
+    /\b(?:standalone (?:microphone|headphones?|waveform|play button|rss arcs?|radio tower|vinyl record|speech bubble)|generic (?:podcast|audio|frequency|clip art)|podcast (?:badge|seal)|app[ -]?icon(?: container| tile)?|logo mockup)\b/iu.test(
       thesis,
     )
   ) {
@@ -5527,14 +5549,31 @@ function safeGeneratedLogoThesis(
   }
   const logoDirection = `${emblem} ${artDirection}`;
   if (
-    /\b(?:scene|tableau|environment|room|landscape|horizon|floor|perspective|photoreal(?:istic|ism)?|three-dimensional|3d render|product mockup|poster|title card|mascot|character portrait|cinematic lighting|material rendering)\b/iu.test(
+    /\b(?:full (?:scene|illustration)|miniature scene|tableau|environment|room|landscape|horizon|floor|perspective|photoreal(?:istic|ism)?|three-dimensional|3d render|product mockup|poster|title card|cinematic scene)\b/iu.test(
       logoDirection,
     )
   ) {
     return "";
   }
+  const hasRecognitionShorthand =
+    /\b(?:host|persona|character|mascot|portrait|face|eye|hand|figure|signature|monogram|premise|evidence|quill|glasses|antenna|microphone|motif|emblem|object)\b/iu.test(
+      emblem,
+    );
+  const hasConcreteSubjectAction =
+    /\b(?:a|an|the|one|two|three)\s+(?!abstract\b|geometric\b|ornamental\b|generic\b|nested\b|interlocking\b|asymmetrical\b)[\p{L}\p{N}-]+/iu.test(
+      emblem,
+    ) &&
+    /\b(?:becomes?|turns?|holds?|carries?|opens?|breaks?|folds?|balances?|spills?|reveals?|emits?|catches?|pulls?|pushes?|pins?|lifts?|unfolds?|changes?|measur(?:es?|ing)|exposes?|interrupts?|shelters?|shares?|steps?|escapes?|vaults?|nudges?|swaps?|reroutes?|offers?|completes?|transforms?|converts?|threads?|cuts?|cracks?|tugs?|leaks?|grows?|melts?|stitches?|stops?|closes?|leaves?|returns?|aims?|passes?|arrives?|lands?|wears?|dissolves?|index(?:es|ed|ing)?|registers?|traps?|releases?|draws?|writes?|casts?|throws?|curls?|winds?|fuses?|resolves?)\b/iu.test(
+      emblem,
+    );
+  const usesAbstractVocabulary =
+    /\b(?:abstract|non-figurative|geometr(?:y|ic)|planes?|contours?|intervals?|voids?|axes|ornamental (?:emblem|symbol|mark)|generic (?:symbol|emblem|podcast))\b/iu.test(
+      emblem,
+    );
   if (
-    !/\b(?:mark|symbol|silhouette|counterform|negative space|notch|cut|aperture|contour|monoline|glyph|shape|geometry|geometric|interlock|overlap|fold|merge|nest|frame)\b/iu.test(
+    (usesAbstractVocabulary && !hasRecognitionShorthand) ||
+    (!hasRecognitionShorthand && !hasConcreteSubjectAction) ||
+    !/\b(?:mark|symbol|silhouette|counterform|negative space|notch|cut|aperture|contour|monoline|glyph|shape|geometry|geometric|interlock|overlap|fold|merge|nest|frame|fuse|lockup)\b/iu.test(
       logoDirection,
     )
   ) {
@@ -6627,11 +6666,11 @@ export async function generateBotcastShowIdentity(
           "Translate persona into original musical behavior rather than a generic genre label. The direction should feel wrong for another host even if the instrument names were swapped. Favor character-bearing tensions such as brilliant control threatened by instability, public command carrying buried tragedy, or innocent delight moving with unstoppable confidence.",
           "musicIdentity must use no host or show name, artist, composer, song, franchise, character, recognizable melody, signature theme, quoted lyric, or imitation request. Describe only wholly original musical attributes.",
           "logoThesis is a compact, provider-safe brief for an actual logo mark. Write three dense clauses labeled 'Persona fingerprint:', 'Emblem:', and 'Art direction:' in one string, aiming for 260-480 characters total.",
-          "Persona fingerprint names the host's distinctive worldview, social energy, contradiction, and intellectual posture. Emblem distills that identity into one compact symbol and specifies its silhouette, counterform, or negative-space relationship. Art direction specifies flat shape behavior, weight, corners, asymmetry, restrained color, and emotional temperature.",
-          "The Emblem must be a logo concept, not a literal illustration. Use one persona-specific motif reduced into abstract or semi-abstract geometry. Favor one silhouette and one memorable internal cut; do not stage props, subjects, or actions as a scene.",
-          "Make enough structural choices that the mark would feel wrong for a different host even after a palette swap. At 32 pixels it must remain crisp, recognizable, and distinct. Use two to four flat shapes and no material realism, texture, lighting, perspective, depth, or decorative detail.",
-          "Broadcast cues are optional and subordinate. Never add detached radiating arcs, wireless marks, frequency rings, or a separate signal glyph beside the mark.",
-          "logoThesis must use no host or show name, portrait, character likeness, signature prop, lettering, initials, existing insignia, or recognizable entertainment-property imagery. Reject scenes, environments, mascots, posters, title cards, app-icon containers, standalone microphones, headphones, waveforms, play buttons, RSS arcs, radio towers, vinyl records, speech bubbles, circular podcast badges, and generic audio clip art.",
+          "Persona fingerprint names the host's distinctive worldview, social energy, contradiction, and intellectual posture. Emblem specifies a compact recognition hierarchy: a host/persona shorthand or premise-specific anchor, a show cue, and optional broadcast cue fused into one emblematic lockup. Art direction specifies form, palette, material treatment, and emotional temperature.",
+          "The Emblem must be compact rather than a full scene. It may use a stylized non-photorealistic host/character shorthand, expressive mascot-like cue, signature persona object, or a short monogram when that makes the show recognizable; use two to four semantically loaded motifs, a memorable silhouette, and deliberate counterform or negative space.",
+          "Make enough structural choices that the mark would feel wrong for a different host even after a palette swap. At 32 pixels it must remain crisp and recognizable: use one dominant anchor, one fused show/format cue, at most three large secondary accents, and no full character pose, enclosing disk, medallion, secondary panel, diagram, or tiny decoration. Editorial vector, cel, enamel, engraved, metallic, ink, restrained dimensional, gradient, shading, or texture treatment is allowed when controlled and character-serving, never default glossy app-icon styling.",
+          "Broadcast cues are optional and subordinate, but microphones, waveforms, and signal marks are allowed when fused into the central emblem rather than detached generic clip art.",
+          "logoThesis must use no host or show name. Recompose relevant persona cues into a new show emblem rather than reproducing an existing logo, insignia, franchise mark, or exact costume or character design one-for-one. Reject full scenes, environments, posters, title cards, app-icon containers, standalone podcast clip art, and generic microphones, headphones, waveforms, play buttons, RSS arcs, radio towers, vinyl records, speech bubbles, or circular podcast badges.",
           ...(hostIsMuted
             ? BOTCAST_MUTED_DASHBOARD_BLURB_DIRECTIONS
             : hostEchoesAddressedSpeech
@@ -7511,17 +7550,16 @@ export async function generateBotcastShowLogoThesis(
           "You are revising only the logo direction for a premium interview show. Do not rename, rewrite, or otherwise alter the show.",
           "Return one JSON object with exactly one string field: logoThesis.",
           "Write three dense clauses labeled 'Persona fingerprint:', 'Emblem:', and 'Art direction:' in one string, aiming for 260-480 characters total.",
-          "Translate the host's identity into an actual compact logo mark. The Emblem clause must specify one persona-specific symbol and its silhouette, counterform, notch, aperture, overlap, or negative-space relationship.",
-          "Use abstract or semi-abstract geometry when it makes the identity more ownable. Keep the mark crisp at 32 pixels and specify two to four flat shapes, strong outer contour, deliberate internal space, and restrained color.",
-          "Do not describe a literal scene, narrative action, environment, mascot, posed objects, material realism, texture, lighting, depth, perspective, poster, title card, app-icon container, or decorative illustration.",
-          "Broadcast cues are optional and subordinate to the host-specific idea; never add detached radiating arcs, wireless marks, frequency rings, or a separate signal glyph beside it.",
-          "Use no host or show name, portrait, character likeness, lettering, initials, existing insignia, or recognizable entertainment-property imagery.",
-          "Reject standalone microphones, headphones, waveforms, play buttons, RSS arcs, radio towers, vinyl records, speech bubbles, circular podcast badges, and generic audio clip art.",
+          "Translate the host and premise into a compact emblematic lockup. The Emblem clause must specify one host/persona shorthand or premise-specific anchor, one show cue, and optional broadcast cue fused through silhouette, counterform, notch, aperture, overlap, or negative space.",
+          "Use two to four semantically loaded motifs, a strong outer contour, deliberate internal space, and controlled editorial art direction. Stylized non-photorealistic character shorthand, a mascot-like cue, a signature persona object, or a short monogram are valid when recognizability depends on them; restrained enamel, ink, metallic, cel, gradient, shading, texture, or dimensional treatment is valid when purposeful. Keep one dominant anchor, one fused show/format cue, at most three large secondary accents, and no full character pose, enclosing disk, medallion, secondary panel, diagram, or tiny decoration.",
+          "Do not describe a full scene, environment, poster, title card, app-icon container, or decorative illustration. Broadcast cues may be integrated into the central emblem but never appear as detached generic clip art.",
+          "Use no host or show name. Recompose relevant persona cues into a new show emblem rather than reproducing an existing logo, insignia, franchise mark, or exact costume or character design one-for-one. Reject standalone microphones, headphones, waveforms, play buttons, RSS arcs, radio towers, vinyl records, speech bubbles, circular podcast badges, and generic audio clip art.",
         ].join(" "),
       },
       {
         role: "user",
         content: [
+          `Show name: ${current.name}`,
           `Show premise: ${current.premise}`,
           `Hosting style: ${current.hostingStyle}`,
           ...influenceLines,
@@ -8385,7 +8423,14 @@ export function queueBotcastEpisodeImageContext(
     | "provider"
     | "model"
     | "replayEmoji"
-  >,
+  > & {
+    replayProxy?: {
+      id: string;
+      bytes: Buffer;
+      width: number;
+      height: number;
+    } | null;
+  },
 ): BotcastEpisode {
   const episode = getBotcastEpisode(db, userId, episodeId);
   if (episode.status !== "live") {
@@ -8400,6 +8445,21 @@ export function queueBotcastEpisodeImageContext(
   if (existing) {
     throw new Error("Signal accepts one image per episode.");
   }
+  const replayProxy = input.replayProxy ?? null;
+  if (
+    replayProxy &&
+    (!replayProxy.id.trim() ||
+      !Buffer.isBuffer(replayProxy.bytes) ||
+      replayProxy.bytes.length <= 0 ||
+      !Number.isInteger(replayProxy.width) ||
+      replayProxy.width < 1 ||
+      replayProxy.width > 128 ||
+      !Number.isInteger(replayProxy.height) ||
+      replayProxy.height < 1 ||
+      replayProxy.height > 128)
+  ) {
+    throw new Error("Signal replay image proxy is invalid.");
+  }
   const context: BotcastImageContextV1 = {
     v: 1,
     imageId: input.imageId,
@@ -8412,6 +8472,7 @@ export function queueBotcastEpisodeImageContext(
       input.replayEmoji,
       botcastEpisodeImageFallbackEmoji(input.kind),
     ),
+    replayProxyId: replayProxy?.id.trim() ?? null,
     savedAssetId: null,
     phase: "queued",
     hostIntroductionMessageId: null,
@@ -8419,10 +8480,32 @@ export function queueBotcastEpisodeImageContext(
     hostFollowUpMessageId: null,
   };
   const now = new Date().toISOString();
-  recordEvent(db, userId, episode.id, "image_context", { ...context }, now);
-  db.prepare(
-    "UPDATE botcast_episodes SET updated_at = ? WHERE id = ? AND user_id = ?",
-  ).run(now, episode.id, userId);
+  db.exec("BEGIN IMMEDIATE TRANSACTION");
+  try {
+    if (replayProxy) {
+      db.prepare(
+        `INSERT INTO botcast_episode_image_proxies
+           (episode_id, user_id, image_id, content_type, width, height, image_bytes, created_at)
+         VALUES (?, ?, ?, 'image/webp', ?, ?, ?, ?)`,
+      ).run(
+        episode.id,
+        userId,
+        input.imageId,
+        replayProxy.width,
+        replayProxy.height,
+        replayProxy.bytes,
+        now,
+      );
+    }
+    recordEvent(db, userId, episode.id, "image_context", { ...context }, now);
+    db.prepare(
+      "UPDATE botcast_episodes SET updated_at = ? WHERE id = ? AND user_id = ?",
+    ).run(now, episode.id, userId);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
   return getBotcastEpisode(db, userId, episode.id);
 }
 
@@ -9360,10 +9443,7 @@ function applyBotcastGuestInterruption(
       latest.content,
       spokenContent,
     );
-    if (interruptedContent === latest.content) {
-      throw new Error("A completed guest line cannot be interrupted.");
-    }
-    if (interruptedContent) {
+    if (interruptedContent && interruptedContent !== latest.content) {
       // Keep the stock crosstalk retort on the producer_cue / plan only. Canonical
       // message content is the audience-heard prefix ending at the cut.
       db.prepare(
@@ -9371,7 +9451,7 @@ function applyBotcastGuestInterruption(
             SET content = ?, voice_performance_text = NULL
           WHERE id = ? AND user_id = ? AND episode_id = ?`,
       ).run(interruptedContent, latest.id, userId, episode.id);
-    } else if (!spokenContent.trim()) {
+    } else if (!interruptedContent && !spokenContent.trim()) {
       // Drop utterance, listener-reaction, and utterance-tagged camera events for
       // the unheard guest line so Auto hysteresis cannot keep framing an empty chair.
       db.prepare(
@@ -9386,11 +9466,15 @@ function applyBotcastGuestInterruption(
       db.prepare(
         "DELETE FROM botcast_messages WHERE id = ? AND user_id = ? AND episode_id = ?",
       ).run(latest.id, userId, episode.id);
-    } else {
+    } else if (!interruptedContent) {
       throw new Error(
         "A guest interruption must preserve an audience-heard prefix of the current line.",
       );
     }
+    // If the final word lands while the saved bridge is preparing, keep the
+    // completed guest line and continue as an immediate host pivot. The audible
+    // handoff has already begun, so rejecting this timing race would strand the
+    // Producer cue after partially playing it.
   } else if (interruption.spokenContent?.trim()) {
     throw new Error("A spoken guest prefix requires its Signal message id.");
   }
@@ -12103,6 +12187,7 @@ type BotcastUtteranceRepairReason =
   | "empty"
   | "empty_after_cleanup"
   | "false_name_identity"
+  | "formal_thanks_appended"
   | "generic_closing"
   | "generic_follow_up"
   | "incomplete_signoff"
@@ -12454,6 +12539,54 @@ export function botcastHostClosingHasFormalThanks(
       spoken,
     );
   return thanksGuest && thanksAudience;
+}
+
+/**
+ * Preserve an otherwise valid host close when its only missing contract is the
+ * formal sign-off. The rejected provider draft stays request-local; callers
+ * persist only this bounded repaired utterance plus provenance metadata.
+ */
+export function botcastRepairHostClosingFormalThanksV1(args: {
+  content: string;
+  guestName: string;
+}): string | null {
+  const guestName = args.guestName.replace(/\s+/gu, " ").trim();
+  const spoken = extractBotcastVoicePerformance(args.content, false).content
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (
+    !guestName ||
+    !spoken ||
+    botcastHostClosingNeedsPersonaRetry(spoken) ||
+    botcastHostClosingInvitesResponse(spoken) ||
+    botcastHostClosingHasFormalThanks(spoken, guestName)
+  ) {
+    return null;
+  }
+
+  const appendMissingThanks = (base: string): string => {
+    const audienceOnly = `${base} Thank you for watching.`;
+    if (botcastHostClosingHasFormalThanks(audienceOnly, guestName)) {
+      return audienceOnly;
+    }
+    const guestOnly = `${base} ${guestName}, thank you for joining me.`;
+    if (botcastHostClosingHasFormalThanks(guestOnly, guestName)) {
+      return guestOnly;
+    }
+    return `${base} ${guestName}, thank you for joining me, and thank you for watching.`;
+  };
+  const sentences = spoken.split(/(?<=[.!?…])\s+/u).filter(Boolean);
+  for (let count = sentences.length; count >= 1; count -= 1) {
+    const repaired = appendMissingThanks(sentences.slice(0, count).join(" "));
+    if (
+      !botcastHostClosingNeedsPersonaRetry(repaired) &&
+      !botcastHostClosingInvitesResponse(repaired) &&
+      botcastHostClosingHasFormalThanks(repaired, guestName)
+    ) {
+      return repaired;
+    }
+  }
+  return null;
 }
 
 /**
@@ -16107,6 +16240,7 @@ export async function advanceBotcastEpisode(
     ReturnType<typeof runAutoFallbackChain>
   >["recovery"];
   let onlineTurn: SignalOnlineTurnResult | undefined;
+  let onlineFormalThanksRepairApplied = false;
   let autoExhaustion: AutoFallbackExhaustedError | null = null;
   let autoExhaustionRecovery:
     | "deterministic_host_closing"
@@ -16822,12 +16956,32 @@ export async function advanceBotcastEpisode(
       now,
     );
     if (onlineTurn.validationFailureReason) {
-      // The provider attempts remain rejected evidence. Do not let the final
-      // rejected draft pass through a narrower sanitizer and become the saved
-      // utterance; recover from the grounded deterministic contract instead.
-      raw = "";
-      providerUsed = "deterministic";
-      modelUsed = "signal-online-validation-fallback";
+      const onlyFormalThanksFailed =
+        hostClosingTurn &&
+        onlineTurn.attempts.length > 0 &&
+        onlineTurn.attempts.every(
+          (attempt) =>
+            attempt.outcome === "rejected" &&
+            attempt.reason === "invalid_output" &&
+            attempt.clause?.startsWith("host_closing_thanks_") === true,
+        );
+      const repairedClosing = onlyFormalThanksFailed
+        ? botcastRepairHostClosingFormalThanksV1({
+            content: onlineTurn.value,
+            guestName: peerAddressName,
+          })
+        : null;
+      if (repairedClosing) {
+        // The attempt trace records only bounded clause/shape provenance. The
+        // rejected raw drafts remain request-local; only this repaired line is
+        // eligible for the canonical transcript.
+        raw = repairedClosing;
+        onlineFormalThanksRepairApplied = true;
+      } else {
+        raw = "";
+        providerUsed = "deterministic";
+        modelUsed = "signal-online-validation-fallback";
+      }
     }
   }
   const openingSubject =
@@ -16996,8 +17150,8 @@ export async function advanceBotcastEpisode(
       ? `I've placed ${imageContextAtTurnStart ? botcastEpisodeImageSpokenReference(imageContextAtTurnStart) : "this image"} at the center of the table. ${hostNamesGuest}, take a look—what are your thoughts?`
       : imageDiscussionTurn === "guest_discussion"
         ? imageContextAtTurnStart?.kind === "item"
-          ? `Let me take a look. This ${imageContextAtTurnStart.name} has a physical presence that changes how I read its details and what they suggest.`
-          : `Let me take a look. This picture of ${imageContextAtTurnStart?.name ?? "the subject"} makes its strongest point through what it puts in focus and what it leaves unresolved.`
+          ? `Let me take a look at ${imageContextAtTurnStart ? botcastEpisodeImageSpokenReference(imageContextAtTurnStart) : "this item"}. Its physical presence changes how I read the details and what they suggest.`
+          : `Let me take a look at ${imageContextAtTurnStart ? botcastEpisodeImageSpokenReference(imageContextAtTurnStart) : "this picture"}. It makes its strongest point through what it puts in focus and what it leaves unresolved.`
         : imageDiscussionTurn === "host_follow_up"
           ? requestedCue
             ? `Keeping both ${imageContextAtTurnStart ? botcastEpisodeImageSpokenReference(imageContextAtTurnStart) : "this image"} and your point in view, ${hostNamesGuest}, the clarification sharpens the question; my own read is that the visible emphasis changes how we should weigh your claim.`
@@ -17726,7 +17880,7 @@ export async function advanceBotcastEpisode(
     participantDepartsThisTurn || hostSignsOffThisTurn
       ? null
       : imageDiscussionTurn === "host_introduction" && imageContextAtTurnStart
-        ? `places ${imageContextAtTurnStart.kind === "item" ? `the ${imageContextAtTurnStart.name}` : `the picture of ${imageContextAtTurnStart.name}`} in the center of the table`
+        ? `places ${botcastEpisodeImageSpokenReference(imageContextAtTurnStart).replace(/^this\b/u, "the")} in the center of the table`
         : resolvedStageAction.action?.action ?? null;
   const voicePerformanceText =
     !picklesBeatKind &&
@@ -17994,6 +18148,7 @@ export async function advanceBotcastEpisode(
     // Intentional silence/mute already owns the on-air content; ellipsis cleanup
     // must not look like a failed model repair in the production log.
     ...((generatedUtterance.repairReason ||
+      onlineFormalThanksRepairApplied ||
       closingContractRepaired ||
       freshContactRepairApplied ||
       prematureSignoffRepairApplied ||
@@ -18005,7 +18160,9 @@ export async function advanceBotcastEpisode(
           utteranceRepair: {
             v: 1,
             source:
-              autoExhaustion || onlineTurn?.validationFailureReason
+              autoExhaustion ||
+                onlineTurn?.validationFailureReason ||
+                onlineFormalThanksRepairApplied
                 ? "provider_recovery"
                 : generatedUtterance.repairReason ||
               closingContractRepaired ||
@@ -18017,6 +18174,8 @@ export async function advanceBotcastEpisode(
                 ? signalAutoFallbackExhaustionIsValidationOnly(autoExhaustion)
                   ? "content_validation"
                   : "provider_availability"
+                : onlineFormalThanksRepairApplied
+                  ? "formal_thanks_appended"
                 : onlineTurn?.validationFailureReason
                   ? "content_validation"
                   : generatedUtterance.repairReason) ??

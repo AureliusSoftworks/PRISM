@@ -379,6 +379,7 @@ import {
   signalLiveActiveMessage,
   signalLivePrimaryAvatarSpeech,
   signalLiveSpeechIsActiveAtElapsedMs,
+  signalLiveSpeechPlaybackIsOwned,
   signalLiveSpeechProjectedElapsedMs,
   type SignalLiveSpeechPlaybackClock,
   type SignalLiveSpeechState,
@@ -424,8 +425,7 @@ import {
   signalReplayIntroDurationMs,
   signalReplayIntroIsLanding,
   signalReplayIntroLandingFadeMs,
-  signalReplayInterviewFootageElapsedMs,
-  signalReplayInterviewFootageOffsetMs,
+  signalReplayCapturedPresentationElapsedMs,
   signalReplayIntroVisualOffsetMs,
 } from "./signalReplayVideoFrame";
 import { REPLAY_RECORDING_CHANGED_EVENT } from "./ReplayRenderCoordinator";
@@ -606,6 +606,52 @@ export interface BotcastModelOption {
   label: string;
   provider: "local" | "openai" | "anthropic";
   supportsImageInput?: boolean;
+}
+
+export function signalEpisodeModelChoiceSupportsImageInput(
+  modelOptions: readonly BotcastModelOption[],
+  modelChoice: string,
+): boolean {
+  if (!modelChoice) {
+    return modelOptions.some((option) => option.supportsImageInput === true);
+  }
+  return (
+    modelOptions.find((option) => option.id === modelChoice)
+      ?.supportsImageInput === true
+  );
+}
+
+export type SignalActiveAutoRoute = {
+  provider: "local" | "openai" | "anthropic";
+  model: string;
+};
+
+/** Latest concrete route Auto actually used, including an active image pin. */
+export function signalActiveAutoRoute(
+  episode: Pick<BotcastEpisode, "provider" | "model" | "events">,
+): SignalActiveAutoRoute | null {
+  const imageContext = botcastLatestImageContextV1(episode.events);
+  if (imageContext && imageContext.phase !== "dismissed") {
+    return { provider: imageContext.provider, model: imageContext.model };
+  }
+  for (let index = episode.events.length - 1; index >= 0; index -= 1) {
+    const event = episode.events[index];
+    if (event?.kind !== "utterance") continue;
+    const provider = event.payload.provider;
+    const model =
+      typeof event.payload.model === "string" ? event.payload.model.trim() : "";
+    if (
+      (provider === "local" ||
+        provider === "openai" ||
+        provider === "anthropic") &&
+      model
+    ) {
+      return { provider, model };
+    }
+  }
+  return episode.model
+    ? { provider: episode.provider, model: episode.model }
+    : null;
 }
 
 export interface BotcastApiRequest {
@@ -915,6 +961,7 @@ export interface BotcastExperienceProps {
   resolveLockedRoutingChip?: (args: {
     modelChoice: string;
     modelProvider: "local" | "openai" | "anthropic";
+    activeAutoRoute: SignalActiveAutoRoute | null;
   }) => LiveSessionRoutingChipLabels | null;
   navigationHeader:
     | ReactNode
@@ -1353,21 +1400,33 @@ type SignalSetupEpisodeImage = Omit<SignalEpisodeImageUpload, "episodeId">;
 
 function SignalEpisodeImageVisual({
   context,
+  episodeId,
+  replay = false,
   ephemeralDataUrl,
 }: {
   context: BotcastImageContextV1;
+  episodeId: string;
+  replay?: boolean;
   ephemeralDataUrl?: string | null;
 }): React.JSX.Element {
   const [failedSource, setFailedSource] = useState<string | null>(null);
+  const replayProxySource =
+    replay && context.replayProxyId
+      ? `/api/botcast/episodes/${encodeURIComponent(episodeId)}/image-proxy`
+      : null;
   const savedSource = context.savedAssetId
     ? `/api/images/${encodeURIComponent(context.savedAssetId)}/file`
     : null;
   const source =
-    ephemeralDataUrl && failedSource !== ephemeralDataUrl
-      ? ephemeralDataUrl
-      : savedSource && failedSource !== savedSource
-        ? savedSource
-        : null;
+    replayProxySource && failedSource !== replayProxySource
+      ? replayProxySource
+      : !replay && ephemeralDataUrl && failedSource !== ephemeralDataUrl
+        ? ephemeralDataUrl
+        : (!replay || !context.replayProxyId) &&
+            savedSource &&
+            failedSource !== savedSource
+          ? savedSource
+          : null;
   const label =
     context.kind === "item"
       ? context.name
@@ -1376,6 +1435,17 @@ function SignalEpisodeImageVisual({
     return (
       // eslint-disable-next-line @next/next/no-img-element -- session-only data or authenticated local asset URL.
       <img src={source} alt={label} onError={() => setFailedSource(source)} />
+    );
+  }
+  if (replay && context.replayProxyId) {
+    return (
+      <span
+        className={styles.episodeImageReplayUnavailable}
+        role="img"
+        aria-label={`${label}; replay image unavailable`}
+      >
+        Image unavailable
+      </span>
     );
   }
   return (
@@ -1606,19 +1676,11 @@ async function readSignalEpisodeImageFile(
   return { fileName: file.name, dataUrl, descriptor };
 }
 
-async function acquireSignalEpisodeImageReplayMetadata(
-  request: BotcastApiRequest,
-  imageId: string,
+function acquireSignalEpisodeImageReplayMetadata(
   fileInput: Pick<
     SignalEpisodeImageUpload,
     "fileName" | "dataUrl" | "descriptor"
   >,
-  runtime: {
-    episodeId?: string;
-    preferredProvider?: "local" | "openai" | "anthropic";
-    responseMode?: BotcastEpisodeResponseMode;
-    modelOverride?: string | null;
-  },
 ): Promise<{
   descriptor: BotcastEpisodeImageDescriptor;
   replayEmoji: string;
@@ -1626,26 +1688,12 @@ async function acquireSignalEpisodeImageReplayMetadata(
   const fallbackEmoji = debateEvidenceEmojiForObject(
     fileInput.descriptor.name,
   );
-  try {
-    const response = await request<{
-      descriptor: BotcastEpisodeImageDescriptor;
-      replayEmoji: string;
-    }>("/api/botcast/episode-image/emoji", {
-      method: "POST",
-      body: JSON.stringify({
-        imageId,
-        fileName: fileInput.fileName,
-        dataUrl: fileInput.dataUrl,
-        name: fileInput.descriptor.name,
-        fallbackEmoji,
-        ...runtime,
-      }),
-    });
-    return response;
-  } catch {
-    // The attachment remains usable with Debate's deterministic object mapping.
-    return { descriptor: fileInput.descriptor, replayEmoji: fallbackEmoji };
-  }
+  // Replay proxies are generated server-side when the image joins an episode;
+  // keep this legacy-shaped helper local so setup never performs a model call.
+  return Promise.resolve({
+    descriptor: fileInput.descriptor,
+    replayEmoji: fallbackEmoji,
+  });
 }
 
 type SignalDeleteTarget =
@@ -2523,6 +2571,7 @@ export function BotcastExperience({
     episodeId: string;
     provider: "local" | "openai" | "anthropic";
     model: string;
+    modelSelectionKind: "auto" | "fixed";
     supportsImageInput: boolean;
     unavailable?: boolean;
   } | null>(null);
@@ -2920,6 +2969,7 @@ export function BotcastExperience({
       options?: {
         voiceChannel?: "primary" | "handoff";
         deferPresentationUntilPlaybackStart?: boolean;
+        onPresenceStart?: () => void;
         onHandoffStart?: () => void;
       },
     ) => Promise<void>
@@ -6705,6 +6755,11 @@ export function BotcastExperience({
     const selectedModelOption = episodeModelDraft
       ? (modelOptions.find((option) => option.id === episodeModelDraft) ?? null)
       : null;
+    const setupImageModelCapable =
+      signalEpisodeModelChoiceSupportsImageInput(
+        modelOptions,
+        episodeModelDraft,
+      );
     if (!producerGuest && !guest) {
       setError(
         signalErrorToast(
@@ -6719,12 +6774,12 @@ export function BotcastExperience({
       setupEpisodeImage &&
       (producerGuest ||
         watchMode ||
-        selectedModelOption?.supportsImageInput !== true)
+        !setupImageModelCapable)
     ) {
       setError(
         signalErrorToast(
           "Start Signal episode",
-          "Choose Produce with a fixed vision-capable model for the attached episode image.",
+          "Choose Produce with Auto or a fixed model whose current pool supports image input.",
           "setup image capability",
         ),
       );
@@ -7328,25 +7383,33 @@ export function BotcastExperience({
       await releaseSignalModelWarmup(opening.episode.id);
       await Promise.all([introPlayback.finished, visualMinimum]);
       if (!episodeOperationIsCurrent(controller, runId)) return;
-      setEpisodePreRoll((current) =>
-        current?.showId === selectedShow.id
-        ? { ...current, phase: "landing" }
-          : current,
-      );
-      await new Promise<void>((resolve) =>
-        window.setTimeout(
-        resolve,
-        preRollSkipRequestedRef.current || reducedMotion ? 90 : 460,
-        ),
-      );
-      if (!episodeOperationIsCurrent(controller, runId)) return;
-      setEpisodePreRoll(null);
-      stopSignalIntroAudio();
+      let openingCardReleaseStarted = false;
+      const releaseOpeningCard = (): void => {
+        if (openingCardReleaseStarted) return;
+        openingCardReleaseStarted = true;
+        const landingMs =
+          preRollSkipRequestedRef.current || reducedMotion ? 90 : 460;
+        setEpisodePreRoll((current) =>
+          current?.showId === selectedShow.id
+            ? { ...current, phase: "landing" }
+            : current,
+        );
+        window.setTimeout(() => {
+          if (!episodeOperationIsCurrent(controller, runId)) return;
+          setEpisodePreRoll((current) =>
+            current?.showId === selectedShow.id ? null : current,
+          );
+        }, landingMs);
+        stopSignalIntroAudio();
+      };
       await playPreparedEpisodeMessage(
         opening.message,
         opening.episode,
         controller,
         runId,
+        true,
+        releaseOpeningCard,
+        { onPresenceStart: releaseOpeningCard },
       );
       if (!episodeOperationIsCurrent(controller, runId)) return;
       if (setupImageUpload) {
@@ -8075,6 +8138,7 @@ export function BotcastExperience({
       options?: {
         voiceChannel?: "primary" | "handoff";
         deferPresentationUntilPlaybackStart?: boolean;
+        onPresenceStart?: () => void;
         onHandoffStart?: () => void;
       },
     ): Promise<void> => {
@@ -8105,8 +8169,14 @@ export function BotcastExperience({
       const presentationDeferred =
         options?.deferPresentationUntilPlaybackStart === true;
       const playbackStillOwned = (): boolean =>
-        episodeOperationIsCurrent(controller, runId) ||
-        audibleHandoffOutgoingMessageIdRef.current === message.id;
+        signalLiveSpeechPlaybackIsOwned({
+          messageId: message.id,
+          activeSpeechMessageId: activeSpeechMessageIdRef.current,
+          operationCurrent: episodeOperationIsCurrent(controller, runId),
+          audibleHandoffMessageId:
+            audibleHandoffOutgoingMessageIdRef.current,
+          voiceChannel: options?.voiceChannel ?? "primary",
+        });
       const voicePlaybackEligible = Boolean(
         bot &&
           !bot.muted &&
@@ -8211,6 +8281,7 @@ export function BotcastExperience({
           ) {
             return;
           }
+          options?.onPresenceStart?.();
           const animateCameraPush =
             liveCameraModeRef.current === "auto" &&
             signalCameraWaitingForPresenceRef.current;
@@ -8263,6 +8334,11 @@ export function BotcastExperience({
             voicePreparationTimer = null;
           }
           playbackStarted = true;
+          if (presentationDeferred) {
+            // Resolve the outgoing audience-heard prefix before the incoming
+            // handoff takes ownership of the one live playback clock.
+            notifyPlaybackStart();
+          }
           const playbackObservedAtMs = performance.now();
           signalLiveSpeechPlaybackClockRef.current = {
             messageId: message.id,
@@ -8274,7 +8350,7 @@ export function BotcastExperience({
               current === message.id ? null : current,
             );
           });
-          notifyPlaybackStart();
+          if (!presentationDeferred) notifyPlaybackStart();
           clearLiveCameraPostSpeechHold();
           const resolvedDurationMs =
             durationMs ??
@@ -9713,25 +9789,27 @@ export function BotcastExperience({
             );
             return {
               bridgeLine: nextHostInterruptionBridge.content,
-              ...(audienceCut
+              // The active message remains the interruption target even when
+              // the handoff lands before its first revealed word. The API uses
+              // that identity plus an empty prefix to remove an unheard prepared
+              // line; dropping it here makes the live cut look like a queued one.
+              messageId: activeGuestMessage.id,
+              spokenContent: audienceHeard,
+              ...(audienceCut &&
+              nextHostInterruptionCrosstalkPlan?.publicInterruptedSpeakerCue
                 ? {
-                    messageId: activeGuestMessage.id,
-                    spokenContent: audienceHeard,
-                    ...(nextHostInterruptionCrosstalkPlan?.publicInterruptedSpeakerCue
-                      ? {
-                          publicInterruptedSpeakerCue:
-                            nextHostInterruptionCrosstalkPlan.publicInterruptedSpeakerCue,
-                          interruptedSpeakerCueSpeechEffect:
-                            "speech_obfuscation" as const,
-                        }
-                      : nextHostInterruptionCrosstalkPlan?.interruptedSpeakerCue
-                        ? {
-                            interruptedSpeakerCue:
-                              nextHostInterruptionCrosstalkPlan.interruptedSpeakerCue,
-                          }
-                        : {}),
+                    publicInterruptedSpeakerCue:
+                      nextHostInterruptionCrosstalkPlan.publicInterruptedSpeakerCue,
+                    interruptedSpeakerCueSpeechEffect:
+                      "speech_obfuscation" as const,
                   }
-                : {}),
+                : audienceCut &&
+                    nextHostInterruptionCrosstalkPlan?.interruptedSpeakerCue
+                  ? {
+                      interruptedSpeakerCue:
+                        nextHostInterruptionCrosstalkPlan.interruptedSpeakerCue,
+                    }
+                  : {}),
             };
           }
         : undefined,
@@ -9957,19 +10035,11 @@ export function BotcastExperience({
     : SIGNAL_REPLAY_INTRO_LANDING_FADE_MS;
   const replayIntroCardEndMs =
     signalReplayDefaultIntroDurationMs(replayActiveTimeline);
-  const replayInterviewFootageOffsetMs =
+  const replayCapturedPresentationElapsedMs =
     replayFaithful && replayActiveTimeline
-      ? signalReplayInterviewFootageOffsetMs({
-          timeline: replayActiveTimeline,
-          introCardEndMs: replayIntroCardEndMs,
-        })
-      : 0;
-  const replayInterviewFootageElapsedMs =
-    replayFaithful && replayActiveTimeline
-      ? signalReplayInterviewFootageElapsedMs({
+      ? signalReplayCapturedPresentationElapsedMs({
           timeline: replayActiveTimeline,
           replayElapsedMs,
-          introCardEndMs: replayIntroCardEndMs,
         })
       : replayElapsedMs;
   const replayIntroBookend =
@@ -9985,7 +10055,7 @@ export function BotcastExperience({
     replayFaithful && replayActiveTimeline
       ? signalReplayBookendAt(
           replayActiveTimeline,
-          replayInterviewFootageElapsedMs,
+          replayCapturedPresentationElapsedMs,
           replayPresentationManifestV2,
           { introEndMs: replayIntroCardEndMs },
         )
@@ -10078,13 +10148,13 @@ export function BotcastExperience({
       replayPresentationManifestV2
         ? replaySceneAtV2(
             replayPresentationManifestV2,
-            replayInterviewFootageElapsedMs,
+            replayCapturedPresentationElapsedMs,
             replaySceneCheckpoints,
           )
         : null,
     [
       replayPresentationManifestV2,
-      replayInterviewFootageElapsedMs,
+      replayCapturedPresentationElapsedMs,
       replaySceneCheckpoints,
     ],
   );
@@ -10120,8 +10190,8 @@ export function BotcastExperience({
     ? (replayActiveTimeline?.beats.find(
         (beat) =>
           beat.kind === "utterance" &&
-          replayInterviewFootageElapsedMs >= beat.startMs &&
-          replayInterviewFootageElapsedMs < beat.endMs,
+          replayCapturedPresentationElapsedMs >= beat.startMs &&
+          replayCapturedPresentationElapsedMs < beat.endMs,
       ) ?? null)
     : null;
   const replayFaithfulMessageIndex =
@@ -10150,7 +10220,7 @@ export function BotcastExperience({
             if (
               beat.kind !== "utterance" ||
               !beat.sourceMessageId ||
-              beat.startMs > replayInterviewFootageElapsedMs
+              beat.startMs > replayCapturedPresentationElapsedMs
             ) {
               return latest;
             }
@@ -11100,8 +11170,8 @@ export function BotcastExperience({
     const delayedLiveCaption =
       args.replay && activeMessageIsSocialSilence
         ? replayPlaying &&
-          replayInterviewFootageElapsedMs >= replayMessageStartMs &&
-          replayInterviewFootageElapsedMs < replayMessageEndMs
+          replayCapturedPresentationElapsedMs >= replayMessageStartMs &&
+          replayCapturedPresentationElapsedMs < replayMessageEndMs
           ? "..."
           : ""
         : !args.replay &&
@@ -11168,7 +11238,7 @@ export function BotcastExperience({
         .at(0) ??
       null;
     const speechElapsedMs = args.replay
-      ? Math.max(0, replayInterviewFootageElapsedMs - replayMessageStartMs)
+      ? Math.max(0, replayCapturedPresentationElapsedMs - replayMessageStartMs)
       : projectedLiveSpeechElapsedMs;
     const speechDurationMs = args.replay
       ? Math.max(1, replayMessageEndMs - replayMessageStartMs)
@@ -11359,7 +11429,7 @@ export function BotcastExperience({
         const captured = replaySpeechActivityAtV2(
           replayPresentationManifestV2,
           replayParticipantIdForRole(role),
-          replayInterviewFootageElapsedMs,
+          replayCapturedPresentationElapsedMs,
         );
         if (captured !== null) return replayPlaying && captured;
       }
@@ -11475,12 +11545,12 @@ export function BotcastExperience({
     );
     const cupNowMs =
       args.replay && episodeStartedAtMs !== null
-      ? episodeStartedAtMs + replayInterviewFootageElapsedMs
+      ? episodeStartedAtMs + replayCapturedPresentationElapsedMs
       : liveEffectiveNowMs;
     const identityNowMs =
       args.replay && episodeStartedAtMs !== null
         ? episodeStartedAtMs +
-          replayInterviewFootageElapsedMs +
+          replayCapturedPresentationElapsedMs +
           (args.currentEpisode.modelWarmupHoldDurationMs ?? 0)
         : signalStageNowMs;
     const identityMirrorStates = botcastIdentityMirrorStatesAtV1(
@@ -11703,7 +11773,7 @@ export function BotcastExperience({
           ? replayMouthShapeAtV2(
               replayPresentationManifestV2,
               participantId,
-              replayInterviewFootageElapsedMs,
+              replayCapturedPresentationElapsedMs,
             )
           : null;
       const liveMouthShapeAt = (nowMs: number): ZenLiveBotMouthShape => {
@@ -11750,7 +11820,7 @@ export function BotcastExperience({
           ? replayVoiceLightLevelAtV2(
               replayPresentationManifestV2,
               participantId,
-              replayInterviewFootageElapsedMs,
+              replayCapturedPresentationElapsedMs,
             )
           : null;
       const replayVoiceLightLevel = args.replay && replayFaithful
@@ -11813,7 +11883,7 @@ export function BotcastExperience({
                 ),
           voiceLightLevel: replayVoiceLightLevel,
           eyeTimelineMs: args.replay
-            ? replayInterviewFootageElapsedMs
+            ? replayCapturedPresentationElapsedMs
             : undefined,
           eyeStateStartedAtMs:
             args.replay && talking ? replayMessageStartMs : undefined,
@@ -12286,6 +12356,8 @@ export function BotcastExperience({
           >
             <SignalEpisodeImageVisual
               context={stageImageContext}
+              episodeId={args.currentEpisode.id}
+              replay={args.replay}
               ephemeralDataUrl={stageEpisodeImage?.dataUrl}
             />
           </figure>
@@ -13938,7 +14010,10 @@ export function BotcastExperience({
     const setupImageModeEligible =
       !producerGuestSelected && playbackModeDraft === "live";
     const setupImageModelCapable =
-      selectedEpisodeModelOption?.supportsImageInput === true;
+      signalEpisodeModelChoiceSupportsImageInput(
+        modelOptions,
+        episodeModelDraft,
+      );
     const setupImageAttachDisabled =
       !setupImageModeEligible ||
       !setupImageModelCapable ||
@@ -13953,14 +14028,7 @@ export function BotcastExperience({
         const fileInput = await readSignalEpisodeImageFile(file);
         const imageId = crypto.randomUUID();
         const replayMetadata = await acquireSignalEpisodeImageReplayMetadata(
-          request,
-          imageId,
           fileInput,
-          {
-            preferredProvider: episodeModelProvider,
-            responseMode,
-            modelOverride: selectedEpisodeModelOption?.id ?? null,
-          },
         );
         setSetupEpisodeImage({
           imageId,
@@ -14657,7 +14725,9 @@ export function BotcastExperience({
                 <small>
                   {setupImageModelCapable
                     ? "Attach a transparent PNG item, opaque PNG photo, or JPG photo. Its filename becomes an editable Name."
-                    : "Choose a fixed vision-capable model in the Signal navbar to attach an image before the episode."}
+                    : episodeModelDraft
+                      ? "Choose a vision-capable model in the Signal navbar to attach an image before the episode."
+                      : "Auto can attach an image when its current model pool includes a vision-capable model."}
                 </small>
               )}
             </div>
@@ -15461,6 +15531,9 @@ export function BotcastExperience({
   const signalCapabilityGuestKind = episode?.guestKind ?? null;
   const signalCapabilityProvider = episode?.provider ?? null;
   const signalCapabilityModel = episode?.model ?? null;
+  const signalCapabilityModelSelectionKind = episode
+    ? (botcastEpisodeModelSelectionKind(episode) ?? "fixed")
+    : "fixed";
   useEffect(() => {
     if (
       !signalCapabilityEpisodeId ||
@@ -15476,6 +15549,7 @@ export function BotcastExperience({
     void request<{
       provider: "local" | "openai" | "anthropic";
       model: string;
+      modelSelectionKind: "auto" | "fixed";
       supportsImageInput: boolean;
     }>(`/api/botcast/episodes/${signalCapabilityEpisodeId}/image-capability`)
       .then((capability) => {
@@ -15491,6 +15565,7 @@ export function BotcastExperience({
           episodeId: signalCapabilityEpisodeId,
           provider: signalCapabilityProvider ?? "local",
           model: signalCapabilityModel ?? "Auto",
+          modelSelectionKind: signalCapabilityModelSelectionKind,
           supportsImageInput: false,
           unavailable: true,
         });
@@ -15504,6 +15579,7 @@ export function BotcastExperience({
     signalCapabilityEpisodeStatus,
     signalCapabilityGuestKind,
     signalCapabilityModel,
+    signalCapabilityModelSelectionKind,
     signalCapabilityPlaybackMode,
     signalCapabilityProvider,
   ]);
@@ -15553,7 +15629,7 @@ export function BotcastExperience({
       : activeEpisodeImageCapability.unavailable
         ? "Signal could not verify image input for the active model, so image upload stays disabled."
         : activeEpisodeImageCapability.supportsImageInput !== true
-          ? "The active Signal model does not support image input. Choose a vision-capable model for a new episode."
+          ? "This episode's locked model pool has no vision-capable model. Start a new episode with a capable Auto pool or fixed model."
       : signalImageDiscussionActive
         ? "This episode's one image is already on the table."
         : signalImageAlreadyUsed
@@ -15562,7 +15638,11 @@ export function BotcastExperience({
           ? "Let the queued Producer cue air before adding an image."
           : imageUploadBusy
             ? "Adding image to the Signal table…"
-            : `Add an image for the host and guest to discuss with ${activeEpisodeImageCapability.model}.`;
+            : `Add an image for the host and guest to discuss with ${
+                activeEpisodeImageCapability.modelSelectionKind === "auto"
+                  ? `Auto → ${activeEpisodeImageCapability.model}`
+                  : activeEpisodeImageCapability.model
+              }.`;
   const queuedCueCanInterruptGuest =
     Boolean(queuedProducerCue) &&
     Boolean(nextHostInterruptionBridge) &&
@@ -15666,10 +15746,7 @@ export function BotcastExperience({
       const fileInput = await readSignalEpisodeImageFile(file);
       const imageId = crypto.randomUUID();
       const replayMetadata = await acquireSignalEpisodeImageReplayMetadata(
-        request,
-        imageId,
         fileInput,
-        { episodeId: episode.id },
       );
       const upload: SignalEpisodeImageUpload = {
         episodeId: episode.id,
@@ -15897,11 +15974,16 @@ export function BotcastExperience({
   const episodeSelectedModelProvider =
     modelOptions.find((option) => option.id === episodeModelControlValue)
       ?.provider ?? preferredProvider;
+  const activeAutoRoute =
+    episode && botcastEpisodeModelSelectionKind(episode) === "auto"
+      ? signalActiveAutoRoute(episode)
+      : null;
   const resolvedLockedRoutingChip =
     liveSessionActive
       ? (resolveLockedRoutingChip?.({
           modelChoice: episodeModelControlValue || "auto",
           modelProvider: episodeSelectedModelProvider,
+          activeAutoRoute,
         }) ?? lockedRoutingChip)
       : null;
   const resolvedNavigationHeader =
@@ -17496,11 +17578,11 @@ export function BotcastExperience({
                       }
                       onClick={() => {
                         const nextMs =
-                          (replayActiveTimeline?.beats.find(
+                          replayActiveTimeline?.beats.find(
                             (beat) => beat.sourceMessageId === message.id,
                           )?.startMs ??
                             replayTimeline.messageStartMs[index] ??
-                            0) + replayInterviewFootageOffsetMs;
+                            0;
                         seekFaithfulReplay(nextMs);
                       }}
                       disabled={!replayFaithful}

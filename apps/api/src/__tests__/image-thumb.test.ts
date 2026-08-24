@@ -11,6 +11,7 @@ import {
   writeGeneratedImageBytes,
 } from "../image-storage.ts";
 import {
+  encodeSignalReplayImageProxyFromRasterBytes,
   encodeWebpThumbFromRasterBytes,
   GENERATED_IMAGE_THUMB_MAX_EDGE_PX,
   readOrCreateThumbBytes,
@@ -104,5 +105,32 @@ describe("encodeWebpThumbFromRasterBytes", () => {
       else process.env.LOCALAI_DATA_DIR = previousDataDir;
       rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("encodeSignalReplayImageProxyFromRasterBytes", () => {
+  it("creates a small metadata-free WebP proxy while preserving alpha", async () => {
+    const png = await sharp({
+      create: {
+        width: 640,
+        height: 480,
+        channels: 4,
+        background: { r: 220, g: 80, b: 140, alpha: 0.42 },
+      },
+    })
+      .withMetadata({ density: 300 })
+      .png()
+      .toBuffer();
+
+    const proxy = await encodeSignalReplayImageProxyFromRasterBytes(png);
+    assert.ok(proxy.bytes.length > 0);
+    assert.equal(proxy.width, 128);
+    assert.equal(proxy.height, 96);
+    const meta = await sharp(proxy.bytes).metadata();
+    assert.equal(meta.format, "webp");
+    assert.equal(meta.width, 128);
+    assert.equal(meta.height, 96);
+    assert.equal(meta.hasAlpha, true);
+    assert.equal(meta.density, undefined);
   });
 });
