@@ -163,7 +163,7 @@ export interface DebateMysteryWitnessChapterV2 {
 export interface DebateMysteryProsecutionChoiceV2 {
   id: string;
   promptLineId: string;
-  optionIds: string[];
+  options: Array<{ id: string; lineId: string; responseNodeId: string }>;
 }
 
 export interface DebateMysteryDialogueGraphV2 {
@@ -346,7 +346,18 @@ export interface DebateWhodunnitFormatStateV2 {
   audioReady: boolean;
   voicesEnabled: boolean;
   localAudioFailure: string | null;
+  calloutHistory: Array<{
+    id: string;
+    callout: DebateMysteryCourtCalloutV2;
+    actorColor: string | null;
+    occurredAt: string;
+  }>;
   pendingCallout: { id: string; callout: DebateMysteryCourtCalloutV2; actorColor: string | null } | null;
+  pendingProsecutionChoice: {
+    id: string;
+    prompt: string;
+    options: Array<{ id: string; text: string }>;
+  } | null;
 }
 
 export type DebateMysteryActionRequestV2 =
@@ -506,7 +517,7 @@ export function validateDebateMysteryDialogueGraphV2(args: {
     if (root.kind !== "choice_reaction" || root.requirements.choices.length !== 1) return false;
     const requiredChoice = root.requirements.choices[0]!;
     const choice = graph.prosecutionChoices.find((entry) =>
-      entry.id === requiredChoice.choiceId && entry.optionIds.includes(requiredChoice.optionId));
+      entry.id === requiredChoice.choiceId && entry.options.some((option) => option.id === requiredChoice.optionId));
     const promptNodeId = choice ? lineById.get(choice.promptLineId)?.nodeId : null;
     if (!choice || !promptNodeId || !reachableNodes.has(promptNodeId)) return false;
     const withoutChoice: DebateMysteryDialogueRequirementV2 = {
@@ -581,8 +592,16 @@ export function validateDebateMysteryDialogueGraphV2(args: {
   }
   for (const choice of graph.prosecutionChoices) {
     if (!lineById.has(choice.promptLineId)) errors.push(`Prosecution choice ${choice.id} has no prompt line.`);
-    if (choice.optionIds.length < 2) errors.push(`Prosecution choice ${choice.id} needs at least two authored options.`);
-    for (const optionId of choice.optionIds) {
+    if (choice.options.length < 2) errors.push(`Prosecution choice ${choice.id} needs at least two authored options.`);
+    for (const option of choice.options) {
+      const optionId = option.id;
+      const optionLine = lineById.get(option.lineId);
+      if (!optionLine || optionLine.mode !== "player_selected") {
+        errors.push(`Prosecution choice ${choice.id} option ${optionId} has no player-selected line.`);
+      }
+      if (!nodeById.has(option.responseNodeId)) {
+        errors.push(`Prosecution choice ${choice.id} option ${optionId} has no response node.`);
+      }
       const responseExists = graph.nodes.some((node) =>
         node.kind === "choice_reaction" &&
         node.requirements.choices.some((choiceRequirement) =>

@@ -11009,11 +11009,12 @@ export function buildBotcastSpeakerPrompt(
   const imageReference = imageContext
     ? botcastEpisodeImageSpokenReference(imageContext)
     : "this image";
+  const imageTitle = imageContext?.name ?? null;
   const imageDiscussionRule =
     args.speakerRole === "host" &&
     args.cue?.kind === "present_image" &&
     imageContext?.phase === "queued"
-      ? `The Producer has supplied ${imageReference}, attached to this turn. Signal's stage visual places it at the center of the table now. In your own host voice, explicitly refer to it as ${JSON.stringify(imageReference)}, invite the guest to look, and ask one concise equivalent of "What are your thoughts on this?" Do not describe upload mechanics, file metadata, vision capability, prompts, or the control room. Do not analyze it for the guest yet; give them the first response.`
+      ? `The Producer has supplied an attached image with the title ${JSON.stringify(imageTitle)}. Signal's stage visual places it at the center of the table now. Treat that title as semantic caption context, not as a sentence to wrap mechanically. In your own host voice, refer to the image naturally, invite the guest to look, and ask one concise equivalent of "What are your thoughts on this?" If the title already contains picture, photo, portrait, artwork, or similar visual wording, do not prepend another generic "picture of" phrase. If the title names or approximately names the interviewed guest, resolve it to that guest and say "of you" when that is the natural phrasing. Do not describe upload mechanics, file metadata, vision capability, prompts, or the control room. Do not analyze it for the guest yet; give them the first response.`
       : args.speakerRole === "guest" && imageContext?.phase === "presented"
         ? `The host has placed ${imageReference} at the center of the table and invited your reaction. Begin with a brief, natural acknowledgement that you are taking a look, then discuss concrete visible details and what they mean from this guest's own perspective. ${imageContext.kind === "item" ? "Treat it as a physical item being shown to you, not as a photograph of an item." : "Treat it as a picture being shown to you, not as the physical subject itself."} Ground every visual claim in the attachment. Do not claim you cannot see it, do not discuss upload mechanics, and do not answer with generic remarks that could fit any image.`
         : args.speakerRole === "host" && imageContext?.phase === "discussing"

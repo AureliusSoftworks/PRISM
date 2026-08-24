@@ -2364,6 +2364,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     );
     CREATE INDEX IF NOT EXISTS idx_debate_mystery_audio_refs_cache
       ON debate_mystery_audio_refs(cache_key);
+    CREATE TRIGGER IF NOT EXISTS debate_mystery_audio_ref_deleted
+      AFTER DELETE ON debate_mystery_audio_refs
+      BEGIN
+        UPDATE debate_mystery_audio_cache
+           SET ref_count = MAX(0, ref_count - 1),
+               last_used_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE cache_key = OLD.cache_key AND user_id = OLD.user_id;
+      END;
     CREATE TABLE IF NOT EXISTS debate_mystery_actions (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,

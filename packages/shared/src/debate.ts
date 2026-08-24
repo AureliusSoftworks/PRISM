@@ -31,6 +31,7 @@ import {
 } from "./debateMystery.ts";
 import {
   normalizeDebateMysteryFormatStateV2,
+  type DebateWhodunnitCreateConfigV2,
   type DebateWhodunnitFormatStateV2,
 } from "./debateMysteryV2.ts";
 import {
@@ -1631,7 +1632,7 @@ export function resolveDebateForumRoundPlan(args: {
 
 export interface DebateSessionCreateRequest {
   format?: DebateFormatId;
-  whodunnit?: DebateWhodunnitCreateConfigV1;
+  whodunnit?: DebateWhodunnitCreateConfigV1 | DebateWhodunnitCreateConfigV2;
   formality?: DebateFormalityId;
   presetId?: DebateSetupPresetId | "custom";
   jury?: {

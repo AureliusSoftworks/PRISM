@@ -130,6 +130,26 @@ describe("Signal public cadence speech", () => {
       }),
       "this picture of Untitled portrait study",
     );
+    const semanticTitle = botcastEpisodeImageDescriptorFromFileName(
+      "hyper-realistic-picture-einstine.jpg",
+      "image/jpeg",
+    );
+    assert.deepEqual(semanticTitle, {
+      kind: "picture",
+      name: "hyper realistic picture einstine",
+      mimeType: "image/jpeg",
+    });
+    assert.equal(
+      botcastEpisodeImageSpokenReference(semanticTitle!),
+      "this hyper realistic picture einstine",
+    );
+    assert.equal(
+      botcastEpisodeImageSpokenReference({
+        kind: "picture",
+        name: 'a “hyper-realistic” portrait of you',
+      }),
+      'this “hyper-realistic” portrait of you',
+    );
     assert.equal(
       botcastEpisodeImageDescriptorFromFileName("wax-candle.jpeg", "image/jpeg"),
       null,

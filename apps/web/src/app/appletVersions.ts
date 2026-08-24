@@ -97,7 +97,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   debate: {
     id: "debate",
     name: "Debate",
-    version: "0.47",
+    version: "0.48",
     status: "preview",
   },
   polling: {

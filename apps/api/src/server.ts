@@ -288,6 +288,18 @@ import {
   resumeDebateMysteryCompilation,
 } from "./debate-mystery.ts";
 import {
+  applyDebateMysteryActionV2,
+  cancelDebateMysteryCompilationV2,
+  continueDebateMysteryV2WithoutVoices,
+  createDebateMysterySessionV2,
+  cleanupUnreferencedDebateMysteryAudioV2,
+  getDebateMysteryAudioClipV2,
+  getDebateMysteryAudioStorageSummaryV2,
+  getDebateMysteryCompilationStatusV2,
+  retryDebateMysteryCompilationV2,
+  runDebateMysteryCompilationV2,
+} from "./debate-mystery-v2.ts";
+import {
   buildSignalLiveBakeArtifactFromEpisode,
   debateSessionSupportsFullBake,
 } from "./live-bake.ts";
@@ -17321,7 +17333,27 @@ function buildRoutes(): RouteDefinition[] {
             : {}),
         },
       );
-      const session = body.format === "whodunnit"
+      const whodunnitVersion = body.whodunnit && typeof body.whodunnit === "object"
+        ? (body.whodunnit as Record<string, unknown>).version
+        : null;
+      const session = body.format === "whodunnit" && whodunnitVersion === 2
+        ? await runWithUsageSession(
+            {
+              db,
+              userId,
+              privacyScope: "private",
+              mode: "debate",
+              surface: "debate",
+            },
+            () => createDebateMysterySessionV2(
+              db,
+              userId,
+              body.whodunnit as Parameters<typeof createDebateMysterySessionV2>[2],
+              body.idempotencyKey,
+              runtime,
+            ),
+          )
+        : body.format === "whodunnit"
         ? await runWithUsageSession(
             {
               db,
@@ -17446,6 +17478,19 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
       const frozen = getDebateSession(db, userId, ctx.params.id);
+      if (frozen.formatState.format === "whodunnit" && frozen.formatState.version === 2) {
+        const session = applyDebateMysteryActionV2(
+          db,
+          userId,
+          ctx.params.id,
+          body as unknown as Parameters<typeof applyDebateMysteryActionV2>[3],
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          session: debateSessionForPlayer(session),
+        });
+        return;
+      }
       const runtime = await debateAiRuntimeForUser(
         userId,
         frozen.provider,
@@ -17488,7 +17533,18 @@ function buildRoutes(): RouteDefinition[] {
         frozen.autoCandidateAllowlist,
         debateAutoRoutingContext(frozen),
       );
-      const session = await runWithUsageSession(
+      const session = frozen.formatState.format === "whodunnit" && frozen.formatState.version === 2
+        ? await runWithUsageSession(
+            {
+              db,
+              userId,
+              privacyScope: "private",
+              mode: "debate",
+              surface: "debate",
+            },
+            () => runDebateMysteryCompilationV2(db, userId, ctx.params.id, runtime),
+          )
+        : await runWithUsageSession(
         {
           db,
           userId,
@@ -17497,8 +17553,90 @@ function buildRoutes(): RouteDefinition[] {
           surface: "debate",
         },
         () => resumeDebateMysteryCompilation(db, userId, ctx.params.id, runtime),
+          );
+      json(ctx.res, 200, { ok: true, session: debateSessionForPlayer(session) });
+    }),
+    route("GET", "/api/debates/:id/mystery-compilation", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        compilation: getDebateMysteryCompilationStatusV2(
+          db,
+          userId,
+          ctx.params.id,
+        ),
+      });
+    }),
+    route("POST", "/api/debates/:id/mystery-compilation/retry", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const frozen = getDebateSession(db, userId, ctx.params.id);
+      if (frozen.formatState.format !== "whodunnit" || frozen.formatState.version !== 2) {
+        throw new HttpError(409, "This session is not a Whodunnit V2 case.");
+      }
+      const runtime = await debateAiRuntimeForUser(
+        userId,
+        frozen.provider,
+        frozenDebateModelOverride(frozen),
+        frozen.responseMode,
+        frozen.generationChain,
+        frozen.autoCandidateAllowlist,
+        debateAutoRoutingContext(frozen),
+      );
+      const session = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "private",
+          mode: "debate",
+          surface: "debate",
+        },
+        () => retryDebateMysteryCompilationV2(db, userId, ctx.params.id, runtime),
       );
       json(ctx.res, 200, { ok: true, session: debateSessionForPlayer(session) });
+    }),
+    route("POST", "/api/debates/:id/mystery-compilation/cancel", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        compilation: cancelDebateMysteryCompilationV2(db, userId, ctx.params.id),
+      });
+    }),
+    route("POST", "/api/debates/:id/mystery-compilation/continue-without-voices", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const session = continueDebateMysteryV2WithoutVoices(
+        db,
+        userId,
+        ctx.params.id,
+      );
+      json(ctx.res, 200, { ok: true, session: debateSessionForPlayer(session) });
+    }),
+    route("GET", "/api/debates/:id/mystery-audio/:lineId", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const file = getDebateMysteryAudioClipV2(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.params.lineId,
+      );
+      streamReplayFile(ctx, {
+        absolutePath: file.absolutePath,
+        contentType: file.mimeType,
+        sizeBytes: file.byteSize,
+      }, { range: true });
+    }),
+    route("GET", "/api/debates/mystery-audio-storage", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        storage: getDebateMysteryAudioStorageSummaryV2(db, userId),
+      });
+    }),
+    route("POST", "/api/debates/mystery-audio-storage/cleanup", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        cleanup: cleanupUnreferencedDebateMysteryAudioV2(db, userId),
+      });
     }),
     route("GET", "/api/debates/:id/notebook", async (ctx) => {
       const userId = requireAuth(ctx);

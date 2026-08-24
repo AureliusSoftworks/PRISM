@@ -1627,6 +1627,18 @@ export function botcastEpisodeImageSpokenReference(
   if (genericName) {
     return image.kind === "item" ? "this item" : "this picture";
   }
+  if (/^(?:(?:an?|the)\s+)?(?:unknown|untitled|generic|unidentified)\b/iu.test(normalizedName)) {
+    return image.kind === "item"
+      ? `this ${normalizedName}`
+      : `this picture of ${normalizedName}`;
+  }
+  const titleAlreadyNamesAVisual =
+    /\b(?:image|item|object|photo|photograph|picture|portrait|artwork|drawing|painting|sketch)\b/iu.test(
+      normalizedName,
+    );
+  if (titleAlreadyNamesAVisual) {
+    return `this ${normalizedName.replace(/^(?:an?|the)\s+/iu, "")}`;
+  }
   return image.kind === "item"
     ? `this ${normalizedName}`
     : `this picture of ${normalizedName}`;

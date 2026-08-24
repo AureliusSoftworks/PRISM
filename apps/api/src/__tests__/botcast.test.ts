@@ -1344,6 +1344,10 @@ describe("Botcast persistence and isolation", () => {
         .map((message) => message.content)
         .join("\n");
       assert.match(hostPrompt, /this wax candle/u);
+      assert.match(hostPrompt, /Treat that title as semantic caption context/u);
+      assert.match(hostPrompt, /If the title already contains picture, photo, portrait/u);
+      assert.match(hostPrompt, /If the title names or approximately names the interviewed guest/u);
+      assert.doesNotMatch(hostPrompt, /explicitly refer to it as "this wax candle"/u);
       assert.match(hostPrompt, /Present the statue as a gift/u);
       assert.match(
         hostPrompt,
