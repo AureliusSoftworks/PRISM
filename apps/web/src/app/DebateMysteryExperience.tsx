@@ -1026,7 +1026,9 @@ export function DebateMysteryPlay(
         setTheoryBoardOpen(false);
         playMysterySfx("theory");
         announceAction(
-          "Charges filed. The public gallery is assembling while Turnabout prepares the frozen court record.",
+          action.action === "choose_investigation_path"
+            ? "Partner investigation complete. Their filed public record is waiting in Turnabout."
+            : "Charges filed. The public gallery is assembling while Turnabout prepares the frozen court record.",
         );
         return true;
       }
@@ -1086,7 +1088,9 @@ export function DebateMysteryPlay(
             : `New lead · ${changedLeads[0]!.title}`
           : changedLeads.length > 1
             ? `${changedLeads.length} leads updated in your notebook.`
-            : action.action === "travel"
+            : action.action === "choose_investigation_path"
+              ? "You are leading the investigation. The mansion is open."
+              : action.action === "travel"
               ? next.rooms.find((room) => room.id === action.roomId)?.name
                 ? `Entered ${next.rooms.find((room) => room.id === action.roomId)?.name}.`
                 : "Room selected."
@@ -1405,6 +1409,9 @@ export function DebateMysteryPlay(
   const theoryReadyCount = theoryChecklist.filter((item) => item.complete).length;
   const inTrial = state.playPhase === "trial";
   const atVerdict = state.playPhase === "verdict" && state.verdict;
+  const choosingInvestigationPath =
+    state.playPhase === "investigation" &&
+    state.investigationApproach === "undecided";
   const courtBeats = state.partnerJournal
     .map((entry) => mysteryCourtBeat(entry, state.suspects))
     .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
@@ -1823,31 +1830,62 @@ export function DebateMysteryPlay(
           <span data-tutorial-target="whodunnit-mission"><b>Mission</b> Determine who killed {state.victim.name}, then prove it in court.</span>
           <small>{state.fictionLabel}</small>
         </div>
-        <div className={styles.actionCounter} data-empty={!inTrial && !atVerdict && state.actionsRemaining === 0 ? "true" : undefined}>
-          {inTrial
+        <div className={styles.actionCounter} data-empty={!inTrial && !atVerdict && !choosingInvestigationPath && state.actionsRemaining === 0 ? "true" : undefined}>
+          {choosingInvestigationPath
+            ? <><small>Assignment</small><strong>Open</strong></>
+            : inTrial
             ? <><small>Credibility</small><strong>{state.credibilityRemaining}</strong></>
             : atVerdict
               ? <><small>Case</small><strong>Closed</strong></>
               : <><small>Actions</small><strong>{state.actionsRemaining}</strong></>}
         </div>
         <div className={styles.hudControls} data-tutorial-target="whodunnit-hud-controls">
-          {!inTrial && !atVerdict ? <button type="button" aria-pressed={caseFileOpen} onClick={() => {
+          {!inTrial && !atVerdict && !choosingInvestigationPath ? <button type="button" aria-pressed={caseFileOpen} onClick={() => {
             setCaseFileOpen((open) => !open);
             setDeskOpen(false);
             playMysterySfx("folder");
           }}>Case file</button> : null}
-          {!inTrial && !atVerdict ? <button type="button" aria-pressed={deskOpen} onClick={() => {
+          {!inTrial && !atVerdict && !choosingInvestigationPath ? <button type="button" aria-pressed={deskOpen} onClick={() => {
             setDeskOpen((open) => !open);
             setCaseFileOpen(false);
             playMysterySfx("paper");
           }}>Desk</button> : null}
-          <button type="button" onClick={() => void openTheoryBoard()} data-tutorial-target="whodunnit-theory-control">Theory</button>
+          {!choosingInvestigationPath ? <button type="button" onClick={() => void openTheoryBoard()} data-tutorial-target="whodunnit-theory-control">Theory</button> : null}
         </div>
       </header>
 
       {error ? <div className={styles.errorBanner} role="alert">{error}</div> : null}
 
-      {atVerdict ? (
+      {choosingInvestigationPath ? (
+        <section className={styles.investigationAssignment} data-tutorial-target="whodunnit-investigation-choice" aria-labelledby="whodunnit-assignment-title">
+          <div className={styles.assignmentScene} aria-hidden="true">
+            <div className={styles.assignmentPartner}>
+              {props.renderMysteryBotAvatar(partner ?? { id: props.session.forAdvocate.id, name: props.session.forAdvocate.name, color: null, glyph: null, hardMuted: false }, "mini", { demeanor: "partner", blinkEnabled: true })}
+            </div>
+            <div className={styles.assignmentFile}><i /><i /><i /><span>Case file</span></div>
+          </div>
+          <div className={styles.assignmentCopy}>
+            <p className={styles.eyebrow}>Case assignment</p>
+            <h1 id="whodunnit-assignment-title">Where do you take the lead?</h1>
+            <p>You can work the mansion yourself, or trust {partner?.name ?? props.session.forAdvocate.name} to investigate and meet them at counsel table with a filed case.</p>
+          </div>
+          <div className={styles.assignmentChoices}>
+            <button type="button" disabled={busy} onClick={() => void perform({ action: "choose_investigation_path", path: "player" })}>
+              <small>Full investigation</small>
+              <strong>Investigate the mansion</strong>
+              <span>Search rooms, question suspects, and decide what accusation reaches court.</span>
+              <b>Enter the crime scene →</b>
+            </button>
+            <button type="button" className={styles.partnerAssignmentChoice} disabled={busy} onClick={() => void perform({ action: "choose_investigation_path", path: "partner" })}>
+              <small>Jump to Turnabout</small>
+              <strong>Trust {partner?.name ?? props.session.forAdvocate.name}</strong>
+              <span>Inherit their evidence, witnesses, and accusation—then prove the case through testimony and cross-examination.</span>
+              <b>Go straight to court →</b>
+            </button>
+          </div>
+          <p className={styles.assignmentFinality}>Once your partner files charges, the mansion closes and their public record becomes your court record.</p>
+        </section>
+      ) : atVerdict ? (
         <section className={styles.verdict} data-grade={state.verdict?.grade}>
           <p className={styles.eyebrow}>PRISM’s deterministic verdict</p>
           <h2>{gradeLabel(state.verdict!.grade)}</h2>

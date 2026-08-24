@@ -29,6 +29,7 @@ import {
   type DebateEventV1,
   type DebateFormalityId,
   type DebateMotionSlateV1,
+  type DebateSessionCreateRequest,
 } from "@localai/shared";
 import { initializeDatabase } from "../db.ts";
 import {
@@ -1723,6 +1724,7 @@ async function createDebateForRole(
     debateRuntime?: DebateAiRuntime;
     formality?: DebateFormalityId;
     moderatorTitle?: string;
+    moderatorNameOverride?: string;
     moderatorSystemPrompt?: string;
     moderatorPowers?: BotPowerV1[];
     forPowers?: BotPowerV1[];
@@ -1762,33 +1764,34 @@ async function createDebateForRole(
     },
     debateRuntime,
   );
-  return createDebateSession(
-    db,
-    "user-1",
-    {
-      motion: MOTION,
-      formality: options.formality,
-      evidence: options.evidence ?? {
-        version: 1,
-        notes: "",
-        sources: [],
-        frozenAt: null,
-      },
-      moderatorTitle: options.moderatorTitle,
-      moderatorBotId: "moderator",
-      forAdvocateBotId: "for",
-      againstAdvocateBotId: "against",
-      playerRole: role,
-      playerSideId: role === "participant" ? "against" : null,
-      participationDifficulty: options.participantDifficulty,
-      advocacyConsent: checks,
-      preferredProvider: "local",
-      theme: "light",
-      ...(options.deferStart ? { deferStart: true } : {}),
-      idempotencyKey: `create:${role}:0001`,
+  const createRequest: DebateSessionCreateRequest & {
+    moderatorName?: string;
+  } = {
+    motion: MOTION,
+    formality: options.formality,
+    evidence: options.evidence ?? {
+      version: 1,
+      notes: "",
+      sources: [],
+      frozenAt: null,
     },
-    debateRuntime,
-  );
+    moderatorTitle: options.moderatorTitle,
+    moderatorBotId: "moderator",
+    forAdvocateBotId: "for",
+    againstAdvocateBotId: "against",
+    playerRole: role,
+    playerSideId: role === "participant" ? "against" : null,
+    participationDifficulty: options.participantDifficulty,
+    advocacyConsent: checks,
+    preferredProvider: "local",
+    theme: "light",
+    ...(options.deferStart ? { deferStart: true } : {}),
+    idempotencyKey: `create:${role}:0001`,
+    ...(options.moderatorNameOverride
+      ? { moderatorName: options.moderatorNameOverride }
+      : {}),
+  };
+  return createDebateSession(db, "user-1", createRequest, debateRuntime);
 }
 
 async function createJuryDebateForRole(
@@ -7106,8 +7109,10 @@ describe("Debate engine", () => {
         debateRuntime,
         formality: "plainspoken",
         moderatorTitle: "  The House  ",
+        moderatorNameOverride: "Justice Aurora",
       });
       assert.equal(session.moderatorTitle, "The House");
+      assert.equal(session.moderatorName, "Mira");
       assert.equal(
         listDebateSessions(db, "user-1")[0]?.moderatorTitle,
         "The House",
@@ -7618,6 +7623,279 @@ describe("Debate engine", () => {
     assert.ok(["bot-a", "bot-b"].includes(invent.suggestion.againstAdvocateBotId));
     assert.equal(invent.suggestion.exhibits.length, 2);
     assert.equal(invent.suggestion.researchMeta.sourcesSkippedReason, "local");
+  });
+
+  it("repairs New Duel motion envelopes that omit motion.motion", async () => {
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse() {
+        return JSON.stringify({
+          topic: "City wildlife",
+          motion: {
+            title: "Night Habitats",
+            forSide: {
+              label: "Protect",
+              brief: "Nightlife and ecology both deserve room to thrive.",
+            },
+            againstSide: {
+              label: "Balance",
+              brief: "City life needs stable nighttime rhythms and safety.",
+            },
+          },
+          format: "forum",
+          formality: "plainspoken",
+          forumRoundMode: "auto",
+          forumRoundCount: 1,
+          juryEnabled: false,
+          setupPresetId: "classic-duel",
+          moderatorTitle: "Night Wardens",
+          forAdvocateBotId: "bot-a",
+          againstAdvocateBotId: "bot-b",
+          notes: "Use motion fallback from title.",
+          exhibits: [],
+        });
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    const invent = await suggestDebateSetup({
+      direction: "",
+      roster: [
+        { id: "bot-a", name: "Ada", personaSnippet: "ecologist" },
+        { id: "bot-b", name: "Bea", personaSnippet: "planner" },
+      ],
+      runtime: runtimeWith(provider),
+      research: {
+        allowOnlineResearch: false,
+        searchWeb: async () => [],
+        searchScholar: async () => [],
+      },
+    });
+    assert.equal(invent.suggestion.motion.motion, "City wildlife");
+    assert.equal(invent.suggestion.motion.forSide.label, "Protect");
+    assert.equal(invent.suggestion.motion.againstSide.label, "Balance");
+    assert.equal(invent.suggestion.exhibits.length, 2);
+  });
+
+  it("repairs New Duel motion envelopes using top-level title fallback", async () => {
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse() {
+        return JSON.stringify({
+          title: "Moonlight Kitchens",
+          motion: {
+            forSide: {
+              label: "Reclaim",
+              brief: "Night activity can support local culture and business.",
+            },
+            againstSide: {
+              label: "Regulate",
+              brief: "Noise and safety need stronger municipal protections.",
+            },
+          },
+          format: "forum",
+          formality: "plainspoken",
+          forumRoundMode: "auto",
+          forumRoundCount: 1,
+          juryEnabled: false,
+          setupPresetId: "classic-duel",
+          moderatorTitle: "Late Shift",
+          forAdvocateBotId: "bot-a",
+          againstAdvocateBotId: "bot-b",
+          notes: "Use topic/title fallback from top-level title.",
+          exhibits: [],
+        });
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    const invent = await suggestDebateSetup({
+      direction: "",
+      roster: [
+        { id: "bot-a", name: "Ada", personaSnippet: "ecologist" },
+        { id: "bot-b", name: "Bea", personaSnippet: "planner" },
+      ],
+      runtime: runtimeWith(provider),
+      research: {
+        allowOnlineResearch: false,
+        searchWeb: async () => [],
+        searchScholar: async () => [],
+      },
+    });
+    assert.equal(invent.suggestion.motion.motion, "Moonlight Kitchens");
+    assert.equal(invent.suggestion.motion.forSide.label, "Reclaim");
+    assert.equal(invent.suggestion.motion.againstSide.label, "Regulate");
+    assert.equal(invent.suggestion.exhibits.length, 2);
+  });
+
+  it("repairs New Duel envelopes with a string motion and root-level side objects", async () => {
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse() {
+        return JSON.stringify({
+          topic: "City wildlife",
+          motion: "Cities should prioritize dark-sky corridors at night.",
+          forSide: {
+            label: "Dark Corridors",
+            brief: "Protect migration routes while reducing glare.",
+          },
+          againstSide: {
+            label: "Safe Streets",
+            brief: "Residents need predictable lighting for safety and comfort.",
+          },
+          format: "forum",
+          formality: "plainspoken",
+          forumRoundMode: "auto",
+          forumRoundCount: 1,
+          juryEnabled: false,
+          setupPresetId: "classic-duel",
+          moderatorTitle: "City Ward",
+          forAdvocateBotId: "bot-a",
+          againstAdvocateBotId: "bot-b",
+          notes: "Lift root side objects into the motion slate.",
+          exhibits: [],
+        });
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    const invent = await suggestDebateSetup({
+      direction: "",
+      roster: [
+        { id: "bot-a", name: "Ada", personaSnippet: "ecologist" },
+        { id: "bot-b", name: "Bea", personaSnippet: "planner" },
+      ],
+      runtime: runtimeWith(provider),
+      research: {
+        allowOnlineResearch: false,
+        searchWeb: async () => [],
+        searchScholar: async () => [],
+      },
+    });
+    assert.equal(
+      invent.suggestion.motion.motion,
+      "Cities should prioritize dark-sky corridors at night.",
+    );
+    assert.equal(invent.suggestion.motion.forSide.label, "Dark Corridors");
+    assert.equal(invent.suggestion.motion.againstSide.label, "Safe Streets");
+  });
+
+  it("keeps a single valid exhibit while repairing New Duel motion envelopes", async () => {
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse() {
+        return JSON.stringify({
+          topic: "City wildlife",
+          motion: {
+            title: "Night Habitats",
+            forSide: {
+              label: "Protect",
+              brief: "Nightlife and ecology both deserve room to thrive.",
+            },
+            againstSide: {
+              label: "Balance",
+              brief: "City life needs stable nighttime rhythms and safety.",
+            },
+          },
+          format: "forum",
+          formality: "plainspoken",
+          forumRoundMode: "auto",
+          forumRoundCount: 1,
+          juryEnabled: false,
+          setupPresetId: "classic-duel",
+          moderatorTitle: "Night Wardens",
+          forAdvocateBotId: "bot-a",
+          againstAdvocateBotId: "bot-b",
+          notes: "Preserve one valid exhibit from model output.",
+          exhibit: {
+            adjective: "Quiet",
+            object: "lamp",
+            observation: "A low amber glow marks the alley.",
+            emoji: "🕯️",
+          },
+        });
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    const invent = await suggestDebateSetup({
+      direction: "",
+      roster: [
+        { id: "bot-a", name: "Ada", personaSnippet: "ecologist" },
+        { id: "bot-b", name: "Bea", personaSnippet: "planner" },
+      ],
+      runtime: runtimeWith(provider),
+      research: {
+        allowOnlineResearch: false,
+        searchWeb: async () => [],
+        searchScholar: async () => [],
+      },
+    });
+    assert.equal(invent.suggestion.motion.motion, "City wildlife");
+    assert.equal(invent.suggestion.exhibits.length, 2);
+    assert.equal(
+      invent.suggestion.exhibits[0].observation,
+      "A low amber glow marks the alley.",
+    );
+    assert.equal(invent.suggestion.exhibits[0].adjective, "Quiet");
+  });
+
+  it("rejects irreparable New Duel motion envelopes", async () => {
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse() {
+        return JSON.stringify({
+          topic: "",
+          motion: {
+            title: "",
+            forSide: {
+              label: "For",
+              brief: "",
+            },
+            againstSide: {
+              label: "",
+              brief: "",
+            },
+          },
+          format: "forum",
+          formality: "plainspoken",
+          forumRoundMode: "auto",
+          forumRoundCount: 1,
+          juryEnabled: false,
+          setupPresetId: "classic-duel",
+          moderatorTitle: "No Motion",
+          forAdvocateBotId: "bot-a",
+          againstAdvocateBotId: "bot-b",
+          notes: "Unrepairable motion payload.",
+        });
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    await assert.rejects(
+      () =>
+        suggestDebateSetup({
+          direction: "",
+          roster: [
+            { id: "bot-a", name: "Ada", personaSnippet: "ecologist" },
+            { id: "bot-b", name: "Bea", personaSnippet: "planner" },
+          ],
+          runtime: runtimeWith(provider),
+          research: {
+            allowOnlineResearch: false,
+            searchWeb: async () => [],
+            searchScholar: async () => [],
+          },
+        }),
+      (error) =>
+        error instanceof Error &&
+        /The model returned an invalid Debate response shape/u.test(error.message),
+    );
   });
 
   it("attaches Brave and Crossref sources when online research is allowed", async () => {

@@ -8,6 +8,10 @@ const atlasSource = readFileSync(
   new URL("./PronunciationAtlas.tsx", import.meta.url),
   "utf8",
 );
+const atlasModelSource = readFileSync(
+  new URL("./pronunciationAtlasModel.ts", import.meta.url),
+  "utf8",
+);
 const atlasCssSource = readFileSync(
   new URL("./PronunciationAtlas.module.css", import.meta.url),
   "utf8",
@@ -35,7 +39,7 @@ describe("cross-accent local voice pronunciation controls", () => {
     );
     assert.match(pageSource, /accentPronunciationEnabled: enabled/u);
     assert.match(
-      pageSource,
+      atlasModelSource,
       /accentPronunciationEnabled:[\s\S]*?activatePronunciation === false[\s\S]*?: true,[\s\S]*?pronunciationBase:/u,
     );
     assert.match(
@@ -120,7 +124,14 @@ describe("cross-accent local voice pronunciation controls", () => {
       atlasSource,
       /onCommit=\{\(next\) => \{[\s\S]*?onCommit\(committed\.selection\);[\s\S]*?\}\}/u,
     );
-    assert.match(atlasSource, /onClick=\{\(\) => commitSelection\(candidate\.selection\)\}/u);
+    assert.match(
+      atlasSource,
+      /onClick=\{\(\) => commitSelection\(candidate\.selection\)\}/u,
+    );
+    assert.match(
+      atlasSource,
+      /data-pronunciation-atlas-variant="true"[\s\S]*?data-accent-definition-id/u,
+    );
     const silentInteractionSource = atlasSource.slice(
       atlasSource.indexOf("<AdjustmentPad"),
       atlasSource.indexOf("<div className={styles.controls}>"),
@@ -211,7 +222,7 @@ describe("cross-accent local voice pronunciation controls", () => {
       )?.label,
       "Russian-influenced English",
     );
-    assert.match(atlasSource, /LOCAL_VOICE_SPEECHPRINT_CAPABILITIES\.map/u);
+    assert.match(atlasSource, /pronunciationAtlasNamedCandidates/u);
   });
 
   it("offers international and regional American pronunciation without map nodes", () => {
@@ -274,7 +285,10 @@ describe("cross-accent local voice pronunciation controls", () => {
   it("commits and persists the exact dropped map point", () => {
     assert.doesNotMatch(atlasSource, /const snapped/u);
     assert.match(atlasSource, /pronunciationAtlasPointForSelection/u);
-    assert.match(pageSource, /pronunciationMapPoint: selection\.point/u);
+    assert.match(
+      atlasModelSource,
+      /pronunciationMapPoint: normalizedSelection\.point/u,
+    );
   });
 
   it("offers nearby accent choices and a single stage-level audition dock", () => {

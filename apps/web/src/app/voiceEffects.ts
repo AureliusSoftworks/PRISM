@@ -721,6 +721,7 @@ function createNoiseBuffer(context: BaseAudioContext, durationSeconds: number, s
 let audioContext: AudioContext | null = null;
 export type VoicePlaybackChannel =
   | "primary"
+  | "handoff"
   | "presence"
   | "reaction"
   | "crosstalk";
@@ -1073,6 +1074,19 @@ const activeVoiceChannels: Record<
     lightMeter: null,
     releaseTimer: null,
   },
+  handoff: {
+    nodes: [],
+    media: null,
+    mediaUrl: null,
+    mediaStartTimer: null,
+    mediaEndTimer: null,
+    resolve: null,
+    progress: null,
+    roomConnection: null,
+    outputGain: null,
+    lightMeter: null,
+    releaseTimer: null,
+  },
   presence: {
     nodes: [],
     media: null,
@@ -1119,6 +1133,7 @@ const completedVoiceTailStops: Record<
   Set<() => void>
 > = {
   primary: new Set(),
+  handoff: new Set(),
   presence: new Set(),
   reaction: new Set(),
   crosstalk: new Set(),
@@ -1548,7 +1563,8 @@ async function playWorkletLivePerformanceVoice(args: {
   const active = activeVoiceChannels[channel];
   stopRealtimeVoiceAudio(channel, { preserveCompletedTails: true });
   outputGain.gain.value =
-    Math.min(1.25, profile.volume) * (channel === "primary" ? 0.88 : 0.62);
+    Math.min(1.25, profile.volume) *
+    (channel === "primary" || channel === "handoff" ? 0.88 : 0.62);
   const leveler =
     lifecycle?.loudnessNormalization === "interview"
       ? connectLiveInterviewVoiceLeveler(context, node)
@@ -1736,7 +1752,8 @@ async function playLivePerformanceVoice(args: {
   audio.playbackRate = playbackRateRatio;
   audio.volume = 1;
   outputGain.gain.value =
-    Math.min(1.25, profile.volume) * (channel === "primary" ? 0.88 : 0.62);
+    Math.min(1.25, profile.volume) *
+    (channel === "primary" || channel === "handoff" ? 0.88 : 0.62);
   const leveler =
     args.lifecycle?.loudnessNormalization === "interview"
       ? connectLiveInterviewVoiceLeveler(context, source)
@@ -1953,7 +1970,8 @@ async function playDecodedLivePerformanceVoice(args: {
   source.buffer = decoded;
   source.playbackRate.setValueAtTime(playbackRateRatio, startedAt);
   outputGain.gain.value =
-    Math.min(1.25, profile.volume) * (channel === "primary" ? 0.88 : 0.62);
+    Math.min(1.25, profile.volume) *
+    (channel === "primary" || channel === "handoff" ? 0.88 : 0.62);
   const leveler =
     args.lifecycle?.loudnessNormalization === "interview"
       ? connectLiveInterviewVoiceLeveler(context, source)
@@ -2418,7 +2436,7 @@ export async function playRealtimeVoiceBytes(args: {
     0.88 *
     voiceEffect.outputTrim *
     voiceCharacter.gainMultiplier *
-    (channel === "primary" ? 1 : 0.62);
+    (channel === "primary" || channel === "handoff" ? 1 : 0.62);
   lowShelf.type = "lowshelf";
   lowShelf.frequency.value = BOT_VOICE_LOW_SHELF_HZ;
   lowShelf.gain.value = voiceCharacter.lowShelfDb;

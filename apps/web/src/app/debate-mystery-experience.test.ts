@@ -4,8 +4,10 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  fillWhodunnitSuspectSeats,
   randomizeWhodunnitCast,
   randomizeWhodunnitCastAroundBot,
+  surpriseWhodunnitSeatBotId,
   minimumWhodunnitBotsForCast,
   distinctWhodunnitCastBotIds,
 } from "./debateMysteryCast.ts";
@@ -112,18 +114,18 @@ describe("Debate Whodunnit experience", () => {
     assert.match(shell, /<DebateMysteryPlay/u);
   });
 
-  it("keeps Whodunnit in Debate Studio and keeps PRISM in the Judge seat", () => {
+  it("keeps Whodunnit in Debate Studio with a cast public Judge and a sealed PRISM Casekeeper", () => {
     assert.match(shell, /setFormat\("whodunnit"\)/u);
     assert.doesNotMatch(shell, /setMysterySetupOpen\(true\)/u);
     assert.match(shell, /format === "whodunnit" \? "Court" : "Motion"/u);
     assert.match(shell, /studioPanel === "cast" \? renderCastStep\(\)/u);
     assert.match(shell, /\(role === "judge" && format === "whodunnit"\)/u);
-    assert.match(shell, /PRISM must rule from the sealed Case Bible/u);
+    assert.match(shell, /cast a public Judge separately/u);
     assert.match(shell, /Participation feedback/u);
     assert.match(shell, /"coach",\s*"Coach"/u);
     assert.match(shell, /"standard",\s*"Standard"/u);
     assert.match(shell, /"immersive",\s*"Immersive"/u);
-    assert.match(shell, /format === "whodunnit"[\s\S]{0,80}\? "PRISM · Judge & Casekeeper"/u);
+    assert.match(shell, /format === "whodunnit"[\s\S]{0,80}\? "Judge"/u);
     assert.match(shell, /useState\("recipe-initial"\)/u);
     assert.match(shell, /setMysteryNonce\(nextMysteryRecipeNonce\(\)\);\s*\}, \[\]\);/u);
     assert.doesNotMatch(shell, /useState\(nextMysteryRecipeNonce\)/u);
@@ -135,9 +137,12 @@ describe("Debate Whodunnit experience", () => {
     assert.match(shell, /<BotPickerGrid/u);
     assert.match(shell, /<BotPickerTile/u);
     assert.match(shell, /mysterySuspectBotIds\.map/u);
+    assert.match(shell, /mysteryJudgeBotId/u);
     assert.match(shell, /mysteryProsecutorPartnerBotId/u);
     assert.match(shell, /mysteryRivalDefenseBotId/u);
-    assert.match(shell, /\? "Four jurors \+ PRISM"/u);
+    assert.match(shell, /\? "Four jurors \+ Judge"/u);
+    assert.match(shell, /data-role-group="suspects"/u);
+    assert.match(shell, /data-role-group="courtroom"/u);
     assert.match(shell, /Four jurors \+ moderator/u);
     assert.doesNotMatch(css, /\.courtRules/u);
     assert.doesNotMatch(css, /\.courtJuryToggle/u);
@@ -160,6 +165,18 @@ describe("Debate Whodunnit experience", () => {
     assert.match(source, /assetRetention="evidence"/u);
     assert.match(shell, /debateMysteryCourtEvidenceAssetUrls\(session\)\.map\(preloadDebateVisualAsset\)/u);
     assert.match(shell, /await openingVisualAssetsReady;[\s\S]{0,260}adoptSession\(null, session, \{ playIntro: true \}\)/u);
+  });
+
+  it("opens with a clear persisted choice between owning the mansion and trusting co-counsel", () => {
+    assert.match(source, /state\.investigationApproach === "undecided"/u);
+    assert.match(source, /data-tutorial-target="whodunnit-investigation-choice"/u);
+    assert.match(source, /Investigate the mansion/u);
+    assert.match(source, /Trust \{partner\?\.name/u);
+    assert.match(source, /action: "choose_investigation_path", path: "player"/u);
+    assert.match(source, /action: "choose_investigation_path", path: "partner"/u);
+    assert.match(source, /Once your partner files charges, the mansion closes/u);
+    assert.match(css, /\.assignmentChoices[\s\S]*grid-template-columns: repeat\(2/u);
+    assert.match(css, /\.partnerAssignmentChoice/u);
   });
 
   it("keeps hotspot affordance outcome-neutral and accessible", () => {
@@ -691,13 +708,41 @@ describe("Debate Whodunnit experience", () => {
     assert.match(shell, /if \(format === "whodunnit"\) \{[\s\S]{0,180}randomizeWhodunnitCast/u);
   });
 
+  it("leaves a removed Whodunnit seat on a one-seat Surprise me reroll", () => {
+    assert.match(shell, /bot\?\.name \?\? "Surprise me"/u);
+    assert.match(shell, /if \(!bot\) surpriseMysterySeat\(seat\)/u);
+    assert.match(
+      shell,
+      /leave seat on Surprise me/u,
+    );
+
+    assert.deepEqual(
+      fillWhodunnitSuspectSeats(
+        ["a", "b", "c", "d"].map((id) => ({ id })),
+        ["a", "", "c"],
+        3,
+      ),
+      ["a", "", "c"],
+    );
+    assert.equal(
+      surpriseWhodunnitSeatBotId(
+        ["a", "b", "c", "d"].map((id) => ({ id })),
+        ["a", "c"],
+        "b",
+        () => 0,
+      ),
+      "d",
+    );
+  });
+
   it("produces distinct random Whodunnit casts with correct role counts", () => {
-    const bots = ["a", "b", "c", "d", "e", "f", "g", "h"].map((id) => ({ id }));
+    const bots = ["a", "b", "c", "d", "e", "f", "g", "h", "i"].map((id) => ({ id }));
     const result = randomizeWhodunnitCast(bots, 6, deterministicSequence([0.81, 0.33, 0.56, 0.11, 0.72, 0.04, 0.89, 0.66]));
     assert.ok(result !== null);
     if (!result) return;
     const allBotIds = [
       ...result.suspectBotIds,
+      result.judgeBotId,
       result.prosecutorPartnerBotId,
       result.rivalDefenseBotId,
     ];
@@ -706,7 +751,7 @@ describe("Debate Whodunnit experience", () => {
   });
 
   it("keeps a Wielded bot among the suspects while populating every role", () => {
-    const bots = ["lizzy", "b", "c", "d", "e", "f", "g", "h"].map(
+    const bots = ["lizzy", "b", "c", "d", "e", "f", "g", "h", "i"].map(
       (id) => ({ id }),
     );
     const result = randomizeWhodunnitCastAroundBot(
@@ -720,6 +765,7 @@ describe("Debate Whodunnit experience", () => {
     assert.equal(result.suspectBotIds[0], "lizzy");
     const allBotIds = [
       ...result.suspectBotIds,
+      result.judgeBotId,
       result.prosecutorPartnerBotId,
       result.rivalDefenseBotId,
     ];
@@ -752,7 +798,7 @@ describe("Debate Whodunnit experience", () => {
   });
 
   it("accepts repeated random-cast attempts on the same pool without duplication", () => {
-    const bots = ["a", "b", "c", "d", "e", "f"].map((id) => ({ id }));
+    const bots = ["a", "b", "c", "d", "e", "f", "g"].map((id) => ({ id }));
     const first = randomizeWhodunnitCast(bots, 4, deterministicSequence([0.21, 0.41, 0.61, 0.81, 0.03, 0.23]));
     const second = randomizeWhodunnitCast(bots, 4, deterministicSequence([0.71, 0.31, 0.91, 0.12, 0.45, 0.67]));
     assert.ok(first);
@@ -760,11 +806,13 @@ describe("Debate Whodunnit experience", () => {
     if (!first || !second) return;
     const firstSelection = [
       ...first.suspectBotIds,
+      first.judgeBotId,
       first.prosecutorPartnerBotId,
       first.rivalDefenseBotId,
     ];
     const secondSelection = [
       ...second.suspectBotIds,
+      second.judgeBotId,
       second.prosecutorPartnerBotId,
       second.rivalDefenseBotId,
     ];
@@ -772,8 +820,8 @@ describe("Debate Whodunnit experience", () => {
     assert.equal(new Set(secondSelection).size, minimumWhodunnitBotsForCast(4));
   });
 
-  it("returns null when the Library cannot satisfy suspect and counsel requirements", () => {
-    const bots = ["a", "b", "c", "d", "e"].map((id) => ({ id }));
+  it("returns null when the Library cannot satisfy suspects and courtroom roles", () => {
+    const bots = ["a", "b", "c", "d", "e", "f"].map((id) => ({ id }));
     assert.equal(randomizeWhodunnitCast(bots, 4), null);
   });
 });

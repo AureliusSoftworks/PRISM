@@ -101,7 +101,7 @@ describe("Coffee player voice", () => {
         source.indexOf("const startCoffeePlayerVoiceForReveal = async"),
       ),
     );
-    assert.match(source, /startCoffeePlayerVoiceForReveal\(trimmed\)/);
+    assert.match(source, /startCoffeePlayerVoiceForReveal\(trimmed, \{/);
     assert.match(
       livePlayerVoice,
       /const voiceSelection = voicePlaybackSelectionRef\.current/,
@@ -121,12 +121,12 @@ describe("Coffee player voice", () => {
     assert.doesNotMatch(livePlayerVoice, /settings\.voiceMode/);
     assert.match(
       source,
-      /setCoffeeUserRevealText\(trimmed\)[\s\S]*?setCoffeeTurnRhythmState\("userTableTyping"\)[\s\S]*?await startCoffeePlayerVoiceForReveal\(trimmed\)/,
+      /const takePlayerFloor = \(\): void => \{[\s\S]*?setCoffeeUserRevealText\(trimmed\)[\s\S]*?setCoffeeTurnRhythmState\("userTableTyping"\)[\s\S]*?startCoffeePlayerVoiceForReveal\(trimmed, \{/,
     );
     assert.match(source, /coffeePlayerVoiceRevealReadyRef\.current = false/);
     assert.match(
       source,
-      /waitForCoffeeUserRevealToSettle\(\)[\s\S]*?await startCoffeePlayerVoiceForReveal\(trimmed\)[\s\S]*?coffeePlayerVoiceRevealReadyRef\.current = true/,
+      /playerFloorTakenPromise\.then\(waitForCoffeeUserRevealToSettle\)[\s\S]*?await startCoffeePlayerVoiceForReveal\(trimmed, \{[\s\S]*?coffeePlayerVoiceRevealReadyRef\.current = true/,
     );
     assert.match(source, /coffeePlayerPlaybackProfile\(settings\.prismDefaultBotAudioVoiceProfile\)/);
     assert.match(source, /playerMessage[\s\S]*?coffeePlayerPlaybackProfile\(settings\.prismDefaultBotAudioVoiceProfile\)/);
@@ -176,6 +176,33 @@ describe("Coffee player voice", () => {
     assert.match(
       liveSignalPlayback,
       /currentEpisode\.guestKind === "producer"[\s\S]*message\.botId === BOTCAST_PRODUCER_GUEST_ID[\s\S]*signalProducerGuestBotSummary/,
+    );
+  });
+
+  it("starts voiced player interruptions before releasing the Coffee speaker", () => {
+    const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    const livePlayerVoice = source.slice(
+      source.indexOf("const startCoffeePlayerVoiceForReveal = async"),
+      source.indexOf(
+        "const commitCoffeePlayerCaptureTiming =",
+        source.indexOf("const startCoffeePlayerVoiceForReveal = async"),
+      ),
+    );
+    assert.match(
+      livePlayerVoice,
+      /const voiceChannel: VoicePlaybackChannel = options\.preserveOutgoingVoice[\s\S]*?\? "handoff"[\s\S]*?: "primary"/,
+    );
+    assert.match(
+      livePlayerVoice,
+      /const takeFloor = \(\): void => \{[\s\S]*?options\.onFloorTaken\?\.\(\);[\s\S]*?releaseRealtimeVoiceAudio\([\s\S]*?"primary"[\s\S]*?COFFEE_PLAYER_INTERRUPTION_RELEASE_MS[\s\S]*?outgoingVoiceController\?\.abort\(\)/,
+    );
+    assert.match(
+      source,
+      /captureCoffeePlayerInterruption\([\s\S]{0,320}preserveAudibleUtterance: true/,
+    );
+    assert.match(
+      source,
+      /startCoffeePlayerVoiceForReveal\(trimmed, \{[\s\S]{0,260}preserveOutgoingVoice: Boolean\(pendingPlayerInterruption\)[\s\S]{0,140}onFloorTaken: takePlayerFloor/,
     );
   });
 

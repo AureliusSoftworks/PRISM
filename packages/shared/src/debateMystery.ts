@@ -91,7 +91,7 @@ export interface DebateWhodunnitCreateConfigV1 {
   formality?: DebateFormalityId;
   /** Frozen court rule, shared with ordinary Debate and Turnabout. */
   juryEnabled?: boolean;
-  /** Whodunnit reserves Judge for PRISM; this selection is seed-stable. */
+  /** The player may prosecute or spectate; the public Judge is cast separately. */
   playerRole?: "participant" | "spectator";
   /** Participant-only feedback visibility, frozen with the court contract. */
   participationDifficulty?: DebateParticipantDifficulty;
@@ -100,6 +100,8 @@ export interface DebateWhodunnitCreateConfigV1 {
   floors?: number;
   totalRooms?: number;
   suspectBotIds: string[];
+  /** Public presiding bot. PRISM remains the sealed server-side Casekeeper. */
+  judgeBotId?: string;
   prosecutorPartnerBotId: string;
   rivalDefenseBotId: string;
 }
@@ -118,6 +120,7 @@ export interface DebateMysteryResolvedConfigV1 {
   floors: number;
   totalRooms: number;
   suspectBotIds: string[];
+  judgeBotId: string;
   prosecutorPartnerBotId: string;
   rivalDefenseBotId: string;
   actionBudget: number;
@@ -757,6 +760,8 @@ export interface DebateWhodunnitFormatStateV1 {
   format: "whodunnit";
   compileStage: DebateMysteryCompileStage;
   playPhase: DebateMysteryPlayPhase;
+  /** Who owns the mansion phase before the public record is frozen for court. */
+  investigationApproach: "undecided" | "player" | "partner";
   caseTitle: string;
   fictionLabel: "Fictional, non-canonical case";
   recipeSeed: string;
@@ -846,6 +851,7 @@ export function debateMysteryTheoryClaimOptions(
 }
 
 export type DebateMysteryActionRequestV1 =
+  | { expectedRevision: number; idempotencyKey: string; action: "choose_investigation_path"; path: "player" | "partner" }
   | { expectedRevision: number; idempotencyKey: string; action: "travel"; roomId: string }
   | { expectedRevision: number; idempotencyKey: string; action: "begin_investigation"; roomId: string }
   | { expectedRevision: number; idempotencyKey: string; action: "begin_interview"; suspectSeatId: string }
@@ -965,7 +971,7 @@ export interface DebateMysterySeatManifestV1 {
 export interface DebateMysteryPortableManifestV1 {
   version: typeof DEBATE_MYSTERY_SCHEMA_VERSION;
   generatorVersion: number;
-  config: Omit<DebateMysteryResolvedConfigV1, "suspectBotIds" | "prosecutorPartnerBotId" | "rivalDefenseBotId">;
+  config: Omit<DebateMysteryResolvedConfigV1, "suspectBotIds" | "judgeBotId" | "prosecutorPartnerBotId" | "rivalDefenseBotId">;
   seats: DebateMysterySeatManifestV1[];
   case: Omit<DebateMysteryCaseBibleV1, "suspects" | "caseSeed">;
 }
@@ -1183,11 +1189,21 @@ export function resolveDebateMysteryConfig(
   if (floors > totalRooms) throw new Error("Every mansion floor requires at least one room.");
   const prosecutorPartnerBotId = compact(value.prosecutorPartnerBotId, 200);
   const rivalDefenseBotId = compact(value.rivalDefenseBotId, 200);
+  // Older saved recipes predate public Judge casting. Keep their PRISM seat
+  // readable while every newly-authored Studio recipe supplies a Library bot.
+  const judgeBotId = compact(value.judgeBotId, 200) || "prism:player-judge";
   if (!prosecutorPartnerBotId || !rivalDefenseBotId || prosecutorPartnerBotId === rivalDefenseBotId) {
     throw new Error("Choose distinct prosecutor partner and rival defense bots.");
   }
   if (suspectBotIds.includes(prosecutorPartnerBotId) || suspectBotIds.includes(rivalDefenseBotId)) {
     throw new Error("Counsel bots cannot also sit in the suspect ensemble.");
+  }
+  if (
+    judgeBotId === prosecutorPartnerBotId
+    || judgeBotId === rivalDefenseBotId
+    || suspectBotIds.includes(judgeBotId)
+  ) {
+    throw new Error("The Judge must be distinct from every suspect and counsel bot.");
   }
   // Custom cases receive a broad discovery/search/interview baseline while
   // still requiring choices; preset budgets remain authored independently.
@@ -1214,6 +1230,7 @@ export function resolveDebateMysteryConfig(
     floors,
     totalRooms,
     suspectBotIds,
+    judgeBotId,
     prosecutorPartnerBotId,
     rivalDefenseBotId,
     actionBudget,
@@ -1293,6 +1310,7 @@ export function debateMysteryRecipeSeed(config: DebateMysteryResolvedConfigV1): 
     floors: config.floors,
     totalRooms: config.totalRooms,
     suspects: config.suspectBotIds,
+    judge: config.judgeBotId,
     prosecutor: config.prosecutorPartnerBotId,
     defense: config.rivalDefenseBotId,
   });
@@ -2511,6 +2529,7 @@ export function projectDebateMysteryCase(bible: DebateMysteryCaseBibleV1, config
     format: "whodunnit",
     compileStage: "complete",
     playPhase: "investigation",
+    investigationApproach: "undecided",
     caseTitle: bible.title,
     fictionLabel: "Fictional, non-canonical case",
     recipeSeed: bible.recipeSeed,
@@ -2590,6 +2609,7 @@ export function defaultDebateMysteryFormatStateV1(): DebateWhodunnitFormatStateV
     format: "whodunnit",
     compileStage: "casting",
     playPhase: "compiling",
+    investigationApproach: "undecided",
     caseTitle: "Untitled Case",
     fictionLabel: "Fictional, non-canonical case",
     recipeSeed: "",
@@ -2609,6 +2629,7 @@ export function defaultDebateMysteryFormatStateV1(): DebateWhodunnitFormatStateV
       floors: 1,
       totalRooms: 5,
       suspectBotIds: [],
+      judgeBotId: "prism:player-judge",
       prosecutorPartnerBotId: "",
       rivalDefenseBotId: "",
       actionBudget: 0,
@@ -2662,6 +2683,12 @@ export function normalizeDebateMysteryFormatStateV1(
   }
   const legacyContinuance = (source as { playPhase?: unknown }).playPhase === "continuance";
   const normalized = source as DebateWhodunnitFormatStateV1;
+  normalized.investigationApproach =
+    normalized.investigationApproach === "undecided" ||
+    normalized.investigationApproach === "player" ||
+    normalized.investigationApproach === "partner"
+      ? normalized.investigationApproach
+      : "player";
   normalized.config = {
     ...normalized.config,
     // Pre-court-rules cases compiled as structured proceedings without a Jury.

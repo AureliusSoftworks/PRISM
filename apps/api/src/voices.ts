@@ -266,16 +266,14 @@ function elevenLabsRespelling(
 }
 
 const ELEVENLABS_AUTHORITATIVE_IPA_ACCENTS = new Set([
-  "american-english",
-  "british-english",
   "scottish-english",
 ]);
 
 /**
  * Eleven v3 accepts IPA wrapped in forward slashes directly in request text.
- * For the three national Accent Map targets whose identity depends heavily on
- * vowel space and rhoticity, project PRISM's provider-neutral target IPA into
- * the private provider body while retaining the selected voice ID as timbre.
+ * Scottish retains the qualified target-IPA path. Removed American/British
+ * umbrellas and named British-family anchors keep authored text intact; their
+ * provider-neutral directions carry the accent without replacing the line.
  */
 async function elevenLabsAccentIpaProjection(
   args: ElevenLabsSpeechArgs,
@@ -351,6 +349,7 @@ async function elevenLabsSpeechInput(
     normalizedProfile.elevenLabsDirection,
   );
   const accentDirection = resolvePremiumAccentDirection({
+    point: normalizedProfile.pronunciationMapPoint,
     accentDefinitionId: normalizedProfile.accentDefinitionId,
     pronunciationBase: normalizedProfile.pronunciationBase,
     speechprintInfluence: normalizedProfile.speechprintInfluence,
@@ -383,8 +382,8 @@ async function elevenLabsSpeechInput(
         .join(" ")} `
     : "";
   // The direction carries prosody. On Eleven v3, authoritative IPA supplies
-  // American/British/Scottish target phonology; other maps retain the lighter
-  // existing respelling projection. Both remain private to the request.
+  // Scottish target phonology; other maps retain the lighter existing
+  // respelling projection. Both remain private to the request.
   //
   // No accent direction means the voice already speaks this accent, and
   // respelling on top of it would double the effect.

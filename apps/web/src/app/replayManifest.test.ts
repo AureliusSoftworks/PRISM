@@ -420,10 +420,10 @@ describe("replay manifests", () => {
       theme: "dark",
       audioEnabled: true,
       audioVolume: 0.72,
-      episodeImageFraming: {
-        left: { x: 16, y: 70, scale: 80 },
-        right: { x: 84, y: 70, scale: 80 },
-        wide: { x: 50, y: 74, scale: 95 },
+      cameraFraming: {
+        left: { zoom: 1.56, panX: -4, panY: 2, episodeImage: { x: 16, y: 70, itemScale: 80, photoScale: 100 } },
+        right: { zoom: 1.48, panX: 5, panY: -1, episodeImage: { x: 84, y: 70, itemScale: 80, photoScale: 100 } },
+        wide: { zoom: 1, panX: 0, panY: 0, episodeImage: { x: 50, y: 74, itemScale: 95, photoScale: 110 } },
       },
       capturedReplayEvents: [
         {
@@ -490,7 +490,7 @@ describe("replay manifests", () => {
     assert.deepEqual(
       (manifest.visual.metadata?.cameraFraming as BotcastShow["cameraFraming"])
         .left.episodeImage,
-      { x: 16, y: 70, scale: 80 },
+      { x: 16, y: 70, itemScale: 80, photoScale: 100 },
     );
     assert.deepEqual(manifest.visual.metadata?.logoPlacement, {
       x: 46,

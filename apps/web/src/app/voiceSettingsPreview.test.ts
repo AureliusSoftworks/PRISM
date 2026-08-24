@@ -622,7 +622,7 @@ describe("voice settings preview", () => {
     assert.match(effectsSource, /\/worklets\/formant-correction-processor\.js/);
   });
 
-  it("ties live Bottish to visible speech and hard-stops interruptions", () => {
+  it("ties live Bottish to visible speech and releases social interruptions", () => {
     assert.match(pageSource, /liveBottishRevealKeyRef/);
     assert.match(pageSource, /prepareChatSpeechReveal/);
     assert.match(pageSource, /startChatSpeechReveal/);
@@ -635,6 +635,10 @@ describe("voice settings preview", () => {
     assert.match(
       pageSource,
       /function stopVoicePlaybackForAssistantInterruption\(\)/,
+    );
+    assert.match(
+      pageSource,
+      /function stopVoicePlaybackForAssistantInterruption\(\)[\s\S]{0,420}releaseVoicePlaybackPreservingPreparedMode\([\s\S]{0,180}CHAT_PLAYER_INTERRUPTION_RELEASE_MS/,
     );
     assert.match(
       pageSource,

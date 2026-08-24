@@ -406,10 +406,13 @@ describe("engine-agnostic voice effects", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     assert.match(
       source,
-      /\| "primary"\s*\| "presence"\s*\| "reaction"\s*\| "crosstalk"/,
+      /\| "primary"\s*\| "handoff"\s*\| "presence"\s*\| "reaction"\s*\| "crosstalk"/,
     );
     assert.match(source, /stopRealtimeVoiceAudio\(channel\)/);
-    assert.match(source, /channel === "primary" \? 1 : 0\.62/);
+    assert.match(
+      source,
+      /channel === "primary" \|\| channel === "handoff" \? 1 : 0\.62/,
+    );
     assert.match(source, /maxDurationMs/);
     assert.match(reactionSource, /args\.mode === "english"/u);
     assert.match(reactionSource, /buildBottishPlan/u);
@@ -745,5 +748,18 @@ describe("voice performance", () => {
     assert.ok(Math.abs(voiceLiltDetuneCents(1, 0.3)) > 100);
     assert.ok(Math.abs(voiceLiltDetuneCents(-1, 0.3)) > 100);
     assert.equal(VOICE_LILT_DEPTH_CENTS, 120);
+  });
+
+  it("owns canonical audible handoffs on a full-level channel separate from crosstalk", () => {
+    const source = readFileSync(
+      new URL("./voiceEffects.ts", import.meta.url),
+      "utf8",
+    );
+    assert.match(source, /\| "handoff"/u);
+    assert.match(source, /handoff:\s*\{[\s\S]{0,260}releaseTimer: null/u);
+    assert.match(
+      source,
+      /channel === "primary" \|\| channel === "handoff" \? 0\.88 : 0\.62/u,
+    );
   });
 });

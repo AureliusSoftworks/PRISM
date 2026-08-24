@@ -29,6 +29,8 @@ export function signalLiveAutoCameraShot(args: {
   baseShot: SignalDirectedCameraShot;
   /** Two distinct performers have active audible playback at the same time. */
   audibleVoiceOverlap?: boolean;
+  /** An incoming canonical voice is preparing while the current mic stays live. */
+  audibleHandoffPreparing?: boolean;
   listenerReactionShot?: SignalDirectedCameraShot | null;
   speakingShot?: SignalDirectedCameraShot | null;
   postSpeechHoldShot?: SignalDirectedCameraShot | null;
@@ -40,6 +42,7 @@ export function signalLiveAutoCameraShot(args: {
   // Crosstalk is a two-person performance. It must outrank every close-up so
   // the audience can read both voices, while manual cameras bypass this helper.
   if (args.audibleVoiceOverlap) return "wide";
+  if (args.audibleHandoffPreparing) return "wide";
   if (args.listenerReactionShot) return args.listenerReactionShot;
   if (args.coverageShot) return args.coverageShot;
   if (args.speakingShot) return args.speakingShot;

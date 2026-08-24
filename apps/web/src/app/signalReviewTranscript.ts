@@ -84,7 +84,19 @@ export function buildSignalReviewTranscript(
       left.occurredAt.localeCompare(right.occurredAt),
   );
   const utteranceEvents = new Map<string, BotcastReplayEvent>();
-  const producerRedirectsByMessageId = new Map<string, BotcastReplayEvent>();
+  const canonicalMessageIds = new Set(
+    episode.messages.map((message) => message.id),
+  );
+  const producerInterruptions = events.filter(
+    (event) =>
+      event.kind === "producer_cue" &&
+      (event.payload.delivery === "redirect_host" ||
+        event.payload.delivery === "interrupt_guest"),
+  );
+  const producerInterruptionsByMessageId = new Map<
+    string,
+    BotcastReplayEvent[]
+  >();
   const silenceOnlyTurnCount = episode.messages.filter((message) =>
     botPowerResponseIsSilentV1(message.content),
   ).length;
@@ -95,12 +107,11 @@ export function buildSignalReviewTranscript(
     if (event.kind === "utterance" && messageId)
       utteranceEvents.set(messageId, event);
     const interruptedMessageId = payloadString(event, "interruptedMessageId");
-    if (
-      event.kind === "producer_cue" &&
-      event.payload.delivery === "redirect_host" &&
-      interruptedMessageId
-    ) {
-      producerRedirectsByMessageId.set(interruptedMessageId, event);
+    if (producerInterruptions.includes(event) && interruptedMessageId) {
+      const existing =
+        producerInterruptionsByMessageId.get(interruptedMessageId) ?? [];
+      existing.push(event);
+      producerInterruptionsByMessageId.set(interruptedMessageId, existing);
     }
   }
   const heardResponseCueLines = (args.presenceBeats ?? []).flatMap((beat) => {
@@ -166,7 +177,8 @@ export function buildSignalReviewTranscript(
   } else {
     episode.messages.forEach((message, index) => {
       const event = utteranceEvents.get(message.id);
-      const producerRedirect = producerRedirectsByMessageId.get(message.id);
+      const turnProducerInterruptions =
+        producerInterruptionsByMessageId.get(message.id) ?? [];
       const participant = message.speakerRole === "host" ? host : guest;
       const segment = payloadString(event, "segment") ?? "unknown";
       const humanProducerGuest =
@@ -231,9 +243,14 @@ export function buildSignalReviewTranscript(
               : "recorded repaired/fallback utterance; raw provider draft not preserved"
         }`,
         `- Immersive voice effect: ${event?.payload.immersiveVoiceEffect === true ? "yes" : "no"}`,
-        `- Producer redirect: ${
-          producerRedirect
-            ? `yes — ${payloadString(producerRedirect, "kind") ?? "producer cue"} (event ${producerRedirect.id}); this canonical turn contains only the audience-heard prefix`
+        `- Producer interruption: ${
+          turnProducerInterruptions.length > 0
+            ? turnProducerInterruptions
+                .map(
+                  (interruption) =>
+                    `${payloadString(interruption, "delivery") ?? "unknown delivery"} — ${payloadString(interruption, "kind") ?? "producer cue"} (event ${interruption.id}); this canonical turn contains only the audience-heard prefix`,
+                )
+                .join("; ")
             : "None recorded"
         }`,
         "- Stage action (avatar only):",
@@ -252,6 +269,20 @@ export function buildSignalReviewTranscript(
   }
 
   lines.push(
+    "",
+    "## Producer Interruption Provenance",
+    "",
+    "This section records producer handoffs independently of canonical transcript membership. Canonical interrupted message: no means no audience-heard prefix was persisted; it does not mean the producer handoff disappeared.",
+    "",
+    ...(producerInterruptions.length > 0
+      ? producerInterruptions.map((event) => {
+          const interruptedMessageId = payloadString(
+            event,
+            "interruptedMessageId",
+          );
+          return `- Event ID: ${event.id} | Delivery: ${payloadString(event, "delivery") ?? "unknown"} | Kind: ${payloadString(event, "kind") ?? "unknown"} | Interrupted message ID: ${interruptedMessageId ?? "None"} | Scheduled bridge: ${payloadString(event, "interruptionBridgeLine") ?? "None"} | Canonical interrupted message: ${interruptedMessageId && canonicalMessageIds.has(interruptedMessageId) ? "yes" : "no"}`;
+        })
+      : ["No redirect_host or interrupt_guest producer handoffs were recorded."]),
     "",
     "## Response cues (heard only)",
     "",

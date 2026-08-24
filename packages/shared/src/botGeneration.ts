@@ -23,9 +23,7 @@ import {
 import {
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
   BOT_AUDIO_VOICE_IDS,
-  LOCAL_VOICE_SPEECHPRINT_INFLUENCES,
   VOICE_EFFECTS,
-  normalizeLocalVoiceSpeechprintInfluence,
   normalizeLocalVoicePronunciationMapPoint,
   normalizeBotNamePronunciation,
   normalizeVoiceAccentDefinitionId,
@@ -49,16 +47,19 @@ import {
   botPowerSourceHashForPowerV1,
   type BotPowerV1,
 } from "./botPower.ts";
-import { VOICE_ACCENT_MAP_ANCHORS } from "./voiceSpeechprint.ts";
+import {
+  VOICE_ACCENT_MAP_ANCHORS,
+  resolveLocalAccentFallback,
+} from "./voiceSpeechprint.ts";
 
 export const BOT_GENERATION_DRAFT_VERSION = 1 as const;
 export const BOT_GENERATION_PROMPT_MAX_LENGTH = 2_000;
 export const BOT_GENERATION_VOICE_PREVIEW_MAX_LENGTH = 240;
-const BOT_GENERATION_ACCENT_DEFINITION_IDS = [
-  "american-english",
-  "british-english",
-  ...LOCAL_VOICE_SPEECHPRINT_INFLUENCES.filter((id) => id !== "none"),
-] as const;
+const BOT_GENERATION_ACCENT_DEFINITION_IDS: readonly string[] = [
+  ...new Set(
+    VOICE_ACCENT_MAP_ANCHORS.map((anchor) => anchor.accentDefinitionId),
+  ),
+];
 export const CURSED_TONGUE_GENERATED_AUTHORING_PROMPT =
   "Every non-silent public spoken reply is involuntarily laced with frequent strong non-slur profanity; their private intended wording stays clean.";
 /** Generated ink is an accent layer, not a fully painted portrait. */
@@ -862,15 +863,11 @@ function normalizeGeneratedVoice(
           batchIndex,
           batchCount,
         });
-  const isBritish = resolvedAccentDefinitionId === "british-english";
-  const localAccent = {
-    pronunciationBase: isBritish ? "en-GB" as const : "en-US" as const,
-    speechprintInfluence: normalizeLocalVoiceSpeechprintInfluence(
-      resolvedAccentDefinitionId === "american-english" || isBritish
-        ? "none"
-        : resolvedAccentDefinitionId,
-    ),
-  };
+  const localAccent = resolveLocalAccentFallback({
+    accentDefinitionId: resolvedAccentDefinitionId,
+    pronunciationBase: "en-US",
+    speechprintInfluence: "none",
+  });
   const strength = record.speechprintStrength === "light" ||
       record.speechprintStrength === "strong" ||
       record.speechprintStrength === "balanced"

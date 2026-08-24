@@ -348,6 +348,8 @@ import {
   deleteBotcastShow,
   deleteBotcastShowIntroAudio,
   endBotcastEpisodeOnProducerCut,
+  recordBotcastProducerCutAudienceHandoff,
+  recordBotcastProducerGuestAudienceHandoff,
   type BotcastProducerCutInterruption,
   type BotcastGenerationOptions,
   ensureBotcastEpisodePersonaReview,
@@ -363,7 +365,6 @@ import {
   generateBotcastShowName,
   generateBotcastShowPremise,
   getBotcastEpisode,
-  getBotcastSignalPreferences,
   getBotcastShow,
   linkBotcastEpisodeImageAsset,
   listBotcastEpisodes,
@@ -392,7 +393,6 @@ import {
   refreshBotcastShowLocalIdent,
   undoBotcastShowAudioPackage,
   updateBotcastShow,
-  updateBotcastSignalPreferences,
 } from "./botcast.ts";
 import {
   ElevenLabsMusicError,
@@ -17340,7 +17340,7 @@ function buildRoutes(): RouteDefinition[] {
               {
                 playerRole: body.playerRole,
                 participationDifficulty: body.participationDifficulty,
-                moderatorName: body.moderatorName,
+                moderatorTitle: body.moderatorTitle,
                 forTeamName: body.forTeamName,
                 againstTeamName: body.againstTeamName,
               },
@@ -19231,25 +19231,6 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/botcast/shows", async (ctx) => {
       const userId = requireAuth(ctx);
       json(ctx.res, 200, { ok: true, shows: listBotcastShows(db, userId) });
-    }),
-    route("GET", "/api/botcast/preferences", async (ctx) => {
-      const userId = requireAuth(ctx);
-      json(ctx.res, 200, {
-        ok: true,
-        preferences: getBotcastSignalPreferences(db, userId),
-      });
-    }),
-    route("PATCH", "/api/botcast/preferences", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const body = ctx.body as Record<string, unknown>;
-      json(ctx.res, 200, {
-        ok: true,
-        preferences: updateBotcastSignalPreferences(
-          db,
-          userId,
-          body.episodeImageFraming,
-        ),
-      });
     }),
     route("POST", "/api/botcast/shows", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -21376,6 +21357,77 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route(
       "POST",
+      "/api/botcast/episodes/:id/cut-handoff",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const body = (ctx.body ?? {}) as Record<string, unknown>;
+        const rawInterruption =
+          body.interruption &&
+          typeof body.interruption === "object" &&
+          !Array.isArray(body.interruption)
+            ? (body.interruption as Record<string, unknown>)
+            : null;
+        if (
+          !rawInterruption ||
+          typeof rawInterruption.messageId !== "string" ||
+          (rawInterruption.speakerRole !== "host" &&
+            rawInterruption.speakerRole !== "guest") ||
+          typeof rawInterruption.spokenContent !== "string"
+        ) {
+          throw new HttpError(400, "Signal cut handoff is invalid.");
+        }
+        const episode = recordBotcastProducerCutAudienceHandoff(
+          db,
+          userId,
+          ctx.params.id,
+          {
+            messageId: rawInterruption.messageId,
+            speakerRole: rawInterruption.speakerRole,
+            spokenContent: rawInterruption.spokenContent,
+          },
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          episode: projectBotcastEpisodeForAudienceV1(episode),
+        });
+      },
+    ),
+    route(
+      "POST",
+      "/api/botcast/episodes/:id/producer-guest-handoff",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const body = (ctx.body ?? {}) as Record<string, unknown>;
+        const rawInterruption =
+          body.interruption &&
+          typeof body.interruption === "object" &&
+          !Array.isArray(body.interruption)
+            ? (body.interruption as Record<string, unknown>)
+            : null;
+        if (
+          !rawInterruption ||
+          typeof rawInterruption.messageId !== "string" ||
+          typeof rawInterruption.spokenContent !== "string"
+        ) {
+          throw new HttpError(400, "Signal Producer-guest handoff is invalid.");
+        }
+        const episode = recordBotcastProducerGuestAudienceHandoff(
+          db,
+          userId,
+          ctx.params.id,
+          {
+            messageId: rawInterruption.messageId,
+            spokenContent: rawInterruption.spokenContent,
+          },
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          episode: projectBotcastEpisodeForAudienceV1(episode),
+        });
+      },
+    ),
+    route(
+      "POST",
       "/api/botcast/episodes/:id/model-warmup-hold",
       async (ctx) => {
         const userId = requireAuth(ctx);
@@ -21850,6 +21902,20 @@ function buildRoutes(): RouteDefinition[] {
                 : {}),
             }
           : undefined;
+      const producerGuestHostInterruptionRecord =
+        body.producerGuestHostInterruption &&
+        typeof body.producerGuestHostInterruption === "object" &&
+        !Array.isArray(body.producerGuestHostInterruption)
+          ? (body.producerGuestHostInterruption as Record<string, unknown>)
+          : null;
+      const producerGuestHostInterruption =
+        typeof producerGuestHostInterruptionRecord?.messageId === "string" &&
+        typeof producerGuestHostInterruptionRecord.spokenContent === "string"
+          ? {
+              messageId: producerGuestHostInterruptionRecord.messageId,
+              spokenContent: producerGuestHostInterruptionRecord.spokenContent,
+            }
+          : undefined;
       const cue: BotcastProducerCue | undefined =
         cueKind === "ask_about" ||
         cueKind === "present_image" ||
@@ -22058,10 +22124,13 @@ function buildRoutes(): RouteDefinition[] {
               userId,
               ctx.params.id,
               typeof body.guestMessage === "string"
-                ? {
+                  ? {
                     guestMessage: body.guestMessage,
                     ...(typeof body.guestThinkingMs === "number"
                       ? { guestThinkingMs: body.guestThinkingMs }
+                      : {}),
+                    ...(producerGuestHostInterruption
+                      ? { producerGuestHostInterruption }
                       : {}),
                   }
                 : cue

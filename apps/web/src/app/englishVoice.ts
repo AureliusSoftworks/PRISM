@@ -1322,6 +1322,7 @@ async function playChunkedEnglishResponse(
   stereoPan = 0,
   authoredPerformanceText?: string | null,
   pacingProfile?: EnglishPacingProfileV1 | null,
+  channel: VoicePlaybackChannel = "primary",
 ): Promise<void> {
   const totalCharacters = Math.max(
     1,
@@ -1431,6 +1432,8 @@ async function playChunkedEnglishResponse(
         roomAcoustics,
         null,
         stereoPan,
+        undefined,
+        channel,
       );
       const actionHeardMs = Math.max(
         actualActionElapsedMs,
@@ -1564,6 +1567,8 @@ async function playChunkedEnglishResponse(
         roomAcoustics,
         playedChunks === 0 ? preSpeechBreath : null,
         stereoPan,
+        undefined,
+        channel,
       );
     const speechHeardMs = Math.max(
       actualChunkElapsedMs,
@@ -1716,6 +1721,7 @@ export function enqueueChunkedEnglishVoice(
   preSpeechBreath?: PreSpeechBreathPlan | null,
   stereoPan = 0,
   pacingProfile?: EnglishPacingProfileV1 | null,
+  channel: VoicePlaybackChannel = "primary",
 ): Promise<void> {
   const expectedGeneration = generation;
   const feelProfile = botAudioVoiceProfileForFeelLane(
@@ -1726,10 +1732,8 @@ export function enqueueChunkedEnglishVoice(
     ...applyVoiceDeliveryMoodToProfile(feelProfile, deliveryMood),
     volume: normalizeBotVoiceVolume(globalVolume),
   };
-  queue = queue
-    .catch(() => undefined)
-    .then(() =>
-      playChunkedEnglishResponse(
+  const run = () =>
+    playChunkedEnglishResponse(
         response,
         playbackProfile,
         expectedGeneration,
@@ -1743,7 +1747,9 @@ export function enqueueChunkedEnglishVoice(
         stereoPan,
         null,
         pacingProfile,
-      ),
-    );
+        channel,
+      );
+  if (channel !== "primary") return run();
+  queue = queue.catch(() => undefined).then(run);
   return queue;
 }

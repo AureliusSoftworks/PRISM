@@ -172,6 +172,18 @@ test("backfills met suspects from both saved interview history and an active leg
   assert.deepEqual(new Set(normalized.metSuspectSeatIds), new Set([activeSuspect!.seatId, historicalSuspect!.seatId]));
 });
 
+test("opens new cases on a persisted investigation assignment without resurfacing it for legacy saves", () => {
+  const config = resolveDebateMysteryConfig(createConfig("compact", "classic", "investigation-assignment"));
+  const bible = compileDeterministicDebateMystery({ config, suspects: suspects(4) });
+  const projected = projectDebateMysteryCase(bible, config);
+  assert.equal(projected.investigationApproach, "undecided");
+
+  const legacy = structuredClone(projected) as unknown as Record<string, unknown>;
+  delete legacy.investigationApproach;
+  const normalized = normalizeDebateMysteryFormatStateV1(legacy);
+  assert.equal(normalized.investigationApproach, "player");
+});
+
 test("treats an already-used legacy room investigation as action-committed", () => {
   const config = resolveDebateMysteryConfig(createConfig("compact", "classic", "investigation-commit-backfill"));
   const bible = compileDeterministicDebateMystery({ config, suspects: suspects(4) });

@@ -252,6 +252,7 @@ export async function prepareAccentMapTargetIpa(args: {
     voiceLocale,
   );
   const phonemeControlActive =
+    (!accentField.legacy && accentField.layers.length > 0) ||
     (voiceAccentDefinitionForId(profile.accentDefinitionId) ??
       voiceAccentDefinitionForLegacyProfile({
         pronunciationBase: profile.pronunciationBase,

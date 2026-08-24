@@ -1583,9 +1583,13 @@ export function normalizeVoiceAccentDefinitionId(
   if (value === null) return null;
   if (typeof value !== "string") return fallback;
   const normalized = value.trim().toLocaleLowerCase().slice(0, 96);
-  return /^[a-z0-9][a-z0-9-]{0,95}$/u.test(normalized)
-    ? normalized
-    : fallback;
+  if (!/^[a-z0-9][a-z0-9-]{0,95}$/u.test(normalized)) return fallback;
+  // These two persisted IDs predate named Accent Map anchors. Country-wide
+  // umbrellas are navigation, never speech settings: preserve old profiles by
+  // normalizing them to the closest concrete varieties at every parse boundary.
+  if (normalized === "american-english") return "general-american-english";
+  if (normalized === "british-english") return "modern-rp-english";
+  return normalized;
 }
 
 export function resolveLocalVoicePronunciationLocale(

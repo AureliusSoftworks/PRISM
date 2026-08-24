@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { LOCAL_VOICE_SPEECHPRINT_CAPABILITIES } from "@localai/shared";
+import {
+  DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+  LOCAL_VOICE_SPEECHPRINT_CAPABILITIES,
+  normalizeBotAudioVoiceProfileV1,
+  resolvePremiumAccentDirection,
+  resolveVoiceAccentField,
+} from "@localai/shared";
 
 import {
   PRONUNCIATION_ATLAS_ANCHORS,
@@ -20,11 +26,14 @@ import {
   pronunciationAtlasPointForCoordinates,
   pronunciationAtlasPointFromLensProjection,
   pronunciationAtlasNaturalSelection,
+  pronunciationAtlasNamedCandidates,
   pronunciationAtlasNearbyCandidates,
   pronunciationAtlasPointForSelection,
   pronunciationAtlasSelectionAtPoint,
   pronunciationAtlasLocationText,
   pronunciationAtlasValueText,
+  profileWithPronunciationAtlasSelection,
+  pronunciationAtlasSelectionForProfile,
   type PronunciationAtlasSelection,
 } from "./pronunciationAtlasModel.ts";
 
@@ -34,6 +43,15 @@ const britishFrench: PronunciationAtlasSelection = {
   influence: "french-influenced-english",
   strength: "balanced",
 };
+
+function fieldFor(selection: PronunciationAtlasSelection) {
+  return resolveVoiceAccentField({
+    point: selection.point,
+    accentDefinitionId: selection.accentDefinitionId,
+    pronunciationBase: selection.pronunciationBase,
+    speechprintInfluence: selection.influence,
+  });
+}
 
 describe("Pronunciation Atlas", () => {
   it("uses one full-frame equirectangular projection for pins and hit testing", () => {
@@ -63,15 +81,27 @@ describe("Pronunciation Atlas", () => {
     );
     assert.ok(
       PRONUNCIATION_ATLAS_ANCHORS.every(
-        (anchor) => anchor.accentDefinitionId.length > 0,
+        (anchor) =>
+          anchor.accentDefinitionId.length > 0 &&
+          anchor.accentDefinitionId !== "american-english" &&
+          anchor.accentDefinitionId !== "british-english",
       ),
     );
+    const named = pronunciationAtlasNamedCandidates(britishFrench);
+    assert.ok(
+      named.every(
+        (candidate) =>
+          candidate.label !== "American" && candidate.label !== "British",
+      ),
+    );
+    assert.ok(named.some((candidate) => candidate.label === "General American"));
+    assert.ok(named.some((candidate) => candidate.label === "Modern RP"));
   });
 
   it("places representative anchors on their real projected regions", () => {
     const expectedPoints = {
       "base-en-US": { x: 0.226, y: 0.279 },
-      "base-en-GB": { x: 0.493, y: 0.199 },
+      "influence-modern-rp-english": { x: 0.5, y: 0.214 },
       "influence-brazilian-portuguese-influenced-english": {
         x: 0.367,
         y: 0.588,
@@ -94,10 +124,10 @@ describe("Pronunciation Atlas", () => {
     }
   });
 
-  it("keeps American and British foundations independent from influence", () => {
+  it("keeps technical foundations out of the visible selected label", () => {
     assert.equal(
       pronunciationAtlasValueText(britishFrench),
-      "British foundation, French-influenced English, Balanced",
+      "French-influenced English, Balanced",
     );
     assert.equal(
       pronunciationAtlasAnchorForSelection(britishFrench).influence,
@@ -105,7 +135,7 @@ describe("Pronunciation Atlas", () => {
     );
   });
 
-  it("resolves a map point to the nearest qualified anchor", () => {
+  it("resolves an unnamed map point to two qualified anchors", () => {
     const japanese = PRONUNCIATION_ATLAS_ANCHORS.find(
       (anchor) => anchor.influence === "japanese-influenced-english",
     );
@@ -115,15 +145,23 @@ describe("Pronunciation Atlas", () => {
       britishFrench,
     );
     assert.equal(selected.pronunciationBase, "en-GB");
-    assert.equal(selected.influence, "japanese-influenced-english");
-    assert.equal(
-      selected.accentDefinitionId,
-      "japanese-influenced-english",
-    );
+    assert.equal(selected.influence, "none");
+    assert.equal(selected.accentDefinitionId, null);
     assert.deepEqual(selected.point, {
       x: japanese.point.x - 0.01,
       y: japanese.point.y + 0.01,
     });
+    const field = fieldFor(selected);
+    assert.equal(field.layers.length, 2);
+    assert.equal(
+      field.layers[0]?.accentDefinitionId,
+      "japanese-influenced-english",
+    );
+    assert.ok(
+      Math.abs(field.layers.reduce((sum, layer) => sum + layer.weight, 0) - 1) <
+        1e-12,
+    );
+    assert.deepEqual(fieldFor(selected), field);
   });
 
   it("keeps a freely dropped pin instead of snapping it to the chosen accent", () => {
@@ -133,6 +171,32 @@ describe("Pronunciation Atlas", () => {
     assert.notDeepEqual(
       pronunciationAtlasPointForSelection(selected),
       pronunciationAtlasAnchorForSelection(selected).point,
+    );
+  });
+
+  it("shows an unnamed Bavarian-core drop as exact without naming the pin", () => {
+    const bavaria = PRONUNCIATION_ATLAS_ANCHORS.find(
+      (anchor) =>
+        anchor.accentDefinitionId ===
+        "bavarian-german-influenced-english",
+    );
+    assert.ok(bavaria);
+    const selected = pronunciationAtlasSelectionAtPoint(
+      bavaria.point,
+      britishFrench,
+    );
+    assert.equal(selected.accentDefinitionId, null);
+    assert.deepEqual(fieldFor(selected).layers, [
+      {
+        accentDefinitionId: "bavarian-german-influenced-english",
+        pronunciationBase: "en-GB",
+        influence: "bavarian-german-influenced-english",
+        weight: 1,
+      },
+    ]);
+    assert.equal(
+      pronunciationAtlasLocationText(selected),
+      "Bavarian German · Balanced",
     );
   });
 
@@ -161,7 +225,8 @@ describe("Pronunciation Atlas", () => {
 
     for (const [point, expectedInfluence] of expectations) {
       assert.equal(
-        pronunciationAtlasSelectionAtPoint(point, britishFrench).influence,
+        fieldFor(pronunciationAtlasSelectionAtPoint(point, britishFrench))
+          .layers[0]?.accentDefinitionId,
         expectedInfluence,
       );
     }
@@ -177,28 +242,28 @@ describe("Pronunciation Atlas", () => {
       );
       assert.ok(anchor);
       assert.equal(
-        pronunciationAtlasSelectionAtPoint(anchor.point, britishFrench)
-          .influence,
+        fieldFor(
+          pronunciationAtlasSelectionAtPoint(anchor.point, britishFrench),
+        ).layers[0]?.accentDefinitionId,
         influence,
       );
     }
   });
 
-  it("pins the selected foundation instead of following the voice source", () => {
-    const american = PRONUNCIATION_ATLAS_ANCHORS.find(
-      (anchor) => anchor.pronunciationBase === "en-US",
+  it("keeps a named General American choice exact", () => {
+    const american = pronunciationAtlasNamedCandidates(britishFrench).find(
+      (candidate) =>
+        candidate.selection.accentDefinitionId === "general-american-english",
     );
     assert.ok(american);
-    const selected = pronunciationAtlasSelectionAtPoint(
-      american.point,
-      britishFrench,
-    );
+    const selected = american.selection;
     assert.equal(selected.pronunciationBase, "en-US");
     assert.equal(selected.influence, "none");
-    assert.equal(selected.accentDefinitionId, "american-english");
+    assert.equal(selected.accentDefinitionId, "general-american-english");
+    assert.equal(fieldFor(selected).layers.length, 1);
     assert.equal(
       pronunciationAtlasLocationText(selected),
-      "American · Balanced",
+      "General American · Balanced",
     );
   });
 
@@ -214,9 +279,10 @@ describe("Pronunciation Atlas", () => {
       strength: "balanced",
     });
     assert.equal(selected.pronunciationBase, "en-GB");
-    assert.equal(selected.influence, "french-influenced-english");
+    assert.equal(selected.influence, "none");
+    assert.equal(selected.accentDefinitionId, null);
     assert.equal(
-      selected.accentDefinitionId,
+      fieldFor(selected).layers[0]?.accentDefinitionId,
       "french-influenced-english",
     );
   });
@@ -279,6 +345,60 @@ describe("Pronunciation Atlas", () => {
     );
   });
 
+  it("commits every London variant as one exact Local and Premium field", () => {
+    const variants = pronunciationAtlasVariantCandidatesInLens(
+      pronunciationAtlasLensForId("isles"),
+      pronunciationAtlasNaturalSelection("en-GB"),
+    );
+    const ids = variants.map(
+      (variant) =>
+        normalizePronunciationAtlasSelection(variant.selection)
+          .accentDefinitionId,
+    );
+    assert.ok(ids.every((id): id is string => Boolean(id)));
+    assert.equal(new Set(ids).size, variants.length);
+
+    for (const variant of variants) {
+      const committed = profileWithPronunciationAtlasSelection(
+        DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        variant.selection,
+      );
+      const normalizedProfile = normalizeBotAudioVoiceProfileV1(committed);
+      const roundTrip = pronunciationAtlasSelectionForProfile(normalizedProfile);
+      assert.equal(
+        normalizedProfile.accentDefinitionId,
+        variant.selection.accentDefinitionId,
+      );
+      assert.equal(
+        roundTrip.accentDefinitionId,
+        variant.selection.accentDefinitionId,
+      );
+      const localField = resolveVoiceAccentField({
+        point: normalizedProfile.pronunciationMapPoint,
+        accentDefinitionId: normalizedProfile.accentDefinitionId,
+        pronunciationBase: normalizedProfile.pronunciationBase,
+        speechprintInfluence: normalizedProfile.speechprintInfluence,
+      });
+      assert.deepEqual(
+        localField.layers.map((layer) => [
+          layer.accentDefinitionId,
+          layer.weight,
+        ]),
+        [[variant.selection.accentDefinitionId, 1]],
+      );
+      const premiumDirection = resolvePremiumAccentDirection({
+        point: normalizedProfile.pronunciationMapPoint,
+        accentDefinitionId: normalizedProfile.accentDefinitionId,
+        pronunciationBase: normalizedProfile.pronunciationBase,
+        speechprintInfluence: normalizedProfile.speechprintInfluence,
+        speechprintStrength: normalizedProfile.speechprintStrength,
+        nativeAccentHint: null,
+      });
+      assert.ok(premiumDirection);
+      assert.doesNotMatch(premiumDirection, /%/u);
+    }
+  });
+
   it("supports deterministic continuous keyboard travel", () => {
     const natural = pronunciationAtlasNaturalSelection("en-US");
     const origin = pronunciationAtlasPointForSelection(natural);
@@ -308,7 +428,8 @@ describe("Pronunciation Atlas", () => {
     );
     assert.equal(candidates[0]?.label, "Irish");
     assert.ok(candidates.some(({ label }) => label === "Scottish"));
-    assert.ok(candidates.some(({ label }) => label === "British"));
+    assert.ok(candidates.every(({ label }) => label !== "British"));
+    assert.ok(candidates.every(({ label }) => label !== "American"));
   });
 
   it("exposes the co-located London constellation without inferring a variant", () => {
@@ -321,7 +442,11 @@ describe("Pronunciation Atlas", () => {
       accentDefinitionId: null,
       influence: "none",
     });
-    assert.equal(dropped.accentDefinitionId, "modern-rp-english");
+    assert.equal(dropped.accentDefinitionId, null);
+    assert.equal(
+      fieldFor(dropped).layers[0]?.accentDefinitionId,
+      "modern-rp-english",
+    );
     const candidates = pronunciationAtlasNearbyCandidates(dropped);
     for (const id of [
       "modern-rp-english",

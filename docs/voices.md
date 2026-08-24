@@ -104,6 +104,16 @@ Californian, Inland North becomes Midwestern American, Eastern New England
 becomes Boston — because a region the provider has no concept of yields no
 accent at all. The Accent Map keeps showing the precise place.
 
+A named Accent Map choice is exact even when an older saved profile carries a
+stale point beside it. A freely placed, unnamed point uses shared source cores
+and boundary falloff: it stays 100% within a source's home range, then moves
+smoothly toward a neighboring regional or language influence after crossing
+that core. Co-located choices such as the London variants are never inferred
+from coordinates. The field is a coarse geographic pronunciation approximation
+for creative casting, not demographic inference about a person or population;
+Local and Premium resolve the same saved field before rendering it through
+their own engines.
+
 Where the accent also moves consonants, Premium respells the words it changes
 rather than sending phonemes: an accent that stops θ requests "I tink dis",
 one that fronts it requests "I fink". The word lists are curated per accent

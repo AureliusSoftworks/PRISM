@@ -11,7 +11,6 @@ import {
   BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT,
   BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
   BOTCAST_DEFAULT_CAMERA_FRAMING,
-  BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING,
   BOTCAST_DEFAULT_LOGO_PLACEMENT,
   BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
@@ -79,8 +78,6 @@ import {
   isBotcastEchoDashboardBlurb,
   normalizeBotcastStudioLayout,
   normalizeBotcastCameraFraming,
-  botcastCameraFramingWithEpisodeImages,
-  normalizeBotcastEpisodeImageFraming,
   normalizeBotcastLogoPlacement,
   normalizeBotcastStudioAtmosphereMix,
   normalizeBotcastStudioGlowTuning,
@@ -303,27 +300,29 @@ describe("Signal producer direct quotes", () => {
 });
 
 describe("Signal show camera framing", () => {
-  it("normalizes global image framing separately from per-show cameras", () => {
-    const globalImages = normalizeBotcastEpisodeImageFraming({
-      left: { x: 12, y: 91, scale: 80 },
-      right: { x: 88, y: 9, scale: 75 },
-      wide: { x: 50, y: 64, scale: 105 },
+  it("keeps image placement on each show camera and migrates legacy scale to Item size", () => {
+    const cameras = normalizeBotcastCameraFraming({
+      left: { zoom: 1.2, panX: 3, panY: -4, episodeImage: { x: 12, y: 91, scale: 80 } },
+      right: { zoom: 1.3, panX: -2, panY: 5, episodeImage: { x: 88, y: 9, itemScale: 75, photoScale: 95 } },
+      wide: { zoom: 1, panX: 0, panY: 0, episodeImage: { x: 50, y: 64, scale: 105 } },
     });
-    const cameras = botcastCameraFramingWithEpisodeImages(
-      {
-        left: { zoom: 1.2, panX: 3, panY: -4 },
-        right: { zoom: 1.3, panX: -2, panY: 5 },
-        wide: { zoom: 1, panX: 0, panY: 0 },
-      },
-      globalImages,
-    );
     assert.equal(cameras.left.zoom, 1.2);
-    assert.deepEqual(cameras.left.episodeImage, globalImages.left);
-    assert.deepEqual(cameras.right.episodeImage, globalImages.right);
-    assert.deepEqual(cameras.wide.episodeImage, globalImages.wide);
-    assert.deepEqual(
-      normalizeBotcastEpisodeImageFraming(undefined),
-      BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING,
+    assert.deepEqual(cameras.left.episodeImage, {
+      x: 12,
+      y: 91,
+      itemScale: 80,
+      photoScale: BOTCAST_DEFAULT_CAMERA_FRAMING.left.episodeImage.photoScale,
+    });
+    assert.deepEqual(cameras.right.episodeImage, {
+      x: 88,
+      y: 9,
+      itemScale: 75,
+      photoScale: 95,
+    });
+    assert.equal(cameras.wide.episodeImage.itemScale, 105);
+    assert.equal(
+      cameras.wide.episodeImage.photoScale,
+      BOTCAST_DEFAULT_CAMERA_FRAMING.wide.episodeImage.photoScale,
     );
   });
 
@@ -342,17 +341,20 @@ describe("Signal show camera framing", () => {
     assert.deepEqual(BOTCAST_DEFAULT_CAMERA_FRAMING.left.episodeImage, {
       x: 24,
       y: 72,
-      scale: 50,
+      itemScale: 50,
+      photoScale: 90,
     });
     assert.deepEqual(BOTCAST_DEFAULT_CAMERA_FRAMING.right.episodeImage, {
       x: 76,
       y: 72,
-      scale: 50,
+      itemScale: 50,
+      photoScale: 90,
     });
     assert.deepEqual(BOTCAST_DEFAULT_CAMERA_FRAMING.wide.episodeImage, {
       x: 50,
       y: 75,
-      scale: 50,
+      itemScale: 50,
+      photoScale: 90,
     });
     assert.deepEqual(
       normalizeBotcastCameraFraming({
@@ -386,7 +388,7 @@ describe("Signal show camera framing", () => {
           zoom: 1.6,
           panX: -8.25,
           panY: 4.5,
-          episodeImage: { x: 5, y: 95, scale: 140 },
+          episodeImage: { x: 5, y: 95, itemScale: 140, photoScale: 90 },
         },
         right: {
           zoom: 2,
@@ -398,7 +400,7 @@ describe("Signal show camera framing", () => {
           zoom: 1,
           panX: 2,
           panY: 3,
-          episodeImage: { x: 48.5, y: 70, scale: 85 },
+          episodeImage: { x: 48.5, y: 70, itemScale: 85, photoScale: 90 },
         },
       },
     );

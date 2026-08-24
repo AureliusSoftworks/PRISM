@@ -15,6 +15,7 @@ import {
   debateMysteryNotebookCharacterCount,
   gradeDebateMysteryTheory,
   normalizeDebateIdempotencyKey,
+  normalizeDebateModeratorTitle,
   normalizeDebateMysteryFormatStateV1,
   normalizeDebateParticipantDifficulty,
   projectDebateMysteryCase,
@@ -85,7 +86,7 @@ type DebateMysteryCourtPlayerRole = Extract<
 interface DebateMysteryCourtSetup {
   playerRole?: unknown;
   participationDifficulty?: unknown;
-  moderatorName?: unknown;
+  moderatorTitle?: unknown;
   forTeamName?: unknown;
   againstTeamName?: unknown;
 }
@@ -95,7 +96,7 @@ function mysteryCourtPlayerRole(value: unknown): DebateMysteryCourtPlayerRole {
   if (value === "participant" || value === "spectator") return value;
   throw new HttpError(
     400,
-    "Choose Participant or Spectator for Whodunnit court. PRISM keeps the Judge seat.",
+    "Choose Participant or Spectator for Whodunnit court. The player cannot occupy the Judge seat.",
   );
 }
 
@@ -595,13 +596,11 @@ function mysterySessionRequest(
       againstSide: { label: typeof courtSetup.againstTeamName === "string" && courtSetup.againstTeamName.trim() ? courtSetup.againstTeamName : "Defense", brief: "Test the filed theory against the strongest supported alternative in the admissible record." },
     },
     evidence: { version: DEBATE_SCHEMA_VERSION, notes: "", sources: [], exhibits: [], frozenAt: null },
-    moderatorTitle: "PRISM · Judge & Casekeeper",
-    moderatorName:
-      typeof courtSetup.moderatorName === "string"
-        ? courtSetup.moderatorName
-        : undefined,
-    moderatorBotId: "prism:player-judge",
-    playerJudgeUsesPrism: true,
+    moderatorTitle: normalizeDebateModeratorTitle(
+      courtSetup.moderatorTitle ?? "Judge",
+    ),
+    moderatorBotId: config.judgeBotId,
+    playerJudgeUsesPrism: config.judgeBotId === "prism:player-judge",
     forAdvocateBotId: config.prosecutorPartnerBotId,
     againstAdvocateBotId: config.rivalDefenseBotId,
     playerRole,
@@ -1082,7 +1081,12 @@ export async function createDebateMysterySession(
   let config: DebateMysteryResolvedConfigV1;
   try { config = resolveDebateMysteryConfig(configInput); }
   catch (error) { throw new HttpError(400, error instanceof Error ? error.message : "Invalid mystery setup."); }
-  const allBotIds = [...config.suspectBotIds, config.prosecutorPartnerBotId, config.rivalDefenseBotId];
+  const allBotIds = [
+    ...config.suspectBotIds,
+    config.judgeBotId,
+    config.prosecutorPartnerBotId,
+    config.rivalDefenseBotId,
+  ].filter((botId) => botId !== "prism:player-judge");
   const bots = mysteryBotRows(db, userId, allBotIds);
   if (bots.length !== allBotIds.length) throw new HttpError(404, "One or more selected cast bots were not found.");
   const request = mysterySessionRequest(
@@ -1176,12 +1180,14 @@ export async function createDebateMysterySession(
       stepKey: "mystery_investigation",
       playerRole: request.playerRole,
       playerSideId: request.playerSideId ?? null,
-      moderatorTitle: "PRISM · Judge & Casekeeper",
-      moderator: {
-        ...session.moderator,
-        name: "PRISM",
-        systemPrompt: "You are PRISM, the neutral Judge and server-side Casekeeper. Never expose hidden case truth. Rule only from deterministic validation and phrase that ruling clearly.",
-      },
+      moderatorTitle: session.moderatorTitle,
+      moderator: config.judgeBotId === "prism:player-judge"
+        ? {
+            ...session.moderator,
+            name: "PRISM",
+            systemPrompt: "You are PRISM, the neutral Judge and server-side Casekeeper. Never expose hidden case truth. Rule only from deterministic validation and phrase that ruling clearly.",
+          }
+        : session.moderator,
       formatState: publicState,
     };
     return persistMysterySession(db, userId, compiled, session.revision);
@@ -1227,6 +1233,7 @@ export async function resumeDebateMysteryCompilation(
     floors: state.config.floors,
     totalRooms: state.config.totalRooms,
     suspectBotIds: state.config.suspectBotIds,
+    judgeBotId: state.config.judgeBotId,
     prosecutorPartnerBotId: state.config.prosecutorPartnerBotId,
     rivalDefenseBotId: state.config.rivalDefenseBotId,
   };
@@ -1241,7 +1248,7 @@ export async function resumeDebateMysteryCompilation(
         session.playerRole === "spectator" ? "spectator" : "participant",
       participationDifficulty:
         session.participation?.difficulty ?? "standard",
-      moderatorName: session.moderatorName,
+      moderatorTitle: session.moderatorTitle,
       forTeamName: session.motion.forSide.label,
       againstTeamName: session.motion.againstSide.label,
     },
@@ -1481,7 +1488,8 @@ async function projectedPartnerReply(args: {
     const courtDirection = args.courtTask
       ? [
           `Deliver the prosecution ${args.courtTask} as one spoken paragraph of 50 to 90 words.`,
-          "Address PRISM as Judge. There is no jury. Never say 'ladies and gentlemen' or refer to jurors.",
+          "Address the presiding Judge. There is no jury. Never say 'ladies and gentlemen' or refer to jurors.",
+          "When naming the charged person, call them 'the accused' or 'the defendant'; never call them 'my client'.",
           "Use no Markdown, headings, bullets, checklist, follow-up question, or analysis preamble. Sound decisive but do not claim anything outside the filed theory and admitted record.",
         ].join("\n")
       : [
@@ -1505,10 +1513,10 @@ async function projectedPartnerReply(args: {
             : "Classic case: identify a useful next question without resolving the theory for the investigator.",
       ].join("\n") },
       { role: "user", content: `${JSON.stringify(publicRecord)}\nInvestigator asks: ${args.question}` },
-    ], { model: lane.model, reasoningEffort: lane.reasoningEffort, turbo: lane.turbo, maxTokens: args.courtTask ? 220 : 420, temperature: 0.2, usagePurpose: "debate_generation", allowFinalLocalFallback: lane.providerName === "local" }), args.courtTask ? 700 : 1_200) || "I can only work from what we have actually discovered.";
+    ], { model: lane.model, reasoningEffort: lane.reasoningEffort, turbo: lane.turbo, maxTokens: args.courtTask ? 220 : 420, temperature: 0.2, usagePurpose: "debate_generation", allowFinalLocalFallback: lane.providerName === "local" }), args.courtTask ? 700 : 1_200) || "The prosecution can only ask the court to assess what the admitted record proves about the accused.";
     clearAnswer = answer;
   } catch {
-    clearAnswer = "I can only work from what we have actually discovered. Your desk notes and pins are working hypotheses, not evidence.";
+    clearAnswer = "The prosecution can only ask the court to assess what the admitted record proves about the accused. Desk notes and pins are working hypotheses, not evidence.";
   }
   const partner = [
     args.session.forAdvocate,
@@ -1561,7 +1569,8 @@ async function projectedDefenseReply(args: {
                 args.session,
                 args.state.config.rivalDefenseBotId,
               ),
-              `Deliver this ${args.task} as one spoken paragraph of 50 to 90 words. Address PRISM as Judge. There is no jury: never say 'ladies and gentlemen,' mention jurors, or appeal to a jury.`,
+              `Deliver this ${args.task} as one spoken paragraph of 50 to 90 words. Address the presiding Judge. There is no jury: never say 'ladies and gentlemen,' mention jurors, or appeal to a jury.`,
+              "Refer to the charged person only as 'my client'. Never call my client 'the accused' or 'the defendant'.",
               "Use no Markdown, headings, bullets, stage directions, or legal-analysis preamble. Be sharp, theatrical, and grounded only in the record.",
             ].join("\n"),
           },
@@ -1581,9 +1590,9 @@ async function projectedDefenseReply(args: {
         },
       ),
       800,
-    ) || "The defense asks PRISM to judge only what this admissible record actually proves.";
+    ) || "My client asks the court to judge only what this admissible record actually proves.";
   } catch {
-    clearReply = "The defense asks PRISM to judge only what this admissible record actually proves.";
+    clearReply = "My client asks the court to judge only what this admissible record actually proves.";
   }
   const defense = [
     args.session.forAdvocate,
@@ -1731,6 +1740,128 @@ export function freezeDebateMysteryInvestigationForCourt(
     imageId: null,
   }));
   return frozen;
+}
+
+/**
+ * Let co-counsel own the mansion phase without turning the shortcut into a
+ * spoiler dump. The handoff contains one deterministic, court-worthy proof
+ * route, plus only the rooms and witnesses needed to ground that public file.
+ */
+function preparePartnerInvestigationForCourt(
+  session: DebateSessionV1,
+  state: DebateWhodunnitFormatStateV1,
+  bible: DebateMysteryCaseBibleV1,
+): DebateWhodunnitFormatStateV1 {
+  const next = structuredClone(state);
+  const route = bible.proofBundles.find((bundle) => bundle.id === "strong-case");
+  if (!route) throw new HttpError(409, "Co-counsel could not assemble a court-ready case file.");
+
+  const revealRoom = (roomId: string): DebateWhodunnitFormatStateV1["rooms"][number] => {
+    const room = next.rooms.find((candidate) => candidate.id === roomId);
+    const canonical = bible.rooms.find((candidate) => candidate.id === roomId);
+    if (!room || !canonical) throw new HttpError(409, "The partner handoff names an unavailable room.");
+    room.templateId = canonical.templateId;
+    room.imageId = canonical.imageId;
+    room.kind = canonical.kind;
+    room.assignedSuspectSeatId = canonical.assignedSuspectSeatId;
+    room.name = DEBATE_MYSTERY_ROOM_TEMPLATES.find((template) => template.id === canonical.templateId)?.name ?? "Unnamed Room";
+    room.discovered = true;
+    room.locked = false;
+    room.activeRegionIds = bible.activeRegions
+      .filter((entry) => entry.roomId === roomId)
+      .map((entry) => entry.regionId);
+    room.activeRegionId = room.activeRegionIds.find((regionId) => !room.inspectedRegionIds.includes(regionId)) ?? null;
+    return room;
+  };
+
+  for (const evidenceId of route.requiredEvidenceIds) {
+    const evidence = bible.evidence.find((candidate) => candidate.id === evidenceId);
+    if (!evidence) throw new HttpError(409, "The partner handoff names unavailable evidence.");
+    if (!next.discoveredEvidence.some((candidate) => candidate.id === evidence.id)) {
+      next.discoveredEvidence.push(publicMysteryEvidence(evidence));
+    }
+    if (evidence.isPhysical && !next.forensicFindings.some((finding) => finding.evidenceId === evidence.id)) {
+      next.forensicFindings.push(frozenForensicFinding(evidence));
+    }
+    for (const item of bible.inventoryItems.filter((candidate) => candidate.evidenceId === evidence.id)) {
+      if (!next.inventoryItems.some((candidate) => candidate.id === item.id)) {
+        next.inventoryItems.push(structuredClone(item));
+      }
+    }
+    const room = revealRoom(evidence.roomId);
+    const outcome = bible.activeRegions.find((candidate) =>
+      candidate.roomId === evidence.roomId && candidate.regionId === evidence.regionId);
+    if (outcome && !room.inspectedRegionIds.includes(outcome.regionId)) {
+      room.inspectedRegionIds.push(outcome.regionId);
+      room.inspectionCounts[outcome.regionId] = 1;
+      room.publicObservation = outcome.inspectionResponse;
+      room.outcomeKind = outcome.kind;
+      const template = DEBATE_MYSTERY_ROOM_TEMPLATES.find((candidate) => candidate.id === room.templateId);
+      room.observations.push({
+        regionId: outcome.regionId,
+        label: template?.regions.find((region) => region.id === outcome.regionId)?.label ?? "Inspected area",
+        observation: outcome.inspectionResponse,
+        outcomeKind: outcome.kind,
+        evidenceId: outcome.evidenceId,
+        accessTargets: [],
+      });
+      room.searched = room.activeRegionIds.every((regionId) => room.inspectedRegionIds.includes(regionId));
+      room.activeRegionId = room.activeRegionIds.find((regionId) => !room.inspectedRegionIds.includes(regionId)) ?? null;
+    }
+  }
+
+  for (const testimonyId of route.requiredTestimonyIds) {
+    const testimony = bible.testimony.find((candidate) => candidate.id === testimonyId);
+    if (!testimony) throw new HttpError(409, "The partner handoff names unavailable testimony.");
+    if (!next.testimony.some((candidate) => candidate.id === testimony.id)) {
+      next.testimony.push(publicMysteryTestimony(testimony, session));
+    }
+    if (!next.metSuspectSeatIds.includes(testimony.speakerSeatId)) {
+      next.metSuspectSeatIds.push(testimony.speakerSeatId);
+    }
+    const witness = bible.suspects.find((candidate) => candidate.seatId === testimony.speakerSeatId);
+    if (witness) revealRoom(witness.roomId);
+  }
+
+  if (!next.metSuspectSeatIds.includes(route.culpritSeatId)) {
+    next.metSuspectSeatIds.push(route.culpritSeatId);
+  }
+  const accused = bible.suspects.find((candidate) => candidate.seatId === route.culpritSeatId);
+  if (!accused) throw new HttpError(409, "Co-counsel could not identify an accused person.");
+  revealRoom(accused.roomId);
+
+  const filedAt = new Date().toISOString();
+  next.leads = updateDebateMysteryPublicLeads(bible, next, filedAt);
+  const claims = debateMysteryTheoryClaimOptions(next);
+  const method = claims.method[0]?.value;
+  const motive = claims.motive[0]?.value;
+  const opportunity = claims.opportunity[0]?.value;
+  if (!method || !motive || !opportunity) {
+    throw new HttpError(409, "Co-counsel's public record is not complete enough to file.");
+  }
+  next.theory = {
+    culpritSeatId: route.culpritSeatId,
+    accompliceSeatId: null,
+    method,
+    motive,
+    opportunity,
+    evidenceIds: [...route.requiredEvidenceIds],
+    testimonyIds: [...route.requiredTestimonyIds],
+  };
+  next.theoryFiledAt = filedAt;
+  next.actionsRemaining = 0;
+  next.activeActivity = null;
+  next.playPhase = "trial";
+  next.investigationApproach = "partner";
+  const partnerName = session.forAdvocate.name || "Co-counsel";
+  next.partnerJournal.push(projectDebateBotPublicUtteranceV1({
+    session,
+    botId: session.forAdvocate.id,
+    botName: partnerName,
+    clearContent: `I investigated the mansion, interviewed the relevant witnesses, and filed charges against ${accused.name}. The evidence and testimony I relied on are frozen in our court record.`,
+    stableTurnKey: `${session.id}:whodunnit:partner-handoff`,
+  }));
+  return next;
 }
 
 /**
@@ -2014,7 +2145,35 @@ export async function applyDebateMysteryAction(
     };
     publicPayload = { ...publicPayload, investigationExhausted: true };
   };
-  if (request.action === "travel") {
+  if (
+    nextState.investigationApproach === "undecided" &&
+    request.action !== "choose_investigation_path"
+  ) {
+    // Old clients and restored replays may begin with the mansion action
+    // directly. Treat that first intentional move as choosing to investigate.
+    nextState.investigationApproach = "player";
+  }
+  if (request.action === "choose_investigation_path") {
+    requireInvestigationPhase("Case assignment");
+    requireNoActiveActivity();
+    if (nextState.investigationApproach !== "undecided") {
+      throw new HttpError(409, "This case assignment has already been accepted.");
+    }
+    if (request.path === "player") {
+      nextState.investigationApproach = "player";
+      publicPayload = { investigationApproach: "player" };
+    } else if (request.path === "partner") {
+      nextState = preparePartnerInvestigationForCourt(nextSession, nextState, bible);
+      nextSession = enterMysteryTurnabout(db, userId, nextSession, nextState, runtime);
+      publicPayload = {
+        investigationApproach: "partner",
+        handoffEvidenceIds: nextState.theory?.evidenceIds ?? [],
+        handoffTestimonyIds: nextState.theory?.testimonyIds ?? [],
+      };
+    } else {
+      throw new HttpError(400, "Choose who will lead the investigation.");
+    }
+  } else if (request.action === "travel") {
     requireInvestigationPhase("Travel");
     requireNoActiveActivity();
     const room = nextState.rooms.find((candidate) => candidate.id === request.roomId);
@@ -2884,7 +3043,7 @@ export async function proposeDebateMysteryNotebookCleanup(
 }
 
 function portableManifest(bible: DebateMysteryCaseBibleV1, config: DebateMysteryResolvedConfigV1): DebateMysteryPortableManifestV1 {
-  const { suspectBotIds: _suspectBotIds, prosecutorPartnerBotId: _prosecutor, rivalDefenseBotId: _defense, ...portableConfig } = config;
+  const { suspectBotIds: _suspectBotIds, judgeBotId: _judge, prosecutorPartnerBotId: _prosecutor, rivalDefenseBotId: _defense, ...portableConfig } = config;
   const { suspects: _suspects, caseSeed: _caseSeed, ...portableCase } = bible;
   return {
     version: DEBATE_MYSTERY_SCHEMA_VERSION,
@@ -2976,6 +3135,7 @@ export async function importDebateMysteryCase(
   }
   const prosecutorPartnerBotId = compact(body.prosecutorPartnerBotId, 200);
   const rivalDefenseBotId = compact(body.rivalDefenseBotId, 200);
+  const judgeBotId = compact(body.judgeBotId, 200);
   const sourceConfig: DebateWhodunnitCreateConfigV1 = {
     version: 1,
     preset: manifest.config.preset,
@@ -3002,13 +3162,19 @@ export async function importDebateMysteryCase(
     floors: manifest.config.floors,
     totalRooms: manifest.config.totalRooms,
     suspectBotIds,
+    judgeBotId,
     prosecutorPartnerBotId,
     rivalDefenseBotId,
   };
   let config: DebateMysteryResolvedConfigV1;
   try { config = resolveDebateMysteryConfig(sourceConfig); }
   catch (error) { throw new HttpError(400, error instanceof Error ? error.message : "Invalid imported cast."); }
-  const allBotIds = [...suspectBotIds, prosecutorPartnerBotId, rivalDefenseBotId];
+  const allBotIds = [
+    ...suspectBotIds,
+    config.judgeBotId,
+    prosecutorPartnerBotId,
+    rivalDefenseBotId,
+  ].filter((botId) => botId !== "prism:player-judge");
   const bots = mysteryBotRows(db, userId, allBotIds);
   if (bots.length !== allBotIds.length) throw new HttpError(404, "One or more imported cast bots were not found.");
   const suspectRows = suspectBotIds.map((id) => bots.find((bot) => bot.id === id)!);
@@ -3082,8 +3248,14 @@ export async function importDebateMysteryCase(
     stepKey: "mystery_investigation",
     playerRole: session.playerRole,
     playerSideId: session.playerSideId,
-    moderatorTitle: "PRISM · Judge & Casekeeper",
-    moderator: { ...session.moderator, name: "PRISM", systemPrompt: "You are PRISM, the neutral Judge and server-side Casekeeper. Never expose hidden case truth." },
+    moderatorTitle: session.moderatorTitle,
+    moderator: config.judgeBotId === "prism:player-judge"
+      ? {
+          ...session.moderator,
+          name: "PRISM",
+          systemPrompt: "You are PRISM, the neutral Judge and server-side Casekeeper. Never expose hidden case truth.",
+        }
+      : session.moderator,
     formatState: importedPublicState,
   }, session.revision);
   return session;

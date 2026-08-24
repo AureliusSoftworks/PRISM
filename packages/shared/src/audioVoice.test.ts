@@ -400,6 +400,20 @@ describe("audio voice normalization", () => {
       parseStoredBotAudioVoiceProfileV1(serialized)?.accentDefinitionId,
       "german-influenced-english",
     );
+    assert.equal(
+      normalizeBotAudioVoiceProfileV1({
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        accentDefinitionId: "american-english",
+      }).accentDefinitionId,
+      "general-american-english",
+    );
+    assert.equal(
+      normalizeBotAudioVoiceProfileV1({
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        accentDefinitionId: "british-english",
+      }).accentDefinitionId,
+      "modern-rp-english",
+    );
   });
 
   it("persists the per-bot Accent Map switch and bypasses it only for synthesis", () => {

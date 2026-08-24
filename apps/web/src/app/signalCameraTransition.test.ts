@@ -8,6 +8,19 @@ import {
 
 describe("Signal automatic camera direction", () => {
 
+  it("holds Wide while an incoming host voice prepares over the live mic", () => {
+    assert.equal(
+      signalLiveAutoCameraShot({
+        baseShot: "left",
+        audibleHandoffPreparing: true,
+        speakingShot: "right",
+        botThinking: false,
+        producerGuestThinking: false,
+      }),
+      "wide",
+    );
+  });
+
   it("holds Wide for true audible crosstalk before reactions or coverage", () => {
     assert.equal(
       signalLiveAutoCameraShot({

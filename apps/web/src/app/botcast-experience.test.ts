@@ -91,6 +91,7 @@ describe("Signal experience shell", () => {
       source,
       /<SignalEpisodeImageVisual[\s\S]{0,120}ephemeralDataUrl=\{stageEpisodeImage\?\.dataUrl\}/u,
     );
+    assert.match(source, /signalEpisodeImageIsVisible\(\{[\s\S]{0,180}replay: args\.replay/u);
     assert.match(
       css,
       /\.episodeImageContext\s*\{[^}]*left:\s*var\(--signal-episode-image-x, 50%\)[^}]*top:\s*var\(--signal-episode-image-y, 75%\)[^}]*width:\s*clamp\(88px, 14%, 180px\)/u,
@@ -814,6 +815,14 @@ describe("Signal experience shell", () => {
     assert.match(
       css,
       /\.stageLayoutModal\s*\{[^}]*overflow:\s*hidden[^}]*grid-template-rows:\s*auto minmax\(0, 1fr\)/u,
+    );
+    assert.match(
+      css,
+      /\.stageLayoutModalBody\s*\{[^}]*overflow-y:\s*auto[^}]*overflow-x:\s*hidden[^}]*scrollbar-gutter:\s*stable[^}]*overscroll-behavior:\s*contain/iu,
+    );
+    assert.doesNotMatch(
+      css,
+      /\.stageLayoutModalBody\s*\{[^}]*overflow:\s*hidden/,
     );
     assert.match(
       css,
@@ -1939,6 +1948,14 @@ describe("Signal experience shell", () => {
     assert.match(source, /invalidateEpisodeOperation\(\)/u);
     assert.match(
       source,
+      /interruptProducerGuestHostLocally\(hostInterruptionForTurn, \{[\s\S]{0,120}preserveAudibleUtterance: true/u,
+    );
+    assert.match(
+      source,
+      /submittedProducerTurn[\s\S]*?voiceChannel: "handoff"[\s\S]*?onHandoffStart:[\s\S]*?audibleHandoffAudienceHeardContent\([\s\S]*?onReleaseUtterance\?\.\([\s\S]*?\/producer-guest-handoff/u,
+    );
+    assert.match(
+      source,
       /\.\.\.\(producerGuestHostInterruption[\s\S]{0,100}\? \{ producerGuestHostInterruption \}[\s\S]{0,40}: \{\}\)/u,
     );
     assert.match(source, /inputDisabled: false/u);
@@ -1962,6 +1979,34 @@ describe("Signal experience shell", () => {
       source,
       /signalThinkingFollowingMessageId\(\{[\s\S]{0,220}preparedMessageId:\s*activeSpeechMessageIdRef\.current/u,
     );
+  });
+
+  it("starts Signal interruptions on an audible handoff before releasing the outgoing primary", () => {
+    assert.match(
+      source,
+      /preserveAudibleUtterance:\s*Boolean\(outgoingMessage\)/u,
+    );
+    assert.match(
+      source,
+      /voiceChannel:\s*"handoff"[\s\S]{0,180}deferPresentationUntilPlaybackStart:\s*true/u,
+    );
+    assert.match(
+      source,
+      /onHandoffStart:[\s\S]{0,500}onReleaseUtterance\?\.\([\s\S]{0,120}SIGNAL_AUDIBLE_HANDOFF_RELEASE_MS/u,
+    );
+    assert.match(
+      source,
+      /audibleHandoffAudienceHeardContent\(outgoingMessage\)[\s\S]{0,900}\/cut-handoff/u,
+    );
+    assert.match(
+      source,
+      /failed incoming handoff must not tear down the outgoing[\s\S]{0,260}if \(!presentationDeferred\) onStopUtterance\?\.\(\)/u,
+    );
+    assert.match(
+      source,
+      /signalLiveSpeechProjectedElapsedMs\([\s\S]{0,320}updateBotcastSpeechReveal/u,
+    );
+    assert.match(pageSource, /onReleaseUtterance=\{releaseBotcastPrimaryUtterance\}/u);
   });
 
   it("uses server-owned host availability and blocks recovery screening while live", () => {
@@ -3073,24 +3118,45 @@ describe("Signal experience shell", () => {
       source,
       /body: JSON\.stringify\(\{ cameraFraming: draft\.framing \}\)/u,
     );
-    assert.match(source, /botcastCameraFramingWithEpisodeImages\(/u);
     assert.match(
       source,
       /BOTCAST_DEFAULT_CAMERA_FRAMING\[[\s\S]{0,100}studioCameraPreviewShot/u,
     );
     assert.match(source, /data-signal-episode-image-placement="true"/u);
-    assert.match(source, /Global for your Signal account and reused by every show/u);
+    assert.match(source, /Item size/u);
+    assert.match(source, /Photo size/u);
     assert.match(
       source,
-      /body: JSON\.stringify\(\{ episodeImageFraming: draft\.framing \}\)/u,
+      /useState<BotcastImageContextV1\["kind"\]>\("item"\)/u,
     );
+    assert.match(source, /aria-label="Episode image preview"/u);
+    assert.match(
+      source,
+      /data-image-kind=\{studioEpisodeImageKindPreview\}/u,
+    );
+    assert.match(
+      source,
+      /signalEpisodeImagePlacementStyle\([\s\S]{0,100}studioEpisodeImageKindPreview/u,
+    );
+    assert.match(source, /setStudioEpisodeImageKindPreview\("item"\)/u);
+    assert.match(source, /setStudioEpisodeImageKindPreview\("picture"\)/u);
+    assert.match(source, /Select Item or Photo to see its real stage treatment/u);
+    assert.match(
+      css,
+      /episodeImageContext\[data-image-kind="item"\] \.episodeImageRehearsalArt[^}]*background:\s*transparent[^}]*drop-shadow/u,
+    );
+    assert.match(
+      css,
+      /stageEpisodeImageKindToggle button\[aria-pressed="true"\]/u,
+    );
+    assert.doesNotMatch(source, /\/api\/botcast\/preferences/u);
     assert.match(source, /data-signal-logo-placement="true"/u);
     assert.match(source, /Saved only for this show/u);
     assert.match(
       source,
       /body: JSON\.stringify\(\{ logoPlacement: draft\.placement \}\)/u,
     );
-    assert.match(source, /signalEpisodeImageFramingSnapshotRef\.current/u);
+    assert.match(source, /signalEpisodeCameraFramingSnapshotRef\.current/u);
     assert.match(source, /replayVisualMetadata\?\.logoPlacement/u);
     assert.match(
       source,

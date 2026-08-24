@@ -22,7 +22,6 @@ import {
   BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
   BOTCAST_DEFAULT_CAMERA_FRAMING,
-  BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING,
   BOTCAST_DEFAULT_LOGO_PLACEMENT,
   BOTCAST_DIRECTOR_MIN_SHOT_MS,
   BOTCAST_CAMERA_PAN_MAX,
@@ -88,7 +87,6 @@ import {
   botcastInterruptedGuestContent,
   botcastListenerReactionForMessage,
   botcastEpisodeImageDescriptorFromFileName,
-  botcastCameraFramingWithEpisodeImages,
   botcastImageContextForMessageV1,
   botcastLatestImageContextV1,
   botcastMessageIsAudibleToAudienceV1,
@@ -111,7 +109,6 @@ import {
   normalizeAccentForTheme,
   normalizeBotcastStudioAtmosphereMix,
   normalizeBotcastCameraFraming,
-  normalizeBotcastEpisodeImageFraming,
   normalizeBotcastEpisodeImagePlacement,
   normalizeBotcastLogoPlacement,
   normalizeBotcastStudioGlowTuning,
@@ -145,11 +142,9 @@ import {
   type BotcastCameraFrame,
   type BotcastCameraFraming,
   type BotcastEpisodeImagePlacement,
-  type BotcastEpisodeImageFraming,
   type BotcastLogoPlacement,
   type BotcastDirectedCameraShot,
   type BotcastShow,
-  type BotcastSignalPreferences,
   type BotcastHostRecoveryCandidate,
   type BotcastHostRecoveryResponse,
   type BotcastHostRecoveryScreenResponse,
@@ -353,6 +348,10 @@ import {
 } from "./signalVoicePerformance";
 import { signalShowCardBlurbs } from "./signalShowCardQuips";
 import { signalStageSoundcheckMessages } from "./signalStageSoundcheck";
+import {
+  signalEpisodeImageIsVisible,
+  signalEpisodeImageScale,
+} from "./signalEpisodeImagePresentation";
 import { shouldSubmitComposerOnEnter } from "./composerKeyPolicy";
 import { applyComposerSendAutoCorrect } from "./composerSendAutoCorrect";
 import {
@@ -448,6 +447,7 @@ import {
 import styles from "./botcast.module.css";
 
 const SIGNAL_MUTE_REACTION_HOLD_MS = 2_500;
+const SIGNAL_AUDIBLE_HANDOFF_RELEASE_MS = 170;
 
 function signalMuteReactionActionLabel(
   action: BotPowerMuteReactionBeatV1["action"],
@@ -861,6 +861,7 @@ export interface BotcastExperienceProps {
     lifecycle: VoicePlaybackLifecycle,
     voiceLevel: number,
     stereoPan: number,
+    channel?: "primary" | "handoff",
   ) => boolean | Promise<boolean>;
   onPrefetchUtterance?: (
     message: BotcastMessage,
@@ -890,6 +891,7 @@ export interface BotcastExperienceProps {
   presenceBeat?: BotPresenceBeatV1 | null;
   presenceBeats?: readonly BotPresenceBeatV1[];
   onStopUtterance?: () => void;
+  onReleaseUtterance?: (fadeMs?: number) => void;
   onProducerGuestActionSfx?: (message: BotcastMessage) => void;
   introAudioEnabled?: boolean;
   introAudioVolume?: number;
@@ -1419,11 +1421,13 @@ function signalStudioFacingForRole(
 
 function signalEpisodeImagePlacementStyle(
   placement: Readonly<BotcastEpisodeImagePlacement>,
+  kind: BotcastImageContextV1["kind"],
 ): CSSProperties {
   return {
     ["--signal-episode-image-x" as string]: `${placement.x}%`,
     ["--signal-episode-image-y" as string]: `${placement.y}%`,
-    ["--signal-episode-image-scale" as string]: placement.scale / 100,
+    ["--signal-episode-image-scale" as string]:
+      signalEpisodeImageScale(placement, kind) / 100,
   };
 }
 
@@ -2322,6 +2326,7 @@ export function BotcastExperience({
   presenceBeat,
   presenceBeats = [],
   onStopUtterance,
+  onReleaseUtterance,
   onProducerGuestActionSfx,
   introAudioEnabled = true,
   introAudioVolume = 1,
@@ -2366,12 +2371,6 @@ export function BotcastExperience({
     [modelOptions],
   );
   const [shows, setShows] = useState<BotcastShow[]>([]);
-  const [signalPreferences, setSignalPreferences] =
-    useState<BotcastSignalPreferences>({
-      episodeImageFraming: normalizeBotcastEpisodeImageFraming(
-        BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING,
-      ),
-    });
   const [selectedShowId, setSelectedShowId] = useState<string | null>(null);
   const [episodes, setEpisodes] = useState<BotcastEpisodeSummary[]>([]);
   const [episode, setEpisode] = useState<BotcastEpisode | null>(null);
@@ -2439,8 +2438,8 @@ export function BotcastExperience({
   const signalCaptureSourceIdRef = useRef<string | null>(null);
   const selectedShowRef = useRef<BotcastShow | null>(null);
   const finalizedSignalRecordingIdsRef = useRef(new Set<string>());
-  const signalEpisodeImageFramingSnapshotRef = useRef(
-    new Map<string, BotcastEpisodeImageFraming>(),
+  const signalEpisodeCameraFramingSnapshotRef = useRef(
+    new Map<string, BotcastCameraFraming>(),
   );
   const [hostDraftId, setHostDraftId] = useState(initialHostBotId);
   const [hostPickerSearch, setHostPickerSearch] = useState("");
@@ -2572,6 +2571,11 @@ export function BotcastExperience({
     guest: boolean;
   }>({ episodeId: null, host: false, guest: false });
   const [liveSpeech, setLiveSpeech] = useState<BotcastLiveSpeech | null>(null);
+  const liveSpeechRef = useRef<BotcastLiveSpeech | null>(null);
+  liveSpeechRef.current = liveSpeech;
+  const audibleHandoffOutgoingMessageIdRef = useRef<string | null>(null);
+  const producerGuestHandoffOutgoingMessageRef =
+    useRef<BotcastMessage | null>(null);
   const [
     signalPreSpeechPresenceMessageId,
     setSignalPreSpeechPresenceMessageId,
@@ -2632,12 +2636,12 @@ export function BotcastExperience({
   >(theme);
   const [studioCameraPreviewShot, setStudioCameraPreviewShot] =
     useState<BotcastDirectedCameraShot>("wide");
+  const [studioEpisodeImageKindPreview, setStudioEpisodeImageKindPreview] =
+    useState<BotcastImageContextV1["kind"]>("item");
   const [studioLayoutPreviewGuestId, setStudioLayoutPreviewGuestId] =
     useState("");
   const [studioLayoutSaving, setStudioLayoutSaving] = useState(false);
   const [studioCameraFramingSaving, setStudioCameraFramingSaving] =
-    useState(false);
-  const [studioEpisodeImageFramingSaving, setStudioEpisodeImageFramingSaving] =
     useState(false);
   const [studioLogoPlacementSaving, setStudioLogoPlacementSaving] =
     useState(false);
@@ -2872,11 +2876,6 @@ export function BotcastExperience({
     revision: number;
   } | null>(null);
   const studioCameraFramingSaveInFlightRef = useRef(false);
-  const studioEpisodeImageFramingDraftRef = useRef<{
-    framing: BotcastEpisodeImageFraming;
-    revision: number;
-  } | null>(null);
-  const studioEpisodeImageFramingSaveInFlightRef = useRef(false);
   const studioLogoPlacementDraftRef = useRef<{
     showId: string;
     placement: BotcastLogoPlacement;
@@ -2918,6 +2917,11 @@ export function BotcastExperience({
       runId: number,
       prepareFollowingTurn?: boolean,
       onPlaybackStart?: () => void | Promise<void>,
+      options?: {
+        voiceChannel?: "primary" | "handoff";
+        deferPresentationUntilPlaybackStart?: boolean;
+        onHandoffStart?: () => void;
+      },
     ) => Promise<void>
   >(async () => undefined);
 
@@ -3312,6 +3316,27 @@ export function BotcastExperience({
     onStopUtteranceRef.current?.();
   }, []);
 
+  const audibleHandoffAudienceHeardContent = useCallback(
+    (message: BotcastMessage): string => {
+      const currentSpeech = liveSpeechRef.current;
+      if (
+        currentSpeech?.messageId !== message.id ||
+        currentSpeech.reveal.phase !== "playing"
+      ) {
+        return message.content;
+      }
+      const elapsedMs = signalLiveSpeechProjectedElapsedMs({
+        liveSpeech: currentSpeech,
+        clock: signalLiveSpeechPlaybackClockRef.current,
+        nowMs: performance.now(),
+      });
+      return botcastSpeechRevealVisibleText(
+        updateBotcastSpeechReveal(currentSpeech.reveal, elapsedMs),
+      ).trimEnd();
+    },
+    [],
+  );
+
   const stopIntroPreview = useCallback((): void => {
     introPreviewRunIdRef.current += 1;
     setIntroPreviewShowId(null);
@@ -3378,10 +3403,10 @@ export function BotcastExperience({
       const manifest = buildSignalReplayManifestV2({
         episode: completedEpisode,
         show,
-        episodeImageFraming:
-          signalEpisodeImageFramingSnapshotRef.current.get(
+        cameraFraming:
+          signalEpisodeCameraFramingSnapshotRef.current.get(
             completedEpisode.id,
-          ) ?? signalPreferences.episodeImageFraming,
+          ) ?? normalizeBotcastCameraFraming(show.cameraFraming),
         bots,
         producerName,
         theme,
@@ -3413,7 +3438,6 @@ export function BotcastExperience({
       introAudioVolume,
       producerName,
       recordingVoiceSelection,
-      signalPreferences.episodeImageFraming,
       theme,
     ],
   );
@@ -3546,7 +3570,8 @@ export function BotcastExperience({
     [request],
   );
 
-  const invalidateEpisodeOperation = useCallback((): void => {
+  const invalidateEpisodeOperation = useCallback(
+    (options: { preserveAudibleUtterance?: boolean } = {}): void => {
     episodeRunIdRef.current += 1;
     episodeOperationAbortRef.current?.abort();
     episodeOperationAbortRef.current = null;
@@ -3565,14 +3590,20 @@ export function BotcastExperience({
     preRollGateResolveRef.current?.();
     preRollGateResolveRef.current = null;
     stopIntroPreview();
-    stopUtterance();
-  }, [
-    assignSignalModelWarmup,
-    discardPreparedAdvance,
-    stopEpisodeOutro,
-    stopIntroPreview,
-    stopUtterance,
-  ]);
+      if (!options.preserveAudibleUtterance) {
+        audibleHandoffOutgoingMessageIdRef.current = null;
+        producerGuestHandoffOutgoingMessageRef.current = null;
+        stopUtterance();
+      }
+    },
+    [
+      assignSignalModelWarmup,
+      discardPreparedAdvance,
+      stopEpisodeOutro,
+      stopIntroPreview,
+      stopUtterance,
+    ],
+  );
 
   const setPersistedSignalModelWarmupHold = useCallback(
     async (episodeId: string, active: boolean): Promise<BotcastEpisode> => {
@@ -4322,6 +4353,7 @@ export function BotcastExperience({
       hostBotId: hostBot.id,
       currentGuestId: studioLayoutPreviewGuestId,
     });
+    setStudioEpisodeImageKindPreview("item");
     setStudioLayoutPreviewGuestId(previewGuestId ?? "");
     setStudioLayoutPreviewTheme(theme);
     setStudioCameraPreviewShot("wide");
@@ -4576,17 +4608,6 @@ export function BotcastExperience({
     return rankedShows;
   }, [request]);
 
-  const loadSignalPreferences = useCallback(async (): Promise<void> => {
-    const response = await request<{ preferences: BotcastSignalPreferences }>(
-      "/api/botcast/preferences",
-    );
-    setSignalPreferences({
-      episodeImageFraming: normalizeBotcastEpisodeImageFraming(
-        response.preferences.episodeImageFraming,
-      ),
-    });
-  }, [request]);
-
   const refreshArtworkJob = useCallback(async (): Promise<void> => {
     try {
       const response = await request<{ job: SignalArtworkJobSnapshot | null }>(
@@ -4712,7 +4733,15 @@ export function BotcastExperience({
       const episodeId = episode.id;
       const deterministicClose = cuttingShowRef.current;
       cuttingShowRef.current = true;
-      invalidateEpisodeOperation();
+      const outgoingMessage = episode.messages.find(
+        (message) => message.id === activeSpeechMessageIdRef.current,
+      );
+      if (outgoingMessage) {
+        audibleHandoffOutgoingMessageIdRef.current = outgoingMessage.id;
+      }
+      invalidateEpisodeOperation({
+        preserveAudibleUtterance: Boolean(outgoingMessage),
+      });
       const { controller, runId } = beginEpisodeOperation();
       setCuttingShow(true);
       setBusy(true);
@@ -4745,15 +4774,57 @@ export function BotcastExperience({
         if (!episodeOperationIsCurrent(controller, runId)) return false;
         setAutoRun(false);
         if (response.message) {
-          prepareEpisodeMessageRef.current(response.message, response.episode);
+          let persistedHandoff: Promise<BotcastEpisode | null> | null = null;
+          if (!outgoingMessage) {
+            prepareEpisodeMessageRef.current(response.message, response.episode);
+          }
           await playPreparedEpisodeMessageRef.current(
             response.message,
             response.episode,
             controller,
             runId,
             false,
+            undefined,
+            outgoingMessage
+              ? {
+                  voiceChannel: "handoff",
+                  deferPresentationUntilPlaybackStart: true,
+                  onHandoffStart: () => {
+                    const audienceHeard =
+                      audibleHandoffAudienceHeardContent(outgoingMessage);
+                    const audienceCut = botcastInterruptedGuestContent(
+                      outgoingMessage.content,
+                      audienceHeard,
+                    );
+                    onReleaseUtterance?.(
+                      SIGNAL_AUDIBLE_HANDOFF_RELEASE_MS,
+                    );
+                    audibleHandoffOutgoingMessageIdRef.current = null;
+                    if (!audienceCut) return;
+                    persistedHandoff = request<{ episode: BotcastEpisode }>(
+                      `/api/botcast/episodes/${encodeURIComponent(episodeId)}/cut-handoff`,
+                      {
+                        method: "POST",
+                        body: JSON.stringify({
+                          interruption: {
+                            messageId: outgoingMessage.id,
+                            speakerRole: outgoingMessage.speakerRole,
+                            spokenContent: audienceHeard,
+                          },
+                        }),
+                      },
+                    )
+                      .then((result) => result.episode)
+                      .catch(() => null);
+                  },
+                }
+              : undefined,
           );
           if (!episodeOperationIsCurrent(controller, runId)) return false;
+          const persistedEpisode = persistedHandoff
+            ? await persistedHandoff
+            : null;
+          if (persistedEpisode) response.episode = persistedEpisode;
         }
         setEpisode(response.episode);
         const outro = playEpisodeOutro({
@@ -4789,11 +4860,13 @@ export function BotcastExperience({
     },
     [
       beginEpisodeOperation,
+      audibleHandoffAudienceHeardContent,
       episode,
       episodeOperationIsCurrent,
       invalidateEpisodeOperation,
       loadEpisodes,
       loadShows,
+      onReleaseUtterance,
       playEpisodeOutro,
       request,
       selectedShow,
@@ -4805,10 +4878,7 @@ export function BotcastExperience({
     let active = true;
     void (async () => {
       try {
-        const [nextShows] = await Promise.all([
-          loadShows(),
-          loadSignalPreferences(),
-        ]);
+        const nextShows = await loadShows();
         if (!active) return;
         const first =
           nextShows.find((show) => show.id === orchestrationLaunch?.showId) ??
@@ -4833,7 +4903,6 @@ export function BotcastExperience({
     initialHostBotId,
     loadEpisodes,
     loadShows,
-    loadSignalPreferences,
     orchestrationLaunch?.showId,
   ]);
 
@@ -5026,64 +5095,12 @@ export function BotcastExperience({
     void flushStudioCameraFramingSave();
   };
 
-  const flushStudioEpisodeImageFramingSave = async (): Promise<void> => {
-    if (studioEpisodeImageFramingSaveInFlightRef.current) return;
-    studioEpisodeImageFramingSaveInFlightRef.current = true;
-    setStudioEpisodeImageFramingSaving(true);
-    try {
-      while (studioEpisodeImageFramingDraftRef.current) {
-        const draft = studioEpisodeImageFramingDraftRef.current;
-        const response = await request<{
-          preferences: BotcastSignalPreferences;
-        }>("/api/botcast/preferences", {
-          method: "PATCH",
-          body: JSON.stringify({ episodeImageFraming: draft.framing }),
-        });
-        const latestDraft = studioEpisodeImageFramingDraftRef.current;
-        setSignalPreferences(
-          latestDraft
-            ? { episodeImageFraming: latestDraft.framing }
-            : {
-                episodeImageFraming: normalizeBotcastEpisodeImageFraming(
-                  response.preferences.episodeImageFraming,
-                ),
-              },
-        );
-        if (!latestDraft || latestDraft.revision === draft.revision) {
-          studioEpisodeImageFramingDraftRef.current = null;
-          break;
-        }
-      }
-    } catch (saveError) {
-      studioEpisodeImageFramingDraftRef.current = null;
-      setError(signalErrorToast("Save global episode image framing", saveError));
-    } finally {
-      studioEpisodeImageFramingSaveInFlightRef.current = false;
-      setStudioEpisodeImageFramingSaving(false);
-      if (studioEpisodeImageFramingDraftRef.current) {
-        void flushStudioEpisodeImageFramingSave();
-      }
-    }
-  };
-
   const updateStudioEpisodeImagePlacement = (
+    show: BotcastShow,
     shot: BotcastDirectedCameraShot,
     placement: BotcastEpisodeImagePlacement,
   ): void => {
-    const previousDraft = studioEpisodeImageFramingDraftRef.current;
-    const previousFraming = normalizeBotcastEpisodeImageFraming(
-      previousDraft?.framing ?? signalPreferences.episodeImageFraming,
-    );
-    const framing = normalizeBotcastEpisodeImageFraming(
-      { ...previousFraming, [shot]: placement },
-      previousFraming,
-    );
-    studioEpisodeImageFramingDraftRef.current = {
-      framing,
-      revision: previousDraft ? previousDraft.revision + 1 : 1,
-    };
-    setSignalPreferences({ episodeImageFraming: framing });
-    void flushStudioEpisodeImageFramingSave();
+    updateStudioCameraFrame(show, shot, { episodeImage: placement });
   };
 
   const beginStudioEpisodeImagePlacementDrag = (
@@ -5106,9 +5123,9 @@ export function BotcastExperience({
       startClientY: event.clientY,
       stageWidth: bounds.width,
       stageHeight: bounds.height,
-      startPlacement: normalizeBotcastEpisodeImageFraming(
-        signalPreferences.episodeImageFraming,
-      )[shot],
+      startPlacement: normalizeBotcastCameraFraming(
+        selectedShowRef.current?.cameraFraming,
+      )[shot].episodeImage,
     };
     setStudioEpisodeImageDraggingShot(shot);
   };
@@ -5131,7 +5148,8 @@ export function BotcastExperience({
       },
       drag.startPlacement,
     );
-    updateStudioEpisodeImagePlacement(drag.shot, placement);
+    const show = selectedShowRef.current;
+    if (show) updateStudioEpisodeImagePlacement(show, drag.shot, placement);
   };
 
   const finishStudioEpisodeImagePlacementDrag = (
@@ -5160,10 +5178,12 @@ export function BotcastExperience({
     event.preventDefault();
     if (event.repeat) return;
     const step = BOTCAST_EPISODE_IMAGE_POSITION_STEP * (event.shiftKey ? 4 : 1);
-    const placement = normalizeBotcastEpisodeImageFraming(
-      signalPreferences.episodeImageFraming,
-    )[shot];
+    const show = selectedShowRef.current;
+    if (!show) return;
+    const placement = normalizeBotcastCameraFraming(show.cameraFraming)[shot]
+      .episodeImage;
     updateStudioEpisodeImagePlacement(
+      show,
       shot,
       normalizeBotcastEpisodeImagePlacement(
         {
@@ -6910,11 +6930,9 @@ export function BotcastExperience({
       if (!episodeOperationIsCurrent(controller, runId)) return;
       unstartedEpisodeId = response.episode.id;
       latestCaptureEpisode = response.episode;
-      signalEpisodeImageFramingSnapshotRef.current.set(
+      signalEpisodeCameraFramingSnapshotRef.current.set(
         response.episode.id,
-        normalizeBotcastEpisodeImageFraming(
-          signalPreferences.episodeImageFraming,
-        ),
+        normalizeBotcastCameraFraming(selectedShow.cameraFraming),
       );
       if (setupEpisodeImage) {
         setupImageUpload = {
@@ -8054,6 +8072,11 @@ export function BotcastExperience({
       runId: number,
       prepareFollowingTurn = true,
       onPlaybackStart?: () => void | Promise<void>,
+      options?: {
+        voiceChannel?: "primary" | "handoff";
+        deferPresentationUntilPlaybackStart?: boolean;
+        onHandoffStart?: () => void;
+      },
     ): Promise<void> => {
       const bot =
         currentEpisode.guestKind === "producer" &&
@@ -8079,6 +8102,11 @@ export function BotcastExperience({
       let settleVoicePlayback: ((value: boolean) => void) | null = null;
       let voiceAttemptActive = true;
       let followingTurnPrepared = false;
+      const presentationDeferred =
+        options?.deferPresentationUntilPlaybackStart === true;
+      const playbackStillOwned = (): boolean =>
+        episodeOperationIsCurrent(controller, runId) ||
+        audibleHandoffOutgoingMessageIdRef.current === message.id;
       const voicePlaybackEligible = Boolean(
         bot &&
           !bot.muted &&
@@ -8126,6 +8154,10 @@ export function BotcastExperience({
       const notifyPlaybackStart = (): void => {
         if (playbackStartNotified) return;
         playbackStartNotified = true;
+        if (presentationDeferred) {
+          options?.onHandoffStart?.();
+          prepareEpisodeMessage(message, currentEpisode);
+        }
         if (producerGuestActionSfxPlan?.revealAtDisplayLength === 0) {
           playProducerGuestActionSfxAt(0, 1);
         }
@@ -8173,8 +8205,9 @@ export function BotcastExperience({
         onPresenceStart: () => {
           if (
             !voiceAttemptActive ||
-            activeSpeechMessageIdRef.current !== message.id ||
-            !episodeOperationIsCurrent(controller, runId)
+            (!presentationDeferred &&
+              activeSpeechMessageIdRef.current !== message.id) ||
+            !playbackStillOwned()
           ) {
             return;
           }
@@ -8220,8 +8253,9 @@ export function BotcastExperience({
         onStart: (durationMs, alignment) => {
           if (
             !voiceAttemptActive ||
-            activeSpeechMessageIdRef.current !== message.id ||
-            !episodeOperationIsCurrent(controller, runId)
+            (!presentationDeferred &&
+              activeSpeechMessageIdRef.current !== message.id) ||
+            !playbackStillOwned()
           )
             return;
           if (voicePreparationTimer !== null) {
@@ -8272,7 +8306,7 @@ export function BotcastExperience({
           if (
             !voiceAttemptActive ||
             activeSpeechMessageIdRef.current !== message.id ||
-            !episodeOperationIsCurrent(controller, runId)
+            !playbackStillOwned()
           ) {
             return;
           }
@@ -8294,7 +8328,7 @@ export function BotcastExperience({
           if (
             !voiceAttemptActive ||
             activeSpeechMessageIdRef.current !== message.id ||
-            !episodeOperationIsCurrent(controller, runId)
+            !playbackStillOwned()
           )
             return;
           armVoiceCompletionWatchdog(durationMs, elapsedMs, {
@@ -8322,7 +8356,7 @@ export function BotcastExperience({
           if (
             !voiceAttemptActive ||
             activeSpeechMessageIdRef.current !== message.id ||
-            !episodeOperationIsCurrent(controller, runId)
+            !playbackStillOwned()
           )
             return;
           if (
@@ -8378,9 +8412,12 @@ export function BotcastExperience({
             settleVoicePlayback = settle;
               voicePreparationTimer = window.setTimeout(
                 () => {
-              voiceAttemptActive = false;
-              onStopUtterance?.();
-              settle(false);
+                  voiceAttemptActive = false;
+                  // A failed incoming handoff must not tear down the outgoing
+                  // speaker before the readable fallback actually takes the
+                  // floor. `notifyPlaybackStart` performs that release below.
+                  if (!presentationDeferred) onStopUtterance?.();
+                  settle(false);
                 },
                 signalVoiceStartTimeoutMs({
                   textLength: Math.max(
@@ -8405,6 +8442,7 @@ export function BotcastExperience({
                   selectedShow?.studioLayout,
                   message.speakerRole,
                 ),
+                options?.voiceChannel ?? "primary",
               ),
             ).then(settle, () => settle(false));
           })
@@ -8416,7 +8454,7 @@ export function BotcastExperience({
       if (pendingListenerReaction) await pendingListenerReaction;
       if (
         activeSpeechMessageIdRef.current !== message.id ||
-        !episodeOperationIsCurrent(controller, runId)
+        !playbackStillOwned()
       )
         return;
       startTransition(() => {
@@ -8515,6 +8553,7 @@ export function BotcastExperience({
       onStopUtterance,
       onProducerGuestActionSfx,
       onUtterance,
+      prepareEpisodeMessage,
       recordingVoiceSelection.englishVoiceEngine,
       recordingVoiceSelection.voiceMode,
       revealUtteranceWithoutAudio,
@@ -8661,6 +8700,9 @@ export function BotcastExperience({
       producerGuestThinkingMs?: number,
       producerGuestHostInterruption?: BotcastHostRedirectContext,
       interruptionCrosstalkPlan?: ListenerReactionPlanV1,
+      resolveGuestInterruptionAtHandoff?: () =>
+        | BotcastGuestInterruptionContext
+        | undefined,
     ): Promise<boolean> => {
       if (
         !episode ||
@@ -8701,10 +8743,16 @@ export function BotcastExperience({
         setBusy(true);
       });
       setError(null);
+      let resolvedGuestInterruption = guestInterruption;
+      let resolveInterruptionHandoffStarted: (() => void) | null = null;
+      const interruptionHandoffStarted = interruptionBridgeMessage
+        ? new Promise<void>((resolve) => {
+            resolveInterruptionHandoffStarted = resolve;
+          })
+        : Promise.resolve();
       let interruptionCrosstalkPlayback: Promise<boolean> | null = null;
       const interruptionBridgePlayback = interruptionBridgeMessage
         ? (() => {
-            prepareEpisodeMessage(interruptionBridgeMessage, episode);
             const interrupter = interruptionCrosstalkPlan
               ? botsById.get(interruptionCrosstalkPlan.listenerBotId)
               : null;
@@ -8777,6 +8825,19 @@ export function BotcastExperience({
                       .catch(() => false);
                   }
                 : undefined,
+              {
+                voiceChannel: "handoff",
+                deferPresentationUntilPlaybackStart: true,
+                onHandoffStart: () => {
+                  resolvedGuestInterruption =
+                    resolveGuestInterruptionAtHandoff?.() ??
+                    resolvedGuestInterruption;
+                  onReleaseUtterance?.(SIGNAL_AUDIBLE_HANDOFF_RELEASE_MS);
+                  audibleHandoffOutgoingMessageIdRef.current = null;
+                  resolveInterruptionHandoffStarted?.();
+                  resolveInterruptionHandoffStarted = null;
+                },
+              },
             );
           })()
         : null;
@@ -8888,9 +8949,9 @@ export function BotcastExperience({
             return false;
           }
         }
-        const requestForegroundAdvance =
-          (): Promise<BotcastEpisodeAdvanceResponse> =>
-            request<BotcastEpisodeAdvanceResponse>(
+        const requestForegroundAdvance = async (): Promise<BotcastEpisodeAdvanceResponse> => {
+          await interruptionHandoffStarted;
+          return request<BotcastEpisodeAdvanceResponse>(
             `/api/botcast/episodes/${encodeURIComponent(episode.id)}/advance`,
             {
               method: "POST",
@@ -8900,7 +8961,9 @@ export function BotcastExperience({
                 ...(requestedCue ? { cue: requestedCue } : {}),
                 ...(requestedCue ? { cueDelivery } : {}),
                 ...(hostRedirect ? { hostRedirect } : {}),
-                ...(guestInterruption ? { guestInterruption } : {}),
+                ...(resolvedGuestInterruption
+                  ? { guestInterruption: resolvedGuestInterruption }
+                  : {}),
                 ...(producerGuestMessage
                   ? { guestMessage: producerGuestMessage }
                   : {}),
@@ -8927,6 +8990,7 @@ export function BotcastExperience({
               }),
             },
             );
+        };
         const response = readyPreparation
             ? await request<BotcastEpisodeAdvanceResponse>(
                 `/api/turn-preparations/${encodeURIComponent(readyPreparation.id)}/commit`,
@@ -8999,7 +9063,14 @@ export function BotcastExperience({
           await waitForSignalUserInputIdle(controller.signal);
           if (!episodeOperationIsCurrent(controller, runId)) return false;
           startTransition(() => setEpisode(stagedEpisode));
-          prepareEpisodeMessage(submittedProducerTurn, stagedEpisode);
+          const outgoingProducerHandoffMessage = producerGuestHostInterruption
+            ? producerGuestHandoffOutgoingMessageRef.current
+            : null;
+          let persistedProducerHandoff: Promise<BotcastEpisode | null> | null =
+            null;
+          if (!outgoingProducerHandoffMessage) {
+            prepareEpisodeMessage(submittedProducerTurn, stagedEpisode);
+          }
           await playPreparedEpisodeMessage(
             submittedProducerTurn,
             stagedEpisode,
@@ -9007,8 +9078,45 @@ export function BotcastExperience({
             runId,
             false,
             () => completeForegroundGenerationHold(),
+            outgoingProducerHandoffMessage
+              ? {
+                  voiceChannel: "handoff",
+                  deferPresentationUntilPlaybackStart: true,
+                  onHandoffStart: () => {
+                    const audienceHeard = audibleHandoffAudienceHeardContent(
+                      outgoingProducerHandoffMessage,
+                    );
+                    onReleaseUtterance?.(
+                      SIGNAL_AUDIBLE_HANDOFF_RELEASE_MS,
+                    );
+                    audibleHandoffOutgoingMessageIdRef.current = null;
+                    producerGuestHandoffOutgoingMessageRef.current = null;
+                    if (!audienceHeard) return;
+                    persistedProducerHandoff = request<{
+                      episode: BotcastEpisode;
+                    }>(
+                      `/api/botcast/episodes/${encodeURIComponent(response.episode.id)}/producer-guest-handoff`,
+                      {
+                        method: "POST",
+                        body: JSON.stringify({
+                          interruption: {
+                            messageId: outgoingProducerHandoffMessage.id,
+                            spokenContent: audienceHeard,
+                          },
+                        }),
+                      },
+                    )
+                      .then((result) => result.episode)
+                      .catch(() => null);
+                  },
+                }
+              : undefined,
           );
           if (!episodeOperationIsCurrent(controller, runId)) return false;
+          const persistedEpisode = persistedProducerHandoff
+            ? await persistedProducerHandoff
+            : null;
+          if (persistedEpisode) response.episode = persistedEpisode;
         }
         await waitForSignalUserInputIdle(controller.signal);
         if (!episodeOperationIsCurrent(controller, runId)) return false;
@@ -9120,6 +9228,7 @@ export function BotcastExperience({
       episodeOperationIsCurrent,
       loadEpisodes,
       onListenerReaction,
+      onReleaseUtterance,
       onResponseCueGeneration,
       playEpisodeOutro,
       playPreparedEpisodeMessage,
@@ -9151,21 +9260,39 @@ export function BotcastExperience({
 
   const interruptProducerGuestHostLocally = (
     interruption: BotcastHostRedirectContext,
+    options: { preserveAudibleUtterance?: boolean } = {},
   ): void => {
-    if (!episode) return;
-    invalidateEpisodeOperation();
-    setEpisode({
-      ...episode,
-      messages: episode.messages.map((message) =>
-        message.id === interruption.messageId
-          ? {
-              ...message,
-              content: interruption.spokenContent,
-              voicePerformanceText: null,
-            }
-          : message,
-      ),
+    const currentEpisode = liveEpisodeRef.current;
+    if (!currentEpisode) return;
+    const outgoingMessage = currentEpisode.messages.find(
+      (message) => message.id === interruption.messageId,
+    );
+    if (options.preserveAudibleUtterance && outgoingMessage) {
+      producerGuestHandoffOutgoingMessageRef.current = outgoingMessage;
+      audibleHandoffOutgoingMessageIdRef.current = outgoingMessage.id;
+    } else {
+      producerGuestHandoffOutgoingMessageRef.current = null;
+    }
+    invalidateEpisodeOperation({
+      preserveAudibleUtterance:
+        options.preserveAudibleUtterance && Boolean(outgoingMessage),
     });
+    setEpisode((current) =>
+      current?.id === currentEpisode.id
+        ? {
+            ...current,
+            messages: current.messages.map((message) =>
+              message.id === interruption.messageId
+                ? {
+                    ...message,
+                    content: interruption.spokenContent,
+                    voicePerformanceText: null,
+                  }
+                : message,
+            ),
+          }
+        : current,
+    );
   };
 
   const shushProducerGuestHost = async (): Promise<void> => {
@@ -9258,8 +9385,15 @@ export function BotcastExperience({
       thinkingEndedAtMs - thinkingStartedAtMs,
     );
     producerGuestThinkingEndedAtRef.current = thinkingEndedAtMs;
-    if (producerGuestHostInterruption) {
-      interruptProducerGuestHostLocally(producerGuestHostInterruption);
+    const hostInterruptionForTurn = signalProducerGuestHostInterruptionContext({
+      episode: liveEpisodeRef.current,
+      speakingMessageId: activeSpeechMessageIdRef.current,
+      liveSpeech: liveSpeechRef.current,
+    });
+    if (hostInterruptionForTurn) {
+      interruptProducerGuestHostLocally(hostInterruptionForTurn, {
+        preserveAudibleUtterance: true,
+      });
     }
     setAutoRun(true);
     const sent = await advanceEpisode(
@@ -9270,7 +9404,7 @@ export function BotcastExperience({
       undefined,
       answer,
       guestThinkingMs,
-      producerGuestHostInterruption ?? undefined,
+      hostInterruptionForTurn ?? undefined,
     );
     if (sent) {
       producerGuestThinkingStartedAtRef.current = null;
@@ -9510,31 +9644,9 @@ export function BotcastExperience({
     )
       return;
     if (activeGuestOnMic) {
-      invalidateEpisodeOperation();
+      audibleHandoffOutgoingMessageIdRef.current = activeGuestMessage!.id;
+      invalidateEpisodeOperation({ preserveAudibleUtterance: true });
     }
-    const optimisticMessages = activeGuestMessage
-      ? episode.messages
-          .filter(
-            (message) =>
-              message.id !== activeGuestMessage.id || interruptedContent,
-          )
-          .map((message) =>
-            message.id === activeGuestMessage.id && interruptedContent
-              ? {
-                  ...message,
-                  // Crosstalk retort stays on the listener plan; optimistic
-                  // transcript shows only the audience-heard cutoff.
-                  content: interruptedContent,
-                  voicePerformanceText: null,
-                }
-              : message,
-          )
-      : episode.messages;
-    const optimisticEpisode = {
-      ...episode,
-      messages: [...optimisticMessages, nextHostInterruptionBridge],
-    };
-    setEpisode(optimisticEpisode);
     // Cancelling an active guest deliberately disables auto-run. The queued
     // interruption is still a live handoff, so resume the normal turn loop
     // after the host bridge and cue response finish.
@@ -9572,6 +9684,57 @@ export function BotcastExperience({
       undefined,
       undefined,
       nextHostInterruptionCrosstalkPlan ?? undefined,
+      activeGuestMessage
+        ? () => {
+            const audienceHeard =
+              audibleHandoffAudienceHeardContent(activeGuestMessage);
+            const audienceCut = botcastInterruptedGuestContent(
+              activeGuestMessage.content,
+              audienceHeard,
+            );
+            setEpisode((current) =>
+              current?.id === episode.id
+                ? {
+                    ...current,
+                    messages: [
+                      ...current.messages.map((message) =>
+                        message.id === activeGuestMessage.id && audienceCut
+                          ? {
+                              ...message,
+                              content: audienceCut,
+                              voicePerformanceText: null,
+                            }
+                          : message,
+                      ),
+                      nextHostInterruptionBridge,
+                    ],
+                  }
+                : current,
+            );
+            return {
+              bridgeLine: nextHostInterruptionBridge.content,
+              ...(audienceCut
+                ? {
+                    messageId: activeGuestMessage.id,
+                    spokenContent: audienceHeard,
+                    ...(nextHostInterruptionCrosstalkPlan?.publicInterruptedSpeakerCue
+                      ? {
+                          publicInterruptedSpeakerCue:
+                            nextHostInterruptionCrosstalkPlan.publicInterruptedSpeakerCue,
+                          interruptedSpeakerCueSpeechEffect:
+                            "speech_obfuscation" as const,
+                        }
+                      : nextHostInterruptionCrosstalkPlan?.interruptedSpeakerCue
+                        ? {
+                            interruptedSpeakerCue:
+                              nextHostInterruptionCrosstalkPlan.interruptedSpeakerCue,
+                          }
+                        : {}),
+                  }
+                : {}),
+            };
+          }
+        : undefined,
     );
   };
 
@@ -10736,10 +10899,12 @@ export function BotcastExperience({
       signalEpisodeImage.imageId === stageImageContext?.imageId
         ? signalEpisodeImage
         : null;
-    const stageImageVisible = Boolean(
-      stageImageContext &&
-        (!args.activeMessage || speakingMessageId === args.activeMessage.id),
-    );
+    const stageImageVisible = signalEpisodeImageIsVisible({
+      hasImageContext: stageImageContext !== null,
+      replay: args.replay,
+      activeMessageId: args.activeMessage?.id ?? null,
+      speakingMessageId,
+    });
     const stageCameraTransitionMode =
       args.replay && replayFaithful
         ? replayCameraTransitionModeV2(replayCameraDirectedScene)
@@ -10839,16 +11004,13 @@ export function BotcastExperience({
     const studioLayout = normalizeBotcastStudioLayout(
       replayVisualMetadata?.studioLayout ?? args.show.studioLayout,
     );
-    const cameraFraming = args.replay
-      ? normalizeBotcastCameraFraming(
-          replayVisualMetadata?.cameraFraming ?? args.show.cameraFraming,
-        )
-      : botcastCameraFramingWithEpisodeImages(
-          args.show.cameraFraming,
-          signalEpisodeImageFramingSnapshotRef.current.get(
-            args.currentEpisode.id,
-          ) ?? signalPreferences.episodeImageFraming,
-        );
+    const cameraFraming = normalizeBotcastCameraFraming(
+      args.replay
+        ? replayVisualMetadata?.cameraFraming ?? args.show.cameraFraming
+        : signalEpisodeCameraFramingSnapshotRef.current.get(
+              args.currentEpisode.id,
+            ) ?? args.show.cameraFraming,
+    );
     const activeCameraFrame = cameraFraming[args.shot];
     const stageVisualShow: BotcastShow =
       args.replay && replayPresentationManifestV2
@@ -12119,6 +12281,7 @@ export function BotcastExperience({
             data-camera-shot={args.shot}
             style={signalEpisodeImagePlacementStyle(
               activeCameraFrame.episodeImage,
+              stageImageContext.kind,
             )}
           >
             <SignalEpisodeImageVisual
@@ -12756,9 +12919,7 @@ export function BotcastExperience({
     const layout = normalizeBotcastStudioLayout(show.studioLayout);
     const cameraFraming = normalizeBotcastCameraFraming(show.cameraFraming);
     const previewCameraFrame = cameraFraming[studioCameraPreviewShot];
-    const previewEpisodeImagePlacement = normalizeBotcastEpisodeImageFraming(
-      signalPreferences.episodeImageFraming,
-    )[studioCameraPreviewShot];
+    const previewEpisodeImagePlacement = previewCameraFrame.episodeImage;
     const previewLogoPlacement = normalizeBotcastLogoPlacement(
       show.logoPlacement,
     );
@@ -13044,7 +13205,6 @@ export function BotcastExperience({
                   <span aria-live="polite">
                     {studioLayoutSaving ||
                     studioCameraFramingSaving ||
-                    studioEpisodeImageFramingSaving ||
                     studioLogoPlacementSaving ||
                     studioGlowTuningSaving ||
                     studioVoiceLevelsSaving ||
@@ -13243,7 +13403,7 @@ export function BotcastExperience({
                   </div>
                   <div
                     className={styles.episodeImageContext}
-                    data-image-kind="picture"
+                    data-image-kind={studioEpisodeImageKindPreview}
                     data-rehearsal-prop="true"
                     data-camera-shot={studioCameraPreviewShot}
                     data-dragging={
@@ -13253,10 +13413,15 @@ export function BotcastExperience({
                     }
                     style={signalEpisodeImagePlacementStyle(
                       previewEpisodeImagePlacement,
+                      studioEpisodeImageKindPreview,
                     )}
                     role="button"
                     tabIndex={0}
-                    aria-label={`${studioCameraPreviewShot} episode image placement. Drag to move; use arrow keys to nudge.`}
+                    aria-label={`${studioCameraPreviewShot} ${
+                      studioEpisodeImageKindPreview === "item"
+                        ? "item"
+                        : "photo"
+                    } placement preview. Drag to move; use arrow keys to nudge.`}
                     onPointerDown={(event) =>
                       beginStudioEpisodeImagePlacementDrag(
                         event,
@@ -13275,12 +13440,15 @@ export function BotcastExperience({
                   >
                     <span
                       className={styles.episodeImageRehearsalArt}
+                      data-image-kind={studioEpisodeImageKindPreview}
                       aria-hidden="true"
                     >
                       <span />
                     </span>
                     <span className={styles.stageLayoutHandleLabel}>
-                      Episode image
+                      {studioEpisodeImageKindPreview === "item"
+                        ? "Item preview"
+                        : "Photo preview"}
                     </span>
                   </div>
                 </section>
@@ -13402,59 +13570,96 @@ export function BotcastExperience({
                         type="button"
                         onClick={() =>
                           updateStudioEpisodeImagePlacement(
+                            show,
                             studioCameraPreviewShot,
-                            BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING[
+                            BOTCAST_DEFAULT_CAMERA_FRAMING[
                               studioCameraPreviewShot
-                            ],
+                            ].episodeImage,
                           )
                         }
                         disabled={
                           previewEpisodeImagePlacement.x ===
-                            BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING[
+                            BOTCAST_DEFAULT_CAMERA_FRAMING[
                               studioCameraPreviewShot
-                            ].x &&
+                            ].episodeImage.x &&
                           previewEpisodeImagePlacement.y ===
-                            BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING[
+                            BOTCAST_DEFAULT_CAMERA_FRAMING[
                               studioCameraPreviewShot
-                            ].y &&
-                          previewEpisodeImagePlacement.scale ===
-                            BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING[
+                            ].episodeImage.y &&
+                          previewEpisodeImagePlacement.itemScale ===
+                            BOTCAST_DEFAULT_CAMERA_FRAMING[
                               studioCameraPreviewShot
-                            ].scale
+                            ].episodeImage.itemScale &&
+                          previewEpisodeImagePlacement.photoScale ===
+                            BOTCAST_DEFAULT_CAMERA_FRAMING[
+                              studioCameraPreviewShot
+                            ].episodeImage.photoScale
                         }
                       >
                         Reset image
                       </button>
                     </header>
+                    <div
+                      className={styles.stageEpisodeImageKindToggle}
+                      role="group"
+                      aria-label="Episode image preview"
+                    >
+                      <button
+                        type="button"
+                        aria-pressed={studioEpisodeImageKindPreview === "item"}
+                        onClick={() =>
+                          setStudioEpisodeImageKindPreview("item")
+                        }
+                      >
+                        Item
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={
+                          studioEpisodeImageKindPreview === "picture"
+                        }
+                        onClick={() =>
+                          setStudioEpisodeImageKindPreview("picture")
+                        }
+                      >
+                        Photo
+                      </button>
+                    </div>
                     <div className={styles.stageCameraSliders}>
-                      {(["scale", "x", "y"] as const).map((control) => {
-                        const scaleControl = control === "scale";
-                        const label = scaleControl
-                          ? "Scale"
-                          : control.toUpperCase();
+                      {(
+                        ["itemScale", "photoScale", "x", "y"] as const
+                      ).map((control) => {
+                        const sizeControl =
+                          control === "itemScale" || control === "photoScale";
+                        const label =
+                          control === "itemScale"
+                            ? "Item size"
+                            : control === "photoScale"
+                              ? "Photo size"
+                              : control.toUpperCase();
                         return (
                           <label key={control}>
                             <span>
                               {label}
                               <output>
                                 {previewEpisodeImagePlacement[control]}
-                                {scaleControl ? "%" : "%"}
+                                %
                               </output>
                             </span>
                             <input
                               type="range"
                               min={
-                                scaleControl
+                                sizeControl
                                   ? BOTCAST_EPISODE_IMAGE_SCALE_MIN
                                   : BOTCAST_EPISODE_IMAGE_POSITION_MIN
                               }
                               max={
-                                scaleControl
+                                sizeControl
                                   ? BOTCAST_EPISODE_IMAGE_SCALE_MAX
                                   : BOTCAST_EPISODE_IMAGE_POSITION_MAX
                               }
                               step={
-                                scaleControl
+                                sizeControl
                                   ? BOTCAST_EPISODE_IMAGE_SCALE_STEP
                                   : BOTCAST_EPISODE_IMAGE_POSITION_STEP
                               }
@@ -13462,6 +13667,7 @@ export function BotcastExperience({
                               aria-label={`${studioCameraPreviewShot} episode image ${label.toLowerCase()}`}
                               onChange={(event) =>
                                 updateStudioEpisodeImagePlacement(
+                                  show,
                                   studioCameraPreviewShot,
                                   {
                                     ...previewEpisodeImagePlacement,
@@ -13477,9 +13683,11 @@ export function BotcastExperience({
                       })}
                     </div>
                     <small>
-                      Global for your Signal account and reused by every show.
-                      Drag the neutral prop on stage; Auto follows the resolved
-                      Left, Right, or Wide placement.
+                      Select Item or Photo to see its real stage treatment, then
+                      drag the visible prop into place. Auto follows the active
+                      Left, Right, or Wide camera. Item and Photo share each
+                      camera&apos;s X/Y, but keep separate sizes for this show. The
+                      preview switch itself is not saved.
                     </small>
                   </div>
                   <div
@@ -14906,6 +15114,9 @@ export function BotcastExperience({
           baseShot: liveBaseShot,
           audibleVoiceOverlap:
             liveCameraMode === "auto" && liveAudibleVoiceOverlap,
+          audibleHandoffPreparing:
+            liveCameraMode === "auto" &&
+            audibleHandoffOutgoingMessageIdRef.current !== null,
           // Sustained reaction/crosstalk audio can own an editorial cut.
           // Brief interjections stay audible without creating a 1→2→1 camera
           // twitch. Fixed manual cameras never yield, and prepared text never

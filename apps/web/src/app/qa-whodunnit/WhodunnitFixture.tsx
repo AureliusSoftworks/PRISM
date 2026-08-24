@@ -24,6 +24,7 @@ const BOTS: MysteryBotSummary[] = [
   ["bot-4", "Orson Pike", "#d8c56e", "⬡"],
   ["bot-5", "Ada Finch", "#8ce58f", "△"],
   ["bot-6", "Lucian Grey", "#8aa5ff", "◈"],
+  ["bot-7", "Justice Rowan", "#a995ff", "⚖"],
 ].map(([id, name, color, glyph]) => ({
   id,
   name,
@@ -41,6 +42,7 @@ function fixtureSession(theoryMode = false): DebateSessionV1 {
     inspiration: "A rainbound estate, a vanished codicil, and a stopped hall clock.",
     nonce: "qa-whodunnit-spatial-flow",
     suspectBotIds: BOTS.slice(0, 4).map((bot) => bot.id),
+    judgeBotId: BOTS[6]!.id,
     prosecutorPartnerBotId: BOTS[4]!.id,
     rivalDefenseBotId: BOTS[5]!.id,
   });
@@ -104,9 +106,9 @@ function fixtureSession(theoryMode = false): DebateSessionV1 {
     playerSideId: null,
     motion: {} as DebateSessionV1["motion"],
     evidence: {} as DebateSessionV1["evidence"],
-    moderatorTitle: "PRISM · Judge & Casekeeper",
-    moderatorName: "PRISM",
-    moderator: { id: "prism", name: "PRISM" } as DebateSessionV1["moderator"],
+    moderatorTitle: "Judge",
+    moderatorName: BOTS[6]!.name,
+    moderator: { id: BOTS[6]!.id, name: BOTS[6]!.name } as DebateSessionV1["moderator"],
     forAdvocate: { id: BOTS[4]!.id, name: BOTS[4]!.name } as DebateSessionV1["forAdvocate"],
     againstAdvocate: { id: BOTS[5]!.id, name: BOTS[5]!.name } as DebateSessionV1["againstAdvocate"],
     advocacyConsent: [],
@@ -185,7 +187,20 @@ export function WhodunnitFixture({
           } as T;
         }
         if (path.endsWith("/mystery-action") && typeof options?.body === "string") {
-          const action = JSON.parse(options.body) as { action?: string; roomId?: string };
+          const action = JSON.parse(options.body) as { action?: string; path?: string; roomId?: string };
+          if (action.action === "choose_investigation_path" && action.path === "player") {
+            const formatState = session.formatState as DebateWhodunnitFormatStateV1;
+            return {
+              session: {
+                ...session,
+                revision: session.revision + 1,
+                formatState: {
+                  ...formatState,
+                  investigationApproach: "player",
+                },
+              },
+            } as T;
+          }
           if (action.action === "begin_investigation" && action.roomId) {
             const formatState = session.formatState as DebateWhodunnitFormatStateV1;
             return {

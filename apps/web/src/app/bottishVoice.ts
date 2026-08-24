@@ -19,6 +19,7 @@ import {
   voiceLiltDetuneCents,
   type VoicePlaybackCharacterAlignment,
   type VoicePlaybackLifecycle,
+  type VoicePlaybackChannel,
   type VoiceRoboticPlan,
 } from "./voiceEffects.ts";
 import type { PreSpeechBreathPlan } from "./preSpeechBreath.ts";
@@ -771,6 +772,7 @@ async function playPlan(
   roomAcoustics?: RoomAcousticsSend,
   preSpeechBreath?: PreSpeechBreathPlan | null,
   stereoPan?: number,
+  channel: VoicePlaybackChannel = "primary",
 ): Promise<void> {
   if (plan.durationMs <= 0 || expectedGeneration !== generation) return;
   await playPreSpeechBreath({
@@ -790,6 +792,7 @@ async function playPlan(
     effectsEnabled,
     roomAcoustics,
     stereoPan,
+    channel,
     lifecycle,
     alignment: plan.alignment,
     compensateLifecycleForOutputLatency: true,
@@ -1134,6 +1137,7 @@ async function playBabble(
   roomAcoustics?: RoomAcousticsSend,
   preSpeechBreath?: PreSpeechBreathPlan | null,
   stereoPan?: number,
+  channel: VoicePlaybackChannel = "primary",
 ): Promise<void> {
   if (expectedGeneration !== generation) return;
   const normalized = normalizeBottishPlaybackProfile(profile);
@@ -1155,6 +1159,7 @@ async function playBabble(
     baseLowpassHz: 20_000,
     roomAcoustics,
     stereoPan,
+    channel,
     lifecycle,
     roboticPlan,
     cleanRoboticCarrier: true,
@@ -1184,6 +1189,7 @@ async function playChunkedBabbleResponse(
   preSpeechBreath?: PreSpeechBreathPlan | null,
   timing?: BottishPlaybackTiming,
   stereoPan = 0,
+  channel: VoicePlaybackChannel = "primary",
 ): Promise<void> {
   const totalCharacters = Math.max(
     1,
@@ -1289,6 +1295,7 @@ async function playChunkedBabbleResponse(
       roomAcoustics,
       playedChunks === 0 ? preSpeechBreath : null,
       stereoPan,
+      channel,
     );
     const speechHeardMs = Math.max(
       actualChunkElapsedMs,
@@ -1334,16 +1341,15 @@ export function enqueueBabbleVoice(
   preSpeechBreath?: PreSpeechBreathPlan | null,
   timing?: BottishPlaybackTiming,
   stereoPan = 0,
+  channel: VoicePlaybackChannel = "primary",
 ): Promise<void> {
   const expectedGeneration = generation;
   const playbackProfile = {
     ...resolveBabblePlaybackProfile(profile, bytes, timing),
     volume: normalizeBotVoiceVolume(globalVolume),
   };
-  queue = queue
-    .catch(() => undefined)
-    .then(() =>
-      playBabble(
+  const run = () =>
+    playBabble(
         bytes,
         sourceText,
         playbackProfile,
@@ -1354,8 +1360,10 @@ export function enqueueBabbleVoice(
         roomAcoustics,
         preSpeechBreath,
         stereoPan,
-      ),
-    );
+        channel,
+      );
+  if (channel !== "primary") return run();
+  queue = queue.catch(() => undefined).then(run);
   return queue;
 }
 
@@ -1371,12 +1379,11 @@ export function enqueueChunkedBabbleVoice(
   preSpeechBreath?: PreSpeechBreathPlan | null,
   timing?: BottishPlaybackTiming,
   stereoPan = 0,
+  channel: VoicePlaybackChannel = "primary",
 ): Promise<void> {
   const expectedGeneration = generation;
-  queue = queue
-    .catch(() => undefined)
-    .then(() =>
-      playChunkedBabbleResponse(
+  const run = () =>
+    playChunkedBabbleResponse(
         response,
         sourceText,
         profile,
@@ -1389,8 +1396,10 @@ export function enqueueChunkedBabbleVoice(
         preSpeechBreath,
         timing,
         stereoPan,
-      ),
-    );
+        channel,
+      );
+  if (channel !== "primary") return run();
+  queue = queue.catch(() => undefined).then(run);
   return queue;
 }
 
@@ -1405,6 +1414,7 @@ export function enqueueBottishVoice(
   roomAcoustics?: RoomAcousticsSend,
   preSpeechBreath?: PreSpeechBreathPlan | null,
   stereoPan = 0,
+  channel: VoicePlaybackChannel = "primary",
 ): Promise<void> {
   const expectedGeneration = generation;
   const normalizedProfile = normalizeBottishPlaybackProfile(profile);
@@ -1419,10 +1429,8 @@ export function enqueueBottishVoice(
   // Pitch and lilt are baked into the procedural plan. Keeping the playback
   // transform neutral prevents a second shift after synthesis.
   const playbackProfile = { ...planProfile, pitch: 0, lilt: 0 };
-  queue = queue
-    .catch(() => undefined)
-    .then(() =>
-      playPlan(
+  const run = () =>
+    playPlan(
         plan,
         playbackProfile,
         expectedGeneration,
@@ -1432,8 +1440,10 @@ export function enqueueBottishVoice(
         roomAcoustics,
         preSpeechBreath,
         stereoPan,
-      ),
-    );
+        channel,
+      );
+  if (channel !== "primary") return run();
+  queue = queue.catch(() => undefined).then(run);
   return queue;
 }
 

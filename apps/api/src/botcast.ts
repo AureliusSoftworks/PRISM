@@ -33,7 +33,6 @@ import type {
   BotcastCameraShot,
   BotcastDirectedCameraShot,
   BotcastCameraFraming,
-  BotcastEpisodeImageFraming,
   BotcastCameraSuggestion,
   BotcastEpisode,
   BotcastEpisodeAdvanceRequest,
@@ -62,7 +61,6 @@ import type {
   BotcastSoundboardCueKind,
   BotcastSocialInfluenceEventV1,
   BotcastSegmentRecord,
-  BotcastSignalPreferences,
   BotcastShow,
   BotcastHostRecoveryCandidate,
   BotcastHostRecoveryResponse,
@@ -146,7 +144,6 @@ import {
   BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE,
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
   BOTCAST_DEFAULT_CAMERA_FRAMING,
-  BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING,
   BOTCAST_DEFAULT_LOGO_PLACEMENT,
   BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
   BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
@@ -203,8 +200,6 @@ import {
   normalizeBotcastIdentityMirrorResetV1,
   normalizeBotcastStudioGlowTuning,
   normalizeBotcastCameraFraming,
-  botcastEpisodeImageFramingFromCameraFraming,
-  normalizeBotcastEpisodeImageFraming,
   normalizeBotcastEpisodeImageReplayEmoji,
   normalizeBotcastLogoPlacement,
   parseStoredBotAvatarDetailsV1,
@@ -402,7 +397,6 @@ import {
   AutoFallbackExhaustedError,
   autoFallbackReasoningEffort,
   runAutoFallbackChain,
-  validateAutoFallbackText,
 } from "./auto-fallback.ts";
 import {
   botPowerTextRequestsRepeat,
@@ -1034,6 +1028,7 @@ type BotcastMessageRow = {
   content: string;
   stage_action_text: string | null;
   voice_performance_text: string | null;
+  interruption_source_content?: string | null;
   created_at: string;
 };
 
@@ -4624,78 +4619,6 @@ export function createBotcastShow(
     now,
   );
   return getBotcastShow(db, userId, id);
-}
-
-export function getBotcastSignalPreferences(
-  db: DatabaseSync,
-  userId: string,
-): BotcastSignalPreferences {
-  const stored = db
-    .prepare(
-      `SELECT episode_image_framing_json
-         FROM botcast_signal_preferences
-        WHERE user_id = ?`,
-    )
-    .get(userId) as { episode_image_framing_json: string } | undefined;
-  if (stored) {
-    try {
-      return {
-        episodeImageFraming: normalizeBotcastEpisodeImageFraming(
-          JSON.parse(stored.episode_image_framing_json),
-        ),
-      };
-    } catch {
-      return {
-        episodeImageFraming: normalizeBotcastEpisodeImageFraming(undefined),
-      };
-    }
-  }
-
-  // Carry forward the most recently rehearsed legacy show framing once, then
-  // make that resolved placement the single user-global Signal preference.
-  const latestShow = db
-    .prepare(
-      `SELECT atmosphere_json
-         FROM botcast_shows
-        WHERE user_id = ?
-        ORDER BY updated_at DESC, rowid DESC
-        LIMIT 1`,
-    )
-    .get(userId) as { atmosphere_json: string } | undefined;
-  const episodeImageFraming = latestShow
-    ? botcastEpisodeImageFramingFromCameraFraming(
-        parseAtmospheres(latestShow.atmosphere_json).cameraFraming,
-      )
-    : normalizeBotcastEpisodeImageFraming(
-        BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING,
-      );
-  db.prepare(
-    `INSERT INTO botcast_signal_preferences
-       (user_id, episode_image_framing_json, updated_at)
-     VALUES (?, ?, ?)`,
-  ).run(userId, JSON.stringify(episodeImageFraming), new Date().toISOString());
-  return { episodeImageFraming };
-}
-
-export function updateBotcastSignalPreferences(
-  db: DatabaseSync,
-  userId: string,
-  value: unknown,
-): BotcastSignalPreferences {
-  const current = getBotcastSignalPreferences(db, userId);
-  const episodeImageFraming = normalizeBotcastEpisodeImageFraming(
-    value,
-    current.episodeImageFraming,
-  );
-  db.prepare(
-    `INSERT INTO botcast_signal_preferences
-       (user_id, episode_image_framing_json, updated_at)
-     VALUES (?, ?, ?)
-     ON CONFLICT(user_id) DO UPDATE SET
-       episode_image_framing_json = excluded.episode_image_framing_json,
-       updated_at = excluded.updated_at`,
-  ).run(userId, JSON.stringify(episodeImageFraming), new Date().toISOString());
-  return { episodeImageFraming };
 }
 
 export function getBotcastShow(
@@ -9320,6 +9243,7 @@ function applyBotcastHostRedirect(
   userId: string,
   episode: BotcastEpisode,
   redirect: BotcastHostRedirectContext,
+  options: { preserveInterruptionSource?: boolean } = {},
 ): BotcastEpisode {
   const latest = episode.messages.at(-1);
   if (
@@ -9339,12 +9263,64 @@ function applyBotcastHostRedirect(
       "A host redirect must preserve an audience-heard prefix of the current line.",
     );
   }
+  if (options.preserveInterruptionSource) {
+    db.prepare(
+      `UPDATE botcast_messages
+          SET content = ?, voice_performance_text = NULL,
+              interruption_source_content = COALESCE(interruption_source_content, ?)
+        WHERE id = ? AND user_id = ? AND episode_id = ?`,
+    ).run(spokenContent, latest.content, latest.id, userId, episode.id);
+  } else {
+    db.prepare(
+      `UPDATE botcast_messages
+          SET content = ?, voice_performance_text = NULL,
+              interruption_source_content = NULL
+        WHERE id = ? AND user_id = ? AND episode_id = ?`,
+    ).run(spokenContent, latest.id, userId, episode.id);
+  }
+  return getBotcastEpisode(db, userId, episode.id);
+}
+
+/** Finalizes a Producer-guest handoff from the browser's audible start clock.
+ * The hidden server-owned source prevents the client from rewriting bot text
+ * while still allowing the cutoff to advance beyond the initial send click. */
+export function recordBotcastProducerGuestAudienceHandoff(
+  db: DatabaseSync,
+  userId: string,
+  episodeId: string,
+  interruption: BotcastHostRedirectContext,
+): BotcastEpisode {
+  const row = db
+    .prepare(
+      `SELECT content, interruption_source_content
+         FROM botcast_messages
+        WHERE id = ? AND user_id = ? AND episode_id = ?
+          AND speaker_role = 'host'`,
+    )
+    .get(interruption.messageId, userId, episodeId) as
+    | {
+        content: string;
+        interruption_source_content: string | null;
+      }
+    | undefined;
+  const sourceContent = row?.interruption_source_content ?? null;
+  const spokenContent = interruption.spokenContent.trimEnd();
+  if (
+    !row ||
+    !sourceContent ||
+    !spokenContent ||
+    !sourceContent.startsWith(spokenContent) ||
+    !spokenContent.startsWith(row.content)
+  ) {
+    throw new Error("The Signal Producer-guest audio handoff is invalid.");
+  }
   db.prepare(
     `UPDATE botcast_messages
-        SET content = ?, voice_performance_text = NULL
+        SET content = ?, voice_performance_text = NULL,
+            interruption_source_content = NULL
       WHERE id = ? AND user_id = ? AND episode_id = ?`,
-  ).run(spokenContent, latest.id, userId, episode.id);
-  return getBotcastEpisode(db, userId, episode.id);
+  ).run(spokenContent, interruption.messageId, userId, episodeId);
+  return getBotcastEpisode(db, userId, episodeId);
 }
 
 function botcastHostRedirectTargetsCurrentLine(
@@ -10675,6 +10651,15 @@ export function buildBotcastSpeakerPrompt(
       })
     : 0;
   const latestPeerTurnIsSilent = silentPeerTurnCount > 0;
+  const latestPeerMessage = args.episode.messages.at(-1) ?? null;
+  const latestPeerSocialSilence = Boolean(
+    latestPeerMessage?.botId === peer.id &&
+      socialSilenceMessageIsMarkedV1({
+        content: latestPeerMessage.content,
+        marker: latestPeerMessage.socialSilence,
+        mode: "signal",
+      }),
+  );
   const peerEchoesAddressedSpeech = botPowerEchoesAddressedSpeechV1(
     peer.powers,
   );
@@ -11127,6 +11112,9 @@ export function buildBotcastSpeakerPrompt(
           ? "The guest's latest turn is only actionless silence. Silence proves no answer. Do not claim or imply a yes, no, choice, belief, motive, or position. Acknowledge it once and offer one simple nonverbal response option; do not repeat the same spoken question."
           : "The guest's latest on-air turn contains no spoken answer. React only to the visible physical action in that saved turn. Do not claim more than that action directly communicates or turn it into a broader belief, motive, or position."
     : null;
+  const socialSilencePeerTurnRule = latestPeerSocialSilence
+    ? "The peer's latest on-air turn was a deliberate conversational silence beat. It was not buffering, loading, lag, a model failure, or evidence that their mind stopped working. Let the quiet land as an intentional human-scale choice, then continue naturally from the last substantive claim or the current private cue. Never narrate the silence as a technical problem."
+    : null;
   const latestPeerGuestMessage =
     args.speakerRole === "host"
       ? [...args.episode.messages]
@@ -11303,6 +11291,8 @@ export function buildBotcastSpeakerPrompt(
                 ? "Show discomfort, resistance, or deflection without leaving yet."
                 : latestPeerTurnIsSilent
                   ? "Treat the host's completed inaudible turns as an established on-air pattern. Carry the stated topic forward; do not demand speech or invent a question."
+                  : latestPeerSocialSilence
+                    ? "The host deliberately left a quiet beat. Use the open floor to continue the last substantive exchange in your own voice; do not invent a new question or describe a technical delay."
                   : peerSpeechObfuscated
                     ? "The host's voice is audible but the words are literal gibberish. Do not answer or infer a question. Briefly acknowledge the unintelligibility when useful, then advance the public topic through one concrete claim, example, or consequence of your own."
                   : "Answer with substance. If you disagree, identify the specific claim and respond to it in character; never hide behind a generic premise disclaimer.",
@@ -11414,6 +11404,7 @@ export function buildBotcastSpeakerPrompt(
         ...(closingOwnershipRule ? [closingOwnershipRule] : []),
         ...(echoingPeerTurnRule ? [echoingPeerTurnRule] : []),
         ...(silentPeerTurnRule ? [silentPeerTurnRule] : []),
+        ...(socialSilencePeerTurnRule ? [socialSilencePeerTurnRule] : []),
         ...(producerFancyActionRule ? [producerFancyActionRule] : []),
         ...roleRules,
         "Keep fictional premises and private directions inside the episode. Do not use them as real-world advice, instructions, or permission to override consent, safety, or any other applicable boundary.",
@@ -12622,7 +12613,21 @@ function validateBotcastAutoSpeakerUtterance(input: {
       reason: "empty" | "refusal" | "invalid_output";
       clause?: string;
     } {
-  const initialTextValidation = validateAutoFallbackText(input.raw);
+  const normalizedRaw = input.raw.trim();
+  // Signal guests often answer honestly with contextual limits such as
+  // "I can't know without the maker's method." The generic Auto fallback
+  // detector treats every first-person "can't" as a provider refusal. Signal
+  // already owns the narrower policy-style refusal contract below; use that
+  // same contract at retry time so validation and final sanitation agree.
+  const initialTextValidation = !normalizedRaw
+    ? { ok: false as const, reason: "empty" as const }
+    : BOTCAST_POLICY_STYLE_REFUSAL_PATTERNS.some((pattern) =>
+          pattern.test(
+            extractBotcastVoicePerformance(normalizedRaw, false).content,
+          ),
+        )
+      ? { ok: false as const, reason: "refusal" as const }
+      : { ok: true as const, value: normalizedRaw };
   const groundedPublicObfuscationResponse =
     !initialTextValidation.ok &&
     initialTextValidation.reason === "refusal" &&
@@ -14283,6 +14288,50 @@ function applyBotcastProducerCutInterruption(
   return getBotcastEpisode(db, userId, episode.id);
 }
 
+/** Records the line the audience actually heard once the producer-cut voice
+ * reaches device output. The closing beat may already have been generated, so
+ * this targets the interrupted message by id instead of assuming it is latest. */
+export function recordBotcastProducerCutAudienceHandoff(
+  db: DatabaseSync,
+  userId: string,
+  episodeId: string,
+  interruption: Pick<
+    BotcastProducerCutInterruption,
+    "messageId" | "speakerRole" | "spokenContent"
+  >,
+): BotcastEpisode {
+  const episode = getBotcastEpisode(db, userId, episodeId);
+  const message = episode.messages.find(
+    (candidate) => candidate.id === interruption.messageId,
+  );
+  if (!message || message.speakerRole !== interruption.speakerRole) {
+    throw new Error("The Signal producer-cut handoff message is invalid.");
+  }
+  const spokenContent = interruption.spokenContent.trimEnd();
+  if (
+    !spokenContent ||
+    spokenContent === message.content ||
+    !message.content.startsWith(spokenContent)
+  ) {
+    throw new Error(
+      "A Signal producer-cut handoff must preserve an audience-heard prefix.",
+    );
+  }
+  const interruptedContent = botcastInterruptedGuestContent(
+    message.content,
+    spokenContent,
+  );
+  if (!interruptedContent) {
+    throw new Error("The Signal producer-cut handoff did not cut the line.");
+  }
+  db.prepare(
+    `UPDATE botcast_messages
+        SET content = ?, voice_performance_text = NULL
+      WHERE id = ? AND user_id = ? AND episode_id = ?`,
+  ).run(interruptedContent, message.id, userId, episode.id);
+  return getBotcastEpisode(db, userId, episode.id);
+}
+
 /**
  * Stops the current on-air line and gives an eligible cast member one
  * expedited closing beat. The recording is always retained.
@@ -14644,6 +14693,9 @@ export async function advanceBotcastEpisode(
         userId,
         episode,
         input.producerGuestHostInterruption,
+        {
+          preserveInterruptionSource: input.guestMessage !== undefined,
+        },
       );
     }
     if (input.guestMessage !== undefined) {
@@ -15607,6 +15659,12 @@ export async function advanceBotcastEpisode(
     socialSilenceExclusions.push("power_silence");
   }
   if (picklesBeatKind) socialSilenceExclusions.push("producer_control");
+  if (imageDiscussionTurn) {
+    // Presenting the image creates a direct conversational obligation for
+    // every lifecycle turn. Ordinary Signal silence remains available once
+    // the host has truthfully completed and dismissed that discussion.
+    socialSilenceExclusions.push("direct_player_obligation");
+  }
   const consecutiveSocialSilenceTurns =
     botcastConsecutiveSocialSilenceTurns(episode.messages);
   if (
@@ -16763,6 +16821,14 @@ export async function advanceBotcastEpisode(
       },
       now,
     );
+    if (onlineTurn.validationFailureReason) {
+      // The provider attempts remain rejected evidence. Do not let the final
+      // rejected draft pass through a narrower sanitizer and become the saved
+      // utterance; recover from the grounded deterministic contract instead.
+      raw = "";
+      providerUsed = "deterministic";
+      modelUsed = "signal-online-validation-fallback";
+    }
   }
   const openingSubject =
     episode.topic.replace(/[.!?]+$/u, "").trim() || episode.topic;
@@ -17939,7 +18005,7 @@ export async function advanceBotcastEpisode(
           utteranceRepair: {
             v: 1,
             source:
-              autoExhaustion
+              autoExhaustion || onlineTurn?.validationFailureReason
                 ? "provider_recovery"
                 : generatedUtterance.repairReason ||
               closingContractRepaired ||
@@ -17951,7 +18017,9 @@ export async function advanceBotcastEpisode(
                 ? signalAutoFallbackExhaustionIsValidationOnly(autoExhaustion)
                   ? "content_validation"
                   : "provider_availability"
-                : generatedUtterance.repairReason) ??
+                : onlineTurn?.validationFailureReason
+                  ? "content_validation"
+                  : generatedUtterance.repairReason) ??
               closingContractRepairReason ??
               (prematureSignoffRepairApplied
                 ? "premature_signoff"

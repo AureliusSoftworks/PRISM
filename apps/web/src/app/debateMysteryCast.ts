@@ -4,6 +4,7 @@ export interface WhodunnitCastBot {
 
 export interface WhodunnitCastAllocation {
   suspectBotIds: string[];
+  judgeBotId: string;
   prosecutorPartnerBotId: string;
   rivalDefenseBotId: string;
 }
@@ -20,7 +21,76 @@ export function distinctWhodunnitCastBotIds(
 }
 
 export function minimumWhodunnitBotsForCast(suspectCount: number): number {
-  return suspectCount + 2;
+  return suspectCount + 3;
+}
+
+/**
+ * Fill newly added or invalid suspect seats without consuming an explicit
+ * blank. A blank is the editable "Surprise me" state left by removing a bot.
+ */
+export function fillWhodunnitSuspectSeats(
+  bots: readonly WhodunnitCastBot[],
+  current: readonly string[],
+  suspectCount: number,
+  excluded: readonly string[] = [],
+): string[] {
+  const targetSuspects = Math.max(0, Math.min(8, Math.round(suspectCount)));
+  const candidates = distinctWhodunnitCastBotIds(bots);
+  const allowed = new Set(candidates);
+  const blocked = new Set(excluded.map((id) => id.trim()).filter(Boolean));
+  const seated = new Set<string>();
+  const seats: Array<string | null> = Array.from(
+    { length: targetSuspects },
+    (_, index) => {
+      const raw = current[index];
+      if (raw === "") return "";
+      const botId = raw?.trim() ?? "";
+      if (
+        !botId ||
+        !allowed.has(botId) ||
+        blocked.has(botId) ||
+        seated.has(botId)
+      ) {
+        return null;
+      }
+      seated.add(botId);
+      return botId;
+    },
+  );
+
+  for (const botId of candidates) {
+    if (blocked.has(botId) || seated.has(botId)) continue;
+    const openIndex = seats.indexOf(null);
+    if (openIndex < 0) break;
+    seats[openIndex] = botId;
+    seated.add(botId);
+  }
+
+  return seats.map((botId) => botId ?? "");
+}
+
+/** Choose a fresh, unused bot for one editable Whodunnit seat. */
+export function surpriseWhodunnitSeatBotId(
+  bots: readonly WhodunnitCastBot[],
+  occupiedBotIds: readonly string[],
+  currentBotId = "",
+  random: () => number = Math.random,
+): string | null {
+  const occupied = new Set(
+    occupiedBotIds.map((id) => id.trim()).filter(Boolean),
+  );
+  const eligible = distinctWhodunnitCastBotIds(bots).filter(
+    (botId) => !occupied.has(botId),
+  );
+  if (eligible.length === 0) return null;
+  const normalizedCurrentBotId = currentBotId.trim();
+  const fresh = eligible.filter((botId) => botId !== normalizedCurrentBotId);
+  const pool = fresh.length > 0 ? fresh : eligible;
+  const index = Math.min(
+    pool.length - 1,
+    Math.max(0, Math.floor(random() * pool.length)),
+  );
+  return pool[index] ?? null;
 }
 
 export function randomizeWhodunnitCast(
@@ -43,8 +113,9 @@ export function randomizeWhodunnitCast(
 
   return {
     suspectBotIds: remaining.slice(0, targetSuspects),
-    prosecutorPartnerBotId: remaining[targetSuspects] ?? "",
-    rivalDefenseBotId: remaining[targetSuspects + 1] ?? "",
+    judgeBotId: remaining[targetSuspects] ?? "",
+    prosecutorPartnerBotId: remaining[targetSuspects + 1] ?? "",
+    rivalDefenseBotId: remaining[targetSuspects + 2] ?? "",
   };
 }
 

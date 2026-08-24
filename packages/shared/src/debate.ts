@@ -1645,7 +1645,6 @@ export interface DebateSessionCreateRequest {
   motion: DebateMotionSlateV1;
   evidence: DebateEvidencePacketV1;
   moderatorTitle?: string;
-  moderatorName?: string;
   moderatorBotId: string;
   playerJudgeUsesPrism?: boolean;
   /** Optional on the human-owned side in Participant mode. */
@@ -1855,7 +1854,7 @@ export interface DebateSessionListItemV1 {
   title: string;
   motion: string;
   moderatorTitle: string;
-  /** Public display name frozen for the presiding seat. */
+  /** Legacy-compatible display name, derived from the frozen presiding identity. */
   moderatorName?: string;
   /** Frozen public side labels used by Archive status and matchup copy. */
   forTeamName?: string;

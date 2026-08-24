@@ -479,7 +479,7 @@ describe("Signal review transcript", () => {
     assert.match(transcript, /"followingMessageId":"message-1"/u);
   });
 
-  it("annotates the interrupted turn for a producer host redirect", () => {
+  it("annotates the interrupted turn and provenance for a producer host redirect", () => {
     const transcript = buildSignalReviewTranscript({
       episode: {
         ...episode,
@@ -510,7 +510,93 @@ describe("Signal review transcript", () => {
 
     assert.match(
       transcript,
-      /- Producer redirect: yes — ask_about \(event event-redirect\); this canonical turn contains only the audience-heard prefix/u,
+      /- Producer interruption: redirect_host — ask_about \(event event-redirect\); this canonical turn contains only the audience-heard prefix/u,
+    );
+    assert.match(
+      transcript,
+      /- Event ID: event-redirect \| Delivery: redirect_host \| Kind: ask_about \| Interrupted message ID: message-1 \| Scheduled bridge: None \| Canonical interrupted message: yes/u,
+    );
+  });
+
+  it("annotates a canonical interrupt_guest prefix", () => {
+    const transcript = buildSignalReviewTranscript({
+      episode: {
+        ...episode,
+        messages: [episode.messages[1]!],
+        events: [
+          episode.events[4]!,
+          {
+            id: "event-guest-interrupt",
+            episodeId: episode.id,
+            sequence: 6,
+            kind: "producer_cue",
+            payload: {
+              kind: "press_harder",
+              delivery: "interrupt_guest",
+              audience: "host",
+              interruptedMessageId: "message-2",
+              interruptionBridgeLine: "Let me stop you there.",
+            },
+            occurredAt: "2026-07-17T17:00:13.000Z",
+          },
+        ],
+        segments: [],
+      },
+      show,
+      host: { id: "host-1", name: "Ada" },
+      guest: { id: "guest-1", name: "Grace" },
+    });
+
+    assert.match(
+      transcript,
+      /- Producer interruption: interrupt_guest — press_harder \(event event-guest-interrupt\); this canonical turn contains only the audience-heard prefix/u,
+    );
+    assert.match(
+      transcript,
+      /Scheduled bridge: Let me stop you there\. \| Canonical interrupted message: yes/u,
+    );
+  });
+
+  it("records interrupt_guest provenance when no interrupted message is canonical", () => {
+    const transcript = buildSignalReviewTranscript({
+      episode: {
+        ...episode,
+        messages: [episode.messages[0]!],
+        events: [
+          episode.events[2]!,
+          {
+            id: "event-hidden-guest-interrupt",
+            episodeId: episode.id,
+            sequence: 4,
+            kind: "producer_cue",
+            payload: {
+              kind: "ask_about",
+              delivery: "interrupt_guest",
+              audience: "host",
+              interruptedMessageId: "cancelled-guest-draft",
+              interruptionBridgeLine: "Hold that thought.",
+            },
+            occurredAt: "2026-07-17T17:00:05.000Z",
+          },
+        ],
+        segments: [],
+      },
+      show,
+      host: { id: "host-1", name: "Ada" },
+      guest: { id: "guest-1", name: "Grace" },
+    });
+
+    assert.match(
+      transcript,
+      /- Event ID: event-hidden-guest-interrupt \| Delivery: interrupt_guest \| Kind: ask_about \| Interrupted message ID: cancelled-guest-draft \| Scheduled bridge: Hold that thought\. \| Canonical interrupted message: no/u,
+    );
+    assert.match(
+      transcript,
+      /Canonical interrupted message: no means no audience-heard prefix was persisted; it does not mean the producer handoff disappeared\./u,
+    );
+    assert.doesNotMatch(
+      transcript,
+      /Producer interruption: interrupt_guest — ask_about \(event event-hidden-guest-interrupt\)/u,
     );
   });
 

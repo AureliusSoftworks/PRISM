@@ -16,6 +16,7 @@ import {
   copyDebateMotionSlate,
   debateAlignmentPreviewCast,
   debateEvidenceSourcePropKind,
+  debateGalleryArrivalShouldMaskStage,
   debateMotionRevealState,
   debatePlayerJudgePrefilledCast,
   debatePrefilledCast,
@@ -337,6 +338,51 @@ describe("Debate experience", () => {
     );
   });
 
+  it("lifts the gallery curtain when a delegated Whodunnit court has advanced", () => {
+    const courtAtOpening = {
+      format: "turnabout",
+      stepKey: "turnabout_intro",
+      formatState: {
+        format: "turnabout",
+        mysteryTrial: {},
+      },
+    } as Pick<DebateSessionV1, "format" | "formatState" | "stepKey">;
+    const courtAtResolution = {
+      ...courtAtOpening,
+      stepKey: "turnabout_jury_deliberation",
+    };
+
+    assert.equal(
+      debateGalleryArrivalShouldMaskStage({
+        baking: true,
+        needsBuffering: true,
+        session: courtAtOpening,
+      }),
+      true,
+    );
+    assert.equal(
+      debateGalleryArrivalShouldMaskStage({
+        baking: true,
+        needsBuffering: true,
+        session: courtAtResolution,
+      }),
+      false,
+    );
+    assert.equal(
+      debateGalleryArrivalShouldMaskStage({
+        baking: true,
+        needsBuffering: true,
+        session: {
+          format: "forum",
+          stepKey: "intro",
+          formatState: { format: "forum" },
+        } as Pick<DebateSessionV1, "format" | "formatState" | "stepKey">,
+      }),
+      true,
+    );
+    assert.match(source, /debateGalleryArrivalShouldMaskStage\(\{[\s\S]{0,180}session,/u);
+  });
+
   it("animates the live room out, opens completed replays empty, and lifts Debate avatar ink", () => {
     assert.match(source, /data-debate-room-presence=\{roomPresence\}/u);
     assert.match(css, /debate-stage-bot-depart/u);
@@ -597,10 +643,16 @@ describe("Debate experience", () => {
   });
 
   it("freezes one custom moderator title across setup, archive, transcript, and the live card", () => {
-    assert.match(source, /useState\("Moderator"\)/u);
+    assert.match(
+      source,
+      /props\.initialFormat === "whodunnit" \? "Judge" : "Moderator"/u,
+    );
     assert.match(source, /data-tutorial-target="debate-moderator-title"/u);
     assert.match(source, /maxLength=\{DEBATE_MODERATOR_TITLE_MAX_LENGTH\}/u);
-    assert.match(source, /placeholder="Moderator, The House, The Court…"/u);
+    assert.match(
+      source,
+      /placeholder="Moderator, Speaker of the House, Keeper of the Truth…"/u,
+    );
     assert.match(
       source,
       /moderatorTitle: normalizeDebateModeratorTitle\(moderatorTitle\)/u,
@@ -619,10 +671,11 @@ describe("Debate experience", () => {
     );
     assert.match(source, /session\.moderatorTitle/u);
     assert.match(source, /data-tutorial-target="debate-team-names"/u);
-    assert.match(source, /data-tutorial-target="debate-moderator-name"/u);
     assert.match(source, /forTeamNameAuthoredRef/u);
     assert.match(source, /againstTeamNameAuthoredRef/u);
-    assert.match(source, /moderatorNameAuthoredRef/u);
+    assert.doesNotMatch(source, /data-tutorial-target="debate-moderator-name"/u);
+    assert.doesNotMatch(source, /Public moderator name|Public Judge name/u);
+    assert.doesNotMatch(source, /moderatorNameAuthoredRef|setModeratorName\(/u);
     assert.match(source, /emptyDebateSlateForFormat/u);
     assert.match(source, /format === "whodunnit" \? "Prosecution" : "Pro"/u);
     assert.match(source, /format === "whodunnit" \? "Defense" : "Con"/u);
@@ -631,6 +684,15 @@ describe("Debate experience", () => {
     assert.match(source, /session\.moderatorName/u);
     assert.match(source, /sessionStatusLabel\(session\)/u);
     assert.match(css, /\.moderatorTitleField\s*\{/u);
+    assert.match(
+      source,
+      /const defaultModeratorTitle\s*=\s*format === "whodunnit" \? "Judge" : "Moderator"/u,
+    );
+    assert.doesNotMatch(
+      source,
+      /const visibleModeratorTitle\s*=\s*format === "whodunnit"/u,
+    );
+    assert.doesNotMatch(source, /disabled=\{format === "whodunnit"\}/u);
   });
 
   it("adds an inline editable Territory dice without changing the motion slate", () => {
@@ -1196,6 +1258,13 @@ describe("Debate experience", () => {
     assert.match(source, /submitTurnaboutAction\(\s*"present_evidence"/u);
     assert.match(source, /submitTurnaboutAction\("pass"/u);
     assert.match(source, /mysteryCourtPassiveFigures/u);
+    assert.match(source, /return verdict\.grade === "incorrect" \? "Not Guilty" : "Guilty"/u);
+    assert.match(source, /The public Judge announces the deterministic Casekeeper ruling/u);
+    assert.match(source, /The court is adjourned\. \$\{outcome\}/u);
+    assert.match(
+      source,
+      /debateSessionIsMysteryTurnabout\(next\)[\s\S]{0,120}event\.speakerKind === "moderator"/u,
+    );
     assert.match(source, /data-court-role=/u);
     assert.match(
       source,
@@ -2979,6 +3048,40 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
+      /onReleaseUtterance\?\.\(DEBATE_INTERRUPT_PRIMARY_RELEASE_MS\)/u,
+    );
+  });
+
+  it("lets Debate interruption preparation run under the outgoing speaker", () => {
+    const overlapStart = source.indexOf(
+      "const fireOverlap = (): Promise<void> =>",
+    );
+    const overlapEnd = source.indexOf(
+      "const played = await onUtterance({",
+      overlapStart,
+    );
+    assert.ok(overlapStart >= 0 && overlapEnd > overlapStart);
+    const overlap = source.slice(overlapStart, overlapEnd);
+    const incomingStart = overlap.indexOf("onStart: (durationMs, alignment) =>");
+    const release = overlap.indexOf(
+      "onReleaseUtterance?.(DEBATE_INTERRUPT_PRIMARY_RELEASE_MS)",
+    );
+    assert.ok(incomingStart >= 0 && release > incomingStart);
+
+    const participantInterrupt = source.slice(
+      source.indexOf("const interruptPresentationForParticipantFloorBreak ="),
+      source.indexOf("const interruptPresentationForRecess ="),
+    );
+    const participantPreparation = source.slice(
+      source.indexOf("const beginParticipantPreparationReveal ="),
+      source.indexOf("const startParticipantFloorBreak ="),
+    );
+    assert.doesNotMatch(
+      participantInterrupt,
+      /onReleaseUtterance\?\.\(DEBATE_INTERRUPT_PRIMARY_RELEASE_MS\)/u,
+    );
+    assert.doesNotMatch(
+      participantPreparation,
       /onReleaseUtterance\?\.\(DEBATE_INTERRUPT_PRIMARY_RELEASE_MS\)/u,
     );
   });

@@ -673,6 +673,240 @@
   box-shadow: 0 0.8rem 2.4rem rgba(0, 0, 0, 0.34), 0 0 1.4rem rgba(102, 229, 234, 0.1);
 }
 
+.investigationAssignment {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 1.5rem;
+  width: min(72rem, calc(100% - 2rem));
+  min-height: calc(100vh - 5.5rem);
+  margin: 0 auto;
+  padding: clamp(2rem, 5vh, 4.5rem) 0 3rem;
+  overflow: hidden;
+  text-align: center;
+}
+
+.investigationAssignment::before {
+  position: absolute;
+  z-index: 0;
+  inset: 5% 12% auto;
+  height: 28rem;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(103, 222, 230, 0.09), rgba(126, 84, 221, 0.055) 38%, transparent 72%);
+  content: "";
+  pointer-events: none;
+}
+
+.assignmentScene,
+.assignmentCopy,
+.assignmentChoices,
+.assignmentFinality {
+  position: relative;
+  z-index: 1;
+}
+
+.assignmentScene {
+  display: flex;
+  align-items: end;
+  justify-content: center;
+  width: 18rem;
+  min-height: 8.25rem;
+}
+
+.assignmentPartner {
+  position: relative;
+  z-index: 2;
+  width: 7.2rem;
+  height: 7.2rem;
+  filter: drop-shadow(0 0.8rem 1.2rem rgba(0, 0, 0, 0.42));
+}
+
+.assignmentPartner > * {
+  width: 100%;
+  height: 100%;
+}
+
+.assignmentFile {
+  position: relative;
+  width: 7rem;
+  height: 5.1rem;
+  margin: 0 0 0.4rem -0.75rem;
+  padding: 1.1rem 0.8rem 0.7rem;
+  color: #342d26;
+  border: 1px solid rgba(227, 189, 113, 0.58);
+  border-radius: 0.18rem;
+  background: linear-gradient(145deg, #e7dcc6, #bba98e);
+  box-shadow: 0 0.9rem 1.7rem rgba(0, 0, 0, 0.34);
+  transform: rotate(4deg);
+}
+
+.assignmentFile::before {
+  position: absolute;
+  top: -0.55rem;
+  left: 0.85rem;
+  width: 2.6rem;
+  height: 0.75rem;
+  border-radius: 0.16rem 0.16rem 0 0;
+  background: #cdbc9e;
+  content: "";
+}
+
+.assignmentFile i {
+  display: block;
+  height: 1px;
+  margin: 0.5rem 0;
+  background: rgba(52, 45, 38, 0.35);
+}
+
+.assignmentFile span {
+  display: block;
+  margin-top: 0.45rem;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.assignmentCopy {
+  max-width: 45rem;
+}
+
+.assignmentCopy h1 {
+  margin: 0.35rem 0 0.75rem;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(2.35rem, 6vw, 4.3rem);
+  font-weight: 500;
+  letter-spacing: -0.045em;
+  line-height: 0.98;
+}
+
+.assignmentCopy > p:last-child {
+  margin: 0 auto;
+  max-width: 42rem;
+  color: var(--mystery-muted);
+  font-size: clamp(0.95rem, 1.6vw, 1.08rem);
+  line-height: 1.55;
+}
+
+.assignmentChoices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+  width: min(58rem, 100%);
+}
+
+.assignmentChoices > button {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  gap: 0.55rem;
+  min-height: 13rem;
+  padding: 1.35rem;
+  text-align: left;
+  border: 1px solid color-mix(in srgb, var(--mystery-violet) 45%, var(--mystery-line));
+  border-radius: 1rem;
+  background: linear-gradient(145deg, rgba(169, 140, 255, 0.12), rgba(17, 20, 35, 0.94));
+  box-shadow: 0 1.2rem 2.8rem rgba(0, 0, 0, 0.24);
+  cursor: pointer;
+}
+
+.assignmentChoices > button:hover,
+.assignmentChoices > button:focus-visible {
+  border-color: var(--mystery-violet);
+  background: linear-gradient(145deg, rgba(169, 140, 255, 0.2), rgba(17, 20, 35, 0.96));
+  transform: translateY(-2px);
+}
+
+.assignmentChoices > button:disabled {
+  cursor: wait;
+  opacity: 0.66;
+}
+
+.assignmentChoices > button small {
+  color: var(--mystery-violet);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.assignmentChoices > button strong {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.35rem, 2.4vw, 1.8rem);
+  font-weight: 500;
+}
+
+.assignmentChoices > button span {
+  color: var(--mystery-muted);
+  line-height: 1.48;
+}
+
+.assignmentChoices > button b {
+  color: var(--mystery-text);
+  font-size: 0.8rem;
+}
+
+.assignmentChoices > .partnerAssignmentChoice {
+  border-color: color-mix(in srgb, var(--mystery-cyan) 48%, var(--mystery-line));
+  background: linear-gradient(145deg, rgba(102, 229, 234, 0.1), rgba(17, 20, 35, 0.94));
+}
+
+.assignmentChoices > .partnerAssignmentChoice:hover,
+.assignmentChoices > .partnerAssignmentChoice:focus-visible {
+  border-color: var(--mystery-cyan);
+  background: linear-gradient(145deg, rgba(102, 229, 234, 0.18), rgba(17, 20, 35, 0.96));
+}
+
+.assignmentChoices > .partnerAssignmentChoice small {
+  color: var(--mystery-cyan);
+}
+
+.assignmentFinality {
+  margin: -0.25rem 0 0;
+  color: color-mix(in srgb, var(--mystery-muted) 80%, transparent);
+  font-size: 0.75rem;
+}
+
+@media (max-width: 700px) {
+  .investigationAssignment {
+    padding-top: 1.5rem;
+  }
+
+  .assignmentScene {
+    transform: scale(0.84);
+  }
+
+  .assignmentChoices {
+    grid-template-columns: 1fr;
+  }
+
+  .assignmentChoices > button {
+    min-height: 10.5rem;
+  }
+}
+
+@media (max-height: 800px) and (min-width: 701px) {
+  .investigationAssignment {
+    gap: 0.85rem;
+    padding-top: 1.15rem;
+    padding-bottom: 1.25rem;
+  }
+
+  .assignmentScene {
+    min-height: 6.6rem;
+    transform: scale(0.78);
+    transform-origin: center bottom;
+  }
+
+  .assignmentCopy h1 {
+    font-size: clamp(2.5rem, 5vw, 3.5rem);
+  }
+
+  .assignmentChoices > button {
+    min-height: 10.75rem;
+    padding: 1rem 1.15rem;
+  }
+}
+
 .investigation {
   display: grid;
   grid-template-columns: clamp(18rem, 25vw, 22rem) minmax(32rem, 1fr);

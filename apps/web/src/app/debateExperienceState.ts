@@ -113,6 +113,25 @@ export function debateRoomPresence(args: {
   return args.observerPerspective === "replay" ? "empty" : "departing";
 }
 
+/**
+ * The gallery curtain represents only the unopened court runway. A delegated
+ * Whodunnit may continue receiving public bake snapshots after its court has
+ * advanced, so local bake state alone must never keep the stage covered.
+ */
+export function debateGalleryArrivalShouldMaskStage(args: {
+  baking: boolean;
+  needsBuffering: boolean;
+  session: Pick<DebateSessionV1, "format" | "formatState" | "stepKey">;
+}): boolean {
+  if (!args.baking || !args.needsBuffering) return false;
+  const isAdvancedMysteryCourt =
+    args.session.format === "turnabout" &&
+    args.session.formatState.format === "turnabout" &&
+    Boolean(args.session.formatState.mysteryTrial) &&
+    args.session.stepKey !== "turnabout_intro";
+  return !isAdvancedMysteryCourt;
+}
+
 export interface DebateSessionRetryDraft {
   topic: string;
   format: DebateFormatId;

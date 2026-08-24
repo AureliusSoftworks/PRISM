@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { deflateRawSync, inflateRawSync } from "node:zlib";
 import type {
@@ -49,6 +51,14 @@ import type { GenerateOptions, LlmProvider, ProviderMessage } from "../providers
 import { HttpError } from "../utils.http.ts";
 
 const NOW = "2026-08-20T19:00:00.000Z";
+const debateSource = readFileSync(
+  fileURLToPath(new URL("../debate.ts", import.meta.url)),
+  "utf8",
+);
+const debateMysterySource = readFileSync(
+  fileURLToPath(new URL("../debate-mystery.ts", import.meta.url)),
+  "utf8",
+);
 
 class MysteryProviderStub implements LlmProvider {
   public readonly name = "local" as const;
@@ -248,6 +258,121 @@ async function bakeMysteryCourtToPlayerAction(
 }
 
 describe("Debate Whodunnit private/public boundary", () => {
+  it("uses courtroom party language and a deterministic public Judge verdict", () => {
+    assert.match(
+      debateMysterySource,
+      /call them 'the accused' or 'the defendant'; never call them 'my client'/u,
+    );
+    assert.match(
+      debateMysterySource,
+      /Refer to the charged person only as 'my client'/u,
+    );
+    assert.match(
+      debateMysterySource,
+      /My client asks the court to judge only what this admissible record actually proves/u,
+    );
+    assert.match(debateSource, /mystery_turnabout_verdict/u);
+    assert.match(debateSource, /speakerKind: "moderator"/u);
+    assert.match(debateSource, /speakerBotId: session\.moderator\.id/u);
+    assert.match(
+      debateSource,
+      /const courtroomVerdict: "Guilty" \| "Not Guilty" =\s*graded\.grade === "incorrect" \? "Not Guilty" : "Guilty"/u,
+    );
+    assert.match(debateSource, /\$\{courtroomVerdict\}/u);
+    assert.match(
+      debateSource,
+      /Do not describe either side as winning, carrying, prevailing, or winning a debate or Turnabout/u,
+    );
+  });
+
+  it("lets the player own the mansion or inherit a deterministic partner-built court record", async () => {
+    const db = testDb();
+    const provider = new MysteryProviderStub();
+    const config = setup(db);
+
+    let manual = await createDebateMysterySession(
+      db,
+      "user-1",
+      config,
+      "mystery-assignment-manual-create",
+      runtime(provider),
+    );
+    assert.equal(manual.formatState.investigationApproach, "undecided");
+    const manualBudget = manual.formatState.actionsRemaining;
+    manual = await applyDebateMysteryAction(db, "user-1", manual.id, {
+      expectedRevision: manual.revision,
+      idempotencyKey: "mystery-assignment-manual",
+      action: "choose_investigation_path",
+      path: "player",
+    }, runtime(provider));
+    assert.equal(manual.format, "whodunnit");
+    assert.equal(manual.formatState.investigationApproach, "player");
+    assert.equal(manual.formatState.actionsRemaining, manualBudget);
+    assert.deepEqual(
+      listDebateMysteryActions(db, "user-1", manual.id).map((entry) => entry.action),
+      ["choose_investigation_path"],
+    );
+
+    let delegated = await createDebateMysterySession(
+      db,
+      "user-1",
+      config,
+      "mystery-assignment-partner-create",
+      runtime(provider),
+    );
+    const delegatedRequest = {
+      expectedRevision: delegated.revision,
+      idempotencyKey: "mystery-assignment-partner",
+      action: "choose_investigation_path" as const,
+      path: "partner" as const,
+    };
+    const bible = getDebateMysteryCaseBible(db, "user-1", delegated.id);
+    const strongCase = bible.proofBundles.find((bundle) => bundle.id === "strong-case")!;
+    delegated = await applyDebateMysteryAction(
+      db,
+      "user-1",
+      delegated.id,
+      delegatedRequest,
+      runtime(provider),
+    );
+    assert.equal(delegated.format, "turnabout");
+    assert.equal(delegated.phase, "opening");
+    assert.equal(delegated.stepKey, "turnabout_intro");
+    assert.equal(delegated.formatState.format, "turnabout");
+    const frozen = delegated.formatState.mysteryTrial?.frozenInvestigation;
+    assert.ok(frozen);
+    assert.equal(frozen.investigationApproach, "partner");
+    assert.equal(frozen.playPhase, "trial");
+    assert.equal(frozen.actionsRemaining, 0);
+    assert.equal(frozen.theory?.culpritSeatId, bible.culpritSeatId);
+    assert.equal(frozen.theory?.accompliceSeatId, null);
+    assert.deepEqual(frozen.theory?.evidenceIds, strongCase.requiredEvidenceIds);
+    assert.deepEqual(frozen.theory?.testimonyIds, strongCase.requiredTestimonyIds);
+    assert.ok(strongCase.requiredEvidenceIds.every((id) =>
+      frozen.discoveredEvidence.some((item) => item.id === id)));
+    assert.ok(strongCase.requiredTestimonyIds.every((id) =>
+      frozen.testimony.some((item) => item.id === id && item.discovered)));
+    assert.ok(frozen.metSuspectSeatIds.includes(bible.culpritSeatId));
+    assert.match(frozen.partnerJournal.at(-1) ?? "", /filed charges/iu);
+    assert.ok(delegated.evidence.exhibits.length > 0);
+    assert.ok(delegated.evidence.sources.length > 0);
+    for (const hiddenKey of ["actorKnowledge", "proofBundles", "factTags", "hidingMechanism", "isCanonicalWeapon"]) {
+      assert.equal(JSON.stringify(delegated).includes(hiddenKey), false, hiddenKey);
+    }
+    assert.deepEqual(
+      listDebateMysteryActions(db, "user-1", delegated.id).map((entry) => entry.action),
+      ["choose_investigation_path"],
+    );
+    const replay = await applyDebateMysteryAction(
+      db,
+      "user-1",
+      delegated.id,
+      delegatedRequest,
+      runtime(provider),
+    );
+    assert.equal(replay.revision, delegated.revision);
+  });
+
   it("isolates each suspect's interview history unless the investigator explicitly discloses testimony", async () => {
     const db = testDb();
     const provider = new MysteryProviderStub();
@@ -1151,10 +1276,12 @@ describe("Debate Whodunnit private/public boundary", () => {
     assert.equal(stillPrivate?.imageId, null);
   });
 
-  it("freezes Participant or Spectator court setup while reserving Judge for PRISM", async () => {
+  it("freezes Participant or Spectator while keeping a separately cast public Judge away from sealed truth", async () => {
     const db = testDb();
     const provider = new MysteryProviderStub();
     const config = setup(db);
+    seedBot(db, "bot-7", 7);
+    config.judgeBotId = "bot-7";
     const spectator = await createDebateMysterySession(
       db,
       "user-1",
@@ -1166,6 +1293,14 @@ describe("Debate Whodunnit private/public boundary", () => {
     assert.equal(spectator.playerRole, "spectator");
     assert.equal(spectator.playerSideId, null);
     assert.equal(spectator.participation, null);
+    assert.equal(spectator.moderator.id, "bot-7");
+    assert.equal(spectator.moderator.name, "Actor 7");
+    assert.equal(spectator.formatState.format, "whodunnit");
+    assert.equal(spectator.formatState.config.judgeBotId, "bot-7");
+    const publicRow = db.prepare(
+      "SELECT session_json FROM debate_sessions WHERE id = ?",
+    ).get(spectator.id) as { session_json: string };
+    assert.equal(publicRow.session_json.includes("culpritSeatId"), false);
     await assert.rejects(
       () => createDebateMysterySession(
         db,
@@ -1196,7 +1331,7 @@ describe("Debate Whodunnit private/public boundary", () => {
       "mystery-court-rules-create",
       runtime(provider),
       {
-        moderatorName: "Justice Sol",
+        moderatorTitle: "Keeper of the Truth",
         forTeamName: "The Seekers",
         againstTeamName: "The Doubters",
       },
@@ -1209,7 +1344,8 @@ describe("Debate Whodunnit private/public boundary", () => {
     assert.equal(created.formality, "heated");
     assert.equal(created.jury.enabled, true);
     assert.equal(created.participation?.difficulty, "coach");
-    assert.equal(created.moderatorName, "Justice Sol");
+    assert.equal(created.moderatorName, "PRISM");
+    assert.equal(created.moderatorTitle, "Keeper of the Truth");
     assert.equal(created.motion.forSide.label, "The Seekers");
     assert.equal(created.motion.againstSide.label, "The Doubters");
     const code = debateMysteryCaseCodeForSession(db, "user-1", created.id);
@@ -1222,6 +1358,7 @@ describe("Debate Whodunnit private/public boundary", () => {
       formality: "parliamentary",
       juryEnabled: false,
       moderatorName: "Justice Nova",
+      moderatorTitle: "Speaker of the House",
       forTeamName: "The Finders",
       againstTeamName: "The Skeptics",
       idempotencyKey: "mystery-court-rules-import",
@@ -1234,7 +1371,8 @@ describe("Debate Whodunnit private/public boundary", () => {
     assert.equal(imported.formatState.config.playerRole, "participant");
     assert.equal(imported.formatState.config.participationDifficulty, "coach");
     assert.equal(imported.participation?.difficulty, "coach");
-    assert.equal(imported.moderatorName, "Justice Nova");
+    assert.equal(imported.moderatorName, "PRISM");
+    assert.equal(imported.moderatorTitle, "Speaker of the House");
     assert.equal(imported.motion.forSide.label, "The Finders");
     assert.equal(imported.motion.againstSide.label, "The Skeptics");
     db.prepare("DELETE FROM debate_mystery_cases WHERE session_id = ? AND user_id = 'user-1'").run(created.id);
@@ -1256,7 +1394,7 @@ describe("Debate Whodunnit private/public boundary", () => {
     assert.equal(resumed.formatState.config.playerRole, "participant");
     assert.equal(resumed.formatState.config.participationDifficulty, "coach");
     assert.equal(resumed.participation?.difficulty, "coach");
-    assert.equal(resumed.moderatorName, "Justice Sol");
+    assert.equal(resumed.moderatorName, "PRISM");
     assert.equal(resumed.motion.forSide.label, "The Seekers");
     assert.equal(resumed.motion.againstSide.label, "The Doubters");
   });
@@ -1585,6 +1723,18 @@ describe("Debate Whodunnit private/public boundary", () => {
     assert.equal(session.status, "completed");
     assert.equal(session.formatState.format, "turnabout");
     assert.equal(session.formatState.mysteryTrial?.verdict?.grade, "lucky_break");
+    const publicVerdict = session.events.find(
+      (event) => event.stepKey === "mystery_turnabout_verdict",
+    );
+    assert.equal(publicVerdict?.speakerKind, "moderator");
+    assert.equal(publicVerdict?.speakerBotId, session.moderator.id);
+    assert.match(publicVerdict?.content ?? "", /Judge: Guilty\./u);
+    assert.doesNotMatch(publicVerdict?.content ?? "", /wins?(?: the)? (?:debate|turnabout)/iu);
+    const closing = session.events.find(
+      (event) => event.stepKey === "closing_moderator",
+    );
+    assert.match(closing?.content ?? "", /Guilty/u);
+    assert.doesNotMatch(closing?.content ?? "", /wins?|prevails?|carries/iu);
     const actions = listDebateMysteryActions(db, "user-1", session.id);
     assert.deepEqual(actions.map((entry) => entry.action), ["begin_investigation", "inspect", "end_activity", "travel", "begin_interview", "interview", "end_activity", "file_theory"]);
     assert.equal(JSON.stringify(actions).includes("culpritSeatId"), true); // The filed accusation is public.
@@ -1710,6 +1860,13 @@ describe("Debate Whodunnit private/public boundary", () => {
     assert.equal(session.status, "completed");
     assert.equal(session.formatState.format, "turnabout");
     assert.equal(session.formatState.mysteryTrial?.verdict?.grade, "incorrect");
+    const publicVerdict = session.events.find(
+      (event) => event.stepKey === "mystery_turnabout_verdict",
+    );
+    assert.equal(publicVerdict?.speakerKind, "moderator");
+    assert.equal(publicVerdict?.speakerBotId, session.moderator.id);
+    assert.match(publicVerdict?.content ?? "", /Judge: Not Guilty\./u);
+    assert.doesNotMatch(publicVerdict?.content ?? "", /wins?(?: the)? (?:debate|turnabout)/iu);
     assert.match(session.formatState.mysteryTrial?.verdict?.reason ?? "", /filed accusation is final/iu);
     await assert.rejects(
       () => applyDebateMysteryAction(db, "user-1", session.id, {

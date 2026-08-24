@@ -331,14 +331,16 @@ export interface BotcastEpisodeImagePlacement {
   x: number;
   /** Vertical viewport position in percent. */
   y: number;
-  /** Visual size as a percent of Signal's canonical image prop. */
+  /** Visual size for transparent PNG item cutouts. */
+  itemScale: number;
+  /** Visual size for opaque PNG and JPG pictures. */
+  photoScale: number;
+}
+export interface BotcastLogoPlacement {
+  x: number;
+  y: number;
   scale: number;
 }
-export type BotcastEpisodeImageFraming = Record<
-  BotcastDirectedCameraShot,
-  BotcastEpisodeImagePlacement
->;
-export type BotcastLogoPlacement = BotcastEpisodeImagePlacement;
 export interface BotcastCameraFrame {
   zoom: number;
   /** Horizontal adjustment layered over Signal's automatic subject framing. */
@@ -370,7 +372,7 @@ export const BOTCAST_DEFAULT_LOGO_PLACEMENT: Readonly<BotcastLogoPlacement> = {
   scale: 100,
 };
 const BOTCAST_LEGACY_EPISODE_IMAGE_PLACEMENT: Readonly<
-  Record<BotcastDirectedCameraShot, BotcastEpisodeImagePlacement>
+  Record<BotcastDirectedCameraShot, { x: number; y: number; scale: number }>
 > = {
   left: { x: 74, y: 62, scale: 70 },
   right: { x: 26, y: 62, scale: 70 },
@@ -381,30 +383,21 @@ export const BOTCAST_DEFAULT_CAMERA_FRAMING: Readonly<BotcastCameraFraming> = {
     zoom: 1.42,
     panX: 0,
     panY: 0,
-    episodeImage: { x: 24, y: 72, scale: 50 },
+    episodeImage: { x: 24, y: 72, itemScale: 50, photoScale: 90 },
   },
   right: {
     zoom: 1.42,
     panX: 0,
     panY: 0,
-    episodeImage: { x: 76, y: 72, scale: 50 },
+    episodeImage: { x: 76, y: 72, itemScale: 50, photoScale: 90 },
   },
   wide: {
     zoom: 1,
     panX: 0,
     panY: 0,
-    episodeImage: { x: 50, y: 75, scale: 50 },
+    episodeImage: { x: 50, y: 75, itemScale: 50, photoScale: 90 },
   },
 };
-export const BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING: Readonly<BotcastEpisodeImageFraming> = {
-  left: { ...BOTCAST_DEFAULT_CAMERA_FRAMING.left.episodeImage },
-  right: { ...BOTCAST_DEFAULT_CAMERA_FRAMING.right.episodeImage },
-  wide: { ...BOTCAST_DEFAULT_CAMERA_FRAMING.wide.episodeImage },
-};
-export interface BotcastSignalPreferences {
-  /** User-global placement reused by every Signal show. */
-  episodeImageFraming: BotcastEpisodeImageFraming;
-}
 export const BOTCAST_AUTO_CAMERA_LEAD_IN_MIN_MS = 240;
 export const BOTCAST_AUTO_CAMERA_LEAD_IN_MAX_MS = 420;
 
@@ -467,7 +460,7 @@ export function normalizeBotcastEpisodeImagePlacement(
 ): BotcastEpisodeImagePlacement {
   const container =
     value && typeof value === "object" && !Array.isArray(value)
-      ? (value as Partial<BotcastEpisodeImagePlacement>)
+      ? (value as Partial<BotcastEpisodeImagePlacement> & { scale?: unknown })
       : {};
   const bounded = (
     candidate: unknown,
@@ -501,55 +494,21 @@ export function normalizeBotcastEpisodeImagePlacement(
       BOTCAST_EPISODE_IMAGE_POSITION_MIN,
       BOTCAST_EPISODE_IMAGE_POSITION_MAX,
     ),
-    scale: bounded(
-      container.scale,
-      fallback.scale,
+    // Before item and photo sizing split, `scale` was an item-cutout size.
+    // Preserve that authored meaning, while photos receive the show's normal
+    // photo fallback until a producer rehearses them explicitly.
+    itemScale: bounded(
+      container.itemScale ?? container.scale,
+      fallback.itemScale,
       BOTCAST_EPISODE_IMAGE_SCALE_MIN,
       BOTCAST_EPISODE_IMAGE_SCALE_MAX,
     ),
-  };
-}
-
-export function normalizeBotcastEpisodeImageFraming(
-  value: unknown,
-  fallback: Readonly<BotcastEpisodeImageFraming> =
-    BOTCAST_DEFAULT_EPISODE_IMAGE_FRAMING,
-): BotcastEpisodeImageFraming {
-  const container =
-    value && typeof value === "object" && !Array.isArray(value)
-      ? (value as Partial<Record<BotcastDirectedCameraShot, unknown>>)
-      : {};
-  return {
-    left: normalizeBotcastEpisodeImagePlacement(container.left, fallback.left),
-    right: normalizeBotcastEpisodeImagePlacement(
-      container.right,
-      fallback.right,
+    photoScale: bounded(
+      container.photoScale,
+      fallback.photoScale,
+      BOTCAST_EPISODE_IMAGE_SCALE_MIN,
+      BOTCAST_EPISODE_IMAGE_SCALE_MAX,
     ),
-    wide: normalizeBotcastEpisodeImagePlacement(container.wide, fallback.wide),
-  };
-}
-
-export function botcastEpisodeImageFramingFromCameraFraming(
-  value: unknown,
-): BotcastEpisodeImageFraming {
-  const framing = normalizeBotcastCameraFraming(value);
-  return normalizeBotcastEpisodeImageFraming({
-    left: framing.left.episodeImage,
-    right: framing.right.episodeImage,
-    wide: framing.wide.episodeImage,
-  });
-}
-
-export function botcastCameraFramingWithEpisodeImages(
-  cameraFraming: unknown,
-  episodeImageFraming: unknown,
-): BotcastCameraFraming {
-  const cameras = normalizeBotcastCameraFraming(cameraFraming);
-  const images = normalizeBotcastEpisodeImageFraming(episodeImageFraming);
-  return {
-    left: { ...cameras.left, episodeImage: images.left },
-    right: { ...cameras.right, episodeImage: images.right },
-    wide: { ...cameras.wide, episodeImage: images.wide },
   };
 }
 
@@ -557,7 +516,15 @@ export function normalizeBotcastLogoPlacement(
   value: unknown,
   fallback: Readonly<BotcastLogoPlacement> = BOTCAST_DEFAULT_LOGO_PLACEMENT,
 ): BotcastLogoPlacement {
-  return normalizeBotcastEpisodeImagePlacement(value, fallback);
+  const container =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Partial<BotcastLogoPlacement>)
+      : {};
+  const placement = normalizeBotcastEpisodeImagePlacement(
+    container,
+    { x: fallback.x, y: fallback.y, itemScale: fallback.scale, photoScale: fallback.scale },
+  );
+  return { x: placement.x, y: placement.y, scale: placement.itemScale };
 }
 
 export function normalizeBotcastCameraFraming(
@@ -577,7 +544,8 @@ export function normalizeBotcastCameraFraming(
     if (
       frame.episodeImage.x === legacy.x &&
       frame.episodeImage.y === legacy.y &&
-      frame.episodeImage.scale === legacy.scale
+      frame.episodeImage.itemScale === legacy.scale &&
+      frame.episodeImage.photoScale === fallback[shot].episodeImage.photoScale
     ) {
       return { ...frame, episodeImage: { ...fallback[shot].episodeImage } };
     }

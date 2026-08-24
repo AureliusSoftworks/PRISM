@@ -31,7 +31,7 @@ describe("automatic Bot Foundry batch jobs", () => {
     assert.equal(
       (payload.authoredAudioVoiceProfile as { accentDefinitionId?: string })
         .accentDefinitionId,
-      "british-english",
+      "modern-rp-english",
     );
     const savedVoice = payload.authoredAudioVoiceProfile as {
       pronunciationMapPoint?: { x: number; y: number };

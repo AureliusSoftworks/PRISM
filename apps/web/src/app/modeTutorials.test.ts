@@ -633,6 +633,11 @@ describe("mode tutorials", () => {
     assert.match(step.body, /world map is a navigator/u);
     assert.match(step.body, /click a region to zoom in/u);
     assert.match(step.body, /place the pin exactly where you want it/u);
+    assert.match(
+      step.body,
+      /an unnamed spot stays 100% within a source's home core, then blends smoothly across its boundary/u,
+    );
+    assert.match(step.body, /never demographic inference/u);
     assert.match(step.body, /required Accent pin/u);
     assert.match(step.body, /Local voice and Feel/u);
     assert.match(step.body, /Premium voice and Feel/u);
@@ -755,9 +760,9 @@ describe("mode tutorials", () => {
     );
     assert.match(copy, /Refine motion reveals the alternate motions/u);
     assert.match(copy, /optional tuning, not a second setup mode/u);
-    assert.match(copy, /exact public authority shown on the center card/u);
-    assert.match(copy, /title freezes with the saved Debate/u);
-    assert.match(copy, /never changes the moderator bot’s identity/u);
+    assert.match(copy, /Moderator’s exact working title on the center card/u);
+    assert.match(copy, /title and team names freeze with the saved Debate/u);
+    assert.match(copy, /setup never renames the Judge/u);
     assert.match(copy, /briefs you should not have to author/u);
     assert.match(copy, /Try another version/u);
     assert.match(copy, /Make sure they’re willing/u);
@@ -1532,6 +1537,8 @@ describe("mode tutorials", () => {
           step.targetSelector === '[data-tutorial-target="debate-cast"]',
       )?.body ?? "";
     assert.match(castCopy, /Surprise me/u);
+    assert.match(castCopy, /removing a bot leaves only that seat on Surprise me/u);
+    assert.match(castCopy, /every other suspect and courtroom seat stays put/u);
     assert.match(castCopy, /vertical hue lens/u);
     assert.match(castCopy, /Prism takes the center Judge \/ Moderator seat/u);
     assert.match(castCopy, /automatic neutral introduction/u);
@@ -1543,6 +1550,10 @@ describe("mode tutorials", () => {
     assert.match(whodunnitCopy, /Wield Prism onto a concrete bot/u);
     assert.match(whodunnitCopy, /fills every other role/u);
     assert.match(whodunnitCopy, /compilation still waits for you/u);
+    assert.match(whodunnitCopy, /Investigate the mansion/u);
+    assert.match(whodunnitCopy, /Trust your partner/u);
+    assert.match(whodunnitCopy, /jump straight into Turnabout/u);
+    assert.match(whodunnitCopy, /testimony and cross-examination/u);
     assert.match(
       castCopy,
       /Your seat & the Jury reveals Participant and Spectator roles/u,
@@ -1552,6 +1563,9 @@ describe("mode tutorials", () => {
         (step) =>
           step.targetSelector === '[data-tutorial-target="debate-seat"]',
       )?.body ?? "";
+    assert.match(seatCopy, /Moderator’s exact working title/u);
+    assert.match(seatCopy, /setup never renames the Judge/u);
+    assert.doesNotMatch(seatCopy, /name both public teams and the public moderator/u);
     assert.match(seatCopy, /four juror seats default to Surprise/u);
     assert.match(seatCopy, /pin any seat from the Library/u);
     assert.match(seatCopy, /Moderator records the fifth and final ballot/u);
@@ -2487,9 +2501,12 @@ describe("mode tutorials", () => {
     assert.ok(signalReplayStep);
     assert.match(
       signalCopy,
-      /Cut show stops the current line[^.]*discards the episode[^.]*under ten seconds[^.]*no host sign-off or saved archive/u,
+      /Cut show remains immediate[^.]*under ten seconds[^.]*discarding the episode[^.]*no host sign-off or saved archive/u,
     );
-    assert.match(signalCopy, /After that[^.]*quick, tactful sign-off/u);
+    assert.match(
+      signalCopy,
+      /After that[^.]*current speaker stays audible[^.]*sign-off prepares/u,
+    );
     assert.match(
       signalCopy,
       /After several substantive exchanges[^.]*host who genuinely refuses to continue[^.]*Host ended the show/u,
@@ -2775,7 +2792,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       signalPowersTutorialBody(),
-      /Send cuts the host at the exact words the audience heard/u,
+      /Send keeps the host audible while your answer prepares/u,
     );
     assert.match(
       signalPowersTutorialBody(),
@@ -2910,7 +2927,11 @@ describe("mode tutorials", () => {
     );
     assert.match(
       signalLiveCutStep.body,
-      /ready handoff never flashes Wide or glides late/u,
+      /ready handoffs never flash Wide or glide late/u,
+    );
+    assert.match(
+      signalLiveCutStep.body,
+      /audible interruption returns to Wide[^.]*incoming voice prepares[^.]*current speaker live/u,
     );
     assert.match(
       signalLiveCutStep.body,
@@ -3353,11 +3374,15 @@ describe("mode tutorials", () => {
     );
     assert.match(
       booking?.body ?? "",
-      /Left, Right, and Wide each keep their own episode-image X, Y, and scale/u,
+      /Switch the rehearsal prop between Item and Photo to see each real stage treatment while you place it/u,
     );
     assert.match(
       booking?.body ?? "",
-      /one global account preference reused by every Signal show/u,
+      /Left, Right, and Wide each keep their own episode-image X and Y plus separate Item size and Photo size for this show/u,
+    );
+    assert.match(
+      booking?.body ?? "",
+      /Transparent PNG items use Item size; opaque PNGs and JPGs use Photo size/u,
     );
     assert.match(
       booking?.body ?? "",
@@ -3369,7 +3394,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       booking?.body ?? "",
-      /resolves global episode-image framing when recording begins[\s\S]*later rehearsal edits never rewrite an earlier episode/u,
+      /freezes this show’s camera and episode-image placement when recording begins[\s\S]*later rehearsal edits never rewrite an earlier episode/u,
     );
     assert.match(
       booking?.body ?? "",

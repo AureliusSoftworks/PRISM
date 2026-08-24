@@ -393,7 +393,7 @@ test("normalizes a frozen moderator title with a safe legacy default", () => {
   );
 });
 
-test("normalizes a public moderator name without changing its fallback identity", () => {
+test("normalizes a legacy frozen moderator name without changing its fallback identity", () => {
   assert.equal(
     normalizeDebateModeratorName("  Justice Aurora  "),
     "Justice Aurora",

@@ -1,11 +1,7 @@
 "use client";
 
 import {
-  LOCAL_VOICE_SPEECHPRINT_CAPABILITIES,
   LOCAL_VOICE_SPEECHPRINT_STRENGTHS,
-  voiceAccentDefinitionForId,
-  type LocalVoicePronunciationBase,
-  type LocalVoiceSpeechprintInfluence,
   type LocalVoiceSpeechprintStrength,
 } from "@localai/shared";
 import { useId, useRef, useState } from "react";
@@ -24,6 +20,7 @@ import {
   pronunciationAtlasDrillCandidates,
   pronunciationAtlasDrillLensAtPoint,
   pronunciationAtlasLensForId,
+  pronunciationAtlasNamedCandidates,
   pronunciationAtlasNaturalSelection,
   pronunciationAtlasNearestDrillLens,
   pronunciationAtlasLocationText,
@@ -117,31 +114,6 @@ function PronunciationAtlasMap({
   );
 }
 
-function foundationSelectValue(
-  selection: PronunciationAtlasSelection,
-): LocalVoicePronunciationBase {
-  return selection.pronunciationBase;
-}
-
-function accentDefinitionIdForSelection(
-  pronunciationBase: LocalVoicePronunciationBase,
-  influence: LocalVoiceSpeechprintInfluence,
-  currentAccentDefinitionId?: string | null,
-): string | null {
-  const current = voiceAccentDefinitionForId(currentAccentDefinitionId);
-  if (
-    current?.localSpeechprintFallback === influence &&
-    (!current.localPronunciationBaseFallback ||
-      current.localPronunciationBaseFallback === pronunciationBase)
-  ) {
-    return current.id;
-  }
-  if (influence !== "none") return influence;
-  if (pronunciationBase === "en-US") return "american-english";
-  if (pronunciationBase === "en-GB") return "british-english";
-  return null;
-}
-
 export function PronunciationAtlas({
   selection,
   pronunciationEnabled = true,
@@ -215,10 +187,14 @@ export function PronunciationAtlas({
     lens,
     padValue.selection,
   );
+  const namedCandidates = pronunciationAtlasNamedCandidates(
+    padValue.selection,
+  );
   const fallbackId = useId();
 
   const commitSelection = (next: PronunciationAtlasSelection): void => {
     const normalized = normalizePronunciationAtlasSelection(next);
+    pendingDrillRef.current = null;
     setDraftValue(null);
     onCommit(normalized);
   };
@@ -320,37 +296,42 @@ export function PronunciationAtlas({
         </div>
       </div>
       {variantCandidates.length > 0 ? (
-      <div className={styles.nearby}>
-        <span>Local variants</span>
-        <div role="group" aria-label="Local accent variants">
-          {variantCandidates.map((candidate) => {
-            const active =
-              candidate.selection.accentDefinitionId
-                ? candidate.selection.accentDefinitionId ===
-                  padValue.selection.accentDefinitionId
-                : candidate.selection.influence ===
-                    padValue.selection.influence &&
-                  (candidate.selection.influence !== "none" ||
-                    candidate.selection.pronunciationBase ===
-                      padValue.selection.pronunciationBase);
-            return (
-              <button
-                key={candidate.id}
-                type="button"
-                data-active={active ? "true" : undefined}
-                aria-pressed={active}
-                disabled={disabled}
-                onClick={() => commitSelection(candidate.selection)}
-              >
-                {candidate.label}
-              </button>
-            );
-          })}
+        <div className={styles.nearby}>
+          <span>Local variants</span>
+          <div role="group" aria-label="Local accent variants">
+            {variantCandidates.map((candidate) => {
+              const active =
+                candidate.selection.accentDefinitionId
+                  ? candidate.selection.accentDefinitionId ===
+                    padValue.selection.accentDefinitionId
+                  : candidate.selection.influence ===
+                      padValue.selection.influence &&
+                    (candidate.selection.influence !== "none" ||
+                      candidate.selection.pronunciationBase ===
+                        padValue.selection.pronunciationBase);
+              return (
+                <button
+                  key={candidate.id}
+                  type="button"
+                  data-pronunciation-atlas-variant="true"
+                  data-accent-definition-id={
+                    candidate.selection.accentDefinitionId ?? undefined
+                  }
+                  data-active={active ? "true" : undefined}
+                  aria-pressed={active}
+                  disabled={disabled}
+                  onClick={() => commitSelection(candidate.selection)}
+                >
+                  {candidate.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
-      </div>
       ) : null}
       <div className={styles.controls}>
-        {padValue.selection.accentDefinitionId ||
+        {padValue.selection.point ||
+        padValue.selection.accentDefinitionId ||
         padValue.selection.influence !== "none" ? (
           <div
             className={styles.strength}
@@ -387,58 +368,49 @@ export function PronunciationAtlas({
           <summary>All accents</summary>
           <div>
             <label>
-              English foundation
+              Named accent
               <select
-                value={foundationSelectValue(padValue.selection)}
+                value={
+                  padValue.selection.accentDefinitionId ??
+                  (padValue.selection.point ? "__blend__" : "")
+                }
                 disabled={disabled}
                 onChange={(event) => {
-                  const pronunciationBase = event.currentTarget
-                    .value as LocalVoicePronunciationBase;
-                  commitSelection({
-                    ...padValue.selection,
-                    pronunciationBase,
-                    accentDefinitionId: accentDefinitionIdForSelection(
-                      pronunciationBase,
-                      padValue.selection.influence,
-                      padValue.selection.accentDefinitionId,
-                    ),
-                  });
+                  const id = event.currentTarget.value;
+                  if (!id) {
+                    commitSelection(
+                      pronunciationAtlasNaturalSelection(
+                        padValue.selection.sourceLocale,
+                      ),
+                    );
+                    return;
+                  }
+                  const candidate = namedCandidates.find(
+                    (entry) => entry.selection.accentDefinitionId === id,
+                  );
+                  if (candidate) commitSelection(candidate.selection);
                 }}
               >
-                <option value="follow-voice">
-                  Automatic foundation
-                </option>
-                <option value="en-US">American English · Approximate</option>
-                <option value="en-GB">British English · Approximate</option>
-              </select>
-            </label>
-            <label>
-              Pronunciation influence
-              <select
-                value={padValue.selection.influence}
-                disabled={disabled}
-                onChange={(event) => {
-                  const influence = event.currentTarget
-                    .value as LocalVoiceSpeechprintInfluence;
-                  commitSelection({
-                    ...padValue.selection,
-                    influence,
-                    accentDefinitionId: accentDefinitionIdForSelection(
-                      padValue.selection.pronunciationBase,
-                      influence,
-                    ),
-                  });
-                }}
-              >
-                <option value="none">Natural voice</option>
-                {LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.map((capability) => (
-                  <option key={capability.id} value={capability.id}>
-                    {capability.label}
+                <option value="">Natural voice</option>
+                {padValue.selection.point &&
+                !padValue.selection.accentDefinitionId ? (
+                  <option value="__blend__" disabled>
+                    Custom two-accent blend
+                  </option>
+                ) : null}
+                {namedCandidates.map((candidate) => (
+                  <option
+                    key={candidate.id}
+                    value={candidate.selection.accentDefinitionId ?? ""}
+                  >
+                    {candidate.label}
                   </option>
                 ))}
               </select>
             </label>
-            {padValue.selection.influence !== "none" ? (
+            {padValue.selection.point ||
+            padValue.selection.accentDefinitionId ||
+            padValue.selection.influence !== "none" ? (
               <label>
                 Strength
                 <select

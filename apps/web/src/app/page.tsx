@@ -290,7 +290,8 @@ import { BotCreationRitual } from "./BotCreationRitual";
 import { AdjustmentPad } from "./AdjustmentPad";
 import { PronunciationAtlas } from "./PronunciationAtlas";
 import {
-  type PronunciationAtlasSelection,
+  profileWithPronunciationAtlasSelection,
+  pronunciationAtlasSelectionForProfile,
 } from "./pronunciationAtlasModel";
 import {
   createAdjustmentPadCoordinateAdapter,
@@ -1463,7 +1464,6 @@ import {
   localVoicePronunciationOverrideIsActive,
   normalizeElevenLabsVoiceDirection,
   premiumVoiceNativeAccentHintFromLabels,
-  resolveLocalAccentFallback,
   normalizeVoiceEffect,
   normalizeVoiceMode,
   voiceDeliveryRateForMood,
@@ -1509,7 +1509,6 @@ import {
   type BotAudioVoiceId,
   type LocalVoicePresentation,
   type LocalVoicePronunciationBase,
-  type LocalVoiceSpeechprintInfluence,
   type BotNamePronunciationEntry,
   type EnglishVoiceEngine,
   type EphemeralChatModeId,
@@ -1645,6 +1644,7 @@ import {
 } from "./speechActivity";
 import {
   releaseRealtimeVoiceAudio,
+  stopRealtimeVoiceAudio,
   type VoicePlaybackChannel,
   type VoicePlaybackCharacterAlignment,
   type VoicePlaybackLifecycle,
@@ -6767,6 +6767,8 @@ const COFFEE_INTERRUPTION_CUE_HIDE_MS = 3200;
 const COFFEE_INTERRUPTED_SNIPPET_HIDE_MS = 9000;
 const COFFEE_BOT_INTERRUPTION_OVERLAP_MS = 240;
 const COFFEE_BOT_INTERRUPTION_RELEASE_MS = 160;
+const COFFEE_PLAYER_INTERRUPTION_RELEASE_MS = 170;
+const CHAT_PLAYER_INTERRUPTION_RELEASE_MS = 170;
 const COFFEE_BOT_INTERRUPTION_AUDIO_START_TIMEOUT_MS = 1_200;
 const COFFEE_MUTE_REACTION_HOLD_MS = 2_500;
 const COFFEE_INTERRUPTION_FALLBACK_VISIBLE_PROGRESS = 0.65;
@@ -10784,74 +10786,6 @@ interface BotVoiceIdentityCatalog {
     options: OfflineVoiceOption[];
   };
   elevenLabs: BotVoiceIdentityCatalogLane;
-}
-
-function speechprintVariationSeed(
-  profile: NormalizedBotAudioVoiceProfileV1,
-  influence: LocalVoiceSpeechprintInfluence,
-): string {
-  if (
-    influence !== "none" &&
-    profile.speechprintInfluence === influence &&
-    profile.speechprintVariationSeed &&
-    profile.speechprintVariationSeed !== "natural-v1"
-  ) {
-    return profile.speechprintVariationSeed;
-  }
-  if (influence === "none") return "natural-v1";
-  const entropy =
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `${profile.baseVoiceId}-${Date.now().toString(36)}`;
-  return `${influence}:${entropy}`.slice(0, 64);
-}
-
-function pronunciationAtlasSelectionForProfile(
-  profile: BotAudioVoiceProfileV1,
-): PronunciationAtlasSelection {
-  const normalized = normalizeBotAudioVoiceProfileV1(profile);
-  return {
-    pronunciationBase: normalized.pronunciationBase ?? "follow-voice",
-    sourceLocale: normalized.accentLocale ?? "en-US",
-    influence: normalized.speechprintInfluence ?? "none",
-    strength: normalized.speechprintStrength ?? "balanced",
-    ...(normalized.accentDefinitionId
-      ? { accentDefinitionId: normalized.accentDefinitionId }
-      : {}),
-    ...(normalized.pronunciationMapPoint
-      ? { point: { ...normalized.pronunciationMapPoint } }
-      : {}),
-  };
-}
-
-function profileWithPronunciationAtlasSelection(
-  profile: BotAudioVoiceProfileV1,
-  selection: PronunciationAtlasSelection,
-  options?: { activatePronunciation?: boolean },
-): NormalizedBotAudioVoiceProfileV1 {
-  const normalized = normalizeBotAudioVoiceProfileV1(profile);
-  const localAccent = resolveLocalAccentFallback({
-    accentDefinitionId: selection.accentDefinitionId,
-    pronunciationBase: selection.pronunciationBase,
-    speechprintInfluence: selection.influence,
-  });
-  return normalizeBotAudioVoiceProfileV1({
-    ...normalized,
-    accentPronunciationEnabled:
-      options?.activatePronunciation === false
-        ? normalized.accentPronunciationEnabled === true
-        : true,
-    pronunciationBase: localAccent.pronunciationBase,
-    accentLocale: selection.sourceLocale,
-    speechprintInfluence: localAccent.speechprintInfluence,
-    speechprintStrength: selection.strength,
-    accentDefinitionId: selection.accentDefinitionId ?? null,
-    pronunciationMapPoint: selection.point ?? null,
-    speechprintVariationSeed: speechprintVariationSeed(
-      normalized,
-      localAccent.speechprintInfluence,
-    ),
-  });
 }
 
 type ElevenLabsVoiceIdResolution =
@@ -19537,6 +19471,7 @@ function enqueueBabbleClipOrFallback(args: {
   roomAcoustics?: RoomAcousticsSend;
   preSpeechBreath?: PreSpeechBreathPlan | null;
   stereoPan?: number;
+  channel?: VoicePlaybackChannel;
 }): Promise<void> {
   const clip = args.media?.kind === "clip" ? args.media.clip : null;
   const lifecycle =
@@ -19560,6 +19495,7 @@ function enqueueBabbleClipOrFallback(args: {
       args.preSpeechBreath,
       args.proceduralTiming,
       args.stereoPan,
+      args.channel,
     );
   }
   return clip
@@ -19575,6 +19511,7 @@ function enqueueBabbleClipOrFallback(args: {
         args.preSpeechBreath,
         args.proceduralTiming,
         args.stereoPan,
+        args.channel,
       )
     : enqueueBottishVoice(
         args.sourceText,
@@ -19587,6 +19524,7 @@ function enqueueBabbleClipOrFallback(args: {
         args.roomAcoustics,
         args.preSpeechBreath,
         args.stereoPan,
+        args.channel,
       );
 }
 
@@ -19673,6 +19611,7 @@ async function enqueueRobotVoiceMode(args: {
   roomAcoustics?: RoomAcousticsSend;
   preSpeechBreath?: PreSpeechBreathPlan | null;
   stereoPan?: number;
+  channel?: VoicePlaybackChannel;
 }): Promise<void> {
   if (args.prepare !== false) await prepareVoiceModePlayback(args.mode);
   const spokenSourceText = expandSpeechAbbreviations(
@@ -19700,6 +19639,7 @@ async function enqueueRobotVoiceMode(args: {
       args.roomAcoustics,
       args.preSpeechBreath,
       args.stereoPan,
+      args.channel,
     );
   }
   const media = await requestBabbleWithProceduralFallback({
@@ -19738,6 +19678,7 @@ async function enqueueRobotVoiceMode(args: {
     roomAcoustics: args.roomAcoustics,
     preSpeechBreath: args.preSpeechBreath,
     stereoPan: args.stereoPan,
+    channel: args.channel,
   });
 }
 
@@ -52497,6 +52438,9 @@ function HomeContent(): React.JSX.Element {
     useState(0);
   const voiceAwaitingReplyRef = useRef(false);
   const voiceSynthesisAbortRef = useRef<AbortController | null>(null);
+  const coffeePlayerHandoffVoiceAbortRef = useRef<AbortController | null>(
+    null,
+  );
   const responseCuePlaybackAbortRef = useRef<AbortController | null>(null);
   const responseCueWaitTimerRef = useRef<number | null>(null);
   const responseCueBarrierRef = useRef<Promise<void>>(Promise.resolve());
@@ -52528,6 +52472,7 @@ function HomeContent(): React.JSX.Element {
     );
   }, []);
   const signalVoiceAbortRef = useRef<AbortController | null>(null);
+  const signalHandoffVoiceAbortRef = useRef<AbortController | null>(null);
   const signalCrosstalkVoiceAbortRef = useRef<AbortController | null>(null);
   const listenerReactionVoiceAbortRef = useRef<AbortController | null>(null);
   const signalVoiceClipCacheRef = useRef<
@@ -52795,8 +52740,12 @@ function HomeContent(): React.JSX.Element {
     voiceAwaitingReplyRef.current = false;
     voiceSynthesisAbortRef.current?.abort();
     voiceSynthesisAbortRef.current = null;
+    coffeePlayerHandoffVoiceAbortRef.current?.abort();
+    coffeePlayerHandoffVoiceAbortRef.current = null;
     signalVoiceAbortRef.current?.abort();
     signalVoiceAbortRef.current = null;
+    signalHandoffVoiceAbortRef.current?.abort();
+    signalHandoffVoiceAbortRef.current = null;
     signalCrosstalkVoiceAbortRef.current?.abort();
     signalCrosstalkVoiceAbortRef.current = null;
     coffeePerceptionOverlapVoiceAbortRef.current?.abort();
@@ -52813,6 +52762,7 @@ function HomeContent(): React.JSX.Element {
       zenHeroVoicePreviewFeedbackTimerRef.current = null;
     }
     liveBottishRevealKeyRef.current = null;
+    stopRealtimeVoiceAudio("handoff");
     if (botHubVoiceFeedbackTimerRef.current) {
       clearTimeout(botHubVoiceFeedbackTimerRef.current);
       botHubVoiceFeedbackTimerRef.current = null;
@@ -64253,10 +64203,17 @@ function HomeContent(): React.JSX.Element {
 
   function stopVoicePlaybackForAssistantInterruption(): void {
     liveBottishRevealKeyRef.current = null;
-    voiceSynthesisAbortRef.current?.abort();
-    voiceSynthesisAbortRef.current = null;
-    stopBottishVoice();
-    stopEnglishVoice();
+    const interruptedController = voiceSynthesisAbortRef.current;
+    releaseVoicePlaybackPreservingPreparedMode(
+      voicePlaybackSelectionRef.current.voiceMode,
+      CHAT_PLAYER_INTERRUPTION_RELEASE_MS,
+    );
+    window.setTimeout(() => {
+      interruptedController?.abort();
+      if (voiceSynthesisAbortRef.current === interruptedController) {
+        voiceSynthesisAbortRef.current = null;
+      }
+    }, CHAT_PLAYER_INTERRUPTION_RELEASE_MS);
   }
 
   function applyActiveAssistantRevealInterruption(
@@ -72791,11 +72748,14 @@ function HomeContent(): React.JSX.Element {
   const stopBotcastUtterance = useCallback((): void => {
     signalVoiceAbortRef.current?.abort();
     signalVoiceAbortRef.current = null;
+    signalHandoffVoiceAbortRef.current?.abort();
+    signalHandoffVoiceAbortRef.current = null;
     signalCrosstalkVoiceAbortRef.current?.abort();
     signalCrosstalkVoiceAbortRef.current = null;
     listenerReactionVoiceAbortRef.current?.abort();
     listenerReactionVoiceAbortRef.current = null;
     stopReactionVoiceAudio();
+    stopRealtimeVoiceAudio("handoff");
     stopVoicePlaybackPreservingPreparedMode(
       voicePlaybackSelectionRef.current.voiceMode,
     );
@@ -73168,7 +73128,7 @@ function HomeContent(): React.JSX.Element {
               effects: [],
               gain: settings?.voiceVolume ?? 0,
               pan: stereoPan,
-              channel: "primary",
+              channel: voiceChannel,
             },
           });
         }
@@ -73250,7 +73210,7 @@ function HomeContent(): React.JSX.Element {
       })();
       const replayVoiceTakeSnapshot: ReplayVoiceTakeV1 = {
         v: 1,
-        sourceKey: `primary:${message.id}`,
+        sourceKey: `${voiceChannel}:${message.id}`,
         sourceMessageId: message.id,
         sourceEventId: null,
         speakerId: botSummary.id,
@@ -73271,7 +73231,10 @@ function HomeContent(): React.JSX.Element {
         effectsEnabled: settings.voiceEffectsEnabled !== false,
         gain: playbackVolume,
         stereoPan,
-        channel: "primary",
+        channel:
+          voiceChannel === "reaction" || voiceChannel === "crosstalk"
+            ? voiceChannel
+            : "primary",
         seed: breathSeed,
         audible: true,
         durationMs: null,
@@ -73306,8 +73269,12 @@ function HomeContent(): React.JSX.Element {
             breathless: speakerBreathless,
           });
       const controller = new AbortController();
+      const handoffChannel = voiceChannel === "handoff";
       const overlapChannel = voiceChannel !== "primary";
-      if (overlapChannel) {
+      if (handoffChannel) {
+        signalHandoffVoiceAbortRef.current?.abort();
+        signalHandoffVoiceAbortRef.current = controller;
+      } else if (overlapChannel) {
         signalCrosstalkVoiceAbortRef.current?.abort();
         signalCrosstalkVoiceAbortRef.current = controller;
       } else {
@@ -73316,7 +73283,9 @@ function HomeContent(): React.JSX.Element {
       }
       const playbackIsCurrent = (): boolean =>
         !controller.signal.aborted &&
-        (overlapChannel
+        (handoffChannel
+          ? signalHandoffVoiceAbortRef.current === controller
+          : overlapChannel
           ? signalCrosstalkVoiceAbortRef.current === controller
           : signalVoiceAbortRef.current === controller);
       if (!overlapChannel) {
@@ -73494,6 +73463,7 @@ function HomeContent(): React.JSX.Element {
             roomAcoustics: voiceRoomAcoustics,
             preSpeechBreath,
             stereoPan,
+            channel: voiceChannel,
           });
           return playbackStarted && !controller.signal.aborted;
         }
@@ -73556,6 +73526,7 @@ function HomeContent(): React.JSX.Element {
             preSpeechBreath,
             stereoPan,
             peekEnglishPacingProfile("bot", botSummary.id),
+            voiceChannel,
           );
           return playbackStarted && !controller.signal.aborted;
         }
@@ -73601,6 +73572,9 @@ function HomeContent(): React.JSX.Element {
       } finally {
         if (signalVoiceAbortRef.current === controller) {
           signalVoiceAbortRef.current = null;
+        }
+        if (signalHandoffVoiceAbortRef.current === controller) {
+          signalHandoffVoiceAbortRef.current = null;
         }
         if (signalCrosstalkVoiceAbortRef.current === controller) {
           signalCrosstalkVoiceAbortRef.current = null;
@@ -129699,14 +129673,42 @@ function HomeContent(): React.JSX.Element {
   };
   const startCoffeePlayerVoiceForReveal = async (
     text: string,
+    options: {
+      preserveOutgoingVoice?: boolean;
+      onFloorTaken?: () => void;
+    } = {},
   ): Promise<number | null> => {
-    if (!settings || !coffeeVoiceSurfaceActiveRef.current) return null;
+    let floorTaken = false;
+    const outgoingVoiceController = options.preserveOutgoingVoice
+      ? voiceSynthesisAbortRef.current
+      : null;
+    const takeFloor = (): void => {
+      if (floorTaken) return;
+      floorTaken = true;
+      options.onFloorTaken?.();
+      if (!options.preserveOutgoingVoice) return;
+      releaseRealtimeVoiceAudio(
+        "primary",
+        COFFEE_PLAYER_INTERRUPTION_RELEASE_MS,
+      );
+      outgoingVoiceController?.abort();
+      if (voiceSynthesisAbortRef.current === outgoingVoiceController) {
+        voiceSynthesisAbortRef.current = null;
+      }
+    };
+    if (!settings || !coffeeVoiceSurfaceActiveRef.current) {
+      takeFloor();
+      return null;
+    }
     const voiceSelection = voicePlaybackSelectionRef.current;
     const profile = coffeePlayerPlaybackProfile(
       settings.prismDefaultBotAudioVoiceProfile,
     );
     const spokenText = extractStageDirections(text).mainText.trim();
-    if (!spokenText) return null;
+    if (!spokenText) {
+      takeFloor();
+      return null;
+    }
     const performanceText = voicePerformanceTextFromActionCues(text, {
       leadingMarkedAction: true,
       omitLocalFoleyTags: true,
@@ -129779,13 +129781,22 @@ function HomeContent(): React.JSX.Element {
       settings.voiceVolume <= 0 ||
       !profile.enabled
     ) {
+      takeFloor();
       return null;
     }
     coffeeActivePlayerVoiceTextRef.current = spokenText;
-    voiceSynthesisAbortRef.current?.abort();
-    handoffVoicePlaybackPreservingPreparedMode(voiceSelection.voiceMode);
     const controller = new AbortController();
-    voiceSynthesisAbortRef.current = controller;
+    const voiceChannel: VoicePlaybackChannel = options.preserveOutgoingVoice
+      ? "handoff"
+      : "primary";
+    if (options.preserveOutgoingVoice) {
+      coffeePlayerHandoffVoiceAbortRef.current?.abort();
+      coffeePlayerHandoffVoiceAbortRef.current = controller;
+    } else {
+      voiceSynthesisAbortRef.current?.abort();
+      handoffVoicePlaybackPreservingPreparedMode(voiceSelection.voiceMode);
+      voiceSynthesisAbortRef.current = controller;
+    }
     return await new Promise<number | null>((resolve) => {
       let settled = false;
       let playerAlignment: SpeechCharacterAlignment | null = null;
@@ -129793,6 +129804,7 @@ function HomeContent(): React.JSX.Element {
       const settle = (durationMs: number | null) => {
         if (settled) return;
         settled = true;
+        takeFloor();
         if (voiceStartFailsafeTimer !== null) {
           window.clearTimeout(voiceStartFailsafeTimer);
           voiceStartFailsafeTimer = null;
@@ -129859,6 +129871,9 @@ function HomeContent(): React.JSX.Element {
             );
             coffeeActivePlayerVoiceTextRef.current = null;
           }
+          if (coffeePlayerHandoffVoiceAbortRef.current === controller) {
+            coffeePlayerHandoffVoiceAbortRef.current = null;
+          }
         },
       };
       void (async () => {
@@ -129893,6 +129908,7 @@ function HomeContent(): React.JSX.Element {
               namePronunciations: bots,
               moodKey: "neutral",
               lifecycle,
+              channel: voiceChannel,
             }).then(
               () => settle(null),
               () => settle(null),
@@ -129938,6 +129954,13 @@ function HomeContent(): React.JSX.Element {
               settings.voiceVolume,
               { ...lifecycle, sourceAlignment: clip.alignment },
               clip.engineUsed,
+              undefined,
+              undefined,
+              undefined,
+              0,
+              undefined,
+              voiceChannel,
+              clip.alignment,
             ).then(
               () => settle(null),
               () => settle(null),
@@ -134496,6 +134519,7 @@ function HomeContent(): React.JSX.Element {
     conversationId: string,
     pendingMessage: CoffeeConversationMessage,
     interruptedBotId: string,
+    options: { preserveAudibleUtterance?: boolean } = {},
   ): CoffeeCapturedPlayerInterruption => {
     const interruptedMainText = extractStageDirections(
       clampCoffeeTableText(pendingMessage.content),
@@ -134529,10 +134553,12 @@ function HomeContent(): React.JSX.Element {
     };
     coffeeCutOffRevealMessageIdRef.current = pendingMessage.id;
     clearCoffeeRhythmTimers();
-    stopBottishVoice();
-    stopEnglishVoice();
-    voiceSynthesisAbortRef.current?.abort();
-    voiceSynthesisAbortRef.current = null;
+    if (!options.preserveAudibleUtterance) {
+      stopBottishVoice();
+      stopEnglishVoice();
+      voiceSynthesisAbortRef.current?.abort();
+      voiceSynthesisAbortRef.current = null;
+    }
     rememberCoffeeHeardCutoff(conversationId, pendingMessage, snippet);
     coffeeTurnRhythmStateRef.current = "playerComposing";
     startTransition(() => {
@@ -134665,21 +134691,21 @@ function HomeContent(): React.JSX.Element {
       startTransition(() => setCoffeeAutoBusy(false));
     }
     let playerInterruption = capturedPlayerInterruption?.input;
-    if (
+    const pendingPlayerInterruption =
       !playerInterruption &&
       !draftIsActionOnly &&
       coffeeTurnRhythmState === "tableTyping" &&
       pendingRevealLatestMessage?.role === "assistant" &&
       coffeePendingSpeakerBotId &&
       !pendingRevealTrollImmune
-    ) {
-      playerInterruption = captureCoffeePlayerInterruption(
-        (coffeeConversationRef.current ?? coffeeConversation)?.id ??
-          "coffee-pending",
-        pendingRevealLatestMessage,
-        coffeePendingSpeakerBotId,
-      ).input;
-    }
+        ? {
+            conversationId:
+              (coffeeConversationRef.current ?? coffeeConversation)?.id ??
+              "coffee-pending",
+            pendingMessage: pendingRevealLatestMessage,
+            interruptedBotId: coffeePendingSpeakerBotId,
+          }
+        : null;
     if (inputShouldWaitForBotReveal) {
       if (pendingRevealTrollImmune) {
         showLocalCommandToast(
@@ -134749,7 +134775,7 @@ function HomeContent(): React.JSX.Element {
       setCoffeeDraft("");
       setCoffeeError(null);
       // Keep the thinking bot's seat cue while a parallel player line is on deck.
-      if (!sendParallelDuringThinkingBot) {
+      if (!sendParallelDuringThinkingBot && !pendingPlayerInterruption) {
         setCoffeePendingSpeakerBotId(null);
       }
     });
@@ -134777,7 +134803,8 @@ function HomeContent(): React.JSX.Element {
       if (
         supersededReveal &&
         supersededLatest?.role === "assistant" &&
-        !playerInterruption
+        !playerInterruption &&
+        !pendingPlayerInterruption
       ) {
         // The queued line never started; the player spoke first. Register a
         // real cut-off instead of silently dropping the queue — otherwise the
@@ -134809,36 +134836,61 @@ function HomeContent(): React.JSX.Element {
         });
       }
     }
-    startTransition(() => clearCoffeeRhythmTimers());
-    coffeeRevealTypingDurationMsRef.current = randomCoffeeRevealDelayMs(
-      trimmed,
-      undefined,
-    );
-    coffeePlayerVoiceStartedAtMsRef.current = null;
-    if (draftTableText.length > 0) {
-      coffeePlayerVoiceRevealReadyRef.current = false;
-      coffeeUserTableTypingSettledRef.current = false;
-      coffeeTurnRhythmStateRef.current = "userTableTyping";
-      startTransition(() => {
-        assignCoffeeTypewriterLength(0);
-        setCoffeeUserRevealText(trimmed);
-        setCoffeeTurnRhythmState("userTableTyping");
-      });
-      // Signal parity: compact the player's voice-preparation gap out of the
-      // faithful master; the room resumes the moment the line turns audible.
+    let playerFloorTaken = false;
+    let resolvePlayerFloorTaken: (() => void) | null = null;
+    const playerFloorTakenPromise = new Promise<void>((resolve) => {
+      resolvePlayerFloorTaken = resolve;
+    });
+    const takePlayerFloor = (): void => {
+      if (playerFloorTaken) return;
+      playerFloorTaken = true;
+      if (pendingPlayerInterruption) {
+        playerInterruption = captureCoffeePlayerInterruption(
+          pendingPlayerInterruption.conversationId,
+          pendingPlayerInterruption.pendingMessage,
+          pendingPlayerInterruption.interruptedBotId,
+          { preserveAudibleUtterance: true },
+        ).input;
+      } else {
+        startTransition(() => clearCoffeeRhythmTimers());
+      }
+      coffeeRevealTypingDurationMsRef.current = randomCoffeeRevealDelayMs(
+        trimmed,
+        undefined,
+      );
+      coffeePlayerVoiceStartedAtMsRef.current = null;
+      if (draftTableText.length > 0) {
+        coffeePlayerVoiceRevealReadyRef.current = false;
+        coffeeUserTableTypingSettledRef.current = false;
+        coffeeTurnRhythmStateRef.current = "userTableTyping";
+        startTransition(() => {
+          assignCoffeeTypewriterLength(0);
+          setCoffeeUserRevealText(trimmed);
+          setCoffeeTurnRhythmState("userTableTyping");
+        });
+      } else {
+        coffeePlayerVoiceRevealReadyRef.current = true;
+        coffeeUserTableTypingSettledRef.current = false;
+        coffeeTurnRhythmStateRef.current = "botThinking";
+        startTransition(() => {
+          setCoffeeUserRevealText("");
+          setCoffeeTurnRhythmState("botThinking");
+        });
+      }
+      resolvePlayerFloorTaken?.();
+      resolvePlayerFloorTaken = null;
+    };
+    if (draftTableText.length > 0 && !pendingPlayerInterruption) {
+      // A quiet player-voice preparation gap is compacted. During an audible
+      // interruption the outgoing bot still belongs in the faithful master,
+      // so that interval must remain on the recording clock.
       setReplayAudioMasterCompactHold(activeConversation.id, true);
     } else {
-      coffeePlayerVoiceRevealReadyRef.current = true;
-      coffeeUserTableTypingSettledRef.current = false;
-      coffeeTurnRhythmStateRef.current = "botThinking";
-      startTransition(() => {
-        setCoffeeUserRevealText("");
-        setCoffeeTurnRhythmState("botThinking");
-      });
+      takePlayerFloor();
     }
     const userRevealSettlePromise =
       draftTableText.length > 0
-        ? waitForCoffeeUserRevealToSettle()
+        ? playerFloorTakenPromise.then(waitForCoffeeUserRevealToSettle)
         : Promise.resolve();
     const abortController = new AbortController();
     coffeeTurnAbortRef.current = abortController;
@@ -134892,6 +134944,8 @@ function HomeContent(): React.JSX.Element {
         coffeeParallelThinkingExpectBotRevealRef.current = false;
       }
       if (!(await ensureCoffeeModelReady(initialWarmup))) return null;
+      await playerFloorTakenPromise;
+      if (abortController.signal.aborted) return null;
       const presentBotIds = currentCoffeePresentBotIdsForRequest(
         activeConversation.id,
       );
@@ -134920,7 +134974,10 @@ function HomeContent(): React.JSX.Element {
     try {
       const playerVoiceDurationMs =
         draftTableText.length > 0
-          ? await startCoffeePlayerVoiceForReveal(trimmed).finally(() =>
+          ? await startCoffeePlayerVoiceForReveal(trimmed, {
+              preserveOutgoingVoice: Boolean(pendingPlayerInterruption),
+              onFloorTaken: takePlayerFloor,
+            }).finally(() =>
               setReplayAudioMasterCompactHold(activeConversation.id, false),
             )
           : null;
@@ -135113,6 +135170,7 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     const capturedPlayerInterruption =
+      technique.kind === "gesture" &&
       activeConversation &&
       interruptedBotId &&
       coffeeTurnRhythmState === "tableTyping" &&
@@ -135124,10 +135182,12 @@ function HomeContent(): React.JSX.Element {
           )
         : undefined;
     setCoffeeShhMenuOpen(false);
-    stopBottishVoice();
-    stopEnglishVoice();
-    voiceSynthesisAbortRef.current?.abort();
-    voiceSynthesisAbortRef.current = null;
+    if (technique.kind === "gesture") {
+      stopBottishVoice();
+      stopEnglishVoice();
+      voiceSynthesisAbortRef.current?.abort();
+      voiceSynthesisAbortRef.current = null;
+    }
     if (activeJobId) {
       void api(
         `/api/coffee/turn-jobs/${encodeURIComponent(activeJobId)}/interrupt`,
@@ -145863,7 +145923,14 @@ function HomeContent(): React.JSX.Element {
               composeSendTint: true,
             })
           }
-          onUtterance={(message, bot, lifecycle, voiceLevel, stereoPan) =>
+          onUtterance={(
+            message,
+            bot,
+            lifecycle,
+            voiceLevel,
+            stereoPan,
+            voiceChannel = "primary",
+          ) =>
             playBotcastUtterance(
               message,
               bot,
@@ -145873,6 +145940,7 @@ function HomeContent(): React.JSX.Element {
               "signal",
               null,
               signalEpisodeResponseMode === "local",
+              voiceChannel,
             )
           }
           onPrefetchUtterance={(message, bot, context) => {
@@ -145913,6 +145981,7 @@ function HomeContent(): React.JSX.Element {
           presenceBeat={activeResponseCueBeat}
           presenceBeats={responseCueBeatHistory}
           onStopUtterance={stopBotcastUtterance}
+          onReleaseUtterance={releaseBotcastPrimaryUtterance}
           onProducerGuestActionSfx={playSignalProducerGuestActionSfx}
           resolveCupRateMultiplier={(botSummary) =>
             botPowerCupRateMultiplierForBotV1(

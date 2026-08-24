@@ -217,7 +217,7 @@ describe("Coffee player response UI wiring", () => {
     );
     assert.match(
       pageSource,
-      /if \(!actionShouldWaitForBotReveal && !sendParallelDuringThinkingBot\) \{\s*clearCoffeeLoopTimer\(\);\s*coffeeContinueAbortRef\.current\?\.abort\(\);/,
+      /if \(!inputShouldWaitForBotReveal && !sendParallelDuringThinkingBot\) \{\s*clearCoffeeLoopTimer\(\);\s*coffeeContinueAbortRef\.current\?\.abort\(\);/,
     );
     assert.match(
       pageSource,
@@ -225,7 +225,7 @@ describe("Coffee player response UI wiring", () => {
     );
     assert.match(
       pageSource,
-      /if \(actionShouldWaitForBotReveal\) \{[\s\S]{0,220}?await waitForCoffeeRevealToSettle\(\);/,
+      /if \(inputShouldWaitForBotReveal\) \{[\s\S]{0,420}?await waitForCoffeeRevealToSettle\(\);/,
     );
     // A visible reveal (tableTyping) is still a real player interruption.
     assert.match(
@@ -315,10 +315,10 @@ describe("Coffee player response UI wiring", () => {
     );
   });
 
-  it("streams the player line to the table before voice preparation finishes", () => {
+  it("takes the Coffee floor when the player's voice actually starts", () => {
     assert.match(
       pageSource,
-      /setCoffeeUserRevealText\(trimmed\);[\s\S]*?setCoffeeTurnRhythmState\("userTableTyping"\);[\s\S]*?waitForCoffeeUserRevealToSettle\(\)[\s\S]*?await startCoffeePlayerVoiceForReveal\(trimmed\)/,
+      /const takePlayerFloor = \(\): void => \{[\s\S]*?setCoffeeUserRevealText\(trimmed\);[\s\S]*?setCoffeeTurnRhythmState\("userTableTyping"\);[\s\S]*?startCoffeePlayerVoiceForReveal\(trimmed, \{[\s\S]*?onFloorTaken: takePlayerFloor/,
     );
     assert.match(
       pageSource,
@@ -330,16 +330,16 @@ describe("Coffee player response UI wiring", () => {
     );
   });
 
-  it("compacts the player's voice-preparation gap out of the faithful master", () => {
-    // Hold begins with the instant provisional stream and always releases
-    // once player voice resolves (started, muted, or failed) — Signal parity.
+  it("keeps audible interruption preparation in the faithful Coffee master", () => {
+    // Quiet player-only prep is compacted; an outgoing bot still speaking
+    // keeps the master clock live until the player takes the floor.
     assert.match(
       pageSource,
-      /setCoffeeTurnRhythmState\("userTableTyping"\);[\s\S]{0,400}setReplayAudioMasterCompactHold\(activeConversation\.id, true\)/,
+      /draftTableText\.length > 0 && !pendingPlayerInterruption[\s\S]{0,400}setReplayAudioMasterCompactHold\(activeConversation\.id, true\)/,
     );
     assert.match(
       pageSource,
-      /startCoffeePlayerVoiceForReveal\(trimmed\)\.finally\(\(\) =>\s*setReplayAudioMasterCompactHold\(activeConversation\.id, false\),?\s*\)/,
+      /startCoffeePlayerVoiceForReveal\(trimmed, \{[\s\S]{0,260}preserveOutgoingVoice: Boolean\(pendingPlayerInterruption\)[\s\S]{0,220}setReplayAudioMasterCompactHold\(activeConversation\.id, false\)/,
     );
   });
 

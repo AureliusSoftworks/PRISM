@@ -56,6 +56,29 @@ export interface VoiceAccentMapAnchorV1 {
   /** Co-located choices are explicit variants, never demographic inference. */
   variantGroup?: string;
   fieldDefault?: boolean;
+  /** Radius of the source's exact 100% home core in atlas map space. */
+  coreRadius: number;
+  /** Radius that calibrates how gradually this source falls toward neighbors. */
+  supportRadius: number;
+  /** Geographic pronunciation family used to preserve home-range coverage. */
+  sourceFamily?: string;
+}
+
+export interface VoiceAccentMapFamilyHomeRangeV1 {
+  id: string;
+  sourceFamily: string;
+  /** Maximum foreign-family share well inside this home range. */
+  interiorForeignBlendMax: number;
+  /** Maximum foreign-family share right on this home range's boundary. */
+  boundaryForeignBlendMax: number;
+  /** Distance outside the boundary over which the home family fades away. */
+  transitionWidth: number;
+  /**
+   * Deliberately coarse geographic coverage, not a claim about a resident's
+   * identity or speech. Coordinates only keep a freely placed map pin inside
+   * the local pronunciation family while nearby sources blend at boundaries.
+   */
+  polygon: readonly VoiceAccentMapPointV1[];
 }
 
 export interface VoiceAccentFieldLayerV1 {
@@ -467,6 +490,18 @@ const AMERICAN_PRONUNCIATION_BASE_INFLUENCES = new Set<
   "miami-english",
 ]);
 
+const BRITISH_PRONUNCIATION_BASE_INFLUENCES = new Set<
+  Exclude<LocalVoiceSpeechprintInfluence, "none">
+>([
+  "modern-rp-english",
+  "cockney-english",
+  "estuary-english",
+  "multicultural-london-english",
+  "essex-english",
+  "irish-english",
+  "scottish-english",
+]);
+
 /**
  * The direction tag is the entire Premium accent mechanism: Premium sends the
  * written line through untouched. A tag naming a region the provider has no
@@ -500,9 +535,10 @@ const PREMIUM_ACCENT_DIRECTION_LABELS: Partial<
 
 export const VOICE_ACCENT_DEFINITIONS: readonly VoiceAccentDefinitionV1[] = [
   {
-    id: "american-english",
-    premiumAccentedEnglishLabel: "American-accented English",
+    id: "general-american-english",
+    premiumAccentedEnglishLabel: "General American-accented English",
     premiumNativeAccentAliases: [
+      "General American",
       "American",
       "American English",
       "US English",
@@ -512,24 +548,12 @@ export const VOICE_ACCENT_DEFINITIONS: readonly VoiceAccentDefinitionV1[] = [
     localSpeechprintFallback: "none",
     localPronunciationBaseFallback: "en-US",
   },
-  {
-    id: "british-english",
-    premiumAccentedEnglishLabel: "British-accented English",
-    premiumNativeAccentAliases: [
-      "British",
-      "British English",
-      "UK English",
-      "English (United Kingdom)",
-      "en-GB",
-    ],
-    localSpeechprintFallback: "none",
-    localPronunciationBaseFallback: "en-GB",
-  },
   ...LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.map((capability) => ({
     id: capability.id,
-    premiumAccentedEnglishLabel: `${premiumAccentLabel(
-      capability.label,
-    )}-accented English`,
+    premiumAccentedEnglishLabel:
+      capability.id === "modern-rp-english"
+        ? "Modern RP-accented English"
+        : `${premiumAccentLabel(capability.label)}-accented English`,
     premiumNativeAccentAliases: premiumNativeAccentAliases(
       capability.id,
       capability.label,
@@ -540,6 +564,8 @@ export const VOICE_ACCENT_DEFINITIONS: readonly VoiceAccentDefinitionV1[] = [
     localSpeechprintFallback: capability.id,
     ...(AMERICAN_PRONUNCIATION_BASE_INFLUENCES.has(capability.id)
       ? { localPronunciationBaseFallback: "en-US" as const }
+      : BRITISH_PRONUNCIATION_BASE_INFLUENCES.has(capability.id)
+        ? { localPronunciationBaseFallback: "en-GB" as const }
       : {}),
   })),
 ];
@@ -620,18 +646,45 @@ const LONDON_VARIANTS = new Set<LocalVoiceSpeechprintInfluence>([
   "multicultural-london-english",
 ]);
 
-export const VOICE_ACCENT_MAP_ANCHORS: readonly VoiceAccentMapAnchorV1[] = [
+type VoiceAccentMapAnchorSeedV1 = Omit<
+  VoiceAccentMapAnchorV1,
+  "coreRadius" | "supportRadius"
+>;
+
+const GERMAN_ACCENT_SOURCE_FAMILY = new Set<VoiceAccentDefinitionId>([
+  "german-influenced-english",
+  "northern-german-influenced-english",
+  "bavarian-german-influenced-english",
+]);
+
+const VOICE_ACCENT_MAP_FIELD_RANGE_OVERRIDES: Readonly<
+  Partial<
+    Record<
+      VoiceAccentDefinitionId,
+      Readonly<{ coreRadius?: number; supportRadius?: number }>
+    >
+  >
+> = {
+  // Bavaria gets a legible home core while France's broader language source
+  // carries the westward transition before the nearer Alpine point can steal
+  // that boundary. These are map-space casting approximations, not borders.
+  "bavarian-german-influenced-english": {
+    coreRadius: 0.005,
+    supportRadius: 0.04,
+  },
+  "french-influenced-english": { supportRadius: 0.05 },
+  "parisian-french-influenced-english": { supportRadius: 0.05 },
+  "northern-italian-influenced-english": { supportRadius: 0.022 },
+  "german-influenced-english": { supportRadius: 0.045 },
+  "northern-german-influenced-english": { supportRadius: 0.04 },
+};
+
+const VOICE_ACCENT_MAP_ANCHOR_SEEDS: readonly VoiceAccentMapAnchorSeedV1[] = [
   {
     id: "base-en-US",
     point: voiceAccentMapPointForCoordinates(-98.5, 39.8),
     pronunciationBase: "en-US",
-    accentDefinitionId: "american-english",
-  },
-  {
-    id: "base-en-GB",
-    point: voiceAccentMapPointForCoordinates(-2.5, 54.2),
-    pronunciationBase: "en-GB",
-    accentDefinitionId: "british-english",
+    accentDefinitionId: "general-american-english",
   },
   ...LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.map((capability) => {
     const [longitude, latitude] = VOICE_ACCENT_MAP_COORDINATES[capability.id];
@@ -640,6 +693,9 @@ export const VOICE_ACCENT_MAP_ANCHORS: readonly VoiceAccentMapAnchorV1[] = [
       point: voiceAccentMapPointForCoordinates(longitude, latitude),
       influence: capability.id,
       accentDefinitionId: capability.id,
+      ...(GERMAN_ACCENT_SOURCE_FAMILY.has(capability.id)
+        ? { sourceFamily: "german" }
+        : {}),
       ...(LONDON_VARIANTS.has(capability.id)
         ? {
             variantGroup: "london",
@@ -648,8 +704,63 @@ export const VOICE_ACCENT_MAP_ANCHORS: readonly VoiceAccentMapAnchorV1[] = [
               : {}),
           }
         : {}),
-    } satisfies VoiceAccentMapAnchorV1;
+    } satisfies VoiceAccentMapAnchorSeedV1;
   }),
+];
+
+function voiceAccentMapAnchorsWithFieldRanges(
+  seeds: readonly VoiceAccentMapAnchorSeedV1[],
+): readonly VoiceAccentMapAnchorV1[] {
+  const locations = new Map<string, VoiceAccentMapAnchorSeedV1[]>();
+  for (const seed of seeds) {
+    const key = voiceAccentMapLocationKey(seed);
+    locations.set(key, [...(locations.get(key) ?? []), seed]);
+  }
+  return seeds.map((seed) => {
+    const key = voiceAccentMapLocationKey(seed);
+    const nearestDistance = Math.min(
+      ...[...locations.entries()]
+        .filter(([candidateKey]) => candidateKey !== key)
+        .map(([, candidates]) =>
+          voiceAccentMapDistance(seed.point, candidates[0]!.point),
+        ),
+    );
+    const override = VOICE_ACCENT_MAP_FIELD_RANGE_OVERRIDES[
+      seed.accentDefinitionId
+    ];
+    const coreRadius =
+      override?.coreRadius ??
+      Math.max(0.00004, Math.min(0.009, nearestDistance * 0.28));
+    const supportRadius = Math.max(
+      coreRadius + 0.00004,
+      override?.supportRadius ??
+        Math.max(coreRadius * 2.5, Math.min(0.09, nearestDistance * 2.4)),
+    );
+    return { ...seed, coreRadius, supportRadius };
+  });
+}
+
+export const VOICE_ACCENT_MAP_ANCHORS: readonly VoiceAccentMapAnchorV1[] =
+  voiceAccentMapAnchorsWithFieldRanges(VOICE_ACCENT_MAP_ANCHOR_SEEDS);
+
+export const VOICE_ACCENT_MAP_FAMILY_HOME_RANGES: readonly VoiceAccentMapFamilyHomeRangeV1[] = [
+  {
+    id: "germany",
+    sourceFamily: "german",
+    interiorForeignBlendMax: 0.1,
+    boundaryForeignBlendMax: 0.25,
+    transitionWidth: 0.008,
+    polygon: [
+      voiceAccentMapPointForCoordinates(5.75, 47.2),
+      voiceAccentMapPointForCoordinates(10.55, 47.15),
+      voiceAccentMapPointForCoordinates(13.1, 47.55),
+      voiceAccentMapPointForCoordinates(15.15, 50.75),
+      voiceAccentMapPointForCoordinates(14.75, 53.2),
+      voiceAccentMapPointForCoordinates(12.1, 54.95),
+      voiceAccentMapPointForCoordinates(8.15, 55.05),
+      voiceAccentMapPointForCoordinates(5.75, 53.55),
+    ],
+  },
 ];
 
 export function normalizeVoiceAccentMapPoint(
@@ -665,7 +776,7 @@ export function normalizeVoiceAccentMapPoint(
   };
 }
 
-function voiceAccentMapDistanceSquared(
+export function voiceAccentMapDistance(
   left: VoiceAccentMapPointV1,
   right: VoiceAccentMapPointV1,
 ): number {
@@ -673,11 +784,97 @@ function voiceAccentMapDistanceSquared(
   const dx = Math.min(rawX, 1 - rawX);
   const latitudeScale = Math.max(0.28, Math.cos((left.y - 0.5) * Math.PI));
   const dy = left.y - right.y;
-  return (dx * latitudeScale) ** 2 + dy ** 2;
+  // Atlas x spans 360 longitude degrees while y spans 180 latitude degrees.
+  // Doubling x restores equal angular units before the latitude correction.
+  return Math.hypot(dx * 2 * latitudeScale, dy);
 }
 
-function voiceAccentMapLocationKey(anchor: VoiceAccentMapAnchorV1): string {
+function voiceAccentMapLocationKey(
+  anchor: Pick<VoiceAccentMapAnchorV1, "point" | "variantGroup">,
+): string {
   return anchor.variantGroup ?? `${anchor.point.x.toFixed(6)}:${anchor.point.y.toFixed(6)}`;
+}
+
+function voiceAccentMapPointIsInsidePolygon(
+  point: VoiceAccentMapPointV1,
+  polygon: readonly VoiceAccentMapPointV1[],
+): boolean {
+  let inside = false;
+  for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index, index += 1) {
+    const currentPoint = polygon[index]!;
+    const previousPoint = polygon[previous]!;
+    const crosses =
+      currentPoint.y > point.y !== previousPoint.y > point.y &&
+      point.x <
+        ((previousPoint.x - currentPoint.x) *
+          (point.y - currentPoint.y)) /
+          (previousPoint.y - currentPoint.y) +
+          currentPoint.x;
+    if (crosses) inside = !inside;
+  }
+  return inside;
+}
+
+function voiceAccentMapDistanceToPolygonBoundary(
+  point: VoiceAccentMapPointV1,
+  polygon: readonly VoiceAccentMapPointV1[],
+): number {
+  const latitudeScale = Math.max(0.28, Math.cos((point.y - 0.5) * Math.PI));
+  const projectedDelta = (candidate: VoiceAccentMapPointV1) => {
+    let dx = candidate.x - point.x;
+    if (dx > 0.5) dx -= 1;
+    if (dx < -0.5) dx += 1;
+    return { x: dx * 2 * latitudeScale, y: candidate.y - point.y };
+  };
+  let nearest = Number.POSITIVE_INFINITY;
+  for (
+    let index = 0, previous = polygon.length - 1;
+    index < polygon.length;
+    previous = index, index += 1
+  ) {
+    const start = projectedDelta(polygon[previous]!);
+    const end = projectedDelta(polygon[index]!);
+    const segmentX = end.x - start.x;
+    const segmentY = end.y - start.y;
+    const denominator = segmentX * segmentX + segmentY * segmentY;
+    const progress =
+      denominator > 0
+        ? Math.max(
+            0,
+            Math.min(1, -(start.x * segmentX + start.y * segmentY) / denominator),
+          )
+        : 0;
+    nearest = Math.min(
+      nearest,
+      Math.hypot(start.x + segmentX * progress, start.y + segmentY * progress),
+    );
+  }
+  return nearest;
+}
+
+interface VoiceAccentMapHomeRangeContextV1 {
+  range: VoiceAccentMapFamilyHomeRangeV1;
+  inside: boolean;
+  boundaryDistance: number;
+}
+
+function voiceAccentMapHomeRangesAtPoint(
+  point: VoiceAccentMapPointV1,
+): readonly VoiceAccentMapHomeRangeContextV1[] {
+  return VOICE_ACCENT_MAP_FAMILY_HOME_RANGES.map((range) => {
+    const inside = voiceAccentMapPointIsInsidePolygon(point, range.polygon);
+    return {
+      range,
+      inside,
+      boundaryDistance: voiceAccentMapDistanceToPolygonBoundary(
+        point,
+        range.polygon,
+      ),
+    };
+  }).filter(
+    ({ range, inside, boundaryDistance }) =>
+      inside || boundaryDistance <= range.transitionWidth,
+  );
 }
 
 function fieldAnchorForLocation(
@@ -696,7 +893,6 @@ export function resolveVoiceAccentField(args: {
   accentDefinitionId?: unknown;
   pronunciationBase: unknown;
   speechprintInfluence: unknown;
-  limit?: number;
 }): VoiceAccentFieldResolutionV1 {
   const point = normalizeVoiceAccentMapPoint(args.point);
   const explicitId = normalizeVoiceAccentDefinitionId(args.accentDefinitionId);
@@ -725,20 +921,133 @@ export function resolveVoiceAccentField(args: {
     const key = voiceAccentMapLocationKey(anchor);
     locations.set(key, [...(locations.get(key) ?? []), anchor]);
   }
+  const explicitDefinition = voiceAccentDefinitionForId(explicitId);
+  const explicitAnchor = explicitDefinition
+    ? VOICE_ACCENT_MAP_ANCHORS.find(
+        (anchor) => anchor.accentDefinitionId === explicitDefinition.id,
+      )
+    : null;
+  // A persisted named choice always stays exact. Older atlas versions saved
+  // the freely placed point beside their nearest named ID, so this also keeps
+  // legacy American/British profiles on their concrete migration targets
+  // instead of reinterpreting stale coordinates as a new geographic blend.
+  // Current unnamed drops explicitly store a null accentDefinitionId.
+  if (explicitDefinition) {
+    const fallback = resolveLocalAccentFallback({
+      ...args,
+      accentDefinitionId: explicitDefinition.id,
+    });
+    return {
+      legacy: false,
+      layers: [
+        {
+          accentDefinitionId: explicitDefinition.id,
+          pronunciationBase:
+            explicitAnchor?.pronunciationBase ?? fallback.pronunciationBase,
+          influence:
+            explicitAnchor?.influence ?? fallback.speechprintInfluence,
+          weight: 1,
+        },
+      ],
+    };
+  }
   const ranked = [...locations.values()]
     .map((anchors) => ({
-      anchor: fieldAnchorForLocation(anchors, explicitId),
-      distanceSquared: voiceAccentMapDistanceSquared(point, anchors[0]!.point),
-      explicit: anchors.some((anchor) => anchor.accentDefinitionId === explicitId),
+      anchor: fieldAnchorForLocation(anchors, null),
+      distance: voiceAccentMapDistance(point, anchors[0]!.point),
     }))
-    .sort((left, right) => left.distanceSquared - right.distanceSquared)
-    .slice(0, Math.max(1, Math.min(4, Math.floor(args.limit ?? 3))));
-  const rawWeights = ranked.map((entry) => {
-    const proximity = 1 / (entry.distanceSquared + 0.00018);
-    return proximity ** 1.35 * (entry.explicit ? 2.75 : 1);
-  });
-  const total = rawWeights.reduce((sum, weight) => sum + weight, 0) || 1;
-  const layers = ranked
+    .map((entry) => ({
+      ...entry,
+      outsideRatio:
+        Math.max(0, entry.distance - entry.anchor.coreRadius) /
+        (entry.anchor.supportRadius - entry.anchor.coreRadius),
+    }));
+  const coreSource = [...ranked]
+    .filter((entry) => entry.distance <= entry.anchor.coreRadius + 1e-12)
+    .sort(
+      (left, right) =>
+        left.distance / left.anchor.coreRadius -
+          right.distance / right.anchor.coreRadius ||
+        left.anchor.accentDefinitionId.localeCompare(
+          right.anchor.accentDefinitionId,
+        ),
+    )[0];
+  if (coreSource) {
+    const definition = voiceAccentDefinitionForId(
+      coreSource.anchor.accentDefinitionId,
+    );
+    return {
+      legacy: false,
+      layers: [
+        {
+          accentDefinitionId: coreSource.anchor.accentDefinitionId,
+          pronunciationBase:
+            coreSource.anchor.pronunciationBase ??
+            definition?.localPronunciationBaseFallback ??
+            normalizeLocalVoicePronunciationBase(args.pronunciationBase),
+          influence:
+            coreSource.anchor.influence ??
+            definition?.localSpeechprintFallback ??
+            "none",
+          weight: 1,
+        },
+      ],
+    };
+  }
+
+  // The pin's two sources are geographically nearest. Core/support radii
+  // determine how much each contributes, but never let a broad support radius
+  // leapfrog a physically closer region.
+  const byDistance = [...ranked].sort(
+    (left, right) =>
+      left.distance - right.distance ||
+      left.anchor.accentDefinitionId.localeCompare(
+        right.anchor.accentDefinitionId,
+      ),
+  );
+  let selected = byDistance.slice(0, 2);
+  let homeRangeContext: VoiceAccentMapHomeRangeContextV1 | null = null;
+  for (const context of voiceAccentMapHomeRangesAtPoint(point)) {
+    const sourceFamily = context.range.sourceFamily;
+    const familySource = byDistance.find(
+      (entry) => entry.anchor.sourceFamily === sourceFamily,
+    );
+    if (!familySource) continue;
+    const neighbor =
+      selected.find((entry) => entry !== familySource) ?? selected[0];
+    selected = neighbor ? [familySource, neighbor] : [familySource];
+    homeRangeContext = context;
+  }
+  const primary = selected[0];
+  const neighbor = selected[1];
+  if (!primary) return { legacy: false, layers: [] };
+  let neighborShare = neighbor
+    ? (() => {
+        const denominator = primary.outsideRatio + neighbor.outsideRatio;
+        const linear = denominator > 0 ? primary.outsideRatio / denominator : 0;
+        return linear * linear * (3 - 2 * linear);
+      })()
+    : 0;
+  if (
+    neighbor &&
+    homeRangeContext &&
+    primary.anchor.sourceFamily === homeRangeContext.range.sourceFamily &&
+    neighbor.anchor.sourceFamily !== homeRangeContext.range.sourceFamily
+  ) {
+    const { range, inside, boundaryDistance } = homeRangeContext;
+    const progress = Math.max(
+      0,
+      Math.min(1, boundaryDistance / range.transitionWidth),
+    );
+    const eased = progress * progress * (3 - 2 * progress);
+    const maximumForeignShare = inside
+      ? range.boundaryForeignBlendMax -
+        (range.boundaryForeignBlendMax - range.interiorForeignBlendMax) * eased
+      : range.boundaryForeignBlendMax +
+        (1 - range.boundaryForeignBlendMax) * eased;
+    neighborShare = Math.min(neighborShare, maximumForeignShare);
+  }
+  const layers = selected
     .map((entry, index) => {
       const definition = voiceAccentDefinitionForId(
         entry.anchor.accentDefinitionId,
@@ -753,10 +1062,15 @@ export function resolveVoiceAccentField(args: {
           entry.anchor.influence ??
           definition?.localSpeechprintFallback ??
           "none",
-        weight: rawWeights[index]! / total,
+        weight: index === 0 ? 1 - neighborShare : neighborShare,
       };
     })
-    .sort((left, right) => right.weight - left.weight);
+    .filter((layer) => layer.weight > 0)
+    .sort(
+      (left, right) =>
+        right.weight - left.weight ||
+        left.accentDefinitionId.localeCompare(right.accentDefinitionId),
+    );
   return { legacy: false, layers };
 }
 
@@ -778,10 +1092,10 @@ export function voiceAccentDefinitionForLegacyProfile(args: {
   );
   if (influence !== "none") return voiceAccentDefinitionForId(influence);
   if (args.pronunciationBase === "en-US") {
-    return voiceAccentDefinitionForId("american-english");
+    return voiceAccentDefinitionForId("general-american-english");
   }
   if (args.pronunciationBase === "en-GB") {
-    return voiceAccentDefinitionForId("british-english");
+    return voiceAccentDefinitionForId("modern-rp-english");
   }
   return null;
 }
@@ -872,15 +1186,81 @@ function premiumNativeAccentMatches(
   });
 }
 
+function premiumProviderAccentLabel(
+  target: VoiceAccentDefinitionV1,
+): string {
+  return (
+    target.premiumDirectionLabel ??
+    target.premiumAccentedEnglishLabel
+      .split(" / ")[0]!
+      .replace(/-accented English$/u, "")
+      .replace(/-accented$/u, "")
+  );
+}
+
+function voiceAccentFieldRoundedPercentages(
+  layers: readonly VoiceAccentFieldLayerV1[],
+): number[] {
+  const exact = layers.map((layer) => layer.weight * 100);
+  const whole = exact.map(Math.floor);
+  let remainder = 100 - whole.reduce((sum, value) => sum + value, 0);
+  const order = exact
+    .map((value, index) => ({ index, fraction: value - whole[index]! }))
+    .sort(
+      (left, right) =>
+        right.fraction - left.fraction || left.index - right.index,
+    );
+  for (const entry of order) {
+    if (remainder <= 0) break;
+    whole[entry.index] = whole[entry.index]! + 1;
+    remainder -= 1;
+  }
+  return whole;
+}
+
 /** Private ElevenLabs v3 cue for the saved Accent Map definition. */
 export function resolvePremiumAccentDirection(args: {
+  point?: unknown;
   accentDefinitionId?: unknown;
   pronunciationBase: unknown;
   speechprintInfluence: unknown;
   speechprintStrength: unknown;
   nativeAccentHint?: unknown;
 }): string | null {
-  const target = premiumAccentTarget(args);
+  const field = normalizeVoiceAccentMapPoint(args.point)
+    ? resolveVoiceAccentField({
+        point: args.point,
+        accentDefinitionId: args.accentDefinitionId,
+        pronunciationBase: args.pronunciationBase,
+        speechprintInfluence: args.speechprintInfluence,
+      })
+    : null;
+  if (field && field.layers.length > 1) {
+    const strength = normalizeLocalVoiceSpeechprintStrength(
+      args.speechprintStrength,
+    );
+    const intensity =
+      strength === "light"
+        ? "subtle "
+        : strength === "strong"
+          ? "strong "
+          : "";
+    const percentages = voiceAccentFieldRoundedPercentages(field.layers);
+    return field.layers
+      .map((layer, index) => {
+        const definition = voiceAccentDefinitionForId(
+          layer.accentDefinitionId,
+        );
+        return definition
+          ? `${intensity}${percentages[index]}% ${premiumProviderAccentLabel(definition)} accent`
+          : null;
+      })
+      .filter((cue): cue is string => Boolean(cue))
+      .join(", ") || null;
+  }
+  const target = field?.layers[0]
+    ? voiceAccentDefinitionForId(field.layers[0].accentDefinitionId)
+    : premiumAccentTarget(args);
   if (!target) return null;
   const strength = normalizeLocalVoiceSpeechprintStrength(
     args.speechprintStrength,
@@ -901,16 +1281,9 @@ export function resolvePremiumAccentDirection(args: {
       : strength === "strong"
         ? "strong "
         : "";
-  const providerAccentLabel =
-    target.premiumDirectionLabel ??
-    target.premiumAccentedEnglishLabel
-      // A slash-joined label names one accent twice. The tag is now the whole
-      // Premium accent mechanism, so it has to stay inside the direction
-      // character cap: a clipped tag loses the word "accent" and stops reading
-      // as a direction at all.
-      .split(" / ")[0]!
-      .replace(/-accented English$/u, "")
-      .replace(/-accented$/u, "");
+  // A slash-joined label names one accent twice. Keep each private direction
+  // inside the provider cap so it retains the actionable word "accent".
+  const providerAccentLabel = premiumProviderAccentLabel(target);
   return `${intensity}${providerAccentLabel} accent`;
 }
 

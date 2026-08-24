@@ -1,13 +1,12 @@
 import {
   botcastMessageIsAudibleToAudienceV1,
-  botcastCameraFramingWithEpisodeImages,
   botcastSnapshotPowersForRoleV1,
   botPowerResponseIsSilentV1,
   buildSignalMusicProfile,
   coffeeInterruptionTranscriptSegments,
   voiceSpokenText,
   type BotcastEpisode,
-  type BotcastEpisodeImageFraming,
+  type BotcastCameraFraming,
   type BotcastReplayEvent,
   type BotcastShow,
   type BotAvatarDetailsV1,
@@ -76,8 +75,8 @@ export function buildSignalReplayManifestV1(args: {
   audioEnabled?: boolean;
   audioVolume?: number;
   capturedReplayEvents?: readonly BotcastReplayEvent[];
-  /** Resolved once for this recording so later global edits cannot rewrite it. */
-  episodeImageFraming?: BotcastEpisodeImageFraming;
+  /** Frozen at recording start so later rehearsal edits cannot rewrite it. */
+  cameraFraming?: BotcastCameraFraming;
 }): ReplayManifestV1 {
   const botsById = new Map(args.bots.map((bot) => [bot.id, bot]));
   const host = botsById.get(args.episode.hostBotId);
@@ -248,12 +247,7 @@ export function buildSignalReplayManifestV1(args: {
         microphoneTintMaskUrl:
           atmosphere?.microphoneTintMaskUrl ?? null,
         studioLayout: args.show.studioLayout,
-        cameraFraming: args.episodeImageFraming
-          ? botcastCameraFramingWithEpisodeImages(
-              args.show.cameraFraming,
-              args.episodeImageFraming,
-            )
-          : args.show.cameraFraming,
+        cameraFraming: args.cameraFraming ?? args.show.cameraFraming,
         logoPlacement: args.show.logoPlacement,
         studioGlowTuning: args.show.studioGlowTuning,
         logoImageUrl: args.show.logo?.imageUrl ?? null,

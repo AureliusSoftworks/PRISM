@@ -2073,12 +2073,6 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       UNIQUE(user_id, host_bot_id),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
-    CREATE TABLE IF NOT EXISTS botcast_signal_preferences (
-      user_id TEXT PRIMARY KEY,
-      episode_image_framing_json TEXT NOT NULL DEFAULT '{}',
-      updated_at TEXT NOT NULL,
-      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
     CREATE TABLE IF NOT EXISTS botcast_host_recovery_candidates (
       user_id TEXT NOT NULL,
       show_id TEXT NOT NULL,
@@ -2209,6 +2203,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       content TEXT NOT NULL,
       stage_action_text TEXT,
       voice_performance_text TEXT,
+      interruption_source_content TEXT,
       created_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(episode_id) REFERENCES botcast_episodes(id) ON DELETE CASCADE
@@ -3138,6 +3133,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!hasBotcastStageActionText) {
     db.exec(
       "ALTER TABLE botcast_messages ADD COLUMN stage_action_text TEXT;",
+    );
+  }
+  const hasBotcastInterruptionSourceContent = botcastMessageColumns.some(
+    (column) => column.name === "interruption_source_content",
+  );
+  if (!hasBotcastInterruptionSourceContent) {
+    db.exec(
+      "ALTER TABLE botcast_messages ADD COLUMN interruption_source_content TEXT;",
     );
   }
   const hasProviderLocked = userColumns.some(

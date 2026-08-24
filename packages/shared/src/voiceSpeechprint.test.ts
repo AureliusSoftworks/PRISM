@@ -7,6 +7,7 @@ import {
   VOICE_ACCENT_DEFINITIONS,
   VOICE_ACCENT_MAP_ANCHORS,
   normalizeElevenLabsVoiceDirection,
+  normalizeVoiceAccentDefinitionId,
   applyLocalVoiceSpeechprintMelodyToIpa,
   applyLocalVoiceSpeechprintToIpa,
   applyVoiceAccentFieldToIpa,
@@ -16,6 +17,8 @@ import {
   resolvePremiumAccentDirection,
   resolveVoiceAccentField,
   voiceAccentDefinitionForId,
+  voiceAccentMapDistance,
+  voiceAccentMapPointForCoordinates,
 } from "@localai/shared";
 
 const SAMPLE_IPA = "θɪs ɹɪvɚ wɪl ðɹaɪv vɛɹi faɹ";
@@ -39,20 +42,45 @@ describe("local voice Speechprints", () => {
     assert.ok(
       VOICE_ACCENT_DEFINITIONS.some(
         (definition) =>
-          definition.id === "american-english" &&
+          definition.id === "general-american-english" &&
           definition.localSpeechprintFallback === "none",
       ),
     );
     assert.ok(
-      VOICE_ACCENT_DEFINITIONS.some(
+      VOICE_ACCENT_DEFINITIONS.every(
         (definition) =>
-          definition.id === "british-english" &&
-          definition.localSpeechprintFallback === "none",
+          definition.id !== "american-english" &&
+          definition.id !== "british-english",
       ),
+    );
+    assert.ok(
+      VOICE_ACCENT_MAP_ANCHORS.every(
+        (anchor) =>
+          anchor.accentDefinitionId !== "american-english" &&
+          anchor.accentDefinitionId !== "british-english",
+      ),
+    );
+    assert.equal(
+      normalizeVoiceAccentDefinitionId("american-english"),
+      "general-american-english",
+    );
+    assert.equal(
+      normalizeVoiceAccentDefinitionId("british-english"),
+      "modern-rp-english",
     );
   });
 
-  it("normalizes a continuous field with smooth deterministic weights", () => {
+  it("publishes deterministic core and support metadata for every source", () => {
+    for (const anchor of VOICE_ACCENT_MAP_ANCHORS) {
+      assert.ok(anchor.coreRadius > 0, anchor.accentDefinitionId);
+      assert.ok(
+        anchor.supportRadius > anchor.coreRadius,
+        anchor.accentDefinitionId,
+      );
+    }
+  });
+
+  it("keeps named anchors exact even when their saved point is stale", () => {
     assert.equal(
       voiceAccentDefinitionForId(" Cockney-English ")?.id,
       "cockney-english",
@@ -62,36 +90,24 @@ describe("local voice Speechprints", () => {
     );
     assert.ok(london);
     const first = resolveVoiceAccentField({
-      point: london.point,
-      accentDefinitionId: "modern-rp-english",
-      pronunciationBase: "en-GB",
-      speechprintInfluence: "modern-rp-english",
-    });
-    const shifted = resolveVoiceAccentField({
-      point: { x: london.point.x + 0.0005, y: london.point.y },
+      point: voiceAccentMapPointForCoordinates(11.58, 48.14),
       accentDefinitionId: "modern-rp-english",
       pronunciationBase: "en-GB",
       speechprintInfluence: "modern-rp-english",
     });
     assert.equal(first.legacy, false);
-    assert.ok(Math.abs(first.layers.reduce((sum, layer) => sum + layer.weight, 0) - 1) < 1e-12);
-    assert.ok(Math.abs(shifted.layers.reduce((sum, layer) => sum + layer.weight, 0) - 1) < 1e-12);
-    assert.ok(
-      first.layers.every(
-        (layer, index) =>
-          index === 0 || first.layers[index - 1]!.weight >= layer.weight,
-      ),
-    );
+    assert.equal(first.layers.length, 1);
+    assert.equal(first.layers[0]?.accentDefinitionId, "modern-rp-english");
+    assert.equal(first.layers[0]?.weight, 1);
     assert.deepEqual(
       resolveVoiceAccentField({
-        point: london.point,
+        point: voiceAccentMapPointForCoordinates(11.58, 48.14),
         accentDefinitionId: "modern-rp-english",
         pronunciationBase: "en-GB",
         speechprintInfluence: "modern-rp-english",
       }),
       first,
     );
-    assert.ok(Math.abs((first.layers[0]?.weight ?? 0) - (shifted.layers[0]?.weight ?? 0)) < 0.03);
     const applied = applyVoiceAccentFieldToIpa({
       ipa: "θɪs ɹɪvɚ faɹ hɑm",
       resolution: first,
@@ -109,7 +125,170 @@ describe("local voice Speechprints", () => {
     );
   });
 
-  it("keeps an explicit co-located London variant dominant", () => {
+  it("keeps a legacy British pin on its concrete Modern RP migration", () => {
+    const field = resolveVoiceAccentField({
+      point: voiceAccentMapPointForCoordinates(-2.5, 54.2),
+      accentDefinitionId: "british-english",
+      pronunciationBase: "en-GB",
+      speechprintInfluence: "none",
+    });
+
+    assert.equal(field.layers.length, 1);
+    assert.equal(field.layers[0]?.accentDefinitionId, "modern-rp-english");
+    assert.equal(field.layers[0]?.weight, 1);
+  });
+
+  it("holds Bavaria at 100% through its core, then raises its neighbor smoothly", () => {
+    const bavaria = VOICE_ACCENT_MAP_ANCHORS.find(
+      (anchor) =>
+        anchor.accentDefinitionId ===
+        "bavarian-german-influenced-english",
+    );
+    const france = VOICE_ACCENT_MAP_ANCHORS.find(
+      (anchor) => anchor.accentDefinitionId === "french-influenced-english",
+    );
+    assert.ok(bavaria && france);
+    const interpolate = (progress: number) => ({
+      x: bavaria.point.x + (france.point.x - bavaria.point.x) * progress,
+      y: bavaria.point.y + (france.point.y - bavaria.point.y) * progress,
+    });
+    const pointAtDistance = (distance: number) => {
+      let low = 0;
+      let high = 1;
+      for (let index = 0; index < 60; index += 1) {
+        const middle = (low + high) / 2;
+        if (
+          voiceAccentMapDistance(interpolate(middle), bavaria.point) < distance
+        ) {
+          low = middle;
+        } else {
+          high = middle;
+        }
+      }
+      return interpolate((low + high) / 2);
+    };
+    const resolve = (point: { x: number; y: number }) =>
+      resolveVoiceAccentField({
+        point,
+        accentDefinitionId: null,
+        pronunciationBase: "en-US",
+        speechprintInfluence: "none",
+      });
+    const layerWeight = (
+      field: ReturnType<typeof resolve>,
+      accentDefinitionId: string,
+    ) =>
+      field.layers.find(
+        (layer) => layer.accentDefinitionId === accentDefinitionId,
+      )?.weight ?? 0;
+
+    const atAnchor = resolve(bavaria.point);
+    const justInside = resolve(pointAtDistance(bavaria.coreRadius * 0.999));
+    const justOutside = resolve(pointAtDistance(bavaria.coreRadius * 1.001));
+    for (const field of [atAnchor, justInside]) {
+      assert.deepEqual(field.layers, [
+        {
+          accentDefinitionId: "bavarian-german-influenced-english",
+          pronunciationBase: "en-US",
+          influence: "bavarian-german-influenced-english",
+          weight: 1,
+        },
+      ]);
+      assert.equal(field.layers.length, 1);
+    }
+    assert.equal(justOutside.layers.length, 2);
+    assert.ok(
+      layerWeight(justOutside, "bavarian-german-influenced-english") < 1,
+    );
+    assert.ok(
+      justOutside.layers.some(
+        (layer) =>
+          layer.accentDefinitionId !==
+            "bavarian-german-influenced-english" && layer.weight > 0,
+      ),
+    );
+
+    const distanceToFrance = voiceAccentMapDistance(
+      france.point,
+      bavaria.point,
+    );
+    const samples = [
+      bavaria.coreRadius * 1.001,
+      bavaria.coreRadius + (distanceToFrance - bavaria.coreRadius) * 0.2,
+      bavaria.coreRadius + (distanceToFrance - bavaria.coreRadius) * 0.4,
+      bavaria.coreRadius + (distanceToFrance - bavaria.coreRadius) * 0.6,
+      bavaria.coreRadius + (distanceToFrance - bavaria.coreRadius) * 0.8,
+    ].map((distance) => resolve(pointAtDistance(distance)));
+    const bavarianWeights = samples.map((field) => {
+      assert.ok(
+        Math.abs(
+          field.layers.reduce((sum, layer) => sum + layer.weight, 0) - 1,
+        ) < 1e-12,
+      );
+      return layerWeight(field, "bavarian-german-influenced-english");
+    });
+    assert.ok(
+      bavarianWeights.every(
+        (weight, index) => index === 0 || weight <= bavarianWeights[index - 1]!,
+      ),
+    );
+  });
+
+  it("keeps German dominant across representative German points", () => {
+    const points = {
+      Munich: [11.576, 48.137],
+      Frankfurt: [8.6821, 50.1109],
+      Cologne: [6.9603, 50.9375],
+      Berlin: [13.405, 52.52],
+      Saarland: [6.9969, 49.2402],
+    } as const;
+    for (const [name, [longitude, latitude]] of Object.entries(points)) {
+      const field = resolveVoiceAccentField({
+        point: voiceAccentMapPointForCoordinates(longitude, latitude),
+        accentDefinitionId: null,
+        pronunciationBase: "en-US",
+        speechprintInfluence: "none",
+      });
+      const germanShare = field.layers
+        .filter((layer) =>
+          layer.accentDefinitionId.includes("german-influenced-english"),
+        )
+        .reduce((sum, layer) => sum + layer.weight, 0);
+      assert.ok(germanShare >= 0.75, `${name}: ${germanShare}`);
+    }
+    const munich = resolveVoiceAccentField({
+      point: voiceAccentMapPointForCoordinates(11.576, 48.137),
+      accentDefinitionId: null,
+      pronunciationBase: "en-US",
+      speechprintInfluence: "none",
+    });
+    assert.equal(munich.layers.length, 1);
+    assert.equal(
+      munich.layers[0]?.accentDefinitionId,
+      "bavarian-german-influenced-english",
+    );
+    assert.equal(munich.layers[0]?.weight, 1);
+
+    const foreignShare = (longitude: number, latitude: number) => {
+      const field = resolveVoiceAccentField({
+        point: voiceAccentMapPointForCoordinates(longitude, latitude),
+        accentDefinitionId: null,
+        pronunciationBase: "en-US",
+        speechprintInfluence: "none",
+      });
+      return field.layers
+        .filter(
+          (layer) =>
+            !layer.accentDefinitionId.includes("german-influenced-english"),
+        )
+        .reduce((sum, layer) => sum + layer.weight, 0);
+    };
+    assert.ok(
+      foreignShare(8.6821, 50.1109) < foreignShare(6.9969, 49.2402),
+    );
+  });
+
+  it("keeps an explicit co-located London variant exact", () => {
     const cockney = VOICE_ACCENT_MAP_ANCHORS.find(
       (anchor) => anchor.accentDefinitionId === "cockney-english",
     );
@@ -120,8 +299,9 @@ describe("local voice Speechprints", () => {
       pronunciationBase: "en-GB",
       speechprintInfluence: "cockney-english",
     });
+    assert.equal(field.layers.length, 1);
     assert.equal(field.layers[0]?.accentDefinitionId, "cockney-english");
-    assert.ok((field.layers[0]?.weight ?? 0) > (field.layers[1]?.weight ?? 0));
+    assert.equal(field.layers[0]?.weight, 1);
   });
 
   it("preserves the exact legacy single-Speechprint path without a point", () => {
@@ -340,7 +520,7 @@ describe("local voice Speechprints", () => {
         speechprintStrength: "balanced",
         nativeAccentHint: null,
       }),
-      "British accent",
+      "Received Pronunciation accent",
     );
   });
 
@@ -491,7 +671,7 @@ describe("local voice Speechprints", () => {
       }),
       {
         pronunciationBase: "en-GB",
-        speechprintInfluence: "none",
+        speechprintInfluence: "modern-rp-english",
       },
     );
     // Regional American accents stay on the rhotic en-US base even when the

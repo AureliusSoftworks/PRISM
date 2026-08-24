@@ -4,6 +4,7 @@ import {
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
   PRISM_BUILTIN_ENGLISH_VOICES,
   applyLocalVoiceSpeechprintToIpa,
+  resolveVoiceAccentField,
   VOICE_ACCENT_MAP_ANCHORS,
 } from "@localai/shared";
 import {
@@ -156,12 +157,67 @@ describe("built-in English audio", () => {
       text: sourceText,
       profile,
     });
+    const field = resolveVoiceAccentField({
+      point: profile.pronunciationMapPoint,
+      accentDefinitionId: profile.accentDefinitionId,
+      pronunciationBase: profile.pronunciationBase,
+      speechprintInfluence: profile.speechprintInfluence,
+    });
     assert.deepEqual(second, first);
+    assert.deepEqual(
+      field.layers.map((layer) => [layer.accentDefinitionId, layer.weight]),
+      [["cockney-english", 1]],
+    );
     assert.equal(first.sourceText, sourceText);
     assert.equal(first.engineVoiceId, "af_heart");
     assert.equal(first.voiceLocale, "en-US");
     assert.equal(first.targetLocale, "en-GB");
     assert.match(first.targetIpa ?? "", /f/u);
+  });
+
+  it("projects an unnamed point through the deterministic two-anchor Local field", async () => {
+    const newYork = VOICE_ACCENT_MAP_ANCHORS.find(
+      (anchor) => anchor.accentDefinitionId === "new-york-english",
+    );
+    const newJersey = VOICE_ACCENT_MAP_ANCHORS.find(
+      (anchor) => anchor.accentDefinitionId === "new-jersey-english",
+    );
+    assert.ok(newYork && newJersey);
+    const pronunciationMapPoint = {
+      x: (newYork.point.x + newJersey.point.x) / 2,
+      y: (newYork.point.y + newJersey.point.y) / 2,
+    };
+    const profile = {
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+      baseVoiceId: "voice-1" as const,
+      accentDefinitionId: null,
+      pronunciationMapPoint,
+      pronunciationBase: "en-US" as const,
+      speechprintInfluence: "none" as const,
+      speechprintVariationSeed: "ny-nj-continuum",
+    };
+    const field = resolveVoiceAccentField({
+      point: pronunciationMapPoint,
+      accentDefinitionId: null,
+      pronunciationBase: "en-US",
+      speechprintInfluence: "none",
+    });
+    const [first, second] = await Promise.all([
+      preparePrismVoicePackPronunciation({ text: "The bird crossed the harbor.", profile }),
+      preparePrismVoicePackPronunciation({ text: "The bird crossed the harbor.", profile }),
+    ]);
+
+    assert.deepEqual(
+      field.layers.map((layer) => layer.accentDefinitionId),
+      ["new-york-english", "new-jersey-english"],
+    );
+    assert.ok(
+      field.layers.every((layer) => Math.abs(layer.weight - 0.5) < 0.001),
+    );
+    assert.deepEqual(second, first);
+    assert.equal(first.sourceText, "The bird crossed the harbor.");
+    assert.equal(first.targetLocale, "en-US");
+    assert.ok(first.targetIpa);
   });
 
   it("maps the tuned PRISM-zikkv Cockney sample exactly at shared runtime strength", async () => {

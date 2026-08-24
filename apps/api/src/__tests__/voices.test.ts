@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2 } from "@localai/shared";
+import {
+  DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+  VOICE_ACCENT_MAP_ANCHORS,
+} from "@localai/shared";
 import {
   ElevenLabsVoiceError,
   VOICE_CAPABILITIES,
@@ -497,7 +500,7 @@ describe("voice Phase 1 boundary", () => {
     assert.equal(requestBody?.text, text);
   });
 
-  it("forces American, British, and Scottish Accent Map phonology across conflicting Premium voices", async () => {
+  it("normalizes umbrella profiles to concrete directions and reserves target IPA for Scottish", async () => {
     const sourceText = "Peter Piper picked a peck of pickled peppers.";
     const cases = [
       {
@@ -506,7 +509,7 @@ describe("voice Phase 1 boundary", () => {
         accentDefinitionId: "american-english",
         targetIpa: "ˈpiːtɚ ˈpaɪpɚ pɪkt ə pɛk əv ˈpɪkəld ˈpɛpɚz",
         expectedText:
-          "[American accent] /ˈpiːtɚ ˈpaɪpɚ pɪkt ə pɛk əv ˈpɪkəld ˈpɛpɚz/",
+          `[General American accent] ${sourceText}`,
       },
       {
         voiceId: "american-premium-voice",
@@ -514,7 +517,7 @@ describe("voice Phase 1 boundary", () => {
         accentDefinitionId: "british-english",
         targetIpa: "ˈpiːtə ˈpaɪpə pɪkt ə pɛk əv ˈpɪkəld ˈpɛpəz",
         expectedText:
-          "[British accent] /ˈpiːtə ˈpaɪpə pɪkt ə pɛk əv ˈpɪkəld ˈpɛpəz/",
+          `[Received Pronunciation accent] ${sourceText}`,
       },
       {
         voiceId: "american-premium-voice",
@@ -566,6 +569,106 @@ describe("voice Phase 1 boundary", () => {
     }
 
     assert.equal(new Set(providerTexts).size, 3);
+  });
+
+  it("carries an unnamed point as the same weighted two-anchor Premium blend", async () => {
+    const newYork = VOICE_ACCENT_MAP_ANCHORS.find(
+      (anchor) => anchor.accentDefinitionId === "new-york-english",
+    );
+    const newJersey = VOICE_ACCENT_MAP_ANCHORS.find(
+      (anchor) => anchor.accentDefinitionId === "new-jersey-english",
+    );
+    assert.ok(newYork && newJersey);
+    const pronunciationMapPoint = {
+      x: (newYork.point.x + newJersey.point.x) / 2,
+      y: (newYork.point.y + newJersey.point.y) / 2,
+    };
+    let requestBody: Record<string, unknown> | null = null;
+    const text = "The river bends past the harbor.";
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      voiceId: "premium-voice",
+      model: "eleven_flash_v2_5",
+      text,
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        accentDefinitionId: null,
+        pronunciationMapPoint,
+        pronunciationBase: "en-US",
+        speechprintInfluence: "none",
+      },
+      fetchImpl: (async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+
+    assert.equal(
+      requestBody?.text,
+      `[50% New York accent] [50% New Jersey accent] ${text}`,
+    );
+    assert.equal(requestBody?.model_id, "eleven_v3");
+  });
+
+  it("keeps an unnamed Bavarian-core drop as one exact Premium source", async () => {
+    const bavaria = VOICE_ACCENT_MAP_ANCHORS.find(
+      (anchor) =>
+        anchor.accentDefinitionId ===
+        "bavarian-german-influenced-english",
+    );
+    assert.ok(bavaria);
+    const text = "The river bends past the old road.";
+    let requestBody: Record<string, unknown> | null = null;
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      voiceId: "premium-voice",
+      model: "eleven_flash_v2_5",
+      text,
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        accentDefinitionId: null,
+        pronunciationMapPoint: bavaria.point,
+        pronunciationBase: "en-US",
+        speechprintInfluence: "none",
+      },
+      fetchImpl: (async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+
+    assert.equal(requestBody?.text, `[Bavarian German accent] ${text}`);
+    assert.doesNotMatch(String(requestBody?.text), /%/u);
+    assert.equal(requestBody?.model_id, "eleven_v3");
+  });
+
+  it("keeps the exact objection sentence authored in British-family Premium routing", async () => {
+    const text =
+      "Objection. Your theory collapses under the weight of a single, undeniable contradiction.";
+    let requestBody: Record<string, unknown> | null = null;
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      voiceId: "american-premium-voice",
+      model: "eleven_flash_v2_5",
+      text,
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        elevenLabsNativeAccentHint: "American",
+        accentDefinitionId: "british-english",
+      },
+      accentIpaResolver: async () => {
+        throw new Error("removed umbrella must not take the full-utterance IPA path");
+      },
+      fetchImpl: (async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+
+    assert.equal(
+      requestBody?.text,
+      `[Received Pronunciation accent] ${text}`,
+    );
   });
 
   it("carries Accent Map strength in the Premium direction, never in the line", async () => {
@@ -940,7 +1043,7 @@ describe("voice Phase 1 boundary", () => {
 
   it("composes title and Accent Map projections without changing alignment text", async () => {
     const sourceText = "Capt. Rivera.";
-    const providerText = "[American accent] /ˈkæptən ɹɪˈvɛɹə/";
+    const providerText = "[General American accent] Captain Rivera.";
     const characters = Array.from(providerText);
     const speech = await requestElevenLabsSpeechWithTimestamps({
       apiKey: "secret-key",
@@ -1029,7 +1132,7 @@ describe("voice Phase 1 boundary", () => {
     assert.match(requestedUrl, /british-premium-voice\/with-timestamps/u);
     assert.equal(
       providerText,
-      "[American accent] [hushed] [sighs] /ˈpiːtɚ ˈpaɪpɚ pɪkt ə pɛk əv ˈpɪkəld ˈpɛpɚz/ [laughs]",
+      `[General American accent] [hushed] [sighs] ${spokenText} [laughs]`,
     );
     assert.equal(speech.alignment?.characters.join(""), spokenText);
     assert.doesNotMatch(speech.alignment?.characters.join("") ?? "", /[\/\[\]ˈɾɚɹ]/u);
