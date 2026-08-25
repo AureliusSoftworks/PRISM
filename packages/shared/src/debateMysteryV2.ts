@@ -10,6 +10,7 @@ import type {
 
 export const DEBATE_MYSTERY_V2_SCHEMA_VERSION = 2 as const;
 export const DEBATE_MYSTERY_AUDIO_MANIFEST_VERSION = 1 as const;
+export const DEBATE_MYSTERY_PLAY_READINESS_VERSION = 1 as const;
 export const DEBATE_MYSTERY_V2_JUROR_COUNT = 4 as const;
 
 export type DebateMysteryTrialTypeV2 = "jury" | "bench";
@@ -51,7 +52,9 @@ export type DebateMysteryDialogueNodeKindV2 =
   | "prosecution_choice"
   | "choice_reaction"
   | "court_reaction"
-  | "partner_consult"
+  | "defense_reaction"
+  | "defendant_reaction"
+  | "prosecutor_strategy"
   | "verdict";
 
 export interface DebateWhodunnitCreateConfigV2 {
@@ -66,7 +69,10 @@ export interface DebateWhodunnitCreateConfigV2 {
   totalRooms?: number;
   suspectBotIds: string[];
   judgeBotId?: string;
-  prosecutorPartnerBotId: string;
+  prosecutorBotId?: string;
+  /** Legacy V2 setup alias. It is accepted only while loading old cases and is
+   * normalized to prosecutorBotId before the setup becomes public. */
+  prosecutorPartnerBotId?: string;
   rivalDefenseBotId: string;
   jurorBotIds: string[];
   playerRole?: "participant" | "spectator";
@@ -74,10 +80,14 @@ export interface DebateWhodunnitCreateConfigV2 {
 }
 
 export interface DebateMysteryResolvedConfigV2
-  extends Omit<DebateWhodunnitCreateConfigV2, "floors" | "totalRooms" | "judgeBotId"> {
+  extends Omit<
+    DebateWhodunnitCreateConfigV2,
+    "floors" | "totalRooms" | "judgeBotId" | "prosecutorBotId" | "prosecutorPartnerBotId"
+  > {
   floors: number;
   totalRooms: number;
   judgeBotId: string;
+  prosecutorBotId: string;
   jurorBotIds: [string, string, string, string] | [];
   eyewitnessChance: number;
 }
@@ -99,6 +109,7 @@ export interface DebateMysterySpokenLineV2 {
   nodeId: string;
   speakerKind: "bot" | "judge" | "player" | "narrator";
   speakerBotId: string | null;
+  stageActionText: string | null;
   visibleText: string;
   spokenText: string;
   performance: DebateMysteryPerformanceDirectionV2;
@@ -144,6 +155,7 @@ export interface DebateMysteryStatementVersionV2 {
   pressNodeId: string;
   correctPresentations: DebateMysteryRecordReferenceV2[];
   rebuttalNodeId: string;
+  objectionNodeId?: string;
   revisionNodeId: string | null;
   nextStatementId: string | null;
 }
@@ -178,6 +190,11 @@ export interface DebateMysteryDialogueGraphV2 {
   prosecutionChoices: DebateMysteryProsecutionChoiceV2[];
   talkTopicNodeIdsBySuspect: Record<string, string[]>;
   presentNodeIdsBySuspect: Record<string, string[]>;
+  prosecutorStrategyNodeId?: string;
+  defendantReactionNodeIdsBySeat?: Record<
+    string,
+    { testimony: string; objection: string; evidence: string }
+  >;
   verdictNodeIds: string[];
 }
 
@@ -253,6 +270,13 @@ export interface DebateMysteryRoomV2 {
   id: string;
   name: string;
   floor: number;
+  /** Frozen mansion footprint. Optional only for V2 cases compiled before the
+   * spatial board contract shipped; clients derive a stable fallback layout. */
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  neighborIds?: string[];
   emoji: string;
   imageId: string | null;
   bundledAssetPath: string | null;
@@ -287,9 +311,144 @@ export interface DebateMysteryPublicTopicV2 {
 export interface DebateMysteryPublicDialogueEntryV2 {
   nodeId: string;
   lineId: string | null;
+  stageActionText?: string | null;
   visibleText: string;
   speakerSeatId: string | null;
+  speakerBotId: string | null;
   occurredAt: string;
+}
+
+const DEBATE_MYSTERY_STAGE_ACTION_VERB_RE = /^(?:adjusts?|blinks?|braces?|clenches?|draws?|examines?|folds?|frowns?|gestures?|glances?|glares?|grimaces?|hesitates?|holds?|leans?|looks?|lowers?|nods?|paces?|pauses?|performs?|places?|points?|raises?|reaches?|recoils?|relaxes?|sets?|shakes?|shifts?|shrugs?|sighs?|scoffs?|smirks?|stares?|steadies?|straightens?|studies?|swallows?|takes?|taps?|tenses?|tilts?|turns?|unfolds?|winces?)\b/iu;
+
+function mysterySpeakerAliases(
+  value?: string | readonly string[] | null,
+): string[] {
+  const names = (Array.isArray(value) ? value : value ? [value] : [])
+    .map((name) => name.replace(/\s+/gu, " ").trim())
+    .filter(Boolean);
+  for (const name of [...names]) {
+    const parts = name.split(/\s+/u);
+    if (parts[0]) names.push(parts[0]);
+    if (parts.length > 1 && parts.at(-1)) names.push(parts.at(-1)!);
+  }
+  return [...new Set(names)].sort((left, right) => right.length - left.length);
+}
+
+function mysteryStageActionDisplayText(
+  value: string,
+  speakerNames?: string | readonly string[] | null,
+  allowAnyVerb = false,
+): string | null {
+  let action = value.replace(/\s+/gu, " ").replace(/[.!?;:\s]+$/u, "").trim();
+  if (!action || action.length > 180 || /["“”]/u.test(action)) return null;
+  for (const speakerName of mysterySpeakerAliases(speakerNames)) {
+    const escapedName = speakerName.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+    const stripped = action.replace(
+      new RegExp(`^${escapedName}(?:['’]s)?(?:\\s+|,\\s*)`, "iu"),
+      "",
+    );
+    if (stripped !== action) {
+      action = stripped;
+      break;
+    }
+  }
+  // Older frozen packs sometimes retain the authoring-time witness name while
+  // the current cast supplies a different displayed profile. A narrated quote
+  // still has an unambiguous visual prefix, so strip that stale proper-name
+  // label before deciding whether it is an action.
+  const staleNamePrefix = action.match(
+    /^(?:[\p{Lu}][\p{L}'’.-]*\s+){1,3}((?:adjusts?|blinks?|braces?|clenches?|draws?|examines?|folds?|frowns?|gestures?|glances?|glares?|grimaces?|hesitates?|holds?|leans?|looks?|lowers?|nods?|paces?|pauses?|performs?|places?|points?|raises?|reaches?|recoils?|relaxes?|sets?|shakes?|shifts?|shrugs?|sighs?|scoffs?|smirks?|stares?|steadies?|straightens?|studies?|swallows?|takes?|taps?|tenses?|tilts?|turns?|unfolds?|winces?)\b[\s\S]*)$/u,
+  );
+  if (staleNamePrefix?.[1]) action = staleNamePrefix[1].trim();
+  action = action.replace(/^(?:he|she|they|the witness|the suspect)\s+/iu, "").trim();
+  if (!action || (!allowAnyVerb && !DEBATE_MYSTERY_STAGE_ACTION_VERB_RE.test(action))) {
+    return null;
+  }
+  return `${action.charAt(0).toLocaleUpperCase()}${action.slice(1)}`;
+}
+
+/** Separates a nonverbal performance beat from the words a Whodunnit actor speaks. */
+export function splitDebateMysteryStageActionTextV2(
+  value: string,
+  speakerNames?: string | readonly string[] | null,
+): { stageActionText: string | null; spokenText: string } {
+  const text = value.replace(/\s+/gu, " ").trim();
+  if (!text) return { stageActionText: null, spokenText: "" };
+
+  const marked = text.match(/^\*([^*\n]{2,180})\*\s+([\s\S]+)$/u);
+  if (marked?.[1] && marked[2]) {
+    const stageActionText = mysteryStageActionDisplayText(marked[1], speakerNames, true);
+    if (stageActionText) return { stageActionText, spokenText: marked[2].trim() };
+  }
+
+  const narrated = text.match(/^(.{2,180}?)[.!?]?\s*[“"]([\s\S]+)[”"]$/u);
+  if (narrated?.[1] && narrated[2]) {
+    const stageActionText = mysteryStageActionDisplayText(narrated[1], speakerNames, true);
+    if (stageActionText) return { stageActionText, spokenText: narrated[2].trim() };
+  }
+
+  return { stageActionText: null, spokenText: text };
+}
+
+function stableMysteryActionIndex(value: string, length: number): number {
+  let hash = 2_166_136_261;
+  for (const character of value) {
+    hash ^= character.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return Math.abs(hash) % Math.max(1, length);
+}
+
+/** Stable, visual-only fallback for legacy lines that never authored a
+ * physical beat. It is intentionally derived from frozen line/performance
+ * data and never enters spoken text or audio. */
+export function fallbackDebateMysteryStageActionTextV2(args: {
+  stableId: string;
+  performance: Pick<DebateMysteryPerformanceDirectionV2, "mood" | "intensity">;
+}): string {
+  const mood = args.performance.mood.toLocaleLowerCase();
+  const candidates = /angry|defiant|insistent|sharp|tense/u.test(mood)
+    ? ["Squares their shoulders", "Holds their ground", "Tenses, then steadies"]
+    : /nervous|guarded|uneasy|afraid|hesitant/u.test(mood)
+      ? ["Hesitates for a beat", "Glances aside, then back", "Steadies their breath"]
+      : /probing|precise|thoughtful|measured|curious/u.test(mood)
+        ? ["Studies the response", "Pauses to consider", "Tilts their head slightly"]
+        : args.performance.intensity >= 2
+          ? ["Leans into the moment", "Holds the room's attention", "Gestures with emphasis"]
+          : ["Pauses for a beat", "Shifts their stance", "Meets the moment steadily"];
+  return candidates[stableMysteryActionIndex(`${args.stableId}:${mood}:${args.performance.intensity}`, candidates.length)]!;
+}
+
+/** Resolves the canonical speech/action split. An explicit authored action
+ * always wins; legacy narration is split next; deterministic fallback is last. */
+export function resolveDebateMysteryLineDeliveryV2(args: {
+  value: string;
+  explicitStageActionText?: string | null;
+  speakerNames?: string | readonly string[] | null;
+  stableId: string;
+  performance: DebateMysteryPerformanceDirectionV2;
+  materializeFallback?: boolean;
+}): { stageActionText: string | null; spokenText: string } {
+  const legacy = splitDebateMysteryStageActionTextV2(args.value, args.speakerNames);
+  const explicit = args.explicitStageActionText?.trim()
+    ? mysteryStageActionDisplayText(
+        args.explicitStageActionText,
+        args.speakerNames,
+        true,
+      )
+    : null;
+  return {
+    stageActionText:
+      explicit ??
+      legacy.stageActionText ??
+      (args.materializeFallback
+        ? fallbackDebateMysteryStageActionTextV2({
+            stableId: args.stableId,
+            performance: args.performance,
+          })
+        : null),
+    spokenText: legacy.spokenText,
+  };
 }
 
 export interface DebateMysteryPublicStatementV2 {
@@ -299,6 +458,7 @@ export interface DebateMysteryPublicStatementV2 {
   version: number;
   lineId: string;
   visibleText: string;
+  stageActionText?: string | null;
   pressed: boolean;
 }
 
@@ -310,6 +470,7 @@ export interface DebateMysteryWitnessCheckpointV2 {
 
 export interface DebateMysteryCourtStateV2 {
   witnessOrder: string[];
+  defendantSeatId: string | null;
   completedChapterIds: string[];
   activeChapterId: string | null;
   activeStatementId: string | null;
@@ -317,6 +478,14 @@ export interface DebateMysteryCourtStateV2 {
   credibilityRemaining: number;
   credibilityMaximum: number;
   checkpoint: DebateMysteryWitnessCheckpointV2 | null;
+}
+
+export interface DebateMysteryPlayReadinessV1 {
+  version: typeof DEBATE_MYSTERY_PLAY_READINESS_VERSION;
+  status: "repair_required" | "repairing" | "ready" | "failed";
+  spoilerSafeMessage: string;
+  contractHash: string | null;
+  checkedAt: string | null;
 }
 
 export interface DebateWhodunnitFormatStateV2 {
@@ -343,6 +512,7 @@ export interface DebateWhodunnitFormatStateV2 {
   theoryFiledAt: string | null;
   court: DebateMysteryCourtStateV2 | null;
   verdict: DebateMysteryVerdictV2 | null;
+  readiness: DebateMysteryPlayReadinessV1;
   audioReady: boolean;
   voicesEnabled: boolean;
   localAudioFailure: string | null;
@@ -369,8 +539,10 @@ export type DebateMysteryActionRequestV2 =
   | { version: 2; expectedRevision: number; idempotencyKey: string; action: "focus_statement"; statementId: string }
   | { version: 2; expectedRevision: number; idempotencyKey: string; action: "press_statement"; statementId: string }
   | { version: 2; expectedRevision: number; idempotencyKey: string; action: "present_record"; statementId: string; record: DebateMysteryRecordReferenceV2 }
+  | { version: 2; expectedRevision: number; idempotencyKey: string; action: "object_statement"; statementId: string; record: DebateMysteryRecordReferenceV2 }
   | { version: 2; expectedRevision: number; idempotencyKey: string; action: "choose_prosecution_response"; choiceId: string; optionId: string }
-  | { version: 2; expectedRevision: number; idempotencyKey: string; action: "consult_partner"; contextNodeId?: string | null }
+  | { version: 2; expectedRevision: number; idempotencyKey: string; action: "review_strategy"; contextNodeId?: string | null }
+  | { version: 2; expectedRevision: number; idempotencyKey: string; action: "advance_spectator_trial" }
   | { version: 2; expectedRevision: number; idempotencyKey: string; action: "retry_witness_checkpoint" };
 
 export interface DebateMysteryGraphValidationResultV2 {
@@ -390,6 +562,37 @@ interface SolverState {
 
 function recordKey(reference: DebateMysteryRecordReferenceV2): string {
   return `${reference.kind}:${reference.id}`;
+}
+
+/**
+ * Spectator automation may admit only physical evidence that the frozen trial
+ * graph actually requires. Testimony becomes public later, when it is heard in
+ * court; unused clues and every sealed-case field remain outside this list.
+ */
+export function debateMysterySpectatorEvidenceReferencesV2(
+  graph: Pick<
+    DebateMysteryDialogueGraphV2,
+    "initialAdmittedRecordIds" | "witnessChapters"
+  >,
+): DebateMysteryRecordReferenceV2[] {
+  const references = [
+    ...graph.initialAdmittedRecordIds.flatMap((value) => {
+      const [kind, ...idParts] = value.split(":");
+      return kind === "evidence" && idParts.length > 0
+        ? [{ kind: "evidence" as const, id: idParts.join(":") }]
+        : [];
+    }),
+    ...graph.witnessChapters.flatMap((chapter) =>
+      chapter.statementVersions.flatMap((statement) =>
+        statement.correctPresentations.filter(
+          (reference) => reference.kind === "evidence",
+        ),
+      ),
+    ),
+  ];
+  return [
+    ...new Map(references.map((reference) => [recordKey(reference), reference])).values(),
+  ];
 }
 
 function duplicateIds(values: readonly { id: string }[]): string[] {
@@ -441,6 +644,8 @@ export function validateDebateMysteryDialogueGraphV2(args: {
   graph: DebateMysteryDialogueGraphV2;
   suspectSeatIds: readonly string[];
   recordReferences: readonly DebateMysteryRecordReferenceV2[];
+  prosecutorBotId?: string | null;
+  rivalDefenseBotId?: string | null;
   eyewitnessSeatId?: string | null;
   accusedAlibiSupportDiscoveryIds?: readonly string[];
 }): DebateMysteryGraphValidationResultV2 {
@@ -465,7 +670,22 @@ export function validateDebateMysteryDialogueGraphV2(args: {
   for (const line of graph.lines) {
     if (!nodeById.has(line.nodeId)) errors.push(`Line ${line.id} references missing node ${line.nodeId}.`);
     if (!line.visibleText.trim()) errors.push(`Line ${line.id} has no visible text.`);
-    if (line.mode === "spoken" && !line.spokenText.trim()) errors.push(`Spoken line ${line.id} has no performance text.`);
+    if (line.mode !== "text_only" && !line.spokenText.trim()) errors.push(`Spoken line ${line.id} has no performance text.`);
+    if (
+      args.prosecutorBotId &&
+      line.mode !== "text_only" &&
+      line.speakerBotId &&
+      !line.stageActionText?.trim()
+    ) {
+      errors.push(`Spoken bot line ${line.id} has no materialized visual performance beat.`);
+    }
+    if (
+      line.speakerKind === "player" &&
+      args.prosecutorBotId &&
+      line.speakerBotId !== args.prosecutorBotId
+    ) {
+      errors.push(`Player-selected prosecution line ${line.id} is not owned by the selected Prosecutor bot.`);
+    }
   }
 
   const chaptersByWitness = new Map<string, DebateMysteryWitnessChapterV2[]>();
@@ -484,6 +704,7 @@ export function validateDebateMysteryDialogueGraphV2(args: {
       if (!lineById.has(statement.lineId)) errors.push(`Statement ${statement.id} references missing line ${statement.lineId}.`);
       if (!nodeById.has(statement.pressNodeId)) errors.push(`Statement ${statement.id} has no Press result.`);
       if (!nodeById.has(statement.rebuttalNodeId)) errors.push(`Statement ${statement.id} has no incorrect-presentation rebuttal.`);
+      if (statement.objectionNodeId && !nodeById.has(statement.objectionNodeId)) errors.push(`Statement ${statement.id} has no Defense objection.`);
       if (statement.revisionNodeId && !nodeById.has(statement.revisionNodeId)) errors.push(`Statement ${statement.id} has a missing revision node.`);
       if (statement.nextStatementId && !statementIds.has(statement.nextStatementId)) errors.push(`Statement ${statement.id} points to missing statement ${statement.nextStatementId}.`);
       for (const proof of statement.correctPresentations) {
@@ -494,8 +715,51 @@ export function validateDebateMysteryDialogueGraphV2(args: {
   for (const seatId of args.suspectSeatIds) {
     if (!(chaptersByWitness.get(seatId)?.length)) errors.push(`Suspect ${seatId} has no cross-examination chapter.`);
   }
+  for (const witnessSeatId of chaptersByWitness.keys()) {
+    if (!args.suspectSeatIds.includes(witnessSeatId)) {
+      errors.push(`Witness ${witnessSeatId} is not a frozen suspect.`);
+    }
+  }
   const ordinals = graph.witnessChapters.map((chapter) => chapter.ordinal);
   if (new Set(ordinals).size !== ordinals.length) errors.push("Witness chapter order contains duplicate ordinals.");
+  if (graph.witnessChapters.length !== args.suspectSeatIds.length) {
+    errors.push("Every suspect, including any accused suspect, must testify exactly once.");
+  }
+  if (args.prosecutorBotId) {
+    const strategyNode = graph.prosecutorStrategyNodeId
+      ? nodeById.get(graph.prosecutorStrategyNodeId)
+      : null;
+    const strategyLine = strategyNode?.lineId ? lineById.get(strategyNode.lineId) : null;
+    if (
+      !strategyNode ||
+      strategyNode.kind !== "prosecutor_strategy" ||
+      strategyLine?.speakerBotId !== args.prosecutorBotId
+    ) {
+      errors.push("The selected Prosecutor has no authored internal strategy line.");
+    }
+  }
+  if (args.rivalDefenseBotId) {
+    for (const node of graph.nodes.filter((entry) => entry.kind === "defense_reaction")) {
+      const line = node.lineId ? lineById.get(node.lineId) : null;
+      if (line?.speakerBotId !== args.rivalDefenseBotId) {
+        errors.push(`Defense reaction ${node.id} is not owned by Defense Counsel.`);
+      }
+    }
+  }
+  if (graph.defendantReactionNodeIdsBySeat) {
+    for (const seatId of args.suspectSeatIds) {
+      const reactions = graph.defendantReactionNodeIdsBySeat[seatId];
+      for (const nodeId of reactions
+        ? [reactions.testimony, reactions.objection, reactions.evidence]
+        : []) {
+        const node = nodeById.get(nodeId);
+        if (node?.kind !== "defendant_reaction" || node.speakerSeatId !== seatId) {
+          errors.push(`Potential defendant ${seatId} has an invalid authored reaction ${nodeId}.`);
+        }
+      }
+      if (!reactions) errors.push(`Potential defendant ${seatId} has no finite authored court reactions.`);
+    }
+  }
 
   const initial: Omit<SolverState, "nodeId"> = {
     discoveries: new Set(graph.initialDiscoveryIds),
@@ -558,7 +822,7 @@ export function validateDebateMysteryDialogueGraphV2(args: {
       const node = nodeById.get(state.nodeId);
       if (!node || !requirementsSatisfied(node.requirements, state)) continue;
       reachableNodes.add(node.id);
-      if (node.lineId && lineById.get(node.lineId)?.mode === "spoken") reachableLines.add(node.lineId);
+      if (node.lineId && lineById.get(node.lineId)?.mode !== "text_only") reachableLines.add(node.lineId);
       const nextState = applyMutations(node, state);
       for (const id of nextState.discoveries) accumulated.discoveries.add(id);
       for (const id of nextState.topics) accumulated.topics.add(id);
@@ -574,6 +838,11 @@ export function validateDebateMysteryDialogueGraphV2(args: {
   }
   for (const node of graph.nodes) {
     if (!reachableNodes.has(node.id)) errors.push(`Dialogue node ${node.id} is unreachable.`);
+  }
+  for (const choice of graph.prosecutionChoices) {
+    for (const option of choice.options) {
+      if (reachableNodes.has(option.responseNodeId)) reachableLines.add(option.lineId);
+    }
   }
   for (const chapter of graph.witnessChapters) {
     if (!reachableNodes.has(chapter.completionNodeId)) errors.push(`Witness chapter ${chapter.id} cannot reach completion.`);
@@ -689,9 +958,14 @@ export function resolveDebateMysteryConfigV2(
   if (trialType === "bench" && jurorBotIds.length > 0) {
     throw new Error("Bench Trial cannot freeze juror bot IDs.");
   }
+  const prosecutorBotId =
+    value.prosecutorBotId?.trim() || value.prosecutorPartnerBotId?.trim() || "";
+  if (!prosecutorBotId) {
+    throw new Error("Whodunnit V2 requires a selected Prosecutor bot.");
+  }
   const castIds = [
     ...suspectBotIds,
-    value.prosecutorPartnerBotId.trim(),
+    prosecutorBotId,
     value.rivalDefenseBotId.trim(),
     ...(value.judgeBotId && value.judgeBotId !== "prism:player-judge" ? [value.judgeBotId.trim()] : []),
     ...jurorBotIds,
@@ -705,15 +979,20 @@ export function resolveDebateMysteryConfigV2(
   const totalRooms = preset === "custom"
     ? Math.min(18, Math.max(suspectBotIds.length + 1, Math.floor(value.totalRooms ?? 10)))
     : presetDefaults.rooms;
+  const {
+    prosecutorPartnerBotId: _legacyProsecutorPartnerBotId,
+    prosecutorBotId: _inputProsecutorBotId,
+    ...publicValue
+  } = value;
   return {
-    ...value,
+    ...publicValue,
     trialType,
     suspectBotIds,
     jurorBotIds: trialType === "jury"
       ? jurorBotIds as [string, string, string, string]
       : [],
     judgeBotId: value.judgeBotId?.trim() || "prism:player-judge",
-    prosecutorPartnerBotId: value.prosecutorPartnerBotId.trim(),
+    prosecutorBotId,
     rivalDefenseBotId: value.rivalDefenseBotId.trim(),
     inspiration: value.inspiration.trim().slice(0, 2_000),
     nonce: value.nonce.trim().slice(0, 200),
@@ -784,5 +1063,74 @@ export function normalizeDebateMysteryFormatStateV2(
   ) {
     return null;
   }
-  return source as DebateWhodunnitFormatStateV2;
+  const configSource = source.config as unknown as Record<string, unknown>;
+  const prosecutorBotId =
+    (typeof configSource.prosecutorBotId === "string"
+      ? configSource.prosecutorBotId.trim()
+      : "") ||
+    (typeof configSource.prosecutorPartnerBotId === "string"
+      ? configSource.prosecutorPartnerBotId.trim()
+      : "");
+  if (!prosecutorBotId) return null;
+  const { prosecutorPartnerBotId: _legacyProsecutorPartnerBotId, ...config } =
+    configSource;
+  const readinessSource = source.readiness as
+    | Partial<DebateMysteryPlayReadinessV1>
+    | undefined;
+  const readiness: DebateMysteryPlayReadinessV1 =
+    readinessSource?.version === DEBATE_MYSTERY_PLAY_READINESS_VERSION &&
+    (
+      readinessSource.status === "repair_required" ||
+      readinessSource.status === "repairing" ||
+      readinessSource.status === "ready" ||
+      readinessSource.status === "failed"
+    )
+      ? {
+          version: DEBATE_MYSTERY_PLAY_READINESS_VERSION,
+          status: readinessSource.status,
+          spoilerSafeMessage:
+            typeof readinessSource.spoilerSafeMessage === "string"
+              ? readinessSource.spoilerSafeMessage
+              : "Checking the local case pack",
+          contractHash:
+            typeof readinessSource.contractHash === "string"
+              ? readinessSource.contractHash
+              : null,
+          checkedAt:
+            typeof readinessSource.checkedAt === "string"
+              ? readinessSource.checkedAt
+              : null,
+        }
+      : {
+          version: DEBATE_MYSTERY_PLAY_READINESS_VERSION,
+          status: "repair_required",
+          spoilerSafeMessage: "Preparing this local case for the current player-role contract",
+          contractHash: null,
+          checkedAt: null,
+        };
+  return {
+    ...(source as DebateWhodunnitFormatStateV2),
+    config: {
+      ...config,
+      prosecutorBotId,
+    } as unknown as DebateMysteryResolvedConfigV2,
+    dialogueHistory: source.dialogueHistory.map((entry) => ({
+      ...entry,
+      speakerBotId:
+        typeof (entry as Partial<DebateMysteryPublicDialogueEntryV2>).speakerBotId ===
+        "string"
+          ? (entry as Partial<DebateMysteryPublicDialogueEntryV2>).speakerBotId!
+          : null,
+    })),
+    court: source.court
+      ? {
+          ...source.court,
+          defendantSeatId:
+            typeof source.court.defendantSeatId === "string"
+              ? source.court.defendantSeatId
+              : source.theory?.culpritSeatId ?? null,
+        }
+      : null,
+    readiness,
+  };
 }

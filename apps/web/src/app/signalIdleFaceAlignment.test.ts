@@ -8,15 +8,19 @@ const pageCss = readFileSync(
   "utf8",
 );
 
-describe("Signal idle face alignment", () => {
-  it("raises the complete face and Ink plane only while a Signal bot is not talking", () => {
+describe("Signal face alignment", () => {
+  it("keeps the complete face and Ink plane raised while a Signal bot talks", () => {
     assert.match(
       pageCss,
-      /\.signalBotPresencePlate\[data-signal-surface="stage"\]:not\(\[data-talking="true"\]\)\s*\.zenLiveBotPresenceScreenContentRig\s*\{[^}]*translate:\s*0 clamp\(-6px, -0\.42vw, -4px\)/iu,
+      /\.signalBotPresencePlate\[data-signal-surface="stage"\]\s*\.zenLiveBotPresenceScreenContentRig\s*\{[^}]*translate:\s*0 clamp\(-6px, -0\.42vw, -4px\)/iu,
     );
     assert.doesNotMatch(
       pageCss,
-      /\.signalBotPresencePlate\[data-signal-surface="stage"\]\[data-talking="true"\][^{]*\.zenLiveBotPresenceScreenContentRig/iu,
+      /\.signalBotPresencePlate\[data-signal-surface="stage"\]:not\(\[data-talking="true"\]\)[^{]*\.zenLiveBotPresenceScreenContentRig/iu,
+    );
+    assert.doesNotMatch(
+      pageCss,
+      /\.signalBotPresencePlate\[data-signal-surface="stage"\][^{]*\[data-avatar-details-ink-role="talking"\]/iu,
     );
 
     const signalPresenceTalkingContracts = pageSource.match(

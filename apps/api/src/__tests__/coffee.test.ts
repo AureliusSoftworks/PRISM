@@ -158,6 +158,7 @@ import {
   restartCoffeeConversationFromSession,
   resolveCoffeeAutonomousSpeakerHandoff,
   resolveCoffeeIdentityMirrorDirectAddresseeV1,
+  resolveCoffeePlayerPlainTextAddresseeV1,
   resolveCoffeeMoodBoostRecipientIdsV1,
   resolveCoffeeMoodDrainHolderIdsV1,
   respondCoffeeWaiterOffer,
@@ -6583,6 +6584,9 @@ describe("Coffee group foundation", () => {
         enabled: true,
         baseVoiceId: "voice-4",
         accentDefinitionId: "indian-english",
+        pronunciationMapPoint: { x: 0.83, y: 0.19 },
+        speechprintInfluence: "indian-english",
+        speechprintVariationSeed: "identity-crisis-target",
       }),
       ALICE.id,
     );
@@ -6594,6 +6598,7 @@ describe("Coffee group foundation", () => {
         enabled: true,
         baseVoiceId: "voice-3",
         accentDefinitionId: "irish-english",
+        pronunciationMapPoint: { x: 0.17, y: 0.73 },
         speechprintInfluence: "irish-english",
         speechprintVariationSeed: "identity-crisis-ian",
       }),
@@ -6681,6 +6686,10 @@ describe("Coffee group foundation", () => {
     assert.equal(
       firstEvent.state.holderVoice?.accentDefinitionId,
       "irish-english",
+    );
+    assert.deepEqual(
+      firstEvent.state.holderVoice?.pronunciationMapPoint,
+      { x: 0.17, y: 0.73 },
     );
     assert.equal(
       firstEvent.state.holderVoice?.speechprintVariationSeed,
@@ -13862,6 +13871,33 @@ describe("coffee prompt leak cleanup", () => {
     );
   });
 
+  it("rejects narrated silence when a directly addressed bot owes spoken words", () => {
+    assert.equal(
+      sanitizeCoffeeTableReply("Lapses into dignified silence.", "Squidward"),
+      "",
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "*lapses into dignified silence*",
+        "Squidward",
+        110,
+        [],
+        { requireSpokenReply: true },
+      ),
+      "",
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "*shifts in the seat* The sealed emergency ration is my answer.",
+        "Squidward",
+        110,
+        [],
+        { requireSpokenReply: true },
+      ),
+      "*shifts in the seat* The sealed emergency ration is my answer.",
+    );
+  });
+
   it("strips bare assistant role tags and repairs glued stage actions", () => {
     assert.equal(
       sanitizeCoffeeTableReply(
@@ -15340,6 +15376,96 @@ describe("pickDirectedSpeaker", () => {
 });
 
 describe("Coffee direct mention routing helpers", () => {
+  it("resolves the exact plain-text direct calls without hijacking third-person references", () => {
+    const roster = [
+      { ...CARA, id: "squidward", name: "Squidward" },
+      PLANKTON,
+      { ...ALICE, id: "spongebob", name: "SpongeBob SquarePants" },
+      MR_KRABS,
+      { ...BORIS, id: "patrick", name: "Patrick Star" },
+    ];
+    for (const line of [
+      "Plankton, what is your favorite thing to eat at the Chum Bucket?",
+      "I asked Plankton.",
+      "Plankton?",
+      "What do you think, SpongeBob?",
+    ]) {
+      const expected = line.includes("SpongeBob") ? "spongebob" : PLANKTON.id;
+      assert.equal(
+        resolveCoffeePlayerPlainTextAddresseeV1({ line, seatedBots: roster }),
+        expected,
+        line,
+      );
+    }
+    for (const line of [
+      "What did Plankton say?",
+      "Plankton is opening a restaurant.",
+      "Alice, Ian, and Cara have all mapped it.",
+    ]) {
+      assert.equal(
+        resolveCoffeePlayerPlainTextAddresseeV1({ line, seatedBots: roster }),
+        null,
+        line,
+      );
+    }
+  });
+
+  it("hard-routes the five-bot pileup session's typed Plankton call and persists route provenance", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-plain-address";
+    const roster = [
+      { ...CARA, id: "squidward", name: "Squidward" },
+      PLANKTON,
+      { ...ALICE, id: "spongebob", name: "SpongeBob SquarePants" },
+      MR_KRABS,
+      { ...BORIS, id: "patrick", name: "Patrick Star" },
+    ];
+    for (const bot of roster) seedCoffeeBot(db, userId, bot);
+    const session = await createCoffeeConversation(db, userId, {
+      groupBotIds: roster.map((bot) => bot.id),
+      coffeeSettings: {
+        responseLength: "balanced",
+        tableEnergy: "afterparty",
+        crossTalk: "pileup",
+        responseDelayBias: 100,
+        breathingRoom: 0,
+        stayOnThread: false,
+        givePlayerLastWord: false,
+      },
+      initialTopic: "If you could go on land, what would you do?",
+    });
+    const chatBodies: unknown[] = [];
+    const playerMessage =
+      "Plankton, what is your favorite thing to eat at the Chum Bucket? Imagine you are a customer. What would you buy?";
+    const turn = await withMockedCoffeeFetch(
+      "My pick is the Chum Bucket Supreme—extra algae glaze.",
+      () =>
+        processCoffeeTurn(
+          db,
+          userId,
+          { conversationId: session.conversation.id, message: playerMessage },
+          { preferredProvider: "local", sessionRemainingMs: 240_000 },
+        ),
+      { chatBodies },
+    );
+    const stored = db.prepare(
+      "SELECT content, tool_payload FROM messages WHERE conversation_id = ? AND role = 'assistant' ORDER BY rowid DESC LIMIT 1",
+    ).get(session.conversation.id) as { content: string; tool_payload: string | null };
+    const route = parseStoredAssistantToolPayload(stored.tool_payload).coffeeTurnRoute;
+
+    assert.equal(turn.speakerBotId, PLANKTON.id);
+    assert.equal(chatBodies.length, 1, "plain address should bypass the auxiliary router");
+    assert.equal(stored.content, "My pick is the Chum Bucket Supreme—extra algae glaze.");
+    assert.deepEqual(route, {
+      v: 1,
+      name: "coffeeTurnRoute",
+      source: "player_direct_address",
+      selectedSpeakerBotId: PLANKTON.id,
+      addressedBotId: PLANKTON.id,
+      playerAddressKind: "plain_text",
+    }, stored.tool_payload ?? "missing tool payload");
+  });
+
   it("separates direct bot address from broad name tagging and excludes the player", () => {
     const identityCrisisIan = {
       ...BORIS,

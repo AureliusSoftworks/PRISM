@@ -5,10 +5,13 @@ import {
   debateMysteryCredibilityMaximumV2,
   debateMysteryEyewitnessChanceV2,
   debateMysteryPremiumAvailableV2,
+  debateMysterySpectatorEvidenceReferencesV2,
   emptyDebateMysteryMutationsV2,
   emptyDebateMysteryRequirementsV2,
   validateDebateMysteryAudioManifestV1,
   validateDebateMysteryDialogueGraphV2,
+  resolveDebateMysteryConfigV2,
+  splitDebateMysteryStageActionTextV2,
   type DebateMysteryAudioManifestV1,
   type DebateMysteryDialogueGraphV2,
   type DebateMysteryDialogueNodeV2,
@@ -22,6 +25,7 @@ function line(id: string, nodeId: string, visibleText = id): DebateMysterySpoken
     nodeId,
     speakerKind: "bot",
     speakerBotId: "bot-1",
+    stageActionText: null,
     visibleText,
     spokenText: visibleText,
     performance: { mood: "guarded", pace: "natural", intensity: 1, actorNote: "Keep the subtext controlled." },
@@ -29,6 +33,43 @@ function line(id: string, nodeId: string, visibleText = id): DebateMysterySpoken
     reusableCalloutKey: null,
   };
 }
+
+test("separates Whodunnit stage action from spoken dialogue", () => {
+  assert.deepEqual(
+    splitDebateMysteryStageActionTextV2(
+      "Meg Griffin frowns at the item. “That does not tell me much about where I was.”",
+      "Meg Griffin",
+    ),
+    {
+      stageActionText: "Frowns at the item",
+      spokenText: "That does not tell me much about where I was.",
+    },
+  );
+  assert.deepEqual(
+    splitDebateMysteryStageActionTextV2(
+      "Former Witness frowns at the item. “That does not tell me much about where I was.”",
+      "Current Cast Name",
+    ),
+    {
+      stageActionText: "Frowns at the item",
+      spokenText: "That does not tell me much about where I was.",
+    },
+  );
+  assert.deepEqual(
+    splitDebateMysteryStageActionTextV2("*winces at the photograph* I have never seen it before."),
+    {
+      stageActionText: "Winces at the photograph",
+      spokenText: "I have never seen it before.",
+    },
+  );
+  assert.deepEqual(
+    splitDebateMysteryStageActionTextV2("That does not prove I entered the room."),
+    {
+      stageActionText: null,
+      spokenText: "That does not prove I entered the room.",
+    },
+  );
+});
 
 function node(
   id: string,
@@ -209,4 +250,33 @@ test("difficulty, eyewitness, Premium, and verdict contracts are deterministic",
   assert.equal(debateMysteryPremiumAvailableV2(), false);
   assert.equal(debateMysteryClassifyVerdictV2({ legalResult: "guilty", accusedIsCulprit: false, proofEstablished: true, proofSafe: true }), "wrongful_conviction");
   assert.equal(debateMysteryClassifyVerdictV2({ legalResult: "not_guilty", accusedIsCulprit: true, proofEstablished: true, proofSafe: true }), "acquittal_despite_proof");
+});
+
+test("Spectator setup is preserved and its partner record selects only required physical proof", () => {
+  const resolved = resolveDebateMysteryConfigV2({
+    version: 2,
+    preset: "compact",
+    difficulty: "classic",
+    artMode: "bundled",
+    trialType: "bench",
+    inspiration: "",
+    nonce: "spectator-contract",
+    suspectBotIds: ["suspect-1", "suspect-2", "suspect-3", "suspect-4"],
+    prosecutorPartnerBotId: "partner",
+    rivalDefenseBotId: "defense",
+    jurorBotIds: [],
+    playerRole: "spectator",
+  });
+  assert.equal(resolved.playerRole, "spectator");
+
+  const graph = validGraph();
+  graph.initialAdmittedRecordIds = ["evidence:opening", "testimony:not-yet-public"];
+  graph.witnessChapters[1]!.statementVersions[0]!.correctPresentations = [{
+    kind: "testimony",
+    id: "prior-witness",
+  }];
+  assert.deepEqual(debateMysterySpectatorEvidenceReferencesV2(graph), [
+    { kind: "evidence", id: "opening" },
+    { kind: "evidence", id: "evidence-seat-1" },
+  ]);
 });

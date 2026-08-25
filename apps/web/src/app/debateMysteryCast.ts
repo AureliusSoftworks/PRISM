@@ -5,7 +5,7 @@ export interface WhodunnitCastBot {
 export interface WhodunnitCastAllocation {
   suspectBotIds: string[];
   judgeBotId: string;
-  prosecutorPartnerBotId: string;
+  prosecutorBotId: string;
   rivalDefenseBotId: string;
 }
 
@@ -114,7 +114,7 @@ export function randomizeWhodunnitCast(
   return {
     suspectBotIds: remaining.slice(0, targetSuspects),
     judgeBotId: remaining[targetSuspects] ?? "",
-    prosecutorPartnerBotId: remaining[targetSuspects + 1] ?? "",
+    prosecutorBotId: remaining[targetSuspects + 1] ?? "",
     rivalDefenseBotId: remaining[targetSuspects + 2] ?? "",
   };
 }

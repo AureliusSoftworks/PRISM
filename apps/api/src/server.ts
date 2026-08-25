@@ -293,6 +293,7 @@ import {
   continueDebateMysteryV2WithoutVoices,
   createDebateMysterySessionV2,
   cleanupUnreferencedDebateMysteryAudioV2,
+  ensureDebateMysteryPlayReadyV2,
   getDebateMysteryAudioClipV2,
   getDebateMysteryAudioStorageSummaryV2,
   getDebateMysteryCompilationStatusV2,
@@ -17521,6 +17522,18 @@ function buildRoutes(): RouteDefinition[] {
         session: debateSessionForPlayer(session),
       });
     }),
+    route("POST", "/api/debates/:id/mystery-readiness", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const session = await ensureDebateMysteryPlayReadyV2(
+        db,
+        userId,
+        ctx.params.id,
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+      });
+    }),
     route("POST", "/api/debates/:id/mystery-resume-compilation", async (ctx) => {
       const userId = requireAuth(ctx);
       const frozen = getDebateSession(db, userId, ctx.params.id);
@@ -23578,6 +23591,10 @@ function buildRoutes(): RouteDefinition[] {
       if (pendingDepartureEpilogue) {
         await pendingDepartureEpilogue;
       }
+      // A synopsis is the terminal transcript snapshot. Cancel any generation
+      // still choosing/holding the floor before reading that snapshot so a
+      // late assistant row cannot land behind the saved recap.
+      cancelCoffeeTurnJobsForConversation(userId, ctx.params.id);
       const requestedProvider = readProvider(body.preferredProvider);
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);

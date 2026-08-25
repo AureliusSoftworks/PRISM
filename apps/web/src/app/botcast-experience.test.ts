@@ -271,6 +271,14 @@ describe("Signal experience shell", () => {
       source,
       /JSON\.stringify\(\{ mode, atMs: liveCameraElapsedMs \}\)/u,
     );
+    assert.match(
+      source,
+      /setLiveCameraOverride\(\{ episodeId: episode\.id, mode \}\)[\s\S]{0,120}setCameraSaving\(true\)/u,
+    );
+    assert.match(
+      source,
+      /liveCameraOverride\?\.episodeId === episode\.id[\s\S]{0,100}liveCameraOverride\.mode/u,
+    );
     assert.match(source, /aria-pressed=\{liveCameraMode === camera\}/u);
     assert.match(source, /data-tutorial-target="botcast-live-camera"/u);
     const liveStageIndex = source.indexOf("shot: liveShot");
@@ -1710,6 +1718,52 @@ describe("Signal experience shell", () => {
     assert.match(css, /\.randomizeBookingButton/u);
   });
 
+  it("resolves I Feel Lucky as one coherent setup before canonical launch", () => {
+    const luckySource = source.slice(
+      source.indexOf("const feelLucky = async"),
+      source.indexOf("return (", source.indexOf("const feelLucky = async")),
+    );
+    assert.match(source, /I Feel Lucky!/u);
+    assert.match(
+      source,
+      /data-tutorial-target="botcast-feel-lucky"/u,
+    );
+    assert.match(
+      source,
+      /Skip the search\. Let Signal surprise you\./u,
+    );
+    assert.match(
+      luckySource,
+      /field: "booking",[\s\S]*currentTopic: "",[\s\S]*currentProducerBrief: "",[\s\S]*preferredProvider: episodeModelProvider,[\s\S]*responseMode,[\s\S]*modelOverride: selectedEpisodeModelOption\?\.id \?\? null/u,
+    );
+    assert.match(
+      luckySource,
+      /luckyLaunchUiInFlightRef\.current[\s\S]*luckyLaunchUiInFlightRef\.current = true[\s\S]*luckyLaunchUiInFlightRef\.current = false/u,
+    );
+    assert.match(
+      luckySource,
+      /await selectShow\(setup\.show\);[\s\S]*setGuestDraftId\(setup\.guestBotId\);[\s\S]*setTopicDraft\(setup\.topic\);[\s\S]*setProducerBriefDraft\(setup\.producerBrief\);[\s\S]*await startEpisode\(\{[\s\S]*watchAutoStart: true/u,
+    );
+    const startSource = source.slice(
+      source.indexOf("const startEpisode = async"),
+      source.indexOf("startEpisodeRef.current = startEpisode"),
+    );
+    assert.match(startSource, /override\?: SignalEpisodeStartOverride/u);
+    assert.match(startSource, /guestBotId: launchGuestId/u);
+    assert.match(startSource, /topic: launchTopic\.trim\(\)/u);
+    assert.match(startSource, /expandComposerDraft\?\.\(launchProducerBrief\)/u);
+    assert.match(
+      startSource,
+      /const launchWatchAutoStart =[\s\S]*override\?\.watchAutoStart \?\? watchAutoStartDraft[\s\S]*if \(!launchWatchAutoStart\)/u,
+    );
+    assert.match(css, /\.feelLuckyButton/u);
+    assert.match(
+      css,
+      /\.feelLuckyPrism[\s\S]*linear-gradient\([^}]*var\(--prism-p\)[^}]*var\(--prism-s\)/u,
+    );
+    assert.doesNotMatch(css, /google/iu);
+  });
+
   it("offers model-synthesized Refract actions beside both editable booking fields", () => {
     assert.match(source, /<PrismRefractTarget/u);
     assert.match(source, /kind: "signal\.booking\.topic"/u);
@@ -1769,8 +1823,8 @@ describe("Signal experience shell", () => {
     assert.match(source, /Private host cues/u);
     assert.match(source, /sendCue\(\{ kind: "refocus" \}\)/u);
     assert.match(source, /Wrap it up/u);
-    assert.match(source, /Say this…/u);
-    assert.match(source, /exact words on air/u);
+    assert.match(source, /Shape this…/u);
+    assert.match(source, /private wording to transform/u);
     assert.match(source, /directQuote/u);
     assert.match(source, /className=\{styles\.producerImageAttach\}/u);
     assert.match(source, /vision-capable active model can also discuss an image/u);
@@ -1786,6 +1840,9 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /Interrupt guest now/u);
     assert.match(source, /interruptGuestWithQueuedCue/u);
+    assert.match(source, /const interrupted = await advanceEpisode/u);
+    assert.match(source, /The interruption did not dispatch/u);
+    assert.match(source, /queuedCueInterruptUnavailableReason/u);
     assert.match(source, /botcastEchoHostInterruptPhrase/u);
     assert.match(source, /applyBotPowerEchoResponseV1/u);
     assert.match(source, /echoBridgeAlreadyVoiced/u);
@@ -1802,7 +1859,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /botcastInterruptedGuestContent/u);
     assert.match(
       source,
-      /guestInterruption \? \{ guestInterruption \} : \{\}/u,
+      /resolvedGuestInterruption[\s\S]{0,80}\? \{ guestInterruption: resolvedGuestInterruption \}/u,
     );
     assert.match(source, /interruptionBridgePlayback/u);
     assert.match(source, /playPreparedEpisodeMessage\([\s\S]{0,180}false,/u);
@@ -1820,10 +1877,9 @@ describe("Signal experience shell", () => {
       source,
       /const activeGuestMessage =[\s\S]{0,180}speakerRole === "guest"/u,
     );
-    assert.match(source, /setEpisode\(optimisticEpisode\)/u);
     assert.match(
       source,
-      /const interruptGuestWithQueuedCue = \(\): void => \{[\s\S]{0,6000}setEpisode\(optimisticEpisode\);[\s\S]{0,400}setAutoRun\(true\);[\s\S]{0,400}void advanceEpisode\(/u,
+      /const interruptGuestWithQueuedCue = async \(\): Promise<void> => \{[\s\S]{0,1800}invalidateEpisodeOperation\(\{ preserveAudibleUtterance: true \}\)[\s\S]{0,500}setAutoRun\(true\)[\s\S]{0,500}const interrupted = await advanceEpisode\(/u,
     );
     assert.match(
       source,
@@ -1868,9 +1924,9 @@ describe("Signal experience shell", () => {
     );
   });
 
-  it("lets the producer send exact on-air words and attach one gated session image", () => {
-    assert.match(source, /Say this…/u);
-    assert.match(source, /exact words on air — one line/u);
+  it("keeps private producer wording off air and attaches one gated session image", () => {
+    assert.match(source, /Shape this…/u);
+    assert.match(source, /private wording to transform — one line/u);
     assert.match(source, /<textarea/u);
     assert.match(source, /producerQuoteCount/u);
     assert.match(source, /directQuote/u);
@@ -1881,7 +1937,8 @@ describe("Signal experience shell", () => {
     assert.match(source, /accept=\{SIGNAL_EPISODE_IMAGE_ACCEPT\}/u);
     assert.match(source, /vision-capable active model can also discuss an image/u);
     assert.match(source, /Private to the host\. Use this for context, direction, or a/u);
-    assert.match(source, /as a message from the Producer/u);
+    assert.match(source, /host always paraphrases it in character/u);
+    assert.match(source, /never reveals\s+the private note/u);
     assert.match(
       source,
       /className=\{styles\.producerCueComposer\}[\s\S]{0,240}queuedCueStatus/u,

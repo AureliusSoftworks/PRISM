@@ -10,6 +10,11 @@ import { normalizeMemoryTier } from "./memory.ts";
 import type { ProviderName } from "./providers.ts";
 import { normalizeVoicePreviewLine } from "./voice-preview-line.ts";
 import {
+  exportDebateMysteryV2BackupV1,
+  importDebateMysteryV2BackupV1,
+  type DebateMysteryV2BackupV1,
+} from "./debate-mystery-v2.ts";
+import {
   APPLET_SESSION_NOTE_ENTRY_MAX_CHARACTERS,
   APPLET_SESSION_NOTE_MAX_CHARACTERS,
   appletSessionBelongsToUser,
@@ -654,6 +659,8 @@ export interface BackupSnapshot {
       idempotencyKey: string;
       createdAt: string;
     }>;
+    /** Complete V2 case compiler state and referenced local performance bytes. */
+    mysteryV2?: DebateMysteryV2BackupV1;
   };
   /** One player-authored note attached to an applet session transcript. */
   sessionNotes?: Array<{
@@ -2848,6 +2855,7 @@ export function exportUserSnapshot(
         ORDER BY revision.session_id, revision.revision`,
     )
     .all(userId) as Array<Record<string, string | number | null>>;
+  const debateMysteryV2 = exportDebateMysteryV2BackupV1(db, userId);
 
   return {
     version: 1,
@@ -3235,6 +3243,7 @@ export function exportUserSnapshot(
         idempotencyKey: String(row.idempotency_key),
         createdAt: String(row.created_at),
       })),
+      mysteryV2: debateMysteryV2,
     },
     sessionNotes: sessionNotes.map((row) => ({
       surface: String(row.surface) as NonNullable<
@@ -3391,11 +3400,15 @@ function assertSnapshotIdsStayWithinTenant(
       | "debate_mystery_actions"
       | "debate_mystery_notebooks"
       | "debate_mystery_notebook_revisions"
+      | "debate_mystery_v2_cases"
+      | "debate_mystery_v2_jobs"
+      | "debate_mystery_audio_manifests"
+      | "debate_mystery_audio_cache"
       | "replay_recordings"
       | "replay_voice_takes"
       | SlateBackupTable,
     ids: readonly string[],
-    idColumn: "id" | "project_id" | "session_id" = "id",
+    idColumn: "id" | "project_id" | "session_id" | "cache_key" = "id",
   ): void => {
     const seen = new Set<string>();
     const findOwner = db.prepare(
@@ -3558,6 +3571,28 @@ function assertSnapshotIdsStayWithinTenant(
       "debate_mystery_notebook_revisions",
       (snapshot.debates.mysteryNotebookRevisions ?? []).map((item) => item.id),
     );
+    const mysteryV2 = snapshot.debates.mysteryV2;
+    if (mysteryV2) {
+      assertIds(
+        "debate_mystery_v2_cases",
+        (mysteryV2.cases ?? []).map((item) => item.sessionId),
+        "session_id",
+      );
+      assertIds(
+        "debate_mystery_v2_jobs",
+        (mysteryV2.jobs ?? []).map((item) => item.id),
+      );
+      assertIds(
+        "debate_mystery_audio_manifests",
+        (mysteryV2.manifests ?? []).map((item) => item.sessionId),
+        "session_id",
+      );
+      assertIds(
+        "debate_mystery_audio_cache",
+        (mysteryV2.clips ?? []).map((item) => item.cacheKey),
+        "cache_key",
+      );
+    }
   }
   if (snapshot.presenceBeats) {
     assertIds(
@@ -4982,6 +5017,14 @@ function importUserSnapshotWithinTransaction(
       try { JSON.parse(revision.documentJson); }
       catch { throw new Error("Account backup contains invalid Mystery notebook revision JSON."); }
       insertMysteryNotebookRevision.run(revision.id, userId, revision.sessionId, revision.revision, revision.documentJson, revision.reason, revision.idempotencyKey, revision.createdAt);
+    }
+    if (snapshot.debates.mysteryV2) {
+      importDebateMysteryV2BackupV1(
+        db,
+        userId,
+        snapshot.debates.mysteryV2,
+        sessionIds,
+      );
     }
   }
 

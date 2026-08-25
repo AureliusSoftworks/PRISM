@@ -28,6 +28,8 @@ import {
 } from "./botcast.ts";
 
 const occurredAt = "2026-07-20T20:00:00.000Z";
+const holderPronunciationMapPoint = { x: 0.17, y: 0.73 } as const;
+const targetPronunciationMapPoint = { x: 0.83, y: 0.19 } as const;
 const targetAvatarDetails: BotAvatarDetailsV1 = {
   version: 1,
   screen: {
@@ -54,6 +56,7 @@ function identityState() {
       baseVoiceId: "voice-3",
       pitch: -0.05,
       accentDefinitionId: "irish-english",
+      pronunciationMapPoint: holderPronunciationMapPoint,
       pronunciationBase: "en-US",
       speechprintInfluence: "irish-english",
       speechprintStrength: "strong",
@@ -72,6 +75,10 @@ test("identity mirror snapshots holder voice but ignores legacy target voice and
   assert.ok(state);
   assert.equal(state.holderVoice?.baseVoiceId, "voice-3");
   assert.equal(state.holderVoice?.accentDefinitionId, "irish-english");
+  assert.deepEqual(
+    state.holderVoice?.pronunciationMapPoint,
+    holderPronunciationMapPoint,
+  );
   assert.equal(state.holderVoice?.speechprintVariationSeed, "ian-voice");
   assert.equal(state.holderVoice?.elevenLabsEffect, "echo");
   assert.equal(state.targetGlyph, "lucideMoonStar");
@@ -80,7 +87,15 @@ test("identity mirror snapshots holder voice but ignores legacy target voice and
   const normalizedLegacy = normalizeBotIdentityMirrorStateV1({
     ...state,
     targetColor: "#00ffcc",
-    targetVoice: { v: 2, enabled: true, baseVoiceId: "voice-4" },
+    targetVoice: {
+      v: 2,
+      enabled: true,
+      baseVoiceId: "voice-4",
+      accentDefinitionId: "indian-english",
+      pronunciationMapPoint: targetPronunciationMapPoint,
+      speechprintInfluence: "indian-english",
+      speechprintVariationSeed: "target-voice",
+    },
     targetVoicePreset: "reflective",
     targetFrameMaterialSeed:
       "bot-frame-material:export:0123456789abcdef0123456789abcdef",
@@ -90,6 +105,11 @@ test("identity mirror snapshots holder voice but ignores legacy target voice and
   assert.equal("targetVoice" in normalizedLegacy, false);
   assert.equal("targetVoicePreset" in normalizedLegacy, false);
   assert.equal("targetFrameMaterialSeed" in normalizedLegacy, false);
+  assert.deepEqual(
+    normalizedLegacy.holderVoice?.pronunciationMapPoint,
+    holderPronunciationMapPoint,
+    "normalization must never replace the frozen holder point with a legacy target point",
+  );
   assert.equal(
     normalizedLegacy.targetGlyph,
     "lucideMoonStar",
@@ -303,6 +323,10 @@ test("identity mirror snapshot stays public while its prompt permits borrowed Po
   assert.equal(mirroredVoice.baseVoiceId, "voice-3");
   assert.equal(mirroredVoice.pitch, -0.05);
   assert.equal(mirroredVoice.accentDefinitionId, "irish-english");
+  assert.deepEqual(
+    mirroredVoice.pronunciationMapPoint,
+    holderPronunciationMapPoint,
+  );
   assert.equal(mirroredVoice.pronunciationBase, "en-US");
   assert.equal(mirroredVoice.speechprintInfluence, "irish-english");
   assert.equal(
@@ -310,29 +334,77 @@ test("identity mirror snapshot stays public while its prompt permits borrowed Po
     "echo",
     "the persisted holder voice must win on replay",
   );
+  const compatibilityVoice = applyBotIdentityMirrorHolderVoiceEffectV1(
+    {
+      v: 2,
+      enabled: true,
+      baseVoiceId: "voice-4",
+      accentDefinitionId: "indian-english",
+      pronunciationMapPoint: targetPronunciationMapPoint,
+    },
+    {
+      v: 2,
+      enabled: true,
+      baseVoiceId: "voice-2",
+      accentDefinitionId: "irish-english",
+      pronunciationMapPoint: holderPronunciationMapPoint,
+      elevenLabsEffect: "deep-space",
+      voiceEffectExplicit: true,
+    },
+  );
+  assert.equal(compatibilityVoice.baseVoiceId, "voice-2");
+  assert.deepEqual(
+    compatibilityVoice.pronunciationMapPoint,
+    holderPronunciationMapPoint,
+  );
+  const { holderVoice: _legacyVoice, ...legacyStateWithoutHolderVoice } = state;
+  const legacyStateWithDiscardedTargetVoice = {
+    ...legacyStateWithoutHolderVoice,
+    targetVoice: {
+      v: 2,
+      enabled: true,
+      baseVoiceId: "voice-4",
+      accentDefinitionId: "indian-english",
+      pronunciationMapPoint: targetPronunciationMapPoint,
+    },
+  } as typeof legacyStateWithoutHolderVoice;
   assert.equal(
-    applyBotIdentityMirrorHolderVoiceEffectV1(
-      { v: 2, enabled: true, baseVoiceId: "voice-4" },
+    resolveBotIdentityMirrorVoiceV1(
+      legacyStateWithDiscardedTargetVoice,
       {
         v: 2,
         enabled: true,
         baseVoiceId: "voice-2",
-        elevenLabsEffect: "deep-space",
-        voiceEffectExplicit: true,
+        pitch: -0.2,
+        accentDefinitionId: "irish-english",
+        pronunciationMapPoint: holderPronunciationMapPoint,
+        speechprintInfluence: "irish-english",
+        speechprintVariationSeed: "legacy-holder",
       },
-    ).baseVoiceId,
-    "voice-2",
-  );
-  const { holderVoice: _legacyVoice, ...legacyStateWithoutHolderVoice } = state;
-  assert.equal(
-    resolveBotIdentityMirrorVoiceV1(
-      legacyStateWithoutHolderVoice,
-      { v: 2, enabled: true, baseVoiceId: "voice-2", pitch: -0.2 },
       null,
     ).baseVoiceId,
     "voice-2",
     "legacy replay events resolve the holder roster instead of the stored target voice",
   );
+  const legacyVoice = resolveBotIdentityMirrorVoiceV1(
+    legacyStateWithoutHolderVoice,
+    {
+      v: 2,
+      enabled: true,
+      baseVoiceId: "voice-2",
+      accentDefinitionId: "irish-english",
+      pronunciationMapPoint: holderPronunciationMapPoint,
+      speechprintInfluence: "irish-english",
+      speechprintVariationSeed: "legacy-holder",
+    },
+    null,
+  );
+  assert.deepEqual(
+    legacyVoice.pronunciationMapPoint,
+    holderPronunciationMapPoint,
+  );
+  assert.equal(legacyVoice.accentDefinitionId, "irish-english");
+  assert.equal(legacyVoice.speechprintVariationSeed, "legacy-holder");
   assert.equal(
     resolveBotIdentityMirrorVoiceV1(
       null,

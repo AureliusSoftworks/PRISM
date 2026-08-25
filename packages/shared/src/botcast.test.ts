@@ -8,6 +8,7 @@ import {
 
 import {
   BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK,
+  BOTCAST_CLOSEUP_CAMERA_SCALE,
   BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT,
   BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
   BOTCAST_DEFAULT_CAMERA_FRAMING,
@@ -212,7 +213,24 @@ describe("Signal public cadence speech", () => {
         episodeId: "episode-1",
         sequence: 2,
         kind: "image_context",
-        payload: { ...base, phase: "dismissed" },
+        payload: {
+          ...base,
+          phase: "dismissed",
+          discussionMessageIds: [
+            "host-intro",
+            "guest-view",
+            "host-opinion",
+            "guest-extension",
+          ],
+          lifecycleEvidence: {
+            v: 1,
+            messageId: "guest-extension",
+            decision: "dismiss",
+            reason: "semantic_transition",
+            source: "speaker_semantic_marker_v1",
+            semanticDecision: "dismiss_after",
+          },
+        },
         occurredAt: "2026-08-23T00:00:01.000Z",
       },
     ];
@@ -227,6 +245,11 @@ describe("Signal public cadence speech", () => {
     assert.equal(
       botcastImageContextForMessageV1(events, "host-opinion")?.phase,
       "dismissed",
+    );
+    assert.equal(
+      botcastImageContextForMessageV1(events, "guest-extension")
+        ?.lifecycleEvidence?.reason,
+      "semantic_transition",
     );
     assert.equal(botcastImageContextForMessageV1(events, "other"), null);
 
@@ -1067,8 +1090,8 @@ describe("Signal studio layout", () => {
   it("defaults missing positions and clamps saved props inside the stage", () => {
     assert.deepEqual(normalizeBotcastStudioLayout(undefined), BOTCAST_DEFAULT_STUDIO_LAYOUT);
     assert.deepEqual(BOTCAST_DEFAULT_STUDIO_LAYOUT, {
-      hostBot: { x: 22.5, y: 71.25 },
-      guestBot: { x: 77.5, y: 71.25 },
+      hostBot: { x: 22.5, y: 68.25 },
+      guestBot: { x: 77.5, y: 68.25 },
       hostCup: { x: 36.25, y: 90 },
       guestCup: { x: 63.75, y: 90 },
       hostFloorGlow: { x: 22.5, y: 84, scale: 1 },
@@ -1083,17 +1106,40 @@ describe("Signal studio layout", () => {
       }),
       BOTCAST_DEFAULT_STUDIO_LAYOUT,
     );
-    assert.equal(
+    assert.deepEqual(
       normalizeBotcastStudioLayout({
         hostBot: { x: 22.5, y: 71.25 },
         guestBot: { x: 77.5, y: 71.25 },
         hostCup: { x: 36.25, y: 90 },
         guestCup: { x: 63.75, y: 90 },
-        hostFloorGlow: { x: 22.5, y: 86, scale: 0.5 },
-        guestFloorGlow: { x: 77.5, y: 86, scale: 0.75 },
-      }).hostFloorGlow.scale,
-      0.5,
+        hostFloorGlow: { x: 22.5, y: 84, scale: 1 },
+        guestFloorGlow: { x: 77.5, y: 84, scale: 1 },
+      }),
+      BOTCAST_DEFAULT_STUDIO_LAYOUT,
     );
+    const customizedOldDefaultBots = normalizeBotcastStudioLayout({
+      hostBot: { x: 22.5, y: 71.25 },
+      guestBot: { x: 77.5, y: 71.25 },
+      hostCup: { x: 36.25, y: 90 },
+      guestCup: { x: 63.75, y: 90 },
+      hostFloorGlow: { x: 22.5, y: 86, scale: 0.5 },
+      guestFloorGlow: { x: 77.5, y: 86, scale: 0.75 },
+    });
+    assert.deepEqual(customizedOldDefaultBots.hostBot, { x: 22.5, y: 68.25 });
+    assert.deepEqual(customizedOldDefaultBots.guestBot, {
+      x: 77.5,
+      y: 68.25,
+    });
+    assert.deepEqual(customizedOldDefaultBots.hostFloorGlow, {
+      x: 22.5,
+      y: 86,
+      scale: 0.5,
+    });
+    assert.deepEqual(customizedOldDefaultBots.guestFloorGlow, {
+      x: 77.5,
+      y: 86,
+      scale: 0.75,
+    });
     assert.deepEqual(
       normalizeBotcastStudioLayout({
         hostBot: { x: 22.5, y: 64 },
@@ -1139,6 +1185,21 @@ describe("Signal studio layout", () => {
   });
 
   it("centers close-ups when possible and keeps every pan inside the TV frame", () => {
+    const defaultOffset = botcastCameraOffsetYPercent(
+      "left",
+      BOTCAST_DEFAULT_STUDIO_LAYOUT,
+    );
+    assert.equal(defaultOffset, -18.81);
+    assert.ok(
+      Math.abs(
+        55 +
+          (BOTCAST_DEFAULT_STUDIO_LAYOUT.hostBot.y - 55) *
+            BOTCAST_CLOSEUP_CAMERA_SCALE +
+          defaultOffset -
+          55,
+      ) < 0.01,
+    );
+
     const layout = normalizeBotcastStudioLayout({
       hostBot: { x: 14, y: 42 },
       guestBot: { x: 68, y: 75 },

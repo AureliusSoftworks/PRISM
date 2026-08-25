@@ -24,12 +24,12 @@ import {
   botPowerResponseHasAddressedInsultV1,
   botPowerSourceHashV1,
   botcastAutoCameraLeadInMs,
-  composeBotcastProducerDirectQuoteUtterance,
   botcastConsecutiveSocialSilenceTurns,
   botcastDirectionalIrritationEdgesFromEvents,
   botcastPendingCrosstalkReclaimV1,
   botcastProducerGuestThinkingDiscountMs,
   botcastFallbackStudioAccentVariantForSeed,
+  botcastImageContextForMessageV1,
   botcastLatestImageContextV1,
   botcastReplayTimeline,
   createBotIdentityMirrorStateV1,
@@ -86,6 +86,7 @@ import {
   recordBotcastProducerCutAudienceHandoff,
   recordBotcastProducerGuestAudienceHandoff,
   ensureBotcastEpisodePersonaReview,
+  extractBotcastImageSemanticDecisionV1,
   forceEndBotcastEpisode,
   generateBotcastBookingSuggestion,
   generateBotcastDirectedBooking,
@@ -1315,7 +1316,10 @@ describe("Botcast persistence and isolation", () => {
       assert.match(botcastSource, /generation\.signalEpisodeImage/u);
       assert.match(botcastSource, /images: \[generation\.signalEpisodeImage!\.input\]/u);
       assert.match(botcastSource, /imageDiscussionTurn === "host_follow_up"/u);
-      assert.match(botcastSource, /: "dismissed",/u);
+      assert.match(botcastSource, /semanticDecision === "continue"/u);
+      assert.match(botcastSource, /"continued_discussion"/u);
+      assert.match(botcastSource, /speaker_semantic_marker_v1/u);
+      assert.match(botcastSource, /Generic pronouns such as it, this, or that/u);
       assert.match(botcastSource, /hostFollowUpMessageId:/u);
       assert.match(botcastSource, /reason: "image_complete"/u);
 
@@ -1529,6 +1533,27 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("keeps Signal image semantic labels private and treats missing evidence as unavailable", () => {
+    assert.deepEqual(
+      extractBotcastImageSemanticDecisionV1(
+        "The red wheel still governs the painting.\n[[signal_image_context:continue]]",
+      ),
+      {
+        content: "The red wheel still governs the painting.",
+        decision: "continue",
+      },
+    );
+    assert.deepEqual(
+      extractBotcastImageSemanticDecisionV1(
+        "I see what you mean. That perspective looks different now.",
+      ),
+      {
+        content: "I see what you mean. That perspective looks different now.",
+        decision: null,
+      },
+    );
+  });
+
   it("keeps every active image-discussion lifecycle turn substantive", async () => {
     const db = fixture();
     const provider = recordingProvider(
@@ -1647,6 +1672,22 @@ describe("Botcast persistence and isolation", () => {
         dismissedContext?.hostFollowUpMessageId,
         hostFollowUp.message?.id,
       );
+      assert.equal(
+        dismissedContext?.lifecycleEvidence?.reason,
+        "semantic_unavailable",
+      );
+      assert.equal(
+        dismissedContext?.lifecycleEvidence?.source,
+        "fallback_minimum",
+      );
+      assert.deepEqual(
+        dismissedContext?.discussionMessageIds,
+        [
+          introduction.message?.id,
+          guestDiscussion.message?.id,
+          hostFollowUp.message?.id,
+        ],
+      );
       for (const turn of [guestDiscussion, hostFollowUp]) {
         const utterance = turn.episode.events.findLast(
           (event) =>
@@ -1656,6 +1697,235 @@ describe("Botcast persistence and isolation", () => {
         assert.equal(utterance?.payload.socialSilence, undefined);
         assert.notEqual(utterance?.payload.model, "social-silence");
       }
+    } finally {
+      db.close();
+    }
+  });
+
+  it("extends saved Signal image visibility for substantive turns and dismisses on a real topic shift", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      [
+        "Welcome to the show. I am Mara Vale, and Ivo Stone joins me to examine invention and appetite.",
+        "Invention reveals the appetite that made it necessary.",
+        "Which appetite is hardest for a maker to admit?",
+        "The appetite to make danger beautiful enough to be welcomed.",
+        "Look at this painting, Ivo. What does the red wheel do to the crowded scene?",
+        "The red wheel gives the crowd a beautiful excuse for its violence.",
+        "Those red spokes make delight complicit in the painting. Is that pleasure part of the accusation?\n[[signal_image_context:continue]]",
+        "Yes. The wheel lets the eye enjoy the very appetite the scene condemns.\n[[signal_image_context:continue]]",
+        "Turning to your apprenticeship, which teacher first challenged that appetite?\n[[signal_image_context:move_on]]",
+        "My first workshop master challenged it by stripping ornament from every lesson.",
+      ],
+      captures,
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const created = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Invention and appetite",
+        preferredProvider: "local",
+        model: "llava",
+        responseMode: "local",
+      });
+      for (let turn = 0; turn < 4; turn += 1) {
+        await advanceBotcastEpisode(
+          db,
+          "user-1",
+          created.id,
+          {},
+          generation(provider),
+        );
+      }
+      queueBotcastEpisodeImageContext(db, "user-1", created.id, {
+        imageId: "signal-image-extended",
+        kind: "picture",
+        name: "crowded painting",
+        mimeType: "image/jpeg",
+        provider: "local",
+        model: "llava",
+        replayEmoji: "🖼️",
+      });
+      const imageGeneration = {
+        ...generation(provider),
+        signalSocialSilenceChanceOverride: 0,
+        signalEpisodeImage: {
+          imageId: "signal-image-extended",
+          input: { mimeType: "image/jpeg" as const, data: "AA==" },
+        },
+      };
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        { cue: { kind: "present_image", imageId: "signal-image-extended" } },
+        imageGeneration,
+      );
+      await advanceBotcastEpisode(db, "user-1", created.id, {}, imageGeneration);
+      const hostContinuation = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        imageGeneration,
+      );
+      assert.equal(
+        botcastLatestImageContextV1(hostContinuation.episode.events)?.phase,
+        "discussing",
+      );
+      assert.doesNotMatch(
+        hostContinuation.message?.content ?? "",
+        /signal_image_context/u,
+      );
+
+      const guestContinuation = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        imageGeneration,
+      );
+      const continuedContext = botcastLatestImageContextV1(
+        guestContinuation.episode.events,
+      );
+      assert.equal(continuedContext?.phase, "discussing");
+      assert.equal(
+        continuedContext?.lifecycleEvidence?.reason,
+        "semantic_continuation",
+      );
+      assert.equal(
+        botcastImageContextForMessageV1(
+          guestContinuation.episode.events,
+          guestContinuation.message?.id,
+        )?.imageId,
+        "signal-image-extended",
+      );
+      assert.equal(
+        captures[7]?.some((message) => Boolean(message.images?.length)),
+        true,
+        "the continued turn receives the same attached image",
+      );
+
+      const topicShift = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        imageGeneration,
+      );
+      const dismissedContext = botcastLatestImageContextV1(
+        topicShift.episode.events,
+      );
+      assert.equal(dismissedContext?.phase, "dismissed");
+      assert.equal(
+        dismissedContext?.lifecycleEvidence?.reason,
+        "semantic_topic_shift",
+      );
+      assert.equal(
+        botcastImageContextForMessageV1(
+          topicShift.episode.events,
+          topicShift.message?.id,
+        ),
+        null,
+        "a genuinely shifted turn is not projected with the asset",
+      );
+
+      const afterShift = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      assert.equal(afterShift.message?.speakerRole, "guest");
+      assert.equal(
+        captures[9]?.some((message) => Boolean(message.images?.length)),
+        false,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps an explicit Producer move-on authoritative over active image discussion", async () => {
+    const db = fixture();
+    const provider = recordingProvider(
+      [
+        "Welcome to the show. I am Mara Vale, and Ivo Stone joins me to examine useful objects.",
+        "Useful objects reveal the habits around them.",
+        "Which habit is easiest to overlook?",
+        "The habit of preserving an object after its purpose has changed.",
+        "Look at this candle, Ivo. What does the rim reveal?",
+        "The melted rim shows repeated use in a steady draft.",
+        "Let us move on to the workshop that taught you to notice such wear.",
+      ],
+      [],
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const created = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Useful objects",
+        preferredProvider: "local",
+        model: "llava",
+        responseMode: "local",
+      });
+      for (let turn = 0; turn < 4; turn += 1) {
+        await advanceBotcastEpisode(
+          db,
+          "user-1",
+          created.id,
+          {},
+          generation(provider),
+        );
+      }
+      queueBotcastEpisodeImageContext(db, "user-1", created.id, {
+        imageId: "signal-image-move-on",
+        kind: "item",
+        name: "wax candle",
+        mimeType: "image/png",
+        provider: "local",
+        model: "llava",
+        replayEmoji: "🕯️",
+      });
+      const imageGeneration = {
+        ...generation(provider),
+        signalSocialSilenceChanceOverride: 0,
+        signalEpisodeImage: {
+          imageId: "signal-image-move-on",
+          input: { mimeType: "image/png" as const, data: "AA==" },
+        },
+      };
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        { cue: { kind: "present_image", imageId: "signal-image-move-on" } },
+        imageGeneration,
+      );
+      await advanceBotcastEpisode(db, "user-1", created.id, {}, imageGeneration);
+      const movedOn = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        { cue: { kind: "move_on" } },
+        imageGeneration,
+      );
+      const context = botcastLatestImageContextV1(movedOn.episode.events);
+      assert.equal(context?.phase, "dismissed");
+      assert.equal(context?.lifecycleEvidence?.reason, "explicit_lifecycle");
+      assert.equal(
+        context?.lifecycleEvidence?.explicitAction,
+        "producer_move_on",
+      );
+      assert.equal(
+        botcastImageContextForMessageV1(
+          movedOn.episode.events,
+          movedOn.message?.id,
+        ),
+        null,
+      );
     } finally {
       db.close();
     }
@@ -4473,6 +4743,45 @@ describe("Botcast persistence and isolation", () => {
           (event) => event.kind === "session_clock_hold",
         ).length,
         1,
+      );
+
+      const zeroDuration = recordBotcastSessionClockHold(
+        db,
+        "user-1",
+        episode.id,
+        {
+          holdId: "run-zero",
+          reason: "foreground_generation",
+          durationMs: 0,
+        },
+      );
+      assert.equal(
+        zeroDuration.events.filter(
+          (event) => event.kind === "session_clock_hold",
+        ).length,
+        1,
+        "zero-duration UI cleanup never becomes replay direction",
+      );
+
+      const completed = forceEndBotcastEpisode(db, "user-1", episode.id);
+      const afterTerminalHold = recordBotcastSessionClockHold(
+        db,
+        "user-1",
+        episode.id,
+        {
+          holdId: "run-after-complete",
+          reason: "foreground_generation",
+          durationMs: 2_000,
+        },
+      );
+      assert.equal(afterTerminalHold.status, "completed");
+      assert.equal(
+        afterTerminalHold.events.filter(
+          (event) => event.kind === "session_clock_hold",
+        ).length,
+        completed.events.filter(
+          (event) => event.kind === "session_clock_hold",
+        ).length,
       );
     } finally {
       db.close();
@@ -7359,6 +7668,84 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("answers a direct Signal interview question instead of routing the guest to social silence", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const guestAnswer =
+      "I enjoyed the invention, but the pleasure is part of the warning: beauty is how vanity keeps the eye from looking away.";
+    const provider = recordingProvider(
+      [
+        "Welcome to The Unavoidable Form. I am Mara Vale, and Ivo Stone joins me to examine invention and judgment.",
+        "The empty field came first; it gave every later shape something severe to answer to.",
+        "While making that crowded machinery, were you condemning its appetite—or enjoying the invention?",
+        guestAnswer,
+      ],
+      captures,
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "The monster in the empty space",
+        producerBrief: "PRIVATE: ask the guest about the painting.",
+      });
+      const substantiveGeneration = generation(provider);
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        substantiveGeneration,
+      );
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        substantiveGeneration,
+      );
+      const hostQuestion = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        substantiveGeneration,
+      );
+      assert.equal(hostQuestion.message?.speakerRole, "host");
+      assert.match(hostQuestion.message?.content ?? "", /\?$/u);
+
+      const guestResponse = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        {
+          ...substantiveGeneration,
+          signalSocialSilenceChanceOverride: 1,
+        },
+      );
+      assert.equal(guestResponse.message?.speakerRole, "guest");
+      assert.equal(guestResponse.message?.content, guestAnswer);
+      assert.equal(guestResponse.message?.socialSilence, undefined);
+      assert.equal(captures.length, 4);
+      assert.doesNotMatch(
+        captures[3]!.map((message) => message.content).join("\n"),
+        /PRIVATE: ask the guest about the painting/u,
+      );
+      const utterance = guestResponse.episode.events.find(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.messageId === guestResponse.message?.id,
+      );
+      assert.equal(utterance?.payload.provider, "local");
+      assert.notEqual(utterance?.payload.model, "social-silence");
+      assert.equal(utterance?.payload.substantive, undefined);
+      assert.equal(utterance?.payload.socialSilence, undefined);
+    } finally {
+      db.close();
+    }
+  });
+
   it("gives a socially silent Signal speaker two substantive turns before another silence", async () => {
     const db = fixture();
     const provider = recordingProvider([
@@ -8322,6 +8709,10 @@ describe("Botcast persistence and isolation", () => {
         enabled: true,
         baseVoiceId: "voice-4",
         pitch: 0.2,
+        accentDefinitionId: "indian-english",
+        pronunciationMapPoint: { x: 0.83, y: 0.19 },
+        speechprintInfluence: "indian-english",
+        speechprintVariationSeed: "identity-crisis-target",
       }),
       JSON.stringify({
         version: 1,
@@ -8363,6 +8754,7 @@ describe("Botcast persistence and isolation", () => {
         baseVoiceId: "voice-3",
         pitch: -0.05,
         accentDefinitionId: "irish-english",
+        pronunciationMapPoint: { x: 0.17, y: 0.73 },
         speechprintInfluence: "irish-english",
         speechprintStrength: "strong",
         speechprintVariationSeed: "identity-crisis-ian",
@@ -8411,6 +8803,10 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(
         (state.holderVoice as Record<string, unknown>).accentDefinitionId,
         "irish-english",
+      );
+      assert.deepEqual(
+        (state.holderVoice as Record<string, unknown>).pronunciationMapPoint,
+        { x: 0.17, y: 0.73 },
       );
       assert.equal(
         (state.holderVoice as Record<string, unknown>).speechprintVariationSeed,
@@ -19891,6 +20287,43 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("keeps completion terminal when a stale cancel arrives", () => {
+    const db = fixture();
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "A terminal race",
+      });
+      const completed = forceEndBotcastEpisode(db, "user-1", episode.id);
+      const cancelled = cancelBotcastEpisode(db, "user-1", episode.id);
+
+      assert.equal(cancelled.status, "completed");
+      assert.equal(cancelled.outcome, completed.outcome);
+      assert.equal(cancelled.completedAt, completed.completedAt);
+      assert.equal(cancelled.runtimeMs, completed.runtimeMs);
+      assert.equal(
+        cancelled.events.filter(
+          (event) => event.kind === "episode_completed",
+        ).length,
+        1,
+      );
+      assert.equal(
+        cancelled.events.some((event) => event.kind === "episode_cancelled"),
+        false,
+      );
+      assert.equal(
+        forceEndBotcastEpisode(db, "user-1", episode.id).events.filter(
+          (event) => event.kind === "episode_completed",
+        ).length,
+        1,
+        "recording finalization remains idempotent",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("records Watch preparation cancellation without turning it into a producer cut", () => {
     const db = fixture();
     try {
@@ -20035,10 +20468,14 @@ describe("Botcast persistence and isolation", () => {
         cut.message?.content,
         "Sorry, gotta go. Ivo Stone, thank you for joining me, and thank you for watching.",
       );
-      assert.equal(cancelled.status, "cancelled");
-      assert.equal(cancelled.completedAt, null);
-      assert.equal(cancelled.runtimeMs, null);
-      assert.equal(getBotcastShow(db, "user-1", show.id).episodeCount, 0);
+      assert.equal(cancelled.status, "completed");
+      assert.equal(cancelled.completedAt, cut.episode.completedAt);
+      assert.equal(cancelled.runtimeMs, cut.episode.runtimeMs);
+      assert.equal(getBotcastShow(db, "user-1", show.id).episodeCount, 1);
+      assert.equal(
+        cancelled.events.some((event) => event.kind === "episode_cancelled"),
+        false,
+      );
     } finally {
       db.close();
     }
@@ -21222,7 +21659,7 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("airs a producer direct quote as a Producer note without calling a model", async () => {
+  it("rejects exact private cue exposure and accepts an in-character paraphrase", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
     const requiredQuote =
@@ -21232,6 +21669,7 @@ describe("Botcast persistence and isolation", () => {
         "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore The inheritance bargain. Ivo, where should we begin?",
         "With the cost of an offer nobody can call simple.",
         `Ivo, the Producer said "${requiredQuote}" How did that feel?`,
+        "Ivo, what consequence would make this argument fail its first real test?",
       ],
       captures,
     );
@@ -21240,20 +21678,28 @@ describe("Botcast persistence and isolation", () => {
       const episode = createBotcastEpisode(db, "user-1", show.id, {
         guestBotId: "guest-1",
         topic: "The inheritance bargain",
+        preferredProvider: "openai",
+        modelOverride: "gpt-signal-test",
+        responseMode: "online",
       });
+      const onlineGeneration = {
+        preferredProvider: "openai" as const,
+        providerFactory: (() => provider) as typeof selectProvider,
+        signalSocialSilenceChanceOverride: 0,
+      };
       await advanceBotcastEpisode(
         db,
         "user-1",
         episode.id,
         {},
-        generation(provider),
+        onlineGeneration,
       );
       await advanceBotcastEpisode(
         db,
         "user-1",
         episode.id,
         {},
-        generation(provider),
+        onlineGeneration,
       );
       const advanced = await advanceBotcastEpisode(
         db,
@@ -21266,28 +21712,96 @@ describe("Botcast persistence and isolation", () => {
             directQuote: requiredQuote,
           },
         },
-        generation(provider),
+        onlineGeneration,
       );
 
-      assert.equal(captures.length, 2);
+      assert.equal(captures.length, 4);
+      assert.match(advanced.message?.content ?? "", /\?$/u);
+      assert.doesNotMatch(advanced.message?.content ?? "", /Producer/iu);
+      assert.doesNotMatch(advanced.message?.content ?? "", new RegExp(requiredQuote, "iu"));
+      const generationEvent = advanced.episode.events.findLast(
+        (event) => event.kind === "provider_generation",
+      );
+      assert.equal(generationEvent?.payload.outcome, "succeeded");
       assert.equal(
-        advanced.message?.content,
-        composeBotcastProducerDirectQuoteUtterance(requiredQuote),
+        Array.isArray(generationEvent?.payload.attempts) &&
+          generationEvent.payload.attempts.some(
+            (attempt: unknown) =>
+              Boolean(
+                attempt &&
+                  typeof attempt === "object" &&
+                  (attempt as Record<string, unknown>).outcome === "rejected" &&
+                  (attempt as Record<string, unknown>).clause ===
+                    "private_cue_exposure",
+              ),
+          ),
+        true,
       );
       const utterance = advanced.episode.events.find(
         (event) =>
           event.kind === "utterance" &&
           event.payload.messageId === advanced.message?.id,
       );
-      assert.equal(utterance?.payload.provider, "deterministic");
-      assert.equal(utterance?.payload.model, "signal-producer-quote");
+      assert.equal(utterance?.payload.provider, "openai");
+      assert.equal(utterance?.payload.model, "gpt-signal-test");
       assert.equal(utterance?.payload.utteranceRepair, undefined);
     } finally {
       db.close();
     }
   });
 
-  it("airs an unfinished producer story on the first host turn that carries it", async () => {
+  it("recovers repeated private cue exposure with a neutral host question", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const privateDirection =
+      "The producer hates you and what you did to get your way. You disgusting pig. May you rot in hell.";
+    const provider = recordingProvider(
+      [
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore The inheritance bargain. Ivo, where should we begin?",
+        "With the cost of an offer nobody can call simple.",
+        privateDirection,
+        privateDirection,
+      ],
+      captures,
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "The inheritance bargain",
+      });
+      await advanceBotcastEpisode(db, "user-1", episode.id, {}, generation(provider));
+      await advanceBotcastEpisode(db, "user-1", episode.id, {}, generation(provider));
+      const advanced = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        { cue: { kind: "ask_about", directQuote: privateDirection } },
+        generation(provider),
+      );
+
+      assert.equal(captures.length, 4);
+      assert.match(advanced.message?.content ?? "", /\?$/u);
+      assert.doesNotMatch(advanced.message?.content ?? "", /Producer|disgusting pig|rot in hell/iu);
+      const utterance = advanced.episode.events.findLast(
+        (event) => event.kind === "utterance",
+      );
+      assert.equal(
+        (utterance?.payload.utteranceRepair as Record<string, unknown> | undefined)
+          ?.reason,
+        "private_cue_exposure",
+      );
+      assert.equal(
+        (utterance?.payload.utteranceRepair as Record<string, unknown> | undefined)
+          ?.fallbackKind,
+        "host_follow_up",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("turns unfinished private wording into a host-owned question", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
     const unfinishedStory =
@@ -21296,7 +21810,7 @@ describe("Botcast persistence and isolation", () => {
       [
         "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore The Cave of Borrowed Certainty. Ivo, where should we begin?",
         "Begin with the difference between a shadow and a claim you can give an account of.",
-        unfinishedStory,
+        "Ivo, what happens when an unfinished story becomes more persuasive than the evidence?",
       ],
       captures,
     );
@@ -21328,26 +21842,26 @@ describe("Botcast persistence and isolation", () => {
         generation(provider),
       );
 
-      assert.equal(captures.length, 2);
+      assert.equal(captures.length, 3);
       assert.equal(
         advanced.message?.content,
-        composeBotcastProducerDirectQuoteUtterance(unfinishedStory),
+        "Ivo, what happens when an unfinished story becomes more persuasive than the evidence?",
       );
-      assert.match(advanced.message?.content ?? "", /Gerald/u);
-      assert.match(advanced.message?.content ?? "", /three magnificent/u);
+      assert.doesNotMatch(advanced.message?.content ?? "", /Gerald/u);
+      assert.doesNotMatch(advanced.message?.content ?? "", /Producer/iu);
       const utterance = advanced.episode.events.find(
         (event) =>
           event.kind === "utterance" &&
           event.payload.messageId === advanced.message?.id,
       );
-      assert.equal(utterance?.payload.model, "signal-producer-quote");
+      assert.notEqual(utterance?.payload.model, "signal-producer-quote");
       assert.equal(utterance?.payload.utteranceRepair, undefined);
     } finally {
       db.close();
     }
   });
 
-  it("airs a nonsense producer Say-this line without calling a model", async () => {
+  it("does not surface nonsense private wording in canonical dialogue", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
     const nonsense =
@@ -21388,26 +21902,27 @@ describe("Botcast persistence and isolation", () => {
         generation(provider),
       );
 
-      assert.equal(captures.length, 2);
+      assert.equal(captures.length, 3);
       assert.equal(
         advanced.message?.content,
-        composeBotcastProducerDirectQuoteUtterance(nonsense),
+        "Oh! That changes everything! If a rule cultivates reason, does it truly make citizens better in soul?",
       );
-      assert.doesNotMatch(advanced.message?.content ?? "", /Oh! That changes everything/u);
+      assert.doesNotMatch(advanced.message?.content ?? "", /zzzz|babababa|nyanyanya/iu);
+      assert.doesNotMatch(advanced.message?.content ?? "", /Producer/iu);
       const utterance = advanced.episode.events.find(
         (event) =>
           event.kind === "utterance" &&
           event.payload.messageId === advanced.message?.id,
       );
-      assert.equal(utterance?.payload.provider, "deterministic");
-      assert.equal(utterance?.payload.model, "signal-producer-quote");
+      assert.equal(utterance?.payload.provider, "local");
+      assert.notEqual(utterance?.payload.model, "signal-producer-quote");
       assert.equal(utterance?.payload.utteranceRepair, undefined);
     } finally {
       db.close();
     }
   });
 
-  it("replaces a host skip with the required producer story instead of waiting", async () => {
+  it("lets a host paraphrase private wording without redelivering it", async () => {
     const db = fixture();
     const unfinishedStory =
       "Gerald was the only potato left in Spudwick. He lived beneath Mrs. Wimple's kitchen sink, where he had developed three magnificent";
@@ -21449,15 +21964,15 @@ describe("Botcast persistence and isolation", () => {
 
       assert.equal(
         advanced.message?.content,
-        composeBotcastProducerDirectQuoteUtterance(unfinishedStory),
+        "Oh! That changes everything! If a rule cultivates reason, does it truly make citizens better in soul?",
       );
-      assert.doesNotMatch(advanced.message?.content ?? "", /Oh! That changes everything/u);
+      assert.doesNotMatch(advanced.message?.content ?? "", /Gerald|Spudwick|three magnificent/iu);
       const utterance = advanced.episode.events.find(
         (event) =>
           event.kind === "utterance" &&
           event.payload.messageId === advanced.message?.id,
       );
-      assert.equal(utterance?.payload.model, "signal-producer-quote");
+      assert.notEqual(utterance?.payload.model, "signal-producer-quote");
       assert.equal(utterance?.payload.utteranceRepair, undefined);
     } finally {
       db.close();

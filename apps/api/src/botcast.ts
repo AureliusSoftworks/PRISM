@@ -152,6 +152,7 @@ import {
   SIGNAL_PICKLES_SLOW_SIP_DURATION_MS,
   BOT_POWER_CANONICAL_SILENCE_V1,
   normalizeAutoRecoveryTrace,
+  botcastImageDiscussionMessageIdsV1,
   botcastLatestImageContextV1,
   applyDirectionalIrritationCleanTurnDecay,
   applyDirectionalIrritationCutoff,
@@ -8478,6 +8479,8 @@ export function queueBotcastEpisodeImageContext(
     hostIntroductionMessageId: null,
     guestDiscussionMessageId: null,
     hostFollowUpMessageId: null,
+    discussionMessageIds: [],
+    lifecycleEvidence: null,
   };
   const now = new Date().toISOString();
   db.exec("BEGIN IMMEDIATE TRANSACTION");
@@ -9192,6 +9195,10 @@ function botcastUndeliveredAskAboutCue(
     ...(detail ? { detail } : {}),
     ...(directQuote ? { directQuote } : {}),
   };
+  // Private wording is consumed by the first host attempt. It may guide a
+  // paraphrase or a neutral recovery, but exact-text matching must never re-arm
+  // it and pressure a later turn to expose the note.
+  if (directQuote) return null;
   if (hostUtterance.payload.utteranceRepair) {
     return missedCue;
   }
@@ -9559,6 +9566,43 @@ export interface BotcastPairHistoryContext {
   narrativeMemories: string[];
   relationshipTone: "strained" | "guarded" | "neutral" | "warm";
   relationshipReason: string | null;
+}
+
+export type BotcastImageSemanticDecisionV1 =
+  | "continue"
+  | "dismiss_after"
+  | "move_on";
+
+const BOTCAST_IMAGE_SEMANTIC_MARKER_PATTERN =
+  /\[\[signal_image_context:(continue|dismiss_after|move_on)\]\]/giu;
+
+/**
+ * Separates the speaker model's private lifecycle label from canonical speech.
+ * Missing or malformed metadata is deliberately unavailable rather than
+ * guessed from pronouns or generic visual wording.
+ */
+export function extractBotcastImageSemanticDecisionV1(raw: string): {
+  content: string;
+  decision: BotcastImageSemanticDecisionV1 | null;
+} {
+  const decisions: BotcastImageSemanticDecisionV1[] = [];
+  const content = raw
+    .replace(
+      BOTCAST_IMAGE_SEMANTIC_MARKER_PATTERN,
+      (_match, candidate: string) => {
+        decisions.push(
+          candidate.toLowerCase() as BotcastImageSemanticDecisionV1,
+        );
+        return "";
+      },
+    )
+    .replace(/[ \t]+\n/gu, "\n")
+    .replace(/\n{3,}/gu, "\n\n")
+    .trim();
+  return {
+    content,
+    decision: decisions.length === 1 ? decisions[0]! : null,
+  };
 }
 
 function botcastRelationshipTone(
@@ -11010,6 +11054,10 @@ export function buildBotcastSpeakerPrompt(
     ? botcastEpisodeImageSpokenReference(imageContext)
     : "this image";
   const imageTitle = imageContext?.name ?? null;
+  const imageHasCompletedMinimum = Boolean(
+    imageContext?.phase === "discussing" &&
+      imageContext.hostFollowUpMessageId,
+  );
   const imageDiscussionRule =
     args.speakerRole === "host" &&
     args.cue?.kind === "present_image" &&
@@ -11019,9 +11067,26 @@ export function buildBotcastSpeakerPrompt(
         ? `The host has placed ${imageReference} at the center of the table and invited your reaction. Begin with a brief, natural acknowledgement that you are taking a look, then discuss concrete visible details and what they mean from this guest's own perspective. ${imageContext.kind === "item" ? "Treat it as a physical item being shown to you, not as a photograph of an item." : "Treat it as a picture being shown to you, not as the physical subject itself."} Ground every visual claim in the attachment. Do not claim you cannot see it, do not discuss upload mechanics, and do not answer with generic remarks that could fit any image.`
         : args.speakerRole === "host" && imageContext?.phase === "discussing"
           ? args.cue
-            ? `${imageReference} remains on the table and the guest's just-finished comment remains authoritative context. Carry out the queued Producer elaboration or clarification while explicitly connecting it to both one concrete visible feature and the guest's actual point. Add this host's own perspective where natural. Do not discard, overwrite, or pretend not to have heard the guest's comment.`
-            : `${imageReference} remains on the table and the guest has just discussed it. Give this host's own concise, visually grounded opinion, explicitly respond to the guest's actual point, then make a natural transition back to the episode's strongest relevant thread according to this host's biases. Do not ask another generic image question; Signal will clear the table after this line.`
+            ? `${imageReference} remains available while it is still the actual subject. Carry out the queued Producer direction without discarding the guest's just-finished point. If the direction continues the asset discussion, connect it to a concrete visible or physical feature; if it genuinely changes subjects, make that transition naturally instead of forcing the asset into an unrelated turn.`
+            : imageHasCompletedMinimum
+              ? `${imageReference} remains available because the conversation has continued around it. Respond naturally to the guest's latest public point. Keep the discussion grounded in a concrete visible or physical feature only while the asset itself remains substantively relevant; if the conversation has genuinely moved on, do not drag it back.`
+              : `${imageReference} remains on the table and the guest has just discussed it. Give this host's own concise, visually grounded opinion and explicitly respond to the guest's actual point. If a specific asset-grounded question naturally follows, ask it; otherwise make a clear transition to the next subject.`
+          : args.speakerRole === "guest" &&
+              imageContext?.phase === "discussing" &&
+              imageHasCompletedMinimum
+            ? `${imageReference} remains available because the conversation has continued around it. Answer the host's latest public point naturally. Keep grounding the answer in a concrete visible or physical feature only while the asset itself remains substantively relevant; if the host has genuinely moved on, follow the new subject without forcing the asset back in.`
           : null;
+  const imageSemanticDecisionRule =
+    imageContext?.phase === "discussing"
+      ? [
+          "Private Signal asset-lifecycle metadata: end the response with exactly one of these tokens on its own line:",
+          "[[signal_image_context:continue]] when the spoken turn substantively discusses the presented asset, a concrete visible or physical feature, or directly develops the other speaker's asset-grounded point and leaves that discussion active;",
+          "[[signal_image_context:dismiss_after]] when the spoken turn substantively closes or transitions out of that asset discussion;",
+          "[[signal_image_context:move_on]] when the spoken turn is genuinely about another subject.",
+          "Generic pronouns such as it, this, or that; generic visual language such as see, look, focus, picture, or perspective; and unrelated visual metaphors are not enough by themselves to mark continue.",
+          "The token is private metadata: never speak, quote, explain, or otherwise refer to it in the on-air words.",
+        ].join(" ")
+      : null;
   const privateImagePresentationRule =
     args.speakerRole === "host" &&
     imageContext &&
@@ -11134,24 +11199,21 @@ export function buildBotcastSpeakerPrompt(
           "A slightly awkward pivot is acceptable. Do not ignore or postpone the cue merely to preserve smooth conversational momentum.",
         ].join(" ")
       : null;
-  const producerDirectionRule = args.cue?.directQuote?.trim()
-    ? "Private producer direction is silent control-room guidance. Speak any required on-air quote exactly as written, framed as a message from the Producer. You may ease into it. Never mention a cue, control room, or the user."
-    : "Private producer direction is silent control-room guidance. Incorporate it naturally; never quote it, mention a producer, or address the user.";
+  const producerDirectionRule =
+    "Private producer direction is silent control-room guidance. Incorporate its intent naturally in your own voice; never quote it, mention a producer, cue, or control room, or address the user.";
   const askAboutCueRule =
     args.speakerRole === "host" &&
     args.cue?.kind === "ask_about"
       ? args.cue.directQuote?.trim()
         ? [
-            "Binding private live objective: on this exact host turn, speak the required on-air quote from the private live producer cue exactly as written.",
-            "Those words are dialogue, not direction. Do not paraphrase, euphemize, soften, or replace them—no stand-ins such as \"F-bomb,\" \"colorful message,\" or \"eloquence.\"",
-            "Deliver the quote as a message from the Producer, not as your own unprompted speech. Ease into it with a short in-character lead-in if you want, then speak the quote exactly. You may say it is from the Producer.",
-            "Never mention a cue, control room, or the user.",
+            "Binding private live objective: on this exact host turn, transform the supplied private wording into one natural, in-character question or redirect.",
+            "The supplied wording is direction, never dialogue. Do not repeat it verbatim or closely quote it, and never attribute it to a Producer, cue, user, or control room.",
             args.cue.detail?.trim()
-              ? "After the quote is spoken, also pursue the requested subject in your own host voice."
-              : "",
+              ? "Use the accompanying subject to decide what the host should actually ask."
+              : "Preserve only the underlying conversational intent and make the host own the resulting words.",
             "If the cue also requests a visible physical act, perform that act through the private stage-direction format and never announce the movement in spoken dialogue.",
           ].filter(Boolean).join(" ")
-        : "Binding private live objective: on this exact host turn, make the requested subject, event, offer, question, spoken line, or physical behavior in the private live producer cue your primary on-air objective. Do not defer it, soften it into a generic follow-up, contradict or invert it, or substitute an adjacent topic. This cue takes priority over ordinary interview momentum for this turn, while the guest remains free to respond in character. It is direction, not dialogue: never quote the cue detail as a whole, never echo producer cadence words such as \"anyway,\" never mention a producer, cue, or control room, and never address the user. If the cue explicitly requests exact on-air words, preserve those words exactly without exposing the surrounding direction; otherwise paraphrase into your own host voice. If it explicitly requests a visible physical act, perform that act through the private stage-direction format and never announce, describe, or claim the movement in spoken dialogue. Do not import absolute real-world calendar years or dated timestamps from the cue; ask the substance in-world so the guest's persona timeline stays intact."
+        : "Binding private live objective: on this exact host turn, make the requested subject, event, offer, question, spoken line, or physical behavior in the private live producer cue your primary on-air objective. Do not defer it, soften it into a generic follow-up, contradict or invert it, or substitute an adjacent topic. This cue takes priority over ordinary interview momentum for this turn, while the guest remains free to respond in character. It is direction, not dialogue: never quote the cue detail as a whole, never echo producer cadence words such as \"anyway,\" never mention a producer, cue, or control room, and never address the user. Transform any suggested wording into your own host voice. If it explicitly requests a visible physical act, perform that act through the private stage-direction format and never announce, describe, or claim the movement in spoken dialogue. Do not import absolute real-world calendar years or dated timestamps from the cue; ask the substance in-world so the guest's persona timeline stays intact."
       : null;
   const refocusCueRule =
     args.speakerRole === "host" &&
@@ -11481,6 +11543,7 @@ export function buildBotcastSpeakerPrompt(
         ...(producerGuestHostExitRule ? [producerGuestHostExitRule] : []),
         ...(liveCueAdjustmentRule ? [liveCueAdjustmentRule] : []),
         ...(imageDiscussionRule ? [imageDiscussionRule] : []),
+        ...(imageSemanticDecisionRule ? [imageSemanticDecisionRule] : []),
         ...(privateImagePresentationRule ? [privateImagePresentationRule] : []),
         ...(askAboutCueRule ? [askAboutCueRule] : []),
         ...(refocusCueRule ? [refocusCueRule] : []),
@@ -12739,6 +12802,8 @@ function validateBotcastAutoSpeakerUtterance(input: {
   rejectOpeningRetryMeta?: boolean;
   preserveProducerAttribution?: boolean;
   requiredDirectQuote?: string;
+  /** Private live wording that must guide the turn without entering dialogue. */
+  privateProducerDirection?: string;
   recentSpeakerContents?: readonly string[];
 }):
   | { ok: true; value: string }
@@ -12788,6 +12853,16 @@ function validateBotcastAutoSpeakerUtterance(input: {
     requiredQuote,
   );
   const spokenContent = extractBotcastVoicePerformance(sanitized, false).content;
+  const privateProducerDirection = input.privateProducerDirection?.trim() ?? "";
+  const exposesPrivateProducerDirection =
+    privateProducerDirection.length > 0 &&
+    (botcastHostTurnIncludesDirectQuote(
+      extractBotcastVoicePerformance(textValidation.value, false).content,
+      privateProducerDirection,
+    ) ||
+      /\b(?:producer|control\s*room|cue(?:\s*card)?)\b/iu.test(
+        extractBotcastVoicePerformance(textValidation.value, false).content,
+      ));
   const missingQuote =
     requiredQuote.length > 0 &&
     !botcastHostTurnIncludesDirectQuote(spokenContent, requiredQuote);
@@ -12801,6 +12876,8 @@ function validateBotcastAutoSpeakerUtterance(input: {
     : null;
   const failClause = !spokenContent
     ? "empty_spoken"
+    : exposesPrivateProducerDirection
+      ? "private_cue_exposure"
     : missingQuote
       ? "missing_quote"
       : input.rejectOpeningRetryMeta &&
@@ -13927,6 +14004,39 @@ function ensureBotcastFinalHostBeat(
   return getBotcastEpisode(db, userId, episode.id);
 }
 
+function dismissActiveBotcastImageContextV1(
+  db: DatabaseSync,
+  userId: string,
+  episode: Pick<BotcastEpisode, "id" | "events">,
+  explicitAction: string,
+  now: string,
+): boolean {
+  const context = botcastLatestImageContextV1(episode.events);
+  if (!context || context.phase === "queued" || context.phase === "dismissed") {
+    return false;
+  }
+  recordEvent(
+    db,
+    userId,
+    episode.id,
+    "image_context",
+    {
+      ...context,
+      phase: "dismissed",
+      lifecycleEvidence: {
+        v: 1,
+        messageId: null,
+        decision: "dismiss",
+        reason: "explicit_lifecycle",
+        source: "lifecycle",
+        explicitAction,
+      },
+    },
+    now,
+  );
+  return true;
+}
+
 function completeEpisode(
   db: DatabaseSync,
   userId: string,
@@ -13935,6 +14045,20 @@ function completeEpisode(
   now: string,
   options: { forceFinalHostBeat?: boolean; userKey?: Buffer } = {},
 ): void {
+  const current = getBotcastEpisode(db, userId, episode.id);
+  if (current.status !== "live") return;
+  episode = current;
+  if (
+    dismissActiveBotcastImageContextV1(
+      db,
+      userId,
+      episode,
+      "episode_completed",
+      now,
+    )
+  ) {
+    episode = getBotcastEpisode(db, userId, episode.id);
+  }
   episode = ensureBotcastFinalHostBeat(
     db,
     userId,
@@ -14046,6 +14170,9 @@ export function recordBotcastSessionClockHold(
   if (!Number.isFinite(input.durationMs) || input.durationMs < 0) {
     throw new Error("Signal session hold duration must be a non-negative number.");
   }
+  if (episode.status !== "live" || Math.round(input.durationMs) === 0) {
+    return episode;
+  }
   const duplicate = episode.events.some(
     (event) =>
       event.kind === "session_clock_hold" &&
@@ -14118,6 +14245,13 @@ function beginBotcastProducerCut(
     },
     now,
   );
+  dismissActiveBotcastImageContextV1(
+    db,
+    userId,
+    episode,
+    "producer_cut",
+    now,
+  );
   transitionEpisodeSegment(db, userId, episode, "closing", now);
   return {
     episode: getBotcastEpisode(db, userId, episode.id),
@@ -14170,14 +14304,21 @@ export function cancelBotcastEpisode(
   } = {},
 ): BotcastEpisode {
   const episode = getBotcastEpisode(db, userId, episodeId);
-  if (episode.status === "cancelled") return episode;
+  if (episode.status !== "live") return episode;
   const now = new Date().toISOString();
+  dismissActiveBotcastImageContextV1(
+    db,
+    userId,
+    episode,
+    "episode_cancelled",
+    now,
+  );
   closeActiveBotcastModelWarmupHold(db, userId, episode.id, now);
   db.prepare(
     `UPDATE botcast_episodes
         SET status = 'cancelled', outcome = NULL, completed_at = NULL,
             runtime_ms = NULL, updated_at = ?
-      WHERE id = ? AND user_id = ? AND status != 'cancelled'`,
+      WHERE id = ? AND user_id = ? AND status = 'live'`,
   ).run(now, episode.id, userId);
   db.prepare(
     `UPDATE botcast_episode_segments SET ended_at = ?
@@ -15365,16 +15506,43 @@ export async function advanceBotcastEpisode(
           (cueDelivery === "interrupt_guest" || cueDelivery === "redirect_host")
         ? "host"
         : scheduledSpeakerRole;
-  const imageContextAtTurnStart = botcastLatestImageContextV1(episode.events);
+  let imageContextAtTurnStart = botcastLatestImageContextV1(episode.events);
+  const explicitImageLifecycleAction =
+    imageContextAtTurnStart &&
+    imageContextAtTurnStart.phase !== "queued" &&
+    imageContextAtTurnStart.phase !== "dismissed"
+      ? producerCut
+        ? "producer_cut"
+        : episode.segment === "closing"
+          ? "closing_segment"
+          : requestedCue?.kind === "move_on" ||
+              requestedCue?.kind === "refocus" ||
+              requestedCue?.kind === "wrap_up"
+            ? `producer_${requestedCue.kind}`
+            : null
+      : null;
+  if (imageContextAtTurnStart && explicitImageLifecycleAction) {
+    dismissActiveBotcastImageContextV1(
+      db,
+      userId,
+      episode,
+      explicitImageLifecycleAction,
+      now,
+    );
+    episode = getBotcastEpisode(db, userId, episode.id);
+    imageContextAtTurnStart = botcastLatestImageContextV1(episode.events);
+  }
   const imageDiscussionTurn =
     requestedCue?.kind === "present_image" && speakerRole === "host"
       ? "host_introduction" as const
       : imageContextAtTurnStart?.phase === "presented" &&
           speakerRole === "guest"
         ? "guest_discussion" as const
-        : imageContextAtTurnStart?.phase === "discussing" &&
-            speakerRole === "host"
-          ? "host_follow_up" as const
+        : imageContextAtTurnStart?.phase === "discussing"
+          ? speakerRole === "host" &&
+              !imageContextAtTurnStart.hostFollowUpMessageId
+            ? "host_follow_up" as const
+            : "continued_discussion" as const
           : null;
   if (episode.guestKind === "producer" && speakerRole === "guest") {
     return { episode, message: null };
@@ -15569,7 +15737,11 @@ export async function advanceBotcastEpisode(
   const speakerRepeatsForHearingPower = Boolean(
     hearingRepeatDirective && !speakerIsMutedForTurn,
   );
-  const requiredProducerQuote = requestedCue?.directQuote?.trim() ?? "";
+  const privateProducerDirection = requestedCue?.directQuote?.trim() ?? "";
+  // `directQuote` is retained in the persisted request shape for backwards
+  // compatibility, but it is private direction now. Nothing on the canonical
+  // path may enforce or synthesize an exact reading.
+  const requiredProducerQuote = "";
   // A quote that lands mid-line is the host taking live direction, not a new
   // beat, so it opens by acknowledging the interruption instead of with the
   // standing lead-in. Rotating on prior redirects keeps it from going stale.
@@ -15604,16 +15776,13 @@ export async function advanceBotcastEpisode(
   // stance has already ruled out, and the sanitizer repair the persona's own
   // words back into the Producer's.
   const producerQuoteEnforced =
-    producerQuoteReception === null ||
-    producerQuoteReception.stance === "verbatim";
+    Boolean(requiredProducerQuote) &&
+    (producerQuoteReception === null ||
+      producerQuoteReception.stance === "verbatim");
   const enforcedDirectQuote = producerQuoteEnforced
     ? requestedCue?.directQuote?.trim()
     : undefined;
-  const stanceAdjustedCue: BotcastProducerCue | null = requestedCue
-    ? producerQuoteEnforced
-      ? requestedCue
-      : { kind: requestedCue.kind, ...(requestedCue.detail ? { detail: requestedCue.detail } : {}) }
-    : null;
+  const stanceAdjustedCue: BotcastProducerCue | null = requestedCue ?? null;
   const producerQuoteUtterance =
     speakerRole === "host" &&
     requiredProducerQuote &&
@@ -15798,6 +15967,18 @@ export async function advanceBotcastEpisode(
     // every lifecycle turn. Ordinary Signal silence remains available once
     // the host has truthfully completed and dismissed that discussion.
     socialSilenceExclusions.push("direct_player_obligation");
+  }
+  const latestPeerTurnRequiresAnswer = Boolean(
+    latestOnAirMessage?.botId === peer.id &&
+      latestOnAirMessage.speakerRole !== speakerRole &&
+      /[?？]/u.test(latestOnAirMessage.content),
+  );
+  if (latestPeerTurnRequiresAnswer) {
+    // In a produced two-person interview, a direct on-air question creates a
+    // response obligation. A decorative silence here reads as a broken guest
+    // answer, and it bypasses the provider/validator path that could otherwise
+    // keep the exchange specific and in character.
+    socialSilenceExclusions.push("direct_peer_question");
   }
   const consecutiveSocialSilenceTurns =
     botcastConsecutiveSocialSilenceTurns(episode.messages);
@@ -16003,6 +16184,11 @@ export async function advanceBotcastEpisode(
   const basePrompt = firstHostOpening
     ? buildBotcastOpeningIntroPrompt(promptArgs)
     : buildBotcastSpeakerPrompt(promptArgs);
+  const signalTurnOutputContract =
+    imageDiscussionTurn === "host_follow_up" ||
+    imageDiscussionTurn === "continued_discussion"
+      ? "Write only the next on-air Signal utterance in the assigned role, followed by exactly one required private signal_image_context lifecycle token; preserve cue, interruption, Power, and closing rules."
+      : "Write only the next on-air Signal utterance in the assigned role; preserve cue, interruption, Power, and closing rules.";
   const hostClosingTurn =
     speakerRole === "host" && episode.segment === "closing";
   const hostClosingRequiresFormalThanks =
@@ -16523,8 +16709,7 @@ export async function advanceBotcastEpisode(
                       generation.experimentalAllModelEffortEnabled === true
                         ? "deep"
                         : "standard",
-                    outputContract:
-                      "Write only the next on-air Signal utterance in the assigned role; preserve cue, interruption, Power, and closing rules.",
+                    outputContract: signalTurnOutputContract,
                   })
                 : attemptBasePrompt;
             return provider.generateResponse(attemptPrompt, attemptOptions);
@@ -16568,9 +16753,9 @@ export async function advanceBotcastEpisode(
         ...(speakerIsMutedForTurn
           ? {}
           : {
-              validate: (candidate: string) =>
-                validateBotcastAutoSpeakerUtterance({
-                  raw: candidate,
+              validate: (candidate: string) => {
+                const validation = validateBotcastAutoSpeakerUtterance({
+                  raw: extractBotcastImageSemanticDecisionV1(candidate).content,
                   speakerName: speaker.name,
                   peerName: peer.name,
                   speakerRole,
@@ -16589,7 +16774,7 @@ export async function advanceBotcastEpisode(
                     !speakerEternallyIntroduces &&
                     !speakerRepeatsForHearingPower &&
                     !speakerEchoesForTurn &&
-                    imageDiscussionTurn !== "host_follow_up",
+                    !imageDiscussionTurn,
                   ...(hostClosingTurn &&
                   episode.guestPresenceMode !== "audience_only"
                     ? { hostClosingGuestName: peerAddressName }
@@ -16605,8 +16790,13 @@ export async function advanceBotcastEpisode(
                   rejectOpeningRetryMeta: firstHostOpening,
                   preserveProducerAttribution: Boolean(enforcedDirectQuote),
                   requiredDirectQuote: enforcedDirectQuote,
+                  privateProducerDirection,
                   recentSpeakerContents,
-                }),
+                });
+                return validation.ok
+                  ? { ...validation, value: candidate }
+                  : validation;
+              },
             }),
       });
       raw = result.value;
@@ -16682,8 +16872,7 @@ export async function advanceBotcastEpisode(
                     generation.experimentalAllModelEffortEnabled === true
                       ? "deep"
                       : "standard",
-                  outputContract:
-                    "Write only the next on-air Signal utterance in the assigned role; preserve cue, interruption, Power, and closing rules.",
+                  outputContract: signalTurnOutputContract,
                 })
               : prompt;
           return runSignalOnlineTurn({
@@ -16697,9 +16886,9 @@ export async function advanceBotcastEpisode(
             ...(hostClosingTurn
               ? { maxAttempts: SIGNAL_HOST_CLOSING_TURN_ATTEMPTS }
               : {}),
-            validate: (candidate) =>
-              validateBotcastAutoSpeakerUtterance({
-                raw: candidate,
+            validate: (candidate) => {
+              const validation = validateBotcastAutoSpeakerUtterance({
+                raw: extractBotcastImageSemanticDecisionV1(candidate).content,
                 speakerName: speaker.name,
                 peerName: peer.name,
                 speakerRole,
@@ -16718,7 +16907,7 @@ export async function advanceBotcastEpisode(
                   !speakerEternallyIntroduces &&
                   !speakerRepeatsForHearingPower &&
                   !speakerEchoesForTurn &&
-                  imageDiscussionTurn !== "host_follow_up",
+                  !imageDiscussionTurn,
                 ...(hostClosingTurn &&
                 episode.guestPresenceMode !== "audience_only"
                   ? { hostClosingGuestName: peerAddressName }
@@ -16734,8 +16923,13 @@ export async function advanceBotcastEpisode(
                 rejectOpeningRetryMeta: firstHostOpening,
                 preserveProducerAttribution: Boolean(enforcedDirectQuote),
                 requiredDirectQuote: enforcedDirectQuote,
+                privateProducerDirection,
                 recentSpeakerContents,
-              }),
+              });
+              return validation.ok
+                ? { ...validation, value: candidate }
+                : validation;
+            },
             validationRetryInstruction,
           });
         },
@@ -16836,8 +17030,7 @@ export async function advanceBotcastEpisode(
                     generation.experimentalAllModelEffortEnabled === true
                       ? "deep"
                       : "standard",
-                  outputContract:
-                    "Write only the next on-air Signal utterance in the assigned role; preserve cue, interruption, Power, and closing rules.",
+                  outputContract: signalTurnOutputContract,
                 })
               : prompt;
           const timeoutMs =
@@ -16857,10 +17050,11 @@ export async function advanceBotcastEpisode(
             (hostClosingTurn ||
               speakerEternallyIntroduces ||
               speakerMumblesSpeech ||
+              Boolean(privateProducerDirection) ||
               (activeFalseNameState && !firstHostOpening)) &&
             !speakerIsMutedForTurn &&
             !validateBotcastAutoSpeakerUtterance({
-              raw: value,
+              raw: extractBotcastImageSemanticDecisionV1(value).content,
               speakerName: speaker.name,
               peerName: peer.name,
               speakerRole,
@@ -16878,6 +17072,7 @@ export async function advanceBotcastEpisode(
               groundedPriorHistory: Boolean(priorPairHistory),
               preserveProducerAttribution: Boolean(enforcedDirectQuote),
               requiredDirectQuote: enforcedDirectQuote,
+              privateProducerDirection,
             }).ok
           ) {
             const retry = await runSignalLocalTurn({
@@ -16985,6 +17180,10 @@ export async function advanceBotcastEpisode(
       }
     }
   }
+  const imageSemanticEnvelope = imageDiscussionTurn
+    ? extractBotcastImageSemanticDecisionV1(raw)
+    : { content: raw, decision: null };
+  raw = imageSemanticEnvelope.content;
   const openingSubject =
     episode.topic.replace(/[.!?]+$/u, "").trim() || episode.topic;
   const topicWithPunctuation = /[.!?]$/u.test(episode.topic.trim())
@@ -17216,6 +17415,17 @@ export async function advanceBotcastEpisode(
         Boolean(enforcedDirectQuote),
         enforcedDirectQuote ?? "",
       );
+  const generatedProducerPrivacyRepairReason =
+    privateProducerDirection &&
+    (botcastHostTurnIncludesDirectQuote(
+      extractBotcastVoicePerformance(raw, false).content,
+      privateProducerDirection,
+    ) ||
+      /\b(?:producer|control\s*room|cue(?:\s*card)?)\b/iu.test(
+        extractBotcastVoicePerformance(raw, false).content,
+      ))
+      ? "private_cue_exposure" as const
+      : null;
   const generatedFalseNameRepairReason =
     activeFalseNameState &&
     !firstHostOpening &&
@@ -17259,7 +17469,7 @@ export async function advanceBotcastEpisode(
     !speakerEternallyIntroduces &&
     !speakerRepeatsForHearingPower &&
     !speakerEchoesForTurn &&
-    imageDiscussionTurn !== "host_follow_up" &&
+    !imageDiscussionTurn &&
     !sanitizedGeneratedUtterance.repairReason &&
     !generatedFalseNameRepairReason &&
     !generatedHostClosingRepairReason &&
@@ -17291,6 +17501,11 @@ export async function advanceBotcastEpisode(
     ? {
         content: fallback,
         repairReason: generatedHostClosingRepairReason,
+      }
+    : generatedProducerPrivacyRepairReason
+    ? {
+        content: fallback,
+        repairReason: generatedProducerPrivacyRepairReason,
       }
     : generatedHostQuestionRepairReason
     ? {
@@ -18789,15 +19004,96 @@ export async function advanceBotcastEpisode(
     botcastReplayTimeline(episode.messages, episode.events).messageStartMs.at(
       -1,
     ) ?? 0;
+  let imageDiscussionDismissedThisTurn = false;
   if (imageDiscussionTurn && imageContextAtTurnStart) {
+    const semanticDecision =
+      imageDiscussionTurn === "host_follow_up" ||
+      imageDiscussionTurn === "continued_discussion"
+        ? !socialSilenceMarker &&
+          !speakerIsMutedForTurn &&
+          !speakerReadsProducerQuote &&
+          !speakerRepeatsForHearingPower &&
+          !speakerEchoesForTurn &&
+          !generatedUtterance.repairReason &&
+          !postPowerGuestRepairApplied
+          ? imageSemanticEnvelope.decision
+          : null
+        : null;
+    const includeCurrentMessage =
+      imageDiscussionTurn === "host_introduction" ||
+      imageDiscussionTurn === "guest_discussion" ||
+      semanticDecision === "continue" ||
+      semanticDecision === "dismiss_after" ||
+      (imageDiscussionTurn === "host_follow_up" && semanticDecision === null);
+    const nextPhase: BotcastImageContextV1["phase"] =
+      imageDiscussionTurn === "host_introduction"
+        ? "presented"
+        : imageDiscussionTurn === "guest_discussion" ||
+            semanticDecision === "continue"
+          ? "discussing"
+          : "dismissed";
+    imageDiscussionDismissedThisTurn = nextPhase === "dismissed";
+    const discussionMessageIds = botcastImageDiscussionMessageIdsV1(
+      imageContextAtTurnStart,
+    );
+    if (includeCurrentMessage && !discussionMessageIds.includes(messageId)) {
+      discussionMessageIds.push(messageId);
+    }
+    const lifecycleEvidence =
+      imageDiscussionTurn === "host_introduction"
+        ? {
+            v: 1 as const,
+            messageId,
+            decision: "continue" as const,
+            reason: "presentation" as const,
+            source: "lifecycle" as const,
+          }
+        : imageDiscussionTurn === "guest_discussion"
+          ? {
+              v: 1 as const,
+              messageId,
+              decision: "continue" as const,
+              reason: "minimum_visibility" as const,
+              source: "fallback_minimum" as const,
+            }
+          : semanticDecision === "continue"
+            ? {
+                v: 1 as const,
+                messageId,
+                decision: "continue" as const,
+                reason: "semantic_continuation" as const,
+                source: "speaker_semantic_marker_v1" as const,
+                semanticDecision,
+              }
+            : semanticDecision === "dismiss_after"
+              ? {
+                  v: 1 as const,
+                  messageId,
+                  decision: "dismiss" as const,
+                  reason: "semantic_transition" as const,
+                  source: "speaker_semantic_marker_v1" as const,
+                  semanticDecision,
+                }
+              : semanticDecision === "move_on"
+                ? {
+                    v: 1 as const,
+                    messageId,
+                    decision: "dismiss" as const,
+                    reason: "semantic_topic_shift" as const,
+                    source: "speaker_semantic_marker_v1" as const,
+                    semanticDecision,
+                  }
+                : {
+                    v: 1 as const,
+                    messageId,
+                    decision: "dismiss" as const,
+                    reason: "semantic_unavailable" as const,
+                    source: "fallback_minimum" as const,
+                    semanticDecision: null,
+                  };
     const nextImageContext: BotcastImageContextV1 = {
       ...imageContextAtTurnStart,
-      phase:
-        imageDiscussionTurn === "host_introduction"
-          ? "presented"
-          : imageDiscussionTurn === "guest_discussion"
-            ? "discussing"
-            : "dismissed",
+      phase: nextPhase,
       hostIntroductionMessageId:
         imageDiscussionTurn === "host_introduction"
           ? messageId
@@ -18810,6 +19106,8 @@ export async function advanceBotcastEpisode(
         imageDiscussionTurn === "host_follow_up"
           ? messageId
           : imageContextAtTurnStart.hostFollowUpMessageId,
+      discussionMessageIds,
+      lifecycleEvidence,
     };
     recordEvent(
       db,
@@ -19124,7 +19422,7 @@ export async function advanceBotcastEpisode(
       );
     }
   }
-  if (imageDiscussionTurn === "host_follow_up") {
+  if (imageDiscussionDismissedThisTurn) {
     recordEvent(
       db,
       userId,
@@ -19133,7 +19431,7 @@ export async function advanceBotcastEpisode(
       {
         shot: "wide",
         reason: "image_complete",
-        speakerRole: "host",
+        speakerRole,
         atMs: messageStartMs + utteranceDurationMs,
         minimumHoldMs: 2_400,
         messageId,

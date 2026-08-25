@@ -67,6 +67,7 @@ import {
 import type {
   CoffeeInterruptionEvent,
   CoffeeInterruptionSocialDelta,
+  CoffeeTurnRouteV1,
 } from "./index.js";
 
 export type { CoffeeStageActionPayload, ZenStageActionPayload };
@@ -635,6 +636,7 @@ export interface ParsedStoredAssistantToolPayload {
   coffeeAside?: CoffeeAsidePayload;
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   autoRecovery?: AutoRecoveryTraceV1;
+  coffeeTurnRoute?: CoffeeTurnRouteV1;
   autoRoute?: AutoRouteDecisionV1;
   reasoningEffort?: ProviderReasoningEffort;
   turbo?: boolean;
@@ -645,6 +647,48 @@ export interface ParsedStoredAssistantToolPayload {
   socialSilence?: SocialSilenceMarkerV1;
   crosstalkReclaim?: CrosstalkReclaimPlanV1;
   botPowerTrollPresentation?: BotPowerTrollPresentationV1;
+}
+
+function normalizeCoffeeTurnRouteV1(value: unknown): CoffeeTurnRouteV1 | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = value as Record<string, unknown>;
+  const sources = new Set<CoffeeTurnRouteV1["source"]>([
+    "hearing_repeat",
+    "directed_speaker",
+    "player_direct_address",
+    "peer_direct_address",
+    "router_model",
+    "deterministic_fallback",
+    "speaker_balance",
+    "autonomous_handoff",
+    "power_override",
+  ]);
+  const selectedSpeakerBotId =
+    typeof row.selectedSpeakerBotId === "string"
+      ? row.selectedSpeakerBotId.trim()
+      : "";
+  if (
+    row.v !== 1 ||
+    row.name !== "coffeeTurnRoute" ||
+    !sources.has(row.source as CoffeeTurnRouteV1["source"]) ||
+    !selectedSpeakerBotId
+  ) {
+    return undefined;
+  }
+  const addressedBotId =
+    typeof row.addressedBotId === "string" ? row.addressedBotId.trim() : "";
+  const playerAddressKind =
+    row.playerAddressKind === "mention" || row.playerAddressKind === "plain_text"
+      ? row.playerAddressKind
+      : undefined;
+  return {
+    v: 1,
+    name: "coffeeTurnRoute",
+    source: row.source as CoffeeTurnRouteV1["source"],
+    selectedSpeakerBotId,
+    ...(addressedBotId ? { addressedBotId } : {}),
+    ...(playerAddressKind ? { playerAddressKind } : {}),
+  };
 }
 
 function normalizeStoredFalseNameStateV1(
@@ -2447,6 +2491,9 @@ export function parseStoredAssistantToolPayload(
       const autoRecovery = root
         ? normalizeStoredAutoRecoveryTrace(root.autoRecovery)
         : undefined;
+      const coffeeTurnRoute = root
+        ? normalizeCoffeeTurnRouteV1(root.coffeeTurnRoute)
+        : undefined;
       const autoRoute = root
         ? normalizeAutoRouteDecisionV1(root.autoRoute)
         : undefined;
@@ -2497,6 +2544,7 @@ export function parseStoredAssistantToolPayload(
         ...(coffeeAside ? { coffeeAside } : {}),
         ...(coffeeReplayEvents.length > 0 ? { coffeeReplayEvents } : {}),
         ...(autoRecovery ? { autoRecovery } : {}),
+        ...(coffeeTurnRoute ? { coffeeTurnRoute } : {}),
         ...(autoRoute ? { autoRoute } : {}),
         ...(reasoningEffort ? { reasoningEffort } : {}),
         ...(turbo ? { turbo: true } : {}),
@@ -2528,6 +2576,7 @@ export function parseStoredAssistantToolPayload(
     const coffeeAside = normalizeCoffeeAsidePayload(row.coffeeAside);
     const coffeeReplayEvents = normalizeCoffeeReplayEventPayloads(row.coffeeReplayEvents);
     const autoRecovery = normalizeStoredAutoRecoveryTrace(row.autoRecovery);
+    const coffeeTurnRoute = normalizeCoffeeTurnRouteV1(row.coffeeTurnRoute);
     const autoRoute = normalizeAutoRouteDecisionV1(row.autoRoute);
     const normalizedReasoningEffort = normalizeProviderReasoningEffort(
       row.reasoningEffort,
@@ -2593,6 +2642,7 @@ export function parseStoredAssistantToolPayload(
       ...(coffeeAside ? { coffeeAside } : {}),
       ...(coffeeReplayEvents.length > 0 ? { coffeeReplayEvents } : {}),
       ...(autoRecovery ? { autoRecovery } : {}),
+      ...(coffeeTurnRoute ? { coffeeTurnRoute } : {}),
       ...(autoRoute ? { autoRoute } : {}),
       ...(reasoningEffort ? { reasoningEffort } : {}),
       ...(turbo ? { turbo: true } : {}),
@@ -2630,6 +2680,7 @@ export function hydrateAssistantMessageParts(args: {
   coffeeAside?: CoffeeAsidePayload;
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   autoRecovery?: AutoRecoveryTraceV1;
+  coffeeTurnRoute?: CoffeeTurnRouteV1;
   autoRoute?: AutoRouteDecisionV1;
   reasoningEffort?: ProviderReasoningEffort;
   turbo?: boolean;
@@ -2674,6 +2725,7 @@ export function hydrateAssistantMessageParts(args: {
       ? { coffeeReplayEvents: stored.coffeeReplayEvents }
       : {}),
     ...(stored.autoRecovery ? { autoRecovery: stored.autoRecovery } : {}),
+    ...(stored.coffeeTurnRoute ? { coffeeTurnRoute: stored.coffeeTurnRoute } : {}),
     ...(stored.autoRoute ? { autoRoute: stored.autoRoute } : {}),
     ...(stored.reasoningEffort
       ? { reasoningEffort: stored.reasoningEffort }

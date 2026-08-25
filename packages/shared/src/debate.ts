@@ -31,6 +31,8 @@ import {
 } from "./debateMystery.ts";
 import {
   normalizeDebateMysteryFormatStateV2,
+  type DebateMysteryPlayPhaseV2,
+  type DebateMysteryVerdictClassificationV2,
   type DebateWhodunnitCreateConfigV2,
   type DebateWhodunnitFormatStateV2,
 } from "./debateMysteryV2.ts";
@@ -1901,8 +1903,8 @@ export interface DebateSessionListItemV1 {
   /** Frozen object exhibits available for Archive Assets polish. */
   exhibitCount: number;
   /** Whodunnit Archive metadata; absent for Forum and Turnabout. */
-  mysteryProgress?: DebateMysteryPlayPhase;
-  mysteryRouteGrade?: DebateMysteryRouteGrade | null;
+  mysteryProgress?: DebateMysteryPlayPhase | DebateMysteryPlayPhaseV2;
+  mysteryRouteGrade?: DebateMysteryRouteGrade | DebateMysteryVerdictClassificationV2 | null;
   mysteryFictionLabel?: "Fictional, non-canonical case";
   mysterySpoilersRevealed?: boolean;
 }

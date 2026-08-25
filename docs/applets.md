@@ -218,9 +218,10 @@ stages do not block the standalone preview.
   every other planned applet is deferred in the exhaustive mode policy.
 - A genuinely new bot addresser replaces the target. The holder borrows public
   name, persona, face, Ink, lower glyph, and active public Power consequences,
-  but new events freeze the holder's effective voice profile: identity,
-  accent, pronunciation, speechprint, and client effect. Shapeshifter remains
-  the full-form mechanic and still copies voice.
+  but new events freeze the holder's effective voice profile: identity, exact
+  Accent Map position, accent definition, pronunciation, speechprint, and
+  client effect. Shapeshifter remains the full-form mechanic and still copies
+  voice.
 - The first holder reveal uses `impostor` exactly once. Later turns remove all
   impostor/imposter/pretender/fake boilerplate and repair recanting before the
   line is published. The stolen original briefly corrects only a genuine wrong

@@ -66,13 +66,35 @@ export async function runWithReasoningGenerationBudget<T>(args: {
   const signal = args.signal
     ? AbortSignal.any([args.signal, timeoutController.signal])
     : timeoutController.signal;
+  let removeAbortListener = (): void => undefined;
+  const abortFailure = new Promise<never>((_resolve, reject) => {
+    const rejectForAbort = (): void => {
+      reject(
+        signal.reason instanceof Error
+          ? signal.reason
+          : new DOMException("Generation cancelled.", "AbortError"),
+      );
+    };
+    if (signal.aborted) {
+      rejectForAbort();
+      return;
+    }
+    signal.addEventListener("abort", rejectForAbort, { once: true });
+    removeAbortListener = () => signal.removeEventListener("abort", rejectForAbort);
+  });
   try {
-    return await args.run(signal);
+    // Most providers honor AbortSignal, but one that does not must never turn
+    // the shared reasoning budget into an infinite wait.
+    return await Promise.race([
+      Promise.resolve().then(() => args.run(signal)),
+      abortFailure,
+    ]);
   } catch (error) {
     if (args.signal?.aborted) throw args.signal.reason ?? error;
     if (timedOut) throw new ReasoningGenerationTimeoutError(timeoutMs);
     throw error;
   } finally {
+    removeAbortListener();
     clearTimeout(timeout);
   }
 }

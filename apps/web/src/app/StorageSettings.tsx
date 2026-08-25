@@ -213,6 +213,24 @@ async function loadAuditCandidateCount(): Promise<number> {
     : 0;
 }
 
+interface MysteryAudioStorageSummary {
+  referencedClipCount: number;
+  referencedBytes: number;
+  cleanupCandidateCount: number;
+  cleanupCandidateBytes: number;
+}
+
+async function loadMysteryAudioStorage(): Promise<MysteryAudioStorageSummary> {
+  const response = await fetch("/api/debates/mystery-audio-storage");
+  const payload = (await response.json().catch(() => null)) as
+    | { storage?: MysteryAudioStorageSummary; error?: string }
+    | null;
+  if (!response.ok || !payload?.storage) {
+    throw new Error(payload?.error ?? "Whodunnit audio storage is unavailable.");
+  }
+  return payload.storage;
+}
+
 interface LensNode {
   id: string;
   label: string;
@@ -424,6 +442,9 @@ export function StorageSettings({
   const [reviewOpen, setReviewOpen] = useState(false);
   const [tidyCandidateCount, setTidyCandidateCount] = useState<number | null>(null);
   const [auditCandidateCount, setAuditCandidateCount] = useState<number | null>(null);
+  const [mysteryAudioStorage, setMysteryAudioStorage] = useState<MysteryAudioStorageSummary | null>(null);
+  const [mysteryAudioCleanupOpen, setMysteryAudioCleanupOpen] = useState(false);
+  const [mysteryAudioCleanupBusy, setMysteryAudioCleanupBusy] = useState(false);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [drillAppletId, setDrillAppletId] = useState<StorageAppletId | null>(null);
 
@@ -475,12 +496,14 @@ export function StorageSettings({
           STORAGE_APPLETS[current].showWhenEmpty;
         return stillActive ? current : null;
       });
-      const [tidy, audit] = await Promise.all([
+      const [tidy, audit, mysteryAudio] = await Promise.all([
         loadSmartTidyPreview().catch(() => null),
         loadAuditCandidateCount().catch(() => null),
+        loadMysteryAudioStorage().catch(() => null),
       ]);
       setTidyCandidateCount(tidy?.candidateCount ?? 0);
       setAuditCandidateCount(audit ?? 0);
+      setMysteryAudioStorage(mysteryAudio);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Storage usage is unavailable.");
     }
@@ -581,6 +604,35 @@ export function StorageSettings({
       setError(caught instanceof Error ? caught.message : "Smart tidy failed.");
     } finally {
       setTidyBusy(false);
+    }
+  };
+
+  const confirmMysteryAudioCleanup = async (): Promise<void> => {
+    setMysteryAudioCleanupBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/debates/mystery-audio-storage/cleanup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { cleanup?: { removedClipCount: number; removedBytes: number }; error?: string }
+        | null;
+      if (!response.ok || !payload?.cleanup) {
+        throw new Error(payload?.error ?? "Whodunnit audio cleanup failed.");
+      }
+      setTidyMessage(
+        payload.cleanup.removedClipCount > 0
+          ? `Cleared ${payload.cleanup.removedClipCount} unreferenced Whodunnit recording${payload.cleanup.removedClipCount === 1 ? "" : "s"} (${formatBytes(payload.cleanup.removedBytes)}).`
+          : "No unreferenced Whodunnit recordings needed cleanup.",
+      );
+      setMysteryAudioCleanupOpen(false);
+      await refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Whodunnit audio cleanup failed.");
+    } finally {
+      setMysteryAudioCleanupBusy(false);
     }
   };
 
@@ -770,10 +822,11 @@ export function StorageSettings({
         <div>
           <span className={styles.focusEyebrow}>Library care</span>
           <p>
-            Two different cleanups: <strong>Smart tidy</strong> looks for old,
+            Three protected cleanups: <strong>Smart tidy</strong> looks for old,
             low-reuse library assets Prism thinks you abandoned.{" "}
             <strong>Audit unused</strong> finds system-managed orphans with no
-            remaining references (separate from Clear unused inside a bin).
+            remaining references. <strong>Whodunnit audio</strong> clears only
+            local performances no case, Archive, or replay still owns.
           </p>
         </div>
         <div className={styles.careActions}>
@@ -813,6 +866,20 @@ export function StorageSettings({
                 ? "Audit unused · none"
                 : `Audit unused · ${auditCandidateCount}`}
           </button>
+          <button
+            type="button"
+            className={styles.actionAudit}
+            data-settings-action="storage-whodunnit-audio-cleanup"
+            onClick={() => setMysteryAudioCleanupOpen(true)}
+            disabled={!mysteryAudioStorage?.cleanupCandidateCount || mysteryAudioCleanupBusy}
+            title="Only recordings with no remaining case, Archive, or replay reference can be cleared."
+          >
+            {mysteryAudioCleanupBusy
+              ? "Clearing…"
+              : mysteryAudioStorage?.cleanupCandidateCount
+                ? `Whodunnit audio · ${mysteryAudioStorage.cleanupCandidateCount}`
+                : "Whodunnit audio · protected"}
+          </button>
         </div>
       </div>
 
@@ -830,6 +897,37 @@ export function StorageSettings({
               {formatBytes(summary.systemManagedBytes)} system-managed (out of reusable rails)
             </span>
           ) : null}
+          {mysteryAudioStorage ? (
+            <span>
+              Whodunnit cases protect {mysteryAudioStorage.referencedClipCount} local recordings ({formatBytes(mysteryAudioStorage.referencedBytes)})
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
+      {mysteryAudioCleanupOpen && mysteryAudioStorage ? (
+        <div
+          className={styles.tidyPanel}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="whodunnit-audio-cleanup-title"
+          data-settings-target="storage-whodunnit-audio-cleanup-dialog"
+        >
+          <header>
+            <div>
+              <span className={pageStyles.settingsEyebrow}>Whodunnit audio</span>
+              <h5 id="whodunnit-audio-cleanup-title">Clear unreferenced local performances?</h5>
+            </div>
+            <button type="button" className={pageStyles.linkButton} onClick={() => setMysteryAudioCleanupOpen(false)} disabled={mysteryAudioCleanupBusy}>Not now</button>
+          </header>
+          <p>
+            {mysteryAudioStorage.cleanupCandidateCount} recording{mysteryAudioStorage.cleanupCandidateCount === 1 ? "" : "s"} · about {formatBytes(mysteryAudioStorage.cleanupCandidateBytes)}. Recordings still used by a case, Archive, or replay remain immutable and protected.
+          </p>
+          <div className={styles.tidyActions}>
+            <button type="button" className={pageStyles.btnPrimary} onClick={() => void confirmMysteryAudioCleanup()} disabled={mysteryAudioCleanupBusy}>
+              {mysteryAudioCleanupBusy ? "Clearing…" : "Clear unreferenced recordings"}
+            </button>
+          </div>
         </div>
       ) : null}
 

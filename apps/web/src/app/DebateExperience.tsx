@@ -649,7 +649,9 @@ import {
 import {
   DebateMysteryV2CompilationResume,
   DebateMysteryV2Play,
+  DebateMysteryV2Readiness,
 } from "./DebateMysteryV2Experience";
+import { formatDebateMysteryV2PublicReview } from "./debateMysteryV2Review";
 import { debateMysteryCourtEvidenceAssetUrls } from "./debateMysteryAssetLifecycle";
 import {
   debateIdentityAppearanceBotV1,
@@ -3038,6 +3040,11 @@ function gradeLabelForMysteryArchive(grade: string): string {
   if (grade === "smoking_gun") return "Smoking Gun";
   if (grade === "strong_case") return "Strong Case";
   if (grade === "lucky_break") return "Lucky Break";
+  if (grade === "just_conviction") return "Just Conviction";
+  if (grade === "unsafe_conviction") return "Unsafe Conviction";
+  if (grade === "wrongful_conviction") return "Wrongful Conviction";
+  if (grade === "acquittal_despite_proof") return "Acquittal Despite Proof";
+  if (grade === "failed_prosecution") return "Failed Prosecution";
   return "Incorrect";
 }
 
@@ -3132,7 +3139,7 @@ function roleDescription(
     if (role === "participant") {
       return "Investigate the mansion, file the theory, and prosecute the frozen public record yourself.";
     }
-    return "Investigate as an observer, then watch both counsel bots argue the filed record.";
+    return "Review the selected Prosecutor’s offstage findings, revise and file the conclusion, then watch the courtroom case unfold automatically.";
   }
   if (format === "turnabout") {
     if (role === "judge") {
@@ -3459,6 +3466,14 @@ export function formatDebateVerboseTranscript(
   playerName = "You",
   presenceBeats: readonly BotPresenceBeatV1[] = [],
 ): string {
+  const mysteryV2PublicReview =
+    session.formatState.format === "whodunnit" &&
+    session.formatState.version === 2
+      ? formatDebateMysteryV2PublicReview(
+          session.formatState,
+          (botId) => debateBotSnapshot(session, botId)?.name ?? null,
+        )
+      : null;
   const participation = debateParticipationState(session);
   const participantSession = session.playerRole === "participant";
   const participantPredispositions = session.voterPredispositions ?? [];
@@ -3658,6 +3673,7 @@ export function formatDebateVerboseTranscript(
           "",
         ];
       }),
+    ...(mysteryV2PublicReview ? [mysteryV2PublicReview, ""] : []),
     ...(session.formatState.format === "forum"
       ? [
           "## Forum round plan",
@@ -4888,7 +4904,7 @@ export function DebateExperience(
   const [mysteryJudgeBotId, setMysteryJudgeBotId] = useState(
     () => bots.find((bot) => !mysterySuspectSelection.includes(bot.id))?.id ?? "",
   );
-  const [mysteryProsecutorPartnerBotId, setMysteryProsecutorPartnerBotId] =
+  const [mysteryProsecutorBotId, setMysteryProsecutorBotId] =
     useState(
       () =>
         bots.find(
@@ -4903,11 +4919,14 @@ export function DebateExperience(
         (bot) =>
           !mysterySuspectSelection.includes(bot.id) &&
           bot.id !== mysteryJudgeBotId &&
-          bot.id !== mysteryProsecutorPartnerBotId,
+          bot.id !== mysteryProsecutorBotId,
       )?.id ?? "",
   );
   const [activeMysteryCastSeat, setActiveMysteryCastSeat] =
     useState<DebateMysteryCastSeat>({ kind: "suspect", index: 0 });
+  const mysterySurpriseCompilePendingRef = useRef(false);
+  const [mysterySurpriseCompileRequest, setMysterySurpriseCompileRequest] =
+    useState(0);
   useEffect(() => {
     setMysteryNonce(nextMysteryRecipeNonce());
   }, []);
@@ -4917,6 +4936,11 @@ export function DebateExperience(
   const [mysteryImportAssignments, setMysteryImportAssignments] = useState<
     Record<string, string>
   >({});
+  useEffect(() => {
+    if (!inspectedMysterySeed && mysteryArtMode === "generated") {
+      setMysteryArtMode("bundled");
+    }
+  }, [inspectedMysterySeed, mysteryArtMode]);
   const [forumRoundMode, setForumRoundMode] =
     useState<DebateForumRoundMode>("auto");
   const [forumRoundCount, setForumRoundCount] = useState(1);
@@ -7495,14 +7519,14 @@ export function DebateExperience(
     mysteryTargetSuspects,
     [
       mysteryJudgeBotId,
-      mysteryProsecutorPartnerBotId,
+      mysteryProsecutorBotId,
       mysteryRivalDefenseBotId,
     ],
   );
   const mysteryFloorBotSignature = [
     ...mysterySuspectBotIds,
     mysteryJudgeBotId,
-    mysteryProsecutorPartnerBotId,
+    mysteryProsecutorBotId,
     mysteryRivalDefenseBotId,
   ].join("|");
   useEffect(() => {
@@ -7555,7 +7579,7 @@ export function DebateExperience(
       : {}),
     suspectBotIds: mysterySuspectBotIds,
     judgeBotId: mysteryJudgeBotId,
-    prosecutorPartnerBotId: mysteryProsecutorPartnerBotId,
+    prosecutorPartnerBotId: mysteryProsecutorBotId,
     rivalDefenseBotId: mysteryRivalDefenseBotId,
   };
   const mysteryCreateConfigV2: DebateWhodunnitCreateConfigV2 = {
@@ -7574,23 +7598,30 @@ export function DebateExperience(
       : {}),
     suspectBotIds: mysterySuspectBotIds,
     judgeBotId: mysteryJudgeBotId,
-    prosecutorPartnerBotId: mysteryProsecutorPartnerBotId,
+    prosecutorBotId: mysteryProsecutorBotId,
     rivalDefenseBotId: mysteryRivalDefenseBotId,
     jurorBotIds: juryEnabled
       ? preferredJurorBotIds.filter((id): id is string => Boolean(id)).slice(0, DEBATE_JURY_SIZE)
       : [],
-    playerRole: "participant",
-    participationDifficulty,
+    playerRole: playerRole === "spectator" ? "spectator" : "participant",
+    participationDifficulty:
+      playerRole === "participant" ? participationDifficulty : undefined,
   };
   let resolvedMysteryConfig: ReturnType<typeof resolveDebateMysteryConfig> | null = null;
+  let resolvedMysteryConfigV2: ReturnType<typeof resolveDebateMysteryConfigV2> | null = null;
   let mysterySetupError: string | null = null;
   try {
     resolvedMysteryConfig = resolveDebateMysteryConfig(mysteryCreateConfig);
-    if (!inspectedMysterySeed) resolveDebateMysteryConfigV2(mysteryCreateConfigV2);
+    if (!inspectedMysterySeed) {
+      resolvedMysteryConfigV2 = resolveDebateMysteryConfigV2(mysteryCreateConfigV2);
+    }
   } catch (caught) {
     mysterySetupError =
       caught instanceof Error ? caught.message : "The mystery cast is incomplete.";
   }
+  const mysterySetupValidated = inspectedMysterySeed
+    ? resolvedMysteryConfig !== null
+    : resolvedMysteryConfigV2 !== null;
   const mysteryCastRequirement = minimumWhodunnitBotsForCast(
     mysteryTargetSuspects,
   );
@@ -7599,7 +7630,7 @@ export function DebateExperience(
     distinctWhodunnitCastBotIds(bots).length < mysteryCastRequirement + (juryEnabled ? DEBATE_JURY_SIZE : 0)
   ) {
     const total = mysteryCastRequirement + (juryEnabled ? DEBATE_JURY_SIZE : 0);
-    mysterySetupError = `Whodunnit needs ${total} distinct Library bots for ${mysteryTargetSuspects} suspects, Judge, prosecutor partner, rival defense${juryEnabled ? ", and four jurors" : ""}.`;
+    mysterySetupError = `Whodunnit needs ${total} distinct Library bots for ${mysteryTargetSuspects} suspects, Judge, player Prosecutor, Defense Counsel${juryEnabled ? ", and four jurors" : ""}.`;
   }
   const mysteryRecipeSeed = resolvedMysteryConfig
     ? debateMysteryRecipeSeed(resolvedMysteryConfig)
@@ -7687,7 +7718,7 @@ export function DebateExperience(
     format === "whodunnit"
       ? [
           mysteryJudgeBotId,
-          mysteryProsecutorPartnerBotId,
+          mysteryProsecutorBotId,
           mysteryRivalDefenseBotId,
           ...mysterySuspectBotIds,
         ]
@@ -7697,7 +7728,7 @@ export function DebateExperience(
   const castComplete =
     castIds.every(Boolean) &&
     new Set(castIds).size === castIds.length &&
-    (format !== "whodunnit" || resolvedMysteryConfig !== null);
+    (format !== "whodunnit" || mysterySetupValidated);
   const motionComplete = Boolean(
     format === "whodunnit" ||
     (motion.motion.trim() &&
@@ -7834,7 +7865,7 @@ export function DebateExperience(
   const readinessTarget = format === "whodunnit" ? 2 : 4;
   const readinessCount = (
     format === "whodunnit"
-      ? [resolvedMysteryConfig !== null, castComplete]
+      ? [mysterySetupValidated, castComplete]
       : [motionComplete, castComplete, roleChecksComplete, evidenceDecisionMade]
   ).filter(Boolean).length;
   const debateCompanionBotIds = useMemo(
@@ -8051,7 +8082,7 @@ export function DebateExperience(
       )?.id ?? "";
     setMysterySuspectSelection(initialMysterySuspects);
     setMysteryJudgeBotId(initialMysteryJudge);
-    setMysteryProsecutorPartnerBotId(initialMysteryProsecutor);
+    setMysteryProsecutorBotId(initialMysteryProsecutor);
     setMysteryRivalDefenseBotId(
       bots.find(
         (bot) =>
@@ -8167,7 +8198,7 @@ export function DebateExperience(
       : activeMysteryCastSeat.kind === "judge"
         ? mysteryJudgeBotId
         : activeMysteryCastSeat.kind === "prosecutor"
-        ? mysteryProsecutorPartnerBotId
+        ? mysteryProsecutorBotId
         : mysteryRivalDefenseBotId;
 
   const assignBotToMysterySeat = (botId: string): void => {
@@ -8176,7 +8207,7 @@ export function DebateExperience(
     const reservedIds = new Set([
       ...mysterySuspectBotIds,
       mysteryJudgeBotId,
-      mysteryProsecutorPartnerBotId,
+      mysteryProsecutorBotId,
       mysteryRivalDefenseBotId,
     ]);
     reservedIds.delete(mysterySelectedBotId);
@@ -8197,7 +8228,7 @@ export function DebateExperience(
     } else if (activeMysteryCastSeat.kind === "judge") {
       setMysteryJudgeBotId(botId);
     } else if (activeMysteryCastSeat.kind === "prosecutor") {
-      setMysteryProsecutorPartnerBotId(botId);
+      setMysteryProsecutorBotId(botId);
     } else {
       setMysteryRivalDefenseBotId(botId);
     }
@@ -8221,7 +8252,7 @@ export function DebateExperience(
     } else if (seat.kind === "judge") {
       setMysteryJudgeBotId("");
     } else if (seat.kind === "prosecutor") {
-      setMysteryProsecutorPartnerBotId("");
+      setMysteryProsecutorBotId("");
     } else {
       setMysteryRivalDefenseBotId("");
     }
@@ -8236,7 +8267,7 @@ export function DebateExperience(
         : seat.kind === "judge"
           ? mysteryJudgeBotId
           : seat.kind === "prosecutor"
-            ? mysteryProsecutorPartnerBotId
+            ? mysteryProsecutorBotId
             : mysteryRivalDefenseBotId;
     const occupiedBotIds = [
       ...mysterySuspectBotIds.filter(
@@ -8245,7 +8276,7 @@ export function DebateExperience(
       ...(seat.kind === "judge" ? [] : [mysteryJudgeBotId]),
       ...(seat.kind === "prosecutor"
         ? []
-        : [mysteryProsecutorPartnerBotId]),
+        : [mysteryProsecutorBotId]),
       ...(seat.kind === "defense" ? [] : [mysteryRivalDefenseBotId]),
     ];
     const botId = surpriseWhodunnitSeatBotId(
@@ -8271,7 +8302,7 @@ export function DebateExperience(
     } else if (seat.kind === "judge") {
       setMysteryJudgeBotId(botId);
     } else if (seat.kind === "prosecutor") {
-      setMysteryProsecutorPartnerBotId(botId);
+      setMysteryProsecutorBotId(botId);
     } else {
       setMysteryRivalDefenseBotId(botId);
     }
@@ -8302,7 +8333,7 @@ export function DebateExperience(
         ? [
             ...mysterySuspectBotIds,
             mysteryJudgeBotId,
-            mysteryProsecutorPartnerBotId,
+            mysteryProsecutorBotId,
             mysteryRivalDefenseBotId,
           ]
         : selectableCastSlots.map((slot) => cast[slot])
@@ -8350,7 +8381,7 @@ export function DebateExperience(
       if (!allocation) return false;
       setMysterySuspectSelection(allocation.suspectBotIds);
       setMysteryJudgeBotId(allocation.judgeBotId);
-      setMysteryProsecutorPartnerBotId(allocation.prosecutorPartnerBotId);
+      setMysteryProsecutorBotId(allocation.prosecutorBotId);
       setMysteryRivalDefenseBotId(allocation.rivalDefenseBotId);
       if (inspectedMysterySeed) {
         setMysteryImportAssignments(
@@ -8403,6 +8434,12 @@ export function DebateExperience(
     return true;
   };
 
+  const surpriseAndCompileMystery = (): void => {
+    if (!randomizeCast()) return;
+    mysterySurpriseCompilePendingRef.current = true;
+    setMysterySurpriseCompileRequest((current) => current + 1);
+  };
+
   const randomizeMysteryCastAroundBot = (anchor: {
     botId: string;
     botName: string;
@@ -8416,7 +8453,7 @@ export function DebateExperience(
     if (!allocation) return;
     setMysterySuspectSelection(allocation.suspectBotIds);
     setMysteryJudgeBotId(allocation.judgeBotId);
-    setMysteryProsecutorPartnerBotId(allocation.prosecutorPartnerBotId);
+    setMysteryProsecutorBotId(allocation.prosecutorBotId);
     setMysteryRivalDefenseBotId(allocation.rivalDefenseBotId);
     setMysteryInspiration(
       anchor.direction.trim() ||
@@ -13444,6 +13481,9 @@ export function DebateExperience(
       session.formatState.format === "whodunnit"
     ) {
       const mystery = session.formatState.config;
+      const frozenProsecutorBotId = "prosecutorBotId" in mystery
+        ? mystery.prosecutorBotId
+        : mystery.prosecutorPartnerBotId;
       setMysteryPreset(mystery.preset);
       setMysteryDifficulty(mystery.difficulty);
       setMysteryArtMode(mystery.artMode);
@@ -13459,11 +13499,11 @@ export function DebateExperience(
           : (bots.find(
               (bot) =>
                 !mystery.suspectBotIds.includes(bot.id) &&
-                bot.id !== mystery.prosecutorPartnerBotId &&
+                bot.id !== frozenProsecutorBotId &&
                 bot.id !== mystery.rivalDefenseBotId,
             )?.id ?? ""),
       );
-      setMysteryProsecutorPartnerBotId(mystery.prosecutorPartnerBotId);
+      setMysteryProsecutorBotId(frozenProsecutorBotId);
       setMysteryRivalDefenseBotId(mystery.rivalDefenseBotId);
       setActiveMysteryCastSeat({ kind: "suspect", index: 0 });
       setMysteryImportCode("");
@@ -13747,7 +13787,7 @@ export function DebateExperience(
           (bot) =>
             !used.has(bot.id) &&
             bot.id !== mysteryJudgeBotId &&
-            bot.id !== mysteryProsecutorPartnerBotId &&
+            bot.id !== mysteryProsecutorBotId &&
             bot.id !== mysteryRivalDefenseBotId,
         )?.id;
         const botId =
@@ -13780,7 +13820,7 @@ export function DebateExperience(
   };
 
   const startMystery = async (): Promise<void> => {
-    if (!resolvedMysteryConfig || busy) return;
+    if (!mysterySetupValidated || busy) return;
     const frozenLegacyConfig: DebateWhodunnitCreateConfigV1 = {
       ...mysteryCreateConfig,
       suspectBotIds: [...mysteryCreateConfig.suspectBotIds],
@@ -13878,6 +13918,20 @@ export function DebateExperience(
       setBusy(false);
     }
   };
+
+  useEffect(() => {
+    if (!mysterySurpriseCompilePendingRef.current) return;
+    if (format !== "whodunnit") {
+      mysterySurpriseCompilePendingRef.current = false;
+      return;
+    }
+    if (!debateCanStart || busy) return;
+    mysterySurpriseCompilePendingRef.current = false;
+    void startMystery();
+    // startMystery intentionally consumes the fully committed setup from this
+    // render after the cast and automatic juror effects have both settled.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busy, debateCanStart, format, mysterySurpriseCompileRequest]);
 
   const saveDebate = async (): Promise<void> => {
     if (!debateCanStart) return;
@@ -17473,7 +17527,11 @@ export function DebateExperience(
       session.format === "whodunnit"
         ? session.status === "completed"
           ? "Open case Archive"
-          : "Return to investigation"
+          : session.mysteryProgress === "case_forge"
+            ? "Return to Case Forge"
+            : session.mysteryProgress === "trial"
+              ? "Return to court"
+              : "Return to investigation"
         : session.status === "completed"
         ? "Watch replay"
         : session.awaitingDeferredStart
@@ -17878,7 +17936,7 @@ export function DebateExperience(
               {
                 id: "for",
                 label: motion.forSide.label || "Prosecution",
-                botId: mysteryProsecutorPartnerBotId,
+                botId: mysteryProsecutorBotId,
                 fallback: "#42d9ff",
                 publicName: null,
               },
@@ -18079,7 +18137,7 @@ export function DebateExperience(
                 label: format === "whodunnit" ? "Court" : "Motion",
                 detail:
                   format === "whodunnit"
-                    ? resolvedMysteryConfig
+                    ? mysterySetupValidated
                       ? "Case recipe prepared"
                       : "Shape the mystery"
                     : motionComplete
@@ -18093,11 +18151,15 @@ export function DebateExperience(
                 id: "cast" as const,
                 index: "02",
                 label: "Cast",
-                detail: roleChecksComplete
-                  ? "Consent secured"
-                  : castComplete
-                    ? "Check willingness"
-                    : "Seat the proceeding",
+                detail: format === "whodunnit"
+                  ? castComplete
+                    ? "Cast validated"
+                    : "Seat the proceeding"
+                  : roleChecksComplete
+                    ? "Consent secured"
+                    : castComplete
+                      ? "Check willingness"
+                      : "Seat the proceeding",
                 complete: castComplete && roleChecksComplete,
                 tutorial: "debate-cast",
                 magic: castRailMagic,
@@ -18456,7 +18518,7 @@ export function DebateExperience(
         <p className={styles.eyebrow}>Case direction</p>
         <label>Inspiration <input value={mysteryInspiration} maxLength={240} onChange={(event) => { setMysteryInspiration(event.currentTarget.value); setMysteryNonce(nextMysteryRecipeNonce()); }} placeholder="Surprise me" /></label>
         <label>Case difficulty <select value={mysteryDifficulty} onChange={(event) => { setMysteryDifficulty(event.currentTarget.value as DebateMysteryDifficulty); setMysteryNonce(nextMysteryRecipeNonce()); }}><option value="casual">Casual</option><option value="classic">Classic</option><option value="mastermind">Mastermind</option></select></label>
-        <label>Room art <select value={mysteryArtMode} onChange={(event) => { setMysteryArtMode(event.currentTarget.value as DebateMysteryArtMode); setMysteryNonce(nextMysteryRecipeNonce()); }}><option value="bundled">Bundled PRISM rooms</option><option value="generated">Generated reskins</option></select></label>
+        <label>Room art <select value={mysteryArtMode} onChange={(event) => { setMysteryArtMode(event.currentTarget.value as DebateMysteryArtMode); setMysteryNonce(nextMysteryRecipeNonce()); }}><option value="bundled">Bundled PRISM rooms</option><option value="generated" disabled={!inspectedMysterySeed}>Generated reskins · Legacy Case Seed</option></select><small>V2 uses aligned bundled rooms; imported V1 Case Seeds retain their generated-reskin option.</small></label>
         <button type="button" className={mysteryStyles.seedButton} onClick={() => setMysteryNonce(nextMysteryRecipeNonce())}><span>Recipe Seed</span><code>{mysteryRecipeSeed}</code><small>Change the recipe</small></button>
       </div>
       <details className={mysteryStyles.seedImport} data-tutorial-target="whodunnit-seed-import">
@@ -19117,7 +19179,9 @@ export function DebateExperience(
           <h2>Seat every voice</h2>
           <p>
             {format === "whodunnit"
-              ? "Choose the suspect ensemble, then cast the public court separately. Your Participant or Spectator choice never makes you the Judge."
+              ? playerRole === "spectator"
+                ? "Choose the suspect ensemble, then cast the public court separately. The selected Prosecutor investigates offstage; you review and file the editable conclusion before watching court."
+                : "Choose the suspect ensemble, then cast the public court separately. You control every legal choice through the selected Prosecutor; the Judge, Defense Counsel, and jurors keep their own roles."
               : playerRole === "participant"
               ? "PRISM holds your side. Cast one opposing bot and one Moderator/Judge; every turn on your side belongs to you."
               : playerRole === "spectator"
@@ -19128,18 +19192,22 @@ export function DebateExperience(
         <button
           type="button"
           className={styles.castRandomizeButton}
-          onClick={randomizeCast}
+          onClick={
+            format === "whodunnit"
+              ? surpriseAndCompileMystery
+              : randomizeCast
+          }
           disabled={
-            bots.length <
+            busy || bots.length <
             (format === "whodunnit"
-              ? mysteryCastRequirement
+              ? mysteryCastRequirement + (juryEnabled ? DEBATE_JURY_SIZE : 0)
               : playerRole === "spectator"
                 ? 3
                 : 2)
           }
           aria-label={
             format === "whodunnit"
-              ? "Randomly assign all Whodunnit cast roles"
+              ? "Randomly assign all Whodunnit cast roles and begin compiling"
               : playerRole === "judge"
               ? "Randomly select both advocates"
               : playerRole === "participant"
@@ -19148,9 +19216,9 @@ export function DebateExperience(
           }
           title={
             format === "whodunnit"
-              ? bots.length < mysteryCastRequirement
-                ? `At least ${mysteryCastRequirement} Library bots are required`
-                : "Randomly assign all suspects and courtroom roles"
+              ? bots.length < mysteryCastRequirement + (juryEnabled ? DEBATE_JURY_SIZE : 0)
+                ? `At least ${mysteryCastRequirement + (juryEnabled ? DEBATE_JURY_SIZE : 0)} Library bots are required`
+                : "Randomly assign every role and begin compiling the case"
               : bots.length < (playerRole === "spectator" ? 3 : 2)
               ? playerRole === "spectator"
                 ? "At least three Library bots are required"
@@ -19219,8 +19287,8 @@ export function DebateExperience(
                 },
                 {
                   seat: { kind: "prosecutor" } as const,
-                  label: "Prosecution partner",
-                  botId: mysteryProsecutorPartnerBotId,
+                  label: "Player Prosecutor",
+                  botId: mysteryProsecutorBotId,
                 },
                 {
                   seat: { kind: "defense" } as const,
@@ -19354,7 +19422,7 @@ export function DebateExperience(
                           : activeMysteryCastSeat.kind === "judge"
                             ? "presiding Judge"
                           : activeMysteryCastSeat.kind === "prosecutor"
-                            ? "prosecutor partner"
+                            ? "player Prosecutor"
                             : "rival defense"
                       }`
                     : `Bot for ${
@@ -19404,7 +19472,7 @@ export function DebateExperience(
                 [
                   ...mysterySuspectBotIds,
                   mysteryJudgeBotId,
-                  mysteryProsecutorPartnerBotId,
+                  mysteryProsecutorBotId,
                   mysteryRivalDefenseBotId,
                 ].includes(bot.id);
               const effectiveDisabledReason = mysteryReserved
@@ -19681,7 +19749,7 @@ export function DebateExperience(
                   checked={playerRole === role}
                   disabled={
                     (role === "participant" && format === "turnabout") ||
-                    (role === "judge" && format === "whodunnit")
+                    (format === "whodunnit" && role === "judge")
                   }
                   onChange={() => selectPlayerRole(role)}
                 />
@@ -21100,7 +21168,9 @@ export function DebateExperience(
         </h2>
         <p>
           {format === "whodunnit"
-            ? "Court and Cast share one editable Debate Studio draft. Compile freezes its recipe, seats, model, Effort, Turbo, Powers, and court contract."
+            ? playerRole === "spectator"
+              ? "Compile freezes the same private case and selected-Prosecutor investigation. You will review an editable conclusion from authorized findings before filing it and watching court."
+              : "Court and Cast share one editable Debate Studio draft. Compile freezes its recipe, seats, model, Effort, Turbo, Powers, and court contract."
             : "One view of what will enter the chamber. Start freezes the room, motion, cast, consent, model, Powers, and evidence."}
         </p>
       </div>
@@ -21196,7 +21266,9 @@ export function DebateExperience(
         <span className={styles.launchThreshold}>
           {debateCanStart
             ? format === "whodunnit"
-              ? "Compile freezes the complete Debate Studio draft."
+              ? playerRole === "spectator"
+                ? "Compile prepares the selected Prosecutor’s findings for your review before court."
+                : "Compile freezes the complete Debate Studio draft."
               : `Start freezes the ${debatePublicMaterialName(formality).toLowerCase()}.`
             : !motionComplete
               ? "Shape the motion to continue."
@@ -28914,10 +28986,27 @@ export function DebateExperience(
           setStudioPanel("archive");
           void loadSessions();
         }}
+      /> : activeSession.formatState.playPhase !== "verdict" &&
+        activeSession.formatState.readiness.status !== "ready" ? <DebateMysteryV2Readiness
+        {...mysterySharedProps}
+        session={activeSession}
+        onSessionChange={adoptMysterySessionChange}
+        onExit={() => {
+          activeSessionIdRef.current = null;
+          activeSessionRef.current = null;
+          setActiveSession(null);
+          setView("dashboard");
+          setStudioPanel("archive");
+          void loadSessions();
+        }}
       /> : <DebateMysteryV2Play
         {...mysterySharedProps}
         session={activeSession}
         onSessionChange={adoptMysterySessionChange}
+        transcriptCopyState={transcriptCopyState}
+        reviewCopyState={reviewBundleCopyState}
+        onCopyVerboseTranscript={copyVerboseTranscript}
+        onCopyAllReviewData={copyAllDebateReviewData}
         onExit={() => {
           activeSessionIdRef.current = null;
           activeSessionRef.current = null;

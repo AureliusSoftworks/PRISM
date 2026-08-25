@@ -700,12 +700,21 @@ describe("Debate Whodunnit experience", () => {
     assert.match(css, /\.theoryWorkspace/u);
   });
 
-  it("adds a clearly labeled one-click random cast action and preserves existing cast flow", () => {
+  it("lets the main Surprise me shortcut cast every role and begin compilation", () => {
     assert.match(shell, /data-tutorial-target="debate-random-cast"/u);
-    assert.match(shell, /"Randomly assign all Whodunnit cast roles"/u);
+    assert.match(shell, /"Randomly assign all Whodunnit cast roles and begin compiling"/u);
     assert.match(shell, /className=\{styles\.castRandomizeButton\}/u);
     assert.match(shell, /<strong>Surprise me<\/strong>/u);
     assert.match(shell, /if \(format === "whodunnit"\) \{[\s\S]{0,180}randomizeWhodunnitCast/u);
+    assert.match(shell, /const surpriseAndCompileMystery = \(\): void => \{/u);
+    assert.match(shell, /mysterySurpriseCompilePendingRef\.current = true/u);
+    assert.match(shell, /format === "whodunnit"[\s\S]{0,120}\? surpriseAndCompileMystery/u);
+    assert.match(shell, /resolvedMysteryConfigV2 = resolveDebateMysteryConfigV2\(mysteryCreateConfigV2\)/u);
+    assert.match(shell, /const mysterySetupValidated = inspectedMysterySeed/u);
+    assert.match(shell, /format !== "whodunnit" \|\| mysterySetupValidated/u);
+    assert.match(shell, /if \(!mysterySetupValidated \|\| busy\) return;/u);
+    assert.match(shell, /\? "Cast validated"/u);
+    assert.match(shell, /if \(!debateCanStart \|\| busy\) return;[\s\S]{0,160}void startMystery\(\)/u);
   });
 
   it("leaves a removed Whodunnit seat on a one-seat Surprise me reroll", () => {
@@ -743,7 +752,7 @@ describe("Debate Whodunnit experience", () => {
     const allBotIds = [
       ...result.suspectBotIds,
       result.judgeBotId,
-      result.prosecutorPartnerBotId,
+      result.prosecutorBotId,
       result.rivalDefenseBotId,
     ];
     assert.equal(allBotIds.length, minimumWhodunnitBotsForCast(6));
@@ -766,7 +775,7 @@ describe("Debate Whodunnit experience", () => {
     const allBotIds = [
       ...result.suspectBotIds,
       result.judgeBotId,
-      result.prosecutorPartnerBotId,
+      result.prosecutorBotId,
       result.rivalDefenseBotId,
     ];
     assert.equal(new Set(allBotIds).size, minimumWhodunnitBotsForCast(6));
@@ -807,13 +816,13 @@ describe("Debate Whodunnit experience", () => {
     const firstSelection = [
       ...first.suspectBotIds,
       first.judgeBotId,
-      first.prosecutorPartnerBotId,
+      first.prosecutorBotId,
       first.rivalDefenseBotId,
     ];
     const secondSelection = [
       ...second.suspectBotIds,
       second.judgeBotId,
-      second.prosecutorPartnerBotId,
+      second.prosecutorBotId,
       second.rivalDefenseBotId,
     ];
     assert.equal(new Set(firstSelection).size, minimumWhodunnitBotsForCast(4));

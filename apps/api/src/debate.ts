@@ -120,6 +120,7 @@ import {
   normalizeDebateIdempotencyKey,
   normalizeDebateJuryStateV1,
   normalizeDebateMysteryFormatStateV1,
+  normalizeDebateMysteryFormatStateV2,
   normalizeDebateModeratorTitle,
   normalizeDebateModeratorName,
   normalizeDebateParticipantDifficulty,
@@ -4134,15 +4135,27 @@ export function listDebateSessions(
         formality,
       );
       if (format === "whodunnit") {
-        const mystery = normalizeDebateMysteryFormatStateV1(parsed.formatState);
-        if (mystery.caseTitle.trim()) title = mystery.caseTitle;
-        mysteryProgress = mystery.playPhase;
-        mysteryRouteGrade = mystery.verdict?.grade ?? null;
-        mysteryFictionLabel = mystery.fictionLabel;
-        mysterySpoilersRevealed = mystery.spoilersRevealed;
-        mysterySuspectColors = mystery.suspects
-          .map((suspect) => suspect.color?.trim() ?? "")
-          .filter((color) => Boolean(color));
+        const mysteryV2 = normalizeDebateMysteryFormatStateV2(parsed.formatState);
+        if (mysteryV2) {
+          if (mysteryV2.caseTitle?.trim()) title = mysteryV2.caseTitle;
+          mysteryProgress = mysteryV2.playPhase;
+          mysteryRouteGrade = mysteryV2.verdict?.classification ?? null;
+          mysteryFictionLabel = mysteryV2.fictionLabel;
+          mysterySpoilersRevealed = mysteryV2.playPhase === "verdict";
+          mysterySuspectColors = mysteryV2.suspects
+            .map((suspect) => suspect.color?.trim() ?? "")
+            .filter((color) => Boolean(color));
+        } else {
+          const mystery = normalizeDebateMysteryFormatStateV1(parsed.formatState);
+          if (mystery.caseTitle.trim()) title = mystery.caseTitle;
+          mysteryProgress = mystery.playPhase;
+          mysteryRouteGrade = mystery.verdict?.grade ?? null;
+          mysteryFictionLabel = mystery.fictionLabel;
+          mysterySpoilersRevealed = mystery.spoilersRevealed;
+          mysterySuspectColors = mystery.suspects
+            .map((suspect) => suspect.color?.trim() ?? "")
+            .filter((color) => Boolean(color));
+        }
       } else if (format === "turnabout") {
         const turnabout = normalizeDebateFormatStateV1(
           parsed.formatState,

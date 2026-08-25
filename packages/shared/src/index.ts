@@ -1738,6 +1738,27 @@ export interface AuthSession {
   expiresAt: string;
 }
 
+export type CoffeeTurnRouteSourceV1 =
+  | "hearing_repeat"
+  | "directed_speaker"
+  | "player_direct_address"
+  | "peer_direct_address"
+  | "router_model"
+  | "deterministic_fallback"
+  | "speaker_balance"
+  | "autonomous_handoff"
+  | "power_override";
+
+/** Privacy-safe persisted provenance for Coffee floor ownership. */
+export interface CoffeeTurnRouteV1 {
+  v: 1;
+  name: "coffeeTurnRoute";
+  source: CoffeeTurnRouteSourceV1;
+  selectedSpeakerBotId: string;
+  addressedBotId?: string;
+  playerAddressKind?: "mention" | "plain_text";
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant" | "system";
@@ -1806,6 +1827,8 @@ export interface ChatMessage {
   coffeeObserverProjection?: BotPowerObserverProjectionV1;
   /** Privacy-safe provider/model attempt history when Auto recovered this reply. */
   autoRecovery?: AutoRecoveryTraceV1;
+  /** Privacy-safe reason the Coffee floor selected this bot. */
+  coffeeTurnRoute?: CoffeeTurnRouteV1;
   /** Saved deterministic hard-response branch from a Ready Power. */
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
   /** Public replay-stable timed Mute presentation; private intent is never here. */

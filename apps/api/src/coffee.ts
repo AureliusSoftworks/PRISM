@@ -146,6 +146,7 @@ import type {
   CoffeeWinningTeamId,
   CoffeeTopicSelectionMode,
   CoffeeTurnResponse,
+  CoffeeTurnRouteV1,
   CoffeePowerPlanV1,
   CoffeeReactionOutcome,
   CoffeeReactionTone,
@@ -3648,6 +3649,7 @@ const COFFEE_INCOHERENT_TABLE_LINE_PATTERNS = [
 const COFFEE_NARRATED_STAGE_DIRECTION_PATTERNS = [
   /^as\s+i\s+(?:watch|listen|consider|ponder|look|glance|take|set)\b.{40,}$/i,
   /^my\b.{0,80}\b(?:coffee\s+)?(?:cup|mug)\b.{0,120}\bas\s+i\s+(?:ponder|think|consider|watch|listen)\b/i,
+  /^(?:lapses?\s+into\s+(?:a\s+)?(?:\w+\s+){0,2}silence|falls?\s+silent)\b/i,
 ] as const;
 
 /**
@@ -3925,6 +3927,8 @@ export function sanitizeCoffeeTableReply(
     allowReclaimCutoff?: boolean;
     /** Planned quick beats / asides keep short conversational reactions. */
     allowMicroReaction?: boolean;
+    /** A player who explicitly gave this bot the floor is owed audible words. */
+    requireSpokenReply?: boolean;
     /** Reject visible prose copied from this bot's private persona scaffold. */
     speakerSystemPrompt?: string | null;
   },
@@ -3978,6 +3982,7 @@ export function sanitizeCoffeeTableReply(
   }
   const withoutQuoteMarks = stripCoffeeVisibleQuoteMarks(withoutCupDrinkingActions);
   const spokenText = visibleCoffeeSpeechForValueScan(withoutQuoteMarks);
+  if (options?.requireSpokenReply && !spokenText) return "";
   if (coffeeReplyTreatsSpeakerAsAnotherParticipant(withoutQuoteMarks, speakerName)) {
     return "";
   }
@@ -4063,6 +4068,7 @@ function serializeCoffeeAssistantToolPayload(args: {
   coffeeStageAction?: CoffeeStageActionPayload | null;
   coffeeReplayEvents?: CoffeeReplayEventPayload[] | null;
   autoRecovery?: AutoRecoveryTraceV1;
+  coffeeTurnRoute?: CoffeeTurnRouteV1;
   autoRoute?: AutoRouteDecisionV1;
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
   botPowerMutePerformance?: BotPowerMutePerformanceV1;
@@ -4081,11 +4087,14 @@ function serializeCoffeeAssistantToolPayload(args: {
   const coffeeReplayEvents = args.coffeeReplayEvents ?? undefined;
   const botPowerIntendedSpeech = args.botPowerIntendedSpeech?.trim() || undefined;
   const coffeeThinkingAside = args.coffeeThinkingAside ?? undefined;
-  const withPrivateIntendedSpeech = (serialized: string | null): string | null => {
-    if (!botPowerIntendedSpeech && !coffeeThinkingAside) return serialized;
+  const withCoffeeMetadata = (serialized: string | null): string | null => {
+    if (!botPowerIntendedSpeech && !coffeeThinkingAside && !args.coffeeTurnRoute) {
+      return serialized;
+    }
     const root = serialized ? JSON.parse(serialized) as Record<string, unknown> : { v: 1 };
     if (botPowerIntendedSpeech) root.botPowerIntendedSpeech = botPowerIntendedSpeech;
     if (coffeeThinkingAside) root.coffeeThinkingAside = coffeeThinkingAside;
+    if (args.coffeeTurnRoute) root.coffeeTurnRoute = args.coffeeTurnRoute;
     return JSON.stringify(root);
   };
   if (
@@ -4095,6 +4104,7 @@ function serializeCoffeeAssistantToolPayload(args: {
       coffeeStageAction ||
       coffeeReplayEvents ||
       args.autoRecovery ||
+      args.coffeeTurnRoute ||
       args.autoRoute ||
       args.botPowerExactResponse ||
       args.botPowerMutePerformance ||
@@ -4106,7 +4116,7 @@ function serializeCoffeeAssistantToolPayload(args: {
       || args.botPowerTrollPresentation
     )
   ) {
-    return withPrivateIntendedSpeech(serializeAssistantToolPayload({
+    return withCoffeeMetadata(serializeAssistantToolPayload({
       coffeeAmbientAction,
       coffeeStageAction,
       coffeeReplayEvents,
@@ -4126,6 +4136,7 @@ function serializeCoffeeAssistantToolPayload(args: {
     !coffeeStageAction &&
     !coffeeReplayEvents &&
     !args.autoRecovery &&
+    !args.coffeeTurnRoute &&
     !args.autoRoute &&
     !args.botPowerExactResponse &&
     !args.botPowerMutePerformance &&
@@ -4145,6 +4156,7 @@ function serializeCoffeeAssistantToolPayload(args: {
     ...(coffeeStageAction ? { coffeeStageAction } : {}),
     ...(coffeeReplayEvents && coffeeReplayEvents.length > 0 ? { coffeeReplayEvents } : {}),
     ...(args.autoRecovery ? { autoRecovery: args.autoRecovery } : {}),
+    ...(args.coffeeTurnRoute ? { coffeeTurnRoute: args.coffeeTurnRoute } : {}),
     ...(args.autoRoute ? { autoRoute: args.autoRoute } : {}),
     ...(args.botPowerExactResponse
       ? { botPowerExactResponse: args.botPowerExactResponse }
@@ -13254,6 +13266,58 @@ export function extractLastAddressedBotId(args: {
   return lastMentionedBotId;
 }
 
+/** Resolve a player's explicit plain-text vocative without treating ordinary
+ * third-person name references as hard floor direction. */
+export function resolveCoffeePlayerPlainTextAddresseeV1(args: {
+  line: string;
+  seatedBots: readonly Pick<CoffeeBotProfile, "id" | "name">[];
+}): string | null {
+  const line = args.line.normalize("NFKC").replace(/\s+/gu, " ").trim();
+  if (!line) return null;
+  const aliasOwners = new Map<string, Set<string>>();
+  for (const bot of args.seatedBots) {
+    for (const alias of new Set([bot.name, ...botNaturalAddressAliasesV1(bot.name)])) {
+      const normalized = alias.normalize("NFKC").toLocaleLowerCase();
+      const owners = aliasOwners.get(normalized) ?? new Set<string>();
+      owners.add(bot.id);
+      aliasOwners.set(normalized, owners);
+    }
+  }
+  let resolvedBotId: string | null = null;
+  let resolvedAt = -1;
+  for (const bot of args.seatedBots) {
+    const aliases = [bot.name, ...botNaturalAddressAliasesV1(bot.name)].filter(
+      (alias) =>
+        aliasOwners.get(alias.normalize("NFKC").toLocaleLowerCase())?.size === 1,
+    );
+    for (const alias of new Set(aliases)) {
+      const escaped = escapeRegExp(alias);
+      const patterns = [
+        new RegExp(
+          `^(?:(?:hey|okay|alright|so|well)\\s*,?\\s*)?${escaped}(?:\\s*[,—:!?]|\\s+(?:what|why|how|do|did|can|could|would|will|are|were)\\b)`,
+          "iu",
+        ),
+        new RegExp(
+          `(?:,\\s*|—\\s*)(?:hey\\s+)?${escaped}\\s*(?=[.!?](?:\\s|$)|$)`,
+          "iu",
+        ),
+        new RegExp(
+          `\\b(?:i\\s+(?:asked|meant)|let|have|need|want)\\s+${escaped}(?:\\s+(?:answer|respond|speak|take\\s+this))?\\b`,
+          "iu",
+        ),
+      ];
+      for (const pattern of patterns) {
+        const match = pattern.exec(line);
+        if (match && match.index >= resolvedAt) {
+          resolvedAt = match.index;
+          resolvedBotId = bot.id;
+        }
+      }
+    }
+  }
+  return resolvedBotId;
+}
+
 export function resolveCoffeeMoodBoostRecipientIdsV1(args: {
   line: string;
   speakerBotId: string;
@@ -15329,6 +15393,7 @@ function loadMessages(
       const coffeeInterruption = storedToolPayload.coffeeInterruption;
       const coffeeReplayEvents = storedToolPayload.coffeeReplayEvents;
       const autoRecovery = storedToolPayload.autoRecovery;
+      const coffeeTurnRoute = storedToolPayload.coffeeTurnRoute;
       const botPowerExactResponse = storedToolPayload.botPowerExactResponse;
       const botPowerMutePerformance = storedToolPayload.botPowerMutePerformance;
       const socialSilence = storedToolPayload.socialSilence;
@@ -15361,6 +15426,7 @@ function loadMessages(
           ? { coffeeAudienceBotIds: null }
           : { coffeeAudienceBotIds: parseStoredBotGroupIds(row.coffee_audience_bot_ids) }),
         ...(autoRecovery ? { autoRecovery } : {}),
+        ...(coffeeTurnRoute ? { coffeeTurnRoute } : {}),
         ...(botPowerExactResponse ? { botPowerExactResponse } : {}),
         ...(botPowerMutePerformance ? { botPowerMutePerformance } : {}),
         ...(socialSilence ? { socialSilence } : {}),
@@ -15400,6 +15466,7 @@ function loadAllMessages(
       const coffeeInterruption = storedToolPayload.coffeeInterruption;
       const coffeeReplayEvents = storedToolPayload.coffeeReplayEvents;
       const autoRecovery = storedToolPayload.autoRecovery;
+      const coffeeTurnRoute = storedToolPayload.coffeeTurnRoute;
       const botPowerExactResponse = storedToolPayload.botPowerExactResponse;
       const botPowerMutePerformance = storedToolPayload.botPowerMutePerformance;
       const socialSilence = storedToolPayload.socialSilence;
@@ -15432,6 +15499,7 @@ function loadAllMessages(
           ? { coffeeAudienceBotIds: null }
           : { coffeeAudienceBotIds: parseStoredBotGroupIds(row.coffee_audience_bot_ids) }),
         ...(autoRecovery ? { autoRecovery } : {}),
+        ...(coffeeTurnRoute ? { coffeeTurnRoute } : {}),
         ...(botPowerExactResponse ? { botPowerExactResponse } : {}),
         ...(botPowerMutePerformance ? { botPowerMutePerformance } : {}),
         ...(socialSilence ? { socialSilence } : {}),
@@ -19120,7 +19188,7 @@ async function generateCoffeeBotReply(args: {
       : null;
   const explicitDirectedSpeaker = pickDirectedSpeaker(routableTurnGroup, effectiveDirectedSpeakerBotId);
   const userActionOnly = turnKind === "user" && coffeeUserMessageIsActionOnly(tableFocus);
-  const currentUserAddressedBotId =
+  const currentUserMentionedBotId =
     !explicitDirectedSpeaker && turnKind === "user"
       ? extractLastAddressedBotId({
           line: tableFocus,
@@ -19128,6 +19196,15 @@ async function generateCoffeeBotReply(args: {
           seatedBotIds,
         })
       : null;
+  const currentUserPlainTextAddressedBotId =
+    !explicitDirectedSpeaker && turnKind === "user" && !currentUserMentionedBotId
+      ? resolveCoffeePlayerPlainTextAddresseeV1({
+          line: tableFocus,
+          seatedBots: routableTurnGroup,
+        })
+      : null;
+  const currentUserAddressedBotId =
+    currentUserMentionedBotId ?? currentUserPlainTextAddressedBotId;
   const currentUserAddressedSpeaker = currentUserAddressedBotId
     ? routableTurnGroup.find((bot) => bot.id === currentUserAddressedBotId) ?? null
     : null;
@@ -19152,13 +19229,16 @@ async function generateCoffeeBotReply(args: {
   let pickedBotId: string;
   let routerReason: string;
   let routerDirective: string | null = null;
+  let routerSource: CoffeeTurnRouteV1["source"];
   if (hearingRepeatDirective) {
+    routerSource = "hearing_repeat";
     pickedBotId = hearingRepeatDirective.repeatingBotId;
     const requesterName = group.find(
       (bot) => bot.id === hearingRepeatDirective.requesterBotId,
     )?.name ?? "the Power holder";
     routerReason = `Hard-of-hearing Power made ${requesterName}'s prior speaker repeat.`;
   } else if (explicitDirectedSpeaker) {
+    routerSource = "directed_speaker";
     pickedBotId = explicitDirectedSpeaker.id;
     routerReason =
       crosstalkReclaim?.speakerBotId === explicitDirectedSpeaker.id
@@ -19173,6 +19253,7 @@ async function generateCoffeeBotReply(args: {
           ? "You just broke the prolonged silence. Follow your brief reaction with one substantive, in-character turn; respond only to the visible silence and elapsed time, never to unheard words."
         : "Start a fresh concrete beat tied to the latest table moment.";
   } else if (currentUserAddressedSpeaker) {
+    routerSource = "player_direct_address";
     pickedBotId = currentUserAddressedSpeaker.id;
     routerReason = `Followed the player's direct address to ${currentUserAddressedSpeaker.name}.`;
     routerDirective = "Answer the direct call-out first, then add one concise in-character angle.";
@@ -19180,10 +19261,12 @@ async function generateCoffeeBotReply(args: {
     if (turnKind === "autonomous" && addressedBotId) {
       const addressedSpeaker = routableTurnGroup.find((bot) => bot.id === addressedBotId);
       if (addressedSpeaker) {
+        routerSource = "peer_direct_address";
         pickedBotId = addressedSpeaker.id;
         routerReason = `Followed direct bot address to ${addressedSpeaker.name}.`;
         routerDirective = "Answer the direct call-out first, then add one concrete new angle.";
       } else {
+        routerSource = "deterministic_fallback";
         const fallbackSpeaker = pickFallbackSpeaker(routableTurnGroup, lastSpeakerBotId);
         pickedBotId = fallbackSpeaker.id;
         routerReason = ROUTER_FALLBACK_REASON;
@@ -19224,15 +19307,18 @@ async function generateCoffeeBotReply(args: {
         });
         const parsed = parseRouterResponse(routerRaw, routableTurnGroup);
         if (parsed) {
+          routerSource = "router_model";
           pickedBotId = parsed.botId;
           routerReason = parsed.reason;
           routerDirective = parsed.directive;
         } else {
+          routerSource = "deterministic_fallback";
           const fallbackSpeaker = pickFallbackSpeaker(routableTurnGroup, lastSpeakerBotId);
           pickedBotId = fallbackSpeaker.id;
           routerReason = ROUTER_FALLBACK_REASON;
         }
       } catch {
+        routerSource = "deterministic_fallback";
         const fallbackSpeaker = pickFallbackSpeaker(routableTurnGroup, lastSpeakerBotId);
         pickedBotId = fallbackSpeaker.id;
         routerReason = ROUTER_FALLBACK_REASON;
@@ -19256,6 +19342,7 @@ async function generateCoffeeBotReply(args: {
     activePollContext,
     });
     if (balanceOverride) {
+      routerSource = "speaker_balance";
       pickedBotId = balanceOverride.id;
       routerReason = `Speaker balance override picked quieter seated bot ${balanceOverride.name}.`;
       routerDirective = `Bring ${balanceOverride.name}'s quieter perspective in with one concrete angle tied to the latest table moment.`;
@@ -19275,6 +19362,7 @@ async function generateCoffeeBotReply(args: {
       turnKind,
     });
     if (handoffSpeaker.id !== pickedBotId) {
+      routerSource = "autonomous_handoff";
       pickedBotId = handoffSpeaker.id;
       routerReason = `Autonomous peer handoff passed the table from the previous speaker to ${handoffSpeaker.name}.`;
       routerDirective =
@@ -19300,6 +19388,7 @@ async function generateCoffeeBotReply(args: {
     if (powerOverride) {
       const powerSpeaker = routableTurnGroup.find((bot) => bot.id === powerOverride.botId);
       if (powerSpeaker) {
+        routerSource = "power_override";
         pickedBotId = powerSpeaker.id;
         routerReason = `Active Power pressure favored ${powerSpeaker.name} (${powerOverride.score > 0 ? "+" : ""}${powerOverride.score}).`;
         routerDirective = `Follow the active Power pull while responding naturally to the latest table moment.`;
@@ -19308,6 +19397,20 @@ async function generateCoffeeBotReply(args: {
   }
 
   const speaker = routableTurnGroup.find((bot) => bot.id === pickedBotId) ?? routableTurnGroup[0]!;
+  const coffeeTurnRoute: CoffeeTurnRouteV1 = {
+    v: 1,
+    name: "coffeeTurnRoute",
+    source: routerSource,
+    selectedSpeakerBotId: speaker.id,
+    ...(currentUserAddressedBotId
+      ? {
+          addressedBotId: currentUserAddressedBotId,
+          playerAddressKind: currentUserMentionedBotId ? "mention" : "plain_text",
+        }
+      : addressedBotId
+        ? { addressedBotId }
+        : {}),
+  };
   const speakerIsMuted = coffeePowerBotIsMuted(coffeePowerPlan, speaker.id);
   const speakerQuietIgnored = coffeePowerQuietTurnIsIgnored({
     plan: coffeePowerPlan,
@@ -19661,6 +19764,12 @@ async function generateCoffeeBotReply(args: {
       : { kind: "full" };
   const replySanitizeOptions = {
     speakerSystemPrompt: speaker.systemPrompt,
+    ...(turnKind === "user" &&
+    currentUserAddressedSpeaker !== null &&
+    !userActionOnly &&
+    !speakerUsesHardResponse
+      ? { requireSpokenReply: true as const }
+      : {}),
     ...(crosstalkReclaim ? { allowReclaimCutoff: true as const } : {}),
     ...(turnTexture.kind !== "full"
       ? { allowMicroReaction: true as const }
@@ -21814,6 +21923,7 @@ async function generateCoffeeBotReply(args: {
     coffeeStageAction,
     coffeeReplayEvents,
     autoRecovery,
+    coffeeTurnRoute,
     autoRoute: settings.autoRouteDecision,
     socialSilence: socialSilenceMarker,
     crosstalkReclaim,
@@ -21848,6 +21958,7 @@ async function generateCoffeeBotReply(args: {
           ? clearSpeechBeforeObfuscation
           : undefined,
   });
+  throwIfCoffeeTurnCancelled(settings.signal);
   db.prepare(
     `INSERT INTO messages
        (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, coffee_audience_bot_ids, created_at)

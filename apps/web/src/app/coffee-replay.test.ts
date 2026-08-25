@@ -660,6 +660,7 @@ describe("coffee replay helpers", () => {
         baseVoiceId: "voice-9",
         pitch: -0.12,
         accentDefinitionId: "irish-english",
+        pronunciationMapPoint: { x: 0.17, y: 0.73 },
         speechprintInfluence: "irish-english",
         elevenLabsEffect: "deep-space",
         voiceEffectExplicit: true,
@@ -681,6 +682,7 @@ describe("coffee replay helpers", () => {
         baseVoiceId: "voice-9",
         pitch: -0.12,
         accentDefinitionId: "irish-english",
+        pronunciationMapPoint: { x: 0.17, y: 0.73 },
         speechprintInfluence: "irish-english",
         elevenLabsEffect: "deep-space",
         voiceEffectExplicit: true,
@@ -756,6 +758,7 @@ describe("coffee replay helpers", () => {
     assert.equal(replayVoice.baseVoiceId, "voice-9");
     assert.equal(replayVoice.pitch, -0.12);
     assert.equal(replayVoice.accentDefinitionId, "irish-english");
+    assert.deepEqual(replayVoice.pronunciationMapPoint, { x: 0.17, y: 0.73 });
     assert.equal(replayVoice.speechprintInfluence, "irish-english");
     assert.equal(
       replayVoice.elevenLabsEffect,
@@ -1136,6 +1139,14 @@ describe("coffee replay helpers", () => {
             crossedOnline: false,
             attempts: [],
           },
+          coffeeTurnRoute: {
+            v: 1,
+            name: "coffeeTurnRoute",
+            source: "player_direct_address",
+            selectedSpeakerBotId: "bot-1",
+            addressedBotId: "bot-1",
+            playerAddressKind: "plain_text",
+          },
           coffeeObserverProjection: { audible: true, visible: true },
           crosstalkReclaim: { sourceMessageId: "interrupted-1" },
           content: "*sets the cup down* Help becomes control when consent disappears.",
@@ -1146,6 +1157,11 @@ describe("coffee replay helpers", () => {
     assert.match(text, /### Turn 01 \| 00:03\.000 \| Nova \(assistant\)/u);
     assert.match(text, /- Message ID: message-1/u);
     assert.match(text, /- Turn routing: local -> gemma/u);
+    assert.match(
+      text,
+      /- Speaker selection: .*"source":"player_direct_address"/u,
+    );
+    assert.match(text, /- Speaker selection: .*"playerAddressKind":"plain_text"/u);
     assert.match(text, /- AUTO recovery: .*"finalModel":"gemma"/u);
     assert.match(text, /- Delivery mood: guarded/u);
     assert.match(text, /- Observer projection: .*"audible":true/u);

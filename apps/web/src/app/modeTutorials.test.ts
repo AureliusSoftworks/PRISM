@@ -41,6 +41,13 @@ describe("mode tutorials", () => {
     assert.match(step.body, /Bench Trial/u);
     assert.match(step.body, /Premium voices are unavailable/u);
     assert.match(step.body, /LOCAL makes no outbound voice request/u);
+    assert.match(step.body, /choose Participant to play the prosecution[\s\S]*or Spectator/u);
+    assert.match(step.body, /frozen case pre-fills/u);
+    assert.match(step.body, /existing Theory Board to review frozen Prosecutor findings/u);
+    assert.match(step.body, /explicitly file the conclusion/u);
+    assert.match(step.body, /Spectator cannot return to the mansion/u);
+    assert.match(step.body, /Unused clues, sealed case fields, graph internals/u);
+    assert.match(step.body, /Participant keeps the full mansion/u);
     assert.match(step.body, /Writing the Case/u);
     assert.match(step.body, /Testing Contradictions/u);
     assert.match(step.body, /Preparing Local Voices/u);
@@ -48,8 +55,10 @@ describe("mode tutorials", () => {
     assert.match(step.body, /Continue without voices/u);
     assert.match(step.body, /no Actions or token economy/u);
     assert.match(step.body, /Move returns to PRISM’s shallow-isometric mansion/u);
-    assert.match(step.body, /Examine resolves authored hotspots/u);
+    assert.match(step.body, /Examine reveals compact illuminated spots over authored objects/u);
     assert.match(step.body, /Talk opens finite authored topics/u);
+    assert.match(step.body, /Nonverbal performance text appears above the suspect/u);
+    assert.match(step.body, /voice, and mouth timing use only the words actually spoken/u);
     assert.match(step.body, /Present shows an admitted evidence or sworn-testimony item/u);
     assert.match(step.body, /Theory Board opens after the crime-scene briefing/u);
     assert.match(step.body, /weakens the case rather than blocking trial/u);
@@ -96,6 +105,18 @@ describe("mode tutorials", () => {
     assert.match(signal.body, /Latest episodes restores an editable booking/u);
     assert.match(signal.body, /One launch row owns Begin episode or Prepare show/u);
     assert.match(signal.body, /missing guest or topic explained at that action/u);
+    assert.match(signal.body, /I Feel Lucky!/u);
+    assert.match(signal.body, /show, guest, title, and private premise/u);
+    const lucky = MODE_TUTORIALS.botcast.steps.find(
+      (step) => step.heading === "Take the lucky shortcut",
+    );
+    assert.ok(lucky);
+    assert.equal(
+      lucky.targetSelector,
+      '[data-tutorial-target="botcast-feel-lucky"]',
+    );
+    assert.match(lucky.body, /immediately starts/u);
+    assert.match(lucky.body, /If synthesis fails, nothing starts/u);
 
     assert.ok(debate);
     assert.match(debate.body, /procedural Studio navigation/u);
@@ -1501,6 +1522,9 @@ describe("mode tutorials", () => {
     assert.match(whodunnitCopy, /four explicitly seated jurors/u);
     assert.match(whodunnitCopy, /durable case/u);
     assert.match(whodunnitCopy, /shallow-isometric mansion/u);
+    assert.match(whodunnitCopy, /Copy verbose transcript/u);
+    assert.match(whodunnitCopy, /Copy all review data/u);
+    assert.match(whodunnitCopy, /never the sealed Case Bible/u);
     assert.match(whodunnitCopy, /Every suspect, including the accused, testifies/u);
     assert.match(whodunnitCopy, /Press for free/u);
     assert.match(whodunnitCopy, /Present an admitted evidence item/u);
@@ -2993,6 +3017,10 @@ describe("mode tutorials", () => {
     );
     assert.match(
       signalControlRoomStep.body,
+      /no direct on-air question is waiting for an answer/u,
+    );
+    assert.match(
+      signalControlRoomStep.body,
       /without voice, mouth movement, or a speaker camera cut/u,
     );
     assert.match(
@@ -3005,19 +3033,19 @@ describe("mode tutorials", () => {
     );
     assert.match(
       signalControlRoomStep.body,
-      /every cue is private to the host/u,
+      /every cue remains private to the host/u,
     );
     assert.match(
       signalControlRoomStep.body,
-      /guest only hears what the host says on mic/u,
+      /guest only hears the host’s own on-mic words/u,
     );
     assert.match(
       signalControlRoomStep.body,
-      /Tab moves between Host note… and Say this…[\s\S]*Enter sends whatever is filled[\s\S]*Enter again runs Interrupt guest now/u,
+      /Tab moves between Host note… and Shape this…[\s\S]*Enter sends whatever is filled[\s\S]*Enter again runs Interrupt guest now/u,
     );
     assert.match(
       signalControlRoomStep.body,
-      /host reads on air as a message from the Producer[\s\S]*without sending that line through a model/u,
+      /private wording to transform[\s\S]*every cue remains private to the host/u,
     );
     assert.match(
       signalControlRoomStep.body,
@@ -3359,6 +3387,10 @@ describe("mode tutorials", () => {
 
   it("teaches setup-time Signal images while keeping first-run guidance generic", () => {
     const booking = signalPowersTutorialBody();
+    const controlRoom =
+      MODE_TUTORIALS.botcast.steps.find(
+        (step) => step.heading === "Produce from the control room",
+      )?.body ?? "";
     assert.match(booking, /Auto’s current model pool contains a vision-capable model/u);
     assert.match(booking, /fixed vision-capable model/u);
     assert.match(booking, /routes an Auto image turn through that capable pool/u);
@@ -3368,6 +3400,10 @@ describe("mode tutorials", () => {
     assert.match(booking, /optional Reason private to the host/u);
     assert.match(booking, /automatically presents the image/u);
     assert.match(booking, /bytes remain session-only/u);
+    assert.match(controlRoom, /at least the guest’s response and the host’s follow-up/u);
+    assert.match(controlRoom, /every further related turn/u);
+    assert.match(controlRoom, /generic pronouns and unrelated visual language do not keep it pinned/u);
+    assert.match(controlRoom, /conversation genuinely moves on/u);
     assert.doesNotMatch(
       FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE,
       /image|PNG|JPG/u,

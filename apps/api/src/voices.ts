@@ -20,7 +20,13 @@ import {
   type VoiceMode,
   type VoiceDeliveryMood,
 } from "@localai/shared";
-import { prepareAccentMapTargetIpa } from "./builtin-tts-runtime.ts";
+
+type AccentIpaResolver = typeof import("./builtin-tts-runtime.ts")["prepareAccentMapTargetIpa"];
+
+const prepareAccentMapTargetIpaLazily: AccentIpaResolver = async (args) => {
+  const { prepareAccentMapTargetIpa } = await import("./builtin-tts-runtime.ts");
+  return prepareAccentMapTargetIpa(args);
+};
 
 export function resolveElevenLabsVoiceId(
   profile: BotAudioVoiceProfileV1
@@ -157,7 +163,7 @@ type ElevenLabsSpeechArgs = {
   fetchImpl?: typeof fetch;
   /** Test seam for deterministic request-contract coverage. Production uses
    * the same provider-neutral Accent Map IPA resolver as Local synthesis. */
-  accentIpaResolver?: typeof prepareAccentMapTargetIpa;
+  accentIpaResolver?: AccentIpaResolver;
 };
 
 /**
@@ -286,7 +292,7 @@ async function elevenLabsAccentIpaProjection(
   ) {
     return null;
   }
-  const resolveIpa = args.accentIpaResolver ?? prepareAccentMapTargetIpa;
+  const resolveIpa = args.accentIpaResolver ?? prepareAccentMapTargetIpaLazily;
   const segments: ElevenLabsTextProjectionSegment[] = [];
   const pushPlain = async (value: string): Promise<void> => {
     if (!value) return;

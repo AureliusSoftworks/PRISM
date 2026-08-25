@@ -374,7 +374,10 @@ export function botcastHostTurnAddressesAskAboutCue(
   return false;
 }
 
-/** True when the host spoke the producer's required on-air quote. */
+/**
+ * Exact normalized match helper. Active Signal cues use this only to reject a
+ * private-wording leak; required on-air producer quotes are legacy behavior.
+ */
 export function botcastHostTurnIncludesDirectQuote(
   hostContent: string,
   directQuote: string,
@@ -384,10 +387,7 @@ export function botcastHostTurnIncludesDirectQuote(
   return normalizeDirectQuote(hostContent).includes(quote);
 }
 
-/**
- * Direct quotes are a hard wording contract. Topic direction stays a
- * paraphrase check only when no quote was supplied.
- */
+/** Legacy cue-delivery check retained for persisted pre-privacy episodes. */
 export function botcastHostTurnAddressesProducerCue(
   hostContent: string,
   cue: { detail?: string; directQuote?: string },

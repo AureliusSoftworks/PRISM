@@ -1004,7 +1004,15 @@ describe("hydrateAssistantMessageParts", () => {
           targetBotName: "Mara Vale",
           targetPersonaPrompt: "A terse lunar cartographer.",
           targetFace: { faceEyeCharacter: "◉" },
-          holderVoice: { version: 1, enabled: true, preset: "warm" },
+          holderVoice: {
+            v: 2,
+            enabled: true,
+            baseVoiceId: "voice-3",
+            accentDefinitionId: "irish-english",
+            pronunciationMapPoint: { x: 0.17, y: 0.73 },
+            speechprintInfluence: "irish-english",
+            speechprintVariationSeed: "identity-crisis-holder",
+          },
           sourceMessageId: "message-2",
           occurredAt: "2026-07-02T15:03:20.000Z",
         }),
@@ -1082,6 +1090,37 @@ describe("hydrateAssistantMessageParts", () => {
       hydrateAssistantMessageParts({ content: "Done.", toolPayload: stored })
         .autoRoute,
       autoRoute,
+    );
+  });
+
+  it("hydrates only bounded Coffee speaker-route provenance", () => {
+    const route = {
+      v: 1,
+      name: "coffeeTurnRoute",
+      source: "player_direct_address",
+      selectedSpeakerBotId: "bot-plankton",
+      addressedBotId: "bot-plankton",
+      playerAddressKind: "plain_text",
+    } as const;
+    assert.deepEqual(
+      hydrateAssistantMessageParts({
+        content: "One chum dish, directly answered.",
+        toolPayload: JSON.stringify({ v: 1, coffeeTurnRoute: route }),
+      }).coffeeTurnRoute,
+      route,
+    );
+    assert.equal(
+      parseStoredAssistantToolPayload(
+        JSON.stringify({
+          v: 1,
+          coffeeTurnRoute: {
+            ...route,
+            source: "hidden_router_prompt",
+            rawDirective: "private chain of thought",
+          },
+        }),
+      ).coffeeTurnRoute,
+      undefined,
     );
   });
 

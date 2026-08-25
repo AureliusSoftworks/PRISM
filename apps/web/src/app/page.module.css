@@ -28772,10 +28772,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   display: none;
 }
 
-/* Signal's resting face reads lower as the interview avatar grows. Move the
-   complete face + authored Ink plane together by a bounded responsive amount;
-   speech keeps the canonical Studio registration used by every other surface. */
-.signalBotPresencePlate[data-signal-surface="stage"]:not([data-talking="true"])
+/* Signal's face reads lower as the interview avatar grows. Move the complete
+   face + authored Ink plane together by a bounded responsive amount so Speech
+   ink does not drop when the bot starts talking. */
+.signalBotPresencePlate[data-signal-surface="stage"]
   .zenLiveBotPresenceScreenContentRig {
   translate: 0 clamp(-6px, -0.42vw, -4px);
 }

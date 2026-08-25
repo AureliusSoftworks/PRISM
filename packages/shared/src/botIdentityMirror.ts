@@ -39,9 +39,11 @@ export interface BotIdentityMirrorStateV1 {
   /** Missing only on legacy replay events created before public ink was copied. */
   targetAvatarDetails?: BotAvatarDetailsV1 | null;
   /**
-   * The holder's effective authored voice is frozen for faithful playback.
+   * The holder's complete effective authored voice is frozen for faithful
+   * playback, including its exact pronunciationMapPoint, accentDefinitionId,
+   * Speechprint identity, provider voice identity, and client effect.
    * Legacy events may omit this and resolve it from the frozen/live holder.
-   * Identity Crisis never stores or plays the target's voice.
+   * Identity Crisis never stores or plays the target's voice or map point.
    */
   holderVoice?: NormalizedBotAudioVoiceProfileV1;
   /** Missing authored glyph is itself a borrowed public identity choice. */
@@ -148,7 +150,10 @@ export function applyBotIdentityMirrorHolderVoiceEffectV1(
   return botIdentityMirrorVoiceV1(holderVoice);
 }
 
-/** New snapshots win; legacy snapshots resolve from the holder, never the target. */
+/**
+ * New snapshots win with the holder's frozen Accent Map position intact;
+ * legacy snapshots resolve from the holder, never the target.
+ */
 export function resolveBotIdentityMirrorVoiceV1(
   state: BotIdentityMirrorStateV1 | null | undefined,
   holderAuthoredVoice: unknown,

@@ -33,6 +33,80 @@ const COFFEE_TOPIC_TITLE_SMALL_WORDS = new Set([
   "with",
 ]);
 
+const COFFEE_TOPIC_TITLE_SEMANTIC_STOP_WORDS = new Set([
+  ...COFFEE_TOPIC_TITLE_SMALL_WORDS,
+  "are",
+  "as",
+  "at",
+  "be",
+  "been",
+  "by",
+  "can",
+  "could",
+  "did",
+  "do",
+  "does",
+  "from",
+  "go",
+  "had",
+  "has",
+  "have",
+  "how",
+  "if",
+  "into",
+  "is",
+  "it",
+  "its",
+  "me",
+  "my",
+  "our",
+  "should",
+  "so",
+  "their",
+  "them",
+  "they",
+  "this",
+  "up",
+  "us",
+  "was",
+  "we",
+  "were",
+  "what",
+  "when",
+  "where",
+  "which",
+  "who",
+  "why",
+  "will",
+  "would",
+  "you",
+  "your",
+]);
+
+function coffeeTopicSemanticTokens(text: string): Set<string> {
+  return new Set(
+    coffeeTopicTitleWords(text)
+      .map((word) =>
+        word
+          .toLocaleLowerCase()
+          .replace(/[’']s$/u, "")
+          .replace(/[’']/gu, ""),
+      )
+      .filter(
+        (word) =>
+          word.length >= 2 &&
+          !COFFEE_TOPIC_TITLE_SEMANTIC_STOP_WORDS.has(word),
+      ),
+  );
+}
+
+function coffeeTopicTitleSharesSourceSubject(title: string, source: string): boolean {
+  const titleTokens = coffeeTopicSemanticTokens(title);
+  const sourceTokens = coffeeTopicSemanticTokens(source);
+  if (titleTokens.size === 0 || sourceTokens.size === 0) return true;
+  return [...titleTokens].some((token) => sourceTokens.has(token));
+}
+
 function titleCaseCoffeeTopicTitle(text: string): string {
   const words = text.split(/\s+/u).filter(Boolean);
   return words
@@ -74,6 +148,16 @@ export function isCleanCoffeeTopicTitle(
   if (sourceTrim.length > COFFEE_TOPIC_TITLE_MAX_CHARS && cleaned === sourceTrim) {
     return false;
   }
+  // A compact headline can satisfy every shape rule while hallucinating a
+  // different subject. Keep generated and stored titles grounded in at least
+  // one meaningful source term; the local heuristic remains the safe fallback.
+  if (
+    sourceTrim &&
+    cleaned !== sourceTrim &&
+    !coffeeTopicTitleSharesSourceSubject(cleaned, sourceTrim)
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -94,6 +178,7 @@ export function heuristicCoffeeTopicTitle(raw: string): string {
   }
 
   text = text
+    .replace(/^if\s+you\s+could\s+(.+?)(?:,\s*what\s+would\s+you\s+do)?[?]?$/iu, "$1")
     .replace(/^(?:what(?:'s| is| was| are| were)|who(?:'s| is)|how|why|when|where)\s+/iu, "")
     .replace(/^(?:the|a|an)\s+/iu, "")
     .replace(/\bpart of (?:your|my|the) (?:story|life|journey|tale)\b/giu, "moment")

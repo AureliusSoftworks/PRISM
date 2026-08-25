@@ -7293,6 +7293,7 @@ interface CoffeeConversationMessage {
   coffeeAudienceBotIds?: string[] | null;
   coffeeObserverProjection?: BotPowerObserverProjectionV1;
   autoRecovery?: AutoRecoveryTraceV1;
+  coffeeTurnRoute?: import("@localai/shared").CoffeeTurnRouteV1;
   botPowerMutePerformance?: BotPowerMutePerformanceV1;
   botPowerTrollPresentation?: BotPowerTrollPresentationV1;
   socialSilence?: SocialSilenceMarkerV1;

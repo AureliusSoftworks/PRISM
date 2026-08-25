@@ -51,6 +51,20 @@ test("generated Coffee titles accept JSON and reject leftover prompts", () => {
     cleanGeneratedCoffeeTopicTitle(HARRY_POTTER_PROMPT, HARRY_POTTER_PROMPT),
     null,
   );
+  assert.equal(
+    cleanGeneratedCoffeeTopicTitle(
+      '{"title":"Explore the Great Barrier Reef"}',
+      "If you could go on land, what would you do?",
+    ),
+    null,
+  );
+  assert.equal(
+    cleanGeneratedCoffeeTopicTitle(
+      '{"title":"Land Adventures"}',
+      "If you could go on land, what would you do?",
+    ),
+    "Land Adventures",
+  );
 });
 
 test("Coffee display titles prefer a clean stored title over the raw prompt", () => {
@@ -74,5 +88,12 @@ test("Coffee display titles prefer a clean stored title over the raw prompt", ()
       coffeeTopic: HARRY_POTTER_PROMPT,
     }),
     "Harry Potter's Most Memorable Moment",
+  );
+  assert.equal(
+    resolveCoffeeTopicDisplayTitle({
+      title: "Explore the Great Barrier Reef",
+      coffeeTopic: "If you could go on land, what would you do?",
+    }),
+    "Go on Land",
   );
 });

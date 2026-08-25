@@ -53,6 +53,22 @@ describe("simulated model effort runner", () => {
     });
   });
 
+  it("enforces the hard timeout when provider work ignores its abort signal", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    let receivedSignal: AbortSignal | null = null;
+    const pending = runWithReasoningGenerationBudget({
+      effort: "none",
+      run: (signal) => {
+        receivedSignal = signal;
+        return new Promise<string>(() => undefined);
+      },
+    });
+    await Promise.resolve();
+    t.mock.timers.tick(60_000);
+    await assert.rejects(pending, ReasoningGenerationTimeoutError);
+    assert.equal(receivedSignal?.aborted, true);
+  });
+
   it("selects only local models for simulated effort", () => {
     assert.equal(
       shouldPrepareMessagesWithSimulatedEffort({

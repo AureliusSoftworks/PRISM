@@ -40,6 +40,7 @@ export type SocialSilenceExclusionV1 =
   | "closing"
   | "poll"
   | "direct_player_obligation"
+  | "direct_peer_question"
   | "departure"
   | "required_wrap"
   | "reclaim"

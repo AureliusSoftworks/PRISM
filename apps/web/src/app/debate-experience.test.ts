@@ -592,7 +592,8 @@ describe("Debate experience", () => {
     assert.match(source, /Try another version/u);
     assert.match(source, /Refine motion/u);
     assert.match(source, /Seat every voice/u);
-    assert.match(source, /Your seat &amp; the Jury/u);
+    assert.match(source, /Player seat & the Jury/iu);
+    assert.match(source, /Your seat & the Jury/iu);
     assert.match(source, /preferredJurorBotIds/u);
     assert.match(source, /emptyPreferredJurorBotIds/u);
     assert.match(source, /assignBotToJurySeat/u);
@@ -946,7 +947,7 @@ describe("Debate experience", () => {
     assert.match(source, /\/api\/debates\/setup-suggestion/u);
     assert.match(
       source,
-      /setPlayerRole\(applied\.playerRole\)[\s\S]{0,200}setJuryEnabled\(applied\.juryEnabled\)[\s\S]{0,200}setPlayerSideId\(applied\.playerSideId\)[\s\S]{0,120}setModeratorTitle\(applied\.moderatorTitle\)/u,
+      /setPlayerRole\(resolvedPlayerRole\)[\s\S]{0,400}setJuryEnabled\([\s\S]{0,220}applied\.juryEnabled[\s\S]{0,400}setPlayerSideId\(resolvedPlayerSideId\)[\s\S]{0,120}setModeratorTitle\(applied\.moderatorTitle\)/u,
     );
     assert.match(
       source,
@@ -957,7 +958,7 @@ describe("Debate experience", () => {
     assert.match(source, /DebateNoticeToast/u);
     assert.match(
       source,
-      /playerRole:\s*applied\.playerRole[\s\S]{0,220}playerSideId:[\s\S]{0,120}applied\.playerRole === "participant"/u,
+      /playerRole:\s*resolvedPlayerRole[\s\S]{0,220}playerSideId:[\s\S]{0,120}resolvedPlayerRole === "participant"/u,
     );
     assert.doesNotMatch(
       source,
@@ -1070,7 +1071,10 @@ describe("Debate experience", () => {
       /Promise\.all(?:Settled)?\([\s\S]{0,260}missingExhibits/u,
     );
     assert.doesNotMatch(startSource, /waitUntilReady/u);
-    assert.doesNotMatch(source, /waitUntilReady/u);
+    assert.match(
+      source,
+      /waitUntilReady: debateSessionIsMysteryTurnabout\(session\)/u,
+    );
     assert.match(
       startSource,
       /if \(missingExhibits\.length > 0\) \{[\s\S]{0,260}finishDebateExhibitSynthesisInBackground\(\s*result\.session\.id,\s*missingExhibits\s*,?[\s\S]{0,140}\}/u,
@@ -1240,16 +1244,17 @@ describe("Debate experience", () => {
     assert.match(source, /if \(disabled\) return/u);
     assert.match(
       source,
-      /if \(option\.id === "whodunnit"\) \{[\s\S]{0,100}setFormat\("whodunnit"\)/u,
+      /if \(option\.id === "whodunnit"\) \{[\s\S]{0,180}setFormat\("whodunnit"\)/u,
     );
     assert.doesNotMatch(source, /setMysterySetupOpen\(true\)/u);
     assert.match(source, /format === "whodunnit" \? "Court" : "Motion"/u);
     assert.match(source, /<BotPickerToolbar/u);
     assert.match(source, /mysterySuspectBotIds\.map/u);
-    assert.match(source, /const frozenConfig: DebateWhodunnitCreateConfigV1/u);
+    assert.match(source, /const frozenConfig: DebateWhodunnitCreateConfigV2/u);
     assert.match(source, /whodunnit: frozenConfig/u);
     assert.match(source, /session\.formatState\.config/u);
-    assert.match(source, /setMysteryProsecutorPartnerBotId\(mystery\.prosecutorPartnerBotId\)/u);
+    assert.match(source, /const frozenProsecutorBotId = "prosecutorBotId" in mystery/u);
+    assert.match(source, /setMysteryProsecutorBotId\(frozenProsecutorBotId\)/u);
     assert.match(source, /format: next\.format/u);
     assert.match(source, /\/turnabout-action/u);
     assert.match(source, /submitTurnaboutAction\("press"/u);
@@ -1598,7 +1603,10 @@ describe("Debate experience", () => {
     // A decline never disables the consent button or blocks a re-check —
     // rerolling is always allowed; launch still requires every advocate to
     // accept server-side.
-    assert.match(source, /disabled=\{!castComplete \|\| busy\}/u);
+    assert.match(
+      source,
+      /disabled=\{format === "whodunnit" \|\| !castComplete \|\| busy\}/u,
+    );
     assert.doesNotMatch(source, /Resolve declined role/u);
     assert.match(source, /if \(!castComplete\) return/u);
     assert.match(source, /asking again is always allowed/u);
@@ -1691,7 +1699,10 @@ describe("Debate experience", () => {
     assert.match(source, /assignBotToCastSlot/u);
     assert.match(source, /Already cast/u);
     assert.match(source, /"Randomly select all three actors"/u);
-    assert.match(source, /onClick=\{randomizeCast\}/u);
+    assert.match(
+      source,
+      /format === "whodunnit"[\s\S]{0,100}\? surpriseAndCompileMystery[\s\S]{0,100}: randomizeCast/u,
+    );
     assert.match(
       source,
       /format === "whodunnit"[\s\S]{0,100}mysteryCastRequirement[\s\S]{0,100}playerRole === "spectator"/u,
@@ -3251,7 +3262,7 @@ describe("Debate experience", () => {
       page,
       /const staticAudiencePortrait =\s*avatarState\.presentation === "mini"/u,
     );
-    assert.match(page, /blinkEnabled=\{false\}/u);
+    assert.match(page, /blinkEnabled=\{avatarState\.blinkEnabled === true\}/u);
     assert.match(page, /runtimeEffectsEnabled=\{!staticAudiencePortrait\}/u);
     assert.match(page, /motionActive=\{[\s\S]{0,120}!staticAudiencePortrait/u);
     assert.match(
@@ -3260,7 +3271,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       page,
-      /const galleryAvatarDetails =[\s\S]{0,260}const galleryHasAvatarArt = avatarDetailsHasVisuals\(\s*galleryAvatarDetails,?\s*\);[\s\S]{0,1800}<AvatarDetailsMask[\s\S]{0,320}detailLevel="audience"[\s\S]{0,520}staticRaster[\s\S]{0,180}coreColor="ink"/u,
+      /const galleryAvatarDetails =[\s\S]{0,260}const galleryHasAvatarArt = avatarDetailsHasVisuals\(\s*galleryAvatarDetails,?\s*\);[\s\S]{0,1200}<MiniAvatarDetailsInk[\s\S]{0,260}details=\{galleryAvatarDetails\}[\s\S]{0,400}staticRaster=\{!authoredMiniPortrait\}/u,
     );
     assert.match(page, /avatarDetailsColor=\{debateAvatarDetailsColor\}/u);
     assert.match(

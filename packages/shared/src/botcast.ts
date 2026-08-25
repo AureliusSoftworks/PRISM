@@ -814,8 +814,10 @@ export function botcastVoiceLevelForBot(
 }
 
 export const BOTCAST_DEFAULT_STUDIO_LAYOUT: BotcastStudioLayout = {
-  hostBot: { x: 22.5, y: 71.25 },
-  guestBot: { x: 77.5, y: 71.25 },
+  // This is the lowest bot anchor that still reaches the 55% close-up focal
+  // line at the default zoom without panning beyond the bottom of the stage.
+  hostBot: { x: 22.5, y: 68.25 },
+  guestBot: { x: 77.5, y: 68.25 },
   hostCup: { x: 36.25, y: 90 },
   guestCup: { x: 63.75, y: 90 },
   hostFloorGlow: {
@@ -829,6 +831,25 @@ export const BOTCAST_DEFAULT_STUDIO_LAYOUT: BotcastStudioLayout = {
     scale: BOTCAST_STUDIO_FLOOR_GLOW_SCALE_MAX,
   },
 };
+
+const BOTCAST_PREVIOUS_COMPLETE_DEFAULT_STUDIO_LAYOUTS = [
+  {
+    hostBot: { x: 22.5, y: 71.25 },
+    guestBot: { x: 77.5, y: 71.25 },
+    hostCup: { x: 36.25, y: 90 },
+    guestCup: { x: 63.75, y: 90 },
+    hostFloorGlow: {
+      x: 22.5,
+      y: 84,
+      scale: BOTCAST_STUDIO_FLOOR_GLOW_SCALE_MAX,
+    },
+    guestFloorGlow: {
+      x: 77.5,
+      y: 84,
+      scale: BOTCAST_STUDIO_FLOOR_GLOW_SCALE_MAX,
+    },
+  },
+] as const satisfies readonly BotcastStudioLayout[];
 
 const BOTCAST_PREVIOUS_DEFAULT_STUDIO_LAYOUTS = [
   {
@@ -934,28 +955,69 @@ export function normalizeBotcastStudioLayout(
   const hasSavedFloorGlow =
     rawContainer.hostFloorGlow !== undefined ||
     rawContainer.guestFloorGlow !== undefined;
-  const isPreviousDefault =
-    !hasSavedFloorGlow &&
-    BOTCAST_PREVIOUS_DEFAULT_STUDIO_LAYOUTS.some((previousDefault) =>
+  const isPreviousCompleteDefault =
+    hasSavedFloorGlow &&
+    BOTCAST_PREVIOUS_COMPLETE_DEFAULT_STUDIO_LAYOUTS.some((previousDefault) =>
       (
         Object.keys(previousDefault) as Array<keyof typeof previousDefault>
       ).every((item) => {
         const point = rawContainer[item];
+        const expectedPoint = previousDefault[item] as BotcastStudioPoint;
         return Boolean(
           point &&
           typeof point === "object" &&
           !Array.isArray(point) &&
-          (point as Partial<BotcastStudioPoint>).x ===
-            previousDefault[item].x &&
-          (point as Partial<BotcastStudioPoint>).y === previousDefault[item].y,
+          (point as Partial<BotcastStudioPoint>).x === expectedPoint.x &&
+          (point as Partial<BotcastStudioPoint>).y === expectedPoint.y &&
+          (point as Partial<BotcastStudioPoint>).scale ===
+            expectedPoint.scale,
         );
       }),
     );
+  const isPreviousDefault =
+    isPreviousCompleteDefault ||
+    (!hasSavedFloorGlow &&
+      BOTCAST_PREVIOUS_DEFAULT_STUDIO_LAYOUTS.some((previousDefault) =>
+        (
+          Object.keys(previousDefault) as Array<keyof typeof previousDefault>
+        ).every((item) => {
+          const point = rawContainer[item];
+          return Boolean(
+            point &&
+            typeof point === "object" &&
+            !Array.isArray(point) &&
+            (point as Partial<BotcastStudioPoint>).x ===
+              previousDefault[item].x &&
+            (point as Partial<BotcastStudioPoint>).y ===
+              previousDefault[item].y,
+          );
+        }),
+      ));
+  const hasPreviousDefaultBotAnchors = (() => {
+    const hostBot = rawContainer.hostBot;
+    const guestBot = rawContainer.guestBot;
+    return Boolean(
+      hostBot &&
+      typeof hostBot === "object" &&
+      !Array.isArray(hostBot) &&
+      guestBot &&
+      typeof guestBot === "object" &&
+      !Array.isArray(guestBot) &&
+      (hostBot as Partial<BotcastStudioPoint>).x === 22.5 &&
+      (hostBot as Partial<BotcastStudioPoint>).y === 71.25 &&
+      (guestBot as Partial<BotcastStudioPoint>).x === 77.5 &&
+      (guestBot as Partial<BotcastStudioPoint>).y === 71.25,
+    );
+  })();
   const container = isPreviousDefault ? {} : rawContainer;
   const layout = (
     Object.keys(BOTCAST_DEFAULT_STUDIO_LAYOUT) as BotcastStudioLayoutItem[]
   ).reduce<BotcastStudioLayout>((layout, item) => {
-    const rawPoint = container[item];
+    const rawPoint =
+      hasPreviousDefaultBotAnchors &&
+      (item === "hostBot" || item === "guestBot")
+        ? undefined
+        : container[item];
     const point =
       rawPoint && typeof rawPoint === "object" && !Array.isArray(rawPoint)
         ? (rawPoint as Partial<BotcastStudioPoint>)
@@ -1328,32 +1390,31 @@ export interface BotcastSegmentRecord {
 export interface BotcastProducerCue {
   kind: BotcastProducerCueKind;
   detail?: string;
-  /** Exact words the host must speak on air. Direction stays in `detail`. */
+  /**
+   * Private wording for the host to transform in character. The legacy field
+   * name is retained on persisted requests, but these words are never an
+   * exact on-air quotation or a message attributed to the Producer.
+   */
   directQuote?: string;
   /** Server-owned reference for a queued Signal episode image. */
   imageId?: string;
 }
 
 /**
- * A "Say this" line is read on air verbatim, so its ceiling is a performance
- * budget, not a text budget. Review 2fcad998 queued ~2,600 characters of song
- * lyrics against the old 4,000 ceiling: the host spent 46 seconds reading and
- * the producer had to fire a second cue to escape it, because nothing in the
- * composer suggested the queued words were minutes long. Keep this near a
- * spoken line — roughly fifteen seconds of speech — so an over-long paste is
- * refused at the keyboard instead of on air.
+ * The legacy-named private wording field stays intentionally short so it
+ * communicates one transformable intent instead of becoming a hidden script.
  */
 export const BOTCAST_PRODUCER_DIRECT_QUOTE_MAX = 240;
 /** Direction, never spoken aloud. Mirrors the server-side `cleanText` ceiling. */
 export const BOTCAST_PRODUCER_CUE_DETAIL_MAX = 280;
-/** Extra completion tokens so the host can ease into a required quote. */
+/** Legacy-named generation allowance retained for request compatibility. */
 export const BOTCAST_PRODUCER_DIRECT_QUOTE_LEAD_IN_TOKENS = 80;
 export const BOTCAST_PRODUCER_DIRECT_QUOTE_TURN_TOKENS_MAX = 2_048;
-/** Spoken framing for a producer "Say this" line. The queued words follow as-is. */
+/** @deprecated Historical exact-quote framing. Never use for new live cues. */
 export const BOTCAST_PRODUCER_DIRECT_QUOTE_LEAD_IN =
   "The Producer sent this in.";
 
-/** Completion budget for a host turn that must air a producer quote in full. */
+/** Completion budget derived from the private wording's size. */
 export function botcastDirectQuoteTurnMaxTokens(directQuote: string): number {
   const words = directQuote.trim().split(/\s+/u).filter(Boolean).length;
   if (words === 0) return 0;
@@ -1363,15 +1424,7 @@ export function botcastDirectQuoteTurnMaxTokens(directQuote: string): number {
   );
 }
 
-/**
- * Spoken framing when a producer note lands *while the host is already
- * talking*. The flat "The Producer sent this in." reads as a fresh beat, which
- * is wrong twice over: the audience just heard the host stop mid-sentence, and
- * the host is meant to sound like someone taking live direction in an earpiece.
- *
- * Review 2fcad998 cut the host off mid-lyric and opened the very next turn with
- * the standard lead-in, so the seam was audible with nothing to explain it.
- */
+/** @deprecated Historical exact-quote framing retained for old data/tests. */
 export const BOTCAST_PRODUCER_DIRECT_QUOTE_UPDATE_LEAD_INS = [
   "Oh, hang on — now they're saying:",
   "Wait, scratch that, the Producer's got something else:",
@@ -1383,10 +1436,7 @@ export const BOTCAST_PRODUCER_DIRECT_QUOTE_UPDATE_LEAD_INS = [
   "Hang on, the booth's cutting in again:",
 ] as const;
 
-/**
- * Rotates the update framing so a producer who fires several cues in one
- * episode never hears the same bridge twice in a row.
- */
+/** @deprecated Historical exact-quote framing retained for compatibility. */
 export function botcastProducerDirectQuoteUpdateLeadInAt(
   ordinal: number,
 ): string {
@@ -1397,10 +1447,7 @@ export function botcastProducerDirectQuoteUpdateLeadInAt(
   ]!;
 }
 
-/**
- * Hosts read producer "Say this" lines exactly. The lead-in is the only
- * extra flavor; the queued words are not rewritten by a model.
- */
+/** @deprecated Active Signal cues must transform private wording, never air it. */
 export function composeBotcastProducerDirectQuoteUtterance(
   directQuote: string,
   leadIn: string = BOTCAST_PRODUCER_DIRECT_QUOTE_LEAD_IN,
@@ -1663,6 +1710,31 @@ export interface BotcastImageContextV1 {
   hostIntroductionMessageId: string | null;
   guestDiscussionMessageId: string | null;
   hostFollowUpMessageId: string | null;
+  /**
+   * Saved visibility projection for every utterance that actually discussed
+   * the presented asset. Replay consumes this list and never reclassifies the
+   * transcript independently from the live episode.
+   */
+  discussionMessageIds?: string[];
+  /** Latest saved lifecycle decision; earlier decisions remain in prior events. */
+  lifecycleEvidence?: BotcastImageLifecycleEvidenceV1 | null;
+}
+
+export interface BotcastImageLifecycleEvidenceV1 {
+  v: 1;
+  messageId: string | null;
+  decision: "continue" | "dismiss";
+  reason:
+    | "presentation"
+    | "minimum_visibility"
+    | "semantic_continuation"
+    | "semantic_transition"
+    | "semantic_topic_shift"
+    | "semantic_unavailable"
+    | "explicit_lifecycle";
+  source: "lifecycle" | "fallback_minimum" | "speaker_semantic_marker_v1";
+  semanticDecision?: "continue" | "dismiss_after" | "move_on" | null;
+  explicitAction?: string | null;
 }
 
 export function normalizeBotcastImageContextV1(
@@ -1697,6 +1769,62 @@ export function normalizeBotcastImageContextV1(
       : null;
   const savedAssetId = messageId(row.savedAssetId);
   const replayProxyId = messageId(row.replayProxyId);
+  const discussionMessageIds = Array.isArray(row.discussionMessageIds)
+    ? Array.from(
+        new Set(
+          row.discussionMessageIds
+            .map(messageId)
+            .filter((id): id is string => id !== null),
+        ),
+      )
+    : [];
+  const lifecycleEvidence = (() => {
+    if (
+      !row.lifecycleEvidence ||
+      typeof row.lifecycleEvidence !== "object" ||
+      Array.isArray(row.lifecycleEvidence)
+    ) {
+      return null;
+    }
+    const evidence = row.lifecycleEvidence as Record<string, unknown>;
+    const decision = evidence.decision;
+    const reason = evidence.reason;
+    const source = evidence.source;
+    const semanticDecision = evidence.semanticDecision;
+    if (
+      evidence.v !== 1 ||
+      (decision !== "continue" && decision !== "dismiss") ||
+      (reason !== "presentation" &&
+        reason !== "minimum_visibility" &&
+        reason !== "semantic_continuation" &&
+        reason !== "semantic_transition" &&
+        reason !== "semantic_topic_shift" &&
+        reason !== "semantic_unavailable" &&
+        reason !== "explicit_lifecycle") ||
+      (source !== "lifecycle" &&
+        source !== "fallback_minimum" &&
+        source !== "speaker_semantic_marker_v1") ||
+      (semanticDecision !== undefined &&
+        semanticDecision !== null &&
+        semanticDecision !== "continue" &&
+        semanticDecision !== "dismiss_after" &&
+        semanticDecision !== "move_on")
+    ) {
+      return null;
+    }
+    return {
+      v: 1,
+      messageId: messageId(evidence.messageId),
+      decision,
+      reason,
+      source,
+      ...(semanticDecision !== undefined ? { semanticDecision } : {}),
+      ...(typeof evidence.explicitAction === "string" &&
+      evidence.explicitAction.trim()
+        ? { explicitAction: evidence.explicitAction.trim().slice(0, 80) }
+        : {}),
+    } satisfies BotcastImageLifecycleEvidenceV1;
+  })();
   return {
     v: 1,
     imageId: row.imageId.trim().slice(0, 160),
@@ -1715,7 +1843,31 @@ export function normalizeBotcastImageContextV1(
     hostIntroductionMessageId: messageId(row.hostIntroductionMessageId),
     guestDiscussionMessageId: messageId(row.guestDiscussionMessageId),
     hostFollowUpMessageId: messageId(row.hostFollowUpMessageId),
+    discussionMessageIds,
+    lifecycleEvidence,
   };
+}
+
+/** Canonical saved asset-linked utterances, including legacy three-turn records. */
+export function botcastImageDiscussionMessageIdsV1(
+  context: Pick<
+    BotcastImageContextV1,
+    | "hostIntroductionMessageId"
+    | "guestDiscussionMessageId"
+    | "hostFollowUpMessageId"
+    | "discussionMessageIds"
+  >,
+): string[] {
+  return Array.from(
+    new Set(
+      [
+        context.hostIntroductionMessageId,
+        context.guestDiscussionMessageId,
+        context.hostFollowUpMessageId,
+        ...(context.discussionMessageIds ?? []),
+      ].filter((id): id is string => typeof id === "string" && id.length > 0),
+    ),
+  );
 }
 
 /** Latest image lifecycle record for the episode, including dismissed replay state. */
@@ -1739,9 +1891,7 @@ export function botcastImageContextForMessageV1(
   if (!messageId) return null;
   const context = botcastLatestImageContextV1(events);
   if (!context || context.phase === "queued") return null;
-  return messageId === context.hostIntroductionMessageId ||
-    messageId === context.guestDiscussionMessageId ||
-    messageId === context.hostFollowUpMessageId
+  return botcastImageDiscussionMessageIdsV1(context).includes(messageId)
     ? context
     : null;
 }

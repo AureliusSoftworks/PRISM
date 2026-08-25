@@ -135,6 +135,7 @@ test("Debate mirror borrows target identity while retaining holder materials", (
       enabled: true,
       baseVoiceId: "voice-2",
       accentDefinitionId: "irish-english",
+      pronunciationMapPoint: { x: 0.17, y: 0.73 },
       pronunciationBase: "en-US",
       speechprintInfluence: "irish-english",
       speechprintStrength: "strong",
@@ -169,6 +170,7 @@ test("Debate mirror borrows target identity while retaining holder materials", (
       baseVoiceId: "voice-4",
       pitch: 0.2,
       accentDefinitionId: "indian-english",
+      pronunciationMapPoint: { x: 0.83, y: 0.19 },
       pronunciationBase: "en-GB",
       speechprintInfluence: "indian-english",
       speechprintVariationSeed: "target-speechprint",
@@ -224,6 +226,10 @@ test("Debate mirror borrows target identity while retaining holder materials", (
   ) {
     assert.equal(mirrored.voiceProfile.baseVoiceId, "voice-2");
     assert.equal(mirrored.voiceProfile.accentDefinitionId, "irish-english");
+    assert.deepEqual(
+      mirrored.voiceProfile.pronunciationMapPoint,
+      { x: 0.17, y: 0.73 },
+    );
     assert.equal(mirrored.voiceProfile.pronunciationBase, "en-US");
     assert.equal(mirrored.voiceProfile.speechprintInfluence, "irish-english");
     assert.equal(mirrored.voiceProfile.speechprintVariationSeed, "holder-speechprint");

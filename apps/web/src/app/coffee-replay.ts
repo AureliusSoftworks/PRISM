@@ -77,6 +77,7 @@ export interface CoffeeReplayMessageLike {
   socialSilence?: SocialSilenceMarkerV1;
   moodKey?: string;
   autoRecovery?: unknown;
+  coffeeTurnRoute?: unknown;
   coffeeObserverProjection?: unknown;
   crosstalkReclaim?: unknown;
   transcriptInterruptionSegment?: {
@@ -1226,6 +1227,13 @@ export function formatCoffeeReviewClipboardText(args: {
           : projected
             ? "persisted interruption projection"
             : `${provider} -> ${model}`
+      }`,
+      `- Speaker selection: ${
+        humanAuthored || projected
+          ? "Not applicable"
+          : message.coffeeTurnRoute === undefined
+            ? "Unknown (legacy or unrecorded)"
+            : sessionReviewStableJson(message.coffeeTurnRoute)
       }`,
       `- AUTO recovery: ${
         humanAuthored || projected

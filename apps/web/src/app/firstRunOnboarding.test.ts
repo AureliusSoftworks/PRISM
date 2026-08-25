@@ -130,6 +130,8 @@ describe("first-run onboarding", () => {
     assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /hold Option/u);
     assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /stays fixed/u);
     assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /nothing begins/u);
+    assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /I Feel Lucky!/u);
+    assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /immediately starts/u);
     assert.match(pageSource, /FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE/u);
   });
 

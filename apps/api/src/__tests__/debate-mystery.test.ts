@@ -1875,7 +1875,7 @@ describe("Debate Whodunnit private/public boundary", () => {
         action: "travel",
         roomId: crimeScene.id,
       }, runtime(provider)),
-      /not a Whodunnit case|already complete/iu,
+      /not a (?:legacy )?Whodunnit case|already complete/iu,
     );
   });
 

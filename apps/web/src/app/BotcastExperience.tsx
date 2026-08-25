@@ -279,6 +279,11 @@ import {
   resolvedSignalBookingGuestId,
 } from "./signalBookingRandomizer";
 import {
+  createSignalLuckyLaunchRunner,
+  signalLuckyEligibleShows,
+  type SignalLuckyLaunchSetup,
+} from "./signalLuckyLaunch";
+import {
   SIGNAL_HOST_CUE_REDIRECT_LATEST_PROGRESS,
   signalHostCueShouldRedirect,
 } from "./signalHostCueTiming";
@@ -1052,7 +1057,7 @@ type SignalReviewCopyState = {
   phase: "copying" | "copied" | "failed";
 };
 
-type SignalBookingSuggestionOperation = "booking";
+type SignalBookingSuggestionOperation = "booking" | "lucky";
 
 type SignalAssetSlot = "day-studio" | "night-studio" | "logo";
 type SignalArtworkKind = SignalAssetSlot;
@@ -1397,6 +1402,11 @@ type SignalEpisodeImageUpload = {
 };
 
 type SignalSetupEpisodeImage = Omit<SignalEpisodeImageUpload, "episodeId">;
+
+type SignalEpisodeStartOverride = SignalLuckyLaunchSetup<BotcastShow> & {
+  setupEpisodeImage: SignalSetupEpisodeImage | null;
+  watchAutoStart?: boolean;
+};
 
 function SignalEpisodeImageVisual({
   context,
@@ -2511,6 +2521,8 @@ export function BotcastExperience({
   const producerGuestAnswerDraftRef = useRef("");
   const [bookingSuggestionBusy, setBookingSuggestionBusy] =
     useState<SignalBookingSuggestionOperation | null>(null);
+  const luckyLaunchRunnerRef = useRef(createSignalLuckyLaunchRunner());
+  const luckyLaunchUiInFlightRef = useRef(false);
   const [internalEpisodeModelDraft, setInternalEpisodeModelDraft] =
     useState("");
   const episodeModelDraft = modelChoice ?? internalEpisodeModelDraft;
@@ -2550,7 +2562,9 @@ export function BotcastExperience({
   >(null);
   const orchestrationLaunchHandledTokenRef = useRef<string | null>(null);
   const orchestrationLaunchStagedTokenRef = useRef<string | null>(null);
-  const startEpisodeRef = useRef<() => Promise<void>>(async () => undefined);
+  const startEpisodeRef = useRef<
+    (override?: SignalEpisodeStartOverride) => Promise<void>
+  >(async () => undefined);
 
   useLayoutEffect(() => {
     const grid = signalBotPickerViewportRef.current?.querySelector<HTMLElement>(
@@ -2656,6 +2670,10 @@ export function BotcastExperience({
   );
   const [cuttingShow, setCuttingShow] = useState(false);
   const [cameraSaving, setCameraSaving] = useState(false);
+  const [liveCameraOverride, setLiveCameraOverride] = useState<{
+    episodeId: string;
+    mode: BotcastCameraShot;
+  } | null>(null);
   const [signalCameraPushMessageId, setSignalCameraPushMessageId] = useState<
     string | null
   >(null);
@@ -6740,18 +6758,32 @@ export function BotcastExperience({
     }
   };
 
-  const startEpisode = async (): Promise<void> => {
-    const producerGuest = guestDraftId === BOTCAST_PRODUCER_GUEST_ID;
+  const startEpisode = async (
+    override?: SignalEpisodeStartOverride,
+  ): Promise<void> => {
+    const launchShow = override?.show ?? selectedShow;
+    const launchGuestId = override?.guestBotId ?? guestDraftId;
+    const launchTopic = override?.topic ?? topicDraft;
+    const launchProducerBrief = override?.producerBrief ?? producerBriefDraft;
+    const launchSetupEpisodeImage =
+      override?.setupEpisodeImage ?? setupEpisodeImage;
+    const launchWatchAutoStart =
+      override?.watchAutoStart ?? watchAutoStartDraft;
+    const launchHostBot = launchShow
+      ? (botsById.get(launchShow.hostBotId) ?? null)
+      : null;
+    const producerGuest = launchGuestId === BOTCAST_PRODUCER_GUEST_ID;
     const watchMode = playbackModeDraft === "watch" && !producerGuest;
     const producerGuestWantsSurprise =
       producerGuest && !producerGuestContextDraft.trim();
     if (
-      !selectedShow ||
-      !guestDraftId ||
-      (!producerGuest && !topicDraft.trim())
+      !launchShow ||
+      !launchHostBot ||
+      !launchGuestId ||
+      (!producerGuest && !launchTopic.trim())
     )
       return;
-    const guest = eligibleBots.find((bot) => bot.id === guestDraftId);
+    const guest = eligibleBots.find((bot) => bot.id === launchGuestId);
     const selectedModelOption = episodeModelDraft
       ? (modelOptions.find((option) => option.id === episodeModelDraft) ?? null)
       : null;
@@ -6771,7 +6803,7 @@ export function BotcastExperience({
       return;
     }
     if (
-      setupEpisodeImage &&
+      launchSetupEpisodeImage &&
       (producerGuest ||
         watchMode ||
         !setupImageModelCapable)
@@ -6785,7 +6817,10 @@ export function BotcastExperience({
       );
       return;
     }
-    if (setupEpisodeImage && !setupEpisodeImage.descriptor.name.trim()) {
+    if (
+      launchSetupEpisodeImage &&
+      !launchSetupEpisodeImage.descriptor.name.trim()
+    ) {
       setError(
         signalErrorToast(
           "Start Signal episode",
@@ -6840,16 +6875,16 @@ export function BotcastExperience({
         })
       : Promise.resolve(autoModelPreparationNotApplicable());
     const preRoll: SignalEpisodePreRoll = {
-      showId: selectedShow.id,
-      showName: selectedShow.name,
+      showId: launchShow.id,
+      showName: launchShow.name,
       guestName: producerGuest ? producerName : guest!.name,
       topic: producerGuest
         ? producerGuestWantsSurprise
           ? "Host’s choice"
           : "Synthesizing your interview"
-        : topicDraft.trim(),
+        : launchTopic.trim(),
       phase: "preparing",
-      source: selectedShow.introAudio.source,
+      source: launchShow.introAudio.source,
     };
     let provisionalCaptureId: string | null = null;
     let introPlayback: { durationMs: number; finished: Promise<void> } = {
@@ -6878,8 +6913,8 @@ export function BotcastExperience({
         signalCaptureSourceIdRef.current = captureSourceId;
       }
       introPlayback = playSignalIntroAudio({
-        ...signalIntroIdentityForShow(selectedShow, hostBot),
-        introAudio: selectedShow.introAudio,
+        ...signalIntroIdentityForShow(launchShow, launchHostBot),
+        introAudio: launchShow.introAudio,
         enabled: introAudioEnabled,
         volume: introAudioVolume,
         startDelayMs: SIGNAL_EPISODE_INTRO_LEAD_IN_MS,
@@ -6941,7 +6976,7 @@ export function BotcastExperience({
     } else {
       await beginEpisodeIntroBookend(
         preRoll,
-        `signal-pending:${selectedShow.id}:${Date.now()}`,
+        `signal-pending:${launchShow.id}:${Date.now()}`,
       );
     }
     setBusy(true);
@@ -6954,11 +6989,11 @@ export function BotcastExperience({
       const resolvedProducerBrief = producerGuest
         ? ""
         : (
-            (await expandComposerDraft?.(producerBriefDraft)) ??
-            producerBriefDraft
+            (await expandComposerDraft?.(launchProducerBrief)) ??
+            launchProducerBrief
           ).trim();
       const response = await request<{ episode: BotcastEpisode }>(
-        `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/episodes`,
+        `/api/botcast/shows/${encodeURIComponent(launchShow.id)}/episodes`,
         {
           method: "POST",
           signal: controller.signal,
@@ -6970,8 +7005,8 @@ export function BotcastExperience({
                 }
               : {
                   guestKind: "bot",
-                  guestBotId: guestDraftId,
-                  topic: topicDraft.trim(),
+                  guestBotId: launchGuestId,
+                  topic: launchTopic.trim(),
                   producerBrief: resolvedProducerBrief,
                 }),
             ...(watchMode ? { playbackMode: "watch" } : {}),
@@ -6987,17 +7022,17 @@ export function BotcastExperience({
       latestCaptureEpisode = response.episode;
       signalEpisodeCameraFramingSnapshotRef.current.set(
         response.episode.id,
-        normalizeBotcastCameraFraming(selectedShow.cameraFraming),
+        normalizeBotcastCameraFraming(launchShow.cameraFraming),
       );
-      if (setupEpisodeImage) {
+      if (launchSetupEpisodeImage) {
         setupImageUpload = {
           episodeId: response.episode.id,
-          ...setupEpisodeImage,
+          ...launchSetupEpisodeImage,
           descriptor: {
-            ...setupEpisodeImage.descriptor,
-            name: setupEpisodeImage.descriptor.name.trim(),
+            ...launchSetupEpisodeImage.descriptor,
+            name: launchSetupEpisodeImage.descriptor.name.trim(),
           },
-          reason: setupEpisodeImage.reason.trim(),
+          reason: launchSetupEpisodeImage.reason.trim(),
         };
         signalEpisodeImageRef.current = setupImageUpload;
         setSignalEpisodeImage(setupImageUpload);
@@ -7127,7 +7162,7 @@ export function BotcastExperience({
         setProducerGuestContextDraft("");
         setInternalEpisodeModelDraft("");
         clearProducerCueDraftInputs({ quote: false });
-        void loadEpisodes(selectedShow.id).catch(() => undefined);
+        void loadEpisodes(launchShow.id).catch(() => undefined);
         // Hold the completed-status outro fallback until Watch presents lines.
         // Bake artifacts arrive already `completed`, which used to open the end
         // card during intro and truncate faithful capture to a few seconds.
@@ -7147,7 +7182,7 @@ export function BotcastExperience({
             topic: bakedEpisode.topic.trim() || preRoll.topic,
             phase: "preparing",
           };
-          if (!watchAutoStartDraft) {
+          if (!launchWatchAutoStart) {
             const watchPlaybackStart = new Promise<void>((resolve) => {
               watchPlaybackStartResolveRef.current = resolve;
             });
@@ -7291,10 +7326,10 @@ export function BotcastExperience({
               setWatchIntermission(null);
               setWatchBakeArtifact(null);
               setWatchBakeStartedAt(null);
-              if (selectedShow) {
+              if (launchShow) {
                 void playEpisodeOutro({
                   episode: presentationEpisode,
-                  show: selectedShow,
+                  show: launchShow,
                   forced: false,
                 });
               }
@@ -7377,7 +7412,7 @@ export function BotcastExperience({
       setProducerGuestContextDraft("");
       setInternalEpisodeModelDraft("");
       clearProducerCueDraftInputs({ quote: false });
-      void loadEpisodes(selectedShow.id).catch(() => undefined);
+      void loadEpisodes(launchShow.id).catch(() => undefined);
       setEpisode(opening.episode);
       prepareEpisodeMessage(opening.message, opening.episode);
       await releaseSignalModelWarmup(opening.episode.id);
@@ -7390,14 +7425,14 @@ export function BotcastExperience({
         const landingMs =
           preRollSkipRequestedRef.current || reducedMotion ? 90 : 460;
         setEpisodePreRoll((current) =>
-          current?.showId === selectedShow.id
+          current?.showId === launchShow.id
             ? { ...current, phase: "landing" }
             : current,
         );
         window.setTimeout(() => {
           if (!episodeOperationIsCurrent(controller, runId)) return;
           setEpisodePreRoll((current) =>
-            current?.showId === selectedShow.id ? null : current,
+            current?.showId === launchShow.id ? null : current,
           );
         }, landingMs);
         stopSignalIntroAudio();
@@ -7441,7 +7476,7 @@ export function BotcastExperience({
               { method: "DELETE" },
             );
             setEpisode(null);
-            void loadEpisodes(selectedShow.id).catch(() => undefined);
+            void loadEpisodes(launchShow.id).catch(() => undefined);
           } catch {
             // Keep the original startup error; the archive can still be discarded manually.
           }
@@ -7451,7 +7486,7 @@ export function BotcastExperience({
           signalCaptureSourceIdRef.current = null;
           await abortReplayAudioMasterCapture(captureSourceId);
         } else if (openingMessageReceived && latestCaptureEpisode) {
-          await finalizeSignalRecording(latestCaptureEpisode, selectedShow);
+          await finalizeSignalRecording(latestCaptureEpisode, launchShow);
         }
         setError(signalErrorToast("Start Signal episode", startError));
       }
@@ -9682,7 +9717,7 @@ export function BotcastExperience({
     }
   };
 
-  const interruptGuestWithQueuedCue = (): void => {
+  const interruptGuestWithQueuedCue = async (): Promise<void> => {
     const cue = queuedProducerCueRef.current;
     const activeGuestMessage = episode?.messages.find(
       (message) =>
@@ -9729,7 +9764,8 @@ export function BotcastExperience({
     setAutoRun(true);
     setHostInterruptionOrdinal((current) => current + 1);
     onPrepareUtterance?.();
-    void advanceEpisode(
+    setNotice("Interrupting the guest…");
+    const interrupted = await advanceEpisode(
       cue,
       "interrupt_guest",
       undefined,
@@ -9814,6 +9850,11 @@ export function BotcastExperience({
           }
         : undefined,
     );
+    if (!interrupted && queuedProducerCueRef.current === cue) {
+      setNotice(
+        "The interruption did not dispatch. The cue is still queued; try again when the guest is visibly on mic.",
+      );
+    }
   };
 
   const openReplay = async (summary: BotcastEpisodeSummary): Promise<void> => {
@@ -14222,6 +14263,67 @@ export function BotcastExperience({
         setBookingSuggestionBusy(null);
       }
     };
+    const feelLucky = async (): Promise<void> => {
+      if (busy || bookingSuggestionBusy || luckyLaunchUiInFlightRef.current)
+        return;
+      luckyLaunchUiInFlightRef.current = true;
+      setBookingSuggestionBusy("lucky");
+      setError(null);
+      setNotice(null);
+      try {
+        await luckyLaunchRunnerRef.current.run({
+          shows,
+          bots: eligibleBots,
+          suggestBooking: async ({ showId, guestBotId }) =>
+            request<{
+              topic: string;
+              producerBrief: string;
+              guestBotId?: string;
+              generated: boolean;
+            }>(
+              `/api/botcast/shows/${encodeURIComponent(showId)}/booking-suggestion`,
+              {
+                method: "POST",
+                body: JSON.stringify({
+                  guestBotId,
+                  field: "booking",
+                  currentTopic: "",
+                  currentProducerBrief: "",
+                  preferredProvider: episodeModelProvider,
+                  responseMode,
+                  modelOverride: selectedEpisodeModelOption?.id ?? null,
+                }),
+              },
+            ),
+          launch: async (setup) => {
+            await selectShow(setup.show);
+            setGuestDraftId(setup.guestBotId);
+            setTopicDraft(setup.topic);
+            setProducerBriefDraft(setup.producerBrief);
+            setNotice("Lucky signal found. Taking it live…");
+            await startEpisode({
+              ...setup,
+              setupEpisodeImage,
+              watchAutoStart: true,
+            });
+          },
+        });
+      } catch (luckyError) {
+        setError(
+          signalErrorToast(
+            "I Feel Lucky",
+            luckyError instanceof Error
+              ? luckyError
+              : "Signal could not produce this lucky booking.",
+          ),
+        );
+      } finally {
+        luckyLaunchUiInFlightRef.current = false;
+        setBookingSuggestionBusy(null);
+      }
+    };
+    const luckyLaunchAvailable =
+      signalLuckyEligibleShows(shows, eligibleBots).length > 0;
     return (
       <div
         className={styles.productionDesk}
@@ -14829,43 +14931,75 @@ export function BotcastExperience({
               </span>
             </label>
           ) : null}
-          <button
-            type="button"
-            className={styles.goLiveButton}
-            onClick={() => void startEpisode()}
-            disabled={
-              busy ||
-              !guestDraftId ||
-              (!producerGuestSelected && !topicDraft.trim()) ||
-              Boolean(
-                setupEpisodeImage &&
-                  (!setupImageModelCapable ||
-                    !setupEpisodeImage.descriptor.name.trim()),
-              )
-            }
-            aria-label={
-              !guestDraftId
-                ? "Book a guest before beginning the episode"
-                : !producerGuestSelected && !topicDraft.trim()
-                  ? "Add an episode topic before beginning"
-                  : setupEpisodeImage && !setupImageModelCapable
-                    ? "Choose a vision-capable model for the attached episode image"
-                    : setupEpisodeImage &&
-                        !setupEpisodeImage.descriptor.name.trim()
-                      ? "Add a Name for the attached episode image"
-                  : playbackModeDraft === "watch" && !producerGuestSelected
-                    ? watchAutoStartDraft
-                      ? "Watch show"
-                      : "Prepare show"
-                    : "Begin episode"
-            }
-          >
-            {playbackModeDraft === "watch" && !producerGuestSelected
-              ? watchAutoStartDraft
-                ? "Watch show"
-                : "Prepare show"
-              : "Begin episode"}
-          </button>
+          <div className={styles.episodeLaunchActions}>
+            <div className={styles.feelLuckyControl}>
+              <button
+                type="button"
+                className={styles.feelLuckyButton}
+                data-tutorial-target="botcast-feel-lucky"
+                onClick={() => void feelLucky()}
+                disabled={
+                  busy ||
+                  Boolean(bookingSuggestionBusy) ||
+                  !luckyLaunchAvailable ||
+                  Boolean(
+                    setupEpisodeImage &&
+                      (!setupImageModelCapable ||
+                        !setupEpisodeImage.descriptor.name.trim()),
+                  )
+                }
+                aria-busy={bookingSuggestionBusy === "lucky"}
+                aria-label="I Feel Lucky! Skip the search. Let Signal surprise you."
+                title="Skip the search. Let Signal surprise you."
+              >
+                {bookingSuggestionBusy === "lucky" ? (
+                  <LoaderCircle data-loading="true" aria-hidden="true" />
+                ) : (
+                  <span className={styles.feelLuckyPrism} aria-hidden="true" />
+                )}
+                I Feel Lucky!
+              </button>
+              <small>Skip the search. Let Signal surprise you.</small>
+            </div>
+            <button
+              type="button"
+              className={styles.goLiveButton}
+              onClick={() => void startEpisode()}
+              disabled={
+                busy ||
+                Boolean(bookingSuggestionBusy) ||
+                !guestDraftId ||
+                (!producerGuestSelected && !topicDraft.trim()) ||
+                Boolean(
+                  setupEpisodeImage &&
+                    (!setupImageModelCapable ||
+                      !setupEpisodeImage.descriptor.name.trim()),
+                )
+              }
+              aria-label={
+                !guestDraftId
+                  ? "Book a guest before beginning the episode"
+                  : !producerGuestSelected && !topicDraft.trim()
+                    ? "Add an episode topic before beginning"
+                    : setupEpisodeImage && !setupImageModelCapable
+                      ? "Choose a vision-capable model for the attached episode image"
+                      : setupEpisodeImage &&
+                          !setupEpisodeImage.descriptor.name.trim()
+                        ? "Add a Name for the attached episode image"
+                    : playbackModeDraft === "watch" && !producerGuestSelected
+                      ? watchAutoStartDraft
+                        ? "Watch show"
+                        : "Prepare show"
+                      : "Begin episode"
+              }
+            >
+              {playbackModeDraft === "watch" && !producerGuestSelected
+                ? watchAutoStartDraft
+                  ? "Watch show"
+                  : "Prepare show"
+                : "Begin episode"}
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -15040,10 +15174,12 @@ export function BotcastExperience({
     return timeline.durationMs;
   })();
   const liveCameraMode = episode
-    ? botcastCameraModeAt({
-        events: episode.events,
-        elapsedMs: Number.POSITIVE_INFINITY,
-      })
+    ? liveCameraOverride?.episodeId === episode.id
+      ? liveCameraOverride.mode
+      : botcastCameraModeAt({
+          events: episode.events,
+          elapsedMs: Number.POSITIVE_INFINITY,
+        })
     : "auto";
   const liveBaseShot = episode
     ? liveCameraMode === "auto"
@@ -15440,6 +15576,8 @@ export function BotcastExperience({
       mode === liveCameraMode
     )
       return;
+    const priorMode = liveCameraMode;
+    setLiveCameraOverride({ episodeId: episode.id, mode });
     setCameraSaving(true);
     setError(null);
     try {
@@ -15451,9 +15589,21 @@ export function BotcastExperience({
         },
       );
       setEpisode((current) =>
-        current?.id === response.episode.id ? response.episode : current,
+        current?.id === response.episode.id && current.status === "live"
+          ? response.episode
+          : current,
+      );
+      setLiveCameraOverride((current) =>
+        current?.episodeId === response.episode.id && current.mode === mode
+          ? null
+          : current,
       );
     } catch (cameraError) {
+      setLiveCameraOverride((current) =>
+        current?.episodeId === episode.id && current.mode === mode
+          ? { episodeId: episode.id, mode: priorMode }
+          : current,
+      );
       setError(signalErrorToast("Change live camera", cameraError));
     } finally {
       setCameraSaving(false);
@@ -15656,6 +15806,13 @@ export function BotcastExperience({
           segment: episode.segment,
           guestDeparted: guestHasDeparted(episode),
         }) === "guest"));
+  const queuedCueInterruptUnavailableReason = queuedCueCanInterruptGuest
+    ? null
+    : !nextHostInterruptionBridge
+      ? "The host is not available to take the mic in this episode state."
+      : busy && speakingMessageId === null
+        ? "The guest is still being prepared. Interrupt becomes available when the guest reaches the mic."
+        : "Interrupt is available while the guest is on mic or is the next scheduled speaker.";
   function producerCueDraftSnapshot(): {
     detail: string;
     directQuote: string;
@@ -16727,17 +16884,21 @@ export function BotcastExperience({
                       <button
                         type="button"
                         disabled={!queuedCueCanInterruptGuest}
-                        onClick={interruptGuestWithQueuedCue}
+                        onClick={() => void interruptGuestWithQueuedCue()}
                         title={
-                          hostBot?.muted
+                          queuedCueInterruptUnavailableReason ??
+                          (hostBot?.muted
                             ? "Let the muted host attempt the cut in canonical silence."
                             : hostBot?.echoesAddressedSpeech
                               ? "Have the echo-bound host cut in by repeating the last audience-heard phrase."
-                              : "Have the host take the mic now with this queued cue."
+                              : "Have the host take the mic now with this queued cue.")
                         }
                       >
                         Interrupt guest now
                       </button>
+                      {queuedCueInterruptUnavailableReason ? (
+                        <small>{queuedCueInterruptUnavailableReason}</small>
+                      ) : null}
                       <button
                         type="button"
                         className={styles.producerCueClear}
@@ -16791,7 +16952,7 @@ export function BotcastExperience({
                     </span>
                   </label>
                   <label>
-                    Say this…
+                    Shape this…
                     <div>
                       <textarea
                         ref={producerQuoteInputRef}
@@ -16821,7 +16982,7 @@ export function BotcastExperience({
                             end: event.currentTarget.selectionEnd ?? 0,
                           };
                         }}
-                        placeholder="exact words on air — one line"
+                        placeholder="private wording to transform — one line"
                         maxLength={BOTCAST_PRODUCER_DIRECT_QUOTE_MAX}
                       />
                     </div>
@@ -16891,8 +17052,9 @@ export function BotcastExperience({
                   {queuedProducerCue ? null : (
                     <small>
                       Private to the host. Use this for context, direction, or a
-                      question. Say this must be spoken exactly, as a message from the Producer —
-                      keep it to a line the host can land in one breath. A
+                      question. Shape this guides the host’s next line, but the
+                      host always paraphrases it in character and never reveals
+                      the private note. Keep it to one clear intent. A
                       vision-capable active model can also discuss an image on
                       the center table.
                     </small>

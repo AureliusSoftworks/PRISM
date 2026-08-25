@@ -6,6 +6,7 @@ import { parsePrismBotArchive } from "../apps/web/src/app/botArchive.ts";
 import { composeBotSystemPrompt } from "../apps/api/src/bots.ts";
 import {
   applyBotPowerAddressedInsultV1,
+  applyBotIdentityMirrorResponseV1,
   applyBotPowerEchoResponseV1,
   applyBotPowerCursedTongueResponseV1,
   applyBotPowerMumbledResponseV1,
@@ -19,6 +20,10 @@ import {
   botPowerMumblesSpeechV1,
   botPowerRequiresAddressedInsultV1,
   botPowerSourceHashV1,
+  botIdentityMirrorHolderPromptV1,
+  createBotIdentityMirrorStateV1,
+  resolveBotAudioVoiceProfileV1,
+  resolveBotIdentityMirrorVoiceV1,
   resolveBotPronunciationMapPointV1,
   strongestBotPowerAntiTruthEffectV1,
   strongestHardBotPowerResponseBudgetEffectV1,
@@ -45,8 +50,12 @@ const reasoningEffort = flagValue("--effort")?.trim().toLowerCase() || null;
 const maxTokens = Number(flagValue("--max-tokens") ?? "220");
 const trollStableTurnKey =
   flagValue("--troll-stable-turn-key")?.trim() || "live-validation:troll:2";
-  const believedName = flagValue("--believed-name")?.trim() || null;
-  const identityColor = flagValue("--identity-color")?.trim() || null;
+const believedName = flagValue("--believed-name")?.trim() || null;
+const identityColor = flagValue("--identity-color")?.trim() || null;
+const identityMirrorTargetName =
+  flagValue("--identity-mirror-target-name")?.trim() || null;
+const identityMirrorTargetPersona =
+  flagValue("--identity-mirror-target-persona")?.trim() || null;
 const syntheticCursedTongue = process.argv.includes("--synthetic-cursed-tongue");
 const syntheticTroll = process.argv.includes("--synthetic-troll");
 
@@ -58,11 +67,12 @@ if (
   !Number.isInteger(maxTokens) ||
   maxTokens < 64 ||
   maxTokens > 8_000 ||
+  Boolean(identityMirrorTargetName) !== Boolean(identityMirrorTargetPersona) ||
   (reasoningEffort &&
     !["minimal", "low", "medium", "high", "xhigh"].includes(reasoningEffort))
 ) {
   throw new Error(
-    "Usage: validate-prism-power-live.mjs (--bundle PATH | --synthetic-cursed-tongue | --synthetic-troll) --input TEXT [--mode chat|zen] [--provider local|openai] [--model MODEL] [--effort minimal|low|medium|high|xhigh] [--max-tokens 64..8000] [--troll-stable-turn-key KEY] [--believed-name NAME] [--identity-color HEX]",
+    "Usage: validate-prism-power-live.mjs (--bundle PATH | --synthetic-cursed-tongue | --synthetic-troll) --input TEXT [--mode chat|zen] [--provider local|openai] [--model MODEL] [--effort minimal|low|medium|high|xhigh] [--max-tokens 64..8000] [--troll-stable-turn-key KEY] [--believed-name NAME] [--identity-color HEX] [--identity-mirror-target-name NAME --identity-mirror-target-persona PERSONA]",
   );
 }
 if (providerName === "openai" && !process.env.OPENAI_API_KEY?.trim()) {
@@ -142,17 +152,57 @@ const botJson = syntheticCursedTongue
       }
     : parsePrismBotArchive(readFileSync(resolve(bundleArgument))).botJson;
 const bot = botJson.bot;
-const systemPrompt = composeBotSystemPrompt(
+const identityMirrorState = identityMirrorTargetName
+  ? createBotIdentityMirrorStateV1({
+      surface: "coffee",
+      holderBotId: "synthetic-identity-mirror-holder",
+      holderBotName: bot.name,
+      targetBotId: "synthetic-identity-mirror-target",
+      targetBotName: identityMirrorTargetName,
+      targetPersonaPrompt: identityMirrorTargetPersona,
+      targetFace: {},
+      holderVoice: resolveBotAudioVoiceProfileV1(
+        bot.authoredAudioVoiceProfile,
+        bot.audioVoiceProfileOverride,
+      ),
+      targetVoice: {
+        v: 2,
+        enabled: true,
+        baseVoiceId: "voice-9",
+        accentDefinitionId: "indian-english",
+        pronunciationMapPoint: { x: 0.83, y: 0.19 },
+        speechprintInfluence: "indian-english",
+        speechprintVariationSeed: "synthetic-target",
+      },
+      sourceMessageId: "synthetic-bot-to-bot-trigger",
+      occurredAt: "2026-08-24T20:00:00.000Z",
+    })
+  : null;
+const baseSystemPrompt = composeBotSystemPrompt(
   bot.name,
-  botJson.systemPrompt,
+  identityMirrorState?.targetPersonaPrompt ?? botJson.systemPrompt,
   bot.flirtEnabled,
   bot.powers,
   {
-    ...(believedName ? { believedName } : {}),
+    ...(identityMirrorState
+      ? { believedName: identityMirrorState.targetBotName }
+      : believedName
+        ? { believedName }
+        : {}),
     identityColor: identityColor || bot.color || null,
+    ...(identityMirrorState
+      ? { audioVoiceProfile: identityMirrorState.holderVoice }
+      : {}),
     ...(mode === "zen" ? { surface: "zen" } : {}),
   },
 );
+const systemPrompt = identityMirrorState
+  ? `${baseSystemPrompt}\n\n${botIdentityMirrorHolderPromptV1({
+      holderName: bot.name,
+      roleLabel: "synthetic Coffee participant",
+      state: identityMirrorState,
+    })}`
+  : baseSystemPrompt;
 if (!systemPrompt) {
   throw new Error("The bot archive did not produce a system prompt.");
 }
@@ -196,6 +246,13 @@ let response = speechCopyApplied
         `live-validation:${bot.name}:${input}`,
       )
     : rawResponse;
+if (identityMirrorState) {
+  response = applyBotIdentityMirrorResponseV1(
+    response,
+    identityMirrorState,
+    true,
+  );
+}
 const responseBudget = strongestHardBotPowerResponseBudgetEffectV1(bot.powers);
 const budgetedResponse = applyBotPowerResponseBudgetV1(
   response,
@@ -255,6 +312,24 @@ console.log(JSON.stringify({
   mode,
   bot: bot.name,
   ...(believedName ? { believedName } : {}),
+  ...(identityMirrorState
+    ? {
+        syntheticBotToBotTrigger: {
+          speakerBotId: identityMirrorState.targetBotId,
+          speakerBotName: identityMirrorState.targetBotName,
+          holderBotId: identityMirrorState.holderBotId,
+          text: input,
+        },
+        identityMirrorInvariant: {
+          holderVoice: resolveBotIdentityMirrorVoiceV1(
+            identityMirrorState,
+            bot.authoredAudioVoiceProfile,
+            bot.audioVoiceProfileOverride,
+          ),
+          targetVoiceNotSnapshotted: !("targetVoice" in identityMirrorState),
+        },
+      }
+    : {}),
   input,
   providerCallCount,
   ...(modelInput !== input ? { modelInput } : {}),
