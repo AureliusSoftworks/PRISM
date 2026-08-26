@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { buildSignalMusicProfile } from "@localai/shared";
 import {
@@ -24,6 +25,17 @@ describe("Signal Synth ident", () => {
 
   it("gives episode playback a short preload lead-in", () => {
     assert.equal(SIGNAL_EPISODE_INTRO_LEAD_IN_MS, 180);
+  });
+
+  it("waits for the shared mixer before routing an ident, while keeping capture silent on routing failure", () => {
+    const source = readFileSync(
+      new URL("signalIntroAudio.ts", import.meta.url),
+      "utf8",
+    );
+    assert.match(
+      source,
+      /const mixerReady = await resumePrismAudioContext\(\);[\s\S]{0,220}activeOutputCleanup = mixerReady[\s\S]{0,280}!activeOutputCleanup && replayAudioMasterCaptureActive\(\)/u,
+    );
   });
 
   it("pins commanding and playful recipes to different emotional directions", () => {

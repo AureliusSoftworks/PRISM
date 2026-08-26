@@ -97,7 +97,7 @@ describe("avatar scale Power visual contract", () => {
     assert.match(pageCss, /data-power-avatar-scale="colossal"[^}]*scale: 3;\s*translate: -58% 0/u);
   });
 
-  it("switches unreadable full avatars to the shared Ink-aware micro form", () => {
+  it("switches unreadable full avatars to the shared glyph-only micro form", () => {
     assert.match(
       pageSource,
       /const microFallbackActive = renderedSizeTier === "micro"/u,
@@ -108,7 +108,7 @@ describe("avatar scale Power visual contract", () => {
     );
     assert.match(
       pageSource,
-      /if \(microFallbackActive\)[\s\S]{0,700}<BotAvatarMicroRenderer[\s\S]{0,500}avatarDetails=\{avatarDetails\}/u,
+      /if \(microFallbackActive\)[\s\S]{0,700}<BotAvatarMicroRenderer[\s\S]{0,500}glyph=\{<BotGlyph name=\{glyph\} size=\{16\} \/>\}/u,
     );
     assert.match(
       pageSource,

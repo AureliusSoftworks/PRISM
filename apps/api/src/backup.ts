@@ -481,6 +481,14 @@ export interface BackupSnapshot {
   slate?: BackupSlateSnapshot;
   /** Optional in older v1 snapshots. Signal is non-canonical but its show archive is user data. */
   botcast?: {
+    /** Optional for older v1 snapshots. Named Rehearse setups belong to the account, not a show. */
+    stagePresets?: Array<{
+      id: string;
+      name: string;
+      stageJson: string;
+      createdAt: string;
+      updatedAt: string;
+    }>;
     shows: Array<{
       id: string;
       hostBotId: string;
@@ -2677,6 +2685,18 @@ export function exportUserSnapshot(
     created_at: string;
     updated_at: string;
   }>;
+  const botcastStagePresets = db
+    .prepare(
+      `SELECT id, name, stage_json, created_at, updated_at
+         FROM botcast_stage_presets WHERE user_id = ? ORDER BY created_at`,
+    )
+    .all(userId) as Array<{
+      id: string;
+      name: string;
+      stage_json: string;
+      created_at: string;
+      updated_at: string;
+    }>;
   const botcastEpisodes = db
     .prepare(
     "SELECT * FROM botcast_episodes WHERE user_id = ? ORDER BY created_at",
@@ -2990,6 +3010,13 @@ export function exportUserSnapshot(
     conversations: conversationPayload,
     slate: exportSlateSnapshot(db, userId),
     botcast: {
+      stagePresets: botcastStagePresets.map((preset) => ({
+        id: preset.id,
+        name: preset.name,
+        stageJson: preset.stage_json,
+        createdAt: preset.created_at,
+        updatedAt: preset.updated_at,
+      })),
       shows: botcastShows.map((row) => ({
         id: row.id,
         hostBotId: row.host_bot_id,
@@ -3388,6 +3415,7 @@ function assertSnapshotIdsStayWithinTenant(
       | "memories"
       | "memory_acquisition_receipts"
       | "botcast_shows"
+      | "botcast_stage_presets"
       | "botcast_episodes"
       | "botcast_episode_segments"
       | "botcast_messages"
@@ -3506,6 +3534,10 @@ function assertSnapshotIdsStayWithinTenant(
   );
   const botcast = snapshot.botcast;
   if (botcast) {
+    assertIds(
+      "botcast_stage_presets",
+      (botcast.stagePresets ?? []).map((item) => item.id),
+    );
     assertIds(
       "botcast_shows",
       botcast.shows.map((item) => item.id),
@@ -4477,6 +4509,20 @@ function importUserSnapshotWithinTransaction(
     const botcast = snapshot.botcast;
     const showIds = new Set(botcast.shows.map((show) => show.id));
     const episodeIds = new Set(botcast.episodes.map((episode) => episode.id));
+    for (const preset of botcast.stagePresets ?? []) {
+      db.prepare(
+        `INSERT OR REPLACE INTO botcast_stage_presets
+          (id, user_id, name, stage_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run(
+        preset.id,
+        userId,
+        preset.name,
+        preset.stageJson,
+        preset.createdAt,
+        preset.updatedAt,
+      );
+    }
     for (const show of botcast.shows) {
       db.prepare(
         `INSERT OR REPLACE INTO botcast_shows

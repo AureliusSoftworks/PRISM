@@ -54,6 +54,40 @@ const emptyDetails = (): AvatarDetailsV1 => ({
 });
 
 describe("avatar details semantic ink", () => {
+  it("lets a surface hide idle Speech ink without hiding Effect ink", () => {
+    const speechMap = paintAvatarDetailsColorMap(
+      new Uint8Array(AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH),
+      [{ x: 64, y: 70 }],
+      1,
+      "talking",
+    ).colorMap;
+    const colorMap = paintAvatarDetailsColorMap(
+      speechMap,
+      [{ x: 60, y: 70 }],
+      1,
+      "effect",
+    ).colorMap;
+    const details = avatarDetailsWithPaintColorMap(emptyDetails(), colorMap);
+    const suppressed = rasterizeVisibleAvatarDetailsRgba(
+      details,
+      "#ffffff",
+      null,
+      { blinking: false, talking: false, speechInkVisible: false },
+    );
+    const completed = rasterizeVisibleAvatarDetailsRgba(
+      details,
+      "#ffffff",
+      null,
+      { blinking: false, talking: false, speechInkVisible: true },
+    );
+    const alphaAt = (pixels: Uint8ClampedArray, x: number, y: number) =>
+      pixels[(y * AVATAR_DETAILS_CANVAS_SIZE + x) * 4 + 3];
+    assert.equal(alphaAt(suppressed, 64, 70), 0);
+    assert.equal(alphaAt(suppressed, 60, 70) > 0, true);
+    assert.equal(alphaAt(completed, 64, 70) > 0, true);
+    assert.equal(alphaAt(completed, 60, 70) > 0, true);
+  });
+
   it("stores mutually exclusive blink, talking, and effect roles", () => {
     const blank = new Uint8Array(AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH);
     const blink = paintAvatarDetailsColorMap(

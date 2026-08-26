@@ -106,6 +106,20 @@ function rulesForExactSelector(selector: string): string[] {
     .map((entry) => entry[2] ?? "");
 }
 
+describe("Zen initial thinking presentation", () => {
+  it("keeps the bot-authored thinking glyph without a loading-screen backing", () => {
+    const loadingScreenRule = ruleForExactSelector(".zenInitialLoadingScreen");
+
+    assert.match(pageSource, /data-zen-initial-loading-screen="true"/u);
+    assert.match(pageSource, /faceThinkingFrames=\{ceremonyFaceStyle\.thinkingFrames\}/u);
+    assert.doesNotMatch(
+      loadingScreenRule,
+      /(?:background|border|box-shadow|overflow):/u,
+    );
+    assert.doesNotMatch(css, /\.zenInitialLoadingScreen::after/u);
+  });
+});
+
 function ruleForSelectorNeedles(...needles: string[]): string {
   const match = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].find((entry) =>
     needles.every((needle) => (entry[1] ?? "").includes(needle)),
@@ -458,8 +472,7 @@ describe("Zen live presence CSS", () => {
       pageSource,
       /const PRISM_ZEN_LIVE_BOT_AVATAR_SIZE_STORAGE_KEY =\s+"prism_zen_live_bot_avatar_size_v2";/,
     );
-    // The floor is the smallest face-bearing Micro stage, so shrinking can
-    // reach the Micro presentation without ever losing the face.
+    // The floor keeps Zen's glyph-only Micro identity comfortably readable.
     assert.match(
       pageSource,
       /const ZEN_LIVE_BOT_AVATAR_MIN_SIZE_PX =\s+BOT_AVATAR_MICRO_FEATURES_HIDE_MAX_PX \+ 1;/,
@@ -3296,7 +3309,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       bodyRule,
-      /--zen-live-bot-buckle-crt-screen-scale:\s*1\.26\s*;/,
+      /--zen-live-bot-buckle-crt-screen-scale:\s*1\.54\s*;/,
     );
     const latticeRule = ruleForExactSelector(
       ".zenLiveBotPresenceBody::after",

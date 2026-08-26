@@ -504,6 +504,27 @@ function buildImageAssetCleanupGraph(
       usageLabel("Debate evidence exhibit", row.motion, row.id),
     );
   }
+  for (const row of readRows<{
+    session_id: string;
+    checkpoint_json: string;
+  }>(
+    db,
+    `SELECT jobs.session_id, jobs.checkpoint_json
+       FROM debate_mystery_v2_jobs AS jobs
+       JOIN debate_sessions AS sessions
+         ON sessions.id = jobs.session_id AND sessions.user_id = jobs.user_id
+      WHERE jobs.user_id = ?
+        AND jobs.checkpoint_json IS NOT NULL
+        AND sessions.status != 'cancelled'`,
+    userId,
+  )) {
+    collectImageReferencesFromText(
+      row.checkpoint_json,
+      knownImageIds,
+      references,
+      usageLabel("Whodunnit Case Forge", null, row.session_id),
+    );
+  }
   for (const row of readRows<{ id: string; markdown: string }>(
     db,
     "SELECT id, markdown FROM conversation_exports WHERE user_id = ?",
@@ -557,6 +578,24 @@ function buildImageAssetCleanupGraph(
     addExactReference(
       row.image_id,
       usageLabel("Slate visual study", row.title, row.project_id),
+    );
+  }
+  for (const row of readRows<{
+    image_id: string;
+    bundle_id: string;
+    name: string;
+  }>(
+    db,
+    `SELECT assets.image_id, assets.bundle_id, bundles.name
+       FROM debate_mystery_mansion_bundle_assets AS assets
+       JOIN debate_mystery_mansion_bundles AS bundles
+         ON bundles.id = assets.bundle_id AND bundles.user_id = assets.user_id
+      WHERE assets.user_id = ?`,
+    userId,
+  )) {
+    addExactReference(
+      row.image_id,
+      usageLabel("Saved Whodunnit mansion", row.name, row.bundle_id),
     );
   }
 

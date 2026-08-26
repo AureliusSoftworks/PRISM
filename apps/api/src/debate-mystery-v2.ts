@@ -20,6 +20,7 @@ import {
   DEBATE_MYSTERY_ROOM_TEMPLATES,
   DEBATE_MYSTERY_V2_SCHEMA_VERSION,
   compileDeterministicDebateMystery,
+  debateEvidenceExhibitTitle,
   botPowerChromaticBiasColorMatchesV1,
   botPowerChromaticBiasEffectsFromEffectsV1,
   botPowerChromaticBiasResolvedHueV1,
@@ -27,9 +28,14 @@ import {
   debateMysteryCredibilityMaximumV2,
   debateMysteryPremiumAvailableV2,
   debateMysterySpectatorEvidenceReferencesV2,
+  debateMysteryTalkTopicMirrorsRecordV2,
   emptyDebateMysteryMutationsV2,
   emptyDebateMysteryRequirementsV2,
   normalizeBotAudioVoiceProfileV1,
+  normalizeDebateEvidenceExhibitAdjective,
+  normalizeDebateEvidenceExhibitObject,
+  normalizeDebateEvidencePacketV1,
+  normalizeDebateMysteryTalkSubjectV2,
   parseStoredBotAudioVoiceProfileV1,
   resolveDebateMysteryLineDeliveryV2,
   resolveDebateMysteryConfigV2,
@@ -38,18 +44,23 @@ import {
   validateDebateMysteryDialogueGraphV2,
   type BotAudioVoiceProfileV1,
   type DebateMysteryActionRequestV2,
+  type DebateEvidenceExhibitV1,
   type DebateMysteryAudioManifestEntryV1,
   type DebateMysteryAudioManifestV1,
   type DebateMysteryCompilationStageV2,
   type DebateMysteryCompilationStatusV2,
+  type DebateMysteryHouseStyleV2,
   type DebateMysteryDialogueGraphV2,
   type DebateMysteryDialogueNodeV2,
   type DebateMysteryPerformanceDirectionV2,
+  type DebateMysteryPresentationGateV2,
+  type DebateMysteryPresentationUnlockTargetV2,
   type DebateMysteryRecordReferenceV2,
   type DebateMysteryResolvedConfigV1,
   type DebateMysteryResolvedConfigV2,
   type DebateMysterySpokenLineV2,
   type DebateMysteryStatementVersionV2,
+  type DebateMysteryTalkSubjectV2,
   type DebateMysteryWitnessChapterV2,
   type DebateMysteryVerdictV2,
   type DebateSessionCreateRequest,
@@ -68,6 +79,7 @@ import {
 import { runWithReasoningGenerationBudget } from "./model-effort-runner.ts";
 import { PRISM_INSTANT_VOICE_MODEL_ID, pcmWaveDurationMs } from "./local-voice-engine.ts";
 import { resolveAbsoluteUnderDataRoot } from "./image-storage.ts";
+import { getDebateMysteryMansionBundleV2 } from "./debate-mystery-mansion-bundles.ts";
 import { HttpError } from "./utils.http.ts";
 
 const V2_JOB_LEASE_MS = 90_000;
@@ -115,18 +127,50 @@ interface MysteryV2JobRow {
   lease_owner: string | null;
   leased_until: string | null;
   cancellation_requested: number;
+  created_at: string;
   updated_at: string;
+}
+
+export interface DebateMysteryEvidenceAssetPreparationV2 {
+  userId: string;
+  sessionId: string;
+  exhibits: DebateEvidenceExhibitV1[];
+  houseStyle: DebateMysteryHouseStyleV2;
+  signal?: AbortSignal;
+  /** Called after one generated image is durable so a restarted Forge can skip it. */
+  onPrepared?: (exhibitId: string, imageId: string) => void | Promise<void>;
+}
+
+export type DebateMysteryEvidenceAssetPreparerV2 = (
+  args: DebateMysteryEvidenceAssetPreparationV2,
+) => Promise<Record<string, string>>;
+
+interface DebateMysteryCompilationOptionsV2 {
+  generateWave?: typeof generateBuiltinEnglishWave;
+  prepareEvidenceAssets?: DebateMysteryEvidenceAssetPreparerV2;
 }
 
 interface AuthoredTopicV2 {
   id: string;
   label: string;
+  subject: DebateMysteryTalkSubjectV2;
   question: string;
   questionStageAction: string | null;
   questionPerformance: Partial<DebateMysteryPerformanceDirectionV2>;
   response: string;
   responseStageAction: string | null;
   performance: Partial<DebateMysteryPerformanceDirectionV2>;
+  repeatResponses: Array<{
+    response: string;
+    responseStageAction: string | null;
+    performance: Partial<DebateMysteryPerformanceDirectionV2>;
+  }>;
+}
+
+interface AuthoredPresentationGateV2 {
+  id: string;
+  requiredRecord: DebateMysteryRecordReferenceV2;
+  unlockTopicId: string;
 }
 
 interface AuthoredStatementV2 {
@@ -157,6 +201,9 @@ interface AuthoredSuspectV2 {
   seatId: string;
   relationship: string;
   alibi: string;
+  roomIntroduction: string;
+  roomIntroductionStageAction: string | null;
+  roomIntroductionPerformance: Partial<DebateMysteryPerformanceDirectionV2>;
   chapterOpening: string;
   chapterCompletion: string;
   defaultPresentProsecutionLine: string;
@@ -172,6 +219,7 @@ interface AuthoredSuspectV2 {
   }>;
   defendantReactions: AuthoredDefendantReactionsV2;
   talkTopics: AuthoredTopicV2[];
+  presentationGate: AuthoredPresentationGateV2 | null;
   testimony: AuthoredStatementV2[];
 }
 
@@ -237,6 +285,9 @@ interface PrivateMysteryCaseV2 {
     title: string;
     description: string;
     emoji: string;
+    /** Presentation-only art remains sealed here until this item is admitted. */
+    visualKind?: "emoji" | "upload" | "synthesized";
+    imageId?: string | null;
   }>;
   examineNodeIdByHotspot: Record<string, string>;
   presentNodeIdBySuspectRecord: Record<string, string>;
@@ -245,7 +296,11 @@ interface PrivateMysteryCaseV2 {
   /** Legacy persisted alias, removed when an active case passes readiness repair. */
   partnerConsultNodeId?: string;
   crimeSceneRoomId: string;
+  investigationRoomIds?: string[];
+  investigationHotspotIdsByRoom?: Record<string, string[]>;
+  investigationPersonIds?: string[];
   playerRoleContractVersion?: 1;
+  investigationProgressionContractVersion?: 2;
   graphValidation: ReturnType<typeof validateDebateMysteryDialogueGraphV2>;
 }
 
@@ -336,7 +391,58 @@ function v1ScaffoldConfig(config: DebateMysteryResolvedConfigV2): DebateMysteryR
   };
 }
 
-function compilationStatus(row: MysteryV2JobRow): DebateMysteryCompilationStatusV2 {
+function completedPassTiming(
+  db: DatabaseSync,
+  row: MysteryV2JobRow,
+  elapsedMs: number,
+): { basisPasses: number; approximateRemainingMs: number | null } {
+  const markers = db.prepare(
+    `SELECT pass_number, elapsed_ms
+       FROM debate_mystery_v2_checkpoints
+      WHERE user_id = ? AND session_id = ? AND pass_number IS NOT NULL
+      ORDER BY pass_number`,
+  ).all(row.user_id, row.session_id) as unknown as Array<{
+    pass_number: number;
+    elapsed_ms: number;
+  }>;
+  const completed = markers.filter((marker) => marker.pass_number <= row.completed_passes);
+  if (completed.length < 2 || row.completed_passes >= row.total_passes) {
+    return { basisPasses: completed.length, approximateRemainingMs: null };
+  }
+  const latestElapsed = completed.at(-1)?.elapsed_ms ?? 0;
+  const averageMs = latestElapsed / Math.max(1, row.completed_passes);
+  return {
+    basisPasses: completed.length,
+    approximateRemainingMs: Math.max(
+      0,
+      Math.round((averageMs * row.total_passes) - elapsedMs),
+    ),
+  };
+}
+
+function compilationStatus(
+  db: DatabaseSync,
+  row: MysteryV2JobRow,
+): DebateMysteryCompilationStatusV2 {
+  const publicFailureStage = row.status !== "needs_attention"
+    ? null
+    : row.completed_passes <= 0
+      ? "writing_case"
+      : row.completed_passes === 1
+        ? "testing_contradictions"
+        : row.completed_passes === 2
+          ? "directing_performances"
+          : row.completed_passes === 3
+            ? "preparing_local_voices"
+            : "verifying_case_audio";
+  const terminal =
+    row.status === "complete" ||
+    row.status === "cancelled" ||
+    row.status === "needs_attention";
+  const elapsedEnd = terminal ? Date.parse(row.updated_at) : Date.now();
+  const elapsedMs = Math.max(0, elapsedEnd - Date.parse(row.created_at));
+  const normalizedElapsedMs = Number.isFinite(elapsedMs) ? Math.round(elapsedMs) : 0;
+  const timing = completedPassTiming(db, row, normalizedElapsedMs);
   return {
     version: 2,
     jobId: row.id,
@@ -347,7 +453,17 @@ function compilationStatus(row: MysteryV2JobRow): DebateMysteryCompilationStatus
     preparedAudioCount: row.prepared_audio_count,
     requiredAudioCount: row.required_audio_count,
     retryable: row.status === "needs_attention",
+    publicFailureCode: row.status !== "needs_attention"
+      ? null
+      : row.public_message === "Local voice preparation needs attention"
+        ? "CASE_FORGE_LOCAL_AUDIO_FAILED"
+        : "CASE_FORGE_COMPILATION_STOPPED",
+    publicFailureStage,
     spoilerSafeMessage: row.public_message,
+    startedAt: row.created_at,
+    elapsedMs: normalizedElapsedMs,
+    approximateRemainingMs: timing.approximateRemainingMs,
+    etaBasisPasses: timing.basisPasses,
     updatedAt: row.updated_at,
   };
 }
@@ -358,7 +474,7 @@ function jobRow(db: DatabaseSync, userId: string, sessionId: string): MysteryV2J
             completed_passes, total_passes, prepared_audio_count,
             required_audio_count, public_message, private_error, input_json,
             checkpoint_json, lease_owner, leased_until,
-            cancellation_requested, updated_at
+            cancellation_requested, created_at, updated_at
        FROM debate_mystery_v2_jobs
       WHERE user_id = ? AND session_id = ?`,
   ).get(userId, sessionId) as MysteryV2JobRow | undefined;
@@ -370,6 +486,64 @@ function publicSessionJson(session: DebateSessionV1): string {
   return JSON.stringify({ ...session, events: [] });
 }
 
+function mysteryV2ExhibitDescriptor(
+  item: { title: string },
+): { adjective: string; object: string } {
+  const words = item.title.replace(/\s+/gu, " ").trim().split(" ").filter(Boolean);
+  const adjective = normalizeDebateEvidenceExhibitAdjective(words[0] ?? "Recovered") || "Recovered";
+  const object = normalizeDebateEvidenceExhibitObject(words.slice(1).join(" ") || words[0] || "evidence") || "evidence";
+  return { adjective, object };
+}
+
+function syncMysteryV2PresentationEvidence(
+  session: DebateSessionV1,
+  state: DebateWhodunnitFormatStateV2,
+): { state: DebateWhodunnitFormatStateV2; evidence: DebateSessionV1["evidence"] } {
+  const existingById = new Map(
+    (session.evidence.exhibits ?? []).map((exhibit) => [exhibit.id, exhibit]),
+  );
+  const record = state.record.map((item) => {
+    if (item.reference.kind !== "evidence") return item;
+    const existing = existingById.get(item.reference.id);
+    const imageId = item.imageId ?? existing?.imageId ?? null;
+    const visualKind = imageId
+      ? item.visualKind === "upload" || existing?.visualKind === "upload"
+        ? "upload" as const
+        : "synthesized" as const
+      : "emoji" as const;
+    return { ...item, imageId, visualKind };
+  });
+  const exhibits: DebateEvidenceExhibitV1[] = record.flatMap((item) => {
+    if (item.reference.kind !== "evidence") return [];
+    const descriptor = mysteryV2ExhibitDescriptor(item);
+    const existing = existingById.get(item.reference.id);
+    const imageId = item.imageId ?? existing?.imageId ?? null;
+    return [{
+      id: item.reference.id,
+      adjective: descriptor.adjective,
+      object: descriptor.object,
+      title: debateEvidenceExhibitTitle(descriptor),
+      observation: item.description,
+      emoji: item.emoji,
+      visualKind: imageId
+        ? item.visualKind === "upload" || existing?.visualKind === "upload"
+          ? "upload"
+          : "synthesized"
+        : "emoji",
+      imageId,
+      createdBy: "prism",
+    }];
+  });
+  return {
+    state: { ...state, record },
+    evidence: normalizeDebateEvidencePacketV1({
+      ...session.evidence,
+      exhibits,
+      frozenAt: session.evidence.frozenAt ?? new Date().toISOString(),
+    }),
+  };
+}
+
 function persistV2Session(
   db: DatabaseSync,
   userId: string,
@@ -377,11 +551,13 @@ function persistV2Session(
   state: DebateWhodunnitFormatStateV2,
   expectedRevision = session.revision,
 ): DebateSessionV1 {
+  const synced = syncMysteryV2PresentationEvidence(session, state);
   const next: DebateSessionV1 = {
     ...session,
     revision: expectedRevision + 1,
     updatedAt: new Date().toISOString(),
-    formatState: state,
+    formatState: synced.state,
+    evidence: synced.evidence,
   };
   const result = db.prepare(
     `UPDATE debate_sessions
@@ -455,6 +631,212 @@ function updateJob(
   return jobRow(db, userId, sessionId);
 }
 
+function recordCompilationCheckpoint(
+  db: DatabaseSync,
+  row: MysteryV2JobRow,
+  args: {
+    key: string;
+    stage: DebateMysteryCompilationStageV2;
+    payload: string;
+    passNumber?: number | null;
+  },
+): void {
+  const completedAt = new Date().toISOString();
+  const elapsedMs = Math.max(0, Date.parse(completedAt) - Date.parse(row.created_at));
+  db.prepare(
+    `INSERT INTO debate_mystery_v2_checkpoints
+       (session_id, user_id, checkpoint_key, pass_number, stage,
+        payload_hash, elapsed_ms, completed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(session_id, checkpoint_key) DO NOTHING`,
+  ).run(
+    row.session_id,
+    row.user_id,
+    args.key,
+    args.passNumber ?? null,
+    args.stage,
+    sha256(args.payload),
+    Number.isFinite(elapsedMs) ? Math.round(elapsedMs) : 0,
+    completedAt,
+  );
+}
+
+function authoringCheckpointKeys(
+  draft: MysteryV2AuthoringCheckpoint,
+): Array<{ key: string; payload: string }> {
+  const checkpoints: Array<{ key: string; payload: string }> = [];
+  if (draft.foundationCore) {
+    checkpoints.push({ key: "section:foundation-core", payload: JSON.stringify(draft.foundationCore) });
+  }
+  for (const [id, value] of Object.entries(draft.examinationsById ?? {})) {
+    if (value?.trim()) checkpoints.push({ key: `section:examination:${id}`, payload: value });
+  }
+  if (draft.foundation) {
+    checkpoints.push({ key: "section:foundation", payload: JSON.stringify(draft.foundation) });
+  }
+  for (const [seatId, suspect] of Object.entries(draft.suspectsBySeatId)) {
+    checkpoints.push({ key: `section:witness:${seatId}`, payload: JSON.stringify(suspect) });
+  }
+  if (draft.prosecutionChoices) {
+    checkpoints.push({
+      key: "section:prosecution-choices",
+      payload: JSON.stringify(draft.prosecutionChoices),
+    });
+  }
+  return checkpoints;
+}
+
+function persistAuthoringCheckpoint(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  draft: MysteryV2AuthoringCheckpoint,
+  publicMessage: string,
+): MysteryV2JobRow {
+  const checkpointJson = JSON.stringify(draft);
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const row = updateJob(db, userId, sessionId, { checkpointJson, publicMessage });
+    for (const checkpoint of authoringCheckpointKeys(draft)) {
+      recordCompilationCheckpoint(db, row, {
+        key: checkpoint.key,
+        stage: "writing_case",
+        payload: checkpoint.payload,
+      });
+    }
+    db.exec("COMMIT");
+    return jobRow(db, userId, sessionId);
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+function persistCompiledSectionCheckpoint(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  args: {
+    key: string;
+    stage: DebateMysteryCompilationStageV2;
+    checkpoint: MysteryV2Checkpoint;
+    payload: string;
+  },
+): MysteryV2JobRow {
+  const checkpointJson = JSON.stringify(args.checkpoint);
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const row = updateJob(db, userId, sessionId, { checkpointJson });
+    recordCompilationCheckpoint(db, row, {
+      key: args.key,
+      stage: args.stage,
+      payload: args.payload,
+    });
+    db.exec("COMMIT");
+    return jobRow(db, userId, sessionId);
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+function withPreparedEvidenceAsset(
+  checkpoint: MysteryV2Checkpoint,
+  exhibitId: string,
+  imageId: string,
+): MysteryV2Checkpoint {
+  return {
+    ...checkpoint,
+    privateCase: {
+      ...checkpoint.privateCase,
+      recordItems: checkpoint.privateCase.recordItems.map((item) =>
+        item.reference.kind === "evidence" && item.reference.id === exhibitId
+          ? { ...item, visualKind: "synthesized" as const, imageId }
+          : item),
+    },
+    publicState: {
+      ...checkpoint.publicState,
+      record: checkpoint.publicState.record.map((item) =>
+        item.reference.kind === "evidence" && item.reference.id === exhibitId
+          ? { ...item, visualKind: "synthesized" as const, imageId }
+          : item),
+    },
+  };
+}
+
+function unpreparedMysteryV2EvidenceAssets(
+  session: DebateSessionV1,
+  checkpoint: MysteryV2Checkpoint,
+): DebateEvidenceExhibitV1[] {
+  const existingById = new Map(
+    (session.evidence.exhibits ?? []).map((exhibit) => [exhibit.id, exhibit]),
+  );
+  return checkpoint.privateCase.recordItems.flatMap((item) => {
+    if (item.reference.kind !== "evidence") return [];
+    const existing = existingById.get(item.reference.id);
+    const imageId = item.imageId ?? existing?.imageId ?? null;
+    if (imageId) return [];
+    const descriptor = mysteryV2ExhibitDescriptor(item);
+    return [{
+      id: item.reference.id,
+      adjective: descriptor.adjective,
+      object: descriptor.object,
+      title: debateEvidenceExhibitTitle(descriptor),
+      observation: item.description,
+      emoji: item.emoji,
+      visualKind: "emoji",
+      imageId: null,
+      createdBy: "prism",
+    }];
+  });
+}
+
+function completeCompilationPass(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  args: {
+    passNumber: number;
+    key: string;
+    stage: DebateMysteryCompilationStageV2;
+    payload: string;
+    checkpointJson?: string;
+    publicMessage?: string;
+    preparedAudioCount?: number;
+    requiredAudioCount?: number;
+    status?: MysteryV2JobRow["status"];
+    privateError?: string | null;
+    clearLease?: boolean;
+  },
+): MysteryV2JobRow {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const current = jobRow(db, userId, sessionId);
+    recordCompilationCheckpoint(db, current, {
+      key: args.key,
+      stage: args.stage,
+      payload: args.payload,
+      passNumber: args.passNumber,
+    });
+    updateJob(db, userId, sessionId, {
+      stage: args.stage,
+      completedPasses: Math.max(current.completed_passes, args.passNumber),
+      checkpointJson: args.checkpointJson,
+      publicMessage: args.publicMessage,
+      preparedAudioCount: args.preparedAudioCount,
+      requiredAudioCount: args.requiredAudioCount,
+      status: args.status,
+      privateError: args.privateError,
+      clearLease: args.clearLease,
+    });
+    db.exec("COMMIT");
+    return jobRow(db, userId, sessionId);
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 function setPublicCompilationStatus(
   db: DatabaseSync,
   userId: string,
@@ -480,7 +862,7 @@ function setPublicCompilationStatus(
   }, {
     ...session.formatState,
     ...extras,
-    compilation: compilationStatus(row),
+    compilation: compilationStatus(db, row),
   });
 }
 
@@ -503,7 +885,13 @@ function initialV2State(
       preparedAudioCount: 0,
       requiredAudioCount: 0,
       retryable: false,
+      publicFailureCode: null,
+      publicFailureStage: null,
       spoilerSafeMessage: V2_SPOILER_SAFE_MESSAGES.writing_case,
+      startedAt: now,
+      elapsedMs: 0,
+      approximateRemainingMs: null,
+      etaBasisPasses: 0,
       updatedAt: now,
     },
     caseTitle: null,
@@ -512,6 +900,7 @@ function initialV2State(
     victim: null,
     suspects: [],
     rooms: [],
+    roomIntroductions: {},
     currentRoomId: null,
     roomView: "mansion",
     metSuspectSeatIds: [],
@@ -564,7 +953,7 @@ function mysteryV2SessionRequest(
       againstSide: { label: "Defense", brief: "Test the accusation against every fair alternative in the admitted record." },
     },
     evidence: { version: 1, notes: "", sources: [], exhibits: [], frozenAt: null },
-    moderatorTitle: "Judge",
+    moderatorTitle: "The Court",
     moderatorBotId: config.judgeBotId,
     playerJudgeUsesPrism: config.judgeBotId === "prism:player-judge",
     forAdvocateBotId: config.prosecutorBotId,
@@ -584,7 +973,7 @@ export function getDebateMysteryCompilationStatusV2(
   userId: string,
   sessionId: string,
 ): DebateMysteryCompilationStatusV2 {
-  return compilationStatus(jobRow(db, userId, sessionId));
+  return compilationStatus(db, jobRow(db, userId, sessionId));
 }
 
 export async function createDebateMysterySessionV2(
@@ -595,7 +984,8 @@ export async function createDebateMysterySessionV2(
   runtime: DebateAiRuntime,
   options: {
     deferBackgroundStart?: boolean;
-    generateWave?: typeof generateBuiltinEnglishWave;
+    generateWave?: DebateMysteryCompilationOptionsV2["generateWave"];
+    prepareEvidenceAssets?: DebateMysteryCompilationOptionsV2["prepareEvidenceAssets"];
   } = {},
 ): Promise<DebateSessionV1> {
   const idempotencyKey = compact(idempotencyKeyInput, 200);
@@ -605,6 +995,26 @@ export async function createDebateMysterySessionV2(
     config = resolveDebateMysteryConfigV2(configInput);
   } catch (error) {
     throw new HttpError(400, error instanceof Error ? error.message : "Invalid Whodunnit V2 setup.");
+  }
+  if (config.mansionBundleId) {
+    const mansion = getDebateMysteryMansionBundleV2(
+      db,
+      userId,
+      config.mansionBundleId,
+    );
+    if (mansion.suspectCount !== config.suspectBotIds.length) {
+      throw new HttpError(
+        400,
+        `This saved mansion requires exactly ${mansion.suspectCount} suspects.`,
+      );
+    }
+    config = {
+      ...config,
+      preset: "custom",
+      floors: mansion.floors,
+      totalRooms: mansion.totalRooms,
+      houseStyle: mansion.houseStyle,
+    };
   }
   if (debateMysteryPremiumAvailableV2()) {
     throw new Error("Whodunnit V2 Premium must remain disabled during the core release.");
@@ -656,7 +1066,7 @@ export async function createDebateMysterySessionV2(
     session.id,
     V2_TOTAL_PASSES,
     V2_SPOILER_SAFE_MESSAGES.writing_case,
-    JSON.stringify(configInput),
+    JSON.stringify(config),
     now,
     now,
   );
@@ -664,6 +1074,7 @@ export async function createDebateMysterySessionV2(
     queueMicrotask(() => {
       void runDebateMysteryCompilationV2(db, userId, session.id, runtime, {
         generateWave: options.generateWave,
+        prepareEvidenceAssets: options.prepareEvidenceAssets,
       }).catch(() => {
         // The durable job records a spoiler-safe Needs Attention state.
       });
@@ -763,22 +1174,46 @@ function authoredExaminationsFromJson(args: {
 function authoredSuspectFromJson(args: {
   value: Record<string, unknown>;
   seatId: string;
-  requiredPresentRecord: DebateMysteryRecordReferenceV2;
+  requiredPresentRecords: readonly DebateMysteryRecordReferenceV2[];
+  requiredPresentationGateRecord: DebateMysteryRecordReferenceV2 | null;
+  recordItems: readonly { reference: DebateMysteryRecordReferenceV2; title: string }[];
+  rooms: readonly { id: string; name: string }[];
+  people: readonly { id: string; name: string }[];
+  courtOnly?: boolean;
 }): AuthoredSuspectV2 {
   const row = args.value.suspect && typeof args.value.suspect === "object"
     ? args.value.suspect as Record<string, unknown>
     : args.value;
   const seatId = compact(row.seatId, 120);
-  const talkTopics: AuthoredTopicV2[] = (Array.isArray(row.talkTopics) ? row.talkTopics : []).flatMap((topicValue) => {
+  const parsedTalkTopics: AuthoredTopicV2[] = (Array.isArray(row.talkTopics) ? row.talkTopics : []).flatMap((topicValue) => {
     if (!topicValue || typeof topicValue !== "object") return [];
     const topic = topicValue as Record<string, unknown>;
     const id = compact(topic.id, 100);
     const label = compact(topic.label, 100);
     const question = compact(topic.question, 600);
     const response = compact(topic.response, 1_200);
+    const repeatResponses = (Array.isArray(topic.repeatResponses) ? topic.repeatResponses : []).flatMap((repeatValue) => {
+      if (!repeatValue || typeof repeatValue !== "object") return [];
+      const repeat = repeatValue as Record<string, unknown>;
+      const repeatResponse = compact(repeat.response, 1_200);
+      return repeatResponse ? [{
+        response: repeatResponse,
+        responseStageAction: compact(repeat.responseStageAction, 180) || null,
+        performance: repeat.performance && typeof repeat.performance === "object"
+          ? repeat.performance as Partial<DebateMysteryPerformanceDirectionV2>
+          : {},
+      }] : [];
+    });
     return id && label && question && response ? [{
       id,
       label,
+      subject: normalizeDebateMysteryTalkSubjectV2({
+        value: topic.subject && typeof topic.subject === "object" ? topic.subject : topic,
+        label,
+        question,
+        rooms: args.rooms,
+        people: args.people,
+      }),
       question,
       questionStageAction: compact(topic.questionStageAction, 180) || null,
       questionPerformance: topic.questionPerformance && typeof topic.questionPerformance === "object"
@@ -789,8 +1224,29 @@ function authoredSuspectFromJson(args: {
       performance: topic.performance && typeof topic.performance === "object"
         ? topic.performance as Partial<DebateMysteryPerformanceDirectionV2>
         : {},
+      // Repeat beats enrich a frozen case, but they must not make an otherwise
+      // complete local-model chapter unusable. Older/smaller models commonly
+      // omit this newly-added optional array even when they supply the primary
+      // exchange, so preserve the authored answer as the deterministic fallback.
+      repeatResponses: repeatResponses.length
+        ? repeatResponses.slice(0, 2)
+        : [{
+            response: `As I said, ${response}`,
+            responseStageAction: null,
+            performance: topic.performance && typeof topic.performance === "object"
+              ? topic.performance as Partial<DebateMysteryPerformanceDirectionV2>
+              : {},
+          }],
     }] : [];
   });
+  const talkTopics = parsedTalkTopics.filter((topic) =>
+    !debateMysteryTalkTopicMirrorsRecordV2({
+      topicId: topic.id,
+      label: topic.label,
+      question: topic.question,
+      subject: topic.subject,
+      records: args.recordItems,
+    }));
   const testimony: AuthoredStatementV2[] = (Array.isArray(row.testimony) ? row.testimony : []).flatMap((statementValue) => {
     if (!statementValue || typeof statementValue !== "object") return [];
     const statement = statementValue as Record<string, unknown>;
@@ -863,10 +1319,45 @@ function authoredSuspectFromJson(args: {
     evidenceStageAction:
       compact(defendantSource.evidenceStageAction, 180) || null,
   };
+  let presentationGate: AuthoredPresentationGateV2 | null = null;
+  if (!args.courtOnly && args.requiredPresentationGateRecord) {
+    const gateSource = row.presentationGate && typeof row.presentationGate === "object"
+      ? row.presentationGate as Record<string, unknown>
+      : {};
+    const requiredRecordId = `${args.requiredPresentationGateRecord.kind}:${args.requiredPresentationGateRecord.id}`;
+    const authoredRecordId = compact(gateSource.recordId, 180);
+    const unlockTopicId = compact(gateSource.unlockTopicId, 100);
+    const gateTopic = talkTopics.find((topic) => topic.id === unlockTopicId);
+    if (
+      authoredRecordId !== requiredRecordId ||
+      !gateTopic ||
+      talkTopics.at(-1)?.id !== gateTopic.id ||
+      talkTopics[0]?.id === gateTopic.id
+    ) {
+      throw new Error(`The authored chapter for ${args.seatId} omitted its exact evidence-gated final Talk subject.`);
+    }
+    presentationGate = {
+      id: compact(gateSource.id, 120) || `gate-${args.seatId}-${gateTopic.id}`,
+      requiredRecord: args.requiredPresentationGateRecord,
+      unlockTopicId: gateTopic.id,
+    };
+  }
   const suspect: AuthoredSuspectV2 = {
     seatId,
     relationship: compact(row.relationship, 700),
     alibi: compact(row.alibi, 800),
+    // Room introductions are presentation polish, not proof-bearing case
+    // logic. Keep a valid earlier-format chapter playable when its authoring
+    // model has not yet learned this optional V2 field.
+    roomIntroduction: compact(row.roomIntroduction, 900) || (() => {
+      const suspectName = args.people.find((person) => person.id === args.seatId)?.name ?? "I";
+      return `I am ${suspectName}. The house has given everyone reasons to be careful; ask what you need, and I will answer.`;
+    })(),
+    roomIntroductionStageAction: compact(row.roomIntroductionStageAction, 180) || null,
+    roomIntroductionPerformance:
+      row.roomIntroductionPerformance && typeof row.roomIntroductionPerformance === "object"
+        ? row.roomIntroductionPerformance as Partial<DebateMysteryPerformanceDirectionV2>
+        : {},
     chapterOpening: compact(row.chapterOpening, 700),
     chapterCompletion: compact(row.chapterCompletion, 700),
     defaultPresentProsecutionLine:
@@ -880,14 +1371,18 @@ function authoredSuspectFromJson(args: {
     presentReactions,
     defendantReactions,
     talkTopics: talkTopics.slice(0, 5),
+    presentationGate,
     testimony: testimony.slice(0, 6),
   };
   if (suspect.seatId !== args.seatId) throw new Error(`The authored chapter changed frozen seat ${args.seatId}.`);
   if (
     !suspect.relationship || !suspect.alibi || !suspect.chapterOpening ||
-    !suspect.chapterCompletion || !suspect.defaultPresentProsecutionLine ||
-    !suspect.defaultPresentReaction ||
-    suspect.talkTopics.length < 3 || suspect.testimony.length < 3
+    !suspect.chapterCompletion || suspect.testimony.length < 3 ||
+    (!args.courtOnly && (
+      !suspect.roomIntroduction || !suspect.defaultPresentProsecutionLine ||
+      !suspect.defaultPresentReaction || suspect.talkTopics.length < 3 ||
+      suspect.talkTopics.some((topic) => !topic.repeatResponses.length)
+    ))
   ) throw new Error(`The authored chapter for ${args.seatId} omitted required dialogue.`);
   const requiredStatementIds = [1, 2, 3].map((ordinal) => `statement-${args.seatId}-${ordinal}`);
   if (!requiredStatementIds.every((id) => suspect.testimony.some((statement) => statement.id === id))) {
@@ -896,8 +1391,10 @@ function authoredSuspectFromJson(args: {
   if (!uniqueIds(suspect.testimony.map((statement) => statement.id))) {
     throw new Error(`The authored chapter for ${args.seatId} repeated a statement ID.`);
   }
-  const requiredRecordId = `${args.requiredPresentRecord.kind}:${args.requiredPresentRecord.id}`;
-  if (!suspect.presentReactions.some((reaction) => reaction.recordId === requiredRecordId)) {
+  const missingPresentReaction = args.courtOnly ? undefined : args.requiredPresentRecords.find((reference) =>
+    !suspect.presentReactions.some((reaction) =>
+      reaction.recordId === `${reference.kind}:${reference.id}`));
+  if (missingPresentReaction) {
     throw new Error(`The authored investigation omitted ${args.seatId}'s proof-bearing evidence reaction.`);
   }
   return suspect;
@@ -918,16 +1415,31 @@ function authoredProsecutionChoicesFromJson(
       if (!optionValue || typeof optionValue !== "object") return [];
       const option = optionValue as Record<string, unknown>;
       const optionId = compact(option.id, 100);
-      const text = compact(option.text, 300);
-      const reaction = compact(option.reaction, 800);
+      // Earlier author prompts used the adjacent Present-reaction names for
+      // these presentation-only lines. Normalize that valid shape without
+      // relaxing the frozen choice, witness, or option ID contract.
+      const text =
+        compact(option.text, 300) ||
+        compact(option.prosecutionLine, 300) ||
+        compact(option.selectedProsecutorText, 300);
+      const reaction =
+        compact(option.reaction, 800) ||
+        compact(option.witnessReaction, 800) ||
+        compact(option.response, 800);
       return optionId && text && reaction
         ? [{
             id: optionId,
             text,
-            stageAction: compact(option.stageAction, 180) || null,
+            stageAction:
+              compact(option.stageAction, 180) ||
+              compact(option.prosecutionStageAction, 180) ||
+              null,
             reaction,
             reactionStageAction:
-              compact(option.reactionStageAction, 180) || null,
+              compact(option.reactionStageAction, 180) ||
+              compact(option.witnessReactionStageAction, 180) ||
+              compact(option.responseStageAction, 180) ||
+              null,
           }]
         : [];
     });
@@ -1004,15 +1516,34 @@ async function authorMysteryV2(args: {
   draft: MysteryV2AuthoringCheckpoint;
   onDraft: (draft: MysteryV2AuthoringCheckpoint, message: string) => void;
 }): Promise<AuthoredMysteryV2> {
+  const courtOnly = args.config.investigationMode === "court_only";
   const botById = new Map(args.bots.map((bot) => [bot.id, bot]));
   const prosecutor = botById.get(args.config.prosecutorBotId);
   const defenseCounsel = botById.get(args.config.rivalDefenseBotId);
   if (!prosecutor || !defenseCounsel) {
     throw new Error("The frozen Prosecutor or Defense Counsel is unavailable.");
   }
+  const reachableEvidenceIds = new Set(
+    args.scaffold.activeRegions.flatMap((outcome) => outcome.evidenceId ? [outcome.evidenceId] : []),
+  );
+  const pivotalGateEvidence =
+    args.scaffold.evidence.find((evidence) =>
+      evidence.isCanonicalWeapon && reachableEvidenceIds.has(evidence.id)) ??
+    args.scaffold.evidence.find((evidence) => reachableEvidenceIds.has(evidence.id)) ??
+    null;
   const suspectRequirements = args.scaffold.suspects.map((suspect, index) => {
     const bot = botById.get(suspect.botId)!;
     const contradiction = args.requiredContradictionBySeat.get(suspect.seatId)!;
+    const presentationGateRecord =
+      suspect.seatId === args.scaffold.culpritSeatId && pivotalGateEvidence
+        ? { kind: "evidence" as const, id: pivotalGateEvidence.id }
+        : null;
+    const requiredPresentReactionRecordIds = [...new Set([
+      `${contradiction.kind}:${contradiction.id}`,
+      ...(presentationGateRecord
+        ? [`${presentationGateRecord.kind}:${presentationGateRecord.id}`]
+        : []),
+    ])];
     return {
       seatId: suspect.seatId,
       name: suspect.name,
@@ -1025,24 +1556,32 @@ async function authorMysteryV2(args: {
       requiredStatementIds: [1, 2, 3].map((ordinal) => `statement-${suspect.seatId}-${ordinal}`),
       requiredContradictionOnSecondStatement: `${contradiction.kind}:${contradiction.id}`,
       requiredPresentReactionRecordId: `${contradiction.kind}:${contradiction.id}`,
+      requiredPresentReactionRecordIds,
+      requiredPresentationGateRecordId: presentationGateRecord
+        ? `${presentationGateRecord.kind}:${presentationGateRecord.id}`
+        : null,
       ordinal: index + 1,
     };
   });
   const setup = {
+    investigationMode: args.config.investigationMode,
     inspiration: args.config.inspiration,
+    spark: args.config.spark,
+    houseStyle: args.config.houseStyle.promptContract,
     difficulty: args.config.difficulty,
     preset: args.config.preset,
     trialType: args.config.trialType,
     culpritSeatId: args.scaffold.culpritSeatId,
     accompliceSeatId: args.scaffold.accompliceSeatId,
     eyewitnessSeatId: args.eyewitnessSeatId,
+    victimId: args.scaffold.victim.id,
     timeline: args.scaffold.timeline,
-    roomNames: args.scaffold.rooms.map((room) => ({
+    roomNames: courtOnly ? [] : args.scaffold.rooms.map((room) => ({
       roomId: room.id,
       name: DEBATE_MYSTERY_ROOM_TEMPLATES.find((template) => template.id === room.templateId)?.name ?? room.templateId,
     })),
     evidenceIds: args.scaffold.evidence.map((item) => item.id),
-    examinationIds: args.examinationIds,
+    examinationIds: courtOnly ? [] : args.examinationIds,
     prosecutor: {
       botId: prosecutor.id,
       name: prosecutor.name,
@@ -1075,7 +1614,9 @@ async function authorMysteryV2(args: {
             title: "original spoiler-safe case title",
             victimName: "fictional name",
             victimDescription: "specific original identity and stakes",
-            publicOpening: "crime-scene briefing without naming the culprit",
+            publicOpening: courtOnly
+              ? "spoiler-safe prosecution case summary suitable for a court title card"
+              : "crime-scene briefing without naming the culprit",
             motive: "sealed motive",
             method: "sealed method",
             prosecutorInternalReasoning: "spoiler-free first-person internal reasoning in the selected Prosecutor persona; it reviews the record but never chooses strategy for the player",
@@ -1106,7 +1647,7 @@ async function authorMysteryV2(args: {
     for (let index = 0; index < setup.examinationIds.length; index += examinationChunkSize) {
       examinationChunks.push(setup.examinationIds.slice(index, index + examinationChunkSize));
     }
-    for (let index = 0; index < examinationChunks.length; index += 1) {
+    for (let index = 0; index < examinationChunks.length && !courtOnly; index += 1) {
       const chunk = examinationChunks[index]!;
       const missingIds = chunk.filter((id) => !compact(examinationsById[id], 1_200));
       if (!missingIds.length) continue;
@@ -1161,10 +1702,23 @@ async function authorMysteryV2(args: {
     const requirement = suspectRequirements[index]!;
     if (args.draft.suspectsBySeatId[requirement.seatId]) continue;
     const requiredRecord = args.requiredContradictionBySeat.get(requirement.seatId)!;
+    const requiredPresentationGateRecord = requirement.requiredPresentationGateRecordId
+      ? {
+          kind: "evidence" as const,
+          id: requirement.requiredPresentationGateRecordId.slice("evidence:".length),
+        }
+      : null;
+    const requiredPresentRecords = [
+      requiredRecord,
+      ...(requiredPresentationGateRecord &&
+      mysteryRecordKey(requiredPresentationGateRecord) !== mysteryRecordKey(requiredRecord)
+        ? [requiredPresentationGateRecord]
+        : []),
+    ];
     const suspect = await generateMysteryAuthoringSectionV2({
       runtime: args.runtime,
       label: `Witness chapter ${index + 1}`,
-      maxTokens: 5_000,
+      maxTokens: courtOnly ? 3_600 : 5_000,
       onAttempt: (attempt) => args.onDraft(
         args.draft,
         `Writing the Case · Witness chapter ${index + 1} of ${suspectRequirements.length} · attempt ${attempt} of ${V2_MAX_AUTHOR_ATTEMPTS}`,
@@ -1177,24 +1731,42 @@ async function authorMysteryV2(args: {
         precedingSwornStatements: Object.values(args.draft.suspectsBySeatId).flatMap((entry) =>
           entry.testimony.map((statement) => ({ witnessSeatId: entry.seatId, id: statement.id, text: statement.text }))),
         outputContract: {
-          suspect: {
+          suspect: courtOnly ? {
             seatId: requirement.seatId,
             relationship: "complete relationship to the victim",
             alibi: "specific authored alibi",
+            chapterOpening: "court opening",
+            chapterCompletion: "court completion after revision",
+            defendantReactions: "court-only defendant reactions with testimony, objection, and evidence text plus optional stage actions",
+            testimony: "3-6 statements using every required statement ID; each has text, stageAction, press, pressStageAction, Defense-Counsel-owned defenseRebuttal and defenseRebuttalStageAction, Defense-Counsel-owned defenseObjection and defenseObjectionStageAction, revision, revisionStageAction, and performance direction",
+          } : {
+            seatId: requirement.seatId,
+            relationship: "complete relationship to the victim",
+            alibi: "specific authored alibi",
+            roomIntroduction: "a concise first-person introduction in this suspect's persona that establishes their presence, mood, and one player-controlled lead without answering the prosecution's first question",
+            roomIntroductionStageAction: "short visual-only physical beat for the reveal",
+            roomIntroductionPerformance: "mood, pace, intensity, actorNote",
             chapterOpening: "court opening",
             chapterCompletion: "court completion after revision",
             defaultPresentProsecutionLine: "finite wording in the selected Prosecutor persona for presenting an unrelated admitted item",
             defaultPresentProsecutionStageAction: "short visual-only physical beat",
             defaultPresentReaction: "finite suspect response to irrelevant evidence",
             defaultPresentReactionStageAction: "short visual-only physical beat",
-            talkTopics: "3-5 topics with id, short menu label, an in-character Prosecutor question, questionStageAction, question performance direction, suspect response, responseStageAction, and response performance direction",
-            presentReactions: [{
-              recordId: requirement.requiredPresentReactionRecordId,
-              prosecutionLine: "specific selected-Prosecutor wording for presenting this proof",
+            talkTopics: "3-5 finite subjects with id, short menu label, category (person, general, motive, alibi, or room), subjectId for person/room, an in-character Prosecutor question, questionStageAction, question performance direction, suspect response, responseStageAction, response performance direction, plus 1-2 repeatResponses. Room subjectId must be an exact setup roomId; person subjectId must be the victim ID or an exact suspect seatId. Never make a Case File evidence/testimony title into a Talk subject.",
+            presentationGate: requiredPresentationGateRecord
+              ? {
+                  id: `gate-${requirement.seatId}`,
+                  recordId: requirement.requiredPresentationGateRecordId,
+                  unlockTopicId: "the final Talk topic id; author that answer as a meaningful lead made available only after this exact record is presented to this suspect",
+                }
+              : null,
+            presentReactions: requirement.requiredPresentReactionRecordIds.map((recordId) => ({
+              recordId,
+              prosecutionLine: "specific selected-Prosecutor wording that explicitly names the exact public Case File title for this proof",
               prosecutionStageAction: "short visual-only physical beat",
-              response: "specific proof-bearing suspect reaction",
+              response: "specific proof-bearing suspect reaction that explicitly names the same public Case File title",
               responseStageAction: "short visual-only physical beat",
-            }],
+            })),
             defendantReactions: {
               testimony: "reaction if this suspect is the defendant while another witness testifies",
               testimonyStageAction: "short visual-only physical beat",
@@ -1210,18 +1782,40 @@ async function authorMysteryV2(args: {
           "The second statement must be exactly contradicted by the assigned record.",
           "Press answers add context without erasing the proof route.",
           "Revision text materially changes the sworn account.",
-          "Each Talk question is a natural, specific way for the prosecution to ask about its menu label and stays under 25 words.",
+          ...(courtOnly ? [
+            "This is a court-only case. Do not write room, mansion, investigation, Talk, or Present dialogue.",
+          ] : [
+            "Each Talk question is a natural, specific way for the prosecution to ask about its typed person, general, motive, alibi, or room subject and stays under 25 words.",
+          "Talk never contains a physical evidence or sworn-testimony record as its subject. A room topic names and references one exact setup roomId.",
+          requiredPresentationGateRecord
+            ? "The final Talk topic is a genuinely consequential follow-up unlocked only by presenting the assigned pivotal record to this exact suspect; do not duplicate the record title as that topic's label."
+            : "Do not invent a presentation gate for this witness.",
+          "Every Talk topic needs one or two repeat responses. Start each with a natural acknowledgment of repetition such as 'As I said' or a persona-specific impatience, then give the complete finite answer; do not use the same canned acknowledgment for every witness.",
+          "The room introduction is a self-contained persona reveal, not a question or an answer. Its distinctive wording or claim must give the first Talk topic a natural contextual handoff, but the player still chooses that question and no topic is selected automatically.",
+          "For every authored Present reaction, write the selected public Case File title exactly in both the Prosecutor line and the witness response. Never expose sealed reasoning or substitute a generic 'item' or 'evidence' reference for that public title.",
           "Every spoken bot line supplies its nonverbal beat in the dedicated stage-action field. Never put an action or a bot name inside spoken dialogue.",
           "Write Prosecutor lines only in the frozen Prosecutor persona and Defense rebuttals or objections only in the frozen Defense Counsel persona. The accused is never their own attorney.",
           "Defendant reactions must stay usable if this suspect becomes the accused, including while another suspect is the active witness.",
           "Keep each Talk response, statement, Press answer, rebuttal, revision, and reaction under 75 words.",
+          ]),
           "Write in this suspect's persona with no placeholders.",
         ],
       },
-      validate: (value) => authoredSuspectFromJson({
+        validate: (value) => authoredSuspectFromJson({
         value,
         seatId: requirement.seatId,
-        requiredPresentRecord: requiredRecord,
+        requiredPresentRecords,
+        requiredPresentationGateRecord,
+        recordItems: foundation.evidence.map((evidence) => ({
+          reference: { kind: "evidence" as const, id: evidence.id },
+          title: evidence.title,
+        })),
+        rooms: setup.roomNames.map((room) => ({ id: room.roomId, name: room.name })),
+        people: [
+          { id: args.scaffold.victim.id, name: foundation.victimName },
+          ...args.scaffold.suspects.map((suspect) => ({ id: suspect.seatId, name: suspect.name })),
+        ],
+        courtOnly,
       }),
     });
     args.draft.suspectsBySeatId[requirement.seatId] = suspect;
@@ -1247,7 +1841,25 @@ async function authorMysteryV2(args: {
           testimony: entry.testimony.map((statement) => ({ id: statement.id, text: statement.text })),
         })),
         outputContract: {
-          prosecutionChoices: "at least one authored choice with id, witnessSeatId, prompt, and 2-4 options containing id, selected-Prosecutor text, stageAction, witness reaction, and reactionStageAction",
+          prosecutionChoices: {
+            minimumItems: 1,
+            itemShape: {
+              id: "stable choice id",
+              witnessSeatId: "exact suspect seatId",
+              prompt: "court prompt",
+              options: {
+                minimumItems: 2,
+                maximumItems: 4,
+                itemShape: {
+                  id: "stable option id",
+                  text: "selected Prosecutor spoken line",
+                  stageAction: "short visual-only Prosecutor beat",
+                  reaction: "witness spoken reaction",
+                  reactionStageAction: "short visual-only witness beat",
+                },
+              },
+            },
+          },
         },
         qualityRules: [
           "The player chooses the option. Never choose or recommend an option in authored text.",
@@ -1287,11 +1899,17 @@ function buildMysteryV2Graph(args: {
   alibiSupportDiscoveryIds: string[];
   contradictionBySeat: ReadonlyMap<string, DebateMysteryRecordReferenceV2>;
 }): { graph: DebateMysteryDialogueGraphV2; privateCase: PrivateMysteryCaseV2; publicState: DebateWhodunnitFormatStateV2 } {
+  const courtOnly = args.config.investigationMode === "court_only";
   const nodes: DebateMysteryDialogueNodeV2[] = [];
   const lines: DebateMysterySpokenLineV2[] = [];
   const interactionRoots: string[] = [];
   const talkTopicNodeIdsBySuspect: Record<string, string[]> = {};
+  const roomIntroductionNodeIdsByRoom: NonNullable<
+    DebateMysteryDialogueGraphV2["roomIntroductionNodeIdsByRoom"]
+  > = {};
+  const repeatResponseNodeIdsByTopic: Record<string, string[]> = {};
   const presentNodeIdsBySuspect: Record<string, string[]> = {};
+  const presentationGates: DebateMysteryPresentationGateV2[] = [];
   const examineNodeIdByHotspot: Record<string, string> = {};
   const presentNodeIdBySuspectRecord: Record<string, string> = {};
   const defaultPresentNodeIdBySuspect: Record<string, string> = {};
@@ -1303,6 +1921,65 @@ function buildMysteryV2Graph(args: {
   const nameByBotId = new Map(args.bots.map((bot) => [bot.id, bot.name]));
   const authoredEvidence = new Map(args.authored.evidence.map((entry) => [entry.id, entry]));
   const authoredExaminations = new Map(args.authored.examinations.map((entry) => [entry.id, entry.text]));
+  const talkSubjectRooms = args.scaffold.rooms.map((room) => ({
+    id: room.id,
+    name: DEBATE_MYSTERY_ROOM_TEMPLATES.find((template) => template.id === room.templateId)?.name ?? room.templateId,
+  }));
+  const talkSubjectPeople = [
+    { id: args.scaffold.victim.id, name: args.authored.victimName },
+    ...args.scaffold.suspects.map((suspect) => ({ id: suspect.seatId, name: suspect.name })),
+  ];
+  const talkRecordItems = args.authored.evidence.map((evidence) => ({
+    reference: { kind: "evidence" as const, id: evidence.id },
+    title: evidence.title,
+  }));
+  const authoredSuspects = args.authored.suspects.map((suspect) => {
+    const talkTopics = suspect.talkTopics.map((topic) => ({
+      ...topic,
+      subject: normalizeDebateMysteryTalkSubjectV2({
+        value: (topic as Partial<AuthoredTopicV2>).subject,
+        label: topic.label,
+        question: topic.question,
+        rooms: talkSubjectRooms,
+        people: talkSubjectPeople,
+      }),
+    })).filter((topic) => !debateMysteryTalkTopicMirrorsRecordV2({
+      topicId: topic.id,
+      label: topic.label,
+      question: topic.question,
+      subject: topic.subject,
+      records: talkRecordItems,
+    }));
+    if (!courtOnly && !talkTopics.length) throw new Error(`The authored chapter for ${suspect.seatId} has no valid Talk subjects.`);
+    const candidateGate = (suspect as Partial<AuthoredSuspectV2>).presentationGate;
+    const presentationGate = candidateGate &&
+      talkTopics.some((topic) => topic.id === candidateGate.unlockTopicId)
+      ? candidateGate
+      : null;
+    return { ...suspect, talkTopics, presentationGate };
+  });
+  const admittedEvidenceIds = new Set(
+    courtOnly
+      ? args.authored.evidence.map((evidence) => evidence.id)
+      : args.scaffold.activeRegions.flatMap((outcome) => outcome.evidenceId ? [outcome.evidenceId] : []),
+  );
+  const recordReferences: DebateMysteryRecordReferenceV2[] = [
+    ...args.authored.evidence
+      .filter((evidence) => admittedEvidenceIds.has(evidence.id))
+      .map((evidence) => ({ kind: "evidence" as const, id: evidence.id })),
+    ...authoredSuspects.flatMap((suspect) =>
+      suspect.testimony.map((statement) => ({ kind: "testimony" as const, id: statement.id }))),
+  ];
+  const presentRecordTitleByKey = new Map<string, string>([
+    ...args.authored.evidence
+      .filter((evidence) => admittedEvidenceIds.has(evidence.id))
+      .map((evidence) => [`evidence:${evidence.id}`, evidence.title] as const),
+    ...authoredSuspects.flatMap((suspect) =>
+      suspect.testimony.map((statement, statementIndex) => [
+        `testimony:${statement.id}`,
+        `${nameBySeat.get(suspect.seatId) ?? "Witness"} — sworn statement ${statementIndex + 1}`,
+      ] as const)),
+  ]);
   const addLineNode = (options: {
     id: string;
     kind: DebateMysteryDialogueNodeV2["kind"];
@@ -1314,6 +1991,8 @@ function buildMysteryV2Graph(args: {
     speakerKind?: DebateMysterySpokenLineV2["speakerKind"];
     speakerBotId?: string | null;
     label?: string | null;
+    locationId?: string | null;
+    talkSubject?: DebateMysteryTalkSubjectV2 | null;
     mode?: DebateMysterySpokenLineV2["mode"];
     performance?: Partial<DebateMysteryPerformanceDirectionV2>;
     requirements?: Partial<DebateMysteryDialogueNodeV2["requirements"]>;
@@ -1332,6 +2011,8 @@ function buildMysteryV2Graph(args: {
       intendedRecipientSeatId: options.intendedRecipientSeatId ?? null,
       lineId,
       label: options.label ?? null,
+      locationId: options.locationId ?? null,
+      talkSubject: options.talkSubject ?? null,
       requirements: { ...emptyDebateMysteryRequirementsV2(), ...options.requirements },
       mutations: { ...emptyDebateMysteryMutationsV2(), ...options.mutations },
       recordReferences: options.records ?? [],
@@ -1377,7 +2058,7 @@ function buildMysteryV2Graph(args: {
     return node;
   };
 
-  const openingNode = addLineNode({
+  const openingNode = courtOnly ? null : addLineNode({
     id: "briefing-opening",
     kind: "briefing",
     scene: "investigation",
@@ -1386,12 +2067,25 @@ function buildMysteryV2Graph(args: {
     mutations: { discoverIds: ["briefing:complete"] },
     terminal: "return_to_room",
   });
-  const initialDiscoveryIds = ["briefing:complete"];
-  const initialAdmittedRecordIds: string[] = [];
-  const publicRecord: DebateWhodunnitFormatStateV2["record"] = [];
+  const initialDiscoveryIds = courtOnly ? ["court:ready"] : ["briefing:complete"];
+  const initialAdmittedRecordIds: string[] = courtOnly
+    ? [...admittedEvidenceIds].map((id) => `evidence:${id}`)
+    : [];
+  const publicRecord: DebateWhodunnitFormatStateV2["record"] = courtOnly
+    ? args.authored.evidence
+      .filter((evidence) => admittedEvidenceIds.has(evidence.id))
+      .map((evidence) => ({
+        reference: { kind: "evidence" as const, id: evidence.id },
+        title: evidence.title,
+        description: evidence.description,
+        emoji: evidence.emoji,
+        admitted: true,
+        updatedAt: new Date().toISOString(),
+      }))
+    : [];
   const openingWeaponEvidenceId = args.scaffold.evidence.find((item) => item.isCanonicalWeapon)?.id ?? null;
 
-  for (const room of args.scaffold.rooms) {
+  if (!courtOnly) for (const room of args.scaffold.rooms) {
     const activeOutcomes = args.scaffold.activeRegions.filter((outcome) => outcome.roomId === room.id);
     for (const outcome of activeOutcomes) {
       const key = `${room.id}:${outcome.regionId}`;
@@ -1404,6 +2098,8 @@ function buildMysteryV2Graph(args: {
         scene: "investigation",
         text: authoredExaminations.get(key)!,
         speakerKind: "narrator",
+        mode: "text_only",
+        locationId: room.id,
         requirements: { discoveryIds: ["briefing:complete"] },
         mutations: {
           discoverIds: [`hotspot:${key}`],
@@ -1427,13 +2123,47 @@ function buildMysteryV2Graph(args: {
     }
   }
 
-  for (const suspect of args.authored.suspects) {
+  for (const suspect of authoredSuspects) {
+    const suspectRoomId = args.scaffold.suspects.find((entry) => entry.seatId === suspect.seatId)?.roomId ?? null;
+    if (!courtOnly) {
+    if (suspectRoomId) {
+      const personaNode = addLineNode({
+        id: `room-introduction-${suspectRoomId}-persona`,
+        kind: "room_introduction",
+        scene: "investigation",
+        text: suspect.roomIntroduction,
+        stageAction: suspect.roomIntroductionStageAction,
+        speakerSeatId: suspect.seatId,
+        locationId: suspectRoomId,
+        performance: suspect.roomIntroductionPerformance,
+        root: false,
+        terminal: "return_to_room",
+      });
+      const casekeeperNode = addLineNode({
+        id: `room-introduction-${suspectRoomId}-casekeeper`,
+        kind: "room_introduction",
+        scene: "investigation",
+        text: "...",
+        speakerKind: "narrator",
+        mode: "text_only",
+        locationId: suspectRoomId,
+        next: [personaNode.id],
+        terminal: "return_to_room",
+      });
+      roomIntroductionNodeIdsByRoom[suspectRoomId] = {
+        casekeeperNodeId: casekeeperNode.id,
+        personaNodeId: personaNode.id,
+        suspectSeatId: suspect.seatId,
+      };
+    }
+    const gatedTopicId = suspect.presentationGate?.unlockTopicId ?? null;
     const topicNodeIds: string[] = [];
     suspect.talkTopics.forEach((topic, index) => {
       const nodeId = `talk-${suspect.seatId}-${topic.id}`;
       const responseNodeId = `talk-response-${suspect.seatId}-${topic.id}`;
-      const nextTopicId = suspect.talkTopics[index + 1]
-        ? `talk-${suspect.seatId}-${suspect.talkTopics[index + 1]!.id}`
+      const nextTopic = suspect.talkTopics[index + 1] ?? null;
+      const nextTopicId = nextTopic && nextTopic.id !== gatedTopicId
+        ? `talk-${suspect.seatId}-${nextTopic.id}`
         : null;
       addLineNode({
         id: nodeId,
@@ -1445,8 +2175,12 @@ function buildMysteryV2Graph(args: {
         speakerBotId: args.config.prosecutorBotId,
         intendedRecipientSeatId: suspect.seatId,
         label: topic.label,
+        locationId: suspectRoomId,
+        talkSubject: topic.subject,
         performance: topic.questionPerformance,
-        requirements: index === 0 ? {} : { unlockedTopicIds: [nodeId] },
+        requirements: index === 0 && topic.id !== gatedTopicId
+          ? {}
+          : { unlockedTopicIds: [nodeId] },
         next: [responseNodeId],
       });
       addLineNode({
@@ -1457,6 +2191,7 @@ function buildMysteryV2Graph(args: {
         stageAction: topic.responseStageAction,
         speakerSeatId: suspect.seatId,
         intendedRecipientSeatId: null,
+        locationId: suspectRoomId,
         performance: topic.performance,
         mutations: {
           discoverIds: [`talk:${suspect.seatId}:${topic.id}`],
@@ -1465,6 +2200,23 @@ function buildMysteryV2Graph(args: {
         next: nextTopicId ? [nextTopicId] : [],
         terminal: "return_to_room",
         root: false,
+      });
+      repeatResponseNodeIdsByTopic[nodeId] = topic.repeatResponses.map((repeat, repeatIndex) => {
+        const repeatNodeId = `talk-repeat-response-${suspect.seatId}-${topic.id}-${repeatIndex + 1}`;
+        addLineNode({
+          id: repeatNodeId,
+          kind: "talk_topic",
+          scene: "investigation",
+          text: repeat.response,
+          stageAction: repeat.responseStageAction,
+          speakerSeatId: suspect.seatId,
+          intendedRecipientSeatId: null,
+          locationId: suspectRoomId,
+          performance: repeat.performance,
+          terminal: "return_to_room",
+          root: false,
+        });
+        return repeatNodeId;
       });
       topicNodeIds.push(nodeId);
     });
@@ -1479,7 +2231,12 @@ function buildMysteryV2Graph(args: {
       speakerKind: "player",
       speakerBotId: args.config.prosecutorBotId,
       intendedRecipientSeatId: suspect.seatId,
+      locationId: suspectRoomId,
       next: [defaultResponseId],
+      // Every public record receives its own finite exchange below. Keep this
+      // legacy anchor out of the playable graph so generic copy cannot enter
+      // the local pack or be selected at runtime.
+      root: false,
     });
     addLineNode({
       id: defaultResponseId,
@@ -1488,26 +2245,35 @@ function buildMysteryV2Graph(args: {
       text: suspect.defaultPresentReaction,
       stageAction: suspect.defaultPresentReactionStageAction,
       speakerSeatId: suspect.seatId,
+      locationId: suspectRoomId,
       terminal: "return_to_room",
       root: false,
     });
     defaultPresentNodeIdBySuspect[suspect.seatId] = defaultNode.id;
     const presentIds = [defaultNode.id];
-    for (const reaction of suspect.presentReactions) {
-      const [kind, ...idParts] = reaction.recordId.split(":");
-      if (kind !== "evidence" && kind !== "testimony") continue;
-      const reference = { kind, id: idParts.join(":") } as DebateMysteryRecordReferenceV2;
-      const responseNodeId = `present-response-${suspect.seatId}-${kind}-${reference.id}`;
+    const reactionByRecord = new Map(suspect.presentReactions.map((reaction) => [reaction.recordId, reaction]));
+    for (const reference of recordReferences) {
+      const recordId = `${reference.kind}:${reference.id}`;
+      const recordTitle = presentRecordTitleByKey.get(recordId);
+      if (!recordTitle) throw new Error(`The public Case File title for ${recordId} is unavailable.`);
+      const reaction = reactionByRecord.get(recordId);
+      const responseNodeId = `present-response-${suspect.seatId}-${reference.kind}-${reference.id}`;
       const node = addLineNode({
-        id: `present-${suspect.seatId}-${kind}-${reference.id}`,
+        id: `present-${suspect.seatId}-${reference.kind}-${reference.id}`,
         kind: "present_reaction",
         scene: "investigation",
-        text: reaction.prosecutionLine,
-        stageAction: reaction.prosecutionStageAction,
+        text: reaction
+          ? presentPromptWithRecordTitleV2(reaction.prosecutionLine, recordTitle)
+          : presentPromptWithRecordTitleV2(
+              suspect.defaultPresentProsecutionLine,
+              recordTitle,
+            ),
+        stageAction: reaction?.prosecutionStageAction ?? suspect.defaultPresentProsecutionStageAction,
         speakerKind: "player",
         speakerBotId: args.config.prosecutorBotId,
         intendedRecipientSeatId: suspect.seatId,
-        requirements: { admittedRecordIds: [reaction.recordId] },
+        locationId: suspectRoomId,
+        requirements: { admittedRecordIds: [recordId] },
         records: [reference],
         next: [responseNodeId],
       });
@@ -1515,19 +2281,42 @@ function buildMysteryV2Graph(args: {
         id: responseNodeId,
         kind: "present_reaction",
         scene: "investigation",
-        text: reaction.response,
-        stageAction: reaction.responseStageAction,
+        text: reaction
+          ? presentResponseWithRecordTitleV2(reaction.response, recordTitle)
+          : presentResponseWithRecordTitleV2(
+              suspect.defaultPresentReaction,
+              recordTitle,
+            ),
+        stageAction: reaction?.responseStageAction ?? suspect.defaultPresentReactionStageAction,
         speakerSeatId: suspect.seatId,
-        requirements: { admittedRecordIds: [reaction.recordId] },
-        mutations: { discoverIds: [`present:${suspect.seatId}:${reaction.recordId}`] },
+        locationId: suspectRoomId,
+        requirements: { admittedRecordIds: [recordId] },
+        mutations: { discoverIds: [`present:${suspect.seatId}:${recordId}`] },
         records: [reference],
         terminal: "return_to_room",
         root: false,
       });
-      presentNodeIdBySuspectRecord[`${suspect.seatId}:${reaction.recordId}`] = node.id;
+      presentNodeIdBySuspectRecord[`${suspect.seatId}:${recordId}`] = node.id;
       presentIds.push(node.id);
     }
     presentNodeIdsBySuspect[suspect.seatId] = presentIds;
+    if (suspect.presentationGate) {
+      const requiredRecordKey = mysteryRecordKey(suspect.presentationGate.requiredRecord);
+      const correctPresentNodeId = presentNodeIdBySuspectRecord[`${suspect.seatId}:${requiredRecordKey}`];
+      const topicNodeId = `talk-${suspect.seatId}-${suspect.presentationGate.unlockTopicId}`;
+      if (!correctPresentNodeId || !topicNodeIds.includes(topicNodeId)) {
+        throw new Error(`The authored presentation gate for ${suspect.seatId} is not fully materialized.`);
+      }
+      presentationGates.push({
+        id: `present-gate-${suspect.seatId}-${suspect.presentationGate.requiredRecord.kind}-${suspect.presentationGate.requiredRecord.id}`,
+        requiredRecord: suspect.presentationGate.requiredRecord,
+        requiredSuspectSeatId: suspect.seatId,
+        correctPresentNodeId,
+        unlocks: [{ kind: "topic", topicNodeId }],
+        requiredForProgression: true,
+      });
+    }
+    }
     const defendantTestimony = addLineNode({
       id: `defendant-${suspect.seatId}-testimony`,
       kind: "defendant_reaction",
@@ -1562,7 +2351,7 @@ function buildMysteryV2Graph(args: {
   const witnessChapters: DebateMysteryWitnessChapterV2[] = [];
   let previousPrimaryStatementId: string | null = null;
   for (const [index, suspectSnapshot] of args.scaffold.suspects.entries()) {
-    const suspect = args.authored.suspects.find((entry) => entry.seatId === suspectSnapshot.seatId)!;
+    const suspect = authoredSuspects.find((entry) => entry.seatId === suspectSnapshot.seatId)!;
     const chapterId = `chapter-${suspect.seatId}`;
     const chapterRequirement = previousPrimaryStatementId
       ? { admittedRecordIds: [`testimony:${previousPrimaryStatementId}`] }
@@ -1736,7 +2525,7 @@ function buildMysteryV2Graph(args: {
   const prosecutorStrategy = addLineNode({
     id: "prosecutor-strategy-default",
     kind: "prosecutor_strategy",
-    scene: "investigation",
+    scene: courtOnly ? "court" : "investigation",
     text: args.authored.prosecutorInternalReasoning,
     speakerKind: "player",
     speakerBotId: args.config.prosecutorBotId,
@@ -1759,11 +2548,6 @@ function buildMysteryV2Graph(args: {
     mode: "text_only",
     terminal: "case_complete",
   });
-  const recordReferences: DebateMysteryRecordReferenceV2[] = [
-    ...args.authored.evidence.map((evidence) => ({ kind: "evidence" as const, id: evidence.id })),
-    ...args.authored.suspects.flatMap((suspect) =>
-      suspect.testimony.map((statement) => ({ kind: "testimony" as const, id: statement.id }))),
-  ];
   const graph: DebateMysteryDialogueGraphV2 = {
     version: 2,
     caseId: args.sessionId,
@@ -1774,7 +2558,10 @@ function buildMysteryV2Graph(args: {
     lines,
     witnessChapters,
     prosecutionChoices,
+    roomIntroductionNodeIdsByRoom,
     talkTopicNodeIdsBySuspect,
+    presentationGates,
+    repeatResponseNodeIdsByTopic,
     presentNodeIdsBySuspect,
     prosecutorStrategyNodeId: prosecutorStrategy.id,
     defendantReactionNodeIdsBySeat,
@@ -1784,6 +2571,14 @@ function buildMysteryV2Graph(args: {
     graph,
     suspectSeatIds: args.scaffold.suspects.map((suspect) => suspect.seatId),
     recordReferences,
+    roomIds: courtOnly ? [] : args.scaffold.rooms.map((room) => room.id),
+    personIds: courtOnly ? [] : [args.scaffold.victim.id, ...args.scaffold.suspects.map((suspect) => suspect.seatId)],
+    hotspotIdsByRoom: courtOnly ? {} : Object.fromEntries(args.scaffold.rooms.map((room) => [
+      room.id,
+      args.scaffold.activeRegions
+        .filter((outcome) => outcome.roomId === room.id)
+        .map((outcome) => outcome.regionId),
+    ])),
     prosecutorBotId: args.config.prosecutorBotId,
     rivalDefenseBotId: args.config.rivalDefenseBotId,
     eyewitnessSeatId: args.eyewitnessSeatId,
@@ -1802,7 +2597,7 @@ function buildMysteryV2Graph(args: {
     eyewitnessSeatId: args.eyewitnessSeatId,
     eyewitnessResolution: args.authored.eyewitnessResolution,
     accusedAlibiSupportDiscoveryIds: args.alibiSupportDiscoveryIds,
-    actorAccounts: args.authored.suspects.map((suspect) => ({
+    actorAccounts: authoredSuspects.map((suspect) => ({
       seatId: suspect.seatId,
       relationship: suspect.relationship,
       alibi: suspect.alibi,
@@ -1812,16 +2607,33 @@ function buildMysteryV2Graph(args: {
         const evidence = authoredEvidence.get(reference.id)!;
         return { reference, title: evidence.title, description: evidence.description, emoji: evidence.emoji };
       }
-      const statement = args.authored.suspects.flatMap((suspect) => suspect.testimony).find((entry) => entry.id === reference.id)!;
-      return { reference, title: "Prior sworn testimony", description: statement.text, emoji: "💬" };
+      const statement = authoredSuspects.flatMap((suspect) => suspect.testimony).find((entry) => entry.id === reference.id)!;
+      return {
+        reference,
+        title: presentRecordTitleByKey.get(mysteryRecordKey(reference))!,
+        description: statement.text,
+        emoji: "💬",
+      };
     }),
     examineNodeIdByHotspot,
     presentNodeIdBySuspectRecord,
     defaultPresentNodeIdBySuspect,
     prosecutorStrategyNodeId: prosecutorStrategy.id,
     crimeSceneRoomId: args.scaffold.crimeSceneRoomId,
+    investigationRoomIds: courtOnly ? [] : args.scaffold.rooms.map((room) => room.id),
+    investigationHotspotIdsByRoom: courtOnly ? {} : Object.fromEntries(args.scaffold.rooms.map((room) => [
+      room.id,
+      args.scaffold.activeRegions
+        .filter((outcome) => outcome.roomId === room.id)
+        .map((outcome) => outcome.regionId),
+    ])),
+    investigationPersonIds: courtOnly ? [] : [
+      args.scaffold.victim.id,
+      ...args.scaffold.suspects.map((suspect) => suspect.seatId),
+    ],
     graphValidation: validation,
     playerRoleContractVersion: 1,
+    investigationProgressionContractVersion: 2,
   };
   const now = new Date().toISOString();
   const publicState: DebateWhodunnitFormatStateV2 = {
@@ -1829,13 +2641,14 @@ function buildMysteryV2Graph(args: {
     caseTitle: args.authored.title,
     victim: { id: args.scaffold.victim.id, name: args.authored.victimName },
     suspects: args.scaffold.suspects.map(({ roomId: _roomId, ...suspect }) => ({ ...suspect, roomId: _roomId })),
-    rooms: args.scaffold.rooms.map((room) => {
+    rooms: courtOnly ? [] : args.scaffold.rooms.map((room) => {
       const template = DEBATE_MYSTERY_ROOM_TEMPLATES.find((entry) => entry.id === room.templateId)!;
       const activeRegionIds = new Set(
         args.scaffold.activeRegions.filter((outcome) => outcome.roomId === room.id).map((outcome) => outcome.regionId),
       );
       return {
         id: room.id,
+        templateId: room.templateId,
         name: template.name,
         floor: room.floor,
         x: room.x,
@@ -1857,20 +2670,23 @@ function buildMysteryV2Graph(args: {
         })),
       };
     }),
-    currentRoomId: args.scaffold.crimeSceneRoomId,
+    roomIntroductions: courtOnly ? {} : Object.fromEntries(args.scaffold.rooms.map((room) => [
+      room.id,
+      roomIntroductionNodeIdsByRoom[room.id] ? "unseen" : "complete",
+    ])),
+    currentRoomId: courtOnly ? null : args.scaffold.crimeSceneRoomId,
     discoveryIds: initialDiscoveryIds,
     record: publicRecord,
-    topics: args.authored.suspects.map((suspect) => {
-      const topic = suspect.talkTopics[0]!;
-      return {
+    topics: courtOnly ? [] : authoredSuspects.flatMap((suspect) =>
+      suspect.talkTopics.map((topic, index) => ({
         nodeId: `talk-${suspect.seatId}-${topic.id}`,
         suspectSeatId: suspect.seatId,
         label: topic.label,
-        unlocked: true,
+        subject: topic.subject,
+        unlocked: index === 0 && suspect.presentationGate?.unlockTopicId !== topic.id,
         completed: false,
-      };
-    }),
-    dialogueHistory: [{
+      }))),
+    dialogueHistory: openingNode ? [{
       nodeId: openingNode.id,
       lineId: openingNode.lineId,
       stageActionText: null,
@@ -1878,8 +2694,8 @@ function buildMysteryV2Graph(args: {
       speakerSeatId: null,
       speakerBotId: null,
       occurredAt: now,
-    }],
-    activeDialogueNodeId: openingNode.id,
+    }] : [],
+    activeDialogueNodeId: openingNode?.id ?? null,
   };
   return { graph, privateCase, publicState };
 }
@@ -1961,6 +2777,61 @@ function uniqueFrozenId(base: string, used: Set<string>): string {
   return candidate;
 }
 
+/** Finite compatibility copy for frozen Talk graphs. It is materialized into
+ * a dedicated line before local audio preparation—never prefixed at playback. */
+function legacyRepeatTalkTextV2(args: {
+  stableId: string;
+  spokenText: string;
+  performance: DebateMysteryPerformanceDirectionV2;
+}): string {
+  const mood = args.performance.mood.toLocaleLowerCase();
+  const candidates = /guarded|nervous|uneasy|hesitant/u.test(mood)
+    ? ["Like I said before, ", "I already told you, ", "I've said this once; "]
+    : /defiant|angry|insistent|sharp|tense/u.test(mood)
+      ? ["Still going on about that? ", "As I already said, ", "I've answered that before: "]
+      : /precise|measured|thoughtful|controlled/u.test(mood)
+        ? ["As I said, ", "To repeat myself, ", "My answer has not changed: "]
+        : ["Like I said, ", "As I said before, ", "I've already explained it: "];
+  const index = Number.parseInt(sha256(`${args.stableId}:${args.performance.mood}`).slice(0, 8), 16) % candidates.length;
+  return `${candidates[index]}${args.spokenText}`;
+}
+
+function presentRecordTitleMentionedV2(text: string, title: string): boolean {
+  return text.toLocaleLowerCase().includes(title.trim().toLocaleLowerCase());
+}
+
+function replaceGenericPresentReferenceV2(text: string, title: string): string {
+  return text
+    .replace(
+      /\b(?:this|that) (?:item|piece of evidence)(?: in the Case File)?\b/giu,
+      `the ${title}`,
+    )
+    .replace(
+      /\bthe (?:item|piece of evidence)\b/giu,
+      `the ${title}`,
+    );
+}
+
+/**
+ * Present dialogue is frozen before play, including the public Case File title.
+ * An author may provide a genuinely specific reaction without restating its
+ * heading; retain that authored line and add the public heading only when it
+ * is needed to make the selected record unambiguous.
+ */
+function presentPromptWithRecordTitleV2(text: string, title: string): string {
+  const contextualText = replaceGenericPresentReferenceV2(text, title);
+  return presentRecordTitleMentionedV2(contextualText, title)
+    ? contextualText
+    : `Let's focus on the ${title}. ${contextualText}`;
+}
+
+function presentResponseWithRecordTitleV2(text: string, title: string): string {
+  const contextualText = replaceGenericPresentReferenceV2(text, title);
+  return presentRecordTitleMentionedV2(contextualText, title)
+    ? contextualText
+    : `Regarding the ${title}: ${contextualText}`;
+}
+
 function migrateDebateMysteryPlayerRoleContractV2(args: {
   privateCase: PrivateMysteryCaseV2;
   graph: DebateMysteryDialogueGraphV2;
@@ -1997,9 +2868,32 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
   const botNameById = new Map(args.botRows.map((bot) => [bot.id, bot.name]));
   const suspectBySeat = new Map(publicState.suspects.map((suspect) => [suspect.seatId, suspect]));
   const botIdBySeat = new Map(publicState.suspects.map((suspect) => [suspect.seatId, suspect.botId]));
+  const subjectRooms = publicState.rooms.map((room) => ({ id: room.id, name: room.name }));
+  const subjectPeople = [
+    ...(publicState.victim ? [{ id: publicState.victim.id, name: publicState.victim.name }] : []),
+    ...publicState.suspects.map((suspect) => ({ id: suspect.seatId, name: suspect.name })),
+  ];
+  const hotspotIdsByRoom = Object.fromEntries(publicState.rooms.map((room) => [
+    room.id,
+    room.hotspots.map((hotspot) => hotspot.id),
+  ]));
+  if (JSON.stringify(privateCase.investigationRoomIds) !== JSON.stringify(subjectRooms.map((room) => room.id))) changed = true;
+  if (JSON.stringify(privateCase.investigationHotspotIdsByRoom) !== JSON.stringify(hotspotIdsByRoom)) changed = true;
+  if (JSON.stringify(privateCase.investigationPersonIds) !== JSON.stringify(subjectPeople.map((person) => person.id))) changed = true;
+  privateCase.investigationRoomIds = subjectRooms.map((room) => room.id);
+  privateCase.investigationHotspotIdsByRoom = hotspotIdsByRoom;
+  privateCase.investigationPersonIds = subjectPeople.map((person) => person.id);
   const usedNodeIds = new Set(graph.nodes.map((node) => node.id));
   const usedLineIds = new Set(graph.lines.map((line) => line.id));
   const movedLegacyResponseByRoot = new Map<string, string>();
+  const inferredGateCandidates: Array<{
+    suspectSeatId: string;
+    requiredRecord: DebateMysteryRecordReferenceV2;
+    unlocks: DebateMysteryPresentationUnlockTargetV2[];
+    responseText: string | null;
+    responseStageAction: string | null;
+    responsePerformance: DebateMysteryPerformanceDirectionV2 | null;
+  }> = [];
   const nodeById = (): Map<string, DebateMysteryDialogueNodeV2> =>
     new Map(graph.nodes.map((node) => [node.id, node]));
   const lineById = (): Map<string, DebateMysterySpokenLineV2> =>
@@ -2065,6 +2959,7 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
     scene: DebateMysteryDialogueNodeV2["scene"];
     speakerSeatId?: string | null;
     intendedRecipientSeatId?: string | null;
+    locationId?: string | null;
   }): DebateMysteryDialogueNodeV2 => ({
     id: args.id,
     kind: args.kind,
@@ -2073,6 +2968,8 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
     intendedRecipientSeatId: args.intendedRecipientSeatId ?? null,
     lineId: args.lineId,
     label: null,
+    locationId: args.locationId ?? null,
+    talkSubject: null,
     requirements: emptyDebateMysteryRequirementsV2(),
     mutations: emptyDebateMysteryMutationsV2(),
     recordReferences: [],
@@ -2110,6 +3007,112 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
     changed = true;
   };
 
+  for (const [hotspotKey, examineNodeId] of Object.entries(privateCase.examineNodeIdByHotspot ?? {})) {
+    const room = publicState.rooms.find((candidate) => hotspotKey.startsWith(`${candidate.id}:`));
+    const node = nodeById().get(examineNodeId);
+    if (node && room && node.locationId !== room.id) {
+      node.locationId = room.id;
+      changed = true;
+    }
+  }
+
+  const retiredTalkNodeIds = new Set(graph.retiredTalkNodeIds ?? []);
+  for (const [suspectSeatId, frozenTopicNodeIds] of Object.entries(graph.talkTopicNodeIdsBySuspect)) {
+    const suspectRoomId = suspectBySeat.get(suspectSeatId)?.roomId ?? null;
+    const activeTopicNodeIds: string[] = [];
+    for (const topicNodeId of frozenTopicNodeIds) {
+      const topic = nodeById().get(topicNodeId);
+      if (!topic?.label) continue;
+      const existingPublicTopic = publicState.topics.find((entry) => entry.nodeId === topicNodeId);
+      const topicLine = topic.lineId ? lineById().get(topic.lineId) : null;
+      const legacyRoomSubject =
+        !topic.talkSubject &&
+        /(?:^|-)room(?:-|$)/iu.test(topicNodeId) &&
+        subjectRooms.some((room) => room.id === privateCase.crimeSceneRoomId)
+          ? { category: "room" as const, roomId: privateCase.crimeSceneRoomId }
+          : null;
+      const durablePublicSubject = existingPublicTopic?.subject?.category !== "general"
+        ? existingPublicTopic?.subject
+        : null;
+      const subject = normalizeDebateMysteryTalkSubjectV2({
+        value: topic.talkSubject ?? durablePublicSubject ?? legacyRoomSubject,
+        label: topic.label,
+        question: topicLine?.spokenText,
+        rooms: subjectRooms,
+        people: subjectPeople,
+      });
+      if (JSON.stringify(topic.talkSubject) !== JSON.stringify(subject)) changed = true;
+      topic.talkSubject = subject;
+      if (topic.locationId !== suspectRoomId) {
+        topic.locationId = suspectRoomId;
+        changed = true;
+      }
+      const responseNode = topic.speakerSeatId === suspectSeatId
+        ? topic
+        : topic.nextNodeIds.map((nodeId) => nodeById().get(nodeId)).find((node) =>
+            node?.kind === "talk_topic" && node.speakerSeatId === suspectSeatId) ?? null;
+      if (responseNode && responseNode.locationId !== suspectRoomId) {
+        responseNode.locationId = suspectRoomId;
+        changed = true;
+      }
+      const responseLine = responseNode?.lineId ? lineById().get(responseNode.lineId) : null;
+      const matchingRecord = debateMysteryTalkTopicMirrorsRecordV2({
+        topicId: topicNodeId,
+        label: topic.label,
+        question: topicLine?.spokenText,
+        subject,
+        records: privateCase.recordItems,
+      });
+      if (!matchingRecord) {
+        activeTopicNodeIds.push(topicNodeId);
+        continue;
+      }
+
+      const retiredIds = [
+        topicNodeId,
+        ...(responseNode && responseNode.id !== topicNodeId ? [responseNode.id] : []),
+        ...(graph.repeatResponseNodeIdsByTopic?.[topicNodeId] ?? []),
+      ];
+      retiredIds.forEach((nodeId) => retiredTalkNodeIds.add(nodeId));
+      const unlocks: DebateMysteryPresentationUnlockTargetV2[] = [];
+      for (const unlockedTopicId of responseNode?.mutations.unlockTopicIds ?? []) {
+        unlocks.push({ kind: "topic", topicNodeId: unlockedTopicId });
+      }
+      for (const discoveryId of responseNode?.mutations.discoverIds ?? []) {
+        unlocks.push({ kind: "location_discovery", discoveryId });
+      }
+      for (const admittedRecordId of responseNode?.mutations.admitRecordIds ?? []) {
+        const item = privateCase.recordItems.find((candidate) =>
+          mysteryRecordKey(candidate.reference) === admittedRecordId);
+        if (item && admittedRecordId !== mysteryRecordKey(matchingRecord)) {
+          unlocks.push({ kind: "record_discovery", record: item.reference });
+        }
+      }
+      if (!unlocks.some((target) => target.kind === "topic")) {
+        const nextTalkTopicId = responseNode?.nextNodeIds.find((nodeId) =>
+          frozenTopicNodeIds.includes(nodeId) && nodeId !== topicNodeId);
+        if (nextTalkTopicId) unlocks.push({ kind: "topic", topicNodeId: nextTalkTopicId });
+      }
+      const uniqueUnlocks = [...new Map(unlocks.map((target) => [JSON.stringify(target), target])).values()];
+      inferredGateCandidates.push({
+        suspectSeatId,
+        requiredRecord: matchingRecord,
+        unlocks: uniqueUnlocks,
+        responseText: responseLine?.spokenText ?? null,
+        responseStageAction: responseLine?.stageActionText ?? null,
+        responsePerformance: responseLine?.performance ?? null,
+      });
+      changed = true;
+    }
+    graph.talkTopicNodeIdsBySuspect[suspectSeatId] = activeTopicNodeIds;
+  }
+  graph.retiredTalkNodeIds = [...retiredTalkNodeIds];
+  if (retiredTalkNodeIds.size) {
+    graph.interactionRootNodeIds = graph.interactionRootNodeIds.filter((nodeId) =>
+      !retiredTalkNodeIds.has(nodeId));
+    publicState.topics = publicState.topics.filter((topic) => !retiredTalkNodeIds.has(topic.nodeId));
+  }
+
   for (const [suspectSeatId, topicNodeIds] of Object.entries(graph.talkTopicNodeIdsBySuspect)) {
     for (const topicNodeId of topicNodeIds) {
       const topic = nodeById().get(topicNodeId);
@@ -2121,6 +3124,7 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
     }
   }
   for (const [suspectSeatId, presentNodeIds] of Object.entries(graph.presentNodeIdsBySuspect)) {
+    const suspectRoomId = suspectBySeat.get(suspectSeatId)?.roomId ?? null;
     for (const presentNodeId of presentNodeIds) {
       const root = nodeById().get(presentNodeId);
       const recordTitle = root?.recordReferences
@@ -2132,8 +3136,296 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
         suspectSeatId,
         `I want your response to ${recordTitle?.trim() || "this item in the Case File"}.`,
       );
+      const migratedRoot = nodeById().get(presentNodeId);
+      const migratedResponse = migratedRoot?.nextNodeIds[0]
+        ? nodeById().get(migratedRoot.nextNodeIds[0]!)
+        : null;
+      for (const node of [migratedRoot, migratedResponse]) {
+        if (node && node.locationId !== suspectRoomId) {
+          node.locationId = suspectRoomId;
+          changed = true;
+        }
+      }
     }
   }
+
+  // Old V2 cases only compiled the proof-bearing reaction, then selected a
+  // generic default for every other Case File record. Materialize every
+  // suspect × public-record exchange here, before readiness and local audio
+  // preparation. This is deterministic compatibility work, never authoring or
+  // runtime text substitution.
+  const presentNodeIdBySuspectRecord = privateCase.presentNodeIdBySuspectRecord ?? {};
+  privateCase.presentNodeIdBySuspectRecord = presentNodeIdBySuspectRecord;
+  const presentNodeIdsBySuspect = graph.presentNodeIdsBySuspect ?? {};
+  graph.presentNodeIdsBySuspect = presentNodeIdsBySuspect;
+  for (const suspect of publicState.suspects) {
+    const witnessBotId = botIdBySeat.get(suspect.seatId);
+    if (!witnessBotId) throw new Error(`Frozen suspect ${suspect.seatId} has no bot identity.`);
+    const presentNodeIds = presentNodeIdsBySuspect[suspect.seatId] ?? [];
+    const defaultPromptNodeId = privateCase.defaultPresentNodeIdBySuspect?.[suspect.seatId];
+    const defaultPromptNode = defaultPromptNodeId ? nodeById().get(defaultPromptNodeId) : null;
+    const defaultPromptLine = defaultPromptNode?.lineId ? lineById().get(defaultPromptNode.lineId) : null;
+    const defaultResponseNode = defaultPromptNode?.nextNodeIds[0]
+      ? nodeById().get(defaultPromptNode.nextNodeIds[0]!)
+      : null;
+    const defaultResponseLine = defaultResponseNode?.lineId ? lineById().get(defaultResponseNode.lineId) : null;
+    for (const recordItem of privateCase.recordItems) {
+      const recordKey = mysteryRecordKey(recordItem.reference);
+      const mappingKey = `${suspect.seatId}:${recordKey}`;
+      const mappedNodeId = presentNodeIdBySuspectRecord[mappingKey];
+      const promptNode = mappedNodeId ? nodeById().get(mappedNodeId) : null;
+      const promptLine = promptNode?.lineId ? lineById().get(promptNode.lineId) : null;
+      const responseNode = promptNode?.nextNodeIds.length === 1
+        ? nodeById().get(promptNode.nextNodeIds[0]!)
+        : null;
+      const responseLine = responseNode?.lineId ? lineById().get(responseNode.lineId) : null;
+      const usable = Boolean(
+        promptNode?.kind === "present_reaction" &&
+        promptNode.speakerSeatId === null &&
+        promptNode.intendedRecipientSeatId === suspect.seatId &&
+        promptLine?.speakerKind === "player" &&
+        promptNode.recordReferences.length === 1 &&
+        mysteryRecordKey(promptNode.recordReferences[0]!) === recordKey &&
+        responseNode?.kind === "present_reaction" &&
+        responseNode.speakerSeatId === suspect.seatId &&
+        responseLine?.speakerKind === "bot",
+      );
+      if (usable && promptNode && promptLine && responseNode && responseLine) {
+        if (promptLine.speakerBotId !== prosecutorBotId) {
+          promptLine.speakerBotId = prosecutorBotId;
+          changed = true;
+        }
+        if (responseLine.speakerBotId !== witnessBotId) {
+          responseLine.speakerBotId = witnessBotId;
+          changed = true;
+        }
+        const promptText = presentPromptWithRecordTitleV2(promptLine.spokenText, recordItem.title);
+        const responseText = presentResponseWithRecordTitleV2(responseLine.spokenText, recordItem.title);
+        if (promptLine.visibleText !== promptText || promptLine.spokenText !== promptText) {
+          promptLine.visibleText = promptText;
+          promptLine.spokenText = promptText;
+          changed = true;
+        }
+        if (responseLine.visibleText !== responseText || responseLine.spokenText !== responseText) {
+          responseLine.visibleText = responseText;
+          responseLine.spokenText = responseText;
+          changed = true;
+        }
+        promptNode.requirements = { ...emptyDebateMysteryRequirementsV2(), admittedRecordIds: [recordKey] };
+        promptNode.recordReferences = [recordItem.reference];
+        promptNode.locationId = suspect.roomId;
+        responseNode.requirements = { ...emptyDebateMysteryRequirementsV2(), admittedRecordIds: [recordKey] };
+        responseNode.recordReferences = [recordItem.reference];
+        responseNode.locationId = suspect.roomId;
+        if (!presentNodeIds.includes(promptNode.id)) presentNodeIds.push(promptNode.id);
+        if (presentNodeIdBySuspectRecord[mappingKey] !== promptNode.id) {
+          presentNodeIdBySuspectRecord[mappingKey] = promptNode.id;
+          changed = true;
+        }
+        continue;
+      }
+
+      const promptNodeId = uniqueFrozenId(
+        `present-${suspect.seatId}-${recordItem.reference.kind}-${recordItem.reference.id}-record`,
+        usedNodeIds,
+      );
+      const responseNodeId = uniqueFrozenId(
+        `present-response-${suspect.seatId}-${recordItem.reference.kind}-${recordItem.reference.id}-record`,
+        usedNodeIds,
+      );
+      const promptLineId = uniqueFrozenId(`line-${promptNodeId}`, usedLineIds);
+      const responseLineId = uniqueFrozenId(`line-${responseNodeId}`, usedLineIds);
+      graph.nodes.push({
+        ...makeNode({
+          id: promptNodeId,
+          lineId: promptLineId,
+          kind: "present_reaction",
+          scene: "investigation",
+          intendedRecipientSeatId: suspect.seatId,
+          locationId: suspect.roomId,
+        }),
+        requirements: { ...emptyDebateMysteryRequirementsV2(), admittedRecordIds: [recordKey] },
+        recordReferences: [recordItem.reference],
+        nextNodeIds: [responseNodeId],
+      });
+      graph.lines.push(makeLine({
+        id: promptLineId,
+        nodeId: promptNodeId,
+        text: presentPromptWithRecordTitleV2(
+          defaultPromptLine?.spokenText || "I want your response to this admitted record.",
+          recordItem.title,
+        ),
+        speakerKind: "player",
+        speakerBotId: prosecutorBotId,
+        mood: "focused inquiry",
+      }));
+      graph.nodes.push({
+        ...makeNode({
+          id: responseNodeId,
+          lineId: responseLineId,
+          kind: "present_reaction",
+          scene: "investigation",
+          speakerSeatId: suspect.seatId,
+          locationId: suspect.roomId,
+        }),
+        requirements: { ...emptyDebateMysteryRequirementsV2(), admittedRecordIds: [recordKey] },
+        mutations: { ...emptyDebateMysteryMutationsV2(), discoverIds: [`present:${suspect.seatId}:${recordKey}`] },
+        recordReferences: [recordItem.reference],
+        terminalOutcome: "return_to_room",
+      });
+      graph.lines.push(makeLine({
+        id: responseLineId,
+        nodeId: responseNodeId,
+        text: presentResponseWithRecordTitleV2(
+          defaultResponseLine?.spokenText || "That record does not change the account I have given you.",
+          recordItem.title,
+        ),
+        speakerKind: "bot",
+        speakerBotId: witnessBotId,
+        mood: "guarded",
+      }));
+      graph.interactionRootNodeIds.push(promptNodeId);
+      presentNodeIds.push(promptNodeId);
+      presentNodeIdBySuspectRecord[mappingKey] = promptNodeId;
+      changed = true;
+    }
+    presentNodeIdsBySuspect[suspect.seatId] = presentNodeIds;
+  }
+
+  const activeTalkTopicIds = new Set(Object.values(graph.talkTopicNodeIdsBySuspect).flat());
+  const presentationGates = [...(graph.presentationGates ?? [])];
+  for (const candidate of inferredGateCandidates) {
+    const requiredRecordKey = mysteryRecordKey(candidate.requiredRecord);
+    const mappingKey = `${candidate.suspectSeatId}:${requiredRecordKey}`;
+    const correctPresentNodeId = presentNodeIdBySuspectRecord[mappingKey];
+    if (!correctPresentNodeId) continue;
+    const unlocks = candidate.unlocks.filter((target) => {
+      if (target.kind === "topic") return activeTalkTopicIds.has(target.topicNodeId);
+      if (target.kind === "record_discovery") {
+        const key = mysteryRecordKey(target.record);
+        return !graph.nodes.some((node) =>
+          !retiredTalkNodeIds.has(node.id) && node.mutations.admitRecordIds.includes(key));
+      }
+      if (target.kind === "location_discovery") {
+        return !graph.nodes.some((node) =>
+          !retiredTalkNodeIds.has(node.id) && node.mutations.discoverIds.includes(target.discoveryId));
+      }
+      return true;
+    });
+    const promptNode = nodeById().get(correctPresentNodeId);
+    const responseNode = promptNode?.nextNodeIds[0]
+      ? nodeById().get(promptNode.nextNodeIds[0]!)
+      : null;
+    const responseLine = responseNode?.lineId ? lineById().get(responseNode.lineId) : null;
+    const recordTitle = privateCase.recordItems.find((item) =>
+      mysteryRecordKey(item.reference) === requiredRecordKey)?.title;
+    if (candidate.responseText && responseLine && recordTitle) {
+      const responseText = presentResponseWithRecordTitleV2(candidate.responseText, recordTitle);
+      responseLine.visibleText = responseText;
+      responseLine.spokenText = responseText;
+      responseLine.stageActionText = candidate.responseStageAction;
+      if (candidate.responsePerformance) responseLine.performance = candidate.responsePerformance;
+      changed = true;
+    }
+    // Even an old evidence topic that unlocked no separate node still owns a
+    // useful authored reaction. Move that reaction onto the exact Present
+    // exchange, but create a progression gate only when there is a real public
+    // target to release.
+    if (!unlocks.length) continue;
+    const existing = presentationGates.find((gate) =>
+      gate.requiredSuspectSeatId === candidate.suspectSeatId &&
+      mysteryRecordKey(gate.requiredRecord) === requiredRecordKey);
+    if (existing) {
+      const merged = [...new Map(
+        [...existing.unlocks, ...unlocks].map((target) => [JSON.stringify(target), target]),
+      ).values()];
+      if (JSON.stringify(existing.unlocks) !== JSON.stringify(merged)) changed = true;
+      existing.unlocks = merged;
+      continue;
+    }
+    presentationGates.push({
+      id: `present-gate-${candidate.suspectSeatId}-${candidate.requiredRecord.kind}-${candidate.requiredRecord.id}`,
+      requiredRecord: candidate.requiredRecord,
+      requiredSuspectSeatId: candidate.suspectSeatId,
+      correctPresentNodeId,
+      unlocks,
+      requiredForProgression: true,
+    });
+    changed = true;
+  }
+  graph.presentationGates = presentationGates;
+
+  // A case frozen before Present gates existed can still contain a topic that
+  // requires its own ID, with no surviving dialogue mutation capable of
+  // unlocking it. Keep exact inferred Present targets blocked, but make every
+  // other orphaned legacy topic independently reachable instead of leaving the
+  // repaired graph in a permanent self-lock.
+  const presentationGatedTopicIds = new Set(presentationGates.flatMap((gate) =>
+    gate.unlocks.flatMap((target) => target.kind === "topic" ? [target.topicNodeId] : [])));
+  for (const topicNodeId of activeTalkTopicIds) {
+    if (presentationGatedTopicIds.has(topicNodeId)) continue;
+    const topic = nodeById().get(topicNodeId);
+    if (
+      !topic ||
+      topic.requirements.unlockedTopicIds.length !== 1 ||
+      topic.requirements.unlockedTopicIds[0] !== topicNodeId
+    ) continue;
+    const hasAuthoredUnlock = graph.nodes.some((node) =>
+      !retiredTalkNodeIds.has(node.id) && node.mutations.unlockTopicIds.includes(topicNodeId));
+    if (hasAuthoredUnlock) continue;
+    topic.requirements.unlockedTopicIds = [];
+    changed = true;
+  }
+
+  const repeatResponseNodeIdsByTopic: Record<string, string[]> = {
+    ...(graph.repeatResponseNodeIdsByTopic ?? {}),
+  };
+  for (const [suspectSeatId, topicNodeIds] of Object.entries(graph.talkTopicNodeIdsBySuspect)) {
+    for (const topicNodeId of topicNodeIds) {
+      const existing = (repeatResponseNodeIdsByTopic[topicNodeId] ?? []).filter((nodeId) => {
+        const node = nodeById().get(nodeId);
+        const line = node?.lineId ? lineById().get(node.lineId) : null;
+        return node?.kind === "talk_topic" && node.speakerSeatId === suspectSeatId && line?.speakerKind === "bot";
+      });
+      if (existing.length) {
+        if (existing.length !== (repeatResponseNodeIdsByTopic[topicNodeId] ?? []).length) changed = true;
+        repeatResponseNodeIdsByTopic[topicNodeId] = existing;
+        continue;
+      }
+      const exchange = resolveDebateMysteryTalkExchangeV2(graph, topicNodeId, suspectSeatId);
+      const responseNode = exchange ? nodeById().get(exchange.responseNodeId) : null;
+      const responseLine = responseNode?.lineId ? lineById().get(responseNode.lineId) : null;
+      if (!responseNode || !responseLine) continue;
+      const nodeId = uniqueFrozenId(`${responseNode.id}-repeat`, usedNodeIds);
+      const lineId = uniqueFrozenId(`line-${nodeId}`, usedLineIds);
+      const repeatLine = {
+        ...structuredClone(responseLine),
+        id: lineId,
+        nodeId,
+        visibleText: legacyRepeatTalkTextV2({
+          stableId: topicNodeId,
+          spokenText: responseLine.spokenText,
+          performance: responseLine.performance,
+        }),
+      };
+      repeatLine.spokenText = repeatLine.visibleText;
+      graph.nodes.push({
+        ...structuredClone(responseNode),
+        id: nodeId,
+        lineId,
+        label: null,
+        requirements: emptyDebateMysteryRequirementsV2(),
+        mutations: emptyDebateMysteryMutationsV2(),
+        recordReferences: [],
+        nextNodeIds: [],
+        terminalOutcome: "return_to_room",
+      });
+      graph.lines.push(repeatLine);
+      repeatResponseNodeIdsByTopic[topicNodeId] = [nodeId];
+      changed = true;
+    }
+  }
+  graph.repeatResponseNodeIdsByTopic = repeatResponseNodeIdsByTopic;
 
   for (const line of graph.lines) {
     if (line.speakerKind === "player" && line.speakerBotId !== prosecutorBotId) {
@@ -2248,11 +3540,125 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
   }
   graph.defendantReactionNodeIdsBySeat = defendantReactions;
 
+  const existingTopicById = new Map(publicState.topics.map((topic) => [topic.nodeId, topic]));
+  const gatedTopicIds = new Set((graph.presentationGates ?? []).flatMap((gate) =>
+    gate.unlocks.flatMap((target) => target.kind === "topic" ? [target.topicNodeId] : [])));
+  const normalizedPublicTopics = Object.entries(graph.talkTopicNodeIdsBySuspect).flatMap(
+    ([suspectSeatId, topicNodeIds]) => topicNodeIds.flatMap((topicNodeId) => {
+      const node = nodeById().get(topicNodeId);
+      if (!node?.label) return [];
+      const existing = existingTopicById.get(topicNodeId);
+      const subject = normalizeDebateMysteryTalkSubjectV2({
+        value: node.talkSubject ?? existing?.subject,
+        label: node.label,
+        rooms: subjectRooms,
+        people: subjectPeople,
+      });
+      node.talkSubject = subject;
+      const initiallyEligible =
+        !gatedTopicIds.has(topicNodeId) &&
+        node.requirements.unlockedTopicIds.length === 0 &&
+        node.requirements.discoveryIds.every((id) => publicState.discoveryIds.includes(id)) &&
+        node.requirements.admittedRecordIds.every((id) =>
+          publicState.record.some((item) => item.admitted && mysteryRecordKey(item.reference) === id));
+      return [{
+        nodeId: topicNodeId,
+        suspectSeatId,
+        label: node.label,
+        subject,
+        unlocked: existing?.unlocked === true || existing?.completed === true || initiallyEligible,
+        completed: existing?.completed === true,
+      }];
+    }),
+  );
+  if (JSON.stringify(publicState.topics) !== JSON.stringify(normalizedPublicTopics)) changed = true;
+  publicState.topics = normalizedPublicTopics;
+
+  // Active cases compiled before room introductions gain a finite local reveal
+  // without asking an authoring model to recreate their case. Visited rooms are
+  // intentionally marked complete so an in-progress investigation never loses
+  // access; unvisited suspect rooms receive the deterministic compatibility
+  // reveal and its prepared local voice on the next readiness pass.
+  const roomIntroductions = graph.roomIntroductionNodeIdsByRoom ?? {};
+  const compatibilityAddedRoomIntroductionIds = new Set<string>();
+  for (const suspect of publicState.suspects) {
+    const roomId = suspect.roomId;
+    if (!roomId || roomIntroductions[roomId]) continue;
+    const speakerBotId = botIdBySeat.get(suspect.seatId);
+    if (!speakerBotId) throw new Error(`Frozen suspect ${suspect.seatId} has no bot identity.`);
+    const personaNodeId = uniqueFrozenId(`room-introduction-${roomId}-persona`, usedNodeIds);
+    const casekeeperNodeId = uniqueFrozenId(`room-introduction-${roomId}-casekeeper`, usedNodeIds);
+    const personaLineId = uniqueFrozenId(`line-${personaNodeId}`, usedLineIds);
+    const casekeeperLineId = uniqueFrozenId(`line-${casekeeperNodeId}`, usedLineIds);
+    const relationship = privateCase.actorAccounts.find((account) => account.seatId === suspect.seatId)?.relationship;
+    graph.nodes.push({
+      ...makeNode({
+        id: personaNodeId,
+        lineId: personaLineId,
+        kind: "room_introduction",
+        scene: "investigation",
+        speakerSeatId: suspect.seatId,
+        locationId: roomId,
+      }),
+      terminalOutcome: "return_to_room",
+    });
+    graph.lines.push(makeLine({
+      id: personaLineId,
+      nodeId: personaNodeId,
+      text: `${suspect.name} studies you for a moment. "I knew the victim as ${relationship || "an acquaintance"}. Ask what you came to ask; I will give you the time I had."`,
+      speakerKind: "bot",
+      speakerBotId,
+      mood: "guarded arrival",
+    }));
+    graph.nodes.push({
+      ...makeNode({
+        id: casekeeperNodeId,
+        lineId: casekeeperLineId,
+        kind: "room_introduction",
+        scene: "investigation",
+        locationId: roomId,
+      }),
+      nextNodeIds: [personaNodeId],
+      terminalOutcome: "return_to_room",
+    });
+    graph.lines.push({
+      id: casekeeperLineId,
+      nodeId: casekeeperNodeId,
+      speakerKind: "narrator",
+      speakerBotId: null,
+      stageActionText: null,
+      visibleText: "...",
+      spokenText: "...",
+      performance: performanceDirection(undefined, "silent observation"),
+      mode: "text_only",
+      reusableCalloutKey: null,
+    });
+    graph.interactionRootNodeIds.push(casekeeperNodeId);
+    roomIntroductions[roomId] = { casekeeperNodeId, personaNodeId, suspectSeatId: suspect.seatId };
+    compatibilityAddedRoomIntroductionIds.add(roomId);
+    changed = true;
+  }
+  graph.roomIntroductionNodeIdsByRoom = roomIntroductions;
+  const normalizedRoomIntroductionState = Object.fromEntries(publicState.rooms.map((room) => {
+    const phase = publicState.roomIntroductions?.[room.id];
+    const newlyMigratedUnvisitedRoom = compatibilityAddedRoomIntroductionIds.has(room.id) && !room.visited;
+    return [room.id, newlyMigratedUnvisitedRoom
+      ? "unseen"
+      : phase === "unseen" || phase === "casekeeper" || phase === "persona" || phase === "complete"
+      ? phase
+      : roomIntroductions[room.id] && !room.visited ? "unseen" : "complete"];
+  }));
+  if (JSON.stringify(publicState.roomIntroductions) !== JSON.stringify(normalizedRoomIntroductionState)) changed = true;
+  publicState.roomIntroductions = normalizedRoomIntroductionState;
+
   for (const line of graph.lines) materializeLine(line);
   const validation = validateDebateMysteryDialogueGraphV2({
     graph,
     suspectSeatIds: privateCase.actorAccounts.map((account) => account.seatId),
     recordReferences: privateCase.recordItems.map((item) => item.reference),
+    roomIds: privateCase.investigationRoomIds,
+    personIds: privateCase.investigationPersonIds,
+    hotspotIdsByRoom: privateCase.investigationHotspotIdsByRoom,
     prosecutorBotId,
     rivalDefenseBotId,
     eyewitnessSeatId: privateCase.eyewitnessSeatId,
@@ -2262,6 +3668,8 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
   privateCase.graphValidation = validation;
   if (privateCase.playerRoleContractVersion !== 1) changed = true;
   privateCase.playerRoleContractVersion = 1;
+  if (privateCase.investigationProgressionContractVersion !== 2) changed = true;
+  privateCase.investigationProgressionContractVersion = 2;
 
   const migratedLineById = lineById();
   const migratedNodeById = nodeById();
@@ -2809,7 +4217,7 @@ export async function runDebateMysteryCompilationV2(
   userId: string,
   sessionId: string,
   runtime: DebateAiRuntime,
-  options: { generateWave?: typeof generateBuiltinEnglishWave } = {},
+  options: DebateMysteryCompilationOptionsV2 = {},
 ): Promise<DebateSessionV1> {
   const claimed = claimCompilationJob(db, userId, sessionId);
   if (!claimed) return getDebateSession(db, userId, sessionId);
@@ -2869,6 +4277,31 @@ export async function runDebateMysteryCompilationV2(
           color: bot.color,
           glyph: bot.glyph,
         })),
+        ...(config.mansionBundleId
+          ? {
+              roomBlueprint: getDebateMysteryMansionBundleV2(
+                db,
+                userId,
+                config.mansionBundleId,
+              ).rooms.map((room, index) => ({
+                id: room.id,
+                floor: room.floor,
+                x: room.x,
+                y: room.y,
+                width: room.width,
+                height: room.height,
+                neighborIds: [...room.neighborIds],
+                templateId: room.templateId,
+                imageId: room.imageId,
+                kind: room.assignedSuspectSeatId
+                  ? "suspect" as const
+                  : index === 0
+                    ? "crime_scene" as const
+                    : "search" as const,
+                assignedSuspectSeatId: room.assignedSuspectSeatId,
+              })),
+            }
+          : {}),
       });
       const scaffoldValidation = validateDebateMysteryCaseBible(scaffold, 10_000);
       if (!scaffoldValidation.valid) throw new Error(scaffoldValidation.errors.join("\n"));
@@ -2908,10 +4341,13 @@ export async function runDebateMysteryCompilationV2(
         draft: authoringDraft,
         onDraft: (draft, message) => {
           requireLease();
-          currentJob = updateJob(db, userId, sessionId, {
-            checkpointJson: JSON.stringify(draft),
-            publicMessage: message,
-          });
+          currentJob = persistAuthoringCheckpoint(
+            db,
+            userId,
+            sessionId,
+            draft,
+            message,
+          );
           setPublicCompilationStatus(db, userId, sessionId, currentJob);
         },
       });
@@ -2928,27 +4364,44 @@ export async function runDebateMysteryCompilationV2(
       });
       requireLease();
       storeCompiledCaseV2(db, userId, sessionId, checkpoint.privateCase, checkpoint.graph);
-      currentJob = updateJob(db, userId, sessionId, {
+      currentJob = completeCompilationPass(db, userId, sessionId, {
+        passNumber: 1,
+        key: "pass:writing-case",
         stage: "testing_contradictions",
-        completedPasses: 1,
+        payload: JSON.stringify(checkpoint),
         checkpointJson: JSON.stringify(checkpoint),
       });
       setPublicCompilationStatus(db, userId, sessionId, currentJob);
+    }
+    if (currentJob.completed_passes < 2) {
       const revalidated = validateDebateMysteryDialogueGraphV2({
         graph: checkpoint.graph,
         suspectSeatIds: checkpoint.publicState.suspects.map((suspect) => suspect.seatId),
         recordReferences: checkpoint.privateCase.recordItems.map((item) => item.reference),
+        roomIds: checkpoint.publicState.rooms.map((room) => room.id),
+        personIds: [
+          ...(checkpoint.publicState.victim ? [checkpoint.publicState.victim.id] : []),
+          ...checkpoint.publicState.suspects.map((suspect) => suspect.seatId),
+        ],
+        hotspotIdsByRoom: Object.fromEntries(checkpoint.publicState.rooms.map((room) => [
+          room.id,
+          room.hotspots.map((hotspot) => hotspot.id),
+        ])),
         prosecutorBotId: checkpoint.privateCase.config.prosecutorBotId,
         rivalDefenseBotId: checkpoint.privateCase.config.rivalDefenseBotId,
         eyewitnessSeatId: checkpoint.privateCase.eyewitnessSeatId,
         accusedAlibiSupportDiscoveryIds: checkpoint.privateCase.accusedAlibiSupportDiscoveryIds,
       });
       if (!revalidated.valid) throw new Error(revalidated.errors.join("\n"));
-      currentJob = updateJob(db, userId, sessionId, {
+      currentJob = completeCompilationPass(db, userId, sessionId, {
+        passNumber: 2,
+        key: "pass:testing-contradictions",
         stage: "directing_performances",
-        completedPasses: 2,
+        payload: JSON.stringify(revalidated),
       });
       setPublicCompilationStatus(db, userId, sessionId, currentJob);
+    }
+    if (currentJob.completed_passes < 3) {
       for (const line of checkpoint.graph.lines) {
         if (
           !line.performance.mood.trim() ||
@@ -2956,28 +4409,67 @@ export async function runDebateMysteryCompilationV2(
           !Number.isInteger(line.performance.intensity)
         ) throw new Error(`Line ${line.id} has incomplete performance direction.`);
       }
+      if (checkpoint.privateCase.config.assetSynthesis.evidence && options.prepareEvidenceAssets) {
+        // Prepare every sealed physical exhibit without leaking undiscovered
+        // Case File entries into public state. The image identity is promoted
+        // with the evidence only when its authored discovery admits it.
+        const prepared = unpreparedMysteryV2EvidenceAssets(session, checkpoint);
+        if (prepared.length > 0) {
+          const imageByExhibitId = await options.prepareEvidenceAssets({
+            userId,
+            sessionId,
+            exhibits: prepared,
+            houseStyle: checkpoint.privateCase.config.houseStyle,
+            onPrepared: (exhibitId, imageId) => {
+              checkpoint = withPreparedEvidenceAsset(checkpoint!, exhibitId, imageId);
+              currentJob = persistCompiledSectionCheckpoint(db, userId, sessionId, {
+                key: `section:evidence-asset:${exhibitId}`,
+                stage: "directing_performances",
+                checkpoint: checkpoint!,
+                payload: JSON.stringify({ exhibitId, imageId }),
+              });
+            },
+          });
+          for (const [exhibitId, imageId] of Object.entries(imageByExhibitId)) {
+            checkpoint = withPreparedEvidenceAsset(checkpoint, exhibitId, imageId);
+          }
+        }
+      }
+      currentJob = completeCompilationPass(db, userId, sessionId, {
+        passNumber: 3,
+        key: "pass:directing-performances",
+        stage: "preparing_local_voices",
+        payload: JSON.stringify({
+          graphHash: sha256(JSON.stringify(checkpoint.graph)),
+          evidenceImageIds: checkpoint.publicState.record.flatMap((item) =>
+            item.reference.kind === "evidence" && item.imageId ? [item.imageId] : []),
+        }),
+        checkpointJson: JSON.stringify(checkpoint),
+      });
+      setPublicCompilationStatus(db, userId, sessionId, currentJob);
     }
     localAudioStage = true;
-    currentJob = updateJob(db, userId, sessionId, {
-      stage: "preparing_local_voices",
-      completedPasses: 3,
-    });
-    setPublicCompilationStatus(db, userId, sessionId, currentJob);
-    await prepareLocalAudioPackV2({
-      db,
-      userId,
-      sessionId,
-      graph: checkpoint.graph,
-      privateCase: checkpoint.privateCase,
-      botRows: bots,
-      generateWave: options.generateWave,
-    });
-    requireLease();
-    currentJob = updateJob(db, userId, sessionId, {
-      stage: "verifying_case_audio",
-      completedPasses: 4,
-    });
-    setPublicCompilationStatus(db, userId, sessionId, currentJob);
+    if (currentJob.completed_passes < 4) {
+      const preparedManifest = await prepareLocalAudioPackV2({
+        db,
+        userId,
+        sessionId,
+        graph: checkpoint.graph,
+        privateCase: checkpoint.privateCase,
+        botRows: bots,
+        generateWave: options.generateWave,
+      });
+      requireLease();
+      currentJob = completeCompilationPass(db, userId, sessionId, {
+        passNumber: 4,
+        key: "pass:preparing-local-voices",
+        stage: "verifying_case_audio",
+        payload: JSON.stringify(preparedManifest),
+        preparedAudioCount: preparedManifest.entries.length,
+        requiredAudioCount: preparedManifest.entries.length,
+      });
+      setPublicCompilationStatus(db, userId, sessionId, currentJob);
+    }
     const manifest = loadAudioManifest(db, userId, sessionId);
     if (!manifest) throw new Error("The local audio manifest disappeared before final verification.");
     const audioValidation = validateDebateMysteryAudioManifestV1({
@@ -2987,10 +4479,12 @@ export async function runDebateMysteryCompilationV2(
     });
     if (!audioValidation.valid) throw new Error(audioValidation.errors.join("\n"));
     if (leaseLost) throw new Error("The durable compilation lease moved to another worker.");
-    currentJob = updateJob(db, userId, sessionId, {
+    currentJob = completeCompilationPass(db, userId, sessionId, {
+      passNumber: 5,
+      key: "pass:verifying-case-audio",
       stage: "complete",
+      payload: JSON.stringify(audioValidation),
       status: "complete",
-      completedPasses: 5,
       preparedAudioCount: manifest.entries.length,
       requiredAudioCount: manifest.entries.length,
       privateError: null,
@@ -3005,7 +4499,7 @@ export async function runDebateMysteryCompilationV2(
     });
     return setPublicCompilationStatus(db, userId, sessionId, currentJob, {
       ...checkpoint.publicState,
-      compilation: compilationStatus(currentJob),
+      compilation: compilationStatus(db, currentJob),
       playPhase: "title_card",
       caseTitle: checkpoint.publicState.caseTitle,
       readiness: {
@@ -3045,7 +4539,8 @@ export async function retryDebateMysteryCompilationV2(
   sessionId: string,
   runtime: DebateAiRuntime,
   options: {
-    generateWave?: typeof generateBuiltinEnglishWave;
+    generateWave?: DebateMysteryCompilationOptionsV2["generateWave"];
+    prepareEvidenceAssets?: DebateMysteryCompilationOptionsV2["prepareEvidenceAssets"];
     deferBackgroundStart?: boolean;
   } = {},
 ): Promise<DebateSessionV1> {
@@ -3057,9 +4552,15 @@ export async function retryDebateMysteryCompilationV2(
   }
   const storedCheckpoint = row.checkpoint_json ? JSON.parse(row.checkpoint_json) as unknown : null;
   const hasCompiledCheckpoint = isMysteryV2CompiledCheckpoint(storedCheckpoint);
-  const retryStage: DebateMysteryCompilationStageV2 = hasCompiledCheckpoint
-    ? "preparing_local_voices"
-    : "writing_case";
+  const retryStage: DebateMysteryCompilationStageV2 = !hasCompiledCheckpoint
+    ? "writing_case"
+    : row.completed_passes <= 1
+      ? "testing_contradictions"
+      : row.completed_passes === 2
+        ? "directing_performances"
+        : row.completed_passes === 3
+          ? "preparing_local_voices"
+          : "verifying_case_audio";
   db.prepare(
     `UPDATE debate_mystery_v2_jobs
         SET status = 'queued', stage = ?, public_message = ?,
@@ -3083,6 +4584,7 @@ export async function retryDebateMysteryCompilationV2(
     queueMicrotask(() => {
       void runDebateMysteryCompilationV2(db, userId, sessionId, runtime, {
         generateWave: options.generateWave,
+        prepareEvidenceAssets: options.prepareEvidenceAssets,
       }).catch(() => {
         // The durable job records its spoiler-safe failure state.
       });
@@ -3098,7 +4600,7 @@ export function cancelDebateMysteryCompilationV2(
 ): DebateMysteryCompilationStatusV2 {
   const row = jobRow(db, userId, sessionId);
   if (row.status === "complete") throw new HttpError(409, "A completed case cannot be cancelled.");
-  if (row.status === "cancelled") return compilationStatus(row);
+  if (row.status === "cancelled") return compilationStatus(db, row);
   db.prepare(
     `UPDATE debate_mystery_v2_jobs
         SET cancellation_requested = 1,
@@ -3108,7 +4610,7 @@ export function cancelDebateMysteryCompilationV2(
             updated_at = ?
       WHERE user_id = ? AND session_id = ?`,
   ).run(V2_SPOILER_SAFE_MESSAGES.cancelled, new Date().toISOString(), userId, sessionId);
-  return compilationStatus(jobRow(db, userId, sessionId));
+  return compilationStatus(db, jobRow(db, userId, sessionId));
 }
 
 export function continueDebateMysteryV2WithoutVoices(
@@ -3157,7 +4659,7 @@ export function continueDebateMysteryV2WithoutVoices(
   });
   return setPublicCompilationStatus(db, userId, sessionId, complete, {
     ...checkpoint.publicState,
-    compilation: compilationStatus(complete),
+    compilation: compilationStatus(db, complete),
     playPhase: "title_card",
     readiness: {
       version: DEBATE_MYSTERY_PLAY_READINESS_VERSION,
@@ -3632,6 +5134,9 @@ export function importDebateMysteryV2BackupV1(
       graph,
       suspectSeatIds: privateCase.actorAccounts.map((account) => account.seatId),
       recordReferences: privateCase.recordItems.map((item) => item.reference),
+      roomIds: privateCase.investigationRoomIds,
+      personIds: privateCase.investigationPersonIds,
+      hotspotIdsByRoom: privateCase.investigationHotspotIdsByRoom,
       eyewitnessSeatId: privateCase.eyewitnessSeatId,
       accusedAlibiSupportDiscoveryIds: privateCase.accusedAlibiSupportDiscoveryIds,
     });
@@ -3792,34 +5297,48 @@ export function resolveDebateMysteryTalkExchangeV2(
   graph: DebateMysteryDialogueGraphV2,
   topicNodeId: string,
   suspectSeatId: string,
+  repeatOrdinal = 0,
 ): { questionNodeId: string | null; responseNodeId: string } | null {
   const topicNode = graph.nodes.find((entry) => entry.id === topicNodeId);
   if (topicNode?.kind !== "talk_topic" || !topicNode.lineId) return null;
+  let questionNodeId: string | null = null;
+  let responseNode: DebateMysteryDialogueNodeV2 | undefined;
 
   // Cases frozen before prosecution questions became their own authored line
   // store the suspect response directly on the public Talk topic node.
   if (topicNode.speakerSeatId === suspectSeatId) {
-    return { questionNodeId: null, responseNodeId: topicNode.id };
-  }
-
-  if (
+    responseNode = topicNode;
+  } else if (
     topicNode.speakerSeatId !== null ||
     topicNode.intendedRecipientSeatId !== suspectSeatId ||
     graph.lines.find((line) => line.id === topicNode.lineId)?.speakerKind !== "player"
   ) {
     return null;
+  } else {
+    questionNodeId = topicNode.id;
+    responseNode = topicNode.nextNodeIds
+      .map((nodeId) => graph.nodes.find((entry) => entry.id === nodeId))
+      .find((node) => {
+        if (node?.kind !== "talk_topic" || node.speakerSeatId !== suspectSeatId || !node.lineId) {
+          return false;
+        }
+        return graph.lines.find((line) => line.id === node.lineId)?.speakerKind === "bot";
+      });
   }
-  const responseNode = topicNode.nextNodeIds
-    .map((nodeId) => graph.nodes.find((entry) => entry.id === nodeId))
-    .find((node) => {
-      if (node?.kind !== "talk_topic" || node.speakerSeatId !== suspectSeatId || !node.lineId) {
-        return false;
-      }
-      return graph.lines.find((line) => line.id === node.lineId)?.speakerKind === "bot";
-    });
-  return responseNode
-    ? { questionNodeId: topicNode.id, responseNodeId: responseNode.id }
-    : null;
+  if (!responseNode) return null;
+  if (repeatOrdinal > 0) {
+    const repeatNodeIds = graph.repeatResponseNodeIdsByTopic?.[topicNodeId] ?? [];
+    const repeatNode = repeatNodeIds.length
+      ? graph.nodes.find((node) => node.id === repeatNodeIds[(repeatOrdinal - 1) % repeatNodeIds.length])
+      : null;
+    if (
+      repeatNode?.kind === "talk_topic" &&
+      repeatNode.speakerSeatId === suspectSeatId &&
+      repeatNode.lineId &&
+      graph.lines.find((line) => line.id === repeatNode.lineId)?.speakerKind === "bot"
+    ) return { questionNodeId, responseNodeId: repeatNode.id };
+  }
+  return { questionNodeId, responseNodeId: responseNode.id };
 }
 
 function replayV2Mutation(
@@ -3891,7 +5410,11 @@ function executeDialogueNodeV2(args: {
   }
   const topics = args.state.topics.map((topic) => ({ ...topic }));
   for (const topicNodeId of node.mutations.unlockTopicIds) {
-    if (topics.some((topic) => topic.nodeId === topicNodeId)) continue;
+    const existingTopic = topics.find((topic) => topic.nodeId === topicNodeId);
+    if (existingTopic) {
+      existingTopic.unlocked = true;
+      continue;
+    }
     const topicNode = args.graph.nodes.find((candidate) => candidate.id === topicNodeId);
     const suspectSeatId = topicNode?.intendedRecipientSeatId ?? topicNode?.speakerSeatId ?? null;
     if (!topicNode?.label || !suspectSeatId) continue;
@@ -3899,6 +5422,15 @@ function executeDialogueNodeV2(args: {
       nodeId: topicNode.id,
       suspectSeatId,
       label: topicNode.label,
+      subject: topicNode.talkSubject ?? normalizeDebateMysteryTalkSubjectV2({
+        value: null,
+        label: topicNode.label,
+        rooms: args.state.rooms.map((room) => ({ id: room.id, name: room.name })),
+        people: [
+          ...(args.state.victim ? [{ id: args.state.victim.id, name: args.state.victim.name }] : []),
+          ...args.state.suspects.map((suspect) => ({ id: suspect.seatId, name: suspect.name })),
+        ],
+      }),
       unlocked: true,
       completed: false,
     });
@@ -3912,7 +5444,12 @@ function executeDialogueNodeV2(args: {
     dialogueHistory: line
       ? [...args.state.dialogueHistory, {
           nodeId: node.id,
-          lineId: line.id,
+          // Examination is a written observation, never a performed line. Keep
+          // this true for frozen V2 graphs too, without regenerating their packs.
+          lineId: node.kind === "examination_result" ? null : line.id,
+          delivery: node.kind === "examination_result" || line.mode === "text_only"
+            ? "text_only"
+            : "spoken",
           stageActionText: line.stageActionText,
           visibleText: line.visibleText,
           speakerSeatId: node.speakerSeatId,
@@ -3920,6 +5457,99 @@ function executeDialogueNodeV2(args: {
           occurredAt: now,
         }]
       : args.state.dialogueHistory,
+  };
+}
+
+function applyDebateMysteryPresentationGatesV2(args: {
+  state: DebateWhodunnitFormatStateV2;
+  graph: DebateMysteryDialogueGraphV2;
+  privateCase: PrivateMysteryCaseV2;
+  suspectSeatId: string;
+  record: DebateMysteryRecordReferenceV2;
+  presentNodeId: string;
+}): DebateWhodunnitFormatStateV2 {
+  const recordKey = mysteryRecordKey(args.record);
+  const gates = (args.graph.presentationGates ?? []).filter((gate) =>
+    gate.requiredSuspectSeatId === args.suspectSeatId &&
+    mysteryRecordKey(gate.requiredRecord) === recordKey &&
+    gate.correctPresentNodeId === args.presentNodeId);
+  if (!gates.length) return args.state;
+
+  const now = new Date().toISOString();
+  const rooms = args.state.rooms.map((room) => ({
+    ...room,
+    hotspots: room.hotspots.map((hotspot) => ({ ...hotspot })),
+  }));
+  const topics = args.state.topics.map((topic) => ({ ...topic }));
+  const records = args.state.record.map((item) => ({ ...item, reference: { ...item.reference } }));
+  const discoveries = new Set(args.state.discoveryIds);
+  const subjectRooms = rooms.map((room) => ({ id: room.id, name: room.name }));
+  const subjectPeople = [
+    ...(args.state.victim ? [{ id: args.state.victim.id, name: args.state.victim.name }] : []),
+    ...args.state.suspects.map((suspect) => ({ id: suspect.seatId, name: suspect.name })),
+  ];
+
+  for (const gate of gates) {
+    for (const target of gate.unlocks) {
+      if (target.kind === "topic") {
+        const existing = topics.find((topic) => topic.nodeId === target.topicNodeId);
+        if (existing) {
+          existing.unlocked = true;
+          continue;
+        }
+        const node = args.graph.nodes.find((candidate) => candidate.id === target.topicNodeId);
+        const suspectSeatId = node?.intendedRecipientSeatId ?? null;
+        if (!node?.label || !suspectSeatId) continue;
+        topics.push({
+          nodeId: node.id,
+          suspectSeatId,
+          label: node.label,
+          subject: node.talkSubject ?? normalizeDebateMysteryTalkSubjectV2({
+            value: null,
+            label: node.label,
+            rooms: subjectRooms,
+            people: subjectPeople,
+          }),
+          unlocked: true,
+          completed: false,
+        });
+      } else if (target.kind === "room") {
+        const room = rooms.find((candidate) => candidate.id === target.roomId);
+        if (room) room.unlocked = true;
+      } else if (target.kind === "hotspot") {
+        const hotspot = rooms
+          .find((room) => room.id === target.roomId)
+          ?.hotspots.find((candidate) => candidate.id === target.hotspotId);
+        if (hotspot) hotspot.unlocked = true;
+      } else if (target.kind === "location_discovery") {
+        discoveries.add(target.discoveryId);
+      } else if (target.kind === "record_discovery" || target.kind === "record_description") {
+        const targetKey = mysteryRecordKey(target.record);
+        const existing = records.find((item) => mysteryRecordKey(item.reference) === targetKey);
+        const frozen = args.privateCase.recordItems.find((item) =>
+          mysteryRecordKey(item.reference) === targetKey);
+        if (!frozen) throw new HttpError(409, "The authored presentation unlock references a missing Case File item.");
+        if (existing) {
+          existing.admitted = true;
+          existing.updatedAt = now;
+          if (target.kind === "record_description") existing.description = target.description;
+        } else {
+          records.push({
+            ...frozen,
+            description: target.kind === "record_description" ? target.description : frozen.description,
+            admitted: true,
+            updatedAt: now,
+          });
+        }
+      }
+    }
+  }
+  return {
+    ...args.state,
+    rooms,
+    topics,
+    record: records,
+    discoveryIds: [...discoveries],
   };
 }
 
@@ -3983,7 +5613,11 @@ function enterWitnessChapterV2(args: {
     pendingProsecutionChoice: null,
     court: {
       witnessOrder: [...args.graph.witnessChapters].sort((a, b) => a.ordinal - b.ordinal).map((chapter) => chapter.id),
-      defendantSeatId: args.state.theory?.culpritSeatId ?? null,
+      defendantSeatId:
+        args.state.theory?.culpritSeatId ??
+        (args.state.config.investigationMode === "court_only"
+          ? args.privateCase.sealedCulpritSeatId
+          : null),
       completedChapterIds: args.state.court?.completedChapterIds ?? [],
       activeChapterId: args.chapter.id,
       activeStatementId: args.chapter.initialStatementIds[0] ?? null,
@@ -4193,6 +5827,57 @@ function prepareSpectatorTheoryV2(args: {
     court: null,
     pendingProsecutionChoice: null,
   };
+}
+
+function prepareCourtOnlyTrialV2(args: {
+  state: DebateWhodunnitFormatStateV2;
+  graph: DebateMysteryDialogueGraphV2;
+  privateCase: PrivateMysteryCaseV2;
+}): DebateWhodunnitFormatStateV2 {
+  const accused = args.state.suspects.find(
+    (suspect) => suspect.seatId === args.privateCase.sealedCulpritSeatId,
+  );
+  if (!accused) throw new HttpError(409, "The court filing has no valid defendant.");
+  const admittedReferences = debateMysterySpectatorEvidenceReferencesV2(args.graph);
+  const admittedKeys = new Set(admittedReferences.map(mysteryRecordKey));
+  const now = new Date().toISOString();
+  const record = args.privateCase.recordItems.flatMap((item) =>
+    item.reference.kind === "evidence" && admittedKeys.has(mysteryRecordKey(item.reference))
+      ? [{ ...item, admitted: true, updatedAt: now }]
+      : [],
+  );
+  if (!record.length) {
+    throw new HttpError(409, "The court-only case has no admissible prosecution record.");
+  }
+  const firstChapter = [...args.graph.witnessChapters]
+    .sort((a, b) => a.ordinal - b.ordinal)[0];
+  if (!firstChapter) throw new HttpError(409, "The authored court has no witnesses.");
+  let state: DebateWhodunnitFormatStateV2 = {
+    ...args.state,
+    rooms: [],
+    currentRoomId: null,
+    roomView: "mansion",
+    roomIntroductions: {},
+    topics: [],
+    discoveryIds: ["court:ready"],
+    metSuspectSeatIds: args.state.suspects.map((suspect) => suspect.seatId),
+    record,
+    theoryAvailable: true,
+    theory: {
+      culpritSeatId: accused.seatId,
+      accompliceSeatId: null,
+      method: args.privateCase.method,
+      motive: args.privateCase.motive,
+      opportunity: "The admitted prosecution record places the defendant within the fatal timeline and supplies the statement-level contradictions for trial.",
+      evidenceIds: admittedReferences.map((reference) => reference.id),
+      testimonyIds: [],
+    },
+    theoryFiledAt: now,
+    court: null,
+    pendingProsecutionChoice: null,
+  };
+  state = enterWitnessChapterV2({ state, graph: args.graph, privateCase: args.privateCase, chapter: firstChapter });
+  return addCallouts(state, ["order"], null);
 }
 
 function advanceSpectatorTrialV2(args: {
@@ -4432,11 +6117,12 @@ export function applyDebateMysteryActionV2(
   const { privateCase, graph } = getDebateMysteryCaseV2(db, userId, sessionId);
   let state = structuredClone(session.formatState);
   const spectator = state.config.playerRole === "spectator";
+  const courtOnly = state.config.investigationMode === "court_only";
   if (
     spectator &&
     !(
       (request.action === "move" && state.playPhase === "title_card" && !request.roomId) ||
-      (request.action === "file_theory" && state.playPhase === "theory") ||
+      (!courtOnly && request.action === "file_theory" && state.playPhase === "theory") ||
       (request.action === "advance_spectator_trial" && state.playPhase === "trial")
     )
   ) {
@@ -4447,12 +6133,14 @@ export function applyDebateMysteryActionV2(
   }
   const publicPayload: Record<string, unknown> = { action: request.action };
   if (request.action === "move") {
-    if (state.playPhase === "title_card" && spectator) {
+    if (state.playPhase === "title_card" && courtOnly) {
+      state = prepareCourtOnlyTrialV2({ state, graph, privateCase });
+    } else if (state.playPhase === "title_card" && spectator) {
       state = prepareSpectatorTheoryV2({ state, graph, privateCase });
     } else if (state.playPhase === "title_card") {
       state.playPhase = "investigation";
     }
-    if (!spectator) {
+    if (!spectator && !courtOnly) {
       if (state.playPhase !== "investigation") {
         throw new HttpError(409, "Mansion movement is unavailable right now.");
       }
@@ -4464,13 +6152,44 @@ export function applyDebateMysteryActionV2(
         room.visited = true;
         state.currentRoomId = room.id;
         state.roomView = "room";
+        const introduction = graph.roomIntroductionNodeIdsByRoom?.[room.id];
+        if (introduction && state.roomIntroductions[room.id] === "unseen") {
+          state = executeDialogueNodeV2({
+            state,
+            graph,
+            privateCase,
+            nodeId: introduction.casekeeperNodeId,
+          });
+          state.roomIntroductions = { ...state.roomIntroductions, [room.id]: "casekeeper" };
+        }
       }
     }
+  } else if (request.action === "advance_room_introduction") {
+    if (state.playPhase !== "investigation" || state.roomView !== "room" || state.currentRoomId !== request.roomId) {
+      throw new HttpError(409, "Enter this room before continuing its introduction.");
+    }
+    const introduction = graph.roomIntroductionNodeIdsByRoom?.[request.roomId];
+    if (!introduction || state.roomIntroductions[request.roomId] !== "casekeeper") {
+      throw new HttpError(409, "That room introduction is not waiting for the Casekeeper beat.");
+    }
+    state = executeDialogueNodeV2({ state, graph, privateCase, nodeId: introduction.personaNodeId });
+    state.roomIntroductions = { ...state.roomIntroductions, [request.roomId]: "persona" };
+  } else if (request.action === "complete_room_introduction") {
+    if (state.playPhase !== "investigation" || state.roomView !== "room" || state.currentRoomId !== request.roomId) {
+      throw new HttpError(409, "Enter this room before completing its introduction.");
+    }
+    if (state.roomIntroductions[request.roomId] !== "persona") {
+      throw new HttpError(409, "That room introduction is not currently performing.");
+    }
+    state.roomIntroductions = { ...state.roomIntroductions, [request.roomId]: "complete" };
   } else if (request.action === "examine") {
     if (state.playPhase !== "investigation" || state.currentRoomId !== request.roomId || state.roomView !== "room") {
       throw new HttpError(409, "Enter this room before examining it.");
     }
     const room = state.rooms.find((entry) => entry.id === request.roomId);
+    if (state.roomIntroductions[request.roomId] && state.roomIntroductions[request.roomId] !== "complete") {
+      throw new HttpError(409, "Let the room introduction finish before examining it.");
+    }
     const hotspot = room?.hotspots.find((entry) => entry.id === request.hotspotId);
     if (!hotspot?.unlocked) throw new HttpError(409, "That examination point is locked.");
     if (hotspot.examined) throw new HttpError(409, "That examination point is already in the record.");
@@ -4484,9 +6203,20 @@ export function applyDebateMysteryActionV2(
     }
     const suspect = state.suspects.find((entry) => entry.seatId === request.suspectSeatId);
     if (!suspect || suspect.roomId !== state.currentRoomId) throw new HttpError(409, "That suspect is not in this room.");
+    if (state.currentRoomId && state.roomIntroductions[state.currentRoomId] && state.roomIntroductions[state.currentRoomId] !== "complete") {
+      throw new HttpError(409, "Let the room introduction finish before questioning the suspect.");
+    }
     const topic = state.topics.find((entry) => entry.nodeId === request.topicNodeId && entry.suspectSeatId === suspect.seatId);
     if (!topic?.unlocked) throw new HttpError(409, "That Talk topic has not unlocked.");
-    const exchange = resolveDebateMysteryTalkExchangeV2(graph, topic.nodeId, suspect.seatId);
+    const repeatOrdinal = topic.completed
+      ? Math.max(1, state.dialogueHistory.filter((entry) => entry.nodeId === topic.nodeId).length)
+      : 0;
+    const exchange = resolveDebateMysteryTalkExchangeV2(
+      graph,
+      topic.nodeId,
+      suspect.seatId,
+      repeatOrdinal,
+    );
     if (!exchange) {
       throw new HttpError(409, "That authored Talk response is unavailable.");
     }
@@ -4512,18 +6242,28 @@ export function applyDebateMysteryActionV2(
     }
     const suspect = state.suspects.find((entry) => entry.seatId === request.suspectSeatId);
     if (!suspect || suspect.roomId !== state.currentRoomId) throw new HttpError(409, "That suspect is not in this room.");
+    if (state.currentRoomId && state.roomIntroductions[state.currentRoomId] && state.roomIntroductions[state.currentRoomId] !== "complete") {
+      throw new HttpError(409, "Let the room introduction finish before presenting the Case File.");
+    }
     const recordKey = mysteryRecordKey(request.record);
     if (!state.record.some((item) => item.admitted && mysteryRecordKey(item.reference) === recordKey)) {
       throw new HttpError(409, "That item is not admitted to the Case File.");
     }
-    const nodeId = privateCase.presentNodeIdBySuspectRecord[`${suspect.seatId}:${recordKey}`]
-      ?? privateCase.defaultPresentNodeIdBySuspect[suspect.seatId];
-    if (!nodeId) throw new HttpError(404, "That authored Present exchange is unavailable.");
+    const nodeId = privateCase.presentNodeIdBySuspectRecord[`${suspect.seatId}:${recordKey}`];
+    if (!nodeId) throw new HttpError(409, "That admitted record has no matching finite Present exchange.");
     state = executeDialogueNodeV2({ state, graph, privateCase, nodeId });
     const responseNodeId = graph.nodes.find((node) => node.id === nodeId)?.nextNodeIds[0];
     if (responseNodeId) {
       state = executeDialogueNodeV2({ state, graph, privateCase, nodeId: responseNodeId });
     }
+    state = applyDebateMysteryPresentationGatesV2({
+      state,
+      graph,
+      privateCase,
+      suspectSeatId: suspect.seatId,
+      record: request.record,
+      presentNodeId: nodeId,
+    });
   } else if (request.action === "review_strategy") {
     if (spectator) throw new HttpError(409, "Spectator mode uses the automated Prosecutor route.");
     if (state.playPhase !== "investigation" && state.playPhase !== "trial") {

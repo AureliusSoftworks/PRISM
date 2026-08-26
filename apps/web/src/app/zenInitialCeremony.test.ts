@@ -69,6 +69,18 @@ test("the Zen setting defaults off and retains the player's preference", () => {
   assert.match(page, /!personaBot \? \(/);
   assert.match(page, /data-zen-initial-loading-screen/);
   assert.match(page, /showThinkingSpinner/);
+  const initialLoadingScreenRule = css.match(
+    /\.zenInitialLoadingScreen \{([^}]*)\}/u,
+  )?.[1];
+  assert.ok(initialLoadingScreenRule);
+  assert.match(
+    initialLoadingScreenRule,
+    /color: var\(--bot-ink, var\(--bot-color, var\(--fg\)\)\);/u,
+  );
+  assert.doesNotMatch(
+    initialLoadingScreenRule,
+    /(?:background|border|box-shadow):/u,
+  );
   assert.match(page, /initialZenOpeningTurn: isInitialZenOpeningTurn/);
   assert.match(page, /conversationId: requestConversationId/);
   assert.match(page, /progressiveZenVoice: false/);

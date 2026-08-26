@@ -299,7 +299,12 @@ import {
   getDebateMysteryCompilationStatusV2,
   retryDebateMysteryCompilationV2,
   runDebateMysteryCompilationV2,
+  type DebateMysteryEvidenceAssetPreparationV2,
 } from "./debate-mystery-v2.ts";
+import {
+  listDebateMysteryMansionBundlesV2,
+  saveDebateMysteryMansionBundleV2,
+} from "./debate-mystery-mansion-bundles.ts";
 import {
   buildSignalLiveBakeArtifactFromEpisode,
   debateSessionSupportsFullBake,
@@ -358,7 +363,9 @@ import {
   castBotcastShowRecoveryHost,
   chatWithBotcastShowHost,
   createBotcastShow,
+  createBotcastStagePreset,
   deleteBotcastShow,
+  deleteBotcastStagePreset,
   deleteBotcastShowIntroAudio,
   endBotcastEpisodeOnProducerCut,
   recordBotcastProducerCutAudienceHandoff,
@@ -381,6 +388,7 @@ import {
   getBotcastShow,
   linkBotcastEpisodeImageAsset,
   listBotcastEpisodes,
+  listBotcastStagePresets,
   listBotcastShows,
   persistCompletedBotcastPairHistory,
   projectBotcastAdvanceResponseForAudienceV1,
@@ -405,6 +413,7 @@ import {
   storeBotcastShowIntroAudio,
   refreshBotcastShowLocalIdent,
   undoBotcastShowAudioPackage,
+  applyBotcastStagePreset,
   updateBotcastShow,
 } from "./botcast.ts";
 import {
@@ -7648,6 +7657,9 @@ async function deleteUserAccount(userId: string): Promise<void> {
     db.prepare("DELETE FROM conversation_exports WHERE user_id = ?").run(
       userId,
     );
+    db.prepare(
+      "DELETE FROM debate_mystery_mansion_bundles WHERE user_id = ?",
+    ).run(userId);
     db.prepare("DELETE FROM images WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM bots WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM memory_summaries WHERE user_id = ?").run(userId);
@@ -9217,13 +9229,104 @@ async function generateDebateMysteryAssetWithSlot(args: {
   }
 }
 
+/** Canonical Debate exhibit synthesis for Whodunnit V2. The frozen house
+ * contract adds case-specific continuity without changing evidence facts. */
+async function prepareDebateMysteryV2EvidenceAssets(
+  args: DebateMysteryEvidenceAssetPreparationV2,
+): Promise<Record<string, string>> {
+  const session = getDebateSession(db, args.userId, args.sessionId);
+  if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
+    throw new HttpError(409, "Evidence preparation requires a Whodunnit V2 case.");
+  }
+  if (session.status === "cancelled") {
+    throw new HttpError(409, "That case is no longer available.");
+  }
+  const user = getUserRow(args.userId);
+  const selection = resolveTypedAssetGenerationSelection(
+    args.userId,
+    "debate_exhibit",
+    {},
+  );
+  const offlineOnly =
+    session.responseMode === "local" || userBlocksOnlineCapabilities(user);
+  const preferredProvider: ImageProviderName = offlineOnly
+    ? "local"
+    : selection.provider;
+  const relatedBotIds = [
+    ...session.formatState.config.suspectBotIds,
+    session.formatState.config.prosecutorBotId,
+    session.formatState.config.rivalDefenseBotId,
+  ];
+  const fallbackController = new AbortController();
+  const signal = args.signal ?? fallbackController.signal;
+  const imageByExhibitId: Record<string, string> = {};
+  for (const exhibit of args.exhibits) {
+    if (exhibit.imageId) continue;
+    try {
+      const imageId = await generateDebateMysteryAssetWithSlot({
+        userId: args.userId,
+        sessionId: args.sessionId,
+        title: exhibit.title,
+        prompt: [
+          buildDebateExhibitSpritePrompt(exhibit),
+          args.houseStyle.promptContract,
+          "The object remains presentation-only: do not add clues, labels, symbols, surroundings, or facts beyond its frozen title.",
+        ].join(" "),
+        preferredProvider,
+        requestedImageModel: selection.model,
+        offlineOnly,
+        size: "1024x1024",
+        purpose: DEBATE_EXHIBIT_IMAGE_PURPOSE,
+        relatedBotIds,
+        signal,
+        normalizeImageBytes: async (imageBytes) =>
+          (await normalizeGeneratedDebateExhibitImage(imageBytes)).pngBytes,
+      });
+      imageByExhibitId[exhibit.id] = imageId;
+      await args.onPrepared?.(exhibit.id, imageId);
+    } catch (error) {
+      if (signal.aborted) throw error;
+      console.warn("[debate-mystery-v2] evidence art retained emoji fallback", {
+        sessionId: args.sessionId,
+        exhibitId: exhibit.id,
+        reason: error instanceof Error ? error.message : "generation failed",
+      });
+    }
+  }
+  return imageByExhibitId;
+}
+
 async function prepareDebateMysteryGeneratedAssets(args: {
   userId: string;
   sessionId: string;
   signal: AbortSignal;
 }): Promise<ReturnType<typeof getDebateSession>> {
   const session = getDebateSession(db, args.userId, args.sessionId);
-  if (session.formatState.format !== "whodunnit" || session.formatState.config.artMode !== "generated") return session;
+  if (session.formatState.format !== "whodunnit") return session;
+  if (session.formatState.version === 2) {
+    const state = session.formatState;
+    const exhibits = (session.evidence.exhibits ?? []).filter((exhibit) => !exhibit.imageId);
+    if (exhibits.length === 0) return session;
+    const imageByExhibitId = await prepareDebateMysteryV2EvidenceAssets({
+      userId: args.userId,
+      sessionId: args.sessionId,
+      exhibits,
+      houseStyle: state.config.houseStyle,
+      signal: args.signal,
+    });
+    let updated = session;
+    for (const [exhibitId, imageId] of Object.entries(imageByExhibitId)) {
+      updated = attachDebateExhibitSprite(
+        db,
+        args.userId,
+        args.sessionId,
+        exhibitId,
+        imageId,
+      );
+    }
+    return updated;
+  }
+  if (session.formatState.config.artMode !== "generated") return session;
   const bible = getDebateMysteryCaseBible(db, args.userId, args.sessionId);
   const user = getUserRow(args.userId);
   const selection = resolveTypedAssetGenerationSelection(args.userId, "debate_exhibit", {});
@@ -17352,6 +17455,7 @@ function buildRoutes(): RouteDefinition[] {
               body.whodunnit as Parameters<typeof createDebateMysterySessionV2>[2],
               body.idempotencyKey,
               runtime,
+              { prepareEvidenceAssets: prepareDebateMysteryV2EvidenceAssets },
             ),
           )
         : body.format === "whodunnit"
@@ -17407,6 +17511,22 @@ function buildRoutes(): RouteDefinition[] {
       } finally {
         ctx.req.off("aborted", onAborted);
       }
+    }),
+    route("GET", "/api/debates/mystery-mansions", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        mansions: listDebateMysteryMansionBundlesV2(db, userId),
+      });
+    }),
+    route("POST", "/api/debates/:id/mystery-mansion/save", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const mansion = saveDebateMysteryMansionBundleV2(
+        db,
+        userId,
+        ctx.params.id,
+      );
+      json(ctx.res, 201, { ok: true, mansion });
     }),
     route("POST", "/api/debates/mystery-seed/inspect", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -17555,7 +17675,9 @@ function buildRoutes(): RouteDefinition[] {
               mode: "debate",
               surface: "debate",
             },
-            () => runDebateMysteryCompilationV2(db, userId, ctx.params.id, runtime),
+            () => runDebateMysteryCompilationV2(db, userId, ctx.params.id, runtime, {
+              prepareEvidenceAssets: prepareDebateMysteryV2EvidenceAssets,
+            }),
           )
         : await runWithUsageSession(
         {
@@ -17603,7 +17725,9 @@ function buildRoutes(): RouteDefinition[] {
           mode: "debate",
           surface: "debate",
         },
-        () => retryDebateMysteryCompilationV2(db, userId, ctx.params.id, runtime),
+        () => retryDebateMysteryCompilationV2(db, userId, ctx.params.id, runtime, {
+          prepareEvidenceAssets: prepareDebateMysteryV2EvidenceAssets,
+        }),
       );
       json(ctx.res, 200, { ok: true, session: debateSessionForPlayer(session) });
     }),
@@ -19381,6 +19505,33 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/botcast/shows", async (ctx) => {
       const userId = requireAuth(ctx);
       json(ctx.res, 200, { ok: true, shows: listBotcastShows(db, userId) });
+    }),
+    route("GET", "/api/botcast/stage-presets", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, { ok: true, presets: listBotcastStagePresets(db, userId) });
+    }),
+    route("POST", "/api/botcast/stage-presets", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const preset = createBotcastStagePreset(db, userId, {
+        name: body.name,
+        settings: body.settings,
+      });
+      json(ctx.res, 201, { ok: true, preset });
+    }),
+    route("POST", "/api/botcast/stage-presets/:id/apply", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      if (typeof body.showId !== "string" || !body.showId.trim()) {
+        throw new HttpError(400, "Choose a Signal show to apply this stage preset.");
+      }
+      const show = applyBotcastStagePreset(db, userId, body.showId, ctx.params.id);
+      json(ctx.res, 200, { ok: true, show });
+    }),
+    route("DELETE", "/api/botcast/stage-presets/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      deleteBotcastStagePreset(db, userId, ctx.params.id);
+      json(ctx.res, 200, { ok: true });
     }),
     route("POST", "/api/botcast/shows", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -31940,12 +32091,29 @@ function buildRoutes(): RouteDefinition[] {
         filterBotId
           ? db
               .prepare(
-                `SELECT id, local_rel_path FROM images WHERE user_id = ? AND ${IMAGE_BOT_MEMBERSHIP_SQL} AND ${GENERAL_IMAGE_LIBRARY_SQL}`,
+                `SELECT id, local_rel_path FROM images
+                  WHERE user_id = ?
+                    AND ${IMAGE_BOT_MEMBERSHIP_SQL}
+                    AND ${GENERAL_IMAGE_LIBRARY_SQL}
+                    AND NOT EXISTS (
+                      SELECT 1
+                        FROM debate_mystery_mansion_bundle_assets AS mansion_assets
+                       WHERE mansion_assets.user_id = images.user_id
+                         AND mansion_assets.image_id = images.id
+                    )`,
               )
               .all(userId, filterBotId, filterBotId)
           : db
               .prepare(
-                `SELECT id, local_rel_path FROM images WHERE user_id = ? AND ${GENERAL_IMAGE_LIBRARY_SQL}`,
+                `SELECT id, local_rel_path FROM images
+                  WHERE user_id = ?
+                    AND ${GENERAL_IMAGE_LIBRARY_SQL}
+                    AND NOT EXISTS (
+                      SELECT 1
+                        FROM debate_mystery_mansion_bundle_assets AS mansion_assets
+                       WHERE mansion_assets.user_id = images.user_id
+                         AND mansion_assets.image_id = images.id
+                    )`,
               )
               .all(userId)
       ) as Array<{ id: string; local_rel_path: string | null }>;
@@ -31955,11 +32123,28 @@ function buildRoutes(): RouteDefinition[] {
       }
       if (filterBotId) {
         db.prepare(
-          `DELETE FROM images WHERE user_id = ? AND ${IMAGE_BOT_MEMBERSHIP_SQL} AND ${GENERAL_IMAGE_LIBRARY_SQL}`,
+          `DELETE FROM images
+            WHERE user_id = ?
+              AND ${IMAGE_BOT_MEMBERSHIP_SQL}
+              AND ${GENERAL_IMAGE_LIBRARY_SQL}
+              AND NOT EXISTS (
+                SELECT 1
+                  FROM debate_mystery_mansion_bundle_assets AS mansion_assets
+                 WHERE mansion_assets.user_id = images.user_id
+                   AND mansion_assets.image_id = images.id
+              )`,
         ).run(userId, filterBotId, filterBotId);
       } else {
         db.prepare(
-          `DELETE FROM images WHERE user_id = ? AND ${GENERAL_IMAGE_LIBRARY_SQL}`,
+          `DELETE FROM images
+            WHERE user_id = ?
+              AND ${GENERAL_IMAGE_LIBRARY_SQL}
+              AND NOT EXISTS (
+                SELECT 1
+                  FROM debate_mystery_mansion_bundle_assets AS mansion_assets
+                 WHERE mansion_assets.user_id = images.user_id
+                   AND mansion_assets.image_id = images.id
+              )`,
         ).run(userId);
       }
       for (const row of rows) {

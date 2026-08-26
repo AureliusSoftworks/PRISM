@@ -76,11 +76,14 @@ import {
   botcastSpokenTurnWithinBudgetV1,
   botcastUtteranceClaimsSignalHistory,
   cancelBotcastEpisode,
+  applyBotcastStagePreset,
   chatWithBotcastShowHost,
   createBotcastEpisode,
   createBotcastShow,
+  createBotcastStagePreset,
   deleteBotcastEpisode,
   deleteBotcastShow,
+  deleteBotcastStagePreset,
   deleteBotcastShowIntroAudio,
   endBotcastEpisodeOnProducerCut,
   recordBotcastProducerCutAudienceHandoff,
@@ -103,6 +106,7 @@ import {
   getBotcastShow,
   listBotcastShows,
   listBotcastEpisodes,
+  listBotcastStagePresets,
   linkBotcastEpisodeImageAsset,
   loadBotcastPairHistoryContext,
   nextBotcastFallbackStudioAccentVariant,
@@ -8225,8 +8229,11 @@ describe("Botcast persistence and isolation", () => {
           event.kind === "utterance" &&
           event.payload.messageId === repaired.message?.id,
       );
-      assert.equal(utterance?.payload.provider, "openai");
-      assert.equal(utterance?.payload.model, "gpt-signal-test");
+      assert.equal(utterance?.payload.provider, "deterministic");
+      assert.equal(
+        utterance?.payload.model,
+        "signal-online-validation-fallback",
+      );
       assert.equal(
         utterance?.payload.utteranceRepair?.reason,
         "false_name_identity",
@@ -25852,9 +25859,21 @@ describe("Botcast persistence and isolation", () => {
           WHERE id = ?`,
         )
         .run(episode.id);
+      const stagePreset = createBotcastStagePreset(source, "user-1", {
+        name: "Archive stage",
+        settings: {
+          studioLayout: show.studioLayout,
+          cameraFraming: show.cameraFraming,
+          logoPlacement: show.logoPlacement,
+          studioGlowTuning: show.studioGlowTuning,
+          voiceLevelsByBotId: { "host-1": 1.1 },
+          atmosphereMix: show.atmosphereMix,
+        },
+      });
       const key = Buffer.alloc(32, 7);
       const snapshot = exportUserSnapshot(source, "user-1", key);
       assert.equal(snapshot.botcast?.shows.length, 1);
+      assert.equal(snapshot.botcast?.stagePresets?.[0]?.id, stagePreset.id);
       assert.equal(
         snapshot.botcast?.shows[0]?.fallbackStudioAccentVariant,
         show.fallbackStudioAccentVariant,
@@ -25895,6 +25914,10 @@ describe("Botcast persistence and isolation", () => {
         },
       );
       importUserSnapshot(target, "user-1", snapshot, key);
+      assert.equal(
+        listBotcastStagePresets(target, "user-1")[0]?.name,
+        "Archive stage",
+      );
       const restoredShow = getBotcastShow(target, "user-1", show.id);
       assert.equal(restoredShow.dayAtmosphere.imageId, "archive-day");
       assert.equal(restoredShow.nightAtmosphere.imageId, "archive-night");
@@ -26024,6 +26047,103 @@ describe("Botcast persistence and isolation", () => {
       source.close();
       target.close();
       legacyTarget.close();
+    }
+  });
+
+  it("persists tenant-scoped Rehearse presets and applies only the stage contract", () => {
+    const db = fixture();
+    try {
+      const source = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const staged = updateBotcastShow(db, "user-1", source.id, {
+        studioLayout: {
+          ...source.studioLayout,
+          hostBot: { x: 18, y: 73 },
+        },
+        cameraFraming: {
+          ...source.cameraFraming,
+          wide: { ...source.cameraFraming.wide, zoom: 1.25, panX: -8 },
+        },
+        logoPlacement: { x: 51, y: 16, scale: 74 },
+        studioGlowTuning: {
+          dark: { opacity: 0.42, blendMode: "screen" },
+          light: { opacity: 0.8, blendMode: "overlay" },
+        },
+        voiceLevelsByBotId: { "host-1": 1.15, "guest-1": 0.8 },
+        atmosphereMix: { background: 0.24, grain: 0, foley: 0.7, filmGrain: 0.4 },
+      });
+      const preset = createBotcastStagePreset(db, "user-1", {
+        name: "  Close interview  ",
+        settings: {
+          studioLayout: staged.studioLayout,
+          cameraFraming: staged.cameraFraming,
+          logoPlacement: staged.logoPlacement,
+          studioGlowTuning: staged.studioGlowTuning,
+          voiceLevelsByBotId: staged.voiceLevelsByBotId,
+          atmosphereMix: staged.atmosphereMix,
+          name: "must not persist",
+        },
+      });
+      assert.equal(preset.name, "Close interview");
+      assert.equal(listBotcastStagePresets(db, "user-1").length, 1);
+      assert.deepEqual(listBotcastStagePresets(db, "user-2"), []);
+
+      db.prepare(
+        `INSERT INTO users (id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, created_at, last_active_at)
+         VALUES ('user-2', 'other@example.com', 'Other', 'hash', 'salt', 'cipher', 'iv', 'tag', ?, ?)`,
+      ).run("2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
+      assert.deepEqual(listBotcastStagePresets(db, "user-2"), []);
+
+      db.prepare(
+        `INSERT INTO botcast_stage_presets
+          (id, user_id, name, stage_json, created_at, updated_at)
+         VALUES ('legacy-duplicate-stage', 'user-1', 'CLOSE INTERVIEW', '{}',
+                 '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+      ).run();
+      assert.equal(listBotcastStagePresets(db, "user-1").length, 2);
+
+      const overwritten = createBotcastStagePreset(db, "user-1", {
+        name: "  close   INTERVIEW ",
+        settings: {
+          ...preset.settings,
+          atmosphereMix: { ...preset.settings.atmosphereMix, background: 0.29 },
+        },
+      });
+      assert.equal(overwritten.id, preset.id);
+      assert.equal(overwritten.name, "close INTERVIEW");
+      assert.equal(overwritten.createdAt, preset.createdAt);
+      assert.equal(overwritten.settings.atmosphereMix.background, 0.29);
+      assert.equal(listBotcastStagePresets(db, "user-1").length, 1);
+
+      const otherTenantPreset = createBotcastStagePreset(db, "user-2", {
+        name: "Close interview",
+        settings: preset.settings,
+      });
+      assert.notEqual(otherTenantPreset.id, preset.id);
+      assert.equal(listBotcastStagePresets(db, "user-2").length, 1);
+
+      const target = createBotcastShow(db, "user-1", {
+        hostBotId: "guest-1",
+        name: "Unchanged identity",
+        premise: "Keep this premise.",
+      });
+      const applied = applyBotcastStagePreset(db, "user-1", target.id, overwritten.id);
+      assert.equal(applied.name, "Unchanged identity");
+      assert.equal(applied.premise, "Keep this premise.");
+      assert.equal(applied.hostBotId, target.hostBotId);
+      assert.deepEqual(applied.studioLayout, staged.studioLayout);
+      assert.deepEqual(applied.cameraFraming, staged.cameraFraming);
+      assert.deepEqual(applied.logoPlacement, staged.logoPlacement);
+      assert.deepEqual(applied.studioGlowTuning, staged.studioGlowTuning);
+      assert.deepEqual(applied.voiceLevelsByBotId, staged.voiceLevelsByBotId);
+      assert.deepEqual(applied.atmosphereMix, overwritten.settings.atmosphereMix);
+      assert.throws(
+        () => applyBotcastStagePreset(db, "user-2", target.id, overwritten.id),
+        /not found/u,
+      );
+      deleteBotcastStagePreset(db, "user-1", overwritten.id);
+      assert.deepEqual(listBotcastStagePresets(db, "user-1"), []);
+    } finally {
+      db.close();
     }
   });
 });

@@ -342,7 +342,10 @@ describe("PRISM bot generator", () => {
     assert.equal(richResult.draft.audioVoiceProfile.accentDefinitionId, "irish-english");
     assert.equal(richResult.draft.namePronunciation, "MAH-ruh VAYL");
     assert.equal(leanResult.draft.audioVoiceProfile.systemVoiceName, "Alex");
-    assert.equal(leanResult.draft.audioVoiceProfile.accentDefinitionId, "british-english");
+    assert.equal(
+      leanResult.draft.audioVoiceProfile.accentDefinitionId,
+      "modern-rp-english",
+    );
     assert.ok(leanResult.draft.audioVoiceProfile.pronunciationMapPoint);
     assert.equal(leanResult.draft.audioVoiceProfile.pace, -0.15);
     assert.equal(leanResult.draft.namePronunciation, "MAH-ruh VAYL");

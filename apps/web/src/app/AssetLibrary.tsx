@@ -73,6 +73,7 @@ export interface AssetRailProps {
   synthesizeDisabled?: boolean;
   onOpenStorageSettings?: () => void;
   onUpload?: () => void;
+  sourceFilter?: "generated" | "uploaded";
   onUndo?: () => void | Promise<void>;
   undoLabel?: string;
   /** General Images owns its existing header picker; typed rails own this compact choice. */
@@ -249,6 +250,7 @@ export function AssetRail({
   synthesizeDisabled = false,
   onOpenStorageSettings,
   onUpload,
+  sourceFilter,
   onUndo,
   undoLabel = "Undo",
   generation,
@@ -275,6 +277,7 @@ export function AssetRail({
     try {
       const query = new URLSearchParams({ kind, limit: "5", sort: "recency" });
       if (context?.trim()) query.set("context", context.trim());
+      if (sourceFilter) query.set("source", sourceFilter);
       const result = await readJson<AssetApiResponse>(
         await fetch(`/api/assets?${query.toString()}`),
       );
@@ -284,7 +287,7 @@ export function AssetRail({
     } finally {
       setLoading(false);
     }
-  }, [context, kind]);
+  }, [context, kind, sourceFilter]);
 
   useEffect(() => {
     void loadRecent();
@@ -323,7 +326,9 @@ export function AssetRail({
         <div>
           <strong>{label ?? IMAGE_ASSET_KIND_LABELS[kind]}</strong>
           <small>
-            {onUpload
+            {sourceFilter === "generated"
+              ? "Synthesize a new image or reuse a previously synthesized one."
+              : onUpload
               ? "Upload, synthesize, or reuse an asset."
               : "Synthesize a new image or reuse a recent one."}
           </small>
@@ -477,6 +482,7 @@ export function AssetRail({
         <AssetLibraryModal
           kind={kind}
           context={context}
+          sourceFilter={sourceFilter}
           currentImageIds={[...currentIds]}
           allowDelete
           onClose={() => {
@@ -633,6 +639,7 @@ export interface AssetLibraryModalProps {
   initialAssetId?: string | null;
   currentImageIds?: readonly string[];
   includeIncomplete?: boolean;
+  sourceFilter?: "generated" | "uploaded";
   allowDelete?: boolean;
   onClose: () => void;
   onSelect?: (asset: ImageAssetSet) => void | Promise<void>;
@@ -646,6 +653,7 @@ export function AssetLibraryModal({
   initialAssetId,
   currentImageIds = [],
   includeIncomplete = false,
+  sourceFilter,
   allowDelete = false,
   onClose,
   onSelect,
@@ -656,7 +664,9 @@ export function AssetLibraryModal({
   const searchRef = useRef<HTMLInputElement | null>(null);
   const initialAssetOpenedRef = useRef<string | null>(null);
   const [query, setQuery] = useState("");
-  const [source, setSource] = useState<"all" | "generated" | "uploaded">("all");
+  const [source, setSource] = useState<"all" | "generated" | "uploaded">(
+    sourceFilter ?? "all",
+  );
   const [usage, setUsage] = useState<"all" | "used" | "unused">("all");
   const [sort, setSort] = useState<"relevance" | "recency">(
     initialAssetId ? "recency" : "relevance",
@@ -714,7 +724,8 @@ export function AssetLibraryModal({
         if (query.trim()) params.set("q", query.trim());
         if (context?.trim()) params.set("context", context.trim());
         if (botId?.trim()) params.set("botId", botId.trim());
-        if (source !== "all") params.set("source", source);
+        const effectiveSource = sourceFilter ?? source;
+        if (effectiveSource !== "all") params.set("source", effectiveSource);
         if (usage !== "all") params.set("usage", usage);
         if (includeIncomplete) params.set("includeIncomplete", "1");
         if (cursor) params.set("cursor", cursor);
@@ -729,7 +740,7 @@ export function AssetLibraryModal({
         setLoading(false);
       }
     },
-    [botId, context, includeIncomplete, kind, query, sort, source, usage],
+    [botId, context, includeIncomplete, kind, query, sort, source, sourceFilter, usage],
   );
 
   useEffect(() => {
@@ -1215,11 +1226,13 @@ export function AssetLibraryModal({
             placeholder={`Search ${IMAGE_ASSET_KIND_LABELS[kind].toLowerCase()}…`}
             aria-label="Search local assets"
           />
-          <select value={source} onChange={(event) => setSource(event.currentTarget.value as typeof source)} aria-label="Asset source">
-            <option value="all">Generated + uploaded</option>
-            <option value="generated">Generated</option>
-            <option value="uploaded">Uploaded</option>
-          </select>
+          {sourceFilter ? null : (
+            <select value={source} onChange={(event) => setSource(event.currentTarget.value as typeof source)} aria-label="Asset source">
+              <option value="all">Generated + uploaded</option>
+              <option value="generated">Generated</option>
+              <option value="uploaded">Uploaded</option>
+            </select>
+          )}
           <select value={usage} onChange={(event) => setUsage(event.currentTarget.value as typeof usage)} aria-label="Asset usage">
             <option value="all">Used + unused</option>
             <option value="used">Used</option>
@@ -1293,6 +1306,19 @@ export function AssetLibraryModal({
                 </button>
               </header>
               <AssetPreview asset={detail} />
+              {onSelect && detail.status === "ready" ? (
+                <div className={styles.detailPrimaryAction}>
+                  <button
+                    type="button"
+                    className={sharedStyles.btnPrimary}
+                    data-asset-equip-action="true"
+                    onClick={() => void onSelect(detail)}
+                    disabled={detailIsCurrent}
+                  >
+                    {detailIsCurrent ? "Already selected" : "Use this asset"}
+                  </button>
+                </div>
+              ) : null}
               <p>{detail.source === "legacy" ? "Protected legacy asset" : assetSourceLabel(detail)} · {new Date(detail.createdAt).toLocaleString()}</p>
               {detail.status === "ready" && primaryMember(detail) ? (
                 <section
@@ -1464,16 +1490,6 @@ export function AssetLibraryModal({
                 </p>
               ) : null}
               <div className={styles.detailActions}>
-                {onSelect && detail.status === "ready" ? (
-                  <button
-                    type="button"
-                    className={sharedStyles.btnPrimary}
-                    onClick={() => void onSelect(detail)}
-                    disabled={detailIsCurrent}
-                  >
-                    {detailIsCurrent ? "Already selected" : "Use this asset"}
-                  </button>
-                ) : null}
                 {allowDelete && deleteConfirmationId !== detail.id ? (
                   <button
                     type="button"

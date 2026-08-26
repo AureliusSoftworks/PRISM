@@ -134,8 +134,19 @@ describe("Coffee Library table sources", () => {
         `INSERT INTO bots (id, user_id, name, system_prompt, color, glyph, chat_enabled, created_at, updated_at)
          VALUES ('bot-6', 'u1', 'bot-6', 'A new regular.', '#a355e8', 'waves', 1, ?, ?)`,
       ).run("2026-08-23T00:00:00.000Z", "2026-08-23T00:00:00.000Z");
+      db.prepare(
+        `INSERT INTO bots (id, user_id, name, system_prompt, color, glyph, chat_enabled, created_at, updated_at)
+         VALUES ('bot-7', 'u1', 'bot-7', 'Another new regular.', '#a355e8', 'waves', 1, ?, ?)`,
+      ).run("2026-08-23T00:00:01.000Z", "2026-08-23T00:00:01.000Z");
       const refreshed = getCoffeeGroup(db, "u1", table.id)!;
-      assert.deepEqual(refreshed.botGroupIds, ["bot-2", "bot-3", "bot-4", "bot-5", "bot-6"]);
+      assert.deepEqual(refreshed.botGroupIds, [
+        "bot-2",
+        "bot-3",
+        "bot-4",
+        "bot-5",
+        "bot-6",
+        "bot-7",
+      ]);
       const session = await createCoffeeConversationFromGroup(
         db,
         "u1",
@@ -143,7 +154,7 @@ describe("Coffee Library table sources", () => {
         { forceAttendance: true },
         { attendanceRandom: () => 0 },
       );
-      assert.equal(session.conversation.botGroupIds?.length, 4);
+      assert.equal(session.conversation.botGroupIds?.length, 5);
     } finally {
       closeTestDatabase(db);
     }

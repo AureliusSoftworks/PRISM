@@ -130,7 +130,24 @@
   border-radius: inherit;
   background: linear-gradient(90deg, #6959ef, #c48cff, #65dbff);
   box-shadow: 0 0 1.2rem rgba(155, 119, 255, 0.7);
-  transition: width 500ms ease;
+  background-size: 180% 100%;
+  animation: forgeProgressShimmer 2.4s linear infinite;
+  transition: width 1600ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes forgeProgressShimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -80% 0; }
+}
+
+.forgeTiming {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.55rem;
+  color: #8e899e;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .forgeStages {
@@ -465,6 +482,17 @@
 .mansionRoomDetails dl div { display: flex; align-items: baseline; gap: 0.28rem; }
 .mansionRoomDetails dd { margin: 0; font-size: 0.78rem; }
 .mansionRoomDetails button { grid-column: 3; grid-row: 1; min-width: 8.5rem; min-height: 2.6rem; padding: 0.6rem 0.85rem; color: #17110a; font-weight: 760; border: 1px solid #f0d091; border-radius: 0.65rem; background: linear-gradient(180deg, #f0d091, #c89c50); box-shadow: 0 0.7rem 1.8rem rgba(0, 0, 0, 0.28); cursor: pointer; }
+.saveMansionButton {
+  justify-self: end;
+  min-height: 2.2rem;
+  padding: 0.45rem 0.7rem;
+  color: #e9fff9;
+  border: 1px solid rgba(107, 231, 201, 0.46);
+  border-radius: 0.65rem;
+  background: rgba(32, 111, 94, 0.28);
+  cursor: pointer;
+}
+.saveMansionButton[data-state="saved"] { border-color: rgba(107, 231, 201, 0.72); background: rgba(32, 111, 94, 0.48); }
 .mansionHint { position: absolute; right: 1.55rem; bottom: 5.45rem; margin: 0; color: var(--mystery-muted); font-size: 0.7rem; opacity: 0.66; }
 
 .partnerFindings {
@@ -486,6 +514,7 @@
   background: #090b13;
   animation: roomDescend 420ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
 }
+.roomScene[data-room-introduction] { min-height: 100dvh; }
 
 @keyframes roomDescend {
   from { opacity: 0; transform: scale(1.04) translateY(-1.5rem); }
@@ -524,7 +553,7 @@
   position: absolute;
   z-index: 4;
   left: 50%;
-  bottom: 17rem;
+  bottom: 19.5rem;
   display: grid;
   justify-items: center;
   width: min(30rem, 44vw);
@@ -533,29 +562,30 @@
   pointer-events: none;
   transition: transform 420ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 260ms ease;
 }
-.roomActor[data-prosecutor-speaking="true"] { opacity: 0.78; transform: translateX(-40%) translateY(0.4rem) scale(0.9); }
+.roomActor[data-prosecutor-speaking="true"]:not(.roomProsecutorActor) { opacity: 0.78; transform: translateX(-40%) translateY(0.4rem) scale(0.9); }
+.roomProsecutorActor { z-index: 4; }
+.roomActor[data-interrogation-phase="prosecutor_entrance"], .roomActor[data-interrogation-phase="suspect_entrance"] { animation: interrogationEntrance 420ms cubic-bezier(0.2, 0.85, 0.25, 1) both; }
+@keyframes interrogationEntrance { from { opacity: 0; transform: translateX(-50%) translateY(1.4rem) scale(0.94); } to { opacity: 1; transform: translateX(-50%) scale(1); } }
 
-.roomActor > :first-child { max-height: 56vh; }
-.roomActor > strong { margin-top: -0.5rem; padding: 0.45rem 0.7rem; border-bottom: 2px solid var(--actor-color); background: rgba(6, 7, 14, 0.78); }
-.roomActorAction {
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 0.7rem);
-  width: max-content;
-  max-width: min(34rem, 82vw);
-  padding: 0.48rem 0.72rem;
-  border: 1px solid color-mix(in srgb, var(--actor-color) 42%, transparent);
-  border-radius: 999px;
-  color: #eee8ff;
-  font-size: clamp(0.82rem, 1.35vw, 1rem);
-  font-style: italic;
-  line-height: 1.35;
-  text-align: center;
-  background: rgba(6, 7, 14, 0.82);
-  box-shadow: 0 0.75rem 1.8rem rgba(0, 0, 0, 0.34);
-  transform: translateX(-50%);
+.roomActorDrift {
+  position: relative;
+  display: grid;
+  width: 100%;
+  justify-items: center;
+  animation: roomActorIdleDrift var(--room-actor-drift-duration, 7.4s) ease-in-out var(--room-actor-drift-delay, 0ms) infinite;
+  will-change: transform;
 }
-
+.roomActorDrift > :not(strong):not([data-signal-voice-action]) { max-height: 56vh; }
+.roomActorDrift > strong { margin-top: -0.5rem; padding: 0.45rem 0.7rem; border-bottom: 2px solid var(--actor-color); background: rgba(6, 7, 14, 0.78); }
+@keyframes roomActorIdleDrift {
+  0% { transform: translate3d(-4px, 1px, 0); }
+  16% { transform: translate3d(3px, -5px, 0); }
+  34% { transform: translate3d(7px, -2px, 0); }
+  51% { transform: translate3d(1px, 4px, 0); }
+  69% { transform: translate3d(-6px, 2px, 0); }
+  84% { transform: translate3d(-2px, -4px, 0); }
+  100% { transform: translate3d(4px, 0, 0); }
+}
 .roomProsecutorCue {
   --actor-color: #72d7ff;
   position: absolute;
@@ -569,60 +599,59 @@
   pointer-events: none;
   animation: prosecutorEnters 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
-.roomProsecutorCue > :not(strong):not(em) { max-width: 100%; max-height: 48vh; }
+.roomProsecutorCue > :not(strong):not([data-signal-voice-action]) { max-width: 100%; max-height: 48vh; }
 .roomProsecutorCue > strong { padding: 0.38rem 0.55rem; border-bottom: 2px solid var(--actor-color); background: rgba(6, 7, 14, 0.84); font-size: 0.72rem; text-align: center; }
-.roomProsecutorCue .roomActorAction { bottom: calc(100% + 0.55rem); max-width: min(27rem, 72vw); }
 @keyframes prosecutorEnters { from { opacity: 0; transform: translateX(-2.5rem) scale(0.94); } to { opacity: 1; transform: none; } }
 
 .roomScene[data-parallax-enabled="true"] .roomParallaxLayer { will-change: transform; }
 
 .hotspots { position: absolute; z-index: 5; inset: 0; pointer-events: none; }
+.roomScene[data-lens-active="true"],
+.roomScene[data-lens-active="true"] .hotspots button { cursor: none; }
 .hotspots button {
   position: absolute;
   width: clamp(3.25rem, 4.5vw, 5rem);
   aspect-ratio: 1;
   padding: 0;
-  border: 1px solid rgba(143, 211, 255, 0.66);
+  border: 0;
   border-radius: 50%;
-  background:
-    radial-gradient(circle, rgba(232, 248, 255, 0.9) 0 0.16rem, transparent 0.2rem),
-    radial-gradient(circle, rgba(118, 208, 255, 0.2), rgba(169, 140, 255, 0.1) 52%, transparent 70%);
-  box-shadow: 0 0 0 0.35rem rgba(118, 208, 255, 0.06), 0 0 1.15rem rgba(118, 208, 255, 0.28);
+  background: transparent;
+  box-shadow: none;
   transform: translate(-50%, -50%);
-  transition: background 150ms ease, border-color 150ms ease, box-shadow 150ms ease, opacity 150ms ease, transform 150ms ease;
-  cursor: crosshair;
+  transition: opacity 150ms ease;
+  cursor: inherit;
   pointer-events: auto;
 }
-.hotspots button:hover:not(:disabled),
-.hotspots button:focus-visible {
-  border-color: rgba(225, 207, 255, 0.94);
-  outline: none;
-  background:
-    radial-gradient(circle, #fff 0 0.18rem, transparent 0.23rem),
-    radial-gradient(circle, rgba(169, 140, 255, 0.34), rgba(118, 208, 255, 0.18) 54%, transparent 72%);
-  box-shadow: 0 0 0 0.5rem rgba(169, 140, 255, 0.1), 0 0 1.5rem rgba(169, 140, 255, 0.48);
-  transform: translate(-50%, -50%) scale(1.08);
-}
-.hotspots button:disabled { cursor: default; opacity: 0.42; }
-.hotspots button[data-reviewed="true"] { border-color: rgba(150, 232, 193, 0.62); }
-.hotspots button span {
+.hotspots button:focus-visible { outline: none; }
+.hotspots button:disabled { cursor: default; pointer-events: none; }
+.hotspots button[data-examining="true"] { opacity: 0; }
+
+.investigationLens {
   position: absolute;
-  left: 50%;
-  top: calc(100% + 0.45rem);
-  padding: 0.42rem 0.58rem;
-  border: 1px solid rgba(180, 160, 255, 0.24);
-  border-radius: 0.5rem;
-  color: #f5f1ff;
-  background: rgba(5, 7, 14, 0.9);
-  box-shadow: 0 0.6rem 1.4rem rgba(0, 0, 0, 0.35);
-  opacity: 0;
-  transform: translate(-50%, -0.2rem);
-  transition: opacity 130ms ease, transform 130ms ease;
-  white-space: nowrap;
+  z-index: 7;
+  width: 3.05rem;
+  height: 3.05rem;
   pointer-events: none;
+  opacity: 0;
+  border: 2px solid rgba(238, 252, 255, 0.86);
+  border-radius: 50%;
+  background: rgba(5, 13, 20, 0.18);
+  box-shadow: none;
+  transform: translate(-50%, -50%) scale(1);
+  transition: opacity 80ms ease, box-shadow 90ms linear, transform 90ms linear;
 }
-.hotspots button:hover span,
-.hotspots button:focus-visible span { opacity: 1; transform: translate(-50%, 0); }
+.investigationLens[data-visible="true"] { opacity: 1; }
+.investigationLens[data-targeted="true"] {
+  box-shadow:
+    0 0 calc(0.45rem + var(--lens-proximity, 0) * 1.65rem) rgba(102, 229, 234, calc(0.14 + var(--lens-proximity, 0) * 0.58)),
+    inset 0 0 calc(0.3rem + var(--lens-proximity, 0) * 0.8rem) rgba(169, 140, 255, calc(0.08 + var(--lens-proximity, 0) * 0.34));
+  transform: translate(-50%, -50%) scale(0.9);
+}
+
+.roomComplete { position: absolute; z-index: 7; inset: 0; display: grid; align-content: center; justify-items: center; padding: 2rem; color: #f5f1ff; text-align: center; pointer-events: none; text-shadow: 0 0.25rem 1.25rem rgba(0, 0, 0, 0.94); animation: roomCompleteDissolve 600ms ease 2.8s forwards; }
+.roomComplete p { margin: 0; max-width: 26rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: clamp(0.72rem, 1.2vw, 0.92rem); letter-spacing: 0.14em; text-transform: uppercase; }
+.roomComplete strong { margin-top: 0.55rem; font-family: Georgia, serif; font-size: clamp(1.8rem, 5vw, 4.5rem); font-weight: 400; }
+@keyframes roomCompleteDissolve { to { opacity: 0; } }
 
 .dialogueBox,
 .courtReaction {
@@ -644,6 +673,20 @@
 .dialogueBox p, .courtReaction p { margin: 0.35rem 0 0; line-height: 1.45; }
 .dialogueBox[data-speaker="prosecutor"] { border-color: rgba(101, 211, 255, 0.42); }
 .dialogueBox[data-speaker="prosecutor"] small { color: #70d8ff; }
+.dialogueBox[data-examination="true"] { cursor: pointer; }
+.dialogueContinueHint {
+  display: block;
+  margin-top: 0.7rem;
+  color: #d4c6ff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-align: right;
+  text-transform: uppercase;
+  animation: observationContinuePulse 1.6s ease-in-out infinite;
+}
+@keyframes observationContinuePulse { 50% { opacity: 0.55; } }
 
 .investigationCommands,
 .courtActions {
@@ -692,10 +735,19 @@
 .choiceTray header, .caseFile header, .theoryBoard header { display: flex; align-items: start; justify-content: space-between; gap: 1rem; margin-bottom: 0.8rem; }
 .choiceTray h2, .caseFile h2, .theoryBoard h2 { margin: 0.18rem 0; }
 .choiceTray header button, .caseFile header button, .theoryBoard header button { border: 0; background: transparent; color: #b9b3c6; cursor: pointer; }
+.topicHelp { margin: -0.2rem 0 0.9rem; color: #aaa5b6; font-size: 0.78rem; line-height: 1.45; }
+.topicGroups { display: grid; gap: 0.9rem; }
+.topicGroup { display: grid; gap: 0.4rem; }
+.topicGroup h3 { margin: 0; color: #aaa5b6; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }
 .topicList { display: grid; gap: 0.45rem; }
 .topicList button { display: flex; align-items: center; gap: 0.65rem; padding: 0.8rem; text-align: left; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 0.65rem; background: rgba(255, 255, 255, 0.035); cursor: pointer; }
-.topicList button span { display: grid; width: 1.4rem; height: 1.4rem; place-items: center; border-radius: 50%; background: rgba(169, 140, 255, 0.16); color: #c0a5ff; }
+.topicIcon { display: grid; flex: 0 0 auto; width: 1.4rem; height: 1.4rem; place-items: center; border-radius: 50%; background: rgba(169, 140, 255, 0.16); color: #c0a5ff; }
+.topicCopy { display: grid; gap: 0.12rem; }
+.topicCopy strong { font: inherit; }
+.topicCopy small { color: #817b8b; font-size: 0.66rem; font-weight: 750; letter-spacing: 0.04em; text-transform: uppercase; }
 .topicList button[data-complete="true"] { color: #97939f; }
+.topicList button[data-blocked="true"] { color: #817b8b; cursor: not-allowed; opacity: 0.72; }
+.topicList button[data-blocked="true"] .topicIcon { background: rgba(255, 255, 255, 0.06); color: #77717f; }
 
 .recordGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 0.5rem; }
 .recordGrid button { display: grid; align-content: start; justify-items: start; gap: 0.2rem; min-height: 7.5rem; padding: 0.75rem; text-align: left; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 0.7rem; background: rgba(255, 255, 255, 0.035); cursor: pointer; }
@@ -762,19 +814,16 @@
 }
 .counselSeat[data-side="prosecution"] { left: clamp(0.75rem, 4vw, 4rem); }
 .counselSeat[data-side="defense"] { right: clamp(0.75rem, 4vw, 4rem); }
-.counselSeat > :not(div):not(em):not(aside) { max-width: 100%; max-height: 15rem; }
+.counselSeat > :not(div):not(aside):not([data-signal-voice-action]) { max-width: 100%; max-height: 15rem; }
 .counselSeat > div { display: grid; width: 100%; padding: 0.42rem 0.55rem; border-bottom: 2px solid var(--counsel-color); background: rgba(7, 9, 18, 0.86); text-align: center; }
 .counselSeat > div small { color: #aaa5b7; font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.08em; }
-.counselAction { position: absolute; z-index: 3; bottom: calc(100% + 0.5rem); width: max-content; max-width: min(24rem, 34vw); padding: 0.42rem 0.62rem; border: 1px solid color-mix(in srgb, var(--counsel-color), transparent 52%); border-radius: 999px; background: rgba(7, 9, 18, 0.88); color: #eee9f8; font-size: 0.76rem; text-align: center; }
 .defendantMini { --defendant-color: #a98cff; position: absolute; right: 72%; bottom: 0.25rem; display: grid; width: min(7rem, 12vw); justify-items: center; filter: drop-shadow(0 0.8rem 1.2rem rgba(0, 0, 0, 0.5)); }
-.defendantMini > :not(small):not(em) { max-width: 100%; max-height: 8rem; }
+.defendantMini > :not(small):not([data-signal-voice-action]) { max-width: 100%; max-height: 8rem; }
 .defendantMini > small { width: max-content; max-width: 10rem; padding: 0.28rem 0.4rem; border-bottom: 2px solid var(--defendant-color); background: rgba(7, 9, 18, 0.9); font-size: 0.58rem; text-align: center; }
-.defendantMini .counselAction { --counsel-color: var(--defendant-color); bottom: calc(100% + 0.35rem); max-width: min(19rem, 30vw); }
 
 .witnessStand { position: absolute; inset: 7.3rem 0 10rem; display: grid; place-content: center; justify-items: center; overflow: hidden; }
-.witnessAvatar { display: grid; width: min(30rem, 50vw); height: min(55vh, 36rem); place-items: end center; filter: drop-shadow(0 2rem 3rem rgba(0, 0, 0, 0.62)); }
-.witnessAvatar > * { max-height: 100%; }
-.witnessAction { position: absolute; z-index: 2; top: 0.65rem; left: 50%; width: max-content; max-width: min(34rem, calc(100vw - 2rem)); padding: 0.48rem 0.78rem; border: 1px solid color-mix(in srgb, var(--witness-color), transparent 52%); border-radius: 999px; background: rgba(7, 9, 18, 0.82); color: color-mix(in srgb, var(--witness-color), white 42%); font-size: clamp(0.82rem, 1.4vw, 1rem); font-weight: 700; text-align: center; transform: translateX(-50%); backdrop-filter: blur(14px); }
+.witnessAvatar { position: relative; display: grid; width: min(30rem, 50vw); height: min(55vh, 36rem); place-items: end center; filter: drop-shadow(0 2rem 3rem rgba(0, 0, 0, 0.62)); }
+.witnessAvatar > :not([data-signal-voice-action]) { max-height: 100%; }
 .witnessIdentity { position: absolute; bottom: 1rem; left: 50%; min-width: 17rem; padding: 0.7rem 1rem; border-bottom: 3px solid var(--witness-color); background: rgba(8, 9, 17, 0.82); text-align: center; transform: translateX(-50%); }
 .witnessIdentity h1 { margin: 0.12rem 0; }
 .witnessIdentity small { color: #aca5b8; }
@@ -832,7 +881,7 @@
   .mansionHint { display: none; }
   .investigationCommands, .courtActions { width: calc(100vw - 1rem); bottom: 0.5rem; grid-auto-columns: 1fr; }
   .investigationCommands button, .courtActions button { padding-inline: 0.25rem; }
-  .roomActor { left: 50%; bottom: 13.5rem; width: 72vw; }
+  .roomActor { left: 50%; bottom: 15.5rem; width: 72vw; }
   .roomProsecutorCue { left: 0.5rem; bottom: 11.8rem; width: 6.5rem; }
   .dialogueBox { bottom: 6.1rem; }
   .theoryHint { display: none; }
@@ -841,14 +890,15 @@
   .witnessAvatar { width: 75vw; }
   .counselSeat { bottom: 3.5rem; width: 6.8rem; opacity: 0.9; }
   .defendantMini { right: 56%; width: 4.2rem; }
-  .counselAction { max-width: 42vw; }
   .ballots { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .progressTrack span { transition: none; }
   .mansionCanvas { animation: none; }
   .mansionRoom { transition: none; }
   .forgePrism i,
+  .progressTrack span,
   .roomScene,
   .roomProsecutorCue,
   .choiceTray,
@@ -859,4 +909,6 @@
   .roomParallaxLayer { transform: none; transition: opacity 180ms ease; }
   .roomBackdrop, .roomBackdrop[data-blurred="true"] { transform: scale(1.025); transition: opacity 180ms ease; }
   .roomActor[data-prosecutor-speaking="true"] { opacity: 1; transform: translateX(-50%); }
+  .roomActorDrift { animation: none; transform: none; will-change: auto; }
+  .dialogueContinueHint { animation: none; }
 }

@@ -27,6 +27,7 @@ export function MiniAvatarDetailsInk({
   color,
   faceGeometry,
   talking,
+  speechInkVisible,
   thinking = false,
   mouthShape = null,
   staticRaster = true,
@@ -37,6 +38,7 @@ export function MiniAvatarDetailsInk({
   color: string | null | undefined;
   faceGeometry?: Partial<AvatarDetailsFaceGeometry> | null;
   talking: boolean;
+  speechInkVisible?: boolean;
   thinking?: boolean;
   mouthShape?: ZenLiveBotMouthShape | null;
   staticRaster?: boolean;
@@ -60,6 +62,7 @@ export function MiniAvatarDetailsInk({
           faceGeometry={faceGeometry}
           blinkPhase={blinkPhase}
           talking={talking}
+          speechInkVisible={speechInkVisible}
           speechMotionActive={false}
           mouthShape={mouthShape}
           depth={depth}

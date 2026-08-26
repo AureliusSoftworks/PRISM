@@ -930,6 +930,8 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.match(pageSource, /blinkPhase=\{avatarDetailsBlinkPhase\}/);
     assert.match(pageSource, /talking=\{inkTalking \?\? isTalking\}/);
     assert.match(pageSource, /speechMotionActive=\{isTalking\}/);
+    assert.match(pageSource, /defaultRestingMouthCharacter !== undefined[\s\S]*faceStyle\.mouthCharacter === null/);
+    assert.match(pageSource, /faceMouthCharacter=\{displayedMouthCharacter\}/);
     assert.match(pageSource, /mouthShape=\{displayedMouthShape\}/);
     assert.doesNotMatch(maskSource, /mouthAnimation/);
     assert.match(
@@ -953,7 +955,7 @@ describe("Avatar Details shared mannequin rendering", () => {
       maskSource,
       /blinking: blinkPhase === "closed"/,
     );
-    assert.match(maskSource, /talking,\s*\},\s*depth,\s*\),/);
+    assert.match(maskSource, /speechInkVisible: speechMotion \? false : speechInkVisible/);
     assert.doesNotMatch(maskSource, /AvatarDetailsRoleLayer/);
     assert.match(
       maskSource,

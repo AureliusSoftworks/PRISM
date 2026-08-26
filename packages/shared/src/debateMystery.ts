@@ -1795,13 +1795,51 @@ function compileDebateMysteryLeadDefinitions(args: {
 export function compileDeterministicDebateMystery(args: {
   config: DebateMysteryResolvedConfigV1;
   suspects: Omit<DebateMysterySuspectSnapshotV1, "seatId" | "roomId">[];
+  /** Optional aggregate-owned mansion layout. Story/clues remain newly compiled. */
+  roomBlueprint?: readonly DebateMysteryFloorplanRoomV1[];
 }): DebateMysteryCaseBibleV1 {
   const recipeSeed = debateMysteryRecipeSeed(args.config);
   const random = seededRandom(`${recipeSeed}:${args.config.inspiration}`);
   // Large custom floorplans can occasionally paint a greedy layout into a
   // corner. Retry from seed-derived candidates so generation stays stable and
   // never depends on runtime timing or an unseeded fallback.
-  const rooms = compileMansionRooms(args.config, recipeSeed);
+  const rooms = args.roomBlueprint
+    ? args.roomBlueprint.map((room) => ({
+        ...room,
+        neighborIds: [...room.neighborIds],
+      }))
+    : compileMansionRooms(args.config, recipeSeed);
+  if (args.roomBlueprint) {
+    if (rooms.length !== args.config.totalRooms) {
+      throw new Error("The reusable mansion room count no longer matches this case setup.");
+    }
+    const roomIds = new Set(rooms.map((room) => room.id));
+    if (
+      roomIds.size !== rooms.length ||
+      rooms.some((room) =>
+        !DEBATE_MYSTERY_ROOM_TEMPLATES.some((template) => template.id === room.templateId) ||
+        !Number.isInteger(room.floor) || room.floor < 1 ||
+        !Number.isFinite(room.x) || !Number.isFinite(room.y) ||
+        !Number.isFinite(room.width) || room.width <= 0 ||
+        !Number.isFinite(room.height) || room.height <= 0 ||
+        room.neighborIds.some((neighborId) => !roomIds.has(neighborId)))
+    ) {
+      throw new Error("The reusable mansion layout failed structural validation.");
+    }
+    const assignedRooms = rooms
+      .filter((room) => room.assignedSuspectSeatId)
+      .sort((left, right) =>
+        (left.assignedSuspectSeatId ?? "").localeCompare(right.assignedSuspectSeatId ?? ""));
+    if (assignedRooms.length !== args.suspects.length) {
+      throw new Error("The reusable mansion requires the same number of suspect rooms.");
+    }
+    rooms.forEach((room) => {
+      room.assignedSuspectSeatId = null;
+    });
+    assignedRooms.forEach((room, index) => {
+      room.assignedSuspectSeatId = `suspect-${index + 1}`;
+    });
+  }
   const suspects = args.suspects.map((suspect, index) => ({
     ...suspect,
     seatId: `suspect-${index + 1}`,

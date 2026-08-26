@@ -263,6 +263,26 @@ export function ensurePrismAudioContextRunning(): void {
   void context.resume().catch(() => undefined);
 }
 
+/**
+ * Wait until the shared mixer is ready before attaching a media element to it.
+ * Once a media element is routed through Web Audio, a suspended context makes
+ * its native output silent, so callers must not start playback first.
+ */
+export async function resumePrismAudioContext(): Promise<boolean> {
+  const context = prismAudioContext();
+  if (!context) return false;
+  if (context.state === "running") return true;
+  try {
+    await context.resume();
+  } catch {
+    return false;
+  }
+  // `resume()` changes state asynchronously; TypeScript keeps the pre-await
+  // control-flow narrowing, so re-read it through the platform state type.
+  const resumedState = context.state as AudioContextState;
+  return resumedState === "running";
+}
+
 let audioContextKeepAliveOwners = 0;
 let releaseAudioContextKeepAliveListeners: (() => void) | null = null;
 let audioContextKeepAliveInterval: number | null = null;

@@ -7,6 +7,7 @@ import {
 } from "@localai/shared";
 import {
   replayAudioMasterCaptureActive,
+  resumePrismAudioContext,
   routeAudioElementToPrismOutput,
 } from "./replayAudioMasterCapture.ts";
 
@@ -973,13 +974,6 @@ export function playSignalIntroAudio(args: {
     audio.src = activeObjectUrl;
   }
   activeAudio = audio;
-  activeOutputCleanup = routeAudioElementToPrismOutput(audio);
-  if (!activeOutputCleanup && replayAudioMasterCaptureActive()) {
-    activeAudio = null;
-    if (activeObjectUrl) URL.revokeObjectURL(activeObjectUrl);
-    activeObjectUrl = null;
-    return { durationMs, finished: Promise.resolve() };
-  }
 
   const finished = new Promise<void>((resolve) => {
     activeResolve = resolve;
@@ -996,15 +990,27 @@ export function playSignalIntroAudio(args: {
     audio.addEventListener("ended", finish, { once: true });
     audio.addEventListener("error", finish, { once: true });
     audio.load();
-    const startDelayMs = Math.max(0, Math.min(1_000, args.startDelayMs ?? 0));
-    const beginPlayback = () => {
+    const beginPlayback = async () => {
       if (activeAudio !== audio) return;
+      // A MediaElementSource disconnects an element from its native device
+      // output. Do not attach it until the shared mix is running; otherwise a
+      // successfully generated Premium ident plays on a suspended, silent bus.
+      const mixerReady = await resumePrismAudioContext();
+      if (activeAudio !== audio) return;
+      activeOutputCleanup = mixerReady
+        ? routeAudioElementToPrismOutput(audio)
+        : null;
+      if (!activeOutputCleanup && replayAudioMasterCaptureActive()) {
+        finish();
+        return;
+      }
       void audio.play().catch(finish);
     };
+    const startDelayMs = Math.max(0, Math.min(1_000, args.startDelayMs ?? 0));
     if (startDelayMs > 0) {
-      window.setTimeout(beginPlayback, startDelayMs);
+      window.setTimeout(() => void beginPlayback(), startDelayMs);
     } else {
-      beginPlayback();
+      void beginPlayback();
     }
     window.setTimeout(finish, startDelayMs + durationMs + 1_500);
   });
@@ -1033,13 +1039,6 @@ export function playSignalOutroAudio(args: {
   audio.volume = Math.max(0, Math.min(1, args.volume * 0.82));
   audio.src = activeObjectUrl;
   activeAudio = audio;
-  activeOutputCleanup = routeAudioElementToPrismOutput(audio);
-  if (!activeOutputCleanup && replayAudioMasterCaptureActive()) {
-    activeAudio = null;
-    URL.revokeObjectURL(activeObjectUrl);
-    activeObjectUrl = null;
-    return { durationMs, finished: Promise.resolve() };
-  }
 
   const finished = new Promise<void>((resolve) => {
     activeResolve = resolve;
@@ -1055,7 +1054,18 @@ export function playSignalOutroAudio(args: {
     };
     audio.addEventListener("ended", finish, { once: true });
     audio.addEventListener("error", finish, { once: true });
-    void audio.play().catch(finish);
+    void (async () => {
+      const mixerReady = await resumePrismAudioContext();
+      if (activeAudio !== audio) return;
+      activeOutputCleanup = mixerReady
+        ? routeAudioElementToPrismOutput(audio)
+        : null;
+      if (!activeOutputCleanup && replayAudioMasterCaptureActive()) {
+        finish();
+        return;
+      }
+      void audio.play().catch(finish);
+    })();
     window.setTimeout(finish, durationMs + 1_000);
   });
   return { durationMs, finished };

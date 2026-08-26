@@ -1041,6 +1041,52 @@ describe("Prism Slate project capabilities", () => {
 });
 
 describe("Prism Image Library capability", () => {
+  it("protects room assets owned by a saved Whodunnit mansion", () => {
+    const db = fixture();
+    try {
+      const createdAt = "2026-08-25T21:00:00.000Z";
+      db.prepare(
+        `INSERT INTO images
+          (id, user_id, bot_id, prompt, url, provider, model, purpose, origin,
+           created_at)
+         VALUES ('mansion-room-image', 'u1', NULL, 'A coherent mansion room',
+                 '/api/images/mansion-room-image/file', 'local', 'local-image',
+                 'debate_mystery_room', 'debate', ?)`,
+      ).run(createdAt);
+      db.prepare(
+        `INSERT INTO debate_mystery_mansion_bundles
+          (id, user_id, source_session_id, name, floors, total_rooms,
+           suspect_count, style_json, layout_json, created_at, updated_at)
+         VALUES ('mansion-1', 'u1', NULL, 'Saved observatory mansion', 1, 1,
+                 1, ?, ?, ?, ?)`,
+      ).run(
+        JSON.stringify({ version: 1, id: "style-1", label: "Observatory", promptContract: "One coherent house." }),
+        JSON.stringify([{ id: "room-1", templateId: "observatory", name: "Observatory", floor: 1, x: 0, y: 0, width: 1, height: 1, neighborIds: [], assignedSuspectSeatId: "suspect-1", emoji: "◇", imageId: "mansion-room-image", bundledAssetPath: null }]),
+        createdAt,
+        createdAt,
+      );
+      db.prepare(
+        `INSERT INTO debate_mystery_mansion_bundle_assets
+          (bundle_id, user_id, room_id, image_id, created_at)
+         VALUES ('mansion-1', 'u1', 'room-1', 'mansion-room-image', ?)`,
+      ).run(createdAt);
+
+      const registry = createPrismDomainCapabilityRegistry();
+      assert.throws(
+        () =>
+          registry.createProposal({
+            context: context(db),
+            capabilityId: "images.delete",
+            input: { imageId: "mansion-room-image" },
+          }),
+        /still used by Saved Whodunnit mansion/u,
+      );
+      assert.ok(db.prepare("SELECT id FROM images WHERE id = 'mansion-room-image'").get());
+    } finally {
+      closeTestDatabase(db);
+    }
+  });
+
   it("blocks legacy single-image deletion when the reusable asset is still in use", () => {
     const db = fixture();
     try {

@@ -2073,6 +2073,15 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       UNIQUE(user_id, host_bot_id),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS botcast_stage_presets (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      stage_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS botcast_host_recovery_candidates (
       user_id TEXT NOT NULL,
       show_id TEXT NOT NULL,
@@ -2323,6 +2332,52 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     );
     CREATE INDEX IF NOT EXISTS idx_debate_mystery_v2_jobs_claim
       ON debate_mystery_v2_jobs(status, leased_until, updated_at);
+    CREATE TABLE IF NOT EXISTS debate_mystery_v2_checkpoints (
+      session_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      checkpoint_key TEXT NOT NULL,
+      pass_number INTEGER CHECK(pass_number IS NULL OR pass_number >= 0),
+      stage TEXT NOT NULL,
+      payload_hash TEXT NOT NULL,
+      elapsed_ms INTEGER NOT NULL CHECK(elapsed_ms >= 0),
+      completed_at TEXT NOT NULL,
+      PRIMARY KEY(session_id, checkpoint_key),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(session_id) REFERENCES debate_sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_debate_mystery_v2_checkpoints_timing
+      ON debate_mystery_v2_checkpoints(user_id, session_id, pass_number, completed_at);
+    CREATE TABLE IF NOT EXISTS debate_mystery_mansion_bundles (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      source_session_id TEXT,
+      name TEXT NOT NULL,
+      floors INTEGER NOT NULL CHECK(floors >= 1),
+      total_rooms INTEGER NOT NULL CHECK(total_rooms >= 1),
+      suspect_count INTEGER NOT NULL CHECK(suspect_count >= 1),
+      style_json TEXT NOT NULL,
+      layout_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(user_id, source_session_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(source_session_id) REFERENCES debate_sessions(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_debate_mystery_mansion_bundles_user_updated
+      ON debate_mystery_mansion_bundles(user_id, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS debate_mystery_mansion_bundle_assets (
+      bundle_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      room_id TEXT NOT NULL,
+      image_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(bundle_id, room_id, image_id),
+      FOREIGN KEY(bundle_id) REFERENCES debate_mystery_mansion_bundles(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(image_id) REFERENCES images(id) ON DELETE RESTRICT
+    );
+    CREATE INDEX IF NOT EXISTS idx_debate_mystery_mansion_bundle_assets_image
+      ON debate_mystery_mansion_bundle_assets(user_id, image_id);
     CREATE TABLE IF NOT EXISTS debate_mystery_audio_manifests (
       session_id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,

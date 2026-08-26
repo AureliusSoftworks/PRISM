@@ -9,7 +9,6 @@ export const BOT_AVATAR_COMPACT_ENTER_MAX_PX = 300;
 export const BOT_AVATAR_COMPACT_EXIT_MIN_PX = 300;
 
 export type BotAvatarMicroPresentation =
-  | "face"
   | "glyph"
   | "block"
   | "pixel";
@@ -17,11 +16,10 @@ export type BotAvatarMicroPresentation =
 export function botAvatarMicroPresentationForSize(
   renderedSizePx: number | null | undefined,
 ): BotAvatarMicroPresentation {
-  if (!Number.isFinite(renderedSizePx ?? Number.NaN)) return "face";
+  if (!Number.isFinite(renderedSizePx ?? Number.NaN)) return "glyph";
   if (renderedSizePx! <= BOT_AVATAR_MICRO_PIXEL_MAX_PX) return "pixel";
   if (renderedSizePx! <= BOT_AVATAR_MICRO_BLOCK_MAX_PX) return "block";
-  if (renderedSizePx! <= BOT_AVATAR_MICRO_FEATURES_HIDE_MAX_PX) return "glyph";
-  return "face";
+  return "glyph";
 }
 
 const AVATAR_RENDERED_SIZE_TIER_RANK: Record<AvatarRenderedSizeTier, number> = {

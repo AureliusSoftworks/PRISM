@@ -597,7 +597,7 @@ function mysterySessionRequest(
     },
     evidence: { version: DEBATE_SCHEMA_VERSION, notes: "", sources: [], exhibits: [], frozenAt: null },
     moderatorTitle: normalizeDebateModeratorTitle(
-      courtSetup.moderatorTitle ?? "Judge",
+      courtSetup.moderatorTitle ?? "The Court",
     ),
     moderatorBotId: config.judgeBotId,
     playerJudgeUsesPrism: config.judgeBotId === "prism:player-judge",

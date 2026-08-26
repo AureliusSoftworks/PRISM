@@ -447,59 +447,18 @@ describe("chatMiniBotAvatar", () => {
     assert.match(pageSource, /\{renderAvatarDetailsInk\("above-face"\)\}/);
   });
 
-  it("uses one correctly oriented static micro renderer with flat pixels and Ink", () => {
+  it("uses one glyph-only micro renderer without facial art or Avatar Details Ink", () => {
     assert.match(pageSource, /function BotAvatarMicroRenderer\(/);
     const microFaceFn = pageSource.slice(
       pageSource.indexOf("function BotAvatarMicroRenderer("),
       pageSource.indexOf("function MessageMoodFace("),
     );
     assert.match(microFaceFn, /<BotAvatarMicro/);
-    assert.match(microFaceFn, /avatarDetails=\{props\.avatarDetails\}/);
     assert.match(microFaceFn, /renderSizePx=\{props\.renderSizePx\}/);
-    assert.match(microFaceFn, /scheduleKey=\{props\.scheduleKey\}/);
-    assert.match(microComponentSource, /avatarDetails\?: BotAvatarDetailsV1 \| null/);
-    assert.match(microComponentSource, /<AvatarDetailsMask/);
-    assert.match(microComponentSource, /detailLevel="audience"/);
-    assert.match(microComponentSource, /coreColor="ink"/);
     assert.match(
       microComponentSource,
-      /color=\{BOT_AVATAR_MICRO_PHOSPHOR_COLOR\}/,
-      "Micro Ink must remain white phosphor instead of borrowing the orb accent",
-    );
-    assert.match(
-      microComponentSource,
-      /--bot-avatar-micro-face-phosphor-color[\s\S]{0,100}BOT_AVATAR_MICRO_PHOSPHOR_COLOR/,
-      "Micro face glyphs must share the white-only phosphor contract",
-    );
-    assert.match(
-      microComponentSource,
-      /`\$\{styles\.messageMoodCoffeeFace\} \$\{styles\.messageMoodMicroFace\}`/,
-    );
-    assert.match(microComponentSource, /faceEyeMovement="still"/);
-    assert.match(microComponentSource, /showQuestionMark=\{false\}/);
-    assert.match(microComponentSource, /motionMode="static"/);
-    assert.match(microComponentSource, /enabled=\{false\}/);
-    assert.match(microComponentSource, /hardPixels/);
-    assert.match(microComponentSource, /forceBlinkPhase="open"/);
-    assert.match(microComponentSource, /coffeeSeatPlateGlyph\([\s\S]*?"closed"/);
-    assert.match(microComponentSource, /isTalking\?: boolean/);
-    assert.match(microComponentSource, /mouthShape\?: ZenLiveBotMouthShape \| null/);
-    assert.match(microComponentSource, /function microAvatarMouthOpen/);
-    assert.match(
-      microComponentSource,
-      /if \(args\.mouthShape == null\) return Boolean\(args\.isTalking\)/,
-      "Micro may use talking only when no live mouth pose is available",
-    );
-    assert.match(
-      pageSource,
-      /<BotAvatarMicro[\s\S]{0,180}?isTalking=\{talking\}[\s\S]{0,240}?className=\{styles\.botGroupWaitingRoomMicroBot\}/,
-      "binary-only Micro consumers must still receive the talking fallback",
-    );
-    assert.match(microComponentSource, /mouthOpen \? "0" : props\.faceStyle\?\.mouthCharacter/);
-    assert.match(microComponentSource, /mouthShape="closed"/);
-    assert.match(
-      microComponentSource,
-      /\["--coffee-plate-emoji-face-scale-y" as string\]:\s*BOT_AVATAR_CANONICAL_FACE_SCALE_Y/,
+      /--bot-avatar-micro-glyph-color[\s\S]{0,100}BOT_AVATAR_MICRO_GLYPH_COLOR/,
+      "Micro glyphs retain the shared white-phosphor contract",
     );
     assert.match(microComponentSource, /data-avatar-render-tier="micro"/);
     assert.match(microComponentSource, /botAvatarMicroPresentationForSize\(props\.renderSizePx\)/);
@@ -509,8 +468,8 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.match(
       microComponentSource,
-      /presentation === "glyph" \? \(\s*<span className=\{styles\.botAvatarMicroGlyph\}>\{props\.glyph\}<\/span>/,
-      "28px Micro avatars should replace face and Ink with the identity glyph",
+      /<span className=\{styles\.botAvatarMicroGlyph\}>\{props\.glyph\}<\/span>/,
+      "Every readable Micro presentation must use the identity glyph",
     );
     assert.match(microComponentSource, /showIdentityPixel \? \(/);
     assert.match(microComponentSource, /styles\.botAvatarMicroIdentityPixel/);
@@ -518,27 +477,18 @@ describe("chatMiniBotAvatar", () => {
     assert.match(microComponentSource, /normalizeAccentForTheme\(identityColor, "dark"\)/);
     assert.match(microComponentSource, /normalizeAccentForTheme\(identityColor, "light"\)/);
     assert.match(microComponentSource, /data-bot-avatar-micro-screen="true"/);
-    assert.match(microComponentSource, /styles\.botAvatarMicroScreenContent/);
-    assert.match(microComponentSource, /styles\.botAvatarMicroFaceRig/);
-    assert.doesNotMatch(microComponentSource, /data-talking|botAvatarMicroTalkingGlow/);
+    assert.doesNotMatch(
+      microComponentSource,
+      /AvatarDetailsMask|CoffeeSeatPlateEmoji|faceStyle|isTalking|mouthShape|scheduleKey|botAvatarMicroFaceRig|botAvatarMicroInk/,
+    );
     assert.match(pageCssSource, /\[data-variant="micro"\]/);
     assert.match(
       pageCssSource,
       /\.messageMoodBadge\[data-face="coffee"\]\[data-variant="micro"\]\s*\{[^}]*border:\s*1px solid/,
     );
-    assert.match(pageCssSource, /\.messageMoodMicroFace\s*\{[^}]*font-size:\s*12px/);
     assert.match(
       pageCssSource,
-      /\.messageMoodMicroFace\s*\{[^}]*color:\s*var\(--bot-avatar-micro-face-phosphor-color, #ffffff\)/,
-    );
-    assert.match(
-      pageCssSource,
-      /\.themeLight \.messageMoodMicroFace\s*\{[^}]*color:\s*var\(--bot-avatar-micro-face-phosphor-color, #ffffff\)/,
-    );
-    assert.match(pageCssSource, /\.botAvatarMicroInk\s*\{[^}]*position:\s*absolute/);
-    assert.match(
-      pageCssSource,
-      /\.botAvatarMicroGlyph\s*\{[^}]*place-items:\s*center;[^}]*color:\s*var\(--bot-avatar-micro-face-phosphor-color, #ffffff\)/,
+      /\.botAvatarMicroGlyph\s*\{[^}]*place-items:\s*center;[^}]*color:\s*var\(--bot-avatar-micro-glyph-color, #ffffff\)/,
     );
     assert.match(pageCssSource, /\.botAvatarMicroGlyph > svg\s*\{[^}]*width:\s*64%;[^}]*height:\s*64%/);
     assert.match(
@@ -561,10 +511,6 @@ describe("chatMiniBotAvatar", () => {
     assert.match(
       pageCssSource,
       /\[data-variant="micro"\],\s*\.messageMoodBadge\[data-face="coffee"\]\[data-variant="micro"\] \*\s*\{[^}]*animation:\s*none !important;[^}]*transition:\s*none !important/,
-    );
-    assert.match(
-      pageCssSource,
-      /\.messageMoodMicroFace \[data-crt-glyph-layer="true"\]::before\s*\{[^}]*display:\s*none/,
     );
     assert.match(
       pageSource,

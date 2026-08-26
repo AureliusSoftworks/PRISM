@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
+import {
+  debateMysteryV2ExaminationCompletesRoom,
+  debateMysteryV2LensClickTarget,
+  debateMysteryV2RoomComplete,
+  resolveDebateMysteryV2Lens,
+} from "./debateMysteryV2Lens.ts";
+import { formatDebateMysteryV2ForgeErrorDetails } from "./debateMysteryV2ForgeFailureDetails.ts";
+import {
+  debateMysteryForgeAuthoritativePercent,
+  formatDebateMysteryForgeElapsed,
+  formatDebateMysteryForgeEta,
+} from "./debateMysteryV2ForgeProgress.ts";
 
 const experienceSource = readFileSync(
   new URL("./DebateMysteryV2Experience.tsx", import.meta.url),
@@ -12,6 +24,14 @@ const setupSource = readFileSync(
 );
 const cssSource = readFileSync(
   new URL("./debateMysteryV2.module.css", import.meta.url),
+  "utf8",
+);
+const signalActionSource = readFileSync(
+  new URL("./SignalVoiceActionText.tsx", import.meta.url),
+  "utf8",
+);
+const signalActionCssSource = readFileSync(
+  new URL("./SignalVoiceActionText.module.css", import.meta.url),
   "utf8",
 );
 const storageSource = readFileSync(
@@ -66,6 +86,24 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(cssSource, /animation:\s*roomDescend[^;]+backwards/u);
   });
 
+  it("keeps unseen occupants off the mansion and stages the finite first-visit reveal", () => {
+    assert.match(experienceSource, /const roomSuspects = room\.visited[\s\S]*\? state\.suspects\.filter[\s\S]*: \[\]/u);
+    assert.match(experienceSource, /roomIntroductionPhase = currentRoom[\s\S]*state\.roomIntroductions\[currentRoom\.id\]/u);
+    assert.match(experienceSource, /roomIntroductionAwaitingContinue = roomIntroductionPhase === "casekeeper"/u);
+    assert.match(experienceSource, /action: "advance_room_introduction"/u);
+    assert.match(experienceSource, /action: "complete_room_introduction"/u);
+    assert.match(experienceSource, /roomIntroductionPersonaActive/u);
+    assert.match(experienceSource, /action\.action === "advance_room_introduction"[\s\S]*startWhodunnitInterrogation\(exchange/u);
+    assert.match(experienceSource, /!roomIntroductionActive \? <nav className=\{styles\.investigationCommands\}/u);
+    assert.match(experienceSource, /!roomIntroductionActive \? <header className=\{styles\.investigationHeader\}/u);
+    assert.match(experienceSource, /!roomIntroductionActive \? <div className=\{styles\.roomTitle\}/u);
+    assert.match(experienceSource, /roomIntroductionPhase !== "casekeeper" \? <div className=\{styles\.roomShade\}/u);
+    assert.match(experienceSource, /data-blurred=\{roomActorVisible/u);
+    assert.match(experienceSource, /roomIntroductionAwaitingContinue \? "Casekeeper"/u);
+    assert.match(experienceSource, /activeAudioRef\.current \|\|/u);
+    assert.match(cssSource, /\.roomScene\[data-room-introduction\]\s*\{\s*min-height:\s*100dvh/u);
+  });
+
   it("uses only the completed local pack during gameplay", () => {
     assert.match(experienceSource, /mystery-audio\/\$\{encodeURIComponent\(lineId\)\}/u);
     assert.match(experienceSource, /Premium voices are unavailable in Whodunnit V2/u);
@@ -80,27 +118,50 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /Prosecutor/u);
     assert.match(experienceSource, /splitDebateMysteryStageActionTextV2\(roomDisplayedDialogue\.visibleText/u);
     assert.match(experienceSource, /roomDisplayedDialogue\?\.stageActionText \?\? roomDialogueDelivery\.stageActionText/u);
-    assert.match(experienceSource, /className=\{styles\.roomActorAction\} role="status"/u);
-    assert.match(experienceSource, /revealedSpeechText\(roomDialogueDelivery\.spokenText, captionSpeechTiming\)/u);
-    assert.match(cssSource, /\.roomActorAction\s*\{[\s\S]*bottom:\s*calc\(100% \+ 0\.7rem\)/u);
+    assert.match(experienceSource, /mysterySignalActionPresentation\([\s\S]*roomDisplayedDialogue/u);
+    assert.match(experienceSource, /roomSuspectStageActionText && roomActionPresentation \? <SignalVoiceActionText/u);
+    assert.match(experienceSource, /key=\{`suspect:\$\{roomDisplayedDialogue\?\.nodeId/u);
+    assert.match(experienceSource, /revealedSpeechText\(whodunnitCaptionSpeechText\(roomDialogueDelivery\.spokenText\), captionSpeechTiming\)/u);
     assert.match(experienceSource, /activeStatement\?\.stageActionText \?\? activeStatementDelivery\.stageActionText/u);
-    assert.match(experienceSource, /className=\{styles\.witnessAction\} role="status"/u);
-    assert.match(experienceSource, /revealedSpeechText\(activeStatementDelivery\.spokenText, captionSpeechTiming\)/u);
-    assert.match(cssSource, /\.witnessAction\s*\{[\s\S]*top:\s*0\.65rem/u);
+    assert.match(experienceSource, /courtWitnessActionPresentation \? <SignalVoiceActionText/u);
+    assert.match(experienceSource, /revealedSpeechText\(whodunnitCaptionSpeechText\(activeStatementDelivery\.spokenText\), captionSpeechTiming\)/u);
+    assert.match(experienceSource, /<SignalVoiceActionText key=\{`prosecution:[\s\S]*\.\.\.dialogueActionPresentation/u);
+    assert.match(signalActionSource, /data-signal-voice-action="true"/u);
+    assert.match(signalActionCssSource, /transition:\s*opacity 120ms linear, transform 180ms ease/u);
+    assert.match(signalActionCssSource, /\[data-phase="entering"\][\s\S]*translateY\(3px\)/u);
+    assert.match(signalActionCssSource, /\[data-phase="exiting"\][\s\S]*translateY\(-4px\)/u);
+    assert.match(signalActionCssSource, /@media \(prefers-reduced-motion: reduce\)[\s\S]*transition:\s*none/u);
+    assert.doesNotMatch(cssSource, /\.roomActorAction|\.counselAction|\.witnessAction/u);
     assert.match(experienceSource, /window\.requestAnimationFrame\(updateSpeechTiming\)/u);
+    assert.match(experienceSource, /audio\.addEventListener\("playing", updateSpeechTiming, \{ once: true \}\)/u);
+    assert.match(experienceSource, /audio\.addEventListener\("ended", completeBeat, \{ once: true \}\)/u);
+    assert.match(experienceSource, /audio\.addEventListener\("error", completeBeat, \{ once: true \}\)/u);
+    assert.match(experienceSource, /audio\.addEventListener\("pause", completeBeat, \{ once: true \}\)/u);
     assert.match(experienceSource, /AUDIO_OFF_REVEAL_MS_PER_CHARACTER/u);
-    assert.match(experienceSource, /onDoubleClick=\{finishCurrentDialogue\}/u);
+    assert.match(experienceSource, /startWhodunnitInterrogation\(exchange, nextState\.config\.prosecutorBotId, suspectSeatId\)/u);
+    assert.match(experienceSource, /whodunnitInterrogationBeatMs\(interrogationPhase\)/u);
+    assert.match(experienceSource, /interrogationPhase === "prosecutor_speaking"/u);
+    assert.match(experienceSource, /whodunnitInterrogationCompletionIsCurrent\(audioGeneration, audioGenerationRef\.current\)/u);
+    assert.match(experienceSource, /whodunnitInterrogationFinishDecision\(/u);
+    assert.match(experienceSource, /audioMouthActive && roomDisplayedDialogue\?\.speakerSeatId === currentSuspect\?\.seatId/u);
+    assert.match(experienceSource, /audioMouthActive && !heldDialogue/u);
+    assert.match(experienceSource, /const roomSpeechInkVisible = !dialoguePerformanceActive \|\| interrogationPhase === "handoff"/u);
+    assert.match(experienceSource, /facing: "left", speechInkVisible: roomSpeechInkVisible/u);
+    assert.match(experienceSource, /facing: "right", speechInkVisible: roomSpeechInkVisible/u);
+    assert.match(setupSource, /defaultRestingMouthCharacter: "\|"/u);
+    assert.match(setupSource, /speechInkVisible: performance\?\.speechInkVisible/u);
+    assert.match(experienceSource, /roomIntroductionAwaitingContinue && currentRoom[\s\S]*action: "advance_room_introduction"[\s\S]*finishCurrentDialogue/u);
     assert.match(experienceSource, /activeAudioRef\.current\?\.pause\(\)/u);
     assert.match(experienceSource, /setHeldDialogue\(queuedDialogue\)/u);
-    assert.match(experienceSource, /speechTiming: roomDisplayedDialogue\?\.speakerSeatId === currentSuspect\?\.seatId/u);
     assert.match(experienceSource, /roomProsecutorActive/u);
-    assert.match(experienceSource, /roomActorVisible = Boolean\(currentBot && command !== "examine"\)/u);
+    assert.match(experienceSource, /const roomActorVisible = Boolean\([\s\S]*roomIntroductionPersonaActive/u);
     assert.match(experienceSource, /className=\{styles\.roomBackdrop\} data-blurred=\{roomActorVisible/u);
     assert.match(experienceSource, /className=\{styles\.roomParallaxLayer\}/u);
     assert.match(experienceSource, /roomParallaxEnabled = Boolean\([\s\S]*command === "examine"/u);
     assert.match(experienceSource, /if \(!roomParallaxEnabled\) setRoomParallax\(\{ x: 0, y: 0 \}\)/u);
     assert.match(experienceSource, /handleRoomPointerLeave/u);
     assert.match(experienceSource, /roomActorVisible && currentBot/u);
+    assert.match(experienceSource, /\$\{styles\.roomActor\} \$\{styles\.roomProsecutorActor\}/u);
     assert.match(experienceSource, /roomContextKey = state\.roomView === "room" \? state\.currentRoomId : null/u);
     assert.match(experienceSource, /state\.dialogueHistory\.length > roomDialogueBaseline\.historyCount/u);
     assert.match(experienceSource, /setRoomDialogueBaseline\(\{[\s\S]*historyCount: state\.dialogueHistory\.length/u);
@@ -111,7 +172,7 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(cssSource, /\.hotspots button\s*\{[\s\S]*width:\s*clamp\(3\.25rem, 4\.5vw, 5rem\)/u);
     assert.match(cssSource, /\.hotspots button\s*\{[\s\S]*border-radius:\s*50%/u);
     assert.match(cssSource, /\.roomActor\s*\{[\s\S]*left:\s*50%/u);
-    assert.match(cssSource, /\.roomActor\s*\{[\s\S]*bottom:\s*17rem/u);
+    assert.match(cssSource, /\.roomActor\s*\{[\s\S]*bottom:\s*19\.5rem/u);
     assert.match(cssSource, /\.roomActor\s*\{[\s\S]*transform:\s*translateX\(-50%\)/u);
     assert.doesNotMatch(cssSource, /\.roomActor\s*\{[\s\S]{0,240}right:\s*8%/u);
     assert.match(cssSource, /\.roomBackdrop\[data-blurred="true"\]\s*\{[\s\S]*filter:\s*blur\(12px\)/u);
@@ -119,7 +180,97 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(cssSource, /--room-parallax-x/u);
     assert.match(cssSource, /\.roomParallaxLayer\s*\{[\s\S]*translate3d\(var\(--room-parallax-x/u);
     assert.match(cssSource, /\.roomActor\[data-prosecutor-speaking="true"\]/u);
+    assert.match(cssSource, /\[data-interrogation-phase="prosecutor_entrance"\]/u);
+    assert.match(experienceSource, /className=\{styles\.roomActorDrift\}/u);
+    assert.match(experienceSource, /mysteryRoomActorDriftStyle\(`\$\{props\.session\.id\}:\$\{currentBot\.id\}:suspect`\)/u);
+    assert.match(experienceSource, /mysteryRoomActorDriftStyle\(`\$\{props\.session\.id\}:\$\{prosecutorBot\.id\}:prosecutor`\)/u);
+    assert.match(cssSource, /@keyframes roomActorIdleDrift[\s\S]*translate3d\(-4px, 1px, 0\)[\s\S]*translate3d\(7px, -2px, 0\)[\s\S]*translate3d\(-6px, 2px, 0\)/u);
+    assert.match(cssSource, /\.roomActorDrift\s*\{[\s\S]*animation:\s*roomActorIdleDrift var\(--room-actor-drift-duration/u);
+    assert.match(cssSource, /prefers-reduced-motion: reduce[\s\S]*\.roomActorDrift\s*\{\s*animation:\s*none/u);
     assert.match(cssSource, /prefers-reduced-motion: reduce/u);
+  });
+
+  it("groups typed Talk subjects, preserves room labels, and keeps records in Present", () => {
+    assert.match(experienceSource, /MYSTERY_TALK_CATEGORY_ORDER = \["person", "motive", "alibi", "room", "general"\]/u);
+    assert.match(experienceSource, /topic\.subject\.category === category/u);
+    assert.match(experienceSource, /subject\.category !== "room"/u);
+    assert.match(experienceSource, /room\.id === subject\.roomId/u);
+    assert.match(experienceSource, /return `\$\{roomName\} · \$\{topic\.label\}`/u);
+    assert.match(experienceSource, /Evidence and testimony stay in Present/u);
+    assert.match(experienceSource, /data-blocked=\{!topic\.unlocked \? "true"/u);
+    assert.match(experienceSource, /disabled=\{busy \|\| dialoguePerformanceActive \|\| !topic\.unlocked\}/u);
+    assert.doesNotMatch(experienceSource, /topic\.suspectSeatId === currentSuspect\.seatId && topic\.unlocked/u);
+    assert.match(experienceSource, /command === "present"[\s\S]*renderRecordButtons\(\(record\) => void sendAction\(\{ action: "present_to_suspect"/u);
+    assert.match(cssSource, /\.topicGroup h3/u);
+    assert.match(cssSource, /\.topicList button\[data-blocked="true"\]/u);
+  });
+
+  it("keeps examination silent, guided by an invisible lens, and closes the room after its final observation", () => {
+    assert.match(experienceSource, /delivery === "text_only"/u);
+    assert.match(experienceSource, /nodeId\.startsWith\("examine-"\)/u);
+    assert.match(experienceSource, /const playbackLineId = dialogueIsTextOnly \? null/u);
+    assert.match(experienceSource, /const lensActive = Boolean\([\s\S]*currentRoomUnexaminedHotspots\.length > 0/u);
+    assert.match(experienceSource, /data-lens-active=\{lensActive/u);
+    assert.match(experienceSource, /setInvestigationLens\(resolveDebateMysteryV2Lens\(/u);
+    assert.match(experienceSource, /onClick=\{handleRoomInvestigationClick\}/u);
+    assert.match(experienceSource, /debateMysteryV2LensClickTarget\(lens\)/u);
+    assert.match(experienceSource, /style=\{\{ left: `\$\{investigationLens\.x\}%`, top: `\$\{investigationLens\.y\}%`/u);
+    assert.match(experienceSource, /onFocus=\{\(\) => \{ const center = debateMysteryV2HotspotCenter/u);
+    assert.match(experienceSource, /data-examining=\{examiningHotspotId === hotspot\.id/u);
+    assert.match(experienceSource, /const roomObservationAwaitingContinue = Boolean\(/u);
+    assert.match(experienceSource, /if \(roomObservationAwaitingContinue\) \{[\s\S]*setRoomDialogueBaseline\(\{/u);
+    assert.match(experienceSource, /data-awaiting-continue=\{roomObservationAwaitingContinue \|\| roomIntroductionAwaitingContinue \? "true" : undefined\}/u);
+    assert.match(experienceSource, /roomObservationAwaitingContinue \|\| roomIntroductionAwaitingContinue \? <span className=\{styles\.dialogueContinueHint\} role="status">Click to continue<\/span>/u);
+    assert.match(experienceSource, /else if \(!roomIntroductionActive\) finishCurrentDialogue\(\)/u);
+    assert.match(experienceSource, /const lensActive = Boolean\([\s\S]*!roomObservationAwaitingContinue/u);
+    assert.match(experienceSource, /const completionCueVisible = Boolean\([\s\S]*!roomObservationAwaitingContinue/u);
+    assert.match(cssSource, /\.dialogueContinueHint\s*\{[\s\S]*animation:\s*observationContinuePulse/u);
+    assert.doesNotMatch(experienceSource, /Click to reveal/u);
+    assert.match(experienceSource, /completionCueVisible \? <div className=\{styles\.roomComplete\}/u);
+    assert.match(cssSource, /\.roomScene\[data-lens-active="true"\][\s\S]*cursor:\s*none/u);
+    assert.match(cssSource, /\.hotspots button\s*\{[\s\S]*background:\s*transparent/u);
+    assert.doesNotMatch(cssSource, /\.hotspots button::before/u);
+    assert.doesNotMatch(experienceSource, /<span>\{hotspot\.label\}<\/span>/u);
+    assert.match(cssSource, /\.investigationLens\s*\{[\s\S]*pointer-events:\s*none/u);
+    assert.match(cssSource, /--lens-proximity/u);
+    assert.match(cssSource, /width:\s*3\.05rem/u);
+    assert.match(experienceSource, /data-targeted=\{debateMysteryV2LensClickTarget\(investigationLens\) \? "true" : undefined\}/u);
+    assert.match(cssSource, /\.investigationLens\[data-targeted="true"\][\s\S]*scale\(0\.9\)/u);
+    assert.match(cssSource, /\.roomComplete\s*\{/u);
+
+    const hotspots = [
+      { id: "locked-near", polygon: [{ x: 49, y: 49 }, { x: 51, y: 51 }], unlocked: false, examined: false },
+      { id: "open-far", polygon: [{ x: 69, y: 49 }, { x: 71, y: 51 }], unlocked: true, examined: false },
+      { id: "reviewed", polygon: [{ x: 54, y: 49 }, { x: 56, y: 51 }], unlocked: true, examined: true },
+    ];
+    const lens = resolveDebateMysteryV2Lens(50, 50, hotspots);
+    assert.equal(lens.hotspotId, "open-far");
+    assert.ok(lens.proximity > 0 && lens.proximity < 1);
+    assert.deepEqual(resolveDebateMysteryV2Lens(70, 50, hotspots), {
+      x: 70,
+      y: 50,
+      proximity: 1,
+      hotspotId: "open-far",
+    });
+    assert.equal(debateMysteryV2LensClickTarget(lens), "open-far");
+    assert.equal(debateMysteryV2LensClickTarget(resolveDebateMysteryV2Lens(2, 2, hotspots)), null);
+    assert.equal(
+      debateMysteryV2LensClickTarget(resolveDebateMysteryV2Lens(70, 50, hotspots.map((hotspot) => hotspot.id === "open-far" ? { ...hotspot, examined: true } : hotspot))),
+      null,
+    );
+    assert.equal(
+      debateMysteryV2LensClickTarget(resolveDebateMysteryV2Lens(70, 50, hotspots.map((hotspot) => ({ ...hotspot, examined: true })))),
+      null,
+    );
+    assert.equal(debateMysteryV2RoomComplete(hotspots), false);
+    assert.equal(debateMysteryV2ExaminationCompletesRoom(hotspots, "open-far"), false);
+    assert.equal(
+      debateMysteryV2ExaminationCompletesRoom(
+        hotspots.map((hotspot) => hotspot.id === "locked-near" ? { ...hotspot, examined: true } : hotspot),
+        "open-far",
+      ),
+      true,
+    );
   });
 
   it("renders the full Case Forge and accessible replay-safe callouts", () => {
@@ -166,6 +317,9 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /window\.setTimeout\(\(\) => void refresh\(\), 900\)/u);
     assert.match(experienceSource, /next\.compilation\.stage !== "needs_attention"/u);
     assert.match(experienceSource, /Retry preparation/u);
+    assert.match(experienceSource, /Copy error details/u);
+    assert.match(experienceSource, /Error details copied to clipboard/u);
+    assert.match(experienceSource, /Could not copy error details\. Try again\./u);
     assert.match(experienceSource, /Continue without voices/u);
     assert.match(experienceSource, /Return to setup/u);
     assert.match(experienceSource, /Case preparation stopped/u);
@@ -173,6 +327,48 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /resume from the last durable checkpoint/u);
     assert.match(experienceSource, /needsAttention \? "error" : "active"/u);
     assert.match(cssSource, /li\[data-state="error"\]/u);
+  });
+
+  it("renders authoritative checkpoint progress with elapsed time and a learned ETA", () => {
+    assert.equal(debateMysteryForgeAuthoritativePercent(0, 5), 0);
+    assert.equal(debateMysteryForgeAuthoritativePercent(3, 5), 60);
+    assert.equal(debateMysteryForgeAuthoritativePercent(8, 5), 100);
+    assert.equal(formatDebateMysteryForgeElapsed(65_000), "1:05");
+    assert.equal(formatDebateMysteryForgeElapsed(3_665_000), "1:01:05");
+    assert.equal(formatDebateMysteryForgeEta(310_000), "Approx. 5 min remaining");
+    assert.match(experienceSource, /role="progressbar"/u);
+    assert.match(experienceSource, /ETA appears after two durable passes/u);
+    assert.match(cssSource, /forgeProgressShimmer/u);
+  });
+
+  it("formats only public Case Forge failure details for copying", () => {
+    const details = formatDebateMysteryV2ForgeErrorDetails("session-public-123", {
+      version: 2,
+      jobId: "case-public-456",
+      stage: "needs_attention",
+      attempt: 3,
+      completedPasses: 2,
+      totalPasses: 5,
+      preparedAudioCount: 0,
+      requiredAudioCount: 0,
+      retryable: true,
+      publicFailureCode: "CASE_FORGE_COMPILATION_STOPPED",
+      publicFailureStage: "writing_case",
+      spoilerSafeMessage: "Case preparation needs attention",
+      startedAt: "2026-08-25T18:20:00.000Z",
+      elapsedMs: 300_000,
+      approximateRemainingMs: null,
+      etaBasisPasses: 2,
+      updatedAt: "2026-08-25T18:25:00.000Z",
+    });
+    assert.match(details, /CASE_FORGE_COMPILATION_STOPPED/u);
+    assert.match(details, /Case preparation needs attention/u);
+    assert.match(details, /session-public-123/u);
+    assert.match(details, /case-public-456/u);
+    assert.match(details, /Failed stage: Writing Case \(writing_case\)/u);
+    assert.match(details, /Attempt: 3/u);
+    assert.match(details, /2026-08-25T18:25:00\.000Z/u);
+    assert.doesNotMatch(details, /Case Bible|culprit|proof route|prompt|secret|credential|juror|Power|private payload/iu);
   });
 
   it("copies both authorized review records from the completed verdict", () => {
@@ -201,6 +397,25 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(setupSource, /format === "whodunnit" && role === "judge"/u);
     assert.match(setupSource, /Premium unavailable for Whodunnit V2/u);
     assert.match(setupSource, /props\.initialFormat === "whodunnit"/u);
+  });
+
+  it("offers a truthful Theme, Forge asset, Archive, and saved-mansion setup", () => {
+    assert.match(setupSource, /Theme \/ Spark/u);
+    assert.match(setupSource, /placeholder="Surprise me/u);
+    assert.match(setupSource, /Synthesize assets in Case Forge/u);
+    assert.match(setupSource, /Create exhibit images with Debate’s existing asset pipeline/u);
+    assert.match(setupSource, /Coming later · available only during Case Forge/u);
+    assert.match(setupSource, /Coming later · investigation music remains unchanged/u);
+    assert.match(setupSource, /mysteryEvidenceAssetSynthesis/u);
+    assert.match(setupSource, /mysteryMansionBundleId/u);
+    assert.match(setupSource, /mystery-mansion\/save/u);
+    assert.match(experienceSource, /Save mansion level/u);
+    assert.match(setupSource, /session\.format === "whodunnit"/u);
+    assert.match(setupSource, /Open evidence assets/u);
+    assert.match(setupSource, /Skip investigation/u);
+    assert.match(setupSource, /investigationMode: mysterySkipInvestigation \? "court_only" : "full"/u);
+    assert.match(setupSource, /court-only cases exclude room assets/u);
+    assert.match(experienceSource, /state\.config\.investigationMode === "court_only" \? "Begin Trial"/u);
   });
 
   it("routes Spectator through editable Prosecutor findings before watch-only court", () => {

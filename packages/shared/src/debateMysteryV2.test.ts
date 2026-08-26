@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  debateMysteryTalkTopicMirrorsRecordV2,
   debateMysteryClassifyVerdictV2,
   debateMysteryCredibilityMaximumV2,
   debateMysteryEyewitnessChanceV2,
+  debateMysteryHouseStyleV2,
+  debateMysteryMansionBundleEligibleV2,
   debateMysteryPremiumAvailableV2,
   debateMysterySpectatorEvidenceReferencesV2,
   emptyDebateMysteryMutationsV2,
   emptyDebateMysteryRequirementsV2,
+  normalizeDebateMysteryTalkSubjectV2,
   validateDebateMysteryAudioManifestV1,
   validateDebateMysteryDialogueGraphV2,
   resolveDebateMysteryConfigV2,
@@ -15,6 +19,8 @@ import {
   type DebateMysteryAudioManifestV1,
   type DebateMysteryDialogueGraphV2,
   type DebateMysteryDialogueNodeV2,
+  type DebateMysteryRecordReferenceV2,
+  type DebateMysteryRoomV2,
   type DebateMysterySpokenLineV2,
   type DebateMysteryWitnessChapterV2,
 } from "./debateMysteryV2.ts";
@@ -69,6 +75,33 @@ test("separates Whodunnit stage action from spoken dialogue", () => {
       spokenText: "That does not prove I entered the room.",
     },
   );
+});
+
+test("Talk semantics preserve rooms while filtering Case File mirrors", () => {
+  const roomSubject = normalizeDebateMysteryTalkSubjectV2({
+    value: { category: "room", subjectId: "room-archive" },
+    label: "The archive",
+    rooms: [{ id: "room-archive", name: "Optical Archive" }],
+  });
+  assert.deepEqual(roomSubject, { category: "room", roomId: "room-archive" });
+  assert.equal(debateMysteryTalkTopicMirrorsRecordV2({
+    topicId: "lead-pipe",
+    label: "The lead pipe",
+    subject: { category: "general" },
+    records: [{ reference: { kind: "evidence", id: "bloodied-lead-pipe" }, title: "Bloodied Lead Pipe" }],
+  })?.id, "bloodied-lead-pipe");
+  assert.equal(debateMysteryTalkTopicMirrorsRecordV2({
+    topicId: "archive-room",
+    label: "The lead pipe display room",
+    subject: roomSubject,
+    records: [{ reference: { kind: "evidence", id: "bloodied-lead-pipe" }, title: "Bloodied Lead Pipe" }],
+  }), null);
+  assert.equal(debateMysteryTalkTopicMirrorsRecordV2({
+    topicId: "archive-room",
+    label: "The archive",
+    subject: { category: "general" },
+    records: [{ reference: { kind: "evidence", id: "archive-exhibit" }, title: "Archive Exhibit 3" }],
+  }), null, "a one-word location label must not partially mirror an evidence title");
 });
 
 function node(
@@ -155,6 +188,75 @@ function validGraph(): DebateMysteryDialogueGraphV2 {
   };
 }
 
+const validationRecordReferences: DebateMysteryRecordReferenceV2[] = [
+  { kind: "evidence", id: "evidence-seat-1" },
+  { kind: "evidence", id: "evidence-seat-2" },
+];
+
+function graphWithPresentationGate(): DebateMysteryDialogueGraphV2 {
+  const graph = validGraph();
+  const gatedTopicId = "talk-gated-lead";
+  const gatedResponseId = "talk-gated-lead-response";
+  const topic = node(gatedTopicId, "talk_topic", {
+    speakerSeatId: null,
+    intendedRecipientSeatId: "seat-1",
+    label: "What the timing changes",
+    locationId: "room-1",
+    talkSubject: { category: "general" },
+    requirements: {
+      ...emptyDebateMysteryRequirementsV2(),
+      unlockedTopicIds: [gatedTopicId],
+    },
+    nextNodeIds: [gatedResponseId],
+  });
+  const topicResponse = node(gatedResponseId, "talk_topic", {
+    speakerSeatId: "seat-1",
+    intendedRecipientSeatId: null,
+    locationId: "room-1",
+  });
+  graph.nodes.push(topic, topicResponse);
+  graph.lines.push(line(topic.lineId!, topic.id), line(topicResponse.lineId!, topicResponse.id));
+  graph.interactionRootNodeIds.push(topic.id);
+  graph.talkTopicNodeIdsBySuspect["seat-1"]!.push(topic.id);
+
+  for (const seatId of ["seat-1", "seat-2"]) {
+    for (const reference of validationRecordReferences) {
+      const key = `${reference.kind}-${reference.id}`;
+      const promptId = `present-${seatId}-${key}`;
+      const responseId = `${promptId}-response`;
+      const prompt = node(promptId, "present_reaction", {
+        speakerSeatId: null,
+        intendedRecipientSeatId: seatId,
+        locationId: "room-1",
+        requirements: {
+          ...emptyDebateMysteryRequirementsV2(),
+          admittedRecordIds: [`${reference.kind}:${reference.id}`],
+        },
+        recordReferences: [reference],
+        nextNodeIds: [responseId],
+      });
+      const response = node(responseId, "present_reaction", {
+        speakerSeatId: seatId,
+        locationId: "room-1",
+        recordReferences: [reference],
+      });
+      graph.nodes.push(prompt, response);
+      graph.lines.push(line(prompt.lineId!, prompt.id), line(response.lineId!, response.id));
+      graph.interactionRootNodeIds.push(prompt.id);
+      graph.presentNodeIdsBySuspect[seatId]!.push(prompt.id);
+    }
+  }
+  graph.presentationGates = [{
+    id: "gate-pivotal-record",
+    requiredRecord: validationRecordReferences[0]!,
+    requiredSuspectSeatId: "seat-1",
+    correctPresentNodeId: "present-seat-1-evidence-evidence-seat-1",
+    unlocks: [{ kind: "topic", topicNodeId: gatedTopicId }],
+    requiredForProgression: true,
+  }];
+  return graph;
+}
+
 test("V2 graph validation proves every suspect has a reachable statement-level proof route", () => {
   const graph = validGraph();
   const result = validateDebateMysteryDialogueGraphV2({
@@ -182,6 +284,70 @@ test("V2 graph validation rejects a suspect without cross-examination", () => {
   });
   assert.equal(result.valid, false);
   assert.ok(result.errors.some((error) => error.includes("seat-2 has no cross-examination")));
+});
+
+test("presentation-gate validation proves an exact finite record and recipient route", () => {
+  const graph = graphWithPresentationGate();
+  const valid = validateDebateMysteryDialogueGraphV2({
+    graph,
+    suspectSeatIds: ["seat-1", "seat-2"],
+    recordReferences: validationRecordReferences,
+    roomIds: ["room-1"],
+  });
+  assert.equal(valid.valid, true, valid.errors.join("\n"));
+  assert.ok(valid.reachableNodeIds.includes("talk-gated-lead"));
+
+  const wrongRecipient = structuredClone(graph);
+  wrongRecipient.presentationGates![0]!.requiredSuspectSeatId = "seat-2";
+  const wrongRecipientResult = validateDebateMysteryDialogueGraphV2({
+    graph: wrongRecipient,
+    suspectSeatIds: ["seat-1", "seat-2"],
+    recordReferences: validationRecordReferences,
+    roomIds: ["room-1"],
+  });
+  assert.equal(wrongRecipientResult.valid, false);
+  assert.ok(wrongRecipientResult.errors.some((error) => error.includes("no exact finite Present route")));
+});
+
+test("presentation-gate validation rejects bad targets, self-locks, and unreachable required records", () => {
+  const badTarget = graphWithPresentationGate();
+  badTarget.presentationGates![0]!.unlocks = [{
+    kind: "hotspot",
+    roomId: "room-1",
+    hotspotId: "missing-hotspot",
+    nodeId: "missing-examination",
+  }];
+  const badTargetResult = validateDebateMysteryDialogueGraphV2({
+    graph: badTarget,
+    suspectSeatIds: ["seat-1", "seat-2"],
+    recordReferences: validationRecordReferences,
+    roomIds: ["room-1"],
+    hotspotIdsByRoom: { "room-1": ["known-hotspot"] },
+  });
+  assert.ok(badTargetResult.errors.some((error) => error.includes("targets invalid hotspot")));
+
+  const selfLocked = graphWithPresentationGate();
+  selfLocked.presentationGates![0]!.unlocks = [{
+    kind: "record_discovery",
+    record: validationRecordReferences[0]!,
+  }];
+  const selfLockedResult = validateDebateMysteryDialogueGraphV2({
+    graph: selfLocked,
+    suspectSeatIds: ["seat-1", "seat-2"],
+    recordReferences: validationRecordReferences,
+    roomIds: ["room-1"],
+  });
+  assert.ok(selfLockedResult.errors.some((error) => error.includes("self-locks on required record")));
+
+  const unreachable = graphWithPresentationGate();
+  unreachable.nodes.find((entry) => entry.id === "checkpoint-seat-1")!.mutations.admitRecordIds = [];
+  const unreachableResult = validateDebateMysteryDialogueGraphV2({
+    graph: unreachable,
+    suspectSeatIds: ["seat-1", "seat-2"],
+    recordReferences: validationRecordReferences,
+    roomIds: ["room-1"],
+  });
+  assert.ok(unreachableResult.errors.some((error) => error.includes("record is unreachable before the gate")));
 });
 
 test("eyewitness validation requires two discoverable independent alibi supports", () => {
@@ -250,6 +416,67 @@ test("difficulty, eyewitness, Premium, and verdict contracts are deterministic",
   assert.equal(debateMysteryPremiumAvailableV2(), false);
   assert.equal(debateMysteryClassifyVerdictV2({ legalResult: "guilty", accusedIsCulprit: false, proofEstablished: true, proofSafe: true }), "wrongful_conviction");
   assert.equal(debateMysteryClassifyVerdictV2({ legalResult: "not_guilty", accusedIsCulprit: true, proofEstablished: true, proofSafe: true }), "acquittal_despite_proof");
+});
+
+test("Theme, asset synthesis, and reusable mansion eligibility freeze deterministically", () => {
+  const resolved = resolveDebateMysteryConfigV2({
+    version: 2,
+    preset: "compact",
+    difficulty: "classic",
+    artMode: "bundled",
+    trialType: "bench",
+    inspiration: "",
+    spark: "Rainy art-deco observatory",
+    assetSynthesis: { evidence: true, rooms: true as never, music: true as never },
+    mansionBundleId: "mansion-1",
+    nonce: "theme-contract",
+    suspectBotIds: ["suspect-1", "suspect-2", "suspect-3", "suspect-4"],
+    prosecutorBotId: "prosecutor",
+    rivalDefenseBotId: "defense",
+    jurorBotIds: [],
+  });
+  assert.equal(resolved.spark, "Rainy art-deco observatory");
+  assert.deepEqual(resolved.assetSynthesis, {
+    evidence: true,
+    rooms: false,
+    music: false,
+  });
+  assert.equal(resolved.investigationMode, "full");
+  const courtOnly = resolveDebateMysteryConfigV2({
+    ...resolved,
+    investigationMode: "court_only",
+    assetSynthesis: { evidence: true, rooms: true as never, music: true as never },
+  });
+  assert.equal(courtOnly.investigationMode, "court_only");
+  assert.deepEqual(courtOnly.assetSynthesis, { evidence: true, rooms: false, music: false });
+  assert.equal(resolved.mansionBundleId, "mansion-1");
+  assert.equal(
+    resolved.houseStyle.id,
+    debateMysteryHouseStyleV2("Rainy art-deco observatory").id,
+  );
+  assert.match(resolved.houseStyle.promptContract, /same mansion/iu);
+
+  const completeRoom: DebateMysteryRoomV2 = {
+    id: "room-1",
+    name: "Observatory",
+    floor: 1,
+    emoji: "◇",
+    imageId: null,
+    bundledAssetPath: "rooms/observatory.webp",
+    unlocked: true,
+    visited: true,
+    hotspots: [{
+      id: "hotspot-1",
+      label: "Telescope",
+      polygon: [],
+      examined: true,
+      unlocked: true,
+    }],
+  };
+  assert.equal(debateMysteryMansionBundleEligibleV2({ rooms: [completeRoom] }), true);
+  assert.equal(debateMysteryMansionBundleEligibleV2({
+    rooms: [{ ...completeRoom, hotspots: [{ ...completeRoom.hotspots[0]!, examined: false }] }],
+  }), false);
 });
 
 test("Spectator setup is preserved and its partner record selects only required physical proof", () => {

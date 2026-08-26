@@ -692,6 +692,25 @@ export interface BotcastStudioAtmosphereMix {
   filmGrain: number;
 }
 
+/** The reusable, show-agnostic portion of a Signal Rehearse Stage. */
+export interface BotcastStagePresetSettings {
+  studioLayout: BotcastStudioLayout;
+  cameraFraming: BotcastCameraFraming;
+  logoPlacement: BotcastLogoPlacement;
+  studioGlowTuning: BotcastStudioGlowTuning;
+  /** Per-bot gains are retained without selecting or otherwise changing a cast. */
+  voiceLevelsByBotId: BotcastVoiceLevelsByBotId;
+  atmosphereMix: BotcastStudioAtmosphereMix;
+}
+
+export interface BotcastStagePreset {
+  id: string;
+  name: string;
+  settings: BotcastStagePresetSettings;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export const BOTCAST_DEFAULT_STUDIO_FILM_GRAIN = 1;
 export const BOTCAST_STUDIO_FILM_GRAIN_MAX = 1;
 export const BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX: Readonly<BotcastStudioAtmosphereMix> = {

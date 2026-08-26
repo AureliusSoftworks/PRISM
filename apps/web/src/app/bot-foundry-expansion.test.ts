@@ -172,7 +172,14 @@ describe("Bot Foundry expansion integration", () => {
     assert.match(pageSource, /botFoundryBatchAvatarTier\(/u);
     assert.match(pageSource, /<ChatMiniBotAvatar/u);
     assert.match(pageSource, /<BotAvatarMicro/u);
-    assert.match(pageSource, /faceStyle=\{preview\.face\}/u);
+    assert.match(
+      pageSource,
+      /<BotAvatarMicro[\s\S]{0,220}glyph=\{<BotGlyph name=\{glyph\} size=\{16\} \/>\}/u,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /<BotAvatarMicro[\s\S]{0,220}(?:faceStyle|avatarDetails)=/u,
+    );
     assert.match(pageSource, /faceEyeCharacter=\{preview\.face\?\.eyeCharacter\}/u);
     assert.match(pageSource, /faceMouthCharacter=\{preview\.face\?\.mouthCharacter\}/u);
     assert.match(pageSource, /data-avatar-render-tier/u);

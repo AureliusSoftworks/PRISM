@@ -11,6 +11,7 @@ import {
   createTestDatabase,
   withTestRegistrationAcceptance,
 } from "../test-support.ts";
+import { queueBotcastEpisodeImageContext } from "../botcast.ts";
 
 const tempDir = mkdtempSync(join(tmpdir(), "prism-signal-item-association-"));
 process.env.PRISM_API_DISABLE_AUTOSTART = "1";
@@ -197,6 +198,15 @@ describe("Signal kept item persona associations", () => {
     const client = createClient();
     const userId = await register(client, "signal-item-owner@example.com");
     const { episodeId, guestBotId } = createBotGuestEpisode(userId, "owner");
+    queueBotcastEpisodeImageContext(db, userId, episodeId, {
+      imageId: "owner-ephemeral-item",
+      kind: "item",
+      name: "flower",
+      mimeType: "image/png",
+      provider: "openai",
+      model: "gpt-image-1",
+      replayEmoji: "🌸",
+    });
 
     const response = await client.request(
       "/api/assets/upload",
@@ -227,9 +237,10 @@ describe("Signal kept item persona associations", () => {
           WHERE user_id = ? AND image_id = ?`,
       )
       .all(userId, payload.imageId) as Array<{ bot_id: string; relation: string }>;
-    assert.deepEqual(associations, [
-      { bot_id: guestBotId, relation: "participant" },
-    ]);
+    assert.deepEqual(
+      associations.map((association) => ({ ...association })),
+      [{ bot_id: guestBotId, relation: "participant" }],
+    );
   });
 
   it("rejects missing, cross-tenant, opaque, and JPEG Signal saves before persistence", async () => {

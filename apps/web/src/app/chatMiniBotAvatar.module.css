@@ -12,6 +12,10 @@
   /* One shared optical registration for every compact surface. */
   --chat-mini-bot-lower-screen-nudge-x: 1px;
   --chat-mini-bot-lower-screen-nudge-y: 0px;
+  --chat-mini-bot-lower-screen-left: 40.6%;
+  --chat-mini-bot-lower-screen-top: 67.2%;
+  --chat-mini-bot-lower-screen-width: 18%;
+  --chat-mini-bot-lower-screen-height: 20.3%;
   /* The 96px chassis raster is square, just like the HD source. Its aperture
      is already authored slightly wider than tall. Keep the displayed frame
      square so the canonical face plane is not compressed horizontally. */
@@ -162,11 +166,11 @@
 
 /* Lower glyph screen: (52,86)-(74,111) on 128px → ~41%/67%/18%/20% */
 .lowerScreen {
-  left: 40.6%;
-  top: 67.2%;
+  left: var(--chat-mini-bot-lower-screen-left);
+  top: var(--chat-mini-bot-lower-screen-top);
   z-index: 7;
-  width: 18%;
-  height: 20.3%;
+  width: var(--chat-mini-bot-lower-screen-width);
+  height: var(--chat-mini-bot-lower-screen-height);
   border-radius: 50%;
   overflow: hidden;
   isolation: isolate;

@@ -180,9 +180,10 @@ test("global thresholds stay fixed at 300px/299px and 81px/80px boundaries", () 
   );
 });
 
-test("micro presentation collapses from face to glyph, block, and one pixel", () => {
-  assert.equal(botAvatarMicroPresentationForSize(undefined), "face");
-  assert.equal(botAvatarMicroPresentationForSize(29), "face");
+test("micro presentation stays glyph-only until it becomes a block or pixel", () => {
+  assert.equal(botAvatarMicroPresentationForSize(undefined), "glyph");
+  assert.equal(botAvatarMicroPresentationForSize(80), "glyph");
+  assert.equal(botAvatarMicroPresentationForSize(29), "glyph");
   assert.equal(botAvatarMicroPresentationForSize(28), "glyph");
   assert.equal(botAvatarMicroPresentationForSize(9), "glyph");
   assert.equal(botAvatarMicroPresentationForSize(8), "block");

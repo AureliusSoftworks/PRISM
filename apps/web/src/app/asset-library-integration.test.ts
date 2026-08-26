@@ -158,7 +158,10 @@ describe("typed local asset library", () => {
   it("locks the fullscreen browser to one kind with local filters and Light/Dark previews", () => {
     assert.match(assetSource, /data-asset-library-kind=\{kind\}/u);
     assert.match(assetSource, /params\.set\("q", query\.trim\(\)\)/u);
-    assert.match(assetSource, /params\.set\("source", source\)/u);
+    assert.match(
+      assetSource,
+      /const effectiveSource = sourceFilter \?\? source;[\s\S]*params\.set\("source", effectiveSource\)/u,
+    );
     assert.match(assetSource, /params\.set\("usage", usage\)/u);
     assert.match(assetSource, /new URLSearchParams\(\{ kind, limit: "24", sort \}\)/u);
     assert.match(assetSource, /asset\.kind === "signal_studio" && light && dark/u);
@@ -202,6 +205,26 @@ describe("typed local asset library", () => {
       /\.detailActions[\s\S]*margin-top: 0\.75rem[\s\S]*border-top:/u,
     );
     assert.match(assetStyles, /\.magentaPass[\s\S]*display: grid/u);
+  });
+
+  it("keeps one reachable equip action directly beneath the detail preview", () => {
+    assert.equal(
+      assetSource.match(/data-asset-equip-action=/gu)?.length ?? 0,
+      1,
+    );
+    assert.equal(assetSource.match(/"Use this asset"/gu)?.length ?? 0, 1);
+    assert.ok(
+      assetSource.indexOf('data-asset-equip-action="true"') >
+        assetSource.indexOf("<AssetPreview asset={detail} />"),
+    );
+    assert.ok(
+      assetSource.indexOf('data-asset-equip-action="true"') <
+        assetSource.indexOf("Magenta cleanup"),
+    );
+    assert.match(
+      assetStyles,
+      /\.detailPrimaryAction[\s\S]*position: sticky[\s\S]*top: 0/u,
+    );
   });
 
   it("supports exact bot-scoped browsing and opens an initial asset in normal details", () => {

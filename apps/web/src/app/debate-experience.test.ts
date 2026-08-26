@@ -646,7 +646,7 @@ describe("Debate experience", () => {
   it("freezes one custom moderator title across setup, archive, transcript, and the live card", () => {
     assert.match(
       source,
-      /props\.initialFormat === "whodunnit" \? "Judge" : "Moderator"/u,
+      /props\.initialFormat === "whodunnit" \? "The Court" : "Moderator"/u,
     );
     assert.match(source, /data-tutorial-target="debate-moderator-title"/u);
     assert.match(source, /maxLength=\{DEBATE_MODERATOR_TITLE_MAX_LENGTH\}/u);
@@ -687,7 +687,7 @@ describe("Debate experience", () => {
     assert.match(css, /\.moderatorTitleField\s*\{/u);
     assert.match(
       source,
-      /const defaultModeratorTitle\s*=\s*format === "whodunnit" \? "Judge" : "Moderator"/u,
+      /const defaultModeratorTitle\s*=\s*format === "whodunnit" \? "The Court" : "Moderator"/u,
     );
     assert.doesNotMatch(
       source,
@@ -1605,7 +1605,7 @@ describe("Debate experience", () => {
     // accept server-side.
     assert.match(
       source,
-      /disabled=\{format === "whodunnit" \|\| !castComplete \|\| busy\}/u,
+      /format === "whodunnit"[\s\S]{0,100}\? mysteryDistinctLibraryBotCount < mysteryFullCastRequirement[\s\S]{0,100}: !castComplete/u,
     );
     assert.doesNotMatch(source, /Resolve declined role/u);
     assert.match(source, /if \(!castComplete\) return/u);
@@ -1705,7 +1705,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /format === "whodunnit"[\s\S]{0,100}mysteryCastRequirement[\s\S]{0,100}playerRole === "spectator"/u,
+      /format === "whodunnit"[\s\S]{0,100}mysteryFullCastRequirement[\s\S]{0,100}playerRole === "spectator"/u,
     );
     assert.match(
       source,

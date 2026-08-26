@@ -191,7 +191,7 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
   );
   assert.match(
     miniSource,
-    /compactPreviewIsMicro \? \([\s\S]*?<BotAvatarMicroRenderer[\s\S]*?\) : \(\s*<ChatMiniBotAvatar/,
+    /compactPreviewIsMicro \? \([\s\S]*?<BotAvatarMicroRenderer[\s\S]*?\) : \([\s\S]*?<ChatMiniBotAvatar/,
     "Avatar Studio compact preview should switch between mini and micro variants through one conditional branch",
   );
   assert.match(
@@ -214,7 +214,11 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
     /forceBlinkPhase=\{previewBlink \? "closed" : "open"\}/,
   );
   assert.match(miniSource, /<BotAvatarMicroRenderer/);
-  assert.match(miniSource, /avatarDetails=\{miniAvatarDetails\}/);
+  assert.doesNotMatch(
+    miniSource,
+    /<BotAvatarMicroRenderer[\s\S]{0,500}avatarDetails=/,
+    "Studio Micro previews must not receive Avatar Details Ink",
+  );
   assert.match(
     pageSource,
     /function BotAvatarMicroRenderer[\s\S]{0,800}<BotAvatarMicro/u,
@@ -236,7 +240,11 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
     miniSource,
     /faceBlinkRotationDeg=\{\s*faceStyle\.blinkRotationDeg\s*\}/,
   );
-  assert.match(miniSource, /faceStyle=\{faceStyle\}/);
+  assert.match(
+    miniSource,
+    /faceGeometry=\{faceStyle\}/,
+    "Studio Mini keeps its authored face geometry while Micro remains glyph-only",
+  );
   assert.doesNotMatch(miniSource, /studio-micro-\$\{previewMode\}/);
   assert.match(miniSource, /className=\{styles\.botAvatarStudioMicroPreview\}/);
   assert.match(
@@ -285,10 +293,7 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
     cssSource,
     /\.botAvatarStudioMicroPreview\s+\.messageMoodBadge\[data-face="coffee"\]\[data-variant="micro"\]\s*\{[^}]*width:\s*var\(--bot-avatar-studio-compact-preview-size, 36px\);[^}]*height:\s*var\(--bot-avatar-studio-compact-preview-size, 36px\);/u,
   );
-  assert.match(
-    cssSource,
-    /\.botAvatarStudioMicroPreview \.messageMoodMicroFace\s*\{[^}]*font-size:\s*calc\([^}]*--bot-avatar-studio-compact-preview-size/u,
-  );
+  assert.doesNotMatch(cssSource, /\.messageMoodMicroFace/u);
   assert.doesNotMatch(
     cssSource,
     /\.botAvatarStudioMiniPreviewViewport \.emptyStateHeroMini(?:Glyph|Art|Avatar)/u,
@@ -298,25 +303,8 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
     cssSource,
     /\.botAvatarStudioMiniPreviewCluster\s*\{[^}]*grid-template-columns:\s*minmax\(0, 220px\);/u,
   );
-  assert.match(
-    cssSource,
-    /--bot-avatar-micro-screen-scale:\s*1\.12;/,
-  );
-  assert.match(
-    cssSource,
-    /--bot-avatar-micro-content-shift-x:\s*calc\(\s*var\(--bot-avatar-studio-compact-preview-size,\s*36px\)\s*\*\s*-0\.027778\s*\);/,
-  );
-  assert.match(
-    cssSource,
-    /--bot-avatar-micro-face-nudge-x:\s*calc\(\s*var\(--bot-avatar-studio-compact-preview-size,\s*36px\)\s*\*\s*0\.027778\s*\);/,
-  );
-  assert.match(
-    cssSource,
-    /--bot-avatar-micro-face-nudge-y:\s*calc\(\s*var\(--bot-avatar-studio-compact-preview-size,\s*36px\)\s*\*\s*-0\.027778\s*\);/,
-  );
   assert.match(microAvatarSource, /data-bot-avatar-micro-screen="true"/);
   assert.match(microAvatarSource, /botAvatarMicroPresentationForSize\(props\.renderSizePx\)/u);
-  assert.match(microAvatarSource, /const showMicroFaceFeatures = presentation === "face"/u);
   assert.match(
     microAvatarSource,
     /data-avatar-micro-presentation=\{presentation\}/u,
@@ -330,11 +318,11 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
   );
   assert.match(
     cssSource,
-    /\.messageMoodMicroFace\s*\{[^}]*font-size:\s*12px;[^}]*color:\s*var\(--bot-avatar-micro-face-phosphor-color, #ffffff\);/u,
+    /\.botAvatarMicroGlyph\s*\{[^}]*color:\s*var\(--bot-avatar-micro-glyph-color, #ffffff\);/u,
   );
-  assert.match(
-    cssSource,
-    /\.themeLight \.messageMoodMicroFace\s*\{[^}]*color:\s*var\(--bot-avatar-micro-face-phosphor-color, #ffffff\);/u,
+  assert.doesNotMatch(
+    microAvatarSource,
+    /AvatarDetailsMask|CoffeeSeatPlateEmoji|faceStyle|avatarDetails|mouthShape|isTalking/u,
   );
 });
 

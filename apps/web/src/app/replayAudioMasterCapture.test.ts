@@ -13,6 +13,7 @@ import {
   prismAudioContext,
   prismAudioOutputNode,
   reconcileReplaySpeechDirection,
+  resumePrismAudioContext,
   replayAudioMasterCaptureCompactsThinkingGaps,
   replayAudioMasterCaptureElapsedMs,
   routeAudioElementToPrismOutput,
@@ -78,7 +79,9 @@ class FakeAudioContext {
     this.listeners.delete(listener);
   }
 
-  async resume(): Promise<void> {}
+  async resume(): Promise<void> {
+    this.state = "running";
+  }
 
   async close(): Promise<void> {
     this.state = "closed";
@@ -241,6 +244,26 @@ test("the replay master captures the same shared output bus that reaches the dev
     Object.defineProperty(globalThis, "MediaRecorder", {
       configurable: true,
       value: originalMediaRecorder,
+    });
+  }
+});
+
+test("a suspended shared mixer is resumed before media-element routing", async () => {
+  const originalWindow = globalThis.window;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { AudioContext: FakeAudioContext },
+  });
+
+  try {
+    const context = prismAudioContext() as unknown as FakeAudioContext;
+    context.state = "suspended";
+    assert.equal(await resumePrismAudioContext(), true);
+    assert.equal(context.state, "running");
+  } finally {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: originalWindow,
     });
   }
 });

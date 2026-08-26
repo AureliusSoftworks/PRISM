@@ -122,7 +122,10 @@ describe("first-run onboarding", () => {
     assert.match(FIRST_RUN_BATCH_FOUNDRY_GUIDANCE, /constellation chamber/u);
     assert.match(FIRST_RUN_BATCH_FOUNDRY_GUIDANCE, /not Avatar Studio/u);
     assert.match(FIRST_RUN_BATCH_FOUNDRY_GUIDANCE, /mini-avatar slot/u);
-    assert.match(FIRST_RUN_BATCH_FOUNDRY_GUIDANCE, /micro faces inside each generated color-and-glyph orb/u);
+    assert.match(
+      FIRST_RUN_BATCH_FOUNDRY_GUIDANCE,
+      /glyph-only Micro identities inside each generated color-and-glyph orb/u,
+    );
     assert.match(pageSource, /FIRST_RUN_BATCH_FOUNDRY_GUIDANCE/u);
   });
 
@@ -130,6 +133,8 @@ describe("first-run onboarding", () => {
     assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /hold Option/u);
     assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /stays fixed/u);
     assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /nothing begins/u);
+    assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /named stage presets/u);
+    assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /never replace a show’s identity, cast, or artwork/u);
     assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /I Feel Lucky!/u);
     assert.match(FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE, /immediately starts/u);
     assert.match(pageSource, /FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE/u);

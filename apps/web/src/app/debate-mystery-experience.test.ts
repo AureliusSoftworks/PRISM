@@ -6,7 +6,9 @@ import { fileURLToPath } from "node:url";
 import {
   fillWhodunnitSuspectSeats,
   randomizeWhodunnitCast,
+  randomizeWhodunnitFullCast,
   randomizeWhodunnitCastAroundBot,
+  resolveWhodunnitSurpriseCast,
   surpriseWhodunnitSeatBotId,
   minimumWhodunnitBotsForCast,
   distinctWhodunnitCastBotIds,
@@ -125,7 +127,7 @@ describe("Debate Whodunnit experience", () => {
     assert.match(shell, /"coach",\s*"Coach"/u);
     assert.match(shell, /"standard",\s*"Standard"/u);
     assert.match(shell, /"immersive",\s*"Immersive"/u);
-    assert.match(shell, /format === "whodunnit"[\s\S]{0,80}\? "Judge"/u);
+    assert.match(shell, /format === "whodunnit"[\s\S]{0,80}\? "The Court"/u);
     assert.match(shell, /useState\("recipe-initial"\)/u);
     assert.match(shell, /setMysteryNonce\(nextMysteryRecipeNonce\(\)\);\s*\}, \[\]\);/u);
     assert.doesNotMatch(shell, /useState\(nextMysteryRecipeNonce\)/u);
@@ -138,7 +140,7 @@ describe("Debate Whodunnit experience", () => {
     assert.match(shell, /<BotPickerTile/u);
     assert.match(shell, /mysterySuspectBotIds\.map/u);
     assert.match(shell, /mysteryJudgeBotId/u);
-    assert.match(shell, /mysteryProsecutorPartnerBotId/u);
+    assert.match(shell, /mysteryProsecutorBotId/u);
     assert.match(shell, /mysteryRivalDefenseBotId/u);
     assert.match(shell, /\? "Four jurors \+ Judge"/u);
     assert.match(shell, /data-role-group="suspects"/u);
@@ -342,6 +344,7 @@ describe("Debate Whodunnit experience", () => {
     assert.match(css, /\.roomSuspectPresence[\s\S]*width: min\(28rem, 38%, 52vh\)/u);
     assert.match(css, /\[data-debate-avatar-quality="mini"\][\s\S]*--zen-live-bot-mini-size: min\(24rem, 100%\)[\s\S]*width: min\(24rem, 100%\)/u);
     assert.match(css, /\[data-chat-mini-bot-avatar="true"\]\[data-size="room"\][\s\S]*--chat-mini-bot-render-size: min\(18rem, 25vh\)/u);
+    assert.match(css, /\[data-chat-mini-bot-avatar="true"\]\[data-size="room"\][\s\S]*--chat-mini-bot-glyph-size: max\(18px, calc\(var\(--chat-mini-bot-render-size\) \* 0\.12\)\)[\s\S]*--chat-mini-bot-lower-screen-width: 22%[\s\S]*--chat-mini-bot-lower-screen-height: 24\.3%/u);
     assert.doesNotMatch(source, /className=\{styles\.roomSuspectName\}/u);
     assert.doesNotMatch(css, /\.roomSuspectName/u);
     assert.match(css, /@keyframes mysterySuspectRoomWalk[\s\S]*transform: translate\(-50%, -50%\)[\s\S]*--suspect-walk-waypoint/u);
@@ -705,16 +708,51 @@ describe("Debate Whodunnit experience", () => {
     assert.match(shell, /"Randomly assign all Whodunnit cast roles and begin compiling"/u);
     assert.match(shell, /className=\{styles\.castRandomizeButton\}/u);
     assert.match(shell, /<strong>Surprise me<\/strong>/u);
-    assert.match(shell, /if \(format === "whodunnit"\) \{[\s\S]{0,180}randomizeWhodunnitCast/u);
+    assert.match(shell, /if \(format === "whodunnit"\) \{[\s\S]{0,180}randomizeWhodunnitFullCast/u);
+    assert.match(shell, /setJuryEnabled\(true\);[\s\S]{0,80}setPreferredJurorBotIds\(allocation\.jurorBotIds\)/u);
     assert.match(shell, /const surpriseAndCompileMystery = \(\): void => \{/u);
     assert.match(shell, /mysterySurpriseCompilePendingRef\.current = true/u);
     assert.match(shell, /format === "whodunnit"[\s\S]{0,120}\? surpriseAndCompileMystery/u);
-    assert.match(shell, /resolvedMysteryConfigV2 = resolveDebateMysteryConfigV2\(mysteryCreateConfigV2\)/u);
-    assert.match(shell, /const mysterySetupValidated = inspectedMysterySeed/u);
-    assert.match(shell, /format !== "whodunnit" \|\| mysterySetupValidated/u);
+    assert.match(shell, /const mysterySetupValidated = mysteryRoleSelected/u);
+    assert.match(shell, /format === "whodunnit"[\s\S]{0,80}\? mysteryRoleSelected/u);
     assert.match(shell, /if \(!mysterySetupValidated \|\| busy\) return;/u);
-    assert.match(shell, /\? "Cast validated"/u);
+    assert.match(shell, /\? "Surprise seats ready"/u);
     assert.match(shell, /if \(!debateCanStart \|\| busy\) return;[\s\S]{0,160}void startMystery\(\)/u);
+  });
+
+  it("treats every unfilled seat as a compile-time random choice while preserving manual cast", () => {
+    const bots = Array.from({ length: 11 }, (_, index) => ({ id: `bot-${index}` }));
+    const result = resolveWhodunnitSurpriseCast(
+      bots,
+      {
+        suspectBotIds: ["bot-0", "", "bot-2", ""],
+        judgeBotId: "bot-4",
+        prosecutorBotId: "",
+        rivalDefenseBotId: "bot-6",
+        jurorBotIds: [null, "bot-8", null, null],
+      },
+      4,
+      4,
+      deterministicSequence([0.81, 0.33, 0.56, 0.11, 0.72, 0.04]),
+    );
+    assert.ok(result);
+    if (!result) return;
+    assert.equal(result.suspectBotIds[0], "bot-0");
+    assert.equal(result.suspectBotIds[2], "bot-2");
+    assert.equal(result.judgeBotId, "bot-4");
+    assert.equal(result.rivalDefenseBotId, "bot-6");
+    assert.equal(result.jurorBotIds[1], "bot-8");
+    const allBotIds = [
+      ...result.suspectBotIds,
+      result.judgeBotId,
+      result.prosecutorBotId,
+      result.rivalDefenseBotId,
+      ...result.jurorBotIds,
+    ];
+    assert.equal(new Set(allBotIds).size, 11);
+    assert.equal(resolveWhodunnitSurpriseCast(bots.slice(0, 10), { suspectBotIds: [] }, 4, 4), null);
+    assert.match(shell, /resolveWhodunnitSurpriseCast\(/u);
+    assert.match(shell, /Compile randomly assigns every Surprise me seat/u);
   });
 
   it("leaves a removed Whodunnit seat on a one-seat Surprise me reroll", () => {
@@ -744,6 +782,25 @@ describe("Debate Whodunnit experience", () => {
     );
   });
 
+  it("keeps all four Whodunnit juror seats in the Cast picker and lets each be replaced", () => {
+    assert.match(shell, /data-role-group="jury"/u);
+    assert.match(shell, /seat: \{ kind: "juror", index \}/u);
+    assert.match(shell, /label: `Juror \$\{index \+ 1\}`/u);
+    assert.match(shell, /activeMysteryCastSeat\.kind === "juror"/u);
+    assert.match(shell, /assignBotToJurySeat\(activeMysteryCastSeat\.index, botId\)/u);
+    assert.match(shell, /clearJurySeat\(seat\.index\)/u);
+    assert.doesNotMatch(shell, /const mysteryFloorBotSignature/u);
+  });
+
+  it("keeps a visible one-click Surprise path at the foot of the Cast step", () => {
+    assert.match(
+      shell,
+      /if \(format === "whodunnit"\) \{\s*surpriseAndCompileMystery\(\);\s*return;/u,
+    );
+    assert.match(shell, /"Surprise me · seat & compile"/u);
+    assert.match(shell, /mysteryDistinctLibraryBotCount < mysteryFullCastRequirement/u);
+  });
+
   it("produces distinct random Whodunnit casts with correct role counts", () => {
     const bots = ["a", "b", "c", "d", "e", "f", "g", "h", "i"].map((id) => ({ id }));
     const result = randomizeWhodunnitCast(bots, 6, deterministicSequence([0.81, 0.33, 0.56, 0.11, 0.72, 0.04, 0.89, 0.66]));
@@ -757,6 +814,26 @@ describe("Debate Whodunnit experience", () => {
     ];
     assert.equal(allBotIds.length, minimumWhodunnitBotsForCast(6));
     assert.equal(new Set(allBotIds).size, minimumWhodunnitBotsForCast(6));
+  });
+
+  it("allocates every required Whodunnit role, including four distinct jurors", () => {
+    const result = randomizeWhodunnitFullCast(
+      Array.from({ length: 11 }, (_, index) => ({ id: `bot-${index}` })),
+      4,
+      4,
+      deterministicSequence([0.81, 0.33, 0.56, 0.11, 0.72, 0.04, 0.89, 0.66, 0.2, 0.4]),
+    );
+    assert.ok(result);
+    if (!result) return;
+    const allBotIds = [
+      ...result.suspectBotIds,
+      result.judgeBotId,
+      result.prosecutorBotId,
+      result.rivalDefenseBotId,
+      ...result.jurorBotIds,
+    ];
+    assert.equal(result.jurorBotIds.length, 4);
+    assert.equal(new Set(allBotIds).size, 11);
   });
 
   it("keeps a Wielded bot among the suspects while populating every role", () => {

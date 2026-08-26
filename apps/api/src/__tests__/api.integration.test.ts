@@ -6053,37 +6053,44 @@ describe("API request integration", () => {
       const preparedFoleyCue = listenerReactionSpokenTextV1(
         preparedFoleyPlayback,
       );
-      assert.ok(preparedFoleyCue);
-      const beforePreparedFoleyCalls = builtinVoiceTexts.length;
+      assert.equal(preparedFoleyCue, null);
+      const beforePreparedFoleyCalls = fetchRecorder.calls.length;
       const preparedFoleyReaction = await client.request(
         "/api/voices/synthesize",
         jsonInit({
           signalMessageId: preparedFoleyMessageId,
           signalTurnPreparationId: preparedFoleyTurn.id,
           speakerBotId: "signal-voice-guest",
-          listenerReactionText: preparedFoleyCue,
+          listenerReactionFoley: "exhales",
           mode: "english",
-          engine: "builtin",
-          includeAlignment: false,
+          engine: "elevenlabs",
+          profile: {
+            ...normalizeBotAudioVoiceProfileV1(undefined),
+            elevenLabsVoiceId: "signal-provider-voice",
+          },
         }),
       );
       assert.equal(preparedFoleyReaction.status, 200);
-      assert.equal(builtinVoiceTexts.at(-1), preparedFoleyCue);
-      assert.equal(builtinVoiceTexts.length, beforePreparedFoleyCalls + 1);
+      assert.equal(
+        JSON.parse(
+          String(fetchRecorder.calls[beforePreparedFoleyCalls]?.init?.body),
+        ).text,
+        "[exhales]...",
+      );
+      assert.equal(fetchRecorder.calls.length, beforePreparedFoleyCalls + 1);
       const forgedPreparedFoleyReaction = await client.request(
         "/api/voices/synthesize",
         jsonInit({
           signalMessageId: preparedFoleyMessageId,
           signalTurnPreparationId: preparedFoleyTurn.id,
           speakerBotId: "signal-voice-guest",
-          listenerReactionText: "Definitely forged.",
+          listenerReactionFoley: "coughs",
           mode: "english",
-          engine: "builtin",
-          includeAlignment: false,
+          engine: "elevenlabs",
         }),
       );
       assert.equal(forgedPreparedFoleyReaction.status, 400);
-      assert.equal(builtinVoiceTexts.length, beforePreparedFoleyCalls + 1);
+      assert.equal(fetchRecorder.calls.length, beforePreparedFoleyCalls + 1);
       const beforeBridgeCalls = fetchRecorder.calls.length;
       const interruptionBridgeVoice = await client.request(
         "/api/voices/synthesize",

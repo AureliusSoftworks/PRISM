@@ -215,6 +215,31 @@ describe("Signal thinking presentation", () => {
     );
   });
 
+  it("releases generation thinking once a producer-cut closing line is prepared", () => {
+    const presentedThinkingRole = signalPresentedThinkingRole({
+      episodeLive: true,
+      producerGuestThinking: false,
+      producerGuestSipActive: false,
+      generationBusy: true,
+      voicePreparationPending: false,
+      hasPreparedMessage: true,
+      hasSpeakingMessage: false,
+      nextSpeakerRole: "host",
+      generationThinkingRole: "host",
+      generationThinkingRunMatches: true,
+    });
+
+    assert.equal(presentedThinkingRole, null);
+    assert.equal(
+      signalStageThinkingRole({
+        presentedThinkingRole,
+        voicePreparationPending: false,
+        voicePreparationRole: "host",
+      }),
+      null,
+    );
+  });
+
   it("marks a delivered final line completed after the episode closes", () => {
     assert.equal(
       signalThinkingPresentationEndReason({

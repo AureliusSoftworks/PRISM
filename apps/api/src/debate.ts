@@ -120,6 +120,7 @@ import {
   normalizeDebateIdempotencyKey,
   normalizeDebateJuryStateV1,
   normalizeDebateMysteryFormatStateV1,
+  debateMysteryMansionBundleEligibleV2,
   normalizeDebateMysteryFormatStateV2,
   normalizeDebateModeratorTitle,
   normalizeDebateModeratorName,
@@ -4083,6 +4084,10 @@ export function listDebateSessions(
     let mysteryRouteGrade: DebateSessionListItemV1["mysteryRouteGrade"];
     let mysteryFictionLabel: DebateSessionListItemV1["mysteryFictionLabel"];
     let mysterySpoilersRevealed: boolean | undefined;
+    let mysteryVersion: 1 | 2 | undefined;
+    let mysteryMissingEvidenceAssetCount: number | undefined;
+    let mysteryMansionSaveEligible: boolean | undefined;
+    let mysteryMansionBundleId: string | null | undefined;
     let mysterySuspectColors: string[] = [];
     try {
       const parsed = JSON.parse(row.session_json) as {
@@ -4137,15 +4142,22 @@ export function listDebateSessions(
       if (format === "whodunnit") {
         const mysteryV2 = normalizeDebateMysteryFormatStateV2(parsed.formatState);
         if (mysteryV2) {
+          mysteryVersion = 2;
           if (mysteryV2.caseTitle?.trim()) title = mysteryV2.caseTitle;
           mysteryProgress = mysteryV2.playPhase;
           mysteryRouteGrade = mysteryV2.verdict?.classification ?? null;
           mysteryFictionLabel = mysteryV2.fictionLabel;
           mysterySpoilersRevealed = mysteryV2.playPhase === "verdict";
+          mysteryMissingEvidenceAssetCount = mysteryV2.record.filter(
+            (item) => item.reference.kind === "evidence" && !item.imageId,
+          ).length;
+          mysteryMansionSaveEligible = debateMysteryMansionBundleEligibleV2(mysteryV2);
+          mysteryMansionBundleId = mysteryV2.config.mansionBundleId;
           mysterySuspectColors = mysteryV2.suspects
             .map((suspect) => suspect.color?.trim() ?? "")
             .filter((color) => Boolean(color));
         } else {
+          mysteryVersion = 1;
           const mystery = normalizeDebateMysteryFormatStateV1(parsed.formatState);
           if (mystery.caseTitle.trim()) title = mystery.caseTitle;
           mysteryProgress = mystery.playPhase;
@@ -4318,6 +4330,14 @@ export function listDebateSessions(
       ...(typeof mysterySpoilersRevealed === "boolean"
         ? { mysterySpoilersRevealed }
         : {}),
+      ...(mysteryVersion ? { mysteryVersion } : {}),
+      ...(typeof mysteryMissingEvidenceAssetCount === "number"
+        ? { mysteryMissingEvidenceAssetCount }
+        : {}),
+      ...(typeof mysteryMansionSaveEligible === "boolean"
+        ? { mysteryMansionSaveEligible }
+        : {}),
+      ...(mysteryMansionBundleId !== undefined ? { mysteryMansionBundleId } : {}),
     };
   });
 }
@@ -21399,6 +21419,17 @@ export function attachDebateExhibitSprite(
           : exhibit,
       ),
     },
+    formatState:
+      session.formatState.format === "whodunnit" && session.formatState.version === 2
+        ? {
+            ...session.formatState,
+            record: session.formatState.record.map((item) =>
+              item.reference.kind === "evidence" && item.reference.id === exhibitId
+                ? { ...item, visualKind: "synthesized" as const, imageId }
+                : item,
+            ),
+          }
+        : session.formatState,
   };
   const result = db
     .prepare(
@@ -21456,6 +21487,17 @@ export function updateDebateExhibitEmoji(
         exhibit.id === exhibitId ? { ...exhibit, emoji } : exhibit,
       ),
     },
+    formatState:
+      session.formatState.format === "whodunnit" && session.formatState.version === 2
+        ? {
+            ...session.formatState,
+            record: session.formatState.record.map((item) =>
+              item.reference.kind === "evidence" && item.reference.id === exhibitId
+                ? { ...item, emoji }
+                : item,
+            ),
+          }
+        : session.formatState,
   };
   const result = db
     .prepare(

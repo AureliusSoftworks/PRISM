@@ -30,6 +30,7 @@ import {
   type DebateWhodunnitFormatStateV1,
 } from "./debateMystery.ts";
 import {
+  debateMysteryMansionBundleEligibleV2,
   normalizeDebateMysteryFormatStateV2,
   type DebateMysteryPlayPhaseV2,
   type DebateMysteryVerdictClassificationV2,
@@ -1907,6 +1908,11 @@ export interface DebateSessionListItemV1 {
   mysteryRouteGrade?: DebateMysteryRouteGrade | DebateMysteryVerdictClassificationV2 | null;
   mysteryFictionLabel?: "Fictional, non-canonical case";
   mysterySpoilersRevealed?: boolean;
+  /** Whodunnit schema metadata used only for safe Archive/setup actions. */
+  mysteryVersion?: 1 | 2;
+  mysteryMissingEvidenceAssetCount?: number;
+  mysteryMansionSaveEligible?: boolean;
+  mysteryMansionBundleId?: string | null;
 }
 
 export interface DebateDebriefChatMessageV1 {

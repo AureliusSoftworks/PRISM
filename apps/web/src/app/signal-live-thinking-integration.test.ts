@@ -22,7 +22,6 @@ describe("Signal live thinking animation", () => {
       signalSource.indexOf("const roleIsThinking ="),
       signalSource.indexOf("const episodeStartedAtCandidate"),
     );
-    assert.match(thinking, /busy[\s\S]{0,100}thinkingRole === role/u);
     assert.match(thinking, /liveStageThinkingRole === role/u);
     assert.match(
       pageSource,
@@ -48,6 +47,18 @@ describe("Signal live thinking animation", () => {
     assert.doesNotMatch(signalSource, /SignalLiveThinkingDomDriver/u);
     assert.doesNotMatch(pageSource, /data-prism-live-thinking-overlay/u);
     assert.doesNotMatch(pageSource, /preloadThinkingSpinner/u);
+  });
+
+  it("does not infer live thinking from a stale busy flag after a closing line is prepared", () => {
+    const thinking = signalSource.slice(
+      signalSource.indexOf("const roleIsThinking ="),
+      signalSource.indexOf("const episodeStartedAtCandidate"),
+    );
+    assert.match(thinking, /liveStageThinkingRole === role/u);
+    assert.doesNotMatch(
+      thinking,
+      /busy\s*&&\s*speakingMessageId\s*===\s*null\s*&&\s*thinkingRole\s*===\s*role/u,
+    );
   });
 
   it("does not strip phosphor layers or semantic mug motion from live Signal", () => {

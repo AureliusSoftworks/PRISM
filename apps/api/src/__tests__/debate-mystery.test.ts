@@ -1728,7 +1728,7 @@ describe("Debate Whodunnit private/public boundary", () => {
     );
     assert.equal(publicVerdict?.speakerKind, "moderator");
     assert.equal(publicVerdict?.speakerBotId, session.moderator.id);
-    assert.match(publicVerdict?.content ?? "", /Judge: Guilty\./u);
+    assert.match(publicVerdict?.content ?? "", /The Court: Guilty\./u);
     assert.doesNotMatch(publicVerdict?.content ?? "", /wins?(?: the)? (?:debate|turnabout)/iu);
     const closing = session.events.find(
       (event) => event.stepKey === "closing_moderator",
@@ -1865,7 +1865,7 @@ describe("Debate Whodunnit private/public boundary", () => {
     );
     assert.equal(publicVerdict?.speakerKind, "moderator");
     assert.equal(publicVerdict?.speakerBotId, session.moderator.id);
-    assert.match(publicVerdict?.content ?? "", /Judge: Not Guilty\./u);
+    assert.match(publicVerdict?.content ?? "", /The Court: Not Guilty\./u);
     assert.doesNotMatch(publicVerdict?.content ?? "", /wins?(?: the)? (?:debate|turnabout)/iu);
     assert.match(session.formatState.mysteryTrial?.verdict?.reason ?? "", /filed accusation is final/iu);
     await assert.rejects(

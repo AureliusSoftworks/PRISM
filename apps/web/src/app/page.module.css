@@ -1459,43 +1459,13 @@
   pointer-events: none;
 }
 
-.botAvatarMicroScreenContent,
-.botAvatarMicroFaceRig {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  transform-origin: 50% 50%;
-}
-
-.botAvatarMicroScreenContent {
-  transform: scale(var(--bot-avatar-micro-screen-scale, 1));
-}
-
-.botAvatarMicroFaceContent {
-  position: absolute;
-  inset: 0;
-  transform: translate(
-    var(--bot-avatar-micro-content-shift-x, 0px),
-    var(--bot-avatar-micro-content-shift-y, 0px)
-  );
-}
-
-.botAvatarMicroFaceRig {
-  z-index: 2;
-  transform: translate(
-    var(--bot-avatar-micro-face-nudge-x, 0px),
-    var(--bot-avatar-micro-face-nudge-y, 0px)
-  );
-}
-
 .botAvatarMicroGlyph {
   position: absolute;
   inset: 0;
   z-index: 4;
   display: grid;
   place-items: center;
-  color: var(--bot-avatar-micro-face-phosphor-color, #ffffff);
+  color: var(--bot-avatar-micro-glyph-color, #ffffff);
   pointer-events: none;
 }
 
@@ -1516,29 +1486,10 @@
   background: var(--bot-avatar-micro-identity-color-light, #5f50d8);
 }
 
-/* The preview keeps the established optical registration; the renderer's
-   canonical post-rotation flip now supplies the missing orientation. */
 .botAvatarStudioMicroPreview
   .messageMoodBadge[data-face="coffee"][data-variant="micro"] {
-  --bot-avatar-micro-screen-scale: 1.12;
-  --bot-avatar-micro-content-shift-x: calc(
-    var(--bot-avatar-studio-compact-preview-size, 36px) * -0.027778
-  );
-  --bot-avatar-micro-content-shift-y: 0px;
-  --bot-avatar-micro-face-nudge-x: calc(
-    var(--bot-avatar-studio-compact-preview-size, 36px) * 0.027778
-  );
-  --bot-avatar-micro-face-nudge-y: calc(
-    var(--bot-avatar-studio-compact-preview-size, 36px) * -0.027778
-  );
   width: var(--bot-avatar-studio-compact-preview-size, 36px);
   height: var(--bot-avatar-studio-compact-preview-size, 36px);
-}
-
-.botAvatarStudioMicroPreview .messageMoodMicroFace {
-  font-size: calc(
-    var(--bot-avatar-studio-compact-preview-size, 36px) * 0.416667
-  );
 }
 
 .botAvatarFoundryCameraHud > span {
@@ -17619,10 +17570,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   height: var(--bot-group-room-micro-visual-size, 36px);
 }
 
-.botGroupWaitingRoomMicroBot .messageMoodMicroFace {
-  font-size: calc(var(--bot-group-room-micro-visual-size, 36px) * 0.42);
-}
-
 .botGroupWaitingRoomPresence[data-room-lod="micro"]
   .botGroupWaitingRoomPresenceName {
   position: absolute;
@@ -23288,84 +23235,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   box-shadow: none;
 }
 
-.botAvatarMicroInk {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  border-radius: 50%;
-  pointer-events: none;
-}
-
-.botAvatarMicroInk [data-avatar-details-mask="true"] {
-  width: 100%;
-  height: 100%;
-  filter: none;
-  mix-blend-mode: normal;
-}
-
-.botAvatarMicroInk[data-avatar-details-depth="behind-face"] {
-  z-index: 1;
-}
-
-.botAvatarMicroInk[data-avatar-details-depth="above-face"] {
-  z-index: 3;
-}
-
-.messageMoodMicroFace {
-  position: relative;
-  z-index: 2;
-  display: block;
-  font-family: var(--prism-face-font);
-  font-size: 12px;
-  line-height: 1;
-  font-weight: var(--prism-face-weight);
-  letter-spacing: var(--prism-face-letter-spacing);
-  font-variant-ligatures: none;
-  color: var(--bot-avatar-micro-face-phosphor-color, #ffffff);
-  filter: none;
-  text-shadow: none;
-  transform-origin: center center;
-}
-
-.themeLight .messageMoodMicroFace {
-  color: var(--bot-avatar-micro-face-phosphor-color, #ffffff);
-  text-shadow: none;
-}
-
-.messageMoodMicroFace [data-coffee-plate-emoji-part],
-.messageMoodMicroFace [data-crt-glyph-layer="true"] {
-  filter: none;
-  text-shadow: none;
-}
-
-.messageMoodMicroFace [data-crt-glyph-layer="true"]::before {
-  display: none;
-}
-
-.messageMoodMicroFace [data-crt-glyph-layer="true"]::after {
-  color: currentColor;
-  background: none;
-  -webkit-background-clip: border-box;
-  background-clip: border-box;
-  -webkit-text-fill-color: currentColor;
-  -webkit-text-stroke: 0;
-  filter: none;
-  mix-blend-mode: normal;
-  text-shadow: none;
-}
-
 .signalArchiveMiniAvatar[data-size="room"] {
   width: 88px;
   height: 88px;
   transform: none;
-}
-
-:is(
-    .debateModeratorMicroAvatar,
-    .zenLiveBotPresenceMicroAvatar
-  )
-  .messageMoodMicroFace {
-  font-size: 14px;
 }
 
 .zenLiveBotPresenceBody[data-render-detail="micro"]::after {
@@ -26138,61 +26011,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   width: 72%;
   height: 72%;
   place-items: center;
-  overflow: hidden;
-  border: 1px solid
-    color-mix(in srgb, var(--bot-color, #5de6ff) 32%, var(--fg) 12%);
-  border-radius: 30%;
   color: var(--bot-ink, var(--bot-color, var(--fg)));
-  background:
-    radial-gradient(
-      circle at 50% 42%,
-      color-mix(in srgb, var(--bot-color, #5de6ff) 16%, transparent),
-      transparent 60%
-    ),
-    color-mix(in srgb, var(--bg-deep) 88%, #05090c 12%);
-  box-shadow:
-    0 0 34px color-mix(in srgb, var(--bot-color, #5de6ff) 24%, transparent),
-    inset 0 0 28px color-mix(in srgb, var(--bot-color, #5de6ff) 12%, transparent),
-    inset 0 1px 0 color-mix(in srgb, #ffffff 12%, transparent);
-}
-
-.zenInitialLoadingScreen::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  pointer-events: none;
-  background: repeating-linear-gradient(
-    to bottom,
-    transparent 0 3px,
-    color-mix(in srgb, var(--fg) 7%, transparent) 3px 4px
-  );
-  opacity: 0.42;
-  mix-blend-mode: soft-light;
-}
-
-.themeLight .zenInitialLoadingScreen {
-  border-color: color-mix(
-    in srgb,
-    var(--bot-color, #1aa6c3) 42%,
-    #6c7b8b 14%
-  );
-  color: color-mix(
-    in srgb,
-    var(--bot-color, #155b78) 72%,
-    #142536 28%
-  );
-  background:
-    radial-gradient(
-      circle at 50% 42%,
-      color-mix(in srgb, var(--bot-color, #1aa6c3) 18%, transparent),
-      transparent 62%
-    ),
-    color-mix(in srgb, #f8fbff 90%, var(--bot-color, #1aa6c3) 10%);
-  box-shadow:
-    0 14px 34px rgba(54, 76, 98, 0.16),
-    0 0 32px color-mix(in srgb, var(--bot-color, #1aa6c3) 18%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.94);
 }
 
 .zenInitialLoadingScreenGlyph {
@@ -29390,7 +29209,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   /* The buckle's physical CRT field is larger than the persona mark painted
      on it. Size that field independently so its boundary can meet the inner
      bezel without scaling the glyph or changing the canonical cell pitch. */
-  --zen-live-bot-buckle-crt-screen-scale: 1.26;
+  --zen-live-bot-buckle-crt-screen-scale: 1.54;
   position: relative;
   z-index: 8;
   width: var(--zen-live-bot-avatar-size, clamp(156px, 14.8vw, 196px));

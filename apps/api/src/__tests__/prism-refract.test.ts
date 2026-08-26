@@ -45,7 +45,7 @@ describe("Prism Refract API contract", () => {
     );
     assert.match(
       globalRuntime,
-      /resolveUserAutoTurboMode[\s\S]{0,500}turboOnly: autoTurboEnabled/u,
+      /resolveUserAutoTurboMode[\s\S]*turboOnly: autoTurboEnabled/u,
     );
     assert.match(route, /generateDebateRefractDraft/u);
     assert.match(route, /generateBotcastRefractDraft/u);

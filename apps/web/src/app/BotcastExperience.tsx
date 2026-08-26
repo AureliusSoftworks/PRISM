@@ -157,6 +157,7 @@ import {
   type BotcastStudioGlowTuning,
   type BotcastStudioLayout,
   type BotcastStudioLayoutItem,
+  type BotcastStagePreset,
   type BotcastVoiceLevelsByBotId,
   type LiveBakeArtifactV1,
   type BotIdentityMirrorStateV1,
@@ -351,6 +352,7 @@ import {
   signalVoicePerformanceActionPresentationAtProgress,
   signalVoicePerformanceTranscriptText,
 } from "./signalVoicePerformance";
+import { SignalVoiceActionText } from "./SignalVoiceActionText";
 import { signalShowCardBlurbs } from "./signalShowCardQuips";
 import { signalStageSoundcheckMessages } from "./signalStageSoundcheck";
 import {
@@ -389,7 +391,6 @@ import {
   type SignalLiveSpeechPlaybackClock,
   type SignalLiveSpeechState,
 } from "./signalLiveAvatarSpeech";
-import { sentenceCaseActionText } from "./zenActions";
 import { botVoiceLightTarget } from "./voiceLightEnvelope";
 import {
   buildSpeechActivityWindowsFromTextCadence,
@@ -1539,11 +1540,6 @@ function signalProducerGuestBotSummary(
   };
 }
 
-const SIGNAL_ASSET_LABELS: Record<SignalAssetSlot, string> = {
-  "day-studio": "Light studio",
-  "night-studio": "Dark studio",
-  logo: "logo",
-};
 type SignalBlockingOperation = {
   title: string;
   detail: string;
@@ -2697,6 +2693,16 @@ export function BotcastExperience({
     null,
   );
   const [studioLayoutEditorOpen, setStudioLayoutEditorOpen] = useState(false);
+  const [studioStagePresets, setStudioStagePresets] = useState<
+    BotcastStagePreset[]
+  >([]);
+  const [studioStagePresetsLoading, setStudioStagePresetsLoading] =
+    useState(false);
+  const [studioStagePresetSaving, setStudioStagePresetSaving] = useState(false);
+  const [studioStagePresetNameDraft, setStudioStagePresetNameDraft] =
+    useState("");
+  const [studioSelectedStagePresetId, setStudioSelectedStagePresetId] =
+    useState("");
   const [studioFineTuningOpen, setStudioFineTuningOpen] = useState(false);
   const [studioLayoutPreviewTheme, setStudioLayoutPreviewTheme] = useState<
     "light" | "dark"
@@ -2920,11 +2926,6 @@ export function BotcastExperience({
   const deleteReturnFocusRef = useRef<HTMLElement | null>(null);
   const audiencePulseCloseButtonRef = useRef<HTMLButtonElement | null>(null);
   const audiencePulseReturnFocusRef = useRef<HTMLButtonElement | null>(null);
-  const [studioUploadLightFile, setStudioUploadLightFile] =
-    useState<File | null>(null);
-  const lightStudioUploadRef = useRef<HTMLInputElement | null>(null);
-  const darkStudioUploadRef = useRef<HTMLInputElement | null>(null);
-  const logoUploadRef = useRef<HTMLInputElement | null>(null);
   const studioLayoutDragRef = useRef<SignalStudioLayoutDrag | null>(null);
   const studioEpisodeImagePlacementDragRef =
     useRef<SignalEpisodeImagePlacementDrag | null>(null);
@@ -4426,6 +4427,7 @@ export function BotcastExperience({
     setStudioLayoutPreviewTheme(theme);
     setStudioCameraPreviewShot("wide");
     setStudioFineTuningOpen(false);
+    void refreshStudioStagePresets();
     setStudioLayoutEditorOpen(true);
   };
   const hostShowAccent = selectedShow
@@ -4674,6 +4676,20 @@ export function BotcastExperience({
     const rankedShows = signalShowsByAudienceRating(response.shows);
     setShows(rankedShows);
     return rankedShows;
+  }, [request]);
+
+  const refreshStudioStagePresets = useCallback(async (): Promise<void> => {
+    setStudioStagePresetsLoading(true);
+    try {
+      const response = await request<{ presets: BotcastStagePreset[] }>(
+        "/api/botcast/stage-presets",
+      );
+      setStudioStagePresets(response.presets);
+    } catch (presetError) {
+      setError(signalErrorToast("Load stage presets", presetError));
+    } finally {
+      setStudioStagePresetsLoading(false);
+    }
   }, [request]);
 
   const refreshArtworkJob = useCallback(async (): Promise<void> => {
@@ -5026,6 +5042,100 @@ export function BotcastExperience({
         : [nextShow, ...current];
     });
     if (nextShow.id === selectedShowId) setShowNameDraft(nextShow.name);
+  };
+
+  const saveStudioStagePreset = async (show: BotcastShow): Promise<void> => {
+    const name = studioStagePresetNameDraft.trim();
+    if (!name || studioStagePresetSaving) return;
+    setStudioStagePresetSaving(true);
+    setError(null);
+    try {
+      const response = await request<{ preset: BotcastStagePreset }>(
+        "/api/botcast/stage-presets",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            name,
+            settings: {
+              studioLayout: show.studioLayout,
+              cameraFraming: show.cameraFraming,
+              logoPlacement: show.logoPlacement,
+              studioGlowTuning: show.studioGlowTuning,
+              voiceLevelsByBotId: show.voiceLevelsByBotId,
+              atmosphereMix: show.atmosphereMix,
+            },
+          }),
+        },
+      );
+      setStudioStagePresets((current) => [
+        response.preset,
+        ...current.filter(
+          (preset) =>
+            preset.id !== response.preset.id &&
+            preset.name.trim().toLocaleLowerCase() !==
+              response.preset.name.trim().toLocaleLowerCase(),
+        ),
+      ]);
+      setStudioSelectedStagePresetId(response.preset.id);
+      setStudioStagePresetNameDraft("");
+      setNotice(`Saved “${response.preset.name}” as a Stage preset.`);
+    } catch (presetError) {
+      setError(signalErrorToast("Save stage preset", presetError));
+    } finally {
+      setStudioStagePresetSaving(false);
+    }
+  };
+
+  const applyStudioStagePreset = async (
+    show: BotcastShow,
+    presetId: string,
+  ): Promise<void> => {
+    if (!presetId || studioStagePresetSaving) return;
+    const presetName =
+      studioStagePresets.find((preset) => preset.id === presetId)?.name ??
+      "Stage preset";
+    setStudioStagePresetSaving(true);
+    setError(null);
+    try {
+      const response = await request<{ show: BotcastShow }>(
+        `/api/botcast/stage-presets/${encodeURIComponent(presetId)}/apply`,
+        { method: "POST", body: JSON.stringify({ showId: show.id }) },
+      );
+      replaceShow(response.show);
+      setStudioSelectedStagePresetId(presetId);
+      setNotice(
+        `Applied “${presetName}” to ${show.name}. The stage settings are saved for this show.`,
+      );
+    } catch (presetError) {
+      setError(signalErrorToast("Apply stage preset", presetError));
+    } finally {
+      setStudioStagePresetSaving(false);
+    }
+  };
+
+  const deleteStudioStagePreset = async (presetId: string): Promise<void> => {
+    if (studioStagePresetSaving) return;
+    const presetName =
+      studioStagePresets.find((preset) => preset.id === presetId)?.name ??
+      "Stage preset";
+    setStudioStagePresetSaving(true);
+    setError(null);
+    try {
+      await request(`/api/botcast/stage-presets/${encodeURIComponent(presetId)}`, {
+        method: "DELETE",
+      });
+      setStudioStagePresets((current) =>
+        current.filter((preset) => preset.id !== presetId),
+      );
+      setStudioSelectedStagePresetId((current) =>
+        current === presetId ? "" : current,
+      );
+      setNotice(`Deleted “${presetName}”.`);
+    } catch (presetError) {
+      setError(signalErrorToast("Delete stage preset", presetError));
+    } finally {
+      setStudioStagePresetSaving(false);
+    }
   };
 
   const updateStudioLayoutDraft = (
@@ -6670,90 +6780,6 @@ export function BotcastExperience({
       setError(signalErrorToast(`Reuse ${label}`, reuseError));
       setNotice(`The current ${label} remains in place.`);
     } finally {
-      setBusy(false);
-    }
-  };
-
-  const uploadStudioSet = async (
-    lightFile: File,
-    darkFile: File,
-  ): Promise<void> => {
-    if (!selectedShow) return;
-    setBusy(true);
-    setError(null);
-    setBlockingOperation({
-      title: "Installing a studio pair",
-      detail: `Saving ${lightFile.name} and ${darkFile.name} to ${selectedShow.name}.`,
-      stepLabel: "Reading Light and Dark images",
-      progress: null,
-      cancellable: false,
-    });
-    try {
-      const [lightDataUrl, darkDataUrl] = await Promise.all([
-        readSignalAssetFile(lightFile),
-        readSignalAssetFile(darkFile),
-      ]);
-      setBlockingOperation((current) =>
-        current
-          ? { ...current, stepLabel: "Saving pair and rebuilding Studio lighting" }
-          : null,
-      );
-      const response = await request<{ show: BotcastShow }>(
-        `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/studio-set/upload`,
-        {
-          method: "POST",
-          body: JSON.stringify({ lightDataUrl, darkDataUrl }),
-        },
-      );
-      replaceShow(response.show);
-      setNotice(
-        "The Light/Dark studio set is live and its lighting map has been rebuilt. The previous set remains saved.",
-      );
-    } catch (uploadError) {
-      setError(signalErrorToast("Upload Signal studio pair", uploadError));
-      setNotice("The current studio pair remains in place.");
-    } finally {
-      setStudioUploadLightFile(null);
-      setBlockingOperation(null);
-      setBusy(false);
-    }
-  };
-
-  const uploadShowAsset = async (
-    slot: SignalAssetSlot,
-    file: File,
-  ): Promise<void> => {
-    if (!selectedShow) return;
-    const label = SIGNAL_ASSET_LABELS[slot];
-    setBusy(true);
-    setError(null);
-    setBlockingOperation({
-      title: `Replacing ${label}`,
-      detail: `Saving ${file.name} to ${selectedShow.name}.`,
-      stepLabel: "Reading image",
-      progress: null,
-      cancellable: false,
-    });
-    try {
-      const dataUrl = await readSignalAssetFile(file);
-      setBlockingOperation((current) =>
-        current ? { ...current, stepLabel: "Saving to Signal" } : null,
-      );
-      const response = await request<{ show: BotcastShow }>(
-        `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/assets/${slot}/upload`,
-        {
-          method: "POST",
-          body: JSON.stringify({ dataUrl }),
-        },
-      );
-      replaceShow(response.show);
-      setNotice(
-        `The ${label} has been replaced. Its previous artwork remains saved.`,
-      );
-    } catch (uploadError) {
-      setError(signalErrorToast("Upload Signal artwork", uploadError));
-    } finally {
-      setBlockingOperation(null);
       setBusy(false);
     }
   };
@@ -11559,14 +11585,11 @@ export function BotcastExperience({
           ?.thinking === true) ||
         (role === "guest" &&
         (replayProducerGuestThinking || liveProducerGuestThinking)) ||
-        (!args.replay &&
-          busy &&
-          speakingMessageId === null &&
-          thinkingRole === role) ||
-        // The line is written and the voice engine is still synthesizing it.
-        // Builtin synthesis alone is allowed 60s; leaving the stage blank for
-        // that is the dead air review 2fcad998 called out.
-        (!args.replay && liveStageThinkingRole === role && !busy));
+        // `liveStageThinkingRole` is tied to the active generation run and
+        // synchronously excludes a prepared line. Do not infer thinking from
+        // the broader busy flag and the next schedule: a producer cut can
+        // retain that flag while its graceful closing line is already on air.
+        (!args.replay && liveStageThinkingRole === role));
     const episodeStartedAtCandidate = Date.parse(args.currentEpisode.startedAt);
     const episodeStartedAtMs = Number.isFinite(episodeStartedAtCandidate)
       ? episodeStartedAtCandidate
@@ -12150,18 +12173,7 @@ export function BotcastExperience({
                 </span>
                 {activeVoiceAction &&
                 args.activeMessage?.speakerRole === "host" ? (
-                  <span
-                    className={styles.voiceActionText}
-                    data-signal-voice-action="true"
-                    data-phase={activeVoiceAction.phase}
-                    style={{
-                      ["--signal-voice-action-opacity" as string]:
-                        activeVoiceAction.opacity,
-                    }}
-                    aria-hidden="true"
-                  >
-                    *{sentenceCaseActionText(activeVoiceAction.action)}*
-                  </span>
+                  <SignalVoiceActionText {...activeVoiceAction} />
                 ) : null}
                 {roleIsListenerReacting("host") &&
                 (listenerReactionPlan || muteReactionBeat) ? (
@@ -12272,18 +12284,7 @@ export function BotcastExperience({
                 </span>
                 {activeVoiceAction &&
                 args.activeMessage?.speakerRole === "guest" ? (
-                  <span
-                    className={styles.voiceActionText}
-                    data-signal-voice-action="true"
-                    data-phase={activeVoiceAction.phase}
-                    style={{
-                      ["--signal-voice-action-opacity" as string]:
-                        activeVoiceAction.opacity,
-                    }}
-                    aria-hidden="true"
-                  >
-                    *{sentenceCaseActionText(activeVoiceAction.action)}*
-                  </span>
+                  <SignalVoiceActionText {...activeVoiceAction} />
                 ) : null}
                 {roleIsListenerReacting("guest") &&
                 (listenerReactionPlan || muteReactionBeat) ? (
@@ -12839,6 +12840,86 @@ export function BotcastExperience({
     );
   };
 
+  const feelLucky = async (): Promise<void> => {
+    if (busy || bookingSuggestionBusy || luckyLaunchUiInFlightRef.current)
+      return;
+    const selectedEpisodeModelOption = episodeModelDraft
+      ? (modelOptions.find((option) => option.id === episodeModelDraft) ?? null)
+      : null;
+    const episodeModelProvider =
+      selectedEpisodeModelOption?.provider ?? preferredProvider;
+    luckyLaunchUiInFlightRef.current = true;
+    setBookingSuggestionBusy("lucky");
+    setError(null);
+    setNotice(null);
+    try {
+      await luckyLaunchRunnerRef.current.run({
+        shows,
+        bots: eligibleBots,
+        suggestBooking: async ({ showId, guestBotId }) =>
+          request<{
+            topic: string;
+            producerBrief: string;
+            guestBotId?: string;
+            generated: boolean;
+          }>(
+            `/api/botcast/shows/${encodeURIComponent(showId)}/booking-suggestion`,
+            {
+              method: "POST",
+              body: JSON.stringify({
+                guestBotId,
+                field: "booking",
+                currentTopic: "",
+                currentProducerBrief: "",
+                preferredProvider: episodeModelProvider,
+                responseMode,
+                modelOverride: selectedEpisodeModelOption?.id ?? null,
+              }),
+            },
+          ),
+        launch: async (setup) => {
+          await selectShow(setup.show);
+          setGuestDraftId(setup.guestBotId);
+          setTopicDraft(setup.topic);
+          setProducerBriefDraft(setup.producerBrief);
+          setNotice("Lucky signal found. Taking it live…");
+          await startEpisode({
+            ...setup,
+            setupEpisodeImage,
+            watchAutoStart: true,
+          });
+        },
+      });
+    } catch (luckyError) {
+      setError(
+        signalErrorToast(
+          "I Feel Lucky",
+          luckyError instanceof Error
+            ? luckyError
+            : "Signal could not produce this lucky booking.",
+        ),
+      );
+    } finally {
+      luckyLaunchUiInFlightRef.current = false;
+      setBookingSuggestionBusy(null);
+    }
+  };
+  const luckyLaunchAvailable =
+    shows.length > 0 &&
+    signalLuckyEligibleShows(shows, eligibleBots).length > 0;
+  const luckyLaunchDisabled =
+    busy ||
+    Boolean(bookingSuggestionBusy) ||
+    !luckyLaunchAvailable ||
+    Boolean(
+      setupEpisodeImage &&
+        (!signalEpisodeModelChoiceSupportsImageInput(
+          modelOptions,
+          episodeModelDraft,
+        ) ||
+          !setupEpisodeImage.descriptor.name.trim()),
+    );
+
   const renderLibrary = (): React.JSX.Element => (
     <aside className={styles.library} aria-label="Signal shows">
       <div className={styles.libraryHeader}>
@@ -13012,11 +13093,44 @@ export function BotcastExperience({
         </PrismRefractTarget>
         <button
           type="button"
+          className={styles.createShowButton}
           onClick={() => void createShow()}
           disabled={!hostDraftId || busy}
         >
           Create show
         </button>
+        <div className={styles.feelLuckyControl}>
+          <button
+            type="button"
+            className={styles.feelLuckyButton}
+            data-tutorial-target="botcast-feel-lucky"
+            onClick={() => void feelLucky()}
+            disabled={luckyLaunchDisabled}
+            aria-busy={bookingSuggestionBusy === "lucky"}
+            aria-label={
+              shows.length === 0
+                ? "I Feel Lucky! Create a show first."
+                : "I Feel Lucky! Skip the search. Let Signal surprise you."
+            }
+            title={
+              shows.length === 0
+                ? "Create a show first."
+                : "Skip the search. Let Signal surprise you."
+            }
+          >
+            {bookingSuggestionBusy === "lucky" ? (
+              <LoaderCircle data-loading="true" aria-hidden="true" />
+            ) : (
+              <span className={styles.feelLuckyPrism} aria-hidden="true" />
+            )}
+            I Feel Lucky!
+          </button>
+          <small>
+            {shows.length === 0
+              ? "Create a show to unlock the shortcut."
+              : "Skip the search. Let Signal surprise you."}
+          </small>
+        </div>
       </div>
     </aside>
   );
@@ -13049,6 +13163,14 @@ export function BotcastExperience({
         studioGlowTuning[glowTheme].blendMode ===
           BOTCAST_DEFAULT_STUDIO_GLOW_TUNING[glowTheme].blendMode,
     );
+    const stagePresetBusy =
+      studioStagePresetSaving ||
+      studioLayoutSaving ||
+      studioCameraFramingSaving ||
+      studioLogoPlacementSaving ||
+      studioGlowTuningSaving ||
+      studioVoiceLevelsSaving ||
+      studioAtmosphereMixSaving;
     const previewStudioGlowTuning = (
       glowTheme: "light" | "dark",
       update: Partial<BotcastStudioGlowThemeTuning>,
@@ -13294,6 +13416,84 @@ export function BotcastExperience({
                   Drag each bot{studioHasCoffeeCup ? ", cup," : ""} and floor
                   glow into place. Arrow keys make fine adjustments.
                 </p>
+                <section
+                  className={styles.stagePresetControls}
+                  aria-label="Signal Rehearse Stage presets"
+                >
+                  <label>
+                    <span>Stage preset</span>
+                    <select
+                      value={studioSelectedStagePresetId}
+                      onChange={(event) =>
+                        setStudioSelectedStagePresetId(event.target.value)
+                      }
+                      disabled={studioStagePresetsLoading || stagePresetBusy}
+                    >
+                      <option value="">
+                        {studioStagePresetsLoading
+                          ? "Loading presets…"
+                          : "Choose a saved setup"}
+                      </option>
+                      {studioStagePresets.map((preset) => (
+                        <option key={preset.id} value={preset.id}>
+                          {preset.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void applyStudioStagePreset(
+                        show,
+                        studioSelectedStagePresetId,
+                      )
+                    }
+                    disabled={
+                      !studioSelectedStagePresetId || stagePresetBusy
+                    }
+                  >
+                    Apply
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Delete selected Signal stage preset"
+                    onClick={() =>
+                      void deleteStudioStagePreset(studioSelectedStagePresetId)
+                    }
+                    disabled={
+                      !studioSelectedStagePresetId || stagePresetBusy
+                    }
+                  >
+                    Delete
+                  </button>
+                  <div className={styles.stagePresetSaveRow}>
+                    <input
+                      value={studioStagePresetNameDraft}
+                      maxLength={80}
+                      placeholder="Name this setup"
+                      aria-label="Signal stage preset name"
+                      onChange={(event) =>
+                        setStudioStagePresetNameDraft(event.target.value)
+                      }
+                      disabled={stagePresetBusy}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void saveStudioStagePreset(show)}
+                      disabled={
+                        !studioStagePresetNameDraft.trim() ||
+                        stagePresetBusy
+                      }
+                    >
+                      Save preset
+                    </button>
+                  </div>
+                  <small>
+                    Applies placement, cameras, screen treatment, room mix, and
+                    saved voice levels—never the show, cast, or artwork.
+                  </small>
+                </section>
                 <div>
                   <div
                     className={styles.stageLayoutThemeToggle}
@@ -14263,67 +14463,6 @@ export function BotcastExperience({
         setBookingSuggestionBusy(null);
       }
     };
-    const feelLucky = async (): Promise<void> => {
-      if (busy || bookingSuggestionBusy || luckyLaunchUiInFlightRef.current)
-        return;
-      luckyLaunchUiInFlightRef.current = true;
-      setBookingSuggestionBusy("lucky");
-      setError(null);
-      setNotice(null);
-      try {
-        await luckyLaunchRunnerRef.current.run({
-          shows,
-          bots: eligibleBots,
-          suggestBooking: async ({ showId, guestBotId }) =>
-            request<{
-              topic: string;
-              producerBrief: string;
-              guestBotId?: string;
-              generated: boolean;
-            }>(
-              `/api/botcast/shows/${encodeURIComponent(showId)}/booking-suggestion`,
-              {
-                method: "POST",
-                body: JSON.stringify({
-                  guestBotId,
-                  field: "booking",
-                  currentTopic: "",
-                  currentProducerBrief: "",
-                  preferredProvider: episodeModelProvider,
-                  responseMode,
-                  modelOverride: selectedEpisodeModelOption?.id ?? null,
-                }),
-              },
-            ),
-          launch: async (setup) => {
-            await selectShow(setup.show);
-            setGuestDraftId(setup.guestBotId);
-            setTopicDraft(setup.topic);
-            setProducerBriefDraft(setup.producerBrief);
-            setNotice("Lucky signal found. Taking it live…");
-            await startEpisode({
-              ...setup,
-              setupEpisodeImage,
-              watchAutoStart: true,
-            });
-          },
-        });
-      } catch (luckyError) {
-        setError(
-          signalErrorToast(
-            "I Feel Lucky",
-            luckyError instanceof Error
-              ? luckyError
-              : "Signal could not produce this lucky booking.",
-          ),
-        );
-      } finally {
-        luckyLaunchUiInFlightRef.current = false;
-        setBookingSuggestionBusy(null);
-      }
-    };
-    const luckyLaunchAvailable =
-      signalLuckyEligibleShows(shows, eligibleBots).length > 0;
     return (
       <div
         className={styles.productionDesk}
@@ -14932,35 +15071,6 @@ export function BotcastExperience({
             </label>
           ) : null}
           <div className={styles.episodeLaunchActions}>
-            <div className={styles.feelLuckyControl}>
-              <button
-                type="button"
-                className={styles.feelLuckyButton}
-                data-tutorial-target="botcast-feel-lucky"
-                onClick={() => void feelLucky()}
-                disabled={
-                  busy ||
-                  Boolean(bookingSuggestionBusy) ||
-                  !luckyLaunchAvailable ||
-                  Boolean(
-                    setupEpisodeImage &&
-                      (!setupImageModelCapable ||
-                        !setupEpisodeImage.descriptor.name.trim()),
-                  )
-                }
-                aria-busy={bookingSuggestionBusy === "lucky"}
-                aria-label="I Feel Lucky! Skip the search. Let Signal surprise you."
-                title="Skip the search. Let Signal surprise you."
-              >
-                {bookingSuggestionBusy === "lucky" ? (
-                  <LoaderCircle data-loading="true" aria-hidden="true" />
-                ) : (
-                  <span className={styles.feelLuckyPrism} aria-hidden="true" />
-                )}
-                I Feel Lucky!
-              </button>
-              <small>Skip the search. Let Signal surprise you.</small>
-            </div>
             <button
               type="button"
               className={styles.goLiveButton}
@@ -18020,59 +18130,6 @@ export function BotcastExperience({
                     aria-label="Show identity controls"
                     hidden={!showIdentityControlsExpanded}
                   >
-                    <input
-                      ref={lightStudioUploadRef}
-                      className={styles.assetUploadInput}
-                      type="file"
-                      accept={SIGNAL_ASSET_ACCEPT}
-                      disabled={busy || selectedShowArtworkBusy}
-                      aria-label="Upload replacement Light studio"
-                      onChange={(event) => {
-                        const file = event.currentTarget.files?.[0];
-                        event.currentTarget.value = "";
-                        if (!file) return;
-                        setStudioUploadLightFile(file);
-                        setNotice("Light selected. Choose the matching Dark studio.");
-                        window.requestAnimationFrame(() =>
-                          darkStudioUploadRef.current?.click(),
-                        );
-                      }}
-                    />
-                    <input
-                      ref={darkStudioUploadRef}
-                      className={styles.assetUploadInput}
-                      type="file"
-                      accept={SIGNAL_ASSET_ACCEPT}
-                      disabled={busy || selectedShowArtworkBusy}
-                      aria-label="Upload replacement Dark studio"
-                      onChange={(event) => {
-                        const file = event.currentTarget.files?.[0];
-                        event.currentTarget.value = "";
-                        if (file && studioUploadLightFile) {
-                          void uploadStudioSet(studioUploadLightFile, file);
-                        } else if (file) {
-                          setError(
-                            signalErrorToast(
-                              "Upload Signal studio pair",
-                              "Choose the Light studio first.",
-                            ),
-                          );
-                        }
-                      }}
-                    />
-                    <input
-                      ref={logoUploadRef}
-                      className={styles.assetUploadInput}
-                      type="file"
-                      accept={SIGNAL_ASSET_ACCEPT}
-                      disabled={busy || selectedShowArtworkBusy}
-                      aria-label="Upload replacement show logo"
-                      onChange={(event) => {
-                        const file = event.currentTarget.files?.[0];
-                        event.currentTarget.value = "";
-                        if (file) void uploadShowAsset("logo", file);
-                      }}
-                    />
                     <strong>Tune the identity.</strong>
                       <small>
                         Refresh the linked studio pair, tune the premise, name,
@@ -18090,7 +18147,7 @@ export function BotcastExperience({
                         ]}
                         refreshKey={`${selectedShow.dayAtmosphere.imageId ?? ""}:${selectedShow.nightAtmosphere.imageId ?? ""}`}
                         disabled={busy || selectedShowArtworkBusy}
-                        onUpload={() => lightStudioUploadRef.current?.click()}
+                        sourceFilter="generated"
                         onSynthesize={regenerateStudio}
                         onSelect={(asset) =>
                           reuseShowAssetSet(asset, "studio pair")
@@ -18104,7 +18161,7 @@ export function BotcastExperience({
                         currentImageIds={[selectedShow.logo.imageId]}
                         refreshKey={selectedShow.logo.imageId}
                         disabled={busy || selectedShowArtworkBusy}
-                        onUpload={() => logoUploadRef.current?.click()}
+                        sourceFilter="generated"
                         onUndo={
                           selectedShow.logo.previousImageUrl ||
                           selectedShow.logo.previousImageId

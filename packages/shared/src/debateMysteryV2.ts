@@ -10,10 +10,61 @@ import type {
 
 export const DEBATE_MYSTERY_V2_SCHEMA_VERSION = 2 as const;
 export const DEBATE_MYSTERY_AUDIO_MANIFEST_VERSION = 1 as const;
-export const DEBATE_MYSTERY_PLAY_READINESS_VERSION = 1 as const;
+export const DEBATE_MYSTERY_PLAY_READINESS_VERSION = 4 as const;
 export const DEBATE_MYSTERY_V2_JUROR_COUNT = 4 as const;
 
+export interface DebateMysteryAssetSynthesisV2 {
+  evidence: boolean;
+  /** Deliberately disabled in the first asset-synthesis release. */
+  rooms: false;
+  /** Deliberately disabled; existing investigation music remains unchanged. */
+  music: false;
+}
+
+/**
+ * Frozen visual direction shared by evidence now and room generation later.
+ * It is presentation-only and contains no sealed case facts.
+ */
+export interface DebateMysteryHouseStyleV2 {
+  version: 1;
+  id: string;
+  label: string;
+  promptContract: string;
+}
+
+export interface DebateMysteryMansionBundleRoomV1 {
+  id: string;
+  templateId: string;
+  name: string;
+  floor: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  neighborIds: string[];
+  assignedSuspectSeatId: string | null;
+  emoji: string;
+  imageId: string | null;
+  bundledAssetPath: string | null;
+}
+
+export interface DebateMysteryMansionBundleSummaryV1 {
+  version: 1;
+  id: string;
+  name: string;
+  sourceSessionId: string | null;
+  floors: number;
+  totalRooms: number;
+  suspectCount: number;
+  houseStyle: DebateMysteryHouseStyleV2;
+  rooms: DebateMysteryMansionBundleRoomV1[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type DebateMysteryTrialTypeV2 = "jury" | "bench";
+/** Frozen at compilation: full mansion investigation, or court from the title card. */
+export type DebateMysteryInvestigationModeV2 = "full" | "court_only";
 export type DebateMysteryCompilationStageV2 =
   | "writing_case"
   | "testing_contradictions"
@@ -43,6 +94,7 @@ export type DebateMysteryCourtCalloutV2 =
   | "not_guilty";
 export type DebateMysteryDialogueNodeKindV2 =
   | "briefing"
+  | "room_introduction"
   | "talk_topic"
   | "present_reaction"
   | "examination_result"
@@ -63,7 +115,14 @@ export interface DebateWhodunnitCreateConfigV2 {
   difficulty: DebateMysteryDifficulty;
   artMode: DebateMysteryArtMode;
   trialType: DebateMysteryTrialTypeV2;
+  /** Skip the mansion and compile the finite court act only. */
+  investigationMode?: DebateMysteryInvestigationModeV2;
   inspiration: string;
+  /** Frozen freeform Theme / Spark. `inspiration` remains its V2 compatibility alias. */
+  spark?: string;
+  assetSynthesis?: Partial<DebateMysteryAssetSynthesisV2>;
+  /** Minimal setup seam for an aggregate-owned saved mansion. */
+  mansionBundleId?: string | null;
   nonce: string;
   floors?: number;
   totalRooms?: number;
@@ -82,12 +141,25 @@ export interface DebateWhodunnitCreateConfigV2 {
 export interface DebateMysteryResolvedConfigV2
   extends Omit<
     DebateWhodunnitCreateConfigV2,
-    "floors" | "totalRooms" | "judgeBotId" | "prosecutorBotId" | "prosecutorPartnerBotId"
+    | "floors"
+    | "totalRooms"
+    | "judgeBotId"
+    | "prosecutorBotId"
+    | "prosecutorPartnerBotId"
+    | "investigationMode"
+    | "spark"
+    | "assetSynthesis"
+    | "mansionBundleId"
   > {
   floors: number;
   totalRooms: number;
   judgeBotId: string;
   prosecutorBotId: string;
+  investigationMode: DebateMysteryInvestigationModeV2;
+  spark: string;
+  assetSynthesis: DebateMysteryAssetSynthesisV2;
+  mansionBundleId: string | null;
+  houseStyle: DebateMysteryHouseStyleV2;
   jurorBotIds: [string, string, string, string] | [];
   eyewitnessChance: number;
 }
@@ -95,6 +167,32 @@ export interface DebateMysteryResolvedConfigV2
 export interface DebateMysteryRecordReferenceV2 {
   kind: DebateMysteryRecordKindV2;
   id: string;
+}
+
+export type DebateMysteryTalkSubjectV2 =
+  | { category: "general" }
+  | { category: "motive" }
+  | { category: "alibi" }
+  | { category: "person"; personId: string }
+  | { category: "room"; roomId: string };
+
+export type DebateMysteryPresentationUnlockTargetV2 =
+  | { kind: "topic"; topicNodeId: string }
+  | { kind: "room"; roomId: string }
+  | { kind: "hotspot"; roomId: string; hotspotId: string; nodeId: string }
+  | { kind: "location_discovery"; discoveryId: string }
+  | { kind: "record_discovery"; record: DebateMysteryRecordReferenceV2 }
+  | { kind: "record_description"; record: DebateMysteryRecordReferenceV2; description: string };
+
+/** Private frozen rule. It is stored with the dialogue graph and is never
+ * projected into the public session payload. */
+export interface DebateMysteryPresentationGateV2 {
+  id: string;
+  requiredRecord: DebateMysteryRecordReferenceV2;
+  requiredSuspectSeatId: string;
+  correctPresentNodeId: string;
+  unlocks: DebateMysteryPresentationUnlockTargetV2[];
+  requiredForProgression: boolean;
 }
 
 export interface DebateMysteryPerformanceDirectionV2 {
@@ -139,6 +237,10 @@ export interface DebateMysteryDialogueNodeV2 {
   intendedRecipientSeatId: string | null;
   lineId: string | null;
   label: string | null;
+  /** Public investigation location, when this interaction is spatially bound. */
+  locationId?: string | null;
+  /** Present only on player-selectable Talk roots. */
+  talkSubject?: DebateMysteryTalkSubjectV2 | null;
   requirements: DebateMysteryDialogueRequirementV2;
   mutations: DebateMysteryDialogueMutationV2;
   recordReferences: DebateMysteryRecordReferenceV2[];
@@ -188,7 +290,23 @@ export interface DebateMysteryDialogueGraphV2 {
   lines: DebateMysterySpokenLineV2[];
   witnessChapters: DebateMysteryWitnessChapterV2[];
   prosecutionChoices: DebateMysteryProsecutionChoiceV2[];
+  /** One finite, two-step reveal for each suspect room. The Casekeeper node is
+   * text-only; the persona node is locally voiced before the case is playable. */
+  roomIntroductionNodeIdsByRoom?: Record<string, {
+    casekeeperNodeId: string;
+    personaNodeId: string;
+    suspectSeatId: string;
+  }>;
   talkTopicNodeIdsBySuspect: Record<string, string[]>;
+  /** Private, exact Present routes and their bounded public unlocks. */
+  presentationGates?: DebateMysteryPresentationGateV2[];
+  /** Compatibility-only Talk nodes retained byte-for-byte after an old
+   * evidence-mirroring topic is removed from the playable Talk menu. */
+  retiredTalkNodeIds?: string[];
+  /** Optional for compatibility with cases frozen before repeat Talk delivery.
+   * Each entry contains finite suspect-owned response nodes selected after a
+   * topic has already been completed. */
+  repeatResponseNodeIdsByTopic?: Record<string, string[]>;
   presentNodeIdsBySuspect: Record<string, string[]>;
   prosecutorStrategyNodeId?: string;
   defendantReactionNodeIdsBySeat?: Record<
@@ -208,7 +326,21 @@ export interface DebateMysteryCompilationStatusV2 {
   preparedAudioCount: number;
   requiredAudioCount: number;
   retryable: boolean;
+  /** Stable public diagnostic code. Never derived from the private compiler error. */
+  publicFailureCode?: "CASE_FORGE_COMPILATION_STOPPED" | "CASE_FORGE_LOCAL_AUDIO_FAILED" | null;
+  /** Last spoiler-safe work stage before recovery. Optional for frozen legacy cases. */
+  publicFailureStage?: Exclude<
+    DebateMysteryCompilationStageV2,
+    "complete" | "needs_attention" | "cancelled"
+  > | null;
   spoilerSafeMessage: string;
+  /** Stable start time used for a live elapsed clock across reloads/restarts. */
+  startedAt: string;
+  /** Server snapshot; clients may advance it from startedAt while work is active. */
+  elapsedMs: number;
+  /** Spoiler-safe estimate derived only from completed durable pass history. */
+  approximateRemainingMs: number | null;
+  etaBasisPasses: number;
   updatedAt: string;
 }
 
@@ -268,6 +400,8 @@ export interface DebateMysteryVerdictV2 {
 
 export interface DebateMysteryRoomV2 {
   id: string;
+  /** Frozen room module identity; optional only for legacy V2 cases. */
+  templateId?: string;
   name: string;
   floor: number;
   /** Frozen mansion footprint. Optional only for V2 cases compiled before the
@@ -291,11 +425,21 @@ export interface DebateMysteryRoomV2 {
   }>;
 }
 
+/** Persisted room-entry choreography. A reload during `persona` repeats the
+ * same frozen local performance; only `complete` restores room controls. */
+export type DebateMysteryRoomIntroductionPhaseV2 =
+  | "unseen"
+  | "casekeeper"
+  | "persona"
+  | "complete";
+
 export interface DebateMysteryPublicRecordItemV2 {
   reference: DebateMysteryRecordReferenceV2;
   title: string;
   description: string;
   emoji: string;
+  visualKind?: "emoji" | "upload" | "synthesized";
+  imageId?: string | null;
   admitted: boolean;
   updatedAt: string;
 }
@@ -304,6 +448,7 @@ export interface DebateMysteryPublicTopicV2 {
   nodeId: string;
   suspectSeatId: string;
   label: string;
+  subject: DebateMysteryTalkSubjectV2;
   unlocked: boolean;
   completed: boolean;
 }
@@ -311,6 +456,9 @@ export interface DebateMysteryPublicTopicV2 {
 export interface DebateMysteryPublicDialogueEntryV2 {
   nodeId: string;
   lineId: string | null;
+  /** Text-only delivery is intentionally silent even when an older frozen case
+   * still has a local audio clip for the authored line. */
+  delivery?: "spoken" | "text_only";
   stageActionText?: string | null;
   visibleText: string;
   speakerSeatId: string | null;
@@ -499,6 +647,7 @@ export interface DebateWhodunnitFormatStateV2 {
   victim: { id: string; name: string } | null;
   suspects: DebateMysteryPublicSuspectSnapshotV1[];
   rooms: DebateMysteryRoomV2[];
+  roomIntroductions: Record<string, DebateMysteryRoomIntroductionPhaseV2>;
   currentRoomId: string | null;
   roomView: "mansion" | "room";
   metSuspectSeatIds: string[];
@@ -532,6 +681,8 @@ export interface DebateWhodunnitFormatStateV2 {
 
 export type DebateMysteryActionRequestV2 =
   | { version: 2; expectedRevision: number; idempotencyKey: string; action: "move"; roomId?: string }
+  | { version: 2; expectedRevision: number; idempotencyKey: string; action: "advance_room_introduction"; roomId: string }
+  | { version: 2; expectedRevision: number; idempotencyKey: string; action: "complete_room_introduction"; roomId: string }
   | { version: 2; expectedRevision: number; idempotencyKey: string; action: "examine"; roomId: string; hotspotId: string }
   | { version: 2; expectedRevision: number; idempotencyKey: string; action: "talk"; suspectSeatId: string; topicNodeId: string }
   | { version: 2; expectedRevision: number; idempotencyKey: string; action: "present_to_suspect"; suspectSeatId: string; record: DebateMysteryRecordReferenceV2 }
@@ -562,6 +713,96 @@ interface SolverState {
 
 function recordKey(reference: DebateMysteryRecordReferenceV2): string {
   return `${reference.kind}:${reference.id}`;
+}
+
+function mysterySubjectPhrase(value: string): string {
+  return value
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/^(?:a|an|the)\s+/u, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function mysterySubjectWords(value: string): string[] {
+  return mysterySubjectPhrase(value)
+    .split(" ")
+    .filter((word) => word.length > 1 && !["about", "regarding", "what", "which", "with"].includes(word));
+}
+
+export function normalizeDebateMysteryTalkSubjectV2(args: {
+  value: unknown;
+  label: string;
+  question?: string;
+  rooms?: readonly { id: string; name: string }[];
+  people?: readonly { id: string; name: string }[];
+}): DebateMysteryTalkSubjectV2 {
+  const source = args.value && typeof args.value === "object"
+    ? args.value as Record<string, unknown>
+    : {};
+  const category = typeof source.category === "string" ? source.category : "";
+  const subjectId = typeof source.subjectId === "string" ? source.subjectId.trim() : "";
+  const roomId = typeof source.roomId === "string" ? source.roomId.trim() : subjectId;
+  const personId = typeof source.personId === "string" ? source.personId.trim() : subjectId;
+  if (category === "room" && args.rooms?.some((room) => room.id === roomId)) {
+    return { category: "room", roomId };
+  }
+  if (category === "person" && args.people?.some((person) => person.id === personId)) {
+    return { category: "person", personId };
+  }
+  if (category === "motive" || category === "alibi" || category === "general") {
+    return { category };
+  }
+
+  const subjectText = mysterySubjectPhrase(`${args.label} ${args.question ?? ""}`);
+  const room = args.rooms?.find((candidate) => {
+    const name = mysterySubjectPhrase(candidate.name);
+    return candidate.id === subjectId || (name.length > 2 && subjectText.includes(name));
+  });
+  if (room) return { category: "room", roomId: room.id };
+  if (/\b(?:alibi|movements?|timeline|whereabouts?|where (?:were|was)|when (?:did|were|was))\b/iu.test(subjectText)) {
+    return { category: "alibi" };
+  }
+  if (/\b(?:motive|reason|resent|grudge|gain|benefit|why)\b/iu.test(subjectText)) {
+    return { category: "motive" };
+  }
+  const person = args.people?.find((candidate) => {
+    const name = mysterySubjectPhrase(candidate.name);
+    return candidate.id === subjectId || (name.length > 2 && subjectText.includes(name));
+  });
+  return person ? { category: "person", personId: person.id } : { category: "general" };
+}
+
+/** Conservative compatibility filter. Explicit room/person/motive/alibi
+ * semantics win; a general or legacy topic is retired only when its ID or
+ * wording unmistakably mirrors a Case File record. */
+export function debateMysteryTalkTopicMirrorsRecordV2(args: {
+  topicId: string;
+  label: string;
+  question?: string;
+  subject?: DebateMysteryTalkSubjectV2 | null;
+  records: readonly { reference: DebateMysteryRecordReferenceV2; title: string }[];
+}): DebateMysteryRecordReferenceV2 | null {
+  if (args.subject?.category === "room") return null;
+  const topicId = mysterySubjectPhrase(args.topicId.replace(/^talk(?:-response)?-/u, ""));
+  const label = mysterySubjectPhrase(args.label);
+  const question = mysterySubjectPhrase(args.question ?? "");
+  const general = !args.subject || args.subject.category === "general";
+  for (const item of args.records) {
+    const referenceId = mysterySubjectPhrase(item.reference.id);
+    const title = mysterySubjectPhrase(item.title);
+    if (!title) continue;
+    if (topicId && (topicId === referenceId || topicId === title)) return item.reference;
+    if (label === title) return item.reference;
+    const labelWords = mysterySubjectWords(label);
+    const titleWords = new Set(mysterySubjectWords(title));
+    if (labelWords.length >= 2 && labelWords.every((word) => titleWords.has(word))) {
+      return item.reference;
+    }
+    if (!general) continue;
+    if (question && question.includes(title)) return item.reference;
+  }
+  return null;
 }
 
 /**
@@ -644,6 +885,9 @@ export function validateDebateMysteryDialogueGraphV2(args: {
   graph: DebateMysteryDialogueGraphV2;
   suspectSeatIds: readonly string[];
   recordReferences: readonly DebateMysteryRecordReferenceV2[];
+  roomIds?: readonly string[];
+  personIds?: readonly string[];
+  hotspotIdsByRoom?: Readonly<Record<string, readonly string[]>>;
   prosecutorBotId?: string | null;
   rivalDefenseBotId?: string | null;
   eyewitnessSeatId?: string | null;
@@ -654,9 +898,15 @@ export function validateDebateMysteryDialogueGraphV2(args: {
   for (const id of duplicateIds(graph.nodes)) errors.push(`Duplicate dialogue node ID: ${id}.`);
   for (const id of duplicateIds(graph.lines)) errors.push(`Duplicate spoken line ID: ${id}.`);
   for (const id of duplicateIds(graph.witnessChapters)) errors.push(`Duplicate witness chapter ID: ${id}.`);
+  const presentationGates = Array.isArray(graph.presentationGates) ? graph.presentationGates : [];
+  for (const id of duplicateIds(presentationGates)) errors.push(`Duplicate presentation gate ID: ${id}.`);
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
   const lineById = new Map(graph.lines.map((line) => [line.id, line]));
   const recordIds = new Set(args.recordReferences.map(recordKey));
+  const roomIds = new Set(args.roomIds ?? []);
+  const personIds = new Set(args.personIds ?? []);
+  const retiredTalkNodeIds = new Set(graph.retiredTalkNodeIds ?? []);
+  const roomIntroductions = graph.roomIntroductionNodeIdsByRoom ?? {};
 
   for (const node of graph.nodes) {
     if (node.lineId && !lineById.has(node.lineId)) errors.push(`Node ${node.id} references missing line ${node.lineId}.`);
@@ -685,6 +935,189 @@ export function validateDebateMysteryDialogueGraphV2(args: {
       line.speakerBotId !== args.prosecutorBotId
     ) {
       errors.push(`Player-selected prosecution line ${line.id} is not owned by the selected Prosecutor bot.`);
+    }
+  }
+  for (const [roomId, introduction] of Object.entries(roomIntroductions)) {
+    if (args.roomIds && !roomIds.has(roomId)) {
+      errors.push(`Room introduction references missing room ${roomId}.`);
+      continue;
+    }
+    const casekeeper = nodeById.get(introduction.casekeeperNodeId);
+    const persona = nodeById.get(introduction.personaNodeId);
+    const casekeeperLine = casekeeper?.lineId ? lineById.get(casekeeper.lineId) : null;
+    const personaLine = persona?.lineId ? lineById.get(persona.lineId) : null;
+    if (
+      casekeeper?.kind !== "room_introduction" ||
+      casekeeperLine?.mode !== "text_only" ||
+      casekeeperLine.visibleText !== "..." ||
+      casekeeper.nextNodeIds.length !== 1 ||
+      casekeeper.nextNodeIds[0] !== introduction.personaNodeId
+    ) {
+      errors.push(`Room introduction ${roomId} has no exact silent Casekeeper beat.`);
+    }
+    if (
+      persona?.kind !== "room_introduction" ||
+      persona?.speakerSeatId !== introduction.suspectSeatId ||
+      personaLine?.mode !== "spoken" ||
+      personaLine.speakerBotId === null ||
+      !personaLine.stageActionText?.trim()
+    ) {
+      errors.push(`Room introduction ${roomId} has no finite voiced persona reveal.`);
+    }
+    if (!graph.interactionRootNodeIds.includes(introduction.casekeeperNodeId)) {
+      errors.push(`Room introduction ${roomId} is not reachable from the finite graph.`);
+    }
+  }
+
+  const activeTalkTopicIds = new Set<string>();
+  for (const [suspectSeatId, topicNodeIds] of Object.entries(graph.talkTopicNodeIdsBySuspect)) {
+    if (!args.suspectSeatIds.includes(suspectSeatId)) {
+      errors.push(`Talk menu ${suspectSeatId} belongs to a missing suspect.`);
+    }
+    for (const topicNodeId of topicNodeIds) {
+      const topic = nodeById.get(topicNodeId);
+      activeTalkTopicIds.add(topicNodeId);
+      if (
+        topic?.kind !== "talk_topic" ||
+        topic.intendedRecipientSeatId !== suspectSeatId ||
+        !topic.label?.trim()
+      ) {
+        errors.push(`Talk topic ${topicNodeId} is not an authored player-selectable subject for ${suspectSeatId}.`);
+        continue;
+      }
+      const subject = topic.talkSubject;
+      if (!subject) {
+        errors.push(`Talk topic ${topicNodeId} has no explicit subject semantics.`);
+      } else if (subject.category === "room") {
+        if (!subject.roomId || (args.roomIds && !roomIds.has(subject.roomId))) {
+          errors.push(`Talk topic ${topicNodeId} references missing room ${subject.roomId || "(blank)"}.`);
+        }
+      } else if (subject.category === "person") {
+        if (!subject.personId || (args.personIds && !personIds.has(subject.personId))) {
+          errors.push(`Talk topic ${topicNodeId} references missing person ${subject.personId || "(blank)"}.`);
+        }
+      } else if (
+        subject.category !== "general" &&
+        subject.category !== "motive" &&
+        subject.category !== "alibi"
+      ) {
+        errors.push(`Talk topic ${topicNodeId} has an unsupported subject category.`);
+      }
+      if (topic.recordReferences.length || topic.requirements.admittedRecordIds.length) {
+        errors.push(`Talk topic ${topicNodeId} mirrors a Case File interaction; evidence and testimony belong only in Present.`);
+      }
+    }
+  }
+
+  const presentRoute = (
+    suspectSeatId: string,
+    reference: DebateMysteryRecordReferenceV2,
+    exactNodeId?: string,
+  ): DebateMysteryDialogueNodeV2 | null => {
+    const key = recordKey(reference);
+    return (graph.presentNodeIdsBySuspect[suspectSeatId] ?? [])
+      .map((nodeId) => nodeById.get(nodeId))
+      .find((node) =>
+        node?.kind === "present_reaction" &&
+        (!exactNodeId || node.id === exactNodeId) &&
+        node.intendedRecipientSeatId === suspectSeatId &&
+        node.recordReferences.length === 1 &&
+        recordKey(node.recordReferences[0]!) === key) ?? null;
+  };
+  for (const gate of presentationGates) {
+    const requiredRecordKey = recordKey(gate.requiredRecord);
+    if (!gate.id?.trim()) errors.push("A presentation gate has no ID.");
+    if (!recordIds.has(requiredRecordKey)) {
+      errors.push(`Presentation gate ${gate.id} requires missing record ${requiredRecordKey}.`);
+    }
+    if (!args.suspectSeatIds.includes(gate.requiredSuspectSeatId)) {
+      errors.push(`Presentation gate ${gate.id} requires missing suspect ${gate.requiredSuspectSeatId}.`);
+    }
+    const correctRoute = presentRoute(
+      gate.requiredSuspectSeatId,
+      gate.requiredRecord,
+      gate.correctPresentNodeId,
+    );
+    if (
+      !correctRoute ||
+      !graph.interactionRootNodeIds.includes(gate.correctPresentNodeId) ||
+      correctRoute.nextNodeIds.length !== 1 ||
+      nodeById.get(correctRoute.nextNodeIds[0]!)?.kind !== "present_reaction"
+    ) {
+      errors.push(`Presentation gate ${gate.id} has no exact finite Present route for ${gate.requiredSuspectSeatId} + ${requiredRecordKey}.`);
+    }
+    if (!Array.isArray(gate.unlocks) || gate.unlocks.length === 0) {
+      errors.push(`Presentation gate ${gate.id} has no bounded public unlock target.`);
+      continue;
+    }
+    for (const target of gate.unlocks as DebateMysteryPresentationUnlockTargetV2[]) {
+      if (target.kind === "topic") {
+        const targetNode = nodeById.get(target.topicNodeId);
+        if (targetNode?.kind !== "talk_topic" || !activeTalkTopicIds.has(target.topicNodeId)) {
+          errors.push(`Presentation gate ${gate.id} targets missing Talk topic ${target.topicNodeId}.`);
+        }
+        if (graph.nodes.some((node) =>
+          !retiredTalkNodeIds.has(node.id) &&
+          node.mutations.unlockTopicIds.includes(target.topicNodeId))) {
+          errors.push(`Presentation gate ${gate.id} has a non-Present bypass to Talk topic ${target.topicNodeId}.`);
+        }
+      } else if (target.kind === "room") {
+        if (!target.roomId || (args.roomIds && !roomIds.has(target.roomId))) {
+          errors.push(`Presentation gate ${gate.id} targets missing room ${target.roomId || "(blank)"}.`);
+        }
+      } else if (target.kind === "hotspot") {
+        const hotspotIds = args.hotspotIdsByRoom?.[target.roomId];
+        const targetNode = nodeById.get(target.nodeId);
+        if (
+          !target.roomId ||
+          !target.hotspotId ||
+          (args.roomIds && !roomIds.has(target.roomId)) ||
+          (hotspotIds && !hotspotIds.includes(target.hotspotId)) ||
+          targetNode?.kind !== "examination_result" ||
+          targetNode.locationId !== target.roomId
+        ) {
+          errors.push(`Presentation gate ${gate.id} targets invalid hotspot ${target.roomId}:${target.hotspotId}.`);
+        }
+      } else if (target.kind === "location_discovery") {
+        if (!target.discoveryId?.trim()) {
+          errors.push(`Presentation gate ${gate.id} has a blank location discovery target.`);
+        }
+        if (graph.nodes.some((node) =>
+          !retiredTalkNodeIds.has(node.id) &&
+          node.mutations.discoverIds.includes(target.discoveryId))) {
+          errors.push(`Presentation gate ${gate.id} has a non-Present bypass to discovery ${target.discoveryId}.`);
+        }
+      } else if (target.kind === "record_discovery" || target.kind === "record_description") {
+        const targetRecordKey = recordKey(target.record);
+        if (!recordIds.has(targetRecordKey)) {
+          errors.push(`Presentation gate ${gate.id} targets missing record ${targetRecordKey}.`);
+        }
+        if (targetRecordKey === requiredRecordKey) {
+          errors.push(`Presentation gate ${gate.id} self-locks on required record ${requiredRecordKey}.`);
+        }
+        if (target.kind === "record_description" && !target.description?.trim()) {
+          errors.push(`Presentation gate ${gate.id} has an empty record-description revision.`);
+        }
+        if (
+          target.kind === "record_discovery" &&
+          graph.nodes.some((node) =>
+            !retiredTalkNodeIds.has(node.id) &&
+            node.mutations.admitRecordIds.includes(targetRecordKey))
+        ) {
+          errors.push(`Presentation gate ${gate.id} has a non-Present bypass to record ${targetRecordKey}.`);
+        }
+      } else {
+        errors.push(`Presentation gate ${gate.id} has an unsupported unlock target type.`);
+      }
+    }
+  }
+  if (presentationGates.length) {
+    for (const suspectSeatId of args.suspectSeatIds) {
+      for (const reference of args.recordReferences) {
+        if (!presentRoute(suspectSeatId, reference)) {
+          errors.push(`Present fallback ${suspectSeatId} + ${recordKey(reference)} is not finite and precompiled.`);
+        }
+      }
     }
   }
 
@@ -760,6 +1193,29 @@ export function validateDebateMysteryDialogueGraphV2(args: {
       if (!reactions) errors.push(`Potential defendant ${seatId} has no finite authored court reactions.`);
     }
   }
+  const repeatTalkNodes = new Set<string>();
+  for (const [topicNodeId, repeatNodeIds] of Object.entries(graph.repeatResponseNodeIdsByTopic ?? {})) {
+    const topic = nodeById.get(topicNodeId);
+    const suspectSeatId = topic?.intendedRecipientSeatId ?? topic?.speakerSeatId ?? null;
+    if (topic?.kind !== "talk_topic" || !suspectSeatId) {
+      errors.push(`Repeat Talk mapping ${topicNodeId} has no authored topic.`);
+      continue;
+    }
+    if (!repeatNodeIds.length) errors.push(`Talk topic ${topicNodeId} has no repeat response.`);
+    for (const repeatNodeId of repeatNodeIds) {
+      const repeatNode = nodeById.get(repeatNodeId);
+      const repeatLine = repeatNode?.lineId ? lineById.get(repeatNode.lineId) : null;
+      if (
+        repeatNode?.kind !== "talk_topic" ||
+        repeatNode.speakerSeatId !== suspectSeatId ||
+        repeatLine?.speakerKind !== "bot"
+      ) {
+        errors.push(`Repeat Talk response ${repeatNodeId} is not a suspect-owned authored line.`);
+        continue;
+      }
+      repeatTalkNodes.add(repeatNodeId);
+    }
+  }
 
   const initial: Omit<SolverState, "nodeId"> = {
     discoveries: new Set(graph.initialDiscoveryIds),
@@ -768,12 +1224,21 @@ export function validateDebateMysteryDialogueGraphV2(args: {
     choices: new Map<string, string>(),
   };
   const queue: SolverState[] = [];
+  const resolvedPresentationGateIds = new Set<string>();
+  const nodeBlockedByPresentationGate = (node: DebateMysteryDialogueNodeV2): boolean =>
+    presentationGates.some((gate) =>
+      !resolvedPresentationGateIds.has(gate.id) &&
+      gate.unlocks.some((target) =>
+        (target.kind === "topic" && target.topicNodeId === node.id) ||
+        (target.kind === "hotspot" && target.nodeId === node.id) ||
+        (target.kind === "room" && target.roomId === node.locationId)));
   const enqueueEligibleRoot = (
     rootId: string,
     state: Omit<SolverState, "nodeId">,
   ): boolean => {
     const root = nodeById.get(rootId);
     if (!root) return false;
+    if (nodeBlockedByPresentationGate(root)) return false;
     if (requirementsSatisfied(root.requirements, state)) {
       queue.push({ nodeId: rootId, ...state });
       return true;
@@ -820,7 +1285,11 @@ export function validateDebateMysteryDialogueGraphV2(args: {
       if (visited.has(signature)) continue;
       visited.add(signature);
       const node = nodeById.get(state.nodeId);
-      if (!node || !requirementsSatisfied(node.requirements, state)) continue;
+      if (
+        !node ||
+        nodeBlockedByPresentationGate(node) ||
+        !requirementsSatisfied(node.requirements, state)
+      ) continue;
       reachableNodes.add(node.id);
       if (node.lineId && lineById.get(node.lineId)?.mode !== "text_only") reachableLines.add(node.lineId);
       const nextState = applyMutations(node, state);
@@ -831,13 +1300,64 @@ export function validateDebateMysteryDialogueGraphV2(args: {
       for (const nextId of node.nextNodeIds) queue.push({ ...nextState, nodeId: nextId });
       madeProgress = true;
     }
+    for (const gate of presentationGates) {
+      if (resolvedPresentationGateIds.has(gate.id)) continue;
+      if (
+        !accumulated.records.has(recordKey(gate.requiredRecord)) ||
+        !reachableNodes.has(gate.correctPresentNodeId)
+      ) continue;
+      resolvedPresentationGateIds.add(gate.id);
+      for (const target of gate.unlocks) {
+        if (target.kind === "topic") accumulated.topics.add(target.topicNodeId);
+        else if (target.kind === "location_discovery") accumulated.discoveries.add(target.discoveryId);
+        else if (target.kind === "record_discovery") accumulated.records.add(recordKey(target.record));
+      }
+      madeProgress = true;
+    }
     for (const rootId of graph.interactionRootNodeIds) {
       if (reachableNodes.has(rootId)) continue;
       if (enqueueEligibleRoot(rootId, accumulated)) madeProgress = true;
     }
   }
+  // Repeat responses are invoked only by a completed-topic action, rather
+  // than by a graph edge. Treat validated mappings as audio-reachable without
+  // changing the frozen graph's normal interaction roots or transitions.
+  for (const nodeId of repeatTalkNodes) {
+    const node = nodeById.get(nodeId)!;
+    reachableNodes.add(nodeId);
+    if (node.lineId && lineById.get(node.lineId)?.mode !== "text_only") reachableLines.add(node.lineId);
+  }
+  // Retired evidence-mirroring Talk exchanges stay in the finite local audio
+  // contract so existing active history remains playable, but their mutations
+  // never participate in progression after migration.
+  for (const nodeId of retiredTalkNodeIds) {
+    const node = nodeById.get(nodeId);
+    if (!node) {
+      errors.push(`Retired Talk node ${nodeId} is missing.`);
+      continue;
+    }
+    if (node.kind !== "talk_topic") errors.push(`Retired Talk node ${nodeId} has the wrong node type.`);
+    reachableNodes.add(nodeId);
+    if (node.lineId && lineById.get(node.lineId)?.mode !== "text_only") reachableLines.add(node.lineId);
+  }
+  for (const gate of presentationGates) {
+    if (resolvedPresentationGateIds.has(gate.id)) continue;
+    const requiredRecordKey = recordKey(gate.requiredRecord);
+    if (!accumulated.records.has(requiredRecordKey)) {
+      errors.push(`Presentation gate ${gate.id} requires ${requiredRecordKey}, but that record is unreachable before the gate.`);
+    } else if (gate.requiredForProgression) {
+      errors.push(`Presentation gate ${gate.id} has no reachable correct Present route.`);
+    }
+  }
   for (const node of graph.nodes) {
-    if (!reachableNodes.has(node.id)) errors.push(`Dialogue node ${node.id} is unreachable.`);
+    // Modern cases map every public Case File record to a finite Present
+    // exchange. The old per-suspect default remains serialized only as a
+    // compatibility anchor and is deliberately not playable or pre-voiced.
+    const dormantPresentDefault =
+      node.kind === "present_reaction" && /-default$/u.test(node.id);
+    if (!reachableNodes.has(node.id) && !dormantPresentDefault) {
+      errors.push(`Dialogue node ${node.id} is unreachable.`);
+    }
   }
   for (const choice of graph.prosecutionChoices) {
     for (const option of choice.options) {
@@ -984,6 +1504,16 @@ export function resolveDebateMysteryConfigV2(
     prosecutorBotId: _inputProsecutorBotId,
     ...publicValue
   } = value;
+  const spark = (value.spark?.trim() || value.inspiration.trim()).slice(0, 2_000);
+  const investigationMode: DebateMysteryInvestigationModeV2 =
+    value.investigationMode === "court_only" ? "court_only" : "full";
+  const assetSynthesis: DebateMysteryAssetSynthesisV2 = {
+    evidence: value.assetSynthesis?.evidence === true,
+    // Court-only cases never prepare investigation-only assets. These remain
+    // server-enforced even after their setup toggles become available.
+    rooms: false,
+    music: false,
+  };
   return {
     ...publicValue,
     trialType,
@@ -994,7 +1524,15 @@ export function resolveDebateMysteryConfigV2(
     judgeBotId: value.judgeBotId?.trim() || "prism:player-judge",
     prosecutorBotId,
     rivalDefenseBotId: value.rivalDefenseBotId.trim(),
-    inspiration: value.inspiration.trim().slice(0, 2_000),
+    inspiration: spark,
+    spark,
+    assetSynthesis,
+    investigationMode,
+    mansionBundleId:
+      typeof value.mansionBundleId === "string" && value.mansionBundleId.trim()
+        ? value.mansionBundleId.trim().slice(0, 200)
+        : null,
+    houseStyle: debateMysteryHouseStyleV2(spark),
     nonce: value.nonce.trim().slice(0, 200),
     floors,
     totalRooms,
@@ -1003,7 +1541,9 @@ export function resolveDebateMysteryConfigV2(
       value.participationDifficulty === "coach" || value.participationDifficulty === "immersive"
         ? value.participationDifficulty
         : "standard",
-    eyewitnessChance: debateMysteryEyewitnessChanceV2(value.difficulty, value.preset),
+    eyewitnessChance: investigationMode === "court_only"
+      ? 0
+      : debateMysteryEyewitnessChanceV2(value.difficulty, value.preset),
   };
 }
 
@@ -1038,6 +1578,8 @@ export function publicEvidenceRecordV2(
     title: evidence.title,
     description: evidence.observation,
     emoji: evidence.emoji,
+    visualKind: evidence.imageId ? "synthesized" : "emoji",
+    imageId: evidence.imageId,
     admitted: true,
     updatedAt,
   };
@@ -1074,6 +1616,31 @@ export function normalizeDebateMysteryFormatStateV2(
   if (!prosecutorBotId) return null;
   const { prosecutorPartnerBotId: _legacyProsecutorPartnerBotId, ...config } =
     configSource;
+  const spark =
+    (typeof configSource.spark === "string" ? configSource.spark.trim() : "") ||
+    (typeof configSource.inspiration === "string"
+      ? configSource.inspiration.trim()
+      : "");
+  const assetSynthesisSource =
+    configSource.assetSynthesis && typeof configSource.assetSynthesis === "object"
+      ? configSource.assetSynthesis as Record<string, unknown>
+      : {};
+  const houseStyleSource =
+    configSource.houseStyle && typeof configSource.houseStyle === "object"
+      ? configSource.houseStyle as Partial<DebateMysteryHouseStyleV2>
+      : null;
+  const houseStyle =
+    houseStyleSource?.version === 1 &&
+    typeof houseStyleSource.id === "string" &&
+    typeof houseStyleSource.label === "string" &&
+    typeof houseStyleSource.promptContract === "string"
+      ? {
+          version: 1 as const,
+          id: houseStyleSource.id,
+          label: houseStyleSource.label,
+          promptContract: houseStyleSource.promptContract,
+        }
+      : debateMysteryHouseStyleV2(spark);
   const readinessSource = source.readiness as
     | Partial<DebateMysteryPlayReadinessV1>
     | undefined;
@@ -1108,12 +1675,65 @@ export function normalizeDebateMysteryFormatStateV2(
           contractHash: null,
           checkedAt: null,
         };
+  const subjectRooms = source.rooms.map((room) => ({ id: room.id, name: room.name }));
+  const subjectPeople = [
+    ...(source.victim ? [{ id: source.victim.id, name: source.victim.name }] : []),
+    ...source.suspects.map((suspect) => ({ id: suspect.seatId, name: suspect.name })),
+  ];
   return {
     ...(source as DebateWhodunnitFormatStateV2),
     config: {
       ...config,
       prosecutorBotId,
+      inspiration: spark,
+      spark,
+      assetSynthesis: {
+        evidence: assetSynthesisSource.evidence === true,
+        rooms: false,
+        music: false,
+      },
+      investigationMode:
+        configSource.investigationMode === "court_only" ? "court_only" : "full",
+      mansionBundleId:
+        typeof configSource.mansionBundleId === "string" &&
+        configSource.mansionBundleId.trim()
+          ? configSource.mansionBundleId.trim()
+          : null,
+      houseStyle,
     } as unknown as DebateMysteryResolvedConfigV2,
+    compilation: {
+      ...source.compilation,
+      startedAt:
+        typeof source.compilation.startedAt === "string"
+          ? source.compilation.startedAt
+          : source.compilation.updatedAt,
+      elapsedMs:
+        typeof source.compilation.elapsedMs === "number" &&
+        Number.isFinite(source.compilation.elapsedMs)
+          ? Math.max(0, Math.round(source.compilation.elapsedMs))
+          : 0,
+      approximateRemainingMs:
+        typeof source.compilation.approximateRemainingMs === "number" &&
+        Number.isFinite(source.compilation.approximateRemainingMs)
+          ? Math.max(0, Math.round(source.compilation.approximateRemainingMs))
+          : null,
+      etaBasisPasses:
+        typeof source.compilation.etaBasisPasses === "number" &&
+        Number.isFinite(source.compilation.etaBasisPasses)
+          ? Math.max(0, Math.round(source.compilation.etaBasisPasses))
+          : 0,
+    },
+    record: source.record.map((item) => ({
+      ...item,
+      visualKind:
+        item.visualKind === "upload" || item.visualKind === "synthesized"
+          ? item.visualKind
+          : "emoji",
+      imageId:
+        typeof item.imageId === "string" && item.imageId.trim()
+          ? item.imageId.trim()
+          : null,
+    })),
     dialogueHistory: source.dialogueHistory.map((entry) => ({
       ...entry,
       speakerBotId:
@@ -1122,6 +1742,35 @@ export function normalizeDebateMysteryFormatStateV2(
           ? (entry as Partial<DebateMysteryPublicDialogueEntryV2>).speakerBotId!
           : null,
     })),
+    roomIntroductions: Object.fromEntries(source.rooms.map((room) => {
+      const phase = source.roomIntroductions?.[room.id];
+      return [room.id, phase === "unseen" || phase === "casekeeper" || phase === "persona" || phase === "complete"
+        ? phase
+        : "complete"];
+    })),
+    topics: source.topics.flatMap((topic) => {
+      if (!topic || typeof topic !== "object") return [];
+      const candidate = topic as Partial<DebateMysteryPublicTopicV2>;
+      if (
+        typeof candidate.nodeId !== "string" ||
+        typeof candidate.suspectSeatId !== "string" ||
+        typeof candidate.label !== "string"
+      ) return [];
+      return [{
+        ...candidate,
+        nodeId: candidate.nodeId,
+        suspectSeatId: candidate.suspectSeatId,
+        label: candidate.label,
+        subject: normalizeDebateMysteryTalkSubjectV2({
+          value: candidate.subject,
+          label: candidate.label,
+          rooms: subjectRooms,
+          people: subjectPeople,
+        }),
+        unlocked: candidate.unlocked === true,
+        completed: candidate.completed === true,
+      }];
+    }),
     court: source.court
       ? {
           ...source.court,
@@ -1133,4 +1782,37 @@ export function normalizeDebateMysteryFormatStateV2(
       : null,
     readiness,
   };
+}
+
+function mysteryStyleHash(value: string): string {
+  let hash = 2_166_136_261;
+  for (const character of value) {
+    hash ^= character.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+/** A deterministic, spoiler-safe one-house contract shared by all visuals. */
+export function debateMysteryHouseStyleV2(sparkInput: string): DebateMysteryHouseStyleV2 {
+  const spark = sparkInput.replace(/\s+/gu, " ").trim().slice(0, 600);
+  const direction = spark || "an original, lived-in mansion with restrained cinematic mystery";
+  return {
+    version: 1,
+    id: `house-${mysteryStyleHash(direction.toLocaleLowerCase())}`,
+    label: spark || "PRISM house style",
+    promptContract: [
+      "One-house continuity contract: every generated asset belongs to the same mansion, era, material palette, weather, lighting logic, and illustration language.",
+      `Frozen Theme / Spark: ${direction}.`,
+      "Preserve this identity for future room generation; do not introduce a second architecture, era, or palette.",
+    ].join(" "),
+  };
+}
+
+export function debateMysteryMansionBundleEligibleV2(
+  state: Pick<DebateWhodunnitFormatStateV2, "rooms">,
+): boolean {
+  return state.rooms.length > 0 && state.rooms.every(
+    (room) => room.unlocked && room.visited && room.hotspots.every((hotspot) => hotspot.examined),
+  );
 }

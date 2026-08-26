@@ -74,6 +74,8 @@ import type {
   BotcastStudioLayout,
   BotcastStudioLightingState,
   BotcastStudioAtmosphereMix,
+  BotcastStagePreset,
+  BotcastStagePresetSettings,
   BotcastVoiceLevelsByBotId,
   BotcastLogoGlyph,
   BotcastLogoDesignV1,
@@ -615,6 +617,8 @@ export interface SignalOnlineTurnResult {
   attempts: SignalOnlineTurnAttemptV1[];
   totalDurationMs: number;
   validationFailureReason?: "empty" | "refusal" | "invalid_output";
+  /** Exact final validation clause, retained for faithful repair provenance. */
+  validationFailureClause?: string;
 }
 
 export class SignalOnlineTurnError extends Error {
@@ -778,6 +782,9 @@ export async function runSignalOnlineTurn(args: {
             attempts,
             totalDurationMs: Math.max(0, Math.round(now() - startedAt)),
             validationFailureReason: validation.reason,
+            ...(validation.clause
+              ? { validationFailureClause: validation.clause }
+              : {}),
           };
         }
         if (args.validationRetryInstruction) {
@@ -968,6 +975,15 @@ type BotcastShowRow = {
   atmosphere_audio_undo_available?: number | null;
   host_powers_json?: string | null;
   host_system_prompt?: string | null;
+};
+
+type BotcastStagePresetRow = {
+  id: string;
+  user_id: string;
+  name: string;
+  stage_json: string;
+  created_at: string;
+  updated_at: string;
 };
 
 export type StoredBotcastShowIntroAudio = {
@@ -3009,6 +3025,163 @@ function mapShow(row: BotcastShowRow): BotcastShow {
       Math.round(Number(row.audience_review_count ?? 0)),
     ),
   };
+}
+
+const BOTCAST_STAGE_PRESET_NAME_MAX = 80;
+
+function normalizeBotcastStagePresetName(raw: unknown): string {
+  const name = typeof raw === "string" ? raw.trim().replace(/\s+/g, " ") : "";
+  if (!name) throw new Error("A Signal stage preset needs a name.");
+  return name.slice(0, BOTCAST_STAGE_PRESET_NAME_MAX);
+}
+
+/** Normalizes the full Rehearse contract while deliberately excluding show identity and assets. */
+export function normalizeBotcastStagePresetSettings(
+  value: unknown,
+  fallback?: Partial<BotcastStagePresetSettings>,
+): BotcastStagePresetSettings {
+  const source = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Partial<BotcastStagePresetSettings>
+    : {};
+  return {
+    studioLayout: normalizeBotcastStudioLayout(
+      source.studioLayout,
+      fallback?.studioLayout ?? BOTCAST_DEFAULT_STUDIO_LAYOUT,
+    ),
+    cameraFraming: normalizeBotcastCameraFraming(
+      source.cameraFraming,
+      fallback?.cameraFraming ?? BOTCAST_DEFAULT_CAMERA_FRAMING,
+    ),
+    logoPlacement: normalizeBotcastLogoPlacement(
+      source.logoPlacement,
+      fallback?.logoPlacement ?? BOTCAST_DEFAULT_LOGO_PLACEMENT,
+    ),
+    studioGlowTuning: normalizeBotcastStudioGlowTuning(
+      source.studioGlowTuning,
+      fallback?.studioGlowTuning ?? BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
+    ),
+    voiceLevelsByBotId: normalizeBotcastVoiceLevelsByBotId(
+      source.voiceLevelsByBotId,
+      fallback?.voiceLevelsByBotId ?? {},
+    ),
+    atmosphereMix: normalizeBotcastStudioAtmosphereMix(
+      source.atmosphereMix,
+      fallback?.atmosphereMix ?? BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
+    ),
+  };
+}
+
+export function botcastStagePresetSettingsFromShow(
+  show: BotcastShow,
+): BotcastStagePresetSettings {
+  return normalizeBotcastStagePresetSettings({
+    studioLayout: show.studioLayout,
+    cameraFraming: show.cameraFraming,
+    logoPlacement: show.logoPlacement,
+    studioGlowTuning: show.studioGlowTuning,
+    voiceLevelsByBotId: show.voiceLevelsByBotId,
+    atmosphereMix: show.atmosphereMix,
+  });
+}
+
+function mapBotcastStagePresetRow(row: BotcastStagePresetRow): BotcastStagePreset {
+  let raw: unknown = undefined;
+  try { raw = JSON.parse(row.stage_json) as unknown; } catch { /* legacy malformed rows fall back safely */ }
+  return {
+    id: row.id,
+    name: row.name,
+    settings: normalizeBotcastStagePresetSettings(raw),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function getBotcastStagePresetRow(
+  db: DatabaseSync,
+  userId: string,
+  presetId: string,
+): BotcastStagePresetRow | undefined {
+  return db.prepare(
+    `SELECT id, user_id, name, stage_json, created_at, updated_at
+       FROM botcast_stage_presets WHERE id = ? AND user_id = ?`,
+  ).get(presetId, userId) as BotcastStagePresetRow | undefined;
+}
+
+export function listBotcastStagePresets(
+  db: DatabaseSync,
+  userId: string,
+): BotcastStagePreset[] {
+  return (db.prepare(
+    `SELECT id, user_id, name, stage_json, created_at, updated_at
+       FROM botcast_stage_presets WHERE user_id = ?
+       ORDER BY updated_at DESC, created_at DESC`,
+  ).all(userId) as unknown as BotcastStagePresetRow[]).map(mapBotcastStagePresetRow);
+}
+
+export function createBotcastStagePreset(
+  db: DatabaseSync,
+  userId: string,
+  input: { name?: unknown; settings?: unknown },
+): BotcastStagePreset {
+  const now = new Date().toISOString();
+  const name = normalizeBotcastStagePresetName(input.name);
+  const settings = normalizeBotcastStagePresetSettings(input.settings);
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const matches = db.prepare(
+      `SELECT id, user_id, name, stage_json, created_at, updated_at
+         FROM botcast_stage_presets
+        WHERE user_id = ? AND name = ? COLLATE NOCASE
+        ORDER BY updated_at DESC, created_at DESC, id ASC`,
+    ).all(userId, name) as unknown as BotcastStagePresetRow[];
+    const id = matches[0]?.id ?? randomId(12);
+    if (matches.length > 0) {
+      db.prepare(
+        `UPDATE botcast_stage_presets
+            SET name = ?, stage_json = ?, updated_at = ?
+          WHERE id = ? AND user_id = ?`,
+      ).run(name, JSON.stringify(settings), now, id, userId);
+      db.prepare(
+        `DELETE FROM botcast_stage_presets
+          WHERE user_id = ? AND name = ? COLLATE NOCASE AND id <> ?`,
+      ).run(userId, name, id);
+    } else {
+      db.prepare(
+        `INSERT INTO botcast_stage_presets (id, user_id, name, stage_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run(id, userId, name, JSON.stringify(settings), now, now);
+    }
+    const row = getBotcastStagePresetRow(db, userId, id);
+    if (!row) throw new Error("Failed to save Signal stage preset.");
+    db.exec("COMMIT");
+    return mapBotcastStagePresetRow(row);
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export function deleteBotcastStagePreset(
+  db: DatabaseSync,
+  userId: string,
+  presetId: string,
+): void {
+  const result = db.prepare(
+    "DELETE FROM botcast_stage_presets WHERE id = ? AND user_id = ?",
+  ).run(presetId, userId);
+  if (Number(result.changes ?? 0) === 0) throw new Error("Signal stage preset not found.");
+}
+
+export function applyBotcastStagePreset(
+  db: DatabaseSync,
+  userId: string,
+  showId: string,
+  presetId: string,
+): BotcastShow {
+  const row = getBotcastStagePresetRow(db, userId, presetId);
+  if (!row) throw new Error("Signal stage preset not found.");
+  const settings = mapBotcastStagePresetRow(row).settings;
+  return updateBotcastShow(db, userId, showId, settings);
 }
 
 function repairBotcastShowHostAuthoredLines(
@@ -12853,6 +13026,12 @@ function validateBotcastAutoSpeakerUtterance(input: {
     requiredQuote,
   );
   const spokenContent = extractBotcastVoicePerformance(sanitized, false).content;
+  const speakerIdentitySwap =
+    input.rejectPeerIdentityClaim === true &&
+    botcastSpeakerClaimsPeerIdentity(
+      extractBotcastVoicePerformance(textValidation.value, false).content,
+      input.peerName,
+    );
   const privateProducerDirection = input.privateProducerDirection?.trim() ?? "";
   const exposesPrivateProducerDirection =
     privateProducerDirection.length > 0 &&
@@ -12874,8 +13053,10 @@ function validateBotcastAutoSpeakerUtterance(input: {
         input.hostClosingGuestName,
       )
     : null;
-  const failClause = !spokenContent
-    ? "empty_spoken"
+  const failClause = speakerIdentitySwap
+    ? "speaker_identity_swap"
+    : !spokenContent
+      ? "empty_spoken"
     : exposesPrivateProducerDirection
       ? "private_cue_exposure"
     : missingQuote
@@ -16428,6 +16609,7 @@ export async function advanceBotcastEpisode(
   >["recovery"];
   let onlineTurn: SignalOnlineTurnResult | undefined;
   let onlineFormalThanksRepairApplied = false;
+  let onlineFreshContactPowerRepair = false;
   let autoExhaustion: AutoFallbackExhaustedError | null = null;
   let autoExhaustionRecovery:
     | "deterministic_host_closing"
@@ -17173,6 +17355,19 @@ export async function advanceBotcastEpisode(
         // eligible for the canonical transcript.
         raw = repairedClosing;
         onlineFormalThanksRepairApplied = true;
+      } else if (
+        speakerEternallyIntroduces &&
+        onlineTurn.attempts.length > 0 &&
+        onlineTurn.attempts.every(
+          (attempt) =>
+            attempt.outcome === "rejected" &&
+            attempt.reason === "invalid_output" &&
+            attempt.clause === "fresh_contact",
+        )
+      ) {
+        // The Power runtime can add the missing introduction without
+        // discarding the provider's otherwise substantive final question.
+        onlineFreshContactPowerRepair = true;
       } else {
         raw = "";
         providerUsed = "deterministic";
@@ -18232,6 +18427,14 @@ export async function advanceBotcastEpisode(
     voicePerformanceText,
     now,
   );
+  const onlineValidationRepairReason: BotcastUtteranceRepairReason | null =
+    onlineTurn?.validationFailureClause === "false_name"
+      ? "false_name_identity"
+      : onlineTurn?.validationFailureClause === "speaker_identity_swap"
+        ? "speaker_identity_swap"
+        : onlineTurn?.validationFailureClause === "fresh_contact"
+          ? "power_fresh_contact"
+          : null;
   recordEvent(
     db,
     userId,
@@ -18376,7 +18579,9 @@ export async function advanceBotcastEpisode(
           utteranceRepair: {
             v: 1,
             source:
-              autoExhaustion ||
+              onlineFreshContactPowerRepair && freshContactRepairApplied
+                ? "power_runtime"
+                : autoExhaustion ||
                 onlineTurn?.validationFailureReason ||
                 onlineFormalThanksRepairApplied
                 ? "provider_recovery"
@@ -18393,7 +18598,7 @@ export async function advanceBotcastEpisode(
                 : onlineFormalThanksRepairApplied
                   ? "formal_thanks_appended"
                 : onlineTurn?.validationFailureReason
-                  ? "content_validation"
+                  ? onlineValidationRepairReason ?? "content_validation"
                   : generatedUtterance.repairReason) ??
               closingContractRepairReason ??
               (prematureSignoffRepairApplied

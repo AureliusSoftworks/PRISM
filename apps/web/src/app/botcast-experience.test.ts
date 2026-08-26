@@ -37,6 +37,35 @@ const pageCss = readFileSync(
 );
 
 describe("Signal experience shell", () => {
+  it("saves, applies, and deletes named Rehearse Stage presets without a second stage-save action", () => {
+    assert.match(source, /\/api\/botcast\/stage-presets/u);
+    assert.match(source, /Save preset/u);
+    assert.match(source, /Choose a saved setup/u);
+    assert.match(source, /Apply/u);
+    assert.match(source, /Delete selected Signal stage preset/u);
+    assert.match(source, /const stagePresetBusy =/u);
+    assert.match(source, /The stage settings are saved for this show/u);
+    assert.match(
+      source,
+      /preset\.name\.trim\(\)\.toLocaleLowerCase\(\)[\s\S]{0,120}response\.preset\.name\.trim\(\)\.toLocaleLowerCase\(\)/u,
+    );
+    assert.match(source, /studioLayout: show\.studioLayout/u);
+    assert.match(source, /cameraFraming: show\.cameraFraming/u);
+    assert.match(source, /logoPlacement: show\.logoPlacement/u);
+    assert.match(source, /studioGlowTuning: show\.studioGlowTuning/u);
+    assert.match(source, /voiceLevelsByBotId: show\.voiceLevelsByBotId/u);
+    assert.match(source, /atmosphereMix: show\.atmosphereMix/u);
+    assert.match(
+      source,
+      /never the show, cast, or artwork/u,
+    );
+    assert.match(css, /\.stagePresetControls\s*\{/u);
+    assert.match(
+      css,
+      /\.stagePresetControls\s*\{[^}]*flex:\s*1 1 520px;[^}]*max-width:\s*570px/iu,
+    );
+  });
+
   it("gates one ephemeral Producer image and stages items vs pictures", () => {
     assert.match(source, /supportsImageInput\?: boolean/u);
     assert.match(
@@ -215,7 +244,7 @@ describe("Signal experience shell", () => {
       css,
       /\.signalBotDropdownOption\s*\{[^}]*display:\s*flex;[^}]*--signal-picker-accent/u,
     );
-    assert.match(css, /\.createShowCard > button, \.goLiveButton/u);
+    assert.match(css, /\.createShowButton, \.goLiveButton/u);
     assert.doesNotMatch(css, /\.createShowCard button, \.goLiveButton/u);
     assert.match(source, /<BotPickerGrid/u);
     assert.match(source, /<BotPickerTile/u);
@@ -841,7 +870,31 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       css,
-      /\.stageLayoutEditor\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) minmax\(290px, 350px\)/u,
+      /\.stageLayoutEditor\s*\{[^}]*grid-template-columns:\s*minmax\(210px, 280px\) minmax\(0, 1fr\) minmax\(240px, 320px\)/u,
+    );
+    assert.match(
+      css,
+      /\.stageLayoutModal \.stageViewportColumn\s*\{[^}]*display:\s*contents/u,
+    );
+    assert.match(
+      css,
+      /\.stageLayoutModal \.stageViewport\s*\{[^}]*position:\s*sticky[^}]*grid-column:\s*2[^}]*grid-row:\s*2 \/ 6/u,
+    );
+    assert.match(
+      css,
+      /\.stageLayoutModal \.stageCameraTuner\s*\{[^}]*position:\s*sticky[^}]*grid-column:\s*3[^}]*overflow-y:\s*auto/u,
+    );
+    assert.match(
+      css,
+      /\.stageLayoutModal \.stageVoiceMixer\s*\{[^}]*grid-column:\s*1/u,
+    );
+    assert.match(
+      css,
+      /\.stageLayoutModal \.stageScreenTreatment\s*\{[^}]*grid-column:\s*1/u,
+    );
+    assert.match(
+      css,
+      /@media \(max-width:\s*900px\)[\s\S]*\.stageLayoutModal \.stageViewportColumn\s*\{[^}]*display:\s*grid[^}]*gap:\s*10px[^}]*\}[\s\S]*\.stageLayoutModal \.stageViewport,[\s\S]*\.stageLayoutModal \.stageCameraTuner\s*\{[^}]*position:\s*relative[^}]*grid-column:\s*1[^}]*overflow-y:\s*visible/u,
     );
     assert.match(css, /data-preview-theme="light"/u);
     assert.match(css, /data-preview-theme="dark"/u);
@@ -1719,6 +1772,13 @@ describe("Signal experience shell", () => {
   });
 
   it("resolves I Feel Lucky as one coherent setup before canonical launch", () => {
+    const createShowCardSource = source.slice(
+      source.indexOf("className={styles.createShowCard}"),
+      source.indexOf(
+        "</aside>",
+        source.indexOf("className={styles.createShowCard}"),
+      ),
+    );
     const luckySource = source.slice(
       source.indexOf("const feelLucky = async"),
       source.indexOf("return (", source.indexOf("const feelLucky = async")),
@@ -1731,6 +1791,24 @@ describe("Signal experience shell", () => {
     assert.match(
       source,
       /Skip the search\. Let Signal surprise you\./u,
+    );
+    assert.ok(
+      createShowCardSource.indexOf("Create show") <
+        createShowCardSource.indexOf(
+          'data-tutorial-target="botcast-feel-lucky"',
+        ),
+    );
+    assert.match(
+      createShowCardSource,
+      /data-tutorial-target="botcast-feel-lucky"/u,
+    );
+    assert.match(
+      createShowCardSource,
+      /disabled=\{luckyLaunchDisabled\}/u,
+    );
+    assert.match(
+      source,
+      /const luckyLaunchAvailable =\s*shows\.length > 0/u,
     );
     assert.match(
       luckySource,
@@ -2697,6 +2775,14 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       css,
+      /\.showBrandPreview\[data-identity-settings-open="true"\] \.showBrandContent\s*\{[^}]*height:\s*100%;[^}]*min-height:\s*0/iu,
+    );
+    assert.match(
+      css,
+      /\.showLookControls\s*\{[^}]*max-height:\s*calc\(100% - 30px\);[^}]*min-height:\s*0;[^}]*overflow-y:\s*auto/iu,
+    );
+    assert.match(
+      css,
       /\.showLookControlGrid\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/iu,
     );
     assert.match(
@@ -2971,21 +3057,13 @@ describe("Signal experience shell", () => {
     assert.match(source, /onSelect=\{\(asset\) => reuseShowAssetSet/u);
   });
 
-  it("replaces each Signal show asset through the shared upload actions", () => {
-    assert.match(source, /aria-label="Upload replacement Light studio"/u);
-    assert.match(source, /aria-label="Upload replacement Dark studio"/u);
-    assert.match(source, /aria-label="Upload replacement show logo"/u);
-    assert.match(source, /accept=\{SIGNAL_ASSET_ACCEPT\}/u);
-    assert.match(source, /uploadStudioSet\(studioUploadLightFile, file\)/u);
-    assert.match(
-      source,
-      /\/api\/botcast\/shows\/\$\{encodeURIComponent\(selectedShow\.id\)\}\/studio-set\/upload/u,
-    );
-    assert.match(source, /uploadShowAsset\("logo", file\)/u);
-    assert.match(source, /title: `Replacing \$\{label\}`/u);
-    assert.match(source, /Its previous artwork remains saved/u);
-    assert.match(source, /onUpload=\{\(\) => lightStudioUploadRef\.current\?\.click\(\)\}/u);
-    assert.match(source, /onUpload=\{\(\) => logoUploadRef\.current\?\.click\(\)\}/u);
+  it("limits Signal show identity assets to synthesis and generated reuse", () => {
+    assert.doesNotMatch(source, /Upload replacement (?:Light|Dark) studio/u);
+    assert.doesNotMatch(source, /Upload replacement show logo/u);
+    assert.doesNotMatch(source, /studio-set\/upload/u);
+    assert.doesNotMatch(source, /assets\/\$\{slot\}\/upload/u);
+    assert.doesNotMatch(source, /onUpload=/u);
+    assert.equal(source.match(/sourceFilter="generated"/gu)?.length, 2);
   });
 
   it("keeps microphones inside the authored studio instead of exposing a separate foreground", () => {

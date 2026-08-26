@@ -18749,15 +18749,9 @@ function BotFaceScreenGlass({
 
 /** Shared authored fallback for surfaces below the full-chassis readability floor. */
 function BotAvatarMicroRenderer(props: {
-  moodKey: NonNullable<Message["moodKey"]>;
+  moodKey?: NonNullable<Message["moodKey"]>;
   placement?: "leading" | "trailing";
   color?: string | null;
-  voicePreset?: BotVoicePreset;
-  faceStyle?: BotFaceStyle | null;
-  isTalking?: boolean;
-  mouthShape?: ZenLiveBotMouthShape | null;
-  scheduleKey?: string;
-  avatarDetails?: BotAvatarDetailsV1 | null;
   glyph?: ReactNode;
   className?: string;
   renderSizePx?: number;
@@ -18767,12 +18761,6 @@ function BotAvatarMicroRenderer(props: {
       moodKey={props.moodKey}
       placement={props.placement}
       color={props.color}
-      voicePreset={props.voicePreset}
-      faceStyle={props.faceStyle}
-      isTalking={props.isTalking}
-      mouthShape={props.mouthShape}
-      scheduleKey={props.scheduleKey}
-      avatarDetails={props.avatarDetails}
       glyph={props.glyph}
       className={props.className}
       renderSizePx={props.renderSizePx}
@@ -18803,10 +18791,6 @@ function MessageMoodFace(props: {
         moodKey={props.moodKey}
         placement={props.placement}
         color={props.color}
-        faceStyle={props.faceStyle}
-        isTalking={props.isTalking ?? props.mouthOpen}
-        mouthShape={props.mouthShape}
-        avatarDetails={props.avatarDetails}
         glyph={<BotGlyph name={props.glyph} size={16} />}
         renderSizePx={40}
       />
@@ -22069,7 +22053,6 @@ function BotFoundryBatchSlotAvatar({
       >
         <BotAvatarMicro
           color={preview.color}
-          faceStyle={preview.face}
           className={styles.botFoundryBatchMicroAvatar}
           glyph={<BotGlyph name={glyph} size={16} />}
           renderSizePx={40}
@@ -22359,9 +22342,6 @@ const BotGroupWaitingRoomPresenceAvatar = memo(
     ) : (
       <BotAvatarMicro
         color={bot.color}
-        faceStyle={resolveBotFaceStyleForBot(bot)}
-        isTalking={talking}
-        avatarDetails={resolveBotAvatarDetails(bot)}
         glyph={<BotGlyph name={bot.glyph} size={16} />}
         className={styles.botGroupWaitingRoomMicroBot}
         renderSizePx={renderSize}
@@ -31759,6 +31739,10 @@ interface ZenLiveBotMannequinProps {
   blinkEnabled?: boolean;
   blinkWhileTalking?: boolean;
   mouthShape: ZenLiveBotMouthShape;
+  /** Surface-scoped default rest glyph; never overrides authored mouths. */
+  defaultRestingMouthCharacter?: string | null;
+  /** Surface-scoped authored Speech-ink visibility. */
+  speechInkVisible?: boolean;
   moodHint: NonNullable<ZenLiveBotActionState["moodHint"]>;
   plateFace?: {
     text: string;
@@ -32028,6 +32012,8 @@ function FullAvatarCompactFallback({
     isTalking,
     inkTalking,
     mouthShape,
+    defaultRestingMouthCharacter,
+    speechInkVisible,
     moodHint,
     plateFace,
     scheduleKey,
@@ -32049,6 +32035,12 @@ function FullAvatarCompactFallback({
       coffeeSeatEmojiMoodFromPrism(zenLiveActionMoodToBotMood(moodHint)),
       miniMouthShape,
     );
+  const displayedMouthCharacter =
+    !isTalking &&
+    defaultRestingMouthCharacter !== undefined &&
+    faceStyle.mouthCharacter === null
+      ? defaultRestingMouthCharacter
+      : faceStyle.mouthCharacter;
   const miniFaceRegistrationStyle = {
     ...(hasAvatarArt
       ? BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE
@@ -32062,6 +32054,7 @@ function FullAvatarCompactFallback({
       color={avatarDetailsColor}
       faceGeometry={faceStyle}
       talking={inkTalking ?? isTalking}
+      speechInkVisible={speechInkVisible}
       thinking={showThinkingSpinner}
       mouthShape={miniMouthShape}
       className={styles.coffeeSeatMiniAvatarArt}
@@ -32106,7 +32099,7 @@ function FullAvatarCompactFallback({
             faceEyeCharacter={faceStyle.eyeCharacter}
             faceEyeMovement="still"
             faceMouthFont={faceStyle.mouthFont}
-            faceMouthCharacter={faceStyle.mouthCharacter}
+            faceMouthCharacter={displayedMouthCharacter}
             faceMouthAnimation={faceStyle.mouthAnimation}
             faceMouthSpeechPoses={faceStyle.mouthSpeechPoses}
             faceFontWeight={faceStyle.weight}
@@ -32163,6 +32156,8 @@ function ZenLiveBotMannequin({
   blinkEnabled = false,
   blinkWhileTalking = true,
   mouthShape,
+  defaultRestingMouthCharacter,
+  speechInkVisible,
   moodHint,
   plateFace,
   plateFaceRest,
@@ -32387,6 +32382,12 @@ function ZenLiveBotMannequin({
     mouthShape,
     isTalking,
   });
+  const displayedMouthCharacter =
+    !isTalking &&
+    defaultRestingMouthCharacter !== undefined &&
+    faceStyle.mouthCharacter === null
+      ? defaultRestingMouthCharacter
+      : faceStyle.mouthCharacter;
   const displayPlateFace =
     plateFaceRestKey !== null && releasedPlateFaceKey === plateFaceRestKey
       ? plateFaceRest!
@@ -32558,14 +32559,7 @@ function ZenLiveBotMannequin({
         style={presenceBodyStyle}
       >
         <BotAvatarMicroRenderer
-          moodKey={zenLiveActionMoodToBotMood(moodHint)}
           color={avatarDetailsColor ?? frameIdentityColor}
-          voicePreset={voicePreset}
-          faceStyle={faceStyle}
-          isTalking={isTalking}
-          mouthShape={mouthShape}
-          scheduleKey={`${scheduleKey}-micro`}
-          avatarDetails={avatarDetails}
           glyph={<BotGlyph name={glyph} size={16} />}
           className={styles.zenLiveBotPresenceMicroAvatar}
           renderSizePx={renderedSizePx}
@@ -32604,6 +32598,8 @@ function ZenLiveBotMannequin({
             isTalking,
             inkTalking,
             mouthShape,
+            defaultRestingMouthCharacter,
+            speechInkVisible,
             moodHint,
             plateFace,
             scheduleKey,
@@ -32728,6 +32724,7 @@ function ZenLiveBotMannequin({
                   faceGeometry={faceStyle}
                   blinkPhase={avatarDetailsBlinkPhase}
                   talking={inkTalking ?? isTalking}
+                  speechInkVisible={speechInkVisible}
                   speechMotionActive={false}
                   mouthShape={displayedMouthShape}
                   depth="behind-face"
@@ -32771,7 +32768,7 @@ function ZenLiveBotMannequin({
                   eyeStateStartedAtMs={eyeStateStartedAtMs}
                   eyeGazeOverride={cursorAttentionGaze}
                   faceMouthFont={faceStyle.mouthFont}
-                  faceMouthCharacter={faceStyle.mouthCharacter}
+                  faceMouthCharacter={displayedMouthCharacter}
                   faceMouthAnimation={faceStyle.mouthAnimation}
                   faceMouthSpeechPoses={faceStyle.mouthSpeechPoses}
                   faceFontWeight={faceStyle.weight}
@@ -32806,6 +32803,7 @@ function ZenLiveBotMannequin({
                   faceGeometry={faceStyle}
                   blinkPhase={avatarDetailsBlinkPhase}
                   talking={inkTalking ?? isTalking}
+                  speechInkVisible={speechInkVisible}
                   speechMotionActive={false}
                   mouthShape={displayedMouthShape}
                   depth="above-face"
@@ -32931,6 +32929,7 @@ function ZenLiveBotMannequin({
                     faceGeometry={faceStyle}
                     blinkPhase={avatarDetailsBlinkPhase}
                     talking={inkTalking ?? isTalking}
+                    speechInkVisible={speechInkVisible}
                     speechMotionActive={isTalking}
                     mouthShape={displayedMouthShape}
                     depth="behind-face"
@@ -32973,7 +32972,7 @@ function ZenLiveBotMannequin({
                     eyeStateStartedAtMs={eyeStateStartedAtMs}
                     eyeGazeOverride={cursorAttentionGaze}
                     faceMouthFont={faceStyle.mouthFont}
-                    faceMouthCharacter={faceStyle.mouthCharacter}
+                    faceMouthCharacter={displayedMouthCharacter}
                     faceMouthAnimation={faceStyle.mouthAnimation}
                     faceMouthSpeechPoses={faceStyle.mouthSpeechPoses}
                     faceFontWeight={faceStyle.weight}
@@ -33011,6 +33010,7 @@ function ZenLiveBotMannequin({
                     faceGeometry={faceStyle}
                     blinkPhase={avatarDetailsBlinkPhase}
                     talking={inkTalking ?? isTalking}
+                    speechInkVisible={speechInkVisible}
                     speechMotionActive={isTalking}
                     mouthShape={displayedMouthShape}
                     depth="above-face"
@@ -34562,7 +34562,6 @@ function ZenLiveBotPresencePlate({
             data-zen-live-bot-body-hit-target="true"
           >
             <BotAvatarMicroRenderer
-              moodKey={zenLiveActionMoodToBotMood(moodHint)}
               color={
                 privateModeActive
                   ? "#e8eee8"
@@ -34570,12 +34569,6 @@ function ZenLiveBotPresencePlate({
                     ? botOrPrismAccentForTheme(bot.color, resolvedTheme)
                     : null
               }
-              voicePreset={voicePreset}
-              faceStyle={faceStyle}
-              isTalking={handlingVisualEmissionActive}
-              mouthShape={faceMouthShape}
-              scheduleKey={`zen-live-micro-${bot?.id ?? "prism"}-${moodHint}`}
-              avatarDetails={bot ? resolveBotAvatarDetails(bot) : null}
               glyph={<BotGlyph name={liveBotGlyphName} size={16} />}
               renderSizePx={bodySize}
             />
@@ -41638,14 +41631,7 @@ function BotAvatarPreviewPanel({
                       style={compactPreviewSizeStyle}
                     >
                       <BotAvatarMicroRenderer
-                        moodKey={previewMood}
                         color={miniAccentColor}
-                        voicePreset={voicePreset}
-                        faceStyle={faceStyle}
-                        isTalking={previewTalking}
-                        mouthShape={displayedPreviewMouthShape}
-                        scheduleKey={`${scheduleKey}-studio-micro`}
-                        avatarDetails={miniAvatarDetails}
                         glyph={<BotGlyph name={glyph} size={16} />}
                         renderSizePx={compactPreviewRenderSize}
                       />
@@ -145469,6 +145455,8 @@ function HomeContent(): React.JSX.Element {
                         blinkEnabled={avatarState.blinkEnabled === true}
                         blinkWhileTalking={!staticAudiencePortrait}
                         mouthShape={debateMouthShape}
+                        defaultRestingMouthCharacter={avatarState.defaultRestingMouthCharacter}
+                        speechInkVisible={avatarState.speechInkVisible}
                         moodHint={debateMoodHint}
                         scheduleKey={`debate-${avatarState.role}-${botSnapshot.id}`}
                         thinkingScheduleKey={`debate-${avatarState.role}-${botSnapshot.id}-thinking`}

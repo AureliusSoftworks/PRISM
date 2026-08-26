@@ -111,9 +111,9 @@
 .createShowCard > label:first-child { color: var(--botcast-muted); font: 700 .7rem/1 system-ui; letter-spacing: .1em; text-transform: uppercase; }
 .createShowCard > label:not(:first-child) { color: var(--botcast-muted); font: 700 .62rem/1.2 system-ui; }
 .createShowCard > label span { font-weight: 500; opacity: .72; }
-.createShowCard select, .createShowCard textarea, .createShowCard > button, .setupGrid select, .setupGrid input, .setupGrid textarea, .episodeLengthControl select, .producerControls input, .producerControls textarea { width: 100%; border: 1px solid var(--botcast-line); border-radius: 9px; color: inherit; background: var(--botcast-field); padding: 10px 11px; }
+.createShowCard select, .createShowCard textarea, .createShowButton, .setupGrid select, .setupGrid input, .setupGrid textarea, .episodeLengthControl select, .producerControls input, .producerControls textarea { width: 100%; border: 1px solid var(--botcast-line); border-radius: 9px; color: inherit; background: var(--botcast-field); padding: 10px 11px; }
 .createShowCard textarea { min-height: 66px; resize: vertical; font: inherit; }
-.createShowCard > button, .goLiveButton { background: linear-gradient(110deg, var(--prism-p), var(--prism-r) 38%, var(--prism-i) 78%, var(--prism-s)); color: #17131d; border: 0; font-weight: 850; cursor: pointer; box-shadow: 0 10px 26px rgba(123, 92, 255, .16); }
+.createShowButton, .goLiveButton { background: linear-gradient(110deg, var(--prism-p), var(--prism-r) 38%, var(--prism-i) 78%, var(--prism-s)); color: #17131d; border: 0; font-weight: 850; cursor: pointer; box-shadow: 0 10px 26px rgba(123, 92, 255, .16); }
 .shell button:disabled { opacity: .45; cursor: not-allowed; }
 
 /* Keep Signal's show rail in the same navigation language as Debate Studio:
@@ -370,7 +370,7 @@
 .signalFallbackStudio[data-surface="dashboard"] { --signal-studio-art-position: center 68%; z-index: -2; }
 .showBrandPreview::after { position: absolute; inset: 0; z-index: -1; content: ""; background: linear-gradient(90deg, rgba(8,10,18,.86) 0%, rgba(8,10,18,.54) 50%, rgba(8,10,18,.3) 100%), linear-gradient(0deg, rgba(8,10,18,.48), transparent 62%); }
 .showBrandContent { position: relative; z-index: 2; display: flex; align-items: center; gap: 24px; min-height: 360px; padding: 36px min(420px, 43%) 36px 36px; color: #fff; }
-.showBrandPreview[data-identity-settings-open="true"] .showBrandContent { padding: 24px 72px 24px 24px; }
+.showBrandPreview[data-identity-settings-open="true"] .showBrandContent { box-sizing: border-box; height: 100%; min-height: 0; padding: 24px 72px 24px 24px; }
 .showBrandContent .showLogo { width: 112px; height: 112px; flex: 0 0 auto; border: 1px solid rgba(255,255,255,.36); border-radius: 28px; box-shadow: 0 22px 54px rgba(0,0,0,.32), 0 0 42px color-mix(in srgb, var(--botcast-accent) 42%, transparent), inset 0 1px 0 rgba(255,255,255,.32); }
 .showBrandIdentity { min-width: 0; display: grid; align-content: center; }
 .showBrandContent h2 { max-width: 760px; margin: 8px 0 4px; color: #fff; font-size: clamp(1.75rem, 3vw, 2.8rem); line-height: 1.04; text-wrap: balance; }
@@ -399,7 +399,7 @@
 .showLookInvitation small { color: rgba(255,255,255,.68); font-size: .68rem; line-height: 1.4; }
 .showLookInvitation button { margin-top: 4px; border: 0; border-radius: 11px; padding: 11px 14px; color: #17131d; background: linear-gradient(110deg, var(--prism-p), var(--prism-r) 29%, var(--prism-i) 60%, var(--prism-s) 82%, var(--prism-m)); box-shadow: 0 12px 28px color-mix(in srgb, var(--prism-m) 24%, transparent), inset 0 1px rgba(255,255,255,.52); font: 850 .76rem/1 system-ui; cursor: pointer; }
 .showLookInvitation button:hover { filter: saturate(1.1) brightness(1.04); }
-.showLookControls { position: relative; z-index: 5; width: min(700px, 68%); max-height: calc(100% - 30px); margin-left: auto; display: grid; gap: 7px; overflow-y: auto; padding: 15px; border: 1px solid rgba(255,255,255,.2); border-radius: 18px; background: rgba(10,11,22,.55); box-shadow: 0 16px 42px rgba(0,0,0,.2), inset 0 1px rgba(255,255,255,.12); backdrop-filter: blur(18px) saturate(1.2); scrollbar-width: thin; }
+.showLookControls { position: relative; z-index: 5; box-sizing: border-box; width: min(700px, 68%); max-height: calc(100% - 30px); min-height: 0; margin-left: auto; display: grid; gap: 7px; overflow-y: auto; overscroll-behavior: contain; padding: 15px; border: 1px solid rgba(255,255,255,.2); border-radius: 18px; background: rgba(10,11,22,.55); box-shadow: 0 16px 42px rgba(0,0,0,.2), inset 0 1px rgba(255,255,255,.12); backdrop-filter: blur(18px) saturate(1.2); scrollbar-width: thin; }
 .showBrandPreview[data-identity-settings-open="true"] .showLookControls { flex: 0 0 min(700px, 68%); }
 .showLookControls[hidden] { display: none; }
 .showLookControls > strong { color: #fff; font-size: .86rem; line-height: 1.2; }
@@ -530,21 +530,23 @@
 .stageLayoutModalHeader p { margin: 0; color: var(--botcast-muted); font-size: .72rem; }
 .stageLayoutModalHeader > button { flex: 0 0 auto; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 44%, var(--botcast-line)); border-radius: 10px; padding: 10px 18px; color: var(--botcast-ink); background: color-mix(in srgb, var(--botcast-host-accent) 14%, var(--botcast-soft-panel)); font: 760 .7rem/1 system-ui; cursor: pointer; }
 .stageLayoutModalBody { width: min(1600px, 100%); height: 100%; min-height: 0; margin: 0 auto; box-sizing: border-box; padding: clamp(12px, 2vw, 28px); overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; overscroll-behavior: contain; }
-.stageLayoutEditor { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(290px, 350px); grid-template-rows: auto auto auto auto minmax(0, 1fr); gap: 12px 18px; }
-.stageLayoutModal .stageViewportColumn { grid-column: 1; grid-row: 2 / 6; align-self: center; width: min(100%, calc((100dvh - 280px) * 1.7778)); max-width: 1320px; min-width: 0; display: grid; gap: 10px; }
-.stageLayoutModal .stageViewport { width: 100%; max-width: none; }
-.stageLayoutModal .stageSoundcheckStatus { grid-column: 2; grid-row: 2; }
-.stageLayoutModal .stageVoiceMixer { grid-column: 2; grid-row: 3; grid-template-columns: 1fr; gap: 9px; }
-.stageLayoutModal .stageScreenTreatment { grid-column: 2; grid-row: 4; }
-.stageLayoutModal .stageFineTuningAtmosphere { grid-column: 2; grid-row: 5; align-self: start; width: 100%; max-width: 350px; }
+.stageLayoutEditor { min-height: 0; display: grid; grid-template-columns: minmax(210px, 280px) minmax(0, 1fr) minmax(240px, 320px); grid-template-rows: auto auto auto auto minmax(0, 1fr); align-items: start; gap: 12px 16px; }
+.stageLayoutModal .stageViewportColumn { display: contents; }
+.stageLayoutModal .stageViewport { position: sticky; top: 0; grid-column: 2; grid-row: 2 / 6; align-self: center; width: min(100%, calc((100dvh - 205px) * 1.7778)); max-width: 1080px; justify-self: center; }
+.stageLayoutModal .stageCameraTuner { position: sticky; top: 0; grid-column: 3; grid-row: 2 / 6; align-self: start; max-height: calc(100dvh - 185px); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.stageLayoutModal .stageSoundcheckStatus { grid-column: 1; grid-row: 2; }
+.stageLayoutModal .stageVoiceMixer { grid-column: 1; grid-row: 3; grid-template-columns: 1fr; gap: 9px; }
+.stageLayoutModal .stageScreenTreatment { grid-column: 1; grid-row: 4; }
+.stageLayoutModal .stageFineTuningAtmosphere { grid-column: 1; grid-row: 5; align-self: start; width: 100%; max-width: 280px; }
 .stageLayoutModal .stageFineTuningAtmosphere .atmosphereMixer { width: 100%; grid-template-columns: 1fr; gap: 9px; margin: 0; }
 .stageLayoutModal .atmosphereMixerSliders { grid-template-columns: 1fr; gap: 8px; }
 .stageLayoutEditor > [hidden] { display: none !important; }
-.stageLayoutEditor[data-fine-tuning="false"] { grid-template-columns: minmax(0, 1fr); }
-.stageLayoutEditor[data-fine-tuning="false"] .stageViewportColumn { grid-column: 1; grid-row: 2 / 6; width: min(100%, calc((100dvh - 205px) * 1.7778)); justify-self: center; }
-.stageLayoutEditorHeader { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.stageLayoutEditor[data-fine-tuning="false"] { grid-template-columns: minmax(0, 1fr) minmax(240px, 320px); }
+.stageLayoutEditor[data-fine-tuning="false"] .stageViewport { grid-column: 1; }
+.stageLayoutEditor[data-fine-tuning="false"] .stageCameraTuner { grid-column: 2; }
+.stageLayoutEditorHeader { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px 18px; }
 .stageLayoutEditorHeader { grid-column: 1 / -1; grid-row: 1; }
-.stageLayoutEditorHeader p { margin: 0; color: var(--botcast-muted); font-size: .72rem; line-height: 1.45; }
+.stageLayoutEditorHeader p { flex: 1 1 240px; margin: 0; color: var(--botcast-muted); font-size: .72rem; line-height: 1.45; }
 .stageLayoutEditorHeader > div { display: flex; align-items: center; gap: 10px; }
 .stageLayoutEditorHeader span { color: var(--botcast-muted); font-size: .66rem; white-space: nowrap; }
 .stageLayoutEditorHeader button { border: 1px solid var(--botcast-line); border-radius: 8px; padding: 7px 10px; color: inherit; background: var(--botcast-soft-panel); cursor: pointer; white-space: nowrap; }
@@ -556,6 +558,14 @@
 .stageLayoutEditorHeader .stageFineTuningToggle[aria-expanded="true"] { color: var(--botcast-ink); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--prism-s) 18%, transparent); }
 .stageLayoutEditorHeader .stageSoundcheckButton[data-active="true"] { color: var(--botcast-ink); box-shadow: 0 0 0 1px color-mix(in srgb, var(--botcast-host-accent) 16%, transparent), 0 0 18px color-mix(in srgb, var(--botcast-host-accent) 14%, transparent); }
 .stageLayoutEditorHeader button:disabled { opacity: .44; cursor: default; }
+.stagePresetControls { min-width: 0; flex: 1 1 520px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; max-width: 570px; padding: 7px; border: 1px solid color-mix(in srgb, var(--prism-s) 27%, var(--botcast-line)); border-radius: 10px; background: color-mix(in srgb, var(--prism-s) 5%, var(--botcast-soft-panel)); }
+.stagePresetControls label { display: grid; gap: 2px; }
+.stagePresetControls label > span, .stagePresetControls small { white-space: normal; }
+.stagePresetControls select, .stagePresetControls input { min-height: 30px; border: 1px solid var(--botcast-line); border-radius: 7px; padding: 5px 7px; color: var(--botcast-ink); background: var(--botcast-panel); font: inherit; font-size: .7rem; }
+.stagePresetControls select { min-width: 148px; }
+.stagePresetSaveRow { display: flex; gap: 4px; }
+.stagePresetSaveRow input { width: 126px; }
+.stagePresetControls small { flex-basis: 100%; color: var(--botcast-muted); font-size: .62rem; line-height: 1.35; }
 .stageSoundcheckStatus { min-height: 34px; display: flex; align-items: center; gap: 9px; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 14%, var(--botcast-line)); border-radius: 10px; padding: 8px 11px; color: var(--botcast-muted); background: color-mix(in srgb, var(--botcast-host-accent) 4%, var(--botcast-soft-panel)); font-size: .66rem; line-height: 1.4; }
 .stageSoundcheckStatus[data-active="true"] { border-color: color-mix(in srgb, var(--botcast-host-accent) 34%, var(--botcast-line)); color: var(--botcast-ink); }
 .stageSoundcheckStatus strong { flex: 0 0 auto; color: color-mix(in srgb, var(--botcast-host-accent) 72%, var(--botcast-ink)); }
@@ -825,6 +835,9 @@
 .episodeLaunchActions { display: flex; align-items: end; justify-content: flex-end; gap: 12px; margin-left: auto; }
 .feelLuckyControl { display: grid; justify-items: end; gap: 5px; }
 .feelLuckyControl small { max-width: 220px; color: color-mix(in srgb, var(--botcast-muted) 78%, transparent); font-size: .61rem; text-align: right; }
+.createShowCard .feelLuckyControl { width: 100%; justify-items: stretch; padding-top: 2px; }
+.createShowCard .feelLuckyControl small { max-width: none; text-align: left; }
+.createShowCard .feelLuckyButton { width: 100%; }
 .feelLuckyButton { position: relative; display: inline-flex; min-height: 40px; align-items: center; justify-content: center; gap: 8px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--prism-p) 34%, var(--botcast-line)); border-radius: 9px; padding: 10px 14px; color: var(--botcast-ink); background: linear-gradient(135deg, color-mix(in srgb, var(--prism-p) 9%, var(--botcast-soft-panel)), color-mix(in srgb, var(--prism-s) 7%, var(--botcast-soft-panel))); box-shadow: inset 0 1px rgba(255, 255, 255, .06), 0 8px 22px color-mix(in srgb, var(--prism-p) 10%, transparent); font-weight: 760; cursor: pointer; transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease; }
 .feelLuckyButton::after { position: absolute; inset: auto -18% -18px; height: 22px; content: ""; background: linear-gradient(90deg, var(--prism-p), var(--prism-r), var(--prism-i), var(--prism-s)); filter: blur(12px); opacity: .2; pointer-events: none; }
 .feelLuckyButton:hover:not(:disabled) { border-color: color-mix(in srgb, var(--prism-i) 58%, var(--botcast-line)); box-shadow: inset 0 1px rgba(255, 255, 255, .08), 0 10px 26px color-mix(in srgb, var(--prism-i) 18%, transparent); transform: translateY(-1px); }
@@ -1232,9 +1245,6 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
 .avatarRig[data-listener-reaction="soft_smile"] { animation: signalListenerWarmth 1.1s ease-in-out 1 both; }
 .avatarRig::after { content: ""; position: absolute; left: 50%; bottom: 7%; z-index: -1; width: 72%; height: 16%; border-radius: 50%; background: radial-gradient(ellipse, color-mix(in srgb, var(--botcast-studio-accent) 18%, rgba(0,0,0,.34)), transparent 72%); filter: blur(8px); transform: translateX(-50%); opacity: .72; }
 .avatarRig > * { max-width: 100%; max-height: 100%; }
-.avatarRig > .voiceActionText { position: absolute; left: 50%; top: -4%; z-index: 12; width: max-content; max-width: 138%; max-height: none; transform: translateX(-50%) translateY(0); opacity: var(--signal-voice-action-opacity, 0); color: rgba(255,255,255,.92); font: italic 760 clamp(.58rem, 1.15vw, .82rem)/1.25 system-ui; letter-spacing: .015em; text-align: center; text-transform: none; text-wrap: balance; text-shadow: 0 2px 7px rgba(0,0,0,.98), 0 0 18px color-mix(in srgb, var(--botcast-studio-accent) 34%, transparent); transition: opacity 120ms linear, transform 180ms ease; pointer-events: none; }
-.avatarRig > .voiceActionText[data-phase="entering"] { transform: translateX(-50%) translateY(3px); }
-.avatarRig > .voiceActionText[data-phase="exiting"] { transform: translateX(-50%) translateY(-4px); }
 .avatarRig > .listenerReactionText { position: absolute; left: 50%; top: -3%; z-index: 13; width: max-content; max-width: 132%; max-height: none; transform: translateX(-50%); border: 1px solid rgba(255,255,255,.14); border-radius: 999px; padding: 4px 8px; color: rgba(255,255,255,.88); background: rgba(7,9,14,.66); backdrop-filter: blur(7px); font: 720 clamp(.52rem, .95vw, .7rem)/1 system-ui; letter-spacing: .03em; text-shadow: 0 2px 7px rgba(0,0,0,.9); animation: signalVoiceActionIn 160ms ease-out both; pointer-events: none; }
 .avatarFallback { width: 132px; aspect-ratio: 1; display: grid; place-items: center; border: 8px solid #454a53; border-radius: 40% 40% 46% 46%; background: #101216; box-shadow: inset 0 0 30px color-mix(in srgb, var(--botcast-accent) 30%, transparent), 0 0 24px color-mix(in srgb, var(--botcast-accent) 22%, transparent); font-size: 2rem; }
 .producerGuestPresence { width: min(76%, 168px); aspect-ratio: 1; display: grid; place-content: center; justify-items: center; gap: 8px; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 56%, rgba(255,255,255,.22)); border-radius: 50%; color: #fff; background: radial-gradient(circle at 35% 24%, rgba(255,255,255,.18), transparent 28%), linear-gradient(145deg, color-mix(in srgb, var(--botcast-host-accent) 72%, #1a1826), #10121a); box-shadow: inset 0 0 34px rgba(255,255,255,.06), 0 14px 36px rgba(0,0,0,.34), 0 0 26px color-mix(in srgb, var(--botcast-host-accent) 22%, transparent); text-align: center; }
@@ -1623,7 +1633,8 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
   .showBrandPreview, .showBrandContent { min-height: 340px; }
   .showBrandPreview[data-identity-settings-open="true"] { height: auto; }
   .showBrandContent { align-content: flex-start; flex-wrap: wrap; gap: 18px; padding: 26px 196px 26px 26px; }
-  .showBrandPreview[data-identity-settings-open="true"] .showBrandContent { padding-right: 26px; padding-bottom: 78px; }
+  .showBrandPreview[data-identity-settings-open="true"] .showBrandContent { height: auto; min-height: 340px; padding-right: 26px; padding-bottom: 78px; }
+  .showLookControls { max-height: none; overflow-y: visible; }
   .showBrandContent .showLogo { width: 82px; height: 82px; border-radius: 22px; }
   .showBrandIdentity { flex: 1 1 300px; }
   .showAudiencePulse { margin-top: 12px; padding: 10px 11px 11px; }
@@ -1671,8 +1682,14 @@ button.episodeParticipantChip:focus-visible { outline: 2px solid color-mix(in sr
   .stageLayoutModal .stageScreenTreatment,
   .stageLayoutModal .stageFineTuningAtmosphere { grid-column: 1; grid-row: auto; width: 100%; max-width: none; }
   .stageLayoutEditor[data-fine-tuning="false"] .stageViewportColumn { grid-column: 1; grid-row: auto; width: 100%; }
+  .stageLayoutModal .stageViewportColumn { display: grid; gap: 10px; }
+  .stageLayoutModal .stageViewport,
+  .stageLayoutModal .stageCameraTuner { position: relative; top: auto; grid-column: 1; grid-row: auto; width: 100%; max-width: none; max-height: none; overflow-y: visible; }
   .stageLayoutEditorHeader { align-items: flex-start; flex-direction: column; }
   .stageLayoutEditorHeader > div { width: 100%; flex-wrap: wrap; }
+  .stagePresetControls { width: 100%; max-width: none; }
+  .stagePresetSaveRow { min-width: 0; flex: 1 1 210px; }
+  .stagePresetSaveRow input { min-width: 0; width: auto; flex: 1 1 auto; }
   .stageCameraSliders { grid-template-columns: 1fr; }
   .producerControls { grid-template-columns: minmax(0, 1fr); grid-template-areas: "composer" "cues"; }
   .cueGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

@@ -48,6 +48,13 @@ describe("mode tutorials", () => {
     assert.match(step.body, /Spectator cannot return to the mansion/u);
     assert.match(step.body, /Unused clues, sealed case fields, graph internals/u);
     assert.match(step.body, /Participant keeps the full mansion/u);
+    assert.match(step.body, /Theme \/ Spark/u);
+    assert.match(step.body, /Skip investigation is an optional frozen setup choice/u);
+    assert.match(step.body, /leaves Evidence synthesis optional/u);
+    assert.match(step.body, /Evidence can also be synthesized or replaced later through Assets in Archive/u);
+    assert.match(step.body, /approximate ETA appears after enough completed sections/u);
+    assert.match(step.body, /last lit durable checkpoint/u);
+    assert.match(step.body, /Save mansion level preserves the layout/u);
     assert.match(step.body, /Writing the Case/u);
     assert.match(step.body, /Testing Contradictions/u);
     assert.match(step.body, /Preparing Local Voices/u);
@@ -55,11 +62,23 @@ describe("mode tutorials", () => {
     assert.match(step.body, /Continue without voices/u);
     assert.match(step.body, /no Actions or token economy/u);
     assert.match(step.body, /Move returns to PRISM’s shallow-isometric mansion/u);
-    assert.match(step.body, /Examine reveals compact illuminated spots over authored objects/u);
-    assert.match(step.body, /Talk opens finite authored topics/u);
+    assert.match(step.body, /Unvisited rooms reveal no occupant glyph/u);
+    assert.match(step.body, /Casekeeper shows a silent "\.\.\." until you click/u);
+    assert.match(step.body, /prepared local pack with mouth motion and a separate stage action/u);
+    assert.match(step.body, /Controls return only after that exact performance ends; revisits skip it/u);
+    assert.match(step.body, /Examine is a silent room-art viewing mode/u);
+    assert.match(step.body, /lens cursor and proximity glow/u);
+    assert.match(step.body, /When the lens glows, select anywhere in the room scene/u);
+    assert.match(step.body, /Click once to finish the reveal/u);
+    assert.match(step.body, /click again to close the observation and resume searching/u);
+    assert.match(step.body, /Talk groups finite authored subjects about people, motives, alibis, general questions, and rooms/u);
+    assert.match(step.body, /room subjects name their location/u);
+    assert.match(step.body, /evidence and testimony never appear in Talk/u);
     assert.match(step.body, /Nonverbal performance text appears above the suspect/u);
     assert.match(step.body, /voice, and mouth timing use only the words actually spoken/u);
-    assert.match(step.body, /Present shows an admitted evidence or sworn-testimony item/u);
+    assert.match(step.body, /Present is the only evidence or sworn-testimony interaction/u);
+    assert.match(step.body, /correct record is shown to the correct suspect/u);
+    assert.match(step.body, /wrong record or recipient unlocks nothing/u);
     assert.match(step.body, /Theory Board opens after the crime-scene briefing/u);
     assert.match(step.body, /weakens the case rather than blocking trial/u);
     assert.match(step.body, /Every suspect, including the accused, testifies/u);
@@ -115,6 +134,8 @@ describe("mode tutorials", () => {
       lucky.targetSelector,
       '[data-tutorial-target="botcast-feel-lucky"]',
     );
+    assert.match(lucky.body, /beneath Create show/u);
+    assert.match(lucky.body, /unlocks once a show exists/u);
     assert.match(lucky.body, /immediately starts/u);
     assert.match(lucky.body, /If synthesis fails, nothing starts/u);
 
@@ -192,7 +213,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       step?.body ?? "",
-      /Micro keeps its face and Ink through 29px/u,
+      /Micro uses its identity glyph throughout the readable Micro tier/u,
     );
     assert.match(
       step?.body ?? "",
@@ -200,10 +221,10 @@ describe("mode tutorials", () => {
     );
     assert.match(
       step?.body ?? "",
-      /Micro deliberately swaps each open mouth pose to a literal 0/u,
+      /Micro uses its identity glyph throughout the readable Micro tier, so it has no face, mouth animation, or Avatar Details Ink/u,
     );
-    assert.match(step?.body ?? "", /keeps its resting mouth for closures/u);
-    assert.match(step?.body ?? "", /At 28px and below, those details clear for a larger identity glyph/u);
+    assert.doesNotMatch(step?.body ?? "", /resting mouth for closures/u);
+    assert.doesNotMatch(step?.body ?? "", /Micro keeps its face|At 28px and below/u);
     assert.match(step?.body ?? "", /At 8px through 2px, the bot resolves to a fixed 4×4 square/u);
     assert.match(step?.body ?? "", /at 1px it becomes one literal identity-color pixel/u);
     assert.match(step?.body ?? "", /Mini avatars stay fixed/u);
@@ -236,7 +257,7 @@ describe("mode tutorials", () => {
     assert.match(step?.body ?? "", /dedicated constellation chamber/u);
     assert.match(step?.body ?? "", /fixed indexed seeds never reorder/u);
     assert.match(step?.body ?? "", /2–20 reveal through the shared mini avatar/u);
-    assert.match(step?.body ?? "", /21–100 use the shared static micro face/u);
+    assert.match(step?.body ?? "", /21–100 use the shared Micro identity glyph/u);
     assert.match(step?.body ?? "", /generated color-and-glyph orb/u);
     assert.match(step?.body ?? "", /Standard and Inspire keep the Creation chamber shell/u);
   });
@@ -1506,10 +1527,11 @@ describe("mode tutorials", () => {
       MODE_TUTORIALS.debate.steps.find(
         (step) =>
           step.targetSelector === '[data-tutorial-target="debate-cast"]',
-      )?.body ?? "";
+    )?.body ?? "";
     assert.match(castCopy, /Surprise me/u);
-    assert.match(castCopy, /removing a bot leaves only that seat on Surprise me/u);
-    assert.match(castCopy, /every other suspect and courtroom seat stays put/u);
+    assert.match(castCopy, /role is the only required choice/u);
+    assert.match(castCopy, /left on Surprise me is randomly assigned when you press Compile the case/u);
+    assert.match(castCopy, /every manual choice stays put/u);
     assert.match(castCopy, /vertical hue lens/u);
     assert.match(castCopy, /Prism takes the center Judge \/ Moderator seat/u);
     assert.match(castCopy, /automatic neutral introduction/u);
@@ -2475,6 +2497,10 @@ describe("mode tutorials", () => {
     assert.ok(signalReplayStep);
     assert.match(
       signalCopy,
+      /Save a named Stage preset[\s\S]*select it and Apply[\s\S]*never show identity, cast, or artwork/u,
+    );
+    assert.match(
+      signalCopy,
       /Cut show remains immediate[^.]*under ten seconds[^.]*discarding the episode[^.]*no host sign-off or saved archive/u,
     );
     assert.match(
@@ -2569,7 +2595,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
-      /studio upload requires both Light and Dark/u,
+      /View all to search previously synthesized assets/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[2]?.body ?? "",

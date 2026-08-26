@@ -43,6 +43,8 @@ export interface AvatarDetailsMaskProps {
   faceGeometry?: Partial<AvatarDetailsFaceGeometry> | null;
   blinkPhase?: "open" | "closed";
   talking?: boolean;
+  /** Overrides the authored idle-rest Speech layer without affecting Blink/Effect ink. */
+  speechInkVisible?: boolean;
   speechMotionActive?: boolean;
   mouthShape?: ZenLiveBotMouthShape | null;
   depth?: Exclude<AvatarDetailsFaceDepth, "all">;
@@ -346,6 +348,7 @@ export function AvatarDetailsMask({
   faceGeometry,
   blinkPhase = "open",
   talking = false,
+  speechInkVisible,
   speechMotionActive = talking,
   mouthShape = null,
   depth = "above-face",
@@ -374,6 +377,7 @@ export function AvatarDetailsMask({
   const speechMotion: AvatarDetailsSpeechMotion | null =
     detailLevel === "full" &&
     talking &&
+    speechInkVisible !== false &&
     speechMotionActive &&
     speechInkAnimation !== "none"
       ? speechInkAnimation
@@ -387,6 +391,10 @@ export function AvatarDetailsMask({
         {
           blinking: blinkPhase === "closed",
           talking,
+          // Animated Speech ink renders in its own emission plane. An
+          // explicit surface override can also keep the authored idle-rest
+          // layer hidden until a performance has fully completed.
+          speechInkVisible: speechMotion ? false : speechInkVisible,
         },
         depth,
       ),
@@ -396,6 +404,8 @@ export function AvatarDetailsMask({
       faceGeometry,
       normalizedColor,
       normalizedDetails,
+      speechInkVisible,
+      speechMotion,
       talking,
     ],
   );

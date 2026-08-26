@@ -1810,7 +1810,12 @@ export function rasterizeVisibleAvatarDetailsRgba(
   details: AvatarDetailsV1 | null | undefined,
   color: string | null | undefined,
   faceGeometry: Partial<AvatarDetailsFaceGeometry> | null | undefined,
-  state: Readonly<{ blinking: boolean; talking: boolean }>,
+  state: Readonly<{
+    blinking: boolean;
+    talking: boolean;
+    /** Explicit surface override; defaults to the authored idle-rest contract. */
+    speechInkVisible?: boolean;
+  }>,
   depth: AvatarDetailsFaceDepth = "all",
 ): Uint8ClampedArray {
   const visibleAlpha = new Uint8Array(
@@ -1818,7 +1823,7 @@ export function rasterizeVisibleAvatarDetailsRgba(
   );
   const visibleRoles: AvatarDetailsInkRole[] = ["effect"];
   if (!state.blinking) visibleRoles.push("blink");
-  if (!state.talking) visibleRoles.push("talking");
+  if (state.speechInkVisible ?? !state.talking) visibleRoles.push("talking");
 
   for (const role of visibleRoles) {
     const roleAlpha = rasterizeAvatarDetailsAlpha(
