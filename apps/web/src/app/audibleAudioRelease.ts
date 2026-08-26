@@ -17,6 +17,22 @@ interface ActiveAudibleRelease {
 
 const activeReleases = new WeakMap<HTMLMediaElement, ActiveAudibleRelease>();
 
+export function audibleAudioTransitionVolumeAt(
+  fromVolume: number,
+  toVolume: number,
+  progress: number,
+): number {
+  const from = Math.max(0, Math.min(1, fromVolume));
+  const to = Math.max(0, Math.min(1, toVolume));
+  const normalizedProgress = Math.max(0, Math.min(1, progress));
+  if (normalizedProgress === 0) return from;
+  if (normalizedProgress === 1) return to;
+  const easedProgress = to < from
+    ? 1 - Math.cos((normalizedProgress * Math.PI) / 2)
+    : Math.sin((normalizedProgress * Math.PI) / 2);
+  return from + (to - from) * easedProgress;
+}
+
 /** Revive a detached element when the same owner resumes before its fade ends. */
 export function cancelAudibleAudioRelease(
   media: HTMLMediaElement,
@@ -89,7 +105,7 @@ export function releaseAudibleAudioElement(
   const step = (): void => {
     if (cancelled) return;
     const progress = Math.min(1, Math.max(0, (now() - startedAt) / durationMs));
-    media.volume = initialVolume * Math.cos((progress * Math.PI) / 2);
+    media.volume = audibleAudioTransitionVolumeAt(initialVolume, 0, progress);
     if (progress >= 1) {
       finish();
       return;

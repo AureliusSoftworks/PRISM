@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  audibleAudioTransitionVolumeAt,
   cancelAudibleAudioRelease,
   releaseAudibleAudioElement,
   teardownSilentMediaElementImmediately,
@@ -21,6 +22,15 @@ function fakeMedia(paused = false, volume = 1) {
 }
 
 describe("audible applet audio release", () => {
+  it("eases both mute and unmute transitions without a gain snap", () => {
+    assert.equal(audibleAudioTransitionVolumeAt(0.8, 0, 0), 0.8);
+    assert.equal(audibleAudioTransitionVolumeAt(0.8, 0, 1), 0);
+    assert.equal(audibleAudioTransitionVolumeAt(0, 0.8, 0), 0);
+    assert.equal(audibleAudioTransitionVolumeAt(0, 0.8, 1), 0.8);
+    assert.ok(audibleAudioTransitionVolumeAt(0.8, 0, 0.5) > 0);
+    assert.ok(audibleAudioTransitionVolumeAt(0, 0.8, 0.5) < 0.8);
+  });
+
   it("keeps audible media playing until an equal-power fade completes", async () => {
     const media = fakeMedia();
     let clock = 0;

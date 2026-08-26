@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { audibleAudioTransitionVolumeAt } from "./audibleAudioRelease";
 import { routeAudioElementToPrismOutput } from "./replayAudioMasterCapture";
 import styles from "./SanctumAudioPlayer.module.css";
 
 export const SANCTUM_AUDIO_PLAYER_RELEASE_MS = 320;
+export const SANCTUM_AUDIO_PLAYER_MUTE_FADE_MS = 180;
 
 function formatClock(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
@@ -29,22 +31,32 @@ export function SanctumAudioPlayer({
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fadeRunRef = useRef(0);
+  const releaseRequestedRef = useRef(false);
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
+  const mutedRef = useRef(muted);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const [current, setCurrent] = useState(0);
   const [duration, setDuration] = useState(0);
   const boundedVolume = Math.max(0, Math.min(1, volume));
 
+  useEffect(() => {
+    mutedRef.current = muted;
+  }, [muted]);
+
   const cancelRelease = useCallback((): void => {
     fadeRunRef.current += 1;
-    if (audioRef.current) audioRef.current.volume = boundedVolume;
+    releaseRequestedRef.current = false;
+    if (audioRef.current) {
+      audioRef.current.volume = mutedRef.current ? 0 : boundedVolume;
+    }
   }, [boundedVolume]);
 
   const release = useCallback(async (): Promise<void> => {
     const audio = audioRef.current;
     if (!audio || audio.paused) return;
+    releaseRequestedRef.current = true;
     const run = fadeRunRef.current + 1;
     fadeRunRef.current = run;
     const startedAt = performance.now();
@@ -59,8 +71,11 @@ export function SanctumAudioPlayer({
           1,
           Math.max(0, (now - startedAt) / SANCTUM_AUDIO_PLAYER_RELEASE_MS),
         );
-        audio.volume =
-          startVolume * Math.cos(progress * Math.PI * 0.5);
+        audio.volume = audibleAudioTransitionVolumeAt(
+          startVolume,
+          0,
+          progress,
+        );
         if (progress < 1) window.requestAnimationFrame(tick);
         else resolve();
       };
@@ -68,7 +83,8 @@ export function SanctumAudioPlayer({
     });
     if (fadeRunRef.current !== run) return;
     audio.pause();
-    audio.volume = boundedVolume;
+    audio.volume = mutedRef.current ? 0 : boundedVolume;
+    releaseRequestedRef.current = false;
   }, [boundedVolume]);
 
   useEffect(() => {
@@ -109,14 +125,32 @@ export function SanctumAudioPlayer({
   }, [release]);
 
   useEffect(() => {
-    if (audioRef.current) audioRef.current.volume = boundedVolume;
-  }, [boundedVolume]);
-
-  useEffect(() => {
     const audio = audioRef.current;
-    if (!audio) return;
-    audio.muted = muted;
-  }, [muted]);
+    if (!audio || releaseRequestedRef.current) return;
+    const targetVolume = muted ? 0 : boundedVolume;
+    if (audio.paused || audio.volume === targetVolume) {
+      audio.volume = targetVolume;
+      return;
+    }
+    const run = fadeRunRef.current + 1;
+    fadeRunRef.current = run;
+    const startedAt = performance.now();
+    const startVolume = audio.volume;
+    const tick = (now: number): void => {
+      if (fadeRunRef.current !== run || releaseRequestedRef.current) return;
+      const progress = Math.min(
+        1,
+        Math.max(0, (now - startedAt) / SANCTUM_AUDIO_PLAYER_MUTE_FADE_MS),
+      );
+      audio.volume = audibleAudioTransitionVolumeAt(
+        startVolume,
+        targetVolume,
+        progress,
+      );
+      if (progress < 1) window.requestAnimationFrame(tick);
+    };
+    window.requestAnimationFrame(tick);
+  }, [boundedVolume, muted]);
 
   const progress = duration > 0 ? Math.min(100, (current / duration) * 100) : 0;
   const empty = !src;

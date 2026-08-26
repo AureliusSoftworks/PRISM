@@ -26,7 +26,7 @@ const APPLET_AUDIO_RELEASE_PATHS: readonly ReleasePath[] = [
   { owner: "Whodunnit dialogue", file: "DebateMysteryV2Experience.tsx", evidence: /finishCurrentDialogue[\s\S]{0,1100}releaseAudibleAudioElement/u },
   { owner: "Avatar performance SFX", file: "botAvatarSfx.ts", evidence: /export function stopBotAvatarSfxAudio\([\s\S]{0,520}releaseBotAvatarSfxSpatialPlayback/u },
   { owner: "Avatar SFX audition", file: "botAvatarSfx.ts", evidence: /export function stopBotAvatarSfxSampleAudio\([\s\S]{0,650}fadeBotAvatarSfxSampleVolume/u },
-  { owner: "Sanctum player", file: "SanctumAudioPlayer.tsx", evidence: /const release = useCallback[\s\S]{0,850}Math\.cos\(progress \* Math\.PI \* 0\.5\)/u },
+  { owner: "Sanctum player", file: "SanctumAudioPlayer.tsx", evidence: /const release = useCallback[\s\S]{0,900}audibleAudioTransitionVolumeAt/u },
   { owner: "PRISM intro", file: "prismIntroAudio.ts", evidence: /const fadeAndReleaseSlot = \([\s\S]{0,800}prismIntroAudioFadeVolumeAt/u },
   { owner: "PRISM companion tap", file: "prismCompanionSfx.ts", evidence: /export function stopPrismCompanionGlassTapAudio\([\s\S]{0,360}releaseAudibleAudioElement/u },
   { owner: "PRISM companion background suspension", file: "PrismCompanion.tsx", evidence: /const pauseBackgroundMedia = \(media: HTMLMediaElement\)[\s\S]{0,320}releaseAudibleAudioElement/u },
@@ -48,5 +48,15 @@ describe("applet audio release inventory", () => {
       const source = readFileSync(new URL(file, import.meta.url), "utf8");
       assert.match(source, /teardown[A-Za-z]+Immediately/u);
     }
+  });
+
+  it("fades Sanctum mute state instead of snapping the media mute bit", () => {
+    const source = readFileSync(
+      new URL("SanctumAudioPlayer.tsx", import.meta.url),
+      "utf8",
+    );
+    assert.doesNotMatch(source, /audio\.muted\s*=/u);
+    assert.match(source, /SANCTUM_AUDIO_PLAYER_MUTE_FADE_MS/u);
+    assert.match(source, /audibleAudioTransitionVolumeAt/u);
   });
 });
