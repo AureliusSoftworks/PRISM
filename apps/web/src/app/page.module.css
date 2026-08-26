@@ -29212,9 +29212,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-live-bot-buckle-rim-scale: 1.92;
   --zen-live-bot-buckle-screen-scale: 1.34;
   --zen-live-bot-buckle-crt-screen-scale: 1.34;
-  --zen-live-bot-buckle-rim-alloy-color: var(
-    --bot-face-metal-alloy-color,
-    #69717a
+  --zen-live-bot-buckle-rim-base-metal: #69717a;
+  --zen-live-bot-buckle-rim-alloy-color: color-mix(
+    in srgb,
+    var(
+        --bot-face-metal-alloy-color,
+        var(--zen-live-bot-buckle-rim-base-metal)
+      )
+      var(--bot-face-metal-alloy-mix, 0%),
+    var(--zen-live-bot-buckle-rim-base-metal)
   );
   /* The resolved persona alloy arrives here through presenceBodyStyle. Keep
      the dark bezel recipe industrial; light mode replaces these material
@@ -29385,12 +29391,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
    shared while giving light mode its own diffuse, softly defined metal. */
 .zenLiveBotPresencePlate[data-theme="light"] .zenLiveBotPresenceBody,
 .themeLight .zenLiveBotPresenceBody {
-  --zen-live-bot-buckle-rim-screen-center: color-mix(
-    in srgb,
-    var(--coffee-bot-color, currentColor) 7%,
-    #dfe8f0
-  );
-  --zen-live-bot-buckle-rim-screen-edge: #bac6d1;
+  --zen-live-bot-buckle-rim-base-metal: #b9c4ce;
   --zen-live-bot-buckle-rim-highlight: #f8fbff;
   --zen-live-bot-buckle-rim-mid-highlight: #d4dee7;
   --zen-live-bot-buckle-rim-shadow: #64717d;
@@ -29408,6 +29409,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .zenLiveBotPresencePlate[data-theme="dark"] .zenLiveBotPresenceBody,
 .themeDark .zenLiveBotPresenceBody {
+  --zen-live-bot-buckle-rim-base-metal: #69717a;
   --zen-live-bot-buckle-rim-highlight: #d7dce1;
   --zen-live-bot-buckle-rim-shadow: #080a0d;
   --zen-live-bot-buckle-rim-edge-shadow: rgba(7, 9, 12, 0.96);

@@ -3321,7 +3321,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       bodyRule,
-      /--zen-live-bot-buckle-rim-alloy-color:\s*var\(\s*--bot-face-metal-alloy-color,\s*#69717a\s*\)/,
+      /--zen-live-bot-buckle-rim-alloy-color:\s*color-mix\(\s*in srgb,\s*var\(\s*--bot-face-metal-alloy-color,\s*var\(--zen-live-bot-buckle-rim-base-metal\)\s*\)\s*var\(--bot-face-metal-alloy-mix,\s*0%\),\s*var\(--zen-live-bot-buckle-rim-base-metal\)\s*\)/,
     );
     const orbRule = ruleForExactSelector(
       ".zenLiveBotPresenceBody::before",
@@ -3416,15 +3416,22 @@ describe("Zen live presence CSS", () => {
     const bodyRule = ruleForExactSelector(".zenLiveBotPresenceBody");
     assert.match(
       bodyRule,
-      /--zen-live-bot-buckle-rim-alloy-color:\s*var\(\s*--bot-face-metal-alloy-color,\s*#69717a\s*\)/,
+      /--zen-live-bot-buckle-rim-alloy-color:\s*color-mix\(\s*in srgb,\s*var\(\s*--bot-face-metal-alloy-color,\s*var\(--zen-live-bot-buckle-rim-base-metal\)\s*\)\s*var\(--bot-face-metal-alloy-mix,\s*0%\),\s*var\(--zen-live-bot-buckle-rim-base-metal\)\s*\)/,
     );
     assert.match(
       css,
-      /\.zenLiveBotPresencePlate\[data-theme="light"\] \.zenLiveBotPresenceBody,[\s\S]*?\{[^}]*--zen-live-bot-buckle-rim-highlight:\s*#f8fbff\s*;[^}]*--zen-live-bot-buckle-rim-shadow:\s*#64717d\s*;[^}]*--zen-live-bot-buckle-rim-edge-shadow:\s*rgba\(83, 96, 109, 0\.62\)\s*;[^}]*\}/,
+      /\.zenLiveBotPresencePlate\[data-theme="light"\] \.zenLiveBotPresenceBody,[\s\S]*?\{[^}]*--zen-live-bot-buckle-rim-base-metal:\s*#b9c4ce\s*;[^}]*--zen-live-bot-buckle-rim-highlight:\s*#f8fbff\s*;[^}]*--zen-live-bot-buckle-rim-shadow:\s*#64717d\s*;[^}]*--zen-live-bot-buckle-rim-edge-shadow:\s*rgba\(83, 96, 109, 0\.62\)\s*;[^}]*\}/,
     );
     assert.match(
       css,
-      /\.zenLiveBotPresencePlate\[data-theme="dark"\] \.zenLiveBotPresenceBody,[\s\S]*?\{[^}]*--zen-live-bot-buckle-rim-highlight:\s*#d7dce1\s*;[^}]*--zen-live-bot-buckle-rim-shadow:\s*#080a0d\s*;[^}]*--zen-live-bot-buckle-rim-edge-shadow:\s*rgba\(7, 9, 12, 0\.96\)\s*;[^}]*\}/,
+      /\.zenLiveBotPresencePlate\[data-theme="dark"\] \.zenLiveBotPresenceBody,[\s\S]*?\{[^}]*--zen-live-bot-buckle-rim-base-metal:\s*#69717a\s*;[^}]*--zen-live-bot-buckle-rim-highlight:\s*#d7dce1\s*;[^}]*--zen-live-bot-buckle-rim-shadow:\s*#080a0d\s*;[^}]*--zen-live-bot-buckle-rim-edge-shadow:\s*rgba\(7, 9, 12, 0\.96\)\s*;[^}]*\}/,
+    );
+    const lightRimRule = ruleForExactSelector(
+      ".themeLight .zenLiveBotPresenceBody",
+    );
+    assert.doesNotMatch(
+      lightRimRule,
+      /--zen-live-bot-buckle-rim-screen-(?:center|edge)\s*:/,
     );
 
     const orbRule = ruleForExactSelector(".zenLiveBotPresenceBody::before");
