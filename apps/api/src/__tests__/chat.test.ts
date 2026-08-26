@@ -29,6 +29,7 @@ import {
   userMessageSuggestsInChatImageRequest,
 } from "../chat.ts";
 import { rewindConversation } from "../conversations.ts";
+import { resetPrismGenerationWorkForTests } from "../generation-work.ts";
 import { persistMemoryCandidates, restoreMemory } from "../memory.ts";
 import { RECENT_WINDOW_SIZE, summarizeThreadCompact } from "../memory-summarizer.ts";
 import { fallbackEmbedding, getAuxiliaryProvider, LocalOllamaProvider, selectProvider, type LlmProvider } from "../providers.ts";
@@ -118,6 +119,7 @@ describe("Cursed Tongue holder history", () => {
 });
 
 afterEach(() => {
+  resetPrismGenerationWorkForTests();
   globalThis.fetch = originalFetch;
 });
 

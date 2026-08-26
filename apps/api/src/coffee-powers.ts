@@ -75,81 +75,16 @@ interface CoffeePowerBotRow {
   powers_json: string | null;
 }
 
-function rebaseBorrowedCoffeeEffectV1(
-  effect: BotPowerEffectV1,
-  holderBotId: string,
-  targetBotId: string,
-  botNamesById: ReadonlyMap<string, string>,
-): BotPowerEffectV1 {
-  if (!("targets" in effect) || !Array.isArray(effect.targets)) return effect;
-  return {
-    ...effect,
-    targets: effect.targets.map((target) => {
-      if (target.kind !== "bot" || !target.botId) return target;
-      const botId =
-        target.botId === holderBotId
-          ? targetBotId
-          : target.botId === targetBotId
-            ? holderBotId
-            : target.botId;
-      return {
-        ...target,
-        botId,
-        name: botNamesById.get(botId) ?? target.name,
-      };
-    }),
-  } as BotPowerEffectV1;
-}
-
 /**
- * Rebase first-order public Powers from each mirror target onto its holder.
- * The frozen Coffee plan remains immutable; private perception permissions and
- * recursive identity-mirror effects stay with their authored owner.
+ * Identity Crisis is a visual overlay. Coffee keeps the frozen Power plan
+ * unchanged so every mechanic remains with its authored holder.
  */
-export function coffeePowerPlanWithIdentityMirrorBorrowingV1(args: {
+export function coffeePowerPlanWithIdentityMirrorHolderPowersV1(args: {
   plan: CoffeePowerPlanV1 | null;
   states: ReadonlyMap<string, BotIdentityMirrorStateV1>;
   botNamesById: ReadonlyMap<string, string>;
 }): CoffeePowerPlanV1 | null {
-  if (!args.plan || args.states.size === 0) return args.plan;
-  const base = args.plan;
-  const bots = { ...base.bots };
-  for (const [holderBotId, state] of args.states) {
-    const holder = base.bots[holderBotId];
-    const target = base.bots[state.targetBotId];
-    if (!holder || !target) continue;
-    const effects = target.effects
-      .filter(
-        (effect) =>
-          effect.type !== "identity_mirror" &&
-          effect.type !== "awareness" &&
-          effect.type !== "speech_audience",
-      )
-      .map((effect) =>
-        rebaseBorrowedCoffeeEffectV1(
-          effect,
-          holderBotId,
-          state.targetBotId,
-          args.botNamesById,
-        ),
-      );
-    if (effects.length === 0) continue;
-    bots[holderBotId] = {
-      ...holder,
-      powerIds: [
-        ...holder.powerIds,
-        ...target.powerIds.map((id) => `identity-mirror:${id}`.slice(0, 128)),
-      ],
-      powerNames: [
-        ...(holder.powerNames ?? []),
-        ...(target.powerNames ?? []),
-      ],
-      selfCue: [holder.selfCue, target.selfCue].filter(Boolean).join(" "),
-      effects: [...holder.effects, ...effects],
-      ruleLabels: [...holder.ruleLabels, ...target.ruleLabels],
-    };
-  }
-  return { ...base, bots };
+  return args.plan;
 }
 
 function parseStringArray(raw: string | null | undefined): string[] {

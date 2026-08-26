@@ -180,15 +180,11 @@ const identityMirrorState = identityMirrorTargetName
   : null;
 const baseSystemPrompt = composeBotSystemPrompt(
   bot.name,
-  identityMirrorState?.targetPersonaPrompt ?? botJson.systemPrompt,
+  botJson.systemPrompt,
   bot.flirtEnabled,
   bot.powers,
   {
-    ...(identityMirrorState
-      ? { believedName: identityMirrorState.targetBotName }
-      : believedName
-        ? { believedName }
-        : {}),
+    ...(believedName ? { believedName } : {}),
     identityColor: identityColor || bot.color || null,
     ...(identityMirrorState
       ? { audioVoiceProfile: identityMirrorState.holderVoice }

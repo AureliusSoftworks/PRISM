@@ -234,7 +234,7 @@ import {
   coffeePowerBotAudibleTo,
   coffeePowerBotCanSpeak,
   coffeePowerBotVisibleTo,
-  coffeePowerPlanWithIdentityMirrorBorrowingV1,
+  coffeePowerPlanWithIdentityMirrorHolderPowersV1,
   coffeePowersPromptForSpeaker,
   parseCoffeePowerPlan,
 } from "../coffee-powers.ts";
@@ -11979,7 +11979,7 @@ describe("buildSpeakerPrompt", () => {
         },
       },
     };
-    const composed = coffeePowerPlanWithIdentityMirrorBorrowingV1({
+    const composed = coffeePowerPlanWithIdentityMirrorHolderPowersV1({
       plan,
       states: new Map([["ian", state]]),
       botNamesById: new Map([

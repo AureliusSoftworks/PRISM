@@ -344,7 +344,7 @@ import {
   coffeePowerHistoryLimitForSpeaker,
   coffeePowerHearingRepeatDirective,
   coffeePowerMessageAudience,
-  coffeePowerPlanWithIdentityMirrorBorrowingV1,
+  coffeePowerPlanWithIdentityMirrorHolderPowersV1,
   coffeePowerMessageAudienceForTurn,
   coffeePowerVoicePresenceMode,
   coffeePowerRouterPromptLines,
@@ -18976,7 +18976,7 @@ async function generateCoffeeBotReply(args: {
         })
       : null;
   let history = loadMessages(db, userId, row.id, historyLimit);
-  coffeePowerPlan = coffeePowerPlanWithIdentityMirrorBorrowingV1({
+  coffeePowerPlan = coffeePowerPlanWithIdentityMirrorHolderPowersV1({
     plan: coffeePowerPlan,
     states: coffeeIdentityMirrorStatesFromHistory(history),
     botNamesById: new Map(turnGroup.map((bot) => [bot.id, bot.name])),

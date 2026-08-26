@@ -9402,9 +9402,10 @@ describe("Botcast persistence and isolation", () => {
         holderPrompt,
         /Persona:\s*A guarded inventor who resists personal speculation/iu,
       );
+      assert.match(holderTurn.message?.content ?? "", /north bearing/iu);
       assert.match(
         holderTurn.message?.content ?? "",
-        /What evidence would make you change that answer\?/u,
+        /(?:pays|evidence|concrete consequence|live with)[^?]*\?$/iu,
       );
       assert.doesNotMatch(holderTurn.message?.content ?? "", /I am Ivo Stone|impostor/iu);
 
