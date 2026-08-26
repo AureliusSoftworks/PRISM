@@ -340,6 +340,7 @@ export class PrismCapabilityRegistry {
       args.context.db,
       args.context.userId,
       args.idempotencyKey,
+      args.context.now,
     );
     if (existing) return existing;
     const proposal = readPrismActionProposal(
@@ -574,10 +575,12 @@ export class PrismCapabilityRegistry {
           args.context.db,
           args.context.userId,
           args.runId,
+          args.context.now,
         )
       : latestUndoablePrismActionRun(
           args.context.db,
           args.context.userId,
+          args.context.now,
         );
     if (!run || run.status !== "committed") {
       throw new Error("There is no reversible Prism action to undo.");
@@ -588,6 +591,7 @@ export class PrismCapabilityRegistry {
         args.context.userId,
         run.id,
         args.context.userKey,
+        args.context.now,
       );
       const childRunIds = Array.isArray(inverse?.childRunIds)
         ? inverse.childRunIds.filter(
@@ -602,6 +606,7 @@ export class PrismCapabilityRegistry {
           args.context.db,
           args.context.userId,
           childRunId,
+          args.context.now,
         );
         if (!child || child.status !== "committed") continue;
         const undoneChild = this.undo({
@@ -633,6 +638,7 @@ export class PrismCapabilityRegistry {
       args.context.userId,
       run.id,
       args.context.userKey,
+      args.context.now,
     );
     if (!inverse) throw new Error("The undo window for that action has expired.");
 

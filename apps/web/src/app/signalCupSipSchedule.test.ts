@@ -3,10 +3,43 @@ import test from "node:test";
 
 import {
   SIGNAL_CUP_SIP_MIN_TURN_GAP,
+  signalCupSipAllowedDuringSpeechV1,
   signalCupSipScheduleV1,
   signalCupSipTurnGapV1,
   type SignalCupSipTurn,
 } from "./signalCupSipSchedule.ts";
+
+test("ambient sips begin only inside the other participant's audible line", () => {
+  assert.equal(
+    signalCupSipAllowedDuringSpeechV1({
+      roleSpeaking: false,
+      otherRoleSpeaking: true,
+    }),
+    true,
+  );
+  assert.equal(
+    signalCupSipAllowedDuringSpeechV1({
+      roleSpeaking: false,
+      otherRoleSpeaking: false,
+    }),
+    false,
+  );
+  assert.equal(
+    signalCupSipAllowedDuringSpeechV1({
+      roleSpeaking: true,
+      otherRoleSpeaking: true,
+    }),
+    false,
+  );
+  assert.equal(
+    signalCupSipAllowedDuringSpeechV1({
+      roleSpeaking: false,
+      otherRoleSpeaking: true,
+      producerGuestRole: true,
+    }),
+    false,
+  );
+});
 
 const EPISODE = "12d3d47ed24f3ecbfd3a5c75";
 
@@ -91,6 +124,19 @@ test("a bot never drinks through its own turn", () => {
       `guest sipped while speaking at turn ${index}`,
     );
   }
+});
+
+test("a listening bot can sip while the other participant holds the floor", () => {
+  const turns = interview(40);
+  const onOtherParticipantTurn = turns.some((turn, index) =>
+    turn.speakerRole === "host" && scheduleAt(turns, index).sippingNow,
+  );
+
+  assert.equal(
+    onOtherParticipantTurn,
+    true,
+    "the deterministic guest schedule should use a host-speaking turn",
+  );
 });
 
 test("sips are seeded per message so a re-sliced transcript agrees", () => {

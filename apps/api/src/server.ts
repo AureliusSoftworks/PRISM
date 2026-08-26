@@ -297,6 +297,7 @@ import {
   getDebateMysteryAudioClipV2,
   getDebateMysteryAudioStorageSummaryV2,
   getDebateMysteryCompilationStatusV2,
+  playDebateMysteryV2Again,
   retryDebateMysteryCompilationV2,
   runDebateMysteryCompilationV2,
   type DebateMysteryEvidenceAssetPreparationV2,
@@ -17654,6 +17655,20 @@ function buildRoutes(): RouteDefinition[] {
         session: debateSessionForPlayer(session),
       });
     }),
+    route("POST", "/api/debates/:id/mystery-play-again", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const result = playDebateMysteryV2Again(
+        db,
+        userId,
+        ctx.params.id,
+        (ctx.body ?? {}) as Parameters<typeof playDebateMysteryV2Again>[3],
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(result.session),
+        reusedExistingOpenRun: result.reusedExistingOpenRun,
+      });
+    }),
     route("POST", "/api/debates/:id/mystery-resume-compilation", async (ctx) => {
       const userId = requireAuth(ctx);
       const frozen = getDebateSession(db, userId, ctx.params.id);
@@ -34834,6 +34849,7 @@ async function dispatchRequest(
     json(res, status, {
       ok: false,
       error: message,
+      ...(error instanceof HttpError && error.code ? { code: error.code } : {}),
     });
   }
 }

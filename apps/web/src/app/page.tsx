@@ -1625,6 +1625,7 @@ import {
   signalOnlineVoiceTimeoutMs,
   signalPreferredVoiceClipReady,
 } from "./signalVoiceFallback";
+import { SignalVoicePrefetchScheduler } from "./signalVoicePrefetch";
 import { signalVoiceCompletionFallbackDurationMs } from "./signalLiveCaptions";
 import {
   applyOfflineVoiceSelection,
@@ -52488,6 +52489,18 @@ function HomeContent(): React.JSX.Element {
   const signalVoiceClipCacheRef = useRef<
     Map<string, Promise<BotcastEnglishVoiceMedia | null>>
   >(new Map());
+  const signalVoiceClipEpisodeByMessageIdRef = useRef<Map<string, string>>(
+    new Map(),
+  );
+  const signalVoiceConsumedEpisodeByMessageIdRef = useRef<Map<string, string>>(
+    new Map(),
+  );
+  const signalVoicePrefetchAttemptEpisodeByMessageIdRef = useRef<
+    Map<string, string>
+  >(new Map());
+  const signalVoicePrefetchSchedulerRef = useRef(
+    new SignalVoicePrefetchScheduler<BotcastEnglishVoiceMedia>(),
+  );
   const debateLastVoiceClipRef = useRef<{
     key: string;
     clip: BotcastEnglishVoiceMedia;
@@ -52644,7 +52657,11 @@ function HomeContent(): React.JSX.Element {
       zenHeroVoicePreviewFeedbackTimerRef.current = null;
     }
     voicePreviewAudioCacheRef.current.clear();
+    signalVoicePrefetchSchedulerRef.current.clear();
     signalVoiceClipCacheRef.current.clear();
+    signalVoiceClipEpisodeByMessageIdRef.current.clear();
+    signalVoiceConsumedEpisodeByMessageIdRef.current.clear();
+    signalVoicePrefetchAttemptEpisodeByMessageIdRef.current.clear();
     debateLastVoiceClipRef.current = null;
     listenerReactionVoiceClipCacheRef.current.clear();
     listenerReactionVoiceReadyClipRef.current.clear();
@@ -52670,7 +52687,11 @@ function HomeContent(): React.JSX.Element {
     });
   }, [settings?.englishVoiceEngine, settings?.preferredProvider]);
   useEffect(() => {
+    signalVoicePrefetchSchedulerRef.current.clear();
     signalVoiceClipCacheRef.current.clear();
+    signalVoiceClipEpisodeByMessageIdRef.current.clear();
+    signalVoiceConsumedEpisodeByMessageIdRef.current.clear();
+    signalVoicePrefetchAttemptEpisodeByMessageIdRef.current.clear();
     debateLastVoiceClipRef.current = null;
     listenerReactionVoiceClipCacheRef.current.clear();
     listenerReactionVoiceReadyClipRef.current.clear();
@@ -72626,14 +72647,31 @@ function HomeContent(): React.JSX.Element {
         settings.voiceVolume <= 0
       )
         return null;
+      if (
+        signalVoiceConsumedEpisodeByMessageIdRef.current.get(message.id) ===
+        message.episodeId
+      ) {
+        return null;
+      }
       const cached = signalVoiceClipCacheRef.current.get(message.id);
       if (cached) return cached;
+      if (
+        signalVoicePrefetchAttemptEpisodeByMessageIdRef.current.get(
+          message.id,
+        ) === message.episodeId
+      ) {
+        return null;
+      }
       if (
         playbackSurface === "debate" &&
         debateLastVoiceClipRef.current?.key === message.id
       ) {
         const replayClip = Promise.resolve(debateLastVoiceClipRef.current.clip);
         signalVoiceClipCacheRef.current.set(message.id, replayClip);
+        signalVoiceClipEpisodeByMessageIdRef.current.set(
+          message.id,
+          message.episodeId,
+        );
         return replayClip;
       }
       const bot = bots.find((candidate) => candidate.id === botSummary.id);
@@ -72667,20 +72705,32 @@ function HomeContent(): React.JSX.Element {
       const expectedEngine: EnglishVoiceEngine = offlineOnly
         ? "builtin"
         : voiceSelection.englishVoiceEngine;
-      const preferredController = new AbortController();
-      const timeout = window.setTimeout(
-        () => preferredController.abort(),
-        signalOnlineVoiceTimeoutMs(botcastVoiceTimeoutText(message).length),
-      );
       let durableReplayClip = false;
-      const clip = (
-        playbackSurface === "debate"
-          ? loadCapturedReplayVoiceAudio({
-              surface: "signal",
-              sourceId: message.episodeId,
-              sourceKey: `primary:${message.id}`,
-            })
-              .then((saved) => {
+      signalVoicePrefetchAttemptEpisodeByMessageIdRef.current.set(
+        message.id,
+        message.episodeId,
+      );
+      const clip = signalVoicePrefetchSchedulerRef.current
+        .schedule({
+          episodeId: message.episodeId,
+          messageId: message.id,
+          task: async (queueSignal) => {
+            const timeoutController = new AbortController();
+            const timeout = window.setTimeout(
+              () => timeoutController.abort(),
+              signalOnlineVoiceTimeoutMs(botcastVoiceTimeoutText(message).length),
+            );
+            const signal = AbortSignal.any([
+              queueSignal,
+              timeoutController.signal,
+            ]);
+            try {
+              if (playbackSurface === "debate") {
+                const saved = await loadCapturedReplayVoiceAudio({
+                  surface: "signal",
+                  sourceId: message.episodeId,
+                  sourceKey: `primary:${message.id}`,
+                }).catch(() => null);
                 if (saved) {
                   durableReplayClip = true;
                   return {
@@ -72693,58 +72743,46 @@ function HomeContent(): React.JSX.Element {
                     },
                   };
                 }
-                return requestBotcastEnglishClip(
-                  message,
-                  normalizedProfile,
-                  !offlineOnly && botSummary.online_enabled !== 0,
-                  expectedEngine,
-                  preferredController.signal,
-                  playbackSurface,
-                  signalTurnPreparationId,
-                );
-              })
-              .catch(() =>
-                requestBotcastEnglishClip(
-                  message,
-                  normalizedProfile,
-                  !offlineOnly && botSummary.online_enabled !== 0,
-                  expectedEngine,
-                  preferredController.signal,
-                  playbackSurface,
-                  signalTurnPreparationId,
-                ),
-              )
-          : requestBotcastEnglishClip(
-              message,
-              normalizedProfile,
-              !offlineOnly && botSummary.online_enabled !== 0,
-              expectedEngine,
-              preferredController.signal,
-              playbackSurface,
-              signalTurnPreparationId,
-            )
-      )
+              }
+              return requestBotcastEnglishClip(
+                message,
+                normalizedProfile,
+                !offlineOnly && botSummary.online_enabled !== 0,
+                expectedEngine,
+                signal,
+                playbackSurface,
+                signalTurnPreparationId,
+              );
+            } finally {
+              window.clearTimeout(timeout);
+            }
+          },
+        })
         .then((resolved) => {
           if (
-            !durableReplayClip &&
-            !signalPreferredVoiceClipReady(
-              resolved.kind === "clip" ? resolved.clip : resolved,
-              expectedEngine,
-            )
+            !resolved ||
+            (!durableReplayClip &&
+              !signalPreferredVoiceClipReady(
+                resolved.kind === "clip" ? resolved.clip : resolved,
+                expectedEngine,
+              ))
           ) {
             signalVoiceClipCacheRef.current.delete(message.id);
+            signalVoiceClipEpisodeByMessageIdRef.current.delete(message.id);
             return null;
           }
           return resolved;
         })
         .catch(() => {
           signalVoiceClipCacheRef.current.delete(message.id);
+          signalVoiceClipEpisodeByMessageIdRef.current.delete(message.id);
           return null;
-        })
-        .finally(() => {
-          window.clearTimeout(timeout);
         });
       signalVoiceClipCacheRef.current.set(message.id, clip);
+      signalVoiceClipEpisodeByMessageIdRef.current.set(
+        message.id,
+        message.episodeId,
+      );
       return clip;
     },
     [
@@ -72754,6 +72792,51 @@ function HomeContent(): React.JSX.Element {
       settings?.prismDefaultBotAudioVoiceProfile,
       settings?.voiceVolume,
     ],
+  );
+  const invalidatePrefetchedBotcastUtterance = useCallback(
+    (episodeId: string, messageId: string): void => {
+      signalVoicePrefetchSchedulerRef.current.invalidateMessage(
+        episodeId,
+        messageId,
+      );
+      if (
+        signalVoiceClipEpisodeByMessageIdRef.current.get(messageId) ===
+        episodeId
+      ) {
+        signalVoiceClipCacheRef.current.delete(messageId);
+        signalVoiceClipEpisodeByMessageIdRef.current.delete(messageId);
+      }
+    },
+    [],
+  );
+  const invalidatePrefetchedBotcastEpisode = useCallback(
+    (episodeId: string): void => {
+      signalVoicePrefetchSchedulerRef.current.invalidateEpisode(episodeId);
+      for (const [messageId, cachedEpisodeId] of [
+        ...signalVoiceClipEpisodeByMessageIdRef.current.entries(),
+      ]) {
+        if (cachedEpisodeId !== episodeId) continue;
+        signalVoiceClipCacheRef.current.delete(messageId);
+        signalVoiceClipEpisodeByMessageIdRef.current.delete(messageId);
+      }
+      for (const [messageId, consumedEpisodeId] of [
+        ...signalVoiceConsumedEpisodeByMessageIdRef.current.entries(),
+      ]) {
+        if (consumedEpisodeId === episodeId) {
+          signalVoiceConsumedEpisodeByMessageIdRef.current.delete(messageId);
+        }
+      }
+      for (const [messageId, attemptedEpisodeId] of [
+        ...signalVoicePrefetchAttemptEpisodeByMessageIdRef.current.entries(),
+      ]) {
+        if (attemptedEpisodeId === episodeId) {
+          signalVoicePrefetchAttemptEpisodeByMessageIdRef.current.delete(
+            messageId,
+          );
+        }
+      }
+    },
+    [],
   );
   const stopBotcastUtterance = useCallback((): void => {
     signalVoiceAbortRef.current?.abort();
@@ -73482,6 +73565,7 @@ function HomeContent(): React.JSX.Element {
           message.id,
         );
         signalVoiceClipCacheRef.current.delete(message.id);
+        signalVoiceClipEpisodeByMessageIdRef.current.delete(message.id);
         const preparedClip = preparedClipPromise
           ? await preparedClipPromise
           : null;
@@ -73505,6 +73589,12 @@ function HomeContent(): React.JSX.Element {
           );
         }
         if (!clip || controller.signal.aborted) return false;
+        if (playbackSurface === "signal") {
+          signalVoiceConsumedEpisodeByMessageIdRef.current.set(
+            message.id,
+            message.episodeId,
+          );
+        }
         // A streamed response body is single-use. Only retain decoded clips for
         // Debate's same-message replay path; replay audio is captured separately
         // as the stream is heard.
@@ -145968,14 +146058,29 @@ function HomeContent(): React.JSX.Element {
             )
           }
           onPrefetchUtterance={(message, bot, context) => {
-            void prefetchBotcastUtterance(
+            const prefetched = prefetchBotcastUtterance(
               message,
               bot,
               "signal",
               signalEpisodeResponseMode === "local",
               context?.signalTurnPreparationId,
             );
+            return prefetched
+              ? prefetched.then((clip) => clip !== null)
+              : false;
           }}
+          premiumVoicePrefetchEnabled={Boolean(
+            settings &&
+              settings.voiceVolume > 0 &&
+              voicePlaybackSelectionRef.current.voiceMode === "english" &&
+              voicePlaybackSelectionRef.current.englishVoiceEngine ===
+                "elevenlabs" &&
+              signalEpisodeResponseMode !== "local",
+          )}
+          onInvalidatePrefetchedUtterance={
+            invalidatePrefetchedBotcastUtterance
+          }
+          onInvalidatePrefetchedEpisode={invalidatePrefetchedBotcastEpisode}
           onPrefetchListenerReaction={prefetchBotcastListenerReaction}
           onListenerReaction={playBotcastListenerReaction}
           onPrepareUtterance={prepareBotcastUtterance}

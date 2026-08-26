@@ -2407,7 +2407,7 @@ describe("Signal experience shell", () => {
     assert.match(pageSource, /Prefetch only the preferred pack/u);
     assert.match(
       pageSource,
-      /onPrefetchUtterance=\{\(message, bot\) => \{[\s\S]{0,180}prefetchBotcastUtterance\(/u,
+      /onPrefetchUtterance=\{\(message, bot, context\) => \{[\s\S]{0,180}prefetchBotcastUtterance\(/u,
     );
     assert.match(source, /prepared \? await prepared\.result : null/u);
     assert.doesNotMatch(

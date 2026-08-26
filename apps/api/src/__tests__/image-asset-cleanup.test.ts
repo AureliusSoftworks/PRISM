@@ -90,6 +90,21 @@ function fixture(): DatabaseSync {
       session_json TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'completed'
     );
+    CREATE TABLE debate_mystery_v2_jobs (
+      session_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      checkpoint_json TEXT
+    );
+    CREATE TABLE debate_mystery_mansion_bundles (
+      id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL
+    );
+    CREATE TABLE debate_mystery_mansion_bundle_assets (
+      bundle_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      image_id TEXT NOT NULL
+    );
     CREATE TABLE image_asset_sets (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL

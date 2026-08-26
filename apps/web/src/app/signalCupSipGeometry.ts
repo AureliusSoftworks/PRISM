@@ -11,6 +11,10 @@ export const SIGNAL_CUP_SIP_FACE_ACTIVE_PROGRESS = 0.6;
 // The authored sip sheet's rim center sits at roughly 25.5% of each frame.
 // After the active 0.98 scale, it is about 24% of the mug height above center.
 const SIGNAL_CUP_SIP_RIM_OFFSET_HEIGHT_RATIO = 0.24;
+// The guest cup reads too centrally when it meets the already inward-faced
+// avatar. Keep the host's directly measured path intact, but bring the guest
+// rim visibly toward the guest's holding side rather than across their face.
+const SIGNAL_GUEST_CUP_SIP_LEFT_OFFSET_HEIGHT_RATIO = 0.3;
 
 export function signalCupSipFaceReleaseMs(durationMs: number): number {
   if (!Number.isFinite(durationMs) || durationMs <= 0) return 0;
@@ -41,6 +45,7 @@ export function signalStageLocalPointFromViewport(args: {
 }
 
 export function signalCupSipTargetFromMouth(args: {
+  role: "host" | "guest";
   sceneBounds: SignalCupSipRect;
   sceneLocalWidth: number;
   sceneLocalHeight: number;
@@ -64,7 +69,11 @@ export function signalCupSipTargetFromMouth(args: {
     // Signal deliberately zeros the shared Coffee sprite's local sip X/Y.
     // The outer stage wrapper therefore owns all travel and can target the
     // already-faced, already-authored mouth directly for either role.
-    x: mouthLocal.x,
+    x:
+      mouthLocal.x -
+      (args.role === "guest"
+        ? args.mugLocalHeight * SIGNAL_GUEST_CUP_SIP_LEFT_OFFSET_HEIGHT_RATIO
+        : 0),
     // The active sprite's rim is above its wrapper center, so lower the wrapper
     // by that authored offset to put the rim itself on the measured mouth.
     y: mouthLocal.y + rimOffsetY,

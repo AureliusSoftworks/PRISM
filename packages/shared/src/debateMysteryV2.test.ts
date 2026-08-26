@@ -11,6 +11,7 @@ import {
   debateMysterySpectatorEvidenceReferencesV2,
   emptyDebateMysteryMutationsV2,
   emptyDebateMysteryRequirementsV2,
+  normalizeDebateMysteryFormatStateV2,
   normalizeDebateMysteryTalkSubjectV2,
   validateDebateMysteryAudioManifestV1,
   validateDebateMysteryDialogueGraphV2,
@@ -24,6 +25,43 @@ import {
   type DebateMysterySpokenLineV2,
   type DebateMysteryWitnessChapterV2,
 } from "./debateMysteryV2.ts";
+
+test("normalizes a frozen pre-substep Case Forge payload without crashing Archive resume", () => {
+  const normalized = normalizeDebateMysteryFormatStateV2({
+    version: 2,
+    format: "whodunnit",
+    config: {
+      version: 2,
+      prosecutorBotId: "prosecutor-1",
+      spark: "",
+    },
+    compilation: {
+      version: 2,
+      jobId: "legacy-job",
+      stage: "writing_case",
+      attempt: 1,
+      completedPasses: 0,
+      totalPasses: 5,
+      preparedAudioCount: 0,
+      requiredAudioCount: 0,
+      retryable: false,
+      spoilerSafeMessage: "Writing the Case",
+      updatedAt: "2026-08-25T00:00:00.000Z",
+    },
+    suspects: [],
+    rooms: [],
+    record: [],
+    topics: [],
+    dialogueHistory: [],
+  });
+
+  assert.ok(normalized);
+  assert.deepEqual(normalized.compilation.substeps, [{
+    id: "legacy-writing_case",
+    label: "Writing the Case",
+    state: "active",
+  }]);
+});
 
 function line(id: string, nodeId: string, visibleText = id): DebateMysterySpokenLineV2 {
   return {

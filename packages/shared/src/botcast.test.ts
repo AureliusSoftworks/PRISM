@@ -651,6 +651,13 @@ describe("Signal fallback studio accents", () => {
       "The part you have heard—",
     );
     assert.equal(
+      botcastInterruptedGuestContent(
+        "An audience-clock handoff remains unfinished.",
+        "An audience-",
+      ),
+      "An audience-—",
+    );
+    assert.equal(
       botcastInterruptedGuestContent("Nothing aired.", ""),
       null,
     );

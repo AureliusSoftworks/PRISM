@@ -13,6 +13,7 @@ describe("Signal cup sip geometry", () => {
   it("maps the rendered mouth through a transformed camera scene", () => {
     const host = signalCupSipTargetFromMouth({
       sceneBounds,
+      role: "host",
       sceneLocalWidth: 1_000,
       sceneLocalHeight: 550,
       mouthBounds,
@@ -20,6 +21,7 @@ describe("Signal cup sip geometry", () => {
     });
     const guest = signalCupSipTargetFromMouth({
       sceneBounds,
+      role: "guest",
       sceneLocalWidth: 1_000,
       sceneLocalHeight: 550,
       mouthBounds,
@@ -29,7 +31,7 @@ describe("Signal cup sip geometry", () => {
     assert.ok(host);
     assert.ok(guest);
     assert.ok(Math.abs(host.x - 500) < 0.000_001);
-    assert.ok(Math.abs(guest.x - 500) < 0.000_001);
+    assert.ok(Math.abs(guest.x - 478.4) < 0.000_001);
     assert.equal(host.y, 217.28);
     assert.equal(guest.y, 217.28);
   });
@@ -37,6 +39,7 @@ describe("Signal cup sip geometry", () => {
   it("follows each authored, role-faced mouth instead of a saved bot-center proxy", () => {
     const base = signalCupSipTargetFromMouth({
       sceneBounds,
+      role: "host",
       sceneLocalWidth: 1_000,
       sceneLocalHeight: 550,
       mouthBounds,
@@ -44,6 +47,7 @@ describe("Signal cup sip geometry", () => {
     });
     const shifted = signalCupSipTargetFromMouth({
       sceneBounds,
+      role: "host",
       sceneLocalWidth: 1_000,
       sceneLocalHeight: 550,
       mouthBounds: {
@@ -58,6 +62,31 @@ describe("Signal cup sip geometry", () => {
     assert.ok(shifted);
     assert.equal(shifted.x - base.x, 10);
     assert.equal(shifted.y - base.y, 20);
+  });
+
+  it("keeps the host target centered while shifting only the guest sip left", () => {
+    const host = signalCupSipTargetFromMouth({
+      sceneBounds,
+      role: "host",
+      sceneLocalWidth: 1_000,
+      sceneLocalHeight: 550,
+      mouthBounds,
+      mugLocalHeight: 72,
+    });
+    const guest = signalCupSipTargetFromMouth({
+      sceneBounds,
+      role: "guest",
+      sceneLocalWidth: 1_000,
+      sceneLocalHeight: 550,
+      mouthBounds,
+      mugLocalHeight: 72,
+    });
+
+    assert.ok(host);
+    assert.ok(guest);
+    assert.ok(Math.abs(host.x - 500) < 0.000_001);
+    assert.ok(Math.abs(host.x - guest.x - 21.6) < 0.000_001);
+    assert.equal(host.y, guest.y);
   });
 
   it("relaxes the Signal sip face before the cup starts returning", () => {

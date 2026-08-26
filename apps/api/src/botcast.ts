@@ -10380,7 +10380,136 @@ export function resolveBotcastFalseNameForSpeakerV1(args: {
   };
 }
 
-/** Runtime gate for bot-only, perceivable, audible Signal identity theft. */
+export interface BotcastPublicSocialConditionV1 {
+  v: 1;
+  kind: "speech_unavailable";
+  participantBotId: string;
+  participantRole: BotcastSpeakerRole;
+  sourceMessageId: string;
+}
+
+export interface BotcastPublicSocialActionV1 {
+  v: 1;
+  kind:
+    | "directed_listener_response"
+    | "directed_silent_turn"
+    | "stage_action";
+  actorBotId: string;
+  targetBotId: string | null;
+  sourceMessageId: string;
+  channel: "visual" | "audible_visual";
+  action: string;
+}
+
+export interface BotcastPublicSocialContextV1 {
+  v: 1;
+  conditions: BotcastPublicSocialConditionV1[];
+  actions: BotcastPublicSocialActionV1[];
+}
+
+export function normalizeBotcastPublicSocialActionV1(
+  value: unknown,
+): BotcastPublicSocialActionV1 | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Partial<BotcastPublicSocialActionV1>;
+  if (
+    candidate.v !== 1 ||
+    (candidate.kind !== "directed_listener_response" &&
+      candidate.kind !== "directed_silent_turn" &&
+      candidate.kind !== "stage_action") ||
+    typeof candidate.actorBotId !== "string" ||
+    (candidate.targetBotId !== null &&
+      typeof candidate.targetBotId !== "string") ||
+    typeof candidate.sourceMessageId !== "string" ||
+    (candidate.channel !== "visual" &&
+      candidate.channel !== "audible_visual") ||
+    typeof candidate.action !== "string"
+  ) {
+    return null;
+  }
+  return {
+    v: 1,
+    kind: candidate.kind,
+    actorBotId: candidate.actorBotId,
+    targetBotId: candidate.targetBotId,
+    sourceMessageId: candidate.sourceMessageId,
+    channel: candidate.channel,
+    action: candidate.action,
+  };
+}
+
+export function botcastPublicSocialContextForSpeakerV1(args: {
+  episode: Pick<BotcastEpisode, "messages" | "events">;
+  speakerRole: BotcastSpeakerRole;
+  speakerBotId: string;
+  peerBotId: string;
+}): BotcastPublicSocialContextV1 {
+  const latestPeerMessage = [...args.episode.messages]
+    .reverse()
+    .find(
+      (message) =>
+        message.botId === args.peerBotId &&
+        message.speakerRole !== args.speakerRole,
+    );
+  const conditions: BotcastPublicSocialConditionV1[] =
+    latestPeerMessage && botPowerResponseIsSilentV1(latestPeerMessage.content)
+      ? [{
+          v: 1,
+          kind: "speech_unavailable",
+          participantBotId: args.peerBotId,
+          participantRole:
+            args.speakerRole === "host" ? "guest" : "host",
+          sourceMessageId: latestPeerMessage.id,
+        }]
+      : [];
+  const actions = args.episode.events.flatMap((event) => {
+    const rawActions = [
+      event.payload.publicSocialAction,
+      ...(Array.isArray(event.payload.publicSocialActions)
+        ? event.payload.publicSocialActions
+        : []),
+    ];
+    return rawActions.flatMap((rawAction) => {
+      const action = normalizeBotcastPublicSocialActionV1(rawAction);
+      return action &&
+        action.actorBotId === args.peerBotId &&
+        (action.targetBotId === null ||
+          action.targetBotId === args.speakerBotId)
+        ? [action]
+        : [];
+    });
+  }).slice(-2);
+  return { v: 1, conditions, actions };
+}
+
+function botcastIdentityMirrorIsFreshForHolderV1(args: {
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[];
+  state: BotIdentityMirrorStateV1 | null;
+  holderBotId: string;
+}): boolean {
+  if (!args.state) return false;
+  let transitionIndex = -1;
+  for (let index = args.events.length - 1; index >= 0; index -= 1) {
+    const event = args.events[index];
+    if (
+      event?.kind === "power_effect" &&
+      event.payload.effect === "identity_mirror" &&
+      (event.payload.state as { holderBotId?: unknown } | undefined)
+        ?.holderBotId === args.holderBotId
+    ) {
+      transitionIndex = index;
+      break;
+    }
+  }
+  if (transitionIndex < 0) return false;
+  return !args.events.slice(transitionIndex + 1).some(
+    (event) =>
+      event.kind === "utterance" &&
+      event.payload.botId === args.holderBotId,
+  );
+}
+
+/** Runtime gate for bot-only, perceivable, publicly directed Signal identity theft. */
 export function botcastIdentityMirrorCanTriggerV1(args: {
   guestKind: BotcastGuestKind | undefined;
   guestPresenceMode: BotcastGuestPresenceMode;
@@ -10392,6 +10521,7 @@ export function botcastIdentityMirrorCanTriggerV1(args: {
   holder: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt" | "powers">;
   currentState: BotIdentityMirrorStateV1 | null;
   content: string;
+  publicDirectedAction?: BotcastPublicSocialActionV1 | null;
 }): boolean {
   const presentGuestReplyToHost =
     args.guestPresenceMode === "present" &&
@@ -10416,15 +10546,23 @@ export function botcastIdentityMirrorCanTriggerV1(args: {
       targetBotName,
     }),
   );
-  return (
-    args.guestKind !== "producer" &&
+  const publicActionAddressesHolder = Boolean(
+    (args.publicDirectedAction?.kind === "directed_listener_response" ||
+      args.publicDirectedAction?.kind === "directed_silent_turn") &&
+      args.publicDirectedAction.actorBotId === args.speaker.id &&
+      args.publicDirectedAction.targetBotId === args.holder.id,
+  );
+  const publicSpeechAddressesHolder =
     !args.speakerIsMuted &&
     !args.speakerMumbles &&
+    (presentGuestReplyToHost || directlyAddressesHolder);
+  return (
+    args.guestKind !== "producer" &&
     botPowerMirrorsIdentityV1(args.holder.powers) &&
     !botcastPowerRestriction(args.speaker, args.holder, "awareness") &&
     !botcastPowerRestriction(args.speaker, args.holder, "speech_audience") &&
     botIdentityMirrorTargetChangesV1(args.currentState, args.speaker.id) &&
-    (presentGuestReplyToHost || directlyAddressesHolder)
+    (publicSpeechAddressesHolder || publicActionAddressesHolder)
   );
 }
 
@@ -10978,14 +11116,29 @@ export function buildBotcastSpeakerPrompt(
         speakerRole: args.speakerRole,
       })
     : 0;
-  const mutedHostGuestSoloTurnOrdinal =
-    !speakerEternallyIntroduces &&
-    args.speakerRole === "guest" &&
-    botPowerIsMutedV1(args.host.powers)
-      ? args.episode.messages.filter(
-          (message) => message.speakerRole === "guest",
-        ).length + 1
-      : 0;
+  const publicSocialContext = botcastPublicSocialContextForSpeakerV1({
+    episode: args.episode,
+    speakerRole: args.speakerRole,
+    speakerBotId: speaker.id,
+    peerBotId: peer.id,
+  });
+  const publicSocialContextRule =
+    publicSocialContext.conditions.length > 0 ||
+    publicSocialContext.actions.length > 0
+      ? [
+          "Audience-visible social context (public facts, never hidden intent):",
+          ...publicSocialContext.conditions.map(
+            () =>
+              `- ${peerAddressName}'s latest completed turn contained no audible speech.`,
+          ),
+          ...publicSocialContext.actions.map((action) =>
+            action.kind === "directed_listener_response"
+              ? `- ${peerAddressName} visibly responded directly to your prior turn: ${action.action}.`
+              : `- ${peerAddressName}'s visible action was: ${action.action}.`,
+          ),
+          `Adapt naturally to only these public conditions and actions while remaining the ${args.speakerRole}. Do not invent words, questions, motives, or Producer intent for ${peerAddressName}.`,
+        ].join("\n")
+      : null;
   const cloneIdentityPrompt = buildCloneFamilyIdentityPrompt(speaker, [
     args.host,
     args.guest,
@@ -11129,11 +11282,11 @@ export function buildBotcastSpeakerPrompt(
   });
   const activeIdentityMirrorState =
     botcastIdentityMirrorStatesV1(args.episode.events).get(speaker.id) ?? null;
-  const identityMirrorJustChanged = Boolean(
-    activeIdentityMirrorState &&
-      activeIdentityMirrorState.sourceMessageId ===
-        args.episode.messages.at(-1)?.id,
-  );
+  const identityMirrorJustChanged = botcastIdentityMirrorIsFreshForHolderV1({
+    events: args.episode.events,
+    state: activeIdentityMirrorState,
+    holderBotId: speaker.id,
+  });
   const activeIdentityShapeshiftState =
     args.activeIdentityShapeshiftState !== undefined
       ? args.activeIdentityShapeshiftState
@@ -11414,9 +11567,7 @@ export function buildBotcastSpeakerPrompt(
       : null;
   const silentPeerTurnRule = latestPeerTurnIsSilent
     ? args.speakerRole === "guest"
-      ? mutedHostGuestSoloTurnOrdinal > 1
-        ? `The host's completed turns have contained no audible words. This is guest-led solo turn ${mutedHostGuestSoloTurnOrdinal}, not a new refusal, question, or unanswered demand. Continue one self-directed broadcast instead of pretending an interview is happening. Advance through exactly one fresh move—a concrete example, counterexample, cost, decision, consequence, contradiction, or safeguard not already present in the transcript. Do not restate the thesis in new words, repeat a request for verbal guidance, or invent anything the host asked or meant.`
-        : "The host's completed turn contained no audible words, and the host remains visibly present. Use the open floor to begin developing the stated topic in your own voice. Do not invent a question or hidden intent, demand speech, or retreat into an abstract account of being watched."
+      ? "The host's latest completed turn contained no audible words, but the host remains visibly present and still owns the interview. React to the public quiet and any visible action as one conversational guest beat: answer no invented question, avoid a queued mini-essay, and leave room for the host's next turn. Do not take over hosting, deliver a sign-off, demand speech, or claim hidden intent."
       : timedSilentGuestProgress !== null
         ? [
             `The guest's latest turn is actionless silence, and this is unanswered silent turn ${unansweredSilentPeerTurnCount} inside a timed ${timedSilentGuestDurationMinutes}-minute episode (about ${Math.round(timedSilentGuestProgress * 100)}% of the target has elapsed). Silence proves no answer, but it does not authorize an early closing. Do not close the show, thank listeners, repeat a prior approach, or claim a yes, no, choice, belief, motive, or position for the guest. Try one materially different interview tactic on every host turn and keep the private producer plan's staged progression authoritative.`,
@@ -11600,7 +11751,7 @@ export function buildBotcastSpeakerPrompt(
               ? "Repeated interruptions have exhausted your patience. Leave now with one in-character final line. Do not ask permission, forecast the exit, or continue the interview."
               : "Your firm boundary was ignored. Leave now with one in-character final line. Do not ask permission, explain that this was inevitable, or continue the interview."
             : firstGuestAfterMutedHostOpening
-              ? `This is the episode's first audible line because ${guestNamesHost}'s opening turn ended without an audible word. Carry the opening naturally: say the exact show name "${args.show.name}", identify yourself as the guest "${args.guest.name}" and ${guestNamesHost} as the host, name the subject, then offer your first substantive thought. Do not claim the host spoke or asked a question.`
+              ? `This is the episode's first audible line because ${guestNamesHost}'s opening turn ended without an audible word. React to that public quiet first, then naturally establish the exact show name "${args.show.name}", yourself as the guest "${args.guest.name}", and ${guestNamesHost} as the host in one concise beat. Make one specific opening contribution and leave room for the host's next turn. Avoid a queued self-introduction followed by a thesis, and do not claim the host spoke or asked a question.`
             : firstGuestOpeningReply
                 ? peerSpeechObfuscated
                   ? `This is your first on-mic reply, but ${guestNamesHost}'s public words are literal gibberish. Do not pretend you received a welcome, observation, provocation, or question. Briefly acknowledge only that the exact words are unintelligible, then enter the public topic through one concrete claim that belongs to this guest. Do not repeat the introductions or default to generic "glad to be here" podcast filler.`
@@ -11702,6 +11853,7 @@ export function buildBotcastSpeakerPrompt(
         ...(powersPrompt ? [powersPrompt] : []),
         ...(annoyanceCue ? [annoyanceCue] : []),
         ...(peerPerceptionRule ? [peerPerceptionRule] : []),
+        ...(publicSocialContextRule ? [publicSocialContextRule] : []),
         ...(peerSpeechObfuscationRule ? [peerSpeechObfuscationRule] : []),
         ...(powerEncounterRule ? [powerEncounterRule] : []),
         ...(candorRule ? [candorRule] : []),
@@ -13991,6 +14143,15 @@ function recordBotcastMutePerformanceDirection(args: {
   const speakerShot = args.speakerRole === "host" ? "left" : "right";
   for (const beat of args.performance.reactionBeats) {
     const atMs = muteStartMs + beat.atMs;
+    const publicSocialAction: BotcastPublicSocialActionV1 = {
+      v: 1,
+      kind: "directed_listener_response",
+      actorBotId: beat.reactorBotId,
+      targetBotId: args.speakerBotId,
+      sourceMessageId: args.messageId,
+      channel: beat.kind === "audible_quip" ? "audible_visual" : "visual",
+      action: beat.action,
+    };
     recordEvent(
       args.db,
       args.userId,
@@ -14003,6 +14164,7 @@ function recordBotcastMutePerformanceDirection(args: {
         listenerBotId: beat.reactorBotId,
         beat,
         atMs,
+        publicSocialAction,
       },
       args.now,
     );
@@ -15537,6 +15699,24 @@ export async function advanceBotcastEpisode(
       botPowerIsMutedV1(hostPowerSnapshot) &&
       botPowerIsMutedV1(guestPowerSnapshot),
   );
+  // A muted speaker and a Copycat have no audible material to exchange until
+  // someone actually addresses Copycat. Treat the resulting silence as a
+  // short embodied composition, not a three-minute retry loop. An active image
+  // still earns its full visible host → guest → host lifecycle first.
+  const mutuallyConstrainedSilentEpisode = Boolean(
+    episode.guestKind === "bot" &&
+      episode.guestPresenceMode === "present" &&
+      hostPowerSnapshot &&
+      guestPowerSnapshot &&
+      ((botPowerIsMutedV1(hostPowerSnapshot) &&
+        botPowerEchoesAddressedSpeechV1(guestPowerSnapshot)) ||
+        (botPowerEchoesAddressedSpeechV1(hostPowerSnapshot) &&
+          botPowerIsMutedV1(guestPowerSnapshot))) &&
+      episode.messages.slice(-2).length === 2 &&
+      episode.messages
+        .slice(-2)
+        .every((message) => botPowerResponseIsSilentV1(message.content)),
+  );
   const mutuallyMutedEpisodeShouldEnterInterview =
     mutuallyMutedEpisode &&
     episode.segment === "opening" &&
@@ -15545,6 +15725,10 @@ export async function advanceBotcastEpisode(
     mutuallyMutedEpisode &&
     episode.segment === "interview" &&
     episode.messages.length >= 2;
+  const mutuallyConstrainedSilentEpisodeShouldClose =
+    mutuallyConstrainedSilentEpisode &&
+    !imageDiscussionPending &&
+    episode.segment === "interview";
   const mutuallyReflectiveEpisode = Boolean(
     episode.guestKind === "bot" &&
       episode.guestPresenceMode === "present" &&
@@ -15590,6 +15774,7 @@ export async function advanceBotcastEpisode(
   const nextSegment = departurePending
     ? episode.segment
     : mutuallyMutedEpisodeShouldClose ||
+        mutuallyConstrainedSilentEpisodeShouldClose ||
         mutuallyReflectiveEpisodeShouldClose ||
         unansweredMutedGuestShouldClose
       ? "closing"
@@ -15665,20 +15850,6 @@ export async function advanceBotcastEpisode(
         : pendingCrosstalkReclaim.speakerBotId === episode.guestBotId
           ? "guest"
           : scheduledSpeakerRole;
-  }
-  const mutedHostNeedsGuestLedSoloContinuation = Boolean(
-    !producerCut &&
-      episode.segment === "interview" &&
-      episode.guestKind === "bot" &&
-      episode.guestPresenceMode === "present" &&
-      hostPowerSnapshot &&
-      guestPowerSnapshot &&
-      botPowerIsMutedV1(hostPowerSnapshot) &&
-      !botPowerIsMutedV1(guestPowerSnapshot) &&
-      botcastHasUtteranceInSegment(episode, "guest", "opening"),
-  );
-  if (mutedHostNeedsGuestLedSoloContinuation) {
-    scheduledSpeakerRole = "guest";
   }
   const speakerRole =
     producerCut
@@ -15771,6 +15942,12 @@ export async function advanceBotcastEpisode(
   const guestNamesHost = botPowerTargetNameV1(host.name, guest.powers);
   const speaker = speakerRole === "host" ? host : guest;
   const peer = speakerRole === "host" ? guest : host;
+  const turnPublicSocialContext = botcastPublicSocialContextForSpeakerV1({
+    episode,
+    speakerRole,
+    speakerBotId: speaker.id,
+    peerBotId: peer.id,
+  });
   const peerAddressName = speakerRole === "host" ? hostNamesGuest : guestNamesHost;
   const firstHostOpening =
     speakerRole === "host" &&
@@ -17402,7 +17579,7 @@ export async function advanceBotcastEpisode(
   const silentGuestFallback =
     speakerRole === "guest" && silentPeerTurnCount > 0
       ? guestCarriesMutedHostOpening
-        ? `Welcome to ${show.name}. I'm ${guest.name}, here with our host ${guestNamesHost}. I will begin with the concrete choice and consequence at the heart of this episode.`
+        ? `${guestNamesHost} leaves the room quiet, so I will place one stake on the table. This is ${show.name}; I'm ${guest.name}, the guest, and ${openingSubject} begins with the first choice it forces.`
         : `I will stay with the subject itself: ${topicWithPunctuation} The part worth examining next is what changes when the idea meets a real choice.`
       : null;
   const producerCutFallback = producerCut
@@ -17589,7 +17766,10 @@ export async function advanceBotcastEpisode(
                 ? `The final point I would leave with your listeners is this: ${topicWithPunctuation} Judge it by the choice it demands and the consequence that follows.`
                 : silentGuestFallback ??
                   guestRecoveryFallback));
-  const sanitizedGeneratedUtterance = picklesBeatKind
+  const deterministicSpeechCopySilence =
+    speakerEchoesForTurn && botPowerResponseIsSilentV1(raw);
+  const sanitizedGeneratedUtterance =
+    picklesBeatKind || deterministicSpeechCopySilence
     ? { content: raw, repairReason: null }
     : sanitizeUtteranceWithRepair(
         removeRepeatedBotcastAudienceHeardPrefix(
@@ -17856,10 +18036,11 @@ export async function advanceBotcastEpisode(
     : powerPresentationContent;
   const activeIdentityMirrorState =
     botcastIdentityMirrorStatesV1(episode.events).get(speaker.id) ?? null;
-  const identityMirrorJustChanged = Boolean(
-    activeIdentityMirrorState &&
-      activeIdentityMirrorState.sourceMessageId === episode.messages.at(-1)?.id,
-  );
+  const identityMirrorJustChanged = botcastIdentityMirrorIsFreshForHolderV1({
+    events: episode.events,
+    state: activeIdentityMirrorState,
+    holderBotId: speaker.id,
+  });
   const shapeshiftIsActivePersonaSource = Boolean(
     activeIdentityShapeshiftState && !activeIdentityMirrorState,
   );
@@ -18287,12 +18468,43 @@ export async function advanceBotcastEpisode(
   const guestDepartsThisTurn = departureRequired || voluntaryDeparture;
   const participantDepartsThisTurn =
     guestDepartsThisTurn || hostRageQuitsThisTurn;
+  const messageId = randomId(12);
   const stageActionText =
     participantDepartsThisTurn || hostSignsOffThisTurn
       ? null
       : imageDiscussionTurn === "host_introduction" && imageContextAtTurnStart
         ? `places ${botcastEpisodeImageSpokenReference(imageContextAtTurnStart).replace(/^this\b/u, "the")} in the center of the table`
+        : deterministicSpeechCopySilence
+          ? null
         : resolvedStageAction.action?.action ?? null;
+  const stagePublicSocialAction: BotcastPublicSocialActionV1 | null =
+    stageActionText
+      ? {
+          v: 1,
+          kind: "stage_action",
+          actorBotId: speaker.id,
+          targetBotId: null,
+          sourceMessageId: messageId,
+          channel: "visual",
+          action: stageActionText,
+        }
+      : null;
+  const mutePublicSocialAction: BotcastPublicSocialActionV1 | null =
+    mutePerformance
+      ? {
+          v: 1,
+          kind: "directed_silent_turn",
+          actorBotId: speaker.id,
+          targetBotId: peer.id,
+          sourceMessageId: messageId,
+          channel: "visual",
+          action: "holds a silent on-air turn toward the other participant",
+        }
+      : null;
+  const turnPublicSocialActions = [
+    ...(mutePublicSocialAction ? [mutePublicSocialAction] : []),
+    ...(stagePublicSocialAction ? [stagePublicSocialAction] : []),
+  ];
   const voicePerformanceText =
     !picklesBeatKind &&
     !socialSilenceMarker &&
@@ -18323,7 +18535,6 @@ export async function advanceBotcastEpisode(
           botcastRecentImmersiveVoiceTags(episode),
         )}]`
     : null;
-  const messageId = randomId(12);
   const tensionMoodKey = botcastVoiceMoodForTension(tension);
   const timedSilentGuestMoodKey =
     timedSilentGuestProgress !== null &&
@@ -18478,6 +18689,13 @@ export async function advanceBotcastEpisode(
         }
       : {}),
     ...(stageActionText ? { stageActionText } : {}),
+    ...(turnPublicSocialActions.length > 0
+      ? { publicSocialActions: turnPublicSocialActions }
+      : {}),
+    ...(turnPublicSocialContext.conditions.length > 0 ||
+    turnPublicSocialContext.actions.length > 0
+      ? { publicSocialContext: turnPublicSocialContext }
+      : {}),
     ...(stageActionText && resolvedStageAction.action
       ? {
           stageAction: {
@@ -18711,6 +18929,7 @@ export async function advanceBotcastEpisode(
           holder: peer,
           currentState: currentIdentityMirrorState,
           content,
+          publicDirectedAction: mutePublicSocialAction,
         })
         ? createBotIdentityMirrorStateV1({
             surface: "signal",
@@ -18739,6 +18958,12 @@ export async function advanceBotcastEpisode(
       {
         v: 1,
         effect: "identity_mirror",
+        ...(mutePublicSocialAction
+          ? {
+              trigger: "public_social_action",
+              sourceAction: mutePublicSocialAction,
+            }
+          : {}),
         state: identityMirrorState,
         irritation: {
           targetBotId: identityMirrorState.targetBotId,
@@ -19087,6 +19312,20 @@ export async function advanceBotcastEpisode(
         : null,
     });
   })();
+  const listenerPublicSocialAction: BotcastPublicSocialActionV1 | null =
+    listenerReaction
+      ? {
+          v: 1,
+          kind: "directed_listener_response",
+          actorBotId: listener.id,
+          targetBotId: speaker.id,
+          sourceMessageId: messageId,
+          channel: listenerReaction.interjectionAttempt
+            ? "audible_visual"
+            : "visual",
+          action: listenerReaction.visualAction,
+        }
+      : null;
   if (listenerReaction) {
     recordEvent(
       db,
@@ -19101,6 +19340,66 @@ export async function advanceBotcastEpisode(
         ...(directionalIrritationDelivery
           ? { directionalIrritationDelivery }
           : {}),
+        ...(listenerPublicSocialAction
+          ? { publicSocialAction: listenerPublicSocialAction }
+          : {}),
+      },
+      now,
+    );
+  }
+  const listenerActionIdentityMirrorState =
+    episode.segment === "closing" ||
+    socialSilenceMarker ||
+    !listenerPublicSocialAction ||
+    !botcastIdentityMirrorCanTriggerV1({
+      guestKind: episode.guestKind,
+      guestPresenceMode: episode.guestPresenceMode,
+      speakerRole: listenerRole,
+      holderRole: speakerRole,
+      speakerIsMuted: botPowerIsMutedV1(listener.powers),
+      speakerMumbles: botPowerMumblesSpeechV1(listener.powers),
+      speaker: listener,
+      holder: speaker,
+      currentState:
+        botcastIdentityMirrorStatesV1(episode.events).get(speaker.id) ?? null,
+      content: "",
+      publicDirectedAction: listenerPublicSocialAction,
+    })
+      ? null
+      : createBotIdentityMirrorStateV1({
+          surface: "signal",
+          holderBotId: speaker.id,
+          holderBotName: speaker.name,
+          targetBotId: listener.id,
+          targetBotName: listener.name,
+          targetPersonaPrompt: listener.systemPrompt,
+          targetFace: botIdentityMirrorFaceV1(listener),
+          targetAvatarDetails: listener.avatarDetails ?? null,
+          holderVoice: resolveBotAudioVoiceProfileV1(
+            speaker.authoredAudioVoiceProfile,
+            speaker.audioVoiceProfileOverride,
+          ),
+          targetGlyph: botIdentityPresentationGlyphV1(listener.glyph),
+          sourceMessageId: messageId,
+          occurredAt: now,
+        });
+  if (listenerActionIdentityMirrorState) {
+    recordEvent(
+      db,
+      userId,
+      episode.id,
+      "power_effect",
+      {
+        v: 1,
+        effect: "identity_mirror",
+        trigger: "public_social_action",
+        sourceAction: listenerPublicSocialAction,
+        state: listenerActionIdentityMirrorState,
+        irritation: {
+          targetBotId: listenerActionIdentityMirrorState.targetBotId,
+          strength: "small",
+          reliable: true,
+        },
       },
       now,
     );

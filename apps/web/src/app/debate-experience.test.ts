@@ -1994,7 +1994,7 @@ describe("Debate experience", () => {
     assert.match(archiveRows, /hidden=\{!expanded\}/u);
     assert.match(
       archiveRows,
-      /setExpandedArchiveSessionId\(\(current\) =>[\s\S]{0,140}current === session\.id \? null : session\.id/u,
+      /setExpandedArchiveSessionId\(\(current\) =>[\s\S]{0,140}current === group\.key \? null : group\.key/u,
     );
     assert.match(archiveRows, /\? "Start debate"/u);
     assert.match(archiveRows, /\? "Resume debate"/u);
@@ -2015,7 +2015,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       archiveRows,
-      /className=\{styles\.archiveOpenButton\}[\s\S]{0,160}openSession\(session\)/u,
+      /className=\{styles\.archiveOpenButton\}[\s\S]{0,700}openSession\(openFamilyRun \?\? session\)/u,
     );
     assert.match(
       archiveRows,
@@ -2027,7 +2027,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       archiveRows,
-      /archiveSynopsis[\s\S]{0,500}archiveActions/u,
+      /archiveSynopsis[\s\S]{0,5000}archiveActions/u,
     );
     assert.match(
       css,

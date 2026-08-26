@@ -346,7 +346,10 @@ import {
   signalCupSipTargetFromMouth,
   signalStageLocalPointFromViewport,
 } from "./signalCupSipGeometry";
-import { signalCupSipScheduleV1 } from "./signalCupSipSchedule";
+import {
+  signalCupSipAllowedDuringSpeechV1,
+  signalCupSipScheduleV1,
+} from "./signalCupSipSchedule";
 import { buildSignalReviewTranscript } from "./signalReviewTranscript";
 import {
   signalVoicePerformanceActionPresentationAtProgress,
@@ -820,6 +823,7 @@ type PreparedBotcastAdvance = {
   afterMessageId: string;
   controller: AbortController;
   preparationId: string | null;
+  prefetchedMessageId: string | null;
   result: Promise<PreparedBotcastAdvanceResult>;
   settled: boolean;
 };
@@ -919,7 +923,13 @@ export interface BotcastExperienceProps {
     message: BotcastMessage,
     bot: BotcastBotSummary,
     context?: { signalTurnPreparationId?: string },
+  ) => boolean | Promise<boolean> | void;
+  premiumVoicePrefetchEnabled?: boolean;
+  onInvalidatePrefetchedUtterance?: (
+    episodeId: string,
+    messageId: string,
   ) => void;
+  onInvalidatePrefetchedEpisode?: (episodeId: string) => void;
   onPrefetchListenerReaction?: (
     plan: ListenerReactionPlanV1,
     bot: BotcastBotSummary,
@@ -2372,6 +2382,9 @@ export function BotcastExperience({
   resolveThinkingAudible,
   onUtterance,
   onPrefetchUtterance,
+  premiumVoicePrefetchEnabled = false,
+  onInvalidatePrefetchedUtterance,
+  onInvalidatePrefetchedEpisode,
   onPrefetchListenerReaction,
   onListenerReaction,
   onPrepareUtterance,
@@ -3120,6 +3133,7 @@ export function BotcastExperience({
       }
 
       const target = signalCupSipTargetFromMouth({
+        role,
         sceneBounds,
         sceneLocalWidth: scene.offsetWidth,
         sceneLocalHeight: scene.offsetHeight,
@@ -3611,8 +3625,11 @@ export function BotcastExperience({
         signalCaptureSourceIdRef.current = null;
         void abortReplayAudioMasterCapture(captureSourceId);
       }
+      if (activeEpisode) {
+        onInvalidatePrefetchedEpisode?.(activeEpisode.id);
+      }
     },
-    [],
+    [onInvalidatePrefetchedEpisode],
   );
 
   const discardPreparedAdvance = useCallback(
@@ -3621,6 +3638,12 @@ export function BotcastExperience({
       if (!prepared) return;
       preparedAdvanceRef.current = null;
       prepared.controller.abort();
+      if (prepared.prefetchedMessageId) {
+        onInvalidatePrefetchedUtterance?.(
+          prepared.episodeId,
+          prepared.prefetchedMessageId,
+        );
+      }
       const discard = (preparationId: string): void => {
         void request(
           `/api/turn-preparations/${encodeURIComponent(preparationId)}`,
@@ -3636,7 +3659,7 @@ export function BotcastExperience({
       }
       void reason;
     },
-    [request],
+    [onInvalidatePrefetchedUtterance, request],
   );
 
   const invalidateEpisodeOperation = useCallback(
@@ -3810,6 +3833,7 @@ export function BotcastExperience({
       void abortReplayAudioMasterCapture(captureSourceId);
     }
     if (episodeId) {
+      onInvalidatePrefetchedEpisode?.(episodeId);
       void request<{ episode: BotcastEpisode }>(
         `/api/botcast/episodes/${encodeURIComponent(episodeId)}/bake/cancel`,
         { method: "POST", body: JSON.stringify({}) },
@@ -7146,6 +7170,7 @@ export function BotcastExperience({
         artifact = startBake.liveBake;
         setWatchBakeArtifact(artifact);
         setWatchBakeLabel(liveBakeStatusCopy(artifact));
+        void prefetchKnownWatchEpisodeVoices(bakedEpisode);
         while (
           episodeOperationIsCurrent(controller, runId) &&
           artifact &&
@@ -7173,6 +7198,7 @@ export function BotcastExperience({
           artifact = polled.liveBake;
           setWatchBakeArtifact(artifact);
           setWatchBakeLabel(liveBakeStatusCopy(artifact));
+          void prefetchKnownWatchEpisodeVoices(bakedEpisode);
           if (artifact.status === "cancelled") {
             throw new DOMException("Bake cancelled", "AbortError");
           }
@@ -7181,6 +7207,8 @@ export function BotcastExperience({
           }
         }
         if (!episodeOperationIsCurrent(controller, runId) || !artifact) return;
+        await prefetchKnownWatchEpisodeVoices(bakedEpisode);
+        if (!episodeOperationIsCurrent(controller, runId)) return;
         latestCaptureEpisode = bakedEpisode;
         openingMessageReceived = bakedEpisode.messages.length > 0;
         setTopicDraft("");
@@ -7254,6 +7282,7 @@ export function BotcastExperience({
                 openingMessageReceived || presentationEpisode.messages.length > 0;
               setEpisode(presentationEpisode);
               setWatchBakeArtifact(presentationArtifact);
+              void prefetchKnownWatchEpisodeVoices(presentationEpisode);
               if (presentationArtifact.status === "cancelled") {
                 throw new DOMException("Bake cancelled", "AbortError");
               }
@@ -7265,6 +7294,8 @@ export function BotcastExperience({
             }
             watchPlaybackStartResolveRef.current = null;
             setWatchPlaybackReady(false);
+            if (!episodeOperationIsCurrent(controller, runId)) return;
+            await prefetchKnownWatchEpisodeVoices(presentationEpisode);
             if (!episodeOperationIsCurrent(controller, runId)) return;
           }
           // The branded ident runs for at least SIGNAL_EPISODE_PRE_ROLL_MIN_MS
@@ -7312,6 +7343,7 @@ export function BotcastExperience({
               // render state — and the playback loop reads the locals anyway,
               // which is the entire point of polling here.
               setWatchBakeArtifact(presentationArtifact);
+              void prefetchKnownWatchEpisodeVoices(presentationEpisode);
             }
           })();
           await beginEpisodeIntroBookend(watchBookend, bakedEpisode.id);
@@ -7320,6 +7352,8 @@ export function BotcastExperience({
           // A poll failure here is not fatal: the playback loop re-polls with
           // its own error handling and the buffer simply stays where it was.
           await introBufferPoll.catch(() => undefined);
+          if (!episodeOperationIsCurrent(controller, runId)) return;
+          await prefetchKnownWatchEpisodeVoices(presentationEpisode);
           if (!episodeOperationIsCurrent(controller, runId)) return;
           setEpisodePreRoll(null);
           const presentedWatchMessageIds = new Set<string>();
@@ -7389,6 +7423,8 @@ export function BotcastExperience({
             presentationEpisode = polled.episode;
             presentationArtifact = polled.liveBake;
             latestCaptureEpisode = presentationEpisode;
+            await prefetchKnownWatchEpisodeVoices(presentationEpisode);
+            if (!episodeOperationIsCurrent(controller, runId)) return;
             setEpisode(presentationEpisode);
             setWatchBakeArtifact(presentationArtifact);
             // Deliberately not liveBakeStatusCopy here: for a baking artifact
@@ -7496,6 +7532,7 @@ export function BotcastExperience({
           await releaseSignalModelWarmup(unstartedEpisodeId);
         }
         if (unstartedEpisodeId && !openingMessageReceived) {
+          onInvalidatePrefetchedEpisode?.(unstartedEpisodeId);
           try {
             await request(
               `/api/botcast/episodes/${encodeURIComponent(unstartedEpisodeId)}`,
@@ -7655,6 +7692,40 @@ export function BotcastExperience({
       }
     },
     [botsById, onPrefetchListenerReaction],
+  );
+
+  const prefetchKnownWatchEpisodeVoices = useCallback(
+    async (currentEpisode: BotcastEpisode): Promise<void> => {
+      if (!premiumVoicePrefetchEnabled || !onPrefetchUtterance) return;
+      const pending: Array<Promise<unknown>> = [];
+      for (const message of currentEpisode.messages) {
+        cacheListenerReactionPlan(currentEpisode, message);
+        let bot = botsById.get(message.botId);
+        if (bot) {
+          bot = botWithIdentityBeforeMessage(bot, currentEpisode, message);
+        }
+        if (
+          !bot ||
+          bot.muted ||
+          !botcastMessageIsAudibleToAudienceV1(message) ||
+          botPowerResponseIsSilentV1(message.content)
+        ) {
+          continue;
+        }
+        pending.push(
+          Promise.resolve(onPrefetchUtterance(message, bot)).catch(
+            () => false,
+          ),
+        );
+      }
+      await Promise.all(pending);
+    },
+    [
+      botsById,
+      cacheListenerReactionPlan,
+      onPrefetchUtterance,
+      premiumVoicePrefetchEnabled,
+    ],
   );
 
   const armListenerReactionTiming = useCallback(
@@ -8725,6 +8796,7 @@ export function BotcastExperience({
         afterMessageId: currentMessage.id,
         controller,
         preparationId: null,
+        prefetchedMessageId: null,
         settled: false,
         result: Promise.resolve({
           ok: false as const,
@@ -8799,6 +8871,7 @@ export function BotcastExperience({
                 !bot.muted &&
                 !botPowerResponseIsSilentV1(utterance.text)
               ) {
+                prepared.prefetchedMessageId = preparedMessage.id;
                 onPrefetchUtterance?.(
                   preparedMessage,
                   bot,
@@ -9136,9 +9209,30 @@ export function BotcastExperience({
                 // A prepared turn the live episode has moved past is a missed
                 // head start, not a broken episode: generate on air instead.
                 if (controller.signal.aborted) throw commitError;
+                const provisionalMessageId =
+                  readyPreparation.provisionalUtterances[0]?.id ?? null;
+                if (provisionalMessageId) {
+                  onInvalidatePrefetchedUtterance?.(
+                    episode.id,
+                    provisionalMessageId,
+                  );
+                }
                 return requestForegroundAdvance();
               })
           : await requestForegroundAdvance();
+        const committedProvisional =
+          readyPreparation?.provisionalUtterances[0] ?? null;
+        if (
+          committedProvisional &&
+          (!response.message ||
+            response.message.id !== committedProvisional.id ||
+            response.message.content !== committedProvisional.text)
+        ) {
+          onInvalidatePrefetchedUtterance?.(
+            episode.id,
+            committedProvisional.id,
+          );
+        }
         const resolvedImageContext = episodeImageForTurn
           ? botcastLatestImageContextV1(response.episode.events)
           : null;
@@ -9365,6 +9459,7 @@ export function BotcastExperience({
       episodeOperationIsCurrent,
       loadEpisodes,
       onListenerReaction,
+      onInvalidatePrefetchedUtterance,
       onReleaseUtterance,
       onResponseCueGeneration,
       playEpisodeOutro,
@@ -11714,13 +11809,16 @@ export function BotcastExperience({
       if (powerRateMultiplier <= 0) return null;
       const producerGuestRole =
         role === "guest" && args.currentEpisode.guestKind === "producer";
-      const sipAllowed =
-        !producerGuestRole && !roleIsSpeaking(role);
+      const otherRole = role === "host" ? "guest" : "host";
+      const sipAllowed = signalCupSipAllowedDuringSpeechV1({
+        roleSpeaking: roleIsSpeaking(role),
+        otherRoleSpeaking: roleIsSpeaking(otherRole),
+        producerGuestRole,
+      });
       // Signal prepares the listener's next turn while the current speaker is
-      // still on mic. Treating that internal preparation as a sip blocker
-      // eliminates the only window the turn-anchored schedule can use, so the
-      // cup remains on the table for the whole episode. The active speaker is
-      // still blocked; a listening bot may visibly sip while preparing.
+      // still on mic. Internal preparation does not block a sip, but active
+      // speech from the other chair is required so the cup rises during the
+      // line rather than in the silent handoff before playback begins.
       // Level and sprite both come off this one counter, so the cup cannot
       // lose coffee through a beat the viewer never saw anyone drink in —
       // which is what review 12d3d47e reported. The count is a function of

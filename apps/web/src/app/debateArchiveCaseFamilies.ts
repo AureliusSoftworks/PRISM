@@ -1,0 +1,52 @@
+import type { DebateSessionListItemV1 } from "@localai/shared";
+
+export interface DebateArchiveSessionGroup {
+  key: string;
+  representative: DebateSessionListItemV1;
+  runs: DebateSessionListItemV1[];
+  isMysteryCaseFamily: boolean;
+  openRun: DebateSessionListItemV1 | null;
+  latestCompletedRun: DebateSessionListItemV1 | null;
+  updatedAt: string;
+}
+
+/** Coalesces only Whodunnit V2 runs; every other archived proceeding stays flat. */
+export function groupDebateArchiveSessions(
+  sessions: readonly DebateSessionListItemV1[],
+): DebateArchiveSessionGroup[] {
+  const buckets = new Map<string, DebateSessionListItemV1[]>();
+  for (const session of sessions) {
+    const familyId = session.format === "whodunnit" &&
+      session.mysteryVersion === 2 &&
+      session.mysteryCaseFamilyId?.trim()
+      ? session.mysteryCaseFamilyId.trim()
+      : null;
+    const key = familyId ? `mystery-v2:${familyId}` : `session:${session.id}`;
+    buckets.set(key, [...(buckets.get(key) ?? []), session]);
+  }
+  return [...buckets.entries()].map(([key, members]) => {
+    const runs = [...members].sort((left, right) =>
+      (right.mysteryRunOrdinal ?? 0) - (left.mysteryRunOrdinal ?? 0) ||
+      right.updatedAt.localeCompare(left.updatedAt));
+    const isMysteryCaseFamily = key.startsWith("mystery-v2:");
+    const openRun = isMysteryCaseFamily
+      ? runs.find((run) => run.status !== "completed" && run.status !== "cancelled") ?? null
+      : null;
+    const latestCompletedRun = [...runs]
+      .filter((run) => run.status === "completed")
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] ?? null;
+    const updatedAt = runs.reduce(
+      (latest, run) => run.updatedAt > latest ? run.updatedAt : latest,
+      runs[0]?.updatedAt ?? "",
+    );
+    return {
+      key,
+      representative: openRun ?? latestCompletedRun ?? runs[0]!,
+      runs,
+      isMysteryCaseFamily,
+      openRun,
+      latestCompletedRun,
+      updatedAt,
+    };
+  }).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}

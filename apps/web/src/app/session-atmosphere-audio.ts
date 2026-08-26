@@ -1218,7 +1218,7 @@ export function startSessionAtmosphere(args: {
     playCue(cue) {
       if (presentationSuspended) return;
       play(SESSION_FOLEY_URLS[cue], "foley", {
-        trim: cue === "coffeeSip" ? 1.25 : 1.0625,
+        trim: cue === "coffeeSip" ? 0.625 : 1.0625,
       });
     },
     preloadFoley(urls) {

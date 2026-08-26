@@ -49,10 +49,12 @@ import {
   type DebateMysteryAudioManifestV1,
   type DebateMysteryCompilationStageV2,
   type DebateMysteryCompilationStatusV2,
+  type DebateMysteryCompilationSubstepV2,
   type DebateMysteryHouseStyleV2,
   type DebateMysteryDialogueGraphV2,
   type DebateMysteryDialogueNodeV2,
   type DebateMysteryPerformanceDirectionV2,
+  type DebateMysteryPlayAgainRequestV2,
   type DebateMysteryPresentationGateV2,
   type DebateMysteryPresentationUnlockTargetV2,
   type DebateMysteryRecordReferenceV2,
@@ -127,6 +129,21 @@ interface MysteryV2JobRow {
   lease_owner: string | null;
   leased_until: string | null;
   cancellation_requested: number;
+  created_at: string;
+  updated_at: string;
+}
+
+interface MysteryV2CaseRow {
+  session_id: string;
+  user_id: string;
+  case_family_id: string;
+  run_ordinal: number;
+  schema_version: number;
+  private_case_json: string;
+  dialogue_graph_json: string;
+  case_hash: string;
+  graph_hash: string;
+  validation_json: string;
   created_at: string;
   updated_at: string;
 }
@@ -420,6 +437,151 @@ function completedPassTiming(
   };
 }
 
+function forgeSubstep(
+  id: string,
+  label: string,
+  state: DebateMysteryCompilationSubstepV2["state"],
+): DebateMysteryCompilationSubstepV2 {
+  return { id, label, state };
+}
+
+/**
+ * This projection may only use durable checkpoints, deterministic pass state,
+ * and local-audio counters. It deliberately does not expose case text, cast
+ * identities, evidence, or private compiler payloads.
+ */
+function compilationSubsteps(
+  db: DatabaseSync,
+  row: MysteryV2JobRow,
+): DebateMysteryCompilationSubstepV2[] {
+  const session = getDebateSession(db, row.user_id, row.session_id);
+  const courtOnly = session.formatState.format === "whodunnit" &&
+    session.formatState.version === 2 &&
+    session.formatState.config.investigationMode === "court_only";
+  const frozenConfig = session.formatState.format === "whodunnit" && session.formatState.version === 2
+    ? session.formatState.config
+    : null;
+  const attention = row.status === "needs_attention";
+  const currentState: DebateMysteryCompilationSubstepV2["state"] = attention
+    ? "attention"
+    : "active";
+  // Failure recovery retains the last durable boundary; keep projecting that
+  // boundary instead of cosmetically collapsing the Forge to a generic error.
+  const stage = row.stage === "needs_attention"
+    ? row.completed_passes <= 0
+      ? "writing_case"
+      : row.completed_passes === 1
+        ? "testing_contradictions"
+        : row.completed_passes === 2
+          ? "directing_performances"
+          : row.completed_passes === 3
+            ? "preparing_local_voices"
+            : "verifying_case_audio"
+    : row.stage;
+  let stored: unknown = null;
+  if (row.checkpoint_json) {
+    try {
+      stored = JSON.parse(row.checkpoint_json) as unknown;
+    } catch {
+      // A damaged private checkpoint must not make the spoiler-safe status
+      // endpoint unusable. Recovery will still stop at the durable pass edge.
+    }
+  }
+  const draft = isMysteryV2AuthoringCheckpoint(stored) ? stored : null;
+  const completedWitnesses = draft ? Object.keys(draft.suspectsBySeatId).length : 0;
+  const totalWitnesses = frozenConfig?.suspectBotIds.length ?? 0;
+
+  switch (stage) {
+    case "writing_case": {
+      const foundationCoreComplete = Boolean(draft?.foundationCore);
+      const foundationComplete = Boolean(draft?.foundation);
+      const witnessesComplete = totalWitnesses > 0 && completedWitnesses >= totalWitnesses;
+      if (!foundationCoreComplete) {
+        return [
+          forgeSubstep("foundation", "Case foundation", currentState),
+          ...(!courtOnly ? [forgeSubstep("room-details", "Room details", "upcoming" as const)] : []),
+          forgeSubstep("witness-chapters", "Witness chapters", "upcoming"),
+          forgeSubstep("prosecution-responses", "Prosecution responses", "upcoming"),
+        ];
+      }
+      if (!courtOnly && !foundationComplete) {
+        return [
+          forgeSubstep("foundation", "Case foundation", "complete"),
+          forgeSubstep("room-details", "Room details", currentState),
+          forgeSubstep("witness-chapters", "Witness chapters", "upcoming"),
+          forgeSubstep("prosecution-responses", "Prosecution responses", "upcoming"),
+        ];
+      }
+      if (!witnessesComplete) {
+        return [
+          forgeSubstep("foundation", "Case foundation", "complete"),
+          ...(!courtOnly ? [forgeSubstep("room-details", "Room details", "complete" as const)] : []),
+          forgeSubstep(
+            "witness-chapters",
+            totalWitnesses > 0 ? `Witness chapters · ${completedWitnesses} of ${totalWitnesses}` : "Witness chapters",
+            currentState,
+          ),
+          forgeSubstep("prosecution-responses", "Prosecution responses", "upcoming"),
+        ];
+      }
+      if (!draft?.prosecutionChoices) {
+        return [
+          forgeSubstep("foundation", "Case foundation", "complete"),
+          ...(!courtOnly ? [forgeSubstep("room-details", "Room details", "complete" as const)] : []),
+          forgeSubstep("witness-chapters", "Witness chapters", "complete"),
+          forgeSubstep("prosecution-responses", "Prosecution responses", currentState),
+        ];
+      }
+      return [
+        forgeSubstep("foundation", "Case foundation", "complete"),
+        ...(!courtOnly ? [forgeSubstep("room-details", "Room details", "complete" as const)] : []),
+        forgeSubstep("witness-chapters", "Witness chapters", "complete"),
+        forgeSubstep("prosecution-responses", "Prosecution responses", "complete"),
+        forgeSubstep("assemble-case", "Assembling the case package", currentState),
+      ];
+    }
+    case "testing_contradictions":
+      return [
+        forgeSubstep("case-draft", "Case draft", "complete"),
+        forgeSubstep("contradiction-checks", "Checking contradictions", currentState),
+      ];
+    case "directing_performances":
+      return [
+        forgeSubstep("contradiction-checks", "Contradictions checked", "complete"),
+        forgeSubstep("performance-directions", "Checking performance directions", currentState),
+      ];
+    case "preparing_local_voices": {
+      const recordingsComplete = row.required_audio_count > 0 &&
+        row.prepared_audio_count >= row.required_audio_count;
+      return [
+        forgeSubstep("dialogue-graph", "Dialogue graph frozen", "complete"),
+        forgeSubstep(
+          "local-recordings",
+          row.required_audio_count > 0
+            ? `Preparing local recordings · ${row.prepared_audio_count} of ${row.required_audio_count}`
+            : "Mapping reachable dialogue",
+          recordingsComplete ? "complete" : currentState,
+        ),
+        forgeSubstep("audio-verification", "Verifying the local audio pack", recordingsComplete ? currentState : "upcoming"),
+      ];
+    }
+    case "verifying_case_audio":
+      return [
+        forgeSubstep("local-recordings", "Local recordings prepared", "complete"),
+        forgeSubstep("audio-verification", "Verifying the local audio pack", currentState),
+        forgeSubstep("open-case", "Opening the case", "upcoming"),
+      ];
+    case "complete":
+      return [
+        forgeSubstep("local-recordings", "Local recordings prepared", "complete"),
+        forgeSubstep("audio-verification", "Audio pack verified", "complete"),
+        forgeSubstep("open-case", "Case ready", "complete"),
+      ];
+    case "cancelled":
+      return [forgeSubstep("cancelled", "Preparation cancelled", "attention")];
+  }
+}
+
 function compilationStatus(
   db: DatabaseSync,
   row: MysteryV2JobRow,
@@ -452,6 +614,7 @@ function compilationStatus(
     totalPasses: row.total_passes,
     preparedAudioCount: row.prepared_audio_count,
     requiredAudioCount: row.required_audio_count,
+    substeps: compilationSubsteps(db, row),
     retryable: row.status === "needs_attention",
     publicFailureCode: row.status !== "needs_attention"
       ? null
@@ -884,6 +1047,14 @@ function initialV2State(
       totalPasses: V2_TOTAL_PASSES,
       preparedAudioCount: 0,
       requiredAudioCount: 0,
+      substeps: [
+        forgeSubstep("foundation", "Case foundation", "active"),
+        ...(config.investigationMode === "full"
+          ? [forgeSubstep("room-details", "Room details", "upcoming" as const)]
+          : []),
+        forgeSubstep("witness-chapters", "Witness chapters", "upcoming"),
+        forgeSubstep("prosecution-responses", "Prosecution responses", "upcoming"),
+      ],
       retryable: false,
       publicFailureCode: null,
       publicFailureStage: null,
@@ -2712,10 +2883,11 @@ function storeCompiledCaseV2(
   const graphJson = JSON.stringify(graph);
   db.prepare(
     `INSERT INTO debate_mystery_v2_cases
-       (session_id, user_id, schema_version, private_case_json,
+       (session_id, user_id, case_family_id, run_ordinal,
+        schema_version, private_case_json,
         dialogue_graph_json, case_hash, graph_hash, validation_json,
         created_at, updated_at)
-     VALUES (?, ?, 2, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, 1, 2, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(session_id) DO UPDATE SET
        private_case_json = excluded.private_case_json,
        dialogue_graph_json = excluded.dialogue_graph_json,
@@ -2727,6 +2899,7 @@ function storeCompiledCaseV2(
   ).run(
     sessionId,
     userId,
+    sessionId,
     privateJson,
     graphJson,
     sha256(privateJson),
@@ -2737,25 +2910,31 @@ function storeCompiledCaseV2(
   );
 }
 
+function mysteryV2CaseRow(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+): MysteryV2CaseRow {
+  const row = db.prepare(
+    `SELECT session_id, user_id, case_family_id, run_ordinal, schema_version,
+            private_case_json, dialogue_graph_json, case_hash, graph_hash,
+            validation_json, created_at, updated_at
+       FROM debate_mystery_v2_cases
+      WHERE user_id = ? AND session_id = ?`,
+  ).get(userId, sessionId) as MysteryV2CaseRow | undefined;
+  if (!row) throw new HttpError(404, "The compiled Whodunnit V2 case is unavailable.");
+  if (sha256(row.private_case_json) !== row.case_hash || sha256(row.dialogue_graph_json) !== row.graph_hash) {
+    throw new HttpError(409, "The compiled Whodunnit V2 case failed its integrity check.");
+  }
+  return row;
+}
+
 export function getDebateMysteryCaseV2(
   db: DatabaseSync,
   userId: string,
   sessionId: string,
 ): { privateCase: PrivateMysteryCaseV2; graph: DebateMysteryDialogueGraphV2 } {
-  const row = db.prepare(
-    `SELECT private_case_json, dialogue_graph_json, case_hash, graph_hash
-       FROM debate_mystery_v2_cases
-      WHERE user_id = ? AND session_id = ?`,
-  ).get(userId, sessionId) as {
-    private_case_json: string;
-    dialogue_graph_json: string;
-    case_hash: string;
-    graph_hash: string;
-  } | undefined;
-  if (!row) throw new HttpError(404, "The compiled Whodunnit V2 case is unavailable.");
-  if (sha256(row.private_case_json) !== row.case_hash || sha256(row.dialogue_graph_json) !== row.graph_hash) {
-    throw new HttpError(409, "The compiled Whodunnit V2 case failed its integrity check.");
-  }
+  const row = mysteryV2CaseRow(db, userId, sessionId);
   return {
     privateCase: JSON.parse(row.private_case_json) as PrivateMysteryCaseV2,
     graph: JSON.parse(row.dialogue_graph_json) as DebateMysteryDialogueGraphV2,
@@ -3870,6 +4049,470 @@ function storeAudioManifest(
   ).run(sessionId, userId, status, JSON.stringify(manifest), now, now);
 }
 
+export interface DebateMysteryPlayAgainResultV2 {
+  session: DebateSessionV1;
+  reusedExistingOpenRun: boolean;
+}
+
+interface MysteryV2ReplayAudioReferenceRow {
+  line_id: string;
+  cache_key: string;
+  clip_path: string;
+  mime_type: string;
+  sha256: string;
+  byte_size: number;
+  duration_ms: number;
+}
+
+function mysteryV2ReplayAudioUnavailable(): HttpError {
+  return new HttpError(
+    409,
+    "The saved voice pack is unavailable. Play this case again without voices instead.",
+    "MYSTERY_REPLAY_AUDIO_UNAVAILABLE",
+  );
+}
+
+function resetMysteryV2JuryForReplay(
+  jury: DebateSessionV1["jury"],
+): DebateSessionV1["jury"] {
+  return {
+    ...structuredClone(jury),
+    phase: jury.enabled ? "waiting" : "disabled",
+    preparedFinalBallots: [],
+    finalBallots: [],
+    moderatorBallot: null,
+    discussionTurnCount: 0,
+    speakerCounts: {},
+    majoritySideId: null,
+    forVotes: 0,
+    againstVotes: 0,
+    calledVoteAt: null,
+    completedAt: null,
+  };
+}
+
+function initialMysteryV2ReplayState(args: {
+  checkpoint: MysteryV2Checkpoint;
+  sourceState: DebateWhodunnitFormatStateV2;
+  jobId: string;
+  now: string;
+  voicesEnabled: boolean;
+  preparedAudioCount: number;
+}): DebateWhodunnitFormatStateV2 {
+  const sourceRecord = new Map(
+    args.sourceState.record.map((item) => [
+      `${item.reference.kind}:${item.reference.id}`,
+      item,
+    ]),
+  );
+  const sourceRooms = new Map(args.sourceState.rooms.map((room) => [room.id, room]));
+  const state = structuredClone(args.checkpoint.publicState);
+  state.record = state.record.map((item) => {
+    const current = sourceRecord.get(`${item.reference.kind}:${item.reference.id}`);
+    return current
+      ? {
+          ...item,
+          imageId: current.imageId ?? null,
+          visualKind: current.imageId ? current.visualKind ?? "synthesized" : "emoji",
+        }
+      : item;
+  });
+  state.rooms = state.rooms.map((room) => {
+    const current = sourceRooms.get(room.id);
+    return current
+      ? {
+          ...room,
+          imageId: current.imageId ?? null,
+          bundledAssetPath: current.bundledAssetPath ?? null,
+        }
+      : room;
+  });
+  state.dialogueHistory = state.dialogueHistory.map((entry) => ({
+    ...entry,
+    occurredAt: args.now,
+  }));
+  state.playPhase = "title_card";
+  state.compilation = {
+    ...args.sourceState.compilation,
+    jobId: args.jobId,
+    stage: "complete",
+    attempt: 0,
+    completedPasses: V2_TOTAL_PASSES,
+    totalPasses: V2_TOTAL_PASSES,
+    preparedAudioCount: args.preparedAudioCount,
+    requiredAudioCount: args.preparedAudioCount,
+    retryable: false,
+    publicFailureCode: null,
+    publicFailureStage: null,
+    spoilerSafeMessage: args.voicesEnabled
+      ? "Your case is ready"
+      : "Your text case is ready",
+    startedAt: args.now,
+    elapsedMs: 0,
+    approximateRemainingMs: null,
+    etaBasisPasses: 0,
+    updatedAt: args.now,
+  };
+  state.readiness = {
+    ...args.sourceState.readiness,
+    status: "ready",
+    spoilerSafeMessage: args.voicesEnabled
+      ? "The frozen local case pack is ready"
+      : "The frozen text case is ready",
+    checkedAt: args.now,
+  };
+  state.audioReady = args.voicesEnabled;
+  state.voicesEnabled = args.voicesEnabled;
+  state.localAudioFailure = null;
+  state.theory = null;
+  state.theoryFiledAt = null;
+  state.court = null;
+  state.verdict = null;
+  state.calloutHistory = [];
+  state.pendingCallout = null;
+  state.pendingProsecutionChoice = null;
+  return state;
+}
+
+/**
+ * Creates a new immutable playthrough entirely from a completed compiled pack.
+ * This function intentionally has no runtime/provider parameter: replay can
+ * only copy durable JSON and attach existing content-addressed audio bytes.
+ */
+export function playDebateMysteryV2Again(
+  db: DatabaseSync,
+  userId: string,
+  completedSessionId: string,
+  request: DebateMysteryPlayAgainRequestV2,
+): DebateMysteryPlayAgainResultV2 {
+  if (request?.version !== 2) {
+    throw new HttpError(400, "Whodunnit Play Again requires version 2.");
+  }
+  const idempotencyKey = request.idempotencyKey?.trim() ?? "";
+  if (!idempotencyKey || idempotencyKey.length > 200) {
+    throw new HttpError(400, "A stable Play Again idempotency key is required.");
+  }
+  const audioMode = request.audioMode === "silent" ? "silent" : "reuse";
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const requestedSource = getDebateSession(db, userId, completedSessionId);
+    if (
+      requestedSource.status !== "completed" ||
+      requestedSource.formatState.format !== "whodunnit" ||
+      requestedSource.formatState.version !== 2 ||
+      requestedSource.formatState.playPhase !== "verdict"
+    ) {
+      throw new HttpError(409, "Play Again is available only for a completed Whodunnit V2 case.");
+    }
+    const requestedCase = mysteryV2CaseRow(db, userId, completedSessionId);
+    const familyId = requestedCase.case_family_id || requestedCase.session_id;
+    const createKey = `mystery-play-again-v2:${familyId}:${idempotencyKey}`;
+
+    const idempotent = db.prepare(
+      `SELECT id, status
+         FROM debate_sessions
+        WHERE user_id = ? AND create_idempotency_key = ?`,
+    ).get(userId, createKey) as { id: string; status: DebateSessionV1["status"] } | undefined;
+    if (idempotent) {
+      const session = getDebateSession(db, userId, idempotent.id);
+      db.exec("COMMIT");
+      return {
+        session,
+        reusedExistingOpenRun: idempotent.status !== "completed" && idempotent.status !== "cancelled",
+      };
+    }
+
+    const existingOpen = db.prepare(
+      `SELECT session.id
+         FROM debate_mystery_v2_cases AS mystery
+         JOIN debate_sessions AS session
+           ON session.user_id = mystery.user_id
+          AND session.id = mystery.session_id
+        WHERE mystery.user_id = ? AND mystery.case_family_id = ?
+          AND session.status NOT IN ('completed', 'cancelled')
+        ORDER BY mystery.run_ordinal DESC
+        LIMIT 1`,
+    ).get(userId, familyId) as { id: string } | undefined;
+    if (existingOpen) {
+      const session = getDebateSession(db, userId, existingOpen.id);
+      db.exec("COMMIT");
+      return { session, reusedExistingOpenRun: true };
+    }
+
+    const sourceIdRow = db.prepare(
+      `SELECT mystery.session_id
+         FROM debate_mystery_v2_cases AS mystery
+         JOIN debate_sessions AS session
+           ON session.user_id = mystery.user_id
+          AND session.id = mystery.session_id
+        WHERE mystery.user_id = ? AND mystery.case_family_id = ?
+          AND session.status = 'completed'
+        ORDER BY session.updated_at DESC, mystery.run_ordinal DESC
+        LIMIT 1`,
+    ).get(userId, familyId) as { session_id: string } | undefined;
+    if (!sourceIdRow) {
+      throw new HttpError(409, "This case family has no completed run to replay.");
+    }
+    const sourceSession = getDebateSession(db, userId, sourceIdRow.session_id);
+    if (
+      sourceSession.formatState.format !== "whodunnit" ||
+      sourceSession.formatState.version !== 2 ||
+      sourceSession.formatState.playPhase !== "verdict"
+    ) {
+      throw new HttpError(409, "The completed Whodunnit V2 source run is invalid.");
+    }
+    const sourceCase = mysteryV2CaseRow(db, userId, sourceSession.id);
+    const privateCase = JSON.parse(sourceCase.private_case_json) as PrivateMysteryCaseV2;
+    const graph = JSON.parse(sourceCase.dialogue_graph_json) as DebateMysteryDialogueGraphV2;
+    const graphValidation = validateDebateMysteryDialogueGraphV2({
+      graph,
+      suspectSeatIds: privateCase.actorAccounts.map((account) => account.seatId),
+      recordReferences: privateCase.recordItems.map((item) => item.reference),
+      roomIds: privateCase.investigationRoomIds,
+      personIds: privateCase.investigationPersonIds,
+      hotspotIdsByRoom: privateCase.investigationHotspotIdsByRoom,
+      prosecutorBotId: privateCase.config.prosecutorBotId,
+      rivalDefenseBotId: privateCase.config.rivalDefenseBotId,
+      eyewitnessSeatId: privateCase.eyewitnessSeatId,
+      accusedAlibiSupportDiscoveryIds: privateCase.accusedAlibiSupportDiscoveryIds,
+    });
+    if (!graphValidation.valid) {
+      throw new HttpError(409, "The compiled Whodunnit V2 dialogue graph failed its integrity check.");
+    }
+    const sourceJob = jobRow(db, userId, sourceSession.id);
+    const storedCheckpoint = sourceJob.checkpoint_json
+      ? JSON.parse(sourceJob.checkpoint_json) as unknown
+      : null;
+    if (sourceJob.status !== "complete" || !isMysteryV2CompiledCheckpoint(storedCheckpoint)) {
+      throw new HttpError(409, "The compiled Whodunnit V2 checkpoint is unavailable.");
+    }
+
+    let voicesEnabled = audioMode === "reuse" && sourceSession.formatState.voicesEnabled;
+    let copiedManifest: DebateMysteryAudioManifestV1 | null = null;
+    let audioReferences: MysteryV2ReplayAudioReferenceRow[] = [];
+    if (voicesEnabled) {
+      const sourceManifestRow = db.prepare(
+        `SELECT status, manifest_json
+           FROM debate_mystery_audio_manifests
+          WHERE user_id = ? AND session_id = ?`,
+      ).get(userId, sourceSession.id) as {
+        status: "preparing" | "complete" | "failed" | "silent";
+        manifest_json: string;
+      } | undefined;
+      if (!sourceManifestRow || sourceManifestRow.status !== "complete") {
+        throw mysteryV2ReplayAudioUnavailable();
+      }
+      try {
+        copiedManifest = JSON.parse(sourceManifestRow.manifest_json) as DebateMysteryAudioManifestV1;
+      } catch {
+        throw mysteryV2ReplayAudioUnavailable();
+      }
+      const validation = validateDebateMysteryAudioManifestV1({
+        graph,
+        manifest: copiedManifest,
+        reachableSpokenLineIds: privateCase.graphValidation.reachableSpokenLineIds,
+      });
+      if (!validation.valid) throw mysteryV2ReplayAudioUnavailable();
+      audioReferences = db.prepare(
+        `SELECT reference.line_id, reference.cache_key, cache.clip_path,
+                cache.mime_type, cache.sha256, cache.byte_size, cache.duration_ms
+           FROM debate_mystery_audio_refs AS reference
+           JOIN debate_mystery_audio_cache AS cache
+             ON cache.user_id = reference.user_id
+            AND cache.cache_key = reference.cache_key
+          WHERE reference.user_id = ? AND reference.session_id = ?`,
+      ).all(userId, sourceSession.id) as unknown as MysteryV2ReplayAudioReferenceRow[];
+      const referenceByLine = new Map(audioReferences.map((reference) => [reference.line_id, reference]));
+      for (const entry of copiedManifest.entries) {
+        const reference = referenceByLine.get(entry.lineId);
+        if (
+          !reference ||
+          reference.sha256 !== entry.sha256 ||
+          reference.byte_size !== entry.byteSize ||
+          reference.clip_path !== entry.clipPath ||
+          !audioFileValid({
+            clipPath: reference.clip_path,
+            sha256: reference.sha256,
+            byteSize: reference.byte_size,
+          })
+        ) {
+          throw mysteryV2ReplayAudioUnavailable();
+        }
+      }
+      audioReferences = copiedManifest.entries.map((entry) => referenceByLine.get(entry.lineId)!);
+    } else {
+      voicesEnabled = false;
+    }
+
+    const nextOrdinalRow = db.prepare(
+      `SELECT COALESCE(MAX(run_ordinal), 0) + 1 AS next_ordinal
+         FROM debate_mystery_v2_cases
+        WHERE user_id = ? AND case_family_id = ?`,
+    ).get(userId, familyId) as { next_ordinal: number };
+    const runOrdinal = nextOrdinalRow.next_ordinal;
+    const now = new Date().toISOString();
+    const sessionId = randomUUID();
+    const jobId = randomUUID();
+    const replayState = initialMysteryV2ReplayState({
+      checkpoint: {
+        privateCase,
+        graph,
+        publicState: storedCheckpoint.publicState,
+      },
+      sourceState: sourceSession.formatState,
+      jobId,
+      now,
+      voicesEnabled,
+      preparedAudioCount: copiedManifest?.entries.length ?? 0,
+    });
+    const replaySession: DebateSessionV1 = {
+      ...structuredClone(sourceSession),
+      id: sessionId,
+      revision: 1,
+      status: "waiting_for_player",
+      phase: "opening",
+      stepKey: "mystery_v2_title",
+      formatState: replayState,
+      jury: resetMysteryV2JuryForReplay(sourceSession.jury),
+      caseBoard: [],
+      ballots: [],
+      playerVerdict: null,
+      winnerSideId: null,
+      judgeGavel: null,
+      judgeGavelCooldownUntil: null,
+      objectionRuling: null,
+      participantObjection: null,
+      participantFloorBreak: null,
+      participantFloorBreakPreparation: null,
+      pausedPresentationEventId: null,
+      preparedResumeEventId: null,
+      archiveReturnBuffer: null,
+      pausedAt: null,
+      pausedDurationMs: 0,
+      events: [],
+      error: null,
+      createdAt: now,
+      updatedAt: now,
+      endedEarlyAt: null,
+      completedAt: null,
+      synopsis: null,
+      liveBake: null,
+    };
+    db.prepare(
+      `INSERT INTO debate_sessions
+         (id, user_id, revision, status, phase, step_key, player_role,
+          player_side_id, create_idempotency_key, motion, winner_side_id,
+          session_json, error, created_at, updated_at, completed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, NULL)`,
+    ).run(
+      replaySession.id,
+      userId,
+      replaySession.revision,
+      replaySession.status,
+      replaySession.phase,
+      replaySession.stepKey,
+      replaySession.playerRole === "spectator" ? "spectator" : "participant",
+      replaySession.playerSideId,
+      createKey,
+      replaySession.motion.motion,
+      publicSessionJson(replaySession),
+      now,
+      now,
+    );
+    db.prepare(
+      `INSERT INTO debate_mystery_v2_cases
+         (session_id, user_id, case_family_id, run_ordinal, schema_version,
+          private_case_json, dialogue_graph_json, case_hash, graph_hash,
+          validation_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 2, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      sessionId,
+      userId,
+      familyId,
+      runOrdinal,
+      sourceCase.private_case_json,
+      sourceCase.dialogue_graph_json,
+      sourceCase.case_hash,
+      sourceCase.graph_hash,
+      sourceCase.validation_json,
+      now,
+      now,
+    );
+    const replayCheckpoint: MysteryV2Checkpoint = {
+      kind: "compiled-v1",
+      privateCase,
+      graph,
+      publicState: replayState,
+    };
+    db.prepare(
+      `INSERT INTO debate_mystery_v2_jobs
+         (id, user_id, session_id, status, stage, attempt, completed_passes,
+          total_passes, prepared_audio_count, required_audio_count,
+          public_message, private_error, input_json, checkpoint_json,
+          lease_owner, leased_until, cancellation_requested, created_at, updated_at)
+       VALUES (?, ?, ?, 'complete', 'complete', 0, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, NULL, 0, ?, ?)`,
+    ).run(
+      jobId,
+      userId,
+      sessionId,
+      V2_TOTAL_PASSES,
+      V2_TOTAL_PASSES,
+      copiedManifest?.entries.length ?? 0,
+      copiedManifest?.entries.length ?? 0,
+      voicesEnabled ? "Your case is ready" : "Your text case is ready",
+      sourceJob.input_json,
+      JSON.stringify(replayCheckpoint),
+      now,
+      now,
+    );
+
+    if (voicesEnabled && copiedManifest) {
+      for (const reference of audioReferences) {
+        db.prepare(
+          `INSERT INTO debate_mystery_audio_refs
+             (session_id, user_id, line_id, cache_key, created_at)
+           VALUES (?, ?, ?, ?, ?)`,
+        ).run(sessionId, userId, reference.line_id, reference.cache_key, now);
+        const updated = db.prepare(
+          `UPDATE debate_mystery_audio_cache
+              SET ref_count = ref_count + 1, last_used_at = ?
+            WHERE user_id = ? AND cache_key = ?`,
+        ).run(now, userId, reference.cache_key);
+        if (Number(updated.changes) !== 1) throw mysteryV2ReplayAudioUnavailable();
+      }
+      storeAudioManifest(
+        db,
+        userId,
+        sessionId,
+        { ...structuredClone(copiedManifest), caseId: sessionId },
+        "complete",
+      );
+    } else {
+      storeAudioManifest(db, userId, sessionId, {
+        version: 1,
+        caseId: sessionId,
+        caseHash: sourceCase.case_hash,
+        scriptHash: sha256("silent"),
+        dialogueGraphHash: sourceCase.graph_hash,
+        engine: "prism-instant-local",
+        model: copiedManifest?.model ?? PRISM_INSTANT_VOICE_MODEL_ID,
+        modelVersion: copiedManifest?.modelVersion ?? "q8-pinned-1",
+        entries: [],
+        complete: false,
+        completedAt: null,
+        verifiedAt: null,
+      }, "silent");
+    }
+
+    db.exec("COMMIT");
+    return { session: replaySession, reusedExistingOpenRun: false };
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 function debateMysteryPlayContractHashV2(args: {
   db: DatabaseSync;
   userId: string;
@@ -4925,6 +5568,10 @@ export function cleanupUnreferencedDebateMysteryAudioV2(
 export interface DebateMysteryV2BackupV1 {
   cases: Array<{
     sessionId: string;
+    /** Optional for backups created before replayable case families shipped. */
+    caseFamilyId?: string;
+    /** Optional for backups created before replayable case families shipped. */
+    runOrdinal?: number;
     schemaVersion: number;
     privateCaseJson: string;
     dialogueGraphJson: string;
@@ -5029,6 +5676,8 @@ export function exportDebateMysteryV2BackupV1(
   return {
     cases: cases.map((row) => ({
       sessionId: String(row.session_id),
+      caseFamilyId: String(row.case_family_id || row.session_id),
+      runOrdinal: Number(row.run_ordinal || 1),
       schemaVersion: Number(row.schema_version),
       privateCaseJson: String(row.private_case_json),
       dialogueGraphJson: String(row.dialogue_graph_json),
@@ -5118,15 +5767,24 @@ export function importDebateMysteryV2BackupV1(
     catch { throw new Error(`Account backup contains invalid ${label} JSON.`); }
   };
 
+  const importedFamilyRuns = new Set<string>();
   for (const mystery of backup.cases ?? []) {
     requireSession(mystery.sessionId);
+    const caseFamilyId = mystery.caseFamilyId?.trim() || mystery.sessionId;
+    const runOrdinal = mystery.runOrdinal ?? 1;
     if (
       mystery.schemaVersion !== DEBATE_MYSTERY_V2_SCHEMA_VERSION ||
+      !Number.isInteger(runOrdinal) || runOrdinal < 1 ||
       sha256(mystery.privateCaseJson) !== mystery.caseHash ||
       sha256(mystery.dialogueGraphJson) !== mystery.graphHash
     ) {
       throw new Error("Account backup contains a corrupted Whodunnit V2 case.");
     }
+    const familyRunKey = `${caseFamilyId}\u0000${runOrdinal}`;
+    if (importedFamilyRuns.has(familyRunKey)) {
+      throw new Error("Account backup contains duplicate Whodunnit V2 Run numbers.");
+    }
+    importedFamilyRuns.add(familyRunKey);
     const privateCase = parseJson(mystery.privateCaseJson, "Whodunnit V2 private case") as PrivateMysteryCaseV2;
     const graph = parseJson(mystery.dialogueGraphJson, "Whodunnit V2 dialogue graph") as DebateMysteryDialogueGraphV2;
     parseJson(mystery.validationJson, "Whodunnit V2 validation");
@@ -5145,12 +5803,13 @@ export function importDebateMysteryV2BackupV1(
     }
     db.prepare(
       `INSERT OR REPLACE INTO debate_mystery_v2_cases
-         (session_id, user_id, schema_version, private_case_json,
+         (session_id, user_id, case_family_id, run_ordinal, schema_version,
+          private_case_json,
           dialogue_graph_json, case_hash, graph_hash, validation_json,
           created_at, updated_at)
-       VALUES (?, ?, 2, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, 2, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
-      mystery.sessionId, userId, mystery.privateCaseJson,
+      mystery.sessionId, userId, caseFamilyId, runOrdinal, mystery.privateCaseJson,
       mystery.dialogueGraphJson, mystery.caseHash, mystery.graphHash,
       mystery.validationJson, mystery.createdAt, mystery.updatedAt,
     );

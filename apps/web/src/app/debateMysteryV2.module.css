@@ -183,6 +183,60 @@
 .forgeStages li[data-state="error"] { color: #ffd1dc; }
 .forgeStages li[data-state="error"] span { color: #ffb1c4; border-color: rgba(255, 120, 151, 0.66); box-shadow: 0 0 1rem rgba(255, 90, 130, 0.28); }
 
+.forgeSubsteps {
+  margin: -0.45rem 0 1.1rem;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid rgba(184, 153, 255, 0.16);
+  border-radius: 0.75rem;
+  background: rgba(6, 7, 17, 0.3);
+}
+
+.forgeSubsteps > p {
+  margin: 0 0 0.45rem;
+  color: #aaa0c7;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.forgeSubsteps ol { display: grid; gap: 0.34rem; margin: 0; padding: 0; list-style: none; }
+.forgeSubsteps li { display: flex; align-items: baseline; gap: 0.52rem; color: #817c91; font-size: 0.8rem; }
+.forgeSubsteps li > span { width: 0.8rem; color: #8d859f; text-align: center; }
+.forgeSubsteps li[data-state="complete"] { color: #c3bed0; }
+.forgeSubsteps li[data-state="complete"] > span { color: #9ee8d0; }
+.forgeSubsteps li[data-state="active"] { color: #fff; font-weight: 700; }
+.forgeSubsteps li[data-state="active"] > span { color: #c6a9ff; animation: forgeSubstepPulse 1.8s ease-in-out infinite; }
+.forgeSubsteps li[data-state="attention"] { color: #ffd1dc; font-weight: 700; }
+.forgeSubsteps li[data-state="attention"] > span { color: #ff9ab6; }
+
+.forgeTip {
+  display: grid;
+  gap: 0.18rem;
+  margin: -0.2rem 0 1rem;
+  padding: 0.75rem 0.85rem;
+  border-left: 2px solid rgba(102, 229, 234, 0.64);
+  background: rgba(57, 140, 158, 0.08);
+}
+
+.forgeTip > span { color: #82dce8; font-size: 0.67rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }
+.forgeTip > p { margin: 0; color: #c8cedc; font-size: 0.82rem; line-height: 1.4; animation: forgeTipReveal 360ms ease-out both; }
+
+@keyframes forgeSubstepPulse {
+  0%, 100% { opacity: 0.42; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.12); }
+}
+
+@keyframes forgeTipReveal {
+  from { opacity: 0; transform: translateY(0.2rem); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .forgeSubsteps li[data-state="active"] > span,
+  .forgeTip > p { animation: none; }
+}
+
 .localVoiceNotice {
   display: flex;
   align-items: center;

@@ -14,6 +14,7 @@ import {
   splitDebateMysteryStageActionTextV2,
   type DebateMysteryActionRequestV2,
   type DebateMysteryCompilationStageV2,
+  type DebateMysteryCompilationStatusV2,
   type DebateMysteryPublicDialogueEntryV2,
   type DebateMysteryPublicTopicV2,
   type DebateMysteryRecordReferenceV2,
@@ -200,6 +201,17 @@ const FORGE_STAGES: Array<{
   { id: "begin_case", label: "Begin Case" },
 ];
 
+const FORGE_TIPS = [
+  "Every checkpoint saves safely, so you can return to Archive whenever you need to.",
+  "The Forge is preparing a finite case pack; nothing during play will call a model.",
+  "Local recordings are prepared on this device. Premium voices are never used here.",
+  "A good case is fair before it is surprising: the Forge checks every proof route before opening court.",
+  "Pressing a statement is free. Listen for the detail the witness is trying hardest to avoid.",
+  "Present evidence against the exact statement it contradicts—not merely the witness who said it.",
+  "Testimony revisions stay in the Case File, so an earlier sworn account can become evidence later.",
+  "Every suspect takes the stand. A minor witness now may become the key contradiction later.",
+] as const;
+
 const CALLOUT_COPY = {
   hold_it: "HOLD IT!",
   objection: "OBJECTION!",
@@ -217,6 +229,18 @@ function mutationBody(value: Record<string, unknown>): RequestInit {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(value),
   };
+}
+
+function usePrefersReducedMotion(): boolean {
+  const [reducedMotion, setReducedMotion] = useState(false);
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = (): void => setReducedMotion(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  return reducedMotion;
 }
 
 async function writeForgeErrorDetailsClipboard(text: string): Promise<void> {
@@ -353,9 +377,16 @@ export function DebateMysteryV2CompilationResume(
   const [resumeNonce, setResumeNonce] = useState(0);
   const [errorDetailsCopyState, setErrorDetailsCopyState] = useState<V2ForgeErrorCopyState>("idle");
   const [clockNowMs, setClockNowMs] = useState(() => Date.now());
+  const [liveCompilation, setLiveCompilation] = useState(state.compilation);
+  const [forgeTipIndex, setForgeTipIndex] = useState(0);
   const sessionId = props.session.id;
   const request = props.request;
   const onSessionChange = props.onSessionChange;
+  const reducedMotion = usePrefersReducedMotion();
+
+  useEffect(() => {
+    setLiveCompilation(state.compilation);
+  }, [state.compilation]);
 
   useEffect(() => {
     let cancelled = false;
@@ -379,18 +410,33 @@ export function DebateMysteryV2CompilationResume(
     };
     const refresh = async (): Promise<void> => {
       try {
+        const compilationResult = await request<{ compilation: DebateMysteryCompilationStatusV2 }>(
+          `/api/debates/${encodeURIComponent(sessionId)}/mystery-compilation`,
+        );
+        if (cancelled) return;
         const result = await request<{ session: DebateSessionV1 }>(
           `/api/debates/${encodeURIComponent(sessionId)}?perspective=live`,
         );
         if (cancelled) return;
-        onSessionChange(result.session);
         const next = result.session.formatState;
+        const nextCompilation = next.format === "whodunnit" && next.version === 2
+          ? compilationResult.compilation
+          : null;
+        if (nextCompilation && next.format === "whodunnit" && next.version === 2) {
+          setLiveCompilation(nextCompilation);
+          onSessionChange({
+            ...result.session,
+            formatState: { ...next, compilation: nextCompilation },
+          });
+        } else {
+          onSessionChange(result.session);
+        }
         if (
           next.format === "whodunnit" &&
           next.version === 2 &&
-          next.compilation.stage !== "complete" &&
-          next.compilation.stage !== "needs_attention" &&
-          next.compilation.stage !== "cancelled"
+          nextCompilation?.stage !== "complete" &&
+          nextCompilation?.stage !== "needs_attention" &&
+          nextCompilation?.stage !== "cancelled"
         ) {
           void resumeCompilation();
           timer = window.setTimeout(() => void refresh(), 900);
@@ -404,9 +450,9 @@ export function DebateMysteryV2CompilationResume(
     };
     void refresh();
     if (
-      state.compilation.stage !== "complete" &&
-      state.compilation.stage !== "needs_attention" &&
-      state.compilation.stage !== "cancelled"
+      liveCompilation.stage !== "complete" &&
+      liveCompilation.stage !== "needs_attention" &&
+      liveCompilation.stage !== "cancelled"
     ) {
       void resumeCompilation();
     }
@@ -418,38 +464,46 @@ export function DebateMysteryV2CompilationResume(
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onSessionChange, request, resumeNonce, sessionId]);
 
-  const needsAttention = state.compilation.stage === "needs_attention";
+  const compilation = liveCompilation;
+  const needsAttention = compilation.stage === "needs_attention";
   const compilationActive =
-    state.compilation.stage !== "complete" &&
-    state.compilation.stage !== "needs_attention" &&
-    state.compilation.stage !== "cancelled";
+    compilation.stage !== "complete" &&
+    compilation.stage !== "needs_attention" &&
+    compilation.stage !== "cancelled";
   useEffect(() => {
     if (!compilationActive) return;
     setClockNowMs(Date.now());
     const timer = window.setInterval(() => setClockNowMs(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, [compilationActive]);
-  const updatedAtMs = Date.parse(state.compilation.updatedAt);
+  useEffect(() => {
+    if (!compilationActive || reducedMotion) return;
+    const timer = window.setInterval(() => {
+      setForgeTipIndex((current) => (current + 1) % FORGE_TIPS.length);
+    }, 9_000);
+    return () => window.clearInterval(timer);
+  }, [compilationActive, reducedMotion]);
+  const updatedAtMs = Date.parse(compilation.updatedAt);
   const elapsedMs = compilationActive && Number.isFinite(updatedAtMs)
-    ? state.compilation.elapsedMs + Math.max(0, clockNowMs - updatedAtMs)
-    : state.compilation.elapsedMs;
+    ? compilation.elapsedMs + Math.max(0, clockNowMs - updatedAtMs)
+    : compilation.elapsedMs;
   const completedPasses = Math.min(
-    state.compilation.totalPasses,
-    Math.max(0, state.compilation.completedPasses),
+    compilation.totalPasses,
+    Math.max(0, compilation.completedPasses),
   );
-  const currentIndex = state.compilation.stage === "complete"
+  const currentIndex = compilation.stage === "complete"
     ? FORGE_STAGES.length - 1
     : Math.min(completedPasses, FORGE_STAGES.length - 1);
   const percent = debateMysteryForgeAuthoritativePercent(
     completedPasses,
-    state.compilation.totalPasses,
+    compilation.totalPasses,
   );
   const etaLabel =
-    state.compilation.etaBasisPasses >= 2 &&
-    state.compilation.approximateRemainingMs !== null &&
-    state.compilation.approximateRemainingMs > 0 &&
+    compilation.etaBasisPasses >= 2 &&
+    compilation.approximateRemainingMs !== null &&
+    compilation.approximateRemainingMs > 0 &&
     compilationActive
-      ? formatDebateMysteryForgeEta(state.compilation.approximateRemainingMs)
+      ? formatDebateMysteryForgeEta(compilation.approximateRemainingMs)
       : null;
 
   const retry = async (): Promise<void> => {
@@ -461,6 +515,9 @@ export function DebateMysteryV2CompilationResume(
         mutationBody({}),
       );
       onSessionChange(result.session);
+      if (result.session.formatState.format === "whodunnit" && result.session.formatState.version === 2) {
+        setLiveCompilation(result.session.formatState.compilation);
+      }
       setResumeNonce((value) => value + 1);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Case Forge could not retry.");
@@ -489,7 +546,7 @@ export function DebateMysteryV2CompilationResume(
     setErrorDetailsCopyState("copying");
     try {
       await writeForgeErrorDetailsClipboard(
-        formatDebateMysteryV2ForgeErrorDetails(sessionId, state.compilation),
+        formatDebateMysteryV2ForgeErrorDetails(sessionId, compilation),
       );
       setErrorDetailsCopyState("copied");
     } catch {
@@ -500,11 +557,11 @@ export function DebateMysteryV2CompilationResume(
   return (
     <main className={styles.forge} data-theme={props.theme} data-tutorial-target="mystery-v2-case-forge">
       <button type="button" className={styles.archiveButton} onClick={props.onExit}>← Archive</button>
-      <section className={styles.forgeCard} aria-live="polite">
+      <section className={styles.forgeCard}>
         <div className={styles.forgePrism} aria-hidden="true"><i /><i /><i /></div>
         <p className={styles.eyebrow}>PRISM / Case Forge</p>
         <h1>{needsAttention ? "Case preparation stopped" : "Preparing a prosecution turnabout"}</h1>
-        <p className={styles.forgeMessage}>{state.compilation.spoilerSafeMessage}</p>
+        <p className={styles.forgeMessage}>{compilation.spoilerSafeMessage}</p>
         {needsAttention ? (
           <p className={styles.forgeRecovery}>
             The Forge is not still running. Your setup and every completed draft section are safe. Retry will resume from the last durable checkpoint.
@@ -517,7 +574,7 @@ export function DebateMysteryV2CompilationResume(
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={percent}
-          aria-valuetext={`${completedPasses} of ${state.compilation.totalPasses} durable passes complete`}
+          aria-valuetext={`${completedPasses} of ${compilation.totalPasses} durable passes complete`}
         >
           <span style={{ width: `${percent}%` }} />
         </div>
@@ -533,16 +590,35 @@ export function DebateMysteryV2CompilationResume(
             </li>
           ))}
         </ol>
+        <section className={styles.forgeSubsteps} aria-label="Current Case Forge work">
+          <p>Current work</p>
+          <ol>
+            {(compilation.substeps ?? []).map((substep) => (
+              <li key={substep.id} data-state={substep.state}>
+                <span aria-hidden="true">
+                  {substep.state === "complete" ? "✓" : substep.state === "attention" ? "!" : "·"}
+                </span>
+                {substep.label}
+              </li>
+            ))}
+          </ol>
+        </section>
+        {compilationActive ? (
+          <aside className={styles.forgeTip} aria-label="Case Forge tip">
+            <span aria-hidden="true">Forge note</span>
+            <p key={forgeTipIndex}>{FORGE_TIPS[forgeTipIndex]}</p>
+          </aside>
+        ) : null}
         <div className={styles.localVoiceNotice}>
           <span aria-hidden="true">◈</span>
           <div><strong>Local English performance</strong><small>Premium voices are unavailable in Whodunnit V2. No ElevenLabs request will be made.</small></div>
         </div>
-        {state.compilation.requiredAudioCount > 0 ? (
-          <small>{state.compilation.preparedAudioCount} / {state.compilation.requiredAudioCount} unique recordings verified</small>
+        {compilation.requiredAudioCount > 0 ? (
+          <small>{compilation.preparedAudioCount} / {compilation.requiredAudioCount} unique recordings verified</small>
         ) : null}
         {needsAttention ? (
           <div className={styles.forgeActions}>
-            <button type="button" onClick={() => void retry()} disabled={busy || !state.compilation.retryable}>Retry preparation</button>
+            <button type="button" onClick={() => void retry()} disabled={busy || !compilation.retryable}>Retry preparation</button>
             {state.localAudioFailure ? <button type="button" onClick={() => void continueSilently()} disabled={busy}>Continue without voices</button> : null}
             <button type="button" onClick={() => void copyErrorDetails()} disabled={errorDetailsCopyState === "copying"}>
               {errorDetailsCopyState === "copying"
@@ -559,7 +635,7 @@ export function DebateMysteryV2CompilationResume(
         {needsAttention && errorDetailsCopyState !== "idle" ? (
           <p role="status">{errorDetailsCopyState === "copied" ? "Error details copied to clipboard." : errorDetailsCopyState === "failed" ? "Could not copy error details. Try again." : "Copying error details…"}</p>
         ) : null}
-        {needsAttention ? <small>Preparation attempt {state.compilation.attempt} · stopped safely</small> : null}
+        {needsAttention ? <small>Preparation attempt {compilation.attempt} · stopped safely</small> : null}
         {error ? <p className={styles.error}>{error}</p> : null}
       </section>
     </main>

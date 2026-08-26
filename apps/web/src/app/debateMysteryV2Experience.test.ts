@@ -315,7 +315,7 @@ describe("Whodunnit V2 prosecution experience", () => {
       /\/api\/debates\/\$\{encodeURIComponent\(sessionId\)\}\/mystery-resume-compilation/u,
     );
     assert.match(experienceSource, /window\.setTimeout\(\(\) => void refresh\(\), 900\)/u);
-    assert.match(experienceSource, /next\.compilation\.stage !== "needs_attention"/u);
+    assert.match(experienceSource, /nextCompilation\?\.stage !== "needs_attention"/u);
     assert.match(experienceSource, /Retry preparation/u);
     assert.match(experienceSource, /Copy error details/u);
     assert.match(experienceSource, /Error details copied to clipboard/u);
@@ -339,6 +339,13 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /role="progressbar"/u);
     assert.match(experienceSource, /ETA appears after two durable passes/u);
     assert.match(cssSource, /forgeProgressShimmer/u);
+    assert.match(experienceSource, /mystery-compilation/u);
+    assert.match(experienceSource, /\(compilation\.substeps \?\? \[\]\)\.map/u);
+    assert.match(experienceSource, /FORGE_TIPS/u);
+    assert.match(experienceSource, /<p key=\{forgeTipIndex\}>\{FORGE_TIPS\[forgeTipIndex\]\}<\/p>/u);
+    assert.match(experienceSource, /usePrefersReducedMotion/u);
+    assert.match(cssSource, /\.forgeSubsteps/u);
+    assert.match(cssSource, /\.forgeTip/u);
   });
 
   it("formats only public Case Forge failure details for copying", () => {
@@ -351,6 +358,7 @@ describe("Whodunnit V2 prosecution experience", () => {
       totalPasses: 5,
       preparedAudioCount: 0,
       requiredAudioCount: 0,
+      substeps: [{ id: "foundation", label: "Case foundation", state: "attention" }],
       retryable: true,
       publicFailureCode: "CASE_FORGE_COMPILATION_STOPPED",
       publicFailureStage: "writing_case",

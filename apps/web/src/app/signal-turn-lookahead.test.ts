@@ -59,6 +59,36 @@ describe("Signal turn lookahead", () => {
     );
   });
 
+  it("invalidates prepared audio when a cue, stale commit, or reroute overtakes it", () => {
+    assert.match(
+      signalSource,
+      /prepared\.prefetchedMessageId[\s\S]{0,180}?onInvalidatePrefetchedUtterance/u,
+    );
+    assert.match(
+      signalSource,
+      /catch\(\(commitError[\s\S]{0,500}?onInvalidatePrefetchedUtterance/u,
+    );
+    assert.match(
+      signalSource,
+      /response\.message\.content !== committedProvisional\.text[\s\S]{0,180}?onInvalidatePrefetchedUtterance/u,
+    );
+  });
+
+  it("prefetches every known Watch line and waits for Premium readiness before playback", () => {
+    assert.match(
+      signalSource,
+      /const prefetchKnownWatchEpisodeVoices = useCallback/u,
+    );
+    assert.match(
+      signalSource,
+      /for \(const message of currentEpisode\.messages\)[\s\S]{0,700}?onPrefetchUtterance\(message, bot\)/u,
+    );
+    assert.match(
+      signalSource,
+      /await introBufferPoll\.catch[\s\S]{0,220}?await prefetchKnownWatchEpisodeVoices\(presentationEpisode\)[\s\S]{0,120}?setEpisodePreRoll\(null\)/u,
+    );
+  });
+
   it("releases a prepared turn a Producer cue has overtaken", () => {
     assert.match(
       signalSource,

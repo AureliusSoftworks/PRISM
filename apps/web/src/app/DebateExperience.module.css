@@ -13756,6 +13756,56 @@
   font-style: normal;
 }
 
+.archiveRunList {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.archiveRunRow {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.75fr) minmax(150px, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 9px;
+  padding: 8px 9px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.archiveRunIdentity,
+.archiveRunMeta {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.archiveRunIdentity strong {
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 12px;
+}
+
+.archiveRunIdentity span,
+.archiveRunMeta {
+  color: rgba(248, 248, 248, 0.62);
+  font-size: 10px;
+}
+
+.archiveRunMeta time,
+.archiveRunMeta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archiveRunActions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
 @media (max-width: 720px) {
   .archiveChipTitle {
     max-width: 100%;
@@ -13772,6 +13822,19 @@
 
   .archiveChipCombatantCopy {
     max-width: 96px;
+  }
+
+  .archiveRunRow {
+    grid-template-columns: 1fr auto;
+  }
+
+  .archiveRunMeta {
+    grid-column: 1;
+  }
+
+  .archiveRunActions {
+    grid-column: 2;
+    grid-row: 1 / span 2;
   }
 }
 

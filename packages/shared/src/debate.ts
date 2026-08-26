@@ -1910,6 +1910,10 @@ export interface DebateSessionListItemV1 {
   mysterySpoilersRevealed?: boolean;
   /** Whodunnit schema metadata used only for safe Archive/setup actions. */
   mysteryVersion?: 1 | 2;
+  /** Stable identity shared by every immutable playthrough of one V2 case. */
+  mysteryCaseFamilyId?: string;
+  /** One-based playthrough number within a V2 case family. */
+  mysteryRunOrdinal?: number;
   mysteryMissingEvidenceAssetCount?: number;
   mysteryMansionSaveEligible?: boolean;
   mysteryMansionBundleId?: string | null;

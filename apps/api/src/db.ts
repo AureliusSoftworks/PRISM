@@ -2288,6 +2288,8 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     CREATE TABLE IF NOT EXISTS debate_mystery_v2_cases (
       session_id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
+      case_family_id TEXT,
+      run_ordinal INTEGER NOT NULL DEFAULT 1 CHECK(run_ordinal >= 1),
       schema_version INTEGER NOT NULL DEFAULT 2 CHECK(schema_version = 2),
       private_case_json TEXT NOT NULL,
       dialogue_graph_json TEXT NOT NULL,
@@ -2702,6 +2704,34 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       FOREIGN KEY(poll_id) REFERENCES coffee_polls(id) ON DELETE CASCADE,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
+  `);
+  const mysteryV2CaseColumns = new Set(
+    (db.prepare("PRAGMA table_info(debate_mystery_v2_cases)").all() as Array<{
+      name: string;
+    }>).map((column) => column.name),
+  );
+  if (!mysteryV2CaseColumns.has("case_family_id")) {
+    db.exec("ALTER TABLE debate_mystery_v2_cases ADD COLUMN case_family_id TEXT;");
+  }
+  if (!mysteryV2CaseColumns.has("run_ordinal")) {
+    db.exec(
+      "ALTER TABLE debate_mystery_v2_cases ADD COLUMN run_ordinal INTEGER NOT NULL DEFAULT 1 CHECK(run_ordinal >= 1);",
+    );
+  }
+  db.exec(`
+    UPDATE debate_mystery_v2_cases
+       SET case_family_id = session_id
+     WHERE case_family_id IS NULL OR case_family_id = '';
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_debate_mystery_v2_cases_family_run
+      ON debate_mystery_v2_cases(user_id, case_family_id, run_ordinal);
+    CREATE TRIGGER IF NOT EXISTS fill_debate_mystery_v2_case_family
+    AFTER INSERT ON debate_mystery_v2_cases
+    WHEN NEW.case_family_id IS NULL OR NEW.case_family_id = ''
+    BEGIN
+      UPDATE debate_mystery_v2_cases
+         SET case_family_id = NEW.session_id
+       WHERE session_id = NEW.session_id;
+    END;
   `);
   const appletSessionNoteColumns = new Set(
     (db.prepare("PRAGMA table_info(applet_session_notes)").all() as Array<{

@@ -53,6 +53,9 @@ describe("mode tutorials", () => {
     assert.match(step.body, /leaves Evidence synthesis optional/u);
     assert.match(step.body, /Evidence can also be synthesized or replaced later through Assets in Archive/u);
     assert.match(step.body, /approximate ETA appears after enough completed sections/u);
+    assert.match(step.body, /Current work list restores the saved foundation/u);
+    assert.match(step.body, /Court-only cases omit room-detail work and use court chapters instead/u);
+    assert.match(step.body, /without being repeatedly announced to assistive technology/u);
     assert.match(step.body, /last lit durable checkpoint/u);
     assert.match(step.body, /Save mansion level preserves the layout/u);
     assert.match(step.body, /Writing the Case/u);
@@ -91,6 +94,17 @@ describe("mode tutorials", () => {
     assert.match(step.body, /truth\/proof grade and juror breakdown/u);
     assert.match(step.body, /Reduced Motion/u);
     assert.match(step.body, /No gameplay action calls an LLM or synthesizes a voice/u);
+    assert.match(step.body, /one case card with every immutable playthrough nested beneath it/u);
+    assert.match(step.body, /same mystery/u);
+    assert.match(step.body, /zero AI, image, or voice synthesis/u);
+    assert.match(step.body, /returns you to that Run instead of creating another/u);
+    const debateSource = readFileSync(
+      new URL("./DebateExperience.tsx", import.meta.url),
+      "utf8",
+    );
+    assert.match(debateSource, /"debate-mystery-play-again"/u);
+    assert.match(debateSource, /data-tutorial-target="debate-mystery-family-runs"/u);
+    assert.match(debateSource, /data-tutorial-target="debate-mystery-play-again-confirm"/u);
     assert.doesNotMatch(step.body, /action token|freeform interview|twitch timer/iu);
   });
 

@@ -410,7 +410,7 @@ test("Signal can disable generic ambient Foley while preserving synchronized cue
     controller.playCue("coffeeSip");
     assert.equal(instances.length, 1);
     assert.match(instances[0]?.src ?? "", /coffee-sip\.mp3$/u);
-    assert.equal(instances[0]?.volume, 0.625);
+    assert.equal(instances[0]?.volume, 0.3125);
     controller.stop();
   } finally {
     if (originalAudio) {

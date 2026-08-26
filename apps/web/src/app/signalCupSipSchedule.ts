@@ -34,6 +34,23 @@ export interface SignalCupSipScheduleV1 {
   sippingNow: boolean;
 }
 
+/**
+ * Ambient Signal sips belong inside the other participant's audible line.
+ * Requiring active speech prevents a queued/saved turn from triggering the
+ * cup early during the silent handoff before playback begins.
+ */
+export function signalCupSipAllowedDuringSpeechV1(args: {
+  roleSpeaking: boolean;
+  otherRoleSpeaking: boolean;
+  producerGuestRole?: boolean;
+}): boolean {
+  return (
+    args.producerGuestRole !== true &&
+    !args.roleSpeaking &&
+    args.otherRoleSpeaking
+  );
+}
+
 function stableUnitValue(seed: string): number {
   let hash = 2166136261;
   for (let index = 0; index < seed.length; index += 1) {
@@ -71,7 +88,7 @@ export function signalCupSipScheduleV1(args: {
   turns: readonly SignalCupSipTurn[];
   presentedIndex: number | null;
   powerRateMultiplier?: number;
-  /** False while this role is speaking or thinking — they cannot drink. */
+  /** True only while this role is listening to the other participant speak. */
   sipAllowed?: boolean;
 }): SignalCupSipScheduleV1 {
   if (

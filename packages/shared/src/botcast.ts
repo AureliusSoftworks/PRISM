@@ -232,7 +232,7 @@ export function botcastInterruptedGuestContent(
 ): string | null {
   const prefix = spokenContent.trimEnd();
   if (!prefix.trim() || !fullContent.startsWith(prefix)) return null;
-  if (prefix === fullContent || /[—–-]$/u.test(prefix)) return prefix;
+  if (prefix === fullContent || /—$/u.test(prefix)) return prefix;
   return `${prefix}—`;
 }
 

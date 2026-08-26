@@ -172,7 +172,7 @@ function proposalFromRow(
   };
 }
 
-function runFromRow(row: RunRow): PrismActionRunV1 {
+function runFromRow(row: RunRow, now = new Date()): PrismActionRunV1 {
   const undoAvailable =
     row.status === "committed" &&
     Boolean(
@@ -180,7 +180,7 @@ function runFromRow(row: RunRow): PrismActionRunV1 {
         row.inverse_iv &&
         row.inverse_tag &&
         row.undo_expires_at &&
-        new Date(row.undo_expires_at).getTime() > Date.now(),
+        new Date(row.undo_expires_at).getTime() > now.getTime(),
     );
   return {
     schemaVersion: PRISM_ORCHESTRATION_VERSION,
@@ -292,6 +292,7 @@ export function readPrismActionRunByIdempotency(
   db: DatabaseSync,
   userId: string,
   idempotencyKey: string,
+  now = new Date(),
 ): PrismActionRunV1 | null {
   const row = db
     .prepare(
@@ -303,7 +304,7 @@ export function readPrismActionRunByIdempotency(
         WHERE user_id = ? AND idempotency_key = ?`,
     )
     .get(userId, idempotencyKey) as RunRow | undefined;
-  return row ? runFromRow(row) : null;
+  return row ? runFromRow(row, now) : null;
 }
 
 export function beginPrismActionRun(args: {
@@ -321,6 +322,7 @@ export function beginPrismActionRun(args: {
     args.db,
     args.userId,
     args.idempotencyKey,
+    args.now,
   );
   if (existing) return existing;
   const createdAt = (args.now ?? new Date()).toISOString();
@@ -410,7 +412,7 @@ export function commitPrismActionRun(args: {
       args.runId,
       args.userId,
     );
-  const run = readPrismActionRun(args.db, args.userId, args.runId);
+  const run = readPrismActionRun(args.db, args.userId, args.runId, now);
   if (!run) throw new Error("Prism could not record the committed action.");
   return run;
 }
@@ -435,6 +437,7 @@ export function readPrismActionRun(
   db: DatabaseSync,
   userId: string,
   runId: string,
+  now = new Date(),
 ): PrismActionRunV1 | null {
   const row = db
     .prepare(
@@ -446,7 +449,7 @@ export function readPrismActionRun(
         WHERE id = ? AND user_id = ?`,
     )
     .get(runId, userId) as RunRow | undefined;
-  return row ? runFromRow(row) : null;
+  return row ? runFromRow(row, now) : null;
 }
 
 export function listRecentPrismActionRuns(
@@ -466,12 +469,13 @@ export function listRecentPrismActionRuns(
         LIMIT ?`,
     )
     .all(userId, Math.max(1, Math.min(100, Math.floor(limit)))) as unknown as RunRow[];
-  return rows.map(runFromRow);
+  return rows.map((row) => runFromRow(row));
 }
 
 export function latestUndoablePrismActionRun(
   db: DatabaseSync,
   userId: string,
+  now = new Date(),
 ): PrismActionRunV1 | null {
   const row = db
     .prepare(
@@ -487,8 +491,8 @@ export function latestUndoablePrismActionRun(
         ORDER BY committed_at DESC, created_at DESC
         LIMIT 1`,
     )
-    .get(userId, new Date().toISOString()) as RunRow | undefined;
-  return row ? runFromRow(row) : null;
+    .get(userId, now.toISOString()) as RunRow | undefined;
+  return row ? runFromRow(row, now) : null;
 }
 
 export function readPrismActionInverse(
@@ -496,6 +500,7 @@ export function readPrismActionInverse(
   userId: string,
   runId: string,
   userKey: Buffer,
+  now = new Date(),
 ): PrismJsonObject | null {
   const row = db
     .prepare(
@@ -516,7 +521,7 @@ export function readPrismActionInverse(
     !row.inverse_iv ||
     !row.inverse_tag ||
     !row.undo_expires_at ||
-    new Date(row.undo_expires_at).getTime() <= Date.now()
+    new Date(row.undo_expires_at).getTime() <= now.getTime()
   ) {
     return null;
   }

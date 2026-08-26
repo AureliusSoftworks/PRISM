@@ -145,6 +145,10 @@ import {
 } from "./liveBakeClient";
 import { buildDebateArchiveChipVisualStyle } from "./debateArchiveChipGradient";
 import {
+  groupDebateArchiveSessions,
+  type DebateArchiveSessionGroup,
+} from "./debateArchiveCaseFamilies";
+import {
   debateCastHueFromLensSliderInput,
   debateCastLensSliderInputValue,
 } from "./debateCastHueLens";
@@ -2910,6 +2914,13 @@ function sessionStatusLabel(session: DebateSessionListItemV1): string {
   return `${session.phase.charAt(0).toUpperCase()}${session.phase.slice(1)}`;
 }
 
+function debateArchiveRunDate(value: string): string {
+  const date = new Date(value);
+  return Number.isFinite(date.getTime())
+    ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(date)
+    : "Date unavailable";
+}
+
 const DEBATE_ARCHIVE_EFFORT_LABELS: Record<
   ProviderReasoningEffort,
   string
@@ -5209,6 +5220,10 @@ export function DebateExperience(
   >(() => new Set());
   const [pendingDeleteSession, setPendingDeleteSession] =
     useState<DebateSessionListItemV1 | null>(null);
+  const [pendingMysteryPlayAgain, setPendingMysteryPlayAgain] = useState<{
+    source: DebateSessionListItemV1;
+    audioUnavailable: boolean;
+  } | null>(null);
   const [earlyEndOpen, setEarlyEndOpen] = useState(false);
   const [exhaustedExitOpen, setExhaustedExitOpen] = useState(false);
   const [deleteUndo, setDeleteUndo] = useState<DebateDeleteUndo | null>(null);
@@ -5933,7 +5948,8 @@ export function DebateExperience(
     sourceDrawerId !== null ||
     earlyEndOpen ||
     exhaustedExitOpen ||
-    pendingDeleteSession !== null;
+    pendingDeleteSession !== null ||
+    pendingMysteryPlayAgain !== null;
   const judgeGavelActiveTarget =
     presenting && presentationEventId && activeSession
       ? (activeSession.events.find(
@@ -6338,6 +6354,7 @@ export function DebateExperience(
   const transcriptFeedRef = useRef<HTMLDivElement | null>(null);
   const transcriptContentRef = useRef<HTMLDivElement | null>(null);
   const deleteConfirmButtonRef = useRef<HTMLButtonElement | null>(null);
+  const mysteryPlayAgainConfirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const earlyEndConfirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const exhaustedExitContinueButtonRef = useRef<HTMLButtonElement | null>(
     null,
@@ -7105,6 +7122,22 @@ export function DebateExperience(
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [pendingDeleteSession]);
+  useEffect(() => {
+    if (!pendingMysteryPlayAgain) return;
+    const frameId = window.requestAnimationFrame(() => {
+      mysteryPlayAgainConfirmButtonRef.current?.focus();
+    });
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setPendingMysteryPlayAgain(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [pendingMysteryPlayAgain]);
   useEffect(() => {
     if (!earlyEndOpen) return;
     const frameId = window.requestAnimationFrame(() => {
@@ -13704,6 +13737,49 @@ export function DebateExperience(
     }
   };
 
+  const playMysteryCaseAgain = async (
+    source: DebateSessionListItemV1,
+    audioMode: "reuse" | "silent",
+  ): Promise<void> => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await props.request<{
+        session: DebateSessionV1;
+        reusedExistingOpenRun: boolean;
+      }>(`/api/debates/${encodeURIComponent(source.id)}/mystery-play-again`,
+        requestBody({
+          version: 2,
+          idempotencyKey: nextMutationKey("mystery-play-again"),
+          audioMode,
+        }),
+      );
+      setPendingMysteryPlayAgain(null);
+      await loadSessions();
+      activeSessionIdRef.current = result.session.id;
+      activeSessionRef.current = result.session;
+      setActiveSession(result.session);
+      setObserverPerspective("live");
+      setView("mystery");
+    } catch (caught) {
+      const message = caught instanceof Error
+        ? caught.message
+        : "This case could not be opened again.";
+      if (
+        audioMode === "reuse" &&
+        /saved voice pack is unavailable|MYSTERY_REPLAY_AUDIO_UNAVAILABLE/iu.test(message)
+      ) {
+        setPendingMysteryPlayAgain({ source, audioUnavailable: true });
+      } else {
+        setPendingMysteryPlayAgain(null);
+        setError(message);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const finishDebateExhibitSynthesisInBackground = (
     sessionId: string,
     exhibits: readonly DebateEvidenceExhibitV1[],
@@ -17596,9 +17672,14 @@ export function DebateExperience(
   };
 
   const renderArchiveSessionRow = (
-    session: DebateSessionListItemV1,
+    group: DebateArchiveSessionGroup,
     index: number,
   ): React.JSX.Element => {
+    const session = group.representative;
+    const familyRuns = group.isMysteryCaseFamily ? group.runs : null;
+    const openFamilyRun = group.openRun;
+    const latestCompletedFamilyRun = group.latestCompletedRun;
+    const familyAssetTarget = latestCompletedFamilyRun ?? session;
     const metaChips = debateArchiveMetaChips(session);
     const modelLabel = debateArchiveModelLabel(session);
     const effortLevel = debateArchiveEffortLevel(session);
@@ -17625,14 +17706,18 @@ export function DebateExperience(
       forAdvocateVisual && againstAdvocateVisual
         ? `${forAdvocateVisual.name} versus ${againstAdvocateVisual.name}`
         : null;
-    const expanded = expandedArchiveSessionId === session.id;
+    const expanded = expandedArchiveSessionId === group.key;
     const canRestartArchivedProceeding =
       session.status === "live" ||
       session.status === "paused" ||
       session.status === "waiting_for_player";
     const archiveDetailsId = `debate-archive-details-${session.id}`;
     const proceedingActionLabel =
-      session.format === "whodunnit"
+      familyRuns
+        ? openFamilyRun
+          ? `Return to Run ${openFamilyRun.mysteryRunOrdinal ?? familyRuns.length}`
+          : "Play again"
+        : session.format === "whodunnit"
         ? session.status === "completed"
           ? "Open case Archive"
           : session.mysteryProgress === "case_forge"
@@ -17648,7 +17733,11 @@ export function DebateExperience(
             ? "Resume debate"
             : "Return to debate";
     const proceedingStatusLabel =
-      session.format === "whodunnit" && session.mysteryRouteGrade
+      familyRuns
+        ? openFamilyRun
+          ? `Run ${openFamilyRun.mysteryRunOrdinal ?? familyRuns.length} in progress`
+          : `${familyRuns.length} run${familyRuns.length === 1 ? "" : "s"}`
+        : session.format === "whodunnit" && session.mysteryRouteGrade
         ? gradeLabelForMysteryArchive(session.mysteryRouteGrade)
         : session.status === "completed"
         ? "Completed"
@@ -17669,7 +17758,7 @@ export function DebateExperience(
             : "Copy verbose transcript";
     return (
       <li
-        key={session.id}
+        key={group.key}
         className={styles.archiveChipRow}
         data-status={session.status}
         data-archive-group-item={
@@ -17679,7 +17768,7 @@ export function DebateExperience(
         <article
           className={styles.archiveChip}
           style={buildDebateArchiveChipVisualStyle(
-            session.id,
+            group.key,
             castColors,
             props.theme,
           )}
@@ -17690,7 +17779,7 @@ export function DebateExperience(
             className={styles.archiveChipToggle}
             onClick={() =>
               setExpandedArchiveSessionId((current) =>
-                current === session.id ? null : session.id,
+                current === group.key ? null : group.key,
               )
             }
             disabled={busy}
@@ -17767,7 +17856,7 @@ export function DebateExperience(
                     .slice(0, 5)
                     .map((color, colorIndex) => (
                       <span
-                        key={`${session.id}:cast:${colorIndex}`}
+                        key={`${group.key}:cast:${colorIndex}`}
                         className={styles.archiveChipDot}
                         style={
                           {
@@ -17793,7 +17882,9 @@ export function DebateExperience(
             <strong className={styles.archiveChipTitle}>{session.title}</strong>
             {!expanded ? (
               <span className={styles.archiveChipMotionPreview}>
-                {session.motion}
+                {familyRuns
+                  ? `${familyRuns.length} playthrough${familyRuns.length === 1 ? "" : "s"} · ${openFamilyRun ? "open run" : "same sealed mystery"}`
+                  : session.motion}
               </span>
             ) : null}
           </button>
@@ -17860,6 +17951,60 @@ export function DebateExperience(
                 <p>{session.synopsisText}</p>
               </div>
             ) : null}
+            {familyRuns ? (
+              <ol
+                className={styles.archiveRunList}
+                aria-label={`${session.title} playthroughs`}
+                data-tutorial-target="debate-mystery-family-runs"
+              >
+                {familyRuns.map((run) => {
+                  const ordinal = run.mysteryRunOrdinal ?? 1;
+                  const outcome = run.status === "completed"
+                    ? run.mysteryRouteGrade
+                      ? gradeLabelForMysteryArchive(run.mysteryRouteGrade)
+                      : "Completed"
+                    : sessionStatusLabel(run);
+                  return (
+                    <li key={run.id} className={styles.archiveRunRow}>
+                      <div className={styles.archiveRunIdentity}>
+                        <strong>Run {ordinal}</strong>
+                        <span>{outcome}</span>
+                      </div>
+                      <div className={styles.archiveRunMeta}>
+                        <time dateTime={run.updatedAt}>
+                          {debateArchiveRunDate(run.updatedAt)}
+                        </time>
+                        <span>
+                          {run.activeDurationMs !== null
+                            ? debateActiveDurationLabel(run.activeDurationMs)
+                            : "No active time recorded"}
+                        </span>
+                      </div>
+                      <div className={styles.archiveRunActions}>
+                        <button
+                          type="button"
+                          className={styles.archiveOpenButton}
+                          onClick={() => void openSession(run)}
+                          disabled={busy}
+                          aria-label={`Open Run ${ordinal} of ${session.title}`}
+                        >
+                          Open
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.deleteButton}
+                          onClick={() => setPendingDeleteSession(run)}
+                          disabled={busy}
+                          aria-label={`Remove Run ${ordinal} of ${session.title}`}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+            ) : null}
             <div className={styles.archiveActions}>
               {session.format !== "whodunnit" ? (
                 <button
@@ -17879,8 +18024,22 @@ export function DebateExperience(
               <button
                 type="button"
                 className={styles.archiveOpenButton}
-                onClick={() => void openSession(session)}
+                onClick={() => {
+                  if (familyRuns && !openFamilyRun && latestCompletedFamilyRun) {
+                    setPendingMysteryPlayAgain({
+                      source: latestCompletedFamilyRun,
+                      audioUnavailable: false,
+                    });
+                    return;
+                  }
+                  void openSession(openFamilyRun ?? session);
+                }}
                 disabled={busy}
+                data-tutorial-target={
+                  familyRuns && !openFamilyRun
+                    ? "debate-mystery-play-again"
+                    : undefined
+                }
               >
                 {proceedingActionLabel}
               </button>
@@ -17935,16 +18094,16 @@ export function DebateExperience(
                 <button
                   type="button"
                   className={styles.archiveReuseButton}
-                  onClick={() => setArchiveAssetsSession(session)}
-                  disabled={busy || (session.exhibitCount ?? 0) < 1}
+                  onClick={() => setArchiveAssetsSession(familyAssetTarget)}
+                  disabled={busy || (familyAssetTarget.exhibitCount ?? 0) < 1}
                   data-tutorial-target="debate-archive-assets-open"
                   aria-label={
-                    (session.exhibitCount ?? 0) < 1
+                    (familyAssetTarget.exhibitCount ?? 0) < 1
                       ? `Assets unavailable for ${session.title} — no evidence`
                       : `Open evidence assets for ${session.title}`
                   }
                   title={
-                    (session.exhibitCount ?? 0) < 1
+                    (familyAssetTarget.exhibitCount ?? 0) < 1
                       ? "No evidence assets are available yet"
                       : "Show evidence, synthesize or replace images, and run magenta cleanup"
                   }
@@ -17952,15 +18111,17 @@ export function DebateExperience(
                   Assets
                 </button>
               ) : null}
-              <button
-                type="button"
-                className={styles.deleteButton}
-                onClick={() => setPendingDeleteSession(session)}
-                aria-label={`Delete ${session.motion}`}
-                disabled={busy}
-              >
-                Remove
-              </button>
+              {!familyRuns ? (
+                <button
+                  type="button"
+                  className={styles.deleteButton}
+                  onClick={() => setPendingDeleteSession(session)}
+                  aria-label={`Delete ${session.motion}`}
+                  disabled={busy}
+                >
+                  Remove
+                </button>
+              ) : null}
             </div>
           </div>
         </article>
@@ -17969,11 +18130,12 @@ export function DebateExperience(
   };
 
   const renderArchive = (): React.JSX.Element => {
-    const openSessions = sessions.filter(
-      (session) => session.status !== "completed",
+    const archiveGroups = groupDebateArchiveSessions(sessions);
+    const openSessions = archiveGroups.filter(
+      (group) => group.representative.status !== "completed",
     );
-    const completedSessions = sessions.filter(
-      (session) => session.status === "completed",
+    const completedSessions = archiveGroups.filter(
+      (group) => group.representative.status === "completed",
     );
     return (
     <section className={`${styles.historySection} ${styles.archivePanel}`}>
@@ -18017,8 +18179,8 @@ export function DebateExperience(
                 </span>
               </header>
               <ul className={styles.sessionList}>
-                {openSessions.map((session, index) =>
-                  renderArchiveSessionRow(session, index),
+                {openSessions.map((group, index) =>
+                  renderArchiveSessionRow(group, index),
                 )}
               </ul>
             </section>
@@ -18037,8 +18199,8 @@ export function DebateExperience(
                 </span>
               </header>
               <ul className={styles.sessionList}>
-                {completedSessions.map((session, index) =>
-                  renderArchiveSessionRow(session, index),
+                {completedSessions.map((group, index) =>
+                  renderArchiveSessionRow(group, index),
                 )}
               </ul>
             </section>
@@ -18435,6 +18597,63 @@ export function DebateExperience(
           closeButtonRef={sourceDrawerCloseButtonRef}
           onClose={() => setSourceDrawerId(null)}
         />
+      ) : null}
+      {pendingMysteryPlayAgain ? (
+        <div
+          className={styles.confirmBackdrop}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !busy) {
+              setPendingMysteryPlayAgain(null);
+            }
+          }}
+        >
+          <section
+            className={styles.confirmDialog}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="debate-mystery-play-again-title"
+            aria-describedby="debate-mystery-play-again-description"
+            data-tutorial-target="debate-mystery-play-again-confirm"
+          >
+            <p className={styles.eyebrow}>Compile once · play many</p>
+            <h2 id="debate-mystery-play-again-title">
+              {pendingMysteryPlayAgain.audioUnavailable
+                ? "Play without voices?"
+                : "Play the same mystery again?"}
+            </h2>
+            <p id="debate-mystery-play-again-description">
+              {pendingMysteryPlayAgain.audioUnavailable
+                ? "The saved voice files are unavailable. The exact culprit, evidence, dialogue, cast, and performances can still replay silently; PRISM will not repair or synthesize anything."
+                : "The culprit, evidence, dialogue, voices, cast, Powers, and settings stay identical. Investigation and courtroom progress reset in a new Run, with no AI or media synthesis."}
+            </p>
+            <div>
+              <button
+                type="button"
+                className={styles.confirmKeepButton}
+                onClick={() => setPendingMysteryPlayAgain(null)}
+                disabled={busy}
+              >
+                Cancel
+              </button>
+              <button
+                ref={mysteryPlayAgainConfirmButtonRef}
+                type="button"
+                className={styles.confirmDeleteButton}
+                onClick={() => void playMysteryCaseAgain(
+                  pendingMysteryPlayAgain.source,
+                  pendingMysteryPlayAgain.audioUnavailable ? "silent" : "reuse",
+                )}
+                disabled={busy}
+              >
+                {busy
+                  ? "Opening…"
+                  : pendingMysteryPlayAgain.audioUnavailable
+                    ? "Play without voices"
+                    : "Play again"}
+              </button>
+            </div>
+          </section>
+        </div>
       ) : null}
       {pendingDeleteSession ? (
         <div

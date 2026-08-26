@@ -4034,15 +4034,22 @@ export function listDebateSessions(
   return (
     db
       .prepare(
-        `SELECT debate_sessions.id, status, phase, motion, player_role,
-                winner_side_id, session_json, updated_at, completed_at,
+        `SELECT debate_sessions.id, debate_sessions.status, debate_sessions.phase,
+                debate_sessions.motion, debate_sessions.player_role,
+                debate_sessions.winner_side_id, debate_sessions.session_json,
+                debate_sessions.updated_at, debate_sessions.completed_at,
+                mystery_v2.case_family_id AS mystery_case_family_id,
+                mystery_v2.run_ordinal AS mystery_run_ordinal,
                 (SELECT COUNT(*)
                    FROM debate_events
                   WHERE debate_events.user_id = debate_sessions.user_id
                     AND debate_events.session_id = debate_sessions.id) AS event_count
            FROM debate_sessions
-          WHERE user_id = ? AND status != 'cancelled'
-          ORDER BY updated_at DESC
+           LEFT JOIN debate_mystery_v2_cases AS mystery_v2
+             ON mystery_v2.user_id = debate_sessions.user_id
+            AND mystery_v2.session_id = debate_sessions.id
+          WHERE debate_sessions.user_id = ? AND debate_sessions.status != 'cancelled'
+          ORDER BY debate_sessions.updated_at DESC
           LIMIT 100`,
       )
       .all(userId) as unknown as Array<{
@@ -4056,6 +4063,8 @@ export function listDebateSessions(
       updated_at: string;
       completed_at: string | null;
       event_count: number;
+      mystery_case_family_id: string | null;
+      mystery_run_ordinal: number | null;
     }>
   ).map((row) => {
     let format: DebateFormatId = "forum";
@@ -4331,6 +4340,12 @@ export function listDebateSessions(
         ? { mysterySpoilersRevealed }
         : {}),
       ...(mysteryVersion ? { mysteryVersion } : {}),
+      ...(mysteryVersion === 2 && row.mystery_case_family_id
+        ? { mysteryCaseFamilyId: row.mystery_case_family_id }
+        : {}),
+      ...(mysteryVersion === 2 && Number.isInteger(row.mystery_run_ordinal)
+        ? { mysteryRunOrdinal: row.mystery_run_ordinal! }
+        : {}),
       ...(typeof mysteryMissingEvidenceAssetCount === "number"
         ? { mysteryMissingEvidenceAssetCount }
         : {}),

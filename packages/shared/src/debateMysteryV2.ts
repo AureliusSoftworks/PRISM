@@ -74,6 +74,13 @@ export type DebateMysteryCompilationStageV2 =
   | "complete"
   | "needs_attention"
   | "cancelled";
+/** A spoiler-safe, resumable unit of the active Case Forge stage. */
+export interface DebateMysteryCompilationSubstepV2 {
+  /** Stable public identifier; never derived from sealed case content. */
+  id: string;
+  label: string;
+  state: "complete" | "active" | "upcoming" | "attention";
+}
 export type DebateMysteryPlayPhaseV2 =
   | "case_forge"
   | "title_card"
@@ -325,6 +332,11 @@ export interface DebateMysteryCompilationStatusV2 {
   totalPasses: number;
   preparedAudioCount: number;
   requiredAudioCount: number;
+  /**
+   * Granular progress derived from durable authoring checkpoints, deterministic
+   * passes, or local-audio counters. It intentionally contains no case facts.
+   */
+  substeps: DebateMysteryCompilationSubstepV2[];
   retryable: boolean;
   /** Stable public diagnostic code. Never derived from the private compiler error. */
   publicFailureCode?: "CASE_FORGE_COMPILATION_STOPPED" | "CASE_FORGE_LOCAL_AUDIO_FAILED" | null;
@@ -677,6 +689,12 @@ export interface DebateWhodunnitFormatStateV2 {
     prompt: string;
     options: Array<{ id: string; text: string }>;
   } | null;
+}
+
+export interface DebateMysteryPlayAgainRequestV2 {
+  version: 2;
+  idempotencyKey: string;
+  audioMode?: "reuse" | "silent";
 }
 
 export type DebateMysteryActionRequestV2 =
@@ -1675,6 +1693,39 @@ export function normalizeDebateMysteryFormatStateV2(
           contractHash: null,
           checkedAt: null,
         };
+  const rawCompilationSubsteps = (
+    source.compilation as unknown as Record<string, unknown>
+  ).substeps;
+  const compilationSubsteps = Array.isArray(rawCompilationSubsteps)
+    ? rawCompilationSubsteps.flatMap((value) => {
+        if (!value || typeof value !== "object") return [];
+        const candidate = value as Record<string, unknown>;
+        const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
+        const label = typeof candidate.label === "string" ? candidate.label.trim() : "";
+        const state = candidate.state;
+        return id && label &&
+          (state === "complete" || state === "active" || state === "upcoming" || state === "attention")
+          ? [{ id, label, state } satisfies DebateMysteryCompilationSubstepV2]
+          : [];
+      })
+    : [];
+  const normalizedCompilationSubsteps = compilationSubsteps.length
+    ? compilationSubsteps
+    : [{
+        id: `legacy-${source.compilation.stage}`,
+        label:
+          typeof source.compilation.spoilerSafeMessage === "string" &&
+          source.compilation.spoilerSafeMessage.trim()
+            ? source.compilation.spoilerSafeMessage.trim()
+            : "Case preparation",
+        state:
+          source.compilation.stage === "complete"
+            ? "complete" as const
+            : source.compilation.stage === "needs_attention" ||
+                source.compilation.stage === "cancelled"
+              ? "attention" as const
+              : "active" as const,
+      }];
   const subjectRooms = source.rooms.map((room) => ({ id: room.id, name: room.name }));
   const subjectPeople = [
     ...(source.victim ? [{ id: source.victim.id, name: source.victim.name }] : []),
@@ -1703,6 +1754,7 @@ export function normalizeDebateMysteryFormatStateV2(
     } as unknown as DebateMysteryResolvedConfigV2,
     compilation: {
       ...source.compilation,
+      substeps: normalizedCompilationSubsteps,
       startedAt:
         typeof source.compilation.startedAt === "string"
           ? source.compilation.startedAt
