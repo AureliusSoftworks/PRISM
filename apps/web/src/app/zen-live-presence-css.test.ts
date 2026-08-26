@@ -3301,11 +3301,15 @@ describe("Zen live presence CSS", () => {
     assert.doesNotMatch(glyphRule, /radial-gradient/);
   });
 
-  it("keeps the lower orb, CRT lattice, and glyph as separate contracts", () => {
+  it("keeps the lower orb rim, screen, CRT lattice, and glyph as separate contracts", () => {
     const bodyRule = ruleForExactSelector(".zenLiveBotPresenceBody");
     assert.match(
       bodyRule,
       /--zen-live-bot-buckle-crt-cell-pitch:\s*clamp\(\s*1px,\s*calc\(var\(--zen-live-bot-body-frame-size\) \* 0\.0078125\),\s*4px\s*\)/,
+    );
+    assert.match(
+      bodyRule,
+      /--zen-live-bot-buckle-rim-scale:\s*1\.92\s*;/,
     );
     assert.match(
       bodyRule,
@@ -3315,21 +3319,33 @@ describe("Zen live presence CSS", () => {
       bodyRule,
       /--zen-live-bot-buckle-crt-screen-scale:\s*1\.54\s*;/,
     );
-    const screenRule = ruleForExactSelector(
+    const orbRule = ruleForExactSelector(
       ".zenLiveBotPresenceBody::before",
     );
-    assert.match(screenRule, /content:\s*""\s*;/);
-    assert.match(screenRule, /z-index:\s*10\s*;/);
+    assert.match(orbRule, /content:\s*""\s*;/);
+    assert.match(orbRule, /z-index:\s*10\s*;/);
     assert.match(
-      screenRule,
-      /width:\s*calc\([\s\S]*?--zen-live-bot-body-glyph-size[\s\S]*?var\(--zen-live-bot-buckle-screen-scale\)[\s\S]*?\)\s*;/,
+      orbRule,
+      /width:\s*calc\([\s\S]*?--zen-live-bot-body-glyph-size[\s\S]*?var\(--zen-live-bot-buckle-rim-scale\)[\s\S]*?\)\s*;/,
     );
     assert.match(
-      screenRule,
-      /height:\s*calc\([\s\S]*?--zen-live-bot-body-glyph-size[\s\S]*?var\(--zen-live-bot-buckle-screen-scale\)[\s\S]*?\)\s*;/,
+      orbRule,
+      /height:\s*calc\([\s\S]*?--zen-live-bot-body-glyph-size[\s\S]*?var\(--zen-live-bot-buckle-rim-scale\)[\s\S]*?\)\s*;/,
     );
-    assert.match(screenRule, /background:\s*radial-gradient/);
-    assert.match(screenRule, /pointer-events:\s*none\s*;/);
+    assert.match(
+      orbRule,
+      /padding:\s*calc\([\s\S]*?--zen-live-bot-buckle-rim-scale[\s\S]*?--zen-live-bot-buckle-screen-scale[\s\S]*?\* 0\.5\s*\)\s*;/,
+    );
+    assert.match(orbRule, /background:[\s\S]*content-box,[\s\S]*conic-gradient/);
+    assert.match(
+      orbRule,
+      /var\(--zen-live-bot-buckle-rim-alloy-color\)/,
+    );
+    assert.match(
+      orbRule,
+      /background-clip:\s*content-box,\s*border-box,\s*border-box,\s*border-box\s*;/,
+    );
+    assert.match(orbRule, /pointer-events:\s*none\s*;/);
     const latticeRule = ruleForExactSelector(
       ".zenLiveBotPresenceBody::after",
     );
@@ -3362,6 +3378,7 @@ describe("Zen live presence CSS", () => {
       /transform:\s*translate\(-50%,\s*-50%\)\s*scaleX\(var\(--zen-live-bot-glyph-facing-scale-x,\s*1\)\)\s*;/,
     );
     assert.doesNotMatch(glyphRule, /repeating-linear-gradient/);
+    assert.doesNotMatch(glyphRule, /zen-live-bot-buckle-rim-scale/);
     assert.doesNotMatch(glyphRule, /zen-live-bot-buckle-screen-scale/);
     assert.doesNotMatch(glyphRule, /zen-live-bot-buckle-crt-screen-scale/);
 
@@ -3370,11 +3387,13 @@ describe("Zen live presence CSS", () => {
       fillRule,
       /transform:\s*translate\(-50%,\s*-50%\)\s*scale\(var\(--zen-live-bot-buckle-screen-scale\)\)\s*;/,
     );
+    assert.doesNotMatch(fillRule, /zen-live-bot-buckle-rim-scale/);
     const glassRule = ruleForExactSelector(".botAvatarFoundryBuckleGlass");
     assert.match(
       glassRule,
       /transform:\s*translate\(-50%,\s*-50%\)\s*scale\(var\(--zen-live-bot-buckle-screen-scale\)\)\s*;/,
     );
+    assert.doesNotMatch(glassRule, /zen-live-bot-buckle-rim-scale/);
     assert.doesNotMatch(
       glassRule,
       /foundry-buckle-glass-scale/,

@@ -29206,11 +29206,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     calc(var(--zen-live-bot-buckle-crt-cell-pitch) * 0.14),
     0.48px
   );
-  /* The lower orb is one shared physical screen: its dark receiving surface
-     and glass grow together, while the CRT lattice keeps its smaller shared
-     footprint. Both remain independent from the persona glyph geometry. */
+  /* The lower orb is one shared physical assembly. Its rebuilt metal bezel,
+     dark receiving surface, glass, CRT lattice, and persona glyph each keep
+     independent geometry so material polish never changes authored identity. */
+  --zen-live-bot-buckle-rim-scale: 1.92;
   --zen-live-bot-buckle-screen-scale: 1.34;
   --zen-live-bot-buckle-crt-screen-scale: 1.54;
+  --zen-live-bot-buckle-rim-alloy-color: var(
+    --bot-face-metal-alloy-color,
+    #69717a
+  );
   position: relative;
   z-index: 8;
   width: var(--zen-live-bot-avatar-size, clamp(156px, 14.8vw, 196px));
@@ -29226,13 +29231,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenLiveBotPresenceBody::before {
-  /* Persistent physical screen below the CRT lattice and glyph. The frame art
-     supplies the surrounding bezel; this slight overscan closes its inner gap. */
+  /* Rebuild the complete lower orb above the baked frame so its silhouette can
+     grow globally without scaling the face chassis. The content box is the
+     independently sized receiving screen; layered radial grooves and an
+     alloy-aware conic highlight retain the authored industrial bezel material. */
   content: "";
   position: absolute;
   left: calc(50% + var(--zen-live-bot-glyph-x-anchor, 0px) + 1px);
   top: calc(50% + var(--zen-live-bot-glyph-y-anchor, 70px) + 1px);
   z-index: 10;
+  box-sizing: border-box;
   width: calc(
     var(
         --zen-live-bot-body-glyph-size,
@@ -29245,7 +29253,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
           var(--zen-live-bot-body-glyph-max-size)
         )
       ) *
-      var(--zen-live-bot-buckle-screen-scale)
+      var(--zen-live-bot-buckle-rim-scale)
   );
   height: calc(
     var(
@@ -29259,18 +29267,94 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
           var(--zen-live-bot-body-glyph-max-size)
         )
       ) *
-      var(--zen-live-bot-buckle-screen-scale)
+      var(--zen-live-bot-buckle-rim-scale)
+  );
+  padding: calc(
+    var(
+        --zen-live-bot-body-glyph-size,
+        clamp(
+          var(--zen-live-bot-body-glyph-min-size),
+          calc(
+            var(--zen-live-bot-body-frame-size) *
+              var(--zen-live-bot-body-glyph-ratio)
+          ),
+          var(--zen-live-bot-body-glyph-max-size)
+        )
+      ) *
+      (
+        var(--zen-live-bot-buckle-rim-scale) -
+          var(--zen-live-bot-buckle-screen-scale)
+      ) * 0.5
   );
   transform: translate(-50%, -50%);
   border-radius: 50%;
-  background: radial-gradient(
-    circle at 50% 48%,
-    color-mix(in srgb, var(--coffee-bot-color, currentColor) 10%, #020507),
-    #020507 74%
-  );
+  background:
+    radial-gradient(
+        circle at 50% 48%,
+        color-mix(in srgb, var(--coffee-bot-color, currentColor) 10%, #020507),
+        #020507 74%
+      )
+      content-box,
+    radial-gradient(
+      circle,
+      transparent 0 61%,
+      rgba(255, 255, 255, 0.22) 62%,
+      rgba(7, 9, 12, 0.96) 65% 70%,
+      rgba(255, 255, 255, 0.1) 72%,
+      rgba(0, 0, 0, 0.84) 76% 82%,
+      transparent 84%
+    ),
+    radial-gradient(
+      circle at 34% 22%,
+      rgba(255, 255, 255, 0.24),
+      transparent 46%
+    ),
+    conic-gradient(
+      from 216deg,
+      color-mix(
+          in srgb,
+          var(--zen-live-bot-buckle-rim-alloy-color) 26%,
+          #080a0d
+        )
+        0deg,
+      color-mix(
+          in srgb,
+          var(--zen-live-bot-buckle-rim-alloy-color) 58%,
+          #d7dce1
+        )
+        58deg,
+      color-mix(
+          in srgb,
+          var(--zen-live-bot-buckle-rim-alloy-color) 30%,
+          #090b0e
+        )
+        132deg,
+      color-mix(
+          in srgb,
+          var(--zen-live-bot-buckle-rim-alloy-color) 48%,
+          #aeb5bc
+        )
+        208deg,
+      color-mix(
+          in srgb,
+          var(--zen-live-bot-buckle-rim-alloy-color) 24%,
+          #050608
+        )
+        286deg,
+      color-mix(
+          in srgb,
+          var(--zen-live-bot-buckle-rim-alloy-color) 26%,
+          #080a0d
+        )
+        360deg
+    );
+  background-clip: content-box, border-box, border-box, border-box;
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
-    inset 0 0 8px rgba(0, 0, 0, 0.72);
+    0 2px 3px rgba(0, 0, 0, 0.72),
+    0 5px 9px rgba(0, 0, 0, 0.34),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.2),
+    inset 0 0 0 3px rgba(0, 0, 0, 0.42),
+    inset 0 0 8px rgba(0, 0, 0, 0.74);
   pointer-events: none;
 }
 
