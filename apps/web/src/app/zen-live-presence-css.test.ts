@@ -3317,7 +3317,11 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       bodyRule,
-      /--zen-live-bot-buckle-crt-screen-scale:\s*1\.54\s*;/,
+      /--zen-live-bot-buckle-crt-screen-scale:\s*1\.34\s*;/,
+    );
+    assert.match(
+      bodyRule,
+      /--zen-live-bot-buckle-rim-alloy-color:\s*var\(\s*--bot-face-metal-alloy-color,\s*#69717a\s*\)/,
     );
     const orbRule = ruleForExactSelector(
       ".zenLiveBotPresenceBody::before",
@@ -3402,6 +3406,32 @@ describe("Zen live presence CSS", () => {
       css,
       /\.signalBotPresencePlate\s+\.zenLiveBotPresenceBody\s*\{[^}]*--zen-live-bot-buckle-crt-screen-scale/,
     );
+  });
+
+  it("adapts the shared lower-orb metal recipe to hull alloy and theme without changing geometry", () => {
+    assert.match(
+      pageSource,
+      /const canonicalIdentityMaterialStyle = accentFrameIdentityColor[\s\S]*?botAvatarIdentityMaterialStyle\([\s\S]*?const presenceBodyStyle = \{\s*\.\.\.\(canonicalIdentityMaterialStyle \?\? \{\}\)/,
+    );
+    const bodyRule = ruleForExactSelector(".zenLiveBotPresenceBody");
+    assert.match(
+      bodyRule,
+      /--zen-live-bot-buckle-rim-alloy-color:\s*var\(\s*--bot-face-metal-alloy-color,\s*#69717a\s*\)/,
+    );
+    assert.match(
+      css,
+      /\.zenLiveBotPresencePlate\[data-theme="light"\] \.zenLiveBotPresenceBody,[\s\S]*?\{[^}]*--zen-live-bot-buckle-rim-highlight:\s*#f8fbff\s*;[^}]*--zen-live-bot-buckle-rim-shadow:\s*#64717d\s*;[^}]*--zen-live-bot-buckle-rim-edge-shadow:\s*rgba\(83, 96, 109, 0\.62\)\s*;[^}]*\}/,
+    );
+    assert.match(
+      css,
+      /\.zenLiveBotPresencePlate\[data-theme="dark"\] \.zenLiveBotPresenceBody,[\s\S]*?\{[^}]*--zen-live-bot-buckle-rim-highlight:\s*#d7dce1\s*;[^}]*--zen-live-bot-buckle-rim-shadow:\s*#080a0d\s*;[^}]*--zen-live-bot-buckle-rim-edge-shadow:\s*rgba\(7, 9, 12, 0\.96\)\s*;[^}]*\}/,
+    );
+
+    const orbRule = ruleForExactSelector(".zenLiveBotPresenceBody::before");
+    assert.match(orbRule, /var\(--zen-live-bot-buckle-rim-alloy-color\)/);
+    assert.match(orbRule, /var\(--zen-live-bot-buckle-rim-highlight\)/);
+    assert.match(orbRule, /var\(--zen-live-bot-buckle-rim-shadow\)/);
+    assert.match(orbRule, /var\(--zen-live-bot-buckle-rim-edge-shadow\)/);
   });
 
   it("quantizes every full-size phosphor glyph on one canonical surface", () => {

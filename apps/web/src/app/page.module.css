@@ -29211,11 +29211,33 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
      independent geometry so material polish never changes authored identity. */
   --zen-live-bot-buckle-rim-scale: 1.92;
   --zen-live-bot-buckle-screen-scale: 1.34;
-  --zen-live-bot-buckle-crt-screen-scale: 1.54;
+  --zen-live-bot-buckle-crt-screen-scale: 1.34;
   --zen-live-bot-buckle-rim-alloy-color: var(
     --bot-face-metal-alloy-color,
     #69717a
   );
+  /* The resolved persona alloy arrives here through presenceBodyStyle. Keep
+     the dark bezel recipe industrial; light mode replaces these material
+     tokens without changing this shared lower-orb geometry. */
+  --zen-live-bot-buckle-rim-screen-center: color-mix(
+    in srgb,
+    var(--coffee-bot-color, currentColor) 10%,
+    #020507
+  );
+  --zen-live-bot-buckle-rim-screen-edge: #020507;
+  --zen-live-bot-buckle-rim-highlight: #d7dce1;
+  --zen-live-bot-buckle-rim-mid-highlight: #aeb5bc;
+  --zen-live-bot-buckle-rim-shadow: #080a0d;
+  --zen-live-bot-buckle-rim-deep-shadow: #050608;
+  --zen-live-bot-buckle-rim-edge-highlight: rgba(255, 255, 255, 0.22);
+  --zen-live-bot-buckle-rim-edge-shadow: rgba(7, 9, 12, 0.96);
+  --zen-live-bot-buckle-rim-edge-deep-shadow: rgba(0, 0, 0, 0.84);
+  --zen-live-bot-buckle-rim-specular: rgba(255, 255, 255, 0.24);
+  --zen-live-bot-buckle-rim-cast: rgba(0, 0, 0, 0.72);
+  --zen-live-bot-buckle-rim-ambient: rgba(0, 0, 0, 0.34);
+  --zen-live-bot-buckle-rim-inset-highlight: rgba(255, 255, 255, 0.2);
+  --zen-live-bot-buckle-rim-inset-shadow: rgba(0, 0, 0, 0.42);
+  --zen-live-bot-buckle-rim-inset-deep-shadow: rgba(0, 0, 0, 0.74);
   position: relative;
   z-index: 8;
   width: var(--zen-live-bot-avatar-size, clamp(156px, 14.8vw, 196px));
@@ -29291,22 +29313,22 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background:
     radial-gradient(
         circle at 50% 48%,
-        color-mix(in srgb, var(--coffee-bot-color, currentColor) 10%, #020507),
-        #020507 74%
+        var(--zen-live-bot-buckle-rim-screen-center),
+        var(--zen-live-bot-buckle-rim-screen-edge) 74%
       )
       content-box,
     radial-gradient(
       circle,
       transparent 0 61%,
-      rgba(255, 255, 255, 0.22) 62%,
-      rgba(7, 9, 12, 0.96) 65% 70%,
+      var(--zen-live-bot-buckle-rim-edge-highlight) 62%,
+      var(--zen-live-bot-buckle-rim-edge-shadow) 65% 70%,
       rgba(255, 255, 255, 0.1) 72%,
-      rgba(0, 0, 0, 0.84) 76% 82%,
+      var(--zen-live-bot-buckle-rim-edge-deep-shadow) 76% 82%,
       transparent 84%
     ),
     radial-gradient(
       circle at 34% 22%,
-      rgba(255, 255, 255, 0.24),
+      var(--zen-live-bot-buckle-rim-specular),
       transparent 46%
     ),
     conic-gradient(
@@ -29314,48 +29336,83 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       color-mix(
           in srgb,
           var(--zen-live-bot-buckle-rim-alloy-color) 26%,
-          #080a0d
+          var(--zen-live-bot-buckle-rim-shadow)
         )
         0deg,
       color-mix(
           in srgb,
           var(--zen-live-bot-buckle-rim-alloy-color) 58%,
-          #d7dce1
+          var(--zen-live-bot-buckle-rim-highlight)
         )
         58deg,
       color-mix(
           in srgb,
           var(--zen-live-bot-buckle-rim-alloy-color) 30%,
-          #090b0e
+          var(--zen-live-bot-buckle-rim-edge-shadow)
         )
         132deg,
       color-mix(
           in srgb,
           var(--zen-live-bot-buckle-rim-alloy-color) 48%,
-          #aeb5bc
+          var(--zen-live-bot-buckle-rim-mid-highlight)
         )
         208deg,
       color-mix(
           in srgb,
           var(--zen-live-bot-buckle-rim-alloy-color) 24%,
-          #050608
+          var(--zen-live-bot-buckle-rim-deep-shadow)
         )
         286deg,
       color-mix(
           in srgb,
           var(--zen-live-bot-buckle-rim-alloy-color) 26%,
-          #080a0d
+          var(--zen-live-bot-buckle-rim-shadow)
         )
         360deg
     );
   background-clip: content-box, border-box, border-box, border-box;
   box-shadow:
-    0 2px 3px rgba(0, 0, 0, 0.72),
-    0 5px 9px rgba(0, 0, 0, 0.34),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.2),
-    inset 0 0 0 3px rgba(0, 0, 0, 0.42),
-    inset 0 0 8px rgba(0, 0, 0, 0.74);
+    0 2px 3px var(--zen-live-bot-buckle-rim-cast),
+    0 5px 9px var(--zen-live-bot-buckle-rim-ambient),
+    inset 0 0 0 1px var(--zen-live-bot-buckle-rim-inset-highlight),
+    inset 0 0 0 3px var(--zen-live-bot-buckle-rim-inset-shadow),
+    inset 0 0 8px var(--zen-live-bot-buckle-rim-inset-deep-shadow);
   pointer-events: none;
+}
+
+/* Full-size Zen, Coffee, Signal, and Studio avatars all emit the plate's
+   data-theme contract. The inherited body variables leave the physical rim
+   shared while giving light mode its own diffuse, softly defined metal. */
+.zenLiveBotPresencePlate[data-theme="light"] .zenLiveBotPresenceBody,
+.themeLight .zenLiveBotPresenceBody {
+  --zen-live-bot-buckle-rim-screen-center: color-mix(
+    in srgb,
+    var(--coffee-bot-color, currentColor) 7%,
+    #dfe8f0
+  );
+  --zen-live-bot-buckle-rim-screen-edge: #bac6d1;
+  --zen-live-bot-buckle-rim-highlight: #f8fbff;
+  --zen-live-bot-buckle-rim-mid-highlight: #d4dee7;
+  --zen-live-bot-buckle-rim-shadow: #64717d;
+  --zen-live-bot-buckle-rim-deep-shadow: #45515d;
+  --zen-live-bot-buckle-rim-edge-highlight: rgba(255, 255, 255, 0.88);
+  --zen-live-bot-buckle-rim-edge-shadow: rgba(83, 96, 109, 0.62);
+  --zen-live-bot-buckle-rim-edge-deep-shadow: rgba(50, 62, 74, 0.48);
+  --zen-live-bot-buckle-rim-specular: rgba(255, 255, 255, 0.72);
+  --zen-live-bot-buckle-rim-cast: rgba(48, 60, 72, 0.22);
+  --zen-live-bot-buckle-rim-ambient: rgba(48, 60, 72, 0.12);
+  --zen-live-bot-buckle-rim-inset-highlight: rgba(255, 255, 255, 0.72);
+  --zen-live-bot-buckle-rim-inset-shadow: rgba(70, 84, 97, 0.26);
+  --zen-live-bot-buckle-rim-inset-deep-shadow: rgba(70, 84, 97, 0.22);
+}
+
+.zenLiveBotPresencePlate[data-theme="dark"] .zenLiveBotPresenceBody,
+.themeDark .zenLiveBotPresenceBody {
+  --zen-live-bot-buckle-rim-highlight: #d7dce1;
+  --zen-live-bot-buckle-rim-shadow: #080a0d;
+  --zen-live-bot-buckle-rim-edge-shadow: rgba(7, 9, 12, 0.96);
+  --zen-live-bot-buckle-rim-cast: rgba(0, 0, 0, 0.72);
+  --zen-live-bot-buckle-rim-inset-deep-shadow: rgba(0, 0, 0, 0.74);
 }
 
 .zenLiveBotPresenceBody::after {
