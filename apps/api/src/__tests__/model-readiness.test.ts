@@ -295,7 +295,7 @@ describe("local model readiness", () => {
     assert.equal(chatCalls, 0);
   });
 
-  it("cancels an in-flight auxiliary warmup before sweeping the live lane", async () => {
+  it("pauses an in-flight auxiliary warmup without unloading its residency", async () => {
     let warmupAborted = false;
     let auxResident = false;
     const unloaded: string[] = [];
@@ -346,7 +346,7 @@ describe("local model readiness", () => {
     await warmup;
 
     assert.equal(warmupAborted, true);
-    assert.deepEqual(unloaded, ["auxiliary-model"]);
+    assert.deepEqual(unloaded, []);
   });
 
   it("releases a finished live model only after its final owner exits", async () => {

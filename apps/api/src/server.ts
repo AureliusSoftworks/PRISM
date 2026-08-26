@@ -29385,6 +29385,7 @@ function buildRoutes(): RouteDefinition[] {
             owner: `coffee:${userId}:${liveSessionId}`,
             model: requestedModel,
             quiesceOtherModels: true,
+            yieldAuxiliary: body.retry === true,
             options: {
               secondaryOllamaHost: user.secondary_ollama_host,
               experimentalDualOllama:

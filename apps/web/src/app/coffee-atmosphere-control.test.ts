@@ -86,7 +86,7 @@ test("every new Coffee Group starts with one random bundled song", () => {
   assert.equal(
     source.match(/chooseCoffeeJazzStationForNewGroup\(response\.group\.id\);/gu)
       ?.length,
-    3,
+    2,
   );
   assert.match(
     source,
@@ -108,7 +108,7 @@ test("Coffee shares tactful foley and cup-synchronized audio with Signal", () =>
   assert.match(atmosphereSource, /mutation\.removedNodes/u);
   assert.match(
     atmosphereSource,
-    /coffeeCupFoleyCueForTransition\(previous, false\)/u,
+    /coffeeCupFoleyCueForTransition\([\s\S]{0,80}previous,[\s\S]{0,40}false,[\s\S]{0,80}placementCueModeForCup\(cup\)/u,
   );
 });
 

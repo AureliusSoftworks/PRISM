@@ -15,6 +15,7 @@ import type {
   UsageTotals,
   UsageTripMeter,
 } from "@localai/shared";
+import { currentPrismGenerationWorkContext } from "./generation-work.ts";
 
 type UsageMode = "zen" | "sandbox" | "coffee" | "story" | "system" | string | null;
 
@@ -435,6 +436,21 @@ type UsageRecentRow = {
   image_quality: string | null;
   cost_micro_usd: number | null;
   pricing_snapshot_json: string | null;
+  workflow: string | null;
+  workflow_stage: string | null;
+  work_role: string | null;
+  work_cache_hit: number | null;
+  work_fallback_reason: string | null;
+  work_context_tokens_kept_local: number | null;
+};
+
+type UsageLocalFirstRow = {
+  workflow: string | null;
+  workflow_stage: string | null;
+  assisted_operation_count: number | null;
+  local_tokens: number | null;
+  online_tokens: number | null;
+  context_tokens_kept_local: number | null;
 };
 
 function normalizeUsagePurpose(value: string | null | undefined): UsagePurpose {
@@ -850,6 +866,14 @@ function insertUsageEvent(
   });
   const createdAt = args.createdAt ?? new Date().toISOString();
   const durationMs = nullableInt(args.durationMs);
+  const generationWork = currentPrismGenerationWorkContext();
+  const contextTokensKeptLocal = generationWork
+    ? Math.max(
+        0,
+        (generationWork.sourceTokenEstimate ?? 0) -
+          (generationWork.exportedTokenEstimate ?? 0),
+      )
+    : null;
   try {
     session.db
       .prepare(
@@ -859,8 +883,11 @@ function insertUsageEvent(
           input_tokens, output_tokens, total_tokens, cached_input_tokens,
           image_count, image_size, image_quality,
           duration_ms, load_duration_ms, prompt_duration_ms, completion_duration_ms,
-          token_count_source, cost_micro_usd, pricing_snapshot_json, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          token_count_source, cost_micro_usd, pricing_snapshot_json,
+          workflow, workflow_stage, work_role, work_execution_lane,
+          work_output_class, work_cache_hit, work_fallback_reason,
+          work_context_tokens_kept_local, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         randomUUID(),
@@ -890,6 +917,14 @@ function insertUsageEvent(
         args.tokenCountSource,
         costMicroUsd,
         snapshot,
+        generationWork?.workflow ?? null,
+        generationWork?.stage ?? null,
+        generationWork?.role ?? null,
+        generationWork?.executionLane ?? null,
+        generationWork?.outputClass ?? null,
+        generationWork ? 0 : null,
+        generationWork?.fallbackReason ? "recovery" : null,
+        contextTokensKeptLocal,
         createdAt
       );
   } catch (error) {
@@ -1238,6 +1273,20 @@ function recentFromRow(row: UsageRecentRow): UsageRecentEvent {
     estimatedCostMicroUsd: row.cost_micro_usd,
     costEstimated: row.cost_micro_usd !== null,
     unpriced: ONLINE_PROVIDERS.has(provider) && row.cost_micro_usd === null,
+    workflow: row.workflow,
+    workflowStage: row.workflow_stage,
+    workRole:
+      row.work_role === "prepare" ||
+      row.work_role === "connective" ||
+      row.work_role === "audit" ||
+      row.work_role === "author" ||
+      row.work_role === "repair"
+        ? row.work_role
+        : null,
+    workCacheHit:
+      row.work_cache_hit === null ? null : row.work_cache_hit === 1,
+    fallbackReason: row.work_fallback_reason,
+    contextTokensKeptLocal: row.work_context_tokens_kept_local,
   };
 }
 
@@ -1424,7 +1473,9 @@ export function getUsageReport(args: {
     .prepare(
       `SELECT id, created_at, surface, mode, purpose, provider, model, event_type,
               input_tokens, output_tokens, total_tokens, token_count_source,
-              image_count, image_size, image_quality, cost_micro_usd, pricing_snapshot_json
+              image_count, image_size, image_quality, cost_micro_usd, pricing_snapshot_json,
+              workflow, workflow_stage, work_role, work_cache_hit,
+              work_fallback_reason, work_context_tokens_kept_local
        FROM usage_events
        WHERE ${where} AND privacy_scope != 'private'
        ORDER BY created_at DESC
@@ -1432,6 +1483,47 @@ export function getUsageReport(args: {
     )
     .all(...params)
     .map((row) => recentFromRow(row as UsageRecentRow));
+  const localFirstRows = args.db
+    .prepare(
+      `SELECT workflow, workflow_stage,
+              COUNT(*) AS assisted_operation_count,
+              COALESCE(SUM(CASE WHEN provider IN ('local', 'ollama', 'comfyui') THEN COALESCE(total_tokens, 0) ELSE 0 END), 0) AS local_tokens,
+              COALESCE(SUM(CASE WHEN provider IN ('openai', 'anthropic') THEN COALESCE(total_tokens, 0) ELSE 0 END), 0) AS online_tokens,
+              COALESCE(SUM(COALESCE(work_context_tokens_kept_local, 0)), 0) AS context_tokens_kept_local
+         FROM usage_events
+        WHERE ${where} AND workflow IS NOT NULL
+        GROUP BY workflow, workflow_stage
+        ORDER BY assisted_operation_count DESC, context_tokens_kept_local DESC
+        LIMIT 24`,
+    )
+    .all(...params) as unknown as UsageLocalFirstRow[];
+  const localFirst = {
+    localTokens: totals.localTokens,
+    onlineTokens: totals.onlineTokens,
+    assistedOperationCount: localFirstRows.reduce(
+      (sum, row) => sum + Number(row.assisted_operation_count ?? 0),
+      0,
+    ),
+    estimatedContextTokensKeptLocal: localFirstRows.reduce(
+      (sum, row) => sum + Number(row.context_tokens_kept_local ?? 0),
+      0,
+    ),
+    byAppletStage: localFirstRows.map((row) => {
+      const workflow = row.workflow?.trim() || "system";
+      const stage = row.workflow_stage?.trim() || "generation";
+      return {
+        key: `${workflow}:${stage}`,
+        workflow,
+        stage,
+        assistedOperationCount: Number(row.assisted_operation_count ?? 0),
+        localTokens: Number(row.local_tokens ?? 0),
+        onlineTokens: Number(row.online_tokens ?? 0),
+        estimatedContextTokensKeptLocal: Number(
+          row.context_tokens_kept_local ?? 0,
+        ),
+      };
+    }),
+  };
   const tracking = args.db
     .prepare("SELECT MIN(created_at) AS started_at FROM usage_events WHERE user_id = ?")
     .get(args.userId) as { started_at: string | null } | undefined;
@@ -1473,6 +1565,7 @@ export function getUsageReport(args: {
     byProvider,
     byModel,
     byPurpose,
+    localFirst,
     recentEvents,
     trackingStartedAt,
     hasUntrackedHistory: Boolean(historyRow?.found),

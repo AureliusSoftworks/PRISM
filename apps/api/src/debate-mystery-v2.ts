@@ -78,7 +78,11 @@ import {
   type DebateAiRuntime,
   type DebateGenerationLane,
 } from "./debate.ts";
-import { runWithReasoningGenerationBudget } from "./model-effort-runner.ts";
+import {
+  estimatePrismTextTokens,
+  runPrismStructuredGeneration,
+} from "./generation-broker.ts";
+import type { PrismGenerationWorkReceipt } from "./generation-work.ts";
 import { PRISM_INSTANT_VOICE_MODEL_ID, pcmWaveDurationMs } from "./local-voice-engine.ts";
 import { resolveAbsoluteUnderDataRoot } from "./image-storage.ts";
 import { getDebateMysteryMansionBundleV2 } from "./debate-mystery-mansion-bundles.ts";
@@ -271,13 +275,78 @@ interface AuthoredMysteryV2 {
 type AuthoredMysteryFoundationV2 = Omit<AuthoredMysteryV2, "suspects" | "prosecutionChoices">;
 type AuthoredMysteryFoundationCoreV2 = Omit<AuthoredMysteryFoundationV2, "examinations">;
 
-interface MysteryV2AuthoringCheckpoint {
+interface MysteryV2AuthoringCheckpointV1 {
   kind: "authoring-v1";
   foundation: AuthoredMysteryFoundationV2 | null;
   foundationCore?: AuthoredMysteryFoundationCoreV2 | null;
   examinationsById?: Record<string, string>;
   suspectsBySeatId: Record<string, AuthoredSuspectV2>;
   prosecutionChoices: AuthoredProsecutionChoiceV2[] | null;
+}
+
+interface MysteryV2FactLedger {
+  version: 1;
+  sourceHash: string;
+  culpritSeatId: string;
+  accompliceSeatId: string | null;
+  eyewitnessSeatId: string | null;
+  frozenIds: {
+    victimId: string;
+    suspectSeatIds: string[];
+    evidenceIds: string[];
+    examinationIds: string[];
+    statementIdsBySeat: Record<string, string[]>;
+  };
+  proofRoutesBySeat: Record<string, string>;
+  schemaConstraints: {
+    investigationMode: DebateMysteryResolvedConfigV2["investigationMode"];
+    trialType: DebateMysteryResolvedConfigV2["trialType"];
+    preset: DebateMysteryResolvedConfigV2["preset"];
+    difficulty: DebateMysteryResolvedConfigV2["difficulty"];
+  };
+}
+
+interface MysteryV2VoiceCard {
+  botId: string;
+  sourceHash: string;
+  cues: string[];
+}
+
+interface MysteryV2AuditIssue {
+  fieldPath: string;
+  code: string;
+  severity: "advisory" | "high";
+  relatedFrozenIds: string[];
+  repairInstruction: string;
+}
+
+interface MysteryV2SectionProvenance {
+  provider: PrismGenerationWorkReceipt["provider"];
+  model: string;
+  role: PrismGenerationWorkReceipt["role"];
+  durationMs: number;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  fallbackReason: string | null;
+  validation: PrismGenerationWorkReceipt["validation"];
+  auditIssues: MysteryV2AuditIssue[];
+}
+
+interface MysteryV2AuthoringCheckpoint {
+  kind: "authoring-v2";
+  foundation: AuthoredMysteryFoundationV2 | null;
+  foundationCore: AuthoredMysteryFoundationCoreV2 | null;
+  examinationsById: Record<string, string>;
+  suspectsBySeatId: Record<string, AuthoredSuspectV2>;
+  prosecutionChoices: AuthoredProsecutionChoiceV2[] | null;
+  contextCapsule: {
+    version: 1;
+    sourceHash: string;
+    factLedger: MysteryV2FactLedger;
+    voiceCardsByBotId: Record<string, MysteryV2VoiceCard>;
+  } | null;
+  connectiveAdditions: Record<string, Record<string, string>>;
+  provenanceBySection: Record<string, MysteryV2SectionProvenance>;
 }
 
 interface PrivateMysteryCaseV2 {
@@ -328,8 +397,45 @@ interface MysteryV2Checkpoint {
   publicState: DebateWhodunnitFormatStateV2;
 }
 
-function isMysteryV2AuthoringCheckpoint(value: unknown): value is MysteryV2AuthoringCheckpoint {
-  return Boolean(value && typeof value === "object" && (value as { kind?: unknown }).kind === "authoring-v1");
+function isMysteryV2AuthoringCheckpoint(
+  value: unknown,
+): value is MysteryV2AuthoringCheckpoint | MysteryV2AuthoringCheckpointV1 {
+  const kind = value && typeof value === "object"
+    ? (value as { kind?: unknown }).kind
+    : null;
+  return kind === "authoring-v1" || kind === "authoring-v2";
+}
+
+function normalizeMysteryV2AuthoringCheckpoint(
+  value: unknown,
+): MysteryV2AuthoringCheckpoint {
+  if (isMysteryV2AuthoringCheckpoint(value)) {
+    return {
+      kind: "authoring-v2",
+      foundation: value.foundation ?? null,
+      foundationCore: value.foundationCore ?? null,
+      examinationsById: value.examinationsById ?? {},
+      suspectsBySeatId: value.suspectsBySeatId ?? {},
+      prosecutionChoices: value.prosecutionChoices ?? null,
+      contextCapsule:
+        value.kind === "authoring-v2" ? value.contextCapsule ?? null : null,
+      connectiveAdditions:
+        value.kind === "authoring-v2" ? value.connectiveAdditions ?? {} : {},
+      provenanceBySection:
+        value.kind === "authoring-v2" ? value.provenanceBySection ?? {} : {},
+    };
+  }
+  return {
+    kind: "authoring-v2",
+    foundation: null,
+    foundationCore: null,
+    examinationsById: {},
+    suspectsBySeatId: {},
+    prosecutionChoices: null,
+    contextCapsule: null,
+    connectiveAdditions: {},
+    provenanceBySection: {},
+  };
 }
 
 function isMysteryV2CompiledCheckpoint(value: unknown): value is MysteryV2Checkpoint {
@@ -1627,24 +1733,287 @@ function authoredProsecutionChoicesFromJson(
   return prosecutionChoices;
 }
 
+function deterministicMysteryVoiceCard(
+  bot: MysteryV2BotRow,
+): MysteryV2VoiceCard {
+  const sourceHash = sha256(bot.system_prompt);
+  const cues = bot.system_prompt
+    .split(/(?<=[.!?])\s+/u)
+    .map((entry) => compact(entry, 120))
+    .filter(Boolean)
+    .slice(0, 3);
+  return {
+    botId: bot.id,
+    sourceHash,
+    cues: cues.length > 0 ? cues : [`Keep ${bot.name}'s established voice.`],
+  };
+}
+
+async function prepareMysteryVoiceCardsV2(args: {
+  runtime: DebateAiRuntime;
+  bots: MysteryV2BotRow[];
+}): Promise<Record<string, MysteryV2VoiceCard>> {
+  const fallback = Object.fromEntries(
+    args.bots.map((bot) => [bot.id, deterministicMysteryVoiceCard(bot)]),
+  );
+  const auxiliary = args.runtime.auxiliary;
+  if (!auxiliary || args.bots.length === 0) return fallback;
+  const sourceByBotId = new Map(
+    args.bots.map((bot) => [bot.id, sha256(bot.system_prompt)]),
+  );
+  try {
+    const result = await runPrismStructuredGeneration({
+      work: {
+        workflow: "case_forge",
+        operation: "prepare_voice_cards",
+        stage: "writing_case",
+        executionLane: "auxiliary",
+        role: "prepare",
+        outputClass: "internal",
+        priority: "compilation",
+        privacyMode: "local",
+        cacheKey: `case-forge-voice-v1:${sha256(JSON.stringify([...sourceByBotId]))}`,
+      },
+      lanes: [{
+        provider: auxiliary,
+        providerName: "local",
+        model: auxiliary.diagnosticModel ?? "auxiliary",
+      }],
+      modelSelectionKind: "fixed",
+      maxFixedAttempts: 1,
+      run: ({ lane, signal, work }) => lane.provider.generateResponse([
+        {
+          role: "system",
+          content: "Compress persona text into style-only voice cues. Do not add biography, relationships, case facts, clues, motives, alibis, or plot. Return JSON only.",
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            bots: args.bots.map((bot) => ({
+              botId: bot.id,
+              sourceHash: sourceByBotId.get(bot.id),
+              persona: bot.system_prompt,
+            })),
+            outputContract: {
+              voiceCards: "one card per bot with exact botId, exact sourceHash, and 1-4 short style cues",
+            },
+          }),
+        },
+      ], {
+        model: lane.model,
+        maxTokens: Math.min(1_800, 220 * args.bots.length),
+        temperature: 0.2,
+        jsonMode: true,
+        usagePurpose: "debate_generation",
+        generationWork: work,
+        signal,
+      }),
+      validate: (raw) => {
+        const parsed = parseJsonObject(raw);
+        const cards = Array.isArray(parsed.voiceCards)
+          ? parsed.voiceCards
+          : [];
+        const normalized = cards.flatMap((value) => {
+          if (!value || typeof value !== "object") return [];
+          const row = value as Record<string, unknown>;
+          const botId = compact(row.botId, 120);
+          const sourceHash = compact(row.sourceHash, 80);
+          const cues = (Array.isArray(row.cues) ? row.cues : [])
+            .map((cue) => compact(cue, 120))
+            .filter(Boolean)
+            .slice(0, 4);
+          return botId && sourceHash === sourceByBotId.get(botId) && cues.length
+            ? [{ botId, sourceHash, cues }]
+            : [];
+        });
+        if (
+          normalized.length !== args.bots.length ||
+          !uniqueIds(normalized.map((card) => card.botId))
+        ) {
+          throw new Error("Voice cards did not preserve the frozen bot sources.");
+        }
+        return Object.fromEntries(normalized.map((card) => [card.botId, card]));
+      },
+    });
+    return result.value;
+  } catch {
+    return fallback;
+  }
+}
+
+function recordMysterySectionReceipt(
+  draft: MysteryV2AuthoringCheckpoint,
+  sectionKey: string,
+  receipt: PrismGenerationWorkReceipt,
+): void {
+  draft.provenanceBySection[sectionKey] = {
+    provider: receipt.provider,
+    model: receipt.model,
+    role: receipt.role,
+    durationMs: receipt.durationMs,
+    inputTokens: receipt.inputTokens,
+    outputTokens: receipt.outputTokens,
+    fallbackReason: receipt.fallbackReason,
+    validation: receipt.validation,
+    auditIssues: draft.provenanceBySection[sectionKey]?.auditIssues ?? [],
+  };
+}
+
+async function auditMysterySectionV2(args: {
+  runtime: DebateAiRuntime;
+  sectionKey: string;
+  section: unknown;
+  ledger: MysteryV2FactLedger;
+  relevantFrozenIds: string[];
+}): Promise<MysteryV2AuditIssue[]> {
+  const auxiliary = args.runtime.auxiliary;
+  if (!auxiliary) return [];
+  const relevantFrozenIds = [...new Set(args.relevantFrozenIds.filter(Boolean))];
+  const allowedHighCodes = new Set([
+    "frozen_id_mismatch",
+    "proof_route_conflict",
+    "culprit_role_conflict",
+    "cross_section_contradiction",
+  ]);
+  try {
+    const result = await runPrismStructuredGeneration({
+      work: {
+        workflow: "case_forge",
+        operation: "audit_case_section",
+        stage: args.sectionKey,
+        executionLane: "auxiliary",
+        role: "audit",
+        outputClass: "internal",
+        priority: "background",
+        privacyMode: "local",
+        cacheKey: `case-forge-audit-v1:${sha256(JSON.stringify({
+          sectionKey: args.sectionKey,
+          section: args.section,
+          relevantFrozenIds,
+          ledgerHash: args.ledger.sourceHash,
+        }))}`,
+      },
+      lanes: [{
+        provider: auxiliary,
+        providerName: "local",
+        model: auxiliary.diagnosticModel ?? "auxiliary",
+      }],
+      modelSelectionKind: "fixed",
+      maxFixedAttempts: 1,
+      run: ({ lane, signal, work }) => lane.provider.generateResponse([
+        {
+          role: "system",
+          content: "Audit one already schema-valid mystery section against only the supplied frozen ledger slice. Do not rewrite prose or invent facts. Return JSON only. Deterministic validators remain authoritative.",
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            sectionKey: args.sectionKey,
+            ledger: {
+              sourceHash: args.ledger.sourceHash,
+              culpritSeatId: args.ledger.culpritSeatId,
+              accompliceSeatId: args.ledger.accompliceSeatId,
+              proofRoutesBySeat: args.ledger.proofRoutesBySeat,
+              relevantFrozenIds,
+            },
+            section: args.section,
+            outputContract: {
+              issues: "array of fieldPath, code, advisory|high severity, relatedFrozenIds, and one minimal repairInstruction",
+            },
+          }),
+        },
+      ], {
+        model: lane.model,
+        maxTokens: 1_200,
+        temperature: 0,
+        jsonMode: true,
+        usagePurpose: "debate_generation",
+        generationWork: work,
+        signal,
+      }),
+      validate: (raw) => {
+        const parsed = parseJsonObject(raw);
+        const rows = Array.isArray(parsed.issues) ? parsed.issues : [];
+        return rows.flatMap((value): MysteryV2AuditIssue[] => {
+          if (!value || typeof value !== "object") return [];
+          const row = value as Record<string, unknown>;
+          const fieldPath = compact(row.fieldPath, 220);
+          const code = compact(row.code, 100)
+            .toLowerCase()
+            .replace(/[^a-z0-9_]+/gu, "_");
+          const relatedIds = (Array.isArray(row.relatedFrozenIds)
+            ? row.relatedFrozenIds
+            : [])
+            .map((id) => compact(id, 160))
+            .filter((id) => relevantFrozenIds.includes(id));
+          const repairInstruction = compact(row.repairInstruction, 280);
+          if (!fieldPath || !code || !repairInstruction) return [];
+          const requestedHigh = row.severity === "high";
+          return [{
+            fieldPath,
+            code,
+            severity:
+              requestedHigh &&
+              allowedHighCodes.has(code) &&
+              relatedIds.length > 0
+                ? "high"
+                : "advisory",
+            relatedFrozenIds: relatedIds,
+            repairInstruction,
+          }];
+        }).slice(0, 12);
+      },
+    });
+    return result.value;
+  } catch {
+    return [];
+  }
+}
+
 async function generateMysteryAuthoringSectionV2<T>(args: {
   runtime: DebateAiRuntime;
   label: string;
   prompt: Record<string, unknown>;
+  sourcePrompt?: Record<string, unknown>;
   maxTokens: number;
+  role?: "author" | "repair";
   validate: (value: Record<string, unknown>) => T;
   onAttempt?: (attempt: number) => void;
+  onReceipt?: (receipt: PrismGenerationWorkReceipt) => void;
 }): Promise<T> {
-  const lane = mysteryV2Lane(args.runtime);
-  let lastError = "The response was incomplete.";
-  for (let attempt = 1; attempt <= V2_MAX_AUTHOR_ATTEMPTS; attempt += 1) {
-    try {
+  const promptText = JSON.stringify(args.prompt);
+  const sourcePromptText = JSON.stringify(args.sourcePrompt ?? args.prompt);
+  const lanes = args.runtime.lanes?.length
+    ? args.runtime.lanes
+    : [mysteryV2Lane(args.runtime)];
+  const result = await runPrismStructuredGeneration({
+    work: {
+      workflow: "case_forge",
+      operation:
+        args.role === "repair"
+          ? "repair_case_section"
+          : "author_case_section",
+      stage: compact(args.prompt.section, 100) || "writing_case",
+      executionLane: "selected",
+      role: args.role ?? "author",
+      outputClass: "critical",
+      priority: "compilation",
+      privacyMode:
+        args.runtime.preferredProvider === "local"
+          ? "local"
+          : args.runtime.modelSelectionKind === "auto"
+            ? "auto"
+            : "online",
+      cacheKey: `case-forge-author-v2:${sha256(promptText)}`,
+      sourceTokenEstimate: estimatePrismTextTokens(sourcePromptText),
+      exportedTokenEstimate: estimatePrismTextTokens(promptText),
+    },
+    lanes,
+    modelSelectionKind: args.runtime.modelSelectionKind ?? "fixed",
+    maxFixedAttempts: V2_MAX_AUTHOR_ATTEMPTS,
+    run: async ({ lane, attempt, priorError, signal, work }) => {
       args.onAttempt?.(attempt);
-      const response = await runWithReasoningGenerationBudget({
-        effort: lane.reasoningEffort,
-        provider: lane.providerName,
-        modelId: lane.model,
-        run: (signal) => lane.provider.generateResponse([
+      return lane.provider.generateResponse([
           {
             role: "system",
             content: "You are PRISM's senior mystery writer and trial designer. Author only the requested bounded section of an original, logically fair prosecution case. Preserve every frozen ID. Return one JSON object only; all prose and dialogue is final production copy.",
@@ -1653,7 +2022,9 @@ async function generateMysteryAuthoringSectionV2<T>(args: {
             role: "user",
             content: JSON.stringify({
               ...args.prompt,
-              repair: attempt > 1 ? { attempt, priorValidationError: lastError } : null,
+              repair: attempt > 1
+                ? { attempt, priorValidationError: priorError }
+                : null,
             }),
           },
         ], {
@@ -1665,15 +2036,21 @@ async function generateMysteryAuthoringSectionV2<T>(args: {
           jsonMode: true,
           usagePurpose: "debate_generation",
           allowFinalLocalFallback: lane.providerName === "local",
+          generationWork: work,
           signal,
-        }),
-      });
-      return args.validate(parseJsonObject(response));
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : "Unknown authoring error";
-    }
-  }
-  throw new Error(`${args.label} could not satisfy validation after ${V2_MAX_AUTHOR_ATTEMPTS} bounded attempts. ${lastError}`);
+        });
+    },
+    validate: (response) => args.validate(parseJsonObject(response)),
+  }).catch((error) => {
+    const detail = error instanceof Error
+      ? error.message
+      : "Unknown authoring error";
+    throw new Error(
+      `${args.label} could not satisfy validation after bounded generation. ${detail}`,
+    );
+  });
+  args.onReceipt?.(result.receipt);
+  return result.value;
 }
 
 async function authorMysteryV2(args: {
@@ -1718,7 +2095,7 @@ async function authorMysteryV2(args: {
     return {
       seatId: suspect.seatId,
       name: suspect.name,
-      persona: bot.system_prompt.slice(0, 1_800),
+      botId: bot.id,
       privateRole: suspect.seatId === args.scaffold.culpritSeatId
         ? "culprit"
         : suspect.seatId === args.scaffold.accompliceSeatId
@@ -1734,6 +2111,83 @@ async function authorMysteryV2(args: {
       ordinal: index + 1,
     };
   });
+  const factLedgerWithoutHash = {
+    version: 1 as const,
+    culpritSeatId: args.scaffold.culpritSeatId,
+    accompliceSeatId: args.scaffold.accompliceSeatId,
+    eyewitnessSeatId: args.eyewitnessSeatId,
+    frozenIds: {
+      victimId: args.scaffold.victim.id,
+      suspectSeatIds: args.scaffold.suspects.map((suspect) => suspect.seatId),
+      evidenceIds: args.scaffold.evidence.map((evidence) => evidence.id),
+      examinationIds: courtOnly ? [] : [...args.examinationIds],
+      statementIdsBySeat: Object.fromEntries(
+        suspectRequirements.map((suspect) => [
+          suspect.seatId,
+          suspect.requiredStatementIds,
+        ]),
+      ),
+    },
+    proofRoutesBySeat: Object.fromEntries(
+      [...args.requiredContradictionBySeat].map(([seatId, reference]) => [
+        seatId,
+        `${reference.kind}:${reference.id}`,
+      ]),
+    ),
+    schemaConstraints: {
+      investigationMode: args.config.investigationMode,
+      trialType: args.config.trialType,
+      preset: args.config.preset,
+      difficulty: args.config.difficulty,
+    },
+  };
+  const factLedger: MysteryV2FactLedger = {
+    ...factLedgerWithoutHash,
+    sourceHash: sha256(JSON.stringify(factLedgerWithoutHash)),
+  };
+  if (
+    !args.draft.contextCapsule ||
+    args.draft.contextCapsule.sourceHash !== factLedger.sourceHash
+  ) {
+    const voiceCardsByBotId = await prepareMysteryVoiceCardsV2({
+      runtime: args.runtime,
+      bots: args.bots,
+    });
+    args.draft.contextCapsule = {
+      version: 1,
+      sourceHash: factLedger.sourceHash,
+      factLedger,
+      voiceCardsByBotId,
+    };
+    args.onDraft(args.draft, "Writing the Case · Context prepared");
+  }
+  const voiceCardsByBotId = args.draft.contextCapsule.voiceCardsByBotId;
+  const pendingAudits: Array<
+    Promise<{ sectionKey: string; issues: MysteryV2AuditIssue[] }>
+  > = [];
+  const targetedRepairs = new Map<
+    string,
+    (issues: MysteryV2AuditIssue[]) => Promise<void>
+  >();
+  const queueAudit = (
+    sectionKey: string,
+    section: unknown,
+    relevantFrozenIds: string[],
+  ): void => {
+    pendingAudits.push(
+      auditMysterySectionV2({
+        runtime: args.runtime,
+        sectionKey,
+        section,
+        ledger: factLedger,
+        relevantFrozenIds,
+      }).then((issues) => {
+        const provenance = args.draft.provenanceBySection[sectionKey];
+        if (provenance) provenance.auditIssues = issues;
+        return { sectionKey, issues };
+      }),
+    );
+  };
   const setup = {
     investigationMode: args.config.investigationMode,
     inspiration: args.config.inspiration,
@@ -1756,14 +2210,17 @@ async function authorMysteryV2(args: {
     prosecutor: {
       botId: prosecutor.id,
       name: prosecutor.name,
-      persona: prosecutor.system_prompt.slice(0, 1_800),
+      voiceCard: voiceCardsByBotId[prosecutor.id],
     },
     defenseCounsel: {
       botId: defenseCounsel.id,
       name: defenseCounsel.name,
-      persona: defenseCounsel.system_prompt.slice(0, 1_800),
+      voiceCard: voiceCardsByBotId[defenseCounsel.id],
     },
-    suspects: suspectRequirements,
+    suspects: suspectRequirements.map((suspect) => ({
+      ...suspect,
+      voiceCard: voiceCardsByBotId[suspect.botId],
+    })),
   };
 
   let foundation = args.draft.foundation;
@@ -1778,6 +2235,8 @@ async function authorMysteryV2(args: {
           args.draft,
           `Writing the Case · Drafting foundation · attempt ${attempt} of ${V2_MAX_AUTHOR_ATTEMPTS}`,
         ),
+        onReceipt: (receipt) =>
+          recordMysterySectionReceipt(args.draft, "foundation", receipt),
         prompt: {
           section: "case_foundation",
           setup,
@@ -1809,6 +2268,47 @@ async function authorMysteryV2(args: {
       });
       args.draft.foundationCore = foundationCore;
       args.onDraft(args.draft, "Writing the Case · Foundation complete");
+      queueAudit("foundation", foundationCore, [
+        factLedger.frozenIds.victimId,
+        ...factLedger.frozenIds.suspectSeatIds,
+        ...factLedger.frozenIds.evidenceIds,
+      ]);
+      targetedRepairs.set("foundation", async (issues) => {
+        const repaired = await generateMysteryAuthoringSectionV2({
+          runtime: args.runtime,
+          label: "The case foundation repair",
+          role: "repair",
+          maxTokens: 4_500,
+          prompt: {
+            section: "targeted_section_repair",
+            targetSectionKey: "foundation",
+            frozenLedgerSlice: {
+              sourceHash: factLedger.sourceHash,
+              culpritSeatId: factLedger.culpritSeatId,
+              accompliceSeatId: factLedger.accompliceSeatId,
+              frozenIds: factLedger.frozenIds,
+            },
+            existingSection: args.draft.foundationCore,
+            repairDelta: issues,
+            outputContract: "Return one complete replacement foundation object in the same schema.",
+          },
+          validate: (value) => authoredFoundationCoreFromJson({
+            value,
+            evidenceIds: setup.evidenceIds,
+          }),
+          onReceipt: (receipt) =>
+            recordMysterySectionReceipt(args.draft, "foundation", receipt),
+        });
+        args.draft.foundationCore = repaired;
+        args.draft.foundation = {
+          ...repaired,
+          examinations: setup.examinationIds.map((id) => ({
+            id,
+            text: args.draft.examinationsById[id]!,
+          })),
+        };
+        args.onDraft(args.draft, "Writing the Case · Foundation repaired");
+      });
     }
 
     const examinationChunkSize = 8;
@@ -1830,6 +2330,12 @@ async function authorMysteryV2(args: {
           args.draft,
           `Writing the Case · Drafting room details ${index + 1} of ${examinationChunks.length} · attempt ${attempt} of ${V2_MAX_AUTHOR_ATTEMPTS}`,
         ),
+        onReceipt: (receipt) =>
+          recordMysterySectionReceipt(
+            args.draft,
+            `examinations:${index + 1}`,
+            receipt,
+          ),
         prompt: {
           section: "room_examinations",
           caseFoundation: foundationCore,
@@ -1857,6 +2363,41 @@ async function authorMysteryV2(args: {
         args.draft,
         `Writing the Case · Room details ${index + 1} of ${examinationChunks.length} complete`,
       );
+      const examinationSectionKey = `examinations:${index + 1}`;
+      queueAudit(examinationSectionKey, authoredChunk, missingIds);
+      targetedRepairs.set(examinationSectionKey, async (issues) => {
+        const repaired = await generateMysteryAuthoringSectionV2({
+          runtime: args.runtime,
+          label: `Room examination batch ${index + 1} repair`,
+          role: "repair",
+          maxTokens: 2_500,
+          prompt: {
+            section: "targeted_section_repair",
+            targetSectionKey: examinationSectionKey,
+            frozenLedgerSlice: {
+              sourceHash: factLedger.sourceHash,
+              examinationIds: missingIds,
+            },
+            existingSection: { examinations: authoredChunk },
+            repairDelta: issues,
+            outputContract: "Return a complete examinations array for the exact supplied IDs.",
+          },
+          validate: (value) => authoredExaminationsFromJson({
+            value,
+            examinationIds: missingIds,
+          }),
+          onReceipt: (receipt) =>
+            recordMysterySectionReceipt(
+              args.draft,
+              examinationSectionKey,
+              receipt,
+            ),
+        });
+        repaired.forEach((entry) => {
+          args.draft.examinationsById[entry.id] = entry.text;
+        });
+        args.onDraft(args.draft, "Writing the Case · Room details repaired");
+      });
     }
     foundation = {
       ...foundationCore,
@@ -1868,6 +2409,10 @@ async function authorMysteryV2(args: {
     args.draft.foundation = foundation;
     args.onDraft(args.draft, "Writing the Case · Foundation complete");
   }
+  if (!foundation) {
+    throw new Error("The resumable case draft is missing its foundation.");
+  }
+  const validatedFoundation = foundation;
 
   for (let index = 0; index < suspectRequirements.length; index += 1) {
     const requirement = suspectRequirements[index]!;
@@ -1886,6 +2431,46 @@ async function authorMysteryV2(args: {
         ? [requiredPresentationGateRecord]
         : []),
     ];
+    const relevantEvidenceIds = new Set(
+      requiredPresentRecords
+        .filter((reference) => reference.kind === "evidence")
+        .map((reference) => reference.id),
+    );
+    const suspectSetupPacket = {
+      investigationMode: setup.investigationMode,
+      houseStyle: setup.houseStyle,
+      difficulty: setup.difficulty,
+      trialType: setup.trialType,
+      victimId: setup.victimId,
+      eyewitnessSeatId: setup.eyewitnessSeatId,
+      timeline: setup.timeline,
+      roomNames: setup.roomNames,
+      evidenceIds: setup.evidenceIds,
+      examinationIds: setup.examinationIds,
+      prosecutor: setup.prosecutor,
+      defenseCounsel: setup.defenseCounsel,
+      suspects: setup.suspects,
+      frozenLedger: {
+        culpritSeatId: factLedger.culpritSeatId,
+        accompliceSeatId: factLedger.accompliceSeatId,
+        proofRoute: factLedger.proofRoutesBySeat[requirement.seatId],
+        statementIds: factLedger.frozenIds.statementIdsBySeat[requirement.seatId],
+      },
+    };
+    const suspectFoundationPacket = {
+      title: foundation.title,
+      victimName: foundation.victimName,
+      victimDescription: foundation.victimDescription,
+      motive: foundation.motive,
+      method: foundation.method,
+      eyewitnessResolution:
+        requirement.seatId === args.eyewitnessSeatId
+          ? foundation.eyewitnessResolution
+          : null,
+      evidence: foundation.evidence.filter((evidence) =>
+        relevantEvidenceIds.has(evidence.id),
+      ),
+    };
     const suspect = await generateMysteryAuthoringSectionV2({
       runtime: args.runtime,
       label: `Witness chapter ${index + 1}`,
@@ -1894,10 +2479,16 @@ async function authorMysteryV2(args: {
         args.draft,
         `Writing the Case · Witness chapter ${index + 1} of ${suspectRequirements.length} · attempt ${attempt} of ${V2_MAX_AUTHOR_ATTEMPTS}`,
       ),
+      onReceipt: (receipt) =>
+        recordMysterySectionReceipt(
+          args.draft,
+          `suspect:${requirement.seatId}`,
+          receipt,
+        ),
       prompt: {
         section: "suspect_chapter",
-        setup,
-        caseFoundation: foundation,
+        setup: suspectSetupPacket,
+        caseFoundation: suspectFoundationPacket,
         suspect: requirement,
         precedingSwornStatements: Object.values(args.draft.suspectsBySeatId).flatMap((entry) =>
           entry.testimony.map((statement) => ({ witnessSeatId: entry.seatId, id: statement.id, text: statement.text }))),
@@ -1972,18 +2563,33 @@ async function authorMysteryV2(args: {
           "Write in this suspect's persona with no placeholders.",
         ],
       },
+      sourcePrompt: {
+        section: "suspect_chapter",
+        setup,
+        caseFoundation: foundation,
+        suspect: requirement,
+        precedingSwornStatements: Object.values(
+          args.draft.suspectsBySeatId,
+        ).flatMap((entry) =>
+          entry.testimony.map((statement) => ({
+            witnessSeatId: entry.seatId,
+            id: statement.id,
+            text: statement.text,
+          })),
+        ),
+      },
         validate: (value) => authoredSuspectFromJson({
         value,
         seatId: requirement.seatId,
         requiredPresentRecords,
         requiredPresentationGateRecord,
-        recordItems: foundation.evidence.map((evidence) => ({
+        recordItems: validatedFoundation.evidence.map((evidence) => ({
           reference: { kind: "evidence" as const, id: evidence.id },
           title: evidence.title,
         })),
         rooms: setup.roomNames.map((room) => ({ id: room.roomId, name: room.name })),
         people: [
-          { id: args.scaffold.victim.id, name: foundation.victimName },
+          { id: args.scaffold.victim.id, name: validatedFoundation.victimName },
           ...args.scaffold.suspects.map((suspect) => ({ id: suspect.seatId, name: suspect.name })),
         ],
         courtOnly,
@@ -1991,6 +2597,64 @@ async function authorMysteryV2(args: {
     });
     args.draft.suspectsBySeatId[requirement.seatId] = suspect;
     args.onDraft(args.draft, `Writing the Case · Witness chapter ${index + 1} of ${suspectRequirements.length} complete`);
+    const suspectSectionKey = `suspect:${requirement.seatId}`;
+    const suspectFrozenIds = [
+      requirement.seatId,
+      ...requirement.requiredStatementIds,
+      ...requirement.requiredPresentReactionRecordIds,
+    ];
+    queueAudit(suspectSectionKey, suspect, suspectFrozenIds);
+    targetedRepairs.set(suspectSectionKey, async (issues) => {
+      const repaired = await generateMysteryAuthoringSectionV2({
+        runtime: args.runtime,
+        label: `Witness chapter ${index + 1} repair`,
+        role: "repair",
+        maxTokens: courtOnly ? 3_600 : 5_000,
+        prompt: {
+          section: "targeted_section_repair",
+          targetSectionKey: suspectSectionKey,
+          frozenLedgerSlice: {
+            sourceHash: factLedger.sourceHash,
+            culpritSeatId: factLedger.culpritSeatId,
+            accompliceSeatId: factLedger.accompliceSeatId,
+            proofRoute: factLedger.proofRoutesBySeat[requirement.seatId],
+            relevantFrozenIds: suspectFrozenIds,
+          },
+          existingSection: { suspect: args.draft.suspectsBySeatId[requirement.seatId] },
+          repairDelta: issues,
+          outputContract: "Return one complete replacement suspect object in the same schema. Change only fields named by the repair delta.",
+        },
+        validate: (value) => authoredSuspectFromJson({
+          value,
+          seatId: requirement.seatId,
+          requiredPresentRecords,
+          requiredPresentationGateRecord,
+          recordItems: validatedFoundation.evidence.map((evidence) => ({
+            reference: { kind: "evidence" as const, id: evidence.id },
+            title: evidence.title,
+          })),
+          rooms: setup.roomNames.map((room) => ({
+            id: room.roomId,
+            name: room.name,
+          })),
+          people: [
+            { id: args.scaffold.victim.id, name: validatedFoundation.victimName },
+            ...args.scaffold.suspects.map((entry) => ({
+              id: entry.seatId,
+              name: entry.name,
+            })),
+          ],
+          courtOnly,
+        }),
+        onReceipt: (receipt) =>
+          recordMysterySectionReceipt(args.draft, suspectSectionKey, receipt),
+      });
+      args.draft.suspectsBySeatId[requirement.seatId] = repaired;
+      args.onDraft(
+        args.draft,
+        `Writing the Case · Witness chapter ${index + 1} repaired`,
+      );
+    });
   }
 
   let prosecutionChoices = args.draft.prosecutionChoices;
@@ -2003,10 +2667,29 @@ async function authorMysteryV2(args: {
         args.draft,
         `Writing the Case · Prosecution responses · attempt ${attempt} of ${V2_MAX_AUTHOR_ATTEMPTS}`,
       ),
+      onReceipt: (receipt) =>
+        recordMysterySectionReceipt(
+          args.draft,
+          "prosecution_choices",
+          receipt,
+        ),
       prompt: {
         section: "prosecution_choices",
-        setup,
-        caseFoundation: foundation,
+        setup: {
+          trialType: setup.trialType,
+          victimId: setup.victimId,
+          eyewitnessSeatId: setup.eyewitnessSeatId,
+          roomNames: setup.roomNames,
+          evidenceIds: setup.evidenceIds,
+          examinationIds: setup.examinationIds,
+          prosecutor: setup.prosecutor,
+          defenseCounsel: setup.defenseCounsel,
+          suspects: setup.suspects,
+        },
+        caseFoundation: {
+          title: foundation.title,
+          victimName: foundation.victimName,
+        },
         witnessChapters: Object.values(args.draft.suspectsBySeatId).map((entry) => ({
           seatId: entry.seatId,
           testimony: entry.testimony.map((statement) => ({ id: statement.id, text: statement.text })),
@@ -2037,6 +2720,20 @@ async function authorMysteryV2(args: {
           "Write each option in the frozen Prosecutor persona and keep every nonverbal beat out of spoken text.",
         ],
       },
+      sourcePrompt: {
+        section: "prosecution_choices",
+        setup,
+        caseFoundation: foundation,
+        witnessChapters: Object.values(args.draft.suspectsBySeatId).map(
+          (entry) => ({
+            seatId: entry.seatId,
+            testimony: entry.testimony.map((statement) => ({
+              id: statement.id,
+              text: statement.text,
+            })),
+          }),
+        ),
+      },
       validate: (value) => authoredProsecutionChoicesFromJson(
         value,
         suspectRequirements.map((entry) => entry.seatId),
@@ -2044,7 +2741,61 @@ async function authorMysteryV2(args: {
     });
     args.draft.prosecutionChoices = prosecutionChoices;
     args.onDraft(args.draft, "Writing the Case · Prosecution responses complete");
+    const prosecutionFrozenIds = [
+      ...factLedger.frozenIds.suspectSeatIds,
+      ...Object.values(factLedger.frozenIds.statementIdsBySeat).flat(),
+    ];
+    queueAudit(
+      "prosecution_choices",
+      prosecutionChoices,
+      prosecutionFrozenIds,
+    );
+    targetedRepairs.set("prosecution_choices", async (issues) => {
+      const repaired = await generateMysteryAuthoringSectionV2({
+        runtime: args.runtime,
+        label: "The prosecution response repair",
+        role: "repair",
+        maxTokens: 2_500,
+        prompt: {
+          section: "targeted_section_repair",
+          targetSectionKey: "prosecution_choices",
+          frozenLedgerSlice: {
+            sourceHash: factLedger.sourceHash,
+            relevantFrozenIds: prosecutionFrozenIds,
+          },
+          existingSection: {
+            prosecutionChoices: args.draft.prosecutionChoices,
+          },
+          repairDelta: issues,
+          outputContract: "Return the complete prosecutionChoices array in the same schema. Change only fields named by the repair delta.",
+        },
+        validate: (value) => authoredProsecutionChoicesFromJson(
+          value,
+          suspectRequirements.map((entry) => entry.seatId),
+        ),
+        onReceipt: (receipt) =>
+          recordMysterySectionReceipt(
+            args.draft,
+            "prosecution_choices",
+            receipt,
+          ),
+      });
+      args.draft.prosecutionChoices = repaired;
+      args.onDraft(args.draft, "Writing the Case · Prosecution responses repaired");
+    });
   }
+
+  const auditResults = await Promise.all(pendingAudits);
+  for (const auditResult of auditResults) {
+    const highIssues = auditResult.issues.filter(
+      (issue) => issue.severity === "high",
+    );
+    const repair = targetedRepairs.get(auditResult.sectionKey);
+    if (highIssues.length > 0 && repair) await repair(highIssues);
+  }
+
+  foundation = args.draft.foundation ?? foundation;
+  prosecutionChoices = args.draft.prosecutionChoices ?? prosecutionChoices;
 
   const authored: AuthoredMysteryV2 = {
     ...foundation,
@@ -4902,9 +5653,9 @@ export async function runDebateMysteryCompilationV2(
     let checkpoint: MysteryV2Checkpoint | null = isMysteryV2CompiledCheckpoint(storedCheckpoint)
       ? storedCheckpoint
       : null;
-    const authoringDraft: MysteryV2AuthoringCheckpoint = isMysteryV2AuthoringCheckpoint(storedCheckpoint)
-      ? storedCheckpoint
-      : { kind: "authoring-v1", foundation: null, suspectsBySeatId: {}, prosecutionChoices: null };
+    const authoringDraft = normalizeMysteryV2AuthoringCheckpoint(
+      storedCheckpoint,
+    );
     if (!checkpoint) {
       const suspectRows = config.suspectBotIds.map((id) => {
         const bot = bots.find((entry) => entry.id === id);

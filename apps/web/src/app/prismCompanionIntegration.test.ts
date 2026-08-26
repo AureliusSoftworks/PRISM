@@ -496,7 +496,7 @@ test("keeps the app shell crisp behind a local focus orb while pausing motion", 
   );
   assert.match(page, /acquirePrismLivingSession\("coffee"/u);
   assert.match(page, /const prismSystemPaused = useSyncExternalStore\(/u);
-  assert.match(page, /const prismPresentationSuspended = useSyncExternalStore\(/u);
+  assert.match(page, /const prismPresentationSuspended = usePrismPresentationSuspended\(\)/u);
   assert.match(page, /prismPresentationSuspendedRef\.current/u);
   assert.match(page, /<PrismVisualLifecycleBridge \/>/u);
   assert.match(page, /armAppNavbarAutoHide\(\)/u);

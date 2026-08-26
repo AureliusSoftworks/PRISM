@@ -90,7 +90,8 @@ describe("shared composer actions", () => {
   it("keeps a local Action buffer so deferred parent draft sync cannot reset keystrokes", () => {
     assert.match(pageSource, /const \[actionLocalValue, setActionLocalValue\] = useState\(actionValue\);/u);
     assert.match(pageSource, /const lastEmittedActionRef = useRef\(actionValue\);/u);
-    assert.match(pageSource, /value=\{actionLocalValue\}/u);
+    assert.match(pageSource, /value=\{latencyCritical \? undefined : actionLocalValue\}/u);
+    assert.match(pageSource, /defaultValue=\{latencyCritical \? actionValue : undefined\}/u);
     assert.match(pageSource, /setActionLocalValue\(normalizedAction\)/u);
     assert.match(
       pageSource,
@@ -163,12 +164,12 @@ describe("shared composer actions", () => {
       /\.coffeeSeatActionBadgeText \{[\s\S]{0,400}font-style: italic;[\s\S]{0,280}text-transform: uppercase;/u,
     );
     assert.match(
-      signalSource,
-      /\*\{sentenceCaseActionText\(activeVoiceAction\.action\)\}\*/u,
+      readFileSync(new URL("./SignalVoiceActionText.tsx", import.meta.url), "utf8"),
+      /\*\{sentenceCaseActionText\(action\)\}\*/u,
     );
     assert.match(
-      signalCssSource,
-      /\.avatarRig > \.voiceActionText \{[^}]*text-transform: none;/u,
+      readFileSync(new URL("./SignalVoiceActionText.module.css", import.meta.url), "utf8"),
+      /\.signalVoiceActionText \{[^}]*text-transform: none;/u,
     );
     assert.equal(
       serializeComposerAction("smiles softly", "Hello."),

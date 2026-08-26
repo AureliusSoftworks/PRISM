@@ -224,7 +224,7 @@ describe("Coffee player voice", () => {
     );
     assert.match(
       reveal,
-      /coffeeActiveVoiceMessageIdRef\.current === pendingMessage\?\.id[\s\S]*?voiceSynthesisAbortRef\.current\?\.abort\(\)[\s\S]*?coffeeVoicePlaybackBusyRef\.current = false/
+      /const voiceOwnedReveal =[\s\S]{0,120}coffeeActiveVoiceMessageIdRef\.current === pendingMessage\.id[\s\S]{0,120}voiceSynthesisAbortRef\.current\?\.abort\(\)[\s\S]{0,260}coffeeVoicePlaybackBusyRef\.current = false/
     );
 
     const scheduler = source.slice(
@@ -240,13 +240,16 @@ describe("Coffee player voice", () => {
 
   it("explains the Coffee persona in Default Prism's voice customizer", () => {
     const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
-    assert.match(source, /Prism represents you at the Coffee table/);
+    const personaStart = source.indexOf("Prism represents you at the Coffee table");
+    const personaEnd = source.indexOf("</p>", personaStart);
+    const personaSource = source.slice(personaStart, personaEnd);
+    assert.match(personaSource, /Prism represents you at the Coffee table/);
     assert.match(
-      source,
+      personaSource,
       /live\s+messages\s+and session\s+replays use this voice/
     );
-    assert.doesNotMatch(source, /Your table voice|Name pronunciation/);
-    assert.doesNotMatch(source, /playerNamePronunciation/);
+    assert.doesNotMatch(personaSource, /Your table voice|Name pronunciation/);
+    assert.doesNotMatch(personaSource, /playerNamePronunciation/);
     assert.match(
       source,
       /coffeePlayerPlaybackProfile\(settings\.prismDefaultBotAudioVoiceProfile\)/,

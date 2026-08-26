@@ -1688,6 +1688,30 @@ export interface UsageRecentEvent {
   estimatedCostMicroUsd: number | null;
   costEstimated: boolean;
   unpriced: boolean;
+  workflow?: string | null;
+  workflowStage?: string | null;
+  workRole?: "prepare" | "connective" | "audit" | "author" | "repair" | null;
+  workCacheHit?: boolean | null;
+  fallbackReason?: string | null;
+  contextTokensKeptLocal?: number | null;
+}
+
+export interface UsageLocalFirstBreakdownItem {
+  key: string;
+  workflow: string;
+  stage: string;
+  assistedOperationCount: number;
+  localTokens: number;
+  onlineTokens: number;
+  estimatedContextTokensKeptLocal: number;
+}
+
+export interface UsageLocalFirstBalance {
+  localTokens: number;
+  onlineTokens: number;
+  assistedOperationCount: number;
+  estimatedContextTokensKeptLocal: number;
+  byAppletStage: UsageLocalFirstBreakdownItem[];
 }
 
 export interface UsageResponse {
@@ -1699,6 +1723,7 @@ export interface UsageResponse {
   byProvider: UsageBreakdownItem[];
   byModel: UsageBreakdownItem[];
   byPurpose: UsageBreakdownItem[];
+  localFirst: UsageLocalFirstBalance;
   recentEvents: UsageRecentEvent[];
   trackingStartedAt: string | null;
   hasUntrackedHistory: boolean;

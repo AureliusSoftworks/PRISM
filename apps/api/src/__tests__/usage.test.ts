@@ -5,6 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDatabase } from "../db.ts";
 import {
+  normalizePrismGenerationWorkContext,
+  runWithPrismGenerationWorkContext,
+} from "../generation-work.ts";
+import {
   getUsageReport,
   patchUsageSession,
   recordEstimatedEmbeddingUsage,
@@ -454,6 +458,72 @@ describe("usage accounting", () => {
       assert.equal(report.totals.eventCount, 1);
       assert.equal(report.totals.onlineTokens, 300);
       assert.equal(report.recentEvents.length, 0);
+    });
+  });
+
+  it("reports additive local-first metadata without exposing private detail", () => {
+    withUsageTestDb((db) => {
+      const recordBrokeredUsage = (privacyScope: "normal" | "private") =>
+        runWithUsageSession(
+          {
+            db,
+            userId: "user-1",
+            privacyScope,
+            mode: "system",
+            surface: "debate",
+          },
+          () =>
+            runWithPrismGenerationWorkContext(
+              normalizePrismGenerationWorkContext({
+                workflow: "case_forge",
+                operation: "author_case_section",
+                stage: "suspect_chapter",
+                executionLane: "selected",
+                role: "author",
+                outputClass: "critical",
+                priority: "compilation",
+                privacyMode: privacyScope === "private" ? "local" : "auto",
+                sourceTokenEstimate: 900,
+                exportedTokenEstimate: 300,
+                fallbackReason: "sealed validation detail must not persist",
+              }),
+              () =>
+                recordTextUsage({
+                  provider: privacyScope === "private" ? "local" : "openai",
+                  model: privacyScope === "private" ? "llama3.2" : "gpt-5.6-sol",
+                  purpose: "debate_generation",
+                  inputTokens: 300,
+                  outputTokens: 100,
+                  totalTokens: 400,
+                  tokenCountSource: "provider_reported",
+                }),
+            ),
+        );
+
+      recordBrokeredUsage("normal");
+      recordBrokeredUsage("private");
+
+      const report = getUsageReport({ db, userId: "user-1", range: "all" });
+      assert.equal(report.localFirst.assistedOperationCount, 2);
+      assert.equal(report.localFirst.localTokens, 400);
+      assert.equal(report.localFirst.onlineTokens, 400);
+      assert.equal(report.localFirst.estimatedContextTokensKeptLocal, 1_200);
+      assert.deepEqual(
+        report.localFirst.byAppletStage.map((item) => [
+          item.workflow,
+          item.stage,
+          item.assistedOperationCount,
+        ]),
+        [["case_forge", "suspect_chapter", 2]],
+      );
+      assert.equal(report.recentEvents.length, 1);
+      assert.equal(report.recentEvents[0]?.workflow, "case_forge");
+      assert.equal(report.recentEvents[0]?.workRole, "author");
+      assert.equal(report.recentEvents[0]?.fallbackReason, "recovery");
+      assert.equal(
+        JSON.stringify(report).includes("sealed validation detail"),
+        false,
+      );
     });
   });
 

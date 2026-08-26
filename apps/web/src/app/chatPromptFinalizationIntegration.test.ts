@@ -77,7 +77,7 @@ test("immersive Zen speaks canonical prompt text and never paints the pending te
   );
   assert.match(
     pageSource,
-    /onStart: \(durationMs\) => \{[\s\S]*?beginReveal\(/u,
+    /const runSilentFallback = \(\): void => \{[\s\S]{0,180}beginReveal\(silentRevealDurationMs, null\)[\s\S]{0,1800}runSilentFallback\(\);/u,
   );
 });
 

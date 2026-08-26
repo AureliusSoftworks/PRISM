@@ -60,11 +60,11 @@ describe("waiting-room Coffee staging integration", () => {
     const runnerSource = pageSource.slice(runnerStart, runnerEnd);
     assert.match(
       runnerSource,
-      /availableGroups\.find\([\s\S]*?group\.libraryGroupId === launch\.sourceGroupId/u,
+      /availableGroups\.find\([\s\S]*?coffeeGroupRosterSignature\(group\.botGroupIds\)[\s\S]*?coffeeGroupRosterSignature\(selectedBotIds\)/u,
     );
     assert.match(
       runnerSource,
-      /libraryGroupId: launch\.sourceGroupId/u,
+      /botLibraryGroupsRef\.current\.find\([\s\S]*?group\.id === launch\.sourceGroupId/u,
     );
     assert.match(
       runnerSource,

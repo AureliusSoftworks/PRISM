@@ -10,6 +10,7 @@ import {
 import { formatDebateMysteryV2ForgeErrorDetails } from "./debateMysteryV2ForgeFailureDetails.ts";
 import {
   debateMysteryForgeAuthoritativePercent,
+  debateMysteryForgeStageIsActive,
   formatDebateMysteryForgeElapsed,
   formatDebateMysteryForgeEta,
 } from "./debateMysteryV2ForgeProgress.ts";
@@ -315,7 +316,7 @@ describe("Whodunnit V2 prosecution experience", () => {
       /\/api\/debates\/\$\{encodeURIComponent\(sessionId\)\}\/mystery-resume-compilation/u,
     );
     assert.match(experienceSource, /window\.setTimeout\(\(\) => void refresh\(\), 900\)/u);
-    assert.match(experienceSource, /nextCompilation\?\.stage !== "needs_attention"/u);
+    assert.match(experienceSource, /debateMysteryForgeStageIsActive\(nextCompilation\.stage\)/u);
     assert.match(experienceSource, /Retry preparation/u);
     assert.match(experienceSource, /Copy error details/u);
     assert.match(experienceSource, /Error details copied to clipboard/u);
@@ -327,6 +328,21 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /resume from the last durable checkpoint/u);
     assert.match(experienceSource, /needsAttention \? "error" : "active"/u);
     assert.match(cssSource, /li\[data-state="error"\]/u);
+  });
+
+  it("keeps active local-recording progress ahead of stale resume snapshots", () => {
+    assert.equal(debateMysteryForgeStageIsActive("preparing_local_voices"), true);
+    assert.equal(debateMysteryForgeStageIsActive("complete"), false);
+    assert.equal(debateMysteryForgeStageIsActive("needs_attention"), false);
+    assert.equal(debateMysteryForgeStageIsActive("cancelled"), false);
+    assert.match(experienceSource, /const onSessionChangeRef = useRef\(onSessionChange\)/u);
+    assert.match(experienceSource, /onSessionChangeRef\.current = onSessionChange/u);
+    assert.match(experienceSource, /const liveCompilationRef = useRef\(liveCompilation\)/u);
+    assert.match(experienceSource, /const shouldApplyResumeResponse =/u);
+    assert.match(experienceSource, /!debateMysteryForgeStageIsActive\(resumedState\.compilation\.stage\)/u);
+    assert.match(experienceSource, /if \(!cancelled && shouldApplyResumeResponse\) \{[\s\S]*onSessionChangeRef\.current\(result\.session\)/u);
+    assert.match(experienceSource, /\}, \[request, resumeNonce, sessionId\]\);/u);
+    assert.doesNotMatch(experienceSource, /\}, \[onSessionChange, request, resumeNonce, sessionId\]\);/u);
   });
 
   it("renders authoritative checkpoint progress with elapsed time and a learned ETA", () => {

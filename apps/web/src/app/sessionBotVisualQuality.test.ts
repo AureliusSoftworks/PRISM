@@ -49,7 +49,7 @@ test("Coffee and Signal preserve authored live avatars while shedding peripheral
   assert.doesNotMatch(pageSource, /data-coffee-live-seat-avatar/u);
   assert.match(
     pageSource,
-    /runtimeEffectsEnabled=\{!signalLivePerformanceAvatar\}/u,
+    /runtimeEffectsEnabled: !signalLivePerformanceAvatar/u,
   );
   assert.match(debateSource, /data-session-bot-visual-quality/u);
   assert.match(

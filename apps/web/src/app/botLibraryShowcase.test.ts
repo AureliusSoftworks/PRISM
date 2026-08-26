@@ -327,7 +327,7 @@ describe("selected bot library showcase", () => {
       "useEffect(() => {\n    voicePreviewPlaybackRunRef.current += 1;",
     );
     const resetEffectEnd = pageSource.indexOf(
-      "  useEffect(() => {\n    signalVoiceClipCacheRef.current.clear();",
+      "  useEffect(() => {\n    signalVoicePrefetchSchedulerRef.current.clear();",
       resetEffectStart,
     );
     const resetEffectSource = pageSource.slice(

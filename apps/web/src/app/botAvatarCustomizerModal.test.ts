@@ -1520,7 +1520,7 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(pageSource, /Show optional pronunciation/);
   assert.match(
     pageSource,
-    /Only needed when speech gets the name wrong\. Leave blank unless\s+you type a phonetic spelling\./,
+    /Only needed when speech gets the name wrong\. A phonetic spelling\s+may include \*breath\* or \*sigh\* for a timed vocal sound\./,
   );
   assert.match(pageSource, /aria-label="Bot name pronunciation"/);
   assert.match(pageSource, /placeholder="Phonetic spelling, if needed"/);

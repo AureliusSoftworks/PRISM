@@ -15,6 +15,10 @@ const signalCss = readFileSync(
   new URL("./botcast.module.css", import.meta.url),
   "utf8",
 );
+const signalVoiceActionCss = readFileSync(
+  new URL("./SignalVoiceActionText.module.css", import.meta.url),
+  "utf8",
+);
 
 describe("avatar visibility Power visual contract", () => {
   it("fully hides Chat and Zen embodiments while preserving their outer plate", () => {
@@ -73,9 +77,9 @@ describe("avatar visibility Power visual contract", () => {
   it("leaves Signal attribution outside the hidden embodiment", () => {
     assert.match(
       signalSource,
-      /<span className=\{styles\.avatarEmbodiment\}[\s\S]{0,600}<\/span>[\s\S]{0,300}className=\{styles\.voiceActionText\}/u,
+      /<span className=\{styles\.avatarEmbodiment\}[\s\S]{0,600}<\/span>[\s\S]{0,300}<SignalVoiceActionText/u,
     );
-    assert.match(signalCss, /\.avatarRig > \.voiceActionText/u);
+    assert.match(signalVoiceActionCss, /\.signalVoiceActionText\s*\{/u);
   });
 
   it("adapts hidden, translucent, and speaking-only states to Story", () => {

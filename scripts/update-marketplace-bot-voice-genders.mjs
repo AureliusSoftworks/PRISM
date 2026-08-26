@@ -52,7 +52,7 @@ const manifestPath = join(marketplaceRoot, "manifest.json");
  * persona's regional speech identity without forcing timbre selection to do so.
  */
 const CURATED_BOT_IDS_BY_VOICE = {
-  "voice-1": ["marie-antoinette"],
+  "voice-1": [],
   "voice-2": ["iris", "scheherazade"],
   "voice-3": [
     "rowan",
@@ -80,7 +80,7 @@ const CURATED_BOT_IDS_BY_VOICE = {
     "near"
   ],
   "voice-6": ["sol", "tiny-bill", "mumbling-jim"],
-  "voice-7": ["mira", "marie-curie", "harriet-tubman", "ron-weasley"],
+  "voice-7": ["mira", "marie-curie", "harriet-tubman"],
   "voice-8": ["khloe-kardashian", "kim-kardashian"],
   "voice-9": ["kourtney-kardashian-barker", "meg-griffin"],
   "voice-10": ["darth-vader", "rancor"],
@@ -108,6 +108,7 @@ const CURATED_BOT_IDS_BY_VOICE = {
     "andy-hominem",
     "hueist-hugh",
     "dante-alighieri",
+    "ron-weasley",
     "raze",
     "stewie-griffin"
   ],
@@ -175,7 +176,12 @@ const CURATED_BOT_IDS_BY_VOICE = {
     "ryuk"
   ],
   "voice-23": ["hagrid", "mr-krabs", "patrick-star", "peter-griffin"],
-  "voice-24": ["jane-austen", "hermione-granger", "professor-mcgonagall"],
+  "voice-24": [
+    "jane-austen",
+    "hermione-granger",
+    "marie-antoinette",
+    "professor-mcgonagall",
+  ],
   "voice-25": ["mary-shelley"],
   "voice-26": ["sad-sally"],
   "voice-27": [

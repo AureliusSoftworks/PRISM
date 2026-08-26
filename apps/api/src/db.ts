@@ -660,6 +660,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       token_count_source TEXT NOT NULL DEFAULT 'unavailable',
       cost_micro_usd INTEGER,
       pricing_snapshot_json TEXT,
+      workflow TEXT,
+      workflow_stage TEXT,
+      work_role TEXT,
+      work_execution_lane TEXT,
+      work_output_class TEXT,
+      work_cache_hit INTEGER,
+      work_fallback_reason TEXT,
+      work_context_tokens_kept_local INTEGER,
       created_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE SET NULL,
@@ -3087,6 +3095,25 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       "ALTER TABLE slate_continuity_entities ADD COLUMN anchors_json TEXT NOT NULL DEFAULT '[]';",
     );
   }
+  const usageEventColumns = db
+    .prepare("PRAGMA table_info(usage_events)")
+    .all() as Array<{ name: string }>;
+  const usageEventColumnMigrations: Array<[string, string]> = [
+    ["workflow", "TEXT"],
+    ["workflow_stage", "TEXT"],
+    ["work_role", "TEXT"],
+    ["work_execution_lane", "TEXT"],
+    ["work_output_class", "TEXT"],
+    ["work_cache_hit", "INTEGER"],
+    ["work_fallback_reason", "TEXT"],
+    ["work_context_tokens_kept_local", "INTEGER"],
+  ];
+  for (const [name, type] of usageEventColumnMigrations) {
+    if (!usageEventColumns.some((column) => column.name === name)) {
+      db.exec(`ALTER TABLE usage_events ADD COLUMN ${name} ${type};`);
+    }
+  }
+
   const userColumns = db.prepare("PRAGMA table_info(users)").all() as Array<{
     name: string;
   }>;

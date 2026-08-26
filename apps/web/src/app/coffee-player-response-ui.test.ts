@@ -57,10 +57,10 @@ describe("Coffee player response UI wiring", () => {
     const handlerSource = pageSource.slice(handlerStart, handlerEnd);
 
     assert.ok(handlerStart >= 0 && handlerEnd > handlerStart);
-    assert.match(
-      handlerSource,
-      /function updateCoffeeDraftFromComposer\(next: string\): void \{\s*preemptCoffeeAutonomyForPlayerInput\(\);\s*coffeeDraftRef\.current = next;\s*if \(next\.trim\(\)\.length === 0\) \{\s*scheduleCoffeeComposerInputPriorityRelease\(\);\s*\}\s*\}/,
-    );
+    assert.match(handlerSource, /preemptCoffeeAutonomyForPlayerInput\(\)/u);
+    assert.match(handlerSource, /coffeeDraftRef\.current = next/u);
+    assert.match(handlerSource, /const nextHasText = next\.trim\(\)\.length > 0/u);
+    assert.match(handlerSource, /scheduleCoffeeComposerInputPriorityRelease\(\)/u);
     assert.doesNotMatch(handlerSource, /setCoffeeDraft|setCoffeeComposerHasDraft/);
     assert.doesNotMatch(pageSource, /pendingCoffeeDraftSync/);
     assert.doesNotMatch(pageSource, /COFFEE_COMPOSER_PARENT_DRAFT_SYNC_MS/);

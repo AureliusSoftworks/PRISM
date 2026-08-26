@@ -124,12 +124,12 @@ test("Zen, Coffee, and live Signal resolve each visible bot's SFX and live state
   );
 
   const signalSource = sourceBefore(
-    "scheduleKey={`botcast-${avatarState.role}-${bot.id}`}",
-    3_000,
+    "scheduleKey: `botcast-${avatarState.role}-${bot.id}`",
+    3_500,
   );
   assert.match(
     signalSource,
-    /avatarSfx=\{[\s\S]{0,80}avatarState\.sfxEnabled[\s\S]{0,180}botAvatarSfxForVoiceBus\([\s\S]{0,120}botAvatarSfxForBot\(bot\)/u,
+    /signalMannequinAvatarSfx =[\s\S]{0,180}avatarState\.sfxEnabled[\s\S]{0,220}botAvatarSfxForVoiceBus\([\s\S]{0,120}botAvatarSfxForBot\(bot\)/u,
   );
   assert.match(signalSource, /avatarState\.talking/);
   assert.match(signalSource, /avatarState\.thinking/);
@@ -161,10 +161,10 @@ test("Signal keeps dashboard avatars quiet and respects Persona SFX triggers on 
   );
   assert.match(botcastSource, /surface: "archive"/u);
   const liveStageAvatarSource = botcastSource.slice(
-    botcastSource.indexOf("const renderedAvatar = renderAvatar?.(bot, {"),
+    botcastSource.indexOf("const renderedAvatar = renderAvatar?.(stageBot, {"),
     botcastSource.indexOf(
       "if (renderedAvatar !== null",
-      botcastSource.indexOf("const renderedAvatar = renderAvatar?.(bot, {"),
+      botcastSource.indexOf("const renderedAvatar = renderAvatar?.(stageBot, {"),
     ),
   );
   assert.match(liveStageAvatarSource, /surface: "stage"/u);
@@ -197,11 +197,11 @@ test("Signal keeps dashboard avatars quiet and respects Persona SFX triggers on 
   assert.doesNotMatch(signalMixSource, /playWhileThinking: true/u);
 
   const producerSource = sourceBefore(
-    'scheduleKey="botcast-producer-prism"',
+    'scheduleKey: "botcast-producer-prism"',
     3_000,
   );
   assert.match(
     producerSource,
-    /avatarSfx=\{[\s\S]{0,100}avatarState\.sfxEnabled[\s\S]{0,220}botAvatarSfxForVoiceBus\([\s\S]{0,100}botAvatarSfxForProfile\([\s\S]{0,180}avatarState\.sfxVoiceBusGain/u,
+    /signalPrismAvatarSfx =[\s\S]{0,180}avatarState\.sfxEnabled[\s\S]{0,240}botAvatarSfxForVoiceBus\([\s\S]{0,140}botAvatarSfxForProfile\([\s\S]{0,220}avatarState\.sfxVoiceBusGain/u,
   );
 });

@@ -1,3 +1,11 @@
+import type { DebateMysteryCompilationStageV2 } from "@localai/shared";
+
+export function debateMysteryForgeStageIsActive(
+  stage: DebateMysteryCompilationStageV2,
+): boolean {
+  return stage !== "complete" && stage !== "needs_attention" && stage !== "cancelled";
+}
+
 export function debateMysteryForgeAuthoritativePercent(
   completedPasses: number,
   totalPasses: number,

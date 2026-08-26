@@ -3820,7 +3820,7 @@ describe("Zen live presence CSS", () => {
     assert.doesNotMatch(mannequinSource, /zenLiveBotPresenceSpinner/);
     assert.match(
       pageSource,
-      /const zenPendingReplyPlaceholderVisible =\s+chatLikeSurface &&\s+pendingReplyVisualVisible &&\s+!zenPlayerMessageRevealActive &&\s+!chatAssistantRevealInProgress;/,
+      /const zenPendingReplyPlaceholderVisible =\s+chatLikeSurface &&\s+pendingReplyVisualVisible &&\s+!zenPlayerMessageRevealActive &&\s+!zenResponseRevealActive;/,
     );
 
     const spinnerFrameRule = ruleForExactSelector(

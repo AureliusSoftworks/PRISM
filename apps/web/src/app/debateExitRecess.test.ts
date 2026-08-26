@@ -108,7 +108,7 @@ test("Leave Debate stays portal-mounted, enabled, and requires two activations",
     /if \(!leaveDebateArmed\) \{[\s\S]{0,140}setLeaveDebateArmed\(true\);[\s\S]{0,300}void softPauseForRecess\(\);[\s\S]{0,60}return;[\s\S]{0,80}exitLiveSessionToStudio\(\)/u,
   );
   const portalStart = source.indexOf(
-    "liveSessionActive && activeSession && leaveDebatePortalTarget",
+    "liveSessionActive &&\n      view !== \"mystery\" &&\n      activeSession &&\n      leaveDebatePortalTarget",
   );
   const portalEnd = source.indexOf("{experience}", portalStart);
   const portalBlock = source.slice(portalStart, portalEnd);

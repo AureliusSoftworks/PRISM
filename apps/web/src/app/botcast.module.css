@@ -69,7 +69,7 @@
   --botcast-curtain: #fff;
   --botcast-logo-surface: color-mix(in srgb, var(--botcast-accent) 6%, #f7f8fc);
   --botcast-logo-art-shadow: drop-shadow(0 1px 1px rgba(16,18,31,.24)) drop-shadow(0 5px 12px rgba(66,69,103,.16));
-  --botcast-photo-frame: linear-gradient(165deg, #fffdf8 0%, #f4eee9 60%, #e8deda 100%);
+  --botcast-photo-frame: linear-gradient(165deg, #fbfdff 0%, #eef4f9 60%, #dbe6ee 100%);
   --botcast-photo-edge: rgba(69, 56, 75, .22);
   --botcast-photo-shadow: 0 15px 34px rgba(58,48,72,.24), 0 2px 5px rgba(58,48,72,.2), inset 0 1px 0 rgba(255,255,255,.72);
 }

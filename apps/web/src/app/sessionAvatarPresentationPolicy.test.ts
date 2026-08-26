@@ -91,7 +91,7 @@ describe("session avatar presentation policy", () => {
     );
   });
 
-  it("keeps authored Coffee and Signal bodies and full live phosphor effects", () => {
+  it("keeps authored Coffee and Signal bodies while shedding only peripheral live effects", () => {
     assert.match(
       signalSource,
       /signalAvatarPresentation\(\{[\s\S]{0,100}live: !args\.replay/u,
@@ -114,7 +114,19 @@ describe("session avatar presentation policy", () => {
       pageSource,
       /const coffeeLiveMinimumRenderedSizeTier = "full" as const/u,
     );
-    assert.doesNotMatch(pageSource, /signalLivePerformanceAvatar/u);
+    const signalRenderer = pageSource.slice(
+      pageSource.indexOf("renderAvatar={(botSummary, avatarState) => {"),
+      pageSource.indexOf("renderMug={(botSummary, mugState) => {"),
+    );
+    assert.match(signalRenderer, /signalLivePerformanceAvatar/u);
+    assert.match(
+      signalRenderer,
+      /pixelRasterizationEnabled: !signalLivePerformanceAvatar/u,
+    );
+    assert.match(
+      signalRenderer,
+      /runtimeEffectsEnabled: !signalLivePerformanceAvatar/u,
+    );
     assert.doesNotMatch(pageSource, /runtimeEffectsEnabled:\s*coffeeReplayActive/u);
     assert.match(
       pageSource,

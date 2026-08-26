@@ -61,6 +61,7 @@ import type { BotPickerGlyphRenderer } from "./BotPicker";
 import { formatDebateMysteryV2ForgeErrorDetails } from "./debateMysteryV2ForgeFailureDetails";
 import {
   debateMysteryForgeAuthoritativePercent,
+  debateMysteryForgeStageIsActive,
   formatDebateMysteryForgeElapsed,
   formatDebateMysteryForgeEta,
 } from "./debateMysteryV2ForgeProgress";
@@ -378,15 +379,25 @@ export function DebateMysteryV2CompilationResume(
   const [errorDetailsCopyState, setErrorDetailsCopyState] = useState<V2ForgeErrorCopyState>("idle");
   const [clockNowMs, setClockNowMs] = useState(() => Date.now());
   const [liveCompilation, setLiveCompilation] = useState(state.compilation);
+  const liveCompilationRef = useRef(liveCompilation);
   const [forgeTipIndex, setForgeTipIndex] = useState(0);
   const sessionId = props.session.id;
   const request = props.request;
   const onSessionChange = props.onSessionChange;
+  const onSessionChangeRef = useRef(onSessionChange);
   const reducedMotion = usePrefersReducedMotion();
+
+  useEffect(() => {
+    onSessionChangeRef.current = onSessionChange;
+  }, [onSessionChange]);
 
   useEffect(() => {
     setLiveCompilation(state.compilation);
   }, [state.compilation]);
+
+  useEffect(() => {
+    liveCompilationRef.current = liveCompilation;
+  }, [liveCompilation]);
 
   useEffect(() => {
     let cancelled = false;
@@ -401,7 +412,17 @@ export function DebateMysteryV2CompilationResume(
           `/api/debates/${encodeURIComponent(sessionId)}/mystery-resume-compilation`,
           mutationBody({}),
         );
-        if (!cancelled) onSessionChange(result.session);
+        const resumedState = result.session.formatState;
+        const shouldApplyResumeResponse =
+          resumedState.format !== "whodunnit" ||
+          resumedState.version !== 2 ||
+          !debateMysteryForgeStageIsActive(resumedState.compilation.stage);
+        // An active resume returns the session's last durable public snapshot.
+        // The status poll owns live recording counts, so accepting that stale
+        // snapshot would erase the counter that just arrived from the job.
+        if (!cancelled && shouldApplyResumeResponse) {
+          onSessionChangeRef.current(result.session);
+        }
       } catch (caught) {
         if (!cancelled) {
           setError(caught instanceof Error ? caught.message : "Case Forge could not resume.");
@@ -424,19 +445,18 @@ export function DebateMysteryV2CompilationResume(
           : null;
         if (nextCompilation && next.format === "whodunnit" && next.version === 2) {
           setLiveCompilation(nextCompilation);
-          onSessionChange({
+          onSessionChangeRef.current({
             ...result.session,
             formatState: { ...next, compilation: nextCompilation },
           });
         } else {
-          onSessionChange(result.session);
+          onSessionChangeRef.current(result.session);
         }
         if (
           next.format === "whodunnit" &&
           next.version === 2 &&
-          nextCompilation?.stage !== "complete" &&
-          nextCompilation?.stage !== "needs_attention" &&
-          nextCompilation?.stage !== "cancelled"
+          nextCompilation !== null &&
+          debateMysteryForgeStageIsActive(nextCompilation.stage)
         ) {
           void resumeCompilation();
           timer = window.setTimeout(() => void refresh(), 900);
@@ -449,11 +469,7 @@ export function DebateMysteryV2CompilationResume(
       }
     };
     void refresh();
-    if (
-      liveCompilation.stage !== "complete" &&
-      liveCompilation.stage !== "needs_attention" &&
-      liveCompilation.stage !== "cancelled"
-    ) {
+    if (debateMysteryForgeStageIsActive(liveCompilationRef.current.stage)) {
       void resumeCompilation();
     }
     return () => {
@@ -461,15 +477,11 @@ export function DebateMysteryV2CompilationResume(
       if (timer !== null) window.clearTimeout(timer);
     };
   // A nonce deliberately restarts the durable resume loop after a player retry.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onSessionChange, request, resumeNonce, sessionId]);
+  }, [request, resumeNonce, sessionId]);
 
   const compilation = liveCompilation;
   const needsAttention = compilation.stage === "needs_attention";
-  const compilationActive =
-    compilation.stage !== "complete" &&
-    compilation.stage !== "needs_attention" &&
-    compilation.stage !== "cancelled";
+  const compilationActive = debateMysteryForgeStageIsActive(compilation.stage);
   useEffect(() => {
     if (!compilationActive) return;
     setClockNowMs(Date.now());

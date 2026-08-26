@@ -17,7 +17,7 @@ describe("bot-grid hue lens contract", () => {
   it("enumerates every active BotPickerGrid surface with its canvas or chrome lens", () => {
     assert.equal((page.match(/<BotPickerGrid\b/gu) ?? []).length, 4);
     assert.match(page, /const renderChatBotPickerGrid/u);
-    assert.match(page, /<HueLensControl[\s\S]{0,240}coffeeHueLensCenter/u);
+    assert.match(page, /<HueLensControl[\s\S]{0,420}hueFilterCenter=\{hueFilterCenter\}/u);
     assert.match(page, /className=\{coffeeCanvasBotGridClassName\}/u);
     assert.match(page, /<HueLensControl[\s\S]{0,360}hueLensTrackSegments/u);
 

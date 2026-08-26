@@ -59,7 +59,7 @@ test("Signal keeps the shared authored renderer on its live stage", () => {
   assert.doesNotMatch(pageSource, /data-signal-live-compact-avatar/u);
   assert.match(
     pageSource,
-    /const signalMannequinProps:[\s\S]*?detailLevel:\s*"full"[\s\S]{0,160}pixelRasterizationEnabled:\s*!signalLivePerformanceAvatar[\s\S]{0,160}runtimeEffectsEnabled:\s*!signalLivePerformanceAvatar[\s\S]{0,160}minimumRenderedSizeTier:\s*"full"/u,
+    /const signalMannequinProps:[\s\S]*?detailLevel:\s*"full"[\s\S]{0,320}minimumRenderedSizeTier:\s*"full"[\s\S]{0,800}pixelRasterizationEnabled:\s*!signalLivePerformanceAvatar[\s\S]{0,160}runtimeEffectsEnabled:\s*!signalLivePerformanceAvatar/u,
   );
   assert.match(pageSource, /data-prism-priority-phosphor="true"/u);
   assert.match(pageSource, /minimumRenderedSizeTier="full"/u);

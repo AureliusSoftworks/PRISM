@@ -6375,6 +6375,13 @@ const USAGE_CSV_HEADERS = [
   "created_at",
   "surface",
   "mode",
+  "workflow",
+  "workflow_stage",
+  "work_role",
+  "cache_hit",
+  "fallback_reason",
+  "assisted_operations",
+  "context_tokens_kept_local",
   "input_tokens",
   "output_tokens",
   "total_tokens",
@@ -6520,6 +6527,20 @@ function buildUsageCsv(report: UsageResponse): string {
       "Private/incognito usage is included in totals only, not recent activity rows.",
   });
   addTotalRow("summary", "totals", "all", "All tracked usage", report.totals);
+  report.localFirst.byAppletStage.forEach((item) => {
+    addRow({
+      section: "local_first",
+      group: "applet_stage",
+      key: item.key,
+      label: `${usagePurposeLabel(item.workflow)} · ${usagePurposeLabel(item.stage)}`,
+      workflow: item.workflow,
+      workflow_stage: item.stage,
+      local_tokens: item.localTokens,
+      online_tokens: item.onlineTokens,
+      assisted_operations: item.assistedOperationCount,
+      context_tokens_kept_local: item.estimatedContextTokensKeptLocal,
+    });
+  });
   addBreakdownRows("purpose", report.byPurpose);
   addBreakdownRows("model", report.byModel);
   addBreakdownRows("provider", report.byProvider);
@@ -6535,6 +6556,12 @@ function buildUsageCsv(report: UsageResponse): string {
       created_at: event.createdAt,
       surface: event.surface,
       mode: event.mode,
+      workflow: event.workflow,
+      workflow_stage: event.workflowStage,
+      work_role: event.workRole,
+      cache_hit: event.workCacheHit,
+      fallback_reason: event.fallbackReason,
+      context_tokens_kept_local: event.contextTokensKeptLocal,
       input_tokens: event.inputTokens,
       output_tokens: event.outputTokens,
       total_tokens: event.totalTokens,
@@ -114541,6 +114568,94 @@ function HomeContent(): React.JSX.Element {
             </div>
           </div>
 
+          {usageReport ? (
+            <section
+              className={styles.usageBreakdownSection}
+              aria-label="Local-first balance"
+            >
+              <div className={styles.usageBreakdownHeader}>
+                <h4>Local-first balance</h4>
+                <span>
+                  {formatUsageNumber(
+                    usageReport.localFirst.assistedOperationCount,
+                  )}{" "}
+                  assisted
+                </span>
+              </div>
+              <p className={styles.usagePreferredProvidersHint}>
+                PRISM prepares and compresses locally, then uses your selected
+                model for critical authorship. Kept-local context is estimated
+                with the same token counter before and after packet reduction.
+              </p>
+              <div className={styles.usageMetricGrid}>
+                <div className={styles.usageMetric}>
+                  <span>Actual local tokens</span>
+                  <strong>
+                    {formatUsageNumber(usageReport.localFirst.localTokens)}
+                  </strong>
+                </div>
+                <div className={styles.usageMetric}>
+                  <span>Actual online tokens</span>
+                  <strong>
+                    {formatUsageNumber(usageReport.localFirst.onlineTokens)}
+                  </strong>
+                </div>
+                <div className={styles.usageMetric}>
+                  <span>Assisted operations</span>
+                  <strong>
+                    {formatUsageNumber(
+                      usageReport.localFirst.assistedOperationCount,
+                    )}
+                  </strong>
+                </div>
+                <div className={styles.usageMetric}>
+                  <span>Context kept local</span>
+                  <strong>
+                    {formatUsageNumber(
+                      usageReport.localFirst.estimatedContextTokensKeptLocal,
+                    )}
+                  </strong>
+                  <small>estimated tokens</small>
+                </div>
+              </div>
+              {usageReport.localFirst.byAppletStage.length > 0 ? (
+                <ul className={styles.usageBreakdownList}>
+                  {usageReport.localFirst.byAppletStage.map((item) => (
+                    <li key={item.key} className={styles.usageBreakdownItem}>
+                      <div className={styles.usageBreakdownItemTop}>
+                        <strong>
+                          {usagePurposeLabel(item.workflow)} ·{" "}
+                          {usagePurposeLabel(item.stage)}
+                        </strong>
+                        <span>
+                          {formatUsageNumber(item.assistedOperationCount)} ops
+                        </span>
+                      </div>
+                      <div className={styles.usageBreakdownMeta}>
+                        <span>
+                          {formatUsageNumber(item.localTokens)} local tokens
+                        </span>
+                        <span>
+                          {formatUsageNumber(item.onlineTokens)} online tokens
+                        </span>
+                        <span>
+                          {formatUsageNumber(
+                            item.estimatedContextTokensKeptLocal,
+                          )}{" "}
+                          context kept local
+                        </span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className={styles.usageEmptyLine}>
+                  Broker-assisted work will appear here as applets run.
+                </p>
+              )}
+            </section>
+          ) : null}
+
           {usageReport?.hasUntrackedHistory ? (
             <div className={styles.usageHistoryNotice}>
               <strong>Forward-only tracking</strong>
@@ -146152,6 +146267,10 @@ function HomeContent(): React.JSX.Element {
             const renderTheme = avatarState.theme ?? resolvedTheme;
             const signalArchiveAvatar = avatarState.surface === "archive";
             const signalDashboardAvatar = avatarState.surface === "dashboard";
+            const signalLivePerformanceAvatar =
+              avatarState.surface === "stage" &&
+              signalLiveSessionId !== null &&
+              avatarState.replayAudioMaster !== true;
             const faceScaleY = coffeePlateFaceScaleYFromSeatHorizontalSide(
               avatarState.facing === "left"
                 ? 1
@@ -146457,6 +146576,8 @@ function HomeContent(): React.JSX.Element {
               avatarDetails: signalMannequinAvatarDetails,
               avatarDetailsColor: color,
               leadershipGroupCount: signalMannequinLeadershipGroupCount,
+              pixelRasterizationEnabled: !signalLivePerformanceAvatar,
+              runtimeEffectsEnabled: !signalLivePerformanceAvatar,
             };
             const signalMannequinAmbientProps: Omit<
               BotAmbientPresenceRigProps,

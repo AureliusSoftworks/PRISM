@@ -665,7 +665,9 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       foundation: unknown;
       suspectsBySeatId: Record<string, unknown>;
     };
-    assert.equal(draft.kind, "authoring-v1");
+    assert.equal(draft.kind, "authoring-v2");
+    assert.ok(draft.contextCapsule);
+    assert.ok(draft.provenanceBySection);
     assert.ok(draft.foundation);
     assert.ok(draft.suspectsBySeatId["suspect-1"]);
     assert.equal(draft.suspectsBySeatId["suspect-2"], undefined);

@@ -10,6 +10,7 @@ import {
   type DualOllamaWorkloadOptions,
   type ResolvedLocalOllamaTarget,
 } from "./providers.ts";
+import { setPrismAuxiliaryHostPaused } from "./generation-work.ts";
 
 const MODEL_PREPARATION_KEEP_ALIVE = "10m";
 const MODEL_PREPARATION_TIMEOUT_MS = 10 * 60_000;
@@ -63,6 +64,14 @@ const persistentWarmupControllerByTarget = new Map<string, AbortController>();
 const liveModelLaneLeaseByOwner = new Map<string, LiveModelLaneLease>();
 const liveModelLaneSweepByHost = new Map<string, Promise<void>>();
 const activeLocalModelRequestCountByTarget = new Map<string, number>();
+const pinnedAuxiliaryTargetByHost = new Map<
+  string,
+  ResolvedLocalOllamaTarget
+>();
+const yieldedAuxiliaryTargetByHost = new Map<
+  string,
+  ResolvedLocalOllamaTarget
+>();
 
 function notApplicableResponse(model: string): ModelPreparationResponse {
   return {
@@ -144,8 +153,8 @@ async function unloadLocalModel(
 
 /**
  * Give a latency-critical Coffee or Signal session one local-model residency
- * lane. Other live sessions remain protected; stale chat, prior-session, and
- * auxiliary runners on the same Ollama host are released before generation.
+ * lane. Other live sessions and the pinned auxiliary model remain protected;
+ * stale chat and prior-session runners on the same host are released.
  * Failure is deliberately best-effort so a remote/self-managed Ollama host can
  * still serve the turn even when it does not support residency inspection.
  */
@@ -155,6 +164,8 @@ export async function claimLiveLocalModelLane(args: {
   options?: DualOllamaWorkloadOptions;
   /** Wait for non-live local work to clear before exposing a live scene. */
   quiesceOtherModels?: boolean;
+  /** Temporarily yield auxiliary residency after a foreground load failure. */
+  yieldAuxiliary?: boolean;
 }): Promise<boolean> {
   const owner = args.owner.trim();
   if (!owner) return false;
@@ -171,9 +182,10 @@ export async function claimLiveLocalModelLane(args: {
     target,
     sweptAtMs: existing?.sweptAtMs ?? 0,
   });
+  setPrismAuxiliaryHostPaused(target.host, true);
   // A keep-warm request may have started just before the browser published its
-  // live-performance marker. Abort and await it before sweeping so it cannot
-  // resurrect an auxiliary runner immediately after the lane is cleaned.
+  // live-performance marker. Stop its decode before foreground work begins,
+  // while retaining any residency Ollama already established.
   const interruptedWarmups: Promise<ModelPreparationResponse>[] = [];
   for (const [key, controller] of persistentWarmupControllerByTarget) {
     if (!key.startsWith(`${target.host}\u0000`)) continue;
@@ -183,6 +195,18 @@ export async function claimLiveLocalModelLane(args: {
   }
   if (interruptedWarmups.length > 0) {
     await Promise.allSettled(interruptedWarmups);
+  }
+  const pinnedAuxiliary = pinnedAuxiliaryTargetByHost.get(target.host);
+  if (
+    args.yieldAuxiliary &&
+    pinnedAuxiliary &&
+    normalizedModelId(pinnedAuxiliary.model) !== normalizedModelId(target.model)
+  ) {
+    yieldedAuxiliaryTargetByHost.set(target.host, pinnedAuxiliary);
+    await unloadLocalModel(
+      pinnedAuxiliary.host,
+      pinnedAuxiliary.model,
+    ).catch(() => undefined);
   }
   if (args.quiesceOtherModels) {
     const deadlineMs = Date.now() + 20_000;
@@ -236,7 +260,15 @@ export async function claimLiveLocalModelLane(args: {
           activeLocalModelRequestCountByTarget.get(
             `${target.host}\u0000${normalized}`,
           ) ?? 0;
-        if (protectedByLiveSession || activeRequestCount > 0) continue;
+        const protectedPinnedAuxiliary =
+          !args.yieldAuxiliary &&
+          pinnedAuxiliary?.host === target.host &&
+          normalizedModelId(pinnedAuxiliary.model) === normalized;
+        if (
+          protectedByLiveSession ||
+          protectedPinnedAuxiliary ||
+          activeRequestCount > 0
+        ) continue;
         await unloadLocalModel(target.host, model).catch(() => undefined);
       }
     } catch {
@@ -267,16 +299,25 @@ export async function releaseLiveLocalModelLane(owner: string): Promise<void> {
       normalizedModelId(candidate.target.model) ===
         normalizedModelId(lease.target.model),
   );
-  if (stillProtected) return;
-  if (
-    (activeLocalModelRequestCountByTarget.get(targetKey(lease.target)) ?? 0) >
-    0
-  ) {
-    return;
-  }
-  await unloadLocalModel(lease.target.host, lease.target.model).catch(
-    () => undefined,
+  const hostStillOwned = Array.from(liveModelLaneLeaseByOwner.values()).some(
+    (candidate) => candidate.target.host === lease.target.host,
   );
+  if (
+    !stillProtected &&
+    (activeLocalModelRequestCountByTarget.get(targetKey(lease.target)) ?? 0) ===
+      0
+  ) {
+    await unloadLocalModel(lease.target.host, lease.target.model).catch(
+      () => undefined,
+    );
+  }
+  if (hostStillOwned) return;
+  setPrismAuxiliaryHostPaused(lease.target.host, false);
+  const yieldedAuxiliary = yieldedAuxiliaryTargetByHost.get(lease.target.host);
+  if (yieldedAuxiliary) {
+    yieldedAuxiliaryTargetByHost.delete(lease.target.host);
+    void warmResolvedAuxiliaryTarget(yieldedAuxiliary).catch(() => undefined);
+  }
 }
 
 function responseFor(entry: StoredReadiness): ModelPreparationResponse {
@@ -493,44 +534,11 @@ export async function prepareLocalModel(args: {
   }
 }
 
-/**
- * Preload the active auxiliary model and ask Ollama to keep it resident until
- * explicitly unloaded or the runtime stops. Calls for the same host/model are
- * coalesced so browser activity heartbeats cannot start parallel loads.
- */
-export async function keepAuxiliaryLocalModelWarm(args: {
-  model: string;
-  options?: DualOllamaWorkloadOptions;
-  /** Test seam; production uses the normal preparation cap. */
-  timeoutMs?: number;
-}): Promise<ModelPreparationResponse> {
-  let target: ResolvedLocalOllamaTarget;
-  try {
-    target = await resolveLocalOllamaTarget(args.model, args.options);
-  } catch (error) {
-    const failure: ModelPreparationFailure =
-      error instanceof LocalModelRequestError && error.kind === "model_unavailable"
-        ? "model_unavailable"
-        : "runtime_unavailable";
-    return {
-      ok: true,
-      state: "unavailable",
-      model: args.model,
-      startedAt: null,
-      expiresAt: null,
-      retryAfterMs: null,
-      failure,
-    };
-  }
-
+async function warmResolvedAuxiliaryTarget(
+  target: ResolvedLocalOllamaTarget,
+  timeoutMs = MODEL_PREPARATION_TIMEOUT_MS,
+): Promise<ModelPreparationResponse> {
   const key = targetKey(target);
-  if (
-    Array.from(liveModelLaneLeaseByOwner.values()).some(
-      (lease) => lease.target.host === target.host,
-    )
-  ) {
-    return notApplicableResponse(target.model);
-  }
   const active = persistentWarmupByTarget.get(key);
   if (active) return active;
 
@@ -540,7 +548,7 @@ export async function keepAuxiliaryLocalModelWarm(args: {
     persistentWarmupControllerByTarget.set(key, controller);
     const timer = setTimeout(
       () => controller.abort(),
-      args.timeoutMs ?? MODEL_PREPARATION_TIMEOUT_MS,
+      timeoutMs,
     );
     let failure: ModelPreparationFailure = "request_failed";
     try {
@@ -602,6 +610,65 @@ export async function keepAuxiliaryLocalModelWarm(args: {
   }
 }
 
+/**
+ * Preload the active auxiliary model and ask Ollama to keep it resident until
+ * explicitly yielded for a foreground load or the runtime stops. Calls for
+ * the same host/model are coalesced so browser heartbeats cannot overlap.
+ */
+export async function keepAuxiliaryLocalModelWarm(args: {
+  model: string;
+  options?: DualOllamaWorkloadOptions;
+  /** Test seam; production uses the normal preparation cap. */
+  timeoutMs?: number;
+}): Promise<ModelPreparationResponse> {
+  let target: ResolvedLocalOllamaTarget;
+  try {
+    target = await resolveLocalOllamaTarget(args.model, args.options);
+  } catch (error) {
+    const failure: ModelPreparationFailure =
+      error instanceof LocalModelRequestError && error.kind === "model_unavailable"
+        ? "model_unavailable"
+        : "runtime_unavailable";
+    return {
+      ok: true,
+      state: "unavailable",
+      model: args.model,
+      startedAt: null,
+      expiresAt: null,
+      retryAfterMs: null,
+      failure,
+    };
+  }
+
+  pinnedAuxiliaryTargetByHost.set(target.host, target);
+  if (
+    Array.from(liveModelLaneLeaseByOwner.values()).some(
+      (lease) => lease.target.host === target.host,
+    )
+  ) {
+    try {
+      const resident = await runningModel(target);
+      if (resident) {
+        const ready: StoredReadiness = {
+          state: "ready",
+          target,
+          digest: resident.digest,
+          expiresAt: resident.expiresAt,
+        };
+        readinessByTarget.set(targetKey(target), ready);
+        return responseFor(ready);
+      }
+    } catch {
+      // A live lane must not be delayed by an auxiliary readiness probe.
+    }
+    return notApplicableResponse(target.model);
+  }
+  return warmResolvedAuxiliaryTarget(
+    target,
+    args.timeoutMs ?? MODEL_PREPARATION_TIMEOUT_MS,
+  );
+}
+
 async function refreshReadinessAfterLocalResponse(
   target: ResolvedLocalOllamaTarget,
 ): Promise<void> {
@@ -648,4 +715,6 @@ export function resetModelReadinessForTests(): void {
   liveModelLaneLeaseByOwner.clear();
   liveModelLaneSweepByHost.clear();
   activeLocalModelRequestCountByTarget.clear();
+  pinnedAuxiliaryTargetByHost.clear();
+  yieldedAuxiliaryTargetByHost.clear();
 }

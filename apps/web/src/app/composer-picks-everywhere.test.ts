@@ -97,7 +97,7 @@ describe("composer shortcut language is Zen-only", () => {
     );
     assert.match(
       pageSource,
-      /const textareaOverlayEnabled =\s*shortcutChipsEnabled \|\| writingAssistEnabled/u,
+      /const textareaOverlayEnabled =\s*!latencyCritical && \(shortcutChipsEnabled \|\| writingAssistEnabled\)/u,
     );
     assert.match(
       pageSource,
@@ -117,11 +117,11 @@ describe("composer shortcut language is Zen-only", () => {
     );
     assert.match(
       signalSource,
-      /await expandComposerDraft\?\.\(producerBriefDraft\)\)\s*\?\?\s*producerBriefDraft/u,
+      /await expandComposerDraft\?\.\(launchProducerBrief\)\)\s*\?\?\s*launchProducerBrief/u,
     );
     assert.match(
       pageSource,
-      /variant: "signal"[\s\S]{0,1400}promptPicks: EMPTY_COMPOSER_COMMAND_PICKS[\s\S]{0,200}wildcardPicks: EMPTY_COMPOSER_COMMAND_PICKS/u,
+      /variant: "signal"[\s\S]{0,2200}promptPicks: EMPTY_COMPOSER_COMMAND_PICKS[\s\S]{0,200}wildcardPicks: EMPTY_COMPOSER_COMMAND_PICKS/u,
     );
   });
 

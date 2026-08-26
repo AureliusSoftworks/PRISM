@@ -14,7 +14,7 @@ export const FIRST_RUN_BOT_DIRECTED_SETUP_GUIDANCE =
   "In an editable Signal, Debate, or Story setup, hold Option to Wield Prism and capture a concrete bot tile. That bot stays fixed while the applet builds the rest of the editable setup around them; nothing begins until you choose the session’s start action. In Signal Rehearse, named stage presets carry only placement, cameras, screen treatment, room mix, and saved voice levels between shows; they never replace a show’s identity, cast, or artwork. Signal’s separate I Feel Lucky! shortcut is the intentional exception: it chooses the whole booking and immediately starts the show.";
 
 export const FIRST_RUN_COFFEE_GROUP_GUIDANCE =
-  "Coffee Groups begin with an explicit choice of 2–5 Library bots. Configure bots changes those permanent members later; Invited and Away only change the next session, and saved sessions keep their original cast.";
+  "Coffee Groups begin with an explicit choice of 2–5 Library bots. Configure bots changes those permanent members later; Invited and Away only change the next session, and saved sessions keep their original cast. Each new group also starts with one of five bundled café songs selected at random, while Custom voice and music synthesis remains explicit and privacy-gated.";
 
 export function clearFirstRunSetupCompletion(storage: {
   removeItem(key: string): void;

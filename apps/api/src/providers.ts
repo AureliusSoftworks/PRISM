@@ -15,6 +15,12 @@ import {
   usagePurpose,
 } from "./usage.ts";
 import { isPrivateNetworkHttpUrl } from "./local-network-host.ts";
+import {
+  normalizePrismGenerationWorkContext,
+  runWithPrismGenerationWorkContext,
+  schedulePrismAuxiliaryWork,
+  type PrismGenerationWorkContext,
+} from "./generation-work.ts";
 
 /**
  * Caps how long `/api/models` hangs while probing `/api/tags` or OpenAI’s model list.
@@ -128,6 +134,8 @@ export interface GenerateOptions {
   /** Requests the provider's supported premium low-latency service tier. */
   turbo?: boolean;
   usagePurpose?: UsagePurpose;
+  /** Private work attribution and scheduling policy owned by PRISM. */
+  generationWork?: Partial<PrismGenerationWorkContext>;
   /** Cancels in-flight provider work when the originating chat request is stopped. */
   signal?: AbortSignal;
   /** Ask providers that support it to constrain the visible reply to a JSON object. */
@@ -1729,6 +1737,36 @@ export class LocalOllamaProvider implements LlmProvider {
     messages: ProviderMessage[],
     options?: GenerateOptions
   ): Promise<string> {
+    if (options?.generationWork?.executionLane === "selected") {
+      const target = await resolveLocalOllamaTarget(
+        options.model?.trim() || config.ollamaModel,
+        {
+          secondaryOllamaHost: this.secondaryOllamaHost,
+          experimentalDualOllama: this.experimentalDualOllama,
+        },
+      );
+      const work = normalizePrismGenerationWorkContext(
+        options.generationWork,
+      );
+      return schedulePrismAuxiliaryWork({
+        host: target.host,
+        context: work,
+        signal: options.signal,
+        run: (signal) =>
+          generateWithFinalLocalOllamaFallback({
+            messages,
+            options: { ...options, generationWork: work, signal },
+            skipFinalLocalFallback:
+              target.model === FINAL_LOCAL_OLLAMA_FALLBACK_MODEL,
+            generate: () =>
+              this.generateResponseDirect(messages, {
+                ...options,
+                generationWork: work,
+                signal,
+              }),
+          }),
+      });
+    }
     return generateWithFinalLocalOllamaFallback({
       messages,
       options,
@@ -2449,10 +2487,10 @@ export function resolveAuxiliaryOllamaModel(prismDefaultLlmModel?: string | null
 
 export function getAuxiliaryProvider(
   prismDefaultLlmModel?: string | null,
-  options: DualOllamaWorkloadOptions = {}
+  providerOptions: DualOllamaWorkloadOptions = {}
 ): LlmProvider {
   const auxiliaryModel = resolveAuxiliaryOllamaModel(prismDefaultLlmModel);
-  const inner = new LocalOllamaProvider(options);
+  const inner = new LocalOllamaProvider(providerOptions);
   return {
     name: "local",
     diagnosticModel: auxiliaryModel,
@@ -2460,12 +2498,39 @@ export function getAuxiliaryProvider(
       messages: ProviderMessage[],
       options?: GenerateOptions
     ): Promise<string> {
-      return inner.generateResponse(messages, {
-        ...options,
-        model: auxiliaryModel,
-        // Auxiliary work must never pay a cold-start penalty while PRISM is
-        // active. A negative keep_alive is Ollama's indefinite residency mode.
-        ollamaKeepAlive: -1,
+      const target = await resolveLocalOllamaTarget(
+        auxiliaryModel,
+        providerOptions,
+      );
+      const work = normalizePrismGenerationWorkContext({
+        workflow: options?.usagePurpose ?? "system",
+        operation: "auxiliary-generation",
+        stage: options?.usagePurpose ?? "generation",
+        executionLane: "auxiliary",
+        role: "prepare",
+        outputClass: "internal",
+        priority: "background",
+        privacyMode: "local",
+        ...options?.generationWork,
+      });
+      return schedulePrismAuxiliaryWork({
+        host: target.host,
+        context: work,
+        signal: options?.signal,
+        run: async (signal) =>
+          await Promise.resolve(
+            runWithPrismGenerationWorkContext(work, () =>
+              inner.generateResponse(messages, {
+                ...options,
+                generationWork: work,
+                model: auxiliaryModel,
+                // Auxiliary work must never pay a cold-start penalty while PRISM is
+                // active. A negative keep_alive is Ollama's indefinite residency mode.
+                ollamaKeepAlive: -1,
+                signal,
+              }),
+            ),
+          ),
       });
     },
     async embedText(text: string): Promise<number[]> {

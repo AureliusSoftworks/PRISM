@@ -90,7 +90,10 @@ describe("quiet pre-session alignment", () => {
     assert.match(debate, /data-tutorial-target="debate-readiness"/u);
     assert.match(debate, /className=\{styles\.setupActions\}/u);
     assert.match(debate, />\s*\{busy \? "Saving…" : "Save Debate"\}/u);
-    assert.match(debate, />\s*\{busy \? "Opening…" : "Start Debate"\}/u);
+    assert.match(
+      debate,
+      /\{busy\s*\? format === "whodunnit"[\s\S]{0,100}: "Opening…"[\s\S]{0,220}: "Start Debate"\}/u,
+    );
     assert.match(
       debate,
       /<p className=\{styles\.notice\} role="status">[\s\S]*?\{setupRestoreNotice\}/u,

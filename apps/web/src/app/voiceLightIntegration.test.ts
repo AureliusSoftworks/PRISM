@@ -16,7 +16,7 @@ const miniAvatarSource = readFileSync(
   "utf8",
 );
 
-test("single-bot surfaces bind voice light targets while live group stages stay static", () => {
+test("single-bot surfaces and the live Signal stage bind scoped voice light targets", () => {
   for (const surface of ["chat", "studio", "bot-preview", "debate"]) {
     assert.match(
       pageSource,
@@ -24,7 +24,7 @@ test("single-bot surfaces bind voice light targets while live group stages stay 
       `${surface} should bind a full-size avatar or voice lifecycle`,
     );
   }
-  assert.doesNotMatch(
+  assert.match(
     signalSource,
     /botVoiceLightTarget\(\s*"signal",\s*args\.currentEpisode\.id,\s*participantId/u,
   );
@@ -36,10 +36,9 @@ test("single-bot surfaces bind voice light targets while live group stages stay 
     pageSource,
     /liveVoiceLightEnvelopeEnabled = playbackSurface !== "signal"/u,
   );
-  assert.match(signalSource, /voiceLightTarget:\s*undefined/u);
   assert.match(
-    pageSource,
-    /mouth phonemes own the live audio-rate budget[\s\S]{0,100}voiceLightTarget:\s*undefined/u,
+    signalSource,
+    /voiceLightTarget:\s*args\.replay && replayFaithful[\s\S]{0,100}\? undefined[\s\S]{0,160}: botVoiceLightTarget\(/u,
   );
   assert.doesNotMatch(miniAvatarSource, /voiceLight|avatarLightMode/u);
 });

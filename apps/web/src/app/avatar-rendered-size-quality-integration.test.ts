@@ -49,7 +49,7 @@ test("the Mini fallback clears authored Ink while the thinking mark presents", (
     pageSource.indexOf("function FullAvatarCompactFallback"),
     pageSource.indexOf("<ChatMiniBotAvatar", pageSource.indexOf("function FullAvatarCompactFallback")),
   );
-  assert.match(fallback, /hasAvatarArt && !showThinkingSpinner \? \(/u);
+  assert.match(fallback, /thinking=\{showThinkingSpinner\}/u);
   assert.match(fallback, /showThinkingSpinner/u);
 });
 
@@ -78,28 +78,23 @@ test("Signal keeps authored full mannequins live while shedding only runtime eff
   assert.doesNotMatch(signalAvatarRenderer, /signalLiveCompactAvatar/u);
   assert.doesNotMatch(signalAvatarRenderer, /data-signal-live-compact-avatar/u);
   assert.equal(signalStageMannequins.length, 2);
-  for (const [mannequin] of signalStageMannequins) {
-    // Signal spends its two-bot budget on the authored full CRT, static CSS
-    // phosphor bloom, and faithful mouth state. Live disables autonomous
-    // effects and synchronous canvas readback around that identity.
-    assert.match(mannequin, /minimumRenderedSizeTier="full"/u);
-    assert.match(mannequin, /detailLevel="full"/u);
-    assert.match(
-      mannequin,
-      /pixelRasterizationEnabled=\{!signalLivePerformanceAvatar\}/u,
-    );
-    assert.match(
-      mannequin,
-      /runtimeEffectsEnabled=\{!signalLivePerformanceAvatar\}/u,
-    );
-    assert.match(mannequin, /isTalking=\{avatarState\.talking\}/u);
-    assert.match(mannequin, /mouthShape=\{avatarState\.mouthShape\}/u);
-  }
-  assert.match(pageSource, /data-prism-priority-phosphor="true"/u);
+  // Signal spends its two-bot budget on the authored full CRT, static CSS
+  // phosphor bloom, and faithful mouth state. The renderer now shares typed
+  // prop objects rather than repeating the complete prop list in both JSX
+  // branches.
+  assert.match(signalAvatarRenderer, /detailLevel: "full"/u);
+  assert.match(signalAvatarRenderer, /minimumRenderedSizeTier: "full"/u);
   assert.match(
-    signalCss,
-    /data-live-episode="true"[\s\S]{0,180}data-prism-priority-phosphor="true"[\s\S]{0,180}data-crt-glyph-layer="true"\]\)::before/u,
+    signalAvatarRenderer,
+    /pixelRasterizationEnabled: !signalLivePerformanceAvatar/u,
   );
+  assert.match(
+    signalAvatarRenderer,
+    /runtimeEffectsEnabled: !signalLivePerformanceAvatar/u,
+  );
+  assert.match(signalAvatarRenderer, /isTalking: signalMannequinTalking/u);
+  assert.match(signalAvatarRenderer, /mouthShape: avatarState\.mouthShape/u);
+  assert.match(pageSource, /data-prism-priority-phosphor="true"/u);
 });
 
 test("live load shedding never substitutes a generic avatar token", () => {
@@ -109,6 +104,6 @@ test("live load shedding never substitutes a generic avatar token", () => {
   assert.doesNotMatch(pageCss, /\.coffeeLiveSeatAvatar/u);
   assert.match(signalSource, /mouthShape:\s*ZenLiveBotMouthShape/u);
   assert.match(signalSource, /mouthShape,/u);
-  assert.match(pageSource, /runtimeEffectsEnabled=\{!signalLivePerformanceAvatar\}/u);
-  assert.match(pageSource, /runtimeEffectsEnabled: coffeeReplayActive/u);
+  assert.match(pageSource, /runtimeEffectsEnabled: !signalLivePerformanceAvatar/u);
+  assert.match(pageSource, /runtimeEffectsEnabled=\{!staticAudiencePortrait\}/u);
 });

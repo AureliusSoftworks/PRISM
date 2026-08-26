@@ -12,7 +12,7 @@ const debateSource = readFileSync(
   "utf8",
 );
 const whodunnitSource = readFileSync(
-  new URL("./DebateMysteryExperience.tsx", import.meta.url),
+  new URL("./DebateExperience.tsx", import.meta.url),
   "utf8",
 );
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
@@ -60,10 +60,10 @@ describe("bot-directed applet setup", () => {
   it("keeps a captured Whodunnit bot in a fully populated editable case setup", () => {
     assert.match(
       whodunnitSource,
-      /id: `whodunnit-setup-anchor-\$\{bot\.id\}`/u,
+      /id: `debate-setup-anchor-\$\{bot\.id\}-\$\{/u,
     );
     assert.match(whodunnitSource, /randomizeWhodunnitCastAroundBot/u);
-    assert.match(whodunnitSource, /run: randomizeCast/u);
-    assert.match(whodunnitSource, /setInspiration/u);
+    assert.match(whodunnitSource, /randomizeMysteryCastAroundBot/u);
+    assert.match(whodunnitSource, /setMysteryInspiration/u);
   });
 });

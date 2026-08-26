@@ -129,7 +129,8 @@ describe("applet session notes", () => {
     assert.match(companion, /currentPrismFrameRate\(\)\?\.fps/u);
     assert.match(companion, /nextDraft\.length > 0/u);
     assert.match(companion, /sessionNoteSavingRef\.current/u);
-    assert.match(companion, /setSessionNoteDraft\(""\)/u);
+    assert.match(companion, /sessionNoteDraftRef\.current = ""/u);
+    assert.match(companion, /composerRef\.current\.value = ""/u);
     assert.match(
       companion,
       /First keystroke marks transcript · overlaps merge/u,

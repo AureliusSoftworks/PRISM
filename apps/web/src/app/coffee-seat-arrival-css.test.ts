@@ -199,7 +199,7 @@ describe("Coffee seat arrival CSS", () => {
       pageSource,
       /useState<CoffeeSessionDurationMinutes \| null>\(null\)/,
     );
-    assert.match(pageSource, /Open-ended · no countdown/);
+    assert.match(pageSource, /Visit: \$\{coffeeSelectedExperienceMode[\s\S]{0,100}· Open-ended/u);
     assert.match(pageSource, /durationMinutes: coffeeSelectedDurationMinutes/);
     assert.match(
       pageSource,
@@ -2265,10 +2265,6 @@ describe("Coffee seat arrival CSS", () => {
       pageSource.indexOf("const createCoffeeGroupFromSelection"),
       pageSource.indexOf("const createCoffeeGroupFromCurrentSession"),
     );
-    const sessionCreationSource = pageSource.slice(
-      pageSource.indexOf("const createCoffeeGroupFromCurrentSession"),
-      pageSource.indexOf("const startCoffeeSessionFromGroup"),
-    );
     assert.match(pageSource, /import \{ PrismBlockingLoader \}/u);
     assert.match(
       pageSource,
@@ -2279,15 +2275,7 @@ describe("Coffee seat arrival CSS", () => {
       /title: "Creating your Coffee Group"[\s\S]*stepLabel: "Saving the table"/u,
     );
     assert.match(
-      sessionCreationSource,
-      /title: "Saving this Coffee Group"[\s\S]*stepLabel: "Saving the table"/u,
-    );
-    assert.match(
       selectionCreationSource,
-      /finally \{\s*setCoffeeGroupCreationOperation\(null\);\s*setCoffeeBusy\(false\);/u,
-    );
-    assert.match(
-      sessionCreationSource,
       /finally \{\s*setCoffeeGroupCreationOperation\(null\);\s*setCoffeeBusy\(false\);/u,
     );
     assert.match(

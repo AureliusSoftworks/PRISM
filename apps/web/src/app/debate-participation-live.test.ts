@@ -81,9 +81,10 @@ test("Participant floor breaks release the opponent before the fixed call and pa
   );
   const releaseEnd = source.indexOf("const interruptPresentationForRecess", release);
   const releaseBlock = source.slice(release, releaseEnd);
+  assert.match(releaseBlock, /setInterruptCameraView\(/u);
   assert.match(
-    releaseBlock,
-    /onReleaseUtterance\?\.\(DEBATE_INTERRUPT_PRIMARY_RELEASE_MS\)/u,
+    source,
+    /interrupterPlaybackStarted = true;[\s\S]{0,120}onReleaseUtterance\?\.\(DEBATE_INTERRUPT_PRIMARY_RELEASE_MS\);[\s\S]{0,180}scheduleProceedingsReveal/u,
   );
   assert.match(releaseBlock, /debateInterruptedSpeechCaption/u);
   assert.match(releaseBlock, /setInterruptCameraView/u);
