@@ -52,7 +52,41 @@ test("normalizes a frozen pre-substep Case Forge payload without crashing Archiv
     rooms: [],
     record: [],
     topics: [],
-    dialogueHistory: [],
+    dialogueHistory: [{
+      nodeId: "talk-holder-seat-alibi",
+      lineId: "line-player-address",
+      visibleText: "Collin, explain that contradiction.",
+      speakerSeatId: null,
+      speakerBotId: "prosecutor-1",
+      speakerKind: "player",
+      occurredAt: "2026-08-25T00:00:00.000Z",
+    }],
+    identityMirrorTargetSnapshots: {
+      "prosecutor-1": {
+        version: 1,
+        botId: "prosecutor-1",
+        name: "  Miles Edgeworth  ",
+        faceStyle: {
+          eyesFont: "concise",
+          eyeCharacter: "⌁",
+          eyeCount: 2,
+          eyeSpacing: 0.47,
+          mouthFont: "formal",
+          mouthCharacter: "▽",
+          mouthAnimation: "custom",
+          mouthSpeechPoses: ["▽", "·", "△", "○"],
+        },
+        avatarDetails: {
+          version: 1,
+          screen: {
+            stamps: [{ id: "diagonal-scar", offsetX: 2, offsetY: -3, scalePct: 90 }],
+            paintMaskBase64: null,
+            speechInkAnimation: "wobble",
+          },
+        },
+        glyph: "lucideScale",
+      },
+    },
   });
 
   assert.ok(normalized);
@@ -61,6 +95,21 @@ test("normalizes a frozen pre-substep Case Forge payload without crashing Archiv
     label: "Writing the Case",
     state: "active",
   }]);
+  assert.equal(normalized.dialogueHistory[0]?.speakerKind, "player");
+  assert.equal(normalized.identityMirrorTargetSnapshots["prosecutor-1"]?.name, "Miles Edgeworth");
+  assert.equal(
+    normalized.identityMirrorTargetSnapshots["prosecutor-1"]?.faceStyle.mouthAnimation,
+    "none",
+  );
+  assert.deepEqual(
+    normalized.identityMirrorTargetSnapshots["prosecutor-1"]?.faceStyle.mouthSpeechPoses,
+    ["▽", "·", "△", "○"],
+  );
+  assert.equal(
+    normalized.identityMirrorTargetSnapshots["prosecutor-1"]?.avatarDetails?.screen.speechInkAnimation,
+    "wobble",
+  );
+  assert.equal(normalized.identityMirrorTargetSnapshots["prosecutor-1"]?.glyph, "lucideScale");
 });
 
 function line(id: string, nodeId: string, visibleText = id): DebateMysterySpokenLineV2 {

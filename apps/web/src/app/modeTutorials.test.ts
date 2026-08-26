@@ -102,9 +102,14 @@ describe("mode tutorials", () => {
     assert.match(step.body, /truth\/proof grade and juror breakdown/u);
     assert.match(step.body, /Reduced Motion/u);
     assert.match(step.body, /No gameplay action calls an LLM or synthesizes a voice/u);
-    assert.match(step.body, /Identity Crisis visually borrows exactly the latest direct addresser’s eyes/u);
+    assert.match(step.body, /Identity Crisis lets the holder knowingly masquerade as the latest eligible direct addresser/u);
     assert.match(step.body, /complete resting and speaking mouth package/u);
-    assert.match(step.body, /name, persona, dialogue, voice and Accent Map, color, chassis\/frame, Powers and consequences/u);
+    assert.match(step.body, /literally double-quoted public name/u);
+    assert.match(step.body, /player-controlled Prosecutor is eligible/u);
+    assert.match(step.body, /defensively treats the original as the suspicious imitator/u);
+    assert.match(step.body, /mild concern rather than panic or constant repetition/u);
+    assert.match(step.body, /color, complete voice and Accent Map location, pronunciation, Speechprint, provider voice identity/u);
+    assert.match(step.body, /target form, direct-address event, and timing are frozen for replay/u);
     assert.match(step.body, /one case card with every immutable playthrough nested beneath it/u);
     assert.match(step.body, /same mystery/u);
     assert.match(step.body, /zero AI, image, or voice synthesis/u);

@@ -150,6 +150,21 @@ test("Coffee locks live sessions to the available workspace instead of scrolling
   );
 });
 
+test("live Coffee keeps the complete current table utterance readable", () => {
+  assert.match(
+    css,
+    /\.coffeeStage\[data-phase="arriving"\] \.coffeeCenterMessageScroll,[\s\S]*?\.coffeeStage\[data-phase="live"\] \.coffeeCenterMessageScroll,[\s\S]*?\.coffeeStage\[data-phase="finished"\] \.coffeeCenterMessageScroll\s*\{[\s\S]*?max-height:\s*clamp\(200px,\s*32vmin,\s*300px\);[\s\S]*?overflow-y:\s*auto;/,
+  );
+  assert.doesNotMatch(
+    css,
+    /\.coffeeStage:is\(\[data-phase="arriving"\],\s*\[data-phase="live"\]\) \.coffeeCenterMessageScroll\s*\{[^}]*overflow:\s*hidden/,
+  );
+  assert.doesNotMatch(
+    css,
+    /\.coffeeStage:is\(\[data-phase="arriving"\],\s*\[data-phase="live"\]\) \.coffeeCenterFeedLine\s*\{[^}]*(?:line-clamp|overflow:\s*hidden)/,
+  );
+});
+
 test("live Coffee stretches its stage row to the composer", () => {
   assert.match(
     css,

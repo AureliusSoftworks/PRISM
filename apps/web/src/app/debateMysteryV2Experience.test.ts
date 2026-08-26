@@ -139,6 +139,13 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /IdentityPresentationBlackout/u);
     assert.match(experienceSource, /botIdentityPresentationTransitionActiveV1/u);
     assert.match(experienceSource, /BOT_IDENTITY_PRESENTATION_TRANSITION_MS/u);
+    assert.match(experienceSource, /state\.identityMirrorTargetSnapshots\[mirror\.targetBotId\]/u);
+    assert.match(experienceSource, /debateMysteryIdentityMirrorTargetBotSnapshotV1/u);
+    assert.match(experienceSource, /debateMysteryQuotedIdentityNameV1\(copiedName\)/u);
+    assert.doesNotMatch(
+      experienceSource,
+      /mysteryIdentityMirrorAppearance\(bot, botById\.get\(mirror\.targetBotId\)/u,
+    );
   });
 
   it("stages each Talk topic as a streamed player-Prosecutor question followed by the centered suspect", () => {
@@ -183,7 +190,11 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.match(experienceSource, /const roomSpeechInkVisible = !dialoguePerformanceActive \|\| interrogationPhase === "handoff"/u);
     assert.match(experienceSource, /facing: "left", speechInkVisible: roomSpeechInkVisible/u);
     assert.match(experienceSource, /facing: "right", speechInkVisible: roomSpeechInkVisible/u);
-    assert.match(setupSource, /defaultRestingMouthCharacter: "\|"/u);
+    assert.doesNotMatch(
+      setupSource,
+      /defaultRestingMouthCharacter/u,
+      "ordinary Whodunnit cast must keep each bot's authored idle mouth",
+    );
     assert.match(setupSource, /speechInkVisible: performance\?\.speechInkVisible/u);
     assert.match(experienceSource, /roomIntroductionAwaitingContinue && currentRoom[\s\S]*action: "advance_room_introduction"[\s\S]*finishCurrentDialogue/u);
     assert.match(experienceSource, /activeAudioRef\.current\?\.pause\(\)/u);

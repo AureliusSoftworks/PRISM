@@ -1,11 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type {
+  BotAvatarDetailsV1,
+  DebateBotSnapshotV1,
+  DebateMysteryIdentityMirrorTargetSnapshotV1,
   DebateMysteryPublicDialogueEntryV2,
   DebateSessionV1,
   DebateWhodunnitFormatStateV2,
 } from "@localai/shared";
-import { debateMysteryIdentityMirrorPresentationsV1 } from "./debateMysteryIdentityMirror.ts";
+import {
+  DEBATE_SCHEMA_VERSION,
+  normalizeBotAudioVoiceProfileV1,
+  resolveBotFaceStyle,
+} from "@localai/shared";
+import { debateIdentityAppearanceBotV1 } from "./debateIdentityPresentation.ts";
+import {
+  debateMysteryIdentityMirrorPresentationsV1,
+  debateMysteryIdentityMirrorTargetBotSnapshotV1,
+  debateMysteryQuotedIdentityNameV1,
+} from "./debateMysteryIdentityMirror.ts";
 
 const holder = "holder";
 const prosecutor = "prosecutor";
@@ -35,13 +48,22 @@ function session(): Pick<DebateSessionV1, "powerPlan"> {
 
 function state(
   dialogueHistory: DebateMysteryPublicDialogueEntryV2[],
-): Pick<DebateWhodunnitFormatStateV2, "config" | "suspects" | "topics" | "dialogueHistory"> {
+  snapshots: Record<string, DebateMysteryIdentityMirrorTargetSnapshotV1> = {},
+): Pick<
+  DebateWhodunnitFormatStateV2,
+  | "config"
+  | "suspects"
+  | "topics"
+  | "dialogueHistory"
+  | "identityMirrorTargetSnapshots"
+> {
   return {
     config: {
       prosecutorBotId: prosecutor,
       rivalDefenseBotId: "defense",
       judgeBotId: "judge",
       jurorBotIds: [],
+      playerRole: "participant",
     },
     suspects: [
       { seatId: "holder-seat", botId: holder, name: "Collin" },
@@ -49,7 +71,15 @@ function state(
     ],
     topics: [{ nodeId: "talk-holder-seat-alibi", suspectSeatId: "holder-seat" }],
     dialogueHistory,
-  } as Pick<DebateWhodunnitFormatStateV2, "config" | "suspects" | "topics" | "dialogueHistory">;
+    identityMirrorTargetSnapshots: snapshots,
+  } as Pick<
+    DebateWhodunnitFormatStateV2,
+    | "config"
+    | "suspects"
+    | "topics"
+    | "dialogueHistory"
+    | "identityMirrorTargetSnapshots"
+  >;
 }
 
 function entry(overrides: Partial<DebateMysteryPublicDialogueEntryV2>): DebateMysteryPublicDialogueEntryV2 {
@@ -59,6 +89,7 @@ function entry(overrides: Partial<DebateMysteryPublicDialogueEntryV2>): DebateMy
     visibleText: "Collin, where were you when the lights failed?",
     speakerSeatId: null,
     speakerBotId: prosecutor,
+    speakerKind: "bot",
     occurredAt: "2026-08-25T10:00:00.000Z",
     ...overrides,
   };
@@ -82,6 +113,8 @@ test("Whodunnit Identity Crisis follows a sealed direct recipient and does not r
   assert.deepEqual(presentations.get(holder), {
     holderBotId: holder,
     targetBotId: prosecutor,
+    targetKind: "bot",
+    targetName: "Megan",
     sourceDialogueKey: "talk-holder-seat-alibi:line-1:2026-08-25T10:00:00.000Z",
     occurredAt: "2026-08-25T10:00:00.000Z",
   });
@@ -122,4 +155,142 @@ test("Whodunnit Identity Crisis can switch only when another bot directly addres
   });
 
   assert.equal(presentations.get(holder)?.targetBotId, witness);
+});
+
+test("Whodunnit Identity Crisis freezes an exact player target and quotes the copied name", () => {
+  const targetInk: BotAvatarDetailsV1 = {
+    version: 1,
+    screen: {
+      stamps: [{ id: "diagonal-scar", offsetX: 2, offsetY: -3, scalePct: 90 }],
+      paintMaskBase64: null,
+      speechInkAnimation: "wobble",
+    },
+  };
+  const targetFace = resolveBotFaceStyle({
+    faceEyesFont: "concise",
+    faceEyeCharacter: "⌁",
+    faceEyeCount: 2,
+    faceEyeSpacing: 0.47,
+    faceEyeAnimation: "wobble",
+    faceEyeScale: 1.18,
+    faceEyeOffsetX: 0.12,
+    faceEyeOffsetY: -0.14,
+    faceEyeRotationDeg: 15,
+    faceBlinkBar: "¦",
+    faceBlinkCount: 1,
+    faceBlinkScale: 0.82,
+    faceBlinkOffsetX: -0.08,
+    faceBlinkOffsetY: 0.11,
+    faceBlinkRotationDeg: -9,
+    faceMouthFont: "formal",
+    faceMouthCharacter: "▽",
+    faceMouthAnimation: "custom",
+    faceMouthSpeechPoses: ["▽", "·", "△", "○"],
+    faceMouthCoffeePucker: false,
+    faceMouthScale: 1.22,
+    faceMouthOffsetX: -0.07,
+    faceMouthOffsetY: 0.09,
+    faceMouthRotationDeg: -17,
+    faceFontWeight: 775,
+    faceThinkingFrames: ["H", "O", "L", "D"],
+  });
+  const targetSnapshot: DebateMysteryIdentityMirrorTargetSnapshotV1 = {
+    version: 1,
+    botId: prosecutor,
+    name: "Miles Edgeworth",
+    faceStyle: targetFace,
+    avatarDetails: targetInk,
+    glyph: "lucideScale",
+  };
+  const frozenState = state([
+    entry({
+      visibleText: "Collin, explain that contradiction.",
+      intendedRecipientSeatId: "holder-seat",
+      speakerKind: "player",
+    }),
+  ], { [prosecutor]: targetSnapshot });
+  const presentations = debateMysteryIdentityMirrorPresentationsV1({
+    session: session(),
+    state: frozenState,
+    botNamesById: new Map([[holder, "Confusion Collin"], [prosecutor, "Changed Library Name"]]),
+  });
+  assert.deepEqual(presentations.get(holder), {
+    holderBotId: holder,
+    targetBotId: prosecutor,
+    targetKind: "player",
+    targetName: "Miles Edgeworth",
+    sourceDialogueKey: "talk-holder-seat-alibi:line-1:2026-08-25T10:00:00.000Z",
+    occurredAt: "2026-08-25T10:00:00.000Z",
+  });
+  assert.equal(debateMysteryQuotedIdentityNameV1("Miles   Edgeworth"), '"Miles Edgeworth"');
+
+  const holderVoice = normalizeBotAudioVoiceProfileV1({
+    v: 2,
+    enabled: true,
+    baseVoiceId: "voice-28",
+    accentDefinitionId: "british-rp",
+    pronunciationMapPoint: { x: 0.17, y: 0.73 },
+    pronunciationBase: "en-GB",
+    speechprintInfluence: "british-rp",
+    speechprintStrength: "strong",
+    speechprintVariationSeed: "collin-speechprint",
+    elevenLabsEffect: "echo",
+    voiceEffectExplicit: true,
+  });
+  const holderFace = resolveBotFaceStyle({
+    faceEyeCharacter: "?",
+    faceMouthCharacter: "|",
+    faceThinkingFrames: ["I", "?", "I", "!"],
+  });
+  const holderSnapshot: DebateBotSnapshotV1 = {
+    version: DEBATE_SCHEMA_VERSION,
+    id: holder,
+    name: "Confusion Collin",
+    systemPrompt: "Collin remains himself.",
+    role: "advocate",
+    sideId: null,
+    color: "#00fde4",
+    glyph: "lucideScanFace",
+    avatarDetails: null,
+    voiceProfile: holderVoice,
+    replayVisualSnapshot: {
+      v: 1,
+      faceStyle: holderFace,
+      avatarDetails: null,
+      voicePreset: "formal",
+      screenMaterialSeed: "holder-screen",
+      frameMaterialSeed: "holder-frame",
+    },
+    powers: [],
+    provider: "local",
+    model: "frozen-whodunnit",
+    revision: "holder-revision",
+  };
+  const frozenTargetBot = debateMysteryIdentityMirrorTargetBotSnapshotV1(
+    frozenState.identityMirrorTargetSnapshots[prosecutor]!,
+  );
+  const appearance = debateIdentityAppearanceBotV1({
+    holder: holderSnapshot,
+    target: frozenTargetBot,
+    effect: "identity_mirror",
+  });
+  const copiedFace = appearance.replayVisualSnapshot!.faceStyle;
+  for (const key of [
+    "eyesFont", "eyeCharacter", "eyeCount", "eyeSpacing", "eyeAnimation",
+    "eyeScale", "eyeOffsetX", "eyeOffsetY", "eyeRotationDeg", "blinkBar",
+    "blinkCount", "blinkScale", "blinkOffsetX", "blinkOffsetY",
+    "blinkRotationDeg", "mouthFont", "mouthCharacter", "mouthAnimation",
+    "mouthSpeechPoses", "mouthCoffeePucker", "mouthScale", "mouthOffsetX",
+    "mouthOffsetY", "mouthRotationDeg", "weight",
+  ] as const) {
+    assert.deepEqual(copiedFace[key], targetFace[key], `copied ${key}`);
+  }
+  assert.deepEqual(copiedFace.thinkingFrames, holderFace.thinkingFrames);
+  assert.equal(appearance.glyph, "lucideScale");
+  assert.deepEqual(appearance.avatarDetails, targetInk);
+  assert.equal(appearance.color, "#00fde4");
+  assert.deepEqual(appearance.voiceProfile, holderVoice);
+  assert.equal(appearance.replayVisualSnapshot?.voicePreset, "formal");
+  assert.equal(appearance.replayVisualSnapshot?.screenMaterialSeed, "holder-screen");
+  assert.equal(appearance.replayVisualSnapshot?.frameMaterialSeed, "holder-frame");
 });

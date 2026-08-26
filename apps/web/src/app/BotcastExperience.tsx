@@ -82,6 +82,7 @@ import {
   crosstalkInterruptionIsMeaningfulV1,
   botcastIdentityMirrorStateBeforeMessageV1,
   botcastIdentityMirrorStatesAtV1,
+  botIdentityMirrorQuotedTargetNameV1,
   botcastIdentityShapeshiftStateBeforeMessageV1,
   botcastIdentityShapeshiftStatesAtV1,
   botcastFalseNameStatesAtV1,
@@ -11771,13 +11772,24 @@ export function BotcastExperience({
       bot: BotcastBotSummary | null | undefined,
       fallback: string,
     ): string => {
+      const mirroredIdentity = bot
+        ? botIdentityMirrorQuotedTargetNameV1(
+            identityMirrorStates.get(bot.id)?.targetBotName,
+          )
+        : "";
       const believed = bot
         ? falseNameStates.get(bot.id)?.believedName?.trim()
         : "";
       const borrowedIdentity = bot
         ? identityShapeshiftStates.get(bot.id)?.targetBotName.trim()
         : "";
-      return believed || borrowedIdentity || bot?.name?.trim() || fallback;
+      return (
+        mirroredIdentity ||
+        believed ||
+        borrowedIdentity ||
+        bot?.name?.trim() ||
+        fallback
+      );
     };
     const liveReactionCaptionSpeaker = liveReactionCaption
       ? liveReactionCaption.botId === args.host?.id

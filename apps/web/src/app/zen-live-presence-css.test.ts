@@ -3349,12 +3349,16 @@ describe("Zen live presence CSS", () => {
       orbRule,
       /background-clip:\s*content-box,\s*border-box,\s*border-box,\s*border-box\s*;/,
     );
+    assert.match(
+      orbRule,
+      /transform:\s*translate\(-50%,\s*-50%\)\s*rotate\(var\(--bot-face-metal-light-rotation,\s*0deg\)\)\s*;/,
+    );
     assert.match(orbRule, /pointer-events:\s*none\s*;/);
     const latticeRule = ruleForExactSelector(
       ".zenLiveBotPresenceBody::after",
     );
     assert.match(latticeRule, /content:\s*""\s*;/);
-    assert.match(latticeRule, /z-index:\s*11\s*;/);
+    assert.match(latticeRule, /z-index:\s*13\s*;/);
     assert.match(latticeRule, /border-radius:\s*50%\s*;/);
     assert.match(
       latticeRule,
@@ -3370,9 +3374,12 @@ describe("Zen live presence CSS", () => {
       latticeRule,
       /var\(--zen-live-bot-buckle-crt-cell-pitch\)/,
     );
-    assert.match(latticeRule, /var\(--coffee-bot-color, currentColor\)/);
     assert.match(latticeRule, /mask-image:\s*radial-gradient/);
-    assert.match(latticeRule, /opacity:\s*0\.78\s*;/);
+    const latticeBackground =
+      latticeRule.match(/background:\s*([\s\S]*?);/)?.[1] ?? "";
+    assert.doesNotMatch(latticeBackground, /radial-gradient/);
+    assert.match(latticeRule, /opacity:\s*0\.18\s*;/);
+    assert.match(latticeRule, /mix-blend-mode:\s*multiply\s*;/);
     assert.match(latticeRule, /pointer-events:\s*none\s*;/);
 
     const glyphRule = ruleForExactSelector(".zenLiveBotPresenceBotGlyph");
@@ -3385,6 +3392,7 @@ describe("Zen live presence CSS", () => {
     assert.doesNotMatch(glyphRule, /zen-live-bot-buckle-rim-scale/);
     assert.doesNotMatch(glyphRule, /zen-live-bot-buckle-screen-scale/);
     assert.doesNotMatch(glyphRule, /zen-live-bot-buckle-crt-screen-scale/);
+    assert.doesNotMatch(glyphRule, /bot-face-metal-light-rotation/);
 
     const fillRule = ruleForExactSelector(".botAvatarFoundryBuckleFill");
     assert.match(
@@ -3393,6 +3401,8 @@ describe("Zen live presence CSS", () => {
     );
     assert.doesNotMatch(fillRule, /zen-live-bot-buckle-rim-scale/);
     const glassRule = ruleForExactSelector(".botAvatarFoundryBuckleGlass");
+    assert.match(glassRule, /z-index:\s*14\s*;/);
+    assert.match(glassRule, /mix-blend-mode:\s*screen\s*;/);
     assert.match(
       glassRule,
       /transform:\s*translate\(-50%,\s*-50%\)\s*scale\(var\(--zen-live-bot-buckle-screen-scale\)\)\s*;/,

@@ -1,6 +1,7 @@
 import {
   applyBotIdentityMirrorFaceV1,
   applyBotIdentityMirrorHolderVoiceEffectV1,
+  botIdentityMirrorQuotedTargetNameV1,
   botIdentityPresentationFrameMaterialSeedV1,
   botIdentityPresentationScreenMaterialSeedV1,
   botIdentityPresentationVoicePresetV1,
@@ -28,8 +29,8 @@ export interface DebateIdentityPresentationChangeV1 {
 
 /**
  * Build the public avatar passed to Debate rendering. Identity Crisis borrows
- * only the target's eyes, complete resting/live mouth package, Avatar Details
- * Ink, and lower glyph. Every other field stays with the holder.
+ * the target's eyes, complete resting/live mouth package, Avatar Details Ink,
+ * lower glyph, and quoted public name. Every other field stays with the holder.
  * Shapeshifter takes the target's face, chassis, and voice, but the holder's
  * authored identity anchors — name, color, glyph — always persist so the
  * chamber can still tell who actually holds the floor. The disguise is carried
@@ -93,6 +94,8 @@ export function debateIdentityAppearanceBotV1(args: {
 
   return {
     ...args.holder,
+    name:
+      botIdentityMirrorQuotedTargetNameV1(args.target.name) || args.holder.name,
     glyph: args.target.glyph,
     avatarDetails:
       targetVisual?.avatarDetails ?? args.target.avatarDetails ?? null,

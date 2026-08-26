@@ -1,5 +1,9 @@
 import {
+  DEBATE_SCHEMA_VERSION,
   botDirectlyAddressesBotV1,
+  botIdentityMirrorQuotedTargetNameV1,
+  type DebateBotSnapshotV1,
+  type DebateMysteryIdentityMirrorTargetSnapshotV1,
   type DebateMysteryPublicDialogueEntryV2,
   type DebateSessionV1,
   type DebateWhodunnitFormatStateV2,
@@ -8,10 +12,44 @@ import {
 export interface DebateMysteryIdentityMirrorPresentationV1 {
   holderBotId: string;
   targetBotId: string;
+  targetKind: "bot" | "player";
+  targetName: string;
   /** The first public entry that established the holder's current form. */
   sourceDialogueKey: string;
   occurredAt: string;
 }
+
+export function debateMysteryIdentityMirrorTargetBotSnapshotV1(
+  target: DebateMysteryIdentityMirrorTargetSnapshotV1,
+): DebateBotSnapshotV1 {
+  return {
+    version: DEBATE_SCHEMA_VERSION,
+    id: target.botId,
+    name: target.name,
+    systemPrompt: "Frozen Whodunnit Identity Crisis presentation target.",
+    role: "advocate",
+    sideId: null,
+    color: null,
+    glyph: target.glyph,
+    avatarDetails: target.avatarDetails,
+    voiceProfile: null,
+    replayVisualSnapshot: {
+      v: 1,
+      faceStyle: target.faceStyle,
+      avatarDetails: target.avatarDetails,
+      voicePreset: "neutral",
+      screenMaterialSeed: `whodunnit-mirror-screen:${target.botId}`,
+      frameMaterialSeed: `whodunnit-mirror-frame:${target.botId}`,
+    },
+    powers: [],
+    provider: "local",
+    model: "frozen-whodunnit-identity-target",
+    revision: `frozen-whodunnit-identity-target:${target.botId}`,
+  };
+}
+
+export const debateMysteryQuotedIdentityNameV1 =
+  botIdentityMirrorQuotedTargetNameV1;
 
 function dialogueKey(entry: DebateMysteryPublicDialogueEntryV2): string {
   return `${entry.nodeId}:${entry.lineId ?? "text"}:${entry.occurredAt}`;
@@ -35,7 +73,11 @@ export function debateMysteryIdentityMirrorPresentationsV1(args: {
   session: Pick<DebateSessionV1, "powerPlan">;
   state: Pick<
     DebateWhodunnitFormatStateV2,
-    "config" | "suspects" | "topics" | "dialogueHistory"
+    | "config"
+    | "suspects"
+    | "topics"
+    | "dialogueHistory"
+    | "identityMirrorTargetSnapshots"
   >;
   botNamesById: ReadonlyMap<string, string>;
 }): ReadonlyMap<string, DebateMysteryIdentityMirrorPresentationV1> {
@@ -96,9 +138,27 @@ export function debateMysteryIdentityMirrorPresentationsV1(args: {
       // Consecutive direct addresses by the same bot retain the first source,
       // so a re-render or later line never restarts the blackout transition.
       if (current?.targetBotId === speakerBotId) continue;
+      const targetName =
+        args.state.identityMirrorTargetSnapshots[speakerBotId]?.name ??
+        args.botNamesById.get(speakerBotId) ??
+        speakerBotId;
+      const targetKind =
+        args.state.config.playerRole !== "spectator" &&
+        speakerBotId === args.state.config.prosecutorBotId &&
+        (
+          entry.speakerKind === "player" ||
+          // Compatibility for frozen V2 dialogue written before speaker-kind
+          // provenance was persisted. The selected Prosecutor bot is the
+          // public player proxy in Participant cases.
+          entry.speakerKind === undefined
+        )
+          ? "player"
+          : "bot";
       presentationByHolder.set(holderBotId, {
         holderBotId,
         targetBotId: speakerBotId,
+        targetKind,
+        targetName,
         sourceDialogueKey: dialogueKey(entry),
         occurredAt: entry.occurredAt,
       });

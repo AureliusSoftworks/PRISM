@@ -930,8 +930,8 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.match(pageSource, /blinkPhase=\{avatarDetailsBlinkPhase\}/);
     assert.match(pageSource, /talking=\{inkTalking \?\? isTalking\}/);
     assert.match(pageSource, /speechMotionActive=\{isTalking\}/);
-    assert.match(pageSource, /defaultRestingMouthCharacter !== undefined[\s\S]*faceStyle\.mouthCharacter === null/);
-    assert.match(pageSource, /faceMouthCharacter=\{displayedMouthCharacter\}/);
+    assert.doesNotMatch(pageSource, /defaultRestingMouthCharacter/);
+    assert.match(pageSource, /faceMouthCharacter=\{faceStyle\.mouthCharacter\}/);
     assert.match(pageSource, /mouthShape=\{displayedMouthShape\}/);
     assert.doesNotMatch(maskSource, /mouthAnimation/);
     assert.match(

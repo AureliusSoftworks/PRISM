@@ -44,6 +44,7 @@ import {
   DEBATE_SIDE_LABEL_MAX_LENGTH,
   DEBATE_SETUP_PRESETS,
   BOT_IDENTITY_PRESENTATION_TRANSITION_MS,
+  botIdentityMirrorQuotedTargetNameV1,
   botPowerIsBreathlessV1,
   pickBotSessionSurnameNameV1,
   botIdentityPresentationTransitionActiveV1,
@@ -731,8 +732,6 @@ export interface DebateBotAvatarState {
   blinkEnabled?: boolean;
   /** Visible screen direction; face and authored Ink turn as one plane. */
   facing?: BotAvatarFacing;
-  /** Surface-scoped default rest glyph; authored mouths remain unchanged. */
-  defaultRestingMouthCharacter?: string | null;
   /** Surface-scoped visibility for authored Avatar Details Speech ink. */
   speechInkVisible?: boolean;
 }
@@ -4555,11 +4554,15 @@ function debateBotPresentation(
     { holderSpeaking: true },
   );
   // Neither visual Power changes who the chamber is addressing. Shapeshifter
-  // carries its disguise in the label; Identity Crisis changes only eyes,
-  // mouth, Ink, and glyph.
+  // names its complete disguise; Identity Crisis takes the target's quoted
+  // public name while preserving the holder's mechanical identity.
   const shapeshifting = identityEffect === "identity_shapeshift";
+  const identityMirrorDisplayName =
+    identityEffect === "identity_mirror" && identitySource
+      ? botIdentityMirrorQuotedTargetNameV1(identitySource.name)
+      : "";
   return {
-    displayName,
+    displayName: identityMirrorDisplayName || displayName,
     identityLabel: identitySource
       ? shapeshifting
         ? `Appearing as ${identitySource.name}`
@@ -4572,7 +4575,7 @@ function debateBotPresentation(
       identityEffect === "identity_mirror"
         ? (identitySource?.glyph ?? bot.glyph)
         : bot.glyph,
-    voiceSourceBotId: identitySource?.id ?? bot.id,
+    voiceSourceBotId: shapeshifting ? (identitySource?.id ?? bot.id) : bot.id,
     visibility:
       observerProjection.visibility === "hidden"
         ? "hidden"
@@ -29425,7 +29428,6 @@ export function DebateExperience(
           colorCycle: false,
           speechTiming: performance?.speechTiming ?? null,
           foleyMouthShape: null,
-          defaultRestingMouthCharacter: "|",
           speechInkVisible: performance?.speechInkVisible,
           // A suspect is always framed as guarded or tense in Whodunnit. The
           // partner remains attentive; neither inherits a cheerful gallery

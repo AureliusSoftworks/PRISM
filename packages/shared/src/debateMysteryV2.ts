@@ -7,6 +7,12 @@ import type {
   DebateMysteryPublicSuspectSnapshotV1,
   DebateMysteryTheoryV1,
 } from "./debateMystery.js";
+import type { BotFaceStyle } from "./botAvatar.js";
+import type { BotAvatarDetailsV1 } from "./botAvatarDetails.js";
+import {
+  botIdentityMirrorAvatarDetailsV1,
+  botIdentityMirrorFaceV1,
+} from "./botIdentityMirror.ts";
 
 export const DEBATE_MYSTERY_V2_SCHEMA_VERSION = 2 as const;
 export const DEBATE_MYSTERY_AUDIO_MANIFEST_VERSION = 1 as const;
@@ -481,10 +487,24 @@ export interface DebateMysteryPublicDialogueEntryV2 {
   visibleText: string;
   speakerSeatId: string | null;
   speakerBotId: string | null;
+  /** Frozen provenance distinguishes a player-authored Prosecutor line from
+   * an automated cast-bot line that uses the same public bot identity. */
+  speakerKind?: "bot" | "player" | "judge" | "narrator";
   /** Recorded only when the authored graph explicitly addresses a bot. */
   intendedRecipientSeatId?: string | null;
   intendedRecipientBotId?: string | null;
   occurredAt: string;
+}
+
+/** Minimal immutable public form needed to replay Identity Crisis without
+ * consulting a mutable Library bot after Case Forge. */
+export interface DebateMysteryIdentityMirrorTargetSnapshotV1 {
+  version: 1;
+  botId: string;
+  name: string;
+  faceStyle: BotFaceStyle;
+  avatarDetails: BotAvatarDetailsV1 | null;
+  glyph: string | null;
 }
 
 const DEBATE_MYSTERY_STAGE_ACTION_VERB_RE = /^(?:adjusts?|blinks?|braces?|clenches?|draws?|examines?|folds?|frowns?|gestures?|glances?|glares?|grimaces?|hesitates?|holds?|leans?|looks?|lowers?|nods?|paces?|pauses?|performs?|places?|points?|raises?|reaches?|recoils?|relaxes?|sets?|shakes?|shifts?|shrugs?|sighs?|scoffs?|smirks?|stares?|steadies?|straightens?|studies?|swallows?|takes?|taps?|tenses?|tilts?|turns?|unfolds?|winces?)\b/iu;
@@ -676,6 +696,11 @@ export interface DebateWhodunnitFormatStateV2 {
   record: DebateMysteryPublicRecordItemV2[];
   topics: DebateMysteryPublicTopicV2[];
   dialogueHistory: DebateMysteryPublicDialogueEntryV2[];
+  /** Frozen visual/name targets for exact live, Archive, and play-again replay. */
+  identityMirrorTargetSnapshots: Record<
+    string,
+    DebateMysteryIdentityMirrorTargetSnapshotV1
+  >;
   activeDialogueNodeId: string | null;
   theoryAvailable: boolean;
   theory: DebateMysteryTheoryV1 | null;
@@ -1741,6 +1766,42 @@ export function normalizeDebateMysteryFormatStateV2(
     ...(source.victim ? [{ id: source.victim.id, name: source.victim.name }] : []),
     ...source.suspects.map((suspect) => ({ id: suspect.seatId, name: suspect.name })),
   ];
+  const identityMirrorTargetSnapshots = Object.fromEntries(
+    Object.entries(source.identityMirrorTargetSnapshots ?? {}).flatMap(
+      ([botId, value]) => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) {
+          return [];
+        }
+        const candidate = value as Partial<DebateMysteryIdentityMirrorTargetSnapshotV1>;
+        const normalizedBotId = botId.trim();
+        const name = typeof candidate.name === "string" ? candidate.name.trim() : "";
+        if (
+          candidate.version !== 1 ||
+          !normalizedBotId ||
+          candidate.botId !== normalizedBotId ||
+          !name ||
+          !candidate.faceStyle ||
+          typeof candidate.faceStyle !== "object" ||
+          Array.isArray(candidate.faceStyle)
+        ) {
+          return [];
+        }
+        return [[normalizedBotId, {
+          version: 1 as const,
+          botId: normalizedBotId,
+          name: name.slice(0, 120),
+          faceStyle: botIdentityMirrorFaceV1(candidate.faceStyle),
+          avatarDetails: botIdentityMirrorAvatarDetailsV1(
+            candidate.avatarDetails,
+          ),
+          glyph:
+            typeof candidate.glyph === "string" && candidate.glyph.trim()
+              ? candidate.glyph.trim().slice(0, 120)
+              : null,
+        } satisfies DebateMysteryIdentityMirrorTargetSnapshotV1]];
+      },
+    ),
+  );
   return {
     ...(source as DebateWhodunnitFormatStateV2),
     config: {
@@ -1785,6 +1846,7 @@ export function normalizeDebateMysteryFormatStateV2(
           ? Math.max(0, Math.round(source.compilation.etaBasisPasses))
           : 0,
     },
+    identityMirrorTargetSnapshots,
     record: source.record.map((item) => ({
       ...item,
       visualKind:
@@ -1803,6 +1865,14 @@ export function normalizeDebateMysteryFormatStateV2(
         "string"
           ? (entry as Partial<DebateMysteryPublicDialogueEntryV2>).speakerBotId!
           : null,
+      ...(
+        entry.speakerKind === "bot" ||
+        entry.speakerKind === "player" ||
+        entry.speakerKind === "judge" ||
+        entry.speakerKind === "narrator"
+          ? { speakerKind: entry.speakerKind }
+          : {}
+      ),
     })),
     roomIntroductions: Object.fromEntries(source.rooms.map((room) => {
       const phase = source.roomIntroductions?.[room.id];

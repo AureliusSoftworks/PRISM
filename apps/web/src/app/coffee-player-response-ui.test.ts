@@ -14,9 +14,13 @@ describe("Coffee player response UI wiring", () => {
       pageSource,
       /latencyCritical=\{variant === "coffee-table" \|\| variant === "signal"\}/u,
     );
+    assert.match(
+      pageSource,
+      /latencyCriticalRichMentions=\{variant === "coffee-table"\}/u,
+    );
   });
 
-  it("keeps latency-critical editing uncontrolled and exits before React UI work", () => {
+  it("keeps ordinary latency-critical editing uncontrolled while restoring Coffee mentions", () => {
     const composerStart = pageSource.indexOf("const ComposerInput = forwardRef<");
     const composerEnd = pageSource.indexOf(
       'ComposerInput.displayName = "ComposerInput"',
@@ -26,7 +30,7 @@ describe("Coffee player response UI wiring", () => {
     assert.ok(composerStart >= 0 && composerEnd > composerStart);
     assert.match(
       composer,
-      /const enabled = requestedRichInputEnabled && !latencyCritical/u,
+      /const enabled =\s*\(requestedRichInputEnabled && !latencyCritical\) \|\|\s*\(latencyCriticalRichMentions && nativeMentionRichInputActive\)/u,
     );
     assert.match(
       composer,
@@ -34,15 +38,39 @@ describe("Coffee player response UI wiring", () => {
     );
     assert.match(
       composer,
-      /onValueChange\(nextValue\);\s*resizeTextareaToContent\(el\);\s*if \(latencyCritical\) return;\s*textareaChipActivationRef/u,
+      /onValueChange\(nextValue\);\s*resizeTextareaToContent\(el\);\s*if \(latencyCritical\) \{[\s\S]{0,240}?latencyCriticalRichMentions &&[\s\S]{0,180}?syncTextareaMention\(el\);[\s\S]{0,80}?return;\s*\}\s*textareaChipActivationRef/u,
     );
     assert.match(
       composer,
-      /if \(latencyCritical\) \{[\s\S]{0,700}onEmptyBackspaceRef\.current\?\.\(\) === true[\s\S]{0,180}return;\s*\}/u,
+      /onEmptyBackspaceRef\.current\?\.\(\) === true\s*\) \{\s*event\.preventDefault\(\);\s*\}\s*return;\s*\}\s*if \(\s*event\.key === "Escape"/u,
     );
     assert.match(
       composer,
       /if \(latencyCritical\) return;\s*const interval = window\.setInterval/u,
+    );
+    assert.match(
+      composer,
+      /const activateLatencyCriticalRichMention = useCallback\([\s\S]{0,500}?setNativeMentionRichInputActive\(true\)[\s\S]{0,260}?wysiwygRef\.current\?\.focus\(\)/u,
+    );
+    assert.match(
+      composer,
+      /<ComposerBotMentionPopover/u,
+    );
+    assert.match(
+      composer,
+      /if \(latencyCritical && latencyCriticalRichMentions\) \{\s*activateLatencyCriticalRichMention\(act\.replacement\)/u,
+    );
+    assert.match(
+      composer,
+      /const nextHasBotMention = tokenizeBotMentionSource\(/u,
+    );
+    assert.match(
+      composer,
+      /\.some\(\(segment\) => segment\.kind === "mention"\)/u,
+    );
+    assert.match(
+      composer,
+      /setNativeMentionRichInputActive\(nextHasBotMention\)/u,
     );
   });
 

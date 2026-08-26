@@ -1237,6 +1237,7 @@ import {
   botPowerMetaSigilV1,
   botPowerAuthoringParadoxHintV1,
   BOT_IDENTITY_SHAPESHIFT_TRANSITION_MS,
+  botIdentityMirrorQuotedTargetNameV1,
   botIdentityMirrorTransitionActiveV1,
   botIdentityShapeshiftTransitionActiveV1,
   resolveBotIdentityMirrorAvatarDetailsV1,
@@ -1845,6 +1846,7 @@ import {
   getBotMentionDisplayLength,
   getBotMentionDisplayText,
   PRISM_BOT_MARKDOWN_LINK_RE,
+  tokenizeBotMentionSource,
   type BotMentionPick,
 } from "./botMention";
 import {
@@ -29662,6 +29664,8 @@ interface ComposerInputProps {
   disabled?: boolean;
   /** Prefer fixed native layout over per-keystroke measurement on live stages. */
   latencyCritical?: boolean;
+  /** Keep ordinary live-stage typing native, promoting only committed bot mentions. */
+  latencyCriticalRichMentions?: boolean;
   value: string;
   placeholder: string;
   writingAssistEnabled: boolean;
@@ -31768,8 +31772,6 @@ interface ZenLiveBotMannequinProps {
   blinkEnabled?: boolean;
   blinkWhileTalking?: boolean;
   mouthShape: ZenLiveBotMouthShape;
-  /** Surface-scoped default rest glyph; never overrides authored mouths. */
-  defaultRestingMouthCharacter?: string | null;
   /** Surface-scoped authored Speech-ink visibility. */
   speechInkVisible?: boolean;
   moodHint: NonNullable<ZenLiveBotActionState["moodHint"]>;
@@ -32041,7 +32043,6 @@ function FullAvatarCompactFallback({
     isTalking,
     inkTalking,
     mouthShape,
-    defaultRestingMouthCharacter,
     speechInkVisible,
     moodHint,
     plateFace,
@@ -32064,12 +32065,6 @@ function FullAvatarCompactFallback({
       coffeeSeatEmojiMoodFromPrism(zenLiveActionMoodToBotMood(moodHint)),
       miniMouthShape,
     );
-  const displayedMouthCharacter =
-    !isTalking &&
-    defaultRestingMouthCharacter !== undefined &&
-    faceStyle.mouthCharacter === null
-      ? defaultRestingMouthCharacter
-      : faceStyle.mouthCharacter;
   const miniFaceRegistrationStyle = {
     ...(hasAvatarArt
       ? BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE
@@ -32128,7 +32123,7 @@ function FullAvatarCompactFallback({
             faceEyeCharacter={faceStyle.eyeCharacter}
             faceEyeMovement="still"
             faceMouthFont={faceStyle.mouthFont}
-            faceMouthCharacter={displayedMouthCharacter}
+            faceMouthCharacter={faceStyle.mouthCharacter}
             faceMouthAnimation={faceStyle.mouthAnimation}
             faceMouthSpeechPoses={faceStyle.mouthSpeechPoses}
             faceFontWeight={faceStyle.weight}
@@ -32185,7 +32180,6 @@ function ZenLiveBotMannequin({
   blinkEnabled = false,
   blinkWhileTalking = true,
   mouthShape,
-  defaultRestingMouthCharacter,
   speechInkVisible,
   moodHint,
   plateFace,
@@ -32411,12 +32405,6 @@ function ZenLiveBotMannequin({
     mouthShape,
     isTalking,
   });
-  const displayedMouthCharacter =
-    !isTalking &&
-    defaultRestingMouthCharacter !== undefined &&
-    faceStyle.mouthCharacter === null
-      ? defaultRestingMouthCharacter
-      : faceStyle.mouthCharacter;
   const displayPlateFace =
     plateFaceRestKey !== null && releasedPlateFaceKey === plateFaceRestKey
       ? plateFaceRest!
@@ -32627,7 +32615,6 @@ function ZenLiveBotMannequin({
             isTalking,
             inkTalking,
             mouthShape,
-            defaultRestingMouthCharacter,
             speechInkVisible,
             moodHint,
             plateFace,
@@ -32797,7 +32784,7 @@ function ZenLiveBotMannequin({
                   eyeStateStartedAtMs={eyeStateStartedAtMs}
                   eyeGazeOverride={cursorAttentionGaze}
                   faceMouthFont={faceStyle.mouthFont}
-                  faceMouthCharacter={displayedMouthCharacter}
+                  faceMouthCharacter={faceStyle.mouthCharacter}
                   faceMouthAnimation={faceStyle.mouthAnimation}
                   faceMouthSpeechPoses={faceStyle.mouthSpeechPoses}
                   faceFontWeight={faceStyle.weight}
@@ -33001,7 +32988,7 @@ function ZenLiveBotMannequin({
                     eyeStateStartedAtMs={eyeStateStartedAtMs}
                     eyeGazeOverride={cursorAttentionGaze}
                     faceMouthFont={faceStyle.mouthFont}
-                    faceMouthCharacter={displayedMouthCharacter}
+                    faceMouthCharacter={faceStyle.mouthCharacter}
                     faceMouthAnimation={faceStyle.mouthAnimation}
                     faceMouthSpeechPoses={faceStyle.mouthSpeechPoses}
                     faceFontWeight={faceStyle.weight}
@@ -37564,6 +37551,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
       enabled: requestedRichInputEnabled,
       disabled = false,
       latencyCritical = false,
+      latencyCriticalRichMentions = false,
       value,
       placeholder,
       writingAssistEnabled,
@@ -37599,7 +37587,11 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
     },
     ref,
   ): React.JSX.Element {
-    const enabled = requestedRichInputEnabled && !latencyCritical;
+    const [nativeMentionRichInputActive, setNativeMentionRichInputActive] =
+      useState(false);
+    const enabled =
+      (requestedRichInputEnabled && !latencyCritical) ||
+      (latencyCriticalRichMentions && nativeMentionRichInputActive);
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const actionInputRef = useRef<HTMLInputElement | null>(null);
     const textareaOverlayRef = useRef<HTMLDivElement | null>(null);
@@ -37672,7 +37664,10 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
     const effectivePlaceholder = generatingRandomPrompt
       ? "Finding a question that fits this conversation..."
       : placeholder;
-    const textareaDisplayValue = enabled ? visibleValue : textareaLocalValue;
+    const richInputValue = nativeMentionRichInputActive
+      ? textareaLocalValue
+      : visibleValue;
+    const textareaDisplayValue = enabled ? richInputValue : textareaLocalValue;
     const focusActionInput = useCallback((): void => {
       window.requestAnimationFrame(() => {
         const input = actionInputRef.current;
@@ -37723,6 +37718,10 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
     );
     const onValueChange = useCallback(
       (nextVisibleValue: string): void => {
+        if (nativeMentionRichInputActive) {
+          textareaValueRef.current = nextVisibleValue;
+          setTextareaLocalValue(nextVisibleValue);
+        }
         if (
           actionInputEnabled &&
           composerMainValueActivatesActionInput(nextVisibleValue)
@@ -37751,6 +37750,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
         enabled,
         focusActionInput,
         latencyCritical,
+        nativeMentionRichInputActive,
         onCanonicalValueChange,
       ],
     );
@@ -38454,6 +38454,22 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
       });
     }, []);
 
+    const activateLatencyCriticalRichMention = useCallback(
+      (replacement: string): void => {
+        textareaValueRef.current = replacement;
+        setTextareaLocalValue(replacement);
+        setNativeMentionRichInputActive(true);
+        setTaMention((state) =>
+          state.open
+            ? { ...state, open: false, caretRect: null, filtered: [] }
+            : state,
+        );
+        onValueChange(replacement);
+        window.requestAnimationFrame(() => wysiwygRef.current?.focus());
+      },
+      [onValueChange],
+    );
+
     const textareaMentionSyncFrameRef = useRef<number | null>(null);
     const textareaMentionSyncSnapshotRef = useRef("");
     const scheduleTextareaMentionSync = useCallback(() => {
@@ -38610,6 +38626,20 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
             : { action: "", message: nextValue };
           actionValueRef.current = nextParts.action;
           lastEmittedActionRef.current = nextParts.action;
+          const nextHasBotMention = tokenizeBotMentionSource(
+            nextParts.message,
+          ).some((segment) => segment.kind === "mention");
+          if (
+            latencyCriticalRichMentions &&
+            (nextHasBotMention || nativeMentionRichInputActive)
+          ) {
+            textareaValueRef.current = nextParts.message;
+            setTextareaLocalValue(nextParts.message);
+            setNativeMentionRichInputActive(nextHasBotMention);
+            setActionLocalValue(nextParts.action);
+            onCanonicalValueChange(nextValue);
+            return;
+          }
           if (latencyCritical) {
             if (actionInputRef.current) {
               actionInputRef.current.value = nextParts.action;
@@ -38685,6 +38715,8 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
         actionInputEnabled,
         enabled,
         latencyCritical,
+        latencyCriticalRichMentions,
+        nativeMentionRichInputActive,
         onCanonicalValueChange,
         onValueChange,
         resizeTextareaToContent,
@@ -38761,7 +38793,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
         {enabled ? (
           <DesktopMarkdownComposer
             ref={wysiwygRef}
-            value={visibleValue}
+            value={richInputValue}
             placeholder={effectivePlaceholder}
             writingAssistEnabled={writingAssistEnabled}
             sentenceCapitalizeEnabled={sentenceCapitalizeEnabled}
@@ -38875,7 +38907,16 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
                     onInputActivity?.();
                     onValueChange(nextValue);
                     resizeTextareaToContent(el);
-                    if (latencyCritical) return;
+                    if (latencyCritical) {
+                      if (
+                        latencyCriticalRichMentions &&
+                        (findAtMentionTokenPlain(nextValue, caret) ||
+                          taMentionRef.current.open)
+                      ) {
+                        syncTextareaMention(el);
+                      }
+                      return;
+                    }
                     textareaChipActivationRef.current = null;
                     pendingTextareaSelectionRef.current = null;
                     setTextareaSelectedWildcardSlotRange(null);
@@ -38993,6 +39034,45 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
                     const el = textareaRef.current;
                     if (!el) return;
                     if (latencyCritical) {
+                      if (
+                        latencyCriticalRichMentions &&
+                        taMentionRef.current.open
+                      ) {
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          dismissTaMentionPopover();
+                          return;
+                        }
+                        if (
+                          (event.key === "ArrowDown" ||
+                            event.key === "ArrowUp") &&
+                          taMentionRef.current.filtered.length > 0
+                        ) {
+                          event.preventDefault();
+                          const delta = event.key === "ArrowDown" ? 1 : -1;
+                          const len = taMentionRef.current.filtered.length;
+                          setTaMention((state) => ({
+                            ...state,
+                            highlight: (state.highlight + delta + len) % len,
+                          }));
+                          return;
+                        }
+                        if (event.key === "Tab" && !event.shiftKey) {
+                          event.preventDefault();
+                          const action = composeMentionTabPlainTextAction(
+                            el.value,
+                            el.selectionStart ?? 0,
+                            mentionBotsRef.current,
+                            taMentionRef.current.highlight,
+                          );
+                          if (action.kind !== "none") {
+                            activateLatencyCriticalRichMention(
+                              action.replacement,
+                            );
+                          }
+                          return;
+                        }
+                      }
                       if (
                         event.key === "Backspace" &&
                         !event.altKey &&
@@ -39582,9 +39662,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
                 </button>
               )}
             </div>
-            {!latencyCritical ? (
-              <>
-                <ComposerBotMentionPopover
+            <ComposerBotMentionPopover
               open={taMention.open}
               caretRect={taMention.caretRect}
               themeSource={composeEditorShellRef.current}
@@ -39624,6 +39702,10 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
                   index,
                 );
                 if (act.kind === "none") return;
+                if (latencyCritical && latencyCriticalRichMentions) {
+                  activateLatencyCriticalRichMention(act.replacement);
+                  return;
+                }
                 pendingTextareaCaretRef.current = act.caret;
                 textareaValueRef.current = act.replacement;
                 setTextareaLocalValue(act.replacement);
@@ -39643,38 +39725,38 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
               excludeInteractionRef={composeEditorShellRef}
               onDismiss={dismissTaMentionPopover}
               footer={mentionPopoverFooter}
-                />
-                <ComposerCommandPopover
-              open={taCommand.open}
-              anchorRect={taCommand.caretRect}
-              themeSource={composeEditorShellRef.current}
-              scope={taCommand.scope}
-              commands={taCommand.filtered}
-              highlightIndex={taCommand.highlight}
-              onHighlightIndexChange={(next) =>
-                setTaCommand((s) => ({ ...s, highlight: next }))
-              }
-              onPickCommand={(command) => {
-                const el = textareaRef.current;
-                if (!el) return;
-                if (
-                  !applyTextareaCommandPick(
-                    el,
-                    command,
-                    taCommandRef.current.scope,
+            />
+            {!latencyCritical ? (
+              <ComposerCommandPopover
+                open={taCommand.open}
+                anchorRect={taCommand.caretRect}
+                themeSource={composeEditorShellRef.current}
+                scope={taCommand.scope}
+                commands={taCommand.filtered}
+                highlightIndex={taCommand.highlight}
+                onHighlightIndexChange={(next) =>
+                  setTaCommand((s) => ({ ...s, highlight: next }))
+                }
+                onPickCommand={(command) => {
+                  const el = textareaRef.current;
+                  if (!el) return;
+                  if (
+                    !applyTextareaCommandPick(
+                      el,
+                      command,
+                      taCommandRef.current.scope,
+                    )
                   )
-                )
-                  return;
-                setTaCommand((s) =>
-                  s.open
-                    ? { ...s, open: false, caretRect: null, filtered: [] }
-                    : s,
-                );
-              }}
-              excludeInteractionRef={composeEditorShellRef}
-              onDismiss={dismissTaCommandPopover}
-                />
-              </>
+                    return;
+                  setTaCommand((s) =>
+                    s.open
+                      ? { ...s, open: false, caretRect: null, filtered: [] }
+                      : s,
+                  );
+                }}
+                excludeInteractionRef={composeEditorShellRef}
+                onDismiss={dismissTaCommandPopover}
+              />
             ) : null}
           </>
         )}
@@ -90239,6 +90321,7 @@ function HomeContent(): React.JSX.Element {
           markdownEditorEnabled: composerMarkdownEditorEnabled,
         })}
         latencyCritical={variant === "coffee-table" || variant === "signal"}
+        latencyCriticalRichMentions={variant === "coffee-table"}
         disabled={inputDisabled}
         value={value}
         placeholder={placeholder}
@@ -140300,6 +140383,11 @@ function HomeContent(): React.JSX.Element {
                 coffeeSeatVoicePreset(bot);
               const falseNameState = falseNameByHolderBotId[bot.id] ?? null;
               const seatPublicName =
+                (identityMirrorState
+                  ? botIdentityMirrorQuotedTargetNameV1(
+                      identityMirrorState.targetBotName,
+                    )
+                  : "") ||
                 falseNameState?.believedName?.trim() ||
                 identityShapeshiftState?.targetBotName?.trim() ||
                 bot.name;
@@ -145667,7 +145755,6 @@ function HomeContent(): React.JSX.Element {
                         blinkEnabled={avatarState.blinkEnabled === true}
                         blinkWhileTalking={!staticAudiencePortrait}
                         mouthShape={debateMouthShape}
-                        defaultRestingMouthCharacter={avatarState.defaultRestingMouthCharacter}
                         speechInkVisible={avatarState.speechInkVisible}
                         moodHint={debateMoodHint}
                         scheduleKey={`debate-${avatarState.role}-${botSnapshot.id}`}

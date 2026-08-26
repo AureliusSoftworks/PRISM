@@ -226,7 +226,7 @@ test("Debate mirror borrows only target eyes, complete mouth, Ink, and glyph", (
     "holder-frame",
   );
   assert.equal(mirrored.replayVisualSnapshot?.screenMaterialSeed, "holder-screen");
-  assert.equal(mirrored.name, holder.name);
+  assert.equal(mirrored.name, '"Target Persona"');
   assert.equal(mirrored.systemPrompt, holder.systemPrompt);
   assert.equal(mirrored.glyph, target.glyph);
   assert.deepEqual(mirrored.avatarDetails, targetInk);

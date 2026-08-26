@@ -24,6 +24,7 @@ import {
   botPowerChromaticBiasColorMatchesV1,
   botPowerChromaticBiasEffectsFromEffectsV1,
   botPowerChromaticBiasResolvedHueV1,
+  botIdentityMirrorFaceV1,
   debateMysteryClassifyVerdictV2,
   debateMysteryCredibilityMaximumV2,
   debateMysteryPremiumAvailableV2,
@@ -36,6 +37,7 @@ import {
   normalizeDebateEvidenceExhibitObject,
   normalizeDebateEvidencePacketV1,
   normalizeDebateMysteryTalkSubjectV2,
+  parseStoredBotAvatarDetailsV1,
   parseStoredBotAudioVoiceProfileV1,
   resolveDebateMysteryLineDeliveryV2,
   resolveDebateMysteryConfigV2,
@@ -51,6 +53,7 @@ import {
   type DebateMysteryCompilationStatusV2,
   type DebateMysteryCompilationSubstepV2,
   type DebateMysteryHouseStyleV2,
+  type DebateMysteryIdentityMirrorTargetSnapshotV1,
   type DebateMysteryDialogueGraphV2,
   type DebateMysteryDialogueNodeV2,
   type DebateMysteryPerformanceDirectionV2,
@@ -111,6 +114,36 @@ interface MysteryV2BotRow {
   export_hash: string | null;
   color: string | null;
   glyph: string | null;
+  avatar_details_json: string | null;
+  face_eyes_font: string | null;
+  face_eye_character: string | null;
+  face_eye_count: number | null;
+  face_eye_spacing: number | null;
+  face_eye_animation: string | null;
+  face_mouth_font: string | null;
+  face_mouth_character: string | null;
+  face_mouth_animation: string | null;
+  face_mouth_speech_poses: string | null;
+  face_mouth_coffee_pucker: number | null;
+  face_font_weight: number | null;
+  face_eye_scale: number | null;
+  face_eye_offset_x: number | null;
+  face_eye_offset_y: number | null;
+  face_eye_rotation_deg: number | null;
+  face_mouth_scale: number | null;
+  face_mouth_offset_x: number | null;
+  face_mouth_offset_y: number | null;
+  face_mouth_rotation_deg: number | null;
+  face_blink_bar: string | null;
+  face_blink_count: number | null;
+  face_blink_scale: number | null;
+  face_blink_offset_x: number | null;
+  face_blink_offset_y: number | null;
+  face_blink_rotation_deg: number | null;
+  face_thinking_frames: string | null;
+  face_thinking_scale: number | null;
+  face_thinking_offset_x: number | null;
+  face_thinking_offset_y: number | null;
   authored_audio_voice_profile: string | null;
   audio_voice_profile_override: string | null;
 }
@@ -501,10 +534,68 @@ function botRows(db: DatabaseSync, userId: string, ids: readonly string[]): Myst
   if (!ownedIds.length) return [];
   return db.prepare(
     `SELECT id, name, system_prompt, export_hash, color, glyph,
+            avatar_details_json,
+            face_eyes_font, face_eye_character, face_eye_count,
+            face_eye_spacing, face_eye_animation,
+            face_mouth_font, face_mouth_character, face_mouth_animation,
+            face_mouth_speech_poses, face_mouth_coffee_pucker,
+            face_font_weight,
+            face_eye_scale, face_eye_offset_x, face_eye_offset_y,
+            face_eye_rotation_deg,
+            face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y,
+            face_mouth_rotation_deg,
+            face_blink_bar, face_blink_count, face_blink_scale,
+            face_blink_offset_x, face_blink_offset_y,
+            face_blink_rotation_deg,
+            face_thinking_frames, face_thinking_scale,
+            face_thinking_offset_x, face_thinking_offset_y,
             authored_audio_voice_profile, audio_voice_profile_override
        FROM bots
       WHERE user_id = ? AND id IN (${ownedIds.map(() => "?").join(", ")})`,
   ).all(userId, ...ownedIds) as unknown as MysteryV2BotRow[];
+}
+
+function mysteryIdentityMirrorTargetSnapshotV1(
+  bot: MysteryV2BotRow,
+): DebateMysteryIdentityMirrorTargetSnapshotV1 {
+  return {
+    version: 1,
+    botId: bot.id,
+    name: bot.name,
+    faceStyle: botIdentityMirrorFaceV1({
+      faceEyesFont: bot.face_eyes_font,
+      faceEyeCharacter: bot.face_eye_character,
+      faceEyeCount: bot.face_eye_count,
+      faceEyeSpacing: bot.face_eye_spacing,
+      faceEyeAnimation: bot.face_eye_animation,
+      faceMouthFont: bot.face_mouth_font,
+      faceMouthCharacter: bot.face_mouth_character,
+      faceMouthAnimation: bot.face_mouth_animation,
+      faceMouthSpeechPoses: bot.face_mouth_speech_poses,
+      faceMouthCoffeePucker: bot.face_mouth_coffee_pucker,
+      faceFontWeight: bot.face_font_weight,
+      faceEyeScale: bot.face_eye_scale,
+      faceEyeOffsetX: bot.face_eye_offset_x,
+      faceEyeOffsetY: bot.face_eye_offset_y,
+      faceEyeRotationDeg: bot.face_eye_rotation_deg,
+      faceMouthScale: bot.face_mouth_scale,
+      faceMouthOffsetX: bot.face_mouth_offset_x,
+      faceMouthOffsetY: bot.face_mouth_offset_y,
+      faceMouthRotationDeg: bot.face_mouth_rotation_deg,
+      faceBlinkBar: bot.face_blink_bar,
+      faceBlinkCount: bot.face_blink_count ?? bot.face_eye_count,
+      faceBlinkScale: bot.face_blink_scale,
+      faceBlinkOffsetX: bot.face_blink_offset_x,
+      faceBlinkOffsetY: bot.face_blink_offset_y,
+      faceBlinkRotationDeg: bot.face_blink_rotation_deg,
+      faceThinkingFrames: bot.face_thinking_frames,
+      faceThinkingScale: bot.face_thinking_scale,
+      faceThinkingOffsetX: bot.face_thinking_offset_x,
+      faceThinkingOffsetY: bot.face_thinking_offset_y,
+    }),
+    avatarDetails: parseStoredBotAvatarDetailsV1(bot.avatar_details_json),
+    glyph: bot.glyph,
+  };
 }
 
 function v1ScaffoldConfig(config: DebateMysteryResolvedConfigV2): DebateMysteryResolvedConfigV1 {
@@ -1201,6 +1292,7 @@ function initialV2State(
     record: [],
     topics: [],
     dialogueHistory: [],
+    identityMirrorTargetSnapshots: {},
     activeDialogueNodeId: null,
     theoryAvailable: false,
     theory: null,
@@ -2423,7 +2515,7 @@ async function authorMysteryV2(args: {
         ? [{
             botId,
             name: botById.get(botId)?.name ?? botId,
-            rule: "When another cast bot directly addresses this holder, the sealed presentation borrows only that addresser's eyes, complete resting/live mouth package, Avatar Details Ink, and lower glyph. The holder keeps their name, persona, color, communication frame, Accent Map, authored voice, Powers, behavior, and every other identity field.",
+            rule: "When another cast bot or the player-controlled Prosecutor directly addresses this holder, the holder knowingly masquerades as that addresser to appropriate only their exact eyes and blink package, complete resting/live mouth package including glyph style and Custom Speech poses, Avatar Details Ink, lower glyph, and a literally double-quoted copy of the addresser's public name. The holder defensively treats the original as the imitator, with mild concern rather than panic or constant repetition. The holder keeps their color, communication frame, complete authored voice, Accent Map location, pronunciation, Speechprint, provider voice identity, Powers, memories, role, and every other speech or mechanical identity field. This is presentation and authored dialogue only and must not change sealed facts or gameplay.",
           }]
         : [],
     ),
@@ -2780,7 +2872,7 @@ async function authorMysteryV2(args: {
           "For every authored Present reaction, write the selected public Case File title exactly in both the Prosecutor line and the witness response. Never expose sealed reasoning or substitute a generic 'item' or 'evidence' reference for that public title.",
           "Every spoken bot line supplies its nonverbal beat in the dedicated stage-action field. Never put an action or a bot name inside spoken dialogue.",
           "Write Prosecutor lines only in the frozen Prosecutor persona and Defense rebuttals or objections only in the frozen Defense Counsel persona. The accused is never their own attorney.",
-          "Identity Crisis changes only the holder's eyes, complete resting/live mouth package, Avatar Details Ink, and lower glyph when a cast bot directly addresses them. Never let it change authored dialogue, persona, name, Powers, facts, proof, role ownership, or voice identity.",
+          "Identity Crisis changes only the holder's eyes, complete resting/live mouth package, Avatar Details Ink, lower glyph, and literally double-quoted public display name when an eligible target directly addresses them. The holder knowingly masquerades as that target and defensively treats the original as the suspicious imitator with mild concern. Never let it change authored dialogue ownership, persona, Powers, facts, proof, role ownership, color, or voice identity.",
           "Defendant reactions must stay usable if this suspect becomes the accused, including while another suspect is the active witness.",
           "Keep each Talk response, statement, Press answer, rebuttal, revision, and reaction under 75 words.",
           ]),
@@ -4094,8 +4186,15 @@ function buildMysteryV2Graph(args: {
       visibleText: args.authored.publicOpening,
       speakerSeatId: null,
       speakerBotId: null,
+      speakerKind: "narrator",
       occurredAt: now,
     }] : [],
+    identityMirrorTargetSnapshots: Object.fromEntries(
+      args.bots.map((bot) => [
+        bot.id,
+        mysteryIdentityMirrorTargetSnapshotV1(bot),
+      ]),
+    ),
     activeDialogueNodeId: openingNode?.id ?? null,
   };
   return { graph, privateCase, publicState };
@@ -7432,6 +7531,7 @@ function executeDialogueNodeV2(args: {
           visibleText: line.visibleText,
           speakerSeatId: node.speakerSeatId,
           speakerBotId: line.speakerBotId,
+          speakerKind: line.speakerKind,
           ...(node.intendedRecipientSeatId
             ? { intendedRecipientSeatId: node.intendedRecipientSeatId }
             : {}),
@@ -7791,6 +7891,7 @@ function prepareSpectatorTheoryV2(args: {
       visibleText: `The selected Prosecutor investigated the mansion and proposed charges against ${accused.name}. Review the admitted physical findings and revise the conclusion before filing it.`,
       speakerSeatId: null,
       speakerBotId: args.state.config.prosecutorBotId,
+      speakerKind: "bot",
       occurredAt: now,
     }],
     activeDialogueNodeId: "prosecutor-offstage-investigation",
@@ -7904,6 +8005,7 @@ function advanceSpectatorTrialV2(args: {
         visibleText: line.visibleText,
         speakerSeatId: chapter.witnessSeatId,
         speakerBotId: line.speakerBotId,
+        speakerKind: line.speakerKind,
         occurredAt: new Date().toISOString(),
       }],
     };
@@ -7930,6 +8032,7 @@ function advanceSpectatorTrialV2(args: {
         visibleText: line.visibleText,
         speakerSeatId: chapter.witnessSeatId,
         speakerBotId: line.speakerBotId,
+        speakerKind: line.speakerKind,
         occurredAt: new Date().toISOString(),
       }],
     };
@@ -7989,6 +8092,7 @@ function advanceSpectatorTrialV2(args: {
       visibleText: optionLine.visibleText,
       speakerSeatId: null,
       speakerBotId: optionLine.speakerBotId,
+      speakerKind: optionLine.speakerKind,
       ...(responseNode?.speakerSeatId
         ? { intendedRecipientSeatId: responseNode.speakerSeatId }
         : {}),
@@ -8357,6 +8461,7 @@ export function applyDebateMysteryActionV2(
       visibleText: optionLine.visibleText,
       speakerSeatId: null,
       speakerBotId: optionLine.speakerBotId,
+      speakerKind: optionLine.speakerKind,
       ...(responseNode?.speakerSeatId
         ? { intendedRecipientSeatId: responseNode.speakerSeatId }
         : {}),

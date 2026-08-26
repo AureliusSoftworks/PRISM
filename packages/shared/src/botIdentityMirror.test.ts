@@ -13,6 +13,7 @@ import {
   botIdentityMirrorHolderPromptV1,
   botIdentityMirrorObserverPromptV1,
   botIdentityMirrorOriginalCorrectionRequiredV1,
+  botIdentityMirrorQuotedTargetNameV1,
   botIdentityMirrorTargetChangesV1,
   botIdentityMirrorTransitionActiveV1,
   createBotIdentityMirrorStateV1,
@@ -277,7 +278,7 @@ test("identity mirror accepts only explicit direct bot address syntax", () => {
   );
 });
 
-test("identity mirror snapshot stays public and does not alter persona prompts", () => {
+test("identity mirror snapshot stays public and gives the holder its masquerade behavior", () => {
   const state = identityState();
   assert.equal(state.targetFace.eyeCharacter, "◉");
   assert.deepEqual(state.targetAvatarDetails, targetAvatarDetails);
@@ -285,13 +286,21 @@ test("identity mirror snapshot stays public and does not alter persona prompts",
   assert.equal("targetVoice" in state, false);
   assert.equal("powers" in state, false);
   assert.equal("privateMemories" in state, false);
+  const holderPrompt = botIdentityMirrorHolderPromptV1({
+    holderName: state.holderBotName,
+    roleLabel: "Signal guest",
+    state,
+  });
+  assert.match(holderPrompt, /knowingly masquerade as Mara Vale/iu);
+  assert.match(holderPrompt, /"Mara Vale"/u);
+  assert.match(holderPrompt, /suspicious imitator/iu);
+  assert.match(holderPrompt, /do not publicly introduce yourself by your saved holder name/iu);
+  assert.match(holderPrompt, /use the borrowed public name without adopting Mara Vale's persona/iu);
+  assert.match(holderPrompt, /own personality.*color.*voice.*Accent Map/iu);
+  assert.doesNotMatch(holderPrompt, /terse lunar cartographer/iu);
   assert.equal(
-    botIdentityMirrorHolderPromptV1({
-      holderName: state.holderBotName,
-      roleLabel: "Signal guest",
-      state,
-    }),
-    "",
+    botIdentityMirrorQuotedTargetNameV1("  Mara   Vale  "),
+    '"Mara Vale"',
   );
   assert.equal(
     normalizeBotIdentityMirrorStateV1({ ...state, targetKind: "human" }),
@@ -488,7 +497,7 @@ test("identity mirror snapshot stays public and does not alter persona prompts",
   );
 });
 
-test("identity mirror never changes social identity or authored responses", () => {
+test("identity mirror keeps observers and deterministic authored responses autonomous", () => {
   const state = identityState();
   const originalPrompt = botIdentityMirrorObserverPromptV1({
     observerBotId: state.targetBotId,

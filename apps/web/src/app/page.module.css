@@ -29314,7 +29314,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
           var(--zen-live-bot-buckle-screen-scale)
       ) * 0.5
   );
-  transform: translate(-50%, -50%);
+  /* Follow the same movement-driven angle as the hull metal. The assembly is
+     circular, so this turns only its asymmetric bezel glare/material read;
+     the independently layered CRT lattice and glyph remain screen-upright. */
+  transform: translate(-50%, -50%)
+    rotate(var(--bot-face-metal-light-rotation, 0deg));
   border-radius: 50%;
   background:
     radial-gradient(
@@ -29418,15 +29422,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenLiveBotPresenceBody::after {
-  /* The buckle glyph is already rasterized on the canonical phosphor grid. Add
-     only the dim physical cell lattice behind it: the frame art supplies the
-     black substrate and bezel, while the bot-colored radial field lets the
-     nearby phosphor bloom reveal cells without repainting the glyph itself. */
+  /* Match the primary display's physical stack: phosphor emission first, then
+     a restrained multiplying cell lattice, then glass. The procedural screen
+     beneath already owns the bot-colored substrate, so this foreground layer
+     contains only screen-fixed CRT lines. */
   content: "";
   position: absolute;
   left: calc(50% + var(--zen-live-bot-glyph-x-anchor, 0px) + 1px);
   top: calc(50% + var(--zen-live-bot-glyph-y-anchor, 70px) + 1px);
-  z-index: 11;
+  z-index: 13;
   width: calc(
     var(
         --zen-live-bot-body-glyph-size,
@@ -29486,18 +29490,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
             var(--zen-live-bot-buckle-crt-line-width)
         )
         var(--zen-live-bot-buckle-crt-cell-pitch)
-    ),
-    radial-gradient(
-      circle at 50% 48%,
-      color-mix(in srgb, var(--coffee-bot-color, currentColor) 16%, transparent)
-        0 42%,
-      color-mix(in srgb, var(--coffee-bot-color, currentColor) 8%, transparent)
-        65%,
-      transparent 82%
     );
   -webkit-mask-image: radial-gradient(circle, #000 0 74%, transparent 100%);
   mask-image: radial-gradient(circle, #000 0 74%, transparent 100%);
-  opacity: 0.78;
+  opacity: 0.18;
+  mix-blend-mode: multiply;
   contain: paint;
 }
 
@@ -32733,7 +32730,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   position: absolute;
   left: calc(50% + var(--zen-live-bot-glyph-x-anchor, 0px) + 1px);
   top: calc(50% + var(--zen-live-bot-glyph-y-anchor, 70px) + 1px);
-  z-index: 13;
+  z-index: 14;
   width: var(--foundry-buckle-screen-size);
   height: var(--foundry-buckle-screen-size);
   border-radius: 50%;
@@ -32745,6 +32742,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   box-shadow:
     inset 0 0 0 1px rgba(255,255,255,.13),
     inset 0 0 8px rgba(0,0,0,.34);
+  mix-blend-mode: screen;
   pointer-events: none;
 }
 
@@ -73169,11 +73167,11 @@ a.settingsCreditItem:focus-visible {
 }
 
 /* A live table is a stage, not a second transcript. Keep only the current
-   utterance inside the table and leave complete history in the side panel. */
+   utterance inside the table and leave complete history in the side panel.
+   Let that utterance use the center's existing scroll geometry in full: a
+   line clamp inserts a false mid-sentence ending even though the text exists. */
 .coffeeStage:is([data-phase="arriving"], [data-phase="live"])
   .coffeeCenterMessageScroll {
-  max-height: min(7em, 112px);
-  overflow: hidden;
   -webkit-mask-image: none;
   mask-image: none;
 }
@@ -73183,15 +73181,6 @@ a.settingsCreditItem:focus-visible {
   min-height: 0;
   padding: 0;
   align-content: center;
-}
-
-.coffeeStage:is([data-phase="arriving"], [data-phase="live"])
-  .coffeeCenterFeedLine {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
-  line-clamp: 4;
 }
 
 .coffeeCenterMessage[data-live-transcript="true"] {

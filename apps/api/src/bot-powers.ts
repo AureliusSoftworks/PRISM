@@ -957,14 +957,14 @@ function deterministicIdentityMirrorPower(
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
     selfCue:
-      "Identity Crisis is presentation-only. When a bot directly addresses you, borrow only that bot's eyes, complete resting/live mouth package, authored Avatar Details Ink, and lower glyph until another bot addresses you or the session resets. Keep your own name, persona, voice and Accent Map, color, chassis/frame, Powers, behavior, memories, role, and every other identity field. The player is never a target.",
+      "Identity Crisis is presentation-only. When an eligible direct addresser triggers the Power, knowingly masquerade as that target to appropriate only their exact eyes and blink package, complete resting/live mouth package including glyph style and Custom Speech poses, authored Avatar Details Ink, lower glyph, and a literally double-quoted copy of their public name until another eligible target addresses you or the session resets. Defensively behave as though the original is the suspicious imitator, with mild concern rather than panic or constant repetition. Keep your own color, chassis/frame, complete voice, Accent Map location, pronunciation, Speechprint, provider voice identity, Powers, behavior, memories, role, and every other speech or mechanical identity field. Whodunnit V2 may treat the player-controlled Prosecutor as the eligible target.",
     observerCue:
-      `${subject} visually borrows only the latest direct bot addresser's eyes, complete resting/live mouth package, authored Avatar Details Ink, and lower glyph. Their name, persona, voice, color, chassis/frame, Powers, behavior, and every other field remain their own.`,
+      `${subject} knowingly masquerades as the latest eligible direct addresser, appropriating only the target's exact eyes and blink package, complete resting/live mouth package including glyph style and Custom Speech poses, authored Avatar Details Ink, lower glyph, and a literally double-quoted copy of the target's public name while defensively treating the original as the imitator. Their color, chassis/frame, complete voice and Accent Map, pronunciation, Speechprint, provider voice identity, Powers, behavior, memories, role, and every other speech or mechanical field remain their own.`,
     effects: [{ type: "identity_mirror", trigger: "direct_bot_address" }],
     ruleLabels: [
-      "Mirrors direct bot addresser",
-      "Eyes mouth Ink glyph only",
-      "Retains holder identity and Powers",
+      "Mirrors eligible direct addresser",
+      "Eyes mouth Ink glyph and quoted name",
+      "Retains holder color and speech identity",
     ],
   };
 }

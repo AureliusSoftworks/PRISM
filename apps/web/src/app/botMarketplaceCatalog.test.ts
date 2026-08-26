@@ -577,10 +577,13 @@ describe("bot marketplace static catalog", () => {
           "ink",
           "glyph",
         ]);
-        assert.match(entry.description ?? "", /eyes, speaking mouth, Ink, and glyph.*every other way/iu);
+        assert.match(
+          entry.description ?? "",
+          /eyes, speaking mouth, Ink, glyph, and quoted public name.*retaining his color and complete speech identity/iu,
+        );
         assert.match(
           bundle.botJson.profile?.purpose.statement ?? "",
-          /only his eyes.*resting\/live mouth package.*Avatar Details Ink.*lower glyph/iu,
+          /exact eyes.*resting\/live mouth package.*Avatar Details Ink.*lower glyph.*double-quoted public name/iu,
         );
         assert.match(
           bundle.botJson.profile?.appearance.description ?? "",
@@ -588,12 +591,17 @@ describe("bot marketplace static catalog", () => {
         );
         assert.match(
           powers[0]?.intent ?? "",
-          /presentation-only.*eyes and blink package.*resting\/live mouth and viseme package.*Avatar Details Ink.*lower glyph/iu,
+          /presentation-only.*exact eyes\/blink.*resting\/live mouth\/visemes with glyph style and Custom Speech poses.*Avatar Details Ink.*lower glyph.*literal double-quoted/iu,
         );
         assert.match(
           powers[0]?.intent ?? "",
-          /Keep Collin's name, persona, dialogue behavior, complete voice and Accent Map.*color.*chassis\/frame.*thinking spinner.*Powers and consequences/iu,
+          /Keep Collin's color\/frame.*voice.*Accent Map\/location.*pronunciation.*Speechprint\/provider voice/iu,
         );
+        assert.match(
+          powers[0]?.intent ?? "",
+          /knowingly masquerades.*double-quoted public name.*Defensively treat the original as the suspicious imitator.*mild concern.*player Prosecutor/iu,
+        );
+        assert.match(powers[0]?.intent ?? "", /Frozen replay; no gameplay synthesis/iu);
         assert.doesNotMatch(
           powers[0]?.intent ?? "",
           /complete public audiovisual identity/iu,

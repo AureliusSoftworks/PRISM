@@ -590,6 +590,7 @@ export {
   botIdentityMirrorFaceV1,
   botIdentityMirrorVoiceV1,
   botIdentityMirrorHolderPromptV1,
+  botIdentityMirrorQuotedTargetNameV1,
   botIdentityMirrorObserverPromptV1,
   botIdentityMirrorOriginalCorrectionRequiredV1,
   botIdentityMirrorTransitionActiveV1,

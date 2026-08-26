@@ -97,7 +97,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   debate: {
     id: "debate",
     name: "Debate",
-    version: "0.52",
+    version: "0.53",
     status: "preview",
   },
   polling: {
@@ -306,9 +306,10 @@ export const BOT_POWER_AVATAR_COLOR_CYCLE_MODE_POLICY: Record<
 };
 
 /**
- * Direct-address identity theft exists only where bots can address bots at
- * runtime. Direct modes retain the holder voice, enforce one reveal label and
- * non-recanting, and hard-correct only genuine misaddressing of the original.
+ * Direct-address identity theft exists only on participant surfaces that can
+ * freeze an eligible addresser. Coffee and Signal use bot targets; Debate also
+ * admits Whodunnit's player-controlled Prosecutor. Direct modes retain the
+ * holder's complete speech identity and deterministic presentation.
  */
 export const BOT_POWER_IDENTITY_MIRROR_MODE_POLICY: Record<
   PrismAppletId,

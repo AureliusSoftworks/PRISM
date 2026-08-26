@@ -1321,6 +1321,13 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(state.playPhase, "title_card");
     assert.equal(state.caseTitle, "The Turnabout at Violet Hour");
     assert.equal(state.audioReady, true);
+    const frozenProsecutorIdentity = structuredClone(
+      state.identityMirrorTargetSnapshots[state.config.prosecutorBotId],
+    );
+    assert.ok(frozenProsecutorIdentity, "Case Forge freezes the player-controlled Prosecutor identity");
+    assert.equal(frozenProsecutorIdentity.botId, state.config.prosecutorBotId);
+    db.prepare("UPDATE bots SET name = 'Changed after Case Forge' WHERE id = ?")
+      .run(state.config.prosecutorBotId);
     assert.equal(typeof state.compilation.startedAt, "string");
     assert.ok(state.compilation.elapsedMs >= 0);
     assert.equal(state.compilation.etaBasisPasses, 5);
@@ -1515,6 +1522,11 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     state = v2State(session);
     assert.equal(state.playPhase, "case_opening");
     assert.deepEqual(state.dialogueHistory.at(-1), openingDialogue, "the compiled briefing is not regenerated at play time");
+    assert.deepEqual(
+      state.identityMirrorTargetSnapshots[state.config.prosecutorBotId],
+      frozenProsecutorIdentity,
+      "gameplay reuses the frozen player target instead of mutable Library data",
+    );
     assert.throws(
       () => act(db, session, { action: "move", roomId: privateCase.crimeSceneRoomId }, "opening-enter-room"),
       /dismiss the Casekeeper briefing/iu,

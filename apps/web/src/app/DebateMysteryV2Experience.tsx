@@ -30,7 +30,11 @@ import {
 import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
 import IdentityPresentationBlackout from "./IdentityPresentationBlackout";
 import { debateIdentityAppearanceBotV1 } from "./debateIdentityPresentation";
-import { debateMysteryIdentityMirrorPresentationsV1 } from "./debateMysteryIdentityMirror";
+import {
+  debateMysteryIdentityMirrorPresentationsV1,
+  debateMysteryIdentityMirrorTargetBotSnapshotV1,
+  debateMysteryQuotedIdentityNameV1,
+} from "./debateMysteryIdentityMirror";
 import {
   WHODUNNIT_INVESTIGATION_MUSIC_FADE_MS,
   WHODUNNIT_INVESTIGATION_MUSIC_TRANSITION_MS,
@@ -300,17 +304,18 @@ function mysteryBotSnapshot(bot: MysteryBotSummary): DebateBotSnapshotV1 {
 
 function mysteryIdentityMirrorAppearance(
   holder: MysteryBotSummary | null,
-  target: MysteryBotSummary | null,
+  target: DebateBotSnapshotV1 | null,
+  copiedName: string,
 ): MysteryBotSummary | null {
   if (!holder || !target) return holder;
   const appearance = debateIdentityAppearanceBotV1({
     holder: mysteryBotSnapshot(holder),
-    target: mysteryBotSnapshot(target),
+    target,
     effect: "identity_mirror",
   });
   return {
     ...holder,
-    name: appearance.name,
+    name: debateMysteryQuotedIdentityNameV1(copiedName),
     glyph: appearance.glyph,
     avatarDetails: appearance.avatarDetails,
     voiceProfile: appearance.voiceProfile,
@@ -843,10 +848,16 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const presentMysteryBot = useCallback((bot: MysteryBotSummary | null): MysteryBotSummary | null => {
     if (!bot) return null;
     const mirror = identityMirrors.get(bot.id);
-    return mirror
-      ? mysteryIdentityMirrorAppearance(bot, botById.get(mirror.targetBotId) ?? null)
-      : bot;
-  }, [botById, identityMirrors]);
+    if (!mirror) return bot;
+    const frozenTarget = state.identityMirrorTargetSnapshots[mirror.targetBotId];
+    const target = frozenTarget
+      ? debateMysteryIdentityMirrorTargetBotSnapshotV1(frozenTarget)
+      : (() => {
+          const liveTarget = botById.get(mirror.targetBotId) ?? null;
+          return liveTarget ? mysteryBotSnapshot(liveTarget) : null;
+        })();
+    return mysteryIdentityMirrorAppearance(bot, target, mirror.targetName);
+  }, [botById, identityMirrors, state.identityMirrorTargetSnapshots]);
   const identityPresentationBlackout = (
     <IdentityPresentationBlackout
       active={botIdentityPresentationTransitionActiveV1(
