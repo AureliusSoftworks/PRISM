@@ -82,7 +82,11 @@ describe("English voice post processing", () => {
     );
     assert.match(
       source,
-      /export function stopEnglishVoice\([\s\S]*?preservePreparedMedia[\s\S]*?if \(!options\.preservePreparedMedia\) releasePreparedMedia\(\)/
+      /export function stopEnglishVoice\([\s\S]{0,220}releaseEnglishVoice\(options\)/,
+    );
+    assert.match(
+      source,
+      /export function teardownEnglishVoiceImmediately\([\s\S]{0,520}if \(!options\.preservePreparedMedia\) releasePreparedMedia\(\)/,
     );
     assert.match(
       source,

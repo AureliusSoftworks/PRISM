@@ -1307,7 +1307,7 @@ export function startSessionAtmosphere(args: {
       mix = restoredMix;
       applyLiveMix(transitionMs);
     },
-    stop(fadeMs = 0) {
+    stop(fadeMs = 180) {
       if (stopped) return;
       stopped = true;
       if (timer !== null && typeof window !== "undefined") {
@@ -1356,9 +1356,20 @@ export function startSessionAtmosphere(args: {
         }
       };
       const fadeDuration = Math.max(0, fadeMs);
+      const browserFadeAvailable =
+        typeof window !== "undefined" &&
+        typeof window.setTimeout === "function" &&
+        [...activeLoops, ...activeBufferAudio].every(
+          (source) => Boolean(source.source.context),
+        ) &&
+        [...activeAudio.values()].every(
+          (source) => source.leveler
+            ? Boolean(source.leveler.busGain.context)
+            : typeof window.setInterval === "function",
+        );
       if (
         fadeDuration > 0 &&
-        typeof window !== "undefined" &&
+        browserFadeAvailable &&
         (activeLoops.size > 0 ||
           activeBufferAudio.size > 0 ||
           activeAudio.size > 0)

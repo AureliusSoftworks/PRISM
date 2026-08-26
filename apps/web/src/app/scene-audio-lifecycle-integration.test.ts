@@ -26,11 +26,16 @@ function sourceSlice(source: string, start: string, end: string): string {
 
 describe("scene audio lifecycle wiring", () => {
   it("registers every standalone PRISM audio backend", () => {
-    assert.match(lifecycleSource, /stopBottishVoice/u);
-    assert.match(lifecycleSource, /stopEnglishVoice/u);
-    assert.match(lifecycleSource, /stopReactionVoiceAudio/u);
+    assert.match(lifecycleSource, /releaseBottishVoice/u);
+    assert.match(lifecycleSource, /releaseEnglishVoice/u);
+    assert.match(lifecycleSource, /releaseReactionVoiceAudio/u);
     assert.match(lifecycleSource, /stopCoffeeActionSfx/u);
-    assert.match(lifecycleSource, /stopSignalIntroAudio/u);
+    assert.match(lifecycleSource, /stopCoffeeSoundtrackSampleAudio/u);
+    assert.match(lifecycleSource, /stopDebateIdentAudio/u);
+    assert.match(lifecycleSource, /stopSignalSoundboardAudio/u);
+    assert.match(lifecycleSource, /stopAllBotAvatarSfxAudio/u);
+    assert.match(lifecycleSource, /stopPrismCompanionGlassTapAudio/u);
+    assert.match(lifecycleSource, /releaseSignalIntroAudio/u);
     assert.match(
       atmosphereLayerSource,
       /return \(\) => \{[\s\S]*controller\.stop\(lifecycleTransitionMs\)/u,
@@ -62,6 +67,10 @@ describe("scene audio lifecycle wiring", () => {
       /listenerReactionVoiceAbortRef\.current\?\.abort\(\)/u,
     );
     assert.match(lifecycle, /stopAudioForStateExit\(\)/u);
+    assert.match(
+      pageSource,
+      /const stopBotcastUtterance = useCallback\(\(\): void => \{[\s\S]{0,900}releaseReactionVoiceAudio\(\);[\s\S]{0,180}releaseRealtimeVoiceAudio\("handoff", 160\);[\s\S]{0,260}stopVoicePlaybackPreservingPreparedMode/u,
+    );
   });
 
   it("invalidates stale Debate voice work before every exit path", () => {

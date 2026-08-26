@@ -71,7 +71,7 @@ export function SessionAtmosphereLayer({
   allowMixBoost = false,
   latencyCritical = false,
   mixTransitionMs = 0,
-  lifecycleTransitionMs = 0,
+  lifecycleTransitionMs = 180,
   ambientFoley = true,
   deferFoley = false,
   deferBotVocalization = deferFoley,

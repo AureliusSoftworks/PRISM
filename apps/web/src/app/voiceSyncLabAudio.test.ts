@@ -348,8 +348,8 @@ test("production playback source contract reuses seed, final-bus tap, tail, and 
   assert.match(source, /enqueueBabbleVoice\([\s\S]*?args\.clip\.seed/u);
   assert.match(source, /enqueueEnglishVoice\([\s\S]*?args\.clip\.seed/u);
   assert.match(source, /shh: \(\) => stopPlayback\("shh"\)/u);
-  assert.match(source, /stopEnglishVoice\(\{ preservePreparedMedia: true \}\)/u);
-  assert.match(source, /stopBottishVoice\(\{ preservePreparedMedia: true \}\)/u);
+  assert.match(source, /teardownEnglishVoiceImmediately\(\{ preservePreparedMedia: true \}\)/u);
+  assert.match(source, /teardownBottishVoiceImmediately\(\{ preservePreparedMedia: true \}\)/u);
 });
 
 test("Shh audit requires immediate cutoff, mouth closure, and post-cut silence", () => {

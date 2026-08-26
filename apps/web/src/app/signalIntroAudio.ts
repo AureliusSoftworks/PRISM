@@ -10,6 +10,7 @@ import {
   resumePrismAudioContext,
   routeAudioElementToPrismOutput,
 } from "./replayAudioMasterCapture.ts";
+import { releaseAudibleAudioElement } from "./audibleAudioRelease.ts";
 
 export const SIGNAL_SYNTH_IDENT_DURATION_MS = BOTCAST_LOCAL_INTRO_DURATION_MS;
 export const SIGNAL_SYNTH_OUTRO_DURATION_MS = 1_800;
@@ -928,16 +929,47 @@ let activeObjectUrl: string | null = null;
 let activeResolve: (() => void) | null = null;
 let activeOutputCleanup: (() => void) | null = null;
 
-export function stopSignalIntroAudio(): void {
-  activeOutputCleanup?.();
-  activeOutputCleanup = null;
-  activeAudio?.pause();
-  activeAudio = null;
-  if (activeObjectUrl) URL.revokeObjectURL(activeObjectUrl);
-  activeObjectUrl = null;
+export const SIGNAL_INTRO_STOP_FADE_MS = 320;
+
+/** Equal-power release for an audible ident/outro. The active slot is
+ * detached first so a replacement may begin while the prior natural tail
+ * leaves the shared mix. */
+export function releaseSignalIntroAudio(
+  fadeMs = SIGNAL_INTRO_STOP_FADE_MS,
+): void {
+  const audio = activeAudio;
+  const objectUrl = activeObjectUrl;
+  const outputCleanup = activeOutputCleanup;
   const resolve = activeResolve;
+  activeAudio = null;
+  activeObjectUrl = null;
+  activeOutputCleanup = null;
   activeResolve = null;
-  resolve?.();
+  if (!audio) {
+    outputCleanup?.();
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+    resolve?.();
+    return;
+  }
+  const finish = (): void => {
+    outputCleanup?.();
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+    resolve?.();
+  };
+  const durationMs = Math.max(0, Math.round(fadeMs));
+  void releaseAudibleAudioElement(audio, {
+    durationMs,
+    onReleased: finish,
+  });
+}
+
+export function stopSignalIntroAudio(): void {
+  releaseSignalIntroAudio();
+}
+
+/** Immediate cleanup for a silent/failed ident that never became audible. */
+export function teardownSignalIntroAudioImmediately(): void {
+  releaseSignalIntroAudio(0);
 }
 
 export function playSignalIntroAudio(args: {
@@ -948,7 +980,7 @@ export function playSignalIntroAudio(args: {
   volume: number;
   startDelayMs?: number;
 }): { durationMs: number; finished: Promise<void> } {
-  stopSignalIntroAudio();
+  releaseSignalIntroAudio();
   const durationMs = args.introAudio.source === "elevenlabs"
     ? Math.max(3_000, args.introAudio.durationMs)
     : SIGNAL_SYNTH_IDENT_DURATION_MS;
@@ -1022,7 +1054,7 @@ export function playSignalOutroAudio(args: {
   enabled: boolean;
   volume: number;
 }): { durationMs: number; finished: Promise<void> } {
-  stopSignalIntroAudio();
+  releaseSignalIntroAudio();
   const durationMs = SIGNAL_SYNTH_OUTRO_DURATION_MS;
   if (
     !args.enabled ||

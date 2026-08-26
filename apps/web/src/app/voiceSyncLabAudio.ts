@@ -17,7 +17,7 @@ import {
   enqueueBabbleVoice,
   enqueueBottishVoice,
   prepareBottishVoice,
-  stopBottishVoice,
+  teardownBottishVoiceImmediately,
   type BottishPlan,
 } from "./bottishVoice.ts";
 import {
@@ -25,7 +25,7 @@ import {
   prepareEnglishVoice,
   readEnglishVoiceSynthesisClip,
   scaleEnglishVoiceAlignmentForPlayback,
-  stopEnglishVoice,
+  teardownEnglishVoiceImmediately,
   type EnglishVoiceCharacterAlignment,
 } from "./englishVoice.ts";
 import { prismAudioContext } from "./replayAudioMasterCapture.ts";
@@ -1819,9 +1819,9 @@ export function playVoiceSyncLabClip(
     controller.abort();
     emit(kind, null, null, lastMouthShape);
     if (args.clip.mode === "english") {
-      stopEnglishVoice({ preservePreparedMedia: true });
+      teardownEnglishVoiceImmediately({ preservePreparedMedia: true });
     } else {
-      stopBottishVoice({ preservePreparedMedia: true });
+      teardownBottishVoiceImmediately({ preservePreparedMedia: true });
     }
   };
   activeVoiceSyncLabPlaybackStop = () => stopPlayback("stop");

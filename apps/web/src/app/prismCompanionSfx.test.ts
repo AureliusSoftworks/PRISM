@@ -72,13 +72,15 @@ test("plays a restrained glass tap and releases it after completion", async () =
   assert.equal(audio.currentTime, 0);
 });
 
-test("can stop active orb taps during teardown", () => {
+test("can release active orb taps during teardown", async () => {
   const audio = new FakeTapAudio();
   playPrismCompanionGlassTap({
     random: () => 0.75,
     createAudio: () => audio,
   });
   stopPrismCompanionGlassTapAudio();
+  assert.equal(audio.pauseCount, 0);
+  await new Promise((resolve) => setTimeout(resolve, 140));
   assert.equal(audio.pauseCount, 1);
   assert.equal(audio.currentTime, 0);
 });

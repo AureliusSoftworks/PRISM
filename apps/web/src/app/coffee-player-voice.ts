@@ -141,6 +141,7 @@ export async function playCoffeePlayerStaticShush(args: {
 
   return await new Promise<boolean>((resolve) => {
     let finished = false;
+    let aborting = false;
     const finish = (completed: boolean) => {
       if (finished) return;
       finished = true;
@@ -154,15 +155,20 @@ export async function playCoffeePlayerStaticShush(args: {
       resolve(completed);
     };
     const abort = () => {
+      aborting = true;
+      const releaseEndsAt = context.currentTime + 0.08;
+      output.gain.cancelScheduledValues(context.currentTime);
+      output.gain.setValueAtTime(output.gain.value, context.currentTime);
+      output.gain.linearRampToValueAtTime(0, releaseEndsAt);
       try {
-        source.stop();
+        source.stop(releaseEndsAt);
       } catch {
         // The source may already have reached its scheduled end.
+        finish(false);
       }
-      finish(false);
     };
     args.signal.addEventListener("abort", abort, { once: true });
-    source.onended = () => finish(true);
+    source.onended = () => finish(!aborting);
     source.start(startsAt);
     source.stop(endsAt);
     args.onStart?.(durationMs);

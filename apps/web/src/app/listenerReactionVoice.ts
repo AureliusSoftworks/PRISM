@@ -26,6 +26,7 @@ import {
 } from "./englishVoice.ts";
 import {
   playRealtimeVoiceBytes,
+  releaseReactionVoiceAudio,
   stopReactionVoiceAudio,
   type VoicePlaybackChannel,
   type VoicePlaybackLifecycle,
@@ -264,4 +265,4 @@ export async function playEphemeralReactionVoice(args: {
   });
 }
 
-export { stopReactionVoiceAudio };
+export { releaseReactionVoiceAudio, stopReactionVoiceAudio };

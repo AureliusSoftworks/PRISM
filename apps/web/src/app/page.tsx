@@ -390,6 +390,10 @@ import {
 } from "./session-atmosphere-audio";
 import { stopPrismSceneAudio } from "./scene-audio-lifecycle";
 import {
+  cancelAudibleAudioRelease,
+  releaseAudibleAudioElement,
+} from "./audibleAudioRelease";
+import {
   AvatarDetailsEditor,
   type AvatarDetailsEquippedStamp,
   type AvatarDetailsEditorHandle,
@@ -1674,6 +1678,7 @@ import {
   playEphemeralReactionVoice,
   playListenerReactionVoice,
   signalListenerReactionVoiceGain,
+  releaseReactionVoiceAudio,
   stopReactionVoiceAudio,
   type ListenerReactionVoiceMode,
 } from "./listenerReactionVoice";
@@ -19596,10 +19601,14 @@ function primeVoiceModePlaybackFromUserGesture(mode: VoiceMode): void {
 }
 
 function stopVoicePlaybackPreservingPreparedMode(mode: VoiceMode): void {
-  stopBottishVoice({
+  releaseBottishVoice({
+    fadeOutMs: 160,
     preservePreparedMedia: mode === "bottish" || mode === "babble",
   });
-  stopEnglishVoice({ preservePreparedMedia: mode === "english" });
+  releaseEnglishVoice({
+    fadeOutMs: 160,
+    preservePreparedMedia: mode === "english",
+  });
 }
 
 /** Retire queue ownership for a natural speaker handoff without severing a
@@ -71149,9 +71158,9 @@ function HomeContent(): React.JSX.Element {
         if (replayMaster.animationFrame !== null) {
           cancelAnimationFrame(replayMaster.animationFrame);
         }
-        replayMaster.audio.pause();
-        replayMaster.audio.removeAttribute("src");
-        replayMaster.audio.load();
+        void releaseAudibleAudioElement(replayMaster.audio, {
+          clearSource: true,
+        });
       }
       setCoffeeReplayUsesAudioMaster(false);
       setCoffeeReplayRecording(null);
@@ -72957,8 +72966,8 @@ function HomeContent(): React.JSX.Element {
     signalCrosstalkVoiceAbortRef.current = null;
     listenerReactionVoiceAbortRef.current?.abort();
     listenerReactionVoiceAbortRef.current = null;
-    stopReactionVoiceAudio();
-    stopRealtimeVoiceAudio("handoff");
+    releaseReactionVoiceAudio();
+    releaseRealtimeVoiceAudio("handoff", 160);
     stopVoicePlaybackPreservingPreparedMode(
       voicePlaybackSelectionRef.current.voiceMode,
     );
@@ -72976,7 +72985,7 @@ function HomeContent(): React.JSX.Element {
     signalCrosstalkVoiceAbortRef.current = null;
     listenerReactionVoiceAbortRef.current?.abort();
     listenerReactionVoiceAbortRef.current = null;
-    stopReactionVoiceAudio();
+    releaseReactionVoiceAudio();
     stopPrismSceneAudio();
   }, []);
   useEffect(() => {
@@ -135627,10 +135636,10 @@ function HomeContent(): React.JSX.Element {
       cancelAnimationFrame(runtime.animationFrame);
       runtime.animationFrame = null;
     }
-    runtime.audio.pause();
+    void releaseAudibleAudioElement(runtime.audio, {
+      clearSource: options.close === true,
+    });
     if (options.close) {
-      runtime.audio.removeAttribute("src");
-      runtime.audio.load();
       coffeeReplayAudioMasterRef.current = null;
       setCoffeeReplayUsesAudioMaster(false);
       setCoffeeReplaySpeakingBotId(null);
@@ -135694,6 +135703,7 @@ function HomeContent(): React.JSX.Element {
     if (!runtime || runtime.offsetMs >= runtime.timeline.durationMs)
       return false;
     stopCoffeeReplayAudioMaster({ preserveOffset: false });
+    cancelAudibleAudioRelease(runtime.audio, 1);
     runtime.audio.playbackRate = 1;
     runtime.audio.currentTime = runtime.offsetMs / 1_000;
     const tick = (): void => {
@@ -146664,6 +146674,7 @@ function HomeContent(): React.JSX.Element {
                 ? (sipPresentation.glyph ?? undefined)
                 : undefined,
               scheduleKey: `botcast-${avatarState.role}-${bot.id}`,
+              thinkingScheduleKey: `botcast-${avatarState.role}-${bot.id}-thinking`,
               showThinkingSpinner: signalMannequinThinking,
               detailLevel: "full",
               minimumRenderedSizeTier: "full",

@@ -1,26 +1,36 @@
-import { stopBottishVoice } from "./bottishVoice.ts";
+import { releaseBottishVoice } from "./bottishVoice.ts";
+import { stopAllBotAvatarSfxAudio } from "./botAvatarSfx.ts";
 import { stopCoffeeActionSfx } from "./coffee-action-sfx.ts";
-import { stopEnglishVoice } from "./englishVoice.ts";
-import { stopSignalIntroAudio } from "./signalIntroAudio.ts";
-import { stopReactionVoiceAudio } from "./voiceEffects.ts";
+import { stopCoffeeSoundtrackSampleAudio } from "./coffeeSoundtrackSampleAudio.ts";
+import { stopDebateIdentAudio } from "./debateIdentAudio.ts";
+import { releaseEnglishVoice } from "./englishVoice.ts";
+import { stopPrismCompanionGlassTapAudio } from "./prismCompanionSfx.ts";
+import { releaseSignalIntroAudio } from "./signalIntroAudio.ts";
+import { stopSignalSoundboardAudio } from "./signalSoundboard.ts";
+import { releaseReactionVoiceAudio } from "./voiceEffects.ts";
 import { runPrismSceneAudioStopSequence } from "./scene-audio-stop-sequence.ts";
 
 export interface PrismSceneAudioStopOptions {
   preservePreparedVoice?: boolean;
 }
 
-/** Halt every foreground/standalone audio source owned by the current scene. */
+/** Release every foreground/standalone audio source owned by the current scene. */
 export function stopPrismSceneAudio(
   options: PrismSceneAudioStopOptions = {},
 ): void {
   const preservePreparedMedia = options.preservePreparedVoice === true;
   runPrismSceneAudioStopSequence(
     [
-      () => stopBottishVoice({ preservePreparedMedia }),
-      () => stopEnglishVoice({ preservePreparedMedia }),
-      stopReactionVoiceAudio,
+      () => releaseBottishVoice({ preservePreparedMedia }),
+      () => releaseEnglishVoice({ preservePreparedMedia }),
+      releaseReactionVoiceAudio,
       stopCoffeeActionSfx,
-      stopSignalIntroAudio,
+      () => { void stopCoffeeSoundtrackSampleAudio(); },
+      () => { void stopDebateIdentAudio(); },
+      stopSignalSoundboardAudio,
+      stopAllBotAvatarSfxAudio,
+      stopPrismCompanionGlassTapAudio,
+      releaseSignalIntroAudio,
     ],
   );
 }

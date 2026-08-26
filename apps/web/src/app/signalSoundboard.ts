@@ -11,6 +11,7 @@ import {
   replayAudioMasterCaptureActive,
   routeAudioElementToPrismOutput,
 } from "./replayAudioMasterCapture.ts";
+import { releaseAudibleAudioElement } from "./audibleAudioRelease.ts";
 
 export interface SignalSoundboardCueDefinition {
   kind: BotcastSoundboardCueKind;
@@ -234,19 +235,14 @@ export function stopSignalSoundboardAudio(
 ): void {
   studioController?.stopFoley(SIGNAL_SOUNDBOARD_FOLEY_TAG, fadeMs);
   for (const audio of [...activeSoundboardAudio]) {
-    if (audio.paused || fadeMs <= 0) {
-      releaseSoundboardAudio(audio);
-      continue;
-    }
-    const initialVolume = audio.volume;
-    const startedAt = Date.now();
-    const timer = globalThis.setInterval(() => {
-      const progress = Math.min(1, (Date.now() - startedAt) / fadeMs);
-      audio.volume = initialVolume * (1 - progress);
-      if (progress < 1) return;
-      globalThis.clearInterval(timer);
-      releaseSoundboardAudio(audio);
-    }, 20);
+    activeSoundboardAudio.delete(audio);
+    const cleanup = soundboardAudioOutputCleanup.get(audio);
+    soundboardAudioOutputCleanup.delete(audio);
+    void releaseAudibleAudioElement(audio as unknown as HTMLMediaElement, {
+      durationMs: fadeMs,
+      resetTime: true,
+      onReleased: cleanup ?? undefined,
+    });
   }
 }
 

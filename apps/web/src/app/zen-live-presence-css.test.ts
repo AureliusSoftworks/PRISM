@@ -1022,6 +1022,10 @@ describe("Zen live presence CSS", () => {
       glyphEmissionRule,
       /--crt-glyph-paint-bleed:\s*var\(--crt-glyph-core-paint-bleed,\s*0\.08em\)\s*;/,
     );
+    assert.match(
+      glyphEmissionRule,
+      /--crt-glyph-emission-outset:\s*max\(\s*var\(--crt-glyph-core-paint-bleed,\s*0\.08em\),\s*var\(\s*--crt-glyph-filter-outset,\s*var\(--crt-glyph-core-paint-bleed,\s*0\.08em\)\s*\)\s*\)\s*;/,
+    );
     assert.match(glyphEmissionRule, /display:\s*inline-grid\s*;/);
     assert.match(glyphEmissionRule, /inline-size:\s*max-content\s*;/);
     assert.match(glyphEmissionRule, /min-inline-size:\s*100%\s*;/);
@@ -1042,19 +1046,10 @@ describe("Zen live presence CSS", () => {
       /margin-inline:\s*calc\(var\(--crt-glyph-paint-bleed\) \* -1\)\s*;/,
     );
 
-    const pendingRasterGlyphPaintSurfaceRule = ruleForExactSelector(
-      '.zenLiveBotPresenceFaceGlyph [data-crt-glyph-layer="true"][data-crt-pixel-mask-pending="true"]',
-    );
-    const readyRasterGlyphPaintSurfaceRule = ruleForExactSelector(
-      '.zenLiveBotPresenceFaceGlyph [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]',
-    );
-    assert.equal(
-      readyRasterGlyphPaintSurfaceRule,
-      pendingRasterGlyphPaintSurfaceRule,
-    );
-    assert.match(
-      pendingRasterGlyphPaintSurfaceRule,
-      /--crt-glyph-paint-bleed:\s*max\(\s*var\(--crt-glyph-core-paint-bleed,\s*0\.08em\),\s*var\(\s*--crt-glyph-filter-outset,\s*var\(--crt-glyph-core-paint-bleed,\s*0\.08em\)\s*\)\s*\)\s*;/,
+    assert.doesNotMatch(
+      css,
+      /data-crt-pixel-mask-(?:pending|ready)="true"\][\s\S]{0,400}--crt-glyph-paint-bleed:\s*max\(/,
+      "Raster state must not enlarge the glyph layout box.",
     );
     assert.match(
       glyphEmissionRule,
@@ -1128,6 +1123,30 @@ describe("Zen live presence CSS", () => {
       /-webkit-text-fill-color:\s*currentColor\s*;/,
     );
     assert.match(glyphCloneBaseRule, /background:\s*none\s*;/);
+    assert.match(
+      glyphCloneBaseRule,
+      /inset:\s*calc\(0px - var\(--crt-glyph-emission-outset\)\)\s*;/,
+    );
+
+    const rasterGlyphMaskSurfaceRule = ruleForSelectorNeedlesWithBody(
+      [
+        '.zenLiveBotPresenceFaceGlyph',
+        '[data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]::before',
+      ],
+      "--crt-glyph-mask-surface-inset",
+    );
+    assert.match(
+      rasterGlyphMaskSurfaceRule,
+      /--crt-glyph-mask-surface-inset:\s*max\(\s*var\(--crt-glyph-emission-outset\),\s*var\(--crt-phosphor-pixel-overscan,\s*0px\)\s*\)\s*;/,
+    );
+    assert.match(
+      rasterGlyphMaskSurfaceRule,
+      /inset:\s*calc\(0px - var\(--crt-glyph-mask-surface-inset\)\)\s*;/,
+    );
+    assert.match(
+      rasterGlyphMaskSurfaceRule,
+      /mask-size:\s*calc\(\s*100% -\s*\(var\(--crt-glyph-mask-surface-inset\) -\s*var\(--crt-phosphor-pixel-overscan,\s*0px\)\) \*\s*2\s*\)\s*calc\(\s*100% -\s*\(var\(--crt-glyph-mask-surface-inset\) -\s*var\(--crt-phosphor-pixel-overscan,\s*0px\)\) \*\s*2\s*\)\s*;/,
+    );
 
     const featurePartRule = ruleForSelectorNeedlesWithBody(
       [".coffeeSeatPlateEmoji [data-coffee-plate-emoji-part]"],
@@ -3518,7 +3537,7 @@ describe("Zen live presence CSS", () => {
     assert.match(css, /mask-image:\s*var\(--crt-phosphor-pixel-mask\)/);
     assert.match(
       css,
-      /inset:\s*calc\(0px - var\(--crt-phosphor-pixel-overscan, 0px\)\)/,
+      /inset:\s*calc\(0px - var\(--crt-glyph-mask-surface-inset\)\)/,
     );
     assert.match(phosphorPixelGlyphCss, /image-rendering:\s*pixelated/);
     assert.match(

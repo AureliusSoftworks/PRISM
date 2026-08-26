@@ -77,6 +77,11 @@ export function playPrismCompanionGlassTap(
 
 export function stopPrismCompanionGlassTapAudio(): void {
   for (const audio of [...activeTapAudio]) {
-    releasePrismCompanionTapAudio(audio);
+    activeTapAudio.delete(audio);
+    void releaseAudibleAudioElement(audio as unknown as HTMLMediaElement, {
+      durationMs: 90,
+      resetTime: true,
+    });
   }
 }
+import { releaseAudibleAudioElement } from "./audibleAudioRelease.ts";

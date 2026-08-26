@@ -28,7 +28,7 @@ import {
   prepareRealtimeVoiceAudio,
   prismLiveVoicePerformanceBudgetActive,
   releaseRealtimeVoiceAudio,
-  stopRealtimeVoiceAudio,
+  teardownRealtimeVoiceAudioImmediately,
   voiceReleaseGainAt,
   type VoicePlaybackChannel,
   type VoicePlaybackLifecycle,
@@ -418,7 +418,6 @@ export function scaleEnglishVoiceAlignmentForPlayback(
 let activeMedia: HTMLAudioElement | null = null;
 let activeMediaUrl: string | null = null;
 let activeMediaStartTimer: number | null = null;
-let activeMediaFadeTimer: number | null = null;
 let activeMediaResolve: (() => void) | null = null;
 const mediaOutputCleanup = new WeakMap<HTMLMediaElement, () => void>();
 
@@ -549,10 +548,6 @@ function beginMediaUnlock(): void {
 
 function releaseActiveMedia(keepElement = false): void {
   const media = activeMedia;
-  if (activeMediaFadeTimer !== null) {
-    window.clearTimeout(activeMediaFadeTimer);
-    activeMediaFadeTimer = null;
-  }
   if (activeMedia) {
     mediaOutputCleanup.get(activeMedia)?.();
     mediaOutputCleanup.delete(activeMedia);
@@ -578,11 +573,21 @@ export function stopEnglishVoice(
     preserveCompletedTails?: boolean;
   } = {},
 ): void {
+  releaseEnglishVoice(options);
+}
+
+/** Engine-internal teardown for media known to be silent or prepared. */
+export function teardownEnglishVoiceImmediately(
+  options: {
+    preservePreparedMedia?: boolean;
+    preserveCompletedTails?: boolean;
+  } = {},
+): void {
   generation += 1;
-  stopRealtimeVoiceAudio("primary", {
+  teardownRealtimeVoiceAudioImmediately("primary", {
     preserveCompletedTails: options.preserveCompletedTails,
   });
-  stopRealtimeVoiceAudio("presence");
+  teardownRealtimeVoiceAudioImmediately("presence");
   releaseActiveMedia();
   if (!options.preservePreparedMedia) releasePreparedMedia();
   activeMediaResolve?.();
@@ -594,43 +599,54 @@ export function releaseEnglishVoice(
   options: {
     fadeOutMs?: number;
     preservePreparedMedia?: boolean;
+    preserveCompletedTails?: boolean;
   } = {},
 ): void {
   generation += 1;
   const fadeOutMs = Math.max(0, Math.round(options.fadeOutMs ?? 160));
   releaseRealtimeVoiceAudio("primary", fadeOutMs);
-  stopRealtimeVoiceAudio("presence");
+  releaseRealtimeVoiceAudio("presence", fadeOutMs);
   const media = activeMedia;
   if (!media) {
     if (!options.preservePreparedMedia) releasePreparedMedia();
     return;
   }
-  if (activeMediaFadeTimer !== null) {
-    window.clearTimeout(activeMediaFadeTimer);
-    activeMediaFadeTimer = null;
-  }
+  const mediaUrl = activeMediaUrl;
+  const resolve = activeMediaResolve;
+  const startTimer = activeMediaStartTimer;
+  activeMedia = null;
+  activeMediaUrl = null;
+  activeMediaResolve = null;
+  activeMediaStartTimer = null;
+  if (startTimer !== null) window.clearTimeout(startTimer);
+  if (!options.preservePreparedMedia) releasePreparedMedia();
   const startVolume = media.volume;
   const startedAt = Date.now();
+  let fadeTimer: number | null = null;
   const finish = (): void => {
-    if (activeMedia !== media) return;
-    const resolve = activeMediaResolve;
-    if (resolve) resolve();
-    else releaseActiveMedia(options.preservePreparedMedia === true);
-    if (!options.preservePreparedMedia) releasePreparedMedia();
+    if (fadeTimer !== null) window.clearTimeout(fadeTimer);
+    fadeTimer = null;
+    mediaOutputCleanup.get(media)?.();
+    mediaOutputCleanup.delete(media);
+    media.pause();
+    media.removeAttribute("src");
+    media.load();
+    if (mediaUrl) URL.revokeObjectURL(mediaUrl);
+    if (options.preservePreparedMedia && !preparedMedia) preparedMedia = media;
+    resolve?.();
   };
   if (fadeOutMs === 0 || media.paused || startVolume <= 0) {
     finish();
     return;
   }
   const step = (): void => {
-    if (activeMedia !== media) return;
     const progress = (Date.now() - startedAt) / fadeOutMs;
     media.volume = voiceReleaseGainAt(startVolume, progress);
     if (progress >= 1) {
       finish();
       return;
     }
-    activeMediaFadeTimer = window.setTimeout(step, 16);
+    fadeTimer = window.setTimeout(step, 16);
   };
   step();
 }

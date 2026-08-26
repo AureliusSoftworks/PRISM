@@ -82,6 +82,10 @@ import {
   stopPrismCompanionGlassTapAudio,
 } from "./prismCompanionSfx";
 import {
+  cancelAudibleAudioRelease,
+  releaseAudibleAudioElement,
+} from "./audibleAudioRelease";
+import {
   finishPrismCompanionSpeechReveal,
   preparePrismCompanionSpeechReveal,
   prismCompanionSpeechVisibleContent,
@@ -881,6 +885,9 @@ export default function PrismCompanion({
   const speechPlaybackActiveRef = useRef(false);
   const pausedBackgroundAnimationsRef = useRef<Set<Animation>>(new Set());
   const pausedBackgroundMediaRef = useRef<Set<HTMLMediaElement>>(new Set());
+  const pausedBackgroundMediaVolumeRef = useRef<WeakMap<HTMLMediaElement, number>>(
+    new WeakMap(),
+  );
   const stopSpeakingRef = useRef(onStopSpeaking);
   const dismissOnExternalInteraction =
     prismCompanionDismissesOnExternalInteraction(surface);
@@ -1647,6 +1654,7 @@ export default function PrismCompanion({
     setPrismSystemPause(PRISM_COMPANION_SYSTEM_PAUSE_REASON, true);
     const pausedAnimations = pausedBackgroundAnimationsRef.current;
     const pausedMedia = pausedBackgroundMediaRef.current;
+    const pausedMediaVolumes = pausedBackgroundMediaVolumeRef.current;
     const isBackgroundElement = (node: unknown): node is Element =>
       node instanceof Element &&
       !node.closest(PRISM_SYSTEM_PAUSE_EXEMPT_SELECTOR);
@@ -1661,7 +1669,8 @@ export default function PrismCompanion({
     };
     const pauseBackgroundMedia = (media: HTMLMediaElement): void => {
       if (!isBackgroundElement(media) || media.paused) return;
-      media.pause();
+      pausedMediaVolumes.set(media, media.volume);
+      void releaseAudibleAudioElement(media, { durationMs: 120 });
       pausedMedia.add(media);
     };
     const handleBackgroundTimelineStart = (): void => {
@@ -1707,9 +1716,13 @@ export default function PrismCompanion({
       }
       pausedAnimations.clear();
       for (const media of pausedMedia) {
-        if (media.isConnected && media.paused && !media.ended) {
+        const restoredVolume = pausedMediaVolumes.get(media) ?? media.volume;
+        cancelAudibleAudioRelease(media, restoredVolume);
+        media.volume = restoredVolume;
+        if (media.isConnected && !media.ended) {
           void media.play().catch(() => undefined);
         }
+        pausedMediaVolumes.delete(media);
       }
       pausedMedia.clear();
     };

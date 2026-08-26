@@ -47,7 +47,7 @@ describe("Signal room acoustics integration", () => {
       voiceSource,
       /stopRealtimeVoiceAudio\(channel, \{ preserveCompletedTails: true \}\)/u,
     );
-    const stopStart = voiceSource.indexOf("export function stopRealtimeVoiceAudio(");
+    const stopStart = voiceSource.indexOf("export function teardownRealtimeVoiceAudioImmediately(");
     const stopEnd = voiceSource.indexOf("export function voiceReleaseGainAt", stopStart);
     const stopSource = voiceSource.slice(stopStart, stopEnd);
     assert.ok(stopStart >= 0 && stopEnd > stopStart);
@@ -59,6 +59,10 @@ describe("Signal room acoustics integration", () => {
     assert.ok(
       stopSource.indexOf("active.roomConnection?.disconnect()") <
         stopSource.indexOf("if (!options.preserveCompletedTails)"),
+    );
+    assert.match(
+      voiceSource,
+      /export function stopRealtimeVoiceAudio\([\s\S]{0,280}releaseRealtimeVoiceAudio/u,
     );
   });
 

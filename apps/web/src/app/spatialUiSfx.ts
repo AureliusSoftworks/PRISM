@@ -113,7 +113,9 @@ const encodedAssetPromises = new Map<string, Promise<ArrayBuffer | null>>();
 const decodedAssetPromises = new Map<string, Promise<AudioBuffer | null>>();
 const previousVariantByCue = new Map<SpatialUiSfxCue, number>();
 const lastPlaybackAtByCue = new Map<SpatialUiSfxCue, number>();
-const activeSources = new Set<AudioBufferSourceNode>();
+const activeSources = new Map<AudioBufferSourceNode, SpatialUiSfxConnection>();
+const releasedConnections = new WeakSet<SpatialUiSfxConnection>();
+const SPATIAL_UI_SFX_RELEASE_MS = 60;
 
 export function spatialUiSfxVariantIndex(
   randomValue: number,
@@ -267,11 +269,22 @@ function preloadSpatialUiSfxAssets(): void {
 }
 
 function releaseConnection(connection: SpatialUiSfxConnection): void {
+  if (releasedConnections.has(connection)) return;
+  releasedConnections.add(connection);
   activeSources.delete(connection.source);
   connection.source.disconnect();
   connection.mono.disconnect();
   connection.panner.disconnect();
   connection.output.disconnect();
+}
+
+function fadeAndReleaseConnection(connection: SpatialUiSfxConnection): void {
+  const now = connection.output.context.currentTime;
+  const endsAt = now + SPATIAL_UI_SFX_RELEASE_MS / 1_000;
+  connection.output.gain.cancelScheduledValues(now);
+  connection.output.gain.setValueAtTime(connection.output.gain.value, now);
+  connection.output.gain.linearRampToValueAtTime(0, endsAt);
+  try { connection.source.stop(endsAt); } catch { releaseConnection(connection); }
 }
 
 export async function playSpatialUiSfx(
@@ -327,10 +340,10 @@ export async function playSpatialUiSfx(
   while (activeSources.size >= MAX_ACTIVE_UI_SFX) {
     const oldest = activeSources.values().next().value;
     if (!oldest) break;
-    oldest.stop();
-    activeSources.delete(oldest);
+    fadeAndReleaseConnection(oldest);
+    activeSources.delete(oldest.source);
   }
-  activeSources.add(connection.source);
+  activeSources.set(connection.source, connection);
   connection.source.addEventListener(
     "ended",
     () => releaseConnection(connection),
@@ -342,9 +355,9 @@ export async function playSpatialUiSfx(
 
 export function stopSpatialUiSfx(): void {
   playbackEpoch += 1;
-  for (const source of [...activeSources]) {
-    source.stop();
-    activeSources.delete(source);
+  for (const connection of [...activeSources.values()]) {
+    fadeAndReleaseConnection(connection);
+    activeSources.delete(connection.source);
   }
 }
 

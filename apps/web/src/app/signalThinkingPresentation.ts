@@ -157,17 +157,30 @@ export function signalThinkingFollowingMessageId(args: {
  */
 export function signalStageThinkingRole(args: {
   presentedThinkingRole: BotcastSpeakerRole | null;
+  nextSpeakerRole: BotcastSpeakerRole | null;
+  producerGuestThinking: boolean;
   voicePreparationPending: boolean;
   voicePreparationRole: BotcastSpeakerRole | null;
 }): BotcastSpeakerRole | null {
-  const role =
-    args.presentedThinkingRole ??
-    (args.voicePreparationPending ? args.voicePreparationRole : null);
+  // Normal turns are paced and voice-buffered behind the current studio shot.
+  // Do not turn that seamless work into an audience-facing wait. A producer
+  // handoff changes ownership from the scheduled speaker, though, and a live
+  // producer guest has no earlier bot turn to carry the beat; those are the
+  // honest fallback cases where the owning screen needs to show its spinner.
+  const generationFallback =
+    args.presentedThinkingRole !== null &&
+    (args.producerGuestThinking ||
+      args.presentedThinkingRole !== args.nextSpeakerRole);
+  const role = generationFallback
+    ? args.presentedThinkingRole
+    : null;
   if (role === null) return null;
   return liveAvatarShouldShowThinking({
-    generating: args.presentedThinkingRole !== null,
-    synthesizing:
-      args.voicePreparationPending && args.voicePreparationRole !== null,
+    generating: generationFallback,
+    // Voice preparation is deliberately buffered off-stage. Keep these
+    // parameters in the contract so callers cannot accidentally treat it as
+    // a fallback just by passing a role.
+    synthesizing: false,
     speaking: false,
     playbackRecording: false,
   })

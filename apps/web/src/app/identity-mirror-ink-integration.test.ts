@@ -34,14 +34,14 @@ describe("Identity Crisis avatar ink integration", () => {
     );
   });
 
-  it("describes the exact four-field visual handoff in current mode guidance", () => {
+  it("describes the exact visual and quoted-name handoff in current mode guidance", () => {
     assert.match(
       tutorialSource,
-      /visually borrows exactly four things from the latest bot that directly addresses it: eyes, the complete resting and speaking mouth package, authored Avatar Details Ink, and the lower glyph/u,
+      /visually borrows the latest eligible direct addresser’s exact eyes and blink package, complete resting and speaking mouth package including glyph style and Custom Speech poses, authored Avatar Details Ink, lower glyph, and a literally double-quoted copy of the target’s public name/u,
     );
     assert.match(
       tutorialSource,
-      /name, persona, dialogue behavior, complete authored voice and Accent Map, color, chassis\/frame, Powers and consequences, thinking spinner, bot ID, seat, role, private perception, safety, provider, and every other field remain its own/u,
+      /Its color, complete authored voice and Accent Map location, pronunciation, Speechprint, provider voice identity, chassis\/frame, Powers and consequences, thinking spinner, bot ID, seat, role, private perception, safety, provider, and every other speech or mechanical field remain its own/u,
     );
     assert.match(
       tutorialSource,
@@ -49,11 +49,15 @@ describe("Identity Crisis avatar ink integration", () => {
     );
     assert.match(
       tutorialSource,
-      /latest direct addresser’s eyes, complete resting and speaking mouth package, Avatar Details Ink, and lower glyph/u,
+      /latest eligible direct addresser by taking their exact eyes and blink package, complete resting and speaking mouth package including glyph style and Custom Speech poses, Avatar Details Ink, lower glyph, and literally double-quoted public name/u,
     );
     assert.match(
       tutorialSource,
-      /holder’s name, persona, dialogue, voice and Accent Map, color, chassis\/frame, Powers and consequences, thinking spinner, and every other field remain unchanged/u,
+      /holder’s color, complete voice and Accent Map location, pronunciation, Speechprint, provider voice identity, chassis\/frame, Powers, thinking spinner, and every other speech or mechanical field remain unchanged/u,
+    );
+    assert.match(
+      tutorialSource,
+      /holder defensively treats the original as the suspicious imitator, with mild concern rather than panic or constant repetition/u,
     );
     assert.match(
       tutorialSource,

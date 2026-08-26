@@ -277,8 +277,12 @@ import {
   SIGNAL_EPISODE_INTRO_LEAD_IN_MS,
   playSignalIntroAudio,
   playSignalOutroAudio,
-  stopSignalIntroAudio,
+  releaseSignalIntroAudio,
 } from "./signalIntroAudio";
+import {
+  cancelAudibleAudioRelease,
+  releaseAudibleAudioElement,
+} from "./audibleAudioRelease";
 import {
   randomSignalEpisodeGuestId,
   resolvedSignalBookingGuestId,
@@ -3459,7 +3463,7 @@ export function BotcastExperience({
   const stopIntroPreview = useCallback((): void => {
     introPreviewRunIdRef.current += 1;
     setIntroPreviewShowId(null);
-    stopSignalIntroAudio();
+    releaseSignalIntroAudio();
   }, []);
 
   const stopStudioSoundcheck = useCallback((): void => {
@@ -3488,7 +3492,7 @@ export function BotcastExperience({
     outroRunIdRef.current += 1;
     setEpisodeOutro(null);
     setEpisodeOutroSfxMutedId(null);
-    stopSignalIntroAudio();
+    releaseSignalIntroAudio();
   }, []);
 
   const finalizeSignalRecording = useCallback(
@@ -3628,7 +3632,7 @@ export function BotcastExperience({
           ? { ...current, phase: "complete" }
           : current,
       );
-      stopSignalIntroAudio();
+      releaseSignalIntroAudio();
       if (!args.discarded) {
         await finalizeSignalRecording(args.episode, args.show);
       }
@@ -3644,7 +3648,7 @@ export function BotcastExperience({
     () => () => {
       studioSoundcheckRunIdRef.current += 1;
       onStopUtteranceRef.current?.();
-      stopSignalIntroAudio();
+      releaseSignalIntroAudio();
       const captureSourceId = signalCaptureSourceIdRef.current;
       const activeEpisode = liveEpisodeRef.current;
       const activeShow = selectedShowRef.current;
@@ -7176,7 +7180,7 @@ export function BotcastExperience({
         });
         setWatchBakeLabel(null);
         setEpisodePreRoll(null);
-        stopSignalIntroAudio();
+        releaseSignalIntroAudio();
         return;
       }
       if (!signalModelWarmupVisibleRef.current) {
@@ -7546,7 +7550,7 @@ export function BotcastExperience({
             current?.showId === launchShow.id ? null : current,
           );
         }, landingMs);
-        stopSignalIntroAudio();
+        releaseSignalIntroAudio();
       };
       await playPreparedEpisodeMessage(
         opening.message,
@@ -7570,7 +7574,7 @@ export function BotcastExperience({
       if (episodeOperationIsCurrent(controller, runId)) {
         preRollGateResolveRef.current?.();
         preRollGateResolveRef.current = null;
-        stopSignalIntroAudio();
+        releaseSignalIntroAudio();
         setWatchBakeLabel(null);
         setWatchIntermission(null);
         setEpisodePreRoll(null);
@@ -7690,7 +7694,7 @@ export function BotcastExperience({
     preRollSkipRequestedRef.current = true;
     preRollGateResolveRef.current?.();
     preRollGateResolveRef.current = null;
-    stopSignalIntroAudio();
+    releaseSignalIntroAudio();
   };
 
   const startBufferedWatch = (): void => {
@@ -10178,7 +10182,9 @@ export function BotcastExperience({
     ) {
       return;
     }
-    replayAudioRef.current?.pause();
+    if (replayAudioRef.current) {
+      void releaseAudibleAudioElement(replayAudioRef.current);
+    }
     setReplayPlaying(false);
     setReplayElapsedMs(0);
     setReplayPlaybackSource("studio-cut");
@@ -10370,7 +10376,7 @@ export function BotcastExperience({
       cancelled = true;
       window.cancelAnimationFrame(animationFrame);
       audio.removeEventListener("canplay", ensurePlaying);
-      audio.pause();
+      void releaseAudibleAudioElement(audio);
     };
   }, [replayActiveAudioUrl, replayFaithful, replayPlaying]);
 
@@ -10975,7 +10981,9 @@ export function BotcastExperience({
     setReplayPlaying(false);
     setReplayVoicePending(false);
     setReplaySpeechActive(false);
-    replayAudioRef.current?.pause();
+    if (replayAudioRef.current) {
+      void releaseAudibleAudioElement(replayAudioRef.current);
+    }
     onStopUtterance?.();
   };
 
@@ -11009,6 +11017,7 @@ export function BotcastExperience({
     if (restartFromBeginning) setReplayElapsedMs(nextMs);
     const audio = replayAudioRef.current;
     if (audio) {
+      cancelAudibleAudioRelease(audio, 1);
       try {
         audio.currentTime = nextMs / 1_000;
       } catch {
@@ -15678,6 +15687,8 @@ export function BotcastExperience({
   // widening what the audience sees cannot add an interval to the replay log.
   const liveStageThinkingRole = signalStageThinkingRole({
     presentedThinkingRole: livePresentedThinkingRole,
+    nextSpeakerRole: liveNextSpeakerRole,
+    producerGuestThinking: liveProducerGuestThinking,
     voicePreparationPending: liveBotVoicePreparationPending,
     voicePreparationRole: liveActiveMessage?.speakerRole ?? null,
   });

@@ -65,6 +65,14 @@ describe("engine-agnostic voice effects", () => {
     assert.ok(voiceReleaseGainAt(0.8, 1) < 0.000_001);
   });
 
+  it("releases every foreground reaction channel through the same fade", () => {
+    const source = readFileSync(new URL("./voiceEffects.ts", import.meta.url), "utf8");
+    assert.match(
+      source,
+      /export function releaseReactionVoiceAudio\(fadeOutMs = 160\): void \{\s*releaseRealtimeVoiceAudio\("reaction", fadeOutMs\);\s*releaseRealtimeVoiceAudio\("crosstalk", fadeOutMs\);/u,
+    );
+  });
+
   it("keeps ordinary Signal listener words at half gain without lowering interruption crosstalk", () => {
     assert.equal(SIGNAL_LISTENER_REACTION_VOICE_GAIN, 0.5);
     assert.equal(signalListenerReactionVoiceGain({ spokenCue: "Hmm." }), 0.5);
@@ -408,7 +416,10 @@ describe("engine-agnostic voice effects", () => {
       source,
       /\| "primary"\s*\| "handoff"\s*\| "presence"\s*\| "reaction"\s*\| "crosstalk"/,
     );
-    assert.match(source, /stopRealtimeVoiceAudio\(channel\)/);
+    assert.match(
+      source,
+      /export function stopRealtimeVoiceAudio\([\s\S]{0,260}releaseRealtimeVoiceAudio\(channel, options\.fadeOutMs \?\? 160\)/u,
+    );
     assert.match(
       source,
       /channel === "primary" \|\| channel === "handoff" \? 1 : 0\.62/,

@@ -1316,7 +1316,7 @@ export async function playPreSpeechBreath(args: {
   return true;
 }
 
-export function stopRealtimeVoiceAudio(
+export function teardownRealtimeVoiceAudioImmediately(
   channel: VoicePlaybackChannel = "primary",
   options: { preserveCompletedTails?: boolean } = {},
 ): void {
@@ -1388,36 +1388,76 @@ export function releaseRealtimeVoiceAudio(
   fadeOutMs = 160,
 ): void {
   const active = activeVoiceChannels[channel];
+  if (active.releaseTimer !== null) {
+    window.clearTimeout(active.releaseTimer);
+    active.releaseTimer = null;
+  }
+  if (active.mediaStartTimer !== null) {
+    window.clearTimeout(active.mediaStartTimer);
+  }
+  if (active.mediaEndTimer !== null) {
+    window.clearTimeout(active.mediaEndTimer);
+  }
   active.progress?.cancel();
-  active.progress = null;
-  if (active.releaseTimer !== null) return;
+  const media = active.media;
+  const mediaUrl = active.mediaUrl;
+  const nodes = active.nodes;
   const gain = active.outputGain;
+  const lightMeter = active.lightMeter;
+  const roomConnection = active.roomConnection;
+  const resolve = active.resolve;
+  active.nodes = [];
+  active.media = null;
+  active.mediaUrl = null;
+  active.mediaStartTimer = null;
+  active.mediaEndTimer = null;
+  active.resolve = null;
+  active.progress = null;
+  active.roomConnection = null;
+  active.outputGain = null;
+  active.lightMeter = null;
   const durationMs = Math.max(0, Math.round(fadeOutMs));
-  if (!gain || active.nodes.length === 0 || durationMs === 0) {
-    stopRealtimeVoiceAudio(channel);
+  let finished = false;
+  const finish = (): void => {
+    if (finished) return;
+    finished = true;
+    if (media) {
+      media.pause();
+      media.removeAttribute("src");
+      if (!prismLiveVoicePerformanceBudgetActive()) media.load();
+    }
+    if (mediaUrl) URL.revokeObjectURL(mediaUrl);
+    for (const node of nodes) {
+      try {
+        if ("stop" in node && typeof node.stop === "function") node.stop();
+      } catch { /* already stopped */ }
+      try { node.disconnect(); } catch { /* already disconnected */ }
+    }
+    lightMeter?.stop();
+    roomConnection?.disconnect();
+    resolve?.();
+  };
+  if (!gain || nodes.length === 0 || durationMs === 0) {
+    finish();
     return;
   }
   const startedAt = gain.context.currentTime;
   const startGain = Math.max(0.0001, gain.gain.value);
   const curve = Float32Array.from({ length: 32 }, (_, index) =>
-    Math.max(
-      0.0001,
-      voiceReleaseGainAt(startGain, index / 31),
-    ),
+    Math.max(0.0001, voiceReleaseGainAt(startGain, index / 31))
   );
   gain.gain.cancelScheduledValues(startedAt);
-  gain.gain.setValueCurveAtTime(
-    curve,
-    startedAt,
-    durationMs / 1_000,
-  );
-  const nodes = active.nodes;
-  active.releaseTimer = window.setTimeout(() => {
-    active.releaseTimer = null;
-    if (active.nodes === nodes && active.outputGain === gain) {
-      stopRealtimeVoiceAudio(channel);
-    }
-  }, durationMs);
+  gain.gain.setValueCurveAtTime(curve, startedAt, durationMs / 1_000);
+  window.setTimeout(finish, durationMs);
+}
+
+/** Public stop is a semantic release: callers may invalidate ownership at
+ * once, but an audible channel always gets a short detached tail. */
+export function stopRealtimeVoiceAudio(
+  channel: VoicePlaybackChannel = "primary",
+  options: { preserveCompletedTails?: boolean; fadeOutMs?: number } = {},
+): void {
+  releaseRealtimeVoiceAudio(channel, options.fadeOutMs ?? 160);
 }
 
 /**
@@ -1466,6 +1506,13 @@ export function scheduleRealtimeVoiceDuck(args: {
 export function stopReactionVoiceAudio(): void {
   stopRealtimeVoiceAudio("reaction");
   stopRealtimeVoiceAudio("crosstalk");
+}
+
+/** Release live reaction channels too; they are foreground voices, not UI
+ * bleeps, and must get the same audible tail as the main speech bus. */
+export function releaseReactionVoiceAudio(fadeOutMs = 160): void {
+  releaseRealtimeVoiceAudio("reaction", fadeOutMs);
+  releaseRealtimeVoiceAudio("crosstalk", fadeOutMs);
 }
 
 /**
@@ -2909,9 +2956,12 @@ export async function playBodilyFoleyThroughVoiceBus(args: {
   });
 
   let cleaned = false;
+  let releaseTimer: number | null = null;
   const cleanup = (): void => {
     if (cleaned) return;
     cleaned = true;
+    if (releaseTimer !== null) window.clearTimeout(releaseTimer);
+    releaseTimer = null;
     for (const source of sources) {
       try {
         source.stop();
@@ -2925,9 +2975,24 @@ export async function playBodilyFoleyThroughVoiceBus(args: {
       }
     }
     roomConnection.disconnect();
-    if (activeBodilyFoleyStop === cleanup) activeBodilyFoleyStop = null;
+    if (activeBodilyFoleyStop === release) activeBodilyFoleyStop = null;
   };
-  activeBodilyFoleyStop = cleanup;
+  const release = (): void => {
+    if (cleaned || releaseTimer !== null) return;
+    const releaseSeconds = 0.12;
+    const releaseStartsAt = context.currentTime;
+    outputGain.gain.cancelScheduledValues(releaseStartsAt);
+    outputGain.gain.setValueAtTime(outputGain.gain.value, releaseStartsAt);
+    outputGain.gain.linearRampToValueAtTime(
+      0,
+      releaseStartsAt + releaseSeconds,
+    );
+    for (const source of sources) {
+      try { source.stop(releaseStartsAt + releaseSeconds); } catch { /* ended */ }
+    }
+    releaseTimer = window.setTimeout(cleanup, releaseSeconds * 1_000);
+  };
+  activeBodilyFoleyStop = release;
 
   await new Promise<void>((resolve) => {
     let remaining = sources.length;

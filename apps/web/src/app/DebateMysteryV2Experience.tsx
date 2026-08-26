@@ -52,6 +52,7 @@ import {
   type MysteryLensState,
 } from "./debateMysteryV2Lens";
 import { routeAudioElementToPrismOutput } from "./replayAudioMasterCapture";
+import { releaseAudibleAudioElement } from "./audibleAudioRelease";
 import {
   nextWhodunnitInterrogationPhase,
   startWhodunnitInterrogation,
@@ -1168,7 +1169,9 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     });
     if (decision === "ignore") return;
     audioGenerationRef.current += 1;
-    activeAudioRef.current?.pause();
+    if (activeAudioRef.current) {
+      void releaseAudibleAudioElement(activeAudioRef.current);
+    }
     activeAudioRef.current = null;
     setSpeechTiming({
       text: splitDebateMysteryStageActionTextV2(queuedDialogue.visibleText, botForDialogue(props, state, queuedDialogue)?.name ?? null).spokenText,
@@ -1321,8 +1324,8 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       audio.removeEventListener("ended", completeBeat);
       audio.removeEventListener("error", completeBeat);
       audio.removeEventListener("pause", completeBeat);
-      audio.pause();
-      releaseOutput?.();
+      if (activeAudioRef.current === audio) activeAudioRef.current = null;
+      void releaseAudibleAudioElement(audio, { onReleased: releaseOutput ?? undefined });
     };
   }, [
     advanceDialoguePlayback,
@@ -1432,13 +1435,17 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     setSpeechTiming(null);
     setInterrogationPhase(null);
     audioGenerationRef.current += 1;
-    activeAudioRef.current?.pause();
+    if (activeAudioRef.current) {
+      void releaseAudibleAudioElement(activeAudioRef.current);
+    }
     activeAudioRef.current = null;
   }, [roomContextKey, roomDialogueBaseline.contextKey, state.dialogueHistory.length]);
 
   useEffect(() => () => {
     audioGenerationRef.current += 1;
-    activeAudioRef.current?.pause();
+    if (activeAudioRef.current) {
+      void releaseAudibleAudioElement(activeAudioRef.current);
+    }
     activeAudioRef.current = null;
   }, []);
 

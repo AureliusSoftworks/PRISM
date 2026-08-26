@@ -20,6 +20,7 @@ import {
   resolveActionSfxPackOwnerId,
 } from "./action-sfx-pack-client";
 import { routeAudioElementToPrismOutput } from "./replayAudioMasterCapture";
+import { releaseAudibleAudioElement } from "./audibleAudioRelease";
 import styles from "./page.module.css";
 
 const SAMPLE_CLIP_OPTIONS = ACTION_SFX_PACK_KINDS.flatMap((kind) =>
@@ -79,12 +80,15 @@ export function ActionSfxPackMagicButton({
   const stopSample = useCallback((): void => {
     const audio = sampleAudioRef.current;
     sampleAudioRef.current = null;
-    sampleCleanupRef.current?.();
+    const cleanup = sampleCleanupRef.current;
     sampleCleanupRef.current = null;
     if (audio) {
-      audio.pause();
-      audio.removeAttribute("src");
-      audio.load();
+      void releaseAudibleAudioElement(audio, {
+        clearSource: true,
+        onReleased: cleanup ?? undefined,
+      });
+    } else {
+      cleanup?.();
     }
     setSamplePlaying(false);
   }, []);

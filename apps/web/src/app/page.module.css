@@ -76131,8 +76131,16 @@ a.settingsCreditItem:focus-visible {
 .messageMoodCoffeeFace [data-crt-glyph-layer="true"],
 .zenLiveBotPresenceFaceGlyph [data-crt-glyph-layer="true"] {
   /* Native live mouth visemes swap several times per frame. Keep their box
-     stable so the source, core, and bloom copies remain registered. */
+     stable so the source, core, and bloom copies remain registered. The
+     emission field may overscan, but it must not change this layout box. */
   --crt-glyph-paint-bleed: var(--crt-glyph-core-paint-bleed, 0.08em);
+  --crt-glyph-emission-outset: max(
+    var(--crt-glyph-core-paint-bleed, 0.08em),
+    var(
+      --crt-glyph-filter-outset,
+      var(--crt-glyph-core-paint-bleed, 0.08em)
+    )
+  );
   --crt-glyph-core-opacity: var(--crt-core-opacity, 0.82);
   --crt-face-glow-radius-scale: var(
     --bot-phosphor-focus-radius-scale,
@@ -76262,30 +76270,6 @@ a.settingsCreditItem:focus-visible {
     );
 }
 
-/* Raster-backed glyphs need a paint/filter surface as large as their active
-   emission stack. Pending masks get the same surface so rasterization measures
-   the final box once; negative margins keep this overscan out of face layout. */
-.coffeeSeatPlateEmoji
-  [data-crt-glyph-layer="true"][data-crt-pixel-mask-pending="true"],
-.coffeeSeatPlateEmoji
-  [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"],
-.messageMoodCoffeeFace
-  [data-crt-glyph-layer="true"][data-crt-pixel-mask-pending="true"],
-.messageMoodCoffeeFace
-  [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"],
-.zenLiveBotPresenceFaceGlyph
-  [data-crt-glyph-layer="true"][data-crt-pixel-mask-pending="true"],
-.zenLiveBotPresenceFaceGlyph
-  [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"] {
-  --crt-glyph-paint-bleed: max(
-    var(--crt-glyph-core-paint-bleed, 0.08em),
-    var(
-      --crt-glyph-filter-outset,
-      var(--crt-glyph-core-paint-bleed, 0.08em)
-    )
-  );
-}
-
 .coffeeSeatPlateEmoji:not([data-face-eye-character])
   [data-coffee-plate-emoji-part="eyes"]
   > [data-crt-glyph-layer="true"],
@@ -76318,7 +76302,10 @@ a.settingsCreditItem:focus-visible {
 .zenLiveBotPresenceFaceGlyph [data-crt-glyph-layer="true"]::after {
   content: attr(data-crt-glyph-content);
   position: absolute;
-  inset: 0;
+  /* The expanded emission canvas is centered around the untouched glyph box.
+     This gives the filter its full halo radius without moving live 0/o/O
+     visemes or misregistering their source, bloom, and core layers. */
+  inset: calc(0px - var(--crt-glyph-emission-outset));
   display: grid;
   place-items: center;
   color: currentColor;
@@ -76500,15 +76487,44 @@ a.settingsCreditItem:focus-visible {
 .zenLiveBotPresenceThinkingGlyph
   [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]::after {
   content: "";
-  inset: calc(0px - var(--crt-phosphor-pixel-overscan, 0px));
+  /* Keep the alpha mask at its rasterized size, then center it on a larger
+     non-layout filter surface. The emitted halo can use the full screen
+     radius without stretching the quantized silhouette. */
+  --crt-glyph-mask-surface-inset: max(
+    var(--crt-glyph-emission-outset),
+    var(--crt-phosphor-pixel-overscan, 0px)
+  );
+  inset: calc(0px - var(--crt-glyph-mask-surface-inset));
   -webkit-mask-image: var(--crt-phosphor-pixel-mask);
   mask-image: var(--crt-phosphor-pixel-mask);
   -webkit-mask-position: center;
   mask-position: center;
   -webkit-mask-repeat: no-repeat;
   mask-repeat: no-repeat;
-  -webkit-mask-size: 100% 100%;
-  mask-size: 100% 100%;
+  -webkit-mask-size: calc(
+      100% -
+        (var(--crt-glyph-mask-surface-inset) -
+            var(--crt-phosphor-pixel-overscan, 0px)) *
+          2
+    )
+    calc(
+      100% -
+        (var(--crt-glyph-mask-surface-inset) -
+            var(--crt-phosphor-pixel-overscan, 0px)) *
+          2
+    );
+  mask-size: calc(
+      100% -
+        (var(--crt-glyph-mask-surface-inset) -
+            var(--crt-phosphor-pixel-overscan, 0px)) *
+          2
+    )
+    calc(
+      100% -
+        (var(--crt-glyph-mask-surface-inset) -
+            var(--crt-phosphor-pixel-overscan, 0px)) *
+          2
+    );
   -webkit-mask-mode: alpha;
   mask-mode: alpha;
   -webkit-background-clip: border-box;

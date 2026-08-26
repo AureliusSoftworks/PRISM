@@ -196,22 +196,39 @@ describe("Signal thinking presentation", () => {
     );
   });
 
-  it("keeps the live face thinking while its generated line is synthesizing", () => {
+  it("keeps ordinary generation and voice preparation off-stage", () => {
     assert.equal(
       signalStageThinkingRole({
-        presentedThinkingRole: null,
+        presentedThinkingRole: "host",
+        nextSpeakerRole: "host",
+        producerGuestThinking: false,
         voicePreparationPending: true,
         voicePreparationRole: "host",
+      }),
+      null,
+    );
+  });
+
+  it("shows fallback thinking on the producer-owned screen", () => {
+    assert.equal(
+      signalStageThinkingRole({
+        presentedThinkingRole: "host",
+        nextSpeakerRole: "guest",
+        producerGuestThinking: false,
+        voicePreparationPending: false,
+        voicePreparationRole: null,
       }),
       "host",
     );
     assert.equal(
       signalStageThinkingRole({
-        presentedThinkingRole: null,
+        presentedThinkingRole: "guest",
+        nextSpeakerRole: "guest",
+        producerGuestThinking: true,
         voicePreparationPending: false,
-        voicePreparationRole: "host",
+        voicePreparationRole: null,
       }),
-      null,
+      "guest",
     );
   });
 
@@ -233,6 +250,8 @@ describe("Signal thinking presentation", () => {
     assert.equal(
       signalStageThinkingRole({
         presentedThinkingRole,
+        nextSpeakerRole: "host",
+        producerGuestThinking: false,
         voicePreparationPending: false,
         voicePreparationRole: "host",
       }),

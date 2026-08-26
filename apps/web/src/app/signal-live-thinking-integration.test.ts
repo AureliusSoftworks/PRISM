@@ -17,7 +17,7 @@ const signalCss = readFileSync(
 );
 
 describe("Signal live thinking animation", () => {
-  it("renders generation and synthesis work through the authored face spinner", () => {
+  it("renders only fallback work through the owning bot's authored face spinner", () => {
     const thinking = signalSource.slice(
       signalSource.indexOf("const roleIsThinking ="),
       signalSource.indexOf("const episodeStartedAtCandidate"),
@@ -30,6 +30,10 @@ describe("Signal live thinking animation", () => {
     assert.match(
       pageSource,
       /showThinkingSpinner:\s*signalMannequinThinking/u,
+    );
+    assert.match(
+      pageSource,
+      /thinkingScheduleKey:\s*`botcast-\$\{avatarState\.role\}-\$\{bot\.id\}-thinking`/u,
     );
     assert.match(pageSource, /detailLevel:\s*"full"/u);
   });
