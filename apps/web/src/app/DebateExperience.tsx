@@ -9164,6 +9164,7 @@ export function DebateExperience(
     async (
       direction: string,
       anchor?: DebateBotDirectedSetupAnchor,
+      formatConstraint?: DebateFormatId,
     ): Promise<void> => {
       if (props.bots.length < 2) {
         setError("Create at least two Library bots to start a Debate.");
@@ -9288,6 +9289,7 @@ export function DebateExperience(
           {
             ...requestBody({
               direction: anchorDirection,
+              format: formatConstraint,
               roster: props.bots.map((bot) => ({
                 id: bot.id,
                 name: bot.name,
@@ -9301,7 +9303,12 @@ export function DebateExperience(
           },
         );
         const applied = applyDebateSetupSuggestion(result.suggestion);
-        const resolvedPlayerRole = anchor?.playerRole ?? applied.playerRole;
+        const resolvedFormat = formatConstraint ?? applied.format;
+        const resolvedPlayerRole =
+          anchor?.playerRole ??
+          (resolvedFormat === "whodunnit" && applied.playerRole === "judge"
+            ? "participant"
+            : applied.playerRole);
         const resolvedPlayerSideId =
           anchor?.playerSideId ?? applied.playerSideId;
         const resolvedSelectableCastSlots: readonly DebateCastSlot[] =
@@ -9326,7 +9333,7 @@ export function DebateExperience(
               })
             : applied.cast;
         setTopic(applied.topic);
-        setFormat(applied.format);
+        setFormat(resolvedFormat);
         setForumRoundMode(applied.forumRoundMode);
         setForumRoundCount(applied.forumRoundCount);
         setFormality(applied.formality);
@@ -9367,6 +9374,12 @@ export function DebateExperience(
         setEvidence(applied.evidence);
         setResearchQuery(applied.researchQuery);
         setScholarQuery(applied.scholarQuery);
+        if (resolvedFormat === "whodunnit") {
+          // Refract refreshes only editable Case Forge direction. It never
+          // reads, mutates, or pre-seals a mystery's private case state.
+          setMysteryInspiration(applied.motion.motion || applied.topic);
+          setMysteryNonce(nextMysteryRecipeNonce());
+        }
         setEvidenceDecisionMade(true);
         setStudioPanel("motion");
         setCastTuningOpen(
@@ -9388,6 +9401,10 @@ export function DebateExperience(
           detail: `Used ${usedModel}.`,
         });
         pendingBotDirectedSetupAnchorRef.current = null;
+        if (resolvedFormat === "whodunnit") {
+          setRoleChecks([]);
+          return;
+        }
         const roleChecksReady =
           resolvedPlayerRole === "participant"
             ? Boolean(
@@ -9410,7 +9427,7 @@ export function DebateExperience(
         }>(
           "/api/debates/role-checks",
           requestBody({
-            format: applied.format,
+            format: resolvedFormat,
             formality: applied.formality,
             motion: applied.motion,
             playerRole: resolvedPlayerRole,
@@ -9486,6 +9503,28 @@ export function DebateExperience(
     }),
     [busy, generateNewDuelFromPrism, inventWarmup, newDuelGenerateBusy, props.bots.length],
   );
+
+  const formatRefractMagic = (
+    targetFormat: DebateFormatId,
+  ): PrismRefractMagicTarget => ({
+    id: `debate:format-refract:${targetFormat}`,
+    label: `Generate a fresh ${
+      targetFormat === "whodunnit"
+        ? "Whodunnit"
+        : targetFormat === "turnabout"
+          ? "Turnabout"
+          : "Forum"
+    } setup`,
+    kind: "magic",
+    ownsPresentation: true,
+    disabled: () =>
+      props.bots.length < 2 ||
+      busy ||
+      newDuelGenerateBusy ||
+      inventWarmup !== null,
+    run: (direction) =>
+      void generateNewDuelFromPrism(direction, undefined, targetFormat),
+  });
 
   const refractMotionSection = useCallback(
     async (direction: string): Promise<void> => {
@@ -18792,29 +18831,42 @@ export function DebateExperience(
               const disabled =
                 playerRole === "participant" && option.id === "turnabout";
               return (
-                <label
+                <PrismRefractTarget
+                  target={formatRefractMagic(option.id as DebateFormatId)}
                   key={option.id}
-                  data-selected={format === option.id ? "true" : undefined}
-                  aria-disabled={disabled ? "true" : undefined}
                 >
-                  <input
-                    type="radio"
-                    name="debate-format"
-                    value={option.id}
-                    checked={format === option.id}
-                    disabled={disabled}
-                    onChange={() => {
-                      if (disabled || option.id === "whodunnit") return;
-                      if (option.id === "forum" || option.id === "turnabout") {
-                        setFormat(option.id);
-                        setRoleChecks([]);
-                      }
-                    }}
-                  />
-                  <strong>{option.name}<em>{option.productionName}</em></strong>
-                  <span>{option.summary}</span>
-                  <small>{option.cadence}</small>
-                </label>
+                  {(binding) => (
+                    <label
+                      {...binding}
+                      data-selected={format === option.id ? "true" : undefined}
+                      aria-disabled={disabled ? "true" : undefined}
+                    >
+                      <input
+                        type="radio"
+                        name="debate-format"
+                        value={option.id}
+                        checked={format === option.id}
+                        disabled={disabled}
+                        onChange={() => {
+                          if (disabled || option.id === "whodunnit") return;
+                          if (
+                            option.id === "forum" ||
+                            option.id === "turnabout"
+                          ) {
+                            setFormat(option.id);
+                            setRoleChecks([]);
+                          }
+                        }}
+                      />
+                      <strong>
+                        {option.name}
+                        <em>{option.productionName}</em>
+                      </strong>
+                      <span>{option.summary}</span>
+                      <small>{option.cadence}</small>
+                    </label>
+                  )}
+                </PrismRefractTarget>
               );
             })}
           </fieldset>
@@ -19045,50 +19097,64 @@ export function DebateExperience(
                 playerRole === "participant" && option.id === "turnabout";
               const disabled = participantForumOnly;
               return (
-                <label
+                <PrismRefractTarget
+                  target={formatRefractMagic(option.id as DebateFormatId)}
                   key={option.id}
-                  data-selected={format === option.id ? "true" : undefined}
-                  data-availability={
-                    participantForumOnly
-                      ? "participant-forum-only"
-                      : option.availability
-                  }
-                  aria-disabled={disabled ? "true" : undefined}
-                  tabIndex={disabled ? 0 : undefined}
                 >
-                  <input
-                    type="radio"
-                    name="debate-format"
-                    value={option.id}
-                    checked={format === option.id}
-                    disabled={disabled}
-                    onChange={() => {
-                      if (disabled) return;
-                      if (option.id === "whodunnit") {
-                        setFormat("whodunnit");
-                        if (playerRole === "judge") setPlayerRole("participant");
-                        setFormality((current) =>
-                          current === "plainspoken" ? "structured" : current,
-                        );
-                        setCastTuningOpen(true);
-                        setRoleChecks([]);
-                        return;
+                  {(binding) => (
+                    <label
+                      {...binding}
+                      data-selected={format === option.id ? "true" : undefined}
+                      data-availability={
+                        participantForumOnly
+                          ? "participant-forum-only"
+                          : option.availability
                       }
-                      if (option.id !== "forum" && option.id !== "turnabout") {
-                        return;
-                      }
-                      setFormat(option.id);
-                      setRoleChecks([]);
-                    }}
-                  />
-                  <strong>
-                    {option.name}
-                    <em>{option.productionName}</em>
-                  </strong>
-                  <span>{option.summary}</span>
-                  <small>{option.cadence}</small>
-                  {participantForumOnly ? <b>Participant uses Forum</b> : null}
-                </label>
+                      aria-disabled={disabled ? "true" : undefined}
+                      tabIndex={disabled ? 0 : undefined}
+                    >
+                      <input
+                        type="radio"
+                        name="debate-format"
+                        value={option.id}
+                        checked={format === option.id}
+                        disabled={disabled}
+                        onChange={() => {
+                          if (disabled) return;
+                          if (option.id === "whodunnit") {
+                            setFormat("whodunnit");
+                            if (playerRole === "judge") {
+                              setPlayerRole("participant");
+                            }
+                            setFormality((current) =>
+                              current === "plainspoken" ? "structured" : current,
+                            );
+                            setCastTuningOpen(true);
+                            setRoleChecks([]);
+                            return;
+                          }
+                          if (
+                            option.id !== "forum" &&
+                            option.id !== "turnabout"
+                          ) {
+                            return;
+                          }
+                          setFormat(option.id);
+                          setRoleChecks([]);
+                        }}
+                      />
+                      <strong>
+                        {option.name}
+                        <em>{option.productionName}</em>
+                      </strong>
+                      <span>{option.summary}</span>
+                      <small>{option.cadence}</small>
+                      {participantForumOnly ? (
+                        <b>Participant uses Forum</b>
+                      ) : null}
+                    </label>
+                  )}
+                </PrismRefractTarget>
               );
             })}
           </fieldset>

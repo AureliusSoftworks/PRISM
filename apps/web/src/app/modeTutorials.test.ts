@@ -17,10 +17,18 @@ describe("mode tutorials", () => {
     assert.match(coffeeBody, /each permanent member explicitly/u);
     assert.match(coffeeBody, /per-bot canvas/u);
     assert.match(coffeeBody, /all five can sit at the live table/u);
-    const bodies = [
+    const debateBody =
       MODE_TUTORIALS.debate.steps.find(
         (step) => step.heading === "Enter the Debate Studio",
-      )?.body ?? "",
+      )?.body ?? "";
+    assert.match(
+      debateBody,
+      /Wield Prism onto Forum, Turnabout, or Whodunnit\?/u,
+    );
+    assert.match(debateBody, /fresh editable case locked to that mode/u);
+    assert.match(debateBody, /never changes a compiled or sealed case/u);
+    const bodies = [
+      debateBody,
       signalPowersTutorialBody(),
     ];
     for (const body of bodies) {

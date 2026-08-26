@@ -7564,6 +7564,64 @@ describe("Debate engine", () => {
     assert.equal(scholarCalls, 0);
   });
 
+  it("keeps Refracted setup cards in their requested Debate format", async () => {
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse() {
+        // Deliberately return the common Forum default. The format constraint
+        // is server-owned so every format card remains truthful.
+        return JSON.stringify({
+          topic: "Night markets",
+          motion: {
+            id: "setup-constraint",
+            title: "After-Hours Market",
+            motion: "Cities should permit overnight neighborhood markets.",
+            forSide: { label: "Open late", brief: "Local commerce benefits." },
+            againstSide: { label: "Keep hours", brief: "Residents need rest." },
+          },
+          format: "forum",
+          formality: "plainspoken",
+          forumRoundMode: "auto",
+          forumRoundCount: 1,
+          juryEnabled: false,
+          setupPresetId: "classic-duel",
+          playerRole: "judge",
+          moderatorTitle: "Night Warden",
+          forAdvocateBotId: "bot-a",
+          againstAdvocateBotId: "bot-b",
+          exhibits: [
+            { adjective: "Neon", object: "sign", observation: "It flickers.", emoji: "💡" },
+            { adjective: "Stamped", object: "permit", observation: "It is unsigned.", emoji: "📄" },
+          ],
+        });
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    for (const formatConstraint of ["forum", "turnabout", "whodunnit"] as const) {
+      const invent = await suggestDebateSetup({
+        direction: "Make this distinct.",
+        formatConstraint,
+        roster: [
+          { id: "bot-a", name: "Ada", personaSnippet: "night librarian" },
+          { id: "bot-b", name: "Bea", personaSnippet: "market organizer" },
+        ],
+        runtime: runtimeWith(provider),
+        research: {
+          allowOnlineResearch: false,
+          searchWeb: async () => [],
+          searchScholar: async () => [],
+        },
+      });
+      assert.equal(invent.suggestion.format, formatConstraint);
+      if (formatConstraint === "whodunnit") {
+        assert.notEqual(invent.suggestion.playerRole, "judge");
+        assert.equal(invent.suggestion.setupPresetId, null);
+      }
+    }
+  });
+
   it("pins New Duel variety prompts so celebrity defaults do not dominate", () => {
     assert.match(debateSource, /Variety seed:/u);
     assert.match(debateSource, /famous default debate celebrities/u);

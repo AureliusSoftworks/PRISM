@@ -945,6 +945,24 @@ describe("Debate experience", () => {
     assert.match(source, /debate:new-duel-generate/u);
     assert.match(source, /generateNewDuelFromPrism/u);
     assert.match(source, /\/api\/debates\/setup-suggestion/u);
+    assert.match(source, /debate:format-refract:\$\{targetFormat\}/u);
+    assert.match(
+      source,
+      /formatRefractMagic\(option\.id as DebateFormatId\)/u,
+    );
+    assert.match(source, /format: formatConstraint/u);
+    assert.match(
+      source,
+      /const resolvedFormat = formatConstraint \?\? applied\.format;[\s\S]{0,1300}setFormat\(resolvedFormat\)/u,
+    );
+    assert.match(
+      source,
+      /resolvedFormat === "whodunnit"[\s\S]{0,240}setMysteryInspiration[\s\S]{0,160}setMysteryNonce/u,
+    );
+    assert.match(
+      source,
+      /resolvedFormat === "whodunnit"[\s\S]{0,120}setRoleChecks\(\[\]\);[\s\S]{0,80}return;/u,
+    );
     assert.match(
       source,
       /setPlayerRole\(resolvedPlayerRole\)[\s\S]{0,400}setJuryEnabled\([\s\S]{0,220}applied\.juryEnabled[\s\S]{0,400}setPlayerSideId\(resolvedPlayerSideId\)[\s\S]{0,120}setModeratorTitle\(applied\.moderatorTitle\)/u,

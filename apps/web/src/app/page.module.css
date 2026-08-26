@@ -28516,9 +28516,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .signalBotPresencePlate {
   --zen-live-bot-avatar-size: clamp(154px, 16vw, 240px);
   --zen-live-bot-avatar-body-size: clamp(140px, 14.5vw, 218px);
-  /* Overscan only the lower CRT field beneath Signal's bezel. The glyph has
-     its own fixed render size and must not grow with this surface. */
-  --zen-live-bot-buckle-crt-screen-scale: 1.64;
   --zen-live-bot-body-x: 50%;
   --zen-live-bot-body-y: 50%;
   --zen-live-bot-face-x: 50%;
@@ -29209,9 +29206,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     calc(var(--zen-live-bot-buckle-crt-cell-pitch) * 0.14),
     0.48px
   );
-  /* The buckle's physical CRT field is larger than the persona mark painted
-     on it. Size that field independently so its boundary can meet the inner
-     bezel without scaling the glyph or changing the canonical cell pitch. */
+  /* The lower orb is one shared physical screen: its dark receiving surface
+     and glass grow together, while the CRT lattice keeps its smaller shared
+     footprint. Both remain independent from the persona glyph geometry. */
+  --zen-live-bot-buckle-screen-scale: 1.34;
   --zen-live-bot-buckle-crt-screen-scale: 1.54;
   position: relative;
   z-index: 8;
@@ -29225,6 +29223,55 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   transform: translateX(calc(var(--zen-live-bot-body-x, 50%) - 50%))
     translateY(calc(var(--zen-live-bot-body-y, 50%) - 50%));
   will-change: transform;
+}
+
+.zenLiveBotPresenceBody::before {
+  /* Persistent physical screen below the CRT lattice and glyph. The frame art
+     supplies the surrounding bezel; this slight overscan closes its inner gap. */
+  content: "";
+  position: absolute;
+  left: calc(50% + var(--zen-live-bot-glyph-x-anchor, 0px) + 1px);
+  top: calc(50% + var(--zen-live-bot-glyph-y-anchor, 70px) + 1px);
+  z-index: 10;
+  width: calc(
+    var(
+        --zen-live-bot-body-glyph-size,
+        clamp(
+          var(--zen-live-bot-body-glyph-min-size),
+          calc(
+            var(--zen-live-bot-body-frame-size) *
+              var(--zen-live-bot-body-glyph-ratio)
+          ),
+          var(--zen-live-bot-body-glyph-max-size)
+        )
+      ) *
+      var(--zen-live-bot-buckle-screen-scale)
+  );
+  height: calc(
+    var(
+        --zen-live-bot-body-glyph-size,
+        clamp(
+          var(--zen-live-bot-body-glyph-min-size),
+          calc(
+            var(--zen-live-bot-body-frame-size) *
+              var(--zen-live-bot-body-glyph-ratio)
+          ),
+          var(--zen-live-bot-body-glyph-max-size)
+        )
+      ) *
+      var(--zen-live-bot-buckle-screen-scale)
+  );
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 50% 48%,
+    color-mix(in srgb, var(--coffee-bot-color, currentColor) 10%, #020507),
+    #020507 74%
+  );
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    inset 0 0 8px rgba(0, 0, 0, 0.72);
+  pointer-events: none;
 }
 
 .zenLiveBotPresenceBody::after {
@@ -32456,7 +32503,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   height: var(--foundry-buckle-screen-size);
   overflow: hidden;
   border-radius: 50%;
-  transform: translate(-50%, -50%);
+  transform: translate(-50%, -50%)
+    scale(var(--zen-live-bot-buckle-screen-scale));
   background: #020507;
   box-shadow:
     inset 0 0 0 1px rgba(255,255,255,.1),
@@ -32528,7 +32576,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .botAvatarFoundryBuckleGlass {
-  --foundry-buckle-glass-scale: 1.26;
   --foundry-buckle-screen-size: var(
     --zen-live-bot-body-glyph-size,
     clamp(
@@ -32547,7 +32594,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   width: var(--foundry-buckle-screen-size);
   height: var(--foundry-buckle-screen-size);
   border-radius: 50%;
-  transform: translate(-50%, -50%) scale(var(--foundry-buckle-glass-scale));
+  transform: translate(-50%, -50%)
+    scale(var(--zen-live-bot-buckle-screen-scale));
   background:
     radial-gradient(circle at 34% 24%, rgba(255,255,255,.18), transparent 24%),
     linear-gradient(145deg, rgba(255,255,255,.08), transparent 44% 68%, rgba(255,255,255,.06));

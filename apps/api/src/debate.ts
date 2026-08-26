@@ -1856,6 +1856,7 @@ export interface DebateSetupSuggestionResearchHooks {
 function normalizeRepairableDebateSetupSuggestion(
   value: Record<string, unknown>,
   allowedBotIds: readonly string[],
+  formatConstraint?: DebateFormatId,
 ): DebateSetupSuggestionV1 | null {
   const allowed = allowedBotIds.filter((id) => id.trim());
   if (allowed.length < 2) return null;
@@ -2020,6 +2021,7 @@ function normalizeRepairableDebateSetupSuggestion(
       sources: [],
     },
     allowed,
+    formatConstraint,
   );
 }
 
@@ -2206,6 +2208,8 @@ export async function generateDebateJudgeEvidencePacket(args: {
  */
 export async function suggestDebateSetup(args: {
   direction?: unknown;
+  /** Keep a Refracted format card in its explicitly chosen production lane. */
+  formatConstraint?: DebateFormatId;
   roster: readonly DebateSetupSuggestionRosterBot[];
   runtime: DebateAiRuntime;
   research: DebateSetupSuggestionResearchHooks;
@@ -2236,6 +2240,7 @@ export async function suggestDebateSetup(args: {
     shuffledRoster[swapAt] = current;
   }
   const direction = compactText(args.direction, 500);
+  const formatConstraint = args.formatConstraint;
   const varietySeed = randomInt(1_000_000_000);
   const rosterLines = shuffledRoster
     .slice(0, 40)
@@ -2244,7 +2249,12 @@ export async function suggestDebateSetup(args: {
         `- ${bot.id} · ${bot.name}${bot.personaSnippet ? ` — ${bot.personaSnippet}` : ""}`,
     )
     .join("\n");
-  const presetCatalog = DEBATE_SETUP_PRESETS.map(
+  const availablePresets = formatConstraint
+    ? DEBATE_SETUP_PRESETS.filter(
+        (preset) => preset.format === formatConstraint,
+      )
+    : DEBATE_SETUP_PRESETS;
+  const presetCatalog = availablePresets.map(
     (preset) =>
       `- ${preset.id}: ${preset.name} · format ${preset.format} · ${preset.formality} · player ${preset.playerRole} · Jury ${preset.juryEnabled ? "on" : "off"}`,
   ).join("\n");
@@ -2273,15 +2283,26 @@ export async function suggestDebateSetup(args: {
             ? `Player direction: ${direction}`
             : "Player direction: invent any lively, arguable territory.",
           `Variety seed: ${varietySeed}`,
-          "Setup presets (choose one setupPresetId; playerRole and juryEnabled must match it):",
-          presetCatalog,
+          formatConstraint
+            ? `Required format: ${formatConstraint}. This is a hard constraint; do not return another format.`
+            : "Format: choose the production lane that best fits the setup.",
+          formatConstraint === "whodunnit"
+            ? [
+                "This is a Whodunnit setup: create a fresh mansion-case direction that will remain editable until Case Forge compiles it.",
+                "Return format whodunnit, setupPresetId null, and playerRole participant or spectator (never judge).",
+              ].join("\n")
+            : [
+                "Setup presets (choose one setupPresetId; playerRole and juryEnabled must match it):",
+                presetCatalog,
+              ].join("\n"),
           "Library roster (choose forAdvocateBotId, againstAdvocateBotId, and when needed moderatorBotId from these ids only):",
           rosterLines,
           "Invent:",
           "- topic: short seed phrase",
           "- motion: one slate with id, title, motion, forSide {label, brief}, againstSide {label, brief}",
-          "- setupPresetId: one of the listed presets",
-          "- format / formality / juryEnabled / playerRole: must match that preset",
+          formatConstraint === "whodunnit"
+            ? "- setupPresetId: null; format: whodunnit; playerRole: participant or spectator"
+            : "- setupPresetId: one of the listed presets; format / formality / juryEnabled / playerRole: must match that preset",
           "- playerSideId: for or against when playerRole is participant; otherwise null",
           "- moderatorBotId: a third unused roster bot when playerRole is spectator or participant; null when playerRole is judge",
           `- moderatorTitle: unique 1-${DEBATE_MODERATOR_TITLE_MAX_LENGTH}-char public title flavored by the topic (not a person name)`,
@@ -2300,7 +2321,11 @@ export async function suggestDebateSetup(args: {
       temperature: 0.84,
       validate: (value) =>
         Boolean(
-          normalizeRepairableDebateSetupSuggestion(value, allowedBotIds),
+          normalizeRepairableDebateSetupSuggestion(
+            value,
+            allowedBotIds,
+            formatConstraint,
+          ),
         ),
     },
   );
@@ -2308,6 +2333,7 @@ export async function suggestDebateSetup(args: {
   const draft = normalizeRepairableDebateSetupSuggestion(
     generation.value,
     allowedBotIds,
+    formatConstraint,
   );
   if (!draft) {
     throw new HttpError(
@@ -2375,6 +2401,7 @@ export async function suggestDebateSetup(args: {
       },
     },
     allowedBotIds,
+    formatConstraint,
   );
   if (!suggestion) {
     throw new HttpError(

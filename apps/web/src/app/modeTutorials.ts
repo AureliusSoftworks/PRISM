@@ -894,6 +894,8 @@ const SIGNAL_PRE_SESSION_ALIGNMENT_TUTORIAL_PREFIX =
   "Signal stays on its native Production Desk. Latest episodes restores an editable booking without starting it, and the guest, topic or private Producer direction, mode, duration, and Watch behavior remain together at the desk. One launch row owns Begin episode or Prepare show, with a missing guest or topic explained at that action. I Feel Lucky! is the deliberate fast lane beside it: one click resolves a coherent show, guest, title, and private premise, then starts immediately.";
 const DEBATE_PRE_SESSION_ALIGNMENT_TUTORIAL_PREFIX =
   "Debate keeps its procedural Studio navigation, proceeding review, readiness rail, consent and evidence checks, Save Debate, Start Debate, and Archive setup reuse. The Studio presents those decisions in its own established language and hierarchy.";
+const DEBATE_FORMAT_REFRACT_TUTORIAL_SUFFIX =
+  "Wield Prism onto Forum, Turnabout, or Whodunnit? in Debate format to invent a fresh editable case locked to that mode. Whodunnit refreshes only the editable Case Forge direction; it never changes a compiled or sealed case.";
 const BOT_DIRECTED_SETUP_WIELD_TUTORIAL_SUFFIX =
   "In an editable pre-session bot picker, hold Option and Wield Prism onto a concrete bot tile to keep that character fixed while the applet populates the remaining setup around them. The result stays editable, ordinary clicks remain ordinary selection, and the session never starts until you choose its launch action.";
 const DEBATE_COPYCAT_FLOOR_TUTORIAL_SUFFIX =
@@ -1040,7 +1042,7 @@ const CURRENT_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       if (step.heading === "Enter the Debate Studio") {
         return {
           ...step,
-          body: `${DEBATE_PRE_SESSION_ALIGNMENT_TUTORIAL_PREFIX} ${body} ${BOT_DIRECTED_SETUP_WIELD_TUTORIAL_SUFFIX}`,
+          body: `${DEBATE_PRE_SESSION_ALIGNMENT_TUTORIAL_PREFIX} ${body} ${DEBATE_FORMAT_REFRACT_TUTORIAL_SUFFIX} ${BOT_DIRECTED_SETUP_WIELD_TUTORIAL_SUFFIX}`,
         };
       }
       return step.heading === "Follow and keep the record"

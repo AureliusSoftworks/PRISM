@@ -1144,6 +1144,7 @@ import {
   buildSignalMusicProfile,
   normalizePrismRefractDirection,
   normalizePrismRefractRequest,
+  isDebateFormatId,
   isImageAssetKind,
   signalPersonaTemperamentFor,
   type BotcastProducerCue,
@@ -16738,6 +16739,9 @@ function buildRoutes(): RouteDefinition[] {
         () =>
           suggestDebateSetup({
             direction: body.direction,
+            formatConstraint: isDebateFormatId(body.format)
+              ? body.format
+              : undefined,
             roster,
             runtime,
             research: {

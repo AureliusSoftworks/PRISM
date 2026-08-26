@@ -2487,6 +2487,7 @@ function normalizeDebateForumRoundCount(value: unknown): number {
 export function normalizeDebateSetupSuggestionV1(
   value: unknown,
   allowedBotIds: readonly string[],
+  formatConstraint?: DebateFormatId,
 ): DebateSetupSuggestionV1 | null {
   const source =
     value && typeof value === "object"
@@ -2598,23 +2599,36 @@ export function normalizeDebateSetupSuggestionV1(
     ? setupPresetRaw
     : null;
   const matchedPreset = setupPresetId
-    ? DEBATE_SETUP_PRESETS.find((preset) => preset.id === setupPresetId) ?? null
+    ? (DEBATE_SETUP_PRESETS.find(
+        (preset) =>
+          preset.id === setupPresetId &&
+          (!formatConstraint || preset.format === formatConstraint),
+      ) ?? null)
     : null;
 
   const requestedPlayerRole = isDebatePlayerRole(source.playerRole)
     ? source.playerRole
     : null;
   const playerRole =
-    matchedPreset?.playerRole ?? requestedPlayerRole ?? "judge";
+    matchedPreset?.playerRole ??
+    (formatConstraint === "whodunnit" && requestedPlayerRole === "judge"
+      ? "participant"
+      : requestedPlayerRole) ??
+    (formatConstraint === "whodunnit" ? "participant" : "judge");
   const juryEnabled = matchedPreset
     ? matchedPreset.juryEnabled
     : source.juryEnabled === true;
   const format = matchedPreset
     ? matchedPreset.format
-    : normalizeDebateFormatId(source.format);
+    : (formatConstraint ?? normalizeDebateFormatId(source.format));
   const formality = matchedPreset
     ? matchedPreset.formality
-    : normalizeDebateFormalityId(source.formality);
+    : (() => {
+        const normalized = normalizeDebateFormalityId(source.formality);
+        return format === "whodunnit" && normalized === "plainspoken"
+          ? "structured"
+          : normalized;
+      })();
 
   const playerSideId =
     playerRole === "participant"
@@ -2646,7 +2660,7 @@ export function normalizeDebateSetupSuggestionV1(
     forumRoundMode: normalizeDebateForumRoundMode(source.forumRoundMode),
     forumRoundCount: normalizeDebateForumRoundCount(source.forumRoundCount),
     juryEnabled,
-    setupPresetId,
+    setupPresetId: matchedPreset?.id ?? null,
     playerRole,
     participantDifficulty:
       source.participantDifficulty === "coach" ||
