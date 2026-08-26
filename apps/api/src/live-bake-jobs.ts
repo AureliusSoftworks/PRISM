@@ -42,6 +42,18 @@ type SignalJob = {
   signalEpisodeImage?: NonNullable<BotcastGenerationOptions["signalEpisodeImage"]>;
 };
 
+/**
+ * Signal artifacts are derived from the append-only episode, so a rejected
+ * background job otherwise has no durable place to put its terminal error.
+ * Retain the last terminal result only for this process and episode key: the
+ * polling client can leave its loader with a recoverable error, while a new
+ * episode (or an explicit cancellation) starts clean.
+ */
+type SignalBakeFailure = {
+  episodeId: string;
+  artifact: LiveBakeArtifactV1;
+};
+
 type BakeJob = DebateJob | SignalJob;
 
 function debateKey(userId: string, sessionId: string): JobKey {
@@ -54,6 +66,7 @@ function signalKey(userId: string, episodeId: string): JobKey {
 
 export class LiveBakeJobManager {
   private readonly jobs = new Map<JobKey, BakeJob>();
+  private readonly signalFailures = new Map<JobKey, SignalBakeFailure>();
 
   isDebateRunning(userId: string, sessionId: string): boolean {
     return this.jobs.has(debateKey(userId, sessionId));
@@ -180,6 +193,7 @@ export class LiveBakeJobManager {
       throw new HttpError(409, "Full bake is only available for Watch a show episodes.");
     }
     if (episode.status === "cancelled") {
+      this.signalFailures.delete(key);
       return {
         episode,
         liveBake: buildSignalLiveBakeArtifactFromEpisode(episode, {
@@ -188,6 +202,10 @@ export class LiveBakeJobManager {
           plannedSynthesisEngine: args.plannedSynthesisEngine,
         }),
       };
+    }
+    const previousFailure = this.signalFailures.get(key);
+    if (previousFailure?.episodeId === episode.id) {
+      return { episode, liveBake: previousFailure.artifact };
     }
     const existing = this.jobs.get(key);
     if (existing?.surface === "signal") {
@@ -236,7 +254,30 @@ export class LiveBakeJobManager {
       signal: controller.signal,
     })
       .then(() => undefined)
-      .catch(() => undefined)
+      .catch((error: unknown) => {
+        const current = this.jobs.get(key);
+        // A cancelled or superseded run must never publish a terminal failure
+        // into a replacement Watch launch.
+        if (
+          controller.signal.aborted ||
+          current?.surface !== "signal" ||
+          current.controller !== controller
+        ) {
+          return;
+        }
+        const latest = getBotcastEpisode(args.db, args.userId, args.episodeId);
+        this.signalFailures.set(key, {
+          episodeId: latest.id,
+          artifact: buildSignalLiveBakeArtifactFromEpisode(latest, {
+            status: "failed",
+            error:
+              error instanceof Error && error.message.trim()
+                ? error.message
+                : "Signal bake failed.",
+            plannedSynthesisEngine: args.plannedSynthesisEngine,
+          }),
+        });
+      })
       .finally(() => {
         const current = this.jobs.get(key);
         if (current?.controller === controller) this.jobs.delete(key);
@@ -268,7 +309,8 @@ export class LiveBakeJobManager {
   cancelSignalBake(userId: string, episodeId: string): boolean {
     const key = signalKey(userId, episodeId);
     const job = this.jobs.get(key);
-    if (!job || job.surface !== "signal") return false;
+    const hadFailure = this.signalFailures.delete(key);
+    if (!job || job.surface !== "signal") return hadFailure;
     job.controller.abort();
     return true;
   }

@@ -152,6 +152,7 @@ import {
   updateBotcastShow,
 } from "../botcast.ts";
 import { AutoFallbackExhaustedError } from "../auto-fallback.ts";
+import { LiveBakeJobManager } from "../live-bake-jobs.ts";
 import { exportUserSnapshot, importUserSnapshot } from "../backup.ts";
 import { loadBotMemoryPanelPayload } from "../bot-memory-panel.ts";
 import { initializeDatabase, readBotRelationship } from "../db.ts";
@@ -1855,6 +1856,149 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(captures[0]?.some((message) => message.images?.length), false);
       assert.equal(captures[1]?.some((message) => message.images?.length), false);
       assert.equal(captures[2]?.some((message) => message.images?.length), true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("surfaces an image-phase Watch bake failure instead of leaving the opening gate pending", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      [
+        "Welcome to the show. I am Mara Vale, and Ivo Stone is here to examine what objects keep hidden.",
+        "Objects keep the habits their makers tried to make invisible.",
+      ],
+      captures,
+    );
+    const manager = new LiveBakeJobManager();
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const created = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "What objects keep hidden",
+        playbackMode: "watch",
+        preferredProvider: "local",
+        model: "llava",
+        responseMode: "local",
+      });
+      queueBotcastEpisodeImageContext(db, "user-1", created.id, {
+        imageId: "watch-image",
+        kind: "item",
+        name: "archive key",
+        mimeType: "image/png",
+        provider: "local",
+        model: "llava",
+        replayEmoji: "🗝️",
+        allowWatchBake: true,
+      });
+      let generationCalls = 0;
+      const start = await manager.startSignalBake({
+        db,
+        userId: "user-1",
+        episodeId: created.id,
+        plannedSynthesisEngine: "local",
+        signalEpisodeImage: {
+          imageId: "watch-image",
+          input: { mimeType: "image/png", data: "AA==" },
+        },
+        resolveGeneration: async () => {
+          generationCalls += 1;
+          if (generationCalls === 3) {
+            throw new Error("Synthetic image preparation failed.");
+          }
+          return generation(provider);
+        },
+      });
+      assert.equal(start.liveBake.status, "baking");
+      for (let attempt = 0; attempt < 40 && manager.isSignalRunning("user-1", created.id); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      assert.equal(manager.isSignalRunning("user-1", created.id), false);
+
+      const failed = await manager.startSignalBake({
+        db,
+        userId: "user-1",
+        episodeId: created.id,
+        plannedSynthesisEngine: "local",
+        signalEpisodeImage: {
+          imageId: "watch-image",
+          input: { mimeType: "image/png", data: "AA==" },
+        },
+        resolveGeneration: async () => generation(provider),
+      });
+      assert.equal(failed.liveBake.status, "failed");
+      assert.match(failed.liveBake.error ?? "", /Synthetic image preparation failed/u);
+      assert.equal(failed.episode.messages.length, 2);
+      assert.equal(
+        botcastLatestImageContextV1(failed.episode.events)?.phase,
+        "queued",
+      );
+      assert.equal(manager.cancelSignalBake("user-1", created.id), true);
+      assert.equal(manager.cancelSignalBake("user-1", created.id), false);
+
+      // A terminal image error belongs only to its own episode/run. It cannot
+      // hold a fresh no-image Watch launch behind the old image job.
+      const replacement = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "What can a new interview reveal?",
+        playbackMode: "watch",
+        preferredProvider: "local",
+        model: "llava",
+        responseMode: "local",
+      });
+      const replacementStart = await manager.startSignalBake({
+        db,
+        userId: "user-1",
+        episodeId: replacement.id,
+        plannedSynthesisEngine: "local",
+        resolveGeneration: async () => generation(provider),
+      });
+      assert.equal(replacementStart.liveBake.status, "baking");
+      assert.equal(manager.isSignalRunning("user-1", replacement.id), true);
+      manager.cancelSignalBake("user-1", replacement.id);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps a no-image Watch opening on the ordinary image-free turn path", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      [
+        "Welcome to the show. I am Mara Vale, and Ivo Stone is here to examine ordinary openings.",
+        "An ordinary opening earns attention by putting one concrete stake on the table.",
+        "Then let us test whether that stake changes when the first answer arrives.",
+      ],
+      captures,
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const created = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "How does an interview begin?",
+        playbackMode: "watch",
+        preferredProvider: "local",
+        model: "llava",
+        responseMode: "local",
+      });
+      for (let turn = 0; turn < 3; turn += 1) {
+        await advanceBotcastEpisode(
+          db,
+          "user-1",
+          created.id,
+          {},
+          generation(provider),
+        );
+      }
+      const episode = getBotcastEpisode(db, "user-1", created.id);
+      assert.equal(episode.messages.length, 3);
+      assert.equal(botcastLatestImageContextV1(episode.events), null);
+      assert.equal(
+        captures.every((prompt) => prompt.every((message) => !message.images?.length)),
+        true,
+      );
     } finally {
       db.close();
     }

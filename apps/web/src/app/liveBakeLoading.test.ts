@@ -42,4 +42,19 @@ describe("liveBakeLoading", () => {
     );
     assert.equal(liveBakeSurfaceTitle("signal"), "Preparing the broadcast");
   });
+
+  it("exposes a terminal Signal bake error instead of a misleading pending label", () => {
+    const artifact = createEmptyLiveBakeArtifact({
+      surface: "signal",
+      sourceId: "signal-image-run",
+      title: "Image-led interview",
+    });
+    artifact.status = "failed";
+    artifact.error = "Signal could not prepare the attached image.";
+
+    assert.equal(
+      liveBakeStatusCopy(artifact),
+      "Signal could not prepare the attached image.",
+    );
+  });
 });

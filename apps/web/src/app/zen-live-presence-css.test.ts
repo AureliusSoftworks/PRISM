@@ -3167,7 +3167,19 @@ describe("Zen live presence CSS", () => {
       talkingFacePartRule,
       /rgba\(255,\s*63,\s*111,\s*calc\(0\.34 \* var\(--crt-prism-face-rim-strength-scale,\s*1\)\)\)/,
     );
-    assert.match(talkingFacePartRule, /filter:\s*none\s*;/);
+    assert.match(
+      talkingFacePartRule,
+      /--crt-prism-face-rim-strength-scale:\s*calc\(\s*var\(--crt-prism-face-glow-strength-scale,\s*1\) \* 0\.96\s*\)\s*;/,
+    );
+    assert.match(
+      talkingFacePartRule,
+      /--crt-prism-face-halo-strength-scale:\s*calc\(\s*var\(--crt-prism-face-glow-strength-scale,\s*1\) \* 0\.86\s*\)\s*;/,
+    );
+    assert.match(
+      talkingFacePartRule,
+      /--crt-glyph-emission-opacity:\s*1\s*;/,
+    );
+    assert.doesNotMatch(talkingFacePartRule, /(?:^|[;\s])filter:\s*none\s*;/);
     assert.doesNotMatch(talkingFacePartRule, /animation:/);
     const talkingFaceGlowRule = ruleForNormalizedSelector(
       '.zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"] .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part] [data-crt-glyph-layer="true"]::before',
@@ -3175,6 +3187,23 @@ describe("Zen live presence CSS", () => {
     assert.match(
       talkingFaceGlowRule,
       /animation:\s*zenLivePrismFaceGlowHueRotate 1\.7s linear infinite\s*;/,
+    );
+
+    const sharedTalkingFacePartRule = ruleForNormalizedSelector(
+      '.zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"]) .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part]',
+    );
+    assert.match(
+      sharedTalkingFacePartRule,
+      /--crt-glyph-emission-opacity:\s*1\s*;/,
+    );
+    assert.match(
+      sharedTalkingFacePartRule,
+      /--crt-face-glow-filter:\s*var\(--zen-live-bot-talking-face-glow-filter-high\)\s*;/,
+    );
+    assert.doesNotMatch(
+      sharedTalkingFacePartRule,
+      /(?:^|[;\s])filter:\s*none\s*;/,
+      "talking must not disable the eyes or mouth emission surface",
     );
 
     assert.match(

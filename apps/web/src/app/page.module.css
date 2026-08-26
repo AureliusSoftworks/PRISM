@@ -30891,9 +30891,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-live-bot-talking-face-glow-filter-low: var(
     --zen-live-bot-talking-face-glow-filter-high
   );
+  /* The bloom clone is the only outward-emission surface. Keep it explicitly
+     live throughout speech instead of relying on a wrapper filter, which can
+     be reset by presentation states without touching the white face core. */
+  --crt-glyph-emission-opacity: 1;
   --crt-face-glow-filter: var(--zen-live-bot-talking-face-glow-filter-high);
   opacity: 1;
-  filter: none;
 }
 
 .zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"])
@@ -31915,6 +31918,14 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
   .zenLiveBotPresenceFaceGlyph
   [data-coffee-plate-emoji-part] {
+  /* Talking Prism receives a clearly legible spectrum halo on the existing
+     alpha-matched bloom clone. Idle Prism keeps the quieter base values. */
+  --crt-prism-face-rim-strength-scale: calc(
+    var(--crt-prism-face-glow-strength-scale, 1) * 0.96
+  );
+  --crt-prism-face-halo-strength-scale: calc(
+    var(--crt-prism-face-glow-strength-scale, 1) * 0.86
+  );
   --crt-bloom-opacity: 0.16;
   --crt-bloom-radius: 2.05px;
   --crt-chromatic-offset: 0.9px;
@@ -31926,6 +31937,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --crt-bloom-wide-strength: 0.11;
   --crt-convergence-offset: 0.34px;
   --crt-convergence-opacity: 0.076;
+  --crt-glyph-emission-opacity: 1;
   --zen-live-bot-talking-face-glow-filter-high: drop-shadow(
       0 0 calc(0.08em * var(--crt-face-glow-radius-scale, 1))
         rgba(
@@ -32033,9 +32045,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
           255,
           calc(0.1 * var(--crt-prism-face-halo-strength-scale, 1))
         )
-    );
+  );
   --crt-face-glow-filter: var(--zen-live-bot-talking-face-glow-filter-high);
-  filter: none;
 }
 
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
@@ -76333,7 +76344,9 @@ a.settingsCreditItem:focus-visible {
     var(--crt-face-edge-color, currentColor);
   paint-order: stroke fill;
   color: var(--crt-face-edge-color, currentColor);
-  opacity: 1;
+  /* This is an emission-only pseudo-element: it may expand its filter
+     surface, but it never changes the source glyph's layout box. */
+  opacity: var(--crt-glyph-emission-opacity, 1);
   text-shadow:
     0 0 var(--crt-glyph-bloom-narrow-radius)
       color-mix(
