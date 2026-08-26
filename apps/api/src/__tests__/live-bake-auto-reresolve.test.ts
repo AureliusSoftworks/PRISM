@@ -36,13 +36,29 @@ describe("live bake Auto re-resolve", () => {
     assert.match(source, /await runWithUsageSession\(/u);
     assert.match(source, /mode: "signal"/u);
     assert.match(source, /surface: "signal"/u);
+    assert.match(
+      source,
+      /imageContext\?\.phase === "queued"[\s\S]{0,420}lastMessage\?\.speakerRole === "guest"/u,
+    );
+    assert.match(
+      source,
+      /internalImageCue \? \{ cue: internalImageCue \} : \{\}[\s\S]{0,180}internalImageCue \? \{ allowWatchBake: true \} : \{\}/u,
+    );
   });
 
   it("wires bake jobs and HTTP starters to per-step resolvers", () => {
     const jobs = readFileSync(join(root, "live-bake-jobs.ts"), "utf8");
     const server = readFileSync(join(root, "server.ts"), "utf8");
     assert.match(jobs, /resolveRuntime:\s*args\.resolveRuntime/u);
-    assert.match(jobs, /resolveGeneration:\s*args\.resolveGeneration/u);
+    assert.match(
+      jobs,
+      /resolveGeneration:\s*async \(\) => \(\{[\s\S]{0,220}await args\.resolveGeneration\(\)[\s\S]{0,260}signalEpisodeImage/u,
+    );
+    assert.match(
+      jobs,
+      /signalEpisodeImage\?: NonNullable<BotcastGenerationOptions\["signalEpisodeImage"\]>/u,
+    );
+    assert.match(jobs, /The active Watch image does not match this bake/u);
     assert.match(
       server,
       /liveBakeJobs\.startDebateBake\(\{[\s\S]*?resolveRuntime:\s*async \(\) =>/u,
@@ -50,6 +66,26 @@ describe("live bake Auto re-resolve", () => {
     assert.match(
       server,
       /liveBakeJobs\.startSignalBake\(\{[\s\S]*?resolveGeneration:\s*async \(\) =>/u,
+    );
+    assert.match(
+      server,
+      /normalizeSignalEpisodeImageForTurn\(body\.episodeImage\)/u,
+    );
+    assert.match(
+      server,
+      /queueBotcastEpisodeImageContext\([\s\S]{0,900}?allowWatchBake: true/u,
+    );
+    assert.match(
+      server,
+      /liveBakeJobs\.startSignalBake\(\{[\s\S]{0,520}?signalEpisodeImage: \{/u,
+    );
+    assert.match(
+      server,
+      /if \(existingImageContext\) \{[\s\S]{0,1800}A dismissed[\s\S]{0,2200}else if \(signalEpisodeImage\)/u,
+    );
+    assert.match(
+      server,
+      /body\.episodeImage === undefined \|\| signalBakeAlreadyRunning[\s\S]{0,500}!signalBakeAlreadyRunning &&/u,
     );
   });
 });

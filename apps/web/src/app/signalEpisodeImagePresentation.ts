@@ -1,4 +1,37 @@
-import type { BotcastEpisodeImagePlacement, BotcastImageContextV1 } from "@localai/shared";
+import type {
+  BotcastEpisodeImagePlacement,
+  BotcastImageContextV1,
+  BotcastProducerCue,
+} from "@localai/shared";
+
+export function signalPendingEpisodeImageCueIsAwaitingHostTurn(args: {
+  episodeId: string;
+  pendingCue: Pick<BotcastProducerCue, "kind" | "imageId"> | null;
+  pendingImage: { episodeId: string; imageId: string } | null;
+  imageContext: Pick<BotcastImageContextV1, "imageId"> | null;
+}): boolean {
+  return Boolean(
+    !args.imageContext &&
+      args.pendingCue?.kind === "present_image" &&
+      args.pendingCue.imageId &&
+      args.pendingImage?.episodeId === args.episodeId &&
+      args.pendingImage.imageId === args.pendingCue.imageId,
+  );
+}
+
+export function signalQueuedProducerCueIsServerOwned(args: {
+  requestedCue: BotcastProducerCue | undefined;
+  queuedCue: BotcastProducerCue | null;
+}): boolean {
+  return Boolean(
+    args.requestedCue &&
+      // Ordinary Producer cues have already been persisted before advance.
+      // An image cue cannot become server-owned until the same request carries
+      // its ephemeral bytes and creates the durable image context.
+      args.requestedCue.kind !== "present_image" &&
+      args.requestedCue === args.queuedCue,
+  );
+}
 
 export function signalEpisodeImageScale(
   placement: Readonly<BotcastEpisodeImagePlacement>,

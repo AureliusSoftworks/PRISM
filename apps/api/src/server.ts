@@ -22555,6 +22555,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/botcast/episodes/:id/bake", async (ctx) => {
       const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
       invalidateTurnPreparation(
         userId,
         "signal",
@@ -22562,11 +22563,141 @@ function buildRoutes(): RouteDefinition[] {
         "Watch bake replaced the prepared turn.",
       );
       const user = getUserRow(userId);
-      const frozenEpisode = getBotcastEpisode(db, userId, ctx.params.id);
+      let frozenEpisode = getBotcastEpisode(db, userId, ctx.params.id);
       if (frozenEpisode.playbackMode !== "watch") {
         throw new HttpError(
           409,
           "Full bake is only available for Watch a show episodes.",
+        );
+      }
+      if (frozenEpisode.guestKind === "producer") {
+        throw new HttpError(409, "Watch a show requires a bot guest.");
+      }
+      const signalBakeAlreadyRunning = liveBakeJobs.isSignalRunning(
+        userId,
+        ctx.params.id,
+      );
+      // Polls keep carrying the session-only source so a stopped job can be
+      // resumed, but an active job already owns the normalized pixels. Avoid
+      // decoding and resizing the same image on every progressive-bake poll.
+      const signalEpisodeImage =
+        body.episodeImage === undefined || signalBakeAlreadyRunning
+          ? null
+          : await normalizeSignalEpisodeImageForTurn(body.episodeImage);
+      const existingImageContext = botcastLatestImageContextV1(
+        frozenEpisode.events,
+      );
+      if (existingImageContext) {
+        if (!signalEpisodeImage) {
+          if (
+            !signalBakeAlreadyRunning &&
+            frozenEpisode.status === "live" &&
+            existingImageContext.phase !== "dismissed"
+          ) {
+            throw new HttpError(
+              409,
+              "The original ephemeral Signal image must remain attached until the discussion ends.",
+            );
+          }
+        } else if (
+          signalEpisodeImage.imageId !== existingImageContext.imageId ||
+          signalEpisodeImage.descriptor.kind !== existingImageContext.kind ||
+          signalEpisodeImage.descriptor.name !== existingImageContext.name ||
+          signalEpisodeImage.descriptor.mimeType !== existingImageContext.mimeType
+        ) {
+          throw new HttpError(
+            409,
+            "The active Watch image does not match this bake.",
+          );
+        }
+        if (signalEpisodeImage) {
+          // The context intentionally stores only replay-safe pixels, but those
+          // are enough to reject a reused image id whose normalized bytes differ
+          // when a stopped in-process job later resumes. While a job is active,
+          // its retained source bytes provide the stronger and cheaper check.
+          // A dismissed context remains the same consumed image; never register
+          // it twice.
+          const savedReplayProxy = db
+            .prepare(
+              `SELECT image_bytes
+                 FROM botcast_episode_image_proxies
+                WHERE episode_id = ? AND user_id = ? AND image_id = ?`,
+            )
+            .get(
+              frozenEpisode.id,
+              userId,
+              existingImageContext.imageId,
+            ) as { image_bytes: Uint8Array } | undefined;
+          let requestedReplayProxy: Awaited<
+            ReturnType<typeof encodeSignalReplayImageProxyFromRasterBytes>
+          >;
+          try {
+            requestedReplayProxy =
+              await encodeSignalReplayImageProxyFromRasterBytes(
+                signalEpisodeImage.rasterBytes,
+              );
+          } catch {
+            throw new HttpError(
+              400,
+              "Signal could not prepare the low-resolution replay image.",
+            );
+          }
+          if (
+            !savedReplayProxy ||
+            !Buffer.from(savedReplayProxy.image_bytes).equals(
+              requestedReplayProxy.bytes,
+            )
+          ) {
+            throw new HttpError(
+              409,
+              "The active Watch image does not match this bake.",
+            );
+          }
+        }
+      } else if (signalEpisodeImage) {
+        const imageRuntime = await contextualSignalRuntimeForEpisode({
+          userId,
+          user,
+          episode: frozenEpisode,
+          requiresImageInput: true,
+        });
+        const supportsImageInput = await providerModelSupportsImageInput(
+          imageRuntime.provider,
+          imageRuntime.model,
+          { secondaryOllamaHost: user.secondary_ollama_host },
+        );
+        if (!supportsImageInput) {
+          throw new HttpError(
+            409,
+            "The active Signal model does not support image input. Choose a vision-capable model for a new episode.",
+          );
+        }
+        let replayProxy: Awaited<
+          ReturnType<typeof encodeSignalReplayImageProxyFromRasterBytes>
+        >;
+        try {
+          replayProxy = await encodeSignalReplayImageProxyFromRasterBytes(
+            signalEpisodeImage.rasterBytes,
+          );
+        } catch {
+          throw new HttpError(
+            400,
+            "Signal could not prepare the low-resolution replay image.",
+          );
+        }
+        frozenEpisode = queueBotcastEpisodeImageContext(
+          db,
+          userId,
+          frozenEpisode.id,
+          {
+            imageId: signalEpisodeImage.imageId,
+            ...signalEpisodeImage.descriptor,
+            provider: imageRuntime.provider,
+            model: imageRuntime.model,
+            replayEmoji: signalEpisodeImage.replayEmoji,
+            allowWatchBake: true,
+            replayProxy: { id: randomId(12), ...replayProxy },
+          },
         );
       }
       try {
@@ -22576,6 +22707,20 @@ function buildRoutes(): RouteDefinition[] {
           episodeId: ctx.params.id,
           plannedSynthesisEngine:
             liveBakePlannedSynthesisEngineForUser(user),
+          ...(signalEpisodeImage
+            ? {
+                signalEpisodeImage: {
+                  imageId: signalEpisodeImage.imageId,
+                  input: signalEpisodeImage.input,
+                  ...(signalEpisodeImage.presentationReason
+                    ? {
+                        presentationReason:
+                          signalEpisodeImage.presentationReason,
+                      }
+                    : {}),
+                },
+              }
+            : {}),
           // Re-resolve each bake step so Auto can switch from latest context;
           // fixed model stays pinned via contextualSignalRuntimeForEpisode.
           resolveGeneration: async () => {

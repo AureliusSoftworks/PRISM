@@ -8599,6 +8599,8 @@ export function queueBotcastEpisodeImageContext(
     | "model"
     | "replayEmoji"
   > & {
+    /** Private Watch bake setup path; public producer calls remain live-only. */
+    allowWatchBake?: boolean;
     replayProxy?: {
       id: string;
       bytes: Buffer;
@@ -8611,7 +8613,10 @@ export function queueBotcastEpisodeImageContext(
   if (episode.status !== "live") {
     throw new Error("Signal image context is locked after the episode ends.");
   }
-  if (episode.playbackMode === "watch" || episode.guestKind !== "bot") {
+  if (
+    (episode.playbackMode === "watch" && input.allowWatchBake !== true) ||
+    episode.guestKind !== "bot"
+  ) {
     throw new Error(
       "Signal image context is available only while producing a live bot interview.",
     );
@@ -15286,6 +15291,8 @@ export async function advanceBotcastEpisode(
   generation: BotcastGenerationOptions,
   context: {
     producerCut?: boolean;
+    /** Private Watch bake seam; never reachable from public producer routes. */
+    allowWatchBake?: boolean;
     /** Speculative databases read pair history but commit it on live state. */
     deferPairHistoryMaintenance?: boolean;
   } = {},
@@ -15336,7 +15343,10 @@ export async function advanceBotcastEpisode(
   }
   if (episode.playbackMode === "watch") {
     if (
-      input.cue ||
+      (input.cue &&
+        !(context.allowWatchBake === true &&
+          input.cue.kind === "present_image" &&
+          input.cueDelivery === undefined)) ||
       input.cueDelivery ||
       input.hostRedirect ||
       input.guestInterruption ||
@@ -15702,7 +15712,7 @@ export async function advanceBotcastEpisode(
   }
   let now = new Date().toISOString();
   let tension = currentTension(episode);
-  if (requestedCue) {
+  if (requestedCue && context.allowWatchBake !== true) {
     tension = persistProducerCue(
       db,
       userId,

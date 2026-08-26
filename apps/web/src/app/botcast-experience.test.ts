@@ -100,6 +100,20 @@ describe("Signal experience shell", () => {
       /descriptor:\s*\{[\s\S]{0,100}kind: resolvedImageContext\.kind[\s\S]{0,100}mimeType: resolvedImageContext\.mimeType/u,
     );
     assert.match(source, /sendCue\(\{ kind: "present_image", imageId: upload\.imageId \}\)/u);
+    const cueOwnershipStart = source.indexOf("const queuedCueIsServerOwned");
+    const cueOwnershipEnd = source.indexOf(
+      "const requestForegroundAdvance",
+      cueOwnershipStart,
+    );
+    const cueOwnershipSource = source.slice(cueOwnershipStart, cueOwnershipEnd);
+    assert.match(
+      cueOwnershipSource,
+      /signalQueuedProducerCueIsServerOwned\(\{[\s\S]{0,120}requestedCue,[\s\S]{0,120}queuedCue: queuedProducerCueRef\.current/u,
+    );
+    assert.match(
+      source,
+      /requestedCue && !queuedCueIsServerOwned[\s\S]{0,100}\? \{ cue: requestedCue \}/u,
+    );
     assert.match(
       source,
       /signalEpisodeModelChoiceSupportsImageInput\([\s\S]{0,120}modelOptions,[\s\S]{0,80}episodeModelDraft/u,
@@ -110,6 +124,16 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /Auto → \$\{activeEpisodeImageCapability\.model\}/u);
     assert.match(source, /data-signal-setup-image="true"/u);
+    assert.match(source, /const setupImageModeEligible = !producerGuestSelected;/u);
+    assert.match(source, /\{setupImageModeEligible \? \(/u);
+    assert.match(
+      source,
+      /const watchBakeRequestBody = \{[\s\S]{0,900}episodeImage: \{[\s\S]{0,260}dataUrl: setupImageUpload\.dataUrl/u,
+    );
+    assert.match(
+      source,
+      /body: JSON\.stringify\(watchBakeRequestBody\)[\s\S]{0,2400}body: JSON\.stringify\(watchBakeRequestBody\)/u,
+    );
     assert.match(source, /Transparent PNG item · presented as the physical item/u);
     assert.match(source, /Opaque PNG photo · presented as a framed picture/u);
     assert.match(source, /JPG photo · presented as a framed picture/u);
@@ -124,6 +148,10 @@ describe("Signal experience shell", () => {
     assert.match(
       source,
       /if \(setupImageUpload\) \{[\s\S]{0,180}assignQueuedProducerCue\(\{[\s\S]{0,100}kind: "present_image"/u,
+    );
+    assert.match(
+      source,
+      /signalPendingEpisodeImageCueIsAwaitingHostTurn\(\{[\s\S]{0,240}pendingCue: queuedProducerCueRef\.current[\s\S]{0,160}pendingImage: signalEpisodeImageRef\.current/u,
     );
     assert.match(
       source,

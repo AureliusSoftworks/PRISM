@@ -38,6 +38,8 @@ type SignalJob = {
   episodeId: string;
   controller: AbortController;
   promise: Promise<void>;
+  /** Session-only normalized bytes retained across in-process poll retries. */
+  signalEpisodeImage?: NonNullable<BotcastGenerationOptions["signalEpisodeImage"]>;
 };
 
 type BakeJob = DebateJob | SignalJob;
@@ -166,6 +168,8 @@ export class LiveBakeJobManager {
     /** Invoked before each bake step so Auto can re-route mid-bake. */
     resolveGeneration: () => Promise<BotcastGenerationOptions>;
     plannedSynthesisEngine: LiveBakeVoiceEngineV1;
+    /** Never persisted: the image is attached privately to required turns. */
+    signalEpisodeImage?: NonNullable<BotcastGenerationOptions["signalEpisodeImage"]>;
   }): Promise<{
     episode: ReturnType<typeof getBotcastEpisode>;
     liveBake: LiveBakeArtifactV1;
@@ -187,6 +191,17 @@ export class LiveBakeJobManager {
     }
     const existing = this.jobs.get(key);
     if (existing?.surface === "signal") {
+      if (
+        existing.signalEpisodeImage &&
+        episode.status !== "completed" &&
+        args.signalEpisodeImage &&
+        (existing.signalEpisodeImage.imageId !== args.signalEpisodeImage.imageId ||
+          existing.signalEpisodeImage.input.data !== args.signalEpisodeImage.input.data ||
+          (existing.signalEpisodeImage.presentationReason ?? null) !==
+            (args.signalEpisodeImage.presentationReason ?? null))
+      ) {
+        throw new HttpError(409, "The active Watch image does not match this bake.");
+      }
       return {
         episode,
         liveBake: buildSignalLiveBakeArtifactFromEpisode(episode, {
@@ -211,7 +226,12 @@ export class LiveBakeJobManager {
       db: args.db,
       userId: args.userId,
       episodeId: args.episodeId,
-      resolveGeneration: args.resolveGeneration,
+      resolveGeneration: async () => ({
+        ...(await args.resolveGeneration()),
+        ...(args.signalEpisodeImage
+          ? { signalEpisodeImage: args.signalEpisodeImage }
+          : {}),
+      }),
       plannedSynthesisEngine: args.plannedSynthesisEngine,
       signal: controller.signal,
     })
@@ -228,6 +248,9 @@ export class LiveBakeJobManager {
       episodeId: args.episodeId,
       controller,
       promise,
+      ...(args.signalEpisodeImage
+        ? { signalEpisodeImage: args.signalEpisodeImage }
+        : {}),
     });
 
     await Promise.resolve();

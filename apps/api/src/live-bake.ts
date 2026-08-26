@@ -13,6 +13,7 @@ import {
   LIVE_BAKE_MAX_STEPS_DEBATE,
   LIVE_BAKE_MAX_STEPS_SIGNAL,
   debateSessionFloorIsSettled,
+  botcastLatestImageContextV1,
   type DebateSessionV1,
   type LiveBakeArtifactV1,
   type LiveBakeStatusV1,
@@ -614,6 +615,17 @@ export async function bakeBotcastWatchEpisode(args: {
         ...(await args.resolveGeneration()),
         signal: args.signal,
       };
+      const imageContext = botcastLatestImageContextV1(episode.events);
+      const lastMessage = episode.messages.at(-1);
+      // Watch never exposes a producer cue. A setup image waits until the
+      // normal host welcome and guest reply have aired, then enters only on
+      // that next eligible host turn.
+      const internalImageCue =
+        imageContext?.phase === "queued" &&
+        episode.messages.some((message) => message.speakerRole === "host") &&
+        lastMessage?.speakerRole === "guest"
+          ? { kind: "present_image" as const, imageId: imageContext.imageId }
+          : undefined;
       await runWithUsageSession(
         {
           db,
@@ -622,7 +634,15 @@ export async function bakeBotcastWatchEpisode(args: {
           mode: "signal",
           surface: "signal",
         },
-        () => advanceBotcastEpisode(db, userId, episodeId, {}, generation),
+        () =>
+          advanceBotcastEpisode(
+            db,
+            userId,
+            episodeId,
+            internalImageCue ? { cue: internalImageCue } : {},
+            generation,
+            internalImageCue ? { allowWatchBake: true } : {},
+          ),
       );
       episode = getBotcastEpisode(db, userId, episodeId);
       artifact = buildSignalLiveBakeArtifactFromEpisode(episode, {

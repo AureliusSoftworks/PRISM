@@ -31511,6 +31511,14 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --crt-face-screen-wash-near-opacity: 58%;
   --crt-face-screen-wash-mid-opacity: 36%;
   --crt-face-screen-wash-far-opacity: 22%;
+  --crt-glyph-filter-outset: max(
+    var(--crt-glyph-core-paint-bleed, 0.08em),
+    calc(21px * var(--crt-face-glow-radius-scale, 1)),
+    calc(
+      var(--crt-bloom-wide-radius, 6px) * 1.45 +
+        var(--crt-beam-softness, 0.45px)
+    )
+  );
   --zen-live-bot-idle-face-glow-filter-high: drop-shadow(
       0 0 calc(0.72px * var(--crt-face-glow-radius-scale, 1))
         var(--crt-face-edge-color)
@@ -31671,6 +31679,14 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     var(--bot-face-weight-glow-stroke, 0.006em) * 0.72
   );
   --bot-face-glow-strength-scale: var(--crt-prism-face-glow-strength-scale);
+  --crt-glyph-filter-outset: max(
+    var(--crt-glyph-core-paint-bleed, 0.08em),
+    calc(0.58em * var(--crt-face-glow-radius-scale, 1)),
+    calc(
+      var(--crt-bloom-wide-radius, 6px) * 1.45 +
+        var(--crt-beam-softness, 0.45px)
+    )
+  );
   --zen-live-bot-idle-face-glow-filter-high: drop-shadow(
       0 -0.012em calc(0.045em * var(--crt-face-glow-radius-scale, 1))
         color-mix(
@@ -76114,6 +76130,8 @@ a.settingsCreditItem:focus-visible {
 .coffeeSeatPlateEmoji [data-crt-glyph-layer="true"],
 .messageMoodCoffeeFace [data-crt-glyph-layer="true"],
 .zenLiveBotPresenceFaceGlyph [data-crt-glyph-layer="true"] {
+  /* Native live mouth visemes swap several times per frame. Keep their box
+     stable so the source, core, and bloom copies remain registered. */
   --crt-glyph-paint-bleed: var(--crt-glyph-core-paint-bleed, 0.08em);
   --crt-glyph-core-opacity: var(--crt-core-opacity, 0.82);
   --crt-face-glow-radius-scale: var(
@@ -76242,6 +76260,30 @@ a.settingsCreditItem:focus-visible {
           var(--zen-live-bot-crt-shared-flicker-contrast-scale, 1)
       )
     );
+}
+
+/* Raster-backed glyphs need a paint/filter surface as large as their active
+   emission stack. Pending masks get the same surface so rasterization measures
+   the final box once; negative margins keep this overscan out of face layout. */
+.coffeeSeatPlateEmoji
+  [data-crt-glyph-layer="true"][data-crt-pixel-mask-pending="true"],
+.coffeeSeatPlateEmoji
+  [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"],
+.messageMoodCoffeeFace
+  [data-crt-glyph-layer="true"][data-crt-pixel-mask-pending="true"],
+.messageMoodCoffeeFace
+  [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"],
+.zenLiveBotPresenceFaceGlyph
+  [data-crt-glyph-layer="true"][data-crt-pixel-mask-pending="true"],
+.zenLiveBotPresenceFaceGlyph
+  [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"] {
+  --crt-glyph-paint-bleed: max(
+    var(--crt-glyph-core-paint-bleed, 0.08em),
+    var(
+      --crt-glyph-filter-outset,
+      var(--crt-glyph-core-paint-bleed, 0.08em)
+    )
+  );
 }
 
 .coffeeSeatPlateEmoji:not([data-face-eye-character])

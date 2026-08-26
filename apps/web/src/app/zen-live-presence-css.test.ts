@@ -1041,6 +1041,21 @@ describe("Zen live presence CSS", () => {
       glyphEmissionRule,
       /margin-inline:\s*calc\(var\(--crt-glyph-paint-bleed\) \* -1\)\s*;/,
     );
+
+    const pendingRasterGlyphPaintSurfaceRule = ruleForExactSelector(
+      '.zenLiveBotPresenceFaceGlyph [data-crt-glyph-layer="true"][data-crt-pixel-mask-pending="true"]',
+    );
+    const readyRasterGlyphPaintSurfaceRule = ruleForExactSelector(
+      '.zenLiveBotPresenceFaceGlyph [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]',
+    );
+    assert.equal(
+      readyRasterGlyphPaintSurfaceRule,
+      pendingRasterGlyphPaintSurfaceRule,
+    );
+    assert.match(
+      pendingRasterGlyphPaintSurfaceRule,
+      /--crt-glyph-paint-bleed:\s*max\(\s*var\(--crt-glyph-core-paint-bleed,\s*0\.08em\),\s*var\(\s*--crt-glyph-filter-outset,\s*var\(--crt-glyph-core-paint-bleed,\s*0\.08em\)\s*\)\s*\)\s*;/,
+    );
     assert.match(
       glyphEmissionRule,
       /margin-block:\s*calc\(var\(--crt-glyph-paint-bleed\) \* -1\)\s*;/,
@@ -1140,6 +1155,10 @@ describe("Zen live presence CSS", () => {
       "--zen-live-bot-idle-face-glow-filter:",
     );
     assert.match(fullAvatarFaceEmissionPartRule, /filter:\s*none\s*;/);
+    assert.match(
+      fullAvatarFaceEmissionPartRule,
+      /--crt-glyph-filter-outset:\s*max\(\s*var\(--crt-glyph-core-paint-bleed,\s*0\.08em\),\s*calc\(21px \* var\(--crt-face-glow-radius-scale,\s*1\)\),\s*calc\(\s*var\(--crt-bloom-wide-radius,\s*6px\) \* 1\.45 \+ var\(--crt-beam-softness,\s*0\.45px\)\s*\)\s*\)\s*;/,
+    );
     assert.doesNotMatch(
       fullAvatarFaceEmissionPartRule,
       /filter:\s*var\(--zen-live-bot-idle-face-glow-filter\)/,

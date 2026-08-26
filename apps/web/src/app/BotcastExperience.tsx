@@ -365,6 +365,8 @@ import { signalStageSoundcheckMessages } from "./signalStageSoundcheck";
 import {
   signalEpisodeImageIsVisible,
   signalEpisodeImageScale,
+  signalPendingEpisodeImageCueIsAwaitingHostTurn,
+  signalQueuedProducerCueIsServerOwned,
 } from "./signalEpisodeImagePresentation";
 import { shouldSubmitComposerOnEnter } from "./composerKeyPolicy";
 import { applyComposerSendAutoCorrect } from "./composerSendAutoCorrect";
@@ -3076,6 +3078,21 @@ export function BotcastExperience({
   useEffect(() => {
     if (!episode) return;
     const activeCue = botcastActiveProducerCueFromEvents(episode.events);
+    if (
+      !activeCue &&
+      signalPendingEpisodeImageCueIsAwaitingHostTurn({
+        episodeId: episode.id,
+        pendingCue: queuedProducerCueRef.current,
+        pendingImage: signalEpisodeImageRef.current,
+        imageContext: botcastLatestImageContextV1(episode.events),
+      })
+    ) {
+      // A pre-show image is intentionally introduced on the next eligible
+      // host turn. The ordinary guest response between the welcome and that
+      // turn updates the episode without creating server cue state; do not let
+      // that update erase the client-owned image and its required host beat.
+      return;
+    }
     assignQueuedProducerCue(activeCue?.cue ?? null, activeCue?.status ?? null);
   }, [assignQueuedProducerCue, episode]);
 
@@ -6873,14 +6890,12 @@ export function BotcastExperience({
     }
     if (
       launchSetupEpisodeImage &&
-      (producerGuest ||
-        watchMode ||
-        !setupImageModelCapable)
+      (producerGuest || !setupImageModelCapable)
     ) {
       setError(
         signalErrorToast(
           "Start Signal episode",
-          "Choose Produce with Auto or a fixed model whose current pool supports image input.",
+          "Choose Auto or a fixed model whose current pool supports image input.",
           "setup image capability",
         ),
       );
@@ -7172,6 +7187,21 @@ export function BotcastExperience({
         setWatchBakeStartedAt(new Date().toISOString());
         let bakedEpisode = response.episode;
         let artifact: LiveBakeArtifactV1 | null = null;
+        const watchBakeRequestBody = {
+          theme,
+          ...(setupImageUpload
+            ? {
+                episodeImage: {
+                  imageId: setupImageUpload.imageId,
+                  fileName: setupImageUpload.fileName,
+                  dataUrl: setupImageUpload.dataUrl,
+                  name: setupImageUpload.descriptor.name,
+                  reason: setupImageUpload.reason,
+                  replayEmoji: setupImageUpload.replayEmoji,
+                },
+              }
+            : {}),
+        };
         const startBake = await request<{
           episode: BotcastEpisode;
           liveBake: LiveBakeArtifactV1;
@@ -7181,7 +7211,7 @@ export function BotcastExperience({
           {
             method: "POST",
             signal: controller.signal,
-            body: JSON.stringify({ theme }),
+            body: JSON.stringify(watchBakeRequestBody),
           },
         );
         if (!episodeOperationIsCurrent(controller, runId)) return;
@@ -7210,7 +7240,7 @@ export function BotcastExperience({
             {
               method: "POST",
               signal: controller.signal,
-              body: JSON.stringify({ theme }),
+              body: JSON.stringify(watchBakeRequestBody),
             },
           );
           bakedEpisode = polled.episode;
@@ -7291,7 +7321,7 @@ export function BotcastExperience({
                 {
                   method: "POST",
                   signal: controller.signal,
-                  body: JSON.stringify({ theme }),
+                  body: JSON.stringify(watchBakeRequestBody),
                 },
               );
               presentationEpisode = polled.episode;
@@ -7346,7 +7376,7 @@ export function BotcastExperience({
                 {
                   method: "POST",
                   signal: controller.signal,
-                  body: JSON.stringify({ theme }),
+                  body: JSON.stringify(watchBakeRequestBody),
                 },
               );
               if (!introBufferPollRunning) return;
@@ -7436,7 +7466,7 @@ export function BotcastExperience({
               {
                 method: "POST",
                 signal: controller.signal,
-                body: JSON.stringify({ theme }),
+                body: JSON.stringify(watchBakeRequestBody),
               },
             );
             presentationEpisode = polled.episode;
@@ -9179,8 +9209,10 @@ export function BotcastExperience({
           }
         }
         const queuedCueIsServerOwned =
-          requestedCue !== undefined &&
-          requestedCue === queuedProducerCueRef.current;
+          signalQueuedProducerCueIsServerOwned({
+            requestedCue,
+            queuedCue: queuedProducerCueRef.current,
+          });
         const requestForegroundAdvance = async (): Promise<BotcastEpisodeAdvanceResponse> => {
           await interruptionHandoffStarted;
           return request<BotcastEpisodeAdvanceResponse>(
@@ -14398,8 +14430,10 @@ export function BotcastExperience({
       : null;
     const episodeModelProvider =
       selectedEpisodeModelOption?.provider ?? preferredProvider;
-    const setupImageModeEligible =
-      !producerGuestSelected && playbackModeDraft === "live";
+    // A bot guest can discuss the same private, session-only image in either
+    // live Produce or spectator Watch. A Producer guest remains in the
+    // human-answer contract and cannot attach one.
+    const setupImageModeEligible = !producerGuestSelected;
     const setupImageModelCapable =
       signalEpisodeModelChoiceSupportsImageInput(
         modelOptions,
@@ -15020,10 +15054,11 @@ export function BotcastExperience({
               }
             </PrismRefractTarget>
           </div>
-          {playbackModeDraft === "live" ? (
+          {setupImageModeEligible ? (
             <div
               className={`${styles.setupField} ${styles.setupEpisodeImage}`}
               data-signal-setup-image="true"
+              data-tutorial-target="botcast-episode-image"
             >
               <div className={styles.setupEpisodeImageHeading}>
                 <div>

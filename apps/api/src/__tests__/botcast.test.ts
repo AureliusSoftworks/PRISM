@@ -1763,6 +1763,103 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("keeps a Watch setup image internal until the host turn after the opening exchange", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      [
+        "Welcome to the show. I am Mara Vale, and Ivo Stone is here to examine what objects keep hidden.",
+        "Objects keep the habits their makers tried to make invisible.",
+        "Ivo, look at this archive key. What does its wear reveal?",
+      ],
+      captures,
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const created = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "What objects keep hidden",
+        playbackMode: "watch",
+        preferredProvider: "local",
+        model: "llava",
+        responseMode: "local",
+      });
+      assert.throws(
+        () =>
+          queueBotcastEpisodeImageContext(db, "user-1", created.id, {
+            imageId: "public-watch-image",
+            kind: "item",
+            name: "public watch key",
+            mimeType: "image/png",
+            provider: "local",
+            model: "llava",
+            replayEmoji: "🗝️",
+          }),
+        /only while producing a live bot interview/u,
+      );
+      queueBotcastEpisodeImageContext(db, "user-1", created.id, {
+        imageId: "watch-image",
+        kind: "item",
+        name: "archive key",
+        mimeType: "image/png",
+        provider: "local",
+        model: "llava",
+        replayEmoji: "🗝️",
+        allowWatchBake: true,
+      });
+      const imageGeneration = {
+        ...generation(provider),
+        signalEpisodeImage: {
+          imageId: "watch-image",
+          input: { mimeType: "image/png" as const, data: "AA==" },
+        },
+      };
+
+      await assert.rejects(
+        advanceBotcastEpisode(
+          db,
+          "user-1",
+          created.id,
+          { cue: { kind: "present_image", imageId: "watch-image" } },
+          imageGeneration,
+        ),
+        /Watch a show episodes play without producer direction/u,
+      );
+
+      const opening = await advanceBotcastEpisode(
+        db, "user-1", created.id, {}, imageGeneration,
+      );
+      const guestReply = await advanceBotcastEpisode(
+        db, "user-1", created.id, {}, imageGeneration,
+      );
+      const introduction = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        { cue: { kind: "present_image", imageId: "watch-image" } },
+        imageGeneration,
+        { allowWatchBake: true },
+      );
+
+      assert.equal(opening.message?.speakerRole, "host");
+      assert.equal(guestReply.message?.speakerRole, "guest");
+      assert.equal(introduction.message?.speakerRole, "host");
+      assert.equal(
+        botcastLatestImageContextV1(introduction.episode.events)?.phase,
+        "presented",
+      );
+      assert.equal(
+        introduction.episode.events.some((event) => event.kind === "producer_cue"),
+        false,
+      );
+      assert.equal(captures[0]?.some((message) => message.images?.length), false);
+      assert.equal(captures[1]?.some((message) => message.images?.length), false);
+      assert.equal(captures[2]?.some((message) => message.images?.length), true);
+    } finally {
+      db.close();
+    }
+  });
+
   it("extends saved Signal image visibility for substantive turns and dismisses on a real topic shift", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
