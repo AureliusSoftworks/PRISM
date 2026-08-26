@@ -35,7 +35,7 @@ export function debateMysteryIdentityMirrorPresentationsV1(args: {
   session: Pick<DebateSessionV1, "powerPlan">;
   state: Pick<
     DebateWhodunnitFormatStateV2,
-    "config" | "suspects" | "dialogueHistory"
+    "config" | "suspects" | "topics" | "dialogueHistory"
   >;
   botNamesById: ReadonlyMap<string, string>;
 }): ReadonlyMap<string, DebateMysteryIdentityMirrorPresentationV1> {
@@ -59,13 +59,26 @@ export function debateMysteryIdentityMirrorPresentationsV1(args: {
     DebateMysteryIdentityMirrorPresentationV1
   >();
 
+  const legacyRecipientBotId = (entry: DebateMysteryPublicDialogueEntryV2): string | null => {
+    const topic = args.state.topics.find((candidate) => candidate.nodeId === entry.nodeId);
+    if (topic) return botIdBySeatId.get(topic.suspectSeatId) ?? null;
+    const addressedSuspect = args.state.suspects.find((suspect) =>
+      entry.nodeId.startsWith(`present-${suspect.seatId}-`),
+    );
+    if (addressedSuspect) return addressedSuspect.botId;
+    if (/^(?:talk|present|choice)-.*(?:response|reaction)/u.test(entry.nodeId)) {
+      return args.state.config.prosecutorBotId;
+    }
+    return null;
+  };
+
   for (const entry of args.state.dialogueHistory) {
     const speakerBotId = entry.speakerBotId;
     if (!speakerBotId || !participantBotIds.has(speakerBotId)) continue;
     const explicitRecipientBotId = entry.intendedRecipientBotId ?? (
       entry.intendedRecipientSeatId
         ? botIdBySeatId.get(entry.intendedRecipientSeatId) ?? null
-        : null
+        : legacyRecipientBotId(entry)
     );
     for (const holderBotId of holderBotIds) {
       if (holderBotId === speakerBotId) continue;

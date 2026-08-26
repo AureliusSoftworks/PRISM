@@ -133,6 +133,14 @@ describe("Whodunnit V2 prosecution experience", () => {
     assert.doesNotMatch(experienceSource, /playMysteryVoice|playMysteryPlayerVoice|elevenlabs\.io/iu);
   });
 
+  it("replays Identity Crisis from the frozen Power plan and public dialogue only", () => {
+    assert.match(experienceSource, /debateMysteryIdentityMirrorPresentationsV1/u);
+    assert.match(experienceSource, /mysteryIdentityMirrorAppearance/u);
+    assert.match(experienceSource, /IdentityPresentationBlackout/u);
+    assert.match(experienceSource, /botIdentityPresentationTransitionActiveV1/u);
+    assert.match(experienceSource, /BOT_IDENTITY_PRESENTATION_TRANSITION_MS/u);
+  });
+
   it("stages each Talk topic as a streamed player-Prosecutor question followed by the centered suspect", () => {
     assert.match(experienceSource, /nextState\.dialogueHistory\.slice\(previousDialogueCount\)/u);
     assert.match(experienceSource, /setDialoguePlaybackQueue\(exchange\)/u);

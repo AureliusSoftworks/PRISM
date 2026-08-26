@@ -1419,6 +1419,133 @@ export interface BotcastProducerCue {
   imageId?: string;
 }
 
+/** Durable, event-backed producer-cue feedback for a live Signal episode. */
+export type BotcastProducerCueLifecycleStatus =
+  | "queued"
+  | "dispatching"
+  | "requeued"
+  | "delivered"
+  | "failed"
+  | "cleared"
+  | "superseded";
+
+export interface BotcastProducerCueLifecycle {
+  cueId: string;
+  cue: BotcastProducerCue;
+  delivery: BotcastProducerCueDelivery;
+  status: BotcastProducerCueLifecycleStatus;
+  eventId: string;
+  sequence: number;
+  failure?:
+    | "privacy_validation"
+    | "delivery_unfulfilled"
+    | "delivery_unavailable";
+}
+
+function botcastProducerCueFromLifecyclePayload(
+  payload: Record<string, unknown>,
+): BotcastProducerCue | null {
+  const kind = payload.kind;
+  if (
+    kind !== "ask_about" &&
+    kind !== "present_image" &&
+    kind !== "refocus" &&
+    kind !== "press_harder" &&
+    kind !== "move_on" &&
+    kind !== "lighten_up" &&
+    kind !== "wrap_up"
+  ) {
+    return null;
+  }
+  return {
+    kind,
+    ...(typeof payload.detail === "string" && payload.detail.trim()
+      ? { detail: payload.detail.trim() }
+      : {}),
+    ...(typeof payload.directQuote === "string" && payload.directQuote.trim()
+      ? { directQuote: payload.directQuote.trim() }
+      : {}),
+    ...(kind === "present_image" &&
+    typeof payload.imageId === "string" &&
+    payload.imageId.trim()
+      ? { imageId: payload.imageId.trim() }
+      : {}),
+  };
+}
+
+/**
+ * Rebuilds cue state from immutable episode events. Queue entries retain the
+ * private direction for the Producer surface; lifecycle transitions retain
+ * only ids and safe outcome labels.
+ */
+export function botcastProducerCueLifecyclesFromEvents(
+  events: readonly Pick<BotcastReplayEvent, "id" | "sequence" | "kind" | "payload">[],
+): BotcastProducerCueLifecycle[] {
+  const lifecycles = new Map<string, BotcastProducerCueLifecycle>();
+  for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
+    if (event.kind !== "producer_cue") continue;
+    const cueId = typeof event.payload.cueId === "string"
+      ? event.payload.cueId.trim()
+      : "";
+    const status = event.payload.lifecycle;
+    if (!cueId || typeof status !== "string") continue;
+    if (status === "queued") {
+      const cue = botcastProducerCueFromLifecyclePayload(event.payload);
+      const delivery = event.payload.delivery;
+      if (
+        !cue ||
+        (delivery !== "next_host_turn" &&
+          delivery !== "interrupt_guest" &&
+          delivery !== "redirect_host")
+      ) continue;
+      lifecycles.set(cueId, {
+        cueId,
+        cue,
+        delivery,
+        status,
+        eventId: event.id,
+        sequence: event.sequence,
+      });
+      continue;
+    }
+    if (
+      status !== "dispatching" &&
+      status !== "requeued" &&
+      status !== "delivered" &&
+      status !== "failed" &&
+      status !== "cleared" &&
+      status !== "superseded"
+    ) continue;
+    const current = lifecycles.get(cueId);
+    if (!current) continue;
+    lifecycles.set(cueId, {
+      ...current,
+      status,
+      eventId: event.id,
+      sequence: event.sequence,
+      ...(status === "failed" &&
+      (event.payload.failure === "privacy_validation" ||
+        event.payload.failure === "delivery_unfulfilled" ||
+        event.payload.failure === "delivery_unavailable")
+        ? { failure: event.payload.failure }
+        : {}),
+    });
+  }
+  return [...lifecycles.values()].sort((left, right) => left.sequence - right.sequence);
+}
+
+export function botcastActiveProducerCueFromEvents(
+  events: readonly Pick<BotcastReplayEvent, "id" | "sequence" | "kind" | "payload">[],
+): BotcastProducerCueLifecycle | null {
+  const active = botcastProducerCueLifecyclesFromEvents(events).filter(
+    (lifecycle) =>
+      lifecycle.status === "queued" ||
+      lifecycle.status === "dispatching" ||
+      lifecycle.status === "requeued",
+  );
+  return active.at(-1) ?? null;
+}
+
 /**
  * The legacy-named private wording field stays intentionally short so it
  * communicates one transformable intent instead of becoming a hidden script.

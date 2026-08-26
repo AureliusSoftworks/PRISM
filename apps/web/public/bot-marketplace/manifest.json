@@ -1,7 +1,7 @@
 {
   "schema": "prism-bot-marketplace-v1",
   "version": 25,
-  "updatedAt": "2026-08-26T05:20:54.181Z",
+  "updatedAt": "2026-08-16T06:30:00.000Z",
   "themes": [
     {
       "id": "originals",
@@ -1403,8 +1403,8 @@
     {
       "id": "identity-crisis-ian",
       "name": "Confusion Collin",
-      "subtitle": "The last bot who spoke to him—obviously",
-      "description": "A brittle identity thief who steals the latest bot addresser's name, face, and persona inside his own vivid shell—while his unmistakable voice never changes.",
+      "subtitle": "A four-part visual identity glitch",
+      "description": "A brittle visual mirror who borrows the latest bot addresser's eyes, speaking mouth, Ink, and glyph while remaining unmistakably himself in every other way.",
       "botHash": "07c0020559027ab50546b8a9e175b27d",
       "bundlePath": "/bot-marketplace/bots/bot-identity-crisis-ian.bot",
       "memoryCount": 0,
@@ -1415,9 +1415,9 @@
         "power",
         "showcase",
         "identity",
-        "impostor",
+        "eyes",
+        "mouth",
         "face",
-        "voice",
         "ink",
         "glyph"
       ],

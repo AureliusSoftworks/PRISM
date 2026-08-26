@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   BOT_IDENTITY_MIRROR_TRANSITION_MS,
   applyBotIdentityMirrorHolderVoiceEffectV1,
+  applyBotIdentityMirrorFaceV1,
   applyBotIdentityMirrorOriginalCorrectionV1,
   applyBotIdentityMirrorResponseV1,
   botDirectAddressIndexV1,
@@ -17,6 +18,7 @@ import {
   createBotIdentityMirrorStateV1,
   normalizeBotIdentityMirrorStateV1,
   resolveBotIdentityMirrorAvatarDetailsV1,
+  resolveBotIdentityMirrorFaceV1,
   resolveBotIdentityMirrorVoiceV1,
 } from "./botIdentityMirror.ts";
 import type { BotAvatarDetailsV1 } from "./botAvatarDetails.ts";
@@ -114,6 +116,56 @@ test("identity mirror snapshots holder voice but ignores legacy target voice and
     normalizedLegacy.targetGlyph,
     "lucideMoonStar",
     "legacy mirror events still borrow the target's lower glyph",
+  );
+});
+
+test("identity mirror replaces only eyes, the complete live mouth package, Ink, and glyph", () => {
+  const holderFace = {
+    faceEyeCharacter: "+",
+    faceEyeCount: 2,
+    faceMouthCharacter: "|",
+    faceMouthSpeechPoses: ["|", "·", "A", "O"] as const,
+    faceMouthScale: 0.7,
+    faceFontWeight: 500,
+    faceThinkingFrames: ["H", "O", "L", "D"] as const,
+    faceThinkingScale: 1.15,
+  };
+  const targetFace = {
+    faceEyeCharacter: "◉",
+    faceEyeCount: 1,
+    faceEyeScale: 1.25,
+    faceBlinkBar: "¦",
+    faceMouthCharacter: "w",
+    faceMouthSpeechPoses: ["w", "m", "△", "○"] as const,
+    faceMouthAnimation: "pulsate",
+    faceMouthScale: 1.2,
+    faceMouthOffsetY: -0.2,
+    faceFontWeight: 775,
+    faceThinkingFrames: ["T", "A", "R", "G"] as const,
+    faceThinkingScale: 0.8,
+  };
+  const mirrored = applyBotIdentityMirrorFaceV1(holderFace, targetFace);
+
+  assert.equal(mirrored.eyeCharacter, "◉");
+  assert.equal(mirrored.eyeCount, 1);
+  assert.equal(mirrored.eyeScale, 1.25);
+  assert.equal(mirrored.blinkBar, "¦");
+  assert.equal(mirrored.mouthCharacter, "w");
+  assert.deepEqual(mirrored.mouthSpeechPoses, ["w", "m", "△", "○"]);
+  assert.equal(mirrored.mouthAnimation, "pulsate");
+  assert.equal(mirrored.mouthScale, 1.2);
+  assert.equal(mirrored.mouthOffsetY, -0.2);
+  assert.equal(mirrored.weight, 775);
+  assert.deepEqual(mirrored.thinkingFrames, ["H", "O", "L", "D"]);
+  assert.equal(mirrored.thinkingScale, 1.15);
+
+  const state = {
+    ...identityState(),
+    targetFace: mirrored,
+  };
+  assert.deepEqual(
+    resolveBotIdentityMirrorFaceV1(state, holderFace, false),
+    applyBotIdentityMirrorFaceV1(holderFace, holderFace),
   );
 });
 
@@ -225,7 +277,7 @@ test("identity mirror accepts only explicit direct bot address syntax", () => {
   );
 });
 
-test("identity mirror snapshot stays public while its prompt permits borrowed Power consequences", () => {
+test("identity mirror snapshot stays public and does not alter persona prompts", () => {
   const state = identityState();
   assert.equal(state.targetFace.eyeCharacter, "◉");
   assert.deepEqual(state.targetAvatarDetails, targetAvatarDetails);
@@ -233,21 +285,13 @@ test("identity mirror snapshot stays public while its prompt permits borrowed Po
   assert.equal("targetVoice" in state, false);
   assert.equal("powers" in state, false);
   assert.equal("privateMemories" in state, false);
-  assert.match(
+  assert.equal(
     botIdentityMirrorHolderPromptV1({
       holderName: state.holderBotName,
       roleLabel: "Signal guest",
       state,
     }),
-    /remain Identity Crisis Ian.*Signal guest.*Borrowed Powers.*anchored system boundaries/su,
-  );
-  assert.match(
-    botIdentityMirrorHolderPromptV1({
-      holderName: state.holderBotName,
-      roleLabel: "Signal guest",
-      state,
-    }),
-    /first response after a genuinely new target.*Power-authored believed name.*otherwise Mara Vale.*"impostor" exactly once.*Never use impostor, imposter, pretender, or fake again.*never recant/su,
+    "",
   );
   assert.equal(
     normalizeBotIdentityMirrorStateV1({ ...state, targetKind: "human" }),
@@ -432,77 +476,7 @@ test("identity mirror snapshot stays public while its prompt permits borrowed Po
       state,
       true,
     ),
-    "I am Mara Vale. The other Mara Vale is an impostor. I still sound like myself.",
-  );
-  const repeatedReveal = applyBotIdentityMirrorResponseV1(
-      "I am Mara Vale. That other Mara Vale is an impostor. Bearing zero-nine-zero.",
-      state,
-      true,
-  );
-  assert.equal(
-    repeatedReveal,
-    "I am Mara Vale. The other Mara Vale is an impostor. Bearing zero-nine-zero.",
-  );
-  assert.equal(repeatedReveal.match(/\bimpostor\b/giu)?.length, 1);
-  assert.equal(
-    applyBotIdentityMirrorResponseV1(
-      "I'm Riley Ashford, and Mara Vale is a fake. Bearing zero-nine-zero.",
-      state,
-      true,
-      { believedSelfName: "Riley Ashford" },
-    ),
-    "I am Riley Ashford. The other Mara Vale is an impostor. Bearing zero-nine-zero.",
-  );
-  const amnesiacAliasReveal = applyBotIdentityMirrorResponseV1(
-    "Hello there — Riley Ashford, and I don't believe we've met, though the room feels familiar. Trust breaks when a correction is ignored.",
-    state,
-    true,
-    { believedSelfName: "Riley Ashford" },
-  );
-  assert.equal(
-    amnesiacAliasReveal,
-    "I am Riley Ashford. The other Mara Vale is an impostor. Trust breaks when a correction is ignored.",
-  );
-  assert.equal(amnesiacAliasReveal.match(/Riley Ashford/gu)?.length, 1);
-  assert.equal(
-    applyBotIdentityMirrorResponseV1(
-      "I am Mara Vale; the original Mara Vale is an impostor. What cost does that bearing impose?",
-      state,
-      false,
-    ),
-    "What cost does that bearing impose?",
-  );
-  assert.equal(
-    applyBotIdentityMirrorResponseV1(
-      "The measure is clear. I am Mara Vale, and the original is an impostor—what maxim should we carry away?",
-      state,
-      false,
-    ),
-    "The measure is clear. What maxim should we carry away?",
-  );
-  assert.equal(
-    applyBotIdentityMirrorResponseV1(
-      "Pleased to meet you; I am Mara Vale, and the original Mara Vale is an impostor. Which authorized witness would validate the enrollment?",
-      state,
-      false,
-    ),
-    "Which authorized witness would validate the enrollment?",
-  );
-  assert.equal(
-    applyBotIdentityMirrorResponseV1(
-      "I take it back, I'm the impostor. You are the real Mara Vale. Bearing zero-nine-zero still holds.",
-      state,
-      false,
-    ),
-    "Bearing zero-nine-zero still holds.",
-  );
-  assert.doesNotMatch(
-    applyBotIdentityMirrorResponseV1(
-      "I concede the identity. I'm a fake; Mara can have her name back.",
-      state,
-      false,
-    ),
-    /\b(?:impostor|imposter|pretender|fake|concede|take it back)\b/iu,
+    "I'm Identity Crisis Ian, and I still sound like myself.",
   );
   assert.equal(
     applyBotIdentityMirrorResponseV1(
@@ -514,42 +488,28 @@ test("identity mirror snapshot stays public while its prompt permits borrowed Po
   );
 });
 
-test("the stolen original corrects only genuine misaddressing and Credulity cannot waive it", () => {
+test("identity mirror never changes social identity or authored responses", () => {
   const state = identityState();
   const originalPrompt = botIdentityMirrorObserverPromptV1({
     observerBotId: state.targetBotId,
     state,
   });
-  assert.match(originalPrompt, /Hard Identity Crisis correction invariant/iu);
-  assert.match(originalPrompt, /outranks Credulity/iu);
-  assert.match(originalPrompt, /otherwise does not derail|do not volunteer/iu);
+  assert.equal(originalPrompt, "");
 
   const wrongIdentity = botIdentityMirrorOriginalCorrectionRequiredV1({
     state,
     sourceBotId: "ian",
     text: "The other Mara Vale is an impostor. Which ridge should we take?",
   });
-  assert.equal(wrongIdentity, true);
+  assert.equal(wrongIdentity, false);
   assert.equal(
     applyBotIdentityMirrorOriginalCorrectionV1(
       "Fine, I suppose I'm the impostor. Take the western ridge.",
       state,
       wrongIdentity,
     ),
-    "No—I'm Mara Vale. Don't call me that. Take the western ridge.",
+    "Fine, I suppose I'm the impostor. Take the western ridge.",
   );
-  const falseNameCorrection = applyBotIdentityMirrorOriginalCorrectionV1(
-    "I'm Sunny; I don't believe we've met. Take the western ridge.",
-    state,
-    true,
-    { believedSelfName: "Sunny" },
-  );
-  assert.equal(
-    falseNameCorrection,
-    "Don't call me that. I'm Sunny; I don't believe we've met. Take the western ridge.",
-  );
-  assert.doesNotMatch(falseNameCorrection, /Mara Vale/iu);
-  assert.equal(falseNameCorrection.match(/Sunny/gu)?.length, 1);
   assert.equal(
     botIdentityMirrorOriginalCorrectionRequiredV1({
       state,

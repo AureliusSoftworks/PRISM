@@ -127,7 +127,7 @@ test("Debate presentation preserves mirror precedence and a stable shapeshift ke
   assert.equal(mirrored?.sourceEventId, "mirror");
 });
 
-test("Debate mirror borrows target identity while retaining holder materials", () => {
+test("Debate mirror borrows only target eyes, complete mouth, Ink, and glyph", () => {
   const holder = botSnapshot("holder", {
     color: "#ff0066",
     voiceProfile: normalizeBotAudioVoiceProfileV1({
@@ -145,7 +145,14 @@ test("Debate mirror borrows target identity while retaining holder materials", (
     }),
     replayVisualSnapshot: {
       ...botSnapshot("holder").replayVisualSnapshot!,
+      faceStyle: resolveBotFaceStyle({
+        faceEyeCharacter: "+",
+        faceMouthCharacter: "|",
+        faceMouthSpeechPoses: ["|", "·", "A", "O"],
+        faceThinkingFrames: ["H", "O", "L", "D"],
+      }),
       voicePreset: "formal",
+      screenMaterialSeed: "holder-screen",
       frameMaterialSeed: "holder-frame",
     },
   });
@@ -179,6 +186,14 @@ test("Debate mirror borrows target identity while retaining holder materials", (
     }),
     replayVisualSnapshot: {
       ...botSnapshot("target").replayVisualSnapshot!,
+      faceStyle: resolveBotFaceStyle({
+        faceEyeCharacter: "◉",
+        faceBlinkBar: "¦",
+        faceMouthCharacter: "w",
+        faceMouthSpeechPoses: ["w", "m", "△", "○"],
+        faceMouthAnimation: "pulsate",
+        faceThinkingFrames: ["T", "A", "R", "G"],
+      }),
       avatarDetails: targetInk,
       voicePreset: "reflective",
       frameMaterialSeed: "target-frame",
@@ -210,13 +225,30 @@ test("Debate mirror borrows target identity while retaining holder materials", (
     mirrored.replayVisualSnapshot?.frameMaterialSeed,
     "holder-frame",
   );
-  assert.equal(mirrored.name, target.name);
-  assert.equal(mirrored.systemPrompt, target.systemPrompt);
+  assert.equal(mirrored.replayVisualSnapshot?.screenMaterialSeed, "holder-screen");
+  assert.equal(mirrored.name, holder.name);
+  assert.equal(mirrored.systemPrompt, holder.systemPrompt);
   assert.equal(mirrored.glyph, target.glyph);
   assert.deepEqual(mirrored.avatarDetails, targetInk);
   assert.equal(
     mirrored.replayVisualSnapshot?.faceStyle.eyeCharacter,
-    "t",
+    "◉",
+  );
+  assert.equal(mirrored.replayVisualSnapshot?.faceStyle.blinkBar, "¦");
+  assert.equal(mirrored.replayVisualSnapshot?.faceStyle.mouthCharacter, "w");
+  assert.deepEqual(
+    mirrored.replayVisualSnapshot?.faceStyle.mouthSpeechPoses,
+    ["w", "m", "△", "○"],
+    "live visemes must use the target mouth package, not the holder's bar mouth",
+  );
+  assert.equal(
+    mirrored.replayVisualSnapshot?.faceStyle.mouthAnimation,
+    "pulsate",
+  );
+  assert.deepEqual(
+    mirrored.replayVisualSnapshot?.faceStyle.thinkingFrames,
+    ["H", "O", "L", "D"],
+    "thinking glyphs are not part of Identity Crisis",
   );
   assert.deepEqual(mirrored.replayVisualSnapshot?.avatarDetails, targetInk);
   if (
@@ -237,7 +269,7 @@ test("Debate mirror borrows target identity while retaining holder materials", (
   } else {
     assert.fail("Identity mirror should retain the holder's portable voice profile.");
   }
-  assert.equal(mirrored.powers[0]?.id, "target-power");
+  assert.deepEqual(mirrored.powers, holder.powers);
 
   // Shapeshifter takes the target's face, chassis, and voice, but the holder's
   // authored identity anchors — name, color, glyph — always persist so the

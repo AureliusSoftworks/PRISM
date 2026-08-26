@@ -6122,39 +6122,12 @@ export function buildBotPowersSelfPromptV1(value: unknown): string {
   return buildBotPowersPromptBlock(botPowerSelfCueLinesV1(value));
 }
 
-/**
- * First-order Power composition for identity mirroring.
- *
- * The holder keeps its own mechanical identity, while the target's active
- * Powers are evaluated as borrowed holder Powers. Perception permissions and
- * identity mirroring itself stay anchored to the original owner so copying a
- * copier cannot recurse or expose private audience state.
- */
+/** Identity Crisis is visual-only; the holder always keeps its own Powers. */
 export function composeBotIdentityMirrorPowersV1(
   holderValue: unknown,
-  targetValue: unknown,
+  _targetValue: unknown,
 ): BotPowerV1[] {
-  const holder = activeBotPowersV1(holderValue);
-  const borrowed = activeBotPowersV1(targetValue).flatMap((power) => {
-    const compiled = power.compiled;
-    if (!compiled) return [];
-    const effects = compiled.effects.filter(
-      (effect) =>
-        effect.type !== "identity_mirror" &&
-        effect.type !== "awareness" &&
-        effect.type !== "speech_audience",
-    );
-    if (effects.length === 0) return [];
-    return [{
-      ...power,
-      id: `identity-mirror:${power.id}`.slice(0, 128),
-      compiled: {
-        ...compiled,
-        effects,
-      },
-    }];
-  });
-  return [...holder, ...borrowed];
+  return activeBotPowersV1(holderValue);
 }
 
 export function botPowerCupRateMultiplierForBotV1(value: unknown): number {

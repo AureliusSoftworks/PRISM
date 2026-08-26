@@ -10,6 +10,9 @@ import {
   type ReactNode,
 } from "react";
 import {
+  BOT_IDENTITY_PRESENTATION_TRANSITION_MS,
+  DEBATE_SCHEMA_VERSION,
+  botIdentityPresentationTransitionActiveV1,
   debateMysteryMansionBundleEligibleV2,
   splitDebateMysteryStageActionTextV2,
   type DebateMysteryActionRequestV2,
@@ -20,10 +23,14 @@ import {
   type DebateMysteryRecordReferenceV2,
   type DebateMysteryRoomV2,
   type DebateMysteryTheoryV1,
+  type DebateBotSnapshotV1,
   type DebateSessionV1,
   type DebateWhodunnitFormatStateV2,
 } from "@localai/shared";
 import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
+import IdentityPresentationBlackout from "./IdentityPresentationBlackout";
+import { debateIdentityAppearanceBotV1 } from "./debateIdentityPresentation";
+import { debateMysteryIdentityMirrorPresentationsV1 } from "./debateMysteryIdentityMirror";
 import {
   WHODUNNIT_INVESTIGATION_MUSIC_FADE_MS,
   WHODUNNIT_INVESTIGATION_MUSIC_TRANSITION_MS,
@@ -269,6 +276,48 @@ function botForDialogue(
     if (exact) return exact;
   }
   return botForSeat(props, state, entry?.speakerSeatId);
+}
+
+function mysteryBotSnapshot(bot: MysteryBotSummary): DebateBotSnapshotV1 {
+  return {
+    version: DEBATE_SCHEMA_VERSION,
+    id: bot.id,
+    name: bot.name,
+    systemPrompt: bot.systemPrompt ?? `You are ${bot.name}.`,
+    role: "advocate",
+    sideId: null,
+    color: bot.color,
+    glyph: bot.glyph,
+    avatarDetails: bot.avatarDetails ?? null,
+    voiceProfile: bot.voiceProfile ?? null,
+    replayVisualSnapshot: bot.replayVisualSnapshot ?? null,
+    powers: bot.powers ?? [],
+    provider: "local",
+    model: "frozen-whodunnit",
+    revision: "frozen-whodunnit",
+  };
+}
+
+function mysteryIdentityMirrorAppearance(
+  holder: MysteryBotSummary | null,
+  target: MysteryBotSummary | null,
+): MysteryBotSummary | null {
+  if (!holder || !target) return holder;
+  const appearance = debateIdentityAppearanceBotV1({
+    holder: mysteryBotSnapshot(holder),
+    target: mysteryBotSnapshot(target),
+    effect: "identity_mirror",
+  });
+  return {
+    ...holder,
+    name: appearance.name,
+    glyph: appearance.glyph,
+    avatarDetails: appearance.avatarDetails,
+    voiceProfile: appearance.voiceProfile,
+    replayVisualSnapshot: appearance.replayVisualSnapshot,
+    powers: appearance.powers,
+    systemPrompt: appearance.systemPrompt,
+  };
 }
 
 function recordKey(reference: DebateMysteryRecordReferenceV2): string {
@@ -756,6 +805,58 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const mutationIndexRef = useRef(0);
   const lastPlayedPerformanceKeyRef = useRef<string | null>(null);
   const lastCalloutIdRef = useRef<string | null>(null);
+  const botById = useMemo(() => new Map(props.bots.map((bot) => [bot.id, bot])), [props.bots]);
+  const botNamesById = useMemo(() => new Map([
+    ...props.bots.map((bot) => [bot.id, bot.name] as const),
+    ...state.suspects.map((suspect) => [suspect.botId, suspect.name] as const),
+  ]), [props.bots, state.suspects]);
+  const identityMirrors = useMemo(
+    () => debateMysteryIdentityMirrorPresentationsV1({
+      session: props.session,
+      state,
+      botNamesById,
+    }),
+    [botNamesById, props.session, state],
+  );
+  const activeIdentityPresentation = useMemo(
+    () => [...identityMirrors.values()].reduce<ReturnType<typeof identityMirrors.get> | null>(
+      (latest, presentation) => !latest || presentation.occurredAt > latest.occurredAt
+        ? presentation
+        : latest,
+      null,
+    ),
+    [identityMirrors],
+  );
+  const [identityPresentationNowMs, setIdentityPresentationNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const now = Date.now();
+    setIdentityPresentationNowMs(now);
+    const occurredAtMs = activeIdentityPresentation
+      ? Date.parse(activeIdentityPresentation.occurredAt)
+      : Number.NaN;
+    if (!Number.isFinite(occurredAtMs)) return;
+    const remainingMs = Math.max(0, occurredAtMs + BOT_IDENTITY_PRESENTATION_TRANSITION_MS - now);
+    if (!remainingMs) return;
+    const timer = window.setTimeout(() => setIdentityPresentationNowMs(Date.now()), remainingMs);
+    return () => window.clearTimeout(timer);
+  }, [activeIdentityPresentation]);
+  const presentMysteryBot = useCallback((bot: MysteryBotSummary | null): MysteryBotSummary | null => {
+    if (!bot) return null;
+    const mirror = identityMirrors.get(bot.id);
+    return mirror
+      ? mysteryIdentityMirrorAppearance(bot, botById.get(mirror.targetBotId) ?? null)
+      : bot;
+  }, [botById, identityMirrors]);
+  const identityPresentationBlackout = (
+    <IdentityPresentationBlackout
+      active={botIdentityPresentationTransitionActiveV1(
+        activeIdentityPresentation,
+        identityPresentationNowMs,
+      )}
+      occurredAt={activeIdentityPresentation?.occurredAt}
+      nowMs={identityPresentationNowMs}
+    />
+  );
   const currentRoom = state.rooms.find((room) => room.id === state.currentRoomId) ?? null;
   const mansionFloors = useMemo(
     () => [...new Set(state.rooms.map((room) => room.floor))].sort((left, right) => right - left),
@@ -764,7 +865,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const [mansionFloor, setMansionFloor] = useState(() => currentRoom?.floor ?? mansionFloors.at(-1) ?? 1);
   const [selectedMansionRoomId, setSelectedMansionRoomId] = useState(() => currentRoom?.id ?? state.rooms[0]?.id ?? "");
   const currentSuspect = state.suspects.find((suspect) => suspect.roomId === currentRoom?.id) ?? null;
-  const currentBot = botForSeat(props, state, currentSuspect?.seatId);
+  const currentBot = presentMysteryBot(botForSeat(props, state, currentSuspect?.seatId));
   const roomIntroductionPhase = currentRoom
     ? state.roomIntroductions[currentRoom.id] ?? "complete"
     : "complete";
@@ -779,14 +880,14 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const lastDialogue = state.dialogueHistory.at(-1) ?? null;
   const queuedDialogue = dialoguePlaybackQueue[dialoguePlaybackIndex] ?? null;
   const displayedDialogue = queuedDialogue ?? heldDialogue ?? lastDialogue;
-  const dialogueBot = botForDialogue(props, state, displayedDialogue);
+  const dialogueBot = presentMysteryBot(botForDialogue(props, state, displayedDialogue));
   const roomDisplayedDialogue = roomIntroductionDialogue ?? queuedDialogue ?? heldDialogue ?? (
     roomDialogueBaseline.contextKey === roomContextKey &&
     state.dialogueHistory.length > roomDialogueBaseline.historyCount
       ? lastDialogue
       : null
   );
-  const roomDialogueBot = botForDialogue(props, state, roomDisplayedDialogue);
+  const roomDialogueBot = presentMysteryBot(botForDialogue(props, state, roomDisplayedDialogue));
   const roomProsecutorActive = roomDisplayedDialogue?.speakerBotId === state.config.prosecutorBotId;
   const roomActorVisible = Boolean(
     currentBot &&
@@ -849,7 +950,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     : -1;
   const witnessSeatId = activeStatement?.witnessSeatId ?? null;
   const witness = state.suspects.find((entry) => entry.seatId === witnessSeatId) ?? null;
-  const witnessBot = botForSeat(props, state, witnessSeatId);
+  const witnessBot = presentMysteryBot(botForSeat(props, state, witnessSeatId));
   const displayedDialogueDelivery = displayedDialogue
     ? splitDebateMysteryStageActionTextV2(displayedDialogue.visibleText, dialogueBot?.name ?? null)
     : { stageActionText: null, spokenText: "" };
@@ -857,11 +958,10 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     ? splitDebateMysteryStageActionTextV2(activeStatement.visibleText, witness?.name ?? null)
     : { stageActionText: null, spokenText: "" };
   const activeStatementStageActionText = activeStatement?.stageActionText ?? activeStatementDelivery.stageActionText;
-  const botById = useMemo(() => new Map(props.bots.map((bot) => [bot.id, bot])), [props.bots]);
-  const prosecutorBot = botById.get(state.config.prosecutorBotId) ?? null;
-  const defenseBot = botById.get(state.config.rivalDefenseBotId) ?? null;
+  const prosecutorBot = presentMysteryBot(botById.get(state.config.prosecutorBotId) ?? null);
+  const defenseBot = presentMysteryBot(botById.get(state.config.rivalDefenseBotId) ?? null);
   const defendant = state.suspects.find((entry) => entry.seatId === state.court?.defendantSeatId) ?? null;
-  const defendantBot = defendant ? botById.get(defendant.botId) ?? null : null;
+  const defendantBot = presentMysteryBot(defendant ? botById.get(defendant.botId) ?? null : null);
   const defendantMiniVisible = Boolean(defendant && defendantBot && defendant.seatId !== witnessSeatId);
   const prosecutorDialogueActive = displayedDialogue?.speakerBotId === state.config.prosecutorBotId;
   const defenseDialogueActive = displayedDialogue?.speakerBotId === state.config.rivalDefenseBotId;
@@ -1578,6 +1678,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           backgroundRecordable={false}
           ambientFoley={false}
         />
+        {identityPresentationBlackout}
         {callout ? <div key={callout.id} className={styles.callout} style={calloutStyle} role="status" aria-live="assertive"><span>{CALLOUT_COPY[callout.callout]}</span></div> : null}
         <header className={styles.courtHeader}>
           <button type="button" onClick={props.onExit}>← Archive</button>
@@ -1624,14 +1725,14 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                   blinkEnabled: true,
                   facing: "left",
                 })}
-                <small>Defendant · {defendant.name}</small>
+                <small>Defendant · {defendantBot.name}</small>
               </aside>
             ) : null}
           </article>
         </section>
         <section className={styles.witnessStand} style={{ "--witness-color": witness?.color ?? "#a98cff" } as CSSProperties}>
           <div className={styles.witnessAvatar}>{witnessBot ? props.renderMysteryBotAvatar(witnessBot, "full", { demeanor: "suspect", talking: speechTiming !== null && displayedDialogue?.speakerSeatId === witnessSeatId, speechTiming: displayedDialogue?.speakerSeatId === witnessSeatId ? speechTiming : null, blinkEnabled: true, facing: "left" }) : <span>◇</span>}{courtWitnessActionPresentation ? <SignalVoiceActionText key={`witness:${displayedDialogue?.nodeId ?? activeStatement?.statementId ?? ""}:${displayedDialogue?.occurredAt ?? ""}`} {...courtWitnessActionPresentation} accent={witness?.color} /> : null}</div>
-          <div className={styles.witnessIdentity}><small>Witness {state.court.completedChapterIds.length + 1} of {state.court.witnessOrder.length}</small><h1>{witness?.name ?? "Witness"}</h1></div>
+          <div className={styles.witnessIdentity}><small>Witness {state.court.completedChapterIds.length + 1} of {state.court.witnessOrder.length}</small><h1>{witnessBot?.name ?? witness?.name ?? "Witness"}</h1></div>
         </section>
         <section className={styles.testimony}>
           <div className={styles.testimonyNav}>
@@ -1674,6 +1775,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         backgroundRecordable={false}
         ambientFoley={false}
       />
+      {identityPresentationBlackout}
       {!roomIntroductionActive ? <header className={styles.investigationHeader}>
         <button type="button" onClick={props.onExit}>← Archive</button>
         <div><p className={styles.eyebrow}>{state.caseTitle}</p><strong>{spectatorTheory ? "Prosecutor Findings" : "Investigation"}</strong></div>
@@ -1766,14 +1868,14 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                   >
                     {room.unlocked ? <strong>{room.name}</strong> : null}
                     {roomSuspects.map((suspect) => {
-                      const bot = botById.get(suspect.botId);
+                      const bot = presentMysteryBot(botById.get(suspect.botId) ?? null);
                       const position = mysteryMapOccupantPosition(props.session.id, room.id, suspect.seatId);
                       return (
                         <i
                           key={suspect.seatId}
                           className={styles.mansionOccupant}
                           role="img"
-                          aria-label={`${suspect.name} is known to be here`}
+                          aria-label={`${bot?.name ?? suspect.name} is known to be here`}
                           data-tutorial-target="mystery-v2-micro-avatar"
                           style={{ left: `${position.xPct}%`, top: `${position.yPct}%`, color: suspect.color ?? "#a98cff" }}
                         >{props.renderBotGlyph(bot?.glyph ?? null, { size: 18, strokeWidth: 1.5, className: styles.mansionOccupantGlyph })}</i>
@@ -1822,7 +1924,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           {command === "examine" && !roomComplete ? <i className={styles.investigationLens} aria-hidden="true" data-visible={lensActive ? "true" : undefined} data-targeted={debateMysteryV2LensClickTarget(investigationLens) ? "true" : undefined} style={{ left: `${investigationLens.x}%`, top: `${investigationLens.y}%`, "--lens-proximity": investigationLens.proximity } as CSSProperties} /> : null}
           {roomIntroductionPhase !== "casekeeper" ? <div className={styles.roomShade} /> : null}
           {!roomIntroductionActive ? <div className={styles.roomTitle}><small>Floor {currentRoom.floor}</small><h1>{currentRoom.name}</h1></div> : null}
-          {roomActorVisible && currentBot ? <div className={styles.roomActor} data-interrogation-phase={interrogationPhase ?? undefined} style={{ "--actor-color": currentSuspect?.color ?? "#a98cff" } as CSSProperties}><div className={styles.roomActorDrift} style={mysteryRoomActorDriftStyle(`${props.session.id}:${currentBot.id}:suspect`)}>{props.renderMysteryBotAvatar(currentBot, "full", { demeanor: "suspect", talking: audioMouthActive && roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId, speechTiming: audioMouthActive && roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId ? speechTiming : null, blinkEnabled: true, facing: "left", speechInkVisible: roomSpeechInkVisible })}<strong>{currentSuspect?.name}</strong>{roomSuspectStageActionText && roomActionPresentation ? <SignalVoiceActionText key={`suspect:${roomDisplayedDialogue?.nodeId ?? ""}:${roomDisplayedDialogue?.occurredAt ?? ""}`} {...roomActionPresentation} accent={currentSuspect?.color} /> : null}</div></div> : null}
+          {roomActorVisible && currentBot ? <div className={styles.roomActor} data-interrogation-phase={interrogationPhase ?? undefined} style={{ "--actor-color": currentBot.color ?? "#a98cff" } as CSSProperties}><div className={styles.roomActorDrift} style={mysteryRoomActorDriftStyle(`${props.session.id}:${currentBot.id}:suspect`)}>{props.renderMysteryBotAvatar(currentBot, "full", { demeanor: "suspect", talking: audioMouthActive && roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId, speechTiming: audioMouthActive && roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId ? speechTiming : null, blinkEnabled: true, facing: "left", speechInkVisible: roomSpeechInkVisible })}<strong>{currentBot.name}</strong>{roomSuspectStageActionText && roomActionPresentation ? <SignalVoiceActionText key={`suspect:${roomDisplayedDialogue?.nodeId ?? ""}:${roomDisplayedDialogue?.occurredAt ?? ""}`} {...roomActionPresentation} accent={currentBot.color} /> : null}</div></div> : null}
           {roomProsecutorActive && prosecutorBot ? <aside className={`${styles.roomActor} ${styles.roomProsecutorActor}`} data-prosecutor-speaking="true" data-interrogation-phase={interrogationPhase ?? undefined} style={{ "--actor-color": prosecutorBot.color ?? "#72d7ff" } as CSSProperties}>
             <div className={styles.roomActorDrift} style={mysteryRoomActorDriftStyle(`${props.session.id}:${prosecutorBot.id}:prosecutor`)}>
               {roomProsecutorStageActionText && roomActionPresentation ? <SignalVoiceActionText key={`room-prosecutor:${roomDisplayedDialogue?.nodeId ?? ""}:${roomDisplayedDialogue?.occurredAt ?? ""}`} {...roomActionPresentation} accent={prosecutorBot.color} /> : null}

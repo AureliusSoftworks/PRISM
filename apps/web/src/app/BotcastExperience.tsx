@@ -69,6 +69,8 @@ import {
   botcastCameraModeAt,
   botcastCameraShotAt,
   botcastAutoCoverageShotAt,
+  botcastActiveProducerCueFromEvents,
+  botcastProducerCueLifecyclesFromEvents,
   botcastDepartureSpeakerRole,
   botcastEchoHostInterruptPhrase,
   botcastEpisodeModelSelectionKind,
@@ -138,6 +140,7 @@ import {
   type BotcastGuestInterruptionContext,
   type BotcastMessage,
   type BotcastProducerCue,
+  type BotcastProducerCueLifecycleStatus,
   type BotcastProducerCueDelivery,
   type BotcastCameraFrame,
   type BotcastCameraFraming,
@@ -2621,6 +2624,9 @@ export function BotcastExperience({
     null,
   );
   const [busy, setBusy] = useState(false);
+  const [queuedCueStatus, setQueuedCueStatus] = useState<
+    BotcastProducerCueLifecycleStatus | null
+  >(null);
   const [signalGenerationThinking, setSignalGenerationThinking] = useState<{
     runId: number;
     role: "host" | "guest" | null;
@@ -3053,12 +3059,24 @@ export function BotcastExperience({
   }, [notice]);
 
   const assignQueuedProducerCue = useCallback(
-    (cue: BotcastProducerCue | null): void => {
+    (
+      cue: BotcastProducerCue | null,
+      status: BotcastProducerCueLifecycleStatus | null = cue
+        ? "queued"
+        : null,
+    ): void => {
       queuedProducerCueRef.current = cue;
       setQueuedProducerCue(cue);
+      setQueuedCueStatus(status);
     },
     [],
   );
+
+  useEffect(() => {
+    if (!episode) return;
+    const activeCue = botcastActiveProducerCueFromEvents(episode.events);
+    assignQueuedProducerCue(activeCue?.cue ?? null, activeCue?.status ?? null);
+  }, [assignQueuedProducerCue, episode]);
 
   const assignSignalModelWarmup = useCallback(
     (value: SignalModelWarmup | null): void => {
@@ -9159,6 +9177,9 @@ export function BotcastExperience({
             return false;
           }
         }
+        const queuedCueIsServerOwned =
+          requestedCue !== undefined &&
+          requestedCue === queuedProducerCueRef.current;
         const requestForegroundAdvance = async (): Promise<BotcastEpisodeAdvanceResponse> => {
           await interruptionHandoffStarted;
           return request<BotcastEpisodeAdvanceResponse>(
@@ -9168,7 +9189,9 @@ export function BotcastExperience({
               signal: controller.signal,
               body: JSON.stringify({
                 theme,
-                ...(requestedCue ? { cue: requestedCue } : {}),
+                ...(requestedCue && !queuedCueIsServerOwned
+                  ? { cue: requestedCue }
+                  : {}),
                 ...(requestedCue ? { cueDelivery } : {}),
                 ...(hostRedirect ? { hostRedirect } : {}),
                 ...(resolvedGuestInterruption
@@ -9263,9 +9286,9 @@ export function BotcastExperience({
           await interruptionCrosstalkPlayback;
         }
         if (!episodeOperationIsCurrent(controller, runId)) return false;
-        if (requestedCue && queuedProducerCueRef.current === requestedCue) {
-          assignQueuedProducerCue(null);
-        }
+        // The returned event log owns the cue outcome. Do not optimistically
+        // clear it here: a repair can requeue it, and a privacy failure must
+        // remain visible instead of looking delivered.
         if (warmupHoldActive || signalModelWarmupRef.current) {
           await releaseSignalModelWarmup(response.episode.id, false);
         }
@@ -9772,13 +9795,33 @@ export function BotcastExperience({
     return () => window.clearTimeout(timer);
   }, [advanceEpisode, autoRun, busy, episode, speakingMessageId]);
 
-  const sendCue = (cue: BotcastProducerCue): void => {
+  const queueProducerCue = async (cue: BotcastProducerCue): Promise<boolean> => {
+    if (!episode) return false;
+    try {
+      const response = await request<{ episode: BotcastEpisode }>(
+        `/api/botcast/episodes/${encodeURIComponent(episode.id)}/producer-cue`,
+        { method: "POST", body: JSON.stringify({ cue }) },
+      );
+      const activeCue = botcastActiveProducerCueFromEvents(response.episode.events);
+      assignQueuedProducerCue(activeCue?.cue ?? null, activeCue?.status ?? null);
+      setEpisode(response.episode);
+      return Boolean(activeCue);
+    } catch (queueError) {
+      setError(signalErrorToast("Queue Signal cue", queueError));
+      return false;
+    }
+  };
+
+  const sendCue = async (cue: BotcastProducerCue): Promise<void> => {
     if (
       !episode ||
       episode.status !== "live" ||
       episode.playbackMode === "watch"
     )
       return;
+    if (cue.kind !== "present_image" && !(await queueProducerCue(cue))) {
+      return;
+    }
     const activeHostMessage = episode.messages.find(
       (message) =>
         message.id === speakingMessageId && message.speakerRole === "host",
@@ -9810,16 +9853,16 @@ export function BotcastExperience({
             : message,
         ),
       });
-      assignQueuedProducerCue(cue);
+      if (cue.kind === "present_image") assignQueuedProducerCue(cue);
       setAutoRun(true);
       onPrepareUtterance?.();
-      void advanceEpisode(cue, "redirect_host", {
+      void advanceEpisode(undefined, "redirect_host", {
         messageId: activeHostMessage.id,
         spokenContent,
       });
       return;
     }
-    assignQueuedProducerCue(cue);
+    if (cue.kind === "present_image") assignQueuedProducerCue(cue);
     setAutoRun(true);
     const nextRole = botcastNextSpeakerRole({
       messages: episode.messages,
@@ -9834,7 +9877,7 @@ export function BotcastExperience({
     }
     if (!busy && speakingMessageId === null && nextRole === "host") {
       onPrepareUtterance?.();
-      void advanceEpisode(cue);
+      void advanceEpisode();
     }
   };
 
@@ -9887,7 +9930,7 @@ export function BotcastExperience({
     onPrepareUtterance?.();
     setNotice("Interrupting the guest…");
     const interrupted = await advanceEpisode(
-      cue,
+      undefined,
       "interrupt_guest",
       undefined,
       {
@@ -11732,10 +11775,7 @@ export function BotcastExperience({
         ? falseNameStates.get(bot.id)?.believedName?.trim()
         : "";
       const borrowedIdentity = bot
-        ? (
-            identityMirrorStates.get(bot.id) ??
-            identityShapeshiftStates.get(bot.id)
-          )?.targetBotName.trim()
+        ? identityShapeshiftStates.get(bot.id)?.targetBotName.trim()
         : "";
       return believed || borrowedIdentity || bot?.name?.trim() || fallback;
     };
@@ -15959,6 +15999,13 @@ export function BotcastExperience({
   // is live. A completed episode is finished — its recording is already
   // sealed — and the composer closes with it.
   const producerCueAvailable = episode?.status === "live";
+  const producerCueLifecycleFeedback = useMemo(
+    () =>
+      episode
+        ? botcastProducerCueLifecyclesFromEvents(episode.events).at(-1) ?? null
+        : null,
+    [episode],
+  );
   const activeEpisodeImageCapability =
     episode && signalImageCapability?.episodeId === episode.id
       ? signalImageCapability
@@ -16099,8 +16146,20 @@ export function BotcastExperience({
       queuedProducerCueRef.current &&
       queuedProducerCueRef.current.kind !== "present_image"
     ) {
-      assignQueuedProducerCue(null);
-      setNotice("Cue withdrawn. The host never hears it.");
+      const episodeId = episode?.id;
+      if (!episodeId) return;
+      void request<{ episode: BotcastEpisode }>(
+        `/api/botcast/episodes/${encodeURIComponent(episodeId)}/producer-cue/clear`,
+        { method: "POST", body: JSON.stringify({}) },
+      )
+        .then((response) => {
+          setEpisode(response.episode);
+          assignQueuedProducerCue(null);
+          setNotice("Cue withdrawn. The host never hears it.");
+        })
+        .catch((clearError) =>
+          setError(signalErrorToast("Clear Signal cue", clearError)),
+        );
     }
   };
   const uploadProducerImage = async (file: File): Promise<void> => {
@@ -17087,7 +17146,12 @@ export function BotcastExperience({
                   {queuedProducerCue ? (
                     <div className={styles.queuedCueStatus} role="status">
                       <p>
-                        Queued for host: {signalProducerCueLabel(queuedProducerCue)}.
+                        {queuedCueStatus === "dispatching"
+                          ? "Dispatching"
+                          : queuedCueStatus === "requeued"
+                            ? "Requeued for host"
+                            : "Queued for host"}
+                        : {signalProducerCueLabel(queuedProducerCue)}.
                       </p>
                       <button
                         type="button"
@@ -17115,6 +17179,16 @@ export function BotcastExperience({
                       >
                         Clear
                       </button>
+                    </div>
+                  ) : producerCueLifecycleFeedback?.status === "failed" ? (
+                    <div className={styles.queuedCueStatus} role="status">
+                      <p>
+                        Cue not delivered safely. Revise and send a new host note.
+                      </p>
+                    </div>
+                  ) : producerCueLifecycleFeedback?.status === "delivered" ? (
+                    <div className={styles.queuedCueStatus} role="status">
+                      <p>Cue delivered to the host.</p>
                     </div>
                   ) : null}
                   <label>

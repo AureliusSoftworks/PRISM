@@ -28516,6 +28516,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .signalBotPresencePlate {
   --zen-live-bot-avatar-size: clamp(154px, 16vw, 240px);
   --zen-live-bot-avatar-body-size: clamp(140px, 14.5vw, 218px);
+  /* Overscan only the lower CRT field beneath Signal's bezel. The glyph has
+     its own fixed render size and must not grow with this surface. */
+  --zen-live-bot-buckle-crt-screen-scale: 1.64;
   --zen-live-bot-body-x: 50%;
   --zen-live-bot-body-y: 50%;
   --zen-live-bot-face-x: 50%;

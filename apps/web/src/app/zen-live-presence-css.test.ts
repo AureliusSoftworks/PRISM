@@ -3340,6 +3340,16 @@ describe("Zen live presence CSS", () => {
     assert.match(glyphRule, /z-index:\s*12\s*;/);
     assert.doesNotMatch(glyphRule, /repeating-linear-gradient/);
     assert.doesNotMatch(glyphRule, /zen-live-bot-buckle-crt-screen-scale/);
+
+    const signalRule = ruleForExactSelector(".signalBotPresencePlate");
+    assert.match(
+      signalRule,
+      /--zen-live-bot-buckle-crt-screen-scale:\s*1\.64\s*;/,
+    );
+    assert.doesNotMatch(
+      signalRule,
+      /--zen-live-bot-body-glyph-(?:size|ratio|render-size)\s*:/,
+    );
   });
 
   it("quantizes every full-size phosphor glyph on one canonical surface", () => {

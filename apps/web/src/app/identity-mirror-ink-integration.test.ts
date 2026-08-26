@@ -30,31 +30,30 @@ describe("Identity Crisis avatar ink integration", () => {
     );
     assert.match(
       pageSource,
-      /presentationIdentity &&\s*botSummary\.identityMirrorTargetFaceActive\s*\? presentationIdentity\.targetFace/u,
+      /resolveBotIdentityMirrorFaceV1\(\s*identityMirrorState,\s*holderFaceStyle,\s*Boolean\(botSummary\.identityMirrorTargetFaceActive\)/u,
     );
   });
 
-  it("describes the saved ink handoff in current mode guidance", () => {
+  it("describes the exact four-field visual handoff in current mode guidance", () => {
     assert.match(
       tutorialSource,
-      /borrows the latest direct bot addresser's public diegetic name, persona, CRT face, authored Avatar Details ink, lower glyph/u,
+      /visually borrows exactly four things from the latest bot that directly addresses it: eyes, the complete resting and speaking mouth package, authored Avatar Details Ink, and the lower glyph/u,
     );
     assert.match(
       tutorialSource,
-      /always keeps its own complete authored voice identity and profile.*accent, pronunciation, speechprint, and client voice effect/u,
+      /name, persona, dialogue behavior, complete authored voice and Accent Map, color, chassis\/frame, Powers and consequences, thinking spinner, bot ID, seat, role, private perception, safety, provider, and every other field remain its own/u,
     );
     assert.match(
       tutorialSource,
-      /first reveal uses impostor once[\s\S]*without repeating the label or ever recanting/u,
-    );
-    assert.match(tutorialSource, /original briefly corrects.*even under Credulity.*otherwise advances/iu);
-    assert.match(
-      tutorialSource,
-      /saved handoff, retained voice, and timing replay exactly/u,
+      /saved handoff and timing replay exactly and reset with the session/u,
     );
     assert.match(
       tutorialSource,
-      /authored default identity returns before the closing sign-off/u,
+      /latest direct addresser’s eyes, complete resting and speaking mouth package, Avatar Details Ink, and lower glyph/u,
+    );
+    assert.match(
+      tutorialSource,
+      /holder’s name, persona, dialogue, voice and Accent Map, color, chassis\/frame, Powers and consequences, thinking spinner, and every other field remain unchanged/u,
     );
     assert.match(
       tutorialSource,

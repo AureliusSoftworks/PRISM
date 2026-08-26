@@ -361,6 +361,7 @@ import {
   botcastPreparedTurnCursor,
   botcastRoutingSnapshot,
   cancelBotcastEpisode,
+  clearBotcastProducerCue,
   castBotcastShowRecoveryHost,
   chatWithBotcastShowHost,
   createBotcastShow,
@@ -402,6 +403,7 @@ import {
   readBotcastShowOutdentAudio,
   recordBotcastAudioCue,
   queueBotcastEpisodeImageContext,
+  queueBotcastProducerCue,
   recordBotcastSessionClockHold,
   recordBotcastSoundboardCue,
   resolveBotcastProducerGuestName,
@@ -22116,6 +22118,62 @@ function buildRoutes(): RouteDefinition[] {
       ctx.res.setHeader("cache-control", "private, max-age=3600");
       ctx.res.end(Buffer.from(row.image_bytes));
     }),
+    route("POST", "/api/botcast/episodes/:id/producer-cue", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      const cueRecord =
+        body.cue && typeof body.cue === "object" && !Array.isArray(body.cue)
+          ? (body.cue as Record<string, unknown>)
+          : null;
+      const kind = cueRecord?.kind;
+      if (
+        kind !== "ask_about" &&
+        kind !== "present_image" &&
+        kind !== "refocus" &&
+        kind !== "press_harder" &&
+        kind !== "move_on" &&
+        kind !== "lighten_up" &&
+        kind !== "wrap_up"
+      ) {
+        throw new HttpError(400, "Signal needs a valid Producer cue.");
+      }
+      invalidateTurnPreparation(
+        userId,
+        "signal",
+        ctx.params.id,
+        "A queued Producer cue replaced the prepared Signal turn.",
+      );
+      const episode = queueBotcastProducerCue(db, userId, ctx.params.id, {
+        kind,
+        ...(typeof cueRecord?.detail === "string"
+          ? { detail: cueRecord.detail }
+          : {}),
+        ...(typeof cueRecord?.directQuote === "string"
+          ? { directQuote: cueRecord.directQuote }
+          : {}),
+        ...(kind === "present_image" && typeof cueRecord?.imageId === "string"
+          ? { imageId: cueRecord.imageId }
+          : {}),
+      });
+      json(ctx.res, 200, {
+        ok: true,
+        episode: projectBotcastEpisodeForAudienceV1(episode),
+      });
+    }),
+    route("POST", "/api/botcast/episodes/:id/producer-cue/clear", async (ctx) => {
+      const userId = requireAuth(ctx);
+      invalidateTurnPreparation(
+        userId,
+        "signal",
+        ctx.params.id,
+        "A withdrawn Producer cue invalidated the prepared Signal turn.",
+      );
+      const episode = clearBotcastProducerCue(db, userId, ctx.params.id);
+      json(ctx.res, 200, {
+        ok: true,
+        episode: projectBotcastEpisodeForAudienceV1(episode),
+      });
+    }),
     route("POST", "/api/botcast/episodes/:id/advance", async (ctx) => {
       const userId = requireAuth(ctx);
       invalidateTurnPreparation(
@@ -22212,12 +22270,6 @@ function buildRoutes(): RouteDefinition[] {
                 : {}),
             }
           : undefined;
-      if (cueDelivery && !cue) {
-        throw new HttpError(
-          400,
-          "Signal cue delivery requires a producer cue.",
-        );
-      }
       if (cueDelivery === "redirect_host" && !hostRedirect) {
         throw new HttpError(
           400,
@@ -22427,9 +22479,9 @@ function buildRoutes(): RouteDefinition[] {
                       ? { producerGuestHostInterruption }
                       : {}),
                   }
-                : cue
+                : cue || cueDelivery
                   ? {
-                      cue,
+                      ...(cue ? { cue } : {}),
                       ...(cueDelivery ? { cueDelivery } : {}),
                       ...(hostRedirect ? { hostRedirect } : {}),
                       ...(guestInterruption ? { guestInterruption } : {}),

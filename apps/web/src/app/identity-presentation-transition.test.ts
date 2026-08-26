@@ -33,8 +33,8 @@ test("borrowed identities install while one shared CRT blackout is active", () =
   );
   assert.match(
     pageSource,
-    /const seatFaceStyle = identityBorrowTargetActive\s+\? identityPresentationState!\.targetFace/u,
-    "Coffee must apply the target before the blackout reveals it",
+    /const seatFaceStyle = identityMirrorState\s+\? resolveBotIdentityMirrorFaceV1\(/u,
+    "Coffee must install the four-field face overlay before the blackout reveals it",
   );
   assert.match(
     botcastSource,
@@ -96,7 +96,7 @@ test("Chat and Zen schedule one persisted transition end without rerender loops"
   );
 });
 
-test("Identity Crisis borrows identity while Shapeshifter retains full-form presentation", () => {
+test("Identity Crisis overlays only eyes, mouth, Ink, and glyph", () => {
   assert.match(
     pageSource,
     /const identityFullFormPresentationState = identityMirrorState\s+\? null\s+: identityShapeshiftState/u,
@@ -119,19 +119,16 @@ test("Identity Crisis borrows identity while Shapeshifter retains full-form pres
     );
   }
   assert.match(pageSource, /presentationIdentity\.targetGlyph/u);
-  assert.match(pageSource, /identityPresentationState!\.targetFace/u);
+  assert.match(pageSource, /resolveBotIdentityMirrorFaceV1/u);
   assert.match(
     botcastSource,
-    /identityMirrorStates\.get\(bot\.id\) \?\?[\s\S]*identityShapeshiftStates\.get\(bot\.id\)[\s\S]*targetBotName\.trim\(\)/u,
-    "Signal nameplates and captions must use the borrowed diegetic name",
+    /const borrowedIdentity = bot\s+\? identityShapeshiftStates\.get\(bot\.id\)\?\.targetBotName\.trim\(\)/u,
+    "Signal nameplates and captions must keep the holder name for Identity Crisis",
   );
-  // Identity Crisis nameplates still read as the borrowed identity; the
-  // Shapeshifter keeps the holder's own name and glyph, with the disguise
-  // carried by the "Appearing as …" label instead.
   assert.match(
     debateSource,
-    /displayName: shapeshifting\s*\?\s*displayName\s*:\s*\(identitySource\?\.name \?\? displayName\)/u,
-    "Debate nameplates borrow the diegetic name for mirrors only",
+    /return \{\s*displayName,/u,
+    "Debate nameplates must keep the holder's name",
   );
   assert.match(
     debateSource,
@@ -140,8 +137,8 @@ test("Identity Crisis borrows identity while Shapeshifter retains full-form pres
   );
   assert.match(
     debateSource,
-    /glyph: shapeshifting \? bot\.glyph : \(identitySource\?\.glyph \?\? bot\.glyph\)/u,
-    "Shapeshifter nameplates keep the holder's authored glyph",
+    /identityEffect === "identity_mirror"[\s\S]*identitySource\?\.glyph \?\? bot\.glyph[\s\S]*: bot\.glyph/u,
+    "Identity Crisis borrows the glyph while Shapeshifter keeps the holder glyph",
   );
   assert.match(
     pageSource,
@@ -165,8 +162,8 @@ test("Identity Crisis borrows identity while Shapeshifter retains full-form pres
   );
   assert.match(
     debateIdentitySource,
-    /color: args\.holder\.color[\s\S]*voiceProfile: applyBotIdentityMirrorHolderVoiceEffectV1[\s\S]*provider: args\.holder\.provider/u,
-    "Debate Identity Crisis must retain holder material and routing boundaries",
+    /applyBotIdentityMirrorFaceV1\([\s\S]*return \{\s*\.\.\.args\.holder,[\s\S]*glyph: args\.target\.glyph,[\s\S]*voiceProfile: applyBotIdentityMirrorHolderVoiceEffectV1/u,
+    "Debate Identity Crisis must retain holder identity while borrowing the exact four visual fields",
   );
   assert.match(
     pageSource,

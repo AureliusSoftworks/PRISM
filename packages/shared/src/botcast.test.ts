@@ -25,6 +25,8 @@ import {
   botcastDirectQuoteTurnMaxTokens,
   composeBotcastProducerDirectQuoteUtterance,
   applyBotcastProducerCueToTension,
+  botcastActiveProducerCueFromEvents,
+  botcastProducerCueLifecyclesFromEvents,
   botcastAutoCameraLeadInMs,
   botcastFallbackStudioAccentVariantForSeed,
   botcastCameraModeAt,
@@ -93,6 +95,49 @@ import {
 } from "./botcast.ts";
 
 describe("Signal public cadence speech", () => {
+  it("rebuilds durable producer cue queue, redelivery, and safe failure state", () => {
+    const events: BotcastReplayEvent[] = [
+      {
+        id: "cue-queued",
+        episodeId: "episode",
+        sequence: 1,
+        kind: "producer_cue",
+        payload: {
+          cueId: "cue-1",
+          lifecycle: "queued",
+          kind: "ask_about",
+          detail: "Ask about the missing promise.",
+          delivery: "next_host_turn",
+        },
+        occurredAt: "2026-08-25T00:00:00.000Z",
+      },
+      {
+        id: "cue-requeued",
+        episodeId: "episode",
+        sequence: 2,
+        kind: "producer_cue",
+        payload: { cueId: "cue-1", lifecycle: "requeued" },
+        occurredAt: "2026-08-25T00:00:01.000Z",
+      },
+    ];
+    assert.equal(botcastActiveProducerCueFromEvents(events)?.status, "requeued");
+    events.push({
+      id: "cue-failed",
+      episodeId: "episode",
+      sequence: 3,
+      kind: "producer_cue",
+      payload: {
+        cueId: "cue-1",
+        lifecycle: "failed",
+        failure: "privacy_validation",
+      },
+      occurredAt: "2026-08-25T00:00:02.000Z",
+    });
+    const lifecycle = botcastProducerCueLifecyclesFromEvents(events).at(-1);
+    assert.equal(botcastActiveProducerCueFromEvents(events), null);
+    assert.equal(lifecycle?.failure, "privacy_validation");
+  });
+
   it("derives the initial PNG item and .jpg picture filename semantics", () => {
     assert.deepEqual(
       botcastEpisodeImageDescriptorFromFileName("wax-candle.png", "image/png"),

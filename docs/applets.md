@@ -31,9 +31,9 @@ ship as `0.5.2` while Coffee is `v0.7`.
 | ------- | ------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Chat    | v1.48   | Active             | Full playground with independent saved conversations, Troll persona cues, timed unaware Mute delivery, Accent Map-keyed Mumbling dialects, six-tier size presentation, complete session-sticky Shapeshifter embodiment, Surname Drift last names, and phosphor-hue prejudice inside each PRISM or persona Home.                                                                                         |
 | Zen     | v1.47   | Active             | Calm one-to-one continuity with bounded player-facing Troll pestering, timed unaware Mute delivery, Accent Map-keyed Mumbling dialects, draggable six-tier embodiment, direct human access, complete session-sticky Shapeshifter embodiment, Surname Drift last names, and phosphor-hue prejudice.                                                                                                        |
-| Coffee  | v2.67   | Active             | Two-to-five-bot tables with bounded Troll interruptions and public bait, cast-aware avatar effects, Power-projected reaction speech, timed Mute reactions and floor breaks, replay-safe Identity Crisis theft with holder-stable voice/accent and hard original corrections, full-form Shapeshifter copying, session last names, replay-safe form changes, phosphor-hue prejudice among seated bots, local-only café Jazz beds, and faithful replay that seats Default Prism for the player.                   |
-| Signal  | v1.85   | Active             | Interview studio with bounded Troll interruptions and public bait, ready-but-paused spectator buffering, audible-clock mouth animation, a paint-contained live stage, premium host-and-premise show identities with cohesive character, concept, and broadcast cues, performance-colored audience ratings, quiet replay-provenanced listener backchannels, private-safe Mumbling interruptions and reaction speech, visibly elapsed timed Mute performances with guaranteed awkward-duration reactions and hard cuts, replay-safe Identity Crisis theft with holder-stable voice/accent and hard original corrections, full-form Shapeshifter copying, session last names, replay-safe form changes, exact on-air producer quotes, Power-permissive encounters, and phosphor-hue prejudice between host and guest. |
-| Debate  | v0.48   | Preview            | Power-permissive Forum and Turnabout proceedings with direct bounded Troll floor cuts, cast-aware avatar effects, Accent Map-keyed Mumbling speech and reaction quips, timed Mute floor timing, frozen public sources, holder-voiced Identity Crisis presentation and full-form Shapeshifter voice copying, session last names, screen-off form changes, phosphor-hue prejudice among advocates, explicit advocacy consent, organic cast reactions, durable verdicts, returning title-card start-from-turn checkpoints, and a Spectator live For/Against favor bar from the heard record. Whodunnit V2 makes the player the prosecutor: a durable spoiler-safe Case Forge compiles and validates finite Move / Examine / Talk / Present investigation, statement-level Press / Present court chapters for every suspect, Jury or Bench verdicts, witness checkpoints, PRISM courtroom callouts, and a complete local English audio pack before the title card. Premium Whodunnit voices remain disabled and gameplay performs no live LLM or voice synthesis. Legacy V1 sessions and Case Seeds remain playable. Territory / Your idea accepts Prompt Center prompts and wildcard decks. |
+| Coffee  | v2.69   | Active             | Two-to-five-bot tables with bounded Troll interruptions and public bait, cast-aware avatar effects, Power-projected reaction speech, timed Mute reactions and floor breaks, replay-safe Identity Crisis eye/mouth/Ink/glyph overlays with holder-stable identity and Powers, full-form Shapeshifter copying, session last names, replay-safe form changes, phosphor-hue prejudice among seated bots, local-only café Jazz beds, and faithful replay that seats Default Prism for the player.                   |
+| Signal  | v1.88   | Active             | Interview studio with bounded Troll interruptions and public bait, ready-but-paused spectator buffering, audible-clock mouth animation, a paint-contained live stage, premium host-and-premise show identities with cohesive character, concept, and broadcast cues, performance-colored audience ratings, quiet replay-provenanced listener backchannels, private-safe Mumbling interruptions and reaction speech, visibly elapsed timed Mute performances with guaranteed awkward-duration reactions and hard cuts, replay-safe Identity Crisis eye/mouth/Ink/glyph overlays with holder-stable identity and Powers, full-form Shapeshifter copying, session last names, replay-safe form changes, exact on-air producer quotes, Power-permissive encounters, and phosphor-hue prejudice between host and guest. |
+| Debate  | v0.52   | Preview            | Power-permissive Forum and Turnabout proceedings with direct bounded Troll floor cuts, cast-aware avatar effects, Accent Map-keyed Mumbling speech and reaction quips, timed Mute floor timing, frozen public sources, four-field Identity Crisis presentation and full-form Shapeshifter voice copying, session last names, screen-off form changes, phosphor-hue prejudice among advocates, explicit advocacy consent, organic cast reactions, durable verdicts, returning title-card start-from-turn checkpoints, and a Spectator live For/Against favor bar from the heard record. Whodunnit V2 makes the player the prosecutor: a durable spoiler-safe Case Forge compiles and validates finite Move / Examine / Talk / Present investigation, statement-level Press / Present court chapters for every suspect, Jury or Bench verdicts, witness checkpoints, PRISM courtroom callouts, and a complete local English audio pack before the title card. It replays Identity Crisis eyes, complete mouth, Ink, and glyph from the frozen Power plan and sealed direct-address history while retaining every other holder field. Premium Whodunnit voices remain disabled and gameplay performs no live LLM or voice synthesis. Legacy V1 sessions and Case Seeds remain playable. Territory / Your idea accepts Prompt Center prompts and wildcard decks. |
 | Polling | v0.0    | Planned            | AI-powered polling across bot groups.                                                                                                                                                                                                                                                                       |
 | Feed    | v0.0    | Planned            | BotBook-style social feed.                                                                                                                                                                                                                                                                                  |
 | Games   | v0.0    | Planned            | Boardgame-like bot matches.                                                                                                                                                                                                                                                                                 |
@@ -212,23 +212,18 @@ stages do not block the standalone preview.
 ## Identity Crisis Power policy
 
 - Coffee and Signal apply the direct runtime contract; Debate applies the same
-  holder-owned voice/presentation split through its frozen participant
+  four-field visual overlay through its frozen participant
   snapshots. Story retains the cue seam while disabled. Chat and Zen have no
   bot-to-bot addresser, Slate has no participant identity-theft surface, and
   every other planned applet is deferred in the exhaustive mode policy.
-- A genuinely new bot addresser replaces the target. The holder borrows public
-  name, persona, face, Ink, lower glyph, and active public Power consequences,
-  but new events freeze the holder's effective voice profile: identity, exact
-  Accent Map position, accent definition, pronunciation, speechprint, and
-  client effect. Shapeshifter remains the full-form mechanic and still copies
-  voice.
-- The first holder reveal uses `impostor` exactly once. Later turns remove all
-  impostor/imposter/pretender/fake boilerplate and repair recanting before the
-  line is published. The stolen original briefly corrects only a genuine wrong
-  name/identity address; that hard correction outranks Credulity and other soft
-  pressure without replacing the original's persona or repeatedly derailing
-  the subject. Player identity, mechanical role/seat, safety, privacy,
-  provider, perception, and attribution boundaries never move.
+- A genuinely new bot addresser replaces the visual target. The holder borrows
+  exactly the target's eyes and blink package, complete resting/live mouth and
+  viseme package, authored Avatar Details Ink, and lower glyph.
+- Name, persona, dialogue behavior, complete voice and Accent Map, color,
+  chassis/frame, thinking spinner, Powers and consequences, memories, bot ID,
+  role/seat, safety, privacy, provider, perception, and attribution remain the
+  holder's. Identity Crisis never rewrites generated text or observer behavior.
+  Shapeshifter remains the full-form mechanic. The player is never a target.
 
 ## Troll Power policy
 
@@ -272,6 +267,16 @@ stages do not block the standalone preview.
   activates.
 
 ## Changelog
+
+### 2026-08-26
+
+- Advanced `Coffee` to `v2.69`, `Signal` to `v1.88`, and `Debate` to `v0.52`.
+  Identity Crisis is now an exact four-field visual overlay: the latest direct
+  bot addresser supplies eyes, the complete resting/live mouth package,
+  authored Avatar Details Ink, and the lower glyph. The holder keeps every
+  other field, including name, persona, dialogue, voice/Accent Map, color,
+  chassis/frame, thinking spinner, and Powers. Live visemes and replay resolve
+  through the same copied mouth package.
 
 ### 2026-08-24
 

@@ -45,6 +45,15 @@ const voiceActionCss = readFileSync(
 );
 
 describe("Signal experience shell", () => {
+  it("restores durable Producer cue state and exposes concise lifecycle feedback", () => {
+    assert.match(source, /botcastActiveProducerCueFromEvents\(episode\.events\)/u);
+    assert.match(source, /\/producer-cue/u);
+    assert.match(source, /producer-cue\/clear/u);
+    assert.match(source, /Cue not delivered safely\. Revise and send a new host note\./u);
+    assert.match(source, /Cue delivered to the host\./u);
+    assert.match(source, /Requeued for host/u);
+  });
+
   it("saves, applies, and deletes named Rehearse Stage presets without a second stage-save action", () => {
     assert.match(source, /\/api\/botcast\/stage-presets/u);
     assert.match(source, /Save preset/u);
@@ -1928,7 +1937,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /queuedProducerCueRef/u);
     assert.match(
       source,
-      /Queued for host: \{signalProducerCueLabel\(queuedProducerCue\)\}/u,
+      /signalProducerCueLabel\(queuedProducerCue\)/u,
     );
     assert.match(source, /Interrupt guest now/u);
     assert.match(source, /interruptGuestWithQueuedCue/u);
@@ -1956,7 +1965,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /interruptionBridgePlayback/u);
     assert.match(source, /playPreparedEpisodeMessage\([\s\S]{0,180}false,/u);
     assert.match(source, /signalHostCueShouldRedirect/u);
-    assert.match(source, /void advanceEpisode\(cue, "redirect_host"/u);
+    assert.match(source, /void advanceEpisode\(undefined, "redirect_host"/u);
     assert.match(
       source,
       /messageId:\s*activeHostMessage\.id,[\s\S]{0,80}spokenContent,/u,
@@ -2437,7 +2446,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /episodeOperationIsCurrent\(controller, runId\)/u);
     assert.match(
       source,
-      /if \(!busy && speakingMessageId === null && nextRole === "host"\) \{[\s\S]{0,100}onPrepareUtterance\?\.\(\);[\s\S]{0,80}advanceEpisode\(cue\)/u,
+      /if \(!busy && speakingMessageId === null && nextRole === "host"\) \{[\s\S]{0,100}onPrepareUtterance\?\.\(\);[\s\S]{0,80}advanceEpisode\(\)/u,
     );
     assert.match(
       source,

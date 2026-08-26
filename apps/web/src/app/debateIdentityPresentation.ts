@@ -1,6 +1,8 @@
 import {
+  applyBotIdentityMirrorFaceV1,
   applyBotIdentityMirrorHolderVoiceEffectV1,
   botIdentityPresentationFrameMaterialSeedV1,
+  botIdentityPresentationScreenMaterialSeedV1,
   botIdentityPresentationVoicePresetV1,
   type DebateBotSnapshotV1,
 } from "@localai/shared";
@@ -26,8 +28,8 @@ export interface DebateIdentityPresentationChangeV1 {
 
 /**
  * Build the public avatar passed to Debate rendering. Identity Crisis borrows
- * the target identity while keeping the holder's complete voice profile,
- * color, communication chassis, frame, mechanical id, seat, and routing boundary.
+ * only the target's eyes, complete resting/live mouth package, Avatar Details
+ * Ink, and lower glyph. Every other field stays with the holder.
  * Shapeshifter takes the target's face, chassis, and voice, but the holder's
  * authored identity anchors — name, color, glyph — always persist so the
  * chamber can still tell who actually holds the floor. The disguise is carried
@@ -65,29 +67,40 @@ export function debateIdentityAppearanceBotV1(args: {
     botIdentityPresentationFrameMaterialSeedV1({
       targetBotId: args.holder.id,
     });
-  const replayVisualSnapshot = targetVisual
+  const holderScreenMaterialSeed =
+    holderVisual?.screenMaterialSeed ??
+    botIdentityPresentationScreenMaterialSeedV1({
+      targetBotId: args.holder.id,
+    });
+  const mirroredFaceStyle =
+    holderVisual && targetVisual
+      ? applyBotIdentityMirrorFaceV1(
+          holderVisual.faceStyle,
+          targetVisual.faceStyle,
+        )
+      : (holderVisual?.faceStyle ?? null);
+  const replayVisualSnapshot = mirroredFaceStyle
     ? {
-        ...targetVisual,
+        v: 1 as const,
+        faceStyle: mirroredFaceStyle,
+        avatarDetails:
+          targetVisual?.avatarDetails ?? args.target.avatarDetails ?? null,
         voicePreset: holderVoicePreset,
+        screenMaterialSeed: holderScreenMaterialSeed,
         frameMaterialSeed: holderFrameMaterialSeed,
       }
     : holderVisual;
 
   return {
-    ...args.target,
-    version: args.holder.version,
-    id: args.holder.id,
-    role: args.holder.role,
-    sideId: args.holder.sideId,
-    color: args.holder.color,
+    ...args.holder,
+    glyph: args.target.glyph,
+    avatarDetails:
+      targetVisual?.avatarDetails ?? args.target.avatarDetails ?? null,
     voiceProfile: applyBotIdentityMirrorHolderVoiceEffectV1(
       args.target.voiceProfile,
       args.holder.voiceProfile,
     ),
     replayVisualSnapshot,
-    provider: args.holder.provider,
-    model: args.holder.model,
-    revision: args.holder.revision,
   };
 }
 

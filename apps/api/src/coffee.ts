@@ -14445,24 +14445,6 @@ export function coffeeFalseNamePromptForSpeaker(args: {
     .join("\n\n");
 }
 
-/** Small deterministic irritation pressure on the copied original only. */
-export function applyCoffeeIdentityMirrorIrritation(args: {
-  socialByBotId: Record<string, CoffeeBotSocialSnapshot>;
-  targetBotId: string;
-}): Record<string, CoffeeBotSocialSnapshot> {
-  const current = args.socialByBotId[args.targetBotId];
-  if (!current) return args.socialByBotId;
-  return {
-    ...args.socialByBotId,
-    [args.targetBotId]: sanitizeCoffeeSocialSnapshot({
-      ...current,
-      disposition: current.disposition - 0.08,
-      valuesFriction: current.valuesFriction + 0.12,
-      restraint: current.restraint - 0.05,
-    }),
-  };
-}
-
 /**
  * Build the speaker LLM prompt for the picked bot. Lighter than
  * `buildPromptMessages` in chat.ts — Coffee skips Prism tool appendix
@@ -14524,13 +14506,13 @@ export function buildSpeakerPrompt(args: {
   peerAddressByBotId?: ReadonlyMap<string, string>;
   /** Compact, already-resolved Coffee-only power context for this speaker. */
   coffeePowersPrompt?: string | null;
-  /** Persisted public identity theft state, composed separately from Powers. */
+  /** Persisted visual-only Identity Crisis state. */
   identityMirrorPrompt?: string | null;
-  /** Active holder snapshot; its public target persona replaces the holder's base persona. */
+  /** Active holder snapshot used only by replay/presentation. */
   identityMirrorState?: BotIdentityMirrorStateV1 | null;
   /** Library/Marketplace shapeshift cues for holder and observers. */
   identityShapeshiftPrompt?: string | null;
-  /** Active shapeshift snapshot used when identity mirroring is not overriding. */
+  /** Active shapeshift snapshot used as the authored persona source. */
   identityShapeshiftState?: BotIdentityShapeshiftStateV1 | null;
   /** John/Jane Doe believed-name cues for holder and observers. */
   falseNamePrompt?: string | null;
@@ -14578,7 +14560,6 @@ export function buildSpeakerPrompt(args: {
     peerAddressByBotId,
     coffeePowersPrompt,
     identityMirrorPrompt,
-    identityMirrorState,
     identityShapeshiftPrompt,
     identityShapeshiftState,
     falseNamePrompt,
@@ -14611,7 +14592,6 @@ export function buildSpeakerPrompt(args: {
   const peerNameFor = (bot: Pick<CoffeeBotProfile, "id" | "name">): string =>
     peerAddressByBotId?.get(bot.id)?.trim() || bot.name;
   const borrowedPersonaPrompt =
-    identityMirrorState?.targetPersonaPrompt ??
     identityShapeshiftState?.targetPersonaPrompt ??
     speaker.systemPrompt;
   const speakerSystemPrompt = composeBotSystemPrompt(
@@ -14620,12 +14600,11 @@ export function buildSpeakerPrompt(args: {
     speaker.flirtEnabled === true,
     undefined,
     {
-      // Identity Crisis retains the holder voice; Shapeshifter copies the form.
-      audioVoiceProfile: identityMirrorState
-        ? speaker.audioVoiceProfileOverride ?? speaker.authoredAudioVoiceProfile
-        : identityShapeshiftState?.targetVoice ??
-          speaker.audioVoiceProfileOverride ??
-          speaker.authoredAudioVoiceProfile,
+      // Identity Crisis is visual-only; Shapeshifter copies the form.
+      audioVoiceProfile:
+        identityShapeshiftState?.targetVoice ??
+        speaker.audioVoiceProfileOverride ??
+        speaker.authoredAudioVoiceProfile,
     },
   );
   const cloneIdentityPrompt = buildCloneFamilyIdentityPrompt(speaker, group);
@@ -20122,12 +20101,10 @@ async function generateCoffeeBotReply(args: {
     falseNameJustChanged = falseNameResolution.justChanged;
     pendingFalseNameState = falseNameResolution.pending;
   }
-  /** Identity mirror overrides shapeshift presentation while active. */
-  const effectiveBorrowedIdentityState = activeIdentityMirrorState
-    ? { kind: "mirror" as const, state: activeIdentityMirrorState }
-    : activeIdentityShapeshiftState
-      ? { kind: "shapeshift" as const, state: activeIdentityShapeshiftState }
-      : null;
+  /** Identity Crisis never replaces the holder's authored persona. */
+  const effectiveBorrowedIdentityState = activeIdentityShapeshiftState
+    ? { kind: "shapeshift" as const, state: activeIdentityShapeshiftState }
+    : null;
   const speakerPerceptionPrompt = turnGroup.flatMap((peer) => {
     if (peer.id === speaker.id) return [];
     const visible = coffeePowerBotVisibleTo(coffeePowerPlan, peer.id, speaker.id);
@@ -21104,9 +21081,7 @@ async function generateCoffeeBotReply(args: {
         activeFalseNameState,
         falseNameJustChanged,
         {
-          replacedSelfNames: activeIdentityMirrorState
-            ? [activeIdentityMirrorState.targetBotName]
-            : [],
+          replacedSelfNames: [],
         },
       ),
       replyCaps.tableReplyMaxChars,
@@ -21396,12 +21371,6 @@ async function generateCoffeeBotReply(args: {
           occurredAt: assistantNow,
         })
       : null;
-  if (identityMirrorState) {
-    nextSocialByBotId = applyCoffeeIdentityMirrorIrritation({
-      socialByBotId: nextSocialByBotId,
-      targetBotId: identityMirrorState.targetBotId,
-    });
-  }
   nextSocialByBotId = lockCoffeeTrollMoodV1(
     coffeePowerPlan,
     nextSocialByBotId,

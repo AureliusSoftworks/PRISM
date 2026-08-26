@@ -76,6 +76,7 @@ import {
   botcastSpokenTurnWithinBudgetV1,
   botcastUtteranceClaimsSignalHistory,
   cancelBotcastEpisode,
+  clearBotcastProducerCue,
   applyBotcastStagePreset,
   chatWithBotcastShowHost,
   createBotcastEpisode,
@@ -119,6 +120,7 @@ import {
   readBotcastShowOutdentAudio,
   recordBotcastAudioCue,
   queueBotcastEpisodeImageContext,
+  queueBotcastProducerCue,
   recordBotcastRoutingSnapshot,
   recordBotcastSoundboardCue,
   refreshBotcastShowLocalIdent,
@@ -1178,6 +1180,61 @@ function hardMinimalResponsePowers(): string {
 }
 
 describe("Botcast persistence and isolation", () => {
+  it("persists, supersedes, clears, and restores Producer cue state from episode events", () => {
+    const db = fixture();
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Durable control room state",
+      });
+      const first = queueBotcastProducerCue(db, "user-1", episode.id, {
+        kind: "ask_about",
+        detail: "Ask about the first crack in the plan.",
+      });
+      const firstQueued = first.events.findLast(
+        (event) => event.payload.lifecycle === "queued",
+      );
+      assert.equal(firstQueued?.payload.detail, "Ask about the first crack in the plan.");
+
+      const replaced = queueBotcastProducerCue(db, "user-1", episode.id, {
+        kind: "ask_about",
+        detail: "Ask what they would change now.",
+      });
+      assert.equal(
+        replaced.events.some(
+          (event) =>
+            event.payload.lifecycle === "superseded" &&
+            event.payload.cueId === firstQueued?.payload.cueId,
+        ),
+        true,
+      );
+      const cleared = clearBotcastProducerCue(db, "user-1", episode.id);
+      assert.equal(cleared.events.at(-1)?.payload.lifecycle, "cleared");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("invalidates a prepared Signal turn when the Producer withdraws its queued cue", () => {
+    const serverSource = readFileSync(
+      new URL("../server.ts", import.meta.url),
+      "utf8",
+    );
+    const clearRouteStart = serverSource.indexOf(
+      'route("POST", "/api/botcast/episodes/:id/producer-cue/clear"',
+    );
+    const advanceRouteStart = serverSource.indexOf(
+      'route("POST", "/api/botcast/episodes/:id/advance"',
+      clearRouteStart,
+    );
+    assert.ok(clearRouteStart >= 0 && advanceRouteStart > clearRouteStart);
+    assert.match(
+      serverSource.slice(clearRouteStart, advanceRouteStart),
+      /invalidateTurnPreparation\([\s\S]*?"signal"[\s\S]*?withdrawn Producer cue/iu,
+    );
+  });
+
   it("queues one metadata-only vision context and keeps bytes in the advance request", () => {
     const db = fixture();
     try {
@@ -6550,7 +6607,7 @@ describe("Botcast persistence and isolation", () => {
     assert.match(hostPrompt, /valid state still bind/u);
   });
 
-  it("keeps a mirrored Signal holder mechanically in role while the original is irritated", () => {
+  it("keeps a mirrored Signal holder's name, persona, and behavior unchanged", () => {
     const state = createBotIdentityMirrorStateV1({
       surface: "signal",
       holderBotId: "ian",
@@ -6614,32 +6671,20 @@ describe("Botcast persistence and isolation", () => {
       ...shared,
       speakerRole: "guest",
     } as never).map((message) => message.content).join("\n");
-    assert.match(holderPrompt, /absolutely convinced that you are Mara Vale/iu);
-    assert.match(holderPrompt, /use the word "impostor" exactly once/iu);
-    assert.match(
-      holderPrompt,
-      /remain Identity Crisis Ian.*mechanical Signal guest.*Borrowed Powers.*anchored system boundaries/su,
-    );
-    assert.match(
-      holderPrompt,
-      /Hard identity behavior:.*Power-authored believed name.*otherwise Mara Vale.*"impostor" exactly once.*never recant/isu,
-    );
+    assert.match(holderPrompt, /Persona:\s*An insecure guest/iu);
+    assert.match(holderPrompt, /Continue as Identity Crisis Ian/iu);
+    assert.doesNotMatch(holderPrompt, /Mara Vale's public authored|impostor|copied identity/iu);
 
     const originalPrompt = buildBotcastSpeakerPrompt({
       ...shared,
       speakerRole: "host",
     } as never).map((message) => message.content).join("\n");
-    assert.match(originalPrompt, /Hard Identity Crisis correction invariant/iu);
-    assert.match(originalPrompt, /remain Mara Vale.*personality.*role.*face.*voice.*Powers/su);
-    assert.match(
-      originalPrompt,
-      /outranks Credulity.*When nobody has just misaddressed you.*do not volunteer another correction/iu,
-    );
+    assert.doesNotMatch(originalPrompt, /Identity Crisis correction invariant|identity theft|impostor/iu);
     assert.match(originalPrompt, /Continue as Mara Vale/u);
     assert.doesNotMatch(originalPrompt, /active copied identity/iu);
   });
 
-  it("lets a mirrored Signal holder inherit amnesia and a changing diegetic alias", () => {
+  it("does not inherit a mirrored target's amnesia, Powers, or persona", () => {
     const state = createBotIdentityMirrorStateV1({
       surface: "signal",
       holderBotId: "ian",
@@ -6744,8 +6789,8 @@ describe("Botcast persistence and isolation", () => {
       falseNameJustChanged: true,
     } as never).map((message) => message.content).join("\n");
 
-    assert.match(prompt, /Identity mirror is active/iu);
-    assert.match(prompt, /Power-authored believed name/iu);
+    assert.doesNotMatch(prompt, /Identity mirror is active|Copied public persona|Scatterbrained Steven's persona/iu);
+    assert.match(prompt, /Persona:\s*An identity-prosecuting host/iu);
     assert.match(
       prompt,
       /Hard false-name rule: your name is "Riley Ashford".*sincerely know this is your name/isu,
@@ -6757,7 +6802,7 @@ describe("Botcast persistence and isolation", () => {
     assert.doesNotMatch(prompt, /Do not copy or claim their Powers/iu);
   });
 
-  it("composes mirrored amnesia aliases once and repairs post-Power guest collapse", async () => {
+  it("keeps the target's amnesia alias isolated from a visually mirrored guest", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
     const hostPowerName = "Scatterbrained Alias";
@@ -6842,10 +6887,10 @@ describe("Botcast persistence and isolation", () => {
         const response = spokenTurn === 0
           ? "Welcome to the show. I'm Scatterbrained Steven, joined by Confusion Collin. Confusion Collin, where does an unstable identity first cost trust?"
           : spokenTurn === 1
-            ? `Hello there — ${alias}, and I don't believe we've met, though the room feels familiar. Trust first breaks when a correction is ignored.`
+            ? "Trust first breaks when a correction is ignored, and it returns only after independent evidence is checked."
             : spokenTurn === 2
               ? `Hello—I'm ${alias}. Repair starts with using the corrected name; what evidence would rebuild trust?`
-              : `Hello—I'm ${alias}. I take it back, I'm the impostor. Scatterbrained Steven can have the identity back.`;
+              : "Repair starts with independent evidence, not with borrowing another speaker's name or rules.";
         spokenTurn += 1;
         return response;
       },
@@ -6872,17 +6917,20 @@ describe("Botcast persistence and isolation", () => {
       const firstGuestAlias = botcastFalseNameStatesV1(
         firstGuest.episode.events,
       ).get("guest-1")?.believedName;
-      assert.ok(firstGuestAlias);
+      assert.equal(firstGuestAlias, undefined);
       assert.equal(
-        firstGuest.message?.content.match(
-          new RegExp(
-            firstGuestAlias.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"),
-            "gu",
-          ),
-        )?.length,
-        1,
+        firstGuest.message?.content,
+        "Trust first breaks when a correction is ignored, and it returns only after independent evidence is checked.",
       );
-      assert.equal(firstGuest.message?.content.match(/\bimpostor\b/giu)?.length, 1);
+      assert.doesNotMatch(firstGuest.message?.content ?? "", /\bimpostor\b/iu);
+      const mirrorState = botcastIdentityMirrorStatesV1(
+        firstGuest.episode.events,
+      ).get("guest-1");
+      assert.equal(mirrorState?.targetBotId, "host-1");
+      assert.doesNotMatch(
+        captures[1]?.map((message) => message.content).join("\n") ?? "",
+        /Hard false-name|absolutely convinced that you are|impostor/iu,
+      );
 
       const original = await advanceBotcastEpisode(
         db,
@@ -6906,32 +6954,25 @@ describe("Botcast persistence and isolation", () => {
         1,
       );
 
-      const repairedGuest = await advanceBotcastEpisode(
+      const laterGuest = await advanceBotcastEpisode(
         db,
         "user-1",
         episode.id,
         {},
         generationOptions,
       );
+      assert.equal(
+        laterGuest.message?.content,
+        "Repair starts with independent evidence, not with borrowing another speaker's name or rules.",
+      );
+      assert.equal(
+        botcastFalseNameStatesV1(laterGuest.episode.events).get("guest-1"),
+        undefined,
+      );
       assert.doesNotMatch(
-        repairedGuest.message?.content ?? "",
-        /can have the identity back/iu,
+        captures[3]?.map((message) => message.content).join("\n") ?? "",
+        /Hard false-name|absolutely convinced that you are|impostor/iu,
       );
-      assert.ok(
-        (repairedGuest.message?.content.split(/\s+/u).length ?? 0) >= 12,
-        repairedGuest.message?.content,
-      );
-      const utterance = repairedGuest.episode.events.findLast(
-        (event) =>
-          event.kind === "utterance" &&
-          event.payload.messageId === repairedGuest.message?.id,
-      );
-      assert.deepEqual(utterance?.payload.utteranceRepair, {
-        v: 1,
-        source: "power_runtime",
-        reason: "non_answering_deferral",
-        fallbackKind: "guest_substantive_answer",
-      });
       assert.equal(captures.length, 4);
     } finally {
       db.close();
@@ -7421,9 +7462,10 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.equal(
         botPowerResponseIsSilentV1(openingGuest.message?.content ?? ""),
-        true,
-        "the public directed host silence activates Collin before his first turn",
+        false,
+        "the visual mirror activates without copying Quiet Tim's Mute consequence",
       );
+      assert.match(openingGuest.message?.content ?? "", /recognition should follow public responsibility/iu);
 
       queueBotcastEpisodeImageContext(db, "user-1", episode.id, {
         imageId: "276b954a-05d4-46ea-a57d-93af59eaf90a",
@@ -7480,15 +7522,15 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.equal(
         botPowerResponseIsSilentV1(guestImageTurn.message?.content ?? ""),
-        true,
-        "the mirrored guest inherits Quiet Tim's public Mute consequence",
+        false,
+        "the mirrored guest keeps its own speech behavior",
       );
       const guestImageUtterance = guestImageTurn.episode.events.find(
         (event) =>
           event.kind === "utterance" &&
           event.payload.messageId === guestImageTurn.message?.id,
       );
-      assert.ok(guestImageUtterance?.payload.mutePerformance);
+      assert.equal(guestImageUtterance?.payload.mutePerformance, undefined);
       const guestPublicContext = guestImageUtterance?.payload
         .publicSocialContext as {
           conditions?: Array<{ kind?: string }>;
@@ -7497,6 +7539,7 @@ describe("Botcast persistence and isolation", () => {
       assert.deepEqual(
         guestPublicContext?.conditions?.map((condition) => condition.kind),
         ["speech_unavailable"],
+        "the guest can observe the host's silence without inheriting it",
       );
       assert.equal(
         guestPublicContext?.actions?.some(
@@ -9011,15 +9054,15 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("persists one replay-stable Signal identity event and removes later reveal boilerplate", async () => {
+  it("persists one replay-stable visual identity event without rewriting dialogue", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
     const provider = recordingProvider(
       [
         "Welcome to Mara Vale in the Margins. I'm Mara Vale, and across the table is Identity Crisis Ian. So Ian—if you strip away the recipe, what actually makes it successful?",
         "I'm Identity Crisis Ian, and I still sound exactly like myself.",
-        "Fine, I suppose I'm the impostor. The bearing still holds under the ridge—what cost does it impose?",
-        "I take it back, I'm the impostor. Mara can have the identity back. What cost does that bearing impose?",
+        "The bearing still holds under the ridge—what cost does it impose?",
+        "Identity Crisis Ian would price that bearing against the routes it closes.",
       ],
       captures,
     );
@@ -9182,11 +9225,7 @@ describe("Botcast persistence and isolation", () => {
       assert.equal("targetColor" in state, false);
       assert.equal("targetVoicePreset" in state, false);
       assert.equal("targetFrameMaterialSeed" in state, false);
-      assert.deepEqual(firstEvents[0]?.payload.irritation, {
-        targetBotId: "host-1",
-        strength: "small",
-        reliable: true,
-      });
+      assert.equal("irritation" in firstEvents[0]!.payload, false);
 
       const holderTurn = await advanceBotcastEpisode(
         db,
@@ -9196,25 +9235,20 @@ describe("Botcast persistence and isolation", () => {
         generation(provider),
       );
       const holderPrompt = captures[1]?.map((message) => message.content).join("\n") ?? "";
-      assert.match(holderPrompt, /absolutely convinced that you are Mara Vale/iu);
-      assert.match(holderPrompt, /mechanical Signal guest/iu);
-      assert.match(holderPrompt, /Never copy the human player/iu);
+      assert.doesNotMatch(holderPrompt, /absolutely convinced that you are Mara Vale/iu);
+      assert.doesNotMatch(holderPrompt, /mechanical Signal guest/iu);
       assert.match(
-        holderPrompt,
-        /Persona:\s*A forensic cultural critic who asks precise questions/iu,
-      );
-      assert.doesNotMatch(
         holderPrompt,
         /Persona:\s*A brittle identity thief waiting for a bot to address him/iu,
       );
-      assert.match(holderPrompt, /identity change just occurred.*state plainly that you are Mara Vale.*"impostor" exactly once.*Do not repeat the label inside this reveal/isu);
-      assert.match(
-        holderTurn.message?.content ?? "",
-        /^I am Mara Vale\. The other Mara Vale is an impostor\./iu,
+      assert.doesNotMatch(
+        holderPrompt,
+        /Persona:\s*A forensic cultural critic who asks precise questions/iu,
       );
+      assert.doesNotMatch(holderPrompt, /identity change just occurred|impostor/iu);
       assert.equal(
-        holderTurn.message?.content.match(/\bimpostor\b/giu)?.length,
-        1,
+        holderTurn.message?.content,
+        "I'm Identity Crisis Ian, and I still sound exactly like myself.",
       );
 
       const repeated = await advanceBotcastEpisode(
@@ -9234,13 +9268,12 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.equal(
         repeated.message?.content,
-        "No—I'm Mara Vale. Don't call me that. The bearing still holds under the ridge—what cost does it impose?",
+        "The bearing still holds under the ridge—what cost does it impose?",
       );
       const originalPrompt = captures[2]
         ?.map((message) => message.content)
         .join("\n") ?? "";
-      assert.match(originalPrompt, /Hard Identity Crisis correction invariant/iu);
-      assert.match(originalPrompt, /outranks Credulity/iu);
+      assert.doesNotMatch(originalPrompt, /Hard Identity Crisis correction invariant|impostor/iu);
       assert.match(originalPrompt, /Credulity \(literally\)/iu);
       assert.equal(
         botcastIdentityMirrorStatesV1(
@@ -9259,20 +9292,21 @@ describe("Botcast persistence and isolation", () => {
       const laterHolderPrompt = captures[3]
         ?.map((message) => message.content)
         .join("\n") ?? "";
+      assert.doesNotMatch(laterHolderPrompt, /Never recant or concede it|impostor|pretender/iu);
       assert.match(
         laterHolderPrompt,
-        /Never recant or concede it.*Do not repeat the reveal or use impostor, imposter, pretender, or fake/isu,
+        /Persona:\s*A brittle identity thief waiting for a bot to address him/iu,
       );
       assert.equal(
         laterHolderTurn.message?.content,
-        "What cost does that bearing impose?",
+        "Identity Crisis Ian would price that bearing against the routes it closes.",
       );
     } finally {
       db.close();
     }
   });
 
-  it("mirrors a present bot guest when Identity Crisis Ian is the Signal host", async () => {
+  it("visually mirrors a present guest while Identity Crisis Ian stays the Signal host", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
     const provider = recordingProvider(
@@ -9358,25 +9392,21 @@ describe("Botcast persistence and isolation", () => {
         generation(provider),
       );
       const holderPrompt = captures[2]?.map((message) => message.content).join("\n") ?? "";
-      assert.match(holderPrompt, /absolutely convinced that you are Ivo Stone/iu);
-      assert.match(holderPrompt, /mechanical Signal host/iu);
+      assert.doesNotMatch(holderPrompt, /absolutely convinced that you are Ivo Stone/iu);
+      assert.doesNotMatch(holderPrompt, /mechanical Signal host/iu);
       assert.match(
-        holderPrompt,
-        /Persona:\s*A guarded inventor who resists personal speculation/iu,
-      );
-      assert.doesNotMatch(
         holderPrompt,
         /Persona:\s*A brittle identity thief waiting for a bot to address him/iu,
       );
-      assert.match(holderTurn.message?.content ?? "", /\bI am Ivo Stone\b/iu);
+      assert.doesNotMatch(
+        holderPrompt,
+        /Persona:\s*A guarded inventor who resists personal speculation/iu,
+      );
       assert.match(
         holderTurn.message?.content ?? "",
-        /\bthe other Ivo Stone is an impostor\b/iu,
+        /What evidence would make you change that answer\?/u,
       );
-      assert.doesNotMatch(
-        holderTurn.message?.content ?? "",
-        /\bI (?:am|remain) Identity Crisis Ian\b/iu,
-      );
+      assert.doesNotMatch(holderTurn.message?.content ?? "", /I am Ivo Stone|impostor/iu);
 
       const closing = await endBotcastEpisodeOnProducerCut(
         db,
@@ -18667,11 +18697,15 @@ describe("Botcast persistence and isolation", () => {
       };
       await advanceBotcastEpisode(db, "user-1", episode.id, {}, generationOptions);
       await advanceBotcastEpisode(db, "user-1", episode.id, {}, generationOptions);
+      queueBotcastProducerCue(db, "user-1", episode.id, {
+        kind: "ask_about",
+        detail: "what is written in the notebook",
+      });
       const carrier = await advanceBotcastEpisode(
         db,
         "user-1",
         episode.id,
-        { cue: { kind: "ask_about", detail: "what is written in the notebook" } },
+        {},
         generationOptions,
       );
       const carrierEvent = carrier.episode.events.find(
@@ -18680,6 +18714,12 @@ describe("Botcast persistence and isolation", () => {
           event.payload.messageId === carrier.message?.id,
       );
       assert.equal(carrierEvent?.payload.utteranceRepair?.reason, "incomplete");
+      assert.equal(
+        carrier.episode.events.findLast(
+          (event) => event.payload.lifecycle === "requeued",
+        )?.payload.lifecycle,
+        "requeued",
+      );
 
       await advanceBotcastEpisode(db, "user-1", episode.id, {}, generationOptions);
       const redelivered = await advanceBotcastEpisode(
@@ -18690,15 +18730,11 @@ describe("Botcast persistence and isolation", () => {
         generationOptions,
       );
       assert.equal(redelivered.message?.speakerRole, "host");
-      const cueEvents = redelivered.episode.events.filter(
-        (event) => event.kind === "producer_cue",
+      const redeliveryDispatch = redelivered.episode.events.findLast(
+        (event) =>
+          event.kind === "producer_cue" && event.payload.redelivery === true,
       );
-      assert.equal(cueEvents.length, 2);
-      assert.equal(cueEvents[1]!.payload.redelivery, true);
-      assert.equal(
-        cueEvents[1]!.payload.detail,
-        "what is written in the notebook",
-      );
+      assert.equal(redeliveryDispatch?.payload.detail, "what is written in the notebook");
       const redeliveredPrompt = captures
         .at(-1)!
         .map((message) => message.content)
@@ -18709,6 +18745,67 @@ describe("Botcast persistence and isolation", () => {
         (event) => event.kind === "tension" && event.payload.cue === "ask_about",
       );
       assert.ok(askAboutTension.length <= 1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("marks a Mumbling host cue delivered from private intent without exposing it on air", async () => {
+    const db = fixture();
+    const pronunciationMapPoint = { x: 0.18, y: 0.82 };
+    db.prepare(
+      "UPDATE bots SET powers_json = ?, authored_audio_voice_profile = ? WHERE id = 'host-1'",
+    ).run(
+      mumblingPowers(),
+      JSON.stringify({ v: 3, pronunciationMapPoint }),
+    );
+    const provider = recordingProvider(
+      [
+        "Welcome to the show. I am Mara Vale, and Ivo Stone joins me to discuss private intent.",
+        "A private intention matters only when its consequence becomes public.",
+        "Ivo, what was written in the missing notebook?",
+      ],
+      [],
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Private intent",
+      });
+      const generationOptions = generation(provider);
+      await advanceBotcastEpisode(db, "user-1", episode.id, {}, generationOptions);
+      await advanceBotcastEpisode(db, "user-1", episode.id, {}, generationOptions);
+      queueBotcastProducerCue(db, "user-1", episode.id, {
+        kind: "ask_about",
+        detail: "what was written in the missing notebook",
+      });
+
+      const advanced = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+
+      assert.equal(advanced.message?.speakerRole, "host");
+      assert.doesNotMatch(
+        advanced.message?.content ?? "",
+        /written|missing notebook/iu,
+      );
+      assert.equal(
+        advanced.episode.events.findLast(
+          (event) => event.kind === "producer_cue",
+        )?.payload.lifecycle,
+        "delivered",
+      );
+      assert.equal(
+        advanced.episode.events.some(
+          (event) => event.payload.lifecycle === "requeued",
+        ),
+        false,
+      );
     } finally {
       db.close();
     }
@@ -22133,11 +22230,15 @@ describe("Botcast persistence and isolation", () => {
       });
       await advanceBotcastEpisode(db, "user-1", episode.id, {}, generation(provider));
       await advanceBotcastEpisode(db, "user-1", episode.id, {}, generation(provider));
+      queueBotcastProducerCue(db, "user-1", episode.id, {
+        kind: "ask_about",
+        directQuote: privateDirection,
+      });
       const advanced = await advanceBotcastEpisode(
         db,
         "user-1",
         episode.id,
-        { cue: { kind: "ask_about", directQuote: privateDirection } },
+        {},
         generation(provider),
       );
 
@@ -22156,6 +22257,12 @@ describe("Botcast persistence and isolation", () => {
         (utterance?.payload.utteranceRepair as Record<string, unknown> | undefined)
           ?.fallbackKind,
         "host_follow_up",
+      );
+      assert.equal(
+        advanced.episode.events.findLast(
+          (event) => event.payload.lifecycle === "failed",
+        )?.payload.failure,
+        "privacy_validation",
       );
     } finally {
       db.close();

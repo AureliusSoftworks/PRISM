@@ -1240,6 +1240,7 @@ import {
   botIdentityMirrorTransitionActiveV1,
   botIdentityShapeshiftTransitionActiveV1,
   resolveBotIdentityMirrorAvatarDetailsV1,
+  resolveBotIdentityMirrorFaceV1,
   resolveBotIdentityMirrorVoiceV1,
   resolveBotIdentityShapeshiftAvatarDetailsV1,
   resolveBotIdentityShapeshiftVoiceV1,
@@ -140300,7 +140301,6 @@ function HomeContent(): React.JSX.Element {
               const falseNameState = falseNameByHolderBotId[bot.id] ?? null;
               const seatPublicName =
                 falseNameState?.believedName?.trim() ||
-                identityMirrorState?.targetBotName?.trim() ||
                 identityShapeshiftState?.targetBotName?.trim() ||
                 bot.name;
               const identityMirrorNowMs = coffeeReplayActive
@@ -140323,9 +140323,16 @@ function HomeContent(): React.JSX.Element {
               const identityBorrowTargetActive = Boolean(
                 identityPresentationState,
               );
-              const seatFaceStyle = identityBorrowTargetActive
-                ? identityPresentationState!.targetFace
-                : resolveBotFaceStyleForBot(bot);
+              const holderSeatFaceStyle = resolveBotFaceStyleForBot(bot);
+              const seatFaceStyle = identityMirrorState
+                ? resolveBotIdentityMirrorFaceV1(
+                    identityMirrorState,
+                    holderSeatFaceStyle,
+                    identityBorrowTargetActive,
+                  )
+                : identityShapeshiftState && identityBorrowTargetActive
+                  ? identityShapeshiftState.targetFace
+                  : holderSeatFaceStyle;
               const seatAvatarDetails = identityMirrorState
                 ? resolveBotIdentityMirrorAvatarDetailsV1(
                     identityMirrorState,
@@ -146472,11 +146479,17 @@ function HomeContent(): React.JSX.Element {
               identityColor,
               renderTheme,
             );
-            const faceStyle =
-              presentationIdentity &&
-              botSummary.identityMirrorTargetFaceActive
-                ? presentationIdentity.targetFace
-                : resolveBotFaceStyleForBot(bot);
+            const holderFaceStyle = resolveBotFaceStyleForBot(bot);
+            const faceStyle = identityMirrorState
+              ? resolveBotIdentityMirrorFaceV1(
+                  identityMirrorState,
+                  holderFaceStyle,
+                  Boolean(botSummary.identityMirrorTargetFaceActive),
+                )
+              : identityShapeshiftState &&
+                    botSummary.identityMirrorTargetFaceActive
+                ? identityShapeshiftState.targetFace
+                : holderFaceStyle;
             const sipMouthTreatmentActive = coffeeSeatSipMouthTreatmentActive({
               sipActive: sipPresentation.active,
               coffeePuckerEnabled: faceStyle.mouthCoffeePucker,

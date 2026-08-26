@@ -94,6 +94,9 @@ describe("mode tutorials", () => {
     assert.match(step.body, /truth\/proof grade and juror breakdown/u);
     assert.match(step.body, /Reduced Motion/u);
     assert.match(step.body, /No gameplay action calls an LLM or synthesizes a voice/u);
+    assert.match(step.body, /Identity Crisis visually borrows exactly the latest direct addresser’s eyes/u);
+    assert.match(step.body, /complete resting and speaking mouth package/u);
+    assert.match(step.body, /name, persona, dialogue, voice and Accent Map, color, chassis\/frame, Powers and consequences/u);
     assert.match(step.body, /one case card with every immutable playthrough nested beneath it/u);
     assert.match(step.body, /same mystery/u);
     assert.match(step.body, /zero AI, image, or voice synthesis/u);

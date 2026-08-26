@@ -673,6 +673,7 @@ export interface DebateBotSummary {
   glyph: string | null;
   avatarDetails?: DebateBotSnapshotV1["avatarDetails"];
   voiceProfile?: DebateBotSnapshotV1["voiceProfile"];
+  replayVisualSnapshot?: DebateBotSnapshotV1["replayVisualSnapshot"];
   powers?: DebateBotSnapshotV1["powers"];
   systemPrompt?: string;
   hardMuted: boolean;
@@ -4553,16 +4554,12 @@ function debateBotPresentation(
       cast.some((participant) => participant.id === target.botId),
     { holderSpeaking: true },
   );
-  // Shapeshifter changes the visible form, not who the chamber is addressing.
-  // The holder keeps their authored name and glyph (and color, applied in
-  // debateIdentityAppearanceBotV1) so the floor can still identify the speaker;
-  // "Appearing as …" carries the disguise. Identity Crisis still reads as the
-  // borrowed identity, which is the point of that Power.
+  // Neither visual Power changes who the chamber is addressing. Shapeshifter
+  // carries its disguise in the label; Identity Crisis changes only eyes,
+  // mouth, Ink, and glyph.
   const shapeshifting = identityEffect === "identity_shapeshift";
   return {
-    displayName: shapeshifting
-      ? displayName
-      : (identitySource?.name ?? displayName),
+    displayName,
     identityLabel: identitySource
       ? shapeshifting
         ? `Appearing as ${identitySource.name}`
@@ -4571,7 +4568,10 @@ function debateBotPresentation(
         ? `Believes: ${falseName}`
         : null,
     identityEffect,
-    glyph: shapeshifting ? bot.glyph : (identitySource?.glyph ?? bot.glyph),
+    glyph:
+      identityEffect === "identity_mirror"
+        ? (identitySource?.glyph ?? bot.glyph)
+        : bot.glyph,
     voiceSourceBotId: identitySource?.id ?? bot.id,
     visibility:
       observerProjection.visibility === "hidden"
@@ -10768,6 +10768,7 @@ export function DebateExperience(
               glyph: snapshot.glyph,
               avatarDetails: snapshot.avatarDetails,
               voiceProfile: pacedVoiceProfile,
+              replayVisualSnapshot: snapshot.replayVisualSnapshot ?? null,
               powers: snapshot.powers,
               systemPrompt: snapshot.systemPrompt,
               hardMuted:
@@ -26956,6 +26957,7 @@ export function DebateExperience(
             glyph: snapshot.glyph,
             avatarDetails: snapshot.avatarDetails,
             voiceProfile: snapshot.voiceProfile ?? null,
+            replayVisualSnapshot: snapshot.replayVisualSnapshot ?? null,
             powers: snapshot.powers,
             systemPrompt: snapshot.systemPrompt,
             hardMuted: session.powerPlan.bots[snapshot.id]?.hardMuted === true,

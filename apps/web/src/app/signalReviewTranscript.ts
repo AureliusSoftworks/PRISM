@@ -3,6 +3,7 @@ import {
   botPowerMutePublicResponseAtElapsedV1,
   botPowerResponseIsSilentV1,
   botcastPublicReactionSpeechForMessage,
+  botcastProducerCueLifecyclesFromEvents,
   botcastReplayTimeline,
   heardBotPresenceBeatTextV1,
   type BotPresenceBeatV1,
@@ -118,6 +119,11 @@ export function buildSignalReviewTranscript(
     const heard = heardBotPresenceBeatTextV1(beat).trim();
     return heard ? [`- ${beat.speaker.name} (${beat.trigger}): ${heard}`] : [];
   });
+  const producerCueLifecycleLines = botcastProducerCueLifecyclesFromEvents(
+    events,
+  ).map((lifecycle) =>
+    `- Cue ${lifecycle.cueId} | ${lifecycle.status}${lifecycle.failure ? ` | ${lifecycle.failure}` : ""} | ${lifecycle.delivery}`,
+  );
 
   const lines: string[] = [
     "# PRISM Signal Review Transcript",
@@ -170,6 +176,15 @@ export function buildSignalReviewTranscript(
       );
     }
   }
+
+  lines.push(
+    "",
+    "## Producer Cue Lifecycle",
+    "",
+    ...(producerCueLifecycleLines.length > 0
+      ? producerCueLifecycleLines
+      : ["No durable Producer cue lifecycle was recorded."]),
+  );
 
   lines.push("", "## Transcript", "");
   if (episode.messages.length === 0) {
@@ -302,8 +317,17 @@ export function buildSignalReviewTranscript(
     lines.push("No production events were recorded.");
   } else {
     for (const event of events) {
+      const reviewPayload =
+        event.kind === "producer_cue"
+          ? (() => {
+              const safe = { ...event.payload };
+              delete safe.detail;
+              delete safe.directQuote;
+              return safe;
+            })()
+          : event.payload;
       lines.push(
-        `- #${String(event.sequence).padStart(4, "0")} | ${formatTimestamp(event.occurredAt)} | ${event.kind} | event ${event.id} | ${sessionReviewStableJson(event.payload)}`,
+        `- #${String(event.sequence).padStart(4, "0")} | ${formatTimestamp(event.occurredAt)} | ${event.kind} | event ${event.id} | ${sessionReviewStableJson(reviewPayload)}`,
       );
     }
   }

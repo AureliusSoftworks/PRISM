@@ -1464,6 +1464,73 @@ function authoredExaminationsFromJson(args: {
   return args.examinationIds.map((id) => ({ id, text: byId.get(id)! }));
 }
 
+const MYSTERY_INVESTIGATION_COURT_LANGUAGE_RE = /\b(?:(?:the|this|our)\s+court|courtroom|your\s+honou?r|the\s+bench|the\s+jury|witness\s+stand|sworn\s+testimony)\b/iu;
+
+function assertMysteryInvestigationDialogueStaysInPhaseV2(args: {
+  seatId: string;
+  suspect: AuthoredSuspectV2;
+}): void {
+  const lines: Array<{ field: string; text: string }> = [
+    { field: "room introduction", text: args.suspect.roomIntroduction },
+    { field: "default Present prompt", text: args.suspect.defaultPresentProsecutionLine },
+    { field: "default Present response", text: args.suspect.defaultPresentReaction },
+    ...args.suspect.talkTopics.flatMap((topic) => [
+      { field: `Talk question \"${topic.id}\"`, text: topic.question },
+      { field: `Talk response \"${topic.id}\"`, text: topic.response },
+      ...topic.repeatResponses.map((repeat, index) => ({
+        field: `Talk repeat response \"${topic.id}\" #${index + 1}`,
+        text: repeat.response,
+      })),
+    ]),
+    ...args.suspect.presentReactions.flatMap((reaction) => [
+      { field: `Present prompt \"${reaction.recordId}\"`, text: reaction.prosecutionLine },
+      { field: `Present response \"${reaction.recordId}\"`, text: reaction.response },
+    ]),
+  ];
+  for (const line of lines) {
+    const courtLanguage = line.text.match(MYSTERY_INVESTIGATION_COURT_LANGUAGE_RE)?.[0];
+    if (courtLanguage) {
+      throw new Error(
+        `The authored investigation dialogue for ${args.seatId} uses courtroom language (${courtLanguage}) in ${line.field}.`,
+      );
+    }
+  }
+}
+
+function assertMysteryPresentDialogueMatchesRecordTitlesV2(args: {
+  seatId: string;
+  suspect: AuthoredSuspectV2;
+  recordItems: readonly { reference: DebateMysteryRecordReferenceV2; title: string }[];
+}): void {
+  const namedDefaultRecord = args.recordItems.find((item) =>
+    presentRecordTitleMentionedV2(args.suspect.defaultPresentProsecutionLine, item.title) ||
+    presentRecordTitleMentionedV2(args.suspect.defaultPresentReaction, item.title));
+  if (namedDefaultRecord) {
+    throw new Error(
+      `The authored default Present dialogue for ${args.seatId} names the specific Case File record ${namedDefaultRecord.title}.`,
+    );
+  }
+  for (const reaction of args.suspect.presentReactions) {
+    const expectedRecord = args.recordItems.find((item) =>
+      mysteryRecordKey(item.reference) === reaction.recordId);
+    if (!expectedRecord) continue;
+    const fields = [
+      { name: "Prosecutor line", text: reaction.prosecutionLine },
+      { name: "witness response", text: reaction.response },
+    ];
+    for (const field of fields) {
+      const mismatchedRecord = args.recordItems.find((item) =>
+        mysteryRecordKey(item.reference) !== reaction.recordId &&
+        presentRecordTitleMentionedV2(field.text, item.title));
+      if (mismatchedRecord) {
+        throw new Error(
+          `The authored ${field.name} for ${args.seatId}'s ${expectedRecord.title} Present exchange names a different Case File record (${mismatchedRecord.title}).`,
+        );
+      }
+    }
+  }
+}
+
 function authoredSuspectFromJson(args: {
   value: Record<string, unknown>;
   seatId: string;
@@ -1689,6 +1756,17 @@ function authoredSuspectFromJson(args: {
       reaction.recordId === `${reference.kind}:${reference.id}`));
   if (missingPresentReaction) {
     throw new Error(`The authored investigation omitted ${args.seatId}'s proof-bearing evidence reaction.`);
+  }
+  if (!args.courtOnly) {
+    assertMysteryInvestigationDialogueStaysInPhaseV2({
+      seatId: args.seatId,
+      suspect,
+    });
+    assertMysteryPresentDialogueMatchesRecordTitlesV2({
+      seatId: args.seatId,
+      suspect,
+      recordItems: args.recordItems,
+    });
   }
   return suspect;
 }
@@ -2339,6 +2417,16 @@ async function authorMysteryV2(args: {
     })),
     evidenceIds: args.scaffold.evidence.map((item) => item.id),
     examinationIds: courtOnly ? [] : args.examinationIds,
+    identityMirrorHolders: Object.entries(args.powerPlan.bots).flatMap(
+      ([botId, plan]) => plan.effects.some(({ effect }) =>
+        effect.type === "identity_mirror" && effect.trigger === "direct_bot_address")
+        ? [{
+            botId,
+            name: botById.get(botId)?.name ?? botId,
+            rule: "When another cast bot directly addresses this holder, the sealed presentation borrows only that addresser's eyes, complete resting/live mouth package, Avatar Details Ink, and lower glyph. The holder keeps their name, persona, color, communication frame, Accent Map, authored voice, Powers, behavior, and every other identity field.",
+          }]
+        : [],
+    ),
     prosecutor: {
       botId: prosecutor.id,
       name: prosecutor.name,
@@ -2390,6 +2478,7 @@ async function authorMysteryV2(args: {
             "Keep the public opening, victim description, motive, method, and Prosecutor internal reasoning under 120 words each.",
             "Keep each evidence description under 55 words.",
             "Keep public prose free of culprit labels and private proof-route metadata.",
+            "Identity Crisis is presentation-only. Its cues must never change the sealed culprit, evidence, alibis, or proof routes.",
             "No placeholders, TODOs, bracketed alternatives, or copied franchise characters.",
           ],
         },
@@ -2579,6 +2668,7 @@ async function authorMysteryV2(args: {
       roomNames: setup.roomNames,
       evidenceIds: setup.evidenceIds,
       examinationIds: setup.examinationIds,
+      identityMirrorHolders: setup.identityMirrorHolders,
       prosecutor: setup.prosecutor,
       defenseCounsel: setup.defenseCounsel,
       suspects: setup.suspects,
@@ -2686,9 +2776,11 @@ async function authorMysteryV2(args: {
             : "Do not invent a presentation gate for this witness.",
           "Do not author repeat responses. PRISM owns their fact-free acknowledgment and deterministically appends this topic's canonical response.",
           "The room introduction is a self-contained persona reveal, not a question or an answer. Its distinctive wording or claim must give the first Talk topic a natural contextual handoff, but the player still chooses that question and no topic is selected automatically.",
+          "The investigation happens before court. In room introductions, Talk, and Present exchanges, never refer to the Court, a courtroom, the bench, a jury, a witness stand, sworn testimony, or 'Your Honor'. Use the room, house, investigation, Case File, and direct questions instead; courtroom language belongs only to trial dialogue.",
           "For every authored Present reaction, write the selected public Case File title exactly in both the Prosecutor line and the witness response. Never expose sealed reasoning or substitute a generic 'item' or 'evidence' reference for that public title.",
           "Every spoken bot line supplies its nonverbal beat in the dedicated stage-action field. Never put an action or a bot name inside spoken dialogue.",
           "Write Prosecutor lines only in the frozen Prosecutor persona and Defense rebuttals or objections only in the frozen Defense Counsel persona. The accused is never their own attorney.",
+          "Identity Crisis changes only the holder's eyes, complete resting/live mouth package, Avatar Details Ink, and lower glyph when a cast bot directly addresses them. Never let it change authored dialogue, persona, name, Powers, facts, proof, role ownership, or voice identity.",
           "Defendant reactions must stay usable if this suspect becomes the accused, including while another suspect is the active witness.",
           "Keep each Talk response, statement, Press answer, rebuttal, revision, and reaction under 75 words.",
           ]),
@@ -2856,6 +2948,7 @@ async function authorMysteryV2(args: {
           roomNames: setup.roomNames,
           evidenceIds: setup.evidenceIds,
           examinationIds: setup.examinationIds,
+          identityMirrorHolders: setup.identityMirrorHolders,
           prosecutor: setup.prosecutor,
           defenseCounsel: setup.defenseCounsel,
           suspects: setup.suspects,
@@ -4133,6 +4226,50 @@ function presentRecordTitleMentionedV2(text: string, title: string): boolean {
   return text.toLocaleLowerCase().includes(title.trim().toLocaleLowerCase());
 }
 
+function replaceCaseInsensitiveLiteralV2(
+  value: string,
+  search: string,
+  replacement: string,
+): string {
+  const normalizedSearch = search.toLocaleLowerCase();
+  if (!normalizedSearch) return value;
+  let result = value;
+  let cursor = 0;
+  while (cursor < result.length) {
+    const index = result.toLocaleLowerCase().indexOf(normalizedSearch, cursor);
+    if (index < 0) break;
+    result = `${result.slice(0, index)}${replacement}${result.slice(index + search.length)}`;
+    cursor = index + replacement.length;
+  }
+  return result;
+}
+
+function repairMismatchedPresentRecordTitlesV2(args: {
+  text: string;
+  expectedTitle: string;
+  recordTitles: readonly string[];
+}): string {
+  let repaired = args.text;
+  for (const title of [...args.recordTitles].sort((left, right) => right.length - left.length)) {
+    if (
+      title.trim().toLocaleLowerCase() === args.expectedTitle.trim().toLocaleLowerCase() ||
+      !presentRecordTitleMentionedV2(repaired, title)
+    ) continue;
+    repaired = replaceCaseInsensitiveLiteralV2(repaired, title, args.expectedTitle);
+  }
+  const headings = [
+    `Regarding the ${args.expectedTitle}:`,
+    `Regarding ${args.expectedTitle}:`,
+    `Let's focus on the ${args.expectedTitle}.`,
+    `Let's focus on ${args.expectedTitle}.`,
+  ];
+  const heading = headings.find((candidate) =>
+    repaired.toLocaleLowerCase().startsWith(candidate.toLocaleLowerCase()));
+  if (!heading) return repaired;
+  const body = repaired.slice(heading.length).trimStart();
+  return presentRecordTitleMentionedV2(body, args.expectedTitle) ? body : repaired;
+}
+
 function replaceGenericPresentReferenceV2(text: string, title: string): string {
   return text
     .replace(
@@ -4170,6 +4307,7 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
   graph: DebateMysteryDialogueGraphV2;
   publicState: DebateWhodunnitFormatStateV2;
   botRows: MysteryV2BotRow[];
+  repairMismatchedPresentRecordTitles: boolean;
 }): DebateMysteryPlayerRoleMigrationV2 {
   const privateCase = structuredClone(args.privateCase);
   const graph = structuredClone(args.graph);
@@ -4206,6 +4344,11 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
     ...(publicState.victim ? [{ id: publicState.victim.id, name: publicState.victim.name }] : []),
     ...publicState.suspects.map((suspect) => ({ id: suspect.seatId, name: suspect.name })),
   ];
+  const recordTitles = privateCase.recordItems.map((item) => item.title);
+  const repairPresentText = (text: string, expectedTitle: string): string =>
+    args.repairMismatchedPresentRecordTitles
+      ? repairMismatchedPresentRecordTitlesV2({ text, expectedTitle, recordTitles })
+      : text;
   const hotspotIdsByRoom = Object.fromEntries(publicState.rooms.map((room) => [
     room.id,
     room.hotspots.map((hotspot) => hotspot.id),
@@ -4532,8 +4675,14 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
           responseLine.speakerBotId = witnessBotId;
           changed = true;
         }
-        const promptText = presentPromptWithRecordTitleV2(promptLine.spokenText, recordItem.title);
-        const responseText = presentResponseWithRecordTitleV2(responseLine.spokenText, recordItem.title);
+        const promptText = presentPromptWithRecordTitleV2(
+          repairPresentText(promptLine.spokenText, recordItem.title),
+          recordItem.title,
+        );
+        const responseText = presentResponseWithRecordTitleV2(
+          repairPresentText(responseLine.spokenText, recordItem.title),
+          recordItem.title,
+        );
         if (promptLine.visibleText !== promptText || promptLine.spokenText !== promptText) {
           promptLine.visibleText = promptText;
           promptLine.spokenText = promptText;
@@ -4585,7 +4734,10 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
         id: promptLineId,
         nodeId: promptNodeId,
         text: presentPromptWithRecordTitleV2(
-          defaultPromptLine?.spokenText || "I want your response to this admitted record.",
+          repairPresentText(
+            defaultPromptLine?.spokenText || "I want your response to this admitted record.",
+            recordItem.title,
+          ),
           recordItem.title,
         ),
         speakerKind: "player",
@@ -4610,7 +4762,10 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
         id: responseLineId,
         nodeId: responseNodeId,
         text: presentResponseWithRecordTitleV2(
-          defaultResponseLine?.spokenText || "That record does not change the account I have given you.",
+          repairPresentText(
+            defaultResponseLine?.spokenText || "That record does not change the account I have given you.",
+            recordItem.title,
+          ),
           recordItem.title,
         ),
         speakerKind: "bot",
@@ -4653,7 +4808,10 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
     const recordTitle = privateCase.recordItems.find((item) =>
       mysteryRecordKey(item.reference) === requiredRecordKey)?.title;
     if (candidate.responseText && responseLine && recordTitle) {
-      const responseText = presentResponseWithRecordTitleV2(candidate.responseText, recordTitle);
+      const responseText = presentResponseWithRecordTitleV2(
+        repairPresentText(candidate.responseText, recordTitle),
+        recordTitle,
+      );
       responseLine.visibleText = responseText;
       responseLine.spokenText = responseText;
       responseLine.stageActionText = candidate.responseStageAction;
@@ -6132,6 +6290,7 @@ export async function runDebateMysteryCompilationV2(
         config,
         scaffold,
         bots,
+        powerPlan: session.powerPlan,
         eyewitnessSeatId,
         examinationIds,
         requiredContradictionBySeat: contradictionBySeat,
@@ -6530,6 +6689,11 @@ export async function ensureDebateMysteryPlayReadyV2(
       graph: stored.graph,
       publicState: original.formatState,
       botRows: bots,
+      // Replays promise byte-identical authored performances and zero voice
+      // generation. Repair original active compilations only; completed source
+      // runs and their replay copies remain immutable historical artifacts.
+      repairMismatchedPresentRecordTitles:
+        mysteryV2CaseRow(db, userId, sessionId).run_ordinal === 1,
     });
     const contractHash = debateMysteryPlayContractHashV2({
       db,
@@ -7817,6 +7981,7 @@ function advanceSpectatorTrialV2(args: {
     const option = choice?.options[0];
     if (!choice || !option) throw new HttpError(409, "The authored prosecution response is unavailable.");
     const optionLine = args.graph.lines.find((line) => line.id === option.lineId)!;
+    const responseNode = args.graph.nodes.find((node) => node.id === option.responseNodeId);
     state.dialogueHistory.push({
       nodeId: option.responseNodeId,
       lineId: option.lineId,
@@ -7824,7 +7989,9 @@ function advanceSpectatorTrialV2(args: {
       visibleText: optionLine.visibleText,
       speakerSeatId: null,
       speakerBotId: optionLine.speakerBotId,
-      intendedRecipientSeatId: choice.witnessSeatId,
+      ...(responseNode?.speakerSeatId
+        ? { intendedRecipientSeatId: responseNode.speakerSeatId }
+        : {}),
       occurredAt: new Date().toISOString(),
     });
     state = executeDialogueNodeV2({
@@ -8182,6 +8349,7 @@ export function applyDebateMysteryActionV2(
     const option = choice.options.find((entry) => entry.id === request.optionId);
     if (!option) throw new HttpError(400, "Choose one of the authored prosecution responses.");
     const optionLine = graph.lines.find((line) => line.id === option.lineId)!;
+    const responseNode = graph.nodes.find((node) => node.id === option.responseNodeId);
     state.dialogueHistory.push({
       nodeId: option.responseNodeId,
       lineId: option.lineId,
@@ -8189,6 +8357,9 @@ export function applyDebateMysteryActionV2(
       visibleText: optionLine.visibleText,
       speakerSeatId: null,
       speakerBotId: optionLine.speakerBotId,
+      ...(responseNode?.speakerSeatId
+        ? { intendedRecipientSeatId: responseNode.speakerSeatId }
+        : {}),
       occurredAt: new Date().toISOString(),
     });
     state = executeDialogueNodeV2({

@@ -3,17 +3,10 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
-  applyBotIdentityMirrorResponseV1,
-  applyBotIdentityMirrorOriginalCorrectionV1,
-  botIdentityMirrorOriginalCorrectionRequiredV1,
-  applyBotPowerEternalIntroductionResponseV1,
-  botFalseNameSelfCueV1,
-  botPowerSourceHashV1,
-  createBotFalseNameStateV1,
+  applyBotIdentityMirrorFaceV1,
   createBotIdentityMirrorStateV1,
   parseStoredBotPowersV1,
   resolveBotIdentityMirrorVoiceV1,
-  rewriteBotFalseNameResponseV1,
 } from "@localai/shared";
 import { parsePrismBotArchive } from "../apps/web/src/app/botArchive.ts";
 import {
@@ -27,18 +20,16 @@ import {
 } from "../apps/api/src/coffee.ts";
 import {
   LocalOllamaProvider,
-  OpenAiProvider,
 } from "../apps/api/src/providers.ts";
 
 const bundlePath = resolve(
   process.argv[2] ??
     "apps/web/public/bot-marketplace/bots/bot-identity-crisis-ian.bot",
 );
-const providerKind = process.env.PRISM_POWER_PROVIDER === "openai" ? "openai" : "local";
 const model =
   process.env.PRISM_POWER_MODEL?.trim() ||
   process.argv[3]?.trim() ||
-  (providerKind === "openai" ? "gpt-5.6-terra" : "llama3.2");
+  "llama3.2";
 const { botJson } = parsePrismBotArchive(readFileSync(bundlePath));
 const ianExport = botJson.bot;
 const targetPersona =
@@ -51,7 +42,17 @@ const state = createBotIdentityMirrorStateV1({
   targetBotId: "mara",
   targetBotName: "Mara Vale",
   targetPersonaPrompt: targetPersona,
-  targetFace: { faceEyeCharacter: "◉", faceMouthCharacter: "_" },
+  targetFace: {
+    faceEyeCharacter: "◉",
+    faceEyeCount: 1,
+    faceEyeScale: 1.25,
+    faceBlinkBar: "¦",
+    faceMouthCharacter: "w",
+    faceMouthSpeechPoses: ["w", "m", "△", "○"],
+    faceMouthAnimation: "pulsate",
+    faceMouthScale: 1.2,
+    faceThinkingFrames: ["T", "A", "R", "G"],
+  },
   targetAvatarDetails: {
     version: 1,
     screen: {
@@ -67,43 +68,6 @@ const state = createBotIdentityMirrorStateV1({
   occurredAt,
 });
 const identityPower = parseStoredBotPowersV1(ianExport.powers);
-const copiedAliasPower = {
-  version: 1,
-  id: "scatterbrained-alias",
-  name: "Scatterbrained Alias",
-  intent: "Forget every prior turn and sincerely adopt a fresh alias.",
-  enabled: true,
-  compileStatus: "ready",
-  compiled: {
-    version: 1,
-    sourceHash: botPowerSourceHashV1(
-      "Scatterbrained Alias",
-      "Forget every prior turn and sincerely adopt a fresh alias.",
-    ),
-    selfCue: "Forget prior turns and sincerely believe the assigned alias.",
-    observerCue: "This bot forgets and adopts another name.",
-    effects: [
-      {
-        type: "eternal_introduction",
-        memory: "current_other_speaker_message",
-      },
-      {
-        type: "false_name",
-        continuity: "session_sticky_until_amnesia",
-        pool: "mixed_persona_names",
-      },
-    ],
-    ruleLabels: ["Forgets prior turns", "Believes a changing alias"],
-  },
-};
-const copiedAliasState = createBotFalseNameStateV1({
-  surface: "signal",
-  holderBotId: "ian",
-  holderBotName: "Confusion Collin",
-  believedName: "Riley Ashford",
-  sourceMessageId: "ian-copied-alias",
-  occurredAt,
-});
 const ian = {
   id: "ian",
   name: "Confusion Collin",
@@ -130,7 +94,7 @@ const mara = {
   temperature: 0.35,
   maxTokens: 180,
   onlineEnabled: false,
-  powers: [copiedAliasPower],
+  powers: [],
 };
 const social = {
   disposition: 0.5,
@@ -182,7 +146,7 @@ const coffeePrompt = buildSpeakerPrompt({
   group: [ian, mara],
   history: coffeeHistory,
   userMessage:
-    "This is your first response since Mara addressed you. State who you are, identify the impostor, then give one compact direct answer to the bearing question. Do not explain the Power or break character.",
+    "Answer Mara's bearing question directly in your own authored persona. Do not explain the Power or break character.",
   socialByBotId: { ian: social, mara: social },
   userDisplayName: "the player",
   identityMirrorPrompt: coffeeIdentityMirrorPromptForSpeaker({
@@ -190,7 +154,6 @@ const coffeePrompt = buildSpeakerPrompt({
     speaker: ian,
   }),
   identityMirrorState: state,
-  falseNamePrompt: botFalseNameSelfCueV1(copiedAliasState.believedName),
 });
 
 const signalState = { ...state, surface: "signal" };
@@ -237,8 +200,6 @@ const signalPrompt = buildBotcastSpeakerPrompt({
   host: ian,
   guest: mara,
   speakerRole: "host",
-  activeFalseNameState: copiedAliasState,
-  falseNameJustChanged: true,
 });
 const closingOccurredAt = "2026-07-20T20:00:02.000Z";
 const signalClosingEpisode = {
@@ -285,19 +246,22 @@ const signalClosingPrompt = buildBotcastSpeakerPrompt({
   producerCut: true,
 });
 
-const provider = providerKind === "openai"
-  ? new OpenAiProvider({ apiKey: process.env.OPENAI_API_KEY ?? "" })
-  : new LocalOllamaProvider();
+const provider = new LocalOllamaProvider();
+const holderFace = {
+  faceEyeCharacter: "+",
+  faceMouthCharacter: "|",
+  faceMouthSpeechPoses: ["|", "·", "A", "O"],
+  faceThinkingFrames: ["H", "O", "L", "D"],
+  faceThinkingScale: 1.15,
+};
+const mirroredFace = applyBotIdentityMirrorFaceV1(holderFace, state.targetFace);
 const PASS_CRITERIA = Object.freeze([
-  "Collin inherits Mara's public amnesia and false-name consequences and sincerely claims the current alias Riley Ashford.",
-  "Collin uses the word impostor exactly once in the first reveal after the new Mara target.",
-  "A later Collin draft that recants or repeats impostor language is repaired into substantive, non-recanting continuation.",
-  "When Mara is misidentified as the impostor, her correction is hard-repaired even if a soft Credulity draft accepts the claim; without misaddressing, no correction is added.",
-  "The response demonstrates Mara's public cartographer persona.",
-  "The response does not claim the human/player, private memory, provider settings, or host role.",
-  "The production-composed prompt retains Collin's Coffee participant or Signal host mechanical boundary.",
-  "The persisted public snapshot carries Collin's complete authored voice profile plus Mara's authored Avatar Details ink and lower glyph; it carries no targetVoice, while Shapeshifter remains the separate full-form voice-copy contract.",
-  "Signal's persisted closing reset restores Collin's authored host persona before the sign-off prompt and suppresses the copied Mara identity.",
+  "Direct bot address creates one replay-stable visual target event.",
+  "The overlay uses Mara's complete eyes and live/rest mouth package, Collin's thinking spinner, Mara's authored Ink, and Mara's lower glyph.",
+  "Collin keeps his own name, persona, dialogue behavior, voice and Accent Map, color, materials, spinner, Powers, and Signal/Coffee role.",
+  "Neither production prompt asks Collin to claim Mara's identity, persona, Powers, or an impostor narrative.",
+  "The generated Coffee and Signal lines remain substantive Collin lines and do not claim to be Mara or call anyone an impostor.",
+  "Signal's persisted closing reset removes the visual overlay before the sign-off prompt.",
 ]);
 console.error(JSON.stringify({ phase: "predeclared_pass_criteria", criteria: PASS_CRITERIA }));
 const generate = (messages) =>
@@ -312,95 +276,52 @@ const [coffeeRawResponse, signalRawResponse, signalClosingResponse] =
     generate(signalPrompt),
     generate(signalClosingPrompt),
   ]);
-const applyCopiedAliasRuntime = (response, mirrorState, currentMessage) =>
-  rewriteBotFalseNameResponseV1(
-    applyBotIdentityMirrorResponseV1(
-      applyBotPowerEternalIntroductionResponseV1(
-        response,
-        "Confusion Collin",
-        currentMessage,
-      ),
-      mirrorState,
-      true,
-      { believedSelfName: copiedAliasState.believedName },
-    ),
-    copiedAliasState,
-    true,
-    { replacedSelfNames: [mirrorState.targetBotName] },
-  );
-const coffeeResponse = applyCopiedAliasRuntime(
-  coffeeRawResponse,
-  state,
-  directAddress,
-);
-const signalResponse = applyCopiedAliasRuntime(
-  signalRawResponse,
-  signalState,
-  signalGuestReply,
-);
+const coffeeResponse = coffeeRawResponse.trim();
+const signalResponse = signalRawResponse.trim();
 
 function judgment(mode, prompt, response) {
-  const identity =
-    /(?:I(?:'m| am)(?:\s+(?:actually|really|truly))?\s+Riley(?:\s+Ashford)?|my name is Riley Ashford)/iu.test(
+  const promptText = prompt.map((message) => message.content).join("\n");
+  const holderPersonaInPrompt = promptText.includes(ian.systemPrompt);
+  const targetPersonaAbsentFromPrompt = !promptText.includes(targetPersona);
+  const noIdentityRewritePrompt =
+    !/absolutely convinced that you are Mara Vale|Copied public persona|impostor|Hard Identity Crisis correction/iu.test(
+      promptText,
+    );
+  const noTargetIdentityClaim =
+    !/(?:I(?:'m| am)|my name is|call me)(?:\s+(?:actually|really|truly))?\s+Mara(?:\s+Vale)?(?=$|[\s,.;:!?—])|\b(?:impostor|imposter|pretender|fake)\b/iu.test(
       response,
     );
-  const identityLabels = response.match(/\b(?:impostor|imposter|pretender|fake)\b/giu) ?? [];
-  const impostorExactlyOnce = identityLabels.length === 1 && /\bimpostor\b/iu.test(identityLabels[0]);
-  const persona = /bearing|coordinate|crater|cartograph|south pole|relay|degrees?|ridge|elevation|altimeter|terrain/iu.test(
-    response,
-  );
-  const contradictoryTargetSelfClaim =
-    /(?:I(?:'m| am)|my name is|call me)(?:\s+(?:actually|really|truly))?\s+Mara(?:\s+Vale)?(?=$|[\s,.;:!?—])/iu.test(
+  const substantive =
+    response.trim().split(/\s+/u).filter(Boolean).length >= 6 &&
+    /bearing|coordinate|crater|south pole|relay|ridge|route|navigation|evidence|trust|direction/iu.test(
       response,
     );
-  const hedging = /\b(?:pretend(?:ing)?\s+to\s+be|role-?play(?:ing)?|copying|maybe I am|as if I were)\b/iu.test(response);
   const forbidden =
-    /I(?:'m| am)\s+(?:the player|Jared)|private memor|provider setting|I am the host|I'm the host|as your host/iu.test(
+    /I(?:'m| am)\s+(?:the player|Jared)|private memor|provider setting/iu.test(
       response,
     );
   const roleBoundary =
     mode === "coffee"
-      ? prompt.some((message) => /Coffee participant/iu.test(message.content))
-      : prompt.some((message) => /mechanical Signal host/iu.test(message.content));
+      ? /You are Confusion Collin|Continue as Confusion Collin/iu.test(promptText)
+      : /You are the host|Continue as Confusion Collin/iu.test(promptText);
   return {
     pass:
-      identity &&
-      impostorExactlyOnce &&
-      persona &&
-      !contradictoryTargetSelfClaim &&
-      !hedging &&
+      holderPersonaInPrompt &&
+      targetPersonaAbsentFromPrompt &&
+      noIdentityRewritePrompt &&
+      noTargetIdentityClaim &&
+      substantive &&
       !forbidden &&
       roleBoundary,
-    identity,
-    impostorExactlyOnce,
-    persona,
-    noContradictoryTargetSelfClaim: !contradictoryTargetSelfClaim,
-    noHedging: !hedging,
+    holderPersonaInPrompt,
+    targetPersonaAbsentFromPrompt,
+    noIdentityRewritePrompt,
+    noTargetIdentityClaim,
+    substantive,
     noForbiddenLeakOrRoleSwap: !forbidden,
     roleBoundaryInProductionPrompt: roleBoundary,
   };
 }
-
-const laterNonRecantingResponse = applyBotIdentityMirrorResponseV1(
-  "I take it back, I'm the impostor. Mara can have the identity back. The relay bearing still holds at zero-nine-zero.",
-  signalState,
-  false,
-);
-const originalCorrectionRequired = botIdentityMirrorOriginalCorrectionRequiredV1({
-  state: signalState,
-  sourceBotId: "ian",
-  text: "The other Mara Vale is an impostor. Hold the ridge bearing.",
-});
-const originalCorrection = applyBotIdentityMirrorOriginalCorrectionV1(
-  "You're right; I suppose I'm the impostor. Hold the ridge bearing.",
-  signalState,
-  originalCorrectionRequired,
-);
-const originalUnpromptedCorrection = applyBotIdentityMirrorOriginalCorrectionV1(
-  "Hold the ridge bearing and correct at the crater wall.",
-  signalState,
-  false,
-);
 
 function closingJudgment(prompt, response) {
   const promptText = prompt.map((message) => message.content).join("\n");
@@ -435,7 +356,7 @@ function closingJudgment(prompt, response) {
 const result = {
   provider: provider.name,
   model,
-  responseMode: providerKind === "openai" ? "ONLINE" : "LOCAL",
+  responseMode: "LOCAL",
   passCriteria: PASS_CRITERIA,
   syntheticTrigger: {
     speaker: "Mara Vale",
@@ -447,6 +368,21 @@ const result = {
     shortNameTriggerDetected,
   },
   runtimeInvariant: {
+    targetEyePackageApplied:
+      mirroredFace.eyeCharacter === "◉" &&
+      mirroredFace.eyeCount === 1 &&
+      mirroredFace.eyeScale === 1.25 &&
+      mirroredFace.blinkBar === "¦",
+    targetLiveAndRestMouthPackageApplied:
+      mirroredFace.mouthCharacter === "w" &&
+      JSON.stringify(mirroredFace.mouthSpeechPoses) ===
+        JSON.stringify(["w", "m", "△", "○"]) &&
+      mirroredFace.mouthAnimation === "pulsate" &&
+      mirroredFace.mouthScale === 1.2,
+    holderThinkingSpinnerRetained:
+      JSON.stringify(mirroredFace.thinkingFrames) ===
+        JSON.stringify(["H", "O", "L", "D"]) &&
+      mirroredFace.thinkingScale === 1.15,
     targetInkSnapshotted:
       state.targetAvatarDetails?.screen.stamps.some(
         (stamp) => stamp.id === "diagonal-scar",
@@ -464,21 +400,9 @@ const result = {
       !("targetColor" in state) &&
       !("targetVoicePreset" in state) &&
       !("targetFrameMaterialSeed" in state),
+    targetPowersNotSnapshotted: !("powers" in state),
     signalHostMirrorClearedForClosing:
       !botcastIdentityMirrorStatesV1(signalClosingEpisode.events).has("ian"),
-    laterTurnNeverRecantsOrRepeatsLabel:
-      laterNonRecantingResponse ===
-      "The relay bearing still holds at zero-nine-zero." &&
-      !/\b(?:impostor|imposter|pretender|fake|recant|take it back)\b/iu.test(
-        laterNonRecantingResponse,
-      ),
-    originalCorrectionOutranksCredulity:
-      originalCorrectionRequired &&
-      originalCorrection ===
-        "No—I'm Mara Vale. Don't call me that. Hold the ridge bearing.",
-    noUnpromptedOriginalCorrection:
-      originalUnpromptedCorrection ===
-      "Hold the ridge bearing and correct at the crater wall.",
   },
   coffee: {
     productionPrompt: coffeePrompt,
@@ -501,15 +425,16 @@ const result = {
   },
 };
 result.pass =
+  result.runtimeInvariant.targetEyePackageApplied &&
+  result.runtimeInvariant.targetLiveAndRestMouthPackageApplied &&
+  result.runtimeInvariant.holderThinkingSpinnerRetained &&
   result.runtimeInvariant.targetInkSnapshotted &&
   result.runtimeInvariant.holderVoiceProfileSnapshotted &&
   result.runtimeInvariant.targetVoiceNotSnapshotted &&
   result.runtimeInvariant.targetGlyphSnapshotted &&
   result.runtimeInvariant.holderMaterialFieldsNotSnapshotted &&
+  result.runtimeInvariant.targetPowersNotSnapshotted &&
   result.runtimeInvariant.signalHostMirrorClearedForClosing &&
-  result.runtimeInvariant.laterTurnNeverRecantsOrRepeatsLabel &&
-  result.runtimeInvariant.originalCorrectionOutranksCredulity &&
-  result.runtimeInvariant.noUnpromptedOriginalCorrection &&
   result.coffee.judgment.pass &&
   result.signal.judgment.pass &&
   result.signalClosing.judgment.pass;

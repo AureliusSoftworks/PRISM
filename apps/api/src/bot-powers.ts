@@ -957,15 +957,14 @@ function deterministicIdentityMirrorPower(
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
     selfCue:
-      "When a bot directly addresses you, become absolutely convinced you are that bot; borrow their public diegetic name, persona, face, authored ink, lower glyph, and the lived consequences of their active public Powers until another bot addresses you or the session resets. Keep your own complete authored voice identity and profile, including accent, pronunciation, speechprint, and client voice effect, plus your saturated color, communication-style chassis, and frame finish. On the first response after a genuinely new target, use impostor exactly once for the original; never use impostor, imposter, pretender, or fake on later turns, and never recant, concede, take back, doubt, or return the stolen identity before reset. Never copy private memories; never change your bot ID, role, seat, safety/privacy boundaries, provider, or private perception permissions. The player is never a target.",
+      "Identity Crisis is presentation-only. When a bot directly addresses you, borrow only that bot's eyes, complete resting/live mouth package, authored Avatar Details Ink, and lower glyph until another bot addresses you or the session resets. Keep your own name, persona, voice and Accent Map, color, chassis/frame, Powers, behavior, memories, role, and every other identity field. The player is never a target.",
     observerCue:
-      `${subject} steals the latest direct bot addresser's public name, persona, face, ink, lower glyph, and active public Power consequences while retaining their own complete voice, material shell, and anchored system boundaries; when misaddressed, the original must briefly correct the wrong identity in character even under Credulity or another soft social pressure, but otherwise does not derail the subject.`,
+      `${subject} visually borrows only the latest direct bot addresser's eyes, complete resting/live mouth package, authored Avatar Details Ink, and lower glyph. Their name, persona, voice, color, chassis/frame, Powers, behavior, and every other field remain their own.`,
     effects: [{ type: "identity_mirror", trigger: "direct_bot_address" }],
     ruleLabels: [
       "Mirrors direct bot addresser",
-      "Always retains holder voice",
-      "Original corrects misaddressing",
-      "Never recants stolen identity",
+      "Eyes mouth Ink glyph only",
+      "Retains holder identity and Powers",
     ],
   };
 }

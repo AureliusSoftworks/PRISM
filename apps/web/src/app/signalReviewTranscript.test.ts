@@ -275,6 +275,51 @@ describe("Signal review transcript", () => {
     assert.match(transcript, /No production events were recorded\./u);
   });
 
+  it("records cue lifecycle without leaking private cue wording into review output", () => {
+    const privateDirection = "Say this exact private sentence to the guest.";
+    const transcript = buildSignalReviewTranscript({
+      episode: {
+        ...episode,
+        events: [
+          ...episode.events,
+          {
+            id: "cue-queued",
+            episodeId: episode.id,
+            sequence: 8,
+            kind: "producer_cue",
+            payload: {
+              cueId: "cue-private",
+              lifecycle: "queued",
+              kind: "ask_about",
+              directQuote: privateDirection,
+              delivery: "next_host_turn",
+            },
+            occurredAt: "2026-07-17T17:01:01.000Z",
+          },
+          {
+            id: "cue-failed",
+            episodeId: episode.id,
+            sequence: 9,
+            kind: "producer_cue",
+            payload: {
+              cueId: "cue-private",
+              lifecycle: "failed",
+              failure: "privacy_validation",
+            },
+            occurredAt: "2026-07-17T17:01:02.000Z",
+          },
+        ],
+      },
+      show,
+      host: { id: "host-1", name: "Ada" },
+      guest: { id: "guest-1", name: "Grace" },
+    });
+
+    assert.match(transcript, /## Producer Cue Lifecycle/u);
+    assert.match(transcript, /Cue cue-private \| failed \| privacy_validation/u);
+    assert.doesNotMatch(transcript, /Say this exact private sentence/u);
+  });
+
   it("identifies Producer guest composer turns as human-authored", () => {
     const transcript = buildSignalReviewTranscript({
       episode: {

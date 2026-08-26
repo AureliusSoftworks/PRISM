@@ -782,24 +782,20 @@ test("Identity Crisis Ian deterministically compiles bounded bot-only identity m
   ]);
   assert.match(
     result.powers[0]?.compiled?.selfCue ?? "",
-    /public diegetic name.*persona.*face.*authored ink.*lower glyph.*active public Powers/iu,
+    /presentation-only.*eyes.*resting\/live mouth package.*Avatar Details Ink.*lower glyph/iu,
   );
   assert.match(
     result.powers[0]?.compiled?.selfCue ?? "",
-    /Keep your own complete authored voice identity and profile.*accent.*pronunciation.*speechprint.*client voice effect.*saturated color.*communication-style chassis.*frame finish/iu,
+    /Keep your own name, persona, voice and Accent Map, color, chassis\/frame, Powers, behavior, memories, role, and every other identity field/iu,
   );
-  assert.match(
+  assert.doesNotMatch(
     result.powers[0]?.compiled?.selfCue ?? "",
-    /first response after a genuinely new target.*impostor exactly once.*never use impostor, imposter, pretender, or fake on later turns.*never recant/iu,
-  );
-  assert.match(
-    result.powers[0]?.compiled?.selfCue ?? "",
-    /diegetic name.*never (?:change )?your bot ID.*role.*seat/iu,
+    /become absolutely convinced|impostor|borrow.*public.*name|active public Power consequences/iu,
   );
   assert.match(result.powers[0]?.compiled?.selfCue ?? "", /player.*never/iu);
   assert.match(
     result.powers[0]?.compiled?.observerCue ?? "",
-    /original must briefly correct.*even under Credulity.*otherwise does not derail/iu,
+    /eyes.*resting\/live mouth package.*Avatar Details Ink.*lower glyph.*name, persona, voice, color, chassis\/frame, Powers, behavior.*remain their own/iu,
   );
 });
 

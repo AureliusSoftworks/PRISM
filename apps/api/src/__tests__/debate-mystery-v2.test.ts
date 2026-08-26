@@ -264,6 +264,55 @@ class ContentBearingPersonaDialogueProvider extends V2AuthorProvider {
   }
 }
 
+class CourtroomInvestigationV2AuthorProvider extends V2AuthorProvider {
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const response = await super.generateResponse(messages, options);
+    const request = JSON.parse(String(messages.at(-1)?.content ?? "{}")) as { section?: string };
+    if (request.section !== "suspect_chapter") return response;
+    const parsed = JSON.parse(response) as { suspect?: Record<string, unknown> };
+    if (!parsed.suspect) return response;
+    parsed.suspect.roomIntroduction = "The Court has no patience for games, so ask your questions carefully.";
+    return JSON.stringify(parsed);
+  }
+}
+
+class CrosswiredPresentTitleV2AuthorProvider extends V2AuthorProvider {
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const response = await super.generateResponse(messages, options);
+    const request = JSON.parse(String(messages.at(-1)?.content ?? "{}")) as { section?: string };
+    if (request.section !== "suspect_chapter") return response;
+    const parsed = JSON.parse(response) as {
+      suspect?: { presentReactions?: Array<Record<string, unknown>> };
+    };
+    for (const reaction of parsed.suspect?.presentReactions ?? []) {
+      reaction.prosecutionLine = "The Service Bell Log is the record I want you to answer.";
+      reaction.response = "The Archive exhibit 2 appears to have been treated with more respect than its owner.";
+    }
+    return JSON.stringify(parsed);
+  }
+}
+
+class RecordSpecificDefaultPresentV2AuthorProvider extends V2AuthorProvider {
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const response = await super.generateResponse(messages, options);
+    const request = JSON.parse(String(messages.at(-1)?.content ?? "{}")) as { section?: string };
+    if (request.section !== "suspect_chapter") return response;
+    const parsed = JSON.parse(response) as { suspect?: Record<string, unknown> };
+    if (!parsed.suspect) return response;
+    parsed.suspect.defaultPresentReaction = "The Service Bell Log has already said everything worth saying.";
+    return JSON.stringify(parsed);
+  }
+}
+
 class CompatibleProsecutionPresentationV2AuthorProvider extends V2AuthorProvider {
   override async generateResponse(messages: ProviderMessage[], options: GenerateOptions): Promise<string> {
     const response = await super.generateResponse(messages, options);
@@ -1148,6 +1197,96 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(graph.lines.some((line) => /Avery did it,/u.test(line.visibleText)), false);
   });
 
+  it("rejects courtroom language in investigation dialogue before a case can be sealed", async () => {
+    const db = testDb();
+    const provider = new CourtroomInvestigationV2AuthorProvider();
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-courtroom-investigation-dialogue",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    const session = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      created.id,
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+    assert.equal(session.status, "failed");
+    assert.equal(v2State(session).compilation.stage, "needs_attention");
+    assert.equal(
+      provider.sections.filter((section) => section === "suspect_chapter:suspect-1").length,
+      3,
+    );
+    const source = db.prepare(
+      "SELECT private_error FROM debate_mystery_v2_jobs WHERE user_id = ? AND session_id = ?",
+    ).get("user-1", session.id) as { private_error: string | null };
+    assert.match(source.private_error ?? "", /investigation dialogue.*courtroom language/iu);
+  });
+
+  it("rejects cross-wired Case File titles in Present dialogue before a case can be sealed", async () => {
+    const db = testDb();
+    const provider = new CrosswiredPresentTitleV2AuthorProvider();
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-crosswired-present-title",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    const session = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      created.id,
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+    assert.equal(session.status, "failed");
+    assert.equal(v2State(session).compilation.stage, "needs_attention");
+    assert.equal(
+      provider.sections.filter((section) => section === "suspect_chapter:suspect-1").length,
+      3,
+    );
+    const source = db.prepare(
+      "SELECT private_error FROM debate_mystery_v2_jobs WHERE user_id = ? AND session_id = ?",
+    ).get("user-1", session.id) as { private_error: string | null };
+    assert.match(source.private_error ?? "", /Present exchange names a different Case File record/iu);
+  });
+
+  it("rejects a record-specific title in reusable default Present dialogue", async () => {
+    const db = testDb();
+    const provider = new RecordSpecificDefaultPresentV2AuthorProvider();
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-record-specific-default-present",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    const session = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      created.id,
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+    assert.equal(session.status, "failed");
+    assert.equal(v2State(session).compilation.stage, "needs_attention");
+    assert.equal(
+      provider.sections.filter((section) => section === "suspect_chapter:suspect-1").length,
+      3,
+    );
+    const source = db.prepare(
+      "SELECT private_error FROM debate_mystery_v2_jobs WHERE user_id = ? AND session_id = ?",
+    ).get("user-1", session.id) as { private_error: string | null };
+    assert.match(source.private_error ?? "", /default Present dialogue.*specific Case File record/iu);
+  });
+
   it("compiles every suspect chapter, prepares a complete local pack, and plays without runtime generation", async () => {
     const db = testDb();
     const provider = new V2AuthorProvider();
@@ -1493,8 +1632,10 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     const talkExchange = state.dialogueHistory.slice(dialogueCountBeforeTalk);
     assert.equal(talkExchange.length, 2);
     assert.equal(talkExchange[0]!.speakerSeatId, null);
+    assert.equal(talkExchange[0]!.intendedRecipientSeatId, firstSuspect.seatId);
     assert.match(talkExchange[0]!.visibleText, /relationship with Avery Voss/iu);
     assert.equal(talkExchange[1]!.speakerSeatId, firstSuspect.seatId);
+    assert.equal(talkExchange[1]!.intendedRecipientBotId, state.config.prosecutorBotId);
     const questionLine = graph.lines.find((line) => line.id === talkExchange[0]!.lineId);
     const responseLine = graph.lines.find((line) => line.id === talkExchange[1]!.lineId);
     assert.equal(questionLine?.speakerKind, "player");
@@ -1611,6 +1752,72 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     const cleanup = cleanupUnreferencedDebateMysteryAudioV2(db, "user-1");
     assert.equal(cleanup.removedClipCount, uniqueClipCount);
     assert.equal(cleanup.remaining.cleanupCandidateCount, 0);
+  });
+
+  it("repairs cross-wired Case File titles in an active case without authoring", async () => {
+    const db = testDb();
+    const provider = new V2AuthorProvider();
+    let session = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-present-title-repair",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    session = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      session.id,
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+    const callsAfterCompile = provider.calls;
+    const compiled = getDebateMysteryCaseV2(db, "user-1", session.id);
+    const graph = structuredClone(compiled.graph);
+    const evidenceRecords = compiled.privateCase.recordItems.filter((item) =>
+      item.reference.kind === "evidence");
+    assert.ok(evidenceRecords.length >= 2, "the repair fixture needs two named Case File records");
+    const selectedRecord = evidenceRecords[0]!;
+    const wrongRecord = evidenceRecords[1]!;
+    const suspect = v2State(session).suspects[0]!;
+    const mappingKey = `${suspect.seatId}:${selectedRecord.reference.kind}:${selectedRecord.reference.id}`;
+    const promptNodeId = compiled.privateCase.presentNodeIdBySuspectRecord[mappingKey]!;
+    const promptNode = graph.nodes.find((node) => node.id === promptNodeId)!;
+    const responseNode = graph.nodes.find((node) => node.id === promptNode.nextNodeIds[0])!;
+    const promptLine = graph.lines.find((line) => line.id === promptNode.lineId)!;
+    const responseLine = graph.lines.find((line) => line.id === responseNode.lineId)!;
+    const crosswiredPrompt = `Let's focus on the ${selectedRecord.title}. The ${wrongRecord.title} is the record I want you to answer.`;
+    const crosswiredResponse = `Regarding the ${selectedRecord.title}: The ${wrongRecord.title} appears to have been treated with more respect than its owner.`;
+    promptLine.visibleText = crosswiredPrompt;
+    promptLine.spokenText = crosswiredPrompt;
+    responseLine.visibleText = crosswiredResponse;
+    responseLine.spokenText = crosswiredResponse;
+    const graphJson = JSON.stringify(graph);
+    db.prepare(
+      `UPDATE debate_mystery_v2_cases
+          SET dialogue_graph_json = ?, graph_hash = ?
+        WHERE user_id = ? AND session_id = ?`,
+    ).run(graphJson, digest(graphJson), "user-1", session.id);
+
+    const locallyPreparedTexts: string[] = [];
+    const repairedSession = await ensureDebateMysteryPlayReadyV2(db, "user-1", session.id, {
+      generateWave: async ({ text }) => {
+        locallyPreparedTexts.push(text);
+        return playableWave();
+      },
+    });
+    assert.equal(provider.calls, callsAfterCompile, "the deterministic repair must not call the authoring LLM");
+    assert.equal(v2State(repairedSession).readiness.status, "ready");
+    const repaired = getDebateMysteryCaseV2(db, "user-1", session.id);
+    assert.equal(repaired.privateCase.presentNodeIdBySuspectRecord[mappingKey], promptNodeId);
+    const repairedPromptLine = repaired.graph.lines.find((line) => line.id === promptLine.id)!;
+    const repairedResponseLine = repaired.graph.lines.find((line) => line.id === responseLine.id)!;
+    assert.match(repairedPromptLine.spokenText, new RegExp(selectedRecord.title, "iu"));
+    assert.doesNotMatch(repairedPromptLine.spokenText, new RegExp(wrongRecord.title, "iu"));
+    assert.match(repairedResponseLine.spokenText, new RegExp(selectedRecord.title, "iu"));
+    assert.doesNotMatch(repairedResponseLine.spokenText, new RegExp(wrongRecord.title, "iu"));
+    assert.ok(locallyPreparedTexts.includes(repairedResponseLine.spokenText));
   });
 
   it("migrates an active legacy partner-shaped case and rebuilds only local player-role audio", async () => {

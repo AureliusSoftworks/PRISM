@@ -131,6 +131,7 @@ import {
   BOTCAST_PRODUCER_CUE_DETAIL_MAX,
   BOTCAST_PRODUCER_DIRECT_QUOTE_MAX,
   botcastDirectQuoteTurnMaxTokens,
+  botcastActiveProducerCueFromEvents,
   botcastEpisodeImageFallbackEmoji,
   botcastEpisodeImageSpokenReference,
   botcastProducerDirectQuoteUpdateLeadInAt,
@@ -9321,7 +9322,10 @@ function botcastUndeliveredAskAboutCue(
 ): BotcastProducerCue | null {
   const cueEvent = [...episode.events]
     .reverse()
-    .find((event) => event.kind === "producer_cue");
+    .find(
+      (event) =>
+        event.kind === "producer_cue" && event.payload.kind === "ask_about",
+    );
   if (!cueEvent) return null;
   const payload = cueEvent.payload;
   const detail =
@@ -9396,6 +9400,7 @@ function persistProducerCue(
   hostRedirect?: BotcastHostRedirectContext,
   guestInterruption?: BotcastGuestInterruptionContext,
   redelivery = false,
+  cueId?: string,
 ): BotcastTensionState {
   const normalizedCue = normalizeBotcastProducerCue(cue);
   recordEvent(
@@ -9405,6 +9410,7 @@ function persistProducerCue(
     "producer_cue",
     {
     ...normalizedCue,
+    ...(cueId ? { cueId, lifecycle: "dispatching" } : {}),
     delivery,
     audience: "host",
     ...(redelivery ? { redelivery: true } : {}),
@@ -9473,6 +9479,61 @@ function persistProducerCue(
     }
   }
   return after;
+}
+
+/** Queue is episode-owned so a reload, a new tab, or a delayed handoff cannot lose it. */
+export function queueBotcastProducerCue(
+  db: DatabaseSync,
+  userId: string,
+  episodeId: string,
+  cue: BotcastProducerCue,
+): BotcastEpisode {
+  const episode = getBotcastEpisode(db, userId, episodeId);
+  if (episode.status !== "live" || episode.playbackMode === "watch") {
+    throw new Error("Producer cues are available only while a live Signal show is on air.");
+  }
+  if (episode.guestKind === "producer") {
+    throw new Error("Producer cues are unavailable while the Producer is the on-air guest.");
+  }
+  const now = new Date().toISOString();
+  const active = botcastActiveProducerCueFromEvents(episode.events);
+  if (active) {
+    recordEvent(db, userId, episodeId, "producer_cue", {
+      cueId: active.cueId,
+      lifecycle: "superseded",
+    }, now);
+  }
+  const normalizedCue = normalizeBotcastProducerCue(cue);
+  recordEvent(db, userId, episodeId, "producer_cue", {
+    ...normalizedCue,
+    cueId: randomId(12),
+    lifecycle: "queued",
+    delivery: "next_host_turn",
+    audience: "host",
+  }, now);
+  db.prepare(
+    "UPDATE botcast_episodes SET updated_at = ? WHERE id = ? AND user_id = ?",
+  ).run(now, episodeId, userId);
+  return getBotcastEpisode(db, userId, episodeId);
+}
+
+export function clearBotcastProducerCue(
+  db: DatabaseSync,
+  userId: string,
+  episodeId: string,
+): BotcastEpisode {
+  const episode = getBotcastEpisode(db, userId, episodeId);
+  const active = botcastActiveProducerCueFromEvents(episode.events);
+  if (!active) return episode;
+  const now = new Date().toISOString();
+  recordEvent(db, userId, episodeId, "producer_cue", {
+    cueId: active.cueId,
+    lifecycle: "cleared",
+  }, now);
+  db.prepare(
+    "UPDATE botcast_episodes SET updated_at = ? WHERE id = ? AND user_id = ?",
+  ).run(now, episodeId, userId);
+  return getBotcastEpisode(db, userId, episodeId);
 }
 
 function botcastInterruptedSpeakerCueProjection(
@@ -11273,8 +11334,7 @@ export function buildBotcastSpeakerPrompt(
   const annoyanceCue = speakerTrollActive
     ? null
     : botcastLatestAnnoyanceCueV1(args.episode.events, speaker.id);
-  // Identity Mirror is a presentation override: borrowed identity guidance
-  // must survive alongside a copied amnesia or alias Power.
+  // Identity Mirror is a visual-only overlay and contributes no persona cue.
   const identityMirrorPrompt = botcastIdentityMirrorPromptV1({
     events: args.episode.events,
     speaker,
@@ -11300,9 +11360,8 @@ export function buildBotcastSpeakerPrompt(
     speaker,
     speakerRole: args.speakerRole,
     activeHolderState: activeIdentityShapeshiftState,
-    identityJustChanged:
-      !activeIdentityMirrorState && identityShapeshiftJustChanged,
-    skipHolderPrompt: Boolean(activeIdentityMirrorState),
+    identityJustChanged: identityShapeshiftJustChanged,
+    skipHolderPrompt: false,
   });
   const activeFalseNameState =
     args.activeFalseNameState !== undefined
@@ -11314,24 +11373,18 @@ export function buildBotcastSpeakerPrompt(
     speaker,
     activeHolderState: activeFalseNameState,
   });
-  /** Mirror presentation wins over shapeshift when both are active. */
+  /** Identity Crisis never replaces the speaker's authored persona. */
   const effectivePersonaName =
-    activeIdentityMirrorState?.targetBotName ??
     activeIdentityShapeshiftState?.targetBotName ??
     speaker.name;
   const effectivePersonaPrompt =
-    activeIdentityMirrorState?.targetPersonaPrompt ??
     activeIdentityShapeshiftState?.targetPersonaPrompt ??
     speaker.systemPrompt;
-  const shapeshiftIsActivePersonaSource = Boolean(
-    activeIdentityShapeshiftState && !activeIdentityMirrorState,
-  );
+  const shapeshiftIsActivePersonaSource = Boolean(activeIdentityShapeshiftState);
   // Identity Crisis retains the holder voice; Shapeshifter copies the form.
   const effectivePersonaVernacularCue = botVernacularAuthoringCueV1(
     botVernacularIdFromStoredVoiceProfile(
-      activeIdentityMirrorState
-        ? speaker.audioVoiceProfileOverride ?? speaker.authoredAudioVoiceProfile
-        : activeIdentityShapeshiftState?.targetVoice ??
+      activeIdentityShapeshiftState?.targetVoice ??
         speaker.audioVoiceProfileOverride ??
         speaker.authoredAudioVoiceProfile,
     ),
@@ -11945,11 +11998,7 @@ export function buildBotcastSpeakerPrompt(
         ...(moodDrainRule
           ? ["Required next-line beat: in the opening words, speak about your own reduced momentum in first person—not the other cast member's mood—then continue in character."]
           : []),
-        identityMirrorJustChanged && activeIdentityMirrorState
-          ? `The identity change just occurred. State plainly that you are ${activeIdentityMirrorState.targetBotName}, use "impostor" exactly once for the original ${activeIdentityMirrorState.targetBotName}, and continue in that public persona while remaining the mechanical ${args.speakerRole}. Do not repeat the label inside this reveal.`
-          : activeIdentityMirrorState
-            ? `Continue in your active copied identity while remaining the mechanical ${args.speakerRole}. Never recant or concede it. Do not repeat the reveal or use impostor, imposter, pretender, or fake; demonstrate the copied persona by advancing the substantive conversation.`
-            : identityShapeshiftJustChanged &&
+        identityShapeshiftJustChanged &&
                 shapeshiftIsActivePersonaSource &&
                 activeIdentityShapeshiftState
               ? `The shapeshift just occurred. First state plainly that you are ${activeIdentityShapeshiftState.targetBotName}, then continue inhabiting that public form while remaining the mechanical ${args.speakerRole}.`
@@ -15336,9 +15385,13 @@ export async function advanceBotcastEpisode(
   ) {
     throw new Error("Only a Producer-guest episode accepts a human guest answer.");
   }
+  const queuedCueLifecycle = input.cue
+    ? null
+    : botcastActiveProducerCueFromEvents(episode.events);
+  let cueLifecycleId = queuedCueLifecycle?.cueId;
   let requestedCue = input.cue
     ? normalizeBotcastProducerCue(input.cue)
-    : undefined;
+    : queuedCueLifecycle?.cue;
   const queuedImageContextAtRequest = botcastLatestImageContextV1(
     episode.events,
   );
@@ -15352,7 +15405,8 @@ export async function advanceBotcastEpisode(
       throw new Error("That Signal image is no longer queued for this episode.");
     }
   }
-  const cueDelivery = input.cueDelivery ?? "next_host_turn";
+  const cueDelivery =
+    input.cueDelivery ?? queuedCueLifecycle?.delivery ?? "next_host_turn";
   let hostRedirect = input.hostRedirect;
   let guestInterruption = input.guestInterruption;
   if (input.cueDelivery && !requestedCue) {
@@ -15382,13 +15436,23 @@ export async function advanceBotcastEpisode(
       );
       episode = getBotcastEpisode(db, userId, episodeId);
     } else {
+      if (cueLifecycleId) {
+        recordEvent(db, userId, episodeId, "producer_cue", {
+          cueId: cueLifecycleId,
+          lifecycle: "failed",
+          failure: "delivery_unavailable",
+        });
+        episode = getBotcastEpisode(db, userId, episodeId);
+      }
       requestedCue = undefined;
       guestInterruption = undefined;
     }
   }
   // A cue that rode a sanitizer-repaired host turn never actually aired.
   // Re-arm it once for the host's next turn instead of losing the direction.
-  let cueRedelivery = false;
+  let cueRedelivery =
+    queuedCueLifecycle?.status === "requeued" ||
+    queuedCueLifecycle?.status === "dispatching";
   if (!requestedCue && !input.cue && episode.segment !== "closing") {
     const undeliveredCue = botcastUndeliveredAskAboutCue(episode);
     if (
@@ -15402,6 +15466,25 @@ export async function advanceBotcastEpisode(
     ) {
       requestedCue = undeliveredCue;
       cueRedelivery = true;
+      const priorDispatch = [...episode.events]
+        .reverse()
+        .find(
+          (event) =>
+            event.kind === "producer_cue" &&
+            event.payload.kind === "ask_about" &&
+            typeof event.payload.cueId === "string",
+        );
+      cueLifecycleId =
+        typeof priorDispatch?.payload.cueId === "string"
+          ? priorDispatch.payload.cueId
+          : undefined;
+      if (cueLifecycleId) {
+        recordEvent(db, userId, episodeId, "producer_cue", {
+          cueId: cueLifecycleId,
+          lifecycle: "requeued",
+        });
+        episode = getBotcastEpisode(db, userId, episodeId);
+      }
     }
   }
   if (requestedCue) {
@@ -15446,7 +15529,17 @@ export async function advanceBotcastEpisode(
       nextRole !== "host" &&
       !echoHostCanHandWrapToGuest
     ) {
-      throw new Error("Producer cues wait for the host's next turn.");
+      if (queuedCueLifecycle && !input.cue) {
+        // The durable queue belongs to the episode, not this particular
+        // advance. Let the scheduled guest turn proceed and leave the cue
+        // active for the following host turn. Explicit legacy cue requests
+        // still reject the wrong floor so callers cannot mislabel delivery.
+        requestedCue = undefined;
+        cueLifecycleId = undefined;
+        cueRedelivery = false;
+      } else {
+        throw new Error("Producer cues wait for the host's next turn.");
+      }
     }
     const guestHasTheMic =
       nextRole === "guest" ||
@@ -15620,6 +15713,7 @@ export async function advanceBotcastEpisode(
       hostRedirect,
       guestInterruption,
       cueRedelivery,
+      cueLifecycleId,
     );
     episode = getBotcastEpisode(db, userId, episodeId);
     if (cueDelivery === "interrupt_guest" && guestInterruption) {
@@ -18080,9 +18174,7 @@ export async function advanceBotcastEpisode(
           activeFalseNameState,
           falseNameJustChanged,
           {
-            replacedSelfNames: activeIdentityMirrorState
-              ? [activeIdentityMirrorState.targetBotName]
-              : [],
+            replacedSelfNames: [],
             announceIdentityOnChange: false,
           },
         )
@@ -18143,9 +18235,7 @@ export async function advanceBotcastEpisode(
               activeFalseNameState,
               falseNameJustChanged,
               {
-                replacedSelfNames: activeIdentityMirrorState
-                  ? [activeIdentityMirrorState.targetBotName]
-                  : [],
+                replacedSelfNames: [],
                 announceIdentityOnChange: false,
               },
             )
@@ -18965,11 +19055,6 @@ export async function advanceBotcastEpisode(
             }
           : {}),
         state: identityMirrorState,
-        irritation: {
-          targetBotId: identityMirrorState.targetBotId,
-          strength: "small",
-          reliable: true,
-        },
       },
       now,
     );
@@ -19395,11 +19480,6 @@ export async function advanceBotcastEpisode(
         trigger: "public_social_action",
         sourceAction: listenerPublicSocialAction,
         state: listenerActionIdentityMirrorState,
-        irritation: {
-          targetBotId: listenerActionIdentityMirrorState.targetBotId,
-          strength: "small",
-          reliable: true,
-        },
       },
       now,
     );
@@ -19972,6 +20052,60 @@ export async function advanceBotcastEpisode(
         : {}),
     },
   );
+  if (cueLifecycleId && requestedCue) {
+    // A speech-transform Power changes only what the audience hears. Judge a
+    // normal ask_about against the host's authored intent so a host such as
+    // Nora is not marked as having ignored a direction merely because the
+    // public line is deliberately unintelligible. If crosstalk cut the line,
+    // keep judging the audience-heard prefix: the requested subject may never
+    // have reached the mic. Exact Producer quotes remain a public-delivery
+    // contract and therefore always use the delivered line.
+    const cueEvaluationContent =
+      !requestedCue.directQuote &&
+      (speakerMumblesSpeech || speakerCursesSpeech) &&
+      !speakerReadsProducerQuote &&
+      deliveredContent === content
+        ? intendedContent
+        : deliveredContent;
+    const privateCueFailed = Boolean(
+      requestedCue.directQuote && generatedUtterance.repairReason,
+    );
+    const detailWasMissed = Boolean(
+      requestedCue.kind === "ask_about" &&
+        requestedCue.detail &&
+        speakerRole === "host" &&
+        (generatedUtterance.repairReason ||
+          !botcastHostTurnAddressesProducerCue(
+            cueEvaluationContent,
+            requestedCue,
+          )),
+    );
+    const lifecycle = privateCueFailed
+      ? "failed"
+      : detailWasMissed
+        ? cueRedelivery
+          ? "failed"
+          : "requeued"
+        : "delivered";
+    recordEvent(
+      db,
+      userId,
+      episode.id,
+      "producer_cue",
+      {
+        cueId: cueLifecycleId,
+        lifecycle,
+        ...(lifecycle === "failed"
+          ? {
+              failure: privateCueFailed
+                ? "privacy_validation"
+                : "delivery_unfulfilled",
+            }
+          : {}),
+      },
+      now,
+    );
+  }
   episode = getBotcastEpisode(db, userId, episode.id);
   const echoHostClosingStillNeedsGuestReflection =
     !producerCut &&

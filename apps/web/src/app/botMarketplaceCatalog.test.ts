@@ -571,28 +571,28 @@ describe("bot marketplace static catalog", () => {
           "power",
           "showcase",
           "identity",
-          "impostor",
+          "eyes",
+          "mouth",
           "face",
-          "voice",
           "ink",
           "glyph",
         ]);
-        assert.match(entry.description ?? "", /inside his own vivid shell.*voice never changes/iu);
+        assert.match(entry.description ?? "", /eyes, speaking mouth, Ink, and glyph.*every other way/iu);
         assert.match(
           bundle.botJson.profile?.purpose.statement ?? "",
-          /borrows.*public name.*persona.*face.*Ink.*lower glyph.*active public Power consequences.*retaining his complete authored voice/iu,
+          /only his eyes.*resting\/live mouth package.*Avatar Details Ink.*lower glyph/iu,
         );
         assert.match(
           bundle.botJson.profile?.appearance.description ?? "",
-          /vivid cyan shell.*communication chassis.*frame stay unmistakably his/iu,
+          /vivid cyan shell.*communication chassis.*frame.*thinking spinner stay unmistakably his/iu,
         );
         assert.match(
           powers[0]?.intent ?? "",
-          /retain Collin's complete authored voice identity\/profile.*accent.*pronunciation.*speechprint.*client voice effect.*saturated color.*communication-style chassis.*frame finish/iu,
+          /presentation-only.*eyes and blink package.*resting\/live mouth and viseme package.*Avatar Details Ink.*lower glyph/iu,
         );
         assert.match(
           powers[0]?.intent ?? "",
-          /impostor exactly once.*never repeat the label or recant.*original briefly correct.*even under Credulity/iu,
+          /Keep Collin's name, persona, dialogue behavior, complete voice and Accent Map.*color.*chassis\/frame.*thinking spinner.*Powers and consequences/iu,
         );
         assert.doesNotMatch(
           powers[0]?.intent ?? "",

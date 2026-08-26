@@ -579,6 +579,7 @@ export {
 export {
   BOT_IDENTITY_MIRROR_TRANSITION_MS,
   BOT_IDENTITY_MIRROR_VERSION,
+  applyBotIdentityMirrorFaceV1,
   applyBotIdentityMirrorHolderVoiceEffectV1,
   applyBotIdentityMirrorOriginalCorrectionV1,
   applyBotIdentityMirrorResponseV1,
@@ -596,6 +597,7 @@ export {
   createBotIdentityMirrorStateV1,
   normalizeBotIdentityMirrorStateV1,
   resolveBotIdentityMirrorAvatarDetailsV1,
+  resolveBotIdentityMirrorFaceV1,
   resolveBotIdentityMirrorVoiceV1,
   type BotIdentityMirrorStateV1,
   type BotIdentityMirrorSurfaceV1,
