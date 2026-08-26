@@ -3167,7 +3167,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       pageSource,
-      /const seatFaceStyle = identityBorrowTargetActive\s+\? identityPresentationState!\.targetFace\s+: resolveBotFaceStyleForBot\(bot\)/,
+      /const holderSeatFaceStyle = resolveBotFaceStyleForBot\(bot\);\s*const seatFaceStyle = identityMirrorState\s+\? resolveBotIdentityMirrorFaceV1\(\s*identityMirrorState,\s*holderSeatFaceStyle,\s*identityBorrowTargetActive,\s*\)\s*: identityShapeshiftState && identityBorrowTargetActive\s+\? identityShapeshiftState\.targetFace\s*: holderSeatFaceStyle/,
     );
     assert.match(
       pageSource,

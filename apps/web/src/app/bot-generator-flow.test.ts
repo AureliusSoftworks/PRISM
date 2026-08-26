@@ -399,7 +399,11 @@ test("Foundry synthesis stays beneath authored glass and separates both liquid s
   );
   assert.match(
     cssSource,
-    /\.botAvatarFoundryBuckleGlass\s*\{[\s\S]*?--foundry-buckle-glass-scale:\s*1\.26;[\s\S]*?scale\(var\(--foundry-buckle-glass-scale\)\)/u,
+    /\.botAvatarFoundryBuckleGlass\s*\{[\s\S]*?z-index:\s*14;[\s\S]*?scale\(var\(--zen-live-bot-buckle-screen-scale\)\)[\s\S]*?mix-blend-mode:\s*screen;/u,
+  );
+  assert.doesNotMatch(
+    cssSource,
+    /\.botAvatarFoundryBuckleGlass\s*\{[^}]*--foundry-buckle-glass-scale/u,
   );
   assert.match(cssSource, /data-screen-crest="true"[\s\S]*?z-index:\s*9;/u);
   assert.match(ritualCssSource, /data-synthesis-complete="true"[\s\S]*?background:\s*#fff;/u);

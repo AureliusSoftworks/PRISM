@@ -6789,8 +6789,23 @@ describe("Botcast persistence and isolation", () => {
       falseNameJustChanged: true,
     } as never).map((message) => message.content).join("\n");
 
-    assert.doesNotMatch(prompt, /Identity mirror is active|Copied public persona|Scatterbrained Steven's persona/iu);
+    assert.match(
+      prompt,
+      /Identity Crisis behavior: you are still Identity Crisis Ian, the mechanical Signal host/iu,
+    );
+    assert.match(
+      prompt,
+      /knowingly masquerade as Scatterbrained Steven.*borrowed name as "Scatterbrained Steven"/isu,
+    );
+    assert.match(
+      prompt,
+      /without adopting Scatterbrained Steven's persona/iu,
+    );
     assert.match(prompt, /Persona:\s*An identity-prosecuting host/iu);
+    assert.doesNotMatch(
+      prompt,
+      /Persona:\s*A friendly man with no durable short-term memory/iu,
+    );
     assert.match(
       prompt,
       /Hard false-name rule: your name is "Riley Ashford".*sincerely know this is your name/isu,
@@ -9236,7 +9251,14 @@ describe("Botcast persistence and isolation", () => {
       );
       const holderPrompt = captures[1]?.map((message) => message.content).join("\n") ?? "";
       assert.doesNotMatch(holderPrompt, /absolutely convinced that you are Mara Vale/iu);
-      assert.doesNotMatch(holderPrompt, /mechanical Signal guest/iu);
+      assert.match(
+        holderPrompt,
+        /Identity Crisis behavior: you are still Identity Crisis Ian, the mechanical Signal guest/iu,
+      );
+      assert.match(
+        holderPrompt,
+        /knowingly masquerade as Mara Vale.*borrowed name as "Mara Vale"/isu,
+      );
       assert.match(
         holderPrompt,
         /Persona:\s*A brittle identity thief waiting for a bot to address him/iu,
@@ -9245,7 +9267,8 @@ describe("Botcast persistence and isolation", () => {
         holderPrompt,
         /Persona:\s*A forensic cultural critic who asks precise questions/iu,
       );
-      assert.doesNotMatch(holderPrompt, /identity change just occurred|impostor/iu);
+      assert.match(holderPrompt, /Mara Vale is the suspicious imitator/iu);
+      assert.doesNotMatch(holderPrompt, /identity change just occurred/iu);
       assert.equal(
         holderTurn.message?.content,
         "I'm Identity Crisis Ian, and I still sound exactly like myself.",
@@ -9393,7 +9416,14 @@ describe("Botcast persistence and isolation", () => {
       );
       const holderPrompt = captures[2]?.map((message) => message.content).join("\n") ?? "";
       assert.doesNotMatch(holderPrompt, /absolutely convinced that you are Ivo Stone/iu);
-      assert.doesNotMatch(holderPrompt, /mechanical Signal host/iu);
+      assert.match(
+        holderPrompt,
+        /Identity Crisis behavior: you are still Identity Crisis Ian, the mechanical Signal host/iu,
+      );
+      assert.match(
+        holderPrompt,
+        /knowingly masquerade as Ivo Stone.*borrowed name as "Ivo Stone"/isu,
+      );
       assert.match(
         holderPrompt,
         /Persona:\s*A brittle identity thief waiting for a bot to address him/iu,

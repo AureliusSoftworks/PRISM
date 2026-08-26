@@ -11857,7 +11857,7 @@ describe("buildSpeakerPrompt", () => {
     );
   });
 
-  it("persists identity mirroring without changing prompts or social state", () => {
+  it("persists identity mirroring with holder-only guidance and unchanged social state", () => {
     const state = createBotIdentityMirrorStateV1({
       surface: "coffee",
       holderBotId: "ian",
@@ -11884,7 +11884,16 @@ describe("buildSpeakerPrompt", () => {
       history,
       speaker: { id: "ian", name: "Identity Crisis Ian" },
     });
-    assert.equal(holderPrompt, "");
+    assert.match(
+      holderPrompt,
+      /Identity Crisis behavior: you are still Identity Crisis Ian, the Coffee participant/iu,
+    );
+    assert.match(
+      holderPrompt,
+      /knowingly masquerade as Mara Vale.*borrowed name as "Mara Vale"/isu,
+    );
+    assert.match(holderPrompt, /Mara Vale is the suspicious imitator/iu);
+    assert.doesNotMatch(holderPrompt, /terse lunar cartographer/iu);
 
     const originalPrompt = coffeeIdentityMirrorPromptForSpeaker({
       history,
