@@ -84,6 +84,8 @@ export interface DebateMysteryCompilationSubstepV2 {
 export type DebateMysteryPlayPhaseV2 =
   | "case_forge"
   | "title_card"
+  /** The pre-authored Casekeeper briefing between the title card and the map. */
+  | "case_opening"
   | "investigation"
   | "theory"
   | "trial"
@@ -242,6 +244,10 @@ export interface DebateMysteryDialogueNodeV2 {
   scene: "investigation" | "court" | "verdict";
   speakerSeatId: string | null;
   intendedRecipientSeatId: string | null;
+  /** Optional explicit bot recipient for a sealed direct-address exchange.
+   * This preserves presentation-only Powers without inferring routing from
+   * turn order during replay. */
+  intendedRecipientBotId?: string | null;
   lineId: string | null;
   label: string | null;
   /** Public investigation location, when this interaction is spatially bound. */
@@ -475,6 +481,9 @@ export interface DebateMysteryPublicDialogueEntryV2 {
   visibleText: string;
   speakerSeatId: string | null;
   speakerBotId: string | null;
+  /** Recorded only when the authored graph explicitly addresses a bot. */
+  intendedRecipientSeatId?: string | null;
+  intendedRecipientBotId?: string | null;
   occurredAt: string;
 }
 
@@ -699,6 +708,7 @@ export interface DebateMysteryPlayAgainRequestV2 {
 
 export type DebateMysteryActionRequestV2 =
   | { version: 2; expectedRevision: number; idempotencyKey: string; action: "move"; roomId?: string }
+  | { version: 2; expectedRevision: number; idempotencyKey: string; action: "dismiss_case_opening" }
   | { version: 2; expectedRevision: number; idempotencyKey: string; action: "advance_room_introduction"; roomId: string }
   | { version: 2; expectedRevision: number; idempotencyKey: string; action: "complete_room_introduction"; roomId: string }
   | { version: 2; expectedRevision: number; idempotencyKey: string; action: "examine"; roomId: string; hotspotId: string }

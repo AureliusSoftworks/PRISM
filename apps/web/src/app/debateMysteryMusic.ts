@@ -26,8 +26,9 @@ export function mysteryInvestigationMusicSessionActive(
 
 export function mysteryInvestigationMusicMix(args: {
   theoryBoardOpen: boolean;
+  roomIntroductionActive?: boolean;
 }): SessionAtmosphereMix {
-  return args.theoryBoardOpen
+  return args.theoryBoardOpen || args.roomIntroductionActive
     ? WHODUNNIT_INVESTIGATION_MUSIC_SILENT_MIX
     : WHODUNNIT_INVESTIGATION_MUSIC_MIX;
 }

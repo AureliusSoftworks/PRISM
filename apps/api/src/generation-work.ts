@@ -213,9 +213,16 @@ function sortPending(queue: AuxiliaryHostQueue): void {
 }
 
 function pumpAuxiliaryQueue(host: string, queue: AuxiliaryHostQueue): void {
-  if (queue.active || pausedAuxiliaryHosts.has(host)) return;
+  if (queue.active) return;
   sortPending(queue);
-  const next = queue.pending.shift();
+  const paused = pausedAuxiliaryHosts.has(host);
+  const nextIndex = paused
+    ? queue.pending.findIndex(
+        (entry) => entry.context.executionLane === "selected",
+      )
+    : 0;
+  if (nextIndex < 0) return;
+  const [next] = queue.pending.splice(nextIndex, 1);
   if (!next) return;
   if (next.signal.aborted || next.callerSettled) {
     pumpAuxiliaryQueue(host, queue);
@@ -306,7 +313,12 @@ export function schedulePrismAuxiliaryWork<T>(args: {
     );
     queue.pending.push(item as QueuedAuxiliaryWork<unknown>);
     const active = queue.active;
-    if (active && item.rank < active.rank) {
+    if (
+      active &&
+      (item.rank < active.rank ||
+        (item.context.executionLane === "selected" &&
+          active.context.executionLane === "auxiliary"))
+    ) {
       abortQueuedWork(
         active,
         abortError("Auxiliary generation yielded to higher-priority work."),

@@ -80,7 +80,7 @@ import {
 } from "./debate.ts";
 import {
   estimatePrismTextTokens,
-  runPrismStructuredGeneration,
+  prismGenerationBroker,
 } from "./generation-broker.ts";
 import type { PrismGenerationWorkReceipt } from "./generation-work.ts";
 import { PRISM_INSTANT_VOICE_MODEL_ID, pcmWaveDurationMs } from "./local-voice-engine.ts";
@@ -293,9 +293,17 @@ interface MysteryV2FactLedger {
   frozenIds: {
     victimId: string;
     suspectSeatIds: string[];
+    roomIds: string[];
     evidenceIds: string[];
     examinationIds: string[];
     statementIdsBySeat: Record<string, string[]>;
+  };
+  roleAssignments: {
+    suspectBotIdBySeat: Record<string, string>;
+    prosecutorBotId: string;
+    defenseCounselBotId: string;
+    judgeBotId: string;
+    jurorBotIds: string[];
   };
   proofRoutesBySeat: Record<string, string>;
   schemaConstraints: {
@@ -385,6 +393,14 @@ interface PrivateMysteryCaseV2 {
   investigationRoomIds?: string[];
   investigationHotspotIdsByRoom?: Record<string, string[]>;
   investigationPersonIds?: string[];
+  /**
+   * A compact, private snapshot of each cast member's authored voice cues.
+   * The post-graph polish pass uses this rather than a mutable bot profile,
+   * so a compiling case keeps the persona it was built around.
+   */
+  personaVoiceCardsByBotId?: Record<string, MysteryV2VoiceCard>;
+  /** Marks a durable checkpoint whose graph already carries persona lead-ins. */
+  personaDialoguePolishVersion?: 1;
   playerRoleContractVersion?: 1;
   investigationProgressionContractVersion?: 2;
   graphValidation: ReturnType<typeof validateDebateMysteryDialogueGraphV2>;
@@ -1762,7 +1778,7 @@ async function prepareMysteryVoiceCardsV2(args: {
     args.bots.map((bot) => [bot.id, sha256(bot.system_prompt)]),
   );
   try {
-    const result = await runPrismStructuredGeneration({
+    const result = await prismGenerationBroker.runStructured({
       work: {
         workflow: "case_forge",
         operation: "prepare_voice_cards",
@@ -1841,6 +1857,97 @@ async function prepareMysteryVoiceCardsV2(args: {
   }
 }
 
+async function prepareMysteryConnectiveAdditionsV2(args: {
+  runtime: DebateAiRuntime;
+  sectionKey: string;
+  voiceCard: MysteryV2VoiceCard | undefined;
+  topicIds: string[];
+}): Promise<Record<string, string>> {
+  const fallback = Object.fromEntries(
+    args.topicIds.map((topicId, index) => [
+      topicId,
+      index % 2 === 0 ? "As I said," : "I have already answered that:",
+    ]),
+  );
+  const auxiliary = args.runtime.auxiliary;
+  if (!auxiliary || args.topicIds.length === 0) return fallback;
+  try {
+    const result = await prismGenerationBroker.runStructured({
+      work: {
+        workflow: "case_forge",
+        operation: "complete_connective_copy",
+        stage: args.sectionKey,
+        executionLane: "auxiliary",
+        role: "connective",
+        outputClass: "connective",
+        priority: "background",
+        privacyMode: "local",
+        cacheKey: `case-forge-connective-v1:${sha256(JSON.stringify({
+          voiceCard: args.voiceCard,
+          topicIds: args.topicIds,
+        }))}`,
+      },
+      lanes: [{
+        provider: auxiliary,
+        providerName: "local",
+        model: auxiliary.diagnosticModel ?? "auxiliary",
+      }],
+      modelSelectionKind: "fixed",
+      maxFixedAttempts: 1,
+      run: ({ lane, signal, work }) => lane.provider.generateResponse([
+        {
+          role: "system",
+          content: "Write only short persona-shaped acknowledgments that a question is being repeated. Do not mention or imply facts, clues, relationships, alibis, motives, evidence, deductions, or answers. JSON only.",
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            voiceCues: args.voiceCard?.cues ?? [],
+            topicIds: args.topicIds,
+            outputContract: {
+              acknowledgments: "object keyed by exact topicId; each value is a fact-free acknowledgment under 12 words",
+            },
+          }),
+        },
+      ], {
+        model: lane.model,
+        maxTokens: 500,
+        temperature: 0.45,
+        jsonMode: true,
+        usagePurpose: "debate_generation",
+        generationWork: work,
+        signal,
+      }),
+      validate: (raw) => {
+        const parsed = parseJsonObject(raw);
+        const acknowledgments = parsed.acknowledgments &&
+          typeof parsed.acknowledgments === "object" &&
+          !Array.isArray(parsed.acknowledgments)
+          ? parsed.acknowledgments as Record<string, unknown>
+          : {};
+        const normalized: Record<string, string> = {};
+        for (const topicId of args.topicIds) {
+          const acknowledgment = compact(acknowledgments[topicId], 90);
+          if (
+            !acknowledgment ||
+            acknowledgment.split(/\s+/u).length > 12 ||
+            /\b(?:evidence|clue|culprit|alibi|motive|proof|record|victim)\b/iu.test(
+              acknowledgment,
+            )
+          ) {
+            throw new Error("Connective copy crossed the fact-free boundary.");
+          }
+          normalized[topicId] = acknowledgment;
+        }
+        return normalized;
+      },
+    });
+    return result.value;
+  } catch {
+    return fallback;
+  }
+}
+
 function recordMysterySectionReceipt(
   draft: MysteryV2AuthoringCheckpoint,
   sectionKey: string,
@@ -1876,7 +1983,7 @@ async function auditMysterySectionV2(args: {
     "cross_section_contradiction",
   ]);
   try {
-    const result = await runPrismStructuredGeneration({
+    const result = await prismGenerationBroker.runStructured({
       work: {
         workflow: "case_forge",
         operation: "audit_case_section",
@@ -1986,7 +2093,7 @@ async function generateMysteryAuthoringSectionV2<T>(args: {
   const lanes = args.runtime.lanes?.length
     ? args.runtime.lanes
     : [mysteryV2Lane(args.runtime)];
-  const result = await runPrismStructuredGeneration({
+  const result = await prismGenerationBroker.runStructured({
     work: {
       workflow: "case_forge",
       operation:
@@ -2058,6 +2165,7 @@ async function authorMysteryV2(args: {
   config: DebateMysteryResolvedConfigV2;
   scaffold: ReturnType<typeof compileDeterministicDebateMystery>;
   bots: MysteryV2BotRow[];
+  powerPlan: DebateSessionV1["powerPlan"];
   eyewitnessSeatId: string | null;
   examinationIds: string[];
   requiredContradictionBySeat: ReadonlyMap<string, DebateMysteryRecordReferenceV2>;
@@ -2119,6 +2227,7 @@ async function authorMysteryV2(args: {
     frozenIds: {
       victimId: args.scaffold.victim.id,
       suspectSeatIds: args.scaffold.suspects.map((suspect) => suspect.seatId),
+      roomIds: courtOnly ? [] : args.scaffold.rooms.map((room) => room.id),
       evidenceIds: args.scaffold.evidence.map((evidence) => evidence.id),
       examinationIds: courtOnly ? [] : [...args.examinationIds],
       statementIdsBySeat: Object.fromEntries(
@@ -2128,6 +2237,28 @@ async function authorMysteryV2(args: {
         ]),
       ),
     },
+    roleAssignments: {
+      suspectBotIdBySeat: Object.fromEntries(
+        args.scaffold.suspects.map((suspect) => [
+          suspect.seatId,
+          suspect.botId,
+        ]),
+      ),
+      prosecutorBotId: args.config.prosecutorBotId,
+      defenseCounselBotId: args.config.rivalDefenseBotId,
+      judgeBotId: args.config.judgeBotId,
+      jurorBotIds: [...args.config.jurorBotIds],
+    },
+    powerPlan: Object.fromEntries(
+      Object.entries(args.powerPlan.bots).map(([botId, plan]) => [
+        botId,
+        plan.effects.map(({ powerId, effect }) => ({
+          powerId,
+          type: effect.type,
+          trigger: "trigger" in effect ? effect.trigger : null,
+        })),
+      ]),
+    ),
     proofRoutesBySeat: Object.fromEntries(
       [...args.requiredContradictionBySeat].map(([seatId, reference]) => [
         seatId,
@@ -2165,6 +2296,7 @@ async function authorMysteryV2(args: {
   const pendingAudits: Array<
     Promise<{ sectionKey: string; issues: MysteryV2AuditIssue[] }>
   > = [];
+  const pendingConnectives: Promise<void>[] = [];
   const targetedRepairs = new Map<
     string,
     (issues: MysteryV2AuditIssue[]) => Promise<void>
@@ -2514,7 +2646,7 @@ async function authorMysteryV2(args: {
             defaultPresentProsecutionStageAction: "short visual-only physical beat",
             defaultPresentReaction: "finite suspect response to irrelevant evidence",
             defaultPresentReactionStageAction: "short visual-only physical beat",
-            talkTopics: "3-5 finite subjects with id, short menu label, category (person, general, motive, alibi, or room), subjectId for person/room, an in-character Prosecutor question, questionStageAction, question performance direction, suspect response, responseStageAction, response performance direction, plus 1-2 repeatResponses. Room subjectId must be an exact setup roomId; person subjectId must be the victim ID or an exact suspect seatId. Never make a Case File evidence/testimony title into a Talk subject.",
+            talkTopics: "3-5 finite subjects with id, short menu label, category (person, general, motive, alibi, or room), subjectId for person/room, an in-character Prosecutor question, questionStageAction, question performance direction, suspect response, responseStageAction, and response performance direction. Omit repeatResponses; PRISM appends the canonical answer to separately generated fact-free repetition acknowledgments. Room subjectId must be an exact setup roomId; person subjectId must be the victim ID or an exact suspect seatId. Never make a Case File evidence/testimony title into a Talk subject.",
             presentationGate: requiredPresentationGateRecord
               ? {
                   id: `gate-${requirement.seatId}`,
@@ -2552,7 +2684,7 @@ async function authorMysteryV2(args: {
           requiredPresentationGateRecord
             ? "The final Talk topic is a genuinely consequential follow-up unlocked only by presenting the assigned pivotal record to this exact suspect; do not duplicate the record title as that topic's label."
             : "Do not invent a presentation gate for this witness.",
-          "Every Talk topic needs one or two repeat responses. Start each with a natural acknowledgment of repetition such as 'As I said' or a persona-specific impatience, then give the complete finite answer; do not use the same canned acknowledgment for every witness.",
+          "Do not author repeat responses. PRISM owns their fact-free acknowledgment and deterministically appends this topic's canonical response.",
           "The room introduction is a self-contained persona reveal, not a question or an answer. Its distinctive wording or claim must give the first Talk topic a natural contextual handoff, but the player still chooses that question and no topic is selected automatically.",
           "For every authored Present reaction, write the selected public Case File title exactly in both the Prosecutor line and the witness response. Never expose sealed reasoning or substitute a generic 'item' or 'evidence' reference for that public title.",
           "Every spoken bot line supplies its nonverbal beat in the dedicated stage-action field. Never put an action or a bot name inside spoken dialogue.",
@@ -2603,7 +2735,49 @@ async function authorMysteryV2(args: {
       ...requirement.requiredStatementIds,
       ...requirement.requiredPresentReactionRecordIds,
     ];
-    queueAudit(suspectSectionKey, suspect, suspectFrozenIds);
+    pendingConnectives.push(
+      prepareMysteryConnectiveAdditionsV2({
+        runtime: args.runtime,
+        sectionKey: suspectSectionKey,
+        voiceCard: voiceCardsByBotId[requirement.botId],
+        topicIds: suspect.talkTopics.map((topic) => topic.id),
+      }).then((additions) => {
+        const connectedSuspect: AuthoredSuspectV2 = {
+          ...args.draft.suspectsBySeatId[requirement.seatId]!,
+          talkTopics: args.draft.suspectsBySeatId[
+            requirement.seatId
+          ]!.talkTopics.map((topic) => {
+            const rawAcknowledgment =
+              additions[topic.id] ?? "As I said,";
+            const acknowledgment = /[,:;!?]$/u.test(rawAcknowledgment)
+              ? rawAcknowledgment
+              : `${rawAcknowledgment},`;
+            const alternateAcknowledgment = /^as i said/iu.test(
+              acknowledgment,
+            )
+              ? "I have already answered that:"
+              : "As I said,";
+            return {
+              ...topic,
+              repeatResponses: [acknowledgment, alternateAcknowledgment].map(
+                (prefix) => ({
+                  response: `${prefix} ${topic.response}`,
+                  responseStageAction: null,
+                  performance: topic.performance,
+                }),
+              ),
+            };
+          }),
+        };
+        args.draft.suspectsBySeatId[requirement.seatId] = connectedSuspect;
+        args.draft.connectiveAdditions[suspectSectionKey] = additions;
+        args.onDraft(
+          args.draft,
+          `Writing the Case · Witness chapter ${index + 1} connective copy complete`,
+        );
+        queueAudit(suspectSectionKey, connectedSuspect, suspectFrozenIds);
+      }),
+    );
     targetedRepairs.set(suspectSectionKey, async (issues) => {
       const repaired = await generateMysteryAuthoringSectionV2({
         runtime: args.runtime,
@@ -2785,6 +2959,7 @@ async function authorMysteryV2(args: {
     });
   }
 
+  await Promise.all(pendingConnectives);
   const auditResults = await Promise.all(pendingAudits);
   for (const auditResult of auditResults) {
     const highIssues = auditResult.issues.filter(
@@ -2811,6 +2986,199 @@ async function authorMysteryV2(args: {
   return authored;
 }
 
+const MYSTERY_PERSONA_DIALOGUE_LEAD_IN_BANNED_WORDS = new Set([
+  "alibi",
+  "case",
+  "clue",
+  "culprit",
+  "evidence",
+  "motive",
+  "proof",
+  "record",
+  "testimony",
+  "victim",
+]);
+
+function mysteryPersonaDialogueWords(value: string): string[] {
+  return value.toLocaleLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}'’]*/gu) ?? [];
+}
+
+function normalizeMysteryPersonaDialogueLeadIn(args: {
+  value: unknown;
+  canonicalWords: ReadonlySet<string>;
+}): string {
+  const leadIn = compact(args.value, 80);
+  const words = mysteryPersonaDialogueWords(leadIn);
+  if (
+    !leadIn ||
+    words.length > 10 ||
+    !/^[\p{L}\p{M}\s,'’;:—-]+$/u.test(leadIn) ||
+    !/[,;:—-]$/u.test(leadIn) ||
+    words.some((word) =>
+      MYSTERY_PERSONA_DIALOGUE_LEAD_IN_BANNED_WORDS.has(word) ||
+      (word.length >= 4 && args.canonicalWords.has(word)),
+    )
+  ) {
+    throw new Error("Persona dialogue polish introduced content-bearing copy.");
+  }
+  return leadIn;
+}
+
+function frozenMysteryPersonaVoiceCardsV2(args: {
+  graph: DebateMysteryDialogueGraphV2;
+  privateCase: PrivateMysteryCaseV2;
+  bots: MysteryV2BotRow[];
+}): Record<string, MysteryV2VoiceCard> {
+  const stored = args.privateCase.personaVoiceCardsByBotId ?? {};
+  const botById = new Map(args.bots.map((bot) => [bot.id, bot]));
+  const speakerBotIds = [...new Set(args.graph.lines.flatMap((line) =>
+    line.speakerBotId ? [line.speakerBotId] : []))];
+  return Object.fromEntries(speakerBotIds.map((botId) => {
+    const card = stored[botId];
+    if (card?.botId === botId && card.cues.length > 0) {
+      return [botId, {
+        botId,
+        sourceHash: card.sourceHash,
+        cues: [...card.cues],
+      }];
+    }
+    const bot = botById.get(botId);
+    return [botId, bot
+      ? deterministicMysteryVoiceCard(bot)
+      : {
+          botId,
+          sourceHash: "legacy-frozen-persona-unavailable",
+          cues: ["Keep this speaker's established voice distinct and controlled."],
+        }];
+  }));
+}
+
+/**
+ * Preserves the graph's authored claims byte-for-byte while adding a short,
+ * persona-selected verbal lead-in to each bot-delivered line. The model never
+ * returns a rewritten claim or a graph shape; it can only select fact-free
+ * cadence around the immutable canonical text.
+ */
+async function polishMysteryPersonaDialogueGraphV2(args: {
+  runtime: DebateAiRuntime;
+  graph: DebateMysteryDialogueGraphV2;
+  privateCase: PrivateMysteryCaseV2;
+  bots: MysteryV2BotRow[];
+}): Promise<DebateMysteryDialogueGraphV2> {
+  const eligibleLines = args.graph.lines.filter((line) =>
+    Boolean(line.speakerBotId) &&
+    line.mode === "spoken" &&
+    line.visibleText.trim().length >= 12 &&
+    line.reusableCalloutKey === null,
+  );
+  if (eligibleLines.length === 0) return args.graph;
+  const voiceCardsByBotId = frozenMysteryPersonaVoiceCardsV2(args);
+  const canonicalWords = new Set(
+    args.graph.lines.flatMap((line) => mysteryPersonaDialogueWords(line.visibleText)),
+  );
+  const prompt = {
+    section: "persona_dialogue_polish",
+    speakers: Object.values(voiceCardsByBotId).map((card) => ({
+      botId: card.botId,
+      voiceCues: card.cues,
+    })),
+    lines: eligibleLines.map((line) => ({
+      lineId: line.id,
+      speakerBotId: line.speakerBotId,
+      canonicalText: line.visibleText,
+    })),
+    outputContract: {
+      lineFrames: "one entry for every exact lineId with one 1-10 word, fact-free leadIn ending in comma, colon, semicolon, or dash",
+    },
+  };
+  const promptText = JSON.stringify(prompt);
+  const lanes = args.runtime.lanes?.length
+    ? args.runtime.lanes
+    : [mysteryV2Lane(args.runtime)];
+  const result = await prismGenerationBroker.runStructured({
+    work: {
+      workflow: "case_forge",
+      operation: "polish_persona_dialogue",
+      stage: "directing_performances",
+      executionLane: "selected",
+      role: "author",
+      outputClass: "critical",
+      priority: "compilation",
+      privacyMode:
+        args.runtime.preferredProvider === "local"
+          ? "local"
+          : args.runtime.modelSelectionKind === "auto"
+            ? "auto"
+            : "online",
+      cacheKey: `case-forge-persona-dialogue-v1:${sha256(promptText)}`,
+      sourceTokenEstimate: estimatePrismTextTokens(promptText),
+      exportedTokenEstimate: estimatePrismTextTokens(promptText),
+    },
+    lanes,
+    modelSelectionKind: args.runtime.modelSelectionKind ?? "fixed",
+    maxFixedAttempts: V2_MAX_AUTHOR_ATTEMPTS,
+    run: ({ lane, signal, work }) => lane.provider.generateResponse([
+      {
+        role: "system",
+        content: "You are PRISM's final dialogue director. Select a compact verbal lead-in that makes each frozen persona sound distinct, especially the prosecutor. The canonical text is immutable: do not restate, revise, summarize, answer, add facts to, or omit it. Return JSON only. A lead-in is cadence only, never an independent claim: 1-10 words, no proper names, no case terms, no new facts, and it must end with a comma, colon, semicolon, or dash.",
+      },
+      { role: "user", content: promptText },
+    ], {
+      model: lane.model,
+      reasoningEffort: lane.reasoningEffort,
+      turbo: lane.turbo,
+      maxTokens: Math.min(6_000, Math.max(1_500, eligibleLines.length * 40)),
+      temperature: 0.45,
+      jsonMode: true,
+      usagePurpose: "debate_generation",
+      allowFinalLocalFallback: lane.providerName === "local",
+      generationWork: work,
+      signal,
+    }),
+    validate: (raw) => {
+      const parsed = parseJsonObject(raw);
+      const frames = Array.isArray(parsed.lineFrames) ? parsed.lineFrames : [];
+      const leadInByLineId = new Map<string, string>();
+      for (const value of frames) {
+        if (!value || typeof value !== "object") {
+          throw new Error("Persona dialogue polish returned an invalid line frame.");
+        }
+        const row = value as Record<string, unknown>;
+        const lineId = compact(row.lineId, 180);
+        if (!lineId || leadInByLineId.has(lineId)) {
+          throw new Error("Persona dialogue polish changed or repeated a line ID.");
+        }
+        leadInByLineId.set(lineId, normalizeMysteryPersonaDialogueLeadIn({
+          value: row.leadIn,
+          canonicalWords,
+        }));
+      }
+      if (
+        leadInByLineId.size !== eligibleLines.length ||
+        eligibleLines.some((line) => !leadInByLineId.has(line.id))
+      ) {
+        throw new Error("Persona dialogue polish did not preserve the complete frozen line set.");
+      }
+      return {
+        ...args.graph,
+        lines: args.graph.lines.map((line) => {
+          const leadIn = leadInByLineId.get(line.id);
+          if (!leadIn) return line;
+          return {
+            ...line,
+            visibleText: `${leadIn} ${line.visibleText}`,
+            spokenText: `${leadIn} ${line.spokenText}`,
+          };
+        }),
+      };
+    },
+  }).catch((error) => {
+    const detail = error instanceof Error ? error.message : "Unknown dialogue polish error";
+    throw new Error(`Persona dialogue polish could not satisfy validation after bounded generation. ${detail}`);
+  });
+  return result.value;
+}
+
 function buildMysteryV2Graph(args: {
   sessionId: string;
   config: DebateMysteryResolvedConfigV2;
@@ -2820,6 +3188,7 @@ function buildMysteryV2Graph(args: {
   eyewitnessSeatId: string | null;
   alibiSupportDiscoveryIds: string[];
   contradictionBySeat: ReadonlyMap<string, DebateMysteryRecordReferenceV2>;
+  personaVoiceCardsByBotId?: Record<string, MysteryV2VoiceCard>;
 }): { graph: DebateMysteryDialogueGraphV2; privateCase: PrivateMysteryCaseV2; publicState: DebateWhodunnitFormatStateV2 } {
   const courtOnly = args.config.investigationMode === "court_only";
   const nodes: DebateMysteryDialogueNodeV2[] = [];
@@ -2910,6 +3279,7 @@ function buildMysteryV2Graph(args: {
     stageAction?: string | null;
     speakerSeatId?: string | null;
     intendedRecipientSeatId?: string | null;
+    intendedRecipientBotId?: string | null;
     speakerKind?: DebateMysterySpokenLineV2["speakerKind"];
     speakerBotId?: string | null;
     label?: string | null;
@@ -2931,6 +3301,9 @@ function buildMysteryV2Graph(args: {
       scene: options.scene,
       speakerSeatId: options.speakerSeatId ?? null,
       intendedRecipientSeatId: options.intendedRecipientSeatId ?? null,
+      ...(options.intendedRecipientBotId
+        ? { intendedRecipientBotId: options.intendedRecipientBotId }
+        : {}),
       lineId,
       label: options.label ?? null,
       locationId: options.locationId ?? null,
@@ -3113,6 +3486,7 @@ function buildMysteryV2Graph(args: {
         stageAction: topic.responseStageAction,
         speakerSeatId: suspect.seatId,
         intendedRecipientSeatId: null,
+        intendedRecipientBotId: args.config.prosecutorBotId,
         locationId: suspectRoomId,
         performance: topic.performance,
         mutations: {
@@ -3133,6 +3507,7 @@ function buildMysteryV2Graph(args: {
           stageAction: repeat.responseStageAction,
           speakerSeatId: suspect.seatId,
           intendedRecipientSeatId: null,
+          intendedRecipientBotId: args.config.prosecutorBotId,
           locationId: suspectRoomId,
           performance: repeat.performance,
           terminal: "return_to_room",
@@ -3167,6 +3542,7 @@ function buildMysteryV2Graph(args: {
       text: suspect.defaultPresentReaction,
       stageAction: suspect.defaultPresentReactionStageAction,
       speakerSeatId: suspect.seatId,
+      intendedRecipientBotId: args.config.prosecutorBotId,
       locationId: suspectRoomId,
       terminal: "return_to_room",
       root: false,
@@ -3211,6 +3587,7 @@ function buildMysteryV2Graph(args: {
             ),
         stageAction: reaction?.responseStageAction ?? suspect.defaultPresentReactionStageAction,
         speakerSeatId: suspect.seatId,
+        intendedRecipientBotId: args.config.prosecutorBotId,
         locationId: suspectRoomId,
         requirements: { admittedRecordIds: [recordId] },
         mutations: { discoverIds: [`present:${suspect.seatId}:${recordId}`] },
@@ -3415,6 +3792,7 @@ function buildMysteryV2Graph(args: {
         text: option.reaction,
         stageAction: option.reactionStageAction,
         speakerSeatId: choice.witnessSeatId,
+        intendedRecipientBotId: args.config.prosecutorBotId,
         requirements: { choices: [{ choiceId: choice.id, optionId: option.id }] },
       });
       const optionLineId = `line-choice-${choice.id}-${option.id}-option`;
@@ -3553,6 +3931,14 @@ function buildMysteryV2Graph(args: {
       args.scaffold.victim.id,
       ...args.scaffold.suspects.map((suspect) => suspect.seatId),
     ],
+    personaVoiceCardsByBotId: Object.fromEntries(args.bots.map((bot) => {
+      const card = args.personaVoiceCardsByBotId?.[bot.id] ?? deterministicMysteryVoiceCard(bot);
+      return [bot.id, {
+        botId: card.botId,
+        sourceHash: card.sourceHash,
+        cues: [...card.cues],
+      }];
+    })),
     graphValidation: validation,
     playerRoleContractVersion: 1,
     investigationProgressionContractVersion: 2,
@@ -3620,6 +4006,23 @@ function buildMysteryV2Graph(args: {
     activeDialogueNodeId: openingNode?.id ?? null,
   };
   return { graph, privateCase, publicState };
+}
+
+function validateMysteryV2CheckpointGraph(
+  checkpoint: MysteryV2Checkpoint,
+): ReturnType<typeof validateDebateMysteryDialogueGraphV2> {
+  return validateDebateMysteryDialogueGraphV2({
+    graph: checkpoint.graph,
+    suspectSeatIds: checkpoint.privateCase.actorAccounts.map((account) => account.seatId),
+    recordReferences: checkpoint.privateCase.recordItems.map((item) => item.reference),
+    roomIds: checkpoint.privateCase.investigationRoomIds,
+    personIds: checkpoint.privateCase.investigationPersonIds,
+    hotspotIdsByRoom: checkpoint.privateCase.investigationHotspotIdsByRoom,
+    prosecutorBotId: checkpoint.privateCase.config.prosecutorBotId,
+    rivalDefenseBotId: checkpoint.privateCase.config.rivalDefenseBotId,
+    eyewitnessSeatId: checkpoint.privateCase.eyewitnessSeatId,
+    accusedAlibiSupportDiscoveryIds: checkpoint.privateCase.accusedAlibiSupportDiscoveryIds,
+  });
 }
 
 function storeCompiledCaseV2(
@@ -5755,6 +6158,7 @@ export async function runDebateMysteryCompilationV2(
         eyewitnessSeatId,
         alibiSupportDiscoveryIds,
         contradictionBySeat,
+        personaVoiceCardsByBotId: authoringDraft.contextCapsule?.voiceCardsByBotId,
       });
       requireLease();
       storeCompiledCaseV2(db, userId, sessionId, checkpoint.privateCase, checkpoint.graph);
@@ -5768,24 +6172,7 @@ export async function runDebateMysteryCompilationV2(
       setPublicCompilationStatus(db, userId, sessionId, currentJob);
     }
     if (currentJob.completed_passes < 2) {
-      const revalidated = validateDebateMysteryDialogueGraphV2({
-        graph: checkpoint.graph,
-        suspectSeatIds: checkpoint.publicState.suspects.map((suspect) => suspect.seatId),
-        recordReferences: checkpoint.privateCase.recordItems.map((item) => item.reference),
-        roomIds: checkpoint.publicState.rooms.map((room) => room.id),
-        personIds: [
-          ...(checkpoint.publicState.victim ? [checkpoint.publicState.victim.id] : []),
-          ...checkpoint.publicState.suspects.map((suspect) => suspect.seatId),
-        ],
-        hotspotIdsByRoom: Object.fromEntries(checkpoint.publicState.rooms.map((room) => [
-          room.id,
-          room.hotspots.map((hotspot) => hotspot.id),
-        ])),
-        prosecutorBotId: checkpoint.privateCase.config.prosecutorBotId,
-        rivalDefenseBotId: checkpoint.privateCase.config.rivalDefenseBotId,
-        eyewitnessSeatId: checkpoint.privateCase.eyewitnessSeatId,
-        accusedAlibiSupportDiscoveryIds: checkpoint.privateCase.accusedAlibiSupportDiscoveryIds,
-      });
+      const revalidated = validateMysteryV2CheckpointGraph(checkpoint);
       if (!revalidated.valid) throw new Error(revalidated.errors.join("\n"));
       currentJob = completeCompilationPass(db, userId, sessionId, {
         passNumber: 2,
@@ -5796,6 +6183,19 @@ export async function runDebateMysteryCompilationV2(
       setPublicCompilationStatus(db, userId, sessionId, currentJob);
     }
     if (currentJob.completed_passes < 3) {
+      if (checkpoint.privateCase.personaDialoguePolishVersion !== 1) {
+        checkpoint.graph = await polishMysteryPersonaDialogueGraphV2({
+          runtime,
+          graph: checkpoint.graph,
+          privateCase: checkpoint.privateCase,
+          bots,
+        });
+        checkpoint.privateCase.personaDialoguePolishVersion = 1;
+        requireLease();
+      }
+      const revalidated = validateMysteryV2CheckpointGraph(checkpoint);
+      if (!revalidated.valid) throw new Error(revalidated.errors.join("\n"));
+      checkpoint.privateCase.graphValidation = revalidated;
       for (const line of checkpoint.graph.lines) {
         if (
           !line.performance.mood.trim() ||
@@ -5829,6 +6229,10 @@ export async function runDebateMysteryCompilationV2(
           }
         }
       }
+      // This is the final authored graph: persona delivery has been applied
+      // and any optional evidence artwork is now attached. Persist it before
+      // local voice preparation so the audio pack speaks exactly this text.
+      storeCompiledCaseV2(db, userId, sessionId, checkpoint.privateCase, checkpoint.graph);
       currentJob = completeCompilationPass(db, userId, sessionId, {
         passNumber: 3,
         key: "pass:directing-performances",
@@ -6864,6 +7268,12 @@ function executeDialogueNodeV2(args: {
           visibleText: line.visibleText,
           speakerSeatId: node.speakerSeatId,
           speakerBotId: line.speakerBotId,
+          ...(node.intendedRecipientSeatId
+            ? { intendedRecipientSeatId: node.intendedRecipientSeatId }
+            : {}),
+          ...(node.intendedRecipientBotId
+            ? { intendedRecipientBotId: node.intendedRecipientBotId }
+            : {}),
           occurredAt: now,
         }]
       : args.state.dialogueHistory,
@@ -7414,6 +7824,7 @@ function advanceSpectatorTrialV2(args: {
       visibleText: optionLine.visibleText,
       speakerSeatId: null,
       speakerBotId: optionLine.speakerBotId,
+      intendedRecipientSeatId: choice.witnessSeatId,
       occurredAt: new Date().toISOString(),
     });
     state = executeDialogueNodeV2({
@@ -7548,32 +7959,51 @@ export function applyDebateMysteryActionV2(
     } else if (state.playPhase === "title_card" && spectator) {
       state = prepareSpectatorTheoryV2({ state, graph, privateCase });
     } else if (state.playPhase === "title_card") {
-      state.playPhase = "investigation";
+      if (request.roomId) {
+        throw new HttpError(409, "Dismiss the Casekeeper briefing before entering a room.");
+      }
+      state.playPhase = "case_opening";
+      state.roomView = "mansion";
+    } else if (state.playPhase === "case_opening") {
+      throw new HttpError(409, "Dismiss the Casekeeper briefing before moving through the mansion.");
     }
     if (!spectator && !courtOnly) {
-      if (state.playPhase !== "investigation") {
-        throw new HttpError(409, "Mansion movement is unavailable right now.");
-      }
-      if (!request.roomId) {
-        state.roomView = "mansion";
+      if (state.playPhase === "case_opening") {
+        // The first title-card move intentionally stops at the briefing stage.
       } else {
-        const room = state.rooms.find((entry) => entry.id === request.roomId);
-        if (!room?.unlocked) throw new HttpError(409, "That location has not unlocked.");
-        room.visited = true;
-        state.currentRoomId = room.id;
-        state.roomView = "room";
-        const introduction = graph.roomIntroductionNodeIdsByRoom?.[room.id];
-        if (introduction && state.roomIntroductions[room.id] === "unseen") {
-          state = executeDialogueNodeV2({
-            state,
-            graph,
-            privateCase,
-            nodeId: introduction.casekeeperNodeId,
-          });
-          state.roomIntroductions = { ...state.roomIntroductions, [room.id]: "casekeeper" };
+        if (state.playPhase !== "investigation") {
+          throw new HttpError(409, "Mansion movement is unavailable right now.");
+        }
+        if (!request.roomId) {
+          state.roomView = "mansion";
+        } else {
+          const room = state.rooms.find((entry) => entry.id === request.roomId);
+          if (!room?.unlocked) throw new HttpError(409, "That location has not unlocked.");
+          room.visited = true;
+          state.currentRoomId = room.id;
+          state.roomView = "room";
+          const introduction = graph.roomIntroductionNodeIdsByRoom?.[room.id];
+          if (introduction && state.roomIntroductions[room.id] === "unseen") {
+            state = executeDialogueNodeV2({
+              state,
+              graph,
+              privateCase,
+              nodeId: introduction.casekeeperNodeId,
+            });
+            state.roomIntroductions = { ...state.roomIntroductions, [room.id]: "casekeeper" };
+          }
         }
       }
     }
+  } else if (request.action === "dismiss_case_opening") {
+    if (spectator || courtOnly || state.playPhase !== "case_opening") {
+      throw new HttpError(409, "The Casekeeper briefing is not awaiting dismissal.");
+    }
+    state.playPhase = "investigation";
+    state.roomView = "mansion";
+    // Retain the immutable briefing in history, but prevent it from becoming
+    // ambient dialogue once the overhead map is visible.
+    state.activeDialogueNodeId = null;
   } else if (request.action === "advance_room_introduction") {
     if (state.playPhase !== "investigation" || state.roomView !== "room" || state.currentRoomId !== request.roomId) {
       throw new HttpError(409, "Enter this room before continuing its introduction.");

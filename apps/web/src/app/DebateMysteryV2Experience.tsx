@@ -55,6 +55,7 @@ import {
 } from "./debateMysteryInterrogation";
 import { SignalVoiceActionText } from "./SignalVoiceActionText";
 import { signalVoicePerformanceActionPresentationAtProgress } from "./signalVoicePerformance";
+import { debateVoiceCompletionFallbackDurationMs } from "./signalLiveCaptions";
 import type { VoicePlaybackCharacterAlignment } from "./voiceEffects";
 import type { MysteryBotSummary } from "./DebateMysteryExperience";
 import type { BotPickerGlyphRenderer } from "./BotPicker";
@@ -741,6 +742,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const [mansionSaveState, setMansionSaveState] = useState<
     "idle" | "saving" | "saved" | "failed"
   >("idle");
+  const [openingMapReveal, setOpeningMapReveal] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
   const [roomParallax, setRoomParallax] = useState({ x: 0, y: 0 });
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -892,7 +894,12 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       : activeStatementActionPresentation;
   const spectator = state.config.playerRole === "spectator";
   const spectatorTheory = spectator && state.playPhase === "theory";
-  const playbackLineId = dialogueIsTextOnly ? null : displayedDialogue?.lineId ?? (
+  const openingOrMapPlaybackSuppressed = state.playPhase === "title_card" || (
+    state.playPhase === "investigation" &&
+    state.roomView === "mansion" &&
+    state.activeDialogueNodeId === null
+  );
+  const playbackLineId = openingOrMapPlaybackSuppressed || dialogueIsTextOnly ? null : displayedDialogue?.lineId ?? (
     state.playPhase === "trial" ? activeStatement?.lineId ?? null : null
   );
   const playbackText = displayedDialogue
@@ -1158,7 +1165,11 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     const updateSpeechTiming = (): void => {
       const durationMs = Number.isFinite(audio.duration) && audio.duration > 0
         ? audio.duration * 1_000
-        : 1;
+        // `playing` can precede WebKit's duration metadata for cached local
+        // case WAVs. A one-millisecond placeholder immediately turns every
+        // viseme into its resting mouth, so retain a natural spoken estimate
+        // until the decoded duration arrives.
+        : debateVoiceCompletionFallbackDurationMs(playbackText);
       setSpeechTiming({
         text: playbackText,
         elapsedMs: Math.min(durationMs, Math.max(0, audio.currentTime * 1_000)),
@@ -1183,6 +1194,8 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     };
     // `playing`, unlike `play`, means this local element has begun audible playback.
     audio.addEventListener("playing", updateSpeechTiming, { once: true });
+    audio.addEventListener("loadedmetadata", updateSpeechTiming);
+    audio.addEventListener("durationchange", updateSpeechTiming);
     audio.addEventListener("ended", completeBeat, { once: true });
     audio.addEventListener("error", completeBeat, { once: true });
     audio.addEventListener("pause", completeBeat, { once: true });
@@ -1192,6 +1205,8 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       if (audioGenerationRef.current === audioGeneration) audioGenerationRef.current += 1;
       setSpeechTiming(null);
       audio.removeEventListener("playing", updateSpeechTiming);
+      audio.removeEventListener("loadedmetadata", updateSpeechTiming);
+      audio.removeEventListener("durationchange", updateSpeechTiming);
       audio.removeEventListener("ended", completeBeat);
       audio.removeEventListener("error", completeBeat);
       audio.removeEventListener("pause", completeBeat);
@@ -1448,6 +1463,50 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     );
   }
 
+  if (state.playPhase === "case_opening") {
+    const openingDialogue = state.dialogueHistory.findLast((entry) => entry.nodeId === "briefing-opening") ?? lastDialogue;
+    const openingText = openingDialogue
+      ? splitDebateMysteryStageActionTextV2(openingDialogue.visibleText, null).spokenText
+      : `The known details of ${state.caseTitle ?? "this case"} are in the file.`;
+    const dismissOpening = async (): Promise<void> => {
+      if (busy) return;
+      // Set the cover before committing the persistent phase transition so the
+      // overhead map is never exposed for a frame between the two scenes.
+      setOpeningMapReveal(true);
+      const advanced = await sendAction({ action: "dismiss_case_opening" });
+      if (!advanced) setOpeningMapReveal(false);
+    };
+    const handleOpeningKeyDown = (event: React.KeyboardEvent<HTMLElement>): void => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        void dismissOpening();
+      }
+    };
+    return (
+      <main className={styles.caseOpening} data-theme={props.theme}>
+        <button type="button" className={styles.archiveButton} onClick={props.onExit}>← Archive</button>
+        <section
+          className={styles.caseOpeningStage}
+          aria-label="Casekeeper briefing. Click anywhere to reveal the mansion map."
+          aria-busy={busy || undefined}
+          role="button"
+          tabIndex={0}
+          onClick={() => void dismissOpening()}
+          onKeyDown={handleOpeningKeyDown}
+        >
+          <div
+            className={styles.caseOpeningDialogue}
+          >
+            <small>Casekeeper</small>
+            <p>{revealedSpeechText(whodunnitCaptionSpeechText(openingText), captionSpeechTiming)}</p>
+            <span className={styles.dialogueContinueHint} role="status">{busy ? "Opening the map…" : "Click to continue"}</span>
+          </div>
+        </section>
+        {error ? <p className={styles.errorBanner}>{error}</p> : null}
+      </main>
+    );
+  }
+
   if (state.playPhase === "verdict" && state.verdict) {
     const retryable = state.court?.credibilityRemaining === 0 && Boolean(state.court.checkpoint);
     return (
@@ -1600,13 +1659,16 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   }
 
   return (
-    <main className={styles.investigation} data-theme={props.theme} data-view={state.roomView} data-tutorial-target="mystery-v2-investigation">
+    <main className={styles.investigation} data-theme={props.theme} data-view={state.roomView} data-opening-map-reveal={openingMapReveal ? "true" : undefined} data-tutorial-target="mystery-v2-investigation">
       <SessionAtmosphereLayer
         sessionKey={`whodunnit-v2-investigation:${props.session.id}`}
         backgroundUrl={WHODUNNIT_INVESTIGATION_MUSIC_URL}
         active={props.audioEnabled}
         volume={props.audioVolume}
-        mix={mysteryInvestigationMusicMix({ theoryBoardOpen: theoryOpen })}
+        mix={mysteryInvestigationMusicMix({
+          theoryBoardOpen: theoryOpen,
+          roomIntroductionActive,
+        })}
         lifecycleTransitionMs={WHODUNNIT_INVESTIGATION_MUSIC_FADE_MS}
         mixTransitionMs={WHODUNNIT_INVESTIGATION_MUSIC_TRANSITION_MS}
         backgroundRecordable={false}

@@ -57,12 +57,16 @@ class V2AuthorProvider implements LlmProvider {
   public readonly diagnosticModel = "mystery-v2-test";
   public calls = 0;
   public readonly sections: string[] = [];
+  public readonly personaDialogueRequests: Array<{
+    lines: Array<{ lineId: string; speakerBotId: string; canonicalText: string }>;
+  }> = [];
 
   public async generateResponse(messages: ProviderMessage[], _options?: GenerateOptions): Promise<string> {
     this.calls += 1;
     const request = JSON.parse(messages.at(-1)!.content) as {
-      section: "case_foundation" | "room_examinations" | "suspect_chapter" | "prosecution_choices";
+      section: "case_foundation" | "room_examinations" | "suspect_chapter" | "prosecution_choices" | "persona_dialogue_polish";
       suspect?: { seatId: string };
+      lines?: Array<{ lineId: string; speakerBotId: string; canonicalText: string }>;
       setup: {
         eyewitnessSeatId: string | null;
         victimId: string;
@@ -83,6 +87,20 @@ class V2AuthorProvider implements LlmProvider {
     this.sections.push(request.section === "suspect_chapter"
       ? `${request.section}:${request.suspect?.seatId ?? "unknown"}`
       : request.section);
+    if (request.section === "persona_dialogue_polish") {
+      const lines = request.lines ?? [];
+      this.personaDialogueRequests.push({ lines });
+      return JSON.stringify({
+        lineFrames: lines.map((line) => ({
+          lineId: line.lineId,
+          leadIn: line.speakerBotId === "bot-5"
+            ? "Let’s be precise:"
+            : line.speakerBotId === "bot-6"
+              ? "Respectfully,"
+              : "Quietly,",
+        })),
+      });
+    }
     if (request.section === "room_examinations") {
       return JSON.stringify({
         examinations: request.setup.examinationIds.map((id, index) => ({
@@ -223,6 +241,29 @@ class LegacyFormatV2AuthorProvider extends V2AuthorProvider {
   }
 }
 
+class ContentBearingPersonaDialogueProvider extends V2AuthorProvider {
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const request = JSON.parse(String(messages.at(-1)?.content ?? "{}")) as {
+      section?: string;
+      lines?: Array<{ lineId: string }>;
+    };
+    if (request.section === "persona_dialogue_polish") {
+      this.calls += 1;
+      this.sections.push("persona_dialogue_polish");
+      return JSON.stringify({
+        lineFrames: (request.lines ?? []).map((line) => ({
+          lineId: line.lineId,
+          leadIn: "Avery did it,",
+        })),
+      });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
 class CompatibleProsecutionPresentationV2AuthorProvider extends V2AuthorProvider {
   override async generateResponse(messages: ProviderMessage[], options: GenerateOptions): Promise<string> {
     const response = await super.generateResponse(messages, options);
@@ -271,6 +312,78 @@ class HangingV2AuthorProvider implements LlmProvider {
 
   public async embedText(): Promise<number[]> {
     return [];
+  }
+}
+
+class EmptyAutoV2AuthorProvider implements LlmProvider {
+  public readonly name = "openai" as const;
+  public calls = 0;
+
+  public async generateResponse(): Promise<string> {
+    this.calls += 1;
+    return "";
+  }
+
+  public async embedText(): Promise<number[]> {
+    return [];
+  }
+}
+
+class AuditingV2AuxiliaryProvider implements LlmProvider {
+  public readonly name = "local" as const;
+  public readonly diagnosticModel = "llama3.2";
+
+  public async generateResponse(messages: ProviderMessage[]): Promise<string> {
+    const request = JSON.parse(messages.at(-1)?.content ?? "{}") as {
+      bots?: Array<{ botId: string; sourceHash: string }>;
+      sectionKey?: string;
+      ledger?: { relevantFrozenIds?: string[] };
+    };
+    if (request.bots) {
+      return JSON.stringify({
+        voiceCards: request.bots.map((bot) => ({
+          botId: bot.botId,
+          sourceHash: bot.sourceHash,
+          cues: ["Measured, exact, and restrained under pressure."],
+        })),
+      });
+    }
+    if (request.sectionKey === "suspect:suspect-1") {
+      return JSON.stringify({
+        issues: [{
+          fieldPath: "alibi",
+          code: "proof_route_conflict",
+          severity: "high",
+          relatedFrozenIds: [request.ledger?.relevantFrozenIds?.[0]],
+          repairInstruction: "Keep the alibi consistent with the frozen proof route.",
+        }],
+      });
+    }
+    return JSON.stringify({ issues: [] });
+  }
+
+  public async embedText(): Promise<number[]> {
+    return [];
+  }
+}
+
+class RepairAwareV2AuthorProvider extends V2AuthorProvider {
+  public repairRequests: Array<Record<string, unknown>> = [];
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const request = JSON.parse(messages.at(-1)?.content ?? "{}") as Record<
+      string,
+      unknown
+    >;
+    if (request.section === "targeted_section_repair") {
+      this.calls += 1;
+      this.repairRequests.push(request);
+      return JSON.stringify(request.existingSection);
+    }
+    return super.generateResponse(messages, options);
   }
 }
 
@@ -540,6 +653,77 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     );
   });
 
+  it("advances an empty Terra author through the frozen Auto lane chain", async () => {
+    const db = testDb();
+    const terra = new EmptyAutoV2AuthorProvider();
+    const sol = new V2AuthorProvider();
+    const autoRuntime: DebateAiRuntime = {
+      preferredProvider: "openai",
+      responseMode: "online",
+      modelSelectionKind: "auto",
+      local: { provider: sol, providerName: "local", model: "llama3.2" },
+      online: { provider: terra, providerName: "openai", model: "gpt-5.6-terra" },
+      lanes: [
+        { provider: terra, providerName: "openai", model: "gpt-5.6-terra" },
+        { provider: sol, providerName: "openai", model: "gpt-5.6-sol" },
+      ],
+    };
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-auto-empty-terra",
+      autoRuntime,
+      { deferBackgroundStart: true },
+    );
+    const compiled = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      created.id,
+      autoRuntime,
+      { generateWave: async () => playableWave() },
+    );
+
+    assert.equal(v2State(compiled).compilation.stage, "complete");
+    assert.ok(terra.calls > 0);
+    assert.equal(terra.calls, sol.calls);
+  });
+
+  it("keeps auxiliary audits advisory until a targeted selected-lane repair", async () => {
+    const db = testDb();
+    const author = new RepairAwareV2AuthorProvider();
+    const auxiliary = new AuditingV2AuxiliaryProvider();
+    const auditedRuntime: DebateAiRuntime = {
+      ...runtime(author),
+      auxiliary,
+    };
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-audited-repair",
+      auditedRuntime,
+      { deferBackgroundStart: true },
+    );
+    const compiled = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      created.id,
+      auditedRuntime,
+      { generateWave: async () => playableWave() },
+    );
+
+    assert.equal(v2State(compiled).compilation.stage, "complete");
+    assert.equal(author.repairRequests.length, 1);
+    const repair = author.repairRequests[0]!;
+    assert.equal(repair.targetSectionKey, "suspect:suspect-1");
+    assert.ok(repair.existingSection);
+    assert.ok(repair.frozenLedgerSlice);
+    assert.ok(repair.repairDelta);
+    assert.equal("setup" in repair, false);
+    assert.equal("caseFoundation" in repair, false);
+  });
+
   it("fails a stalled case author into spoiler-safe recovery instead of hanging at Writing the Case", async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const db = testDb();
@@ -615,7 +799,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.ok(state.dialogueHistory.some((entry) => /The house has given everyone reasons/u.test(entry.visibleText)) === false);
     const { graph } = getDebateMysteryCaseV2(db, "user-1", session.id);
     assert.ok(graph.lines.some((line) => /The house has given everyone reasons/u.test(line.spokenText)));
-    assert.ok(graph.lines.some((line) => /^As I said,/u.test(line.spokenText)));
+    assert.ok(graph.lines.some((line) => /^Quietly, As I said,/u.test(line.spokenText)));
   });
 
   it("accepts prosecution choices authored with compatible presentation field names", async () => {
@@ -684,6 +868,19 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       ],
     );
     assert.equal(resumedStatus.substeps[2]?.label, "Witness chapters · 1 of 4");
+
+    const legacyDraft = {
+      ...draft,
+      kind: "authoring-v1",
+    } as Record<string, unknown>;
+    delete legacyDraft.contextCapsule;
+    delete legacyDraft.connectiveAdditions;
+    delete legacyDraft.provenanceBySection;
+    db.prepare(
+      `UPDATE debate_mystery_v2_jobs
+          SET checkpoint_json = ?
+        WHERE user_id = ? AND session_id = ?`,
+    ).run(JSON.stringify(legacyDraft), "user-1", session.id);
 
     provider.permitSecondChapter = true;
     await retryDebateMysteryCompilationV2(db, "user-1", session.id, runtime(provider), {
@@ -873,6 +1070,84 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     );
   });
 
+  it("seals a persona-shaped dialogue pass without changing a line's authored claim or graph", async () => {
+    const db = testDb();
+    const provider = new V2AuthorProvider();
+    let session = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-persona-dialogue",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    session = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      session.id,
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+    assert.equal(v2State(session).compilation.stage, "complete");
+    assert.equal(provider.personaDialogueRequests.length, 1);
+    assert.ok(provider.sections.includes("persona_dialogue_polish"));
+
+    const { graph, privateCase } = getDebateMysteryCaseV2(db, "user-1", session.id);
+    const canonicalByLineId = new Map(
+      provider.personaDialogueRequests[0]!.lines.map((line) => [line.lineId, line]),
+    );
+    assert.ok(canonicalByLineId.size > 0);
+    assert.ok(privateCase.personaVoiceCardsByBotId?.["bot-5"]);
+    for (const [lineId, source] of canonicalByLineId) {
+      const line = graph.lines.find((candidate) => candidate.id === lineId);
+      assert.ok(line, `the polish pass must retain ${lineId}`);
+      const leadIn = source.speakerBotId === "bot-5"
+        ? "Let’s be precise:"
+        : source.speakerBotId === "bot-6"
+          ? "Respectfully,"
+          : "Quietly,";
+      assert.equal(line.visibleText, `${leadIn} ${source.canonicalText}`);
+      assert.equal(line.spokenText, `${leadIn} ${source.canonicalText}`);
+      assert.ok(graph.nodes.some((node) => node.lineId === lineId));
+    }
+    const prosecutorLines = graph.lines.filter((line) => line.speakerBotId === "bot-5");
+    assert.ok(prosecutorLines.length > 0);
+    assert.ok(prosecutorLines.every((line) =>
+      !canonicalByLineId.has(line.id) || line.visibleText.startsWith("Let’s be precise:")));
+  });
+
+  it("rejects content-bearing persona polish before a case can be sealed", async () => {
+    const db = testDb();
+    const provider = new ContentBearingPersonaDialogueProvider();
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-invalid-persona-dialogue",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    const session = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      created.id,
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+    const state = v2State(session);
+    assert.equal(state.compilation.stage, "needs_attention");
+    assert.equal(
+      provider.sections.filter((section) => section === "persona_dialogue_polish").length,
+      3,
+    );
+    const source = db.prepare(
+      "SELECT private_error FROM debate_mystery_v2_jobs WHERE user_id = ? AND session_id = ?",
+    ).get("user-1", session.id) as { private_error: string | null };
+    assert.match(source.private_error ?? "", /content-bearing copy/iu);
+    const { graph } = getDebateMysteryCaseV2(db, "user-1", session.id);
+    assert.equal(graph.lines.some((line) => /Avery did it,/u.test(line.visibleText)), false);
+  });
+
   it("compiles every suspect chapter, prepares a complete local pack, and plays without runtime generation", async () => {
     const db = testDb();
     const provider = new V2AuthorProvider();
@@ -1024,7 +1299,7 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     assert.equal(legacyDefaultPresentLine?.stageActionText, "Frowns at the item");
     assert.equal(
       legacyDefaultPresentLine?.spokenText,
-      "That item was in the mansion, but it does not change the exact account I have given you.",
+      "Quietly, That item was in the mansion, but it does not change the exact account I have given you.",
     );
     assert.equal(legacyDefaultPresentLine?.visibleText, legacyDefaultPresentLine?.spokenText);
     assert.equal(preparedProfilesByText.has(legacyDefaultPresentLine!.spokenText), false);
@@ -1095,7 +1370,24 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       /not found/iu,
     );
 
-    session = act(db, session, { action: "move", roomId: privateCase.crimeSceneRoomId }, "begin-case");
+    const providerCallsBeforeOpening = provider.calls;
+    const openingDialogue = structuredClone(v2State(session).dialogueHistory.at(-1));
+    session = act(db, session, { action: "move" }, "begin-case");
+    state = v2State(session);
+    assert.equal(state.playPhase, "case_opening");
+    assert.deepEqual(state.dialogueHistory.at(-1), openingDialogue, "the compiled briefing is not regenerated at play time");
+    assert.throws(
+      () => act(db, session, { action: "move", roomId: privateCase.crimeSceneRoomId }, "opening-enter-room"),
+      /dismiss the Casekeeper briefing/iu,
+    );
+    session = act(db, session, { action: "dismiss_case_opening" }, "dismiss-casekeeper-opening");
+    state = v2State(session);
+    assert.equal(state.playPhase, "investigation");
+    assert.equal(state.roomView, "mansion");
+    assert.equal(state.activeDialogueNodeId, null);
+    assert.deepEqual(state.dialogueHistory.at(-1), openingDialogue, "dismissing the briefing preserves the sealed transcript");
+    assert.equal(provider.calls, providerCallsBeforeOpening, "opening the case only reuses the compiled briefing");
+    session = act(db, session, { action: "move", roomId: privateCase.crimeSceneRoomId }, "enter-crime-scene");
     state = v2State(session);
     for (const room of state.rooms) {
       session = act(db, session, { action: "move", roomId: room.id }, `move-${room.id}`);
@@ -2078,6 +2370,8 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       generateWave: async () => playableWave(),
     });
     session = act(db, session, { action: "move" }, "participant-begin-case");
+    assert.equal(v2State(session).playPhase, "case_opening");
+    session = act(db, session, { action: "dismiss_case_opening" }, "participant-dismiss-casekeeper");
     const state = v2State(session);
     assert.equal(state.playPhase, "investigation");
     assert.ok(state.rooms.length > 0);

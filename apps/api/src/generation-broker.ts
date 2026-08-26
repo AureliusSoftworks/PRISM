@@ -384,3 +384,25 @@ export async function runPrismStructuredGeneration<T>(
   }
   throw lastError;
 }
+
+/**
+ * Stable server-side broker surface used beneath applet orchestration. The
+ * function exports remain as narrow test seams and backwards-compatible
+ * helpers; product code should share this singleton.
+ */
+export class PrismGenerationBroker {
+  public runStructured<T>(
+    request: PrismStructuredGenerationRequest<T>,
+  ): Promise<PrismStructuredGenerationResult<T>> {
+    return runPrismStructuredGeneration(request);
+  }
+
+  public runDeterministic<T>(args: {
+    work: PrismStructuredGenerationRequest<T>["work"];
+    run: () => T | Promise<T>;
+  }): Promise<PrismStructuredGenerationResult<T>> {
+    return runPrismDeterministicWork(args);
+  }
+}
+
+export const prismGenerationBroker = new PrismGenerationBroker();

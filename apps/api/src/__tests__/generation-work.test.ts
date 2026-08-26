@@ -5,6 +5,7 @@ import {
   normalizePrismGenerationWorkContext,
   resetPrismGenerationWorkForTests,
   schedulePrismAuxiliaryWork,
+  setPrismAuxiliaryHostPaused,
 } from "../generation-work.ts";
 
 function context(
@@ -128,5 +129,53 @@ describe("PRISM auxiliary generation scheduler", () => {
     });
     assert.deepEqual(await Promise.all([first, second]), ["shared", "shared"]);
     assert.equal(calls, 1);
+  });
+
+  it("keeps cache versions independent", async () => {
+    let calls = 0;
+    const run = async () => String(++calls);
+    const first = schedulePrismAuxiliaryWork({
+      host: "http://primary",
+      context: context("background", "voice-card:v1:source"),
+      run,
+    });
+    const second = schedulePrismAuxiliaryWork({
+      host: "http://primary",
+      context: context("background", "voice-card:v2:source"),
+      run,
+    });
+    assert.deepEqual(await Promise.all([first, second]), ["1", "2"]);
+  });
+
+  it("holds auxiliary work while allowing selected foreground work", async () => {
+    const events: string[] = [];
+    setPrismAuxiliaryHostPaused("http://primary", true);
+    const auxiliary = schedulePrismAuxiliaryWork({
+      host: "http://primary",
+      context: context("background"),
+      run: async () => {
+        events.push("auxiliary");
+        return "auxiliary";
+      },
+    });
+    const selectedContext = normalizePrismGenerationWorkContext({
+      ...context("interactive"),
+      executionLane: "selected",
+      role: "author",
+      outputClass: "critical",
+    });
+    const selected = schedulePrismAuxiliaryWork({
+      host: "http://primary",
+      context: selectedContext,
+      run: async () => {
+        events.push("selected");
+        return "selected";
+      },
+    });
+    assert.equal(await selected, "selected");
+    assert.deepEqual(events, ["selected"]);
+    setPrismAuxiliaryHostPaused("http://primary", false);
+    assert.equal(await auxiliary, "auxiliary");
+    assert.deepEqual(events, ["selected", "auxiliary"]);
   });
 });

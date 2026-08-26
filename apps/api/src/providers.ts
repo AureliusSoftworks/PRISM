@@ -164,6 +164,24 @@ export interface GenerateOptions {
 
 export type ProviderName = "local" | "openai" | "anthropic";
 
+function providerGenerationWork(
+  providerName: ProviderName,
+  options: GenerateOptions | undefined,
+): PrismGenerationWorkContext {
+  const purpose = options?.usagePurpose ?? "system_unlabeled";
+  return normalizePrismGenerationWorkContext({
+    workflow: purpose,
+    operation: "generate_response",
+    stage: purpose,
+    executionLane: "selected",
+    role: "author",
+    outputClass: "critical",
+    priority: "interactive",
+    privacyMode: providerName === "local" ? "local" : "online",
+    ...options?.generationWork,
+  });
+}
+
 export function defaultModelIdForProvider(provider: ProviderName): string {
   return provider === "local"
     ? config.ollamaModel
@@ -1737,7 +1755,18 @@ export class LocalOllamaProvider implements LlmProvider {
     messages: ProviderMessage[],
     options?: GenerateOptions
   ): Promise<string> {
-    if (options?.generationWork?.executionLane === "selected") {
+    if (!options?.generationWork) {
+      const work = providerGenerationWork("local", options);
+      return await Promise.resolve(
+        runWithPrismGenerationWorkContext(work, () =>
+          this.generateResponse(messages, { ...options, generationWork: work }),
+        ),
+      );
+    }
+    if (
+      options?.generationWork?.executionLane === "selected" &&
+      options.generationWork.operation !== "generate_response"
+    ) {
       const target = await resolveLocalOllamaTarget(
         options.model?.trim() || config.ollamaModel,
         {
@@ -1755,7 +1784,14 @@ export class LocalOllamaProvider implements LlmProvider {
         run: (signal) =>
           generateWithFinalLocalOllamaFallback({
             messages,
-            options: { ...options, generationWork: work, signal },
+            options: {
+              ...options,
+              generationWork: work,
+              // Broker-owned selected work preserves its frozen lane. Auto
+              // carries final local recovery explicitly in runtime.lanes.
+              allowFinalLocalFallback: false,
+              signal,
+            },
             skipFinalLocalFallback:
               target.model === FINAL_LOCAL_OLLAMA_FALLBACK_MODEL,
             generate: () =>
@@ -2091,6 +2127,14 @@ export class OpenAiProvider implements LlmProvider {
     messages: ProviderMessage[],
     options?: GenerateOptions
   ): Promise<string> {
+    if (!options?.generationWork) {
+      const work = providerGenerationWork("openai", options);
+      return await Promise.resolve(
+        runWithPrismGenerationWorkContext(work, () =>
+          this.generateResponse(messages, { ...options, generationWork: work }),
+        ),
+      );
+    }
     return generateWithFinalLocalOllamaFallback({
       messages,
       options,
@@ -2304,6 +2348,14 @@ export class AnthropicProvider implements LlmProvider {
     messages: ProviderMessage[],
     options?: GenerateOptions
   ): Promise<string> {
+    if (!options?.generationWork) {
+      const work = providerGenerationWork("anthropic", options);
+      return await Promise.resolve(
+        runWithPrismGenerationWorkContext(work, () =>
+          this.generateResponse(messages, { ...options, generationWork: work }),
+        ),
+      );
+    }
     return generateWithFinalLocalOllamaFallback({
       messages,
       options,
@@ -2524,6 +2576,7 @@ export function getAuxiliaryProvider(
                 ...options,
                 generationWork: work,
                 model: auxiliaryModel,
+                allowFinalLocalFallback: false,
                 // Auxiliary work must never pay a cold-start penalty while PRISM is
                 // active. A negative keep_alive is Ollama's indefinite residency mode.
                 ollamaKeepAlive: -1,

@@ -1,0 +1,95 @@
+import {
+  botDirectlyAddressesBotV1,
+  type DebateMysteryPublicDialogueEntryV2,
+  type DebateSessionV1,
+  type DebateWhodunnitFormatStateV2,
+} from "@localai/shared";
+
+export interface DebateMysteryIdentityMirrorPresentationV1 {
+  holderBotId: string;
+  targetBotId: string;
+  /** The first public entry that established the holder's current form. */
+  sourceDialogueKey: string;
+  occurredAt: string;
+}
+
+function dialogueKey(entry: DebateMysteryPublicDialogueEntryV2): string {
+  return `${entry.nodeId}:${entry.lineId ?? "text"}:${entry.occurredAt}`;
+}
+
+function holderHasIdentityMirror(
+  session: Pick<DebateSessionV1, "powerPlan">,
+  botId: string,
+): boolean {
+  return session.powerPlan.bots[botId]?.effects.some(
+    ({ effect }) => effect.type === "identity_mirror" && effect.trigger === "direct_bot_address",
+  ) ?? false;
+}
+
+/**
+ * Resolve Identity Crisis directly from the frozen Power plan and durable public
+ * dialogue history. Whodunnit never authorizes a live model, so this must not
+ * infer a target from turn order or mutable profile data.
+ */
+export function debateMysteryIdentityMirrorPresentationsV1(args: {
+  session: Pick<DebateSessionV1, "powerPlan">;
+  state: Pick<
+    DebateWhodunnitFormatStateV2,
+    "config" | "suspects" | "dialogueHistory"
+  >;
+  botNamesById: ReadonlyMap<string, string>;
+}): ReadonlyMap<string, DebateMysteryIdentityMirrorPresentationV1> {
+  const botIdBySeatId = new Map(
+    args.state.suspects.map((suspect) => [suspect.seatId, suspect.botId]),
+  );
+  const participantBotIds = new Set<string>([
+    ...args.state.suspects.map((suspect) => suspect.botId),
+    args.state.config.prosecutorBotId,
+    args.state.config.rivalDefenseBotId,
+    ...(args.state.config.judgeBotId === "prism:player-judge"
+      ? []
+      : [args.state.config.judgeBotId]),
+    ...args.state.config.jurorBotIds,
+  ]);
+  const holderBotIds = [...participantBotIds].filter((botId) =>
+    holderHasIdentityMirror(args.session, botId),
+  );
+  const presentationByHolder = new Map<
+    string,
+    DebateMysteryIdentityMirrorPresentationV1
+  >();
+
+  for (const entry of args.state.dialogueHistory) {
+    const speakerBotId = entry.speakerBotId;
+    if (!speakerBotId || !participantBotIds.has(speakerBotId)) continue;
+    const explicitRecipientBotId = entry.intendedRecipientBotId ?? (
+      entry.intendedRecipientSeatId
+        ? botIdBySeatId.get(entry.intendedRecipientSeatId) ?? null
+        : null
+    );
+    for (const holderBotId of holderBotIds) {
+      if (holderBotId === speakerBotId) continue;
+      const holderName = args.botNamesById.get(holderBotId);
+      const directAddressedByName = holderName
+        ? botDirectlyAddressesBotV1({
+            text: entry.visibleText,
+            targetBotId: holderBotId,
+            targetBotName: holderName,
+          })
+        : false;
+      if (explicitRecipientBotId !== holderBotId && !directAddressedByName) continue;
+
+      const current = presentationByHolder.get(holderBotId);
+      // Consecutive direct addresses by the same bot retain the first source,
+      // so a re-render or later line never restarts the blackout transition.
+      if (current?.targetBotId === speakerBotId) continue;
+      presentationByHolder.set(holderBotId, {
+        holderBotId,
+        targetBotId: speakerBotId,
+        sourceDialogueKey: dialogueKey(entry),
+        occurredAt: entry.occurredAt,
+      });
+    }
+  }
+  return presentationByHolder;
+}

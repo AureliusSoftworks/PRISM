@@ -349,6 +349,55 @@ describe("local model readiness", () => {
     assert.deepEqual(unloaded, []);
   });
 
+  it("yields pinned auxiliary residency only on retry and rewarms after release", async () => {
+    let running = ["auxiliary-model", "coffee-model"];
+    let warmCalls = 0;
+    const unloaded: string[] = [];
+    globalThis.fetch = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const url = String(input);
+      if (url.endsWith("/api/ps")) {
+        return Response.json({
+          models: running.map((model) => ({ model, digest: `sha256:${model}` })),
+        });
+      }
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<
+        string,
+        unknown
+      >;
+      if (url.endsWith("/api/chat")) {
+        warmCalls += 1;
+        if (!running.includes(String(body.model))) {
+          running.push(String(body.model));
+        }
+        return Response.json({ done: true });
+      }
+      unloaded.push(String(body.model));
+      running = running.filter((model) => model !== body.model);
+      return Response.json({ done: true });
+    }) as typeof fetch;
+
+    assert.equal(
+      (await keepAuxiliaryLocalModelWarm({ model: "auxiliary-model" })).state,
+      "ready",
+    );
+    await claimLiveLocalModelLane({
+      owner: "coffee:user:session",
+      model: "coffee-model",
+      yieldAuxiliary: true,
+    });
+    assert.deepEqual(unloaded, ["auxiliary-model"]);
+    await releaseLiveLocalModelLane("coffee:user:session");
+    for (let attempt = 0; attempt < 20 && warmCalls < 2; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+    assert.deepEqual(unloaded, ["auxiliary-model", "coffee-model"]);
+    assert.equal(warmCalls, 2);
+    assert.equal(running.includes("auxiliary-model"), true);
+  });
+
   it("releases a finished live model only after its final owner exits", async () => {
     const unloaded: string[] = [];
     globalThis.fetch = (async (

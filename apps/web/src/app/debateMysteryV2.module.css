@@ -1,5 +1,6 @@
 .forge,
 .titleCard,
+.caseOpening,
 .investigation,
 .court,
 .verdict {
@@ -18,6 +19,7 @@
 
 .forge button,
 .titleCard button,
+.caseOpening button,
 .investigation button,
 .court button,
 .verdict button,
@@ -262,6 +264,44 @@
   text-align: center;
 }
 
+.caseOpening {
+  position: relative;
+  display: grid;
+  min-height: 100dvh;
+  overflow: hidden;
+  background: #000;
+}
+
+.caseOpeningStage {
+  position: relative;
+  min-height: 100dvh;
+  background: #000;
+  cursor: pointer;
+}
+
+.caseOpeningStage:focus-visible { outline: 3px solid #fff; outline-offset: -3px; }
+
+.caseOpeningDialogue {
+  position: absolute;
+  z-index: 8;
+  left: 50%;
+  bottom: clamp(2rem, 8vh, 7.4rem);
+  width: min(48rem, calc(100vw - 2rem));
+  padding: 1rem 1.15rem;
+  border: 1px solid rgba(180, 160, 255, 0.34);
+  border-radius: 0.85rem;
+  color: var(--v2-text);
+  background: rgba(7, 9, 18, 0.96);
+  box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.64);
+  cursor: pointer;
+  transform: translateX(-50%);
+  backdrop-filter: blur(16px);
+}
+
+.caseOpeningDialogue small { color: #c0a8ff; font-weight: 800; }
+.caseOpeningDialogue p { margin: 0.35rem 0 0; line-height: 1.45; }
+.caseOpeningStage[aria-busy="true"] { cursor: progress; }
+
 .titlePrism {
   color: #b9a0ff;
   font-size: 7rem;
@@ -300,6 +340,21 @@
 
 .investigation,
 .court { position: relative; overflow: hidden; }
+
+.investigation[data-opening-map-reveal="true"]::after {
+  position: absolute;
+  z-index: 30;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  background: #000;
+  animation: caseOpeningReveal 780ms cubic-bezier(.2, .78, .2, 1) both;
+}
+
+@keyframes caseOpeningReveal {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
 
 .investigationHeader,
 .courtHeader {
@@ -953,6 +1008,7 @@
   .mansionRoom { transition: none; }
   .forgePrism i,
   .progressTrack span,
+  .investigation[data-opening-map-reveal="true"]::after,
   .roomScene,
   .roomProsecutorCue,
   .choiceTray,

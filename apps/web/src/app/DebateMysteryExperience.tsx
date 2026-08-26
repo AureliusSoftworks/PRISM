@@ -24,6 +24,7 @@ import {
   type DebateMysteryNotebookV2,
   type DebateMysteryRegionV1,
   type DebateMysteryTheoryV1,
+  type DebateBotSnapshotV1,
   type DebateSessionV1,
   type DebateWhodunnitFormatStateV1,
   type ProviderReasoningEffort,
@@ -86,6 +87,11 @@ export interface MysteryBotSummary {
   name: string;
   color: string | null;
   glyph: string | null;
+  avatarDetails?: DebateBotSnapshotV1["avatarDetails"];
+  voiceProfile?: DebateBotSnapshotV1["voiceProfile"];
+  replayVisualSnapshot?: DebateBotSnapshotV1["replayVisualSnapshot"];
+  powers?: DebateBotSnapshotV1["powers"];
+  systemPrompt?: string;
   hardMuted: boolean;
 }
 

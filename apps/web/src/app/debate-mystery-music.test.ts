@@ -33,7 +33,7 @@ describe("Whodunnit investigation music", () => {
     assert.equal(mysteryInvestigationMusicSessionActive("verdict"), false);
   });
 
-  it("keeps its level during interviews and fades silently through the Theory Board", () => {
+  it("keeps its level during interviews and fades silently for first-visit introductions and the Theory Board", () => {
     assert.equal(
       mysteryInvestigationMusicMix({
         theoryBoardOpen: false,
@@ -43,6 +43,13 @@ describe("Whodunnit investigation music", () => {
     assert.equal(
       mysteryInvestigationMusicMix({
         theoryBoardOpen: true,
+      }),
+      WHODUNNIT_INVESTIGATION_MUSIC_SILENT_MIX,
+    );
+    assert.equal(
+      mysteryInvestigationMusicMix({
+        theoryBoardOpen: false,
+        roomIntroductionActive: true,
       }),
       WHODUNNIT_INVESTIGATION_MUSIC_SILENT_MIX,
     );
@@ -74,10 +81,10 @@ describe("Whodunnit investigation music", () => {
     assert.match(source, /lifecycleTransitionMs=\{WHODUNNIT_INVESTIGATION_MUSIC_FADE_MS\}/u);
   });
 
-  it("documents the steady interview level and silent non-investigation boundaries", () => {
+  it("documents the first-visit silence, steady interviews, and silent non-investigation boundaries", () => {
     assert.match(
       tutorialSource,
-      /The Midnight Clue underscores the mansion investigation at one steady level—even during interviews/u,
+      /The Midnight Clue underscores the mansion investigation at one steady level—after any first-visit introduction and even during interviews/u,
     );
     assert.match(tutorialSource, /fades for the Theory Board and courtroom/u);
   });
