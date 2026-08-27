@@ -31,6 +31,7 @@ import {
   getDebateMysteryAudioClipV2,
   getDebateMysteryCaseV2,
   getDebateMysteryCompilationStatusV2,
+  mysteryV2CriticalAuthoringAttemptTimeoutMs,
   playDebateMysteryV2Again,
   restartDebateMysteryCourtV2,
   restartDebateMysteryInvestigationV2,
@@ -38,6 +39,7 @@ import {
   resolveDebateMysteryTalkExchangeV2,
   retryDebateMysteryCompilationV2,
   runDebateMysteryCompilationV2,
+  V2_CRITICAL_AUTHORING_MIN_ATTEMPT_TIMEOUT_MS,
 } from "../debate-mystery-v2.ts";
 import {
   listDebateMysteryMansionBundlesV2,
@@ -330,6 +332,155 @@ class LegacyFormatV2AuthorProvider extends V2AuthorProvider {
     const topics = Array.isArray(parsed.suspect.talkTopics) ? parsed.suspect.talkTopics : [];
     for (const topic of topics) {
       if (topic && typeof topic === "object") delete (topic as Record<string, unknown>).repeatResponses;
+    }
+    return JSON.stringify(parsed);
+  }
+}
+
+class MinimalCoreV2AuthorProvider extends V2AuthorProvider {
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const response = await super.generateResponse(messages, options);
+    const request = JSON.parse(String(messages.at(-1)?.content ?? "{}")) as {
+      section?: string;
+    };
+    if (request.section !== "suspect_chapter") return response;
+    const parsed = JSON.parse(response) as { suspect?: Record<string, unknown> };
+    const suspect = parsed.suspect;
+    if (!suspect) return response;
+    const presentationGate = suspect.presentationGate && typeof suspect.presentationGate === "object"
+      ? suspect.presentationGate as Record<string, unknown>
+      : null;
+    const unlockTopicId = typeof presentationGate?.unlockTopicId === "string"
+      ? presentationGate.unlockTopicId
+      : null;
+    const talkTopics = (Array.isArray(suspect.talkTopics) ? suspect.talkTopics : [])
+      .filter((topic): topic is Record<string, unknown> => Boolean(topic && typeof topic === "object"));
+    const coreTopic = (unlockTopicId
+      ? talkTopics.find((topic) => topic.id === unlockTopicId)
+      : talkTopics[0]) ?? talkTopics[0];
+    const minimalTopics = coreTopic
+      ? [{
+          id: coreTopic.id,
+          label: coreTopic.label,
+          category: coreTopic.category,
+          subjectId: coreTopic.subjectId,
+          question: coreTopic.question,
+          response: coreTopic.response,
+        }]
+      : [];
+    const presentReactions = (Array.isArray(suspect.presentReactions) ? suspect.presentReactions : [])
+      .filter((reaction): reaction is Record<string, unknown> => Boolean(reaction && typeof reaction === "object"))
+      .map((reaction) => ({
+        recordId: reaction.recordId,
+        response: reaction.response,
+      }));
+    const testimony = (Array.isArray(suspect.testimony) ? suspect.testimony : [])
+      .filter((statement): statement is Record<string, unknown> => Boolean(statement && typeof statement === "object"))
+      .map((statement) => ({
+        id: statement.id,
+        text: statement.text,
+        press: statement.press,
+        defenseRebuttal: statement.defenseRebuttal ?? statement.rebuttal,
+        revision: statement.revision,
+      }));
+    parsed.suspect = {
+      seatId: suspect.seatId,
+      relationship: suspect.relationship,
+      alibi: suspect.alibi,
+      talkTopics: minimalTopics,
+      presentationGate,
+      presentReactions,
+      testimony,
+    };
+    return JSON.stringify(parsed);
+  }
+}
+
+class GateNormalizationV2AuthorProvider extends V2AuthorProvider {
+  public requiredGateRecordId: string | null = null;
+  public nominatedTopicId: string | null = null;
+  private readonly gateMode: "early-topic" | "missing-topic";
+
+  public constructor(gateMode: "early-topic" | "missing-topic") {
+    super();
+    this.gateMode = gateMode;
+  }
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const response = await super.generateResponse(messages, options);
+    const request = JSON.parse(String(messages.at(-1)?.content ?? "{}")) as {
+      section?: string;
+      suspect?: { requiredPresentationGateRecordId?: string | null };
+    };
+    const requiredRecordId = request.suspect?.requiredPresentationGateRecordId;
+    if (request.section !== "suspect_chapter" || !requiredRecordId) {
+      return response;
+    }
+    const parsed = JSON.parse(response) as { suspect?: Record<string, unknown> };
+    const suspect = parsed.suspect;
+    if (!suspect) return response;
+    const topics = (Array.isArray(suspect.talkTopics) ? suspect.talkTopics : [])
+      .filter((topic): topic is Record<string, unknown> =>
+        Boolean(topic && typeof topic === "object"));
+    const firstTopicId = typeof topics[0]?.id === "string"
+      ? topics[0].id
+      : null;
+    this.requiredGateRecordId = requiredRecordId;
+    this.nominatedTopicId = this.gateMode === "early-topic"
+      ? firstTopicId
+      : "missing-authored-topic";
+    suspect.presentationGate = {
+      id: "model-owned-gate-id",
+      recordId: "evidence:not-the-frozen-record",
+      unlockTopicId: this.nominatedTopicId,
+    };
+    if (this.gateMode === "missing-topic") {
+      const reactions = (Array.isArray(suspect.presentReactions)
+        ? suspect.presentReactions
+        : []).filter((reaction): reaction is Record<string, unknown> =>
+          Boolean(reaction && typeof reaction === "object"));
+      const requiredReaction = reactions.find(
+        (reaction) => reaction.recordId === requiredRecordId,
+      );
+      if (requiredReaction) {
+        requiredReaction.response =
+          "This record changes my account: I crossed the gallery later than I admitted.";
+      }
+    }
+    return JSON.stringify(parsed);
+  }
+}
+
+class MissingWitnessCoreV2AuthorProvider extends V2AuthorProvider {
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const response = await super.generateResponse(messages, options);
+    const request = JSON.parse(String(messages.at(-1)?.content ?? "{}")) as {
+      section?: string;
+    };
+    if (request.section !== "suspect_chapter") return response;
+    const parsed = JSON.parse(response) as { suspect?: Record<string, unknown> };
+    if (!parsed.suspect) return response;
+    delete parsed.suspect.relationship;
+    const testimony = Array.isArray(parsed.suspect.testimony) ? parsed.suspect.testimony : [];
+    const secondStatement = testimony[1];
+    if (secondStatement && typeof secondStatement === "object") {
+      delete (secondStatement as Record<string, unknown>).press;
+    }
+    const presentReactions = Array.isArray(parsed.suspect.presentReactions)
+      ? parsed.suspect.presentReactions
+      : [];
+    const firstReaction = presentReactions[0];
+    if (firstReaction && typeof firstReaction === "object") {
+      delete (firstReaction as Record<string, unknown>).response;
     }
     return JSON.stringify(parsed);
   }
@@ -705,6 +856,25 @@ function finishSpectatorRun(
 }
 
 describe("Whodunnit V2 durable prosecution runtime", () => {
+  it("gives critical authoring recovery lanes at least two minutes without shrinking larger budgets", () => {
+    assert.equal(
+      mysteryV2CriticalAuthoringAttemptTimeoutMs({
+        providerName: "anthropic",
+        model: "claude-opus-5",
+        reasoningEffort: "none",
+      }),
+      V2_CRITICAL_AUTHORING_MIN_ATTEMPT_TIMEOUT_MS,
+    );
+    assert.equal(
+      mysteryV2CriticalAuthoringAttemptTimeoutMs({
+        providerName: "openai",
+        model: "gpt-5.6-sol",
+        reasoningEffort: "high",
+      }),
+      360_000,
+    );
+  });
+
   it("freezes difficulty-scaled suspect awareness and temporal recall", () => {
     const suspects = Array.from({ length: 8 }, (_, index) => ({
       seatId: `suspect-${index + 1}`,
@@ -1081,16 +1251,20 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
       "SELECT private_error FROM debate_mystery_v2_jobs WHERE user_id = ? AND session_id = ?",
     ).get("user-1", session.id) as { private_error: string | null };
     assert.match(row.private_error ?? "", /exact clock recall.*10:13 AM/iu);
+    const impreciseWitnessRequests = provider.requests.filter((request) => {
+      const suspect = request.suspect as
+        | { temporalRecall?: string }
+        | undefined;
+      return (
+        request.section === "suspect_chapter" &&
+        suspect?.temporalRecall !== "exact"
+      );
+    });
+    assert.ok(impreciseWitnessRequests.length > 0);
     assert.ok(
-      provider.requests.some((request) => {
-        const suspect = request.suspect as
-          | { temporalRecall?: string }
-          | undefined;
-        return (
-          request.section === "suspect_chapter" &&
-          suspect?.temporalRecall !== "exact"
-        );
-      }),
+      impreciseWitnessRequests.every((request) =>
+        !("timeline" in (request.setup as Record<string, unknown>))),
+      "an imprecise witness prompt must not export exact timeline anchors",
     );
   });
 
@@ -1401,6 +1575,172 @@ describe("Whodunnit V2 durable prosecution runtime", () => {
     const { graph } = getDebateMysteryCaseV2(db, "user-1", session.id);
     assert.ok(graph.lines.some((line) => /The house has given everyone reasons/u.test(line.spokenText)));
     assert.ok(graph.lines.some((line) => /^Quietly, As I said,/u.test(line.spokenText)));
+  });
+
+  it("compiles a proof-bearing witness core and supplies presentation-only dialogue", async () => {
+    const db = testDb();
+    const provider = new MinimalCoreV2AuthorProvider();
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-minimal-witness-core",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    const session = await runDebateMysteryCompilationV2(db, "user-1", created.id, runtime(provider), {
+      generateWave: async () => playableWave(),
+    });
+    const state = v2State(session);
+    assert.equal(state.compilation.stage, "complete");
+    const witnessRequest = provider.requests.find((request) => request.section === "suspect_chapter");
+    assert.ok(witnessRequest);
+    assert.doesNotMatch(
+      JSON.stringify(witnessRequest.outputContract),
+      /chapterOpening|chapterCompletion|roomIntroduction|defaultPresent|stageAction|performance|defendantReactions/u,
+    );
+    const { privateCase, graph } = getDebateMysteryCaseV2(db, "user-1", session.id);
+    assert.equal(privateCase.graphValidation.valid, true);
+    for (const topicNodeIds of Object.values(graph.talkTopicNodeIdsBySuspect)) {
+      assert.ok(topicNodeIds.length >= 3, "every witness keeps at least three investigation subjects");
+    }
+    assert.ok(graph.lines.some((line) => /The court calls Actor/u.test(line.spokenText)));
+    assert.ok(graph.lines.some((line) =>
+      /I can answer only what this Case File record establishes/u.test(line.spokenText)));
+  });
+
+  it("moves a valid authored gate topic last and binds the frozen record deterministically", async () => {
+    const db = testDb();
+    const provider = new GateNormalizationV2AuthorProvider("early-topic");
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-normalize-early-gate",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    const session = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      created.id,
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+    assert.equal(v2State(session).compilation.stage, "complete");
+    const { graph } = getDebateMysteryCaseV2(db, "user-1", session.id);
+    const gate = graph.presentationGates?.[0];
+    assert.ok(gate);
+    assert.equal(
+      recordReferenceKey(gate.requiredRecord),
+      provider.requiredGateRecordId,
+    );
+    const target = gate.unlocks.find((unlock) => unlock.kind === "topic");
+    assert.ok(target && target.kind === "topic");
+    const topicNodeIds =
+      graph.talkTopicNodeIdsBySuspect[gate.requiredSuspectSeatId] ?? [];
+    assert.ok(topicNodeIds.length >= 3);
+    assert.equal(target.topicNodeId, topicNodeIds.at(-1));
+    assert.notEqual(target.topicNodeId, topicNodeIds[0]);
+    assert.equal(
+      target.topicNodeId,
+      `talk-${gate.requiredSuspectSeatId}-${provider.nominatedTopicId}`,
+    );
+    const gateRequest = provider.requests.find((request) => {
+      const suspect = request.suspect as
+        | { requiredPresentationGateRecordId?: string | null }
+        | undefined;
+      return Boolean(suspect?.requiredPresentationGateRecordId);
+    });
+    const gateContract = (
+      (gateRequest?.outputContract as { suspect?: { presentationGate?: unknown } })
+        ?.suspect?.presentationGate
+    ) as Record<string, unknown>;
+    assert.deepEqual(Object.keys(gateContract), ["unlockTopicId"]);
+  });
+
+  it("synthesizes a final gated follow-up from the required Present reaction", async () => {
+    const db = testDb();
+    const provider = new GateNormalizationV2AuthorProvider("missing-topic");
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-synthesize-missing-gate-topic",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    const session = await runDebateMysteryCompilationV2(
+      db,
+      "user-1",
+      created.id,
+      runtime(provider),
+      { generateWave: async () => playableWave() },
+    );
+    const state = v2State(session);
+    assert.equal(state.compilation.stage, "complete");
+    const { graph } = getDebateMysteryCaseV2(db, "user-1", session.id);
+    const gate = graph.presentationGates?.[0];
+    assert.ok(gate);
+    assert.equal(
+      recordReferenceKey(gate.requiredRecord),
+      provider.requiredGateRecordId,
+    );
+    const target = gate.unlocks.find((unlock) => unlock.kind === "topic");
+    assert.ok(target && target.kind === "topic");
+    const topicNodeIds =
+      graph.talkTopicNodeIdsBySuspect[gate.requiredSuspectSeatId] ?? [];
+    assert.ok(topicNodeIds.length >= 3);
+    assert.equal(target.topicNodeId, topicNodeIds.at(-1));
+    assert.notEqual(target.topicNodeId, topicNodeIds[0]);
+    assert.match(target.topicNodeId, /record-follow-up/u);
+    assert.equal(
+      state.topics.find((topic) => topic.nodeId === target.topicNodeId)?.unlocked,
+      false,
+    );
+    const exchange = resolveDebateMysteryTalkExchangeV2(
+      graph,
+      target.topicNodeId,
+      gate.requiredSuspectSeatId,
+    );
+    const responseNode = graph.nodes.find(
+      (node) => node.id === exchange?.responseNodeId,
+    );
+    const responseLine = graph.lines.find(
+      (line) => line.id === responseNode?.lineId,
+    );
+    assert.match(
+      responseLine?.spokenText ?? "",
+      /This record changes my account: I crossed the gallery later than I admitted\./u,
+    );
+  });
+
+  it("reports each absent proof-bearing witness field in the private diagnostic", async () => {
+    const db = testDb();
+    const provider = new MissingWitnessCoreV2AuthorProvider();
+    const created = await createDebateMysterySessionV2(
+      db,
+      "user-1",
+      config(),
+      "create-v2-missing-witness-core",
+      runtime(provider),
+      { deferBackgroundStart: true },
+    );
+    const session = await runDebateMysteryCompilationV2(db, "user-1", created.id, runtime(provider), {
+      generateWave: async () => playableWave(),
+    });
+    assert.equal(v2State(session).compilation.stage, "needs_attention");
+    assert.equal(
+      provider.sections.filter((section) => section === "suspect_chapter:suspect-1").length,
+      3,
+    );
+    const source = db.prepare(
+      "SELECT private_error FROM debate_mystery_v2_jobs WHERE user_id = ? AND session_id = ?",
+    ).get("user-1", session.id) as { private_error: string | null };
+    assert.match(source.private_error ?? "", /omitted required core dialogue: relationship,/u);
+    assert.match(source.private_error ?? "", /testimony\.statement-suspect-1-2\.press/u);
+    assert.match(source.private_error ?? "", /presentReactions\.evidence:[^,.]+\.response/u);
+    assert.doesNotMatch(source.private_error ?? "", /omitted required dialogue\.$/u);
   });
 
   it("accepts prosecution choices authored with compatible presentation field names", async () => {

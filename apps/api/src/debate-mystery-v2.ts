@@ -42,6 +42,8 @@ import {
   normalizeDebateMysteryV2ForgeProgressMessage,
   parseStoredBotAvatarDetailsV1,
   parseStoredBotAudioVoiceProfileV1,
+  REASONING_GENERATION_AUTO_TOTAL_BUDGET_MS,
+  reasoningGenerationBudgetMs,
   resolveDebateMysteryLineDeliveryV2,
   resolveDebateMysteryConfigV2,
   validateDebateMysteryAudioManifestV1,
@@ -105,6 +107,7 @@ import { HttpError } from "./utils.http.ts";
 const V2_JOB_LEASE_MS = 90_000;
 const V2_TOTAL_PASSES = 5;
 const V2_PERSONA_DIALOGUE_POLISH_TIMEOUT_MS = 75_000;
+export const V2_CRITICAL_AUTHORING_MIN_ATTEMPT_TIMEOUT_MS = 120_000;
 const V2_AUDIO_SUBDIR = "debate-mystery-audio-v2";
 const V2_STAGING_RECLAIM_AGE_MS = V2_JOB_LEASE_MS * 2;
 
@@ -691,6 +694,21 @@ function mysteryV2Lane(runtime: DebateAiRuntime): DebateGenerationLane {
     return runtime.online ?? runtime.local;
   }
   return runtime.local;
+}
+
+export function mysteryV2CriticalAuthoringAttemptTimeoutMs(
+  lane: Pick<
+    DebateGenerationLane,
+    "providerName" | "model" | "reasoningEffort"
+  >,
+): number {
+  return Math.max(
+    V2_CRITICAL_AUTHORING_MIN_ATTEMPT_TIMEOUT_MS,
+    reasoningGenerationBudgetMs(lane.reasoningEffort, {
+      provider: lane.providerName,
+      modelId: lane.model,
+    }),
+  );
 }
 
 function botRows(db: DatabaseSync, userId: string, ids: readonly string[]): MysteryV2BotRow[] {
@@ -2119,6 +2137,11 @@ function authoredSuspectFromJson(args: {
     ? args.value.suspect as Record<string, unknown>
     : args.value;
   const seatId = compact(row.seatId, 120);
+  const relationship = compact(row.relationship, 700);
+  const alibi = compact(row.alibi, 800);
+  const suspectName = args.people.find((person) => person.id === args.seatId)?.name ?? "The witness";
+  const victim = args.people.find((person) => person.id !== args.seatId) ?? args.people[0];
+  const requiredStatementIds = [1, 2, 3].map((ordinal) => `statement-${args.seatId}-${ordinal}`);
   const parsedTalkTopics: AuthoredTopicV2[] = (Array.isArray(row.talkTopics) ? row.talkTopics : []).flatMap((topicValue) => {
     if (!topicValue || typeof topicValue !== "object") return [];
     const topic = topicValue as Record<string, unknown>;
@@ -2173,14 +2196,89 @@ function authoredSuspectFromJson(args: {
           }],
     }] : [];
   });
-  const talkTopics = parsedTalkTopics.filter((topic) =>
+  const authoredTalkTopics = parsedTalkTopics.filter((topic) =>
     !debateMysteryTalkTopicMirrorsRecordV2({
       topicId: topic.id,
       label: topic.label,
       question: topic.question,
       subject: topic.subject,
       records: args.recordItems,
-    }));
+    })).slice(0, 5);
+  const gateSource = row.presentationGate && typeof row.presentationGate === "object"
+    ? row.presentationGate as Record<string, unknown>
+    : {};
+  const authoredGateTopicId = compact(gateSource.unlockTopicId, 100);
+  const authoredGateTopic = authoredGateTopicId
+    ? authoredTalkTopics.find((topic) => topic.id === authoredGateTopicId) ?? null
+    : null;
+  const fallbackTopicIds = new Set(authoredTalkTopics.map((topic) => topic.id));
+  const fallbackTopic = (args: {
+    id: string;
+    label: string;
+    subject: DebateMysteryTalkSubjectV2;
+    question: string;
+    response: string;
+  }): AuthoredTopicV2 => {
+    let id = args.id;
+    let suffix = 2;
+    while (fallbackTopicIds.has(id)) id = `${args.id}-${suffix++}`;
+    fallbackTopicIds.add(id);
+    return {
+      id,
+      label: args.label,
+      subject: args.subject,
+      question: args.question,
+      questionStageAction: null,
+      questionPerformance: {},
+      response: args.response,
+      responseStageAction: null,
+      performance: {},
+      repeatResponses: [{
+        response: `As I said, ${args.response}`,
+        responseStageAction: null,
+        performance: {},
+      }],
+    };
+  };
+  const fallbackCandidates = [
+    ...(relationship && victim ? [fallbackTopic({
+      id: `relationship-${args.seatId}`,
+      label: `Relationship with ${victim.name}`,
+      subject: { category: "person" as const, personId: victim.id },
+      question: `Describe your relationship with ${victim.name}.`,
+      response: relationship,
+    })] : []),
+    ...(alibi ? [fallbackTopic({
+      id: `alibi-${args.seatId}`,
+      label: "Your alibi",
+      subject: { category: "alibi" as const },
+      question: "State your alibi and the movements that support it.",
+      response: alibi,
+    })] : []),
+    ...(relationship && alibi ? [fallbackTopic({
+      id: `account-${args.seatId}`,
+      label: "Your account",
+      subject: { category: "general" as const },
+      question: "What else should this investigation record about your relationship or alibi?",
+      response: `${relationship} ${alibi}`.slice(0, 1_200),
+    })] : []),
+  ];
+  const existingFallbackSubjects = new Set(authoredTalkTopics.map((topic) => {
+    if (topic.subject.category === "person") return `person:${topic.subject.personId}`;
+    return topic.subject.category;
+  }));
+  const neededFallbacks: AuthoredTopicV2[] = [];
+  for (const candidate of fallbackCandidates) {
+    if (authoredTalkTopics.length + neededFallbacks.length >= 3) break;
+    const subjectKey = candidate.subject.category === "person"
+      ? `person:${candidate.subject.personId}`
+      : candidate.subject.category;
+    if (existingFallbackSubjects.has(subjectKey) && candidate.subject.category !== "general") {
+      continue;
+    }
+    existingFallbackSubjects.add(subjectKey);
+    neededFallbacks.push(candidate);
+  }
   const testimony: AuthoredStatementV2[] = (Array.isArray(row.testimony) ? row.testimony : []).flatMap((statementValue) => {
     if (!statementValue || typeof statementValue !== "object") return [];
     const statement = statementValue as Record<string, unknown>;
@@ -2232,6 +2330,33 @@ function authoredSuspectFromJson(args: {
         }]
       : [];
   });
+  const requiredPresentationGateRecordId = args.requiredPresentationGateRecord
+    ? `${args.requiredPresentationGateRecord.kind}:${args.requiredPresentationGateRecord.id}`
+    : null;
+  const requiredPresentationGateReaction = requiredPresentationGateRecordId
+    ? presentReactions.find((reaction) =>
+        reaction.recordId === requiredPresentationGateRecordId) ?? null
+    : null;
+  const synthesizedGateTopic =
+    args.requiredPresentationGateRecord &&
+      !authoredGateTopic &&
+      requiredPresentationGateReaction
+      ? fallbackTopic({
+          id: `record-follow-up-${args.seatId}`,
+          label: "What the record changes",
+          subject: { category: "general" },
+          question: "What does this Case File record change about your account?",
+          response: requiredPresentationGateReaction.response,
+        })
+      : null;
+  const gateTopic = authoredGateTopic ?? synthesizedGateTopic;
+  const ordinaryTalkTopics = [
+    ...authoredTalkTopics.filter((topic) => topic.id !== gateTopic?.id),
+    ...neededFallbacks.filter((topic) => topic.id !== gateTopic?.id),
+  ];
+  const talkTopics = gateTopic
+    ? [...ordinaryTalkTopics.slice(0, 4), gateTopic]
+    : ordinaryTalkTopics.slice(0, 5);
   const defendantSource =
     row.defendantReactions && typeof row.defendantReactions === "object"
       ? (row.defendantReactions as Record<string, unknown>)
@@ -2254,32 +2379,21 @@ function authoredSuspectFromJson(args: {
       compact(defendantSource.evidenceStageAction, 180) || null,
   };
   let presentationGate: AuthoredPresentationGateV2 | null = null;
-  if (!args.courtOnly && args.requiredPresentationGateRecord) {
-    const gateSource = row.presentationGate && typeof row.presentationGate === "object"
-      ? row.presentationGate as Record<string, unknown>
-      : {};
-    const requiredRecordId = `${args.requiredPresentationGateRecord.kind}:${args.requiredPresentationGateRecord.id}`;
-    const authoredRecordId = compact(gateSource.recordId, 180);
-    const unlockTopicId = compact(gateSource.unlockTopicId, 100);
-    const gateTopic = talkTopics.find((topic) => topic.id === unlockTopicId);
-    if (
-      authoredRecordId !== requiredRecordId ||
-      !gateTopic ||
-      talkTopics.at(-1)?.id !== gateTopic.id ||
-      talkTopics[0]?.id === gateTopic.id
-    ) {
-      throw new Error(`The authored chapter for ${args.seatId} omitted its exact evidence-gated final Talk subject.`);
-    }
+  if (
+    !args.courtOnly &&
+    args.requiredPresentationGateRecord &&
+    gateTopic
+  ) {
     presentationGate = {
-      id: compact(gateSource.id, 120) || `gate-${args.seatId}-${gateTopic.id}`,
+      id: `gate-${args.seatId}-${gateTopic.id}`,
       requiredRecord: args.requiredPresentationGateRecord,
       unlockTopicId: gateTopic.id,
     };
   }
   const suspect: AuthoredSuspectV2 = {
     seatId,
-    relationship: compact(row.relationship, 700),
-    alibi: compact(row.alibi, 800),
+    relationship,
+    alibi,
     // Room introductions are presentation polish, not proof-bearing case
     // logic. Keep a valid earlier-format chapter playable when its authoring
     // model has not yet learned this optional V2 field.
@@ -2292,33 +2406,75 @@ function authoredSuspectFromJson(args: {
       row.roomIntroductionPerformance && typeof row.roomIntroductionPerformance === "object"
         ? row.roomIntroductionPerformance as Partial<DebateMysteryPerformanceDirectionV2>
         : {},
-    chapterOpening: compact(row.chapterOpening, 700),
-    chapterCompletion: compact(row.chapterCompletion, 700),
+    chapterOpening:
+      compact(row.chapterOpening, 700) ||
+      `The court calls ${suspectName}. Give a clear account and answer only what you know.`,
+    chapterCompletion:
+      compact(row.chapterCompletion, 700) ||
+      `The court records the material revision to ${suspectName}'s account and releases this witness subject to recall.`,
     defaultPresentProsecutionLine:
       compact(row.defaultPresentProsecutionLine, 700) ||
       "I am placing this admitted record before you. What do you make of it?",
     defaultPresentProsecutionStageAction:
       compact(row.defaultPresentProsecutionStageAction, 180) || null,
-    defaultPresentReaction: compact(row.defaultPresentReaction, 700),
+    defaultPresentReaction:
+      compact(row.defaultPresentReaction, 700) ||
+      "I can answer only what this Case File record establishes. It does not change the account I have given you.",
     defaultPresentReactionStageAction:
       compact(row.defaultPresentReactionStageAction, 180) || null,
     presentReactions,
     defendantReactions,
-    talkTopics: talkTopics.slice(0, 5),
+    talkTopics,
     presentationGate,
     testimony: testimony.slice(0, 6),
   };
   if (suspect.seatId !== args.seatId) throw new Error(`The authored chapter changed frozen seat ${args.seatId}.`);
-  if (
-    !suspect.relationship || !suspect.alibi || !suspect.chapterOpening ||
-    !suspect.chapterCompletion || suspect.testimony.length < 3 ||
-    (!args.courtOnly && (
-      !suspect.roomIntroduction || !suspect.defaultPresentProsecutionLine ||
-      !suspect.defaultPresentReaction || suspect.talkTopics.length < 3 ||
-      suspect.talkTopics.some((topic) => !topic.repeatResponses.length)
-    ))
-  ) throw new Error(`The authored chapter for ${args.seatId} omitted required dialogue.`);
-  const requiredStatementIds = [1, 2, 3].map((ordinal) => `statement-${args.seatId}-${ordinal}`);
+  const rawTestimony = Array.isArray(row.testimony)
+    ? row.testimony.filter((value): value is Record<string, unknown> => Boolean(value && typeof value === "object"))
+    : [];
+  const rawPresentReactions = Array.isArray(row.presentReactions)
+    ? row.presentReactions.filter((value): value is Record<string, unknown> => Boolean(value && typeof value === "object"))
+    : [];
+  const missingRequiredStatementFields = requiredStatementIds.flatMap((requiredId) => {
+    const statement = rawTestimony.find((entry) => compact(entry.id, 120) === requiredId);
+    if (!statement) return [`testimony.${requiredId}`];
+    return [
+      ...(!compact(statement.text, 1_000) ? [`testimony.${requiredId}.text`] : []),
+      ...(!compact(statement.press, 1_000) ? [`testimony.${requiredId}.press`] : []),
+      ...(!(compact(statement.defenseRebuttal, 1_000) || compact(statement.rebuttal, 1_000))
+        ? [`testimony.${requiredId}.defenseRebuttal`]
+        : []),
+      ...(!compact(statement.revision, 1_000) ? [`testimony.${requiredId}.revision`] : []),
+    ];
+  });
+  const missingRequiredPresentFields = args.courtOnly
+    ? []
+    : args.requiredPresentRecords.flatMap((reference) => {
+        const requiredId = `${reference.kind}:${reference.id}`;
+        const reaction = rawPresentReactions.find((entry) =>
+          compact(entry.recordId, 180) === requiredId);
+        if (!reaction) return [`presentReactions.${requiredId}`];
+        return compact(reaction.response, 1_000)
+          ? []
+          : [`presentReactions.${requiredId}.response`];
+      });
+  const missingCoreFields = [
+    ...(!suspect.relationship ? ["relationship"] : []),
+    ...(!suspect.alibi ? ["alibi"] : []),
+    ...missingRequiredStatementFields,
+    ...missingRequiredPresentFields,
+    ...(suspect.testimony.length < 3
+      ? [`testimony (${suspect.testimony.length} of 3 complete statements)`]
+      : []),
+    ...(!args.courtOnly && suspect.talkTopics.length < 3
+      ? [`Talk subjects (${suspect.talkTopics.length} of 3 after safe fallbacks)`]
+      : []),
+  ];
+  if (missingCoreFields.length) {
+    throw new Error(
+      `The authored chapter for ${args.seatId} omitted required core dialogue: ${missingCoreFields.join(", ")}.`,
+    );
+  }
   if (!requiredStatementIds.every((id) => suspect.testimony.some((statement) => statement.id === id))) {
     throw new Error(`The authored chapter for ${args.seatId} changed its frozen statement IDs.`);
   }
@@ -2778,6 +2934,8 @@ async function generateMysteryAuthoringSectionV2<T>(args: {
     lanes,
     modelSelectionKind: args.runtime.modelSelectionKind ?? "fixed",
     maxAttempts: DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS,
+    perAttemptTimeoutMs: mysteryV2CriticalAuthoringAttemptTimeoutMs,
+    totalTimeoutMs: REASONING_GENERATION_AUTO_TOTAL_BUDGET_MS,
     run: async ({ lane, attempt, priorError, signal, work }) => {
       args.onAttempt?.(attempt);
       return lane.provider.generateResponse([
@@ -3258,7 +3416,9 @@ async function authorMysteryV2(args: {
       trialType: setup.trialType,
       victimId: setup.victimId,
       eyewitnessSeatId: setup.eyewitnessSeatId,
-      timeline: setup.timeline,
+      ...(requirement.temporalRecall === "exact"
+        ? { timeline: setup.timeline }
+        : {}),
       roomNames: setup.roomNames,
       evidenceIds: setup.evidenceIds,
       examinationIds: setup.examinationIds,
@@ -3305,7 +3465,10 @@ async function authorMysteryV2(args: {
         section: "suspect_chapter",
         setup: suspectSetupPacket,
         caseFoundation: suspectFoundationPacket,
-        suspect: requirement,
+        suspect: {
+          ...requirement,
+          voiceCard: voiceCardsByBotId[requirement.botId],
+        },
         precedingSwornStatements: Object.values(args.draft.suspectsBySeatId).flatMap((entry) =>
           entry.testimony.map((statement) => ({ witnessSeatId: entry.seatId, id: statement.id, text: statement.text }))),
         outputContract: {
@@ -3313,47 +3476,22 @@ async function authorMysteryV2(args: {
             seatId: requirement.seatId,
             relationship: "complete relationship to the victim",
             alibi: "specific authored alibi",
-            chapterOpening: "court opening",
-            chapterCompletion: "court completion after revision",
-            defendantReactions: "court-only defendant reactions with testimony, objection, and evidence text plus optional stage actions",
-            testimony: "3-6 statements using every required statement ID; each has text, stageAction, press, pressStageAction, Defense-Counsel-owned defenseRebuttal and defenseRebuttalStageAction, Defense-Counsel-owned defenseObjection and defenseObjectionStageAction, revision, revisionStageAction, and performance direction",
+            testimony: "exactly 3 statements using every required statement ID; each has only id, text, press, Defense-Counsel-owned defenseRebuttal, and a materially changed revision",
           } : {
             seatId: requirement.seatId,
             relationship: "complete relationship to the victim",
             alibi: "specific authored alibi",
-            roomIntroduction: "a concise first-person introduction in this suspect's persona that establishes their presence, mood, and one player-controlled lead without answering the prosecution's first question",
-            roomIntroductionStageAction: "short visual-only physical beat for the reveal",
-            roomIntroductionPerformance: "mood, pace, intensity, actorNote",
-            chapterOpening: "court opening",
-            chapterCompletion: "court completion after revision",
-            defaultPresentProsecutionLine: "finite wording in the selected Prosecutor persona for presenting an unrelated admitted item",
-            defaultPresentProsecutionStageAction: "short visual-only physical beat",
-            defaultPresentReaction: "finite suspect response to irrelevant evidence",
-            defaultPresentReactionStageAction: "short visual-only physical beat",
-            talkTopics: "3-5 finite subjects with id, short menu label, category (person, general, motive, alibi, or room), subjectId for person/room, an in-character Prosecutor question, questionStageAction, question performance direction, suspect response, responseStageAction, and response performance direction. Omit repeatResponses; PRISM appends the canonical answer to separately generated fact-free repetition acknowledgments. Room subjectId must be an exact setup roomId; person subjectId must be the victim ID or an exact suspect seatId. Never make a Case File evidence/testimony title into a Talk subject.",
+            talkTopics: "1-3 concise non-evidence subjects with only id, short menu label, category (person, general, motive, alibi, or room), subjectId for person/room, an in-character Prosecutor question, and the suspect response. PRISM supplies safe relationship/alibi subjects when fewer than 3 survive. Room subjectId must be an exact setup roomId; person subjectId must be the victim ID or an exact suspect seatId. Never make a Case File evidence/testimony title into a Talk subject.",
             presentationGate: requiredPresentationGateRecord
               ? {
-                  id: `gate-${requirement.seatId}`,
-                  recordId: requirement.requiredPresentationGateRecordId,
-                  unlockTopicId: "the final Talk topic id; author that answer as a meaningful lead made available only after this exact record is presented to this suspect",
+                  unlockTopicId: "optional id of one authored Talk topic to reserve as the evidence follow-up. PRISM binds the frozen record and moves the topic to the final position; omit this field if no authored topic fits",
                 }
               : null,
             presentReactions: requirement.requiredPresentReactionRecordIds.map((recordId) => ({
               recordId,
-              prosecutionLine: "specific selected-Prosecutor wording that explicitly names the exact public Case File title for this proof",
-              prosecutionStageAction: "short visual-only physical beat",
-              response: "specific proof-bearing suspect reaction that explicitly names the same public Case File title",
-              responseStageAction: "short visual-only physical beat",
+              response: "specific proof-bearing suspect reaction to this exact record; PRISM materializes its public Case File title",
             })),
-            defendantReactions: {
-              testimony: "reaction if this suspect is the defendant while another witness testifies",
-              testimonyStageAction: "short visual-only physical beat",
-              objection: "reaction if this suspect is the defendant during a Defense objection",
-              objectionStageAction: "short visual-only physical beat",
-              evidence: "reaction if this suspect is the defendant during an evidentiary turn",
-              evidenceStageAction: "short visual-only physical beat",
-            },
-            testimony: "3-6 statements using every required statement ID; each has text, stageAction, press, pressStageAction, Defense-Counsel-owned defenseRebuttal and defenseRebuttalStageAction, Defense-Counsel-owned defenseObjection and defenseObjectionStageAction, revision, revisionStageAction, and performance direction",
+            testimony: "exactly 3 statements using every required statement ID; each has only id, text, press, Defense-Counsel-owned defenseRebuttal, and a materially changed revision",
           },
         },
         qualityRules: [
@@ -3376,16 +3514,12 @@ async function authorMysteryV2(args: {
             "Each Talk question is a natural, specific way for the prosecution to ask about its typed person, general, motive, alibi, or room subject and stays under 25 words.",
           "Talk never contains a physical evidence or sworn-testimony record as its subject. A room topic names and references one exact setup roomId.",
           requiredPresentationGateRecord
-            ? "The final Talk topic is a genuinely consequential follow-up unlocked only by presenting the assigned pivotal record to this exact suspect; do not duplicate the record title as that topic's label."
+            ? "You may nominate one authored Talk topic as the pivotal evidence follow-up through presentationGate.unlockTopicId. Do not echo a gate id or record id: PRISM binds the exact frozen record, moves a valid topic to the final position, or supplies a safe follow-up from the required Present response."
             : "Do not invent a presentation gate for this witness.",
-          "Do not author repeat responses. PRISM owns their fact-free acknowledgment and deterministically appends this topic's canonical response.",
-          "The room introduction is a self-contained persona reveal, not a question or an answer. Its distinctive wording or claim must give the first Talk topic a natural contextual handoff, but the player still chooses that question and no topic is selected automatically.",
-          "The investigation happens before court. In room introductions, Talk, and Present exchanges, never refer to the Court, a courtroom, the bench, a jury, a witness stand, sworn testimony, or 'Your Honor'. Use the room, house, investigation, Case File, and direct questions instead; courtroom language belongs only to trial dialogue.",
-          "For every authored Present reaction, write the selected public Case File title exactly in both the Prosecutor line and the witness response. Never expose sealed reasoning or substitute a generic 'item' or 'evidence' reference for that public title.",
-          "Every spoken bot line supplies its nonverbal beat in the dedicated stage-action field. Never put an action or a bot name inside spoken dialogue.",
-          "Write Prosecutor lines only in the frozen Prosecutor persona and Defense rebuttals or objections only in the frozen Defense Counsel persona. The accused is never their own attorney.",
-          "Identity Crisis changes only the holder's eyes, complete resting/live mouth package, Avatar Details Ink, lower glyph, and literally double-quoted public display name when an eligible target directly addresses them. The holder knowingly masquerades as that target and defensively treats the original as the suspicious imitator with mild concern. Never let it change authored dialogue ownership, persona, Powers, facts, proof, role ownership, color, or voice identity.",
-          "Defendant reactions must stay usable if this suspect becomes the accused, including while another suspect is the active witness.",
+          "Do not author repeat responses, stage actions, performance directions, generic Present copy, chapter transitions, or defendant reactions. PRISM owns those presentation-only fallbacks.",
+          "The investigation happens before court. In Talk and Present responses, never refer to the Court, a courtroom, the bench, a jury, a witness stand, sworn testimony, or 'Your Honor'. Use the room, house, investigation, Case File, and direct questions instead; courtroom language belongs only to trial dialogue.",
+          "Each required Present response addresses only its exact supplied record. PRISM materializes the public Case File title; never name a different record or expose sealed reasoning.",
+          "Write Talk questions only in the frozen Prosecutor persona and Defense rebuttals only in the frozen Defense Counsel persona. The accused is never their own attorney.",
           "Keep each Talk response, statement, Press answer, rebuttal, revision, and reaction under 75 words.",
           ]),
           "Write in this suspect's persona with no placeholders.",

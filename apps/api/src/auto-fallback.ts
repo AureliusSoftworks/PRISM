@@ -36,6 +36,16 @@ export interface AutoFallbackRunResult<T> {
 /** Auto may inspect the whole eligible lane, but one request stays bounded. */
 export const AUTO_FALLBACK_TOTAL_TIMEOUT_MAX_MS = 600_000;
 
+/** Keep exhaustion diagnostics useful without turning them into output logs. */
+export const AUTO_FALLBACK_VALIDATION_CLAUSE_MAX_CHARS = 160;
+export const AUTO_FALLBACK_EXHAUSTED_MESSAGE_MAX_CHARS = 1_024;
+
+const AUTO_FALLBACK_EXHAUSTED_BASE_MESSAGE =
+  "All Auto models failed. Retry when a model is available.";
+const AUTO_FALLBACK_VALIDATION_DIAGNOSTICS_PREFIX = " Validation clauses: ";
+const AUTO_FALLBACK_SAFE_MODEL_LABEL_RE =
+  /^[a-z0-9][a-z0-9._:/+-]{0,79}$/iu;
+
 /** The primary keeps its configured effort; recovery attempts prioritize speed. */
 export function autoFallbackReasoningEffort<
   T extends ProviderReasoningEffort | undefined,
@@ -52,11 +62,69 @@ export function autoFallbackReasoningEffort<
   return attemptIndex === 0 ? primaryEffort : "none";
 }
 
+function safeAutoFallbackAttemptLabel(
+  attempt: AutoFallbackAttemptTraceV1,
+): string {
+  const model = attempt.model.trim();
+  return AUTO_FALLBACK_SAFE_MODEL_LABEL_RE.test(model)
+    ? `${attempt.provider}/${model}`
+    : attempt.provider;
+}
+
+function autoFallbackValidationDiagnostics(
+  attempts: readonly AutoFallbackAttemptTraceV1[],
+): string | undefined {
+  const entries: string[] = [];
+  const seenClauses = new Set<string>();
+  for (const attempt of attempts) {
+    if (attempt?.reason !== "invalid_output" || !attempt.clause?.trim()) {
+      continue;
+    }
+    const clause = attempt.clause
+      .replace(/\s+/gu, " ")
+      .trim()
+      .slice(0, AUTO_FALLBACK_VALIDATION_CLAUSE_MAX_CHARS);
+    const key = clause.toLocaleLowerCase();
+    if (!clause || seenClauses.has(key)) continue;
+    seenClauses.add(key);
+    entries.push(`[${safeAutoFallbackAttemptLabel(attempt)}] ${clause}`);
+  }
+  if (entries.length === 0) return undefined;
+
+  const maxDiagnosticChars =
+    AUTO_FALLBACK_EXHAUSTED_MESSAGE_MAX_CHARS -
+    AUTO_FALLBACK_EXHAUSTED_BASE_MESSAGE.length -
+    AUTO_FALLBACK_VALIDATION_DIAGNOSTICS_PREFIX.length;
+  const rendered: string[] = [];
+  let omittedCount = 0;
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index]!;
+    const remainingCount = entries.length - index - 1;
+    const candidate = [...rendered, entry].join(" | ");
+    const remainingSuffix = remainingCount > 0
+      ? ` | +${remainingCount} more`
+      : "";
+    if ((candidate + remainingSuffix).length > maxDiagnosticChars) {
+      omittedCount = entries.length - index;
+      break;
+    }
+    rendered.push(entry);
+  }
+  if (omittedCount > 0) rendered.push(`+${omittedCount} more`);
+  return rendered.join(" | ").slice(0, maxDiagnosticChars);
+}
+
 export class AutoFallbackExhaustedError extends Error {
   public readonly attempts: AutoFallbackAttemptTraceV1[];
 
   public constructor(attempts: AutoFallbackAttemptTraceV1[]) {
-    super("All Auto models failed. Retry when a model is available.");
+    const diagnostics = autoFallbackValidationDiagnostics(attempts);
+    super(
+      AUTO_FALLBACK_EXHAUSTED_BASE_MESSAGE +
+        (diagnostics
+          ? AUTO_FALLBACK_VALIDATION_DIAGNOSTICS_PREFIX + diagnostics
+          : ""),
+    );
     this.name = "AutoFallbackExhaustedError";
     this.attempts = attempts;
   }

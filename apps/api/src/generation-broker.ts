@@ -84,6 +84,23 @@ function errorMessage(error: unknown): string {
     : "The generation result was not usable.";
 }
 
+function validationClause(error: unknown): string {
+  // Node's JSON parser may quote part of the rejected draft in SyntaxError
+  // messages. Repair context remains private to the next attempt, but the
+  // durable attempt trace must name only the failed contract.
+  return error instanceof SyntaxError
+    ? "The result was not valid JSON."
+    : errorMessage(error).slice(0, 80);
+}
+
+function structuredOutputLooksJson(raw: string): boolean {
+  const candidate = raw
+    .trim()
+    .replace(/^```(?:json)?\s*/iu, "")
+    .trimStart();
+  return candidate.startsWith("{") || candidate.startsWith("[");
+}
+
 function abortError(message: string): Error {
   const error = new Error(message);
   error.name = "AbortError";
@@ -286,7 +303,7 @@ export async function runPrismStructuredGeneration<T>(
       signal: request.signal,
       validate: (raw) => {
         const textFailure = validateAutoFallbackText(raw);
-        if (!textFailure.ok) {
+        if (!textFailure.ok && textFailure.reason === "empty") {
           priorError = textFailure.reason;
           return textFailure;
         }
@@ -295,11 +312,20 @@ export async function runPrismStructuredGeneration<T>(
           acceptedOutputTokens = estimatePrismTextTokens(raw);
           return { ok: true as const, value };
         } catch (error) {
+          const refusalFailure = validateAutoFallbackText(raw);
+          if (
+            !structuredOutputLooksJson(raw) &&
+            !refusalFailure.ok &&
+            refusalFailure.reason === "refusal"
+          ) {
+            priorError = refusalFailure.reason;
+            return refusalFailure;
+          }
           priorError = errorMessage(error);
           return {
             ok: false as const,
             reason: "invalid_output" as const,
-            clause: priorError.slice(0, 80),
+            clause: validationClause(error),
           };
         }
       },
@@ -361,8 +387,23 @@ export async function runPrismStructuredGeneration<T>(
           ),
       });
       const textFailure = validateAutoFallbackText(raw);
-      if (!textFailure.ok) throw new Error(textFailure.reason);
-      const value = request.validate(raw);
+      if (!textFailure.ok && textFailure.reason === "empty") {
+        throw new Error(textFailure.reason);
+      }
+      let value: T;
+      try {
+        value = request.validate(raw);
+      } catch (error) {
+        const refusalFailure = validateAutoFallbackText(raw);
+        if (
+          !structuredOutputLooksJson(raw) &&
+          !refusalFailure.ok &&
+          refusalFailure.reason === "refusal"
+        ) {
+          throw new Error(refusalFailure.reason);
+        }
+        throw error;
+      }
       acceptedOutputTokens = estimatePrismTextTokens(raw);
       attempts.push({
         provider: lane.providerName,

@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  AUTO_FALLBACK_EXHAUSTED_MESSAGE_MAX_CHARS,
   AUTO_FALLBACK_TOTAL_TIMEOUT_MAX_MS,
+  AUTO_FALLBACK_VALIDATION_CLAUSE_MAX_CHARS,
   AutoFallbackExhaustedError,
   autoFallbackReasoningEffort,
   runAutoFallbackChain,
@@ -27,6 +29,89 @@ describe("Auto fallback runner", () => {
     assert.equal(autoFallbackReasoningEffort(0, "high"), "high");
     assert.equal(autoFallbackReasoningEffort(1, "high"), "none");
     assert.equal(autoFallbackReasoningEffort(5, "xhigh"), "none");
+  });
+
+  it("retains every distinct validation clause after later invalid JSON and timeout failures", () => {
+    const error = new AutoFallbackExhaustedError([
+      {
+        provider: "openai",
+        model: "gpt-4.1",
+        durationMs: 12,
+        outcome: "failed",
+        reason: "invalid_output",
+        clause: "Witness chapter omitted required dialogue.",
+      },
+      {
+        provider: "anthropic",
+        model: "claude-haiku-4-5",
+        durationMs: 18,
+        outcome: "failed",
+        reason: "invalid_output",
+        clause: "Temporal recall must remain approximate.",
+      },
+      {
+        provider: "anthropic",
+        model: "claude-haiku-4-5",
+        durationMs: 19,
+        outcome: "failed",
+        reason: "invalid_output",
+        clause: "  Witness chapter omitted   required dialogue. ",
+      },
+      {
+        provider: "anthropic",
+        model: "claude-opus-5",
+        durationMs: 20,
+        outcome: "failed",
+        reason: "invalid_output",
+        clause: "The result was not valid JSON.",
+      },
+      {
+        provider: "anthropic",
+        model: "last-recovery",
+        durationMs: 60_000,
+        outcome: "failed",
+        reason: "timeout",
+      },
+    ]);
+
+    assert.match(
+      error.message,
+      /\[openai\/gpt-4\.1\] Witness chapter omitted required dialogue\./u,
+    );
+    assert.match(
+      error.message,
+      /\[anthropic\/claude-haiku-4-5\] Temporal recall must remain approximate\./u,
+    );
+    assert.match(
+      error.message,
+      /\[anthropic\/claude-opus-5\] The result was not valid JSON\./u,
+    );
+    assert.equal(
+      error.message.match(/Witness chapter omitted required dialogue\./gu)?.length,
+      1,
+    );
+  });
+
+  it("bounds every validation clause and the complete exhaustion message", () => {
+    const error = new AutoFallbackExhaustedError(
+      Array.from({ length: 64 }, (_, index) => ({
+        provider: "openai" as const,
+        model: `model-${index}`,
+        durationMs: index,
+        outcome: "failed" as const,
+        reason: "invalid_output" as const,
+        clause: `schema-clause-${index}-${"x".repeat(400)}`,
+      })),
+    );
+
+    assert.ok(
+      error.message.length <= AUTO_FALLBACK_EXHAUSTED_MESSAGE_MAX_CHARS,
+    );
+    assert.doesNotMatch(
+      error.message,
+      new RegExp(`x{${AUTO_FALLBACK_VALIDATION_CLAUSE_MAX_CHARS + 1}}`, "u"),
+    );
+    assert.match(error.message, /\+\d+ more/u);
   });
 
   it("returns the primary without recovery metadata when it succeeds", async () => {
